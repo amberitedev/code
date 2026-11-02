@@ -31,6 +31,7 @@ use crate::{
     content,
     installs::ModLoader,
     servers::{Phase, ServerError, launch, records},
+    state::servers::adapters::sqlite::content_rows,
 };
 
 /// Query of GET `/modrinth/v0/servers`. Mirrors Archon.Servers.v0.GetServersOptions.
@@ -577,7 +578,7 @@ async fn linked_instance(
     state: &AppState,
     id: &str,
 ) -> Result<Option<LinkedInstance>, ApiError> {
-    let Some(pack) = content::records::pack(&state.db, id).await? else {
+    let Some(pack) = content_rows::get_pack(&state.db, id).await? else {
         return Ok(None);
     };
     let Some(linked) = content::install::linked(&pack) else {
@@ -733,7 +734,7 @@ pub async fn reinstall(
     };
     let busy = state.content.busy(&id)?;
     let hold = state.servers.hold(&id)?;
-    content::records::unlink(&state.db, &id).await?;
+    content_rows::unlink(&state.db, &id).await?;
     state.access.owed.notify_one();
     let progress = state.content.progress(&id);
     let result = content::install::loader(
@@ -885,13 +886,13 @@ async fn server_full(
         .map(|args| launch::invocation(&args));
     // A server that follows an instance reads that instance's share; one that follows none has
     // its own once it is shared.
-    let linked = content::records::pack(&state.db, &row.id)
+    let linked = content_rows::get_pack(&state.db, &row.id)
         .await?
         .as_ref()
         .and_then(content::install::linked);
     let shared_instance_id = match linked {
         Some(linked) => Some(linked.shared_instance_id),
-        None => content::records::share_id(&state.db, &row.id).await?,
+        None => records::share_id(&state.db, &row.id).await?,
     };
     let content = match (&row.loader, &row.game_version) {
         (Some(loader), Some(game_version)) => Some(WorldContentInfo {

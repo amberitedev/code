@@ -442,8 +442,10 @@ async fn failed_backups_and_installs_say_why() {
     );
 
     sqlx::query(
-        "INSERT INTO packs (server_id, name, version_number, sha1, error) \
-         VALUES (?, 'Pack', '1', 'abc', 'the pack is for Minecraft 26.2')",
+        "INSERT INTO server_content_sets (id, server_id, name, source_kind, status, \
+         game_version, loader, created, modified, version_number, sha1, error) \
+         VALUES ('set', ?, 'Pack', 'imported_modpack', 'available', '26.3', 'fabric', 0, 0, \
+         '1', 'abc', 'the pack is for Minecraft 26.2')",
     )
     .bind(&server)
     .execute(&state.db)

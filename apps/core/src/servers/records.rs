@@ -177,6 +177,33 @@ pub async fn set_java(
     Ok(())
 }
 
+/// The share of a server that follows no instance, once it is shared.
+pub async fn share_id(
+    db: impl sqlx::SqliteExecutor<'_>,
+    server_id: &str,
+) -> sqlx::Result<Option<String>> {
+    Ok(sqlx::query_scalar::<_, Option<String>>(
+        "SELECT share_id FROM servers WHERE id = ?",
+    )
+    .bind(server_id)
+    .fetch_optional(db)
+    .await?
+    .flatten())
+}
+
+pub async fn set_share_id(
+    db: impl sqlx::SqliteExecutor<'_>,
+    server_id: &str,
+    share_id: Option<&str>,
+) -> sqlx::Result<()> {
+    sqlx::query("UPDATE servers SET share_id = ? WHERE id = ?")
+        .bind(share_id)
+        .bind(server_id)
+        .execute(db)
+        .await?;
+    Ok(())
+}
+
 pub async fn set_update_channel(
     db: &SqlitePool,
     id: &str,

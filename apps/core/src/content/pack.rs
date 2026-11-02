@@ -1,17 +1,27 @@
 //! Packs: Modrinth's `.mrpack`. A pack is an index of files to download plus `overrides/` and
 //! `server-overrides/` to unpack. Installing or updating one is planned as a whole first
 //! ([`plan`]): every file the pack wants is placed, kept, or, when the owner edited it since the
-//! pack put it there, left alone and marked pending until the App says keep or replace.
+//! pack put it there, left alone and marked pending until the App says keep or replace. Which
+//! files a server takes is bedrock's rule ([`split`]); the rest are client only and never placed.
 
 use std::{
     collections::{BTreeMap, HashMap},
     io::{Read, Seek},
 };
 
+use bedrock::content::{
+    Env, SideType, Version, VersionEnvironment, ids_from_cdn, server_takes,
+};
+use bedrock::upstream::jar::{
+    Environment as JarEnvironment, Platform as JarPlatform,
+};
+
 use super::{
     archive::{self, ArchiveError},
     folder::{self, PathError},
-    records::{ContentFile, Origin, Pending},
+};
+use crate::state::servers::{
+    ContentSourceKind, Pending, SkippedFile, TrackedFile,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -108,67 +118,175 @@ pub fn fold(path: &str, case_insensitive: bool) -> String {
     }
 }
 
-/// Every file a server running `index` should have, by path. Client-only files are left out, and
-/// `server-overrides/` wins over `overrides/`. Downloads must come from an allowed host.
-pub fn wanted<R: Read + Seek>(
+/// A file of a pack, before it is known whether the server takes it.
+#[derive(Debug, Clone)]
+pub struct Candidate {
+    pub path: String,
+    pub wanted: Wanted,
+    /// The index's word on its sides; `server-overrides/` are the server's.
+    pub env: Option<Env>,
+    /// For a jar of `overrides/`: the sides its own metadata names.
+    pub jar: Option<JarEnvironment>,
+    /// For an index file, its download URLs, which may name its Modrinth project and version.
+    pub downloads: Vec<String>,
+}
+
+impl Candidate {
+    /// Whether Modrinth is asked where the file runs: the index does not say, for a file it
+    /// downloads or a jar of `overrides/`.
+    pub fn ask_modrinth(&self) -> bool {
+        self.env.is_none()
+            && (matches!(self.wanted.source, Source::Download(_))
+                || self.path.ends_with(".jar"))
+    }
+}
+
+/// Every file of a pack, with what the index and, for jars of `overrides/`, their metadata say
+/// about their sides. `loader` is the pack's, whose
+/// jar metadata is read first.
+pub fn candidates<R: Read + Seek>(
     index: &Index,
     archive: &mut zip::ZipArchive<R>,
-    case_insensitive: bool,
-) -> Result<BTreeMap<String, Wanted>, PackError> {
-    let mut wanted = BTreeMap::new();
-    // Two spellings of one file are refused; the same spelling twice is an override.
-    let mut spellings: HashMap<String, String> = HashMap::new();
-    let mut add = |path: String, want: Wanted| match spellings
-        .insert(fold(&path, case_insensitive), path.clone())
-    {
-        Some(other) if other != path => Err(PackError::Collision(other, path)),
-        _ => {
-            wanted.insert(path, want);
-            Ok(())
-        }
-    };
+    loader: Option<JarPlatform>,
+) -> Result<Vec<Candidate>, PackError> {
+    let mut candidates = Vec::new();
     for (n, file) in index.files.iter().enumerate() {
-        if !bedrock::content::server_takes(file.env.as_ref(), None, None) {
-            continue;
-        }
-        let path = folder::clean(&file.path)?;
-        let usable = file.downloads.iter().any(|url| {
-            reqwest::Url::parse(url)
-                .is_ok_and(|url| super::hosts::allowed(&url, false))
-        });
-        if !usable {
-            return Err(PackError::Host(path));
-        }
-        add(
-            path,
-            Wanted {
+        candidates.push(Candidate {
+            path: folder::clean(&file.path)?,
+            wanted: Wanted {
                 sha1: file.hashes.sha1.to_ascii_lowercase(),
                 source: Source::Download(n),
                 size: file.file_size,
             },
-        )?;
+            env: file.env,
+            jar: None,
+            downloads: file.downloads.clone(),
+        });
     }
     let entries = archive::entries(archive)?;
     // One budget for every override: a small pack must not inflate past it entry by entry.
     let mut budget = archive::MAX_UNPACKED;
-    for prefix in ["overrides/", "server-overrides/"] {
+    let server_side = Env {
+        client: SideType::Unsupported,
+        server: SideType::Required,
+    };
+    for (prefix, env) in [
+        ("overrides/", None),
+        ("server-overrides/", Some(server_side)),
+    ] {
         for (n, (path, is_dir)) in entries.iter().enumerate() {
             let Some(path) = path.strip_prefix(prefix).filter(|_| !is_dir)
             else {
                 continue;
             };
             let (sha1, size) = archive::entry_sha1(archive, n, &mut budget)?;
-            add(
-                path.to_owned(),
-                Wanted {
+            let jar = if env.is_none() && path.ends_with(".jar") {
+                jar_environment(archive, n, size, loader)
+            } else {
+                None
+            };
+            candidates.push(Candidate {
+                path: path.to_owned(),
+                wanted: Wanted {
                     sha1,
                     source: Source::Override(n),
                     size,
                 },
-            )?;
+                env,
+                jar,
+                downloads: Vec::new(),
+            });
         }
     }
-    Ok(wanted)
+    Ok(candidates)
+}
+
+/// The sides the jar at entry `n` of the pack names in its metadata. Best effort: `None` for a
+/// jar that cannot be read.
+fn jar_environment<R: Read + Seek>(
+    archive: &mut zip::ZipArchive<R>,
+    n: usize,
+    size: u64,
+    loader: Option<JarPlatform>,
+) -> Option<JarEnvironment> {
+    let mut bytes = Vec::with_capacity(usize::try_from(size).ok()?);
+    archive
+        .by_index(n)
+        .ok()?
+        .take(size)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    let mut jar = zip::ZipArchive::new(std::io::Cursor::new(bytes)).ok()?;
+    bedrock::upstream::jar::inspect(&mut jar, loader)?
+        .manifest
+        .environment
+}
+
+/// Where Modrinth says each file runs, by SHA-1, with its version: what
+/// `Modrinth::sided_by_hashes` answers for the candidates that ask.
+pub type Known = HashMap<String, (Version, Option<VersionEnvironment>)>;
+
+/// The files a server takes, by path, and the ones it leaves out because they are client only,
+/// by bedrock's rule (`server_takes`): the index first, then Modrinth by hash, then a jar's own
+/// metadata. `server-overrides/` wins over `overrides/`. A download the server takes must come
+/// from an allowed host.
+pub fn split(
+    candidates: Vec<Candidate>,
+    known: &Known,
+    case_insensitive: bool,
+) -> Result<(BTreeMap<String, Wanted>, Vec<SkippedFile>), PackError> {
+    let mut wanted = BTreeMap::new();
+    let mut skipped = Vec::new();
+    // Two spellings of one file are refused; the same spelling twice is an override.
+    let mut spellings: HashMap<String, String> = HashMap::new();
+    for candidate in candidates {
+        let modrinth = candidate
+            .ask_modrinth()
+            .then(|| known.get(&candidate.wanted.sha1))
+            .flatten();
+        if !server_takes(
+            candidate.env.as_ref(),
+            modrinth.and_then(|(_, environment)| *environment),
+            candidate.jar,
+        ) {
+            let (project_id, version_id) = modrinth
+                .map(|(version, _)| {
+                    (version.project_id.clone(), version.id.clone())
+                })
+                .or_else(|| {
+                    candidate.downloads.iter().find_map(|url| ids_from_cdn(url))
+                })
+                .unzip();
+            skipped.push(SkippedFile {
+                relative_path: candidate.path,
+                sha1: candidate.wanted.sha1,
+                size: candidate.wanted.size,
+                project_id,
+                version_id,
+            });
+            continue;
+        }
+        let usable = matches!(candidate.wanted.source, Source::Override(_))
+            || candidate.downloads.iter().any(|url| {
+                reqwest::Url::parse(url)
+                    .is_ok_and(|url| super::hosts::allowed(&url, false))
+            });
+        if !usable {
+            return Err(PackError::Host(candidate.path));
+        }
+        let path = candidate.path;
+        match spellings.insert(fold(&path, case_insensitive), path.clone()) {
+            Some(other) if other != path => {
+                return Err(PackError::Collision(other, path));
+            }
+            _ => {
+                wanted.insert(path, candidate.wanted);
+            }
+        }
+    }
+    // A file the server takes from elsewhere in the pack is not left out.
+    skipped.retain(|file| !wanted.contains_key(&file.relative_path));
+    Ok((wanted, skipped))
 }
 
 /// One thing an install does to a path.
@@ -181,15 +299,15 @@ pub enum Step {
     Place {
         path: String,
         wanted: Wanted,
-        row: Option<ContentFile>,
+        row: Option<TrackedFile>,
         expected: Option<String>,
-        before: Option<ContentFile>,
+        before: Option<TrackedFile>,
     },
     /// The file is right as it is; record `row`.
-    Record(ContentFile),
+    Record(TrackedFile),
     /// Delete the file and its row: the pack dropped it and nobody edited it. Done only if the
     /// file still has the row's hash when its turn comes.
-    Delete(ContentFile),
+    Delete(TrackedFile),
     /// Forget the row: the pack dropped a file that is already gone, or the row names a file
     /// another row now names with the pack's new spelling.
     Forget(String),
@@ -225,6 +343,8 @@ pub fn check_budget(steps: &[Step]) -> Result<u64, PackError> {
 }
 
 /// What installing `wanted` over the files on disk does, given the rows recorded for them.
+/// `kind` is the source kind of the pack being installed, which every file it places or keeps
+/// takes.
 ///
 /// A pack file the owner edited (its hash on disk is not the one recorded, or it is gone) is
 /// never touched: when the new pack changes or drops it, the row is marked pending instead. A
@@ -232,23 +352,35 @@ pub fn check_budget(steps: &[Step]) -> Result<u64, PackError> {
 /// pack files that are missing. Server-owned files are placed only where none exists. Rows and
 /// wanted paths are matched the way the file system compares paths.
 pub fn plan(
-    rows: &[ContentFile],
+    rows: &[TrackedFile],
     wanted: &BTreeMap<String, Wanted>,
     disk: &Disk,
     repair: bool,
+    kind: ContentSourceKind,
 ) -> Vec<Step> {
     let key = |path: &str| fold(path, disk.case_insensitive);
-    let rows: HashMap<String, &ContentFile> =
-        rows.iter().map(|row| (key(&row.path), row)).collect();
+    let rows: HashMap<String, &TrackedFile> = rows
+        .iter()
+        .map(|row| (key(&row.relative_path), row))
+        .collect();
     let wanted_keys: std::collections::HashSet<String> =
         wanted.keys().map(|path| key(path)).collect();
-    let pack_row = |path: &str, wanted: &Wanted, pending| ContentFile {
-        path: path.to_owned(),
-        origin: Origin::Pack,
+    let pack_row = |path: &str, wanted: &Wanted, pending| TrackedFile {
+        relative_path: path.to_owned(),
+        source_kind: kind,
         sha1: wanted.sha1.clone(),
+        size: wanted.size,
         project_id: None,
         version_id: None,
         pending,
+    };
+    // A row of the pack takes the new pack's kind; one someone added stays theirs.
+    let origin = |row: &TrackedFile| {
+        if row.from_pack() {
+            kind
+        } else {
+            ContentSourceKind::Local
+        }
     };
     let mut steps = Vec::new();
     for (path, want) in wanted {
@@ -256,11 +388,11 @@ pub fn plan(
         let row = rows.get(&key(path)).copied();
         // The pack spells a file it already placed another way: the row follows the new
         // spelling, and the old one is only forgotten, never deleted, since it is this file.
-        if let Some(row) = row.filter(|row| row.path != *path) {
-            steps.push(Step::Forget(row.path.clone()));
+        if let Some(row) = row.filter(|row| row.relative_path != *path) {
+            steps.push(Step::Forget(row.relative_path.clone()));
         }
-        let row = row.map(|row| ContentFile {
-            path: path.clone(),
+        let row = row.map(|row| TrackedFile {
+            relative_path: path.clone(),
             ..row.clone()
         });
         let row = row.as_ref();
@@ -282,7 +414,7 @@ pub fn plan(
         let place = || Step::Place {
             path: path.clone(),
             wanted: want.clone(),
-            row: Some(ContentFile {
+            row: Some(TrackedFile {
                 project_id: row
                     .filter(|row| row.sha1 == want.sha1)
                     .and_then(|row| row.project_id.clone()),
@@ -294,10 +426,10 @@ pub fn plan(
             expected: on_disk.clone(),
             before: row.cloned(),
         };
-        let keep = |row: &ContentFile, sha1: &str, origin, pending| {
-            Step::Record(ContentFile {
+        let keep = |row: &TrackedFile, sha1: &str, source_kind, pending| {
+            Step::Record(TrackedFile {
                 sha1: sha1.to_owned(),
-                origin,
+                source_kind,
                 pending,
                 ..row.clone()
             })
@@ -307,50 +439,47 @@ pub fn plan(
             if let Some(row) = row {
                 let pending =
                     (row.sha1 != want.sha1).then_some(Pending::Changed);
-                steps.push(keep(row, &row.sha1, row.origin, pending));
+                steps.push(keep(row, &row.sha1, origin(row), pending));
             }
             continue;
         }
         let step = match (row, on_disk.as_deref()) {
             // Already the pack's file.
             (Some(row), Some(sha1)) if sha1 == want.sha1 => {
-                keep(row, &want.sha1, Origin::Pack, None)
+                keep(row, &want.sha1, kind, None)
             }
             (None, Some(sha1)) if sha1 == want.sha1 => {
                 Step::Record(pack_row(path, want, None))
             }
             // Nothing there: the pack places it, unless the owner deleted a pack file.
             (None, None) => place(),
-            (Some(row), None) if repair || row.origin == Origin::Added => {
-                place()
-            }
+            (Some(row), None) if repair || !row.from_pack() => place(),
             (Some(row), None) if row.sha1 == want.sha1 => {
-                keep(row, &row.sha1, Origin::Pack, None)
+                keep(row, &row.sha1, kind, None)
             }
             (Some(row), None) => {
-                keep(row, &row.sha1, Origin::Pack, Some(Pending::Changed))
+                keep(row, &row.sha1, kind, Some(Pending::Changed))
             }
             // A pack file as Core placed it: replace it with the new one.
-            (Some(row), Some(sha1))
-                if row.origin == Origin::Pack && sha1 == row.sha1 =>
-            {
+            (Some(row), Some(sha1)) if row.from_pack() && sha1 == row.sha1 => {
                 place()
             }
             // Edited, but the pack did not change it: the edit stays, nothing to decide.
             (Some(row), Some(_))
-                if row.origin == Origin::Pack && row.sha1 == want.sha1 =>
+                if row.from_pack() && row.sha1 == want.sha1 =>
             {
-                keep(row, &row.sha1, Origin::Pack, None)
+                keep(row, &row.sha1, kind, None)
             }
             // Edited, and the pack has a new version: the owner decides.
             (Some(row), Some(_)) => {
-                keep(row, &row.sha1, row.origin, Some(Pending::Changed))
+                keep(row, &row.sha1, origin(row), Some(Pending::Changed))
             }
             // A file nobody recorded is in the way: it is the owner's.
-            (None, Some(sha1)) => Step::Record(ContentFile {
-                path: path.clone(),
-                origin: Origin::Added,
+            (None, Some(sha1)) => Step::Record(TrackedFile {
+                relative_path: path.clone(),
+                source_kind: ContentSourceKind::Local,
                 sha1: sha1.to_owned(),
+                size: 0,
                 project_id: None,
                 version_id: None,
                 pending: Some(Pending::Changed),
@@ -359,18 +488,18 @@ pub fn plan(
         steps.push(step);
     }
     for row in rows.values() {
-        if row.origin != Origin::Pack || wanted_keys.contains(&key(&row.path)) {
+        if !row.from_pack() || wanted_keys.contains(&key(&row.relative_path)) {
             continue;
         }
         // The path became the server's (its world was renamed to it): never deleted.
-        if folder::is_server_owned(&row.path, disk.level_name) {
-            steps.push(Step::Forget(row.path.clone()));
+        if folder::is_server_owned(&row.relative_path, disk.level_name) {
+            steps.push(Step::Forget(row.relative_path.clone()));
             continue;
         }
-        steps.push(match (disk.sha1)(&row.path) {
-            None => Step::Forget(row.path.clone()),
+        steps.push(match (disk.sha1)(&row.relative_path) {
+            None => Step::Forget(row.relative_path.clone()),
             Some(sha1) if sha1 == row.sha1 => Step::Delete((*row).clone()),
-            Some(_) => Step::Record(ContentFile {
+            Some(_) => Step::Record(TrackedFile {
                 pending: Some(Pending::Removed),
                 ..(*row).clone()
             }),
@@ -388,7 +517,7 @@ pub fn plan(
 fn step_path(step: &Step) -> &str {
     match step {
         Step::Place { path, .. } | Step::Forget(path) => path,
-        Step::Delete(row) | Step::Record(row) => &row.path,
+        Step::Delete(row) | Step::Record(row) => &row.relative_path,
     }
 }
 
@@ -396,13 +525,13 @@ fn step_path(step: &Step) -> &str {
 /// deleted (the hash on disk is not the one recorded), and every file waiting on a decision,
 /// whatever its origin or hash.
 pub fn edited<'a>(
-    rows: &'a [ContentFile],
+    rows: &'a [TrackedFile],
     sha1: &dyn Fn(&str) -> Option<String>,
-) -> Vec<(&'a ContentFile, Option<String>)> {
+) -> Vec<(&'a TrackedFile, Option<String>)> {
     rows.iter()
         .filter_map(|row| {
-            let on_disk = sha1(&row.path);
-            let changed = row.origin == Origin::Pack
+            let on_disk = sha1(&row.relative_path);
+            let changed = row.from_pack()
                 && on_disk.as_deref() != Some(row.sha1.as_str());
             (changed || row.pending.is_some()).then_some((row, on_disk))
         })
@@ -412,6 +541,9 @@ pub fn edited<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The source kind of the pack the tests install.
+    const KIND: ContentSourceKind = ContentSourceKind::ImportedModpack;
 
     #[test]
     fn minecraft_versions_compare_by_release() {
@@ -426,11 +558,16 @@ mod tests {
         assert_eq!(release_order("24w14a", "1.21"), None);
     }
 
-    fn row(path: &str, origin: Origin, sha1: &str) -> ContentFile {
-        ContentFile {
-            path: path.into(),
-            origin,
+    fn row(
+        path: &str,
+        source_kind: ContentSourceKind,
+        sha1: &str,
+    ) -> TrackedFile {
+        TrackedFile {
+            relative_path: path.into(),
+            source_kind,
             sha1: sha1.into(),
+            size: 1,
             project_id: None,
             version_id: None,
             pending: None,
@@ -446,7 +583,7 @@ mod tests {
     }
 
     fn run(
-        rows: &[ContentFile],
+        rows: &[TrackedFile],
         wanted: &[(&str, &str)],
         on_disk: &[(&str, &str)],
         repair: bool,
@@ -456,7 +593,7 @@ mod tests {
 
     /// As [`run`], on a file system that compares paths without case when `case_insensitive`.
     fn run_on(
-        rows: &[ContentFile],
+        rows: &[TrackedFile],
         wanted: &[(&str, &str)],
         on_disk: &[(&str, &str)],
         repair: bool,
@@ -489,6 +626,7 @@ mod tests {
                 case_insensitive,
             },
             repair,
+            KIND,
         )
     }
 
@@ -502,12 +640,12 @@ mod tests {
         path: &str,
         sha1: &str,
         on_disk: Option<&str>,
-        before: Option<&ContentFile>,
+        before: Option<&TrackedFile>,
     ) -> Step {
         Step::Place {
             path: path.into(),
             wanted: want(sha1),
-            row: Some(row(path, Origin::Pack, sha1)),
+            row: Some(row(path, KIND, sha1)),
             expected: on_disk.map(str::to_owned),
             before: before.cloned(),
         }
@@ -530,11 +668,11 @@ mod tests {
     #[test]
     fn an_update_replaces_untouched_files_and_leaves_edited_ones_pending() {
         let rows = [
-            row("config/edited.toml", Origin::Pack, "e1"),
-            row("config/same.toml", Origin::Pack, "s1"),
-            row("mods/old.jar", Origin::Pack, "o1"),
-            row("mods/kept.jar", Origin::Pack, "k1"),
-            row("mods/mine.jar", Origin::Added, "x1"),
+            row("config/edited.toml", KIND, "e1"),
+            row("config/same.toml", KIND, "s1"),
+            row("mods/old.jar", KIND, "o1"),
+            row("mods/kept.jar", KIND, "k1"),
+            row("mods/mine.jar", ContentSourceKind::Local, "x1"),
         ];
         let steps = run(
             &rows,
@@ -557,7 +695,7 @@ mod tests {
         assert_eq!(
             steps,
             [
-                Step::Record(ContentFile {
+                Step::Record(TrackedFile {
                     pending: Some(Pending::Changed),
                     ..rows[0].clone()
                 }),
@@ -571,7 +709,7 @@ mod tests {
 
     #[test]
     fn an_edit_the_pack_did_not_touch_needs_no_decision() {
-        let rows = [row("config/a.toml", Origin::Pack, "a1")];
+        let rows = [row("config/a.toml", KIND, "a1")];
         let steps = run(
             &rows,
             &[("config/a.toml", "a1")],
@@ -584,14 +722,14 @@ mod tests {
     #[test]
     fn edited_files_the_pack_dropped_are_kept_pending() {
         let rows = [
-            row("config/gone.toml", Origin::Pack, "g1"),
-            row("mods/deleted.jar", Origin::Pack, "d1"),
+            row("config/gone.toml", KIND, "g1"),
+            row("mods/deleted.jar", KIND, "d1"),
         ];
         let steps = run(&rows, &[], &[("config/gone.toml", "owner")], false);
         assert_eq!(
             steps,
             [
-                Step::Record(ContentFile {
+                Step::Record(TrackedFile {
                     pending: Some(Pending::Removed),
                     ..rows[0].clone()
                 }),
@@ -602,14 +740,14 @@ mod tests {
 
     #[test]
     fn a_pack_file_the_owner_deleted_stays_deleted_until_repair() {
-        let rows = [row("mods/m.jar", Origin::Pack, "m1")];
+        let rows = [row("mods/m.jar", KIND, "m1")];
         assert_eq!(
             run(&rows, &[("mods/m.jar", "m1")], &[], false),
             [Step::Record(rows[0].clone())]
         );
         assert_eq!(
             run(&rows, &[("mods/m.jar", "m2")], &[], false),
-            [Step::Record(ContentFile {
+            [Step::Record(TrackedFile {
                 pending: Some(Pending::Changed),
                 ..rows[0].clone()
             })]
@@ -630,9 +768,10 @@ mod tests {
         );
         assert_eq!(
             steps,
-            [Step::Record(ContentFile {
+            [Step::Record(TrackedFile {
                 pending: Some(Pending::Changed),
-                ..row("config/a.toml", Origin::Added, "owner")
+                size: 0,
+                ..row("config/a.toml", ContentSourceKind::Local, "owner")
             })]
         );
         // The same file is simply the pack's.
@@ -642,10 +781,7 @@ mod tests {
             &[("config/a.toml", "a1")],
             false,
         );
-        assert_eq!(
-            steps,
-            [Step::Record(row("config/a.toml", Origin::Pack, "a1"))]
-        );
+        assert_eq!(steps, [Step::Record(row("config/a.toml", KIND, "a1"))]);
     }
 
     #[test]
@@ -674,7 +810,7 @@ mod tests {
 
     #[test]
     fn a_pack_file_the_owner_disabled_stays_disabled_even_on_repair() {
-        let rows = [row("mods/m.jar", Origin::Pack, "m1")];
+        let rows = [row("mods/m.jar", KIND, "m1")];
         let disabled = [("mods/m.jar.disabled", "m1")];
         for repair in [false, true] {
             assert_eq!(
@@ -686,7 +822,7 @@ mod tests {
         // A new version waits for the owner, still disabled.
         assert_eq!(
             run(&rows, &[("mods/m.jar", "m2")], &disabled, true),
-            [Step::Record(ContentFile {
+            [Step::Record(TrackedFile {
                 pending: Some(Pending::Changed),
                 ..rows[0].clone()
             })]
@@ -696,7 +832,7 @@ mod tests {
     #[test]
     fn a_dropped_file_that_is_now_inside_the_world_is_forgotten_not_deleted() {
         // The pack placed `world/data.dat`; then level-name was set to `world`.
-        let rows = [row("world/data.dat", Origin::Pack, "d1")];
+        let rows = [row("world/data.dat", KIND, "d1")];
         assert_eq!(
             run(&rows, &[], &[("world/data.dat", "d1")], false),
             [Step::Forget("world/data.dat".into())]
@@ -705,7 +841,7 @@ mod tests {
 
     #[test]
     fn a_pack_that_respells_a_file_moves_its_row_without_deleting_it() {
-        let rows = [row("Config/A.toml", Origin::Pack, "a1")];
+        let rows = [row("Config/A.toml", KIND, "a1")];
         // One file on Windows and macOS: the row follows the new spelling.
         assert_eq!(
             run_on(
@@ -717,7 +853,7 @@ mod tests {
             ),
             [
                 Step::Forget("Config/A.toml".into()),
-                Step::Record(row("config/a.toml", Origin::Pack, "a1")),
+                Step::Record(row("config/a.toml", KIND, "a1")),
             ]
         );
         // Two files on Linux: the old one goes, the new one is placed.
@@ -752,13 +888,108 @@ mod tests {
         let mut archive =
             zip::ZipArchive::new(writer.finish().unwrap()).unwrap();
         let index = read_index(&mut archive).unwrap();
+        let candidates = candidates(&index, &mut archive, None).unwrap();
         assert!(matches!(
-            wanted(&index, &mut archive, true),
+            split(candidates.clone(), &Known::new(), true),
             Err(PackError::Collision(..))
         ));
-        let both = wanted(&index, &mut archive, false).unwrap();
+        let (both, _) = split(candidates, &Known::new(), false).unwrap();
         assert_eq!(both.len(), 2);
         assert_eq!(both["config/a.toml"].size, 1);
+    }
+
+    /// A jar whose only metadata is `fabric.mod.json` with `environment`.
+    fn fabric_jar(environment: &str) -> Vec<u8> {
+        use std::io::Write;
+
+        let mut jar = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        jar.start_file(
+            "fabric.mod.json",
+            zip::write::SimpleFileOptions::default(),
+        )
+        .unwrap();
+        write!(
+            jar,
+            r#"{{"id":"m","version":"1","environment":"{environment}"}}"#
+        )
+        .unwrap();
+        jar.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    fn a_server_leaves_out_what_the_index_modrinth_or_the_jar_says_is_client_only()
+     {
+        use std::io::Write;
+
+        let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        let options = zip::write::SimpleFileOptions::default();
+        writer.start_file("modrinth.index.json", options).unwrap();
+        writer
+            .write_all(
+                br#"{"formatVersion":1,"game":"minecraft","versionId":"1","name":"p",
+                "dependencies":{"minecraft":"1.21.1","fabric-loader":"0.16.0"},
+                "files":[
+                {"path":"mods/client.jar","hashes":{"sha1":"c1"},"env":{"client":"required","server":"unsupported"},"downloads":["https://cdn.modrinth.com/data/P/versions/V/client.jar"],"fileSize":1},
+                {"path":"mods/asked.jar","hashes":{"sha1":"a1"},"downloads":["https://cdn.modrinth.com/data/Q/versions/W/asked.jar"],"fileSize":1}]}"#,
+            )
+            .unwrap();
+        for (name, bytes) in [
+            ("overrides/mods/menu.jar", fabric_jar("client")),
+            ("overrides/mods/both.jar", fabric_jar("*")),
+            ("overrides/mods/forge.jar", b"not a jar".to_vec()),
+            ("server-overrides/mods/menu.jar", fabric_jar("client")),
+            ("overrides/resourcepacks/look.zip", b"x".to_vec()),
+        ] {
+            writer.start_file(name, options).unwrap();
+            writer.write_all(&bytes).unwrap();
+        }
+        let mut archive =
+            zip::ZipArchive::new(writer.finish().unwrap()).unwrap();
+        let index = read_index(&mut archive).unwrap();
+        let candidates =
+            candidates(&index, &mut archive, Some(JarPlatform::Fabric))
+                .unwrap();
+        let asked = candidates
+            .iter()
+            .find(|candidate| candidate.path == "mods/asked.jar")
+            .unwrap();
+        let version: Version = serde_json::from_value(serde_json::json!({
+            "id": "W", "project_id": "Q", "version_number": "1"
+        }))
+        .unwrap();
+        let known = Known::from([(
+            asked.wanted.sha1.clone(),
+            (version, Some(VersionEnvironment::ClientOnly)),
+        )]);
+        let (wanted, skipped) = split(candidates, &known, false).unwrap();
+
+        assert_eq!(
+            wanted.keys().collect::<Vec<_>>(),
+            [
+                "mods/both.jar",
+                "mods/forge.jar",
+                // `server-overrides/` is the server's, whatever the jar says.
+                "mods/menu.jar",
+                "resourcepacks/look.zip",
+            ]
+        );
+        let skipped: Vec<_> = skipped
+            .iter()
+            .map(|file| {
+                (
+                    file.relative_path.as_str(),
+                    file.project_id.as_deref(),
+                    file.version_id.as_deref(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            skipped,
+            [
+                ("mods/client.jar", Some("P"), Some("V")),
+                ("mods/asked.jar", Some("Q"), Some("W")),
+            ]
+        );
     }
 
     #[test]
@@ -785,14 +1016,14 @@ mod tests {
     #[test]
     fn edited_files_are_those_whose_hash_changed_or_that_are_gone() {
         let rows = [
-            row("config/a.toml", Origin::Pack, "a1"),
-            row("config/b.toml", Origin::Pack, "b1"),
-            row("config/c.toml", Origin::Pack, "c1"),
-            row("mods/mine.jar", Origin::Added, "x1"),
+            row("config/a.toml", KIND, "a1"),
+            row("config/b.toml", KIND, "b1"),
+            row("config/c.toml", KIND, "c1"),
+            row("mods/mine.jar", ContentSourceKind::Local, "x1"),
             // The owner's file the pack also wants: pending, whatever its hash.
-            ContentFile {
+            TrackedFile {
                 pending: Some(Pending::Changed),
-                ..row("mods/theirs.jar", Origin::Added, "t1")
+                ..row("mods/theirs.jar", ContentSourceKind::Local, "t1")
             },
         ];
         let on_disk = HashMap::from([
@@ -806,7 +1037,7 @@ mod tests {
         });
         let paths: Vec<_> = edited
             .iter()
-            .map(|(row, sha1)| (row.path.as_str(), sha1.as_deref()))
+            .map(|(row, sha1)| (row.relative_path.as_str(), sha1.as_deref()))
             .collect();
         assert_eq!(
             paths,

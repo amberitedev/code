@@ -1,5 +1,5 @@
--- Core's schema. Until `core-rewrite` merges into `main` this file may be edited freely; from the
--- first release on, shipped migrations are never edited again.
+-- Core's schema. Nothing is released, so this one file is edited freely and a local database is
+-- reset when it changes; from the first release on, shipped migrations are never edited again.
 -- Times are unix seconds. Ids are UUID strings unless noted.
 
 -- This Core. One row.
@@ -22,7 +22,14 @@ CREATE TABLE core (
     auto_update INTEGER NOT NULL DEFAULT 1,
     -- When the owner accepted the Minecraft EULA, once for every server. Null: not yet, and no
     -- server starts.
-    eula_accepted_at INTEGER
+    eula_accepted_at INTEGER,
+    -- Storage this Core offers the shared file pool (`store`). On by default.
+    storage_enabled INTEGER NOT NULL DEFAULT 1,
+    -- Bytes the store may hold. Null: a tenth of the disk's free space at start, between 10 and
+    -- 20 GiB.
+    storage_cap INTEGER,
+    -- Bytes the store may serve a day. 50 GiB.
+    storage_egress_cap INTEGER NOT NULL DEFAULT 53687091200
 );
 
 -- The pairing code this Core is showing, shared by every copal process on this data folder. One row.
@@ -52,7 +59,14 @@ CREATE TABLE servers (
     java_version INTEGER,
     -- The owner accepted the Minecraft EULA for this server, so Core writes eula=true. Step 8
     -- replaces it with one acceptance per Core.
-    eula_accepted INTEGER NOT NULL DEFAULT 0
+    eula_accepted INTEGER NOT NULL DEFAULT 0,
+    -- The least stable Modrinth version type the server's addons and their dependencies are
+    -- picked from (a `VersionType`).
+    update_channel TEXT NOT NULL DEFAULT 'release'
+        CHECK (update_channel IN ('release', 'beta', 'alpha')),
+    -- The share of a server that follows no instance, which Core writes (`api::share`). Null
+    -- until the server is shared.
+    share_id TEXT
 );
 
 -- Every time a server ran. The live process identity (pid, start time, boot id) is in
@@ -149,40 +163,144 @@ CREATE TABLE backups (
 );
 CREATE INDEX backups_server ON backups (server_id, created_at);
 
--- Content is the files on disk; this records where each tracked file came from.
-CREATE TABLE content_files (
+-- Every create and restore of a backup, queued and run one at a time.
+CREATE TABLE backup_operations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    backup_id TEXT NOT NULL REFERENCES backups (id) ON DELETE CASCADE,
     server_id TEXT NOT NULL REFERENCES servers (id) ON DELETE CASCADE,
-    -- Relative to the server folder, with forward slashes: `mods/a.jar`, `config/b.toml`.
-    path TEXT NOT NULL,
-    origin TEXT NOT NULL CHECK (origin IN ('pack', 'added')),
-    -- SHA-1 of the file as Core placed it. A different hash on disk means the owner edited it.
-    sha1 TEXT NOT NULL,
-    project_id TEXT,
-    version_id TEXT,
-    -- A pack update found this file edited and left it alone: the new pack `changed` it or
-    -- `removed` it. Cleared when the App says keep or replace.
-    pending TEXT CHECK (pending IN ('changed', 'removed')),
-    PRIMARY KEY (server_id, path)
+    kind TEXT NOT NULL CHECK (kind IN ('create', 'restore')),
+    state TEXT NOT NULL CHECK (state IN ('queued', 'running', 'done', 'failed', 'cancelled')),
+    -- Who asked. Null for Core itself (schedules, updates) and the local CLI.
+    user_id TEXT,
+    queued_at INTEGER NOT NULL,
+    started_at INTEGER,
+    ended_at INTEGER,
+    error TEXT,
+    -- The App showed the result and was told to stop.
+    acked INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX backup_operations_state ON backup_operations (state, id);
+
+-- A server's backup schedule, in the App's slot model. Without a row: daily, keeping the last 7.
+CREATE TABLE backup_schedules (
+    server_id TEXT PRIMARY KEY REFERENCES servers (id) ON DELETE CASCADE,
+    -- Always an interval, even with scheduled backups off.
+    interval_hours INTEGER NOT NULL,
+    -- The automatic slots; 0 turns scheduled backups off.
+    keep INTEGER NOT NULL,
+    -- When the schedule last came due with nothing new to back up, so the next due time Core
+    -- reports is one it keeps.
+    skipped_at INTEGER
 );
 
--- The pack a server follows. Unlinking deletes the row and keeps the files.
-CREATE TABLE packs (
-    server_id TEXT PRIMARY KEY REFERENCES servers (id) ON DELETE CASCADE,
-    -- The Modrinth project and version, or null for a pack file the App uploaded.
+-- Content is the files on disk. These three tables record where each tracked file came from, in
+-- app-lib's shape (`instance_content_sets`, `instance_files`, `instance_content_entries`) with
+-- `server` for `instance`. Copal's differences are marked "Copal:". The rows are read and written
+-- by `state::servers::adapters::sqlite::content_rows`.
+
+-- The pack a server follows, as a content set. A server has at most one; unlinking deletes it
+-- and keeps the files, as files someone added.
+CREATE TABLE server_content_sets (
+    id TEXT PRIMARY KEY,
+    -- Copal: one set per server.
+    server_id TEXT NOT NULL UNIQUE REFERENCES servers (id) ON DELETE CASCADE,
+    -- As the pack's index names it.
+    name TEXT NOT NULL,
+    -- 'modrinth_modpack', 'imported_modpack' (a file the App uploaded), or 'shared_instance' (a
+    -- version of an App instance's share).
+    source_kind TEXT NOT NULL,
+    status TEXT NOT NULL,
+    game_version TEXT NOT NULL,
+    protocol_version INTEGER,
+    loader TEXT NOT NULL,
+    loader_version TEXT,
+    created INTEGER NOT NULL,
+    modified INTEGER NOT NULL,
+    -- Copal: where the pack came from. The Modrinth project and version, or null for a pack file
+    -- the App uploaded.
     project_id TEXT,
     version_id TEXT,
     -- As the pack's index names them.
-    name TEXT NOT NULL,
     version_number TEXT NOT NULL,
     summary TEXT,
     -- SHA-1 of the .mrpack, kept in `meta/packs/`.
     sha1 TEXT NOT NULL,
-    -- The App instance the pack came from, when the App shares one.
+    -- The App instance the pack came from, and the version of its share it is.
     instance_id TEXT,
     instance_name TEXT,
+    shared_instance_id TEXT,
+    shared_version INTEGER,
     -- Why the last install, update, or repair failed. Cleared by the next one that works, or by
     -- unlinking.
     error TEXT
+);
+
+-- Every file Core tracks on a server, by the path it has when enabled.
+CREATE TABLE server_files (
+    id TEXT PRIMARY KEY,
+    server_id TEXT NOT NULL REFERENCES servers (id) ON DELETE CASCADE,
+    -- Relative to the server folder, with forward slashes: `mods/a.jar`, `config/b.toml`. A
+    -- disabled addon is on disk with `.disabled` added.
+    relative_path TEXT NOT NULL,
+    file_name TEXT NOT NULL,
+    -- As Core last left it; the disk decides.
+    enabled INTEGER NOT NULL,
+    -- SHA-1 of the file as Core placed it. A different hash on disk means the owner edited it.
+    sha1 TEXT NOT NULL,
+    -- As Core placed it; 0 for a file it found there rather than placed.
+    size INTEGER NOT NULL,
+    -- Copal: a file of the pack the server leaves out, client only, which is never on its disk.
+    missing INTEGER NOT NULL DEFAULT 0,
+    added_at INTEGER NOT NULL,
+    modified_at INTEGER NOT NULL,
+    UNIQUE (server_id, relative_path)
+);
+
+-- Where each tracked file came from, and which sides it is on for.
+CREATE TABLE server_content_entries (
+    id TEXT PRIMARY KEY,
+    server_id TEXT NOT NULL REFERENCES servers (id) ON DELETE CASCADE,
+    -- Copal: the pack's set for a file the pack placed, null for one someone added.
+    content_set_id TEXT REFERENCES server_content_sets (id) ON DELETE SET NULL,
+    -- Copal: every entry is one file's.
+    file_id TEXT NOT NULL UNIQUE REFERENCES server_files (id) ON DELETE CASCADE,
+    -- A `ContentType` (`mod`, `plugin`, `datapack`, ...). Copal: null for a pack's other files,
+    -- such as configs.
+    project_type TEXT,
+    project_id TEXT,
+    version_id TEXT,
+    -- 'local' for a file someone on the server added, or the source kind of the pack's set.
+    source_kind TEXT NOT NULL,
+    -- 'unsupported' server side: the file is renamed `.disabled`, and players still get it.
+    server_requirement TEXT NOT NULL DEFAULT 'required',
+    -- 'unsupported' client side: the server runs it, and its share leaves it out.
+    client_requirement TEXT NOT NULL DEFAULT 'required',
+    -- Off for both sides.
+    enabled INTEGER NOT NULL DEFAULT 1,
+    added_at INTEGER NOT NULL,
+    modified_at INTEGER NOT NULL,
+    -- Copal: someone set the sides by hand.
+    sides_unlocked INTEGER NOT NULL DEFAULT 0,
+    -- Copal: a pack update found this file edited and left it alone: the new pack `changed` it
+    -- or `removed` it. Cleared when the App says keep or replace.
+    pending TEXT CHECK (pending IN ('changed', 'removed'))
+);
+CREATE INDEX server_content_entries_server ON server_content_entries (server_id);
+
+-- A pack pushed while the server ran, applied when it next stops. Only the latest push waits.
+-- Not a content set: nothing of it is on the server until it applies.
+CREATE TABLE pending_packs (
+    server_id TEXT PRIMARY KEY REFERENCES servers (id) ON DELETE CASCADE,
+    -- SHA-1 of the .mrpack, kept in `meta/packs/`.
+    sha1 TEXT NOT NULL,
+    instance_id TEXT NOT NULL,
+    instance_name TEXT NOT NULL,
+    shared_instance_id TEXT NOT NULL,
+    shared_version INTEGER NOT NULL,
+    -- Start the server again once the pack is in: the push asked for a restart.
+    start_after INTEGER NOT NULL,
+    -- Install it even for an older Minecraft than the world's, as the push asked.
+    force INTEGER NOT NULL
 );
 
 -- When a server restarts by itself. A server without a row has the defaults: crash restart on,

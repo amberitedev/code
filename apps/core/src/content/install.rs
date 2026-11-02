@@ -26,7 +26,6 @@ use super::{
     modrinth,
     pack::{self, Index, Platform, Source, Step, Wanted},
     properties,
-    records::{self, ContentFile, Origin, Pack, Pending},
 };
 use crate::{
     api::{
@@ -39,6 +38,10 @@ use crate::{
         shared::SharedDirs,
     },
     servers::{Hold, records as servers_records},
+    state::servers::{
+        ContentSet, ContentSetStatus, ContentSourceKind, Pack, Pending,
+        SkippedFile, TrackedFile, adapters::sqlite::content_rows,
+    },
 };
 
 /// Pack files downloaded at once.
@@ -149,7 +152,7 @@ pub async fn pack(
     force: bool,
 ) -> Result<Option<GameVersionChange>, Error> {
     let id = hold.id();
-    let current = records::pack(&content.db, id).await?;
+    let current = content_rows::get_pack(&content.db, id).await?;
     let result = install_pack(
         content,
         hold,
@@ -161,8 +164,12 @@ pub async fn pack(
     )
     .await;
     if let Err(error) = &result {
-        records::set_pack_error(&content.db, id, Some(&format!("{error:#}")))
-            .await?;
+        content_rows::set_pack_error(
+            &content.db,
+            id,
+            Some(&format!("{error:#}")),
+        )
+        .await?;
     }
     let _ = tokio::fs::remove_dir_all(pack_staging(content, id)).await;
     result
@@ -211,8 +218,14 @@ async fn install_pack(
     let archive_path = dirs.pack(&sha1);
     let folder = Arc::new(Folder::open(&content.paths.server(id))?);
     let case_insensitive = folder.case_insensitive()?;
-    let (index, wanted) = read_pack(&archive_path, case_insensitive).await?;
+    let (index, wanted, skipped) =
+        read_pack(content, &archive_path, case_insensitive).await?;
     let platform = pack::platform(&index)?;
+    let kind = match (&instance, &project) {
+        (Some(_), _) => ContentSourceKind::SharedInstance,
+        (None, Some(_)) => ContentSourceKind::ModrinthModpack,
+        (None, None) => ContentSourceKind::ImportedModpack,
+    };
 
     let server = servers_records::get(&content.db, id)
         .await?
@@ -230,7 +243,7 @@ async fn install_pack(
             || server.loader_version == platform.loader_version);
 
     // Every download first: a failure here changes nothing.
-    let rows = records::files(&content.db, id).await?;
+    let rows = content_rows::get_tracked_files(&content.db, id).await?;
     let steps = {
         let folder = Arc::clone(&folder);
         let wanted = wanted.clone();
@@ -250,6 +263,7 @@ async fn install_pack(
                     case_insensitive,
                 },
                 repair,
+                kind,
             )
         })
         .await
@@ -265,16 +279,28 @@ async fn install_pack(
         install_platform(content, hold, progress, &platform, repair).await?;
     }
 
-    let summary = index.summary.clone();
-    records::set_pack(
+    let now = chrono::Utc::now();
+    content_rows::set_pack(
         &content.db,
         id,
         &Pack {
+            set: ContentSet {
+                id: uuid::Uuid::new_v4().to_string(),
+                instance_id: id.to_owned(),
+                name: index.name.clone(),
+                source_kind: kind,
+                status: ContentSetStatus::Available,
+                game_version: platform.game_version.clone(),
+                protocol_version: None,
+                loader: platform.loader,
+                loader_version: platform.loader_version.clone(),
+                created: now,
+                modified: now,
+            },
             project_id: project.as_ref().map(|(project, _)| project.clone()),
             version_id: project.as_ref().map(|(_, version)| version.clone()),
-            name: index.name.clone(),
             version_number: index.version_id.clone(),
-            summary,
+            summary: index.summary.clone(),
             sha1: sha1.clone(),
             instance_id: instance.as_ref().map(|linked| linked.id.clone()),
             instance_name: instance.as_ref().map(|linked| linked.name.clone()),
@@ -287,12 +313,13 @@ async fn install_pack(
     )
     .await?;
     apply(content, id, &folder, &archive_path, &index, steps, &staged).await?;
+    content_rows::set_skipped_files(&content.db, id, &skipped).await?;
     if let Some(properties) = properties {
         write_properties(&content.paths.server(id), &properties)?;
     }
     if let Some(old) = current.map(|pack| &pack.sha1)
         && *old != sha1
-        && !records::pack_in_use(&content.db, old).await?
+        && !content_rows::pack_in_use(&content.db, old).await?
     {
         let _ = tokio::fs::remove_file(dirs.pack(old)).await;
     }
@@ -440,22 +467,43 @@ fn allowed_url(url: &str) -> Result<reqwest::Url, Error> {
         })
 }
 
-/// A pack's index and the files it wants, read from the `.mrpack` at `path`.
+/// A pack's index, the files a server takes from it, and its client-only files, read from the
+/// `.mrpack` at `path`. Files the index gives no sides for are looked up on Modrinth by hash;
+/// when Modrinth cannot be reached they are taken, as a server is safer with them.
 pub async fn read_pack(
+    content: &Content,
     path: &Path,
     case_insensitive: bool,
-) -> Result<(Index, BTreeMap<String, Wanted>), Error> {
+) -> Result<(Index, BTreeMap<String, Wanted>, Vec<SkippedFile>), Error> {
     let path = path.to_owned();
-    tokio::task::spawn_blocking(move || {
+    let (index, candidates) = tokio::task::spawn_blocking(move || {
         let file = std::fs::File::open(&path)?;
         let mut archive = zip::ZipArchive::new(file)
             .map_err(super::archive::ArchiveError::from)?;
         let index = pack::read_index(&mut archive)?;
-        let wanted = pack::wanted(&index, &mut archive, case_insensitive)?;
-        Ok((index, wanted))
+        let loader = pack::platform(&index)?.loader;
+        let candidates = pack::candidates(
+            &index,
+            &mut archive,
+            ModLoader::from(loader).jar_platform(),
+        )?;
+        Ok::<_, Error>((index, candidates))
     })
     .await
-    .map_err(std::io::Error::other)?
+    .map_err(std::io::Error::other)??;
+    let ask: Vec<String> = candidates
+        .iter()
+        .filter(|candidate| candidate.ask_modrinth())
+        .map(|candidate| candidate.wanted.sha1.clone())
+        .collect();
+    let known = content.modrinth.sided_by_hashes(&ask).await.unwrap_or_else(
+        |error| {
+            warn!(%error, "could not ask Modrinth where a pack's files run");
+            pack::Known::new()
+        },
+    );
+    let (wanted, skipped) = pack::split(candidates, &known, case_insensitive)?;
+    Ok((index, wanted, skipped))
 }
 
 /// Download every file the plan places from the index, checked, into staging. Returns where each
@@ -581,7 +629,12 @@ async fn apply(
                     if let Some(theirs) =
                         changed_meanwhile(&path, row.is_some(), before, now)
                     {
-                        records::put(&content.db, server_id, &theirs).await?;
+                        content_rows::upsert_tracked_file(
+                            &content.db,
+                            server_id,
+                            &theirs,
+                        )
+                        .await?;
                     }
                     continue;
                 }
@@ -596,43 +649,72 @@ async fn apply(
                         row.project_id = Some(project);
                         row.version_id = Some(version);
                     }
-                    records::put(&content.db, server_id, &row).await?;
+                    content_rows::upsert_tracked_file(
+                        &content.db,
+                        server_id,
+                        &row,
+                    )
+                    .await?;
                 }
             }
             Step::Record(row) => {
-                records::put(&content.db, server_id, &row).await?
+                content_rows::upsert_tracked_file(&content.db, server_id, &row)
+                    .await?
             }
             // A path that became the server's since the plan is only forgotten.
             Step::Delete(row)
                 if super::folder::is_server_owned(
-                    &row.path,
+                    &row.relative_path,
                     &folder.level_name(),
                 ) =>
             {
-                records::remove(&content.db, server_id, &row.path).await?
+                content_rows::remove_tracked_file(
+                    &content.db,
+                    server_id,
+                    &row.relative_path,
+                )
+                .await?
             }
-            Step::Delete(row) => match sha1_now(folder, &row.path).await? {
+            Step::Delete(row) => match sha1_now(folder, &row.relative_path)
+                .await?
+            {
                 Some(sha1) if sha1 == row.sha1 => {
                     let folder = Arc::clone(folder);
-                    let target = row.path.clone();
+                    let target = row.relative_path.clone();
                     tokio::task::spawn_blocking(move || folder.remove(&target))
                         .await
                         .map_err(std::io::Error::other)??;
-                    records::remove(&content.db, server_id, &row.path).await?;
+                    content_rows::remove_tracked_file(
+                        &content.db,
+                        server_id,
+                        &row.relative_path,
+                    )
+                    .await?;
                 }
                 None => {
-                    records::remove(&content.db, server_id, &row.path).await?
+                    content_rows::remove_tracked_file(
+                        &content.db,
+                        server_id,
+                        &row.relative_path,
+                    )
+                    .await?
                 }
                 Some(_) => {
-                    let row = ContentFile {
+                    let row = TrackedFile {
                         pending: Some(Pending::Removed),
                         ..row
                     };
-                    records::put(&content.db, server_id, &row).await?;
+                    content_rows::upsert_tracked_file(
+                        &content.db,
+                        server_id,
+                        &row,
+                    )
+                    .await?;
                 }
             },
             Step::Forget(path) => {
-                records::remove(&content.db, server_id, &path).await?
+                content_rows::remove_tracked_file(&content.db, server_id, &path)
+                    .await?
             }
         }
     }
@@ -645,22 +727,23 @@ async fn apply(
 fn changed_meanwhile(
     path: &str,
     tracked: bool,
-    before: Option<ContentFile>,
+    before: Option<TrackedFile>,
     now: Option<String>,
-) -> Option<ContentFile> {
+) -> Option<TrackedFile> {
     let theirs = match (before, now) {
         (Some(before), _) => before,
-        (None, Some(sha1)) if tracked => ContentFile {
-            path: path.to_owned(),
-            origin: Origin::Added,
+        (None, Some(sha1)) if tracked => TrackedFile {
+            relative_path: path.to_owned(),
+            source_kind: ContentSourceKind::Local,
             sha1,
+            size: 0,
             project_id: None,
             version_id: None,
             pending: None,
         },
         _ => return None,
     };
-    Some(ContentFile {
+    Some(TrackedFile {
         pending: Some(Pending::Changed),
         ..theirs
     })
@@ -745,10 +828,12 @@ pub fn write_properties(
 
 /// Fill in the Modrinth project of tracked files that lack one, by their hash. Best effort.
 pub async fn identify(content: &Content, server_id: &str) {
-    let Ok(rows) = records::files(&content.db, server_id).await else {
+    let Ok(rows) =
+        content_rows::get_tracked_files(&content.db, server_id).await
+    else {
         return;
     };
-    let unknown: Vec<&ContentFile> =
+    let unknown: Vec<&TrackedFile> =
         rows.iter().filter(|row| row.project_id.is_none()).collect();
     if unknown.is_empty() {
         return;
@@ -759,10 +844,10 @@ pub async fn identify(content: &Content, server_id: &str) {
         Ok(found) => {
             for row in unknown {
                 if let Some(version) = found.get(&row.sha1) {
-                    let _ = records::set_project(
+                    let _ = content_rows::set_project(
                         &content.db,
                         server_id,
-                        &row.path,
+                        &row.relative_path,
                         &version.project_id,
                         &version.id,
                     )
@@ -784,8 +869,9 @@ pub async fn decide(
     path: &str,
     replace: bool,
 ) -> Result<(), Error> {
-    let row = records::file(&content.db, server_id, path)
+    let row = content_rows::get_tracked_file(&content.db, server_id, path)
         .await?
+        .map(|(row, _)| row)
         .filter(|row| row.pending.is_some())
         .ok_or_else(|| {
             Error::NotFound(format!("{path} waits for no decision."))
@@ -794,11 +880,11 @@ pub async fn decide(
     match (row.pending, replace) {
         (Some(Pending::Removed), false) => {
             let sha1 = folder.sha1(path)?.unwrap_or(row.sha1.clone());
-            records::put(
+            content_rows::upsert_tracked_file(
                 &content.db,
                 server_id,
-                &ContentFile {
-                    origin: Origin::Added,
+                &TrackedFile {
+                    source_kind: ContentSourceKind::Local,
                     sha1,
                     pending: None,
                     ..row
@@ -808,17 +894,20 @@ pub async fn decide(
         }
         (Some(Pending::Removed), true) => {
             folder.remove(path)?;
-            records::remove(&content.db, server_id, path).await?;
+            content_rows::remove_tracked_file(&content.db, server_id, path)
+                .await?;
         }
         (_, replace) => {
-            let pack =
-                records::pack(&content.db, server_id).await?.ok_or_else(
-                    || Error::Invalid("This server follows no pack.".into()),
-                )?;
+            let pack = content_rows::get_pack(&content.db, server_id)
+                .await?
+                .ok_or_else(|| {
+                    Error::Invalid("This server follows no pack.".into())
+                })?;
             let archive_path =
                 SharedDirs::new(content.paths.root()).pack(&pack.sha1);
-            let (index, wanted) =
-                read_pack(&archive_path, folder.case_insensitive()?).await?;
+            let (index, wanted, _) =
+                read_pack(content, &archive_path, folder.case_insensitive()?)
+                    .await?;
             let want = wanted.get(path).ok_or_else(|| {
                 Error::NotFound(format!("The pack has no {path}."))
             })?;
@@ -844,12 +933,13 @@ pub async fn decide(
                         .await;
                 placed?;
             }
-            records::put(
+            content_rows::upsert_tracked_file(
                 &content.db,
                 server_id,
-                &ContentFile {
-                    origin: Origin::Pack,
+                &TrackedFile {
+                    source_kind: pack.set.source_kind,
                     sha1: want.sha1.clone(),
+                    size: want.size,
                     pending: None,
                     ..row
                 },

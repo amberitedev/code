@@ -100,7 +100,8 @@ impl consume::Modrinth for Lookup<'_> {
         let dirs = SharedDirs::new(self.0.paths.root());
         let sha1 =
             install::fetch_modrinth_pack(self.0, &dirs, id, &|_| {}).await?;
-        let (_, wanted) = install::read_pack(&dirs.pack(&sha1), false).await?;
+        let (_, wanted, _) =
+            install::read_pack(self.0, &dirs.pack(&sha1), false).await?;
         let sha1s = wanted
             .values()
             .map(|file| file.sha1.clone())

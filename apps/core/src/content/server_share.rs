@@ -9,10 +9,8 @@
 
 use std::collections::HashMap;
 
-use super::{
-    addons::{Listed, Sides},
-    records::{ContentFile, Origin, SideToggle},
-};
+use super::addons::{Listed, Sides};
+use crate::state::servers::{EntrySides, TrackedFile};
 use sharing_client::push::RemovedFile;
 
 use modrinth_content_management::ContentType;
@@ -21,31 +19,33 @@ use modrinth_content_management::ContentType;
 /// disk but off for players. A file Modrinth knows goes by version; any other mod by its path.
 pub fn removed(
     listed: &[Listed],
-    rows: &HashMap<String, ContentFile>,
-    toggles: &HashMap<String, SideToggle>,
+    rows: &HashMap<String, TrackedFile>,
+    toggles: &HashMap<String, EntrySides>,
     addon_dirs: &[String],
 ) -> Vec<RemovedFile> {
     let mut pack_rows = rows
         .values()
-        .filter(|row| row.origin == Origin::Pack)
+        .filter(|row| row.from_pack())
         .collect::<Vec<_>>();
-    pack_rows.sort_by(|a, b| a.path.cmp(&b.path));
+    pack_rows.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
     let mut removed = Vec::new();
     for row in pack_rows {
-        let for_players = match listed.iter().find(|item| item.path == row.path)
-        {
-            Some(item) => {
-                Sides::of(item, toggles.get(&item.path)).for_players()
-            }
-            // Gone from disk. Only addons count; the pack's other files are not content.
-            None => !row.path.rsplit_once('/').is_some_and(|(dir, _)| {
-                addon_dirs.iter().any(|addon_dir| addon_dir == dir)
-            }),
-        };
+        let for_players =
+            match listed.iter().find(|item| item.path == row.relative_path) {
+                Some(item) => {
+                    Sides::of(item, toggles.get(&item.path)).for_players()
+                }
+                // Gone from disk. Only addons count; the pack's other files are not content.
+                None => !row.relative_path.rsplit_once('/').is_some_and(
+                    |(dir, _)| {
+                        addon_dirs.iter().any(|addon_dir| addon_dir == dir)
+                    },
+                ),
+            };
         if for_players {
             continue;
         }
-        let entry = match (&row.version_id, row.path.split_once('/')) {
+        let entry = match (&row.version_id, row.relative_path.split_once('/')) {
             (Some(version_id), _) => RemovedFile::Version {
                 version_id: version_id.clone(),
             },
@@ -95,18 +95,15 @@ pub enum Carried {
 /// the modpack, so the pack's own files are left to it.
 pub fn carried(
     listed: &[Listed],
-    rows: &HashMap<String, ContentFile>,
-    toggles: &HashMap<String, SideToggle>,
+    rows: &HashMap<String, TrackedFile>,
+    toggles: &HashMap<String, EntrySides>,
     modpack: bool,
 ) -> Vec<Carried> {
     listed
         .iter()
         .filter(|item| Sides::of(item, toggles.get(&item.path)).for_players())
         .filter(|item| {
-            !modpack
-                || rows
-                    .get(&item.path)
-                    .is_none_or(|row| row.origin != Origin::Pack)
+            !modpack || rows.get(&item.path).is_none_or(|row| !row.from_pack())
         })
         .filter_map(|item| {
             let file_type = match item.kind {
@@ -142,7 +139,7 @@ pub fn carried(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::content::records::Origin;
+    use bedrock::state::{ContentRequirement, ContentSourceKind};
 
     fn listed(path: &str, kind: ContentType, disabled: bool) -> Listed {
         Listed {
@@ -155,13 +152,22 @@ mod tests {
         }
     }
 
-    fn toggle(path: &str, server: bool, player: bool) -> (String, SideToggle) {
+    /// A side turned off is unsupported there.
+    fn side(off: bool) -> ContentRequirement {
+        if off {
+            ContentRequirement::Unsupported
+        } else {
+            ContentRequirement::Required
+        }
+    }
+
+    fn toggle(path: &str, server: bool, player: bool) -> (String, EntrySides) {
         (
             path.into(),
-            SideToggle {
-                path: path.into(),
-                disabled_server: server,
-                disabled_player: player,
+            EntrySides {
+                enabled: true,
+                server_requirement: side(server),
+                client_requirement: side(player),
                 unlocked: true,
             },
         )
@@ -190,10 +196,11 @@ mod tests {
         ]);
         let rows = HashMap::from([(
             "mods/modrinth.jar".to_owned(),
-            ContentFile {
-                path: "mods/modrinth.jar".into(),
-                origin: Origin::Added,
+            TrackedFile {
+                relative_path: "mods/modrinth.jar".into(),
+                source_kind: ContentSourceKind::Local,
                 sha1: "x".into(),
+                size: 1,
                 project_id: Some("project".into()),
                 version_id: Some("version".into()),
                 pending: None,
@@ -222,13 +229,14 @@ mod tests {
 
     #[test]
     fn a_shared_modpack_carries_only_what_the_owner_changed() {
-        let row = |path: &str, origin, version_id: Option<&str>| {
+        let row = |path: &str, source_kind, version_id: Option<&str>| {
             (
                 path.to_owned(),
-                ContentFile {
-                    path: path.into(),
-                    origin,
+                TrackedFile {
+                    relative_path: path.into(),
+                    source_kind,
                     sha1: "x".into(),
+                    size: 1,
                     project_id: version_id.map(|_| "project".into()),
                     version_id: version_id.map(Into::into),
                     pending: None,
@@ -247,14 +255,22 @@ mod tests {
             toggle("mods/server.jar", false, true),
         ]);
         let rows = HashMap::from([
-            row("mods/kept.jar", Origin::Pack, Some("kept")),
-            row("mods/client.jar", Origin::Pack, None),
-            row("mods/server.jar", Origin::Pack, Some("server")),
+            row(
+                "mods/kept.jar",
+                ContentSourceKind::ModrinthModpack,
+                Some("kept"),
+            ),
+            row("mods/client.jar", ContentSourceKind::ModrinthModpack, None),
+            row(
+                "mods/server.jar",
+                ContentSourceKind::ModrinthModpack,
+                Some("server"),
+            ),
             // Deleted by the owner.
-            row("mods/deleted.jar", Origin::Pack, None),
+            row("mods/deleted.jar", ContentSourceKind::ModrinthModpack, None),
             // A config the pack placed, deleted: not content.
-            row("config/a.toml", Origin::Pack, None),
-            row("mods/added.jar", Origin::Added, Some("added")),
+            row("config/a.toml", ContentSourceKind::ModrinthModpack, None),
+            row("mods/added.jar", ContentSourceKind::Local, Some("added")),
         ]);
 
         assert_eq!(
@@ -283,10 +299,11 @@ mod tests {
         let row = |path: &str| {
             (
                 path.to_owned(),
-                ContentFile {
-                    path: path.into(),
-                    origin: Origin::Pack,
+                TrackedFile {
+                    relative_path: path.into(),
+                    source_kind: ContentSourceKind::ModrinthModpack,
                     sha1: "x".into(),
+                    size: 1,
                     project_id: None,
                     version_id: None,
                     pending: None,

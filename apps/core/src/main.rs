@@ -11,6 +11,7 @@ mod db;
 mod installs;
 mod network;
 mod servers;
+mod state;
 mod storage;
 mod update;
 

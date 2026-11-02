@@ -44,12 +44,14 @@ use crate::{
         self, Busy,
         addons::{self, Listed},
         install::{self as content_install, Linked, PackSource},
-        pack,
-        records::{self, ContentFile, Origin, Pack, PendingPack, SideToggle},
-        shared,
+        pack, shared,
     },
     installs::{ModLoader, shared::SharedDirs},
     servers::{Hold, ServerError, records as servers_records},
+    state::servers::{
+        Pack, Pending, PendingPack, SkippedFile, TrackedFile,
+        adapters::sqlite::content_rows, project_type_of,
+    },
 };
 
 /// Mirrors Archon.Content.v1.ContentOwnerType.
@@ -507,28 +509,29 @@ async fn addon_list(
     id: &str,
     loader: Option<ModLoader>,
     listed: Vec<Listed>,
+    skipped: Vec<SkippedFile>,
     updates: bool,
 ) -> Result<Vec<Addon>, ApiError> {
     let mut manifests = manifests(state, id, loader, &listed).await;
-    let rows = records::files(&state.db, id).await?;
-    let rows: HashMap<String, ContentFile> = rows
-        .into_iter()
-        .map(|row| (row.path.clone(), row))
-        .collect();
-    let toggles: HashMap<String, SideToggle> = records::toggles(&state.db, id)
-        .await?
-        .into_iter()
-        .map(|toggle| (toggle.path.clone(), toggle))
-        .collect();
+    let mut rows = HashMap::new();
+    let mut toggles = HashMap::new();
+    for (row, sides) in
+        content_rows::get_tracked_files_with_sides(&state.db, id).await?
+    {
+        toggles.insert(row.relative_path.clone(), sides);
+        rows.insert(row.relative_path.clone(), row);
+    }
     let mut project_ids: Vec<String> = rows
         .values()
         .filter_map(|row| row.project_id.clone())
+        .chain(skipped.iter().filter_map(|file| file.project_id.clone()))
         .collect();
     project_ids.sort();
     project_ids.dedup();
     let version_ids: Vec<String> = rows
         .values()
         .filter_map(|row| row.version_id.clone())
+        .chain(skipped.iter().filter_map(|file| file.version_id.clone()))
         .collect();
     let modrinth = &state.content.modrinth;
     let (projects, versions) = tokio::join!(
@@ -546,12 +549,12 @@ async fn addon_list(
         .map(|version| (version.id.clone(), version))
         .collect();
     let newer = if updates {
-        let row_list: Vec<ContentFile> = rows.values().cloned().collect();
+        let row_list: Vec<TrackedFile> = rows.values().cloned().collect();
         addons::updates(&state.content, id, &listed, &row_list, &versions).await
     } else {
         HashMap::new()
     };
-    Ok(listed
+    let mut addons: Vec<Addon> = listed
         .into_iter()
         .map(|item| {
             let row = rows.get(&item.path);
@@ -574,7 +577,7 @@ async fn addon_list(
                 side_toggle_unlocked: toggle
                     .is_some_and(|toggle| toggle.unlocked),
                 kind: item.kind,
-                from_modpack: row.is_some_and(|row| row.origin == Origin::Pack),
+                from_modpack: row.is_some_and(TrackedFile::from_pack),
                 status: AddonStatus::Installed,
                 pack_client_retained: false,
                 pack_client_depends: false,
@@ -595,7 +598,53 @@ async fn addon_list(
                 installed: None,
             }
         })
-        .collect())
+        .collect();
+    // The pack's client-only files: listed, off for the server, never on its disk.
+    addons.extend(skipped.into_iter().filter_map(|file| {
+        let kind = project_type_of(&file.relative_path)?;
+        let project = file
+            .project_id
+            .as_ref()
+            .and_then(|project| projects.get(project));
+        let version = file
+            .version_id
+            .as_ref()
+            .and_then(|version| versions.get(version));
+        Some(Addon {
+            filename: file
+                .relative_path
+                .rsplit('/')
+                .next()
+                .unwrap_or_default()
+                .to_owned(),
+            id: file.relative_path,
+            filesize: file.size,
+            btime: None,
+            disabled: false,
+            disabled_server: true,
+            disabled_player: false,
+            side_toggle_unlocked: false,
+            kind,
+            from_modpack: true,
+            status: AddonStatus::Installed,
+            pack_client_retained: false,
+            pack_client_depends: false,
+            needs_side_type_review: false,
+            has_update: None,
+            name: project.map(|project| project.title.clone()),
+            project_id: file.project_id,
+            version: version.map(|version| AddonVersion {
+                id: version.id.clone(),
+                name: Some(version.version_number.clone()),
+                environment: None,
+            }),
+            owner: None,
+            icon_url: project.and_then(|project| project.icon_url.clone()),
+            manifest: None,
+            installed: Some(false),
+        })
+    }));
+    Ok(addons)
 }
 
 /// The jar on disk for `listed`, opened without following a link.
@@ -659,7 +708,7 @@ async fn modpack_fields(
     id: &str,
     check: bool,
 ) -> Result<Option<ModpackFields>, ApiError> {
-    let Some(pack) = records::pack(&state.db, id).await? else {
+    let Some(pack) = content_rows::get_pack(&state.db, id).await? else {
         return Ok(None);
     };
     let modrinth = &state.content.modrinth;
@@ -695,8 +744,8 @@ async fn modpack_fields(
             version_id: version_id.clone(),
         },
         _ => ModpackSpec::LocalFile {
-            filename: format!("{}.mrpack", pack.name),
-            name: pack.name.clone(),
+            filename: format!("{}.mrpack", pack.set.name),
+            name: pack.set.name.clone(),
             description: pack.summary.clone(),
         },
     };
@@ -706,7 +755,7 @@ async fn modpack_fields(
         title: Some(
             project
                 .as_ref()
-                .map_or(pack.name.clone(), |project| project.title.clone()),
+                .map_or(pack.set.name.clone(), |project| project.title.clone()),
         ),
         description: project
             .as_ref()
@@ -746,7 +795,7 @@ pub async fn linked_state(
             LinkedPackState::Applying
         } else if pack.error.is_some() {
             LinkedPackState::Failed
-        } else if records::pending(&state.db, id).await?.is_some() {
+        } else if content_rows::get_pending(&state.db, id).await?.is_some() {
             LinkedPackState::Pending
         } else {
             LinkedPackState::UpToDate
@@ -774,11 +823,13 @@ pub async fn list(
             content::folder::Folder::open(&state.servers.paths().server(&id))?;
         let listed: Vec<Listed> =
             addons::scan(&folder, loader).into_iter().collect();
+        let skipped = content_rows::get_skipped_files(&state.db, &id).await?;
         let mut addons = addon_list(
             &state,
             &id,
             loader,
             listed,
+            skipped,
             query.updates == Some(true),
         )
         .await?;
@@ -972,7 +1023,7 @@ pub async fn enable_many(
 /// Refuses a server that follows an instance. Its instance's owner writes the share it reads,
 /// side toggles included, so it has no share or toggles of its own.
 pub async fn server_first(state: &AppState, id: &str) -> Result<(), ApiError> {
-    let linked = records::pack(&state.db, id)
+    let linked = content_rows::get_pack(&state.db, id)
         .await?
         .is_some_and(|pack| content_install::linked(&pack).is_some());
     if linked {
@@ -1085,7 +1136,7 @@ pub async fn get_update(
                 format!("There is no {}.", query.filename),
             )
         })?;
-    let addon = addon_list(&state, &id, loader, vec![listed], true)
+    let addon = addon_list(&state, &id, loader, vec![listed], Vec::new(), true)
         .await?
         .pop()
         .expect("one in, one out");
@@ -1178,7 +1229,7 @@ pub async fn install(
                 busy,
                 Installing::Loader,
                 move |content, hold, progress| async move {
-                    records::unlink(&content.db, hold.id()).await?;
+                    content_rows::unlink(&content.db, hold.id()).await?;
                     access.owed.notify_one();
                     content_install::loader(
                         &content,
@@ -1342,7 +1393,7 @@ async fn install_instance(
     match state.servers.hold(id) {
         Ok(hold) => {
             // A version still waiting from an earlier push is superseded by this one.
-            let waiting = records::clear_pending(&state.db, id).await?;
+            let waiting = content_rows::clear_pending(&state.db, id).await?;
             forget_pack(state, waiting).await;
             let app = Arc::clone(state);
             state.content.spawn(
@@ -1360,7 +1411,7 @@ async fn install_instance(
                     let (sha1, version) = match written {
                         Ok(written) => written,
                         Err(error) => {
-                            records::set_pack_error(
+                            content_rows::set_pack_error(
                                 &content.db,
                                 hold.id(),
                                 Some(&format!("{error:#}")),
@@ -1415,7 +1466,8 @@ async fn install_instance(
                         force,
                     };
                     let replaced =
-                        records::set_pending(&state.db, &id, &pending).await?;
+                        content_rows::set_pending(&state.db, &id, &pending)
+                            .await?;
                     forget_pack(&state, replaced).await;
                     drop_own_share(&state, &id).await?;
                     if restart {
@@ -1433,7 +1485,7 @@ async fn install_instance(
                     Ok(()) => apply_pending(state, id).await,
                     Err(error) => {
                         tracing::warn!(server = %id, %error, "could not take a pushed version");
-                        let _ = records::set_pack_error(
+                        let _ = content_rows::set_pack_error(
                             &state.db,
                             &id,
                             Some(&format!("{error:#}")),
@@ -1465,13 +1517,14 @@ async fn drop_own_share(state: &AppState, id: &str) -> sqlx::Result<()> {
 pub async fn apply_pending(state: Arc<AppState>, id: String) {
     let id = id.as_str();
     let busy = state.content.busy_wait(id).await;
-    let Ok(Some(pending)) = records::pending(&state.db, id).await else {
+    let Ok(Some(pending)) = content_rows::get_pending(&state.db, id).await
+    else {
         return;
     };
     let Ok(hold) = state.servers.hold(id) else {
         return;
     };
-    if records::clear_pending(&state.db, id).await.is_err() {
+    if content_rows::clear_pending(&state.db, id).await.is_err() {
         return;
     }
     let (start_after, force) = (pending.start_after, pending.force);
@@ -1512,7 +1565,7 @@ pub async fn apply_pending(state: Arc<AppState>, id: String) {
 /// Delete a pack file nothing uses any more, such as a waiting version a newer push replaced.
 async fn forget_pack(state: &AppState, sha1: Option<String>) {
     let Some(sha1) = sha1 else { return };
-    if let Ok(false) = records::pack_in_use(&state.db, &sha1).await {
+    if let Ok(false) = content_rows::pack_in_use(&state.db, &sha1).await {
         let dirs = SharedDirs::new(state.servers.paths().root());
         let _ = tokio::fs::remove_file(dirs.pack(&sha1)).await;
     }
@@ -1524,7 +1577,7 @@ pub async fn apply_pending_on_stop(state: Arc<AppState>) {
 
     let mut events = state.servers.events.subscribe();
     // Versions pushed before Core last stopped, to servers that are stopped now.
-    for id in records::servers_pending(&state.db)
+    for id in content_rows::servers_pending(&state.db)
         .await
         .unwrap_or_default()
     {
@@ -1555,7 +1608,7 @@ pub async fn repair(
         .await?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
     let (hold, busy) = begin(&state, &id)?;
-    if records::pack(&state.db, &id).await?.is_some() {
+    if content_rows::get_pack(&state.db, &id).await?.is_some() {
         // The pack the server already follows: no other Minecraft.
         spawn_pack(&state, hold, busy, PackSource::Current, None, true);
     } else {
@@ -1602,7 +1655,7 @@ pub async fn unlink(
     caller.require(&state.db, &id, Level::Editor).await?;
     world(&id, &wid)?;
     let _busy = state.content.busy(&id)?;
-    records::unlink(&state.db, &id).await?;
+    content_rows::unlink(&state.db, &id).await?;
     state.access.owed.notify_one();
     state.content.clear_error(&id);
     activity::log(&state.db, &caller, Some(&id), Action::ContentChanged).await;
@@ -1648,9 +1701,15 @@ pub async fn update_modpack(
     };
     caller.require(&state.db, &id, Level::Editor).await?;
     world(&id, &wid)?;
-    let pack = records::pack(&state.db, &id).await?.ok_or_else(|| {
-        ApiError::new(ErrorCode::NotFound, "This server follows no pack.")
-    })?;
+    let pack =
+        content_rows::get_pack(&state.db, &id)
+            .await?
+            .ok_or_else(|| {
+                ApiError::new(
+                    ErrorCode::NotFound,
+                    "This server follows no pack.",
+                )
+            })?;
     let Some(project_id) = pack.project_id else {
         return Err(ApiError::new(
             ErrorCode::InvalidRequest,
@@ -1790,7 +1849,7 @@ pub async fn upload_modpack(
         tokio::fs::rename(&path, &stored).await?;
         // A file that is not a pack is refused now, not in the background. Spellings that
         // collide are checked at install, against the server's own disk.
-        content_install::read_pack(&stored, false)
+        content_install::read_pack(&state.content, &stored, false)
             .await
             .map_err(|error| {
                 let stored = stored.clone();
@@ -1868,7 +1927,7 @@ pub async fn edited(
     Path(id): Path<String>,
 ) -> Result<Json<EditedFiles>, ApiError> {
     caller.require(&state.db, &id, Level::Viewer).await?;
-    let rows = records::files(&state.db, &id).await?;
+    let rows = content_rows::get_tracked_files(&state.db, &id).await?;
     let folder = Arc::new(content::folder::Folder::open(
         &state.servers.paths().server(&id),
     )?);
@@ -1876,11 +1935,11 @@ pub async fn edited(
         pack::edited(&rows, &|path| folder.sha1(path).ok().flatten())
             .into_iter()
             .map(|(row, on_disk)| EditedFile {
-                path: row.path.clone(),
+                path: row.relative_path.clone(),
                 deleted: on_disk.is_none(),
                 pending: row.pending.map(|pending| match pending {
-                    records::Pending::Changed => PendingChange::Changed,
-                    records::Pending::Removed => PendingChange::Removed,
+                    Pending::Changed => PendingChange::Changed,
+                    Pending::Removed => PendingChange::Removed,
                 }),
             })
             .collect()

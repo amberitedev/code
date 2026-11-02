@@ -1,7 +1,7 @@
-//! Content: the files on a server's disk, with the origin of each tracked file recorded in
-//! `content_files` (from the pack, or added on the server). No mods table: the folders are the
-//! list, and a row only says who put a file there and what it was then, which is how Core knows
-//! the owner edited it (see `pack::edited`).
+//! Content: the files on a server's disk, with where each tracked file came from (the pack, or
+//! someone on the server) recorded in app-lib's content tables (`state::servers`). The folders
+//! are the list, and a record only says who put a file there and what it was then, which is how
+//! Core knows the owner edited it (see `pack::edited`), and which sides it is on for.
 //!
 //! One change at a time per server: a second one is refused as busy rather than queued. Loader and
 //! pack installs run in the background, hold the server so it cannot start, and report progress
@@ -16,7 +16,6 @@ pub mod install;
 pub mod modrinth;
 pub mod pack;
 pub mod properties;
-pub mod records;
 pub mod server_share;
 pub mod shared;
 

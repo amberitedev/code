@@ -13,7 +13,7 @@ use std::{
     sync::Arc,
 };
 
-use bedrock::content::least_stable;
+use bedrock::{content::least_stable, state::ContentRequirement};
 use modrinth_content_management::{
     ContentType, ResolutionPreferences, ResolveContentPlan,
     ResolveContentRequest, SkippedReason, VersionType, resolve_content,
@@ -25,7 +25,6 @@ use super::{
     folder::{self, Folder},
     install::{MAX_FILE, identify},
     modrinth::{self, Version},
-    records::{self, ContentFile, Origin, SideToggle},
 };
 use crate::{
     installs::{
@@ -33,6 +32,10 @@ use crate::{
         download::{self, FileDownload, Hash},
     },
     servers::records as servers_records,
+    state::servers::{
+        ContentSourceKind, EntrySides, TrackedFile,
+        adapters::sqlite::content_rows,
+    },
 };
 
 /// Added to an addon's file name to disable it.
@@ -247,7 +250,7 @@ pub async fn add(
     kind: Option<ContentType>,
 ) -> Result<(), Error> {
     let target = target(content, server_id).await?;
-    let rows = records::files(&content.db, server_id).await?;
+    let rows = content_rows::get_tracked_files(&content.db, server_id).await?;
     let folder = Arc::new(Folder::open(&content.paths.server(server_id))?);
     let mut existing = provided(&rows, &|path| folder.exists(path));
     existing.remove(project_id);
@@ -278,24 +281,24 @@ pub async fn add(
 /// The projects this server already has: those of recorded files that are enabled and on disk.
 /// A disabled file's row keeps its enabled path, so it is not there.
 fn provided(
-    rows: &[ContentFile],
+    rows: &[TrackedFile],
     exists: &dyn Fn(&str) -> bool,
 ) -> HashSet<String> {
     rows.iter()
-        .filter(|row| exists(&row.path))
+        .filter(|row| exists(&row.relative_path))
         .filter_map(|row| row.project_id.clone())
         .collect()
 }
 
 /// Download a version's file into `dir`, replacing an older file of the same project, and record
-/// it as added.
+/// it as added. The sides of the file it replaces go to the new one.
 async fn place_version(
     content: &Content,
     server_id: &str,
     folder: &Arc<Folder>,
     dir: &str,
     version: &Version,
-    rows: &[ContentFile],
+    rows: &[TrackedFile],
 ) -> Result<(), Error> {
     let file = version.primary().ok_or_else(|| {
         Error::Invalid(format!("Version {} has no file.", version.id))
@@ -334,22 +337,23 @@ async fn place_version(
         },
     )
     .await?;
-    let old: Vec<ContentFile> = rows
+    let old: Vec<TrackedFile> = rows
         .iter()
         .filter(|row| {
             row.project_id.as_deref() == Some(version.project_id.as_str())
-                && row.path.starts_with(&format!("{dir}/"))
-                && row.path != path
+                && row.relative_path.starts_with(&format!("{dir}/"))
+                && row.relative_path != path
         })
         .cloned()
         .collect();
-    // A file off for the server stays off when it is updated, since its toggle moves to the new
-    // file and only counts while the file is `.disabled`.
-    let toggles = records::toggles(&content.db, server_id).await?;
-    let off_for_server = old.iter().any(|row| {
-        toggles
-            .iter()
-            .any(|toggle| toggle.path == row.path && toggle.disabled_server)
+    let sides = content_rows::get_entry_sides(&content.db, server_id).await?;
+    let moved = old
+        .iter()
+        .find_map(|row| sides.get(&row.relative_path).copied());
+    // A file off for the server stays off when it is updated, since its sides move to the new
+    // file and only count while the file is `.disabled`.
+    let off_for_server = moved.is_some_and(|sides| {
+        sides.server_requirement == ContentRequirement::Unsupported
     });
     let written = if off_for_server {
         format!("{path}{DISABLED}")
@@ -363,8 +367,8 @@ async fn place_version(
         tokio::task::spawn_blocking(move || -> std::io::Result<()> {
             folder.write(&written, &mut std::fs::File::open(&staged)?)?;
             for row in &old {
-                folder.remove(&row.path)?;
-                folder.remove(&format!("{}{DISABLED}", row.path))?;
+                folder.remove(&row.relative_path)?;
+                folder.remove(&format!("{}{DISABLED}", row.relative_path))?;
             }
             Ok(())
         })
@@ -374,25 +378,42 @@ async fn place_version(
     let _ = tokio::fs::remove_file(&staging).await;
     placed??;
     for row in old {
-        records::move_toggle(&content.db, server_id, &row.path, &path).await?;
-        // A pack file's row stays, so the pack does not put it back.
-        if row.origin == Origin::Added {
-            records::remove(&content.db, server_id, &row.path).await?;
+        // A pack file's row stays, so the pack does not put it back; its sides moved on.
+        if row.from_pack() {
+            content_rows::set_entry_sides(
+                &content.db,
+                server_id,
+                &row.relative_path,
+                &EntrySides::default(),
+            )
+            .await?;
+        } else {
+            content_rows::remove_tracked_file(
+                &content.db,
+                server_id,
+                &row.relative_path,
+            )
+            .await?;
         }
     }
-    records::put(
+    content_rows::upsert_tracked_file(
         &content.db,
         server_id,
-        &ContentFile {
-            path,
-            origin: Origin::Added,
+        &TrackedFile {
+            relative_path: path.clone(),
+            source_kind: ContentSourceKind::Local,
             sha1: file.hashes.sha1.to_ascii_lowercase(),
+            size: file.size,
             project_id: Some(version.project_id.clone()),
             version_id: Some(version.id.clone()),
             pending: None,
         },
     )
     .await?;
+    if let Some(sides) = moved {
+        content_rows::set_entry_sides(&content.db, server_id, &path, &sides)
+            .await?;
+    }
     Ok(())
 }
 
@@ -427,11 +448,21 @@ pub async fn remove(
     let folder = Folder::open(&content.paths.server(server_id))?;
     let (path, on_disk) = locate(&folder, kind, filename)?;
     folder.remove(&on_disk)?;
-    records::remove_toggle(&content.db, server_id, &path).await?;
-    if let Some(row) = records::file(&content.db, server_id, &path).await?
-        && row.origin == Origin::Added
-    {
-        records::remove(&content.db, server_id, &path).await?;
+    match content_rows::get_tracked_file(&content.db, server_id, &path).await? {
+        Some((row, _)) if row.from_pack() => {
+            content_rows::set_entry_sides(
+                &content.db,
+                server_id,
+                &path,
+                &EntrySides::default(),
+            )
+            .await?;
+        }
+        Some(_) => {
+            content_rows::remove_tracked_file(&content.db, server_id, &path)
+                .await?;
+        }
+        None => {}
     }
     Ok(())
 }
@@ -447,11 +478,11 @@ pub async fn set_enabled(
 ) -> Result<(), Error> {
     let folder = Folder::open(&content.paths.server(server_id))?;
     let (path, on_disk) = locate(&folder, kind, filename)?;
-    let mut toggle = toggle(content, server_id, &path).await?;
-    toggle.disabled_server = false;
+    let mut sides = sides(content, server_id, &path).await?;
+    sides.enabled = enabled;
+    sides.server_requirement = ContentRequirement::Required;
     rename_enabled(&folder, &path, &on_disk, enabled)?;
-    records::set_toggle(&content.db, server_id, &toggle).await?;
-    Ok(())
+    save_sides(content, server_id, &folder, &path, &sides).await
 }
 
 fn rename_enabled(
@@ -471,19 +502,57 @@ fn rename_enabled(
     Ok(())
 }
 
-async fn toggle(
+/// The sides recorded for the addon at its enabled `path`; on for both when none are.
+async fn sides(
     content: &Content,
     server_id: &str,
     path: &str,
-) -> Result<SideToggle, Error> {
-    Ok(records::toggles(&content.db, server_id)
+) -> Result<EntrySides, Error> {
+    Ok(content_rows::get_tracked_file(&content.db, server_id, path)
         .await?
-        .into_iter()
-        .find(|toggle| toggle.path == path)
-        .unwrap_or_else(|| SideToggle {
-            path: path.to_owned(),
-            ..SideToggle::default()
-        }))
+        .map(|(_, sides)| sides)
+        .unwrap_or_default())
+}
+
+/// Record the sides of the addon at its enabled `path`. A file Core does not track yet is
+/// tracked as someone's on the server, unless its sides are the default, which needs no record.
+async fn save_sides(
+    content: &Content,
+    server_id: &str,
+    folder: &Folder,
+    path: &str,
+    sides: &EntrySides,
+) -> Result<(), Error> {
+    if content_rows::set_entry_sides(&content.db, server_id, path, sides)
+        .await?
+        || *sides == EntrySides::default()
+    {
+        return Ok(());
+    }
+    let on_disk = if folder.exists(path) {
+        path.to_owned()
+    } else {
+        format!("{path}{DISABLED}")
+    };
+    let sha1 = folder
+        .sha1(&on_disk)?
+        .ok_or_else(|| Error::NotFound(format!("There is no {path}.")))?;
+    content_rows::upsert_tracked_file(
+        &content.db,
+        server_id,
+        &TrackedFile {
+            relative_path: path.to_owned(),
+            source_kind: ContentSourceKind::Local,
+            sha1,
+            size: 0,
+            project_id: None,
+            version_id: None,
+            pending: None,
+        },
+    )
+    .await?;
+    content_rows::set_entry_sides(&content.db, server_id, path, sides).await?;
+    Ok(())
 }
 
 /// A side an addon can be turned off for.
@@ -506,16 +575,20 @@ pub async fn set_side(
 ) -> Result<(), Error> {
     let folder = Folder::open(&content.paths.server(server_id))?;
     let (path, on_disk) = locate(&folder, kind, filename)?;
-    let mut toggle = toggle(content, server_id, &path).await?;
+    let mut sides = sides(content, server_id, &path).await?;
+    let requirement = if enabled {
+        ContentRequirement::Required
+    } else {
+        ContentRequirement::Unsupported
+    };
     match side {
         Side::Server => {
             rename_enabled(&folder, &path, &on_disk, enabled)?;
-            toggle.disabled_server = !enabled;
+            sides.server_requirement = requirement;
         }
-        Side::Player => toggle.disabled_player = !enabled,
+        Side::Player => sides.client_requirement = requirement,
     }
-    records::set_toggle(&content.db, server_id, &toggle).await?;
-    Ok(())
+    save_sides(content, server_id, &folder, &path, &sides).await
 }
 
 /// Mark an addon's sides as set by hand, or as following the file again.
@@ -528,13 +601,12 @@ pub async fn set_unlocked(
 ) -> Result<(), Error> {
     let folder = Folder::open(&content.paths.server(server_id))?;
     let (path, _) = locate(&folder, kind, filename)?;
-    let mut toggle = toggle(content, server_id, &path).await?;
-    toggle.unlocked = unlocked;
-    records::set_toggle(&content.db, server_id, &toggle).await?;
-    Ok(())
+    let mut sides = sides(content, server_id, &path).await?;
+    sides.unlocked = unlocked;
+    save_sides(content, server_id, &folder, &path, &sides).await
 }
 
-/// Where an addon runs, from its file and its toggles.
+/// Where an addon runs, from its file and its recorded sides.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Sides {
     /// Off for both sides.
@@ -544,16 +616,19 @@ pub struct Sides {
 }
 
 impl Sides {
-    /// A `.disabled` file is off for the server alone only while its toggle says so; a file
+    /// A `.disabled` file is off for the server alone only while its sides say so; a file
     /// renamed back by hand runs again.
-    pub fn of(listed: &Listed, toggle: Option<&SideToggle>) -> Self {
+    pub fn of(listed: &Listed, sides: Option<&EntrySides>) -> Self {
         let disabled_server = listed.disabled
-            && toggle.is_some_and(|toggle| toggle.disabled_server);
+            && sides.is_some_and(|sides| {
+                sides.server_requirement == ContentRequirement::Unsupported
+            });
         Self {
             disabled: listed.disabled && !disabled_server,
             disabled_server,
-            disabled_player: toggle
-                .is_some_and(|toggle| toggle.disabled_player),
+            disabled_player: sides.is_some_and(|sides| {
+                sides.client_requirement == ContentRequirement::Unsupported
+            }),
         }
     }
 
@@ -586,7 +661,10 @@ pub async fn update(
     let folder = Arc::new(Folder::open(&content.paths.server(server_id))?);
     let listed = find(&folder, Some(target.loader), filename)
         .ok_or_else(|| Error::NotFound(format!("There is no {filename}.")))?;
-    let row = records::file(&content.db, server_id, &listed.path).await?;
+    let row =
+        content_rows::get_tracked_file(&content.db, server_id, &listed.path)
+            .await?
+            .map(|(row, _)| row);
     // The version installed now: the one recorded, or the one Modrinth knows by its hash.
     let installed = match row.as_ref().and_then(|row| row.version_id.as_deref())
     {
@@ -639,16 +717,19 @@ pub async fn update(
         }
     };
     let version = content.modrinth.version(&version_id).await?;
-    let rows = records::files(&content.db, server_id).await?;
+    let rows = content_rows::get_tracked_files(&content.db, server_id).await?;
     let mut rows = rows;
     // The file being replaced counts as this project's even before Modrinth said so.
-    if let Some(row) = rows.iter_mut().find(|row| row.path == listed.path) {
+    if let Some(row) =
+        rows.iter_mut().find(|row| row.relative_path == listed.path)
+    {
         row.project_id = Some(project.clone());
     } else {
-        rows.push(ContentFile {
-            path: listed.path.clone(),
-            origin: Origin::Added,
+        rows.push(TrackedFile {
+            relative_path: listed.path.clone(),
+            source_kind: ContentSourceKind::Local,
             sha1: String::new(),
+            size: 0,
             project_id: Some(project.clone()),
             version_id: None,
             pending: None,
@@ -706,17 +787,19 @@ pub async fn upload(
     };
     // Over a pack file, the row keeps what the pack placed, so the upload counts as the owner's
     // edit and a pack update leaves it alone.
-    let pack_file = records::file(&content.db, server_id, &path)
-        .await?
-        .is_some_and(|row| row.origin == Origin::Pack);
+    let pack_file =
+        content_rows::get_tracked_file(&content.db, server_id, &path)
+            .await?
+            .is_some_and(|(row, _)| row.from_pack());
     if !pack_file {
-        records::put(
+        content_rows::upsert_tracked_file(
             &content.db,
             server_id,
-            &ContentFile {
-                path,
-                origin: Origin::Added,
+            &TrackedFile {
+                relative_path: path,
+                source_kind: ContentSourceKind::Local,
                 sha1,
+                size: tokio::fs::metadata(staged).await?.len(),
                 project_id: None,
                 version_id: None,
                 pending: None,
@@ -736,18 +819,20 @@ pub async fn updates(
     content: &Content,
     server_id: &str,
     listed: &[Listed],
-    rows: &[ContentFile],
+    rows: &[TrackedFile],
     installed: &HashMap<String, Version>,
 ) -> HashMap<String, Version> {
     let Ok(target) = target(content, server_id).await else {
         return HashMap::default();
     };
-    let by_path: HashMap<&str, &ContentFile> =
-        rows.iter().map(|row| (row.path.as_str(), row)).collect();
+    let by_path: HashMap<&str, &TrackedFile> = rows
+        .iter()
+        .map(|row| (row.relative_path.as_str(), row))
+        .collect();
     // The files to check, by kind and channel, since each asks Modrinth on its own.
     let mut groups: HashMap<
         (ContentType, VersionType),
-        Vec<(&Listed, &ContentFile)>,
+        Vec<(&Listed, &TrackedFile)>,
     > = HashMap::new();
     for item in listed {
         let Some(row) = by_path
@@ -841,10 +926,11 @@ mod tests {
 
     #[test]
     fn only_enabled_files_on_disk_provide_a_dependency() {
-        let row = |path: &str, project: &str| ContentFile {
-            path: path.into(),
-            origin: Origin::Added,
+        let row = |path: &str, project: &str| TrackedFile {
+            relative_path: path.into(),
+            source_kind: ContentSourceKind::Local,
             sha1: "x".into(),
+            size: 1,
             project_id: Some(project.into()),
             version_id: None,
             pending: None,

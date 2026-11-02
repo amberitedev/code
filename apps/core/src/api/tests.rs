@@ -23,8 +23,36 @@ use crate::{
     daemon::{folders, paths::Paths},
     db,
     servers::Servers,
+    state::servers::{
+        ContentSourceKind, TrackedFile, adapters::sqlite::content_rows,
+    },
     update::Updater,
 };
+
+/// Record `path` as a file an uploaded pack placed, with the hash `as placed` and its Modrinth
+/// project and version, if any.
+async fn track(
+    db: &sqlx::SqlitePool,
+    server: &str,
+    path: &str,
+    project: Option<(&str, &str)>,
+) {
+    content_rows::upsert_tracked_file(
+        db,
+        server,
+        &TrackedFile {
+            relative_path: path.into(),
+            source_kind: ContentSourceKind::ImportedModpack,
+            sha1: "as placed".into(),
+            size: 0,
+            project_id: project.map(|(project, _)| project.into()),
+            version_id: project.map(|(_, version)| version.into()),
+            pending: None,
+        },
+    )
+    .await
+    .unwrap();
+}
 
 struct Core {
     _dir: tempfile::TempDir,
@@ -760,13 +788,7 @@ async fn content_and_files_follow_the_role_table() {
     assert_eq!(read["known"]["motd"], "Edited");
 
     // A file the pack placed and the owner changed is listed as edited.
-    sqlx::query(
-        "INSERT INTO content_files (server_id, path, origin, sha1) VALUES (?, 'config/a.toml', 'pack', 'as placed')",
-    )
-    .bind(&server)
-    .execute(&core.state.db)
-    .await
-    .unwrap();
+    track(&core.state.db, &server, "config/a.toml", None).await;
     let (_, edited) = core
         .call(
             Method::GET,
@@ -787,14 +809,7 @@ async fn an_upload_over_a_pack_file_counts_as_the_owners_edit() {
     let core = core().await;
     let server = core.server.clone();
     let editor = core.sign_in("editor").await;
-    sqlx::query(
-        "INSERT INTO content_files (server_id, path, origin, sha1, project_id, version_id) \
-         VALUES (?, 'mods/a.jar', 'pack', 'as placed', 'P', 'V')",
-    )
-    .bind(&server)
-    .execute(&core.state.db)
-    .await
-    .unwrap();
+    track(&core.state.db, &server, "mods/a.jar", Some(("P", "V"))).await;
     let boundary = "copal-test";
     let body = format!(
         "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.jar\"\r\n\r\npatched\r\n--{boundary}--\r\n"
@@ -814,13 +829,15 @@ async fn an_upload_over_a_pack_file_counts_as_the_owners_edit() {
     let (status, _) = core.send(request).await;
     assert_eq!(status, StatusCode::NO_CONTENT);
 
-    let row: (String, String) = sqlx::query_as(
-        "SELECT origin, sha1 FROM content_files WHERE path = 'mods/a.jar'",
-    )
-    .fetch_one(&core.state.db)
-    .await
-    .unwrap();
-    assert_eq!(row, ("pack".into(), "as placed".into()));
+    let (row, _) =
+        content_rows::get_tracked_file(&core.state.db, &server, "mods/a.jar")
+            .await
+            .unwrap()
+            .unwrap();
+    assert_eq!(
+        (row.source_kind, row.sha1.as_str()),
+        (ContentSourceKind::ImportedModpack, "as placed")
+    );
     let (_, edited) = core
         .call(
             Method::GET,
@@ -1479,8 +1496,10 @@ async fn side_toggles_decide_what_the_server_runs_and_what_players_get() {
 
     // A server that follows an instance has neither toggles nor a share of its own.
     sqlx::query(
-        "INSERT INTO packs (server_id, name, version_number, sha1, instance_id, instance_name, \
-         shared_instance_id, shared_version) VALUES (?, 'I', '1', 'x', 'i', 'I', 's', 1)",
+        "INSERT INTO server_content_sets (id, server_id, name, source_kind, status, game_version, \
+         loader, created, modified, version_number, sha1, instance_id, instance_name, \
+         shared_instance_id, shared_version) VALUES ('set', ?, 'I', 'shared_instance', \
+         'available', '1.21.1', 'fabric', 0, 0, '1', 'x', 'i', 'I', 's', 1)",
     )
     .bind(&server)
     .execute(&core.state.db)

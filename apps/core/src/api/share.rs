@@ -34,11 +34,11 @@ use crate::{
     content::{
         addons,
         folder::{self, Folder},
-        records::{self, ContentFile, SideToggle},
         server_share::{Carried, carried, removed},
     },
     installs::ModLoader,
     servers::{ServerError, records as servers_records},
+    state::servers::adapters::sqlite::content_rows,
 };
 
 /// Config files `GET .../content/share/files` lists at most.
@@ -236,18 +236,16 @@ async fn snapshot(state: &AppState, id: &str) -> Result<Snapshot, ApiError> {
     };
     let folder = Arc::new(Folder::open(&state.servers.paths().server(id))?);
     let listed = addons::scan(&folder, Some(loader));
-    let rows: HashMap<String, ContentFile> = records::files(&state.db, id)
-        .await?
-        .into_iter()
-        .map(|row| (row.path.clone(), row))
-        .collect();
-    let toggles: HashMap<String, SideToggle> = records::toggles(&state.db, id)
-        .await?
-        .into_iter()
-        .map(|toggle| (toggle.path.clone(), toggle))
-        .collect();
+    let mut rows = HashMap::new();
+    let mut toggles = HashMap::new();
+    for (row, sides) in
+        content_rows::get_tracked_files_with_sides(&state.db, id).await?
+    {
+        toggles.insert(row.relative_path.clone(), sides);
+        rows.insert(row.relative_path.clone(), row);
+    }
     // A pack uploaded as a file is not on Modrinth, so its files are shared one by one.
-    let modpack_id = records::pack(&state.db, id)
+    let modpack_id = content_rows::get_pack(&state.db, id)
         .await?
         .and_then(|pack| pack.version_id);
     let carried = carried(&listed, &rows, &toggles, modpack_id.is_some());
@@ -360,7 +358,7 @@ pub async fn share(
     let snapshot = snapshot(&state, &id).await?;
     // The share takes the server's name on every push. One deleted elsewhere, or made by this
     // Core under an earlier pairing, is replaced by a new one.
-    let existing = match records::share_id(&state.db, &id).await? {
+    let existing = match servers_records::share_id(&state.db, &id).await? {
         Some(share_id) => {
             match backend.rename_share(&share_id, &snapshot.name).await {
                 Err(push::PushError::Backend {
@@ -376,7 +374,8 @@ pub async fn share(
         None => {
             let share_id =
                 backend.create_server_share(&snapshot.name, &id).await?;
-            records::set_share_id(&state.db, &id, Some(&share_id)).await?;
+            servers_records::set_share_id(&state.db, &id, Some(&share_id))
+                .await?;
             share_id
         }
     };
@@ -473,7 +472,7 @@ pub async fn unshare(
     caller.require(&state.db, &id, Level::Owner).await?;
     world(&id, &wid)?;
     server_first(&state, &id).await?;
-    if records::share_id(&state.db, &id).await?.is_none() {
+    if servers_records::share_id(&state.db, &id).await?.is_none() {
         return Err(ApiError::new(
             ErrorCode::NotFound,
             "This server is not shared.",
@@ -484,7 +483,7 @@ pub async fn unshare(
     // 404, which `delete_share` counts as deleted, and a 403 `not_owner` means it is not this
     // Core's any more.
     if let (Some(share_id), Ok(backend)) = (
-        records::share_id(&state.db, &id).await?,
+        servers_records::share_id(&state.db, &id).await?,
         backend(&state).await,
     ) {
         match backend.delete_share(&share_id).await {
@@ -495,7 +494,7 @@ pub async fn unshare(
             Err(error) => return Err(error.into()),
         }
     }
-    records::set_share_id(&state.db, &id, None).await?;
+    servers_records::set_share_id(&state.db, &id, None).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -507,10 +506,11 @@ pub async fn owe_share_deletion(
     conn: &mut sqlx::SqliteConnection,
     id: &str,
 ) -> sqlx::Result<()> {
-    let Some(share_id) = records::share_id(&mut *conn, id).await? else {
+    let Some(share_id) = servers_records::share_id(&mut *conn, id).await?
+    else {
         return Ok(());
     };
-    records::set_share_id(&mut *conn, id, None).await?;
+    servers_records::set_share_id(&mut *conn, id, None).await?;
     crate::access::sync::owe(conn, &OwedCall::DeleteShare { share_id }).await
 }
 
@@ -584,7 +584,7 @@ pub async fn diff(
     let not_shared = || {
         ApiError::new(ErrorCode::NotFound, "This server has no shared version.")
     };
-    let share_id = records::share_id(&state.db, &id)
+    let share_id = servers_records::share_id(&state.db, &id)
         .await?
         .ok_or_else(not_shared)?;
     let latest = backend(&state)
