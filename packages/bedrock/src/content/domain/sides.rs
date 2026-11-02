@@ -1,7 +1,7 @@
 //! Which side runs a Modrinth version, as a pack index says it.
 
 use crate::content::model::modrinth::VersionEnvironment;
-use crate::content::model::mrpack::{Env, SideType};
+use crate::content::model::mrpack::{Env, IndexFile, SideType};
 
 /// The pack `env` of a version that runs in `environment`. Upstream's rule
 /// (app-lib `api/instance/export_mrpack.rs`, `get_mrpack_environment`): a version runs on both
@@ -22,6 +22,14 @@ pub fn mrpack_env(environment: Option<VersionEnvironment>) -> Env {
         DedicatedServerOnly => (SideType::Unsupported, SideType::Required),
     };
     Env { client, server }
+}
+
+/// Whether a server leaves out `file` of a pack: only when the index says the server side does
+/// not support it. A file with no `env` runs on both sides.
+pub fn server_skips(file: &IndexFile) -> bool {
+    file.env
+        .as_ref()
+        .is_some_and(|env| env.server == SideType::Unsupported)
 }
 
 #[cfg(test)]

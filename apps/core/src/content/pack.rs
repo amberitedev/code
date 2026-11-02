@@ -8,8 +8,6 @@ use std::{
     io::{Read, Seek},
 };
 
-use bedrock::content::SideType;
-
 use super::{
     archive::{self, ArchiveError},
     folder::{self, PathError},
@@ -147,11 +145,7 @@ pub fn wanted<R: Read + Seek>(
         }
     };
     for (n, file) in index.files.iter().enumerate() {
-        if file
-            .env
-            .as_ref()
-            .is_some_and(|env| env.server == SideType::Unsupported)
-        {
+        if bedrock::content::server_skips(file) {
             continue;
         }
         let path = folder::clean(&file.path)?;

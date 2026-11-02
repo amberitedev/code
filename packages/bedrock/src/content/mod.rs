@@ -10,7 +10,7 @@ pub use adapters::modrinth::{Modrinth, ModrinthError};
 pub use adapters::mrpack::{IndexError, read_index};
 pub use domain::channel::{least_stable, version_type_fallbacks};
 pub use domain::mrpack::{PackPlatform, loader_dependency, platform};
-pub use domain::sides::mrpack_env;
+pub use domain::sides::{mrpack_env, server_skips};
 pub use model::modrinth::{
     Project, SidedVersion, Version, VersionEnvironment, VersionFile,
     VersionHashes, ids_from_cdn,
