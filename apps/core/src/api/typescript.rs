@@ -51,7 +51,7 @@ fn declarations() -> String {
         backend::OwedCall::decl(&cfg),
         backend::StorageReport::decl(&cfg),
         sharing_storage::local::HeldVersion::decl(&cfg),
-        sharing_client::store::PoolCore::decl(&cfg),
+        sharing_client::pool::PoolCore::decl(&cfg),
         backend::StorageAnswer::decl(&cfg),
         backend::PullOrder::decl(&cfg),
         content::EditedFiles::decl(&cfg),

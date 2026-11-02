@@ -8,6 +8,7 @@ use crate::self_hosted::pool;
 use async_walkdir::{Filtering, WalkDir};
 use futures::{StreamExt, TryStreamExt};
 use sharing_client::push;
+use sharing_client::versions::VersionContent;
 
 #[tracing::instrument]
 pub async fn unpublish_shared_instance(instance_id: &str) -> crate::Result<()> {
@@ -91,6 +92,8 @@ pub(super) async fn detach_local_shared_instance(
     Ok(())
 }
 
+/// `file_paths` are the files to send with this version; files the latest version
+/// shares stay shared unless they are in `removed_paths` or gone from the instance.
 /// `on_progress` receives the uploaded and total bytes of the files the
 /// shared instances service asks for. `server_core` is a Core the owner owns
 /// that runs a linked server of this instance; the backend keeps the share's
@@ -99,6 +102,7 @@ pub(super) async fn detach_local_shared_instance(
 pub async fn publish_shared_instance(
     instance_id: &str,
     file_paths: Vec<String>,
+    removed_paths: Vec<String>,
     server_core: Option<String>,
     on_progress: &(dyn Fn(u64, u64) + Send + Sync),
 ) -> crate::Result<SharedInstanceAttachment> {
@@ -106,6 +110,7 @@ pub async fn publish_shared_instance(
     publish_shared_instance_inner(
         instance_id,
         &file_paths,
+        &removed_paths,
         server_core.as_deref(),
         on_progress,
         &state,
@@ -154,6 +159,14 @@ pub async fn get_shared_instance_publish_preview(
     let diffs =
         shared_instance_publish_diffs(&metadata, &version, &snapshot, &state)
             .await?;
+    let shared = version
+        .configs()
+        .map(|file| file.file_name.as_str())
+        .collect::<HashSet<_>>();
+    let mut files = snapshot.shared_files;
+    for file in &mut files {
+        file.shared = shared.contains(file.path.as_str());
+    }
     set_shared_instance_publish_status(
         instance_id,
         &attachment,
@@ -168,17 +181,15 @@ pub async fn get_shared_instance_publish_preview(
         shared_instance_id: attachment.id,
         latest_version: version.version,
         diffs,
-        files: snapshot.shared_files,
+        files,
     }))
 }
 
 pub(super) async fn shared_instance_install_modpack(
-    version: &InstanceVersionResponse,
+    version: &ShareVersion,
     state: &State,
 ) -> crate::Result<Option<crate::install::SharedInstanceInstallModpack>> {
-    let Some(modpack_id) =
-        version.modpack_id.as_deref().filter(|id| !id.is_empty())
-    else {
+    let Some(modpack_id) = version.modpack_id() else {
         return Ok(None);
     };
     let modpack_version = CachedEntry::get_version(
@@ -300,7 +311,7 @@ pub(super) struct CurrentPublishSnapshot {
     pub(super) disabled_version_ids: Vec<String>,
     pub(super) disabled_external_files: BTreeSet<ExternalFileKey>,
     pub(super) shared_files: Vec<SharedInstancePublishFile>,
-    pub(super) removed_files: Vec<SharedInstanceRemovedFile>,
+    pub(super) removed_files: Vec<RemovedFile>,
     pub(super) effective_version_ids: Vec<String>,
 }
 
@@ -371,7 +382,7 @@ pub(super) async fn collect_publish_snapshot(
     for file in &modpack_files {
         if let Some(version_id) = &file.version_id {
             if !enabled_versions.contains(version_id.as_str()) {
-                let removed = SharedInstanceRemovedFile::Version {
+                let removed = RemovedFile::Version {
                     version_id: version_id.clone(),
                 };
                 if !removed_files.contains(&removed) {
@@ -381,7 +392,7 @@ pub(super) async fn collect_publish_snapshot(
         } else if !enabled_paths.contains(file.relative_path.as_str())
             && let Some((parent, filename)) = file.relative_path.split_once('/')
         {
-            removed_files.push(SharedInstanceRemovedFile::Path {
+            removed_files.push(RemovedFile::Path {
                 parent: parent.to_string(),
                 filename: filename.to_string(),
             });
@@ -589,6 +600,7 @@ pub(super) async fn set_shared_instance_publish_status(
 pub(super) async fn publish_shared_instance_inner(
     instance_id: &str,
     file_paths: &[String],
+    removed_paths: &[String],
     server_core: Option<&str>,
     on_progress: &(dyn Fn(u64, u64) + Send + Sync),
     state: &State,
@@ -597,6 +609,7 @@ pub(super) async fn publish_shared_instance_inner(
     let result = publish_shared_instance_reported(
         instance_id,
         file_paths,
+        removed_paths,
         server_core,
         on_progress,
         &mut report,
@@ -610,6 +623,7 @@ pub(super) async fn publish_shared_instance_inner(
 async fn publish_shared_instance_reported(
     instance_id: &str,
     file_paths: &[String],
+    removed_paths: &[String],
     server_core: Option<&str>,
     on_progress: &(dyn Fn(u64, u64) + Send + Sync),
     report: &mut PublishReport,
@@ -646,6 +660,7 @@ async fn publish_shared_instance_reported(
         instance_id,
         &attachment.id,
         file_paths,
+        removed_paths,
         server_core,
         on_progress,
         report,
@@ -707,6 +722,7 @@ pub(super) async fn publish_current_content(
     instance_id: &str,
     shared_instance_id: &str,
     file_paths: &[String],
+    removed_paths: &[String],
     server_core: Option<&str>,
     on_progress: &(dyn Fn(u64, u64) + Send + Sync),
     report: &mut PublishReport,
@@ -774,7 +790,7 @@ pub(super) async fn publish_current_content(
         modpack_id,
         removed_files: snapshot.removed_files,
         game_version: metadata.applied_content_set.game_version.clone(),
-        loader: metadata.applied_content_set.loader.as_str(),
+        loader: metadata.applied_content_set.loader.as_str().to_owned(),
         loader_version: metadata
             .applied_content_set
             .loader_version
@@ -782,21 +798,21 @@ pub(super) async fn publish_current_content(
             .unwrap_or_default(),
     };
 
-    let base_url = service_base_url()?;
-    let backend = push::Backend::new(
-        shared_instances_upload_client(&base_url).clone(),
-        base_url,
-        shared_clients_session()
-            .and_then(|session| session.access_token)
-            .ok_or(crate::ErrorKind::NotLoggedIn)?,
+    let keep = kept_config(
+        state
+            .directories
+            .instances_dir()
+            .join(&metadata.instance.path),
+        removed_paths,
     );
     let result = push::push(
-        &backend,
+        &push_backend()?,
         &pool::STORE,
         shared_instance_id,
         &content,
         server_core,
-        &files,
+        files,
+        &keep,
         &state.directories.caches_dir().join("pool"),
         &mut |event| report_push_event(report, on_progress, event),
     )
@@ -804,17 +820,12 @@ pub(super) async fn publish_current_content(
     match result {
         Ok(version) => Ok(version),
         Err(push::PushError::Unavailable(reason)) => {
-            let reason = match reason {
-                push::Unavailable::Deleted => {
-                    SharedInstanceUnavailableReason::Deleted
-                }
-                push::Unavailable::AccessRevoked => {
-                    if !active_amberite_session_is_configured(state).await? {
-                        bail!(crate::ErrorKind::NotLoggedIn);
-                    }
-                    SharedInstanceUnavailableReason::AccessRevoked
-                }
-            };
+            let reason = unavailable_reason(reason);
+            if reason == SharedInstanceUnavailableReason::AccessRevoked
+                && !active_amberite_session_is_configured(state).await?
+            {
+                bail!(crate::ErrorKind::NotLoggedIn);
+            }
             if let Some(attachment) = metadata.shared_instance.as_ref() {
                 handle_unavailable_shared_instance_if_current_user(
                     instance_id,
@@ -830,15 +841,34 @@ pub(super) async fn publish_current_content(
     }
 }
 
-/// A version's upstream fields, which the writer sends beside the files it adds.
-#[derive(Serialize)]
-struct VersionContent<'a> {
-    modrinth_ids: Vec<String>,
-    modpack_id: Option<String>,
-    removed_files: Vec<SharedInstanceRemovedFile>,
-    game_version: String,
-    loader: &'a str,
-    loader_version: String,
+/// Where the push finds a config the latest version shares: the instance's copy, while the
+/// owner has it and did not stop sharing it in `removed_paths`.
+fn kept_config(
+    instance_path: std::path::PathBuf,
+    removed_paths: &[String],
+) -> impl Fn(
+    String,
+) -> futures::future::BoxFuture<
+    'static,
+    std::io::Result<Option<std::path::PathBuf>>,
+> + Send
++ Sync
++ use<> {
+    let removed = removed_paths.iter().cloned().collect::<HashSet<_>>();
+    move |file_name: String| {
+        let kept = (!removed.contains(&file_name)
+            && INSTANCE_SCOPE.carries(&file_name))
+        .then(|| instance_path.join(&file_name));
+        Box::pin(async move {
+            let Some(path) = kept else {
+                return Ok(None);
+            };
+            Ok(tokio::fs::symlink_metadata(&path)
+                .await
+                .is_ok_and(|metadata| metadata.is_file())
+                .then_some(path))
+        })
+    }
 }
 
 fn report_push_event(
@@ -849,6 +879,13 @@ fn report_push_event(
     use push::PushEvent;
 
     match event {
+        PushEvent::Dropped(names) => {
+            report.step(format!(
+                "Stopped sharing {} config files: {}",
+                names.len(),
+                names.join(", ")
+            ));
+        }
         PushEvent::Hashed(files) => {
             report.files = files
                 .iter()
@@ -881,7 +918,7 @@ fn report_push_event(
 /// The App's error for each way a push fails, worded for the push UI.
 fn push_error(error: push::PushError) -> crate::Error {
     use push::PushError;
-    use sharing_client::store::StoreError;
+    use sharing_client::pool::StoreError;
 
     match error {
         PushError::Executable(file_name) => {
@@ -892,15 +929,12 @@ fn push_error(error: push::PushError) -> crate::Error {
             crate::util::io::format_bytes(MAX_SHARED_FILES_TOTAL_SIZE)
         ))
         .into(),
-        PushError::FileChanged(file_name) => crate::ErrorKind::InputError(
-            format!("{file_name} changed while it was being pushed. Push again."),
-        )
-        .into(),
-        PushError::CarriedFileMissing => crate::ErrorKind::InputError(
-            "The Core no longer has a config file shared earlier. Select it under Files and push again."
-                .to_string(),
-        )
-        .into(),
+        PushError::FileChanged(file_name) => {
+            crate::ErrorKind::InputError(format!(
+                "{file_name} changed while it was being pushed. Push again."
+            ))
+            .into()
+        }
         PushError::NoStorage => crate::ErrorKind::PoolNoStorage.into(),
         PushError::PushInFlight => crate::ErrorKind::PoolPushInFlight.into(),
         PushError::Refused(description) => {
@@ -914,14 +948,7 @@ fn push_error(error: push::PushError) -> crate::Error {
             crate::ErrorKind::PoolEgressSpent.into()
         }
         PushError::Io(error) => error.into(),
-        PushError::Http(error) => anyhow::Error::new(error.without_url())
-            .context(crate::ErrorKind::SharedInstancesApiError)
-            .into(),
-        error @ PushError::Backend { status, .. } if status >= 500 => {
-            anyhow::Error::new(error)
-                .context(crate::ErrorKind::SharedInstancesApiError)
-                .into()
-        }
+        PushError::Backend(error) => backend_error(error),
         error => anyhow::Error::new(error).into(),
     }
 }
@@ -941,9 +968,8 @@ pub(super) async fn collect_shareable_files(
             let entry_path = entry.path();
             let skip_dir = is_dir
                 && entry_path.strip_prefix(&root).is_ok_and(|relative| {
-                    !is_shareable_directory(
-                        &relative.to_string_lossy().replace('\\', "/"),
-                    )
+                    !INSTANCE_SCOPE
+                        .enters(&relative.to_string_lossy().replace('\\', "/"))
                 });
             if skip_dir {
                 Filtering::IgnoreDir
@@ -962,16 +988,17 @@ pub(super) async fn collect_shareable_files(
         let entry_path = entry.path();
         let relative_path = entry_path.strip_prefix(instance_path)?;
         let path = relative_path.to_string_lossy().replace('\\', "/");
-        if !is_shareable_file_path(&path) {
+        if !INSTANCE_SCOPE.reaches(&path) {
             continue;
         }
         let size = entry.metadata().await?.len();
         let blocked =
-            is_executable_content(&read_file_head(&entry_path).await?);
+            INSTANCE_SCOPE.blocked(&path, &read_file_head(&entry_path).await?);
         files.push(SharedInstancePublishFile {
             path,
             size,
             blocked,
+            shared: false,
         });
     }
 
@@ -1171,7 +1198,7 @@ pub(super) async fn owned_shared_instance(
         None => {
             ensure_shareable_link(&metadata.link)?;
             tracing::info!(instance_id, "Creating shared instance");
-            let remote = create_remote_instance(
+            let remote_id = create_remote_instance(
                 shared_instance_name(metadata.instance.name.clone()),
                 state,
             )
@@ -1179,13 +1206,13 @@ pub(super) async fn owned_shared_instance(
             let linked_user_id = linked_amberite_user_id(state).await?;
             tracing::info!(
                 instance_id,
-                shared_instance_id = %remote.id,
+                shared_instance_id = %remote_id,
                 "Created remote shared instance"
             );
             crate::state::attach_shared_instance(
                 instance_id,
                 crate::state::SharedInstanceAttachmentInput {
-                    id: remote.id.clone(),
+                    id: remote_id.clone(),
                     role: SharedInstanceRole::Owner,
                     manager_id: None,
                     server_manager_name: None,
@@ -1201,11 +1228,12 @@ pub(super) async fn owned_shared_instance(
             .await?;
             tracing::debug!(
                 instance_id,
-                shared_instance_id = %remote.id,
+                shared_instance_id = %remote_id,
                 "Attached local instance as shared instance owner"
             );
             publish_shared_instance_inner(
                 instance_id,
+                &[],
                 &[],
                 None,
                 &|_, _| {},

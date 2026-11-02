@@ -8982,6 +8982,7 @@ dependencies = [
  "hex",
  "hkdf",
  "infer 0.22.0",
+ "path-util",
  "rand 0.10.3",
  "reqwest 0.13.5",
  "serde",
@@ -9019,6 +9020,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.1",
+ "sharing-client",
  "tar",
  "tempfile",
  "tokio",
@@ -9028,7 +9030,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "ts-rs",
- "url",
  "uuid 1.28.0",
  "walkdir",
 ]

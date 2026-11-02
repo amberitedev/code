@@ -144,6 +144,8 @@ pub struct Store {
     core_id: String,
     keys: Keys<JsonFile>,
     allow_private_sources: bool,
+    /// Pulls from other Cores. One for the life of the store.
+    client: sharing_client::pool::StoreClient,
     caps: Mutex<Caps>,
     index: Mutex<Index>,
     limits: Limits,
@@ -166,6 +168,10 @@ impl Store {
             core_id,
             keys,
             allow_private_sources,
+            client: sharing_client::pool::StoreClient::direct(concat!(
+                "copal-store/",
+                env!("CARGO_PKG_VERSION")
+            )),
             caps: Mutex::new(caps),
             index: Mutex::new(index),
         })

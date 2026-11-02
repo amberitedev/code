@@ -125,7 +125,7 @@ async function show(e?: MouseEvent) {
  * Runs the push in the background, where the task list shows it. "Push and restart" asks first
  * when players are online; cancelling that question returns to the review.
  */
-async function confirmPublish(paths: string[], restart: boolean) {
+async function confirmPublish(paths: string[], restart: boolean, removed: string[]) {
 	let restartNow = restart
 	if (restart && props.askRestart) {
 		const answer = await props.askRestart()
@@ -135,16 +135,16 @@ async function confirmPublish(paths: string[], restart: boolean) {
 		}
 		restartNow = answer
 	}
-	void publishChanges(paths, restartNow)
+	void publishChanges(paths, removed, restartNow)
 }
 
-async function publishChanges(paths: string[], restart: boolean) {
+async function publishChanges(paths: string[], removed: string[], restart: boolean) {
 	if (state.value !== 'reviewing') return
 
 	setState('publishing')
 	try {
-		if (publishes.value && (unpublished.value || paths.length > 0)) {
-			if (!(await publishToFriends(paths))) return
+		if (publishes.value && (unpublished.value || paths.length > 0 || removed.length > 0)) {
+			if (!(await publishToFriends(paths, removed))) return
 			emit('published')
 		}
 		if (hasServers.value) await props.pushServers?.(restart)
@@ -154,10 +154,16 @@ async function publishChanges(paths: string[], restart: boolean) {
 }
 
 /** Publishes to friends and reports whether it succeeded. */
-async function publishToFriends(paths: string[]) {
+async function publishToFriends(paths: string[], removed: string[]) {
 	const task = trackSharedInstancePublish(props.instance)
 	try {
-		await publish_shared_instance(props.instance.id, paths, await ownServerCore(), task.update)
+		await publish_shared_instance(
+			props.instance.id,
+			paths,
+			removed,
+			await ownServerCore(),
+			task.update,
+		)
 		await loadSupportDetails(task)
 		task.succeed()
 		return true

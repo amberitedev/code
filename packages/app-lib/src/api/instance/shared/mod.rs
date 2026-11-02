@@ -3,7 +3,7 @@ use crate::event::InstancePayloadType;
 use crate::event::emit::emit_instance;
 use crate::install::{
     InstallJobSnapshot, SharedInstanceExternalFileData,
-    SharedInstanceInstallData, SharedInstanceRemovedFile,
+    SharedInstanceInstallData,
 };
 use crate::state::instances::{InstanceLink, SharedInstanceAttachment};
 use crate::state::{
@@ -23,13 +23,10 @@ use modrinth_content_management::{
     ContentSetDiffOptions, ContentSetSnapshot, ExternalFileKey,
     LoaderReference, diff_configuration, diff_content_sets,
 };
-use reqwest::{Method, StatusCode};
-use serde::de::DeserializeOwned;
+use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use std::collections::BTreeSet;
 use std::collections::{HashMap, HashSet};
-use std::io::Read;
 use std::sync::{LazyLock, RwLock};
 
 #[derive(Clone)]
@@ -65,130 +62,24 @@ pub(crate) fn shared_clients_session() -> Option<SharedClientsSession> {
 }
 
 pub(crate) use bedrock::limits::MAX_SHARE_BYTES as MAX_SHARED_FILES_TOTAL_SIZE;
-pub(crate) use sharing_client::push::{
-    CONFIG_BUNDLE_FILE_TYPE, CONFIG_FILE_TYPE,
+use sharing_client::rules::ShareScope;
+pub(crate) use sharing_client::rules::{
+    CONFIG_EXTENSIONS as CONFIG_FILE_EXTENSIONS, CONFIG_FILE_TYPE,
+    SCAN_HEAD_SIZE as FILE_SCAN_HEAD_SIZE,
 };
+use sharing_client::versions::RemovedFile;
 pub(crate) const CONFIG_SYNC_ENABLED: bool = true;
 pub(crate) const CONFIG_DIRECTORY: &str = "config";
-pub(crate) const MAX_CONFIG_BUNDLE_ENTRIES: usize = 4096;
-pub(crate) const MAX_CONFIG_BUNDLE_FILE_SIZE: u64 = 512 * 1024 * 1024;
-pub(crate) const MAX_CONFIG_BUNDLE_TOTAL_SIZE: u64 = 512 * 1024 * 1024;
-pub(crate) const CONFIG_FILE_EXTENSIONS: [&str; 14] = [
-    "json",
-    "json5",
-    "jsonc",
-    "yml",
-    "yaml",
-    "css",
-    "toml",
-    "txt",
-    "ini",
-    "cfg",
-    "conf",
-    "properties",
-    "xml",
-    "nbt",
-];
 
-/// Extensions of executables, scripts and installers. These are hidden from
-/// the publish file selection and never installed; the shared instances
-/// backend also rejects them by content.
-const EXECUTABLE_FILE_EXTENSIONS: &[&str] = &[
-    "exe", "dll", "msi", "msix", "com", "scr", "cpl", "sys", "bat", "cmd",
-    "ps1", "psm1", "vbs", "vbe", "jse", "wsf", "wsh", "hta", "lnk", "reg",
-    "sh", "bash", "zsh", "command", "app", "dylib", "so", "appimage", "apk",
-    "deb", "rpm", "dmg", "pkg", "class",
-];
-
-pub(crate) fn is_supported_config_file(path: &std::path::Path) -> bool {
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| {
-            CONFIG_FILE_EXTENSIONS
-                .iter()
-                .any(|candidate| extension.eq_ignore_ascii_case(candidate))
-        })
-}
+/// Where an instance's shared files come from: any path its `.mrpack` export includes.
+pub(crate) const INSTANCE_SCOPE: ShareScope = ShareScope::Instance {
+    exportable: super::export_mrpack::is_exportable_path,
+};
 
 /// Whether members can install a shared file at this instance-relative path.
 /// Content folders are shared through the content set instead.
 pub(crate) fn is_shareable_file_path(path: &str) -> bool {
-    crate::state::content_store::validate_relative(path).is_ok()
-        && is_shareable_path(path)
-        && !is_executable_file(path)
-        && path
-            .split_once('/')
-            .is_none_or(|(root, _)| !is_content_folder(root))
-}
-
-fn is_executable_file(path: &str) -> bool {
-    std::path::Path::new(path)
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| {
-            EXECUTABLE_FILE_EXTENSIONS
-                .iter()
-                .any(|candidate| extension.eq_ignore_ascii_case(candidate))
-        })
-}
-
-pub(super) use sharing_client::push::{
-    SCAN_HEAD_SIZE as FILE_SCAN_HEAD_SIZE, is_executable_content,
-};
-
-/// Whether a directory can hold shareable files, so the rest can be skipped
-/// while walking the instance.
-pub(super) fn is_shareable_directory(path: &str) -> bool {
-    is_shareable_path(path) && !is_content_folder(path)
-}
-
-fn is_shareable_path(path: &str) -> bool {
-    super::export_mrpack::is_exportable_path(path)
-}
-
-fn is_content_folder(path: &str) -> bool {
-    ProjectType::iterator()
-        .any(|project_type| project_type.get_folder() == path)
-}
-
-pub(crate) fn read_bounded_config_bundle_entry(
-    reader: impl Read,
-    declared_size: u64,
-    total_size: &mut u64,
-) -> crate::Result<Vec<u8>> {
-    let remaining = MAX_CONFIG_BUNDLE_TOTAL_SIZE.saturating_sub(*total_size);
-    let entry_limit = MAX_CONFIG_BUNDLE_FILE_SIZE.min(remaining);
-    if declared_size > entry_limit {
-        bail!(crate::ErrorKind::InputError(
-            "shared instance config bundle exceeds the uncompressed size limit"
-                .to_string(),
-        ));
-    }
-
-    let capacity = usize::try_from(declared_size).context(
-        crate::ErrorKind::InputError(
-            "shared instance config bundle entry is too large".to_string(),
-        ),
-    )?;
-    let mut bytes = Vec::with_capacity(capacity);
-    reader
-        .take(entry_limit.saturating_add(1))
-        .read_to_end(&mut bytes)
-        .context("failed to read shared instance config bundle")?;
-    let actual_size = bytes.len() as u64;
-    if actual_size > entry_limit {
-        bail!(crate::ErrorKind::InputError(
-            "shared instance config bundle exceeds the uncompressed size limit"
-                .to_string(),
-        ));
-    }
-    *total_size = total_size.checked_add(actual_size).ok_or(
-        crate::ErrorKind::InputError(
-            "shared instance config bundle size overflowed".to_string(),
-        ),
-    )?;
-
-    Ok(bytes)
+    INSTANCE_SCOPE.carries(path)
 }
 
 mod client;
@@ -203,7 +94,7 @@ mod report;
 mod server;
 mod types;
 
-pub(crate) use self::client::report_pool_failure;
+pub(crate) use self::client::share_backend;
 pub(crate) use self::content::shared_modpack_files;
 pub use self::icons::cache_shared_instance_server_icon;
 pub(crate) use self::install::{

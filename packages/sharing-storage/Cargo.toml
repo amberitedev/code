@@ -24,6 +24,7 @@ ring = "0.17.14"
 rustls = { version = "0.23.32", default-features = false, features = ["ring", "std", "tls12"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+sharing-client = { workspace = true }
 sha2 = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tokio-util = { workspace = true, features = ["io"] }
@@ -31,7 +32,6 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 # The key set is part of Core's generated TypeScript.
 ts-rs = { workspace = true }
-url = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 walkdir = "2.5"
 

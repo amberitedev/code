@@ -64,7 +64,7 @@
 			:disabled="
 				!canSetup || actionsLocked || previewQuery.isError.value || !previewQuery.data.value
 			"
-			@confirm="(paths, restart) => perform(previewAction, true, paths, restart)"
+			@confirm="(paths, restart, removed) => perform(previewAction, true, paths, restart, removed)"
 			@cancel="previewOpen = false"
 			@retry="previewQuery.refetch()"
 		/>
@@ -261,14 +261,20 @@ async function perform(
 	reviewed = false,
 	configPaths: string[] = [],
 	restart?: boolean,
+	removedConfigPaths: string[] = [],
 ) {
 	if (!worldId.value || actionsLocked.value || migrating.value) return
-	if (requireMigration(action, () => perform(action, reviewed, configPaths, restart))) return
+	if (
+		requireMigration(action, () =>
+			perform(action, reviewed, configPaths, restart, removedConfigPaths),
+		)
+	)
+		return
 	if (action === 'play' && !reviewed && canSetup.value && needsUpdate.value) {
 		void showPreview(true)
 		return
 	}
-	await runAction(action, reviewed, configPaths, restart)
+	await runAction(action, reviewed, configPaths, restart, removedConfigPaths)
 }
 function requireMigration(action: Action, resume: () => Promise<void>) {
 	if (!migration?.required.value) return false

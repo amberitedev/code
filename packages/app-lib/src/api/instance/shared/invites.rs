@@ -102,22 +102,14 @@ pub async fn create_shared_instance_invite_link(
 
     let created_at = Utc::now();
 
-    let response = request_json::<CreateInstanceInviteResponse>(
-        "create_instance_invite",
-        Method::POST,
-        &format!("/instances/{}/invites", attachment.id),
-        Some(json!({
-            "max_age": max_age_seconds,
-            "max_uses": max_uses,
-        })),
-        &state,
-    )
-    .await?;
+    let invite_id =
+        create_remote_invite(&attachment.id, max_age_seconds, max_uses, &state)
+            .await?;
 
     emit_instance(instance_id, InstancePayloadType::Edited).await?;
 
     Ok(SharedInstanceInviteLink {
-        invite_id: response.id,
+        invite_id,
         expires_at: created_at
             + chrono::Duration::seconds(i64::from(max_age_seconds)),
         max_uses,

@@ -97,7 +97,9 @@
 			:loading="previewQuery.isFetching.value"
 			:error="previewQuery.isError.value"
 			:disabled="!canSetup || previewQuery.isError.value || !previewQuery.data.value"
-			@confirm="(paths) => runAction(previewAction, true, paths)"
+			@confirm="
+				(paths, _restart, removed) => runAction(previewAction, true, paths, undefined, removed)
+			"
 			@cancel="previewOpen = false"
 			@retry="previewQuery.refetch()"
 		/>

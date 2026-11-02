@@ -989,6 +989,7 @@ async fn install_instance(
                 move |content, hold, progress| async move {
                     let written = shared::write_pack(
                         &content,
+                        &backend,
                         hold.id(),
                         version,
                         &instance.name,
@@ -1034,6 +1035,7 @@ async fn install_instance(
             tokio::spawn(async move {
                 let written = shared::write_pack(
                     &state.content,
+                    &backend,
                     &id,
                     version,
                     &instance.name,

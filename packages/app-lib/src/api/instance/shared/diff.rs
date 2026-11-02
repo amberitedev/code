@@ -15,8 +15,8 @@ struct SharedContentSnapshot {
 
 pub(super) async fn shared_instance_update_diffs(
     metadata: &crate::state::InstanceMetadata,
-    version: &InstanceVersionResponse,
-    config_files: &[ExternalFileResponse],
+    version: &ShareVersion,
+    config_files: &[ManifestFile],
     state: &State,
 ) -> crate::Result<Vec<SharedInstanceUpdateDiff>> {
     let before_configuration = local_configuration(metadata);
@@ -68,9 +68,9 @@ pub(super) async fn shared_instance_update_diffs(
             }
             let installed = current_external_sha1s
                 .get(&(file.file_name.clone(), file.file_type.clone()));
-            let unchanged = installed.zip(file.sha1.as_ref()).is_some_and(
-                |(installed, wanted)| installed.eq_ignore_ascii_case(wanted),
-            );
+            let unchanged = installed.is_some_and(|installed| {
+                installed.eq_ignore_ascii_case(&file.sha1)
+            });
             if unchanged {
                 unchanged_files.insert(file.file_name.clone());
             } else {
@@ -112,7 +112,7 @@ pub(super) async fn shared_instance_update_diffs(
 /// server sent without a hash, or that cannot be checked, count as changed.
 async fn changed_config_files(
     instance_id: &str,
-    config_files: &[ExternalFileResponse],
+    config_files: &[ManifestFile],
     state: &State,
 ) -> crate::Result<Vec<String>> {
     use futures::StreamExt;
@@ -143,19 +143,14 @@ async fn changed_config_files(
 async fn changed_config_file_name(
     writer: &crate::api::instance::InstanceFileWriter,
     state: &State,
-    file: &ExternalFileResponse,
+    file: &ManifestFile,
 ) -> Option<String> {
-    let Some(file_size) =
-        file.file_size.and_then(|size| u64::try_from(size).ok())
-    else {
-        return Some(file.file_name.clone());
-    };
     let is_current = crate::install::instance_has_shared_file(
         writer,
         state,
         &file.file_name,
-        file_size,
-        file.sha1.as_deref(),
+        file.file_size,
+        Some(&file.sha1),
     )
     .await
     .unwrap_or(false);
@@ -165,11 +160,11 @@ async fn changed_config_file_name(
 /// What `after` changed over `before`, two versions of the same share, for its version history.
 /// Without `before`, everything `after` holds is added.
 pub(super) async fn shared_version_diffs(
-    before: Option<&InstanceVersionResponse>,
-    after: &InstanceVersionResponse,
+    before: Option<&ShareVersion>,
+    after: &ShareVersion,
     state: &State,
 ) -> crate::Result<Vec<SharedInstanceUpdateDiff>> {
-    let snapshot = async |version: &InstanceVersionResponse| {
+    let snapshot = async |version: &ShareVersion| {
         let (version_ids, external_files) =
             remote_shared_content(version, state).await?;
         crate::Result::Ok(SharedContentSnapshot {
@@ -210,7 +205,7 @@ pub(super) async fn shared_version_diffs(
         }) else {
             continue;
         };
-        if previous.sha1.is_some() && previous.sha1 == file.sha1 {
+        if previous.sha1 == file.sha1 {
             unchanged_files.insert(file.file_name.as_str());
         } else {
             changed_files.insert(file.file_name.as_str());
@@ -228,7 +223,7 @@ pub(super) async fn shared_version_diffs(
     let config_file_names = super::content::changed_config_files(
         &after.external_files,
         before.map(|version| version.external_files.as_slice()),
-    )?
+    )
     .into_iter()
     .filter(|file| file.file_type == CONFIG_FILE_TYPE)
     .map(|file| file.file_name)
@@ -251,7 +246,7 @@ pub(super) async fn shared_version_diffs(
 
 pub(super) async fn shared_instance_publish_diffs(
     metadata: &crate::state::InstanceMetadata,
-    version: &InstanceVersionResponse,
+    version: &ShareVersion,
     snapshot: &CurrentPublishSnapshot,
     state: &State,
 ) -> crate::Result<Vec<SharedInstanceUpdateDiff>> {
@@ -308,9 +303,7 @@ pub(super) async fn shared_instance_publish_diffs(
             }) else {
                 continue;
             };
-            let Some(remote_sha1) = remote.sha1.as_deref() else {
-                continue;
-            };
+            let remote_sha1 = remote.sha1.as_str();
             let changed = match crate::util::fetch::sha1_file_async(
                 instance_path.join(path),
             )
@@ -351,18 +344,14 @@ fn local_configuration(
     }
 }
 
-fn remote_configuration(
-    version: &InstanceVersionResponse,
-) -> ContentSetConfiguration {
+fn remote_configuration(version: &ShareVersion) -> ContentSetConfiguration {
+    let (loader, loader_version) = instance_loader(version);
     ContentSetConfiguration {
-        modpack_version_id: version
-            .modpack_id
-            .clone()
-            .filter(|id| !id.is_empty()),
-        game_version: version.game_version.clone(),
+        modpack_version_id: version.modpack_id().map(str::to_owned),
+        game_version: version.content.game_version.clone(),
         loader: LoaderReference {
-            name: version.loader.as_str().to_string(),
-            version: Some(version.loader_version.clone()),
+            name: loader.as_str().to_string(),
+            version: Some(loader_version),
         },
     }
 }

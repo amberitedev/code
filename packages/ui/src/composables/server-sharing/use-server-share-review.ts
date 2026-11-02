@@ -25,6 +25,8 @@ export type ServerShareActionTarget = {
 	worldId: string
 	userId: string | undefined
 	configPaths: string[]
+	/** Configs the share carries that this push stops sharing. */
+	removedConfigPaths: string[]
 	restart?: boolean
 	isCurrent: () => boolean
 }
@@ -97,6 +99,7 @@ export function useServerShareReview<Action extends string = 'push'>(options?: {
 			worldId: targetWorldId,
 			userId,
 			configPaths: [],
+			removedConfigPaths: [],
 			isCurrent: () =>
 				!disposed && worldId.value === targetWorldId && auth.user.value?.id === userId,
 		}
@@ -138,7 +141,7 @@ export function useServerShareReview<Action extends string = 'push'>(options?: {
 			serverId,
 			target.worldId,
 			target.configPaths,
-			{ restart: target.restart },
+			{ restart: target.restart, removedConfigPaths: target.removedConfigPaths },
 		)
 		await Promise.all([
 			queryClient.invalidateQueries({ queryKey: serverKeys.detailV1(serverId) }),
@@ -148,19 +151,22 @@ export function useServerShareReview<Action extends string = 'push'>(options?: {
 	}
 
 	/**
-	 * Runs `action` for the current world, pushing `configPaths` alongside the world's content.
-	 * `restart` decides whether a push restarts the server to load server-side changes.
+	 * Runs `action` for the current world, pushing `configPaths` alongside the world's content
+	 * and no longer sharing `removedConfigPaths`. `restart` decides whether a push restarts the
+	 * server to load server-side changes.
 	 */
 	async function runAction(
 		action: Action,
 		reviewed = false,
 		configPaths: string[] = [],
 		restart?: boolean,
+		removedConfigPaths: string[] = [],
 	) {
 		if (pending.value) return
 		const target = currentTarget()
 		if (!target) return
 		target.configPaths = configPaths
+		target.removedConfigPaths = removedConfigPaths
 		target.restart = restart
 		await executeAction(action, target, reviewed)
 	}

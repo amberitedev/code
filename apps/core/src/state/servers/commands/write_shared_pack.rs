@@ -11,11 +11,11 @@
 
 use std::path::{Path, PathBuf};
 
+use sharing_client::backend::Backend;
 use sharing_client::consume::{
-    self, ConsumeError, ModpackFile, PoolAccess, PoolFile, ReadyVersion,
-    ServerPackError,
+    self, ModpackFile, ReadyVersion, ServerPackError,
 };
-use sharing_client::store::{FetchError, StoreClient};
+use sharing_client::pool::{self, FetchError, PoolFile};
 
 use super::install_pack as install;
 use crate::{
@@ -26,10 +26,13 @@ use crate::{
     },
 };
 
-/// Fetch the files of `version` (read with [`consume::ready_version`]) and write it as an
-/// `.mrpack` named `name` in the shared store. Returns the pack's SHA-1 and the version.
+/// Fetch the files of `version` (read with [`consume::ready_version`] through `backend`) and
+/// write it as an `.mrpack` named `name` in the shared store. Holders that serve bad bytes are
+/// reported through `backend`, as a member's App reports them. Returns the pack's SHA-1 and the
+/// version.
 pub async fn write_pack(
     content: &Content,
+    backend: &Backend,
     server_id: &str,
     version: ReadyVersion,
     name: &str,
@@ -40,7 +43,8 @@ pub async fn write_pack(
             ServerPackError::Modrinth(error) => error,
             error => Error::Invalid(error.to_string()),
         })?;
-    let total: u64 = version.files.iter().map(|file| file.object_size).sum();
+    let total: u64 =
+        version.files.iter().map(|(_, file)| file.object_size).sum();
     let staging = content
         .paths
         .staging(server_id)
@@ -54,19 +58,10 @@ pub async fn write_pack(
     )?;
     let result = async {
         let mut fetched = Vec::with_capacity(version.files.len());
-        if !version.files.is_empty() {
-            let pool = version.pool.as_ref().ok_or_else(|| {
-                Error::Invalid(
-                    "The version has files but nowhere to fetch them.".into(),
-                )
-            })?;
-            let store =
-                StoreClient::new(concat!("copal/", env!("CARGO_PKG_VERSION")));
-            for (n, file) in version.files.iter().enumerate() {
-                let path = staging.join(n.to_string());
-                fetch(&store, pool, file, &path).await?;
-                fetched.push((file.path.clone(), path));
-            }
+        for (n, (name, file)) in version.files.iter().enumerate() {
+            let path = staging.join(n.to_string());
+            fetch(content, backend, name, file, &path).await?;
+            fetched.push((name.clone(), path));
         }
         let dirs = SharedDirs::new(content.paths.root());
         let packed = staging.join("pack.mrpack");
@@ -133,27 +128,33 @@ impl consume::Modrinth for Lookup<'_> {
     }
 }
 
-/// Fetch one file from the first holder that serves it correctly, decrypted and checked against
-/// both C and P, into `path`, as a member's App does.
+/// Fetch the file `name` from the first holder that serves it correctly, decrypted and checked
+/// against both C and P, into `path`, as a member's App does.
 async fn fetch(
-    store: &StoreClient,
-    pool: &PoolAccess,
+    content: &Content,
+    backend: &Backend,
+    name: &str,
     file: &PoolFile,
     path: &Path,
 ) -> Result<(), Error> {
-    // The holders that served bad bytes are logged by the client; only members report them.
-    consume::fetch(store, pool, file, |mut reader| async move {
-        let mut out = tokio::fs::File::create(path).await?;
-        tokio::io::copy(&mut reader, &mut out).await?;
-        out.sync_all().await
-    })
+    pool::fetch(
+        &content.store,
+        backend,
+        file,
+        &|_| {},
+        |mut reader| async move {
+            let mut out = tokio::fs::File::create(path).await?;
+            tokio::io::copy(&mut reader, &mut out).await?;
+            out.sync_all().await
+        },
+    )
     .await
     .map_err(|error| {
         Error::Invalid(match error {
-            ConsumeError::Fetch(FetchError::Sink(error)) => {
-                format!("Could not write {}: {error}", file.path)
+            FetchError::Sink(error) => {
+                format!("Could not write {name}: {error}")
             }
-            error => format!("Could not fetch {}: {error}", file.path),
+            error => format!("Could not fetch {name}: {error}"),
         })
     })
 }

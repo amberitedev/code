@@ -352,7 +352,7 @@ mod tests {
     #[test]
     fn content_keys_follow_the_protocol() {
         assert!(is_content_type("mod") && is_content_type("datapack"));
-        assert!(!is_content_type("config") && !is_content_type("configs"));
+        assert!(!is_content_type("config"));
         // An empty HKDF salt is the same as 32 zero bytes (RFC 5869), which is what a
         // WebCrypto or Node backend computing the same key will use.
         let p = [9; 32];

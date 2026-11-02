@@ -1,5 +1,5 @@
 use super::client::{
-    ExternalFileResponse, InstanceVersionResponse, get_remote_version,
+    ManifestFile, ShareVersion, check_removed_files, get_remote_version,
 };
 use super::diff::shared_external_file_key;
 use super::publish::dedupe_strings;
@@ -18,9 +18,9 @@ use std::collections::BTreeMap;
 pub(super) async fn remote_shared_config_files(
     shared_instance_id: &str,
     applied_version: Option<i32>,
-    latest: &InstanceVersionResponse,
+    latest: &ShareVersion,
     state: &State,
-) -> crate::Result<Vec<ExternalFileResponse>> {
+) -> crate::Result<Vec<ManifestFile>> {
     let applied = match applied_version {
         Some(version) if version >= latest.version => return Ok(Vec::new()),
         Some(version) => {
@@ -32,40 +32,34 @@ pub(super) async fn remote_shared_config_files(
     let applied = applied.filter(|applied| {
         applied.backtrack_version == latest.backtrack_version
     });
-    changed_config_files(
+    Ok(changed_config_files(
         &latest.external_files,
         applied
             .as_ref()
             .map(|version| version.external_files.as_slice()),
-    )
+    ))
 }
 
-/// The config files of `latest` that are new or differ from `applied`. A legacy config bundle
-/// comes first so individual files are written over it.
+/// The config files of `latest` that are new or differ from `applied`, by path.
 pub(super) fn changed_config_files(
-    latest: &[ExternalFileResponse],
-    applied: Option<&[ExternalFileResponse]>,
-) -> crate::Result<Vec<ExternalFileResponse>> {
+    latest: &[ManifestFile],
+    applied: Option<&[ManifestFile]>,
+) -> Vec<ManifestFile> {
     let applied = applied
         .unwrap_or_default()
         .iter()
         .map(|file| ((&file.file_type, &file.file_name), &file.sha256))
         .collect::<HashMap<_, _>>();
-    let mut bundle = None;
-    let mut files = BTreeMap::new();
-    for file in latest.iter().filter(|file| {
-        applied.get(&(&file.file_type, &file.file_name)) != Some(&&file.sha256)
-    }) {
-        match file.file_type.as_str() {
-            CONFIG_BUNDLE_FILE_TYPE => bundle = Some(file.clone()),
-            CONFIG_FILE_TYPE => {
-                files.insert(file.file_name.clone(), file.clone());
-            }
-            _ => {}
-        }
-    }
-
-    Ok(bundle.into_iter().chain(files.into_values()).collect())
+    let files = latest
+        .iter()
+        .filter(|file| {
+            file.file_type == CONFIG_FILE_TYPE
+                && applied.get(&(&file.file_type, &file.file_name))
+                    != Some(&&file.sha256)
+        })
+        .map(|file| (file.file_name.clone(), file.clone()))
+        .collect::<BTreeMap<_, _>>();
+    files.into_values().collect()
 }
 
 pub(crate) struct SharedModpackFile {
@@ -76,10 +70,7 @@ pub(crate) struct SharedModpackFile {
 }
 
 impl SharedModpackFile {
-    pub(crate) fn is_removed(
-        &self,
-        removed_files: &[SharedInstanceRemovedFile],
-    ) -> bool {
+    pub(crate) fn is_removed(&self, removed_files: &[RemovedFile]) -> bool {
         removed_files.iter().any(|removed| {
             removed.matches(self.version_id.as_deref(), &self.relative_path)
                 || self
@@ -262,25 +253,21 @@ fn is_content_path(path: &str) -> bool {
 }
 
 pub(super) async fn remote_shared_content(
-    version: &InstanceVersionResponse,
+    version: &ShareVersion,
     state: &State,
 ) -> crate::Result<(Vec<String>, BTreeSet<ExternalFileKey>)> {
-    version.validate_removed_files()?;
+    check_removed_files(version)?;
     let mut version_ids = version
+        .content
         .modrinth_ids
         .iter()
-        .filter(|id| version.modpack_id.as_deref() != Some(id.as_str()))
+        .filter(|id| version.modpack_id() != Some(id.as_str()))
         .cloned()
         .collect::<Vec<_>>();
     let mut external_files = version
         .external_files
         .iter()
-        .filter(|file| {
-            !matches!(
-                file.file_type.as_str(),
-                CONFIG_BUNDLE_FILE_TYPE | CONFIG_FILE_TYPE
-            )
-        })
+        .filter(|file| file.file_type != CONFIG_FILE_TYPE)
         .map(|file| shared_external_file_key(&file.file_type, &file.file_name))
         .collect::<crate::Result<BTreeSet<_>>>()?;
     let explicit_paths = version
@@ -291,11 +278,9 @@ pub(super) async fn remote_shared_content(
                 .map(|kind| format!("{}/{}", kind.get_folder(), file.file_name))
         })
         .collect::<HashSet<_>>();
-    if let Some(modpack_id) =
-        version.modpack_id.as_deref().filter(|id| !id.is_empty())
-    {
+    if let Some(modpack_id) = version.modpack_id() {
         for file in shared_modpack_files(modpack_id, state).await? {
-            if file.is_removed(&version.removed_files)
+            if file.is_removed(&version.content.removed_files)
                 || explicit_paths.contains(&file.relative_path)
             {
                 continue;
@@ -322,21 +307,20 @@ pub(super) async fn remote_shared_content(
 mod tests {
     use super::*;
 
-    fn file(
-        file_type: &str,
-        file_name: &str,
-        sha256: &str,
-    ) -> ExternalFileResponse {
-        ExternalFileResponse {
+    fn file(file_type: &str, file_name: &str, sha256: u8) -> ManifestFile {
+        ManifestFile {
             file_name: file_name.to_string(),
             file_type: file_type.to_string(),
-            file_size: Some(1),
-            sha256: Some(sha256.to_string()),
-            ..Default::default()
+            file_size: 1,
+            sha1: String::new(),
+            sha256: [sha256; 32],
+            object: [0; 32],
+            object_size: 17,
+            key: None,
         }
     }
 
-    fn names(files: &[ExternalFileResponse]) -> Vec<(&str, &str)> {
+    fn names(files: &[ManifestFile]) -> Vec<(&str, &str)> {
         files
             .iter()
             .map(|file| (file.file_type.as_str(), file.file_name.as_str()))
@@ -346,17 +330,17 @@ mod tests {
     #[test]
     fn only_configs_changed_since_the_applied_version_are_written() {
         let applied = [
-            file(CONFIG_FILE_TYPE, "config/same.toml", "1"),
-            file(CONFIG_FILE_TYPE, "config/changed.toml", "1"),
+            file(CONFIG_FILE_TYPE, "config/same.toml", 1),
+            file(CONFIG_FILE_TYPE, "config/changed.toml", 1),
         ];
         let latest = [
-            file("mod", "extra.jar", "2"),
-            file(CONFIG_FILE_TYPE, "config/same.toml", "1"),
-            file(CONFIG_FILE_TYPE, "config/changed.toml", "2"),
-            file(CONFIG_FILE_TYPE, "config/new.toml", "2"),
+            file("mod", "extra.jar", 2),
+            file(CONFIG_FILE_TYPE, "config/same.toml", 1),
+            file(CONFIG_FILE_TYPE, "config/changed.toml", 2),
+            file(CONFIG_FILE_TYPE, "config/new.toml", 2),
         ];
 
-        let files = changed_config_files(&latest, Some(&applied)).unwrap();
+        let files = changed_config_files(&latest, Some(&applied));
 
         assert_eq!(
             names(&files),
@@ -368,19 +352,20 @@ mod tests {
     }
 
     #[test]
-    fn a_first_install_writes_every_config_with_the_bundle_first() {
+    fn a_first_install_writes_every_config() {
         let latest = [
-            file(CONFIG_FILE_TYPE, "config/a.toml", "1"),
-            file(CONFIG_BUNDLE_FILE_TYPE, "configs.zip", "1"),
+            file(CONFIG_FILE_TYPE, "config/b.toml", 1),
+            file("mod", "a.jar", 1),
+            file(CONFIG_FILE_TYPE, "config/a.toml", 1),
         ];
 
-        let files = changed_config_files(&latest, None).unwrap();
+        let files = changed_config_files(&latest, None);
 
         assert_eq!(
             names(&files),
             [
-                (CONFIG_BUNDLE_FILE_TYPE, "configs.zip"),
                 (CONFIG_FILE_TYPE, "config/a.toml"),
+                (CONFIG_FILE_TYPE, "config/b.toml"),
             ]
         );
     }

@@ -34,18 +34,19 @@ pub async fn get_shared_instance_version(
         before
             .as_ref()
             .map(|version| version.external_files.as_slice()),
-    )?
+    )
     .into_iter()
     .filter(|file| file.file_type == CONFIG_FILE_TYPE)
     .map(|file| file.file_name)
     .collect();
     let (version_ids, external_files) =
         super::content::remote_shared_content(&after, &state).await?;
+    let (loader, loader_version) = instance_loader(&after);
     Ok(SharedInstanceVersionDetails {
         content_count: version_ids.len() + external_files.len(),
-        game_version: after.game_version,
-        loader: after.loader,
-        loader_version: after.loader_version,
+        game_version: after.content.game_version,
+        loader,
+        loader_version,
         diffs,
         config_files,
     })
@@ -103,7 +104,7 @@ async fn kept_version(
     shared_instance_id: &str,
     version: i32,
     state: &State,
-) -> crate::Result<InstanceVersionResponse> {
+) -> crate::Result<ShareVersion> {
     get_remote_version(shared_instance_id, version, state)
         .await?
         .ok_or_else(|| {

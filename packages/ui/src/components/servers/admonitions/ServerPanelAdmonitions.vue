@@ -599,7 +599,7 @@ function onInstallationDismiss() {
 		:loading="previewQuery.isFetching.value"
 		:error="previewQuery.isError.value"
 		:disabled="!canSetup || sharePending || previewQuery.isError.value || !previewQuery.data.value"
-		@confirm="(paths, restart) => runAction('push', true, paths, restart)"
+		@confirm="(paths, restart, removed) => runAction('push', true, paths, restart, removed)"
 		@cancel="previewOpen = false"
 		@retry="previewQuery.refetch()"
 	/>

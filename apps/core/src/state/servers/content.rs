@@ -94,6 +94,8 @@ pub struct Content {
     /// Pack content, from allowed hosts only. See `hosts`.
     pub downloads: reqwest::Client,
     pub modrinth: modrinth::Modrinth,
+    /// Copal's one client for Cores' stores, for every push and every share fetch.
+    pub store: sharing_client::pool::StoreClient,
     /// What addon jars say about themselves, for the content list.
     pub manifests: bedrock::upstream::jar::Cache,
     /// Updates back the world up first.
@@ -122,6 +124,10 @@ impl Content {
         let content = Arc::new(Self {
             modrinth: modrinth::Modrinth::new(http.clone()),
             manifests: bedrock::upstream::jar::Cache::default(),
+            store: sharing_client::pool::StoreClient::new(concat!(
+                "copal/",
+                env!("CARGO_PKG_VERSION")
+            )),
             downloads: hosts::client()?,
             http,
             paths,

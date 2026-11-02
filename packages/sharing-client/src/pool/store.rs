@@ -1,5 +1,6 @@
 //! The client for a Core's store routes (`/store/` in the Protocol of `docs/internals/pool.md`),
-//! used by an owner's App to store a version and by members' Apps and Cores to fetch its files.
+//! used by an owner's App to store a version, by members' Apps and Cores to fetch its files, and
+//! by a store to pull a version from another Core.
 //! A Core serves HTTPS with a certificate it made itself, so each Core gets a client that trusts
 //! only the certificate whose SHA-256 the backend handed out. Only `https://ip:port` addresses are
 //! used, so a ticket never leaves over plain HTTP.
@@ -53,6 +54,8 @@ pub enum StoreError {
 }
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long a [`StoreClient::direct`] client waits for the next bytes of an answer.
+const DIRECT_READ_TIMEOUT: Duration = Duration::from_secs(60);
 const PIPE_SIZE: usize = 256 * 1024;
 /// Further tries at one holder after a dropped connection, each from where the last stopped.
 const RESUME_ATTEMPTS: usize = 2;
@@ -61,10 +64,14 @@ const RESUME_ATTEMPTS: usize = 2;
 const RATE_LIMIT_WAITS: u32 = 8;
 const RATE_LIMIT_MAX_WAIT: Duration = Duration::from_secs(30);
 
-/// Reaches Cores' stores. Keep one for the life of the process: it reuses a connection per Core
-/// and remembers which of a Core's addresses last connected.
+/// Reaches Cores' stores. Keep one for the life of the process (the App and Copal each hold one,
+/// and so does the store): it reuses a connection per Core and remembers which of a Core's
+/// addresses last connected.
 pub struct StoreClient {
     user_agent: String,
+    /// Uses no proxy and gives up on a stalled read, for a store pulling from a Core it was told
+    /// about.
+    direct: bool,
     /// One client per pinned certificate.
     clients: Mutex<HashMap<[u8; 32], reqwest::Client>>,
     /// The address that last connected, per Core id.
@@ -138,8 +145,18 @@ impl StoreClient {
     pub fn new(user_agent: impl Into<String>) -> Self {
         Self {
             user_agent: user_agent.into(),
+            direct: false,
             clients: Mutex::default(),
             addresses: Mutex::default(),
+        }
+    }
+
+    /// A client that uses no proxy and gives up on a read stalled for [`DIRECT_READ_TIMEOUT`],
+    /// so a store pulling from another Core cannot be held or redirected.
+    pub fn direct(user_agent: impl Into<String>) -> Self {
+        Self {
+            direct: true,
+            ..Self::new(user_agent)
         }
     }
 
@@ -156,13 +173,16 @@ impl StoreClient {
         let config = tls::pinned_config(fingerprint)
             .map_err(|error| StoreError::Other(0, error.to_string()))?;
         // No overall timeout: an object can take minutes on a slow uplink.
-        let client = reqwest::Client::builder()
+        let mut builder = reqwest::Client::builder()
             .use_preconfigured_tls(config)
             .connect_timeout(CONNECT_TIMEOUT)
             .tcp_keepalive(Some(Duration::from_secs(10)))
             .redirect(reqwest::redirect::Policy::none())
-            .user_agent(&self.user_agent)
-            .build()?;
+            .user_agent(&self.user_agent);
+        if self.direct {
+            builder = builder.no_proxy().read_timeout(DIRECT_READ_TIMEOUT);
+        }
+        let client = builder.build()?;
         clients.insert(fingerprint, client.clone());
         Ok(client)
     }
@@ -287,6 +307,50 @@ impl StoreClient {
             .send()
             .await?;
         Ok(check(response).await?.json().await?)
+    }
+
+    /// The list of version `root` as the Core stored it, refused past `max` bytes.
+    pub async fn version_list(
+        &self,
+        core: &PoolCore,
+        ticket: &str,
+        root: &str,
+        max: usize,
+    ) -> Result<Vec<u8>, StoreError> {
+        let response = self
+            .send(core, |client, address| {
+                client
+                    .get(format!("{address}/store/versions/{root}"))
+                    .bearer_auth(ticket)
+            })
+            .await?;
+        let mut body = Vec::new();
+        let mut chunks = response.bytes_stream();
+        while let Some(chunk) = chunks.try_next().await? {
+            body.extend_from_slice(&chunk);
+            if body.len() > max {
+                return Err(StoreError::Other(
+                    0,
+                    "the version list is too large".into(),
+                ));
+            }
+        }
+        Ok(body)
+    }
+
+    /// The bytes of object `c` of version `root`, unchecked: the caller checks them against C.
+    pub async fn object_reader(
+        &self,
+        core: &PoolCore,
+        ticket: &str,
+        root: &str,
+        c: &str,
+    ) -> Result<impl tokio::io::AsyncRead + Send + Unpin + use<>, StoreError>
+    {
+        let response = self.object(core, ticket, root, c, 0).await?;
+        Ok(tokio_util::io::StreamReader::new(
+            response.bytes_stream().map_err(std::io::Error::other),
+        ))
     }
 
     /// The object `c` of version `root`, from byte `from` on.

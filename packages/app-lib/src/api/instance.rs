@@ -76,10 +76,8 @@ pub use self::screenshots::{
     move_screenshots, save_edited_screenshot,
 };
 pub(crate) use self::shared::{
-    CONFIG_BUNDLE_FILE_TYPE, CONFIG_DIRECTORY, CONFIG_FILE_EXTENSIONS,
-    CONFIG_FILE_TYPE, CONFIG_SYNC_ENABLED, MAX_CONFIG_BUNDLE_ENTRIES,
-    is_shareable_file_path, is_supported_config_file,
-    read_bounded_config_bundle_entry, report_pool_failure,
+    CONFIG_DIRECTORY, CONFIG_FILE_EXTENSIONS, CONFIG_FILE_TYPE,
+    CONFIG_SYNC_ENABLED, is_shareable_file_path, share_backend,
     shared_instance_update_data, shared_modpack_files,
 };
 pub use self::shared::{

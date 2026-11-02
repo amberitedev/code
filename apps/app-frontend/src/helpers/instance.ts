@@ -693,6 +693,7 @@ export interface SharedInstancePublishFile {
 	path: string
 	size: number
 	blocked: boolean
+	shared: boolean
 }
 
 export interface SharedInstanceInviteLink {
@@ -775,12 +776,14 @@ export async function get_shared_instance_publish_preview(
 export async function publish_shared_instance(
 	instanceId: string,
 	filePaths: string[],
+	removedPaths: string[],
 	serverCoreId: string | null,
 	onProgress: (uploadedBytes: number, totalBytes: number) => void,
 ): Promise<SharedInstanceAttachment> {
 	return await invoke('plugin:instance|instance_share_publish', {
 		instanceId,
 		filePaths,
+		removedPaths,
 		serverCoreId,
 		onProgress: new Channel<[number, number]>(([uploaded, total]) => onProgress(uploaded, total)),
 	})

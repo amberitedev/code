@@ -1,13 +1,10 @@
 //! Copying a version from another Core, as a pull ticket asks. The store reaches only the Core
-//! the backend named, at a public address, over TLS pinned to that Core's certificate, so it
-//! cannot be turned into a general downloader. [`address`] and [`pinned`] are how anything else
-//! reaches a holder safely too.
+//! the backend named, at a public address, through `sharing_client`'s store client: TLS pinned
+//! to that Core's certificate, no proxy and no redirect, so it cannot be turned into a general
+//! downloader.
 
-use std::time::Duration;
-
-use bedrock::net::{CoreAddress, ip, tls};
-use futures::TryStreamExt;
-use tokio_util::io::StreamReader;
+use bedrock::net::{CoreAddress, ip};
+use sharing_client::pool::PoolCore;
 use tracing::info;
 
 use crate::{
@@ -33,40 +30,30 @@ pub(crate) async fn pull(
     source: &Source,
 ) -> Result<bool, StoreError> {
     let ticket = source.ticket().expect("verify requires a source ticket");
-    let base = address(source.address(), store.allow_private_sources)?;
-    let client = pinned(&source.core.cert_fingerprint)?;
-    let get = |path: String| {
-        client
-            .get(base.join(&path).expect("a valid path"))
-            .bearer_auth(ticket)
-            .send()
+    let core = PoolCore {
+        // The certificate names the Core: the backend gives no id with a source.
+        id: source.core.cert_fingerprint.clone(),
+        address: address(source.address(), store.allow_private_sources)?,
+        public_address: None,
+        cert_fingerprint: source.core.cert_fingerprint.clone(),
     };
-
-    let response = get(format!("/store/versions/{root}"))
+    let root_hex = root.to_string();
+    let body = store
+        .client
+        .version_list(&core, ticket, &root_hex, MAX_LIST)
         .await
-        .and_then(reqwest::Response::error_for_status)
         .map_err(failed)?;
-    let mut body = Vec::new();
-    let mut chunks = response.bytes_stream();
-    while let Some(chunk) = chunks.try_next().await.map_err(failed)? {
-        body.extend_from_slice(&chunk);
-        if body.len() > MAX_LIST {
-            return Err(failed("its version list is too large"));
-        }
-    }
     let list: VersionList = serde_json::from_slice(&body)
         .map_err(|_| failed("its version list is unreadable"))?;
     let missing = store.begin(root, list.clone(), None).await?;
     info!(%root, objects = missing.len(), "pulling a version");
     for hash in missing {
         let size = list.size_of(&hash).expect("missing objects are listed");
-        let response = get(format!("/store/versions/{root}/objects/{hash}"))
+        let reader = store
+            .client
+            .object_reader(&core, ticket, &root_hex, &hash.to_string())
             .await
-            .and_then(reqwest::Response::error_for_status)
             .map_err(failed)?;
-        let reader = StreamReader::new(
-            response.bytes_stream().map_err(std::io::Error::other),
-        );
         objects::write_object(&store.layout, &hash, size, reader)
             .await
             .map_err(|error| match error {
@@ -81,7 +68,7 @@ pub(crate) async fn pull(
 pub fn address(
     address: &str,
     allow_private: bool,
-) -> Result<url::Url, StoreError> {
+) -> Result<String, StoreError> {
     let invalid = |description: &str| {
         StoreError::new(Code::InvalidRequest, description.to_owned())
     };
@@ -91,28 +78,7 @@ pub fn address(
     if !allow_private && !ip::is_public(address.socket().ip()) {
         return Err(invalid("The source Core's address is not public."));
     }
-    Ok(url::Url::parse(&address.to_string()).expect("a valid URL"))
-}
-
-/// A client that trusts exactly the certificate whose SHA-256 is `fingerprint`, follows no
-/// redirect, and uses no proxy.
-pub fn pinned(fingerprint: &str) -> Result<reqwest::Client, StoreError> {
-    let fingerprint = tls::parse_fingerprint(fingerprint).ok_or_else(|| {
-        StoreError::new(
-            Code::InvalidRequest,
-            "The source Core's fingerprint is unreadable.",
-        )
-    })?;
-    let config = tls::pinned_config(fingerprint).map_err(failed)?;
-    reqwest::Client::builder()
-        .use_preconfigured_tls(config)
-        .redirect(reqwest::redirect::Policy::none())
-        .no_proxy()
-        .connect_timeout(Duration::from_secs(15))
-        .read_timeout(Duration::from_secs(60))
-        .user_agent(concat!("copal-store/", env!("CARGO_PKG_VERSION")))
-        .build()
-        .map_err(failed)
+    Ok(address.to_string())
 }
 
 #[cfg(test)]

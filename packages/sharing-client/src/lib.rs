@@ -1,8 +1,18 @@
-//! What the App and Core share about sharing (`docs/internals/pool.md`): the pool's encryption,
-//! the client for a Core's store routes that both use to reach a version's files, the writer
-//! that pushes a share's versions, and the reading side that takes them.
+//! What the App and Core share about sharing (`docs/internals/pool.md`). Laid out like app-lib,
+//! one folder per concern:
+//!
+//! - `backend`: the client for the backend's share routes.
+//! - `versions`: the share version as the backend gives and takes it.
+//! - `rules`: which files a share may carry, and what a blocked file is.
+//! - `push`: the writer of a share's versions.
+//! - `pool`: the client for Cores' stores, and fetching a version's files from them.
+//! - `consume`: a version as a server takes it.
+//! - `crypto`: the pool's encryption.
 
+pub mod backend;
 pub mod consume;
 pub mod crypto;
+pub mod pool;
 pub mod push;
-pub mod store;
+pub mod rules;
+pub mod versions;

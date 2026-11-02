@@ -14,7 +14,7 @@ use crate::state::servers::{
     adapters::filesystem::content_files::{DISABLED, Listed},
     domain::sides::Sides,
 };
-use sharing_client::push::RemovedFile;
+use sharing_client::versions::RemovedFile;
 
 use modrinth_content_management::ContentType;
 
@@ -52,10 +52,10 @@ pub fn removed(
             (Some(version_id), _) => RemovedFile::Version {
                 version_id: version_id.clone(),
             },
-            (None, Some(("mods", filename))) if removable(filename) => {
-                RemovedFile::Path {
-                    parent: "mods".into(),
-                    filename: filename.into(),
+            (None, Some(("mods", filename))) => {
+                match RemovedFile::path("mods", filename) {
+                    Some(entry) => entry,
+                    None => continue,
                 }
             }
             _ => continue,
@@ -65,17 +65,6 @@ pub fn removed(
         }
     }
     removed
-}
-
-/// Whether the App takes `filename` as a removed path: one plain file name of an addon archive,
-/// as `SharedInstanceRemovedFile::validate` checks. It drops a version listing anything else.
-/// The backend's file names also refuse control characters.
-fn removable(filename: &str) -> bool {
-    path_util::is_safe_file_name(filename)
-        && !filename.contains(char::is_control)
-        && [".jar", ".zip", ".jar.disabled", ".zip.disabled"]
-            .iter()
-            .any(|suffix| filename.ends_with(suffix))
 }
 
 /// One addon as the share carries it.
@@ -333,6 +322,7 @@ mod tests {
 
     #[test]
     fn a_removed_path_is_one_safe_archive_name() {
+        let removable = |name: &str| RemovedFile::path("mods", name).is_some();
         for name in ["a.jar", "a.zip", "a.jar.disabled", "CONFIG.jar"] {
             assert!(removable(name), "{name}");
         }

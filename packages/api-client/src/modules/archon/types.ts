@@ -384,7 +384,10 @@ export namespace Archon {
 			export type ShareableFile = {
 				path: string
 				size: number
+				/** Under `config/`, but a share cannot carry it. */
 				blocked: boolean
+				/** The share's latest version carries it. */
+				shared: boolean
 			}
 
 			export type ShareableFilesResponse = {

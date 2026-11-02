@@ -21,7 +21,12 @@ use axum::{
 use chrono::{DateTime, Utc};
 use modrinth_content_management::ContentType;
 use serde::{Deserialize, Serialize};
-use sharing_client::{push, store::StoreClient};
+use sharing_client::{
+    backend::{Backend, BackendError},
+    push,
+    rules::{CONFIG_FILE_TYPE, SCAN_HEAD_SIZE, ShareScope},
+    versions::{RemovedFile, VersionContent},
+};
 
 use super::{
     AppState,
@@ -46,31 +51,19 @@ use crate::{
 
 /// Config files `GET .../content/share/files` lists at most.
 const MAX_LISTED: usize = 2000;
-/// Extensions a shared config file may have, as `SHAREABLE_CONFIG_EXTENSIONS` in
-/// `packages/ui/src/composables/server-sharing/config-files.ts`.
-const CONFIG_EXTENSIONS: &[&str] = &[
-    "json",
-    "json5",
-    "jsonc",
-    "yml",
-    "yaml",
-    "css",
-    "toml",
-    "txt",
-    "ini",
-    "cfg",
-    "conf",
-    "properties",
-    "xml",
-    "nbt",
-];
+/// Where a server's shared files come from.
+const SCOPE: ShareScope = ShareScope::Server;
 
 /// Body of POST `.../content/share`. Mirrors the body of `ArchonContentV1Module.share`.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct ShareRequest {
-    /// Files under `config/` to send with this version. Configs sent earlier stay shared.
+    /// Files under `config/` to send with this version. Configs sent earlier stay shared while
+    /// the server has them, unless they are in `removed_config_paths`.
     #[serde(default)]
     pub config_paths: Vec<String>,
+    /// Configs sent earlier that this version stops sharing.
+    #[serde(default)]
+    pub removed_config_paths: Vec<String>,
     /// Restart a running server once the version is out.
     #[serde(default)]
     pub restart: Option<bool>,
@@ -89,7 +82,10 @@ pub struct ShareWorldContentResponse {
 pub struct ShareableFile {
     pub path: String,
     pub size: u64,
+    /// Under `config/`, but a share cannot carry it (see `sharing_client::rules`).
     pub blocked: bool,
+    /// The share's latest version carries it.
+    pub shared: bool,
 }
 
 /// Mirrors Archon.Content.v1.ShareableFilesResponse.
@@ -174,18 +170,6 @@ pub struct SharedInstancePublishDiff {
     pub versions: HashMap<String, VersionName>,
 }
 
-/// A version's upstream content fields, as the App sends them.
-#[derive(Serialize)]
-struct VersionContent {
-    modrinth_ids: Vec<String>,
-    /// The Modrinth version of the modpack the server was installed from.
-    modpack_id: Option<String>,
-    removed_files: Vec<push::RemovedFile>,
-    game_version: String,
-    loader: &'static str,
-    loader_version: String,
-}
-
 /// What a push of the server would send now.
 struct Snapshot {
     /// The server's name, which the share takes.
@@ -193,27 +177,6 @@ struct Snapshot {
     folder: Arc<Folder>,
     content: VersionContent,
     carried: Vec<Carried>,
-}
-
-/// Whether `path` is a file under `config/` a share may carry, as `toShareableConfigPath` in
-/// `config-files.ts` decides.
-fn shareable_config(path: &str) -> bool {
-    let mut parts = path.split('/');
-    if parts.next() != Some("config") {
-        return false;
-    }
-    let names = parts.collect::<Vec<_>>();
-    let Some(last) = names.last() else {
-        return false;
-    };
-    names.iter().all(|name| {
-        !name.is_empty()
-            && !name.starts_with('.')
-            && !name.contains(['\\', ':'])
-            && !name.ends_with(['.', ' '])
-    }) && last.rsplit_once('.').is_some_and(|(_, extension)| {
-        CONFIG_EXTENSIONS.contains(&extension.to_ascii_lowercase().as_str())
-    })
 }
 
 async fn snapshot(state: &AppState, id: &str) -> Result<Snapshot, ApiError> {
@@ -281,7 +244,7 @@ async fn snapshot(state: &AppState, id: &str) -> Result<Snapshot, ApiError> {
             modpack_id,
             removed_files,
             game_version,
-            loader: shared_loader,
+            loader: shared_loader.to_owned(),
             loader_version: loader_version.unwrap_or_default(),
         },
         carried,
@@ -289,9 +252,7 @@ async fn snapshot(state: &AppState, id: &str) -> Result<Snapshot, ApiError> {
 }
 
 /// The backend's share routes, reached with this Core's key.
-pub(super) async fn backend(
-    state: &AppState,
-) -> Result<push::Backend, ApiError> {
+pub(super) async fn backend(state: &AppState) -> Result<Backend, ApiError> {
     let key: Option<String> =
         sqlx::query_scalar("SELECT backend_key FROM core WHERE id = 1")
             .fetch_optional(&state.db)
@@ -299,7 +260,7 @@ pub(super) async fn backend(
             .flatten();
     match (state.storage.backend_url(), key) {
         (Some(url), Some(key)) => {
-            Ok(push::Backend::new(state.content.http.clone(), url, key))
+            Ok(Backend::new(state.content.http.clone(), url, key))
         }
         _ => Err(ApiError::new(
             ErrorCode::Conflict,
@@ -319,6 +280,25 @@ impl From<push::PushError> for ApiError {
             | PushError::PushInFlight
             | PushError::FileChanged(_)
             | PushError::Unavailable(_) => ErrorCode::Conflict,
+            PushError::Backend(error) => return Self::from_backend(error),
+            _ => ErrorCode::Internal,
+        };
+        Self::new(code, error.to_string())
+    }
+}
+
+impl From<BackendError> for ApiError {
+    fn from(error: BackendError) -> Self {
+        Self::from_backend(&error)
+    }
+}
+
+impl ApiError {
+    /// A share that is gone or no longer reachable with this Core's key (404, 401) is a
+    /// conflict the caller can resolve; anything else is the backend's fault.
+    fn from_backend(error: &BackendError) -> Self {
+        let code = match error {
+            BackendError::Unavailable { .. } => ErrorCode::Conflict,
             _ => ErrorCode::Internal,
         };
         Self::new(code, error.to_string())
@@ -353,7 +333,7 @@ pub async fn share(
     for path in &request.config_paths {
         let path = folder::clean(path.trim_start_matches('/'))
             .map_err(crate::state::servers::Error::from)?;
-        if !shareable_config(&path) {
+        if !SCOPE.carries(&path) {
             return Err(ApiError::new(
                 ErrorCode::InvalidRequest,
                 format!("{path} cannot be shared."),
@@ -368,9 +348,17 @@ pub async fn share(
     let existing = match server_rows::share_id(&state.db, &id).await? {
         Some(share_id) => {
             match backend.rename_share(&share_id, &snapshot.name).await {
-                Err(push::PushError::Backend {
-                    status: 403 | 404, ..
-                }) => None,
+                Err(error)
+                    if matches!(
+                        error.status(),
+                        Some(
+                            reqwest::StatusCode::FORBIDDEN
+                                | reqwest::StatusCode::NOT_FOUND
+                        )
+                    ) =>
+                {
+                    None
+                }
                 result => result.map(|()| Some(share_id))?,
             }
         }
@@ -406,10 +394,17 @@ pub async fn share(
             )),
             Carried::Modrinth { .. } => None,
         })
-        .chain(configs.into_iter().map(|path| {
-            (path.clone(), push::CONFIG_FILE_TYPE.to_owned(), path)
-        }))
+        .chain(
+            configs
+                .into_iter()
+                .map(|path| (path.clone(), CONFIG_FILE_TYPE.to_owned(), path)),
+        )
         .collect::<Vec<_>>();
+    let keep = kept_config(
+        Arc::clone(&snapshot.folder),
+        staging.join("kept"),
+        request.removed_config_paths,
+    );
     let result = async {
         let files = {
             let folder = Arc::clone(&snapshot.folder);
@@ -433,17 +428,20 @@ pub async fn share(
             .await
             .map_err(std::io::Error::other)??
         };
-        let store =
-            StoreClient::new(concat!("copal/", env!("CARGO_PKG_VERSION")));
         push::push(
             &backend,
-            &store,
+            &state.content.store,
             &share_id,
             &snapshot.content,
             None,
-            &files,
+            files,
+            &keep,
             &staging.join("pool"),
-            &mut |_| {},
+            &mut |event| {
+                if let push::PushEvent::Dropped(names) = event {
+                    tracing::info!(server = %id, ?names, "stopped sharing config files");
+                }
+            },
         )
         .await
     }
@@ -468,6 +466,46 @@ pub async fn share(
     }))
 }
 
+/// Where the push finds a config the latest version shares: a copy under `staging` of the
+/// server's file, while the server has it and it is not in `removed`.
+fn kept_config(
+    folder: Arc<Folder>,
+    staging: std::path::PathBuf,
+    removed: Vec<String>,
+) -> impl Fn(
+    String,
+) -> futures::future::BoxFuture<
+    'static,
+    std::io::Result<Option<std::path::PathBuf>>,
+> + Send
++ Sync {
+    let removed = Arc::new(removed);
+    move |file_name: String| {
+        let (folder, staging, removed) =
+            (Arc::clone(&folder), staging.clone(), Arc::clone(&removed));
+        Box::pin(async move {
+            if removed.contains(&file_name) || !SCOPE.carries(&file_name) {
+                return Ok(None);
+            }
+            tokio::task::spawn_blocking(move || {
+                std::fs::create_dir_all(&staging)?;
+                let to = staging.join(uuid::Uuid::new_v4().to_string());
+                match stage(&folder, &file_name, &to) {
+                    Ok(()) => Ok(Some(to)),
+                    Err(error)
+                        if error.kind() == std::io::ErrorKind::NotFound =>
+                    {
+                        Ok(None)
+                    }
+                    Err(error) => Err(error),
+                }
+            })
+            .await
+            .map_err(std::io::Error::other)?
+        })
+    }
+}
+
 /// `DELETE .../content/share`: delete the server's share. Everyone who had it stops getting
 /// updates.
 pub async fn unshare(
@@ -478,26 +516,23 @@ pub async fn unshare(
     caller.require(&state.db, &id, Level::Owner).await?;
     world(&id, &wid)?;
     server_first(&state, &id).await?;
-    if server_rows::share_id(&state.db, &id).await?.is_none() {
+    let Some(share_id) = server_rows::share_id(&state.db, &id).await? else {
         return Err(ApiError::new(
             ErrorCode::NotFound,
             "This server is not shared.",
         ));
-    }
-    // An unpaired Core, or a 410 `core_removed`, means the Core was removed from the account
-    // that had the share, and the backend deleted its shares then. A share already gone is a
-    // 404, which `delete_share` counts as deleted, and a 403 `not_owner` means it is not this
-    // Core's any more.
-    if let (Some(share_id), Ok(backend)) = (
-        server_rows::share_id(&state.db, &id).await?,
-        backend(&state).await,
-    ) {
+    };
+    // An unpaired Core means the Core was removed from the account that had the share, and the
+    // backend deleted its shares then. `delete_share` counts a share already gone (404, or 410
+    // `core_removed`) as deleted, and a 403 `not_owner` means it is not this Core's any more.
+    if let Ok(backend) = backend(&state).await {
         match backend.delete_share(&share_id).await {
-            Ok(())
-            | Err(push::PushError::Backend {
-                status: 403 | 410, ..
-            }) => {}
-            Err(error) => return Err(error.into()),
+            Err(error)
+                if error.status() != Some(reqwest::StatusCode::FORBIDDEN) =>
+            {
+                return Err(error.into());
+            }
+            _ => {}
         }
     }
     server_rows::set_share_id(&state.db, &id, None).await?;
@@ -529,15 +564,42 @@ pub async fn files(
     world(&id, &wid)?;
     server_first(&state, &id).await?;
     let folder = Folder::open(&state.servers.paths().server(&id))?;
-    let response = tokio::task::spawn_blocking(move || list_configs(&folder))
-        .await
-        .map_err(std::io::Error::other)??;
+    let shared = shared_configs(&state, &id).await;
+    let response =
+        tokio::task::spawn_blocking(move || list_configs(&folder, &shared))
+            .await
+            .map_err(std::io::Error::other)??;
     Ok(Json(response))
 }
 
-/// Every file under `config/`, without following links. Folders that cannot be opened, such as
-/// a link, are skipped.
-fn list_configs(folder: &Folder) -> std::io::Result<ShareableFilesResponse> {
+/// The configs the latest version of the server's share carries. None when it has no share or
+/// the backend cannot be read now, which only leaves the files unmarked.
+async fn shared_configs(state: &AppState, id: &str) -> BTreeSet<String> {
+    let latest = async {
+        let Some(share_id) = server_rows::share_id(&state.db, id).await? else {
+            return Ok(None);
+        };
+        Ok::<_, ApiError>(backend(state).await?.latest_ready(&share_id).await?)
+    };
+    match latest.await {
+        Ok(latest) => latest
+            .iter()
+            .flat_map(|version| version.configs())
+            .map(|file| file.file_name.clone())
+            .collect(),
+        Err(error) => {
+            tracing::warn!(server = %id, error = %error.description, "could not read the share's configs");
+            BTreeSet::new()
+        }
+    }
+}
+
+/// Every file under `config/` the share reaches, without following links. Folders that cannot be
+/// opened, such as a link, are skipped.
+fn list_configs(
+    folder: &Folder,
+    shared: &BTreeSet<String>,
+) -> std::io::Result<ShareableFilesResponse> {
     let mut files = Vec::new();
     let mut folders = vec!["config".to_owned()];
     while let Some(path) = folders.pop() {
@@ -553,8 +615,10 @@ fn list_configs(folder: &Folder) -> std::io::Result<ShareableFilesResponse> {
             };
             let child = format!("{path}/{name}");
             if kind.is_dir() {
-                folders.push(child);
-            } else if kind.is_file() {
+                if SCOPE.enters(&child) {
+                    folders.push(child);
+                }
+            } else if kind.is_file() && SCOPE.reaches(&child) {
                 if files.len() == MAX_LISTED {
                     return Ok(ShareableFilesResponse {
                         files,
@@ -562,7 +626,8 @@ fn list_configs(folder: &Folder) -> std::io::Result<ShareableFilesResponse> {
                     });
                 }
                 files.push(ShareableFile {
-                    blocked: !shareable_config(&child),
+                    blocked: SCOPE.blocked(&child, &head(folder, &child)),
+                    shared: shared.contains(&child),
                     size: entry.metadata().map_or(0, |meta| meta.len()),
                     path: child,
                 });
@@ -574,6 +639,18 @@ fn list_configs(folder: &Folder) -> std::io::Result<ShareableFilesResponse> {
         files,
         truncated: false,
     })
+}
+
+/// The leading bytes of the file at `path`, which tell an executable apart. Empty when it
+/// cannot be read.
+fn head(folder: &Folder, path: &str) -> Vec<u8> {
+    use std::io::Read;
+
+    let mut head = Vec::with_capacity(SCAN_HEAD_SIZE);
+    if let Ok(Some(file)) = folder.open_file(path) {
+        let _ = file.take(SCAN_HEAD_SIZE as u64).read_to_end(&mut head);
+    }
+    head
 }
 
 /// `GET .../content/share/diff`: what a push would change. 404 while the share has no version
@@ -613,9 +690,13 @@ pub async fn diff(
         .collect::<BTreeMap<_, _>>();
     // The modpack's files players stop getting (`true`) or get again.
     let removed_changes = [
-        (&snapshot.content.removed_files, &latest.removed_files, true),
         (
-            &latest.removed_files,
+            &snapshot.content.removed_files,
+            &latest.content.removed_files,
+            true,
+        ),
+        (
+            &latest.content.removed_files,
             &snapshot.content.removed_files,
             false,
         ),
@@ -629,15 +710,16 @@ pub async fn diff(
     .collect::<Vec<_>>();
     let removed_versions =
         removed_changes.iter().filter_map(|(entry, _)| match entry {
-            push::RemovedFile::Version { version_id } => Some(version_id),
-            push::RemovedFile::Path { .. } => None,
+            RemovedFile::Version { version_id } => Some(version_id),
+            RemovedFile::Path { .. } => None,
         });
     let version_ids = latest
+        .content
         .modrinth_ids
         .iter()
         .chain(after.values())
         .chain(removed_versions)
-        .chain(&latest.modpack_id)
+        .chain(&latest.content.modpack_id)
         .chain(&snapshot.content.modpack_id)
         .cloned()
         .collect::<BTreeSet<_>>()
@@ -656,12 +738,14 @@ pub async fn diff(
             .clone()
     };
     let before = latest
+        .content
         .modrinth_ids
         .iter()
         .map(|version_id| (project_of(version_id), version_id.clone()))
         .collect::<BTreeMap<_, _>>();
     let mut diffs = project_diffs(&before, &after);
     let mut pack_projects = latest
+        .content
         .modpack_id
         .iter()
         .chain(&snapshot.content.modpack_id)
@@ -669,7 +753,7 @@ pub async fn diff(
         .collect::<Vec<_>>();
     for (entry, removed) in removed_changes {
         diffs.push(match entry {
-            push::RemovedFile::Version { version_id } => {
+            RemovedFile::Version { version_id } => {
                 let project_id = project_of(version_id);
                 pack_projects.push(project_id.clone());
                 DiffEntry::Project {
@@ -685,22 +769,20 @@ pub async fn diff(
                     },
                 }
             }
-            push::RemovedFile::Path { filename, .. } => {
-                DiffEntry::ExternalFile {
-                    file_type: "mod".into(),
-                    file_name: filename.clone(),
-                    kind: if removed {
-                        FileChange::Removed
-                    } else {
-                        FileChange::Added
-                    },
-                }
-            }
+            RemovedFile::Path { filename, .. } => DiffEntry::ExternalFile {
+                file_type: "mod".into(),
+                file_name: filename.clone(),
+                kind: if removed {
+                    FileChange::Removed
+                } else {
+                    FileChange::Added
+                },
+            },
         });
     }
 
-    // Files: content files by SHA-1, and configs only where the server's copy changed, since a
-    // config not sent again stays shared.
+    // Files: content files by SHA-1, and configs where the server's copy changed, since a push
+    // sends every config still shared as the server has it.
     let shared = latest
         .external_files
         .iter()
@@ -725,7 +807,7 @@ pub async fn diff(
         .chain(
             shared
                 .keys()
-                .filter(|(file_type, _)| file_type == push::CONFIG_FILE_TYPE)
+                .filter(|(file_type, _)| file_type == CONFIG_FILE_TYPE)
                 .map(|(file_type, file_name)| {
                     (file_type.clone(), file_name.clone(), file_name.clone())
                 }),
@@ -745,11 +827,7 @@ pub async fn diff(
     for ((file_type, file_name), sha1) in &local {
         let kind = match shared.get(&(file_type.clone(), file_name.clone())) {
             None => FileChange::Added,
-            Some(file)
-                if !file.sha1.as_deref().is_some_and(|shared| {
-                    shared.eq_ignore_ascii_case(sha1)
-                }) =>
-            {
+            Some(file) if !file.sha1.eq_ignore_ascii_case(sha1) => {
                 FileChange::Updated
             }
             Some(_) => continue,
@@ -760,11 +838,9 @@ pub async fn diff(
             kind,
         });
     }
+    // A config the server no longer has leaves the share with the next push.
     for (file_type, file_name) in shared.keys() {
-        if ![push::CONFIG_FILE_TYPE, push::CONFIG_BUNDLE_FILE_TYPE]
-            .contains(&file_type.as_str())
-            && !local.contains_key(&(file_type.clone(), file_name.clone()))
-        {
+        if !local.contains_key(&(file_type.clone(), file_name.clone())) {
             diffs.push(DiffEntry::ExternalFile {
                 file_type: file_type.clone(),
                 file_name: file_name.clone(),
@@ -774,8 +850,10 @@ pub async fn diff(
     }
 
     let content = &snapshot.content;
-    let modpack = match (latest.modpack_id.clone(), content.modpack_id.clone())
-    {
+    let modpack = match (
+        latest.content.modpack_id.clone(),
+        content.modpack_id.clone(),
+    ) {
         (Some(before), Some(after)) if before != after => {
             Some(Change::Updated { before, after })
         }
@@ -786,10 +864,10 @@ pub async fn diff(
     if let Some(change) = modpack {
         diffs.push(DiffEntry::Modpack { change });
     }
-    if latest.game_version != content.game_version {
+    if latest.content.game_version != content.game_version {
         diffs.push(DiffEntry::GameVersion {
             change: Change::Updated {
-                before: latest.game_version.clone(),
+                before: latest.content.game_version.clone(),
                 after: content.game_version.clone(),
             },
         });
@@ -799,8 +877,8 @@ pub async fn diff(
         version: Some(version.to_owned()).filter(|version| !version.is_empty()),
     };
     let (shared_loader, local_loader) = (
-        loader(&latest.loader, &latest.loader_version),
-        loader(content.loader, &content.loader_version),
+        loader(&latest.content.loader, &latest.content.loader_version),
+        loader(&content.loader, &content.loader_version),
     );
     if shared_loader != local_loader {
         diffs.push(DiffEntry::Loader {
@@ -896,13 +974,32 @@ mod tests {
     use super::*;
 
     #[test]
-    fn config_paths_are_shareable_as_the_app_decides() {
-        assert!(shareable_config("config/a.toml"));
-        assert!(shareable_config("config/mod/b.JSON"));
-        assert!(!shareable_config("config"));
-        assert!(!shareable_config("mods/a.toml"));
-        assert!(!shareable_config("config/a.jar"));
-        assert!(!shareable_config("config/.hidden/a.toml"));
-        assert!(!shareable_config("config/a.toml."));
+    fn configs_are_listed_and_blocked_by_the_share_rules() {
+        let directory = tempfile::tempdir().unwrap();
+        let config = directory.path().join("config");
+        std::fs::create_dir_all(config.join(".hidden")).unwrap();
+        std::fs::write(config.join("a.toml"), "x = 1").unwrap();
+        std::fs::write(config.join("b.jar"), "jar").unwrap();
+        std::fs::write(config.join("c.json"), b"MZ\x90\x00\x03\x00\x00\x00")
+            .unwrap();
+        std::fs::write(config.join(".hidden/d.toml"), "x = 1").unwrap();
+        let folder = Folder::open(directory.path()).unwrap();
+        let shared = BTreeSet::from(["config/a.toml".to_owned()]);
+
+        let listed = list_configs(&folder, &shared).unwrap();
+
+        let files = listed
+            .files
+            .iter()
+            .map(|file| (file.path.as_str(), file.blocked, file.shared))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            files,
+            [
+                ("config/a.toml", false, true),
+                ("config/b.jar", true, false),
+                ("config/c.json", true, false),
+            ]
+        );
     }
 }

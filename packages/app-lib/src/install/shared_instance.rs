@@ -12,9 +12,7 @@ use super::runner::{
 };
 use crate::ErrorKind;
 use crate::api::instance::{
-    CONFIG_BUNDLE_FILE_TYPE, CONFIG_DIRECTORY, CONFIG_FILE_TYPE,
-    CONFIG_SYNC_ENABLED, MAX_CONFIG_BUNDLE_ENTRIES, is_shareable_file_path,
-    is_supported_config_file, read_bounded_config_bundle_entry,
+    CONFIG_FILE_TYPE, CONFIG_SYNC_ENABLED, is_shareable_file_path,
     shared_modpack_files,
 };
 use crate::api::pack::install_from::CreatePackLocation;
@@ -30,7 +28,6 @@ use path_util::SafeRelativeUtf8UnixPathBuf;
 use sqlx::SqlitePool;
 use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use uuid::Uuid;
@@ -222,7 +219,6 @@ struct DesiredSharedInstanceContent {
         SharedInstanceExternalFileKey,
         DesiredSharedInstanceExternalFile,
     >,
-    config_bundle: Option<SharedInstanceExternalFileData>,
     config_files: Vec<SharedInstanceExternalFileData>,
 }
 
@@ -240,7 +236,6 @@ struct SharedInstanceApplyPlan {
     external_removals: Vec<CurrentSharedInstanceExternalFile>,
     external_updates: Vec<DesiredSharedInstanceExternalFile>,
     external_additions: Vec<DesiredSharedInstanceExternalFile>,
-    config_bundle: Option<SharedInstanceExternalFileData>,
     config_files: Vec<SharedInstanceExternalFileData>,
     modpack_toggles: Vec<(String, bool)>,
     modpack_removals: Vec<String>,
@@ -286,7 +281,6 @@ impl SharedInstanceApplyPlan {
         let mut plan = Self {
             project_removals,
             external_removals,
-            config_bundle: desired.config_bundle,
             config_files: desired.config_files,
             modpack_toggles: modpack_changes.toggles,
             modpack_removals: modpack_changes.removals,
@@ -342,7 +336,6 @@ impl SharedInstanceApplyPlan {
             + self.project_additions.len()
             + self.external_updates.len()
             + self.external_additions.len()
-            + usize::from(self.config_bundle.is_some())
             + self.config_files.len()) as u64
     }
 }
@@ -544,7 +537,6 @@ async fn apply_shared_instance_changes(
             .iter()
             .chain(&plan.external_additions)
             .map(|file| &file.file)
-            .chain(&plan.config_bundle)
             .chain(&plan.config_files)
             .collect(),
         content_change_count,
@@ -840,12 +832,6 @@ async fn desired_shared_instance_content(
         if file.file_type == CONFIG_FILE_TYPE {
             if CONFIG_SYNC_ENABLED {
                 content.config_files.push(file.clone());
-            }
-            continue;
-        }
-        if file.file_type == CONFIG_BUNDLE_FILE_TYPE {
-            if CONFIG_SYNC_ENABLED {
-                content.config_bundle = Some(file.clone());
             }
             continue;
         }
@@ -1274,9 +1260,9 @@ struct SharedInstanceModInstall<'a> {
 }
 
 /// Mods and content files are installed before individual shared files, so
-/// those files are checked against the content just installed and override
-/// any config bundle entries at the same path. Larger downloads start first so
-/// a big download is not left running alone at the end.
+/// those files are checked against the content just installed. Larger
+/// downloads start first so a big download is not left running alone at the
+/// end.
 async fn install_shared_instance_downloads(
     job_id: Uuid,
     job_state: &mut InstallJobState,
@@ -1519,11 +1505,6 @@ async fn install_shared_instance_external_file(
     state: &State,
     downloaded: &DownloadedBytes,
 ) -> crate::Result<()> {
-    if file.file_type == CONFIG_BUNDLE_FILE_TYPE && !CONFIG_SYNC_ENABLED {
-        downloaded.add(file.file_size);
-        return Ok(());
-    }
-
     validate_shared_instance_external_file_name(&file.file_name)?;
 
     if file.file_size > MAX_SHARED_INSTANCE_EXTERNAL_FILE_SIZE {
@@ -1549,15 +1530,6 @@ async fn install_shared_instance_external_file(
         );
     }
     let bytes = bytes::Bytes::from(bytes);
-
-    if file.file_type == CONFIG_BUNDLE_FILE_TYPE {
-        return install_shared_instance_config_bundle(
-            instance_id,
-            bytes,
-            state,
-        )
-        .await;
-    }
 
     let project_type = ProjectType::from_name(&file.file_type).ok_or(
         ErrorKind::InputError(format!(
@@ -1781,78 +1753,4 @@ fn validate_shared_instance_external_file_name(
     }
 
     Ok(())
-}
-
-async fn install_shared_instance_config_bundle(
-    instance_id: &str,
-    bytes: bytes::Bytes,
-    state: &State,
-) -> crate::Result<()> {
-    let files =
-        tokio::task::spawn_blocking(move || read_config_bundle(bytes.as_ref()))
-            .await??;
-    let metadata = crate::state::instances::commands::get_instance_metadata(
-        instance_id,
-        &state.pool,
-    )
-    .await?
-    .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
-    let config_path = state
-        .directories
-        .instances_dir()
-        .join(metadata.instance.path)
-        .join(CONFIG_DIRECTORY);
-    crate::util::io::create_dir_all(&config_path).await?;
-
-    for (relative_path, bytes) in files {
-        let path = config_path.join(relative_path);
-        if let Some(parent) = path.parent() {
-            crate::util::io::create_dir_all(parent).await?;
-        }
-        crate::util::io::write(path, bytes).await?;
-    }
-
-    Ok(())
-}
-
-fn read_config_bundle(bytes: &[u8]) -> crate::Result<Vec<(PathBuf, Vec<u8>)>> {
-    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes))
-        .context(ErrorKind::InputError(
-            "invalid shared instance config bundle".to_string(),
-        ))?;
-    if archive.len() > MAX_CONFIG_BUNDLE_ENTRIES {
-        bail!(ErrorKind::InputError(
-            "shared instance config bundle contains too many entries"
-                .to_string(),
-        ));
-    }
-    let mut files = Vec::new();
-    let mut total_size = 0;
-
-    for index in 0..archive.len() {
-        let file = archive.by_index(index).context(ErrorKind::InputError(
-            "invalid shared instance config bundle entry".to_string(),
-        ))?;
-        if file.is_dir() {
-            continue;
-        }
-        let path = file.enclosed_name().ok_or(ErrorKind::InputError(
-            "shared instance config bundle contains an unsafe path".to_string(),
-        ))?;
-        if !is_supported_config_file(&path) {
-            bail!(ErrorKind::InputError(format!(
-                "shared instance config bundle contains unsupported file {}",
-                path.display()
-            )));
-        }
-        let declared_size = file.size();
-        let bytes = read_bounded_config_bundle_entry(
-            file,
-            declared_size,
-            &mut total_size,
-        )?;
-        files.push((path.to_path_buf(), bytes));
-    }
-
-    Ok(files)
 }

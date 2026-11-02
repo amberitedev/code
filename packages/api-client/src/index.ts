@@ -39,6 +39,7 @@ export { type VerboseLoggingConfig, VerboseLoggingFeature } from './features/ver
 export type { InferredClientModules } from './modules'
 export { CoreApprovalError } from './modules/archon/cores/v1'
 export * from './modules/bedrock/limits'
+export * from './modules/sharing/rules'
 export { TICKET_HEADER } from './modules/copal/access/v1'
 export { SharedInstancesApiError } from './modules/shared-instances/errors'
 export * from './modules/types'

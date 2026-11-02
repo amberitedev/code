@@ -81,7 +81,7 @@ pub struct SharedInstanceInstallPreview {
     pub content_version_ids: Vec<String>,
     pub external_files: Vec<SharedInstanceExternalFilePreview>,
     #[serde(default)]
-    pub removed_files: Vec<SharedInstanceRemovedFile>,
+    pub removed_files: Vec<RemovedFile>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -115,7 +115,10 @@ pub struct SharedInstancePublishPreview {
 pub struct SharedInstancePublishFile {
     pub path: String,
     pub size: u64,
+    /// In the instance, but a share cannot carry it (see `sharing_client::rules`).
     pub blocked: bool,
+    /// The share's latest version carries it.
+    pub shared: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
