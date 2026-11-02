@@ -63,7 +63,6 @@ pub(crate) use bedrock::limits::MAX_SHARE_BYTES as MAX_SHARED_FILES_TOTAL_SIZE;
 use sharing_client::rules::ShareScope;
 pub(crate) use sharing_client::rules::{
     CONFIG_EXTENSIONS as CONFIG_FILE_EXTENSIONS, CONFIG_FILE_TYPE,
-    SCAN_HEAD_SIZE as FILE_SCAN_HEAD_SIZE,
 };
 use sharing_client::versions::RemovedFile;
 pub(crate) const CONFIG_SYNC_ENABLED: bool = true;

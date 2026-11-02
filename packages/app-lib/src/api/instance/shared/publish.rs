@@ -5,7 +5,6 @@ use super::report::{PublishReport, PublishReportFile};
 use super::types::*;
 use super::*;
 use crate::self_hosted::pool;
-use async_walkdir::{Filtering, WalkDir};
 use futures::{StreamExt, TryStreamExt};
 use sharing_client::push;
 
@@ -370,30 +369,16 @@ pub(super) async fn collect_publish_snapshot(
         .filter(|item| item.enabled)
         .map(|item| item.file_path.trim_end_matches(".disabled"))
         .collect::<HashSet<_>>();
-    let mut removed_files = Vec::new();
-    for file in &modpack_files {
-        if let Some(version_id) = &file.version_id {
-            if !enabled_versions.contains(version_id.as_str()) {
-                let removed = RemovedFile::Version {
-                    version_id: version_id.clone(),
-                };
-                if !removed_files.contains(&removed) {
-                    removed_files.push(removed);
+    // The modpack's files the owner removed or turned off.
+    let removed_files =
+        push::removed_files(modpack_files.iter().filter(|file| {
+            match &file.version_id {
+                Some(version_id) => {
+                    !enabled_versions.contains(version_id.as_str())
                 }
+                None => !enabled_paths.contains(file.path.as_str()),
             }
-        } else if !enabled_paths.contains(file.path.as_str())
-            && let Some((parent, filename)) = file.path.split_once('/')
-        {
-            removed_files.push(RemovedFile::Path {
-                parent: parent.to_string(),
-                filename: filename.to_string(),
-            });
-        }
-    }
-    let inherited_versions = modpack_files
-        .iter()
-        .filter_map(|file| file.version_id.as_deref())
-        .collect::<HashSet<_>>();
+        }));
     let mut effective_version_ids = Vec::new();
     let installed_version_ids = items
         .iter()
@@ -412,10 +397,8 @@ pub(super) async fn collect_publish_snapshot(
     .into_iter()
     .map(|version| version.id)
     .collect::<HashSet<_>>();
-    let mut version_ids = Vec::new();
     let mut seen_version_ids = HashSet::new();
-    let mut external_files = Vec::new();
-    let mut seen_external_files = HashSet::new();
+    let mut rows = Vec::new();
     let mut disabled_project_ids = HashSet::new();
     let mut disabled_version_ids = Vec::new();
     let mut seen_disabled_version_ids = HashSet::new();
@@ -423,31 +406,33 @@ pub(super) async fn collect_publish_snapshot(
 
     for item in items {
         if item.enabled {
-            if let Some(version) = item.version.as_ref()
-                && available_version_ids.contains(&version.id)
+            let version_id = item
+                .version
+                .as_ref()
+                .map(|version| version.id.clone())
+                .filter(|id| available_version_ids.contains(id));
+            if let Some(version_id) = &version_id
+                && seen_version_ids.insert(version_id.clone())
             {
-                if seen_version_ids.insert(version.id.clone()) {
-                    effective_version_ids.push(version.id.clone());
-                    if !inherited_versions.contains(version.id.as_str()) {
-                        version_ids.push(version.id.clone());
-                    }
-                }
+                effective_version_ids.push(version_id.clone());
+            }
+            if version_id.is_none() && item.file_path.is_empty() {
                 continue;
             }
-
-            if item.file_path.is_empty() {
-                continue;
-            }
-
-            let file_type = file_type(item.project_type);
-            let external_key = format!("{}:{file_type}", item.file_path);
-            if seen_external_files.insert(external_key) {
-                external_files.push(ExternalFileCandidate {
-                    file_name: item.file_name,
-                    file_type,
-                    source: ExternalFileSource::InstanceFile(item.file_path),
-                });
-            }
+            rows.push(push::ContentRow {
+                from_modpack: modpack_id.is_some()
+                    && matches!(
+                        item.source_kind,
+                        Some(
+                            ContentSourceKind::ModrinthModpack
+                                | ContentSourceKind::ServerProject
+                        )
+                    ),
+                path: item.file_path,
+                file_name: item.file_name,
+                file_type: file_type(item.project_type),
+                version_id,
+            });
             continue;
         }
 
@@ -480,6 +465,24 @@ pub(super) async fn collect_publish_snapshot(
             path: enabled_file_name(&item.file_name),
         });
     }
+
+    let read = push::read_content(rows, &modpack_files);
+    let mut seen_external_files = HashSet::new();
+    let external_files = read
+        .carried
+        .into_iter()
+        .filter(|row| {
+            seen_external_files
+                .insert((row.path.clone(), row.file_type.clone()))
+        })
+        .map(|row| ExternalFileCandidate {
+            file_name: row.file_name,
+            file_type: row.file_type,
+            source: ExternalFileSource::InstanceFile(row.path),
+        })
+        .collect();
+    let mut version_ids = read.modrinth_ids;
+    dedupe_strings(&mut version_ids);
 
     Ok(CurrentPublishSnapshot {
         version_ids,
@@ -908,69 +911,31 @@ fn push_error(error: push::PushError) -> crate::Error {
     }
 }
 
+/// The files the owner can pick for a push (`rules::list_shareable`), none marked shared yet.
 pub(super) async fn collect_shareable_files(
     instance_path: &std::path::Path,
 ) -> crate::Result<Vec<SharedInstancePublishFile>> {
-    let mut files = Vec::new();
-    let root = instance_path.to_path_buf();
-    let mut walker = WalkDir::new(instance_path).filter(move |entry| {
-        let root = root.clone();
-        async move {
-            let is_dir = entry
-                .file_type()
-                .await
-                .is_ok_and(|file_type| file_type.is_dir());
-            let entry_path = entry.path();
-            let skip_dir = is_dir
-                && entry_path.strip_prefix(&root).is_ok_and(|relative| {
-                    !INSTANCE_SCOPE
-                        .enters(&relative.to_string_lossy().replace('\\', "/"))
-                });
-            if skip_dir {
-                Filtering::IgnoreDir
-            } else {
-                Filtering::Continue
-            }
-        }
-    });
-
-    while let Some(entry) = walker.next().await {
-        let entry = entry.context("failed to read instance directory")?;
-        if !entry.file_type().await?.is_file() {
-            continue;
-        }
-
-        let entry_path = entry.path();
-        let relative_path = entry_path.strip_prefix(instance_path)?;
-        let path = relative_path.to_string_lossy().replace('\\', "/");
-        if !INSTANCE_SCOPE.reaches(&path) {
-            continue;
-        }
-        let size = entry.metadata().await?.len();
-        let blocked =
-            INSTANCE_SCOPE.blocked(&path, &read_file_head(&entry_path).await?);
-        files.push(SharedInstancePublishFile {
-            path,
-            size,
-            blocked,
-            shared: false,
-        });
-    }
-
-    files.sort_by(|left, right| left.path.cmp(&right.path));
-    Ok(files)
-}
-
-async fn read_file_head(path: &std::path::Path) -> crate::Result<Vec<u8>> {
-    use tokio::io::AsyncReadExt;
-
-    let mut head = Vec::with_capacity(FILE_SCAN_HEAD_SIZE);
-    tokio::fs::File::open(path)
-        .await?
-        .take(FILE_SCAN_HEAD_SIZE as u64)
-        .read_to_end(&mut head)
-        .await?;
-    Ok(head)
+    let instance_path = instance_path.to_path_buf();
+    let listed = tokio::task::spawn_blocking(move || {
+        sharing_client::rules::list_shareable(
+            INSTANCE_SCOPE,
+            &sharing_client::rules::DiskFolder(&instance_path),
+            &Default::default(),
+            usize::MAX,
+        )
+    })
+    .await
+    .context("failed to read instance directory")??;
+    Ok(listed
+        .files
+        .into_iter()
+        .map(|file| SharedInstancePublishFile {
+            path: file.path,
+            size: file.size,
+            blocked: file.blocked,
+            shared: file.shared,
+        })
+        .collect())
 }
 
 /// Each selected file is uploaded on its own under its instance-relative

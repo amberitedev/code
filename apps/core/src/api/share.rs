@@ -31,7 +31,10 @@ use sharing_client::{
     },
     install::ModpackFile,
     push,
-    rules::{CONFIG_FILE_TYPE, SCAN_HEAD_SIZE, ShareScope},
+    rules::{
+        CONFIG_FILE_TYPE, FolderEntry, SCAN_HEAD_SIZE, ShareFolder, ShareScope,
+        list_shareable,
+    },
     versions::{ShareVersion, VersionContent},
 };
 use ts_rs::TS;
@@ -53,7 +56,7 @@ use crate::{
             sqlite::{content_rows, server_rows},
         },
         commands::drop_own_share::drop_own_share,
-        domain::server_share::{Carried, carried, removed},
+        domain::server_share::{content_rows, pack_file, removed},
         modrinth_pack,
     },
 };
@@ -123,7 +126,8 @@ struct Snapshot {
     name: String,
     folder: Arc<Folder>,
     content: VersionContent,
-    carried: Vec<Carried>,
+    /// The files the push carries, as the server has them.
+    carried: Vec<push::ContentRow>,
     /// The files its modpack placed, by which the share diff splits a version on that modpack.
     pack_files: Vec<ModpackFile>,
 }
@@ -167,18 +171,19 @@ async fn snapshot(state: &AppState, id: &str) -> Result<Snapshot, ApiError> {
                 modrinth_pack(&pack.link)
                     .map(|(_, version_id)| version_id.to_owned())
             });
-    let carried = carried(&listed, &rows, &entry_sides, modpack_id.is_some());
     let pack_files = rows
         .values()
         .filter(|row| row.by_pack())
-        .map(|row| ModpackFile {
-            path: row.relative_path.clone(),
-            sha1: Some(row.sha1.clone()),
-            version_id: row.version_id.clone(),
-            alias: None,
-            source: (),
-        })
-        .collect();
+        .map(pack_file)
+        .collect::<Vec<_>>();
+    let read = push::read_content(
+        content_rows(&listed, &rows, &entry_sides, modpack_id.is_some()),
+        if modpack_id.is_some() {
+            &pack_files
+        } else {
+            &[]
+        },
+    );
     let removed_files = if modpack_id.is_some() {
         let level = folder.level_name();
         let dirs = [ContentType::Mod, ContentType::DataPack]
@@ -189,18 +194,11 @@ async fn snapshot(state: &AppState, id: &str) -> Result<Snapshot, ApiError> {
     } else {
         Vec::new()
     };
-    let modrinth_ids = carried
-        .iter()
-        .filter_map(|item| match item {
-            Carried::Modrinth { version_id, .. } => Some(version_id.clone()),
-            Carried::File { .. } => None,
-        })
-        .collect();
     // The files are staged when a push sends them; the builder decides the content.
     let (content, _) = push::build_version(
         SCOPE,
         push::VersionInput {
-            modrinth_ids,
+            modrinth_ids: read.modrinth_ids,
             modpack_id,
             removed_files,
             game_version,
@@ -214,7 +212,7 @@ async fn snapshot(state: &AppState, id: &str) -> Result<Snapshot, ApiError> {
         name: server.name,
         folder,
         content,
-        carried,
+        carried: read.carried,
         pack_files,
     })
 }
@@ -350,17 +348,12 @@ pub async fn share(
     let sources = snapshot
         .carried
         .iter()
-        .filter_map(|item| match item {
-            Carried::File {
-                file_name,
-                file_type,
-                on_disk,
-            } => Some((
-                file_name.clone(),
-                file_type.to_string(),
-                on_disk.clone(),
-            )),
-            Carried::Modrinth { .. } => None,
+        .map(|row| {
+            (
+                row.file_name.clone(),
+                row.file_type.clone(),
+                row.path.clone(),
+            )
         })
         .chain(
             configs
@@ -529,63 +522,62 @@ async fn shared_configs(state: &AppState, id: &str) -> BTreeSet<String> {
     }
 }
 
-/// Every file under `config/` the share reaches, without following links. Folders that cannot be
-/// opened, such as a link, are skipped.
+/// Every file under `config/` the share reaches (`rules::list_shareable`), without following
+/// links.
 fn list_configs(
     folder: &Folder,
     shared: &BTreeSet<String>,
 ) -> std::io::Result<ShareableFilesResponse> {
-    let mut files = Vec::new();
-    let mut folders = vec!["config".to_owned()];
-    while let Some(path) = folders.pop() {
-        let Ok(dir) = folder.open_dir(Some(&path)) else {
-            continue;
-        };
-        for entry in dir.entries()?.filter_map(Result::ok) {
-            let Ok(name) = entry.file_name().into_string() else {
-                continue;
-            };
-            let Ok(kind) = entry.file_type() else {
-                continue;
-            };
-            let child = format!("{path}/{name}");
-            if kind.is_dir() {
-                if SCOPE.enters(&child) {
-                    folders.push(child);
-                }
-            } else if kind.is_file() && SCOPE.reaches(&child) {
-                if files.len() == MAX_LISTED {
-                    return Ok(ShareableFilesResponse {
-                        files,
-                        truncated: true,
-                    });
-                }
-                files.push(ShareableFile {
-                    blocked: SCOPE.blocked(&child, &head(folder, &child)),
-                    shared: shared.contains(&child),
-                    size: entry.metadata().map_or(0, |meta| meta.len()),
-                    path: child,
-                });
-            }
-        }
-    }
-    files.sort_by(|left, right| left.path.cmp(&right.path));
+    let listed =
+        list_shareable(SCOPE, &ServerFolder(folder), shared, MAX_LISTED)?;
     Ok(ShareableFilesResponse {
-        files,
-        truncated: false,
+        files: listed
+            .files
+            .into_iter()
+            .map(|file| ShareableFile {
+                path: file.path,
+                size: file.size,
+                blocked: file.blocked,
+                shared: file.shared,
+            })
+            .collect(),
+        truncated: listed.truncated,
     })
 }
 
-/// The leading bytes of the file at `path`, which tell an executable apart. Empty when it
-/// cannot be read.
-fn head(folder: &Folder, path: &str) -> Vec<u8> {
-    use std::io::Read;
+/// The server folder as the share's file listing reads it, through `Folder`, which never
+/// follows a link.
+struct ServerFolder<'a>(&'a Folder);
 
-    let mut head = Vec::with_capacity(SCAN_HEAD_SIZE);
-    if let Ok(Some(file)) = folder.open_file(path) {
-        let _ = file.take(SCAN_HEAD_SIZE as u64).read_to_end(&mut head);
+impl ShareFolder for ServerFolder<'_> {
+    fn entries(&self, path: &str) -> std::io::Result<Vec<FolderEntry>> {
+        let dir = self.0.open_dir((!path.is_empty()).then_some(path))?;
+        let mut entries = Vec::new();
+        for entry in dir.entries()?.filter_map(Result::ok) {
+            let (Ok(name), Ok(kind)) =
+                (entry.file_name().into_string(), entry.file_type())
+            else {
+                continue;
+            };
+            if kind.is_dir() {
+                entries.push(FolderEntry::Dir(name));
+            } else if kind.is_file() {
+                let size = entry.metadata().map_or(0, |meta| meta.len());
+                entries.push(FolderEntry::File { name, size });
+            }
+        }
+        Ok(entries)
     }
-    head
+
+    fn head(&self, path: &str) -> Vec<u8> {
+        use std::io::Read;
+
+        let mut head = Vec::with_capacity(SCAN_HEAD_SIZE);
+        if let Ok(Some(file)) = self.0.open_file(path) {
+            let _ = file.take(SCAN_HEAD_SIZE as u64).read_to_end(&mut head);
+        }
+        head
+    }
 }
 
 /// `GET .../content/share/diff`: what a push would change. 404 while the share has no version
@@ -705,17 +697,12 @@ async fn share_contents(
     let local = snapshot
         .carried
         .iter()
-        .filter_map(|item| match item {
-            Carried::File {
-                file_name,
-                file_type,
-                on_disk,
-            } => Some((
-                file_type.to_string(),
-                file_name.clone(),
-                on_disk.clone(),
-            )),
-            Carried::Modrinth { .. } => None,
+        .map(|row| {
+            (
+                row.file_type.clone(),
+                row.file_name.clone(),
+                row.path.clone(),
+            )
         })
         .chain(latest.configs().map(|file| {
             (

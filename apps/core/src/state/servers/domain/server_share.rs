@@ -6,6 +6,8 @@
 //! A server installed from a Modrinth modpack shares that modpack, as the App does, so players
 //! also get its client-only files, which never land on the server. Its pack files are then left
 //! to the modpack, and the ones the owner removed or turned off for players are listed as removed.
+//! This file reads the server's rows into what `sharing_client::push` takes; which rows go by
+//! Modrinth version, which are carried and how removed files are named is decided there.
 
 use std::collections::HashMap;
 
@@ -14,12 +16,14 @@ use crate::state::servers::{
     adapters::filesystem::content_files::{DISABLED, Listed},
     domain::sides::Sides,
 };
+use sharing_client::install::ModpackFile;
+use sharing_client::push::ContentRow;
 use sharing_client::versions::RemovedFile;
 
 use modrinth_content_management::ContentType;
 
 /// The pack files of a shared modpack that players do not get: deleted from the server, or on
-/// disk but off for players. A file Modrinth knows goes by version; any other mod by its path.
+/// disk but off for players. A file Modrinth knows goes by version; any other addon by its path.
 pub fn removed(
     listed: &[Listed],
     rows: &HashMap<String, TrackedFile>,
@@ -31,73 +35,49 @@ pub fn removed(
         .filter(|row| row.by_pack())
         .collect::<Vec<_>>();
     pack_rows.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
-    let mut removed = Vec::new();
-    for row in pack_rows {
-        let for_players =
+    let dropped = pack_rows
+        .into_iter()
+        .filter(|row| {
             match listed.iter().find(|item| item.path == row.relative_path) {
                 Some(item) => {
-                    Sides::of(item, entry_sides.get(&item.path)).for_players()
+                    !Sides::of(item, entry_sides.get(&item.path)).for_players()
                 }
                 // Gone from disk. Only addons count; the pack's other files are not content.
-                None => !row.relative_path.rsplit_once('/').is_some_and(
+                None => row.relative_path.rsplit_once('/').is_some_and(
                     |(dir, _)| {
                         addon_dirs.iter().any(|addon_dir| addon_dir == dir)
                     },
                 ),
-            };
-        if for_players {
-            continue;
-        }
-        let entry = match (&row.version_id, row.relative_path.split_once('/')) {
-            (Some(version_id), _) => RemovedFile::Version {
-                version_id: version_id.clone(),
-            },
-            (None, Some(("mods", filename))) => {
-                match RemovedFile::path("mods", filename) {
-                    Some(entry) => entry,
-                    None => continue,
-                }
             }
-            _ => continue,
-        };
-        if !removed.contains(&entry) {
-            removed.push(entry);
-        }
+        })
+        .map(pack_file)
+        .collect::<Vec<_>>();
+    sharing_client::push::removed_files(&dropped)
+}
+
+/// A file the server's pack placed, as the share names a modpack's files.
+pub fn pack_file(row: &TrackedFile) -> ModpackFile {
+    ModpackFile {
+        path: row.relative_path.clone(),
+        sha1: Some(row.sha1.clone()),
+        version_id: row.version_id.clone(),
+        alias: None,
+        source: (),
     }
-    removed
 }
 
-/// One addon as the share carries it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Carried {
-    Modrinth {
-        version_id: String,
-        project_id: String,
-    },
-    File {
-        /// The manifest's name and type: the file name, and `mod` or `datapack`.
-        file_name: String,
-        file_type: &'static str,
-        /// Where its bytes are, relative to the server folder.
-        on_disk: String,
-    },
-}
-
-/// The addons of `listed` that the share carries, in order. With `modpack` the share carries
-/// the modpack, so the pack's own files are left to it.
-pub fn carried(
+/// The addons of `listed` that players get, in order, as a push reads them. With `modpack` the
+/// share carries the modpack, so the pack's own files are marked as the modpack's.
+pub fn content_rows(
     listed: &[Listed],
     rows: &HashMap<String, TrackedFile>,
     entry_sides: &HashMap<String, EntrySides>,
     modpack: bool,
-) -> Vec<Carried> {
+) -> Vec<ContentRow> {
     listed
         .iter()
         .filter(|item| {
             Sides::of(item, entry_sides.get(&item.path)).for_players()
-        })
-        .filter(|item| {
-            !modpack || rows.get(&item.path).is_none_or(|row| !row.by_pack())
         })
         .filter_map(|item| {
             let file_type = match item.kind {
@@ -109,22 +89,18 @@ pub fn carried(
                 | ContentType::ModPack => return None,
             };
             let row = rows.get(&item.path);
-            if let Some((version_id, project_id)) = row.and_then(|row| {
-                Some((row.version_id.clone()?, row.project_id.clone()?))
-            }) {
-                return Some(Carried::Modrinth {
-                    version_id,
-                    project_id,
-                });
-            }
-            Some(Carried::File {
-                file_name: item.filename.clone(),
-                file_type,
-                on_disk: if item.disabled {
+            Some(ContentRow {
+                path: if item.disabled {
                     format!("{}{}", item.path, DISABLED)
                 } else {
                     item.path.clone()
                 },
+                file_name: item.filename.clone(),
+                file_type: file_type.to_owned(),
+                version_id: row
+                    .filter(|row| row.project_id.is_some())
+                    .and_then(|row| row.version_id.clone()),
+                from_modpack: modpack && row.is_some_and(TrackedFile::by_pack),
             })
         })
         .collect()
@@ -134,6 +110,34 @@ pub fn carried(
 mod tests {
     use super::*;
     use bedrock::state::{ContentRequirement, ContentSourceKind};
+
+    /// What a push sends of the server: its Modrinth versions, and each carried file as its
+    /// manifest name, type and path on disk.
+    fn pushed(
+        listed: &[Listed],
+        rows: &HashMap<String, TrackedFile>,
+        entry_sides: &HashMap<String, EntrySides>,
+        modpack: bool,
+    ) -> (Vec<String>, Vec<(String, String, String)>) {
+        let pack = if modpack {
+            rows.values()
+                .filter(|row| row.by_pack())
+                .map(pack_file)
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let content = sharing_client::push::read_content(
+            content_rows(listed, rows, entry_sides, modpack),
+            &pack,
+        );
+        let carried = content
+            .carried
+            .into_iter()
+            .map(|row| (row.file_name, row.file_type, row.path))
+            .collect();
+        (content.modrinth_ids, carried)
+    }
 
     fn listed(path: &str, kind: ContentType, disabled: bool) -> Listed {
         Listed {
@@ -202,23 +206,22 @@ mod tests {
             },
         )]);
 
-        let file = |file_name: &str, file_type, on_disk: &str| Carried::File {
-            file_name: file_name.into(),
-            file_type,
-            on_disk: on_disk.into(),
-        };
+        let (modrinth_ids, carried) =
+            pushed(&listed, &rows, &entry_sides, false);
+        assert_eq!(modrinth_ids, ["version"]);
         assert_eq!(
-            carried(&listed, &rows, &entry_sides, false),
+            carried,
             [
-                file("both.jar", "mod", "mods/both.jar"),
-                file("client.jar", "mod", "mods/client.jar.disabled"),
-                file("back.jar", "mod", "mods/back.jar"),
-                Carried::Modrinth {
-                    version_id: "version".into(),
-                    project_id: "project".into(),
-                },
-                file("pack.zip", "datapack", "world/datapacks/pack.zip"),
+                ("both.jar", "mod", "mods/both.jar"),
+                ("client.jar", "mod", "mods/client.jar.disabled"),
+                ("back.jar", "mod", "mods/back.jar"),
+                ("pack.zip", "datapack", "world/datapacks/pack.zip"),
             ]
+            .map(|(name, kind, path)| (
+                name.into(),
+                kind.into(),
+                path.into()
+            ))
         );
     }
 
@@ -268,13 +271,10 @@ mod tests {
             row("mods/added.jar", ContentSourceKind::Local, Some("added")),
         ]);
 
-        assert_eq!(
-            carried(&listed, &rows, &entry_sides, true),
-            [Carried::Modrinth {
-                version_id: "added".into(),
-                project_id: "project".into(),
-            }]
-        );
+        let (modrinth_ids, carried) =
+            pushed(&listed, &rows, &entry_sides, true);
+        assert_eq!(modrinth_ids, ["added"]);
+        assert!(carried.is_empty());
         assert_eq!(
             removed(&listed, &rows, &entry_sides, &["mods".into()]),
             [

@@ -19,7 +19,8 @@ pub struct ContentRow {
     pub file_type: String,
     /// Its Modrinth version, when members can install it from Modrinth.
     pub version_id: Option<String>,
-    /// The share's modpack placed it, so members get it from the modpack.
+    /// The share's modpack placed it, so members get it from the modpack while the modpack
+    /// still places it.
     pub from_modpack: bool,
 }
 
@@ -32,8 +33,9 @@ pub struct ReadContent {
 }
 
 /// What a push sends of `rows`, for a share whose modpack places `modpack` (empty without one).
-/// A file the modpack placed is left to it, and so is a Modrinth version the modpack also
-/// places. A file Modrinth does not know is carried as it is.
+/// A file the modpack placed is left to it while the modpack still places it, by its version or
+/// at its path (on or off), and so is a Modrinth version the modpack also places. A file
+/// Modrinth does not know is carried as it is.
 pub fn read_content<S>(
     rows: Vec<ContentRow>,
     modpack: &[ModpackFile<S>],
@@ -42,9 +44,14 @@ pub fn read_content<S>(
         .iter()
         .filter_map(|file| file.version_id.as_deref())
         .collect::<HashSet<_>>();
+    let paths = modpack
+        .iter()
+        .map(|file| file.path.as_str())
+        .collect::<HashSet<_>>();
     let mut content = ReadContent::default();
     for row in rows {
-        if row.from_modpack {
+        let enabled = row.path.strip_suffix(".disabled").unwrap_or(&row.path);
+        if row.from_modpack && paths.contains(enabled) {
             continue;
         }
         match &row.version_id {
@@ -119,7 +126,9 @@ mod tests {
         let content = read_content(
             vec![
                 row("mods/a.jar", Some("a"), true),
-                row("mods/cdn.jar", None, true),
+                row("mods/cdn.jar.disabled", None, true),
+                // The modpack no longer places it.
+                row("mods/leftover.jar", None, true),
                 // Installed again by hand: the modpack still places it.
                 row("mods/a-copy.jar", Some("a"), false),
                 row("mods/b.jar", Some("b"), false),
@@ -129,7 +138,13 @@ mod tests {
         );
 
         assert_eq!(content.modrinth_ids, ["b"]);
-        assert_eq!(content.carried, [row("mods/local.jar", None, false)]);
+        assert_eq!(
+            content.carried,
+            [
+                row("mods/leftover.jar", None, true),
+                row("mods/local.jar", None, false),
+            ]
+        );
     }
 
     #[test]
