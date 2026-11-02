@@ -42,7 +42,7 @@ use crate::{
     installs::{ModLoader, shared::SharedDirs},
     servers::{Hold, ServerError},
     state::servers::{
-        self as content, Busy, PendingPack, SharedInstanceLink,
+        self as content, Busy,
         adapters::{
             filesystem::{
                 archive::{self, NoRoom},
@@ -57,10 +57,10 @@ use crate::{
             check_content_updates::check_modpack_update,
             content_mutation::{self, Side},
             edited_files::{decide_edited_file, list_edited_files},
+            install_instance::{self, InstanceInstall},
             install_loader::install_loader,
             install_pack::{self as content_install, PackSource},
             list_content::{get_linked_modpack_info, list_content, open_jar},
-            write_shared_pack as shared,
         },
         modrinth_pack,
     },
@@ -917,12 +917,10 @@ fn spawn_pack(
     );
 }
 
-/// Apply the latest version of a share to a server, which Core reads from the backend with its
-/// own key and the `ticket` of the user who asked, so it reads only what that user can. Only the
-/// local CLI reads without one, as the Core's owner. The version is read before this returns,
-/// so one that cannot go fails the request. A stopped server installs it now. A running one keeps running: Core fetches the
-/// version's files, then it waits for the server to stop, or with `restart` Core stops the
-/// server, and it applies then (see [`apply_pending`]).
+/// Apply the latest version of a share to a server (`commands::install_instance`), which Core
+/// reads from the backend with its own key and the `ticket` of the user who asked, so it reads
+/// only what that user can. Only the local CLI reads without one, as the Core's owner. The
+/// version is read before this returns, so one that cannot go fails the request.
 #[allow(clippy::too_many_arguments)]
 async fn install_instance(
     state: &Arc<AppState>,
@@ -976,210 +974,24 @@ async fn install_instance(
                 ApiError::new(ErrorCode::Conflict, error.to_string())
             }
         })?;
-    match state.servers.hold(id) {
-        Ok(hold) => {
-            // A version still waiting from an earlier push is superseded by this one.
-            let waiting = content_rows::clear_pending(&state.db, id).await?;
-            forget_pack(state, waiting).await;
-            let app = Arc::clone(state);
-            state.content.spawn(
-                hold,
-                busy,
-                Installing::Modpack,
-                move |content, hold, progress| async move {
-                    let written = shared::write_pack(
-                        &content,
-                        &backend,
-                        hold.id(),
-                        version,
-                        &instance.name,
-                    )
-                    .await;
-                    let (sha1, version) = match written {
-                        Ok(written) => written,
-                        Err(error) => {
-                            content_rows::set_pack_error(
-                                &content.db,
-                                hold.id(),
-                                Some(&format!("{error:#}")),
-                            )
-                            .await?;
-                            return Err(error);
-                        }
-                    };
-                    let source = PackSource::Stored {
-                        sha1,
-                        instance: Some(SharedInstanceLink {
-                            instance_id: instance.id,
-                            instance_name: instance.name,
-                            shared_instance_id,
-                            version: version.into(),
-                        }),
-                    };
-                    let installed = content_install::pack(
-                        &content, &hold, &progress, source, properties, force,
-                    )
-                    .await;
-                    // Another instance may have dropped the players of the one it
-                    // followed, even when a later step failed.
-                    app.access.owed.notify_one();
-                    let change = installed?;
-                    drop_own_share(&app, hold.id()).await?;
-                    Ok(change)
-                },
-            );
-        }
-        Err(ServerError::AlreadyRunning) => {
-            let state = Arc::clone(state);
-            let id = id.to_owned();
-            tokio::spawn(async move {
-                let written = shared::write_pack(
-                    &state.content,
-                    &backend,
-                    &id,
-                    version,
-                    &instance.name,
-                )
-                .await;
-                drop(busy);
-                let result = async {
-                    let (sha1, version) = written?;
-                    let pending = PendingPack {
-                        sha1,
-                        instance_id: instance.id,
-                        instance_name: instance.name,
-                        shared_instance_id,
-                        shared_version: version.into(),
-                        start_after: restart,
-                        force,
-                    };
-                    let replaced =
-                        content_rows::set_pending(&state.db, &id, &pending)
-                            .await?;
-                    forget_pack(&state, replaced).await;
-                    drop_own_share(&state, &id).await?;
-                    if restart {
-                        match state.servers.stop(&id).await {
-                            // It stopped on its own while the version was fetched.
-                            Err(ServerError::NotRunning) => {}
-                            result => result?,
-                        }
-                    }
-                    Ok::<_, content::Error>(())
-                }
-                .await;
-                match result {
-                    // The server may have stopped while the version was fetched.
-                    Ok(()) => apply_pending(state, id).await,
-                    Err(error) => {
-                        tracing::warn!(server = %id, %error, "could not take a pushed version");
-                        let _ = content_rows::set_pack_error(
-                            &state.db,
-                            &id,
-                            Some(&format!("{error:#}")),
-                        )
-                        .await;
-                    }
-                }
-            });
-        }
-        Err(error) => return Err(error.into()),
-    }
-    Ok(())
-}
-
-/// Let go of the server's own share once it follows an instance, since a server never has two
-/// shares. Called only after the link is recorded, so a failed link keeps the share and its
-/// players.
-async fn drop_own_share(state: &AppState, id: &str) -> sqlx::Result<()> {
-    let mut tx = state.db.begin().await?;
-    super::share::owe_share_deletion(&mut tx, id).await?;
-    tx.commit().await?;
-    state.access.owed.notify_one();
-    Ok(())
-}
-
-/// Apply the version waiting for a server, when one waits and the server is stopped. Starts the
-/// server again afterwards when the push asked for a restart.
-/// Another change to the server's content is waited for, so it never costs the version.
-pub async fn apply_pending(state: Arc<AppState>, id: String) {
-    let id = id.as_str();
-    let busy = state.content.busy_wait(id).await;
-    let Ok(Some(pending)) = content_rows::get_pending(&state.db, id).await
-    else {
-        return;
-    };
-    let Ok(hold) = state.servers.hold(id) else {
-        return;
-    };
-    if content_rows::clear_pending(&state.db, id).await.is_err() {
-        return;
-    }
-    let (start_after, force) = (pending.start_after, pending.force);
-    let access = state.access.clone();
-    let source = PackSource::Stored {
-        sha1: pending.sha1,
-        instance: Some(SharedInstanceLink {
-            instance_id: pending.instance_id,
-            instance_name: pending.instance_name,
-            shared_instance_id: pending.shared_instance_id,
-            version: pending.shared_version,
-        }),
-    };
-    state.content.spawn(
-        hold,
+    install_instance::install_instance(
+        &state.content,
+        Arc::clone(&state.access.owed),
+        id,
         busy,
-        Installing::Modpack,
-        move |content, hold, progress| async move {
-            let result = content_install::pack(
-                &content, &hold, &progress, source, None, force,
-            )
-            .await;
-            // Another instance may have dropped the players of the one it followed.
-            access.owed.notify_one();
-            if start_after {
-                // Back up either way: a failed update changes nothing it could not finish.
-                let id = hold.id().to_owned();
-                drop(hold);
-                if let Err(error) = content.servers.start(&id).await {
-                    tracing::warn!(server = %id, %error, "could not start the server after its update");
-                }
-            }
-            result
+        backend,
+        version,
+        InstanceInstall {
+            instance_id: instance.id,
+            instance_name: instance.name,
+            shared_instance_id,
+            properties,
+            restart,
+            force,
         },
-    );
-}
-
-/// Delete a pack file nothing uses any more, such as a waiting version a newer push replaced.
-async fn forget_pack(state: &AppState, sha1: Option<String>) {
-    let Some(sha1) = sha1 else { return };
-    if let Ok(false) = content_rows::pack_in_use(&state.db, &sha1).await {
-        let dirs = SharedDirs::new(state.servers.paths().root());
-        let _ = tokio::fs::remove_file(dirs.pack(&sha1)).await;
-    }
-}
-
-/// Apply pushed versions as their servers stop, for as long as Core runs.
-pub async fn apply_pending_on_stop(state: Arc<AppState>) {
-    use tokio::sync::broadcast::error::RecvError;
-
-    let mut events = state.servers.events.subscribe();
-    // Versions pushed before Core last stopped, to servers that are stopped now.
-    for id in content_rows::servers_pending(&state.db)
-        .await
-        .unwrap_or_default()
-    {
-        tokio::spawn(apply_pending(Arc::clone(&state), id));
-    }
-    loop {
-        match events.recv().await {
-            Ok(crate::servers::Lifecycle::Ended(id)) => {
-                tokio::spawn(apply_pending(Arc::clone(&state), id));
-            }
-            Ok(_) | Err(RecvError::Lagged(_)) => {}
-            Err(RecvError::Closed) => return,
-        }
-    }
+    )
+    .await?;
+    Ok(())
 }
 
 /// `POST .../content/repair`: check every file of the loader and the pack again, put back pack

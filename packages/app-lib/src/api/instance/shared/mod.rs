@@ -18,14 +18,12 @@ use crate::util::fetch::{
 use anyhow::{Context, bail};
 use chrono::{DateTime, Utc};
 use modrinth_content_management::{
-    Change, CommonExternalFilePolicy, ConfigurationDiff,
-    ContentSetConfiguration, ContentSetDiffEntry, ContentSetDiffKind,
-    ContentSetDiffOptions, ContentSetSnapshot, ExternalFileKey,
-    LoaderReference, diff_configuration, diff_content_sets,
+    CommonExternalFilePolicy, ContentSetConfiguration, ExternalFileKey,
+    LoaderReference,
 };
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::collections::{HashMap, HashSet};
 use std::sync::{LazyLock, RwLock};
 

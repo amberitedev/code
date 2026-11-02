@@ -8,7 +8,6 @@ use crate::self_hosted::pool;
 use async_walkdir::{Filtering, WalkDir};
 use futures::{StreamExt, TryStreamExt};
 use sharing_client::push;
-use sharing_client::versions::VersionContent;
 
 #[tracing::instrument]
 pub async fn unpublish_shared_instance(instance_id: &str) -> crate::Result<()> {
@@ -227,16 +226,12 @@ pub(super) fn shared_instance_loader_version(
     (!loader_version.is_empty()).then_some(loader_version)
 }
 
-/// The shared content installed now: Modrinth version ids, external files, and the SHA-1 of each
-/// external file present on disk, by name and file type.
+/// The shared content installed now: Modrinth version ids, and the external files with the
+/// SHA-1 of each.
 pub(super) async fn current_shared_content(
     metadata: &crate::state::InstanceMetadata,
     state: &State,
-) -> crate::Result<(
-    Vec<String>,
-    BTreeSet<ExternalFileKey>,
-    HashMap<(String, String), String>,
-)> {
+) -> crate::Result<(Vec<String>, BTreeMap<ExternalFileKey, Option<String>>)> {
     let entries = crate::state::instances::adapters::sqlite::content_rows::get_content_entries(
 		&metadata.applied_content_set.id, &state.pool,
 	).await?;
@@ -264,8 +259,7 @@ pub(super) async fn current_shared_content(
     .map(|file| (file.hash.clone(), file))
     .collect::<HashMap<_, _>>();
     let mut version_ids = Vec::new();
-    let mut external_files = BTreeSet::new();
-    let mut external_file_sha1s = HashMap::new();
+    let mut external_files = BTreeMap::new();
     for entry in entries {
         if !entry.source_kind.is_shared_instance_managed() || !entry.enabled {
             continue;
@@ -289,19 +283,17 @@ pub(super) async fn current_shared_content(
         if let Some(version_id) = version_id {
             version_ids.push(version_id);
         } else {
-            let path = enabled_file_name(&file.file_name);
-            external_file_sha1s.insert(
-                (path.clone(), file_type(entry.project_type)),
-                file.sha1.clone(),
+            external_files.insert(
+                ExternalFileKey {
+                    content_type: entry.project_type.into(),
+                    path: enabled_file_name(&file.file_name),
+                },
+                Some(file.sha1.clone()),
             );
-            external_files.insert(ExternalFileKey {
-                content_type: entry.project_type.into(),
-                path,
-            });
         }
     }
     dedupe_strings(&mut version_ids);
-    Ok((version_ids, external_files, external_file_sha1s))
+    Ok((version_ids, external_files))
 }
 
 pub(super) struct CurrentPublishSnapshot {
@@ -389,8 +381,8 @@ pub(super) async fn collect_publish_snapshot(
                     removed_files.push(removed);
                 }
             }
-        } else if !enabled_paths.contains(file.relative_path.as_str())
-            && let Some((parent, filename)) = file.relative_path.split_once('/')
+        } else if !enabled_paths.contains(file.path.as_str())
+            && let Some((parent, filename)) = file.path.split_once('/')
         {
             removed_files.push(RemovedFile::Path {
                 parent: parent.to_string(),
@@ -499,40 +491,6 @@ pub(super) async fn collect_publish_snapshot(
         removed_files,
         effective_version_ids,
     })
-}
-
-pub(super) async fn shared_versions_by_id(
-    version_ids: &[String],
-    allow_missing: bool,
-    state: &State,
-) -> crate::Result<HashMap<String, crate::state::Version>> {
-    let version_id_refs =
-        version_ids.iter().map(String::as_str).collect::<Vec<_>>();
-    let versions = CachedEntry::get_version_many(
-        &version_id_refs,
-        Some(CacheBehaviour::Bypass),
-        &state.pool,
-        &state.api_semaphore,
-    )
-    .await?;
-
-    let fetched_ids = versions
-        .iter()
-        .map(|version| version.id.as_str())
-        .collect::<HashSet<_>>();
-    if !allow_missing
-        && let Some(missing) = version_ids
-            .iter()
-            .find(|id| !fetched_ids.contains(id.as_str()))
-    {
-        bail!(crate::ErrorKind::InputError(format!(
-            "shared content version {missing} was not found"
-        )));
-    }
-    Ok(versions
-        .into_iter()
-        .map(|version| (version.id.clone(), version))
-        .collect())
 }
 
 pub(super) async fn shared_project_names(
@@ -785,18 +743,19 @@ pub(super) async fn publish_current_content(
             path: source.path().to_path_buf(),
         })
         .collect::<Vec<_>>();
-    let content = VersionContent {
-        modrinth_ids: snapshot.version_ids,
-        modpack_id,
-        removed_files: snapshot.removed_files,
-        game_version: metadata.applied_content_set.game_version.clone(),
-        loader: metadata.applied_content_set.loader.as_str().to_owned(),
-        loader_version: metadata
-            .applied_content_set
-            .loader_version
-            .clone()
-            .unwrap_or_default(),
-    };
+    let (content, files) = push::build_version(
+        INSTANCE_SCOPE,
+        push::VersionInput {
+            modrinth_ids: snapshot.version_ids,
+            modpack_id,
+            removed_files: snapshot.removed_files,
+            game_version: metadata.applied_content_set.game_version.clone(),
+            loader: metadata.applied_content_set.loader.as_str().to_owned(),
+            loader_version: metadata.applied_content_set.loader_version.clone(),
+            files,
+        },
+    )
+    .map_err(|error| crate::ErrorKind::InputError(error.to_string()))?;
 
     let locate = locate_config(
         state

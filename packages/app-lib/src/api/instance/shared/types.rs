@@ -1,4 +1,7 @@
 use super::*;
+pub use sharing_client::diff::{
+    SharedInstanceUpdateDiff, SharedInstanceUpdateDiffType,
+};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SharedInstanceUsers {
@@ -157,24 +160,6 @@ pub struct SharedInstanceInviteCreator {
     pub avatar: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SharedInstanceUpdateDiff {
-    #[serde(rename = "type")]
-    pub type_: SharedInstanceUpdateDiffType,
-    pub project_id: Option<String>,
-    pub project_name: Option<String>,
-    pub file_name: Option<String>,
-    pub current_version_name: Option<String>,
-    pub new_version_name: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub config_file_count: Option<usize>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub config_file_names: Vec<String>,
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub disabled: bool,
-}
-
 /// One kept version as its version history shows it: what it runs on, how much it holds, and
 /// what it changed over the version before it.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -188,22 +173,4 @@ pub struct SharedInstanceVersionDetails {
     pub diffs: Vec<SharedInstanceUpdateDiff>,
     /// Paths of the config files it changed, or of all it holds without a base.
     pub config_files: Vec<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SharedInstanceUpdateDiffType {
-    Added,
-    Removed,
-    Updated,
-    ModpackLinked,
-    ModpackUpdated,
-    ModpackUnlinked,
-    GameVersionUpdated,
-    LoaderUpdated,
-    ConfigFilesUpdated,
-}
-
-pub(super) fn is_false(value: &bool) -> bool {
-    !*value
 }

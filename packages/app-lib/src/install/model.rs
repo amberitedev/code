@@ -260,6 +260,9 @@ pub struct SharedInstanceInstallData {
     pub removed_files: Vec<RemovedFile>,
     #[serde(default)]
     pub external_files: Vec<SharedInstanceExternalFileData>,
+    /// Config files the applied version shared that this one no longer does.
+    #[serde(default)]
+    pub removed_config_files: Vec<SharedInstanceRemovedConfig>,
     pub modpack: Option<SharedInstanceInstallModpack>,
     pub game_version: String,
     pub loader: ModLoader,
@@ -281,6 +284,15 @@ pub struct SharedInstanceExternalFileData {
     /// Set when the file lives in the shared file pool, which replaces `url`.
     #[serde(default)]
     pub(crate) pool: Option<crate::self_hosted::pool::PoolFile>,
+}
+
+/// A config file that left the share, as the member's applied version sent it. The update
+/// deletes the member's copy while it is still exactly this file, and keeps one they edited.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct SharedInstanceRemovedConfig {
+    pub file_name: String,
+    pub file_size: u64,
+    pub sha1: String,
 }
 
 /// A file of the shared modpack members do not get, as the share version names it.

@@ -8,8 +8,8 @@
 use ts_rs::{Config, TS};
 
 use super::{
-    access, activity, backend, console, content, error, eula, events, insight,
-    logs, pairing, performance, sessions, startup, storage, update,
+    access, activity, backend, console, content, error, eula, insight, logs,
+    pairing, performance, sessions, share, startup, storage, update,
 };
 
 const PATH: &str = concat!(
@@ -47,8 +47,8 @@ fn declarations() -> String {
         backend::AccessDirectory::decl(&cfg),
         backend::Grant::decl(&cfg),
         backend::Remove::decl(&cfg),
-        backend::ForgetPlayers::decl(&cfg),
-        backend::OwedCall::decl(&cfg),
+        crate::access::owed::ForgetPlayers::decl(&cfg),
+        crate::access::owed::OwedCall::decl(&cfg),
         backend::StorageReport::decl(&cfg),
         sharing_storage::local::HeldVersion::decl(&cfg),
         sharing_client::pool::PoolCore::decl(&cfg),
@@ -60,7 +60,10 @@ fn declarations() -> String {
         content::Decision::decl(&cfg),
         content::Choice::decl(&cfg),
         startup::JavaPath::decl(&cfg),
-        events::GameVersionChange::decl(&cfg),
+        crate::event::GameVersionChange::decl(&cfg),
+        share::SharedInstancePublishDiff::decl(&cfg),
+        sharing_client::diff::SharedInstanceUpdateDiff::decl(&cfg),
+        sharing_client::diff::SharedInstanceUpdateDiffType::decl(&cfg),
         update::UpdateStatus::decl(&cfg),
         crate::update::versions::FailedTrial::decl(&cfg),
         crate::update::release::Channel::decl(&cfg),

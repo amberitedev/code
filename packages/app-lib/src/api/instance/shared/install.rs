@@ -1,5 +1,5 @@
 use super::client::*;
-use super::content::{remote_shared_config_files, remote_shared_content};
+use super::content::{remote_config_update, remote_shared_content};
 use super::diff::*;
 use super::icons::shared_instance_server_icon;
 use super::publish::*;
@@ -179,15 +179,16 @@ pub(super) async fn shared_instance_install_preview_from_version(
         name => name.to_string(),
     };
     let modpack = shared_instance_install_modpack(&version, state).await?;
-    let (content_version_ids, effective_external_files) =
-        remote_shared_content(&version, state).await?;
+    let content = remote_shared_content(&version, state).await?;
+    let content_version_ids = content.version_ids;
     let modpack_version_id =
         modpack.as_ref().map(|modpack| modpack.version_id.clone());
     let icon_url = modpack
         .as_ref()
         .and_then(|modpack| modpack.icon_url.clone());
-    let external_files = effective_external_files
-        .into_iter()
+    let external_files = content
+        .external_files
+        .into_keys()
         .map(|file| SharedInstanceExternalFilePreview {
             file_name: file.path,
             file_type: file.content_type.as_str().to_string(),
@@ -266,15 +267,24 @@ async fn get_shared_instance_update_preview_inner(
         .applied_version
         .is_none_or(|current| current < version.version);
     let diffs = if newer {
-        let config_files = remote_shared_config_files(
+        let configs = remote_config_update(
             &attachment.id,
             config_base_version(&attachment, &version),
             &version,
             &state,
         )
         .await?;
-        shared_instance_update_diffs(&metadata, &version, &config_files, &state)
-            .await?
+        let removed =
+            unedited_configs(&metadata.instance.id, &configs.left, &state)
+                .await?;
+        shared_instance_update_diffs(
+            &metadata,
+            &version,
+            &configs.write,
+            &removed,
+            &state,
+        )
+        .await?
     } else {
         Vec::new()
     };
@@ -653,7 +663,7 @@ pub(super) async fn shared_instance_install_data(
             "shared instance version is not ready to install".to_string(),
         ));
     }
-    let config_files = remote_shared_config_files(
+    let configs = remote_config_update(
         shared_instance_id,
         applied_version,
         &version,
@@ -703,20 +713,13 @@ pub(super) async fn shared_instance_install_data(
     } else {
         Vec::new()
     };
+    // The modpack's install places its own files, so only what the version adds is installed.
+    let modrinth_ids =
+        sharing_client::install::version_files(&version, inherited)
+            .modrinth_ids;
     let access = version.pool_access(shared_instance_id);
     let (loader, loader_version) = instance_loader(&version);
     let content = version.content;
-    let modrinth_ids = content
-        .modrinth_ids
-        .into_iter()
-        .filter(|id| {
-            Some(id.as_str()) != modpack_version_id
-                && !inherited.iter().any(|file| {
-                    file.version_id.as_deref() == Some(id.as_str())
-                        && !file.is_removed(&content.removed_files)
-                })
-        })
-        .collect();
 
     Ok(SharedInstanceInstallData {
         linked_server: remote.linked_server,
@@ -734,11 +737,20 @@ pub(super) async fn shared_instance_install_data(
             .external_files
             .into_iter()
             .filter(|file| file.file_type != CONFIG_FILE_TYPE)
-            .chain(config_files)
+            .chain(configs.write)
             .map(|file| {
                 shared_instance_external_file_data(file, access.as_ref())
             })
             .collect::<crate::Result<Vec<_>>>()?,
+        removed_config_files: configs
+            .left
+            .into_iter()
+            .map(|file| crate::install::SharedInstanceRemovedConfig {
+                file_name: file.file_name,
+                file_size: file.file_size,
+                sha1: file.sha1,
+            })
+            .collect(),
         modpack,
         game_version: content.game_version,
         loader,

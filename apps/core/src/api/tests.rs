@@ -1730,10 +1730,8 @@ async fn the_owner_changes_storage_and_the_store_is_forwarded_to() {
 
 #[tokio::test]
 async fn a_failed_install_tells_the_app_why() {
-    use super::{
-        content::Installing,
-        events::{InstallProgressKey, WsEvent},
-    };
+    use super::content::Installing;
+    use crate::event::{InstallProgressKey, WsEvent};
     let core = core().await;
     let content = &core.state.content;
     let mut events = content.events.subscribe();

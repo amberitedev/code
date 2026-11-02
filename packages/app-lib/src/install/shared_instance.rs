@@ -373,6 +373,7 @@ async fn apply_shared_instance_update_inner(
     )
     .await?
     .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
+    remove_left_configs(instance_id, data, state).await?;
     let plan = SharedInstanceApplyPlan::build(&metadata, data, state).await?;
 
     if !plan.configuration_changed && data.linked_server.is_some() {
@@ -557,6 +558,42 @@ async fn apply_shared_instance_changes(
     Ok(())
 }
 
+/// Delete the config files that left the share where the member's copy is still what the share
+/// sent. One the member edited stays theirs.
+async fn remove_left_configs(
+    instance_id: &str,
+    data: &SharedInstanceInstallData,
+    state: &State,
+) -> crate::Result<()> {
+    if data.removed_config_files.is_empty() {
+        return Ok(());
+    }
+    let writer =
+        crate::api::instance::InstanceFileWriter::new(state, instance_id)
+            .await?;
+    for file in &data.removed_config_files {
+        let unedited = instance_has_shared_file(
+            &writer,
+            state,
+            &file.file_name,
+            file.file_size,
+            Some(&file.sha1),
+        )
+        .await
+        .unwrap_or(false);
+        if unedited {
+            let path = writer.destination(state, &file.file_name).await?;
+            match tokio::fs::remove_file(&path).await {
+                Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                    return Err(error.into());
+                }
+                _ => {}
+            }
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn shared_instance_update_requires_full_apply(
     metadata: &crate::state::InstanceMetadata,
     data: &SharedInstanceInstallData,
@@ -688,7 +725,7 @@ async fn shared_modpack_toggles(
     for inherited in inherited {
         let overridden = data.external_files.iter().any(|file| {
             ProjectType::from_name(&file.file_type).is_some_and(|kind| {
-                inherited.relative_path
+                inherited.path
                     == format!("{}/{}", kind.get_folder(), file.file_name)
             })
         });
@@ -703,7 +740,7 @@ async fn shared_modpack_toggles(
                 let file =
                     entry.file_id.as_ref().and_then(|id| files.get(id))?;
                 (file.relative_path.trim_end_matches(".disabled")
-                    == inherited.relative_path
+                    == inherited.path
                     && inherited.sha1.as_deref().map_or_else(
                         || {
                             inherited.version_id.is_none()

@@ -4,8 +4,8 @@
 //! confirms them.
 //!
 //! The App pushes an instance's share with [`push`], and a Core pushes a server's share with
-//! the same call. What goes into a version is the caller's: it picks the files and passes the
-//! upstream content fields (Modrinth ids, loader, and so on) as they are.
+//! the same call. Each caller reads what goes into a version from its own state and turns it
+//! into the content and files with [`build_version`].
 //!
 //! Configs are picked per push, and a version lists every config still shared: one the latest
 //! version carries and this push does not send again is kept while the scope still carries it,
@@ -15,8 +15,10 @@
 
 mod hash;
 mod upload;
+mod version;
 
 pub use hash::HashedFile;
+pub use version::{BuildError, VersionInput, build_version};
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};

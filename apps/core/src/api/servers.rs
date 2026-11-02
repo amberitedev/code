@@ -30,7 +30,9 @@ use crate::{
     servers::{Phase, ServerError, launch},
     state::servers::{
         adapters::sqlite::{content_rows, server_rows},
-        commands::{install_loader, list_content::linked_pack_state},
+        commands::{
+            drop_own_share, install_loader, list_content::linked_pack_state,
+        },
     },
 };
 
@@ -368,10 +370,9 @@ pub struct WorldContentInfo {
     /// The share the server reads: its instance's, when it follows one, else its own once it is
     /// shared (`api::share`). Only its own is written from the server.
     pub shared_instance_id: Option<String>,
-    /// Not tracked yet: Core does not compare the server to its share until a push asks.
+    /// The server has changes its own share's latest version does not, so a push would change
+    /// something. Always false for a server that follows an instance: it has no share of its own.
     pub shared_instance_needs_update: bool,
-    /// A push changes nothing the server runs, so it never needs a restart.
-    pub requires_restart: bool,
     pub modloader: String,
     pub modloader_version: String,
     pub game_version: String,
@@ -769,7 +770,7 @@ async fn remove_server(
     id: &str,
 ) -> Result<Vec<String>, ApiError> {
     let mut tx = state.db.begin().await?;
-    super::share::owe_share_deletion(&mut tx, id).await?;
+    drop_own_share::owe_share_deletion(&mut tx, id).await?;
     let members: Vec<String> =
         sqlx::query_scalar("SELECT user_id FROM access WHERE server_id = ?")
             .bind(id)
@@ -782,8 +783,8 @@ async fn remove_server(
     // Its players, if it had any, lose what it shared with them.
     crate::access::sync::owe(
         &mut tx,
-        &super::backend::OwedCall::ForgetPlayers(
-            super::backend::ForgetPlayers {
+        &crate::access::owed::OwedCall::ForgetPlayers(
+            crate::access::owed::ForgetPlayers {
                 server_id: id.into(),
                 share_id: None,
             },
@@ -844,15 +845,20 @@ async fn server_full(
     let linked = content_rows::get_pack(&state.db, &row.id)
         .await?
         .and_then(|pack| pack.share.clone());
-    let shared_instance_id = match linked {
-        Some(linked) => Some(linked.shared_instance_id),
-        None => server_rows::share_id(&state.db, &row.id).await?,
+    let (shared_instance_id, needs_update) = match linked {
+        Some(linked) => (Some(linked.shared_instance_id), false),
+        None => match server_rows::share_id(&state.db, &row.id).await? {
+            Some(share_id) => (
+                Some(share_id),
+                super::share::needs_update(state, &row.id).await,
+            ),
+            None => (None, false),
+        },
     };
     let content = match (&row.loader, &row.game_version) {
         (Some(loader), Some(game_version)) => Some(WorldContentInfo {
             shared_instance_id,
-            shared_instance_needs_update: false,
-            requires_restart: false,
+            shared_instance_needs_update: needs_update,
             modloader: loader.clone(),
             modloader_version: row.loader_version.clone().unwrap_or_default(),
             game_version: game_version.clone(),
