@@ -874,13 +874,25 @@ pub async fn unarchive(
             .map(|path| format!("/{path}"))
             .collect();
         if !query.dry {
-            archive::extract(&folder, &mut zip, room, |entry| {
-                let path = destination(entry);
-                let exists = folder.exists(&path);
-                let owned = folder::is_server_owned(&path, &level);
-                (!exists || (query.overwrite && !owned)).then_some(path)
-            })
-            .map_err(crate::state::servers::Error::from)?;
+            // Paths nothing was at before, so a partway failure can take them away again. Files
+            // it replaced stay replaced: what they held is already gone.
+            let mut created = Vec::new();
+            let extracted =
+                archive::extract(&folder, &mut zip, room, |entry| {
+                    let path = destination(entry);
+                    let exists = folder.exists(&path);
+                    let owned = folder::is_server_owned(&path, &level);
+                    if !exists {
+                        created.push(path.clone());
+                    }
+                    (!exists || (query.overwrite && !owned)).then_some(path)
+                });
+            if let Err(error) = extracted {
+                for path in created.iter().rev() {
+                    let _ = folder.remove(path);
+                }
+                return Err(crate::state::servers::Error::from(error).into());
+            }
         }
         Ok(ExtractResult {
             modpack_name,

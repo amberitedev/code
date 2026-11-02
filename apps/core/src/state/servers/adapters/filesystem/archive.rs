@@ -1,9 +1,10 @@
 //! Unpacking zip archives into a server folder: pack overrides, uploaded worlds and folders, and
 //! the file manager's unarchive. Every entry is checked before anything is written; one entry
-//! with `..`, a root, a link, or a name Windows would change refuses the whole archive. What is
-//! unpacked is counted in the bytes actually inflated, not what the archive claims: an entry may
-//! grow at most `MAX_COMPRESSION_RATIO` times its packed size, and everything unpacked must fit
-//! in the disk's free space less what Core keeps free ([`room`]).
+//! with `..`, a root, a link, or a name Windows would change refuses the whole archive, and so do
+//! listed sizes that do not fit in the disk's free space less what Core keeps free ([`room`]).
+//! Listed sizes can lie, so what is unpacked is also counted in the bytes actually inflated: an
+//! entry may grow at most `MAX_COMPRESSION_RATIO` times its packed size, and everything unpacked
+//! must fit in the room.
 
 use std::io::{self, Read, Seek};
 
@@ -118,21 +119,31 @@ pub fn entries<R: Read + Seek>(
 }
 
 /// Unpack every entry `place` maps to a path into `folder`, and return what was written, at most
-/// `room` bytes in all (see [`room`]). `place` gets each checked entry path and returns where it
-/// goes, or `None` to skip it. Refuses the whole archive before writing anything if an entry is
-/// bad.
+/// `room` bytes in all (see [`room`]). `place` gets each checked entry path, once and before
+/// anything is written, and returns where it goes, or `None` to skip it. Refuses the whole archive
+/// before writing anything if an entry is bad or the entries' listed sizes do not fit in `room`.
+/// Listed sizes can lie, so what is inflated is still counted while writing, and an archive that
+/// lied can fail partway with its earlier entries written.
 pub fn extract<R: Read + Seek>(
     folder: &Folder,
     archive: &mut zip::ZipArchive<R>,
     mut room: u64,
     mut place: impl FnMut(&str) -> Option<String>,
 ) -> Result<Vec<Placed>, ArchiveError> {
-    let entries = entries(archive)?;
-    let mut placed = Vec::new();
-    for (index, (path, is_dir)) in entries.into_iter().enumerate() {
+    let mut targets = Vec::new();
+    let mut listed = 0u64;
+    for (index, (path, is_dir)) in entries(archive)?.into_iter().enumerate() {
         let Some(target) = place(&path) else {
             continue;
         };
+        if !is_dir {
+            listed = listed.saturating_add(archive.by_index_raw(index)?.size());
+        }
+        targets.push((index, path, target, is_dir));
+    }
+    NoRoom::check("the archive", listed, room)?;
+    let mut placed = Vec::new();
+    for (index, path, target, is_dir) in targets {
         if is_dir {
             folder.create_dir_all(&target)?;
             continue;
@@ -347,25 +358,35 @@ mod tests {
     }
 
     #[test]
-    fn an_entry_past_the_room_leaves_the_file_it_would_replace() {
+    fn an_archive_listed_past_the_room_is_refused_with_nothing_written() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("config")).unwrap();
         std::fs::write(dir.path().join("config/a.toml"), "original").unwrap();
         let folder = Folder::open(dir.path()).unwrap();
+        // Each entry fits on its own; together they do not.
         let mut zip = archive(|writer| {
-            file(writer, "config/a.toml", &[b'x'; 20]);
+            file(writer, "config/b.toml", &[b'b'; 10]);
+            file(writer, "config/a.toml", &[b'a'; 10]);
         });
-        let error = extract(&folder, &mut zip, 10, anywhere).unwrap_err();
-        assert!(matches!(error, ArchiveError::NoRoom(_)), "{error}");
-        assert_eq!(
-            error.to_string(),
-            "There is not enough disk space on the Core for the archive entry config/a.toml. The Core keeps 256 MB free."
+        let error = extract(&folder, &mut zip, 15, anywhere).unwrap_err();
+        assert!(
+            matches!(
+                error,
+                ArchiveError::NoRoom(NoRoom {
+                    needed: Some(20),
+                    room: 15,
+                    ..
+                })
+            ),
+            "{error}"
         );
+        assert!(error.to_string().starts_with(
+            "There is not enough disk space on the Core for the archive: it needs about"
+        ));
         assert_eq!(
             std::fs::read_to_string(dir.path().join("config/a.toml")).unwrap(),
             "original"
         );
-        // Nor is its half-written copy left beside it.
         assert_eq!(
             std::fs::read_dir(dir.path().join("config"))
                 .unwrap()
