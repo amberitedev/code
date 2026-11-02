@@ -56,7 +56,7 @@ fn declarations() -> String {
         backend::PullOrder::decl(&cfg),
         content::EditedFiles::decl(&cfg),
         content::EditedFile::decl(&cfg),
-        content::PendingChange::decl(&cfg),
+        crate::state::servers::model::PendingChange::decl(&cfg),
         content::Decision::decl(&cfg),
         content::Choice::decl(&cfg),
         startup::JavaPath::decl(&cfg),

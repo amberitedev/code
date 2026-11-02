@@ -32,8 +32,6 @@ minecraft-meta-manifest = { workspace = true }
 minisign-verify = "0.2.4"
 modrinth-content-management = { workspace = true }
 netdev = "0.46.3"
-# The App's rule for a safe file name, which a shared version's removed paths must follow.
-path-util = { workspace = true }
 rcgen = "0.14.7"
 reqwest = { workspace = true, features = ["json", "rustls-no-provider", "stream"] }
 # Already in the build through rustls: Ed25519 for tickets and random session tokens.

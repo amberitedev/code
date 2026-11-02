@@ -4,6 +4,10 @@ edition.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 
+# cargo-shear cannot see the app-lib files bedrock compiles in place with #[path], which use these.
+[package.metadata.cargo-shear]
+ignored = ["tokio-util"]
+
 # What the App and Copal both need that is not sharing: the content schema borrowed from app-lib,
 # clones of upstream code tangled with app-lib's State (`ports.toml`), `.mrpack` and Modrinth
 # content rules, connections to Cores, disk space, and limits. Imports go one way:
