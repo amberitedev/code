@@ -89,6 +89,7 @@ mod tests {
             date_published: chrono::NaiveDate::from_ymd_opt(2026, 1, day)
                 .and_then(|date| date.and_hms_opt(0, 0, 0))
                 .map(|time| time.and_utc()),
+            environment: None,
         }
     }
 

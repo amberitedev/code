@@ -10,6 +10,7 @@ pub mod client_only_files;
 pub mod content_mutation;
 pub mod drop_own_share;
 pub mod edited_files;
+pub mod export_mrpack;
 pub mod forget_pack;
 pub mod install_instance;
 pub mod install_loader;

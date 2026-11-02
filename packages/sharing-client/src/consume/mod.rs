@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::future::Future;
 
 use bedrock::content::{
-    Hashes, Index, IndexFile, SidedVersion, loader_dependency, mrpack_env,
+    Hashes, Index, IndexFile, Version, loader_dependency, mrpack_env,
 };
 use bedrock::state::ModLoader;
 use reqwest::StatusCode;
@@ -43,7 +43,7 @@ pub trait Modrinth {
     fn versions(
         &self,
         ids: &[String],
-    ) -> impl Future<Output = Result<Vec<SidedVersion>, Self::Error>> + Send;
+    ) -> impl Future<Output = Result<Vec<Version>, Self::Error>> + Send;
 
     /// Every file the modpack version `id` places, by path, with the Modrinth version of each
     /// one Modrinth knows. The server's pack install decides which of them it runs.

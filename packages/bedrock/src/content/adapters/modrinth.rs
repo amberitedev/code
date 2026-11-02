@@ -11,7 +11,7 @@ use serde::{Serialize, de::DeserializeOwned};
 
 use crate::content::domain::channel::version_type_fallbacks;
 use crate::content::model::modrinth::{
-    Project, SidedVersion, Version, VersionEnvironment,
+    Project, Version, VersionEnvironment,
 };
 
 const API: &str = "https://api.modrinth.com/v2";
@@ -157,22 +157,12 @@ impl Modrinth {
             .await
     }
 
+    /// The versions among `ids` that Modrinth has, from v3 of the API so each says where it
+    /// runs.
     pub async fn versions_by_id(
         &self,
         ids: &[String],
     ) -> Result<Vec<Version>, ModrinthError> {
-        if ids.is_empty() {
-            return Ok(Vec::new());
-        }
-        self.get(format!("{API}/versions?ids={}", json_query(ids)))
-            .await
-    }
-
-    /// As [`Self::versions_by_id`], with where each version runs.
-    pub async fn sided_versions(
-        &self,
-        ids: &[String],
-    ) -> Result<Vec<SidedVersion>, ModrinthError> {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
@@ -262,7 +252,7 @@ impl Modrinth {
             .map(|version| version.id.clone())
             .collect();
         let environments: HashMap<String, Option<VersionEnvironment>> = self
-            .sided_versions(&ids)
+            .versions_by_id(&ids)
             .await?
             .into_iter()
             .map(|version| (version.id, version.environment))

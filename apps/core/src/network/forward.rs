@@ -66,6 +66,9 @@ pub struct Network {
     on: bool,
     routing: tokio::sync::Mutex<Routing>,
     reports: std::sync::Mutex<HashMap<String, Report>>,
+    /// Where players join this Core's servers: its public address, or its own network's when it
+    /// has none. Backend sync keeps it current (`access::sync`).
+    join_ip: std::sync::Mutex<Option<IpAddr>>,
 }
 
 #[derive(Default)]
@@ -129,6 +132,7 @@ impl Network {
             on,
             routing: tokio::sync::Mutex::default(),
             reports: std::sync::Mutex::default(),
+            join_ip: std::sync::Mutex::default(),
         }
     }
 
@@ -141,6 +145,16 @@ impl Network {
     /// The last check of a server's port, or of Core's with [`CORE`].
     pub fn report(&self, key: &str) -> Option<Report> {
         self.reports.lock().expect("not poisoned").get(key).cloned()
+    }
+
+    /// The IP players join this Core's servers at, with each server's game port. `None` until
+    /// backend sync has looked it up once.
+    pub fn join_ip(&self) -> Option<IpAddr> {
+        *self.join_ip.lock().expect("not poisoned")
+    }
+
+    pub fn set_join_ip(&self, ip: IpAddr) {
+        *self.join_ip.lock().expect("not poisoned") = Some(ip);
     }
 
     /// Forward and check Core's API and every running server, then follow servers starting

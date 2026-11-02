@@ -24,7 +24,7 @@ use tracing::{info, warn};
 use super::{Access, Changed, now, owed::OwedCall, pairing};
 use crate::{
     api::backend::{AccessDirectory, StateReport, StorageAnswer},
-    network::public_ip,
+    network::{forward::Network, public_ip},
     storage::Storage,
 };
 
@@ -44,6 +44,8 @@ pub struct Sync {
     pub bind: IpAddr,
     pub access: Arc<Access>,
     pub storage: Arc<Storage>,
+    /// Told the join IP whenever the addresses are looked up.
+    pub network: Arc<Network>,
 }
 
 /// Owe the backend `call`, in the transaction of the change that needs it. Wake sync with
@@ -191,7 +193,7 @@ impl Sync {
         } else {
             self.bind
         };
-        let public = if local.is_loopback() {
+        let found = if local.is_loopback() {
             None
         } else {
             public_ip::find(match local {
@@ -199,9 +201,16 @@ impl Sync {
                 IpAddr::V6(_) => None,
             })
             .await
-            .map(|ip| self.url(ip))
-            .or_else(|| previous.map(str::to_owned))
         };
+        // Players join at the public address; a Core with none is joined on its own network.
+        match found {
+            Some(ip) => self.network.set_join_ip(ip),
+            None if previous.is_none() => self.network.set_join_ip(local),
+            None => {}
+        }
+        let public = found
+            .map(|ip| self.url(ip))
+            .or_else(|| previous.map(str::to_owned));
         Addresses {
             local: self.url(local),
             public,
@@ -603,6 +612,7 @@ mod tests {
         .unwrap();
         let dir = tempfile::tempdir().unwrap();
         Sync {
+            network: Arc::new(Network::off(db.clone())),
             storage: Arc::new(Storage::new(
                 db.clone(),
                 crate::daemon::paths::Paths::new(dir.path()),

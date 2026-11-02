@@ -1,5 +1,4 @@
 import { AbstractModule } from '../../../core/abstract-module'
-import type { DownloadSink } from '../../../types/download'
 import type { RequestOptions } from '../../../types/request'
 import { SharedInstancesApiError } from '../errors'
 import type { SharedInstances } from '../types'
@@ -185,28 +184,6 @@ export class SharedInstancesInstancesV1Module extends AbstractModule {
 				method: 'DELETE',
 				body: { user_ids: [entry.user.id] },
 			},
-		)
-	}
-
-	public async downloadMrpack(instanceId: string, version: number): Promise<Blob> {
-		return this.request(`/instances/${encodeURIComponent(instanceId)}/versions/${version}/mrpack`, {
-			api: 'sharedinstances',
-			version: 1,
-			method: 'GET',
-			responseType: 'blob',
-			timeout: 600_000,
-		})
-	}
-
-	public async downloadMrpackTo(
-		instanceId: string,
-		version: number,
-		sink: DownloadSink,
-	): Promise<void> {
-		return this.client.download(
-			`/instances/${encodeURIComponent(instanceId)}/versions/${version}/mrpack`,
-			{ api: 'sharedinstances', version: 1, method: 'GET' },
-			sink,
 		)
 	}
 }
