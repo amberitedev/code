@@ -798,12 +798,11 @@ pub(super) async fn publish_current_content(
             .unwrap_or_default(),
     };
 
-    let keep = kept_config(
+    let locate = locate_config(
         state
             .directories
             .instances_dir()
             .join(&metadata.instance.path),
-        removed_paths,
     );
     let result = push::push(
         &push_backend()?,
@@ -812,7 +811,11 @@ pub(super) async fn publish_current_content(
         &content,
         server_core,
         files,
-        &keep,
+        push::KeptConfigs {
+            scope: INSTANCE_SCOPE,
+            removed: removed_paths,
+            locate: &locate,
+        },
         &state.directories.caches_dir().join("pool"),
         &mut |event| report_push_event(report, on_progress, event),
     )
@@ -841,11 +844,10 @@ pub(super) async fn publish_current_content(
     }
 }
 
-/// Where the push finds a config the latest version shares: the instance's copy, while the
-/// owner has it and did not stop sharing it in `removed_paths`.
-fn kept_config(
+/// Where the push finds a config the latest version shares: the instance's copy, while it has
+/// one.
+fn locate_config(
     instance_path: std::path::PathBuf,
-    removed_paths: &[String],
 ) -> impl Fn(
     String,
 ) -> futures::future::BoxFuture<
@@ -854,15 +856,9 @@ fn kept_config(
 > + Send
 + Sync
 + use<> {
-    let removed = removed_paths.iter().cloned().collect::<HashSet<_>>();
     move |file_name: String| {
-        let kept = (!removed.contains(&file_name)
-            && INSTANCE_SCOPE.carries(&file_name))
-        .then(|| instance_path.join(&file_name));
+        let path = instance_path.join(file_name);
         Box::pin(async move {
-            let Some(path) = kept else {
-                return Ok(None);
-            };
             Ok(tokio::fs::symlink_metadata(&path)
                 .await
                 .is_ok_and(|metadata| metadata.is_file())

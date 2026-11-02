@@ -8,9 +8,10 @@
 //! upstream content fields (Modrinth ids, loader, and so on) as they are.
 //!
 //! Configs are picked per push, and a version lists every config still shared: one the latest
-//! version carries and this push does not send again is kept while [`KeepConfig`] finds it, so
-//! the owner's local copy is sent again. A config the owner stopped sharing, or no longer has, is
-//! left out of the version and reported with [`PushEvent::Dropped`].
+//! version carries and this push does not send again is kept while the scope still carries it,
+//! the owner did not stop sharing it and [`KeptConfigs::locate`] finds it, so the owner's local
+//! copy is sent again. Any other is left out of the version and reported with
+//! [`PushEvent::Dropped`].
 
 mod hash;
 mod upload;
@@ -29,6 +30,7 @@ use reqwest::StatusCode;
 use crate::backend::{Backend, BackendError, NewVersion, Unavailable};
 use crate::crypto;
 use crate::pool::{StoreClient, StoreError};
+use crate::rules::ShareScope;
 use crate::versions::{ManifestFile, ShareVersion, VersionContent};
 
 /// Files hashed or encrypted at once.
@@ -85,11 +87,21 @@ pub struct PushFile {
 }
 
 /// Where the owner's copy of a config the latest version carries is now: `Some` while the owner
-/// still shares it and has it, so it is sent again from there; `None` to leave it out. The path
-/// must stay readable until the push ends.
-pub type KeepConfig = dyn Fn(String) -> BoxFuture<'static, std::io::Result<Option<PathBuf>>>
+/// has it, so it is sent again from there; `None` when it is gone. The path must stay readable
+/// until the push ends.
+pub type LocateConfig = dyn Fn(String) -> BoxFuture<'static, std::io::Result<Option<PathBuf>>>
     + Send
     + Sync;
+
+/// How a push keeps the configs the latest version carries and it does not send again.
+#[derive(Clone, Copy)]
+pub struct KeptConfigs<'a> {
+    /// What the share may carry; a config outside it is dropped.
+    pub scope: ShareScope,
+    /// Configs the owner stopped sharing with this push, by path.
+    pub removed: &'a [String],
+    pub locate: &'a LocateConfig,
+}
 
 /// How a push is going, for the caller's progress and logs.
 pub enum PushEvent<'a> {
@@ -118,7 +130,7 @@ struct Object {
 }
 
 /// Pushes a new version of the share `share_id` holding `files`, plus the configs of the latest
-/// version that `keep` still finds, and returns its number once members can install it.
+/// version that `kept` keeps, and returns its number once members can install it.
 /// `server_core` is a Core of the owner running a server of this share, which the backend makes
 /// its home. Encrypted files wait in a folder of their own under `scratch` until the Core has
 /// them.
@@ -130,12 +142,12 @@ pub async fn push(
     content: &VersionContent,
     server_core: Option<&str>,
     files: Vec<PushFile>,
-    keep: &KeepConfig,
+    kept: KeptConfigs<'_>,
     scratch: &Path,
     on_event: &mut (dyn FnMut(PushEvent<'_>) + Send),
 ) -> Result<i32, PushError> {
     let previous = previous_versions(backend, share_id).await?;
-    let files = with_kept_configs(&previous, files, keep, on_event).await?;
+    let files = with_kept_configs(&previous, files, kept, on_event).await?;
     let hashed = hash::hash_files(&files).await?;
     on_event(PushEvent::Hashed(&hashed));
     if let Some(file) = hashed.iter().find(|file| file.executable) {
@@ -337,16 +349,23 @@ async fn previous_versions(
 }
 
 /// `files` plus the configs of the latest ready version that this push does not send again and
-/// that `keep` still finds. Reports the ones it leaves out.
+/// that `kept` keeps. Reports the ones it leaves out.
 async fn with_kept_configs(
     previous: &[ShareVersion],
     mut files: Vec<PushFile>,
-    keep: &KeepConfig,
+    kept: KeptConfigs<'_>,
     on_event: &mut (dyn FnMut(PushEvent<'_>) + Send),
 ) -> Result<Vec<PushFile>, PushError> {
     let mut dropped = Vec::new();
     for file_name in kept_configs(previous, &files) {
-        match keep(file_name.clone()).await? {
+        let shared = kept.scope.carries(&file_name)
+            && !kept.removed.contains(&file_name);
+        let path = if shared {
+            (kept.locate)(file_name.clone()).await?
+        } else {
+            None
+        };
+        match path {
             Some(path) => files.push(PushFile {
                 file_name,
                 file_type: crate::rules::CONFIG_FILE_TYPE.to_owned(),
@@ -532,23 +551,30 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_config_the_owner_no_longer_has_is_dropped_and_reported() {
+    async fn configs_gone_unshared_or_out_of_scope_are_dropped_and_reported() {
         let previous = [version(
             1,
             true,
             vec![
                 manifest("config", "config/kept.json", 1, 9),
                 manifest("config", "config/gone.json", 2, 9),
+                manifest("config", "config/unshared.json", 3, 9),
+                manifest("config", "options.txt", 4, 9),
             ],
         )];
-        let keep: &KeepConfig = &|name: String| {
+        let locate: &LocateConfig = &|name: String| {
             Box::pin(async move {
-                Ok((name == "config/kept.json").then(|| PathBuf::from(name)))
+                Ok((name != "config/gone.json").then(|| PathBuf::from(name)))
             })
+        };
+        let kept = KeptConfigs {
+            scope: ShareScope::Server,
+            removed: &["config/unshared.json".to_owned()],
+            locate,
         };
         let mut dropped = Vec::new();
         let files =
-            with_kept_configs(&previous, Vec::new(), keep, &mut |event| {
+            with_kept_configs(&previous, Vec::new(), kept, &mut |event| {
                 if let PushEvent::Dropped(names) = event {
                     dropped.extend_from_slice(names);
                 }
@@ -560,6 +586,9 @@ mod tests {
             .map(|file| file.file_name.as_str())
             .collect::<Vec<_>>();
         assert_eq!(names, ["config/kept.json"]);
-        assert_eq!(dropped, ["config/gone.json"]);
+        assert_eq!(
+            dropped,
+            ["config/gone.json", "config/unshared.json", "options.txt"]
+        );
     }
 }

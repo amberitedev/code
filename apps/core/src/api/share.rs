@@ -400,11 +400,8 @@ pub async fn share(
                 .map(|path| (path.clone(), CONFIG_FILE_TYPE.to_owned(), path)),
         )
         .collect::<Vec<_>>();
-    let keep = kept_config(
-        Arc::clone(&snapshot.folder),
-        staging.join("kept"),
-        request.removed_config_paths,
-    );
+    let locate =
+        locate_config(Arc::clone(&snapshot.folder), staging.join("kept"));
     let result = async {
         let files = {
             let folder = Arc::clone(&snapshot.folder);
@@ -435,7 +432,11 @@ pub async fn share(
             &snapshot.content,
             None,
             files,
-            &keep,
+            push::KeptConfigs {
+                scope: SCOPE,
+                removed: &request.removed_config_paths,
+                locate: &locate,
+            },
             &staging.join("pool"),
             &mut |event| {
                 if let push::PushEvent::Dropped(names) = event {
@@ -467,11 +468,10 @@ pub async fn share(
 }
 
 /// Where the push finds a config the latest version shares: a copy under `staging` of the
-/// server's file, while the server has it and it is not in `removed`.
-fn kept_config(
+/// server's file, while the server has it.
+fn locate_config(
     folder: Arc<Folder>,
     staging: std::path::PathBuf,
-    removed: Vec<String>,
 ) -> impl Fn(
     String,
 ) -> futures::future::BoxFuture<
@@ -479,14 +479,9 @@ fn kept_config(
     std::io::Result<Option<std::path::PathBuf>>,
 > + Send
 + Sync {
-    let removed = Arc::new(removed);
     move |file_name: String| {
-        let (folder, staging, removed) =
-            (Arc::clone(&folder), staging.clone(), Arc::clone(&removed));
+        let (folder, staging) = (Arc::clone(&folder), staging.clone());
         Box::pin(async move {
-            if removed.contains(&file_name) || !SCOPE.carries(&file_name) {
-                return Ok(None);
-            }
             tokio::task::spawn_blocking(move || {
                 std::fs::create_dir_all(&staging)?;
                 let to = staging.join(uuid::Uuid::new_v4().to_string());
