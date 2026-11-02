@@ -122,6 +122,18 @@ pub enum PushEvent<'a> {
     Confirmed,
 }
 
+/// A version a push made, with what the owner's history keeps of it.
+pub struct Pushed {
+    pub version: i32,
+    /// The latest ready version before this push: the one it changed.
+    pub previous: Option<ShareVersion>,
+    /// The version's files as its manifest lists them.
+    pub external_files: Vec<ManifestFile>,
+    /// Where the bytes of each of `external_files` are, in the same order. They stay readable
+    /// for as long as the caller keeps the files it pushed.
+    pub paths: Vec<PathBuf>,
+}
+
 /// An encrypted object of the push.
 struct Object {
     object: [u8; 32],
@@ -132,7 +144,7 @@ struct Object {
 }
 
 /// Pushes a new version of the share `share_id` holding `files`, plus the configs of the latest
-/// version that `kept` keeps, and returns its number once members can install it.
+/// version that `kept` keeps, and returns it once members can install it.
 /// `server_core` is a Core of the owner running a server of this share, which the backend makes
 /// its home. Encrypted files wait in a folder of their own under `scratch` until the Core has
 /// them.
@@ -147,7 +159,7 @@ pub async fn push(
     kept: KeptConfigs<'_>,
     scratch: &Path,
     on_event: &mut (dyn FnMut(PushEvent<'_>) + Send),
-) -> Result<i32, PushError> {
+) -> Result<Pushed, PushError> {
     let previous = previous_versions(backend, share_id).await?;
     let files = with_kept_configs(&previous, files, kept, on_event).await?;
     let hashed = hash::hash_files(&files).await?;
@@ -175,6 +187,12 @@ pub async fn push(
         on_event,
     )
     .await;
+    let result = result.map(|(version, external_files)| Pushed {
+        version,
+        previous: previous.into_iter().next().filter(|latest| latest.ready),
+        external_files,
+        paths: hashed.iter().map(|file| file.path().to_path_buf()).collect(),
+    });
     if let Err(error) = tokio::fs::remove_dir_all(&folder).await
         && error.kind() != std::io::ErrorKind::NotFound
     {
@@ -198,7 +216,7 @@ async fn push_hashed(
     hashed: &[HashedFile],
     folder: &Path,
     on_event: &mut (dyn FnMut(PushEvent<'_>) + Send),
-) -> Result<i32, PushError> {
+) -> Result<(i32, Vec<ManifestFile>), PushError> {
     let keys = file_keys(previous, hashed);
     tokio::fs::create_dir_all(folder).await?;
     // Collected first so the stream holds plain futures, not a borrowing closure, which keeps
@@ -254,7 +272,7 @@ async fn push_hashed(
         .map_err(refusal)?;
     on_event(PushEvent::Created(created.version));
     if created.ready {
-        return Ok(created.version);
+        return Ok((created.version, external_files));
     }
 
     if let Some(grant) = &created.store {
@@ -282,7 +300,7 @@ async fn push_hashed(
         match backend.version(share_id, Some(created.version)).await {
             Ok(version) if version.ready => {
                 on_event(PushEvent::Confirmed);
-                return Ok(created.version);
+                return Ok((created.version, external_files));
             }
             Ok(_)
             | Err(BackendError::Unavailable {
