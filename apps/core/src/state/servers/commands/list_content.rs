@@ -40,11 +40,11 @@ pub async fn list_content(
 ) -> Result<Vec<Addon>, Error> {
     let mut manifests = manifests(content, id, loader, &listed).await;
     let mut rows = HashMap::new();
-    let mut toggles = HashMap::new();
+    let mut entry_sides = HashMap::new();
     for (row, sides) in
         content_rows::get_tracked_files_with_sides(&content.db, id).await?
     {
-        toggles.insert(row.relative_path.clone(), sides);
+        entry_sides.insert(row.relative_path.clone(), sides);
         rows.insert(row.relative_path.clone(), row);
     }
     let mut project_ids: Vec<String> = rows
@@ -90,8 +90,8 @@ pub async fn list_content(
             let version = row
                 .and_then(|row| row.version_id.as_ref())
                 .and_then(|version| versions.get(version));
-            let toggle = toggles.get(&item.path);
-            let sides = Sides::of(&item, toggle);
+            let recorded = entry_sides.get(&item.path);
+            let sides = Sides::of(&item, recorded);
             Addon {
                 id: item.path.clone(),
                 filename: item.filename,
@@ -100,8 +100,8 @@ pub async fn list_content(
                 disabled: sides.disabled,
                 disabled_server: sides.disabled_server,
                 disabled_player: sides.disabled_player,
-                side_toggle_unlocked: toggle
-                    .is_some_and(|toggle| toggle.unlocked),
+                side_toggle_unlocked: recorded
+                    .is_some_and(|recorded| recorded.unlocked),
                 kind: item.kind,
                 from_modpack: row.is_some_and(TrackedFile::by_pack),
                 status: AddonStatus::Installed,

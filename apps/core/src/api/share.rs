@@ -239,25 +239,25 @@ async fn snapshot(state: &AppState, id: &str) -> Result<Snapshot, ApiError> {
     let folder = Arc::new(Folder::open(&state.servers.paths().server(id))?);
     let listed = content_files::scan(&folder, Some(loader));
     let mut rows = HashMap::new();
-    let mut toggles = HashMap::new();
+    let mut entry_sides = HashMap::new();
     for (row, sides) in
         content_rows::get_tracked_files_with_sides(&state.db, id).await?
     {
-        toggles.insert(row.relative_path.clone(), sides);
+        entry_sides.insert(row.relative_path.clone(), sides);
         rows.insert(row.relative_path.clone(), row);
     }
     // A pack uploaded as a file is not on Modrinth, so its files are shared one by one.
     let modpack_id = content_rows::get_pack(&state.db, id)
         .await?
         .and_then(|pack| pack.version_id);
-    let carried = carried(&listed, &rows, &toggles, modpack_id.is_some());
+    let carried = carried(&listed, &rows, &entry_sides, modpack_id.is_some());
     let removed_files = if modpack_id.is_some() {
         let level = folder.level_name();
         let dirs = [ContentType::Mod, ContentType::DataPack]
             .map(|kind| content_files::kind_folder(kind, &level))
             .into_iter()
             .collect::<Result<Vec<_>, _>>()?;
-        removed(&listed, &rows, &toggles, &dirs)
+        removed(&listed, &rows, &entry_sides, &dirs)
     } else {
         Vec::new()
     };

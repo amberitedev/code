@@ -1413,7 +1413,7 @@ async fn a_pack_update_takes_an_empty_body_sent_as_json() {
 }
 
 #[tokio::test]
-async fn side_toggles_decide_what_the_server_runs_and_what_players_get() {
+async fn sides_decide_what_the_server_runs_and_what_players_get() {
     let core = core().await;
     let server = core.server.clone();
     let editor = core.sign_in("editor").await;
@@ -1494,7 +1494,7 @@ async fn side_toggles_decide_what_the_server_runs_and_what_players_get() {
     assert_eq!(client["disabled"], true);
     assert_eq!(client["disabled_server"], false);
 
-    // A server that follows an instance has neither toggles nor a share of its own.
+    // A server that follows an instance has neither sides nor a share of its own.
     sqlx::query(
         "INSERT INTO server_content_sets (id, server_id, name, source_kind, status, game_version, \
          loader, created, modified, version_number, sha1, instance_id, instance_name, \

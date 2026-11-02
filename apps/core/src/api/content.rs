@@ -741,7 +741,7 @@ pub async fn enable_many(
 }
 
 /// Refuses a server that follows an instance. Its instance's owner writes the share it reads,
-/// side toggles included, so it has no share or toggles of its own.
+/// sides included, so it has no share or sides of its own.
 pub async fn server_first(state: &AppState, id: &str) -> Result<(), ApiError> {
     let linked = content_rows::get_pack(&state.db, id)
         .await?

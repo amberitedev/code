@@ -23,7 +23,7 @@ use modrinth_content_management::ContentType;
 pub fn removed(
     listed: &[Listed],
     rows: &HashMap<String, TrackedFile>,
-    toggles: &HashMap<String, EntrySides>,
+    entry_sides: &HashMap<String, EntrySides>,
     addon_dirs: &[String],
 ) -> Vec<RemovedFile> {
     let mut pack_rows = rows
@@ -36,7 +36,7 @@ pub fn removed(
         let for_players =
             match listed.iter().find(|item| item.path == row.relative_path) {
                 Some(item) => {
-                    Sides::of(item, toggles.get(&item.path)).for_players()
+                    Sides::of(item, entry_sides.get(&item.path)).for_players()
                 }
                 // Gone from disk. Only addons count; the pack's other files are not content.
                 None => !row.relative_path.rsplit_once('/').is_some_and(
@@ -99,12 +99,14 @@ pub enum Carried {
 pub fn carried(
     listed: &[Listed],
     rows: &HashMap<String, TrackedFile>,
-    toggles: &HashMap<String, EntrySides>,
+    entry_sides: &HashMap<String, EntrySides>,
     modpack: bool,
 ) -> Vec<Carried> {
     listed
         .iter()
-        .filter(|item| Sides::of(item, toggles.get(&item.path)).for_players())
+        .filter(|item| {
+            Sides::of(item, entry_sides.get(&item.path)).for_players()
+        })
         .filter(|item| {
             !modpack || rows.get(&item.path).is_none_or(|row| !row.by_pack())
         })
@@ -164,7 +166,7 @@ mod tests {
         }
     }
 
-    fn toggle(path: &str, server: bool, player: bool) -> (String, EntrySides) {
+    fn sides(path: &str, server: bool, player: bool) -> (String, EntrySides) {
         (
             path.into(),
             EntrySides {
@@ -192,10 +194,10 @@ mod tests {
             listed("world/datapacks/pack.zip", ContentType::DataPack, false),
             listed("plugins/plugin.jar", ContentType::Plugin, false),
         ];
-        let toggles = HashMap::from([
-            toggle("mods/client.jar", true, false),
-            toggle("mods/server.jar", false, true),
-            toggle("mods/back.jar", true, false),
+        let entry_sides = HashMap::from([
+            sides("mods/client.jar", true, false),
+            sides("mods/server.jar", false, true),
+            sides("mods/back.jar", true, false),
         ]);
         let rows = HashMap::from([(
             "mods/modrinth.jar".to_owned(),
@@ -216,7 +218,7 @@ mod tests {
             on_disk: on_disk.into(),
         };
         assert_eq!(
-            carried(&listed, &rows, &toggles, false),
+            carried(&listed, &rows, &entry_sides, false),
             [
                 file("both.jar", "mod", "mods/both.jar"),
                 file("client.jar", "mod", "mods/client.jar.disabled"),
@@ -253,9 +255,9 @@ mod tests {
             listed("mods/server.jar", ContentType::Mod, false),
             listed("mods/added.jar", ContentType::Mod, false),
         ];
-        let toggles = HashMap::from([
-            toggle("mods/client.jar", true, false),
-            toggle("mods/server.jar", false, true),
+        let entry_sides = HashMap::from([
+            sides("mods/client.jar", true, false),
+            sides("mods/server.jar", false, true),
         ]);
         let rows = HashMap::from([
             row(
@@ -277,14 +279,14 @@ mod tests {
         ]);
 
         assert_eq!(
-            carried(&listed, &rows, &toggles, true),
+            carried(&listed, &rows, &entry_sides, true),
             [Carried::Modrinth {
                 version_id: "added".into(),
                 project_id: "project".into(),
             }]
         );
         assert_eq!(
-            removed(&listed, &rows, &toggles, &["mods".into()]),
+            removed(&listed, &rows, &entry_sides, &["mods".into()]),
             [
                 RemovedFile::Path {
                     parent: "mods".into(),
