@@ -7,7 +7,7 @@
 //! Also `GET /modrinth/v0/servers/{id}/fs`, where the App learns the base of these routes.
 //!
 //! Editors and the owner only: the files hold the world and every setting. Every path goes
-//! through `content::folder`, so nothing reaches outside the server folder, links included.
+//! through `state::servers::adapters::filesystem::folder`, so nothing reaches outside the server folder, links included.
 //! Uploads and unpacking never replace server-owned files (see `folder::is_server_owned`);
 //! `fs/update` is an explicit edit and may change them. `fs/copy` and the v0 `fs/zip` have no
 //! caller in the App and are not served.
@@ -47,7 +47,7 @@ use crate::{
             archive::{self, ArchiveError},
             folder::{self, Folder},
         },
-        commands::content_mutation as addons,
+        commands::apply_content_install::add_uploaded_file,
         domain::pack,
     },
 };
@@ -1305,7 +1305,8 @@ pub async fn finalize_session(
             }
             UploadScope::Content => {
                 for (name, staged) in &files {
-                    addons::upload(&state.content, &id, name, staged).await?;
+                    add_uploaded_file(&state.content, &id, name, staged)
+                        .await?;
                 }
             }
         }

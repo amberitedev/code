@@ -111,7 +111,7 @@ pub struct Pack {
     pub sha1: String,
     pub instance_id: Option<String>,
     pub instance_name: Option<String>,
-    /// The share and version the pack is, for a pack from an App instance (`content::shared`).
+    /// The share and version the pack is, for a pack from an App instance (`commands::write_shared_pack`).
     pub shared_instance_id: Option<String>,
     pub shared_version: Option<i64>,
     pub error: Option<String>,

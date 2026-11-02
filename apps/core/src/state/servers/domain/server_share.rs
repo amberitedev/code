@@ -9,10 +9,11 @@
 
 use std::collections::HashMap;
 
-use crate::state::servers::commands::content_mutation::{
-    DISABLED, Listed, Sides,
-};
 use crate::state::servers::{EntrySides, TrackedFile};
+use crate::state::servers::{
+    adapters::filesystem::content_files::{DISABLED, Listed},
+    domain::sides::Sides,
+};
 use sharing_client::push::RemovedFile;
 
 use modrinth_content_management::ContentType;

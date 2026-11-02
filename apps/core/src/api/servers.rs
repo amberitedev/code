@@ -30,7 +30,9 @@ use crate::{
     servers::{Phase, ServerError, launch},
     state::servers::{
         adapters::sqlite::{content_rows, server_rows},
-        commands::install_pack,
+        commands::{
+            install_loader, install_pack, list_content::linked_pack_state,
+        },
     },
 };
 
@@ -556,7 +558,7 @@ async fn linked_instance(
     Ok(Some(LinkedInstance {
         id: linked.id,
         name: linked.name,
-        state: super::content::linked_state(state, id, &pack).await?,
+        state: linked_pack_state(&state.content, id, &pack).await?,
         error: pack.error,
         visible_to_friends: false,
         shared_instance_id: Some(linked.shared_instance_id),
@@ -706,7 +708,7 @@ pub async fn reinstall(
     content_rows::unlink(&state.db, &id).await?;
     state.access.owed.notify_one();
     let progress = state.content.progress(&id);
-    let result = install_pack::loader(
+    let result = install_loader::install_loader(
         &state.content,
         &hold,
         &progress,

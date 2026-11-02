@@ -4,7 +4,7 @@
 //! `GET .../content/share/files`. Mirrors `Archon.Content.v1` (`archon/content/v1.ts`).
 //!
 //! A server that follows an instance gets 409 on all of them: it reads its instance's share,
-//! and each share has one writer. What a version carries is `content::server_share`, plus the
+//! and each share has one writer. What a version carries is `domain::server_share`, plus the
 //! config files the push picks.
 
 use std::{
@@ -34,11 +34,11 @@ use crate::{
     installs::ModLoader,
     servers::ServerError,
     state::servers::{
+        adapters::filesystem::content_files,
         adapters::{
             filesystem::folder::{self, Folder},
             sqlite::{content_rows, server_rows},
         },
-        commands::content_mutation as addons,
         domain::server_share::{Carried, carried, removed},
     },
 };
@@ -237,7 +237,7 @@ async fn snapshot(state: &AppState, id: &str) -> Result<Snapshot, ApiError> {
         ModLoader::Vanilla | ModLoader::Paper => ("vanilla", None),
     };
     let folder = Arc::new(Folder::open(&state.servers.paths().server(id))?);
-    let listed = addons::scan(&folder, Some(loader));
+    let listed = content_files::scan(&folder, Some(loader));
     let mut rows = HashMap::new();
     let mut toggles = HashMap::new();
     for (row, sides) in
@@ -254,7 +254,7 @@ async fn snapshot(state: &AppState, id: &str) -> Result<Snapshot, ApiError> {
     let removed_files = if modpack_id.is_some() {
         let level = folder.level_name();
         let dirs = [ContentType::Mod, ContentType::DataPack]
-            .map(|kind| addons::kind_folder(kind, &level))
+            .map(|kind| content_files::kind_folder(kind, &level))
             .into_iter()
             .collect::<Result<Vec<_>, _>>()?;
         removed(&listed, &rows, &toggles, &dirs)

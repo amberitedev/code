@@ -109,7 +109,8 @@ impl Hasher {
 }
 
 /// The client for Core's own fixed sources: Modrinth's API and launcher metadata, Mojang, PaperMC,
-/// the Forge and NeoForge mavens, and Azul. Pack content uses `content::hosts` instead.
+/// the Forge and NeoForge mavens, and Azul. Pack content uses
+/// `state::servers::adapters::network::hosts` instead.
 pub fn client() -> reqwest::Result<reqwest::Client> {
     builder().build()
 }
