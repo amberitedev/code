@@ -1964,8 +1964,9 @@ async fn a_server_exports_as_a_pack_once_per_link() {
     let config = core.state.servers.paths().server(&server).join("config");
     std::fs::create_dir_all(config.join("sub")).unwrap();
     std::fs::write(config.join("sub/a.toml"), "a = 1").unwrap();
-    let authorize =
-        format!("/servers/{server}/v1/worlds/{server}/content/export-mrpack/authorize");
+    let authorize = format!(
+        "/servers/{server}/v1/worlds/{server}/content/export-mrpack/authorize"
+    );
 
     let (status, _) = core
         .call(Method::GET, &authorize, Some(&viewer), None, None)

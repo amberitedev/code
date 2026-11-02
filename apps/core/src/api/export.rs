@@ -48,7 +48,8 @@ pub async fn export(
     Query(query): Query<DownloadQuery>,
 ) -> Result<Response, ApiError> {
     world(&id, &wid)?;
-    downloader(&state, caller, query.token.as_deref(), &id, &Target::Pack).await?;
+    downloader(&state, caller, query.token.as_deref(), &id, &Target::Pack)
+        .await?;
     let server = server_rows::get(&state.db, &id)
         .await?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;

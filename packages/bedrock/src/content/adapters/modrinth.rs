@@ -10,9 +10,7 @@ use reqwest::StatusCode;
 use serde::{Serialize, de::DeserializeOwned};
 
 use crate::content::domain::channel::version_type_fallbacks;
-use crate::content::model::modrinth::{
-    Project, Version, VersionEnvironment,
-};
+use crate::content::model::modrinth::{Project, Version, VersionEnvironment};
 
 const API: &str = "https://api.modrinth.com/v2";
 const API_V3: &str = "https://api.modrinth.com/v3";

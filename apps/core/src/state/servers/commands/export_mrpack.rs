@@ -71,7 +71,8 @@ pub async fn export_mrpack(
 
     let sides: HashMap<String, EntrySides> =
         content_rows::get_entry_sides(&content.db, &server.id).await?;
-    let skipped = content_rows::get_skipped_files(&content.db, &server.id).await?;
+    let skipped =
+        content_rows::get_skipped_files(&content.db, &server.id).await?;
     let root = content.servers.paths().server(&server.id);
     let (found, configs) = tokio::task::spawn_blocking(move || {
         let folder = Folder::open(&root)?;
@@ -165,9 +166,9 @@ pub async fn export_mrpack(
         dependencies,
     })
     .map_err(|error| Error::Invalid(error.to_string()))?;
-    let needed = overrides
-        .iter()
-        .fold(index.len() as u64, |total, file| total.saturating_add(file.size));
+    let needed = overrides.iter().fold(index.len() as u64, |total, file| {
+        total.saturating_add(file.size)
+    });
     let parent = path.parent().unwrap_or(path);
     tokio::fs::create_dir_all(parent).await?;
     NoRoom::check("the export", needed, archive::room(parent)?)?;
@@ -214,7 +215,11 @@ impl Found {
 
     /// Where it goes as an override: `overrides/` for both sides, else the one side's folder.
     fn into_override(self) -> Override {
-        let folder = match (self.sides.disabled, self.for_players(), self.for_server()) {
+        let folder = match (
+            self.sides.disabled,
+            self.for_players(),
+            self.for_server(),
+        ) {
             (true, _, _) | (false, true, true) => "overrides",
             (false, true, false) => "client-overrides",
             (false, false, _) => "server-overrides",
@@ -267,7 +272,8 @@ fn config_files(folder: &Folder) -> Vec<(String, u64)> {
     let mut files = Vec::new();
     let mut folders = vec![CONFIG.to_owned()];
     while let Some(path) = folders.pop() {
-        let Ok(entries) = folder.open_dir(Some(&path)).and_then(|dir| dir.entries())
+        let Ok(entries) =
+            folder.open_dir(Some(&path)).and_then(|dir| dir.entries())
         else {
             continue;
         };
@@ -386,9 +392,15 @@ mod tests {
         )
         .unwrap();
         assert_eq!(file.path, "mods/a.jar");
-        assert_eq!(file.downloads, ["https://cdn.modrinth.com/data/p/versions/v/a.jar"]);
+        assert_eq!(
+            file.downloads,
+            ["https://cdn.modrinth.com/data/p/versions/v/a.jar"]
+        );
         let env = file.env.unwrap();
-        assert_eq!((env.client, env.server), (SideType::Unsupported, SideType::Required));
+        assert_eq!(
+            (env.client, env.server),
+            (SideType::Unsupported, SideType::Required)
+        );
 
         let client = version(VersionEnvironment::ClientOnly);
         let env = index_file(
@@ -398,7 +410,10 @@ mod tests {
         .unwrap()
         .env
         .unwrap();
-        assert_eq!((env.client, env.server), (SideType::Required, SideType::Unsupported));
+        assert_eq!(
+            (env.client, env.server),
+            (SideType::Required, SideType::Unsupported)
+        );
     }
 
     #[test]
@@ -413,7 +428,11 @@ mod tests {
             "client-overrides/mods/a.jar"
         );
         assert_eq!(
-            entry(found("plugins/a.jar", ContentType::Plugin, on(false, false))),
+            entry(found(
+                "plugins/a.jar",
+                ContentType::Plugin,
+                on(false, false)
+            )),
             "server-overrides/plugins/a.jar"
         );
         let off = Sides {

@@ -37,12 +37,16 @@ fn serve(answers: Vec<(u16, String)>) -> (String, Arc<Mutex<Vec<String>>>) {
 
 fn http() -> reqwest::Client {
     reqwest::Client::builder()
-        .use_preconfigured_tls(bedrock::net::tls::pinned_config([0; 32]).unwrap())
+        .use_preconfigured_tls(
+            bedrock::net::tls::pinned_config([0; 32]).unwrap(),
+        )
         .build()
         .unwrap()
 }
 
-async fn push_against(answers: Vec<(u16, String)>) -> (Result<i32, PushError>, Vec<String>) {
+async fn push_against(
+    answers: Vec<(u16, String)>,
+) -> (Result<i32, PushError>, Vec<String>) {
     let (url, seen) = serve(answers);
     let backend = Backend::new(http(), url, "token");
     let locate: &LocateConfig = &|_| Box::pin(async { Ok(None) });
@@ -78,10 +82,16 @@ async fn push_against(answers: Vec<(u16, String)>) -> (Result<i32, PushError>, V
 
 #[tokio::test]
 async fn revoked_token_fails_the_push() {
-    let (result, seen) =
-        push_against(vec![(401, r#"{"error":"unauthorized","description":"x"}"#.into())]).await;
+    let (result, seen) = push_against(vec![(
+        401,
+        r#"{"error":"unauthorized","description":"x"}"#.into(),
+    )])
+    .await;
     assert!(
-        matches!(result, Err(PushError::Unavailable(Unavailable::AccessRevoked))),
+        matches!(
+            result,
+            Err(PushError::Unavailable(Unavailable::AccessRevoked))
+        ),
         "{result:?}"
     );
     assert_eq!(seen.len(), 1, "no version is created after a 401");
@@ -89,7 +99,8 @@ async fn revoked_token_fails_the_push() {
 
 #[tokio::test]
 async fn share_without_versions_gets_its_first() {
-    let root = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+    let root =
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
     let created = format!(
         r#"{{"modrinth_ids":[],"modpack_id":null,"removed_files":[],"game_version":"1.21.1","loader":"fabric","loader_version":"","root":"{root}","external_files":[],"version":1,"ready":true}}"#
     );
