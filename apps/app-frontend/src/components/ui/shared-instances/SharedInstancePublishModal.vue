@@ -15,6 +15,7 @@ import { type ContentDiffItem, injectModrinthClient, SharedFilesPublishModal } f
 import { computed, ref } from 'vue'
 
 import { trackSharedInstancePublish } from '@/components/ui/download-manager/shared-instance-publishes'
+import { sharedDiffItems } from '@/components/ui/shared-instances/shared-diff-items'
 import { isServerBehind, type LinkedServer } from '@/features/servers/linked-servers'
 import { getErrorMessage, isSharedInstanceUnavailableError } from '@/helpers/install'
 import {
@@ -94,15 +95,7 @@ async function show(e?: MouseEvent) {
 				emit('published')
 				return
 			}
-			diffs = preview.diffs.map((diff) => ({
-				type: diff.type,
-				projectName: diff.projectName ?? undefined,
-				fileName: diff.fileName ?? undefined,
-				currentVersionName: diff.currentVersionName ?? undefined,
-				newVersionName: diff.newVersionName ?? undefined,
-				fileCount: diff.configFileCount ?? undefined,
-				disabled: diff.disabled,
-			}))
+			diffs = sharedDiffItems(preview.diffs)
 			files.value = preview.files
 			serversBehind.value = (props.servers ?? []).some((server) =>
 				isServerBehind(server, preview.sharedInstanceId, preview.latestVersion),
