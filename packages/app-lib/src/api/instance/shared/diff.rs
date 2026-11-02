@@ -327,6 +327,25 @@ pub(super) async fn shared_instance_publish_diffs(
             }
         }
     }
+    // A push sends every config still shared as the instance has it, so one the owner edited or
+    // deleted is a change to review, as on Copal.
+    let shared_configs = version.configs().cloned().collect::<Vec<_>>();
+    let config_file_names =
+        changed_config_files(&metadata.instance.id, &shared_configs, state)
+            .await?;
+    if !config_file_names.is_empty() {
+        diffs.push(SharedInstanceUpdateDiff {
+            type_: SharedInstanceUpdateDiffType::ConfigFilesUpdated,
+            project_id: None,
+            project_name: None,
+            file_name: None,
+            current_version_name: None,
+            new_version_name: None,
+            config_file_count: Some(config_file_names.len()),
+            config_file_names,
+            disabled: false,
+        });
+    }
     Ok(diffs)
 }
 
