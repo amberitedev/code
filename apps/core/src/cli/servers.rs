@@ -428,7 +428,7 @@ fn describe(server: &Server, insight: &ServerInsight) -> String {
         "{}  {}  port {}",
         server.name,
         server.power_state.map_or("unknown", state_name),
-        server.net.port
+        server.net.game_port
     )];
     if server.power_state.is_some_and(is_up) {
         let players = if insight.players.is_empty() {
@@ -516,7 +516,7 @@ pub fn table(servers: &[Server]) -> String {
                 server.server_id,
                 server.power_state.map_or("unknown", state_name),
                 server.mc_version.as_deref().unwrap_or("-"),
-                server.net.port,
+                server.net.game_port,
                 server.name,
             )
         })
@@ -687,7 +687,7 @@ mod tests {
 
     fn server(id: &str, name: &str) -> Server {
         let mut server: Server = serde_json::from_value(serde_json::json!({
-            "server_id": id, "name": name, "owner_id": "", "net": {"ip": null, "port": 25565, "domain": "", "outside": null},
+            "server_id": id, "name": name, "owner_id": "", "net": {"ip": null, "port": 25565, "domain": "", "outside": null, "game_port": 25565},
             "game": "Minecraft", "backup_quota": 0, "used_backup_quota": 0, "status": "available",
             "suspension_reason": null, "loader": null, "loader_version": null, "mc_version": null,
             "upstream": null, "sftp_username": "", "sftp_password": "", "sftp_host": "",

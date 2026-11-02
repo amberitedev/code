@@ -7,7 +7,7 @@ import {
 import { useQueryClient } from '@tanstack/vue-query'
 import { computed, type Ref, ref, watch } from 'vue'
 
-import { create_shared_instance_invite_link, type SharedInstanceInvite } from '@/helpers/instance'
+import { create_shared_instance_invite_link } from '@/helpers/instance'
 
 import { sharedInstanceInviteUrl } from './shared-instance-share-types'
 
@@ -60,14 +60,9 @@ export function useSharedInstanceInviteLink(
 			void refreshInvites()
 		} catch (error) {
 			// Reported here and not rethrown, so the link editor does not show the raw request error.
+			// The new link is made before the old one is deleted, so a failure keeps the old one.
 			onError(error)
-			// The old link is deleted before the new one is made, so it may be gone now.
-			await refreshInvites()
-			const invites = queryClient.getQueryData<SharedInstanceInvite[]>([
-				'sharedInstanceInvites',
-				instanceId.value,
-			])
-			if (invites && !invites.some((invite) => invite.id === replaced)) reset()
+			void refreshInvites()
 		} finally {
 			pending.value = false
 		}

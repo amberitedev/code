@@ -28,8 +28,8 @@ differs from what that client was written for, on purpose.
 - `/v1/servers/{core}/{server}/players` (`GET`, `POST`, `DELETE`) and `/invites[/{id}]`: the
   players of a Core server, the people it is shared with, in the shapes of `users` and `invites`.
   They read the share the server follows without being members, and accept and leave as members
-  do. A write names the share (`instance_id`), the server's `name` and `port`, and `outside`, the
-  Core's `net.outside` (`{ ip, port }`, or null, which keeps the last one known). The App's
+  do. A write names the share (`instance_id`), the server's `name` and `port` (its game port), and
+  `outside`, the Core's `net.outside` (`{ ip, port }`, or null, which keeps the last one known). The App's
   Play tab reaches these through `sharedinstances.players_v1`. Players read the share only while
   the server's Core owner owns it or is a joined member; a member who leaves or is kicked takes
   their servers, players, and links with them. Players get 403 `members_only` on `GET users`, and

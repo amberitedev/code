@@ -287,8 +287,12 @@ How it works (`apps/core/src/network`):
 - Addresses: once the API passes the outside test, Core reports `https://<address>:<port>` to the
   backend as its `public_address`. The App uses a Core's local address when it answers and the
   public one otherwise. Each server's outside address and its reachability come back from the
-  hosting API with the server (`net.outside`, `reachability`).
-- The App: "Copy address" on a linked server copies the outside address when there is one. The
+  hosting API with the server (`net.outside`, `reachability`). The server's `net.ip` and `net.port`
+  are its join address: the router's outside address when it granted a different port, otherwise
+  the Core's public IP and the game port (`net.game_port`).
+- The App: "Copy address" on a linked server copies the join address. When the App reaches its
+  Core at the Core's local address, it joins that Core's servers at that address and the game port
+  (`cores_v1.joinNet`), so owners at home do not depend on NAT loopback. The
   signal icon on a linked server's row in Worlds turns orange when the server runs but cannot be
   reached from outside, and hovering it shows the cause.
 - IPv6 is not handled yet.

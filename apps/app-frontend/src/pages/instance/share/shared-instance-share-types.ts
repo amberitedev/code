@@ -12,5 +12,5 @@ export {
 
 /** The link that joins one of this App's shares, on Amberite's account site. */
 export function sharedInstanceInviteUrl(inviteId: string) {
-	return inviteLinkUrl(config.accountWebUrl || config.accountApiUrl || config.siteUrl, inviteId)
+	return inviteLinkUrl(config.accountSiteUrl, inviteId)
 }

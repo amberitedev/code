@@ -345,10 +345,7 @@ const canSubmitReport = computed(
 const creatorProfileLink = computed(() => {
 	const username = creator.value?.username
 	return username
-		? () =>
-				openUrl(
-					`${config.accountWebUrl || config.accountApiUrl || config.siteUrl}/user/${encodeURIComponent(username)}`,
-				)
+		? () => openUrl(`${config.accountSiteUrl}/user/${encodeURIComponent(username)}`)
 		: undefined
 })
 

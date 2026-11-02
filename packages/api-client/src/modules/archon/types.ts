@@ -902,6 +902,11 @@ export namespace Archon {
 				domain: string
 				/** Core: where the server is on the internet, when it can be joined from there. */
 				outside?: { ip: string; port: number } | null
+				/**
+				 * Core: the port the server listens on. `ip` and `port` are where players join from the
+				 * internet, which is the router's port when it forwarded a different one.
+				 */
+				game_port?: number
 			}
 
 			/**

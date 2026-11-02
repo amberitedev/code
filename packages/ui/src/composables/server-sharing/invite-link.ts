@@ -13,7 +13,10 @@ export function remainingPlayerSlots(playerCount: number) {
 	return Math.max(0, SHARED_INSTANCE_MAX_PLAYERS - playerCount)
 }
 
-/** The page an invite link opens. */
+/**
+ * The page an invite link opens. Every invite URL, for instance and server shares alike, is built
+ * here; `siteUrl` is the site the App passes, its account site (the App's `config.accountSiteUrl`).
+ */
 export function inviteLinkUrl(siteUrl: string, inviteId: string) {
 	return `${siteUrl.replace(/\/$/, '')}/share/${encodeURIComponent(inviteId)}`
 }

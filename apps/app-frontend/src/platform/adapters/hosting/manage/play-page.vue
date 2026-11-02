@@ -7,5 +7,5 @@ const { play } = injectServerPlay()
 </script>
 
 <template>
-	<ServersManagePlayPage :on-play-server="play" :site-url="config.siteUrl" />
+	<ServersManagePlayPage :on-play-server="play" :site-url="config.accountSiteUrl" />
 </template>

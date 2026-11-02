@@ -7,7 +7,7 @@
 			:resolve-viewer="resolveViewer"
 			:show-copy-id-action="appSettings.devMode"
 			:force-server-play-migration="appSettings.getFeatureFlag('debug_server_play_migration')"
-			:site-url="config.siteUrl"
+			:site-url="config.accountSiteUrl"
 			:auth-user="authUser"
 			:navigate-to-billing="
 				client.selfHostedHosting

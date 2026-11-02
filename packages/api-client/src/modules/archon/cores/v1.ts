@@ -211,6 +211,24 @@ export class ArchonCoresV1Module extends AbstractModule {
 		return this.routes.get(core.id)?.address ?? core.address
 	}
 
+	/**
+	 * Where this App joins a server. When its Core answers at the Core's own network address, the
+	 * App is on that network (or the Core has no router in front of it), so it joins at that address
+	 * and the server's game port: owners at home then do not depend on their router taking its own
+	 * internet address back in (NAT loopback). Otherwise it is where players join from the internet.
+	 * Pass the result to `getHostingServerAddress`; show and copy the plain `net`, which is what
+	 * everyone else joins.
+	 */
+	public joinNet(server: Pick<Archon.Servers.v0.Server, 'server_id' | 'net'>) {
+		const { net } = server
+		if (!this.client.selfHostedHosting || net.game_port === undefined) return net
+		const coreId = this.serverCores.get(server.server_id) ?? this.listed[0]?.id
+		const core = this.listed.find((candidate) => candidate.id === coreId)
+		if (!core || this.address(core) !== core.address) return net
+		const ip = new URL(core.address).hostname.replace(/^\[|\]$/g, '')
+		return { ...net, ip, port: net.game_port }
+	}
+
 	/** The hosting API base URL for a request: the Core that has the server the request names. */
 	public async hostingUrl(
 		path: string,
