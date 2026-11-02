@@ -91,7 +91,7 @@ pub struct SharedInstanceAttachment {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct SharedInstanceAttachmentInput {
+pub struct SharedInstanceAttachmentInput {
     pub id: String,
     pub role: SharedInstanceRole,
     pub manager_id: Option<String>,

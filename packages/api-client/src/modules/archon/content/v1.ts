@@ -11,7 +11,7 @@ export class ArchonContentV1Module extends AbstractModule {
 		serverId: string,
 		worldId: string,
 		configPaths: string[] = [],
-		options?: { timeout?: number; restart?: boolean },
+		options?: { timeout?: number; restart?: boolean; removedConfigPaths?: string[] },
 	): Promise<Archon.Content.v1.ShareWorldContentResponse> {
 		return this.client.request(
 			`/servers/${encodeURIComponent(serverId)}/worlds/${encodeURIComponent(worldId)}/content/share`,
@@ -21,7 +21,11 @@ export class ArchonContentV1Module extends AbstractModule {
 				method: 'POST',
 				timeout: options?.timeout ?? 600_000,
 				retry: false,
-				body: { config_paths: configPaths, restart: options?.restart },
+				body: {
+					config_paths: configPaths,
+					removed_config_paths: options?.removedConfigPaths ?? [],
+					restart: options?.restart,
+				},
 			},
 		)
 	}

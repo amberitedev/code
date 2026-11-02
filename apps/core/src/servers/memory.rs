@@ -146,7 +146,7 @@ mod platform {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{db, servers::records};
+    use crate::{db, state::servers::adapters::sqlite::server_rows};
 
     #[test]
     fn the_heap_starts_small_and_custom_flags_replace_the_tuned_ones() {
@@ -171,8 +171,10 @@ mod tests {
     #[tokio::test]
     async fn flags_are_set_and_reset() {
         let db = db::memory().await;
-        let server =
-            records::create(&db, "A", |_| true).await.unwrap().unwrap();
+        let server = server_rows::create(&db, "A", |_| true)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(flags(&db, &server.id).await.unwrap(), None);
         let own = vec!["-XX:+UseZGC".to_owned()];
         set_flags(&db, &server.id, Some(&own)).await.unwrap();

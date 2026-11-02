@@ -58,6 +58,7 @@ import {
 	defineMessages,
 	injectNotificationManager,
 	NewModal,
+	serverKeys,
 	useVIntl,
 } from '@modrinth/ui'
 import { useQueryClient } from '@tanstack/vue-query'
@@ -69,7 +70,6 @@ import {
 	coreProblem,
 	playersOnline,
 	pushInstanceToServer,
-	serversQueryKey,
 	useLinkedServers,
 } from '@/features/servers/linked-servers'
 import type { GameInstance } from '@/helpers/types'
@@ -190,7 +190,7 @@ async function pushToServers(restart: boolean) {
 		})
 	} finally {
 		uploading.value = false
-		await queryClient.invalidateQueries({ queryKey: serversQueryKey })
+		await queryClient.invalidateQueries({ queryKey: serverKeys.list() })
 	}
 }
 

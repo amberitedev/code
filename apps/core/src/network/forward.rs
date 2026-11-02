@@ -30,7 +30,8 @@ use super::{
 };
 use crate::{
     access::now,
-    servers::{Lifecycle, Servers, records},
+    servers::{Lifecycle, Servers},
+    state::servers::adapters::sqlite::server_rows,
 };
 
 /// The key of Core's own API mapping and report.
@@ -49,6 +50,8 @@ const LISTEN_WAIT: Duration = Duration::from_secs(120);
 #[derive(Debug, Clone)]
 pub struct Report {
     pub diagnosis: Diagnosis,
+    /// Where the port is joined from the internet, while Core can tell it is usable there.
+    pub outside: Option<SocketAddr>,
     /// Unix seconds.
     pub at: i64,
 }
@@ -63,6 +66,9 @@ pub struct Network {
     on: bool,
     routing: tokio::sync::Mutex<Routing>,
     reports: std::sync::Mutex<HashMap<String, Report>>,
+    /// Where players join this Core's servers: its public address, or its own network's when it
+    /// has none. Backend sync keeps it current (`access::sync`).
+    join_ip: std::sync::Mutex<Option<IpAddr>>,
 }
 
 #[derive(Default)]
@@ -126,6 +132,7 @@ impl Network {
             on,
             routing: tokio::sync::Mutex::default(),
             reports: std::sync::Mutex::default(),
+            join_ip: std::sync::Mutex::default(),
         }
     }
 
@@ -138,6 +145,16 @@ impl Network {
     /// The last check of a server's port, or of Core's with [`CORE`].
     pub fn report(&self, key: &str) -> Option<Report> {
         self.reports.lock().expect("not poisoned").get(key).cloned()
+    }
+
+    /// The IP players join this Core's servers at, with each server's game port. `None` until
+    /// backend sync has looked it up once.
+    pub fn join_ip(&self) -> Option<IpAddr> {
+        *self.join_ip.lock().expect("not poisoned")
+    }
+
+    pub fn set_join_ip(&self, ip: IpAddr) {
+        *self.join_ip.lock().expect("not poisoned") = Some(ip);
     }
 
     /// Forward and check Core's API and every running server, then follow servers starting
@@ -225,7 +242,8 @@ impl Network {
         let Some(run) = servers.run_of(&server_id) else {
             return;
         };
-        let Ok(Some(server)) = records::get(&self.db, &server_id).await else {
+        let Ok(Some(server)) = server_rows::get(&self.db, &server_id).await
+        else {
             return;
         };
         let Ok(port) = u16::try_from(server.port) else {
@@ -290,6 +308,7 @@ impl Network {
         reports.insert(
             key.into(),
             Report {
+                outside: outside(&facts, &diagnosis),
                 diagnosis,
                 at: now(),
             },
@@ -437,6 +456,23 @@ fn changed(previous: Option<&Diagnosis>, now: &Diagnosis) -> bool {
     previous.is_none_or(|previous| {
         previous.case != now.case || previous.title != now.title
     })
+}
+
+/// Where a usable port is joined from the internet: this computer's own public address, or the
+/// router's internet side with the port it granted.
+fn outside(facts: &Facts, diagnosis: &Diagnosis) -> Option<SocketAddr> {
+    if !diagnosis.usable() {
+        return None;
+    }
+    match &facts.router {
+        RouterFacts::NoNat => Some(SocketAddr::new(facts.local_ip, facts.port)),
+        RouterFacts::Found {
+            wan_ip: Some(ip),
+            mapping: Ok(port),
+            ..
+        } => Some(SocketAddr::new(*ip, *port)),
+        _ => None,
+    }
 }
 
 async fn save(db: &SqlitePool, key: &str, mapping: &Mapping) {

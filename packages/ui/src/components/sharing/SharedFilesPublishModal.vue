@@ -65,7 +65,7 @@
 					@navigate="scrollFileTreeToTop"
 				/>
 			</div>
-			<SharedFilesStorageMeter :used="selectedSize" :limit="limit" class="px-6 pt-4" />
+			<SharedFilesStorageMeter :used="selectedSize" :limit="MAX_SHARE_BYTES" class="px-6 pt-4" />
 		</div>
 
 		<template #actions>
@@ -109,6 +109,7 @@
 </template>
 
 <script setup lang="ts">
+import { MAX_SHARE_BYTES } from '@modrinth/api-client'
 import {
 	CircleAlertIcon,
 	RotateCounterClockwiseIcon,
@@ -116,7 +117,7 @@ import {
 	UploadIcon,
 	XIcon,
 } from '@modrinth/assets'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 import Admonition from '#ui/components/base/Admonition.vue'
 import { Button, type ButtonMenuOption, SplitButton } from '#ui/components/base/buttons'
@@ -133,34 +134,36 @@ import SharedFilesStorageMeter from './SharedFilesStorageMeter.vue'
 export type SharedFilesPublishFile = {
 	path: string
 	size: number
+	/** In the folder, but a share cannot carry it. */
 	blocked: boolean
+	/** The share's latest version carries it, so it starts selected and unticking it removes it. */
+	shared: boolean
 }
 
-const props = withDefaults(
-	defineProps<{
-		diffs: ContentDiffItem[]
-		files: SharedFilesPublishFile[]
-		changesDescription?: string
-		confirmLabel?: string
-		restartConfirmLabel?: string
-		/** Pushing loads server-side changes, so the primary action also restarts the server. */
-		requiresRestart?: boolean
-		restartDisabled?: boolean
-		/** Allows pushing when nothing changed and no files are selected. */
-		allowEmpty?: boolean
-		disabled?: boolean
-		changesLoading?: boolean
-		changesError?: boolean
-		filesLoading?: boolean
-		filesError?: boolean
-		/** Most bytes one push may select. */
-		limit?: number
-	}>(),
-	{ limit: 2 * 1024 ** 3 },
-)
+const props = defineProps<{
+	diffs: ContentDiffItem[]
+	files: SharedFilesPublishFile[]
+	changesDescription?: string
+	confirmLabel?: string
+	restartConfirmLabel?: string
+	/** Pushing loads server-side changes, so the primary action also restarts the server. */
+	requiresRestart?: boolean
+	restartDisabled?: boolean
+	/** Allows pushing when nothing changed and no files are selected. */
+	allowEmpty?: boolean
+	disabled?: boolean
+	changesLoading?: boolean
+	changesError?: boolean
+	filesLoading?: boolean
+	filesError?: boolean
+}>()
 
 const emit = defineEmits<{
-	confirm: [paths: string[], restart: boolean]
+	/**
+	 * `paths` are the files newly picked for this version, and `removed` the shared files it stops
+	 * sharing. Shared files left selected stay shared without being listed.
+	 */
+	confirm: [paths: string[], restart: boolean, removed: string[]]
 	cancel: []
 	'retry-changes': []
 	'retry-files': []
@@ -194,14 +197,37 @@ const selectedFiles = computed(() => {
 		(file) => !file.blocked && isPathSelected(file.path, includedPaths, excludedPaths),
 	)
 })
+// Files the share already carries start selected, also when the list arrives after opening.
+watch(() => props.files, includeShared, { immediate: true })
+
+function includeShared() {
+	const touched = new Set([...includedFilePaths.value, ...excludedFilePaths.value])
+	const shared = props.files
+		.filter((file) => file.shared && !file.blocked && !touched.has(file.path))
+		.map((file) => file.path)
+	if (shared.length > 0) includedFilePaths.value = [...includedFilePaths.value, ...shared]
+}
+
+const pickedPaths = computed(() =>
+	selectedFiles.value.filter((file) => !file.shared).map((file) => file.path),
+)
+const removedPaths = computed(() => {
+	const selected = new Set(selectedFiles.value.map((file) => file.path))
+	return props.files
+		.filter((file) => file.shared && !selected.has(file.path))
+		.map((file) => file.path)
+})
 const selectedSize = computed(() =>
 	selectedFiles.value.reduce((total, file) => total + file.size, 0),
 )
 const confirmDisabled = computed(
 	() =>
 		props.disabled ||
-		selectedSize.value > props.limit ||
-		(!props.allowEmpty && props.diffs.length === 0 && selectedFiles.value.length === 0),
+		selectedSize.value > MAX_SHARE_BYTES ||
+		(!props.allowEmpty &&
+			props.diffs.length === 0 &&
+			pickedPaths.value.length === 0 &&
+			removedPaths.value.length === 0),
 )
 const restartOptions = computed<ButtonMenuOption[]>(() => [
 	{
@@ -218,6 +244,7 @@ function show(options?: { event?: MouseEvent; keepSelection?: boolean }) {
 		includedFilePaths.value = []
 		excludedFilePaths.value = []
 		activeTab.value = 'changes'
+		includeShared()
 	}
 	modal.value?.show(options?.event)
 }
@@ -247,10 +274,11 @@ function scrollFileTreeToTop() {
 
 function handleConfirm(restart: boolean) {
 	if (confirmDisabled.value || (restart && props.restartDisabled)) return
-	const paths = selectedFiles.value.map((file) => file.path)
+	const paths = pickedPaths.value
+	const removed = removedPaths.value
 	closingFromAction.value = true
 	hide()
-	emit('confirm', paths, restart)
+	emit('confirm', paths, restart, removed)
 	closingFromAction.value = false
 }
 

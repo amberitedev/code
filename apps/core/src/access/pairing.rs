@@ -312,7 +312,12 @@ async fn request_code(state: &Pairing<'_>) -> Result<Pending, String> {
         })?;
     let status = response.status();
     if !status.is_success() {
-        let body: BackendError = response.json().await.unwrap_or_default();
+        let body = response
+            .bytes()
+            .await
+            .ok()
+            .and_then(|body| bedrock::net::ErrorBody::parse(&body))
+            .unwrap_or_default();
         return Err(match body.error.as_str() {
             "already_signed_in" => "this Core is still listed under an account. Remove it in the App under Settings, Cores.".into(),
             "invalid_address" => format!(
@@ -412,14 +417,6 @@ fn display_code(code: &str) -> String {
         8 => format!("{}-{}", &upper[..4], &upper[4..]),
         _ => upper,
     }
-}
-
-#[derive(Default, Deserialize)]
-struct BackendError {
-    #[serde(default)]
-    error: String,
-    #[serde(default)]
-    description: String,
 }
 
 fn now() -> i64 {

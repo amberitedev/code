@@ -1,72 +1,24 @@
-import type { Archon } from '@modrinth/api-client'
+import type { Copal } from '@modrinth/api-client'
 
 import type { ContentDiffItem } from '#ui/layouts/shared/installation-settings/types'
 
-type Change<T> = Archon.Content.v1.SharedContentChange<T>
-type DiffEntry = Archon.Content.v1.SharedContentDiffEntry
-const before = <T>(change: Change<T>) => ('before' in change ? change.before : undefined)
-const after = <T>(change: Change<T>) => ('after' in change ? change.after : undefined)
-const isSharedFile = (entry: DiffEntry) =>
-	entry.type === 'external_file' && entry.file_type === 'config'
-
-/** Files pushed alongside the content are summarized as one "Changed files" entry, like the app does. */
-export function resolveServerShareDiff(
-	diff: Archon.Content.v1.SharedInstancePublishDiff,
+/**
+ * A share diff as the content diff list shows it: the App's updates, versions and pushes, and a
+ * Core server's push, all give it in `sharing_client::diff`'s shape. File names are URL-encoded
+ * because the diff list decodes them.
+ */
+export function sharedDiffItems(
+	diffs: readonly Copal.SharedInstanceUpdateDiff[],
 ): ContentDiffItem[] {
-	const versionName = (id?: string) => {
-		if (!id) return undefined
-		const version = diff.versions?.[id]
-		return version?.version_number ?? version?.name ?? id
-	}
-	const sharedFileNames = diff.diffs.flatMap((entry) =>
-		entry.type === 'external_file' && isSharedFile(entry) ? [entry.file_name] : [],
-	)
-	const items = diff.diffs
-		.filter((entry) => !isSharedFile(entry))
-		.map((entry): ContentDiffItem => {
-			if (entry.type === 'external_file')
-				return { type: entry.kind, fileName: encodeURIComponent(entry.file_name) }
-			if (entry.type === 'loader') {
-				const label = (value?: { name: string; version: string | null }) =>
-					value ? [value.name, value.version].filter(Boolean).join(' ') : undefined
-				return {
-					type: 'loader_updated',
-					currentVersionName: label(before(entry.change)),
-					newVersionName: label(after(entry.change)),
-				}
-			}
-			if (entry.type === 'game_version')
-				return {
-					type: 'game_version_updated',
-					currentVersionName: before(entry.change),
-					newVersionName: after(entry.change),
-				}
-			const versionId = after(entry.change) ?? before(entry.change)
-			const projectId =
-				entry.type === 'project'
-					? entry.project_id
-					: versionId
-						? diff.versions?.[versionId]?.project_id
-						: undefined
-			return {
-				type:
-					entry.type === 'project'
-						? entry.change.kind
-						: entry.change.kind === 'added'
-							? 'modpack_linked'
-							: entry.change.kind === 'removed'
-								? 'modpack_unlinked'
-								: 'modpack_updated',
-				projectName: projectId ? (diff.projects?.[projectId]?.name ?? projectId) : versionId,
-				currentVersionName: versionName(before(entry.change)),
-				newVersionName: versionName(after(entry.change)),
-			}
-		})
-	if (sharedFileNames.length)
-		items.push({
-			type: 'config_files_updated',
-			fileCount: sharedFileNames.length,
-			fileNames: sharedFileNames,
-		})
-	return items
+	return diffs.map((diff) => ({
+		type: diff.type,
+		projectName: diff.projectName ?? undefined,
+		fileName: diff.fileName ? encodeURIComponent(diff.fileName) : undefined,
+		currentVersionName: diff.currentVersionName ?? undefined,
+		newVersionName: diff.newVersionName ?? undefined,
+		fileCount: diff.configFileCount,
+		fileNames: diff.configFileNames,
+		disabled: diff.disabled,
+		external: diff.type === 'added' && !diff.projectId && !!diff.fileName,
+	}))
 }

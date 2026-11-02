@@ -188,7 +188,8 @@ pub fn uninstall(remove_data: bool) -> Result<()> {
 
     #[cfg(unix)]
     for path in [SUDOERS, HELPER] {
-        remove_file(Path::new(path))?;
+        crate::util::if_present(std::fs::remove_file(path))
+            .wrap_err_with(|| format!("could not remove {path}"))?;
     }
     let program = program_path();
     if let Some(dir) = program.parent()
@@ -348,18 +349,6 @@ fn install_sudoers() -> Result<()> {
     }
     std::fs::rename(&staged, SUDOERS)?;
     Ok(())
-}
-
-#[cfg(unix)]
-fn remove_file(path: &Path) -> Result<()> {
-    match std::fs::remove_file(path) {
-        Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
-            Err(error).wrap_err_with(|| {
-                format!("could not remove {}", path.display())
-            })
-        }
-        _ => Ok(()),
-    }
 }
 
 #[cfg(test)]

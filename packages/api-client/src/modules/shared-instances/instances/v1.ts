@@ -1,21 +1,9 @@
-import { AbstractModule } from '../../../core/abstract-module'
-import type { DownloadSink } from '../../../types/download'
-import type { RequestOptions } from '../../../types/request'
-import { SharedInstancesApiError } from '../errors'
+import { SharedInstancesModule } from '../module'
 import type { SharedInstances } from '../types'
 
-export class SharedInstancesInstancesV1Module extends AbstractModule {
+export class SharedInstancesInstancesV1Module extends SharedInstancesModule {
 	public getModuleID(): string {
 		return 'sharedinstances_instances_v1'
-	}
-
-	/** Every request goes through here so a refused one is thrown as a `SharedInstancesApiError`. */
-	private async request<T>(path: string, options: RequestOptions): Promise<T> {
-		try {
-			return await this.client.request<T>(path, options)
-		} catch (error) {
-			throw SharedInstancesApiError.from(error)
-		}
 	}
 
 	public async get(
@@ -31,15 +19,6 @@ export class SharedInstancesInstancesV1Module extends AbstractModule {
 				params,
 			},
 		)
-	}
-
-	public async getForUser(userId: string): Promise<string[]> {
-		return this.request<string[]>('/instances', {
-			api: 'sharedinstances',
-			version: 1,
-			method: 'GET',
-			params: { user: userId },
-		})
 	}
 
 	public async getUsers(instanceId: string): Promise<SharedInstances.Instances.v1.InstanceUsers> {
@@ -64,60 +43,20 @@ export class SharedInstancesInstancesV1Module extends AbstractModule {
 		})
 	}
 
-	public async declinePendingInvite(instanceId: string): Promise<void> {
-		return this.request(`/instances/${encodeURIComponent(instanceId)}/invites/pending`, {
+	/**
+	 * Owner or member. A ticket for Core `coreId` to read this share for the signed-in user, sent
+	 * with an `instance` install so the Core reads only what that user can.
+	 */
+	public async getServerTicket(
+		instanceId: string,
+		coreId: string,
+	): Promise<{ ticket: string; expires: string }> {
+		return this.request(`/instances/${encodeURIComponent(instanceId)}/server-ticket`, {
 			api: 'sharedinstances',
 			version: 1,
-			method: 'DELETE',
+			method: 'POST',
+			body: { core_id: coreId },
 		})
-	}
-
-	public async getLatestVersion(
-		instanceId: string,
-	): Promise<SharedInstances.Instances.v1.InstanceVersion> {
-		return this.request<SharedInstances.Instances.v1.InstanceVersion>(
-			`/instances/${encodeURIComponent(instanceId)}/versions`,
-			{
-				api: 'sharedinstances',
-				version: 1,
-				method: 'GET',
-			},
-		)
-	}
-
-	/** Members. The kept versions, newest first, as the owner's storage lists them. */
-	public async getHistory(instanceId: string): Promise<SharedInstances.Storage.v1.StoredVersion[]> {
-		return this.request<SharedInstances.Storage.v1.StoredVersion[]>(
-			`/instances/${encodeURIComponent(instanceId)}/history`,
-			{
-				api: 'sharedinstances',
-				version: 1,
-				method: 'GET',
-			},
-		)
-	}
-
-	/** Owner only. The current version cannot be deleted: a 409 with code `current_version`. */
-	public async deleteVersion(instanceId: string, version: number): Promise<void> {
-		return this.request(`/instances/${encodeURIComponent(instanceId)}/versions/${version}`, {
-			api: 'sharedinstances',
-			version: 1,
-			method: 'DELETE',
-		})
-	}
-
-	public async getVersion(
-		instanceId: string,
-		version: number,
-	): Promise<SharedInstances.Instances.v1.InstanceVersion> {
-		return this.request<SharedInstances.Instances.v1.InstanceVersion>(
-			`/instances/${encodeURIComponent(instanceId)}/versions/${version}`,
-			{
-				api: 'sharedinstances',
-				version: 1,
-				method: 'GET',
-			},
-		)
 	}
 
 	public async inviteUsers(instanceId: string, userIds: string[]): Promise<{ failed: string[] }> {
@@ -137,27 +76,5 @@ export class SharedInstancesInstancesV1Module extends AbstractModule {
 			method: 'DELETE',
 			body: { user_ids: userIds },
 		})
-	}
-
-	public async downloadMrpack(instanceId: string, version: number): Promise<Blob> {
-		return this.request(`/instances/${encodeURIComponent(instanceId)}/versions/${version}/mrpack`, {
-			api: 'sharedinstances',
-			version: 1,
-			method: 'GET',
-			responseType: 'blob',
-			timeout: 600_000,
-		})
-	}
-
-	public async downloadMrpackTo(
-		instanceId: string,
-		version: number,
-		sink: DownloadSink,
-	): Promise<void> {
-		return this.client.download(
-			`/instances/${encodeURIComponent(instanceId)}/versions/${version}/mrpack`,
-			{ api: 'sharedinstances', version: 1, method: 'GET' },
-			sink,
-		)
 	}
 }

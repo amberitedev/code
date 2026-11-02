@@ -437,7 +437,7 @@ async fn store_outputs(steps: &Steps) -> Result<(), InstallerError> {
         let (made, path) = (steps.made.clone(), relative.clone());
         let bytes = tokio::task::spawn_blocking(move || {
             let mut bytes = Vec::new();
-            let file = crate::content::folder::Folder::open(&made)?
+            let file = crate::state::servers::adapters::filesystem::folder::Folder::open(&made)?
                 .open_file(&path)?
                 .ok_or_else(|| {
                     std::io::Error::from(std::io::ErrorKind::NotFound)

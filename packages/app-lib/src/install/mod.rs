@@ -18,9 +18,9 @@ pub use model::{
     InstallJavaStep, InstallJobEventKind, InstallJobKind, InstallJobSnapshot,
     InstallJobStatus, InstallModpackPreview, InstallPhaseDetails,
     InstallPhaseId, InstallPostInstallEdit, InstallProgress,
-    InstallProgressSecondary, InstallRequest, SharedInstanceExternalFileData,
-    SharedInstanceInstallData, SharedInstanceInstallModpack,
-    SharedInstanceRemovedFile,
+    InstallProgressSecondary, InstallRequest, RemovedFile,
+    SharedInstanceExternalFileData, SharedInstanceInstallData,
+    SharedInstanceInstallModpack, SharedInstanceRemovedConfig,
 };
 pub use runner::{
     bulk_update_content, cancel_job, create_instance, create_modpack_instance,

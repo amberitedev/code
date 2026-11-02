@@ -3,7 +3,7 @@
  * So, for example, addDefaultInstance creates a blank instance object, where the Rust struct is serialized,
  *  and deserialized into a usable JS object.
  */
-import type { Archon, Labrinth } from '@modrinth/api-client'
+import type { Labrinth } from '@modrinth/api-client'
 import type { ContentItem, ContentOwner } from '@modrinth/ui'
 import { Channel, convertFileSrc, invoke } from '@tauri-apps/api/core'
 
@@ -693,6 +693,7 @@ export interface SharedInstancePublishFile {
 	path: string
 	size: number
 	blocked: boolean
+	shared: boolean
 }
 
 export interface SharedInstanceInviteLink {
@@ -775,12 +776,14 @@ export async function get_shared_instance_publish_preview(
 export async function publish_shared_instance(
 	instanceId: string,
 	filePaths: string[],
+	removedPaths: string[],
 	serverCoreId: string | null,
 	onProgress: (uploadedBytes: number, totalBytes: number) => void,
 ): Promise<SharedInstanceAttachment> {
 	return await invoke('plugin:instance|instance_share_publish', {
 		instanceId,
 		filePaths,
+		removedPaths,
 		serverCoreId,
 		onProgress: new Channel<[number, number]>(([uploaded, total]) => onProgress(uploaded, total)),
 	})
@@ -805,11 +808,4 @@ export async function ensure_shared_instance(
 	instanceId: string,
 ): Promise<SharedInstanceAttachment> {
 	return await invoke('plugin:instance|instance_share_ensure', { instanceId })
-}
-
-/** The share's latest version, as a server's Core takes it (`content_variant: 'instance'`). */
-export async function get_shared_instance_server_pack(
-	instanceId: string,
-): Promise<Archon.Content.v1.SharedVersion> {
-	return await invoke('plugin:instance|instance_share_server_pack', { instanceId })
 }

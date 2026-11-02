@@ -14,7 +14,8 @@ pub(super) struct PublishReportFile {
     pub(super) file_name: String,
     pub(super) file_type: String,
     pub(super) size: u64,
-    pub(super) sha512: String,
+    /// P, in hex.
+    pub(super) sha256: String,
     pub(super) executable: bool,
 }
 
@@ -210,11 +211,11 @@ impl PublishReport {
             };
             let _ = writeln!(
                 details,
-                "- {} [{}{upload}{blocked}] {} sha512={}",
+                "- {} [{}{upload}{blocked}] {} sha256={}",
                 file.file_name,
                 file.file_type,
                 format_bytes(file.size),
-                file.sha512
+                file.sha256
             );
         }
 

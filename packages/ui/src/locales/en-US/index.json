@@ -2114,6 +2114,9 @@
   "header.category.resolutions": {
     "defaultMessage": "Resolution"
   },
+  "hosting.content.enabled-for.client-only-not-installed-lock": {
+    "defaultMessage": "Players get this client-only file with the pack."
+  },
   "hosting.content.enabled-for.client-only-on-server-warning": {
     "defaultMessage": "This client-only content is enabled on the server and may prevent the server from starting."
   },
@@ -6784,9 +6787,6 @@
   },
   "servers.play.invites-unavailable": {
     "defaultMessage": "Invitations are unavailable while an action is in progress or the player limit has been reached."
-  },
-  "servers.play.not-ready": {
-    "defaultMessage": "The shared content is not ready yet. Please try again shortly."
   },
   "servers.play.not-shared": {
     "defaultMessage": "An owner or editor needs to share this world first."

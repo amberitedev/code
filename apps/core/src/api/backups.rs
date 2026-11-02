@@ -44,7 +44,8 @@ use crate::{
             self, Kind, OpKind, OpState, Operation, State as BackupRowState,
         },
     },
-    servers::{ServerError, records as servers_records},
+    servers::ServerError,
+    state::servers::adapters::sqlite::server_rows,
 };
 
 /// Also the `{kind}` of the history routes. Mirrors
@@ -57,7 +58,7 @@ pub enum BackupQueueOperationType {
 }
 
 /// Mirrors Archon.BackupsQueue.v1.BackupQueueState.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BackupQueueState {
     Pending,
@@ -70,7 +71,7 @@ pub enum BackupQueueState {
 }
 
 /// Mirrors Archon.BackupsQueue.v1.BackupStatus.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BackupStatus {
     Pending,
@@ -83,7 +84,7 @@ pub enum BackupStatus {
 
 /// Body of POST `backups-queue` (create) and POST `backups-queue/{bid}/restore`. Mirrors
 /// Archon.BackupsQueue.v1.BackupRequest.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BackupRequest {
     pub name: String,
 }
@@ -96,13 +97,13 @@ pub struct PatchBackup {
 }
 
 /// Response of POST `backups-queue`. Mirrors Archon.BackupsQueue.v1.PostBackupQueueResponse.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PostBackupQueueResponse {
     pub id: Uuid,
 }
 
 /// Who started an operation. Mirrors Archon.BackupsQueue.v1.UserInfo.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserInfo {
     pub id: String,
     pub username: String,
@@ -127,7 +128,7 @@ pub enum HistoryAction {
 }
 
 /// A queued or running operation. Mirrors Archon.BackupsQueue.v1.ActiveOperation.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActiveOperation {
     pub backup_id: Uuid,
     pub operation_type: BackupQueueOperationType,
@@ -141,7 +142,7 @@ pub struct ActiveOperation {
 
 /// One past or current operation on a backup. Mirrors
 /// Archon.BackupsQueue.v1.BackupQueueOperation.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BackupQueueOperation {
     pub operation_type: BackupQueueOperationType,
     pub operation_id: Option<i64>,
@@ -158,7 +159,7 @@ pub struct BackupQueueOperation {
 
 /// Mirrors Archon.BackupsQueue.v1.BackupQueueBackup. `rotates_at` is set on the backups that
 /// hold a scheduled slot: when the scheduled backups after it will have pushed it out.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BackupQueueBackup {
     pub id: Uuid,
     pub name: String,
@@ -172,7 +173,7 @@ pub struct BackupQueueBackup {
 }
 
 /// Response of GET `backups-queue`. Mirrors Archon.BackupsQueue.v1.BackupsQueueResponse.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BackupsQueueResponse {
     pub active_operations: Vec<ActiveOperation>,
     pub backups: Vec<BackupQueueBackup>,
@@ -180,7 +181,7 @@ pub struct BackupsQueueResponse {
 
 /// How a server's [`SLOTS`] are split and how often it is backed up. Mirrors
 /// Archon.BackupsQueue.v1.WorldBackupOptions.
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct WorldBackupOptions {
     pub split_automatic: u32,
     pub split_manual: u32,
@@ -190,7 +191,7 @@ pub struct WorldBackupOptions {
 
 /// Response of GET `backups-queue/with-options`. Mirrors
 /// Archon.BackupsQueue.v1.BackupsQueueWithOptionsResponse.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BackupsQueueWithOptionsResponse {
     #[serde(flatten)]
     pub queue: BackupsQueueResponse,
@@ -200,7 +201,7 @@ pub struct BackupsQueueWithOptionsResponse {
 
 /// Body of PATCH `backups-queue/with-options`. Mirrors
 /// Archon.BackupsQueue.v1.PatchWorldBackupOptions.
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct PatchWorldBackupOptions {
     #[serde(default)]
     pub split_automatic: Option<u32>,
@@ -222,7 +223,7 @@ pub struct PatchOptionsQuery {
 /// Response of PATCH `backups-queue/with-options`. Not `applied` when the change would delete
 /// the scheduled backups in `backup_ids` and was not acknowledged. Mirrors
 /// Archon.BackupsQueue.v1.PatchWorldBackupOptionsResponse.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PatchWorldBackupOptionsResponse {
     pub applied: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -776,7 +777,7 @@ pub(super) fn expired_link() -> ApiError {
 
 /// Who is downloading: a link token for `target` on `server`, or a session in the header. Either
 /// way they must still be an editor of the server.
-async fn downloader(
+pub(super) async fn downloader(
     state: &AppState,
     caller: Result<Caller, ApiError>,
     token: Option<&str>,
@@ -798,10 +799,12 @@ async fn downloader(
     Ok(caller)
 }
 
-/// A zip streamed to the client, with a name to save it as.
-fn zip_response(
+/// A zip streamed to the client, saved as `name` with `extension`. A `temporary` file is removed
+/// once the response is done with it.
+pub(super) fn zip_response(
     file: std::fs::File,
     name: &str,
+    extension: &str,
     temporary: Option<std::path::PathBuf>,
 ) -> Response {
     let length = file.metadata().map(|meta| meta.len()).unwrap_or_default();
@@ -827,7 +830,7 @@ fn zip_response(
             (header::CONTENT_LENGTH, length.to_string()),
             (
                 header::CONTENT_DISPOSITION,
-                format!("attachment; filename=\"{name}.zip\""),
+                format!("attachment; filename=\"{name}.{extension}\""),
             ),
         ],
         Body::from_stream(stream),
@@ -898,7 +901,7 @@ pub async fn download_backup(
         },
     )
     .await;
-    Ok(zip_response(file, &found.name, None))
+    Ok(zip_response(file, &found.name, "zip", None))
 }
 
 /// `GET /servers/{id}/v1/worlds/{wid}/files/download-full-zip`: the world and settings as they
@@ -913,7 +916,7 @@ pub async fn download_world(
     let caller =
         downloader(&state, caller, query.token.as_deref(), &id, &Target::World)
             .await?;
-    let server = servers_records::get(&state.db, &id)
+    let server = server_rows::get(&state.db, &id)
         .await?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
     let path = state
@@ -925,7 +928,7 @@ pub async fn download_world(
     state.backups.snapshot(&id, &path, |_| {}).await?;
     let file = std::fs::File::open(&path)?;
     activity::log(&state.db, &caller, Some(&id), Action::WorldDownloaded).await;
-    Ok(zip_response(file, &server.name, Some(path)))
+    Ok(zip_response(file, &server.name, "zip", Some(path)))
 }
 
 /// `GET /v1/servers/{id}/worlds/{wid}/select-download`: the world downloads straight from Core.

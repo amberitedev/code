@@ -29,14 +29,16 @@ use uuid::Uuid;
 use super::{
     AppState,
     activity::Action,
-    backend::{Grant, OwedCall, Remove},
+    backend::{Grant, Remove},
     error::{ApiError, ErrorCode},
 };
 use crate::{
     access::{
-        Caller, Dangerous, Level, activity, fresh_ticket, now, sync::owe,
+        Caller, Dangerous, Level, activity, fresh_ticket, now, owed::OwedCall,
+        sync::owe,
     },
-    servers::{ServerError, records},
+    servers::ServerError,
+    state::servers::adapters::sqlite::server_rows,
 };
 
 /// People with a role on any server of this Core, at most. The backend's directory holds no
@@ -390,8 +392,8 @@ async fn owner_id(db: &sqlx::SqlitePool) -> sqlx::Result<Option<String>> {
 async fn server(
     state: &AppState,
     id: &str,
-) -> Result<records::ServerRow, ApiError> {
-    Ok(records::get(&state.db, id)
+) -> Result<server_rows::ServerRow, ApiError> {
+    Ok(server_rows::get(&state.db, id)
         .await?
         .ok_or_else(|| ServerError::NotFound(id.into()))?)
 }

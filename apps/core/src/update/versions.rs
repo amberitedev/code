@@ -18,7 +18,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::daemon::paths::Paths;
+use crate::{daemon::paths::Paths, util::if_present};
 
 /// Which version the launcher runs. Launchers are never updated, so a field never changes its
 /// meaning and new fields must be optional.
@@ -147,7 +147,7 @@ pub fn load(paths: &Paths) -> io::Result<Option<State>> {
 pub fn save(paths: &Paths, state: Option<&State>) -> io::Result<()> {
     let path = paths.version_state();
     let Some(state) = state else {
-        remove_file(&path)?;
+        if_present(std::fs::remove_file(&path))?;
         // A fresh install clears the state before the data folder exists: nothing to sync.
         if !paths.versions().exists() {
             return Ok(());
@@ -195,7 +195,7 @@ fn database_files(dir: &Path) -> [PathBuf; 3] {
 pub fn save_database(paths: &Paths) -> io::Result<()> {
     let copy = paths.database_before_update();
     let staged = copy.with_extension("new");
-    remove_dir(&staged)?;
+    if_present(std::fs::remove_dir_all(&staged))?;
     std::fs::create_dir_all(&staged)?;
     let db = paths.database();
     let db_dir = db.parent().expect("the database has a folder");
@@ -206,7 +206,7 @@ pub fn save_database(paths: &Paths) -> io::Result<()> {
         }
     }
     sync_dir(&staged)?;
-    remove_dir(&copy)?;
+    if_present(std::fs::remove_dir_all(&copy))?;
     std::fs::rename(&staged, &copy)?;
     sync_dir(db_dir)
 }
@@ -232,17 +232,10 @@ pub fn restore_database(paths: &Paths) -> io::Result<()> {
             copy_synced(from, &staged)?;
             std::fs::rename(&staged, &to)?;
         } else {
-            remove_file(&to)?;
+            if_present(std::fs::remove_file(&to))?;
         }
     }
     sync_dir(db_dir)
-}
-
-fn remove_dir(path: &Path) -> io::Result<()> {
-    match std::fs::remove_dir_all(path) {
-        Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
-        _ => Ok(()),
-    }
 }
 
 /// Copy the running binary into its version folder, so an update has a version to roll back
@@ -274,13 +267,6 @@ pub fn clean(paths: &Paths, keep: &[&str]) {
         if let Err(error) = std::fs::remove_dir_all(entry.path()) {
             tracing::debug!(%error, version = %name, "kept an old version");
         }
-    }
-}
-
-fn remove_file(path: &Path) -> io::Result<()> {
-    match std::fs::remove_file(path) {
-        Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
-        _ => Ok(()),
     }
 }
 

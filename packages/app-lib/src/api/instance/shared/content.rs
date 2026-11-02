@@ -1,119 +1,73 @@
-use super::client::{
-    ExternalFileResponse, InstanceVersionResponse, get_remote_version,
-};
-use super::diff::shared_external_file_key;
-use super::publish::dedupe_strings;
+use super::client::{ManifestFile, ShareVersion, check_removed_files};
+use super::diff::remote_configuration;
 use super::*;
 use crate::api::pack::install_from::{
     EnvType, PackDependency, PackFileHash, PackFormat,
 };
 use crate::state::{DependencyType, SideType};
 use crate::util::fetch::{DownloadMeta, DownloadReason};
+use sharing_client::diff::{CarriedFile, ShareContent};
+use sharing_client::install::{ConfigUpdate, ModpackFile, config_update};
 use std::collections::BTreeMap;
 
-/// The config files a member writes to reach `latest`. Every version lists all config files
-/// shared so far, so only those that changed since `applied_version` are written and the rest
-/// stay as the member has them, as when upstream published configs as deltas. Every config is
-/// written on a first install, or when the backend no longer keeps the applied version.
-pub(super) async fn remote_shared_config_files(
-    shared_instance_id: &str,
+/// What reaching `latest` does to a member's config files (see
+/// `sharing_client::install::config_update`), from the manifest of the version their instance
+/// applied, which the App keeps beside its attachment. Every config is written on a first install
+/// (no `instance_id`), and when that manifest is not kept.
+pub(super) async fn remote_config_update(
+    instance_id: Option<&str>,
     applied_version: Option<i32>,
-    latest: &InstanceVersionResponse,
+    latest: &ShareVersion,
     state: &State,
-) -> crate::Result<Vec<ExternalFileResponse>> {
-    let applied = match applied_version {
-        Some(version) if version >= latest.version => return Ok(Vec::new()),
-        Some(version) => {
-            get_remote_version(shared_instance_id, version, state).await?
+) -> crate::Result<ConfigUpdate> {
+    let applied = match (instance_id, applied_version) {
+        (_, Some(version)) if version >= latest.version => {
+            return Ok(ConfigUpdate::default());
         }
-        None => None,
+        (Some(instance_id), Some(version)) => {
+            applied_files(instance_id, version, &state.pool).await?
+        }
+        _ => None,
     };
-    // A changed `backtrack_version` starts the member over, so every config is written.
-    let applied = applied.filter(|applied| {
-        applied.backtrack_version == latest.backtrack_version
-    });
-    changed_config_files(
-        &latest.external_files,
-        applied
-            .as_ref()
-            .map(|version| version.external_files.as_slice()),
+    Ok(config_update(&latest.external_files, applied.as_deref()))
+}
+
+/// The manifest files of `version` of the share, as the instance applied it, while the App keeps
+/// them.
+pub(super) async fn applied_files(
+    instance_id: &str,
+    version: i32,
+    pool: &sqlx::SqlitePool,
+) -> crate::Result<Option<Vec<ManifestFile>>> {
+    let files: Option<String> = sqlx::query_scalar(
+        "SELECT files FROM shared_instance_applied_files WHERE instance_id = ? AND version = ?",
     )
+    .bind(instance_id)
+    .bind(version)
+    .fetch_optional(pool)
+    .await?;
+    files
+        .map(|files| serde_json::from_str(&files))
+        .transpose()
+        .map_err(Into::into)
 }
 
-/// The config files of `latest` that are new or differ from `applied`. A legacy config bundle
-/// comes first so individual files are written over it.
-pub(super) fn changed_config_files(
-    latest: &[ExternalFileResponse],
-    applied: Option<&[ExternalFileResponse]>,
-) -> crate::Result<Vec<ExternalFileResponse>> {
-    ensure_config_limits(latest)?;
-    let applied = applied
-        .unwrap_or_default()
-        .iter()
-        .map(|file| ((&file.file_type, &file.file_name), &file.sha256))
-        .collect::<HashMap<_, _>>();
-    let mut bundle = None;
-    let mut files = BTreeMap::new();
-    for file in latest.iter().filter(|file| {
-        applied.get(&(&file.file_type, &file.file_name)) != Some(&&file.sha256)
-    }) {
-        match file.file_type.as_str() {
-            CONFIG_BUNDLE_FILE_TYPE => bundle = Some(file.clone()),
-            CONFIG_FILE_TYPE => {
-                files.insert(file.file_name.clone(), file.clone());
-            }
-            _ => {}
-        }
-    }
-
-    Ok(bundle.into_iter().chain(files.into_values()).collect())
-}
-
-fn ensure_config_limits(
-    external_files: &[ExternalFileResponse],
+/// Keeps the manifest files of `version`, which the instance just applied, for its next update.
+pub(crate) async fn set_applied_files(
+    instance_id: &str,
+    version: i32,
+    files: &[ManifestFile],
+    pool: &sqlx::SqlitePool,
 ) -> crate::Result<()> {
-    let mut count = 0;
-    let mut size = 0_u64;
-    for file in external_files
-        .iter()
-        .filter(|file| file.file_type == CONFIG_FILE_TYPE)
-    {
-        count += 1;
-        size = size.saturating_add(
-            file.file_size
-                .and_then(|size| u64::try_from(size).ok())
-                .unwrap_or(u64::MAX),
-        );
-    }
-    if count > MAX_SHARED_FILES || size > MAX_SHARED_FILES_TOTAL_SIZE {
-        bail!(crate::ErrorKind::InputError(
-            "shared instance files exceed the size or file count limit"
-                .to_string(),
-        ));
-    }
+    sqlx::query(
+        "INSERT INTO shared_instance_applied_files (instance_id, version, files) VALUES (?, ?, ?)          ON CONFLICT (instance_id) DO UPDATE SET version = excluded.version, files = excluded.files",
+    )
+    .bind(instance_id)
+    .bind(version)
+    .bind(serde_json::to_string(files)?)
+    .execute(pool)
+    .await?;
     Ok(())
-}
-
-pub(crate) struct SharedModpackFile {
-    pub relative_path: String,
-    pub sha1: Option<String>,
-    pub version_id: Option<String>,
-    removed_path_alias: Option<String>,
-}
-
-impl SharedModpackFile {
-    pub(crate) fn is_removed(
-        &self,
-        removed_files: &[SharedInstanceRemovedFile],
-    ) -> bool {
-        removed_files.iter().any(|removed| {
-            removed.matches(self.version_id.as_deref(), &self.relative_path)
-                || self
-                    .removed_path_alias
-                    .as_deref()
-                    .is_some_and(|path| removed.matches(None, path))
-        })
-    }
 }
 
 /// Reads the client content from the cached pack archive, including unresolved overrides.
@@ -121,7 +75,7 @@ impl SharedModpackFile {
 pub(crate) async fn shared_modpack_files(
     modpack_id: &str,
     state: &State,
-) -> crate::Result<Vec<SharedModpackFile>> {
+) -> crate::Result<Vec<ModpackFile>> {
     let version = CachedEntry::get_version(
         modpack_id,
         Some(CacheBehaviour::MustRevalidate),
@@ -272,11 +226,12 @@ pub(crate) async fn shared_modpack_files(
                         .contains(filename)
                         .then(|| format!("{default_parent}/{filename}"))
                 });
-            SharedModpackFile {
-                relative_path,
+            ModpackFile {
+                path: relative_path,
                 sha1: hash,
                 version_id: metadata.map(|file| file.version_id.clone()),
-                removed_path_alias,
+                alias: removed_path_alias,
+                source: (),
             }
         })
         .collect())
@@ -287,138 +242,21 @@ fn is_content_path(path: &str) -> bool {
         && !path.ends_with(".disabled")
 }
 
+/// The share content `version` gives members, as the share diff reads it.
 pub(super) async fn remote_shared_content(
-    version: &InstanceVersionResponse,
+    version: &ShareVersion,
     state: &State,
-) -> crate::Result<(Vec<String>, BTreeSet<ExternalFileKey>)> {
-    version.validate_removed_files()?;
-    let mut version_ids = version
-        .modrinth_ids
-        .iter()
-        .filter(|id| version.modpack_id.as_deref() != Some(id.as_str()))
-        .cloned()
-        .collect::<Vec<_>>();
-    let mut external_files = version
-        .external_files
-        .iter()
-        .filter(|file| {
-            !matches!(
-                file.file_type.as_str(),
-                CONFIG_BUNDLE_FILE_TYPE | CONFIG_FILE_TYPE
-            )
-        })
-        .map(|file| shared_external_file_key(&file.file_type, &file.file_name))
-        .collect::<crate::Result<BTreeSet<_>>>()?;
-    let explicit_paths = version
-        .external_files
-        .iter()
-        .filter_map(|file| {
-            ProjectType::from_name(&file.file_type)
-                .map(|kind| format!("{}/{}", kind.get_folder(), file.file_name))
-        })
-        .collect::<HashSet<_>>();
-    if let Some(modpack_id) =
-        version.modpack_id.as_deref().filter(|id| !id.is_empty())
-    {
-        for file in shared_modpack_files(modpack_id, state).await? {
-            if file.is_removed(&version.removed_files)
-                || explicit_paths.contains(&file.relative_path)
-            {
-                continue;
-            }
-            if let Some(version_id) = file.version_id {
-                version_ids.push(version_id);
-            } else if let Some((parent, filename)) =
-                file.relative_path.split_once('/')
-            {
-                external_files.insert(ExternalFileKey {
-                    content_type: ProjectType::from_name(parent)
-                        .expect("pack content path was validated")
-                        .into(),
-                    path: filename.to_string(),
-                });
-            }
-        }
-    }
-    dedupe_strings(&mut version_ids);
-    Ok((version_ids, external_files))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn file(
-        file_type: &str,
-        file_name: &str,
-        sha256: &str,
-    ) -> ExternalFileResponse {
-        ExternalFileResponse {
-            file_name: file_name.to_string(),
-            file_type: file_type.to_string(),
-            file_size: Some(1),
-            sha256: Some(sha256.to_string()),
-            ..Default::default()
-        }
-    }
-
-    fn names(files: &[ExternalFileResponse]) -> Vec<(&str, &str)> {
-        files
-            .iter()
-            .map(|file| (file.file_type.as_str(), file.file_name.as_str()))
-            .collect()
-    }
-
-    #[test]
-    fn only_configs_changed_since_the_applied_version_are_written() {
-        let applied = [
-            file(CONFIG_FILE_TYPE, "config/same.toml", "1"),
-            file(CONFIG_FILE_TYPE, "config/changed.toml", "1"),
-        ];
-        let latest = [
-            file("mod", "extra.jar", "2"),
-            file(CONFIG_FILE_TYPE, "config/same.toml", "1"),
-            file(CONFIG_FILE_TYPE, "config/changed.toml", "2"),
-            file(CONFIG_FILE_TYPE, "config/new.toml", "2"),
-        ];
-
-        let files = changed_config_files(&latest, Some(&applied)).unwrap();
-
-        assert_eq!(
-            names(&files),
-            [
-                (CONFIG_FILE_TYPE, "config/changed.toml"),
-                (CONFIG_FILE_TYPE, "config/new.toml"),
-            ]
-        );
-    }
-
-    #[test]
-    fn a_first_install_writes_every_config_with_the_bundle_first() {
-        let latest = [
-            file(CONFIG_FILE_TYPE, "config/a.toml", "1"),
-            file(CONFIG_BUNDLE_FILE_TYPE, "configs.zip", "1"),
-        ];
-
-        let files = changed_config_files(&latest, None).unwrap();
-
-        assert_eq!(
-            names(&files),
-            [
-                (CONFIG_BUNDLE_FILE_TYPE, "configs.zip"),
-                (CONFIG_FILE_TYPE, "config/a.toml"),
-            ]
-        );
-    }
-
-    #[test]
-    fn limits_apply_to_the_version() {
-        let mut half = file(CONFIG_FILE_TYPE, "config/a.toml", "1");
-        half.file_size = Some((MAX_SHARED_FILES_TOTAL_SIZE / 2 + 1) as i64);
-        let mut other_half = half.clone();
-        other_half.file_name = "config/b.toml".to_string();
-
-        assert!(changed_config_files(&[half.clone()], None).is_ok());
-        assert!(changed_config_files(&[half, other_half], None).is_err());
-    }
+) -> crate::Result<ShareContent> {
+    check_removed_files(version)?;
+    let modpack = match version.modpack_id() {
+        Some(modpack_id) => shared_modpack_files(modpack_id, state).await?,
+        None => Vec::new(),
+    };
+    ShareContent::of(
+        &version.content,
+        version.external_files.iter().map(CarriedFile::from),
+        modpack,
+        remote_configuration(version),
+    )
+    .map_err(|error| crate::ErrorKind::InputError(error.to_string()).into())
 }

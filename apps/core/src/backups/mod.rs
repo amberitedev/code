@@ -44,13 +44,14 @@ use uuid::Uuid;
 
 use crate::{
     access::{Caller, now},
-    api::events::{BackupState, BackupTask, WsEvent},
-    content::{
+    daemon::paths::Paths,
+    event::{BackupState, BackupTask, WsEvent},
+    servers::{Phase, ServerError, Servers, console},
+    state::servers::adapters::filesystem::{
         archive,
         folder::{self, Folder},
     },
-    daemon::paths::Paths,
-    servers::{Phase, ServerError, Servers, console},
+    util::if_present,
 };
 use records::{Kind, OpKind, OpState, Operation};
 pub use space::enough_space;
@@ -111,6 +112,8 @@ pub enum Target {
     Backup(String),
     /// One file of the server, by its cleaned path.
     File(String),
+    /// The server's content as a `.mrpack`.
+    Pack,
 }
 
 /// A download link someone with access asked for: single use, for a few minutes.
@@ -403,7 +406,7 @@ impl Backups {
                 "The backup is in use; try again when it is done.".into(),
             ));
         }
-        remove_file(&self.file(server_id, backup_id))?;
+        if_present(std::fs::remove_file(self.file(server_id, backup_id)))?;
         records::delete_backup(&self.db, backup_id).await?;
         Ok(())
     }
@@ -467,16 +470,12 @@ impl Backups {
             }
         }
         if operation.kind == OpKind::Create && error.is_some() {
-            let _ = remove_file(
-                &self.file(&operation.server_id, &operation.backup_id),
+            let _ = std::fs::remove_file(
+                self.file(&operation.server_id, &operation.backup_id),
             );
         }
-        let recorded = match &result {
-            Ok(size) => Ok(*size),
-            Err(_) => Err(error.as_deref().unwrap_or_default()),
-        };
         if let Err(error) =
-            records::finish(&self.db, &operation, recorded).await
+            records::finish(&self.db, &operation, error.as_deref()).await
         {
             warn!(%error, "could not record the end of a backup operation");
         }
@@ -911,14 +910,6 @@ fn send_progress(
             finish_time: finished,
         },
     ));
-}
-
-/// Remove a file; one that is not there is fine.
-fn remove_file(path: &Path) -> io::Result<()> {
-    match std::fs::remove_file(path) {
-        Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
-        _ => Ok(()),
-    }
 }
 
 /// The world folders of a server folder, by name.

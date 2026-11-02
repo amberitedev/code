@@ -27,7 +27,8 @@ use super::{
 use crate::{
     access::{Caller, Level, activity},
     installs::java,
-    servers::{ServerError, launch, records},
+    servers::{ServerError, launch},
+    state::servers::adapters::sqlite::server_rows,
 };
 
 /// Mirrors the `jdk_version` union of Archon.Servers.v0.StartupConfig.
@@ -127,7 +128,7 @@ const MAJORS: [u32; 5] = [8, 11, 17, 21, 25];
 
 /// What the startup routes report for a server: its command line and Java major.
 async fn report(state: &AppState, id: &str) -> Result<(String, u32), ApiError> {
-    let server = records::get(&state.db, id)
+    let server = server_rows::get(&state.db, id)
         .await?
         .ok_or_else(|| ServerError::NotFound(id.into()))?;
     let paths = state.servers.paths();
@@ -159,7 +160,7 @@ async fn set_major(
             format!("Core installs Java {MAJORS:?}, not {major}."),
         ));
     }
-    let server = records::get(&state.db, id)
+    let server = server_rows::get(&state.db, id)
         .await?
         .ok_or_else(|| ServerError::NotFound(id.into()))?;
     // The major the version needs is the default, not a choice: stored, it would pin the server
@@ -176,7 +177,7 @@ async fn set_major(
         None => None,
     };
     let chosen = major.filter(|major| Some(*major) != needed);
-    records::set_java(
+    server_rows::set_java(
         &state.db,
         id,
         server.java_path.as_deref(),
@@ -284,7 +285,7 @@ pub async fn set_java_path(
     Json(body): Json<JavaPath>,
 ) -> Result<StatusCode, ApiError> {
     caller.require(&state.db, &id, Level::Editor).await?;
-    let server = records::get(&state.db, &id)
+    let server = server_rows::get(&state.db, &id)
         .await?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
     if let Some(path) = &body.path {
@@ -296,7 +297,7 @@ pub async fn set_java_path(
             ));
         }
     }
-    records::set_java(
+    server_rows::set_java(
         &state.db,
         &id,
         body.path.as_deref(),

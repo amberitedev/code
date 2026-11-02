@@ -159,9 +159,6 @@ export namespace SharedInstances {
 				kept_versions: number | null
 				shares: StoredShare[]
 			}
-
-			/** `kept_versions` is 1 to 1000, or null to keep all. */
-			export type StorageSettings = Pick<Storage, 'kept_versions'>
 		}
 	}
 

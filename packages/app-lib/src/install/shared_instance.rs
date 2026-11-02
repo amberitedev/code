@@ -12,10 +12,7 @@ use super::runner::{
 };
 use crate::ErrorKind;
 use crate::api::instance::{
-    CONFIG_BUNDLE_FILE_TYPE, CONFIG_DIRECTORY, CONFIG_FILE_TYPE,
-    CONFIG_SYNC_ENABLED, MAX_CONFIG_BUNDLE_ENTRIES,
-    MAX_SHARED_FILES_TOTAL_SIZE, is_shareable_file_path,
-    is_supported_config_file, read_bounded_config_bundle_entry,
+    CONFIG_FILE_TYPE, CONFIG_SYNC_ENABLED, is_shareable_file_path,
     shared_modpack_files,
 };
 use crate::api::pack::install_from::CreatePackLocation;
@@ -31,7 +28,6 @@ use path_util::SafeRelativeUtf8UnixPathBuf;
 use sqlx::SqlitePool;
 use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use uuid::Uuid;
@@ -40,7 +36,6 @@ use uuid::Uuid;
 const DEFAULT_SERVER_ICON: &[u8] = include_bytes!(
     "../../../assets/external/illustrations/minecraft_server_icon.png"
 );
-const MAX_SHARED_INSTANCE_EXTERNAL_FILE_SIZE: u64 = 500 * 1024 * 1024;
 const MAX_SHARED_INSTANCE_INITIAL_BUFFER_SIZE: u64 = 8 * 1024 * 1024;
 const SHARED_INSTANCE_CONTENT_DOWNLOAD_CONCURRENCY: usize = 4;
 const SHARED_INSTANCE_FILE_DOWNLOAD_CONCURRENCY: usize = 64;
@@ -166,6 +161,13 @@ pub(super) async fn finalize_shared_instance_attachment(
         },
         &state.pool,
     )
+    .await?;
+    crate::api::instance::set_applied_files(
+        instance_id,
+        data.version,
+        &data.applied_files,
+        &state.pool,
+    )
     .await
 }
 
@@ -223,7 +225,6 @@ struct DesiredSharedInstanceContent {
         SharedInstanceExternalFileKey,
         DesiredSharedInstanceExternalFile,
     >,
-    config_bundle: Option<SharedInstanceExternalFileData>,
     config_files: Vec<SharedInstanceExternalFileData>,
 }
 
@@ -241,7 +242,6 @@ struct SharedInstanceApplyPlan {
     external_removals: Vec<CurrentSharedInstanceExternalFile>,
     external_updates: Vec<DesiredSharedInstanceExternalFile>,
     external_additions: Vec<DesiredSharedInstanceExternalFile>,
-    config_bundle: Option<SharedInstanceExternalFileData>,
     config_files: Vec<SharedInstanceExternalFileData>,
     modpack_toggles: Vec<(String, bool)>,
     modpack_removals: Vec<String>,
@@ -260,7 +260,10 @@ impl SharedInstanceApplyPlan {
             });
         }
 
-        let current = current_shared_instance_content(metadata, state).await?;
+        let owner = owner_shared_content(metadata, data, state).await?;
+        let current =
+            current_shared_instance_content(metadata, owner.as_ref(), state)
+                .await?;
         let desired = desired_shared_instance_content(data, state).await?;
         let modpack_changes =
             shared_modpack_toggles(metadata, data, state).await?;
@@ -287,7 +290,6 @@ impl SharedInstanceApplyPlan {
         let mut plan = Self {
             project_removals,
             external_removals,
-            config_bundle: desired.config_bundle,
             config_files: desired.config_files,
             modpack_toggles: modpack_changes.toggles,
             modpack_removals: modpack_changes.removals,
@@ -343,7 +345,6 @@ impl SharedInstanceApplyPlan {
             + self.project_additions.len()
             + self.external_updates.len()
             + self.external_additions.len()
-            + usize::from(self.config_bundle.is_some())
             + self.config_files.len()) as u64
     }
 }
@@ -381,6 +382,7 @@ async fn apply_shared_instance_update_inner(
     )
     .await?
     .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
+    remove_left_configs(instance_id, data, state).await?;
     let plan = SharedInstanceApplyPlan::build(&metadata, data, state).await?;
 
     if !plan.configuration_changed && data.linked_server.is_some() {
@@ -429,7 +431,8 @@ async fn reinstall_shared_instance(
     if data.fresh_start {
         clear_shared_instance_for_fresh_start(instance_id, state).await?;
     } else {
-        remove_existing_shared_instance_content(instance_id, state).await?;
+        remove_existing_shared_instance_content(instance_id, data, state)
+            .await?;
     }
     apply_shared_instance_content(job_id, job_state, state, instance_id, data)
         .await?;
@@ -545,7 +548,6 @@ async fn apply_shared_instance_changes(
             .iter()
             .chain(&plan.external_additions)
             .map(|file| &file.file)
-            .chain(&plan.config_bundle)
             .chain(&plan.config_files)
             .collect(),
         content_change_count,
@@ -563,6 +565,42 @@ async fn apply_shared_instance_changes(
     )
     .await?;
 
+    Ok(())
+}
+
+/// Delete the config files that left the share where the member's copy is still what the share
+/// sent. One the member edited stays theirs.
+async fn remove_left_configs(
+    instance_id: &str,
+    data: &SharedInstanceInstallData,
+    state: &State,
+) -> crate::Result<()> {
+    if data.removed_config_files.is_empty() {
+        return Ok(());
+    }
+    let writer =
+        crate::api::instance::InstanceFileWriter::new(state, instance_id)
+            .await?;
+    for file in &data.removed_config_files {
+        let unedited = instance_has_shared_file(
+            &writer,
+            state,
+            &file.file_name,
+            file.file_size,
+            Some(&file.sha1),
+        )
+        .await
+        .unwrap_or(false);
+        if unedited {
+            let path = writer.destination(state, &file.file_name).await?;
+            match tokio::fs::remove_file(&path).await {
+                Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                    return Err(error.into());
+                }
+                _ => {}
+            }
+        }
+    }
     Ok(())
 }
 
@@ -597,6 +635,7 @@ pub(super) fn shared_instance_update_requires_full_apply(
 
 async fn current_shared_instance_content(
     metadata: &crate::state::InstanceMetadata,
+    owner: Option<&OwnerSharedContent>,
     state: &State,
 ) -> crate::Result<CurrentSharedInstanceContent> {
     let entries = content_rows::get_content_entries(
@@ -622,16 +661,15 @@ async fn current_shared_instance_content(
     let mut content = CurrentSharedInstanceContent::default();
 
     for entry in entries {
-        if !replaced_by_shared_update(metadata, entry.source_kind) {
-            continue;
-        }
-
         let Some(file_id) = entry.file_id.as_ref() else {
             continue;
         };
         let Some(file) = files.get(file_id) else {
             continue;
         };
+        if !replaced_by_shared_update(&entry, &file.file_name, owner) {
+            continue;
+        }
 
         if let Some(version_id) = entry.version_id.clone() {
             let Some(project_id) = entry.project_id.clone().or_else(|| {
@@ -696,10 +734,11 @@ async fn shared_modpack_toggles(
     let mut changes = SharedModpackChanges::default();
     for inherited in inherited {
         let overridden = data.external_files.iter().any(|file| {
-            ProjectType::from_name(&file.file_type).is_some_and(|kind| {
-                inherited.relative_path
-                    == format!("{}/{}", kind.get_folder(), file.file_name)
-            })
+            sharing_client::install::content_path(
+                &file.file_type,
+                &file.file_name,
+            )
+            .is_some_and(|path| path == inherited.path)
         });
         let removed = inherited.is_removed(&data.removed_files);
         let enabled = !removed && !overridden;
@@ -712,7 +751,7 @@ async fn shared_modpack_toggles(
                 let file =
                     entry.file_id.as_ref().and_then(|id| files.get(id))?;
                 (file.relative_path.trim_end_matches(".disabled")
-                    == inherited.relative_path
+                    == inherited.path
                     && inherited.sha1.as_deref().map_or_else(
                         || {
                             inherited.version_id.is_none()
@@ -801,18 +840,100 @@ async fn ensure_shared_instance_additions_enabled(
     Ok(())
 }
 
-/// Whether a shared update replaces content of this kind. A member keeps what they added
-/// themselves. Everything in the owner's instance is pushed, so restoring a version replaces
-/// their own additions too.
-fn replaced_by_shared_update(
+/// The owner's own content a restore may replace: what the share carried at its last push (the
+/// newest entry of the owner's history) or carries in the restored version. The rest of the
+/// owner's instance was added since the last push and is kept, so a restore never deletes work
+/// the owner has not pushed.
+#[derive(Debug, Default)]
+struct OwnerSharedContent {
+    version_ids: HashSet<String>,
+    project_ids: HashSet<String>,
+    files: HashSet<SharedInstanceExternalFileKey>,
+}
+
+/// The owner's [`OwnerSharedContent`] for applying `data`, or `None` for a member.
+async fn owner_shared_content(
     metadata: &crate::state::InstanceMetadata,
-    source_kind: ContentSourceKind,
+    data: &SharedInstanceInstallData,
+    state: &State,
+) -> crate::Result<Option<OwnerSharedContent>> {
+    let Some(attachment) = metadata
+        .shared_instance
+        .as_ref()
+        .filter(|attachment| attachment.role == SharedInstanceRole::Owner)
+    else {
+        return Ok(None);
+    };
+    let last_push =
+        crate::api::instance::last_shared_push(&attachment.id, state).await?;
+    let mut content = OwnerSharedContent::default();
+    content
+        .version_ids
+        .extend(data.modrinth_ids.iter().cloned());
+    if let Some(entry) = &last_push {
+        content
+            .version_ids
+            .extend(entry.content.modrinth_ids.iter().cloned());
+    }
+    let pushed_files = last_push.iter().flat_map(|entry| {
+        entry
+            .manifest()
+            .map(|file| (file.file_type.as_str(), file.file_name.as_str()))
+    });
+    let restored_files = data
+        .external_files
+        .iter()
+        .map(|file| (file.file_type.as_str(), file.file_name.as_str()));
+    for (file_type, file_name) in pushed_files.chain(restored_files) {
+        if let Some(project_type) = ProjectType::from_name(file_type) {
+            content.files.insert((project_type, file_name.to_owned()));
+        }
+    }
+    let ids = content
+        .version_ids
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    content.project_ids = CachedEntry::get_version_many(
+        &ids,
+        None,
+        &state.pool,
+        &state.api_semaphore,
+    )
+    .await?
+    .into_iter()
+    .map(|version| version.project_id)
+    .collect();
+    Ok(Some(content))
+}
+
+/// Whether a shared update replaces `entry`, whose file is `file_name`. A member keeps what they
+/// added themselves, and an owner restoring a version keeps what they added since their last
+/// push (`owner`).
+fn replaced_by_shared_update(
+    entry: &crate::state::ContentEntry,
+    file_name: &str,
+    owner: Option<&OwnerSharedContent>,
 ) -> bool {
-    source_kind == ContentSourceKind::SharedInstance
-        || source_kind == ContentSourceKind::Local
-            && metadata.shared_instance.as_ref().is_some_and(|attachment| {
-                attachment.role == SharedInstanceRole::Owner
-            })
+    match (entry.source_kind, owner) {
+        (ContentSourceKind::SharedInstance, _) => true,
+        (ContentSourceKind::Local, Some(owner)) => {
+            let enabled_name =
+                file_name.strip_suffix(".disabled").unwrap_or(file_name);
+            entry
+                .version_id
+                .as_ref()
+                .is_some_and(|id| owner.version_ids.contains(id))
+                || entry
+                    .project_id
+                    .as_ref()
+                    .is_some_and(|id| owner.project_ids.contains(id))
+                || owner
+                    .files
+                    .contains(&(entry.project_type, enabled_name.to_owned()))
+        }
+        _ => false,
+    }
 }
 
 async fn desired_shared_instance_content(
@@ -841,12 +962,6 @@ async fn desired_shared_instance_content(
         if file.file_type == CONFIG_FILE_TYPE {
             if CONFIG_SYNC_ENABLED {
                 content.config_files.push(file.clone());
-            }
-            continue;
-        }
-        if file.file_type == CONFIG_BUNDLE_FILE_TYPE {
-            if CONFIG_SYNC_ENABLED {
-                content.config_bundle = Some(file.clone());
             }
             continue;
         }
@@ -1127,8 +1242,9 @@ async fn install_shared_instance_additions(
     Ok(())
 }
 
-pub(super) async fn remove_existing_shared_instance_content(
+async fn remove_existing_shared_instance_content(
     instance_id: &str,
+    data: &SharedInstanceInstallData,
     state: &State,
 ) -> crate::Result<()> {
     let metadata = crate::state::instances::commands::get_instance_metadata(
@@ -1142,17 +1258,31 @@ pub(super) async fn remove_existing_shared_instance_content(
         &state.pool,
     )
     .await?;
-    let managed_ids = entries
+    let owner = owner_shared_content(&metadata, data, state).await?;
+    let files = content_rows::get_instance_files(instance_id, &state.pool)
+        .await?
         .into_iter()
+        .map(|file| (file.id.clone(), file))
+        .collect::<HashMap<_, _>>();
+    let managed_ids = entries
+        .iter()
         .filter(|entry| {
             entry.source_kind.is_shared_instance_managed()
-                || replaced_by_shared_update(&metadata, entry.source_kind)
+                || entry
+                    .file_id
+                    .as_ref()
+                    .and_then(|id| files.get(id))
+                    .is_some_and(|file| {
+                        replaced_by_shared_update(
+                            entry,
+                            &file.file_name,
+                            owner.as_ref(),
+                        )
+                    })
         })
-        .filter_map(|entry| entry.file_id)
+        .filter_map(|entry| entry.file_id.clone())
         .collect::<HashSet<_>>();
-    for file in
-        content_rows::get_instance_files(instance_id, &state.pool).await?
-    {
+    for file in files.into_values() {
         if managed_ids.contains(&file.id) {
             crate::state::instances::commands::remove_project(
                 instance_id,
@@ -1275,9 +1405,9 @@ struct SharedInstanceModInstall<'a> {
 }
 
 /// Mods and content files are installed before individual shared files, so
-/// those files are checked against the content just installed and override
-/// any config bundle entries at the same path. Larger downloads start first so
-/// a big download is not left running alone at the end.
+/// those files are checked against the content just installed. Larger
+/// downloads start first so a big download is not left running alone at the
+/// end.
 async fn install_shared_instance_downloads(
     job_id: Uuid,
     job_state: &mut InstallJobState,
@@ -1520,26 +1650,19 @@ async fn install_shared_instance_external_file(
     state: &State,
     downloaded: &DownloadedBytes,
 ) -> crate::Result<()> {
-    if file.file_type == CONFIG_BUNDLE_FILE_TYPE && !CONFIG_SYNC_ENABLED {
-        downloaded.add(file.file_size);
-        return Ok(());
-    }
-
     validate_shared_instance_external_file_name(&file.file_name)?;
 
-    if file.file_size > MAX_SHARED_INSTANCE_EXTERNAL_FILE_SIZE {
-        bail!(ErrorKind::InputError(format!(
-            "shared instance external file {} exceeds the maximum size",
-            file.file_name
-        )));
-    }
-
-    let bytes = match &file.pool {
-        Some(pool) => {
+    let bytes = match (&file.local, &file.pool) {
+        (Some(path), _) => {
+            let bytes = crate::util::io::read(path).await?;
+            downloaded.add(bytes.len() as u64);
+            bytes
+        }
+        (None, Some(pool)) => {
             fetch_pooled_shared_instance_external_file(file, pool, downloaded)
                 .await?
         }
-        None => {
+        (None, None) => {
             download_shared_instance_external_file(file, downloaded).await?
         }
     };
@@ -1550,15 +1673,6 @@ async fn install_shared_instance_external_file(
         );
     }
     let bytes = bytes::Bytes::from(bytes);
-
-    if file.file_type == CONFIG_BUNDLE_FILE_TYPE {
-        return install_shared_instance_config_bundle(
-            instance_id,
-            bytes,
-            state,
-        )
-        .await;
-    }
 
     let project_type = ProjectType::from_name(&file.file_type).ok_or(
         ErrorKind::InputError(format!(
@@ -1661,7 +1775,7 @@ async fn download_shared_instance_external_file(
     Ok(bytes)
 }
 
-/// Shared files can be up to the version's size limit, so they are streamed to
+/// Shared files can be large, so they are streamed to
 /// disk rather than held in memory.
 async fn install_shared_instance_file(
     writer: &crate::api::instance::InstanceFileWriter,
@@ -1673,11 +1787,9 @@ async fn install_shared_instance_file(
         downloaded.add(file.file_size);
         return Ok(());
     }
-    if !is_shareable_file_path(&file.file_name)
-        || file.file_size > MAX_SHARED_FILES_TOTAL_SIZE
-    {
+    if !is_shareable_file_path(&file.file_name) {
         bail!(ErrorKind::InputError(format!(
-            "shared instance file {} is unsupported or too large",
+            "shared instance file {} is unsupported",
             file.file_name
         )));
     }
@@ -1692,6 +1804,13 @@ async fn install_shared_instance_file(
     {
         downloaded.add(file.file_size);
         return Ok(());
+    }
+    if let Some(path) = &file.local {
+        let reader = tokio::fs::File::open(path).await?;
+        downloaded.add(file.file_size);
+        return writer
+            .write_from_reader(state, &file.file_name, reader, file.file_size)
+            .await;
     }
     if let Some(pool) = &file.pool {
         return crate::self_hosted::pool::fetch_file(
@@ -1786,76 +1905,79 @@ fn validate_shared_instance_external_file_name(
     Ok(())
 }
 
-async fn install_shared_instance_config_bundle(
-    instance_id: &str,
-    bytes: bytes::Bytes,
-    state: &State,
-) -> crate::Result<()> {
-    let files =
-        tokio::task::spawn_blocking(move || read_config_bundle(bytes.as_ref()))
-            .await??;
-    let metadata = crate::state::instances::commands::get_instance_metadata(
-        instance_id,
-        &state.pool,
-    )
-    .await?
-    .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
-    let config_path = state
-        .directories
-        .instances_dir()
-        .join(metadata.instance.path)
-        .join(CONFIG_DIRECTORY);
-    crate::util::io::create_dir_all(&config_path).await?;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::{ContentEntry, ContentRequirement};
 
-    for (relative_path, bytes) in files {
-        let path = config_path.join(relative_path);
-        if let Some(parent) = path.parent() {
-            crate::util::io::create_dir_all(parent).await?;
+    fn entry(
+        source_kind: ContentSourceKind,
+        project_id: Option<&str>,
+        version_id: Option<&str>,
+    ) -> ContentEntry {
+        ContentEntry {
+            id: "e".into(),
+            instance_id: "i".into(),
+            content_set_id: "c".into(),
+            file_id: Some("f".into()),
+            project_type: ProjectType::Mod,
+            project_id: project_id.map(str::to_owned),
+            version_id: version_id.map(str::to_owned),
+            source_kind,
+            server_requirement: ContentRequirement::Unknown,
+            client_requirement: ContentRequirement::Unknown,
+            enabled: true,
+            added_at: chrono::Utc::now(),
+            modified_at: chrono::Utc::now(),
         }
-        crate::util::io::write(path, bytes).await?;
     }
 
-    Ok(())
-}
+    #[test]
+    fn a_restore_keeps_what_the_owner_added_since_the_last_push() {
+        let owner = OwnerSharedContent {
+            version_ids: HashSet::from(["pushed".to_owned()]),
+            project_ids: HashSet::from(["pushed-project".to_owned()]),
+            files: HashSet::from([(ProjectType::Mod, "pushed.jar".to_owned())]),
+        };
+        let local = ContentSourceKind::Local;
 
-fn read_config_bundle(bytes: &[u8]) -> crate::Result<Vec<(PathBuf, Vec<u8>)>> {
-    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes))
-        .context(ErrorKind::InputError(
-            "invalid shared instance config bundle".to_string(),
-        ))?;
-    if archive.len() > MAX_CONFIG_BUNDLE_ENTRIES {
-        bail!(ErrorKind::InputError(
-            "shared instance config bundle contains too many entries"
-                .to_string(),
+        // Shared: in the last push or the restored version.
+        assert!(replaced_by_shared_update(
+            &entry(local, Some("other"), Some("pushed")),
+            "a.jar",
+            Some(&owner),
+        ));
+        assert!(replaced_by_shared_update(
+            &entry(local, Some("pushed-project"), Some("newer")),
+            "a.jar",
+            Some(&owner),
+        ));
+        assert!(replaced_by_shared_update(
+            &entry(local, None, None),
+            "pushed.jar.disabled",
+            Some(&owner),
+        ));
+        // Added since the last push: kept.
+        assert!(!replaced_by_shared_update(
+            &entry(local, Some("new-project"), Some("new")),
+            "new.jar",
+            Some(&owner),
+        ));
+        assert!(!replaced_by_shared_update(
+            &entry(local, None, None),
+            "unpushed.jar",
+            Some(&owner),
+        ));
+        // A member keeps their own additions; shared content is always replaced.
+        assert!(!replaced_by_shared_update(
+            &entry(local, Some("pushed-project"), Some("pushed")),
+            "a.jar",
+            None,
+        ));
+        assert!(replaced_by_shared_update(
+            &entry(ContentSourceKind::SharedInstance, None, None),
+            "a.jar",
+            None,
         ));
     }
-    let mut files = Vec::new();
-    let mut total_size = 0;
-
-    for index in 0..archive.len() {
-        let file = archive.by_index(index).context(ErrorKind::InputError(
-            "invalid shared instance config bundle entry".to_string(),
-        ))?;
-        if file.is_dir() {
-            continue;
-        }
-        let path = file.enclosed_name().ok_or(ErrorKind::InputError(
-            "shared instance config bundle contains an unsafe path".to_string(),
-        ))?;
-        if !is_supported_config_file(&path) {
-            bail!(ErrorKind::InputError(format!(
-                "shared instance config bundle contains unsupported file {}",
-                path.display()
-            )));
-        }
-        let declared_size = file.size();
-        let bytes = read_bounded_config_bundle_entry(
-            file,
-            declared_size,
-            &mut total_size,
-        )?;
-        files.push((path.to_path_buf(), bytes));
-    }
-
-    Ok(files)
 }

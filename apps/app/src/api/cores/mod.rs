@@ -16,6 +16,7 @@ mod tls;
 
 use std::{collections::HashMap, sync::Arc};
 
+use bedrock::net::ErrorBody;
 use bytes::Bytes;
 use http_body_util::Full;
 use hyper::{
@@ -83,14 +84,18 @@ impl CoreError {
     }
 
     fn answered(status: StatusCode, body: &[u8]) -> Self {
-        let body: Value = serde_json::from_slice(body).unwrap_or_default();
-        let field = |name: &str, fallback: &str| {
-            body[name].as_str().unwrap_or(fallback).to_owned()
+        let body = ErrorBody::parse(body).unwrap_or_default();
+        let or = |field: String, fallback: &str| {
+            if field.is_empty() {
+                fallback.to_owned()
+            } else {
+                field
+            }
         };
         Self {
             status: Some(status.as_u16()),
-            error: field("error", "internal"),
-            description: field("description", "The Core refused."),
+            error: or(body.error, "internal"),
+            description: or(body.description, "The Core refused."),
         }
     }
 }

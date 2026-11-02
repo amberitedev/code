@@ -32,7 +32,8 @@ use super::{
 };
 use crate::{
     access::{Caller, Level, activity},
-    servers::{ServerError, records},
+    servers::ServerError,
+    state::servers::adapters::sqlite::server_rows,
 };
 
 const GAME_ICON: &str = "server-icon.png";
@@ -52,7 +53,7 @@ pub struct IconQuery {
 
 /// The owner passes `require` for any id, so a missing server is found here.
 async fn exists(state: &AppState, id: &str) -> Result<(), ApiError> {
-    records::get(&state.db, id)
+    server_rows::get(&state.db, id)
         .await?
         .ok_or_else(|| ServerError::NotFound(id.into()))?;
     Ok(())

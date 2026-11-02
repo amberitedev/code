@@ -337,12 +337,7 @@ mod platform {
         if systemd() && Path::new(UNIT).exists() {
             systemctl(&["disable", "--now", NAME])?;
         }
-        match std::fs::remove_file(UNIT) {
-            Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
-                return Err(error.into());
-            }
-            _ => {}
-        }
+        crate::util::if_present(std::fs::remove_file(UNIT))?;
         if systemd() {
             systemctl(&["daemon-reload"])?;
         }
@@ -414,11 +409,6 @@ mod platform {
 
     pub fn unregister() -> Result<()> {
         stop()?;
-        match std::fs::remove_file(PLIST) {
-            Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
-                Err(error.into())
-            }
-            _ => Ok(()),
-        }
+        Ok(crate::util::if_present(std::fs::remove_file(PLIST))?)
     }
 }

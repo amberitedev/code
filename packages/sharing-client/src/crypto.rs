@@ -23,6 +23,13 @@ pub fn content_key(p: &[u8; 32]) -> [u8; 32] {
     key
 }
 
+/// A hash written as 64 hex characters.
+pub fn parse_hash(text: &str) -> Option<[u8; 32]> {
+    let mut hash = [0; 32];
+    hex::decode_to_slice(text, &mut hash).ok()?;
+    Some(hash)
+}
+
 /// Content files get a derived key; every other file type gets a random one.
 pub fn is_content_type(file_type: &str) -> bool {
     matches!(file_type, "mod" | "resourcepack" | "shader" | "datapack")
@@ -345,7 +352,7 @@ mod tests {
     #[test]
     fn content_keys_follow_the_protocol() {
         assert!(is_content_type("mod") && is_content_type("datapack"));
-        assert!(!is_content_type("config") && !is_content_type("configs"));
+        assert!(!is_content_type("config"));
         // An empty HKDF salt is the same as 32 zero bytes (RFC 5869), which is what a
         // WebCrypto or Node backend computing the same key will use.
         let p = [9; 32];

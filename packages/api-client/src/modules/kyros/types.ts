@@ -128,6 +128,11 @@ export namespace Kyros {
 
 	export namespace Content {
 		export namespace v1 {
+			/** Core: a link token for one `.mrpack` export, valid for five minutes. */
+			export interface MrpackExportAuthorization {
+				token: string
+			}
+
 			export interface UploadModpackFileResponse {
 				/** The backup made before restoring client files, which reports the restoration's progress. */
 				backup_id: string | null

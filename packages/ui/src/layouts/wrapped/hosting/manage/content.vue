@@ -70,6 +70,10 @@ type AddonWithUiState = Archon.Content.v1.Addon & { installing?: boolean }
 const { formatMessage } = useVIntl()
 
 const messages = defineMessages({
+	notInstalledLock: {
+		id: 'hosting.content.enabled-for.client-only-not-installed-lock',
+		defaultMessage: 'Players get this client-only file with the pack.',
+	},
 	resourcePackLock: {
 		id: 'hosting.content.enabled-for.resource-pack-lock',
 		defaultMessage: 'Resource packs can only be enabled for players.',
@@ -827,7 +831,12 @@ const { queueAddonToggle, cancelQueuedAddonToggle } = useAddonToggles({
 async function handleSetEnabledFor(item: ContentItem, side: ContentSide, enabled: boolean) {
 	if (contentActionDisabled.value || serverPlayMigration?.required.value) return
 	const addon = getAddonForItem(item)
-	if (!addon || (side === 'server' && isPlayerOnlyContent(addon))) return
+	if (
+		!addon ||
+		(addon.installed === false && side !== 'server') ||
+		(side === 'server' && isPlayerOnlyContent(addon))
+	)
+		return
 	const targetWorldId = worldId.value
 	const showPerformanceWarning = enabled && side === 'server' && addon.project_id === 'uCdwusMi'
 	if (
@@ -853,7 +862,7 @@ async function handleSetEnabledFor(item: ContentItem, side: ContentSide, enabled
 async function handleToggleEnabled(item: ContentItem) {
 	if (contentActionDisabled.value) return
 	const addon = getAddonForItem(item)
-	if (!addon) return
+	if (!addon || addon.installed === false) return
 	if (!addon.disabled && !isEnabledForAnySide(addon) && !serverPlayMigration?.required.value) {
 		const sides = (['server', 'player'] as const).filter(
 			(side) =>
@@ -1124,11 +1133,16 @@ function addonToContentItem(addon: AddonWithUiState): ContentItem {
 	const serverEnabled = !isPlayerOnlyContent(addon) && !addon.disabled_server
 	const playerEnabled = !addon.disabled_player
 	const needsMigration = !!serverPlayMigration?.required.value
+	// A client-only pack file the Core never placed: turning its server side on places it, and
+	// players always get it with the pack.
+	const notInstalled = addon.installed === false
 	const lockedSides: ContentSide[] = needsMigration
 		? ['server', 'player']
-		: isPlayerOnlyContent(addon)
-			? ['server']
-			: []
+		: notInstalled
+			? ['player']
+			: isPlayerOnlyContent(addon)
+				? ['server']
+				: []
 	const warning = needsMigration ? undefined : getEnabledForWarning(addon)
 	return {
 		project: {
@@ -1168,11 +1182,13 @@ function addonToContentItem(addon: AddonWithUiState): ContentItem {
 			locked: lockedSides.length > 0,
 			lockedTooltip: needsMigration
 				? formatMessage(serverPlayMigrationMessages.contentLocked)
-				: isPlayerOnlyContent(addon)
-					? formatMessage(
-							addon.kind === 'resourcepack' ? messages.resourcePackLock : messages.shaderLock,
-						)
-					: undefined,
+				: notInstalled
+					? formatMessage(messages.notInstalledLock)
+					: isPlayerOnlyContent(addon)
+						? formatMessage(
+								addon.kind === 'resourcepack' ? messages.resourcePackLock : messages.shaderLock,
+							)
+						: undefined,
 			disabledSides: lockedSides,
 			warningTooltip: warning?.tooltip,
 			warningKind: warning?.kind,
@@ -1461,8 +1477,11 @@ provideContentManager({
 	disableAddContentTooltip: permissionDeniedMessage.value,
 	contentTypeLabel: type,
 	toggleEnabled: handleToggleEnabled,
-	// Side toggles are kept by Modrinth's hosting; a Core does not store them yet.
-	setEnabledFor: client.selfHostedHosting ? undefined : handleSetEnabledFor,
+	// A Core keeps side toggles only for a server that follows no instance: the instance's owner
+	// decides them for its servers.
+	get setEnabledFor() {
+		return client.selfHostedHosting && linkedInstanceId.value ? undefined : handleSetEnabledFor
+	},
 	deleteItem: handleDeleteItem,
 	bulkDeleteItems: handleBulkDelete,
 	refresh: async () => {
@@ -1537,7 +1556,7 @@ provideContentManager({
 					:header="
 						formatMessage(linkedInstanceId ? messages.instanceContent : messages.modpackContent)
 					"
-					:enable-enabled-for="!linkedInstanceId && !client.selfHostedHosting"
+					:enable-enabled-for="!linkedInstanceId"
 					show-environment-warnings
 					:action-disabled="contentActionDisabled"
 					:action-disabled-tooltip="contentActionBusyMessage ?? undefined"

@@ -10,6 +10,8 @@ import type { Env } from '../common/types'
 // - `store`: the owner's App uploads one version (`root`) of at most `bytes` to the home Core.
 // - `fetch`: a member's App reads one version from any of the Cores in `aud`.
 // - `pull`: a Core copies one version from `source`, with a fetch ticket for it inside.
+// - `read`: the App lets one Core (`aud`) read one share (`share`) for its user (`sub`), so a
+//   server can follow it. The backend checks this kind itself; no Core takes it.
 //
 // Signing stores nothing. The private key is the `TICKET_KEY` secret, an Ed25519 JWK with its
 // `kid`; README.md says how to make one and how to rotate it.
@@ -20,10 +22,13 @@ const SESSION_TTL_S = 5 * 60
 const STORE_TTL_S = 60 * 60
 export const FETCH_TTL_S = 6 * 60 * 60
 const PULL_TTL_S = 24 * 60 * 60
+const READ_TTL_S = 5 * 60
 
 interface SigningKey {
 	kid: string
 	key: CryptoKey
+	/** The public half, for the tickets the backend checks itself. */
+	verify: CryptoKey
 }
 
 // Imported once per isolate. Keyed by the secret so a rotated secret is picked up.
@@ -48,7 +53,8 @@ async function importKey(secret: string): Promise<SigningKey> {
 	)
 		throw new Error('TICKET_KEY must be an Ed25519 JWK with a kid')
 	const key = await crypto.subtle.importKey('jwk', { kty, crv, x, d }, 'Ed25519', false, ['sign'])
-	return { kid, key }
+	const verify = await crypto.subtle.importKey('jwk', { kty, crv, x }, 'Ed25519', false, ['verify'])
+	return { kid, key, verify }
 }
 
 const base64url = (bytes: Uint8Array) =>
@@ -74,6 +80,67 @@ async function sign(
 		ticket: `${signed}.${base64url(new Uint8Array(signature))}`,
 		expires: new Date(body.exp * 1000).toISOString(),
 	}
+}
+
+const decodeBase64url = (text: string) =>
+	Uint8Array.from(atob(text.replace(/-/g, '+').replace(/_/g, '/')), (character) =>
+		character.charCodeAt(0),
+	)
+
+/**
+ * The claims of `ticket` when this backend signed it as `kind` and it has not expired, else null.
+ * Only the current key is checked, so a rotation refuses older tickets: fine for ones that last
+ * minutes.
+ */
+async function verified(
+	env: Env,
+	ticket: string,
+	kind: string,
+): Promise<Record<string, unknown> | null> {
+	const { kid, verify } = await signingKey(env)
+	const [header, body, signature, ...extra] = ticket.split('.')
+	if (!header || !body || !signature || extra.length) return null
+	try {
+		const head: Record<string, unknown> = JSON.parse(
+			new TextDecoder().decode(decodeBase64url(header)),
+		)
+		if (head.alg !== 'EdDSA' || head.kid !== kid) return null
+		const valid = await crypto.subtle.verify(
+			'Ed25519',
+			verify,
+			decodeBase64url(signature),
+			new TextEncoder().encode(`${header}.${body}`),
+		)
+		if (!valid) return null
+		const claims: Record<string, unknown> = JSON.parse(
+			new TextDecoder().decode(decodeBase64url(body)),
+		)
+		if (claims.iss !== TICKET_ISSUER || claims.kind !== kind) return null
+		if (typeof claims.exp !== 'number' || claims.exp <= Date.now() / 1000) return null
+		return claims
+	} catch {
+		return null
+	}
+}
+
+/** App: a ticket for Core `coreId` to read share `shareId` for `userId`, who can read it. */
+export async function readTicket(env: Env, userId: string, shareId: string, coreId: string) {
+	return sign(env, 'read', { sub: userId, aud: coreId, share: shareId }, READ_TTL_S)
+}
+
+/**
+ * The user a read ticket names, when it is valid for Core `coreId` and share `shareId`, else null.
+ * The caller still checks that the user can read the share now.
+ */
+export async function readTicketUser(
+	env: Env,
+	ticket: string,
+	coreId: string,
+	shareId: string,
+): Promise<string | null> {
+	const claims = await verified(env, ticket, 'read')
+	if (!claims || claims.aud !== coreId || claims.share !== shareId) return null
+	return typeof claims.sub === 'string' ? claims.sub : null
 }
 
 /** A Core as a ticket names it and the App reaches it. */

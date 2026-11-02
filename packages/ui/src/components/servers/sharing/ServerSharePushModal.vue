@@ -45,7 +45,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-	confirm: [paths: string[], restart: boolean]
+	confirm: [paths: string[], restart: boolean, removed: string[]]
 	cancel: []
 	retry: []
 }>()
@@ -77,9 +77,9 @@ function hide() {
 	modal.value?.hide()
 }
 
-function confirm(paths: string[], restart: boolean) {
+function confirm(paths: string[], restart: boolean, removed: string[]) {
 	open.value = false
-	emit('confirm', paths, restart)
+	emit('confirm', paths, restart, removed)
 }
 
 function cancel() {

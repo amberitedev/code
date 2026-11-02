@@ -96,28 +96,31 @@ pub async fn create_shared_instance_invite_link(
         ));
     }
 
-    if let Some(invite_id) = replace_invite_id {
-        delete_remote_invite(&attachment.id, &invite_id, &state).await?;
-    }
-
     let created_at = Utc::now();
 
-    let response = request_json::<CreateInstanceInviteResponse>(
-        "create_instance_invite",
-        Method::POST,
-        &format!("/instances/{}/invites", attachment.id),
-        Some(json!({
-            "max_age": max_age_seconds,
-            "max_uses": max_uses,
-        })),
-        &state,
-    )
-    .await?;
+    let invite_id =
+        create_remote_invite(&attachment.id, max_age_seconds, max_uses, &state)
+            .await?;
+
+    // Amberite: the replaced link goes only once its replacement exists, and a failed delete takes
+    // the new one back, so a failure leaves the old link working. The Play tab replaces server
+    // links the same way (packages/ui use-server-players.ts).
+    if let Some(replaced) = replace_invite_id
+        && let Err(error) =
+            delete_remote_invite(&attachment.id, &replaced, &state).await
+    {
+        if let Err(undo) =
+            delete_remote_invite(&attachment.id, &invite_id, &state).await
+        {
+            tracing::warn!(%undo, "could not take back a replacement invite link");
+        }
+        return Err(error);
+    }
 
     emit_instance(instance_id, InstancePayloadType::Edited).await?;
 
     Ok(SharedInstanceInviteLink {
-        invite_id: response.id,
+        invite_id,
         expires_at: created_at
             + chrono::Duration::seconds(i64::from(max_age_seconds)),
         max_uses,

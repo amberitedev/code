@@ -1,7 +1,7 @@
-import { AbstractModule } from '../../../core/abstract-module'
+import { SharedInstancesModule } from '../module'
 import type { SharedInstances } from '../types'
 
-export class SharedInstancesModerationV1Module extends AbstractModule {
+export class SharedInstancesModerationV1Module extends SharedInstancesModule {
 	public getModuleID(): string {
 		return 'sharedinstances_moderation_v1'
 	}
@@ -9,7 +9,7 @@ export class SharedInstancesModerationV1Module extends AbstractModule {
 	public async blacklistUsers(
 		request: SharedInstances.Moderation.v1.BlacklistUserRequest,
 	): Promise<void> {
-		return this.client.request('/moderation/blacklist', {
+		return this.request('/moderation/blacklist', {
 			api: 'sharedinstances',
 			version: 1,
 			method: 'POST',
@@ -20,7 +20,7 @@ export class SharedInstancesModerationV1Module extends AbstractModule {
 	public async unblacklistUsers(
 		request: SharedInstances.Moderation.v1.BlacklistUserRequest,
 	): Promise<void> {
-		return this.client.request('/moderation/blacklist', {
+		return this.request('/moderation/blacklist', {
 			api: 'sharedinstances',
 			version: 1,
 			method: 'DELETE',
@@ -29,7 +29,7 @@ export class SharedInstancesModerationV1Module extends AbstractModule {
 	}
 
 	public async deleteFile(instanceId: string, version: number, fileName: string): Promise<void> {
-		return this.client.request(
+		return this.request(
 			`/moderation/instances/${encodeURIComponent(instanceId)}/versions/${version}/files/${encodeURIComponent(fileName)}`,
 			{
 				api: 'sharedinstances',

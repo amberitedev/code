@@ -1,4 +1,7 @@
 use super::*;
+pub use sharing_client::diff::{
+    SharedInstanceUpdateDiff, SharedInstanceUpdateDiffType,
+};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SharedInstanceUsers {
@@ -81,7 +84,7 @@ pub struct SharedInstanceInstallPreview {
     pub content_version_ids: Vec<String>,
     pub external_files: Vec<SharedInstanceExternalFilePreview>,
     #[serde(default)]
-    pub removed_files: Vec<SharedInstanceRemovedFile>,
+    pub removed_files: Vec<RemovedFile>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -115,7 +118,10 @@ pub struct SharedInstancePublishPreview {
 pub struct SharedInstancePublishFile {
     pub path: String,
     pub size: u64,
+    /// In the instance, but a share cannot carry it (see `sharing_client::rules`).
     pub blocked: bool,
+    /// The share's latest version carries it.
+    pub shared: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -154,22 +160,22 @@ pub struct SharedInstanceInviteCreator {
     pub avatar: Option<String>,
 }
 
+/// One entry of an owner's share history, as the History tab shows it.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SharedInstanceUpdateDiff {
-    #[serde(rename = "type")]
-    pub type_: SharedInstanceUpdateDiffType,
-    pub project_id: Option<String>,
-    pub project_name: Option<String>,
-    pub file_name: Option<String>,
-    pub current_version_name: Option<String>,
-    pub new_version_name: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub config_file_count: Option<usize>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub config_file_names: Vec<String>,
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub disabled: bool,
+pub struct SharedInstanceHistoryEntry {
+    pub version: i32,
+    pub created: DateTime<Utc>,
+    #[serde(flatten)]
+    pub details: SharedInstanceVersionDetails,
+}
+
+/// How many versions each share's local history keeps (`None` for all), and how many each
+/// share has now, by share id.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SharedHistorySettings {
+    pub kept: Option<usize>,
+    pub entries: HashMap<String, usize>,
 }
 
 /// One kept version as its version history shows it: what it runs on, how much it holds, and
@@ -185,22 +191,4 @@ pub struct SharedInstanceVersionDetails {
     pub diffs: Vec<SharedInstanceUpdateDiff>,
     /// Paths of the config files it changed, or of all it holds without a base.
     pub config_files: Vec<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SharedInstanceUpdateDiffType {
-    Added,
-    Removed,
-    Updated,
-    ModpackLinked,
-    ModpackUpdated,
-    ModpackUnlinked,
-    GameVersionUpdated,
-    LoaderUpdated,
-    ConfigFilesUpdated,
-}
-
-pub(super) fn is_false(value: &bool) -> bool {
-    !*value
 }

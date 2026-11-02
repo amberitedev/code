@@ -8,10 +8,7 @@ use std::{
 
 use color_eyre::eyre::Result;
 
-use super::{
-    records::ServerRow,
-    shim::{Launch, PROTOCOL},
-};
+use super::shim::{Launch, PROTOCOL};
 use crate::{
     daemon::{folders, paths::Paths},
     installs::{
@@ -21,6 +18,7 @@ use crate::{
             version_info::merged_version_id,
         },
     },
+    state::servers::adapters::sqlite::server_rows::ServerRow,
 };
 
 /// Why a server cannot start yet.
@@ -28,10 +26,6 @@ use crate::{
 pub enum NotReady {
     #[error("nothing is installed on this server yet")]
     NotInstalled,
-    #[error(
-        "accept the Minecraft EULA for this server first: copal servers eula <id>"
-    )]
-    Eula,
 }
 
 /// What is installed on a server, or why nothing is.
@@ -52,9 +46,6 @@ pub async fn prepare(
     run_id: &str,
 ) -> Result<(Launch, Option<java::Lease>)> {
     installed(server)?;
-    if !server.eula_accepted {
-        return Err(NotReady::Eula.into());
-    }
 
     let dir = paths.server(&server.id);
     folders::create_server_folder(&dir)?;

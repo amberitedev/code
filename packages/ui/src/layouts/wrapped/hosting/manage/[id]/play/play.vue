@@ -3,9 +3,9 @@
 		<ServerPlayCard
 			:address="serverAddress"
 			:disabled="actionsLocked || migrating || !worldId || (!canSetup && !sharedInstanceId)"
-			:pending-action="pendingAction"
+			:pending-action="exporting ? 'download' : pendingAction"
 			@play="perform('play')"
-			@download="perform('download')"
+			@download="exportModpack"
 		/>
 		<section class="flex flex-col gap-3">
 			<h1 class="m-0 text-2xl font-semibold text-contrast">
@@ -23,7 +23,7 @@
 				:loading="players.members.isLoading.value"
 				:can-manage="canSetup"
 				:disabled="players.membershipMutation.isPending.value || actionsLocked || migrating"
-				:show-push-update="!!sharedInstanceId"
+				:show-push-update="!!sharedInstanceId && !followsInstance"
 				:push-update-disabled="actionsLocked || migrating || !worldId"
 				:push-update-pending="previewQuery.isFetching.value || pendingAction === 'push'"
 				:invite-disabled="actionsLocked || migrating || !worldId"
@@ -64,7 +64,7 @@
 			:disabled="
 				!canSetup || actionsLocked || previewQuery.isError.value || !previewQuery.data.value
 			"
-			@confirm="(paths, restart) => perform(previewAction, true, paths, restart)"
+			@confirm="(paths, restart, removed) => perform(previewAction, true, paths, restart, removed)"
 			@cancel="previewOpen = false"
 			@retry="previewQuery.refetch()"
 		/>
@@ -103,7 +103,8 @@ import {
 } from '#ui/components/sharing/server-sharing-update/handoff'
 import { defineMessages, useVIntl } from '#ui/composables/i18n'
 import { useServerPermissions } from '#ui/composables/server-permissions'
-import { sharedInstanceMrpackFilename } from '#ui/composables/server-sharing/shared-instance'
+import { inviteLinkUrl } from '#ui/composables/server-sharing/invite-link'
+import { mrpackFilename } from '#ui/composables/server-sharing/shared-instance'
 import {
 	type ServerShareActionTarget,
 	useServerShareReview,
@@ -111,11 +112,11 @@ import {
 import { useEnsureServerRunning } from '#ui/composables/use-ensure-server-running'
 import {
 	injectAuth,
-	injectModrinthClient,
 	injectModrinthServerContext,
 	injectNotificationManager,
 	type ServerPlayTarget,
 } from '#ui/providers'
+import { injectFileDownload } from '#ui/providers/file-download'
 import { injectPageContext } from '#ui/providers/page-context'
 import { getHostingServerAddress } from '#ui/utils/servers'
 
@@ -126,10 +127,9 @@ import {
 import ServerPlayCard from './ServerPlayCard.vue'
 import { useServerPlayers } from './use-server-players'
 
-type Action = 'play' | 'invite' | 'download' | 'push'
+type Action = 'play' | 'invite' | 'push'
 const props = defineProps<{
 	onPlayServer: (target: ServerPlayTarget) => void | Promise<void>
-	onDownloadMrpack?: (instanceId: string, version: number, filename: string) => Promise<void>
 	siteUrl: string
 }>()
 const { formatMessage } = useVIntl()
@@ -146,7 +146,6 @@ onScopeDispose(() => {
 	pageContext?.intercomBubble?.requestHidden?.(intercomHiddenRequestId, false)
 })
 const { handleError } = injectNotificationManager()
-const client = injectModrinthClient()
 const auth = injectAuth()
 const { serverId, worldId, server, serverFull } = injectModrinthServerContext()
 const { canSetup } = useServerPermissions()
@@ -154,7 +153,8 @@ const ensureServerRunning = useEnsureServerRunning()
 const world = computed(() => serverFull.value?.worlds.find((world) => world.id === worldId.value))
 const sharedInstanceId = computed(() => world.value?.content?.shared_instance_id ?? null)
 const needsUpdate = computed(() => world.value?.content?.shared_instance_needs_update ?? false)
-const players = useServerPlayers(sharedInstanceId, canSetup)
+const followsInstance = computed(() => !!server.value?.linked_instance)
+const players = useServerPlayers(serverId, sharedInstanceId, canSetup)
 const invitePlayersModal = ref<InstanceType<typeof InvitePlayersModal>>()
 const inviteHandoff = injectServerInviteHandoff(null)
 const migration = injectServerPlayMigration(null)
@@ -185,9 +185,7 @@ const inviteHeader = computed(() =>
 const inviteProps = computed<InvitePlayersContentProps>(() => ({
 	friends: players.candidates.value,
 	searchUsers: players.search,
-	link: players.link.value
-		? `${props.siteUrl}/share/${encodeURIComponent(players.link.value.id)}`
-		: undefined,
+	link: players.link.value ? inviteLinkUrl(props.siteUrl, players.link.value.id) : undefined,
 	linkExpiresAt: players.link.value?.expiration,
 	linkMaxUses: players.link.value?.max_uses,
 	linkMaxUsesLimit: players.remaining.value,
@@ -212,12 +210,14 @@ async function performAction(action: Action, target: ServerShareActionTarget) {
 	const { worldId: targetWorldId, configPaths, isCurrent: sameContext } = target
 	let id = serverFull.value?.worlds.find((world) => world.id === targetWorldId)?.content
 		?.shared_instance_id
+	// A server that follows an instance reads that instance's share, which only the instance
+	// owner's App pushes: here it only manages players and plays.
 	const shouldShare =
+		!followsInstance.value &&
 		canSetup.value &&
 		(!id ||
 			action === 'push' ||
-			((action === 'play' || action === 'download') &&
-				(needsUpdate.value || configPaths.length > 0)))
+			(action === 'play' && (needsUpdate.value || configPaths.length > 0)))
 	if (shouldShare) {
 		const shared = await shareReview.publish(target)
 		id = shared.shared_instance_id
@@ -238,15 +238,28 @@ async function performAction(action: Action, target: ServerShareActionTarget) {
 		if (!sameContext()) return
 		if (inviteHandoff?.requested.value) inviteHandoff.provide(inviteBinding)
 		else invitePlayersModal.value?.show()
-	} else if (action === 'download' && props.onDownloadMrpack) {
-		const latest = await client.sharedinstances.instances_v1.getLatestVersion(id)
-		if (!latest.ready) throw new Error(formatMessage(messages.notReady))
-		if (!sameContext()) return
-		await props.onDownloadMrpack(
-			id,
-			latest.version,
-			sharedInstanceMrpackFilename(server.value.name),
-		)
+	}
+}
+const fileDownload = injectFileDownload(null)
+const exporting = ref(false)
+/** Saves the server's content as a `.mrpack` its Core exports, for players on other launchers. */
+async function exportModpack() {
+	const nodeUrlHost = server.value.node?.instance
+	if (!fileDownload || !nodeUrlHost || !worldId.value || exporting.value) return
+	exporting.value = true
+	try {
+		await fileDownload.download({
+			type: 'server-mrpack',
+			serverId,
+			serverName: server.value.name,
+			nodeUrlHost,
+			worldId: worldId.value,
+			filename: mrpackFilename(server.value.name),
+		})
+	} catch (error) {
+		handleError(error as Error)
+	} finally {
+		exporting.value = false
 	}
 }
 const pendingAction = computed(() =>
@@ -257,14 +270,20 @@ async function perform(
 	reviewed = false,
 	configPaths: string[] = [],
 	restart?: boolean,
+	removedConfigPaths: string[] = [],
 ) {
 	if (!worldId.value || actionsLocked.value || migrating.value) return
-	if (requireMigration(action, () => perform(action, reviewed, configPaths, restart))) return
+	if (
+		requireMigration(action, () =>
+			perform(action, reviewed, configPaths, restart, removedConfigPaths),
+		)
+	)
+		return
 	if (action === 'play' && !reviewed && canSetup.value && needsUpdate.value) {
 		void showPreview(true)
 		return
 	}
-	await runAction(action, reviewed, configPaths, restart)
+	await runAction(action, reviewed, configPaths, restart, removedConfigPaths)
 }
 function requireMigration(action: Action, resume: () => Promise<void>) {
 	if (!migration?.required.value) return false
@@ -377,10 +396,6 @@ const messages = defineMessages({
 	notShared: {
 		id: 'servers.play.not-shared',
 		defaultMessage: 'An owner or editor needs to share this world first.',
-	},
-	notReady: {
-		id: 'servers.play.not-ready',
-		defaultMessage: 'The shared content is not ready yet. Please try again shortly.',
 	},
 })
 </script>

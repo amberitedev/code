@@ -9,7 +9,7 @@ use std::{
     net::{IpAddr, Ipv4Addr},
 };
 
-use super::{firewall::Firewall, is_private};
+use super::{firewall::Firewall, is_private, is_shared_range};
 
 /// Everything measured about one port.
 #[derive(Debug, Clone)]
@@ -148,11 +148,6 @@ impl Diagnosis {
         }
         out
     }
-}
-
-/// 100.64.0.0/10, the range internet providers use when customers share an address.
-fn is_shared_range(ip: IpAddr) -> bool {
-    matches!(ip, IpAddr::V4(v4) if v4.octets()[0] == 100 && (64..128).contains(&v4.octets()[1]))
 }
 
 /// Decide which case `facts` describe.

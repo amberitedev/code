@@ -3,7 +3,7 @@ import { BoxIcon, GameIcon, getLoaderIcon } from '@modrinth/assets'
 import { formatLoader, useVIntl } from '@modrinth/ui'
 import { computed } from 'vue'
 
-import type { SharedInstanceVersionDetails } from '@/helpers/install'
+import type { SharedInstanceHistoryEntry } from '@/helpers/install'
 
 import { changeOf } from './changes'
 
@@ -11,16 +11,14 @@ import { changeOf } from './changes'
 // bright; `arrows` also shows what it moved from.
 
 const props = defineProps<{
-	details: SharedInstanceVersionDetails
-	/** False for the oldest kept version, which has nothing before it to change. */
-	compare: boolean
+	details: SharedInstanceHistoryEntry
 	arrows?: boolean
 }>()
 
 const { formatMessage } = useVIntl()
 
-const game = computed(() => props.compare && changeOf(props.details.diffs, 'game_version_updated'))
-const loader = computed(() => props.compare && changeOf(props.details.diffs, 'loader_updated'))
+const game = computed(() => changeOf(props.details.diffs, 'game_version_updated'))
+const loader = computed(() => changeOf(props.details.diffs, 'loader_updated'))
 const loaderLabel = computed(
 	() => `${formatLoader(formatMessage, props.details.loader)} ${props.details.loaderVersion}`,
 )

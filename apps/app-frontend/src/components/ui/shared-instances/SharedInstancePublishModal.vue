@@ -5,14 +5,18 @@
 		:files="files"
 		:requires-restart="hasServers"
 		:allow-empty="serversBehind"
-		:limit="SHARE_LIMIT_BYTES"
 		@confirm="confirmPublish"
 		@cancel="finishReview"
 	/>
 </template>
 
 <script setup lang="ts">
-import { type ContentDiffItem, injectModrinthClient, SharedFilesPublishModal } from '@modrinth/ui'
+import {
+	type ContentDiffItem,
+	injectModrinthClient,
+	SharedFilesPublishModal,
+	sharedDiffItems,
+} from '@modrinth/ui'
 import { computed, ref } from 'vue'
 
 import { trackSharedInstancePublish } from '@/components/ui/download-manager/shared-instance-publishes'
@@ -58,8 +62,6 @@ const emit = defineEmits<{
 const client = injectModrinthClient()
 const { notifySharedInstanceError, notifySharedInstanceAvailability } = useSharedInstanceErrors()
 const sharedInstanceState = injectSharedInstance()
-// The pool stores at most 1 GiB per shared version (MAX_SHARE_BYTES in apps/backend).
-const SHARE_LIMIT_BYTES = 1024 ** 3
 
 const modal = ref<InstanceType<typeof SharedFilesPublishModal>>()
 const publishDiffs = ref<ContentDiffItem[]>([])
@@ -97,15 +99,7 @@ async function show(e?: MouseEvent) {
 				emit('published')
 				return
 			}
-			diffs = preview.diffs.map((diff) => ({
-				type: diff.type,
-				projectName: diff.projectName ?? undefined,
-				fileName: diff.fileName ?? undefined,
-				currentVersionName: diff.currentVersionName ?? undefined,
-				newVersionName: diff.newVersionName ?? undefined,
-				fileCount: diff.configFileCount ?? undefined,
-				disabled: diff.disabled,
-			}))
+			diffs = sharedDiffItems(preview.diffs)
 			files.value = preview.files
 			serversBehind.value = (props.servers ?? []).some((server) =>
 				isServerBehind(server, preview.sharedInstanceId, preview.latestVersion),
@@ -128,7 +122,7 @@ async function show(e?: MouseEvent) {
  * Runs the push in the background, where the task list shows it. "Push and restart" asks first
  * when players are online; cancelling that question returns to the review.
  */
-async function confirmPublish(paths: string[], restart: boolean) {
+async function confirmPublish(paths: string[], restart: boolean, removed: string[]) {
 	let restartNow = restart
 	if (restart && props.askRestart) {
 		const answer = await props.askRestart()
@@ -138,16 +132,16 @@ async function confirmPublish(paths: string[], restart: boolean) {
 		}
 		restartNow = answer
 	}
-	void publishChanges(paths, restartNow)
+	void publishChanges(paths, removed, restartNow)
 }
 
-async function publishChanges(paths: string[], restart: boolean) {
+async function publishChanges(paths: string[], removed: string[], restart: boolean) {
 	if (state.value !== 'reviewing') return
 
 	setState('publishing')
 	try {
-		if (publishes.value && (unpublished.value || paths.length > 0)) {
-			if (!(await publishToFriends(paths))) return
+		if (publishes.value && (unpublished.value || paths.length > 0 || removed.length > 0)) {
+			if (!(await publishToFriends(paths, removed))) return
 			emit('published')
 		}
 		if (hasServers.value) await props.pushServers?.(restart)
@@ -157,10 +151,16 @@ async function publishChanges(paths: string[], restart: boolean) {
 }
 
 /** Publishes to friends and reports whether it succeeded. */
-async function publishToFriends(paths: string[]) {
+async function publishToFriends(paths: string[], removed: string[]) {
 	const task = trackSharedInstancePublish(props.instance)
 	try {
-		await publish_shared_instance(props.instance.id, paths, await ownServerCore(), task.update)
+		await publish_shared_instance(
+			props.instance.id,
+			paths,
+			removed,
+			await ownServerCore(),
+			task.update,
+		)
 		await loadSupportDetails(task)
 		task.succeed()
 		return true

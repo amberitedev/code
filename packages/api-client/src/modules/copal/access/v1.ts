@@ -14,10 +14,10 @@ export const TICKET_HEADER = 'X-Amberite-Ticket'
  * and adds that session to every request to the Core. The account session never leaves the App,
  * and the page never sees a Core session.
  *
- * Dangerous actions (inviting, removing, changing a role, revoking someone else's session,
- * removing the Core from its account, deleting a server, restoring a backup) also carry a fresh
- * ticket, fetched right before the call: each ticket is good for one use, for five minutes. A
- * request marked `dangerous` gets one from `CoreSessionFeature`.
+ * Dangerous actions (inviting, removing, changing a role, removing the Core from its account,
+ * deleting a server, restoring a backup) also carry a fresh ticket, fetched right before the call:
+ * each ticket is good for one use, for five minutes. A request marked `dangerous` gets one from
+ * `CoreSessionFeature`.
  */
 export class CopalAccessV1Module extends AbstractModule {
 	/** Sign-ins in flight, by Core id, so requests that fail together sign in once. */
@@ -68,19 +68,6 @@ export class CopalAccessV1Module extends AbstractModule {
 	/** Sign this device out of the Core, and forget its session even when the Core is off. */
 	public signOut(coreId: string): Promise<void> {
 		return this.platform().signOut(coreId)
-	}
-
-	/** Every session on the Core for its owner; only the caller's own for anyone else. */
-	public sessions(coreId: string): Promise<Copal.Session[]> {
-		return this.core(coreId, '/sessions')
-	}
-
-	/** End a session. Someone else's needs the owner, and the fresh ticket this sends. */
-	public async revokeSession(coreId: string, id: string): Promise<void> {
-		await this.core(coreId, `/sessions/${encodeURIComponent(id)}`, {
-			method: 'DELETE',
-			dangerous: true,
-		})
 	}
 
 	/** The caller's own access: whether they own the Core, and their role on each server. */

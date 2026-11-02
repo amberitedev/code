@@ -24,9 +24,10 @@ use super::{
 use crate::{
     access::{Caller, Level, activity},
     servers::{
-        ServerError, memory, records,
+        ServerError, memory,
         restarts::{self, Restarts},
     },
+    state::servers::adapters::sqlite::server_rows,
 };
 
 /// The least memory a server may have.
@@ -61,7 +62,7 @@ async fn performance(
     state: &AppState,
     id: &str,
 ) -> Result<Performance, ApiError> {
-    let server = records::get(&state.db, id)
+    let server = server_rows::get(&state.db, id)
         .await?
         .ok_or_else(|| ServerError::NotFound(id.into()))?;
     let own = memory::flags(&state.db, id).await?;

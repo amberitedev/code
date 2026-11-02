@@ -1,25 +1,23 @@
 import { type Archon, ModrinthApiError, type SharedInstances } from '@modrinth/api-client'
+import { serverListQueryOptions } from '@modrinth/ui'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, type MaybeRefOrGetter, ref, toValue, watch } from 'vue'
 
 import { useSharedInstanceEvent } from '@/composables/use-shared-instance-event'
-import { ensure_shared_instance, get_shared_instance_server_pack } from '@/helpers/instance'
+import { ensure_shared_instance } from '@/helpers/instance'
 import { apiClient } from '@/platform/modrinth-client'
 
 export type LinkedServer = Archon.Servers.v0.Server & {
 	linked_instance: Archon.Servers.v0.LinkedInstance
 }
 
-/** Shared with the Servers page, so both read the same cached list. */
-export const serversQueryKey = ['servers'] as const
-
 /**
- * The one query for the Core's server list. It never retries: a Core that is down refuses the
- * connection at once, and the next check is only seconds away.
+ * The one query for the Core's server list, under the same key and fetch as the Servers page so
+ * both read the same cached list. It never retries: a Core that is down refuses the connection at
+ * once, and the next check is only seconds away.
  */
 const serversQueryOptions = {
-	queryKey: serversQueryKey,
-	queryFn: () => apiClient.archon.servers_v0.list({ limit: 100 }),
+	...serverListQueryOptions(apiClient),
 	enabled: () => apiClient.selfHostedHosting,
 	staleTime: 5_000,
 	refetchInterval: 5_000,
@@ -145,17 +143,6 @@ export function linkedServerState(server: LinkedServer): LinkedServerState {
 	return isServerRunning(server) ? 'running' : 'offline'
 }
 
-/** Where this App joins and pings the server: its address on the Core's own network. */
-export function serverAddress(server: Archon.Servers.v0.Server) {
-	return `${server.net.domain || server.net.ip || '127.0.0.1'}:${server.net.port}`
-}
-
-/** The address to give to friends: the one on the internet when the server has one. */
-export function shareableServerAddress(server: Archon.Servers.v0.Server) {
-	const outside = server.net.outside
-	return outside ? `${outside.ip}:${outside.port}` : serverAddress(server)
-}
-
 /** Why a running server cannot be joined from the internet, or undefined when it can. */
 export function unreachableCause(server: Archon.Servers.v0.Server) {
 	if (server.power_state !== 'running' || server.reachability?.state !== 'unreachable') {
@@ -171,23 +158,29 @@ export function playersOnline(server: Archon.Servers.v0.Server) {
 
 /**
  * Has a server apply the latest version of the instance's share. The server follows the instance
- * through its share like one more member: its Core fetches the files from the pool itself, so
- * nothing is uploaded from here. The first push installs the instance and links the server to
- * it. A running server takes the version when it next stops, unless `restart` is set.
+ * through its share like one more member: its Core reads the version from the backend, for this
+ * user with a read ticket, and fetches the files from the pool itself, so nothing is uploaded from here. The first push installs the
+ * instance and links the server to it. A running server takes the version when it next stops,
+ * unless `restart` is set.
  */
 export async function pushInstanceToServer(
 	instance: { id: string; name: string },
 	serverId: string,
 	options: { properties?: Archon.Content.v1.PropertiesFields; restart?: boolean } = {},
 ) {
-	await ensure_shared_instance(instance.id)
-	const share = await get_shared_instance_server_pack(instance.id)
+	const [share, core] = await Promise.all([
+		ensure_shared_instance(instance.id),
+		apiClient.archon.cores_v1.coreOf(serverId),
+	])
+	// The Core reads the share for this user only, with this ticket.
+	const { ticket } = await apiClient.sharedinstances.instances_v1.getServerTicket(share.id, core.id)
 	// A Core server has one world, with the server's own id.
 	const worldId = serverId
 	await apiClient.archon.content_v1.installContent(serverId, worldId, {
 		content_variant: 'instance',
 		instance,
-		share,
+		shared_instance_id: share.id,
+		ticket,
 		properties: options.properties,
 		restart: options.restart,
 	})

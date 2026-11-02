@@ -1303,6 +1303,45 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
+name = "bedrock"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bytes",
+ "chrono",
+ "fs4",
+ "futures",
+ "hex",
+ "itertools 0.15.0",
+ "json5",
+ "modrinth-content-management",
+ "nix 0.30.1",
+ "parking_lot",
+ "pathdiff",
+ "postcard-bindgen",
+ "reqwest 0.13.5",
+ "rustls",
+ "same-file",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "sqlx",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "toml 1.1.8+spec-1.1.0",
+ "tracing",
+ "ts-rs",
+ "url",
+ "uuid 1.28.0",
+ "windows 0.61.3",
+ "windows-sys 0.61.2",
+ "zip 9.0.5",
+]
+
+[[package]]
 name = "bigdecimal"
 version = "0.4.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2273,6 +2312,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "base64 0.23.1",
+ "bedrock",
  "bytes",
  "cap-fs-ext",
  "cap-std",
@@ -2292,6 +2332,7 @@ dependencies = [
  "libc",
  "minecraft-meta-manifest",
  "minisign-verify",
+ "modrinth-content-management",
  "netdev",
  "nix 0.30.1",
  "rcgen",
@@ -8933,23 +8974,29 @@ dependencies = [
 name = "sharing-client"
 version = "0.0.0"
 dependencies = [
+ "bedrock",
  "bytes",
  "chacha20poly1305",
  "futures",
  "hex",
  "hkdf",
+ "infer 0.22.0",
+ "modrinth-content-management",
+ "path-util",
+ "rand 0.10.3",
  "reqwest 0.13.5",
- "rustls",
  "serde",
  "serde_json",
+ "sha1_smol",
  "sha2 0.11.1",
+ "sqlx",
  "tar",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "tokio-util",
  "tracing",
- "url",
+ "ts-rs",
 ]
 
 [[package]]
@@ -8958,6 +9005,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "base64 0.23.1",
+ "bedrock",
  "bytes",
  "chrono",
  "clap 4.6.7",
@@ -8966,7 +9014,6 @@ dependencies = [
  "hex",
  "http-body-util",
  "hyper-util",
- "nix 0.30.1",
  "rcgen",
  "reqwest 0.13.5",
  "ring",
@@ -8974,6 +9021,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.1",
+ "sharing-client",
  "tar",
  "tempfile",
  "tokio",
@@ -8983,10 +9031,8 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "ts-rs",
- "url",
  "uuid 1.28.0",
  "walkdir",
- "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -10227,6 +10273,7 @@ dependencies = [
  "async-tungstenite",
  "async-walkdir",
  "base64 0.23.1",
+ "bedrock",
  "bon",
  "bytemuck",
  "bytes",
@@ -10254,7 +10301,6 @@ dependencies = [
  "image",
  "indexmap 2.14.2",
  "indicatif",
- "infer 0.22.0",
  "itertools 0.15.0",
  "json5",
  "minecraft-meta-manifest",
@@ -10317,6 +10363,7 @@ dependencies = [
  "aes-gcm 0.11.1",
  "anyhow",
  "base64 0.23.1",
+ "bedrock",
  "browser-bridge",
  "bytes",
  "chrono",

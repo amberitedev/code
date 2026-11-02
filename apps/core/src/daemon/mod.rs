@@ -148,12 +148,13 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
         Arc::clone(&servers),
     )
     .await?;
-    let content = crate::content::Content::open(
+    let content = crate::state::servers::Content::open(
         paths.clone(),
         db.clone(),
         Arc::clone(&servers),
         Arc::clone(&backups),
-    )?;
+    )
+    .await?;
     let update = Arc::new(Updater::new(
         paths.clone(),
         db.clone(),
@@ -177,11 +178,16 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
         backups,
         uploads: api::files::Uploads::default(),
         update: Arc::clone(&update),
-        network,
+        network: Arc::clone(&network),
         storage: Arc::clone(&storage),
     });
     let router = api::router(Arc::clone(&state));
-    tokio::spawn(api::content::apply_pending_on_stop(Arc::clone(&state)));
+    tokio::spawn(
+        crate::state::servers::commands::apply_pending_on_stop::apply_pending_on_stop(
+            Arc::clone(&state.content),
+            Arc::clone(&state.access.owed),
+        ),
+    );
     match config.backend_url.clone() {
         Some(backend_url) => {
             tokio::spawn(access::sync::run(Arc::new(access::sync::Sync {
@@ -194,6 +200,7 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
                 bind: config.bind,
                 access: Arc::clone(&access),
                 storage,
+                network,
             })));
             tokio::spawn(
                 async move { state.access.keys.refresh_daily().await },

@@ -35,7 +35,12 @@ export function useServerSharingSettings() {
 	)
 	const invites = useQuery(
 		computed(() => ({
-			...sharedInstanceInvitesQueryOptions(client, sharedInstanceId.value ?? '', userId.value),
+			...sharedInstanceInvitesQueryOptions(
+				client,
+				serverId,
+				sharedInstanceId.value ?? '',
+				userId.value,
+			),
 			enabled: !!targetKey.value,
 			refetchOnMount: 'always' as const,
 			refetchInterval: 30_000,
@@ -46,7 +51,7 @@ export function useServerSharingSettings() {
 	type ShareTarget = { worldId: string; instanceId: string }
 	const revokeMutation = useMutation({
 		mutationFn: (target: ShareTarget & { inviteId: string }) =>
-			client.sharedinstances.invites_v1.delete(target.instanceId, target.inviteId),
+			client.sharedinstances.players_v1.deleteLink(serverId, target.instanceId, target.inviteId),
 		onSuccess: (_data, target) => {
 			queryClient.setQueriesData<SharedInstances.Invites.v1.InviteLink[]>(
 				{ queryKey: sharedInstanceKeys.invites(target.instanceId) },

@@ -120,7 +120,7 @@
 						:managed="isManagedServerWorld(row.world)"
 						:linked-server-id="row.linked?.server_id"
 						:linked-note="row.linked && linkedNote(row.linked)"
-						:copy-address="row.linked && shareableServerAddress(row.linked)"
+						:copy-address="row.linked && getHostingServerAddress(row.linked.net)"
 						:outside-warning="row.linked && unreachableCause(row.linked)"
 						:hosted-by="row.hosted?.host.username"
 						:hosted-server-id="
@@ -209,6 +209,7 @@ import {
 	FilterPills,
 	GAME_MODES,
 	type GameVersion,
+	getHostingServerAddress,
 	GhostBlock,
 	injectNotificationManager,
 	Input,
@@ -240,8 +241,6 @@ import {
 	type HostedServer,
 	type LinkedServer,
 	linkedServerState,
-	serverAddress,
-	shareableServerAddress,
 	unreachableCause,
 	useCanManageHostedServer,
 	useHostedServers,
@@ -279,6 +278,7 @@ import {
 	type World,
 	worldNameMatchesQuery,
 } from '@/helpers/worlds.ts'
+import { apiClient } from '@/platform/modrinth-client'
 import { injectServerInstall } from '@/providers/server-install'
 
 import { injectInstancePage } from '../instance-context'
@@ -404,6 +404,11 @@ const pins = useWorldPins(() => instance.value.id)
  */
 type WorldRow = { key: string; world: World; linked?: LinkedServer; hosted?: HostedServer }
 
+/** Where this App joins a linked server, which its row shows, pings and joins. See `joinNet`. */
+function joinAddress(server: LinkedServer) {
+	return getHostingServerAddress(apiClient.archon.cores_v1.joinNet(server))
+}
+
 function serverRow(key: string, name: string, address: string): ServerWorld {
 	return {
 		type: 'server',
@@ -422,7 +427,11 @@ const rows = computed<WorldRow[]>(() => {
 	const all: WorldRow[] = [
 		...linkedServers.value.map((linked) => {
 			const key = `linked:${linked.server_id}`
-			return { key, linked, world: serverRow(key, linked.name, serverAddress(linked)) }
+			return {
+				key,
+				linked,
+				world: serverRow(key, linked.name, joinAddress(linked)),
+			}
 		}),
 		...hostedServers.value.map((hosted) => {
 			const key = `hosted:${hosted.core_id}:${hosted.server_id}`
@@ -740,9 +749,12 @@ async function refreshServer(address: string) {
 
 // Ping linked servers like the rest, and again whenever one starts, stops, or moves.
 watch(
-	() => linkedServers.value.map((server) => `${serverAddress(server)}|${server.power_state}`),
+	() => linkedServers.value.map((server) => `${joinAddress(server)}|${server.power_state}`),
 	() => {
-		for (const server of linkedServers.value) void refreshServer(serverAddress(server))
+		for (const server of linkedServers.value) {
+			const address = joinAddress(server)
+			if (address) void refreshServer(address)
+		}
 	},
 	{ immediate: true },
 )

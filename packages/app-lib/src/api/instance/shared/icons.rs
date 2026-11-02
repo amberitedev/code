@@ -1,4 +1,4 @@
-use super::client::{get_remote_server_icon, shared_instances_request_error};
+use super::client::get_remote_server_icon;
 use super::*;
 use std::path::PathBuf;
 
@@ -53,18 +53,18 @@ pub(super) async fn shared_instance_server_icon(
         }
         _ => None,
     };
-    let mut response = get_remote_server_icon(
+    let Some(mut response) = get_remote_server_icon(
         instance_id,
         cached.as_ref().and_then(|cached| cached.etag.as_deref()),
         state,
     )
-    .await?;
-    if response.status() == StatusCode::NOT_FOUND {
+    .await?
+    else {
         if tokio::fs::try_exists(&mapping).await? {
             tokio::fs::remove_file(&mapping).await?;
         }
         return Ok(None);
-    }
+    };
     if response.status() == StatusCode::NOT_MODIFIED
         && let Some(cached) = cached
     {
@@ -73,15 +73,6 @@ pub(super) async fn shared_instance_server_icon(
                 .to_string_lossy()
                 .to_string(),
         ));
-    }
-    if !response.status().is_success() {
-        return shared_instances_request_error(
-            "get_instance_server_icon",
-            Method::GET,
-            &format!("/instances/{instance_id}/server-icon"),
-            response,
-        )
-        .await;
     }
     let etag = response
         .headers()

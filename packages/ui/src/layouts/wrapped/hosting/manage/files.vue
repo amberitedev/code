@@ -109,9 +109,11 @@ const busyWarning = computed(() =>
 const shareWorld = computed(() =>
 	serverContext.serverFull.value?.worlds.find((world) => world.id === worldId.value),
 )
-// A Core cannot share a server's content yet, so the server play prompts stay off there.
+// Config pushes go to the server's own share; a server that follows an instance has none.
 const sharedInstanceId = computed(() =>
-	client.selfHostedHosting ? null : (shareWorld.value?.content?.shared_instance_id ?? null),
+	serverContext.server.value?.linked_instance
+		? null
+		: (shareWorld.value?.content?.shared_instance_id ?? null),
 )
 const sharedInstanceInstalledOnce = useSharedInstanceInstalledOnce(sharedInstanceId)
 const configPushModal = ref<InstanceType<typeof ConfigPushPromptModal>>()

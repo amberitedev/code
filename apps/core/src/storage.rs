@@ -41,9 +41,9 @@ use tokio::{
 use tracing::{info, warn};
 
 use crate::{
-    access::sync,
+    access::{owed::OwedCall, sync},
     api::{
-        backend::{OwedCall, PullOrder, StorageAnswer, StorageReport},
+        backend::{PullOrder, StorageAnswer, StorageReport},
         error::{ApiError, ErrorCode},
         storage::{StorageSettings, StorageStatus},
     },
@@ -142,6 +142,11 @@ impl Storage {
                 .build()
                 .expect("a plain HTTP client builds"),
         }
+    }
+
+    /// The backend's root, unless none is set.
+    pub fn backend_url(&self) -> Option<&str> {
+        self.backend_url.as_deref()
     }
 
     /// Run the store, and report to the backend after uploads and hourly.

@@ -124,7 +124,6 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
             instance_share_unlink,
             instance_share_unpublish,
             instance_share_ensure,
-            instance_share_server_pack,
             instance_export_mrpack,
             instance_get_pack_export_candidates,
         ])
@@ -1489,12 +1488,14 @@ pub async fn instance_share_get_publish_preview(
 pub async fn instance_share_publish(
     instance_id: &str,
     file_paths: Vec<String>,
+    removed_paths: Vec<String>,
     server_core_id: Option<String>,
     on_progress: tauri::ipc::Channel<(u64, u64)>,
 ) -> Result<SharedInstanceAttachment> {
     Ok(theseus::instance::publish_shared_instance(
         instance_id,
         file_paths,
+        removed_paths,
         server_core_id,
         &|uploaded, total| {
             let _ = on_progress.send((uploaded, total));
@@ -1535,11 +1536,4 @@ pub async fn instance_share_ensure(
     Ok(theseus::instance::ensure_shared_instance(instance_id)
         .await?
         .into())
-}
-
-#[tauri::command]
-pub async fn instance_share_server_pack(
-    instance_id: &str,
-) -> Result<theseus::instance::SharedInstanceServerPack> {
-    Ok(theseus::instance::get_shared_instance_server_pack(instance_id).await?)
 }

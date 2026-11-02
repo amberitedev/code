@@ -5,15 +5,16 @@
 use std::sync::Arc;
 
 use axum::{Json, extract::State};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::AppState;
 use crate::db;
 
-#[derive(Serialize)]
+/// Response of `GET /health`. The CLI reads it too.
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Health {
-    pub status: &'static str,
-    pub version: &'static str,
+    pub status: String,
+    pub version: String,
     pub core_id: String,
 }
 
@@ -25,8 +26,8 @@ pub async fn get(
         .map_err(|_| axum::http::StatusCode::SERVICE_UNAVAILABLE)?;
     state.update.answered();
     Ok(Json(Health {
-        status: "ok",
-        version: env!("CARGO_PKG_VERSION"),
+        status: "ok".into(),
+        version: env!("CARGO_PKG_VERSION").into(),
         core_id,
     }))
 }

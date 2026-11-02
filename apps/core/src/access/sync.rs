@@ -16,14 +16,15 @@ use std::{
 
 use reqwest::{Method, StatusCode};
 use serde::Serialize;
+use sharing_client::backend::Backend;
 use sqlx::{SqliteConnection, SqlitePool};
 use tokio::sync::watch;
 use tracing::{info, warn};
 
-use super::{Access, Changed, now, pairing};
+use super::{Access, Changed, now, owed::OwedCall, pairing};
 use crate::{
-    api::backend::{AccessDirectory, OwedCall, StateReport, StorageAnswer},
-    network::public_ip,
+    api::backend::{AccessDirectory, StateReport, StorageAnswer},
+    network::{forward::Network, public_ip},
     storage::Storage,
 };
 
@@ -43,6 +44,8 @@ pub struct Sync {
     pub bind: IpAddr,
     pub access: Arc<Access>,
     pub storage: Arc<Storage>,
+    /// Told the join IP whenever the addresses are looked up.
+    pub network: Arc<Network>,
 }
 
 /// Owe the backend `call`, in the transaction of the change that needs it. Wake sync with
@@ -101,6 +104,25 @@ enum Failure {
     Lost(Lost),
     /// The backend refused this call for good. It is dropped.
     Refused(String),
+}
+
+/// How a call the backend answered with `status` failed. 410 means the backend no longer knows
+/// this Core. A refused key is retried: only that 410 un-pairs, so a single 401 wipes nothing.
+fn failure(status: StatusCode, problem: String) -> Failure {
+    if status == StatusCode::GONE {
+        Failure::Lost(Lost::Removed)
+    } else if status.is_server_error()
+        || matches!(
+            status,
+            StatusCode::UNAUTHORIZED
+                | StatusCode::REQUEST_TIMEOUT
+                | StatusCode::TOO_MANY_REQUESTS
+        )
+    {
+        Failure::Lost(Lost::Unreachable(problem))
+    } else {
+        Failure::Refused(problem)
+    }
 }
 
 /// Wait before the next try after `failures` failures in a row: 10 seconds, doubling, at most an
@@ -171,7 +193,7 @@ impl Sync {
         } else {
             self.bind
         };
-        let public = if local.is_loopback() {
+        let found = if local.is_loopback() {
             None
         } else {
             public_ip::find(match local {
@@ -179,9 +201,16 @@ impl Sync {
                 IpAddr::V6(_) => None,
             })
             .await
-            .map(|ip| self.url(ip))
-            .or_else(|| previous.map(str::to_owned))
         };
+        // Players join at the public address; a Core with none is joined on its own network.
+        match found {
+            Some(ip) => self.network.set_join_ip(ip),
+            None if previous.is_none() => self.network.set_join_ip(local),
+            None => {}
+        }
+        let public = found
+            .map(|ip| self.url(ip))
+            .or_else(|| previous.map(str::to_owned));
         Addresses {
             local: self.url(local),
             public,
@@ -380,6 +409,39 @@ impl Sync {
             OwedCall::Remove(remove) => {
                 self.call(key, Method::DELETE, "/core/access", remove).await
             }
+            OwedCall::DeleteShare { share_id } => {
+                // A server took the share again since, through the backend answering its
+                // existing share: it stays.
+                let taken: bool = sqlx::query_scalar(
+                    "SELECT EXISTS (SELECT 1 FROM servers WHERE share_id = ?)",
+                )
+                .bind(share_id)
+                .fetch_one(&self.db)
+                .await
+                .map_err(|error| {
+                    Failure::Lost(Lost::Unreachable(error.to_string()))
+                })?;
+                if taken {
+                    return Ok(());
+                }
+                // Done on success, on a share already gone (`delete_share`'s 404 and 410), and
+                // on 403 `not_owner` (no longer this Core's), which is refused and dropped.
+                let backend =
+                    Backend::new(self.http.clone(), &self.backend_url, key)
+                        .with_timeout(CALL_TIMEOUT);
+                backend.delete_share(share_id).await.map_err(
+                    |error| match error.status() {
+                        Some(status) => failure(status, error.to_string()),
+                        None => {
+                            Failure::Lost(Lost::Unreachable(error.to_string()))
+                        }
+                    },
+                )
+            }
+            OwedCall::ForgetPlayers(forget) => {
+                self.call(key, Method::DELETE, "/core/players", forget)
+                    .await
+            }
             OwedCall::ReportState => {
                 self.call(
                     key,
@@ -439,26 +501,11 @@ impl Sync {
         if status.is_success() {
             return Ok(response);
         }
-        if status == StatusCode::GONE {
-            return Err(Failure::Lost(Lost::Removed));
-        }
         let problem = format!(
             "{path} answered {status}: {}",
             response.text().await.unwrap_or_default()
         );
-        // A refused key is retried: only the 410 above un-pairs, so a single 401 wipes nothing.
-        if status.is_server_error()
-            || matches!(
-                status,
-                StatusCode::UNAUTHORIZED
-                    | StatusCode::REQUEST_TIMEOUT
-                    | StatusCode::TOO_MANY_REQUESTS
-            )
-        {
-            Err(Failure::Lost(Lost::Unreachable(problem)))
-        } else {
-            Err(Failure::Refused(problem))
-        }
+        Err(failure(status, problem))
     }
 
     /// Forget the owner and everything that came from them: their key, owed calls, every session,
@@ -565,6 +612,7 @@ mod tests {
         .unwrap();
         let dir = tempfile::tempdir().unwrap();
         Sync {
+            network: Arc::new(Network::off(db.clone())),
             storage: Arc::new(Storage::new(
                 db.clone(),
                 crate::daemon::paths::Paths::new(dir.path()),

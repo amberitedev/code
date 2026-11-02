@@ -7,7 +7,7 @@
 //! Also `GET /modrinth/v0/servers/{id}/fs`, where the App learns the base of these routes.
 //!
 //! Editors and the owner only: the files hold the world and every setting. Every path goes
-//! through `content::folder`, so nothing reaches outside the server folder, links included.
+//! through `state::servers::adapters::filesystem::folder`, so nothing reaches outside the server folder, links included.
 //! Uploads and unpacking never replace server-owned files (see `folder::is_server_owned`);
 //! `fs/update` is an explicit edit and may change them. `fs/copy` and the v0 `fs/zip` have no
 //! caller in the App and are not served.
@@ -34,18 +34,21 @@ use super::{
     AppState,
     activity::Action,
     backups::{DownloadQuery, DownloadToken, expired_link},
-    content::{MAX_UPLOAD, stage_field, world},
+    content::{stage_field, world},
     error::{ApiError, ErrorCode},
     servers::JwtAuth,
 };
 use crate::{
     access::{Caller, Level, activity, now},
     backups::Target,
-    content::{
-        Busy, addons,
-        archive::{self, ArchiveError},
-        folder::{self, Folder},
-        pack,
+    state::servers::{
+        Busy,
+        adapters::filesystem::{
+            archive::{self, ArchiveError, NoRoom},
+            folder::{self, Folder},
+        },
+        commands::apply_content_install::add_uploaded_file,
+        domain::pack,
     },
 };
 
@@ -627,7 +630,7 @@ async fn stream_file(
         .into_response())
 }
 
-/// Stream a request body into a staged file, at most [`MAX_UPLOAD`] bytes.
+/// Stream a request body into a staged file, as much as fits on the disk (`archive::room`).
 async fn stage_body(
     state: &AppState,
     id: &str,
@@ -638,9 +641,9 @@ async fn stage_body(
         .paths()
         .staging(id)
         .join(format!("body-{}", uuid::Uuid::new_v4()));
-    if let Some(parent) = staged.parent() {
-        tokio::fs::create_dir_all(parent).await?;
-    }
+    let parent = staged.parent().unwrap_or(&staged);
+    tokio::fs::create_dir_all(parent).await?;
+    let room = archive::room(parent)?;
     let result = async {
         let mut file = tokio::fs::File::create(&staged).await?;
         let mut stream = body.into_data_stream();
@@ -650,11 +653,13 @@ async fn stage_body(
                 ApiError::new(ErrorCode::InvalidRequest, error.to_string())
             })?;
             written += chunk.len() as u64;
-            if written > MAX_UPLOAD {
-                return Err(ApiError::new(
-                    ErrorCode::InvalidRequest,
-                    "Uploads are at most 4 GB.",
-                ));
+            if written > room {
+                return Err(crate::state::servers::Error::from(NoRoom {
+                    what: "the upload".into(),
+                    needed: None,
+                    room,
+                })
+                .into());
             }
             file.write_all(&chunk).await?;
         }
@@ -839,6 +844,7 @@ pub async fn unarchive(
     let source = inner_path(&query.src)?;
     let target = api_path(&query.trg)?;
     let (folder, busy) = changing(&state, &id)?;
+    let room = archive::room(&state.servers.paths().server(&id))?;
     let result = locked(&busy, move || {
         let file = folder
             .open_file(&source)
@@ -846,11 +852,10 @@ pub async fn unarchive(
             .flatten()
             .ok_or_else(|| not_found(&source))?
             .into_std();
-        let packed = file.metadata()?.len();
         let mut zip = zip::ZipArchive::new(file).map_err(|error| {
-            ApiError::from(crate::content::Error::from(ArchiveError::from(
-                error,
-            )))
+            ApiError::from(crate::state::servers::Error::from(
+                ArchiveError::from(error),
+            ))
         })?;
         let modpack_name =
             pack::read_index(&mut zip).ok().map(|index| index.name);
@@ -859,8 +864,8 @@ pub async fn unarchive(
             Some(target) => format!("{target}/{entry}"),
             None => entry.to_owned(),
         };
-        let entries =
-            archive::entries(&mut zip).map_err(crate::content::Error::from)?;
+        let entries = archive::entries(&mut zip)
+            .map_err(crate::state::servers::Error::from)?;
         let conflicting_files: Vec<String> = entries
             .iter()
             .filter(|(_, is_dir)| !is_dir)
@@ -869,13 +874,25 @@ pub async fn unarchive(
             .map(|path| format!("/{path}"))
             .collect();
         if !query.dry {
-            archive::extract(&folder, &mut zip, packed, |entry| {
-                let path = destination(entry);
-                let exists = folder.exists(&path);
-                let owned = folder::is_server_owned(&path, &level);
-                (!exists || (query.overwrite && !owned)).then_some(path)
-            })
-            .map_err(crate::content::Error::from)?;
+            // Paths nothing was at before, so a partway failure can take them away again. Files
+            // it replaced stay replaced: what they held is already gone.
+            let mut created = Vec::new();
+            let extracted =
+                archive::extract(&folder, &mut zip, room, |entry| {
+                    let path = destination(entry);
+                    let exists = folder.exists(&path);
+                    let owned = folder::is_server_owned(&path, &level);
+                    if !exists {
+                        created.push(path.clone());
+                    }
+                    (!exists || (query.overwrite && !owned)).then_some(path)
+                });
+            if let Err(error) = extracted {
+                for path in created.iter().rev() {
+                    let _ = folder.remove(path);
+                }
+                return Err(crate::state::servers::Error::from(error).into());
+            }
         }
         Ok(ExtractResult {
             modpack_name,
@@ -1185,17 +1202,13 @@ pub async fn upload_files(
             })?;
     let _turn = turn.lock_owned().await;
     // Read once it is this upload's turn: what the uploads before it committed counts.
-    let (dir, budget) =
+    let dir =
         state
             .uploads
             .change(&caller, &id, scope, &upload_id, |session| {
-                Ok((
-                    session.dir.clone(),
-                    MAX_UPLOAD.saturating_sub(session.bytes),
-                ))
+                Ok(session.dir.clone())
             })?;
     let mut added = Vec::new();
-    let mut remaining = budget;
     let result = async {
         while let Some(mut field) =
             form.next_field().await.map_err(|error| {
@@ -1220,9 +1233,8 @@ pub async fn upload_files(
                 }
             }
             let staged = dir.join(uuid::Uuid::new_v4().to_string());
-            stage_field(&mut field, &staged, remaining).await?;
+            stage_field(&mut field, &staged).await?;
             let size = tokio::fs::metadata(&staged).await?.len();
-            remaining = remaining.saturating_sub(size);
             added.push((name, staged, size));
         }
         Ok::<_, ApiError>(())
@@ -1234,12 +1246,6 @@ pub async fn upload_files(
                 .uploads
                 .change(&caller, &id, scope, &upload_id, |session| {
                     let size: u64 = added.iter().map(|(_, _, size)| size).sum();
-                    if session.bytes + size > MAX_UPLOAD {
-                        return Err(ApiError::new(
-                            ErrorCode::InvalidRequest,
-                            "Uploads are at most 4 GB.",
-                        ));
-                    }
                     let now = now();
                     session.files.extend(added.iter().map(
                         |(name, staged, _)| (name.clone(), staged.clone()),
@@ -1303,7 +1309,8 @@ pub async fn finalize_session(
             }
             UploadScope::Content => {
                 for (name, staged) in &files {
-                    addons::upload(&state.content, &id, name, staged).await?;
+                    add_uploaded_file(&state.content, &id, name, staged)
+                        .await?;
                 }
             }
         }

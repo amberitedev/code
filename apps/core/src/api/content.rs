@@ -10,17 +10,24 @@
 //! their answer for those a pack update left alone.
 //!
 //! Viewers see the content list; changing it is for editors. Loader and pack installs answer at
-//! once and go on in the background (see `content`).
+//! once and go on in the background (see `state::servers::Content`). The work is in
+//! `state::servers::commands`; these routes check access and map requests and errors.
+//!
+//! Where Archon's names a concept the shared crates have, the shared type is on the wire, with
+//! the same names: an addon's `kind` is `ContentType` (Archon's `AddonKind`, which has no
+//! `modpack`), the update channel is `VersionType` (Archon's `ReleaseChannel`), and a version's
+//! `environment` is bedrock's `VersionEnvironment`.
 
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc};
 
 use axum::{
     Json,
     extract::{Multipart, Path, Query, State, multipart::Field},
     http::{StatusCode, header::CONTENT_TYPE},
 };
-use chrono::{DateTime, Utc};
+use modrinth_content_management::{ContentType, VersionType};
 use serde::{Deserialize, Serialize};
+use sharing_client::consume;
 use tokio::io::AsyncWriteExt;
 use ts_rs::TS;
 
@@ -32,133 +39,37 @@ use super::{
 };
 use crate::{
     access::{Caller, Level, activity},
-    content::{
-        self, Busy,
-        addons::{self, Listed},
-        install::{self as content_install, Linked, PackSource},
-        manifest::{self, Manifest},
-        modrinth::ReleaseChannel,
-        pack,
-        records::{self, ContentFile, Origin, Pack, PendingPack},
-        shared::{self, SharedVersion},
-    },
     installs::{ModLoader, shared::SharedDirs},
-    servers::{Hold, ServerError, records as servers_records},
+    servers::{Hold, ServerError},
+    state::servers::{
+        self as content, Busy,
+        adapters::{
+            filesystem::{
+                archive::{self, NoRoom},
+                content_files::{self, Listed},
+                folder,
+            },
+            sqlite::{content_rows, server_rows},
+        },
+        commands::{
+            apply_content_install::{add_project, add_uploaded_file},
+            apply_content_update::update_project,
+            check_content_updates::check_modpack_update,
+            content_mutation::{self, Side},
+            edited_files::{decide_edited_file, list_edited_files},
+            install_instance::{self, InstanceInstall},
+            install_loader::install_loader,
+            install_pack::{self as content_install, PackSource},
+            list_content::{get_linked_modpack_info, list_content, open_jar},
+        },
+        modrinth_pack,
+    },
 };
 
-/// Mirrors Archon.Content.v1.AddonKind.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum AddonKind {
-    Mod,
-    Plugin,
-    Datapack,
-    Shader,
-    Resourcepack,
-}
-
-/// Mirrors Archon.Content.v1.ContentOwnerType.
-#[allow(dead_code)] // Core sends no owners yet.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ContentOwnerType {
-    User,
-    Organization,
-}
-
-/// The Modrinth user or organization behind a project. Mirrors Archon.Content.v1.ContentOwner, and
-/// Archon.Content.v1.ModpackOwner, which has the same shape.
-#[derive(Debug, Clone, Serialize)]
-pub struct ContentOwner {
-    pub id: String,
-    pub name: String,
-    #[serde(rename = "type")]
-    pub kind: ContentOwnerType,
-    pub icon_url: Option<String>,
-}
-
-/// Where a version runs. Mirrors Labrinth.Projects.v3.Environment.
-#[allow(dead_code)] // Core sends no environments yet.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Environment {
-    ClientAndServer,
-    ClientOnly,
-    ClientOnlyServerOptional,
-    SingleplayerOnly,
-    ServerOnly,
-    ServerOnlyClientOptional,
-    DedicatedServerOnly,
-    ClientOrServer,
-    ClientOrServerPrefersBoth,
-    Unknown,
-}
-
-/// Mirrors Archon.Content.v1.AddonVersion.
-#[derive(Debug, Clone, Serialize)]
-pub struct AddonVersion {
-    pub id: String,
-    pub name: Option<String>,
-    pub environment: Option<Environment>,
-}
-
-/// Serializes as `"pending"`, `"installed"`, or `{"failed": {"error": ...}}`. Mirrors
-/// Archon.Content.v1.AddonStatus.
-#[allow(dead_code)] // Adds answer once placed or with their error, so none is pending or failed.
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum AddonStatus {
-    Pending,
-    Installed,
-    Failed { error: String },
-}
-
-/// One file in the content list. Response of GET `.../addons/update`, and an item of GET
-/// `.../addons`. Mirrors Archon.Content.v1.Addon.
-#[derive(Debug, Clone, Serialize)]
-pub struct Addon {
-    pub id: String,
-    pub filename: String,
-    pub filesize: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub btime: Option<DateTime<Utc>>,
-    pub disabled: bool,
-    pub kind: AddonKind,
-    pub from_modpack: bool,
-    pub status: AddonStatus,
-    pub pack_client_retained: bool,
-    pub pack_client_depends: bool,
-    pub has_update: Option<String>,
-    pub name: Option<String>,
-    pub project_id: Option<String>,
-    pub version: Option<AddonVersion>,
-    pub owner: Option<ContentOwner>,
-    pub icon_url: Option<String>,
-    /// What the jar says about itself, for mods and plugins.
-    pub manifest: Option<Manifest>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub installed: Option<bool>,
-}
-
-/// Where a linked server is with the newest version pushed to it. Mirrors
-/// Archon.Content.v1.LinkedPackState.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum LinkedPackState {
-    UpToDate,
-    Downloading,
-    Pending,
-    Applying,
-    Failed,
-}
-
-/// What a world is installing. Mirrors the `installing` union of Archon.Content.v1.Addons.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Installing {
-    Loader,
-    Modpack,
-}
+// The content list and edited files are what `state::servers::commands` produce.
+pub use crate::state::servers::model::{
+    Addon, EditedFile, Installing, LinkedPackState, ModpackFields, ModpackSpec,
+};
 
 /// Why the last install failed. Mirrors the `error` object of Archon.Content.v1.Addons.
 #[derive(Debug, Clone, Serialize)]
@@ -174,12 +85,14 @@ pub struct Addons {
     pub modloader_version: Option<String>,
     pub game_version: Option<String>,
     /// The least stable channel addon updates are offered from.
-    pub update_channel: ReleaseChannel,
+    pub update_channel: VersionType,
     pub modpack: Option<ModpackFields>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub installing: Option<Installing>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<ContentError>,
+    /// Always 0, as `Addon::needs_side_type_review` is always false.
+    pub files_need_side_type_review: u32,
     pub addons: Option<Vec<Addon>>,
 }
 
@@ -190,6 +103,8 @@ pub struct AddonsQuery {
     pub from_modpack: Option<bool>,
     #[serde(default)]
     pub disabled: Option<bool>,
+    #[serde(default)]
+    pub needs_side_type_review: Option<bool>,
     #[serde(default)]
     pub addons: Option<bool>,
     #[serde(default)]
@@ -204,15 +119,43 @@ pub struct AddAddonRequest {
     #[serde(default)]
     pub version_id: Option<String>,
     #[serde(default)]
-    pub kind: Option<AddonKind>,
+    pub kind: Option<ContentType>,
 }
 
 /// Body of POST `.../addons/delete`, `.../disable`, and `.../enable`. Mirrors
 /// Archon.Content.v1.RemoveAddonRequest.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RemoveAddonRequest {
-    pub kind: AddonKind,
+    pub kind: ContentType,
     pub filename: String,
+}
+
+/// Body of POST `.../addons/set-enabled-server` and `.../set-enabled-player`. Mirrors
+/// Archon.Content.v1.SetAddonEnabledRequest.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SetAddonEnabledRequest {
+    pub kind: ContentType,
+    pub filename: String,
+    pub enabled: bool,
+}
+
+/// Body of POST `.../addons/set-locked-side-toggle`. Mirrors
+/// Archon.Content.v1.SetAddonSideToggleLockedRequest.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SetAddonSideToggleLockedRequest {
+    pub kind: ContentType,
+    pub filename: String,
+    pub locked: bool,
+}
+
+/// Body of POST `.../addons/complete-side-type-review`. Mirrors
+/// Archon.Content.v1.CompleteSideTypeReviewRequest. Core has nothing to review, so it is only
+/// checked.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct CompleteSideTypeReviewRequest {
+    #[allow(dead_code)]
+    #[serde(default)]
+    pub addons: Option<Vec<RemoveAddonRequest>>,
 }
 
 /// Body of POST `.../addons/delete-many`, `.../disable-many`, and `.../enable-many`. Mirrors the
@@ -258,44 +201,6 @@ pub enum Modloader {
     Vanilla,
 }
 
-/// Which pack a world follows. Mirrors Archon.Content.v1.ModpackSpec.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "platform", rename_all = "snake_case")]
-pub enum ModpackSpec {
-    /// Mirrors Archon.Content.v1.ModpackSpecModrinth.
-    Modrinth {
-        project_id: String,
-        version_id: String,
-    },
-    /// Mirrors Archon.Content.v1.ModpackSpecLocalFile.
-    LocalFile {
-        filename: String,
-        name: String,
-        description: Option<String>,
-    },
-}
-
-/// The linked pack, as Modrinth's modpack card shows it. Response of GET
-/// `.../content/modpack/update`, and the `modpack` of GET `.../addons`. Mirrors
-/// Archon.Content.v1.ModpackFields.
-#[derive(Debug, Clone, Serialize)]
-pub struct ModpackFields {
-    pub spec: ModpackSpec,
-    pub has_update: Option<String>,
-    pub title: Option<String>,
-    pub description: Option<String>,
-    pub icon_url: Option<String>,
-    pub owner: Option<ContentOwner>,
-    pub version_number: Option<String>,
-    pub date_published: Option<DateTime<Utc>>,
-    pub downloads: Option<u64>,
-    pub followers: Option<u64>,
-    pub instance_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub state: Option<LinkedPackState>,
-    pub error: Option<String>,
-}
-
 /// Body of POST `.../content`: install a pack or a bare loader. Mirrors
 /// Archon.Content.v1.InstallWorldContent.
 #[derive(Debug, Clone, Deserialize)]
@@ -322,12 +227,16 @@ pub enum InstallWorldContent {
         #[serde(default)]
         properties: Option<PropertiesFields>,
     },
-    /// Amberite: apply a version of an App instance's share (`content::shared`). On a running
-    /// server it waits for the server to stop, or with `restart` stops it, applies, and starts
-    /// it again.
+    /// Amberite: apply the latest version of an App instance's share (`commands::write_shared_pack`), which
+    /// Core reads from the backend itself. On a running server it waits for the server to stop,
+    /// or with `restart` stops it, applies, and starts it again.
     Instance {
         instance: UploadedInstance,
-        share: SharedVersion,
+        shared_instance_id: String,
+        /// The backend's read ticket for this Core and share, which the App gets with its user's
+        /// session. Required from the App; the local CLI has none and reads as the owner.
+        #[serde(default)]
+        ticket: Option<String>,
         #[serde(default)]
         properties: Option<PropertiesFields>,
         #[serde(default)]
@@ -365,28 +274,6 @@ pub struct UploadedInstance {
     pub name: String,
 }
 
-/// A file of a pack the owner edited since the pack placed it, or deleted. Item of
-/// `GET /servers/{id}/content/edited`.
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-pub struct EditedFile {
-    /// Relative to the server folder, with forward slashes.
-    pub path: String,
-    /// The owner deleted it (or disabled it) rather than changed it.
-    pub deleted: bool,
-    /// What the last pack update wants for it, waiting on a [`Decision`]; null when nothing waits.
-    pub pending: Option<PendingChange>,
-}
-
-/// What a pack update wants for a file the owner edited.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "snake_case")]
-pub enum PendingChange {
-    /// The new pack has another version of the file.
-    Changed,
-    /// The new pack no longer has the file.
-    Removed,
-}
-
 /// Response of `GET /servers/{id}/content/edited`.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct EditedFiles {
@@ -417,7 +304,17 @@ impl From<content::Error> for ApiError {
                 let code = match &error {
                     Error::Busy => ErrorCode::Conflict,
                     Error::NotFound(_) => ErrorCode::NotFound,
+                    Error::Resolve(
+                        modrinth_content_management::Error::Provider(_),
+                    ) => ErrorCode::Internal,
+                    // The disk, not the request: the same one may go once there is room.
+                    Error::NoRoom(_)
+                    | Error::Archive(archive::ArchiveError::NoRoom(_))
+                    | Error::Pack(content::domain::pack::PackError::NoRoom(
+                        _,
+                    )) => ErrorCode::Conflict,
                     Error::Invalid(_)
+                    | Error::Resolve(_)
                     | Error::Path(_)
                     | Error::Pack(_)
                     | Error::Archive(_) => ErrorCode::InvalidRequest,
@@ -477,240 +374,6 @@ fn loader_of(loader: Modloader) -> Result<ModLoader, ApiError> {
     })
 }
 
-/// The content list of a server, with what Modrinth knows about each file.
-async fn addon_list(
-    state: &AppState,
-    id: &str,
-    loader: Option<ModLoader>,
-    listed: Vec<Listed>,
-    updates: bool,
-) -> Result<Vec<Addon>, ApiError> {
-    let mut manifests = manifests(state, id, loader, &listed).await;
-    let rows = records::files(&state.db, id).await?;
-    let rows: HashMap<String, ContentFile> = rows
-        .into_iter()
-        .map(|row| (row.path.clone(), row))
-        .collect();
-    let mut project_ids: Vec<String> = rows
-        .values()
-        .filter_map(|row| row.project_id.clone())
-        .collect();
-    project_ids.sort();
-    project_ids.dedup();
-    let version_ids: Vec<String> = rows
-        .values()
-        .filter_map(|row| row.version_id.clone())
-        .collect();
-    let modrinth = &state.content.modrinth;
-    let (projects, versions) = tokio::join!(
-        modrinth.projects(&project_ids),
-        modrinth.versions_by_id(&version_ids)
-    );
-    let projects: HashMap<String, content::modrinth::Project> = projects
-        .unwrap_or_default()
-        .into_iter()
-        .map(|project| (project.id.clone(), project))
-        .collect();
-    let versions: HashMap<String, content::modrinth::Version> = versions
-        .unwrap_or_default()
-        .into_iter()
-        .map(|version| (version.id.clone(), version))
-        .collect();
-    let newer = if updates {
-        let row_list: Vec<ContentFile> = rows.values().cloned().collect();
-        addons::updates(&state.content, id, &listed, &row_list).await
-    } else {
-        HashMap::new()
-    };
-    Ok(listed
-        .into_iter()
-        .map(|item| {
-            let row = rows.get(&item.path);
-            let project = row
-                .and_then(|row| row.project_id.as_ref())
-                .and_then(|project| projects.get(project));
-            let version = row
-                .and_then(|row| row.version_id.as_ref())
-                .and_then(|version| versions.get(version));
-            Addon {
-                id: item.path.clone(),
-                filename: item.filename,
-                filesize: item.size,
-                btime: item.created,
-                disabled: item.disabled,
-                kind: item.kind,
-                from_modpack: row.is_some_and(|row| row.origin == Origin::Pack),
-                status: AddonStatus::Installed,
-                pack_client_retained: false,
-                pack_client_depends: false,
-                has_update: newer
-                    .get(&item.path)
-                    .map(|version| version.id.clone()),
-                name: project.map(|project| project.title.clone()),
-                project_id: row.and_then(|row| row.project_id.clone()),
-                version: version.map(|version| AddonVersion {
-                    id: version.id.clone(),
-                    name: Some(version.version_number.clone()),
-                    environment: None,
-                }),
-                owner: None,
-                icon_url: project.and_then(|project| project.icon_url.clone()),
-                manifest: manifests.remove(&item.path),
-                installed: None,
-            }
-        })
-        .collect())
-}
-
-/// The jar on disk for `listed`, opened without following a link.
-fn open_jar(
-    folder: &content::folder::Folder,
-    listed: &Listed,
-) -> Option<std::fs::File> {
-    let on_disk = if listed.disabled {
-        format!("{}{}", listed.path, addons::DISABLED)
-    } else {
-        listed.path.clone()
-    };
-    Some(folder.open_file(&on_disk).ok()??.into_std())
-}
-
-/// What each mod and plugin jar in `listed` says about itself, by path. Best effort: a jar that
-/// cannot be read has none.
-async fn manifests(
-    state: &AppState,
-    id: &str,
-    loader: Option<ModLoader>,
-    listed: &[Listed],
-) -> HashMap<String, Manifest> {
-    let jars: Vec<Listed> = listed
-        .iter()
-        .filter(|listed| {
-            matches!(listed.kind, AddonKind::Mod | AddonKind::Plugin)
-        })
-        .cloned()
-        .collect();
-    if jars.is_empty() {
-        return HashMap::new();
-    }
-    let content = Arc::clone(&state.content);
-    let root = state.servers.paths().server(id);
-    let id = id.to_owned();
-    tokio::task::spawn_blocking(move || {
-        let Ok(folder) = content::folder::Folder::open(&root) else {
-            return HashMap::new();
-        };
-        jars.into_iter()
-            .filter_map(|listed| {
-                let file = open_jar(&folder, &listed)?;
-                let key = format!("{id}/{}", listed.path);
-                let inspection = content.manifests.get(&key, file, loader)?;
-                Some((listed.path, inspection.manifest))
-            })
-            .collect()
-    })
-    .await
-    .unwrap_or_default()
-}
-
-/// The pack a server follows, as the modpack card shows it.
-async fn modpack_fields(
-    state: &AppState,
-    id: &str,
-    check: bool,
-) -> Result<Option<ModpackFields>, ApiError> {
-    let Some(pack) = records::pack(&state.db, id).await? else {
-        return Ok(None);
-    };
-    let modrinth = &state.content.modrinth;
-    let (project, version, has_update) =
-        match (&pack.project_id, &pack.version_id) {
-            (Some(project_id), Some(version_id)) => {
-                let (project, version) = tokio::join!(
-                    modrinth.project(project_id),
-                    modrinth.version(version_id)
-                );
-                let has_update = if check {
-                    modrinth
-                        .versions(project_id, &[], None)
-                        .await
-                        .ok()
-                        .and_then(|versions| versions.into_iter().next())
-                        .map(|latest| latest.id)
-                        .filter(|latest| latest != version_id)
-                } else {
-                    None
-                };
-                (project.ok(), version.ok(), has_update)
-            }
-            _ => (None, None, None),
-        };
-    let linked_state = linked_state(state, id, &pack).await?;
-    let spec = match (&pack.project_id, &pack.version_id) {
-        (Some(project_id), Some(version_id)) => ModpackSpec::Modrinth {
-            project_id: project_id.clone(),
-            version_id: version_id.clone(),
-        },
-        _ => ModpackSpec::LocalFile {
-            filename: format!("{}.mrpack", pack.name),
-            name: pack.name.clone(),
-            description: pack.summary.clone(),
-        },
-    };
-    Ok(Some(ModpackFields {
-        spec,
-        has_update,
-        title: Some(
-            project
-                .as_ref()
-                .map_or(pack.name.clone(), |project| project.title.clone()),
-        ),
-        description: project
-            .as_ref()
-            .and_then(|project| project.description.clone())
-            .or(pack.summary.clone()),
-        icon_url: project
-            .as_ref()
-            .and_then(|project| project.icon_url.clone()),
-        owner: None,
-        version_number: Some(
-            version
-                .as_ref()
-                .map_or(pack.version_number.clone(), |version| {
-                    version.version_number.clone()
-                }),
-        ),
-        date_published: version
-            .as_ref()
-            .and_then(|version| version.date_published),
-        downloads: project.as_ref().and_then(|project| project.downloads),
-        followers: project.as_ref().and_then(|project| project.followers),
-        instance_id: pack.instance_id.clone(),
-        state: Some(linked_state),
-        error: pack.error,
-    }))
-}
-
-/// Where a server is with the pack it follows: applying it, failed, waiting for the server to
-/// stop to apply a newer push, or up to date.
-pub async fn linked_state(
-    state: &AppState,
-    id: &str,
-    pack: &Pack,
-) -> Result<LinkedPackState, ApiError> {
-    Ok(
-        if state.content.activity(id).installing == Some(Installing::Modpack) {
-            LinkedPackState::Applying
-        } else if pack.error.is_some() {
-            LinkedPackState::Failed
-        } else if records::pending(&state.db, id).await?.is_some() {
-            LinkedPackState::Pending
-        } else {
-            LinkedPackState::UpToDate
-        },
-    )
-}
-
 /// `GET .../addons`.
 pub async fn list(
     caller: Caller,
@@ -720,22 +383,23 @@ pub async fn list(
 ) -> Result<Json<Addons>, ApiError> {
     caller.require(&state.db, &id, Level::Viewer).await?;
     world(&id, &wid)?;
-    let server = servers_records::get(&state.db, &id)
+    let server = server_rows::get(&state.db, &id)
         .await?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
     let loader = server.loader.as_deref().and_then(ModLoader::parse);
     let addons = if query.addons == Some(false) {
         None
     } else {
-        let folder =
-            content::folder::Folder::open(&state.servers.paths().server(&id))?;
+        let folder = folder::Folder::open(&state.servers.paths().server(&id))?;
         let listed: Vec<Listed> =
-            addons::scan(&folder, loader).into_iter().collect();
-        let mut addons = addon_list(
-            &state,
+            content_files::scan(&folder, loader).into_iter().collect();
+        let skipped = content_rows::get_skipped_files(&state.db, &id).await?;
+        let mut addons = list_content(
+            &state.content,
             &id,
             loader,
             listed,
+            skipped,
             query.updates == Some(true),
         )
         .await?;
@@ -744,12 +408,19 @@ pub async fn list(
                 .from_modpack
                 .is_none_or(|wanted| addon.from_modpack == wanted)
                 && query.disabled.is_none_or(|wanted| addon.disabled == wanted)
+                && query
+                    .needs_side_type_review
+                    .is_none_or(|wanted| addon.needs_side_type_review == wanted)
         });
         Some(addons)
     };
     let activity = state.content.activity(&id);
-    let modpack =
-        modpack_fields(&state, &id, query.updates == Some(true)).await?;
+    let modpack = get_linked_modpack_info(
+        &state.content,
+        &id,
+        query.updates == Some(true),
+    )
+    .await?;
     let error = activity
         .error
         .clone()
@@ -763,6 +434,7 @@ pub async fn list(
         modpack,
         installing: activity.installing,
         error,
+        files_need_side_type_review: 0,
         addons,
     }))
 }
@@ -789,7 +461,7 @@ pub async fn add_many(
     let _busy = state.content.busy(&id)?;
     let result = async {
         for request in &requests {
-            addons::add(
+            add_project(
                 &state.content,
                 &id,
                 &request.project_id,
@@ -827,11 +499,16 @@ async fn change(
     for item in items {
         match change {
             Change::Delete => {
-                addons::remove(&state.content, id, item.kind, &item.filename)
-                    .await?
+                content_mutation::remove_project(
+                    &state.content,
+                    id,
+                    item.kind,
+                    &item.filename,
+                )
+                .await?
             }
             Change::Enable(enabled) => {
-                addons::set_enabled(
+                content_mutation::set_enabled(
                     &state.content,
                     id,
                     item.kind,
@@ -922,6 +599,100 @@ pub async fn enable_many(
     .await
 }
 
+/// Refuses a server that follows an instance. Its instance's owner writes the share it reads,
+/// sides included, so it has no share or sides of its own.
+pub async fn server_first(state: &AppState, id: &str) -> Result<(), ApiError> {
+    let linked = content_rows::get_pack(&state.db, id)
+        .await?
+        .is_some_and(|pack| pack.share.is_some());
+    if linked {
+        return Err(ApiError::new(
+            ErrorCode::Conflict,
+            "This server follows an instance, which its owner shares.",
+        ));
+    }
+    Ok(())
+}
+
+async fn set_side(
+    state: &AppState,
+    caller: &Caller,
+    id: &str,
+    wid: &str,
+    request: SetAddonEnabledRequest,
+    side: Side,
+) -> Result<StatusCode, ApiError> {
+    caller.require(&state.db, id, Level::Editor).await?;
+    world(id, wid)?;
+    server_first(state, id).await?;
+    let _busy = state.content.busy(id)?;
+    content_mutation::set_side(
+        &state.content,
+        id,
+        request.kind,
+        &request.filename,
+        side,
+        request.enabled,
+    )
+    .await?;
+    activity::log(&state.db, caller, Some(id), Action::ContentChanged).await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `POST .../addons/set-enabled-server`.
+pub async fn set_enabled_server(
+    caller: Caller,
+    State(state): State<Arc<AppState>>,
+    Path((id, wid)): Path<(String, String)>,
+    Json(request): Json<SetAddonEnabledRequest>,
+) -> Result<StatusCode, ApiError> {
+    set_side(&state, &caller, &id, &wid, request, Side::Server).await
+}
+
+/// `POST .../addons/set-enabled-player`.
+pub async fn set_enabled_player(
+    caller: Caller,
+    State(state): State<Arc<AppState>>,
+    Path((id, wid)): Path<(String, String)>,
+    Json(request): Json<SetAddonEnabledRequest>,
+) -> Result<StatusCode, ApiError> {
+    set_side(&state, &caller, &id, &wid, request, Side::Player).await
+}
+
+/// `POST .../addons/set-locked-side-toggle`.
+pub async fn set_side_toggle_locked(
+    caller: Caller,
+    State(state): State<Arc<AppState>>,
+    Path((id, wid)): Path<(String, String)>,
+    Json(request): Json<SetAddonSideToggleLockedRequest>,
+) -> Result<StatusCode, ApiError> {
+    caller.require(&state.db, &id, Level::Editor).await?;
+    world(&id, &wid)?;
+    server_first(&state, &id).await?;
+    let _busy = state.content.busy(&id)?;
+    content_mutation::set_unlocked(
+        &state.content,
+        &id,
+        request.kind,
+        &request.filename,
+        !request.locked,
+    )
+    .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `POST .../addons/complete-side-type-review`: nothing to do, since Core never asks for one.
+pub async fn complete_side_type_review(
+    caller: Caller,
+    State(state): State<Arc<AppState>>,
+    Path((id, wid)): Path<(String, String)>,
+    Json(_): Json<CompleteSideTypeReviewRequest>,
+) -> Result<StatusCode, ApiError> {
+    caller.require(&state.db, &id, Level::Editor).await?;
+    world(&id, &wid)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 /// `GET .../addons/update?filename`: the file, with its newest version in `has_update`.
 pub async fn get_update(
     caller: Caller,
@@ -931,23 +702,29 @@ pub async fn get_update(
 ) -> Result<Json<Addon>, ApiError> {
     caller.require(&state.db, &id, Level::Viewer).await?;
     world(&id, &wid)?;
-    let server = servers_records::get(&state.db, &id)
+    let server = server_rows::get(&state.db, &id)
         .await?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
-    let folder =
-        content::folder::Folder::open(&state.servers.paths().server(&id))?;
+    let folder = folder::Folder::open(&state.servers.paths().server(&id))?;
     let loader = server.loader.as_deref().and_then(ModLoader::parse);
-    let listed =
-        addons::find(&folder, loader, &query.filename).ok_or_else(|| {
+    let listed = content_files::find(&folder, loader, &query.filename)
+        .ok_or_else(|| {
             ApiError::new(
                 ErrorCode::NotFound,
                 format!("There is no {}.", query.filename),
             )
         })?;
-    let addon = addon_list(&state, &id, loader, vec![listed], true)
-        .await?
-        .pop()
-        .expect("one in, one out");
+    let addon = list_content(
+        &state.content,
+        &id,
+        loader,
+        vec![listed],
+        Vec::new(),
+        true,
+    )
+    .await?
+    .pop()
+    .expect("one in, one out");
     Ok(Json(addon))
 }
 
@@ -981,7 +758,7 @@ pub async fn update_many(
     let _busy = state.content.busy(&id)?;
     let result = async {
         for request in &body.addons {
-            addons::update(
+            update_project(
                 &state.content,
                 &id,
                 &request.filename,
@@ -1008,7 +785,7 @@ pub async fn install(
 ) -> Result<StatusCode, ApiError> {
     caller.require(&state.db, &id, Level::Editor).await?;
     world(&id, &wid)?;
-    let server = servers_records::get(&state.db, &id)
+    let server = server_rows::get(&state.db, &id)
         .await?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
     match request {
@@ -1031,13 +808,15 @@ pub async fn install(
                 })?;
             let requested = Some(version).filter(|version| !version.is_empty());
             let (hold, busy) = begin(&state, &id)?;
+            let access = state.access.clone();
             state.content.spawn(
                 hold,
                 busy,
                 Installing::Loader,
                 move |content, hold, progress| async move {
-                    records::unlink(&content.db, hold.id()).await?;
-                    content_install::loader(
+                    content_rows::unlink(&content.db, hold.id()).await?;
+                    access.owed.notify_one();
+                    install_loader(
                         &content,
                         &hold,
                         &progress,
@@ -1059,13 +838,22 @@ pub async fn install(
         }
         InstallWorldContent::Instance {
             instance,
-            share,
+            shared_instance_id,
+            ticket,
             properties,
             restart,
             force,
         } => {
             install_instance(
-                &state, &id, instance, share, properties, restart, force,
+                &state,
+                &id,
+                &caller,
+                ticket,
+                instance,
+                shared_instance_id,
+                properties,
+                restart,
+                force,
             )
             .await?;
         }
@@ -1111,201 +899,98 @@ fn spawn_pack(
     properties: Option<PropertiesFields>,
     force: bool,
 ) {
-    state.content.spawn(
-        hold,
-        busy,
-        Installing::Modpack,
-        move |content, hold, progress| async move {
-            content_install::pack(
-                &content, &hold, &progress, source, properties, force,
-            )
-            .await
-        },
-    );
-}
-
-/// Apply a share version to a server. A stopped server installs it now. A running one keeps
-/// running: Core fetches the version, then it waits for the server to stop, or with `restart`
-/// Core stops the server, and it applies then (see [`apply_pending`]).
-async fn install_instance(
-    state: &Arc<AppState>,
-    id: &str,
-    instance: UploadedInstance,
-    share: SharedVersion,
-    properties: Option<PropertiesFields>,
-    restart: bool,
-    force: bool,
-) -> Result<(), ApiError> {
-    let busy = state.content.busy(id)?;
-    let linked = Linked {
-        id: instance.id,
-        name: instance.name,
-        shared_instance_id: share.shared_instance_id.clone(),
-        version: share.version,
-    };
-    match state.servers.hold(id) {
-        Ok(hold) => {
-            // A version still waiting from an earlier push is superseded by this one.
-            let waiting = records::clear_pending(&state.db, id).await?;
-            forget_pack(state, waiting).await;
-            state.content.spawn(
-                hold,
-                busy,
-                Installing::Modpack,
-                move |content, hold, progress| async move {
-                    let sha1 =
-                        match shared::write_pack(&content, hold.id(), &share)
-                            .await
-                        {
-                            Ok(sha1) => sha1,
-                            Err(error) => {
-                                records::set_pack_error(
-                                    &content.db,
-                                    hold.id(),
-                                    Some(&format!("{error:#}")),
-                                )
-                                .await?;
-                                return Err(error);
-                            }
-                        };
-                    let source = PackSource::Stored {
-                        sha1,
-                        instance: Some(linked),
-                    };
-                    content_install::pack(
-                        &content, &hold, &progress, source, properties, force,
-                    )
-                    .await
-                },
-            );
-        }
-        Err(ServerError::AlreadyRunning) => {
-            let state = Arc::clone(state);
-            let id = id.to_owned();
-            tokio::spawn(async move {
-                let written =
-                    shared::write_pack(&state.content, &id, &share).await;
-                drop(busy);
-                let result = async {
-                    let pending = PendingPack {
-                        sha1: written?,
-                        instance_id: linked.id,
-                        instance_name: linked.name,
-                        shared_instance_id: linked.shared_instance_id,
-                        shared_version: linked.version,
-                        start_after: restart,
-                        force,
-                    };
-                    let replaced =
-                        records::set_pending(&state.db, &id, &pending).await?;
-                    forget_pack(&state, replaced).await;
-                    if restart {
-                        match state.servers.stop(&id).await {
-                            // It stopped on its own while the version was fetched.
-                            Err(ServerError::NotRunning) => {}
-                            result => result?,
-                        }
-                    }
-                    Ok::<_, content::Error>(())
-                }
-                .await;
-                match result {
-                    // The server may have stopped while the version was fetched.
-                    Ok(()) => apply_pending(state, id).await,
-                    Err(error) => {
-                        tracing::warn!(server = %id, %error, "could not take a pushed version");
-                        let _ = records::set_pack_error(
-                            &state.db,
-                            &id,
-                            Some(&format!("{error:#}")),
-                        )
-                        .await;
-                    }
-                }
-            });
-        }
-        Err(error) => return Err(error.into()),
-    }
-    Ok(())
-}
-
-/// Apply the version waiting for a server, when one waits and the server is stopped. Starts the
-/// server again afterwards when the push asked for a restart.
-/// Another change to the server's content is waited for, so it never costs the version.
-pub async fn apply_pending(state: Arc<AppState>, id: String) {
-    let id = id.as_str();
-    let busy = state.content.busy_wait(id).await;
-    let Ok(Some(pending)) = records::pending(&state.db, id).await else {
-        return;
-    };
-    let Ok(hold) = state.servers.hold(id) else {
-        return;
-    };
-    if records::clear_pending(&state.db, id).await.is_err() {
-        return;
-    }
-    let (start_after, force) = (pending.start_after, pending.force);
-    let source = PackSource::Stored {
-        sha1: pending.sha1,
-        instance: Some(Linked {
-            id: pending.instance_id,
-            name: pending.instance_name,
-            shared_instance_id: pending.shared_instance_id,
-            version: pending.shared_version,
-        }),
-    };
+    let access = state.access.clone();
     state.content.spawn(
         hold,
         busy,
         Installing::Modpack,
         move |content, hold, progress| async move {
             let result = content_install::pack(
-                &content, &hold, &progress, source, None, force,
+                &content, &hold, &progress, source, properties, force,
             )
             .await;
-            if start_after {
-                // Back up either way: a failed update changes nothing it could not finish.
-                let id = hold.id().to_owned();
-                drop(hold);
-                if let Err(error) = content.servers.start(&id).await {
-                    tracing::warn!(server = %id, %error, "could not start the server after its update");
-                }
-            }
+            // A pack of its own may have dropped the players of the instance it followed.
+            access.owed.notify_one();
             result
         },
     );
 }
 
-/// Delete a pack file nothing uses any more, such as a waiting version a newer push replaced.
-async fn forget_pack(state: &AppState, sha1: Option<String>) {
-    let Some(sha1) = sha1 else { return };
-    if let Ok(false) = records::pack_in_use(&state.db, &sha1).await {
-        let dirs = SharedDirs::new(state.servers.paths().root());
-        let _ = tokio::fs::remove_file(dirs.pack(&sha1)).await;
-    }
-}
-
-/// Apply pushed versions as their servers stop, for as long as Core runs.
-pub async fn apply_pending_on_stop(state: Arc<AppState>) {
-    use tokio::sync::broadcast::error::RecvError;
-
-    let mut events = state.servers.events.subscribe();
-    // Versions pushed before Core last stopped, to servers that are stopped now.
-    for id in records::servers_pending(&state.db)
-        .await
-        .unwrap_or_default()
-    {
-        tokio::spawn(apply_pending(Arc::clone(&state), id));
-    }
-    loop {
-        match events.recv().await {
-            Ok(crate::servers::Lifecycle::Ended(id)) => {
-                tokio::spawn(apply_pending(Arc::clone(&state), id));
-            }
-            Ok(_) | Err(RecvError::Lagged(_)) => {}
-            Err(RecvError::Closed) => return,
+/// Apply the latest version of a share to a server (`commands::install_instance`), which Core
+/// reads from the backend with its own key and the `ticket` of the user who asked, so it reads
+/// only what that user can. Only the local CLI reads without one, as the Core's owner. The
+/// version is read before this returns, so one that cannot go fails the request.
+#[allow(clippy::too_many_arguments)]
+async fn install_instance(
+    state: &Arc<AppState>,
+    id: &str,
+    caller: &Caller,
+    ticket: Option<String>,
+    instance: UploadedInstance,
+    shared_instance_id: String,
+    properties: Option<PropertiesFields>,
+    restart: bool,
+    force: bool,
+) -> Result<(), ApiError> {
+    let busy = state.content.busy(id)?;
+    let backend = super::share::backend(state).await?;
+    let backend = match (ticket, caller) {
+        (Some(ticket), _) => backend.with_read_ticket(ticket),
+        (None, Caller::Local) => backend,
+        // Without a ticket the backend reads as the Core's owner, which is not who asked.
+        (None, Caller::Session { .. }) => {
+            return Err(ApiError::new(
+                ErrorCode::InvalidRequest,
+                "An instance install needs a read ticket for this Core.",
+            ));
         }
-    }
+    };
+    let version = consume::ready_version(&backend, &shared_instance_id)
+        .await
+        .map_err(|error| match error {
+            // The backend names why by its code. It checks the Core owner's account before the
+            // reader's, so a locked or blacklisted account is most likely the owner's.
+            consume::ReadError::Denied { code, description } => {
+                let message = match code.as_str() {
+                    "not_member" => {
+                        "You no longer have access to this instance's share."
+                    }
+                    "ticket_invalid" => {
+                        "The request to update the server expired. Try again."
+                    }
+                    "account_locked" | "blacklisted" => {
+                        "The owner of this Core cannot use sharing right now."
+                    }
+                    _ => description.as_str(),
+                };
+                ApiError::new(ErrorCode::Forbidden, message)
+            }
+            consume::ReadError::Backend(error) => ApiError::from(error),
+            error @ consume::ReadError::NoVersion => {
+                ApiError::new(ErrorCode::NotFound, error.to_string())
+            }
+            error @ consume::ReadError::NotReady => {
+                ApiError::new(ErrorCode::Conflict, error.to_string())
+            }
+        })?;
+    install_instance::install_instance(
+        &state.content,
+        Arc::clone(&state.access.owed),
+        id,
+        busy,
+        backend,
+        version,
+        InstanceInstall {
+            instance_id: instance.id,
+            instance_name: instance.name,
+            shared_instance_id,
+            properties,
+            restart,
+            force,
+        },
+    )
+    .await?;
+    Ok(())
 }
 
 /// `POST .../content/repair`: check every file of the loader and the pack again, put back pack
@@ -1318,11 +1003,11 @@ pub async fn repair(
 ) -> Result<StatusCode, ApiError> {
     caller.require(&state.db, &id, Level::Editor).await?;
     world(&id, &wid)?;
-    let server = servers_records::get(&state.db, &id)
+    let server = server_rows::get(&state.db, &id)
         .await?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
     let (hold, busy) = begin(&state, &id)?;
-    if records::pack(&state.db, &id).await?.is_some() {
+    if content_rows::get_pack(&state.db, &id).await?.is_some() {
         // The pack the server already follows: no other Minecraft.
         spawn_pack(&state, hold, busy, PackSource::Current, None, true);
     } else {
@@ -1341,7 +1026,7 @@ pub async fn repair(
             busy,
             Installing::Loader,
             move |content, hold, progress| async move {
-                content_install::loader(
+                install_loader(
                     &content,
                     &hold,
                     &progress,
@@ -1369,7 +1054,8 @@ pub async fn unlink(
     caller.require(&state.db, &id, Level::Editor).await?;
     world(&id, &wid)?;
     let _busy = state.content.busy(&id)?;
-    records::unlink(&state.db, &id).await?;
+    content_rows::unlink(&state.db, &id).await?;
+    state.access.owed.notify_one();
     state.content.clear_error(&id);
     activity::log(&state.db, &caller, Some(&id), Action::ContentChanged).await;
     Ok(StatusCode::NO_CONTENT)
@@ -1383,7 +1069,7 @@ pub async fn modpack(
 ) -> Result<Json<ModpackFields>, ApiError> {
     caller.require(&state.db, &id, Level::Viewer).await?;
     world(&id, &wid)?;
-    modpack_fields(&state, &id, true)
+    get_linked_modpack_info(&state.content, &id, true)
         .await?
         .map(Json)
         .ok_or_else(|| {
@@ -1414,34 +1100,45 @@ pub async fn update_modpack(
     };
     caller.require(&state.db, &id, Level::Editor).await?;
     world(&id, &wid)?;
-    let pack = records::pack(&state.db, &id).await?.ok_or_else(|| {
-        ApiError::new(ErrorCode::NotFound, "This server follows no pack.")
-    })?;
-    let Some(project_id) = pack.project_id else {
+    let pack =
+        content_rows::get_pack(&state.db, &id)
+            .await?
+            .ok_or_else(|| {
+                ApiError::new(
+                    ErrorCode::NotFound,
+                    "This server follows no pack.",
+                )
+            })?;
+    let Some((project_id, installed_id)) = modrinth_pack(&pack.link) else {
         return Err(ApiError::new(
             ErrorCode::InvalidRequest,
             "This pack came from a file; upload the new file instead.",
         ));
     };
-    let latest = state
+    let no_update = || {
+        ApiError::new(
+            ErrorCode::Conflict,
+            "The pack has no newer version on this server's update channel.",
+        )
+    };
+    let installed = state
         .content
         .modrinth
-        .versions(&project_id, &[], None)
+        .version(installed_id)
         .await
-        .map_err(content::Error::from)?
-        .into_iter()
-        .next()
-        .ok_or_else(|| {
-            ApiError::new(ErrorCode::NotFound, "The pack has no versions.")
-        })?;
+        .map_err(content::Error::from)?;
+    let newest =
+        check_modpack_update(&state.content, &id, project_id, &installed)
+            .await?
+            .ok_or_else(no_update)?;
     let (hold, busy) = begin(&state, &id)?;
     spawn_pack(
         &state,
         hold,
         busy,
         PackSource::Modrinth {
-            project_id,
-            version_id: latest.id,
+            project_id: project_id.to_owned(),
+            version_id: newest,
         },
         None,
         force,
@@ -1450,18 +1147,15 @@ pub async fn update_modpack(
     Ok(StatusCode::ACCEPTED)
 }
 
-/// The most one upload request may write.
-pub const MAX_UPLOAD: u64 = 4 * 1024 * 1024 * 1024;
-
-/// Stream one multipart field into `path`, at most `limit` bytes, returning its SHA-1.
+/// Stream one multipart field into `path`, as much as fits on the disk (`archive::room`),
+/// returning its SHA-1.
 pub async fn stage_field(
     field: &mut Field<'_>,
     path: &std::path::Path,
-    limit: u64,
 ) -> Result<String, ApiError> {
-    if let Some(parent) = path.parent() {
-        tokio::fs::create_dir_all(parent).await?;
-    }
+    let parent = path.parent().unwrap_or(path);
+    tokio::fs::create_dir_all(parent).await?;
+    let room = archive::room(parent)?;
     let result = async {
         let mut file = tokio::fs::File::create(path).await?;
         let mut hasher = sha1::Sha1::default();
@@ -1470,14 +1164,13 @@ pub async fn stage_field(
             ApiError::new(ErrorCode::InvalidRequest, error.body_text())
         })? {
             written += chunk.len() as u64;
-            if written > limit {
-                return Err(ApiError::new(
-                    ErrorCode::InvalidRequest,
-                    format!(
-                        "Uploads are at most {} GB.",
-                        limit / 1024 / 1024 / 1024
-                    ),
-                ));
+            if written > room {
+                return Err(content::Error::from(NoRoom {
+                    what: "the upload".into(),
+                    needed: None,
+                    room,
+                })
+                .into());
             }
             sha1::Digest::update(&mut hasher, &chunk);
             file.write_all(&chunk).await?;
@@ -1518,12 +1211,7 @@ pub async fn upload_modpack(
                 Some("file") => {
                     let path =
                         dirs.pack(&format!("upload-{}", uuid::Uuid::new_v4()));
-                    let sha1 = stage_field(
-                        &mut field,
-                        &path,
-                        content_install::MAX_PACK,
-                    )
-                    .await?;
+                    let sha1 = stage_field(&mut field, &path).await?;
                     staged = Some((path, sha1));
                 }
                 Some("properties") => {
@@ -1543,15 +1231,20 @@ pub async fn upload_modpack(
         tokio::fs::rename(&path, &stored).await?;
         // A file that is not a pack is refused now, not in the background. Spellings that
         // collide are checked at install, against the server's own disk.
-        content_install::read_pack(&stored, false)
-            .await
-            .map_err(|error| {
-                let stored = stored.clone();
-                tokio::spawn(async move {
-                    let _ = tokio::fs::remove_file(stored).await;
-                });
-                ApiError::from(error)
-            })?;
+        content_install::read_pack(
+            &state.content,
+            &stored,
+            &Default::default(),
+            false,
+        )
+        .await
+        .map_err(|error| {
+            let stored = stored.clone();
+            tokio::spawn(async move {
+                let _ = tokio::fs::remove_file(stored).await;
+            });
+            ApiError::from(error)
+        })?;
         Ok::<_, ApiError>(sha1)
     }
     .await;
@@ -1591,7 +1284,6 @@ pub async fn upload_addons(
         .staging(&id)
         .join(uuid::Uuid::new_v4().to_string());
     let result = async {
-        let mut budget = MAX_UPLOAD;
         let mut n = 0;
         while let Some(mut field) = form.next_field().await.map_err(bad_form)? {
             let Some(filename) = field.file_name().map(str::to_owned) else {
@@ -1599,10 +1291,8 @@ pub async fn upload_addons(
             };
             n += 1;
             let path = staging.join(n.to_string());
-            stage_field(&mut field, &path, budget).await?;
-            budget =
-                budget.saturating_sub(tokio::fs::metadata(&path).await?.len());
-            addons::upload(&state.content, &id, &filename, &path).await?;
+            stage_field(&mut field, &path).await?;
+            add_uploaded_file(&state.content, &id, &filename, &path).await?;
         }
         Ok::<_, ApiError>(())
     }
@@ -1621,25 +1311,7 @@ pub async fn edited(
     Path(id): Path<String>,
 ) -> Result<Json<EditedFiles>, ApiError> {
     caller.require(&state.db, &id, Level::Viewer).await?;
-    let rows = records::files(&state.db, &id).await?;
-    let folder = Arc::new(content::folder::Folder::open(
-        &state.servers.paths().server(&id),
-    )?);
-    let files = tokio::task::spawn_blocking(move || {
-        pack::edited(&rows, &|path| folder.sha1(path).ok().flatten())
-            .into_iter()
-            .map(|(row, on_disk)| EditedFile {
-                path: row.path.clone(),
-                deleted: on_disk.is_none(),
-                pending: row.pending.map(|pending| match pending {
-                    records::Pending::Changed => PendingChange::Changed,
-                    records::Pending::Removed => PendingChange::Removed,
-                }),
-            })
-            .collect()
-    })
-    .await
-    .map_err(std::io::Error::other)?;
+    let files = list_edited_files(&state.content, &id).await?;
     Ok(Json(EditedFiles { files }))
 }
 
@@ -1652,9 +1324,8 @@ pub async fn decide(
 ) -> Result<StatusCode, ApiError> {
     caller.require(&state.db, &id, Level::Editor).await?;
     let _busy = state.content.busy(&id)?;
-    let path =
-        content::folder::clean(&decision.path).map_err(content::Error::from)?;
-    content_install::decide(
+    let path = folder::clean(&decision.path).map_err(content::Error::from)?;
+    decide_edited_file(
         &state.content,
         &id,
         &path,
@@ -1683,8 +1354,8 @@ pub async fn embedded_icon(
     caller.require(&state.db, &id, Level::Viewer).await?;
     world(&id, &wid)?;
     let kind = match query.parent_directory.as_str() {
-        "mods" => AddonKind::Mod,
-        "plugins" => AddonKind::Plugin,
+        "mods" => ContentType::Mod,
+        "plugins" => ContentType::Plugin,
         _ => {
             return Err(ApiError::new(
                 ErrorCode::InvalidRequest,
@@ -1692,22 +1363,29 @@ pub async fn embedded_icon(
             ));
         }
     };
-    let server = servers_records::get(&state.db, &id)
+    let server = server_rows::get(&state.db, &id)
         .await?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
     let loader = server.loader.as_deref().and_then(ModLoader::parse);
     let content = Arc::clone(&state.content);
     let root = state.servers.paths().server(&id);
     let icon = tokio::task::spawn_blocking(move || {
-        let folder = content::folder::Folder::open(&root).ok()?;
-        let listed = addons::find(&folder, loader, &query.filename)
+        let folder = folder::Folder::open(&root).ok()?;
+        let listed = content_files::find(&folder, loader, &query.filename)
             .filter(|listed| listed.kind == kind)?;
         let key = format!("{id}/{}", listed.path);
         let path = content
             .manifests
-            .get(&key, open_jar(&folder, &listed)?, loader)?
+            .get(
+                &key,
+                open_jar(&folder, &listed)?,
+                loader.and_then(ModLoader::jar_platform),
+            )?
             .icon?;
-        let bytes = manifest::read_icon(open_jar(&folder, &listed)?, &path)?;
+        let bytes = bedrock::upstream::jar::read_icon(
+            open_jar(&folder, &listed)?,
+            &path,
+        )?;
         Some((path, bytes))
     })
     .await

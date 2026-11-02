@@ -98,21 +98,6 @@ pub struct Remove {
     pub keep_core: bool,
 }
 
-/// A call Core still owes the backend, stored as JSON in `backend_owed.call` and retried with
-/// backoff.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum OwedCall {
-    /// `POST /core/access`.
-    Grant(Grant),
-    /// `DELETE /core/access`.
-    Remove(Remove),
-    /// `POST /core/state` with the state at the time it is sent.
-    ReportState,
-    /// `POST /core/storage` with the store's holdings at the time it is sent.
-    ReportStorage,
-}
-
 /// Body of `POST /core/storage`. Bytes throughout.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct StorageReport {

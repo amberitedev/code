@@ -1,0 +1,86 @@
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
+
+use super::{Object, PushError, PushEvent};
+use crate::pool::{ListedObject, PoolCore, StoreClient};
+
+/// Uploads rounds of whatever the Core still lacks until it holds the whole version.
+const UPLOAD_ROUNDS: usize = 3;
+const UPLOAD_PROGRESS_INTERVAL: Duration = Duration::from_millis(200);
+
+/// Stores a version's objects on `core`, sending only those it lacks, and returns the C of each
+/// object it sent. Every object of a push is on disk, so one the Core lost since an earlier
+/// version is sent again.
+pub(super) async fn store_version(
+    store: &StoreClient,
+    core: &PoolCore,
+    ticket: &str,
+    root: &str,
+    objects: &[Object],
+    on_event: &mut (dyn FnMut(PushEvent<'_>) + Send),
+) -> Result<HashSet<String>, PushError> {
+    let paths = objects
+        .iter()
+        .map(|object| (hex::encode(object.object), object.path.clone()))
+        .collect::<HashMap<_, _>>();
+    let mut list = objects
+        .iter()
+        .map(|object| ListedObject {
+            hash: hex::encode(object.object),
+            size: object.size,
+        })
+        .collect::<Vec<_>>();
+    list.sort_by(|left, right| left.hash.cmp(&right.hash));
+    list.dedup_by(|left, right| left.hash == right.hash);
+    let hashes = list
+        .iter()
+        .map(|object| object.hash.clone())
+        .collect::<Vec<_>>();
+
+    let have = store.have(core, ticket, root, &hashes).await?;
+    if have.complete {
+        return Ok(HashSet::new());
+    }
+    let mut missing = have.missing;
+    let requested = missing.iter().cloned().collect::<HashSet<_>>();
+    let total = list
+        .iter()
+        .filter(|object| requested.contains(&object.hash))
+        .map(|object| object.size)
+        .sum();
+    let uploaded = Arc::new(AtomicU64::new(0));
+    on_event(PushEvent::Progress(0, total));
+    for _ in 0..UPLOAD_ROUNDS {
+        let sending = missing
+            .iter()
+            .filter_map(|hash| Some((hash.clone(), paths.get(hash)?.clone())))
+            .collect::<Vec<_>>();
+        let upload = store.upload(
+            core,
+            ticket,
+            root,
+            &list,
+            sending,
+            Arc::clone(&uploaded),
+        );
+        tokio::pin!(upload);
+        let mut ticker = tokio::time::interval(UPLOAD_PROGRESS_INTERVAL);
+        let outcome = loop {
+            tokio::select! {
+                outcome = &mut upload => break outcome,
+                _ = ticker.tick() => on_event(PushEvent::Progress(
+                    uploaded.load(Ordering::Relaxed).min(total),
+                    total,
+                )),
+            }
+        }?;
+        if outcome.complete {
+            on_event(PushEvent::Progress(total, total));
+            return Ok(requested);
+        }
+        missing = outcome.missing;
+    }
+    Err(PushError::NotAccepted)
+}

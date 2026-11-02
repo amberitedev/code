@@ -9,6 +9,7 @@ repository.workspace = true
 [dependencies]
 axum = { version = "0.8.4", features = ["multipart", "ws"] }
 base64 = { workspace = true }
+bedrock = { workspace = true }
 bytes = { workspace = true }
 # Server folders are written by mods; every path Core opens in one stays inside it.
 cap-fs-ext = "3.4"
@@ -29,6 +30,7 @@ image = { workspace = true, features = ["gif", "jpeg", "png", "webp"] }
 minecraft-meta-manifest = { workspace = true }
 # Checks the signature on Copal release manifests.
 minisign-verify = "0.2.4"
+modrinth-content-management = { workspace = true }
 netdev = "0.46.3"
 rcgen = "0.14.7"
 reqwest = { workspace = true, features = ["json", "rustls-no-provider", "stream"] }

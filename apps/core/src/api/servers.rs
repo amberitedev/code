@@ -1,4 +1,4 @@
-//! Servers: `GET /modrinth/v0/servers`, `GET /modrinth/v0/servers/{id}` and its `power`, `name`,
+//! Servers: `GET /modrinth/v0/servers`, `GET /modrinth/v0/servers/{id}` and its `power`,
 //! `fs`, `ws`, and `reinstall` routes; `GET /v1/servers`, `GET /v1/servers/{id}`,
 //! `PATCH /v1/servers/{id}/worlds/{wid}`, `GET /v1/servers/{id}/worlds/{wid}/select-download`,
 //! `DELETE /v1/servers/{id}/flows/intro`; and
@@ -6,9 +6,11 @@
 //! `packages/api-client/src/modules/archon/types.ts` (`archon/servers/v0.ts`, `archon/servers/v1.ts`,
 //! and `createServer` in `archon/cores/v1.ts`).
 
-#![allow(dead_code)] // Wired in step 4: worlds, files, and linked instances.
-
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::BTreeMap,
+    net::{IpAddr, SocketAddr},
+    sync::Arc,
+};
 
 use axum::{
     Json,
@@ -16,6 +18,7 @@ use axum::{
     http::{HeaderMap, StatusCode, header::HOST},
 };
 use chrono::{DateTime, Utc};
+use modrinth_content_management::VersionType;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -27,19 +30,16 @@ use super::{
 };
 use crate::{
     access::{Caller, Dangerous, Level, activity},
-    content::{self, modrinth::ReleaseChannel},
     installs::ModLoader,
-    servers::{Phase, ServerError, launch, records},
+    servers::{Phase, ServerError, launch},
+    state::servers::{
+        adapters::sqlite::{content_rows, server_rows},
+        commands::{
+            drop_own_share, install_loader, list_content::linked_pack_state,
+            needs_update::needs_update,
+        },
+    },
 };
-
-/// Query of GET `/modrinth/v0/servers`. Mirrors Archon.Servers.v0.GetServersOptions.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ServerListQuery {
-    #[serde(default)]
-    pub limit: Option<u32>,
-    #[serde(default)]
-    pub offset: Option<u32>,
-}
 
 /// Response of GET `/modrinth/v0/servers`. `users` is keyed by user id. Mirrors
 /// Archon.Servers.v0.ServerGetResponse.
@@ -115,10 +115,15 @@ pub struct Upstream {
 /// Where players join the server. Mirrors Archon.Servers.v0.Net.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Net {
+    /// With `port`, the join address upstream's helper reads (packages/ui getHostingServerAddress).
+    /// See [`join_address`].
     pub ip: Option<String>,
     pub port: u16,
     pub domain: String,
     pub outside: Option<OutsideAddress>,
+    /// The port the server listens on. The App joins it here, at the Core's own address, when it
+    /// reaches the Core on its network; the backend gets it for players.
+    pub game_port: u16,
 }
 
 /// Where the server is on the internet. Mirrors the `outside` object of Archon.Servers.v0.Net.
@@ -267,13 +272,6 @@ pub struct PowerRequest {
     pub action: PowerAction,
 }
 
-/// Body of POST `/modrinth/v0/servers/{id}/name`. Mirrors the body of
-/// `ArchonServersV0Module.updateName`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RenameRequest {
-    pub name: String,
-}
-
 /// Query of POST `/modrinth/v0/servers/{id}/reinstall`. `hard` erases the server's data first.
 /// Mirrors the `hard` param of `ArchonServersV0Module.reinstall`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -360,7 +358,7 @@ pub struct LocationMetadata {
 pub struct WorldFull {
     pub id: Uuid,
     pub name: String,
-    pub update_channel: ReleaseChannel,
+    pub update_channel: VersionType,
     pub created_at: DateTime<Utc>,
     pub is_active: bool,
     pub download_method: WorldDownloadMethod,
@@ -379,6 +377,12 @@ pub struct WorldReadiness {
 /// Mirrors Archon.Servers.v1.WorldContentInfo.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorldContentInfo {
+    /// The share the server reads: its instance's, when it follows one, else its own once it is
+    /// shared (`api::share`). Only its own is written from the server.
+    pub shared_instance_id: Option<String>,
+    /// The server has changes its own share's latest version does not, so a push would change
+    /// something. Always false for a server that follows an instance: it has no share of its own.
+    pub shared_instance_needs_update: bool,
     pub modloader: String,
     pub modloader_version: String,
     pub game_version: String,
@@ -413,23 +417,6 @@ pub struct CreateServerInstance {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateServerResponse {
     pub id: Uuid,
-}
-
-/// Body of PATCH `/local/servers/{id}/linked-instance`: the sharing settings to change. Mirrors
-/// Archon.Servers.v0.LinkedInstanceSettings.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LinkedInstanceSettings {
-    #[serde(default)]
-    pub visible_to_friends: Option<bool>,
-    #[serde(default)]
-    pub shared_instance: Option<SharedInstance>,
-}
-
-/// `id` is null once the instance is no longer shared. Mirrors the `shared_instance` object of
-/// Archon.Servers.v0.LinkedInstanceSettings.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SharedInstance {
-    pub id: Option<String>,
 }
 
 impl From<ServerError> for ApiError {
@@ -484,11 +471,46 @@ fn host(headers: &HeaderMap) -> &str {
         .unwrap_or("localhost")
 }
 
+/// Where players join a server from the internet: the router's grant when it gave a different
+/// outside port than the game port, otherwise the Core's join IP and the game port. No domain.
+fn join_address(
+    join_ip: Option<IpAddr>,
+    game_port: u16,
+    outside: Option<SocketAddr>,
+) -> (Option<IpAddr>, u16) {
+    match outside {
+        Some(outside) if outside.port() != game_port => {
+            (Some(outside.ip()), outside.port())
+        }
+        _ => (join_ip, game_port),
+    }
+}
+
+fn net(state: &AppState, row: &server_rows::ServerRow) -> Net {
+    let game_port = u16::try_from(row.port).unwrap_or_default();
+    // Known while the server runs and its port is forwarded, or open on a public address.
+    let outside = state
+        .network
+        .report(&row.id)
+        .and_then(|report| report.outside);
+    let (ip, port) = join_address(state.network.join_ip(), game_port, outside);
+    Net {
+        ip: ip.map(|ip| ip.to_string()),
+        port,
+        domain: String::new(),
+        outside: outside.map(|address| OutsideAddress {
+            ip: address.ip().to_string(),
+            port: address.port(),
+        }),
+        game_port,
+    }
+}
+
 /// What the hosting API shows for a server row, to a caller with `level` on it, reached at
 /// `host`.
 async fn server(
     state: &AppState,
-    row: records::ServerRow,
+    row: server_rows::ServerRow,
     level: Level,
     host: &str,
 ) -> Result<Server, ApiError> {
@@ -497,10 +519,12 @@ async fn server(
         Some(Phase::Running | Phase::Unmanaged(_)) => ServerPowerState::Running,
         Some(Phase::Stopping) => ServerPowerState::Stopping,
         Some(Phase::Installing) => ServerPowerState::Offline,
-        None => match records::last_outcome(&state.db, &row.id).await? {
-            Some(records::Outcome::Crashed) => ServerPowerState::Crashed,
-            Some(records::Outcome::Killed) => ServerPowerState::Killed,
-            Some(records::Outcome::Stopped) | None => ServerPowerState::Offline,
+        None => match server_rows::last_outcome(&state.db, &row.id).await? {
+            Some(server_rows::Outcome::Crashed) => ServerPowerState::Crashed,
+            Some(server_rows::Outcome::Killed) => ServerPowerState::Killed,
+            Some(server_rows::Outcome::Stopped) | None => {
+                ServerPowerState::Offline
+            }
         },
     };
     let owner_id: Option<String> =
@@ -508,16 +532,12 @@ async fn server(
             .fetch_optional(&state.db)
             .await?
             .flatten();
+    let net = net(state, &row);
     Ok(Server {
         server_id: Uuid::parse_str(&row.id).unwrap_or_default(),
         name: row.name,
         owner_id: owner_id.unwrap_or_default(),
-        net: Net {
-            ip: None,
-            port: u16::try_from(row.port).unwrap_or_default(),
-            domain: String::new(),
-            outside: None,
-        },
+        net,
         game: Game::Minecraft,
         backup_quota: 0,
         used_backup_quota: 0,
@@ -561,16 +581,16 @@ async fn linked_instance(
     state: &AppState,
     id: &str,
 ) -> Result<Option<LinkedInstance>, ApiError> {
-    let Some(pack) = content::records::pack(&state.db, id).await? else {
+    let Some(pack) = content_rows::get_pack(&state.db, id).await? else {
         return Ok(None);
     };
-    let Some(linked) = content::install::linked(&pack) else {
+    let Some(linked) = pack.share.clone() else {
         return Ok(None);
     };
     Ok(Some(LinkedInstance {
-        id: linked.id,
-        name: linked.name,
-        state: super::content::linked_state(state, id, &pack).await?,
+        id: linked.instance_id,
+        name: linked.instance_name,
+        state: linked_pack_state(&state.content, id, &pack).await?,
         error: pack.error,
         visible_to_friends: false,
         shared_instance_id: Some(linked.shared_instance_id),
@@ -598,7 +618,7 @@ pub async fn list(
     headers: HeaderMap,
 ) -> Result<Json<ServerGetResponse>, ApiError> {
     let mut servers = Vec::new();
-    for row in records::list(&state.db).await? {
+    for row in server_rows::list(&state.db).await? {
         if let Some(level) = caller.level(&state.db, &row.id).await? {
             servers.push(server(&state, row, level, host(&headers)).await?);
         }
@@ -624,7 +644,7 @@ pub async fn get(
     Path(id): Path<String>,
 ) -> Result<Json<Server>, ApiError> {
     let level = caller.require(&state.db, &id, Level::Viewer).await?;
-    let row = records::get(&state.db, &id)
+    let row = server_rows::get(&state.db, &id)
         .await?
         .ok_or(ServerError::NotFound(id))?;
     Ok(Json(server(&state, row, level, host(&headers)).await?))
@@ -717,9 +737,10 @@ pub async fn reinstall(
     };
     let busy = state.content.busy(&id)?;
     let hold = state.servers.hold(&id)?;
-    content::records::unlink(&state.db, &id).await?;
+    content_rows::unlink(&state.db, &id).await?;
+    state.access.owed.notify_one();
     let progress = state.content.progress(&id);
-    let result = content::install::loader(
+    let result = install_loader::install_loader(
         &state.content,
         &hold,
         &progress,
@@ -742,20 +763,6 @@ pub async fn reinstall(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// `POST /local/servers/{id}/eula`: the owner accepted the Minecraft EULA for this server.
-pub async fn accept_eula(
-    caller: Caller,
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
-) -> Result<StatusCode, ApiError> {
-    caller.require_owner()?;
-    if !records::accept_eula(&state.db, &id).await? {
-        return Err(ServerError::NotFound(id).into());
-    }
-    activity::log(&state.db, &caller, Some(&id), Action::EulaAccepted).await;
-    Ok(StatusCode::NO_CONTENT)
-}
-
 /// `DELETE /local/servers/{id}`: delete a stopped server, its world, and every role on it. Owner
 /// only, dangerous. Its activity history stays.
 pub async fn delete(
@@ -763,7 +770,7 @@ pub async fn delete(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
-    records::get(&state.db, &id)
+    server_rows::get(&state.db, &id)
         .await?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
     if state.servers.hold_for_deletion(&id).is_err() {
@@ -788,14 +795,15 @@ pub async fn delete(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Delete a held server's row, and with it every role on it, owing the backend each removal.
-/// Returns who had a role.
+/// Delete a held server's row, and with it every role on it and its own share and that share's
+/// history, owing the backend each removal and dropping its players. Returns who had a role.
 async fn remove_server(
     state: &AppState,
     caller: &Caller,
     id: &str,
 ) -> Result<Vec<String>, ApiError> {
     let mut tx = state.db.begin().await?;
+    let share_id = drop_own_share::owe_share_deletion(&mut tx, id).await?;
     let members: Vec<String> =
         sqlx::query_scalar("SELECT user_id FROM access WHERE server_id = ?")
             .bind(id)
@@ -805,6 +813,17 @@ async fn remove_server(
         .bind(id)
         .execute(&mut *tx)
         .await?;
+    // Its players, if it had any, lose what it shared with them.
+    crate::access::sync::owe(
+        &mut tx,
+        &crate::access::owed::OwedCall::ForgetPlayers(
+            crate::access::owed::ForgetPlayers {
+                server_id: id.into(),
+                share_id: None,
+            },
+        ),
+    )
+    .await?;
     for user in &members {
         super::access::owe_removal(&mut tx, user, id).await?;
     }
@@ -816,6 +835,9 @@ async fn remove_server(
     )
     .await?;
     tx.commit().await?;
+    if let Some(share_id) = share_id {
+        drop_own_share::release_history(&state.content, &share_id).await;
+    }
     Ok(members)
 }
 
@@ -839,7 +861,7 @@ pub async fn ws_auth(
 /// the server's.
 async fn server_full(
     state: &AppState,
-    row: records::ServerRow,
+    row: server_rows::ServerRow,
     host: &str,
 ) -> Result<ServerFull, ApiError> {
     let created_at: i64 =
@@ -854,8 +876,24 @@ async fn server_full(
     let invocation = launch::args(paths, &row)
         .ok()
         .map(|args| launch::invocation(&args));
+    // A server that follows an instance reads that instance's share; one that follows none has
+    // its own once it is shared.
+    let linked = content_rows::get_pack(&state.db, &row.id)
+        .await?
+        .and_then(|pack| pack.share.clone());
+    let (shared_instance_id, needs_update) = match linked {
+        Some(linked) => (Some(linked.shared_instance_id), false),
+        None => match server_rows::share_id(&state.db, &row.id).await? {
+            Some(share_id) => {
+                (Some(share_id), needs_update(&state.content, &row.id).await)
+            }
+            None => (None, false),
+        },
+    };
     let content = match (&row.loader, &row.game_version) {
         (Some(loader), Some(game_version)) => Some(WorldContentInfo {
+            shared_instance_id,
+            shared_instance_needs_update: needs_update,
             modloader: loader.clone(),
             modloader_version: row.loader_version.clone().unwrap_or_default(),
             game_version: game_version.clone(),
@@ -913,7 +951,7 @@ pub async fn list_v1(
     headers: HeaderMap,
 ) -> Result<Json<Vec<ServerFull>>, ApiError> {
     let mut servers = Vec::new();
-    for row in records::list(&state.db).await? {
+    for row in server_rows::list(&state.db).await? {
         if caller.level(&state.db, &row.id).await?.is_some() {
             servers.push(server_full(&state, row, host(&headers)).await?);
         }
@@ -929,7 +967,7 @@ pub async fn get_v1(
     Path(id): Path<String>,
 ) -> Result<Json<ServerFull>, ApiError> {
     caller.require(&state.db, &id, Level::Viewer).await?;
-    let row = records::get(&state.db, &id)
+    let row = server_rows::get(&state.db, &id)
         .await?
         .ok_or(ServerError::NotFound(id))?;
     Ok(Json(server_full(&state, row, host(&headers)).await?))
@@ -941,7 +979,7 @@ pub async fn get_v1(
 #[derive(Debug, Clone, Deserialize)]
 pub struct PatchWorld {
     #[serde(default)]
-    pub update_channel: Option<ReleaseChannel>,
+    pub update_channel: Option<VersionType>,
 }
 
 /// `PATCH /v1/servers/{id}/worlds/{wid}`.
@@ -953,13 +991,44 @@ pub async fn patch_world(
 ) -> Result<StatusCode, ApiError> {
     caller.require(&state.db, &id, Level::Editor).await?;
     super::content::world(&id, &wid)?;
-    records::get(&state.db, &id)
+    server_rows::get(&state.db, &id)
         .await?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
     if let Some(channel) = request.update_channel {
-        records::set_update_channel(&state.db, &id, channel).await?;
+        server_rows::set_update_channel(&state.db, &id, channel).await?;
         activity::log(&state.db, &caller, Some(&id), Action::SettingsChanged)
             .await;
     }
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn join_address_uses_the_routers_port_only_when_it_differs() {
+        let public: IpAddr = "203.0.113.5".parse().unwrap();
+        let wan: IpAddr = "198.51.100.7".parse().unwrap();
+        assert_eq!(
+            join_address(Some(public), 25565, None),
+            (Some(public), 25565)
+        );
+        assert_eq!(
+            join_address(
+                Some(public),
+                25565,
+                Some(SocketAddr::new(wan, 25565))
+            ),
+            (Some(public), 25565)
+        );
+        assert_eq!(
+            join_address(
+                Some(public),
+                25565,
+                Some(SocketAddr::new(wan, 41000))
+            ),
+            (Some(wan), 41000)
+        );
+    }
 }

@@ -9,6 +9,7 @@
 pub mod activity;
 pub mod keys;
 pub mod local;
+pub mod owed;
 pub mod pairing;
 pub mod sessions;
 pub mod sync;

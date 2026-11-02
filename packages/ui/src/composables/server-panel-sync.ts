@@ -142,7 +142,6 @@ export function useServerPanelSync(options: UseServerPanelSyncOptions) {
 									...world.content,
 									shared_instance_id: event.shared_instance_id,
 									shared_instance_needs_update: event.needs_update,
-									requires_restart: event.requires_restart,
 								},
 							}
 						: world,

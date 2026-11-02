@@ -15,8 +15,9 @@ pub mod content;
 pub mod error;
 pub mod eula;
 pub mod events;
+pub mod export;
 pub mod files;
-mod health;
+pub mod health;
 mod icon;
 pub mod insight;
 pub mod logs;
@@ -25,7 +26,8 @@ pub mod performance;
 pub mod properties;
 pub mod servers;
 pub mod sessions;
-mod startup;
+pub mod share;
+pub mod startup;
 pub mod storage;
 #[cfg(test)]
 mod tests;
@@ -63,7 +65,7 @@ pub struct AppState {
     pub db: SqlitePool,
     pub servers: Arc<crate::servers::Servers>,
     pub access: Arc<crate::access::Access>,
-    pub content: Arc<crate::content::Content>,
+    pub content: Arc<crate::state::servers::Content>,
     pub backups: Arc<crate::backups::Backups>,
     pub uploads: files::Uploads,
     pub update: Arc<crate::update::Updater>,
@@ -110,7 +112,6 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/servers/{id}/ws", get(events::console))
         .route("/local/servers", post(servers::create))
         .route("/local/servers/{id}", delete(servers::delete))
-        .route("/local/servers/{id}/eula", post(servers::accept_eula))
         .route("/v1/servers", get(servers::list_v1))
         .route("/v1/servers/{id}", get(servers::get_v1))
         .route("/v1/servers/{id}/worlds/{wid}", patch(servers::patch_world))
@@ -159,6 +160,10 @@ pub fn router(state: Arc<AppState>) -> Router {
             get(files::authorize_file),
         )
         .route(
+            "/servers/{id}/v1/worlds/{wid}/content/export-mrpack/authorize",
+            get(export::authorize),
+        )
+        .route(
             "/v1/servers/{id}/worlds/{wid}/properties",
             get(properties::get).patch(properties::patch),
         )
@@ -168,6 +173,24 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/servers/{id}/worlds/{wid}/addons/enable", post(content::enable))
         .route("/v1/servers/{id}/worlds/{wid}/addons/disable-many", post(content::disable_many))
         .route("/v1/servers/{id}/worlds/{wid}/addons/enable-many", post(content::enable_many))
+        .route(
+            "/v1/servers/{id}/worlds/{wid}/addons/set-enabled-server",
+            post(content::set_enabled_server),
+        )
+        .route(
+            "/v1/servers/{id}/worlds/{wid}/addons/set-enabled-player",
+            post(content::set_enabled_player),
+        )
+        .route(
+            "/v1/servers/{id}/worlds/{wid}/addons/set-locked-side-toggle",
+            post(content::set_side_toggle_locked),
+        )
+        .route(
+            "/v1/servers/{id}/worlds/{wid}/addons/complete-side-type-review",
+            post(content::complete_side_type_review),
+        )
+        .route("/v1/servers/{id}/worlds/{wid}/content/share/diff", get(share::diff))
+        .route("/v1/servers/{id}/worlds/{wid}/content/share/files", get(share::files))
         .route("/v1/servers/{id}/worlds/{wid}/content", post(content::install))
         .route("/v1/servers/{id}/worlds/{wid}/content/repair", post(content::repair))
         .route("/v1/servers/{id}/worlds/{wid}/content/unlink-modpack", post(content::unlink))
@@ -201,6 +224,11 @@ pub fn router(state: Arc<AppState>) -> Router {
         // Starting a server answers once Java runs, and an install or update once it is done.
         .route("/modrinth/v0/servers/{id}/power", post(servers::power))
         .route("/update/apply", post(update::apply))
+        // A push uploads the server's files and waits for the store to confirm them.
+        .route(
+            "/v1/servers/{id}/worlds/{wid}/content/share",
+            post(share::share).delete(share::unshare),
+        )
         .route("/servers/{id}/reachability", post(insight::check))
         .route(
             "/modrinth/v0/servers/{id}/reinstall",
@@ -238,8 +266,12 @@ pub fn router(state: Arc<AppState>) -> Router {
             "/servers/{id}/v1/worlds/{wid}/files/contents-raw",
             get(files::download_file),
         )
+        .route(
+            "/servers/{id}/v1/worlds/{wid}/content/export-mrpack",
+            get(export::export),
+        )
         .layer(DefaultBodyLimit::max(MAX_BODY))
-        // Uploads stream to disk with their own cap (`content::MAX_UPLOAD`).
+        // Uploads stream to disk with their own cap: the disk's free space (`archive::room`).
         .route(
             "/servers/{id}/v1/worlds/{wid}/content/upload-modpack-file",
             post(content::upload_modpack),

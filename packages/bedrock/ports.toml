@@ -1,0 +1,78 @@
+# Upstream code bedrock carries as its own copy, because borrowing it with `#[path]` is impossible
+# (it is tangled with app-lib's `State`). Each entry names our path, the upstream path in
+# modrinth/main, and the modrinth/main commit the files came from. Sync tooling is Linear AMB-54;
+# until then, port upstream changes by diffing `upstream` from `commit` to modrinth/main and
+# applying the same diff to `ours`. The App keeps using the originals.
+#
+# `adapted` lists every file of ours that differs from upstream, and why. Every other file under
+# `ours` is upstream's, byte for byte.
+
+[[clone]]
+ours = "packages/bedrock/src/upstream/store"
+upstream = "packages/app-lib/src/state/content_store"
+commit = "cf0a3ca593506c543ed63c35986e31ade1b19b2e"
+adapted = [
+  # Ours: what the cloned files use from app-lib (State, DirectoryInfo, fetch, instance rows,
+  # the runtime cache, install jobs), for a host with no instances. Mounted as
+  # `bedrock::upstream::store`; the clone itself is mounted at `crate::state::content_store`.
+  "glue.rs",
+  # Ours: the store's tables, from app-lib's migrations, for a host's own migration.
+  "schema.sql",
+  # Replaces upstream's, which migrates app-lib's old instance copies and app directories.
+  "commands/migration.rs",
+  # Outside `ours`: `packages/bedrock/build.rs` sets MODRINTH_API_URL for adapters/downloads.rs.
+  "../../../build.rs",
+]
+
+[[clone]]
+ours = "packages/bedrock/src/upstream/jar/embedded_content_metadata.rs"
+upstream = "packages/app-lib/src/state/instances/commands/embedded_content_metadata.rs"
+commit = "d39674ce0096fb88fd128459988e4c1de8102648"
+# The parsing half only: `resolve_embedded_content_metadata` and `metadata_cache_key` (app-lib's
+# cache and State) are cut, with the imports only they used. `EmbeddedContentMetadata` comes from
+# the glue (`jar/mod.rs`), and the last lines declare Copal's additions (`jar/server.rs`) as a
+# child module so they can use the private parsers.
+adapted = ["embedded_content_metadata.rs"]
+
+# Small upstream definitions copied into our own files. Each copy names its source in a comment.
+[[copy]]
+ours = "packages/bedrock/src/upstream/jar/mod.rs"
+item = "EmbeddedContentMetadata"
+upstream = "packages/app-lib/src/state/instances/content.rs"
+commit = "f9ffe5ae620218751d3ed19841dee3f5e3cd206a"
+
+[[copy]]
+ours = "packages/bedrock/src/upstream/store/glue.rs"
+item = "file_modified_at_ns"
+upstream = "packages/app-lib/src/state/cache.rs"
+commit = "fbef1fec98505f042812fd5e6a9c90e207534144"
+
+[[copy]]
+ours = "packages/bedrock/src/content/model/modrinth.rs"
+item = "VersionEnvironment"
+upstream = "packages/app-lib/src/state/cache.rs"
+commit = "fbef1fec98505f042812fd5e6a9c90e207534144"
+
+[[copy]]
+ours = "packages/bedrock/src/content/model/mrpack.rs"
+item = "SideType"
+upstream = "packages/app-lib/src/state/cache.rs"
+commit = "fbef1fec98505f042812fd5e6a9c90e207534144"
+
+[[copy]]
+ours = "packages/bedrock/src/content/domain/channel.rs"
+item = "ReleaseChannel::least_stable, ReleaseChannel::version_type_fallbacks"
+upstream = "packages/app-lib/src/state/cache.rs"
+commit = "fbef1fec98505f042812fd5e6a9c90e207534144"
+
+[[copy]]
+ours = "packages/bedrock/src/content/domain/channel.rs"
+item = "check_modpack_update"
+upstream = "packages/app-lib/src/state/instances/commands/list_content.rs"
+commit = "d39674ce0096fb88fd128459988e4c1de8102648"
+
+[[copy]]
+ours = "packages/bedrock/src/content/domain/sides.rs"
+item = "get_mrpack_environment"
+upstream = "packages/app-lib/src/api/instance/export_mrpack.rs"
+commit = "3c8fccf56efbe5f7dae279d7a7c414fcc1ecb3f8"

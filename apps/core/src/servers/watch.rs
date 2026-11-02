@@ -17,11 +17,13 @@ use tracing::{info, warn};
 use super::{
     Lifecycle, Phase, ServerError, Servers, console,
     insight::{self, Insight},
-    records::{self, Outcome},
     restarts,
     shim::Message,
 };
-use crate::access::now;
+use crate::{
+    access::now,
+    state::servers::adapters::sqlite::server_rows::{self, Outcome},
+};
 
 /// Crashes within [`CRASH_WINDOW`] after which Core leaves a server stopped.
 pub const CRASH_LIMIT: i64 = 3;
@@ -70,7 +72,7 @@ impl Servers {
     pub(super) async fn ended(&self, id: &str, generation: u64) {
         self.watched().remove(id);
         let _ = self.events.send(Lifecycle::Ended(id.into()));
-        if let Ok(Some(run)) = records::last_ended(&self.db, id).await {
+        if let Ok(Some(run)) = server_rows::last_ended(&self.db, id).await {
             self.after_crash(id, &run, generation).await;
         }
     }
@@ -156,7 +158,7 @@ impl Servers {
         generation: u64,
     ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
         Box::pin(async move {
-            if records::run_outcome(&self.db, run).await.ok().flatten()
+            if server_rows::run_outcome(&self.db, run).await.ok().flatten()
                 != Some(Outcome::Crashed)
                 || !self.crash_restart_on(id).await
             {
@@ -313,7 +315,7 @@ mod tests {
         ended_at: i64,
     ) -> String {
         let run = uuid::Uuid::new_v4().to_string();
-        records::start_run(db, server, &run, ended_at - 1)
+        server_rows::start_run(db, server, &run, ended_at - 1)
             .await
             .unwrap();
         sqlx::query(
@@ -390,12 +392,12 @@ mod tests {
         assert!(servers.retries().is_empty());
 
         // The shim died before Java ran: no status file, so the run crashed.
-        records::start_run(&db, &server, "boot", now())
+        server_rows::start_run(&db, &server, "boot", now())
             .await
             .unwrap();
         servers.start_failed(&server, "boot").await;
         assert_eq!(
-            records::run_outcome(&db, "boot").await.unwrap(),
+            server_rows::run_outcome(&db, "boot").await.unwrap(),
             Some(Outcome::Crashed)
         );
         assert_eq!(
@@ -412,20 +414,22 @@ mod tests {
         let (_dir, servers) = servers().await;
         let db = servers.db.clone();
         let server = servers.create("A").await.unwrap().id;
-        records::start_run(&db, &server, "boot", now())
+        server_rows::start_run(&db, &server, "boot", now())
             .await
             .unwrap();
         // A run the cleanup must not touch, as a start right after would record.
-        records::start_run(&db, &server, "next", now())
+        server_rows::start_run(&db, &server, "next", now())
             .await
             .unwrap();
         servers.start_failed(&server, "boot").await;
         assert_eq!(
-            records::run_outcome(&db, "boot").await.unwrap(),
+            server_rows::run_outcome(&db, "boot").await.unwrap(),
             Some(Outcome::Crashed)
         );
         assert_eq!(
-            records::open_runs(&db, &server, i64::MAX).await.unwrap(),
+            server_rows::open_runs(&db, &server, i64::MAX)
+                .await
+                .unwrap(),
             ["next"]
         );
     }

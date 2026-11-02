@@ -1,19 +1,8 @@
-const SHAREABLE_CONFIG_EXTENSIONS = new Set([
-	'json',
-	'json5',
-	'jsonc',
-	'yml',
-	'yaml',
-	'css',
-	'toml',
-	'txt',
-	'ini',
-	'cfg',
-	'conf',
-	'properties',
-	'xml',
-	'nbt',
-])
+import { SERVER_SHARE_FOLDER, SHAREABLE_CONFIG_EXTENSIONS } from '@modrinth/api-client'
+
+// Mirrors `ShareScope::Server` in packages/sharing-client/src/rules/mod.rs, which decides what a
+// server's share carries; the extension list is generated from it.
+const extensions = new Set(SHAREABLE_CONFIG_EXTENSIONS)
 
 /** Whether a file or folder name inside `config/` can be included in a shared instance push. */
 export function isShareableConfigEntryName(name: string) {
@@ -21,7 +10,7 @@ export function isShareableConfigEntryName(name: string) {
 }
 
 export function hasShareableConfigExtension(name: string) {
-	return SHAREABLE_CONFIG_EXTENSIONS.has(name.split('.').pop()?.toLowerCase() ?? '')
+	return extensions.has(name.split('.').pop()?.toLowerCase() ?? '')
 }
 
 /**
@@ -30,7 +19,7 @@ export function hasShareableConfigExtension(name: string) {
  */
 export function toShareableConfigPath(path: string): string | undefined {
 	const segments = path.split('/').filter(Boolean)
-	if (segments.length < 2 || segments[0] !== 'config') return
+	if (segments.length < 2 || segments[0] !== SERVER_SHARE_FOLDER) return
 	const entries = segments.slice(1)
 	if (!entries.every(isShareableConfigEntryName)) return
 	if (!hasShareableConfigExtension(entries[entries.length - 1])) return

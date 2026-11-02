@@ -43,6 +43,10 @@ async fn open_migrated_app_db(db_path: &Path) -> crate::Result<Pool<Sqlite>> {
     }
 
     sqlx::migrate!().run(&pool).await?;
+    // The share history table is sharing-client's, the same as Core's.
+    sqlx::raw_sql(sharing_client::history::SCHEMA)
+        .execute(&pool)
+        .await?;
     record_current_app_version(&pool).await?;
 
     if let Err(err) = stale_data_cleanup(&pool).await {

@@ -15,7 +15,7 @@ use hyper::{
 use hyper_util::rt::TokioIo;
 use rustls::{
     ServerConfig,
-    crypto::aws_lc_rs::default_provider,
+    crypto::ring::default_provider,
     pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer},
 };
 use sha2::{Digest, Sha256};

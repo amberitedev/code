@@ -1,10 +1,12 @@
 use super::client::*;
-use super::content::{remote_shared_config_files, remote_shared_content};
+use super::content::{remote_config_update, remote_shared_content};
 use super::diff::*;
 use super::icons::shared_instance_server_icon;
 use super::publish::*;
 use super::types::*;
 use super::*;
+use crate::self_hosted::pool::{PoolAccess, PoolFile};
+use sharing_client::install::ConfigUpdate;
 
 #[tracing::instrument]
 pub async fn install_shared_instance(
@@ -38,6 +40,7 @@ async fn install_shared_instance_inner(
 ) -> crate::Result<InstallJobSnapshot> {
     let state = State::get().await?;
     let version = get_latest_remote_version(shared_instance_id, &state).await?;
+    let configs = remote_config_update(None, None, &version, &state).await?;
     let data = shared_instance_install_data(
         shared_instance_id,
         manager_id,
@@ -46,6 +49,7 @@ async fn install_shared_instance_inner(
         instance_icon_url,
         name,
         version,
+        configs,
         None,
         &state,
     )
@@ -169,23 +173,25 @@ pub(super) fn shared_instance_invite_manager(
 pub(super) async fn shared_instance_install_preview_from_version(
     shared_instance_id: String,
     name: String,
-    version: InstanceVersionResponse,
+    version: ShareVersion,
     state: &State,
 ) -> crate::Result<SharedInstanceInstallPreview> {
+    let (loader, _) = instance_loader(&version);
     let name = match name.trim() {
         "" => "Shared instance".to_string(),
         name => name.to_string(),
     };
     let modpack = shared_instance_install_modpack(&version, state).await?;
-    let (content_version_ids, effective_external_files) =
-        remote_shared_content(&version, state).await?;
+    let content = remote_shared_content(&version, state).await?;
+    let content_version_ids = content.version_ids;
     let modpack_version_id =
         modpack.as_ref().map(|modpack| modpack.version_id.clone());
     let icon_url = modpack
         .as_ref()
         .and_then(|modpack| modpack.icon_url.clone());
-    let external_files = effective_external_files
-        .into_iter()
+    let external_files = content
+        .external_files
+        .into_keys()
         .map(|file| SharedInstanceExternalFilePreview {
             file_name: file.path,
             file_type: file.content_type.as_str().to_string(),
@@ -198,14 +204,14 @@ pub(super) async fn shared_instance_install_preview_from_version(
         version: version.version,
         name,
         icon_url,
-        game_version: version.game_version,
-        loader: version.loader,
+        game_version: version.content.game_version,
+        loader,
         mod_count: content_version_ids.len() + external_file_count,
         external_file_count,
         modpack_version_id,
         content_version_ids,
         external_files,
-        removed_files: version.removed_files,
+        removed_files: version.content.removed_files,
     })
 }
 
@@ -258,21 +264,30 @@ async fn get_shared_instance_update_preview_inner(
             diffs: Vec::new(),
         }));
     }
-    version.validate_removed_files()?;
+    check_removed_files(&version)?;
 
     let newer = attachment
         .applied_version
         .is_none_or(|current| current < version.version);
     let diffs = if newer {
-        let config_files = remote_shared_config_files(
-            &attachment.id,
+        let configs = remote_config_update(
+            Some(&metadata.instance.id),
             config_base_version(&attachment, &version),
             &version,
             &state,
         )
         .await?;
-        shared_instance_update_diffs(&metadata, &version, &config_files, &state)
-            .await?
+        let removed =
+            unedited_configs(&metadata.instance.id, &configs.left, &state)
+                .await?;
+        shared_instance_update_diffs(
+            &metadata,
+            &version,
+            &configs.write,
+            &removed,
+            &state,
+        )
+        .await?
     } else {
         Vec::new()
     };
@@ -391,7 +406,13 @@ pub(crate) async fn shared_instance_update_data(
         get_latest_remote_member_version(instance_id, &attachment, state)
             .await?;
     let fresh_start = backtrack_version_changed(&attachment, &version);
-    let applied_version = config_base_version(&attachment, &version);
+    let configs = remote_config_update(
+        Some(&metadata.instance.id),
+        config_base_version(&attachment, &version),
+        &version,
+        state,
+    )
+    .await?;
     let mut data = shared_instance_install_data(
         &attachment.id,
         attachment.manager_id.clone(),
@@ -400,7 +421,8 @@ pub(crate) async fn shared_instance_update_data(
         None,
         metadata.instance.name,
         version,
-        applied_version,
+        configs,
+        None,
         state,
     )
     .await?;
@@ -412,7 +434,7 @@ pub(crate) async fn shared_instance_update_data(
 /// start over from the shared content published since then.
 fn backtrack_version_changed(
     attachment: &SharedInstanceAttachment,
-    version: &InstanceVersionResponse,
+    version: &ShareVersion,
 ) -> bool {
     attachment.applied_version.is_some()
         && attachment.applied_backtrack_version != version.backtrack_version
@@ -420,7 +442,7 @@ fn backtrack_version_changed(
 
 fn config_base_version(
     attachment: &SharedInstanceAttachment,
-    version: &InstanceVersionResponse,
+    version: &ShareVersion,
 ) -> Option<i32> {
     if backtrack_version_changed(attachment, version) {
         None
@@ -449,6 +471,7 @@ pub(super) async fn ensure_ready_remote_version_for_invite(
             publish_shared_instance_inner(
                 instance_id,
                 &[],
+                &[],
                 None,
                 &|_, _| {},
                 state,
@@ -472,7 +495,7 @@ pub(super) async fn get_latest_remote_member_version(
     instance_id: &str,
     attachment: &SharedInstanceAttachment,
     state: &State,
-) -> crate::Result<InstanceVersionResponse> {
+) -> crate::Result<ShareVersion> {
     if let SharedInstanceRemoteResponse::Unavailable(reason) =
         get_remote_instance_access(&attachment.id, state).await?
     {
@@ -613,86 +636,47 @@ pub(super) fn shared_instance_unavailable_message(
     }
 }
 
+/// `file` as an install fetches it: from `history`, the owner's saved copies, when restoring a
+/// version of their history, else through `access`, the version's pool. A restore never reaches
+/// the pool. A version whose files are in the pool but has no holders cannot be fetched.
 fn shared_instance_external_file_data(
-    file: ExternalFileResponse,
+    file: ManifestFile,
+    access: Option<&std::sync::Arc<PoolAccess>>,
+    history: Option<&[(ManifestFile, std::path::PathBuf)]>,
 ) -> crate::Result<SharedInstanceExternalFileData> {
-    let file_size =
-        file.file_size.ok_or(crate::ErrorKind::InputError(format!(
-            "shared instance external file {} is missing its size",
-            file.file_name
-        )))?;
-    let file_size = u64::try_from(file_size).context(
-        crate::ErrorKind::InputError(format!(
-            "shared instance external file {} has an invalid size",
-            file.file_name
-        )),
-    )?;
-    let pool = match file.object.as_deref() {
-        Some(object) => Some(std::sync::Arc::new(pool_file(&file, object)?)),
-        None => None,
+    let (local, pool) = match history {
+        Some(history) => {
+            let path = history
+                .iter()
+                .find(|(saved, _)| saved == &file)
+                .map(|(_, path)| path.clone())
+                .ok_or_else(|| {
+                    crate::ErrorKind::InputError(format!(
+                        "the saved copy of {} is gone",
+                        file.file_name
+                    ))
+                })?;
+            (Some(path), None)
+        }
+        None => {
+            let access =
+                access.ok_or(crate::ErrorKind::PoolFilesUnavailable)?;
+            let pool = PoolFile::new(&file, std::sync::Arc::clone(access))
+                .map_err(|error| {
+                    crate::ErrorKind::InputError(error.to_string())
+                })?;
+            (None, Some(pool))
+        }
     };
-
-    // Pool files are fetched from a Core, so only the others need a URL.
-    let url = file.url.unwrap_or_default();
-    if pool.is_none() && url.is_empty() {
-        bail!(crate::ErrorKind::InputError(format!(
-            "shared instance external file {} is missing its download URL",
-            file.file_name
-        )));
-    }
     Ok(SharedInstanceExternalFileData {
         file_name: file.file_name,
         file_type: file.file_type,
-        url,
-        file_size,
-        sha1: file.sha1,
+        // Pool files are fetched from a Core, never by URL.
+        url: String::new(),
+        file_size: file.file_size,
+        sha1: Some(file.sha1),
         pool,
-    })
-}
-
-fn pool_file(
-    file: &ExternalFileResponse,
-    object: &str,
-) -> crate::Result<crate::self_hosted::pool::PoolFile> {
-    use crate::self_hosted::pool::{crypto, parse_hash};
-
-    // A version whose files are in the pool but has no holders cannot be fetched.
-    let access = file
-        .pool
-        .clone()
-        .ok_or(crate::ErrorKind::PoolFilesUnavailable)?;
-    let invalid = || {
-        crate::ErrorKind::InputError(format!(
-            "shared instance file {} has an invalid pool entry",
-            file.file_name
-        ))
-    };
-    let key = match file.key.as_deref() {
-        Some(key) => Some(parse_hash(key).ok_or_else(invalid)?),
-        None if crypto::is_content_type(&file.file_type) => None,
-        None => return Err(invalid().into()),
-    };
-
-    let object_size = file
-        .object_size
-        .filter(|size| {
-            file.file_size
-                .and_then(|size| u64::try_from(size).ok())
-                .map(crypto::object_size)
-                == Some(*size)
-        })
-        .ok_or_else(invalid)?;
-
-    Ok(crate::self_hosted::pool::PoolFile {
-        object: parse_hash(object).ok_or_else(invalid)?,
-        object_size,
-        key,
-        sha256: file
-            .sha256
-            .as_deref()
-            .and_then(parse_hash)
-            .ok_or_else(invalid)?,
-        access,
+        local,
     })
 }
 
@@ -703,23 +687,17 @@ pub(super) async fn shared_instance_install_data(
     server_manager_icon_url: Option<String>,
     instance_icon_url: Option<String>,
     name: String,
-    version: InstanceVersionResponse,
-    applied_version: Option<i32>,
+    version: ShareVersion,
+    configs: ConfigUpdate,
+    history: Option<&[(ManifestFile, std::path::PathBuf)]>,
     state: &State,
 ) -> crate::Result<SharedInstanceInstallData> {
-    version.validate_removed_files()?;
+    check_removed_files(&version)?;
     if !version.ready {
         bail!(crate::ErrorKind::InputError(
             "shared instance version is not ready to install".to_string(),
         ));
     }
-    let config_files = remote_shared_config_files(
-        shared_instance_id,
-        applied_version,
-        &version,
-        state,
-    )
-    .await?;
 
     let remote =
         match get_remote_instance_access(shared_instance_id, state).await? {
@@ -763,17 +741,36 @@ pub(super) async fn shared_instance_install_data(
     } else {
         Vec::new()
     };
-    let modrinth_ids = version
-        .modrinth_ids
-        .into_iter()
-        .filter(|id| {
-            Some(id.as_str()) != modpack_version_id
-                && !inherited.iter().any(|file| {
-                    file.version_id.as_deref() == Some(id.as_str())
-                        && !file.is_removed(&version.removed_files)
-                })
+    // The modpack's install places its own files, so only what the version adds is installed:
+    // its Modrinth versions, the pool files it places and the configs that left the share.
+    let plan = sharing_client::install::install_plan(
+        &version,
+        inherited,
+        configs,
+        sharing_client::install::Side::Client,
+    );
+    let access = version.pool_access(shared_instance_id);
+    let external_files = plan
+        .pool_files()
+        .map(|(_, file)| {
+            shared_instance_external_file_data(
+                file.clone(),
+                access.as_ref(),
+                history,
+            )
+        })
+        .collect::<crate::Result<Vec<_>>>()?;
+    let removed_config_files = plan
+        .deleted()
+        .map(|(_, file)| crate::install::SharedInstanceRemovedConfig {
+            file_name: file.file_name.clone(),
+            file_size: file.file_size,
+            sha1: file.sha1.clone(),
         })
         .collect();
+    let (loader, loader_version) = instance_loader(&version);
+    let content = version.content;
+    let applied_files = version.external_files.clone();
 
     Ok(SharedInstanceInstallData {
         linked_server: remote.linked_server,
@@ -785,26 +782,17 @@ pub(super) async fn shared_instance_install_data(
         linked_user_id,
         name,
         version: version.version,
-        modrinth_ids,
-        removed_files: version.removed_files,
-        external_files: version
-            .external_files
-            .into_iter()
-            .filter(|file| {
-                !matches!(
-                    file.file_type.as_str(),
-                    CONFIG_BUNDLE_FILE_TYPE | CONFIG_FILE_TYPE
-                )
-            })
-            .chain(config_files)
-            .map(shared_instance_external_file_data)
-            .collect::<crate::Result<Vec<_>>>()?,
+        modrinth_ids: plan.modrinth_ids,
+        removed_files: content.removed_files,
+        external_files,
+        removed_config_files,
         modpack,
-        game_version: version.game_version,
-        loader: version.loader,
-        loader_version: shared_instance_loader_version(version.loader_version),
+        game_version: content.game_version,
+        loader,
+        loader_version: shared_instance_loader_version(loader_version),
         backtrack_version: version.backtrack_version,
         fresh_start: false,
+        applied_files,
     })
 }
 

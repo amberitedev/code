@@ -1,0 +1,850 @@
+//! Installing a pack on a held server: a new one, an update, or repair.
+//!
+//! A pack install downloads every file it needs into `runs/<server>/staging/` before it changes
+//! anything, so a download that fails leaves the server as it was. Then it applies the plan
+//! (`pack::plan`) file by file, recording each as it goes; a failure there is recorded on the
+//! pack and repair finishes the job. Updates copy the world first.
+
+use std::{
+    collections::{BTreeMap, HashMap},
+    path::{Path, PathBuf},
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+};
+
+use futures::{StreamExt, TryStreamExt};
+
+use tracing::{info, warn};
+
+use crate::{
+    installs::{
+        self, ModLoader,
+        download::{self, Hash},
+        shared::SharedDirs,
+    },
+    servers::Hold,
+    state::servers::{
+        Content, ContentSet, ContentSetStatus, ContentSourceKind, Error,
+        GameVersionChange, InstallProgressKey, InstanceLink, Pack, Pending,
+        Progress, PropertiesFields, SharedInstanceLink, TrackedFile,
+        adapters::filesystem::content_files::DISABLED,
+        adapters::{
+            filesystem::{
+                archive::{self, NoRoom},
+                folder::{self, Folder},
+                properties,
+            },
+            network::{content_download, hosts, modrinth},
+            sqlite::{content_rows, server_rows},
+        },
+        domain::pack::{
+            self, Index, Platform, ServerOn, Source, Split, Step, Wanted,
+        },
+        link_source_kind,
+    },
+};
+
+/// Pack files downloaded at once.
+const CONCURRENCY: usize = 6;
+
+/// Which pack to install.
+#[derive(Debug, Clone)]
+pub enum PackSource {
+    Modrinth {
+        project_id: String,
+        version_id: String,
+    },
+    /// An `.mrpack` already in the shared store: one the App uploaded, or one Core wrote from a
+    /// share version (`write_shared_pack`), whose instance is `instance`.
+    Stored {
+        sha1: String,
+        instance: Option<SharedInstanceLink>,
+    },
+    /// The pack the server follows now: repair.
+    Current,
+}
+
+/// Where a pack install stages its downloads. Uploads and addons stage beside it.
+pub(super) fn pack_staging(content: &Content, server_id: &str) -> PathBuf {
+    content.paths.staging(server_id).join("pack")
+}
+
+/// Install or update the held server's pack, or repair it (`PackSource::Current`). Settings in
+/// `properties` are written once the pack is in place.
+pub async fn pack(
+    content: &Content,
+    hold: &Hold,
+    progress: &Progress,
+    source: PackSource,
+    properties: Option<PropertiesFields>,
+    force: bool,
+) -> Result<Option<GameVersionChange>, Error> {
+    let id = hold.id();
+    let current = content_rows::get_pack(&content.db, id).await?;
+    let result = install_pack(
+        content,
+        hold,
+        progress,
+        source,
+        current.as_ref(),
+        properties,
+        force,
+    )
+    .await;
+    if let Err(error) = &result {
+        content_rows::set_pack_error(
+            &content.db,
+            id,
+            Some(&format!("{error:#}")),
+        )
+        .await?;
+    }
+    let _ = tokio::fs::remove_dir_all(pack_staging(content, id)).await;
+    result
+}
+
+/// Install a pack. One for an older Minecraft than the server's world is refused unless `force`:
+/// a world does not go back a version safely. Returns the Minecraft version the server moved
+/// from and to, when it did.
+async fn install_pack(
+    content: &Content,
+    hold: &Hold,
+    progress: &Progress,
+    source: PackSource,
+    current: Option<&Pack>,
+    properties: Option<PropertiesFields>,
+    force: bool,
+) -> Result<Option<GameVersionChange>, Error> {
+    let id = hold.id();
+    let dirs = SharedDirs::new(content.paths.root());
+    let repair = matches!(source, PackSource::Current);
+    let (sha1, mut link, share) = match source {
+        PackSource::Modrinth {
+            project_id,
+            version_id,
+        } => {
+            let key = InstallProgressKey::ModrinthModpack {
+                project_id: project_id.clone(),
+                version_id: version_id.clone(),
+            };
+            let sha1 =
+                fetch_modrinth_pack(content, &dirs, &version_id, &|share| {
+                    progress.set("pack", &key, share);
+                })
+                .await?;
+            (
+                sha1,
+                InstanceLink::ModrinthModpack {
+                    project_id,
+                    version_id,
+                },
+                None,
+            )
+        }
+        PackSource::Stored { sha1, instance } => {
+            let link = match instance {
+                Some(_) => InstanceLink::SharedInstance {
+                    modpack_project_id: None,
+                    modpack_version_id: None,
+                },
+                None => InstanceLink::ImportedModpack {
+                    project_id: None,
+                    version_id: None,
+                    name: None,
+                    version_number: None,
+                    filename: None,
+                },
+            };
+            (sha1, link, instance)
+        }
+        PackSource::Current => {
+            let pack = current.ok_or_else(|| {
+                Error::Invalid("This server follows no pack to repair.".into())
+            })?;
+            (pack.sha1.clone(), pack.link.clone(), pack.share.clone())
+        }
+    };
+    let archive_path = dirs.pack(&sha1);
+    let folder = Arc::new(Folder::open(&content.paths.server(id))?);
+    let case_insensitive = folder.case_insensitive()?;
+    let server_on = content_rows::get_server_overrides(&content.db, id).await?;
+    let (
+        index,
+        Split {
+            wanted,
+            skipped,
+            turned_on,
+        },
+    ) = read_pack(content, &archive_path, &server_on, case_insensitive).await?;
+    let platform = pack::platform(&index)?;
+    // As app-lib names an imported pack: by its index.
+    if let InstanceLink::ImportedModpack {
+        name,
+        version_number,
+        ..
+    } = &mut link
+    {
+        *name = Some(index.name.clone());
+        *version_number = Some(index.version_id.clone());
+    }
+    let kind = link_source_kind(&link);
+
+    let server = server_rows::get(&content.db, id)
+        .await?
+        .ok_or_else(|| Error::NotFound(format!("There is no server {id}.")))?;
+    let game_version_change = game_version_change(
+        server.game_version.as_deref(),
+        &platform.game_version,
+        force,
+    )?;
+    let same_platform = server.loader.as_deref()
+        == Some(platform.loader.as_str())
+        && server.game_version.as_deref()
+            == Some(platform.game_version.as_str())
+        && (platform.loader_version.is_none()
+            || server.loader_version == platform.loader_version);
+
+    // Every download first: a failure here changes nothing.
+    let rows = content_rows::get_tracked_files(&content.db, id).await?;
+    let steps = {
+        let folder = Arc::clone(&folder);
+        let wanted = wanted.clone();
+        tokio::task::spawn_blocking(move || {
+            let level = folder.level_name();
+            let sha1 = |path: &str| folder.sha1(path).ok().flatten();
+            let disabled =
+                |path: &str| folder.exists(&format!("{path}{DISABLED}"));
+            pack::plan(
+                &rows,
+                &wanted,
+                &pack::Disk {
+                    sha1: &sha1,
+                    disabled: &disabled,
+                    level_name: &level,
+                    case_insensitive,
+                },
+                repair,
+                kind,
+            )
+        })
+        .await
+        .map_err(std::io::Error::other)?
+    };
+    // What is replaced is still counted, so an update asks for a little more than it needs.
+    pack::check_room(&steps, archive::room(&content.paths.server(id))?)?;
+    let staged = stage_downloads(content, id, &index, &steps, progress).await?;
+
+    if server.game_version.is_some() && !repair {
+        content.backups.pre_update(id).await?;
+    }
+    if !same_platform || repair {
+        install_platform(content, hold, progress, &platform, repair).await?;
+    }
+
+    let now = chrono::Utc::now();
+    content_rows::set_pack(
+        &content.db,
+        id,
+        &Pack {
+            set: ContentSet {
+                id: uuid::Uuid::new_v4().to_string(),
+                instance_id: id.to_owned(),
+                name: index.name.clone(),
+                source_kind: kind,
+                status: ContentSetStatus::Available,
+                game_version: platform.game_version.clone(),
+                protocol_version: None,
+                loader: platform.loader,
+                loader_version: platform.loader_version.clone(),
+                created: now,
+                modified: now,
+            },
+            link,
+            share,
+            version_number: index.version_id.clone(),
+            summary: index.summary.clone(),
+            sha1: sha1.clone(),
+            error: None,
+        },
+    )
+    .await?;
+    apply(content, id, &folder, &archive_path, &index, steps, &staged).await?;
+    content_rows::set_server_overrides(&content.db, id, &turned_on).await?;
+    content_rows::set_skipped_files(&content.db, id, &skipped).await?;
+    if let Some(properties) = properties {
+        write_properties(&content.paths.server(id), &properties)?;
+    }
+    if let Some(old) = current.map(|pack| &pack.sha1)
+        && *old != sha1
+        && !content_rows::pack_in_use(&content.db, old).await?
+    {
+        let _ = tokio::fs::remove_file(dirs.pack(old)).await;
+    }
+    super::sync_content_files::identify(content, id).await;
+    info!(server = %id, pack = %index.name, version = %index.version_id, "pack installed");
+    if let Some(change) = &game_version_change {
+        info!(server = %id, from = %change.from, to = %change.to, "the pack moved the server to another Minecraft");
+    }
+    Ok(game_version_change)
+}
+
+/// The Minecraft version a pack for `pack` moves a server on `server` from and to, or why it may
+/// not: one that is not a newer release is refused unless `force`, since a world does not go
+/// back a version safely. That includes any snapshot, pre-release or release candidate on
+/// either side, which cannot be strictly ordered (a pre-release of 1.21 is older than 1.21).
+fn game_version_change(
+    server: Option<&str>,
+    pack: &str,
+    force: bool,
+) -> Result<Option<GameVersionChange>, Error> {
+    use std::cmp::Ordering;
+    let Some(server) = server.filter(|server| *server != pack) else {
+        return Ok(None);
+    };
+    match pack::release_order(pack, server) {
+        Some(Ordering::Greater | Ordering::Equal) => {}
+        _ if force => {}
+        Some(Ordering::Less) => {
+            return Err(Error::Invalid(format!(
+                "This pack is for Minecraft {pack}, older than the {server} this server's world is from, and a world does not go back a version safely. Install it with force to do it anyway."
+            )));
+        }
+        None => {
+            return Err(Error::Invalid(format!(
+                "This pack is for Minecraft {pack} and this server's world is from {server}. A snapshot or pre-release cannot be ordered against a release, and a world does not go back a version safely. Install it with force to do it anyway."
+            )));
+        }
+    }
+    Ok(Some(GameVersionChange {
+        from: server.to_owned(),
+        to: pack.to_owned(),
+    }))
+}
+
+/// Install the loader a pack runs on.
+async fn install_platform(
+    content: &Content,
+    hold: &Hold,
+    progress: &Progress,
+    platform: &Platform,
+    verify: bool,
+) -> Result<(), Error> {
+    let server = server_rows::get(&content.db, hold.id())
+        .await?
+        .ok_or_else(|| Error::NotFound("The server is gone.".into()))?;
+    let loader = ModLoader::from(platform.loader);
+    let key = InstallProgressKey::Platform {
+        platform: super::install_loader::platform_name(loader),
+        platform_version: platform.loader_version.clone().unwrap_or_default(),
+        game_version: platform.game_version.clone(),
+    };
+    let installed = installs::install(
+        &content.servers,
+        hold,
+        &content.http,
+        &server,
+        loader,
+        &platform.game_version,
+        platform.loader_version.as_deref(),
+        verify,
+        &|share| progress.set("platform", &key, share),
+    )
+    .await?;
+    server_rows::set_installed(
+        &content.db,
+        hold.id(),
+        platform.loader.as_str(),
+        &platform.game_version,
+        installed.as_deref(),
+    )
+    .await?;
+    Ok(())
+}
+
+/// Download a Modrinth pack version's `.mrpack` into the shared store and return its SHA-1.
+pub(super) async fn fetch_modrinth_pack(
+    content: &Content,
+    dirs: &SharedDirs,
+    version_id: &str,
+    progress: &(dyn Fn(f64) + Sync),
+) -> Result<String, Error> {
+    let version = content.modrinth.version(version_id).await?;
+    let file = version.primary().ok_or_else(|| {
+        Error::Invalid(format!("Modrinth version {version_id} has no file."))
+    })?;
+    let url = allowed_url(&file.url)?;
+    let sha1 = file.hashes.sha1.to_ascii_lowercase();
+    let path = dirs.pack(&sha1);
+    if !download::has_hash(&path, Hash::Sha1(&sha1)).await {
+        let received = AtomicU64::new(0);
+        let total = file.size.max(1);
+        content_download::fetch(
+            &content.downloads,
+            url.as_str(),
+            &path,
+            Hash::Sha1(&sha1),
+            &|update| match update {
+                download::Progress::Bytes { bytes, .. } => {
+                    let done =
+                        received.fetch_add(bytes, Ordering::Relaxed) + bytes;
+                    progress(done as f64 / total as f64);
+                }
+                download::Progress::Reset => {
+                    received.store(0, Ordering::Relaxed)
+                }
+            },
+        )
+        .await?;
+    }
+    progress(1.0);
+    Ok(sha1)
+}
+
+fn allowed_url(url: &str) -> Result<reqwest::Url, Error> {
+    reqwest::Url::parse(url)
+        .ok()
+        .filter(|url| hosts::allowed(url, false))
+        .ok_or_else(|| {
+            Error::Invalid(format!(
+                "{url} is not on a host packs may download from."
+            ))
+        })
+}
+
+/// A pack's index, the files a server takes from it, and its client-only files, read from the
+/// `.mrpack` at `path`. Files the index gives no sides for are looked up on Modrinth by hash;
+/// when Modrinth cannot be reached they are taken, as a server is safer with them. Client-only
+/// files in `server_on` are taken too (see `pack::split`).
+pub async fn read_pack(
+    content: &Content,
+    path: &Path,
+    server_on: &ServerOn,
+    case_insensitive: bool,
+) -> Result<(Index, Split), Error> {
+    let path = path.to_owned();
+    let room = archive::room(content.paths.root())?;
+    let (index, candidates) = tokio::task::spawn_blocking(move || {
+        let file = std::fs::File::open(&path)?;
+        let mut archive =
+            zip::ZipArchive::new(file).map_err(archive::ArchiveError::from)?;
+        let index = pack::read_index(&mut archive)?;
+        let loader = pack::platform(&index)?.loader;
+        let candidates = pack::candidates(
+            &index,
+            &mut archive,
+            ModLoader::from(loader).jar_platform(),
+            room,
+        )?;
+        Ok::<_, Error>((index, candidates))
+    })
+    .await
+    .map_err(std::io::Error::other)??;
+    let ask: Vec<String> = candidates
+        .iter()
+        .filter(|candidate| candidate.ask_modrinth())
+        .map(|candidate| candidate.wanted.sha1.clone())
+        .collect();
+    let known = content.modrinth.sided_by_hashes(&ask).await.unwrap_or_else(
+        |error| {
+            warn!(%error, "could not ask Modrinth where a pack's files run");
+            pack::Known::new()
+        },
+    );
+    let split = pack::split(candidates, &known, server_on, case_insensitive)?;
+    Ok((index, split))
+}
+
+/// Download every file the plan places from the index, checked, into staging. Returns where each
+/// landed, by index file.
+async fn stage_downloads(
+    content: &Content,
+    server_id: &str,
+    index: &Index,
+    steps: &[Step],
+    progress: &Progress,
+) -> Result<HashMap<usize, PathBuf>, Error> {
+    let staging = pack_staging(content, server_id);
+    let _ = tokio::fs::remove_dir_all(&staging).await;
+    tokio::fs::create_dir_all(&staging).await?;
+    let needed: Vec<usize> = steps
+        .iter()
+        .filter_map(|step| match step {
+            Step::Place {
+                wanted:
+                    Wanted {
+                        source: Source::Download(n),
+                        ..
+                    },
+                ..
+            } => Some(*n),
+            _ => None,
+        })
+        .collect();
+    let total: u64 = needed
+        .iter()
+        .map(|n| index.files[*n].file_size)
+        .sum::<u64>()
+        .max(1);
+    let received = AtomicU64::new(0);
+    let key = InstallProgressKey::LocalModpack {
+        filename: index.name.clone(),
+    };
+    let staged = futures::stream::iter(needed)
+        .map(|n| {
+            let staging = &staging;
+            let received = &received;
+            let key = &key;
+            async move {
+                let file = &index.files[n];
+                let path = staging.join(n.to_string());
+                fetch_index_file(content, file, &path, &|bytes| {
+                    let done =
+                        received.fetch_add(bytes, Ordering::Relaxed) + bytes;
+                    progress.set("files", key, done as f64 / total as f64);
+                })
+                .await?;
+                Ok::<_, Error>((n, path))
+            }
+        })
+        .buffer_unordered(CONCURRENCY)
+        .try_collect()
+        .await?;
+    progress.set("files", &key, 1.0);
+    Ok(staged)
+}
+
+/// Download one file of a pack index from the first allowed URL that works.
+async fn fetch_index_file(
+    content: &Content,
+    file: &pack::IndexFile,
+    path: &Path,
+    progress: &(dyn Fn(u64) + Sync),
+) -> Result<(), Error> {
+    let hash = match &file.hashes.sha512 {
+        Some(sha512) => Hash::Sha512(sha512),
+        None => Hash::Sha1(&file.hashes.sha1),
+    };
+    let mut last =
+        Error::Invalid(format!("{} has no allowed download.", file.path));
+    for url in &file.downloads {
+        let Ok(url) = allowed_url(url) else { continue };
+        let result = content_download::fetch(
+            &content.downloads,
+            url.as_str(),
+            path,
+            hash,
+            &|update| {
+                if let download::Progress::Bytes { bytes, .. } = update {
+                    progress(bytes);
+                }
+            },
+        )
+        .await;
+        match result {
+            Ok(()) => return Ok(()),
+            // Another host does not make it fit.
+            Err(error @ Error::NoRoom(_)) => return Err(error),
+            Err(error) => last = error,
+        }
+    }
+    Err(last)
+}
+
+/// Carry out a plan, recording every file as it is placed. Each file is hashed again right
+/// before it is replaced or deleted: one that changed since the plan was made is left as it is
+/// and marked pending, the way the plan treats an edit it saw.
+async fn apply(
+    content: &Content,
+    server_id: &str,
+    folder: &Arc<Folder>,
+    archive_path: &Path,
+    index: &Index,
+    steps: Vec<Step>,
+    staged: &HashMap<usize, PathBuf>,
+) -> Result<(), Error> {
+    for step in steps {
+        match step {
+            Step::Place {
+                path,
+                wanted,
+                row,
+                expected,
+                before,
+            } => {
+                let now = sha1_now(folder, &path).await?;
+                if now != expected {
+                    if let Some(theirs) =
+                        changed_meanwhile(&path, row.is_some(), before, now)
+                    {
+                        content_rows::upsert_tracked_file(
+                            &content.db,
+                            server_id,
+                            &theirs,
+                        )
+                        .await?;
+                    }
+                    continue;
+                }
+                place(folder, archive_path, &path, &wanted, staged).await?;
+                if let Some(mut row) = row {
+                    if let Source::Download(n) = wanted.source
+                        && let Some((project, version)) = index.files[n]
+                            .downloads
+                            .iter()
+                            .find_map(|url| modrinth::ids_from_cdn(url))
+                    {
+                        row.project_id = Some(project);
+                        row.version_id = Some(version);
+                    }
+                    content_rows::upsert_tracked_file(
+                        &content.db,
+                        server_id,
+                        &row,
+                    )
+                    .await?;
+                }
+            }
+            Step::Record(row) => {
+                content_rows::upsert_tracked_file(&content.db, server_id, &row)
+                    .await?
+            }
+            // A path that became the server's since the plan is only forgotten.
+            Step::Delete(row)
+                if folder::is_server_owned(
+                    &row.relative_path,
+                    &folder.level_name(),
+                ) =>
+            {
+                content_rows::remove_tracked_file(
+                    &content.db,
+                    server_id,
+                    &row.relative_path,
+                )
+                .await?
+            }
+            Step::Delete(row) => match sha1_now(folder, &row.relative_path)
+                .await?
+            {
+                Some(sha1) if sha1 == row.sha1 => {
+                    let folder = Arc::clone(folder);
+                    let target = row.relative_path.clone();
+                    tokio::task::spawn_blocking(move || folder.remove(&target))
+                        .await
+                        .map_err(std::io::Error::other)??;
+                    content_rows::remove_tracked_file(
+                        &content.db,
+                        server_id,
+                        &row.relative_path,
+                    )
+                    .await?;
+                }
+                None => {
+                    content_rows::remove_tracked_file(
+                        &content.db,
+                        server_id,
+                        &row.relative_path,
+                    )
+                    .await?
+                }
+                Some(_) => {
+                    let row = TrackedFile {
+                        pending: Some(Pending::Removed),
+                        ..row
+                    };
+                    content_rows::upsert_tracked_file(
+                        &content.db,
+                        server_id,
+                        &row,
+                    )
+                    .await?;
+                }
+            },
+            Step::Forget(path) => {
+                content_rows::remove_tracked_file(&content.db, server_id, &path)
+                    .await?
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The row to keep for a file a place step found changed since the plan: what was recorded,
+/// now pending; or, for a file nobody recorded, the owner's file with its hash, pending. `None`
+/// for a server-owned file someone made meanwhile, which is theirs.
+fn changed_meanwhile(
+    path: &str,
+    tracked: bool,
+    before: Option<TrackedFile>,
+    now: Option<String>,
+) -> Option<TrackedFile> {
+    let theirs = match (before, now) {
+        (Some(before), _) => before,
+        (None, Some(sha1)) if tracked => TrackedFile {
+            relative_path: path.to_owned(),
+            source_kind: ContentSourceKind::Local,
+            sha1,
+            size: 0,
+            project_id: None,
+            version_id: None,
+            pending: None,
+        },
+        _ => return None,
+    };
+    Some(TrackedFile {
+        pending: Some(Pending::Changed),
+        ..theirs
+    })
+}
+
+/// The SHA-1 of the file at `path` as it is now.
+async fn sha1_now(
+    folder: &Arc<Folder>,
+    path: &str,
+) -> Result<Option<String>, Error> {
+    let folder = Arc::clone(folder);
+    let path = path.to_owned();
+    Ok(tokio::task::spawn_blocking(move || folder.sha1(&path))
+        .await
+        .map_err(std::io::Error::other)??)
+}
+
+/// Write one file the pack wants: a staged download, or an entry of the pack's own archive. An
+/// entry that inflates past the size it was planned with is refused before it replaces
+/// anything, so the budget checked before the install holds.
+async fn place(
+    folder: &Arc<Folder>,
+    archive_path: &Path,
+    path: &str,
+    wanted: &Wanted,
+    staged: &HashMap<usize, PathBuf>,
+) -> Result<(), Error> {
+    let folder = Arc::clone(folder);
+    let path = path.to_owned();
+    let size = wanted.size;
+    let source = match &wanted.source {
+        Source::Download(n) => {
+            Err(staged.get(n).cloned().ok_or_else(|| {
+                Error::Invalid(format!("{path} was not downloaded."))
+            })?)
+        }
+        Source::Override(entry) => Ok(*entry),
+    };
+    let archive_path = archive_path.to_owned();
+    tokio::task::spawn_blocking(move || -> Result<(), Error> {
+        match source {
+            Err(staged) => {
+                folder.write(&path, &mut std::fs::File::open(staged)?)?;
+            }
+            Ok(entry) => {
+                let mut archive =
+                    zip::ZipArchive::new(std::fs::File::open(archive_path)?)
+                        .map_err(archive::ArchiveError::from)?;
+                let entry = archive
+                    .by_index(entry)
+                    .map_err(archive::ArchiveError::from)?;
+                folder.write(
+                    &path,
+                    &mut archive::AtMost {
+                        inner: entry,
+                        left: size,
+                    },
+                )?;
+            }
+        }
+        Ok(())
+    })
+    .await
+    .map_err(std::io::Error::other)?
+}
+
+/// Write the pack's file at `path` on its own, outside an install: a download is staged first, and
+/// the file must fit on the disk.
+pub(super) async fn place_one(
+    content: &Content,
+    server_id: &str,
+    folder: &Arc<Folder>,
+    archive_path: &Path,
+    index: &Index,
+    path: &str,
+    want: &Wanted,
+) -> Result<(), Error> {
+    NoRoom::check(
+        path,
+        want.size,
+        archive::room(&content.paths.server(server_id))?,
+    )?;
+    let mut staged = HashMap::new();
+    let result = async {
+        if let Source::Download(n) = want.source {
+            let target = pack_staging(content, server_id).join(n.to_string());
+            fetch_index_file(content, &index.files[n], &target, &|_| {})
+                .await?;
+            staged.insert(n, target);
+        }
+        place(folder, archive_path, path, want, &staged).await
+    }
+    .await;
+    let _ = tokio::fs::remove_dir_all(pack_staging(content, server_id)).await;
+    result
+}
+
+/// Write the settings an install came with into `server.properties`.
+pub fn write_properties(
+    dir: &Path,
+    fields: &PropertiesFields,
+) -> std::io::Result<()> {
+    let mut changes: BTreeMap<String, Option<String>> =
+        crate::state::servers::known_pairs(&fields.known)
+            .into_iter()
+            .map(|(key, value)| (key, Some(value)))
+            .collect();
+    for (key, value) in fields.custom.iter().flatten() {
+        changes.insert(key.clone(), Some(value.clone()));
+    }
+    properties::patch(dir, &changes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_older_minecraft_needs_force_and_a_newer_one_is_reported() {
+        assert_eq!(game_version_change(None, "26.3", false).unwrap(), None);
+        assert_eq!(
+            game_version_change(Some("26.3"), "26.3", false).unwrap(),
+            None
+        );
+        let newer = GameVersionChange {
+            from: "26.2".into(),
+            to: "26.3".into(),
+        };
+        assert_eq!(
+            game_version_change(Some("26.2"), "26.3", false).unwrap(),
+            Some(newer)
+        );
+        assert!(matches!(
+            game_version_change(Some("26.3"), "26.2", false),
+            Err(Error::Invalid(_))
+        ));
+        assert_eq!(
+            game_version_change(Some("26.3"), "26.2", true)
+                .unwrap()
+                .map(|change| change.to),
+            Some("26.2".into())
+        );
+        // A pre-release or snapshot pack over a release needs force too.
+        for pack in ["1.21-pre1", "24w14a"] {
+            assert!(
+                matches!(
+                    game_version_change(Some("1.21"), pack, false),
+                    Err(Error::Invalid(_))
+                ),
+                "{pack}"
+            );
+            assert!(game_version_change(Some("1.21"), pack, true).is_ok());
+        }
+    }
+}

@@ -38,7 +38,7 @@ export function createFileDownload(
 		async download(file) {
 			const saveId = await selectExternal(
 				file.filename,
-				file.type === 'mrpack'
+				file.type === 'server-mrpack'
 					? { name: 'Modrinth Modpack', extensions: ['mrpack'] }
 					: file.type === 'server-backup' || file.type === 'server-world'
 						? { name: 'ZIP archive', extensions: ['zip'] }
@@ -100,13 +100,16 @@ export function createFileDownload(
 						)
 						break
 					}
-					case 'mrpack':
-						await client.sharedinstances.instances_v1.downloadMrpackTo(
-							file.instanceId,
-							file.version,
-							sink,
+					case 'server-mrpack': {
+						const { token } = await client.kyros.content_v1.authorizeMrpackExport(
+							file.nodeUrlHost,
+							file.worldId,
+						)
+						await saveUrl(
+							client.kyros.content_v1.getMrpackExportUrl(file.nodeUrlHost, file.worldId, token),
 						)
 						break
+					}
 					case 'server-world': {
 						const { token } = await client.kyros.files_v1.authorizeFullWorldDownload(
 							file.nodeUrlHost,

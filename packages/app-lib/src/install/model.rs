@@ -5,7 +5,6 @@ use crate::state::{
     InstanceIconConfig, InstanceInstallStage, InstanceLink, InstanceMetadata,
     ModLoader,
 };
-use anyhow::bail;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -258,9 +257,12 @@ pub struct SharedInstanceInstallData {
     pub version: i32,
     pub modrinth_ids: Vec<String>,
     #[serde(default)]
-    pub removed_files: Vec<SharedInstanceRemovedFile>,
+    pub removed_files: Vec<RemovedFile>,
     #[serde(default)]
     pub external_files: Vec<SharedInstanceExternalFileData>,
+    /// Config files the applied version shared that this one no longer does.
+    #[serde(default)]
+    pub removed_config_files: Vec<SharedInstanceRemovedConfig>,
     pub modpack: Option<SharedInstanceInstallModpack>,
     pub game_version: String,
     pub loader: ModLoader,
@@ -269,6 +271,9 @@ pub struct SharedInstanceInstallData {
     pub backtrack_version: Option<String>,
     #[serde(default)]
     pub fresh_start: bool,
+    /// The version's whole manifest, which a member keeps once it applied the version.
+    #[serde(default)]
+    pub applied_files: Vec<sharing_client::versions::ManifestFile>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -281,58 +286,24 @@ pub struct SharedInstanceExternalFileData {
     pub sha1: Option<String>,
     /// Set when the file lives in the shared file pool, which replaces `url`.
     #[serde(default)]
-    pub(crate) pool: Option<std::sync::Arc<crate::self_hosted::pool::PoolFile>>,
+    pub(crate) pool: Option<crate::self_hosted::pool::PoolFile>,
+    /// Set when an owner restores the file from their history: its saved copy, which replaces
+    /// `pool`.
+    #[serde(default)]
+    pub(crate) local: Option<PathBuf>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum SharedInstanceRemovedFile {
-    Version { version_id: String },
-    Path { parent: String, filename: String },
+/// A config file that left the share, as the member's applied version sent it. The update
+/// deletes the member's copy while it is still exactly this file, and keeps one they edited.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct SharedInstanceRemovedConfig {
+    pub file_name: String,
+    pub file_size: u64,
+    pub sha1: String,
 }
 
-impl SharedInstanceRemovedFile {
-    pub(crate) fn matches(
-        &self,
-        version_id: Option<&str>,
-        relative_path: &str,
-    ) -> bool {
-        match self {
-            Self::Version {
-                version_id: removed,
-            } => version_id == Some(removed.as_str()),
-            Self::Path { parent, filename } => {
-                let path = relative_path
-                    .strip_suffix(".disabled")
-                    .unwrap_or(relative_path);
-                let filename =
-                    filename.strip_suffix(".disabled").unwrap_or(filename);
-                path == format!("{parent}/{filename}")
-            }
-        }
-    }
-
-    pub(crate) fn validate(&self) -> crate::Result<()> {
-        if let Self::Path { parent, filename } = self
-            && (!matches!(
-                parent.as_str(),
-                "mods"
-                    | "plugins"
-                    | "datapacks"
-                    | "shaderpacks"
-                    | "resourcepacks"
-            ) || !path_util::is_safe_file_name(filename)
-                || ![".jar", ".zip", ".jar.disabled", ".zip.disabled"]
-                    .iter()
-                    .any(|suffix| filename.ends_with(*suffix)))
-        {
-            bail!(crate::ErrorKind::InputError(
-                "invalid removed modpack file path".to_string(),
-            ));
-        }
-        Ok(())
-    }
-}
+/// A file of the shared modpack members do not get, as the share version names it.
+pub use sharing_client::versions::RemovedFile;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SharedInstanceInstallModpack {

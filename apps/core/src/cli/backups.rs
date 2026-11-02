@@ -1,16 +1,18 @@
 //! `copal backups ...`, on the backup routes of step 5 (`api::backups`). A server's one world has
 //! the server's id, so its backups are under `/v1/servers/{id}/worlds/{id}/backups-queue`.
-//!
-//! The answer structs in `api::backups` only serialize, so the CLI reads the fields it shows
-//! with its own, matching by name.
 
 use axum::http::Method;
 use clap::Subcommand;
 use color_eyre::eyre::{Result, bail};
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::{Client, Output, servers};
+use crate::api::backups::{
+    BackupQueueBackup as Backup, BackupQueueOperationType, BackupQueueState,
+    BackupRequest, BackupStatus, BackupsQueueResponse,
+    BackupsQueueWithOptionsResponse as WithOptions, PatchWorldBackupOptions,
+    PatchWorldBackupOptionsResponse, PostBackupQueueResponse,
+};
 
 #[derive(Debug, Subcommand)]
 pub enum BackupsCommand {
@@ -42,85 +44,32 @@ pub enum BackupsCommand {
     },
 }
 
-/// `api::backups::BackupsQueueWithOptionsResponse`, the parts the CLI shows.
-#[derive(Debug, Serialize, Deserialize)]
-struct WithOptions {
-    options: Options,
-    next_auto_backup_at: Option<chrono::DateTime<chrono::Utc>>,
+/// Why a backup's last operation failed, when it did: `create` or `restore`, and the reason Core
+/// recorded.
+fn failure(backup: &Backup) -> Option<String> {
+    let last = backup
+        .history
+        .last()
+        .filter(|op| op.state == BackupQueueState::Failed)?;
+    Some(format!(
+        "{} failed: {}",
+        match last.operation_type {
+            BackupQueueOperationType::Create => "create",
+            BackupQueueOperationType::Restore => "restore",
+        },
+        last.error.as_deref().unwrap_or("no reason was recorded")
+    ))
 }
 
-/// `api::backups::WorldBackupOptions`.
-#[derive(Debug, Serialize, Deserialize)]
-struct Options {
-    split_automatic: u32,
-    split_manual: u32,
-    limit: u32,
-    interval: u32,
-}
-
-/// `api::backups::PatchWorldBackupOptions`.
-#[derive(Debug, Serialize)]
-struct Patch {
-    split_automatic: u32,
-    split_manual: u32,
-    interval: u32,
-}
-
-/// `api::backups::PatchWorldBackupOptionsResponse`.
-#[derive(Debug, Deserialize)]
-struct Patched {
-    #[serde(default)]
-    backup_ids: Vec<Uuid>,
-}
-
-/// One backup in `api::backups::BackupsQueueResponse`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Backup {
-    pub id: Uuid,
-    pub name: String,
-    pub created_at: chrono::DateTime<chrono::Utc>,
-    pub status: String,
-    pub automated: bool,
-    /// Its creates and restores, oldest first.
-    #[serde(default)]
-    pub history: Vec<Operation>,
-}
-
-/// One entry of a backup's `history` in `api::backups::BackupQueueBackup`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Operation {
-    pub operation_type: String,
-    pub state: String,
-    pub error: Option<String>,
-}
-
-impl Backup {
-    /// Why its last operation failed, when it did: `create` or `restore`, and the reason Core
-    /// recorded.
-    pub fn failure(&self) -> Option<String> {
-        let last = self.history.last().filter(|op| op.state == "failed")?;
-        Some(format!(
-            "{} failed: {}",
-            last.operation_type,
-            last.error.as_deref().unwrap_or("no reason was recorded")
-        ))
+/// A backup's status as the API names it.
+fn status(status: BackupStatus) -> &'static str {
+    match status {
+        BackupStatus::Pending => "pending",
+        BackupStatus::InProgress => "in_progress",
+        BackupStatus::TimedOut => "timed_out",
+        BackupStatus::Error => "error",
+        BackupStatus::Done => "done",
     }
-}
-
-#[derive(Debug, Deserialize)]
-struct Backups {
-    backups: Vec<Backup>,
-}
-
-/// `api::backups::BackupRequest`.
-#[derive(Debug, Serialize)]
-struct BackupRequest {
-    name: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct Created {
-    id: Uuid,
 }
 
 pub async fn run(client: &Client, command: BackupsCommand) -> Result<Output> {
@@ -142,12 +91,12 @@ pub async fn run(client: &Client, command: BackupsCommand) -> Result<Output> {
                                 .created_at
                                 .with_timezone(&chrono::Local)
                                 .format("%Y-%m-%d %H:%M"),
-                            backup.status,
+                            status(backup.status),
                             backup.name,
                             if backup.automated { " (scheduled)" } else { "" }
                         );
                         // The reason is Core's text, which may quote file names: escaped.
-                        match backup.failure() {
+                        match failure(backup) {
                             Some(failure) => {
                                 format!("{line}\n    {}", super::safe(&failure))
                             }
@@ -164,7 +113,7 @@ pub async fn run(client: &Client, command: BackupsCommand) -> Result<Output> {
             let name = name.unwrap_or_else(|| {
                 chrono::Local::now().format("%Y-%m-%d %H:%M").to_string()
             });
-            let created: Created = client
+            let created: PostBackupQueueResponse = client
                 .post(&queue(&server.server_id), &BackupRequest { name })
                 .await?;
             Ok(Output::new(
@@ -218,18 +167,20 @@ pub async fn run(client: &Client, command: BackupsCommand) -> Result<Output> {
                     );
                 };
                 // The owner at the keyboard: scheduled backups past the new slots go now.
-                let patched: Patched = client
+                let patched: PatchWorldBackupOptionsResponse = client
                     .call(
                         Method::PATCH,
                         &format!("{path}?ar=true"),
-                        Some(&Patch {
-                            split_automatic,
-                            split_manual,
-                            interval: every.unwrap_or(current.options.interval),
+                        Some(&PatchWorldBackupOptions {
+                            split_automatic: Some(split_automatic),
+                            split_manual: Some(split_manual),
+                            interval: Some(
+                                every.unwrap_or(current.options.interval),
+                            ),
                         }),
                     )
                     .await?;
-                deleted = patched.backup_ids.len();
+                deleted = patched.backup_ids.map_or(0, |ids| ids.len());
                 current = client.get(&path).await?;
             }
             let options = &current.options;
@@ -265,7 +216,7 @@ fn queue(server_id: &Uuid) -> String {
 }
 
 async fn list(client: &Client, server_id: &Uuid) -> Result<Vec<Backup>> {
-    let backups: Backups = client.get(&queue(server_id)).await?;
+    let backups: BackupsQueueResponse = client.get(&queue(server_id)).await?;
     Ok(backups.backups)
 }
 

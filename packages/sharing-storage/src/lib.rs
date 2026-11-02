@@ -17,7 +17,6 @@ pub mod local;
 mod objects;
 pub mod pull;
 mod routes;
-pub mod space;
 mod tar;
 mod tickets;
 
@@ -50,10 +49,7 @@ use limits::Limits;
 use local::{Caps, HeldVersion, Status};
 pub use objects::Hash;
 use objects::{Index, Layout, ListState, VersionList};
-pub use pull::is_public;
 
-/// Room the disk keeps after an upload, so the store never fills the disk the Core uses.
-const DISK_RESERVE: u64 = 256 * 1024 * 1024;
 const GC_EVERY: Duration = Duration::from_secs(10 * 60);
 
 /// `copal store`, as Copal starts it.
@@ -148,6 +144,8 @@ pub struct Store {
     core_id: String,
     keys: Keys<JsonFile>,
     allow_private_sources: bool,
+    /// Pulls from other Cores. One for the life of the store.
+    client: sharing_client::pool::StoreClient,
     caps: Mutex<Caps>,
     index: Mutex<Index>,
     limits: Limits,
@@ -170,6 +168,10 @@ impl Store {
             core_id,
             keys,
             allow_private_sources,
+            client: sharing_client::pool::StoreClient::direct(concat!(
+                "copal-store/",
+                env!("CARGO_PKG_VERSION")
+            )),
             caps: Mutex::new(caps),
             index: Mutex::new(index),
         })
@@ -237,9 +239,9 @@ impl Store {
                 self.index().pending.remove(root);
             }
         };
-        let free =
-            space::free(self.layout.root()).inspect_err(|_| unreserve())?;
-        if free < needed + DISK_RESERVE {
+        let free = bedrock::disk::free(self.layout.root())
+            .inspect_err(|_| unreserve())?;
+        if free < needed + bedrock::limits::DISK_MARGIN_BYTES {
             unreserve();
             return Err(StoreError::new(
                 Code::DiskFull,
@@ -329,7 +331,7 @@ impl Store {
         Ok(Status {
             cap: caps.cap,
             used,
-            free: space::free(self.layout.root())?,
+            free: bedrock::disk::free(self.layout.root())?,
             egress_cap: caps.egress_cap,
             egress_today: self.limits.egress_today(),
             versions,
