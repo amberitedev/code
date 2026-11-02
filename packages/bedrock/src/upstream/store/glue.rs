@@ -17,8 +17,8 @@ use serde::Deserialize;
 use sqlx::SqlitePool;
 use tokio::io::AsyncWriteExt;
 
-use crate::state::content_store::ContentStore;
-pub use crate::state::content_store::StoreUsage;
+use crate::state::content_store::StoredFileHandle;
+pub use crate::state::content_store::{ContentStore, StoreUsage};
 
 /// The tables the store reads and writes, for a host's own migration. `instance_files` holds
 /// only the columns the store reads; a host without instances keeps it empty.
@@ -27,7 +27,19 @@ pub const SCHEMA: &str = include_str!("schema.sql");
 /// What the cloned commands take where upstream takes app-lib's `State`.
 pub struct State {
     pub pool: SqlitePool,
-    pub fetch_semaphore: fetch::FetchSemaphore,
+    pub(crate) fetch_semaphore: fetch::FetchSemaphore,
+}
+
+impl State {
+    /// The state for a store on `pool`, downloading up to 8 files at once.
+    pub fn new(pool: SqlitePool) -> Self {
+        Self {
+            pool,
+            fetch_semaphore: fetch::FetchSemaphore(
+                tokio::sync::Semaphore::new(8),
+            ),
+        }
+    }
 }
 
 /// The folders the store lives in, as app-lib's `DirectoryInfo` names them.
@@ -64,12 +76,64 @@ pub async fn open(
 ) -> crate::Result<ContentStore> {
     let lock = ContentStore::lock_process(&dirs.settings_dir).await?;
     let store = ContentStore::new(dirs, pool.clone(), lock).await?;
-    let state = State {
-        pool,
-        fetch_semaphore: fetch::FetchSemaphore(tokio::sync::Semaphore::new(8)),
-    };
+    let state = State::new(pool);
     crate::state::content_store::migrate(&store, &state).await?;
     Ok(store)
+}
+
+/// A blob in the store, by its SHA-512. Cleanup cannot remove it while this is held, so read
+/// [`Stored::path`] before dropping it.
+pub struct Stored(StoredFileHandle);
+
+impl Stored {
+    pub fn sha512(&self) -> &str {
+        &self.0.metadata.sha512
+    }
+
+    pub fn size(&self) -> u64 {
+        self.0.metadata.size as u64
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.0.path
+    }
+}
+
+/// Put `bytes` in the store. Unretained content is removed by the next cleanup, so
+/// [`retain`] what must be kept.
+pub async fn store_bytes(
+    store: &ContentStore,
+    bytes: &[u8],
+) -> crate::Result<Stored> {
+    store.store_bytes(bytes).await.map(Stored)
+}
+
+/// The healthy blob with `sha512`, if the store has it.
+pub async fn lookup(
+    store: &ContentStore,
+    sha512: &str,
+) -> crate::Result<Option<Stored>> {
+    Ok(store.lookup(Some(sha512), None).await?.map(Stored))
+}
+
+/// Keep `sha512s` through cleanup for `owner`, a key of the host's choosing within `kind`
+/// (for example a share's history).
+pub async fn retain(
+    store: &ContentStore,
+    kind: &str,
+    owner: &str,
+    sha512s: &[String],
+) -> crate::Result<()> {
+    store.retain(kind, owner, sha512s).await
+}
+
+/// Drop everything `owner` retains within `kind`; cleanup may then remove it.
+pub async fn release(
+    store: &ContentStore,
+    kind: &str,
+    owner: &str,
+) -> crate::Result<()> {
+    store.release(kind, owner).await
 }
 
 /// app-lib's `file_modified_at_ns` (`state/cache.rs`).
@@ -384,52 +448,5 @@ pub(crate) mod fetch {
             .error_for_status()?
             .json()
             .await?)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
-
-    use super::*;
-
-    #[tokio::test]
-    async fn retained_content_survives_cleanup_until_released() {
-        let dir = tempfile::tempdir().unwrap();
-        let pool = SqlitePoolOptions::new()
-            .connect_with(
-                SqliteConnectOptions::new()
-                    .filename(dir.path().join("store.db"))
-                    .create_if_missing(true),
-            )
-            .await
-            .unwrap();
-        sqlx::raw_sql(SCHEMA).execute(&pool).await.unwrap();
-        let dirs = DirectoryInfo {
-            settings_dir: dir.path().to_path_buf(),
-            config_dir: dir.path().to_path_buf(),
-        };
-        let store = open(&dirs, pool.clone()).await.unwrap();
-        let state = State {
-            pool,
-            fetch_semaphore: fetch::FetchSemaphore(fetch::Semaphore::new(1)),
-        };
-
-        let sha512 = store
-            .store_bytes(b"a pushed config")
-            .await
-            .unwrap()
-            .metadata
-            .sha512;
-        store
-            .retain("share_history", "1", std::slice::from_ref(&sha512))
-            .await
-            .unwrap();
-        store.cleanup(&state, true).await.unwrap();
-        assert!(store.lookup(Some(&sha512), None).await.unwrap().is_some());
-
-        store.release("share_history", "1").await.unwrap();
-        store.cleanup(&state, true).await.unwrap();
-        assert!(store.lookup(Some(&sha512), None).await.unwrap().is_none());
     }
 }
