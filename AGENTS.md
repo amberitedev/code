@@ -241,12 +241,13 @@ bedrock holds three kinds of code:
    into `packages/api-client/src/modules/bedrock/limits.ts`).
 
 sharing-client is one folder per concern: `backend` (the one client for the backend's share
-routes), `versions` (the share version, `RemovedFile`), `rules` (which files a share carries and
-what `blocked` means; generated into `packages/api-client/src/modules/sharing/rules.ts`), `push`
-(the version builder and the writer), `pool` (the store client and the fetch), `consume` (a
-version as a server takes it), `install` (a version as a member installs it: its content less its
-modpack, and the configs an update writes or deletes), `diff` (the share diff both sides show) and
-`crypto`.
+routes), `versions` (the share version, `RemovedFile`), `rules` (which files a share carries,
+what `blocked` means, and the listing of pickable files; generated into
+`packages/api-client/src/modules/sharing/rules.ts`), `push` (reading an owner's rows into a
+version, the version builder and the writer), `pool` (the store client and the fetch), `consume`
+(a version as a server takes it), `install` (the member install plan: a version's files at each
+side's paths, less its modpack, with the configs an update writes, keeps or deletes; each side
+applies it with its own writer), `diff` (the share diff both sides show) and `crypto`.
 
 New and restructured Rust follows app-lib's layout: `api/` for entry points, `state/<domain>/` with
 `model/` (plain types), `adapters/` (sqlite rows, filesystem, network), `commands/` (one operation
