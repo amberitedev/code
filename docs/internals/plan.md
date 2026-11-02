@@ -124,6 +124,29 @@ Later, in rough order of intent:
 - Limits tied to what you give: offer storage to others (for example 10 GB) and your own
   allowance follows from it.
 
+### Links and history
+
+Decided 2026-11-02.
+
+- **Two directions, one behavior.** Instance first: create an instance, create a server from it,
+  share the server. Server first: create a server, share it, and players hit Play, which makes
+  the instance they need. Both links work the same way: the source manages the content and
+  everything linked follows it fully.
+- **The one difference is how many.** An instance can have many linked servers. A server has one
+  Play instance, because a server is one world.
+- Players of a linked server get the instance's pack, with the address of the server they were
+  shared, as "you have this pack to connect to this server". Several servers of one instance show
+  under that one instance on the player's side.
+- **History lives with the source and works the same on the App and the Core.** An instance's
+  history is in its owner's App. A server-first server's history is on its Core, from its first
+  push. The two History pages behave the same: list, restore, delete.
+- **A restore is local.** It puts the source back to that version and changes nothing else. To
+  give it to anyone, you push it.
+- **Linked things store no history.** A linked server or a Play instance shows its source's
+  history read-only, fetched from the source, so you can see what changed. Restore and push
+  happen only where the content is managed.
+- Only the owner sees history. Members and players get none.
+
 ## Privacy
 
 Shared files are encrypted before they leave the owner's App, so a Core owner cannot read what
@@ -318,3 +341,13 @@ How it works (`apps/core/src/network`):
   local port the App opens for a Core that serves HTTPS).
 
 ## Open questions
+
+- **Linked servers offline or online.** A linked server is a kind of share of its instance today,
+  always through the backend. Whether a server on your own Core should follow its instance
+  without going online is not decided (AMB-58).
+- **Two servers from one instance, on the player's side.** They show under one instance today,
+  which is a little odd. Decide how players see and pick between them (AMB-56).
+- **Leaving a read-only history.** Something on a linked thing's read-only History page should
+  take you to the source, where you can restore. Decide what, after the logic is built (AMB-57).
+- **Linked server history on another computer** (AMB-55). The instance's history is only on the
+  computer that pushed it, so the linked server's History page is empty elsewhere.
