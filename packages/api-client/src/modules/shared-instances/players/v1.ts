@@ -102,11 +102,16 @@ export class SharedInstancesPlayersV1Module extends SharedInstancesModule {
 
 	/**
 	 * What a write tells the backend about the server: the share it follows, the name its players
-	 * see, its port, and where the Core's router opened it on the internet (null while it has
+	 * see, its game port, and where the Core's router opened it on the internet (null while it has
 	 * not). Players join that when known, otherwise the port on the Core's latest address.
 	 */
 	private async server(serverId: string, instanceId: string) {
 		const { name, net } = await this.client.archon.servers_v0.get(serverId)
-		return { instance_id: instanceId, name, port: net.port, outside: net.outside ?? null }
+		return {
+			instance_id: instanceId,
+			name,
+			port: net.game_port ?? net.port,
+			outside: net.outside ?? null,
+		}
 	}
 }

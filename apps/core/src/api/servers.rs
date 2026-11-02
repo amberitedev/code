@@ -6,7 +6,11 @@
 //! `packages/api-client/src/modules/archon/types.ts` (`archon/servers/v0.ts`, `archon/servers/v1.ts`,
 //! and `createServer` in `archon/cores/v1.ts`).
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::BTreeMap,
+    net::{IpAddr, SocketAddr},
+    sync::Arc,
+};
 
 use axum::{
     Json,
@@ -110,10 +114,15 @@ pub struct Upstream {
 /// Where players join the server. Mirrors Archon.Servers.v0.Net.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Net {
+    /// With `port`, the join address upstream's helper reads (packages/ui getHostingServerAddress).
+    /// See [`join_address`].
     pub ip: Option<String>,
     pub port: u16,
     pub domain: String,
     pub outside: Option<OutsideAddress>,
+    /// The port the server listens on. The App joins it here, at the Core's own address, when it
+    /// reaches the Core on its network; the backend gets it for players.
+    pub game_port: u16,
 }
 
 /// Where the server is on the internet. Mirrors the `outside` object of Archon.Servers.v0.Net.
@@ -461,6 +470,41 @@ fn host(headers: &HeaderMap) -> &str {
         .unwrap_or("localhost")
 }
 
+/// Where players join a server from the internet: the router's grant when it gave a different
+/// outside port than the game port, otherwise the Core's join IP and the game port. No domain.
+fn join_address(
+    join_ip: Option<IpAddr>,
+    game_port: u16,
+    outside: Option<SocketAddr>,
+) -> (Option<IpAddr>, u16) {
+    match outside {
+        Some(outside) if outside.port() != game_port => {
+            (Some(outside.ip()), outside.port())
+        }
+        _ => (join_ip, game_port),
+    }
+}
+
+fn net(state: &AppState, row: &server_rows::ServerRow) -> Net {
+    let game_port = u16::try_from(row.port).unwrap_or_default();
+    // Known while the server runs and its port is forwarded, or open on a public address.
+    let outside = state
+        .network
+        .report(&row.id)
+        .and_then(|report| report.outside);
+    let (ip, port) = join_address(state.network.join_ip(), game_port, outside);
+    Net {
+        ip: ip.map(|ip| ip.to_string()),
+        port,
+        domain: String::new(),
+        outside: outside.map(|address| OutsideAddress {
+            ip: address.ip().to_string(),
+            port: address.port(),
+        }),
+        game_port,
+    }
+}
+
 /// What the hosting API shows for a server row, to a caller with `level` on it, reached at
 /// `host`.
 async fn server(
@@ -487,26 +531,12 @@ async fn server(
             .fetch_optional(&state.db)
             .await?
             .flatten();
+    let net = net(state, &row);
     Ok(Server {
         server_id: Uuid::parse_str(&row.id).unwrap_or_default(),
         name: row.name,
         owner_id: owner_id.unwrap_or_default(),
-        net: Net {
-            // Upstream's join address (packages/ui getHostingServerAddress): this IP and the
-            // game port, no domain.
-            ip: state.network.join_ip().map(|ip| ip.to_string()),
-            port: u16::try_from(row.port).unwrap_or_default(),
-            domain: String::new(),
-            // Known while the server runs and its port is forwarded, or open on a public address.
-            outside: state
-                .network
-                .report(&row.id)
-                .and_then(|report| report.outside)
-                .map(|address| OutsideAddress {
-                    ip: address.ip().to_string(),
-                    port: address.port(),
-                }),
-        },
+        net,
         game: Game::Minecraft,
         backup_quota: 0,
         used_backup_quota: 0,
@@ -967,4 +997,35 @@ pub async fn patch_world(
             .await;
     }
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn join_address_uses_the_routers_port_only_when_it_differs() {
+        let public: IpAddr = "203.0.113.5".parse().unwrap();
+        let wan: IpAddr = "198.51.100.7".parse().unwrap();
+        assert_eq!(
+            join_address(Some(public), 25565, None),
+            (Some(public), 25565)
+        );
+        assert_eq!(
+            join_address(
+                Some(public),
+                25565,
+                Some(SocketAddr::new(wan, 25565))
+            ),
+            (Some(public), 25565)
+        );
+        assert_eq!(
+            join_address(
+                Some(public),
+                25565,
+                Some(SocketAddr::new(wan, 41000))
+            ),
+            (Some(wan), 41000)
+        );
+    }
 }
