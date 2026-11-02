@@ -9,7 +9,10 @@ use modrinth_content_management::{ContentMetadataProvider, VersionType};
 use reqwest::StatusCode;
 use serde::{Serialize, de::DeserializeOwned};
 
-use crate::content::model::modrinth::{Project, SidedVersion, Version};
+use crate::content::domain::channel::version_type_fallbacks;
+use crate::content::model::modrinth::{
+    Project, SidedVersion, Version, VersionEnvironment,
+};
 
 const API: &str = "https://api.modrinth.com/v2";
 const API_V3: &str = "https://api.modrinth.com/v3";
@@ -229,6 +232,64 @@ impl Modrinth {
             body["loaders"] = serde_json::json!(loaders);
         }
         self.post("/version_files/update", &body).await
+    }
+
+    /// The newest version for each file, by SHA-1, on `channel`: as [`Self::updates`], asking
+    /// for each step of [`version_type_fallbacks`] in turn the files the steps before found
+    /// nothing for, as app-lib's `CachedFileUpdate` fetch does.
+    pub async fn updates_on_channel(
+        &self,
+        sha1s: &[String],
+        loaders: &[&str],
+        game_version: &str,
+        channel: VersionType,
+    ) -> Result<HashMap<String, Version>, ModrinthError> {
+        let mut found = HashMap::new();
+        for version_types in version_type_fallbacks(channel) {
+            let remaining: Vec<String> = sha1s
+                .iter()
+                .filter(|sha1| !found.contains_key(*sha1))
+                .cloned()
+                .collect();
+            if remaining.is_empty() {
+                break;
+            }
+            found.extend(
+                self.updates(&remaining, loaders, game_version, version_types)
+                    .await?,
+            );
+        }
+        Ok(found)
+    }
+
+    /// The version each file is, by SHA-1, with where it runs. Files Modrinth does not know are
+    /// left out.
+    pub async fn sided_by_hashes(
+        &self,
+        sha1s: &[String],
+    ) -> Result<
+        HashMap<String, (Version, Option<VersionEnvironment>)>,
+        ModrinthError,
+    > {
+        let versions = self.by_hashes(sha1s).await?;
+        let ids: Vec<String> = versions
+            .values()
+            .map(|version| version.id.clone())
+            .collect();
+        let environments: HashMap<String, Option<VersionEnvironment>> = self
+            .sided_versions(&ids)
+            .await?
+            .into_iter()
+            .map(|version| (version.id, version.environment))
+            .collect();
+        Ok(versions
+            .into_iter()
+            .map(|(sha1, version)| {
+                let environment =
+                    environments.get(&version.id).copied().flatten();
+                (sha1, (version, environment))
+            })
+            .collect())
     }
 }
 

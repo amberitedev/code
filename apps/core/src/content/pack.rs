@@ -145,7 +145,7 @@ pub fn wanted<R: Read + Seek>(
         }
     };
     for (n, file) in index.files.iter().enumerate() {
-        if bedrock::content::server_skips(file) {
+        if !bedrock::content::server_takes(file.env.as_ref(), None, None) {
             continue;
         }
         let path = folder::clean(&file.path)?;

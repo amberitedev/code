@@ -6,6 +6,22 @@
 
 use modrinth_content_management::VersionType;
 
+/// How a version type is named in Modrinth's API and in a stored update channel.
+pub fn version_type_name(version_type: VersionType) -> &'static str {
+    match version_type {
+        VersionType::Release => "release",
+        VersionType::Beta => "beta",
+        VersionType::Alpha => "alpha",
+    }
+}
+
+/// The version type named `name`, as [`version_type_name`] writes it.
+pub fn parse_version_type(name: &str) -> Option<VersionType> {
+    VersionType::ALL
+        .into_iter()
+        .find(|version_type| version_type_name(*version_type) == name)
+}
+
 /// The less stable of `a` and `b`.
 pub fn least_stable(a: VersionType, b: VersionType) -> VersionType {
     a.max(b)
@@ -28,6 +44,17 @@ pub fn version_type_fallbacks(
 mod tests {
     use super::*;
     use VersionType::*;
+
+    #[test]
+    fn version_types_read_back_by_name() {
+        for version_type in VersionType::ALL {
+            assert_eq!(
+                parse_version_type(version_type_name(version_type)),
+                Some(version_type)
+            );
+        }
+        assert_eq!(parse_version_type("stable"), None);
+    }
 
     #[test]
     fn the_installed_channel_widens_the_preferred_one() {
