@@ -19,10 +19,12 @@ use std::path::{Path, PathBuf};
 use sqlx::SqlitePool;
 
 pub use adapters::counts;
-pub use model::{HistoryEntry, HistoryFile};
+pub use model::{HistoryEntry, HistoryFile, SharedInstanceHistoryEntry};
 
 use crate::diff::SharedInstanceUpdateDiff;
+use crate::install::{ConfigUpdate, config_update};
 use crate::push::Pushed;
+use crate::rules::CONFIG_FILE_TYPE;
 use crate::versions::{ManifestFile, VersionContent};
 
 /// The `share_history` table. The App and Core apply it after their own migrations; it only
@@ -84,15 +86,25 @@ pub enum HistoryError<E> {
     MissingVersion(i32),
     #[error("the saved copy of {0} is gone")]
     MissingFile(String),
+    #[error("the latest version cannot be deleted")]
+    Latest,
     #[error(transparent)]
     Store(E),
 }
 
 /// What restoring an entry writes back: its content, and each of its files with where its copy is.
+/// A restore is local: it puts the source back to the entry and changes nothing else, so it
+/// replaces only what the share carried at the last push or carries in the entry. What the owner
+/// added since the last push stays.
 #[derive(Debug, Clone)]
 pub struct RestorePlan {
     pub entry: HistoryEntry,
     pub files: Vec<(ManifestFile, PathBuf)>,
+    /// The last push, which tells what the owner added since from what the share carried.
+    pub last: Option<HistoryEntry>,
+    /// Every config of the entry is written back. A config the last push shared and the entry
+    /// does not is deleted while it is still as pushed.
+    pub configs: ConfigUpdate,
 }
 
 /// Records `pushed`, a version of `share_id` with `content`, which changed `diffs` over the
@@ -207,7 +219,25 @@ pub async fn restore_plan<S: HistoryStore>(
             })?;
         files.push((file.manifest.clone(), path));
     }
-    Ok(RestorePlan { entry, files })
+    let last = latest(store, share_id).await.map_err(HistoryError::Store)?;
+    let restored = entry.manifest().cloned().collect::<Vec<_>>();
+    let last_files = last
+        .as_ref()
+        .map(|last| last.manifest().cloned().collect::<Vec<_>>());
+    let configs = ConfigUpdate {
+        write: restored
+            .iter()
+            .filter(|file| file.file_type == CONFIG_FILE_TYPE)
+            .cloned()
+            .collect(),
+        left: config_update(&restored, last_files.as_deref()).left,
+    };
+    Ok(RestorePlan {
+        entry,
+        files,
+        last,
+        configs,
+    })
 }
 
 /// Deletes `version` of `share_id` and lets the store clean up its files.
@@ -218,6 +248,22 @@ pub async fn delete<S: HistoryStore>(
 ) -> Result<(), S::Error> {
     adapters::delete_entry(store.db(), share_id, version).await?;
     store.release(&owner_id(share_id, version)).await
+}
+
+/// Deletes `version` of `share_id` at its owner's request. The newest entry is the last push,
+/// which restores and the check for changes to push compare with, so it stays.
+pub async fn delete_older<S: HistoryStore>(
+    store: &S,
+    share_id: &str,
+    version: i32,
+) -> Result<(), HistoryError<S::Error>> {
+    let newest = latest(store, share_id).await.map_err(HistoryError::Store)?;
+    if newest.is_some_and(|newest| newest.version == version) {
+        return Err(HistoryError::Latest);
+    }
+    delete(store, share_id, version)
+        .await
+        .map_err(HistoryError::Store)
 }
 
 /// Keeps the newest `kept` entries of `share_id` (all of them when `None`) and deletes the rest.
@@ -388,10 +434,49 @@ mod tests {
         assert_eq!(plan.files.len(), 1);
         assert_eq!(plan.files[0].0.file_name, "config/a.toml");
         assert_eq!(plan.files[0].1, PathBuf::from("/source/1/config/a.toml"));
+        assert_eq!(plan.last.as_ref().map(|last| last.version), Some(2));
+        // Its configs are written back; one only the last push shared leaves.
+        let names = |files: &[ManifestFile]| {
+            files
+                .iter()
+                .map(|file| file.file_name.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(names(&plan.configs.write), ["config/a.toml"]);
+        assert_eq!(names(&plan.configs.left), ["config/b.toml"]);
         assert!(matches!(
             restore_plan(&store, "s", 3).await,
             Err(HistoryError::MissingVersion(3))
         ));
+    }
+
+    #[tokio::test]
+    async fn the_owner_deletes_any_version_but_the_last_push() {
+        let store = Memory::new().await;
+        for version in 1..=2 {
+            record(
+                &store,
+                "s",
+                &content(),
+                &pushed(version, &[]),
+                Vec::new(),
+                None,
+            )
+            .await
+            .unwrap();
+        }
+        assert!(matches!(
+            delete_older(&store, "s", 2).await,
+            Err(HistoryError::Latest)
+        ));
+        delete_older(&store, "s", 1).await.unwrap();
+        let versions = list(&store, "s")
+            .await
+            .unwrap()
+            .iter()
+            .map(|entry| entry.version)
+            .collect::<Vec<_>>();
+        assert_eq!(versions, [2]);
     }
 
     #[tokio::test]

@@ -132,7 +132,7 @@ pub use self::types::{
     SharedInstanceJoinType, SharedInstancePublishFile,
     SharedInstancePublishPreview, SharedInstanceUpdateDiff,
     SharedInstanceUpdateDiffType, SharedInstanceUpdatePreview,
-    SharedInstanceUser, SharedInstanceUsers, SharedInstanceVersionDetails,
+    SharedInstanceUser, SharedInstanceUsers,
 };
 
 pub async fn can_active_user_use_shared_instances() -> crate::Result<bool> {

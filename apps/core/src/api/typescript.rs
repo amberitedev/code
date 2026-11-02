@@ -64,6 +64,7 @@ fn declarations() -> String {
         share::SharedInstancePublishDiff::decl(&cfg),
         sharing_client::diff::SharedInstanceUpdateDiff::decl(&cfg),
         sharing_client::diff::SharedInstanceUpdateDiffType::decl(&cfg),
+        sharing_client::history::SharedInstanceHistoryEntry::decl(&cfg),
         update::UpdateStatus::decl(&cfg),
         crate::update::versions::FailedTrial::decl(&cfg),
         crate::update::release::Channel::decl(&cfg),

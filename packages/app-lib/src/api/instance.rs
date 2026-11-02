@@ -89,7 +89,7 @@ pub use self::shared::{
     SharedInstanceJoinType, SharedInstancePublishFile,
     SharedInstancePublishPreview, SharedInstanceUpdateDiff,
     SharedInstanceUpdateDiffType, SharedInstanceUpdatePreview,
-    SharedInstanceUser, SharedInstanceUsers, SharedInstanceVersionDetails,
+    SharedInstanceUser, SharedInstanceUsers,
     accept_pending_shared_instance_invite,
     accept_shared_instance_invite_for_install,
     cache_shared_instance_server_icon, can_active_user_use_shared_instances,

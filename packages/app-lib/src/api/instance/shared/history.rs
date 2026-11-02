@@ -8,8 +8,9 @@ use super::install::shared_instance_install_data;
 use super::publish::*;
 use super::types::*;
 use super::*;
-use sharing_client::history::{self, HistoryEntry, HistoryError, HistoryStore};
-use sharing_client::install::{ConfigUpdate, config_update};
+use sharing_client::history::{
+    self, HistoryEntry, HistoryError, HistoryStore, SharedInstanceHistoryEntry,
+};
 use sharing_client::push::Pushed;
 use sharing_client::versions::VersionContent;
 use std::path::{Path, PathBuf};
@@ -134,42 +135,8 @@ pub async fn get_shared_instance_history(
     Ok(history::list(&AppHistory(&state), &attachment.id)
         .await?
         .into_iter()
-        .map(history_entry)
+        .map(SharedInstanceHistoryEntry::from)
         .collect())
-}
-
-fn history_entry(entry: HistoryEntry) -> SharedInstanceHistoryEntry {
-    let version = entry_version(&entry);
-    let (loader, loader_version) = instance_loader(&version);
-    let config_files = entry
-        .diffs
-        .iter()
-        .find(|diff| {
-            matches!(
-                diff.type_,
-                SharedInstanceUpdateDiffType::ConfigFilesUpdated
-            )
-        })
-        .map(|diff| diff.config_file_names.clone())
-        .unwrap_or_default();
-    SharedInstanceHistoryEntry {
-        version: entry.version,
-        created: DateTime::from_timestamp_millis(entry.created)
-            .unwrap_or_default(),
-        details: SharedInstanceVersionDetails {
-            content_count: entry.content.modrinth_ids.len()
-                + version
-                    .external_files
-                    .iter()
-                    .filter(|file| file.file_type != CONFIG_FILE_TYPE)
-                    .count(),
-            game_version: entry.content.game_version,
-            loader,
-            loader_version,
-            diffs: entry.diffs,
-            config_files,
-        },
-    }
 }
 
 /// An entry as the share version it recorded, for the code that reads versions. Its files are
@@ -200,21 +167,11 @@ pub async fn restore_shared_instance_version(
         .await?
         .ok_or(crate::ErrorKind::InputError("unknown instance".to_string()))?;
     let attachment = owner_attachment(instance_id, &state).await?;
-    let store = AppHistory(&state);
-    let plan = history::restore_plan(&store, &attachment.id, version)
-        .await
-        .map_err(history_error)?;
-    let last_push = history::latest(&store, &attachment.id).await?;
+    let plan =
+        history::restore_plan(&AppHistory(&state), &attachment.id, version)
+            .await
+            .map_err(history_error)?;
     let restored = entry_version(&plan.entry);
-    // Every config of the version is written back. A config the last push shared and the
-    // version does not is removed while it is still as pushed.
-    let last_files =
-        last_push.map(|entry| entry.manifest().cloned().collect::<Vec<_>>());
-    let configs = ConfigUpdate {
-        write: restored.configs().cloned().collect(),
-        left: config_update(&restored.external_files, last_files.as_deref())
-            .left,
-    };
     let data = shared_instance_install_data(
         &attachment.id,
         attachment.manager_id.clone(),
@@ -223,7 +180,7 @@ pub async fn restore_shared_instance_version(
         None,
         metadata.instance.name,
         restored,
-        configs,
+        plan.configs,
         Some(&plan.files),
         &state,
     )
@@ -232,8 +189,8 @@ pub async fn restore_shared_instance_version(
         .await
 }
 
-/// Deletes `version` from the instance's share history. The newest entry is the last push,
-/// which restores compare with, so it stays.
+/// Deletes `version` from the instance's share history. The newest entry is the last push, so it
+/// stays (`sharing_client::history::delete_older`).
 #[tracing::instrument]
 pub async fn delete_shared_instance_version(
     instance_id: &str,
@@ -241,16 +198,9 @@ pub async fn delete_shared_instance_version(
 ) -> crate::Result<()> {
     let state = State::get().await?;
     let attachment = owner_attachment(instance_id, &state).await?;
-    let store = AppHistory(&state);
-    if history::latest(&store, &attachment.id)
-        .await?
-        .is_some_and(|latest| latest.version == version)
-    {
-        bail!(crate::ErrorKind::InputError(
-            "the latest version cannot be deleted".to_string(),
-        ));
-    }
-    history::delete(&store, &attachment.id, version).await
+    history::delete_older(&AppHistory(&state), &attachment.id, version)
+        .await
+        .map_err(history_error)
 }
 
 /// How many versions each share's history keeps, and how many each has now.
