@@ -56,6 +56,7 @@ export function useSharedInstanceInstalledOnce(instanceId: Ref<string | null>) {
 	return computed(() => instance.data.value?.installed_once ?? false)
 }
 
-export function sharedInstanceMrpackFilename(name: string) {
+/** A safe file name for a `.mrpack` named after `name`. */
+export function mrpackFilename(name: string) {
 	return `${name.replace(/[\\/:*?"<>|]/g, '_')}.mrpack`
 }

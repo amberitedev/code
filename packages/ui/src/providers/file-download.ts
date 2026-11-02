@@ -10,7 +10,7 @@ export type FileDownload = { filename: string; serverId?: string; serverName?: s
 			backupId: string
 	  }
 	| { type: 'server-world'; nodeUrlHost: string; worldId: string }
-	| { type: 'mrpack'; instanceId: string; version: number }
+	| { type: 'server-mrpack'; nodeUrlHost: string; worldId: string }
 )
 
 export interface FileDownloadProvider {
