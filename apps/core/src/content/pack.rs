@@ -13,7 +13,6 @@ use super::{
     folder::{self, PathError},
     records::{ContentFile, Origin, Pending},
 };
-use crate::installs::ModLoader;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PackError {
@@ -49,29 +48,13 @@ pub fn read_index<R: Read + Seek>(
     )
 }
 
-/// The loader and versions a pack runs on.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Platform {
-    pub loader: ModLoader,
-    pub game_version: String,
-    pub loader_version: Option<String>,
-}
+/// The loader and versions a pack runs on, as bedrock reads them.
+pub use bedrock::content::PackPlatform as Platform;
 
+/// The platform a pack runs on; one that names no Minecraft version is not a pack.
 pub fn platform(index: &Index) -> Result<Platform, PackError> {
-    use bedrock::state::ModLoader as PackLoader;
-    let platform = bedrock::content::platform(index).ok_or_else(|| {
+    bedrock::content::platform(index).ok_or_else(|| {
         PackError::NotAPack("it names no Minecraft version".into())
-    })?;
-    Ok(Platform {
-        loader: match platform.loader {
-            PackLoader::Vanilla => ModLoader::Vanilla,
-            PackLoader::Fabric => ModLoader::Fabric,
-            PackLoader::Quilt => ModLoader::Quilt,
-            PackLoader::Forge => ModLoader::Forge,
-            PackLoader::NeoForge => ModLoader::NeoForge,
-        },
-        game_version: platform.game_version,
-        loader_version: platform.loader_version,
     })
 }
 

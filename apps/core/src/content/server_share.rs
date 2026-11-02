@@ -15,7 +15,7 @@ use super::{
 };
 use sharing_client::push::RemovedFile;
 
-use crate::api::content::AddonKind;
+use modrinth_content_management::ContentType;
 
 /// The pack files of a shared modpack that players do not get: deleted from the server, or on
 /// disk but off for players. A file Modrinth knows goes by version; any other mod by its path.
@@ -110,11 +110,12 @@ pub fn carried(
         })
         .filter_map(|item| {
             let file_type = match item.kind {
-                AddonKind::Mod => "mod",
-                AddonKind::Datapack => "datapack",
-                AddonKind::Plugin
-                | AddonKind::Shader
-                | AddonKind::Resourcepack => return None,
+                ContentType::Mod => "mod",
+                ContentType::DataPack => "datapack",
+                ContentType::Plugin
+                | ContentType::Shader
+                | ContentType::ResourcePack
+                | ContentType::ModPack => return None,
             };
             let row = rows.get(&item.path);
             if let Some((version_id, project_id)) = row.and_then(|row| {
@@ -143,7 +144,7 @@ mod tests {
     use super::*;
     use crate::content::records::Origin;
 
-    fn listed(path: &str, kind: AddonKind, disabled: bool) -> Listed {
+    fn listed(path: &str, kind: ContentType, disabled: bool) -> Listed {
         Listed {
             path: path.into(),
             kind,
@@ -169,18 +170,18 @@ mod tests {
     #[test]
     fn the_share_carries_what_players_get() {
         let listed = [
-            listed("mods/both.jar", AddonKind::Mod, false),
+            listed("mods/both.jar", ContentType::Mod, false),
             // Off for the server: `.disabled` on disk, still shared.
-            listed("mods/client.jar", AddonKind::Mod, true),
+            listed("mods/client.jar", ContentType::Mod, true),
             // Off for players: runs, not shared.
-            listed("mods/server.jar", AddonKind::Mod, false),
+            listed("mods/server.jar", ContentType::Mod, false),
             // Off for both.
-            listed("mods/off.jar", AddonKind::Mod, true),
+            listed("mods/off.jar", ContentType::Mod, true),
             // Renamed back by hand after it was turned off for the server: it runs again.
-            listed("mods/back.jar", AddonKind::Mod, false),
-            listed("mods/modrinth.jar", AddonKind::Mod, false),
-            listed("world/datapacks/pack.zip", AddonKind::Datapack, false),
-            listed("plugins/plugin.jar", AddonKind::Plugin, false),
+            listed("mods/back.jar", ContentType::Mod, false),
+            listed("mods/modrinth.jar", ContentType::Mod, false),
+            listed("world/datapacks/pack.zip", ContentType::DataPack, false),
+            listed("plugins/plugin.jar", ContentType::Plugin, false),
         ];
         let toggles = HashMap::from([
             toggle("mods/client.jar", true, false),
@@ -235,11 +236,11 @@ mod tests {
             )
         };
         let listed = [
-            listed("mods/kept.jar", AddonKind::Mod, false),
+            listed("mods/kept.jar", ContentType::Mod, false),
             // Off for the server: players still get it from the pack.
-            listed("mods/client.jar", AddonKind::Mod, true),
-            listed("mods/server.jar", AddonKind::Mod, false),
-            listed("mods/added.jar", AddonKind::Mod, false),
+            listed("mods/client.jar", ContentType::Mod, true),
+            listed("mods/server.jar", ContentType::Mod, false),
+            listed("mods/added.jar", ContentType::Mod, false),
         ];
         let toggles = HashMap::from([
             toggle("mods/client.jar", true, false),

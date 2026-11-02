@@ -3,8 +3,8 @@
 use sqlx::SqlitePool;
 
 use super::shim::{EndedBy, ExitStatus};
-use crate::content::modrinth::ReleaseChannel;
 use crate::network::firewall::SERVER_PORTS;
+use modrinth_content_management::VersionType;
 
 /// A row of `servers`.
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -19,7 +19,8 @@ pub struct ServerRow {
     pub java_path: Option<String>,
     pub java_version: Option<i64>,
     pub eula_accepted: bool,
-    pub update_channel: ReleaseChannel,
+    #[sqlx(try_from = "crate::content::modrinth::ChannelText")]
+    pub update_channel: VersionType,
 }
 
 /// How a run ended, as `runs.outcome` stores it.
@@ -179,10 +180,10 @@ pub async fn set_java(
 pub async fn set_update_channel(
     db: &SqlitePool,
     id: &str,
-    channel: ReleaseChannel,
+    channel: VersionType,
 ) -> sqlx::Result<()> {
     sqlx::query("UPDATE servers SET update_channel = ? WHERE id = ?")
-        .bind(channel)
+        .bind(bedrock::content::version_type_name(channel))
         .bind(id)
         .execute(db)
         .await?;

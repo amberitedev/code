@@ -23,7 +23,7 @@ use super::{
     activity::Action,
     content::{
         Addon, AddonStatus, AddonVersion, Addons, ContentError, ContentOwner,
-        Environment, Installing,
+        Installing,
     },
 };
 use crate::{
@@ -667,7 +667,7 @@ pub struct WorldContentModpack {
     pub description: Option<String>,
     pub version_number: Option<String>,
     pub date_published: Option<DateTime<Utc>>,
-    pub environment: Option<Environment>,
+    pub environment: Option<bedrock::content::VersionEnvironment>,
     pub has_update: Option<String>,
 }
 

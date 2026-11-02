@@ -16,7 +16,10 @@ use serde::{Deserialize, Serialize};
 use crate::servers::{Hold, ServerError, Servers, launch, records::ServerRow};
 use shared::SharedDirs;
 
-/// The server software a server runs, as `servers.loader` stores it.
+/// The server software a server runs, as `servers.loader` stores it. App-lib's `ModLoader`
+/// (`bedrock::state::ModLoader`), which packs and content sets name, plus Paper. App-lib's is
+/// borrowed from its own file and has no Paper, so this one stays beside it; a pack's loader
+/// converts with `From`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ModLoader {
@@ -52,6 +55,32 @@ impl ModLoader {
         ]
         .into_iter()
         .find(|loader| loader.as_str().eq_ignore_ascii_case(name))
+    }
+
+    /// The jar metadata a server with this loader reads first. Vanilla reads none first.
+    pub fn jar_platform(self) -> Option<bedrock::upstream::jar::Platform> {
+        use bedrock::upstream::jar::Platform;
+        Some(match self {
+            Self::Fabric => Platform::Fabric,
+            Self::Quilt => Platform::Quilt,
+            Self::NeoForge => Platform::NeoForge,
+            Self::Forge => Platform::Forge,
+            Self::Paper => Platform::Paper,
+            Self::Vanilla => return None,
+        })
+    }
+}
+
+impl From<bedrock::state::ModLoader> for ModLoader {
+    fn from(loader: bedrock::state::ModLoader) -> Self {
+        use bedrock::state::ModLoader as Modded;
+        match loader {
+            Modded::Vanilla => Self::Vanilla,
+            Modded::Fabric => Self::Fabric,
+            Modded::Quilt => Self::Quilt,
+            Modded::Forge => Self::Forge,
+            Modded::NeoForge => Self::NeoForge,
+        }
     }
 }
 

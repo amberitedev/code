@@ -11,6 +11,11 @@
 //!
 //! Viewers see the content list; changing it is for editors. Loader and pack installs answer at
 //! once and go on in the background (see `content`).
+//!
+//! Where Archon's names a concept the shared crates have, the shared type is on the wire, with
+//! the same names: an addon's `kind` is `ContentType` (Archon's `AddonKind`, which has no
+//! `modpack`), the update channel is `VersionType` (Archon's `ReleaseChannel`), and a version's
+//! `environment` is bedrock's `VersionEnvironment`.
 
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
@@ -19,7 +24,9 @@ use axum::{
     extract::{Multipart, Path, Query, State, multipart::Field},
     http::{StatusCode, header::CONTENT_TYPE},
 };
+use bedrock::content::VersionEnvironment;
 use chrono::{DateTime, Utc};
+use modrinth_content_management::{ContentType, VersionType};
 use serde::{Deserialize, Serialize};
 use sharing_client::consume;
 use tokio::io::AsyncWriteExt;
@@ -37,8 +44,6 @@ use crate::{
         self, Busy,
         addons::{self, Listed},
         install::{self as content_install, Linked, PackSource},
-        manifest::{self, Manifest},
-        modrinth::ReleaseChannel,
         pack,
         records::{self, ContentFile, Origin, Pack, PendingPack, SideToggle},
         shared,
@@ -46,17 +51,6 @@ use crate::{
     installs::{ModLoader, shared::SharedDirs},
     servers::{Hold, ServerError, records as servers_records},
 };
-
-/// Mirrors Archon.Content.v1.AddonKind.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum AddonKind {
-    Mod,
-    Plugin,
-    Datapack,
-    Shader,
-    Resourcepack,
-}
 
 /// Mirrors Archon.Content.v1.ContentOwnerType.
 #[allow(dead_code)] // Core sends no owners yet.
@@ -78,29 +72,12 @@ pub struct ContentOwner {
     pub icon_url: Option<String>,
 }
 
-/// Where a version runs. Mirrors Labrinth.Projects.v3.Environment.
-#[allow(dead_code)] // Core sends no environments yet.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Environment {
-    ClientAndServer,
-    ClientOnly,
-    ClientOnlyServerOptional,
-    SingleplayerOnly,
-    ServerOnly,
-    ServerOnlyClientOptional,
-    DedicatedServerOnly,
-    ClientOrServer,
-    ClientOrServerPrefersBoth,
-    Unknown,
-}
-
 /// Mirrors Archon.Content.v1.AddonVersion.
 #[derive(Debug, Clone, Serialize)]
 pub struct AddonVersion {
     pub id: String,
     pub name: Option<String>,
-    pub environment: Option<Environment>,
+    pub environment: Option<VersionEnvironment>,
 }
 
 /// Serializes as `"pending"`, `"installed"`, or `{"failed": {"error": ...}}`. Mirrors
@@ -128,7 +105,7 @@ pub struct Addon {
     pub disabled_server: bool,
     pub disabled_player: bool,
     pub side_toggle_unlocked: bool,
-    pub kind: AddonKind,
+    pub kind: ContentType,
     pub from_modpack: bool,
     pub status: AddonStatus,
     pub pack_client_retained: bool,
@@ -142,7 +119,7 @@ pub struct Addon {
     pub owner: Option<ContentOwner>,
     pub icon_url: Option<String>,
     /// What the jar says about itself, for mods and plugins.
-    pub manifest: Option<Manifest>,
+    pub manifest: Option<bedrock::upstream::jar::Manifest>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub installed: Option<bool>,
 }
@@ -181,7 +158,7 @@ pub struct Addons {
     pub modloader_version: Option<String>,
     pub game_version: Option<String>,
     /// The least stable channel addon updates are offered from.
-    pub update_channel: ReleaseChannel,
+    pub update_channel: VersionType,
     pub modpack: Option<ModpackFields>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub installing: Option<Installing>,
@@ -215,14 +192,14 @@ pub struct AddAddonRequest {
     #[serde(default)]
     pub version_id: Option<String>,
     #[serde(default)]
-    pub kind: Option<AddonKind>,
+    pub kind: Option<ContentType>,
 }
 
 /// Body of POST `.../addons/delete`, `.../disable`, and `.../enable`. Mirrors
 /// Archon.Content.v1.RemoveAddonRequest.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RemoveAddonRequest {
-    pub kind: AddonKind,
+    pub kind: ContentType,
     pub filename: String,
 }
 
@@ -230,7 +207,7 @@ pub struct RemoveAddonRequest {
 /// Archon.Content.v1.SetAddonEnabledRequest.
 #[derive(Debug, Clone, Deserialize)]
 pub struct SetAddonEnabledRequest {
-    pub kind: AddonKind,
+    pub kind: ContentType,
     pub filename: String,
     pub enabled: bool,
 }
@@ -239,7 +216,7 @@ pub struct SetAddonEnabledRequest {
 /// Archon.Content.v1.SetAddonSideToggleLockedRequest.
 #[derive(Debug, Clone, Deserialize)]
 pub struct SetAddonSideToggleLockedRequest {
-    pub kind: AddonKind,
+    pub kind: ContentType,
     pub filename: String,
     pub locked: bool,
 }
@@ -460,7 +437,11 @@ impl From<content::Error> for ApiError {
                 let code = match &error {
                     Error::Busy => ErrorCode::Conflict,
                     Error::NotFound(_) => ErrorCode::NotFound,
+                    Error::Resolve(
+                        modrinth_content_management::Error::Provider(_),
+                    ) => ErrorCode::Internal,
                     Error::Invalid(_)
+                    | Error::Resolve(_)
                     | Error::Path(_)
                     | Error::Pack(_)
                     | Error::Archive(_) => ErrorCode::InvalidRequest,
@@ -566,7 +547,7 @@ async fn addon_list(
         .collect();
     let newer = if updates {
         let row_list: Vec<ContentFile> = rows.values().cloned().collect();
-        addons::updates(&state.content, id, &listed, &row_list).await
+        addons::updates(&state.content, id, &listed, &row_list, &versions).await
     } else {
         HashMap::new()
     };
@@ -637,11 +618,11 @@ async fn manifests(
     id: &str,
     loader: Option<ModLoader>,
     listed: &[Listed],
-) -> HashMap<String, Manifest> {
+) -> HashMap<String, bedrock::upstream::jar::Manifest> {
     let jars: Vec<Listed> = listed
         .iter()
         .filter(|listed| {
-            matches!(listed.kind, AddonKind::Mod | AddonKind::Plugin)
+            matches!(listed.kind, ContentType::Mod | ContentType::Plugin)
         })
         .cloned()
         .collect();
@@ -662,7 +643,7 @@ async fn manifests(
                 let inspection = content.manifests.get(
                     &key,
                     file,
-                    content::manifest::platform(loader),
+                    loader.and_then(ModLoader::jar_platform),
                 )?;
                 Some((listed.path, inspection.manifest))
             })
@@ -689,18 +670,21 @@ async fn modpack_fields(
                     modrinth.project(project_id),
                     modrinth.version(version_id)
                 );
+                let version = version.ok();
                 let has_update = if check {
-                    modrinth
-                        .versions(project_id, &[], None)
-                        .await
-                        .ok()
-                        .and_then(|versions| versions.into_iter().next())
-                        .map(|latest| latest.id)
-                        .filter(|latest| latest != version_id)
+                    addons::pack_update(
+                        &state.content,
+                        id,
+                        project_id,
+                        version.as_ref(),
+                    )
+                    .await
+                    .ok()
+                    .flatten()
                 } else {
                     None
                 };
-                (project.ok(), version.ok(), has_update)
+                (project.ok(), version, has_update)
             }
             _ => (None, None, None),
         };
@@ -1673,17 +1657,30 @@ pub async fn update_modpack(
             "This pack came from a file; upload the new file instead.",
         ));
     };
-    let latest = state
-        .content
-        .modrinth
-        .versions(&project_id, &[], None)
-        .await
-        .map_err(content::Error::from)?
-        .into_iter()
-        .next()
-        .ok_or_else(|| {
-            ApiError::new(ErrorCode::NotFound, "The pack has no versions.")
-        })?;
+    let installed = match &pack.version_id {
+        Some(version_id) => Some(
+            state
+                .content
+                .modrinth
+                .version(version_id)
+                .await
+                .map_err(content::Error::from)?,
+        ),
+        None => None,
+    };
+    let newest = addons::pack_update(
+        &state.content,
+        &id,
+        &project_id,
+        installed.as_ref(),
+    )
+    .await?
+    .ok_or_else(|| {
+        ApiError::new(
+            ErrorCode::Conflict,
+            "The pack has no newer version for this server's Minecraft and update channel.",
+        )
+    })?;
     let (hold, busy) = begin(&state, &id)?;
     spawn_pack(
         &state,
@@ -1691,7 +1688,7 @@ pub async fn update_modpack(
         busy,
         PackSource::Modrinth {
             project_id,
-            version_id: latest.id,
+            version_id: newest,
         },
         None,
         force,
@@ -1933,8 +1930,8 @@ pub async fn embedded_icon(
     caller.require(&state.db, &id, Level::Viewer).await?;
     world(&id, &wid)?;
     let kind = match query.parent_directory.as_str() {
-        "mods" => AddonKind::Mod,
-        "plugins" => AddonKind::Plugin,
+        "mods" => ContentType::Mod,
+        "plugins" => ContentType::Plugin,
         _ => {
             return Err(ApiError::new(
                 ErrorCode::InvalidRequest,
@@ -1958,10 +1955,13 @@ pub async fn embedded_icon(
             .get(
                 &key,
                 open_jar(&folder, &listed)?,
-                manifest::platform(loader),
+                loader.and_then(ModLoader::jar_platform),
             )?
             .icon?;
-        let bytes = manifest::read_icon(open_jar(&folder, &listed)?, &path)?;
+        let bytes = bedrock::upstream::jar::read_icon(
+            open_jar(&folder, &listed)?,
+            &path,
+        )?;
         Some((path, bytes))
     })
     .await

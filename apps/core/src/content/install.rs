@@ -358,8 +358,9 @@ async fn install_platform(
     let server = servers_records::get(&content.db, hold.id())
         .await?
         .ok_or_else(|| Error::NotFound("The server is gone.".into()))?;
+    let loader = ModLoader::from(platform.loader);
     let key = InstallProgressKey::Platform {
-        platform: platform_name(platform.loader),
+        platform: platform_name(loader),
         platform_version: platform.loader_version.clone().unwrap_or_default(),
         game_version: platform.game_version.clone(),
     };
@@ -368,7 +369,7 @@ async fn install_platform(
         hold,
         &content.http,
         &server,
-        platform.loader,
+        loader,
         &platform.game_version,
         platform.loader_version.as_deref(),
         verify,

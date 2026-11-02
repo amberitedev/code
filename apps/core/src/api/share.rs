@@ -19,13 +19,14 @@ use axum::{
     http::StatusCode,
 };
 use chrono::{DateTime, Utc};
+use modrinth_content_management::ContentType;
 use serde::{Deserialize, Serialize};
 use sharing_client::{push, store::StoreClient};
 
 use super::{
     AppState,
     backend::OwedCall,
-    content::{AddonKind, server_first, world},
+    content::{server_first, world},
     error::{ApiError, ErrorCode},
 };
 use crate::{
@@ -252,8 +253,10 @@ async fn snapshot(state: &AppState, id: &str) -> Result<Snapshot, ApiError> {
     let carried = carried(&listed, &rows, &toggles, modpack_id.is_some());
     let removed_files = if modpack_id.is_some() {
         let level = folder.level_name();
-        let dirs = [AddonKind::Mod, AddonKind::Datapack]
-            .map(|kind| addons::kind_folder(kind, &level));
+        let dirs = [ContentType::Mod, ContentType::DataPack]
+            .map(|kind| addons::kind_folder(kind, &level))
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()?;
         removed(&listed, &rows, &toggles, &dirs)
     } else {
         Vec::new()

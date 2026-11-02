@@ -1,21 +1,33 @@
 //! Addons: mods, plugins, and datapacks, as files in their folders. A disabled addon is its file
 //! with `.disabled` added; its row keeps the enabled path, so a pack update treats a disabled
 //! pack file like one the owner removed and leaves it alone.
+//!
+//! Which version to install and which dependencies come with it is
+//! `modrinth_content_management::resolve_content`'s, as in the App: the update channel falls back
+//! one step at a time when nothing on it fits, and a dependency it cannot place is reported in
+//! the log instead of failing the add.
 
-use std::{collections::HashSet, path::Path, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    path::Path,
+    sync::Arc,
+};
 
-use modrinth_content_management::DependencyType;
+use bedrock::content::least_stable;
+use modrinth_content_management::{
+    ContentType, ResolutionPreferences, ResolveContentPlan,
+    ResolveContentRequest, SkippedReason, VersionType, resolve_content,
+};
 use tracing::warn;
 
 use super::{
     Content, Error,
     folder::{self, Folder},
     install::{MAX_FILE, identify},
-    modrinth::{self, ReleaseChannel, Version},
+    modrinth::{self, Version},
     records::{self, ContentFile, Origin, SideToggle},
 };
 use crate::{
-    api::content::AddonKind,
     installs::{
         ModLoader,
         download::{self, FileDownload, Hash},
@@ -25,27 +37,33 @@ use crate::{
 
 /// Added to an addon's file name to disable it.
 pub const DISABLED: &str = ".disabled";
-/// Dependencies followed for one add, however deep.
-const MAX_DEPENDENCIES: usize = 64;
 
 /// The folder addons of `kind` live in. Datapacks are inside the world; adding one on purpose is
-/// the one way content goes there.
-pub fn kind_folder(kind: AddonKind, level_name: &str) -> String {
-    match kind {
-        AddonKind::Mod => "mods".into(),
-        AddonKind::Plugin => "plugins".into(),
-        AddonKind::Datapack => format!("{level_name}/datapacks"),
-        AddonKind::Shader => "shaderpacks".into(),
-        AddonKind::Resourcepack => "resourcepacks".into(),
-    }
+/// the one way content goes there. A modpack is not an addon and has none.
+pub fn kind_folder(
+    kind: ContentType,
+    level_name: &str,
+) -> Result<String, Error> {
+    Ok(match kind {
+        ContentType::Mod => "mods".into(),
+        ContentType::Plugin => "plugins".into(),
+        ContentType::DataPack => format!("{level_name}/datapacks"),
+        ContentType::Shader => "shaderpacks".into(),
+        ContentType::ResourcePack => "resourcepacks".into(),
+        ContentType::ModPack => {
+            return Err(Error::Invalid("A modpack is not an addon.".into()));
+        }
+    })
 }
 
 /// The kinds a server with `loader` lists.
-pub fn kinds(loader: Option<ModLoader>) -> Vec<AddonKind> {
+pub fn kinds(loader: Option<ModLoader>) -> Vec<ContentType> {
     match loader {
-        Some(ModLoader::Paper) => vec![AddonKind::Plugin, AddonKind::Datapack],
-        Some(ModLoader::Vanilla) | None => vec![AddonKind::Datapack],
-        Some(_) => vec![AddonKind::Mod, AddonKind::Datapack],
+        Some(ModLoader::Paper) => {
+            vec![ContentType::Plugin, ContentType::DataPack]
+        }
+        Some(ModLoader::Vanilla) | None => vec![ContentType::DataPack],
+        Some(_) => vec![ContentType::Mod, ContentType::DataPack],
     }
 }
 
@@ -54,7 +72,7 @@ pub fn kinds(loader: Option<ModLoader>) -> Vec<AddonKind> {
 pub struct Listed {
     /// The enabled path, which its row uses.
     pub path: String,
-    pub kind: AddonKind,
+    pub kind: ContentType,
     pub filename: String,
     pub disabled: bool,
     pub size: u64,
@@ -66,7 +84,9 @@ pub fn scan(folder: &Folder, loader: Option<ModLoader>) -> Vec<Listed> {
     let level = folder.level_name();
     let mut listed = Vec::new();
     for kind in kinds(loader) {
-        let dir = kind_folder(kind, &level);
+        let Ok(dir) = kind_folder(kind, &level) else {
+            continue;
+        };
         let Ok(entries) =
             folder.open_dir(Some(&dir)).and_then(|dir| dir.entries())
         else {
@@ -106,13 +126,17 @@ pub fn scan(folder: &Folder, loader: Option<ModLoader>) -> Vec<Listed> {
 }
 
 /// What a server runs, for picking versions.
-struct Target {
-    loader: ModLoader,
-    game_version: String,
-    channel: ReleaseChannel,
+pub struct Target {
+    pub loader: ModLoader,
+    pub game_version: String,
+    /// The server's update channel.
+    pub channel: VersionType,
 }
 
-async fn target(content: &Content, server_id: &str) -> Result<Target, Error> {
+pub async fn target(
+    content: &Content,
+    server_id: &str,
+) -> Result<Target, Error> {
     let server = servers_records::get(&content.db, server_id)
         .await?
         .ok_or_else(|| {
@@ -133,53 +157,83 @@ async fn target(content: &Content, server_id: &str) -> Result<Target, Error> {
     }
 }
 
-/// The Modrinth loaders a `kind` is filtered by on this server.
-fn loaders(target: &Target, kind: AddonKind) -> Vec<&'static str> {
+/// The Modrinth loaders content of `kind` is picked by on this server. A modpack's are the
+/// server's loader's, as for mods.
+fn loaders(target: &Target, kind: ContentType) -> Vec<&'static str> {
     match kind {
-        AddonKind::Datapack => vec!["datapack"],
+        ContentType::DataPack => vec!["datapack"],
         _ => modrinth::loaders_for(target.loader),
     }
 }
 
+/// What a project is picked as when the App names no kind: plugins on Paper, datapacks on
+/// Vanilla, mods otherwise, which `resolve_content` lets match datapack versions too.
+fn default_kind(loader: ModLoader) -> ContentType {
+    match loader {
+        ModLoader::Paper => ContentType::Plugin,
+        ModLoader::Vanilla => ContentType::DataPack,
+        _ => ContentType::Mod,
+    }
+}
+
 /// The kind a version is, from the loaders it lists.
-fn kind_of(version: &Version, target: &Target) -> AddonKind {
+fn kind_of(version: &Version, target: &Target) -> ContentType {
     let has = |name: &str| version.loaders.iter().any(|loader| loader == name);
     if has("datapack")
         && (target.loader == ModLoader::Vanilla || version.loaders.len() == 1)
     {
-        AddonKind::Datapack
+        ContentType::DataPack
     } else if target.loader == ModLoader::Paper {
-        AddonKind::Plugin
+        ContentType::Plugin
     } else {
-        AddonKind::Mod
+        ContentType::Mod
     }
 }
 
-/// The newest version of `project` that runs on this server and is on its update channel.
-async fn latest(
+/// What `resolve_content` picks for `project_id` on this server: `version_id`, or the newest
+/// version of `kind` on `channel`, and the required dependencies none of `existing` provide.
+async fn resolve(
     content: &Content,
     target: &Target,
-    project: &str,
-    kind: Option<AddonKind>,
-) -> Result<Version, Error> {
-    let filter = kind.map_or_else(
-        || modrinth::loaders_for(target.loader),
-        |kind| loaders(target, kind),
-    );
-    content
-        .modrinth
-        .versions(project, &filter, Some(&target.game_version))
-        .await?
-        .into_iter()
-        .find(|version| version.version_type <= target.channel.into())
-        .ok_or_else(|| {
-            Error::Invalid(format!(
-                "{project} has no version for {} {} on the {} channel.",
-                target.loader,
-                target.game_version,
-                target.channel.name()
-            ))
-        })
+    project_id: &str,
+    version_id: Option<&str>,
+    kind: ContentType,
+    existing: HashSet<String>,
+    channel: VersionType,
+) -> Result<ResolveContentPlan, Error> {
+    let plan = resolve_content(
+        content.modrinth.clone(),
+        ResolveContentRequest {
+            project_id: project_id.to_owned(),
+            version_id: version_id.map(str::to_owned),
+            content_type: kind,
+            selected: ResolutionPreferences::default(),
+            target: ResolutionPreferences {
+                game_versions: vec![target.game_version.clone()],
+                loaders: loaders(target, kind)
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect(),
+            },
+            existing_project_ids: existing.into_iter().collect(),
+            update_channel: Some(channel),
+        },
+    )
+    .await?;
+    for skipped in &plan.skipped {
+        if !matches!(
+            skipped.reason,
+            SkippedReason::AlreadyInstalled | SkippedReason::DuplicateProject
+        ) {
+            warn!(
+                project = %project_id,
+                dependency = %skipped.project_id,
+                reason = ?skipped.reason,
+                "a dependency was left out"
+            );
+        }
+    }
+    Ok(plan)
 }
 
 /// Add a Modrinth project, and the dependencies it requires that nothing on the server provides
@@ -190,48 +244,30 @@ pub async fn add(
     server_id: &str,
     project_id: &str,
     version_id: Option<&str>,
-    kind: Option<AddonKind>,
+    kind: Option<ContentType>,
 ) -> Result<(), Error> {
     let target = target(content, server_id).await?;
-    let version = match version_id {
-        Some(id) => content.modrinth.version(id).await?,
-        None => latest(content, &target, project_id, kind).await?,
-    };
-    let kind = kind.unwrap_or_else(|| kind_of(&version, &target));
     let rows = records::files(&content.db, server_id).await?;
     let folder = Arc::new(Folder::open(&content.paths.server(server_id))?);
-    let mut provided = provided(&rows, &|path| folder.exists(path));
-    provided.remove(&version.project_id);
-
-    let mut install = vec![version];
-    let mut index = 0;
-    while index < install.len() && install.len() < MAX_DEPENDENCIES {
-        let dependencies = install[index].dependencies.clone();
-        provided.insert(install[index].project_id.clone());
-        index += 1;
-        for dependency in dependencies {
-            if dependency.dependency_type != DependencyType::Required {
-                continue;
-            }
-            let dependency_version =
-                match (&dependency.version_id, &dependency.project_id) {
-                    (Some(version), _) => {
-                        content.modrinth.version(version).await?
-                    }
-                    (None, Some(project)) if !provided.contains(project) => {
-                        latest(content, &target, project, Some(kind)).await?
-                    }
-                    _ => continue,
-                };
-            if provided.contains(&dependency_version.project_id) {
-                continue;
-            }
-            provided.insert(dependency_version.project_id.clone());
-            install.push(dependency_version);
-        }
+    let mut existing = provided(&rows, &|path| folder.exists(path));
+    existing.remove(project_id);
+    let plan = resolve(
+        content,
+        &target,
+        project_id,
+        version_id,
+        kind.unwrap_or(default_kind(target.loader)),
+        existing,
+        target.channel,
+    )
+    .await?;
+    let primary = content.modrinth.version(&plan.primary.version_id).await?;
+    let kind = kind.unwrap_or_else(|| kind_of(&primary, &target));
+    let mut install = vec![primary];
+    for dependency in &plan.dependencies {
+        install.push(content.modrinth.version(&dependency.version_id).await?);
     }
-
-    let dir = kind_folder(kind, &folder.level_name());
+    let dir = kind_folder(kind, &folder.level_name())?;
     for version in &install {
         place_version(content, server_id, &folder, &dir, version, &rows)
             .await?;
@@ -363,14 +399,14 @@ async fn place_version(
 /// Where an addon is on disk: its enabled path, and the path of the file there now.
 fn locate(
     folder: &Folder,
-    kind: AddonKind,
+    kind: ContentType,
     filename: &str,
 ) -> Result<(String, String), Error> {
     let name = folder::clean(filename.trim_end_matches(DISABLED))?;
     if name.contains('/') {
         return Err(Error::Invalid(format!("{filename} is not a file name.")));
     }
-    let path = format!("{}/{name}", kind_folder(kind, &folder.level_name()));
+    let path = format!("{}/{name}", kind_folder(kind, &folder.level_name())?);
     let disabled = format!("{path}{DISABLED}");
     if folder.exists(&path) {
         Ok((path.clone(), path))
@@ -385,7 +421,7 @@ fn locate(
 pub async fn remove(
     content: &Content,
     server_id: &str,
-    kind: AddonKind,
+    kind: ContentType,
     filename: &str,
 ) -> Result<(), Error> {
     let folder = Folder::open(&content.paths.server(server_id))?;
@@ -405,7 +441,7 @@ pub async fn remove(
 pub async fn set_enabled(
     content: &Content,
     server_id: &str,
-    kind: AddonKind,
+    kind: ContentType,
     filename: &str,
     enabled: bool,
 ) -> Result<(), Error> {
@@ -463,7 +499,7 @@ pub enum Side {
 pub async fn set_side(
     content: &Content,
     server_id: &str,
-    kind: AddonKind,
+    kind: ContentType,
     filename: &str,
     side: Side,
     enabled: bool,
@@ -486,7 +522,7 @@ pub async fn set_side(
 pub async fn set_unlocked(
     content: &Content,
     server_id: &str,
-    kind: AddonKind,
+    kind: ContentType,
     filename: &str,
     unlocked: bool,
 ) -> Result<(), Error> {
@@ -551,8 +587,10 @@ pub async fn update(
     let listed = find(&folder, Some(target.loader), filename)
         .ok_or_else(|| Error::NotFound(format!("There is no {filename}.")))?;
     let row = records::file(&content.db, server_id, &listed.path).await?;
-    let project = match row.as_ref().and_then(|row| row.project_id.clone()) {
-        Some(project) => project,
+    // The version installed now: the one recorded, or the one Modrinth knows by its hash.
+    let installed = match row.as_ref().and_then(|row| row.version_id.as_deref())
+    {
+        Some(id) => Some(content.modrinth.version(id).await?),
         None => {
             let on_disk = if listed.disabled {
                 format!("{}{DISABLED}", listed.path)
@@ -567,18 +605,40 @@ pub async fn update(
                 .by_hashes(std::slice::from_ref(&sha1))
                 .await?
                 .remove(&sha1)
-                .map(|version| version.project_id)
-                .ok_or_else(|| {
-                    Error::Invalid(format!(
-                        "Modrinth does not know {filename}."
-                    ))
-                })?
         }
     };
-    let version = match version_id {
-        Some(id) => content.modrinth.version(id).await?,
-        None => latest(content, &target, &project, Some(listed.kind)).await?,
+    let project = row
+        .as_ref()
+        .and_then(|row| row.project_id.clone())
+        .or_else(|| {
+            installed.as_ref().map(|version| version.project_id.clone())
+        })
+        .ok_or_else(|| {
+            Error::Invalid(format!("Modrinth does not know {filename}."))
+        })?;
+    let version_id = match version_id {
+        Some(id) => id.to_owned(),
+        None => {
+            // A beta someone installed keeps getting betas.
+            let channel =
+                installed.as_ref().map_or(target.channel, |version| {
+                    least_stable(target.channel, version.version_type)
+                });
+            resolve(
+                content,
+                &target,
+                &project,
+                None,
+                listed.kind,
+                HashSet::new(),
+                channel,
+            )
+            .await?
+            .primary
+            .version_id
+        }
     };
+    let version = content.modrinth.version(&version_id).await?;
     let rows = records::files(&content.db, server_id).await?;
     let mut rows = rows;
     // The file being replaced counts as this project's even before Modrinth said so.
@@ -594,7 +654,7 @@ pub async fn update(
             pending: None,
         });
     }
-    let dir = kind_folder(listed.kind, &folder.level_name());
+    let dir = kind_folder(listed.kind, &folder.level_name())?;
     place_version(content, server_id, &folder, &dir, &version, &rows).await
 }
 
@@ -617,12 +677,12 @@ pub async fn upload(
         return Err(Error::Invalid(format!("{filename} is not a file name.")));
     }
     let kind = if name.ends_with(".zip") {
-        AddonKind::Datapack
+        ContentType::DataPack
     } else if name.ends_with(".jar") {
         if loader == Some(ModLoader::Paper) {
-            AddonKind::Plugin
+            ContentType::Plugin
         } else {
-            AddonKind::Mod
+            ContentType::Mod
         }
     } else {
         return Err(Error::Invalid(format!(
@@ -630,7 +690,7 @@ pub async fn upload(
         )));
     };
     let folder = Arc::new(Folder::open(&content.paths.server(server_id))?);
-    let path = format!("{}/{name}", kind_folder(kind, &folder.level_name()));
+    let path = format!("{}/{name}", kind_folder(kind, &folder.level_name())?);
     let sha1 = {
         let folder = Arc::clone(&folder);
         let path = path.clone();
@@ -668,49 +728,65 @@ pub async fn upload(
     Ok(())
 }
 
-/// The newest version for each listed file Modrinth knows, by path. Best effort: empty when
-/// Modrinth cannot be reached.
+/// The newest version for each listed file Modrinth knows, by path, on the channel it updates
+/// on: the least stable of the server's and the one its installed version (in `installed`, by
+/// id) is on. Each channel falls back one step at a time, as in the App. Best effort: empty
+/// when Modrinth cannot be reached.
 pub async fn updates(
     content: &Content,
     server_id: &str,
     listed: &[Listed],
     rows: &[ContentFile],
-) -> std::collections::HashMap<String, Version> {
+    installed: &HashMap<String, Version>,
+) -> HashMap<String, Version> {
     let Ok(target) = target(content, server_id).await else {
-        return std::collections::HashMap::default();
+        return HashMap::default();
     };
-    let by_path: std::collections::HashMap<&str, &ContentFile> =
+    let by_path: HashMap<&str, &ContentFile> =
         rows.iter().map(|row| (row.path.as_str(), row)).collect();
-    let mut wanted = Vec::new();
+    // The files to check, by kind and channel, since each asks Modrinth on its own.
+    let mut groups: HashMap<
+        (ContentType, VersionType),
+        Vec<(&Listed, &ContentFile)>,
+    > = HashMap::new();
     for item in listed {
-        if let Some(row) = by_path.get(item.path.as_str())
-            && row.project_id.is_some()
-        {
-            wanted.push((item, row.sha1.clone(), row.version_id.clone()));
-        }
+        let Some(row) = by_path
+            .get(item.path.as_str())
+            .filter(|row| row.project_id.is_some())
+        else {
+            continue;
+        };
+        let channel = row
+            .version_id
+            .as_ref()
+            .and_then(|id| installed.get(id))
+            .map_or(target.channel, |version| {
+                least_stable(target.channel, version.version_type)
+            });
+        groups
+            .entry((item.kind, channel))
+            .or_default()
+            .push((item, row));
     }
-    let mut found = std::collections::HashMap::new();
-    for kind in kinds(Some(target.loader)) {
-        let of_kind: Vec<_> = wanted
-            .iter()
-            .filter(|(item, ..)| item.kind == kind)
-            .collect();
+    let mut found = HashMap::new();
+    for ((kind, channel), files) in groups {
         let sha1s: Vec<String> =
-            of_kind.iter().map(|(_, sha1, _)| sha1.clone()).collect();
+            files.iter().map(|(_, row)| row.sha1.clone()).collect();
         match content
             .modrinth
-            .updates(
+            .updates_on_channel(
                 &sha1s,
                 &loaders(&target, kind),
                 &target.game_version,
-                target.channel.version_types(),
+                channel,
             )
             .await
         {
             Ok(mut newer) => {
-                for (item, sha1, current) in of_kind {
-                    if let Some(version) = newer.remove(sha1)
-                        && current.as_deref() != Some(version.id.as_str())
+                for (item, row) in files {
+                    if let Some(version) = newer.remove(&row.sha1)
+                        && row.version_id.as_deref()
+                            != Some(version.id.as_str())
                     {
                         found.insert(item.path.clone(), version);
                     }
@@ -722,6 +798,41 @@ pub async fn updates(
         }
     }
     found
+}
+
+/// The newest version of the Modrinth pack `project_id` a server can update to, when it is not
+/// `installed`: one for the server's Minecraft and loader, on the least stable of the server's
+/// channel and the installed version's.
+pub async fn pack_update(
+    content: &Content,
+    server_id: &str,
+    project_id: &str,
+    installed: Option<&Version>,
+) -> Result<Option<String>, Error> {
+    let target = target(content, server_id).await?;
+    let channel = installed.map_or(target.channel, |version| {
+        least_stable(target.channel, version.version_type)
+    });
+    let newest = match resolve(
+        content,
+        &target,
+        project_id,
+        None,
+        ContentType::ModPack,
+        HashSet::new(),
+        channel,
+    )
+    .await
+    {
+        Ok(plan) => plan.primary.version_id,
+        Err(Error::Resolve(
+            modrinth_content_management::Error::NoCompatibleVersion(_),
+        )) => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    Ok(Some(newest).filter(|newest| {
+        installed.is_none_or(|installed| installed.id != *newest)
+    }))
 }
 
 #[cfg(test)]

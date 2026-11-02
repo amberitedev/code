@@ -16,6 +16,7 @@ use axum::{
     http::{HeaderMap, StatusCode, header::HOST},
 };
 use chrono::{DateTime, Utc};
+use modrinth_content_management::VersionType;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -27,7 +28,7 @@ use super::{
 };
 use crate::{
     access::{Caller, Dangerous, Level, activity},
-    content::{self, modrinth::ReleaseChannel},
+    content,
     installs::ModLoader,
     servers::{Phase, ServerError, launch, records},
 };
@@ -360,7 +361,7 @@ pub struct LocationMetadata {
 pub struct WorldFull {
     pub id: Uuid,
     pub name: String,
-    pub update_channel: ReleaseChannel,
+    pub update_channel: VersionType,
     pub created_at: DateTime<Utc>,
     pub is_active: bool,
     pub download_method: WorldDownloadMethod,
@@ -982,7 +983,7 @@ pub async fn get_v1(
 #[derive(Debug, Clone, Deserialize)]
 pub struct PatchWorld {
     #[serde(default)]
-    pub update_channel: Option<ReleaseChannel>,
+    pub update_channel: Option<VersionType>,
 }
 
 /// `PATCH /v1/servers/{id}/worlds/{wid}`.

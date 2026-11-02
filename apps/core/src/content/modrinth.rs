@@ -1,65 +1,24 @@
 //! What Core asks Modrinth's API. The client and its types are bedrock's, shared with the App;
-//! what stays here is Copal's own: the update channel as servers store it and which loaders a
-//! Copal loader takes content of.
+//! what stays here is Copal's own: which loaders a Copal loader takes content of. A server's
+//! update channel is a [`VersionType`]: the least stable type it takes versions of.
 
 pub use bedrock::content::{
     Modrinth, ModrinthError, Project, Version, ids_from_cdn,
 };
 use modrinth_content_management::VersionType;
-use serde::{Deserialize, Serialize};
 
-/// How stable a Modrinth version is, ordered from most to least stable. As a server's
-/// update channel, the least stable type it takes versions of. Mirrors
-/// Archon.Servers.v1.ReleaseChannel.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Default,
-    Serialize,
-    Deserialize,
-    sqlx::Type,
-)]
-#[serde(rename_all = "lowercase")]
-#[sqlx(type_name = "TEXT", rename_all = "lowercase")]
-pub enum ReleaseChannel {
-    #[default]
-    Release,
-    Beta,
-    Alpha,
-}
+/// `servers.update_channel` as stored: a version type's name. Read into a [`VersionType`] with
+/// `#[sqlx(try_from = "ChannelText")]`.
+#[derive(sqlx::Type)]
+#[sqlx(transparent)]
+pub struct ChannelText(String);
 
-impl ReleaseChannel {
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Release => "release",
-            Self::Beta => "beta",
-            Self::Alpha => "alpha",
-        }
-    }
+impl TryFrom<ChannelText> for VersionType {
+    type Error = &'static str;
 
-    /// The version types a server on this channel takes.
-    pub fn version_types(self) -> &'static [VersionType] {
-        use VersionType::*;
-        match self {
-            Self::Release => &[Release],
-            Self::Beta => &[Release, Beta],
-            Self::Alpha => &[Release, Beta, Alpha],
-        }
-    }
-}
-
-impl From<ReleaseChannel> for VersionType {
-    fn from(channel: ReleaseChannel) -> Self {
-        match channel {
-            ReleaseChannel::Release => Self::Release,
-            ReleaseChannel::Beta => Self::Beta,
-            ReleaseChannel::Alpha => Self::Alpha,
-        }
+    fn try_from(text: ChannelText) -> Result<Self, Self::Error> {
+        bedrock::content::parse_version_type(&text.0)
+            .ok_or("an update channel is release, beta, or alpha")
     }
 }
 
