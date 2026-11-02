@@ -724,10 +724,11 @@ async fn shared_modpack_toggles(
     let mut changes = SharedModpackChanges::default();
     for inherited in inherited {
         let overridden = data.external_files.iter().any(|file| {
-            ProjectType::from_name(&file.file_type).is_some_and(|kind| {
-                inherited.path
-                    == format!("{}/{}", kind.get_folder(), file.file_name)
-            })
+            sharing_client::install::content_path(
+                &file.file_type,
+                &file.file_name,
+            )
+            .is_some_and(|path| path == inherited.path)
         });
         let removed = inherited.is_removed(&data.removed_files);
         let enabled = !removed && !overridden;
