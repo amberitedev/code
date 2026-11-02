@@ -3,18 +3,18 @@ import { RotateCounterClockwiseIcon } from '@modrinth/assets'
 import {
 	AvatarGroup,
 	ConfirmModal,
-	injectModrinthClient,
 	injectNotificationManager,
 	SegmentedBar,
 	useFormatBytes,
 	useFormatDateTime,
 	useRelativeTime,
 } from '@modrinth/ui'
-import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/vue-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, ref, watch } from 'vue'
 
 import {
 	countedShares,
+	sharedHistorySettingsKey,
 	sharedStorageKey,
 	useDeleteVersion,
 	useSharedStorage,
@@ -23,7 +23,7 @@ import {
 import { get_project_many } from '@/helpers/cache.js'
 import {
 	getErrorMessage,
-	install_get_shared_instance_version,
+	install_get_shared_instance_history,
 	install_restore_shared_instance_version,
 	wait_for_install_job,
 } from '@/helpers/install'
@@ -34,12 +34,11 @@ import { changedItems, changeTitle } from './changes'
 import VersionMeta from './version-meta.vue'
 import VersionModal from './version-modal.vue'
 
-// The share's kept versions, newest first, each named after what it changed over the one before
-// it. Members see them read-only. The owner also sees this share's part of the allowance and can
-// restore a version into this instance, to push again, or delete one.
+// The versions the owner pushed from this computer, newest first, each named after what it changed
+// over the one before it. The owner also sees this share's part of the allowance and can restore a
+// version into this instance, to push again, or delete one. Restoring reads only this computer.
 
 const instancePage = injectInstancePage()
-const client = injectModrinthClient()
 const appEvents = injectAppEvents()
 const { addNotification } = injectNotificationManager()
 const formatBytes = useFormatBytes()
@@ -51,47 +50,28 @@ const shareId = computed(() => instance.value.shared_instance?.id)
 const owner = computed(() => instance.value.shared_instance?.role === 'owner')
 
 const history = useQuery({
-	queryKey: computed(() => versionHistoryKey(shareId.value ?? '')),
-	queryFn: () => client.sharedinstances.instances_v1.getHistory(shareId.value!),
-	enabled: () => !!shareId.value && !instancePage.offline.value,
+	queryKey: computed(() => versionHistoryKey(instance.value.id)),
+	queryFn: () => install_get_shared_instance_history(instance.value.id),
+	enabled: () => !!shareId.value,
 })
 const versions = computed(() => history.data.value ?? [])
 
-// A push, or an update reaching a member, adds a version and changes the share's usage.
+// A push adds a version and changes the share's usage.
 const queryClient = useQueryClient()
 watch(
 	() => instance.value.shared_instance?.latest_version,
 	() => {
-		if (!shareId.value) return
-		queryClient.invalidateQueries({ queryKey: versionHistoryKey(shareId.value) })
+		queryClient.invalidateQueries({ queryKey: versionHistoryKey(instance.value.id) })
+		queryClient.invalidateQueries({ queryKey: sharedHistorySettingsKey })
 		queryClient.invalidateQueries({ queryKey: sharedStorageKey })
 	},
 )
-
-// Versions never change, so each one and what it changed over its base is fetched once. Deleting
-// the version before it gives it a new base and a new key.
-const details = useQueries({
-	queries: computed(() =>
-		versions.value.map((version, index) => {
-			const base = versions.value[index + 1]?.version ?? null
-			return {
-				queryKey: ['shared-version', shareId.value, version.version, base] as const,
-				queryFn: () =>
-					install_get_shared_instance_version(instance.value.id, version.version, base),
-				staleTime: Infinity,
-				retry: false,
-			}
-		}),
-	),
-})
 
 // Icons of the projects the versions touched, from the App's project cache.
 const projectIds = computed(() =>
 	[
 		...new Set(
-			details.value.flatMap(
-				(each) => each.data?.diffs.flatMap((diff) => diff.projectId ?? []) ?? [],
-			),
+			versions.value.flatMap((each) => each.diffs.flatMap((diff) => diff.projectId ?? [])),
 		),
 	].sort(),
 )
@@ -108,21 +88,14 @@ const icons = computed(
 
 const rows = computed(() =>
 	versions.value.map((version, index) => {
-		const data = details.value[index]?.data
-		/** The oldest kept version has nothing before it, so it shows what it holds. */
-		const oldest = index === versions.value.length - 1
 		/** The version the instance was shared with, drawn as the start of the line. */
 		const shared = version.version === 1
 		return {
 			...version,
-			details: data,
-			title: shared
-				? 'Shared'
-				: oldest
-					? 'Oldest version'
-					: data && changeTitle(data.diffs, data.configFiles.length),
-			items: data ? changedItems(data.diffs, icons.value) : [],
-			oldest,
+			/** The newest version: the last push, which members have. */
+			current: index === 0,
+			title: shared ? 'Shared' : changeTitle(version.diffs, version.configFiles.length),
+			items: changedItems(version.diffs, icons.value),
 			shared,
 		}
 	}),
@@ -165,7 +138,6 @@ const busy = computed(
 	() =>
 		restore.isPending.value ||
 		deleteVersion.isPending.value ||
-		instancePage.offline.value ||
 		instance.value.install_stage !== 'installed',
 )
 
@@ -174,7 +146,7 @@ const confirmRestore = ref<InstanceType<typeof ConfirmModal>>()
 const confirmDelete = ref<InstanceType<typeof ConfirmModal>>()
 // Kept after a modal closes so its text does not change while it fades out.
 const selected = ref<Row | null>(null)
-// The row as it is now, since its details can arrive after it opens.
+// The row as it is now, since the history can reload while it is open.
 const selectedRow = computed(
 	() => rows.value.find((row) => row.version === selected.value?.version) ?? selected.value,
 )
@@ -213,7 +185,9 @@ function confirm(next?: InstanceType<typeof ConfirmModal>) {
 			title="Delete this version?"
 			description="This can't be undone."
 			proceed-label="Delete"
-			@proceed="selected && shareId && deleteVersion.mutate({ shareId, version: selected.version })"
+			@proceed="
+				selected && deleteVersion.mutate({ instanceId: instance.id, version: selected.version })
+			"
 		/>
 
 		<div v-if="owner && storage && share?.counted" class="flex items-center gap-4">
@@ -255,23 +229,15 @@ function confirm(next?: InstanceType<typeof ConfirmModal>) {
 						:class="row.shared && !row.current ? 'bg-transparent' : 'bg-bg-raised'"
 					>
 						<span class="flex min-w-0 flex-1 flex-col gap-1">
-							<span v-if="row.title" class="truncate font-semibold text-contrast">
-								{{ row.title }}
-							</span>
-							<span v-else class="h-4 w-48 rounded-full bg-button-bg" aria-hidden="true" />
-							<VersionMeta
-								v-if="row.details"
-								class="text-sm"
-								:details="row.details"
-								:compare="!row.oldest"
-							/>
+							<span class="truncate font-semibold text-contrast">{{ row.title }}</span>
+							<VersionMeta class="text-sm" :details="row" />
 						</span>
 						<AvatarGroup class="w-2/5 shrink-0 self-stretch" :items="row.items" />
 						<span
-							v-tooltip="row.ready ? formatDate(row.created) : undefined"
+							v-tooltip="formatDate(row.created)"
 							class="w-16 shrink-0 text-right tabular-nums text-contrast"
 						>
-							{{ row.ready ? formatRelativeTime(row.created) : 'Uploading' }}
+							{{ formatRelativeTime(row.created) }}
 						</span>
 					</span>
 				</button>

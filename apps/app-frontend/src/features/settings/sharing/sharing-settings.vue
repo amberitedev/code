@@ -4,7 +4,6 @@ import {
 	Button,
 	ConfirmModal,
 	injectAuth,
-	injectModrinthClient,
 	injectNotificationManager,
 	SegmentedBar,
 	Slider,
@@ -21,25 +20,27 @@ import AccountRequired from '@/features/cores/account-required.vue'
 import { injectAppSettingsModal } from '@/features/settings/app-settings-modal/context'
 import {
 	countedShares,
-	sharedStorageKey,
+	sharedHistorySettingsKey,
+	useSharedHistorySettings,
 	useSharedStorage,
 } from '@/features/settings/sharing/use-shared-storage'
-import { getErrorMessage } from '@/helpers/install'
+import { getErrorMessage, install_set_shared_history_kept } from '@/helpers/install'
 import { instanceListQueryOptions } from '@/pages/instance/query-options'
 
-// The account's shared storage: how much of its allowance its shares use, each share's part of
-// it, and how many versions they keep. Deleting single versions is on each instance's History tab.
+// The account's shared storage: how much of its allowance its shares use and each share's part of
+// it. Below it, how many versions each share's history on this computer keeps. Deleting single
+// versions is on each instance's History tab.
 
-/** The slider's top, which keeps every version. The backend stores that as null. */
+/** The slider's top, which keeps every version. The App stores that as null. */
 const MAX_KEPT = 50
 
-const client = injectModrinthClient()
 const auth = injectAuth()
 const queryClient = useQueryClient()
 const { addNotification } = injectNotificationManager()
 const formatBytes = useFormatBytes()
 
 const { data: storage, error, isFetching, refetch } = useSharedStorage()
+const { data: history } = useSharedHistorySettings()
 const overAllowance = computed(
 	() => !!storage.value && storage.value.used > storage.value.allowance,
 )
@@ -82,7 +83,7 @@ const rows = computed(() => {
 			name: share.name,
 			instanceId: instanceIds.value.get(share.id),
 			color: colors.get(share.id),
-			versions: share.versions.filter((version) => version.ready).length,
+			versions: history.value?.entries[share.id] ?? 0,
 			size: share.size,
 		}))
 })
@@ -96,14 +97,13 @@ const columns: TableColumn<keyof Row & string>[] = [
 // What the slider shows. It follows the saved setting and resets when a change fails.
 const kept = ref(MAX_KEPT)
 function resetKept() {
-	kept.value = storage.value?.kept_versions ?? MAX_KEPT
+	kept.value = history.value?.kept ?? MAX_KEPT
 }
-watch(() => storage.value?.kept_versions, resetKept, { immediate: true })
+watch(() => history.value?.kept, resetKept, { immediate: true })
 
 const changeKept = useMutation({
-	mutationFn: (next: number) =>
-		client.sharedinstances.storage_v1.change({ kept_versions: next >= MAX_KEPT ? null : next }),
-	onSuccess: (status) => queryClient.setQueryData(sharedStorageKey, status),
+	mutationFn: (next: number) => install_set_shared_history_kept(next >= MAX_KEPT ? null : next),
+	onSuccess: (settings) => queryClient.setQueryData(sharedHistorySettingsKey, settings),
 	onError: (cause) => {
 		console.error('Failed to change kept versions', cause)
 		resetKept()
@@ -115,11 +115,10 @@ const changeKept = useMutation({
 	},
 })
 
-/** How many versions keeping only the last `count` ready ones of each share would delete. */
+/** How many versions keeping only the last `count` of each share's history would delete. */
 function droppedBy(count: number) {
-	return (storage.value?.shares ?? []).reduce(
-		(total, share) =>
-			total + Math.max(share.versions.filter((version) => version.ready).length - count, 0),
+	return Object.values(history.value?.entries ?? {}).reduce(
+		(total, entries) => total + Math.max(entries - count, 0),
 		0,
 	)
 }
@@ -132,7 +131,7 @@ const dropping = computed(() => droppedBy(pending.value))
 
 // Saves once the slider rests, asking first when the new setting deletes versions.
 const saveKept = useDebounceFn((next: number) => {
-	if (next === (storage.value?.kept_versions ?? MAX_KEPT)) return
+	if (next === (history.value?.kept ?? MAX_KEPT)) return
 	if (next < MAX_KEPT && droppedBy(next) > 0) {
 		pending.value = next
 		confirmKept.value?.show()
