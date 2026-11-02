@@ -13,9 +13,10 @@ use bedrock::state::ModLoader;
 use reqwest::StatusCode;
 
 use crate::backend::{Backend, BackendError, Unavailable};
-use crate::install::{ModpackFile, version_files};
+use crate::install::{
+    ModpackFile, Side, Source, Step, config_update, install_plan,
+};
 use crate::pool::{InvalidPoolEntry, PoolFile};
-use crate::rules::CONFIG_FILE_TYPE;
 use crate::versions::ShareVersion;
 
 /// A share version as a server takes it. `S` is how the caller gets a modpack file's bytes.
@@ -131,10 +132,12 @@ pub async fn ready_version(
     })
 }
 
-/// `version` as a server takes it: the Modrinth mods it adds, in a pack index named `name`, the
-/// files of its modpack (less the ones the owner removed or the share carries itself, see
-/// [`version_files`]), and the mods and config files in the pool. Client-only Modrinth mods are
-/// listed but marked unsupported on servers.
+/// `version` as a server takes it, by [`install_plan`] for [`Side::Server`]: the Modrinth mods
+/// it adds, in a pack index named `name`, the files of its modpack (less the ones the owner
+/// removed or the share carries itself), and the mods and config files in the pool. Client-only
+/// Modrinth mods are listed but marked unsupported on servers. The pack is the server's whole
+/// record of the share, so every config is in it; the server's pack install compares it with
+/// what is on disk and keeps the owner's edits.
 pub async fn server_pack<M: Modrinth>(
     ReadyVersion { share_id, version }: ReadyVersion,
     name: &str,
@@ -148,14 +151,19 @@ pub async fn server_pack<M: Modrinth>(
             .map_err(ServerPackError::Modrinth)?,
         None => Vec::new(),
     };
-    let split = version_files(&version, modpack);
-    let ids = split.modrinth_ids;
+    let plan = install_plan(
+        &version,
+        modpack,
+        config_update(&version.external_files, None),
+        Side::Server,
+    );
+    let ids = &plan.modrinth_ids;
 
     let versions = if ids.is_empty() {
         Vec::new()
     } else {
         modrinth
-            .versions(&ids)
+            .versions(ids)
             .await
             .map_err(ServerPackError::Modrinth)?
     };
@@ -204,18 +212,26 @@ pub async fn server_pack<M: Modrinth>(
 
     let access = version.pool_access(&share_id);
     let mut pool_files = Vec::new();
-    for file in &version.external_files {
-        let Some(path) = server_path(&file.file_type, &file.file_name) else {
-            continue;
-        };
+    for (path, file) in plan.pool_files() {
         let access = access.clone().ok_or(ServerPackError::PoolUnavailable)?;
-        pool_files.push((path, PoolFile::new(file, access)?));
+        pool_files.push((path.to_owned(), PoolFile::new(file, access)?));
     }
+    let modpack_files = plan
+        .steps
+        .into_iter()
+        .filter_map(|step| match step {
+            Step::Place {
+                source: Source::Modpack(file),
+                ..
+            } => Some(file),
+            _ => None,
+        })
+        .collect();
 
     Ok(ServerPack {
         shared_instance_id: share_id,
         version: version.version,
-        modpack_files: split.modpack_files,
+        modpack_files,
         index: Index {
             format_version: Index::FORMAT_VERSION,
             game: Index::GAME.to_owned(),
@@ -227,31 +243,4 @@ pub async fn server_pack<M: Modrinth>(
         },
         files: pool_files,
     })
-}
-
-/// Where a manifest entry goes on a server, or `None` when servers do not take it. A server gets
-/// mods and the config files a version carries; resource packs, shaders, and the rest are for
-/// players.
-pub fn server_path(file_type: &str, file_name: &str) -> Option<String> {
-    match file_type {
-        CONFIG_FILE_TYPE => Some(file_name.to_string()),
-        "mod" => Some(format!("mods/{file_name}")),
-        _ => None,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn servers_take_mods_and_configs_only() {
-        assert_eq!(server_path("mod", "a.jar").as_deref(), Some("mods/a.jar"));
-        assert_eq!(
-            server_path("config", "config/a.json").as_deref(),
-            Some("config/a.json")
-        );
-        assert_eq!(server_path("resourcepack", "a.zip"), None);
-        assert_eq!(server_path("shader", "a.zip"), None);
-    }
 }

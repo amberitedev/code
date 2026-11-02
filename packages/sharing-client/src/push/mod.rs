@@ -5,7 +5,7 @@
 //!
 //! The App pushes an instance's share with [`push`], and a Core pushes a server's share with
 //! the same call. Each caller reads what goes into a version from its own state and turns it
-//! into the content and files with [`build_version`].
+//! into the content and files with [`read_content`], [`removed_files`] and [`build_version`].
 //!
 //! Configs are picked per push, and a version lists every config still shared: one the latest
 //! version carries and this push does not send again is kept while the scope still carries it,
@@ -13,10 +13,12 @@
 //! copy is sent again. Any other is left out of the version and reported with
 //! [`PushEvent::Dropped`].
 
+mod content;
 mod hash;
 mod upload;
 mod version;
 
+pub use content::{ContentRow, ReadContent, read_content, removed_files};
 pub use hash::HashedFile;
 pub use version::{BuildError, VersionInput, build_version};
 

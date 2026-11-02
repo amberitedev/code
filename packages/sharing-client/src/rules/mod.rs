@@ -11,6 +11,13 @@
 //! generated from this file. `cargo test -p sharing-client` fails when that file is stale.
 //! Regenerate it with `cargo test -p sharing-client -- --ignored write_typescript`.
 
+mod listing;
+
+pub use listing::{
+    DiskFolder, FolderEntry, ShareFolder, ShareableFile, ShareableFiles,
+    list_shareable,
+};
+
 use std::path::{Component, Path};
 
 use bedrock::state::ProjectType;
