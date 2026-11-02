@@ -12,8 +12,8 @@
 use std::path::{Path, PathBuf};
 
 use sharing_client::consume::{
-    self, ConsumeError, ModpackFile, ModrinthFile, ModrinthVersion, PoolAccess,
-    PoolFile, ReadyVersion, ServerPackError,
+    self, ConsumeError, ModpackFile, PoolAccess, PoolFile, ReadyVersion,
+    ServerPackError,
 };
 use sharing_client::store::{FetchError, StoreClient};
 
@@ -92,26 +92,8 @@ impl consume::Modrinth for Lookup<'_> {
     async fn versions(
         &self,
         ids: &[String],
-    ) -> Result<Vec<ModrinthVersion>, Error> {
-        let versions = self.0.modrinth.sided_versions(ids).await?;
-        Ok(versions
-            .into_iter()
-            .map(|version| {
-                let file = version.primary().map(|file| ModrinthFile {
-                    url: file.url.clone(),
-                    filename: file.filename.clone(),
-                    sha1: file.hashes.sha1.clone(),
-                    sha512: file.hashes.sha512.clone(),
-                    size: file.size,
-                });
-                ModrinthVersion {
-                    id: version.id,
-                    loaders: version.loaders,
-                    environment: version.environment,
-                    file,
-                }
-            })
-            .collect())
+    ) -> Result<Vec<bedrock::content::SidedVersion>, Error> {
+        Ok(self.0.modrinth.sided_versions(ids).await?)
     }
 
     async fn modpack_files(&self, id: &str) -> Result<Vec<ModpackFile>, Error> {

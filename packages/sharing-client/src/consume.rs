@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::future::Future;
 
 use bedrock::content::{
-    Hashes, Index, IndexFile, VersionEnvironment, loader_dependency, mrpack_env,
+    Hashes, Index, IndexFile, SidedVersion, loader_dependency, mrpack_env,
 };
 use bedrock::net::ErrorBody;
 use bedrock::state::ModLoader;
@@ -61,7 +61,7 @@ pub trait Modrinth {
     fn versions(
         &self,
         ids: &[String],
-    ) -> impl Future<Output = Result<Vec<ModrinthVersion>, Self::Error>> + Send;
+    ) -> impl Future<Output = Result<Vec<SidedVersion>, Self::Error>> + Send;
 
     /// Every file the modpack version `id` puts on a server, by path, with the Modrinth version
     /// of each one Modrinth knows.
@@ -69,26 +69,6 @@ pub trait Modrinth {
         &self,
         id: &str,
     ) -> impl Future<Output = Result<Vec<ModpackFile>, Self::Error>> + Send;
-}
-
-/// A Modrinth version, as far as a server pack needs it.
-#[derive(Debug, Clone)]
-pub struct ModrinthVersion {
-    pub id: String,
-    pub loaders: Vec<String>,
-    /// Where it runs, as v3 says.
-    pub environment: Option<VersionEnvironment>,
-    /// The file it is installed from. A version without one is left out.
-    pub file: Option<ModrinthFile>,
-}
-
-#[derive(Debug, Clone)]
-pub struct ModrinthFile {
-    pub url: String,
-    pub filename: String,
-    pub sha1: String,
-    pub sha512: Option<String>,
-    pub size: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -305,16 +285,17 @@ pub async fn server_pack<M: Modrinth>(
                 )
             })
         })
+        // A version without a file to install from is left out.
         .filter_map(|version| {
-            let file = version.file?;
+            let file = version.primary()?;
             Some(IndexFile {
                 path: format!("mods/{}", file.filename),
                 hashes: Hashes {
-                    sha1: file.sha1,
-                    sha512: file.sha512,
+                    sha1: file.hashes.sha1.clone(),
+                    sha512: file.hashes.sha512.clone(),
                 },
                 env: Some(mrpack_env(version.environment)),
-                downloads: vec![file.url],
+                downloads: vec![file.url.clone()],
                 file_size: file.size,
             })
         })
