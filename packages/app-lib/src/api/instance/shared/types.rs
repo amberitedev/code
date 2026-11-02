@@ -160,6 +160,24 @@ pub struct SharedInstanceInviteCreator {
     pub avatar: Option<String>,
 }
 
+/// One entry of an owner's share history, as the History tab shows it.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SharedInstanceHistoryEntry {
+    pub version: i32,
+    pub created: DateTime<Utc>,
+    #[serde(flatten)]
+    pub details: SharedInstanceVersionDetails,
+}
+
+/// How many versions each share's local history keeps (`None` for all), and how many each
+/// share has now, by share id.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SharedHistorySettings {
+    pub kept: Option<usize>,
+    pub entries: HashMap<String, usize>,
+}
+
 /// One kept version as its version history shows it: what it runs on, how much it holds, and
 /// what it changed over the version before it.
 #[derive(Clone, Debug, Serialize, Deserialize)]

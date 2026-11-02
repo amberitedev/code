@@ -77,11 +77,13 @@ pub use self::screenshots::{
 };
 pub(crate) use self::shared::{
     CONFIG_DIRECTORY, CONFIG_FILE_EXTENSIONS, CONFIG_FILE_TYPE,
-    CONFIG_SYNC_ENABLED, is_shareable_file_path, share_backend,
-    shared_instance_update_data, shared_modpack_files,
+    CONFIG_SYNC_ENABLED, is_shareable_file_path, last_shared_push,
+    set_applied_files, share_backend, shared_instance_update_data,
+    shared_modpack_files,
 };
 pub use self::shared::{
-    SharedInstanceExternalFilePreview, SharedInstanceInstallPreview,
+    SharedHistorySettings, SharedInstanceExternalFilePreview,
+    SharedInstanceHistoryEntry, SharedInstanceInstallPreview,
     SharedInstanceInvite, SharedInstanceInviteCreator,
     SharedInstanceInviteInstallPreview, SharedInstanceInviteLink,
     SharedInstanceJoinType, SharedInstancePublishFile,
@@ -97,9 +99,11 @@ pub use self::shared::{
     get_shared_instance_publish_preview,
     get_shared_instance_publish_support_details,
     get_shared_instance_update_preview, get_shared_instance_users,
-    get_shared_instance_version, install_shared_instance,
+    delete_shared_instance_version, get_shared_history_settings,
+    get_shared_instance_history, install_shared_instance,
     invite_shared_instance_users, publish_shared_instance,
     remove_shared_instance_users, restore_shared_instance_version,
+    set_shared_history_kept,
     revoke_shared_instance_invite, set_shared_clients_session,
     unlink_shared_instance, unpublish_shared_instance, update_shared_instance,
 };

@@ -563,12 +563,12 @@ const showShareTab = computed(() => {
 	)
 })
 
-// Members see the history too, read-only.
+// The history is the owner's pushes from this computer, so members have none.
 const showHistoryTab = computed(
 	() =>
 		currentUserCanUseSharedInstances.value &&
 		!instance.value?.quarantined &&
-		!!instance.value?.shared_instance,
+		instance.value?.shared_instance?.role === 'owner',
 )
 
 const tabs = computed(() => {
@@ -632,13 +632,13 @@ const tabs = computed(() => {
 watch(
 	() => ({
 		quarantined: instance.value?.quarantined ?? false,
-		unshared: !!instance.value && !instance.value.shared_instance,
+		notOwner: !!instance.value && instance.value.shared_instance?.role !== 'owner',
 		routeName: router.currentRoute.value.name,
 	}),
-	({ quarantined, unshared, routeName }) => {
+	({ quarantined, notOwner, routeName }) => {
 		if (
 			(quarantined && (routeName === 'InstanceShare' || routeName === 'InstanceHistory')) ||
-			(unshared && routeName === 'InstanceHistory')
+			(notOwner && routeName === 'InstanceHistory')
 		) {
 			void router.replace(basePath.value)
 		}

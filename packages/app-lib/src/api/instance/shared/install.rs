@@ -6,6 +6,7 @@ use super::publish::*;
 use super::types::*;
 use super::*;
 use crate::self_hosted::pool::{PoolAccess, PoolFile};
+use sharing_client::install::ConfigUpdate;
 
 #[tracing::instrument]
 pub async fn install_shared_instance(
@@ -39,6 +40,7 @@ async fn install_shared_instance_inner(
 ) -> crate::Result<InstallJobSnapshot> {
     let state = State::get().await?;
     let version = get_latest_remote_version(shared_instance_id, &state).await?;
+    let configs = remote_config_update(None, None, &version, &state).await?;
     let data = shared_instance_install_data(
         shared_instance_id,
         manager_id,
@@ -47,6 +49,7 @@ async fn install_shared_instance_inner(
         instance_icon_url,
         name,
         version,
+        configs,
         None,
         &state,
     )
@@ -268,7 +271,7 @@ async fn get_shared_instance_update_preview_inner(
         .is_none_or(|current| current < version.version);
     let diffs = if newer {
         let configs = remote_config_update(
-            &attachment.id,
+            Some(&metadata.instance.id),
             config_base_version(&attachment, &version),
             &version,
             &state,
@@ -403,7 +406,13 @@ pub(crate) async fn shared_instance_update_data(
         get_latest_remote_member_version(instance_id, &attachment, state)
             .await?;
     let fresh_start = backtrack_version_changed(&attachment, &version);
-    let applied_version = config_base_version(&attachment, &version);
+    let configs = remote_config_update(
+        Some(&metadata.instance.id),
+        config_base_version(&attachment, &version),
+        &version,
+        state,
+    )
+    .await?;
     let mut data = shared_instance_install_data(
         &attachment.id,
         attachment.manager_id.clone(),
@@ -412,7 +421,8 @@ pub(crate) async fn shared_instance_update_data(
         None,
         metadata.instance.name,
         version,
-        applied_version,
+        configs,
+        None,
         state,
     )
     .await?;
@@ -626,15 +636,29 @@ pub(super) fn shared_instance_unavailable_message(
     }
 }
 
-/// `file` as a member's install fetches it, through `access`, the version's pool. A version
-/// whose files are in the pool but has no holders cannot be fetched.
+/// `file` as an install fetches it: from `history`, the owner's saved copies, when it has this
+/// exact file, else through `access`, the version's pool. A version whose files are in the pool
+/// but has no holders cannot be fetched.
 fn shared_instance_external_file_data(
     file: ManifestFile,
     access: Option<&std::sync::Arc<PoolAccess>>,
+    history: Option<&[(ManifestFile, std::path::PathBuf)]>,
 ) -> crate::Result<SharedInstanceExternalFileData> {
-    let access = access.ok_or(crate::ErrorKind::PoolFilesUnavailable)?;
-    let pool = PoolFile::new(&file, std::sync::Arc::clone(access))
-        .map_err(|error| crate::ErrorKind::InputError(error.to_string()))?;
+    let local = history
+        .into_iter()
+        .flatten()
+        .find(|(saved, _)| saved == &file)
+        .map(|(_, path)| path.clone());
+    let pool = match local {
+        Some(_) => None,
+        None => {
+            let access =
+                access.ok_or(crate::ErrorKind::PoolFilesUnavailable)?;
+            Some(PoolFile::new(&file, std::sync::Arc::clone(access)).map_err(
+                |error| crate::ErrorKind::InputError(error.to_string()),
+            )?)
+        }
+    };
     Ok(SharedInstanceExternalFileData {
         file_name: file.file_name,
         file_type: file.file_type,
@@ -642,7 +666,8 @@ fn shared_instance_external_file_data(
         url: String::new(),
         file_size: file.file_size,
         sha1: Some(file.sha1),
-        pool: Some(pool),
+        pool,
+        local,
     })
 }
 
@@ -654,7 +679,8 @@ pub(super) async fn shared_instance_install_data(
     instance_icon_url: Option<String>,
     name: String,
     version: ShareVersion,
-    applied_version: Option<i32>,
+    configs: ConfigUpdate,
+    history: Option<&[(ManifestFile, std::path::PathBuf)]>,
     state: &State,
 ) -> crate::Result<SharedInstanceInstallData> {
     check_removed_files(&version)?;
@@ -663,13 +689,6 @@ pub(super) async fn shared_instance_install_data(
             "shared instance version is not ready to install".to_string(),
         ));
     }
-    let configs = remote_config_update(
-        shared_instance_id,
-        applied_version,
-        &version,
-        state,
-    )
-    .await?;
 
     let remote =
         match get_remote_instance_access(shared_instance_id, state).await? {
@@ -725,7 +744,11 @@ pub(super) async fn shared_instance_install_data(
     let external_files = plan
         .pool_files()
         .map(|(_, file)| {
-            shared_instance_external_file_data(file.clone(), access.as_ref())
+            shared_instance_external_file_data(
+                file.clone(),
+                access.as_ref(),
+                history,
+            )
         })
         .collect::<crate::Result<Vec<_>>>()?;
     let removed_config_files = plan
@@ -738,6 +761,7 @@ pub(super) async fn shared_instance_install_data(
         .collect();
     let (loader, loader_version) = instance_loader(&version);
     let content = version.content;
+    let applied_files = version.external_files.clone();
 
     Ok(SharedInstanceInstallData {
         linked_server: remote.linked_server,
@@ -759,6 +783,7 @@ pub(super) async fn shared_instance_install_data(
         loader_version: shared_instance_loader_version(loader_version),
         backtrack_version: version.backtrack_version,
         fresh_start: false,
+        applied_files,
     })
 }
 

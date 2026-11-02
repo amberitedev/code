@@ -22,6 +22,7 @@ pub async fn unpublish_shared_instance(instance_id: &str) -> crate::Result<()> {
     ensure_owner(&attachment)?;
 
     delete_remote_instance(&attachment.id, &state).await?;
+    super::history::forget_share_history(&attachment.id, &state).await?;
     detach_local_shared_instance(instance_id, metadata.link, &state).await?;
     emit_instance(instance_id, InstancePayloadType::Edited).await?;
 
@@ -783,7 +784,16 @@ pub(super) async fn publish_current_content(
     )
     .await;
     match result {
-        Ok(version) => Ok(version),
+        Ok(pushed) => {
+            super::history::record_push(
+                shared_instance_id,
+                &content,
+                &pushed,
+                state,
+            )
+            .await;
+            Ok(pushed.version)
+        }
         Err(push::PushError::Unavailable(reason)) => {
             let reason = unavailable_reason(reason);
             if reason == SharedInstanceUnavailableReason::AccessRevoked

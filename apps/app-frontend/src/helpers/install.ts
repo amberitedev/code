@@ -231,36 +231,63 @@ export async function install_update_shared_instance(instanceId: string) {
 	})
 }
 
-/** A kept version of a share, as its version history shows it. */
-export interface SharedInstanceVersionDetails {
+/** A version the owner pushed from this App, as the instance's History tab shows it. */
+export interface SharedInstanceHistoryEntry {
+	version: number
+	/** When the push finished, as an ISO date. */
+	created: string
 	gameVersion: string
 	loader: string
 	loaderVersion: string
 	/** Projects and files, not counting config files. */
 	contentCount: number
+	/** What it changed over the version before it. */
 	diffs: SharedInstanceUpdateDiff[]
-	/** Paths of the config files it changed, or of all it holds without a base. */
+	/** Paths of the config files it changed. */
 	configFiles: string[]
 }
 
-/** `version` of the instance's share and what it changed over `base`. Without a base, all of it is added. */
-export async function install_get_shared_instance_version(
-	instanceId: string,
-	version: number,
-	base: number | null,
-) {
-	return await invoke<SharedInstanceVersionDetails>(
-		'plugin:install|install_get_shared_instance_version',
-		{ instanceId, version, base },
+/** The owner's history of the instance's share, newest first. Empty for a member. */
+export async function install_get_shared_instance_history(instanceId: string) {
+	return await invoke<SharedInstanceHistoryEntry[]>(
+		'plugin:install|install_get_shared_instance_history',
+		{ instanceId },
 	)
 }
 
-/** Owner only. Puts the instance back to a kept version, leaving it to push. */
+/** Owner only. Puts the instance back to a version from its history, leaving it to push. */
 export async function install_restore_shared_instance_version(instanceId: string, version: number) {
 	return await invoke<InstallJobSnapshot>(
 		'plugin:install|install_restore_shared_instance_version',
 		{ instanceId, version },
 	)
+}
+
+/** Owner only. Deletes a version from the share's history. The latest one stays. */
+export async function install_delete_shared_instance_version(instanceId: string, version: number) {
+	return await invoke<void>('plugin:install|install_delete_shared_instance_version', {
+		instanceId,
+		version,
+	})
+}
+
+/** How many versions each share's history on this computer keeps, and how many each has. */
+export interface SharedHistorySettings {
+	/** Null keeps every version. */
+	kept: number | null
+	/** Versions in each share's history, by share id. */
+	entries: Record<string, number>
+}
+
+export async function install_get_shared_history_settings() {
+	return await invoke<SharedHistorySettings>('plugin:install|install_get_shared_history_settings')
+}
+
+/** Keeps the newest `kept` versions of every share's history (all when null) and deletes the rest. */
+export async function install_set_shared_history_kept(kept: number | null) {
+	return await invoke<SharedHistorySettings>('plugin:install|install_set_shared_history_kept', {
+		kept,
+	})
 }
 
 export async function install_import_instance(

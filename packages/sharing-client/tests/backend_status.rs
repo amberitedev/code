@@ -77,7 +77,7 @@ async fn push_against(
     )
     .await;
     let seen = seen.lock().unwrap().clone();
-    (result, seen)
+    (result.map(|pushed| pushed.version), seen)
 }
 
 #[tokio::test]

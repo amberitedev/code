@@ -2,13 +2,19 @@ import type { SharedInstances } from '@modrinth/api-client'
 import { injectModrinthClient, injectNotificationManager } from '@modrinth/ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 
-import { getErrorMessage } from '@/helpers/install'
+import {
+	getErrorMessage,
+	install_delete_shared_instance_version,
+	install_get_shared_history_settings,
+} from '@/helpers/install'
 
 export const sharedStorageKey = ['shared-storage'] as const
-/** One share's kept versions, as its members see them. */
-export const versionHistoryKey = (shareId: string) => ['shared-version-history', shareId] as const
+/** The owner's history of one instance's share, kept on this computer. */
+export const versionHistoryKey = (instanceId: string) =>
+	['shared-version-history', instanceId] as const
+export const sharedHistorySettingsKey = ['shared-history-settings'] as const
 
-/** The account's shared storage: its allowance, kept versions, and the shares it owns. */
+/** The account's shared storage: its allowance and the shares it owns. */
 export function useSharedStorage() {
 	const client = injectModrinthClient()
 	return useQuery({
@@ -17,14 +23,21 @@ export function useSharedStorage() {
 	})
 }
 
-/** Deletes an older version of one of the account's shares, then reloads its storage and history. */
+/** How many versions each share's local history keeps, and how many each has. */
+export function useSharedHistorySettings() {
+	return useQuery({
+		queryKey: sharedHistorySettingsKey,
+		queryFn: install_get_shared_history_settings,
+	})
+}
+
+/** Deletes an older version from an instance's share history, then reloads the history. */
 export function useDeleteVersion() {
-	const client = injectModrinthClient()
 	const queryClient = useQueryClient()
 	const { addNotification } = injectNotificationManager()
 	return useMutation({
-		mutationFn: ({ shareId, version }: { shareId: string; version: number }) =>
-			client.sharedinstances.instances_v1.deleteVersion(shareId, version),
+		mutationFn: ({ instanceId, version }: { instanceId: string; version: number }) =>
+			install_delete_shared_instance_version(instanceId, version),
 		onError: (cause) => {
 			console.error('Failed to delete version', cause)
 			addNotification({
@@ -33,10 +46,10 @@ export function useDeleteVersion() {
 				text: getErrorMessage(cause),
 			})
 		},
-		onSettled: (_data, _error, { shareId }) =>
+		onSettled: (_data, _error, { instanceId }) =>
 			Promise.all([
-				queryClient.invalidateQueries({ queryKey: sharedStorageKey }),
-				queryClient.invalidateQueries({ queryKey: versionHistoryKey(shareId) }),
+				queryClient.invalidateQueries({ queryKey: sharedHistorySettingsKey }),
+				queryClient.invalidateQueries({ queryKey: versionHistoryKey(instanceId) }),
 			]),
 	})
 }

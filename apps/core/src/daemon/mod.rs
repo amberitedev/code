@@ -153,7 +153,8 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
         db.clone(),
         Arc::clone(&servers),
         Arc::clone(&backups),
-    )?;
+    )
+    .await?;
     let update = Arc::new(Updater::new(
         paths.clone(),
         db.clone(),
