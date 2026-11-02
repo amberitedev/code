@@ -21,15 +21,6 @@ export class SharedInstancesInstancesV1Module extends SharedInstancesModule {
 		)
 	}
 
-	public async getForUser(userId: string): Promise<string[]> {
-		return this.request<string[]>('/instances', {
-			api: 'sharedinstances',
-			version: 1,
-			method: 'GET',
-			params: { user: userId },
-		})
-	}
-
 	public async getUsers(instanceId: string): Promise<SharedInstances.Instances.v1.InstanceUsers> {
 		return this.request<SharedInstances.Instances.v1.InstanceUsers>(
 			`/instances/${encodeURIComponent(instanceId)}/users`,
@@ -66,54 +57,6 @@ export class SharedInstancesInstancesV1Module extends SharedInstancesModule {
 			method: 'POST',
 			body: { core_id: coreId },
 		})
-	}
-
-	public async getLatestVersion(
-		instanceId: string,
-	): Promise<SharedInstances.Instances.v1.InstanceVersion> {
-		return this.request<SharedInstances.Instances.v1.InstanceVersion>(
-			`/instances/${encodeURIComponent(instanceId)}/versions`,
-			{
-				api: 'sharedinstances',
-				version: 1,
-				method: 'GET',
-			},
-		)
-	}
-
-	/** Members. The kept versions, newest first, as the owner's storage lists them. */
-	public async getHistory(instanceId: string): Promise<SharedInstances.Storage.v1.StoredVersion[]> {
-		return this.request<SharedInstances.Storage.v1.StoredVersion[]>(
-			`/instances/${encodeURIComponent(instanceId)}/history`,
-			{
-				api: 'sharedinstances',
-				version: 1,
-				method: 'GET',
-			},
-		)
-	}
-
-	/** Owner only. The current version cannot be deleted: a 409 with code `current_version`. */
-	public async deleteVersion(instanceId: string, version: number): Promise<void> {
-		return this.request(`/instances/${encodeURIComponent(instanceId)}/versions/${version}`, {
-			api: 'sharedinstances',
-			version: 1,
-			method: 'DELETE',
-		})
-	}
-
-	public async getVersion(
-		instanceId: string,
-		version: number,
-	): Promise<SharedInstances.Instances.v1.InstanceVersion> {
-		return this.request<SharedInstances.Instances.v1.InstanceVersion>(
-			`/instances/${encodeURIComponent(instanceId)}/versions/${version}`,
-			{
-				api: 'sharedinstances',
-				version: 1,
-				method: 'GET',
-			},
-		)
 	}
 
 	public async inviteUsers(instanceId: string, userIds: string[]): Promise<{ failed: string[] }> {
