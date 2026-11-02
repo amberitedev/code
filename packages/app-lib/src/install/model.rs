@@ -271,6 +271,9 @@ pub struct SharedInstanceInstallData {
     pub backtrack_version: Option<String>,
     #[serde(default)]
     pub fresh_start: bool,
+    /// The version's whole manifest, which a member keeps once it applied the version.
+    #[serde(default)]
+    pub applied_files: Vec<sharing_client::versions::ManifestFile>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -284,6 +287,10 @@ pub struct SharedInstanceExternalFileData {
     /// Set when the file lives in the shared file pool, which replaces `url`.
     #[serde(default)]
     pub(crate) pool: Option<crate::self_hosted::pool::PoolFile>,
+    /// Set when an owner restores the file from their history: its saved copy, which replaces
+    /// `pool`.
+    #[serde(default)]
+    pub(crate) local: Option<PathBuf>,
 }
 
 /// A config file that left the share, as the member's applied version sent it. The update

@@ -327,26 +327,6 @@ pub(super) async fn get_latest_remote_version_optional_unavailable(
     call_share(state, backend.version(shared_instance_id, None)).await
 }
 
-/// Returns `None` for versions that never became ready.
-pub(super) async fn get_remote_version(
-    shared_instance_id: &str,
-    version: i32,
-    state: &State,
-) -> crate::Result<Option<ShareVersion>> {
-    let backend = share_backend()?;
-    match call_share(state, backend.version(shared_instance_id, Some(version)))
-        .await?
-    {
-        SharedInstanceRemoteResponse::Available(version) => Ok(Some(version)),
-        SharedInstanceRemoteResponse::Unavailable(
-            SharedInstanceUnavailableReason::Deleted,
-        ) => Ok(None),
-        SharedInstanceRemoteResponse::Unavailable(reason) => {
-            Err(shared_instance_unavailable_error(reason))
-        }
-    }
-}
-
 pub(super) async fn add_remote_users(
     shared_instance_id: &str,
     user_ids: Vec<String>,

@@ -1,4 +1,4 @@
-use super::client::{ShareVersion, check_removed_files, get_remote_version};
+use super::client::{ManifestFile, ShareVersion, check_removed_files};
 use super::diff::remote_configuration;
 use super::*;
 use crate::api::pack::install_from::{
@@ -10,34 +10,64 @@ use sharing_client::diff::{CarriedFile, ShareContent};
 use sharing_client::install::{ConfigUpdate, ModpackFile, config_update};
 use std::collections::BTreeMap;
 
-/// What reaching `latest` does to the member's config files (see
-/// `sharing_client::install::config_update`), from the version they applied. Every config is
-/// written on a first install, or when the backend no longer keeps the applied version.
+/// What reaching `latest` does to a member's config files (see
+/// `sharing_client::install::config_update`), from the manifest of the version their instance
+/// applied, which the App keeps beside its attachment. Every config is written on a first install
+/// (no `instance_id`), and when that manifest is not kept.
 pub(super) async fn remote_config_update(
-    shared_instance_id: &str,
+    instance_id: Option<&str>,
     applied_version: Option<i32>,
     latest: &ShareVersion,
     state: &State,
 ) -> crate::Result<ConfigUpdate> {
-    let applied = match applied_version {
-        Some(version) if version >= latest.version => {
+    let applied = match (instance_id, applied_version) {
+        (_, Some(version)) if version >= latest.version => {
             return Ok(ConfigUpdate::default());
         }
-        Some(version) => {
-            get_remote_version(shared_instance_id, version, state).await?
+        (Some(instance_id), Some(version)) => {
+            applied_files(instance_id, version, &state.pool).await?
         }
-        None => None,
+        _ => None,
     };
-    // A changed `backtrack_version` starts the member over, so every config is written.
-    let applied = applied.filter(|applied| {
-        applied.backtrack_version == latest.backtrack_version
-    });
-    Ok(config_update(
-        &latest.external_files,
-        applied
-            .as_ref()
-            .map(|version| version.external_files.as_slice()),
-    ))
+    Ok(config_update(&latest.external_files, applied.as_deref()))
+}
+
+/// The manifest files of `version` of the share, as the instance applied it, while the App keeps
+/// them.
+pub(super) async fn applied_files(
+    instance_id: &str,
+    version: i32,
+    pool: &sqlx::SqlitePool,
+) -> crate::Result<Option<Vec<ManifestFile>>> {
+    let files: Option<String> = sqlx::query_scalar(
+        "SELECT files FROM shared_instance_applied_files WHERE instance_id = ? AND version = ?",
+    )
+    .bind(instance_id)
+    .bind(version)
+    .fetch_optional(pool)
+    .await?;
+    files
+        .map(|files| serde_json::from_str(&files))
+        .transpose()
+        .map_err(Into::into)
+}
+
+/// Keeps the manifest files of `version`, which the instance just applied, for its next update.
+pub(crate) async fn set_applied_files(
+    instance_id: &str,
+    version: i32,
+    files: &[ManifestFile],
+    pool: &sqlx::SqlitePool,
+) -> crate::Result<()> {
+    sqlx::query(
+        "INSERT INTO shared_instance_applied_files (instance_id, version, files) VALUES (?, ?, ?)          ON CONFLICT (instance_id) DO UPDATE SET version = excluded.version, files = excluded.files",
+    )
+    .bind(instance_id)
+    .bind(version)
+    .bind(serde_json::to_string(files)?)
+    .execute(pool)
+    .await?;
+    Ok(())
 }
 
 /// Reads the client content from the cached pack archive, including unresolved overrides.

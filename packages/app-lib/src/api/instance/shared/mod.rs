@@ -93,7 +93,8 @@ mod server;
 mod types;
 
 pub(crate) use self::client::share_backend;
-pub(crate) use self::content::shared_modpack_files;
+pub(crate) use self::content::{set_applied_files, shared_modpack_files};
+pub(crate) use self::history::last_shared_push;
 pub use self::icons::cache_shared_instance_server_icon;
 pub(crate) use self::install::{
     check_shared_instance_availability_before_launch,
@@ -102,7 +103,9 @@ pub(crate) use self::install::{
 pub(crate) use self::publish::sync_shared_instance_icon;
 
 pub use self::history::{
-    get_shared_instance_version, restore_shared_instance_version,
+    delete_shared_instance_version, get_shared_history_settings,
+    get_shared_instance_history, restore_shared_instance_version,
+    set_shared_history_kept,
 };
 pub use self::install::{
     accept_shared_instance_invite_for_install,
@@ -124,7 +127,8 @@ pub use self::publish::{
 pub use self::report::get_shared_instance_publish_support_details;
 pub use self::server::ensure_shared_instance;
 pub use self::types::{
-    SharedInstanceExternalFilePreview, SharedInstanceInstallPreview,
+    SharedHistorySettings, SharedInstanceExternalFilePreview,
+    SharedInstanceHistoryEntry, SharedInstanceInstallPreview,
     SharedInstanceInvite, SharedInstanceInviteCreator,
     SharedInstanceInviteInstallPreview, SharedInstanceInviteLink,
     SharedInstanceJoinType, SharedInstancePublishFile,

@@ -8,7 +8,8 @@ use theseus::install::{
 };
 use theseus::instance::{
     SharedInstanceInstallPreview, SharedInstanceInviteInstallPreview,
-    SharedInstanceUpdatePreview, SharedInstanceVersionDetails,
+    SharedHistorySettings, SharedInstanceHistoryEntry,
+    SharedInstanceUpdatePreview,
 };
 use theseus::pack::import::ImportLauncherType;
 use theseus::pack::install_from::CreatePackLocation;
@@ -27,8 +28,11 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
             install_get_shared_instance_update_preview,
             install_shared_instance,
             install_update_shared_instance,
-            install_get_shared_instance_version,
+            install_get_shared_instance_history,
             install_restore_shared_instance_version,
+            install_delete_shared_instance_version,
+            install_get_shared_history_settings,
+            install_set_shared_history_kept,
             install_bulk_update_content,
             install_import_instance,
             install_duplicate_instance,
@@ -205,17 +209,10 @@ pub async fn install_update_shared_instance(
 }
 
 #[tauri::command]
-pub async fn install_get_shared_instance_version(
+pub async fn install_get_shared_instance_history(
     instance_id: String,
-    version: i32,
-    base: Option<i32>,
-) -> Result<SharedInstanceVersionDetails> {
-    Ok(theseus::instance::get_shared_instance_version(
-        &instance_id,
-        version,
-        base,
-    )
-    .await?)
+) -> Result<Vec<SharedInstanceHistoryEntry>> {
+    Ok(theseus::instance::get_shared_instance_history(&instance_id).await?)
 }
 
 #[tauri::command]
@@ -228,6 +225,31 @@ pub async fn install_restore_shared_instance_version(
         version,
     )
     .await?)
+}
+
+#[tauri::command]
+pub async fn install_delete_shared_instance_version(
+    instance_id: String,
+    version: i32,
+) -> Result<()> {
+    Ok(theseus::instance::delete_shared_instance_version(
+        &instance_id,
+        version,
+    )
+    .await?)
+}
+
+#[tauri::command]
+pub async fn install_get_shared_history_settings()
+-> Result<SharedHistorySettings> {
+    Ok(theseus::instance::get_shared_history_settings().await?)
+}
+
+#[tauri::command]
+pub async fn install_set_shared_history_kept(
+    kept: Option<usize>,
+) -> Result<SharedHistorySettings> {
+    Ok(theseus::instance::set_shared_history_kept(kept).await?)
 }
 
 #[tauri::command]
