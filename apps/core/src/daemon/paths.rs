@@ -26,7 +26,7 @@ pub struct Folder {
 
 /// Every top-level folder. `runs/` and `servers/` hold one folder per server, which inherits the
 /// access of its parent.
-pub const FOLDERS: [Folder; 10] = [
+pub const FOLDERS: [Folder; 11] = [
     Folder {
         name: "db",
         servers: ServersAccess::None,
@@ -56,6 +56,11 @@ pub const FOLDERS: [Folder; 10] = [
         name: "store",
         servers: ServersAccess::None,
         holds: "encrypted shared files of the pool. See `store`",
+    },
+    Folder {
+        name: "content-store",
+        servers: ServersAccess::None,
+        holds: "files of the shares' history. See `state::servers::adapters::history`",
     },
     Folder {
         name: "logs",
@@ -235,6 +240,12 @@ impl Paths {
         self.root.join("store")
     }
 
+    /// The content store clone (`bedrock::upstream::store`), which keeps the files of the
+    /// shares' history.
+    pub fn content_store(&self) -> PathBuf {
+        self.root.join("content-store")
+    }
+
     /// One server's folder: the only place `copal-servers` can write.
     pub fn server(&self, server_id: &str) -> PathBuf {
         self.root.join("servers").join(server_id)
@@ -282,6 +293,7 @@ mod tests {
             paths.staging("a"),
             paths.logs(),
             paths.store(),
+            paths.content_store(),
             paths.server("a"),
             paths.meta(),
             paths.java(),

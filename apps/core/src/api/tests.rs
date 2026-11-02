@@ -107,6 +107,7 @@ async fn core() -> Core {
         Arc::clone(&servers),
         Arc::clone(&backups),
     )
+    .await
     .unwrap();
     let storage = Arc::new(crate::storage::Storage::new(
         db.clone(),

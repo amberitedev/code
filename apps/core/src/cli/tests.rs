@@ -150,6 +150,7 @@ async fn core() -> (tempfile::TempDir, Arc<AppState>, Client) {
         Arc::clone(&servers),
         Arc::clone(&backups),
     )
+    .await
     .unwrap();
     let state = Arc::new(AppState {
         servers,

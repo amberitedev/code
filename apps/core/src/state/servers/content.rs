@@ -96,6 +96,9 @@ pub struct Content {
     pub modrinth: modrinth::Modrinth,
     /// Copal's one client for Cores' stores, for every push and every share fetch.
     pub store: sharing_client::pool::StoreClient,
+    /// The content store clone, which keeps the files of the shares' history
+    /// (`adapters::history`).
+    pub content_store: bedrock::upstream::store::ContentStore,
     /// What addon jars say about themselves, for the content list.
     pub manifests: bedrock::upstream::jar::Cache,
     /// Updates back the world up first.
@@ -114,13 +117,23 @@ pub struct Busy {
 
 impl Content {
     /// Content for every server; also starts the check for newer Java patches.
-    pub fn open(
+    pub async fn open(
         paths: Paths,
         db: SqlitePool,
         servers: Arc<Servers>,
         backups: Arc<Backups>,
     ) -> color_eyre::Result<Arc<Self>> {
         let http = download::client()?;
+        let store_dir = paths.content_store();
+        let content_store = bedrock::upstream::store::open(
+            &bedrock::upstream::store::DirectoryInfo {
+                settings_dir: store_dir.clone(),
+                config_dir: store_dir,
+            },
+            db.clone(),
+        )
+        .await
+        .map_err(|error| color_eyre::eyre::eyre!("{error:#}"))?;
         let content = Arc::new(Self {
             modrinth: modrinth::Modrinth::new(http.clone()),
             manifests: bedrock::upstream::jar::Cache::default(),
@@ -128,6 +141,7 @@ impl Content {
                 "copal/",
                 env!("CARGO_PKG_VERSION")
             )),
+            content_store,
             downloads: hosts::client()?,
             http,
             paths,

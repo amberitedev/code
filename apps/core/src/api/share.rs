@@ -29,10 +29,11 @@ use sharing_client::{
         CarriedFile, DiffError, DiffOptions, Disabled, ShareContent,
         SharedInstanceUpdateDiff, VersionName, has_changes, share_diff,
     },
+    history,
     install::ModpackFile,
     push,
     rules::{CONFIG_FILE_TYPE, SCAN_HEAD_SIZE, ShareScope},
-    versions::{ShareVersion, VersionContent},
+    versions::{ManifestFile, VersionContent},
 };
 use ts_rs::TS;
 
@@ -50,6 +51,7 @@ use crate::{
         adapters::network::modrinth::ModrinthError,
         adapters::{
             filesystem::folder::{self, Folder},
+            history::History,
             sqlite::{content_rows, server_rows},
         },
         commands::drop_own_share::drop_own_share,
@@ -393,7 +395,7 @@ pub async fn share(
             .await
             .map_err(std::io::Error::other)??
         };
-        push::push(
+        let pushed = push::push(
             &backend,
             &state.content.store,
             &share_id,
@@ -412,7 +414,10 @@ pub async fn share(
                 }
             },
         )
-        .await
+        .await?;
+        // Recorded while the staged copies are still there.
+        record_push(&state, &snapshot, &share_id, &pushed).await;
+        Ok::<_, ApiError>(pushed.version)
     }
     .await;
     let _ = tokio::fs::remove_dir_all(&staging).await;
@@ -610,7 +615,9 @@ pub async fn diff(
         .await?
         .ok_or_else(not_shared)?;
     let snapshot = snapshot(&state, &id).await?;
-    let (before, after) = share_contents(&snapshot, &latest).await?;
+    let (before, after) =
+        share_contents(&snapshot, &latest.content, &latest.external_files)
+            .await?;
     let diffs =
         share_diff(&before, &after, &push_options(), &Names(&state.content))
             .await
@@ -640,21 +647,25 @@ fn push_options() -> DiffOptions {
     }
 }
 
-/// Whether the server has changes its share's latest version does not have, so a push would
-/// change something (upstream's `shared_instance_needs_update`). False for a server that is not
-/// shared, and when the backend cannot be read now.
+/// Whether the server has changes its last push does not have, so a push would change something
+/// (upstream's `shared_instance_needs_update`). Compared with the newest entry of the share's
+/// history on this Core, so it asks no backend. False for a server that is not shared, and when
+/// this Core has no push of it.
 pub async fn needs_update(state: &AppState, id: &str) -> bool {
     let check = async {
         let Some(share_id) = server_rows::share_id(&state.db, id).await? else {
             return Ok(false);
         };
-        let Some(latest) =
-            backend(state).await?.latest_ready(&share_id).await?
+        let Some(last) = history::latest(&history_store(state), &share_id)
+            .await
+            .map_err(crate::state::servers::Error::from)?
         else {
             return Ok(false);
         };
         let snapshot = snapshot(state, id).await?;
-        let (before, after) = share_contents(&snapshot, &latest).await?;
+        let files = last.manifest().cloned().collect::<Vec<_>>();
+        let (before, after) =
+            share_contents(&snapshot, &last.content, &files).await?;
         Ok::<_, ApiError>(has_changes(
             &before,
             &after,
@@ -662,44 +673,108 @@ pub async fn needs_update(state: &AppState, id: &str) -> bool {
         ))
     };
     check.await.unwrap_or_else(|error| {
-        tracing::debug!(server = %id, error = %error.description, "could not compare the server to its share");
+        tracing::debug!(server = %id, error = %error.description, "could not compare the server to its last push");
         false
     })
 }
 
-/// The latest version, and what a push of the server sends now, as the share diff reads them.
-/// A version on the server's own modpack is split by the files that modpack placed.
-async fn share_contents(
+/// The share history this Core keeps.
+fn history_store(state: &AppState) -> History<'_> {
+    History {
+        store: &state.content.content_store,
+        db: &state.db,
+    }
+}
+
+/// Records `pushed` in the share's history, naming what it changed over the version before it.
+/// The push already succeeded, so a failure is logged and the version is only missing from the
+/// history.
+async fn record_push(
+    state: &AppState,
     snapshot: &Snapshot,
-    latest: &ShareVersion,
-) -> Result<(ShareContent, ShareContent), ApiError> {
-    let configuration = |content: &VersionContent| ContentSetConfiguration {
+    share_id: &str,
+    pushed: &push::Pushed,
+) {
+    let diffs = async {
+        let before = match &pushed.previous {
+            Some(previous) => version_content(
+                snapshot,
+                &previous.content,
+                &previous.external_files,
+            )?,
+            None => ShareContent::empty(configuration(&snapshot.content)),
+        };
+        let after = version_content(
+            snapshot,
+            &snapshot.content,
+            &pushed.external_files,
+        )?;
+        share_diff(&before, &after, &push_options(), &Names(&state.content))
+            .await
+            .map_err(|error| {
+                ApiError::new(ErrorCode::Internal, error.to_string())
+            })
+    };
+    let diffs = diffs.await.unwrap_or_else(|error| {
+        tracing::warn!(share = %share_id, error = %error.description, "could not name what a push changed");
+        Vec::new()
+    });
+    if let Err(error) = history::record(
+        &history_store(state),
+        share_id,
+        &snapshot.content,
+        pushed,
+        diffs,
+        Some(history::DEFAULT_KEPT),
+    )
+    .await
+    {
+        tracing::warn!(share = %share_id, %error, "could not record a push in the share's history");
+    }
+}
+
+fn configuration(content: &VersionContent) -> ContentSetConfiguration {
+    ContentSetConfiguration {
         modpack_version_id: content.modpack_id.clone(),
         game_version: content.game_version.clone(),
         loader: LoaderReference {
             name: content.loader.clone(),
             version: Some(content.loader_version.clone()),
         },
+    }
+}
+
+/// A version, `content` with `files`, as the share diff reads it. A version on the server's own
+/// modpack is split by the files that modpack placed.
+fn version_content(
+    snapshot: &Snapshot,
+    content: &VersionContent,
+    files: &[ManifestFile],
+) -> Result<ShareContent, ApiError> {
+    let pack = if content.modpack_id.is_some()
+        && content.modpack_id == snapshot.content.modpack_id
+    {
+        snapshot.pack_files.clone()
+    } else {
+        Vec::new()
     };
-    let pack = |content: &VersionContent| {
-        if content.modpack_id.is_some()
-            && content.modpack_id == snapshot.content.modpack_id
-        {
-            snapshot.pack_files.clone()
-        } else {
-            Vec::new()
-        }
-    };
-    let invalid = |error: modrinth_content_management::Error| {
-        ApiError::new(ErrorCode::Internal, error.to_string())
-    };
-    let before = ShareContent::of(
-        &latest.content,
-        latest.external_files.iter().map(CarriedFile::from),
-        pack(&latest.content),
-        configuration(&latest.content),
+    ShareContent::of(
+        content,
+        files.iter().map(CarriedFile::from),
+        pack,
+        configuration(content),
     )
-    .map_err(invalid)?;
+    .map_err(|error| ApiError::new(ErrorCode::Internal, error.to_string()))
+}
+
+/// A version (`content` with `files`), and what a push of the server sends now, as the share
+/// diff reads them.
+async fn share_contents(
+    snapshot: &Snapshot,
+    content: &VersionContent,
+    files: &[ManifestFile],
+) -> Result<(ShareContent, ShareContent), ApiError> {
+    let before = version_content(snapshot, content, files)?;
     // A push sends the server's addons as they are on disk, and every config still shared as
     // the server has it, so one it no longer has leaves the share.
     let local = snapshot
@@ -717,13 +792,18 @@ async fn share_contents(
             )),
             Carried::Modrinth { .. } => None,
         })
-        .chain(latest.configs().map(|file| {
-            (
-                CONFIG_FILE_TYPE.to_owned(),
-                file.file_name.clone(),
-                file.file_name.clone(),
-            )
-        }))
+        .chain(
+            files
+                .iter()
+                .filter(|file| file.file_type == CONFIG_FILE_TYPE)
+                .map(|file| {
+                    (
+                        CONFIG_FILE_TYPE.to_owned(),
+                        file.file_name.clone(),
+                        file.file_name.clone(),
+                    )
+                }),
+        )
         .collect::<Vec<_>>();
     let folder = Arc::clone(&snapshot.folder);
     let local = tokio::task::spawn_blocking(move || {
@@ -749,7 +829,7 @@ async fn share_contents(
         snapshot.pack_files.clone(),
         configuration(&snapshot.content),
     )
-    .map_err(invalid)?;
+    .map_err(|error| ApiError::new(ErrorCode::Internal, error.to_string()))?;
     Ok((before, after))
 }
 

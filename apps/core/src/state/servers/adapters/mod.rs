@@ -2,5 +2,6 @@
 //! the network services content comes from.
 
 pub mod filesystem;
+pub mod history;
 pub mod network;
 pub mod sqlite;

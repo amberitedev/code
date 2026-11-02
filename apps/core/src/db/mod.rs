@@ -34,9 +34,22 @@ pub async fn memory() -> SqlitePool {
     pool
 }
 
+/// Copal's migrations, then the tables of the content store clone, which bedrock owns
+/// (`bedrock::upstream::store::SCHEMA`), once.
 async fn migrate(pool: &SqlitePool) -> sqlx::Result<()> {
     sqlx::migrate!("./migrations").run(pool).await?;
-    Ok(())
+    let mut tx = pool.begin().await?;
+    let has_store: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'store_blobs')",
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+    if !has_store {
+        sqlx::raw_sql(bedrock::upstream::store::SCHEMA)
+            .execute(&mut *tx)
+            .await?;
+    }
+    tx.commit().await
 }
 
 /// This Core's id, made on first start. It is the audience of every ticket the backend signs for
@@ -73,11 +86,13 @@ mod tests {
             [
                 "access",
                 "activity",
+                "app_metadata",
                 "backend_owed",
                 "backup_operations",
                 "backup_schedules",
                 "backups",
                 "core",
+                "instance_files",
                 "jvm_flags",
                 "pairing",
                 "pending_packs",
@@ -90,6 +105,11 @@ mod tests {
                 "server_links",
                 "servers",
                 "sessions",
+                "share_history",
+                "store_blobs",
+                "store_instance_files",
+                "store_operations",
+                "store_retained_refs",
                 "used_tickets",
                 "users",
             ]

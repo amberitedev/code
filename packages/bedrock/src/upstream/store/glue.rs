@@ -108,6 +108,15 @@ pub async fn store_bytes(
     store.store_bytes(bytes).await.map(Stored)
 }
 
+/// Put a copy of the file at `path` in the store. Unretained content is removed by the next
+/// cleanup, so [`retain`] what must be kept.
+pub async fn store_file(
+    store: &ContentStore,
+    path: &Path,
+) -> crate::Result<Stored> {
+    store.store_file(path).await.map(Stored)
+}
+
 /// The healthy blob with `sha512`, if the store has it.
 pub async fn lookup(
     store: &ContentStore,
