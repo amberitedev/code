@@ -636,27 +636,36 @@ pub(super) fn shared_instance_unavailable_message(
     }
 }
 
-/// `file` as an install fetches it: from `history`, the owner's saved copies, when it has this
-/// exact file, else through `access`, the version's pool. A version whose files are in the pool
-/// but has no holders cannot be fetched.
+/// `file` as an install fetches it: from `history`, the owner's saved copies, when restoring a
+/// version of their history, else through `access`, the version's pool. A restore never reaches
+/// the pool. A version whose files are in the pool but has no holders cannot be fetched.
 fn shared_instance_external_file_data(
     file: ManifestFile,
     access: Option<&std::sync::Arc<PoolAccess>>,
     history: Option<&[(ManifestFile, std::path::PathBuf)]>,
 ) -> crate::Result<SharedInstanceExternalFileData> {
-    let local = history
-        .into_iter()
-        .flatten()
-        .find(|(saved, _)| saved == &file)
-        .map(|(_, path)| path.clone());
-    let pool = match local {
-        Some(_) => None,
+    let (local, pool) = match history {
+        Some(history) => {
+            let path = history
+                .iter()
+                .find(|(saved, _)| saved == &file)
+                .map(|(_, path)| path.clone())
+                .ok_or_else(|| {
+                    crate::ErrorKind::InputError(format!(
+                        "the saved copy of {} is gone",
+                        file.file_name
+                    ))
+                })?;
+            (Some(path), None)
+        }
         None => {
             let access =
                 access.ok_or(crate::ErrorKind::PoolFilesUnavailable)?;
-            Some(PoolFile::new(&file, std::sync::Arc::clone(access)).map_err(
-                |error| crate::ErrorKind::InputError(error.to_string()),
-            )?)
+            let pool = PoolFile::new(&file, std::sync::Arc::clone(access))
+                .map_err(|error| {
+                    crate::ErrorKind::InputError(error.to_string())
+                })?;
+            (None, Some(pool))
         }
     };
     Ok(SharedInstanceExternalFileData {
