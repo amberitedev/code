@@ -59,6 +59,59 @@ export class ArchonContentV1Module extends AbstractModule {
 		)
 	}
 
+	/** Core only. Owner only. The versions of the server's own share its Core pushed, newest first. */
+	public async getShareHistory(
+		serverId: string,
+		worldId: string,
+	): Promise<Archon.Content.v1.SharedInstanceHistoryEntry[]> {
+		return this.client.request(
+			`/servers/${encodeURIComponent(serverId)}/worlds/${encodeURIComponent(worldId)}/content/share/history`,
+			{
+				api: 'archon',
+				version: 1,
+				method: 'GET',
+			},
+		)
+	}
+
+	/**
+	 * Core only. Owner only. Puts the server back to a version from its share's history, leaving it
+	 * to push. A version on another loader, Minecraft version or modpack installs that first, in the
+	 * background, and needs the server stopped.
+	 */
+	public async restoreShareVersion(
+		serverId: string,
+		worldId: string,
+		version: number,
+	): Promise<void> {
+		await this.client.request<void>(
+			`/servers/${encodeURIComponent(serverId)}/worlds/${encodeURIComponent(worldId)}/content/share/history/${version}/restore`,
+			{
+				api: 'archon',
+				version: 1,
+				method: 'POST',
+				retry: false,
+			},
+		)
+	}
+
+	/** Core only. Owner only. Deletes a version from the share's history. The latest one stays. */
+	public async deleteShareVersion(
+		serverId: string,
+		worldId: string,
+		version: number,
+	): Promise<void> {
+		await this.client.request<void>(
+			`/servers/${encodeURIComponent(serverId)}/worlds/${encodeURIComponent(worldId)}/content/share/history/${version}`,
+			{
+				api: 'archon',
+				version: 1,
+				method: 'DELETE',
+				retry: false,
+			},
+		)
+	}
+
 	public async unshare(serverId: string, worldId: string): Promise<void> {
 		return this.client.request(
 			`/servers/${encodeURIComponent(serverId)}/worlds/${encodeURIComponent(worldId)}/content/share`,
