@@ -6,6 +6,7 @@
 			:reload-page="() => router.go(0)"
 			:resolve-viewer="resolveViewer"
 			:show-copy-id-action="appSettings.devMode"
+			:additional-tabs="historyTabs"
 			:force-server-play-migration="appSettings.getFeatureFlag('debug_server_play_migration')"
 			:site-url="config.accountSiteUrl"
 			:auth-user="authUser"
@@ -52,7 +53,7 @@
 
 <script setup lang="ts">
 import type { Archon, Labrinth } from '@modrinth/api-client'
-import { ServerStackIcon } from '@modrinth/assets'
+import { HistoryIcon, ServerStackIcon } from '@modrinth/assets'
 import {
 	commonMessages,
 	injectAuth,
@@ -67,6 +68,7 @@ import { useRoute, useRouter } from 'vue-router'
 
 import { useAppSettings } from '@/composables/use-app-settings.ts'
 import { config } from '@/config'
+import { useServerHistory } from '@/features/share-history/use-server-history'
 import { get_user } from '@/helpers/cache'
 import { get as getCreds } from '@/helpers/mr_auth'
 import { provideBreadcrumbParent, useBreadcrumb, useRootBreadcrumb } from '@/shared/breadcrumbs'
@@ -97,6 +99,20 @@ const serverId = computed(() => {
 	const rawId = serverRoute.value.params.id
 	return Array.isArray(rawId) ? (rawId[0] ?? '') : (rawId ?? '')
 })
+
+// History lives with the share's source, and only its owner sees it (`useServerHistory`).
+const historySource = useServerHistory(serverId)
+const historyTabs = computed(() =>
+	historySource.value
+		? [
+				{
+					label: 'History',
+					href: `/hosting/manage/${serverId.value}/history`,
+					icon: HistoryIcon,
+				},
+			]
+		: [],
+)
 
 function getCachedServerName(id: string): string | undefined {
 	return queryClient
