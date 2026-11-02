@@ -20,18 +20,14 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::{
-    api::{
-        content::Installing,
-        events::{
-            GameVersionChange, InstallProgressItem, InstallProgressKey,
-            InstallationResult, WsEvent,
-        },
-    },
+    // The websocket's events, which Core sends progress and results on.
+    api::events::{InstallProgressItem, InstallationResult, WsEvent},
     backups::Backups,
     daemon::paths::Paths,
     installs::{self, download},
     servers::{Hold, ServerError, Servers},
     state::servers::{
+        GameVersionChange, InstallProgressKey, Installing,
         adapters::{
             filesystem::{archive, folder},
             network::{hosts, modrinth},

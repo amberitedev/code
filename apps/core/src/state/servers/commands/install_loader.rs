@@ -3,9 +3,9 @@
 use tracing::info;
 
 use crate::{
-    api::events::{ContentPlatform, InstallProgressKey},
     installs::{self, ModLoader},
     servers::Hold,
+    state::servers::model::{ContentPlatform, InstallProgressKey},
     state::servers::{Content, Error, Progress, adapters::sqlite::server_rows},
 };
 

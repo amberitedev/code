@@ -16,11 +16,9 @@ use std::{
 
 use futures::{StreamExt, TryStreamExt};
 
-use crate::api::events::GameVersionChange;
 use tracing::{info, warn};
 
 use crate::{
-    api::{events::InstallProgressKey, properties::PropertiesFields},
     installs::{
         self, ModLoader,
         download::{self, Hash},
@@ -29,7 +27,8 @@ use crate::{
     servers::Hold,
     state::servers::{
         Content, ContentSet, ContentSetStatus, ContentSourceKind, Error,
-        InstanceLink, Pack, Pending, Progress, SharedInstanceLink, TrackedFile,
+        GameVersionChange, InstallProgressKey, InstanceLink, Pack, Pending,
+        Progress, PropertiesFields, SharedInstanceLink, TrackedFile,
         adapters::filesystem::content_files::DISABLED,
         adapters::{
             filesystem::{
@@ -796,7 +795,7 @@ pub fn write_properties(
     fields: &PropertiesFields,
 ) -> std::io::Result<()> {
     let mut changes: BTreeMap<String, Option<String>> =
-        crate::api::properties::known_pairs(&fields.known)
+        crate::state::servers::known_pairs(&fields.known)
             .into_iter()
             .map(|(key, value)| (key, Some(value)))
             .collect();

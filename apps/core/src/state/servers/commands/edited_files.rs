@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use super::install_pack::{place_one, read_pack};
 use crate::{
-    api::content::{EditedFile, PendingChange},
     installs::shared::SharedDirs,
+    state::servers::model::{EditedFile, PendingChange},
     state::servers::{
         Content, ContentSourceKind, Error, Pending, TrackedFile,
         adapters::{filesystem::folder::Folder, sqlite::content_rows},

@@ -8,13 +8,11 @@ use super::check_content_updates::{
     check_content_updates, check_modpack_update,
 };
 use crate::{
-    api::content::{
-        Addon, AddonStatus, AddonVersion, Installing, LinkedPackState,
-        ModpackFields, ModpackSpec,
-    },
     installs::ModLoader,
     state::servers::{
-        Content, Error, Pack, SkippedFile, TrackedFile,
+        Addon, AddonStatus, AddonVersion, Content, Error, Installing,
+        LinkedPackState, ModpackFields, ModpackSpec, Pack, SkippedFile,
+        TrackedFile,
         adapters::{
             filesystem::{
                 content_files::{DISABLED, Listed},
