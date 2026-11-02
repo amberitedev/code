@@ -4,7 +4,8 @@
 //! never the pool.
 //!
 //! As in the App, what the share carried is replaced and what the owner added since the last
-//! push stays (`domain::restore`). Every config of the version is written back, and one the last
+//! push stays (`sharing_client::history::restore`), and how the server's addons change into the
+//! version's is `sharing_client::install::content_changes`, as in the App. Every config of the version is written back, and one the last
 //! push shared that the version does not is removed while it is still as pushed. Addons and
 //! configs change the way the addon routes change them, whether the server runs or not. A version
 //! on another loader, Minecraft version or modpack installs that first, which needs the server
@@ -14,11 +15,18 @@
 //! but not whether the owner deleted one or only turned it off for players, so a restore cannot
 //! tell which to delete.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use sharing_client::{
-    history::{self, RestorePlan},
-    versions::VersionContent,
+    history::{
+        self, HistoryEntry, RestorePlan,
+        restore::{Carried, Origin, replaced},
+    },
+    install::{ContentProject, CurrentFile, DesiredFile, content_changes},
+    versions::{ManifestFile, VersionContent},
 };
 
 use super::{
@@ -41,10 +49,7 @@ use crate::{
             },
             sqlite::{content_rows, server_rows},
         },
-        domain::{
-            restore::{Present, Shared, addon_changes},
-            server_share::{file_type, kind},
-        },
+        domain::server_share::{file_type, kind},
     },
 };
 
@@ -232,62 +237,147 @@ async fn apply(
         .map(|row| (row.relative_path.clone(), row))
         .collect::<HashMap<_, _>>();
 
-    // The server's addons outside its pack, hashed off the async workers.
-    let present = {
+    // The server's addons, hashed off the async workers.
+    let listed = {
         let folder = Arc::clone(&folder);
         let sha1s = Arc::clone(&content.sha1s);
-        let rows = rows.clone();
         tokio::task::spawn_blocking(move || {
-            let mut present = Vec::new();
-            for item in content_files::scan(&folder, Some(target.loader)) {
-                let Some(file_type) = file_type(item.kind) else {
-                    continue;
-                };
-                let row = rows.get(&item.path);
-                if row.is_some_and(TrackedFile::by_pack) {
-                    continue;
-                }
-                let on_disk = if item.disabled {
-                    format!("{}{DISABLED}", item.path)
-                } else {
-                    item.path.clone()
-                };
-                present.push(Present {
-                    file_type,
-                    file_name: item.filename,
-                    disabled: item.disabled,
-                    project_id: row.and_then(|row| row.project_id.clone()),
-                    version_id: row
-                        .filter(|row| row.project_id.is_some())
-                        .and_then(|row| row.version_id.clone()),
-                    sha1: folder.sha1_cached(&on_disk, &sha1s)?,
-                });
-            }
-            Ok::<_, std::io::Error>(present)
+            content_files::scan(&folder, Some(target.loader))
+                .into_iter()
+                .filter(|item| file_type(item.kind).is_some())
+                .map(|item| {
+                    let on_disk = if item.disabled {
+                        format!("{}{DISABLED}", item.path)
+                    } else {
+                        item.path.clone()
+                    };
+                    let sha1 = folder.sha1_cached(&on_disk, &sha1s)?;
+                    Ok((item, sha1))
+                })
+                .collect::<std::io::Result<Vec<_>>>()
         })
         .await
         .map_err(std::io::Error::other)??
     };
-    let mut shared = Shared::of(plan.last.as_ref(), &plan.entry);
-    let ids = shared.version_ids.iter().cloned().collect::<Vec<_>>();
-    shared.project_ids = content
-        .modrinth
-        .versions_by_id(&ids)
-        .await?
-        .into_iter()
-        .map(|version| version.project_id)
-        .collect();
-    let changes = addon_changes(present, &shared, &plan.entry);
 
-    for addon in &changes.remove {
-        if let Some(kind) = kind(addon.file_type) {
-            remove_project(content, id, kind, &addon.file_name).await?;
+    // What the restore may replace, and how the server changes into the version, are
+    // sharing-client's, as in the App. Reading the server into them stays here.
+    let entries = || plan.last.iter().chain([&plan.entry]);
+    let mut carried = Carried::new(
+        entries().flat_map(|entry| entry.content.modrinth_ids.iter().cloned()),
+        entries().flat_map(carried_files).map(|(key, _)| key),
+    );
+    let ids = carried.version_ids.iter().cloned().collect::<Vec<_>>();
+    let versions = content.modrinth.versions_by_id(&ids).await?;
+    carried.project_ids = versions
+        .iter()
+        .map(|version| version.project_id.clone())
+        .collect();
+    let mut current_projects = HashMap::new();
+    let mut current_files = HashMap::new();
+    let mut turned_off = HashSet::new();
+    for (item, sha1) in listed {
+        let Some(file_type) = file_type(item.kind) else {
+            continue;
+        };
+        let row = rows.get(&item.path);
+        let origin = if row.is_some_and(TrackedFile::by_pack) {
+            Origin::Pack
+        } else {
+            Origin::Own
+        };
+        let project_id = row.and_then(|row| row.project_id.clone());
+        let version_id = row
+            .filter(|row| row.project_id.is_some())
+            .and_then(|row| row.version_id.clone());
+        let key = (file_type.to_owned(), item.filename.clone());
+        if !replaced(
+            origin,
+            Some(&carried),
+            version_id.as_deref(),
+            project_id.as_deref(),
+            &key,
+        ) {
+            continue;
+        }
+        let at = (item.kind, item.filename);
+        match (version_id, project_id) {
+            (Some(version_id), Some(project_id)) => {
+                current_projects.insert(
+                    version_id.clone(),
+                    ContentProject {
+                        project_id,
+                        version_id,
+                        item: at,
+                    },
+                );
+            }
+            _ => {
+                if item.disabled {
+                    turned_off.insert(key.clone());
+                }
+                current_files.insert(key, CurrentFile { sha1, item: at });
+            }
         }
     }
-    if !changes.versions.is_empty() {
+    let version = |id: &str| {
+        versions
+            .iter()
+            .find(|version| version.id == id)
+            .cloned()
+            .ok_or_else(|| {
+                Error::Invalid(format!(
+                    "Modrinth version {id} of the share was not found."
+                ))
+            })
+    };
+    let mut desired_projects = HashMap::new();
+    for id in &plan.entry.content.modrinth_ids {
+        let project_id = version(id)?.project_id;
+        desired_projects.insert(
+            id.clone(),
+            ContentProject {
+                project_id,
+                version_id: id.clone(),
+                item: (),
+            },
+        );
+    }
+    let desired_files = carried_files(&plan.entry)
+        .map(|(key, file)| {
+            let desired = DesiredFile {
+                sha1: Some(file.sha1.clone()),
+                file,
+            };
+            (key, desired)
+        })
+        .collect::<HashMap<_, _>>();
+    let changes = content_changes(
+        current_projects,
+        current_files,
+        desired_projects,
+        desired_files,
+    );
+
+    let removals = changes
+        .project_removals
+        .iter()
+        .map(|project| &project.item)
+        .chain(&changes.file_removals);
+    for (kind, file_name) in removals {
+        remove_project(content, id, *kind, file_name).await?;
+    }
+    // An update is placed over the version it replaces (`place_version`).
+    let placed = changes
+        .project_updates
+        .iter()
+        .map(|(_, desired)| desired)
+        .chain(&changes.project_additions)
+        .collect::<Vec<_>>();
+    if !placed.is_empty() {
         let rows = content_rows::get_tracked_files(&content.db, id).await?;
-        for version_id in &changes.versions {
-            let version = content.modrinth.version(version_id).await?;
+        for desired in placed {
+            let version = version(&desired.version_id)?;
             let dir =
                 kind_folder(kind_of(&version, &target), &folder.level_name())?;
             place_version(content, id, &folder, &dir, &version, &rows).await?;
@@ -310,12 +400,15 @@ async fn apply(
     };
     let mut writes = Vec::new();
     let mut tracked = Vec::new();
-    for (file, disabled) in &changes.files {
+    for file in changes.file_updates.iter().chain(&changes.file_additions) {
         let Some(kind) = kind(&file.file_type) else {
             continue;
         };
         let path = addon_path(&folder, kind, &file.file_name)?;
-        let on_disk = if *disabled {
+        // A copy turned off on the server stays off.
+        let on_disk = if turned_off
+            .contains(&(file.file_type.clone(), file.file_name.clone()))
+        {
             format!("{path}{DISABLED}")
         } else {
             path.clone()
@@ -370,6 +463,16 @@ async fn apply(
         content_rows::upsert_tracked_file(&content.db, id, row).await?;
     }
     Ok(())
+}
+
+/// The addon files `entry` carries, by type and name, as the server's addons are keyed.
+fn carried_files(
+    entry: &HistoryEntry,
+) -> impl Iterator<Item = ((String, String), &ManifestFile)> {
+    entry
+        .manifest()
+        .filter(|file| kind(&file.file_type).is_some())
+        .map(|file| ((file.file_type.clone(), file.file_name.clone()), file))
 }
 
 /// A config's path in the server folder, as a push of the server checks it.

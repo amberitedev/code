@@ -25,6 +25,10 @@ use crate::util::fetch::{DownloadReason, REQWEST_CLIENT};
 use anyhow::{Context, bail};
 use futures::StreamExt;
 use path_util::SafeRelativeUtf8UnixPathBuf;
+use sharing_client::history::restore::{Carried, Origin, replaced};
+use sharing_client::install::{
+    ContentChanges, ContentProject, CurrentFile, DesiredFile, content_changes,
+};
 use sqlx::SqlitePool;
 use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet};
@@ -171,29 +175,11 @@ pub(super) async fn finalize_shared_instance_attachment(
     .await
 }
 
-#[derive(Clone, Debug)]
-struct CurrentSharedInstanceProject {
-    project_id: String,
-    version_id: String,
-    relative_path: String,
-}
+/// A Modrinth version an update may replace, at its path in the instance.
+type CurrentSharedInstanceProject = ContentProject<String>;
 
-#[derive(Clone, Debug)]
-struct CurrentSharedInstanceExternalFile {
-    relative_path: String,
-    sha1: String,
-    missing: bool,
-}
-
-impl CurrentSharedInstanceExternalFile {
-    fn matches(&self, desired: &SharedInstanceExternalFileData) -> bool {
-        !self.missing
-            && desired
-                .sha1
-                .as_deref()
-                .is_some_and(|sha1| self.sha1.eq_ignore_ascii_case(sha1))
-    }
-}
+/// A carried file an update may replace, by its path in the instance.
+type CurrentSharedInstanceExternalFile = CurrentFile<String>;
 
 type SharedInstanceExternalFileKey = (ProjectType, String);
 
@@ -206,42 +192,20 @@ struct CurrentSharedInstanceContent {
     >,
 }
 
-#[derive(Clone, Debug)]
-struct DesiredSharedInstanceProject {
-    project_id: String,
-    version_id: String,
-}
-
-#[derive(Clone, Debug)]
-struct DesiredSharedInstanceExternalFile {
-    file: SharedInstanceExternalFileData,
-    file_type: ProjectType,
-}
-
 #[derive(Default)]
 struct DesiredSharedInstanceContent {
-    projects: HashMap<String, DesiredSharedInstanceProject>,
+    projects: HashMap<String, ContentProject>,
     external_files: HashMap<
         SharedInstanceExternalFileKey,
-        DesiredSharedInstanceExternalFile,
+        DesiredFile<SharedInstanceExternalFileData>,
     >,
     config_files: Vec<SharedInstanceExternalFileData>,
-}
-
-struct SharedInstanceProjectUpdate {
-    current: CurrentSharedInstanceProject,
-    desired: DesiredSharedInstanceProject,
 }
 
 #[derive(Default)]
 struct SharedInstanceApplyPlan {
     configuration_changed: bool,
-    project_removals: Vec<CurrentSharedInstanceProject>,
-    project_updates: Vec<SharedInstanceProjectUpdate>,
-    project_additions: Vec<DesiredSharedInstanceProject>,
-    external_removals: Vec<CurrentSharedInstanceExternalFile>,
-    external_updates: Vec<DesiredSharedInstanceExternalFile>,
-    external_additions: Vec<DesiredSharedInstanceExternalFile>,
+    changes: ContentChanges<String, String, SharedInstanceExternalFileData>,
     config_files: Vec<SharedInstanceExternalFileData>,
     modpack_toggles: Vec<(String, bool)>,
     modpack_removals: Vec<String>,
@@ -273,78 +237,26 @@ impl SharedInstanceApplyPlan {
                 ..Default::default()
             });
         }
-        let project_removals = current
-            .projects
-            .values()
-            .filter(|current| {
-                !desired.projects.contains_key(&current.version_id)
-            })
-            .cloned()
-            .collect();
-        let external_removals = current
-            .external_files
-            .iter()
-            .filter(|(key, _)| !desired.external_files.contains_key(*key))
-            .map(|(_, current)| current.clone())
-            .collect();
-        let mut plan = Self {
-            project_removals,
-            external_removals,
+        // Which versions and files go, change and come is sharing-client's, as on a Core.
+        Ok(Self {
+            changes: content_changes(
+                current.projects,
+                current.external_files,
+                desired.projects,
+                desired.external_files,
+            ),
             config_files: desired.config_files,
             modpack_toggles: modpack_changes.toggles,
             modpack_removals: modpack_changes.removals,
             ..Default::default()
-        };
-
-        let mut additions = desired
-            .projects
-            .into_values()
-            .filter(|desired| {
-                !current.projects.contains_key(&desired.version_id)
-            })
-            .collect::<Vec<_>>();
-        while let Some(desired) = additions.pop() {
-            let replacements = plan
-                .project_removals
-                .iter()
-                .enumerate()
-                .filter(|(_, current)| current.project_id == desired.project_id)
-                .map(|(index, _)| index)
-                .collect::<Vec<_>>();
-            let unambiguous = !additions
-                .iter()
-                .any(|other| other.project_id == desired.project_id)
-                && !plan
-                    .project_additions
-                    .iter()
-                    .any(|other| other.project_id == desired.project_id);
-            if replacements.len() == 1 && unambiguous {
-                plan.project_updates.push(SharedInstanceProjectUpdate {
-                    current: plan.project_removals.remove(replacements[0]),
-                    desired,
-                });
-            } else {
-                plan.project_additions.push(desired);
-            }
-        }
-
-        for desired in desired.external_files.into_values() {
-            let key = (desired.file_type, desired.file.file_name.clone());
-            match current.external_files.get(&key) {
-                Some(current) if current.matches(&desired.file) => {}
-                Some(_) => plan.external_updates.push(desired),
-                None => plan.external_additions.push(desired),
-            }
-        }
-
-        Ok(plan)
+        })
     }
 
     fn content_change_count(&self) -> u64 {
-        (self.project_updates.len()
-            + self.project_additions.len()
-            + self.external_updates.len()
-            + self.external_additions.len()
+        (self.changes.project_updates.len()
+            + self.changes.project_additions.len()
+            + self.changes.file_updates.len()
+            + self.changes.file_additions.len()
             + self.config_files.len()) as u64
     }
 }
@@ -487,19 +399,19 @@ async fn apply_shared_instance_changes(
         .await?;
     }
 
-    for project in plan.project_removals {
+    for project in plan.changes.project_removals {
         crate::state::instances::commands::remove_project(
             instance_id,
-            &project.relative_path,
+            &project.item,
             state,
         )
         .await?;
     }
 
-    for file in plan.external_removals {
+    for path in plan.changes.file_removals {
         crate::state::instances::commands::remove_project(
             instance_id,
-            &file.relative_path,
+            &path,
             state,
         )
         .await?;
@@ -529,14 +441,15 @@ async fn apply_shared_instance_changes(
         job_state,
         state,
         instance_id,
-        plan.project_updates
+        plan.changes
+            .project_updates
             .iter()
-            .map(|update| SharedInstanceModInstall {
-                version_id: &update.desired.version_id,
+            .map(|(current, desired)| SharedInstanceModInstall {
+                version_id: &desired.version_id,
                 reason: DownloadReason::Update,
-                replaces: Some(&update.current),
+                replaces: Some(current),
             })
-            .chain(plan.project_additions.iter().map(|project| {
+            .chain(plan.changes.project_additions.iter().map(|project| {
                 SharedInstanceModInstall {
                     version_id: &project.version_id,
                     reason: DownloadReason::Standalone,
@@ -544,10 +457,10 @@ async fn apply_shared_instance_changes(
                 }
             }))
             .collect(),
-        plan.external_updates
+        plan.changes
+            .file_updates
             .iter()
-            .chain(&plan.external_additions)
-            .map(|file| &file.file)
+            .chain(&plan.changes.file_additions)
             .chain(&plan.config_files)
             .collect(),
         content_change_count,
@@ -685,16 +598,15 @@ async fn current_shared_instance_content(
                 CurrentSharedInstanceProject {
                     project_id,
                     version_id,
-                    relative_path: file.relative_path.clone(),
+                    item: file.relative_path.clone(),
                 },
             );
         } else {
             content.external_files.insert(
                 (entry.project_type, file.file_name.clone()),
                 CurrentSharedInstanceExternalFile {
-                    relative_path: file.relative_path.clone(),
-                    sha1: file.sha1.clone(),
-                    missing: file.missing,
+                    sha1: (!file.missing).then(|| file.sha1.clone()),
+                    item: file.relative_path.clone(),
                 },
             );
         }
@@ -840,16 +752,10 @@ async fn ensure_shared_instance_additions_enabled(
     Ok(())
 }
 
-/// The owner's own content a restore may replace: what the share carried at its last push (the
-/// newest entry of the owner's history) or carries in the restored version. The rest of the
-/// owner's instance was added since the last push and is kept, so a restore never deletes work
-/// the owner has not pushed.
-#[derive(Debug, Default)]
-struct OwnerSharedContent {
-    version_ids: HashSet<String>,
-    project_ids: HashSet<String>,
-    files: HashSet<SharedInstanceExternalFileKey>,
-}
+/// The owner's own content a restore may replace (`sharing_client::history::restore`): what the
+/// share carried at its last push (the newest entry of the owner's history) or carries in the
+/// restored version.
+type OwnerSharedContent = Carried<SharedInstanceExternalFileKey>;
 
 /// The owner's [`OwnerSharedContent`] for applying `data`, or `None` for a member.
 async fn owner_shared_content(
@@ -866,15 +772,6 @@ async fn owner_shared_content(
     };
     let last_push =
         crate::api::instance::last_shared_push(&attachment.id, state).await?;
-    let mut content = OwnerSharedContent::default();
-    content
-        .version_ids
-        .extend(data.modrinth_ids.iter().cloned());
-    if let Some(entry) = &last_push {
-        content
-            .version_ids
-            .extend(entry.content.modrinth_ids.iter().cloned());
-    }
     let pushed_files = last_push.iter().flat_map(|entry| {
         entry
             .manifest()
@@ -884,11 +781,19 @@ async fn owner_shared_content(
         .external_files
         .iter()
         .map(|file| (file.file_type.as_str(), file.file_name.as_str()));
-    for (file_type, file_name) in pushed_files.chain(restored_files) {
-        if let Some(project_type) = ProjectType::from_name(file_type) {
-            content.files.insert((project_type, file_name.to_owned()));
-        }
-    }
+    let mut content = Carried::new(
+        data.modrinth_ids.iter().cloned().chain(
+            last_push
+                .iter()
+                .flat_map(|entry| entry.content.modrinth_ids.iter().cloned()),
+        ),
+        pushed_files.chain(restored_files).filter_map(
+            |(file_type, file_name)| {
+                ProjectType::from_name(file_type)
+                    .map(|project_type| (project_type, file_name.to_owned()))
+            },
+        ),
+    );
     let ids = content
         .version_ids
         .iter()
@@ -907,33 +812,27 @@ async fn owner_shared_content(
     Ok(Some(content))
 }
 
-/// Whether a shared update replaces `entry`, whose file is `file_name`. A member keeps what they
-/// added themselves, and an owner restoring a version keeps what they added since their last
-/// push (`owner`).
+/// Whether a shared update replaces `entry`, whose file is `file_name`, by the rule in
+/// `sharing_client::history::restore`: a member keeps what they added themselves, and an owner
+/// restoring a version keeps what they added since their last push (`owner`).
 fn replaced_by_shared_update(
     entry: &crate::state::ContentEntry,
     file_name: &str,
     owner: Option<&OwnerSharedContent>,
 ) -> bool {
-    match (entry.source_kind, owner) {
-        (ContentSourceKind::SharedInstance, _) => true,
-        (ContentSourceKind::Local, Some(owner)) => {
-            let enabled_name =
-                file_name.strip_suffix(".disabled").unwrap_or(file_name);
-            entry
-                .version_id
-                .as_ref()
-                .is_some_and(|id| owner.version_ids.contains(id))
-                || entry
-                    .project_id
-                    .as_ref()
-                    .is_some_and(|id| owner.project_ids.contains(id))
-                || owner
-                    .files
-                    .contains(&(entry.project_type, enabled_name.to_owned()))
-        }
-        _ => false,
-    }
+    let origin = match entry.source_kind {
+        ContentSourceKind::SharedInstance => Origin::Share,
+        ContentSourceKind::Local => Origin::Own,
+        _ => Origin::Pack,
+    };
+    let enabled_name = file_name.strip_suffix(".disabled").unwrap_or(file_name);
+    replaced(
+        origin,
+        owner,
+        entry.version_id.as_deref(),
+        entry.project_id.as_deref(),
+        &(entry.project_type, enabled_name.to_owned()),
+    )
 }
 
 async fn desired_shared_instance_content(
@@ -951,9 +850,10 @@ async fn desired_shared_instance_content(
             ))?;
         content.projects.insert(
             version.id.clone(),
-            DesiredSharedInstanceProject {
+            ContentProject {
                 project_id: version.project_id.clone(),
                 version_id: version.id.clone(),
+                item: (),
             },
         );
     }
@@ -973,9 +873,9 @@ async fn desired_shared_instance_content(
         )?;
         content.external_files.insert(
             (file_type, file.file_name.clone()),
-            DesiredSharedInstanceExternalFile {
+            DesiredFile {
+                sha1: file.sha1.clone(),
                 file: file.clone(),
-                file_type,
             },
         );
     }
@@ -1567,11 +1467,11 @@ async fn install_shared_instance_mod(
         )
         .await?;
     if let Some(current) = install.replaces
-        && current.relative_path != new_path
+        && current.item != new_path
     {
         crate::state::instances::commands::remove_project(
             instance_id,
-            &current.relative_path,
+            &current.item,
             state,
         )
         .await?;
@@ -1903,81 +1803,4 @@ fn validate_shared_instance_external_file_name(
     }
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::state::{ContentEntry, ContentRequirement};
-
-    fn entry(
-        source_kind: ContentSourceKind,
-        project_id: Option<&str>,
-        version_id: Option<&str>,
-    ) -> ContentEntry {
-        ContentEntry {
-            id: "e".into(),
-            instance_id: "i".into(),
-            content_set_id: "c".into(),
-            file_id: Some("f".into()),
-            project_type: ProjectType::Mod,
-            project_id: project_id.map(str::to_owned),
-            version_id: version_id.map(str::to_owned),
-            source_kind,
-            server_requirement: ContentRequirement::Unknown,
-            client_requirement: ContentRequirement::Unknown,
-            enabled: true,
-            added_at: chrono::Utc::now(),
-            modified_at: chrono::Utc::now(),
-        }
-    }
-
-    #[test]
-    fn a_restore_keeps_what_the_owner_added_since_the_last_push() {
-        let owner = OwnerSharedContent {
-            version_ids: HashSet::from(["pushed".to_owned()]),
-            project_ids: HashSet::from(["pushed-project".to_owned()]),
-            files: HashSet::from([(ProjectType::Mod, "pushed.jar".to_owned())]),
-        };
-        let local = ContentSourceKind::Local;
-
-        // Shared: in the last push or the restored version.
-        assert!(replaced_by_shared_update(
-            &entry(local, Some("other"), Some("pushed")),
-            "a.jar",
-            Some(&owner),
-        ));
-        assert!(replaced_by_shared_update(
-            &entry(local, Some("pushed-project"), Some("newer")),
-            "a.jar",
-            Some(&owner),
-        ));
-        assert!(replaced_by_shared_update(
-            &entry(local, None, None),
-            "pushed.jar.disabled",
-            Some(&owner),
-        ));
-        // Added since the last push: kept.
-        assert!(!replaced_by_shared_update(
-            &entry(local, Some("new-project"), Some("new")),
-            "new.jar",
-            Some(&owner),
-        ));
-        assert!(!replaced_by_shared_update(
-            &entry(local, None, None),
-            "unpushed.jar",
-            Some(&owner),
-        ));
-        // A member keeps their own additions; shared content is always replaced.
-        assert!(!replaced_by_shared_update(
-            &entry(local, Some("pushed-project"), Some("pushed")),
-            "a.jar",
-            None,
-        ));
-        assert!(replaced_by_shared_update(
-            &entry(ContentSourceKind::SharedInstance, None, None),
-            "a.jar",
-            None,
-        ));
-    }
 }

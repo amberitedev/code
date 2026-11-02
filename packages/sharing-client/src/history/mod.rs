@@ -11,6 +11,7 @@
 
 mod adapters;
 mod model;
+pub mod restore;
 
 use std::fmt::Display;
 use std::future::Future;
