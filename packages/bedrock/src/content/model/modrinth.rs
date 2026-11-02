@@ -20,38 +20,20 @@ pub struct Version {
     #[serde(default)]
     pub dependencies: Vec<Dependency>,
     pub date_published: Option<DateTime<Utc>>,
+    /// Where the version runs. Only v3 of the API says (`Modrinth::versions_by_id`); every v2
+    /// answer leaves it `None`.
+    #[serde(default)]
+    pub environment: Option<VersionEnvironment>,
 }
 
 impl Version {
     /// The file a version is installed from.
     pub fn primary(&self) -> Option<&VersionFile> {
-        primary(&self.files)
+        self.files
+            .iter()
+            .find(|file| file.primary)
+            .or_else(|| self.files.first())
     }
-}
-
-/// A version as v3 of the API gives it, which also says where it runs.
-#[derive(Debug, Clone, Deserialize)]
-pub struct SidedVersion {
-    pub id: String,
-    #[serde(default)]
-    pub loaders: Vec<String>,
-    #[serde(default)]
-    pub files: Vec<VersionFile>,
-    pub environment: Option<VersionEnvironment>,
-}
-
-impl SidedVersion {
-    /// The file a version is installed from.
-    pub fn primary(&self) -> Option<&VersionFile> {
-        primary(&self.files)
-    }
-}
-
-fn primary(files: &[VersionFile]) -> Option<&VersionFile> {
-    files
-        .iter()
-        .find(|file| file.primary)
-        .or_else(|| files.first())
 }
 
 #[derive(Debug, Clone, Deserialize)]

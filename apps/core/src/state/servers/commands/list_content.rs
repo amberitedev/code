@@ -114,7 +114,7 @@ pub async fn list_content(
                 version: version.map(|version| AddonVersion {
                     id: version.id.clone(),
                     name: Some(version.version_number.clone()),
-                    environment: None,
+                    environment: version.environment,
                 }),
                 owner: None,
                 icon_url: project.and_then(|project| project.icon_url.clone()),
@@ -160,7 +160,7 @@ pub async fn list_content(
             version: version.map(|version| AddonVersion {
                 id: version.id.clone(),
                 name: Some(version.version_number.clone()),
-                environment: None,
+                environment: version.environment,
             }),
             owner: None,
             icon_url: project.and_then(|project| project.icon_url.clone()),

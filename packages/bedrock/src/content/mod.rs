@@ -15,7 +15,7 @@ pub use domain::channel::{
 pub use domain::mrpack::{PackPlatform, loader_dependency, platform};
 pub use domain::sides::{mrpack_env, server_takes};
 pub use model::modrinth::{
-    Project, SidedVersion, Version, VersionEnvironment, VersionFile,
+    Project, Version, VersionEnvironment, VersionFile,
     VersionHashes, ids_from_cdn,
 };
 pub use model::mrpack::{Env, Hashes, Index, IndexFile, SideType};

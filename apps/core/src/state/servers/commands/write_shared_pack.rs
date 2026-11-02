@@ -94,8 +94,8 @@ impl consume::Modrinth for Lookup<'_> {
     async fn versions(
         &self,
         ids: &[String],
-    ) -> Result<Vec<bedrock::content::SidedVersion>, Error> {
-        Ok(self.0.modrinth.sided_versions(ids).await?)
+    ) -> Result<Vec<bedrock::content::Version>, Error> {
+        Ok(self.0.modrinth.versions_by_id(ids).await?)
     }
 
     async fn modpack_files(&self, id: &str) -> Result<Vec<ModpackFile>, Error> {
