@@ -19,7 +19,7 @@ const { addNotification } = injectNotificationManager()
 
 const serverId = computed(() => String(route.params.id ?? ''))
 const source = useServerHistory(serverId)
-const historyKey = computed(() => ['server-share-history', serverId.value] as const)
+const historyKey = computed(() => serverKeys.shareHistory(serverId.value))
 
 const history = useQuery({
 	queryKey: computed(() => [...historyKey.value, source.value?.source] as const),

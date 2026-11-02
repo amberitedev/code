@@ -146,6 +146,7 @@ export function useServerShareReview<Action extends string = 'push'>(options?: {
 		await Promise.all([
 			queryClient.invalidateQueries({ queryKey: serverKeys.detailV1(serverId) }),
 			queryClient.invalidateQueries({ queryKey: serverKeys.shareDiff(serverId, target.worldId) }),
+			queryClient.invalidateQueries({ queryKey: serverKeys.shareHistory(serverId) }),
 		])
 		return shared
 	}
