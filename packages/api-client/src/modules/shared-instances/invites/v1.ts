@@ -1,7 +1,7 @@
-import { AbstractModule } from '../../../core/abstract-module'
+import { SharedInstancesModule } from '../module'
 import type { SharedInstances } from '../types'
 
-export class SharedInstancesInvitesV1Module extends AbstractModule {
+export class SharedInstancesInvitesV1Module extends SharedInstancesModule {
 	public getModuleID(): string {
 		return 'sharedinstances_invites_v1'
 	}
@@ -10,7 +10,7 @@ export class SharedInstancesInvitesV1Module extends AbstractModule {
 		inviteId: string,
 		options?: { version?: boolean },
 	): Promise<SharedInstances.Invites.v1.Invite> {
-		return this.client.request<SharedInstances.Invites.v1.Invite>(
+		return this.request<SharedInstances.Invites.v1.Invite>(
 			`/invites/${encodeURIComponent(inviteId)}`,
 			{
 				api: 'sharedinstances',
@@ -24,7 +24,7 @@ export class SharedInstancesInvitesV1Module extends AbstractModule {
 	}
 
 	public async list(instanceId: string): Promise<SharedInstances.Invites.v1.InviteLink[]> {
-		return this.client.request(`/instances/${encodeURIComponent(instanceId)}/invites`, {
+		return this.request(`/instances/${encodeURIComponent(instanceId)}/invites`, {
 			api: 'sharedinstances',
 			version: 1,
 			method: 'GET',
@@ -35,7 +35,7 @@ export class SharedInstancesInvitesV1Module extends AbstractModule {
 		instanceId: string,
 		options: { max_age?: number; max_uses: number },
 	): Promise<{ id: string }> {
-		return this.client.request(`/instances/${encodeURIComponent(instanceId)}/invites`, {
+		return this.request(`/instances/${encodeURIComponent(instanceId)}/invites`, {
 			api: 'sharedinstances',
 			version: 1,
 			method: 'POST',
@@ -45,7 +45,7 @@ export class SharedInstancesInvitesV1Module extends AbstractModule {
 	}
 
 	public async delete(instanceId: string, inviteId: string): Promise<void> {
-		return this.client.request(
+		return this.request(
 			`/instances/${encodeURIComponent(instanceId)}/invites/${encodeURIComponent(inviteId)}`,
 			{
 				api: 'sharedinstances',
