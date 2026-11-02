@@ -11,6 +11,18 @@ pub fn room(path: &Path) -> io::Result<u64> {
     Ok(free(path)?.saturating_sub(DISK_MARGIN_BYTES))
 }
 
+const MB: u64 = 1024 * 1024;
+const GB: u64 = 1024 * MB;
+
+/// A size as people read it: gigabytes with one decimal, or whole megabytes below one.
+pub fn label(bytes: u64) -> String {
+    if bytes >= GB {
+        format!("{:.1} GB", bytes as f64 / GB as f64)
+    } else {
+        format!("{} MB", bytes.div_ceil(MB))
+    }
+}
+
 /// The bytes this account may still write on the disk that holds `path`.
 #[cfg(unix)]
 pub fn free(path: &Path) -> io::Result<u64> {
@@ -47,6 +59,13 @@ pub fn free(path: &Path) -> io::Result<u64> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn sizes_read_as_megabytes_or_gigabytes() {
+        assert_eq!(super::label(1), "1 MB");
+        assert_eq!(super::label(900 * super::MB), "900 MB");
+        assert_eq!(super::label(1156 * super::MB), "1.1 GB");
+    }
+
     #[test]
     fn the_free_space_of_a_real_disk_is_read() {
         let dir = tempfile::tempdir().unwrap();

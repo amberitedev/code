@@ -232,6 +232,7 @@ async fn install_pack(
         .await
         .map_err(std::io::Error::other)?
     };
+    // What is replaced is still counted, so an update asks for a little more than it needs.
     pack::check_room(&steps, archive::room(&content.paths.server(id))?)?;
     let staged = stage_downloads(content, id, &index, &steps, progress).await?;
 

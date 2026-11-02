@@ -10,7 +10,10 @@ use std::io::{self, Read, Seek};
 /// What Core may still write on the disk at a path: its free space less the margin it keeps.
 pub use bedrock::disk::room;
 pub use bedrock::limits::MAX_ARCHIVE_ENTRIES as MAX_ENTRIES;
-use bedrock::limits::{DISK_MARGIN_BYTES, MAX_COMPRESSION_RATIO};
+use bedrock::{
+    disk::label,
+    limits::{DISK_MARGIN_BYTES, MAX_COMPRESSION_RATIO},
+};
 use sha1::Digest;
 
 use super::folder::{self, Folder, PathError};
@@ -19,14 +22,12 @@ use super::folder::{self, Folder, PathError};
 /// repeated byte packs to almost nothing, and the disk check still covers it.
 const SMALL_ENTRY: u64 = 1024 * 1024;
 
-const MB: u64 = 1024 * 1024;
-
 /// Something does not fit in the disk's free space less what Core keeps free.
 #[derive(Debug, thiserror::Error)]
 #[error(
-    "there is not enough free disk space for {what}{}; Core keeps {} MB free",
-    needed.map(|needed| format!(": it needs {} MB and there are {} MB", needed.div_ceil(MB), room / MB)).unwrap_or_default(),
-    DISK_MARGIN_BYTES / MB
+    "There is not enough disk space on the Core for {what}{}. The Core keeps {} free.",
+    needed.map(|needed| format!(": it needs about {} and {} can be used", label(needed), label(*room))).unwrap_or_default(),
+    label(DISK_MARGIN_BYTES)
 )]
 pub struct NoRoom {
     /// What did not fit, such as "the pack" or "the upload".
@@ -58,7 +59,7 @@ pub enum ArchiveError {
     #[error(transparent)]
     NoRoom(#[from] NoRoom),
     #[error(
-        "the archive entry {0} unpacks to more than {MAX_COMPRESSION_RATIO} times its packed size, as only a zip bomb does"
+        "This archive is a zip bomb: its entry {0} unpacks to more than {MAX_COMPRESSION_RATIO} times its packed size."
     )]
     Bomb(String),
     #[error("the archive has more than {MAX_ENTRIES} entries")]
@@ -357,6 +358,10 @@ mod tests {
         let error = extract(&folder, &mut zip, 10, anywhere).unwrap_err();
         assert!(matches!(error, ArchiveError::NoRoom(_)), "{error}");
         assert_eq!(
+            error.to_string(),
+            "There is not enough disk space on the Core for the archive entry config/a.toml. The Core keeps 256 MB free."
+        );
+        assert_eq!(
             std::fs::read_to_string(dir.path().join("config/a.toml")).unwrap(),
             "original"
         );
@@ -366,6 +371,18 @@ mod tests {
                 .unwrap()
                 .count(),
             1
+        );
+    }
+
+    #[test]
+    fn no_room_says_what_is_needed_and_what_can_be_used() {
+        const GB: u64 = 1024 * 1024 * 1024;
+        assert!(NoRoom::check("the pack", GB, GB).is_ok());
+        assert_eq!(
+            NoRoom::check("the pack", 2 * GB, GB)
+                .unwrap_err()
+                .to_string(),
+            "There is not enough disk space on the Core for the pack: it needs about 2.0 GB and 1.0 GB can be used. The Core keeps 256 MB free."
         );
     }
 
