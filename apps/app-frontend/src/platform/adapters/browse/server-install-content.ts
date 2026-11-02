@@ -364,7 +364,7 @@ export function useServerInstallContent(opts: {
 				await onboardingFlow.open({
 					serverId: serverIdQuery.value,
 					worldId: effectiveServerWorldId.value,
-					siteUrl: appConfig.siteUrl,
+					siteUrl: appConfig.accountSiteUrl,
 					project: request,
 					backToBrowse: true,
 					onHide: onServerFlowHide,

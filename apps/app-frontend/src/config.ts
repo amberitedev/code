@@ -21,6 +21,13 @@ export const config = {
 	labrinthBaseUrl,
 	archonBaseUrl,
 	sharedInstancesBaseUrl,
+	/**
+	 * Amberite's account site, where share and server invite links and profile links open. A getter,
+	 * because the dev App sets `accountApiUrl` after start.
+	 */
+	get accountSiteUrl() {
+		return this.accountWebUrl || this.accountApiUrl || this.siteUrl
+	},
 }
 
 export function applyDevAppConfig(devConfig: { backendUrl?: string }) {
