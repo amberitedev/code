@@ -8982,6 +8982,7 @@ dependencies = [
  "hex",
  "hkdf",
  "infer 0.22.0",
+ "modrinth-content-management",
  "path-util",
  "rand 0.10.3",
  "reqwest 0.13.5",

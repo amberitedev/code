@@ -3,7 +3,7 @@
 //! [`server_pack`], fetches its files with [`crate::pool::fetch`], and installs it like any
 //! pack.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::future::Future;
 
 use bedrock::content::{
@@ -13,18 +13,22 @@ use bedrock::state::ModLoader;
 use reqwest::StatusCode;
 
 use crate::backend::{Backend, BackendError, Unavailable};
+use crate::install::{ModpackFile, version_files};
 use crate::pool::{InvalidPoolEntry, PoolFile};
 use crate::rules::CONFIG_FILE_TYPE;
 use crate::versions::ShareVersion;
 
-/// A share version as a server takes it.
+/// A share version as a server takes it. `S` is how the caller gets a modpack file's bytes.
 #[derive(Debug, Clone)]
-pub struct ServerPack {
+pub struct ServerPack<S> {
     pub shared_instance_id: String,
     pub version: i32,
-    /// `modrinth.index.json` for the files on Modrinth. Core writes it as it is, and its pack
-    /// install checks it.
+    /// `modrinth.index.json` for the Modrinth mods the version adds over its modpack. Core
+    /// writes it with the modpack's own files, and its pack install checks it.
     pub index: Index,
+    /// The modpack's files the server gets, Modrinth's or not: index entries, overrides and
+    /// config files alike, at the paths the modpack puts them.
+    pub modpack_files: Vec<ModpackFile<S>>,
     /// The version's files that live in the pool, by their path in the server folder.
     pub files: Vec<(String, PoolFile)>,
 }
@@ -32,6 +36,8 @@ pub struct ServerPack {
 /// Modrinth's API as the caller reaches it, so each side uses its own client and cache.
 pub trait Modrinth {
     type Error;
+    /// How the caller gets a modpack file's bytes.
+    type Source;
 
     /// The versions among `ids` that Modrinth has.
     fn versions(
@@ -39,18 +45,14 @@ pub trait Modrinth {
         ids: &[String],
     ) -> impl Future<Output = Result<Vec<SidedVersion>, Self::Error>> + Send;
 
-    /// Every file the modpack version `id` puts on a server, by path, with the Modrinth version
-    /// of each one Modrinth knows.
+    /// Every file the modpack version `id` places, by path, with the Modrinth version of each
+    /// one Modrinth knows. The server's pack install decides which of them it runs.
     fn modpack_files(
         &self,
         id: &str,
-    ) -> impl Future<Output = Result<Vec<ModpackFile>, Self::Error>> + Send;
-}
-
-#[derive(Debug, Clone)]
-pub struct ModpackFile {
-    pub path: String,
-    pub version_id: Option<String>,
+    ) -> impl Future<
+        Output = Result<Vec<ModpackFile<Self::Source>>, Self::Error>,
+    > + Send;
 }
 
 /// Why a share's latest version cannot go to a server now.
@@ -129,48 +131,25 @@ pub async fn ready_version(
     })
 }
 
-/// `version` as a server takes it: the Modrinth mods, in a pack index named `name`, and the mods
-/// and config files in the pool. A version based on a modpack takes the modpack's files too,
-/// less the ones the owner removed or the share carries itself. Client-only Modrinth mods are
+/// `version` as a server takes it: the Modrinth mods it adds, in a pack index named `name`, the
+/// files of its modpack (less the ones the owner removed or the share carries itself, see
+/// [`version_files`]), and the mods and config files in the pool. Client-only Modrinth mods are
 /// listed but marked unsupported on servers.
 pub async fn server_pack<M: Modrinth>(
     ReadyVersion { share_id, version }: ReadyVersion,
     name: &str,
     modrinth: &M,
-) -> Result<ServerPack, ServerPackError<M::Error>> {
+) -> Result<ServerPack<M::Source>, ServerPackError<M::Error>> {
     let content = &version.content;
-    let modpack = version.modpack_id();
-    let mut ids = content
-        .modrinth_ids
-        .iter()
-        .filter(|id| modpack != Some(id.as_str()))
-        .cloned()
-        .collect::<Vec<_>>();
-    if let Some(modpack) = modpack {
-        let carried = version
-            .external_files
-            .iter()
-            .filter_map(|file| server_path(&file.file_type, &file.file_name))
-            .collect::<HashSet<_>>();
-        let files = modrinth
+    let modpack = match version.modpack_id() {
+        Some(modpack) => modrinth
             .modpack_files(modpack)
             .await
-            .map_err(ServerPackError::Modrinth)?;
-        ids.extend(
-            files
-                .into_iter()
-                .filter(|file| {
-                    !carried.contains(&file.path)
-                        && !content.removed_files.iter().any(|removed| {
-                            removed
-                                .matches(file.version_id.as_deref(), &file.path)
-                        })
-                })
-                .filter_map(|file| file.version_id),
-        );
-    }
-    ids.sort_unstable();
-    ids.dedup();
+            .map_err(ServerPackError::Modrinth)?,
+        None => Vec::new(),
+    };
+    let split = version_files(&version, modpack);
+    let ids = split.modrinth_ids;
 
     let versions = if ids.is_empty() {
         Vec::new()
@@ -236,6 +215,7 @@ pub async fn server_pack<M: Modrinth>(
     Ok(ServerPack {
         shared_instance_id: share_id,
         version: version.version,
+        modpack_files: split.modpack_files,
         index: Index {
             format_version: Index::FORMAT_VERSION,
             game: Index::GAME.to_owned(),

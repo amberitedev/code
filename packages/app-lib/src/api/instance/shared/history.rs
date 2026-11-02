@@ -28,22 +28,21 @@ pub async fn get_shared_instance_version(
             }
         },
     )?;
-    let diffs = shared_version_diffs(before.as_ref(), &after, &state).await?;
-    let config_files = super::content::changed_config_files(
-        &after.external_files,
-        before
-            .as_ref()
-            .map(|version| version.external_files.as_slice()),
-    )
-    .into_iter()
-    .filter(|file| file.file_type == CONFIG_FILE_TYPE)
-    .map(|file| file.file_name)
-    .collect();
-    let (version_ids, external_files) =
-        super::content::remote_shared_content(&after, &state).await?;
+    let (diffs, content) =
+        shared_version_diffs(before.as_ref(), &after, &state).await?;
+    let config_files = diffs
+        .iter()
+        .find(|diff| {
+            matches!(
+                diff.type_,
+                SharedInstanceUpdateDiffType::ConfigFilesUpdated
+            )
+        })
+        .map(|diff| diff.config_file_names.clone())
+        .unwrap_or_default();
     let (loader, loader_version) = instance_loader(&after);
     Ok(SharedInstanceVersionDetails {
-        content_count: version_ids.len() + external_files.len(),
+        content_count: content.version_ids.len() + content.external_files.len(),
         game_version: after.content.game_version,
         loader,
         loader_version,

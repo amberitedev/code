@@ -7,11 +7,15 @@
 //! - `push`: the writer of a share's versions.
 //! - `pool`: the client for Cores' stores, and fetching a version's files from them.
 //! - `consume`: a version as a server takes it.
+//! - `install`: a version as a member installs it, beside or on top of its modpack.
+//! - `diff`: what one share content changes over another, for updates, pushes and history.
 //! - `crypto`: the pool's encryption.
 
 pub mod backend;
 pub mod consume;
 pub mod crypto;
+pub mod diff;
+pub mod install;
 pub mod pool;
 pub mod push;
 pub mod rules;
