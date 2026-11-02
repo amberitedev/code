@@ -16,5 +16,8 @@ pub mod install_instance;
 pub mod install_loader;
 pub mod install_pack;
 pub mod list_content;
+pub mod needs_update;
+pub mod record_push;
+pub mod share_snapshot;
 pub mod sync_content_files;
 pub mod write_shared_pack;

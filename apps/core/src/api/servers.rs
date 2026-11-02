@@ -36,6 +36,7 @@ use crate::{
         adapters::sqlite::{content_rows, server_rows},
         commands::{
             drop_own_share, install_loader, list_content::linked_pack_state,
+            needs_update::needs_update,
         },
     },
 };
@@ -883,10 +884,9 @@ async fn server_full(
     let (shared_instance_id, needs_update) = match linked {
         Some(linked) => (Some(linked.shared_instance_id), false),
         None => match server_rows::share_id(&state.db, &row.id).await? {
-            Some(share_id) => (
-                Some(share_id),
-                super::share::needs_update(state, &row.id).await,
-            ),
+            Some(share_id) => {
+                (Some(share_id), needs_update(&state.content, &row.id).await)
+            }
             None => (None, false),
         },
     };
