@@ -5,13 +5,14 @@ use std::time::Duration;
 use axum::http::Method;
 use clap::Subcommand;
 use color_eyre::eyre::Result;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use super::{Client, Output, Switch, local_time, on_off, servers};
 use crate::{
     access::pairing,
     api::{
         eula::Eula,
+        health::Health,
         insight::{Machine, Reach},
         logs::CoreLogs,
         pairing::PairingStatus,
@@ -41,13 +42,6 @@ pub enum UpdateCommand {
     /// Go back to the version before the last update, with the database from before it.
     /// Changes made since the update are lost.
     Rollback,
-}
-
-/// What `/health` answers, as the CLI reads it.
-#[derive(Debug, Deserialize, Serialize)]
-pub struct Health {
-    pub version: String,
-    pub core_id: String,
 }
 
 /// `copal status`.

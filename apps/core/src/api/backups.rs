@@ -57,7 +57,7 @@ pub enum BackupQueueOperationType {
 }
 
 /// Mirrors Archon.BackupsQueue.v1.BackupQueueState.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BackupQueueState {
     Pending,
@@ -70,7 +70,7 @@ pub enum BackupQueueState {
 }
 
 /// Mirrors Archon.BackupsQueue.v1.BackupStatus.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BackupStatus {
     Pending,
@@ -83,7 +83,7 @@ pub enum BackupStatus {
 
 /// Body of POST `backups-queue` (create) and POST `backups-queue/{bid}/restore`. Mirrors
 /// Archon.BackupsQueue.v1.BackupRequest.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BackupRequest {
     pub name: String,
 }
@@ -96,13 +96,13 @@ pub struct PatchBackup {
 }
 
 /// Response of POST `backups-queue`. Mirrors Archon.BackupsQueue.v1.PostBackupQueueResponse.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PostBackupQueueResponse {
     pub id: Uuid,
 }
 
 /// Who started an operation. Mirrors Archon.BackupsQueue.v1.UserInfo.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserInfo {
     pub id: String,
     pub username: String,
@@ -127,7 +127,7 @@ pub enum HistoryAction {
 }
 
 /// A queued or running operation. Mirrors Archon.BackupsQueue.v1.ActiveOperation.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActiveOperation {
     pub backup_id: Uuid,
     pub operation_type: BackupQueueOperationType,
@@ -141,7 +141,7 @@ pub struct ActiveOperation {
 
 /// One past or current operation on a backup. Mirrors
 /// Archon.BackupsQueue.v1.BackupQueueOperation.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BackupQueueOperation {
     pub operation_type: BackupQueueOperationType,
     pub operation_id: Option<i64>,
@@ -158,7 +158,7 @@ pub struct BackupQueueOperation {
 
 /// Mirrors Archon.BackupsQueue.v1.BackupQueueBackup. `rotates_at` is set on the backups that
 /// hold a scheduled slot: when the scheduled backups after it will have pushed it out.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BackupQueueBackup {
     pub id: Uuid,
     pub name: String,
@@ -172,7 +172,7 @@ pub struct BackupQueueBackup {
 }
 
 /// Response of GET `backups-queue`. Mirrors Archon.BackupsQueue.v1.BackupsQueueResponse.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BackupsQueueResponse {
     pub active_operations: Vec<ActiveOperation>,
     pub backups: Vec<BackupQueueBackup>,
@@ -180,7 +180,7 @@ pub struct BackupsQueueResponse {
 
 /// How a server's [`SLOTS`] are split and how often it is backed up. Mirrors
 /// Archon.BackupsQueue.v1.WorldBackupOptions.
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct WorldBackupOptions {
     pub split_automatic: u32,
     pub split_manual: u32,
@@ -190,7 +190,7 @@ pub struct WorldBackupOptions {
 
 /// Response of GET `backups-queue/with-options`. Mirrors
 /// Archon.BackupsQueue.v1.BackupsQueueWithOptionsResponse.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BackupsQueueWithOptionsResponse {
     #[serde(flatten)]
     pub queue: BackupsQueueResponse,
@@ -200,7 +200,7 @@ pub struct BackupsQueueWithOptionsResponse {
 
 /// Body of PATCH `backups-queue/with-options`. Mirrors
 /// Archon.BackupsQueue.v1.PatchWorldBackupOptions.
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct PatchWorldBackupOptions {
     #[serde(default)]
     pub split_automatic: Option<u32>,
@@ -222,7 +222,7 @@ pub struct PatchOptionsQuery {
 /// Response of PATCH `backups-queue/with-options`. Not `applied` when the change would delete
 /// the scheduled backups in `backup_ids` and was not acknowledged. Mirrors
 /// Archon.BackupsQueue.v1.PatchWorldBackupOptionsResponse.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PatchWorldBackupOptionsResponse {
     pub applied: bool,
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -28,6 +28,7 @@ use tracing::{info, warn};
 
 use crate::{
     api::update::UpdateStatus, daemon::paths::Paths, servers::Servers,
+    util::if_present,
 };
 use release::{Channel, Manifest, ManifestError, Release};
 
@@ -495,12 +496,7 @@ impl Updater {
             return Ok(());
         }
         let staging = self.paths.versions().join(format!("{version}.partial"));
-        match std::fs::remove_dir_all(&staging) {
-            Err(error) if error.kind() != io::ErrorKind::NotFound => {
-                return Err(error.into());
-            }
-            _ => {}
-        }
+        if_present(std::fs::remove_dir_all(&staging))?;
         std::fs::create_dir_all(&staging)?;
         let staged =
             staging.join(binary.file_name().expect("a binary has a name"));
@@ -518,12 +514,7 @@ impl Updater {
             )?;
         }
         let folder = self.paths.version(&version);
-        match std::fs::remove_dir_all(&folder) {
-            Err(error) if error.kind() != io::ErrorKind::NotFound => {
-                return Err(error.into());
-            }
-            _ => {}
-        }
+        if_present(std::fs::remove_dir_all(&folder))?;
         std::fs::rename(&staging, &folder)?;
         Ok(())
     }

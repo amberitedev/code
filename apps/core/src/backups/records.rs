@@ -108,12 +108,10 @@ pub async fn queue_operation(
 ) -> sqlx::Result<i64> {
     let mut tx = db.begin().await?;
     if kind == OpKind::Create {
-        sqlx::query(
-            "UPDATE backups SET state = 'queued', error = NULL WHERE id = ?",
-        )
-        .bind(backup_id)
-        .execute(&mut *tx)
-        .await?;
+        sqlx::query("UPDATE backups SET state = 'queued' WHERE id = ?")
+            .bind(backup_id)
+            .execute(&mut *tx)
+            .await?;
     }
     let id = queue(&mut tx, backup_id, server_id, kind, user_id).await?;
     tx.commit().await?;
@@ -202,16 +200,17 @@ pub async fn start(
     Ok(true)
 }
 
-/// Record how an operation ended. A create's backup becomes done with its size, or failed.
+/// Record how an operation ended, failed with `error` or done. A create's backup becomes done
+/// or failed with it.
 pub async fn finish(
     db: &SqlitePool,
     operation: &Operation,
-    result: Result<u64, &str>,
+    error: Option<&str>,
 ) -> sqlx::Result<()> {
     let mut tx = db.begin().await?;
-    let (state, error) = match result {
-        Ok(_) => (OpState::Done, None),
-        Err(error) => (OpState::Failed, Some(error)),
+    let state = match error {
+        None => OpState::Done,
+        Some(_) => OpState::Failed,
     };
     sqlx::query("UPDATE backup_operations SET state = ?, ended_at = ?, error = ? WHERE id = ?")
         .bind(state)
@@ -221,14 +220,12 @@ pub async fn finish(
         .execute(&mut *tx)
         .await?;
     if operation.kind == OpKind::Create {
-        let (state, size) = match result {
-            Ok(size) => (State::Done, i64::try_from(size).unwrap_or(i64::MAX)),
-            Err(_) => (State::Failed, 0),
+        let state = match error {
+            None => State::Done,
+            Some(_) => State::Failed,
         };
-        sqlx::query("UPDATE backups SET state = ?, size_bytes = ?, error = ? WHERE id = ?")
+        sqlx::query("UPDATE backups SET state = ? WHERE id = ?")
             .bind(state)
-            .bind(size)
-            .bind(error)
             .bind(&operation.backup_id)
             .execute(&mut *tx)
             .await?;
@@ -245,7 +242,7 @@ pub async fn fail_interrupted(db: &SqlitePool) -> sqlx::Result<Vec<Operation>> {
         .fetch_all(db)
         .await?;
     for operation in &interrupted {
-        finish(db, operation, Err("Core stopped while this ran")).await?;
+        finish(db, operation, Some("Core stopped while this ran")).await?;
     }
     Ok(interrupted)
 }

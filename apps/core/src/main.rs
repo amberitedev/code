@@ -14,6 +14,7 @@ mod servers;
 mod state;
 mod storage;
 mod update;
+mod util;
 
 use std::process::ExitCode;
 

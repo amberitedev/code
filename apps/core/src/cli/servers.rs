@@ -6,7 +6,7 @@ use axum::http::Method;
 use clap::{ArgGroup, Subcommand};
 use color_eyre::eyre::{Result, bail};
 use futures::StreamExt;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use tokio_tungstenite::tungstenite::Message;
 
 use super::{Client, Output, Switch, on_off};
@@ -21,6 +21,7 @@ use crate::{
             PowerRequest, ReinstallRequest, Server, ServerGetResponse,
             ServerPowerState,
         },
+        startup::JavaPath,
     },
     servers::restarts::{Schedule, TimeOfDay, Weekday},
 };
@@ -489,12 +490,6 @@ fn describe(server: &Server, insight: &ServerInsight) -> String {
         );
     }
     lines.join("\n")
-}
-
-/// The body of `PUT /servers/{id}/java`, as step 4's `api::startup::JavaPath` has it.
-#[derive(Debug, Serialize)]
-struct JavaPath {
-    path: Option<String>,
 }
 
 fn performance_path(server: &Server) -> String {

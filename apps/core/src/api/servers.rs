@@ -1,12 +1,10 @@
-//! Servers: `GET /modrinth/v0/servers`, `GET /modrinth/v0/servers/{id}` and its `power`, `name`,
+//! Servers: `GET /modrinth/v0/servers`, `GET /modrinth/v0/servers/{id}` and its `power`,
 //! `fs`, `ws`, and `reinstall` routes; `GET /v1/servers`, `GET /v1/servers/{id}`,
 //! `PATCH /v1/servers/{id}/worlds/{wid}`, `GET /v1/servers/{id}/worlds/{wid}/select-download`,
 //! `DELETE /v1/servers/{id}/flows/intro`; and
 //! Amberite's `POST /local/servers` and `DELETE /local/servers/{id}`. Mirrors `Archon.Servers` in
 //! `packages/api-client/src/modules/archon/types.ts` (`archon/servers/v0.ts`, `archon/servers/v1.ts`,
 //! and `createServer` in `archon/cores/v1.ts`).
-
-#![allow(dead_code)] // Wired in step 4: worlds, files, and linked instances.
 
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -33,15 +31,6 @@ use crate::{
     servers::{Phase, ServerError, launch, records},
     state::servers::adapters::sqlite::content_rows,
 };
-
-/// Query of GET `/modrinth/v0/servers`. Mirrors Archon.Servers.v0.GetServersOptions.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ServerListQuery {
-    #[serde(default)]
-    pub limit: Option<u32>,
-    #[serde(default)]
-    pub offset: Option<u32>,
-}
 
 /// Response of GET `/modrinth/v0/servers`. `users` is keyed by user id. Mirrors
 /// Archon.Servers.v0.ServerGetResponse.
@@ -269,13 +258,6 @@ pub struct PowerRequest {
     pub action: PowerAction,
 }
 
-/// Body of POST `/modrinth/v0/servers/{id}/name`. Mirrors the body of
-/// `ArchonServersV0Module.updateName`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RenameRequest {
-    pub name: String,
-}
-
 /// Query of POST `/modrinth/v0/servers/{id}/reinstall`. `hard` erases the server's data first.
 /// Mirrors the `hard` param of `ArchonServersV0Module.reinstall`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -422,23 +404,6 @@ pub struct CreateServerInstance {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateServerResponse {
     pub id: Uuid,
-}
-
-/// Body of PATCH `/local/servers/{id}/linked-instance`: the sharing settings to change. Mirrors
-/// Archon.Servers.v0.LinkedInstanceSettings.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LinkedInstanceSettings {
-    #[serde(default)]
-    pub visible_to_friends: Option<bool>,
-    #[serde(default)]
-    pub shared_instance: Option<SharedInstance>,
-}
-
-/// `id` is null once the instance is no longer shared. Mirrors the `shared_instance` object of
-/// Archon.Servers.v0.LinkedInstanceSettings.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SharedInstance {
-    pub id: Option<String>,
 }
 
 impl From<ServerError> for ApiError {
@@ -757,20 +722,6 @@ pub async fn reinstall(
     result?;
     drop((hold, busy));
     activity::log(&state.db, &caller, Some(&id), Action::ContentChanged).await;
-    Ok(StatusCode::NO_CONTENT)
-}
-
-/// `POST /local/servers/{id}/eula`: the owner accepted the Minecraft EULA for this server.
-pub async fn accept_eula(
-    caller: Caller,
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
-) -> Result<StatusCode, ApiError> {
-    caller.require_owner()?;
-    if !records::accept_eula(&state.db, &id).await? {
-        return Err(ServerError::NotFound(id).into());
-    }
-    activity::log(&state.db, &caller, Some(&id), Action::EulaAccepted).await;
     Ok(StatusCode::NO_CONTENT)
 }
 

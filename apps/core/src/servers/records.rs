@@ -18,7 +18,6 @@ pub struct ServerRow {
     pub memory_mb: i64,
     pub java_path: Option<String>,
     pub java_version: Option<i64>,
-    pub eula_accepted: bool,
     #[sqlx(try_from = "crate::content::modrinth::ChannelText")]
     pub update_channel: VersionType,
 }
@@ -46,7 +45,7 @@ pub struct Ended {
 const DEFAULT_MEMORY_MB: i64 = 2048;
 
 const COLUMNS: &str = "id, name, game_version, loader, loader_version, port, memory_mb, \
-                       java_path, java_version, eula_accepted, update_channel";
+                       java_path, java_version, update_channel";
 
 /// Whether no other program on this machine holds `port`. Minecraft listens on every interface,
 /// TCP for the game and UDP for query and voice mods, so Core tries to bind the same: TCP and
@@ -215,15 +214,6 @@ pub async fn set_update_channel(
         .execute(db)
         .await?;
     Ok(())
-}
-
-pub async fn accept_eula(db: &SqlitePool, id: &str) -> sqlx::Result<bool> {
-    let result =
-        sqlx::query("UPDATE servers SET eula_accepted = 1 WHERE id = ?")
-            .bind(id)
-            .execute(db)
-            .await?;
-    Ok(result.rows_affected() == 1)
 }
 
 pub async fn start_run(
@@ -450,9 +440,6 @@ mod tests {
         let first = create(&db, "A", |_| true).await.unwrap().unwrap();
         let second = create(&db, "B", |_| true).await.unwrap().unwrap();
         assert_eq!(second.port, first.port + 1);
-        assert!(!second.eula_accepted);
-        assert!(accept_eula(&db, &second.id).await.unwrap());
-        assert!(get(&db, &second.id).await.unwrap().unwrap().eula_accepted);
     }
 
     #[tokio::test]

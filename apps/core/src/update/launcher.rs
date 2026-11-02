@@ -202,12 +202,7 @@ fn prepare(paths: &Paths) -> Result<(PathBuf, Option<String>)> {
         && !trial.database_saved
     {
         let marker = versions::marker(paths, &state.active);
-        match std::fs::remove_file(marker) {
-            Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
-                return Err(error.into());
-            }
-            _ => {}
-        }
+        crate::util::if_present(std::fs::remove_file(marker))?;
         versions::save_database(paths)
             .wrap_err("could not copy the database before the update")?;
         trial.database_saved = true;

@@ -57,9 +57,6 @@ CREATE TABLE servers (
     java_path TEXT,
     -- The managed Java major the owner chose; null means the one the Minecraft version needs.
     java_version INTEGER,
-    -- The owner accepted the Minecraft EULA for this server, so Core writes eula=true. Step 8
-    -- replaces it with one acceptance per Core.
-    eula_accepted INTEGER NOT NULL DEFAULT 0,
     -- The least stable Modrinth version type the server's addons and their dependencies are
     -- picked from (a `VersionType`).
     update_channel TEXT NOT NULL DEFAULT 'release'
@@ -157,9 +154,7 @@ CREATE TABLE backups (
     -- Pre-update backups have their own retention, so they do not evict scheduled ones.
     kind TEXT NOT NULL CHECK (kind IN ('manual', 'scheduled', 'pre_update')),
     state TEXT NOT NULL CHECK (state IN ('queued', 'running', 'done', 'failed')),
-    size_bytes INTEGER NOT NULL DEFAULT 0,
-    created_at INTEGER NOT NULL,
-    error TEXT
+    created_at INTEGER NOT NULL
 );
 CREATE INDEX backups_server ON backups (server_id, created_at);
 

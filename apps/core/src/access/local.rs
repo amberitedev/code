@@ -112,12 +112,7 @@ impl Listener {
     /// lock that makes it the only one listening there.
     pub fn bind(path: &Path, mode: u32) -> io::Result<Self> {
         use std::os::unix::fs::PermissionsExt;
-        match std::fs::remove_file(path) {
-            Err(error) if error.kind() != io::ErrorKind::NotFound => {
-                return Err(error);
-            }
-            _ => {}
-        }
+        crate::util::if_present(std::fs::remove_file(path))?;
         let listener = tokio::net::UnixListener::bind(path)?;
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))?;
         Ok(Self {

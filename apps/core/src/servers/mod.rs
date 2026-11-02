@@ -29,7 +29,7 @@ use sqlx::SqlitePool;
 use tokio::sync::broadcast;
 use tracing::{info, warn};
 
-use crate::daemon::paths::Paths;
+use crate::{daemon::paths::Paths, util::if_present};
 use records::{Ended, Outcome};
 use shim::{Connection, ExitStatus, Message, RunRecord, ShimError};
 
@@ -503,12 +503,6 @@ impl Servers {
         if crate::api::eula::accepted_at(&self.db).await?.is_none() {
             return Err(ServerError::Eula);
         }
-        // The owner accepted for every server; `launch` writes `eula.txt` from the server's flag.
-        records::accept_eula(&self.db, id).await?;
-        let server = &records::ServerRow {
-            eula_accepted: true,
-            ..server.clone()
-        };
         // The lease keeps its Java until the shim runs it, when the launch spec does.
         let (mut launch, _java) =
             launch::prepare(&self.paths, &self.http, server, run_id)
@@ -525,12 +519,7 @@ impl Servers {
         std::fs::create_dir_all(self.paths.run(id))?;
         // What an earlier run left must not be mistaken for this one's.
         for stale in [self.paths.run_record(id), self.paths.run_status(id)] {
-            match std::fs::remove_file(stale) {
-                Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
-                    return Err(error.into());
-                }
-                _ => {}
-            }
+            if_present(std::fs::remove_file(stale))?;
         }
         shim::write_json(&self.paths.launch_spec(id), &launch)?;
         records::start_run(
@@ -824,12 +813,7 @@ impl Servers {
             self.paths.run(id),
             self.paths.backups().join(id),
         ] {
-            match std::fs::remove_dir_all(&folder) {
-                Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
-                    return Err(error.into());
-                }
-                _ => {}
-            }
+            if_present(std::fs::remove_dir_all(&folder))?;
         }
         Ok(())
     }
@@ -880,12 +864,7 @@ impl Servers {
         crate::daemon::folders::create_server_folder(&dir.join("tmp"))?;
         std::fs::create_dir_all(self.paths.run(id))?;
         for stale in [self.paths.run_record(id), self.paths.run_status(id)] {
-            match std::fs::remove_file(stale) {
-                Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
-                    return Err(error.into());
-                }
-                _ => {}
-            }
+            if_present(std::fs::remove_file(stale))?;
         }
         let mut full_args = vec![
             "-Xmx1G".to_owned(),

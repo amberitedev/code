@@ -16,7 +16,7 @@ pub mod error;
 pub mod eula;
 pub mod events;
 pub mod files;
-mod health;
+pub mod health;
 mod icon;
 pub mod insight;
 pub mod logs;
@@ -26,7 +26,7 @@ pub mod properties;
 pub mod servers;
 pub mod sessions;
 pub mod share;
-mod startup;
+pub mod startup;
 pub mod storage;
 #[cfg(test)]
 mod tests;
@@ -111,7 +111,6 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/servers/{id}/ws", get(events::console))
         .route("/local/servers", post(servers::create))
         .route("/local/servers/{id}", delete(servers::delete))
-        .route("/local/servers/{id}/eula", post(servers::accept_eula))
         .route("/v1/servers", get(servers::list_v1))
         .route("/v1/servers/{id}", get(servers::get_v1))
         .route("/v1/servers/{id}/worlds/{wid}", patch(servers::patch_world))
