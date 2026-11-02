@@ -550,7 +550,7 @@ async fn linked_instance(
     let Some(pack) = content_rows::get_pack(&state.db, id).await? else {
         return Ok(None);
     };
-    let Some(linked) = pack.link.shared_instance().cloned() else {
+    let Some(linked) = pack.share.clone() else {
         return Ok(None);
     };
     Ok(Some(LinkedInstance {
@@ -843,7 +843,7 @@ async fn server_full(
     // its own once it is shared.
     let linked = content_rows::get_pack(&state.db, &row.id)
         .await?
-        .and_then(|pack| pack.link.shared_instance().cloned());
+        .and_then(|pack| pack.share.clone());
     let shared_instance_id = match linked {
         Some(linked) => Some(linked.shared_instance_id),
         None => server_rows::share_id(&state.db, &row.id).await?,

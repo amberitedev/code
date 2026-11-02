@@ -3,11 +3,8 @@
 mod content_set_remote_ref;
 pub use self::content_set_remote_ref::*;
 
-mod content_set_sync_state;
-pub use self::content_set_sync_state::*;
-
-// content_entry.rs, content_set.rs, file.rs and manifest.rs are compiled by bedrock so Copal
-// shares them.
+// content_entry.rs, content_set.rs, content_set_sync_state.rs, file.rs, link.rs and
+// manifest.rs are compiled by bedrock so Copal shares them.
 pub use bedrock::state::instances::model::*;
 
 mod game_options;
@@ -22,9 +19,6 @@ pub use self::install_candidate::*;
 
 mod launch;
 pub use self::launch::*;
-
-mod link;
-pub use self::link::*;
 
 mod update_check;
 pub use self::update_check::*;

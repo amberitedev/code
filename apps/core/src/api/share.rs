@@ -40,6 +40,7 @@ use crate::{
             sqlite::{content_rows, server_rows},
         },
         domain::server_share::{Carried, carried, removed},
+        modrinth_pack,
     },
 };
 
@@ -251,8 +252,7 @@ async fn snapshot(state: &AppState, id: &str) -> Result<Snapshot, ApiError> {
         content_rows::get_pack(&state.db, id)
             .await?
             .and_then(|pack| {
-                pack.link
-                    .modrinth()
+                modrinth_pack(&pack.link)
                     .map(|(_, version_id)| version_id.to_owned())
             });
     let carried = carried(&listed, &rows, &entry_sides, modpack_id.is_some());

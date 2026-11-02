@@ -10,7 +10,7 @@ use bedrock::state::ContentRequirement;
 pub use bedrock::state::{ContentSet, ContentSetStatus, ContentSourceKind};
 use modrinth_content_management::ContentType;
 
-use super::ServerLink;
+use super::{InstanceLink, SharedInstanceLink};
 
 /// What a pack update wants for a file it found edited.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -107,7 +107,9 @@ pub struct SkippedFile {
 #[derive(Debug, Clone)]
 pub struct Pack {
     pub set: ContentSet,
-    pub link: ServerLink,
+    pub link: InstanceLink,
+    /// The share a `SharedInstance` link's pack is a version of; `None` for every other link.
+    pub share: Option<SharedInstanceLink>,
     /// As the pack's index names it.
     pub version_number: String,
     pub summary: Option<String>,

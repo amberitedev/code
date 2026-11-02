@@ -9,6 +9,10 @@ pub use self::content_entry::*;
 mod content_set;
 pub use self::content_set::*;
 
+#[path = "../../../../../app-lib/src/state/instances/model/content_set_sync_state.rs"]
+mod content_set_sync_state;
+pub use self::content_set_sync_state::*;
+
 #[path = "../../../../../app-lib/src/state/instances/model/file.rs"]
 mod file;
 pub use self::file::*;
@@ -16,6 +20,10 @@ pub use self::file::*;
 #[path = "../../../../../app-lib/src/state/instances/model/manifest.rs"]
 mod manifest;
 pub use self::manifest::*;
+
+#[path = "../../../../../app-lib/src/state/instances/model/link.rs"]
+mod link;
+pub use self::link::*;
 
 /// The error the borrowed `from_str` parsers return, as app-lib's `unknown_value` builds it.
 fn unknown_value(kind: &str, value: &str) -> crate::Error {

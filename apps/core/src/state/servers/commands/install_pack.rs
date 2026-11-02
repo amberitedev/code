@@ -6,7 +6,7 @@
 //! pack and repair finishes the job. Updates copy the world first.
 
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, HashMap},
     path::{Path, PathBuf},
     sync::{
         Arc,
@@ -28,9 +28,8 @@ use crate::{
     },
     servers::Hold,
     state::servers::{
-        Content, ContentSet, ContentSetStatus, ContentSourceKind, Error, Pack,
-        Pending, Progress, ServerLink, SharedInstanceLink, SkippedFile,
-        TrackedFile,
+        Content, ContentSet, ContentSetStatus, ContentSourceKind, Error,
+        InstanceLink, Pack, Pending, Progress, SharedInstanceLink, TrackedFile,
         adapters::filesystem::content_files::DISABLED,
         adapters::{
             filesystem::{
@@ -41,7 +40,10 @@ use crate::{
             network::{content_download, hosts, modrinth},
             sqlite::{content_rows, server_rows},
         },
-        domain::pack::{self, Index, Platform, Source, Step, Wanted},
+        domain::pack::{
+            self, Index, Platform, ServerOn, Source, Split, Step, Wanted,
+        },
+        link_source_kind,
     },
 };
 
@@ -119,7 +121,7 @@ async fn install_pack(
     let id = hold.id();
     let dirs = SharedDirs::new(content.paths.root());
     let repair = matches!(source, PackSource::Current);
-    let (sha1, link) = match source {
+    let (sha1, mut link, share) = match source {
         PackSource::Modrinth {
             project_id,
             version_id,
@@ -135,34 +137,60 @@ async fn install_pack(
                 .await?;
             (
                 sha1,
-                ServerLink::ModrinthModpack {
+                InstanceLink::ModrinthModpack {
                     project_id,
                     version_id,
                 },
+                None,
             )
         }
-        PackSource::Stored { sha1, instance } => (
-            sha1,
-            instance.map_or(
-                ServerLink::ImportedModpack,
-                ServerLink::SharedInstance,
-            ),
-        ),
+        PackSource::Stored { sha1, instance } => {
+            let link = match instance {
+                Some(_) => InstanceLink::SharedInstance {
+                    modpack_project_id: None,
+                    modpack_version_id: None,
+                },
+                None => InstanceLink::ImportedModpack {
+                    project_id: None,
+                    version_id: None,
+                    name: None,
+                    version_number: None,
+                    filename: None,
+                },
+            };
+            (sha1, link, instance)
+        }
         PackSource::Current => {
             let pack = current.ok_or_else(|| {
                 Error::Invalid("This server follows no pack to repair.".into())
             })?;
-            (pack.sha1.clone(), pack.link.clone())
+            (pack.sha1.clone(), pack.link.clone(), pack.share.clone())
         }
     };
     let archive_path = dirs.pack(&sha1);
     let folder = Arc::new(Folder::open(&content.paths.server(id))?);
     let case_insensitive = folder.case_insensitive()?;
     let server_on = content_rows::get_server_overrides(&content.db, id).await?;
-    let (index, wanted, skipped) =
-        read_pack(content, &archive_path, &server_on, case_insensitive).await?;
+    let (
+        index,
+        Split {
+            wanted,
+            skipped,
+            turned_on,
+        },
+    ) = read_pack(content, &archive_path, &server_on, case_insensitive).await?;
     let platform = pack::platform(&index)?;
-    let kind = link.source_kind();
+    // As app-lib names an imported pack: by its index.
+    if let InstanceLink::ImportedModpack {
+        name,
+        version_number,
+        ..
+    } = &mut link
+    {
+        *name = Some(index.name.clone());
+        *version_number = Some(index.version_id.clone());
+    }
+    let kind = link_source_kind(&link);
 
     let server = server_rows::get(&content.db, id)
         .await?
@@ -234,6 +262,7 @@ async fn install_pack(
                 modified: now,
             },
             link,
+            share,
             version_number: index.version_id.clone(),
             summary: index.summary.clone(),
             sha1: sha1.clone(),
@@ -242,6 +271,7 @@ async fn install_pack(
     )
     .await?;
     apply(content, id, &folder, &archive_path, &index, steps, &staged).await?;
+    content_rows::set_server_overrides(&content.db, id, &turned_on).await?;
     content_rows::set_skipped_files(&content.db, id, &skipped).await?;
     if let Some(properties) = properties {
         write_properties(&content.paths.server(id), &properties)?;
@@ -386,14 +416,15 @@ fn allowed_url(url: &str) -> Result<reqwest::Url, Error> {
 /// A pack's index, the files a server takes from it, and its client-only files, read from the
 /// `.mrpack` at `path`. Files the index gives no sides for are looked up on Modrinth by hash;
 /// when Modrinth cannot be reached they are taken, as a server is safer with them. Client-only
-/// files at a path in `server_on` are taken too (see `pack::split`).
+/// files in `server_on` are taken too (see `pack::split`).
 pub async fn read_pack(
     content: &Content,
     path: &Path,
-    server_on: &HashSet<String>,
+    server_on: &ServerOn,
     case_insensitive: bool,
-) -> Result<(Index, BTreeMap<String, Wanted>, Vec<SkippedFile>), Error> {
+) -> Result<(Index, Split), Error> {
     let path = path.to_owned();
+    let room = archive::room(content.paths.root())?;
     let (index, candidates) = tokio::task::spawn_blocking(move || {
         let file = std::fs::File::open(&path)?;
         let mut archive =
@@ -404,6 +435,7 @@ pub async fn read_pack(
             &index,
             &mut archive,
             ModLoader::from(loader).jar_platform(),
+            room,
         )?;
         Ok::<_, Error>((index, candidates))
     })
@@ -420,9 +452,8 @@ pub async fn read_pack(
             pack::Known::new()
         },
     );
-    let (wanted, skipped) =
-        pack::split(candidates, &known, server_on, case_insensitive)?;
-    Ok((index, wanted, skipped))
+    let split = pack::split(candidates, &known, server_on, case_insensitive)?;
+    Ok((index, split))
 }
 
 /// Download every file the plan places from the index, checked, into staging. Returns where each

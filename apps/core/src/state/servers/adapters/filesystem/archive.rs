@@ -153,16 +153,19 @@ pub fn extract<R: Read + Seek>(
 
 /// The SHA-1 and size of the entry at `index`, named `name`, read without unpacking it. The size
 /// is what the entry actually inflates to, not what the archive claims; one that grows like a
-/// zip bomb is refused.
+/// zip bomb is refused. What it inflates to is drawn from `budget`, so hashing every entry of an
+/// archive reads no more than the archive could unpack, and one past it is refused.
 pub fn entry_sha1<R: Read + Seek>(
     archive: &mut zip::ZipArchive<R>,
     index: usize,
     name: &str,
+    budget: &mut u64,
 ) -> Result<(String, u64), ArchiveError> {
     let mut reader =
-        Hashing::new(Inflating::new(archive.by_index(index)?, name, u64::MAX));
+        Hashing::new(Inflating::new(archive.by_index(index)?, name, *budget));
     let size = io::copy(&mut reader, &mut io::sink())
         .map_err(ArchiveError::from_read)?;
+    *budget -= size;
     Ok((reader.finish(), size))
 }
 
@@ -378,12 +381,38 @@ mod tests {
             writer.start_file("overrides/small", deflated).unwrap();
             writer.write_all(&[0; 1000]).unwrap();
         });
+        let mut budget = u64::MAX;
         assert!(matches!(
-            entry_sha1(&mut zip, 0, "overrides/zeros"),
+            entry_sha1(&mut zip, 0, "overrides/zeros", &mut budget),
             Err(ArchiveError::Bomb(_))
         ));
         // A small entry passes whatever its ratio.
-        assert_eq!(entry_sha1(&mut zip, 1, "overrides/small").unwrap().1, 1000);
+        assert_eq!(
+            entry_sha1(&mut zip, 1, "overrides/small", &mut budget)
+                .unwrap()
+                .1,
+            1000
+        );
+    }
+
+    #[test]
+    fn hashing_entries_draws_on_one_budget() {
+        let mut zip = archive(|writer| {
+            file(writer, "overrides/a", &[b'a'; 10]);
+            file(writer, "overrides/b", &[b'b'; 10]);
+        });
+        let mut budget = 15;
+        assert_eq!(
+            entry_sha1(&mut zip, 0, "overrides/a", &mut budget)
+                .unwrap()
+                .1,
+            10
+        );
+        assert_eq!(budget, 5);
+        assert!(matches!(
+            entry_sha1(&mut zip, 1, "overrides/b", &mut budget),
+            Err(ArchiveError::NoRoom(_))
+        ));
     }
 
     #[test]

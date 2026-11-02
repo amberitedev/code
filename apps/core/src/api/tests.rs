@@ -1536,7 +1536,7 @@ async fn a_client_only_pack_file_is_placed_for_the_server_and_taken_back() {
     use crate::{
         installs::shared::SharedDirs,
         state::servers::{
-            ContentSet, ContentSetStatus, Pack, ServerLink, SkippedFile,
+            ContentSet, ContentSetStatus, InstanceLink, Pack, SkippedFile,
         },
     };
 
@@ -1592,7 +1592,14 @@ async fn a_client_only_pack_file_is_placed_for_the_server_and_taken_back() {
                 created: chrono::Utc::now(),
                 modified: chrono::Utc::now(),
             },
-            link: ServerLink::ImportedModpack,
+            link: InstanceLink::ImportedModpack {
+                project_id: None,
+                version_id: None,
+                name: None,
+                version_number: None,
+                filename: None,
+            },
+            share: None,
             version_number: "1".into(),
             summary: None,
             sha1: "pack".into(),
@@ -1659,7 +1666,8 @@ async fn a_client_only_pack_file_is_placed_for_the_server_and_taken_back() {
     assert_eq!(
         content_rows::get_server_overrides(&core.state.db, &server)
             .await
-            .unwrap(),
+            .unwrap()
+            .paths,
         std::collections::HashSet::from(["mods/menu.jar".to_owned()])
     );
 
@@ -1671,6 +1679,7 @@ async fn a_client_only_pack_file_is_placed_for_the_server_and_taken_back() {
         content_rows::get_server_overrides(&core.state.db, &server)
             .await
             .unwrap()
+            .paths
             .is_empty()
     );
 }

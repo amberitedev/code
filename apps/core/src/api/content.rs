@@ -64,6 +64,7 @@ use crate::{
             list_content::{get_linked_modpack_info, list_content, open_jar},
             write_shared_pack as shared,
         },
+        modrinth_pack,
     },
 };
 
@@ -752,7 +753,7 @@ pub async fn enable_many(
 pub async fn server_first(state: &AppState, id: &str) -> Result<(), ApiError> {
     let linked = content_rows::get_pack(&state.db, id)
         .await?
-        .is_some_and(|pack| pack.link.shared_instance().is_some());
+        .is_some_and(|pack| pack.share.is_some());
     if linked {
         return Err(ApiError::new(
             ErrorCode::Conflict,
@@ -1443,7 +1444,7 @@ pub async fn update_modpack(
                     "This server follows no pack.",
                 )
             })?;
-    let Some((project_id, installed_id)) = pack.link.modrinth() else {
+    let Some((project_id, installed_id)) = modrinth_pack(&pack.link) else {
         return Err(ApiError::new(
             ErrorCode::InvalidRequest,
             "This pack came from a file; upload the new file instead.",
@@ -1568,7 +1569,7 @@ pub async fn upload_modpack(
         content_install::read_pack(
             &state.content,
             &stored,
-            &std::collections::HashSet::new(),
+            &Default::default(),
             false,
         )
         .await

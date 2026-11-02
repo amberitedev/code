@@ -193,17 +193,23 @@ CREATE TABLE backup_schedules (
 -- `instance_content_entries`) with `server` for `instance`. Copal's differences are marked
 -- "Copal:". The rows are read and written by `state::servers::adapters::sqlite::content_rows`.
 
--- Where the pack a server follows came from (`state::servers::ServerLink`). A server that follows
--- no pack has no row. Written and deleted with its content set.
+-- Where the pack a server follows came from: app-lib's `InstanceLink`, with the columns of the
+-- variants a server has. A server that follows no pack has no row. Written and deleted with its
+-- content set.
 CREATE TABLE server_links (
     server_id TEXT PRIMARY KEY REFERENCES servers (id) ON DELETE CASCADE,
     -- 'modrinth_modpack', 'imported_modpack' (a file the App uploaded), or 'shared_instance' (a
     -- version of an App instance's share).
     link_kind TEXT NOT NULL
         CHECK (link_kind IN ('modrinth_modpack', 'imported_modpack', 'shared_instance')),
-    -- The Modrinth project and version of a 'modrinth_modpack'.
+    -- The Modrinth project and version of a 'modrinth_modpack', or of the pack an
+    -- 'imported_modpack' or 'shared_instance' is when known.
     modrinth_project_id TEXT,
     modrinth_version_id TEXT,
+    -- An 'imported_modpack' as its index names it, and the file it came in.
+    imported_name TEXT,
+    imported_version_number TEXT,
+    imported_filename TEXT,
     -- The share of a 'shared_instance'.
     shared_instance_id TEXT,
     -- Copal: the version of the share the pack is, and the App instance it came from. app-lib

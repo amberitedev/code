@@ -24,7 +24,7 @@ use crate::{
             sqlite::content_rows,
         },
         domain::sides::Sides,
-        project_type_of,
+        modrinth_pack, project_type_of,
     },
 };
 
@@ -238,7 +238,7 @@ pub async fn get_linked_modpack_info(
         return Ok(None);
     };
     let modrinth = &content.modrinth;
-    let (project, version, has_update) = match pack.link.modrinth() {
+    let (project, version, has_update) = match modrinth_pack(&pack.link) {
         Some((project_id, version_id)) => {
             let (project, version) = tokio::join!(
                 modrinth.project(project_id),
@@ -260,7 +260,7 @@ pub async fn get_linked_modpack_info(
         _ => (None, None, None),
     };
     let linked_state = linked_pack_state(content, id, &pack).await?;
-    let spec = match pack.link.modrinth() {
+    let spec = match modrinth_pack(&pack.link) {
         Some((project_id, version_id)) => ModpackSpec::Modrinth {
             project_id: project_id.to_owned(),
             version_id: version_id.to_owned(),
@@ -300,8 +300,8 @@ pub async fn get_linked_modpack_info(
         downloads: project.as_ref().and_then(|project| project.downloads),
         followers: project.as_ref().and_then(|project| project.followers),
         instance_id: pack
-            .link
-            .shared_instance()
+            .share
+            .as_ref()
             .map(|shared| shared.instance_id.clone()),
         state: Some(linked_state),
         error: pack.error,

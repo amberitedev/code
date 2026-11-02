@@ -86,14 +86,14 @@ pub async fn decide_edited_file(
             let server_on =
                 content_rows::get_server_overrides(&content.db, server_id)
                     .await?;
-            let (index, wanted, _) = read_pack(
+            let (index, split) = read_pack(
                 content,
                 &archive_path,
                 &server_on,
                 folder.case_insensitive()?,
             )
             .await?;
-            let want = wanted.get(path).ok_or_else(|| {
+            let want = split.wanted.get(path).ok_or_else(|| {
                 Error::NotFound(format!("The pack has no {path}."))
             })?;
             if replace {

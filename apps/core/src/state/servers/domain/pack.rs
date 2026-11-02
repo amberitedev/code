@@ -100,6 +100,26 @@ pub enum Source {
     Override(usize),
 }
 
+/// The pack files someone turned on for the server although they are client only: by path, and
+/// by Modrinth project for the ones that have one, so a pack update that renames a file (a new
+/// version's jar is usually named for it) keeps it on.
+#[derive(Debug, Clone, Default)]
+pub struct ServerOn {
+    pub paths: HashSet<String>,
+    pub projects: HashSet<String>,
+}
+
+/// What [`split`] makes of a pack's files.
+#[derive(Debug, Default)]
+pub struct Split {
+    /// The files a server takes, by path.
+    pub wanted: BTreeMap<String, Wanted>,
+    /// The client-only files it leaves out.
+    pub skipped: Vec<SkippedFile>,
+    /// The paths of `wanted` taken only because someone turned them on ([`ServerOn`]).
+    pub turned_on: HashSet<String>,
+}
+
 /// A file the pack wants at a path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Wanted {
@@ -143,12 +163,14 @@ impl Candidate {
 }
 
 /// Every file of a pack, with what the index and, for jars of `overrides/`, their metadata say
-/// about their sides. `loader` is the pack's, whose
-/// jar metadata is read first.
+/// about their sides. `loader` is the pack's, whose jar metadata is read first. Every override is
+/// inflated to hash it, all of them drawing on `room` (see `archive::room`): a pack whose
+/// overrides do not fit on the disk could not be installed anyway.
 pub fn candidates<R: Read + Seek>(
     index: &Index,
     archive: &mut zip::ZipArchive<R>,
     loader: Option<JarPlatform>,
+    mut room: u64,
 ) -> Result<Vec<Candidate>, PackError> {
     let mut candidates = Vec::new();
     for (n, file) in index.files.iter().enumerate() {
@@ -178,7 +200,8 @@ pub fn candidates<R: Read + Seek>(
             else {
                 continue;
             };
-            let (sha1, size) = archive::entry_sha1(archive, n, entry)?;
+            let (sha1, size) =
+                archive::entry_sha1(archive, n, entry, &mut room)?;
             let jar = if env.is_none() && path.ends_with(".jar") {
                 jar_environment(archive, n, size, loader)
             } else {
@@ -200,14 +223,21 @@ pub fn candidates<R: Read + Seek>(
     Ok(candidates)
 }
 
+/// The largest jar of `overrides/` whose metadata is read. A jar is read into memory whole to
+/// inspect it; one past this is not inspected, and is taken unless Modrinth knows it.
+const MAX_INSPECTED_JAR: u64 = 128 * 1024 * 1024;
+
 /// The sides the jar at entry `n` of the pack names in its metadata. Best effort: `None` for a
-/// jar that cannot be read.
+/// jar that cannot be read or is too large to read ([`MAX_INSPECTED_JAR`]).
 fn jar_environment<R: Read + Seek>(
     archive: &mut zip::ZipArchive<R>,
     n: usize,
     size: u64,
     loader: Option<JarPlatform>,
 ) -> Option<JarEnvironment> {
+    if size > MAX_INSPECTED_JAR {
+        return None;
+    }
     let mut bytes = Vec::with_capacity(usize::try_from(size).ok()?);
     archive
         .by_index(n)
@@ -227,17 +257,18 @@ pub type Known = HashMap<String, (Version, Option<VersionEnvironment>)>;
 
 /// The files a server takes, by path, and the ones it leaves out because they are client only,
 /// by bedrock's rule (`server_takes`): the index first, then Modrinth by hash, then a jar's own
-/// metadata. `server-overrides/` wins over `overrides/`. A client-only file at a path in
-/// `server_on` is taken anyway: someone turned it on for the server. A download the server takes
-/// must come from an allowed host.
+/// metadata. `server-overrides/` wins over `overrides/`. A client-only file in `server_on`, by
+/// path or Modrinth project, is taken anyway: someone turned it on for the server. A download
+/// the server takes must come from an allowed host.
 pub fn split(
     candidates: Vec<Candidate>,
     known: &Known,
-    server_on: &HashSet<String>,
+    server_on: &ServerOn,
     case_insensitive: bool,
-) -> Result<(BTreeMap<String, Wanted>, Vec<SkippedFile>), PackError> {
+) -> Result<Split, PackError> {
     let mut wanted = BTreeMap::new();
     let mut skipped = Vec::new();
+    let mut turned_on = HashSet::new();
     // Two spellings of one file are refused; the same spelling twice is an override.
     let mut spellings: HashMap<String, String> = HashMap::new();
     for candidate in candidates {
@@ -245,31 +276,32 @@ pub fn split(
             .ask_modrinth()
             .then(|| known.get(&candidate.wanted.sha1))
             .flatten();
-        let skip = |candidate: Candidate| {
-            let (project_id, version_id) = modrinth
-                .map(|(version, _)| {
-                    (version.project_id.clone(), version.id.clone())
-                })
-                .or_else(|| {
-                    candidate.downloads.iter().find_map(|url| ids_from_cdn(url))
-                })
-                .unzip();
-            SkippedFile {
-                relative_path: candidate.path,
-                sha1: candidate.wanted.sha1,
-                size: candidate.wanted.size,
-                project_id,
-                version_id,
-            }
+        let (project_id, version_id) = modrinth
+            .map(|(version, _)| {
+                (version.project_id.clone(), version.id.clone())
+            })
+            .or_else(|| {
+                candidate.downloads.iter().find_map(|url| ids_from_cdn(url))
+            })
+            .unzip();
+        let client_only = !server_takes(
+            candidate.env.as_ref(),
+            modrinth.and_then(|(_, environment)| *environment),
+            candidate.jar,
+        );
+        let on = client_only
+            && (server_on.paths.contains(&candidate.path)
+                || project_id
+                    .as_ref()
+                    .is_some_and(|id| server_on.projects.contains(id)));
+        let skip = |candidate: Candidate| SkippedFile {
+            relative_path: candidate.path,
+            sha1: candidate.wanted.sha1,
+            size: candidate.wanted.size,
+            project_id,
+            version_id,
         };
-        let turned_on = server_on.contains(&candidate.path);
-        if !turned_on
-            && !server_takes(
-                candidate.env.as_ref(),
-                modrinth.and_then(|(_, environment)| *environment),
-                candidate.jar,
-            )
-        {
+        if client_only && !on {
             skipped.push(skip(candidate));
             continue;
         }
@@ -279,7 +311,7 @@ pub fn split(
                     .is_ok_and(|url| hosts::allowed(&url, false))
             });
         // A file turned on by hand stays client only rather than fail the whole pack.
-        if !usable && turned_on {
+        if !usable && on {
             skipped.push(skip(candidate));
             continue;
         }
@@ -292,13 +324,22 @@ pub fn split(
                 return Err(PackError::Collision(other, path));
             }
             _ => {
+                if on {
+                    turned_on.insert(path.clone());
+                } else {
+                    turned_on.remove(&path);
+                }
                 wanted.insert(path, candidate.wanted);
             }
         }
     }
     // A file the server takes from elsewhere in the pack is not left out.
     skipped.retain(|file| !wanted.contains_key(&file.relative_path));
-    Ok((wanted, skipped))
+    Ok(Split {
+        wanted,
+        skipped,
+        turned_on,
+    })
 }
 
 /// One thing an install does to a path.
@@ -908,13 +949,21 @@ mod tests {
         let mut archive =
             zip::ZipArchive::new(writer.finish().unwrap()).unwrap();
         let index = read_index(&mut archive).unwrap();
-        let candidates = candidates(&index, &mut archive, None).unwrap();
+        let candidates =
+            candidates(&index, &mut archive, None, u64::MAX).unwrap();
         assert!(matches!(
-            split(candidates.clone(), &Known::new(), &HashSet::new(), true),
+            split(
+                candidates.clone(),
+                &Known::new(),
+                &ServerOn::default(),
+                true
+            ),
             Err(PackError::Collision(..))
         ));
-        let (both, _) =
-            split(candidates, &Known::new(), &HashSet::new(), false).unwrap();
+        let both =
+            split(candidates, &Known::new(), &ServerOn::default(), false)
+                .unwrap()
+                .wanted;
         assert_eq!(both.len(), 2);
         assert_eq!(both["config/a.toml"].size, 1);
     }
@@ -967,9 +1016,13 @@ mod tests {
         let mut archive =
             zip::ZipArchive::new(writer.finish().unwrap()).unwrap();
         let index = read_index(&mut archive).unwrap();
-        let candidates =
-            candidates(&index, &mut archive, Some(JarPlatform::Fabric))
-                .unwrap();
+        let candidates = candidates(
+            &index,
+            &mut archive,
+            Some(JarPlatform::Fabric),
+            u64::MAX,
+        )
+        .unwrap();
         let asked = candidates
             .iter()
             .find(|candidate| candidate.path == "mods/asked.jar")
@@ -982,19 +1035,43 @@ mod tests {
             asked.wanted.sha1.clone(),
             (version, Some(VersionEnvironment::ClientOnly)),
         )]);
-        let (turned_on, _) = split(
+        let by_path = split(
             candidates.clone(),
             &known,
-            &HashSet::from(["mods/client.jar".to_owned()]),
+            &ServerOn {
+                paths: HashSet::from(["mods/client.jar".to_owned()]),
+                ..ServerOn::default()
+            },
             false,
         )
         .unwrap();
         assert!(
-            turned_on.contains_key("mods/client.jar"),
+            by_path.wanted.contains_key("mods/client.jar"),
             "a client-only file someone turned on is the server's"
         );
-        let (wanted, skipped) =
-            split(candidates, &known, &HashSet::new(), false).unwrap();
+        assert_eq!(
+            by_path.turned_on,
+            HashSet::from(["mods/client.jar".to_owned()])
+        );
+        // An update names a new version's jar for it: the project it is a file of stays on.
+        let by_project = split(
+            candidates.clone(),
+            &known,
+            &ServerOn {
+                paths: HashSet::from(["mods/client-0.9.jar".to_owned()]),
+                projects: HashSet::from(["P".to_owned()]),
+            },
+            false,
+        )
+        .unwrap();
+        assert!(by_project.wanted.contains_key("mods/client.jar"));
+        assert!(by_project.turned_on.contains("mods/client.jar"));
+        let Split {
+            wanted,
+            skipped,
+            turned_on,
+        } = split(candidates, &known, &ServerOn::default(), false).unwrap();
+        assert!(turned_on.is_empty());
 
         assert_eq!(
             wanted.keys().collect::<Vec<_>>(),

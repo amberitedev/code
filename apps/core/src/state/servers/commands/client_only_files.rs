@@ -32,15 +32,15 @@ pub async fn place_client_only_file(
     let path = skipped.relative_path;
     let mut server_on =
         content_rows::get_server_overrides(&content.db, server_id).await?;
-    server_on.insert(path.clone());
-    let (index, wanted, _) = read_pack(
+    server_on.paths.insert(path.clone());
+    let (index, split) = read_pack(
         content,
         &archive_path,
         &server_on,
         folder.case_insensitive()?,
     )
     .await?;
-    let want = wanted.get(&path).ok_or_else(|| {
+    let want = split.wanted.get(&path).ok_or_else(|| {
         Error::Invalid(format!(
             "The pack cannot place {path} on a server: it is not on a host packs may download from."
         ))

@@ -14,10 +14,11 @@ use sqlx::{SqliteExecutor, SqlitePool};
 use crate::{
     access::sync::owe,
     api::backend::{ForgetPlayers, OwedCall},
+    state::servers::domain::pack::ServerOn,
     state::servers::model::{
-        ContentSet, ContentSetStatus, ContentSourceKind, EntrySides, Pack,
-        Pending, PendingPack, ServerLink, SharedInstanceLink, SkippedFile,
-        TrackedFile, project_type_of,
+        ContentSet, ContentSetStatus, ContentSourceKind, EntrySides,
+        InstanceLink, Pack, Pending, PendingPack, SharedInstanceLink,
+        SkippedFile, TrackedFile, project_type_of,
     },
 };
 
@@ -88,6 +89,9 @@ struct ContentSetRow {
     link_kind: String,
     modrinth_project_id: Option<String>,
     modrinth_version_id: Option<String>,
+    imported_name: Option<String>,
+    imported_version_number: Option<String>,
+    imported_filename: Option<String>,
     shared_instance_id: Option<String>,
     shared_instance_version: Option<i64>,
     instance_id: Option<String>,
@@ -97,30 +101,47 @@ struct ContentSetRow {
 const PACK_COLUMNS: &str = "s.id, s.server_id, s.name, s.source_kind, s.status, s.game_version, \
      s.protocol_version, s.loader, s.loader_version, s.created, s.modified, s.version_number, \
      s.summary, s.sha1, s.error, l.link_kind, l.modrinth_project_id, l.modrinth_version_id, \
-     l.shared_instance_id, l.shared_instance_version, l.instance_id, l.instance_name";
+     l.imported_name, l.imported_version_number, l.imported_filename, l.shared_instance_id, l.shared_instance_version, l.instance_id, l.instance_name";
 
 impl ContentSetRow {
-    /// The link, from its columns as app-lib's `InstanceLinkRow` reads them.
-    fn link(&self) -> sqlx::Result<ServerLink> {
+    /// The link and, for a share's pack, its share, from their columns as app-lib's
+    /// `InstanceLinkRow` reads them.
+    fn link(&self) -> sqlx::Result<(InstanceLink, Option<SharedInstanceLink>)> {
         let missing = |column: &str| {
             sqlx::Error::Decode(
                 format!("a {} link has no {column}", self.link_kind).into(),
             )
         };
         Ok(match self.link_kind.as_str() {
-            "modrinth_modpack" => ServerLink::ModrinthModpack {
-                project_id: self
-                    .modrinth_project_id
-                    .clone()
-                    .ok_or_else(|| missing("modrinth_project_id"))?,
-                version_id: self
-                    .modrinth_version_id
-                    .clone()
-                    .ok_or_else(|| missing("modrinth_version_id"))?,
-            },
-            "imported_modpack" => ServerLink::ImportedModpack,
-            "shared_instance" => {
-                ServerLink::SharedInstance(SharedInstanceLink {
+            "modrinth_modpack" => (
+                InstanceLink::ModrinthModpack {
+                    project_id: self
+                        .modrinth_project_id
+                        .clone()
+                        .ok_or_else(|| missing("modrinth_project_id"))?,
+                    version_id: self
+                        .modrinth_version_id
+                        .clone()
+                        .ok_or_else(|| missing("modrinth_version_id"))?,
+                },
+                None,
+            ),
+            "imported_modpack" => (
+                InstanceLink::ImportedModpack {
+                    project_id: self.modrinth_project_id.clone(),
+                    version_id: self.modrinth_version_id.clone(),
+                    name: self.imported_name.clone(),
+                    version_number: self.imported_version_number.clone(),
+                    filename: self.imported_filename.clone(),
+                },
+                None,
+            ),
+            "shared_instance" => (
+                InstanceLink::SharedInstance {
+                    modpack_project_id: self.modrinth_project_id.clone(),
+                    modpack_version_id: self.modrinth_version_id.clone(),
+                },
+                Some(SharedInstanceLink {
                     instance_id: self
                         .instance_id
                         .clone()
@@ -136,8 +157,8 @@ impl ContentSetRow {
                     version: self
                         .shared_instance_version
                         .ok_or_else(|| missing("shared_instance_version"))?,
-                })
-            }
+                }),
+            ),
             other => {
                 return Err(sqlx::Error::Decode(
                     format!("unknown server link kind {other}").into(),
@@ -147,12 +168,72 @@ impl ContentSetRow {
     }
 }
 
+/// The `server_links` columns of a link, as app-lib's `instance_link_columns` builds them:
+/// kind, Modrinth project and version, imported name, version number and filename.
+type LinkColumns<'a> = (
+    &'static str,
+    Option<&'a str>,
+    Option<&'a str>,
+    Option<&'a str>,
+    Option<&'a str>,
+    Option<&'a str>,
+);
+
+/// A server follows only the three kinds of link `server_links` allows.
+fn link_columns(link: &InstanceLink) -> sqlx::Result<LinkColumns<'_>> {
+    Ok(match link {
+        InstanceLink::ModrinthModpack {
+            project_id,
+            version_id,
+        } => (
+            "modrinth_modpack",
+            Some(project_id),
+            Some(version_id),
+            None,
+            None,
+            None,
+        ),
+        InstanceLink::ImportedModpack {
+            project_id,
+            version_id,
+            name,
+            version_number,
+            filename,
+        } => (
+            "imported_modpack",
+            project_id.as_deref(),
+            version_id.as_deref(),
+            name.as_deref(),
+            version_number.as_deref(),
+            filename.as_deref(),
+        ),
+        InstanceLink::SharedInstance {
+            modpack_project_id,
+            modpack_version_id,
+        } => (
+            "shared_instance",
+            modpack_project_id.as_deref(),
+            modpack_version_id.as_deref(),
+            None,
+            None,
+            None,
+        ),
+        other => {
+            return Err(sqlx::Error::Encode(
+                format!("a server cannot follow a {other:?} link").into(),
+            ));
+        }
+    })
+}
+
 impl TryFrom<ContentSetRow> for Pack {
     type Error = sqlx::Error;
 
     fn try_from(row: ContentSetRow) -> sqlx::Result<Self> {
+        let (link, share) = row.link()?;
         Ok(Self {
-            link: row.link()?,
+            link,
+            share,
             set: ContentSet {
                 id: row.id,
                 instance_id: row.server_id,
@@ -511,13 +592,13 @@ pub async fn return_to_client_only(
     tx.commit().await
 }
 
-/// The paths of the pack's client-only files someone turned on for the server.
+/// The pack's client-only files someone turned on for the server.
 pub async fn get_server_overrides(
     db: impl SqliteExecutor<'_>,
     server_id: &str,
-) -> sqlx::Result<HashSet<String>> {
-    let paths: Vec<String> = sqlx::query_scalar(
-        "SELECT f.relative_path FROM server_files f \
+) -> sqlx::Result<ServerOn> {
+    let rows: Vec<(String, Option<String>)> = sqlx::query_as(
+        "SELECT f.relative_path, e.project_id FROM server_files f \
          JOIN server_content_entries e ON e.file_id = f.id \
          WHERE f.server_id = ? AND f.missing = 0 AND e.server_override = 1 \
          AND e.source_kind != 'local'",
@@ -525,7 +606,33 @@ pub async fn get_server_overrides(
     .bind(server_id)
     .fetch_all(db)
     .await?;
-    Ok(paths.into_iter().collect())
+    let mut on = ServerOn::default();
+    for (path, project_id) in rows {
+        on.paths.insert(path);
+        on.projects.extend(project_id);
+    }
+    Ok(on)
+}
+
+/// Mark the pack files at `paths` as turned on for the server by hand
+/// ([`EntrySides::server_override`]): a pack update placed them only because they were.
+pub async fn set_server_overrides(
+    db: &SqlitePool,
+    server_id: &str,
+    paths: &HashSet<String>,
+) -> sqlx::Result<()> {
+    for path in paths {
+        sqlx::query(
+            "UPDATE server_content_entries SET server_override = 1, sides_unlocked = 1 \
+             WHERE file_id = (SELECT id FROM server_files \
+             WHERE server_id = ? AND relative_path = ? AND missing = 0)",
+        )
+        .bind(server_id)
+        .bind(path)
+        .execute(db)
+        .await?;
+    }
+    Ok(())
 }
 
 /// The client-only files of the pack the server follows, by path.
@@ -580,7 +687,7 @@ pub async fn set_pack(
     .fetch_optional(&mut *tx)
     .await?
     .flatten();
-    let shared = pack.link.shared_instance();
+    let shared = pack.share.as_ref();
     let shared_instance_id = shared.map(|shared| &shared.shared_instance_id);
     if followed.is_some() && followed.as_ref() != shared_instance_id {
         forget_players(&mut tx, server_id, followed.clone()).await?;
@@ -621,17 +728,27 @@ pub async fn set_pack(
     .bind(&pack.error)
     .execute(&mut *tx)
     .await?;
-    let (modrinth_project_id, modrinth_version_id) =
-        pack.link.modrinth().unzip();
+    let (
+        link_kind,
+        modrinth_project_id,
+        modrinth_version_id,
+        imported_name,
+        imported_version_number,
+        imported_filename,
+    ) = link_columns(&pack.link)?;
     sqlx::query(
         "INSERT OR REPLACE INTO server_links (server_id, link_kind, modrinth_project_id, \
-         modrinth_version_id, shared_instance_id, shared_instance_version, instance_id, \
-         instance_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+         modrinth_version_id, imported_name, imported_version_number, imported_filename, \
+         shared_instance_id, shared_instance_version, instance_id, instance_name) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(server_id)
-    .bind(pack.link.kind())
+    .bind(link_kind)
     .bind(modrinth_project_id)
     .bind(modrinth_version_id)
+    .bind(imported_name)
+    .bind(imported_version_number)
+    .bind(imported_filename)
     .bind(shared_instance_id)
     .bind(shared.map(|shared| shared.version))
     .bind(shared.map(|shared| &shared.instance_id))
@@ -817,16 +934,26 @@ mod tests {
                 modified: Utc::now(),
             },
             link: match shared_instance_id {
-                Some(shared_instance_id) => {
-                    ServerLink::SharedInstance(SharedInstanceLink {
-                        instance_id: "i".into(),
-                        instance_name: "Instance".into(),
-                        shared_instance_id: shared_instance_id.into(),
-                        version: 1,
-                    })
-                }
-                None => ServerLink::ImportedModpack,
+                Some(_) => InstanceLink::SharedInstance {
+                    modpack_project_id: None,
+                    modpack_version_id: None,
+                },
+                None => InstanceLink::ImportedModpack {
+                    project_id: None,
+                    version_id: None,
+                    name: None,
+                    version_number: None,
+                    filename: None,
+                },
             },
+            share: shared_instance_id.map(|shared_instance_id| {
+                SharedInstanceLink {
+                    instance_id: "i".into(),
+                    instance_name: "Instance".into(),
+                    shared_instance_id: shared_instance_id.into(),
+                    version: 1,
+                }
+            }),
             version_number: "1".into(),
             summary: None,
             sha1: "a".repeat(40),
@@ -869,10 +996,11 @@ mod tests {
         let db = server().await;
         set_pack(&db, "s1", &pack(Some("share-a"))).await.unwrap();
         let stored = get_pack(&db, "s1").await.unwrap().unwrap();
+        assert!(matches!(stored.link, InstanceLink::SharedInstance { .. }));
         assert_eq!(
-            stored.link,
-            pack(Some("share-a")).link,
-            "the link reads back"
+            stored.share,
+            pack(Some("share-a")).share,
+            "the share reads back"
         );
         let id = stored.set.id;
         set_pack(&db, "s1", &pack(Some("share-a"))).await.unwrap();
