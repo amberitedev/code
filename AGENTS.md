@@ -200,7 +200,8 @@ An empty environment is a bad test. Worktrees get an isolated copy of the primar
 
 - `apps/app-frontend` - Vue desktop product UI and inherited Modrinth launcher pages.
 - `apps/app` - Tauri shell, native commands, capabilities, and process integration.
-- `apps/core` - Copal, the Rust server manager.
+- `apps/core` - Copal, the Rust server manager. Its server content is in app-lib's layout under
+  `src/state/servers/`; `src/api/` holds the HTTP routes.
 - `packages/sharing-storage` - the store: a child process of `copal` that holds encrypted shared
   files for the pool. It has no identity of its own: the Core forwards `/store/` on its one port to
   it unread, manages it over stdio, and reports for it (`apps/core/src/storage.rs`). It has no
