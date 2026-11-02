@@ -143,7 +143,7 @@ async fn configs_on_disk<'a>(
     files: &'a [ManifestFile],
     state: &State,
 ) -> crate::Result<Vec<&'a ManifestFile>> {
-    use futures::StreamExt;
+    use futures::{StreamExt, future::BoxFuture};
 
     let files = files
         .iter()
@@ -156,19 +156,26 @@ async fn configs_on_disk<'a>(
         crate::api::instance::InstanceFileWriter::new(state, instance_id)
             .await?;
     let writer = &writer;
-    Ok(futures::stream::iter(files)
-        .map(|file| async move {
-            crate::install::instance_has_shared_file(
-                writer,
-                state,
-                &file.file_name,
-                file.file_size,
-                Some(&file.sha1),
-            )
-            .await
-            .unwrap_or(false)
-            .then_some(file)
+    // Boxed as Send first: a stream of borrowing closures makes the Tauri command's future fail
+    // the higher-ranked Send check.
+    let checks = files
+        .into_iter()
+        .map(|file| -> BoxFuture<'_, Option<&'a ManifestFile>> {
+            Box::pin(async move {
+                crate::install::instance_has_shared_file(
+                    writer,
+                    state,
+                    &file.file_name,
+                    file.file_size,
+                    Some(&file.sha1),
+                )
+                .await
+                .unwrap_or(false)
+                .then_some(file)
+            })
         })
+        .collect::<Vec<_>>();
+    Ok(futures::stream::iter(checks)
         .buffer_unordered(CONFIG_HASH_CONCURRENCY)
         .filter_map(std::future::ready)
         .collect()
