@@ -25,7 +25,7 @@ pub fn removed(
 ) -> Vec<RemovedFile> {
     let mut pack_rows = rows
         .values()
-        .filter(|row| row.from_pack())
+        .filter(|row| row.by_pack())
         .collect::<Vec<_>>();
     pack_rows.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
     let mut removed = Vec::new();
@@ -103,7 +103,7 @@ pub fn carried(
         .iter()
         .filter(|item| Sides::of(item, toggles.get(&item.path)).for_players())
         .filter(|item| {
-            !modpack || rows.get(&item.path).is_none_or(|row| !row.from_pack())
+            !modpack || rows.get(&item.path).is_none_or(|row| !row.by_pack())
         })
         .filter_map(|item| {
             let file_type = match item.kind {

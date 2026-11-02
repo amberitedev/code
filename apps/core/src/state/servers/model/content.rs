@@ -56,7 +56,7 @@ pub struct TrackedFile {
 
 impl TrackedFile {
     /// Whether the pack the server follows put it there.
-    pub fn from_pack(&self) -> bool {
+    pub fn by_pack(&self) -> bool {
         self.source_kind != ContentSourceKind::Local
     }
 }

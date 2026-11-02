@@ -290,6 +290,8 @@ pub fn split(
 }
 
 /// One thing an install does to a path.
+// A plan is made once per install, so boxing the large variant saves nothing worth having.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Step {
     /// Write the pack's file, then record `row`. `row` is `None` for a server-owned file, which
@@ -376,7 +378,7 @@ pub fn plan(
     };
     // A row of the pack takes the new pack's kind; one someone added stays theirs.
     let origin = |row: &TrackedFile| {
-        if row.from_pack() {
+        if row.by_pack() {
             kind
         } else {
             ContentSourceKind::Local
@@ -453,7 +455,7 @@ pub fn plan(
             }
             // Nothing there: the pack places it, unless the owner deleted a pack file.
             (None, None) => place(),
-            (Some(row), None) if repair || !row.from_pack() => place(),
+            (Some(row), None) if repair || !row.by_pack() => place(),
             (Some(row), None) if row.sha1 == want.sha1 => {
                 keep(row, &row.sha1, kind, None)
             }
@@ -461,13 +463,11 @@ pub fn plan(
                 keep(row, &row.sha1, kind, Some(Pending::Changed))
             }
             // A pack file as Core placed it: replace it with the new one.
-            (Some(row), Some(sha1)) if row.from_pack() && sha1 == row.sha1 => {
+            (Some(row), Some(sha1)) if row.by_pack() && sha1 == row.sha1 => {
                 place()
             }
             // Edited, but the pack did not change it: the edit stays, nothing to decide.
-            (Some(row), Some(_))
-                if row.from_pack() && row.sha1 == want.sha1 =>
-            {
+            (Some(row), Some(_)) if row.by_pack() && row.sha1 == want.sha1 => {
                 keep(row, &row.sha1, kind, None)
             }
             // Edited, and the pack has a new version: the owner decides.
@@ -488,7 +488,7 @@ pub fn plan(
         steps.push(step);
     }
     for row in rows.values() {
-        if !row.from_pack() || wanted_keys.contains(&key(&row.relative_path)) {
+        if !row.by_pack() || wanted_keys.contains(&key(&row.relative_path)) {
             continue;
         }
         // The path became the server's (its world was renamed to it): never deleted.
@@ -531,8 +531,8 @@ pub fn edited<'a>(
     rows.iter()
         .filter_map(|row| {
             let on_disk = sha1(&row.relative_path);
-            let changed = row.from_pack()
-                && on_disk.as_deref() != Some(row.sha1.as_str());
+            let changed =
+                row.by_pack() && on_disk.as_deref() != Some(row.sha1.as_str());
             (changed || row.pending.is_some()).then_some((row, on_disk))
         })
         .collect()

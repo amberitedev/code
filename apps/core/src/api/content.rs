@@ -577,7 +577,7 @@ async fn addon_list(
                 side_toggle_unlocked: toggle
                     .is_some_and(|toggle| toggle.unlocked),
                 kind: item.kind,
-                from_modpack: row.is_some_and(TrackedFile::from_pack),
+                from_modpack: row.is_some_and(TrackedFile::by_pack),
                 status: AddonStatus::Installed,
                 pack_client_retained: false,
                 pack_client_depends: false,

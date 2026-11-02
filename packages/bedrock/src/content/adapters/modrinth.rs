@@ -134,29 +134,6 @@ impl Modrinth {
         self.get(format!("{API}/version/{id}")).await
     }
 
-    /// A project's versions, newest first, that run on one of `loaders` and `game_version`.
-    /// No loaders means any (packs, datapacks on Vanilla).
-    pub async fn versions(
-        &self,
-        project: &str,
-        loaders: &[&str],
-        game_version: Option<&str>,
-    ) -> Result<Vec<Version>, ModrinthError> {
-        let mut query = Vec::new();
-        if !loaders.is_empty() {
-            query.push(format!("loaders={}", json_query(&loaders)));
-        }
-        if let Some(game_version) = game_version {
-            query
-                .push(format!("game_versions={}", json_query(&[game_version])));
-        }
-        self.get(format!(
-            "{API}/project/{project}/version?{}",
-            query.join("&")
-        ))
-        .await
-    }
-
     pub async fn project(&self, id: &str) -> Result<Project, ModrinthError> {
         self.get(format!("{API}/project/{id}")).await
     }

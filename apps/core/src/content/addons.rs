@@ -379,7 +379,7 @@ async fn place_version(
     placed??;
     for row in old {
         // A pack file's row stays, so the pack does not put it back; its sides moved on.
-        if row.from_pack() {
+        if row.by_pack() {
             content_rows::set_entry_sides(
                 &content.db,
                 server_id,
@@ -449,7 +449,7 @@ pub async fn remove(
     let (path, on_disk) = locate(&folder, kind, filename)?;
     folder.remove(&on_disk)?;
     match content_rows::get_tracked_file(&content.db, server_id, &path).await? {
-        Some((row, _)) if row.from_pack() => {
+        Some((row, _)) if row.by_pack() => {
             content_rows::set_entry_sides(
                 &content.db,
                 server_id,
@@ -790,7 +790,7 @@ pub async fn upload(
     let pack_file =
         content_rows::get_tracked_file(&content.db, server_id, &path)
             .await?
-            .is_some_and(|(row, _)| row.from_pack());
+            .is_some_and(|(row, _)| row.by_pack());
     if !pack_file {
         content_rows::upsert_tracked_file(
             &content.db,
