@@ -188,10 +188,30 @@ CREATE TABLE backup_schedules (
     skipped_at INTEGER
 );
 
--- Content is the files on disk. These three tables record where each tracked file came from, in
--- app-lib's shape (`instance_content_sets`, `instance_files`, `instance_content_entries`) with
--- `server` for `instance`. Copal's differences are marked "Copal:". The rows are read and written
--- by `state::servers::adapters::sqlite::content_rows`.
+-- Content is the files on disk. These four tables record where each tracked file came from, in
+-- app-lib's shape (`instance_links`, `instance_content_sets`, `instance_files`,
+-- `instance_content_entries`) with `server` for `instance`. Copal's differences are marked
+-- "Copal:". The rows are read and written by `state::servers::adapters::sqlite::content_rows`.
+
+-- Where the pack a server follows came from (`state::servers::ServerLink`). A server that follows
+-- no pack has no row. Written and deleted with its content set.
+CREATE TABLE server_links (
+    server_id TEXT PRIMARY KEY REFERENCES servers (id) ON DELETE CASCADE,
+    -- 'modrinth_modpack', 'imported_modpack' (a file the App uploaded), or 'shared_instance' (a
+    -- version of an App instance's share).
+    link_kind TEXT NOT NULL
+        CHECK (link_kind IN ('modrinth_modpack', 'imported_modpack', 'shared_instance')),
+    -- The Modrinth project and version of a 'modrinth_modpack'.
+    modrinth_project_id TEXT,
+    modrinth_version_id TEXT,
+    -- The share of a 'shared_instance'.
+    shared_instance_id TEXT,
+    -- Copal: the version of the share the pack is, and the App instance it came from. app-lib
+    -- keeps an instance's applied share version with its shared-instance attachment.
+    shared_instance_version INTEGER,
+    instance_id TEXT,
+    instance_name TEXT
+);
 
 -- The pack a server follows, as a content set. A server has at most one; unlinking deletes it
 -- and keeps the files, as files someone added.
@@ -211,22 +231,12 @@ CREATE TABLE server_content_sets (
     loader_version TEXT,
     created INTEGER NOT NULL,
     modified INTEGER NOT NULL,
-    -- Copal: every column from here on, which app-lib keeps in `instance_links` and
-    -- `instance_content_set_remote_refs`; a server follows at most one pack, so they live on its
-    -- set. Where the pack came from: the Modrinth project and version, or null for a pack file
-    -- the App uploaded.
-    project_id TEXT,
-    version_id TEXT,
-    -- As the pack's index names them.
+    -- Copal: every column from here on, about the pack file itself. As the pack's index names
+    -- them.
     version_number TEXT NOT NULL,
     summary TEXT,
     -- SHA-1 of the .mrpack, kept in `meta/packs/`.
     sha1 TEXT NOT NULL,
-    -- The App instance the pack came from, and the version of its share it is.
-    instance_id TEXT,
-    instance_name TEXT,
-    shared_instance_id TEXT,
-    shared_version INTEGER,
     -- Why the last install, update, or repair failed. Cleared by the next one that works, or by
     -- unlinking.
     error TEXT

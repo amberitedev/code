@@ -1,4 +1,4 @@
-//! The rows of a server's content tables (`server_content_sets`, `server_files`,
+//! The rows of a server's content tables (`server_links`, `server_content_sets`, `server_files`,
 //! `server_content_entries`) and of `pending_packs`, and the model they read into. Mirrors
 //! app-lib's `state/instances/adapters/sqlite/content_rows.rs`: a row struct per table read with
 //! `TryFrom` into the model, and the queries beside them, with `server` for `instance`. Copal's
@@ -16,7 +16,8 @@ use crate::{
     api::backend::{ForgetPlayers, OwedCall},
     state::servers::model::{
         ContentSet, ContentSetStatus, ContentSourceKind, EntrySides, Pack,
-        Pending, PendingPack, SkippedFile, TrackedFile, project_type_of,
+        Pending, PendingPack, ServerLink, SharedInstanceLink, SkippedFile,
+        TrackedFile, project_type_of,
     },
 };
 
@@ -64,7 +65,7 @@ impl TryFrom<TrackedFileRow> for (TrackedFile, EntrySides) {
     }
 }
 
-/// A row of `server_content_sets`.
+/// A row of `server_content_sets` joined with the server's `server_links` row.
 #[derive(Debug, sqlx::FromRow)]
 struct ContentSetRow {
     id: String,
@@ -78,16 +79,70 @@ struct ContentSetRow {
     loader_version: Option<String>,
     created: i64,
     modified: i64,
-    project_id: Option<String>,
-    version_id: Option<String>,
     version_number: String,
     summary: Option<String>,
     sha1: String,
+    error: Option<String>,
+    link_kind: String,
+    modrinth_project_id: Option<String>,
+    modrinth_version_id: Option<String>,
+    shared_instance_id: Option<String>,
+    shared_instance_version: Option<i64>,
     instance_id: Option<String>,
     instance_name: Option<String>,
-    shared_instance_id: Option<String>,
-    shared_version: Option<i64>,
-    error: Option<String>,
+}
+
+const PACK_COLUMNS: &str = "s.id, s.server_id, s.name, s.source_kind, s.status, s.game_version, \
+     s.protocol_version, s.loader, s.loader_version, s.created, s.modified, s.version_number, \
+     s.summary, s.sha1, s.error, l.link_kind, l.modrinth_project_id, l.modrinth_version_id, \
+     l.shared_instance_id, l.shared_instance_version, l.instance_id, l.instance_name";
+
+impl ContentSetRow {
+    /// The link, from its columns as app-lib's `InstanceLinkRow` reads them.
+    fn link(&self) -> sqlx::Result<ServerLink> {
+        let missing = |column: &str| {
+            sqlx::Error::Decode(
+                format!("a {} link has no {column}", self.link_kind).into(),
+            )
+        };
+        Ok(match self.link_kind.as_str() {
+            "modrinth_modpack" => ServerLink::ModrinthModpack {
+                project_id: self
+                    .modrinth_project_id
+                    .clone()
+                    .ok_or_else(|| missing("modrinth_project_id"))?,
+                version_id: self
+                    .modrinth_version_id
+                    .clone()
+                    .ok_or_else(|| missing("modrinth_version_id"))?,
+            },
+            "imported_modpack" => ServerLink::ImportedModpack,
+            "shared_instance" => {
+                ServerLink::SharedInstance(SharedInstanceLink {
+                    instance_id: self
+                        .instance_id
+                        .clone()
+                        .ok_or_else(|| missing("instance_id"))?,
+                    instance_name: self
+                        .instance_name
+                        .clone()
+                        .ok_or_else(|| missing("instance_name"))?,
+                    shared_instance_id: self
+                        .shared_instance_id
+                        .clone()
+                        .ok_or_else(|| missing("shared_instance_id"))?,
+                    version: self
+                        .shared_instance_version
+                        .ok_or_else(|| missing("shared_instance_version"))?,
+                })
+            }
+            other => {
+                return Err(sqlx::Error::Decode(
+                    format!("unknown server link kind {other}").into(),
+                ));
+            }
+        })
+    }
 }
 
 impl TryFrom<ContentSetRow> for Pack {
@@ -95,6 +150,7 @@ impl TryFrom<ContentSetRow> for Pack {
 
     fn try_from(row: ContentSetRow) -> sqlx::Result<Self> {
         Ok(Self {
+            link: row.link()?,
             set: ContentSet {
                 id: row.id,
                 instance_id: row.server_id,
@@ -111,15 +167,9 @@ impl TryFrom<ContentSetRow> for Pack {
                 created: timestamp(row.created),
                 modified: timestamp(row.modified),
             },
-            project_id: row.project_id,
-            version_id: row.version_id,
             version_number: row.version_number,
             summary: row.summary,
             sha1: row.sha1,
-            instance_id: row.instance_id,
-            instance_name: row.instance_name,
-            shared_instance_id: row.shared_instance_id,
-            shared_version: row.shared_version,
             error: row.error,
         })
     }
@@ -448,10 +498,13 @@ pub async fn get_pack(
     server_id: &str,
 ) -> sqlx::Result<Option<Pack>> {
     let row: Option<ContentSetRow> =
-        sqlx::query_as("SELECT * FROM server_content_sets WHERE server_id = ?")
-            .bind(server_id)
-            .fetch_optional(db)
-            .await?;
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "SELECT {PACK_COLUMNS} FROM server_content_sets s \
+             JOIN server_links l ON l.server_id = s.server_id WHERE s.server_id = ?"
+        )))
+        .bind(server_id)
+        .fetch_optional(db)
+        .await?;
     row.map(TryInto::try_into).transpose()
 }
 
@@ -469,16 +522,18 @@ pub async fn set_pack(
 ) -> sqlx::Result<()> {
     let mut tx = db.begin_with("BEGIN IMMEDIATE").await?;
     let followed: Option<String> = sqlx::query_scalar(
-        "SELECT shared_instance_id FROM server_content_sets WHERE server_id = ?",
+        "SELECT shared_instance_id FROM server_links WHERE server_id = ?",
     )
     .bind(server_id)
     .fetch_optional(&mut *tx)
     .await?
     .flatten();
-    if followed.is_some() && followed != pack.shared_instance_id {
+    let shared = pack.link.shared_instance();
+    let shared_instance_id = shared.map(|shared| &shared.shared_instance_id);
+    if followed.is_some() && followed.as_ref() != shared_instance_id {
         forget_players(&mut tx, server_id, followed.clone()).await?;
     }
-    if followed.is_some() && pack.shared_instance_id.is_none() {
+    if followed.is_some() && shared_instance_id.is_none() {
         sqlx::query("DELETE FROM pending_packs WHERE server_id = ?")
             .bind(server_id)
             .execute(&mut *tx)
@@ -487,20 +542,15 @@ pub async fn set_pack(
     let set = &pack.set;
     sqlx::query(
         "INSERT INTO server_content_sets (id, server_id, name, source_kind, status, \
-         game_version, protocol_version, loader, loader_version, created, modified, project_id, \
-         version_id, version_number, summary, sha1, instance_id, instance_name, \
-         shared_instance_id, shared_version, error) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
+         game_version, protocol_version, loader, loader_version, created, modified, \
+         version_number, summary, sha1, error) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
          ON CONFLICT (server_id) DO UPDATE SET name = excluded.name, \
          source_kind = excluded.source_kind, status = excluded.status, \
          game_version = excluded.game_version, protocol_version = excluded.protocol_version, \
          loader = excluded.loader, loader_version = excluded.loader_version, \
-         modified = excluded.modified, project_id = excluded.project_id, \
-         version_id = excluded.version_id, version_number = excluded.version_number, \
-         summary = excluded.summary, sha1 = excluded.sha1, instance_id = excluded.instance_id, \
-         instance_name = excluded.instance_name, \
-         shared_instance_id = excluded.shared_instance_id, \
-         shared_version = excluded.shared_version, error = excluded.error",
+         modified = excluded.modified, version_number = excluded.version_number, \
+         summary = excluded.summary, sha1 = excluded.sha1, error = excluded.error",
     )
     .bind(&set.id)
     .bind(server_id)
@@ -513,16 +563,27 @@ pub async fn set_pack(
     .bind(&set.loader_version)
     .bind(set.created.timestamp())
     .bind(set.modified.timestamp())
-    .bind(&pack.project_id)
-    .bind(&pack.version_id)
     .bind(&pack.version_number)
     .bind(&pack.summary)
     .bind(&pack.sha1)
-    .bind(&pack.instance_id)
-    .bind(&pack.instance_name)
-    .bind(&pack.shared_instance_id)
-    .bind(pack.shared_version)
     .bind(&pack.error)
+    .execute(&mut *tx)
+    .await?;
+    let (modrinth_project_id, modrinth_version_id) =
+        pack.link.modrinth().unzip();
+    sqlx::query(
+        "INSERT OR REPLACE INTO server_links (server_id, link_kind, modrinth_project_id, \
+         modrinth_version_id, shared_instance_id, shared_instance_version, instance_id, \
+         instance_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(server_id)
+    .bind(pack.link.kind())
+    .bind(modrinth_project_id)
+    .bind(modrinth_version_id)
+    .bind(shared_instance_id)
+    .bind(shared.map(|shared| shared.version))
+    .bind(shared.map(|shared| &shared.instance_id))
+    .bind(shared.map(|shared| &shared.instance_name))
     .execute(&mut *tx)
     .await?;
     tx.commit().await
@@ -566,7 +627,7 @@ pub async fn set_pack_error(
 pub async fn unlink(db: &SqlitePool, server_id: &str) -> sqlx::Result<()> {
     let mut tx = db.begin_with("BEGIN IMMEDIATE").await?;
     let followed: Option<String> = sqlx::query_scalar(
-        "SELECT shared_instance_id FROM server_content_sets WHERE server_id = ?",
+        "SELECT shared_instance_id FROM server_links WHERE server_id = ?",
     )
     .bind(server_id)
     .fetch_optional(&mut *tx)
@@ -587,6 +648,10 @@ pub async fn unlink(db: &SqlitePool, server_id: &str) -> sqlx::Result<()> {
     .execute(&mut *tx)
     .await?;
     sqlx::query("DELETE FROM server_content_sets WHERE server_id = ?")
+        .bind(server_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM server_links WHERE server_id = ?")
         .bind(server_id)
         .execute(&mut *tx)
         .await?;
@@ -699,15 +764,20 @@ mod tests {
                 created: Utc::now(),
                 modified: Utc::now(),
             },
-            project_id: None,
-            version_id: None,
+            link: match shared_instance_id {
+                Some(shared_instance_id) => {
+                    ServerLink::SharedInstance(SharedInstanceLink {
+                        instance_id: "i".into(),
+                        instance_name: "Instance".into(),
+                        shared_instance_id: shared_instance_id.into(),
+                        version: 1,
+                    })
+                }
+                None => ServerLink::ImportedModpack,
+            },
             version_number: "1".into(),
             summary: None,
             sha1: "a".repeat(40),
-            instance_id: shared_instance_id.map(|_| "i".into()),
-            instance_name: shared_instance_id.map(|_| "Instance".into()),
-            shared_instance_id: shared_instance_id.map(Into::into),
-            shared_version: shared_instance_id.map(|_| 1),
             error: None,
         }
     }
@@ -746,7 +816,13 @@ mod tests {
     async fn leaving_an_instance_drops_its_players() {
         let db = server().await;
         set_pack(&db, "s1", &pack(Some("share-a"))).await.unwrap();
-        let id = get_pack(&db, "s1").await.unwrap().unwrap().set.id;
+        let stored = get_pack(&db, "s1").await.unwrap().unwrap();
+        assert_eq!(
+            stored.link,
+            pack(Some("share-a")).link,
+            "the link reads back"
+        );
+        let id = stored.set.id;
         set_pack(&db, "s1", &pack(Some("share-a"))).await.unwrap();
         assert_eq!(owed(&db).await, 0, "a new version of the same instance");
         assert_eq!(

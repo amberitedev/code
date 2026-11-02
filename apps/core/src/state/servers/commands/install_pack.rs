@@ -29,7 +29,8 @@ use crate::{
     servers::Hold,
     state::servers::{
         Content, ContentSet, ContentSetStatus, ContentSourceKind, Error, Pack,
-        Pending, Progress, SkippedFile, TrackedFile,
+        Pending, Progress, ServerLink, SharedInstanceLink, SkippedFile,
+        TrackedFile,
         adapters::filesystem::content_files::DISABLED,
         adapters::{
             filesystem::{
@@ -63,19 +64,10 @@ pub enum PackSource {
     /// share version (`write_shared_pack`), whose instance is `instance`.
     Stored {
         sha1: String,
-        instance: Option<Linked>,
+        instance: Option<SharedInstanceLink>,
     },
     /// The pack the server follows now: repair.
     Current,
-}
-
-/// The App instance a pack came from, and the version of its share the pack is.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Linked {
-    pub id: String,
-    pub name: String,
-    pub shared_instance_id: String,
-    pub version: i64,
 }
 
 /// Where a pack install stages its downloads. Uploads and addons stage beside it.
@@ -132,7 +124,7 @@ async fn install_pack(
     let id = hold.id();
     let dirs = SharedDirs::new(content.paths.root());
     let repair = matches!(source, PackSource::Current);
-    let (sha1, project, instance) = match source {
+    let (sha1, link) = match source {
         PackSource::Modrinth {
             project_id,
             version_id,
@@ -146,15 +138,26 @@ async fn install_pack(
                     progress.set("pack", &key, share);
                 })
                 .await?;
-            (sha1, Some((project_id, version_id)), None)
+            (
+                sha1,
+                ServerLink::ModrinthModpack {
+                    project_id,
+                    version_id,
+                },
+            )
         }
-        PackSource::Stored { sha1, instance } => (sha1, None, instance),
+        PackSource::Stored { sha1, instance } => (
+            sha1,
+            instance.map_or(
+                ServerLink::ImportedModpack,
+                ServerLink::SharedInstance,
+            ),
+        ),
         PackSource::Current => {
             let pack = current.ok_or_else(|| {
                 Error::Invalid("This server follows no pack to repair.".into())
             })?;
-            let project = pack.project_id.clone().zip(pack.version_id.clone());
-            (pack.sha1.clone(), project, linked(pack))
+            (pack.sha1.clone(), pack.link.clone())
         }
     };
     let archive_path = dirs.pack(&sha1);
@@ -163,11 +166,7 @@ async fn install_pack(
     let (index, wanted, skipped) =
         read_pack(content, &archive_path, case_insensitive).await?;
     let platform = pack::platform(&index)?;
-    let kind = match (&instance, &project) {
-        (Some(_), _) => ContentSourceKind::SharedInstance,
-        (None, Some(_)) => ContentSourceKind::ModrinthModpack,
-        (None, None) => ContentSourceKind::ImportedModpack,
-    };
+    let kind = link.source_kind();
 
     let server = server_rows::get(&content.db, id)
         .await?
@@ -238,17 +237,10 @@ async fn install_pack(
                 created: now,
                 modified: now,
             },
-            project_id: project.as_ref().map(|(project, _)| project.clone()),
-            version_id: project.as_ref().map(|(_, version)| version.clone()),
+            link,
             version_number: index.version_id.clone(),
             summary: index.summary.clone(),
             sha1: sha1.clone(),
-            instance_id: instance.as_ref().map(|linked| linked.id.clone()),
-            instance_name: instance.as_ref().map(|linked| linked.name.clone()),
-            shared_instance_id: instance
-                .as_ref()
-                .map(|linked| linked.shared_instance_id.clone()),
-            shared_version: instance.as_ref().map(|linked| linked.version),
             error: None,
         },
     )
@@ -270,16 +262,6 @@ async fn install_pack(
         info!(server = %id, from = %change.from, to = %change.to, "the pack moved the server to another Minecraft");
     }
     Ok(game_version_change)
-}
-
-/// The instance and share version a pack row follows, when it came from an App instance.
-pub fn linked(pack: &Pack) -> Option<Linked> {
-    Some(Linked {
-        id: pack.instance_id.clone()?,
-        name: pack.instance_name.clone()?,
-        shared_instance_id: pack.shared_instance_id.clone()?,
-        version: pack.shared_version?,
-    })
 }
 
 /// The Minecraft version a pack for `pack` moves a server on `server` from and to, or why it may

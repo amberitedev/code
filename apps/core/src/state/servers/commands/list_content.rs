@@ -238,33 +238,32 @@ pub async fn get_linked_modpack_info(
         return Ok(None);
     };
     let modrinth = &content.modrinth;
-    let (project, version, has_update) =
-        match (&pack.project_id, &pack.version_id) {
-            (Some(project_id), Some(version_id)) => {
-                let (project, version) = tokio::join!(
-                    modrinth.project(project_id),
-                    modrinth.version(version_id)
-                );
-                let version = version.ok();
-                // Without the installed version there is nothing to compare, as in the App.
-                let has_update = match &version {
-                    Some(installed) if check => {
-                        check_modpack_update(content, id, project_id, installed)
-                            .await
-                            .ok()
-                            .flatten()
-                    }
-                    _ => None,
-                };
-                (project.ok(), version, has_update)
-            }
-            _ => (None, None, None),
-        };
+    let (project, version, has_update) = match pack.link.modrinth() {
+        Some((project_id, version_id)) => {
+            let (project, version) = tokio::join!(
+                modrinth.project(project_id),
+                modrinth.version(version_id)
+            );
+            let version = version.ok();
+            // Without the installed version there is nothing to compare, as in the App.
+            let has_update = match &version {
+                Some(installed) if check => {
+                    check_modpack_update(content, id, project_id, installed)
+                        .await
+                        .ok()
+                        .flatten()
+                }
+                _ => None,
+            };
+            (project.ok(), version, has_update)
+        }
+        _ => (None, None, None),
+    };
     let linked_state = linked_pack_state(content, id, &pack).await?;
-    let spec = match (&pack.project_id, &pack.version_id) {
-        (Some(project_id), Some(version_id)) => ModpackSpec::Modrinth {
-            project_id: project_id.clone(),
-            version_id: version_id.clone(),
+    let spec = match pack.link.modrinth() {
+        Some((project_id, version_id)) => ModpackSpec::Modrinth {
+            project_id: project_id.to_owned(),
+            version_id: version_id.to_owned(),
         },
         _ => ModpackSpec::LocalFile {
             filename: format!("{}.mrpack", pack.set.name),
@@ -300,7 +299,10 @@ pub async fn get_linked_modpack_info(
             .and_then(|version| version.date_published),
         downloads: project.as_ref().and_then(|project| project.downloads),
         followers: project.as_ref().and_then(|project| project.followers),
-        instance_id: pack.instance_id.clone(),
+        instance_id: pack
+            .link
+            .shared_instance()
+            .map(|shared| shared.instance_id.clone()),
         state: Some(linked_state),
         error: pack.error,
     }))

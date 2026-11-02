@@ -1497,9 +1497,17 @@ async fn sides_decide_what_the_server_runs_and_what_players_get() {
     // A server that follows an instance has neither sides nor a share of its own.
     sqlx::query(
         "INSERT INTO server_content_sets (id, server_id, name, source_kind, status, game_version, \
-         loader, created, modified, version_number, sha1, instance_id, instance_name, \
-         shared_instance_id, shared_version) VALUES ('set', ?, 'I', 'shared_instance', \
-         'available', '1.21.1', 'fabric', 0, 0, '1', 'x', 'i', 'I', 's', 1)",
+         loader, created, modified, version_number, sha1) VALUES ('set', ?, 'I', \
+         'shared_instance', 'available', '1.21.1', 'fabric', 0, 0, '1', 'x')",
+    )
+    .bind(&server)
+    .execute(&core.state.db)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO server_links (server_id, link_kind, shared_instance_id, \
+         shared_instance_version, instance_id, instance_name) \
+         VALUES (?, 'shared_instance', 's', 1, 'i', 'I')",
     )
     .bind(&server)
     .execute(&core.state.db)

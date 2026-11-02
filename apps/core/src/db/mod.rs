@@ -87,6 +87,7 @@ mod tests {
                 "server_content_entries",
                 "server_content_sets",
                 "server_files",
+                "server_links",
                 "servers",
                 "sessions",
                 "used_tickets",

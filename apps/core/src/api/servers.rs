@@ -30,9 +30,7 @@ use crate::{
     servers::{Phase, ServerError, launch},
     state::servers::{
         adapters::sqlite::{content_rows, server_rows},
-        commands::{
-            install_loader, install_pack, list_content::linked_pack_state,
-        },
+        commands::{install_loader, list_content::linked_pack_state},
     },
 };
 
@@ -552,12 +550,12 @@ async fn linked_instance(
     let Some(pack) = content_rows::get_pack(&state.db, id).await? else {
         return Ok(None);
     };
-    let Some(linked) = install_pack::linked(&pack) else {
+    let Some(linked) = pack.link.shared_instance().cloned() else {
         return Ok(None);
     };
     Ok(Some(LinkedInstance {
-        id: linked.id,
-        name: linked.name,
+        id: linked.instance_id,
+        name: linked.instance_name,
         state: linked_pack_state(&state.content, id, &pack).await?,
         error: pack.error,
         visible_to_friends: false,
@@ -845,8 +843,7 @@ async fn server_full(
     // its own once it is shared.
     let linked = content_rows::get_pack(&state.db, &row.id)
         .await?
-        .as_ref()
-        .and_then(install_pack::linked);
+        .and_then(|pack| pack.link.shared_instance().cloned());
     let shared_instance_id = match linked {
         Some(linked) => Some(linked.shared_instance_id),
         None => server_rows::share_id(&state.db, &row.id).await?,

@@ -451,6 +451,13 @@ async fn failed_backups_and_installs_say_why() {
     .execute(&state.db)
     .await
     .unwrap();
+    sqlx::query(
+        "INSERT INTO server_links (server_id, link_kind) VALUES (?, 'imported_modpack')",
+    )
+    .bind(&server)
+    .execute(&state.db)
+    .await
+    .unwrap();
     let info = super::servers::run(
         &client,
         ServersCommand::Info {

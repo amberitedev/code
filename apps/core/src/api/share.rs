@@ -247,9 +247,14 @@ async fn snapshot(state: &AppState, id: &str) -> Result<Snapshot, ApiError> {
         rows.insert(row.relative_path.clone(), row);
     }
     // A pack uploaded as a file is not on Modrinth, so its files are shared one by one.
-    let modpack_id = content_rows::get_pack(&state.db, id)
-        .await?
-        .and_then(|pack| pack.version_id);
+    let modpack_id =
+        content_rows::get_pack(&state.db, id)
+            .await?
+            .and_then(|pack| {
+                pack.link
+                    .modrinth()
+                    .map(|(_, version_id)| version_id.to_owned())
+            });
     let carried = carried(&listed, &rows, &entry_sides, modpack_id.is_some());
     let removed_files = if modpack_id.is_some() {
         let level = folder.level_name();

@@ -44,7 +44,7 @@ use crate::{
     installs::{ModLoader, shared::SharedDirs},
     servers::{Hold, ServerError},
     state::servers::{
-        self as content, Busy, PendingPack,
+        self as content, Busy, PendingPack, SharedInstanceLink,
         adapters::{
             filesystem::{
                 content_files::{self, Listed},
@@ -59,7 +59,7 @@ use crate::{
             content_mutation::{self, Side},
             edited_files::{decide_edited_file, list_edited_files},
             install_loader::install_loader,
-            install_pack::{self as content_install, Linked, PackSource},
+            install_pack::{self as content_install, PackSource},
             list_content::{get_linked_modpack_info, list_content, open_jar},
             write_shared_pack as shared,
         },
@@ -745,7 +745,7 @@ pub async fn enable_many(
 pub async fn server_first(state: &AppState, id: &str) -> Result<(), ApiError> {
     let linked = content_rows::get_pack(&state.db, id)
         .await?
-        .is_some_and(|pack| content_install::linked(&pack).is_some());
+        .is_some_and(|pack| pack.link.shared_instance().is_some());
     if linked {
         return Err(ApiError::new(
             ErrorCode::Conflict,
@@ -1148,9 +1148,9 @@ async fn install_instance(
                     };
                     let source = PackSource::Stored {
                         sha1,
-                        instance: Some(Linked {
-                            id: instance.id,
-                            name: instance.name,
+                        instance: Some(SharedInstanceLink {
+                            instance_id: instance.id,
+                            instance_name: instance.name,
                             shared_instance_id,
                             version: version.into(),
                         }),
@@ -1257,9 +1257,9 @@ pub async fn apply_pending(state: Arc<AppState>, id: String) {
     let access = state.access.clone();
     let source = PackSource::Stored {
         sha1: pending.sha1,
-        instance: Some(Linked {
-            id: pending.instance_id,
-            name: pending.instance_name,
+        instance: Some(SharedInstanceLink {
+            instance_id: pending.instance_id,
+            instance_name: pending.instance_name,
             shared_instance_id: pending.shared_instance_id,
             version: pending.shared_version,
         }),
@@ -1436,7 +1436,7 @@ pub async fn update_modpack(
                     "This server follows no pack.",
                 )
             })?;
-    let Some(project_id) = pack.project_id else {
+    let Some((project_id, installed_id)) = pack.link.modrinth() else {
         return Err(ApiError::new(
             ErrorCode::InvalidRequest,
             "This pack came from a file; upload the new file instead.",
@@ -1448,7 +1448,6 @@ pub async fn update_modpack(
             "The pack has no newer version on this server's update channel.",
         )
     };
-    let installed_id = pack.version_id.as_deref().ok_or_else(no_update)?;
     let installed = state
         .content
         .modrinth
@@ -1456,7 +1455,7 @@ pub async fn update_modpack(
         .await
         .map_err(content::Error::from)?;
     let newest =
-        check_modpack_update(&state.content, &id, &project_id, &installed)
+        check_modpack_update(&state.content, &id, project_id, &installed)
             .await?
             .ok_or_else(no_update)?;
     let (hold, busy) = begin(&state, &id)?;
@@ -1465,7 +1464,7 @@ pub async fn update_modpack(
         hold,
         busy,
         PackSource::Modrinth {
-            project_id,
+            project_id: project_id.to_owned(),
             version_id: newest,
         },
         None,

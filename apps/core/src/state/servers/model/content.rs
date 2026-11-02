@@ -10,6 +10,8 @@ use bedrock::state::ContentRequirement;
 pub use bedrock::state::{ContentSet, ContentSetStatus, ContentSourceKind};
 use modrinth_content_management::ContentType;
 
+use super::ServerLink;
+
 /// What a pack update wants for a file it found edited.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pending {
@@ -101,19 +103,12 @@ pub struct SkippedFile {
 #[derive(Debug, Clone)]
 pub struct Pack {
     pub set: ContentSet,
-    /// The Modrinth project and version, or `None` for a pack file the App uploaded.
-    pub project_id: Option<String>,
-    pub version_id: Option<String>,
+    pub link: ServerLink,
     /// As the pack's index names it.
     pub version_number: String,
     pub summary: Option<String>,
     /// SHA-1 of the `.mrpack`, kept in `meta/packs/`.
     pub sha1: String,
-    pub instance_id: Option<String>,
-    pub instance_name: Option<String>,
-    /// The share and version the pack is, for a pack from an App instance (`commands::write_shared_pack`).
-    pub shared_instance_id: Option<String>,
-    pub shared_version: Option<i64>,
     pub error: Option<String>,
 }
 
