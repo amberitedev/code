@@ -1949,3 +1949,62 @@ async fn an_icon_is_saved_for_minecraft_and_the_app_then_reset() {
     );
     assert!(!server_dir.join("server-icon.png").exists());
 }
+
+#[tokio::test]
+async fn a_server_exports_as_a_pack_once_per_link() {
+    use std::io::Read;
+
+    let core = core().await;
+    let server = core.server.clone();
+    let editor = core.sign_in("editor").await;
+    let viewer = core.sign_in("viewer").await;
+    sqlx::query("UPDATE servers SET loader = 'fabric', loader_version = '0.16.0', game_version = '1.21.1' WHERE id = ?")
+        .bind(&server)
+        .execute(&core.state.db)
+        .await
+        .unwrap();
+    let config = core.state.servers.paths().server(&server).join("config");
+    std::fs::create_dir_all(config.join("sub")).unwrap();
+    std::fs::write(config.join("sub/a.toml"), "a = 1").unwrap();
+    let authorize =
+        format!("/servers/{server}/v1/worlds/{server}/content/export-mrpack/authorize");
+
+    let (status, _) = core
+        .call(Method::GET, &authorize, Some(&viewer), None, None)
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "a viewer may not export");
+    let (status, token) = core
+        .call(Method::GET, &authorize, Some(&editor), None, None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let export = || {
+        Request::builder()
+            .uri(format!(
+                "/servers/{server}/v1/worlds/{server}/content/export-mrpack?token={}",
+                token["token"].as_str().unwrap()
+            ))
+            .body(Body::empty())
+            .unwrap()
+    };
+    let response = core.router.clone().oneshot(export()).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers()["content-disposition"],
+        "attachment; filename=\"A.mrpack\""
+    );
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let mut pack = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+    let index = bedrock::content::read_index(&mut pack).unwrap();
+    assert_eq!(index.name, "A");
+    assert_eq!(index.dependencies["minecraft"], "1.21.1");
+    assert_eq!(index.dependencies["fabric-loader"], "0.16.0");
+    let mut text = String::new();
+    pack.by_name("overrides/config/sub/a.toml")
+        .unwrap()
+        .read_to_string(&mut text)
+        .unwrap();
+    assert_eq!(text, "a = 1");
+
+    let (status, _) = core.send(export()).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "a link exports once");
+}
