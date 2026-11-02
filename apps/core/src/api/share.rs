@@ -478,7 +478,7 @@ pub async fn unshare(
     caller.require(&state.db, &id, Level::Owner).await?;
     world(&id, &wid)?;
     server_first(&state, &id).await?;
-    if !drop_own_share(&state.db, &state.access.owed, &id).await? {
+    if !drop_own_share(&state.content, &state.access.owed, &id).await? {
         return Err(ApiError::new(
             ErrorCode::NotFound,
             "This server is not shared.",

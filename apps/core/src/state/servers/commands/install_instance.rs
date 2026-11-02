@@ -104,7 +104,7 @@ pub async fn install_instance(
                     // followed, even when a later step failed.
                     owed.notify_one();
                     let change = installed?;
-                    drop_own_share(&content.db, &owed, hold.id()).await?;
+                    drop_own_share(&content, &owed, hold.id()).await?;
                     Ok(change)
                 },
             );
@@ -137,7 +137,7 @@ pub async fn install_instance(
                         content_rows::set_pending(&content.db, &id, &pending)
                             .await?;
                     forget_pack(&content, replaced).await;
-                    drop_own_share(&content.db, &owed, &id).await?;
+                    drop_own_share(&content, &owed, &id).await?;
                     if restart {
                         match content.servers.stop(&id).await {
                             // It stopped on its own while the version was fetched.

@@ -794,15 +794,15 @@ pub async fn delete(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Delete a held server's row, and with it every role on it and its own share, owing the backend
-/// each removal and dropping its players. Returns who had a role.
+/// Delete a held server's row, and with it every role on it and its own share and that share's
+/// history, owing the backend each removal and dropping its players. Returns who had a role.
 async fn remove_server(
     state: &AppState,
     caller: &Caller,
     id: &str,
 ) -> Result<Vec<String>, ApiError> {
     let mut tx = state.db.begin().await?;
-    drop_own_share::owe_share_deletion(&mut tx, id).await?;
+    let share_id = drop_own_share::owe_share_deletion(&mut tx, id).await?;
     let members: Vec<String> =
         sqlx::query_scalar("SELECT user_id FROM access WHERE server_id = ?")
             .bind(id)
@@ -834,6 +834,9 @@ async fn remove_server(
     )
     .await?;
     tx.commit().await?;
+    if let Some(share_id) = share_id {
+        drop_own_share::release_history(&state.content, &share_id).await;
+    }
     Ok(members)
 }
 
