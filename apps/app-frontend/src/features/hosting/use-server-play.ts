@@ -151,7 +151,10 @@ export function useServerPlay(modals: Ref<ServerPlayModals | undefined>) {
 		const instance = await get(instanceId)
 		if (!instance || instance.quarantined || instance.install_stage !== 'installed')
 			throw new Error(formatMessage(messages.notReady))
-		const address = getHostingServerAddress(legacy.net, server.subdomain)
+		const address = getHostingServerAddress(
+			client.archon.cores_v1.joinNet(legacy),
+			server.subdomain,
+		)
 		if (!address) throw new Error(formatMessage(messages.noAddress))
 		await assertAccount(target)
 		await ensureManagedServerWorldExists(instanceId, target.name, address)
