@@ -145,6 +145,17 @@ pub async fn release(
     store.release(kind, owner).await
 }
 
+/// Remove content nothing retains and nothing has used for a minute, as upstream's periodic
+/// cleanup does with its cache limit at zero: the host keeps only what it retains. Returns the
+/// bytes freed. Fails while other store work holds the store; try again later.
+pub async fn cleanup(
+    store: &ContentStore,
+    pool: SqlitePool,
+) -> crate::Result<u64> {
+    store.set_cache_limit(0).await?;
+    store.cleanup(&State::new(pool), false).await
+}
+
 /// app-lib's `file_modified_at_ns` (`state/cache.rs`).
 pub(crate) fn file_modified_at_ns(
     metadata: &std::fs::Metadata,

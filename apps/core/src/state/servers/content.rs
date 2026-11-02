@@ -156,6 +156,27 @@ impl Content {
         tokio::spawn(async move {
             installs::java::update_all(&java.paths, &java.http).await
         });
+        // History prunes and released shares only drop retained refs; this removes their files,
+        // on upstream's ten-minute cleanup interval.
+        let cleanup = Arc::clone(&content);
+        tokio::spawn(async move {
+            let mut interval =
+                tokio::time::interval(std::time::Duration::from_secs(600));
+            interval.set_missed_tick_behavior(
+                tokio::time::MissedTickBehavior::Skip,
+            );
+            loop {
+                interval.tick().await;
+                if let Err(error) = bedrock::upstream::store::cleanup(
+                    &cleanup.content_store,
+                    cleanup.db.clone(),
+                )
+                .await
+                {
+                    tracing::debug!(%error, "content store cleanup deferred");
+                }
+            }
+        });
         Ok(content)
     }
 

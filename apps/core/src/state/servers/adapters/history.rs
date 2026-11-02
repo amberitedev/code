@@ -163,5 +163,17 @@ mod tests {
                 .version,
             1
         );
+
+        // Cleanup keeps what the history retains, and removes it once the history lets go.
+        let blob = plan.files[0].1.clone();
+        sqlx::query("UPDATE store_blobs SET last_used_at = 0")
+            .execute(&db)
+            .await
+            .unwrap();
+        store::cleanup(&content_store, db.clone()).await.unwrap();
+        assert!(blob.exists());
+        history::prune(&history, "share", Some(0)).await.unwrap();
+        store::cleanup(&content_store, db.clone()).await.unwrap();
+        assert!(!blob.exists());
     }
 }
