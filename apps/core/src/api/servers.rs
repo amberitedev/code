@@ -491,7 +491,9 @@ async fn server(
         name: row.name,
         owner_id: owner_id.unwrap_or_default(),
         net: Net {
-            ip: None,
+            // Upstream's join address (packages/ui getHostingServerAddress): this IP and the
+            // game port, no domain.
+            ip: state.network.join_ip().map(|ip| ip.to_string()),
             port: u16::try_from(row.port).unwrap_or_default(),
             domain: String::new(),
             // Known while the server runs and its port is forwarded, or open on a public address.

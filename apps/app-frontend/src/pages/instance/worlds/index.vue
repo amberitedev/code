@@ -120,7 +120,7 @@
 						:managed="isManagedServerWorld(row.world)"
 						:linked-server-id="row.linked?.server_id"
 						:linked-note="row.linked && linkedNote(row.linked)"
-						:copy-address="row.linked && shareableServerAddress(row.linked)"
+						:copy-address="row.linked && getHostingServerAddress(row.linked.net)"
 						:outside-warning="row.linked && unreachableCause(row.linked)"
 						:hosted-by="row.hosted?.host.username"
 						:hosted-server-id="
@@ -209,6 +209,7 @@ import {
 	FilterPills,
 	GAME_MODES,
 	type GameVersion,
+	getHostingServerAddress,
 	GhostBlock,
 	injectNotificationManager,
 	Input,
@@ -240,8 +241,6 @@ import {
 	type HostedServer,
 	type LinkedServer,
 	linkedServerState,
-	serverAddress,
-	shareableServerAddress,
 	unreachableCause,
 	useCanManageHostedServer,
 	useHostedServers,
@@ -422,7 +421,11 @@ const rows = computed<WorldRow[]>(() => {
 	const all: WorldRow[] = [
 		...linkedServers.value.map((linked) => {
 			const key = `linked:${linked.server_id}`
-			return { key, linked, world: serverRow(key, linked.name, serverAddress(linked)) }
+			return {
+				key,
+				linked,
+				world: serverRow(key, linked.name, getHostingServerAddress(linked.net)),
+			}
 		}),
 		...hostedServers.value.map((hosted) => {
 			const key = `hosted:${hosted.core_id}:${hosted.server_id}`
@@ -740,9 +743,15 @@ async function refreshServer(address: string) {
 
 // Ping linked servers like the rest, and again whenever one starts, stops, or moves.
 watch(
-	() => linkedServers.value.map((server) => `${serverAddress(server)}|${server.power_state}`),
+	() =>
+		linkedServers.value.map(
+			(server) => `${getHostingServerAddress(server.net)}|${server.power_state}`,
+		),
 	() => {
-		for (const server of linkedServers.value) void refreshServer(serverAddress(server))
+		for (const server of linkedServers.value) {
+			const address = getHostingServerAddress(server.net)
+			if (address) void refreshServer(address)
+		}
 	},
 	{ immediate: true },
 )

@@ -177,7 +177,7 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
         backups,
         uploads: api::files::Uploads::default(),
         update: Arc::clone(&update),
-        network,
+        network: Arc::clone(&network),
         storage: Arc::clone(&storage),
     });
     let router = api::router(Arc::clone(&state));
@@ -194,6 +194,7 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
                 bind: config.bind,
                 access: Arc::clone(&access),
                 storage,
+                network,
             })));
             tokio::spawn(
                 async move { state.access.keys.refresh_daily().await },
