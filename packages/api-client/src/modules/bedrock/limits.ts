@@ -29,3 +29,9 @@ export const MAX_COMPRESSION_RATIO = 100
  * free space less this.
  */
 export const DISK_MARGIN_BYTES = 268435456
+
+/**
+ * The most a version's object list in a store may weigh: 4,096 objects take well under a
+ * megabyte.
+ */
+export const MAX_VERSION_LIST_BYTES = 4194304

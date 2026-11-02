@@ -83,15 +83,17 @@ pub struct VersionList {
 }
 
 impl VersionList {
-    /// R: the SHA-256 of the objects' hashes as raw bytes, in order.
+    /// R of the listed objects ([`sharing_client::crypto::root`]). It names the list once
+    /// [`Self::check`] has found it sorted and without repeats.
     pub fn root(&self) -> Hash {
-        let mut hasher = Sha256::new();
-        for entry in &self.objects {
-            hasher.update(
-                hex::decode(entry.hash.as_str()).expect("a valid hash"),
-            );
-        }
-        Hash::of_digest(&hasher.finalize())
+        Hash::of_digest(&sharing_client::crypto::root(self.objects.iter().map(
+            |entry| {
+                let mut hash = [0; 32];
+                hex::decode_to_slice(entry.hash.as_str(), &mut hash)
+                    .expect("a valid hash");
+                hash
+            },
+        )))
     }
 
     /// Require the list to be sorted, without repeats, and to name `root`.

@@ -34,9 +34,6 @@ use crate::{
     tickets::{self, Claims},
 };
 
-/// The most `version.json` may weigh: 4,096 objects take well under a megabyte.
-const MAX_LIST: u64 = 4 * 1024 * 1024;
-
 pub(crate) fn router(store: Arc<Store>) -> Router {
     Router::new()
         .route("/store/versions/{root}", get(list).post(upload))
@@ -185,7 +182,7 @@ async fn upload(
     let first = first
         .filter(|entry| entry.name == "version.json")
         .ok_or_else(|| invalid("The upload must start with version.json."))?;
-    if first.size > MAX_LIST {
+    if first.size > bedrock::limits::MAX_VERSION_LIST_BYTES {
         return Err(invalid("version.json is too large."));
     }
     let mut json = Vec::new();

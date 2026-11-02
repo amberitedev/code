@@ -309,13 +309,13 @@ impl StoreClient {
         Ok(check(response).await?.json().await?)
     }
 
-    /// The list of version `root` as the Core stored it, refused past `max` bytes.
+    /// The list of version `root` as the Core stored it, refused past
+    /// [`MAX_VERSION_LIST_BYTES`](bedrock::limits::MAX_VERSION_LIST_BYTES).
     pub async fn version_list(
         &self,
         core: &PoolCore,
         ticket: &str,
         root: &str,
-        max: usize,
     ) -> Result<Vec<u8>, StoreError> {
         let response = self
             .send(core, |client, address| {
@@ -328,7 +328,7 @@ impl StoreClient {
         let mut chunks = response.bytes_stream();
         while let Some(chunk) = chunks.try_next().await? {
             body.extend_from_slice(&chunk);
-            if body.len() > max {
+            if body.len() as u64 > bedrock::limits::MAX_VERSION_LIST_BYTES {
                 return Err(StoreError::Other(
                     0,
                     "the version list is too large".into(),

@@ -13,9 +13,6 @@ use crate::{
     tickets::Source,
 };
 
-/// The most a version list may weigh.
-const MAX_LIST: usize = 4 * 1024 * 1024;
-
 fn failed(description: impl std::fmt::Display) -> StoreError {
     StoreError::new(
         Code::Conflict,
@@ -40,7 +37,7 @@ pub(crate) async fn pull(
     let root_hex = root.to_string();
     let body = store
         .client
-        .version_list(&core, ticket, &root_hex, MAX_LIST)
+        .version_list(&core, ticket, &root_hex)
         .await
         .map_err(failed)?;
     let list: VersionList = serde_json::from_slice(&body)
