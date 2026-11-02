@@ -5,7 +5,7 @@
 //! files a server takes is bedrock's rule ([`split`]); the rest are client only and never placed.
 
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     io::{Read, Seek},
 };
 
@@ -227,11 +227,13 @@ pub type Known = HashMap<String, (Version, Option<VersionEnvironment>)>;
 
 /// The files a server takes, by path, and the ones it leaves out because they are client only,
 /// by bedrock's rule (`server_takes`): the index first, then Modrinth by hash, then a jar's own
-/// metadata. `server-overrides/` wins over `overrides/`. A download the server takes must come
-/// from an allowed host.
+/// metadata. `server-overrides/` wins over `overrides/`. A client-only file at a path in
+/// `server_on` is taken anyway: someone turned it on for the server. A download the server takes
+/// must come from an allowed host.
 pub fn split(
     candidates: Vec<Candidate>,
     known: &Known,
+    server_on: &HashSet<String>,
     case_insensitive: bool,
 ) -> Result<(BTreeMap<String, Wanted>, Vec<SkippedFile>), PackError> {
     let mut wanted = BTreeMap::new();
@@ -243,11 +245,7 @@ pub fn split(
             .ask_modrinth()
             .then(|| known.get(&candidate.wanted.sha1))
             .flatten();
-        if !server_takes(
-            candidate.env.as_ref(),
-            modrinth.and_then(|(_, environment)| *environment),
-            candidate.jar,
-        ) {
+        let skip = |candidate: Candidate| {
             let (project_id, version_id) = modrinth
                 .map(|(version, _)| {
                     (version.project_id.clone(), version.id.clone())
@@ -256,13 +254,23 @@ pub fn split(
                     candidate.downloads.iter().find_map(|url| ids_from_cdn(url))
                 })
                 .unzip();
-            skipped.push(SkippedFile {
+            SkippedFile {
                 relative_path: candidate.path,
                 sha1: candidate.wanted.sha1,
                 size: candidate.wanted.size,
                 project_id,
                 version_id,
-            });
+            }
+        };
+        let turned_on = server_on.contains(&candidate.path);
+        if !turned_on
+            && !server_takes(
+                candidate.env.as_ref(),
+                modrinth.and_then(|(_, environment)| *environment),
+                candidate.jar,
+            )
+        {
+            skipped.push(skip(candidate));
             continue;
         }
         let usable = matches!(candidate.wanted.source, Source::Override(_))
@@ -270,6 +278,11 @@ pub fn split(
                 reqwest::Url::parse(url)
                     .is_ok_and(|url| hosts::allowed(&url, false))
             });
+        // A file turned on by hand stays client only rather than fail the whole pack.
+        if !usable && turned_on {
+            skipped.push(skip(candidate));
+            continue;
+        }
         if !usable {
             return Err(PackError::Host(candidate.path));
         }
@@ -897,10 +910,11 @@ mod tests {
         let index = read_index(&mut archive).unwrap();
         let candidates = candidates(&index, &mut archive, None).unwrap();
         assert!(matches!(
-            split(candidates.clone(), &Known::new(), true),
+            split(candidates.clone(), &Known::new(), &HashSet::new(), true),
             Err(PackError::Collision(..))
         ));
-        let (both, _) = split(candidates, &Known::new(), false).unwrap();
+        let (both, _) =
+            split(candidates, &Known::new(), &HashSet::new(), false).unwrap();
         assert_eq!(both.len(), 2);
         assert_eq!(both["config/a.toml"].size, 1);
     }
@@ -968,7 +982,19 @@ mod tests {
             asked.wanted.sha1.clone(),
             (version, Some(VersionEnvironment::ClientOnly)),
         )]);
-        let (wanted, skipped) = split(candidates, &known, false).unwrap();
+        let (turned_on, _) = split(
+            candidates.clone(),
+            &known,
+            &HashSet::from(["mods/client.jar".to_owned()]),
+            false,
+        )
+        .unwrap();
+        assert!(
+            turned_on.contains_key("mods/client.jar"),
+            "a client-only file someone turned on is the server's"
+        );
+        let (wanted, skipped) =
+            split(candidates, &known, &HashSet::new(), false).unwrap();
 
         assert_eq!(
             wanted.keys().collect::<Vec<_>>(),

@@ -257,7 +257,11 @@ pub async fn place_version(
     let sides = content_rows::get_entry_sides(&content.db, server_id).await?;
     let moved = old
         .iter()
-        .find_map(|row| sides.get(&row.relative_path).copied());
+        .find_map(|row| sides.get(&row.relative_path).copied())
+        .map(|sides| EntrySides {
+            server_override: false,
+            ..sides
+        });
     // A file off for the server stays off when it is updated, since its sides move to the new
     // file and only count while the file is `.disabled`.
     let off_for_server = moved.is_some_and(|sides| {

@@ -6,7 +6,7 @@
 //! pack and repair finishes the job. Updates copy the world first.
 
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     path::{Path, PathBuf},
     sync::{
         Arc,
@@ -34,7 +34,7 @@ use crate::{
         adapters::filesystem::content_files::DISABLED,
         adapters::{
             filesystem::{
-                archive,
+                archive::{self, NoRoom},
                 folder::{self, Folder},
                 properties,
             },
@@ -158,8 +158,9 @@ async fn install_pack(
     let archive_path = dirs.pack(&sha1);
     let folder = Arc::new(Folder::open(&content.paths.server(id))?);
     let case_insensitive = folder.case_insensitive()?;
+    let server_on = content_rows::get_server_overrides(&content.db, id).await?;
     let (index, wanted, skipped) =
-        read_pack(content, &archive_path, case_insensitive).await?;
+        read_pack(content, &archive_path, &server_on, case_insensitive).await?;
     let platform = pack::platform(&index)?;
     let kind = link.source_kind();
 
@@ -384,10 +385,12 @@ fn allowed_url(url: &str) -> Result<reqwest::Url, Error> {
 
 /// A pack's index, the files a server takes from it, and its client-only files, read from the
 /// `.mrpack` at `path`. Files the index gives no sides for are looked up on Modrinth by hash;
-/// when Modrinth cannot be reached they are taken, as a server is safer with them.
+/// when Modrinth cannot be reached they are taken, as a server is safer with them. Client-only
+/// files at a path in `server_on` are taken too (see `pack::split`).
 pub async fn read_pack(
     content: &Content,
     path: &Path,
+    server_on: &HashSet<String>,
     case_insensitive: bool,
 ) -> Result<(Index, BTreeMap<String, Wanted>, Vec<SkippedFile>), Error> {
     let path = path.to_owned();
@@ -417,7 +420,8 @@ pub async fn read_pack(
             pack::Known::new()
         },
     );
-    let (wanted, skipped) = pack::split(candidates, &known, case_insensitive)?;
+    let (wanted, skipped) =
+        pack::split(candidates, &known, server_on, case_insensitive)?;
     Ok((index, wanted, skipped))
 }
 
@@ -481,7 +485,7 @@ async fn stage_downloads(
 }
 
 /// Download one file of a pack index from the first allowed URL that works.
-pub(super) async fn fetch_index_file(
+async fn fetch_index_file(
     content: &Content,
     file: &pack::IndexFile,
     path: &Path,
@@ -678,7 +682,7 @@ async fn sha1_now(
 /// Write one file the pack wants: a staged download, or an entry of the pack's own archive. An
 /// entry that inflates past the size it was planned with is refused before it replaces
 /// anything, so the budget checked before the install holds.
-pub(super) async fn place(
+async fn place(
     folder: &Arc<Folder>,
     archive_path: &Path,
     path: &str,
@@ -722,6 +726,37 @@ pub(super) async fn place(
     })
     .await
     .map_err(std::io::Error::other)?
+}
+
+/// Write the pack's file at `path` on its own, outside an install: a download is staged first, and
+/// the file must fit on the disk.
+pub(super) async fn place_one(
+    content: &Content,
+    server_id: &str,
+    folder: &Arc<Folder>,
+    archive_path: &Path,
+    index: &Index,
+    path: &str,
+    want: &Wanted,
+) -> Result<(), Error> {
+    NoRoom::check(
+        path,
+        want.size,
+        archive::room(&content.paths.server(server_id))?,
+    )?;
+    let mut staged = HashMap::new();
+    let result = async {
+        if let Source::Download(n) = want.source {
+            let target = pack_staging(content, server_id).join(n.to_string());
+            fetch_index_file(content, &index.files[n], &target, &|_| {})
+                .await?;
+            staged.insert(n, target);
+        }
+        place(folder, archive_path, path, want, &staged).await
+    }
+    .await;
+    let _ = tokio::fs::remove_dir_all(pack_staging(content, server_id)).await;
+    result
 }
 
 /// Write the settings an install came with into `server.properties`.

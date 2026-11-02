@@ -174,6 +174,7 @@ mod tests {
                 server_requirement: side(server),
                 client_requirement: side(player),
                 unlocked: true,
+                server_override: false,
             },
         )
     }

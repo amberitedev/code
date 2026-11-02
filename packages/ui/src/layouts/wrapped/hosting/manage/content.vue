@@ -72,7 +72,7 @@ const { formatMessage } = useVIntl()
 const messages = defineMessages({
 	notInstalledLock: {
 		id: 'hosting.content.enabled-for.client-only-not-installed-lock',
-		defaultMessage: 'This pack file is client only, so it is not installed on the server.',
+		defaultMessage: 'Players get this client-only file with the pack.',
 	},
 	resourcePackLock: {
 		id: 'hosting.content.enabled-for.resource-pack-lock',
@@ -831,7 +831,11 @@ const { queueAddonToggle, cancelQueuedAddonToggle } = useAddonToggles({
 async function handleSetEnabledFor(item: ContentItem, side: ContentSide, enabled: boolean) {
 	if (contentActionDisabled.value || serverPlayMigration?.required.value) return
 	const addon = getAddonForItem(item)
-	if (!addon || addon.installed === false || (side === 'server' && isPlayerOnlyContent(addon)))
+	if (
+		!addon ||
+		(addon.installed === false && side !== 'server') ||
+		(side === 'server' && isPlayerOnlyContent(addon))
+	)
 		return
 	const targetWorldId = worldId.value
 	const showPerformanceWarning = enabled && side === 'server' && addon.project_id === 'uCdwusMi'
@@ -1129,11 +1133,13 @@ function addonToContentItem(addon: AddonWithUiState): ContentItem {
 	const serverEnabled = !isPlayerOnlyContent(addon) && !addon.disabled_server
 	const playerEnabled = !addon.disabled_player
 	const needsMigration = !!serverPlayMigration?.required.value
-	// A client-only pack file the Core never placed has no file to toggle.
+	// A client-only pack file the Core never placed: turning its server side on places it, and
+	// players always get it with the pack.
 	const notInstalled = addon.installed === false
-	const lockedSides: ContentSide[] =
-		needsMigration || notInstalled
-			? ['server', 'player']
+	const lockedSides: ContentSide[] = needsMigration
+		? ['server', 'player']
+		: notInstalled
+			? ['player']
 			: isPlayerOnlyContent(addon)
 				? ['server']
 				: []

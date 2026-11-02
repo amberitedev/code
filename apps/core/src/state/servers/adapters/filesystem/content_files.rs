@@ -108,11 +108,7 @@ pub fn locate(
     kind: ContentType,
     filename: &str,
 ) -> Result<(String, String), Error> {
-    let name = folder::clean(filename.trim_end_matches(DISABLED))?;
-    if name.contains('/') {
-        return Err(Error::Invalid(format!("{filename} is not a file name.")));
-    }
-    let path = format!("{}/{name}", kind_folder(kind, &folder.level_name())?);
+    let path = addon_path(folder, kind, filename)?;
     let disabled = format!("{path}{DISABLED}");
     if folder.exists(&path) {
         Ok((path.clone(), path))
@@ -121,6 +117,22 @@ pub fn locate(
     } else {
         Err(Error::NotFound(format!("There is no {filename}.")))
     }
+}
+
+/// The enabled path of the addon `filename` of `kind`, whether or not it is on disk.
+pub fn addon_path(
+    folder: &Folder,
+    kind: ContentType,
+    filename: &str,
+) -> Result<String, Error> {
+    let name = folder::clean(filename.trim_end_matches(DISABLED))?;
+    if name.contains('/') {
+        return Err(Error::Invalid(format!("{filename} is not a file name.")));
+    }
+    Ok(format!(
+        "{}/{name}",
+        kind_folder(kind, &folder.level_name())?
+    ))
 }
 
 pub fn rename_enabled(

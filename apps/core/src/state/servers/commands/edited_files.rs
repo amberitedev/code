@@ -1,16 +1,16 @@
 //! The pack files the owner edited since the pack placed them, and their answer for those a pack
 //! update left alone.
 
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
-use super::install_pack::{fetch_index_file, pack_staging, place, read_pack};
+use super::install_pack::{place_one, read_pack};
 use crate::{
     api::content::{EditedFile, PendingChange},
     installs::shared::SharedDirs,
     state::servers::{
         Content, ContentSourceKind, Error, Pending, TrackedFile,
         adapters::{filesystem::folder::Folder, sqlite::content_rows},
-        domain::pack::{self, Source},
+        domain::pack,
     },
 };
 
@@ -83,33 +83,30 @@ pub async fn decide_edited_file(
                 })?;
             let archive_path =
                 SharedDirs::new(content.paths.root()).pack(&pack.sha1);
-            let (index, wanted, _) =
-                read_pack(content, &archive_path, folder.case_insensitive()?)
+            let server_on =
+                content_rows::get_server_overrides(&content.db, server_id)
                     .await?;
+            let (index, wanted, _) = read_pack(
+                content,
+                &archive_path,
+                &server_on,
+                folder.case_insensitive()?,
+            )
+            .await?;
             let want = wanted.get(path).ok_or_else(|| {
                 Error::NotFound(format!("The pack has no {path}."))
             })?;
             if replace {
-                let mut staged = HashMap::new();
-                if let Source::Download(n) = want.source {
-                    let staging = pack_staging(content, server_id);
-                    tokio::fs::create_dir_all(&staging).await?;
-                    let target = staging.join(n.to_string());
-                    fetch_index_file(
-                        content,
-                        &index.files[n],
-                        &target,
-                        &|_| {},
-                    )
-                    .await?;
-                    staged.insert(n, target);
-                }
-                let placed =
-                    place(&folder, &archive_path, path, want, &staged).await;
-                let _ =
-                    tokio::fs::remove_dir_all(pack_staging(content, server_id))
-                        .await;
-                placed?;
+                place_one(
+                    content,
+                    server_id,
+                    &folder,
+                    &archive_path,
+                    &index,
+                    path,
+                    want,
+                )
+                .await?;
             }
             content_rows::upsert_tracked_file(
                 &content.db,

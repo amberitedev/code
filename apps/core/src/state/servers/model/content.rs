@@ -75,6 +75,9 @@ pub struct EntrySides {
     pub client_requirement: ContentRequirement,
     /// Someone set the sides by hand.
     pub unlocked: bool,
+    /// A client-only file of the pack that someone turned on for the server, so Core placed it.
+    /// Pack updates keep it; turning the server side off makes it a [`SkippedFile`] again.
+    pub server_override: bool,
 }
 
 impl Default for EntrySides {
@@ -84,6 +87,7 @@ impl Default for EntrySides {
             server_requirement: ContentRequirement::Required,
             client_requirement: ContentRequirement::Required,
             unlocked: false,
+            server_override: false,
         }
     }
 }

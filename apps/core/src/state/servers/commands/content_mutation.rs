@@ -3,11 +3,14 @@
 use bedrock::state::ContentRequirement;
 use modrinth_content_management::ContentType;
 
+use super::client_only_files::{
+    place_client_only_file, return_client_only_file,
+};
 use crate::state::servers::{
     Content, ContentSourceKind, EntrySides, Error, TrackedFile,
     adapters::{
         filesystem::{
-            content_files::{DISABLED, locate, rename_enabled},
+            content_files::{DISABLED, addon_path, locate, rename_enabled},
             folder::Folder,
         },
         sqlite::content_rows,
@@ -123,7 +126,9 @@ pub enum Side {
 
 /// Turn an addon on or off for one side. Off for the server, its file is `.disabled` and the
 /// server's share still carries it; off for players, the server runs it and the share leaves it
-/// out.
+/// out. A client-only file of the pack, which is not on the server, is placed when its server
+/// side is turned on, and made client only again when it is turned off
+/// (`client_only_files`).
 pub async fn set_side(
     content: &Content,
     server_id: &str,
@@ -133,6 +138,28 @@ pub async fn set_side(
     enabled: bool,
 ) -> Result<(), Error> {
     let folder = Folder::open(&content.paths.server(server_id))?;
+    if side == Side::Server {
+        let path = addon_path(&folder, kind, filename)?;
+        if enabled
+            && let Some(skipped) =
+                content_rows::get_skipped_files(&content.db, server_id)
+                    .await?
+                    .into_iter()
+                    .find(|file| file.relative_path == path)
+        {
+            return place_client_only_file(content, server_id, skipped).await;
+        }
+        if !enabled
+            && let Some((row, sides)) =
+                content_rows::get_tracked_file(&content.db, server_id, &path)
+                    .await?
+            && sides.server_override
+            && row.by_pack()
+        {
+            return return_client_only_file(content, server_id, &folder, row)
+                .await;
+        }
+    }
     let (path, on_disk) = locate(&folder, kind, filename)?;
     let mut sides = sides(content, server_id, &path).await?;
     let requirement = if enabled {

@@ -288,6 +288,10 @@ CREATE TABLE server_content_entries (
     modified_at INTEGER NOT NULL,
     -- Copal: someone set the sides by hand.
     sides_unlocked INTEGER NOT NULL DEFAULT 0,
+    -- Copal: a client-only file of the pack that someone turned on for the server, so Core placed
+    -- it. Pack updates keep it on the server; turning the server side off makes it client only
+    -- again.
+    server_override INTEGER NOT NULL DEFAULT 0,
     -- Copal: a pack update found this file edited and left it alone: the new pack `changed` it
     -- or `removed` it. Cleared when the App says keep or replace.
     pending TEXT CHECK (pending IN ('changed', 'removed'))

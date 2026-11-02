@@ -4,6 +4,7 @@
 pub mod apply_content_install;
 pub mod apply_content_update;
 pub mod check_content_updates;
+pub mod client_only_files;
 pub mod content_mutation;
 pub mod edited_files;
 pub mod install_loader;

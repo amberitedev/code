@@ -9,7 +9,10 @@
 //! Core only ever asks a holder for a file through the store API, so where and how the pool
 //! keeps files does not matter here.
 
-use std::path::{Path, PathBuf};
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+};
 
 use sharing_client::consume::{
     self, ConsumeError, ModpackFile, PoolAccess, PoolFile, ReadyVersion,
@@ -107,8 +110,13 @@ impl consume::Modrinth for Lookup<'_> {
         let dirs = SharedDirs::new(self.0.paths.root());
         let sha1 =
             install::fetch_modrinth_pack(self.0, &dirs, id, &|_| {}).await?;
-        let (_, wanted, _) =
-            install::read_pack(self.0, &dirs.pack(&sha1), false).await?;
+        let (_, wanted, _) = install::read_pack(
+            self.0,
+            &dirs.pack(&sha1),
+            &HashSet::new(),
+            false,
+        )
+        .await?;
         let sha1s = wanted
             .values()
             .map(|file| file.sha1.clone())

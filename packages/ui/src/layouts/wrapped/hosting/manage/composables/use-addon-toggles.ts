@@ -66,7 +66,9 @@ export function useAddonToggles(options: {
 			}
 			const sides = (['server', 'player'] as const).filter((side) => changes[side] !== undefined)
 			if (sides.length === 0) return
-			if (!isPlayerOnlyContent(addon) && !addon.side_toggle_unlocked) {
+			// A client-only pack file that is not installed has no file to unlock; turning its
+			// server side on places it with its sides set by hand.
+			if (!isPlayerOnlyContent(addon) && !addon.side_toggle_unlocked && addon.installed !== false) {
 				await client.archon.content_v1.setAddonSideToggleLocked(serverId, targetWorldId, {
 					...request,
 					locked: false,
@@ -92,6 +94,11 @@ export function useAddonToggles(options: {
 		markPendingAddonToggleSent(queryClient, serverId, batch.worldId, batch.addon, batch.changes)
 		try {
 			await mutation.mutateAsync(batch)
+			// The server side of a pack file can place or take back a client-only file, which
+			// changes the row itself rather than only its toggles.
+			if (batch.changes.server !== undefined && batch.addon.from_modpack) {
+				void queryClient.invalidateQueries({ queryKey: batch.queryKey, exact: true })
+			}
 		} catch {
 			discardFailedAddonToggle(queryClient, serverId, batch.worldId, batch.addon, batch.changes)
 			void queryClient.invalidateQueries({ queryKey: batch.queryKey, exact: true })

@@ -5,7 +5,7 @@
 //! differences: one content set per server (the pack it follows), every entry is one file's,
 //! and a pack's client-only files are `missing` rows (see the schema in `001_init.sql`).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use bedrock::state::{ContentRequirement, ModLoader};
 use chrono::{DateTime, TimeZone, Utc};
@@ -35,11 +35,12 @@ struct TrackedFileRow {
     server_requirement: String,
     client_requirement: String,
     sides_unlocked: bool,
+    server_override: bool,
 }
 
 const TRACKED_COLUMNS: &str = "f.relative_path, f.sha1, f.size, e.source_kind, e.project_id, \
      e.version_id, e.pending, e.enabled, e.server_requirement, e.client_requirement, \
-     e.sides_unlocked";
+     e.sides_unlocked, e.server_override";
 
 impl TryFrom<TrackedFileRow> for (TrackedFile, EntrySides) {
     type Error = sqlx::Error;
@@ -60,6 +61,7 @@ impl TryFrom<TrackedFileRow> for (TrackedFile, EntrySides) {
                 server_requirement: requirement(&row.server_requirement)?,
                 client_requirement: requirement(&row.client_requirement)?,
                 unlocked: row.sides_unlocked,
+                server_override: row.server_override,
             },
         ))
     }
@@ -401,12 +403,14 @@ pub async fn set_entry_sides(
     };
     sqlx::query(
         "UPDATE server_content_entries SET enabled = ?, server_requirement = ?, \
-         client_requirement = ?, sides_unlocked = ?, modified_at = ? WHERE file_id = ?",
+         client_requirement = ?, sides_unlocked = ?, server_override = ?, modified_at = ? \
+         WHERE file_id = ?",
     )
     .bind(sides.enabled)
     .bind(sides.server_requirement.as_str())
     .bind(sides.client_requirement.as_str())
     .bind(sides.unlocked)
+    .bind(sides.server_override)
     .bind(Utc::now().timestamp())
     .bind(&file_id)
     .execute(&mut *tx)
@@ -431,49 +435,97 @@ pub async fn set_skipped_files(
     server_id: &str,
     skipped: &[SkippedFile],
 ) -> sqlx::Result<()> {
-    let now = Utc::now().timestamp();
     let mut tx = db.begin_with("BEGIN IMMEDIATE").await?;
     sqlx::query("DELETE FROM server_files WHERE server_id = ? AND missing = 1")
         .bind(server_id)
         .execute(&mut *tx)
         .await?;
     for file in skipped {
-        let file_id: Option<String> = sqlx::query_scalar(
-            "INSERT OR IGNORE INTO server_files (id, server_id, relative_path, file_name, \
-             enabled, sha1, size, missing, added_at, modified_at) \
-             VALUES (?, ?, ?, ?, 0, ?, ?, 1, ?, ?) RETURNING id",
-        )
-        .bind(uuid::Uuid::new_v4().to_string())
-        .bind(server_id)
-        .bind(&file.relative_path)
-        .bind(file_name(&file.relative_path))
-        .bind(&file.sha1)
-        .bind(signed(file.size))
-        .bind(now)
-        .bind(now)
-        .fetch_optional(&mut *tx)
-        .await?;
-        let Some(file_id) = file_id else { continue };
-        sqlx::query(
-            "INSERT INTO server_content_entries (id, server_id, content_set_id, file_id, \
-             project_type, project_id, version_id, source_kind, server_requirement, \
-             client_requirement, enabled, added_at, modified_at) \
-             SELECT ?, ?, id, ?, ?, ?, ?, source_kind, 'unsupported', 'required', 1, ?, ? \
-             FROM server_content_sets WHERE server_id = ?",
-        )
-        .bind(uuid::Uuid::new_v4().to_string())
-        .bind(server_id)
-        .bind(&file_id)
-        .bind(project_type_of(&file.relative_path).map(|kind| kind.as_str()))
-        .bind(&file.project_id)
-        .bind(&file.version_id)
-        .bind(now)
-        .bind(now)
-        .bind(server_id)
-        .execute(&mut *tx)
-        .await?;
+        insert_skipped_file(&mut tx, server_id, file).await?;
     }
     tx.commit().await
+}
+
+/// Record one client-only file of the pack, unless Core tracks its path.
+async fn insert_skipped_file(
+    tx: &mut sqlx::SqliteConnection,
+    server_id: &str,
+    file: &SkippedFile,
+) -> sqlx::Result<()> {
+    let now = Utc::now().timestamp();
+    let file_id: Option<String> = sqlx::query_scalar(
+        "INSERT OR IGNORE INTO server_files (id, server_id, relative_path, file_name, \
+         enabled, sha1, size, missing, added_at, modified_at) \
+         VALUES (?, ?, ?, ?, 0, ?, ?, 1, ?, ?) RETURNING id",
+    )
+    .bind(uuid::Uuid::new_v4().to_string())
+    .bind(server_id)
+    .bind(&file.relative_path)
+    .bind(file_name(&file.relative_path))
+    .bind(&file.sha1)
+    .bind(signed(file.size))
+    .bind(now)
+    .bind(now)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some(file_id) = file_id else {
+        return Ok(());
+    };
+    sqlx::query(
+        "INSERT INTO server_content_entries (id, server_id, content_set_id, file_id, \
+         project_type, project_id, version_id, source_kind, server_requirement, \
+         client_requirement, enabled, added_at, modified_at) \
+         SELECT ?, ?, id, ?, ?, ?, ?, source_kind, 'unsupported', 'required', 1, ?, ? \
+         FROM server_content_sets WHERE server_id = ?",
+    )
+    .bind(uuid::Uuid::new_v4().to_string())
+    .bind(server_id)
+    .bind(&file_id)
+    .bind(project_type_of(&file.relative_path).map(|kind| kind.as_str()))
+    .bind(&file.project_id)
+    .bind(&file.version_id)
+    .bind(now)
+    .bind(now)
+    .bind(server_id)
+    .execute(&mut *tx)
+    .await?;
+    Ok(())
+}
+
+/// Forget the tracked file at `file`'s path and record it as a client-only file of the pack
+/// again: someone turned the server side of a [`EntrySides::server_override`] file off.
+pub async fn return_to_client_only(
+    db: &SqlitePool,
+    server_id: &str,
+    file: &SkippedFile,
+) -> sqlx::Result<()> {
+    let mut tx = db.begin_with("BEGIN IMMEDIATE").await?;
+    sqlx::query(
+        "DELETE FROM server_files WHERE server_id = ? AND relative_path = ? AND missing = 0",
+    )
+    .bind(server_id)
+    .bind(&file.relative_path)
+    .execute(&mut *tx)
+    .await?;
+    insert_skipped_file(&mut tx, server_id, file).await?;
+    tx.commit().await
+}
+
+/// The paths of the pack's client-only files someone turned on for the server.
+pub async fn get_server_overrides(
+    db: impl SqliteExecutor<'_>,
+    server_id: &str,
+) -> sqlx::Result<HashSet<String>> {
+    let paths: Vec<String> = sqlx::query_scalar(
+        "SELECT f.relative_path FROM server_files f \
+         JOIN server_content_entries e ON e.file_id = f.id \
+         WHERE f.server_id = ? AND f.missing = 0 AND e.server_override = 1 \
+         AND e.source_kind != 'local'",
+    )
+    .bind(server_id)
+    .fetch_all(db)
+    .await?;
+    Ok(paths.into_iter().collect())
 }
 
 /// The client-only files of the pack the server follows, by path.
@@ -642,7 +694,7 @@ pub async fn unlink(db: &SqlitePool, server_id: &str) -> sqlx::Result<()> {
         .await?;
     sqlx::query(
         "UPDATE server_content_entries SET source_kind = 'local', pending = NULL, \
-         content_set_id = NULL WHERE server_id = ?",
+         content_set_id = NULL, server_override = 0 WHERE server_id = ?",
     )
     .bind(server_id)
     .execute(&mut *tx)

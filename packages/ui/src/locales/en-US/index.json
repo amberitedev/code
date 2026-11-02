@@ -2115,7 +2115,7 @@
     "defaultMessage": "Resolution"
   },
   "hosting.content.enabled-for.client-only-not-installed-lock": {
-    "defaultMessage": "This pack file is client only, so it is not installed on the server."
+    "defaultMessage": "Players get this client-only file with the pack."
   },
   "hosting.content.enabled-for.client-only-on-server-warning": {
     "defaultMessage": "This client-only content is enabled on the server and may prevent the server from starting."
