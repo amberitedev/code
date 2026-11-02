@@ -44,8 +44,8 @@ use uuid::Uuid;
 
 use crate::{
     access::{Caller, now},
-    api::events::{BackupState, BackupTask, WsEvent},
     daemon::paths::Paths,
+    event::{BackupState, BackupTask, WsEvent},
     servers::{Phase, ServerError, Servers, console},
     state::servers::adapters::filesystem::{
         archive,

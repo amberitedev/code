@@ -7,6 +7,7 @@ mod backups;
 mod cli;
 mod daemon;
 mod db;
+mod event;
 mod installs;
 mod network;
 mod servers;

@@ -1,5 +1,5 @@
 //! What an install is doing and did, as the websocket's progress events carry it
-//! (`api::events`).
+//! (`crate::event`).
 
 use serde::Serialize;
 

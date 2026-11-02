@@ -8,7 +8,7 @@
 //! config files the push picks.
 
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeSet, HashMap},
     path::Path as FsPath,
     sync::Arc,
 };
@@ -18,19 +18,26 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
 };
-use chrono::{DateTime, Utc};
-use modrinth_content_management::ContentType;
+use modrinth_content_management::{
+    CommonExternalFilePolicy, ContentSetConfiguration, ContentType,
+    LoaderReference,
+};
 use serde::{Deserialize, Serialize};
 use sharing_client::{
     backend::{Backend, BackendError},
+    diff::{
+        CarriedFile, DiffError, DiffOptions, Disabled, ShareContent,
+        SharedInstanceUpdateDiff, VersionName, has_changes, share_diff,
+    },
+    install::ModpackFile,
     push,
     rules::{CONFIG_FILE_TYPE, SCAN_HEAD_SIZE, ShareScope},
-    versions::{RemovedFile, VersionContent},
+    versions::{ShareVersion, VersionContent},
 };
+use ts_rs::TS;
 
 use super::{
     AppState,
-    backend::OwedCall,
     content::{server_first, world},
     error::{ApiError, ErrorCode},
 };
@@ -40,10 +47,12 @@ use crate::{
     servers::ServerError,
     state::servers::{
         adapters::filesystem::content_files,
+        adapters::network::modrinth::ModrinthError,
         adapters::{
             filesystem::folder::{self, Folder},
             sqlite::{content_rows, server_rows},
         },
+        commands::drop_own_share::drop_own_share,
         domain::server_share::{Carried, carried, removed},
         modrinth_pack,
     },
@@ -95,79 +104,17 @@ pub struct ShareableFilesResponse {
     pub truncated: bool,
 }
 
-/// Mirrors Archon.Content.v1.SharedContentChange.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum Change<T> {
-    Added { after: T },
-    Removed { before: T },
-    Updated { before: T, after: T },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum FileChange {
-    Added,
-    Removed,
-    Updated,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct LoaderName {
-    pub name: String,
-    pub version: Option<String>,
-}
-
-/// Mirrors Archon.Content.v1.SharedContentDiffEntry.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum DiffEntry {
-    Project {
-        project_id: String,
-        change: Change<String>,
-    },
-    ExternalFile {
-        file_type: String,
-        file_name: String,
-        kind: FileChange,
-    },
-    Modpack {
-        change: Change<String>,
-    },
-    GameVersion {
-        change: Change<String>,
-    },
-    Loader {
-        change: Change<LoaderName>,
-    },
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ProjectName {
-    pub name: String,
-    pub icon_url: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct VersionName {
-    pub project_id: String,
-    pub name: String,
-    pub version_number: Option<String>,
-}
-
-/// Response of GET `.../content/share/diff`: what a push would change from the latest version.
-/// Mirrors Archon.Content.v1.SharedInstancePublishDiff.
-#[derive(Debug, Clone, Serialize)]
+/// Response of GET `.../content/share/diff`: what a push would change from the latest version,
+/// in the App's diff shape (`sharing_client::diff`). Mirrors
+/// Archon.Content.v1.SharedInstancePublishDiff.
+#[derive(Debug, Clone, Serialize, TS)]
 pub struct SharedInstancePublishDiff {
     pub shared_instance_id: String,
     pub latest_version: i32,
-    pub local_updated_at: DateTime<Utc>,
     pub has_changes: bool,
-    /// A push changes nothing the server runs.
+    /// The server is running, so it runs these changes only once it restarts.
     pub requires_restart: bool,
-    pub diffs: Vec<DiffEntry>,
-    pub projects: HashMap<String, ProjectName>,
-    pub versions: HashMap<String, VersionName>,
+    pub diffs: Vec<SharedInstanceUpdateDiff>,
 }
 
 /// What a push of the server would send now.
@@ -177,6 +124,8 @@ struct Snapshot {
     folder: Arc<Folder>,
     content: VersionContent,
     carried: Vec<Carried>,
+    /// The files its modpack placed, by which the share diff splits a version on that modpack.
+    pack_files: Vec<ModpackFile>,
 }
 
 async fn snapshot(state: &AppState, id: &str) -> Result<Snapshot, ApiError> {
@@ -219,6 +168,17 @@ async fn snapshot(state: &AppState, id: &str) -> Result<Snapshot, ApiError> {
                     .map(|(_, version_id)| version_id.to_owned())
             });
     let carried = carried(&listed, &rows, &entry_sides, modpack_id.is_some());
+    let pack_files = rows
+        .values()
+        .filter(|row| row.by_pack())
+        .map(|row| ModpackFile {
+            path: row.relative_path.clone(),
+            sha1: Some(row.sha1.clone()),
+            version_id: row.version_id.clone(),
+            alias: None,
+            source: (),
+        })
+        .collect();
     let removed_files = if modpack_id.is_some() {
         let level = folder.level_name();
         let dirs = [ContentType::Mod, ContentType::DataPack]
@@ -248,6 +208,7 @@ async fn snapshot(state: &AppState, id: &str) -> Result<Snapshot, ApiError> {
             loader_version: loader_version.unwrap_or_default(),
         },
         carried,
+        pack_files,
     })
 }
 
@@ -507,7 +468,8 @@ fn kept_config(
 }
 
 /// `DELETE .../content/share`: delete the server's share. Everyone who had it stops getting
-/// updates.
+/// updates. The backend is owed the deletion (`commands::drop_own_share`), which reaches it once
+/// it can, so an unpaired Core deletes it when it pairs again or never needs to.
 pub async fn unshare(
     caller: Caller,
     State(state): State<Arc<AppState>>,
@@ -516,42 +478,13 @@ pub async fn unshare(
     caller.require(&state.db, &id, Level::Owner).await?;
     world(&id, &wid)?;
     server_first(&state, &id).await?;
-    let Some(share_id) = server_rows::share_id(&state.db, &id).await? else {
+    if !drop_own_share(&state.db, &state.access.owed, &id).await? {
         return Err(ApiError::new(
             ErrorCode::NotFound,
             "This server is not shared.",
         ));
-    };
-    // An unpaired Core means the Core was removed from the account that had the share, and the
-    // backend deleted its shares then. `delete_share` counts a share already gone (404, or 410
-    // `core_removed`) as deleted, and a 403 `not_owner` means it is not this Core's any more.
-    if let Ok(backend) = backend(&state).await {
-        match backend.delete_share(&share_id).await {
-            Err(error)
-                if error.status() != Some(reqwest::StatusCode::FORBIDDEN) =>
-            {
-                return Err(error.into());
-            }
-            _ => {}
-        }
     }
-    server_rows::set_share_id(&state.db, &id, None).await?;
     Ok(StatusCode::NO_CONTENT)
-}
-
-/// Let go of the server's own share, if it has one, in the caller's transaction: the server
-/// stops being shared now, and the backend is owed the share's deletion, so its players stop
-/// getting it. Wake sync with `Access::owed` once it commits. Called when the server is deleted
-/// and once it follows an instance, since a server never has two shares.
-pub async fn owe_share_deletion(
-    conn: &mut sqlx::SqliteConnection,
-    id: &str,
-) -> sqlx::Result<()> {
-    let Some(share_id) = server_rows::share_id(&mut *conn, id).await? else {
-        return Ok(());
-    };
-    server_rows::set_share_id(&mut *conn, id, None).await?;
-    crate::access::sync::owe(conn, &OwedCall::DeleteShare { share_id }).await
 }
 
 /// `GET .../content/share/files`: the config files a push can carry.
@@ -675,120 +608,98 @@ pub async fn diff(
         .await?
         .ok_or_else(not_shared)?;
     let snapshot = snapshot(&state, &id).await?;
-
-    // Projects, by the version each side has.
-    let after = snapshot
-        .carried
-        .iter()
-        .filter_map(|item| match item {
-            Carried::Modrinth {
-                version_id,
-                project_id,
-            } => Some((project_id.clone(), version_id.clone())),
-            Carried::File { .. } => None,
-        })
-        .collect::<BTreeMap<_, _>>();
-    // The modpack's files players stop getting (`true`) or get again.
-    let removed_changes = [
-        (
-            &snapshot.content.removed_files,
-            &latest.content.removed_files,
-            true,
-        ),
-        (
-            &latest.content.removed_files,
-            &snapshot.content.removed_files,
-            false,
-        ),
-    ]
-    .into_iter()
-    .flat_map(|(list, other, removed)| {
-        list.iter()
-            .filter(|entry| !other.contains(entry))
-            .map(move |entry| (entry, removed))
-    })
-    .collect::<Vec<_>>();
-    let removed_versions =
-        removed_changes.iter().filter_map(|(entry, _)| match entry {
-            RemovedFile::Version { version_id } => Some(version_id),
-            RemovedFile::Path { .. } => None,
-        });
-    let version_ids = latest
-        .content
-        .modrinth_ids
-        .iter()
-        .chain(after.values())
-        .chain(removed_versions)
-        .chain(&latest.content.modpack_id)
-        .chain(&snapshot.content.modpack_id)
-        .cloned()
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
-    let modrinth = &state.content.modrinth;
-    let versions = modrinth
-        .versions_by_id(&version_ids)
-        .await
-        .unwrap_or_default();
-    let project_of = |version_id: &String| {
-        versions
-            .iter()
-            .find(|version| &version.id == version_id)
-            .map_or(version_id, |version| &version.project_id)
-            .clone()
-    };
-    let before = latest
-        .content
-        .modrinth_ids
-        .iter()
-        .map(|version_id| (project_of(version_id), version_id.clone()))
-        .collect::<BTreeMap<_, _>>();
-    let mut diffs = project_diffs(&before, &after);
-    let mut pack_projects = latest
-        .content
-        .modpack_id
-        .iter()
-        .chain(&snapshot.content.modpack_id)
-        .map(project_of)
-        .collect::<Vec<_>>();
-    for (entry, removed) in removed_changes {
-        diffs.push(match entry {
-            RemovedFile::Version { version_id } => {
-                let project_id = project_of(version_id);
-                pack_projects.push(project_id.clone());
-                DiffEntry::Project {
-                    project_id,
-                    change: if removed {
-                        Change::Removed {
-                            before: version_id.clone(),
-                        }
-                    } else {
-                        Change::Added {
-                            after: version_id.clone(),
-                        }
-                    },
+    let (before, after) = share_contents(&snapshot, &latest).await?;
+    let diffs =
+        share_diff(&before, &after, &push_options(), &Names(&state.content))
+            .await
+            .map_err(|error| match error {
+                DiffError::MissingVersion(_) => {
+                    ApiError::new(ErrorCode::Conflict, error.to_string())
                 }
-            }
-            RemovedFile::Path { filename, .. } => DiffEntry::ExternalFile {
-                file_type: "mod".into(),
-                file_name: filename.clone(),
-                kind: if removed {
-                    FileChange::Removed
-                } else {
-                    FileChange::Added
-                },
-            },
-        });
-    }
+                DiffError::Names(error) => {
+                    crate::state::servers::Error::from(error).into()
+                }
+            })?;
+    let has_changes = !diffs.is_empty();
+    Ok(Json(SharedInstancePublishDiff {
+        shared_instance_id: share_id,
+        latest_version: latest.version,
+        has_changes,
+        requires_restart: has_changes && state.servers.phase(&id).is_some(),
+        diffs,
+    }))
+}
 
-    // Files: content files by SHA-1, and configs where the server's copy changed, since a push
-    // sends every config still shared as the server has it.
-    let shared = latest
-        .external_files
-        .iter()
-        .map(|file| ((file.file_type.clone(), file.file_name.clone()), file))
-        .collect::<BTreeMap<_, _>>();
-    let folder = Arc::clone(&snapshot.folder);
+/// A push compares every file it sends by SHA-1, which both sides know.
+fn push_options() -> DiffOptions {
+    DiffOptions {
+        common_external_files: CommonExternalFilePolicy::AssumeUnchanged,
+        disabled: Disabled::default(),
+    }
+}
+
+/// Whether the server has changes its share's latest version does not have, so a push would
+/// change something (upstream's `shared_instance_needs_update`). False for a server that is not
+/// shared, and when the backend cannot be read now.
+pub async fn needs_update(state: &AppState, id: &str) -> bool {
+    let check = async {
+        let Some(share_id) = server_rows::share_id(&state.db, id).await? else {
+            return Ok(false);
+        };
+        let Some(latest) =
+            backend(state).await?.latest_ready(&share_id).await?
+        else {
+            return Ok(false);
+        };
+        let snapshot = snapshot(state, id).await?;
+        let (before, after) = share_contents(&snapshot, &latest).await?;
+        Ok::<_, ApiError>(has_changes(
+            &before,
+            &after,
+            push_options().common_external_files,
+        ))
+    };
+    check.await.unwrap_or_else(|error| {
+        tracing::debug!(server = %id, error = %error.description, "could not compare the server to its share");
+        false
+    })
+}
+
+/// The latest version, and what a push of the server sends now, as the share diff reads them.
+/// A version on the server's own modpack is split by the files that modpack placed.
+async fn share_contents(
+    snapshot: &Snapshot,
+    latest: &ShareVersion,
+) -> Result<(ShareContent, ShareContent), ApiError> {
+    let configuration = |content: &VersionContent| ContentSetConfiguration {
+        modpack_version_id: content.modpack_id.clone(),
+        game_version: content.game_version.clone(),
+        loader: LoaderReference {
+            name: content.loader.clone(),
+            version: Some(content.loader_version.clone()),
+        },
+    };
+    let pack = |content: &VersionContent| {
+        if content.modpack_id.is_some()
+            && content.modpack_id == snapshot.content.modpack_id
+        {
+            snapshot.pack_files.clone()
+        } else {
+            Vec::new()
+        }
+    };
+    let invalid = |error: modrinth_content_management::Error| {
+        ApiError::new(ErrorCode::Internal, error.to_string())
+    };
+    let before = ShareContent::of(
+        &latest.content,
+        latest.external_files.iter().map(CarriedFile::from),
+        pack(&latest.content),
+        configuration(&latest.content),
+    )
+    .map_err(invalid)?;
+    // A push sends the server's addons as they are on disk, and every config still shared as
+    // the server has it, so one it no longer has leaves the share.
     let local = snapshot
         .carried
         .iter()
@@ -804,169 +715,80 @@ pub async fn diff(
             )),
             Carried::Modrinth { .. } => None,
         })
-        .chain(
-            shared
-                .keys()
-                .filter(|(file_type, _)| file_type == CONFIG_FILE_TYPE)
-                .map(|(file_type, file_name)| {
-                    (file_type.clone(), file_name.clone(), file_name.clone())
-                }),
-        )
+        .chain(latest.configs().map(|file| {
+            (
+                CONFIG_FILE_TYPE.to_owned(),
+                file.file_name.clone(),
+                file.file_name.clone(),
+            )
+        }))
         .collect::<Vec<_>>();
+    let folder = Arc::clone(&snapshot.folder);
     let local = tokio::task::spawn_blocking(move || {
         local
             .into_iter()
-            .filter_map(|(file_type, file_name, on_disk)| {
-                let sha1 = folder.sha1(&on_disk).ok()??;
-                Some(((file_type, file_name), sha1))
+            .map(|(file_type, file_name, on_disk)| {
+                let sha1 = folder.sha1(&on_disk).ok().flatten();
+                (file_type, file_name, sha1)
             })
-            .collect::<BTreeMap<_, _>>()
+            .collect::<Vec<_>>()
     })
     .await
     .map_err(std::io::Error::other)?;
-    for ((file_type, file_name), sha1) in &local {
-        let kind = match shared.get(&(file_type.clone(), file_name.clone())) {
-            None => FileChange::Added,
-            Some(file) if !file.sha1.eq_ignore_ascii_case(sha1) => {
-                FileChange::Updated
-            }
-            Some(_) => continue,
-        };
-        diffs.push(DiffEntry::ExternalFile {
-            file_type: file_type.clone(),
-            file_name: file_name.clone(),
-            kind,
-        });
-    }
-    // A config the server no longer has leaves the share with the next push.
-    for (file_type, file_name) in shared.keys() {
-        if !local.contains_key(&(file_type.clone(), file_name.clone())) {
-            diffs.push(DiffEntry::ExternalFile {
-                file_type: file_type.clone(),
-                file_name: file_name.clone(),
-                kind: FileChange::Removed,
-            });
-        }
-    }
-
-    let content = &snapshot.content;
-    let modpack = match (
-        latest.content.modpack_id.clone(),
-        content.modpack_id.clone(),
-    ) {
-        (Some(before), Some(after)) if before != after => {
-            Some(Change::Updated { before, after })
-        }
-        (Some(before), None) => Some(Change::Removed { before }),
-        (None, Some(after)) => Some(Change::Added { after }),
-        _ => None,
-    };
-    if let Some(change) = modpack {
-        diffs.push(DiffEntry::Modpack { change });
-    }
-    if latest.content.game_version != content.game_version {
-        diffs.push(DiffEntry::GameVersion {
-            change: Change::Updated {
-                before: latest.content.game_version.clone(),
-                after: content.game_version.clone(),
-            },
-        });
-    }
-    let loader = |name: &str, version: &str| LoaderName {
-        name: name.to_owned(),
-        version: Some(version.to_owned()).filter(|version| !version.is_empty()),
-    };
-    let (shared_loader, local_loader) = (
-        loader(&latest.content.loader, &latest.content.loader_version),
-        loader(&content.loader, &content.loader_version),
-    );
-    if shared_loader != local_loader {
-        diffs.push(DiffEntry::Loader {
-            change: Change::Updated {
-                before: shared_loader,
-                after: local_loader,
-            },
-        });
-    }
-
-    let project_ids = before
-        .keys()
-        .chain(after.keys())
-        .chain(&pack_projects)
-        .cloned()
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
-    let projects = modrinth
-        .projects(&project_ids)
-        .await
-        .unwrap_or_default()
-        .into_iter()
-        .map(|project| {
-            (
-                project.id,
-                ProjectName {
-                    name: project.title,
-                    icon_url: project.icon_url,
-                },
-            )
-        })
-        .collect();
-    let versions = versions
-        .into_iter()
-        .map(|version| {
-            (
-                version.id,
-                VersionName {
-                    project_id: version.project_id,
-                    name: version.version_number.clone(),
-                    version_number: Some(version.version_number),
-                },
-            )
-        })
-        .collect();
-    Ok(Json(SharedInstancePublishDiff {
-        shared_instance_id: share_id,
-        latest_version: latest.version,
-        local_updated_at: Utc::now(),
-        has_changes: !diffs.is_empty(),
-        requires_restart: false,
-        diffs,
-        projects,
-        versions,
-    }))
+    let after = ShareContent::of(
+        &snapshot.content,
+        local
+            .iter()
+            .map(|(file_type, file_name, sha1)| CarriedFile {
+                file_type,
+                file_name,
+                sha1: sha1.as_deref(),
+            }),
+        snapshot.pack_files.clone(),
+        configuration(&snapshot.content),
+    )
+    .map_err(invalid)?;
+    Ok((before, after))
 }
 
-/// Each project added, removed, or on another version, from the version each side has of it.
-fn project_diffs(
-    before: &BTreeMap<String, String>,
-    after: &BTreeMap<String, String>,
-) -> Vec<DiffEntry> {
-    let projects = before.keys().chain(after.keys()).collect::<BTreeSet<_>>();
-    projects
-        .into_iter()
-        .filter_map(|project| {
-            let change = match (before.get(project), after.get(project)) {
-                (None, Some(after)) => Change::Added {
-                    after: after.clone(),
-                },
-                (Some(before), None) => Change::Removed {
-                    before: before.clone(),
-                },
-                (Some(before), Some(after)) if before != after => {
-                    Change::Updated {
-                        before: before.clone(),
-                        after: after.clone(),
-                    }
-                }
-                _ => return None,
-            };
-            Some(DiffEntry::Project {
-                project_id: project.clone(),
-                change,
+/// Modrinth's names through Core's own client.
+struct Names<'a>(&'a crate::state::servers::Content);
+
+impl sharing_client::diff::Names for Names<'_> {
+    type Error = ModrinthError;
+
+    async fn versions(
+        &self,
+        ids: &[String],
+    ) -> Result<Vec<VersionName>, ModrinthError> {
+        Ok(self
+            .0
+            .modrinth
+            .versions_by_id(ids)
+            .await?
+            .into_iter()
+            .map(|version| VersionName {
+                id: version.id,
+                project_id: version.project_id,
+                name: version.version_number.clone(),
+                version_number: version.version_number,
             })
-        })
-        .collect()
+            .collect())
+    }
+
+    async fn projects(
+        &self,
+        ids: &[String],
+    ) -> Result<HashMap<String, String>, ModrinthError> {
+        Ok(self
+            .0
+            .modrinth
+            .projects(ids)
+            .await?
+            .into_iter()
+            .map(|project| (project.id, project.title))
+            .collect())
+    }
 }
 
 #[cfg(test)]

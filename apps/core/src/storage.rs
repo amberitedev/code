@@ -41,9 +41,9 @@ use tokio::{
 use tracing::{info, warn};
 
 use crate::{
-    access::sync,
+    access::{owed::OwedCall, sync},
     api::{
-        backend::{OwedCall, PullOrder, StorageAnswer, StorageReport},
+        backend::{PullOrder, StorageAnswer, StorageReport},
         error::{ApiError, ErrorCode},
         storage::{StorageSettings, StorageStatus},
     },

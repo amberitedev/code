@@ -20,10 +20,10 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::{
-    // The websocket's events, which Core sends progress and results on.
-    api::events::{InstallProgressItem, InstallationResult, WsEvent},
     backups::Backups,
     daemon::paths::Paths,
+    // The websocket's events, which Core sends progress and results on.
+    event::{InstallProgressItem, InstallationResult, WsEvent},
     installs::{self, download},
     servers::{Hold, ServerError, Servers},
     state::servers::{

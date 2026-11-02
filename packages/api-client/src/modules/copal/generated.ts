@@ -286,6 +286,24 @@ export type JavaPath = { path: string | null, };
 
 export type GameVersionChange = { from: string, to: string, };
 
+export type SharedInstancePublishDiff = { shared_instance_id: string, latest_version: number, has_changes: boolean, 
+/**
+ * The server is running, so it runs these changes only once it restarts.
+ */
+requires_restart: boolean, diffs: Array<SharedInstanceUpdateDiff>, };
+
+export type SharedInstanceUpdateDiff = { type: SharedInstanceUpdateDiffType, projectId: string | null, projectName: string | null, 
+/**
+ * A file without a Modrinth project, by its name in its type's folder.
+ */
+fileName: string | null, currentVersionName: string | null, newVersionName: string | null, configFileCount?: number, configFileNames?: Array<string>, 
+/**
+ * A removal of something the owner had turned off, which members never ran.
+ */
+disabled?: boolean, };
+
+export type SharedInstanceUpdateDiffType = "added" | "removed" | "updated" | "modpack_linked" | "modpack_updated" | "modpack_unlinked" | "game_version_updated" | "loader_updated" | "config_files_updated";
+
 export type UpdateStatus = { 
 /**
  * The running version.
