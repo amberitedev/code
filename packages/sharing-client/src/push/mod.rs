@@ -193,7 +193,10 @@ pub async fn push(
         version,
         previous: previous.into_iter().next().filter(|latest| latest.ready),
         external_files,
-        paths: hashed.iter().map(|file| file.path().to_path_buf()).collect(),
+        paths: hashed
+            .iter()
+            .map(|file| file.path().to_path_buf())
+            .collect(),
     });
     if let Err(error) = tokio::fs::remove_dir_all(&folder).await
         && error.kind() != std::io::ErrorKind::NotFound
