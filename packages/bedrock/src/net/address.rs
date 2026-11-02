@@ -1,8 +1,12 @@
-use std::{fmt, net::SocketAddr};
+use std::{
+    fmt,
+    net::{IpAddr, SocketAddr},
+};
 
 /// Where a Core serves its API: `https://ip:port`, as Copal reports it. Nothing else is a Core
-/// address: no host name, no default port, no user, path or query, so a ticket or session never
-/// leaves over plain HTTP or to a name someone else resolves.
+/// address: no host name, user, path or query, so a ticket or session never leaves over plain
+/// HTTP or to a name someone else resolves. A missing port is 443, because the backend stores a
+/// port-443 address without it (`URL.origin` drops the default port).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CoreAddress(SocketAddr);
 
@@ -13,14 +17,25 @@ pub enum AddressError {
 }
 
 impl CoreAddress {
-    /// `address` as `https://ip:port`, with or without a trailing `/`.
+    /// `address` as `https://ip:port` or `https://ip`, with or without a trailing `/`.
     pub fn parse(address: &str) -> Result<Self, AddressError> {
-        let socket = address
+        let rest = address
             .strip_prefix("https://")
-            .map(|rest| rest.strip_suffix('/').unwrap_or(rest))
-            .and_then(|rest| rest.parse::<SocketAddr>().ok())
             .ok_or(AddressError::Invalid)?;
-        Ok(Self(socket))
+        let rest = rest.strip_suffix('/').unwrap_or(rest);
+        let socket = rest.parse::<SocketAddr>().ok().or_else(|| {
+            let ip = rest
+                .strip_prefix('[')
+                .and_then(|ip| ip.strip_suffix(']'))
+                .unwrap_or(rest);
+            // A bare IPv6 address would read its last group as a port, so only the bracketed
+            // form is accepted for IPv6.
+            match ip.parse::<IpAddr>().ok()? {
+                IpAddr::V6(_) if ip.len() == rest.len() => None,
+                ip => Some(SocketAddr::new(ip, 443)),
+            }
+        });
+        socket.map(Self).ok_or(AddressError::Invalid)
     }
 
     pub fn socket(self) -> SocketAddr {
@@ -50,6 +65,9 @@ mod tests {
             "https://10.0.0.11:17007/",
             "https://[::1]:17007",
             "https://8.8.8.8:443",
+            "https://1.2.3.4",
+            "https://1.2.3.4/",
+            "https://[::1]",
         ] {
             assert!(CoreAddress::parse(address).is_ok(), "{address}");
         }
@@ -57,7 +75,7 @@ mod tests {
             "http://10.0.0.11:17007",
             "https://core.example:17007",
             "https://localhost:17007",
-            "https://10.0.0.11",
+            "https://::1",
             "https://user@10.0.0.11:17007",
             "https://10.0.0.11:17007/path",
             "https://10.0.0.11:17007?query",
@@ -72,5 +90,7 @@ mod tests {
         let address = CoreAddress::parse("https://[::1]:17007/").unwrap();
         assert_eq!(address.to_string(), "https://[::1]:17007");
         assert_eq!(address.authority(), "[::1]:17007");
+        let address = CoreAddress::parse("https://1.2.3.4").unwrap();
+        assert_eq!(address.to_string(), "https://1.2.3.4:443");
     }
 }
