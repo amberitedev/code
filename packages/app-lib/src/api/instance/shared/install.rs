@@ -713,11 +713,29 @@ pub(super) async fn shared_instance_install_data(
     } else {
         Vec::new()
     };
-    // The modpack's install places its own files, so only what the version adds is installed.
-    let modrinth_ids =
-        sharing_client::install::version_files(&version, inherited)
-            .modrinth_ids;
+    // The modpack's install places its own files, so only what the version adds is installed:
+    // its Modrinth versions, the pool files it places and the configs that left the share.
+    let plan = sharing_client::install::install_plan(
+        &version,
+        inherited,
+        configs,
+        sharing_client::install::Side::Client,
+    );
     let access = version.pool_access(shared_instance_id);
+    let external_files = plan
+        .pool_files()
+        .map(|(_, file)| {
+            shared_instance_external_file_data(file.clone(), access.as_ref())
+        })
+        .collect::<crate::Result<Vec<_>>>()?;
+    let removed_config_files = plan
+        .deleted()
+        .map(|(_, file)| crate::install::SharedInstanceRemovedConfig {
+            file_name: file.file_name.clone(),
+            file_size: file.file_size,
+            sha1: file.sha1.clone(),
+        })
+        .collect();
     let (loader, loader_version) = instance_loader(&version);
     let content = version.content;
 
@@ -731,26 +749,10 @@ pub(super) async fn shared_instance_install_data(
         linked_user_id,
         name,
         version: version.version,
-        modrinth_ids,
+        modrinth_ids: plan.modrinth_ids,
         removed_files: content.removed_files,
-        external_files: version
-            .external_files
-            .into_iter()
-            .filter(|file| file.file_type != CONFIG_FILE_TYPE)
-            .chain(configs.write)
-            .map(|file| {
-                shared_instance_external_file_data(file, access.as_ref())
-            })
-            .collect::<crate::Result<Vec<_>>>()?,
-        removed_config_files: configs
-            .left
-            .into_iter()
-            .map(|file| crate::install::SharedInstanceRemovedConfig {
-                file_name: file.file_name,
-                file_size: file.file_size,
-                sha1: file.sha1,
-            })
-            .collect(),
+        external_files,
+        removed_config_files,
         modpack,
         game_version: content.game_version,
         loader,
