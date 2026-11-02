@@ -1,3 +1,4 @@
+import type { Copal } from '@modrinth/api-client'
 import { invoke } from '@tauri-apps/api/core'
 
 import type { InstallErrorView } from '@/generated/app-events/InstallErrorView'
@@ -103,26 +104,8 @@ export interface SharedInstanceUpdatePreview {
 	diffs: SharedInstanceUpdateDiff[]
 }
 
-export interface SharedInstanceUpdateDiff {
-	type:
-		| 'added'
-		| 'removed'
-		| 'updated'
-		| 'modpack_linked'
-		| 'modpack_updated'
-		| 'modpack_unlinked'
-		| 'game_version_updated'
-		| 'loader_updated'
-		| 'config_files_updated'
-	projectId?: string | null
-	projectName?: string | null
-	fileName?: string | null
-	currentVersionName?: string | null
-	newVersionName?: string | null
-	configFileCount?: number | null
-	configFileNames?: string[] | null
-	disabled?: boolean
-}
+/** The App gives its share diffs in the same shape as a Core (`sharing_client::diff`). */
+export type SharedInstanceUpdateDiff = Copal.SharedInstanceUpdateDiff
 
 const SHARED_INSTANCE_UNAVAILABLE_ERROR_CODES: Record<string, SharedInstanceUnavailableReason> = {
 	shared_instance_deleted: 'deleted',

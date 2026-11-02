@@ -1,11 +1,15 @@
-import type { InviteLinkSettings } from '@modrinth/ui'
+import {
+	DEFAULT_INVITE_LINK_MAX_USES,
+	inviteLinkMaxAge,
+	inviteLinkMaxUses,
+	type InviteLinkSettings,
+} from '@modrinth/ui'
 import { useQueryClient } from '@tanstack/vue-query'
 import { computed, type Ref, ref, watch } from 'vue'
 
-import { config } from '@/config'
 import { create_shared_instance_invite_link, type SharedInstanceInvite } from '@/helpers/instance'
 
-const DEFAULT_INVITE_LINK_MAX_USES = 10
+import { sharedInstanceInviteUrl } from './shared-instance-share-types'
 
 export function useSharedInstanceInviteLink(
 	instanceId: Ref<string>,
@@ -19,9 +23,7 @@ export function useSharedInstanceInviteLink(
 	const details = ref<Awaited<ReturnType<typeof create_shared_instance_invite_link>>>()
 	const pending = ref(false)
 	const link = computed(() =>
-		details.value
-			? `${config.accountWebUrl || config.accountApiUrl || config.siteUrl}/share/${encodeURIComponent(details.value.inviteId)}`
-			: undefined,
+		details.value ? sharedInstanceInviteUrl(details.value.inviteId) : undefined,
 	)
 
 	async function ensure() {
@@ -45,19 +47,14 @@ export function useSharedInstanceInviteLink(
 
 	async function update(settings: InviteLinkSettings) {
 		if (!details.value) return
-		const maxInviteLinkUses = Math.floor(maxInviteUses.value)
-		if (maxInviteLinkUses <= 0) return
+		if (Math.floor(maxInviteUses.value) <= 0) return
 
 		const replaced = details.value.inviteId
 		pending.value = true
 		try {
-			const maxAgeSeconds = Math.max(
-				1,
-				Math.min(604800, Math.floor((settings.expiresAt.getTime() - Date.now()) / 1000)),
-			)
 			details.value = await create_shared_instance_invite_link(instanceId.value, {
-				maxAgeSeconds,
-				maxUses: Math.min(settings.maxUses, maxInviteLinkUses),
+				maxAgeSeconds: inviteLinkMaxAge(settings.expiresAt),
+				maxUses: inviteLinkMaxUses(settings.maxUses, maxInviteUses.value),
 				replaceInviteId: replaced,
 			})
 			void refreshInvites()

@@ -103,6 +103,7 @@ import {
 } from '#ui/components/sharing/server-sharing-update/handoff'
 import { defineMessages, useVIntl } from '#ui/composables/i18n'
 import { useServerPermissions } from '#ui/composables/server-permissions'
+import { inviteLinkUrl } from '#ui/composables/server-sharing/invite-link'
 import { mrpackFilename } from '#ui/composables/server-sharing/shared-instance'
 import {
 	type ServerShareActionTarget,
@@ -184,9 +185,7 @@ const inviteHeader = computed(() =>
 const inviteProps = computed<InvitePlayersContentProps>(() => ({
 	friends: players.candidates.value,
 	searchUsers: players.search,
-	link: players.link.value
-		? `${props.siteUrl}/share/${encodeURIComponent(players.link.value.id)}`
-		: undefined,
+	link: players.link.value ? inviteLinkUrl(props.siteUrl, players.link.value.id) : undefined,
 	linkExpiresAt: players.link.value?.expiration,
 	linkMaxUses: players.link.value?.max_uses,
 	linkMaxUsesLimit: players.remaining.value,

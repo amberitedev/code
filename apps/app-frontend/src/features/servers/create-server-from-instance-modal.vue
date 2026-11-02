@@ -19,17 +19,14 @@ import {
 	injectModrinthClient,
 	injectNotificationManager,
 	notifyHomeAddressOnce,
+	serverKeys,
 	useVIntl,
 } from '@modrinth/ui'
 import { useQueryClient } from '@tanstack/vue-query'
 import { nextTick, ref } from 'vue'
 
 import ChooseCoreModal from '@/features/cores/choose-core-modal.vue'
-import {
-	coreProblem,
-	pushInstanceToServer,
-	serversQueryKey,
-} from '@/features/servers/linked-servers'
+import { coreProblem, pushInstanceToServer } from '@/features/servers/linked-servers'
 import { getInstanceIconUrl } from '@/helpers/instance'
 import type { GameInstance } from '@/helpers/types'
 
@@ -86,7 +83,7 @@ async function create(ctx: CreationFlowContextValue) {
 		flow.value?.hide()
 		// Nobody else sees the server of an instance that is not shared.
 		if (props.instance.shared_instance) notifyHomeAddressOnce(addNotification, formatMessage)
-		await queryClient.invalidateQueries({ queryKey: serversQueryKey })
+		await queryClient.invalidateQueries({ queryKey: serverKeys.list() })
 		try {
 			await pushInstanceToServer(instance, id, { properties: ctx.buildProperties() })
 		} catch (error) {
@@ -106,7 +103,7 @@ async function create(ctx: CreationFlowContextValue) {
 		})
 	} finally {
 		ctx.loading.value = false
-		await queryClient.invalidateQueries({ queryKey: serversQueryKey })
+		await queryClient.invalidateQueries({ queryKey: serverKeys.list() })
 	}
 }
 

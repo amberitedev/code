@@ -11,7 +11,12 @@
 </template>
 
 <script setup lang="ts">
-import { type ContentDiffItem, injectModrinthClient, SharedFilesPublishModal } from '@modrinth/ui'
+import {
+	type ContentDiffItem,
+	injectModrinthClient,
+	SharedFilesPublishModal,
+	sharedDiffItems,
+} from '@modrinth/ui'
 import { computed, ref } from 'vue'
 
 import { trackSharedInstancePublish } from '@/components/ui/download-manager/shared-instance-publishes'
@@ -94,15 +99,7 @@ async function show(e?: MouseEvent) {
 				emit('published')
 				return
 			}
-			diffs = preview.diffs.map((diff) => ({
-				type: diff.type,
-				projectName: diff.projectName ?? undefined,
-				fileName: diff.fileName ?? undefined,
-				currentVersionName: diff.currentVersionName ?? undefined,
-				newVersionName: diff.newVersionName ?? undefined,
-				fileCount: diff.configFileCount ?? undefined,
-				disabled: diff.disabled,
-			}))
+			diffs = sharedDiffItems(preview.diffs)
 			files.value = preview.files
 			serversBehind.value = (props.servers ?? []).some((server) =>
 				isServerBehind(server, preview.sharedInstanceId, preview.latestVersion),

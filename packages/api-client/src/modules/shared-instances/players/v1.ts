@@ -1,6 +1,4 @@
-import { AbstractModule } from '../../../core/abstract-module'
-import type { RequestOptions } from '../../../types/request'
-import { SharedInstancesApiError } from '../errors'
+import { SharedInstancesModule } from '../module'
 import type { SharedInstances } from '../types'
 
 /**
@@ -11,7 +9,7 @@ import type { SharedInstances } from '../types'
  * being its members (docs/internals/plan.md, "Shares, members, and players"). Both answer in the
  * shared instance's shapes, so the Play tab does not tell them apart.
  */
-export class SharedInstancesPlayersV1Module extends AbstractModule {
+export class SharedInstancesPlayersV1Module extends SharedInstancesModule {
 	public getModuleID(): string {
 		return 'sharedinstances_players_v1'
 	}
@@ -22,7 +20,11 @@ export class SharedInstancesPlayersV1Module extends AbstractModule {
 	): Promise<SharedInstances.Instances.v1.InstanceUsers> {
 		if (!this.client.selfHostedHosting)
 			return this.client.sharedinstances.instances_v1.getUsers(instanceId)
-		return this.request(await this.path(serverId, 'players'), { method: 'GET' })
+		return this.request(await this.path(serverId, 'players'), {
+			api: 'sharedinstances',
+			version: 1,
+			method: 'GET',
+		})
 	}
 
 	/** Players whose privacy settings refuse the invite come back in `failed`. */
@@ -34,6 +36,8 @@ export class SharedInstancesPlayersV1Module extends AbstractModule {
 		if (!this.client.selfHostedHosting)
 			return this.client.sharedinstances.instances_v1.inviteUsers(instanceId, userIds)
 		return this.request(await this.path(serverId, 'players'), {
+			api: 'sharedinstances',
+			version: 1,
 			method: 'POST',
 			body: { ...(await this.server(serverId, instanceId)), user_ids: userIds },
 			retry: false,
@@ -44,6 +48,8 @@ export class SharedInstancesPlayersV1Module extends AbstractModule {
 		if (!this.client.selfHostedHosting)
 			return this.client.sharedinstances.instances_v1.removeUsers(instanceId, userIds)
 		return this.request(await this.path(serverId, 'players'), {
+			api: 'sharedinstances',
+			version: 1,
 			method: 'DELETE',
 			body: { user_ids: userIds },
 		})
@@ -56,7 +62,11 @@ export class SharedInstancesPlayersV1Module extends AbstractModule {
 	): Promise<SharedInstances.Invites.v1.InviteLink[]> {
 		if (!this.client.selfHostedHosting)
 			return this.client.sharedinstances.invites_v1.list(instanceId)
-		return this.request(await this.path(serverId, 'invites'), { method: 'GET' })
+		return this.request(await this.path(serverId, 'invites'), {
+			api: 'sharedinstances',
+			version: 1,
+			method: 'GET',
+		})
 	}
 
 	public async createLink(
@@ -67,6 +77,8 @@ export class SharedInstancesPlayersV1Module extends AbstractModule {
 		if (!this.client.selfHostedHosting)
 			return this.client.sharedinstances.invites_v1.create(instanceId, options)
 		return this.request(await this.path(serverId, 'invites'), {
+			api: 'sharedinstances',
+			version: 1,
 			method: 'POST',
 			body: { ...(await this.server(serverId, instanceId)), ...options },
 			retry: false,
@@ -77,19 +89,10 @@ export class SharedInstancesPlayersV1Module extends AbstractModule {
 		if (!this.client.selfHostedHosting)
 			return this.client.sharedinstances.invites_v1.delete(instanceId, inviteId)
 		return this.request(`${await this.path(serverId, 'invites')}/${encodeURIComponent(inviteId)}`, {
+			api: 'sharedinstances',
+			version: 1,
 			method: 'DELETE',
 		})
-	}
-
-	private async request<T>(
-		path: string,
-		options: Omit<RequestOptions, 'api' | 'version'>,
-	): Promise<T> {
-		try {
-			return await this.client.request<T>(path, { ...options, api: 'sharedinstances', version: 1 })
-		} catch (error) {
-			throw SharedInstancesApiError.from(error)
-		}
 	}
 
 	private async path(serverId: string, section: 'players' | 'invites') {

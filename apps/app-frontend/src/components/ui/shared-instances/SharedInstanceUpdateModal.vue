@@ -20,7 +20,13 @@
 
 <script setup lang="ts">
 import { DownloadIcon } from '@modrinth/assets'
-import { commonMessages, ContentDiffModal, defineMessages, useVIntl } from '@modrinth/ui'
+import {
+	commonMessages,
+	ContentDiffModal,
+	defineMessages,
+	sharedDiffItems,
+	useVIntl,
+} from '@modrinth/ui'
 import { computed, ref } from 'vue'
 
 import { config } from '@/config'
@@ -35,8 +41,6 @@ import {
 import { useSharedInstanceErrors } from '@/helpers/shared-instance-errors'
 import type { GameInstance } from '@/helpers/types'
 import { injectAppEvents } from '@/providers/app-events'
-
-import { sharedDiffItems } from './shared-diff-items'
 
 type UpdateCompleteCallback = () => void | Promise<void>
 

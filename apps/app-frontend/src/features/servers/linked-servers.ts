@@ -1,4 +1,5 @@
 import { type Archon, ModrinthApiError, type SharedInstances } from '@modrinth/api-client'
+import { serverListQueryOptions } from '@modrinth/ui'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, type MaybeRefOrGetter, ref, toValue, watch } from 'vue'
 
@@ -10,16 +11,13 @@ export type LinkedServer = Archon.Servers.v0.Server & {
 	linked_instance: Archon.Servers.v0.LinkedInstance
 }
 
-/** Shared with the Servers page, so both read the same cached list. */
-export const serversQueryKey = ['servers'] as const
-
 /**
- * The one query for the Core's server list. It never retries: a Core that is down refuses the
- * connection at once, and the next check is only seconds away.
+ * The one query for the Core's server list, under the same key and fetch as the Servers page so
+ * both read the same cached list. It never retries: a Core that is down refuses the connection at
+ * once, and the next check is only seconds away.
  */
 const serversQueryOptions = {
-	queryKey: serversQueryKey,
-	queryFn: () => apiClient.archon.servers_v0.list({ limit: 100 }),
+	...serverListQueryOptions(apiClient),
 	enabled: () => apiClient.selfHostedHosting,
 	staleTime: 5_000,
 	refetchInterval: 5_000,

@@ -11,6 +11,7 @@ import {
 	injectModrinthClient,
 	injectNotificationManager,
 	SegmentedBar,
+	serverKeys,
 	Slider,
 	Toggle,
 	useFormatBytes,
@@ -21,7 +22,7 @@ import { computed, ref, watch } from 'vue'
 
 import AccountRequired from '@/features/cores/account-required.vue'
 import { coresQueryKey, injectCoreActions, useCores } from '@/features/cores/use-cores'
-import { coreOffline, serversQueryKey, useServers } from '@/features/servers/linked-servers'
+import { coreOffline, useServers } from '@/features/servers/linked-servers'
 import { useSharedStorage } from '@/features/settings/sharing/use-shared-storage'
 
 // One of the account's Cores, picked at the top: the storage it lends the pool and its daily
@@ -157,7 +158,7 @@ async function remove() {
 	} finally {
 		await Promise.all([
 			queryClient.invalidateQueries({ queryKey: coresQueryKey }),
-			queryClient.invalidateQueries({ queryKey: serversQueryKey }),
+			queryClient.invalidateQueries({ queryKey: serverKeys.list() }),
 		])
 		removing.value = false
 	}

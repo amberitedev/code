@@ -8,6 +8,7 @@ import {
 	injectPopupNotificationManager,
 	serverIconQueryOptions,
 	type ServerPlayTarget,
+	sharedDiffItems,
 	useVIntl,
 } from '@modrinth/ui'
 import { useMutation, useQueryClient } from '@tanstack/vue-query'
@@ -303,17 +304,7 @@ export function useServerPlay(modals: Ref<ServerPlayModals | undefined>) {
 		preview: SharedInstanceUpdatePreview,
 	) {
 		pendingUpdate.value = { target, instanceId }
-		updateDiffs.value = preview.diffs.map((diff) => ({
-			type: diff.type,
-			projectName: diff.projectName ?? undefined,
-			fileName: diff.fileName ? encodeURIComponent(diff.fileName) : undefined,
-			currentVersionName: diff.currentVersionName ?? undefined,
-			newVersionName: diff.newVersionName ?? undefined,
-			fileCount: diff.configFileCount ?? undefined,
-			fileNames: diff.configFileNames ?? undefined,
-			disabled: diff.disabled,
-			external: diff.type === 'added' && !diff.projectId && !!diff.fileName,
-		}))
+		updateDiffs.value = sharedDiffItems(preview.diffs)
 		modals.value?.showUpdatePreview()
 	}
 

@@ -1,24 +1,24 @@
-import type { Archon } from '@modrinth/api-client'
+import type { Copal } from '@modrinth/api-client'
 
 import type { ContentDiffItem } from '#ui/layouts/shared/installation-settings/types'
 
 /**
- * A server share's push diff as the content diff list shows it. Core gives it in the App's diff
- * shape (`sharing_client::diff`), so this maps it as the App maps its own.
+ * A share diff as the content diff list shows it: the App's updates, versions and pushes, and a
+ * Core server's push, all give it in `sharing_client::diff`'s shape. File names are URL-encoded
+ * because the diff list decodes them.
  */
-export function resolveServerShareDiff(
-	diff: Archon.Content.v1.SharedInstancePublishDiff,
+export function sharedDiffItems(
+	diffs: readonly Copal.SharedInstanceUpdateDiff[],
 ): ContentDiffItem[] {
-	return diff.diffs.map((entry) => ({
-		type: entry.type,
-		projectName: entry.projectName ?? undefined,
-		// The diff list decodes file names.
-		fileName: entry.fileName ? encodeURIComponent(entry.fileName) : undefined,
-		currentVersionName: entry.currentVersionName ?? undefined,
-		newVersionName: entry.newVersionName ?? undefined,
-		fileCount: entry.configFileCount ?? undefined,
-		fileNames: entry.configFileNames ?? undefined,
-		disabled: entry.disabled,
-		external: entry.type === 'added' && !entry.projectId && !!entry.fileName,
+	return diffs.map((diff) => ({
+		type: diff.type,
+		projectName: diff.projectName ?? undefined,
+		fileName: diff.fileName ? encodeURIComponent(diff.fileName) : undefined,
+		currentVersionName: diff.currentVersionName ?? undefined,
+		newVersionName: diff.newVersionName ?? undefined,
+		fileCount: diff.configFileCount,
+		fileNames: diff.configFileNames,
+		disabled: diff.disabled,
+		external: diff.type === 'added' && !diff.projectId && !!diff.fileName,
 	}))
 }
