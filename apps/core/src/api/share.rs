@@ -53,7 +53,7 @@ use crate::{
         adapters::filesystem::content_files,
         adapters::network::modrinth::ModrinthError,
         adapters::{
-            filesystem::folder::{self, Folder},
+            filesystem::folder::{self, Folder, Sha1Cache},
             history::History,
             sqlite::{content_rows, server_rows},
         },
@@ -127,6 +127,8 @@ struct Snapshot {
     /// The server's name, which the share takes.
     name: String,
     folder: Arc<Folder>,
+    /// Core's SHA-1s of unchanged files, so comparing with a push hashes only what changed.
+    sha1s: Arc<Sha1Cache>,
     content: VersionContent,
     /// The files the push carries, as the server has them.
     carried: Vec<push::ContentRow>,
@@ -213,6 +215,7 @@ async fn snapshot(state: &AppState, id: &str) -> Result<Snapshot, ApiError> {
     Ok(Snapshot {
         name: server.name,
         folder,
+        sha1s: Arc::clone(&state.content.sha1s),
         content,
         carried: read.carried,
         pack_files,
@@ -793,11 +796,12 @@ async fn share_contents(
         )
         .collect::<Vec<_>>();
     let folder = Arc::clone(&snapshot.folder);
+    let sha1s = Arc::clone(&snapshot.sha1s);
     let local = tokio::task::spawn_blocking(move || {
         local
             .into_iter()
             .map(|(file_type, file_name, on_disk)| {
-                let sha1 = folder.sha1(&on_disk).ok().flatten();
+                let sha1 = folder.sha1_cached(&on_disk, &sha1s).ok().flatten();
                 (file_type, file_name, sha1)
             })
             .collect::<Vec<_>>()

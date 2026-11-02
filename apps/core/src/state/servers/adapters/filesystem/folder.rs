@@ -10,8 +10,11 @@
 //! Files and folders Core creates here stay writable by `copal-servers` (see `daemon::folders`).
 
 use std::{
+    collections::HashMap,
     io::{self, Read, Write},
     path::{Path, PathBuf},
+    sync::Mutex,
+    time::SystemTime,
 };
 
 use cap_fs_ext::DirExt;
@@ -219,6 +222,11 @@ pub fn open_plain(
     Ok(file)
 }
 
+/// The SHA-1s [`Folder::sha1_cached`] took, by file, with the size and modification time each
+/// file had then. Checks that run on every server read (`needs_update`) hash only what changed.
+#[derive(Default)]
+pub struct Sha1Cache(Mutex<HashMap<PathBuf, ((u64, SystemTime), String)>>);
+
 impl Folder {
     /// Open a server folder. The folder itself must not be a link.
     pub fn open(root: &Path) -> io::Result<Self> {
@@ -335,6 +343,38 @@ impl Folder {
             }
             Err(error) => Err(error),
         }
+    }
+
+    /// [`Folder::sha1`], taken from `cache` while the file keeps the size and modification time
+    /// it had when it was last hashed.
+    pub fn sha1_cached(
+        &self,
+        path: &str,
+        cache: &Sha1Cache,
+    ) -> io::Result<Option<String>> {
+        let stamp = self.metadata(path).ok().and_then(|metadata| {
+            let modified = metadata.modified().ok()?.into_std();
+            metadata.is_file().then_some((metadata.len(), modified))
+        });
+        let Some(stamp) = stamp else {
+            return self.sha1(path);
+        };
+        let key = self.root.join(path);
+        if let Some((known, sha1)) =
+            cache.0.lock().expect("not poisoned").get(&key)
+            && *known == stamp
+        {
+            return Ok(Some(sha1.clone()));
+        }
+        let sha1 = self.sha1(path)?;
+        if let Some(sha1) = &sha1 {
+            cache
+                .0
+                .lock()
+                .expect("not poisoned")
+                .insert(key, (stamp, sha1.clone()));
+        }
+        Ok(sha1)
     }
 
     /// What is at `path`, without following a link there.
@@ -564,6 +604,23 @@ mod tests {
         let error = folder.open_file("world/level.dat").unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
         assert!(error.to_string().contains("may not read"));
+    }
+
+    #[test]
+    fn a_cached_sha1_is_taken_again_once_the_file_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.toml"), "x = 1").unwrap();
+        let folder = Folder::open(dir.path()).unwrap();
+        let cache = Sha1Cache::default();
+        let first = folder.sha1_cached("a.toml", &cache).unwrap();
+        assert_eq!(first, folder.sha1("a.toml").unwrap());
+        assert_eq!(folder.sha1_cached("a.toml", &cache).unwrap(), first);
+        std::fs::write(dir.path().join("a.toml"), "x = 22").unwrap();
+        let second = folder.sha1_cached("a.toml", &cache).unwrap();
+        assert_ne!(second, first);
+        assert_eq!(second, folder.sha1("a.toml").unwrap());
+        std::fs::remove_file(dir.path().join("a.toml")).unwrap();
+        assert_eq!(folder.sha1_cached("a.toml", &cache).unwrap(), None);
     }
 
     #[cfg(unix)]

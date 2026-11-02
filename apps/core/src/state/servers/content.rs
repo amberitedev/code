@@ -29,7 +29,10 @@ use crate::{
     state::servers::{
         GameVersionChange, InstallProgressKey, Installing,
         adapters::{
-            filesystem::{archive, folder},
+            filesystem::{
+                archive,
+                folder::{self, Sha1Cache},
+            },
             network::{hosts, modrinth},
         },
         domain::pack,
@@ -99,6 +102,8 @@ pub struct Content {
     /// The content store clone, which keeps the files of the shares' history
     /// (`adapters::history`).
     pub content_store: bedrock::upstream::store::ContentStore,
+    /// SHA-1s of server files, kept while a file is unchanged (`needs_update`).
+    pub sha1s: Arc<Sha1Cache>,
     /// What addon jars say about themselves, for the content list.
     pub manifests: bedrock::upstream::jar::Cache,
     /// Updates back the world up first.
@@ -142,6 +147,7 @@ impl Content {
                 env!("CARGO_PKG_VERSION")
             )),
             content_store,
+            sha1s: Arc::default(),
             downloads: hosts::client()?,
             http,
             paths,
