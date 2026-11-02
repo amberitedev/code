@@ -22,7 +22,7 @@ use std::{
 
 use sharing_client::{
     history::{
-        self, HistoryEntry, RestorePlan,
+        self, RestorePlan,
         restore::{Carried, Origin, replaced},
     },
     install::{ContentProject, CurrentFile, DesiredFile, content_changes},
@@ -33,7 +33,7 @@ use super::{
     apply_content_install::{kind_of, place_version, target},
     content_mutation::remove_project,
     install_loader::install_loader,
-    install_pack::{self as content_install, PackSource},
+    install_pack::{self as content_install, PackSource, world_version_change},
     share_snapshot::{SCOPE, history_store, snapshot},
 };
 use crate::{
@@ -47,6 +47,7 @@ use crate::{
                 content_files::{self, DISABLED, addon_path, kind_folder},
                 folder::{self, Folder},
             },
+            network::modrinth::Version,
             sqlite::{content_rows, server_rows},
         },
         domain::server_share::{file_type, kind},
@@ -76,14 +77,24 @@ pub async fn restore_share_version(
     let plan =
         history::restore_plan(&history_store(content), &share_id, version)
             .await?;
-    let installed = server_rows::get(&content.db, id)
+    let server = server_rows::get(&content.db, id)
         .await?
-        .and_then(|server| server.loader)
-        .and_then(|loader| ModLoader::parse(&loader));
+        .ok_or_else(|| Error::NotFound(format!("There is no server {id}.")))?;
+    // Everything that can refuse the restore does so before anything changes: a world going back
+    // a Minecraft version, a Modrinth version that is gone, and (in `restore_plan`) a saved copy
+    // the history no longer has.
+    world_version_change(
+        server.game_version.as_deref(),
+        &plan.entry.content.game_version,
+        "This version",
+    )
+    .map_err(Error::Invalid)?;
+    let prepared = prepare(content, &plan).await?;
+    let installed = server.loader.as_deref().and_then(ModLoader::parse);
     let current = snapshot(content, id).await?.content;
     let Some(setup) = Setup::of(installed, &current, &plan.entry.content)?
     else {
-        apply(content, id, &plan).await?;
+        apply(content, id, &plan, &prepared).await?;
         drop(busy);
         return Ok(Restored::Now);
     };
@@ -103,8 +114,9 @@ pub async fn restore_share_version(
         busy,
         installing,
         move |content, hold, progress| async move {
-            let change = setup.run(&content, &hold, &progress).await?;
-            apply(&content, hold.id(), &plan).await?;
+            let change =
+                setup.run(&content, &hold, &progress, &prepared).await?;
+            apply(&content, hold.id(), &plan, &prepared).await?;
             Ok(change)
         },
     );
@@ -116,7 +128,7 @@ pub async fn restore_share_version(
 enum Setup {
     /// The version's modpack, from Modrinth.
     Pack { version_id: String },
-    /// The version's loader and Minecraft. With `unlink` the server first stops following its
+    /// The version's loader and Minecraft. With `unlink` the server then stops following its
     /// pack, whose files stay, as any bare install leaves them.
     Loader {
         loader: ModLoader,
@@ -180,11 +192,11 @@ impl Setup {
         content: &Content,
         hold: &Hold,
         progress: &Progress,
+        prepared: &Prepared,
     ) -> Result<Option<GameVersionChange>, Error> {
         match self {
             Self::Pack { version_id } => {
-                let project_id =
-                    content.modrinth.version(&version_id).await?.project_id;
+                let project_id = prepared.version(&version_id)?.project_id;
                 content_install::pack(
                     content,
                     hold,
@@ -204,9 +216,6 @@ impl Setup {
                 loader_version,
                 unlink,
             } => {
-                if unlink {
-                    content_rows::unlink(&content.db, hold.id()).await?;
-                }
                 install_loader(
                     content,
                     hold,
@@ -217,10 +226,60 @@ impl Setup {
                     false,
                 )
                 .await?;
+                if unlink {
+                    content_rows::unlink(&content.db, hold.id()).await?;
+                }
                 Ok(None)
             }
         }
     }
+}
+
+/// What a restore reads from Modrinth, before it changes anything: what the share carried, with
+/// its projects, and every Modrinth version the restored version names, its modpack included.
+struct Prepared {
+    carried: Carried<(String, String)>,
+    versions: Vec<Version>,
+}
+
+impl Prepared {
+    fn version(&self, id: &str) -> Result<Version, Error> {
+        self.versions
+            .iter()
+            .find(|version| version.id == id)
+            .cloned()
+            .ok_or_else(|| {
+                Error::Invalid(format!(
+                    "Modrinth version {id} of the share was not found."
+                ))
+            })
+    }
+}
+
+async fn prepare(
+    content: &Content,
+    plan: &RestorePlan,
+) -> Result<Prepared, Error> {
+    let mut carried =
+        Carried::of(plan, |file| carried_key(file).map(|(key, _)| key));
+    let modpack = &plan.entry.content.modpack_id;
+    let ids = carried
+        .version_ids
+        .iter()
+        .chain(modpack)
+        .cloned()
+        .collect::<Vec<_>>();
+    let versions = content.modrinth.versions_by_id(&ids).await?;
+    carried.project_ids = versions
+        .iter()
+        .filter(|version| carried.version_ids.contains(&version.id))
+        .map(|version| version.project_id.clone())
+        .collect();
+    let prepared = Prepared { carried, versions };
+    for id in plan.entry.content.modrinth_ids.iter().chain(modpack) {
+        prepared.version(id)?;
+    }
+    Ok(prepared)
 }
 
 /// Puts the server's addons and configs back to `plan`'s version.
@@ -228,6 +287,7 @@ async fn apply(
     content: &Content,
     id: &str,
     plan: &RestorePlan,
+    prepared: &Prepared,
 ) -> Result<(), Error> {
     let target = target(content, id).await?;
     let folder = Arc::new(Folder::open(&content.paths.server(id))?);
@@ -262,17 +322,6 @@ async fn apply(
 
     // What the restore may replace, and how the server changes into the version, are
     // sharing-client's, as in the App. Reading the server into them stays here.
-    let entries = || plan.last.iter().chain([&plan.entry]);
-    let mut carried = Carried::new(
-        entries().flat_map(|entry| entry.content.modrinth_ids.iter().cloned()),
-        entries().flat_map(carried_files).map(|(key, _)| key),
-    );
-    let ids = carried.version_ids.iter().cloned().collect::<Vec<_>>();
-    let versions = content.modrinth.versions_by_id(&ids).await?;
-    carried.project_ids = versions
-        .iter()
-        .map(|version| version.project_id.clone())
-        .collect();
     let mut current_projects = HashMap::new();
     let mut current_files = HashMap::new();
     let mut turned_off = HashSet::new();
@@ -293,7 +342,7 @@ async fn apply(
         let key = (file_type.to_owned(), item.filename.clone());
         if !replaced(
             origin,
-            Some(&carried),
+            Some(&prepared.carried),
             version_id.as_deref(),
             project_id.as_deref(),
             &key,
@@ -320,20 +369,9 @@ async fn apply(
             }
         }
     }
-    let version = |id: &str| {
-        versions
-            .iter()
-            .find(|version| version.id == id)
-            .cloned()
-            .ok_or_else(|| {
-                Error::Invalid(format!(
-                    "Modrinth version {id} of the share was not found."
-                ))
-            })
-    };
     let mut desired_projects = HashMap::new();
     for id in &plan.entry.content.modrinth_ids {
-        let project_id = version(id)?.project_id;
+        let project_id = prepared.version(id)?.project_id;
         desired_projects.insert(
             id.clone(),
             ContentProject {
@@ -343,7 +381,10 @@ async fn apply(
             },
         );
     }
-    let desired_files = carried_files(&plan.entry)
+    let desired_files = plan
+        .entry
+        .manifest()
+        .filter_map(carried_key)
         .map(|(key, file)| {
             let desired = DesiredFile {
                 sha1: Some(file.sha1.clone()),
@@ -377,7 +418,7 @@ async fn apply(
     if !placed.is_empty() {
         let rows = content_rows::get_tracked_files(&content.db, id).await?;
         for desired in placed {
-            let version = version(&desired.version_id)?;
+            let version = prepared.version(&desired.version_id)?;
             let dir =
                 kind_folder(kind_of(&version, &target), &folder.level_name())?;
             place_version(content, id, &folder, &dir, &version, &rows).await?;
@@ -465,14 +506,13 @@ async fn apply(
     Ok(())
 }
 
-/// The addon files `entry` carries, by type and name, as the server's addons are keyed.
-fn carried_files(
-    entry: &HistoryEntry,
-) -> impl Iterator<Item = ((String, String), &ManifestFile)> {
-    entry
-        .manifest()
-        .filter(|file| kind(&file.file_type).is_some())
-        .map(|file| ((file.file_type.clone(), file.file_name.clone()), file))
+/// A carried addon file by type and name, as the server's addons are keyed, or `None` for a file
+/// that is not an addon, such as a config.
+fn carried_key(
+    file: &ManifestFile,
+) -> Option<((String, String), &ManifestFile)> {
+    kind(&file.file_type)
+        .map(|_| ((file.file_type.clone(), file.file_name.clone()), file))
 }
 
 /// A config's path in the server folder, as a push of the server checks it.
@@ -669,5 +709,25 @@ mod tests {
                 .version,
             2
         );
+
+        // A version for an older Minecraft is refused before anything changes.
+        let mut older = snapshot(&content, &id).await.unwrap().content;
+        older.game_version = "1.20.1".into();
+        let pushed = sharing_client::push::Pushed {
+            version: 3,
+            previous: None,
+            external_files: Vec::new(),
+            paths: Vec::new(),
+        };
+        history::record(&history, "share", &older, &pushed, Vec::new(), None)
+            .await
+            .unwrap();
+        let busy = content.busy(&id).unwrap();
+        let refused = restore_share_version(&content, &id, busy, 3).await;
+        assert!(
+            matches!(&refused, Err(Error::Invalid(reason)) if reason.contains("older than the 1.21.1")),
+            "{refused:?}"
+        );
+        assert_eq!(read("mods/own.jar").as_deref(), Some("jar 1"));
     }
 }

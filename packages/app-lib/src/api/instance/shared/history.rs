@@ -10,6 +10,7 @@ use super::types::*;
 use super::*;
 use sharing_client::history::{
     self, HistoryEntry, HistoryError, HistoryStore, SharedInstanceHistoryEntry,
+    restore::Carried,
 };
 use sharing_client::push::Pushed;
 use sharing_client::versions::VersionContent;
@@ -106,14 +107,6 @@ pub(super) async fn record_push(
         .await;
 }
 
-/// The last push of `share_id` from this App: the newest entry of its history.
-pub(crate) async fn last_shared_push(
-    share_id: &str,
-    state: &State,
-) -> crate::Result<Option<HistoryEntry>> {
-    history::latest(&AppHistory(state), share_id).await
-}
-
 /// Deletes the whole history of `share_id`, once the share is gone.
 pub(super) async fn forget_share_history(
     share_id: &str,
@@ -172,7 +165,11 @@ pub async fn restore_shared_instance_version(
             .await
             .map_err(history_error)?;
     let restored = entry_version(&plan.entry);
-    let data = shared_instance_install_data(
+    let carried = Carried::of(&plan, |file| {
+        ProjectType::from_name(&file.file_type)
+            .map(|project_type| (project_type, file.file_name.clone()))
+    });
+    let mut data = shared_instance_install_data(
         &attachment.id,
         attachment.manager_id.clone(),
         attachment.server_manager_name.clone(),
@@ -185,6 +182,7 @@ pub async fn restore_shared_instance_version(
         &state,
     )
     .await?;
+    data.restore = Some(carried);
     crate::install::update_shared_instance(instance_id.to_string(), Some(data))
         .await
 }

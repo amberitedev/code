@@ -224,7 +224,7 @@ impl SharedInstanceApplyPlan {
             });
         }
 
-        let owner = owner_shared_content(metadata, data, state).await?;
+        let owner = owner_shared_content(data, state).await?;
         let current =
             current_shared_instance_content(metadata, owner.as_ref(), state)
                 .await?;
@@ -757,43 +757,15 @@ async fn ensure_shared_instance_additions_enabled(
 /// restored version.
 type OwnerSharedContent = Carried<SharedInstanceExternalFileKey>;
 
-/// The owner's [`OwnerSharedContent`] for applying `data`, or `None` for a member.
+/// The owner's [`OwnerSharedContent`] for a restore, with the projects of its versions, or `None`
+/// for a member's update.
 async fn owner_shared_content(
-    metadata: &crate::state::InstanceMetadata,
     data: &SharedInstanceInstallData,
     state: &State,
 ) -> crate::Result<Option<OwnerSharedContent>> {
-    let Some(attachment) = metadata
-        .shared_instance
-        .as_ref()
-        .filter(|attachment| attachment.role == SharedInstanceRole::Owner)
-    else {
+    let Some(mut content) = data.restore.clone() else {
         return Ok(None);
     };
-    let last_push =
-        crate::api::instance::last_shared_push(&attachment.id, state).await?;
-    let pushed_files = last_push.iter().flat_map(|entry| {
-        entry
-            .manifest()
-            .map(|file| (file.file_type.as_str(), file.file_name.as_str()))
-    });
-    let restored_files = data
-        .external_files
-        .iter()
-        .map(|file| (file.file_type.as_str(), file.file_name.as_str()));
-    let mut content = Carried::new(
-        data.modrinth_ids.iter().cloned().chain(
-            last_push
-                .iter()
-                .flat_map(|entry| entry.content.modrinth_ids.iter().cloned()),
-        ),
-        pushed_files.chain(restored_files).filter_map(
-            |(file_type, file_name)| {
-                ProjectType::from_name(file_type)
-                    .map(|project_type| (project_type, file_name.to_owned()))
-            },
-        ),
-    );
     let ids = content
         .version_ids
         .iter()
@@ -1158,7 +1130,7 @@ async fn remove_existing_shared_instance_content(
         &state.pool,
     )
     .await?;
-    let owner = owner_shared_content(&metadata, data, state).await?;
+    let owner = owner_shared_content(data, state).await?;
     let files = content_rows::get_instance_files(instance_id, &state.pool)
         .await?
         .into_iter()

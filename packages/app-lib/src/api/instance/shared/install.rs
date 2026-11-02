@@ -792,6 +792,7 @@ pub(super) async fn shared_instance_install_data(
         loader_version: shared_instance_loader_version(loader_version),
         backtrack_version: version.backtrack_version,
         fresh_start: false,
+        restore: None,
         applied_files,
     })
 }

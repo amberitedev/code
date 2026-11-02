@@ -7,6 +7,11 @@
 use std::collections::HashSet;
 use std::hash::Hash;
 
+use serde::{Deserialize, Serialize};
+
+use super::RestorePlan;
+use crate::versions::ManifestFile;
+
 /// Where content on disk came from, as an update weighs it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Origin {
@@ -21,7 +26,8 @@ pub enum Origin {
 /// What the share carried at the last push or carries in the restored version: the owner's own
 /// content a restore may replace. `K` is each side's key for a carried file, such as its type and
 /// name.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound(deserialize = "K: Deserialize<'de> + Eq + Hash"))]
 pub struct Carried<K> {
     pub version_ids: HashSet<String>,
     /// The projects of `version_ids`, so a mod updated since the push is replaced too. Only
@@ -41,6 +47,21 @@ impl<K: Eq + Hash> Carried<K> {
             project_ids: HashSet::new(),
             files: files.into_iter().collect(),
         }
+    }
+
+    /// What restoring `plan` may replace: the versions and files of the last push and the
+    /// restored version, without projects. `key` names a carried file as the side keys its
+    /// content, or `None` for one that is not content, such as a config.
+    pub fn of(
+        plan: &RestorePlan,
+        key: impl Fn(&ManifestFile) -> Option<K>,
+    ) -> Self {
+        let entries = || plan.last.iter().chain([&plan.entry]);
+        Self::new(
+            entries()
+                .flat_map(|entry| entry.content.modrinth_ids.iter().cloned()),
+            entries().flat_map(|entry| entry.manifest().filter_map(&key)),
+        )
     }
 
     pub fn carries(

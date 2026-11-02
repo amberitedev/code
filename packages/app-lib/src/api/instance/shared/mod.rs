@@ -92,7 +92,6 @@ mod types;
 
 pub(crate) use self::client::share_backend;
 pub(crate) use self::content::{set_applied_files, shared_modpack_files};
-pub(crate) use self::history::last_shared_push;
 pub use self::icons::cache_shared_instance_server_icon;
 pub(crate) use self::install::{
     check_shared_instance_availability_before_launch,

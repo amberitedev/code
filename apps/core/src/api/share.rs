@@ -560,6 +560,7 @@ pub async fn restore(
 }
 
 /// `DELETE .../content/share/history/{version}`: delete a version other than the last push.
+/// Refused while the server's content is busy, such as with a restore of that version.
 pub async fn delete_version(
     caller: Caller,
     State(state): State<Arc<AppState>>,
@@ -568,6 +569,7 @@ pub async fn delete_version(
     caller.require(&state.db, &id, Level::Owner).await?;
     world(&id, &wid)?;
     server_first(&state, &id).await?;
+    let _busy = state.content.busy(&id)?;
     delete_share_version(&state.content, &id, version).await?;
     Ok(StatusCode::NO_CONTENT)
 }

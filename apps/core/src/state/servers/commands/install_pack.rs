@@ -291,35 +291,54 @@ async fn install_pack(
 }
 
 /// The Minecraft version a pack for `pack` moves a server on `server` from and to, or why it may
-/// not: one that is not a newer release is refused unless `force`, since a world does not go
-/// back a version safely. That includes any snapshot, pre-release or release candidate on
-/// either side, which cannot be strictly ordered (a pre-release of 1.21 is older than 1.21).
+/// not ([`world_version_change`]), unless `force`.
 fn game_version_change(
     server: Option<&str>,
     pack: &str,
     force: bool,
 ) -> Result<Option<GameVersionChange>, Error> {
+    match world_version_change(server, pack, "This pack") {
+        Ok(change) => Ok(change),
+        Err(_) if force => Ok(Some(GameVersionChange {
+            from: server.unwrap_or_default().to_owned(),
+            to: pack.to_owned(),
+        })),
+        Err(reason) => Err(Error::Invalid(format!(
+            "{reason} Install it with force to do it anyway."
+        ))),
+    }
+}
+
+/// The Minecraft version content for `target`, named `subject` ("This pack"), moves a server
+/// whose world is from `server` from and to, or why the world may not go there: one that is not
+/// a newer release is refused, since a world does not go back a version safely. That includes
+/// any snapshot, pre-release or release candidate on either side, which cannot be strictly
+/// ordered (a pre-release of 1.21 is older than 1.21).
+pub fn world_version_change(
+    server: Option<&str>,
+    target: &str,
+    subject: &str,
+) -> Result<Option<GameVersionChange>, String> {
     use std::cmp::Ordering;
-    let Some(server) = server.filter(|server| *server != pack) else {
+    let Some(server) = server.filter(|server| *server != target) else {
         return Ok(None);
     };
-    match pack::release_order(pack, server) {
+    match pack::release_order(target, server) {
         Some(Ordering::Greater | Ordering::Equal) => {}
-        _ if force => {}
         Some(Ordering::Less) => {
-            return Err(Error::Invalid(format!(
-                "This pack is for Minecraft {pack}, older than the {server} this server's world is from, and a world does not go back a version safely. Install it with force to do it anyway."
-            )));
+            return Err(format!(
+                "{subject} is for Minecraft {target}, older than the {server} this server's world is from, and a world does not go back a version safely."
+            ));
         }
         None => {
-            return Err(Error::Invalid(format!(
-                "This pack is for Minecraft {pack} and this server's world is from {server}. A snapshot or pre-release cannot be ordered against a release, and a world does not go back a version safely. Install it with force to do it anyway."
-            )));
+            return Err(format!(
+                "{subject} is for Minecraft {target} and this server's world is from {server}. A snapshot or pre-release cannot be ordered against a release, and a world does not go back a version safely."
+            ));
         }
     }
     Ok(Some(GameVersionChange {
         from: server.to_owned(),
-        to: pack.to_owned(),
+        to: target.to_owned(),
     }))
 }
 

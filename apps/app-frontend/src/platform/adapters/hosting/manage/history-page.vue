@@ -66,6 +66,16 @@ const remove = useServerChange(
 	(id, world, version) => client.archon.content_v1.deleteShareVersion(id, world, version),
 	'Could not delete the version',
 )
+// A restore onto another loader or pack goes on in the background, holding the server, which
+// reports itself installing meanwhile.
+const server = useQuery({
+	queryKey: computed(() => serverKeys.detail(serverId.value)),
+	queryFn: () => client.archon.servers_v0.get(serverId.value),
+})
+const busy = computed(
+	() =>
+		restore.isPending.value || remove.isPending.value || server.data.value?.status === 'installing',
+)
 </script>
 
 <template>
@@ -74,7 +84,7 @@ const remove = useServerChange(
 		:versions="history.data.value ?? []"
 		:loading="history.isPending.value"
 		:editable="source.source === 'server'"
-		:busy="restore.isPending.value || remove.isPending.value"
+		:busy="busy"
 		subject="server"
 		@restore="restore.mutate"
 		@delete="remove.mutate"
