@@ -28,6 +28,8 @@ export type ServerShareActionTarget = {
 	/** Configs the share carries that this push stops sharing. */
 	removedConfigPaths: string[]
 	restart?: boolean
+	/** Set once `publish` lands, so a later failure in the same action does not reopen the review. */
+	pushed?: boolean
 	isCurrent: () => boolean
 }
 
@@ -143,6 +145,7 @@ export function useServerShareReview<Action extends string = 'push'>(options?: {
 			target.configPaths,
 			{ restart: target.restart, removedConfigPaths: target.removedConfigPaths },
 		)
+		target.pushed = true
 		await Promise.all([
 			queryClient.invalidateQueries({ queryKey: serverKeys.detailV1(serverId) }),
 			queryClient.invalidateQueries({ queryKey: serverKeys.shareDiff(serverId, target.worldId) }),
@@ -178,8 +181,10 @@ export function useServerShareReview<Action extends string = 'push'>(options?: {
 			if (target.isCurrent()) previewOpen.value = false
 		} catch (error) {
 			handleError(error)
-			if (reviewed && previewOpen.value && target.isCurrent())
-				diffModal.value?.show({ keepSelection: true })
+			if (!reviewed || !previewOpen.value || !target.isCurrent()) return
+			// The review holds the diff from before the push, so it only reopens when the push failed.
+			if (target.pushed) previewOpen.value = false
+			else diffModal.value?.show({ keepSelection: true })
 		}
 	}
 
