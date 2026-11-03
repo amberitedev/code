@@ -13,21 +13,29 @@ use axum::{
 };
 use tokio::sync::{broadcast, mpsc};
 
-use super::{AppState, activity::Action};
+use super::{
+    AppState,
+    activity::Action,
+    servers::{ServerPowerState, power_state},
+};
 use crate::{
     access::{Caller, Changed, Level, StreamGuard, activity, now, sessions},
     api::error::{ApiError, ErrorCode},
     servers::console,
 };
 
-use crate::event::{LogStream, WsClientMessage, WsEvent};
+use crate::event::{LogStream, PowerState, WsClientMessage, WsEvent};
 
 /// Console lines a new console socket starts with.
 const BACKLOG: usize = 200;
 /// How often an open console checks that its session has not expired.
 const RECHECK_EVERY: std::time::Duration = std::time::Duration::from_secs(600);
+/// How often an open console looks for a power change. A server's phase changes in many places,
+/// so the socket reads it, which costs a lock, instead of each of them announcing it.
+const POWER_EVERY: std::time::Duration = std::time::Duration::from_millis(500);
 
-/// `GET /servers/{id}/ws`: the console. Sends the last lines and every new one as `log` events,
+/// `GET /servers/{id}/ws`: the console. Sends the server's power state as `power-state` events,
+/// and the last console lines and every new one as `log` events,
 /// leaving out the answers to Core's health check, and passes `command` messages to the server. Editors and the owner only: it carries chat and
 /// player IPs. The upgrade request carries the session; the first message must still be `auth`,
 /// as the hosting API has it, but its token is not read. The stream closes when its session ends
@@ -102,6 +110,16 @@ async fn console_socket(
     {
         return;
     }
+    // The App shows a server as stopped until told otherwise, so it learns the power state
+    // before it treats the page as ready.
+    let mut phase = state.servers.phase(&id);
+    let mut power = power_of(&state, &id).await;
+    if send(&mut socket, &WsEvent::PowerState { state: power })
+        .await
+        .is_err()
+    {
+        return;
+    }
     // The App treats the server page as ready once it knows what is installing, so it is told
     // straight away, even when that is nothing.
     let installing = WsEvent::InstallProgress {
@@ -112,6 +130,8 @@ async fn console_socket(
     }
     let mut recheck = tokio::time::interval(RECHECK_EVERY);
     recheck.tick().await;
+    let mut power_check = tokio::time::interval(POWER_EVERY);
+    power_check.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let path = state.servers.paths().console_log(&id);
     let (backlog, end) = console::tail(&path, BACKLOG).unwrap_or_default();
     for line in backlog.into_iter().filter(|line| console::for_people(line)) {
@@ -148,6 +168,20 @@ async fn console_socket(
                     return;
                 }
             }
+            _ = power_check.tick() => {
+                let now = state.servers.phase(&id);
+                if now == phase {
+                    continue;
+                }
+                phase = now;
+                let next = power_of(&state, &id).await;
+                if next != power {
+                    power = next;
+                    if send(&mut socket, &WsEvent::PowerState { state: power }).await.is_err() {
+                        return;
+                    }
+                }
+            }
             _ = recheck.tick() => {
                 if !still_allowed(&state, &caller, &id).await {
                     let _ = socket.send(Message::Close(None)).await;
@@ -176,6 +210,22 @@ async fn console_socket(
                 Some(Ok(_)) => {}
                 Some(Err(_)) | None => return,
             },
+        }
+    }
+}
+
+/// `id`'s power state as the hosting API's socket names it. A killed server reads as stopped.
+async fn power_of(state: &AppState, id: &str) -> PowerState {
+    match power_state(state, id)
+        .await
+        .unwrap_or(ServerPowerState::Offline)
+    {
+        ServerPowerState::Starting => PowerState::Starting,
+        ServerPowerState::Running => PowerState::Running,
+        ServerPowerState::Stopping => PowerState::Stopping,
+        ServerPowerState::Crashed => PowerState::Crashed,
+        ServerPowerState::Offline | ServerPowerState::Killed => {
+            PowerState::Stopped
         }
     }
 }
