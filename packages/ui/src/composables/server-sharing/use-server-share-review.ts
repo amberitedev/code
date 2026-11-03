@@ -182,8 +182,15 @@ export function useServerShareReview<Action extends string = 'push'>(options?: {
 		} catch (error) {
 			handleError(error)
 			if (!reviewed || !previewOpen.value || !target.isCurrent()) return
-			// The review holds the diff from before the push, so it only reopens when the push failed.
-			if (target.pushed) previewOpen.value = false
+			// The review holds the diff from before the push. Once the push landed it stays closed;
+			// otherwise it reopens on a fresh diff, since a failed request may still have pushed.
+			if (target.pushed) {
+				previewOpen.value = false
+				return
+			}
+			const fresh = await previewQuery.refetch()
+			if (!previewOpen.value || !target.isCurrent()) return
+			if (fresh.error) previewOpen.value = false
 			else diffModal.value?.show({ keepSelection: true })
 		}
 	}
