@@ -11,6 +11,14 @@
 				:instance="instance"
 				@published="emit('published')"
 			/>
+			<InstanceAdmonitionsSharedInstanceOwnerUpdate
+				v-else-if="item.kind === 'shared-instance-owner-update'"
+				@review-update="emit('review-update', $event)"
+			/>
+			<InstanceAdmonitionsSharedInstanceRestored
+				v-else-if="item.kind === 'shared-instance-restored'"
+				@dismiss="dismissRestoredNotice"
+			/>
 			<InstanceAdmonitionsSharedInstanceWrongAccount
 				v-else-if="item.kind === 'shared-instance-wrong-account'"
 				:expected-user-id="sharedInstanceExpectedUserId"
@@ -30,14 +38,24 @@
 </template>
 
 <script setup lang="ts">
-import { StackedAdmonitions } from '@modrinth/ui'
+import { injectNotificationManager, StackedAdmonitions } from '@modrinth/ui'
 import { computed, ref, watch } from 'vue'
 
+<<<<<<< HEAD
 import { useLinkedServers } from '@/features/servers/linked-servers'
+=======
+import { toError } from '@/helpers/errors'
+>>>>>>> modrinth/main
 import type { SharedInstanceUnavailableReason } from '@/helpers/install'
 import type { GameInstance } from '@/helpers/types'
+import { dismissSharedInstanceRestoredNotice } from '@/platform/app-lib/shared-instances/commands'
 
+<<<<<<< HEAD
 import InstanceAdmonitionsLinkedServerFailed from './linked-server-failed.vue'
+=======
+import InstanceAdmonitionsSharedInstanceOwnerUpdate from './shared-instance-owner-update.vue'
+import InstanceAdmonitionsSharedInstanceRestored from './shared-instance-restored.vue'
+>>>>>>> modrinth/main
 import InstanceAdmonitionsSharedInstanceStale from './shared-instance-stale.vue'
 import InstanceAdmonitionsSharedInstanceUnavailable from './shared-instance-unavailable.vue'
 import InstanceAdmonitionsSharedInstanceWrongAccount from './shared-instance-wrong-account.vue'
@@ -55,12 +73,16 @@ const props = defineProps<{
 	sharedInstanceExpectedUserId?: string | null
 	sharedInstanceRole?: SharedInstanceRole | null
 	sharedInstanceSignedOut?: boolean
+	sharedInstanceUpdateAvailable?: boolean
 }>()
 
 const emit = defineEmits<{
 	published: []
 	delete: []
+	'review-update': [event: MouseEvent]
 }>()
+
+const { handleError } = injectNotificationManager()
 
 const sharedInstanceWrongAccount = computed(() => props.sharedInstanceWrongAccount ?? false)
 const displayedSharedInstanceUnavailableReason = computed<SharedInstanceUnavailableReason | null>(
@@ -75,10 +97,37 @@ const showSharedInstancePublishAdmonition = computed(
 		props.instance.shared_instance?.role === 'owner' &&
 		props.instance.shared_instance.status === 'stale',
 )
+<<<<<<< HEAD
 const { servers: linkedServers } = useLinkedServers(() => props.instance.id)
 const failedServers = computed(() =>
 	linkedServers.value.filter((server) => server.linked_instance.state === 'failed'),
 )
+=======
+const showSharedInstanceOwnerUpdateAdmonition = computed(
+	() =>
+		!sharedInstanceWrongAccount.value &&
+		props.instance.install_stage === 'installed' &&
+		props.instance.shared_instance?.role === 'owner' &&
+		(props.instance.shared_instance.status === 'update_available' ||
+			props.sharedInstanceUpdateAvailable),
+)
+const restoredNoticeDismissed = ref(false)
+const showSharedInstanceRestoredAdmonition = computed(
+	() =>
+		!restoredNoticeDismissed.value &&
+		props.instance.install_stage === 'installed' &&
+		props.instance.shared_instance?.role === 'owner' &&
+		!!props.instance.shared_instance.restored_from_remote,
+)
+
+async function dismissRestoredNotice() {
+	restoredNoticeDismissed.value = true
+	await dismissSharedInstanceRestoredNotice(props.instance.id).catch((error) => {
+		restoredNoticeDismissed.value = false
+		handleError(toError(error))
+	})
+}
+>>>>>>> modrinth/main
 const stackItems = computed<InstanceAdmonitionItem[]>(() => {
 	const items: InstanceAdmonitionItem[] = []
 
@@ -114,12 +163,30 @@ const stackItems = computed<InstanceAdmonitionItem[]>(() => {
 		})
 	}
 
+	if (showSharedInstanceOwnerUpdateAdmonition.value) {
+		items.push({
+			id: 'shared-instance-owner-update',
+			type: 'info',
+			dismissible: false,
+			kind: 'shared-instance-owner-update',
+		})
+	}
+
 	if (showSharedInstancePublishAdmonition.value) {
 		items.push({
 			id: 'shared-instance-stale',
 			type: 'warning',
 			dismissible: false,
 			kind: 'shared-instance-stale',
+		})
+	}
+
+	if (showSharedInstanceRestoredAdmonition.value) {
+		items.push({
+			id: 'shared-instance-restored',
+			type: 'info',
+			dismissible: false,
+			kind: 'shared-instance-restored',
 		})
 	}
 
@@ -130,6 +197,13 @@ watch(
 	() => [props.instance.id, displayedSharedInstanceUnavailableReason.value],
 	() => {
 		sharedInstanceUnavailableDismissed.value = false
+	},
+)
+
+watch(
+	() => props.instance.id,
+	() => {
+		restoredNoticeDismissed.value = false
 	},
 )
 </script>

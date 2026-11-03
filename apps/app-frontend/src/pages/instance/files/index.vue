@@ -47,6 +47,7 @@ const messages = defineMessages({
 const instanceRootQuery = useQuery(
 	computed(() => ({
 		queryKey: instanceKeys.rootPath(instancePage.instanceId.value),
+		networkMode: 'always' as const,
 		queryFn: () => get_full_path(instancePage.instanceId.value),
 		enabled: !!instancePage.instanceId.value,
 		staleTime: Infinity,
@@ -94,7 +95,13 @@ function directoryQueryOptions(dirPath: string) {
 // files change outside this tab (content installs, the game itself).
 const directoryQuery = useQuery(
 	computed(() => ({
+<<<<<<< HEAD
 		...directoryQueryOptions(currentPath.value),
+=======
+		queryKey: instanceKeys.files(instancePage.instanceId.value, currentPath.value),
+		networkMode: 'always' as const,
+		queryFn: () => listDirectory(currentPath.value),
+>>>>>>> modrinth/main
 		enabled: !!instanceRoot.value,
 		refetchOnMount: 'always' as const,
 	})),

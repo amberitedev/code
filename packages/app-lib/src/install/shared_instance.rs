@@ -19,7 +19,7 @@ use crate::api::pack::install_from::CreatePackLocation;
 use crate::state::instances::adapters::sqlite::content_rows;
 use crate::state::{
     CachedEntry, ContentSetSyncStatus, ContentSourceKind, InstanceLink,
-    ProjectType, SharedInstanceAttachmentInput, SharedInstanceRole, State,
+    ProjectType, SharedInstanceAttachmentInput, State,
 };
 use crate::util::fetch::{DownloadReason, REQWEST_CLIENT};
 use anyhow::{Context, bail};
@@ -64,7 +64,8 @@ pub(super) async fn attach_pending_shared_instance(
         instance_id,
         SharedInstanceAttachmentInput {
             id: data.shared_instance_id.clone(),
-            role: SharedInstanceRole::Member,
+            role: data.role,
+            restored_from_remote: data.restored_from_remote,
             manager_id: data.manager_id.clone(),
             server_manager_name: data.server_manager_name.clone(),
             server_manager_icon_url: data.server_manager_icon_url.clone(),
@@ -153,7 +154,8 @@ pub(super) async fn finalize_shared_instance_attachment(
         instance_id,
         SharedInstanceAttachmentInput {
             id: data.shared_instance_id.clone(),
-            role: SharedInstanceRole::Member,
+            role: data.role,
+            restored_from_remote: data.restored_from_remote,
             manager_id: data.manager_id.clone(),
             server_manager_name: data.server_manager_name.clone(),
             server_manager_icon_url: data.server_manager_icon_url.clone(),
@@ -224,10 +226,19 @@ impl SharedInstanceApplyPlan {
             });
         }
 
+<<<<<<< HEAD
         let owner = owner_shared_content(data, state).await?;
         let current =
             current_shared_instance_content(metadata, owner.as_ref(), state)
                 .await?;
+=======
+        let current = current_shared_instance_content(
+            metadata,
+            !data.role.is_member(),
+            state,
+        )
+        .await?;
+>>>>>>> modrinth/main
         let desired = desired_shared_instance_content(data, state).await?;
         let modpack_changes =
             shared_modpack_toggles(metadata, data, state).await?;
@@ -297,8 +308,23 @@ async fn apply_shared_instance_update_inner(
     remove_left_configs(instance_id, data, state).await?;
     let plan = SharedInstanceApplyPlan::build(&metadata, data, state).await?;
 
+<<<<<<< HEAD
     if !plan.configuration_changed && data.linked_server.is_some() {
         crate::api::instance::synced_servers::discard_modpack_servers(
+=======
+    if plan.configuration_changed {
+        crate::api::instance::prepare_instance_update(instance_id).await?;
+        remove_existing_shared_instance_content(
+            instance_id,
+            !data.role.is_member(),
+            state,
+        )
+        .await?;
+        apply_shared_instance_content(
+            job_id,
+            job_state,
+            state,
+>>>>>>> modrinth/main
             instance_id,
             state,
         )
@@ -548,14 +574,25 @@ pub(super) fn shared_instance_update_requires_full_apply(
 
 async fn current_shared_instance_content(
     metadata: &crate::state::InstanceMetadata,
+<<<<<<< HEAD
     owner: Option<&OwnerSharedContent>,
+=======
+    include_local_content: bool,
+>>>>>>> modrinth/main
     state: &State,
 ) -> crate::Result<CurrentSharedInstanceContent> {
     let entries = content_rows::get_content_entries(
         &metadata.applied_content_set.id,
         &state.pool,
     )
-    .await?;
+    .await?
+    .into_iter()
+    .filter(|entry| {
+        entry.source_kind == ContentSourceKind::SharedInstance
+            || (include_local_content
+                && entry.source_kind == ContentSourceKind::Local)
+    })
+    .collect::<Vec<_>>();
     let files =
         content_rows::get_instance_files(&metadata.instance.id, &state.pool)
             .await?
@@ -564,7 +601,6 @@ async fn current_shared_instance_content(
             .collect::<HashMap<_, _>>();
     let version_ids_without_project = entries
         .iter()
-        .filter(|entry| entry.source_kind == ContentSourceKind::SharedInstance)
         .filter(|entry| entry.project_id.is_none())
         .filter_map(|entry| entry.version_id.clone())
         .collect::<Vec<_>>();
@@ -980,6 +1016,7 @@ async fn install_shared_instance_base(
             location,
             instance_id.to_string(),
             DownloadReason::Modpack,
+            true,
             &state.pool,
             data.linked_server.is_some(),
             data.linked_server.is_some(),
@@ -1116,7 +1153,11 @@ async fn install_shared_instance_additions(
 
 async fn remove_existing_shared_instance_content(
     instance_id: &str,
+<<<<<<< HEAD
     data: &SharedInstanceInstallData,
+=======
+    include_local_content: bool,
+>>>>>>> modrinth/main
     state: &State,
 ) -> crate::Result<()> {
     let metadata = crate::state::instances::commands::get_instance_metadata(
@@ -1134,6 +1175,7 @@ async fn remove_existing_shared_instance_content(
     let files = content_rows::get_instance_files(instance_id, &state.pool)
         .await?
         .into_iter()
+<<<<<<< HEAD
         .map(|file| (file.id.clone(), file))
         .collect::<HashMap<_, _>>();
     let managed_ids = entries
@@ -1153,6 +1195,13 @@ async fn remove_existing_shared_instance_content(
                     })
         })
         .filter_map(|entry| entry.file_id.clone())
+=======
+        .filter(|entry| {
+            include_local_content
+                || entry.source_kind.is_shared_instance_managed()
+        })
+        .filter_map(|entry| entry.file_id)
+>>>>>>> modrinth/main
         .collect::<HashSet<_>>();
     for file in files.into_values() {
         if managed_ids.contains(&file.id) {

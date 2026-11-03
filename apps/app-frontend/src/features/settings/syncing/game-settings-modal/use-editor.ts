@@ -79,6 +79,7 @@ export function useGameSettingsEditor(
 	)
 	const loadError = computed(() => !draftState.value && stateQuery.isError.value)
 	const previewMutation = useMutation({
+		networkMode: 'always',
 		mutationFn: ({
 			instanceId,
 			request,
@@ -91,6 +92,7 @@ export function useGameSettingsEditor(
 				: preview_synced_game_option_changes(request),
 	})
 	const saveMutation = useMutation({
+		networkMode: 'always',
 		mutationFn: saveDraft,
 		onError: handleError,
 	})

@@ -35,6 +35,7 @@ const {
 	clearLive,
 } = useInstanceConsole(instanceId.value)
 
+<<<<<<< HEAD
 // Not awaited, so the tab opens at once: the live console is a per-instance store, and the
 // terminal fills in when the buffered output arrives. Live `log` events are ignored until then
 // because the buffer already contains them.
@@ -44,6 +45,20 @@ const liveConsoleHydration = hydrate()
 	.finally(() => {
 		liveConsoleHydrated = true
 	})
+=======
+const consoleHydrationQuery = useQuery({
+	queryKey: computed(() => instanceKeys.console(instanceId.value)),
+	networkMode: 'always',
+	queryFn: async () => {
+		await hydrate()
+		return true
+	},
+	staleTime: 0,
+	refetchOnMount: 'always',
+})
+
+await consoleHydrationQuery.suspense()
+>>>>>>> modrinth/main
 
 function buildLogList(rawLogs) {
 	return [
@@ -67,6 +82,7 @@ function buildLogList(rawLogs) {
 const logs = ref(buildLogList([]))
 const historicalLogsQuery = useQuery({
 	queryKey: computed(() => instanceKeys.logs(instanceId.value)),
+	networkMode: 'always',
 	queryFn: getHistoricalLogs,
 	staleTime: 0,
 })

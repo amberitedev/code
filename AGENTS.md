@@ -12,7 +12,18 @@ the App. Sharing is not tied to a Core and works for everyone. There are no frie
 
 This project is very new and has not yet been deployed or tested anywhere, but there are some things we should never compromise on.
 
+<<<<<<< HEAD
 ### 1. Easy to use
+=======
+| App              | Description                    |
+| ---------------- | ------------------------------ |
+| `frontend`       | Main Modrinth website (Nuxt 3) |
+| `app-frontend`   | Desktop/app frontend (Vue 3)   |
+| `app`            | Desktop/app shell (Tauri)      |
+| `app-playground` | Testing playground for app     |
+| `labrinth`       | Backend API service            |
+| `docs`           | Documentation site (Astro)     |
+>>>>>>> modrinth/main
 
 Amberite makes everything feel simple and easy. The technical stuff is hidden behind advanced settings. If an average non-technical user can’t do something, it’s too complicated.
 
@@ -34,7 +45,35 @@ Amberite ports Modrinth’s social backend from upstream `apps/labrinth` (friend
 
 A verified Minecraft account is the basis of your Amberite identity and is used to sign in. Modrinth accounts are linked only for Modrinth features.
 
+<<<<<<< HEAD
 ## A note from Ilai
+=======
+- [`apps/labrinth/AGENTS.md`](apps/labrinth/AGENTS.md) — Backend API
+- [`apps/frontend/AGENTS.md`](apps/frontend/AGENTS.md) - Frontend Website
+- [`apps/app-frontend/AGENTS.md`](apps/app-frontend/AGENTS.md) — Desktop app frontend
+- [`packages/app-lib/AGENTS.md`](packages/app-lib/AGENTS.md) — Desktop app library (Rust, `theseus`)
+- [`packages/ui/AGENTS.md`](packages/ui/AGENTS.md) — Shared UI components
+- [`packages/api-client/AGENTS.md`](packages/api-client/AGENTS.md) — API client
+
+## Skills
+
+Task-specific instructions live in `.agents/skills/<name>/SKILL.md`. When a task matches one, read its `SKILL.md` before starting:
+
+- `figma-mcp` — implementing a draft Figma design or a draft figma.com link
+- `tanstack-query` — `useQuery`, `useMutation`, cache invalidation, replacing `useAsyncData`
+- `cross-platform-pages` — pages shared between the website and the app
+- `api-module` — adding an endpoint module to `packages/api-client`
+- `i18n-pass` — localizing hard-coded strings
+- `review-changelog` — reviewing a `packages/blog/changelog.ts` entry
+
+## Working on Tasks
+
+- If the message is a question ("why does X happen?", "is this a backend or frontend issue?", "can you check…"), investigate and answer only. Do not edit files until asked to fix or implement.
+- Stay within the scope of the request. Mention related problems you notice instead of fixing them.
+- Fix the cause, not the symptom. Avoid special-case constants or hardcoded lists to make one case work; find where the data or logic should come from.
+- When a fix can't be verified without running the app, say so. If the user reports it still doesn't work, add debug logging and give the exact command to run it before attempting another fix.
+- Trust the user's reports about what they observed in the running app.
+>>>>>>> modrinth/main
 
 I like ambitious ideas, simple systems, and software that feels obvious. Do not preserve complexity just because it already exists. Do not introduce machinery because it looks architecturally impressive. Understand the real constraint, then fight for the smallest model that makes the correct behavior unsurprising.
 
@@ -47,6 +86,7 @@ The rest of this document is meant to help you navigate the codebase and make ch
 The most common frontend defect is a change that works on the side that was tested and is missing
 somewhere else. Before calling frontend work done, check which of these apply:
 
+<<<<<<< HEAD
 - **Both ends.** Check every side of a feature, not only the side you changed.
 - **API client.** Any communication between clients (app) and backends (Core, `apps/backend`) is typed in
   `packages/api-client`. Native sharing uploads and downloads go through `packages/app-lib`.
@@ -54,6 +94,15 @@ somewhere else. Before calling frontend work done, check which of these apply:
   a bug.
 - **Shared UI.** Changes to inherited Modrinth UI or `packages/ui` can affect screens outside the one
   you changed. Check its consumers before treating it as local.
+=======
+- DO NOT pipe output through `head`, `tail`, `less`, or `more`
+- NEVER use `| head -n X` or `| tail -n X` to truncate output
+- IMPORTANT: Run commands directly without pipes when possible
+- IMPORTANT: If you need to limit output, use command-specific flags (e.g. `git log -n 10` instead of `git log | head -10`)
+- Narrow output at the source instead: `grep -m 20`, `sed -n '40,120p' file`, `git diff --stat`, `gh pr diff --name-only`
+- For long build or lint output (`cargo clippy`, `pnpm prepr:*`), redirect it to a file in `$TMPDIR` and search that file for errors
+- ALWAYS read the full output — never pipe through filters
+>>>>>>> modrinth/main
 
 ## Dev servers
 

@@ -28,7 +28,7 @@ use crate::event::emit::emit_instance;
 use crate::state::instances::adapters::sqlite::content_rows;
 use crate::state::instances::commands::resolve_icon_path;
 use crate::state::{
-    ContentSourceKind, InstanceIconConfig, InstanceInstallStage, InstanceLink,
+    ContentSourceKind, IconConfig, InstanceInstallStage, InstanceLink,
     ModLoader, ProjectType, State,
 };
 use crate::util::fetch::DownloadReason;
@@ -88,7 +88,7 @@ pub async fn create_instance(
     loader: ModLoader,
     loader_version: Option<String>,
     icon_path: Option<String>,
-    icon_config: Option<InstanceIconConfig>,
+    icon_config: Option<IconConfig>,
     link: InstanceLink,
 ) -> crate::Result<InstallJobSnapshot> {
     start(InstallRequest::CreateInstance {
@@ -643,6 +643,7 @@ async fn prepare_initial_instance(
             location,
             post_install_edit,
         } => {
+<<<<<<< HEAD
             diagnostics::install_step(
                 job_id,
                 "prepare_modpack_instance",
@@ -691,6 +692,93 @@ async fn prepare_initial_instance(
                     set_instance_id(job_state, metadata.instance.id);
                     Ok(())
                 },
+=======
+            let preview = match location {
+                CreatePackLocation::FromFile { path } => {
+                    get_local_pack_instance(&path)
+                }
+                location => get_instance_from_pack(location).await?,
+            };
+            let name = post_install_edit
+                .as_ref()
+                .and_then(|edit| edit.name.clone())
+                .unwrap_or_else(|| preview.name.clone());
+            let icon_path = match post_install_edit
+                .as_ref()
+                .and_then(|edit| edit.icon_path.as_ref())
+            {
+                Some(icon_path) => icon_path.clone(),
+                None => preview
+                    .icon
+                    .as_ref()
+                    .map(|path| path.to_string_lossy().to_string())
+                    .or_else(|| preview.icon_url.clone()),
+            };
+            let link = post_install_edit
+                .as_ref()
+                .and_then(|edit| edit.link.clone())
+                .or_else(|| preview.link.clone())
+                .unwrap_or(InstanceLink::Unmanaged);
+            let metadata = crate::api::instance::create(
+                name,
+                preview.game_version,
+                preview.modloader,
+                preview.loader_version,
+                icon_path,
+                None,
+                link,
+            )
+            .await?;
+            set_display(
+                job_state,
+                metadata.instance.name,
+                metadata.instance.icon_path,
+            );
+            set_instance_id(job_state, metadata.instance.id);
+        }
+        InstallRequest::CreateSharedInstance { data } => {
+            let shared_link = shared_instance_link(data.modpack.as_ref());
+            let icon_config = data
+                .instance_icon_url
+                .as_ref()
+                .and(data.instance_icon_config.clone())
+                .filter(|config| config.validate().is_ok());
+            let (game_version, loader, loader_version, icon_path) =
+                if let Some(modpack) = data.modpack.clone() {
+                    let preview = get_instance_from_pack(
+                        shared_instance_pack_location(modpack),
+                    )
+                    .await?;
+                    (
+                        preview.game_version,
+                        preview.modloader,
+                        preview.loader_version,
+                        data.instance_icon_url
+                            .clone()
+                            .or_else(|| {
+                                preview.icon.as_ref().map(|path| {
+                                    path.to_string_lossy().to_string()
+                                })
+                            })
+                            .or_else(|| preview.icon_url.clone()),
+                    )
+                } else {
+                    (
+                        data.game_version.clone(),
+                        data.loader,
+                        data.loader_version.clone(),
+                        data.instance_icon_url.clone(),
+                    )
+                };
+            let metadata = crate::api::instance::create(
+                data.name.clone(),
+                game_version,
+                loader,
+                loader_version,
+                icon_path,
+                icon_config,
+                shared_link,
+>>>>>>> modrinth/main
             )
             .await?
         }
@@ -1256,7 +1344,24 @@ async fn run_request(
                     Ok(Some(instance_id))
                 },
             )
+<<<<<<< HEAD
             .await
+=======
+            .await?;
+            install_pack(
+                job_id,
+                job_state,
+                location,
+                instance_id.clone(),
+                DownloadReason::Modpack,
+                false,
+                &state.pool,
+            )
+            .await?;
+            apply_post_install_edit(&instance_id, post_install_edit, state)
+                .await?;
+            Ok(Some(instance_id))
+>>>>>>> modrinth/main
         }
         InstallRequest::CreateSharedInstance { data } => {
             diagnostics::install_step(
@@ -1501,7 +1606,30 @@ async fn run_request(
                     Ok(Some(instance_id))
                 },
             )
+<<<<<<< HEAD
             .await
+=======
+            .await?;
+            install_pack(
+                job_id,
+                job_state,
+                location,
+                instance_id.clone(),
+                DownloadReason::Modpack,
+                false,
+                &state.pool,
+            )
+            .await?;
+            restore_disabled_projects(
+                &instance_id,
+                disabled_project_ids,
+                state,
+            )
+            .await?;
+            apply_post_install_edit(&instance_id, post_install_edit, state)
+                .await?;
+            Ok(Some(instance_id))
+>>>>>>> modrinth/main
         }
         InstallRequest::BulkUpdateContent {
             instance_id,
@@ -1816,6 +1944,7 @@ pub(super) fn install_pack(
     location: CreatePackLocation,
     instance_id: String,
     reason: DownloadReason,
+<<<<<<< HEAD
     pool: &SqlitePool,
     ignore_modpack_servers: bool,
     preserve_icon: bool,
@@ -1832,6 +1961,20 @@ pub(super) fn install_pack(
             preserve_icon,
         )
     })
+=======
+    keep_instance_icon: bool,
+    pool: &'a SqlitePool,
+) -> impl Future<Output = crate::Result<()>> + Send + 'a {
+    Box::pin(install_pack_inner(
+        job_id,
+        job_state,
+        location,
+        instance_id,
+        reason,
+        keep_instance_icon,
+        pool,
+    ))
+>>>>>>> modrinth/main
 }
 
 async fn install_pack_inner(
@@ -1840,6 +1983,7 @@ async fn install_pack_inner(
     location: CreatePackLocation,
     instance_id: String,
     reason: DownloadReason,
+    keep_instance_icon: bool,
     pool: &SqlitePool,
     ignore_modpack_servers: bool,
     preserve_icon: bool,
@@ -1854,7 +1998,16 @@ async fn install_pack_inner(
         )
         .await?;
 
-    let create_pack = match location {
+    let kept_icon = if keep_instance_icon {
+        crate::state::get_instance(&instance_id, pool)
+            .await?
+            .and_then(|instance| instance.instance.icon_path)
+            .map(PathBuf::from)
+    } else {
+        None
+    };
+
+    let mut create_pack = match location {
         CreatePackLocation::FromVersionId {
             project_id,
             version_id,
@@ -1873,7 +2026,11 @@ async fn install_pack_inner(
                 project_id,
                 version_id,
                 title,
+<<<<<<< HEAD
                 if preserve_icon { None } else { icon_url },
+=======
+                icon_url.filter(|_| kept_icon.is_none()),
+>>>>>>> modrinth/main
                 instance_id.clone(),
                 reason,
                 reporter.clone(),
@@ -1892,6 +2049,7 @@ async fn install_pack_inner(
         }
     };
 
+<<<<<<< HEAD
     diagnostics::install_step(job_id, "install_mrpack_files", || {
         install_zipped_mrpack_files_with_reporter(
             create_pack,
@@ -1902,6 +2060,18 @@ async fn install_pack_inner(
             preserve_icon,
         )
     })
+=======
+    if kept_icon.is_some() {
+        create_pack.description.icon = kept_icon;
+    }
+
+    install_zipped_mrpack_files_with_reporter(
+        create_pack,
+        false,
+        reason,
+        reporter,
+    )
+>>>>>>> modrinth/main
     .await?;
 
     Ok(())

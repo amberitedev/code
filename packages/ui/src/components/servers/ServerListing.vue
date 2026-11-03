@@ -26,7 +26,12 @@
 				v-if="hasIconOverlay"
 				class="flex size-16 items-center justify-center rounded-xl border-[1px] border-solid border-button-border bg-button-bg shadow-sm"
 			>
-				<ServerIcon :image="image ?? undefined" :disabled="isDisabled" class="!rounded-xl" />
+				<ServerIcon
+					:image="image"
+					:config="iconConfig"
+					:disabled="isDisabled"
+					class="!rounded-xl"
+				/>
 				<SpinnerIcon
 					v-if="isProvisioning || isUpgrading"
 					class="size-8 animate-spin absolute text-contrast"
@@ -34,7 +39,7 @@
 				/>
 				<LockIcon v-else class="size-8 absolute" :class="{ 'opacity-50': isDisabled }" />
 			</div>
-			<ServerIcon v-else :image="image ?? undefined" :disabled="isDisabled" />
+			<ServerIcon v-else :image="image" :config="iconConfig" :disabled="isDisabled" />
 			<div class="ml-4 flex flex-col gap-1.5">
 				<div class="flex flex-row items-center gap-2.5">
 					<h2 class="m-0 text-xl font-bold text-contrast" :class="{ 'opacity-50': isDisabled }">
@@ -422,6 +427,7 @@ type ServerListingProps = {
 	loader_version?: string | null
 	net?: Archon.Servers.v0.Net
 	upstream?: Archon.Servers.v0.Upstream | null
+	icon?: Archon.Icons.v1.ServerIcon | null
 	flows?: Archon.Servers.v0.Flows
 	pendingChange?: PendingChange
 	online?: boolean
@@ -439,6 +445,7 @@ type ServerListingProps = {
 const props = defineProps<ServerListingProps>()
 const router = useRouter()
 
+<<<<<<< HEAD
 const { archon, labrinth } = injectModrinthClient()
 const queryClient = useQueryClient()
 
@@ -456,6 +463,9 @@ function prefetchServer() {
 		staleTime: 30_000,
 	})
 }
+=======
+const { labrinth } = injectModrinthClient()
+>>>>>>> modrinth/main
 
 const isConfiguring = computed(() => props.flows?.intro)
 const isUpgrading = computed(
@@ -545,7 +555,12 @@ const { data: projectData } = useQuery({
 
 const iconUrl = computed(() => projectData.value?.icon_url)
 
+<<<<<<< HEAD
 const { icon: image } = useServerIcon(() => props.server_id, {
+=======
+const { config: iconConfig, image } = useServerIcon(() => props.server_id, {
+	icon: () => props.icon,
+>>>>>>> modrinth/main
 	enabled: computed(() => props.status === 'available'),
 })
 

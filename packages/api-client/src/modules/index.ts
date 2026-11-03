@@ -5,7 +5,10 @@ import { ArchonBackupRepositoriesInternalModule } from './archon/backup-reposito
 import { ArchonBackupsV1Module } from './archon/backups/v1'
 import { ArchonBackupsQueueV1Module } from './archon/backups-queue/v1'
 import { ArchonContentV1Module } from './archon/content/v1'
+<<<<<<< HEAD
 import { ArchonCoresV1Module } from './archon/cores/v1'
+=======
+>>>>>>> modrinth/main
 import { ArchonIconsV1Module } from './archon/icons/v1'
 import { ArchonNodesInternalModule } from './archon/nodes/internal'
 import { ArchonNoticesV0Module } from './archon/notices/v0'
@@ -94,7 +97,10 @@ export const MODULE_REGISTRY = {
 	archon_backups_queue_v1: ArchonBackupsQueueV1Module,
 	archon_backups_v1: ArchonBackupsV1Module,
 	archon_content_v1: ArchonContentV1Module,
+<<<<<<< HEAD
 	archon_cores_v1: ArchonCoresV1Module,
+=======
+>>>>>>> modrinth/main
 	archon_icons_v1: ArchonIconsV1Module,
 	archon_nodes_internal: ArchonNodesInternalModule,
 	archon_notices_v0: ArchonNoticesV0Module,

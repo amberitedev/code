@@ -99,6 +99,11 @@ export function useSharedInstanceInviteHandler(
 			...invite,
 			invitedByUsername: invite.invitedByUsername ?? invitedBy?.username ?? null,
 			invitedByAvatarUrl: invite.invitedByAvatarUrl ?? invitedBy?.avatar_url ?? null,
+<<<<<<< HEAD
+=======
+			instanceIconUrl: sharedInstance ? sharedInstance.icon : invite.instanceIconUrl,
+			instanceIconConfig: sharedInstance ? sharedInstance.icon_config : invite.instanceIconConfig,
+>>>>>>> modrinth/main
 		}
 	}
 
@@ -204,6 +209,7 @@ export function useSharedInstanceInviteHandler(
 						null,
 						null,
 						invite.instanceIconUrl,
+						invite.instanceIconConfig,
 					)
 					await markNotificationRead(notification).catch((error) => handleError(toError(error)))
 					await queryClient.invalidateQueries({ queryKey: ['instances'] })
@@ -309,6 +315,7 @@ export function useSharedInstanceInviteHandler(
 						invite.serverManagerName,
 						invite.serverManagerIconUrl,
 						invite.instanceIconUrl,
+						invite.instanceIconConfig,
 					)
 					await queryClient.invalidateQueries({ queryKey: ['instances'] })
 				},

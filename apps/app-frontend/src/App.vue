@@ -96,6 +96,7 @@ import { useInstanceMetadataRefresh } from '@/composables/use-instance-metadata-
 import { useQuickInstanceLimit } from '@/composables/use-quick-instance-limit.ts'
 import { isDarkTheme, useTheme } from '@/composables/use-theme.ts'
 import { config } from '@/config'
+<<<<<<< HEAD
 import AddCoreModal from '@/features/cores/add-core-modal.vue'
 import {
 	coresQueryKey,
@@ -110,6 +111,10 @@ import {
 	createInstanceLaunchState,
 	provideInstanceLaunchState,
 } from '@/features/instances/launch-state'
+=======
+import InstanceActionModals from '@/features/instances/instance-actions/instance-action-modals.vue'
+import SharedInstanceModals from '@/features/library/shared-instances/shared-instance-modals.vue'
+>>>>>>> modrinth/main
 import { provideMinecraftAccounts } from '@/features/minecraft-accounts/context'
 import { useCoreWatch } from '@/features/servers/linked-servers'
 import AppSettingsModal from '@/features/settings/app-settings-modal/index.vue'
@@ -173,7 +178,11 @@ import {
 } from '@/pages/instance/query-options'
 import { createFileDownload } from '@/platform/adapters/file-download'
 import { createIconCache } from '@/platform/adapters/icon-cache'
+<<<<<<< HEAD
 import { apiClient as tauriApiClient } from '@/platform/modrinth-client'
+=======
+import { createAppClient } from '@/platform/modrinth-client'
+>>>>>>> modrinth/main
 import {
 	appUpdateState,
 	downloadAvailableAppUpdate,
@@ -285,6 +294,7 @@ provideModrinthClient(tauriApiClient)
 provideServerOnboardingFlow(createServerOnboardingFlow())
 provideServerInviteHandoff(createServerInviteHandoff())
 provideFileDownload(createFileDownload(tauriApiClient, trackExternalFileDownload))
+<<<<<<< HEAD
 const iconCache = createIconCache()
 provideIconCache(iconCache)
 provideInstanceLaunchState(createInstanceLaunchState())
@@ -300,6 +310,15 @@ provideServerPlay(serverPlay)
 useCores()
 useCoreWatch()
 
+=======
+provideIconCache(createIconCache())
+const { data: authenticatedModrinthUser } = useQuery({
+	queryKey: computed(() => ['authenticated-user', 'campaigns', credentials.value?.user?.id]),
+	queryFn: () => tauriApiClient.labrinth.users_v3.getAuthenticated(),
+	enabled: () => !!credentials.value?.session,
+	retry: false,
+})
+>>>>>>> modrinth/main
 useQuery({
 	queryKey: computed(() => instanceKeys.sharedEligibility(credentials.value?.user?.id)),
 	queryFn: can_current_user_use_shared_instances,
@@ -1957,6 +1976,8 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 			@saved="onCreationIconSaved"
 		/>
 		<UnknownPackWarningModal ref="unknownPackWarningModal" />
+		<InstanceActionModals ref="instanceActionModals" />
+		<SharedInstanceModals ref="sharedInstanceModals" />
 		<div
 			class="app-grid-navbar bg-bg-raised flex flex-col p-[0.5rem] pt-0 gap-[0.25rem] w-[--left-bar-width]"
 		>

@@ -147,7 +147,10 @@ fn main() {
             .plugin(
                 "onboarding-checklist",
                 InlinedPlugin::new()
-                    .commands(&["get_onboarding_checklist"])
+                    .commands(&[
+                        "get_onboarding_checklist",
+                        "skip_create_instance_onboarding",
+                    ])
                     .default_permission(
                         DefaultPermissionRule::AllowAllCommands,
                     ),
@@ -311,7 +314,17 @@ fn main() {
                         "instance_share_publish_support_details",
                         "instance_share_unlink",
                         "instance_share_unpublish",
+<<<<<<< HEAD
                         "instance_share_ensure",
+=======
+                        "instance_share_unpublish_remote",
+                        "instance_share_leave_remote",
+                        "instance_share_get_cached_library",
+                        "instance_share_cache_library",
+                        "instance_get_hidden_ids",
+                        "instance_set_hidden",
+                        "instance_share_dismiss_restored_notice",
+>>>>>>> modrinth/main
                         "instance_export_mrpack",
                         "instance_get_pack_export_candidates",
                     ])
@@ -395,6 +408,32 @@ fn main() {
                         "get_opening_command",
                         "get_image_thumbnail",
                         "cache_remote_icon",
+<<<<<<< HEAD
+=======
+                    ])
+                    .default_permission(
+                        DefaultPermissionRule::AllowAllCommands,
+                    ),
+            )
+            .plugin(
+                "ads",
+                InlinedPlugin::new()
+                    .commands(&[
+                        "init_ads_window",
+                        "hide_ads_window",
+                        "update_ads_window_hold",
+                        "show_ads_consent_ui",
+                        "expand_ads_consent_webview",
+                        "open_ads_consent_preferences",
+                        "finish_ads_consent_flow",
+                        "should_show_ads_consent_popup",
+                        "perform_ads_consent_action",
+                        "record_ads_click",
+                        "open_link",
+                        "get_ads_personalization",
+                        "get_ads_debug_state",
+                        "report_ads_debug_state",
+>>>>>>> modrinth/main
                     ])
                     .default_permission(
                         DefaultPermissionRule::AllowAllCommands,

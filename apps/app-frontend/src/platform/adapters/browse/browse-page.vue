@@ -349,6 +349,7 @@ const searchContextReady = ref(
 				(!linkedInstanceProjectId.value || linkedInstanceProjectQuery.data.value !== undefined))),
 )
 
+<<<<<<< HEAD
 // Not awaited, so entering Browse does not hold the previous page on screen.
 void initInstanceContext().finally(() => {
 	// The hidden ids were first taken from cached or still empty state, so take them again from
@@ -358,6 +359,19 @@ void initInstanceContext().finally(() => {
 	addInstanceGameVersionToServerFilters()
 	searchContextReady.value = true
 })
+=======
+async function refreshInstalledProjectIds() {
+	if (!route.query.i) {
+		const instances = await queryClient
+			.fetchQuery({
+				networkMode: 'always' as const,
+				queryKey: [...instanceKeys.all, 'installed-project-ids'],
+				queryFn: listInstances,
+				staleTime: 0,
+			})
+			.catch(handleError)
+		if (!instances) return
+>>>>>>> modrinth/main
 
 // The ids of what is already installed, for the context Browse was opened in.
 function installedProjectIdsQuery(): {
@@ -379,6 +393,7 @@ function installedProjectIdsQuery(): {
 	}
 
 	if (route.query.from === 'worlds') {
+<<<<<<< HEAD
 		return {
 			queryKey: instanceKeys.installedProjectIds(targetInstanceId, 'worlds'),
 			queryFn: async () =>
@@ -398,6 +413,36 @@ function installedProjectIdsQuery(): {
 
 async function refreshInstalledProjectIds() {
 	const ids = await queryClient.fetchQuery(installedProjectIdsQuery()).catch(handleError)
+=======
+		const targetInstanceId = route.query.i as string
+		const worlds = await queryClient
+			.fetchQuery({
+				networkMode: 'always' as const,
+				queryKey: instanceKeys.installedProjectIds(targetInstanceId, 'worlds'),
+				queryFn: () => get_instance_worlds(targetInstanceId),
+				staleTime: 0,
+			})
+			.catch(handleError)
+		if (!worlds) return
+
+		const serverProjectIds = worlds
+			.filter((w) => w.type === 'server' && 'project_id' in w && w.project_id)
+			.map((w) => (w as { project_id: string }).project_id)
+		debugLog('installedServerProjectIds loaded', { count: serverProjectIds.length })
+		installedProjectIds.value = serverProjectIds
+		return
+	}
+
+	const targetInstanceId = route.query.i as string
+	const ids = await queryClient
+		.fetchQuery({
+			networkMode: 'always' as const,
+			queryKey: instanceKeys.installedProjectIds(targetInstanceId, 'content'),
+			queryFn: () => getInstalledProjectIds(targetInstanceId),
+			staleTime: 0,
+		})
+		.catch(handleError)
+>>>>>>> modrinth/main
 	if (!ids) return
 
 	debugLog('installedProjectIds loaded', { count: ids.length })
@@ -1259,6 +1304,7 @@ async function search(requestParams: string) {
 	return toSearchResponse(await queryClient.fetchQuery(searchQueryOptions(requestParams)), isServer)
 }
 
+<<<<<<< HEAD
 // The cached results of a search that `search` would return without fetching.
 function peekSearch(requestParams: string) {
 	const state = queryClient.getQueryState<RawSearchResults>(
@@ -1274,6 +1320,19 @@ function peekSearch(requestParams: string) {
 	}
 	return toSearchResponse(state.data, projectType.value === 'server')
 }
+=======
+	const rawResults = await queryClient.fetchQuery({
+		networkMode: 'always' as const,
+		queryKey: ['search', 'v3', requestParams],
+		queryFn: () =>
+			get_search_results_v3(requestParams, 'must_revalidate') as Promise<{
+				result: Labrinth.Search.v3.SearchResults & {
+					hits: (Labrinth.Search.v3.ResultSearchProject & { installed?: boolean })[]
+				}
+			} | null>,
+		staleTime: 30_000,
+	})
+>>>>>>> modrinth/main
 
 function toSearchResponse(rawResults: RawSearchResults, isServer: boolean) {
 	if (!rawResults) {

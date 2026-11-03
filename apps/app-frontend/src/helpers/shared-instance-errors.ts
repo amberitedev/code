@@ -5,6 +5,8 @@ import {
 	getErrorMessage,
 	getSharedInstanceUnavailableReason,
 	isSharedInstanceFileNotAllowedError,
+	isSharedInstanceLimitReachedError,
+	isSharedInstanceOwnerBehindError,
 	isSharedInstancesApiError,
 	type SharedInstanceUnavailableReason,
 } from '@/helpers/install'
@@ -100,13 +102,32 @@ export const sharedInstanceErrorMessages = defineMessages({
 		id: 'instance.shared-instance.network-error.text',
 		defaultMessage: 'Unable to connect to shared instances API',
 	},
+	ownerBehindTitle: {
+		id: 'instance.shared-instance.owner-behind.title',
+		defaultMessage: "Couldn't push update",
+	},
+	ownerBehindText: {
+		id: 'instance.shared-instance.owner-behind.text',
+		defaultMessage:
+			'A newer version was pushed from another Modrinth App installation. Download it, then try again.',
+	},
 	fileNotAllowedTitle: {
 		id: 'instance.shared-instance.file-not-allowed.title',
 		defaultMessage: 'File type not allowed',
 	},
+<<<<<<< HEAD
 	tooLargeTitle: {
 		id: 'instance.shared-instance.too-large.title',
 		defaultMessage: 'Over the sharing limit',
+=======
+	limitReachedTitle: {
+		id: 'instance.shared-instance.limit-reached.title',
+		defaultMessage: 'Shared instance limit reached',
+	},
+	limitReachedText: {
+		id: 'instance.shared-instance.limit-reached.text',
+		defaultMessage: "You can't share any more instances.",
+>>>>>>> modrinth/main
 	},
 })
 
@@ -207,8 +228,28 @@ export function useSharedInstanceErrors() {
 			return
 		}
 
+<<<<<<< HEAD
 		const message = getErrorMessage(error)
 		const status = error instanceof ModrinthApiError ? error.statusCode : undefined
+=======
+		if (isSharedInstanceOwnerBehindError(error)) {
+			addNotification({
+				type: 'error',
+				title: formatMessage(sharedInstanceErrorMessages.ownerBehindTitle),
+				text: formatMessage(sharedInstanceErrorMessages.ownerBehindText),
+			})
+			return
+		}
+
+		if (isSharedInstanceLimitReachedError(error)) {
+			addNotification({
+				type: 'error',
+				title: formatMessage(sharedInstanceErrorMessages.limitReachedTitle),
+				text: formatMessage(sharedInstanceErrorMessages.limitReachedText),
+			})
+			return
+		}
+>>>>>>> modrinth/main
 
 		addNotification({
 			type: 'error',

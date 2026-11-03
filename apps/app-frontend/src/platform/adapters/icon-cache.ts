@@ -1,4 +1,5 @@
 import type { IconCacheContext } from '@modrinth/ui'
+<<<<<<< HEAD
 import { convertFileSrc } from '@tauri-apps/api/core'
 
 import { cacheIconBytes, cacheRemoteIcon } from '@/platform/app-lib/icons/commands'
@@ -29,6 +30,16 @@ export function createIconCache(): IconCacheContext {
 				return request
 			}
 			if (!source.startsWith('https://')) return Promise.resolve(source)
+=======
+
+import { cacheRemoteIcon } from '@/platform/app-lib/icons/commands'
+
+export function createIconCache(): IconCacheContext {
+	const pending = new Map<string, Promise<string>>()
+	const resolvedUrls = new Map<string, string>()
+	return {
+		cacheIcon(source) {
+>>>>>>> modrinth/main
 			const existing = pending.get(source)
 			if (existing) return existing
 			const request = cacheRemoteIcon(source)
@@ -43,7 +54,11 @@ export function createIconCache(): IconCacheContext {
 			return request
 		},
 		peekIcon(source) {
+<<<<<<< HEAD
 			return typeof source === 'string' ? resolvedUrls.get(source) : resolvedBlobs.get(source)
+=======
+			return resolvedUrls.get(source)
+>>>>>>> modrinth/main
 		},
 	}
 }

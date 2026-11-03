@@ -56,6 +56,7 @@ async fn diff(
     options: &DiffOptions,
     state: &State,
 ) -> crate::Result<Vec<SharedInstanceUpdateDiff>> {
+<<<<<<< HEAD
     share_diff(before, after, options, &AppNames(state))
         .await
         .map_err(|error| match error {
@@ -65,6 +66,30 @@ async fn diff(
             DiffError::Names(error) => error,
         })
 }
+=======
+    let before_configuration = local_configuration(metadata);
+    let after_configuration = remote_configuration(version);
+    let modpack_unlinked = before_configuration.modpack_version_id.is_some()
+        && after_configuration.modpack_version_id.is_none();
+    let is_owner = metadata
+        .shared_instance
+        .as_ref()
+        .is_some_and(|attachment| !attachment.role.is_member());
+    let (version_ids, external_files) =
+        current_shared_content(metadata, modpack_unlinked, is_owner, state)
+            .await?;
+    let before = SharedContentSnapshot {
+        version_ids,
+        external_files,
+        configuration: before_configuration,
+    };
+    let (version_ids, external_files) = remote_shared_content(version)?;
+    let after = SharedContentSnapshot {
+        version_ids,
+        external_files,
+        configuration: after_configuration,
+    };
+>>>>>>> modrinth/main
 
 /// A member's update: their instance's shared content, then `version`. `configs` is what the
 /// update does to their config files ([`unedited_configs`] of what left the share is removed).

@@ -147,6 +147,7 @@ pub enum ErrorKind {
     SharedInstanceFileNotAllowed(String),
 
     #[error(
+<<<<<<< HEAD
         "No storage is available for shared files right now. Try again later."
     )]
     PoolNoStorage,
@@ -177,6 +178,16 @@ pub enum ErrorKind {
 
     #[error("The shared files are not available right now. Try again later.")]
     PoolFilesUnavailable,
+=======
+        "a newer version of this shared instance was pushed from another Modrinth App installation"
+    )]
+    SharedInstanceOwnerBehind,
+
+    #[error(
+        "you have reached the maximum number of shared instances you can own"
+    )]
+    SharedInstanceLimitReached,
+>>>>>>> modrinth/main
 
     #[error("join handle error: {0}")]
     JoinError(#[from] tokio::task::JoinError),
@@ -350,6 +361,7 @@ impl ErrorKind {
             Self::SharedInstanceFileNotAllowed(_) => {
                 "shared_instance_file_not_allowed"
             }
+<<<<<<< HEAD
             Self::PoolNoStorage => "pool_no_storage",
             Self::PoolPushInFlight => "pool_push_in_flight",
             Self::PoolTooLarge(_) => "pool_too_large",
@@ -358,6 +370,10 @@ impl ErrorKind {
             Self::PoolPushUnconfirmed => "pool_push_unconfirmed",
             Self::PoolFilesBroken => "pool_files_broken",
             Self::PoolFilesUnavailable => "pool_files_unavailable",
+=======
+            Self::SharedInstanceOwnerBehind => "shared_instance_owner_behind",
+            Self::SharedInstanceLimitReached => "shared_instance_limit_reached",
+>>>>>>> modrinth/main
             Self::HashError(_, _) => "hash_error",
             Self::LoginCanceled => "login_canceled",
             Self::NotLoggedIn => "not_logged_in",

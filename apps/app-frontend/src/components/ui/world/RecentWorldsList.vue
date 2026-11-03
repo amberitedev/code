@@ -60,6 +60,7 @@ const queryClient = useQueryClient()
 const locallyPlayedInstances = ref<Record<string, Dayjs>>({})
 const gameVersionsQuery = useQuery({
 	queryKey: ['tags', 'game-versions'],
+	networkMode: 'always',
 	queryFn: (): Promise<GameVersion[]> =>
 		traceStartupStep('Load jump-in game versions', () => get_game_versions()),
 	staleTime: Infinity,
@@ -430,7 +431,21 @@ async function stopInstance(path: string) {
 const currentInstance = ref<string>()
 const currentWorld = ref<string>()
 
+<<<<<<< HEAD
 const processesQuery = useRunningProcesses()
+=======
+type ProcessMetadata = {
+	uuid: string
+	instance_id: string
+	start_time: string
+}
+
+const processesQuery = useQuery({
+	queryKey: ['processes', 'list'],
+	networkMode: 'always',
+	queryFn: (): Promise<ProcessMetadata[]> => get_all(),
+})
+>>>>>>> modrinth/main
 const runningInstances = computed(() =>
 	(processesQuery.data.value ?? []).map((process) => process.instance_id),
 )

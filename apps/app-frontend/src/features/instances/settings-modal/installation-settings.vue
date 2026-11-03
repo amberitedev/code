@@ -71,26 +71,32 @@ function getSupportedModpackLoaders() {
 }
 
 const fabricVersionsQuery = useQuery({
+	networkMode: 'always' as const,
 	queryKey: ['instance-settings', 'loader-versions', 'fabric'],
 	queryFn: () => get_loader_versions('fabric') as Promise<Manifest>,
 })
 const forgeVersionsQuery = useQuery({
+	networkMode: 'always' as const,
 	queryKey: ['instance-settings', 'loader-versions', 'forge'],
 	queryFn: () => get_loader_versions('forge') as Promise<Manifest>,
 })
 const quiltVersionsQuery = useQuery({
+	networkMode: 'always' as const,
 	queryKey: ['instance-settings', 'loader-versions', 'quilt'],
 	queryFn: () => get_loader_versions('quilt') as Promise<Manifest>,
 })
 const neoforgeVersionsQuery = useQuery({
+	networkMode: 'always' as const,
 	queryKey: ['instance-settings', 'loader-versions', 'neo'],
 	queryFn: () => get_loader_versions('neo') as Promise<Manifest>,
 })
 const gameVersionsQuery = useQuery({
+	networkMode: 'always' as const,
 	queryKey: ['instance-settings', 'game-versions'],
 	queryFn: () => get_game_versions() as Promise<GameVersionTag[]>,
 })
 const loadersQuery = useQuery({
+	networkMode: 'always' as const,
 	queryKey: ['instance-settings', 'loaders', 'modpack'],
 	queryFn: getSupportedModpackLoaders,
 })
@@ -128,6 +134,7 @@ const canUnpublishSharedInstance = computed(
 )
 
 const modpackInfoQuery = useQuery({
+	networkMode: 'always' as const,
 	queryKey: computed(() => ['linkedModpackInfo', instance.value.id]),
 	queryFn: () => get_linked_modpack_info(instance.value.id, 'must_revalidate'),
 	enabled: computed(() => isModrinthLinkedModpack.value && !offline),

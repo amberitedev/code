@@ -138,6 +138,26 @@
 		</SharedInstanceShareEmptyState>
 
 		<SharedInstanceShareEmptyState
+			v-else-if="sharedInstanceLimitReached && !instance.shared_instance"
+			:heading="formatMessage(messages.limitReachedHeading)"
+			:description="
+				ownedSharedInstanceLimit.max.value === null
+					? undefined
+					: formatMessage(messages.limitReachedDescription, {
+							limit: ownedSharedInstanceLimit.max.value,
+						})
+			"
+		>
+			<template #actions>
+				<Button type="colored" color="brand" size="lg" @click="manageSharedInstances">
+					<LibraryIcon aria-hidden="true" />{{
+						formatMessage(messages.manageSharedInstancesButton)
+					}}
+				</Button>
+			</template>
+		</SharedInstanceShareEmptyState>
+
+		<SharedInstanceShareEmptyState
 			v-else
 			:heading="formatMessage(messages.noFriendsInvitedHeading)"
 			:description="formatMessage(messages.noFriendsInvitedDescription)"
@@ -166,7 +186,11 @@
 </template>
 
 <script setup lang="ts">
+<<<<<<< HEAD
 import { LogInIcon, SpinnerIcon, UnlinkIcon, UserPlusIcon } from '@modrinth/assets'
+=======
+import { LibraryIcon, LogInIcon, SpinnerIcon, UserPlusIcon } from '@modrinth/assets'
+>>>>>>> modrinth/main
 import {
 	Avatar,
 	Button,
@@ -182,10 +206,23 @@ import {
 } from '@modrinth/ui'
 import { useQueryClient } from '@tanstack/vue-query'
 import { computed, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 
 import ModrinthAccountRequiredModal from '@/components/ui/modal/ModrinthAccountRequiredModal.vue'
+<<<<<<< HEAD
 import InstancePushButton from '@/features/servers/instance-push-button.vue'
 import { isSharedInstancesApiError } from '@/helpers/install'
+=======
+import SharedInstancePublishModal from '@/components/ui/shared-instances/SharedInstancePublishModal.vue'
+import { OWNED_SHARED_INSTANCES_FILTER } from '@/features/library/library-instance'
+import { useOwnedSharedInstanceLimit } from '@/features/library/shared-instances/use-owned-shared-instance-limit'
+import {
+	getSharedInstanceUnavailableReason,
+	isSharedInstanceLimitReachedError,
+	isSharedInstancesApiError,
+	isSharedInstanceUnavailableError,
+} from '@/helpers/install'
+>>>>>>> modrinth/main
 import { edit } from '@/helpers/instance'
 import type { ModrinthAuthFlow } from '@/helpers/mr_auth.ts'
 import {
@@ -207,6 +244,7 @@ import { useSharedInstanceMembers } from './use-shared-instance-members'
 
 const instancePage = injectInstancePage()
 const auth = injectAuth()
+const router = useRouter()
 const queryClient = useQueryClient()
 const { formatMessage } = useVIntl()
 const { addNotification } = injectNotificationManager()
@@ -219,6 +257,11 @@ const sharedInstanceActionsLocked = actionsLocked
 const currentUserId = computed(() => auth.user.value?.id ?? null)
 const isSignedIn = computed(() => !!auth.session_token.value)
 const sharedInstancesApiUnavailable = ref(false)
+const sharedInstanceLimitError = ref(false)
+const ownedSharedInstanceLimit = useOwnedSharedInstanceLimit()
+const sharedInstanceLimitReached = computed(
+	() => sharedInstanceLimitError.value || ownedSharedInstanceLimit.limitReached.value,
+)
 const accountRequiredModal = ref<InstanceType<typeof ModrinthAccountRequiredModal>>()
 const invitePlayersModal = ref<InstanceType<typeof InvitePlayersModal>>()
 const unlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
@@ -234,6 +277,7 @@ function notifyOtherError(error: unknown) {
 
 /** Every failed sharing action on this page ends up here. */
 function notifyOperationError(error: unknown) {
+<<<<<<< HEAD
 	void sharedInstanceState.reportActionError(error, notifyOtherError)
 }
 
@@ -249,6 +293,20 @@ function notifyInviteError(error: unknown, user: InvitePlayersUser) {
 			}),
 		})
 	})
+=======
+	if (isSharedInstanceLimitReachedError(error)) {
+		sharedInstanceLimitError.value = true
+		void ownedSharedInstanceLimit.refetch()
+	} else if (isSharedInstanceUnavailableError(error)) {
+		notifySharedInstanceUnavailable(
+			getSharedInstanceUnavailableReason(error),
+			sharedInstanceState.unavailableManager.value,
+		)
+	} else {
+		if (isSharedInstancesApiError(error)) sharedInstancesApiUnavailable.value = true
+		notifySharedInstanceError(error)
+	}
+>>>>>>> modrinth/main
 }
 
 const eligibilityQuery = sharedInstanceState.eligibilityQuery
@@ -352,6 +410,18 @@ const messages = defineMessages({
 	inviteFriendsButton: {
 		id: 'app.instance.share.empty.invite-friends-button',
 		defaultMessage: 'Invite friends',
+	},
+	limitReachedHeading: {
+		id: 'app.instance.share.limit-reached.heading',
+		defaultMessage: 'Shared instance limit reached',
+	},
+	limitReachedDescription: {
+		id: 'app.instance.share.limit-reached.description',
+		defaultMessage: "You've shared a maximum of {limit} instances already.",
+	},
+	manageSharedInstancesButton: {
+		id: 'app.instance.share.limit-reached.manage-button',
+		defaultMessage: 'Manage shared instances',
 	},
 	userLimitReached: {
 		id: 'app.instance.share.invite-modal.user-limit-reached',
@@ -458,6 +528,9 @@ async function requestAuth(flow: ModrinthAuthFlow) {
 }
 function signInToShare(event?: MouseEvent) {
 	void accountRequiredModal.value?.show(event)
+}
+function manageSharedInstances() {
+	void router.push({ path: '/', query: { filter: OWNED_SHARED_INSTANCES_FILTER } })
 }
 
 provideSharedInstanceManagement({
