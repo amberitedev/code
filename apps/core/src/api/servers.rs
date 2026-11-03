@@ -506,6 +506,27 @@ fn net(state: &AppState, row: &server_rows::ServerRow) -> Net {
     }
 }
 
+/// Where `id` is in its run, from its `phase`, or how its last run ended when it has none.
+pub(super) async fn power_state(
+    state: &AppState,
+    id: &str,
+    phase: Option<Phase>,
+) -> sqlx::Result<ServerPowerState> {
+    Ok(match phase {
+        Some(Phase::Starting) => ServerPowerState::Starting,
+        Some(Phase::Running | Phase::Unmanaged(_)) => ServerPowerState::Running,
+        Some(Phase::Stopping) => ServerPowerState::Stopping,
+        Some(Phase::Installing) => ServerPowerState::Offline,
+        None => match server_rows::last_outcome(&state.db, id).await? {
+            Some(server_rows::Outcome::Crashed) => ServerPowerState::Crashed,
+            Some(server_rows::Outcome::Killed) => ServerPowerState::Killed,
+            Some(server_rows::Outcome::Stopped) | None => {
+                ServerPowerState::Offline
+            }
+        },
+    })
+}
+
 /// What the hosting API shows for a server row, to a caller with `level` on it, reached at
 /// `host`.
 async fn server(
@@ -514,19 +535,8 @@ async fn server(
     level: Level,
     host: &str,
 ) -> Result<Server, ApiError> {
-    let power_state = match state.servers.phase(&row.id) {
-        Some(Phase::Starting) => ServerPowerState::Starting,
-        Some(Phase::Running | Phase::Unmanaged(_)) => ServerPowerState::Running,
-        Some(Phase::Stopping) => ServerPowerState::Stopping,
-        Some(Phase::Installing) => ServerPowerState::Offline,
-        None => match server_rows::last_outcome(&state.db, &row.id).await? {
-            Some(server_rows::Outcome::Crashed) => ServerPowerState::Crashed,
-            Some(server_rows::Outcome::Killed) => ServerPowerState::Killed,
-            Some(server_rows::Outcome::Stopped) | None => {
-                ServerPowerState::Offline
-            }
-        },
-    };
+    let power_state =
+        power_state(state, &row.id, state.servers.phase(&row.id)).await?;
     let owner_id: Option<String> =
         sqlx::query_scalar("SELECT owner_user_id FROM core WHERE id = 1")
             .fetch_optional(&state.db)

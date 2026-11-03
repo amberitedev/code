@@ -36,10 +36,23 @@ pub enum WsEvent {
     Log { stream: LogStream, message: String },
     /// Mirrors Archon.Websocket.v0.WSAuthOkEvent.
     AuthOk,
+    /// Mirrors Archon.Websocket.v0.WSPowerStateEvent. Core does not report exit codes here.
+    PowerState { state: PowerState },
     /// Mirrors Archon.Websocket.v0.WSInstallationResultEvent.
     InstallationResult(InstallationResult),
     /// Mirrors Archon.Websocket.v0.WSInstallProgressEvent.
     InstallProgress { items: Vec<InstallProgressItem> },
+}
+
+/// Mirrors Archon.Websocket.v0.PowerState.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PowerState {
+    Running,
+    Stopped,
+    Starting,
+    Stopping,
+    Crashed,
 }
 
 /// Mirrors Archon.Websocket.v0.BackupTask.

@@ -595,9 +595,10 @@ mod tests {
         let paths = crate::daemon::paths::Paths::new(dir.path());
         crate::daemon::folders::create(&paths, None).unwrap();
         let db = crate::db::memory().await;
-        let servers = crate::servers::Servers::open(paths.clone(), db.clone())
-            .await
-            .unwrap();
+        let servers =
+            crate::servers::Servers::open(paths.clone(), db.clone(), None)
+                .await
+                .unwrap();
         let id = servers.create("A").await.unwrap().id;
         let backups = crate::backups::Backups::open(
             paths.clone(),
