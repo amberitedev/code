@@ -28,6 +28,9 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
+          # GITHUB_TOKEN can never push changes to .github/workflows, which Modrinth edits. This
+          # fine-grained token has Contents and Workflows write on this repo only.
+          token: ${{ secrets.UPSTREAM_SYNC_TOKEN }}
 
       - name: Pick the next sync branch
         id: next
@@ -108,7 +111,7 @@ jobs:
           name: upstream-sync-${{ steps.next.outputs.n }}
           path: ${{ runner.temp }}/sync
 
-  # A push made with GITHUB_TOKEN starts no workflows, so CI is called directly for a clean merge.
+  # CI runs on pull requests and main, not on branch pushes, so it is called directly for a clean merge.
   ci:
     name: CI
     needs: sync

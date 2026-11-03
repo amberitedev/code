@@ -7,7 +7,7 @@ on:
   push:
     branches: [main]
   pull_request:
-  # The upstream sync workflow calls this for its branch, since its push starts no workflows.
+  # The upstream sync workflow calls this for its branch before a pull request exists.
   workflow_call:
     inputs:
       ref:
