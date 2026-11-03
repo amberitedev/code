@@ -38,6 +38,8 @@ pub enum WsEvent {
     AuthOk,
     /// Mirrors Archon.Websocket.v0.WSPowerStateEvent. Core does not report exit codes here.
     PowerState { state: PowerState },
+    /// Mirrors Archon.Websocket.v0.WSUptimeEvent: seconds the running server has been up.
+    Uptime { uptime: u64 },
     /// Mirrors Archon.Websocket.v0.WSInstallationResultEvent.
     InstallationResult(InstallationResult),
     /// Mirrors Archon.Websocket.v0.WSInstallProgressEvent.
