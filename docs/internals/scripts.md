@@ -261,3 +261,8 @@ from Modrinth and pruned, and any conflict markers committed as they are. The ru
 `upstream-sync-N` artifact holds the script's JSON summary, the new commit titles, the merged
 Modrinth pull requests, and the diff of Modrinth's changelog. The `/upstream-sync` skill resolves
 the branch and opens the pull request. Merge it with a merge commit, never a squash.
+
+The workflow checks out and pushes with the `UPSTREAM_SYNC_TOKEN` secret, because GitHub never lets
+`GITHUB_TOKEN` push changes to `.github/workflows`. It is a fine-grained personal access token for
+`amberitedev/code` only, with Contents and Workflows set to read and write. When it expires the
+Merge step fails at checkout; replace the secret with a new token.
