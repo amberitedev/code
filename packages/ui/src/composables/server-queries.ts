@@ -11,6 +11,7 @@ export const serverKeys = {
 	startup: (serverId: string) => ['servers', 'startup', 'v1', serverId] as const,
 	shareDiff: (serverId: string, ...scope: [worldId?: string, userId?: string]) =>
 		['servers', 'share-diff', serverId, ...scope] as const,
+	shareHistory: (serverId: string) => ['servers', 'share-history', serverId] as const,
 	shareFiles: (serverId: string, worldId: string, userId: string | undefined) =>
 		['servers', 'share-files', serverId, worldId, userId] as const,
 }

@@ -9,8 +9,9 @@ import type { ChangedItem } from './changes'
 import VersionMeta from './version-meta.vue'
 
 // One pushed version: what it runs on and the mods and config files it changed, framed as the
-// App's other lists of changes are. Version 1 is what the instance was shared with. The owner can
-// restore or delete any version but the current one, which is what members have.
+// App's other lists of changes are. Version 1 is what the share started with. Where the content is
+// managed (`editable`), the owner can restore or delete any version but the current one, which is
+// what everyone has.
 
 defineProps<{
 	row:
@@ -22,7 +23,7 @@ defineProps<{
 				shared: boolean
 		  })
 		| null
-	owner: boolean
+	editable: boolean
 	busy: boolean
 }>()
 
@@ -89,7 +90,7 @@ defineExpose({
 		</template>
 		<div v-else class="h-24" aria-hidden="true" />
 
-		<template v-if="owner && row && !row.current" #actions>
+		<template v-if="editable && row && !row.current" #actions>
 			<div class="flex justify-between gap-2">
 				<Button type="quiet" color="red" :disabled="busy" @click="emit('delete')">
 					<TrashIcon aria-hidden="true" /> Delete

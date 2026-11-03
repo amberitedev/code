@@ -231,21 +231,8 @@ export async function install_update_shared_instance(instanceId: string) {
 	})
 }
 
-/** A version the owner pushed from this App, as the instance's History tab shows it. */
-export interface SharedInstanceHistoryEntry {
-	version: number
-	/** When the push finished, as an ISO date. */
-	created: string
-	gameVersion: string
-	loader: string
-	loaderVersion: string
-	/** Projects and files, not counting config files. */
-	contentCount: number
-	/** What it changed over the version before it. */
-	diffs: SharedInstanceUpdateDiff[]
-	/** Paths of the config files it changed. */
-	configFiles: string[]
-}
+/** A pushed version as a History page shows it. The App and Core return the same shape. */
+export type SharedInstanceHistoryEntry = Copal.SharedInstanceHistoryEntry
 
 /** The owner's history of the instance's share, newest first. Empty for a member. */
 export async function install_get_shared_instance_history(instanceId: string) {

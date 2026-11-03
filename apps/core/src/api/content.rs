@@ -302,7 +302,7 @@ impl From<content::Error> for ApiError {
             Error::Server(error) => error.into(),
             error => {
                 let code = match &error {
-                    Error::Busy => ErrorCode::Conflict,
+                    Error::Busy | Error::Running(_) => ErrorCode::Conflict,
                     Error::NotFound(_) => ErrorCode::NotFound,
                     Error::Resolve(
                         modrinth_content_management::Error::Provider(_),

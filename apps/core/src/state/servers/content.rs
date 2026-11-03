@@ -50,6 +50,9 @@ pub enum Error {
     NotFound(String),
     #[error("{0}")]
     Invalid(String),
+    /// The change needs the server stopped, and it is running.
+    #[error("{0}")]
+    Running(String),
     #[error(transparent)]
     Server(#[from] ServerError),
     #[error(transparent)]

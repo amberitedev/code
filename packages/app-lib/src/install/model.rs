@@ -274,6 +274,16 @@ pub struct SharedInstanceInstallData {
     /// The version's whole manifest, which a member keeps once it applied the version.
     #[serde(default)]
     pub applied_files: Vec<sharing_client::versions::ManifestFile>,
+    /// An owner's restore: what the share carried at the last push or carries in the restored
+    /// version, which the restore may replace (`sharing_client::history::restore`). `None` for a
+    /// member's install or update.
+    #[serde(default)]
+    pub restore: Option<
+        sharing_client::history::restore::Carried<(
+            crate::state::ProjectType,
+            String,
+        )>,
+    >,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

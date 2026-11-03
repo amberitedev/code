@@ -53,6 +53,11 @@ export default new createRouter({
 					name: 'ServerManageAccess',
 					component: () => import('@/platform/adapters/hosting/manage/access-page.vue'),
 				},
+				{
+					path: 'history',
+					name: 'ServerManageHistory',
+					component: () => import('@/platform/adapters/hosting/manage/history-page.vue'),
+				},
 			],
 		},
 		{

@@ -66,6 +66,28 @@ pub fn pack_file(row: &TrackedFile) -> ModpackFile {
     }
 }
 
+/// The manifest type a server's share carries addons of `kind` as. Plugins run only on a server,
+/// and a server has no shaders or resource packs of its own.
+pub fn file_type(kind: ContentType) -> Option<&'static str> {
+    match kind {
+        ContentType::Mod => Some("mod"),
+        ContentType::DataPack => Some("datapack"),
+        ContentType::Plugin
+        | ContentType::Shader
+        | ContentType::ResourcePack
+        | ContentType::ModPack => None,
+    }
+}
+
+/// The kind of addon a server's share carries as `file_type`, the other way from [`file_type`].
+pub fn kind(file_type: &str) -> Option<ContentType> {
+    match file_type {
+        "mod" => Some(ContentType::Mod),
+        "datapack" => Some(ContentType::DataPack),
+        _ => None,
+    }
+}
+
 /// The addons of `listed` that players get, in order, as a push reads them. With `modpack` the
 /// share carries the modpack, so the pack's own files are marked as the modpack's.
 pub fn content_rows(
@@ -80,14 +102,7 @@ pub fn content_rows(
             Sides::of(item, entry_sides.get(&item.path)).for_players()
         })
         .filter_map(|item| {
-            let file_type = match item.kind {
-                ContentType::Mod => "mod",
-                ContentType::DataPack => "datapack",
-                ContentType::Plugin
-                | ContentType::Shader
-                | ContentType::ResourcePack
-                | ContentType::ModPack => return None,
-            };
+            let file_type = file_type(item.kind)?;
             let row = rows.get(&item.path);
             Some(ContentRow {
                 path: if item.disabled {

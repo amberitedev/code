@@ -304,6 +304,25 @@ disabled?: boolean, };
 
 export type SharedInstanceUpdateDiffType = "added" | "removed" | "updated" | "modpack_linked" | "modpack_updated" | "modpack_unlinked" | "game_version_updated" | "loader_updated" | "config_files_updated";
 
+export type SharedInstanceHistoryEntry = { version: number, 
+/**
+ * When the push finished, in milliseconds since the Unix epoch.
+ */
+created: number, gameVersion: string, 
+/**
+ * The share's loader name, such as `fabric`, or `vanilla` for a server without a client
+ * loader.
+ */
+loader: string, loaderVersion: string, 
+/**
+ * Projects and files, not counting config files.
+ */
+contentCount: number, diffs: Array<SharedInstanceUpdateDiff>, 
+/**
+ * Paths of the config files it changed, or of all it holds without a base.
+ */
+configFiles: Array<string>, };
+
 export type UpdateStatus = { 
 /**
  * The running version.

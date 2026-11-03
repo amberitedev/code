@@ -141,6 +141,7 @@ import { injectInstanceLaunchState } from '@/features/instances/launch-state'
 import { useLinkedServer } from '@/features/instances/linked-server/use-linked-server'
 import InstanceSettingsModal from '@/features/instances/settings-modal/index.vue'
 import { serverStatusQueryOptions } from '@/features/servers/queries'
+import { usePlayInstanceServer } from '@/features/share-history/use-play-instance-server'
 import { trackEvent } from '@/helpers/analytics'
 import { toError } from '@/helpers/errors'
 import {
@@ -563,12 +564,15 @@ const showShareTab = computed(() => {
 	)
 })
 
-// The history is the owner's pushes from this computer, so members have none.
+// History lives with a share's source and only its owner sees it: the owner's instance shows its
+// pushes from this computer, and a Play instance shows its server's, read-only, to the server's
+// owner. Other members have none.
+const playServer = usePlayInstanceServer(instance)
 const showHistoryTab = computed(
 	() =>
 		currentUserCanUseSharedInstances.value &&
 		!instance.value?.quarantined &&
-		instance.value?.shared_instance?.role === 'owner',
+		(instance.value?.shared_instance?.role === 'owner' || !!playServer.value),
 )
 
 const tabs = computed(() => {
@@ -632,13 +636,17 @@ const tabs = computed(() => {
 watch(
 	() => ({
 		quarantined: instance.value?.quarantined ?? false,
-		notOwner: !!instance.value && instance.value.shared_instance?.role !== 'owner',
+		// A Play instance's server is looked up first; `undefined` until it is known.
+		noHistory:
+			!!instance.value &&
+			instance.value.shared_instance?.role !== 'owner' &&
+			playServer.value === null,
 		routeName: router.currentRoute.value.name,
 	}),
-	({ quarantined, notOwner, routeName }) => {
+	({ quarantined, noHistory, routeName }) => {
 		if (
 			(quarantined && (routeName === 'InstanceShare' || routeName === 'InstanceHistory')) ||
-			(notOwner && routeName === 'InstanceHistory')
+			(noHistory && routeName === 'InstanceHistory')
 		) {
 			void router.replace(basePath.value)
 		}

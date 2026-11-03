@@ -5,7 +5,7 @@
 use std::path::{Path, PathBuf};
 
 use bedrock::upstream::store::{self, ContentStore};
-use sharing_client::history::{HistoryStore, OWNER_KIND};
+use sharing_client::history::{HistoryError, HistoryStore, OWNER_KIND};
 use sqlx::SqlitePool;
 
 use crate::state::servers::Error;
@@ -18,6 +18,18 @@ pub struct History<'a> {
 
 fn store_error(error: bedrock::Error) -> Error {
     Error::Other(color_eyre::eyre::eyre!("{error:#}"))
+}
+
+impl From<HistoryError<Error>> for Error {
+    fn from(error: HistoryError<Error>) -> Self {
+        match error {
+            HistoryError::Store(error) => error,
+            error @ HistoryError::MissingVersion(_) => {
+                Error::NotFound(error.to_string())
+            }
+            error => Error::Invalid(error.to_string()),
+        }
+    }
 }
 
 impl HistoryStore for History<'_> {

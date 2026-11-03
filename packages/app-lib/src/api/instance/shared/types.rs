@@ -2,6 +2,7 @@ use super::*;
 pub use sharing_client::diff::{
     SharedInstanceUpdateDiff, SharedInstanceUpdateDiffType,
 };
+pub use sharing_client::history::SharedInstanceHistoryEntry;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SharedInstanceUsers {
@@ -160,35 +161,10 @@ pub struct SharedInstanceInviteCreator {
     pub avatar: Option<String>,
 }
 
-/// One entry of an owner's share history, as the History tab shows it.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SharedInstanceHistoryEntry {
-    pub version: i32,
-    pub created: DateTime<Utc>,
-    #[serde(flatten)]
-    pub details: SharedInstanceVersionDetails,
-}
-
 /// How many versions each share's local history keeps (`None` for all), and how many each
 /// share has now, by share id.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SharedHistorySettings {
     pub kept: Option<usize>,
     pub entries: HashMap<String, usize>,
-}
-
-/// One kept version as its version history shows it: what it runs on, how much it holds, and
-/// what it changed over the version before it.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SharedInstanceVersionDetails {
-    pub game_version: String,
-    pub loader: ModLoader,
-    pub loader_version: String,
-    /// Projects and files, not counting config files.
-    pub content_count: usize,
-    pub diffs: Vec<SharedInstanceUpdateDiff>,
-    /// Paths of the config files it changed, or of all it holds without a base.
-    pub config_files: Vec<String>,
 }

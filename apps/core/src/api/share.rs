@@ -3,6 +3,10 @@
 //! /v1/servers/{id}/worlds/{wid}/content/share`, `GET .../content/share/diff`, and
 //! `GET .../content/share/files`. Mirrors `Archon.Content.v1` (`archon/content/v1.ts`).
 //!
+//! Also the share's history on this Core, for the owner alone (plan.md, "Links and history"):
+//! `GET .../content/share/history`, `POST .../content/share/history/{version}/restore` and
+//! `DELETE .../content/share/history/{version}`.
+//!
 //! A server that follows an instance gets 409 on all of them: it reads its instance's share,
 //! and each share has one writer. What a version carries is `commands::share_snapshot`, plus the
 //! config files the push picks.
@@ -18,6 +22,7 @@ use serde::{Deserialize, Serialize};
 use sharing_client::{
     backend::{Backend, BackendError},
     diff::{DiffError, SharedInstanceUpdateDiff, share_diff},
+    history::SharedInstanceHistoryEntry,
     push,
     rules::{
         CONFIG_FILE_TYPE, FolderEntry, SCAN_HEAD_SIZE, ShareFolder,
@@ -28,19 +33,23 @@ use ts_rs::TS;
 
 use super::{
     AppState,
+    activity::Action,
     content::{server_first, world},
     error::{ApiError, ErrorCode},
 };
 use crate::{
-    access::{Caller, Level},
+    access::{Caller, Level, activity},
     state::servers::{
         adapters::{
             filesystem::folder::{self, Folder},
             sqlite::server_rows,
         },
         commands::{
+            delete_share_version::delete_share_version,
             drop_own_share::drop_own_share,
+            get_share_history::get_share_history,
             record_push::record_push,
+            restore_share_version::{Restored, restore_share_version},
             share_snapshot::{
                 Names, SCOPE, push_options, share_contents, snapshot,
             },
@@ -515,6 +524,54 @@ pub async fn diff(
         requires_restart: has_changes && state.servers.phase(&id).is_some(),
         diffs,
     }))
+}
+
+/// `GET .../content/share/history`: the versions of the server's share this Core pushed, newest
+/// first, as the App lists an instance's.
+pub async fn history(
+    caller: Caller,
+    State(state): State<Arc<AppState>>,
+    Path((id, wid)): Path<(String, String)>,
+) -> Result<Json<Vec<SharedInstanceHistoryEntry>>, ApiError> {
+    caller.require(&state.db, &id, Level::Owner).await?;
+    world(&id, &wid)?;
+    server_first(&state, &id).await?;
+    Ok(Json(get_share_history(&state.content, &id).await?))
+}
+
+/// `POST .../content/share/history/{version}/restore`: put the server back to a version, to
+/// push again. 204 once it is back; 202 while the version's loader or pack installs first.
+pub async fn restore(
+    caller: Caller,
+    State(state): State<Arc<AppState>>,
+    Path((id, wid, version)): Path<(String, String, i32)>,
+) -> Result<StatusCode, ApiError> {
+    caller.require(&state.db, &id, Level::Owner).await?;
+    world(&id, &wid)?;
+    server_first(&state, &id).await?;
+    let busy = state.content.busy(&id)?;
+    let restored =
+        restore_share_version(&state.content, &id, busy, version).await?;
+    activity::log(&state.db, &caller, Some(&id), Action::ContentChanged).await;
+    Ok(match restored {
+        Restored::Now => StatusCode::NO_CONTENT,
+        Restored::Background => StatusCode::ACCEPTED,
+    })
+}
+
+/// `DELETE .../content/share/history/{version}`: delete a version other than the last push.
+/// Refused while the server's content is busy, such as with a restore of that version.
+pub async fn delete_version(
+    caller: Caller,
+    State(state): State<Arc<AppState>>,
+    Path((id, wid, version)): Path<(String, String, i32)>,
+) -> Result<StatusCode, ApiError> {
+    caller.require(&state.db, &id, Level::Owner).await?;
+    world(&id, &wid)?;
+    server_first(&state, &id).await?;
+    let _busy = state.content.busy(&id)?;
+    delete_share_version(&state.content, &id, version).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[cfg(test)]

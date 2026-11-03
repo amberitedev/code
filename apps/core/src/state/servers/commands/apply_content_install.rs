@@ -91,7 +91,7 @@ fn default_kind(loader: ModLoader) -> ContentType {
 }
 
 /// The kind a version is, from the loaders it lists.
-fn kind_of(version: &Version, target: &Target) -> ContentType {
+pub fn kind_of(version: &Version, target: &Target) -> ContentType {
     let has = |name: &str| version.loaders.iter().any(|loader| loader == name);
     if has("datapack")
         && (target.loader == ModLoader::Vanilla || version.loaders.len() == 1)
