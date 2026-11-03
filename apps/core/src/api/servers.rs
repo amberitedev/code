@@ -506,12 +506,13 @@ fn net(state: &AppState, row: &server_rows::ServerRow) -> Net {
     }
 }
 
-/// Where `id` is in its run, or how its last run ended when it has none.
+/// Where `id` is in its run, from its `phase`, or how its last run ended when it has none.
 pub(super) async fn power_state(
     state: &AppState,
     id: &str,
+    phase: Option<Phase>,
 ) -> sqlx::Result<ServerPowerState> {
-    Ok(match state.servers.phase(id) {
+    Ok(match phase {
         Some(Phase::Starting) => ServerPowerState::Starting,
         Some(Phase::Running | Phase::Unmanaged(_)) => ServerPowerState::Running,
         Some(Phase::Stopping) => ServerPowerState::Stopping,
@@ -534,7 +535,8 @@ async fn server(
     level: Level,
     host: &str,
 ) -> Result<Server, ApiError> {
-    let power_state = power_state(state, &row.id).await?;
+    let power_state =
+        power_state(state, &row.id, state.servers.phase(&row.id)).await?;
     let owner_id: Option<String> =
         sqlx::query_scalar("SELECT owner_user_id FROM core WHERE id = 1")
             .fetch_optional(&state.db)

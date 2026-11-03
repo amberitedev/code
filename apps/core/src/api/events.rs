@@ -112,8 +112,15 @@ async fn console_socket(
     }
     // The App shows a server as stopped until told otherwise, so it learns the power state
     // before it treats the page as ready.
-    let mut phase = state.servers.phase(&id);
-    let mut power = power_of(&state, &id).await;
+    // The phase the power state was last read from, or `None` until a read succeeds. A failed
+    // read sends the App's default and is tried again on the next check.
+    let mut seen = None;
+    let mut power = PowerState::Stopped;
+    let phase = state.servers.phase(&id);
+    if let Some(read) = power_of(&state, &id, phase).await {
+        seen = Some(phase);
+        power = read;
+    }
     if send(&mut socket, &WsEvent::PowerState { state: power })
         .await
         .is_err()
@@ -169,12 +176,14 @@ async fn console_socket(
                 }
             }
             _ = power_check.tick() => {
-                let now = state.servers.phase(&id);
-                if now == phase {
+                let phase = state.servers.phase(&id);
+                if seen == Some(phase) {
                     continue;
                 }
-                phase = now;
-                let next = power_of(&state, &id).await;
+                let Some(next) = power_of(&state, &id, phase).await else {
+                    continue;
+                };
+                seen = Some(phase);
                 if next != power {
                     power = next;
                     if send(&mut socket, &WsEvent::PowerState { state: power }).await.is_err() {
@@ -214,12 +223,21 @@ async fn console_socket(
     }
 }
 
-/// `id`'s power state as the hosting API's socket names it. A killed server reads as stopped.
-async fn power_of(state: &AppState, id: &str) -> PowerState {
-    match power_state(state, id)
-        .await
-        .unwrap_or(ServerPowerState::Offline)
-    {
+/// `id`'s power state at `phase`, as the hosting API's socket names it, or `None` when its last
+/// run could not be read. A killed server reads as stopped.
+async fn power_of(
+    state: &AppState,
+    id: &str,
+    phase: Option<crate::servers::Phase>,
+) -> Option<PowerState> {
+    let power = match power_state(state, id, phase).await {
+        Ok(power) => power,
+        Err(error) => {
+            tracing::debug!(server = %id, %error, "power state");
+            return None;
+        }
+    };
+    Some(match power {
         ServerPowerState::Starting => PowerState::Starting,
         ServerPowerState::Running => PowerState::Running,
         ServerPowerState::Stopping => PowerState::Stopping,
@@ -227,7 +245,7 @@ async fn power_of(state: &AppState, id: &str) -> PowerState {
         ServerPowerState::Offline | ServerPowerState::Killed => {
             PowerState::Stopped
         }
-    }
+    })
 }
 
 fn log(message: String) -> WsEvent {
