@@ -21,7 +21,7 @@ use super::{
 use crate::{
     access::{Caller, Changed, Level, StreamGuard, activity, now, sessions},
     api::error::{ApiError, ErrorCode},
-    servers::console,
+    servers::{console, restarts::run_started_at},
 };
 
 use crate::event::{LogStream, PowerState, WsClientMessage, WsEvent};
@@ -111,9 +111,9 @@ async fn console_socket(
         return;
     }
     // The App shows a server as stopped until told otherwise, so it learns the power state
-    // before it treats the page as ready.
-    // The phase the power state was last read from, or `None` until a read succeeds. A failed
-    // read sends the App's default and is tried again on the next check.
+    // before it treats the page as ready. `seen` is the phase the power state was last read
+    // from, or `None` until a read succeeds: a failed read sends the App's default and is tried
+    // again on the next check.
     let mut seen = None;
     let mut power = PowerState::Stopped;
     let phase = state.servers.phase(&id);
@@ -121,10 +121,7 @@ async fn console_socket(
         seen = Some(phase);
         power = read;
     }
-    if send(&mut socket, &WsEvent::PowerState { state: power })
-        .await
-        .is_err()
-    {
+    if send_power(&mut socket, &state, &id, power).await.is_err() {
         return;
     }
     // The App treats the server page as ready once it knows what is installing, so it is told
@@ -186,7 +183,7 @@ async fn console_socket(
                 seen = Some(phase);
                 if next != power {
                     power = next;
-                    if send(&mut socket, &WsEvent::PowerState { state: power }).await.is_err() {
+                    if send_power(&mut socket, &state, &id, power).await.is_err() {
                         return;
                     }
                 }
@@ -246,6 +243,24 @@ async fn power_of(
             PowerState::Stopped
         }
     })
+}
+
+/// Sends `power`, and for a running server how long its run has been up, which the App's uptime
+/// counts on from.
+async fn send_power(
+    socket: &mut WebSocket,
+    state: &AppState,
+    id: &str,
+    power: PowerState,
+) -> Result<(), axum::Error> {
+    send(socket, &WsEvent::PowerState { state: power }).await?;
+    if power == PowerState::Running
+        && let Some(started) = run_started_at(&state.db, id).await
+    {
+        let uptime = u64::try_from(now() - started).unwrap_or(0);
+        send(socket, &WsEvent::Uptime { uptime }).await?;
+    }
+    Ok(())
 }
 
 fn log(message: String) -> WsEvent {

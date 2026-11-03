@@ -226,7 +226,10 @@ fn warning(left: i64) -> String {
 }
 
 /// When the server's current run started, in unix seconds.
-async fn run_started_at(db: &SqlitePool, server_id: &str) -> Option<i64> {
+pub(crate) async fn run_started_at(
+    db: &SqlitePool,
+    server_id: &str,
+) -> Option<i64> {
     sqlx::query_scalar(
         "SELECT started_at FROM runs WHERE server_id = ? AND ended_at IS NULL \
          ORDER BY started_at DESC LIMIT 1",
