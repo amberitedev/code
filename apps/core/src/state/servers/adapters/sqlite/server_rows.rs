@@ -1,5 +1,7 @@
 //! Server rows and their run history in the database.
 
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
 use sqlx::SqlitePool;
 
 use crate::network::firewall::SERVER_PORTS;
@@ -49,36 +51,44 @@ const DEFAULT_MEMORY_MB: i64 = 2048;
 const COLUMNS: &str = "id, name, game_version, loader, loader_version, port, memory_mb, \
                        java_path, java_version, update_channel";
 
-/// Whether no other program on this machine holds `port`. Minecraft listens on every interface,
-/// TCP for the game and UDP for query and voice mods, so Core tries to bind the same: TCP and
-/// UDP, IPv4 and, where the machine has it, IPv6. A port is taken when a bind fails because it
-/// is in use or reserved; a bind the OS cannot do at all, such as IPv6 on a machine without it,
-/// says nothing about the port.
-pub fn port_free(port: u16) -> bool {
+/// Whether no other program on this machine holds `port`. Minecraft listens on the addresses
+/// [`probed_ips`] gives, TCP for the game and UDP for query and voice mods, so Core tries to bind
+/// the same. A port is taken when a bind fails because it is in use or reserved; a bind the OS
+/// cannot do at all, such as IPv6 on a machine without it, says nothing about the port.
+pub fn port_free(port: u16, local_only: Option<IpAddr>) -> bool {
     use std::{
         io::ErrorKind,
-        net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, UdpSocket},
+        net::{SocketAddr, TcpListener, UdpSocket},
     };
 
-    [
-        IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-        IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-    ]
-    .into_iter()
-    .map(|ip| SocketAddr::new(ip, port))
-    .flat_map(|address| {
-        [
-            TcpListener::bind(address).err(),
-            UdpSocket::bind(address).err(),
-        ]
-    })
-    .flatten()
-    .all(|error| {
-        !matches!(
-            error.kind(),
-            ErrorKind::AddrInUse | ErrorKind::PermissionDenied
-        )
-    })
+    probed_ips(local_only)
+        .into_iter()
+        .map(|ip| SocketAddr::new(ip, port))
+        .flat_map(|address| {
+            [
+                TcpListener::bind(address).err(),
+                UdpSocket::bind(address).err(),
+            ]
+        })
+        .flatten()
+        .all(|error| {
+            !matches!(
+                error.kind(),
+                ErrorKind::AddrInUse | ErrorKind::PermissionDenied
+            )
+        })
+}
+
+/// Where a server listens: a local-only Core's own loopback address (see `Config::local_only`),
+/// otherwise every interface, IPv4 and, where the machine has it, IPv6.
+fn probed_ips(local_only: Option<IpAddr>) -> Vec<IpAddr> {
+    match local_only {
+        Some(ip) => vec![ip],
+        None => vec![
+            IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+            IpAddr::V6(Ipv6Addr::UNSPECIFIED),
+        ],
+    }
 }
 
 pub async fn list(db: &SqlitePool) -> sqlx::Result<Vec<ServerRow>> {
@@ -459,11 +469,26 @@ mod tests {
 
     #[test]
     fn a_port_in_use_is_not_free() {
-        // A TCP listener on every IPv4 interface, as another program's server would hold.
-        let tcp = std::net::TcpListener::bind("0.0.0.0:0").unwrap();
-        assert!(!port_free(tcp.local_addr().unwrap().port()));
+        // Loopback only: tests must not open sockets Windows Firewall asks about.
+        let local = Some(IpAddr::V4(Ipv4Addr::LOCALHOST));
+        // A TCP listener, as another program's server would hold.
+        let tcp = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        assert!(!port_free(tcp.local_addr().unwrap().port(), local));
         // UDP alone counts too: query and voice mods use it.
-        let udp = std::net::UdpSocket::bind("0.0.0.0:0").unwrap();
-        assert!(!port_free(udp.local_addr().unwrap().port()));
+        let udp = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        assert!(!port_free(udp.local_addr().unwrap().port(), local));
+    }
+
+    #[test]
+    fn a_local_only_core_probes_only_its_own_address() {
+        let local = IpAddr::V4(Ipv4Addr::LOCALHOST);
+        assert_eq!(probed_ips(Some(local)), [local]);
+        assert_eq!(
+            probed_ips(None),
+            [
+                IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                IpAddr::V6(Ipv6Addr::UNSPECIFIED)
+            ]
+        );
     }
 }

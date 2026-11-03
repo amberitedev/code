@@ -81,6 +81,14 @@ impl Config {
         Ok(config)
     }
 
+    /// The loopback address a Core bound to one keeps every socket on: its server-port probes,
+    /// its Minecraft servers, and no router forwarding. Nothing outside this computer can reach
+    /// such a Core, and Windows asks to allow each new program path the first time it listens
+    /// beyond loopback, which in dev is every build and test binary. `None` binds as usual.
+    pub fn local_only(&self) -> Option<IpAddr> {
+        self.bind.is_loopback().then_some(self.bind)
+    }
+
     fn with_file(data_dir: PathBuf, file: File) -> Self {
         Self {
             data_dir,

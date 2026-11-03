@@ -141,7 +141,8 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
         Arc::clone(&access.owed),
     ));
     storage.start();
-    let servers = Servers::open(paths.clone(), db.clone()).await?;
+    let servers =
+        Servers::open(paths.clone(), db.clone(), config.local_only()).await?;
     let backups = crate::backups::Backups::open(
         paths.clone(),
         db.clone(),
@@ -167,7 +168,7 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
         db.clone(),
         config.port,
         installed,
-        config.forward_ports,
+        config.forward_ports && config.local_only().is_none(),
     ));
     tokio::spawn(Arc::clone(&network).run(Arc::clone(&servers)));
     let state = Arc::new(api::AppState {

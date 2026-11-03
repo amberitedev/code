@@ -20,7 +20,13 @@ async fn setup() -> Setup {
     let paths = Paths::new(dir.path());
     folders::create(&paths, None).unwrap();
     let db = db::memory().await;
-    let servers = Servers::open(paths.clone(), db.clone()).await.unwrap();
+    let servers = Servers::open(
+        paths.clone(),
+        db.clone(),
+        Some(std::net::Ipv4Addr::LOCALHOST.into()),
+    )
+    .await
+    .unwrap();
     let server = servers.create("A").await.unwrap().id;
     server_rows::set_installed(&db, &server, "vanilla", "1.21.1", None)
         .await
@@ -329,7 +335,13 @@ async fn a_cancelled_operation_never_runs_and_a_claimed_one_cannot_be_cancelled(
     folders::create(&paths, None).unwrap();
     let db = db::memory().await;
     // No engine runs here, so nothing claims the operations but the test.
-    let servers = Servers::open(paths, db.clone()).await.unwrap();
+    let servers = Servers::open(
+        paths,
+        db.clone(),
+        Some(std::net::Ipv4Addr::LOCALHOST.into()),
+    )
+    .await
+    .unwrap();
     let server = servers.create("A").await.unwrap().id;
     let queue = |name: &'static str| {
         let db = db.clone();

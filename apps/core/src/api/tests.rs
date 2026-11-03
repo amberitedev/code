@@ -74,7 +74,13 @@ async fn core() -> Core {
         .execute(&db)
         .await
         .unwrap();
-    let servers = Servers::open(paths.clone(), db.clone()).await.unwrap();
+    let servers = Servers::open(
+        paths.clone(),
+        db.clone(),
+        Some(std::net::Ipv4Addr::LOCALHOST.into()),
+    )
+    .await
+    .unwrap();
     let server = servers.create("A").await.unwrap().id;
     for (user, role) in [("editor", "editor"), ("viewer", "viewer")] {
         sqlx::query("INSERT INTO access (server_id, user_id, role, added_at) VALUES (?, ?, ?, 0)")

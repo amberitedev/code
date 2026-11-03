@@ -1,8 +1,9 @@
-//! Preparing a server to start: its folder, `eula.txt`, its port in `server.properties`, Java,
+//! Preparing a server to start: its folder, `eula.txt`, its address in `server.properties`, Java,
 //! and the command line the shim runs, for every loader.
 
 use std::{
     io::{self, Read, Write},
+    net::IpAddr,
     path::{Path, PathBuf},
 };
 
@@ -38,12 +39,13 @@ fn installed(server: &ServerRow) -> Result<(ModLoader, &str), NotReady> {
 }
 
 /// Everything the shim needs to start `server`, and the lease on its Java (see `java::Lease`).
-/// Writes `eula.txt` and the port first.
+/// Writes `eula.txt` and the address first. `local_only` is `Config::local_only`.
 pub async fn prepare(
     paths: &Paths,
     http: &reqwest::Client,
     server: &ServerRow,
     run_id: &str,
+    local_only: Option<IpAddr>,
 ) -> Result<(Launch, Option<java::Lease>)> {
     installed(server)?;
 
@@ -55,7 +57,7 @@ pub async fn prepare(
         b"eula=true
 ",
     )?;
-    set_port(&dir, server.port)?;
+    set_address(&dir, server.port, local_only)?;
 
     let (java, lease) = java_for(paths, http, server).await?;
     let memory = server.memory_mb;
@@ -174,20 +176,31 @@ pub fn memory_limit(heap_mb: i64) -> u64 {
     heap + (heap / 2).max(1024)
 }
 
-/// Set `server-port` in `server.properties`, keeping every other line.
-fn set_port(dir: &Path, port: i64) -> io::Result<()> {
+/// Set `server-port` in `server.properties`, and `server-ip` for a local-only Core so Minecraft
+/// listens on loopback too. Every other line stays, otherwise the owner's `server-ip` included.
+fn set_address(
+    dir: &Path,
+    port: i64,
+    local_only: Option<IpAddr>,
+) -> io::Result<()> {
     let path = dir.join("server.properties");
     let text = match read_server_file(&path) {
         Ok(text) => text,
         Err(error) if error.kind() == io::ErrorKind::NotFound => String::new(),
         Err(error) => return Err(error),
     };
-    let mut lines: Vec<&str> = text
+    let ours = |key: &str| {
+        key == "server-port" || (key == "server-ip" && local_only.is_some())
+    };
+    let mut lines: Vec<String> = text
         .lines()
-        .filter(|line| property_key(line) != Some("server-port"))
+        .filter(|line| !property_key(line).is_some_and(ours))
+        .map(str::to_owned)
         .collect();
-    let port_line = format!("server-port={port}");
-    lines.push(&port_line);
+    lines.push(format!("server-port={port}"));
+    if let Some(ip) = local_only {
+        lines.push(format!("server-ip={ip}"));
+    }
     write_server_file(&path, format!("{}\n", lines.join("\n")).as_bytes())
 }
 
@@ -260,6 +273,8 @@ fn regular(file: std::fs::File) -> io::Result<std::fs::File> {
 
 #[cfg(test)]
 mod tests {
+    use std::net::Ipv4Addr;
+
     use super::*;
 
     #[test]
@@ -270,11 +285,29 @@ mod tests {
             "#Minecraft server properties\nmotd=Hi\nserver-port = 25565\nserver-portal=x\n",
         )
         .unwrap();
-        set_port(dir.path(), 25570).unwrap();
+        set_address(dir.path(), 25570, None).unwrap();
         assert_eq!(
             std::fs::read_to_string(dir.path().join("server.properties"))
                 .unwrap(),
             "#Minecraft server properties\nmotd=Hi\nserver-portal=x\nserver-port=25570\n"
+        );
+    }
+
+    #[test]
+    fn a_local_only_core_owns_server_ip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("server.properties");
+        std::fs::write(&path, "server-ip=10.0.0.5\nmotd=Hi\n").unwrap();
+        set_address(dir.path(), 25570, None).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "server-ip=10.0.0.5\nmotd=Hi\nserver-port=25570\n"
+        );
+        set_address(dir.path(), 25570, Some(Ipv4Addr::LOCALHOST.into()))
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "motd=Hi\nserver-port=25570\nserver-ip=127.0.0.1\n"
         );
     }
 
@@ -305,7 +338,7 @@ mod tests {
             .unwrap();
         }
         assert!(write_server_file(&dir.path().join("eula.txt"), b"x").is_err());
-        assert!(set_port(dir.path(), 25565).is_err());
+        assert!(set_address(dir.path(), 25565, None).is_err());
     }
 
     #[test]
