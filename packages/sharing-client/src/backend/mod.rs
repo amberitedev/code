@@ -250,13 +250,15 @@ impl Backend {
                 .await
             }
             Some(ShareIcon::Image(bytes)) => {
+                // The backend serves the image with the type it was sent with.
+                let mime = infer::get(&bytes)
+                    .map_or("application/octet-stream", |kind| {
+                        kind.mime_type()
+                    });
                 self.empty(
                     "upload_instance_icon",
                     self.request(Method::PUT, &path)
-                        .header(
-                            reqwest::header::CONTENT_TYPE,
-                            "application/octet-stream",
-                        )
+                        .header(reqwest::header::CONTENT_TYPE, mime)
                         .body(bytes),
                 )
                 .await
