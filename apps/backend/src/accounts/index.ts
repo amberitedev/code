@@ -32,6 +32,7 @@ import {
 } from '../common/http'
 import { addNotification } from '../common/notifications'
 import type { Env, UserRow } from '../common/types'
+import { USER_ICON_BYTES } from '../social'
 
 type Flow = { id: string; kind: string; user_id: string; payload: string | null; expires: string }
 const noContent = () => new Response(null, { status: 204 })
@@ -260,9 +261,18 @@ export async function handleAccounts(request: Request, env: Env): Promise<Respon
 		return null
 	}
 	if (['/_internal/globals', '/globals'].includes(path) && method === 'GET') {
+		const MiB = 1024 * 1024
 		return json({
 			captcha_enabled: env.LOCAL_DEV !== 'true',
 			tax_compliance_thresholds: { 2025: 600, 2026: 2000 },
+			// Avatars are ours (`social/index.ts`); the rest are Modrinth's limits, for uploads that
+			// go to Modrinth.
+			max_user_icon_size: USER_ICON_BYTES,
+			max_project_icon_size: 2 * MiB,
+			max_organization_icon_size: MiB / 2,
+			max_collection_icon_size: MiB / 2,
+			max_oauth_client_icon_size: MiB / 2,
+			max_gallery_image_size: 5 * MiB,
 		})
 	}
 	if (path === '/_dev/session' && method === 'POST') {
