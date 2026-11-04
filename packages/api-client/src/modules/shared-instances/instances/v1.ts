@@ -42,6 +42,19 @@ export class SharedInstancesInstancesV1Module extends SharedInstancesModule {
 		})
 	}
 
+	public async getLatestVersion(
+		instanceId: string,
+	): Promise<SharedInstances.Instances.v1.InstanceVersion> {
+		return this.client.request<SharedInstances.Instances.v1.InstanceVersion>(
+			`/instances/${encodeURIComponent(instanceId)}/versions`,
+			{
+				api: 'sharedinstances',
+				version: 1,
+				method: 'GET',
+			},
+		)
+	}
+
 	public async getUsers(instanceId: string): Promise<SharedInstances.Instances.v1.InstanceUsers> {
 		return this.request<SharedInstances.Instances.v1.InstanceUsers>(
 			`/instances/${encodeURIComponent(instanceId)}/users`,

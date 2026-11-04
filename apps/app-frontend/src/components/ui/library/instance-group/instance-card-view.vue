@@ -31,13 +31,17 @@ const localIcon = computed(() => {
 })
 const appSettings = useAppSettings()
 const compactMode = computed(() => appSettings.compactInstanceCards)
+// An uninstalled shared instance has no local file, so no modified time.
+const modified = computed(() =>
+	'modified' in props.instance ? String(props.instance.modified) : '',
+)
 const thumbnail = useImageThumbnail(
 	localIcon,
 	() => (compactMode.value ? 96 : 384),
-	() => ('modified' in props.instance ? String(props.instance.modified) : ''),
+	() => modified.value,
 )
 const thumbnailKey = computed(
-	() => `${localIcon.value}|${compactMode.value ? 96 : 384}|${props.instance.modified}`,
+	() => `${localIcon.value}|${compactMode.value ? 96 : 384}|${modified.value}`,
 )
 watch(thumbnail, (url) => {
 	if (url) knownThumbnails.set(thumbnailKey.value, url)

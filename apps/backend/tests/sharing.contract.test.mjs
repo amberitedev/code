@@ -264,10 +264,15 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		)
 		await ok(await call(`/instances/${id}/invites/pending`, 'POST', undefined, 'mra_friend'))
 		// The Library lists a member's joined shares, and only an owner's own without `include_joined`.
-		assert.deepEqual(await ok(await call('/instances?user=friend', 'GET', undefined, 'mra_friend')), [])
+		assert.deepEqual(
+			await ok(await call('/instances?user=friend', 'GET', undefined, 'mra_friend')),
+			[],
+		)
 		assert.ok(
 			(
-				await ok(await call('/instances?user=friend&include_joined=true', 'GET', undefined, 'mra_friend'))
+				await ok(
+					await call('/instances?user=friend&include_joined=true', 'GET', undefined, 'mra_friend'),
+				)
 			).includes(id),
 		)
 		assert.ok((await ok(await call('/instances?user=owner'))).includes(id))

@@ -909,13 +909,6 @@ export namespace Archon {
 				restrict_power: boolean
 			}
 
-			export type SuspensionLift = {
-				/** When the server is suspended again. */
-				until: string
-				/** Whether the server is prevented from starting while the suspension is lifted. */
-				restrict_power: boolean
-			}
-
 			export type UserScope = number
 
 			export type Net = {

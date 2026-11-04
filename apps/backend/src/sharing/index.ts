@@ -1649,7 +1649,14 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 	if (section === 'icon') {
 		owner(item, user.id)
 		if (request.method === 'PUT' && !child) {
-			await setIcon(env, url, id, await readBytes(request, ICON_BYTES), request.headers.get('content-type'), null)
+			await setIcon(
+				env,
+				url,
+				id,
+				await readBytes(request, ICON_BYTES),
+				request.headers.get('content-type'),
+				null,
+			)
 			return empty()
 		}
 		// An icon made in the icon editor: the rendered image and the settings it was made from.

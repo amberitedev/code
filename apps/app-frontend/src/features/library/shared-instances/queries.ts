@@ -1,5 +1,4 @@
-import type { Labrinth } from '@modrinth/api-client'
-import type { injectModrinthClient } from '@modrinth/ui'
+import type { AbstractModrinthClient, Labrinth } from '@modrinth/api-client'
 import type { QueryClient } from '@tanstack/vue-query'
 
 import { hiddenInstanceIdsQueryOptions } from '@/features/library/hidden-instances/queries'
@@ -10,7 +9,7 @@ import type { CachedSharedInstanceSummary } from '@/platform/app-lib/shared-inst
 
 import type { UninstalledSharedInstance } from './types'
 
-type ModrinthClient = ReturnType<typeof injectModrinthClient>
+type ModrinthClient = AbstractModrinthClient
 
 export const sharedInstanceLibraryKeys = {
 	all: ['shared-instances', 'library'] as const,
