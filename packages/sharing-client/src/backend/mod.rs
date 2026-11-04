@@ -14,6 +14,7 @@ pub use error::{BackendError, Unavailable};
 use std::time::Duration;
 
 use bedrock::net::ErrorBody;
+use modrinth_content_management::icons::IconConfig;
 use reqwest::{Method, StatusCode};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::json;
@@ -224,15 +225,42 @@ impl Backend {
         }
     }
 
-    /// Sets the share's icon to `icon`, or removes it.
+    /// Sets the share's icon to `icon`, with the icon editor settings it was made from when it
+    /// was made there, or removes it.
     pub async fn set_share_icon(
         &self,
         share_id: &str,
         icon: Option<Vec<u8>>,
+        config: Option<&IconConfig>,
     ) -> Result<(), BackendError> {
         let path = format!("/instances/{share_id}/icon");
-        match icon {
-            Some(bytes) => {
+        match (icon, config) {
+            // An icon made in the icon editor goes up with its settings, so members can edit a
+            // copy of it.
+            (Some(bytes), Some(config)) => {
+                let form = reqwest::multipart::Form::new()
+                    .part(
+                        "image",
+                        reqwest::multipart::Part::bytes(bytes)
+                            .file_name("icon.png")
+                            .mime_str("image/png")?,
+                    )
+                    .part(
+                        "config",
+                        reqwest::multipart::Part::text(
+                            serde_json::to_string(config)
+                                .expect("an icon config is plain data"),
+                        )
+                        .mime_str("application/json")?,
+                    );
+                self.empty(
+                    "upload_generated_instance_icon",
+                    self.request(Method::PUT, &format!("{path}/generated"))
+                        .multipart(form),
+                )
+                .await
+            }
+            (Some(bytes), None) => {
                 self.empty(
                     "upload_instance_icon",
                     self.request(Method::PUT, &path)
@@ -244,7 +272,7 @@ impl Backend {
                 )
                 .await
             }
-            None => {
+            (None, _) => {
                 self.empty(
                     "delete_instance_icon",
                     self.request(Method::DELETE, &path),

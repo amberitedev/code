@@ -17,7 +17,7 @@ infer = { workspace = true }
 modrinth-content-management = { workspace = true }
 path-util = { workspace = true }
 rand = { workspace = true }
-reqwest = { workspace = true, features = ["json", "rustls-no-provider", "stream"] }
+reqwest = { workspace = true, features = ["json", "multipart", "rustls-no-provider", "stream"] }
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true }
 sha1_smol = { workspace = true }

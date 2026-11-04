@@ -119,6 +119,8 @@ pub fn router(state: Arc<AppState>) -> Router {
             "/v1/servers/{id}/icon",
             get(icon::get).put(icon::set).delete(icon::delete),
         )
+        .route("/v1/servers/{id}/icon/metadata", get(icon::metadata))
+        .route("/v1/servers/{id}/icon/generated", put(icon::set_generated))
         .route("/modrinth/v0/servers/{id}/fs", get(files::auth))
         .route(
             "/modrinth/v0/servers/{id}/startup",

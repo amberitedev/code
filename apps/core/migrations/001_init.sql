@@ -63,7 +63,12 @@ CREATE TABLE servers (
         CHECK (update_channel IN ('release', 'beta', 'alpha')),
     -- The share of a server that follows no instance, which Core writes (`api::share`). Null
     -- until the server is shared.
-    share_id TEXT
+    share_id TEXT,
+    -- The icon editor settings (JSON `IconConfig`) the server's icon was made from, and the
+    -- SHA-256 of the game icon they made. A game icon with another hash was replaced some other
+    -- way, so the settings no longer describe it.
+    icon_config TEXT,
+    icon_hash TEXT
 );
 
 -- Every time a server ran. The live process identity (pid, start time, boot id) is in

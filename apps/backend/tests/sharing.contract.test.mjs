@@ -165,6 +165,26 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		assert.deepEqual(Buffer.from(await (await send(info.icon, 'GET')).arrayBuffer()), icon)
 		assert.equal(info.installed_once, false)
 		assert.equal(info.linked_server, null)
+		assert.equal(info.icon_config, null, 'an uploaded image has no icon editor settings')
+		// An icon made in the icon editor keeps its settings, so members can edit a copy.
+		const iconConfig = { background: { type: 'color', value: '#c78aff' }, symbol: 'dusk_block' }
+		const generated = async (config) => {
+			const form = new FormData()
+			form.append('image', new Blob([icon], { type: 'image/png' }), 'icon.png')
+			form.append('config', JSON.stringify(config))
+			// Encoded here so the boundary goes in the header, as the App sends it.
+			const body = new Request('http://local.test', { method: 'PUT', body: form })
+			return send(
+				`http://local.test/v1/instances/${id}/icon/generated`,
+				'PUT',
+				'mra_owner',
+				await body.arrayBuffer(),
+				{ 'content-type': body.headers.get('content-type') },
+			)
+		}
+		assert.equal((await generated({ ...iconConfig, symbol: 'Not A Symbol' })).status, 400)
+		await ok(await generated(iconConfig))
+		assert.deepEqual((await ok(await call(`/instances/${id}`))).icon_config, iconConfig)
 		await code(await call(`/instances/${id}/server-icon`), 404, 'icon_not_found')
 		// Inviting a batch invites those who accept invitations and names the rest.
 		assert.deepEqual(
@@ -243,6 +263,14 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 			'no second Core offers storage, so there is no replica yet',
 		)
 		await ok(await call(`/instances/${id}/invites/pending`, 'POST', undefined, 'mra_friend'))
+		// The Library lists a member's joined shares, and only an owner's own without `include_joined`.
+		assert.deepEqual(await ok(await call('/instances?user=friend', 'GET', undefined, 'mra_friend')), [])
+		assert.ok(
+			(
+				await ok(await call('/instances?user=friend&include_joined=true', 'GET', undefined, 'mra_friend'))
+			).includes(id),
+		)
+		assert.ok((await ok(await call('/instances?user=owner'))).includes(id))
 		assert.equal(
 			(await ok(await call(`/instances/${id}/versions`, 'GET', undefined, 'mra_friend'))).version,
 			1,

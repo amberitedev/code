@@ -277,8 +277,11 @@ pub(super) async fn update_remote_instance_icon(
         None => None,
     };
     let backend = backend_with(icon.is_some())?;
-    call(state, backend.set_share_icon(shared_instance_id, icon, icon_config))
-        .await
+    call(
+        state,
+        backend.set_share_icon(shared_instance_id, icon, icon_config),
+    )
+    .await
 }
 
 pub(super) async fn get_remote_users(
