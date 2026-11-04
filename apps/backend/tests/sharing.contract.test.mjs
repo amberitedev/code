@@ -166,25 +166,22 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		assert.equal(info.installed_once, false)
 		assert.equal(info.linked_server, null)
 		assert.equal(info.icon_config, null, 'an uploaded image has no icon editor settings')
-		// An icon made in the icon editor keeps its settings, so members can edit a copy.
+		// An icon made in the icon editor is only its settings, and replaces the uploaded image.
 		const iconConfig = { background: { type: 'color', value: '#c78aff' }, symbol: 'dusk_block' }
-		const generated = async (config) => {
-			const form = new FormData()
-			form.append('image', new Blob([icon], { type: 'image/png' }), 'icon.png')
-			form.append('config', JSON.stringify(config))
-			// Encoded here so the boundary goes in the header, as the App sends it.
-			const body = new Request('http://local.test', { method: 'PUT', body: form })
-			return send(
+		const generated = (config) =>
+			send(
 				`http://local.test/v1/instances/${id}/icon/generated`,
 				'PUT',
 				'mra_owner',
-				await body.arrayBuffer(),
-				{ 'content-type': body.headers.get('content-type') },
+				JSON.stringify(config),
+				{ 'content-type': 'application/json' },
 			)
-		}
 		assert.equal((await generated({ ...iconConfig, symbol: 'Not A Symbol' })).status, 400)
 		await ok(await generated(iconConfig))
-		assert.deepEqual((await ok(await call(`/instances/${id}`))).icon_config, iconConfig)
+		const drawn = await ok(await call(`/instances/${id}`))
+		assert.deepEqual([drawn.icon, drawn.icon_config], [null, iconConfig])
+		assert.equal((await send(info.icon, 'GET')).status, 404, 'the replaced image is gone')
+		assert.equal((await files.list({ prefix: `icons/${id}/` })).objects.length, 0)
 		await code(await call(`/instances/${id}/server-icon`), 404, 'icon_not_found')
 		// Inviting a batch invites those who accept invitations and names the rest.
 		assert.deepEqual(

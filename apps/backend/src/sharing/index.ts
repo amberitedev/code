@@ -38,8 +38,10 @@ type Instance = {
 	id: string
 	owner_id: string
 	name: string
+	/** URL of an uploaded image, kept in R2 at `iconKey`. NULL for an icon editor icon. */
 	icon: string | null
-	/** JSON of the icon editor settings `icon` was made from. See `iconConfig`. */
+	/** JSON of the icon editor settings, which clients draw themselves. NULL for an uploaded
+	 * image. See `iconConfig`. */
 	icon_config: string | null
 	quarantine: number
 	installed_once: number
@@ -381,6 +383,8 @@ export async function sweepFiles(env: Env, id: string): Promise<void> {
 	)
 	const unused = stored.filter((key) => !used.has(key))
 	if (unused.length) await env.FILES.delete(unused)
+	const icons = await env.FILES.list({ prefix: `icons/${id}/` })
+	if (icons.objects.length) await env.FILES.delete(icons.objects.map((object) => object.key))
 }
 
 /**
@@ -457,6 +461,7 @@ async function notifyReadyInvites(env: Env, id: string): Promise<void> {
 				shared_instance_id: id,
 				shared_instance_name: invite.name,
 				shared_instance_icon: item.icon,
+				shared_instance_icon_config: iconConfig(item),
 				invited_by: invite.by,
 			}),
 			created: now(),
@@ -1473,24 +1478,18 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 	const [, route, id, section, child] = parts
 	if (route === 'invites' && id && request.method === 'GET')
 		return previewInvite(env, id, url.searchParams.get('version') === 'true')
-	if (route === 'icons' && id && request.method === 'GET') {
-		const row = await env.DB.prepare(
-			'SELECT icon_data,icon_type FROM shared_instances WHERE icon = ?',
-		)
-			.bind(url.origin + url.pathname)
-			.first<{ icon_data: string | null; icon_type: string | null }>()
-		if (!row?.icon_data)
-			throw new ApiError(404, 'not_found', 'Icon was not found', 'icon_not_found')
-		return new Response(
-			Uint8Array.from(atob(row.icon_data), (character) => character.charCodeAt(0)),
-			{
-				headers: {
-					'Content-Type': row.icon_type ?? 'image/png',
-					// Every upload gets a new URL, so a fetched icon never changes.
-					'Cache-Control': 'private, max-age=31536000, immutable',
-				},
+	// `/v1/icons/{share}/{upload}`, read from R2 without touching D1.
+	if (route === 'icons' && id && section && !child && request.method === 'GET') {
+		const object = await env.FILES.get(iconKey(id, section))
+		if (!object) throw new ApiError(404, 'not_found', 'Icon was not found', 'icon_not_found')
+		return new Response(object.body, {
+			headers: {
+				'Content-Type': object.httpMetadata?.contentType ?? 'image/png',
+				// Every upload gets a new URL, so a fetched icon never changes. Public, because
+				// invite previews show it before anyone signs in.
+				'Cache-Control': 'public, max-age=31536000, immutable',
 			},
-		)
+		})
 	}
 	if (tokenFrom(request).startsWith('amc_')) return coreSharing(request, env, parts.slice(1))
 	const user = await requireUser(request, env)
@@ -1649,45 +1648,23 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 	if (section === 'icon') {
 		owner(item, user.id)
 		if (request.method === 'PUT' && !child) {
-			await setIcon(
-				env,
-				url,
-				id,
-				await readBytes(request, ICON_BYTES),
-				request.headers.get('content-type'),
-				null,
-			)
+			const data = await readBytes(request, ICON_BYTES)
+			if (data.byteLength > ICON_BYTES)
+				throw new ApiError(413, 'invalid_input', 'Icon is too large')
+			const upload = crypto.randomUUID()
+			await env.FILES.put(iconKey(id, upload), data, {
+				httpMetadata: { contentType: request.headers.get('content-type') ?? 'image/png' },
+			})
+			await setIcon(env, item, `${url.origin}/v1/icons/${id}/${upload}`, null)
 			return empty()
 		}
-		// An icon made in the icon editor: the rendered image and the settings it was made from.
+		// An icon made in the icon editor: only its settings, which clients draw themselves.
 		if (request.method === 'PUT' && child === 'generated') {
-			const form = await new Response(await readBytes(request, ICON_BYTES + 4096), {
-				headers: { 'content-type': request.headers.get('content-type') ?? '' },
-			})
-				.formData()
-				.catch(() => {
-					throw new ApiError(400, 'invalid_input', 'Expected a multipart form')
-				})
-			const image: unknown = form.get('image')
-			const config: unknown = form.get('config')
-			if (!(image instanceof Blob) || typeof config !== 'string')
-				throw new ApiError(400, 'invalid_input', 'Expected an image and a config')
-			await setIcon(
-				env,
-				url,
-				id,
-				new Uint8Array(await image.arrayBuffer()),
-				image.type || 'image/png',
-				validIconConfig(config),
-			)
+			await setIcon(env, item, null, validIconConfig(await request.text()))
 			return empty()
 		}
 		if (request.method === 'DELETE' && !child) {
-			await env.DB.prepare(
-				'UPDATE shared_instances SET icon = NULL,icon_data = NULL,icon_type = NULL,icon_config = NULL WHERE id = ?',
-			)
-				.bind(id)
-				.run()
+			await setIcon(env, item, null, null)
 			return empty()
 		}
 	}
@@ -1696,29 +1673,17 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 
 const ICON_BYTES = 256 * 1024
 
-async function setIcon(
-	env: Env,
-	url: URL,
-	id: string,
-	data: Uint8Array,
-	type: string | null,
-	config: string | null,
-) {
-	if (data.byteLength > ICON_BYTES) throw new ApiError(413, 'invalid_input', 'Icon is too large')
-	let binary = ''
-	for (const byte of data) binary += String.fromCharCode(byte)
-	await env.DB.prepare(
-		'UPDATE shared_instances SET icon = ?,icon_data = ?,icon_type = ?,icon_config = ? WHERE id = ?',
-	)
-		.bind(
-			// Every upload gets a new URL, so a fetched icon never changes.
-			`${url.origin}/v1/icons/${crypto.randomUUID()}`,
-			btoa(binary),
-			type ?? 'image/png',
-			config,
-			id,
-		)
+/** Where an uploaded icon is kept in R2. Under the share, so `sweepFiles` clears them with it. */
+const iconKey = (share: string, upload: string) => `icons/${share}/${upload}`
+
+/** Replaces the share's icon with an uploaded image's `url` or icon editor `config`, and drops
+ * the image it had. */
+async function setIcon(env: Env, item: Instance, url: string | null, config: string | null) {
+	await env.DB.prepare('UPDATE shared_instances SET icon = ?,icon_config = ? WHERE id = ?')
+		.bind(url, config, item.id)
 		.run()
+	const upload = item.icon?.split('/').pop()
+	if (upload) await env.FILES.delete(iconKey(item.id, upload))
 }
 
 const ICON_COLOR = /^#[0-9a-fA-F]{6}$/

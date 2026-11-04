@@ -43,8 +43,10 @@ differs from what that client was written for, on purpose.
   live link, which the owner revokes with `DELETE invites/{id}`. For the instance's Share tab.
 - `POST /v1/instances/{id}/versions/{v}/reports`: a member reports broken files.
 - `GET` and `PATCH /v1/storage`: the account's pool usage and kept-versions setting.
-- `GET /v1/icons/{id}`: instance icons, stored in D1 instead of a CDN. `icon_config`, the icon
-  editor settings from `PUT /v1/instances/{id}/icon/generated`, is kept beside the image.
+- `GET /v1/icons/{share}/{upload}`: uploaded instance icons, kept in R2 instead of a CDN.
+- `PUT /v1/instances/{id}/icon/generated` takes only the icon editor settings, as JSON, with no
+  image. The share's `icon` is then null and `icon_config` set, and every client draws the icon
+  itself. Invite notifications carry `shared_instance_icon_config` for the same reason.
 
 ## Fields that are always empty
 
