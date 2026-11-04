@@ -12,7 +12,9 @@ export function useOwnedSharedInstanceLimit() {
 	const limitsQuery = useQuery(
 		computed(() => ({
 			...sharedInstanceLimitsQueryOptions(client, userId.value ?? ''),
-			enabled: !!userId.value,
+			// Dormant upstream feature: the backend has no owned-share cap and serves no
+			// `/instances/limits`, so this never asks and the limit is never reached.
+			enabled: false,
 		})),
 	)
 
