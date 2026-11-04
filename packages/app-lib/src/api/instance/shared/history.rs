@@ -175,6 +175,7 @@ pub async fn restore_shared_instance_version(
         attachment.server_manager_name.clone(),
         attachment.server_manager_icon_url.clone(),
         None,
+        None,
         metadata.instance.name,
         restored,
         plan.configs,

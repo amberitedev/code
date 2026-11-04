@@ -42,7 +42,7 @@ pub async fn leave_remote_shared_instance(
     shared_instance_id: &str,
 ) -> crate::Result<()> {
     let state = State::get().await?;
-    let Some(user_id) = linked_modrinth_user_id(&state).await? else {
+    let Some(user_id) = linked_amberite_user_id(&state).await? else {
         bail!(crate::ErrorKind::InputError(
             "you must be signed in to leave a shared instance".to_string(),
         ));

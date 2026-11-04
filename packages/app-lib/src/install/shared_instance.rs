@@ -19,7 +19,7 @@ use crate::api::pack::install_from::CreatePackLocation;
 use crate::state::instances::adapters::sqlite::content_rows;
 use crate::state::{
     CachedEntry, ContentSetSyncStatus, ContentSourceKind, InstanceLink,
-    ProjectType, SharedInstanceAttachmentInput, State,
+    ProjectType, SharedInstanceAttachmentInput, SharedInstanceRole, State,
 };
 use crate::util::fetch::{DownloadReason, REQWEST_CLIENT};
 use anyhow::{Context, bail};
@@ -557,14 +557,7 @@ async fn current_shared_instance_content(
         &metadata.applied_content_set.id,
         &state.pool,
     )
-    .await?
-    .into_iter()
-    .filter(|entry| {
-        entry.source_kind == ContentSourceKind::SharedInstance
-            || (include_local_content
-                && entry.source_kind == ContentSourceKind::Local)
-    })
-    .collect::<Vec<_>>();
+    .await?;
     let files =
         content_rows::get_instance_files(&metadata.instance.id, &state.pool)
             .await?
@@ -573,6 +566,7 @@ async fn current_shared_instance_content(
             .collect::<HashMap<_, _>>();
     let version_ids_without_project = entries
         .iter()
+        .filter(|entry| entry.source_kind == ContentSourceKind::SharedInstance)
         .filter(|entry| entry.project_id.is_none())
         .filter_map(|entry| entry.version_id.clone())
         .collect::<Vec<_>>();
