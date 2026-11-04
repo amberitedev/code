@@ -4,6 +4,7 @@ import type { QueryClient } from '@tanstack/vue-query'
 import { hiddenInstanceIdsQueryOptions } from '@/features/library/hidden-instances/queries'
 import { get_user, get_user_many } from '@/helpers/cache.js'
 import { install_get_shared_instance_preview } from '@/helpers/install'
+import { shared_icon_path } from '@/helpers/instance'
 import type { InstanceLoader } from '@/helpers/types'
 import type { CachedSharedInstanceSummary } from '@/platform/app-lib/shared-instances/commands'
 
@@ -88,7 +89,7 @@ const loadSharedInstance = async (
 		role: isOwner ? 'owner' : 'member',
 		manager_id: isOwner ? null : ownerId,
 		name: instance.name,
-		icon_path: instance.icon ?? undefined,
+		icon_path: (await shared_icon_path(instance.icon, instance.icon_config)) ?? undefined,
 		icon_config: instance.icon_config ?? null,
 		game_version: version.game_version,
 		loader: version.loader as InstanceLoader,

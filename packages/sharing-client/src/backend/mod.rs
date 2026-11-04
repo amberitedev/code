@@ -32,6 +32,14 @@ pub struct Backend {
     timeout: Option<Duration>,
 }
 
+/// A share's icon as the backend keeps it.
+pub enum ShareIcon<'a> {
+    /// Made in the icon editor: only its settings go up, and every client draws it.
+    Drawn(&'a IconConfig),
+    /// An uploaded image.
+    Image(Vec<u8>),
+}
+
 /// The body of `POST /v1/instances/:id/versions`.
 #[derive(Serialize)]
 pub struct NewVersion<'a> {
@@ -225,42 +233,23 @@ impl Backend {
         }
     }
 
-    /// Sets the share's icon to `icon`, with the icon editor settings it was made from when it
-    /// was made there, or removes it.
+    /// Sets the share's icon, or removes it with `None`.
     pub async fn set_share_icon(
         &self,
         share_id: &str,
-        icon: Option<Vec<u8>>,
-        config: Option<&IconConfig>,
+        icon: Option<ShareIcon<'_>>,
     ) -> Result<(), BackendError> {
         let path = format!("/instances/{share_id}/icon");
-        match (icon, config) {
-            // An icon made in the icon editor goes up with its settings, so members can edit a
-            // copy of it.
-            (Some(bytes), Some(config)) => {
-                let form = reqwest::multipart::Form::new()
-                    .part(
-                        "image",
-                        reqwest::multipart::Part::bytes(bytes)
-                            .file_name("icon.png")
-                            .mime_str("image/png")?,
-                    )
-                    .part(
-                        "config",
-                        reqwest::multipart::Part::text(
-                            serde_json::to_string(config)
-                                .expect("an icon config is plain data"),
-                        )
-                        .mime_str("application/json")?,
-                    );
+        match icon {
+            Some(ShareIcon::Drawn(config)) => {
                 self.empty(
                     "upload_generated_instance_icon",
                     self.request(Method::PUT, &format!("{path}/generated"))
-                        .multipart(form),
+                        .json(config),
                 )
                 .await
             }
-            (Some(bytes), None) => {
+            Some(ShareIcon::Image(bytes)) => {
                 self.empty(
                     "upload_instance_icon",
                     self.request(Method::PUT, &path)
@@ -272,7 +261,7 @@ impl Backend {
                 )
                 .await
             }
-            (None, _) => {
+            None => {
                 self.empty(
                     "delete_instance_icon",
                     self.request(Method::DELETE, &path),

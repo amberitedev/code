@@ -9,6 +9,7 @@ import {
 	edit_generated_icon,
 	edit_generated_icon_if_empty,
 	get_recent_icon_configs,
+	loadSymbolBytes,
 } from '@/helpers/instance'
 
 const props = defineProps<{
@@ -22,12 +23,6 @@ const emit = defineEmits<{
 
 const { handleError } = injectNotificationManager()
 const editor = ref<InstanceType<typeof IconEditorModal> | null>(null)
-
-async function loadSymbolBytes(asset: string): Promise<number[]> {
-	const response = await fetch(asset)
-	if (!response.ok) throw new Error('Failed to load the icon symbol.')
-	return Array.from(new Uint8Array(await response.arrayBuffer()))
-}
 
 async function save(config: IconConfig, asset: string): Promise<string> {
 	const symbolBytes = await loadSymbolBytes(asset)

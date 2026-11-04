@@ -4,6 +4,7 @@ import { ref } from 'vue'
 
 import SharedInstanceInstallModal from '@/components/ui/shared-instances/shared-instance-install-modal/index.vue'
 import { install_shared_instance, wait_for_install_job } from '@/helpers/install'
+import { getInstanceIconUrl } from '@/helpers/instance'
 import { useSharedInstanceErrors } from '@/helpers/shared-instance-errors'
 import {
 	leaveRemoteSharedInstance,
@@ -53,7 +54,9 @@ async function install(
 		)
 
 		installModal.value?.show(
-			instance.icon_path ? { ...preview, iconUrl: instance.icon_path } : preview,
+			instance.icon_path
+				? { ...preview, iconUrl: getInstanceIconUrl(instance.icon_path) }
+				: preview,
 			async () => {
 				if (loadingIds.value.has(sharedInstanceId)) return
 				setLoading(sharedInstanceId, true)

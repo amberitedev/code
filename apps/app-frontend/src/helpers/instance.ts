@@ -4,7 +4,7 @@
  *  and deserialized into a usable JS object.
  */
 import type { IconConfig, Labrinth } from '@modrinth/api-client'
-import type { ContentItem, ContentOwner } from '@modrinth/ui'
+import { type ContentItem, type ContentOwner, getIconSymbolAsset } from '@modrinth/ui'
 import { Channel, convertFileSrc, invoke } from '@tauri-apps/api/core'
 
 import type { InstallJobSnapshot, SharedInstanceUpdateDiff } from './install'
@@ -660,6 +660,27 @@ export async function cache_generated_icon(
 		symbolBytes,
 		addToRecents,
 	})
+}
+
+/** The bytes of an icon editor symbol, which the App draws its icons from. */
+export async function loadSymbolBytes(asset: string): Promise<number[]> {
+	const response = await fetch(asset)
+	if (!response.ok) throw new Error('Failed to load the icon symbol.')
+	return Array.from(new Uint8Array(await response.arrayBuffer()))
+}
+
+/**
+ * A share's icon as an instance icon path or URL. A share made in the icon editor arrives as its
+ * settings only, so it is drawn here, cached by content. Null when there is none to show.
+ */
+export async function shared_icon_path(
+	icon: string | null | undefined,
+	config: IconConfig | null | undefined,
+): Promise<string | null> {
+	if (icon) return icon
+	const asset = config ? getIconSymbolAsset(config.symbol) : undefined
+	if (!config || !asset) return null
+	return await cache_generated_icon(config, await loadSymbolBytes(asset))
 }
 
 export async function get_recent_icon_configs(): Promise<IconConfig[]> {

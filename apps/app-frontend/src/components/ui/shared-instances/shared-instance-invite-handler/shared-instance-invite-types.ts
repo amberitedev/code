@@ -8,6 +8,7 @@ export type SharedInstanceInviteNotificationBody = {
 	invited_by_username?: unknown
 	invited_by_avatar_url?: unknown
 	shared_instance_icon?: unknown
+	shared_instance_icon_config?: unknown
 }
 
 export type AppNotification = {

@@ -19,7 +19,7 @@ import {
 	install_get_shared_instance_preview,
 	install_shared_instance,
 } from '@/helpers/install'
-import { list } from '@/helpers/instance'
+import { getInstanceIconUrl, list, shared_icon_path } from '@/helpers/instance'
 import { useSharedInstanceErrors } from '@/helpers/shared-instance-errors'
 
 import { parseSharedInstanceInviteNotification } from './shared-instance-invite-parser'
@@ -90,13 +90,16 @@ export function useSharedInstanceInviteHandler(
 	}
 
 	async function resolveInvite(invite: SharedInstanceInvite) {
-		const invitedBy =
+		const [invitedBy, instanceIconUrl] = await Promise.all([
 			(!invite.invitedByUsername || !invite.invitedByAvatarUrl) && invite.invitedById
-				? await get_user(invite.invitedById, 'bypass').catch(() => null)
-				: null
+				? get_user(invite.invitedById, 'bypass').catch(() => null)
+				: null,
+			shared_icon_path(invite.instanceIconUrl, invite.instanceIconConfig).catch(() => null),
+		])
 
 		return {
 			...invite,
+			instanceIconUrl,
 			invitedByUsername: invite.invitedByUsername ?? invitedBy?.username ?? null,
 			invitedByAvatarUrl: invite.invitedByAvatarUrl ?? invitedBy?.avatar_url ?? null,
 		}
@@ -190,7 +193,7 @@ export function useSharedInstanceInviteHandler(
 				invite.sharedInstanceName,
 			)
 			if (generation !== notificationGeneration) return
-			if (invite.instanceIconUrl) preview.iconUrl = invite.instanceIconUrl
+			if (invite.instanceIconUrl) preview.iconUrl = getInstanceIconUrl(invite.instanceIconUrl)
 
 			await showInstallOrAlreadyInstalled(
 				invite.sharedInstanceId,
@@ -251,7 +254,7 @@ export function useSharedInstanceInviteHandler(
 			actorName: invite.invitedByUsername,
 			actorAvatarUrl: invite.invitedByAvatarUrl ?? undefined,
 			entityName: invite.sharedInstanceName,
-			entityIconUrl: invite.instanceIconUrl ?? undefined,
+			entityIconUrl: getInstanceIconUrl(invite.instanceIconUrl) ?? undefined,
 			autoCloseMs: null,
 			onReview: () => reviewNotification(notification, invite),
 			onOpenActor: () => {
@@ -297,7 +300,12 @@ export function useSharedInstanceInviteHandler(
 			if (!(await requireAccount())) return
 			const generation = notificationGeneration
 			const invite = await install_get_shared_instance_invite_preview(inviteId)
+			const instanceIconUrl = await shared_icon_path(
+				invite.instanceIconUrl,
+				invite.instanceIconConfig,
+			).catch(() => null)
 			if (generation !== notificationGeneration) return
+			if (instanceIconUrl) invite.preview.iconUrl = getInstanceIconUrl(instanceIconUrl)
 			await showInstallOrAlreadyInstalled(
 				invite.sharedInstanceId,
 				invite.preview,
@@ -309,7 +317,7 @@ export function useSharedInstanceInviteHandler(
 						invite.managerId,
 						invite.serverManagerName,
 						invite.serverManagerIconUrl,
-						invite.instanceIconUrl,
+						instanceIconUrl,
 						invite.instanceIconConfig,
 					)
 					await queryClient.invalidateQueries({ queryKey: ['instances'] })
