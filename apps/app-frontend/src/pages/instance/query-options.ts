@@ -50,6 +50,7 @@ export const screenshotKeys = {
 export function instanceListQueryOptions() {
 	return queryOptions({
 		queryKey: instanceKeys.list(),
+		networkMode: 'always',
 		queryFn: listInstances,
 		staleTime: 30_000,
 	})
@@ -58,6 +59,7 @@ export function instanceListQueryOptions() {
 export function syncedScreenshotsQueryOptions() {
 	return queryOptions({
 		queryKey: screenshotKeys.global(),
+		networkMode: 'always',
 		queryFn: list_synced_screenshots,
 		staleTime: 0,
 	})
@@ -66,6 +68,7 @@ export function syncedScreenshotsQueryOptions() {
 export function instanceScreenshotsQueryOptions(instanceId: string) {
 	return queryOptions({
 		queryKey: screenshotKeys.instance(instanceId),
+		networkMode: 'always',
 		queryFn: () => list_instance_screenshots(instanceId),
 		staleTime: 0,
 	})
@@ -74,6 +77,7 @@ export function instanceScreenshotsQueryOptions(instanceId: string) {
 export function screenshotGroupsQueryOptions() {
 	return queryOptions({
 		queryKey: screenshotKeys.groups(),
+		networkMode: 'always',
 		queryFn: list_screenshot_groups,
 		staleTime: 0,
 	})
@@ -95,6 +99,7 @@ export function instanceDetailQueryOptions(instanceId: string) {
 export function instanceProcessesQueryOptions(instanceId: string) {
 	return queryOptions({
 		queryKey: instanceKeys.processes(instanceId),
+		networkMode: 'always',
 		queryFn: async () => {
 			const processes = await get_by_instance_id(instanceId)
 			return Array.isArray(processes) ? processes : []
@@ -120,6 +125,7 @@ export function sharedInstanceUpdatePreviewQueryOptions(
 export function instanceLinkedProjectQueryOptions(projectId: string) {
 	return queryOptions({
 		queryKey: instanceKeys.linkedProject(projectId),
+		networkMode: 'always',
 		queryFn: () => get_project_v3(projectId, 'must_revalidate'),
 		staleTime: 30_000,
 	})
@@ -140,6 +146,7 @@ export function instanceContentQueryOptions(
 export function instanceWorldsQueryOptions(instanceId: string) {
 	return queryOptions({
 		queryKey: instanceKeys.worlds(instanceId),
+		networkMode: 'always',
 		queryFn: () => refreshWorlds(instanceId),
 		staleTime: 0,
 	})

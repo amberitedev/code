@@ -55,6 +55,8 @@ pub(super) struct InstanceInviteInfoResponse {
     #[serde(default)]
     pub(super) inviter: Option<SharedInstanceInviteCreator>,
     #[serde(default)]
+    pub(super) instance_icon_config: Option<IconConfig>,
+    #[serde(default)]
     pub(super) managers: Vec<InstanceInviteManagerResponse>,
     #[serde(default)]
     pub(super) version: Option<ShareVersion>,
@@ -267,6 +269,7 @@ pub(super) async fn get_remote_instance_access(
 pub(super) async fn update_remote_instance_icon(
     shared_instance_id: &str,
     icon_path: Option<&str>,
+    icon_config: Option<&IconConfig>,
     state: &State,
 ) -> crate::Result<()> {
     let icon = match icon_path {
@@ -274,7 +277,8 @@ pub(super) async fn update_remote_instance_icon(
         None => None,
     };
     let backend = backend_with(icon.is_some())?;
-    call(state, backend.set_share_icon(shared_instance_id, icon)).await
+    call(state, backend.set_share_icon(shared_instance_id, icon, icon_config))
+        .await
 }
 
 pub(super) async fn get_remote_users(

@@ -10,6 +10,7 @@
 		<IconButton
 			type="quiet"
 			size="sm"
+			:disabled="disabled"
 			:label="formatMessage(messages.removeFile, { filename: file.name })"
 			@click="file = null"
 		>
@@ -26,7 +27,7 @@
 		:primary-prompt="null"
 		:secondary-prompt="formatMessage(messages.uploadPrompt)"
 		:processing-prompt="formatMessage(messages.processingFile)"
-		class="!rounded-[20px] !border-[1.5px] !border-surface-4 !bg-surface-2 focus-within:outline focus-within:outline-2 focus-within:outline-brand data-[highlighted]:!border-brand data-[highlighted]:!bg-brand-highlight"
+		class="!rounded-[20px] !border-[1.5px] !border-surface-4 !bg-surface-2 hover:brightness-110 focus-within:outline focus-within:outline-2 focus-within:outline-brand data-[highlighted]:!border-brand data-[highlighted]:!bg-brand-highlight"
 		@change="file = $event[0] ?? null"
 		@local-change="file = $event[0] ?? null"
 	/>
@@ -42,9 +43,14 @@ import { useVIntl } from '#ui/composables/i18n'
 import type { CurseForgePackFile } from '../../creation-flow-context'
 import { curseforgeMessages as messages } from '../../curseforge'
 
-const { accept = '.zip', localFiles = true } = defineProps<{
+const {
+	accept = '.zip',
+	localFiles = true,
+	disabled = false,
+} = defineProps<{
 	accept?: string
 	localFiles?: boolean
+	disabled?: boolean
 }>()
 
 const file = defineModel<CurseForgePackFile | null>({ required: true })

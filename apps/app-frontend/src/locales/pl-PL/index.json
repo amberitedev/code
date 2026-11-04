@@ -3128,6 +3128,9 @@
   "app.settings.troubleshooting.report-ad.title": {
     "message": "Zgłoś reklamę"
   },
+  "app.shared-instance-publish.preparing": {
+    "message": "Przygotowywanie aktualizacji..."
+  },
   "app.sidebar.playing-as": {
     "message": "Graj jako"
   },
@@ -4015,6 +4018,9 @@
   },
   "instance.shared-instance.error.title": {
     "message": "Coś poszło nie tak"
+  },
+  "instance.shared-instance.file-not-allowed.title": {
+    "message": "Niedozwolony format pliku"
   },
   "instance.shared-instance.network-error.text": {
     "message": "Nie można połączyć się z API udostępnionych instancji"

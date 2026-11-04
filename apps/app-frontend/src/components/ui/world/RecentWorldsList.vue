@@ -60,6 +60,7 @@ const queryClient = useQueryClient()
 const locallyPlayedInstances = ref<Record<string, Dayjs>>({})
 const gameVersionsQuery = useQuery({
 	queryKey: ['tags', 'game-versions'],
+	networkMode: 'always',
 	queryFn: (): Promise<GameVersion[]> =>
 		traceStartupStep('Load jump-in game versions', () => get_game_versions()),
 	staleTime: Infinity,

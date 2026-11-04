@@ -75,8 +75,13 @@ pub(super) async fn shared_instance_update_diffs(
     removed: &[ManifestFile],
     state: &State,
 ) -> crate::Result<Vec<SharedInstanceUpdateDiff>> {
+    // An owner's local files are part of their share, so their update compares them too.
+    let is_owner = metadata
+        .shared_instance
+        .as_ref()
+        .is_some_and(|attachment| !attachment.role.is_member());
     let (mut before_ids, mut external_files) =
-        current_shared_content(metadata, state).await?;
+        current_shared_content(metadata, is_owner, state).await?;
     let mut after = remote_shared_content(version, state).await?;
     // Players never run server-only mods, so a change to one is for the instance's servers and
     // prompts no member.

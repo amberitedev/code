@@ -2,8 +2,8 @@ use crate::LabrinthError;
 use crate::api::pack::import::ImportLauncherType;
 use crate::api::pack::install_from::{CreatePackInstance, CreatePackLocation};
 use crate::state::{
-    InstanceIconConfig, InstanceInstallStage, InstanceLink, InstanceMetadata,
-    ModLoader,
+    IconConfig, InstanceInstallStage, InstanceLink, InstanceMetadata,
+    ModLoader, SharedInstanceRole,
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -174,7 +174,7 @@ pub enum InstallRequest {
         loader_version: Option<String>,
         icon_path: Option<String>,
         #[serde(default)]
-        icon_config: Option<InstanceIconConfig>,
+        icon_config: Option<IconConfig>,
         link: InstanceLink,
     },
     CreateModpackInstance {
@@ -183,7 +183,7 @@ pub enum InstallRequest {
         post_install_edit: Option<InstallPostInstallEdit>,
     },
     CreateSharedInstance {
-        data: SharedInstanceInstallData,
+        data: Box<SharedInstanceInstallData>,
     },
     ImportInstance {
         launcher_type: ImportLauncherType,
@@ -244,6 +244,10 @@ pub struct SharedInstanceInstallData {
     #[serde(default)]
     pub linked_server: Option<SharedInstanceLinkedServer>,
     pub shared_instance_id: String,
+    #[serde(default)]
+    pub role: SharedInstanceRole,
+    #[serde(default)]
+    pub restored_from_remote: bool,
     pub manager_id: Option<String>,
     #[serde(default)]
     pub server_manager_name: Option<String>,
@@ -251,6 +255,8 @@ pub struct SharedInstanceInstallData {
     pub server_manager_icon_url: Option<String>,
     #[serde(default)]
     pub instance_icon_url: Option<String>,
+    #[serde(default)]
+    pub instance_icon_config: Option<IconConfig>,
     #[serde(default)]
     pub linked_user_id: Option<String>,
     pub name: String,

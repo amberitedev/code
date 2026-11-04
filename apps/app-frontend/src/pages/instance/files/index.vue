@@ -47,6 +47,7 @@ const messages = defineMessages({
 const instanceRootQuery = useQuery(
 	computed(() => ({
 		queryKey: instanceKeys.rootPath(instancePage.instanceId.value),
+		networkMode: 'always' as const,
 		queryFn: () => get_full_path(instancePage.instanceId.value),
 		enabled: !!instancePage.instanceId.value,
 		staleTime: Infinity,
@@ -85,6 +86,7 @@ async function writeBytes(path: string, bytes: Uint8Array, createOnly = false) {
 function directoryQueryOptions(dirPath: string) {
 	return {
 		queryKey: instanceKeys.files(instancePage.instanceId.value, dirPath),
+		networkMode: 'always' as const,
 		queryFn: () => listDirectory(dirPath),
 		staleTime: 30_000,
 	}

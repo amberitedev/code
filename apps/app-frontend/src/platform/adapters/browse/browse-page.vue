@@ -397,7 +397,9 @@ function installedProjectIdsQuery(): {
 }
 
 async function refreshInstalledProjectIds() {
-	const ids = await queryClient.fetchQuery(installedProjectIdsQuery()).catch(handleError)
+	const ids = await queryClient
+		.fetchQuery({ ...installedProjectIdsQuery(), networkMode: 'always' })
+		.catch(handleError)
 	if (!ids) return
 
 	debugLog('installedProjectIds loaded', { count: ids.length })
@@ -1232,6 +1234,7 @@ const SEARCH_STALE_TIME = 5 * 60_000
 function searchQueryOptions(requestParams: string) {
 	return queryOptions({
 		queryKey: ['search', 'v3', requestParams],
+		networkMode: 'always',
 		queryFn: async () => {
 			const rawResults = (await get_search_results_v3(
 				requestParams,
@@ -1384,6 +1387,24 @@ function addInstanceGameVersionToServerFilters() {
 }
 
 addInstanceGameVersionToServerFilters()
+
+// A member browsing mods for a shared instance starts on client mods.
+const clientFilterPreselectedInstanceId = ref<string | null>(null)
+watch(
+	[instance, projectType],
+	([currentInstance, type]) => {
+		if (currentInstance?.shared_instance?.role !== 'member' || type !== 'mod') return
+		if (clientFilterPreselectedInstanceId.value === currentInstance.id) return
+		clientFilterPreselectedInstanceId.value = currentInstance.id
+		if (searchState.currentFilters.value.some((f) => f.type === 'environment')) return
+		searchState.currentFilters.value.push({
+			type: 'environment',
+			option: 'client',
+			negative: false,
+		})
+	},
+	{ immediate: true },
+)
 
 // Does nothing until the search context is ready; becoming ready starts the search instead.
 void searchState.refreshSearch()

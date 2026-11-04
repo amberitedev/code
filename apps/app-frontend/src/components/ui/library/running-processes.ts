@@ -26,6 +26,7 @@ export function useRunningProcesses() {
 
 	return useQuery({
 		queryKey: processListKey,
+		networkMode: 'always',
 		queryFn: (): Promise<ProcessMetadata[]> => get_all(),
 		staleTime: 30_000,
 	})

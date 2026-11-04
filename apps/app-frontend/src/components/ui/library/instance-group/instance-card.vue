@@ -1,24 +1,19 @@
 <script setup lang="ts">
 import { PointerActivationConstraints } from '@dnd-kit/dom'
 import { KeyboardSensor, PointerSensor, useDraggable } from '@dnd-kit/vue'
-import { CheckIcon, DownloadIcon, PlayIcon, SpinnerIcon, StopCircleIcon } from '@modrinth/assets'
+import { DownloadIcon, PlayIcon, SpinnerIcon, StopCircleIcon } from '@modrinth/assets'
 import { defineMessages, IconButton, injectNotificationManager, useVIntl } from '@modrinth/ui'
 import { useEventListener } from '@vueuse/core'
 import { computed, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
 
 import InstanceCardView from '@/components/ui/library/instance-group/instance-card-view.vue'
+import InstanceSelectionButton from '@/components/ui/library/instance-group/instance-selection-button.vue'
+import InstanceSharedBadge from '@/components/ui/library/instance-group/instance-shared-badge.vue'
 import { getLibraryInstanceSelectionKey, useLibrary } from '@/components/ui/library/use-library'
-import { useAppEvent } from '@/composables/use-app-event'
-import { handleSevereError } from '@/composables/use-error.js'
-import { trackEvent } from '@/helpers/analytics'
+import { useInstanceActions } from '@/features/instances/use-instance-actions'
+import { libraryInstanceMessages } from '@/features/library/messages'
 import { install_existing_instance, install_pack_to_existing_instance } from '@/helpers/install'
-import { kill, run } from '@/helpers/instance'
-import { get_by_instance_id } from '@/helpers/process'
 import type { GameInstance } from '@/helpers/types'
-import { showInstanceInFolder } from '@/helpers/utils.js'
-
-type ProcessEvent = 'installing' | 'launched' | 'finished'
 
 const LOADING_INDICATOR_DELAY_MS = 100
 
@@ -32,33 +27,19 @@ const instanceCardSensors = [
 const { handleError } = injectNotificationManager()
 const { formatMessage } = useVIntl()
 const messages = defineMessages({
-	selectInstance: {
-		id: 'app.library.instance.select-with-name',
-		defaultMessage: 'Select {name}',
-	},
-	deselectInstance: {
-		id: 'app.library.instance.deselect-with-name',
-		defaultMessage: 'Deselect {name}',
-	},
-	openInstance: {
-		id: 'app.library.instance.open-with-name',
-		defaultMessage: 'Open {name}',
-	},
 	loading: { id: 'app.library.instance.loading', defaultMessage: 'Instance is loading...' },
-	installing: { id: 'app.library.instance.installing', defaultMessage: 'Installing...' },
 	stop: { id: 'app.library.instance.stop', defaultMessage: 'Stop' },
 	repair: { id: 'app.library.instance.repair', defaultMessage: 'Repair' },
 	play: { id: 'app.library.instance.play', defaultMessage: 'Play' },
-	select: { id: 'app.library.instance.select', defaultMessage: 'Select instance' },
-	deselect: { id: 'app.library.instance.deselect', defaultMessage: 'Deselect instance' },
 })
 const {
 	displayState,
 	selectedLibraryInstances,
 	isLibraryInstanceSelectionActive,
 	activeDraggedInstanceKeys,
+	canSelectLibraryInstance,
+	getSharedInstanceOwner,
 	runningInstanceIds,
-	holdingShift,
 } = useLibrary()
 
 const props = defineProps<{
@@ -72,17 +53,21 @@ const emit = defineEmits<{
 }>()
 
 const instanceCardElement = ref<InstanceType<typeof InstanceCardView> | null>(null)
-const playing = ref(false)
-const loading = ref(false)
-const currentEvent = ref<ProcessEvent | null>(null)
 const isPrimaryPointerDown = ref(false)
-const modLoading = computed(
-	() =>
-		loading.value ||
-		currentEvent.value === 'installing' ||
-		(currentEvent.value === 'launched' && !playing.value),
-)
-const installing = computed(() => props.instance.install_stage.includes('installing'))
+const {
+	playing,
+	modLoading,
+	installing,
+	checkProcess,
+	play,
+	stop,
+	seeInstance,
+	openFolder,
+	addContent,
+} = useInstanceActions(() => props.instance, {
+	// The library's shared process list sets the initial state, so mounting a card costs no request.
+	running: () => runningInstanceIds.value.has(props.instance.id),
+})
 const installed = computed(() => props.instance.install_stage === 'installed')
 const loadingIndicatorRequested = computed(
 	() => !playing.value && (modLoading.value || installing.value),
@@ -109,6 +94,9 @@ const selectionKey = computed(() =>
 	}),
 )
 const selected = computed(() => selectedLibraryInstances.value.has(selectionKey.value))
+const selectable = computed(() => selected.value || canSelectLibraryInstance(props.instance.id))
+const owner = computed(() => getSharedInstanceOwner(props.instance))
+const isOwner = computed(() => props.instance.shared_instance?.role === 'owner')
 const isPartOfActiveDrag = computed(() => activeDraggedInstanceKeys.value.has(selectionKey.value))
 const { isDragging } = useDraggable({
 	id: computed(() => `instance:${props.instanceGroupId}:${props.instance.id}`),
@@ -120,13 +108,6 @@ const { isDragging } = useDraggable({
 		fromGroup: props.instanceGroupId,
 	})),
 })
-
-const router = useRouter()
-
-const seeInstance = async () => {
-	if (installing.value) return
-	await router.push(`/instance/${encodeURIComponent(props.instance.id)}`)
-}
 
 const toggleSelection = (event?: MouseEvent) => {
 	emit('toggle-selection', event?.shiftKey ?? false)
@@ -148,7 +129,7 @@ useEventListener(window, 'blur', resetPrimaryPointer)
 
 const activateCard = (event: MouseEvent) => {
 	if (isLibraryInstanceSelectionActive.value || event.shiftKey) {
-		toggleSelection(event)
+		if (selectable.value) toggleSelection(event)
 	} else {
 		void seeInstance()
 	}
@@ -168,41 +149,6 @@ const handleCardKeydown = (event: KeyboardEvent) => {
 		event.preventDefault()
 		toggleSelection()
 	}
-}
-
-const checkProcess = async () => {
-	const runningProcesses = (await get_by_instance_id(props.instance.id).catch(handleError)) ?? []
-
-	playing.value = runningProcesses.length > 0
-}
-
-const play = async (event: MouseEvent | null, context: string) => {
-	event?.stopPropagation()
-	if (props.instance.quarantined || installing.value || modLoading.value) return
-	loading.value = true
-	await run(props.instance.id)
-		.catch((err) => handleSevereError(err, { instanceId: props.instance.id }))
-		.finally(() => {
-			trackEvent('InstanceStart', {
-				loader: props.instance.loader,
-				game_version: props.instance.game_version,
-				source: context,
-			})
-		})
-	loading.value = false
-}
-
-const stop = async (event: MouseEvent | null, context: string) => {
-	event?.stopPropagation()
-	playing.value = false
-
-	await kill(props.instance.id).catch(handleError)
-
-	trackEvent('InstanceStop', {
-		loader: props.instance.loader,
-		game_version: props.instance.game_version,
-		source: context,
-	})
 }
 
 const repair = async (event: MouseEvent) => {
@@ -225,18 +171,6 @@ const repair = async (event: MouseEvent) => {
 	}
 }
 
-const openFolder = async () => {
-	await showInstanceInFolder(props.instance.id)
-}
-
-const addContent = async () => {
-	if (props.instance.quarantined || installing.value || modLoading.value) return
-	await router.push({
-		path: `/browse/${props.instance.loader === 'vanilla' ? 'datapack' : 'mod'}`,
-		query: { i: props.instance.id },
-	})
-}
-
 defineExpose({
 	play,
 	stop,
@@ -248,22 +182,6 @@ defineExpose({
 		return playing.value
 	},
 })
-
-useAppEvent('process', (event) => {
-	if (event.instance_id === props.instance.id) {
-		currentEvent.value = event.event
-		playing.value = event.event === 'launched'
-	}
-})
-
-// The library's shared process list sets the initial state, so mounting a card costs no request.
-watch(
-	() => runningInstanceIds.value.has(props.instance.id),
-	(running) => {
-		playing.value = running
-	},
-	{ immediate: true },
-)
 </script>
 
 <template>
@@ -274,6 +192,7 @@ watch(
 			'!scale-100': isDragging,
 			'opacity-50': isPartOfActiveDrag,
 			'scale-[0.95]': isPrimaryPointerDown && !isLibraryInstanceSelectionActive,
+			'!cursor-default opacity-50': !selectable,
 		}"
 		:instance="instance"
 		:selected="selected"
@@ -284,10 +203,15 @@ watch(
 		tabindex="0"
 		:aria-label="
 			isLibraryInstanceSelectionActive
-				? formatMessage(selected ? messages.deselectInstance : messages.selectInstance, {
-						name: instance.name,
-					})
-				: formatMessage(messages.openInstance, { name: instance.name })
+				? formatMessage(
+						selected
+							? libraryInstanceMessages.deselectWithName
+							: libraryInstanceMessages.selectWithName,
+						{
+							name: instance.name,
+						},
+					)
+				: formatMessage(libraryInstanceMessages.openWithName, { name: instance.name })
 		"
 		:aria-pressed="isLibraryInstanceSelectionActive ? selected : undefined"
 		@click="activateCard"
@@ -295,6 +219,14 @@ watch(
 		@mouseenter="checkProcess"
 		@pointerdown="handlePointerDown"
 	>
+		<template #icon-overlay="{ compact }">
+			<InstanceSharedBadge
+				v-if="isOwner || owner"
+				:owner="owner"
+				:is-owner="isOwner"
+				:compact="compact"
+			/>
+		</template>
 		<template #loading="{ compact }">
 			<div
 				v-if="loadingIndicatorVisible"
@@ -302,7 +234,9 @@ watch(
 			>
 				<div class="absolute inset-0 bg-surface-1 opacity-30" />
 				<SpinnerIcon
-					v-tooltip="formatMessage(modLoading ? messages.loading : messages.installing)"
+					v-tooltip="
+						formatMessage(modLoading ? messages.loading : libraryInstanceMessages.installing)
+					"
 					class="relative text-contrast"
 					:class="compact ? 'size-5' : 'size-[30%]'"
 					tabindex="-1"
@@ -340,7 +274,7 @@ watch(
 						type="colored"
 						color="brand"
 						:size="compact ? 'md' : 'lg'"
-						class="origin-bottom scale-75 opacity-0 transition-opacity group-hover/card:scale-100 group-hover/card:opacity-100"
+						class="origin-bottom scale-75 opacity-0 transition-opacity group-hover/card:scale-100 group-hover/card:opacity-100 group-focus-visible/card:scale-100 group-focus-visible/card:opacity-100 group-has-[:focus-visible]/card:scale-100 group-has-[:focus-visible]/card:opacity-100"
 						@click="(e) => repair(e)"
 					>
 						<DownloadIcon />
@@ -357,7 +291,7 @@ watch(
 						type="colored"
 						color="brand"
 						:size="compact ? 'md' : 'lg'"
-						class="origin-bottom scale-75 opacity-0 transition-opacity group-hover/card:scale-100 group-hover/card:opacity-100"
+						class="origin-bottom scale-75 opacity-0 transition-opacity group-hover/card:scale-100 group-hover/card:opacity-100 group-focus-visible/card:scale-100 group-focus-visible/card:opacity-100 group-has-[:focus-visible]/card:scale-100 group-has-[:focus-visible]/card:opacity-100"
 						@click="(e) => play(e, 'InstanceCard')"
 						@mouseenter="checkProcess"
 					>
@@ -367,30 +301,13 @@ watch(
 			</div>
 		</template>
 		<template #overlay="{ compact }">
-			<button
-				type="button"
-				class="selection-button group/selection absolute z-[2] flex size-[50px] cursor-pointer items-start pt-4 justify-center border-0 bg-transparent p-0"
-				:class="compact ? '-right-1 -top-1' : 'right-2 top-1.5'"
-				:aria-label="formatMessage(selected ? messages.deselect : messages.select)"
-				:aria-pressed="selected"
-				@click.stop="toggleSelection"
-			>
-				<span
-					v-tooltip="formatMessage(selected ? messages.deselect : messages.select)"
-					class="relative flex items-center justify-center rounded-full opacity-0 transition-opacity duration-200 ease-out group-hover/card:opacity-100 group-hover/selection:brightness-125"
-					:class="{
-						'size-[20px]': compact,
-						'size-[24px]': !compact,
-						'border-0 !opacity-100': selected,
-						'border-2 border-solid border-primary bg-transparent': !selected,
-						'[outline:3px_solid_var(--color-purple)] outline-offset-1':
-							holdingShift && isSelectionAnchor,
-					}"
-				>
-					<span v-if="selected" class="absolute inset-0 rounded-full bg-contrast" />
-					<CheckIcon v-if="selected" class="relative size-4 invert [stroke-width:3]" />
-				</span>
-			</button>
+			<InstanceSelectionButton
+				v-if="selectable"
+				:selected="selected"
+				:compact="compact"
+				:is-selection-anchor="isSelectionAnchor"
+				@toggle="toggleSelection"
+			/>
 		</template>
 	</InstanceCardView>
 </template>

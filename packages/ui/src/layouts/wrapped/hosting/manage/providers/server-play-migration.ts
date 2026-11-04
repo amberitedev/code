@@ -1,3 +1,4 @@
+import type { UploadProgress } from '@modrinth/api-client'
 import type { ComputedRef, Ref } from 'vue'
 
 import type {
@@ -20,7 +21,7 @@ export type ServerPlayMigrationNext = 'invite' | (() => void)
 export interface ServerPlayMigration {
 	/** False while the server's content is still loading, so `required` can't be trusted yet. */
 	ready: ComputedRef<boolean>
-	/** Whether Archon flagged the server for migration, or the debug flag spoofs it. */
+	/** Whether Archon flagged the server for migration. */
 	tagged: ComputedRef<boolean>
 	required: ComputedRef<boolean>
 	/** `null` until the server's content, and how it was installed, are known. */
@@ -28,11 +29,18 @@ export interface ServerPlayMigration {
 	/** Whether the mrpack the server was installed from is still in the world, so it needn't be uploaded again. */
 	hasUploadedMrpack: ComputedRef<boolean>
 	step: Ref<ServerPlayMigrationStep>
+	/** Progress of the pack being uploaded for the reinstall, `null` when nothing is uploading. */
+	uploadProgress: Ref<UploadProgress | null>
 	/** Whether a migration is running, including one started before this panel was mounted. */
 	active: ComputedRef<boolean>
 	modpackName: ComputedRef<string | null>
 	prompt: (next: ServerPlayMigrationNext) => void
-	start: (source: ServerPlayMigrationSource, next?: ServerPlayMigrationNext) => Promise<boolean>
+	/** Runs the migration, calling `onRequested` once the reinstall is accepted, after any upload. */
+	start: (
+		source: ServerPlayMigrationSource,
+		next?: ServerPlayMigrationNext,
+		onRequested?: () => void,
+	) => Promise<boolean>
 }
 
 export const [injectServerPlayMigration, provideServerPlayMigration] =

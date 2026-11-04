@@ -3,7 +3,7 @@
  * So, for example, addDefaultInstance creates a blank instance object, where the Rust struct is serialized,
  *  and deserialized into a usable JS object.
  */
-import type { Labrinth } from '@modrinth/api-client'
+import type { IconConfig, Labrinth } from '@modrinth/api-client'
 import type { ContentItem, ContentOwner } from '@modrinth/ui'
 import { Channel, convertFileSrc, invoke } from '@tauri-apps/api/core'
 
@@ -13,7 +13,6 @@ import type {
 	ContentFile,
 	ContentFileProjectType,
 	GameInstance,
-	InstanceIconConfig,
 	InstanceLoader,
 	SharedInstanceAttachment,
 } from './types'
@@ -627,7 +626,7 @@ export async function edit_icon(instanceId: string, iconPath: string | null): Pr
 
 export async function edit_generated_icon(
 	instanceId: string,
-	config: InstanceIconConfig,
+	config: IconConfig,
 	symbolBytes: number[],
 ): Promise<string> {
 	return await invoke('plugin:instance|instance_edit_generated_icon', {
@@ -639,7 +638,7 @@ export async function edit_generated_icon(
 
 export async function edit_generated_icon_if_empty(
 	instanceId: string,
-	config: InstanceIconConfig,
+	config: IconConfig,
 	symbolBytes: number[],
 ): Promise<boolean> {
 	const result = await invoke<string | null>('plugin:instance|instance_edit_generated_icon', {
@@ -652,7 +651,7 @@ export async function edit_generated_icon_if_empty(
 }
 
 export async function cache_generated_icon(
-	config: InstanceIconConfig,
+	config: IconConfig,
 	symbolBytes: number[],
 	addToRecents = false,
 ): Promise<string> {
@@ -663,7 +662,7 @@ export async function cache_generated_icon(
 	})
 }
 
-export async function get_recent_icon_configs(): Promise<InstanceIconConfig[]> {
+export async function get_recent_icon_configs(): Promise<IconConfig[]> {
 	return await invoke('plugin:instance|instance_get_recent_icon_configs')
 }
 

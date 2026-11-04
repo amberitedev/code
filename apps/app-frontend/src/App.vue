@@ -106,10 +106,12 @@ import {
 import { pageGeneration } from '@/features/crash'
 import ServerPlayHandler from '@/features/hosting/play-handler.vue'
 import { prefetchHostingData } from '@/features/hosting/prefetch'
+import InstanceActionModals from '@/features/instances/instance-actions/instance-action-modals.vue'
 import {
 	createInstanceLaunchState,
 	provideInstanceLaunchState,
 } from '@/features/instances/launch-state'
+import SharedInstanceModals from '@/features/library/shared-instances/shared-instance-modals.vue'
 import { provideMinecraftAccounts } from '@/features/minecraft-accounts/context'
 import { useCoreWatch } from '@/features/servers/linked-servers'
 import AppSettingsModal from '@/features/settings/app-settings-modal/index.vue'
@@ -1957,6 +1959,8 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 			@saved="onCreationIconSaved"
 		/>
 		<UnknownPackWarningModal ref="unknownPackWarningModal" />
+		<InstanceActionModals ref="instanceActionModals" />
+		<SharedInstanceModals ref="sharedInstanceModals" />
 		<div
 			class="app-grid-navbar bg-bg-raised flex flex-col p-[0.5rem] pt-0 gap-[0.25rem] w-[--left-bar-width]"
 		>

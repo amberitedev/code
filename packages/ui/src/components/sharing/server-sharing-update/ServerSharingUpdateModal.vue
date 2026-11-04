@@ -12,7 +12,7 @@ import { computed, ref, shallowRef, useTemplateRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import AutoLink from '#ui/components/base/AutoLink.vue'
-import { Button, IconButton } from '#ui/components/base/buttons'
+import { Button, ButtonLink, IconButton } from '#ui/components/base/buttons'
 import IntlFormatted from '#ui/components/base/IntlFormatted.vue'
 import NewModal from '#ui/components/modal/NewModal.vue'
 import { serverPlayMigrationMessages } from '#ui/components/servers/play-migration/messages'
@@ -28,18 +28,18 @@ import { useVideoPlayer } from './use-video-player'
 
 /**
  * Where "Continue" sends the user. On a server's play page the invite flow is handed off
- * into this modal; anywhere else the user first picks a server.
+ * into this modal; anywhere else the user first picks a server. Past customers who no longer
+ * own a server are sent to buy one instead.
  */
-export type ServerSharingUpdateTarget = {
-	path: string
-	playPage: boolean
-}
+export type ServerSharingUpdateTarget =
+	| { kind: 'invite'; path: string; playPage: boolean }
+	| { kind: 'purchase' }
 
 const props = defineProps<{
 	siteUrl: string
 	videoSrc: string
 	posterSrc: string
-	/** Overrides the default description, which is written for the Modrinth App. */
+	/** Overrides the default description for server owners, which is written for the Modrinth App. */
 	description?: string
 }>()
 
@@ -54,6 +54,10 @@ const displayBinding = computed(() => inviteBinding.value ?? lastBinding.value)
 const migrationBinding = computed(() => inviteHandoff.migration.value)
 const lastMigrationBinding = shallowRef<typeof migrationBinding.value>(null)
 const displayMigrationBinding = computed(() => migrationBinding.value ?? lastMigrationBinding.value)
+const startingMigration = ref(false)
+const migrationUploadProgress = computed(
+	() => displayMigrationBinding.value?.uploadProgress.value ?? null,
+)
 const router = useRouter()
 const { formatMessage } = useVIntl()
 const { handleError } = injectNotificationManager()
@@ -69,12 +73,16 @@ const {
 	reset: resetVideo,
 	sync: syncVideoState,
 } = useVideoPlayer(video, handleError)
-const target = ref<ServerSharingUpdateTarget>({ path: '/hosting/manage', playPage: false })
+const target = ref<ServerSharingUpdateTarget>({
+	kind: 'invite',
+	path: '/hosting/manage',
+	playPage: false,
+})
 
 const messages = defineMessages({
 	badge: {
 		id: 'servers.sharing-update.badge',
-		defaultMessage: 'New this update',
+		defaultMessage: 'New update',
 	},
 	title: {
 		id: 'servers.sharing-update.title',
@@ -85,6 +93,11 @@ const messages = defineMessages({
 		defaultMessage:
 			'You can now share your server directly with friends in the app. When they accept, we’ll create an instance for them that is managed by your server.',
 	},
+	purchaseDescription: {
+		id: 'servers.sharing-update.purchase-description',
+		defaultMessage:
+			'Get a server and share it directly with friends. When they accept in the Modrinth App, we’ll create an instance for them that is managed by your server.',
+	},
 	blog: {
 		id: 'servers.sharing-update.blog',
 		defaultMessage: 'Read more about this release in the <link>server sharing</link> blog.',
@@ -92,6 +105,10 @@ const messages = defineMessages({
 	skip: {
 		id: 'servers.sharing-update.skip',
 		defaultMessage: 'Skip',
+	},
+	getServer: {
+		id: 'servers.sharing-update.get-server',
+		defaultMessage: 'Get a server',
 	},
 	continue: {
 		id: 'servers.sharing-update.continue',
@@ -162,8 +179,12 @@ async function backToIntro() {
 }
 
 function startMigration(source: ServerPlayMigrationSource) {
-	void displayMigrationBinding.value?.start(source)
-	hide()
+	const binding = displayMigrationBinding.value
+	if (!binding || startingMigration.value) return
+	startingMigration.value = true
+	void binding.start(source, hide).finally(() => {
+		startingMigration.value = false
+	})
 }
 
 watch(
@@ -174,7 +195,7 @@ watch(
 )
 
 async function invitePlayers() {
-	if (inviting.value) return
+	if (inviting.value || target.value.kind !== 'invite') return
 	const { path, playPage } = target.value
 	if (!playPage) {
 		inviteHandoff.awaitingServer.value = true
@@ -205,6 +226,7 @@ defineExpose({ show, hide })
 		max-width="calc(100vw - 2rem)"
 		:aria-label="formatMessage(messages.title)"
 		:on-hide="onHide"
+		:disable-close="!!migrationUploadProgress"
 		class="!overflow-y-auto !rounded-[20px] !bg-surface-3"
 	>
 		<div v-if="stage === 'intro'" class="w-[544px] max-w-full">
@@ -309,13 +331,17 @@ defineExpose({ show, hide })
 						{{ formatMessage(messages.title) }}
 					</h2>
 					<p class="m-0 text-base leading-6 text-primary">
-						{{ description ?? formatMessage(messages.description) }}
+						{{
+							target.kind === 'purchase'
+								? formatMessage(messages.purchaseDescription)
+								: (description ?? formatMessage(messages.description))
+						}}
 					</p>
 					<p class="m-0 text-base leading-6 text-primary">
 						<IntlFormatted :message-id="messages.blog">
 							<template #link="{ children }">
 								<AutoLink
-									:to="`${props.siteUrl}/news/article/server-sharing`"
+									:to="`${props.siteUrl}/news/article/server-play`"
 									class="font-medium text-link hover:underline"
 								>
 									<component :is="() => children" />
@@ -330,7 +356,26 @@ defineExpose({ show, hide })
 						<CircleSlashIcon aria-hidden="true" />
 						{{ formatMessage(messages.skip) }}
 					</Button>
-					<Button type="colored" color="brand" size="lg" :loading="inviting" @click="invitePlayers">
+					<ButtonLink
+						v-if="target.kind === 'purchase'"
+						type="colored"
+						color="brand"
+						size="lg"
+						:href="`${props.siteUrl}/hosting`"
+						target="_blank"
+						@click="hide"
+					>
+						<RightArrowIcon aria-hidden="true" />
+						{{ formatMessage(messages.getServer) }}
+					</ButtonLink>
+					<Button
+						v-else
+						type="colored"
+						color="brand"
+						size="lg"
+						:loading="inviting"
+						@click="invitePlayers"
+					>
 						<SpinnerIcon v-if="inviting" class="animate-spin" aria-hidden="true" />
 						<RightArrowIcon v-else aria-hidden="true" />
 						{{ formatMessage(messages.continue) }}
@@ -345,7 +390,11 @@ defineExpose({ show, hide })
 				<h2 class="m-0 min-w-0 text-2xl font-semibold text-contrast">
 					{{ formatMessage(serverPlayMigrationMessages.title) }}
 				</h2>
-				<IconButton :label="formatMessage(commonMessages.closeButton)" @click="hide">
+				<IconButton
+					:label="formatMessage(commonMessages.closeButton)"
+					:disabled="!!migrationUploadProgress"
+					@click="hide"
+				>
 					<XIcon aria-hidden="true" />
 				</IconButton>
 			</div>
@@ -355,6 +404,8 @@ defineExpose({ show, hide })
 				:modpack-name="displayMigrationBinding.modpackName"
 				:has-uploaded-mrpack="displayMigrationBinding.hasUploadedMrpack"
 				:world-id="displayMigrationBinding.worldId"
+				:disabled="startingMigration"
+				:upload-progress="migrationUploadProgress"
 				@back="backToIntro"
 				@confirm="startMigration"
 			/>
