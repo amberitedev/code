@@ -26,7 +26,6 @@ import {
 	commonSettingsMessages,
 	ContentInstallModal,
 	ContentUpdaterModal,
-	createServerInviteHandoff,
 	createServerOnboardingFlow,
 	CreationFlowModal,
 	defineMessages,
@@ -43,7 +42,6 @@ import {
 	provideNotificationManager,
 	providePageContext,
 	providePopupNotificationManager,
-	provideServerInviteHandoff,
 	provideServerOnboardingFlow,
 	provideServerPlay,
 	ServerOnboardingModal,
@@ -116,7 +114,6 @@ import { provideMinecraftAccounts } from '@/features/minecraft-accounts/context'
 import { useCoreWatch } from '@/features/servers/linked-servers'
 import AppSettingsModal from '@/features/settings/app-settings-modal/index.vue'
 import { provideSettingsActions } from '@/features/settings/settings-actions'
-import NewUpdateModal from '@/features/updates/new-update-modal/index.vue'
 import { getAccountAppearance, rememberAccountAppearance } from '@/helpers/account-appearance.ts'
 import { debugAnalytics, initAnalytics, trackEvent } from '@/helpers/analytics'
 import { check_reachable } from '@/helpers/auth.js'
@@ -285,7 +282,6 @@ const { addPopupNotification } = popupNotificationManager
 
 provideModrinthClient(tauriApiClient)
 provideServerOnboardingFlow(createServerOnboardingFlow())
-provideServerInviteHandoff(createServerInviteHandoff())
 provideFileDownload(createFileDownload(tauriApiClient, trackExternalFileDownload))
 const iconCache = createIconCache()
 provideIconCache(iconCache)
@@ -670,7 +666,6 @@ async function setupApp() {
 	stateInitialized.value = true
 	debugStartup('App state initialized')
 	await traceStartupStep('Render initialized app', nextTick)
-	await newUpdateModal.value?.notifyForVersion(version, pending_update_toast_for_version)
 
 	await traceStartupStep('Register window resize listener', () =>
 		getCurrentWindow().onResized(async () => {
@@ -861,7 +856,6 @@ const updateToPlayModal = ref()
 
 const modrinthLoginModal = ref()
 const appSettingsModal = ref()
-const newUpdateModal = ref()
 
 const settingsActions = provideSettingsActions({
 	openSettings: () => appSettingsModal.value?.show(),
@@ -1929,7 +1923,6 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 		</Transition>
 		<AppSettingsModal ref="appSettingsModal" />
 		<AddCoreModal ref="addCoreModal" />
-		<NewUpdateModal ref="newUpdateModal" />
 		<Suspense>
 			<ModrinthAccountRequiredModal ref="modrinthLoginModal" :request-auth="requestModrinthAuth" />
 		</Suspense>
