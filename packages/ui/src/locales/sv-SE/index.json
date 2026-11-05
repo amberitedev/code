@@ -38,9 +38,6 @@
   "billing.resubscribe-modal.resubscribe": {
     "defaultMessage": "Återprenumerera"
   },
-  "billing.resubscribe-modal.title": {
-    "defaultMessage": "Återprenumerera till Server"
-  },
   "browse.advanced-filters.apply-saved-preferences": {
     "defaultMessage": "Tillämpa sparade preferenser"
   },
@@ -4948,9 +4945,6 @@
   },
   "servers.backups.rotation-modal.header": {
     "defaultMessage": "Ta bort automatiska säkerhetskopior?"
-  },
-  "servers.backups.slots.auto.next": {
-    "defaultMessage": "Nästa om {time}"
   },
   "servers.backups.slots.auto.next-soon": {
     "defaultMessage": "Nästa säkerhetskopiering startar snart"

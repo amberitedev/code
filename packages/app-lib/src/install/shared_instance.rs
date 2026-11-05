@@ -64,7 +64,8 @@ pub(super) async fn attach_pending_shared_instance(
         instance_id,
         SharedInstanceAttachmentInput {
             id: data.shared_instance_id.clone(),
-            role: SharedInstanceRole::Member,
+            role: data.role,
+            restored_from_remote: data.restored_from_remote,
             manager_id: data.manager_id.clone(),
             server_manager_name: data.server_manager_name.clone(),
             server_manager_icon_url: data.server_manager_icon_url.clone(),
@@ -153,7 +154,8 @@ pub(super) async fn finalize_shared_instance_attachment(
         instance_id,
         SharedInstanceAttachmentInput {
             id: data.shared_instance_id.clone(),
-            role: SharedInstanceRole::Member,
+            role: data.role,
+            restored_from_remote: data.restored_from_remote,
             manager_id: data.manager_id.clone(),
             server_manager_name: data.server_manager_name.clone(),
             server_manager_icon_url: data.server_manager_icon_url.clone(),
@@ -980,6 +982,7 @@ async fn install_shared_instance_base(
             location,
             instance_id.to_string(),
             DownloadReason::Modpack,
+            true,
             &state.pool,
             data.linked_server.is_some(),
             data.linked_server.is_some(),

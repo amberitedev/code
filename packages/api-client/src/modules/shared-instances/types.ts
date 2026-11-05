@@ -1,3 +1,5 @@
+import type { IconConfig } from '../../types/icons'
+
 export namespace SharedInstances {
 	/**
 	 * Sent live to the members of a shared instance when its member list (`shared_instance_users`)
@@ -28,6 +30,7 @@ export namespace SharedInstances {
 				name: string
 				type: 'server'
 				icon?: string | null
+				icon_config?: IconConfig | null
 			}
 
 			export type Manager = UserManager | ServerManager
@@ -50,6 +53,7 @@ export namespace SharedInstances {
 				instance_id: string
 				instance_name: string
 				instance_icon?: string | null
+				instance_icon_config?: IconConfig | null
 				game_version: string
 				loader_version: string
 				inviter: Inviter | null
@@ -67,9 +71,15 @@ export namespace SharedInstances {
 			export type Instance = {
 				name: string
 				icon: string | null
+				icon_config: IconConfig | null
 				quarantine: boolean
 				installed_once: boolean
 				linked_server: { domain: string; region: string; online_status: OnlineStatus } | null
+			}
+
+			export type InstanceLimits = {
+				current: number
+				max: number
 			}
 
 			export type JoinType = 'owner' | 'invite' | 'link'

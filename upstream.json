@@ -1,5 +1,6 @@
 {
 	"ignore": [
+		".github/scripts/notify-app-build.mjs",
 		".github/templates",
 		".github/workflows/api-client-release.yml",
 		".github/workflows/cancel-pr-workflow-on-merge.yml",
@@ -18,6 +19,7 @@
 		".github/workflows/turbo-ci.yml",
 		".mergify.yml",
 		"apps/app-frontend/src/app/shell/sidebar/promotion.vue",
+		"apps/app-frontend/src/features/updates/new-update-modal",
 		"apps/app-frontend/src/helpers/ads.js",
 		"apps/app-playground",
 		"apps/app/capabilities/ads.json",
@@ -31,6 +33,7 @@
 		"apps/meta-generator",
 		"docker-compose.yml",
 		"packages/api-client/AGENTS.md",
+		"packages/assets/illustrations/server-sharing",
 		"packages/component-derive",
 		"packages/minecraft-meta-model",
 		"packages/modrinth-log",
@@ -39,6 +42,9 @@
 		"packages/muralpay",
 		"packages/neverbounce",
 		"packages/sqlx-tracing",
+		"packages/ui/src/components/sharing/server-sharing-update/ServerSharingUpdateModal.vue",
+		"packages/ui/src/components/sharing/server-sharing-update/target.ts",
+		"packages/ui/src/components/sharing/server-sharing-update/use-video-player.ts",
 		"packages/xredis",
 		"patches/@vue-email__markdown@0.0.7.patch",
 		"patches/@vue-email__tailwind@0.2.0.patch",

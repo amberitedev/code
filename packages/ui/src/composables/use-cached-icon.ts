@@ -5,17 +5,16 @@ import { injectIconCache } from '#ui/providers/icon-cache'
 export function useCachedIcon(source: MaybeRefOrGetter<string | Blob | null | undefined>) {
 	const cache = injectIconCache(null)
 	const input = computed(() => toValue(source) ?? undefined)
+
+	const needsResolving = (value: string | Blob | undefined) =>
+		typeof value === 'string' ? !!cache && value.startsWith('https://') : !!value
 	const resolved = shallowRef<{ source: string | Blob; url: string }>()
 
 	watch(
 		input,
 		async (value, _, onCleanup) => {
-			if (!value || typeof window === 'undefined') {
-				resolved.value = undefined
-				return
-			}
-			if (typeof value === 'string' && (!cache || !value.startsWith('https://'))) return
-			const cached = cache?.peekIcon?.(value)
+			if (!value || !needsResolving(value) || typeof window === 'undefined') return
+			const cached = cache?.peekIcon(value)
 			if (cached) {
 				resolved.value = { source: value, url: cached }
 				return
@@ -24,9 +23,7 @@ export function useCachedIcon(source: MaybeRefOrGetter<string | Blob | null | un
 			let objectUrl: string | undefined
 			onCleanup(() => {
 				active = false
-				if (!objectUrl) return
-				if (resolved.value?.url === objectUrl) resolved.value = undefined
-				URL.revokeObjectURL(objectUrl)
+				if (objectUrl) URL.revokeObjectURL(objectUrl)
 			})
 			const fallback = () => {
 				if (typeof value === 'string') return value
@@ -44,10 +41,14 @@ export function useCachedIcon(source: MaybeRefOrGetter<string | Blob | null | un
 		{ immediate: true },
 	)
 
-	return computed(() => {
+	const pending = computed(
+		() => needsResolving(input.value) && resolved.value?.source !== input.value,
+	)
+	const src = computed(() => {
 		const value = input.value
-		if (!value) return undefined
-		if (typeof value === 'string' && (!cache || !value.startsWith('https://'))) return value
-		return resolved.value?.url
+		if (typeof value === 'string' && !needsResolving(value)) return value
+		return pending.value ? undefined : resolved.value?.url
 	})
+
+	return { src, pending }
 }

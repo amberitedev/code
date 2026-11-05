@@ -1959,9 +1959,12 @@ async fn an_icon_is_saved_for_minecraft_and_the_app_then_reset() {
         core.send(put(&editor, b"not an image".to_vec())).await.0,
         StatusCode::BAD_REQUEST
     );
+    let (status, uploaded) = core.send(put(&editor, wide.clone())).await;
+    assert_eq!(status, StatusCode::OK);
     assert_eq!(
-        core.send(put(&editor, wide)).await.0,
-        StatusCode::NO_CONTENT
+        uploaded["config"],
+        Value::Null,
+        "an uploaded image has no editor settings"
     );
 
     let (status, game) = get(uri.clone(), viewer.clone()).await;
@@ -1978,6 +1981,58 @@ async fn an_icon_is_saved_for_minecraft_and_the_app_then_reset() {
     );
     let server_dir = core.state.servers.paths().server(&core.server);
     assert!(server_dir.join("server-icon.png").exists());
+
+    // An icon made in the icon editor keeps its settings until the icon is replaced.
+    let config = json!({ "background": { "type": "color", "value": "#c78aff" }, "symbol": "dusk_block" });
+    let boundary = "icon-boundary";
+    let mut form = Vec::new();
+    form.extend_from_slice(
+        format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"image\"; filename=\"icon.png\"\r\nContent-Type: image/png\r\n\r\n"
+        )
+        .as_bytes(),
+    );
+    form.extend_from_slice(&wide);
+    form.extend_from_slice(
+        format!(
+            "\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"config\"\r\n\r\n{config}\r\n--{boundary}--\r\n"
+        )
+        .as_bytes(),
+    );
+    let generated = Request::put(format!("{uri}/generated"))
+        .header("authorization", format!("Bearer {editor}"))
+        .header(
+            "content-type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(Body::from(form))
+        .unwrap();
+    let (status, made) = core.send(generated).await;
+    assert_eq!(status, StatusCode::OK, "{made}");
+    assert_eq!(made["config"], config);
+    let (status, metadata) = core
+        .call(
+            Method::GET,
+            &format!("{uri}/metadata"),
+            Some(&viewer),
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(metadata, made);
+    let (status, _) = core.send(put(&editor, wide)).await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, metadata) = core
+        .call(
+            Method::GET,
+            &format!("{uri}/metadata"),
+            Some(&viewer),
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(metadata["config"], Value::Null);
 
     let (status, _) = core
         .call(Method::DELETE, &uri, Some(&editor), None, None)

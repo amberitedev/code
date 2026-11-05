@@ -299,7 +299,8 @@ function requireMigration(action: Action, resume: () => Promise<void>) {
 			modpackName: migration.modpackName.value,
 			hasUploadedMrpack: migration.hasUploadedMrpack.value,
 			worldId: worldId.value!,
-			start: (source) => migration.start(source, next),
+			uploadProgress: migration.uploadProgress,
+			start: (source, onRequested) => migration.start(source, next, onRequested),
 		})
 	} else {
 		migration.prompt(next)
@@ -339,13 +340,13 @@ async function updateInviteLink(settings: InviteLinkSettings) {
 	})
 }
 watch(
-	[worldId, canSetup, () => inviteHandoff?.requested.value, () => migration?.ready.value],
+	[worldId, canSetup, () => inviteHandoff?.requested.value, migrating, actionsLocked],
 	async () => {
 		if (!inviteHandoff?.requested.value) {
 			inviteHandoffStarted = false
 			return
 		}
-		if (!worldId.value || inviteHandoffStarted || (migration && !migration.ready.value)) return
+		if (!worldId.value || inviteHandoffStarted || migrating.value || actionsLocked.value) return
 		inviteHandoffStarted = true
 		if (canSetup.value) await perform('invite')
 		if (!inviteHandoff.binding.value && !inviteHandoff.migration.value) inviteHandoff.cancel()

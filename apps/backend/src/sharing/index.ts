@@ -38,7 +38,11 @@ type Instance = {
 	id: string
 	owner_id: string
 	name: string
+	/** URL of an uploaded image, kept in R2 at `iconKey`. NULL for an icon editor icon. */
 	icon: string | null
+	/** JSON of the icon editor settings, which clients draw themselves. NULL for an uploaded
+	 * image. See `iconConfig`. */
+	icon_config: string | null
 	quarantine: number
 	installed_once: number
 	home: string | null
@@ -379,6 +383,8 @@ export async function sweepFiles(env: Env, id: string): Promise<void> {
 	)
 	const unused = stored.filter((key) => !used.has(key))
 	if (unused.length) await env.FILES.delete(unused)
+	const icons = await env.FILES.list({ prefix: `icons/${id}/` })
+	if (icons.objects.length) await env.FILES.delete(icons.objects.map((object) => object.key))
 }
 
 /**
@@ -455,6 +461,7 @@ async function notifyReadyInvites(env: Env, id: string): Promise<void> {
 				shared_instance_id: id,
 				shared_instance_name: invite.name,
 				shared_instance_icon: item.icon,
+				shared_instance_icon_config: iconConfig(item),
 				invited_by: invite.by,
 			}),
 			created: now(),
@@ -880,6 +887,7 @@ async function previewInvite(env: Env, id: string, withVersion: boolean): Promis
 		instance_id: item.id,
 		instance_name: server?.name ?? item.name,
 		instance_icon: item.icon,
+		instance_icon_config: iconConfig(item),
 		game_version: manifest?.game_version ?? '',
 		loader_version: manifest?.loader_version ?? '',
 		inviter: manager
@@ -1470,24 +1478,18 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 	const [, route, id, section, child] = parts
 	if (route === 'invites' && id && request.method === 'GET')
 		return previewInvite(env, id, url.searchParams.get('version') === 'true')
-	if (route === 'icons' && id && request.method === 'GET') {
-		const row = await env.DB.prepare(
-			'SELECT icon_data,icon_type FROM shared_instances WHERE icon = ?',
-		)
-			.bind(url.origin + url.pathname)
-			.first<{ icon_data: string | null; icon_type: string | null }>()
-		if (!row?.icon_data)
-			throw new ApiError(404, 'not_found', 'Icon was not found', 'icon_not_found')
-		return new Response(
-			Uint8Array.from(atob(row.icon_data), (character) => character.charCodeAt(0)),
-			{
-				headers: {
-					'Content-Type': row.icon_type ?? 'image/png',
-					// Every upload gets a new URL, so a fetched icon never changes.
-					'Cache-Control': 'private, max-age=31536000, immutable',
-				},
+	// `/v1/icons/{share}/{upload}`, read from R2 without touching D1.
+	if (route === 'icons' && id && section && !child && request.method === 'GET') {
+		const object = await env.FILES.get(iconKey(id, section))
+		if (!object) throw new ApiError(404, 'not_found', 'Icon was not found', 'icon_not_found')
+		return new Response(object.body, {
+			headers: {
+				'Content-Type': object.httpMetadata?.contentType ?? 'image/png',
+				// Every upload gets a new URL, so a fetched icon never changes. Public, because
+				// invite previews show it before anyone signs in.
+				'Cache-Control': 'public, max-age=31536000, immutable',
 			},
-		)
+		})
 	}
 	if (tokenFrom(request).startsWith('amc_')) return coreSharing(request, env, parts.slice(1))
 	const user = await requireUser(request, env)
@@ -1549,14 +1551,15 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 					'Private instance lists belong to their account',
 					'not_own_list',
 				)
+			// The caller's own shares, and with `include_joined` every share they can play too.
+			const query =
+				url.searchParams.get('include_joined') === 'true'
+					? `SELECT instance_id FROM shared_members WHERE user_id = ?1 AND joined_at IS NOT NULL UNION SELECT s.instance_id FROM ${PLAYERS} WHERE p.user_id = ?1 AND p.joined_at IS NOT NULL`
+					: 'SELECT id AS instance_id FROM shared_instances WHERE owner_id = ?1'
 			return json(
-				(
-					await env.DB.prepare(
-						`SELECT instance_id FROM shared_members WHERE user_id = ?1 AND joined_at IS NOT NULL UNION SELECT s.instance_id FROM ${PLAYERS} WHERE p.user_id = ?1 AND p.joined_at IS NOT NULL`,
-					)
-						.bind(user.id)
-						.all<{ instance_id: string }>()
-				).results.map((row) => row.instance_id),
+				(await env.DB.prepare(query).bind(user.id).all<{ instance_id: string }>()).results.map(
+					(row) => row.instance_id,
+				),
 			)
 		}
 		if (request.method === 'POST') {
@@ -1585,6 +1588,7 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 			return json({
 				name: item.name,
 				icon: item.icon,
+				icon_config: iconConfig(item),
 				quarantine: item.quarantine === 1,
 				installed_once: item.installed_once === 1,
 				// The App adds it to the instance's server list.
@@ -1643,30 +1647,74 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 	}
 	if (section === 'icon') {
 		owner(item, user.id)
-		if (request.method === 'PUT') {
-			const data = await readBytes(request, 256 * 1024)
-			let binary = ''
-			for (const byte of new Uint8Array(data)) binary += String.fromCharCode(byte)
-			await env.DB.prepare(
-				'UPDATE shared_instances SET icon = ?,icon_data = ?,icon_type = ? WHERE id = ?',
-			)
-				.bind(
-					`${url.origin}/v1/icons/${crypto.randomUUID()}`,
-					btoa(binary),
-					request.headers.get('content-type') ?? 'image/png',
-					id,
-				)
-				.run()
+		if (request.method === 'PUT' && !child) {
+			const data = await readBytes(request, ICON_BYTES)
+			if (data.byteLength > ICON_BYTES)
+				throw new ApiError(413, 'invalid_input', 'Icon is too large')
+			const upload = crypto.randomUUID()
+			await env.FILES.put(iconKey(id, upload), data, {
+				httpMetadata: { contentType: request.headers.get('content-type') ?? 'image/png' },
+			})
+			await setIcon(env, item, `${url.origin}/v1/icons/${id}/${upload}`, null)
 			return empty()
 		}
-		if (request.method === 'DELETE') {
-			await env.DB.prepare(
-				'UPDATE shared_instances SET icon = NULL,icon_data = NULL,icon_type = NULL WHERE id = ?',
-			)
-				.bind(id)
-				.run()
+		// An icon made in the icon editor: only its settings, which clients draw themselves.
+		if (request.method === 'PUT' && child === 'generated') {
+			await setIcon(env, item, null, validIconConfig(await request.text()))
+			return empty()
+		}
+		if (request.method === 'DELETE' && !child) {
+			await setIcon(env, item, null, null)
 			return empty()
 		}
 	}
 	throw new ApiError(405, 'method_not_allowed', 'Unsupported sharing operation')
+}
+
+const ICON_BYTES = 256 * 1024
+
+/** Where an uploaded icon is kept in R2. Under the share, so `sweepFiles` clears them with it. */
+const iconKey = (share: string, upload: string) => `icons/${share}/${upload}`
+
+/** Replaces the share's icon with an uploaded image's `url` or icon editor `config`, and drops
+ * the image it had. */
+async function setIcon(env: Env, item: Instance, url: string | null, config: string | null) {
+	await env.DB.prepare('UPDATE shared_instances SET icon = ?,icon_config = ? WHERE id = ?')
+		.bind(url, config, item.id)
+		.run()
+	const upload = item.icon?.split('/').pop()
+	if (upload) await env.FILES.delete(iconKey(item.id, upload))
+}
+
+const ICON_COLOR = /^#[0-9a-fA-F]{6}$/
+const ICON_SYMBOL = /^[a-z0-9_]{1,64}$/
+
+/** The icon editor settings as stored JSON, checked by the rules of
+ * `modrinth-content-management`'s `IconConfig::validate`. */
+function validIconConfig(text: string): string {
+	let value: unknown
+	try {
+		value = JSON.parse(text)
+	} catch {
+		throw new ApiError(400, 'invalid_input', 'Icon config is not JSON')
+	}
+	const invalid = () => new ApiError(400, 'invalid_input', 'Invalid icon config')
+	if (typeof value !== 'object' || value === null) throw invalid()
+	const { background, symbol } = value as { background?: unknown; symbol?: unknown }
+	if (typeof symbol !== 'string' || !ICON_SYMBOL.test(symbol)) throw invalid()
+	if (typeof background !== 'object' || background === null) throw invalid()
+	const color = (field: unknown) => typeof field === 'string' && ICON_COLOR.test(field)
+	const bg = background as Record<string, unknown>
+	if (bg.type === 'color' && color(bg.value))
+		return JSON.stringify({ background: { type: 'color', value: bg.value }, symbol })
+	if (bg.type === 'linear-top-down-gradient' && color(bg.top_color) && color(bg.bottom_color))
+		return JSON.stringify({
+			background: { type: bg.type, top_color: bg.top_color, bottom_color: bg.bottom_color },
+			symbol,
+		})
+	throw invalid()
+}
+
+function iconConfig(item: Instance): unknown {
+	return item.icon_config ? JSON.parse(item.icon_config) : null
 }

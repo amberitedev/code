@@ -44,9 +44,6 @@
   "billing.resubscribe-modal.resubscribe": {
     "defaultMessage": "Ponovno se pretplati"
   },
-  "billing.resubscribe-modal.title": {
-    "defaultMessage": "Ponovna pretplata"
-  },
   "browse.advanced-filters.apply-saved-preferences": {
     "defaultMessage": "Primeni sačuvana podešavanja"
   },
@@ -6219,3 +6216,4 @@
     "defaultMessage": "Tip"
   }
 }
+

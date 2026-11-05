@@ -197,6 +197,11 @@ pub struct BackupsQueueWithOptionsResponse {
     pub queue: BackupsQueueResponse,
     pub options: WorldBackupOptions,
     pub next_auto_backup_at: Option<DateTime<Utc>>,
+    /// Backups in the manual slots. A manual backup is refused once this reaches
+    /// `split_manual`.
+    pub manual_count: u32,
+    /// Backups in the scheduled slots. The oldest rotate out past `split_automatic`.
+    pub auto_count: u32,
 }
 
 /// Body of PATCH `backups-queue/with-options`. Mirrors
@@ -454,8 +459,22 @@ pub async fn list_with_options(
     caller.require(&state.db, &id, Level::Viewer).await?;
     world(&id, &wid)?;
     let (schedule, next) = slots(&state, &id).await?;
+    let queue = queue(&state, &id, &schedule, next).await?;
+    let count = |counts: fn(&BackupQueueBackup) -> bool| {
+        queue.backups.iter().filter(|backup| counts(backup)).count() as u32
+    };
+    let auto_count = count(|backup| backup.rotates_at.is_some());
+    let manual_count = count(|backup| {
+        !backup.automated
+            && matches!(
+                backup.status,
+                BackupStatus::Pending
+                    | BackupStatus::InProgress
+                    | BackupStatus::Done
+            )
+    });
     Ok(Json(BackupsQueueWithOptionsResponse {
-        queue: queue(&state, &id, &schedule, next).await?,
+        queue,
         options: WorldBackupOptions {
             split_automatic: schedule.keep,
             split_manual: SLOTS.saturating_sub(schedule.keep),
@@ -463,6 +482,8 @@ pub async fn list_with_options(
             interval: schedule.interval_hours,
         },
         next_auto_backup_at: next.map(time),
+        manual_count,
+        auto_count,
     }))
 }
 

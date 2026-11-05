@@ -2754,7 +2754,7 @@
     "message": "當安裝已排入佇列或正在執行時，顯示「複製詳細資訊」按鈕。這項設定僅適用於前述安裝情形，安裝失敗或中斷時一律顯示該按鈕。"
   },
   "app.settings.resource-management.always-show-copy-details.title": {
-    "message": "一律顯示複製詳細資訊"
+    "message": "一律顯示「複製詳細資訊」"
   },
   "app.settings.resource-management.app-cache.confirm.description": {
     "message": "在快取完成重建前，應用程式的載入速度可能會比較慢。"
@@ -4036,6 +4036,9 @@
   },
   "instance.shared-instance.error.title": {
     "message": "出了點狀況"
+  },
+  "instance.shared-instance.file-not-allowed.title": {
+    "message": "不允許的檔案類型"
   },
   "instance.shared-instance.network-error.text": {
     "message": "無法連線到共用實例 API"

@@ -3,18 +3,27 @@
 //!
 //! - `GET`: the 64x64 game icon as PNG, or with `?original=true` the display icon, up to 512x512.
 //!   Viewers and up. 404 when the server has no icon.
-//! - `PUT`: the body is a PNG, JPEG, GIF, or WebP image. Editors and up.
+//! - `GET /metadata`: the game icon's hash and the icon editor settings it was made from.
+//!   Viewers and up. 404 when the server has no icon.
+//! - `PUT`: the body is a PNG, JPEG, GIF, or WebP image. Editors and up. Answers with the
+//!   metadata.
+//! - `PUT /generated`: an icon made in the icon editor, as the parts `image` and `config` (JSON
+//!   `IconConfig`). Editors and up. Answers with the metadata.
 //! - `DELETE`: removes the icon. Editors and up. 404 when there was none.
 //!
 //! Both files live in the server folder: `server-icon.png` is the one Minecraft shows in the
 //! multiplayer list from its next start, and `server-icon-original.png` is what the App shows. A
 //! `server-icon.png` that came with a pack or was placed by hand is the display icon too.
+//!
+//! The icon editor settings are kept in the server's row with the hash of the game icon they
+//! made, so an icon replaced through the files routes drops them.
 
 use std::{io::Cursor, sync::Arc};
 
 use axum::{
+    Json,
     body::{Body, Bytes},
-    extract::{Path, Query, State},
+    extract::{Multipart, Path, Query, State},
     http::{StatusCode, header},
     response::IntoResponse,
 };
@@ -22,7 +31,9 @@ use image::{
     DynamicImage, ImageDecoder, ImageFormat, ImageReader, imageops::FilterType,
     metadata::Orientation,
 };
-use serde::Deserialize;
+use modrinth_content_management::icons::IconConfig;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use super::{
     AppState,
@@ -49,6 +60,14 @@ const MAX_SOURCE_SIDE: u32 = 4096;
 pub struct IconQuery {
     #[serde(default)]
     pub original: bool,
+}
+
+/// A server's icon, as `Archon.Icons.v1.ServerIcon`.
+#[derive(Debug, Clone, Serialize)]
+pub struct ServerIcon {
+    /// SHA-256 hex digest of the 64x64 game icon.
+    pub hash: String,
+    pub config: Option<IconConfig>,
 }
 
 /// The owner passes `require` for any id, so a missing server is found here.
@@ -101,19 +120,109 @@ pub async fn set(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     body: Bytes,
-) -> Result<StatusCode, ApiError> {
+) -> Result<Json<ServerIcon>, ApiError> {
     caller.require(&state.db, &id, Level::Editor).await?;
     exists(&state, &id).await?;
-    let (game, original) = blocking(move || icons(&body)).await?;
-    let (folder, busy) = changing(&state, &id)?;
+    write(&state, &caller, &id, body, None).await.map(Json)
+}
+
+/// `PUT /v1/servers/{id}/icon/generated`.
+pub async fn set_generated(
+    caller: Caller,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    mut form: Multipart,
+) -> Result<Json<ServerIcon>, ApiError> {
+    caller.require(&state.db, &id, Level::Editor).await?;
+    exists(&state, &id).await?;
+    let bad_form = |error: axum::extract::multipart::MultipartError| {
+        ApiError::new(ErrorCode::InvalidRequest, error.body_text())
+    };
+    let (mut image, mut config) = (None, None);
+    while let Some(field) = form.next_field().await.map_err(bad_form)? {
+        match field.name() {
+            Some("image") => {
+                image = Some(field.bytes().await.map_err(bad_form)?)
+            }
+            Some("config") => {
+                config = Some(field.text().await.map_err(bad_form)?)
+            }
+            _ => {}
+        }
+    }
+    let (Some(image), Some(config)) = (image, config) else {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            "The upload needs an image and a config.",
+        ));
+    };
+    let config: IconConfig = serde_json::from_str(&config)
+        .ok()
+        .filter(|config: &IconConfig| config.validate().is_ok())
+        .ok_or_else(|| {
+            ApiError::new(ErrorCode::InvalidRequest, "Invalid icon config.")
+        })?;
+    write(&state, &caller, &id, image, Some(config))
+        .await
+        .map(Json)
+}
+
+/// Writes both icon files from `image` and keeps `config` with the game icon's hash.
+async fn write(
+    state: &AppState,
+    caller: &Caller,
+    id: &str,
+    image: Bytes,
+    config: Option<IconConfig>,
+) -> Result<ServerIcon, ApiError> {
+    let (game, original) = blocking(move || icons(&image)).await?;
+    let hash = hex::encode(Sha256::digest(&game));
+    let (folder, busy) = changing(state, id)?;
     locked(&busy, move || {
         folder.write(ORIGINAL_ICON, &mut original.as_slice())?;
         folder.write(GAME_ICON, &mut game.as_slice())?;
         Ok(())
     })
     .await?;
-    activity::log(&state.db, &caller, Some(&id), Action::SettingsChanged).await;
-    Ok(StatusCode::NO_CONTENT)
+    let stored = config.as_ref().map(|config| {
+        serde_json::to_string(config).expect("an icon config is plain data")
+    });
+    server_rows::set_icon_config(
+        &state.db,
+        id,
+        stored.as_deref().map(|config| (config, hash.as_str())),
+    )
+    .await?;
+    activity::log(&state.db, caller, Some(id), Action::SettingsChanged).await;
+    Ok(ServerIcon { hash, config })
+}
+
+/// `GET /v1/servers/{id}/icon/metadata`.
+pub async fn metadata(
+    caller: Caller,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<ServerIcon>, ApiError> {
+    caller.require(&state.db, &id, Level::Viewer).await?;
+    exists(&state, &id).await?;
+    let folder = folder(&state, &id)?;
+    let game = blocking(move || {
+        folder
+            .open_file(GAME_ICON)?
+            .ok_or_else(no_icon)
+            .and_then(|file| {
+                let mut bytes = Vec::new();
+                std::io::Read::read_to_end(&mut file.into_std(), &mut bytes)?;
+                Ok(bytes)
+            })
+    })
+    .await?;
+    let hash = hex::encode(Sha256::digest(&game));
+    let config = server_rows::icon_config(&state.db, &id)
+        .await?
+        .filter(|(_, made)| *made == hash)
+        .and_then(|(config, _)| serde_json::from_str(&config).ok());
+    Ok(Json(ServerIcon { hash, config }))
 }
 
 /// The game icon and the original as PNG files. The game icon is cropped to a square from the
@@ -201,6 +310,7 @@ pub async fn delete(
         Ok(())
     })
     .await?;
+    server_rows::set_icon_config(&state.db, &id, None).await?;
     activity::log(&state.db, &caller, Some(&id), Action::SettingsChanged).await;
     Ok(StatusCode::NO_CONTENT)
 }

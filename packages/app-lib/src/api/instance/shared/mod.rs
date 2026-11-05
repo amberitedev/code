@@ -8,7 +8,7 @@ use crate::install::{
 use crate::state::instances::{InstanceLink, SharedInstanceAttachment};
 use crate::state::{
     AppliedContentSetPatch, CacheBehaviour, CachedEntry, ContentSetSyncStatus,
-    ContentSourceKind, EditInstance, ModLoader, ProjectType,
+    ContentSourceKind, EditInstance, IconConfig, ModLoader, ProjectType,
     SharedInstanceRole, State,
 };
 use crate::util::fetch::{
@@ -85,6 +85,7 @@ mod history;
 mod icons;
 mod install;
 mod invites;
+mod library;
 mod publish;
 mod report;
 mod server;
@@ -106,6 +107,7 @@ pub use self::history::{
 };
 pub use self::install::{
     accept_shared_instance_invite_for_install,
+    dismiss_shared_instance_restored_notice,
     get_shared_instance_install_preview,
     get_shared_instance_invite_install_preview,
     get_shared_instance_update_preview, install_shared_instance,
@@ -117,9 +119,13 @@ pub use self::invites::{
     get_shared_instance_users, invite_shared_instance_users,
     remove_shared_instance_users, revoke_shared_instance_invite,
 };
+pub use self::library::{
+    cache_shared_instance_library, get_cached_shared_instance_library,
+};
 pub use self::publish::{
-    get_shared_instance_publish_preview, publish_shared_instance,
-    unlink_shared_instance, unpublish_shared_instance,
+    get_shared_instance_publish_preview, leave_remote_shared_instance,
+    publish_shared_instance, unlink_shared_instance,
+    unpublish_remote_shared_instance, unpublish_shared_instance,
 };
 pub use self::report::get_shared_instance_publish_support_details;
 pub use self::server::ensure_shared_instance;

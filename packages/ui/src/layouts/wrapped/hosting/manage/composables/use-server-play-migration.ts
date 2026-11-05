@@ -24,10 +24,6 @@ const UNSUPPORTED_LOADERS = new Set(['vanilla', 'paper', 'purpur', 'spigot', 'bu
 
 type ReadableRef<T> = Ref<T> | ComputedRef<T>
 
-export type TrackUpload = <T>(
-	run: (onProgress: (progress: UploadProgress) => void) => Promise<T>,
-) => Promise<T>
-
 function waitFor<T>(source: () => T | undefined): Promise<T> {
 	return new Promise((resolve) => {
 		const initial = source()
@@ -47,14 +43,12 @@ export function useServerPlayMigration(options: {
 	serverId: string
 	worldId: ReadableRef<string | null>
 	serverFull: ReadableRef<Archon.Servers.v1.ServerFull | null | undefined>
-	forced: () => boolean
 	content: ReadableRef<Archon.Content.v1.Addons | null | undefined>
 	backups: ReadableRef<Archon.BackupsQueue.v1.BackupQueueBackup[]>
 	invalidateBackups: () => Promise<void>
 	trackMigration: (backupId: string) => void
 	migrationStateFor: (backupId: string) => Archon.Websocket.v0.BackupState | undefined
 	migrationActive: ReadableRef<boolean>
-	trackUpload: TrackUpload
 	prompt: (next: ServerPlayMigrationNext) => void
 	onMigrated: (next: ServerPlayMigrationNext) => void
 }): ServerPlayMigration {
@@ -62,12 +56,11 @@ export function useServerPlayMigration(options: {
 	const queryClient = useQueryClient()
 	const { handleError } = injectNotificationManager()
 	const step = ref<ServerPlayMigrationStep>('idle')
+	const uploadProgress = ref<UploadProgress | null>(null)
 	const completed = ref(false)
 
 	const tagged = computed(
-		() =>
-			!completed.value &&
-			(options.forced() || !!options.serverFull.value?.tags.includes(SERVER_PLAY_MIGRATION_TAG)),
+		() => !completed.value && !!options.serverFull.value?.tags.includes(SERVER_PLAY_MIGRATION_TAG),
 	)
 	const active = computed(() => step.value !== 'idle' || options.migrationActive.value)
 
@@ -119,6 +112,17 @@ export function useServerPlayMigration(options: {
 		return modpack.version_number ? `${modpack.title} ${modpack.version_number}` : modpack.title
 	})
 
+	async function trackUpload<T>(
+		run: (onProgress: (progress: UploadProgress) => void) => Promise<T>,
+	): Promise<T> {
+		uploadProgress.value = { loaded: 0, total: 0, progress: 0 }
+		try {
+			return await run((progress) => (uploadProgress.value = progress))
+		} finally {
+			uploadProgress.value = null
+		}
+	}
+
 	async function requestReinstall(
 		worldId: string,
 		source: ServerPlayMigrationSource,
@@ -139,13 +143,13 @@ export function useServerPlayMigration(options: {
 						{ known: {} },
 						{ restoreClientFiles: true, useExistingMrpack: !source.file, onProgress },
 					).promise
-				const response = source.file ? await options.trackUpload(upload) : await upload()
+				const response = source.file ? await trackUpload(upload) : await upload()
 				return response.backup_id
 			}
 			case 'curseforge': {
 				const restore = (onUploadProgress?: (progress: UploadProgress) => void) =>
 					restoreCurseForgeClientFiles(client, worldId, source.selection, { onUploadProgress })
-				return hasCurseForgeUploads(source.selection) ? options.trackUpload(restore) : restore()
+				return hasCurseForgeUploads(source.selection) ? trackUpload(restore) : restore()
 			}
 		}
 	}
@@ -175,7 +179,11 @@ export function useServerPlayMigration(options: {
 		if (shared) await client.archon.content_v1.share(options.serverId, worldId)
 	}
 
-	async function start(source: ServerPlayMigrationSource, next?: ServerPlayMigrationNext) {
+	async function start(
+		source: ServerPlayMigrationSource,
+		next?: ServerPlayMigrationNext,
+		onRequested?: () => void,
+	) {
 		const worldId = options.worldId.value
 		if (!worldId || active.value) return false
 		const inviteEarly = next === 'invite'
@@ -183,6 +191,7 @@ export function useServerPlayMigration(options: {
 			step.value = 'migrating'
 			const backupId = await requestReinstall(worldId, source)
 			if (!backupId) throw new Error('The server content could not be updated.')
+			onRequested?.()
 			if (inviteEarly) options.onMigrated(next)
 			if (!(await waitForMigration(backupId))) return false
 			await queryClient.invalidateQueries({ queryKey: serverKeys.detailV1(options.serverId) })
@@ -205,6 +214,7 @@ export function useServerPlayMigration(options: {
 		kind,
 		hasUploadedMrpack,
 		step,
+		uploadProgress,
 		active,
 		modpackName,
 		prompt: options.prompt,

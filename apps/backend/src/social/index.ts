@@ -8,6 +8,9 @@ import { sweepFiles } from '../sharing'
 import { blockedEitherWay, patchPreferences, preferences } from './preferences'
 import { friendsStatuses, notifyUser } from './socket'
 
+/** The largest avatar a user may upload. Avatars are kept in D1, so this stays well under a row. */
+export const USER_ICON_BYTES = 512 * 1024
+
 type FriendRow = { user_id: string; friend_id: string; accepted: number; created: string }
 const empty = () => new Response(null, { status: 204 })
 const notFound = () => new ApiError(404, 'not_found', 'Not found')
@@ -318,8 +321,9 @@ export async function handleSocial(request: Request, env: Env): Promise<Response
 				])
 				return empty()
 			}
-			const bytes = await readBytes(request, 524288)
-			if (!bytes.length || bytes.length > 524288) invalid('Icons must be smaller than 512KiB')
+			const bytes = await readBytes(request, USER_ICON_BYTES)
+			if (!bytes.length || bytes.length > USER_ICON_BYTES)
+				invalid('Icons must be smaller than 512KiB')
 			const ext = url.searchParams.get('ext')?.toLowerCase()
 			const types: Record<string, string> = {
 				png: 'image/png',

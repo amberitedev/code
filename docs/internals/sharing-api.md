@@ -43,7 +43,10 @@ differs from what that client was written for, on purpose.
   live link, which the owner revokes with `DELETE invites/{id}`. For the instance's Share tab.
 - `POST /v1/instances/{id}/versions/{v}/reports`: a member reports broken files.
 - `GET` and `PATCH /v1/storage`: the account's pool usage and kept-versions setting.
-- `GET /v1/icons/{id}`: instance icons, stored in D1 instead of a CDN.
+- `GET /v1/icons/{share}/{upload}`: uploaded instance icons, kept in R2 instead of a CDN.
+- `PUT /v1/instances/{id}/icon/generated` takes only the icon editor settings, as JSON, with no
+  image. The share's `icon` is then null and `icon_config` set, and every client draws the icon
+  itself. Invite notifications carry `shared_instance_icon_config` for the same reason.
 
 ## Fields that are always empty
 
@@ -55,8 +58,12 @@ differs from what that client was written for, on purpose.
   public address: the last `outside`, then the host of the Core's `address` with the server's port. Its
   `region` is empty and `online_status` null.
 - `GET /v1/instances/{id}/server-icon` is always 404: the backend keeps no server icons.
+- `icon_config` on a server manager is never set, for the same reason.
 
 ## Missing
+
+- No owned-share cap: `GET /v1/instances/limits` does not exist and creating a share never fails
+  with "Cannot own more than". The App's limit check is kept dormant.
 
 - No mrpack export: `GET /v1/instances/{id}/versions/{v}/mrpack` does not exist (AMB-51).
 - Deleting one file through moderation quarantines the whole instance, since the backend cannot

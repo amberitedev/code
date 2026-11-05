@@ -14,6 +14,7 @@ pub use error::{BackendError, Unavailable};
 use std::time::Duration;
 
 use bedrock::net::ErrorBody;
+use modrinth_content_management::icons::IconConfig;
 use reqwest::{Method, StatusCode};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::json;
@@ -29,6 +30,14 @@ pub struct Backend {
     token: Option<String>,
     read_ticket: Option<String>,
     timeout: Option<Duration>,
+}
+
+/// A share's icon as the backend keeps it.
+pub enum ShareIcon<'a> {
+    /// Made in the icon editor: only its settings go up, and every client draws it.
+    Drawn(&'a IconConfig),
+    /// An uploaded image.
+    Image(Vec<u8>),
 }
 
 /// The body of `POST /v1/instances/:id/versions`.
@@ -224,22 +233,32 @@ impl Backend {
         }
     }
 
-    /// Sets the share's icon to `icon`, or removes it.
+    /// Sets the share's icon, or removes it with `None`.
     pub async fn set_share_icon(
         &self,
         share_id: &str,
-        icon: Option<Vec<u8>>,
+        icon: Option<ShareIcon<'_>>,
     ) -> Result<(), BackendError> {
         let path = format!("/instances/{share_id}/icon");
         match icon {
-            Some(bytes) => {
+            Some(ShareIcon::Drawn(config)) => {
+                self.empty(
+                    "upload_generated_instance_icon",
+                    self.request(Method::PUT, &format!("{path}/generated"))
+                        .json(config),
+                )
+                .await
+            }
+            Some(ShareIcon::Image(bytes)) => {
+                // The backend serves the image with the type it was sent with.
+                let mime = infer::get(&bytes)
+                    .map_or("application/octet-stream", |kind| {
+                        kind.mime_type()
+                    });
                 self.empty(
                     "upload_instance_icon",
                     self.request(Method::PUT, &path)
-                        .header(
-                            reqwest::header::CONTENT_TYPE,
-                            "application/octet-stream",
-                        )
+                        .header(reqwest::header::CONTENT_TYPE, mime)
                         .body(bytes),
                 )
                 .await

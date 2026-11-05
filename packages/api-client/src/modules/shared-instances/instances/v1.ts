@@ -21,6 +21,40 @@ export class SharedInstancesInstancesV1Module extends SharedInstancesModule {
 		)
 	}
 
+	public async getForUser(
+		userId: string,
+		options?: { include_joined?: boolean },
+	): Promise<string[]> {
+		return this.client.request<string[]>('/instances', {
+			api: 'sharedinstances',
+			version: 1,
+			method: 'GET',
+			params: { user: userId, include_joined: options?.include_joined },
+		})
+	}
+
+	public async getLimits(userId?: string): Promise<SharedInstances.Instances.v1.InstanceLimits> {
+		return this.client.request<SharedInstances.Instances.v1.InstanceLimits>('/instances/limits', {
+			api: 'sharedinstances',
+			version: 1,
+			method: 'GET',
+			params: { user: userId },
+		})
+	}
+
+	public async getLatestVersion(
+		instanceId: string,
+	): Promise<SharedInstances.Instances.v1.InstanceVersion> {
+		return this.client.request<SharedInstances.Instances.v1.InstanceVersion>(
+			`/instances/${encodeURIComponent(instanceId)}/versions`,
+			{
+				api: 'sharedinstances',
+				version: 1,
+				method: 'GET',
+			},
+		)
+	}
+
 	public async getUsers(instanceId: string): Promise<SharedInstances.Instances.v1.InstanceUsers> {
 		return this.request<SharedInstances.Instances.v1.InstanceUsers>(
 			`/instances/${encodeURIComponent(instanceId)}/users`,

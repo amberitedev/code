@@ -7,7 +7,6 @@
 			:resolve-viewer="resolveViewer"
 			:show-copy-id-action="appSettings.devMode"
 			:additional-tabs="historyTabs"
-			:force-server-play-migration="appSettings.getFeatureFlag('debug_server_play_migration')"
 			:site-url="config.accountSiteUrl"
 			:auth-user="authUser"
 			:navigate-to-billing="

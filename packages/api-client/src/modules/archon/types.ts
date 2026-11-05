@@ -1,4 +1,5 @@
 import type { Copal } from '../copal/types'
+import type { IconConfig } from '../../types/icons'
 import type { Labrinth } from '../labrinth/types'
 
 export namespace Archon {
@@ -748,6 +749,16 @@ export namespace Archon {
 		}
 	}
 
+	export namespace Icons {
+		export namespace v1 {
+			export type ServerIcon = {
+				/** SHA-256 hex digest of the 64x64 game icon. */
+				hash: string
+				config: IconConfig | null
+			}
+		}
+	}
+
 	export namespace Servers {
 		export namespace Internal {
 			export type Lookup = {
@@ -853,6 +864,7 @@ export namespace Archon {
 				is_medal: boolean
 				current_user_permissions: UserScope
 				locked_since: string | null
+				icon: Icons.v1.ServerIcon | null
 
 				medal_expires?: string
 
@@ -1013,6 +1025,7 @@ export namespace Archon {
 				 */
 				drop_client_mods: boolean
 				location: ServerLocation
+				icon: Icons.v1.ServerIcon | null
 				worlds: WorldFull[]
 				/** IDs of the server's backup repositories. Only returned to support agents. */
 				repository_ids?: number[]
@@ -1275,6 +1288,10 @@ export namespace Archon {
 			export type BackupsQueueWithOptionsResponse = BackupsQueueResponse & {
 				options: WorldBackupOptions
 				next_auto_backup_at: string | null
+				/** How many backups occupy the manual backup pool. Manual backups can't be created once this reaches `split_manual`. */
+				manual_count: number
+				/** How many backups occupy the automatic backup pool. The oldest ones rotate out once this exceeds `split_automatic`. */
+				auto_count: number
 			}
 
 			export type PatchWorldBackupOptions = {

@@ -138,6 +138,7 @@
 					<template #leading>
 						<ServerIcon
 							:image="serverHeaderImage"
+							:config="serverData.is_medal ? null : serverIconConfig"
 							:class="isNuxt ? 'size-20 !rounded-2xl' : 'size-16 !rounded-xl'"
 						/>
 					</template>
@@ -321,9 +322,9 @@
 		:has-uploaded-mrpack="serverPlayMigration.hasUploadedMrpack.value"
 		:world-id="worldId"
 		:disabled="!canSetup || serverPlayMigration.active.value"
+		:upload-progress="serverPlayMigration.uploadProgress.value"
 		@confirm="confirmServerPlayMigration"
 	/>
-	<UploadProgressModal ref="serverPlayMigrationUploadModal" />
 	<ServerInviteLinkModal
 		ref="serverInviteLinkModal"
 		:server-id="serverId"
@@ -381,7 +382,6 @@ import PageHeaderBadgeItem from '#ui/components/base/page-header/page-header-bad
 import ServerNotice from '#ui/components/base/ServerNotice.vue'
 import TagIcon from '#ui/components/base/TagIcon.vue'
 import ConfirmLeaveModal from '#ui/components/modal/ConfirmLeaveModal.vue'
-import UploadProgressModal from '#ui/components/modal/UploadProgressModal.vue'
 import ServerPanelAdmonitions from '#ui/components/servers/admonitions/ServerPanelAdmonitions.vue'
 import ServerIcon from '#ui/components/servers/icons/ServerIcon.vue'
 import LiftSuspensionModal from '#ui/components/servers/LiftSuspensionModal.vue'
@@ -395,6 +395,7 @@ import {
 	hasServerPermission,
 	useDebugLogger,
 	useFormatDateTime,
+	useGeneratedIconSrc,
 	useLoadingBarToken,
 	useModrinthServersConsole,
 	useReadyState,
@@ -460,7 +461,6 @@ const props = withDefaults(
 		}) => void | Promise<void>
 		constrainWidth?: boolean
 		layoutMode?: 'page' | 'fill'
-		forceServerPlayMigration?: boolean
 	}>(),
 	{
 		showCopyIdAction: false,
@@ -478,13 +478,8 @@ const props = withDefaults(
 		browseContent: undefined,
 		constrainWidth: false,
 		layoutMode: 'page',
-		forceServerPlayMigration: false,
 	},
 )
-
-const emit = defineEmits<{
-	'server-play-migration-tagged': []
-}>()
 
 const { formatMessage } = useVIntl()
 
@@ -635,7 +630,11 @@ const { disconnect: disconnectPanelSync } = useServerPanelSync({
 	worldId,
 })
 
-const { icon: serverImage } = useServerIcon(() => props.serverId)
+const { config: serverIconConfig, image: serverIconImage } = useServerIcon(() => props.serverId, {
+	icon: () => serverData.value?.icon,
+})
+const serverIconGeneratedSrc = useGeneratedIconSrc(serverIconConfig)
+const serverImage = computed(() => serverIconGeneratedSrc.value ?? serverIconImage.value)
 const { data: serverProject } = useServerProject(computed(() => serverData.value?.upstream ?? null))
 
 const onStateEvent = (data: Archon.Websocket.v0.WSStateEvent) => {
@@ -679,7 +678,6 @@ const {
 })
 
 const serverPlayMigrationModal = ref<InstanceType<typeof ServerPlayMigrationModal>>()
-const serverPlayMigrationUploadModal = ref<InstanceType<typeof UploadProgressModal>>()
 const serverInviteLinkModal = ref<InstanceType<typeof ServerInviteLinkModal>>()
 const canSetup = computed(() =>
 	hasServerPermission(serverData.value?.current_user_permissions ?? 0, 'SETUP'),
@@ -690,14 +688,11 @@ const { migration: serverPlayMigration, confirmMigration: confirmServerPlayMigra
 		worldId,
 		serverFull,
 		content: serverContent,
-		forced: () => props.forceServerPlayMigration,
 		backupsQueue,
 		canSetup,
 		serverLoaded: computed(() => !!serverData.value),
 		migrationModal: serverPlayMigrationModal,
 		inviteLinkModal: serverInviteLinkModal,
-		trackUpload: (run) => serverPlayMigrationUploadModal.value?.trackProgress(run) ?? run(() => {}),
-		onTagged: () => emit('server-play-migration-tagged'),
 	})
 
 const globalInviteForServer = computed(
@@ -709,7 +704,7 @@ const isOnboarding = computed(
 )
 
 const serverHeaderImage = computed(() =>
-	serverData.value?.is_medal ? 'https://cdn.modrinth.com/medal_icon.webp' : serverImage.value,
+	serverData.value?.is_medal ? 'https://cdn.modrinth.com/medal_icon.webp' : serverIconImage.value,
 )
 
 const showServerUptime = computed(() => props.showUptime && serverPowerState.value === 'running')

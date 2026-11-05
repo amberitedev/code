@@ -10,7 +10,7 @@
 [[clone]]
 ours = "packages/bedrock/src/upstream/store"
 upstream = "packages/app-lib/src/state/content_store"
-commit = "cf0a3ca593506c543ed63c35986e31ade1b19b2e"
+commit = "fcd4fe1facd1dc823456c0207c1bcb2543b19e0f"
 adapted = [
   # Ours: what the cloned files use from app-lib (State, DirectoryInfo, fetch, instance rows,
   # the runtime cache, install jobs), for a host with no instances. Mounted as

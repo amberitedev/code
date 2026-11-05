@@ -16,6 +16,7 @@ pub async fn install_shared_instance(
     server_manager_name: Option<String>,
     server_manager_icon_url: Option<String>,
     instance_icon_url: Option<String>,
+    instance_icon_config: Option<IconConfig>,
 ) -> crate::Result<InstallJobSnapshot> {
     crate::util::fetch::wait_for_local_api_rate_limit(Box::pin(
         install_shared_instance_inner(
@@ -25,6 +26,7 @@ pub async fn install_shared_instance(
             server_manager_name,
             server_manager_icon_url,
             instance_icon_url,
+            instance_icon_config,
         ),
     ))
     .await
@@ -37,16 +39,18 @@ async fn install_shared_instance_inner(
     server_manager_name: Option<String>,
     server_manager_icon_url: Option<String>,
     instance_icon_url: Option<String>,
+    instance_icon_config: Option<IconConfig>,
 ) -> crate::Result<InstallJobSnapshot> {
     let state = State::get().await?;
     let version = get_latest_remote_version(shared_instance_id, &state).await?;
     let configs = remote_config_update(None, None, &version, &state).await?;
-    let data = shared_instance_install_data(
+    let mut data = shared_instance_install_data(
         shared_instance_id,
         manager_id,
         server_manager_name,
         server_manager_icon_url,
         instance_icon_url,
+        instance_icon_config,
         name,
         version,
         configs,
@@ -55,7 +59,62 @@ async fn install_shared_instance_inner(
     )
     .await?;
 
+    if data.manager_id.is_none()
+        && data.server_manager_name.is_none()
+        && is_remote_shared_instance_owner(
+            shared_instance_id,
+            data.linked_user_id.as_deref(),
+            &state,
+        )
+        .await
+    {
+        data.role = SharedInstanceRole::Owner;
+        data.restored_from_remote = true;
+        data.server_manager_icon_url = None;
+    }
+
     crate::install::create_shared_instance(data).await
+}
+
+async fn is_remote_shared_instance_owner(
+    shared_instance_id: &str,
+    linked_user_id: Option<&str>,
+    state: &State,
+) -> bool {
+    let Some(linked_user_id) = linked_user_id else {
+        return false;
+    };
+
+    match get_remote_users(shared_instance_id, state).await {
+        Ok(users) => users.users.iter().any(|user| {
+            user.id == linked_user_id
+                && user.join_type == SharedInstanceJoinType::Owner
+        }),
+        Err(error) => {
+            tracing::warn!(
+                shared_instance_id,
+                %error,
+                "Could not check shared instance ownership, installing as a member"
+            );
+            false
+        }
+    }
+}
+
+#[tracing::instrument]
+pub async fn dismiss_shared_instance_restored_notice(
+    instance_id: &str,
+) -> crate::Result<()> {
+    let state = State::get().await?;
+    crate::state::set_shared_instance_restored_from_remote(
+        instance_id,
+        false,
+        &state.pool,
+    )
+    .await?;
+    emit_instance(instance_id, InstancePayloadType::Edited).await?;
+
+    Ok(())
 }
 
 pub(super) fn shared_instance_invite_install_name(
@@ -105,6 +164,7 @@ pub async fn get_shared_instance_invite_install_preview(
     let shared_instance_id = invite.instance_id;
     let instance_icon_url = invite.instance_icon;
     let inviter = invite.inviter;
+    let instance_icon_config = invite.instance_icon_config;
     let (manager_id, server_manager_name, server_manager_icon_url) =
         shared_instance_invite_manager(invite.managers);
     let name = shared_instance_invite_install_name(
@@ -132,6 +192,7 @@ pub async fn get_shared_instance_invite_install_preview(
         server_manager_name,
         server_manager_icon_url,
         instance_icon_url,
+        instance_icon_config,
         preview,
     })
 }
@@ -235,7 +296,7 @@ async fn get_shared_instance_update_preview_inner(
     let Some(attachment) = metadata.shared_instance.clone() else {
         return Ok(None);
     };
-    if !attachment.role.is_member() {
+    if !attachment.role.is_member() && attachment.applied_version.is_none() {
         if let SharedInstanceRemoteResponse::Unavailable(reason) =
             get_remote_instance_access(&attachment.id, &state).await?
         {
@@ -253,7 +314,7 @@ async fn get_shared_instance_update_preview_inner(
     }
 
     let version =
-        get_latest_remote_member_version(instance_id, &attachment, &state)
+        get_latest_attached_remote_version(instance_id, &attachment, &state)
             .await?;
     if !version.ready {
         return Ok(Some(SharedInstanceUpdatePreview {
@@ -382,9 +443,9 @@ fn member_attachment(
             "instance is not attached to a shared instance".to_string(),
         ),
     )?;
-    if !attachment.role.is_member() {
+    if !attachment.role.is_member() && attachment.applied_version.is_none() {
         bail!(crate::ErrorKind::InputError(
-            "only shared instance members can update from shared instances"
+            "unpublished shared instances have no updates to download"
                 .to_string(),
         ));
     }
@@ -403,7 +464,7 @@ pub(crate) async fn shared_instance_update_data(
     let attachment = member_attachment(&metadata)?;
 
     let version =
-        get_latest_remote_member_version(instance_id, &attachment, state)
+        get_latest_attached_remote_version(instance_id, &attachment, state)
             .await?;
     let fresh_start = backtrack_version_changed(&attachment, &version);
     let configs = remote_config_update(
@@ -419,6 +480,7 @@ pub(crate) async fn shared_instance_update_data(
         attachment.server_manager_name.clone(),
         attachment.server_manager_icon_url.clone(),
         None,
+        None,
         metadata.instance.name,
         version,
         configs,
@@ -426,6 +488,8 @@ pub(crate) async fn shared_instance_update_data(
         state,
     )
     .await?;
+    data.role = attachment.role;
+    data.restored_from_remote = attachment.restored_from_remote;
     data.fresh_start = fresh_start;
     Ok(data)
 }
@@ -491,7 +555,7 @@ pub(super) async fn ensure_ready_remote_version_for_invite(
     }
 }
 
-pub(super) async fn get_latest_remote_member_version(
+pub(super) async fn get_latest_attached_remote_version(
     instance_id: &str,
     attachment: &SharedInstanceAttachment,
     state: &State,
@@ -607,6 +671,13 @@ pub(super) async fn handle_unavailable_shared_instance_if_current_user(
         _ => {
             crate::state::clear_shared_instance(instance_id, &state.pool)
                 .await?;
+            if attachment.server_manager_name.is_some() {
+                crate::api::instance::synced_servers::remove_managed_servers(
+                    instance_id,
+                    state,
+                )
+                .await?;
+            }
         }
     }
     emit_instance(instance_id, InstancePayloadType::Edited).await?;
@@ -686,6 +757,7 @@ pub(super) async fn shared_instance_install_data(
     server_manager_name: Option<String>,
     server_manager_icon_url: Option<String>,
     instance_icon_url: Option<String>,
+    instance_icon_config: Option<IconConfig>,
     name: String,
     version: ShareVersion,
     configs: ConfigUpdate,
@@ -775,10 +847,13 @@ pub(super) async fn shared_instance_install_data(
     Ok(SharedInstanceInstallData {
         linked_server: remote.linked_server,
         shared_instance_id: shared_instance_id.to_string(),
+        role: SharedInstanceRole::Member,
+        restored_from_remote: false,
         manager_id,
         server_manager_name,
         server_manager_icon_url,
         instance_icon_url,
+        instance_icon_config,
         linked_user_id,
         name,
         version: version.version,

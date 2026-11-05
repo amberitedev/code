@@ -10,16 +10,18 @@ import { computed, ref, watch } from 'vue'
 
 import { useAppSettings } from '@/composables/use-app-settings.ts'
 import { useImageThumbnail } from '@/composables/use-image-thumbnail'
+import type { LibraryInstance } from '@/features/library/library-instance'
 import { getInstanceIconUrl } from '@/helpers/instance'
-import type { GameInstance } from '@/helpers/types'
 
 const props = withDefaults(
 	defineProps<{
-		instance: GameInstance
+		instance: LibraryInstance
 		selected?: boolean
+		dimmed?: boolean
 	}>(),
 	{
 		selected: false,
+		dimmed: false,
 	},
 )
 
@@ -29,13 +31,17 @@ const localIcon = computed(() => {
 })
 const appSettings = useAppSettings()
 const compactMode = computed(() => appSettings.compactInstanceCards)
+// An uninstalled shared instance has no local file, so no modified time.
+const modified = computed(() =>
+	'modified' in props.instance ? String(props.instance.modified) : '',
+)
 const thumbnail = useImageThumbnail(
 	localIcon,
 	() => (compactMode.value ? 96 : 384),
-	() => String(props.instance.modified),
+	() => modified.value,
 )
 const thumbnailKey = computed(
-	() => `${localIcon.value}|${compactMode.value ? 96 : 384}|${props.instance.modified}`,
+	() => `${localIcon.value}|${compactMode.value ? 96 : 384}|${modified.value}`,
 )
 watch(thumbnail, (url) => {
 	if (url) knownThumbnails.set(thumbnailKey.value, url)
@@ -76,19 +82,24 @@ function measureTruncation() {
 	>
 		<div
 			class="relative flex shrink-0 items-center max-w-full overflow-clip"
-			:class="compactMode ? 'size-10 rounded-lg' : 'aspect-square min-w-full rounded-2xl'"
+			:class="[
+				compactMode ? 'size-10 rounded-lg' : 'aspect-square min-w-full rounded-2xl',
+				{ 'bg-surface-1': dimmed },
+			]"
 		>
 			<Avatar
 				class="pointer-events-none outline-none"
-				:class="compactMode ? '!rounded-lg' : '!rounded-2xl'"
+				:class="[compactMode ? '!rounded-lg' : '!rounded-2xl', { 'opacity-25': dimmed }]"
 				size="100%"
 				:src="iconSrc"
+				cache-icon
 				loading="lazy"
 				:tint-by="instance.id"
 				alt=""
 				no-shadow
 				pad-transparent-corners
 			/>
+			<slot name="icon-overlay" :compact="compactMode" />
 			<slot name="loading" :compact="compactMode" />
 			<div
 				class="absolute z-[1] flex items-center justify-center"

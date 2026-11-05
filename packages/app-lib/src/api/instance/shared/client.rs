@@ -5,7 +5,7 @@
 use super::install::*;
 use super::*;
 use crate::ErrorKind;
-use sharing_client::backend::{Backend, BackendError, Unavailable};
+use sharing_client::backend::{Backend, BackendError, ShareIcon, Unavailable};
 pub(super) use sharing_client::versions::{ManifestFile, ShareVersion};
 
 #[derive(Debug)]
@@ -54,6 +54,8 @@ pub(super) struct InstanceInviteInfoResponse {
     pub(super) instance_icon: Option<String>,
     #[serde(default)]
     pub(super) inviter: Option<SharedInstanceInviteCreator>,
+    #[serde(default)]
+    pub(super) instance_icon_config: Option<IconConfig>,
     #[serde(default)]
     pub(super) managers: Vec<InstanceInviteManagerResponse>,
     #[serde(default)]
@@ -267,13 +269,18 @@ pub(super) async fn get_remote_instance_access(
 pub(super) async fn update_remote_instance_icon(
     shared_instance_id: &str,
     icon_path: Option<&str>,
+    icon_config: Option<&IconConfig>,
     state: &State,
 ) -> crate::Result<()> {
-    let icon = match icon_path {
-        Some(icon_path) => Some(crate::util::io::read(icon_path).await?),
-        None => None,
+    // An icon editor icon goes up as its settings alone; members draw it themselves.
+    let icon = match (icon_config, icon_path) {
+        (Some(config), _) => Some(ShareIcon::Drawn(config)),
+        (None, Some(icon_path)) => {
+            Some(ShareIcon::Image(crate::util::io::read(icon_path).await?))
+        }
+        (None, None) => None,
     };
-    let backend = backend_with(icon.is_some())?;
+    let backend = backend_with(matches!(icon, Some(ShareIcon::Image(_))))?;
     call(state, backend.set_share_icon(shared_instance_id, icon)).await
 }
 

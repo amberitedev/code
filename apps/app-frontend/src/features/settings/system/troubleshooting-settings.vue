@@ -21,6 +21,7 @@ const queryClient = useQueryClient()
 const clearCacheConfirmModal = ref<InstanceType<typeof ConfirmModalWrapper> | null>(null)
 
 const copyDetailsMutation = useMutation({
+	networkMode: 'always',
 	mutationKey: appSettingsKeys.update,
 	scope: { id: 'app-settings' },
 	mutationFn: async (enabled: boolean) => {
