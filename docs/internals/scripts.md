@@ -94,7 +94,8 @@ restarting after Rust edits queue up instead of taking the whole machine.
 
 Every checkout compiles into the primary checkout's `target/dev-shared`, like a pnpm store: each
 third-party crate is compiled once and kept once, whichever checkout needed it first. Only the
-runner compiles there; a plain `cargo` run uses `target` and cannot change what the runner trusts.
+runner compiles there; a plain `cargo` run uses `target` and cannot change what the runner trusts. `cargo clean` in the primary checkout
+deletes `target/dev-shared` too, so every checkout compiles from scratch next time.
 
 Cargo decides what to recompile from file times alone, so in a shared folder a crate last compiled
 from another checkout can look finished here. `target/dev-shared/built-crates.json` records, for each crate in

@@ -979,11 +979,16 @@ async function ensureProgram(
 			while (!NodeFS.existsSync(cached(key))) {
 				runnerLog('info', `${spec.label} building ${build.program} (${key})`)
 				const recordBuilt = prepareCheckoutCrates(worktree, build)
-				if (!(await runCargo(spec, build, builds, build.cargoArgs))) return undefined
-				recordBuilt()
+				const compiled = await runCargo(spec, build, builds, build.cargoArgs)
 				const builtKey = programKey(worktree, build)
-				// An input edited during the build makes this program a mix. Build again.
+				// An input edited during the build makes this program a mix, and Cargo may have
+				// compiled crates the record calls unchanged. Forget the record and build again.
+				if (builtKey !== key) {
+					NodeFS.rmSync(NodePath.join(build.targetDir, BUILT_CRATES), { force: true })
+				}
+				if (!compiled) return undefined
 				if (builtKey === key) {
+					recordBuilt()
 					NodeFS.mkdirSync(NodePath.dirname(cached(key)), { recursive: true })
 					const partial = `${cached(key)}.${process.pid}.partial`
 					NodeFS.copyFileSync(NodePath.join(build.targetDir, 'debug', build.program), partial)
@@ -1053,8 +1058,10 @@ function prepareCheckoutCrates(worktree: string, build: ProgramBuild): () => voi
 		const digest = hash.digest('hex')
 		hashes.set(folder, digest)
 		const built = record[folder]
-		const time =
-			built?.hash === digest && built.programs.includes(build.program) ? TRUSTED_FILE_TIME : now
+		const trusted = built?.hash === digest && built.programs.includes(build.program)
+		// About to compile, so its entry is wrong whether or not this build succeeds.
+		if (!trusted) delete record[folder]
+		const time = trusted ? TRUSTED_FILE_TIME : now
 		for (const [file] of entries) {
 			try {
 				NodeFS.utimesSync(NodePath.join(worktree, file), time, time)
@@ -1063,6 +1070,7 @@ function prepareCheckoutCrates(worktree: string, build: ProgramBuild): () => voi
 			}
 		}
 	}
+	writeRecord(recordFile, record)
 	return () => {
 		for (const [folder, hash] of hashes) {
 			const built = record[folder]
@@ -1071,8 +1079,16 @@ function prepareCheckoutCrates(worktree: string, build: ProgramBuild): () => voi
 					? { hash, programs: [...new Set([...built.programs, build.program])] }
 					: { hash, programs: [build.program] }
 		}
-		NodeFS.writeFileSync(recordFile, JSON.stringify(record, null, '\t'))
+		writeRecord(recordFile, record)
 	}
+}
+
+/** Written whole, then renamed into place, so a stopped runner never leaves half a record. */
+function writeRecord(file: string, record: unknown): void {
+	NodeFS.mkdirSync(NodePath.dirname(file), { recursive: true })
+	const partial = `${file}.${process.pid}.partial`
+	NodeFS.writeFileSync(partial, JSON.stringify(record, null, '\t'))
+	NodeFS.renameSync(partial, file)
 }
 
 /** Whether Cargo succeeded. */
