@@ -3,12 +3,14 @@
 // Prepares a checkout for work: dependencies, development data, and the App library's environment
 // file. T3 Code runs this when it creates a worktree (see t3.json); it is safe to run again by hand.
 // Progress is recorded in .data/setup.json so an agent that starts before this finishes can tell
-// "still running" from "never ran".
+// "still running" from "never ran". While running it names this process's pid: a pid that no longer
+// exists means setup was killed, so run it again.
 
 import * as NodeChildProcess from 'node:child_process'
 import * as NodeFS from 'node:fs'
 import * as NodePath from 'node:path'
 import { copyDataEntry, DATA_ENTRIES } from './dev-data.ts'
+import { recordTiming } from './timings.ts'
 
 const ENV_FILE = NodePath.join('packages', 'app-lib', '.env')
 
@@ -17,16 +19,41 @@ const primary = primaryWorktree(worktree)
 const data = NodePath.join(worktree, '.data')
 const statusPath = NodePath.join(data, 'setup.json')
 const startedAt = new Date().toISOString()
+const started = performance.now()
+const ms: Record<string, number> = {}
+let error = ''
+let cancelled = false
 
 NodeFS.mkdirSync(data, { recursive: true })
 writeStatus('running')
+// Every way out ends with a final status, so an agent never waits on a setup that is gone. A hard
+// kill skips this, which the dead pid shows.
+process.on('uncaughtExceptionMonitor', (thrown) => {
+	error = thrown instanceof Error ? (thrown.stack ?? thrown.message) : String(thrown)
+})
+process.on('exit', (code) => {
+	const result = cancelled ? 'cancelled' : code === 0 ? 'ok' : 'failed'
+	writeStatus(result === 'ok' ? 'done' : 'failed')
+	ms.total = Math.round(performance.now() - started)
+	recordTiming(primary, { kind: 'setup', worktree, branch: currentBranch(), result, ms })
+})
+let install: NodeChildProcess.ChildProcess | undefined
+for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
+	process.on(signal, () => {
+		cancelled = true
+		error = `Cancelled by ${signal}.`
+		// The install ends on the signal, and setup exits once it has.
+		if (install) install.kill(signal)
+		else process.exit(1)
+	})
+}
 
 // The install is the slow part, so the copies run while it works.
-const install = installDependencies()
+const installed = timed('install', installDependencies)
 
 try {
 	if (!samePath(worktree, primary)) {
-		copyDevelopmentData()
+		await timed('data', async () => copyDevelopmentData())
 		copyEnvFile()
 	}
 	for (const path of [
@@ -35,19 +62,17 @@ try {
 	]) {
 		NodeFS.mkdirSync(path, { recursive: true })
 	}
-	startBuild()
-} catch (error) {
+} catch (thrown) {
 	// A failed copy must not hide the install result, or stop the install from finishing.
-	console.error(`[setup] ${error instanceof Error ? error.message : String(error)}`)
+	error = thrown instanceof Error ? thrown.message : String(thrown)
+	console.error(`[setup] ${error}`)
 	process.exitCode = 1
 }
 
-if (!(await install)) process.exitCode = 1
-writeStatus(process.exitCode ? 'failed' : 'done')
+if (!(await installed)) process.exitCode = 1
+if (cancelled) process.exitCode = 1
 console.log(
-	process.exitCode
-		? '[setup] failed. Fix the error above, then run: node scripts/setup-worktree.ts'
-		: '[setup] done',
+	process.exitCode ? '[setup] failed. Fix the error above, then run: vp run setup' : '[setup] done',
 )
 
 // Only what is missing, so running setup again never replaces data the work has changed.
@@ -71,63 +96,64 @@ function copyEnvFile(): void {
 }
 
 // Install scripts write the shared .git/config, so two worktrees set up at once can collide.
-// One retry clears that.
+// One retry clears that. A stale lockfile fails instead of being rewritten, and with stdin closed a
+// prompt fails instead of waiting forever.
 async function installDependencies(): Promise<boolean> {
 	for (const attempt of [1, 2]) {
-		if ((await run('vp', ['i'])) === 0) return true
+		if (cancelled) return false
+		if ((await run('vp i --frozen-lockfile -- --yes')) === 0) return true
+		error = 'vp i failed. Its output is in the setup terminal.'
 		console.error(`[setup] vp i failed${attempt === 1 ? '; retrying once' : ''}`)
 	}
 	return false
 }
 
-/**
- * Builds the App and Core in the background, so `up` has them ready by the time the work needs
- * them. It runs behind everything else, waits its turn behind other checkouts' builds, and finds
- * nothing to do when another checkout already built the same Rust. Its log is `.data/build.log`.
- */
-function startBuild(): void {
-	// Optional: `up` builds whatever is missing, so a build that cannot start never fails setup.
-	const notStarted = (error: unknown) =>
-		console.error(
-			`[setup] background build not started: ${error instanceof Error ? error.message : String(error)}`,
-		)
-	try {
-		const log = NodeFS.openSync(NodePath.join(data, 'build.log'), 'w')
-		const child = NodeChildProcess.spawn(
-			process.execPath,
-			[NodePath.join(worktree, 'scripts', 'dev-runner.ts'), 'build'],
-			{ cwd: worktree, detached: true, stdio: ['ignore', log, log], windowsHide: true },
-		)
-		child.once('error', notStarted)
-		child.unref()
-		NodeFS.closeSync(log)
-	} catch (error) {
-		notStarted(error)
-	}
-}
-
-function run(command: string, args: ReadonlyArray<string>): Promise<number> {
+// Output goes straight to the terminal: the data copy blocks this process, and a piped install
+// would stall behind it.
+function run(command: string): Promise<number> {
 	return new Promise((resolve) => {
 		// The shell resolves vp.cmd on Windows.
-		const child = NodeChildProcess.spawn([command, ...args].join(' '), {
+		const child = NodeChildProcess.spawn(command, {
 			cwd: worktree,
 			shell: true,
-			stdio: 'inherit',
+			stdio: ['ignore', 'inherit', 'inherit'],
 		})
+		install = child
 		child.once('error', () => resolve(1))
-		child.once('close', (code) => resolve(code ?? 1))
+		child.once('close', (code) => {
+			install = undefined
+			resolve(code ?? 1)
+		})
 	})
+}
+
+async function timed<T>(step: string, work: () => Promise<T>): Promise<T> {
+	const start = performance.now()
+	try {
+		return await work()
+	} finally {
+		ms[step] = Math.round(performance.now() - start)
+	}
 }
 
 function writeStatus(status: 'running' | 'done' | 'failed'): void {
 	const finishedAt = status === 'running' ? undefined : new Date().toISOString()
+	const details = status === 'running' ? { pid: process.pid } : status === 'failed' ? { error } : {}
 	// Replaced whole, so an agent reading it mid-write never sees half a file.
 	const partial = `${statusPath}.partial`
 	NodeFS.writeFileSync(
 		partial,
-		`${JSON.stringify({ status, startedAt, finishedAt }, null, '\t')}\n`,
+		`${JSON.stringify({ status, startedAt, finishedAt, ...details }, null, '\t')}\n`,
 	)
 	NodeFS.renameSync(partial, statusPath)
+}
+
+function currentBranch(): string {
+	try {
+		return git(['branch', '--show-current'], worktree)
+	} catch {
+		return ''
+	}
 }
 
 function primaryWorktree(cwd: string): string {

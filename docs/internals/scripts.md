@@ -23,9 +23,10 @@ because two worktrees set up at the same time can collide on the shared Git conf
 library's `.env`. The scenario copy leaves out Minecraft's game assets (`meta/assets`) and the App
 window's browser caches; they are most of the files and are fetched again when needed. It does not
 overwrite anything already in the worktree, so it is safe to run again. `.data/setup.json` records
-whether it is `running`, `done`, or `failed`. Once the data is copied, it starts
-`node scripts/dev-runner.ts build` in the background, so the App and Core are usually compiled by
-the time the work needs them. That build logs to `.data/build.log`.
+whether it is `running` (with its `pid`), `done`, or `failed` (with an `error`). Any exit,
+including Ctrl+C, writes the final state; a hard kill cannot, so a `running` file whose `pid` is
+gone means setup died. Rust is not built here: `up` builds what it needs, and with the shared build
+folder that is usually nothing.
 
 ## Dev
 
@@ -37,26 +38,24 @@ the time the work needs them. That build logs to `.data/build.log`.
   `dev:backend` first. Core and Minecraft servers are not needed for account/sharing work.
 - `vp run dev:core`: Starts only Core. It pairs with the Worker and checks App sign-in tickets
   against the Worker's public key, so start `dev:backend` too.
-- `node scripts/dev-runner.ts up 1 2`: Starts the same stack in the background, waits until every service answers
+- `vp run up 1 2`: Starts the same stack in the background, waits until every service answers
   and every App's page loads through its browser bridge, then prints the bridge URLs. In a new
   checkout the frontend spends a minute or two preparing its dependencies; that happens inside `up`. It writes to `.data/dev.log`
   and returns after 9 minutes if the stack is still compiling; run it again to keep waiting. It
   fails at once when a Rust build fails, or when the App's entry module does not compile, printing
   the compiler error; the stack keeps running. An optional mode comes first:
-  `node scripts/dev-runner.ts up dev:backend`. Unlike `vp run dev`, it leaves out the account sign-in
+  `vp run up dev:backend`. Unlike `vp run dev`, it leaves out the account sign-in
   website and keeps App windows off the desktop, because agents use Apps through the browser
   bridge. `--show-windows` shows them; on a stack already running hidden it fails, so run `down`
   first.
-- `node scripts/dev-runner.ts status`: Prints what is running, whether it is ready, and each App's bridge URL. Exits
+- `vp run status`: Prints what is running, whether it is ready, and each App's bridge URL. Exits
   non-zero when the stack is not ready.
-- `node scripts/dev-runner.ts down`: Stops this checkout's dev runner and everything it started.
+- `vp run down`: Stops this checkout's dev runner and everything it started.
 - `node scripts/dev-runner.ts build`: Compiles the App and Core for this checkout's Rust without
-  starting anything. Worktree setup runs it.
-- `node scripts/dev-runner.ts preset`: Lists the saved datasets in the primary checkout's
-  `.data/presets`. `preset save <name>` saves this checkout's `backend`, `core`, and `scenarios`
-  there, replacing any earlier preset of that name; the stack must be stopped.
-  `up --preset <name> 1 2` replaces this checkout's data with that preset, then starts. Copies
-  leave out game assets and browser caches, as setup does.
+  starting anything. `check:changed` runs it when Rust changed.
+- `vp run check:changed [ref]`: CI's fast checks for the files changed since the merge base with
+  `origin/main` (or `ref`): lint, typos, TOML, typecheck and tests of the affected packages,
+  `dev:check`, and for Rust `rustfmt` and a build. typos and tombi are skipped when not installed.
 - `vp run dev:check`: Prints the processes, state directory, URLs, and ports that a full run would
   use without starting anything.
 
@@ -171,7 +170,7 @@ Share tab lists scenario 2 as a member, and scenario 2's copy shows no wrong-acc
 member's instance has no Share tab). Rebuild it in a worktree, through the Apps, and hand it over
 by copying; test data never leaves a worktree on its own.
 
-1. `node scripts/dev-runner.ts up 1 2` and open both bridge URLs.
+1. `vp run up 1 2` and open both bridge URLs.
 2. In App 1, delete every instance whose Share tab says "Wrong account" (Instance settings, General,
    Delete instance). Such a record points at a shared instance the backend no longer has, and the
    locked Share tab offers no other way out.
@@ -184,7 +183,7 @@ by copying; test data never leaves a worktree on its own.
 6. In App 2, accept the invite toast and click Install. Wait until the install finishes (the
    download indicator in the top bar), which leaves the instance in App 2's library as a member of
    the shared instance.
-7. `node scripts/dev-runner.ts down`. With the primary checkout's stack stopped too, replace the
+7. `vp run down`. With the primary checkout's stack stopped too, replace the
    primary's `.data/backend`, `.data/core`, and `.data/scenarios` with the worktree's.
 
 Publishing uploads only files that are not on Modrinth: loose mods, selected configs, and the like.
@@ -214,7 +213,7 @@ stable, but an occupied port can shift the actual run.
 ## Process ownership
 
 The dev runner stops its child processes when it receives Ctrl+C or the `quit` input command.
-A runner started with `node scripts/dev-runner.ts up` has no input; stop it with `node scripts/dev-runner.ts down`, which stops the
+A runner started with `vp run up` has no input; stop it with `vp run down`, which stops the
 PID recorded in `.data/runtime.json` and nothing else. Never kill by a broad process name, command
 match, or worktree path: several worktrees may be running Node, Core, and Tauri at the same
 time, and a pattern can also match the agent doing the work.
@@ -260,3 +259,11 @@ The workflow checks out and pushes with the `UPSTREAM_SYNC_TOKEN` secret, becaus
 `GITHUB_TOKEN` push changes to `.github/workflows`. It is a fine-grained personal access token for
 `amberitedev/code` only, with Contents and Workflows set to read and write. When it expires the
 Merge step fails at checkout; replace the secret with a new token.
+
+## Timings
+
+Setup, every Rust build, and every `up` append one JSON line to the primary checkout's
+`.data/timings.jsonl`, shared by all checkouts. Each line has `kind` (`setup`, `build`, `up`),
+the worktree, the result, and milliseconds per step: `install` and `data` for setup, `lockWait`
+and `compile` plus the number of repo crates compiled again for a build, and the wait until ready
+for `up`. It is the record for checking whether a change to the dev setup made it faster.
