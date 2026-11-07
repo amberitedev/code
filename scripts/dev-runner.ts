@@ -27,12 +27,12 @@ const PORT_PROBE_HOSTS = ['127.0.0.1', '::1'] as const
 const UP_WAIT_MS = 9 * 60_000
 // One cached program per distinct set of Rust inputs. Older ones are deleted.
 const CACHED_PROGRAMS = 6
-// How much bigger than the primary's a worktree's build output grows before it starts over.
-const BUILD_GROWTH_LIMIT = 10 * 2 ** 30
 const BUILD_LOCK_STALE_MS = 60 * 60_000
 const BUILD_LOCK = 'building'
-// Beside each cached program: the checkout it was built in, whose build output a new worktree may clone.
-const CHECKOUT_FILE = 'checkout'
+// In the shared build output: each repo crate's content when last compiled, and for which programs.
+const BUILT_CRATES = 'built-crates.json'
+// Given to an unchanged crate's files so Cargo trusts its compiled output.
+const TRUSTED_FILE_TIME = new Date('2000-01-01T00:00:00Z')
 const BRIDGE_READY = /browser bridge ready.*?url=(http:\/\/[\d.]+:\d+)/
 const FETCH_BAD_PORTS = new Set([
 	0, 1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 79, 87, 95, 101, 102,
@@ -80,8 +80,6 @@ export type ProgramBuild = {
 	/** Programs built by every checkout, shared. Its lock lets one build run at a time. */
 	readonly cacheDir: string
 	readonly cargoArgs: ReadonlyArray<string>
-	/** The primary checkout, whose `target` is cloned into `targetDir` before the first build. */
-	readonly cloneFrom?: string
 	/** Where Cargo runs. It takes the toolchain and `.cargo` settings from here. */
 	readonly cwd: string
 	/** Settings the build reads. They change the program, so they are part of its key. */
@@ -735,7 +733,7 @@ export function createProcessSpecs(input: {
 				ignoredInputs: [],
 				inputs: workspaceInputs(input.paths, 'copal'),
 				program: programFile('copal'),
-				...workspaceBuildDirs(input.paths, input.env),
+				...workspaceBuildDirs(input.paths),
 			},
 			cwd: coreDir,
 			env: coreEnv,
@@ -827,7 +825,7 @@ function appProgramBuild(paths: WorktreePaths, env: NodeJS.ProcessEnv): ProgramB
 		// The App's version comes from the frontend.
 		inputs: [...workspaceInputs(paths, 'theseus_gui'), 'apps/app-frontend/package.json'],
 		program: programFile('theseus_gui'),
-		...workspaceBuildDirs(paths, env),
+		...workspaceBuildDirs(paths),
 	}
 }
 
@@ -898,42 +896,13 @@ function localCrates(worktree: string): ReadonlyMap<string, LocalCrate> {
 }
 
 /**
- * Where a checkout compiles the workspace. On a drive that clones files without copying them
- * (a Windows Dev Drive), each worktree gets its own build output, cloned from the primary
- * checkout's, so worktrees keep their own compiler caches and take little extra space.
- * Elsewhere every checkout compiles into the primary checkout's build output, so a new worktree
- * still reuses the dependencies compiled there.
+ * Every checkout compiles into one build output, like a pnpm store: each dependency is compiled
+ * once and kept once. Builds already run one at a time. Only the runner compiles there, so
+ * `BUILT_CRATES` describes everything in it; a person's own Cargo runs use `target` as usual.
  */
-function workspaceBuildDirs(
-	paths: WorktreePaths,
-	env: NodeJS.ProcessEnv,
-): Pick<ProgramBuild, 'cacheDir' | 'cloneFrom' | 'targetDir'> {
-	const shared = env.CARGO_TARGET_DIR ?? NodePath.join(paths.primary, 'target')
-	const cacheDir = NodePath.join(shared, 'dev-bin')
-	if (env.CARGO_TARGET_DIR || !clonesFiles(paths)) return { cacheDir, targetDir: shared }
-	return { cacheDir, cloneFrom: paths.primary, targetDir: NodePath.join(paths.worktree, 'target') }
-}
-
-let clonesFilesResult: boolean | undefined
-/** Whether this worktree and the primary checkout share a drive that clones files: ReFS. */
-function clonesFiles(paths: WorktreePaths): boolean {
-	if (clonesFilesResult !== undefined) return clonesFilesResult
-	clonesFilesResult = false
-	if (process.platform !== 'win32') return clonesFilesResult
-	// T3 Code reaches its worktrees through a junction, so compare where the files really are.
-	const worktree = NodeFS.realpathSync.native(paths.worktree)
-	const primary = NodeFS.realpathSync.native(paths.primary)
-	const drive = NodePath.parse(worktree).root.slice(0, 1).toUpperCase()
-	if (worktree === primary || NodePath.parse(primary).root.slice(0, 1).toUpperCase() !== drive) {
-		return clonesFilesResult
-	}
-	const result = NodeChildProcess.spawnSync(
-		'powershell',
-		['-NoProfile', '-Command', `(Get-Volume -DriveLetter ${drive}).FileSystem`],
-		{ encoding: 'utf8', windowsHide: true },
-	)
-	clonesFilesResult = result.stdout.trim() === 'ReFS'
-	return clonesFilesResult
+function workspaceBuildDirs(paths: WorktreePaths): Pick<ProgramBuild, 'cacheDir' | 'targetDir'> {
+	const targetDir = NodePath.join(paths.primary, 'target', 'dev-shared')
+	return { cacheDir: NodePath.join(targetDir, 'dev-bin'), targetDir }
 }
 
 function programFile(name: string): string {
@@ -951,8 +920,16 @@ export function programKey(worktree: string, build: ProgramBuild): string {
 	}
 	add(process.platform, process.arch, ...build.cargoArgs)
 	add(JSON.stringify(Object.entries(build.env).sort(([left], [right]) => (left < right ? -1 : 1))))
-	// Every input's content as Git would store it, so the same content gives the same key
-	// whether it is committed, staged, edited, or new.
+	const contents = inputContents(worktree, build)
+	for (const file of [...contents.keys()].sort()) add(file, contents.get(file)!)
+	return hash.digest('hex').slice(0, 20)
+}
+
+/**
+ * Every file the build reads, relative to the checkout with `/`, and its content as Git would
+ * store it, so the same content gives the same hash whether it is committed, staged, edited, or new.
+ */
+function inputContents(worktree: string, build: ProgramBuild): Map<string, string> {
 	const contents = new Map<string, string>()
 	for (const entry of git(['ls-files', '-s', '-z', '--', ...build.inputs], worktree).split('\0')) {
 		const [details, file] = entry.split('\t')
@@ -978,8 +955,7 @@ export function programKey(worktree: string, build: ProgramBuild): string {
 				: 'missing',
 		)
 	}
-	for (const file of [...contents.keys()].sort()) add(file, contents.get(file)!)
-	return hash.digest('hex').slice(0, 20)
+	return contents
 }
 
 /** The cached program for this build's current inputs, built first when there is none. */
@@ -1002,22 +978,21 @@ async function ensureProgram(
 			// Another runner may have built it while this one waited.
 			while (!NodeFS.existsSync(cached(key))) {
 				runnerLog('info', `${spec.label} building ${build.program} (${key})`)
-				if (build.cloneFrom) {
-					if (!(await cloneBuildOutput(worktree, spec, build, build.cloneFrom, builds, stopped)))
-						return undefined
-				} else if (!markCheckoutCratesChanged(worktree, spec, build)) return undefined
-				if (!(await runCargo(spec, build, builds, build.cargoArgs))) return undefined
+				const recordBuilt = prepareCheckoutCrates(worktree, build)
+				const compiled = await runCargo(spec, build, builds, build.cargoArgs)
 				const builtKey = programKey(worktree, build)
-				// An input edited during the build makes this program a mix. Build again.
+				// An input edited during the build makes this program a mix, and Cargo may have
+				// compiled crates the record calls unchanged. Forget the record and build again.
+				if (builtKey !== key) {
+					NodeFS.rmSync(NodePath.join(build.targetDir, BUILT_CRATES), { force: true })
+				}
+				if (!compiled) return undefined
 				if (builtKey === key) {
+					recordBuilt()
 					NodeFS.mkdirSync(NodePath.dirname(cached(key)), { recursive: true })
 					const partial = `${cached(key)}.${process.pid}.partial`
 					NodeFS.copyFileSync(NodePath.join(build.targetDir, 'debug', build.program), partial)
 					NodeFS.renameSync(partial, cached(key))
-					NodeFS.writeFileSync(
-						NodePath.join(NodePath.dirname(cached(key)), CHECKOUT_FILE),
-						worktree,
-					)
 				}
 				key = builtKey
 			}
@@ -1042,235 +1017,78 @@ async function ensureProgram(
 }
 
 /**
- * Cargo decides whether a crate needs compiling from file times alone, and checkouts share one
- * build output. A crate last compiled from another checkout looks finished whenever this
- * checkout's files are older, whatever they contain. So after another checkout's build, the
- * crates that live in the checkout are marked as changed. Cargo then compiles them again from
- * this checkout's files, and the compiler reuses whatever work still applies.
+ * Cargo decides whether a crate needs compiling from file times alone, and every checkout shares
+ * one build output. So before a build, each crate in the repo is checked against the content it
+ * was last compiled from for this program. A crate that matches gets old file times, so Cargo
+ * keeps its compiled output even though this checkout's files are newer. A crate that differs, or
+ * was last compiled for another program from other content, gets the current time, so Cargo
+ * compiles it again from this checkout. Returns what to record once the build succeeds.
  */
-function markCheckoutCratesChanged(
-	worktree: string,
-	spec: ProcessSpec,
-	build: ProgramBuild,
-): boolean {
-	const lastCheckout = NodePath.join(build.targetDir, `${build.program}.checkout`)
-	if (NodeFS.existsSync(lastCheckout) && NodeFS.readFileSync(lastCheckout, 'utf8') === worktree) {
-		return true
+function prepareCheckoutCrates(worktree: string, build: ProgramBuild): () => void {
+	const recordFile = NodePath.join(build.targetDir, BUILT_CRATES)
+	let record: Record<string, { hash: string; programs: ReadonlyArray<string> }> = {}
+	try {
+		record = JSON.parse(NodeFS.readFileSync(recordFile, 'utf8'))
+	} catch {
+		// First build into this folder: every crate compiles.
 	}
-	const metadata = NodeChildProcess.spawnSync('cargo', ['metadata', '--format-version', '1'], {
-		cwd: build.cwd,
-		encoding: 'utf8',
-		env: { ...spec.env, ...build.env },
-		maxBuffer: 256 * 1024 * 1024,
-		windowsHide: true,
-	})
-	if (metadata.status !== 0) {
-		runnerLog('error', metadata.stderr.trim() || 'cargo metadata failed.')
-		return false
+	const folders = build.inputs.filter((input) =>
+		NodeFS.existsSync(NodePath.join(worktree, input, 'Cargo.toml')),
+	)
+	const files = new Map<string, Array<[string, string]>>(folders.map((folder) => [folder, []]))
+	// Inputs outside every crate folder, such as the App's version in `package.json`, count toward
+	// the program's own crate (the first input folder). Cargo judges them through build scripts
+	// that recorded another checkout's paths, so only their content can say they changed.
+	const loose: Array<[string, string]> = []
+	for (const [file, blob] of inputContents(worktree, build)) {
+		const folder = folders
+			.filter((candidate) => file.startsWith(`${candidate}/`))
+			.sort((left, right) => right.length - left.length)[0]
+		if (folder) files.get(folder)!.push([file, blob])
+		else loose.push([file, blob])
 	}
-	const { packages } = JSON.parse(metadata.stdout) as {
-		packages: ReadonlyArray<{
-			source: string | null
-			targets: ReadonlyArray<{ src_path: string }>
-		}>
-	}
-	runnerLog('info', `${spec.label} last built from another checkout, compiling its crates again`)
+	const hashes = new Map<string, string>()
 	const now = new Date()
-	// A crate without a source is read from a folder rather than downloaded. Each target's first
-	// file (lib.rs, main.rs, build.rs) is enough: compiling it reads the rest.
-	for (const crate of packages.filter((entry) => entry.source === null)) {
-		for (const target of crate.targets) NodeFS.utimesSync(target.src_path, now, now)
-	}
-	NodeFS.writeFileSync(lastCheckout, worktree)
-	return true
-}
-
-/**
- * Gives a worktree its own build output by cloning another checkout's, then makes the clone look
- * built from this worktree: Cargo trusts file times, and build scripts record absolute paths.
- * Crates whose files match the source's are then up to date; changed ones compile again. The
- * source is whichever checkout behind a cached program, or the primary, has the fewest Rust files
- * that differ from this one. The primary is rarely built, so that is usually a recent worktree.
- *
- * Cargo never deletes old output, and every file a build writes stops being shared with the
- * source. So once a worktree's build output outgrows the source's by `BUILD_GROWTH_LIMIT`, it is
- * deleted and cloned again. That build compiles this worktree's changes without their compiler
- * caches, and the worktree is back to taking almost no space.
- */
-async function cloneBuildOutput(
-	worktree: string,
-	spec: ProcessSpec,
-	build: ProgramBuild,
-	primary: string,
-	builds: Set<NodeChildProcess.ChildProcess>,
-	stopped: () => boolean,
-): Promise<boolean> {
-	const source = closestBuiltCheckout(worktree, build, primary)
-	const from = NodePath.join(source, 'target')
-	if (!NodeFS.existsSync(from)) return true
-	if (NodeFS.existsSync(build.targetDir)) {
-		const growth = folderSize(build.targetDir) - folderSize(from, build.cacheDir)
-		if (growth < BUILD_GROWTH_LIMIT) return true
-		const old = `${build.targetDir}.old`
-		try {
-			NodeFS.rmSync(old, { recursive: true, force: true })
-			NodeFS.renameSync(build.targetDir, old)
-		} catch {
-			// Something still has a file open, such as an older App run from it. Build there.
-			return true
+	for (const [folder, entries] of files) {
+		const hash = NodeCrypto.createHash('sha256')
+		const hashed = folder === folders[0] ? [...entries, ...loose] : entries
+		for (const [file, blob] of hashed.sort(([left], [right]) => (left < right ? -1 : 1))) {
+			hash.update(file).update('\0').update(blob).update('\0')
 		}
-		runnerLog(
-			'info',
-			`${spec.label} deleting its build output, ${(growth / 2 ** 30).toFixed(1)} GB over ${source}'s`,
-		)
-		NodeFS.rmSync(old, { recursive: true, force: true })
-	}
-	runnerLog('info', `${spec.label} cloning the build output of ${source}`)
-	const partial = `${build.targetDir}.partial`
-	NodeFS.rmSync(partial, { recursive: true, force: true })
-	// Robocopy, many files at once: Windows' copy engine clones each file on ReFS, but the cost is
-	// per file, and a build output has tens of thousands. NodeFS.cpSync took over ten minutes.
-	const copy = NodeChildProcess.spawn(
-		'robocopy',
-		[
-			NodePath.resolve(from),
-			NodePath.resolve(partial),
-			'/E',
-			'/MT:64',
-			'/COPY:DAT',
-			'/DCOPY:T',
-			'/R:0',
-			'/W:0',
-			'/NP',
-			'/NFL',
-			'/NDL',
-			'/NJH',
-			'/NJS',
-			'/XD',
-			NodePath.resolve(build.cacheDir),
-			'/XF',
-			'*.checkout',
-		],
-		{ stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true },
-	)
-	builds.add(copy)
-	const output: string[] = []
-	copy.stdout.on('data', (chunk) => output.push(String(chunk)))
-	copy.stderr.on('data', (chunk) => output.push(String(chunk)))
-	const code = await new Promise<number | null>((resolve) => {
-		copy.once('error', () => resolve(null))
-		copy.once('close', resolve)
-	})
-	builds.delete(copy)
-	// Robocopy's codes below 8 all mean every file was copied.
-	if (code === null || code >= 8) {
-		if (!stopped()) runnerLog('error', `Could not clone ${from}: ${output.join('').trim()}`)
-		NodeFS.rmSync(partial, { recursive: true, force: true })
-		return false
-	}
-	const buildScripts = NodePath.join(partial, 'debug', 'build')
-	const paths = [source, worktree].map((path) => `${path}${NodePath.sep}`)
-	const [sourceEscaped, worktreeEscaped] = paths.map((path) => path.replaceAll('\\', '\\\\'))
-	for (const folder of NodeFS.existsSync(buildScripts) ? NodeFS.readdirSync(buildScripts) : []) {
-		for (const name of ['output', 'root-output']) {
-			const file = NodePath.join(buildScripts, folder, name)
-			if (!NodeFS.existsSync(file)) continue
-			const text = NodeFS.readFileSync(file, 'utf8')
-			const rewritten = text
-				.replaceAll(sourceEscaped!, worktreeEscaped!)
-				.replaceAll(paths[0]!, paths[1]!)
-			if (rewritten === text) continue
-			// Rewritten in place with its old time, or Cargo would run the build script again.
-			const { atime, mtime } = NodeFS.statSync(file)
-			NodeFS.writeFileSync(file, rewritten)
-			NodeFS.utimesSync(file, atime, mtime)
+		const digest = hash.digest('hex')
+		hashes.set(folder, digest)
+		const built = record[folder]
+		const trusted = built?.hash === digest && built.programs.includes(build.program)
+		// About to compile, so its entry is wrong whether or not this build succeeds.
+		if (!trusted) delete record[folder]
+		const time = trusted ? TRUSTED_FILE_TIME : now
+		for (const [file] of entries) {
+			try {
+				NodeFS.utimesSync(NodePath.join(worktree, file), time, time)
+			} catch {
+				// Deleted since it was listed.
+			}
 		}
 	}
-	NodeFS.renameSync(partial, build.targetDir)
-
-	const sameFiles = [...sameInputFiles(worktree, source, build.inputs)]
-	for (const file of build.ignoredInputs) {
-		const original = NodePath.join(source, NodePath.relative(worktree, file))
-		if (
-			NodeFS.existsSync(file) &&
-			NodeFS.existsSync(original) &&
-			NodeFS.readFileSync(file).equals(NodeFS.readFileSync(original))
-		) {
-			sameFiles.push(NodePath.relative(worktree, file))
+	writeRecord(recordFile, record)
+	return () => {
+		for (const [folder, hash] of hashes) {
+			const built = record[folder]
+			record[folder] =
+				built?.hash === hash
+					? { hash, programs: [...new Set([...built.programs, build.program])] }
+					: { hash, programs: [build.program] }
 		}
+		writeRecord(recordFile, record)
 	}
-	for (const file of sameFiles) {
-		const { atime, mtime } = NodeFS.statSync(NodePath.join(source, file))
-		NodeFS.utimesSync(NodePath.join(worktree, file), atime, mtime)
-	}
-	return true
 }
 
-/**
- * Of the primary and the checkouts that built a cached program, the one with build output whose
- * committed Rust files differ least from `worktree`'s.
- */
-function closestBuiltCheckout(worktree: string, build: ProgramBuild, primary: string): string {
-	const builders = NodeFS.readdirSync(build.cacheDir).flatMap((entry) => {
-		const file = NodePath.join(build.cacheDir, entry, CHECKOUT_FILE)
-		return NodeFS.existsSync(file) ? [NodeFS.readFileSync(file, 'utf8')] : []
-	})
-	const candidates = [...new Set([primary, ...builders])].filter(
-		(checkout) =>
-			!samePath(checkout, worktree) && NodeFS.existsSync(NodePath.join(checkout, 'target')),
-	)
-	const inputs = inputBlobs(worktree, build.inputs).size
-	let closest = { checkout: primary, differing: Number.POSITIVE_INFINITY }
-	for (const checkout of candidates) {
-		let differing: number
-		try {
-			differing = inputs - sameInputFiles(worktree, checkout, build.inputs).length
-		} catch {
-			// Deleted while this ran.
-			continue
-		}
-		if (differing < closest.differing) closest = { checkout, differing }
-	}
-	return closest.checkout
-}
-
-/** Input files, relative to the checkouts, committed with the same content in both and edited in neither. */
-function sameInputFiles(
-	checkout: string,
-	other: string,
-	inputs: ReadonlyArray<string>,
-): ReadonlyArray<string> {
-	const otherBlobs = inputBlobs(other, inputs)
-	const edited = new Set([...editedInputs(other, inputs), ...editedInputs(checkout, inputs)])
-	return [...inputBlobs(checkout, inputs)]
-		.filter(([file, blob]) => otherBlobs.get(file) === blob && !edited.has(file))
-		.map(([file]) => file)
-}
-
-/** Each committed input file, relative to the checkout, with its content's hash. */
-function inputBlobs(checkout: string, inputs: ReadonlyArray<string>): ReadonlyMap<string, string> {
-	return new Map(
-		git(['ls-files', '-s', '-z', '--', ...inputs], checkout)
-			.split('\0')
-			.flatMap((entry) => {
-				const [details, file] = entry.split('\t')
-				return details && file ? [[file, details.split(' ')[1]!] as const] : []
-			}),
-	)
-}
-
-function editedInputs(checkout: string, inputs: ReadonlyArray<string>): ReadonlyArray<string> {
-	return git(['ls-files', '-m', '-z', '--', ...inputs], checkout).split('\0')
-}
-
-/** The total size in bytes of the files in a folder, leaving out `skip`. */
-function folderSize(folder: string, skip?: string): number {
-	return NodeFS.readdirSync(folder, { withFileTypes: true }).reduce((total, entry) => {
-		const path = NodePath.join(folder, entry.name)
-		if (path === skip) return total
-		if (entry.isDirectory()) return total + folderSize(path, skip)
-		return entry.isFile() ? total + NodeFS.statSync(path).size : total
-	}, 0)
+/** Written whole, then renamed into place, so a stopped runner never leaves half a record. */
+function writeRecord(file: string, record: unknown): void {
+	NodeFS.mkdirSync(NodePath.dirname(file), { recursive: true })
+	const partial = `${file}.${process.pid}.partial`
+	NodeFS.writeFileSync(partial, JSON.stringify(record, null, '\t'))
+	NodeFS.renameSync(partial, file)
 }
 
 /** Whether Cargo succeeded. */
