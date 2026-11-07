@@ -733,7 +733,7 @@ export function createProcessSpecs(input: {
 				ignoredInputs: [],
 				inputs: workspaceInputs(input.paths, 'copal'),
 				program: programFile('copal'),
-				...workspaceBuildDirs(input.paths, input.env),
+				...workspaceBuildDirs(input.paths),
 			},
 			cwd: coreDir,
 			env: coreEnv,
@@ -825,7 +825,7 @@ function appProgramBuild(paths: WorktreePaths, env: NodeJS.ProcessEnv): ProgramB
 		// The App's version comes from the frontend.
 		inputs: [...workspaceInputs(paths, 'theseus_gui'), 'apps/app-frontend/package.json'],
 		program: programFile('theseus_gui'),
-		...workspaceBuildDirs(paths, env),
+		...workspaceBuildDirs(paths),
 	}
 }
 
@@ -896,14 +896,12 @@ function localCrates(worktree: string): ReadonlyMap<string, LocalCrate> {
 }
 
 /**
- * Every checkout compiles into one build output, the primary checkout's `target`, like a pnpm
- * store: each dependency is compiled once and kept once. Builds already run one at a time.
+ * Every checkout compiles into one build output, like a pnpm store: each dependency is compiled
+ * once and kept once. Builds already run one at a time. Only the runner compiles there, so
+ * `BUILT_CRATES` describes everything in it; a person's own Cargo runs use `target` as usual.
  */
-function workspaceBuildDirs(
-	paths: WorktreePaths,
-	env: NodeJS.ProcessEnv,
-): Pick<ProgramBuild, 'cacheDir' | 'targetDir'> {
-	const targetDir = env.CARGO_TARGET_DIR ?? NodePath.join(paths.primary, 'target')
+function workspaceBuildDirs(paths: WorktreePaths): Pick<ProgramBuild, 'cacheDir' | 'targetDir'> {
+	const targetDir = NodePath.join(paths.primary, 'target', 'dev-shared')
 	return { cacheDir: NodePath.join(targetDir, 'dev-bin'), targetDir }
 }
 
@@ -1033,17 +1031,23 @@ function prepareCheckoutCrates(worktree: string, build: ProgramBuild): () => voi
 		NodeFS.existsSync(NodePath.join(worktree, input, 'Cargo.toml')),
 	)
 	const files = new Map<string, Array<[string, string]>>(folders.map((folder) => [folder, []]))
+	// Inputs outside every crate folder, such as the App's version in `package.json`, count toward
+	// the program's own crate (the first input folder). Cargo judges them through build scripts
+	// that recorded another checkout's paths, so only their content can say they changed.
+	const loose: Array<[string, string]> = []
 	for (const [file, blob] of inputContents(worktree, build)) {
 		const folder = folders
 			.filter((candidate) => file.startsWith(`${candidate}/`))
 			.sort((left, right) => right.length - left.length)[0]
 		if (folder) files.get(folder)!.push([file, blob])
+		else loose.push([file, blob])
 	}
 	const hashes = new Map<string, string>()
 	const now = new Date()
 	for (const [folder, entries] of files) {
 		const hash = NodeCrypto.createHash('sha256')
-		for (const [file, blob] of entries.sort(([left], [right]) => (left < right ? -1 : 1))) {
+		const hashed = folder === folders[0] ? [...entries, ...loose] : entries
+		for (const [file, blob] of hashed.sort(([left], [right]) => (left < right ? -1 : 1))) {
 			hash.update(file).update('\0').update(blob).update('\0')
 		}
 		const digest = hash.digest('hex')
@@ -1067,7 +1071,7 @@ function prepareCheckoutCrates(worktree: string, build: ProgramBuild): () => voi
 					? { hash, programs: [...new Set([...built.programs, build.program])] }
 					: { hash, programs: [build.program] }
 		}
-		NodeFS.writeFileSync(recordFile, JSON.stringify(record, null, '	'))
+		NodeFS.writeFileSync(recordFile, JSON.stringify(record, null, '\t'))
 	}
 }
 

@@ -66,7 +66,7 @@ Scenario numbers passed after the task name override `defaultScenarios` in `dev.
 
 The runner builds the App and Core with `cargo build` and never runs them from the build output.
 Each program is copied to `<target>/dev-bin/<key>/` and run from there, where `<target>` is the
-primary checkout's `target`; every worktree shares those programs. Both are members of the root Cargo workspace.
+primary checkout's `target/dev-shared`; every worktree shares those programs. Both are members of the root Cargo workspace.
 The key is a hash of everything that goes into the build:
 
 - Both: the root `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `.cargo`, the Cargo arguments,
@@ -92,19 +92,20 @@ fails, the process stays stopped until the next restart.
 Builds run one at a time across every checkout, at below-normal priority, so several agents
 restarting after Rust edits queue up instead of taking the whole machine.
 
-Every checkout compiles into the primary checkout's `target`, like a pnpm store: each third-party
-crate is compiled once and kept once, whichever checkout needed it first. Set `CARGO_TARGET_DIR`
-to use another folder.
+Every checkout compiles into the primary checkout's `target/dev-shared`, like a pnpm store: each
+third-party crate is compiled once and kept once, whichever checkout needed it first. Only the
+runner compiles there; a plain `cargo` run uses `target` and cannot change what the runner trusts.
 
 Cargo decides what to recompile from file times alone, so in a shared folder a crate last compiled
-from another checkout can look finished here. `target/built-crates.json` records, for each crate in
+from another checkout can look finished here. `target/dev-shared/built-crates.json` records, for each crate in
 the repo, the content it was last compiled from and for which programs. Before a build, a crate
 that matches gets its files dated 2000, so Cargo keeps its output; any other crate gets the current
-time, so Cargo compiles it again. Switching between worktrees that differ only in `apps/app`
+time, so Cargo compiles it again. Inputs outside every crate folder, such as the App's version in
+`apps/app-frontend/package.json`, count toward the program's own crate. Switching between worktrees that differ only in `apps/app`
 compiles that one crate (about 2.5 minutes); when `packages/app-lib` differs too, theseus compiles
 again as well (about 7 minutes).
 
-An older checkout that still runs its App from `target/debug` holds that file open; the runner
+An older checkout that still runs its App from `target/dev-shared/debug` holds that file open; the runner
 renames it aside and builds again.
 
 A fresh dev Core belongs to nobody. Add it once from an App with the code in the `[core]` output;
