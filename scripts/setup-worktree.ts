@@ -43,7 +43,7 @@ for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
 		cancelled = true
 		error = `Cancelled by ${signal}.`
 		// The install ends on the signal, and setup exits once it has.
-		if (install) install.kill(signal)
+		if (install) stopInstall(install, signal)
 		else process.exit(1)
 	})
 }
@@ -102,6 +102,7 @@ async function installDependencies(): Promise<boolean> {
 	for (const attempt of [1, 2]) {
 		if (cancelled) return false
 		if ((await run('vp i --frozen-lockfile -- --yes')) === 0) return true
+		if (cancelled) return false
 		error = 'vp i failed. Its output is in the setup terminal.'
 		console.error(`[setup] vp i failed${attempt === 1 ? '; retrying once' : ''}`)
 	}
@@ -116,6 +117,8 @@ function run(command: string): Promise<number> {
 		const child = NodeChildProcess.spawn(command, {
 			cwd: worktree,
 			shell: true,
+			// Its own process group off Windows, so a cancel can stop the shell and vp together.
+			detached: process.platform !== 'win32',
 			stdio: ['ignore', 'inherit', 'inherit'],
 		})
 		install = child
@@ -125,6 +128,16 @@ function run(command: string): Promise<number> {
 			resolve(code ?? 1)
 		})
 	})
+}
+
+// Killing only the shell would leave vp installing, and a retry could start a second install.
+function stopInstall(child: NodeChildProcess.ChildProcess, signal: NodeJS.Signals): void {
+	if (child.pid === undefined) return
+	if (process.platform === 'win32') {
+		NodeChildProcess.spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'])
+	} else {
+		process.kill(-child.pid, signal)
+	}
 }
 
 async function timed<T>(step: string, work: () => Promise<T>): Promise<T> {

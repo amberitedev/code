@@ -79,7 +79,7 @@ another. Before calling work done, walk this list and say which entries applied:
 - Nothing watches Rust. After a Rust edit, `vp run down` then `vp run up`. `up` stops and prints
   compiler errors, so it is also the check for Rust changes.
 - Backend-only work needs no App: `vp run up dev:backend` starts in seconds. `vp run up dev:core`
-  adds the Core.
+  starts only the Core. For the backend and Core together, start the full stack.
 - Ports derive from the worktree path and are stable across restarts. Read the real ones and the
   bridge URLs from `vp run status`, since occupied ports shift.
 - Never kill by process name, path, or worktree string. Several worktrees run stacks at once, and
@@ -97,7 +97,8 @@ instead of pointing at live state:
   `.data/scenarios/<number>` is one App installation. Scenarios 1 to 4 are the default set; a new
   number makes another isolated App and account.
 - The backend, Core, and scenarios are one dataset. Copy them together.
-- Stop the affected process before copying SQLite files, or copy their `-wal` and `-shm` files too.
+- Stop the affected process before copying SQLite files, and copy their `-wal` and `-shm` files with
+  them.
 - Copy in, never symlink. Data flows one way: into your sandbox, never back out.
 
 ## Verifying

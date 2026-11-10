@@ -82,7 +82,7 @@ for (const pack of PACKAGES) {
 }
 // The root test run (vite.config.ts) covers scripts/ and api-client's unit tests.
 const unitTests = changed.flatMap((file) => {
-	if (!/^(?:scripts|packages\/api-client\/src)\//.test(file)) return []
+	if (!/^(?:scripts|packages\/api-client\/src)\/.+\.ts$/.test(file)) return []
 	const test = file.replace(/(?<!\.test)\.ts$/, '.test.ts')
 	return NodeFS.existsSync(NodePath.join(root, test)) ? [test] : []
 })
