@@ -1,4 +1,4 @@
--- Shared files live in a pool of Cores (docs/internals/pool.md). The backend keeps each version's
+-- Shared files live in a pool of Cores. The backend keeps each version's
 -- manifest in R2 under `manifests/<instance>/<version>` and only these rows in D1. The per-file
 -- rows and R2 file objects of the earlier design go; local databases start their versions over.
 DROP TABLE IF EXISTS shared_files;

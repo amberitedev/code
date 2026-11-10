@@ -6,7 +6,7 @@ import type { SharedInstances } from '../types'
  * there. Every call takes the server and the shared instance its world follows. Upstream a
  * server's players are the members of that shared instance, so off a Core these are its `users`
  * and `invites` calls. On a Core they are the server's own players, who read the share without
- * being its members (docs/internals/plan.md, "Shares, members, and players"). Both answer in the
+ * being its members. Both answer in the
  * shared instance's shapes, so the Play tab does not tell them apart.
  */
 export class SharedInstancesPlayersV1Module extends SharedInstancesModule {

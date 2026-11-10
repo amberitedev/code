@@ -1,5 +1,4 @@
-//! Copal, Amberite's self-hosted Minecraft server manager. Its product decisions are in
-//! `docs/internals/plan.md`.
+//! Copal, Amberite's self-hosted Minecraft server manager.
 
 mod access;
 mod api;

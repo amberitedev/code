@@ -1,4 +1,4 @@
-//! A share version as the backend gives it and takes it (`docs/internals/pool.md`, Protocol).
+//! A share version as the backend gives it and takes it.
 //! `GET /v1/instances/:id/versions[/:n]` and `POST /v1/instances/:id/versions` answer with it,
 //! and the invite preview carries one without file keys. Every field the backend always writes
 //! is required, so a version that does not parse is refused as a whole.

@@ -1,9 +1,9 @@
 ---
-name: test-amberite-app
+name: test-app
 description: Check a change in the real Amberite App through its browser bridge, with scenario test accounts, and hand a window to the developer. Use for any App change a person can see.
 ---
 
-# Test the Amberite App
+# Test the App
 
 ## Start it
 

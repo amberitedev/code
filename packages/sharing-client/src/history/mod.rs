@@ -1,6 +1,6 @@
 //! A share's local history: every version its owner pushed, kept by the App or Core that pushed
-//! it, so the owner can look back and restore one without the pool keeping old versions
-//! (`docs/internals/pool.md`). The newest entry is also the last push, which Core compares a
+//! it, so the owner can look back and restore one without the pool keeping old versions.
+//! The newest entry is also the last push, which Core compares a
 //! server with to tell whether a push would change anything.
 //!
 //! An entry is the version's content, its manifest and what it changed over the version before

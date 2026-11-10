@@ -8,7 +8,6 @@ import { startBackend } from './worker.mjs'
 // Core sends from `apps/core/src/storage.rs`, with the same method, path and body, and
 // every response is checked for the fields that code reads. Files never reach the backend: the
 // App sends a manifest of encrypted objects and the Core reports which versions it holds.
-// See docs/internals/pool.md, "Protocol".
 
 const GB = 1024 ** 3
 const EMPTY_ROOT = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'

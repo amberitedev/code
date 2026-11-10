@@ -1,4 +1,4 @@
-//! The App's half of the shared file pool (`docs/internals/pool.md`). A member fetches each
+//! The App's half of the shared file pool. A member fetches each
 //! file back from one of the version's holders with `sharing_client::pool::fetch`, which checks
 //! it twice, against C and then P, and reports holders that served bad bytes. An owner's push
 //! goes through `sharing_client::push`. Both are the code Core uses too.

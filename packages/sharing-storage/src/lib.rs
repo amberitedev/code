@@ -1,4 +1,4 @@
-//! The shared file pool's store (`docs/internals/pool.md`): encrypted objects named by hash, kept
+//! The shared file pool's store: encrypted objects named by hash, kept
 //! for versions a backend-signed ticket names, served to whoever holds a fetch ticket.
 //!
 //! It runs as `copal store`, a child process Copal starts and supervises, and is reached only

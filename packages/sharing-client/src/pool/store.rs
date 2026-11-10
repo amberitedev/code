@@ -1,4 +1,4 @@
-//! The client for a Core's store routes (`/store/` in the Protocol of `docs/internals/pool.md`),
+//! The client for a Core's store routes (`/store/`),
 //! used by an owner's App to store a version, by members' Apps and Cores to fetch its files, and
 //! by a store to pull a version from another Core.
 //! A Core serves HTTPS with a certificate it made itself, so each Core gets a client that trusts

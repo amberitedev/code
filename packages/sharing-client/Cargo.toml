@@ -2,7 +2,7 @@
 name = "sharing-client"
 edition.workspace = true
 
-# What the App and Core share about sharing (`docs/internals/pool.md`): the backend client for
+# What the App and Core share about sharing: the backend client for
 # share routes, the share version, the share file rules, the pool (store client, encryption and
 # fetch) and the writer that pushes a share's versions. The App and Core both push and read shares
 # with them, and the store pulls from other Cores with the store client.

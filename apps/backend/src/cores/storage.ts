@@ -6,8 +6,7 @@ import { pullTicket } from './tickets'
 
 // A Core's storage report: what its store holds and how much room it has, sent after every
 // completed upload or pull and once an hour. The backend confirms the versions whose home it is,
-// tells it which versions to drop and which to pull, and writes only what changed. See
-// docs/internals/pool.md, "Core and backend".
+// tells it which versions to drop and which to pull, and writes only what changed.
 
 const MAX_VERSIONS = 10_000
 /** A report of `MAX_VERSIONS` versions is about a megabyte. */

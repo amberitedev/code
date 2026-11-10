@@ -4,7 +4,7 @@ import type { Env } from '../common/types'
 import { type Holder, fetchTicket, storeTicket } from '../cores/tickets'
 
 // The pool side of sharing: which Core holds a share, the manifest an owner's App sends, and the
-// tickets that let Apps talk to stores. See docs/internals/pool.md, "Protocol". The backend never
+// tickets that let Apps talk to stores. The backend never
 // carries a file byte: it keeps manifests in R2, one row per version in D1, and signs tickets.
 
 export const MAX_VERSION_FILES = 4096
@@ -151,7 +151,7 @@ function draw(cores: Candidate[], exclude: string[]): string | null {
 }
 
 /**
- * Where a share's two copies go (docs/internals/pool.md, "Where a share lives"). An owner with a
+ * Where a share's two copies go. An owner with a
  * private Core, one with storage off, keeps every share there alone. Otherwise a share whose
  * instance has a server on `serverCore`, one of the owner's Cores, is homed there, and the rest
  * live on other people's Cores, or on the owner's own when no one else's can take them. A share

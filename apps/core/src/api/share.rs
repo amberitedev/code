@@ -1,9 +1,9 @@
 //! The share of a server-first server, a server that follows no instance, which this Core writes
-//! with its own key (`docs/internals/plan.md`, "Shares, members, and players"): `POST|DELETE
+//! with its own key: `POST|DELETE
 //! /v1/servers/{id}/worlds/{wid}/content/share`, `GET .../content/share/diff`, and
 //! `GET .../content/share/files`. Mirrors `Archon.Content.v1` (`archon/content/v1.ts`).
 //!
-//! Also the share's history on this Core, for the owner alone (plan.md, "Links and history"):
+//! Also the share's history on this Core, for the owner alone:
 //! `GET .../content/share/history`, `POST .../content/share/history/{version}/restore` and
 //! `DELETE .../content/share/history/{version}`.
 //!

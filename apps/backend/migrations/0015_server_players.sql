@@ -1,5 +1,5 @@
--- The players of a Core server: the people the server is shared with (docs/internals/plan.md,
--- "Shares, members, and players"). They read the share the server follows without being its
+-- The players of a Core server: the people the server is shared with.
+-- They read the share the server follows without being its
 -- members. The Core's owner writes these from the App's Play tab.
 
 -- A server that has players, and the share it follows: its instance's share, or its own

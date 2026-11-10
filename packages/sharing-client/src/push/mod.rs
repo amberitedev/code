@@ -1,4 +1,4 @@
-//! The writer of a share's versions (`docs/internals/pool.md`, Push): hash the files, keep the
+//! The writer of a share's versions: hash the files, keep the
 //! configs the owner still shares, reuse keys from the previous version, encrypt, create the
 //! version on the backend, store the objects on the Core it picks, and wait until that Core
 //! confirms them.
