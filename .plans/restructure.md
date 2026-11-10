@@ -194,7 +194,9 @@ user's browser. Account for that the way the Core proxy already does (a secret i
 ## Events
 
 Each host serves one WebSocket. The client subscribes to topics (an instance, a server's console,
-install progress) and the host checks `Access` at subscribe time. A Viewer never gets a console,
+install progress) and the host checks `Access` at subscribe time, and again when the caller's role
+changes or their session is revoked or expires, ending what they may no longer see, as Core's
+console stream does today. A Viewer never gets a console,
 because it carries chat and player IPs. Every event is a variant of `Event` in contracts, so a new
 live feature adds a variant, not a new socket. This replaces the Tauri `Channel` in
 `app-lib/src/event` and Core's per-server socket.

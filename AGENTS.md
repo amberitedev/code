@@ -116,7 +116,8 @@ instead of pointing at live state:
 - **Do not run repo-wide checks.** No `vp check`, no `vp run -r test`, no `vp run -r typecheck`
   unless the developer asks. CI owns the full suite.
 - Proof for a bug fix depends on the bug. Logic, data, state, and protocol bugs get a failing test
-  first (the fewest that fail on `main` for that reason), then the fix. Purely visual bugs
+  first (the fewest that fail for that reason on `main`, or before the fix for a bug this branch
+  introduced), then the fix. Purely visual bugs
   (spacing, colour, alignment, a layout shift) get before/after screenshots as their proof and no
   test. A Core- or backend-only fix with no visible surface ships the test plus a short runtime
   transcript.
