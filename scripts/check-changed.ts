@@ -16,15 +16,17 @@ import * as NodePath from 'node:path'
 
 const root = git(['rev-parse', '--show-toplevel'])
 const base = git(['merge-base', 'HEAD', process.argv[2] ?? 'origin/main'])
-const changed = [
+// Deletions still decide which packages and builds run; only checks that read files skip them.
+const touched = [
 	...new Set([
 		...git(['diff', '--name-only', '-z', base]).split('\0'),
 		...git(['ls-files', '-o', '--exclude-standard', '-z']).split('\0'),
 	]),
-].filter((file) => file && NodeFS.existsSync(NodePath.join(root, file)))
+].filter(Boolean)
+const changed = touched.filter((file) => NodeFS.existsSync(NodePath.join(root, file)))
 
 const under = (...folders: ReadonlyArray<string>) =>
-	changed.some((file) => folders.some((folder) => file.startsWith(`${folder}/`)))
+	touched.some((file) => folders.some((folder) => file.startsWith(`${folder}/`)))
 const matching = (pattern: RegExp) => changed.filter((file) => pattern.test(file))
 
 // The packages CI typechecks and tests (ci.yml, js job), and what reaches each.
@@ -89,12 +91,12 @@ const unitTests = changed.flatMap((file) => {
 if (unitTests.length > 0) {
 	steps.push({ name: 'unit tests', command: 'vp', args: ['test', 'run', ...new Set(unitTests)] })
 }
-if (under('scripts') || changed.includes('dev.json')) {
+if (under('scripts') || touched.includes('dev.json')) {
 	steps.push({ name: 'dev:check', command: 'vp', args: ['run', 'dev:check'] })
 }
 const rust = matching(/\.rs$/)
 if (rust.length > 0) steps.push({ name: 'rustfmt', command: 'rustfmt', args: ['--check', ...rust] })
-if (rust.length > 0 || matching(/(?:^|\/)Cargo\.(?:toml|lock)$/).length > 0) {
+if (touched.some((file) => /\.rs$|(?:^|\/)Cargo\.(?:toml|lock)$/.test(file))) {
 	steps.push({ name: 'rust build', command: 'node', args: ['scripts/dev-runner.ts', 'build'] })
 }
 
