@@ -1,5 +1,4 @@
-//! The store's routes, which Copal forwards from its own port. Each takes a pool ticket. Shapes:
-//! `docs/internals/pool.md`, Protocol.
+//! The store's routes, which Copal forwards from its own port. Each takes a pool ticket.
 
 use std::{
     io::{self, SeekFrom},

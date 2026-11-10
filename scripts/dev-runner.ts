@@ -9,7 +9,7 @@ import * as NodePath from 'node:path'
 import * as NodeReadline from 'node:readline'
 import * as NodeURL from 'node:url'
 import * as NodeUtil from 'node:util'
-import { copyDataEntry, DATA_ENTRIES } from './dev-data.ts'
+import { recordTiming } from './timings.ts'
 import { normalizeScenarioDatabase, runningAppCommands } from './scenario-state.ts'
 
 const BASE_PORTS = {
@@ -246,24 +246,15 @@ async function main(): Promise<void> {
 	const defaultScenarios = readDefaultScenarios(NodePath.join(paths.worktree, 'dev.json'))
 	const [command, ...commandArgs] = process.argv.slice(2)
 	if (command === 'up') {
-		const presetIndex = commandArgs.indexOf('--preset')
-		const preset = presetIndex === -1 ? undefined : commandArgs[presetIndex + 1]
-		if (presetIndex !== -1 && !preset) throw new DevRunnerError('--preset needs a preset name.')
-		const args = (presetIndex === -1 ? commandArgs : commandArgs.toSpliced(presetIndex, 2)).filter(
-			(arg) => arg !== '--show-windows',
-		)
+		const args = commandArgs.filter((arg) => arg !== '--show-windows')
 		// The mode is optional here: `up 1 2` means the full stack with those scenarios.
 		const hasMode = DEV_MODES.some((mode) => mode === args[0])
-		return up(
-			paths,
-			{
-				...parseInput(hasMode ? args : ['dev', ...args], defaultScenarios),
-				// Apps sign themselves in and are used through the browser bridge.
-				accountWeb: false,
-				hideWindows: !commandArgs.includes('--show-windows'),
-			},
-			preset,
-		)
+		return up(paths, {
+			...parseInput(hasMode ? args : ['dev', ...args], defaultScenarios),
+			// Apps sign themselves in and are used through the browser bridge.
+			accountWeb: false,
+			hideWindows: !commandArgs.includes('--show-windows'),
+		})
 	}
 	if (command === 'down') return down(paths)
 	if (command === 'status') {
@@ -271,7 +262,6 @@ async function main(): Promise<void> {
 		return
 	}
 	if (command === 'build') return buildPrograms(paths)
-	if (command === 'preset') return savePreset(paths, commandArgs)
 	const input = parseInput(process.argv.slice(2), defaultScenarios)
 	const { offset: startOffset, source } = resolveStartOffset({
 		devInstance: process.env.DEV_INSTANCE,
@@ -605,49 +595,6 @@ async function buildPrograms(paths: WorktreePaths): Promise<void> {
 	}
 }
 
-/**
- * `preset` lists the saved datasets. `preset save <name>` saves this checkout's data under that
- * name, replacing any earlier one, so any checkout can start from it with `up --preset <name>`.
- * Presets live in the primary checkout's `.data/presets`.
- */
-function savePreset(paths: WorktreePaths, args: ReadonlyArray<string>): void {
-	const [action, name] = args
-	if (action === undefined) {
-		const presets = NodePath.join(paths.primary, '.data', 'presets')
-		const names = NodeFS.existsSync(presets) ? NodeFS.readdirSync(presets) : []
-		for (const preset of names.filter((entry) => !entry.endsWith('.partial'))) {
-			const scenarios = NodePath.join(presets, preset, 'scenarios')
-			const numbers = NodeFS.existsSync(scenarios) ? NodeFS.readdirSync(scenarios) : []
-			runnerLog('info', `${preset} (scenarios ${numbers.join(' ') || 'none'})`)
-		}
-		if (names.length === 0) runnerLog('info', 'no presets. Save one with: preset save <name>')
-		return
-	}
-	if (action !== 'save' || !name) {
-		throw new DevRunnerError('Use preset to list presets, or preset save <name>.')
-	}
-	const target = presetPath(paths, name)
-	if (readLiveRuntime(paths)) {
-		throw new DevRunnerError(
-			'Run node scripts/dev-runner.ts down first, so the data is not in use.',
-		)
-	}
-	NodeFS.mkdirSync(target, { recursive: true })
-	for (const entry of DATA_ENTRIES) {
-		if (NodeFS.existsSync(NodePath.join(paths.data, entry)))
-			copyDataEntry(paths.data, target, entry)
-		else NodeFS.rmSync(NodePath.join(target, entry), { recursive: true, force: true })
-	}
-	runnerLog('info', `saved preset ${name}`)
-}
-
-function presetPath(paths: WorktreePaths, name: string): string {
-	if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) {
-		throw new DevRunnerError(`Preset names use lowercase letters, digits, and dashes: ${name}`)
-	}
-	return NodePath.join(paths.primary, '.data', 'presets', name)
-}
-
 function ensureDataLayout(paths: WorktreePaths, scenarios: ReadonlyArray<number>): void {
 	NodeFS.mkdirSync(paths.data, { recursive: true })
 	NodeFS.mkdirSync(paths.coreData, { recursive: true })
@@ -972,13 +919,18 @@ async function ensureProgram(
 	if (NodeFS.existsSync(cached(key))) {
 		runnerLog('info', `${spec.label} using ${cached(key)}`)
 	} else {
+		const started = performance.now()
 		const unlock = await lockBuilds(cache, spec.label, stopped)
 		if (!unlock) return undefined
+		const lockWait = performance.now() - started
+		let changedCrates = 0
+		let result: 'ok' | 'failed' = 'failed'
 		try {
 			// Another runner may have built it while this one waited.
 			while (!NodeFS.existsSync(cached(key))) {
 				runnerLog('info', `${spec.label} building ${build.program} (${key})`)
-				const recordBuilt = prepareCheckoutCrates(worktree, build)
+				const prepared = prepareCheckoutCrates(worktree, build)
+				changedCrates += prepared.changed
 				const compiled = await runCargo(spec, build, builds, build.cargoArgs)
 				const builtKey = programKey(worktree, build)
 				// An input edited during the build makes this program a mix, and Cargo may have
@@ -988,7 +940,7 @@ async function ensureProgram(
 				}
 				if (!compiled) return undefined
 				if (builtKey === key) {
-					recordBuilt()
+					prepared.recordBuilt()
 					NodeFS.mkdirSync(NodePath.dirname(cached(key)), { recursive: true })
 					const partial = `${cached(key)}.${process.pid}.partial`
 					NodeFS.copyFileSync(NodePath.join(build.targetDir, 'debug', build.program), partial)
@@ -996,8 +948,25 @@ async function ensureProgram(
 				}
 				key = builtKey
 			}
+			result = 'ok'
 		} finally {
 			unlock()
+			const total = performance.now() - started
+			// The shared build output is <primary>/target/dev-shared.
+			recordTiming(NodePath.resolve(build.targetDir, '..', '..'), {
+				kind: 'build',
+				worktree,
+				program: build.program,
+				key,
+				result,
+				// Crates in the repo compiled again; third-party crates are not counted.
+				changedCrates,
+				ms: {
+					lockWait: Math.round(lockWait),
+					compile: Math.round(total - lockWait),
+					total: Math.round(total),
+				},
+			})
 		}
 	}
 	const used = new Date()
@@ -1022,9 +991,13 @@ async function ensureProgram(
  * was last compiled from for this program. A crate that matches gets old file times, so Cargo
  * keeps its compiled output even though this checkout's files are newer. A crate that differs, or
  * was last compiled for another program from other content, gets the current time, so Cargo
- * compiles it again from this checkout. Returns what to record once the build succeeds.
+ * compiles it again from this checkout. Returns how many crates will compile, and what to record
+ * once the build succeeds.
  */
-function prepareCheckoutCrates(worktree: string, build: ProgramBuild): () => void {
+function prepareCheckoutCrates(
+	worktree: string,
+	build: ProgramBuild,
+): { readonly changed: number; readonly recordBuilt: () => void } {
 	const recordFile = NodePath.join(build.targetDir, BUILT_CRATES)
 	let record: Record<string, { hash: string; programs: ReadonlyArray<string> }> = {}
 	try {
@@ -1049,6 +1022,7 @@ function prepareCheckoutCrates(worktree: string, build: ProgramBuild): () => voi
 	}
 	const hashes = new Map<string, string>()
 	const now = new Date()
+	let changed = 0
 	for (const [folder, entries] of files) {
 		const hash = NodeCrypto.createHash('sha256')
 		const hashed = folder === folders[0] ? [...entries, ...loose] : entries
@@ -1060,7 +1034,10 @@ function prepareCheckoutCrates(worktree: string, build: ProgramBuild): () => voi
 		const built = record[folder]
 		const trusted = built?.hash === digest && built.programs.includes(build.program)
 		// About to compile, so its entry is wrong whether or not this build succeeds.
-		if (!trusted) delete record[folder]
+		if (!trusted) {
+			delete record[folder]
+			changed += 1
+		}
 		const time = trusted ? TRUSTED_FILE_TIME : now
 		for (const [file] of entries) {
 			try {
@@ -1071,7 +1048,7 @@ function prepareCheckoutCrates(worktree: string, build: ProgramBuild): () => voi
 		}
 	}
 	writeRecord(recordFile, record)
-	return () => {
+	const recordBuilt = () => {
 		for (const [folder, hash] of hashes) {
 			const built = record[folder]
 			record[folder] =
@@ -1081,6 +1058,7 @@ function prepareCheckoutCrates(worktree: string, build: ProgramBuild): () => voi
 		}
 		writeRecord(recordFile, record)
 	}
+	return { changed, recordBuilt }
 }
 
 /** Written whole, then renamed into place, so a stopped runner never leaves half a record. */
@@ -1646,7 +1624,7 @@ function portIsOpen(port: number): Promise<boolean> {
 async function printStatus(paths: WorktreePaths): Promise<boolean> {
 	const runtime = readLiveRuntime(paths)
 	if (!runtime) {
-		runnerLog('info', 'not running. Start it with: node scripts/dev-runner.ts up')
+		runnerLog('info', 'not running. Start it with: vp run up')
 		return false
 	}
 	let ready = false
@@ -1677,36 +1655,14 @@ async function printStatus(paths: WorktreePaths): Promise<boolean> {
 }
 
 /**
- * Starts the dev stack in the background and returns once it is ready to use. With `preset`, this
- * checkout's data is replaced by that saved dataset first.
+ * Starts the dev stack in the background and returns once it is ready to use.
  */
-async function up(paths: WorktreePaths, input: RunnerInput, preset?: string): Promise<void> {
+async function up(paths: WorktreePaths, input: RunnerInput): Promise<void> {
 	let started: NodeChildProcess.ChildProcess | undefined
 	const live = readLiveRuntime(paths)
-	if (preset) {
-		if (live) {
-			throw new DevRunnerError(
-				'Already running. Run node scripts/dev-runner.ts down before switching data.',
-			)
-		}
-		const source = presetPath(paths, preset)
-		if (!NodeFS.existsSync(source)) {
-			throw new DevRunnerError(
-				`There is no preset ${preset}. node scripts/dev-runner.ts preset lists them.`,
-			)
-		}
-		for (const entry of DATA_ENTRIES) {
-			if (NodeFS.existsSync(NodePath.join(source, entry))) copyDataEntry(source, paths.data, entry)
-			else NodeFS.rmSync(NodePath.join(paths.data, entry), { recursive: true, force: true })
-		}
-		runnerLog('info', `data from preset ${preset}`)
-	}
 	// An App decides whether to show its window when it starts, so asking a running one is too late.
 	if (live?.hideWindows && !input.hideWindows) {
-		runnerLog(
-			'error',
-			'Already running with App windows hidden. Run node scripts/dev-runner.ts down first.',
-		)
+		runnerLog('error', 'Already running with App windows hidden. Run vp run down first.')
 		process.exitCode = 1
 		return
 	}
@@ -1714,7 +1670,7 @@ async function up(paths: WorktreePaths, input: RunnerInput, preset?: string): Pr
 	if (live && (live.mode !== input.mode || liveScenarios !== input.scenarios.join(' '))) {
 		runnerLog(
 			'error',
-			`Already running ${[live.mode, liveScenarios].filter(Boolean).join(' ')}. Run node scripts/dev-runner.ts down first.`,
+			`Already running ${[live.mode, liveScenarios].filter(Boolean).join(' ')}. Run vp run down first.`,
 		)
 		process.exitCode = 1
 		return
@@ -1738,11 +1694,24 @@ async function up(paths: WorktreePaths, input: RunnerInput, preset?: string): Pr
 		runnerLog('info', `started PID ${started.pid}`)
 	}
 
+	const waitStarted = performance.now()
+	// How long an agent waited for a usable stack. `waiting` means up gave up before it was ready.
+	const record = (result: 'ok' | 'failed' | 'waiting') =>
+		recordTiming(paths.primary, {
+			kind: 'up',
+			worktree: paths.worktree,
+			result,
+			startedRunner: started !== undefined,
+			mode: input.mode,
+			scenarios: input.scenarios,
+			ms: { total: Math.round(performance.now() - waitStarted) },
+		})
 	const deadline = Date.now() + UP_WAIT_MS
 	while (Date.now() < deadline) {
 		if (started && started.exitCode !== null) {
 			runnerLog('error', `The dev runner stopped while starting. See ${devLogPath(paths)}`)
 			process.exitCode = 1
+			record('failed')
 			return
 		}
 		const runtime = readLiveRuntime(paths)
@@ -1751,6 +1720,7 @@ async function up(paths: WorktreePaths, input: RunnerInput, preset?: string): Pr
 		if (current?.buildFailed) {
 			runnerLog('error', `${current.buildFailed} did not build. See ${devLogPath(paths)}`)
 			process.exitCode = 1
+			record('failed')
 			return
 		}
 		let ready: boolean
@@ -1763,18 +1733,21 @@ async function up(paths: WorktreePaths, input: RunnerInput, preset?: string): Pr
 				`${error.message}\nThe stack is still running and picks up the fix by itself. Fix it, then run up again.`,
 			)
 			process.exitCode = 1
+			record('failed')
 			return
 		}
 		if (ready) {
 			await printStatus(paths)
+			record('ok')
 			return
 		}
 		await new Promise((resolve) => setTimeout(resolve, 2_000))
 	}
 	runnerLog(
 		'warning',
-		`Still starting. Run node scripts/dev-runner.ts up again to keep waiting. Log: ${devLogPath(paths)}`,
+		`Still starting. Run vp run up again to keep waiting. Log: ${devLogPath(paths)}`,
 	)
+	record('waiting')
 	// Not a failure: the runner is still working.
 }
 

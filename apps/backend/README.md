@@ -1,7 +1,7 @@
 # Local accounts and sharing backend
 
-One Cloudflare Worker owns account, social, and sharing metadata in D1. Shared files live on Cores
-(see `docs/internals/pool.md`); the Worker keeps each version's manifest in an R2 bucket, which
+One Cloudflare Worker owns account, social, and sharing metadata in D1. Shared files live on Cores;
+the Worker keeps each version's manifest in an R2 bucket, which
 wrangler emulates locally, and never carries a file byte. There are no
 remote bindings or deployment scripts. The root development runner supplies local secrets and keeps
 persistent state under the worktree's `.data/`.
@@ -76,8 +76,7 @@ The App removes a Core by telling the Core first, with a ticket, and then callin
 Core's directory: an Ed25519 JWT with `iss`, `kind: "session"`, `sub`, `name`, `avatar_url`,
 `aud` (the Core id), `iat`, `exp` five minutes later, and a random `jti`. It writes nothing. The
 Core verifies it against `public/core/keys.json`, served as a static asset at `/core/keys.json` so
-it costs no requests. The pool's `store`, `fetch`, and `pull` tickets are signed the same way; see
-`docs/internals/pool.md`.
+it costs no requests. The pool's `store`, `fetch`, and `pull` tickets are signed the same way.
 
 `POST /core/storage` is a Core's storage report: what its store holds and how much room it has.
 The answer lists versions to drop and to pull.

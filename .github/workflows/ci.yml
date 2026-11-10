@@ -44,8 +44,20 @@ jobs:
         id: filter
         with:
           filters: |
+            # Copal and the local crates it builds with (cargo metadata from apps/core).
             core:
               - apps/core/**
+              - packages/bedrock/**
+              - packages/minecraft-meta-manifest/**
+              - packages/modrinth-content-management/**
+              - packages/path-util/**
+              - packages/sharing-client/**
+              - packages/sharing-storage/**
+              - Cargo.toml
+              - Cargo.lock
+              - rust-toolchain.toml
+              - rustfmt.toml
+              - .cargo/**
               - .github/workflows/ci.yml
             app:
               - apps/app/**

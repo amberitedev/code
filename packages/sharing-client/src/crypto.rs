@@ -1,4 +1,4 @@
-//! The pool's file encryption, exactly as `docs/internals/pool.md` (Protocol) writes it down. The
+//! The pool's file encryption. The
 //! backend and the store check the same values, so nothing here may change on its own. The App
 //! encrypts and decrypts with it; Core decrypts the versions it applies to its servers.
 

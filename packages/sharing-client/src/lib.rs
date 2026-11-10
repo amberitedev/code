@@ -1,4 +1,4 @@
-//! What the App and Core share about sharing (`docs/internals/pool.md`). Laid out like app-lib,
+//! What the App and Core share about sharing. Laid out like app-lib,
 //! one folder per concern:
 //!
 //! - `backend`: the client for the backend's share routes.

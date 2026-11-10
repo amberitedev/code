@@ -1,4 +1,4 @@
--- Storage (docs/internals/pool.md, "Where a share lives" and "Kept versions and usage").
+-- Storage: where a share lives, and the versions an account keeps.
 
 -- The bytes of a version's objects that the version kept before it did not have, so a share's
 -- usage is its oldest kept version plus what each later one added. NULL counts the whole version.

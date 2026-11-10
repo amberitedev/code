@@ -1,40 +1,42 @@
 # Amberite
 
-Amberite is a modded Minecraft launcher with instance sharing and self-hosted servers built in. A
-Rust server called Copal runs on whatever computer or cloud machine you install it on, and the
-desktop app is built on top of the Modrinth App.
+Amberite is a Minecraft launcher for modding and sharing, with self-hosted servers. Run the Rust
+server (Copal, also called Core) on any machine and manage it from the desktop App.
 
-You can think of Amberite as Modrinth with sharing and self-hosted servers built into it. You share
-your modpack with your friends, and any of you can run it as a server and control that server from
-the App. Sharing is not tied to a Core and works for everyone. There are no friend groups.
+You can think of Amberite as Modrinth Hosting, but free and better. Sharing is not tied to a Core
+and works for everyone.
 
-## What makes Amberite special?
-
-This project is very new and has not yet been deployed or tested anywhere, but there are some things we should never compromise on.
+This project is very new and has not been deployed or tested anywhere, so never migrate anything.
+But there are some things we never compromise on.
 
 ### 1. Easy to use
 
-Amberite makes everything feel simple and easy. The technical stuff is hidden behind advanced settings. If an average non-technical user can’t do something, it’s too complicated.
+Amberite is built so anyone can use it, without being any less capable. A non-technical user can do
+everything they need without setup or jargon. Advanced options exist, but the basics never require
+them.
 
-### 2. Self-hosted Core
+### 2. Performance without compromise
 
-Copal/Core is Amberite’s self-hosted server manager. It is open source and free, runs on hardware you control, and fully replaces Modrinth Hosting. A server can be created from an instance, so its content follows the instance without anyone managing or syncing it.
+Lots of apps have gotten bogged down with bad tech decisions and "slop". We have not, and we're
+proud of Amberite's performance. We regularly audit for performance regressions. Make sure every
+change considers its performance impact.
 
-### 3. Modrinth handles public content
+### 3. Free to run
 
-Modrinth handles public content (mods, modpacks, resource packs, etc.). Amberite uses that ecosystem and does not intend to replace it.
+Amberite is free. We never run or host servers: they are self-hosted, and we use those self-hosted
+servers to further reduce the cost of our backend. Keep every change cheap, with plenty of headroom.
 
-### 4. The App builds on Modrinth
+### 4. Built on Modrinth
 
-The App keeps the full Modrinth experience. Users can continue using it as their main launcher (browsing content, managing instances, installing modpacks and mods, etc.), with Amberite’s features added on top.
+Modrinth handles public content, and we use that ecosystem rather than replacing it. We keep the
+full Modrinth experience, so users can keep it as their main launcher with Amberite's features added
+on top.
 
-Amberite ports Modrinth’s social backend from upstream `apps/labrinth` (friends, profiles, accounts, etc.) to `apps/backend` (Cloudflare Workers and D1) while keeping the same schemas and contracts. Labrinth has no sharing server, so the sharing API follows the App's client instead; its intentional differences are in `docs/internals/sharing-api.md`. Amberite runs this backend itself, with relevant upstream changes carried over. Labrinth is not kept in this repo: read it from `modrinth/main`. `upstream.json` lists the upstream paths we never take (`ignore`) and the labrinth paths we port from (`watch`).
+Amberite ports Modrinth's social backend from `apps/labrinth` (friends, profiles, sharing, etc.) to
+`apps/backend` (Cloudflare Workers and D1) while keeping the same schemas and contracts. Amberite
+runs this backend itself, with relevant upstream changes carried over.
 
-### 5. Minecraft-first identity
-
-A verified Minecraft account is the basis of your Amberite identity and is used to sign in. Modrinth accounts are linked only for Modrinth features.
-
-## A note from Ilai
+## A note from ilai
 
 I like ambitious ideas, simple systems, and software that feels obvious. Do not preserve complexity just because it already exists. Do not introduce machinery because it looks architecturally impressive. Understand the real constraint, then fight for the smallest model that makes the correct behavior unsurprising.
 
@@ -42,231 +44,130 @@ Channel both "measure twice, cut once" and "yagni". Fight scope creep. Try to ho
 
 The rest of this document is meant to help you navigate the codebase and make changes effectively. Think of these instructions less as "hard rules", more as "good defaults". The developer's preferences should be able to override anything here.
 
+Of note: most Amberite work is done by agents in T3 Code worktrees, several at once. Be careful
+with dev stacks, data, and processes that belong to another worktree or to the developer.
+
 ## Hit every surface
 
-The most common frontend defect is a change that works on the side that was tested and is missing
-somewhere else. Before calling frontend work done, check which of these apply:
+The most common defect in this repo is a change that works on the side you tested and is missing on
+another. Before calling work done, walk this list and say which entries applied:
 
-- **Both ends.** Check every side of a feature, not only the side you changed.
-- **API client.** Any communication between clients (app) and backends (Core, `apps/backend`) is typed in
-  `packages/api-client`. Native sharing uploads and downloads go through `packages/app-lib`.
-- **Reverse states.** If you added a way in, add the way out and the way to see it. A one-way door is
-  a bug.
-- **Shared UI.** Changes to inherited Modrinth UI or `packages/ui` can affect screens outside the one
-  you changed. Check its consumers before treating it as local.
+- **Way in, way out.** If you added a way in, add the way out and the way to see it. Share needs
+  unshare, invite needs revoke. A one-way door is an unfinished feature.
+- **One contract.** Every call between the App and a backend (Core, `apps/backend`) is typed in
+  `packages/api-client`. Values Rust owns, such as limits and share rules, are generated into
+  api-client, never typed twice.
+- **Shared UI.** Changes to inherited Modrinth UI or `packages/ui` can affect screens outside the
+  one you changed. Check its consumers before treating it as local.
+- **Docs.** Check whether the change makes existing guidance inaccurate. Apply the
+  [documentation rules](#documentation) before adding anything.
 
 ## Dev servers
 
-- Worktree setup (`node scripts/setup-worktree.ts`, run by `t3.json`) installs dependencies, copies
-  the primary checkout's test data, and then compiles the App and Core in the background so they
-  are ready when you need them. It takes a few minutes and is often still running when you
-  start. Do not wait for it: reading and editing code needs none of it, so begin the work straight
-  away. Look at `.data/setup.json` only when you first need to run something: `running` means it is
-  not ready yet (never run `vp i` beside it), `failed` or a missing file means run the script again.
-- `node scripts/dev-runner.ts up 1 2` starts the whole stack in the background and returns once each App's
-  page loads through its browser bridge, printing the bridge URLs. `node scripts/dev-runner.ts status` prints the same at any time and
-  `node scripts/dev-runner.ts down` stops it. The log is `.data/dev.log`. Apps started this way have no window
-  on the desktop; add `--show-windows` when a person needs to see them.
-- The App and Core are built once per distinct set of Rust inputs and shared by every checkout. A
-  checkout whose Rust matches something already built is ready in about 30 seconds and compiles
-  nothing. Otherwise the start compiles first, one build at a time across all checkouts: about a
-  minute after a small Rust edit in a checkout that has built before. The first build in a worktree
-  compiles only the repo's crates that differ from the last build; third-party crates are shared
-  by every checkout. `up` stops at once and prints the compiler errors when the Rust does not
-  compile, so it is also the check for Rust changes. It does the same when the App's entry
-  (`apps/app-frontend/src/main.js`) does not compile; the stack keeps running and picks up the fix.
-  It gives up waiting after 9 minutes; run it
-  again to keep waiting.
-- Nothing watches Rust files. After a Rust edit, run `down` then `up`, which rebuilds because the
-  inputs changed.
-- `vp run dev` is the same stack in the foreground, for a person at a terminal, with App windows and the
-  account sign-in website. It starts the local backend, one
-  Core, and the App scenarios selected by `dev.json`. Pass scenario numbers to run several isolated
-  Apps against the same backends: `vp run dev 1 2 3`.
-- The backend runs locally through `wrangler dev --local`. No Cloudflare account, billing, or cloud
-  deployment is used, in the primary checkout or in worktrees.
-- Worktree state lives in that worktree's gitignored `.data/`. The backend and Core are shared;
-  `scenarios/<number>/` is the complete persistent state of one App installation. Do not point a
-  worktree at another checkout's live state.
-- Ports derive from the worktree path and stay stable across restarts when available. Read the real
-  ports and bridge URLs from `node scripts/dev-runner.ts status` or `.data/runtime.json`, because occupied ports
-  shift and bridge ports change on every start.
-- `vp run dev:app`, `vp run dev:core`, and `vp run dev:backend` start only that part of the
-  environment.
-- Stop what you started with `node scripts/dev-runner.ts down`, which stops only this checkout's runner. Never kill
-  by a broad process name or path; several worktrees may be running at once.
-- Changes that only touch the backend or Core do not need an App: `node scripts/dev-runner.ts up dev:backend` starts
-  in seconds and compiles no Rust.
+- `vp i` installs. Worktrees get this from the t3.json setup script; if module resolution looks
+  broken, it probably did not run.
+- Setup runs in the background. While `.data/setup.json` says `running` and its `pid` is alive,
+  wait for it and do not run `vp i`. It ends with `done` or `failed` (with the error). A dead pid,
+  `failed`, or no file at all means run `vp run setup` yourself.
+- `vp run up 1 2` starts the backend, one Core, and the Apps for scenarios 1 and 2 in the
+  background, and returns once each App loads, printing its bridge URL. `vp run status` prints them
+  again; `vp run down` stops only this checkout's stack. The log is `.data/dev.log`.
+  `vp run dev` is the same stack in the foreground with App windows, for a person at a terminal.
+- Rust builds once per distinct set of Rust inputs, shared by every checkout. With no Rust changes,
+  `up` compiles nothing. Otherwise it compiles only the repo's crates that changed, one build at a
+  time across checkouts. `up` gives up waiting after 9 minutes; run it again to keep waiting.
+- Nothing watches Rust. After a Rust edit, `vp run down` then `vp run up`. `up` stops and prints
+  compiler errors, so it is also the check for Rust changes.
+- Backend-only work needs no App: `vp run up dev:backend` starts in seconds. `vp run up dev:core`
+  starts only the Core. For the backend and Core together, start the full stack.
+- Ports derive from the worktree path and are stable across restarts. Read the real ones and the
+  bridge URLs from `vp run status`, since occupied ports shift.
+- Never kill by process name, path, or worktree string. Several worktrees run stacks at once, and
+  your own agent's command line holds this worktree's path. Stop what you started with
+  `vp run down`, or kill only a PID you captured at spawn.
 
-## Driving the App
-
-Each running App serves itself to a browser at its bridge URL, with every native call going to the
-real App. That is how agents click through it and take screenshots; no computer use is involved.
-
-For any change a person can see, do this without asking: start the App, open it through the bridge,
-use the screen you changed, and screenshot it. Scenario Apps hold only local test accounts, so their
-screenshots may be uploaded for a pull request. Computer use on the real desktop still needs the
-developer's go-ahead.
-
-1. `node scripts/dev-runner.ts up 1` (or `1 2` for two accounts), then take the bridge URL from its output.
-2. In T3 Code, `preview_open` that URL, then use `preview_click`, `preview_type`, and
-   `preview_evaluate` to work the UI. Open one tab per App and pass its `tabId` on every call.
-3. `preview_snapshot` with `save: true` writes a PNG and returns its path. Read that file to look at
-   the screen. For a pull request, upload it with the `file-upload` skill and embed the URL.
-4. `node scripts/dev-runner.ts down` when you are finished.
-5. If the change has UI, end by starting the App for the developer with
-   `node scripts/dev-runner.ts up <scenarios> --show-windows`, with test data that reaches the
-   changed screen, so they can try it straight away.
-
-- Once the developer has an App window, it is theirs: do not drive that App through the bridge. A
-  bridge tab runs against the same App, so your clicks change what they see and save real
-  settings. Do your bridge pass before step 5, or ask first.
-
-- Take the "before" screenshot before you edit; the App reloads UI changes on its own, so the
-  "after" is the same tab a moment later. Motion and timing changes get a short recording
-  (`preview_recording_start` / `preview_recording_stop`) instead.
-- A full-screen "Something broke" (`[data-crash-screen]`) means a page threw while rendering. Its
-  Details hold the route, source, and stack; the console has the same under `[crash]`. Errors that
-  leave the page usable are only logged, under `[error]`.
-- The first load of a tab takes around 20 seconds and shows a blank page meanwhile. Wait for the
-  sidebar before judging or screenshotting.
-- A second tab that T3 Code is not showing does not lay out: `innerText` reads as empty and
-  `preview_click` on its toasts and modals times out. Read `textContent` and click through the DOM
-  with `preview_evaluate` there.
-
-- Each App signs itself in at startup as its scenario account (`scenario_<number>`), so screens
-  behind an account work straight away. Nothing needs signing in by hand.
-- Calls made through `preview_evaluate` are cut off after 15 seconds. Start long work and poll for
-  the result instead of awaiting it.
-- Open only bridge URLs in the preview. The raw App URL has no native calls, and the account sign-in
-  website hangs the preview tools.
-- Only the native window shows window chrome, system dialogs, and drag and drop from the desktop.
-  Those need a person or computer use, and an App started with `--show-windows`.
-
-Full command, state, and port behavior: `docs/internals/scripts.md`.
+Ports, builds, and timings: [scripts](docs/internals/scripts.md).
 
 ## Test data
 
-An empty environment is a bad test. Worktrees get an isolated copy of the primary checkout's
-`.data/` instead of pointing at live state:
+An empty database is a bad test. Each worktree gets a copy of the primary checkout's `.data/`
+instead of pointing at live state:
 
-- `.data/backend` (accounts and sharing metadata) and `.data/core` (servers and the shared files it
-  stores) are shared by every App in the worktree. `.data/scenarios/<number>` contains the complete
-  local state of one App installation.
-- Run `vp run dev 1 2 3` to launch several Apps as different fake accounts against the same backend and
-  Core. Each scenario keeps its own database, settings, Minecraft instances, credentials, and
-  WebView state.
-- Scenarios `1` through `4` are the default test set. A new positive number creates another isolated
-  App state and fake account when the task needs one.
-- Treat the backend, Core, and the App scenarios as one dataset. Copy them together when replacing the
-  baseline; do not create Core-only scenarios.
-- Stop the affected process before editing or copying SQLite state. A live file copy is not safe
-  unless its `-wal` and `-shm` files are copied with it.
-- Copy data into the worktree, never symlink it to another checkout. Test data flows into the
-  sandbox, never back out.
-- Presets are saved datasets for situations the baseline does not reach.
-  `node scripts/dev-runner.ts preset` lists them, and `up --preset <name> 1 2` replaces this
-  checkout's data with one before starting. `preset save <name>` stores this checkout's data as a
-  preset for every checkout; that sends data out of the sandbox, so do it only when the developer
-  asks.
+- `.data/backend` and `.data/core` are shared by every App in the worktree.
+  `.data/scenarios/<number>` is one App installation. Scenarios 1 to 4 are the default set; a new
+  number makes another isolated App and account.
+- The backend, Core, and scenarios are one dataset. Copy them together.
+- Stop the affected process before copying SQLite files, and copy their `-wal` and `-shm` files with
+  them.
+- Copy in, never symlink. Data flows one way: into your sandbox, never back out.
 
 ## Verifying
 
-- Use the smallest proof that the change works: `vp test run <files>` for tests you touched, targeted
-  lint, and typecheck only for the workspace you changed.
-- You usually do not need to build or compile. CI checks every push, and `vp run dev` compiles what
-  it runs. When you do need the compiler, such as for a large Rust change, run `cargo check` scoped
-  to the crate you changed (`-p <crate>` or that crate's directory). Release builds
-  (`cargo build --release`, `vp build`) and app bundles are slow and rarely tell you anything a check
-  would not.
-- You usually do not need repo-wide checks (`vp check`, `vp run -r test`, `vp run -r typecheck`).
-  CI runs the full suite. Run one when your change really reaches across the repo, and prefer the
-  narrowest command that covers it.
-- Do not add backend tests by default. Add them when the developer asks or when the behavior is
-  stable enough that a focused regression test is useful.
-- User-visible App changes get one pass against the real App through the browser bridge (see
-  "Driving the App"). The primary agent does this once after integrating; subagents do not start
-  their own dev stacks. Ask before computer use.
+- Before you push, run `vp run check:changed`. It runs CI's fast checks for changed files: lint,
+  typos, TOML, typecheck and tests of the affected packages, and for Rust `rustfmt` and a build.
+  CI still runs the full suites.
+- Test behavior that can break, such as sharing and sync logic, Core and backend permission
+  checks, persistence and migrations, external-format parsing (modpacks, Modrinth's API), race
+  fixes, and the logic a bug fix changed. Leave out tests for what types already guarantee, trivial
+  logic, copy text, smoke runs, mock-call mirrors, and props rendered to static markup.
+- Extend before you add. When an existing test or table covers the behavior, add a row or an
+  assertion there. Write a new test only when no case fits.
+- Test at one layer: the lowest one that fails on `main`. Do not repeat the case in a wrapper test
+  or at each call site.
+- **Do not run repo-wide checks.** No `vp check`, no `vp run -r test`, no `vp run -r typecheck`
+  unless the developer asks. CI owns the full suite.
+- Proof for a bug fix depends on the bug. Logic, data, state, and protocol bugs get a failing test
+  first (the fewest that fail for that reason on `main`, or before the fix for a bug this branch
+  introduced), then the fix. Purely visual bugs
+  (spacing, colour, alignment, a layout shift) get before/after screenshots as their proof and no
+  test. A Core- or backend-only fix with no visible surface ships the test plus a short runtime
+  transcript.
+- User-visible App changes get one integrated pass in the real App: read
+  [test-app](.agents/skills/test-app/SKILL.md). The primary agent does this once after
+  integrating. Subagents do not start their own dev stacks.
 
-## Pull requests
+## Documentation
 
-- Never create or publish a pull request unless the developer explicitly asks.
-- Use conventional titles in plain language.
-- Keep one concern per pull request.
-- Start the body with the problem, then explain the solution and focused verification.
-- UI changes need before-and-after images. Motion or timing changes need a short video.
-- Do not include unrelated working-tree changes.
+Most code changes do not need an internal documentation change. Agents can read the code.
 
-## Where code lives
+- `docs/internals/` is for architectural decisions and their reasons, constraints that span
+  components, and implementation traps that are hard to discover from the source. Before adding a
+  paragraph, ask what a maintainer would get wrong without it. If reading the relevant code answers
+  the question, leave it out.
+- Do not document every feature, enumerate fields or methods, narrate control flow, maintain file
+  catalogs, or append PR summaries. Types, tests, and code already record the implementation.
+- A local reason the code can't show goes in a short nearby code comment. Use an internal doc when
+  the reasoning crosses boundaries or needs context the code cannot carry well. Link to the
+  relevant source instead of copying it.
+- When a documented decision or constraint changes, rewrite or remove the affected text. Do not
+  append another account of the new behavior. A new internal page needs a distinct, durable reason
+  to exist.
 
-- `apps/app-frontend` - Vue desktop product UI and inherited Modrinth launcher pages.
-- `apps/app` - Tauri shell, native commands, capabilities, and process integration.
-- `apps/core` - Copal, the Rust server manager. Its server content is in app-lib's layout under
-  `src/state/servers/`; `src/api/` holds the HTTP routes.
-- `packages/sharing-storage` - the store: a child process of `copal` that holds encrypted shared
-  files for the pool. It has no identity of its own: the Core forwards `/store/` on its one port to
-  it unread, manages it over stdio, and reports for it (`apps/core/src/storage.rs`). It has no
-  database or keys and checks the backend's tickets itself. Design in `docs/internals/pool.md`.
-- `apps/backend` - accounts, friends, presence, and sharing metadata on Cloudflare Workers, D1, and
-  R2. Shared files live on Cores, never on Cloudflare.
-- `packages/ui` - shared Modrinth and Amberite UI.
-- `packages/api-client` - typed client for Modrinth, the backend, and Core.
-- `packages/app-lib` - inherited launcher and platform library.
-- `docs/internals` - `plan.md` holds product goals and decisions; `scripts.md` covers dev commands;
-  `ui.md` holds the rules for how the App's UI behaves.
+## Plans and work artifacts
 
-### Shared Rust
-
-Code the App and Copal both need exists once, in these crates. The App (`packages/app-lib`,
-`apps/app`) and Copal stay thin: state, Tauri commands or HTTP routes, progress.
-
-| Crate                                  | Job                                                                              | Rule                             |
-| -------------------------------------- | -------------------------------------------------------------------------------- | -------------------------------- |
-| `packages/modrinth-content-management` | Modrinth's content decisions: `resolve_content`, content and configuration diffs | Upstream's. Never edit; call it. |
-| `packages/bedrock`                     | Everything both sides share that is not sharing                                  | Ours.                            |
-| `packages/sharing-client`              | Everything about shares                                                          | Ours.                            |
-| `packages/sharing-storage`             | The store process                                                                | Ours.                            |
-
-Imports go one way: `modrinth-content-management` -> `bedrock` -> `sharing-client` ->
-`sharing-storage`. Copal never depends on app-lib.
-
-bedrock holds three kinds of code:
-
-1. Borrowed app-lib files, compiled in place with `#[path]` (`state/`). app-lib imports those types
-   from bedrock instead of compiling them. Prefer this for any app-lib file whose dependencies are
-   small enough for bedrock to provide.
-2. Clones of upstream code tangled with app-lib's `State` (`upstream/`), kept byte for byte where
-   possible with all adaptation in one glue file, and declared in `packages/bedrock/ports.toml`.
-   The App keeps the originals.
-3. Our own shared code: content rules, reaching Cores, disk space, and `limits` (also generated
-   into `packages/api-client/src/modules/bedrock/limits.ts`).
-
-sharing-client is one folder per concern: `backend` (the one client for the backend's share
-routes), `versions` (the share version, `RemovedFile`), `rules` (which files a share carries,
-what `blocked` means, and the listing of pickable files; generated into
-`packages/api-client/src/modules/sharing/rules.ts`), `push` (reading an owner's rows into a
-version, the version builder and the writer), `pool` (the store client and the fetch), `consume`
-(a version as a server takes it), `install` (the member install plan: a version's files at each
-side's paths, less its modpack, with the configs an update writes, keeps or deletes; each side
-applies it with its own writer), `diff` (the share diff both sides show) and `crypto`.
-
-New and restructured Rust follows app-lib's layout: `api/` for entry points, `state/<domain>/` with
-`model/` (plain types), `adapters/` (sqlite rows, filesystem, network), `commands/` (one operation
-per file), optional `domain/` (pure rules), and `mod.rs` re-exports. Use app-lib's names for the
-same concepts (`ContentSet`, `ContentEntry`, `list_content`, ...).
-
-## Work tracking
-
-Work lives in Linear, team `AMB`. Labels, statuses, the issue template, and Linear operations are in
-`docs/agents/issue-tracker.md`. `/start` runs one session on the next issue, `/triage` sorts issues,
-and `/to-tickets` turns a plan into issues.
+- Implementation plans and research notes the developer wants to keep go in `.plans/`, so they can
+  be handed to other agents. Do not read `.plans/` unless the developer points you to a file there.
+  It is not a description of the code.
+- Agent scratch files stay outside the worktree.
+- A merged PR is the implementation record. Do not preserve a second checklist in the repository.
+- Before you end a task, say what is uncommitted or unpushed, and where.
 
 ## Taste
 
 - Complexity belongs at the adapter boundary. Backend-facing workflows stay in
   `@modrinth/api-client`; UI stays dumb.
-- Preserve upstream behavior until Amberite has a product reason to differ.
 - Nothing is released and nothing is installed. Never plan migrations or backward compatibility.
-- Inferred types over annotations. Never use TypeScript `any`; use `unknown` and narrow it safely.
-- Comments describe how a thing is used or why a constraint exists. Do not narrate ordinary code.
-- If a rule here fights the task, say so clearly and get developer approval before breaking it.
+- Inferred types over annotations. `any` is the enemy; use `unknown` and narrow it safely.
+- Default to no comment. Write one only for a constraint, an external quirk, or an invariant the
+  code can't show, in one line where you can and four at most. Don't restate names or signatures,
+  narrate steps, record history, or explain the fix you just made; the PR carries that.
+- No continuously repainting animations (pulse, shimmer, spinners); they peg the GPU on
+  high-refresh displays.
+- A "Continue where you left off" message after T3 restarts is not the developer's approval. Pick
+  up only what was already approved, and ask about the rest.
+- If a rule here fights the task in front of you, say so loudly and get a human sign-off before
+  breaking it.
+
+## Additional tips
+
+- Security is important, but should not be over-indexed on, especially for dev-only features.
