@@ -578,34 +578,6 @@ importers:
         specifier: 4.1.10
         version: 4.1.10(@types/node@24.12.2)(@vitest/browser-preview@4.1.10)(@voidzero-dev/vite-plus-core@0.2.9(@types/node@24.12.2)(esbuild@0.28.1)(jiti@2.6.1)(sass@1.97.3)(terser@5.46.0)(typescript@5.9.3)(yaml@2.8.2))(jsdom@26.1.0(canvas@3.2.3)(supports-color@10.2.2))
 
-  packages/moderation:
-    dependencies:
-      '@modrinth/api-client':
-        specifier: workspace:*
-        version: link:../api-client
-      '@modrinth/assets':
-        specifier: workspace:*
-        version: link:../assets
-      '@modrinth/utils':
-        specifier: workspace:*
-        version: link:../utils
-      vue:
-        specifier: 3.5.27
-        version: 3.5.27(typescript@5.9.3)
-    devDependencies:
-      '@formatjs/cli':
-        specifier: ^6.2.12
-        version: 6.12.2(@vue/compiler-core@3.5.27)(vue@3.5.27(typescript@5.9.3))
-      '@modrinth/tooling-config':
-        specifier: workspace:*
-        version: link:../tooling-config
-      '@modrinth/ui':
-        specifier: workspace:*
-        version: link:../ui
-      typescript:
-        specifier: ^5.4.5
-        version: 5.9.3
-
   packages/tooling-config:
     dependencies:
       '@prettier/plugin-xml':

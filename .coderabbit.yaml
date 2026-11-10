@@ -1,0 +1,213 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+# Shaped by our CodeRabbit plan's limits: a review covers at most 300 files after path_filters, and
+# each push gets one review.
+
+tone_instructions: >-
+  Be direct and brief. Plain words, no praise, no filler, no emoji. Say what is wrong, why it
+  matters and the fix. Skip what oxlint, oxfmt, clippy or rustfmt already catch.
+
+reviews:
+  profile: assertive
+  poem: false
+  in_progress_fortune: false
+  sequence_diagrams: false
+
+  auto_review:
+    enabled: true
+    auto_pause_after_reviewed_commits: 0
+    base_branches:
+      - '^refactor/restructure-repo$'
+      - '^restructure/'
+
+  path_filters:
+    - '!**/Cargo.lock'
+    - '!**/pnpm-lock.yaml'
+    - '!**/.sqlx/**'
+    - '!.plans/**'
+    - '!packages/contracts/ts/contracts.ts'
+    - '!packages/contracts/ts/engine.ts'
+    - '!packages/contracts/ts/app.ts'
+    - '!apps/app-frontend/src/generated/**'
+    - '!apps/backend/src/worker-configuration.d.ts'
+    - '!packages/assets/generated-icons.ts'
+    - '!**/generated.ts'
+    - '!**/*.generated.ts'
+    - '!**/*.generated.d.ts'
+    - '!**/*.{png,jpg,jpeg,gif,webp,avif,ico,icns,mp4,webm,ttf,otf,woff,woff2,gltf,glb,fbx,jar,zip}'
+    - '!packages/moderation/**'
+    - '!.idea/**'
+
+  path_instructions:
+    - path: 'packages/{engine,app-lib}/**'
+      instructions: |
+        The engine (packages/app-lib today, packages/engine after the rename) owns instances on one
+        machine. Upstream Modrinth code: keep upstream's names and layout so merges stay clean.
+        - It never imports a host (apps/app, apps/core, crates theseus_gui and copal). Shared logic
+          goes here, host features go in the host.
+        - It tells, it never asks: it takes what it needs as arguments and reports through events.
+          Code that needs a lot of desktop data belongs in the App.
+        - No global state. Flag new statics holding state and new State::get() calls; the host
+          creates the engine and passes it in.
+        - Engines never call each other. Sharing goes through the backend and the stores.
+        - No desktop tables or desktop-only code paths: the same engine runs on a Core.
+        - Every route it serves is an Endpoint from packages/contracts.
+    - path: 'packages/contracts/**'
+      instructions: |
+        The protocol: Rust types and Endpoints (method, path, request, response) for every route we
+        own, plus ApiError, Event and the protocol version. No logic.
+        - Use upstream's names where upstream has the concept (shared instance, InstanceVersion,
+          ExternalFile, InstanceUser, Invite). Our additions get plain names, not jargon, and no
+          single-letter names for hashes.
+        - Errors are ApiError codes, never message text the UI matches on.
+        - The protocol version is bumped only when old and new sides can no longer talk.
+        - Generated TS under ts/ must match the Rust; only ts/index.ts is hand-written.
+    - path: 'apps/app/**'
+      instructions: |
+        The desktop host. It creates the engine and passes it in, owns the desktop domains, serves
+        everything on 127.0.0.1 and runs the Core proxy.
+        - Desktop features are App routes used the same way by the native window and a browser tab.
+          No dev-only second path.
+        - Every local route requires the loopback secret and checks Origin.
+        - The Core proxy is a pipe that knows no routes. Core session tokens never reach the
+          WebView; the proxy adds them on the way out. The certificate fingerprint check is written
+          once.
+        - Routes are Endpoints from packages/contracts, not hand-written request or response types.
+    - path: 'apps/core/**'
+      instructions: |
+        The server host, shipped as Copal. In code it is called Core; "copal" belongs only to the
+        binary, crate, service, installer and release.
+        - No desktop code paths or desktop tables: no Discord, friends, skins or Modrinth sign-in.
+        - Routes are Endpoints from packages/contracts. Access is checked through the host's Access
+          on every route and every event subscription, and rechecked when a role changes or a
+          session ends. A Viewer never gets a console.
+        - Mods, packs, archives and paths are untrusted. Paths stay inside the server's folder.
+        - Host concepts keep the name "server" (routes /servers/{id}, the servers table).
+    - path: 'apps/backend/**'
+      instructions: |
+        A Cloudflare Worker on D1, ported from Modrinth's labrinth with the same schemas and
+        contracts. It must stay free to run.
+        - Handlers are typed by the TS generated from packages/contracts. No hand-written request
+          or response types.
+        - Watch cost: bounded queries, indexed lookups, no per-request fan-out or unbounded loops
+          over rows.
+        - Table and column names follow the contract names.
+    - path: 'apps/app-frontend/**'
+      instructions: |
+        The UI, mostly upstream Modrinth code.
+        - Every call goes through packages/api-client. The UI stays dumb.
+        - Upstream's helpers keep their names and signatures; only their bodies change.
+        - No continuously repainting animations (pulse, shimmer, spinners).
+    - path: 'packages/ui/**'
+      instructions: |
+        Shared upstream Modrinth UI used by screens outside the one being changed. Flag any edit
+        and check its other consumers. Keep upstream names so merges stay clean.
+    - path: 'packages/api-client/**'
+      instructions: |
+        The one TS client: a generic call(Endpoint, body) through client.local, client.core(id) and
+        client.backend, plus upstream's Modrinth modules.
+        - No per-route hand-written clients and no hand-written types for routes we own; types
+          come from packages/contracts.
+        - Upstream's archon and shared-instances modules stay untouched.
+        - Backend-facing workflow complexity lives here, not in the UI.
+
+  pre_merge_checks:
+    docstrings:
+      mode: 'off'
+    title:
+      mode: warning
+      requirements: >-
+        Conventional commit: "type(scope): outcome" or "type: outcome". type is one of feat, fix,
+        refactor, chore, docs, test, ci, build, perf, revert. The scope is optional and lowercase.
+        The outcome is a plain-language statement of what is now true, lowercase first word, no
+        trailing period.
+    custom_checks:
+      - name: Engine never imports a host
+        mode: warning
+        instructions: |
+          Pass if the diff changes nothing under packages/engine or packages/app-lib.
+          Fail if a change there adds a dependency on, or an import from, theseus_gui, copal, or
+          any path under apps/, or adds new use of tauri.
+      - name: No new global state
+        mode: warning
+        instructions: |
+          Fail if the diff adds, in any Rust crate under packages/ or apps/, a static that holds
+          mutable or runtime state (OnceCell, OnceLock, LazyLock, lazy_static, a static Mutex,
+          RwLock or atomic used as shared state), or a new State::get() call. Constants and
+          compile-time tables pass. Otherwise pass.
+      - name: Owned routes are contract Endpoints
+        mode: warning
+        instructions: |
+          Fail if the diff adds or changes an HTTP route in apps/app, apps/core, apps/backend,
+          packages/engine, packages/app-lib or packages/sharing-storage whose method, path, request
+          or response is not taken from an Endpoint in packages/contracts. Also fail if it adds a
+          hand-written TS or Rust type that mirrors such a route's request or response, or a
+          per-route hand-written client. Routes that only exist in upstream Modrinth code and are
+          not edited pass. Otherwise pass.
+      - name: No desktop code on a Core
+        mode: warning
+        instructions: |
+          Fail if the diff adds, under apps/core, packages/engine or packages/app-lib, code or
+          migrations for desktop-only features: Discord, friends, skins, Minecraft or Modrinth
+          sign-in, windows, dialogs, shortcuts, the updater, or a Tauri API. Code under apps/app
+          passes. Otherwise pass.
+      - name: Upstream helpers keep their signatures
+        mode: warning
+        instructions: |
+          Pass if the diff changes nothing under apps/app-frontend/src/helpers.
+          Fail if an existing exported function there is renamed or removed, or its parameters or
+          return type change. Changing only function bodies passes. New exports pass.
+
+  finishing_touches:
+    docstrings:
+      enabled: false
+
+  tools:
+    clippy:
+      enabled: true
+    oxc:
+      enabled: true
+    actionlint:
+      enabled: true
+    gitleaks:
+      enabled: true
+    shellcheck:
+      enabled: true
+    yamllint:
+      enabled: true
+    semgrep:
+      enabled: true
+    osvScanner:
+      enabled: true
+    eslint:
+      enabled: false
+    biome:
+      enabled: false
+    markdownlint:
+      enabled: false
+    languagetool:
+      enabled: false
+
+  security_risk_instructions: |
+    The App runs a local HTTP server on 127.0.0.1. Any program on the machine can reach it, and so
+    can any website through the user's browser. Every route must require the loopback secret and
+    check the Origin header; a route without both is high risk.
+
+    A Core runs on the internet on someone's own machine, behind a self-signed certificate that the
+    App pins by fingerprint. The App reaches Cores through its local proxy. Core session tokens
+    must never enter the WebView: the proxy adds them on the way out. Changes to the fingerprint
+    check, the proxy, Core sessions, pairing or Core access checks are high risk.
+
+    The backend is a Cloudflare Worker on D1 that holds accounts, friends and sharing metadata. It
+    must stay cheap to run, so unbounded queries or work an anonymous caller can trigger are a cost
+    and availability risk as well as a security one.
+
+    Servers run third-party mods and modpacks. Archives, file paths inside them, pack manifests and
+    the hosts packs download from are untrusted: extraction must stay inside the target folder,
+    sizes must be bounded, and downloads go only to allowed hosts.
+
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - AGENTS.md
+      - docs/internals/*.md

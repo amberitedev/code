@@ -1,45 +1,29 @@
-<picture>
-	<source media="(prefers-color-scheme: light)" srcset=".github/assets/monorepo_cover_light.png">
-	<img alt="Modrinth Monorepo Cover" src=".github/assets/monorepo_cover.png">
-</picture>
+# Amberite
 
-![Issues](https://img.shields.io/github/issues-raw/Modrinth/code?color=c78aff&label=issues&style=for-the-badge)
-![Pull Requests](https://img.shields.io/github/issues-pr-raw/Modrinth/code?color=c78aff&label=PRs&style=for-the-badge)
-![Contributors](https://img.shields.io/github/contributors/Modrinth/code?color=c78aff&label=contributors&style=for-the-badge)
-![Lines of Code](https://img.shields.io/endpoint?url=https://loctopus.creeperkatze.dev/github/modrinth/code/badge?style=flat&logoColor=white&color=c78aff&style=for-the-badge)
-![Commit Activity](https://img.shields.io/github/commit-activity/m/Modrinth/code?color=c78aff&label=commits&style=for-the-badge)
-![Last Commit](https://img.shields.io/github/last-commit/Modrinth/code?color=c78aff&label=last%20commit&style=for-the-badge)
+Amberite is a Minecraft launcher for modding and sharing, with self-hosted servers. Run the Rust
+server (Core) on any machine and manage it from the desktop App. Sharing is not tied to a Core and
+works for everyone.
 
-## Modrinth Monorepo
+## Running it
 
-Welcome to the Modrinth Monorepo, the primary codebase for the Modrinth website, app, API and documentation. It contains ![Lines of code](https://img.shields.io/endpoint?url=https://loctopus.creeperkatze.dev/github/modrinth/code/badge%3Fformat%3Dhuman&logoColor=white&color=black&label=) lines of code and has ![Contributors](https://img.shields.io/github/contributors/Modrinth/code?color=black&label=) contributors!
+```sh
+vp i
+vp run dev
+```
 
-If you're not a developer and you've stumbled upon this repository, you can access the web interface on the [Modrinth website](https://modrinth.com) and download the latest release of the app [here](https://modrinth.com/app).
+`vp run dev` starts the backend, a Core and the App.
 
-## Development
+## Docs
 
-This repository contains several projects. For detailed development information, please refer to their respective guides:
+[AGENTS.md](AGENTS.md) explains how the repo is laid out and how to work in it.
+[docs/internals](docs/internals) holds architectural decisions and the constraints behind them.
 
-| Project | Directory  | Guide                                                    |
-| ------- | ---------- | -------------------------------------------------------- |
-| App     | `apps/app` | [Guide](https://docs.modrinth.com/contributing/theseus/) |
+## Credit
 
-Shared libraries live in `packages/`.
-
-## Contributing
-
-We welcome contributions! Before submitting any contributions, please read our [contributing guidelines](https://docs.modrinth.com/contributing/getting-started/).
-
-If you plan to fork this repository for your own purposes, please review our [copying guidelines](COPYING.md).
-
-## Security
-
-If you discover a security vulnerability within our codebase, please follow our [responsible disclosure guidelines](https://modrinth.com/legal/security).
-
-## Support
-
-If you need help with the Modrinth web interface or app, please visit our [support page](https://support.modrinth.com). For general inquiries, you can also join our [Discord server](https://discord.modrinth.com).
+Amberite is built on [Modrinth](https://github.com/modrinth/code). Most of the App and its UI come
+from Modrinth's launcher, and Modrinth handles public content.
 
 ## License
 
-All packages in this repository are licensed under their respective licenses. See the [copying guidelines](COPYING.md) for details, including restrictions on Modrinth branding.
+Each package has its own license. See [COPYING.md](COPYING.md), including its rules on Modrinth
+branding.
