@@ -47,14 +47,15 @@ folder that is usually nothing.
   against the Worker's public key, so start `dev:backend` too.
 - `node scripts/dev-runner.ts up 1 2`: Starts the same stack in the background, waits until every
   service answers and every App's page loads through its browser bridge, then prints each App's
-  bridge URL and `tab:` URL. Run it with node: on Windows, `vp run` puts its command in a job
-  that kills every process in it when vp exits, the background stack included. The tab URL opens
-  the App in a plain browser tab on its own origin, which needs the App's local API, and the App
-  does not serve it yet; use the bridge URL. In a new checkout the frontend spends a minute or two preparing its dependencies; that happens inside `up`. It writes to `.data/dev.log`
-  and returns after 9 minutes if the stack is still compiling; run it again to keep waiting. It
-  fails at once when a Rust build fails, or when the App's entry module does not compile, printing
-  the compiler error; the stack keeps running. An optional mode comes first:
-  `up dev:backend`. Unlike `vp run dev`, it leaves out the account sign-in
+  bridge URL and `tab:` URL. There is no `vp run up`: on Windows, `vp run` puts its command in a
+  job that kills every process in it when vp exits, the background stack included. The tab URL
+  opens the App in a plain browser tab on its own origin, where most native calls do not work; use
+  the bridge URL. In a new checkout the frontend spends a minute or two preparing its dependencies;
+  that happens inside `up`. It writes to `.data/dev.log` and returns after 9 minutes if the stack
+  is still compiling; run it again to keep waiting. It fails at once when a Rust build fails, or
+  when the App's entry module does not compile, printing the compiler error; the stack keeps
+  running. An optional mode comes first: `node scripts/dev-runner.ts up dev:backend`. Unlike
+  `vp run dev`, it leaves out the account sign-in
   website and keeps App windows off the desktop, because agents use Apps through the browser
   bridge. `--show-windows` shows them; on a stack already running hidden it fails, so run `down`
   first.
@@ -188,7 +189,7 @@ Worktree setup copies `backend`, `core`, and `scenarios` from the primary checko
 overwriting existing state.
 
 `runtime.json` holds the runner's PID, the ports, and each scenario's `bridgeUrl` and `tabUrl` while
-the stack is running. The PID and bridge URLs are removed when it stops.
+the stack is running. The PID and URLs are removed when it stops.
 
 ### Regenerating the sharing dataset
 
@@ -234,11 +235,9 @@ advances the complete applicable set until it finds an available one. To start A
 an existing backend, use the same `PORT_OFFSET` if that backend shifted from its preferred
 offset; read the ports in the runner output first.
 
-Each App also gets a local API address, `http://127.0.0.1:<port>/<secret>`: when the runner starts,
-it picks a free port and a 64-character hex secret per scenario, passes them to the App as
-`localPort` and `localSecret` in `--amberite-dev-config`, and adds the address to both of the
-App's URLs as `#local=<address>`. `rs <scenario>` keeps them. The secret is in `runtime.json` and
-the `up` and `status` output, never in `.data/dev.log`.
+Each App also gets a local API address, `http://127.0.0.1:<port>/<secret>`, which the runner passes
+in its dev config and adds to both of the App's URLs as `#local=<address>`. The secret is in
+`runtime.json` and the `up` and `status` output, never in `.data/dev.log`.
 
 Treat the `[dev-runner]` output and `.data/runtime.json` as authoritative. The preferred ports are
 stable, but an occupied port can shift the actual run.

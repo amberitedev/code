@@ -76,21 +76,20 @@ another. Before calling work done, walk this list and say which entries applied:
 - Setup runs in the background. While `.data/setup.json` says `running` and its `pid` is alive,
   wait for it and do not run `vp i`. It ends with `done` or `failed` (with the error). A dead pid,
   `failed`, or no file at all means run `vp run setup` yourself.
-- `node scripts/dev-runner.ts up 1 2` (`up` below) starts the backend, one Core, and the Apps for
-  scenarios 1 and 2 in the background, and returns once each App loads, printing its bridge URL and
-  a `tab:` URL. Not `vp run up`: on Windows, vp kills everything its command started when it
-  returns, the background stack included. `vp run status` prints the URLs again; `vp run down`
-  stops only this checkout's stack. The log is `.data/dev.log`. `vp run dev` is the same stack in
-  the foreground with App windows, for a person at a terminal.
-- Use the bridge URL. The `tab:` URL opens the App in a plain browser tab, which needs the App's
-  local API, and the App does not serve it yet.
+- `node scripts/dev-runner.ts up 1 2` starts the backend, one Core, and the Apps for scenarios 1
+  and 2 in the background, and returns once each App loads, printing its bridge URL. There is no
+  `vp run up`: on Windows, vp kills everything its command started when it returns, the background
+  stack included. `vp run status` prints the URLs again; `vp run down` stops only this checkout's
+  stack. The log is `.data/dev.log`. `vp run dev` is the same stack in the foreground with App
+  windows, for a person at a terminal.
 - Rust builds once per distinct set of Rust inputs, shared by every checkout. With no Rust changes,
   `up` compiles nothing. Otherwise it compiles only the repo's crates that changed, one build at a
   time across checkouts. `up` gives up waiting after 9 minutes; run it again to keep waiting.
-- Nothing watches Rust. After a Rust edit, `vp run down` then `up`. `up` stops and prints
-  compiler errors, so it is also the check for Rust changes.
-- Backend-only work needs no App: `up dev:backend` starts in seconds. `up dev:core`
-  starts only the Core. For the backend and Core together, start the full stack.
+- Nothing watches Rust. After a Rust edit, `vp run down`, then `node scripts/dev-runner.ts up`
+  again. `up` stops and prints compiler errors, so it is also the check for Rust changes.
+- Backend-only work needs no App: `node scripts/dev-runner.ts up dev:backend` starts in seconds.
+  `node scripts/dev-runner.ts up dev:core` starts only the Core. For the backend and Core together,
+  start the full stack.
 - Ports derive from the worktree path and are stable across restarts. Read the real ones and the
   bridge URLs from `vp run status`, since occupied ports shift.
 - Never kill by process name, path, or worktree string. Several worktrees run stacks at once, and

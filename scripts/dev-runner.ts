@@ -139,7 +139,7 @@ type RuntimeFile = {
 		/** Serves this scenario's real App to a browser. Set once the App has started. */
 		bridgeUrl?: string
 		/** Opens this scenario's frontend in a plain browser tab, on its own origin. */
-		readonly tabUrl: string
+		readonly tabUrl?: string
 	}>
 	readonly source: string
 	readonly urls: Record<PortName, string>
@@ -241,7 +241,7 @@ export function createRuntimeEnvironment(input: {
 }
 
 /** A free loopback port and a new secret for each scenario's App. */
-export async function pickLocalAddresses(
+async function pickLocalAddresses(
 	scenarios: ReadonlyArray<number>,
 ): Promise<ReadonlyMap<number, LocalAddress>> {
 	// Every listener stays open until all ports are read, so no two scenarios get the same one.
@@ -253,6 +253,8 @@ export async function pickLocalAddresses(
 						const server = NodeNet.createServer()
 						server.once('error', reject)
 						server.listen({ host: '127.0.0.1', port: 0 }, () => {
+							// Keeps no runner alive when another pick fails before these are closed.
+							server.unref()
 							const address = server.address()
 							if (typeof address === 'object' && address) resolve({ port: address.port, server })
 							else reject(new DevRunnerError('Could not pick a local port for an App.'))
@@ -456,7 +458,7 @@ async function main(): Promise<void> {
 			const bridgeUrl = bridgeUrlFromLine(line)
 			if (!bridgeUrl) return
 			setBridgeUrl(spec.label, bridgeUrl)
-			// This output goes to .data/dev.log, which never gets the `#local=` secret.
+			// Runner output can be .data/dev.log, so it never carries the `#local=` secret.
 			runnerLog('info', `${spec.label} ready ${bridgeUrl}`)
 		})
 		processes.set(spec.label, running)
@@ -644,7 +646,8 @@ async function buildPrograms(paths: WorktreePaths): Promise<void> {
 		branch: currentBranch(paths.worktree),
 		env: createRuntimeEnvironment({ baseEnv: readSharedEnv(paths), ports }),
 		hideWindows: true,
-		localAddresses: await pickLocalAddresses([1]),
+		// Only the builds are used, so no App ever gets this address.
+		localAddresses: new Map([[1, { port: 0, secret: '' }]]),
 		mode: 'dev',
 		paths,
 		ports,
@@ -1769,7 +1772,11 @@ function stoppedRuntime(runtime: RuntimeFile): RuntimeFile {
 	return {
 		...runtime,
 		pid: undefined,
-		scenarios: runtime.scenarios.map((scenario) => ({ ...scenario, bridgeUrl: undefined })),
+		scenarios: runtime.scenarios.map((scenario) => ({
+			...scenario,
+			bridgeUrl: undefined,
+			tabUrl: undefined,
+		})),
 	}
 }
 
@@ -1920,7 +1927,7 @@ async function printStatus(paths: WorktreePaths): Promise<boolean> {
 			'info',
 			`App ${scenario.number} (${scenario.username}) ${scenario.bridgeUrl ?? 'starting'}`,
 		)
-		runnerLog('info', `  tab: ${scenario.tabUrl}`)
+		if (scenario.tabUrl) runnerLog('info', `  tab: ${scenario.tabUrl}`)
 	}
 	runnerLog('info', `log ${devLogPath(paths)}`)
 	return ready

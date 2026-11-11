@@ -6,7 +6,6 @@
 	"scripts": {
 		"prepare": "vp config --no-agent && pnpm i18n:coverage",
 		"setup": "node scripts/setup-worktree.ts",
-		"up": "node scripts/dev-runner.ts up",
 		"status": "node scripts/dev-runner.ts status",
 		"down": "node scripts/dev-runner.ts down",
 		"dev": "node scripts/dev-runner.ts dev",

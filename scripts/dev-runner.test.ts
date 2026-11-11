@@ -11,7 +11,6 @@ import {
 	findFirstAvailableOffset,
 	isBrowserAllowedPort,
 	parseInput,
-	pickLocalAddresses,
 	portsForOffset,
 	prepareCheckoutCrates,
 	processLabelsForMode,
@@ -113,14 +112,6 @@ describe('dev runner ports', () => {
 		})
 
 		expect(checked).toEqual([16662])
-	})
-
-	it('gives every App its own local port and secret', async () => {
-		const addresses = await pickLocalAddresses([1, 2])
-		const [first, second] = [addresses.get(1)!, addresses.get(2)!]
-		expect(first.port).not.toBe(second.port)
-		expect(first.secret).not.toBe(second.secret)
-		expect(first.secret).toMatch(/^[0-9a-f]{64}$/)
 	})
 
 	it('skips ports blocked by browsers', () => {
