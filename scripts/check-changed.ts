@@ -160,9 +160,9 @@ function workspaceCrates() {
 		['metadata', '--no-deps', '--offline', '--format-version', '1'],
 		{ cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
 	)
-	if (result.error) return 'no cargo'
-	if (result.status !== 0) {
-		console.error(result.stderr.trim())
+	if (result.error && 'code' in result.error && result.error.code === 'ENOENT') return 'no cargo'
+	if (result.error || result.status !== 0) {
+		console.error(result.error?.message ?? result.stderr.trim())
 		return 'failed'
 	}
 	const { packages } = JSON.parse(result.stdout) as {
