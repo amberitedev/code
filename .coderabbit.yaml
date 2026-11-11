@@ -46,15 +46,20 @@ reviews:
           goes here, host features go in the host.
         - It tells, it never asks: it takes what it needs as arguments and reports through events.
           Code that needs a lot of desktop data belongs in the App.
-        - No global state. Flag new statics holding state and new State::get() calls; the host
-          creates the engine and passes it in.
+        - No global state. Flag new statics keyed by instance, job or session and new State::get()
+          calls; the host creates the engine and passes it in. Process resources stay static: the
+          Modrinth rate limit and fetch fence, its reqwest clients and user agent, regex statics,
+          task-locals and semaphores.
         - Engines never call each other. Sharing goes through the backend and the stores.
         - No desktop tables or desktop-only code paths: the same engine runs on a Core.
-        - Every route it serves is an Endpoint from packages/contracts.
+        - Every route it serves is a contracts::Endpoint impl declared in src/endpoints over the
+          engine's own types. No hand-written mirror types.
     - path: 'packages/contracts/**'
       instructions: |
-        The protocol: Rust types and Endpoints (method, path, request, response) for every route we
-        own, plus ApiError, Event and the protocol version. No logic.
+        The protocol: the Endpoint machinery, ApiError, PROTOCOL_VERSION, limits, share rules and
+        every type we own outright, with the Endpoints over those types. It sits below the engine,
+        so engine and App Endpoints live beside their types there, and each source owns its event
+        enum. No logic.
         - Use upstream's names where upstream has the concept (shared instance, InstanceVersion,
           ExternalFile, InstanceUser, Invite). Our additions get plain names, not jargon, and no
           single-letter names for hashes.
@@ -71,15 +76,17 @@ reviews:
         - The Core proxy is a pipe that knows no routes. Core session tokens never reach the
           WebView; the proxy adds them on the way out. The certificate fingerprint check is written
           once.
-        - Routes are Endpoints from packages/contracts, not hand-written request or response types.
+        - Routes are contracts::Endpoint impls (App ones in src/server/endpoints), not
+          hand-written request or response types.
     - path: 'apps/core/**'
       instructions: |
         The server host, shipped as Copal. In code it is called Core; "copal" belongs only to the
         binary, crate, service, installer and release.
         - No desktop code paths or desktop tables: no Discord, friends, skins or Modrinth sign-in.
-        - Routes are Endpoints from packages/contracts. Access is checked through the host's Access
-          on every route and every event subscription, and rechecked when a role changes or a
-          session ends. A Viewer never gets a console.
+        - Every route is a contracts::Endpoint impl: Core-native ones from contracts::core, routes
+          over engine types declared in apps/core. Access is checked through the host's Access on
+          every route and every event subscription, and rechecked when a role changes or a session
+          ends. A Viewer never gets a console.
         - Mods, packs, archives and paths are untrusted. Paths stay inside the server's folder.
         - Host concepts keep the name "server" (routes /servers/{id}, the servers table).
     - path: 'apps/backend/**'
@@ -107,7 +114,8 @@ reviews:
         client.backend, plus upstream's Modrinth modules.
         - No per-route hand-written clients and no hand-written types for routes we own; types
           come from packages/contracts.
-        - Upstream's archon and shared-instances modules stay untouched.
+        - Add no Amberite code to upstream's archon and shared-instances modules. Removing our
+          earlier additions from them is expected.
         - Backend-facing workflow complexity lives here, not in the UI.
 
   pre_merge_checks:
@@ -118,38 +126,46 @@ reviews:
       requirements: >-
         Conventional commit: "type(scope): outcome" or "type: outcome". type is one of feat, fix,
         refactor, chore, docs, test, ci, build, perf, revert. The scope is optional and lowercase.
-        The outcome is a plain-language statement of what is now true, lowercase first word, no
-        trailing period.
+        The outcome is a plain-language statement of what is now true, no trailing period. Its
+        first word is lowercase unless it is a name (Minecraft, Discord, Core) or an identifier.
     custom_checks:
       - name: Engine never imports a host
         mode: warning
         instructions: |
           Pass if the diff changes nothing under packages/engine or packages/app-lib.
           Fail if a change there adds a dependency on, or an import from, theseus_gui, copal, or
-          any path under apps/, or adds new use of tauri.
+          any path under apps/, or adds new use of tauri. Code that is only moved or renamed,
+          including a crate or folder rename, counts as existing, not added.
       - name: No new global state
         mode: warning
         instructions: |
-          Fail if the diff adds, in any Rust crate under packages/ or apps/, a static that holds
-          mutable or runtime state (OnceCell, OnceLock, LazyLock, lazy_static, a static Mutex,
-          RwLock or atomic used as shared state), or a new State::get() call. Constants and
-          compile-time tables pass. Otherwise pass.
-      - name: Owned routes are contract Endpoints
+          Fail if the diff adds, in any Rust crate under packages/ or apps/, a static holding state
+          keyed by instance, job or session (OnceCell, OnceLock, LazyLock, lazy_static, a static
+          Mutex, RwLock or atomic), or a new State::get() call. Process resources pass: the
+          Modrinth rate limit and fetch fence, reqwest clients, user agent, regex statics,
+          task-locals and semaphores. Constants and compile-time tables pass. Code that is only
+          moved or renamed, including a crate or folder rename, counts as existing, not added.
+          Otherwise pass.
+      - name: Owned routes are Endpoints
         mode: warning
         instructions: |
-          Fail if the diff adds or changes an HTTP route in apps/app, apps/core, apps/backend,
-          packages/engine, packages/app-lib or packages/sharing-storage whose method, path, request
-          or response is not taken from an Endpoint in packages/contracts. Also fail if it adds a
-          hand-written TS or Rust type that mirrors such a route's request or response, or a
-          per-route hand-written client. Routes that only exist in upstream Modrinth code and are
-          not edited pass. Otherwise pass.
+          Fail if the diff adds a route, or changes a route's method, path, request or response, in
+          apps/app, apps/core, apps/backend, packages/engine, packages/app-lib or
+          packages/sharing-storage, and the route is not served from a contracts::Endpoint impl
+          declared in packages/contracts, packages/engine/src/endpoints,
+          apps/app/src/server/endpoints or apps/core (apps/backend uses the TS generated from
+          them). A change to a handler body alone passes. Also fail if it adds a hand-written TS or
+          Rust type that mirrors such a route's request or response, or a per-route hand-written
+          client. Routes that only exist in upstream Modrinth code and are not edited pass.
+          Otherwise pass.
       - name: No desktop code on a Core
         mode: warning
         instructions: |
           Fail if the diff adds, under apps/core, packages/engine or packages/app-lib, code or
           migrations for desktop-only features: Discord, friends, skins, Minecraft or Modrinth
           sign-in, windows, dialogs, shortcuts, the updater, or a Tauri API. Code under apps/app
-          passes. Otherwise pass.
+          passes. Code that is only moved or renamed, including a crate or folder rename, counts as
+          existing, not added. Otherwise pass.
       - name: Upstream helpers keep their signatures
         mode: warning
         instructions: |

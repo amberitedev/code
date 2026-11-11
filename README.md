@@ -1,10 +1,13 @@
 # Amberite
 
 Amberite is a Minecraft launcher for modding and sharing, with self-hosted servers. Run the Rust
-server (Core) on any machine and manage it from the desktop App. Sharing is not tied to a Core and
-works for everyone.
+server (Core, shipped as Copal) on any machine and manage it from the desktop App. Sharing is not
+tied to a Core and works for everyone.
 
 ## Running it
+
+Install Node 24.15 or newer and [Vite+](https://viteplus.dev/guide/) (the `vp` command) as
+[docs/internals/scripts.md](docs/internals/scripts.md#first-checkout) describes, then:
 
 ```sh
 vp i
