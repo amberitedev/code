@@ -78,8 +78,9 @@ cover. Port small changes in a commit titled `feat(<scope>): port <change> from 
 `feat(backend): port user bans from upstream`. List larger ones in the PR instead of porting them.
 
 When a `port` commit renames a ported path upstream, add the new upstream path to `ported` in
-`upstream.json` and check the later commits in this sync that touch it. Only the listed name is
-reported.
+`upstream.json`, and check the later commits in this sync that touch it: only the listed name is
+reported. If our tree did not have the old path, delete the copy the merge brought in at the new
+one, or the next sync treats it as a file we kept.
 
 ## 8. Push and open the PR
 
