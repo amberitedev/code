@@ -254,18 +254,7 @@ errors and warnings to the same terminal; error and warning notifications are lo
 
 ## Upstream sync
 
-`.github/workflows/upstream-sync.yml` runs daily. When Modrinth has new commits and no earlier sync
-is waiting, it runs `node scripts/upstream-sync.ts` on a new `sync/upstream/N` branch and pushes it:
-one merge commit with both parents, the `ignore` paths from `upstream.json` deleted, lockfiles taken
-from Modrinth and pruned, and any conflict markers committed as they are. The run's
-`upstream-sync-N` artifact holds the script's JSON summary, the new commit titles, the merged
-Modrinth pull requests, and the diff of Modrinth's changelog. The `/upstream-sync` skill resolves
-the branch and opens the pull request. Merge it with a merge commit, never a squash.
-
-The workflow checks out and pushes with the `UPSTREAM_SYNC_TOKEN` secret, because GitHub never lets
-`GITHUB_TOKEN` push changes to `.github/workflows`. It is a fine-grained personal access token for
-`amberitedev/code` only, with Contents and Workflows set to read and write. When it expires the
-Merge step fails at checkout; replace the secret with a new token.
+The daily Modrinth merge, `upstream.json` and the porting rules are in [upstream](upstream.md).
 
 ## Timings
 
