@@ -104,20 +104,25 @@ export default defineConfig({
 		overrides: [
 			{
 				files: ['apps/app-frontend/src/**'],
-				excludeFiles: ['apps/app-frontend/src/platform/**', 'apps/app-frontend/src/helpers/**'],
+				excludeFiles: ['apps/app-frontend/src/platform/**'],
 				rules: {
 					'eslint/no-restricted-imports': [
 						'error',
 						{
-							paths: [
-								'@tauri-apps/api/app',
-								'@tauri-apps/api/window',
-								'@tauri-apps/plugin-dialog',
-								'@tauri-apps/plugin-fs',
-								'@tauri-apps/plugin-opener',
-								'@tauri-apps/plugin-os',
-								'@tauri-apps/plugin-window-state',
-							].map((name) => ({ name, message: 'Import it from @/platform instead.' })),
+							patterns: [
+								{
+									group: [
+										'@tauri-apps/plugin-*',
+										'@tauri-apps/api/*',
+										'!@tauri-apps/api/core',
+										'!@tauri-apps/api/event',
+										'!@tauri-apps/plugin-http',
+									],
+									allowTypeImports: true,
+									message:
+										'Import it from @/platform/{os,dialog,opener,window,files}, or add a wrapper there.',
+								},
+							],
 						},
 					],
 				},

@@ -1,8 +1,8 @@
 import type { UnlistenFn } from '@tauri-apps/api/event'
 import type { DragDropEvent } from '@tauri-apps/api/webview'
-import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
 
 import { platform } from '@/platform/os'
+import { getCurrentWebviewWindow } from '@/platform/window'
 
 export type NativeDragDropEvent =
 	| { type: 'enter'; paths: string[]; position: { x: number; y: number } }
