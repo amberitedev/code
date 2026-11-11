@@ -91,10 +91,11 @@ export function mergeMapped({ base, upstream, renamed, cwd }: MergeOptions) {
 		process.stderr.write(`${messages[index++]?.trimEnd()}\n`)
 	}
 
-	ok(['read-tree', '-u', '-m', 'HEAD', tree])
+	// MERGE_HEAD goes first: if a later step fails, git merge --abort undoes it.
 	NodeFS.writeFileSync(
 		NodePath.resolve(cwd, ok(['rev-parse', '--git-path', 'MERGE_HEAD'])),
 		`${upstream}\n`,
 	)
+	ok(['read-tree', '-u', '-m', 'HEAD', tree])
 	return conflicts
 }

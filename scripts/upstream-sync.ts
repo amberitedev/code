@@ -67,7 +67,7 @@ for (const path of removed) {
 
 const lockfiles: Record<string, 'regenerated' | 'failed'> = {}
 for (const [file, command] of Object.entries(LOCKFILES)) {
-	git('checkout', upstream, '--', file)
+	git('checkout', upstreamSha, '--', file)
 	const [bin, ...args] = command
 	lockfiles[file] = run(bin, args) ? 'regenerated' : 'failed'
 	git('add', '--', file)
