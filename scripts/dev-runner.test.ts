@@ -16,7 +16,9 @@ import {
 	processLabelsForMode,
 	programKey,
 	resolveStartOffset,
+	scenarioTabUrl,
 	scenarioUsername,
+	withLocalBase,
 } from './dev-runner.ts'
 
 describe('dev runner ports', () => {
@@ -221,6 +223,10 @@ describe('dev runner scenarios', () => {
 			branch: 'feature',
 			env: { MODRINTH_API_URL: 'https://api.example/v2/' },
 			hideWindows: true,
+			localAddresses: new Map([
+				[1, { port: 50001, secret: 'one' }],
+				[3, { port: 50003, secret: 'three' }],
+			]),
 			mode: 'dev',
 			paths,
 			ports: portsForOffset(0),
@@ -264,6 +270,11 @@ describe('dev runner scenarios', () => {
 		expect(apps.map((spec) => JSON.parse(spec.args.at(-1)!).username)).toEqual([
 			'scenario_1',
 			'scenario_3',
+		])
+		// `rs` restarts an App from this spec, so it keeps its local address.
+		expect(apps.map((spec) => JSON.parse(spec.args.at(-1)!))).toMatchObject([
+			{ localPort: 50001, localSecret: 'one' },
+			{ localPort: 50003, localSecret: 'three' },
 		])
 	})
 })
@@ -375,5 +386,12 @@ describe('dev runner readiness', () => {
 			),
 		).toBe('http://127.0.0.1:64463')
 		expect(bridgeUrlFromLine('Browser bridge Vite WebSocket proxy failed')).toBeUndefined()
+	})
+
+	it("carries the App's local API base on the bridge and tab URLs", () => {
+		const address = { port: 50001, secret: 'ab12' }
+		const local = '#local=http%3A%2F%2F127.0.0.1%3A50001%2Fab12'
+		expect(withLocalBase('http://127.0.0.1:64463', address)).toBe(`http://127.0.0.1:64463/${local}`)
+		expect(scenarioTabUrl(2, 1420, address)).toBe(`http://scenario-2.localhost:1420/${local}`)
 	})
 })

@@ -107,6 +107,11 @@ export type ProcessSpec = {
 	readonly env: NodeJS.ProcessEnv
 	readonly label: string
 }
+/** Where a dev App serves its local API. Picked once per runner, so `rs` keeps it. */
+export type LocalAddress = {
+	readonly port: number
+	readonly secret: string
+}
 type RunningProcess = {
 	readonly child: NodeChildProcess.ChildProcess
 	readonly done: Promise<number>
@@ -133,6 +138,8 @@ type RuntimeFile = {
 		readonly username: string
 		/** Serves this scenario's real App to a browser. Set once the App has started. */
 		bridgeUrl?: string
+		/** Opens this scenario's frontend in a plain browser tab, on its own origin. */
+		readonly tabUrl?: string
 	}>
 	readonly source: string
 	readonly urls: Record<PortName, string>
@@ -233,6 +240,49 @@ export function createRuntimeEnvironment(input: {
 	return env
 }
 
+/** A free loopback port and a new secret for each scenario's App. */
+async function pickLocalAddresses(
+	scenarios: ReadonlyArray<number>,
+): Promise<ReadonlyMap<number, LocalAddress>> {
+	// Every listener stays open until all ports are read, so no two scenarios get the same one.
+	const servers = await Promise.all(
+		scenarios.map(
+			() =>
+				new Promise<{ readonly port: number; readonly server: NodeNet.Server }>(
+					(resolve, reject) => {
+						const server = NodeNet.createServer()
+						server.once('error', reject)
+						server.listen({ host: '127.0.0.1', port: 0 }, () => {
+							// Keeps no runner alive when another pick fails before these are closed.
+							server.unref()
+							const address = server.address()
+							if (typeof address === 'object' && address) resolve({ port: address.port, server })
+							else reject(new DevRunnerError('Could not pick a local port for an App.'))
+						})
+					},
+				),
+		),
+	)
+	for (const { server } of servers) server.close()
+	return new Map(
+		scenarios.map((scenario, index) => [
+			scenario,
+			{ port: servers[index]!.port, secret: NodeCrypto.randomBytes(32).toString('hex') },
+		]),
+	)
+}
+
+/** The URL with the App's local API base in its `#local=` fragment, where the frontend reads it. */
+export function withLocalBase(url: string, address: LocalAddress): string {
+	const located = new URL(url)
+	located.hash = `local=${encodeURIComponent(`http://127.0.0.1:${address.port}/${address.secret}`)}`
+	return located.href
+}
+
+export function scenarioTabUrl(scenario: number, vitePort: number, address: LocalAddress): string {
+	return withLocalBase(`http://scenario-${scenario}.localhost:${vitePort}`, address)
+}
+
 /** The browser bridge URL an App prints once it is usable, if this log line is that one. */
 export function bridgeUrlFromLine(line: string): string | undefined {
 	return BRIDGE_READY.exec(line)?.[1]
@@ -283,6 +333,7 @@ async function main(): Promise<void> {
 		startOffset,
 	})
 	const ports = portsForOffset(selectedOffset)
+	const localAddresses = await pickLocalAddresses(input.scenarios)
 	const branch = currentBranch(paths.worktree)
 	const env = createRuntimeEnvironment({ baseEnv: readSharedEnv(paths), ports })
 	if (!input.dryRun) {
@@ -300,6 +351,7 @@ async function main(): Promise<void> {
 		branch,
 		env,
 		hideWindows: input.hideWindows,
+		localAddresses,
 		mode: input.mode,
 		paths,
 		ports,
@@ -329,6 +381,7 @@ async function main(): Promise<void> {
 			dataDir: scenarioDataPath(paths, scenario),
 			number: scenario,
 			username: scenarioUsername(scenario),
+			tabUrl: scenarioTabUrl(scenario, ports.app, localAddresses.get(scenario)!),
 		})),
 		source,
 		urls: {
@@ -341,8 +394,10 @@ async function main(): Promise<void> {
 	writeRuntimeFile(paths, runtime)
 	const setBridgeUrl = (label: string, bridgeUrl: string | undefined) => {
 		const scenario = runtime.scenarios.find((entry) => `app:${entry.number}` === label)
-		if (!scenario || scenario.bridgeUrl === bridgeUrl) return
-		scenario.bridgeUrl = bridgeUrl
+		if (!scenario) return
+		const located = bridgeUrl && withLocalBase(bridgeUrl, localAddresses.get(scenario.number)!)
+		if (scenario.bridgeUrl === located) return
+		scenario.bridgeUrl = located
 		writeRuntimeFile(paths, runtime)
 	}
 	const setBuildFailed = (label: string, failed: boolean) => {
@@ -403,6 +458,7 @@ async function main(): Promise<void> {
 			const bridgeUrl = bridgeUrlFromLine(line)
 			if (!bridgeUrl) return
 			setBridgeUrl(spec.label, bridgeUrl)
+			// Runner output can be .data/dev.log, so it never carries the `#local=` secret.
 			runnerLog('info', `${spec.label} ready ${bridgeUrl}`)
 		})
 		processes.set(spec.label, running)
@@ -590,6 +646,8 @@ async function buildPrograms(paths: WorktreePaths): Promise<void> {
 		branch: currentBranch(paths.worktree),
 		env: createRuntimeEnvironment({ baseEnv: readSharedEnv(paths), ports }),
 		hideWindows: true,
+		// Only the builds are used, so no App ever gets this address.
+		localAddresses: new Map([[1, { port: 0, secret: '' }]]),
 		mode: 'dev',
 		paths,
 		ports,
@@ -727,6 +785,7 @@ export function createProcessSpecs(input: {
 	readonly branch: string
 	readonly env: NodeJS.ProcessEnv
 	readonly hideWindows: boolean
+	readonly localAddresses: ReadonlyMap<number, LocalAddress>
 	readonly mode: DevMode
 	readonly paths: WorktreePaths
 	readonly ports: DevPorts
@@ -816,6 +875,7 @@ export function createProcessSpecs(input: {
 				devUrl: `http://localhost:${input.ports.app}`,
 				env: input.env,
 				hideWindows: input.hideWindows,
+				localAddress: input.localAddresses.get(scenario)!,
 				paths: input.paths,
 				scenario,
 			}),
@@ -829,6 +889,7 @@ function createAppProcessSpec(input: {
 	readonly devUrl: string
 	readonly env: NodeJS.ProcessEnv
 	readonly hideWindows: boolean
+	readonly localAddress: LocalAddress
 	readonly paths: WorktreePaths
 	readonly scenario: number
 }): ProcessSpec {
@@ -843,6 +904,8 @@ function createAppProcessSpec(input: {
 		dataDir,
 		devUrl: input.devUrl,
 		hideWindow: input.hideWindows,
+		localPort: input.localAddress.port,
+		localSecret: input.localAddress.secret,
 		title: `Modrinth ${input.scenario} - ${input.branch}`,
 		username: scenarioUsername(input.scenario),
 	}
@@ -1709,7 +1772,11 @@ function stoppedRuntime(runtime: RuntimeFile): RuntimeFile {
 	return {
 		...runtime,
 		pid: undefined,
-		scenarios: runtime.scenarios.map((scenario) => ({ ...scenario, bridgeUrl: undefined })),
+		scenarios: runtime.scenarios.map((scenario) => ({
+			...scenario,
+			bridgeUrl: undefined,
+			tabUrl: undefined,
+		})),
 	}
 }
 
@@ -1775,7 +1842,7 @@ async function runtimeIsReady(runtime: RuntimeFile): Promise<boolean> {
 async function appPageLoads(bridgeUrl: string): Promise<boolean> {
 	/** The file's text, or `undefined` when the server answered with an error. */
 	const load = async (path: string) => {
-		const response = await fetch(`${bridgeUrl}${path}`, { signal: AbortSignal.timeout(60_000) })
+		const response = await fetch(new URL(path, bridgeUrl), { signal: AbortSignal.timeout(60_000) })
 		const text = await response.text()
 		if (response.status === 500) throw new PageError(path, text)
 		return response.ok ? text : undefined
@@ -1835,7 +1902,7 @@ function portIsOpen(port: number): Promise<boolean> {
 async function printStatus(paths: WorktreePaths): Promise<boolean> {
 	const runtime = readLiveRuntime(paths)
 	if (!runtime) {
-		runnerLog('info', 'not running. Start it with: vp run up')
+		runnerLog('info', 'not running. Start it with: node scripts/dev-runner.ts up')
 		return false
 	}
 	let ready = false
@@ -1860,6 +1927,7 @@ async function printStatus(paths: WorktreePaths): Promise<boolean> {
 			'info',
 			`App ${scenario.number} (${scenario.username}) ${scenario.bridgeUrl ?? 'starting'}`,
 		)
+		if (scenario.tabUrl) runnerLog('info', `  tab: ${scenario.tabUrl}`)
 	}
 	runnerLog('info', `log ${devLogPath(paths)}`)
 	return ready
@@ -1889,6 +1957,8 @@ async function up(paths: WorktreePaths, input: RunnerInput): Promise<void> {
 	if (!live) {
 		NodeFS.mkdirSync(paths.data, { recursive: true })
 		const log = NodeFS.openSync(devLogPath(paths), 'w')
+		// On Windows `vp run` puts its command in a kill-on-close job without breakaway, so a runner
+		// started through it dies when vp returns. Node cannot spawn outside that job.
 		started = NodeChildProcess.spawn(
 			process.execPath,
 			[
@@ -1956,7 +2026,7 @@ async function up(paths: WorktreePaths, input: RunnerInput): Promise<void> {
 	}
 	runnerLog(
 		'warning',
-		`Still starting. Run vp run up again to keep waiting. Log: ${devLogPath(paths)}`,
+		`Still starting. Run node scripts/dev-runner.ts up again to keep waiting. Log: ${devLogPath(paths)}`,
 	)
 	record('waiting')
 	// Not a failure: the runner is still working.

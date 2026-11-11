@@ -45,17 +45,21 @@ folder that is usually nothing.
   `dev:backend` first. Core and Minecraft servers are not needed for account/sharing work.
 - `vp run dev:core`: Starts only Core. It pairs with the Worker and checks App sign-in tickets
   against the Worker's public key, so start `dev:backend` too.
-- `vp run up 1 2`: Starts the same stack in the background, waits until every service answers
-  and every App's page loads through its browser bridge, then prints the bridge URLs. In a new
-  checkout the frontend spends a minute or two preparing its dependencies; that happens inside `up`. It writes to `.data/dev.log`
-  and returns after 9 minutes if the stack is still compiling; run it again to keep waiting. It
-  fails at once when a Rust build fails, or when the App's entry module does not compile, printing
-  the compiler error; the stack keeps running. An optional mode comes first:
-  `vp run up dev:backend`. Unlike `vp run dev`, it leaves out the account sign-in
+- `node scripts/dev-runner.ts up 1 2`: Starts the same stack in the background, waits until every
+  service answers and every App's page loads through its browser bridge, then prints each App's
+  bridge URL and `tab:` URL. There is no `vp run up`: on Windows, `vp run` puts its command in a
+  job that kills every process in it when vp exits, the background stack included. The tab URL
+  opens the App in a plain browser tab on its own origin, where most native calls do not work; use
+  the bridge URL. In a new checkout the frontend spends a minute or two preparing its dependencies;
+  that happens inside `up`. It writes to `.data/dev.log` and returns after 9 minutes if the stack
+  is still compiling; run it again to keep waiting. It fails at once when a Rust build fails, or
+  when the App's entry module does not compile, printing the compiler error; the stack keeps
+  running. An optional mode comes first: `node scripts/dev-runner.ts up dev:backend`. Unlike
+  `vp run dev`, it leaves out the account sign-in
   website and keeps App windows off the desktop, because agents use Apps through the browser
   bridge. `--show-windows` shows them; on a stack already running hidden it fails, so run `down`
   first.
-- `vp run status`: Prints what is running, whether it is ready, and each App's bridge URL. Exits
+- `vp run status`: Prints what is running, whether it is ready, and each App's URLs. Exits
   non-zero when the stack is not ready.
 - `vp run down`: Stops this checkout's dev runner and everything it started.
 - `node scripts/dev-runner.ts build`: Compiles the App and Core for this checkout's Rust without
@@ -184,8 +188,8 @@ Keep backend, Core, and scenarios together when copying the dataset.
 Worktree setup copies `backend`, `core`, and `scenarios` from the primary checkout's `.data/` without
 overwriting existing state.
 
-`runtime.json` holds the runner's PID, the ports, and each scenario's `bridgeUrl` while the stack is
-running. The PID and bridge URLs are removed when it stops.
+`runtime.json` holds the runner's PID, the ports, and each scenario's `bridgeUrl` and `tabUrl` while
+the stack is running. The PID and URLs are removed when it stops.
 
 ### Regenerating the sharing dataset
 
@@ -194,7 +198,7 @@ Share tab lists scenario 2 as a member, and scenario 2's copy shows no wrong-acc
 member's instance has no Share tab). Rebuild it in a worktree, through the Apps, and hand it over
 by copying; test data never leaves a worktree on its own.
 
-1. `vp run up 1 2` and open both bridge URLs.
+1. `node scripts/dev-runner.ts up 1 2` and open both bridge URLs.
 2. In App 1, delete every instance whose Share tab says "Wrong account" (Instance settings, General,
    Delete instance). Such a record points at a shared instance the backend no longer has, and the
    locked Share tab offers no other way out.
@@ -231,13 +235,17 @@ advances the complete applicable set until it finds an available one. To start A
 an existing backend, use the same `PORT_OFFSET` if that backend shifted from its preferred
 offset; read the ports in the runner output first.
 
+Each App also gets a local API address, `http://127.0.0.1:<port>/<secret>`, which the runner passes
+in its dev config and adds to both of the App's URLs as `#local=<address>`. The secret is in
+`runtime.json` and the `up` and `status` output, never in `.data/dev.log`.
+
 Treat the `[dev-runner]` output and `.data/runtime.json` as authoritative. The preferred ports are
 stable, but an occupied port can shift the actual run.
 
 ## Process ownership
 
 The dev runner stops its child processes when it receives Ctrl+C or the `quit` input command.
-A runner started with `vp run up` has no input; stop it with `vp run down`, which stops the
+A runner started with `up` has no input; stop it with `vp run down`, which stops the
 PID recorded in `.data/runtime.json` and nothing else. Never kill by a broad process name, command
 match, or worktree path: several worktrees may be running Node, Core, and Tauri at the same
 time, and a pattern can also match the agent doing the work.
