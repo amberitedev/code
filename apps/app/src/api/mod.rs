@@ -20,7 +20,6 @@ mod thumbnails;
 pub mod utils;
 
 pub mod cache;
-pub mod cores;
 pub mod files;
 pub mod friends;
 pub mod worlds;

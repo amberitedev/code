@@ -16,6 +16,7 @@ use tauri_plugin_fs::FsExt;
 use tokio::sync::broadcast::error::RecvError;
 
 mod api;
+mod cores;
 mod dev;
 mod server;
 
@@ -410,7 +411,7 @@ fn main() {
         .plugin(api::files::init())
         .plugin(api::friends::init())
         .plugin(api::worlds::init())
-        .plugin(api::cores::init())
+        .plugin(cores::init())
         .manage(PendingUpdateData::default())
         .manage(RestartAfterPendingUpdate::default())
         .manage(EventForwarder::default())
