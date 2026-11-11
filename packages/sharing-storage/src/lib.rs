@@ -241,7 +241,7 @@ impl Store {
         };
         let free = bedrock::disk::free(self.layout.root())
             .inspect_err(|_| unreserve())?;
-        if free < needed + bedrock::limits::DISK_MARGIN_BYTES {
+        if free < needed + contracts::limits::DISK_MARGIN_BYTES {
             unreserve();
             return Err(StoreError::new(
                 Code::DiskFull,

@@ -1,3 +1,4 @@
+import type { ContractTransport } from '../contracts/client'
 import { AbstractFeature, type FeatureConfig } from '../core/abstract-feature'
 import type { RequestContext } from '../types/request'
 
@@ -21,6 +22,20 @@ export class SelfHostedFeature extends AbstractFeature {
 	async execute<T>(next: () => Promise<T>, context: RequestContext): Promise<T> {
 		await routeSelfHostedRequest(context, this.config)
 		return next()
+	}
+
+	/** `client.backend`'s way to the backend: the same URL and account session. */
+	get transport(): ContractTransport {
+		return {
+			base: async () => this.config.baseUrl,
+			headers: async () => {
+				const token = await this.config.token()
+				const headers: Record<string, string> = {}
+				if (token) headers.Authorization = `Bearer ${token}`
+				return headers
+			},
+			fetch: (input, init) => fetch(input, init),
+		}
 	}
 }
 

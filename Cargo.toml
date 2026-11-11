@@ -6,6 +6,7 @@ members = [
   "packages/ariadne",
   "packages/bedrock",
   "packages/browser-bridge",
+  "packages/contracts",
   "packages/engine",
   "packages/minecraft-meta-manifest",
   "packages/modrinth-content-management",
@@ -41,6 +42,7 @@ chrono = "0.4.45"
 cidre = { version = "0.29.0", default-features = false, features = ["macos_15_0"] }
 clap = "4.6.7"
 color-eyre = "0.6.5"
+contracts = { path = "packages/contracts" }
 darling = { version = "0.24" }
 dashmap = "6.2.1"
 data-url = "0.3.2"

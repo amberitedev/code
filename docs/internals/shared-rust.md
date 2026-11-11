@@ -5,13 +5,14 @@ Code the App and Copal both need exists once, in these crates. The App (`package
 
 | Crate                                  | Job                                                                              | Rule                             |
 | -------------------------------------- | -------------------------------------------------------------------------------- | -------------------------------- |
+| `packages/contracts`                   | The protocol: Endpoints, `ApiError`, limits and share rules, generated to TS     | Ours. Imports none of ours.      |
 | `packages/modrinth-content-management` | Modrinth's content decisions: `resolve_content`, content and configuration diffs | Upstream's. Never edit; call it. |
 | `packages/bedrock`                     | Everything both sides share that is not sharing                                  | Ours.                            |
 | `packages/sharing-client`              | Everything about shares                                                          | Ours.                            |
 | `packages/sharing-storage`             | The store process                                                                | Ours.                            |
 
 Imports go one way: `modrinth-content-management` -> `bedrock` -> `sharing-client` ->
-`sharing-storage`. Copal never depends on the engine.
+`sharing-storage`, and every crate may import `contracts`. Copal never depends on the engine.
 
 bedrock holds three kinds of code:
 
@@ -21,13 +22,11 @@ bedrock holds three kinds of code:
 2. Clones of upstream code tangled with the engine's `State` (`upstream/`), kept byte for byte where
    possible with all adaptation in one glue file, and declared in `packages/bedrock/ports.toml`.
    The App keeps the originals.
-3. Our own shared code: content rules, reaching Cores, disk space, and `limits` (also generated
-   into `packages/api-client/src/modules/bedrock/limits.ts`).
+3. Our own shared code: content rules, reaching Cores, and disk space.
 
 sharing-client is one folder per concern: `backend` (the one client for the backend's share
 routes), `versions` (the share version, `RemovedFile`), `rules` (which files a share carries,
-what `blocked` means, and the listing of pickable files; generated into
-`packages/api-client/src/modules/sharing/rules.ts`), `push` (reading an owner's rows into a
+what `blocked` means, and the listing of pickable files), `push` (reading an owner's rows into a
 version, the version builder and the writer), `pool` (the store client and the fetch), `consume`
 (a version as a server takes it), `install` (the member install plan: a version's files at each
 side's paths, less its modpack, with the configs an update writes, keeps or deletes; each side

@@ -1,3 +1,4 @@
+import { ContractClient } from '../contracts/client'
 import type { InferredClientModules } from '../modules'
 import { buildModuleStructure } from '../modules'
 import type { BaseUrlConfig, ClientConfig } from '../types/client'
@@ -9,6 +10,7 @@ import type { AbstractFeature } from './abstract-feature'
 import type { AbstractModule } from './abstract-module'
 import type { AbstractSyncClient } from './abstract-sync'
 import { CoreSessionFeature } from '../features/core-session'
+import { SelfHostedFeature } from '../features/self-hosted'
 import { AbstractUploadClient } from './abstract-upload-client'
 import type { AbstractWebSocketClient } from './abstract-websocket'
 import { ModrinthApiError, ModrinthServerError } from './errors'
@@ -35,6 +37,10 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 	 */
 	private _moduleNamespaces: Map<string, Record<string, AbstractModule>> = new Map()
 
+	private _backend?: ContractClient
+	private _local?: ContractClient
+	private _cores: Map<string, ContractClient> = new Map()
+
 	public readonly labrinth!: InferredClientModules['labrinth']
 	public readonly archon!: ArchonClientModules & {
 		sockets: AbstractWebSocketClient
@@ -52,6 +58,33 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 	/** See `ClientConfig.coreSessions`. */
 	public get coreSessions(): ClientConfig['coreSessions'] {
 		return this.config.coreSessions
+	}
+
+	/** Our account backend's routes, at the URL and with the session `SelfHostedFeature` uses. */
+	public get backend(): ContractClient {
+		if (this._backend) return this._backend
+		const selfHosted = this.features.find((feature) => feature instanceof SelfHostedFeature)
+		if (!selfHosted) throw new Error('This client has no account backend')
+		return (this._backend = new ContractClient(selfHosted.transport))
+	}
+
+	/** The App's local server: engine and App routes. */
+	public get local(): ContractClient {
+		if (this._local) return this._local
+		const transport = this.config.localTransport
+		if (!transport) throw new Error('This client has no local server')
+		return (this._local = new ContractClient(transport))
+	}
+
+	/** A Core's routes: engine and Core routes. */
+	public core(coreId: string): ContractClient {
+		const known = this._cores.get(coreId)
+		if (known) return known
+		const transport = this.config.coreTransport
+		if (!transport) throw new Error('This client cannot reach Cores')
+		const client = new ContractClient(transport(coreId))
+		this._cores.set(coreId, client)
+		return client
 	}
 
 	public readonly copal!: InferredClientModules['copal']

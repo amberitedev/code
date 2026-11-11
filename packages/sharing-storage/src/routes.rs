@@ -181,7 +181,7 @@ async fn upload(
     let first = first
         .filter(|entry| entry.name == "version.json")
         .ok_or_else(|| invalid("The upload must start with version.json."))?;
-    if first.size > bedrock::limits::MAX_VERSION_LIST_BYTES {
+    if first.size > contracts::limits::MAX_VERSION_LIST_BYTES {
         return Err(invalid("version.json is too large."));
     }
     let mut json = Vec::new();

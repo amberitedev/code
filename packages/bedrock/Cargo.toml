@@ -10,13 +10,14 @@ ignored = ["tokio-util"]
 
 # What the App and Copal both need that is not sharing: the content schema borrowed from the engine,
 # clones of upstream code tangled with the engine's State (`ports.toml`), `.mrpack` and Modrinth
-# content rules, connections to Cores, disk space, and limits. Imports go one way:
+# content rules, connections to Cores, and disk space. Imports go one way:
 # modrinth-content-management -> bedrock -> sharing-client -> sharing-storage.
 [dependencies]
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 bytes = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
+contracts = { workspace = true }
 fs4 = { workspace = true, features = ["tokio"] }
 futures = { workspace = true }
 hex = { workspace = true }

@@ -3,7 +3,7 @@
 
 use std::{io, path::Path};
 
-use crate::limits::DISK_MARGIN_BYTES;
+use contracts::limits::DISK_MARGIN_BYTES;
 
 /// The bytes a Core may still write on the disk that holds `path`: its free space less
 /// [`DISK_MARGIN_BYTES`], which it always leaves free.

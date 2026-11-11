@@ -17,6 +17,7 @@ cap-std = "3.4"
 chrono = { workspace = true, features = ["serde"] }
 clap = { workspace = true, features = ["derive"] }
 color-eyre = { workspace = true }
+contracts = { workspace = true }
 crab_nat = "0.8.1"
 dunce = { workspace = true }
 futures = { workspace = true }

@@ -15,7 +15,7 @@ await build({
 	external: ['ofetch', 'mitt', '@tauri-apps/plugin-http'],
 	plugins: [
 		dts({
-			bundleTypes: true,
+			bundleTypes: { bundledPackages: ['@amberite/contracts'] },
 			outDirs: 'dist',
 			processor: 'ts',
 			tsconfigPath: './tsconfig.build.json',

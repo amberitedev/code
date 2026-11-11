@@ -946,7 +946,7 @@ fn push_error(error: push::PushError) -> crate::Error {
         }
         PushError::TooLarge => crate::ErrorKind::PoolTooLarge(format!(
             "A shared instance can hold at most {} of files.",
-            crate::util::io::format_bytes(bedrock::limits::MAX_SHARE_BYTES)
+            crate::util::io::format_bytes(contracts::limits::MAX_SHARE_BYTES)
         ))
         .into(),
         PushError::FileChanged(file_name) => {

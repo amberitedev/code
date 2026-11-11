@@ -434,6 +434,9 @@ importers:
 
   apps/backend:
     dependencies:
+      '@amberite/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       zxcvbn:
         specifier: 4.4.2
         version: 4.4.2
@@ -458,6 +461,9 @@ importers:
 
   packages/api-client:
     dependencies:
+      '@amberite/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       mitt:
         specifier: ^3.0.1
         version: 3.0.1
@@ -577,6 +583,8 @@ importers:
       vitest:
         specifier: 4.1.10
         version: 4.1.10(@types/node@24.12.2)(@vitest/browser-preview@4.1.10)(@voidzero-dev/vite-plus-core@0.2.9(@types/node@24.12.2)(esbuild@0.28.1)(jiti@2.6.1)(sass@1.97.3)(terser@5.46.0)(typescript@5.9.3)(yaml@2.8.2))(jsdom@26.1.0(canvas@3.2.3)(supports-color@10.2.2))
+
+  packages/contracts: {}
 
   packages/tooling-config:
     dependencies:

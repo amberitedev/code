@@ -1,3 +1,4 @@
+import type { ContractTransport } from '../contracts/client'
 import type { AbstractFeature } from '../core/abstract-feature'
 import type { Copal } from '../modules/copal/types'
 import type { RequestContext } from './request'
@@ -71,6 +72,12 @@ export interface ClientConfig {
 	 * a session token, and `connectCore` adds it to each request. See `copal.access_v1`.
 	 */
 	coreSessions?: CoreSessions
+
+	/** How `client.local` reaches the App's local server. */
+	localTransport?: ContractTransport
+
+	/** How `client.core(id)` reaches the Core `coreId`. */
+	coreTransport?: (coreId: string) => ContractTransport
 
 	/**
 	 * User agent string or provider for requests
