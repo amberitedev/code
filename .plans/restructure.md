@@ -220,10 +220,10 @@ The UI runs fully in a plain browser tab, so agents and tests need no bridge.
 ## Upstream
 
 Upstream's code keeps merging. `packages/engine` is upstream's `packages/app-lib`, renamed, and
-merges by path through `upstream.json`'s `renamed` map. A test merged 86 real upstream app-lib commits onto the
-renamed folder with zero content conflicts. Rename the crate too (`theseus` to `engine`). If that
-turns out to cause real merge pain, keeping `theseus` as the crate name is acceptable; the folder
-rename stays.
+merges by path through `upstream.json`'s `renamed` map. A test merged 86 real upstream app-lib
+commits onto the moved folder, before the crate rename, with zero content conflicts. Rename the
+crate too (`theseus` to `engine`). If that turns out to cause real merge pain, keeping `theseus` as
+the crate name is acceptable; the folder rename stays.
 
 `docs/internals/upstream.md` holds the rules an agent applies to upstream changes:
 

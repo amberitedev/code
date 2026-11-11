@@ -10,10 +10,18 @@ import * as NodePath from 'node:path'
 
 import { type UpstreamConfig, ourPath } from './upstream-paths.ts'
 
+type MergeOptions = {
+	// Merge base of HEAD and `upstream`, both commit shas.
+	base: string
+	upstream: string
+	renamed: UpstreamConfig['renamed']
+	cwd: string
+}
+
 // Leaves the merged tree in the index and working tree with MERGE_HEAD set to upstream, so the next
-// `git commit` makes the merge commit. Returns the conflicted paths; their markers are in the files.
-// Needs git 2.45 or newer (merge-tree on trees) and a clean working tree.
-export function mergeMapped(upstream: string, renamed: UpstreamConfig['renamed'], cwd: string) {
+// `git commit` makes the merge commit. Returns the conflicted paths; their markers are in the files,
+// and git's explanation of each is printed to stderr. Needs git 2.45 or newer (merge-tree on trees).
+export function mergeMapped({ base, upstream, renamed, cwd }: MergeOptions) {
 	const git = (args: string[], options: { env?: NodeJS.ProcessEnv; input?: string } = {}) =>
 		NodeChildProcess.spawnSync('git', args, {
 			cwd,
@@ -28,6 +36,12 @@ export function mergeMapped(upstream: string, renamed: UpstreamConfig['renamed']
 		return result.stdout.trim()
 	}
 
+	if (base === upstream) throw new Error(`Already up to date with ${upstream}`)
+	// read-tree would carry staged changes into the merge commit, where `git merge` refused them.
+	if (git(['diff-index', '--quiet', '--cached', 'HEAD']).status !== 0) {
+		throw new Error('The index has staged changes; commit or unstage them first')
+	}
+
 	// A fresh index takes `ls-tree` lines as they are, so modes, symlinks and submodules carry over.
 	const mappedTree = (commit: string) => {
 		const dir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), 'upstream-merge-'))
@@ -37,8 +51,8 @@ export function mergeMapped(upstream: string, renamed: UpstreamConfig['renamed']
 				.split('\0')
 				.filter(Boolean)
 				.map((entry) => {
-					const [info, path = ''] = entry.split('\t')
-					return `${info}\t${ourPath(path, renamed)}\0`
+					const tab = entry.indexOf('\t')
+					return `${entry.slice(0, tab)}\t${ourPath(entry.slice(tab + 1), renamed)}\0`
 				})
 				.join('')
 			ok(['update-index', '-z', '--index-info'], { env, input })
@@ -48,28 +62,39 @@ export function mergeMapped(upstream: string, renamed: UpstreamConfig['renamed']
 		}
 	}
 
-	const upstreamSha = ok(['rev-parse', '--verify', `${upstream}^{commit}`])
-	const base = ok(['merge-base', 'HEAD', upstreamSha])
+	// Our mapped prefixes leave no rename to detect; directoryRenames still places files we added
+	// inside a folder upstream moved on its own.
 	const merge = git([
+		'-c',
+		'merge.directoryRenames=true',
 		'merge-tree',
 		'--write-tree',
 		'-z',
 		'--name-only',
-		'--no-messages',
 		`--merge-base=${mappedTree(base)}`,
 		'HEAD',
-		mappedTree(upstreamSha),
+		mappedTree(upstream),
 	])
 	// Exit 1 means conflicts; anything else is an error.
 	if (merge.status !== 0 && merge.status !== 1) {
 		throw new Error(`git merge-tree failed:\n${merge.stderr}`)
 	}
-	const [tree = '', ...conflicts] = merge.stdout.split('\0').filter(Boolean)
+	// `<tree>\0<conflicted path>\0...\0\0` then messages as `<count>\0<paths>\0<type>\0<text>\0`.
+	const end = merge.stdout.indexOf('\0\0')
+	const [tree = '', ...conflicts] = merge.stdout
+		.slice(0, end === -1 ? undefined : end)
+		.split('\0')
+		.filter(Boolean)
+	const messages = end === -1 ? [] : merge.stdout.slice(end + 2).split('\0')
+	for (let index = 0; index + 2 < messages.length;) {
+		index += 1 + Number(messages[index]) + 1
+		process.stderr.write(`${messages[index++]?.trimEnd()}\n`)
+	}
 
 	ok(['read-tree', '-u', '-m', 'HEAD', tree])
 	NodeFS.writeFileSync(
 		NodePath.resolve(cwd, ok(['rev-parse', '--git-path', 'MERGE_HEAD'])),
-		`${upstreamSha}\n`,
+		`${upstream}\n`,
 	)
 	return conflicts
 }

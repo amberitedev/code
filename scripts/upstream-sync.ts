@@ -44,8 +44,9 @@ const config: UpstreamConfig = JSON.parse(NodeFS.readFileSync('upstream.json', '
 // Git quotes non-ASCII paths by default, and a quoted path matches no key in upstream.json.
 const unquoted = ['-c', 'core.quotePath=false'] as const
 
-const base = git('merge-base', 'HEAD', upstream)
-const upstreamSha = git('rev-parse', upstream)
+const upstreamSha = git('rev-parse', '--verify', `${upstream}^{commit}`)
+const [base, ...otherBases] = lines(git('merge-base', '--all', 'HEAD', upstreamSha))
+if (!base || otherBases.length > 0) throw new Error(`HEAD and ${upstream} need one merge base`)
 const ours = changedPaths(
 	parseNameStatus(git(...unquoted, 'diff', '--find-renames', '--name-status', base, 'HEAD')),
 )
@@ -54,7 +55,12 @@ const removed = removedPaths(config, (path) =>
 	Boolean(git('ls-tree', '-r', '--name-only', 'HEAD', '--', path)),
 )
 
-const merged = mergeMapped(upstream, config.renamed, process.cwd())
+const merged = mergeMapped({
+	base,
+	upstream: upstreamSha,
+	renamed: config.renamed,
+	cwd: process.cwd(),
+})
 for (const path of removed) {
 	if (git('ls-files', '--', path)) git('rm', '-r', '-q', '--force', '--', path)
 }

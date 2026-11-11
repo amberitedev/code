@@ -43,6 +43,7 @@ it('merges upstream into our renamed folder by path', () => {
 		'lib/main.rs': `fn main() {}\n${lines('base', 10)}`,
 		'lib/old.rs': lines('old', 5),
 		'lib/gradlew': lines('gradle', 5),
+		'lib/both.rs': 'base\n',
 		'lib/.sqlx/query-aaaa.json': `{"query": "SELECT 1",\n${lines('"describe"', 10)}}\n`,
 	})
 	git('add', '-A')
@@ -56,6 +57,7 @@ it('merges upstream into our renamed folder by path', () => {
 		'lib/main.rs': `fn main() { upstream() }\n${lines('base', 10)}`,
 		'lib/new.rs': lines('new', 5),
 		'lib/gradlew': lines('gradle', 6),
+		'lib/both.rs': 'upstream\n',
 		'lib/.sqlx/query-bbbb.json': `{"query": "SELECT 2",\n${lines('"describe"', 10)}}\n`,
 	})
 	commit('upstream')
@@ -63,21 +65,31 @@ it('merges upstream into our renamed folder by path', () => {
 
 	git('switch', '-q', 'ours')
 	git('mv', 'lib', 'engine')
-	write({ 'engine/main.rs': `fn main() {}\nbase 0\n${lines('ours', 30)}` })
+	write({
+		'engine/main.rs': `fn main() {}\nbase 0\n${lines('ours', 30)}`,
+		'engine/both.rs': 'ours\n',
+	})
 	commit('ours')
 
-	expect(mergeMapped('upstream', { lib: 'engine' }, repo)).toEqual([])
+	const base = git('merge-base', 'ours', upstream)
+	expect(mergeMapped({ base, upstream, renamed: { lib: 'engine' }, cwd: repo })).toEqual([
+		'engine/both.rs',
+	])
 	git('commit', '-q', '-m', 'merge')
 
 	expect(git('rev-parse', 'HEAD^2')).toBe(upstream)
 	expect(git('ls-tree', '-r', '--name-only', 'HEAD').split('\n')).toEqual([
 		'engine/.sqlx/query-bbbb.json',
+		'engine/both.rs',
 		'engine/gradlew',
 		'engine/main.rs',
 		'engine/new.rs',
 	])
 	expect(git('show', 'HEAD:engine/main.rs')).toBe(
 		`fn main() { upstream() }\nbase 0\n${lines('ours', 30)}`.trim(),
+	)
+	expect(git('show', 'HEAD:engine/both.rs')).toMatch(
+		/^<<<<<<< [^\n]*\nours\n=======\nupstream\n>>>>>>> /,
 	)
 	expect(git('ls-tree', 'HEAD', 'engine/gradlew')).toMatch(/^100755 /)
 	expect(git('status', '--porcelain')).toBe('')
