@@ -18,6 +18,7 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
 };
+use contracts::{ApiError, ErrorCode};
 use serde::{Deserialize, Serialize};
 use sharing_client::{
     backend::{Backend, BackendError},
@@ -35,7 +36,7 @@ use super::{
     AppState,
     activity::Action,
     content::{server_first, world},
-    error::{ApiError, ErrorCode},
+    internal,
 };
 use crate::{
     access::{Caller, Level, activity},
@@ -119,7 +120,8 @@ pub(super) async fn backend(state: &AppState) -> Result<Backend, ApiError> {
     let key: Option<String> =
         sqlx::query_scalar("SELECT backend_key FROM core WHERE id = 1")
             .fetch_optional(&state.db)
-            .await?
+            .await
+            .map_err(internal)?
             .flatten();
     match (state.storage.backend_url(), key) {
         (Some(url), Some(key)) => {
@@ -132,40 +134,33 @@ pub(super) async fn backend(state: &AppState) -> Result<Backend, ApiError> {
     }
 }
 
-impl From<push::PushError> for ApiError {
-    fn from(error: push::PushError) -> Self {
-        use push::PushError;
-        let code = match &error {
-            PushError::Executable(_)
-            | PushError::TooLarge
-            | PushError::Refused(_) => ErrorCode::InvalidRequest,
-            PushError::NoStorage
-            | PushError::PushInFlight
-            | PushError::FileChanged(_)
-            | PushError::Unavailable(_) => ErrorCode::Conflict,
-            PushError::Backend(error) => return Self::from_backend(error),
-            _ => ErrorCode::Internal,
-        };
-        Self::new(code, error.to_string())
-    }
+pub(crate) fn push_error(error: push::PushError) -> ApiError {
+    use push::PushError;
+    let error = match error {
+        PushError::Backend(error) => return backend_error(error),
+        error => error,
+    };
+    let code = match &error {
+        PushError::Executable(_)
+        | PushError::TooLarge
+        | PushError::Refused(_) => ErrorCode::InvalidInput,
+        PushError::NoStorage
+        | PushError::PushInFlight
+        | PushError::FileChanged(_)
+        | PushError::Unavailable(_) => ErrorCode::Conflict,
+        _ => ErrorCode::InternalError,
+    };
+    ApiError::new(code, error.to_string())
 }
 
-impl From<BackendError> for ApiError {
-    fn from(error: BackendError) -> Self {
-        Self::from_backend(&error)
-    }
-}
-
-impl ApiError {
-    /// A share that is gone or no longer reachable with this Core's key (404, 401) is a
-    /// conflict the caller can resolve; anything else is the backend's fault.
-    fn from_backend(error: &BackendError) -> Self {
-        let code = match error {
-            BackendError::Unavailable { .. } => ErrorCode::Conflict,
-            _ => ErrorCode::Internal,
-        };
-        Self::new(code, error.to_string())
-    }
+/// A share that is gone or no longer reachable with this Core's key (404, 401) is a
+/// conflict the caller can resolve; anything else is the backend's fault.
+pub(crate) fn backend_error(error: BackendError) -> ApiError {
+    let code = match error {
+        BackendError::Unavailable { .. } => ErrorCode::Conflict,
+        _ => ErrorCode::InternalError,
+    };
+    ApiError::new(code, error.to_string())
 }
 
 /// Copy `path` out of the server folder to `to`, so the push reads bytes no link or later write
@@ -198,7 +193,7 @@ pub async fn share(
             .map_err(crate::state::servers::Error::from)?;
         if !SCOPE.carries(&path) {
             return Err(ApiError::new(
-                ErrorCode::InvalidRequest,
+                ErrorCode::InvalidInput,
                 format!("{path} cannot be shared."),
             ));
         }
@@ -208,7 +203,10 @@ pub async fn share(
     let snapshot = snapshot(&state.content, &id).await?;
     // The share takes the server's name on every push. One deleted elsewhere, or made by this
     // Core under an earlier pairing, is replaced by a new one.
-    let existing = match server_rows::share_id(&state.db, &id).await? {
+    let existing = match server_rows::share_id(&state.db, &id)
+        .await
+        .map_err(internal)?
+    {
         Some(share_id) => {
             match backend.rename_share(&share_id, &snapshot.name).await {
                 Err(error)
@@ -222,7 +220,9 @@ pub async fn share(
                 {
                     None
                 }
-                result => result.map(|()| Some(share_id))?,
+                result => {
+                    result.map(|()| Some(share_id)).map_err(backend_error)?
+                }
             }
         }
         None => None,
@@ -230,9 +230,13 @@ pub async fn share(
     let share_id = match existing {
         Some(share_id) => share_id,
         None => {
-            let share_id =
-                backend.create_server_share(&snapshot.name, &id).await?;
-            server_rows::set_share_id(&state.db, &id, Some(&share_id)).await?;
+            let share_id = backend
+                .create_server_share(&snapshot.name, &id)
+                .await
+                .map_err(backend_error)?;
+            server_rows::set_share_id(&state.db, &id, Some(&share_id))
+                .await
+                .map_err(internal)?;
             share_id
         }
     };
@@ -281,7 +285,7 @@ pub async fn share(
                     .collect::<std::io::Result<Vec<_>>>()
             })
             .await
-            .map_err(std::io::Error::other)??
+            .map_err(internal)?.map_err(internal)?
         };
         let pushed = push::push(
             &backend,
@@ -302,7 +306,7 @@ pub async fn share(
                 }
             },
         )
-        .await?;
+        .await.map_err(push_error)?;
         // Recorded while the staged copies are still there.
         record_push(&state.content, &snapshot, &share_id, &pushed).await;
         Ok::<_, ApiError>(pushed.version)
@@ -373,7 +377,10 @@ pub async fn unshare(
     caller.require(&state.db, &id, Level::Owner).await?;
     world(&id, &wid)?;
     server_first(&state, &id).await?;
-    if !drop_own_share(&state.content, &state.access.owed, &id).await? {
+    if !drop_own_share(&state.content, &state.access.owed, &id)
+        .await
+        .map_err(internal)?
+    {
         return Err(ApiError::new(
             ErrorCode::NotFound,
             "This server is not shared.",
@@ -391,12 +398,14 @@ pub async fn files(
     caller.require(&state.db, &id, Level::Editor).await?;
     world(&id, &wid)?;
     server_first(&state, &id).await?;
-    let folder = Folder::open(&state.servers.paths().server(&id))?;
+    let folder =
+        Folder::open(&state.servers.paths().server(&id)).map_err(internal)?;
     let shared = shared_configs(&state, &id).await;
     let response =
         tokio::task::spawn_blocking(move || list_configs(&folder, &shared))
             .await
-            .map_err(std::io::Error::other)??;
+            .map_err(internal)?
+            .map_err(internal)?;
     Ok(Json(response))
 }
 
@@ -404,10 +413,19 @@ pub async fn files(
 /// the backend cannot be read now, which only leaves the files unmarked.
 async fn shared_configs(state: &AppState, id: &str) -> BTreeSet<String> {
     let latest = async {
-        let Some(share_id) = server_rows::share_id(&state.db, id).await? else {
+        let Some(share_id) = server_rows::share_id(&state.db, id)
+            .await
+            .map_err(internal)?
+        else {
             return Ok(None);
         };
-        Ok::<_, ApiError>(backend(state).await?.latest_ready(&share_id).await?)
+        Ok::<_, ApiError>(
+            backend(state)
+                .await?
+                .latest_ready(&share_id)
+                .await
+                .map_err(backend_error)?,
+        )
     };
     match latest.await {
         Ok(latest) => latest
@@ -494,12 +512,14 @@ pub async fn diff(
         ApiError::new(ErrorCode::NotFound, "This server has no shared version.")
     };
     let share_id = server_rows::share_id(&state.db, &id)
-        .await?
+        .await
+        .map_err(internal)?
         .ok_or_else(not_shared)?;
     let latest = backend(&state)
         .await?
         .latest_ready(&share_id)
-        .await?
+        .await
+        .map_err(backend_error)?
         .ok_or_else(not_shared)?;
     let snapshot = snapshot(&state.content, &id).await?;
     let (before, after) =

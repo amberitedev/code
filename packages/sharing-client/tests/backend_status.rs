@@ -4,6 +4,7 @@ use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
 
+use contracts::ErrorCode;
 use sharing_client::backend::{Backend, Unavailable};
 use sharing_client::pool::StoreClient;
 use sharing_client::push::{self, KeptConfigs, LocateConfig, PushError};
@@ -84,7 +85,7 @@ async fn push_against(
 async fn revoked_token_fails_the_push() {
     let (result, seen) = push_against(vec![(
         401,
-        r#"{"error":"unauthorized","description":"x"}"#.into(),
+        r#"{"error":"not_member","description":"x"}"#.into(),
     )])
     .await;
     assert!(
@@ -114,6 +115,16 @@ async fn share_without_versions_gets_its_first() {
 }
 
 #[tokio::test]
+async fn the_pool_refuses_a_version_by_its_code() {
+    let (result, _) = push_against(vec![
+        (404, r#"{"error":"not_found","description":"x"}"#.into()),
+        (503, r#"{"error":"no_storage","description":"x"}"#.into()),
+    ])
+    .await;
+    assert!(matches!(result, Err(PushError::NoStorage)), "{result:?}");
+}
+
+#[tokio::test]
 async fn deleting_a_gone_share_succeeds() {
     for status in [404, 410] {
         let (url, _) = serve(vec![(status, "{}".into())]);
@@ -122,12 +133,12 @@ async fn deleting_a_gone_share_succeeds() {
     }
     let (url, _) = serve(vec![(
         403,
-        r#"{"error":"forbidden","code":"not_owner","description":"n"}"#.into(),
+        r#"{"error":"not_owner","description":"n"}"#.into(),
     )]);
     let error = Backend::new(http(), url, "token")
         .delete_share("share")
         .await
         .unwrap_err();
     assert_eq!(error.status(), Some(reqwest::StatusCode::FORBIDDEN));
-    assert_eq!(error.body().unwrap().code(), "not_owner");
+    assert_eq!(error.body().unwrap().error, ErrorCode::NotOwner);
 }

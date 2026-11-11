@@ -8,9 +8,10 @@ use axum::{
     Json,
     extract::{Path, State},
 };
+use contracts::ApiError;
 use serde::Deserialize;
 
-use super::{AppState, activity::Action, content::world, error::ApiError};
+use super::{AppState, activity::Action, content::world, internal};
 use crate::{
     access::{Caller, Level, activity},
     state::servers::adapters::filesystem::properties,
@@ -88,7 +89,7 @@ pub async fn get(
     caller.require(&state.db, &id, Level::Editor).await?;
     world(&id, &wid)?;
     let dir = state.servers.paths().server(&id);
-    Ok(Json(fields(properties::read(&dir)?)))
+    Ok(Json(fields(properties::read(&dir).map_err(internal)?)))
 }
 
 /// `PATCH .../properties`: set the known fields given and each custom key, removing custom keys
@@ -111,10 +112,10 @@ pub async fn patch(
     // Read, patched, and written under the lock installs and file edits take, so neither lands
     // between the read and the write and is lost.
     let busy = state.content.busy(&id)?;
-    properties::patch(&dir, &changes)?;
+    properties::patch(&dir, &changes).map_err(internal)?;
     drop(busy);
     activity::log(&state.db, &caller, Some(&id), Action::SettingsChanged).await;
-    Ok(Json(fields(properties::read(&dir)?)))
+    Ok(Json(fields(properties::read(&dir).map_err(internal)?)))
 }
 
 #[cfg(test)]

@@ -12,14 +12,11 @@
 use std::sync::Arc;
 
 use axum::{Json, extract::State, http::HeaderMap};
+use contracts::{ApiError, ErrorCode};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use super::{
-    AppState,
-    activity::Action,
-    error::{ApiError, ErrorCode},
-};
+use super::{AppState, activity::Action, internal};
 use crate::{
     access::{Caller, Dangerous, activity, fresh_ticket},
     update::{UpdateError, release::Channel, versions::FailedTrial},
@@ -88,7 +85,7 @@ impl From<UpdateError> for ApiError {
             | UpdateError::NothingToRollBackTo => ErrorCode::Conflict,
             UpdateError::DowngradeRemote => ErrorCode::Forbidden,
             UpdateError::NoRelease(_) => ErrorCode::NotFound,
-            _ => ErrorCode::Internal,
+            _ => ErrorCode::InternalError,
         };
         Self::new(code, error.to_string())
     }
@@ -113,7 +110,7 @@ pub async fn settings(
     caller.require_owner()?;
     // Turning auto-update on or changing the channel decides what Core installs next, so it is
     // as dangerous as installing it. Turning auto-update off is not.
-    let (channel, _) = state.update.settings().await?;
+    let (channel, _) = state.update.settings().await.map_err(internal)?;
     if request.auto_update == Some(true)
         || request.channel.is_some_and(|wanted| wanted != channel)
     {
@@ -122,7 +119,8 @@ pub async fn settings(
     state
         .update
         .set_settings(request.channel, request.auto_update)
-        .await?;
+        .await
+        .map_err(internal)?;
     Ok(Json(state.update.status().await?))
 }
 

@@ -13,6 +13,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use bytes::Bytes;
+use contracts::{ApiError, ErrorCode};
 use futures::stream::BoxStream;
 use futures::{Stream, StreamExt, TryStreamExt};
 use reqwest::StatusCode;
@@ -21,7 +22,7 @@ use tokio::io::AsyncReadExt;
 use ts_rs::TS;
 
 use crate::crypto::{DecryptError, Decryptor};
-use crate::net::{CoreAddress, ErrorBody, tls};
+use crate::net::{CoreAddress, tls};
 
 /// A Core as the backend names it. `address` is tried first and `public_address` when the first
 /// does not connect, so a Core on the same network is reached directly.
@@ -43,8 +44,8 @@ pub enum StoreError {
     EgressSpent,
     #[error("the Core is limiting requests")]
     RateLimited,
-    #[error("the Core refused the ticket ({0})")]
-    Ticket(String),
+    #[error("the Core refused the ticket ({0:?})")]
+    Ticket(ErrorCode),
     #[error("the Core does not have this")]
     NotFound,
     #[error("the Core answered {0}: {1}")]
@@ -528,17 +529,20 @@ async fn check(
     }
     let status = response.status().as_u16();
     let text = response.text().await.unwrap_or_default();
-    let Some(body) =
-        ErrorBody::parse(text.as_bytes()).filter(|body| !body.error.is_empty())
-    else {
+    let Ok(body) = serde_json::from_str::<ApiError>(&text) else {
         return Err(StoreError::Other(status, text));
     };
-    Err(match body.error.as_str() {
-        "disk_full" => StoreError::DiskFull,
-        "egress_spent" => StoreError::EgressSpent,
-        "rate_limited" => StoreError::RateLimited,
-        "not_found" => StoreError::NotFound,
-        error if error.starts_with("ticket_") => StoreError::Ticket(body.error),
+    Err(match body.error {
+        ErrorCode::DiskFull => StoreError::DiskFull,
+        ErrorCode::EgressSpent => StoreError::EgressSpent,
+        ErrorCode::RateLimited => StoreError::RateLimited,
+        ErrorCode::NotFound => StoreError::NotFound,
+        code @ (ErrorCode::TicketRequired
+        | ErrorCode::TicketInvalid
+        | ErrorCode::TicketReused
+        | ErrorCode::TicketExpired
+        | ErrorCode::TicketWrongCore
+        | ErrorCode::TicketWrongKind) => StoreError::Ticket(code),
         _ => StoreError::Other(status, body.description),
     })
 }

@@ -21,13 +21,14 @@ use axum::{
     routing::{get, post},
 };
 use bytes::Bytes;
+use contracts::{ApiError, ErrorCode};
 use futures::{StreamExt, TryStreamExt};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio_util::io::{ReaderStream, StreamReader};
 
 use crate::{
-    Code, Store, StoreError, now,
+    Store, io_error, now,
     objects::{self, Hash, VersionList, WriteError},
     pull, tar,
     tickets::{self, Claims},
@@ -42,12 +43,12 @@ pub(crate) fn router(store: Arc<Store>) -> Router {
         .with_state(store)
 }
 
-fn invalid(description: impl Into<String>) -> StoreError {
-    StoreError::new(Code::InvalidRequest, description)
+fn invalid(description: impl Into<String>) -> ApiError {
+    ApiError::new(ErrorCode::InvalidInput, description)
 }
 
-fn not_found(description: &str) -> StoreError {
-    StoreError::new(Code::NotFound, description)
+fn not_found(description: &str) -> ApiError {
+    ApiError::new(ErrorCode::NotFound, description)
 }
 
 fn bearer(headers: &HeaderMap) -> Option<&str> {
@@ -58,7 +59,7 @@ fn bearer(headers: &HeaderMap) -> Option<&str> {
         .strip_prefix("Bearer ")
 }
 
-fn root_of(text: &str) -> Result<Hash, StoreError> {
+fn root_of(text: &str) -> Result<Hash, ApiError> {
     Hash::parse(text).ok_or_else(|| not_found("There is no such version."))
 }
 
@@ -68,9 +69,9 @@ impl Store {
         headers: &HeaderMap,
         kind: &'static str,
         root: &Hash,
-    ) -> Result<Claims, StoreError> {
+    ) -> Result<Claims, ApiError> {
         let ticket = bearer(headers).ok_or_else(|| {
-            StoreError::new(Code::TicketInvalid, "This needs a ticket.")
+            ApiError::new(ErrorCode::TicketInvalid, "This needs a ticket.")
         })?;
         tickets::verify(&self.keys, ticket, &self.core_id, kind, root, now())
             .await
@@ -85,7 +86,7 @@ impl Store {
         headers: &HeaderMap,
         extensions: &Extensions,
         root: &Hash,
-    ) -> Result<Claims, StoreError> {
+    ) -> Result<Claims, ApiError> {
         let address = headers
             .get("x-forwarded-for")
             .and_then(|value| value.to_str().ok())
@@ -98,8 +99,8 @@ impl Store {
             })
             .unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST));
         if self.limits.limited(address) {
-            return Err(StoreError::new(
-                Code::RateLimited,
+            return Err(ApiError::new(
+                ErrorCode::RateLimited,
                 "Too many refused requests from this address. Wait a minute.",
             ));
         }
@@ -126,14 +127,17 @@ async fn have(
     Path(root): Path<String>,
     headers: HeaderMap,
     body: Bytes,
-) -> Result<Json<HaveAnswer>, StoreError> {
+) -> Result<Json<HaveAnswer>, ApiError> {
     let root = root_of(&root)?;
     store.ticket(&headers, tickets::STORE, &root).await?;
     let Have { objects } = serde_json::from_slice(&body)
         .map_err(|_| invalid("Send { objects: [hash...] }."))?;
     let mut missing = Vec::new();
     for hash in objects {
-        if !tokio::fs::try_exists(store.layout.object(&hash)).await? {
+        if !tokio::fs::try_exists(store.layout.object(&hash))
+            .await
+            .map_err(io_error)?
+        {
             missing.push(hash);
         }
     }
@@ -150,7 +154,7 @@ struct Uploaded {
     missing: Vec<Hash>,
 }
 
-fn bad_tar(error: io::Error) -> StoreError {
+fn bad_tar(error: io::Error) -> ApiError {
     if error.kind() == io::ErrorKind::InvalidData {
         invalid(error.to_string())
     } else {
@@ -165,7 +169,7 @@ async fn upload(
     Path(root): Path<String>,
     headers: HeaderMap,
     body: Body,
-) -> Result<Json<Uploaded>, StoreError> {
+) -> Result<Json<Uploaded>, ApiError> {
     let root = root_of(&root)?;
     let claims = store.ticket(&headers, tickets::STORE, &root).await?;
     if store.is_stored(&root) {
@@ -201,14 +205,17 @@ async fn upload(
                 "An object is not the size its version lists.",
             ));
         }
-        if tokio::fs::try_exists(store.layout.object(&hash)).await? {
+        if tokio::fs::try_exists(store.layout.object(&hash))
+            .await
+            .map_err(io_error)?
+        {
             continue;
         }
         objects::write_object(&store.layout, &hash, size, tar.body())
             .await
             .map_err(|error| match error {
                 WriteError::Mismatch(description) => invalid(description),
-                WriteError::Io(error) => error.into(),
+                WriteError::Io(error) => io_error(error),
             })?;
     }
     let missing = store.finish(&root).await?;
@@ -224,7 +231,7 @@ async fn list(
     Path(root): Path<String>,
     headers: HeaderMap,
     extensions: Extensions,
-) -> Result<Json<VersionList>, StoreError> {
+) -> Result<Json<VersionList>, ApiError> {
     let root = root_of(&root)?;
     store.fetch_ticket(&headers, &extensions, &root).await?;
     let list = store
@@ -251,12 +258,12 @@ async fn object(
     Path((root, object)): Path<(String, String)>,
     headers: HeaderMap,
     extensions: Extensions,
-) -> Result<Response, StoreError> {
+) -> Result<Response, ApiError> {
     let root = root_of(&root)?;
     store.fetch_ticket(&headers, &extensions, &root).await?;
     let slot = store.limits.fetch_slot().ok_or_else(|| {
-        StoreError::new(
-            Code::RateLimited,
+        ApiError::new(
+            ErrorCode::RateLimited,
             "This Core is serving as many downloads as it can. Try again shortly.",
         )
     })?;
@@ -268,8 +275,8 @@ async fn object(
         .ok_or_else(|| not_found("This Core does not hold that version."))?;
     list.size_of(&object).ok_or_else(not_held)?;
     if store.limits.egress_today() >= store.caps().egress_cap {
-        return Err(StoreError::new(
-            Code::EgressSpent,
+        return Err(ApiError::new(
+            ErrorCode::EgressSpent,
             "This Core has sent all it may today.",
         ));
     }
@@ -278,9 +285,9 @@ async fn object(
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 return Err(not_held());
             }
-            file => file?,
+            file => file.map_err(io_error)?,
         };
-    let len = file.metadata().await?.len();
+    let len = file.metadata().await.map_err(io_error)?.len();
     let from = range_start(&headers);
     if from.is_some_and(|from| from >= len) {
         let mut refused =
@@ -293,7 +300,7 @@ async fn object(
         return Ok(refused);
     }
     let start = from.unwrap_or(0);
-    file.seek(SeekFrom::Start(start)).await?;
+    file.seek(SeekFrom::Start(start)).await.map_err(io_error)?;
     let counter = Arc::clone(&store);
     let stream =
         ReaderStream::new(file.take(len - start)).inspect(move |chunk| {
@@ -327,7 +334,7 @@ async fn pull_version(
     State(store): State<Arc<Store>>,
     Path(root): Path<String>,
     headers: HeaderMap,
-) -> Result<Json<Pulled>, StoreError> {
+) -> Result<Json<Pulled>, ApiError> {
     let root = root_of(&root)?;
     let claims = store.ticket(&headers, tickets::PULL, &root).await?;
     if store.is_stored(&root) {
@@ -561,7 +568,7 @@ pub mod tests {
         let (status, error) =
             f.json(Method::POST, &uri, &ticket, Body::from(body)).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
-        assert_eq!(error["error"], "invalid_request");
+        assert_eq!(error["error"], "invalid_input");
         let folder = f.store.layout.object(&list.objects[0].hash);
         assert!(!folder.exists());
         assert_eq!(

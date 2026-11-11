@@ -246,8 +246,7 @@ export async function poolAccess(env: Env, holderList: Holder[], root: string) {
 /** What the owner needs to upload a version: the home Core and a store ticket for it. */
 export async function storeGrant(env: Env, homeId: string, root: string, bytes: number) {
 	const [core] = await holders(env, [homeId])
-	if (!core)
-		throw new ApiError(503, 'no_storage', 'The Core holding this share is gone', 'no_storage')
+	if (!core) throw new ApiError(503, 'no_storage', 'The Core holding this share is gone')
 	const { ticket, expires } = await storeTicket(env, core.id, root, bytes)
 	return { core, ticket, expires }
 }

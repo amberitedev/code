@@ -1,6 +1,5 @@
+use contracts::ApiError;
 use reqwest::StatusCode;
-
-use crate::net::ErrorBody;
 
 /// Why the backend would not give a share.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -31,16 +30,16 @@ pub enum BackendError {
     #[error("{reason}")]
     Unavailable {
         reason: Unavailable,
-        body: ErrorBody,
+        body: Option<ApiError>,
     },
-    /// Any other answer but success, with the error body it carried (empty when it was none).
+    /// Any other answer but success, with the error body it carried, if it was one.
     #[error(
         "shared instances API request {operation} failed with status {status}"
     )]
     Status {
         operation: &'static str,
         status: StatusCode,
-        body: ErrorBody,
+        body: Option<ApiError>,
     },
     #[error(
         "shared instances API request {operation} sent unreadable JSON: {error}"
@@ -71,10 +70,10 @@ impl BackendError {
     }
 
     /// The error body the backend answered with, when it answered with one.
-    pub fn body(&self) -> Option<&ErrorBody> {
+    pub fn body(&self) -> Option<&ApiError> {
         match self {
             Self::Unavailable { body, .. } | Self::Status { body, .. } => {
-                Some(body)
+                body.as_ref()
             }
             Self::Decode { .. } | Self::Http(_) => None,
         }

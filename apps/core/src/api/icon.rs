@@ -27,6 +27,7 @@ use axum::{
     http::{StatusCode, header},
     response::IntoResponse,
 };
+use contracts::{ApiError, ErrorCode};
 use image::{
     DynamicImage, ImageDecoder, ImageFormat, ImageReader, imageops::FilterType,
     metadata::Orientation,
@@ -38,8 +39,8 @@ use sha2::{Digest, Sha256};
 use super::{
     AppState,
     activity::Action,
-    error::{ApiError, ErrorCode},
     files::{blocking, changing, folder, locked},
+    internal,
 };
 use crate::{
     access::{Caller, Level, activity},
@@ -73,7 +74,8 @@ pub struct ServerIcon {
 /// The owner passes `require` for any id, so a missing server is found here.
 async fn exists(state: &AppState, id: &str) -> Result<(), ApiError> {
     server_rows::get(&state.db, id)
-        .await?
+        .await
+        .map_err(internal)?
         .ok_or_else(|| ServerError::NotFound(id.into()))?;
     Ok(())
 }
@@ -136,7 +138,7 @@ pub async fn set_generated(
     caller.require(&state.db, &id, Level::Editor).await?;
     exists(&state, &id).await?;
     let bad_form = |error: axum::extract::multipart::MultipartError| {
-        ApiError::new(ErrorCode::InvalidRequest, error.body_text())
+        ApiError::new(ErrorCode::InvalidInput, error.body_text())
     };
     let (mut image, mut config) = (None, None);
     while let Some(field) = form.next_field().await.map_err(bad_form)? {
@@ -152,7 +154,7 @@ pub async fn set_generated(
     }
     let (Some(image), Some(config)) = (image, config) else {
         return Err(ApiError::new(
-            ErrorCode::InvalidRequest,
+            ErrorCode::InvalidInput,
             "The upload needs an image and a config.",
         ));
     };
@@ -160,7 +162,7 @@ pub async fn set_generated(
         .ok()
         .filter(|config: &IconConfig| config.validate().is_ok())
         .ok_or_else(|| {
-            ApiError::new(ErrorCode::InvalidRequest, "Invalid icon config.")
+            ApiError::new(ErrorCode::InvalidInput, "Invalid icon config.")
         })?;
     write(&state, &caller, &id, image, Some(config))
         .await
@@ -179,8 +181,12 @@ async fn write(
     let hash = hex::encode(Sha256::digest(&game));
     let (folder, busy) = changing(state, id)?;
     locked(&busy, move || {
-        folder.write(ORIGINAL_ICON, &mut original.as_slice())?;
-        folder.write(GAME_ICON, &mut game.as_slice())?;
+        folder
+            .write(ORIGINAL_ICON, &mut original.as_slice())
+            .map_err(internal)?;
+        folder
+            .write(GAME_ICON, &mut game.as_slice())
+            .map_err(internal)?;
         Ok(())
     })
     .await?;
@@ -192,7 +198,8 @@ async fn write(
         id,
         stored.as_deref().map(|config| (config, hash.as_str())),
     )
-    .await?;
+    .await
+    .map_err(internal)?;
     activity::log(&state.db, caller, Some(id), Action::SettingsChanged).await;
     Ok(ServerIcon { hash, config })
 }
@@ -208,18 +215,21 @@ pub async fn metadata(
     let folder = folder(&state, &id)?;
     let game = blocking(move || {
         folder
-            .open_file(GAME_ICON)?
+            .open_file(GAME_ICON)
+            .map_err(internal)?
             .ok_or_else(no_icon)
             .and_then(|file| {
                 let mut bytes = Vec::new();
-                std::io::Read::read_to_end(&mut file.into_std(), &mut bytes)?;
+                std::io::Read::read_to_end(&mut file.into_std(), &mut bytes)
+                    .map_err(internal)?;
                 Ok(bytes)
             })
     })
     .await?;
     let hash = hex::encode(Sha256::digest(&game));
     let config = server_rows::icon_config(&state.db, &id)
-        .await?
+        .await
+        .map_err(internal)?
         .filter(|(_, made)| *made == hash)
         .and_then(|(config, _)| serde_json::from_str(&config).ok());
     Ok(Json(ServerIcon { hash, config }))
@@ -230,7 +240,7 @@ pub async fn metadata(
 fn icons(image: &[u8]) -> Result<(Vec<u8>, Vec<u8>), ApiError> {
     let invalid = || {
         ApiError::new(
-            ErrorCode::InvalidRequest,
+            ErrorCode::InvalidInput,
             "Upload a PNG, JPEG, GIF, or WebP image.",
         )
     };
@@ -251,7 +261,7 @@ fn icons(image: &[u8]) -> Result<(Vec<u8>, Vec<u8>), ApiError> {
     let (width, height) = reader()?.into_dimensions().map_err(|_| invalid())?;
     if width > MAX_SOURCE_SIDE || height > MAX_SOURCE_SIDE {
         return Err(ApiError::new(
-            ErrorCode::InvalidRequest,
+            ErrorCode::InvalidInput,
             format!(
                 "Icons may be at most {MAX_SOURCE_SIDE}x{MAX_SOURCE_SIDE} pixels."
             ),
@@ -279,7 +289,7 @@ fn png(image: &DynamicImage) -> Result<Vec<u8>, ApiError> {
     image
         .write_to(&mut Cursor::new(&mut bytes), ImageFormat::Png)
         .map_err(|error| {
-            ApiError::new(ErrorCode::Internal, error.to_string())
+            ApiError::new(ErrorCode::InternalError, error.to_string())
         })?;
     Ok(bytes)
 }
@@ -305,12 +315,14 @@ pub async fn delete(
             return Err(no_icon());
         }
         for name in icons {
-            folder.remove(name)?;
+            folder.remove(name).map_err(internal)?;
         }
         Ok(())
     })
     .await?;
-    server_rows::set_icon_config(&state.db, &id, None).await?;
+    server_rows::set_icon_config(&state.db, &id, None)
+        .await
+        .map_err(internal)?;
     activity::log(&state.db, &caller, Some(&id), Action::SettingsChanged).await;
     Ok(StatusCode::NO_CONTENT)
 }

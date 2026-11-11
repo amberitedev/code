@@ -26,14 +26,12 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use chrono::{DateTime, Utc};
+use contracts::{ApiError, ErrorCode};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::{
-    AppState,
-    activity::Action,
-    content::world,
-    error::{ApiError, ErrorCode},
+    AppState, activity::Action, content::world, internal,
     servers::WorldDownloadMethod,
 };
 use crate::{
@@ -260,7 +258,7 @@ impl From<backups::Error> for ApiError {
                 let code = match &error {
                     Error::NotFound(_) => ErrorCode::NotFound,
                     Error::Conflict(_) | Error::Space(_) => ErrorCode::Conflict,
-                    _ => ErrorCode::Internal,
+                    _ => ErrorCode::InternalError,
                 };
                 Self::new(code, format!("{error:#}"))
             }
@@ -288,7 +286,7 @@ fn backup_name(name: &str) -> Result<&str, ApiError> {
     let name = name.trim();
     if name.is_empty() || name.chars().count() > 64 {
         return Err(ApiError::new(
-            ErrorCode::InvalidRequest,
+            ErrorCode::InvalidInput,
             "A backup name has 1 to 64 characters.",
         ));
     }
@@ -309,7 +307,8 @@ async fn users(
             sqlx::query_as("SELECT name, avatar_url FROM users WHERE id = ?")
                 .bind(user_id)
                 .fetch_optional(&state.db)
-                .await?;
+                .await
+                .map_err(internal)?;
         let (username, avatar_url) =
             row.unwrap_or_else(|| (user_id.clone(), None));
         users.insert(
@@ -329,7 +328,7 @@ async fn slots(
     state: &AppState,
     id: &str,
 ) -> Result<(records::Schedule, Option<i64>), ApiError> {
-    let schedule = records::schedule(&state.db, id).await?;
+    let schedule = records::schedule(&state.db, id).await.map_err(internal)?;
     let next = state.backups.next_scheduled(id).await?;
     Ok((schedule, next))
 }
@@ -343,7 +342,8 @@ async fn queue(
     schedule: &records::Schedule,
     next: Option<i64>,
 ) -> Result<BackupsQueueResponse, ApiError> {
-    let operations = records::operations(&state.db, id).await?;
+    let operations =
+        records::operations(&state.db, id).await.map_err(internal)?;
     let users = users(state, &operations).await?;
     let user = |op: &Operation| {
         op.user_id
@@ -368,7 +368,8 @@ async fn queue(
     let interval = i64::from(schedule.interval_hours) * 3600;
     let mut slotted = 0u32;
     let backups = records::backups(&state.db, id)
-        .await?
+        .await
+        .map_err(internal)?
         .into_iter()
         .map(|backup| {
             let live = backup.state != BackupRowState::Failed;
@@ -502,11 +503,11 @@ pub async fn patch_options(
 ) -> Result<Json<PatchWorldBackupOptionsResponse>, ApiError> {
     caller.require(&state.db, &id, Level::Editor).await?;
     world(&id, &wid)?;
-    let current = records::schedule(&state.db, &id).await?;
+    let current = records::schedule(&state.db, &id).await.map_err(internal)?;
     let interval_hours = body.interval.unwrap_or(current.interval_hours);
     if !(1..=24 * 31).contains(&interval_hours) {
         return Err(ApiError::new(
-            ErrorCode::InvalidRequest,
+            ErrorCode::InvalidInput,
             "Back up at most every hour and at least every 744 hours.",
         ));
     }
@@ -515,7 +516,7 @@ pub async fn patch_options(
             if automatic.checked_add(manual) != Some(SLOTS) =>
         {
             return Err(ApiError::new(
-                ErrorCode::InvalidRequest,
+                ErrorCode::InvalidInput,
                 format!("Scheduled and manual slots add up to {SLOTS}."),
             ));
         }
@@ -525,12 +526,13 @@ pub async fn patch_options(
     };
     if keep > SLOTS {
         return Err(ApiError::new(
-            ErrorCode::InvalidRequest,
+            ErrorCode::InvalidInput,
             format!("There are {SLOTS} slots."),
         ));
     }
-    let rotated =
-        records::excess(&state.db, &id, Kind::Scheduled, keep).await?;
+    let rotated = records::excess(&state.db, &id, Kind::Scheduled, keep)
+        .await
+        .map_err(internal)?;
     let acknowledged = query.ar.as_deref() == Some("true");
     if !rotated.is_empty() && !acknowledged {
         return Ok(Json(PatchWorldBackupOptionsResponse {
@@ -552,7 +554,8 @@ pub async fn patch_options(
             ..current
         },
     )
-    .await?;
+    .await
+    .map_err(internal)?;
     for old in &rotated {
         state.backups.delete(&id, old).await?;
         activity::log(
@@ -613,7 +616,10 @@ pub async fn rename(
         return Ok(StatusCode::NO_CONTENT);
     };
     let name = backup_name(name)?;
-    if !records::rename(&state.db, &id, &backup, name).await? {
+    if !records::rename(&state.db, &id, &backup, name)
+        .await
+        .map_err(internal)?
+    {
         return Err(ApiError::new(
             ErrorCode::NotFound,
             format!("There is no backup {backup}."),
@@ -726,7 +732,8 @@ pub async fn history(
     caller.require(&state.db, &id, Level::Editor).await?;
     world(&id, &wid)?;
     let found = records::operation(&state.db, operation)
-        .await?
+        .await
+        .map_err(internal)?
         .filter(|op| op.server_id == id && operation_type(op.kind) == kind);
     if found.is_none() {
         return Err(ApiError::new(
@@ -735,10 +742,12 @@ pub async fn history(
         ));
     }
     let done = match action {
-        HistoryAction::Ack => records::ack(&state.db, &id, operation).await?,
-        HistoryAction::Cancel => {
-            records::cancel(&state.db, &id, operation).await?
-        }
+        HistoryAction::Ack => records::ack(&state.db, &id, operation)
+            .await
+            .map_err(internal)?,
+        HistoryAction::Cancel => records::cancel(&state.db, &id, operation)
+            .await
+            .map_err(internal)?,
     };
     if !done {
         return Err(ApiError::new(
@@ -764,7 +773,8 @@ pub async fn authorize_backup(
     caller.require(&state.db, &id, Level::Editor).await?;
     world(&id, &wid)?;
     records::backup(&state.db, &id, &backup)
-        .await?
+        .await
+        .map_err(internal)?
         .ok_or_else(|| {
             ApiError::new(
                 ErrorCode::NotFound,
@@ -791,7 +801,7 @@ pub async fn authorize_world(
 /// The answer to a link token that is unknown, used, or past its five minutes.
 pub(super) fn expired_link() -> ApiError {
     ApiError::new(
-        ErrorCode::Unauthorized,
+        ErrorCode::InvalidCredentials,
         "This download link has expired or was used.",
     )
 }
@@ -904,7 +914,8 @@ pub async fn download_backup(
         downloader(&state, caller, query.token.as_deref(), &id, &target)
             .await?;
     let found = records::backup(&state.db, &id, &backup)
-        .await?
+        .await
+        .map_err(internal)?
         .filter(|found| found.state == BackupRowState::Done)
         .ok_or_else(|| {
             ApiError::new(
@@ -912,7 +923,8 @@ pub async fn download_backup(
                 format!("There is no finished backup {backup}."),
             )
         })?;
-    let file = std::fs::File::open(state.backups.file(&id, &backup))?;
+    let file = std::fs::File::open(state.backups.file(&id, &backup))
+        .map_err(internal)?;
     activity::log(
         &state.db,
         &caller,
@@ -938,7 +950,8 @@ pub async fn download_world(
         downloader(&state, caller, query.token.as_deref(), &id, &Target::World)
             .await?;
     let server = server_rows::get(&state.db, &id)
-        .await?
+        .await
+        .map_err(internal)?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
     let path = state
         .servers
@@ -947,7 +960,7 @@ pub async fn download_world(
         .join(&id)
         .join(format!("download-{}.zip", Uuid::new_v4()));
     state.backups.snapshot(&id, &path, |_| {}).await?;
-    let file = std::fs::File::open(&path)?;
+    let file = std::fs::File::open(&path).map_err(internal)?;
     activity::log(&state.db, &caller, Some(&id), Action::WorldDownloaded).await;
     Ok(zip_response(file, &server.name, "zip", Some(path)))
 }

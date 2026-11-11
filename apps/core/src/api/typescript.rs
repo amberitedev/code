@@ -8,8 +8,8 @@
 use ts_rs::{Config, TS};
 
 use super::{
-    access, activity, backend, console, content, error, eula, insight, logs,
-    pairing, performance, sessions, share, startup, storage, update,
+    access, activity, backend, console, content, eula, insight, logs, pairing,
+    performance, sessions, share, startup, storage, update,
 };
 
 const PATH: &str = concat!(
@@ -22,8 +22,6 @@ fn declarations() -> String {
     // Numbers in these types are unix seconds and small counts, which JSON gives as `number`.
     let cfg = Config::default().with_large_int("number");
     [
-        error::ApiError::decl(&cfg),
-        error::ErrorCode::decl(&cfg),
         access::Role::decl(&cfg),
         access::User::decl(&cfg),
         access::Member::decl(&cfg),

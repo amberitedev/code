@@ -21,6 +21,7 @@ use axum::{
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
 };
+use contracts::{ApiError, ErrorCode};
 use serde::{Deserialize, Serialize};
 use sqlx::SqliteConnection;
 use ts_rs::TS;
@@ -30,7 +31,7 @@ use super::{
     AppState,
     activity::Action,
     backend::{Grant, Remove},
-    error::{ApiError, ErrorCode},
+    internal,
 };
 use crate::{
     access::{
@@ -126,7 +127,7 @@ pub async fn me(
 ) -> Result<Json<MyAccess>, ApiError> {
     let Some(user_id) = caller.user_id() else {
         return Err(ApiError::new(
-            ErrorCode::InvalidRequest,
+            ErrorCode::InvalidInput,
             "The local CLI is this Core's owner and has no account here.",
         ));
     };
@@ -138,10 +139,10 @@ pub async fn me(
         )
         .bind(user_id)
         .fetch_all(&state.db)
-        .await?
+        .await.map_err(internal)?
     };
     Ok(Json(MyAccess {
-        user: user(&state.db, user_id).await?,
+        user: user(&state.db, user_id).await.map_err(internal)?,
         owner: caller.is_owner(),
         servers: servers
             .into_iter()
@@ -163,8 +164,8 @@ pub async fn list(
 ) -> Result<Json<ServerAccess>, ApiError> {
     caller.require(&state.db, &server_id, Level::Owner).await?;
     server(&state, &server_id).await?;
-    let owner = match owner_id(&state.db).await? {
-        Some(id) => Some(user(&state.db, &id).await?),
+    let owner = match owner_id(&state.db).await.map_err(internal)? {
+        Some(id) => Some(user(&state.db, &id).await.map_err(internal)?),
         None => None,
     };
     let rows: Vec<String> = sqlx::query_scalar(
@@ -172,7 +173,7 @@ pub async fn list(
     )
     .bind(&server_id)
     .fetch_all(&state.db)
-    .await?;
+    .await.map_err(internal)?;
     let mut members = Vec::new();
     for user_id in rows {
         members.push(member(&state.db, &server_id, &user_id).await?);
@@ -200,25 +201,28 @@ pub async fn invite(
         || name.chars().count() > 64
     {
         return Err(ApiError::new(
-            ErrorCode::InvalidRequest,
+            ErrorCode::InvalidInput,
             "Invite someone by their account id and name.",
         ));
     }
-    if owner_id(&state.db).await?.as_deref() == Some(user_id.as_str()) {
+    if owner_id(&state.db).await.map_err(internal)?.as_deref()
+        == Some(user_id.as_str())
+    {
         return Err(ApiError::new(
             ErrorCode::Conflict,
             "The owner already has every role on every server.",
         ));
     }
 
-    let mut tx = state.db.begin().await?;
+    let mut tx = state.db.begin().await.map_err(internal)?;
     let (known, people): (bool, i64) = sqlx::query_as(
         "SELECT EXISTS (SELECT 1 FROM access WHERE user_id = ?), \
          (SELECT COUNT(DISTINCT user_id) FROM access)",
     )
     .bind(&user_id)
     .fetch_one(&mut *tx)
-    .await?;
+    .await
+    .map_err(internal)?;
     if !known && people >= MAX_DIRECTORY {
         return Err(ApiError::new(
             ErrorCode::Conflict,
@@ -237,7 +241,7 @@ pub async fn invite(
     .bind(&avatar_url)
     .bind(now())
     .execute(&mut *tx)
-    .await?;
+    .await.map_err(internal)?;
     sqlx::query(
         "INSERT INTO access (server_id, user_id, role, added_at) VALUES (?, ?, ?, ?) \
          ON CONFLICT (server_id, user_id) DO UPDATE SET role = excluded.role",
@@ -247,7 +251,7 @@ pub async fn invite(
     .bind(invite.role)
     .bind(now())
     .execute(&mut *tx)
-    .await?;
+    .await.map_err(internal)?;
     activity::record(
         &mut tx,
         caller.user_id(),
@@ -257,7 +261,8 @@ pub async fn invite(
             role: invite.role,
         },
     )
-    .await?;
+    .await
+    .map_err(internal)?;
     owe(
         &mut tx,
         &OwedCall::Grant(Grant {
@@ -267,8 +272,9 @@ pub async fn invite(
             role: invite.role,
         }),
     )
-    .await?;
-    tx.commit().await?;
+    .await
+    .map_err(internal)?;
+    tx.commit().await.map_err(internal)?;
     state.access.owed.notify_one();
     state.access.changed(&user_id);
     Ok(Json(member(&state.db, &server_id, &user_id).await?))
@@ -281,7 +287,7 @@ pub async fn change_role(
     Path((server_id, user_id)): Path<(String, String)>,
     Json(change): Json<ChangeRole>,
 ) -> Result<Json<Member>, ApiError> {
-    let mut tx = state.db.begin().await?;
+    let mut tx = state.db.begin().await.map_err(internal)?;
     let changed = sqlx::query(
         "UPDATE access SET role = ? WHERE server_id = ? AND user_id = ?",
     )
@@ -289,7 +295,8 @@ pub async fn change_role(
     .bind(&server_id)
     .bind(&user_id)
     .execute(&mut *tx)
-    .await?;
+    .await
+    .map_err(internal)?;
     if changed.rows_affected() == 0 {
         return Err(not_a_member());
     }
@@ -302,8 +309,9 @@ pub async fn change_role(
             role: change.role,
         },
     )
-    .await?;
-    tx.commit().await?;
+    .await
+    .map_err(internal)?;
+    tx.commit().await.map_err(internal)?;
     // An editor made a viewer loses the console at once.
     state.access.changed(&user_id);
     Ok(Json(member(&state.db, &server_id, &user_id).await?))
@@ -322,20 +330,22 @@ pub async fn remove(
         caller.require_owner()?;
         fresh_ticket(&state, &caller, &headers).await?;
     }
-    let mut tx = state.db.begin().await?;
+    let mut tx = state.db.begin().await.map_err(internal)?;
     let removed =
         sqlx::query("DELETE FROM access WHERE server_id = ? AND user_id = ?")
             .bind(&server_id)
             .bind(&user_id)
             .execute(&mut *tx)
-            .await?;
+            .await
+            .map_err(internal)?;
     if removed.rows_affected() == 0 {
         return Err(not_a_member());
     }
     sqlx::query("DELETE FROM sessions WHERE user_id = ?")
         .bind(&user_id)
         .execute(&mut *tx)
-        .await?;
+        .await
+        .map_err(internal)?;
     activity::record(
         &mut tx,
         caller.user_id(),
@@ -344,9 +354,12 @@ pub async fn remove(
             user_id: user_id.clone(),
         },
     )
-    .await?;
-    owe_removal(&mut tx, &user_id, &server_id).await?;
-    tx.commit().await?;
+    .await
+    .map_err(internal)?;
+    owe_removal(&mut tx, &user_id, &server_id)
+        .await
+        .map_err(internal)?;
+    tx.commit().await.map_err(internal)?;
     state.access.owed.notify_one();
     state.access.changed(&user_id);
     Ok(StatusCode::NO_CONTENT)
@@ -394,7 +407,8 @@ async fn server(
     id: &str,
 ) -> Result<server_rows::ServerRow, ApiError> {
     Ok(server_rows::get(&state.db, id)
-        .await?
+        .await
+        .map_err(internal)?
         .ok_or_else(|| ServerError::NotFound(id.into()))?)
 }
 
@@ -424,10 +438,11 @@ async fn member(
     .bind(server_id)
     .bind(user_id)
     .fetch_optional(db)
-    .await?
+    .await
+    .map_err(internal)?
     .ok_or_else(not_a_member)?;
     Ok(Member {
-        user: user(db, user_id).await?,
+        user: user(db, user_id).await.map_err(internal)?,
         role,
         added_at,
     })

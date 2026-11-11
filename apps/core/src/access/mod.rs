@@ -26,14 +26,11 @@ use axum::{
     extract::FromRequestParts,
     http::{HeaderMap, header::AUTHORIZATION, request::Parts},
 };
+use contracts::{ApiError, ErrorCode};
 use tokio::sync::{Notify, broadcast};
 
 use crate::{
-    api::{
-        AppState,
-        access::Role,
-        error::{ApiError, ErrorCode},
-    },
+    api::{AppState, access::Role, internal},
     db,
 };
 
@@ -220,7 +217,7 @@ impl Caller {
         server_id: &str,
         level: Level,
     ) -> Result<Level, ApiError> {
-        match self.level(db, server_id).await? {
+        match self.level(db, server_id).await.map_err(internal)? {
             None => Err(ApiError::new(
                 ErrorCode::NotFound,
                 format!("There is no server {server_id}."),
@@ -254,7 +251,7 @@ impl FromRequestParts<Arc<AppState>> for Caller {
             .and_then(|value| value.strip_prefix("Bearer "))
             .ok_or_else(|| {
                 ApiError::new(
-                    ErrorCode::Unauthorized,
+                    ErrorCode::InvalidCredentials,
                     "Sign in to this Core with a ticket first.",
                 )
             })?;
@@ -314,7 +311,7 @@ pub async fn fresh_ticket(
             )
         })?;
     let now = now();
-    let core_id = db::core_id(&state.db).await?;
+    let core_id = db::core_id(&state.db).await.map_err(internal)?;
     let claims =
         tickets::verify(&state.access.keys, ticket, &core_id, now).await?;
     if claims.sub != user_id {
@@ -323,6 +320,6 @@ pub async fn fresh_ticket(
             "The ticket is for someone else.",
         ));
     }
-    let mut conn = state.db.acquire().await?;
+    let mut conn = state.db.acquire().await.map_err(internal)?;
     tickets::spend(&mut conn, &claims, now).await
 }

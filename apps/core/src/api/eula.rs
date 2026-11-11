@@ -7,11 +7,12 @@
 use std::sync::Arc;
 
 use axum::{Json, extract::State};
+use contracts::ApiError;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use ts_rs::TS;
 
-use super::{AppState, activity::Action, error::ApiError};
+use super::{AppState, activity::Action, internal};
 use crate::access::{Caller, activity, now};
 
 /// Where the EULA is, to show before accepting it.
@@ -55,7 +56,7 @@ pub async fn get(
     caller.require_owner()?;
     Ok(Json(Eula {
         url: URL.into(),
-        accepted_at: accepted_at(&state.db).await?,
+        accepted_at: accepted_at(&state.db).await.map_err(internal)?,
     }))
 }
 
@@ -65,13 +66,13 @@ pub async fn post(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Eula>, ApiError> {
     caller.require_owner()?;
-    let before = accepted_at(&state.db).await?;
-    accept(&state.db).await?;
+    let before = accepted_at(&state.db).await.map_err(internal)?;
+    accept(&state.db).await.map_err(internal)?;
     if before.is_none() {
         activity::log(&state.db, &caller, None, Action::EulaAccepted).await;
     }
     Ok(Json(Eula {
         url: URL.into(),
-        accepted_at: accepted_at(&state.db).await?,
+        accepted_at: accepted_at(&state.db).await.map_err(internal)?,
     }))
 }

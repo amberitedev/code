@@ -1,3 +1,4 @@
+import type { ErrorCode } from '@amberite/contracts'
 import { describe, expect, it } from 'vite-plus/test'
 
 import { AuthFeature } from '../../../features/auth'
@@ -95,7 +96,7 @@ function header(headers: Record<string, string>, name: string) {
 	return Object.entries(headers).find(([key]) => key.toLowerCase() === name.toLowerCase())?.[1]
 }
 
-function coreError(error: string) {
+function coreError(error: ErrorCode) {
 	return new ModrinthApiError('HTTP 401', {
 		statusCode: 401,
 		responseData: { error, description: '' },
@@ -115,7 +116,7 @@ describe('copal access', () => {
 
 	it('signs in once and retries a Core request its session no longer works for', async () => {
 		const api = new FakeClient()
-		api.answers = [coreError('unauthorized'), { servers: [], users: {} }]
+		api.answers = [coreError('invalid_credentials'), { servers: [], users: {} }]
 		await api.archon.cores_v1.servers()
 		expect(api.signIns).toHaveLength(1)
 		expect(api.toCore().map((request) => request.url)).toEqual([
@@ -126,7 +127,7 @@ describe('copal access', () => {
 
 	it('gives up after one sign-in, and never signs in for a refused ticket', async () => {
 		const api = new FakeClient()
-		api.answers = [coreError('unauthorized'), coreError('unauthorized')]
+		api.answers = [coreError('invalid_credentials'), coreError('invalid_credentials')]
 		await expect(api.copal.access_v1.me(CORE.id)).rejects.toMatchObject({ statusCode: 401 })
 		expect(api.signIns).toHaveLength(1)
 

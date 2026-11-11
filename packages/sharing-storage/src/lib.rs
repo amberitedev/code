@@ -35,13 +35,8 @@ use std::{
     time::Duration,
 };
 
-use axum::{
-    Json,
-    http::StatusCode,
-    response::{IntoResponse, Response},
-};
 use color_eyre::eyre::{Result, WrapErr};
-use serde::{Deserialize, Serialize};
+use contracts::{ApiError, ErrorCode};
 use tracing::{info, warn};
 
 use keys::{JsonFile, Keys};
@@ -75,63 +70,13 @@ pub struct Args {
     pub allow_private_sources: bool,
 }
 
-/// An error code of the store, as `{ error, description }` like Core's.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Code {
-    TicketInvalid,
-    TicketExpired,
-    TicketWrongCore,
-    TicketWrongKind,
-    NotFound,
-    DiskFull,
-    EgressSpent,
-    RateLimited,
-    InvalidRequest,
-    Conflict,
-    Internal,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StoreError {
-    pub error: Code,
-    pub description: String,
-}
-
-impl StoreError {
-    pub fn new(error: Code, description: impl Into<String>) -> Self {
-        Self {
-            error,
-            description: description.into(),
-        }
-    }
-}
-
-impl IntoResponse for StoreError {
-    fn into_response(self) -> Response {
-        let status = match self.error {
-            Code::TicketInvalid
-            | Code::TicketExpired
-            | Code::TicketWrongCore
-            | Code::TicketWrongKind => StatusCode::UNAUTHORIZED,
-            Code::NotFound => StatusCode::NOT_FOUND,
-            Code::DiskFull => StatusCode::INSUFFICIENT_STORAGE,
-            Code::EgressSpent | Code::RateLimited => {
-                StatusCode::TOO_MANY_REQUESTS
-            }
-            Code::InvalidRequest => StatusCode::BAD_REQUEST,
-            Code::Conflict => StatusCode::CONFLICT,
-            Code::Internal => StatusCode::INTERNAL_SERVER_ERROR,
-        };
-        (status, Json(self)).into_response()
-    }
-}
-
-impl From<std::io::Error> for StoreError {
-    fn from(error: std::io::Error) -> Self {
-        warn!(%error, "the store failed");
-        Self::new(Code::Internal, "The store failed. Its log says why.")
-    }
+/// An I/O failure as the answer a caller sees; the cause goes to the log.
+pub(crate) fn io_error(error: std::io::Error) -> ApiError {
+    warn!(%error, "the store failed");
+    ApiError::new(
+        ErrorCode::InternalError,
+        "The store failed. Its log says why.",
+    )
 }
 
 fn now() -> i64 {
@@ -200,16 +145,18 @@ impl Store {
         root: &Hash,
         list: VersionList,
         max_bytes: Option<u64>,
-    ) -> Result<Vec<Hash>, StoreError> {
+    ) -> Result<Vec<Hash>, ApiError> {
         let invalid =
-            |description| StoreError::new(Code::InvalidRequest, description);
+            |description| ApiError::new(ErrorCode::InvalidInput, description);
         list.check(root).map_err(invalid)?;
         if max_bytes.is_some_and(|max| list.bytes() > max) {
             return Err(invalid(
                 "The version is larger than its ticket allows.",
             ));
         }
-        let missing = objects::missing(&self.layout, &list).await?;
+        let missing = objects::missing(&self.layout, &list)
+            .await
+            .map_err(io_error)?;
         let needed: u64 = list
             .objects
             .iter()
@@ -223,8 +170,8 @@ impl Store {
         let reserved = {
             let mut index = self.index();
             if index.used_with(Some(&list)) > cap {
-                return Err(StoreError::new(
-                    Code::DiskFull,
+                return Err(ApiError::new(
+                    ErrorCode::DiskFull,
                     "This Core's storage for shared files is full.",
                 ));
             }
@@ -240,11 +187,12 @@ impl Store {
             }
         };
         let free = sharing_client::disk::free(self.layout.root())
-            .inspect_err(|_| unreserve())?;
+            .inspect_err(|_| unreserve())
+            .map_err(io_error)?;
         if free < needed + contracts::limits::DISK_MARGIN_BYTES {
             unreserve();
-            return Err(StoreError::new(
-                Code::DiskFull,
+            return Err(ApiError::new(
+                ErrorCode::DiskFull,
                 "This Core's disk is full.",
             ));
         }
@@ -254,24 +202,27 @@ impl Store {
                 &serde_json::to_vec(list.as_ref()).expect("lists serialize"),
             )
             .await
-            .inspect_err(|_| unreserve())?;
+            .inspect_err(|_| unreserve())
+            .map_err(io_error)?;
         }
         Ok(missing)
     }
 
     /// Store `root`'s pending list once every object is present. Returns those still missing.
-    async fn finish(&self, root: &Hash) -> Result<Vec<Hash>, StoreError> {
+    async fn finish(&self, root: &Hash) -> Result<Vec<Hash>, ApiError> {
         let pending = self.index().pending.get(root).cloned();
         let Some((at, list)) = pending else {
             if self.is_stored(root) {
                 return Ok(Vec::new());
             }
-            return Err(StoreError::new(
-                Code::Conflict,
+            return Err(ApiError::new(
+                ErrorCode::Conflict,
                 "This upload was abandoned. Start it again.",
             ));
         };
-        let missing = objects::missing(&self.layout, &list).await?;
+        let missing = objects::missing(&self.layout, &list)
+            .await
+            .map_err(io_error)?;
         if !missing.is_empty() {
             return Ok(missing);
         }
@@ -279,7 +230,8 @@ impl Store {
             &self.layout.list(root, ListState::Stored),
             &serde_json::to_vec(list.as_ref()).expect("lists serialize"),
         )
-        .await?;
+        .await
+        .map_err(io_error)?;
         {
             let mut index = self.index();
             index.pending.remove(root);

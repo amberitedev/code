@@ -12,7 +12,6 @@ pub mod backend;
 pub mod backups;
 pub mod console;
 pub mod content;
-pub mod error;
 pub mod eula;
 pub mod events;
 pub mod export;
@@ -44,6 +43,7 @@ use axum::{
     routing::{any, delete, get, patch, post, put},
 };
 use color_eyre::eyre::{Result, eyre};
+use contracts::{ApiError, ErrorCode};
 use hyper_util::{
     rt::{TokioExecutor, TokioIo, TokioTimer},
     server::conn::auto::Builder,
@@ -52,6 +52,11 @@ use hyper_util::{
 use sqlx::SqlitePool;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tower_http::{timeout::TimeoutLayer, trace::TraceLayer};
+
+/// A failure on the Core's side, such as a database or disk error, described by its cause.
+pub fn internal(error: impl std::fmt::Display) -> ApiError {
+    ApiError::new(ErrorCode::InternalError, format!("{error:#}"))
+}
 
 /// The longest a request may take, except the routes that wait on a server.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);

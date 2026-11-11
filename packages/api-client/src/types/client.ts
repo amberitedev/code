@@ -1,3 +1,5 @@
+import type { ApiError } from '@amberite/contracts'
+
 import type { ContractTransport } from '../contracts/client'
 import type { AbstractFeature } from '../core/abstract-feature'
 import type { Copal } from '../modules/copal/types'
@@ -32,7 +34,7 @@ export type RequestHooks = {
  * Why the platform could not sign in to a Core: the error Core answered with, or `status` null
  * when it did not answer.
  */
-export type CoreCallError = { status: number | null; error: string; description: string }
+export type CoreCallError = ApiError & { status: number | null }
 
 /** See `ClientConfig.coreSessions`. Each call rejects with a `CoreCallError`. */
 export interface CoreSessions {

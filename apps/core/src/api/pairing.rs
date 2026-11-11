@@ -15,15 +15,12 @@ use std::{
 };
 
 use axum::{Json, extract::State, http::StatusCode};
+use contracts::{ApiError, ErrorCode};
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use ts_rs::TS;
 
-use super::{
-    AppState,
-    activity::Action,
-    error::{ApiError, ErrorCode},
-};
+use super::{AppState, activity::Action, internal};
 use crate::access::{Caller, Changed, Dangerous, activity, pairing, sync};
 
 /// How long `POST /pairing/code` waits for the new code.
@@ -40,11 +37,11 @@ pub struct PairingStatus {
 }
 
 async fn status(db: &SqlitePool) -> Result<PairingStatus, ApiError> {
-    let paired = pairing::paired(db).await?;
+    let paired = pairing::paired(db).await.map_err(internal)?;
     let shown = if paired {
         None
     } else {
-        pairing::shown(db).await?
+        pairing::shown(db).await.map_err(internal)?
     };
     Ok(PairingStatus {
         paired,
@@ -68,14 +65,17 @@ pub async fn new_code(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<PairingStatus>, ApiError> {
     caller.require_owner()?;
-    if pairing::paired(&state.db).await? {
+    if pairing::paired(&state.db).await.map_err(internal)? {
         return Err(ApiError::new(
             ErrorCode::Conflict,
             "This Core is already paired. To pair it with another account, remove it in Amberite under Settings, Cores, first.",
         ));
     }
-    let old = pairing::shown(&state.db).await?.map(|shown| shown.code);
-    pairing::drop_code(&state.db).await?;
+    let old = pairing::shown(&state.db)
+        .await
+        .map_err(internal)?
+        .map(|shown| shown.code);
+    pairing::drop_code(&state.db).await.map_err(internal)?;
     state.access.new_code.notify_one();
     let deadline = Instant::now() + NEW_CODE_WAIT;
     loop {
@@ -85,7 +85,7 @@ pub async fn new_code(
         }
         if Instant::now() > deadline {
             return Err(ApiError::new(
-                ErrorCode::Internal,
+                ErrorCode::InternalError,
                 "Core could not get a new code from Amberite yet. It keeps trying: run copal status in a minute. copal logs says why.",
             ));
         }
@@ -98,11 +98,12 @@ pub async fn remove(
     Dangerous(caller): Dangerous,
     State(state): State<Arc<AppState>>,
 ) -> Result<StatusCode, ApiError> {
-    let mut tx = state.db.begin().await?;
+    let mut tx = state.db.begin().await.map_err(internal)?;
     activity::record(&mut tx, caller.user_id(), None, &Action::CoreRemoved)
-        .await?;
-    sync::unpair(&mut tx).await?;
-    tx.commit().await?;
+        .await
+        .map_err(internal)?;
+    sync::unpair(&mut tx).await.map_err(internal)?;
+    tx.commit().await.map_err(internal)?;
     let _ = state.access.changed.send(Changed::Everyone);
     // Sync notices and pairs again.
     state.access.owed.notify_one();

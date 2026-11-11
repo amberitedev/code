@@ -19,6 +19,7 @@
 use std::{convert::Infallible, sync::Arc, sync::LazyLock};
 
 use bytes::Bytes;
+use contracts::{ApiError, ErrorCode};
 use http_body_util::{Either, Full};
 use hyper::{
     Method, Request, Response, StatusCode, Uri,
@@ -90,7 +91,7 @@ async fn handle(
     mut request: Request<Incoming>,
 ) -> Result<Reply, Infallible> {
     let Some(uri) = without_capability(request.uri(), &proxy.capability) else {
-        return Ok(error(StatusCode::NOT_FOUND, "not_found", "Not found."));
+        return Ok(error(ErrorCode::NotFound, "Not found."));
     };
     *request.uri_mut() = uri;
     let Some(origin) = request
@@ -100,8 +101,7 @@ async fn handle(
         .cloned()
     else {
         return Ok(error(
-            StatusCode::FORBIDDEN,
-            "forbidden",
+            ErrorCode::Forbidden,
             "Only the Amberite App can use this address.",
         ));
     };
@@ -109,8 +109,7 @@ async fn handle(
     // WebView. Here the answer would hand the WebView a raw token.
     if request.method() == Method::POST && request.uri().path() == "/sessions" {
         return Ok(error(
-            StatusCode::FORBIDDEN,
-            "forbidden",
+            ErrorCode::Forbidden,
             "Sign in to a Core through the App.",
         ));
     }
@@ -148,11 +147,7 @@ async fn handle(
     };
     let mut response = sent.unwrap_or_else(|problem| {
         tracing::debug!(%problem, "a Core did not answer");
-        error(
-            StatusCode::BAD_GATEWAY,
-            "unreachable",
-            "The Core did not answer.",
-        )
+        error(ErrorCode::NetworkError, "The Core did not answer.")
     });
     response
         .headers_mut()
@@ -290,13 +285,13 @@ async fn upgrade(
     Ok(response.map(Either::Left))
 }
 
-/// An answer in the shape of Core's own errors, so the App reads both the same way.
-fn error(status: StatusCode, code: &str, description: &str) -> Reply {
-    let body = serde_json::json!({ "error": code, "description": description });
+fn error(code: ErrorCode, description: &str) -> Reply {
+    let body = serde_json::to_string(&ApiError::new(code, description))
+        .expect("an error serializes");
     Response::builder()
-        .status(status)
+        .status(code.status())
         .header(CONTENT_TYPE, "application/json")
-        .body(Either::Right(Full::from(body.to_string())))
+        .body(Either::Right(Full::from(body)))
         .expect("a valid response")
 }
 

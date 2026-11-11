@@ -12,12 +12,12 @@ use axum::{
     Json,
     extract::{Path, State},
 };
+use contracts::ApiError;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use super::{
-    AppState,
-    error::ApiError,
+    AppState, internal,
     servers::{Reachability, ReachabilityState},
 };
 use crate::{
@@ -160,7 +160,7 @@ async fn insight(
     )
     .bind(id)
     .fetch_optional(&state.db)
-    .await?;
+    .await.map_err(internal)?;
     let live = state.servers.insight(id).unwrap_or_default();
     Ok(ServerInsight {
         players: live.players.into_iter().collect(),
@@ -211,7 +211,7 @@ pub async fn machine(
 ) -> Result<Json<Machine>, ApiError> {
     caller.require_owner()?;
     let memory_mb = memory::machine_mb();
-    let assigned_mb = memory::assigned_mb(&state.db).await?;
+    let assigned_mb = memory::assigned_mb(&state.db).await.map_err(internal)?;
     let warning = memory_mb
         .filter(|&machine| assigned_mb > machine as i64)
         .map(|machine| {

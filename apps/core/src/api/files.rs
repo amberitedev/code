@@ -26,6 +26,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use chrono::{DateTime, Utc};
+use contracts::{ApiError, ErrorCode};
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
@@ -35,7 +36,7 @@ use super::{
     activity::Action,
     backups::{DownloadQuery, DownloadToken, expired_link},
     content::{stage_field, world},
-    error::{ApiError, ErrorCode},
+    internal,
     servers::JwtAuth,
 };
 use crate::{
@@ -393,7 +394,9 @@ pub(super) fn folder(
     state: &AppState,
     id: &str,
 ) -> Result<Arc<Folder>, ApiError> {
-    Ok(Arc::new(Folder::open(&state.servers.paths().server(id))?))
+    Ok(Arc::new(
+        Folder::open(&state.servers.paths().server(id)).map_err(internal)?,
+    ))
 }
 
 /// The folder, taken for a change: the same lock installs hold, so an edit never lands between
@@ -409,14 +412,14 @@ pub(super) fn changing(
 /// A path the App sent, checked. `None` is the server folder itself.
 fn api_path(path: &str) -> Result<Option<String>, ApiError> {
     folder::from_api(path).map_err(|error| {
-        ApiError::new(ErrorCode::InvalidRequest, error.to_string())
+        ApiError::new(ErrorCode::InvalidInput, error.to_string())
     })
 }
 
 /// A path that must name something inside the folder, not the folder itself.
 fn inner_path(path: &str) -> Result<String, ApiError> {
     api_path(path)?.ok_or_else(|| {
-        ApiError::new(ErrorCode::InvalidRequest, "Name a file or folder.")
+        ApiError::new(ErrorCode::InvalidInput, "Name a file or folder.")
     })
 }
 
@@ -424,7 +427,7 @@ pub(super) async fn blocking<T: Send + 'static>(
     work: impl FnOnce() -> Result<T, ApiError> + Send + 'static,
 ) -> Result<T, ApiError> {
     tokio::task::spawn_blocking(work).await.map_err(|error| {
-        ApiError::new(ErrorCode::Internal, error.to_string())
+        ApiError::new(ErrorCode::InternalError, error.to_string())
     })?
 }
 
@@ -483,7 +486,7 @@ pub async fn list(
             .open_dir(path.as_deref())
             .map_err(|_| not_found(path.as_deref().unwrap_or("folder")))?;
         let mut items = Vec::new();
-        for entry in dir.entries()?.filter_map(Result::ok) {
+        for entry in dir.entries().map_err(internal)?.filter_map(Result::ok) {
             let Ok(name) = entry.file_name().into_string() else {
                 continue;
             };
@@ -608,7 +611,7 @@ async fn stream_file(
             Err(error) if error.kind() == std::io::ErrorKind::InvalidInput => {
                 return Err(not_found(&path));
             }
-            Err(error) => return Err(error.into()),
+            Err(error) => return Err(internal(error)),
         };
         Ok(file.into_std())
     })
@@ -642,15 +645,16 @@ async fn stage_body(
         .staging(id)
         .join(format!("body-{}", uuid::Uuid::new_v4()));
     let parent = staged.parent().unwrap_or(&staged);
-    tokio::fs::create_dir_all(parent).await?;
-    let room = archive::room(parent)?;
+    tokio::fs::create_dir_all(parent).await.map_err(internal)?;
+    let room = archive::room(parent).map_err(internal)?;
     let result = async {
-        let mut file = tokio::fs::File::create(&staged).await?;
+        let mut file =
+            tokio::fs::File::create(&staged).await.map_err(internal)?;
         let mut stream = body.into_data_stream();
         let mut written = 0u64;
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(|error| {
-                ApiError::new(ErrorCode::InvalidRequest, error.to_string())
+                ApiError::new(ErrorCode::InvalidInput, error.to_string())
             })?;
             written += chunk.len() as u64;
             if written > room {
@@ -661,9 +665,9 @@ async fn stage_body(
                 })
                 .into());
             }
-            file.write_all(&chunk).await?;
+            file.write_all(&chunk).await.map_err(internal)?;
         }
-        file.flush().await?;
+        file.flush().await.map_err(internal)?;
         Ok(())
     }
     .await;
@@ -683,7 +687,12 @@ async fn place(
     let result = locked(busy, {
         let staged = staged.clone();
         move || {
-            folder.write(&path, &mut std::fs::File::open(&staged)?)?;
+            folder
+                .write(
+                    &path,
+                    &mut std::fs::File::open(&staged).map_err(internal)?,
+                )
+                .map_err(internal)?;
             Ok(())
         }
     })
@@ -745,7 +754,10 @@ pub async fn create(
     match query.kind {
         CreateKind::Directory => {
             let (folder, busy) = changing(&state, &id)?;
-            locked(&busy, move || Ok(folder.create_dir_all(&path)?)).await?;
+            locked(&busy, move || {
+                Ok(folder.create_dir_all(&path).map_err(internal)?)
+            })
+            .await?;
         }
         CreateKind::File => {
             let staged = stage_body(&state, &id, body).await?;
@@ -794,7 +806,7 @@ pub async fn rename(
                 format!("{to} already exists."),
             ));
         }
-        Ok(folder.rename(&from, &to)?)
+        Ok(folder.rename(&from, &to).map_err(internal)?)
     })
     .await?;
     activity::log(&state.db, &caller, Some(&id), Action::ContentChanged).await;
@@ -821,7 +833,7 @@ pub async fn delete(
                 )
             })?;
         } else {
-            folder.remove(&path)?;
+            folder.remove(&path).map_err(internal)?;
         }
         Ok(())
     })
@@ -844,7 +856,8 @@ pub async fn unarchive(
     let source = inner_path(&query.src)?;
     let target = api_path(&query.trg)?;
     let (folder, busy) = changing(&state, &id)?;
-    let room = archive::room(&state.servers.paths().server(&id))?;
+    let room =
+        archive::room(&state.servers.paths().server(&id)).map_err(internal)?;
     let result = locked(&busy, move || {
         let file = folder
             .open_file(&source)
@@ -974,30 +987,34 @@ fn zip_tree(
     let options = zip::write::SimpleFileOptions::default()
         .compression_method(zip::CompressionMethod::Deflated)
         .large_file(true);
-    for entry in dir.entries()?.filter_map(Result::ok) {
+    for entry in dir.entries().map_err(internal)?.filter_map(Result::ok) {
         let Ok(name) = entry.file_name().into_string() else {
             continue;
         };
-        let kind = entry.file_type()?;
+        let kind = entry.file_type().map_err(internal)?;
         let path = format!("{prefix}{name}");
         if kind.is_dir() {
             zip.add_directory(format!("{path}/"), options)
                 .map_err(zip_error)?;
             zip_tree(
                 zip,
-                &folder::open_child(dir, &name, &path)?,
+                &folder::open_child(dir, &name, &path).map_err(internal)?,
                 &format!("{path}/"),
             )?;
         } else if kind.is_file() {
             zip.start_file(&path, options).map_err(zip_error)?;
-            std::io::copy(&mut folder::open_plain(dir, &name, &path)?, zip)?;
+            std::io::copy(
+                &mut folder::open_plain(dir, &name, &path).map_err(internal)?,
+                zip,
+            )
+            .map_err(internal)?;
         }
     }
     Ok(())
 }
 
 fn zip_error(error: zip::result::ZipError) -> ApiError {
-    ApiError::new(ErrorCode::Internal, error.to_string())
+    ApiError::new(ErrorCode::InternalError, error.to_string())
 }
 
 /// `POST v1/worlds/{wid}/files/zip`: zip a folder into `<folder>.zip`, or paths inside `parent`
@@ -1030,7 +1047,7 @@ pub async fn zip(
                 .map(|name| folder::clean(name.trim_matches('/')))
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|error| {
-                    ApiError::new(ErrorCode::InvalidRequest, error.to_string())
+                    ApiError::new(ErrorCode::InvalidInput, error.to_string())
                 })?;
             (api_path(&parent)?, include, inner_path(&target)?)
         }
@@ -1042,12 +1059,16 @@ pub async fn zip(
         .paths()
         .staging(&id)
         .join(format!("zip-{}", uuid::Uuid::new_v4()));
-    tokio::fs::create_dir_all(staged.parent().expect("inside staging")).await?;
+    tokio::fs::create_dir_all(staged.parent().expect("inside staging"))
+        .await
+        .map_err(internal)?;
     let result = locked(&busy, {
         let staged = staged.clone();
         let folder = Arc::clone(&folder);
         move || {
-            let mut zip = zip::ZipWriter::new(std::fs::File::create(&staged)?);
+            let mut zip = zip::ZipWriter::new(
+                std::fs::File::create(&staged).map_err(internal)?,
+            );
             for name in &include {
                 let path = match &parent {
                     Some(parent) => format!("{parent}/{name}"),
@@ -1063,7 +1084,7 @@ pub async fn zip(
                     .map_err(zip_error)?;
                     zip_tree(
                         &mut zip,
-                        &folder.open_dir(Some(&path))?,
+                        &folder.open_dir(Some(&path)).map_err(internal)?,
                         &format!("{name}/"),
                     )?;
                 } else if meta.is_file() {
@@ -1074,13 +1095,19 @@ pub async fn zip(
                     )
                     .map_err(zip_error)?;
                     let mut file = folder
-                        .open_file(&path)?
+                        .open_file(&path)
+                        .map_err(internal)?
                         .ok_or_else(|| not_found(name))?;
-                    std::io::copy(&mut file, &mut zip)?;
+                    std::io::copy(&mut file, &mut zip).map_err(internal)?;
                 }
             }
             zip.finish().map_err(zip_error)?;
-            folder.write(&target, &mut std::fs::File::open(&staged)?)?;
+            folder
+                .write(
+                    &target,
+                    &mut std::fs::File::open(&staged).map_err(internal)?,
+                )
+                .map_err(internal)?;
             Ok(())
         }
     })
@@ -1212,7 +1239,7 @@ pub async fn upload_files(
     let result = async {
         while let Some(mut field) =
             form.next_field().await.map_err(|error| {
-                ApiError::new(ErrorCode::InvalidRequest, error.body_text())
+                ApiError::new(ErrorCode::InvalidInput, error.body_text())
             })?
         {
             let Some(name) = field.file_name().map(str::to_owned) else {
@@ -1226,7 +1253,7 @@ pub async fn upload_files(
                 UploadScope::Content => {
                     folder::clean(&name).map_err(|error| {
                         ApiError::new(
-                            ErrorCode::InvalidRequest,
+                            ErrorCode::InvalidInput,
                             error.to_string(),
                         )
                     })?;
@@ -1234,7 +1261,8 @@ pub async fn upload_files(
             }
             let staged = dir.join(uuid::Uuid::new_v4().to_string());
             stage_field(&mut field, &staged).await?;
-            let size = tokio::fs::metadata(&staged).await?.len();
+            let size =
+                tokio::fs::metadata(&staged).await.map_err(internal)?.len();
             added.push((name, staged, size));
         }
         Ok::<_, ApiError>(())

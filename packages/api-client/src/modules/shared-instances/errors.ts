@@ -1,3 +1,5 @@
+import type { ErrorCode } from '@amberite/contracts'
+
 import { ModrinthApiError } from '../../core/errors'
 import { isModrinthErrorResponse } from '../../types/errors'
 
@@ -8,8 +10,7 @@ import { isModrinthErrorResponse } from '../../types/errors'
  */
 export class SharedInstancesApiError extends ModrinthApiError {
 	readonly status: number
-	/** The backend's exact cause (`code`) when it sends one, otherwise its broad kind (`error`). */
-	readonly code: string | null
+	readonly code: ErrorCode | null
 
 	constructor(error: ModrinthApiError & { statusCode: number }) {
 		super(error.message, {
@@ -21,8 +22,7 @@ export class SharedInstancesApiError extends ModrinthApiError {
 		this.name = 'SharedInstancesApiError'
 		this.status = error.statusCode
 		const body = error.responseData
-		if (!isModrinthErrorResponse(body)) this.code = null
-		else this.code = 'code' in body && typeof body.code === 'string' ? body.code : body.error
+		this.code = isModrinthErrorResponse(body) ? (body.error as ErrorCode) : null
 	}
 
 	/** Errors without a response, such as a failed connection, are returned unchanged. */

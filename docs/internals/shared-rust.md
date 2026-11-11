@@ -31,8 +31,8 @@ what `blocked` means, and the listing of pickable files), `push` (reading an own
 version, the version builder and the writer), `pool` (the store client and the fetch), `install`
 (the member install plan: a version's files at each side's paths, less its modpack, with the
 configs an update writes, keeps or deletes; each side applies it with its own writer), `diff` (the
-share diff both sides show), `crypto`, `net` (a Core's address, TLS pinned to its certificate,
-public IPs and the error body) and `disk` (free space).
+share diff both sides show), `crypto`, `net` (a Core's address, TLS pinned to its certificate and
+public IPs) and `disk` (free space).
 
 New and restructured Rust follows the engine's layout: `api/` for entry points, `state/<domain>/`
 with `model/` (plain types), `adapters/` (sqlite rows, filesystem, network), `commands/` (one

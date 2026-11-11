@@ -17,6 +17,7 @@ mod tls;
 use std::{collections::HashMap, sync::Arc};
 
 use bytes::Bytes;
+use contracts::{ApiError, ErrorCode};
 use http_body_util::Full;
 use hyper::{
     Method, Request, StatusCode,
@@ -24,7 +25,6 @@ use hyper::{
 };
 use serde::Serialize;
 use serde_json::{Value, json};
-use sharing_client::net::ErrorBody;
 use tauri::{Manager, State, plugin::TauriPlugin};
 use tokio::{net::TcpListener, sync::Mutex};
 
@@ -65,37 +65,36 @@ struct Tunnel {
 #[derive(Default)]
 struct Tunnels(Mutex<HashMap<Tunnel, (String, Arc<Proxy>)>>);
 
-/// Why a call to a Core failed: its status and the error code and description it answered with,
-/// in Core's own error shape. `status` is null when the Core did not answer.
+/// Why a call to a Core failed: its status and the error it answered with. `status` is null when
+/// the Core did not answer.
 #[derive(Debug, Serialize)]
 struct CoreError {
     status: Option<u16>,
-    error: String,
-    description: String,
+    #[serde(flatten)]
+    error: ApiError,
 }
 
 impl CoreError {
-    fn unreachable(problem: impl std::fmt::Display) -> Self {
+    fn local(error: ErrorCode, description: impl Into<String>) -> Self {
         Self {
             status: None,
-            error: "unreachable".into(),
-            description: format!("The Core did not answer: {problem}"),
+            error: ApiError::new(error, description),
         }
     }
 
+    fn unreachable(problem: impl std::fmt::Display) -> Self {
+        Self::local(
+            ErrorCode::NetworkError,
+            format!("The Core did not answer: {problem}"),
+        )
+    }
+
     fn answered(status: StatusCode, body: &[u8]) -> Self {
-        let body = ErrorBody::parse(body).unwrap_or_default();
-        let or = |field: String, fallback: &str| {
-            if field.is_empty() {
-                fallback.to_owned()
-            } else {
-                field
-            }
-        };
         Self {
             status: Some(status.as_u16()),
-            error: or(body.error, "internal"),
-            description: or(body.description, "The Core refused."),
+            error: serde_json::from_slice(body).unwrap_or_else(|_| {
+                ApiError::new(ErrorCode::InternalError, "The Core refused.")
+            }),
         }
     }
 }
@@ -151,12 +150,9 @@ async fn core_sign_in(
     ticket: String,
     sessions: State<'_, Arc<Sessions>>,
 ) -> Result<Value, CoreError> {
-    let target =
-        Target::new(&address, &fingerprint).map_err(|problem| CoreError {
-            status: None,
-            error: "invalid_request".into(),
-            description: problem,
-        })?;
+    let target = Target::new(&address, &fingerprint).map_err(|problem| {
+        CoreError::local(ErrorCode::InvalidInput, problem)
+    })?;
     let body = json!({ "ticket": ticket, "device_name": device_name() });
     let request = Request::builder()
         .method(Method::POST)
@@ -180,12 +176,10 @@ async fn core_sign_in(
     // as after an account switch mid sign-in, is ended and never kept.
     if signed["session"]["user"]["id"].as_str() != Some(account.as_str()) {
         end_session(&target, &token).await;
-        return Err(CoreError {
-            status: None,
-            error: "invalid_request".into(),
-            description: "The account changed while signing in. Try again."
-                .into(),
-        });
+        return Err(CoreError::local(
+            ErrorCode::InvalidInput,
+            "The account changed while signing in. Try again.",
+        ));
     }
     sessions.store(&Key { account, core_id }, token).await;
     Ok(signed["session"].take())

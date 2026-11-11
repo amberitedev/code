@@ -98,8 +98,7 @@ type Manifest = {
 }
 const empty = () => new Response(null, { status: 204 })
 const now = () => new Date().toISOString()
-const quarantined = () =>
-	new ApiError(403, 'forbidden', 'Shared instance is quarantined', 'quarantined')
+const quarantined = () => new ApiError(403, 'quarantined', 'Shared instance is quarantined')
 
 function string(value: unknown, field: string, max = 256): string {
 	if (typeof value !== 'string' || value.length > max || !value.trim())
@@ -198,8 +197,7 @@ async function instance(env: Env, id: string): Promise<Instance> {
 	const result = await env.DB.prepare('SELECT * FROM shared_instances WHERE id = ?')
 		.bind(id)
 		.first<Instance>()
-	if (!result)
-		throw new ApiError(404, 'not_found', 'Shared instance was not found', 'instance_not_found')
+	if (!result) throw new ApiError(404, 'instance_not_found', 'Shared instance was not found')
 	return result
 }
 
@@ -288,32 +286,25 @@ async function member(
 	)
 		.bind(item.id, userId, allowPending ? 1 : 0)
 		.first<{ reads: number }>()
-	if (!row?.reads)
-		throw new ApiError(401, 'unauthorized', 'Shared instance access was revoked', 'not_member')
+	if (!row?.reads) throw new ApiError(401, 'not_member', 'Shared instance access was revoked')
 }
 
 function owner(item: Instance, userId: string) {
 	if (item.owner_id !== userId)
-		throw new ApiError(
-			403,
-			'forbidden',
-			'Only the owner can change this shared instance',
-			'not_owner',
-		)
+		throw new ApiError(403, 'not_owner', 'Only the owner can change this shared instance')
 }
 
 async function requireSharing(env: Env, userId: string): Promise<void> {
 	if (
 		await env.DB.prepare('SELECT 1 FROM sharing_blacklist WHERE user_id = ?').bind(userId).first()
 	)
-		throw new ApiError(403, 'forbidden', 'This account cannot use sharing', 'blacklisted')
+		throw new ApiError(403, 'blacklisted', 'This account cannot use sharing')
 }
 
 /** The manifest of a version, read from R2 as text so the Worker never parses it. */
 async function manifestText(env: Env, item: Pick<Version, 'instance_id' | 'version'>) {
 	const object = await env.FILES.get(manifestKey(item.instance_id, item.version))
-	if (!object)
-		throw new ApiError(404, 'not_found', 'Shared version was not found', 'version_not_found')
+	if (!object) throw new ApiError(404, 'version_not_found', 'Shared version was not found')
 	return object.text()
 }
 
@@ -356,8 +347,7 @@ async function latestVersion(env: Env, id: string): Promise<Version> {
 	)
 		.bind(id)
 		.first<Version>()
-	if (!result)
-		throw new ApiError(404, 'not_found', 'Shared instance has no version', 'version_not_found')
+	if (!result) throw new ApiError(404, 'version_not_found', 'Shared instance has no version')
 	return result
 }
 
@@ -534,9 +524,8 @@ async function createVersion(
 	if (body.external_files.length > MAX_VERSION_FILES)
 		throw new ApiError(
 			413,
-			'invalid_input',
-			`A shared instance can hold at most ${MAX_VERSION_FILES} files`,
 			'too_many_files',
+			`A shared instance can hold at most ${MAX_VERSION_FILES} files`,
 		)
 	const seen = new Set<string>()
 	const external = body.external_files.map((value) => {
@@ -566,12 +555,7 @@ async function createVersion(
 		throw new ApiError(400, 'invalid_input', 'root does not match the files')
 	const bytes = versionBytes(external)
 	if (bytes > MAX_SHARE_BYTES)
-		throw new ApiError(
-			413,
-			'invalid_input',
-			'A shared instance can hold at most 1 GB of files',
-			'share_too_large',
-		)
+		throw new ApiError(413, 'share_too_large', 'A shared instance can hold at most 1 GB of files')
 	const serverCore =
 		core ??
 		(body.server_core === undefined || body.server_core === null
@@ -594,9 +578,8 @@ async function createVersion(
 		if (fresh)
 			throw new ApiError(
 				409,
-				'conflict',
-				'Another push of this instance is still uploading. Try again when it finishes.',
 				'push_in_flight',
+				'Another push of this instance is still uploading. Try again when it finishes.',
 			)
 		await env.DB.prepare(
 			'DELETE FROM shared_instance_versions WHERE instance_id = ? AND version = ?',
@@ -625,7 +608,6 @@ async function createVersion(
 				503,
 				'no_storage',
 				'No storage is available for shared files right now. Try again later.',
-				'no_storage',
 			)
 		const ready = (
 			await env.DB.prepare(
@@ -656,9 +638,8 @@ async function createVersion(
 			if (others + shareUsage(kept === null ? after : after.slice(-kept)) > ALLOWANCE_BYTES)
 				throw new ApiError(
 					413,
-					'invalid_input',
-					`This push needs more than your ${ALLOWANCE_BYTES / 1024 ** 3} GB of shared storage. Delete old versions to free space.`,
 					'storage_quota',
+					`This push needs more than your ${ALLOWANCE_BYTES / 1024 ** 3} GB of shared storage. Delete old versions to free space.`,
 				)
 		}
 		if (placement.home !== item.home || placement.replica !== item.replica) {
@@ -688,9 +669,8 @@ async function createVersion(
 	if (!version)
 		throw new ApiError(
 			409,
-			'conflict',
-			'Another push of this instance is still uploading. Try again when it finishes.',
 			'push_in_flight',
+			'Another push of this instance is still uploading. Try again when it finishes.',
 		)
 	try {
 		await env.FILES.put(manifestKey(item.id, version.version), JSON.stringify(manifest))
@@ -757,9 +737,8 @@ async function deleteVersion(
 	if (!version.ready || current.version === version.version)
 		throw new ApiError(
 			409,
-			'conflict',
-			version.ready ? 'The current version cannot be deleted.' : 'This version is still uploading.',
 			'current_version',
+			version.ready ? 'The current version cannot be deleted.' : 'This version is still uploading.',
 		)
 	const neighbour = (direction: '<' | '>') =>
 		env.DB.prepare(
@@ -845,7 +824,7 @@ async function usableLink(env: Env, id: string): Promise<Link> {
 	)
 		.bind(id, now())
 		.first<Link>()
-	if (!link) throw new ApiError(404, 'not_found', 'Invite is invalid or expired', 'invite_invalid')
+	if (!link) throw new ApiError(404, 'invite_invalid', 'Invite is invalid or expired')
 	return link
 }
 
@@ -873,8 +852,7 @@ async function previewInvite(env: Env, id: string, withVersion: boolean): Promis
 				.bind(link.core_id, link.server_id)
 				.first<{ name: string; owner_id: string }>()
 		: null
-	if (link.server_id && !server)
-		throw new ApiError(404, 'not_found', 'Invite was not found', 'invite_invalid')
+	if (link.server_id && !server) throw new ApiError(404, 'invite_invalid', 'Invite was not found')
 	const manager = await env.DB.prepare('SELECT id,username,avatar_url FROM users WHERE id = ?')
 		.bind(server?.owner_id ?? item.owner_id)
 		.first<{ id: string; username: string; avatar_url: string | null }>()
@@ -934,7 +912,7 @@ async function invites(
 				).bind(now(), item.id, userId),
 			])
 			if (!members?.meta.changes && !players?.meta.changes)
-				throw new ApiError(404, 'not_found', 'Pending invite was not found', 'invite_not_found')
+				throw new ApiError(404, 'invite_not_found', 'Pending invite was not found')
 			await installedOnce(env, item, userId)
 			await notifyMembers(env, item.id, 'shared_instance_users', userId)
 			return empty()
@@ -972,7 +950,7 @@ async function invites(
 		if (joined?.joined_at) return empty()
 		const usable = await usableLink(env, inviteId)
 		if (usable.instance_id !== item.id)
-			throw new ApiError(404, 'not_found', 'Invite was not found', 'invite_invalid')
+			throw new ApiError(404, 'invite_invalid', 'Invite was not found')
 		await env.DB.batch([
 			usable.server_id
 				? env.DB.prepare(
@@ -1042,12 +1020,7 @@ async function users(
 	if (request.method === 'GET') {
 		// Players get the content, not the list of who the instance is shared with.
 		if (!(await joinedMember(env, item, userId)))
-			throw new ApiError(
-				403,
-				'forbidden',
-				'Only members see who an instance is shared with',
-				'members_only',
-			)
+			throw new ApiError(403, 'members_only', 'Only members see who an instance is shared with')
 		const rows = (
 			await env.DB.prepare(
 				'SELECT user_id AS id,joined_at,join_type,last_played FROM shared_instance_users WHERE instance_id = ?',
@@ -1140,9 +1113,8 @@ async function followShare(
 	if ((item.core_id !== null && !own) || !joined)
 		throw new ApiError(
 			403,
-			'forbidden',
-			'A server can only follow your own share or one you joined',
 			'not_member',
+			'A server can only follow your own share or one you joined',
 		)
 	if (item.quarantine) throw quarantined()
 	const server: SharedServer = {
@@ -1232,7 +1204,7 @@ async function serverPlayers(
 	const core = await env.DB.prepare('SELECT owner_id FROM cores WHERE id = ?')
 		.bind(coreId)
 		.first<{ owner_id: string }>()
-	if (!core) throw new ApiError(404, 'not_found', 'Core was not found', 'core_not_found')
+	if (!core) throw new ApiError(404, 'core_not_found', 'Core was not found')
 	const server = await env.DB.prepare(
 		'SELECT * FROM hosted_servers WHERE core_id = ? AND server_id = ?',
 	)
@@ -1240,8 +1212,7 @@ async function serverPlayers(
 		.first<SharedServer>()
 	const coreOwner = core.owner_id === userId
 	const shareOwner = server ? (await instance(env, server.instance_id)).owner_id === userId : false
-	const refused = () =>
-		new ApiError(403, 'forbidden', "Only the server's owner can share it", 'not_owner')
+	const refused = () => new ApiError(403, 'not_owner', "Only the server's owner can share it")
 	const links =
 		'FROM shared_instance_invites WHERE core_id = ? AND server_id = ? AND expiration > ?'
 
@@ -1396,7 +1367,7 @@ async function coreSharing(
 ): Promise<Response> {
 	const core = await requireListedCore(request, env)
 	const refused = () =>
-		new ApiError(403, 'forbidden', 'A Core reaches only the shares of its own servers', 'not_owner')
+		new ApiError(403, 'not_owner', 'A Core reaches only the shares of its own servers')
 	if (route !== 'instances') throw refused()
 	// An owner may always delete their share, locked or not.
 	if (!(id && !section && request.method === 'DELETE')) {
@@ -1433,12 +1404,7 @@ async function coreSharing(
 		const ticket = request.headers.get('X-Amberite-Read-Ticket')
 		const reader = ticket ? await readTicketUser(env, ticket, core.id, id) : core.owner_id
 		if (!reader)
-			throw new ApiError(
-				403,
-				'forbidden',
-				'The read ticket is not for this Core and share',
-				'ticket_invalid',
-			)
+			throw new ApiError(403, 'ticket_invalid', 'The read ticket is not for this Core and share')
 		await requireUnlocked(env, reader)
 		await requireSharing(env, reader)
 		await member(env, item, reader)
@@ -1468,8 +1434,7 @@ async function coreSharing(
 				.bind(id, Number(child))
 				.first<Version>()
 		: await latestVersion(env, id)
-	if (!version)
-		throw new ApiError(404, 'not_found', 'Shared version was not found', 'version_not_found')
+	if (!version) throw new ApiError(404, 'version_not_found', 'Shared version was not found')
 	return versionResponse(env, item, version, null)
 }
 
@@ -1489,7 +1454,7 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 	// `/v1/icons/{share}/{upload}`, read from R2 without touching D1.
 	if (route === 'icons' && id && section && !child && request.method === 'GET') {
 		const object = await env.FILES.get(iconKey(id, section))
-		if (!object) throw new ApiError(404, 'not_found', 'Icon was not found', 'icon_not_found')
+		if (!object) throw new ApiError(404, 'icon_not_found', 'Icon was not found')
 		return new Response(object.body, {
 			headers: {
 				'Content-Type': object.httpMetadata?.contentType ?? 'image/png',
@@ -1510,7 +1475,7 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 	}
 	if (route === 'moderation') {
 		if (user.role !== 'admin' && user.role !== 'moderator')
-			throw new ApiError(403, 'forbidden', 'Moderator access is required', 'not_moderator')
+			throw new ApiError(403, 'not_moderator', 'Moderator access is required')
 		if (id === 'blacklist' && ['POST', 'DELETE'].includes(request.method)) {
 			const ids = strings((await readJson(request)).user_ids, 'user_ids', 100)
 			if (ids.length)
@@ -1547,18 +1512,13 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 		return serverPlayers(request, env, user.id, id, section, child, parts[5])
 	}
 	if (route !== 'instances')
-		throw new ApiError(404, 'not_found', 'Sharing endpoint was not found', 'endpoint_not_found')
+		throw new ApiError(404, 'endpoint_not_found', 'Sharing endpoint was not found')
 	// An owner may always delete their share; `owner` below still checks it is theirs.
 	if (!(id && !section && request.method === 'DELETE')) await requireSharing(env, user.id)
 	if (!id) {
 		if (request.method === 'GET') {
 			if (url.searchParams.has('user') && url.searchParams.get('user') !== user.id)
-				throw new ApiError(
-					403,
-					'forbidden',
-					'Private instance lists belong to their account',
-					'not_own_list',
-				)
+				throw new ApiError(403, 'not_own_list', 'Private instance lists belong to their account')
 			// The caller's own shares, and with `include_joined` every share they can play too.
 			const query =
 				url.searchParams.get('include_joined') === 'true'
@@ -1621,7 +1581,7 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 	// The backend keeps no server icons yet, so the server a player came through has none. The App
 	// reads 404 as no icon.
 	if (section === 'server-icon' && !child && request.method === 'GET')
-		throw new ApiError(404, 'not_found', 'Shared instance has no server icon', 'icon_not_found')
+		throw new ApiError(404, 'icon_not_found', 'Shared instance has no server icon')
 	// A ticket for one Core to read this share for the user, so a server they manage can follow
 	// it. The Core sends it with its reads, and the backend checks the user can still read then.
 	if (section === 'server-ticket' && !child && request.method === 'POST') {
@@ -1647,7 +1607,7 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 			: await latestVersion(env, id)
 		// Members only see versions once they are ready; the App reads the 404 as "never ready".
 		if (!version || (child && !version.ready && item.owner_id !== user.id))
-			throw new ApiError(404, 'not_found', 'Shared version was not found', 'version_not_found')
+			throw new ApiError(404, 'version_not_found', 'Shared version was not found')
 		if (request.method === 'GET' && parts.length <= 5)
 			return versionResponse(env, item, version, user.id)
 		if (request.method === 'DELETE' && child && parts.length === 5)

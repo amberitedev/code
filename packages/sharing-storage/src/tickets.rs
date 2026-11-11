@@ -5,10 +5,10 @@
 //! - `fetch`: read `root`. `aud` lists the Cores holding it.
 //! - `pull`: copy `root` from `source`, with the fetch ticket inside. `aud` is this Core.
 
+use contracts::{ApiError, ErrorCode};
 use serde::Deserialize;
 
 use crate::{
-    Code, StoreError,
     keys::{ISSUER, JsonFile, Keys, LEEWAY_S},
     objects::Hash,
 };
@@ -89,8 +89,8 @@ impl Audience {
     }
 }
 
-fn invalid(description: &str) -> StoreError {
-    StoreError::new(Code::TicketInvalid, description)
+fn invalid(description: &str) -> ApiError {
+    ApiError::new(ErrorCode::TicketInvalid, description)
 }
 
 /// The claims of `ticket`, required to be of `kind`, for this Core, for `root`, and current at
@@ -102,7 +102,7 @@ pub async fn verify(
     kind: &'static str,
     root: &Hash,
     now: i64,
-) -> Result<Claims, StoreError> {
+) -> Result<Claims, ApiError> {
     let value = keys.verify(ticket).await.map_err(invalid)?;
     let common: Common = serde_json::from_value(value.clone())
         .map_err(|_| invalid("The ticket's claims are unreadable."))?;
@@ -110,14 +110,14 @@ pub async fn verify(
         return Err(invalid("The ticket is from another issuer."));
     }
     if common.kind != kind {
-        return Err(StoreError::new(
-            Code::TicketWrongKind,
+        return Err(ApiError::new(
+            ErrorCode::TicketWrongKind,
             format!("This needs a {kind} ticket."),
         ));
     }
     if !common.aud.contains(core_id) {
-        return Err(StoreError::new(
-            Code::TicketWrongCore,
+        return Err(ApiError::new(
+            ErrorCode::TicketWrongCore,
             "The ticket is for another Core.",
         ));
     }
@@ -127,8 +127,8 @@ pub async fn verify(
         ));
     }
     if now > common.exp + LEEWAY_S {
-        return Err(StoreError::new(
-            Code::TicketExpired,
+        return Err(ApiError::new(
+            ErrorCode::TicketExpired,
             "The ticket expired. Get a new one.",
         ));
     }
@@ -215,7 +215,7 @@ mod tests {
         ticket: &str,
         kind: &'static str,
         now: i64,
-    ) -> Code {
+    ) -> ErrorCode {
         verify(keys, ticket, "core", kind, &root(), now)
             .await
             .unwrap_err()
@@ -241,7 +241,7 @@ mod tests {
         assert_eq!(claims.bytes, Some(10));
         assert_eq!(
             code(&keys, &store, FETCH, NOW).await,
-            Code::TicketWrongKind
+            ErrorCode::TicketWrongKind
         );
         let fetch = ticket(
             &signer,
@@ -258,7 +258,7 @@ mod tests {
         );
         assert_eq!(
             code(&keys, &fetch, STORE, NOW).await,
-            Code::TicketWrongKind
+            ErrorCode::TicketWrongKind
         );
         let session = signer.sign(&json!({
             "iss": ISSUER, "kind": "session", "sub": "u", "aud": "core",
@@ -266,7 +266,7 @@ mod tests {
         }));
         assert_eq!(
             code(&keys, &session, FETCH, NOW).await,
-            Code::TicketWrongKind
+            ErrorCode::TicketWrongKind
         );
     }
 
@@ -279,7 +279,7 @@ mod tests {
             ticket(&signer, FETCH, json!(["other"]), &root, NOW, json!({}));
         assert_eq!(
             code(&keys, &other_core, FETCH, NOW).await,
-            Code::TicketWrongCore
+            ErrorCode::TicketWrongCore
         );
         let other_root = ticket(
             &signer,
@@ -291,7 +291,7 @@ mod tests {
         );
         assert_eq!(
             code(&keys, &other_root, FETCH, NOW).await,
-            Code::TicketInvalid
+            ErrorCode::TicketInvalid
         );
         let fetch =
             ticket(&signer, FETCH, json!("core"), &root, NOW, json!({}));
@@ -309,17 +309,17 @@ mod tests {
         );
         assert_eq!(
             code(&keys, &fetch, FETCH, NOW + 3661).await,
-            Code::TicketExpired
+            ErrorCode::TicketExpired
         );
         assert_eq!(
             code(&keys, &fetch, FETCH, NOW - 61).await,
-            Code::TicketInvalid
+            ErrorCode::TicketInvalid
         );
         let no_bytes =
             ticket(&signer, STORE, json!("core"), &root, NOW, json!({}));
         assert_eq!(
             code(&keys, &no_bytes, STORE, NOW).await,
-            Code::TicketInvalid
+            ErrorCode::TicketInvalid
         );
         let no_source_ticket = ticket(
             &signer,
@@ -331,12 +331,15 @@ mod tests {
         );
         assert_eq!(
             code(&keys, &no_source_ticket, PULL, NOW).await,
-            Code::TicketInvalid
+            ErrorCode::TicketInvalid
         );
         let stranger = Signer::new("k1");
         let forged =
             ticket(&stranger, FETCH, json!("core"), &root, NOW, json!({}));
-        assert_eq!(code(&keys, &forged, FETCH, NOW).await, Code::TicketInvalid);
+        assert_eq!(
+            code(&keys, &forged, FETCH, NOW).await,
+            ErrorCode::TicketInvalid
+        );
     }
 
     #[test]

@@ -18,16 +18,12 @@ use axum::{
     http::{HeaderMap, StatusCode, header::HOST},
 };
 use chrono::{DateTime, Utc};
+use contracts::{ApiError, ErrorCode};
 use modrinth_content_management::VersionType;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{
-    AppState,
-    activity::Action,
-    content::LinkedPackState,
-    error::{ApiError, ErrorCode},
-};
+use super::{AppState, activity::Action, content::LinkedPackState, internal};
 use crate::{
     access::{Caller, Dangerous, Level, activity},
     installs::ModLoader,
@@ -434,16 +430,10 @@ impl From<ServerError> for ApiError {
             | ServerError::NotReady(_)
             | ServerError::Shim(_) => ErrorCode::Conflict,
             ServerError::StartFailed(_) | ServerError::Other(_) => {
-                ErrorCode::Internal
+                ErrorCode::InternalError
             }
         };
         Self::new(code, format!("{error:#}"))
-    }
-}
-
-impl From<sqlx::Error> for ApiError {
-    fn from(error: sqlx::Error) -> Self {
-        ServerError::from(error).into()
     }
 }
 
@@ -535,12 +525,14 @@ async fn server(
     level: Level,
     host: &str,
 ) -> Result<Server, ApiError> {
-    let power_state =
-        power_state(state, &row.id, state.servers.phase(&row.id)).await?;
+    let power_state = power_state(state, &row.id, state.servers.phase(&row.id))
+        .await
+        .map_err(internal)?;
     let owner_id: Option<String> =
         sqlx::query_scalar("SELECT owner_user_id FROM core WHERE id = 1")
             .fetch_optional(&state.db)
-            .await?
+            .await
+            .map_err(internal)?
             .flatten();
     let net = net(state, &row);
     Ok(Server {
@@ -591,7 +583,10 @@ async fn linked_instance(
     state: &AppState,
     id: &str,
 ) -> Result<Option<LinkedInstance>, ApiError> {
-    let Some(pack) = content_rows::get_pack(&state.db, id).await? else {
+    let Some(pack) = content_rows::get_pack(&state.db, id)
+        .await
+        .map_err(internal)?
+    else {
         return Ok(None);
     };
     let Some(linked) = pack.share.clone() else {
@@ -628,8 +623,10 @@ pub async fn list(
     headers: HeaderMap,
 ) -> Result<Json<ServerGetResponse>, ApiError> {
     let mut servers = Vec::new();
-    for row in server_rows::list(&state.db).await? {
-        if let Some(level) = caller.level(&state.db, &row.id).await? {
+    for row in server_rows::list(&state.db).await.map_err(internal)? {
+        if let Some(level) =
+            caller.level(&state.db, &row.id).await.map_err(internal)?
+        {
             servers.push(server(&state, row, level, host(&headers)).await?);
         }
     }
@@ -655,7 +652,8 @@ pub async fn get(
 ) -> Result<Json<Server>, ApiError> {
     let level = caller.require(&state.db, &id, Level::Viewer).await?;
     let row = server_rows::get(&state.db, &id)
-        .await?
+        .await
+        .map_err(internal)?
         .ok_or(ServerError::NotFound(id))?;
     Ok(Json(server(&state, row, level, host(&headers)).await?))
 }
@@ -670,7 +668,7 @@ pub async fn create(
     let name = request.name.trim();
     if name.is_empty() || name.chars().count() > 64 {
         return Err(ApiError::new(
-            ErrorCode::InvalidRequest,
+            ErrorCode::InvalidInput,
             "A server name has 1 to 64 characters.",
         ));
     }
@@ -735,19 +733,21 @@ pub async fn reinstall(
     } = request
     else {
         return Err(ApiError::new(
-            ErrorCode::InvalidRequest,
+            ErrorCode::InvalidInput,
             "Install packs through the content routes.",
         ));
     };
     let Some(loader) = ModLoader::parse(&loader).filter(|_| !query.hard) else {
         return Err(ApiError::new(
-            ErrorCode::InvalidRequest,
+            ErrorCode::InvalidInput,
             "Core installs Vanilla, Fabric, Quilt, Forge, NeoForge, and Paper, and never erases a server.",
         ));
     };
     let busy = state.content.busy(&id)?;
     let hold = state.servers.hold(&id)?;
-    content_rows::unlink(&state.db, &id).await?;
+    content_rows::unlink(&state.db, &id)
+        .await
+        .map_err(internal)?;
     state.access.owed.notify_one();
     let progress = state.content.progress(&id);
     let result = install_loader::install_loader(
@@ -781,7 +781,8 @@ pub async fn delete(
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
     server_rows::get(&state.db, &id)
-        .await?
+        .await
+        .map_err(internal)?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
     if state.servers.hold_for_deletion(&id).is_err() {
         return Err(ApiError::new(
@@ -812,17 +813,21 @@ async fn remove_server(
     caller: &Caller,
     id: &str,
 ) -> Result<Vec<String>, ApiError> {
-    let mut tx = state.db.begin().await?;
-    let share_id = drop_own_share::owe_share_deletion(&mut tx, id).await?;
+    let mut tx = state.db.begin().await.map_err(internal)?;
+    let share_id = drop_own_share::owe_share_deletion(&mut tx, id)
+        .await
+        .map_err(internal)?;
     let members: Vec<String> =
         sqlx::query_scalar("SELECT user_id FROM access WHERE server_id = ?")
             .bind(id)
             .fetch_all(&mut *tx)
-            .await?;
+            .await
+            .map_err(internal)?;
     sqlx::query("DELETE FROM servers WHERE id = ?")
         .bind(id)
         .execute(&mut *tx)
-        .await?;
+        .await
+        .map_err(internal)?;
     // Its players, if it had any, lose what it shared with them.
     crate::access::sync::owe(
         &mut tx,
@@ -833,9 +838,12 @@ async fn remove_server(
             },
         ),
     )
-    .await?;
+    .await
+    .map_err(internal)?;
     for user in &members {
-        super::access::owe_removal(&mut tx, user, id).await?;
+        super::access::owe_removal(&mut tx, user, id)
+            .await
+            .map_err(internal)?;
     }
     activity::record(
         &mut tx,
@@ -843,8 +851,9 @@ async fn remove_server(
         Some(id),
         &Action::ServerDeleted,
     )
-    .await?;
-    tx.commit().await?;
+    .await
+    .map_err(internal)?;
+    tx.commit().await.map_err(internal)?;
     if let Some(share_id) = share_id {
         drop_own_share::release_history(&state.content, &share_id).await;
     }
@@ -878,7 +887,8 @@ async fn server_full(
         sqlx::query_scalar("SELECT created_at FROM servers WHERE id = ?")
             .bind(&row.id)
             .fetch_one(&state.db)
-            .await?;
+            .await
+            .map_err(internal)?;
     let created_at =
         DateTime::<Utc>::from_timestamp(created_at, 0).unwrap_or_default();
     let id = Uuid::parse_str(&row.id).unwrap_or_default();
@@ -889,11 +899,15 @@ async fn server_full(
     // A server that follows an instance reads that instance's share; one that follows none has
     // its own once it is shared.
     let linked = content_rows::get_pack(&state.db, &row.id)
-        .await?
+        .await
+        .map_err(internal)?
         .and_then(|pack| pack.share.clone());
     let (shared_instance_id, needs_update) = match linked {
         Some(linked) => (Some(linked.shared_instance_id), false),
-        None => match server_rows::share_id(&state.db, &row.id).await? {
+        None => match server_rows::share_id(&state.db, &row.id)
+            .await
+            .map_err(internal)?
+        {
             Some(share_id) => {
                 (Some(share_id), needs_update(&state.content, &row.id).await)
             }
@@ -961,8 +975,13 @@ pub async fn list_v1(
     headers: HeaderMap,
 ) -> Result<Json<Vec<ServerFull>>, ApiError> {
     let mut servers = Vec::new();
-    for row in server_rows::list(&state.db).await? {
-        if caller.level(&state.db, &row.id).await?.is_some() {
+    for row in server_rows::list(&state.db).await.map_err(internal)? {
+        if caller
+            .level(&state.db, &row.id)
+            .await
+            .map_err(internal)?
+            .is_some()
+        {
             servers.push(server_full(&state, row, host(&headers)).await?);
         }
     }
@@ -978,7 +997,8 @@ pub async fn get_v1(
 ) -> Result<Json<ServerFull>, ApiError> {
     caller.require(&state.db, &id, Level::Viewer).await?;
     let row = server_rows::get(&state.db, &id)
-        .await?
+        .await
+        .map_err(internal)?
         .ok_or(ServerError::NotFound(id))?;
     Ok(Json(server_full(&state, row, host(&headers)).await?))
 }
@@ -1002,10 +1022,13 @@ pub async fn patch_world(
     caller.require(&state.db, &id, Level::Editor).await?;
     super::content::world(&id, &wid)?;
     server_rows::get(&state.db, &id)
-        .await?
+        .await
+        .map_err(internal)?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
     if let Some(channel) = request.update_channel {
-        server_rows::set_update_channel(&state.db, &id, channel).await?;
+        server_rows::set_update_channel(&state.db, &id, channel)
+            .await
+            .map_err(internal)?;
         activity::log(&state.db, &caller, Some(&id), Action::SettingsChanged)
             .await;
     }

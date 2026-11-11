@@ -1,14 +1,6 @@
 // Generated from apps/core by ts-rs. Do not edit.
 // Regenerate: pnpm --filter @amberite/core types
 
-export type ApiError = { error: ErrorCode, 
-/**
- * Ready to show.
- */
-description: string, };
-
-export type ErrorCode = "unauthorized" | "forbidden" | "ticket_required" | "ticket_invalid" | "ticket_wrong_core" | "ticket_expired" | "ticket_reused" | "clock_wrong" | "not_invited" | "not_found" | "rate_limited" | "invalid_request" | "conflict" | "internal";
-
 export type Role = "viewer" | "editor";
 
 export type User = { id: string, name: string, avatar_url: string | null, };

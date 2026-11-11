@@ -26,6 +26,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use contracts::ErrorCode;
 use contracts::limits::MAX_SHARE_BYTES;
 use futures::future::BoxFuture;
 use futures::{StreamExt, TryStreamExt};
@@ -318,23 +319,19 @@ async fn push_hashed(
     Err(PushError::Unconfirmed)
 }
 
-/// The pool's refusals of a new version, named by the backend's `code`. Every refusal over a
+/// The pool's refusals of a new version, named by the backend's code. Every refusal over a
 /// limit (413) carries a description naming the limit, which is shown as is.
 fn refusal(error: BackendError) -> PushError {
-    if let BackendError::Status { status, body, .. } = &error
-        && matches!(
-            *status,
-            StatusCode::CONFLICT
-                | StatusCode::PAYLOAD_TOO_LARGE
-                | StatusCode::SERVICE_UNAVAILABLE
-        )
+    if let BackendError::Status {
+        status,
+        body: Some(body),
+        ..
+    } = &error
     {
-        match body.code.as_deref() {
-            Some("no_storage") => return PushError::NoStorage,
-            Some("push_in_flight") => return PushError::PushInFlight,
-            _ if *status == StatusCode::PAYLOAD_TOO_LARGE
-                && !body.description.is_empty() =>
-            {
+        match body.error {
+            ErrorCode::NoStorage => return PushError::NoStorage,
+            ErrorCode::PushInFlight => return PushError::PushInFlight,
+            _ if *status == StatusCode::PAYLOAD_TOO_LARGE => {
                 return PushError::Refused(body.description.clone());
             }
             _ => {}

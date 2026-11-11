@@ -11,6 +11,7 @@ use axum::{
     },
     response::{IntoResponse, Response},
 };
+use contracts::{ApiError, ErrorCode};
 use tokio::sync::{broadcast, mpsc};
 
 use super::{
@@ -20,7 +21,6 @@ use super::{
 };
 use crate::{
     access::{Caller, Changed, Level, StreamGuard, activity, now, sessions},
-    api::error::{ApiError, ErrorCode},
     servers::{console, restarts::run_started_at},
 };
 

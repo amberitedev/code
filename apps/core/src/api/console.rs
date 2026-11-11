@@ -9,14 +9,11 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
 };
+use contracts::{ApiError, ErrorCode};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use super::{
-    AppState,
-    activity::Action,
-    error::{ApiError, ErrorCode},
-};
+use super::{AppState, activity::Action};
 use crate::access::{Caller, Level, activity};
 
 /// The longest command Core passes on.
@@ -43,7 +40,7 @@ pub async fn send(
         || command.contains(['\n', '\r'])
     {
         return Err(ApiError::new(
-            ErrorCode::InvalidRequest,
+            ErrorCode::InvalidInput,
             format!("Send one line of at most {MAX_COMMAND} characters."),
         ));
     }

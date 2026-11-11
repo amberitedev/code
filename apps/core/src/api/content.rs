@@ -25,16 +25,14 @@ use axum::{
     extract::{Multipart, Path, Query, State, multipart::Field},
     http::{StatusCode, header::CONTENT_TYPE},
 };
+use contracts::{ApiError, ErrorCode};
 use modrinth_content_management::{ContentType, VersionType};
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 use ts_rs::TS;
 
 use super::{
-    AppState,
-    activity::Action,
-    error::{ApiError, ErrorCode},
-    properties::PropertiesFields,
+    AppState, activity::Action, internal, properties::PropertiesFields,
 };
 use crate::{
     access::{Caller, Level, activity},
@@ -306,7 +304,7 @@ impl From<content::Error> for ApiError {
                     Error::NotFound(_) => ErrorCode::NotFound,
                     Error::Resolve(
                         modrinth_content_management::Error::Provider(_),
-                    ) => ErrorCode::Internal,
+                    ) => ErrorCode::InternalError,
                     // The disk, not the request: the same one may go once there is room.
                     Error::NoRoom(_)
                     | Error::Archive(archive::ArchiveError::NoRoom(_))
@@ -317,18 +315,12 @@ impl From<content::Error> for ApiError {
                     | Error::Resolve(_)
                     | Error::Path(_)
                     | Error::Pack(_)
-                    | Error::Archive(_) => ErrorCode::InvalidRequest,
-                    _ => ErrorCode::Internal,
+                    | Error::Archive(_) => ErrorCode::InvalidInput,
+                    _ => ErrorCode::InternalError,
                 };
                 Self::new(code, format!("{error:#}"))
             }
         }
-    }
-}
-
-impl From<std::io::Error> for ApiError {
-    fn from(error: std::io::Error) -> Self {
-        content::Error::Io(error).into()
     }
 }
 
@@ -367,7 +359,7 @@ fn loader_of(loader: Modloader) -> Result<ModLoader, ApiError> {
         Modloader::Paper => ModLoader::Paper,
         Modloader::Purpur => {
             return Err(ApiError::new(
-                ErrorCode::InvalidRequest,
+                ErrorCode::InvalidInput,
                 "Core does not run Purpur.",
             ));
         }
@@ -384,16 +376,20 @@ pub async fn list(
     caller.require(&state.db, &id, Level::Viewer).await?;
     world(&id, &wid)?;
     let server = server_rows::get(&state.db, &id)
-        .await?
+        .await
+        .map_err(internal)?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
     let loader = server.loader.as_deref().and_then(ModLoader::parse);
     let addons = if query.addons == Some(false) {
         None
     } else {
-        let folder = folder::Folder::open(&state.servers.paths().server(&id))?;
+        let folder = folder::Folder::open(&state.servers.paths().server(&id))
+            .map_err(internal)?;
         let listed: Vec<Listed> =
             content_files::scan(&folder, loader).into_iter().collect();
-        let skipped = content_rows::get_skipped_files(&state.db, &id).await?;
+        let skipped = content_rows::get_skipped_files(&state.db, &id)
+            .await
+            .map_err(internal)?;
         let mut addons = list_content(
             &state.content,
             &id,
@@ -603,7 +599,8 @@ pub async fn enable_many(
 /// sides included, so it has no share or sides of its own.
 pub async fn server_first(state: &AppState, id: &str) -> Result<(), ApiError> {
     let linked = content_rows::get_pack(&state.db, id)
-        .await?
+        .await
+        .map_err(internal)?
         .is_some_and(|pack| pack.share.is_some());
     if linked {
         return Err(ApiError::new(
@@ -703,9 +700,11 @@ pub async fn get_update(
     caller.require(&state.db, &id, Level::Viewer).await?;
     world(&id, &wid)?;
     let server = server_rows::get(&state.db, &id)
-        .await?
+        .await
+        .map_err(internal)?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
-    let folder = folder::Folder::open(&state.servers.paths().server(&id))?;
+    let folder = folder::Folder::open(&state.servers.paths().server(&id))
+        .map_err(internal)?;
     let loader = server.loader.as_deref().and_then(ModLoader::parse);
     let listed = content_files::find(&folder, loader, &query.filename)
         .ok_or_else(|| {
@@ -786,7 +785,8 @@ pub async fn install(
     caller.require(&state.db, &id, Level::Editor).await?;
     world(&id, &wid)?;
     let server = server_rows::get(&state.db, &id)
-        .await?
+        .await
+        .map_err(internal)?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
     match request {
         InstallWorldContent::Bare {
@@ -802,7 +802,7 @@ pub async fn install(
                 .or(server.game_version)
                 .ok_or_else(|| {
                     ApiError::new(
-                        ErrorCode::InvalidRequest,
+                        ErrorCode::InvalidInput,
                         "Choose a Minecraft version.",
                     )
                 })?;
@@ -869,7 +869,7 @@ pub async fn install(
             } = spec
             else {
                 return Err(ApiError::new(
-                    ErrorCode::InvalidRequest,
+                    ErrorCode::InvalidInput,
                     "Send a pack file through upload-modpack-file.",
                 ));
             };
@@ -940,7 +940,7 @@ async fn install_instance(
         // Without a ticket the backend reads as the Core's owner, which is not who asked.
         (None, Caller::Session { .. }) => {
             return Err(ApiError::new(
-                ErrorCode::InvalidRequest,
+                ErrorCode::InvalidInput,
                 "An instance install needs a read ticket for this Core.",
             ));
         }
@@ -951,21 +951,23 @@ async fn install_instance(
             // The backend names why by its code. It checks the Core owner's account before the
             // reader's, so a locked or blacklisted account is most likely the owner's.
             consume::ReadError::Denied { code, description } => {
-                let message = match code.as_str() {
-                    "not_member" => {
+                let message = match code {
+                    ErrorCode::NotMember => {
                         "You no longer have access to this instance's share."
                     }
-                    "ticket_invalid" => {
+                    ErrorCode::TicketInvalid => {
                         "The request to update the server expired. Try again."
                     }
-                    "account_locked" | "blacklisted" => {
+                    ErrorCode::AccountLocked | ErrorCode::Blacklisted => {
                         "The owner of this Core cannot use sharing right now."
                     }
                     _ => description.as_str(),
                 };
                 ApiError::new(ErrorCode::Forbidden, message)
             }
-            consume::ReadError::Backend(error) => ApiError::from(error),
+            consume::ReadError::Backend(error) => {
+                super::share::backend_error(error)
+            }
             error @ consume::ReadError::NoVersion => {
                 ApiError::new(ErrorCode::NotFound, error.to_string())
             }
@@ -1004,10 +1006,15 @@ pub async fn repair(
     caller.require(&state.db, &id, Level::Editor).await?;
     world(&id, &wid)?;
     let server = server_rows::get(&state.db, &id)
-        .await?
+        .await
+        .map_err(internal)?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
     let (hold, busy) = begin(&state, &id)?;
-    if content_rows::get_pack(&state.db, &id).await?.is_some() {
+    if content_rows::get_pack(&state.db, &id)
+        .await
+        .map_err(internal)?
+        .is_some()
+    {
         // The pack the server already follows: no other Minecraft.
         spawn_pack(&state, hold, busy, PackSource::Current, None, true);
     } else {
@@ -1054,7 +1061,9 @@ pub async fn unlink(
     caller.require(&state.db, &id, Level::Editor).await?;
     world(&id, &wid)?;
     let _busy = state.content.busy(&id)?;
-    content_rows::unlink(&state.db, &id).await?;
+    content_rows::unlink(&state.db, &id)
+        .await
+        .map_err(internal)?;
     state.access.owed.notify_one();
     state.content.clear_error(&id);
     activity::log(&state.db, &caller, Some(&id), Action::ContentChanged).await;
@@ -1094,24 +1103,21 @@ pub async fn update_modpack(
     } else {
         serde_json::from_slice::<UpdateModpack>(&body)
             .map_err(|error| {
-                ApiError::new(ErrorCode::InvalidRequest, error.to_string())
+                ApiError::new(ErrorCode::InvalidInput, error.to_string())
             })?
             .force
     };
     caller.require(&state.db, &id, Level::Editor).await?;
     world(&id, &wid)?;
-    let pack =
-        content_rows::get_pack(&state.db, &id)
-            .await?
-            .ok_or_else(|| {
-                ApiError::new(
-                    ErrorCode::NotFound,
-                    "This server follows no pack.",
-                )
-            })?;
+    let pack = content_rows::get_pack(&state.db, &id)
+        .await
+        .map_err(internal)?
+        .ok_or_else(|| {
+            ApiError::new(ErrorCode::NotFound, "This server follows no pack.")
+        })?;
     let Some((project_id, installed_id)) = modrinth_pack(&pack.link) else {
         return Err(ApiError::new(
-            ErrorCode::InvalidRequest,
+            ErrorCode::InvalidInput,
             "This pack came from a file; upload the new file instead.",
         ));
     };
@@ -1154,14 +1160,14 @@ pub async fn stage_field(
     path: &std::path::Path,
 ) -> Result<String, ApiError> {
     let parent = path.parent().unwrap_or(path);
-    tokio::fs::create_dir_all(parent).await?;
-    let room = archive::room(parent)?;
+    tokio::fs::create_dir_all(parent).await.map_err(internal)?;
+    let room = archive::room(parent).map_err(internal)?;
     let result = async {
-        let mut file = tokio::fs::File::create(path).await?;
+        let mut file = tokio::fs::File::create(path).await.map_err(internal)?;
         let mut hasher = sha1::Sha1::default();
         let mut written = 0u64;
         while let Some(chunk) = field.chunk().await.map_err(|error| {
-            ApiError::new(ErrorCode::InvalidRequest, error.body_text())
+            ApiError::new(ErrorCode::InvalidInput, error.body_text())
         })? {
             written += chunk.len() as u64;
             if written > room {
@@ -1173,9 +1179,9 @@ pub async fn stage_field(
                 .into());
             }
             sha1::Digest::update(&mut hasher, &chunk);
-            file.write_all(&chunk).await?;
+            file.write_all(&chunk).await.map_err(internal)?;
         }
-        file.flush().await?;
+        file.flush().await.map_err(internal)?;
         Ok(hex::encode(sha1::Digest::finalize(hasher)))
     }
     .await;
@@ -1187,7 +1193,7 @@ pub async fn stage_field(
 }
 
 fn bad_form(error: axum::extract::multipart::MultipartError) -> ApiError {
-    ApiError::new(ErrorCode::InvalidRequest, error.body_text())
+    ApiError::new(ErrorCode::InvalidInput, error.body_text())
 }
 
 /// `POST /servers/{id}/v1/worlds/{wid}/content/upload-modpack-file`: install an uploaded
@@ -1223,12 +1229,12 @@ pub async fn upload_modpack(
         }
         let (path, sha1) = staged.take().ok_or_else(|| {
             ApiError::new(
-                ErrorCode::InvalidRequest,
+                ErrorCode::InvalidInput,
                 "The upload has no pack file.",
             )
         })?;
         let stored = dirs.pack(&sha1);
-        tokio::fs::rename(&path, &stored).await?;
+        tokio::fs::rename(&path, &stored).await.map_err(internal)?;
         // A file that is not a pack is refused now, not in the background. Spellings that
         // collide are checked at install, against the server's own disk.
         content_install::read_pack(
@@ -1358,13 +1364,14 @@ pub async fn embedded_icon(
         "plugins" => ContentType::Plugin,
         _ => {
             return Err(ApiError::new(
-                ErrorCode::InvalidRequest,
+                ErrorCode::InvalidInput,
                 "parent_directory is mods or plugins.",
             ));
         }
     };
     let server = server_rows::get(&state.db, &id)
-        .await?
+        .await
+        .map_err(internal)?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
     let loader = server.loader.as_deref().and_then(ModLoader::parse);
     let content = Arc::clone(&state.content);

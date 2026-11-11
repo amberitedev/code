@@ -9,6 +9,7 @@ use axum::{
     Json,
     extract::{Query, State},
 };
+use contracts::ApiError;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
@@ -16,7 +17,7 @@ use uuid::Uuid;
 use super::{
     AppState,
     access::{Role, User},
-    error::ApiError,
+    internal,
 };
 use crate::access::{Caller, activity};
 
@@ -27,7 +28,9 @@ pub async fn list(
     Query(query): Query<ActivityQuery>,
 ) -> Result<Json<ActivityPage>, ApiError> {
     caller.require_owner()?;
-    Ok(Json(activity::page(&state.db, &query).await?))
+    Ok(Json(
+        activity::page(&state.db, &query).await.map_err(internal)?,
+    ))
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]

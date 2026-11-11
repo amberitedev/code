@@ -12,10 +12,11 @@ use axum::{
     extract::{Request, State},
     response::Response,
 };
+use contracts::ApiError;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use super::{AppState, error::ApiError};
+use super::AppState;
 use crate::access::{Caller, Peer};
 
 /// The settings to change. Absent ones stay. Bytes throughout.

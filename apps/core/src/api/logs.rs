@@ -7,10 +7,11 @@ use axum::{
     Json,
     extract::{Query, State},
 };
+use contracts::ApiError;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use super::{AppState, error::ApiError};
+use super::AppState;
 use crate::{access::Caller, servers::console};
 
 #[derive(Debug, Clone, Deserialize, TS)]

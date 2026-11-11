@@ -24,6 +24,7 @@ use axum::{
     http::{HeaderValue, Method, StatusCode, Uri, header},
     response::{IntoResponse, Response},
 };
+use contracts::{ApiError, ErrorCode};
 use hyper_util::{
     client::legacy::{Client as HttpClient, connect::HttpConnector},
     rt::TokioExecutor,
@@ -44,7 +45,7 @@ use crate::{
     access::{owed::OwedCall, sync},
     api::{
         backend::{PullOrder, StorageAnswer, StorageReport},
-        error::{ApiError, ErrorCode},
+        internal,
         storage::{StorageSettings, StorageStatus},
     },
     backups::space,
@@ -337,7 +338,7 @@ impl Storage {
 
     /// `GET /storage`.
     pub async fn status(&self) -> Result<StorageStatus, ApiError> {
-        let settings = self.settings().await?;
+        let settings = self.settings().await.map_err(internal)?;
         let running = self.store_status().await;
         let free = match &running {
             Some(status) => status.free,
@@ -369,7 +370,7 @@ impl Storage {
             || change.egress_cap.is_some_and(|cap| cap < 0)
         {
             return Err(ApiError::new(
-                ErrorCode::InvalidRequest,
+                ErrorCode::InvalidInput,
                 "The caps are bytes: more than zero for storage, zero or more for egress.",
             ));
         }
@@ -382,8 +383,9 @@ impl Storage {
         .bind(change.cap)
         .bind(change.egress_cap)
         .execute(&self.db)
-        .await?;
-        let settings = self.settings().await?;
+        .await
+        .map_err(internal)?;
+        let settings = self.settings().await.map_err(internal)?;
         // A store that is not running starts with the new caps.
         let running = self.running.borrow().clone();
         if let Some(running) = running {

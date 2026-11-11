@@ -116,7 +116,7 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		}
 		const code = async (response, status, code) => {
 			assert.equal(response.status, status)
-			assert.equal((await response.json()).code, code)
+			assert.equal((await response.json()).error, code)
 		}
 		/** `create_remote_version`: the manifest with its files already encrypted and named. */
 		const push = (id, external, user = 'mra_owner') =>

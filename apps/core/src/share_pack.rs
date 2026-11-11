@@ -10,7 +10,7 @@ use bedrock::content::{
     Hashes, Index, IndexFile, Version, loader_dependency, mrpack_env,
 };
 use bedrock::state::ModLoader;
-use contracts::Side;
+use contracts::{ErrorCode, Side};
 use reqwest::StatusCode;
 
 use sharing_client::backend::{Backend, BackendError, Unavailable};
@@ -61,10 +61,13 @@ pub trait Modrinth {
 pub enum ReadError {
     #[error(transparent)]
     Backend(#[from] BackendError),
-    /// The backend refused the read (401 or 403), with the `code` it named, or its `error` kind
-    /// when it named none, and its description.
+    /// The backend refused the read (401 or 403), with the code it named (`Unknown` when it
+    /// sent no error body) and its description.
     #[error("{description}")]
-    Denied { code: String, description: String },
+    Denied {
+        code: ErrorCode,
+        description: String,
+    },
     #[error("The instance's share has no version.")]
     NoVersion,
     #[error(
@@ -110,14 +113,17 @@ pub async fn ready_version(
             ) =>
         {
             let status = error.status().unwrap_or_default();
-            let body = error.body().cloned().unwrap_or_default();
-            let description = if body.description.is_empty() {
-                format!("The backend refused the read with status {status}.")
-            } else {
-                body.description.clone()
-            };
+            let body = error.body();
+            let description = body
+                .map(|body| body.description.clone())
+                .filter(|description| !description.is_empty())
+                .unwrap_or_else(|| {
+                    format!(
+                        "The backend refused the read with status {status}."
+                    )
+                });
             return Err(ReadError::Denied {
-                code: body.code().to_owned(),
+                code: body.map_or(ErrorCode::Unknown, |body| body.error),
                 description,
             });
         }

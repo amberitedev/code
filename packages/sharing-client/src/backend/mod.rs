@@ -13,12 +13,12 @@ pub use error::{BackendError, Unavailable};
 
 use std::time::Duration;
 
+use contracts::ApiError;
 use modrinth_content_management::icons::IconConfig;
 use reqwest::{Method, StatusCode};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::json;
 
-use crate::net::ErrorBody;
 use crate::pool::Fault;
 use crate::versions::{ManifestFile, ShareVersion, VersionContent};
 
@@ -479,23 +479,14 @@ impl Backend {
         share_id: &str,
         invite_id: &str,
     ) -> Result<(), BackendError> {
-        match self
-            .empty(
-                "accept_instance_invite",
-                self.request(
-                    Method::POST,
-                    &format!("/instances/{share_id}/invites/{invite_id}"),
-                ),
-            )
-            .await
-        {
-            Err(BackendError::Status {
-                status: StatusCode::BAD_REQUEST,
-                body,
-                ..
-            }) if body.description.contains("already has access") => Ok(()),
-            result => result,
-        }
+        self.empty(
+            "accept_instance_invite",
+            self.request(
+                Method::POST,
+                &format!("/instances/{share_id}/invites/{invite_id}"),
+            ),
+        )
+        .await
     }
 
     /// Accepts the caller's pending invite. False when there is none (404).
@@ -570,11 +561,11 @@ async fn check(
     }
     let request_id = request_id(&response);
     let text = response.bytes().await.unwrap_or_default();
-    let body = ErrorBody::parse(&text).unwrap_or_default();
+    let body = serde_json::from_slice::<ApiError>(&text).ok();
     tracing::warn!(
         operation,
         status = status.as_u16(),
-        code = body.code(),
+        code = ?body.as_ref().map(|body| body.error),
         request_id = request_id.as_deref().unwrap_or("none"),
         "Shared instances API request failed"
     );

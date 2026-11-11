@@ -15,15 +15,11 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
 };
+use contracts::{ApiError, ErrorCode};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use super::{
-    AppState,
-    activity::Action,
-    content::world,
-    error::{ApiError, ErrorCode},
-};
+use super::{AppState, activity::Action, content::world, internal};
 use crate::{
     access::{Caller, Level, activity},
     installs::java,
@@ -129,7 +125,8 @@ const MAJORS: [u32; 5] = [8, 11, 17, 21, 25];
 /// What the startup routes report for a server: its command line and Java major.
 async fn report(state: &AppState, id: &str) -> Result<(String, u32), ApiError> {
     let server = server_rows::get(&state.db, id)
-        .await?
+        .await
+        .map_err(internal)?
         .ok_or_else(|| ServerError::NotFound(id.into()))?;
     let paths = state.servers.paths();
     let invocation = launch::args(paths, &server)
@@ -140,7 +137,7 @@ async fn report(state: &AppState, id: &str) -> Result<(String, u32), ApiError> {
     let major = launch::java_major(paths, &state.content.http, &server)
         .await
         .map_err(|error| {
-            ApiError::new(ErrorCode::Internal, format!("{error:#}"))
+            ApiError::new(ErrorCode::InternalError, format!("{error:#}"))
         })?;
     Ok((invocation, major))
 }
@@ -156,12 +153,13 @@ async fn set_major(
         && !MAJORS.contains(&major)
     {
         return Err(ApiError::new(
-            ErrorCode::InvalidRequest,
+            ErrorCode::InvalidInput,
             format!("Core installs Java {MAJORS:?}, not {major}."),
         ));
     }
     let server = server_rows::get(&state.db, id)
-        .await?
+        .await
+        .map_err(internal)?
         .ok_or_else(|| ServerError::NotFound(id.into()))?;
     // The major the version needs is the default, not a choice: stored, it would pin the server
     // to it after a game version change.
@@ -183,7 +181,8 @@ async fn set_major(
         server.java_path.as_deref(),
         chosen.map(i64::from),
     )
-    .await?;
+    .await
+    .map_err(internal)?;
     activity::log(&state.db, caller, Some(id), Action::SettingsChanged).await;
     Ok(())
 }
@@ -195,7 +194,7 @@ fn custom_command(
 ) -> Result<(), ApiError> {
     match command {
         Some(command) if command.trim() != current => Err(ApiError::new(
-            ErrorCode::InvalidRequest,
+            ErrorCode::InvalidInput,
             "Core builds the startup command itself; memory and flags are set per server.",
         )),
         _ => Ok(()),
@@ -286,13 +285,14 @@ pub async fn set_java_path(
 ) -> Result<StatusCode, ApiError> {
     caller.require(&state.db, &id, Level::Editor).await?;
     let server = server_rows::get(&state.db, &id)
-        .await?
+        .await
+        .map_err(internal)?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
     if let Some(path) = &body.path {
         let path = std::path::Path::new(path);
         if !path.is_absolute() || !path.is_file() {
             return Err(ApiError::new(
-                ErrorCode::InvalidRequest,
+                ErrorCode::InvalidInput,
                 "A custom Java is an absolute path to its java binary on the Core's machine.",
             ));
         }
@@ -303,7 +303,8 @@ pub async fn set_java_path(
         body.path.as_deref(),
         server.java_version,
     )
-    .await?;
+    .await
+    .map_err(internal)?;
     activity::log(&state.db, &caller, Some(&id), Action::SettingsChanged).await;
     Ok(StatusCode::NO_CONTENT)
 }

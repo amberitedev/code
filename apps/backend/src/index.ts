@@ -17,7 +17,8 @@ function corsOrigin(request: Request, env: Env): string | null {
 		try {
 			const parsed = new URL(origin)
 			if (
-				['localhost', '127.0.0.1', '[::1]', 'tauri.localhost'].includes(parsed.hostname) ||
+				['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname) ||
+				parsed.hostname.endsWith('.localhost') ||
 				origin === 'tauri://localhost'
 			)
 				return origin
@@ -45,7 +46,7 @@ export default {
 					(await handleCores(request, env)) ??
 					(await handleAccounts(request, env)) ??
 					(await handleSocial(request, env)) ??
-					json({ error: 'not_found', description: 'Not found' }, 404)
+					errorResponse(new ApiError(404, 'not_found', 'Not found'))
 		} catch (error) {
 			if (error instanceof ApiError) response = errorResponse(error)
 			else {
@@ -55,7 +56,7 @@ export default {
 					new URL(request.url).pathname,
 					error,
 				)
-				response = json({ error: 'internal_error', description: 'An internal error occurred' }, 500)
+				response = errorResponse(new ApiError(500, 'internal_error', 'An internal error occurred'))
 			}
 		}
 		if (response.status === 101) return response

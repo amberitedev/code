@@ -16,15 +16,11 @@ use axum::{
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
 };
+use contracts::{ApiError, ErrorCode};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use super::{
-    AppState,
-    access::User,
-    activity::Action,
-    error::{ApiError, ErrorCode},
-};
+use super::{AppState, access::User, activity::Action, internal};
 use crate::access::{Caller, Peer, activity, fresh_ticket, now, sessions};
 
 #[derive(Debug, Clone, Deserialize, TS)]
@@ -99,7 +95,11 @@ pub async fn list(
         Caller::Session { id, .. } => Some(id.as_str()),
         Caller::Local => None,
     };
-    Ok(Json(sessions::list(&state.db, only, current, now()).await?))
+    Ok(Json(
+        sessions::list(&state.db, only, current, now())
+            .await
+            .map_err(internal)?,
+    ))
 }
 
 /// `DELETE /sessions/{id}`.
@@ -112,7 +112,8 @@ pub async fn revoke(
     let not_found =
         || ApiError::new(ErrorCode::NotFound, "There is no such session.");
     let session = sessions::get(&state.db, &id, None)
-        .await?
+        .await
+        .map_err(internal)?
         .ok_or_else(not_found)?;
     if caller.user_id() != Some(session.user.id.as_str()) {
         if !caller.is_owner() {
@@ -131,7 +132,7 @@ pub async fn sign_out(
     match &caller {
         Caller::Session { id, .. } => end(&state, &caller, id).await,
         Caller::Local => Err(ApiError::new(
-            ErrorCode::InvalidRequest,
+            ErrorCode::InvalidInput,
             "The local CLI has no session to sign out of.",
         )),
     }
@@ -142,7 +143,9 @@ async fn end(
     caller: &Caller,
     id: &str,
 ) -> Result<StatusCode, ApiError> {
-    if let Some(user) = sessions::revoke(&state.db, id).await? {
+    if let Some(user) =
+        sessions::revoke(&state.db, id).await.map_err(internal)?
+    {
         state.access.changed(&user);
         activity::log(
             &state.db,

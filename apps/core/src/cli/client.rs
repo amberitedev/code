@@ -4,6 +4,7 @@
 use axum::http::{Method, Request, header};
 use bytes::Bytes;
 use color_eyre::eyre::{Result, WrapErr, bail};
+use contracts::ApiError;
 use http_body_util::{BodyExt, Full};
 use hyper_util::rt::TokioIo;
 use serde::{Serialize, de::DeserializeOwned};
@@ -11,7 +12,6 @@ use tokio_tungstenite::WebSocketStream;
 
 use crate::{
     access::local::{self, Stream},
-    api::error::ApiError,
     daemon::{config, paths::Paths},
 };
 

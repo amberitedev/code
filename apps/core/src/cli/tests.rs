@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use clap::{CommandFactory, Parser};
+use contracts::{ApiError, ErrorCode};
 
 use super::{
     Cli, Client, Command, access::AccessCommand, backups::BackupsCommand,
@@ -94,12 +95,11 @@ fn console_text_cannot_drive_the_terminal() {
 
 #[test]
 fn errors_print_as_json_in_cores_shape() {
-    let error: color_eyre::Report =
-        super::client::Refused(crate::api::error::ApiError::new(
-            crate::api::error::ErrorCode::Conflict,
-            "the server is not running",
-        ))
-        .into();
+    let error: color_eyre::Report = super::client::Refused(ApiError::new(
+        ErrorCode::Conflict,
+        "the server is not running",
+    ))
+    .into();
     let json = super::json_for(&error);
     assert_eq!(json["error"], "conflict");
     assert_eq!(json["description"], "the server is not running");

@@ -9,8 +9,8 @@ import type { RequestContext } from '../types/request'
  * innermost, so it acts on each attempt as it is sent:
  *
  * - A `dangerous` request gets a fresh ticket in `X-Amberite-Ticket`.
- * - A request Core answers with 401 `unauthorized` (no session, or it ended) signs in with a new
- *   ticket once and is sent again. Any other 401, such as a refused ticket, is the answer.
+ * - A request Core answers with 401 `invalid_credentials` (no session, or it ended) signs in with a
+ *   new ticket once and is sent again. Any other 401, such as a refused ticket, is the answer.
  */
 export class CoreSessionFeature extends AbstractFeature {
 	constructor(private readonly client: AbstractModrinthClient) {
@@ -50,6 +50,9 @@ function signedOut(error: unknown): boolean {
 	if (!(error instanceof ModrinthApiError) || error.statusCode !== 401) return false
 	const data = error.responseData
 	return (
-		typeof data === 'object' && data !== null && 'error' in data && data.error === 'unauthorized'
+		typeof data === 'object' &&
+		data !== null &&
+		'error' in data &&
+		data.error === 'invalid_credentials'
 	)
 }

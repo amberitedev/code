@@ -3,19 +3,20 @@
 //! to that Core's certificate, no proxy and no redirect, so it cannot be turned into a general
 //! downloader.
 
+use contracts::{ApiError, ErrorCode};
 use sharing_client::net::{CoreAddress, ip};
 use sharing_client::pool::PoolCore;
 use tracing::info;
 
 use crate::{
-    Code, Store, StoreError,
+    Store,
     objects::{self, Hash, VersionList, WriteError},
     tickets::Source,
 };
 
-fn failed(description: impl std::fmt::Display) -> StoreError {
-    StoreError::new(
-        Code::Conflict,
+fn failed(description: impl std::fmt::Display) -> ApiError {
+    ApiError::new(
+        ErrorCode::Conflict,
         format!("Could not copy from the other Core: {description}"),
     )
 }
@@ -25,7 +26,7 @@ pub(crate) async fn pull(
     store: &Store,
     root: &Hash,
     source: &Source,
-) -> Result<bool, StoreError> {
+) -> Result<bool, ApiError> {
     let ticket = source.ticket().expect("verify requires a source ticket");
     let core = PoolCore {
         // The certificate names the Core: the backend gives no id with a source.
@@ -62,12 +63,9 @@ pub(crate) async fn pull(
 }
 
 /// `https://ip:port`, refused unless the IP is public or `allow_private` is set.
-pub fn address(
-    address: &str,
-    allow_private: bool,
-) -> Result<String, StoreError> {
+pub fn address(address: &str, allow_private: bool) -> Result<String, ApiError> {
     let invalid = |description: &str| {
-        StoreError::new(Code::InvalidRequest, description.to_owned())
+        ApiError::new(ErrorCode::InvalidInput, description.to_owned())
     };
     let address = CoreAddress::parse(address).map_err(|_| {
         invalid("The source Core's address must be https://ip:port.")

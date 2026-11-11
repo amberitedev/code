@@ -10387,6 +10387,7 @@ dependencies = [
  "browser-bridge",
  "bytes",
  "chrono",
+ "contracts",
  "dashmap",
  "either",
  "engine",

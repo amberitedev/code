@@ -8,13 +8,14 @@ use axum::{
     extract::{Path, Query, State},
     response::Response,
 };
+use contracts::ApiError;
 use uuid::Uuid;
 
 use super::{
     AppState,
     backups::{DownloadQuery, DownloadToken, downloader, zip_response},
     content::world,
-    error::ApiError,
+    internal,
 };
 use crate::{
     access::{Caller, Level},
@@ -51,7 +52,8 @@ pub async fn export(
     downloader(&state, caller, query.token.as_deref(), &id, &Target::Pack)
         .await?;
     let server = server_rows::get(&state.db, &id)
-        .await?
+        .await
+        .map_err(internal)?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
     let path = state
         .content
@@ -62,6 +64,6 @@ pub async fn export(
         let _ = tokio::fs::remove_file(&path).await;
         return Err(error.into());
     }
-    let file = std::fs::File::open(&path)?;
+    let file = std::fs::File::open(&path).map_err(internal)?;
     Ok(zip_response(file, &server.name, "mrpack", Some(path)))
 }

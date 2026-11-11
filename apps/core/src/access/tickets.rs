@@ -2,15 +2,13 @@
 //! makes a session (`sessions::sign_in`) or authorizes one dangerous action
 //! (`access::fresh_ticket`), and is good for one use either way.
 
+use contracts::{ApiError, ErrorCode};
 use sqlx::SqliteConnection;
 
 use sharing_storage::keys::{ISSUER, LEEWAY_S};
 
 use super::keys::Keys;
-use crate::api::{
-    backend::TicketClaims,
-    error::{ApiError, ErrorCode},
-};
+use crate::api::{backend::TicketClaims, internal};
 
 fn invalid(description: &str) -> ApiError {
     ApiError::new(ErrorCode::TicketInvalid, description)
@@ -68,7 +66,8 @@ pub async fn spend(
     sqlx::query("DELETE FROM used_tickets WHERE expires_at < ?")
         .bind(now - LEEWAY_S)
         .execute(&mut *conn)
-        .await?;
+        .await
+        .map_err(internal)?;
     let inserted =
         sqlx::query("INSERT INTO used_tickets (jti, expires_at) VALUES (?, ?)")
             .bind(&claims.jti)
@@ -82,7 +81,7 @@ pub async fn spend(
                 "That ticket was already used. Get a new one.",
             ))
         }
-        inserted => inserted.map(drop).map_err(Into::into),
+        inserted => inserted.map(drop).map_err(internal),
     }
 }
 

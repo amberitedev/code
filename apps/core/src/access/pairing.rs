@@ -10,6 +10,7 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bytes::Bytes;
+use contracts::{ApiError, ErrorCode};
 use futures::{SinkExt, StreamExt};
 use reqwest::{
     StatusCode, Upgraded,
@@ -312,19 +313,20 @@ async fn request_code(state: &Pairing<'_>) -> Result<Pending, String> {
         })?;
     let status = response.status();
     if !status.is_success() {
-        let body = response
-            .bytes()
-            .await
-            .ok()
-            .and_then(|body| sharing_client::net::ErrorBody::parse(&body))
-            .unwrap_or_default();
-        return Err(match body.error.as_str() {
-            "already_signed_in" => "this Core is still listed under an account. Remove it in the App under Settings, Cores.".into(),
-            "invalid_address" => format!(
+        let Some(body) =
+            response.bytes().await.ok().and_then(|body| {
+                serde_json::from_slice::<ApiError>(&body).ok()
+            })
+        else {
+            return Err(format!("Amberite answered {status}."));
+        };
+        return Err(match body.error {
+            ErrorCode::AlreadySignedIn => "this Core is still listed under an account. Remove it in the App under Settings, Cores.".into(),
+            ErrorCode::InvalidAddress => format!(
                 "this Core's address {} is not allowed. {}",
                 state.address, body.description
             ),
-            "too_many_requests" => "this Core asked for too many codes in a short time".into(),
+            ErrorCode::TooManyRequests => "this Core asked for too many codes in a short time".into(),
             _ => format!("Amberite answered {status}. {}", body.description),
         });
     }

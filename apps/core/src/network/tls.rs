@@ -15,6 +15,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use color_eyre::eyre::{Result, WrapErr, eyre};
+use contracts::{ApiError, ErrorCode};
 use rustls::{
     ServerConfig,
     pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer},
@@ -27,11 +28,7 @@ use tokio::{
 use tokio_rustls::TlsAcceptor;
 use tracing::debug;
 
-use crate::{
-    access::Peer,
-    api::error::{ApiError, ErrorCode},
-    daemon::paths::Paths,
-};
+use crate::{access::Peer, daemon::paths::Paths};
 
 /// How long a new connection may take to finish the TLS handshake.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
@@ -162,7 +159,7 @@ async fn guard(request: Request, next: Next) -> Response {
         .or_else(|| request.uri().host());
     if !host.is_some_and(host_allowed) {
         return ApiError::new(
-            ErrorCode::InvalidRequest,
+            ErrorCode::InvalidInput,
             "Reach this Core by its IP address.",
         )
         .into_response();
