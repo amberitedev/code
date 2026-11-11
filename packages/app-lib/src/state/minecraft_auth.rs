@@ -1907,6 +1907,7 @@ mod persistence_tests {
 
     #[tokio::test]
     async fn credentials_round_trip_and_selection_use_sqlite() {
+        crate::install_crypto_provider();
         let pool = pool().await;
         let first_uuid = Uuid::new_v4();
         let second_uuid = Uuid::new_v4();
