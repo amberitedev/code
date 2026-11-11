@@ -62,7 +62,8 @@ folder that is usually nothing.
   starting anything. `check:changed` runs it when Rust changed.
 - `vp run check:changed [ref]`: CI's fast checks for the files changed since the merge base with
   `origin/main` (or `ref`): lint, typos, TOML, typecheck and tests of the affected packages,
-  `dev:check`, and for Rust `rustfmt` and a build. typos and tombi are skipped when not installed.
+  `dev:check`, and for Rust `rustfmt`, a build, and `cargo test` of every workspace crate with a
+  changed file (except the ones CI leaves out). typos and tombi are skipped when not installed.
 - `vp run dev:check`: Prints the processes, state directory, URLs, and ports that a full run would
   use without starting anything.
 
@@ -78,9 +79,10 @@ The key is a hash of everything that goes into the build:
 - Both: the root `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `.cargo`, the Cargo arguments,
   and the folders of the program's crate and every local crate it builds with, as
   `cargo metadata` reports them. Crates it does not use, such as labrinth, can change without a
-  rebuild.
-- App, also: `apps/app-frontend/package.json` (the App's version), `packages/app-lib/.env`, the
-  variables named in that file and `.env.prod`, and `apps/app/tauri-local.conf.json`.
+  rebuild. Also `packages/app-lib/.env` and the variables named in that file and `.env.prod`,
+  which app-lib's build compiles in.
+- App, also: `apps/app-frontend/package.json` (the App's version) and
+  `apps/app/tauri-local.conf.json`.
 
 Files are hashed by content as Git would store it, including edits and new files that are not
 committed, so the same Rust in two checkouts gives the same key. When the key already has a program,
