@@ -6,8 +6,9 @@ tied to a Core and works for everyone.
 
 ## Running it
 
-Install Node 24.15 or newer and [Vite+](https://viteplus.dev/guide/) (the `vp` command) as
-[docs/internals/scripts.md](docs/internals/scripts.md#first-checkout) describes, then:
+You need Node 24.15 or newer, [Vite+](https://viteplus.dev/guide/) (the `vp` command), Rust through
+[rustup](https://rustup.rs), a JDK, and Tauri's system packages.
+[docs/internals/scripts.md](docs/internals/scripts.md#first-checkout) has the details. Then:
 
 ```sh
 vp i

@@ -72,7 +72,8 @@ reviews:
         everything on 127.0.0.1 and runs the Core proxy.
         - Desktop features are App routes used the same way by the native window and a browser tab.
           No dev-only second path.
-        - Every local route requires the loopback secret and checks Origin.
+        - Every local route is reached through a secret in its path (the App's loopback secret, or
+          the Core proxy's path capability) and checks Origin.
         - The Core proxy is a pipe that knows no routes. Core session tokens never reach the
           WebView; the proxy adds them on the way out. The certificate fingerprint check is written
           once.
@@ -205,8 +206,9 @@ reviews:
 
   security_risk_instructions: |
     The App runs a local HTTP server on 127.0.0.1. Any program on the machine can reach it, and so
-    can any website through the user's browser. Every route must require the loopback secret and
-    check the Origin header; a route without both is high risk.
+    can any website through the user's browser. Every route must be reached through a secret in its
+    path (the App's loopback secret, or the Core proxy's path capability) and check the Origin
+    header; a route without both is high risk.
 
     A Core runs on the internet on someone's own machine, behind a self-signed certificate that the
     App pins by fingerprint. The App reaches Cores through its local proxy. Core session tokens
