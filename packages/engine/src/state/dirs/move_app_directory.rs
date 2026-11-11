@@ -21,38 +21,6 @@ const MOVED_APP_DIRECTORIES: [&str; 6] = [
     "icons",
     "synced-options",
 ];
-pub(crate) async fn relocate_tree(from: &Path, to: &Path) -> crate::Result<()> {
-    if !fs::try_exists(from).await? {
-        return Ok(());
-    }
-    if fs::symlink_metadata(from).await?.file_type().is_symlink() {
-        bail!(ErrorKind::InputError(
-            "a shared-data root must not be a symlink during migration"
-                .to_string(),
-        ));
-    }
-    if let Some(parent) = to.parent() {
-        fs::create_dir_all(parent).await?;
-    }
-    if !fs::try_exists(to).await?
-        && crate::util::io::is_same_disk(from, to.parent().unwrap_or(to))
-            .unwrap_or(false)
-    {
-        fs::rename(from, to).await?;
-        if let Some(parent) = to.parent() {
-            sync_directory(parent).await?;
-        }
-        return Ok(());
-    }
-    copy_tree(
-        from,
-        to,
-        &[(from.to_path_buf(), to.to_path_buf())],
-        &std::collections::HashSet::new(),
-    )
-    .await
-}
-
 async fn copy_tree(
     from: &Path,
     to: &Path,

@@ -234,7 +234,23 @@ impl ContentStore {
         self.finish_journal(journal).await
     }
 
-    pub(crate) async fn recover_unregistered_files(&self) -> crate::Result<()> {
+    pub(crate) async fn recover_abandoned(
+        &self,
+        install_backups: &std::path::Path,
+    ) -> crate::Result<()> {
+        for owner in catalog::retained_owners(&self.pool, "rollback").await? {
+            if uuid::Uuid::parse_str(&owner).is_ok()
+                && !filesystem::path_exists(&install_backups.join(&owner))
+                    .await?
+            {
+                self.release("rollback", &owner).await?;
+            }
+        }
+        self.remove_abandoned_staging().await?;
+        self.recover_unregistered_files().await
+    }
+
+    async fn recover_unregistered_files(&self) -> crate::Result<()> {
         let known = catalog::known_hashes(&self.pool).await?;
         let Some(mut files) =
             UnregisteredFiles::open(&self.root, known).await?
@@ -246,7 +262,7 @@ impl ContentStore {
         }
         Ok(())
     }
-    pub(crate) async fn remove_abandoned_staging(&self) -> crate::Result<()> {
+    async fn remove_abandoned_staging(&self) -> crate::Result<()> {
         filesystem::remove_abandoned_staging(&self.staging).await
     }
 }

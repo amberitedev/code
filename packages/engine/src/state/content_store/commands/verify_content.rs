@@ -1,9 +1,8 @@
-use crate::state::content_store::adapters::downloads;
 use crate::state::content_store::adapters::filesystem;
 use crate::state::content_store::adapters::filesystem::symlink_metadata_if_exists;
 use crate::state::content_store::{
     ContentStore, FileStorageKind, InstanceFileStatus, StoredFileHandle,
-    StoredFileMetadata, content_file_path,
+    content_file_path,
 };
 use crate::state::instances;
 use crate::{ErrorKind, State};
@@ -123,37 +122,5 @@ impl ContentStore {
             }
         }
         Ok(())
-    }
-
-    pub(in crate::state::content_store) async fn repair_stored_file(
-        &self,
-        stored_file: &StoredFileMetadata,
-        sources: &[String],
-        state: &State,
-    ) -> crate::Result<()> {
-        let mirrors = sources.iter().map(String::as_str).collect::<Vec<_>>();
-        let downloaded = downloads::download(
-            &self.staging,
-            &self.pool,
-            &mirrors,
-            None,
-            &state.fetch_semaphore,
-            None,
-        )
-        .await?;
-        if downloaded.sha512 != stored_file.sha512
-            || downloaded.size != stored_file.size as u64
-        {
-            bail!(ErrorKind::ContentStoreError(
-                "repair download has an unexpected hash or size".into(),
-            ));
-        }
-        let path = self.path(stored_file)?;
-        filesystem::quarantine_file(&self.root, &path, &stored_file.sha512)
-            .await?;
-        let repaired = self
-            .save_staged_file(downloaded.into_staged()?, sources)
-            .await?;
-        self.restore_quarantined_hardlinks(&repaired).await
     }
 }

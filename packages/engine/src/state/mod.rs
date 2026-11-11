@@ -76,8 +76,6 @@ mod mr_auth;
 
 pub use self::mr_auth::*;
 
-mod legacy_converter;
-
 pub mod attached_world_data;
 pub mod hidden_instances;
 pub mod server_join_log;
@@ -120,8 +118,6 @@ pub struct State {
     //
     // /// App identifier string (like com.modrinth.ModrinthApp)
     // pub app_identifier: String,
-    pub restart_after_pending_update: AtomicBool,
-
     pub(crate) pool: SqlitePool,
 
     pub(crate) file_watcher: FileWatcher,
@@ -150,20 +146,13 @@ impl State {
         }
         state.content_store.recover(None).await?;
         crate::install::recovery::recover_interrupted_jobs(state).await?;
-        content_store::migrate(state).await?;
+        state
+            .content_store
+            .recover_abandoned(&state.directories.install_backups_dir())
+            .await?;
         state
             .startup_complete
             .store(true, std::sync::atomic::Ordering::Release);
-        tokio::spawn(async move {
-            loop {
-                if let Err(error) =
-                    content_store::migrate_instance_copies(state).await
-                {
-                    tracing::warn!("Content copy migration deferred: {error}");
-                }
-                tokio::time::sleep(std::time::Duration::from_secs(10)).await;
-            }
-        });
         tokio::spawn(async move {
             let mut interval =
                 tokio::time::interval(std::time::Duration::from_secs(600));
@@ -173,10 +162,14 @@ impl State {
             loop {
                 interval.tick().await;
                 if let Err(error) =
-                    crate::api::instance::synced_packs::migrate_store(state)
-                        .await
+                    crate::api::instance::synced_packs::reconcile_retention(
+                        state,
+                    )
+                    .await
                 {
-                    tracing::warn!("Synced-pack migration deferred: {error}");
+                    tracing::warn!(
+                        "Synced-pack retention pass deferred: {error}"
+                    );
                 }
                 if let Err(error) =
                     CachedEntry::purge_long_expired(&state.pool).await
@@ -216,10 +209,6 @@ impl State {
                 tracing::error!(
                     "Failed to reconcile instance synced options during startup: {error}"
                 );
-            }
-
-            if let Err(e) = crate::api::instance::migrate_legacy_icons().await {
-                tracing::error!("Error migrating legacy instance icons: {e}");
             }
 
             let res = tokio::try_join!(
@@ -304,7 +293,6 @@ impl State {
             content_store::ContentStore::lock_process(&settings_dir).await?;
         let pool = db::connect(&app_identifier).await?;
 
-        legacy_converter::migrate_legacy_data(&pool).await?;
         crate::self_hosted::accounts::bind_origin(&pool).await?;
 
         tracing::info!("Fetching app settings");
@@ -354,7 +342,6 @@ impl State {
             synced_options: SyncedOptions::default(),
             presence,
             process_manager,
-            restart_after_pending_update: AtomicBool::new(false),
             pool,
             file_watcher,
             // app_identifier,

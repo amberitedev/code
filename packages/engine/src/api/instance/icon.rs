@@ -28,12 +28,6 @@ const REMOTE_ICON_MAX_AGE: std::time::Duration =
 static REMOTE_ICON_DOWNLOADS: tokio::sync::Semaphore =
     tokio::sync::Semaphore::const_new(4);
 
-enum LegacyIconAction {
-    Keep,
-    Normalize,
-    Remove,
-}
-
 pub async fn edit_icon(
     instance_id: &str,
     icon_path: Option<&Path>,
@@ -304,59 +298,6 @@ pub(crate) async fn cache_icon_from_path(
     write_cached_icon(bytes, state).await
 }
 
-pub(crate) async fn migrate_legacy_icons() -> crate::Result<()> {
-    let state = State::get().await?;
-    let instances = instance_rows::list_instances(&state.pool).await?;
-
-    for instance in instances {
-        let Some(icon_path) = instance.icon_path.as_deref() else {
-            continue;
-        };
-        let action = match inspect_legacy_icon(Path::new(icon_path)) {
-            Ok(action) => action,
-            Err(error) => {
-                tracing::warn!(
-                    instance_id = instance.id,
-                    icon_path,
-                    error = %error,
-                    "Failed to inspect legacy instance icon"
-                );
-                continue;
-            }
-        };
-
-        match action {
-            LegacyIconAction::Keep => {}
-            LegacyIconAction::Normalize => {
-                if let Err(error) =
-                    edit_icon(&instance.id, Some(Path::new(icon_path))).await
-                {
-                    tracing::warn!(
-                        instance_id = instance.id,
-                        icon_path,
-                        error = %error,
-                        "Failed to normalize legacy instance icon"
-                    );
-                }
-            }
-            LegacyIconAction::Remove => {
-                if let Err(error) =
-                    apply_instance_icon(&instance.id, None, None, &state).await
-                {
-                    tracing::warn!(
-                        instance_id = instance.id,
-                        icon_path,
-                        error = %error,
-                        "Failed to remove legacy SVG instance icon"
-                    );
-                }
-            }
-        }
-    }
-
-    Ok(())
-}
-
 async fn apply_instance_icon(
     instance_id: &str,
     icon_path: Option<String>,
@@ -459,33 +400,6 @@ where
         ))?;
 
     validate_normalized_icon(normalized.into_inner())
-}
-
-fn inspect_legacy_icon(icon_path: &Path) -> crate::Result<LegacyIconAction> {
-    let metadata =
-        std::fs::metadata(icon_path).context(ErrorKind::InputError(
-            format!("could not inspect instance icon {}", icon_path.display()),
-        ))?;
-    let file = StdFile::open(icon_path).context(ErrorKind::InputError(
-        format!("could not open instance icon {}", icon_path.display()),
-    ))?;
-    let mut reader = BufReader::new(file);
-    let bytes = reader.fill_buf().context(ErrorKind::InputError(format!(
-        "could not inspect instance icon {}",
-        icon_path.display()
-    )))?;
-
-    if has_svg_extension(icon_path) || looks_like_svg(bytes) {
-        return Ok(LegacyIconAction::Remove);
-    }
-
-    if metadata.len() < INSTANCE_ICON_MAX_BYTES as u64
-        && image::guess_format(bytes).ok() == Some(image::ImageFormat::Png)
-    {
-        return Ok(LegacyIconAction::Keep);
-    }
-
-    Ok(LegacyIconAction::Normalize)
 }
 
 fn validate_normalized_icon(normalized: Vec<u8>) -> crate::Result<Bytes> {

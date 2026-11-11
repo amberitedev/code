@@ -1218,8 +1218,7 @@ pub(in crate::api::instance) async fn decorate_content(
                     instance_ids: synced_instance_ids(
                         id, &library, &instances, global,
                     ),
-                    update_pending: pack.migration_error.is_some()
-                        || placement.pending
+                    update_pending: placement.pending
                         || item.enabled != pack.item.enabled
                         || placement.error.is_some(),
                 });

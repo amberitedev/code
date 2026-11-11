@@ -7,7 +7,7 @@ mod worker;
 
 pub(crate) use worker::{PackSyncWorker, queue_reconciliation};
 
-pub(crate) use storage::migrate_store;
+pub(crate) use storage::reconcile_retention;
 
 pub use operations::{
     desync_pack, get_pack_sync_preview, list_synced_packs, remove_synced_pack,
@@ -45,10 +45,7 @@ struct PackLibrary {
 struct SyncedPack {
     item: ContentItem,
     sha1: String,
-    #[serde(default)]
-    blob_sha512: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    migration_error: Option<String>,
+    blob_sha512: String,
     game_versions: Vec<String>,
     #[serde(default)]
     selected: Option<bool>,

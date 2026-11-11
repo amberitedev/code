@@ -98,12 +98,6 @@ pub(in crate::state::content_store) async fn delete_file(
     Ok(())
 }
 
-pub(in crate::state::content_store) fn file_sources(
-    stored_file: &StoredFileMetadata,
-) -> crate::Result<Vec<String>> {
-    Ok(serde_json::from_str(&stored_file.sources)?)
-}
-
 pub(in crate::state::content_store) fn encode_sources(
     sources: &[String],
 ) -> crate::Result<String> {

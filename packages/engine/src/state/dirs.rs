@@ -1,7 +1,7 @@
 //! Theseus directory information
 pub(crate) mod move_app_directory;
 use crate::event::emit::{emit_loading, init_loading};
-use crate::state::{Settings, State};
+use crate::state::Settings;
 use crate::util::fetch::IoSemaphore;
 use crate::{ErrorKind, LoadingBarType};
 use anyhow::Context;
@@ -23,10 +23,6 @@ pub struct DirectoryInfo {
 }
 
 impl DirectoryInfo {
-    pub fn global_handle_if_ready() -> Option<Self> {
-        State::get_if_initialized().map(|state| state.directories.clone())
-    }
-
     pub fn get_initial_settings_dir(&self) -> Option<PathBuf> {
         Self::initial_settings_dir_path(&self.app_identifier)
     }
