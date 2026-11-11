@@ -146,7 +146,7 @@ pub(super) async fn write_library(
         }
         .await;
         if let Err(error) = repair {
-            tracing::warn!(%error, "Synced pack retention will be reconciled on the next migration");
+            tracing::warn!(%error, "Synced pack retention will be reconciled on the next cleanup pass");
         }
     }
     result
@@ -234,66 +234,7 @@ pub(super) async fn read_stored_file(
         .stored_file)
 }
 
-pub(crate) async fn migrate_store(state: &State) -> crate::Result<()> {
-    let ids = {
-        let _guard = state.synced_options.lock().await;
-        read_library(state)
-            .await?
-            .packs
-            .keys()
-            .cloned()
-            .collect::<Vec<_>>()
-    };
-    for id in ids {
-        let snapshot = {
-            let _guard = state.synced_options.lock().await;
-            read_library(state).await?
-        };
-        let Some(expected) = snapshot.packs.get(&id) else {
-            continue;
-        };
-        let recovered =
-            recover_legacy_pack(Some(&id), expected, &snapshot, state).await;
-        let _guard = state.synced_options.lock().await;
-        let mut library = read_library(state).await?;
-        let Some(previous) = library.packs.get(&id).cloned() else {
-            continue;
-        };
-        if previous.sha1 != expected.sha1
-            || previous.blob_sha512 != expected.blob_sha512
-        {
-            continue;
-        }
-        let mut pack = previous.clone();
-        match &recovered {
-            Ok(stored_file) => {
-                pack.blob_sha512 = Some(stored_file.metadata.sha512.clone());
-                pack.item.size = stored_file.metadata.size as u64;
-                pack.migration_error = None;
-            }
-            Err(error) => {
-                pack.migration_error = Some(error.to_string());
-                tracing::warn!(pack_id = %id, "Synced pack migration deferred: {error}");
-            }
-        }
-        let mut changed = pack.blob_sha512 != previous.blob_sha512
-            || pack.item.size != previous.item.size
-            || pack.migration_error != previous.migration_error;
-        for placements in library.instances.values_mut() {
-            if let Some(placement) = placements.get_mut(&id)
-                && (pack.migration_error.is_some()
-                    || placement.error == previous.migration_error)
-            {
-                changed |= placement.error != pack.migration_error;
-                placement.error.clone_from(&pack.migration_error);
-            }
-        }
-        library.packs.insert(id, pack);
-        if changed {
-            write_library(&library, state).await?;
-        }
-    }
-    let cache_complete = cleanup_legacy_cache(state).await?;
+pub(crate) async fn reconcile_retention(state: &State) -> crate::Result<()> {
     let _guard = state.synced_options.lock().await;
     if tokio::fs::try_exists(directory(state)).await? {
         crate::state::content_store::sync_directory(&directory(state)).await?;
@@ -328,16 +269,6 @@ pub(crate) async fn migrate_store(state: &State) -> crate::Result<()> {
             state.content_store.release("synced-cache", &owner).await?;
         }
     }
-    let complete = cache_complete
-        && library.packs.values().all(|pack| {
-            pack.blob_sha512.is_some() && pack.migration_error.is_none()
-        });
-    crate::state::content_store::set_setting(
-        &state.pool,
-        "store_synced_packs_migrated",
-        if complete { "1" } else { "0" },
-    )
-    .await?;
     Ok(())
 }
 
@@ -431,63 +362,4 @@ async fn import_matching_pack(
         ));
     }
     Ok(Some(stored_file))
-}
-
-async fn cleanup_legacy_cache(state: &State) -> crate::Result<bool> {
-    let legacy = directory(state).join("files");
-    if !tokio::fs::try_exists(&legacy).await? {
-        return Ok(true);
-    }
-    let mut complete = true;
-    let mut entries = tokio::fs::read_dir(&legacy).await?;
-    while let Some(entry) = entries.next_entry().await? {
-        let _guard = state.synced_options.lock().await;
-        let library = read_library(state).await?;
-        if !entry.file_type().await?.is_file() {
-            continue;
-        }
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if validate_digest(&name, 40).is_err() {
-            continue;
-        }
-        if library.packs.values().any(|pack| {
-            pack.sha1 == name
-                && (pack.migration_error.is_some()
-                    || pack.blob_sha512.is_none())
-        }) {
-            complete = false;
-            continue;
-        }
-        let result: crate::Result<()> = async {
-            if crate::util::fetch::sha1_file_async(entry.path()).await?.1
-                != name
-            {
-                let quarantine = directory(state).join("quarantine");
-                tokio::fs::create_dir_all(&quarantine).await?;
-                tokio::fs::rename(
-                    entry.path(),
-                    quarantine.join(format!("{name}-{}", uuid::Uuid::new_v4())),
-                )
-                .await?;
-            } else {
-                state.content_store.store_file(&entry.path()).await?;
-                tokio::fs::remove_file(entry.path()).await?;
-            }
-            Ok(())
-        }
-        .await;
-        if let Err(error) = result {
-            complete = false;
-            tracing::warn!(path = %entry.path().display(), "Preserving legacy cache file for a later retry: {error}");
-        }
-    }
-    if tokio::fs::read_dir(&legacy)
-        .await?
-        .next_entry()
-        .await?
-        .is_none()
-    {
-        tokio::fs::remove_dir(&legacy).await?;
-    }
-    Ok(complete)
 }

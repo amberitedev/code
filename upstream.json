@@ -84,6 +84,8 @@
 		"apps/labrinth/src/routes/v3/notifications.rs": "apps/backend/src/social/index.ts",
 		"apps/labrinth/src/routes/v3/users.rs": "apps/backend/src/social/index.ts",
 		"apps/labrinth/src/sync/friends.rs": "apps/backend/src/social/socket.ts",
+		"packages/app-lib/src/state/content_store/commands/migration.rs": "packages/engine/src/state/content_store/commands/recovery.rs",
+		"packages/app-lib/src/state/legacy_converter.rs": "",
 		"packages/ariadne/src/networking": "apps/backend/src/social/socket.ts"
 	}
 }

@@ -7,7 +7,7 @@ mod worker;
 
 pub(crate) use worker::{PackSyncWorker, queue_reconciliation};
 
-pub(crate) use storage::migrate_store;
+pub(crate) use storage::reconcile_retention;
 
 pub use operations::{
     desync_pack, get_pack_sync_preview, list_synced_packs, remove_synced_pack,

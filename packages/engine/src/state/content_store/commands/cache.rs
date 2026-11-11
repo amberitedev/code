@@ -163,16 +163,6 @@ impl ContentStore {
         purge_unused: bool,
     ) -> crate::Result<u64> {
         let _exclusive = self.cleanup_lock.try_write().map_err(|_| ErrorKind::ContentStoreError("the shared store is busy; try cleanup again after content operations finish".into()))?;
-        if catalog::setting(&self.pool, "store_layout_version")
-            .await?
-            .as_deref()
-            != Some("1")
-        {
-            bail!(ErrorKind::ContentStoreError(
-                "finish shared-store migration before cleaning its cache"
-                    .into(),
-            ));
-        }
         let _runtime_exclusive = self.runtime_cache_lock.try_write()
 			.map_err(|_| ErrorKind::ContentStoreError("game or Java files are in use; try cleanup again after the operation finishes".into()))?;
         let runtime =
