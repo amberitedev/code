@@ -6,7 +6,6 @@
 //! - `rules`: which files a share may carry, and what a blocked file is.
 //! - `push`: the writer of a share's versions.
 //! - `pool`: the client for Cores' stores, and fetching a version's files from them.
-//! - `consume`: a version as a server takes it.
 //! - `install`: a version as a member installs it, beside or on top of its modpack.
 //! - `diff`: what one share content changes over another, for updates, pushes and history.
 //! - `history`: the versions an owner pushed, kept locally by the side that pushed them.
@@ -15,7 +14,6 @@
 //! - `disk`: free disk space, checked before the store and Core write.
 
 pub mod backend;
-pub mod consume;
 pub mod crypto;
 pub mod diff;
 pub mod disk;

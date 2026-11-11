@@ -19,13 +19,21 @@ pub use listing::{
 
 use std::path::{Component, Path};
 
-use bedrock::state::ProjectType;
 use contracts::rules::{SERVER_SHARE_FOLDER, SHAREABLE_CONFIG_EXTENSIONS};
+use modrinth_content_management::ContentType;
 
 /// The manifest type of a single file the owner picked, named by its path.
 pub const CONFIG_FILE_TYPE: &str = "config";
 /// Leading bytes of each file passed to [`is_executable_content`].
 pub const SCAN_HEAD_SIZE: usize = 8192;
+/// The folder of each content type an instance or server folder holds. Plugins and modpacks have
+/// none.
+const CONTENT_FOLDERS: [(ContentType, &str); 4] = [
+    (ContentType::Mod, "mods"),
+    (ContentType::DataPack, "datapacks"),
+    (ContentType::ResourcePack, "resourcepacks"),
+    (ContentType::Shader, "shaderpacks"),
+];
 
 /// Extensions of executables, scripts and installers, which no share carries.
 const EXECUTABLE_EXTENSIONS: &[&str] = &[
@@ -144,9 +152,29 @@ fn extension(path: &str) -> Option<String> {
     Some(extension.to_ascii_lowercase())
 }
 
+/// The content type with a folder that `name` names, by its manifest type (`shader`) or its
+/// folder (`shaderpacks`).
+pub(crate) fn content_type(name: &str) -> Option<ContentType> {
+    CONTENT_FOLDERS
+        .into_iter()
+        .find(|(content_type, folder)| {
+            content_type.as_str() == name || *folder == name
+        })
+        .map(|(content_type, _)| content_type)
+}
+
+/// The folder content of `content_type` goes in.
+pub(crate) fn content_folder(
+    content_type: ContentType,
+) -> Option<&'static str> {
+    CONTENT_FOLDERS
+        .into_iter()
+        .find(|(listed, _)| *listed == content_type)
+        .map(|(_, folder)| folder)
+}
+
 fn is_content_folder(path: &str) -> bool {
-    ProjectType::iterator()
-        .any(|project_type| project_type.get_folder() == path)
+    CONTENT_FOLDERS.iter().any(|(_, folder)| *folder == path)
 }
 
 #[cfg(test)]
@@ -184,6 +212,15 @@ mod tests {
         assert!(INSTANCE.reaches("tool.exe"));
         assert!(!INSTANCE.carries("tool.exe"));
         assert!(!INSTANCE.reaches("../a.txt"));
+    }
+
+    #[test]
+    fn content_types_are_named_by_type_or_folder() {
+        assert_eq!(content_type("shader"), Some(ContentType::Shader));
+        assert_eq!(content_type("shaderpacks"), Some(ContentType::Shader));
+        assert_eq!(content_folder(ContentType::DataPack), Some("datapacks"));
+        assert_eq!(content_type("plugin"), None);
+        assert_eq!(content_folder(ContentType::ModPack), None);
     }
 
     #[test]

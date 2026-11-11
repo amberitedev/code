@@ -17,10 +17,8 @@ use modrinth_content_management::{
     LoaderReference, diff_configuration, diff_content_sets,
 };
 
-use bedrock::state::ProjectType;
-
 use crate::install::{ModpackFile, split_content};
-use crate::rules::CONFIG_FILE_TYPE;
+use crate::rules::{CONFIG_FILE_TYPE, content_type};
 use crate::versions::{ManifestFile, VersionContent};
 
 pub use model::{SharedInstanceUpdateDiff, SharedInstanceUpdateDiffType};
@@ -93,7 +91,7 @@ impl ShareContent {
         for file in split.unknown_modpack_files() {
             let key = file.path.split_once('/').and_then(|(parent, name)| {
                 Some(ExternalFileKey {
-                    content_type: ProjectType::from_name(parent)?.into(),
+                    content_type: content_type(parent)?,
                     path: name.to_owned(),
                 })
             });

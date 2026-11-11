@@ -14,10 +14,12 @@ pub mod limits;
 pub mod rules;
 #[cfg(feature = "server")]
 pub mod server;
+mod side;
 #[cfg(feature = "ts")]
 pub mod ts;
 
 pub use error::{ApiError, ErrorCode};
+pub use side::Side;
 
 /// Bumped only when old and new sides can no longer talk to each other. Releases do not touch it.
 pub const PROTOCOL_VERSION: u32 = 1;

@@ -7,7 +7,6 @@
 use std::sync::Arc;
 
 use sharing_client::backend::Backend;
-use sharing_client::consume::ReadyVersion;
 use tokio::sync::Notify;
 
 use super::{
@@ -19,6 +18,7 @@ use super::{
 };
 use crate::{
     servers::ServerError,
+    share_pack::ReadyVersion,
     state::servers::{
         Busy, Content, Error, Installing, PendingPack, PropertiesFields,
         SharedInstanceLink, adapters::sqlite::content_rows,

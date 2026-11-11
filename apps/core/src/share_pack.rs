@@ -1,7 +1,7 @@
 //! The reading side of a share: a version as a server takes it. A server's Core reads the latest
 //! version of the share it follows with [`ready_version`], builds a [`ServerPack`] from it with
-//! [`server_pack`], fetches its files with [`crate::pool::fetch`], and installs it like any
-//! pack.
+//! [`server_pack`], fetches its files with [`sharing_client::pool::fetch`], and installs it like
+//! any pack.
 
 use std::collections::BTreeMap;
 use std::future::Future;
@@ -10,19 +10,19 @@ use bedrock::content::{
     Hashes, Index, IndexFile, Version, loader_dependency, mrpack_env,
 };
 use bedrock::state::ModLoader;
+use contracts::Side;
 use reqwest::StatusCode;
 
-use crate::backend::{Backend, BackendError, Unavailable};
-use crate::install::{
-    ModpackFile, Side, Source, Step, config_update, install_plan,
+use sharing_client::backend::{Backend, BackendError, Unavailable};
+use sharing_client::install::{
+    ModpackFile, Source, Step, config_update, install_plan,
 };
-use crate::pool::{InvalidPoolEntry, PoolFile};
-use crate::versions::ShareVersion;
+use sharing_client::pool::{InvalidPoolEntry, PoolFile};
+use sharing_client::versions::ShareVersion;
 
 /// A share version as a server takes it. `S` is how the caller gets a modpack file's bytes.
 #[derive(Debug, Clone)]
 pub struct ServerPack<S> {
-    pub shared_instance_id: String,
     pub version: i32,
     /// `modrinth.index.json` for the Modrinth mods the version adds over its modpack. Core
     /// writes it with the modpack's own files, and its pack install checks it.
@@ -229,7 +229,6 @@ pub async fn server_pack<M: Modrinth>(
         .collect();
 
     Ok(ServerPack {
-        shared_instance_id: share_id,
         version: version.version,
         modpack_files,
         index: Index {

@@ -10,6 +10,7 @@ mod event;
 mod installs;
 mod network;
 mod servers;
+mod share_pack;
 mod state;
 mod storage;
 mod update;

@@ -1,29 +1,22 @@
+use contracts::Side;
+
 use crate::rules::CONFIG_FILE_TYPE;
 use crate::versions::{ManifestFile, ShareVersion};
 
 use super::{ConfigUpdate, ModpackFile, content_path, version_files};
 
-/// Who installs a version: a member's App instance, or a Core's server following the share.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Side {
-    Client,
-    /// A server takes mods and the config files a version carries; resource packs, shaders and
-    /// the rest are for players. A modpack's own files all go to the server's pack install,
-    /// which leaves out the client-only ones itself.
-    Server,
-}
-
-impl Side {
-    /// Where a manifest entry goes on this side, or `None` when this side does not take it.
-    pub fn path(self, file_type: &str, file_name: &str) -> Option<String> {
-        match self {
-            Self::Client => content_path(file_type, file_name),
-            Self::Server => match file_type {
-                CONFIG_FILE_TYPE => Some(file_name.to_owned()),
-                "mod" => Some(format!("mods/{file_name}")),
-                _ => None,
-            },
-        }
+/// Where a manifest entry goes on `side`, or `None` when that side does not take it. A server
+/// takes mods and the config files a version carries; resource packs, shaders and the rest are
+/// for players. A modpack's own files all go to the server's pack install, which leaves out the
+/// client-only ones itself.
+fn side_path(side: Side, file_type: &str, file_name: &str) -> Option<String> {
+    match side {
+        Side::Client => content_path(file_type, file_name),
+        Side::Server => match file_type {
+            CONFIG_FILE_TYPE => Some(file_name.to_owned()),
+            "mod" => Some(format!("mods/{file_name}")),
+            _ => None,
+        },
     }
 }
 
@@ -121,7 +114,8 @@ pub fn install_plan<S>(
             .any(|written| written.file_name == file.file_name)
     };
     for file in &version.external_files {
-        let Some(path) = side.path(&file.file_type, &file.file_name) else {
+        let Some(path) = side_path(side, &file.file_type, &file.file_name)
+        else {
             continue;
         };
         let config = file.file_type == CONFIG_FILE_TYPE;
@@ -138,7 +132,7 @@ pub fn install_plan<S>(
         });
     }
     for file in configs.left {
-        if let Some(path) = side.path(&file.file_type, &file.file_name) {
+        if let Some(path) = side_path(side, &file.file_type, &file.file_name) {
             steps.push(Step::Delete { path, file });
         }
     }

@@ -27,7 +27,6 @@ use axum::{
 };
 use modrinth_content_management::{ContentType, VersionType};
 use serde::{Deserialize, Serialize};
-use sharing_client::consume;
 use tokio::io::AsyncWriteExt;
 use ts_rs::TS;
 
@@ -41,6 +40,7 @@ use crate::{
     access::{Caller, Level, activity},
     installs::{ModLoader, shared::SharedDirs},
     servers::{Hold, ServerError},
+    share_pack as consume,
     state::servers::{
         self as content, Busy,
         adapters::{

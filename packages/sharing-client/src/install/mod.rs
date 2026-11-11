@@ -13,7 +13,8 @@ pub use changes::{
     ContentChanges, ContentProject, CurrentFile, DesiredFile, content_changes,
 };
 pub use configs::{ConfigUpdate, config_update};
+pub use contracts::Side;
 pub use modpack::{
     ModpackFile, VersionFiles, content_path, split_content, version_files,
 };
-pub use plan::{InstallPlan, Side, Source, Step, install_plan};
+pub use plan::{InstallPlan, Source, Step, install_plan};

@@ -1,6 +1,4 @@
-use bedrock::state::ProjectType;
-
-use crate::rules::CONFIG_FILE_TYPE;
+use crate::rules::{CONFIG_FILE_TYPE, content_folder, content_type};
 use crate::versions::{RemovedFile, ShareVersion, VersionContent};
 
 /// A file a version's modpack places, as the caller read it from the modpack: an index entry or
@@ -72,8 +70,9 @@ pub fn content_path(file_type: &str, file_name: &str) -> Option<String> {
     if file_type == CONFIG_FILE_TYPE {
         return Some(file_name.to_owned());
     }
-    ProjectType::from_name(file_type)
-        .map(|kind| format!("{}/{file_name}", kind.get_folder()))
+    content_type(file_type)
+        .and_then(content_folder)
+        .map(|folder| format!("{folder}/{file_name}"))
 }
 
 /// `version`'s content less what its modpack places, from `modpack`, every file of the

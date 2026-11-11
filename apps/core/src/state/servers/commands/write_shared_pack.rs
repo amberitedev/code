@@ -15,13 +15,13 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use sharing_client::backend::Backend;
-use sharing_client::consume::{self, ReadyVersion, ServerPackError};
 use sharing_client::install::ModpackFile;
 use sharing_client::pool::{self, FetchError, PoolFile};
 
 use super::install_pack as install;
 use crate::{
     installs::{ModLoader, shared::SharedDirs},
+    share_pack::{self, ReadyVersion, ServerPackError},
     state::servers::{
         Content, Error,
         adapters::filesystem::archive::{self, NoRoom},
@@ -42,7 +42,7 @@ pub enum PackEntry {
     },
 }
 
-/// Fetch the files of `version` (read with [`consume::ready_version`] through `backend`) and
+/// Fetch the files of `version` (read with [`share_pack::ready_version`] through `backend`) and
 /// write it as an `.mrpack` named `name` in the shared store. Holders that serve bad bytes are
 /// reported through `backend`, as a member's App reports them. Returns the pack's SHA-1 and the
 /// version.
@@ -53,7 +53,7 @@ pub async fn write_pack(
     version: ReadyVersion,
     name: &str,
 ) -> Result<(String, i32), Error> {
-    let version = consume::server_pack(version, name, &Lookup(content))
+    let version = share_pack::server_pack(version, name, &Lookup(content))
         .await
         .map_err(|error| match error {
             ServerPackError::Modrinth(error) => error,
@@ -125,7 +125,7 @@ pub async fn write_pack(
 /// Modrinth as a share's server pack needs it, through Core's own client.
 struct Lookup<'a>(&'a Content);
 
-impl consume::Modrinth for Lookup<'_> {
+impl share_pack::Modrinth for Lookup<'_> {
     type Error = Error;
     type Source = PackEntry;
 
