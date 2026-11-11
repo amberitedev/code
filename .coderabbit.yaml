@@ -20,8 +20,6 @@ reviews:
       - '^restructure/'
 
   path_filters:
-    # TEMPORARY, this pull request only: the 589 moved files would put the review over the limit.
-    - '!packages/engine/**'
     - '!**/Cargo.lock'
     - '!**/pnpm-lock.yaml'
     - '!**/.sqlx/**'
