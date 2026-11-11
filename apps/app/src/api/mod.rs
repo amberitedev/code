@@ -1,6 +1,6 @@
+use engine::error_code;
 use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
-use theseus::error_code;
 
 pub mod auth;
 pub mod import;

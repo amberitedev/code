@@ -1,18 +1,18 @@
-use serde::{Deserialize, Serialize};
-use tauri::{Manager, Runtime};
-use tauri_plugin_opener::OpenerExt;
-use theseus::{
+use engine::{
     emit_warning, handler,
     prelude::{CommandPayload, DirectoryInfo, app_db_backup_dir},
 };
+use serde::{Deserialize, Serialize};
+use tauri::{Manager, Runtime};
+use tauri_plugin_opener::OpenerExt;
 
 use crate::api::Result;
 use crate::api::oauth_utils::auth_code_reply::{
     normalize_deep_link_command, parse_auth_deeplink, submit_deeplink,
 };
 use dashmap::DashMap;
+use engine::prelude::canonicalize;
 use std::path::{Path, PathBuf};
-use theseus::prelude::canonicalize;
 use tokio_util::sync::CancellationToken;
 use url::Url;
 
@@ -59,7 +59,7 @@ pub fn init<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
 
 #[tauri::command]
 pub async fn cache_remote_icon(source: &str) -> Result<String> {
-    let path = theseus::instance::cache_remote_icon(source).await?;
+    let path = engine::instance::cache_remote_icon(source).await?;
     Ok(tauri_convert_file_src(&path)?.to_string())
 }
 
@@ -85,7 +85,7 @@ pub fn get_os() -> OS {
 
 #[tauri::command]
 pub async fn is_network_metered() -> Result<bool> {
-    Ok(theseus::prelude::is_network_metered().await?)
+    Ok(engine::prelude::is_network_metered().await?)
 }
 
 // Lists active progress bars
@@ -93,8 +93,8 @@ pub async fn is_network_metered() -> Result<bool> {
 // Values provided should not be used directly, as they are not guaranteed to be up-to-date
 #[tauri::command]
 pub async fn progress_bars_list()
--> Result<DashMap<uuid::Uuid, theseus::LoadingBar>> {
-    let res = theseus::EventState::list_progress_bars().await?;
+-> Result<DashMap<uuid::Uuid, engine::LoadingBar>> {
+    let res = engine::EventState::list_progress_bars().await?;
     Ok(res)
 }
 
@@ -172,7 +172,7 @@ pub async fn export_debug_info<R: Runtime>(
     id: String,
     path: PathBuf,
     on_progress: tauri::ipc::Channel<
-        theseus::debug_info::DebugInfoExportProgress,
+        engine::debug_info::DebugInfoExportProgress,
     >,
 ) -> Result<bool> {
     let key = (window.label().to_string(), id);
@@ -189,7 +189,7 @@ pub async fn export_debug_info<R: Runtime>(
         }
     }
     let result =
-        theseus::debug_info::export_debug_info(path, cancel, move |progress| {
+        engine::debug_info::export_debug_info(path, cancel, move |progress| {
             let _ = on_progress.send(progress);
         })
         .await;
@@ -208,8 +208,8 @@ pub fn cancel_debug_info_export<R: Runtime>(
     }
 }
 
-/// Amberite's own deep links, next to the Modrinth ones app-lib parses. The frontend handles both
-/// in `handleCommand`, told apart by `event`.
+/// Amberite's own deep links, next to the Modrinth ones the engine parses. The frontend handles
+/// both in `handleCommand`, told apart by `event`.
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "event")]
 pub enum AmberiteCommand {
@@ -301,7 +301,7 @@ pub async fn handle_command<R: Runtime>(
     }
 
     tracing::info!("handle command: {command}");
-    // Amberite's own links go straight to the frontend; app-lib only knows the Modrinth ones.
+    // Amberite's own links go straight to the frontend; the engine only knows the Modrinth ones.
     if let Some(command) = amberite_command(&command) {
         use tauri::Emitter;
         app.emit("amberite-command", command)?;
@@ -310,7 +310,7 @@ pub async fn handle_command<R: Runtime>(
         }
         return Ok(());
     }
-    Ok(theseus::handler::parse_and_emit_command(&command).await?)
+    Ok(engine::handler::parse_and_emit_command(&command).await?)
 }
 
 async fn opening_command(command: &str) -> Result<Option<OpeningCommand>> {

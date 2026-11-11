@@ -38,10 +38,10 @@ reviews:
     - '!.idea/**'
 
   path_instructions:
-    - path: 'packages/{engine,app-lib}/**'
+    - path: 'packages/engine/**'
       instructions: |
-        The engine (packages/app-lib today, packages/engine after the rename) owns instances on one
-        machine. Upstream Modrinth code: keep upstream's names and layout so merges stay clean.
+        The engine owns instances on one machine. Upstream Modrinth code (upstream's app-lib): keep
+        upstream's names and layout so merges stay clean.
         - It never imports a host (apps/app, apps/core, crates theseus_gui and copal). Shared logic
           goes here, host features go in the host.
         - It tells, it never asks: it takes what it needs as arguments and reports through events.
@@ -133,7 +133,7 @@ reviews:
       - name: Engine never imports a host
         mode: warning
         instructions: |
-          Pass if the diff changes nothing under packages/engine or packages/app-lib.
+          Pass if the diff changes nothing under packages/engine.
           Fail if a change there adds a dependency on, or an import from, theseus_gui, copal, or
           any path under apps/, or adds new use of tauri. Code that is only moved or renamed,
           including a crate or folder rename, counts as existing, not added.
@@ -151,7 +151,7 @@ reviews:
         mode: warning
         instructions: |
           Fail if the diff adds a route, or changes a route's method, path, request or response, in
-          apps/app, apps/core, apps/backend, packages/engine, packages/app-lib or
+          apps/app, apps/core, apps/backend, packages/engine or
           packages/sharing-storage, and the route is not served from a contracts::Endpoint impl
           declared in packages/contracts, packages/engine/src/endpoints,
           apps/app/src/server/endpoints or apps/core (apps/backend uses the TS generated from
@@ -162,7 +162,7 @@ reviews:
       - name: No desktop code on a Core
         mode: warning
         instructions: |
-          Fail if the diff adds, under apps/core, packages/engine or packages/app-lib, code or
+          Fail if the diff adds, under apps/core or packages/engine, code or
           migrations for desktop-only features: Discord, friends, skins, Minecraft or Modrinth
           sign-in, windows, dialogs, shortcuts, the updater, or a Tauri API. Code under apps/app
           passes. Code that is only moved or renamed, including a crate or folder rename, counts as

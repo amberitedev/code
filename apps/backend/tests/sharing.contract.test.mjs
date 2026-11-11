@@ -4,7 +4,7 @@ import test from 'node:test'
 
 import { startBackend } from './worker.mjs'
 
-// Every request here is one the App sends from `packages/app-lib/src/api/instance/shared` or a
+// Every request here is one the App sends from `packages/engine/src/api/instance/shared` or a
 // Core sends from `apps/core/src/storage.rs`, with the same method, path and body, and
 // every response is checked for the fields that code reads. Files never reach the backend: the
 // App sends a manifest of encrypted objects and the Core reports which versions it holds.

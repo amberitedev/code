@@ -3,12 +3,12 @@ use crate::api::oauth_utils;
 use crate::api::oauth_utils::auth_code_reply::AuthReplySession;
 use crate::api::oauth_utils::auth_seal::AuthSeal;
 use anyhow::Context;
+use engine::ErrorKind;
+use engine::prelude::*;
 use tauri::Manager;
 use tauri::Runtime;
 use tauri::plugin::TauriPlugin;
 use tauri_plugin_opener::OpenerExt;
-use theseus::ErrorKind;
-use theseus::prelude::*;
 use url::Url;
 
 const LAUNCHER_AUTH_PROTOCOL: &str = "2";
@@ -63,27 +63,27 @@ pub async fn modrinth_login<R: Runtime>(
 
 #[tauri::command]
 pub async fn logout() -> Result<()> {
-    Ok(theseus::mr_auth::logout().await?)
+    Ok(engine::mr_auth::logout().await?)
 }
 
 #[tauri::command]
 pub async fn get() -> Result<Option<ModrinthCredentials>> {
-    Ok(theseus::mr_auth::get_credentials().await?)
+    Ok(engine::mr_auth::get_credentials().await?)
 }
 
 #[tauri::command]
 pub async fn get_all() -> Result<Vec<ModrinthCredentials>> {
-    Ok(theseus::mr_auth::get_all().await?)
+    Ok(engine::mr_auth::get_all().await?)
 }
 
 #[tauri::command]
 pub async fn set_active(user_id: String) -> Result<()> {
-    Ok(theseus::mr_auth::set_active(&user_id).await?)
+    Ok(engine::mr_auth::set_active(&user_id).await?)
 }
 
 #[tauri::command]
 pub async fn remove_account(user_id: String) -> Result<()> {
-    Ok(theseus::mr_auth::remove_user(&user_id).await?)
+    Ok(engine::mr_auth::remove_user(&user_id).await?)
 }
 
 #[tauri::command]

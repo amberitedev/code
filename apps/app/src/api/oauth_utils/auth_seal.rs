@@ -53,7 +53,7 @@ impl AuthSeal {
         &self.nonce
     }
 
-    pub fn public_key(&self) -> Result<String, theseus::Error> {
+    pub fn public_key(&self) -> Result<String, engine::Error> {
         let der = self
             .secret
             .public_key()
@@ -63,7 +63,7 @@ impl AuthSeal {
         Ok(URL_SAFE_NO_PAD.encode(der.as_bytes()))
     }
 
-    pub fn open(&self, sealed: &str) -> Result<String, theseus::Error> {
+    pub fn open(&self, sealed: &str) -> Result<String, engine::Error> {
         open_session(&self.secret, sealed, &self.nonce)
     }
 }
@@ -72,7 +72,7 @@ fn open_session(
     secret: &SecretKey,
     sealed: &str,
     expected_nonce: &str,
-) -> Result<String, theseus::Error> {
+) -> Result<String, engine::Error> {
     if sealed.len() > MAX_SEALED_LEN {
         return Err(invalid_sealed_session());
     }
@@ -120,7 +120,7 @@ fn open_session(
 fn derive_cipher(
     secret: &SecretKey,
     public: &PublicKey,
-) -> Result<Aes256Gcm, theseus::Error> {
+) -> Result<Aes256Gcm, engine::Error> {
     let shared = diffie_hellman(secret.to_nonzero_scalar(), public.as_affine());
     let mut aes_key = [0u8; 32];
     Hkdf::<Sha256>::new(None, shared.raw_secret_bytes())
@@ -141,6 +141,6 @@ fn is_session_token(token: &str) -> bool {
             .all(|character| character.is_ascii_alphanumeric())
 }
 
-fn invalid_sealed_session() -> theseus::Error {
+fn invalid_sealed_session() -> engine::Error {
     anyhow!("invalid sealed app sign-in session")
 }

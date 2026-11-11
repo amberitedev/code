@@ -1,6 +1,6 @@
 # Shared Rust
 
-Code the App and Copal both need exists once, in these crates. The App (`packages/app-lib`,
+Code the App and Copal both need exists once, in these crates. The App (`packages/engine`,
 `apps/app`) and Copal stay thin: state, Tauri commands or HTTP routes, progress.
 
 | Crate                                  | Job                                                                              | Rule                             |
@@ -11,14 +11,14 @@ Code the App and Copal both need exists once, in these crates. The App (`package
 | `packages/sharing-storage`             | The store process                                                                | Ours.                            |
 
 Imports go one way: `modrinth-content-management` -> `bedrock` -> `sharing-client` ->
-`sharing-storage`. Copal never depends on app-lib.
+`sharing-storage`. Copal never depends on the engine.
 
 bedrock holds three kinds of code:
 
-1. Borrowed app-lib files, compiled in place with `#[path]` (`state/`). app-lib imports those types
-   from bedrock instead of compiling them. Prefer this for any app-lib file whose dependencies are
-   small enough for bedrock to provide.
-2. Clones of upstream code tangled with app-lib's `State` (`upstream/`), kept byte for byte where
+1. Borrowed engine files, compiled in place with `#[path]` (`state/`). The engine imports those
+   types from bedrock instead of compiling them. Prefer this for any engine file whose dependencies
+   are small enough for bedrock to provide.
+2. Clones of upstream code tangled with the engine's `State` (`upstream/`), kept byte for byte where
    possible with all adaptation in one glue file, and declared in `packages/bedrock/ports.toml`.
    The App keeps the originals.
 3. Our own shared code: content rules, reaching Cores, disk space, and `limits` (also generated
@@ -33,7 +33,7 @@ version, the version builder and the writer), `pool` (the store client and the f
 side's paths, less its modpack, with the configs an update writes, keeps or deletes; each side
 applies it with its own writer), `diff` (the share diff both sides show) and `crypto`.
 
-New and restructured Rust follows app-lib's layout: `api/` for entry points, `state/<domain>/` with
-`model/` (plain types), `adapters/` (sqlite rows, filesystem, network), `commands/` (one operation
-per file), optional `domain/` (pure rules), and `mod.rs` re-exports. Use app-lib's names for the
-same concepts (`ContentSet`, `ContentEntry`, `list_content`, ...).
+New and restructured Rust follows the engine's layout: `api/` for entry points, `state/<domain>/`
+with `model/` (plain types), `adapters/` (sqlite rows, filesystem, network), `commands/` (one
+operation per file), optional `domain/` (pure rules), and `mod.rs` re-exports. Use the engine's
+names for the same concepts (`ContentSet`, `ContentEntry`, `list_content`, ...).

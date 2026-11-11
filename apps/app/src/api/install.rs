@@ -1,18 +1,18 @@
 use crate::api::Result;
 use crate::api::instance::InstanceLink;
-use serde::Deserialize;
-use std::path::PathBuf;
-use theseus::data::ModLoader;
-use theseus::install::{
+use engine::data::ModLoader;
+use engine::install::{
     InstallJobSnapshot, InstallModpackPreview, InstallPostInstallEdit,
 };
-use theseus::instance::{
+use engine::instance::{
     SharedHistorySettings, SharedInstanceHistoryEntry,
     SharedInstanceInstallPreview, SharedInstanceInviteInstallPreview,
     SharedInstanceUpdatePreview,
 };
-use theseus::pack::import::ImportLauncherType;
-use theseus::pack::install_from::CreatePackLocation;
+use engine::pack::import::ImportLauncherType;
+use engine::pack::install_from::CreatePackLocation;
+use serde::Deserialize;
+use std::path::PathBuf;
 use uuid::Uuid;
 
 pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
@@ -58,7 +58,7 @@ pub struct InstallCreateInstanceRequest {
     pub loader: ModLoader,
     pub loader_version: Option<String>,
     pub icon_path: Option<String>,
-    pub icon_config: Option<theseus::data::IconConfig>,
+    pub icon_config: Option<engine::data::IconConfig>,
     pub link: Option<InstanceLink>,
 }
 
@@ -89,14 +89,14 @@ impl InstallPostInstallEditRequest {
 pub async fn install_get_modpack_preview(
     location: CreatePackLocation,
 ) -> Result<InstallModpackPreview> {
-    Ok(theseus::pack::install_from::get_instance_from_pack(location).await?)
+    Ok(engine::pack::install_from::get_instance_from_pack(location).await?)
 }
 
 #[tauri::command]
 pub async fn install_create_instance(
     request: InstallCreateInstanceRequest,
 ) -> Result<InstallJobSnapshot> {
-    Ok(theseus::install::create_instance(
+    Ok(engine::install::create_instance(
         request.name.trim().to_string(),
         request.game_version,
         request.loader,
@@ -105,7 +105,7 @@ pub async fn install_create_instance(
         request.icon_config,
         match request.link {
             Some(link) => link.into_core()?,
-            None => theseus::data::InstanceLink::Unmanaged,
+            None => engine::data::InstanceLink::Unmanaged,
         },
     )
     .await?)
@@ -116,7 +116,7 @@ pub async fn install_create_modpack_instance(
     location: CreatePackLocation,
     post_install_edit: Option<InstallPostInstallEditRequest>,
 ) -> Result<InstallJobSnapshot> {
-    Ok(theseus::install::create_modpack_instance(
+    Ok(engine::install::create_modpack_instance(
         location,
         post_install_edit.map(|edit| edit.into_core()).transpose()?,
     )
@@ -128,7 +128,7 @@ pub async fn install_get_shared_instance_preview(
     shared_instance_id: String,
     name: String,
 ) -> Result<SharedInstanceInstallPreview> {
-    Ok(theseus::instance::get_shared_instance_install_preview(
+    Ok(engine::instance::get_shared_instance_install_preview(
         &shared_instance_id,
         name,
     )
@@ -140,7 +140,7 @@ pub async fn install_get_shared_instance_invite_preview(
     invite_id: String,
 ) -> Result<SharedInstanceInviteInstallPreview> {
     Ok(
-        theseus::instance::get_shared_instance_invite_install_preview(
+        engine::instance::get_shared_instance_invite_install_preview(
             &invite_id,
         )
         .await?,
@@ -152,20 +152,18 @@ pub async fn install_accept_shared_instance_invite(
     shared_instance_id: String,
     invite_id: String,
 ) -> Result<()> {
-    Ok(
-        theseus::instance::accept_shared_instance_invite_for_install(
-            &shared_instance_id,
-            &invite_id,
-        )
-        .await?,
+    Ok(engine::instance::accept_shared_instance_invite_for_install(
+        &shared_instance_id,
+        &invite_id,
     )
+    .await?)
 }
 
 #[tauri::command]
 pub async fn install_accept_pending_shared_instance_invite(
     shared_instance_id: String,
 ) -> Result<()> {
-    Ok(theseus::instance::accept_pending_shared_instance_invite(
+    Ok(engine::instance::accept_pending_shared_instance_invite(
         &shared_instance_id,
     )
     .await?)
@@ -176,7 +174,7 @@ pub async fn install_get_shared_instance_update_preview(
     instance_id: String,
 ) -> Result<Option<SharedInstanceUpdatePreview>> {
     Ok(
-        theseus::instance::get_shared_instance_update_preview(&instance_id)
+        engine::instance::get_shared_instance_update_preview(&instance_id)
             .await?,
     )
 }
@@ -189,9 +187,9 @@ pub async fn install_shared_instance(
     server_manager_name: Option<String>,
     server_manager_icon_url: Option<String>,
     instance_icon_url: Option<String>,
-    instance_icon_config: Option<theseus::data::IconConfig>,
+    instance_icon_config: Option<engine::data::IconConfig>,
 ) -> Result<InstallJobSnapshot> {
-    Ok(theseus::instance::install_shared_instance(
+    Ok(engine::instance::install_shared_instance(
         &shared_instance_id,
         name,
         manager_id,
@@ -207,14 +205,14 @@ pub async fn install_shared_instance(
 pub async fn install_update_shared_instance(
     instance_id: String,
 ) -> Result<InstallJobSnapshot> {
-    Ok(theseus::instance::update_shared_instance(&instance_id).await?)
+    Ok(engine::instance::update_shared_instance(&instance_id).await?)
 }
 
 #[tauri::command]
 pub async fn install_get_shared_instance_history(
     instance_id: String,
 ) -> Result<Vec<SharedInstanceHistoryEntry>> {
-    Ok(theseus::instance::get_shared_instance_history(&instance_id).await?)
+    Ok(engine::instance::get_shared_instance_history(&instance_id).await?)
 }
 
 #[tauri::command]
@@ -222,20 +220,8 @@ pub async fn install_restore_shared_instance_version(
     instance_id: String,
     version: i32,
 ) -> Result<InstallJobSnapshot> {
-    Ok(theseus::instance::restore_shared_instance_version(
-        &instance_id,
-        version,
-    )
-    .await?)
-}
-
-#[tauri::command]
-pub async fn install_delete_shared_instance_version(
-    instance_id: String,
-    version: i32,
-) -> Result<()> {
     Ok(
-        theseus::instance::delete_shared_instance_version(
+        engine::instance::restore_shared_instance_version(
             &instance_id,
             version,
         )
@@ -244,24 +230,35 @@ pub async fn install_delete_shared_instance_version(
 }
 
 #[tauri::command]
+pub async fn install_delete_shared_instance_version(
+    instance_id: String,
+    version: i32,
+) -> Result<()> {
+    Ok(
+        engine::instance::delete_shared_instance_version(&instance_id, version)
+            .await?,
+    )
+}
+
+#[tauri::command]
 pub async fn install_get_shared_history_settings()
 -> Result<SharedHistorySettings> {
-    Ok(theseus::instance::get_shared_history_settings().await?)
+    Ok(engine::instance::get_shared_history_settings().await?)
 }
 
 #[tauri::command]
 pub async fn install_set_shared_history_kept(
     kept: Option<usize>,
 ) -> Result<SharedHistorySettings> {
-    Ok(theseus::instance::set_shared_history_kept(kept).await?)
+    Ok(engine::instance::set_shared_history_kept(kept).await?)
 }
 
 #[tauri::command]
 pub async fn install_bulk_update_content(
     instance_id: String,
-    updates: Vec<theseus::install::ContentUpdateSelection>,
+    updates: Vec<engine::install::ContentUpdateSelection>,
 ) -> Result<InstallJobSnapshot> {
-    Ok(theseus::install::bulk_update_content(instance_id, updates).await?)
+    Ok(engine::install::bulk_update_content(instance_id, updates).await?)
 }
 
 #[tauri::command]
@@ -270,7 +267,7 @@ pub async fn install_import_instance(
     base_path: PathBuf,
     instance_folder: String,
 ) -> Result<InstallJobSnapshot> {
-    Ok(theseus::install::import_instance(
+    Ok(engine::install::import_instance(
         launcher_type,
         base_path,
         instance_folder,
@@ -282,7 +279,7 @@ pub async fn install_import_instance(
 pub async fn install_duplicate_instance(
     source_instance_id: String,
 ) -> Result<InstallJobSnapshot> {
-    Ok(theseus::install::duplicate_instance(source_instance_id).await?)
+    Ok(engine::install::duplicate_instance(source_instance_id).await?)
 }
 
 #[tauri::command]
@@ -290,7 +287,7 @@ pub async fn install_existing_instance(
     instance_id: String,
     force: bool,
 ) -> Result<InstallJobSnapshot> {
-    Ok(theseus::install::install_existing_instance(instance_id, force).await?)
+    Ok(engine::install::install_existing_instance(instance_id, force).await?)
 }
 
 #[tauri::command]
@@ -299,7 +296,7 @@ pub async fn install_pack_to_existing_instance(
     location: CreatePackLocation,
     post_install_edit: Option<InstallPostInstallEditRequest>,
 ) -> Result<InstallJobSnapshot> {
-    Ok(theseus::install::install_pack_to_existing_instance(
+    Ok(engine::install::install_pack_to_existing_instance(
         instance_id,
         location,
         post_install_edit.map(|edit| edit.into_core()).transpose()?,
@@ -311,40 +308,40 @@ pub async fn install_pack_to_existing_instance(
 pub async fn install_job_list(
     include_finished: bool,
 ) -> Result<Vec<InstallJobSnapshot>> {
-    Ok(theseus::install::list_jobs(include_finished).await?)
+    Ok(engine::install::list_jobs(include_finished).await?)
 }
 
 #[tauri::command]
 pub async fn install_job_get(job_id: Uuid) -> Result<InstallJobSnapshot> {
-    Ok(theseus::install::get_job(job_id).await?)
+    Ok(engine::install::get_job(job_id).await?)
 }
 
 #[tauri::command]
 pub async fn install_job_retry(job_id: Uuid) -> Result<InstallJobSnapshot> {
-    Ok(theseus::install::retry_job(job_id).await?)
+    Ok(engine::install::retry_job(job_id).await?)
 }
 
 #[tauri::command]
 pub async fn install_job_pause(job_id: Uuid) -> Result<InstallJobSnapshot> {
-    Ok(theseus::install::pause_job(job_id).await?)
+    Ok(engine::install::pause_job(job_id).await?)
 }
 
 #[tauri::command]
 pub async fn install_job_resume(job_id: Uuid) -> Result<InstallJobSnapshot> {
-    Ok(theseus::install::resume_job(job_id).await?)
+    Ok(engine::install::resume_job(job_id).await?)
 }
 
 #[tauri::command]
 pub async fn install_job_cancel(job_id: Uuid) -> Result<InstallJobSnapshot> {
-    Ok(theseus::install::cancel_job(job_id).await?)
+    Ok(engine::install::cancel_job(job_id).await?)
 }
 
 #[tauri::command]
 pub async fn install_job_dismiss(job_id: Uuid) -> Result<()> {
-    Ok(theseus::install::dismiss_job(job_id).await?)
+    Ok(engine::install::dismiss_job(job_id).await?)
 }
 
 #[tauri::command]
 pub async fn install_job_support_details(job_id: Uuid) -> Result<String> {
-    Ok(theseus::install::job_support_details(job_id).await?)
+    Ok(engine::install::job_support_details(job_id).await?)
 }

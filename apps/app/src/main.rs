@@ -5,12 +5,12 @@
 #![recursion_limit = "256"]
 
 use anyhow::Context;
+use engine::prelude::*;
 use native_dialog::{DialogBuilder, MessageLevel};
 use std::env;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{Listener, Manager};
 use tauri_plugin_fs::FsExt;
-use theseus::prelude::*;
 
 mod api;
 mod dev;
@@ -31,7 +31,7 @@ async fn initialize_state(
     events: tauri::ipc::Channel<tauri::ipc::InvokeResponseBody>,
 ) -> api::Result<()> {
     tracing::info!("Initializing app event state...");
-    theseus::EventState::init(app.clone(), events).await?;
+    engine::EventState::init(app.clone(), events).await?;
 
     tracing::info!("Initializing app state...");
     State::init(app.config().identifier.clone()).await?;
@@ -127,7 +127,7 @@ async fn set_restart_after_pending_update(
 // ie: deep links or filepaths for .mrpacks
 fn main() {
     dev::prepare();
-    theseus::install_crypto_provider();
+    engine::install_crypto_provider();
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -136,7 +136,7 @@ fn main() {
     tauri::async_runtime::set(runtime.handle().clone());
 
     #[cfg(feature = "export-app-events")]
-    theseus::export_app_event_bindings(
+    engine::export_app_event_bindings(
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../app-frontend/src/generated/app-events"),
     )
@@ -146,14 +146,14 @@ fn main() {
         tracing is set basd on the environment variable RUST_LOG=xxx, depending on the amount of logs to show
             ERROR > WARN > INFO > DEBUG > TRACE
         eg. RUST_LOG=info will show info, warn, and error logs
-            RUST_LOG="theseus=trace" will show *all* messages but from theseus only (and not dependencies using similar crates)
-            RUST_LOG="theseus=trace" will show *all* messages but from theseus only (and not dependencies using similar crates)
+            RUST_LOG="engine=trace" will show *all* messages but from engine only (and not dependencies using similar crates)
+            RUST_LOG="engine=trace" will show *all* messages but from engine only (and not dependencies using similar crates)
 
         Error messages returned to Tauri will display as traced error logs if they return an error.
         This will also include an attached span trace if the error is from a tracing error, and the level is set to info, debug, or trace
 
         on unix:
-            RUST_LOG="theseus=trace" {run command}
+            RUST_LOG="engine=trace" {run command}
 
     */
 
@@ -164,7 +164,7 @@ fn main() {
         tauri_context.config_mut().build.dev_url = Some(dev_url);
     }
 
-    let _log_guard = theseus::start_logger(&tauri_context.config().identifier);
+    let _log_guard = engine::start_logger(&tauri_context.config().identifier);
 
     tracing::info!("Initialized tracing subscriber. Loading Modrinth App!");
 
@@ -184,8 +184,8 @@ fn main() {
 
     #[cfg(feature = "updater")]
     {
+        use engine::launcher_user_agent;
         use tauri_plugin_http::reqwest::header::{HeaderValue, USER_AGENT};
-        use theseus::launcher_user_agent;
         builder = builder.plugin(
             tauri_plugin_updater::Builder::new()
                 .header(
@@ -398,7 +398,7 @@ fn main() {
 
                 if matches!(&event, tauri::RunEvent::ExitRequested { .. })
                     && let Err(error) = tauri::async_runtime::block_on(
-                        theseus::minecraft_skins::flush_pending_skin_change(),
+                        engine::minecraft_skins::flush_pending_skin_change(),
                     )
                 {
                     tracing::warn!(
@@ -416,7 +416,7 @@ fn main() {
                     if let Some((update, data)) = &*update_data.0.lock().unwrap()
                     {
                         fn set_changelog_toast(version: Option<String>) {
-                            let toast_result: theseus::Result<()> = tauri::async_runtime::block_on(async move {
+                            let toast_result: engine::Result<()> = tauri::async_runtime::block_on(async move {
                                 let mut settings = settings::get().await?;
                                 settings.pending_update_toast_for_version = version;
                                 settings::set(settings).await?;

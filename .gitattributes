@@ -34,10 +34,10 @@
 # configuration by leaving it unspecified, which works fine as long as
 # people don't mess with Git's line ending settings, which is the vast
 # majority of cases.
-/packages/app-lib/migrations/20240711194701_init.sql !eol
-/packages/app-lib/migrations/20240813205023_drop-active-unique.sql !eol
-/packages/app-lib/migrations/20240930001852_disable-personalized-ads.sql !eol
-/packages/app-lib/migrations/20241222013857_feature-flags.sql !eol
+/packages/engine/migrations/20240711194701_init.sql !eol
+/packages/engine/migrations/20240813205023_drop-active-unique.sql !eol
+/packages/engine/migrations/20240930001852_disable-personalized-ads.sql !eol
+/packages/engine/migrations/20241222013857_feature-flags.sql !eol
 
 # Keep this fork's agent instructions during upstream merges.
 AGENTS.md merge=keepLocal

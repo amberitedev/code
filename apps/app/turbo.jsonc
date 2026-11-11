@@ -5,7 +5,7 @@
 		// Turborepo derives Cargo inputs for the `theseus_gui` crate, but not for the
 		// `@modrinth/app` pnpm package in this directory, whose scripts also compile it.
 		// The Cargo workspace files and sibling crates are hashed explicitly for those.
-		// The app-lib entries mirror the rerun-if-changed list in its build.rs
+		// The engine entries mirror the rerun-if-changed list in its build.rs
 		"build": {
 			"inputs": [
 				"$TURBO_DEFAULT$",
@@ -18,14 +18,14 @@
 				"$TURBO_ROOT$/.cargo/config.toml",
 				"$TURBO_ROOT$/packages/*/Cargo.toml",
 				"$TURBO_ROOT$/packages/*/src/**/*.rs",
-				"$TURBO_ROOT$/packages/app-lib/build.rs",
-				"$TURBO_ROOT$/packages/app-lib/src/**",
-				"$TURBO_ROOT$/packages/app-lib/migrations/**",
-				"$TURBO_ROOT$/packages/app-lib/.sqlx/**",
-				"$TURBO_ROOT$/packages/app-lib/java/src/**",
-				"$TURBO_ROOT$/packages/app-lib/java/gradle/**",
-				"$TURBO_ROOT$/packages/app-lib/java/*.kts",
-				"$TURBO_ROOT$/packages/app-lib/java/gradle.properties",
+				"$TURBO_ROOT$/packages/engine/build.rs",
+				"$TURBO_ROOT$/packages/engine/src/**",
+				"$TURBO_ROOT$/packages/engine/migrations/**",
+				"$TURBO_ROOT$/packages/engine/.sqlx/**",
+				"$TURBO_ROOT$/packages/engine/java/src/**",
+				"$TURBO_ROOT$/packages/engine/java/gradle/**",
+				"$TURBO_ROOT$/packages/engine/java/*.kts",
+				"$TURBO_ROOT$/packages/engine/java/gradle.properties",
 			],
 		},
 		// Running Clippy and tests on a Tauri application requires
@@ -45,14 +45,14 @@
 				"$TURBO_ROOT$/.cargo/config.toml",
 				"$TURBO_ROOT$/packages/*/Cargo.toml",
 				"$TURBO_ROOT$/packages/*/src/**/*.rs",
-				"$TURBO_ROOT$/packages/app-lib/build.rs",
-				"$TURBO_ROOT$/packages/app-lib/src/**",
-				"$TURBO_ROOT$/packages/app-lib/migrations/**",
-				"$TURBO_ROOT$/packages/app-lib/.sqlx/**",
-				"$TURBO_ROOT$/packages/app-lib/java/src/**",
-				"$TURBO_ROOT$/packages/app-lib/java/gradle/**",
-				"$TURBO_ROOT$/packages/app-lib/java/*.kts",
-				"$TURBO_ROOT$/packages/app-lib/java/gradle.properties",
+				"$TURBO_ROOT$/packages/engine/build.rs",
+				"$TURBO_ROOT$/packages/engine/src/**",
+				"$TURBO_ROOT$/packages/engine/migrations/**",
+				"$TURBO_ROOT$/packages/engine/.sqlx/**",
+				"$TURBO_ROOT$/packages/engine/java/src/**",
+				"$TURBO_ROOT$/packages/engine/java/gradle/**",
+				"$TURBO_ROOT$/packages/engine/java/*.kts",
+				"$TURBO_ROOT$/packages/engine/java/gradle.properties",
 			],
 		},
 		"test": {

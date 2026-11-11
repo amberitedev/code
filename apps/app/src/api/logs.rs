@@ -1,6 +1,6 @@
 use crate::api::Result;
-use theseus::logs::LogType;
-use theseus::logs::{self, CensoredString, LatestLogCursor, Logs};
+use engine::logs::LogType;
+use engine::logs::{self, CensoredString, LatestLogCursor, Logs};
 
 /*
 A log is a struct containing the filename string, stdout, and stderr, as follows:
