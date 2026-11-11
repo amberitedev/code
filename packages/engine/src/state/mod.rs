@@ -168,7 +168,7 @@ impl State {
                     .await
                 {
                     tracing::warn!(
-                        "Synced-pack retention cleanup deferred: {error}"
+                        "Synced-pack retention pass deferred: {error}"
                     );
                 }
                 if let Err(error) =

@@ -45,10 +45,7 @@ struct PackLibrary {
 struct SyncedPack {
     item: ContentItem,
     sha1: String,
-    #[serde(default)]
-    blob_sha512: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    migration_error: Option<String>,
+    blob_sha512: String,
     game_versions: Vec<String>,
     #[serde(default)]
     selected: Option<bool>,

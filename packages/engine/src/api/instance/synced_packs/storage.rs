@@ -1,8 +1,8 @@
 use super::{PackLibrary, SyncedPack};
 use crate::ErrorKind;
 use crate::state::content_store::{
-    StoredFileHandle, content_file_path, hash_file, validate_digest,
-    validate_instance_path, validate_relative,
+    StoredFileHandle, content_file_path, hash_file, validate_instance_path,
+    validate_relative,
 };
 use crate::state::instances::adapters::sqlite::{content_rows, instance_rows};
 use crate::state::{CachedEntry, State};
@@ -61,27 +61,21 @@ pub(super) async fn write_library(
     let previous = read_library(state).await?;
     let mut renamed = false;
     let result: crate::Result<()> = async {
-		let mut library = library.clone();
-		for (id, pack) in &mut library.packs {
-			let deferred = previous.packs.get(id).is_some_and(|previous| {
-				previous.sha1 == pack.sha1
-					&& previous.blob_sha512 == pack.blob_sha512
-					&& (pack.migration_error.is_some()
-						|| previous.blob_sha512.is_none())
+		for (id, pack) in &library.packs {
+			let saved = previous.packs.get(id).is_some_and(|previous| {
+				previous.sha1 == pack.sha1 && previous.blob_sha512 == pack.blob_sha512
 			});
 			let stored_file = match state.content_store.lookup(
-				pack.blob_sha512.as_deref(),
+				Some(&pack.blob_sha512),
 				Some(pack.item.size),
-			).await {
-				Ok(Some(stored_file)) => stored_file,
-				Ok(None) | Err(_) if deferred => continue,
-				Ok(None) => bail!(ErrorKind::InputError(
+			).await? {
+				Some(stored_file) => stored_file,
+				// Stays retained; read_stored_file restores the object when an instance needs it.
+				None if saved => continue,
+				None => bail!(ErrorKind::InputError(
 					"a synced pack needs repair or re-import before its library can be saved".to_string(),
 				)),
-				Err(error) => return Err(error),
 			};
-			pack.blob_sha512 = Some(stored_file.metadata.sha512.clone());
-			pack.migration_error = None;
 			state.content_store.retain(
 				"synced-pack",
 				id,
@@ -111,14 +105,11 @@ pub(super) async fn write_library(
 			state.content_store.release("synced-pack", id).await?;
 		}
 		for (id, pack) in &library.packs {
-			if let Some(hash) = &pack.blob_sha512
-				&& pack.migration_error.is_none()
-			{
-				state.content_store.replace_retained(
-					"synced-pack", id, std::slice::from_ref(hash),
-				).await?;
-				state.content_store.release("synced-cache", hash).await?;
-			}
+			let hash = &pack.blob_sha512;
+			state.content_store.replace_retained(
+				"synced-pack", id, std::slice::from_ref(hash),
+			).await?;
+			state.content_store.release("synced-cache", hash).await?;
 		}
 		Ok(())
 	}.await;
@@ -134,7 +125,7 @@ pub(super) async fn write_library(
                 let hashes = durable
                     .packs
                     .get(id)
-                    .and_then(|pack| pack.blob_sha512.clone())
+                    .map(|pack| pack.blob_sha512.clone())
                     .into_iter()
                     .collect::<Vec<_>>();
                 state
@@ -146,7 +137,7 @@ pub(super) async fn write_library(
         }
         .await;
         if let Err(error) = repair {
-            tracing::warn!(%error, "Synced pack retention will be reconciled on the next cleanup pass");
+            tracing::warn!(%error, "Synced pack retention will be reconciled on the next retention pass");
         }
     }
     result
@@ -174,7 +165,7 @@ pub(super) async fn read_stored_file(
 ) -> crate::Result<StoredFileHandle> {
     if let Some(stored_file) = state
         .content_store
-        .lookup(pack.blob_sha512.as_deref(), Some(pack.item.size))
+        .lookup(Some(&pack.blob_sha512), Some(pack.item.size))
         .await?
     {
         return Ok(stored_file);
@@ -185,7 +176,7 @@ pub(super) async fn read_stored_file(
         .iter()
         .find(|(_, candidate)| candidate.sha1 == pack.sha1)
         .map(|(id, _)| id.as_str());
-    match recover_legacy_pack(id, pack, &library, state).await {
+    match recover_pack_from_instances(id, pack, &library, state).await {
         Ok(stored_file) => return Ok(stored_file),
         Err(error) => {
             tracing::debug!("Local synced-pack recovery deferred: {error}")
@@ -209,10 +200,7 @@ pub(super) async fn read_stored_file(
     let file = version
         .files
         .iter()
-        .find(|file| match &pack.blob_sha512 {
-            Some(hash) => file.hashes.get("sha512") == Some(hash),
-            None => file.hashes.get("sha1") == Some(&pack.sha1),
-        })
+        .find(|file| file.hashes.get("sha512") == Some(&pack.blob_sha512))
         .ok_or(ErrorKind::InputError(
             "the synced pack's original file is unavailable; re-import it"
                 .to_string(),
@@ -247,7 +235,7 @@ pub(crate) async fn reconcile_retention(state: &State) -> crate::Result<()> {
         let hashes = library
             .packs
             .get(&owner)
-            .and_then(|pack| pack.blob_sha512.clone())
+            .map(|pack| pack.blob_sha512.clone())
             .into_iter()
             .collect::<Vec<_>>();
         state
@@ -261,37 +249,19 @@ pub(crate) async fn reconcile_retention(state: &State) -> crate::Result<()> {
     )
     .await?
     {
-        if !library
-            .packs
-            .values()
-            .any(|pack| pack.blob_sha512.as_deref() == Some(owner.as_str()))
-        {
+        if !library.packs.values().any(|pack| pack.blob_sha512 == owner) {
             state.content_store.release("synced-cache", &owner).await?;
         }
     }
     Ok(())
 }
 
-async fn recover_legacy_pack(
+async fn recover_pack_from_instances(
     id: Option<&str>,
     pack: &SyncedPack,
     library: &PackLibrary,
     state: &State,
 ) -> crate::Result<StoredFileHandle> {
-    validate_digest(&pack.sha1, 40)?;
-    if let Some(stored_file) = state
-        .content_store
-        .lookup(pack.blob_sha512.as_deref(), Some(pack.item.size))
-        .await?
-    {
-        return Ok(stored_file);
-    }
-    let legacy = directory(state).join("files").join(&pack.sha1);
-    if let Some(stored_file) =
-        import_matching_pack(&legacy, pack, state).await?
-    {
-        return Ok(stored_file);
-    }
     for instance in instance_rows::list_instances(&state.pool).await? {
         validate_instance_path(&instance.path)?;
         let base = state.directories.instances_dir().join(&instance.path);
@@ -330,7 +300,7 @@ async fn recover_legacy_pack(
         }
     }
     bail!(ErrorKind::InputError(format!(
-        "synced pack {} is missing or damaged; restore or re-import it to finish migration",
+        "synced pack {} is missing or damaged; restore or re-import it",
         pack.item.file_name
     )))
 }
@@ -345,19 +315,13 @@ async fn import_matching_pack(
     else {
         return Ok(None);
     };
-    let matches = match &pack.blob_sha512 {
-        Some(expected) => expected == &sha512,
-        None => {
-            crate::util::fetch::sha1_file_async(source).await?.1 == pack.sha1
-        }
-    };
-    if !matches {
+    if sha512 != pack.blob_sha512 {
         return Ok(None);
     }
     let stored_file = state.content_store.store_file(source).await?;
     if stored_file.metadata.sha512 != sha512 {
         bail!(ErrorKind::InputError(
-            "the synced pack changed while it was being migrated; retry after closing the instance"
+            "the synced pack changed while it was being restored; retry after closing the instance"
                 .to_string(),
         ));
     }
