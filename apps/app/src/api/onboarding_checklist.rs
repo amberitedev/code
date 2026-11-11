@@ -1,6 +1,6 @@
 use crate::api::Result;
+use engine::prelude::*;
 use tauri::plugin::TauriPlugin;
-use theseus::prelude::*;
 
 pub fn init<R: tauri::Runtime>() -> TauriPlugin<R> {
     tauri::plugin::Builder::new("onboarding-checklist")

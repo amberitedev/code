@@ -107,7 +107,7 @@ if (touched.some((file) => /\.rs$|(?:^|\/)Cargo\.(?:toml|lock)$/.test(file))) {
 const READ_BY_CRATE: Readonly<Record<string, string>> = {
 	'packages/api-client/src/modules/bedrock/limits.ts': 'bedrock',
 	'packages/api-client/src/modules/sharing/rules.ts': 'sharing-client',
-	'packages/assets/external/illustrations/minecraft_server_icon.png': 'theseus',
+	'packages/assets/external/illustrations/minecraft_server_icon.png': 'engine',
 }
 const crates = under('apps', 'packages') ? workspaceCrates() : []
 if (crates === 'no cargo') skipped.push('rust tests (cargo is not installed)')

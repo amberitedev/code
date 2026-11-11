@@ -1,4 +1,5 @@
 use crate::api::Result;
+use engine::{LoadingBarType, emit_loading, init_loading, launcher_user_agent};
 use std::sync::{Arc, Mutex};
 use tauri::http::HeaderValue;
 use tauri::http::header::ACCEPT;
@@ -7,9 +8,6 @@ use tauri_plugin_http::reqwest;
 use tauri_plugin_http::reqwest::ClientBuilder;
 use tauri_plugin_updater::Error;
 use tauri_plugin_updater::Update;
-use theseus::{
-    LoadingBarType, emit_loading, init_loading, launcher_user_agent,
-};
 use tokio::time::Instant;
 
 #[derive(Default)]

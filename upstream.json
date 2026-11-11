@@ -59,7 +59,9 @@
 		"scripts/reset-db.sh",
 		"scripts/seed-db.sh"
 	],
-	"renamed": {},
+	"renamed": {
+		"packages/app-lib": "packages/engine"
+	},
 	"ported": {
 		"apps/labrinth/src/database/models/blocked_user_item.rs": "apps/backend/src/social/index.ts",
 		"apps/labrinth/src/database/models/friend_item.rs": "apps/backend/src/social/index.ts",

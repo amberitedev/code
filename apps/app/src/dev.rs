@@ -31,7 +31,7 @@ pub fn prepare() {
         .and_then(|config| config.backend_url.clone())
         .or_else(|| env::var("ACCOUNT_API_URL").ok());
     if let Some(backend_url) = backend_url {
-        theseus::self_hosted::accounts::configure(
+        engine::self_hosted::accounts::configure(
             &backend_url,
             env::var("ACCOUNT_WEB_URL").ok().as_deref(),
         )
@@ -71,7 +71,7 @@ async fn open_session(
     backend_url: &str,
     secret: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    if theseus::mr_auth::get_credentials().await?.is_some() {
+    if engine::mr_auth::get_credentials().await?.is_some() {
         return Ok(());
     }
     #[derive(Deserialize)]
@@ -95,7 +95,7 @@ async fn open_session(
         .text()
         .await?;
     let session: Session = serde_json::from_str(&response)?;
-    theseus::mr_auth::authenticate_finish_flow(&session.session).await?;
+    engine::mr_auth::authenticate_finish_flow(&session.session).await?;
     Ok(())
 }
 

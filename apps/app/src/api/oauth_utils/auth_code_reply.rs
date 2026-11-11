@@ -13,9 +13,9 @@
 use std::{net::SocketAddr, sync::Mutex, time::Duration};
 
 use anyhow::{Context, anyhow, bail};
+use engine::prelude::tcp_listen_any_loopback;
 use hyper::body::Incoming;
 use hyper_util::rt::{TokioIo, TokioTimer};
-use theseus::prelude::tcp_listen_any_loopback;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use url::Url;
@@ -32,8 +32,8 @@ static PENDING_AUTH: Mutex<Option<PendingAuth>> = Mutex::new(None);
 
 pub struct AuthReplySession {
     nonce: String,
-    socket_rx: Option<oneshot::Receiver<Result<SocketAddr, theseus::Error>>>,
-    listener: JoinHandle<Result<Option<String>, theseus::Error>>,
+    socket_rx: Option<oneshot::Receiver<Result<SocketAddr, engine::Error>>>,
+    listener: JoinHandle<Result<Option<String>, engine::Error>>,
     deeplink_rx: oneshot::Receiver<String>,
 }
 
@@ -63,7 +63,7 @@ impl AuthReplySession {
         }
     }
 
-    pub async fn socket_addr(&mut self) -> Result<SocketAddr, theseus::Error> {
+    pub async fn socket_addr(&mut self) -> Result<SocketAddr, engine::Error> {
         let mut socket_rx =
             self.socket_rx.take().ok_or_else(auth_listener_stopped)?;
 
@@ -75,7 +75,7 @@ impl AuthReplySession {
         }
     }
 
-    pub async fn wait(&mut self) -> Result<Option<String>, theseus::Error> {
+    pub async fn wait(&mut self) -> Result<Option<String>, engine::Error> {
         let result = tokio::select! {
             localhost_result = &mut self.listener => {
                 localhost_result.context("auth code listener stopped")?
@@ -177,7 +177,7 @@ fn clear_pending_auth(nonce: &str) {
     }
 }
 
-fn auth_listener_stopped() -> theseus::Error {
+fn auth_listener_stopped() -> engine::Error {
     anyhow!("auth code listener stopped")
 }
 
@@ -197,10 +197,10 @@ pub fn normalize_deep_link_command(command: &str) -> String {
 }
 
 async fn listen(
-    listen_socket_tx: oneshot::Sender<Result<SocketAddr, theseus::Error>>,
+    listen_socket_tx: oneshot::Sender<Result<SocketAddr, engine::Error>>,
     expected_nonce: String,
     mut cancel_rx: oneshot::Receiver<()>,
-) -> Result<Option<String>, theseus::Error> {
+) -> Result<Option<String>, engine::Error> {
     let listener = match tcp_listen_any_loopback().await {
         Ok(listener) => {
             listen_socket_tx

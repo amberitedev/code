@@ -1,15 +1,15 @@
 use crate::api::Result;
 use either::Either;
-use enumset::EnumSet;
-use tauri::{AppHandle, Manager, Runtime};
-use theseus::instance::{self, QuickPlayType, get_full_path};
-use theseus::prelude::ProcessMetadata;
-use theseus::server_address::ServerAddress;
-use theseus::worlds;
-use theseus::worlds::{
+use engine::instance::{self, QuickPlayType, get_full_path};
+use engine::prelude::ProcessMetadata;
+use engine::server_address::ServerAddress;
+use engine::worlds;
+use engine::worlds::{
     DisplayStatus, ProtocolVersion, ServerPackStatus, ServerStatus, World,
     WorldType, WorldWithInstance,
 };
+use enumset::EnumSet;
+use tauri::{AppHandle, Manager, Runtime};
 
 pub fn init<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
     tauri::plugin::Builder::new("worlds")
@@ -211,9 +211,9 @@ pub async fn remove_server_from_instance(
 pub async fn desync_server(
     instance_id: &str,
     server_id: &str,
-    mode: theseus::instance::DesyncServerMode,
+    mode: engine::instance::DesyncServerMode,
 ) -> Result<()> {
-    Ok(theseus::instance::desync_server(instance_id, server_id, mode).await?)
+    Ok(engine::instance::desync_server(instance_id, server_id, mode).await?)
 }
 
 #[tauri::command]

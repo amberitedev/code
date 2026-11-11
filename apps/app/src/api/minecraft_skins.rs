@@ -1,9 +1,9 @@
 use crate::api::Result;
 
-use std::path::Path;
-use theseus::minecraft_skins::{
+use engine::minecraft_skins::{
     self, Bytes, Cape, MinecraftSkinVariant, Skin, UrlOrBlob,
 };
+use std::path::Path;
 
 pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     tauri::plugin::Builder::new("minecraft-skins")

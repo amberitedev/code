@@ -1,5 +1,6 @@
 use crate::api::Result;
 use anyhow::{Context, anyhow};
+use engine::ErrorKind;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{Cursor, Read};
@@ -9,7 +10,6 @@ use std::time::{Duration, Instant};
 use tauri::{Manager, Runtime};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_http::reqwest;
-use theseus::ErrorKind;
 use tokio::io::AsyncWriteExt;
 use tokio_util::sync::CancellationToken;
 
@@ -155,8 +155,8 @@ pub async fn file_upload_local<R: Runtime>(
     );
 
     let mut last_progress: Option<Instant> = None;
-    let upload = theseus::upload::upload_local_file(
-        theseus::upload::LocalFileUpload {
+    let upload = engine::upload::upload_local_file(
+        engine::upload::LocalFileUpload {
             url,
             headers: request.headers.into_iter().collect(),
             path: request.path,
@@ -175,7 +175,7 @@ pub async fn file_upload_local<R: Runtime>(
         },
     );
 
-    let result: Result<theseus::upload::UploadResponse> = tokio::select! {
+    let result: Result<engine::upload::UploadResponse> = tokio::select! {
         _ = cancel.cancelled() => Err(anyhow!("Upload cancelled").into()),
         result = upload => result.map_err(Into::into),
     };
@@ -209,14 +209,14 @@ pub async fn file_extract_zip(
     override_conflicts: bool,
     dry_run: bool,
 ) -> Result<Option<ExtractDryRunResult>> {
-    theseus::instance::validate_instance_file_write(instance_id, file_path)
+    engine::instance::validate_instance_file_write(instance_id, file_path)
         .await?;
     let parent = file_path
         .trim_start_matches('/')
         .rsplit_once('/')
         .map_or("", |(parent, _)| parent);
     let file_bytes =
-        theseus::instance::read_instance_file(instance_id, file_path).await?;
+        engine::instance::read_instance_file(instance_id, file_path).await?;
     let (mut zip_reader, names) = tokio::task::spawn_blocking(move || {
         let mut archive = zip::ZipArchive::new(Cursor::new(file_bytes))
             .context("failed to read zip file")?;
@@ -253,7 +253,7 @@ pub async fn file_extract_zip(
         } else {
             format!("{parent}/{name}")
         };
-        let resolved = theseus::instance::validate_instance_file_write(
+        let resolved = engine::instance::validate_instance_file_write(
             instance_id,
             &target,
         )
@@ -293,7 +293,7 @@ pub async fn file_extract_zip(
         .await
         .with_context(|| format!("failed to read archive entry {path}"))??;
         zip_reader = archive;
-        theseus::instance::write_instance_file(
+        engine::instance::write_instance_file(
             instance_id,
             &path,
             &bytes,
@@ -308,13 +308,13 @@ pub async fn file_extract_zip(
 pub async fn file_list(
     instance_id: &str,
     path: &str,
-) -> Result<Vec<theseus::instance::InstanceFileItem>> {
-    Ok(theseus::instance::list_instance_files(instance_id, path).await?)
+) -> Result<Vec<engine::instance::InstanceFileItem>> {
+    Ok(engine::instance::list_instance_files(instance_id, path).await?)
 }
 
 #[tauri::command]
 pub async fn file_read(instance_id: &str, path: &str) -> Result<Vec<u8>> {
-    Ok(theseus::instance::read_instance_file(instance_id, path).await?)
+    Ok(engine::instance::read_instance_file(instance_id, path).await?)
 }
 
 #[tauri::command]
@@ -324,7 +324,7 @@ pub async fn file_write(
     bytes: Vec<u8>,
     create_only: bool,
 ) -> Result<()> {
-    Ok(theseus::instance::write_instance_file(
+    Ok(engine::instance::write_instance_file(
         instance_id,
         path,
         &bytes,
@@ -338,7 +338,7 @@ pub async fn file_create_directory(
     instance_id: &str,
     path: &str,
 ) -> Result<()> {
-    Ok(theseus::instance::create_instance_directory(instance_id, path).await?)
+    Ok(engine::instance::create_instance_directory(instance_id, path).await?)
 }
 
 #[tauri::command]
@@ -347,12 +347,14 @@ pub async fn file_rename(
     source: &str,
     destination: &str,
 ) -> Result<()> {
-    Ok(theseus::instance::rename_instance_file(
-        instance_id,
-        source,
-        destination,
+    Ok(
+        engine::instance::rename_instance_file(
+            instance_id,
+            source,
+            destination,
+        )
+        .await?,
     )
-    .await?)
 }
 
 #[tauri::command]
@@ -362,7 +364,7 @@ pub async fn file_delete(
     recursive: bool,
 ) -> Result<()> {
     Ok(
-        theseus::instance::delete_instance_file(instance_id, path, recursive)
+        engine::instance::delete_instance_file(instance_id, path, recursive)
             .await?,
     )
 }
@@ -391,7 +393,7 @@ pub async fn file_save_as<R: Runtime>(
     if let Some(dest) = rx.await.unwrap_or(None) {
         let dest_path =
             std::path::PathBuf::try_from(dest).context("invalid save path")?;
-        theseus::instance::save_instance_file_as(
+        engine::instance::save_instance_file_as(
             instance_id,
             file_path,
             &dest_path,

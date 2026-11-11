@@ -1,4 +1,4 @@
-//! A server's state, in app-lib's layout (`packages/app-lib/src/state/instances/`): `model/` for
+//! A server's state, in the engine's layout (`packages/engine/src/state/instances/`): `model/` for
 //! plain types, `adapters/` for SQLite rows, the server folder and the network, `domain/` for
 //! pure rules, and `commands/` with one operation per file. [`Content`] is what every content
 //! command runs with.

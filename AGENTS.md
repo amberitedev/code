@@ -6,6 +6,10 @@ server (Core) on any machine and manage it from the desktop App.
 New code, folders, types and docs say Core. Copal names only the shipped program: its binary,
 crate, service, installer and release.
 
+Theseus is Modrinth's codename for the App. It survives in upstream names we keep: the App crate
+`theseus_gui`, the Java package `com.modrinth.theseus` and `theseus.jar`, the `modrinth/theseus`
+user agent, `THESEUS_CONFIG_DIR` and the `theseus-*.yml` workflows.
+
 You can think of Amberite as Modrinth Hosting, but free and better. Sharing is not tied to a Core
 and works for everyone.
 

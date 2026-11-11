@@ -79,8 +79,8 @@ The key is a hash of everything that goes into the build:
 - Both: the root `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `.cargo`, the Cargo arguments,
   and the folders of the program's crate and every local crate it builds with, as
   `cargo metadata` reports them. Crates it does not use, such as labrinth, can change without a
-  rebuild. Also `packages/app-lib/.env` and the variables named in that file and `.env.prod`,
-  which app-lib's build compiles in.
+  rebuild. Also `packages/engine/.env` and the variables named in that file and `.env.prod`,
+  which the engine's build compiles in.
 - App, also: `apps/app-frontend/package.json` (the App's version) and
   `apps/app/tauri-local.conf.json`.
 
@@ -111,7 +111,7 @@ the repo, the content it was last compiled from and for which programs. Before a
 that matches gets its files dated 2000, so Cargo keeps its output; any other crate gets the current
 time, so Cargo compiles it again. Inputs outside every crate folder, such as the App's version in
 `apps/app-frontend/package.json`, count toward the program's own crate. Switching between worktrees that differ only in `apps/app`
-compiles that one crate (about 2.5 minutes); when `packages/app-lib` differs too, theseus compiles
+compiles that one crate (about 2.5 minutes); when `packages/engine` differs too, the engine compiles
 again as well (about 7 minutes).
 
 An older checkout that still runs its App from `target/dev-shared/debug` holds that file open; the runner

@@ -29,7 +29,7 @@ pub async fn get_image_thumbnail<R: Runtime>(
         )
         .into());
     }
-    let cache = theseus::State::get()
+    let cache = engine::State::get()
         .await?
         .directories
         .caches_dir()

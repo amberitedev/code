@@ -1,14 +1,7 @@
 use crate::api::Result;
 use anyhow::Context;
 use dashmap::DashMap;
-use path_util::SafeRelativeUtf8UnixPathBuf;
-use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
-use std::path::{Path, PathBuf};
-use tauri::{AppHandle, Manager, Runtime};
-use tauri_plugin_fs::FsExt;
-use tauri_plugin_opener::OpenerExt;
-use theseus::data::{
+use engine::data::{
     AppliedContentSetPatch, ContentItem, Dependency,
     EditInstance as CoreEditInstance, InstanceInstallCandidate,
     InstanceInstallTarget, InstanceLaunchOverridesPatch,
@@ -17,11 +10,18 @@ use theseus::data::{
     SharedInstanceAttachment as CoreSharedInstanceAttachment,
     SharedInstanceRole,
 };
-use theseus::instance::InstallProjectWithDependenciesRequest;
-use theseus::instance::QuickPlayType;
-use theseus::prelude::*;
-use theseus::server_address::ServerAddress;
-use theseus::{DownloadReason, ErrorKind};
+use engine::instance::InstallProjectWithDependenciesRequest;
+use engine::instance::QuickPlayType;
+use engine::prelude::*;
+use engine::server_address::ServerAddress;
+use engine::{DownloadReason, ErrorKind};
+use path_util::SafeRelativeUtf8UnixPathBuf;
+use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+use tauri::{AppHandle, Manager, Runtime};
+use tauri_plugin_fs::FsExt;
+use tauri_plugin_opener::OpenerExt;
 
 pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     tauri::plugin::Builder::new("instance")
@@ -145,7 +145,7 @@ pub struct Instance {
     pub launcher_feature_version: String,
     pub name: String,
     pub icon_path: Option<String>,
-    pub icon_config: Option<theseus::data::IconConfig>,
+    pub icon_config: Option<engine::data::IconConfig>,
     pub game_version: String,
     pub protocol_version: Option<u32>,
     pub loader: ModLoader,
@@ -526,13 +526,13 @@ fn edit_to_core(edit_instance: EditInstance) -> Result<CoreEditInstance> {
 
 #[tauri::command]
 pub async fn instance_remove(instance_id: &str) -> Result<()> {
-    theseus::instance::remove(instance_id).await?;
+    engine::instance::remove(instance_id).await?;
     Ok(())
 }
 
 #[tauri::command]
 pub async fn instance_get(instance_id: &str) -> Result<Option<Instance>> {
-    Ok(theseus::instance::get(instance_id)
+    Ok(engine::instance::get(instance_id)
         .await?
         .map(Instance::from))
 }
@@ -542,7 +542,7 @@ pub async fn instance_get_many(
     instance_ids: Vec<String>,
 ) -> Result<Vec<Instance>> {
     let ids = instance_ids.iter().map(|x| &**x).collect::<Vec<&str>>();
-    Ok(theseus::instance::get_many(&ids)
+    Ok(engine::instance::get_many(&ids)
         .await?
         .into_iter()
         .map(Instance::from)
@@ -551,7 +551,7 @@ pub async fn instance_get_many(
 
 #[tauri::command]
 pub async fn instance_list() -> Result<Vec<Instance>> {
-    Ok(theseus::instance::list()
+    Ok(engine::instance::list()
         .await?
         .into_iter()
         .map(Instance::from)
@@ -560,40 +560,40 @@ pub async fn instance_list() -> Result<Vec<Instance>> {
 
 #[tauri::command]
 pub async fn instance_list_groups()
--> Result<Vec<theseus::instance::InstanceGroup>> {
-    Ok(theseus::instance::list_groups().await?)
+-> Result<Vec<engine::instance::InstanceGroup>> {
+    Ok(engine::instance::list_groups().await?)
 }
 
 #[tauri::command]
 pub async fn instance_create_group(
     name: String,
-) -> Result<theseus::instance::InstanceGroup> {
-    Ok(theseus::instance::create_group(name).await?)
+) -> Result<engine::instance::InstanceGroup> {
+    Ok(engine::instance::create_group(name).await?)
 }
 
 #[tauri::command]
 pub async fn instance_rename_group(
     id: String,
     new_name: String,
-) -> Result<theseus::instance::InstanceGroup> {
-    Ok(theseus::instance::rename_group(id, new_name).await?)
+) -> Result<engine::instance::InstanceGroup> {
+    Ok(engine::instance::rename_group(id, new_name).await?)
 }
 
 #[tauri::command]
 pub async fn instance_delete_group(id: String) -> Result<()> {
-    Ok(theseus::instance::delete_group(id).await?)
+    Ok(engine::instance::delete_group(id).await?)
 }
 
 #[tauri::command]
 pub async fn instance_set_group_order(group_ids: Vec<String>) -> Result<()> {
-    Ok(theseus::instance::set_group_order(group_ids).await?)
+    Ok(engine::instance::set_group_order(group_ids).await?)
 }
 
 #[tauri::command]
 pub async fn instance_set_group_memberships(
-    updates: Vec<theseus::instance::InstanceGroupMembershipUpdate>,
+    updates: Vec<engine::instance::InstanceGroupMembershipUpdate>,
 ) -> Result<()> {
-    Ok(theseus::instance::set_group_memberships(updates).await?)
+    Ok(engine::instance::set_group_memberships(updates).await?)
 }
 
 #[tauri::command]
@@ -601,14 +601,14 @@ pub async fn instance_get_projects(
     instance_id: &str,
     cache_behaviour: Option<CacheBehaviour>,
 ) -> Result<DashMap<String, ContentFile>> {
-    Ok(theseus::instance::get_projects(instance_id, cache_behaviour).await?)
+    Ok(engine::instance::get_projects(instance_id, cache_behaviour).await?)
 }
 
 #[tauri::command]
 pub async fn instance_get_installed_project_ids(
     instance_id: &str,
 ) -> Result<Vec<String>> {
-    Ok(theseus::instance::get_installed_project_ids(instance_id).await?)
+    Ok(engine::instance::get_installed_project_ids(instance_id).await?)
 }
 
 #[tauri::command]
@@ -617,7 +617,7 @@ pub async fn instance_get_install_candidates(
     project_type: ProjectType,
     targets: Vec<InstanceInstallTarget>,
 ) -> Result<Vec<InstanceInstallCandidate>> {
-    Ok(theseus::instance::get_install_candidates(
+    Ok(engine::instance::get_install_candidates(
         project_id,
         project_type,
         targets,
@@ -639,20 +639,20 @@ pub async fn instance_get_content_items(
     cache_behaviour: Option<CacheBehaviour>,
 ) -> Result<Vec<ContentItem>> {
     Ok(
-        theseus::instance::get_content_items(instance_id, cache_behaviour)
+        engine::instance::get_content_items(instance_id, cache_behaviour)
             .await?,
     )
 }
 
 #[tauri::command]
 pub async fn instance_sync_content_files(instance_id: &str) -> Result<()> {
-    theseus::instance::sync_content_files(instance_id).await?;
+    engine::instance::sync_content_files(instance_id).await?;
     Ok(())
 }
 
 #[tauri::command]
 pub async fn instance_refresh_content_updates(instance_id: &str) -> Result<()> {
-    Ok(theseus::instance::refresh_content_updates(instance_id).await?)
+    Ok(engine::instance::refresh_content_updates(instance_id).await?)
 }
 
 #[tauri::command]
@@ -660,7 +660,7 @@ pub async fn instance_get_dependencies_as_content_items(
     dependencies: Vec<Dependency>,
     cache_behaviour: Option<CacheBehaviour>,
 ) -> Result<Vec<ContentItem>> {
-    Ok(theseus::instance::get_dependencies_as_content_items(
+    Ok(engine::instance::get_dependencies_as_content_items(
         dependencies,
         cache_behaviour,
     )
@@ -673,11 +673,8 @@ pub async fn instance_get_linked_modpack_info(
     cache_behaviour: Option<CacheBehaviour>,
 ) -> Result<Option<LinkedModpackInfo>> {
     Ok(
-        theseus::instance::get_linked_modpack_info(
-            instance_id,
-            cache_behaviour,
-        )
-        .await?,
+        engine::instance::get_linked_modpack_info(instance_id, cache_behaviour)
+            .await?,
     )
 }
 
@@ -686,7 +683,7 @@ pub async fn instance_get_linked_modpack_content(
     instance_id: &str,
     cache_behaviour: Option<CacheBehaviour>,
 ) -> Result<Vec<ContentItem>> {
-    Ok(theseus::instance::get_linked_modpack_content(
+    Ok(engine::instance::get_linked_modpack_content(
         instance_id,
         cache_behaviour,
     )
@@ -695,7 +692,7 @@ pub async fn instance_get_linked_modpack_content(
 
 #[tauri::command]
 pub async fn instance_get_full_path(instance_id: &str) -> Result<PathBuf> {
-    Ok(theseus::instance::get_full_path(instance_id).await?)
+    Ok(engine::instance::get_full_path(instance_id).await?)
 }
 
 #[tauri::command]
@@ -703,7 +700,7 @@ pub async fn instance_get_mod_full_path(
     instance_id: &str,
     project_path: &str,
 ) -> Result<PathBuf> {
-    Ok(theseus::instance::get_mod_full_path(instance_id, project_path).await?)
+    Ok(engine::instance::get_mod_full_path(instance_id, project_path).await?)
 }
 
 #[tauri::command]
@@ -711,7 +708,7 @@ pub async fn instance_list_screenshots<R: Runtime>(
     app_handle: AppHandle<R>,
     instance_id: &str,
 ) -> Result<Vec<InstanceScreenshot>> {
-    let screenshots = theseus::instance::list_screenshots(instance_id).await?;
+    let screenshots = engine::instance::list_screenshots(instance_id).await?;
     serialize_screenshots(&app_handle, screenshots)
 }
 
@@ -719,7 +716,7 @@ pub async fn instance_list_screenshots<R: Runtime>(
 pub async fn instance_list_all_screenshots<R: Runtime>(
     app_handle: AppHandle<R>,
 ) -> Result<Vec<InstanceScreenshot>> {
-    let screenshots = theseus::instance::list_all_screenshots().await?;
+    let screenshots = engine::instance::list_all_screenshots().await?;
     serialize_screenshots(&app_handle, screenshots)
 }
 
@@ -727,95 +724,92 @@ pub async fn instance_list_all_screenshots<R: Runtime>(
 pub async fn instance_list_synced_screenshots<R: Runtime>(
     app_handle: AppHandle<R>,
 ) -> Result<Vec<InstanceScreenshot>> {
-    let screenshots = theseus::instance::list_synced_screenshots().await?;
+    let screenshots = engine::instance::list_synced_screenshots().await?;
     serialize_screenshots(&app_handle, screenshots)
 }
 
 #[tauri::command]
 pub async fn instance_save_edited_screenshot<R: Runtime>(
     app_handle: AppHandle<R>,
-    key: theseus::instance::ScreenshotKey,
+    key: engine::instance::ScreenshotKey,
     png_bytes: Vec<u8>,
-    mode: theseus::instance::ScreenshotEditSaveMode,
+    mode: engine::instance::ScreenshotEditSaveMode,
 ) -> Result<InstanceScreenshot> {
     let screenshot =
-        theseus::instance::save_edited_screenshot(key, png_bytes, mode).await?;
+        engine::instance::save_edited_screenshot(key, png_bytes, mode).await?;
     serialize_screenshot(&app_handle, screenshot)
 }
 
 #[tauri::command]
 pub async fn instance_list_screenshot_groups()
--> Result<Vec<theseus::instance::ScreenshotGroup>> {
-    Ok(theseus::instance::list_screenshot_groups().await?)
+-> Result<Vec<engine::instance::ScreenshotGroup>> {
+    Ok(engine::instance::list_screenshot_groups().await?)
 }
 
 #[tauri::command]
 pub async fn instance_create_screenshot_group(
     name: String,
     screenshot_ids: Vec<String>,
-) -> Result<theseus::instance::ScreenshotGroup> {
-    Ok(
-        theseus::instance::create_screenshot_group(name, screenshot_ids)
-            .await?,
-    )
+) -> Result<engine::instance::ScreenshotGroup> {
+    Ok(engine::instance::create_screenshot_group(name, screenshot_ids).await?)
 }
 
 #[tauri::command]
 pub async fn instance_rename_screenshot_group(
     id: String,
     new_name: String,
-) -> Result<theseus::instance::ScreenshotGroup> {
-    Ok(theseus::instance::rename_screenshot_group(id, new_name).await?)
+) -> Result<engine::instance::ScreenshotGroup> {
+    Ok(engine::instance::rename_screenshot_group(id, new_name).await?)
 }
 
 #[tauri::command]
 pub async fn instance_delete_screenshot_group(id: String) -> Result<()> {
-    Ok(theseus::instance::delete_screenshot_group(id).await?)
+    Ok(engine::instance::delete_screenshot_group(id).await?)
 }
 
 #[tauri::command]
 pub async fn instance_set_screenshot_group_memberships(
-    updates: Vec<theseus::instance::ScreenshotGroupMembershipUpdate>,
+    updates: Vec<engine::instance::ScreenshotGroupMembershipUpdate>,
 ) -> Result<()> {
-    Ok(theseus::instance::set_screenshot_group_memberships(updates).await?)
+    Ok(engine::instance::set_screenshot_group_memberships(updates).await?)
 }
 
 #[tauri::command]
 pub async fn instance_import_screenshot_groups(
-    groups: Vec<theseus::instance::ScreenshotGroupImport>,
+    groups: Vec<engine::instance::ScreenshotGroupImport>,
 ) -> Result<()> {
-    Ok(theseus::instance::import_screenshot_groups(groups).await?)
+    Ok(engine::instance::import_screenshot_groups(groups).await?)
 }
 
 #[tauri::command]
 pub async fn instance_delete_screenshots(
-    keys: Vec<theseus::instance::ScreenshotKey>,
+    keys: Vec<engine::instance::ScreenshotKey>,
 ) -> Result<()> {
-    Ok(theseus::instance::delete_screenshots(&keys).await?)
+    Ok(engine::instance::delete_screenshots(&keys).await?)
 }
 
 #[tauri::command]
 pub async fn instance_export_screenshots(
-    keys: Vec<theseus::instance::ScreenshotKey>,
+    keys: Vec<engine::instance::ScreenshotKey>,
     export_path: PathBuf,
 ) -> Result<()> {
-    Ok(theseus::instance::export_screenshots(&keys, export_path).await?)
+    Ok(engine::instance::export_screenshots(&keys, export_path).await?)
 }
 
 #[tauri::command]
 pub async fn instance_move_screenshots(
-    keys: Vec<theseus::instance::ScreenshotKey>,
+    keys: Vec<engine::instance::ScreenshotKey>,
     target_instance_id: &str,
-) -> Result<Vec<theseus::instance::ScreenshotKey>> {
-    Ok(theseus::instance::move_screenshots(&keys, target_instance_id).await?)
+) -> Result<Vec<engine::instance::ScreenshotKey>> {
+    Ok(engine::instance::move_screenshots(&keys, target_instance_id).await?)
 }
 
 #[tauri::command]
 pub async fn instance_open_screenshot<R: Runtime>(
     app_handle: AppHandle<R>,
-    key: theseus::instance::ScreenshotKey,
+    key: engine::instance::ScreenshotKey,
 ) -> Result<()> {
-    let path = theseus::instance::get_screenshot_path(&key).await?;
+    let path = engine::instance::get_screenshot_path(&key).await?;
     app_handle
         .opener()
         .reveal_item_in_dir(path)
@@ -828,10 +822,10 @@ pub async fn instance_set_synced_option(
     instance_id: &str,
     option: InstanceSyncedOption,
     enabled: bool,
-    resolution: Option<theseus::instance::SyncedOptionJoinResolution>,
+    resolution: Option<engine::instance::SyncedOptionJoinResolution>,
 ) -> Result<Instance> {
     Ok(Instance::from(
-        theseus::instance::set_synced_option(
+        engine::instance::set_synced_option(
             instance_id,
             option,
             enabled,
@@ -845,9 +839,9 @@ pub async fn instance_set_synced_option(
 pub async fn instance_get_synced_option_join_preview(
     instance_id: &str,
     option: InstanceSyncedOption,
-) -> Result<theseus::instance::SyncedOptionJoinPreview> {
+) -> Result<engine::instance::SyncedOptionJoinPreview> {
     Ok(
-        theseus::instance::get_synced_option_join_preview(instance_id, option)
+        engine::instance::get_synced_option_join_preview(instance_id, option)
             .await?,
     )
 }
@@ -855,20 +849,20 @@ pub async fn instance_get_synced_option_join_preview(
 #[tauri::command]
 pub async fn instance_get_synced_options_overview(
     instance_id: &str,
-) -> Result<theseus::instance::SyncedOptionsOverview> {
-    Ok(theseus::instance::get_synced_options_overview(instance_id).await?)
+) -> Result<engine::instance::SyncedOptionsOverview> {
+    Ok(engine::instance::get_synced_options_overview(instance_id).await?)
 }
 
 #[tauri::command]
 pub async fn instance_get_global_synced_options()
--> Result<theseus::instance::GlobalSyncedOptions> {
-    Ok(theseus::instance::get_global_synced_options().await?)
+-> Result<engine::instance::GlobalSyncedOptions> {
+    Ok(engine::instance::get_global_synced_options().await?)
 }
 
 #[tauri::command]
 pub async fn instance_get_initialized_synced_options()
--> Result<theseus::instance::GlobalSyncedOptions> {
-    Ok(theseus::instance::get_initialized_synced_options().await?)
+-> Result<engine::instance::GlobalSyncedOptions> {
+    Ok(engine::instance::get_initialized_synced_options().await?)
 }
 
 #[tauri::command]
@@ -876,8 +870,8 @@ pub async fn instance_set_global_synced_option(
     option: InstanceSyncedOption,
     enabled: bool,
     base_instance_id: Option<String>,
-) -> Result<theseus::instance::GlobalSyncedOptions> {
-    Ok(theseus::instance::set_global_synced_option(
+) -> Result<engine::instance::GlobalSyncedOptions> {
+    Ok(engine::instance::set_global_synced_option(
         option,
         enabled,
         base_instance_id.as_deref(),
@@ -887,14 +881,14 @@ pub async fn instance_set_global_synced_option(
 
 #[tauri::command]
 pub async fn instance_list_game_options_sync_sources()
--> Result<Vec<theseus::instance::GameOptionsSourceCandidate>> {
-    Ok(theseus::instance::list_game_options_sync_sources().await?)
+-> Result<Vec<engine::instance::GameOptionsSourceCandidate>> {
+    Ok(engine::instance::list_game_options_sync_sources().await?)
 }
 
 #[tauri::command]
 pub async fn instance_get_synced_game_options_config()
--> Result<theseus::instance::GameSettingsEditorState> {
-    Ok(theseus::instance::get_synced_game_options_config().await?)
+-> Result<engine::instance::GameSettingsEditorState> {
+    Ok(engine::instance::get_synced_game_options_config().await?)
 }
 
 #[tauri::command]
@@ -903,8 +897,8 @@ pub async fn instance_get_game_setting_locale_labels(
     locale: String,
     option_ids: Vec<String>,
     refresh_sources: bool,
-) -> Result<theseus::instance::GameSettingLocaleLabels> {
-    Ok(theseus::instance::get_game_setting_locale_labels(
+) -> Result<engine::instance::GameSettingLocaleLabels> {
+    Ok(engine::instance::get_game_setting_locale_labels(
         instance_id.as_deref(),
         &locale,
         option_ids,
@@ -915,31 +909,31 @@ pub async fn instance_get_game_setting_locale_labels(
 
 #[tauri::command]
 pub async fn instance_preview_synced_game_option_changes(
-    request: theseus::instance::UpdateGameSettingsRequest,
-) -> Result<theseus::instance::GameSettingsEditorState> {
-    Ok(theseus::instance::preview_synced_game_option_changes(request).await?)
+    request: engine::instance::UpdateGameSettingsRequest,
+) -> Result<engine::instance::GameSettingsEditorState> {
+    Ok(engine::instance::preview_synced_game_option_changes(request).await?)
 }
 
 #[tauri::command]
 pub async fn instance_save_synced_game_option_changes(
-    request: theseus::instance::UpdateGameSettingsRequest,
-) -> Result<theseus::instance::SaveGameSettingsResult> {
-    Ok(theseus::instance::save_synced_game_option_changes(request).await?)
+    request: engine::instance::UpdateGameSettingsRequest,
+) -> Result<engine::instance::SaveGameSettingsResult> {
+    Ok(engine::instance::save_synced_game_option_changes(request).await?)
 }
 
 #[tauri::command]
 pub async fn instance_get_local_game_options_config(
     instance_id: &str,
-) -> Result<theseus::instance::GameSettingsEditorState> {
-    Ok(theseus::instance::get_local_game_options_config(instance_id).await?)
+) -> Result<engine::instance::GameSettingsEditorState> {
+    Ok(engine::instance::get_local_game_options_config(instance_id).await?)
 }
 
 #[tauri::command]
 pub async fn instance_preview_local_game_option_changes(
     instance_id: &str,
-    request: theseus::instance::UpdateGameSettingsRequest,
-) -> Result<theseus::instance::GameSettingsEditorState> {
-    Ok(theseus::instance::preview_local_game_option_changes(
+    request: engine::instance::UpdateGameSettingsRequest,
+) -> Result<engine::instance::GameSettingsEditorState> {
+    Ok(engine::instance::preview_local_game_option_changes(
         instance_id,
         request,
     )
@@ -949,29 +943,29 @@ pub async fn instance_preview_local_game_option_changes(
 #[tauri::command]
 pub async fn instance_save_local_game_option_changes(
     instance_id: &str,
-    request: theseus::instance::UpdateGameSettingsRequest,
-) -> Result<theseus::instance::SaveGameSettingsResult> {
+    request: engine::instance::UpdateGameSettingsRequest,
+) -> Result<engine::instance::SaveGameSettingsResult> {
     Ok(
-        theseus::instance::save_local_game_option_changes(instance_id, request)
+        engine::instance::save_local_game_option_changes(instance_id, request)
             .await?,
     )
 }
 
 #[tauri::command]
 pub async fn instance_get_command_history() -> Result<String> {
-    Ok(theseus::instance::get_command_history().await?)
+    Ok(engine::instance::get_command_history().await?)
 }
 
 #[tauri::command]
 pub async fn instance_set_command_history(contents: &str) -> Result<String> {
-    Ok(theseus::instance::set_command_history(contents).await?)
+    Ok(engine::instance::set_command_history(contents).await?)
 }
 
 #[tauri::command]
 pub async fn instance_open_synced_options_folder<R: Runtime>(
     app_handle: AppHandle<R>,
 ) -> Result<()> {
-    let path = theseus::instance::get_synced_options_folder().await?;
+    let path = engine::instance::get_synced_options_folder().await?;
     app_handle
         .opener()
         .open_path(path.to_string_lossy(), None::<&str>)
@@ -981,29 +975,29 @@ pub async fn instance_open_synced_options_folder<R: Runtime>(
 
 #[tauri::command]
 pub async fn instance_list_synced_servers()
--> Result<Vec<theseus::instance::SyncedServer>> {
-    Ok(theseus::instance::list_synced_servers().await?)
+-> Result<Vec<engine::instance::SyncedServer>> {
+    Ok(engine::instance::list_synced_servers().await?)
 }
 
 #[tauri::command]
 pub async fn instance_update_synced_server(
-    server: theseus::instance::SyncedServer,
+    server: engine::instance::SyncedServer,
 ) -> Result<()> {
-    Ok(theseus::instance::update_synced_server(server).await?)
+    Ok(engine::instance::update_synced_server(server).await?)
 }
 
 #[tauri::command]
 pub async fn instance_remove_synced_server(server_id: &str) -> Result<()> {
-    Ok(theseus::instance::remove_synced_server(server_id).await?)
+    Ok(engine::instance::remove_synced_server(server_id).await?)
 }
 
 #[tauri::command]
 pub async fn instance_get_pack_sync_preview(
     instance_id: &str,
     project_path: &str,
-) -> Result<theseus::instance::PackSyncPreview> {
+) -> Result<engine::instance::PackSyncPreview> {
     Ok(
-        theseus::instance::get_pack_sync_preview(instance_id, project_path)
+        engine::instance::get_pack_sync_preview(instance_id, project_path)
             .await?,
     )
 }
@@ -1013,23 +1007,23 @@ pub async fn instance_sync_pack(
     instance_id: &str,
     project_path: &str,
 ) -> Result<()> {
-    Ok(theseus::instance::sync_pack(instance_id, project_path).await?)
+    Ok(engine::instance::sync_pack(instance_id, project_path).await?)
 }
 
 #[tauri::command]
 pub async fn instance_desync_pack(
     instance_id: &str,
     pack_id: &str,
-    mode: theseus::instance::DesyncServerMode,
+    mode: engine::instance::DesyncServerMode,
 ) -> Result<()> {
-    Ok(theseus::instance::desync_pack(instance_id, pack_id, mode).await?)
+    Ok(engine::instance::desync_pack(instance_id, pack_id, mode).await?)
 }
 
 #[tauri::command]
 pub async fn instance_list_synced_packs(
     project_type: ProjectType,
 ) -> Result<Vec<ContentItem>> {
-    Ok(theseus::instance::list_synced_packs(project_type).await?)
+    Ok(engine::instance::list_synced_packs(project_type).await?)
 }
 
 #[tauri::command]
@@ -1039,12 +1033,8 @@ pub async fn instance_upload_synced_pack(
     game_versions: Vec<String>,
 ) -> Result<()> {
     Ok(
-        theseus::instance::upload_synced_pack(
-            path,
-            project_type,
-            game_versions,
-        )
-        .await?,
+        engine::instance::upload_synced_pack(path, project_type, game_versions)
+            .await?,
     )
 }
 
@@ -1053,12 +1043,12 @@ pub async fn instance_set_synced_pack_enabled(
     pack_id: &str,
     enabled: bool,
 ) -> Result<()> {
-    Ok(theseus::instance::set_synced_pack_enabled(pack_id, enabled).await?)
+    Ok(engine::instance::set_synced_pack_enabled(pack_id, enabled).await?)
 }
 
 #[tauri::command]
 pub async fn instance_remove_synced_pack(pack_id: &str) -> Result<()> {
-    Ok(theseus::instance::remove_synced_pack(pack_id).await?)
+    Ok(engine::instance::remove_synced_pack(pack_id).await?)
 }
 
 #[tauri::command]
@@ -1066,17 +1056,17 @@ pub async fn instance_rebuild_synced_options(
     instance_id: Option<&str>,
 ) -> Result<()> {
     if let Some(instance_id) = instance_id {
-        theseus::instance::reconcile_instance_synced_options(instance_id)
+        engine::instance::reconcile_instance_synced_options(instance_id)
             .await?;
     } else {
-        theseus::instance::reconcile_all_synced_options().await?;
+        engine::instance::reconcile_all_synced_options().await?;
     }
     Ok(())
 }
 
 fn serialize_screenshots<R: Runtime>(
     app_handle: &AppHandle<R>,
-    screenshots: Vec<theseus::instance::InstanceScreenshot>,
+    screenshots: Vec<engine::instance::InstanceScreenshot>,
 ) -> Result<Vec<InstanceScreenshot>> {
     let screenshot_directories = screenshots
         .iter()
@@ -1101,7 +1091,7 @@ fn serialize_screenshots<R: Runtime>(
 
 fn serialize_screenshot<R: Runtime>(
     app_handle: &AppHandle<R>,
-    screenshot: theseus::instance::InstanceScreenshot,
+    screenshot: engine::instance::InstanceScreenshot,
 ) -> Result<InstanceScreenshot> {
     app_handle
         .asset_protocol_scope()
@@ -1115,7 +1105,7 @@ fn serialize_screenshot<R: Runtime>(
 }
 
 fn serialize_screenshot_data(
-    screenshot: theseus::instance::InstanceScreenshot,
+    screenshot: engine::instance::InstanceScreenshot,
 ) -> Result<InstanceScreenshot> {
     let mut url = super::utils::tauri_convert_file_src(&screenshot.path)?;
     url.query_pairs_mut()
@@ -1138,7 +1128,7 @@ fn serialize_screenshot_data(
 pub async fn instance_get_optimal_jre_key(
     instance_id: &str,
 ) -> Result<Option<JavaVersion>> {
-    Ok(theseus::instance::get_optimal_jre_key(instance_id).await?)
+    Ok(engine::instance::get_optimal_jre_key(instance_id).await?)
 }
 
 #[tauri::command]
@@ -1149,7 +1139,7 @@ pub async fn instance_check_installed(
     let check_project_id = project_id;
 
     if let Ok(projects) =
-        theseus::instance::get_projects(instance_id, None).await
+        engine::instance::get_projects(instance_id, None).await
     {
         Ok(projects.into_iter().any(|(_, project)| {
             project
@@ -1168,7 +1158,7 @@ pub async fn instance_update_project(
     project_path: &str,
 ) -> Result<String> {
     Ok(
-        theseus::instance::update_project(instance_id, project_path, None)
+        engine::instance::update_project(instance_id, project_path, None)
             .await?,
     )
 }
@@ -1180,7 +1170,7 @@ pub async fn instance_add_project_from_version(
     reason: DownloadReason,
     dependent_on_version_id: Option<String>,
 ) -> Result<String> {
-    Ok(theseus::instance::add_project_from_version(
+    Ok(engine::instance::add_project_from_version(
         instance_id,
         version_id,
         reason,
@@ -1194,7 +1184,7 @@ pub async fn instance_install_project_with_dependencies(
     instance_id: &str,
     request: InstallProjectWithDependenciesRequest,
 ) -> Result<ResolveContentPlan> {
-    Ok(theseus::instance::install_project_with_dependencies(
+    Ok(engine::instance::install_project_with_dependencies(
         instance_id,
         request,
     )
@@ -1207,7 +1197,7 @@ pub async fn instance_switch_project_version_with_dependencies(
     project_path: &str,
     version_id: &str,
 ) -> Result<String> {
-    Ok(theseus::instance::switch_project_version_with_dependencies(
+    Ok(engine::instance::switch_project_version_with_dependencies(
         instance_id,
         project_path,
         version_id,
@@ -1221,7 +1211,7 @@ pub async fn instance_add_project_from_path(
     project_path: &Path,
     project_type: Option<ProjectType>,
 ) -> Result<String> {
-    Ok(theseus::instance::add_project_from_path(
+    Ok(engine::instance::add_project_from_path(
         instance_id,
         project_path,
         project_type,
@@ -1231,7 +1221,7 @@ pub async fn instance_add_project_from_path(
 
 #[tauri::command]
 pub async fn instance_is_file_on_modrinth(project_path: &Path) -> Result<bool> {
-    Ok(theseus::instance::is_file_on_modrinth(project_path).await?)
+    Ok(engine::instance::is_file_on_modrinth(project_path).await?)
 }
 
 #[tauri::command]
@@ -1240,7 +1230,7 @@ pub async fn instance_toggle_disable_project(
     project_path: &str,
     desired_enabled: Option<bool>,
 ) -> Result<String> {
-    Ok(theseus::instance::toggle_disable_project(
+    Ok(engine::instance::toggle_disable_project(
         instance_id,
         project_path,
         desired_enabled,
@@ -1254,7 +1244,7 @@ pub async fn instance_set_project_locked(
     project_path: &str,
     locked: bool,
 ) -> Result<()> {
-    theseus::instance::set_project_locked(instance_id, project_path, locked)
+    engine::instance::set_project_locked(instance_id, project_path, locked)
         .await?;
     Ok(())
 }
@@ -1264,7 +1254,7 @@ pub async fn instance_remove_project(
     instance_id: &str,
     project_path: &str,
 ) -> Result<()> {
-    theseus::instance::remove_project(instance_id, project_path).await?;
+    engine::instance::remove_project(instance_id, project_path).await?;
     Ok(())
 }
 
@@ -1272,8 +1262,8 @@ pub async fn instance_remove_project(
 pub async fn instance_update_managed_modrinth_version(
     instance_id: String,
     version_id: String,
-) -> Result<theseus::install::InstallJobSnapshot> {
-    Ok(theseus::instance::update_managed_modrinth_version(
+) -> Result<engine::install::InstallJobSnapshot> {
+    Ok(engine::instance::update_managed_modrinth_version(
         &instance_id,
         &version_id,
     )
@@ -1283,8 +1273,8 @@ pub async fn instance_update_managed_modrinth_version(
 #[tauri::command]
 pub async fn instance_repair_managed_modrinth(
     instance_id: &str,
-) -> Result<theseus::install::InstallJobSnapshot> {
-    Ok(theseus::instance::repair_managed_modrinth(instance_id).await?)
+) -> Result<engine::install::InstallJobSnapshot> {
+    Ok(engine::instance::repair_managed_modrinth(instance_id).await?)
 }
 
 #[tauri::command]
@@ -1297,7 +1287,7 @@ pub async fn instance_export_mrpack(
     description: Option<String>,
     name: Option<String>,
 ) -> Result<()> {
-    theseus::instance::export_mrpack(
+    engine::instance::export_mrpack(
         instance_id,
         export_location,
         included_overrides,
@@ -1314,8 +1304,8 @@ pub async fn instance_export_mrpack(
 pub async fn instance_get_pack_export_candidates(
     instance_id: &str,
     parent: Option<SafeRelativeUtf8UnixPathBuf>,
-) -> Result<Vec<theseus::instance::PackExportCandidate>> {
-    Ok(theseus::instance::get_pack_export_candidates_for_parent(
+) -> Result<Vec<engine::instance::PackExportCandidate>> {
+    Ok(engine::instance::get_pack_export_candidates_for_parent(
         instance_id,
         parent,
     )
@@ -1331,12 +1321,12 @@ pub async fn instance_run(
         Some(addr) => QuickPlayType::Server(ServerAddress::Unresolved(addr)),
         None => QuickPlayType::None,
     };
-    Ok(theseus::instance::run(instance_id, quick_play).await?)
+    Ok(engine::instance::run(instance_id, quick_play).await?)
 }
 
 #[tauri::command]
 pub async fn instance_kill(instance_id: &str) -> Result<()> {
-    theseus::instance::kill(instance_id).await?;
+    engine::instance::kill(instance_id).await?;
     Ok(())
 }
 
@@ -1345,7 +1335,7 @@ pub async fn instance_edit(
     instance_id: &str,
     edit_instance: EditInstance,
 ) -> Result<()> {
-    theseus::instance::edit(instance_id, edit_to_core(edit_instance)?).await?;
+    engine::instance::edit(instance_id, edit_to_core(edit_instance)?).await?;
     Ok(())
 }
 
@@ -1354,24 +1344,24 @@ pub async fn instance_edit_icon(
     instance_id: &str,
     icon_path: Option<&Path>,
 ) -> Result<()> {
-    theseus::instance::edit_icon(instance_id, icon_path).await?;
+    engine::instance::edit_icon(instance_id, icon_path).await?;
     Ok(())
 }
 
 #[tauri::command]
 pub async fn instance_cache_icon(icon_bytes: Vec<u8>) -> Result<String> {
-    Ok(theseus::instance::cache_icon_bytes(icon_bytes).await?)
+    Ok(engine::instance::cache_icon_bytes(icon_bytes).await?)
 }
 
 #[tauri::command]
 pub async fn instance_edit_generated_icon(
     instance_id: &str,
-    config: theseus::data::IconConfig,
+    config: engine::data::IconConfig,
     symbol_bytes: Vec<u8>,
     only_if_empty: Option<bool>,
 ) -> Result<Option<String>> {
     if only_if_empty.unwrap_or(false) {
-        return Ok(theseus::instance::edit_generated_icon_if_empty(
+        return Ok(engine::instance::edit_generated_icon_if_empty(
             instance_id,
             config,
             symbol_bytes,
@@ -1380,7 +1370,7 @@ pub async fn instance_edit_generated_icon(
     }
 
     Ok(Some(
-        theseus::instance::edit_generated_icon(
+        engine::instance::edit_generated_icon(
             instance_id,
             config,
             symbol_bytes,
@@ -1391,11 +1381,11 @@ pub async fn instance_edit_generated_icon(
 
 #[tauri::command]
 pub async fn instance_cache_generated_icon(
-    config: theseus::data::IconConfig,
+    config: engine::data::IconConfig,
     symbol_bytes: Vec<u8>,
     add_to_recents: bool,
 ) -> Result<String> {
-    Ok(theseus::instance::cache_generated_icon(
+    Ok(engine::instance::cache_generated_icon(
         config,
         symbol_bytes,
         add_to_recents,
@@ -1405,29 +1395,29 @@ pub async fn instance_cache_generated_icon(
 
 #[tauri::command]
 pub async fn instance_get_recent_icon_configs()
--> Result<Vec<theseus::data::IconConfig>> {
-    Ok(theseus::instance::get_recent_icon_configs().await?)
+-> Result<Vec<engine::data::IconConfig>> {
+    Ok(engine::instance::get_recent_icon_configs().await?)
 }
 
 #[tauri::command]
 pub async fn instance_share_can_current_user_use() -> Result<bool> {
-    Ok(theseus::instance::can_active_user_use_shared_instances().await?)
+    Ok(engine::instance::can_active_user_use_shared_instances().await?)
 }
 
 #[tauri::command]
 pub async fn instance_share_get_users(
     instance_id: &str,
-) -> Result<theseus::instance::SharedInstanceUsers> {
-    Ok(theseus::instance::get_shared_instance_users(instance_id).await?)
+) -> Result<engine::instance::SharedInstanceUsers> {
+    Ok(engine::instance::get_shared_instance_users(instance_id).await?)
 }
 
 #[tauri::command]
 pub async fn instance_share_invite_users(
     instance_id: &str,
     user_ids: Vec<String>,
-) -> Result<theseus::instance::SharedInstanceUsers> {
+) -> Result<engine::instance::SharedInstanceUsers> {
     Ok(
-        theseus::instance::invite_shared_instance_users(instance_id, user_ids)
+        engine::instance::invite_shared_instance_users(instance_id, user_ids)
             .await?,
     )
 }
@@ -1438,8 +1428,8 @@ pub async fn instance_share_create_invite_link(
     max_age_seconds: Option<i32>,
     max_uses: Option<i32>,
     replace_invite_id: Option<String>,
-) -> Result<theseus::instance::SharedInstanceInviteLink> {
-    Ok(theseus::instance::create_shared_instance_invite_link(
+) -> Result<engine::instance::SharedInstanceInviteLink> {
+    Ok(engine::instance::create_shared_instance_invite_link(
         instance_id,
         max_age_seconds,
         max_uses,
@@ -1451,8 +1441,8 @@ pub async fn instance_share_create_invite_link(
 #[tauri::command]
 pub async fn instance_share_get_invites(
     instance_id: &str,
-) -> Result<Vec<theseus::instance::SharedInstanceInvite>> {
-    Ok(theseus::instance::get_shared_instance_invites(instance_id).await?)
+) -> Result<Vec<engine::instance::SharedInstanceInvite>> {
+    Ok(engine::instance::get_shared_instance_invites(instance_id).await?)
 }
 
 #[tauri::command]
@@ -1461,11 +1451,8 @@ pub async fn instance_share_revoke_invite(
     invite_id: String,
 ) -> Result<()> {
     Ok(
-        theseus::instance::revoke_shared_instance_invite(
-            instance_id,
-            invite_id,
-        )
-        .await?,
+        engine::instance::revoke_shared_instance_invite(instance_id, invite_id)
+            .await?,
     )
 }
 
@@ -1474,8 +1461,8 @@ pub async fn instance_share_remove_users(
     instance_id: &str,
     user_ids: Vec<String>,
     has_pending_recipients: bool,
-) -> Result<theseus::instance::SharedInstanceUsers> {
-    Ok(theseus::instance::remove_shared_instance_users(
+) -> Result<engine::instance::SharedInstanceUsers> {
+    Ok(engine::instance::remove_shared_instance_users(
         instance_id,
         user_ids,
         has_pending_recipients,
@@ -1486,9 +1473,9 @@ pub async fn instance_share_remove_users(
 #[tauri::command]
 pub async fn instance_share_get_publish_preview(
     instance_id: &str,
-) -> Result<Option<theseus::instance::SharedInstancePublishPreview>> {
+) -> Result<Option<engine::instance::SharedInstancePublishPreview>> {
     Ok(
-        theseus::instance::get_shared_instance_publish_preview(instance_id)
+        engine::instance::get_shared_instance_publish_preview(instance_id)
             .await?,
     )
 }
@@ -1501,7 +1488,7 @@ pub async fn instance_share_publish(
     server_core_id: Option<String>,
     on_progress: tauri::ipc::Channel<(u64, u64)>,
 ) -> Result<SharedInstanceAttachment> {
-    Ok(theseus::instance::publish_shared_instance(
+    Ok(engine::instance::publish_shared_instance(
         instance_id,
         file_paths,
         removed_paths,
@@ -1519,7 +1506,7 @@ pub async fn instance_share_publish_support_details(
     instance_id: &str,
 ) -> Result<Option<String>> {
     Ok(
-        theseus::instance::get_shared_instance_publish_support_details(
+        engine::instance::get_shared_instance_publish_support_details(
             instance_id,
         )
         .await?,
@@ -1528,13 +1515,13 @@ pub async fn instance_share_publish_support_details(
 
 #[tauri::command]
 pub async fn instance_share_unlink(instance_id: &str) -> Result<()> {
-    theseus::instance::unlink_shared_instance(instance_id).await?;
+    engine::instance::unlink_shared_instance(instance_id).await?;
     Ok(())
 }
 
 #[tauri::command]
 pub async fn instance_share_unpublish(instance_id: &str) -> Result<()> {
-    theseus::instance::unpublish_shared_instance(instance_id).await?;
+    engine::instance::unpublish_shared_instance(instance_id).await?;
     Ok(())
 }
 
@@ -1542,7 +1529,7 @@ pub async fn instance_share_unpublish(instance_id: &str) -> Result<()> {
 pub async fn instance_share_ensure(
     instance_id: &str,
 ) -> Result<SharedInstanceAttachment> {
-    Ok(theseus::instance::ensure_shared_instance(instance_id)
+    Ok(engine::instance::ensure_shared_instance(instance_id)
         .await?
         .into())
 }
@@ -1551,28 +1538,28 @@ pub async fn instance_share_ensure(
 pub async fn instance_share_unpublish_remote(
     shared_instance_id: &str,
 ) -> Result<()> {
-    theseus::instance::unpublish_remote_shared_instance(shared_instance_id)
+    engine::instance::unpublish_remote_shared_instance(shared_instance_id)
         .await?;
     Ok(())
 }
 
 #[tauri::command]
 pub async fn instance_share_get_cached_library()
--> Result<Vec<theseus::data::CachedSharedInstanceSummary>> {
-    Ok(theseus::instance::get_cached_shared_instance_library().await?)
+-> Result<Vec<engine::data::CachedSharedInstanceSummary>> {
+    Ok(engine::instance::get_cached_shared_instance_library().await?)
 }
 
 #[tauri::command]
 pub async fn instance_share_cache_library(
-    instances: Vec<theseus::data::CachedSharedInstanceSummary>,
+    instances: Vec<engine::data::CachedSharedInstanceSummary>,
 ) -> Result<()> {
-    theseus::instance::cache_shared_instance_library(instances).await?;
+    engine::instance::cache_shared_instance_library(instances).await?;
     Ok(())
 }
 
 #[tauri::command]
 pub async fn instance_get_hidden_ids() -> Result<Vec<String>> {
-    Ok(theseus::instance::get_hidden_instance_ids().await?)
+    Ok(engine::instance::get_hidden_instance_ids().await?)
 }
 
 #[tauri::command]
@@ -1580,7 +1567,7 @@ pub async fn instance_set_hidden(
     instance_id: &str,
     hidden: bool,
 ) -> Result<()> {
-    theseus::instance::set_instance_hidden(instance_id, hidden).await?;
+    engine::instance::set_instance_hidden(instance_id, hidden).await?;
     Ok(())
 }
 
@@ -1588,7 +1575,7 @@ pub async fn instance_set_hidden(
 pub async fn instance_share_dismiss_restored_notice(
     instance_id: &str,
 ) -> Result<()> {
-    theseus::instance::dismiss_shared_instance_restored_notice(instance_id)
+    engine::instance::dismiss_shared_instance_restored_notice(instance_id)
         .await?;
     Ok(())
 }
@@ -1597,6 +1584,6 @@ pub async fn instance_share_dismiss_restored_notice(
 pub async fn instance_share_leave_remote(
     shared_instance_id: &str,
 ) -> Result<()> {
-    theseus::instance::leave_remote_shared_instance(shared_instance_id).await?;
+    engine::instance::leave_remote_shared_instance(shared_instance_id).await?;
     Ok(())
 }

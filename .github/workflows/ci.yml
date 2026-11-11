@@ -53,12 +53,12 @@ jobs:
               # Whole crate folders: crates compile in or test against files of every type.
               - apps/app/**
               - apps/core/**
-              - packages/app-lib/**
               - packages/ariadne/**
               - packages/async-minecraft-ping/**
               - packages/bedrock/**
               - packages/browser-bridge/**
               - packages/contracts/**
+              - packages/engine/**
               - packages/minecraft-meta-manifest/**
               - packages/modrinth-content-management/**
               - packages/path-util/**
@@ -66,7 +66,7 @@ jobs:
               - packages/sharing-client/**
               - packages/sharing-storage/**
               - packages/toasty/**
-              # Read from outside a crate: two drift tests' generated files and an icon app-lib embeds.
+              # Read from outside a crate: two drift tests' generated files and an icon the engine embeds.
               - packages/api-client/src/modules/bedrock/limits.ts
               - packages/api-client/src/modules/sharing/rules.ts
               - packages/assets/external/illustrations/minecraft_server_icon.png
@@ -131,7 +131,7 @@ jobs:
       - uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc # v2.86.7
         with:
           tool: cargo-shear@1.11.2
-      - run: cp packages/app-lib/.env.staging packages/app-lib/.env
+      - run: cp packages/engine/.env.staging packages/engine/.env
       # Tauri only checks that the frontend build folder exists; an empty one is enough to compile.
       - run: mkdir -p apps/app-frontend/dist
       - run: cargo fmt --all --check

@@ -562,8 +562,8 @@ function resolveWorktreePaths(): WorktreePaths {
 /** Settings from the env files, overridden by the environment. */
 function readSharedEnv(paths: WorktreePaths): NodeJS.ProcessEnv {
 	return {
-		...readEnv(NodePath.join(paths.worktree, 'packages', 'app-lib', '.env.prod')),
-		...readEnv(NodePath.join(paths.worktree, 'packages', 'app-lib', '.env')),
+		...readEnv(NodePath.join(paths.worktree, 'packages', 'engine', '.env.prod')),
+		...readEnv(NodePath.join(paths.worktree, 'packages', 'engine', '.env')),
 		...readEnv(NodePath.join(paths.primary, '.env.local')),
 		...readEnv(NodePath.join(paths.primary, 'apps', 'core', '.env.local')),
 		...readEnv(NodePath.join(paths.worktree, '.env.local')),
@@ -676,7 +676,7 @@ export function createProcessSpecs(input: {
 			build: {
 				cargoArgs: ['build', '--package', 'copal'],
 				cwd: coreDir,
-				...appLibBuildSettings(input.paths, input.env),
+				...engineBuildSettings(input.paths, input.env),
 				inputs: workspaceInputs(input.paths, 'copal'),
 				program: programFile('copal'),
 				...workspaceBuildDirs(input.paths),
@@ -733,7 +733,7 @@ function createAppProcessSpec(input: {
 		cwd: NodePath.join(input.paths.worktree, 'apps', 'app'),
 		env: {
 			...input.env,
-			RUST_LOG: 'theseus=warn,theseus_gui=warn,browser_bridge=info,webview=off',
+			RUST_LOG: 'engine=warn,theseus_gui=warn,browser_bridge=info,webview=off',
 			THESEUS_CONFIG_DIR: dataDir,
 			WEBVIEW2_USER_DATA_FOLDER: NodePath.join(dataDir, 'webview2'),
 		},
@@ -743,7 +743,7 @@ function createAppProcessSpec(input: {
 
 function appProgramBuild(paths: WorktreePaths, env: NodeJS.ProcessEnv): ProgramBuild {
 	const appDir = NodePath.join(paths.worktree, 'apps', 'app')
-	const appLib = appLibBuildSettings(paths, env)
+	const engine = engineBuildSettings(paths, env)
 	return {
 		// What `tauri dev` ran. Without `custom-protocol` the App loads its frontend from devUrl.
 		cargoArgs: [
@@ -756,12 +756,12 @@ function appProgramBuild(paths: WorktreePaths, env: NodeJS.ProcessEnv): ProgramB
 		],
 		cwd: appDir,
 		env: {
-			...appLib.env,
+			...engine.env,
 			TAURI_CONFIG: JSON.stringify(
 				JSON.parse(NodeFS.readFileSync(NodePath.join(appDir, 'tauri-local.conf.json'), 'utf8')),
 			),
 		},
-		ignoredInputs: appLib.ignoredInputs,
+		ignoredInputs: engine.ignoredInputs,
 		// The App's version comes from the frontend.
 		inputs: [...workspaceInputs(paths, 'theseus_gui'), 'apps/app-frontend/package.json'],
 		program: programFile('theseus_gui'),
@@ -770,17 +770,17 @@ function appProgramBuild(paths: WorktreePaths, env: NodeJS.ProcessEnv): ProgramB
 }
 
 /**
- * app-lib's build passes these to the compiler: from its `.env`, or from the environment when that
- * file is missing. Every program that may build app-lib takes them.
+ * The engine's build passes these to the compiler: from its `.env`, or from the environment when
+ * that file is missing. Every program that may build the engine takes them.
  */
-function appLibBuildSettings(
+function engineBuildSettings(
 	paths: WorktreePaths,
 	env: NodeJS.ProcessEnv,
 ): Pick<ProgramBuild, 'env' | 'ignoredInputs'> {
-	const appLibDir = NodePath.join(paths.worktree, 'packages', 'app-lib')
+	const engineDir = NodePath.join(paths.worktree, 'packages', 'engine')
 	const names = Object.keys({
-		...readEnv(NodePath.join(appLibDir, '.env.prod')),
-		...readEnv(NodePath.join(appLibDir, '.env')),
+		...readEnv(NodePath.join(engineDir, '.env.prod')),
+		...readEnv(NodePath.join(engineDir, '.env')),
 	})
 	return {
 		env: Object.fromEntries(
@@ -789,7 +789,7 @@ function appLibBuildSettings(
 				return value === undefined ? [] : [[name, value] as const]
 			}),
 		),
-		ignoredInputs: [NodePath.join(appLibDir, '.env')],
+		ignoredInputs: [NodePath.join(engineDir, '.env')],
 	}
 }
 

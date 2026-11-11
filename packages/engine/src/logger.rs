@@ -2,16 +2,16 @@
     tracing is set basd on the environment variable RUST_LOG=xxx, depending on the amount of logs to show
         ERROR > WARN > INFO > DEBUG > TRACE
     eg. RUST_LOG=info will show info, warn, and error logs
-        RUST_LOG="theseus=trace" will show *all* messages but from theseus only (and not dependencies using similar crates)
-        RUST_LOG="theseus=trace" will show *all* messages but from theseus only (and not dependencies using similar crates)
+        RUST_LOG="engine=trace" will show *all* messages but from engine only (and not dependencies using similar crates)
+        RUST_LOG="engine=trace" will show *all* messages but from engine only (and not dependencies using similar crates)
 
     Error messages returned to Tauri will display as traced error logs if they return an error.
     This will also include an attached span trace if the error is from a tracing error, and the level is set to info, debug, or trace
 
     on unix:
-        RUST_LOG="theseus=trace" {run command}
+        RUST_LOG="engine=trace" {run command}
 
-    The default is theseus=show, meaning only logs from theseus will be displayed, and at the info or higher level.
+    The default is engine=show, meaning only logs from engine will be displayed, and at the info or higher level.
 
 */
 
@@ -24,7 +24,7 @@ pub fn start_logger(_app_identifier: &str) -> Option<()> {
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| {
             tracing_subscriber::EnvFilter::new(
-                "theseus=info,theseus_gui=info,webview=trace",
+                "engine=info,theseus_gui=info,webview=trace",
             )
         });
     tracing_subscriber::registry()
@@ -114,7 +114,7 @@ pub fn start_logger(app_identifier: &str) -> Option<()> {
 
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| {
-            tracing_subscriber::EnvFilter::new("theseus=info,webview=trace")
+            tracing_subscriber::EnvFilter::new("engine=info,webview=trace")
         });
 
     tracing_subscriber::registry()

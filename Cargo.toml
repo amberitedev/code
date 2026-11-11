@@ -3,10 +3,10 @@ resolver = "2"
 members = [
   "apps/app",
   "apps/core",
-  "packages/app-lib",
   "packages/ariadne",
   "packages/bedrock",
   "packages/browser-bridge",
+  "packages/engine",
   "packages/minecraft-meta-manifest",
   "packages/modrinth-content-management",
   "packages/path-util",
@@ -51,6 +51,7 @@ dotenvy = "0.15.7"
 dunce = "1.0.5"
 either = "1.19.0"
 encoding_rs = "0.8.42"
+engine = { path = "packages/engine" }
 enumset = "1.1.14"
 flate2 = "1.1.10"
 fs4 = { version = "1.1.0", default-features = false }
@@ -128,7 +129,6 @@ tauri-plugin-updater = { git = "https://github.com/modrinth/plugins-workspace", 
 ] }
 tauri-plugin-window-state = "=2.4.0"
 tempfile = "3.27.0"
-theseus = { path = "packages/app-lib" }
 thiserror = "2.0.21"
 toasty = { version = "0.11.0" }
 tokio = "1.54.0"
