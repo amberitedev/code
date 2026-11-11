@@ -39,11 +39,13 @@ const LOCKFILES = {
 
 const upstream = process.argv[2] ?? 'modrinth/main'
 const config: UpstreamConfig = JSON.parse(NodeFS.readFileSync('upstream.json', 'utf8'))
+// Git quotes non-ASCII paths by default, and a quoted path matches no key in upstream.json.
+const unquoted = ['-c', 'core.quotePath=false'] as const
 
 const base = git('merge-base', 'HEAD', upstream)
 const upstreamSha = git('rev-parse', upstream)
 const ours = changedPaths(
-	parseNameStatus(git('diff', '--find-renames', '--name-status', base, 'HEAD')),
+	parseNameStatus(git(...unquoted, 'diff', '--find-renames', '--name-status', base, 'HEAD')),
 )
 const commits = lines(git('rev-list', '--reverse', '--no-merges', `${base}..${upstream}`))
 const removed = removedPaths(config, (path) =>
@@ -90,7 +92,9 @@ const buckets: Record<Bucket, Commit[]> = {
 }
 for (const sha of commits) {
 	// --find-renames shows a move as one change, so a moved page is not counted as a new one.
-	const changes = parseNameStatus(git('show', '--find-renames', '--format=', '--name-status', sha))
+	const changes = parseNameStatus(
+		git(...unquoted, 'show', '--find-renames', '--format=', '--name-status', sha),
+	)
 	buckets[bucketOf(changes, config, ours)].push({
 		sha,
 		title: git('log', '-1', '--format=%s', sha),

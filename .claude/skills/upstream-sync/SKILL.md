@@ -77,6 +77,10 @@ porting rules in `docs/internals/upstream.md`. Apply the same rules to any other
 cover. Port small changes in a commit titled `feat(<scope>): port <change> from upstream`, such as
 `feat(backend): port user bans from upstream`. List larger ones in the PR instead of porting them.
 
+When a `port` commit renames a ported path upstream, add the new upstream path to `ported` in
+`upstream.json` and check the later commits in this sync that touch it. Only the listed name is
+reported.
+
 ## 8. Push and open the PR
 
 1. `git push --force-with-lease`. The amend rewrote the merge the workflow pushed.
