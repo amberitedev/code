@@ -17,6 +17,7 @@ bytes = { workspace = true }
 chrono = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 color-eyre = { workspace = true }
+contracts = { workspace = true }
 futures = { workspace = true }
 hex = { workspace = true }
 reqwest = { workspace = true, features = ["json", "rustls-no-provider", "stream"] }

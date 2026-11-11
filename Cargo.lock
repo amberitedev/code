@@ -1310,6 +1310,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "chrono",
+ "contracts",
  "fs4",
  "futures",
  "hex",
@@ -2236,6 +2237,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "contracts"
+version = "0.0.0"
+dependencies = [
+ "axum",
+ "bytes",
+ "contracts",
+ "http-body-util",
+ "reqwest 0.13.5",
+ "rustls",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "tower",
+ "ts-rs",
+]
+
+[[package]]
 name = "convert_case"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2319,6 +2338,7 @@ dependencies = [
  "chrono",
  "clap 4.6.7",
  "color-eyre",
+ "contracts",
  "crab_nat",
  "dunce",
  "flate2",
@@ -3277,6 +3297,7 @@ dependencies = [
  "chardetng",
  "chrono",
  "cidre",
+ "contracts",
  "dashmap",
  "data-url",
  "derive_more 2.1.1",
@@ -9073,6 +9094,7 @@ dependencies = [
  "bedrock",
  "bytes",
  "chacha20poly1305",
+ "contracts",
  "futures",
  "hex",
  "hkdf",
@@ -9106,6 +9128,7 @@ dependencies = [
  "chrono",
  "clap 4.6.7",
  "color-eyre",
+ "contracts",
  "futures",
  "hex",
  "http-body-util",

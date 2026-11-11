@@ -66,9 +66,7 @@ jobs:
               - packages/sharing-client/**
               - packages/sharing-storage/**
               - packages/toasty/**
-              # Read from outside a crate: two drift tests' generated files and an icon the engine embeds.
-              - packages/api-client/src/modules/bedrock/limits.ts
-              - packages/api-client/src/modules/sharing/rules.ts
+              # Read from outside a crate: an icon the engine embeds.
               - packages/assets/external/illustrations/minecraft_server_icon.png
               - .github/workflows/ci.yml
 

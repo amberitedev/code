@@ -1,3 +1,5 @@
+export * from '@amberite/contracts'
+export * from './contracts'
 export { AbstractModrinthClient } from './core/abstract-client'
 export { AbstractFeature, type FeatureConfig } from './core/abstract-feature'
 export {
@@ -38,8 +40,6 @@ export {
 export { type VerboseLoggingConfig, VerboseLoggingFeature } from './features/verbose-logging'
 export type { InferredClientModules } from './modules'
 export { CoreApprovalError } from './modules/archon/cores/v1'
-export * from './modules/bedrock/limits'
-export * from './modules/sharing/rules'
 export { TICKET_HEADER } from './modules/copal/access/v1'
 export { SharedInstancesApiError } from './modules/shared-instances/errors'
 export * from './modules/types'

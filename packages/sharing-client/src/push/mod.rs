@@ -26,7 +26,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use bedrock::limits::MAX_SHARE_BYTES;
+use contracts::limits::MAX_SHARE_BYTES;
 use futures::future::BoxFuture;
 use futures::{StreamExt, TryStreamExt};
 use reqwest::StatusCode;

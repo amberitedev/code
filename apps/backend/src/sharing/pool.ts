@@ -10,10 +10,6 @@ import { type Holder, fetchTicket, storeTicket } from '../cores/tickets'
 export const MAX_VERSION_FILES = 4096
 /** The manifest request body; 4,096 entries with keys are about 1 MB. */
 export const MAX_MANIFEST_BODY = 4 * 1024 * 1024
-/** A share's latest version, in distinct encrypted bytes. */
-export const MAX_SHARE_BYTES = 1024 ** 3
-/** Every account's allowance on other people's Cores: its usage may not pass this. */
-export const ALLOWANCE_BYTES = 3 * 1024 ** 3
 /** Ready versions a share keeps, files included, when its owner has not chosen. */
 export const DEFAULT_KEPT_VERSIONS = 5
 /** How long an unconfirmed version blocks the next push: the store ticket's life. */

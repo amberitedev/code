@@ -32,7 +32,7 @@ const matching = (pattern: RegExp) => changed.filter((file) => pattern.test(file
 
 // The packages CI typechecks and tests (ci.yml, js job), and what reaches each.
 const PACKAGES = [
-	{ name: '@amberite/backend', test: true, reachedBy: ['apps/backend'] },
+	{ name: '@amberite/backend', test: true, reachedBy: ['apps/backend', 'packages/contracts'] },
 	{ name: '@amberite/browser-bridge', test: true, reachedBy: ['packages/browser-bridge'] },
 	{
 		name: '@modrinth/app-frontend',
@@ -42,6 +42,7 @@ const PACKAGES = [
 			'packages/ui',
 			'packages/api-client',
 			'packages/assets',
+			'packages/contracts',
 			'packages/utils',
 		],
 	},
@@ -109,8 +110,6 @@ if (touched.some((file) => /\.rs$|(?:^|\/)Cargo\.(?:toml|lock)$/.test(file))) {
 }
 // Files outside a crate's folder that its tests read (ci.yml's rust filter lists them too).
 const READ_BY_CRATE: Readonly<Record<string, string>> = {
-	'packages/api-client/src/modules/bedrock/limits.ts': 'bedrock',
-	'packages/api-client/src/modules/sharing/rules.ts': 'sharing-client',
 	'packages/assets/external/illustrations/minecraft_server_icon.png': 'engine',
 }
 const crates = under('apps', 'packages') ? workspaceCrates() : []

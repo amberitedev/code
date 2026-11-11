@@ -8,13 +8,11 @@
 
 use std::io::{self, Read, Seek};
 
+use bedrock::disk::label;
 /// What Core may still write on the disk at a path: its free space less the margin it keeps.
 pub use bedrock::disk::room;
-pub use bedrock::limits::MAX_ARCHIVE_ENTRIES as MAX_ENTRIES;
-use bedrock::{
-    disk::label,
-    limits::{DISK_MARGIN_BYTES, MAX_COMPRESSION_RATIO},
-};
+pub use contracts::limits::MAX_ARCHIVE_ENTRIES as MAX_ENTRIES;
+use contracts::limits::{DISK_MARGIN_BYTES, MAX_COMPRESSION_RATIO};
 use sha1::Digest;
 
 use super::folder::{self, Folder, PathError};

@@ -2,7 +2,8 @@
 //! instead of failing halfway.
 
 pub use bedrock::disk::free;
-use bedrock::{disk::label, limits::DISK_MARGIN_BYTES};
+use bedrock::disk::label;
+use contracts::limits::DISK_MARGIN_BYTES;
 
 /// Not enough room on the Core's disk for a backup or restore.
 #[derive(Debug, thiserror::Error)]

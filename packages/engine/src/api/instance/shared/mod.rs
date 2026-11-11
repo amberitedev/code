@@ -59,10 +59,9 @@ pub(crate) fn shared_clients_session() -> Option<SharedClientsSession> {
         .clone()
 }
 
+pub(crate) use contracts::rules::SHAREABLE_CONFIG_EXTENSIONS as CONFIG_FILE_EXTENSIONS;
+pub(crate) use sharing_client::rules::CONFIG_FILE_TYPE;
 use sharing_client::rules::ShareScope;
-pub(crate) use sharing_client::rules::{
-    CONFIG_EXTENSIONS as CONFIG_FILE_EXTENSIONS, CONFIG_FILE_TYPE,
-};
 use sharing_client::versions::RemovedFile;
 pub(crate) const CONFIG_SYNC_ENABLED: bool = true;
 pub(crate) const CONFIG_DIRECTORY: &str = "config";

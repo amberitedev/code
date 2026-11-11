@@ -1,3 +1,5 @@
+import { ALLOWANCE_BYTES, MAX_SHARE_BYTES } from '@amberite/contracts'
+
 import { requireUnlocked, requireUser, tokenFrom } from '../common/auth'
 import { randomId } from '../common/crypto'
 import { ApiError, json, readBytes, readJson } from '../common/http'
@@ -8,10 +10,8 @@ import { readTicket, readTicketUser } from '../cores/tickets'
 import { canInviteToSharedInstance } from '../social/preferences'
 import { notifyUser } from '../social/socket'
 import {
-	ALLOWANCE_BYTES,
 	EMPTY_ROOT,
 	MAX_MANIFEST_BODY,
-	MAX_SHARE_BYTES,
 	MAX_VERSION_FILES,
 	type ManifestFile,
 	UNCONFIRMED_TTL_MS,

@@ -61,9 +61,10 @@ another. Before calling work done, walk this list and say which entries applied:
 
 - **Way in, way out.** If you added a way in, add the way out and the way to see it. Share needs
   unshare, invite needs revoke. A one-way door is an unfinished feature.
-- **One contract.** Every call between the App and a backend (Core, `apps/backend`) is typed in
-  `packages/api-client`. Values Rust owns, such as limits and share rules, are generated into
-  api-client, never typed twice.
+- **One contract.** Every call between the App and a backend (Core, `apps/backend`) is an
+  `Endpoint` whose TS is generated into `@amberite/contracts` and called through
+  `packages/api-client`. Values Rust owns, such as limits and share rules, are generated the same
+  way, never typed twice.
 - **Shared UI.** Changes to inherited Modrinth UI or `packages/ui` can affect screens outside the
   one you changed. Check its consumers before treating it as local.
 - **Docs.** Check whether the change makes existing guidance inaccurate. Apply the

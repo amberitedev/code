@@ -7,9 +7,8 @@
 //! be picked, and both refuse them in a push.
 //!
 //! The server's rules are mirrored in `packages/ui/src/composables/server-sharing/config-files.ts`,
-//! which takes the extension list from `packages/api-client/src/modules/sharing/rules.ts`,
-//! generated from this file. `cargo test -p sharing-client` fails when that file is stale.
-//! Regenerate it with `cargo test -p sharing-client -- --ignored write_typescript`.
+//! which reads the folder and extensions from [`contracts::rules`] through the generated
+//! TypeScript.
 
 mod listing;
 
@@ -21,30 +20,12 @@ pub use listing::{
 use std::path::{Component, Path};
 
 use bedrock::state::ProjectType;
+use contracts::rules::{SERVER_SHARE_FOLDER, SHAREABLE_CONFIG_EXTENSIONS};
 
 /// The manifest type of a single file the owner picked, named by its path.
 pub const CONFIG_FILE_TYPE: &str = "config";
 /// Leading bytes of each file passed to [`is_executable_content`].
 pub const SCAN_HEAD_SIZE: usize = 8192;
-/// The folder a server's shared files live in.
-pub const SERVER_SHARE_FOLDER: &str = "config";
-/// Extensions of the config files a server's share may carry.
-pub const CONFIG_EXTENSIONS: [&str; 14] = [
-    "json",
-    "json5",
-    "jsonc",
-    "yml",
-    "yaml",
-    "css",
-    "toml",
-    "txt",
-    "ini",
-    "cfg",
-    "conf",
-    "properties",
-    "xml",
-    "nbt",
-];
 
 /// Extensions of executables, scripts and installers, which no share carries.
 const EXECUTABLE_EXTENSIONS: &[&str] = &[
@@ -107,7 +88,7 @@ impl ShareScope {
             && match self {
                 Self::Instance { .. } => !is_executable_name(path),
                 Self::Server => extension(path).is_some_and(|extension| {
-                    CONFIG_EXTENSIONS.contains(&extension.as_str())
+                    SHAREABLE_CONFIG_EXTENSIONS.contains(&extension.as_str())
                 }),
             }
     }
@@ -209,47 +190,5 @@ mod tests {
     fn executables_are_blocked_by_their_bytes() {
         assert!(INSTANCE.blocked("options.txt", b"MZ\x90\x00\x03\x00\x00\x00"));
         assert!(!INSTANCE.blocked("options.txt", b"fov:90"));
-    }
-
-    mod typescript {
-        const PATH: &str = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../api-client/src/modules/sharing/rules.ts"
-        );
-
-        fn file() -> String {
-            let extensions = super::CONFIG_EXTENSIONS
-                .iter()
-                .map(|extension| format!("\t'{extension}',\n"))
-                .collect::<String>();
-            format!(
-                "// Generated from packages/sharing-client/src/rules/mod.rs. Do not edit.\n\
-                 // Regenerate: cargo test -p sharing-client -- --ignored write_typescript\n\n\
-                 /** The folder a server's shared files live in. */\n\
-                 export const SERVER_SHARE_FOLDER = '{}'\n\n\
-                 /** Extensions of the config files a server's share may carry. */\n\
-                 export const SHAREABLE_CONFIG_EXTENSIONS: readonly string[] = [\n{extensions}]\n",
-                super::SERVER_SHARE_FOLDER
-            )
-        }
-
-        #[test]
-        fn typescript_is_up_to_date() {
-            let written = std::fs::read_to_string(PATH).unwrap_or_default();
-            assert!(
-                written.replace("\r\n", "\n") == file(),
-                "{PATH} is out of date. Run: cargo test -p sharing-client -- --ignored write_typescript"
-            );
-        }
-
-        #[test]
-        #[ignore = "writes the generated file; run on purpose"]
-        fn write_typescript() {
-            std::fs::create_dir_all(
-                std::path::Path::new(PATH).parent().unwrap(),
-            )
-            .unwrap();
-            std::fs::write(PATH, file()).unwrap();
-        }
     }
 }
