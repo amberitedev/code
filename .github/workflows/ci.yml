@@ -50,14 +50,26 @@ jobs:
               - rust-toolchain.toml
               - rustfmt.toml
               - .cargo/**
-              - '**/migrations/**'
-              - '**/.sqlx/**'
-              - packages/*/java/**
-              - packages/*/.env*
-              - packages/contracts/**
-              # tauri-build checks capabilities and tauri*.conf.json when it compiles.
+              # Whole crate folders: crates compile in or test against files of every type.
               - apps/app/**
-              - apps/core/scripts/**
+              - apps/core/**
+              - packages/app-lib/**
+              - packages/ariadne/**
+              - packages/async-minecraft-ping/**
+              - packages/bedrock/**
+              - packages/browser-bridge/**
+              - packages/contracts/**
+              - packages/minecraft-meta-manifest/**
+              - packages/modrinth-content-management/**
+              - packages/path-util/**
+              - packages/serde-binhum/**
+              - packages/sharing-client/**
+              - packages/sharing-storage/**
+              - packages/toasty/**
+              # Read from outside a crate: two drift tests' generated files and an icon app-lib embeds.
+              - packages/api-client/src/modules/bedrock/limits.ts
+              - packages/api-client/src/modules/sharing/rules.ts
+              - packages/assets/external/illustrations/minecraft_server_icon.png
               - .github/workflows/ci.yml
 
   js:
@@ -128,7 +140,10 @@ jobs:
       # serde-binhum's only tests are upstream's README doctests, which lack their dependencies.
       - run: cargo test --workspace --exclude toasty --exclude serde-binhum --locked
       - run: sh -n apps/core/scripts/install.sh
-      # The guard passes when cargo finds no tauri, so first prove the name resolves.
-      - run: cargo tree --locked -e normal -p theseus_gui -i tauri --depth 0
+      # A cargo error fails the step, and theseus_gui proves the pattern matches tauri.
       - name: Copal does not depend on Tauri
-        run: '! cargo tree --locked -e normal -p copal -i tauri'
+        run: |
+          gui=$(cargo tree --locked -e normal -p theseus_gui --prefix none -f '{p}')
+          copal=$(cargo tree --locked -e normal -p copal --prefix none -f '{p}')
+          grep -q '^tauri v' <<< "$gui"
+          if grep '^tauri v' <<< "$copal"; then echo '::error::copal depends on tauri'; exit 1; fi

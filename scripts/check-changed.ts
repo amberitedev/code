@@ -51,7 +51,8 @@ type Step = {
 	readonly name: string
 	readonly command: string
 	readonly args: ReadonlyArray<string>
-	readonly env?: NodeJS.ProcessEnv
+	/** Added to this process's environment. */
+	readonly env?: Readonly<Record<string, string>>
 }
 const steps: Step[] = []
 const skipped: string[] = []
@@ -101,14 +102,20 @@ if (rust.length > 0) steps.push({ name: 'rustfmt', command: 'rustfmt', args: ['-
 if (touched.some((file) => /\.rs$|(?:^|\/)Cargo\.(?:toml|lock)$/.test(file))) {
 	steps.push({ name: 'rust build', command: 'node', args: ['scripts/dev-runner.ts', 'build'] })
 }
-const crates = workspaceCrates()
+// Files outside a crate's folder that its tests read (ci.yml's rust filter lists them too).
+const READ_BY_CRATE: Readonly<Record<string, string>> = {
+	'packages/api-client/src/modules/bedrock/limits.ts': 'bedrock',
+	'packages/api-client/src/modules/sharing/rules.ts': 'sharing-client',
+	'packages/assets/external/illustrations/minecraft_server_icon.png': 'theseus',
+}
+const crates = under('apps', 'packages') ? workspaceCrates() : []
 if (crates === undefined) skipped.push('rust tests (cargo metadata failed)')
 else {
 	// The crates CI leaves out of the workspace tests (ci.yml, rust job).
 	const untested = new Set(['toasty', 'serde-binhum'])
+	const readBy = new Set(touched.flatMap((file) => READ_BY_CRATE[file] ?? []))
 	const tested = crates.filter(
-		(crate) =>
-			!untested.has(crate.name) && touched.some((file) => file.startsWith(`${crate.folder}/`)),
+		(crate) => !untested.has(crate.name) && (under(crate.folder) || readBy.has(crate.name)),
 	)
 	if (tested.some((crate) => crate.name === 'theseus_gui')) {
 		// Tauri only checks that the frontend build folder exists, as in CI.
@@ -119,7 +126,7 @@ else {
 			name: 'rust tests',
 			command: 'cargo',
 			args: ['test', '--locked', ...tested.flatMap((crate) => ['-p', crate.name])],
-			env: { ...process.env, SQLX_OFFLINE: 'true' },
+			env: { SQLX_OFFLINE: 'true' },
 		})
 	}
 }
@@ -127,18 +134,15 @@ else {
 console.log(`[check] ${changed.length} changed files since ${base.slice(0, 9)}`)
 const results = steps.map((step) => {
 	console.log(`\n[check] ${step.name}`)
+	const options = { cwd: root, env: { ...process.env, ...step.env }, stdio: 'inherit' } as const
 	// Windows runs vp through its .cmd shim, which needs the shell. File names are quoted for it.
 	const result =
 		process.platform === 'win32' && step.command === 'vp'
 			? NodeChildProcess.spawnSync(
 					[step.command, ...step.args.map((arg) => `"${arg}"`)].join(' '),
-					{ cwd: root, shell: true, stdio: 'inherit' },
+					{ ...options, shell: true },
 				)
-			: NodeChildProcess.spawnSync(step.command, step.args, {
-					cwd: root,
-					env: step.env,
-					stdio: 'inherit',
-				})
+			: NodeChildProcess.spawnSync(step.command, step.args, options)
 	return { name: step.name, ok: result.status === 0 }
 })
 console.log('\n[check] summary')
