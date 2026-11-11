@@ -51,6 +51,8 @@ type Step = {
 	readonly name: string
 	readonly command: string
 	readonly args: ReadonlyArray<string>
+	/** Added after `args`, over as many runs as it takes to keep each command line short. */
+	readonly files?: ReadonlyArray<string>
 }
 const steps: Step[] = []
 const skipped: string[] = []
@@ -58,15 +60,17 @@ const failed: string[] = []
 
 const scripts = matching(/\.(?:[cm]?[jt]s|vue)$/)
 if (scripts.length > 0) {
-	steps.push({ name: 'lint', command: 'vp', args: ['lint', '--deny-warnings', ...scripts] })
+	steps.push({ name: 'lint', command: 'vp', args: ['lint', '--deny-warnings'], files: scripts })
 }
-if (onPath('typos')) steps.push({ name: 'typos', command: 'typos', args: changed })
-else skipped.push('typos (not installed)')
+// Excluded files stay excluded when named, as in CI's run over the whole repo.
+if (onPath('typos')) {
+	steps.push({ name: 'typos', command: 'typos', args: ['--force-exclude'], files: changed })
+} else skipped.push('typos (not installed)')
 const toml = matching(/\.toml$/)
 if (toml.length > 0) {
 	if (onPath('tombi')) {
-		steps.push({ name: 'tombi lint', command: 'tombi', args: ['lint', ...toml] })
-		steps.push({ name: 'tombi fmt', command: 'tombi', args: ['fmt', '--check', ...toml] })
+		steps.push({ name: 'tombi lint', command: 'tombi', args: ['lint'], files: toml })
+		steps.push({ name: 'tombi fmt', command: 'tombi', args: ['fmt', '--check'], files: toml })
 	} else skipped.push('tombi (not installed)')
 }
 for (const pack of PACKAGES) {
@@ -97,7 +101,9 @@ if (under('scripts') || touched.includes('dev.json')) {
 	steps.push({ name: 'dev:check', command: 'vp', args: ['run', 'dev:check'] })
 }
 const rust = matching(/\.rs$/)
-if (rust.length > 0) steps.push({ name: 'rustfmt', command: 'rustfmt', args: ['--check', ...rust] })
+if (rust.length > 0) {
+	steps.push({ name: 'rustfmt', command: 'rustfmt', args: ['--check'], files: rust })
+}
 if (touched.some((file) => /\.rs$|(?:^|\/)Cargo\.(?:toml|lock)$/.test(file))) {
 	steps.push({ name: 'rust build', command: 'node', args: ['scripts/dev-runner.ts', 'build'] })
 }
@@ -133,16 +139,8 @@ else {
 console.log(`[check] ${changed.length} changed files since ${base.slice(0, 9)}`)
 const results = steps.map((step) => {
 	console.log(`\n[check] ${step.name}`)
-	const options = { cwd: root, stdio: 'inherit' } as const
-	// Windows runs vp through its .cmd shim, which needs the shell. File names are quoted for it.
-	const result =
-		process.platform === 'win32' && step.command === 'vp'
-			? NodeChildProcess.spawnSync(
-					[step.command, ...step.args.map((arg) => `"${arg}"`)].join(' '),
-					{ ...options, shell: true },
-				)
-			: NodeChildProcess.spawnSync(step.command, step.args, options)
-	return { name: step.name, ok: result.status === 0 }
+	const runs = batches(step.files ?? []).map((files) => run(step.command, [...step.args, ...files]))
+	return { name: step.name, ok: runs.every(Boolean) }
 })
 console.log('\n[check] summary')
 for (const { name, ok } of results) console.log(`  ${ok ? 'pass' : 'FAIL'}  ${name}`)
@@ -173,6 +171,39 @@ function workspaceCrates() {
 			'/',
 		),
 	}))
+}
+
+/**
+ * The files in groups that keep each command line under cmd.exe's 8191 characters, which Windows
+ * applies to vp through its shell. No files is one empty group, so the step still runs once.
+ */
+function batches(files: ReadonlyArray<string>): ReadonlyArray<ReadonlyArray<string>> {
+	const groups: string[][] = [[]]
+	let length = 0
+	for (const file of files) {
+		if (length + file.length > 6000 && groups.at(-1)!.length > 0) {
+			groups.push([])
+			length = 0
+		}
+		groups.at(-1)!.push(file)
+		length += file.length + 3
+	}
+	return groups
+}
+
+/** Whether the command succeeded. */
+function run(command: string, args: ReadonlyArray<string>): boolean {
+	const options = { cwd: root, stdio: 'inherit' } as const
+	// Windows runs vp through its .cmd shim, which needs the shell. File names are quoted for it.
+	const result =
+		process.platform === 'win32' && command === 'vp'
+			? NodeChildProcess.spawnSync([command, ...args.map((arg) => `"${arg}"`)].join(' '), {
+					...options,
+					shell: true,
+				})
+			: NodeChildProcess.spawnSync(command, args, options)
+	if (result.error) console.error(`[check] ${command}: ${result.error.message}`)
+	return result.status === 0
 }
 
 function onPath(command: string): boolean {
