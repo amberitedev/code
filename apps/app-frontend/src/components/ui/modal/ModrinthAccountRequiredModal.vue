@@ -114,10 +114,10 @@ import {
 	NewModal,
 	useVIntl,
 } from '@modrinth/ui'
-import { openUrl } from '@tauri-apps/plugin-opener'
 import { ref } from 'vue'
 
 import { cancelLogin, type ModrinthAuthFlow } from '@/helpers/mr_auth'
+import { openUrl } from '@/platform/opener'
 
 const props = defineProps<{
 	requestAuth: (flow: ModrinthAuthFlow, addAccount?: boolean) => Promise<boolean>

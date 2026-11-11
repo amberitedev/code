@@ -41,8 +41,6 @@ import {
 	useVIntl,
 } from '@modrinth/ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
-import { save } from '@tauri-apps/plugin-dialog'
-import { readFile } from '@tauri-apps/plugin-fs'
 import { useElementSize, useStorage, useWindowSize } from '@vueuse/core'
 import dayjs from 'dayjs'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
@@ -75,6 +73,8 @@ import {
 	screenshotKeys,
 	syncedScreenshotsQueryOptions,
 } from '@/pages/instance/query-options'
+import { save } from '@/platform/dialog'
+import { readFile } from '@/platform/files'
 
 import ScreenshotDragGather from './drag-gather.vue'
 import ScreenshotDragPreview from './drag-preview.vue'

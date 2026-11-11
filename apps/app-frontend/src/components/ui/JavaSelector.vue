@@ -99,13 +99,13 @@ import {
 	XCircleIcon,
 } from '@modrinth/assets'
 import { Button, defineMessages, injectNotificationManager, Input, useVIntl } from '@modrinth/ui'
-import { open } from '@tauri-apps/plugin-dialog'
 import { ref, watch } from 'vue'
 
 import JavaDetectionModal from '@/components/ui/JavaDetectionModal.vue'
 import useJavaTest from '@/composables/useJavaTest'
 import { trackEvent } from '@/helpers/analytics'
 import { auto_install_java, find_filtered_jres, get_jre } from '@/helpers/jre.js'
+import { open } from '@/platform/dialog'
 
 const { handleError } = injectNotificationManager()
 const { formatMessage } = useVIntl()

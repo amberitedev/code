@@ -101,5 +101,32 @@ export default defineConfig({
 			typeAware: false,
 			typeCheck: false,
 		},
+		overrides: [
+			{
+				files: ['apps/app-frontend/src/**'],
+				excludeFiles: ['apps/app-frontend/src/platform/**'],
+				rules: {
+					'eslint/no-restricted-imports': [
+						'error',
+						{
+							patterns: [
+								{
+									group: [
+										'@tauri-apps/plugin-*',
+										'@tauri-apps/api/*',
+										'!@tauri-apps/api/core',
+										'!@tauri-apps/api/event',
+										'!@tauri-apps/plugin-http',
+									],
+									allowTypeImports: true,
+									message:
+										'Import it from @/platform/{os,dialog,opener,window,files}, or add a wrapper there.',
+								},
+							],
+						},
+					],
+				},
+			},
+		],
 	},
 })

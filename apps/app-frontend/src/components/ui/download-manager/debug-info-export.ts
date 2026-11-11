@@ -1,8 +1,8 @@
 import { Channel, invoke } from '@tauri-apps/api/core'
-import { save } from '@tauri-apps/plugin-dialog'
 import { computed, reactive, ref } from 'vue'
 
 import { toError } from '@/helpers/errors'
+import { save } from '@/platform/dialog'
 
 export interface DebugInfoExportProgress {
 	stage: 'preparing' | 'exporting' | 'finishing'

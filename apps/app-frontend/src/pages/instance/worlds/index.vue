@@ -220,7 +220,6 @@ import {
 } from '@modrinth/ui'
 import { autoToHTML } from '@sfirew/minecraft-motd-parser'
 import { queryOptions, useQuery, useQueryClient } from '@tanstack/vue-query'
-import { platform } from '@tauri-apps/plugin-os'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import Draggable from 'vuedraggable'
@@ -279,6 +278,7 @@ import {
 	worldNameMatchesQuery,
 } from '@/helpers/worlds.ts'
 import { apiClient } from '@/platform/modrinth-client'
+import { platform } from '@/platform/os'
 import { injectServerInstall } from '@/providers/server-install'
 
 import { injectInstancePage } from '../instance-context'

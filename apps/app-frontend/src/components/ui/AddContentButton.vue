@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { DropdownIcon, FolderOpenIcon, PlusIcon } from '@modrinth/assets'
 import { Button, injectNotificationManager, TeleportOverflowMenu } from '@modrinth/ui'
-import { open } from '@tauri-apps/plugin-dialog'
 import { useRouter } from 'vue-router'
 
 import { add_project_from_path } from '@/helpers/instance'
+import { open } from '@/platform/dialog'
 
 const { handleError } = injectNotificationManager()
 

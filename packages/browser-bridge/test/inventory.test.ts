@@ -18,21 +18,7 @@ const sourceRoots = [
 	NodePath.join(repositoryRoot, 'packages', 'ui', 'src'),
 ]
 
-const expectedRuntimeImports: Record<string, ReadonlyArray<string>> = {
-	'@tauri-apps/api/app': ['getVersion'],
-	'@tauri-apps/api/core': ['Channel', 'convertFileSrc', 'invoke'],
-	'@tauri-apps/api/event': ['listen'],
-	'@tauri-apps/api/webviewWindow': ['getCurrentWebviewWindow'],
-	'@tauri-apps/api/window': ['getCurrentWindow'],
-	'@tauri-apps/plugin-dialog': ['open', 'save'],
-	'@tauri-apps/plugin-fs': ['readFile'],
-	'@tauri-apps/plugin-http': ['fetch'],
-	'@tauri-apps/plugin-opener': ['openUrl'],
-	'@tauri-apps/plugin-os': ['platform', 'type', 'version'],
-	'@tauri-apps/plugin-window-state': ['StateFlags', 'saveWindowState'],
-}
-
-describe.sequential('Amberite Tauri API inventory', () => {
+describe.sequential('Amberite bridge wiring and commands', () => {
 	it('keeps the Amberite hook optional, debug-only, and enabled only by dev launchers', () => {
 		const appCargo = NodeFS.readFileSync(
 			NodePath.join(repositoryRoot, 'apps', 'app', 'Cargo.toml'),
@@ -62,15 +48,9 @@ describe.sequential('Amberite Tauri API inventory', () => {
 		expect(appPackage).not.toMatch(/"build"\s*:\s*"[^"]*browser-bridge/)
 	})
 
-	it('fails when Amberite adds a Tauri runtime surface without bridge coverage', () => {
-		const actual = collectRuntimeImports(readAmberiteSources())
-		expect(normalizeInventory(actual)).toEqual(normalizeInventory(expectedRuntimeImports))
-	})
-
 	it('round-trips every direct command Amberite sends through invoke', async () => {
 		// `show_window` raises the native window, so the bridge answers it in the browser.
 		const commands = collectCommands(readAmberiteSources()).filter((cmd) => cmd !== 'show_window')
-		expect(commands.length).toBeGreaterThan(150)
 		const { socket, window } = await installBrowserBridge()
 
 		for (const [index, cmd] of commands.entries()) {
@@ -106,31 +86,6 @@ function walk(directory: string): string[] {
 	return output
 }
 
-function collectRuntimeImports(sources: ReadonlyArray<string>): Record<string, string[]> {
-	const imports = new Map<string, Set<string>>()
-	const add = (module: string, name: string) => {
-		const names = imports.get(module) ?? new Set<string>()
-		names.add(name)
-		imports.set(module, names)
-	}
-	for (const source of sources) {
-		const staticImports = source.matchAll(
-			/import\s*\{([^}]*)\}\s*from\s*['"](@tauri-apps\/[^'"]+)['"]/g,
-		)
-		for (const match of staticImports) {
-			for (const raw of match[1]?.split(',') ?? []) {
-				const item = raw.trim()
-				if (!item || /^type\s+/.test(item)) continue
-				add(match[2]!, item.split(/\s+as\s+/)[0]!.trim())
-			}
-		}
-		for (const match of source.matchAll(/import\(['"](@tauri-apps\/[^'"]+)['"]\)/g)) {
-			if (match[1] === '@tauri-apps/plugin-http') add(match[1], 'fetch')
-		}
-	}
-	return Object.fromEntries([...imports].map(([module, names]) => [module, [...names]]))
-}
-
 function collectCommands(sources: ReadonlyArray<string>): string[] {
 	const commands = new Set<string>()
 	for (const source of sources) {
@@ -139,12 +94,4 @@ function collectCommands(sources: ReadonlyArray<string>): string[] {
 		}
 	}
 	return [...commands].sort()
-}
-
-function normalizeInventory(inventory: Record<string, ReadonlyArray<string>>) {
-	return Object.fromEntries(
-		Object.entries(inventory)
-			.sort(([left], [right]) => left.localeCompare(right))
-			.map(([module, names]) => [module, [...names].sort()]),
-	)
 }

@@ -2,7 +2,6 @@ import 'overlayscrollbars/overlayscrollbars.css'
 
 import { installTooltipDirective } from '@modrinth/ui'
 import { focusManager, VueQueryPlugin } from '@tanstack/vue-query'
-import { getCurrentWindow } from '@tauri-apps/api/window'
 import { createApp } from 'vue'
 
 import { config } from '@/config'
@@ -10,6 +9,7 @@ import { overlayScrollbarsDirective } from '@/directives/overlayScrollbars'
 import { installCrashScreen } from '@/features/crash'
 import { setupErrorReporting } from '@/helpers/error-reporting'
 import { debugStartup, traceStartupStep } from '@/helpers/startup-debug'
+import { getCurrentWindow } from '@/platform/window'
 import i18nPlugin from '@/plugins/i18n'
 import i18nDebugPlugin from '@/plugins/i18n-debug'
 

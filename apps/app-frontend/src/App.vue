@@ -55,14 +55,9 @@ import {
 } from '@modrinth/ui'
 import { renderString } from '@modrinth/utils/parse'
 import { useQueries, useQuery, useQueryClient } from '@tanstack/vue-query'
-import { getVersion } from '@tauri-apps/api/app'
 import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import { getCurrentWindow } from '@tauri-apps/api/window'
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
-import { openUrl } from '@tauri-apps/plugin-opener'
-import { type } from '@tauri-apps/plugin-os'
-import { saveWindowState, StateFlags } from '@tauri-apps/plugin-window-state'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 
@@ -173,6 +168,9 @@ import {
 import { createFileDownload } from '@/platform/adapters/file-download'
 import { createIconCache } from '@/platform/adapters/icon-cache'
 import { apiClient as tauriApiClient } from '@/platform/modrinth-client'
+import { openUrl } from '@/platform/opener'
+import { getVersion, type } from '@/platform/os'
+import { getCurrentWindow, saveWindowState, StateFlags } from '@/platform/window'
 import {
 	appUpdateState,
 	downloadAvailableAppUpdate,

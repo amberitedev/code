@@ -7,12 +7,12 @@ import {
 	TauriModrinthClient,
 	VerboseLoggingFeature,
 } from '@modrinth/api-client'
-import { getVersion } from '@tauri-apps/api/app'
 import { invoke } from '@tauri-apps/api/core'
 
 import { config } from '@/config'
 import { get as getModrinthCredentials } from '@/helpers/mr_auth'
 import { createLocalFileUploader } from '@/platform/adapters/local-file-upload'
+import { getVersion } from '@/platform/os'
 
 /**
  * The App version for the User-Agent, fetched once. A failed fetch is not kept, so the next

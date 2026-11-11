@@ -19,7 +19,6 @@ import {
 	useVIntl,
 } from '@modrinth/ui'
 import { useQueryClient } from '@tanstack/vue-query'
-import { open } from '@tauri-apps/plugin-dialog'
 import { computed, type Ref, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
@@ -29,6 +28,7 @@ import { trackEvent } from '@/helpers/analytics'
 import { install_duplicate_instance } from '@/helpers/install'
 import { edit, edit_icon, getInstanceIconUrl, remove } from '@/helpers/instance'
 import type { GameInstance } from '@/helpers/types'
+import { open } from '@/platform/dialog'
 
 import { injectInstanceSettings } from './instance-settings-context'
 
