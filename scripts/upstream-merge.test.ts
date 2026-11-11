@@ -36,6 +36,8 @@ it('merges upstream into our renamed folder by path', () => {
 		['user.name', 'test'],
 		['user.email', 'test@example.com'],
 		['core.autocrlf', 'false'],
+		// The fixture sets the executable bit in the index only, which a later add would undo on Linux.
+		['core.fileMode', 'false'],
 	]) {
 		git('config', key, value)
 	}
