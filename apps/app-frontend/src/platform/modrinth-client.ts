@@ -1,5 +1,7 @@
 import {
+	type AbstractModrinthClient,
 	AuthFeature,
+	GenericModrinthClient,
 	NodeAuthFeature,
 	nodeAuthState,
 	PanelVersionFeature,
@@ -12,20 +14,8 @@ import { invoke } from '@tauri-apps/api/core'
 import { config } from '@/config'
 import { get as getModrinthCredentials } from '@/helpers/mr_auth'
 import { createLocalFileUploader } from '@/platform/adapters/local-file-upload'
+import { isNativeWindow, localTransport } from '@/platform/local'
 import { getVersion } from '@/platform/os'
-
-/**
- * The App version for the User-Agent, fetched once. A failed fetch is not kept, so the next
- * request asks again: a browser bridge tab can ask while the native page is still loading.
- */
-const getAppVersion = (() => {
-	let version: Promise<string> | undefined
-	return () =>
-		(version ??= getVersion().catch((error: unknown) => {
-			version = undefined
-			throw error
-		}))
-})()
 
 /** The account signed in. A Core session belongs to one account and one Core. */
 async function account(): Promise<string> {
@@ -35,11 +25,13 @@ async function account(): Promise<string> {
 }
 
 /**
- * The App's one client for Modrinth, the account backend, and Cores. Root setup provides it to
- * components; code outside components imports it directly.
+ * The App's one client for Modrinth, the account backend, Cores and its own local server. Root
+ * setup provides it to components; code outside components imports it directly. A tab has no
+ * Tauri HTTP plugin, so it uses `fetch`.
  */
-export const apiClient: TauriModrinthClient = new TauriModrinthClient({
-	userAgent: async () => `modrinth/theseus/${await getAppVersion()}`,
+const ModrinthClient = isNativeWindow ? TauriModrinthClient : GenericModrinthClient
+export const apiClient: AbstractModrinthClient = new ModrinthClient({
+	userAgent: async () => `modrinth/theseus/${await getVersion()}`,
 	labrinthBaseUrl: config.labrinthBaseUrl,
 	// With our own account backend, hosting is the account's own Cores, found through it.
 	selfHostedHosting: Boolean(config.accountApiUrl),
@@ -69,6 +61,7 @@ export const apiClient: TauriModrinthClient = new TauriModrinthClient({
 	archonBaseUrl: config.archonBaseUrl,
 	sharedInstancesBaseUrl: config.sharedInstancesBaseUrl,
 	localFileUploader: createLocalFileUploader(),
+	localTransport,
 	features: [
 		...(config.accountApiUrl
 			? [

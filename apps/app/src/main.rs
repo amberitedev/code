@@ -7,13 +7,13 @@
 use anyhow::Context;
 use engine::prelude::*;
 use native_dialog::{DialogBuilder, MessageLevel};
-use std::env;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{Listener, Manager};
 use tauri_plugin_fs::FsExt;
 
 mod api;
 mod dev;
+mod server;
 
 #[cfg(target_os = "macos")]
 mod macos;
@@ -75,17 +75,6 @@ fn show_window(app: tauri::AppHandle) {
     }
 }
 
-#[tauri::command]
-fn is_dev() -> bool {
-    cfg!(debug_assertions)
-}
-
-#[tauri::command]
-fn are_updates_enabled() -> bool {
-    cfg!(feature = "updater")
-        && env::var("MODRINTH_EXTERNAL_UPDATE_PROVIDER").is_err()
-}
-
 #[cfg(feature = "updater")]
 pub use updater_impl::*;
 
@@ -108,11 +97,6 @@ fn restart_app(app: tauri::AppHandle) {
 
 #[derive(Default)]
 struct RestartAfterPendingUpdate(AtomicBool);
-
-#[tauri::command]
-fn get_amberite_dev_config() -> Option<dev::DevAppConfig> {
-    dev::config().cloned()
-}
 
 #[tauri::command]
 async fn set_restart_after_pending_update(
@@ -143,7 +127,7 @@ fn main() {
     .expect("failed to export app event TypeScript bindings");
 
     /*
-        tracing is set basd on the environment variable RUST_LOG=xxx, depending on the amount of logs to show
+        tracing is set based on the environment variable RUST_LOG=xxx, depending on the amount of logs to show
             ERROR > WARN > INFO > DEBUG > TRACE
         eg. RUST_LOG=info will show info, warn, and error logs
             RUST_LOG="engine=trace" will show *all* messages but from engine only (and not dependencies using similar crates)
@@ -168,7 +152,19 @@ fn main() {
 
     tracing::info!("Initialized tracing subscriber. Loading Modrinth App!");
 
-    let mut builder = tauri::Builder::default();
+    let local = server::LocalServer::bind(
+        dev::config().and_then(|config| config.local_port),
+        dev::config().and_then(|config| config.local_secret.clone()),
+        tauri_context.config().build.dev_url.clone(),
+    )
+    .expect("failed to bind the App's local server");
+    let local_init = local.init_plugin();
+    let router = local.router(server::endpoints::boot::Boot::current(
+        tauri_context.package_info().version.to_string(),
+    ));
+    runtime.spawn(local.serve(router));
+
+    let mut builder = tauri::Builder::default().plugin(local_init);
 
     #[cfg(all(debug_assertions, feature = "browser-bridge"))]
     {
@@ -218,7 +214,6 @@ fn main() {
 
     builder = builder
         .plugin(tauri_plugin_http::init())
-        .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_fs::init())
@@ -373,8 +368,6 @@ fn main() {
         .manage(RestartAfterPendingUpdate::default())
         .invoke_handler(tauri::generate_handler![
             initialize_state,
-            is_dev,
-            are_updates_enabled,
             get_update_size,
             enqueue_update_for_installation,
             remove_enqueued_update,
@@ -382,7 +375,6 @@ fn main() {
             toggle_decorations,
             show_window,
             restart_app,
-            get_amberite_dev_config,
         ]);
 
     tracing::info!("Initializing app...");

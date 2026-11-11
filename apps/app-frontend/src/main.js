@@ -2,22 +2,22 @@ import 'overlayscrollbars/overlayscrollbars.css'
 
 import { installTooltipDirective } from '@modrinth/ui'
 import { focusManager, VueQueryPlugin } from '@tanstack/vue-query'
+import { invoke } from '@tauri-apps/api/core'
 import { createApp } from 'vue'
 
-import { config } from '@/config'
+import { applyDevAppConfig, config } from '@/config'
 import { overlayScrollbarsDirective } from '@/directives/overlayScrollbars'
 import { installCrashScreen } from '@/features/crash'
 import { setupErrorReporting } from '@/helpers/error-reporting'
 import { debugStartup, traceStartupStep } from '@/helpers/startup-debug'
+import { loadBoot } from '@/platform/os'
 import { getCurrentWindow } from '@/platform/window'
 import i18nPlugin from '@/plugins/i18n'
 import i18nDebugPlugin from '@/plugins/i18n-debug'
 
 async function bootstrap() {
-	if (import.meta.env.DEV) {
-		const { initializeDevRuntime } = await import('@/app/runtime/dev-config')
-		await initializeDevRuntime()
-	}
+	const boot = await loadBoot()
+	applyDevAppConfig({ backendUrl: boot.backend_url ?? undefined })
 	const [{ default: App }, { default: router }] = await Promise.all([
 		import('@/App.vue'),
 		import('@/routes'),
@@ -58,4 +58,10 @@ async function bootstrap() {
 	await mount()
 }
 
-void bootstrap()
+// Until App.vue loads there is no crash screen, and a release window stays hidden.
+bootstrap().catch((error) => {
+	console.error(error)
+	const reason = error instanceof Error ? error.message : String(error)
+	document.getElementById('app')?.replaceChildren(`Amberite could not start. ${reason}`)
+	void invoke('show_window').catch(() => {})
+})

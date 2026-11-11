@@ -1,8 +1,8 @@
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::env;
 use std::sync::OnceLock;
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DevAppConfig {
     pub credential_namespace: String,
@@ -17,6 +17,9 @@ pub struct DevAppConfig {
     /// Keeps the native window off the desktop; the App is used through the browser bridge.
     #[serde(default)]
     pub hide_window: bool,
+    /// The local server's address, which the runner prints in tab URLs.
+    pub local_port: Option<u16>,
+    pub local_secret: Option<String>,
 }
 
 static CONFIG: OnceLock<Option<DevAppConfig>> = OnceLock::new();

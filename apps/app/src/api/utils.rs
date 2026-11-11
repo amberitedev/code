@@ -2,7 +2,7 @@ use engine::{
     emit_warning, handler,
     prelude::{CommandPayload, app_db_backup_dir},
 };
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tauri::{Manager, Runtime};
 use tauri_plugin_opener::OpenerExt;
 
@@ -40,9 +40,7 @@ pub fn init<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
             }
         })
         .invoke_handler(tauri::generate_handler![
-            get_os,
             is_network_metered,
-            should_disable_mouseover,
             highlight_in_folder,
             open_path,
             show_launcher_logs_folder,
@@ -63,26 +61,6 @@ pub async fn cache_remote_icon(source: &str) -> Result<String> {
     Ok(tauri_convert_file_src(&path)?.to_string())
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(clippy::enum_variant_names)]
-pub enum OS {
-    Windows,
-    Linux,
-    MacOS,
-}
-
-/// Gets OS
-#[tauri::command]
-pub fn get_os() -> OS {
-    #[cfg(target_os = "windows")]
-    let os = OS::Windows;
-    #[cfg(target_os = "linux")]
-    let os = OS::Linux;
-    #[cfg(target_os = "macos")]
-    let os = OS::MacOS;
-    os
-}
-
 #[tauri::command]
 pub async fn is_network_metered() -> Result<bool> {
     Ok(engine::prelude::is_network_metered().await?)
@@ -96,26 +74,6 @@ pub async fn progress_bars_list()
 -> Result<DashMap<uuid::Uuid, engine::LoadingBar>> {
     let res = engine::EventState::list_progress_bars().await?;
     Ok(res)
-}
-
-// disables mouseover and fixes a random crash error only fixed by recent versions of macos
-#[tauri::command]
-pub async fn should_disable_mouseover() -> bool {
-    if cfg!(target_os = "macos") {
-        // We try to match version to 12.2 or higher. If unrecognizable to pattern or lower, we default to the css with disabled mouseover for safety
-        if let tauri_plugin_os::Version::Semantic(major, minor, _) =
-            tauri_plugin_os::version()
-            && major >= 12
-            && minor >= 3
-        {
-            // Mac os version is 12.3 or higher, we allow mouseover
-            return false;
-        }
-        true
-    } else {
-        // Not macos, we allow mouseover
-        false
-    }
 }
 
 #[tauri::command]

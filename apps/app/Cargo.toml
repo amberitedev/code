@@ -10,11 +10,12 @@ license = "GPL-3.0-only"
 [dependencies]
 aes-gcm = { workspace = true }
 anyhow = { workspace = true }
+axum = { version = "0.8.4", default-features = false, features = ["http1", "json", "query", "tokio"] }
 
 base64 = { workspace = true }
 bytes = { workspace = true }
 chrono = { workspace = true }
-contracts = { workspace = true }
+contracts = { workspace = true, features = ["server"] }
 dashmap = { workspace = true }
 either = { workspace = true }
 engine = { workspace = true, features = ["tauri"] }
@@ -26,6 +27,7 @@ hyper-util = { workspace = true, features = ["tokio"] }
 image = { workspace = true, features = ["gif", "jpeg", "png", "webp"] }
 keyring = { workspace = true }
 native-dialog = { workspace = true }
+os_info = { version = "3.15.0", default-features = false }
 p256 = { workspace = true, features = ["ecdh"] }
 paste = { workspace = true }
 path-util = { workspace = true }
@@ -41,7 +43,6 @@ tauri-plugin-dialog = { workspace = true }
 tauri-plugin-fs = { workspace = true }
 tauri-plugin-http = { workspace = true }
 tauri-plugin-opener = { workspace = true }
-tauri-plugin-os = { workspace = true }
 tauri-plugin-single-instance = { workspace = true }
 tauri-plugin-updater = { workspace = true }
 tauri-plugin-window-state = { workspace = true }
@@ -65,9 +66,12 @@ workspace = true
 features = ["devtools", "macos-private-api", "protocol-asset"]
 
 [dev-dependencies]
+contracts = { workspace = true, features = ["server", "ts"] }
 rcgen = "0.14.7"
 rustls = { workspace = true, features = ["std"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tower = { version = "0.5.2", features = ["util"] }
+ts-rs = { workspace = true }
 
 [build-dependencies]
 tauri-build = { workspace = true, features = ["codegen"] }

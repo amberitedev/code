@@ -2,13 +2,14 @@ import { invoke } from '@tauri-apps/api/core'
 
 import { get_full_path, get_mod_full_path } from '@/helpers/instance'
 import { save } from '@/platform/dialog'
+import { getBoot } from '@/platform/os'
 
 export async function isDev() {
-	return await invoke('is_dev')
+	return getBoot().dev
 }
 
 export async function areUpdatesEnabled() {
-	return await invoke('are_updates_enabled')
+	return getBoot().updates_enabled
 }
 
 export async function getUpdateSize(updateRid) {
@@ -29,7 +30,7 @@ export async function setRestartAfterPendingUpdate(should_restart) {
 
 // One of 'Windows', 'Linux', 'MacOS'
 export async function getOS() {
-	return await invoke('plugin:utils|get_os')
+	return { windows: 'Windows', macos: 'MacOS', linux: 'Linux' }[getBoot().platform]
 }
 
 export async function isNetworkMetered() {
