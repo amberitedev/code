@@ -86,9 +86,14 @@ export function mergeMapped({ base, upstream, renamed, cwd }: MergeOptions) {
 		.split('\0')
 		.filter(Boolean)
 	const messages = end === -1 ? [] : merge.stdout.slice(end + 2).split('\0')
+	// Some conflicts, such as a folder upstream split two ways, have a message and no conflicted file.
+	const flagged: string[] = []
 	for (let index = 0; index + 2 < messages.length;) {
-		index += 1 + Number(messages[index]) + 1
-		process.stderr.write(`${messages[index++]?.trimEnd()}\n`)
+		const count = Number(messages[index])
+		const [type = '', text = ''] = messages.slice(index + 1 + count)
+		if (type.startsWith('CONFLICT')) flagged.push(...messages.slice(index + 1, index + 1 + count))
+		process.stderr.write(`${text.trimEnd()}\n`)
+		index += count + 3
 	}
 
 	// MERGE_HEAD goes first: if a later step fails, git merge --abort undoes it.
@@ -97,5 +102,5 @@ export function mergeMapped({ base, upstream, renamed, cwd }: MergeOptions) {
 		`${upstream}\n`,
 	)
 	ok(['read-tree', '-u', '-m', 'HEAD', tree])
-	return conflicts
+	return [...new Set([...conflicts, ...flagged])].sort()
 }
