@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vite-plus/test'
 
+import { SelfHostedFeature } from '../../../features/self-hosted'
 import { GenericModrinthClient } from '../../../platform/generic'
 import type { RequestOptions } from '../../../types/request'
 import type { Archon } from '../types'
@@ -30,11 +31,16 @@ class FakeClient extends GenericModrinthClient {
 			selfHostedHosting: true,
 			connectCore: async (_coreId, address) =>
 				`http://127.0.0.1:5000/${encodeURIComponent(address)}`,
+			features: [new SelfHostedFeature({ baseUrl: ACCOUNTS, token: async () => undefined })],
 		})
 	}
 
+	protected async platformFetch(input: RequestInfo | URL): Promise<Response> {
+		if (String(input) === `${ACCOUNTS}/cores`) return Response.json([CORE])
+		return new Response(null, { status: 404 })
+	}
+
 	protected async executeRequest<T>(url: string, _options: RequestOptions): Promise<T> {
-		if (url === `${ACCOUNTS}/v3/cores`) return [CORE] as T
 		if (url.includes(encodeURIComponent(LOCAL)) && !this.home) throw new Error('no answer')
 		return {} as T
 	}

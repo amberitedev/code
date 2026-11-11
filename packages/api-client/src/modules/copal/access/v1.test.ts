@@ -70,6 +70,20 @@ class FakeClient extends GenericModrinthClient {
 		})
 	}
 
+	/** The backend, which `client.backend` reaches. */
+	protected async platformFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+		const url = String(input)
+		this.sent.push({
+			url,
+			method: init?.method ?? 'GET',
+			headers: { ...(init?.headers as Record<string, string>) },
+			body: init?.body,
+		})
+		if (url === `${ACCOUNTS}/cores`) return Response.json([CORE])
+		if (url.endsWith('/ticket')) return Response.json({ ticket: `ticket-${++this.tickets}` })
+		return new Response(null, { status: 204 })
+	}
+
 	protected async executeRequest<T>(url: string, options: RequestOptions): Promise<T> {
 		this.sent.push({
 			url,
@@ -78,8 +92,6 @@ class FakeClient extends GenericModrinthClient {
 			body: options.body,
 			params: options.params,
 		})
-		if (url === `${ACCOUNTS}/v3/cores`) return [CORE] as T
-		if (url.endsWith('/ticket')) return { ticket: `ticket-${++this.tickets}` } as T
 		const answer = url in this.routes ? this.routes[url] : this.answers.shift()
 		if (answer instanceof Error) throw answer
 		return (answer ?? {}) as T
@@ -162,7 +174,7 @@ describe('copal access', () => {
 		const calls = api.sent
 			.filter((request) => !request.url.endsWith('/ticket'))
 			.map((request) => `${request.method} ${request.url}`)
-		expect(calls.slice(-2)).toEqual([`DELETE ${PROXY}/pairing`, `DELETE ${ACCOUNTS}/v3/cores/core`])
+		expect(calls.slice(-2)).toEqual([`DELETE ${PROXY}/pairing`, `DELETE ${ACCOUNTS}/cores/core`])
 		expect(api.hasSession).toBe(false)
 	})
 
@@ -170,7 +182,7 @@ describe('copal access', () => {
 		const api = new FakeClient()
 		api.answers = [new ModrinthApiError('Network error')]
 		await api.archon.cores_v1.revoke(CORE)
-		expect(api.sent.at(-1)?.url).toBe(`${ACCOUNTS}/v3/cores/core`)
+		expect(api.sent.at(-1)?.url).toBe(`${ACCOUNTS}/cores/core`)
 	})
 
 	it('never sends the account token to a Core', async () => {

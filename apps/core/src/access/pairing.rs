@@ -10,14 +10,19 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bytes::Bytes;
-use contracts::{ApiError, ErrorCode};
+use contracts::{
+    Empty, Endpoint, ErrorCode, Json,
+    backend::cores::{
+        CoreOwner, NewSignInCode, PollSignIn, RequestSignInCode, SignInStatus,
+        WaitForSignIn,
+    },
+    client::{CallError, Remote, call},
+};
 use futures::{SinkExt, StreamExt};
 use reqwest::{
     StatusCode, Upgraded,
     header::{CONNECTION, SEC_WEBSOCKET_KEY, SEC_WEBSOCKET_VERSION, UPGRADE},
 };
-use serde::Deserialize;
-use serde_json::json;
 use sqlx::SqlitePool;
 use tokio::sync::Notify;
 use tokio_tungstenite::{
@@ -185,7 +190,7 @@ async fn open_socket(
 ) -> Option<WebSocketStream<Upgraded>> {
     let response = state
         .http
-        .get(format!("{}/core/auth/wait", state.backend_url))
+        .get(format!("{}{}", state.backend_url, WaitForSignIn::PATH))
         .bearer_auth(key)
         .header(CONNECTION, "upgrade")
         .header(UPGRADE, "websocket")
@@ -243,7 +248,7 @@ pub async fn paired(db: &SqlitePool) -> sqlx::Result<bool> {
 /// Record the owner and the key, and the owner's name until their first ticket names them.
 async fn set_owner(
     db: &SqlitePool,
-    owner: &Approved,
+    owner: &CoreOwner,
     key: &str,
 ) -> sqlx::Result<()> {
     let mut tx = db.begin().await?;
@@ -284,54 +289,42 @@ async fn forget_code(state: &Pairing<'_>, code: &str) {
         .await;
 }
 
-#[derive(Deserialize)]
-struct CodeResponse {
-    code: String,
-    key: String,
-    expires_in: i64,
-    poll_interval: i64,
-}
-
 /// Ask the backend for a new code and key, and remember them.
 async fn request_code(state: &Pairing<'_>) -> Result<Pending, String> {
-    let response = state
-        .http
-        .post(format!("{}/core/auth/code", state.backend_url))
-        .json(&json!({
-            "core_id": state.core_id,
-            "name": core_name(),
-            "address": state.address,
-            "cert_fingerprint": state.cert_fingerprint,
-        }))
-        .send()
-        .await
-        .map_err(|error| {
-            format!(
-                "Amberite could not be reached at {} ({error})",
-                state.backend_url
-            )
-        })?;
-    let status = response.status();
-    if !status.is_success() {
-        let Some(body) =
-            response.bytes().await.ok().and_then(|body| {
-                serde_json::from_slice::<ApiError>(&body).ok()
-            })
-        else {
-            return Err(format!("Amberite answered {status}."));
-        };
-        return Err(match body.error {
+    let request = NewSignInCode {
+        core_id: state.core_id.into(),
+        name: core_name(),
+        address: state.address.into(),
+        cert_fingerprint: Some(state.cert_fingerprint.into()),
+    };
+    let issued = call::<RequestSignInCode>(
+        &remote(state, None),
+        &(),
+        &(),
+        Json(request),
+    )
+    .await
+    .map_err(|error| match error {
+        CallError::Api { status, error } => match error.error {
             ErrorCode::AlreadySignedIn => "this Core is still listed under an account. Remove it in the App under Settings, Cores.".into(),
             ErrorCode::InvalidAddress => format!(
                 "this Core's address {} is not allowed. {}",
-                state.address, body.description
+                state.address, error.description
             ),
             ErrorCode::TooManyRequests => "this Core asked for too many codes in a short time".into(),
-            _ => format!("Amberite answered {status}. {}", body.description),
-        });
-    }
-    let issued: CodeResponse = response.json().await.map_err(|error| {
-        format!("Amberite gave an unexpected answer ({error})")
+            _ => format!("Amberite answered {status}. {}", error.description),
+        },
+        CallError::Decode { status, .. }
+            if !StatusCode::from_u16(status)
+                .is_ok_and(|status| status.is_success()) =>
+        {
+            format!("Amberite answered {status}.")
+        }
+        CallError::Http(error) => format!(
+            "Amberite could not be reached at {} ({error})",
+            state.backend_url
+        ),
+        error => format!("Amberite gave an unexpected answer ({error})"),
     })?;
     let pending = Pending {
         code: issued.code,
@@ -353,62 +346,46 @@ async fn request_code(state: &Pairing<'_>) -> Result<Pending, String> {
     Ok(pending)
 }
 
-/// The account that approved the code.
-#[derive(Deserialize)]
-pub struct Approved {
-    pub id: String,
-    pub username: String,
-}
-
 enum Poll {
     Pending,
-    Approved(Approved),
+    Approved(CoreOwner),
     /// The backend no longer knows the code: it expired or was replaced.
     Gone,
     Unavailable(String),
 }
 
-#[derive(Deserialize)]
-struct PollResponse {
-    status: String,
-    account: Option<Approved>,
-}
-
 async fn poll(state: &Pairing<'_>, key: &str) -> Poll {
-    let response = state
-        .http
-        .post(format!("{}/core/auth/poll", state.backend_url))
-        .bearer_auth(key)
-        .send()
-        .await;
-    let response = match response {
-        Ok(response) => response,
-        Err(error) => {
-            return Poll::Unavailable(format!(
-                "Amberite could not be reached ({error})"
-            ));
+    match call::<PollSignIn>(&remote(state, Some(key)), &(), &(), Empty).await {
+        Ok(SignInStatus::Approved { account }) => Poll::Approved(account),
+        Ok(SignInStatus::Pending) => Poll::Pending,
+        Err(CallError::Api { error, .. })
+            if error.error == ErrorCode::CodeExpired =>
+        {
+            Poll::Gone
         }
-    };
-    match response.status() {
-        StatusCode::GONE => Poll::Gone,
-        status if !status.is_success() => {
+        Err(
+            CallError::Api { status, .. } | CallError::Decode { status, .. },
+        ) if !StatusCode::from_u16(status)
+            .is_ok_and(|status| status.is_success()) =>
+        {
             Poll::Unavailable(format!("Amberite answered {status}"))
         }
-        _ => match response.json::<PollResponse>().await {
-            Ok(PollResponse {
-                account: Some(account),
-                ..
-            }) => Poll::Approved(account),
-            Ok(PollResponse { status, .. }) if status == "pending" => {
-                Poll::Pending
-            }
-            Ok(_) => {
-                Poll::Unavailable("Amberite gave an unexpected answer".into())
-            }
-            Err(error) => Poll::Unavailable(format!(
-                "Amberite gave an unexpected answer ({error})"
-            )),
-        },
+        Err(CallError::Http(error)) => Poll::Unavailable(format!(
+            "Amberite could not be reached ({error})"
+        )),
+        Err(error) => Poll::Unavailable(format!(
+            "Amberite gave an unexpected answer ({error})"
+        )),
+    }
+}
+
+fn remote<'a>(state: &Pairing<'a>, key: Option<&'a str>) -> Remote<'a> {
+    Remote {
+        http: state.http,
+        base: state.backend_url,
+        bearer: key,
+        read_ticket: None,
+        timeout: None,
     }
 }
 

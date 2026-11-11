@@ -1,22 +1,29 @@
+import {
+	type AccessDirectory,
+	type AccessGrant,
+	type AccessRevocation,
+	type EnteredCode,
+	type ForgottenServer,
+	type ListedCore,
+	type NewSignInCode,
+	type SignInStatus,
+	type StateReport,
+	type VisibleServer,
+	cores,
+} from '@amberite/contracts'
+
 import { findUser, requireUser, tokenFrom } from '../common/auth'
 import { isPrivateHost } from '../common/address'
 import { digest, randomId } from '../common/crypto'
-import {
-	ApiError,
-	invalid,
-	json,
-	readJson,
-	routePath,
-	stringField,
-	unauthorized,
-} from '../common/http'
+import { ApiError, invalid, objectBody, stringField, unauthorized } from '../common/http'
 import { addNotification } from '../common/notifications'
+import { type Route, noBody, route } from '../common/router'
 import type { Env } from '../common/types'
 import { blockedEitherWay } from '../social/preferences'
 import { forgetServer, sweepFiles } from '../sharing'
-import { MAX_SERVER_NAME, parseServers, writeServers } from './servers'
+import { MAX_SERVER_NAME, writeServers } from './servers'
 import { waitForApproval } from './sign-in'
-import { reportStorage } from './storage'
+import { MAX_REPORT_BODY, parseStorageReport, reportStorage } from './storage'
 import { issueTicket } from './tickets'
 
 // Core sign-in. A signed-out Core asks for a code and the key it will use, shows the code to its
@@ -53,6 +60,7 @@ const INVITE_WINDOW_MS = 10 * 60_000
 // Accounts one Core's access directory may hold. Core refuses an invite past it, with
 // `MAX_DIRECTORY` in `apps/core/src/api/access.rs`; the two must stay equal.
 const MAX_DIRECTORY = 1000
+const MAX_SERVERS = 100
 
 interface PendingRow {
 	code: string
@@ -106,7 +114,7 @@ function certFingerprint(body: Record<string, unknown>): string | null {
 }
 
 /** A Core as `userId` sees it. `owned` is false for a Core they were only invited to. */
-function publicCore(row: CoreRow, userId: string) {
+function publicCore(row: CoreRow, userId: string): ListedCore {
 	return {
 		id: row.id,
 		name: row.name,
@@ -120,11 +128,13 @@ function publicCore(row: CoreRow, userId: string) {
 	}
 }
 
+function parseEnteredCode(raw: unknown): EnteredCode {
+	return { code: stringField(objectBody(raw), 'code', 32) }
+}
+
 /** The code as the user typed it: the dash and case do not matter. */
-function authCode(body: Record<string, unknown>): string {
-	return stringField(body, 'code', 32)
-		.replace(/[^a-z0-9]/gi, '')
-		.toLowerCase()
+function authCode({ code }: EnteredCode): string {
+	return code.replace(/[^a-z0-9]/gi, '').toLowerCase()
 }
 
 function generateCode(): string {
@@ -154,17 +164,23 @@ async function countInWindow(env: Env, scope: string, windowMs: number, now: num
 	return { count: row.count, windowEnds: Date.parse(row.window_start) + windowMs }
 }
 
+function parseNewSignInCode(raw: unknown): NewSignInCode {
+	const body = objectBody(raw)
+	return {
+		core_id: stringField(body, 'core_id', 64),
+		name: stringField(body, 'name', 64),
+		address: coreAddress(body),
+		cert_fingerprint: certFingerprint(body),
+	}
+}
+
 /**
  * Core, signed out: ask for a code to show its owner, and the key it will use once the owner
  * approves. Only the key's hash is stored, and the key does nothing until approval. A Core has one
  * pending code at a time; asking again replaces it.
  */
-async function requestCode(request: Request, env: Env) {
-	const body = await readJson(request)
-	const coreId = stringField(body, 'core_id', 64)
-	const name = stringField(body, 'name', 64)
-	const address = coreAddress(body)
-	const fingerprint = certFingerprint(body)
+async function requestCode(request: Request, env: Env, body: NewSignInCode) {
+	const { core_id: coreId, name, address, cert_fingerprint: fingerprint } = body
 	const now = Date.now()
 
 	// Checked before counting: a listed Core keeps asking until it is removed in the App, and must
@@ -216,7 +232,7 @@ async function requestCode(request: Request, env: Env) {
 			if (attempt < 3) continue
 			throw error
 		}
-		return json({ code, key, expires_in: CODE_TTL_MS / 1000, poll_interval: POLL_INTERVAL_S })
+		return { code, key, expires_in: CODE_TTL_MS / 1000, poll_interval: POLL_INTERVAL_S }
 	}
 }
 
@@ -225,7 +241,7 @@ async function requestCode(request: Request, env: Env) {
  * what makes that key a Core's key, so an approved key is recognised here like on every other Core
  * route. 410 tells the Core its code is gone and it should ask for a new one.
  */
-async function pollCode(request: Request, env: Env) {
+async function pollCode(request: Request, env: Env): Promise<SignInStatus> {
 	const key = tokenFrom(request)
 	if (!key.startsWith('amc_')) unauthorized()
 	const keyHash = await digest(key)
@@ -234,11 +250,11 @@ async function pollCode(request: Request, env: Env) {
 	)
 		.bind(keyHash)
 		.first<{ id: string; username: string }>()
-	if (core) return json({ status: 'approved', account: core })
+	if (core) return { status: 'approved', account: core }
 	const pending = await env.DB.prepare('SELECT expires FROM core_auth_codes WHERE key_hash = ?')
 		.bind(keyHash)
 		.first<{ expires: string }>()
-	if (pending && pending.expires > new Date().toISOString()) return json({ status: 'pending' })
+	if (pending && pending.expires > new Date().toISOString()) return { status: 'pending' }
 	throw new ApiError(410, 'code_expired', 'That code has expired')
 }
 
@@ -273,10 +289,10 @@ async function pendingCore(env: Env, userId: string, code: string): Promise<Pend
 }
 
 /** App: which machine is behind this code, so the user can check before approving. */
-async function lookupCode(request: Request, env: Env) {
+async function lookupCode(request: Request, env: Env, body: () => Promise<EnteredCode>) {
 	const user = await requireUser(request, env)
-	const row = await pendingCore(env, user.id, authCode(await readJson(request)))
-	return json({ name: row.name })
+	const row = await pendingCore(env, user.id, authCode(await body()))
+	return { name: row.name }
 }
 
 /**
@@ -285,9 +301,9 @@ async function lookupCode(request: Request, env: Env) {
  * cannot store a key the Core no longer holds. A Core that belongs to someone else is never taken
  * over.
  */
-async function approveCode(request: Request, env: Env) {
+async function approveCode(request: Request, env: Env, body: () => Promise<EnteredCode>) {
 	const user = await requireUser(request, env)
-	const row = await pendingCore(env, user.id, authCode(await readJson(request)))
+	const row = await pendingCore(env, user.id, authCode(await body()))
 	const now = new Date().toISOString()
 	const stored = await env.DB.prepare(
 		'INSERT INTO cores (id,owner_id,name,address,cert_fingerprint,key_hash,created,last_seen) SELECT core_id, ?1, name, address, cert_fingerprint, key_hash, ?2, ?2 FROM core_auth_codes WHERE code = ?3 AND expires > ?2 ON CONFLICT(id) DO UPDATE SET key_hash = excluded.key_hash, name = excluded.name, address = excluded.address, cert_fingerprint = excluded.cert_fingerprint, public_address = NULL, last_seen = excluded.last_seen WHERE owner_id = excluded.owner_id RETURNING id, name',
@@ -313,7 +329,7 @@ async function approveCode(request: Request, env: Env) {
 	await env.CORE_SIGN_IN.getByName(stored.id)
 		.approved()
 		.catch((error: unknown) => console.error('Could not wake the Core', error))
-	return json(stored)
+	return stored
 }
 
 /** What a state report may change on a Core's row. */
@@ -345,25 +361,48 @@ function httpsAddress(body: Record<string, unknown>, key: string): string {
 	return address
 }
 
+function parseStateReport(raw: unknown): StateReport {
+	const body = objectBody(raw)
+	const fingerprint = certFingerprint(body)
+	if (!fingerprint) invalid('Invalid cert_fingerprint')
+	return {
+		address: httpsAddress(body, 'address'),
+		public_address: body.public_address == null ? null : httpsAddress(body, 'public_address'),
+		cert_fingerprint: fingerprint,
+		version: stringField(body, 'version', 32),
+		servers: parseServers(body.servers),
+	}
+}
+
+function parseServers(servers: unknown): VisibleServer[] {
+	if (!Array.isArray(servers) || servers.length > MAX_SERVERS) invalid('Invalid servers')
+	return servers.map((server: unknown) => {
+		const body = objectBody(server)
+		return {
+			id: stringField(body, 'id', 64),
+			name: stringField(body, 'name', MAX_SERVER_NAME),
+			address: stringField(body, 'address', 261),
+			shared_instance_id: stringField(body, 'shared_instance_id', 64),
+		}
+	})
+}
+
 /**
  * Core, signed in: its whole state, sent once on start and again when any of it changes: where the
  * App reaches it, the certificate the App pins, its version, and the servers it shows to friends.
  * A report that changes nothing writes nothing. A Core removed from its account gets 410
  * `core_removed` and un-pairs.
  */
-async function reportState(request: Request, env: Env) {
+async function reportState(request: Request, env: Env, body: () => Promise<StateReport>) {
 	const core = await requireListedCore(request, env)
-	const body = await readJson(request)
-	const fingerprint = certFingerprint(body)
-	if (!fingerprint) invalid('Invalid cert_fingerprint')
+	const report = await body()
 	await writeState(env, core, {
-		address: httpsAddress(body, 'address'),
-		public_address: body.public_address == null ? null : httpsAddress(body, 'public_address'),
-		cert_fingerprint: fingerprint,
-		version: stringField(body, 'version', 32),
+		address: report.address,
+		public_address: report.public_address,
+		cert_fingerprint: report.cert_fingerprint,
+		version: report.version,
 	})
-	await writeServers(env, core, parseServers(body.servers))
-	return new Response(null, { status: 204 })
+	await writeServers(env, core, report.servers)
 }
 
 /** The Core a request's key belongs to, or null for a key no Core has. */
@@ -394,19 +433,25 @@ export async function requireListedCore(request: Request, env: Env): Promise<Cor
 const INVITE_FILTER =
 	"user_id = ? AND json_extract(body,'$.type') = 'server_invite' AND json_extract(body,'$.core_id') = ? AND json_extract(body,'$.server_id') = ?"
 
+function parseAccessGrant(raw: unknown): AccessGrant {
+	const body = objectBody(raw)
+	return {
+		user: stringField(body, 'user', 64),
+		server_id: stringField(body, 'server_id', 64),
+		server_name: stringField(body, 'server_name', MAX_SERVER_NAME),
+		role: stringField(body, 'role', 16),
+	}
+}
+
 /**
  * Core, signed in: its owner invited an account to one of its servers. The account may reach this
  * Core from now on, and gets the invite as a notification. `user` is an id or a username; the
  * answer says who it is, so the Core can show their name. Only the owner invites, so the invite
  * is always from the owner.
  */
-async function grantAccess(request: Request, env: Env) {
+async function grantAccess(request: Request, env: Env, body: () => Promise<AccessGrant>) {
 	const core = await requireListedCore(request, env)
-	const body = await readJson(request)
-	const serverId = stringField(body, 'server_id', 64)
-	const serverName = stringField(body, 'server_name', MAX_SERVER_NAME)
-	const role = stringField(body, 'role', 16)
-	const username = stringField(body, 'user', 64)
+	const { server_id: serverId, server_name: serverName, role, user: username } = await body()
 
 	// Counted before the account is looked up, so a Core cannot use this to test names either.
 	const now = Date.now()
@@ -444,7 +489,17 @@ async function grantAccess(request: Request, env: Env) {
 		role,
 		invited_by: core.owner_id,
 	})
-	return json({ id: user.id, username: user.username, avatar_url: user.avatar_url })
+	return { id: user.id, username: user.username, avatar_url: user.avatar_url }
+}
+
+function parseAccessDirectory(raw: unknown): AccessDirectory {
+	const userIds = objectBody(raw).user_ids
+	if (!Array.isArray(userIds) || userIds.length > MAX_DIRECTORY) invalid('Invalid user_ids')
+	return {
+		user_ids: userIds.map((id: unknown) =>
+			typeof id === 'string' && id.length > 0 && id.length <= 64 ? id : invalid('Invalid user_ids'),
+		),
+	}
 }
 
 /**
@@ -453,16 +508,9 @@ async function grantAccess(request: Request, env: Env) {
  * leave the two apart. Only rows that change are written. Unknown accounts and the owner are
  * skipped.
  */
-async function replaceAccess(request: Request, env: Env) {
+async function replaceAccess(request: Request, env: Env, body: () => Promise<AccessDirectory>) {
 	const core = await requireListedCore(request, env)
-	const userIds = (await readJson(request)).user_ids
-	if (
-		!Array.isArray(userIds) ||
-		userIds.length > MAX_DIRECTORY ||
-		!userIds.every((id) => typeof id === 'string' && id.length > 0 && id.length <= 64)
-	)
-		invalid('Invalid user_ids')
-	const ids = JSON.stringify(userIds)
+	const ids = JSON.stringify((await body()).user_ids)
 	await env.DB.batch([
 		env.DB.prepare(
 			'DELETE FROM core_access WHERE core_id = ?1 AND user_id NOT IN (SELECT value FROM json_each(?2))',
@@ -471,86 +519,122 @@ async function replaceAccess(request: Request, env: Env) {
 			'INSERT OR IGNORE INTO core_access (core_id,user_id,created) SELECT ?1, id, ?3 FROM users WHERE id IN (SELECT value FROM json_each(?2)) AND id != ?4',
 		).bind(core.id, ids, new Date().toISOString(), core.owner_id),
 	])
-	return new Response(null, { status: 204 })
 }
 
 /**
  * Core, signed in: an account lost its access or its invite to one server. Its invite is withdrawn,
  * and unless `keep_core` says it still has another server there, so is its way to this Core.
  */
-async function revokeAccess(request: Request, env: Env) {
+async function revokeAccess(request: Request, env: Env, body: () => Promise<AccessRevocation>) {
 	const core = await requireListedCore(request, env)
-	const body = await readJson(request)
-	const userId = stringField(body, 'user_id', 64)
+	const revocation = await body()
+	const userId = revocation.user_id
 	await env.DB.prepare(`DELETE FROM notifications WHERE ${INVITE_FILTER}`)
-		.bind(userId, core.id, stringField(body, 'server_id', 64))
+		.bind(userId, core.id, revocation.server_id)
 		.run()
-	if (body.keep_core !== true)
+	if (!revocation.keep_core)
 		await env.DB.prepare('DELETE FROM core_access WHERE core_id = ? AND user_id = ?')
 			.bind(core.id, userId)
 			.run()
-	return new Response(null, { status: 204 })
 }
 
-export async function handleCores(request: Request, env: Env): Promise<Response | null> {
-	const path = routePath(request),
-		method = request.method
-	if (path === '/core/auth/code' && method === 'POST') return requestCode(request, env)
-	if (path === '/core/auth/poll' && method === 'POST') return pollCode(request, env)
-	if (path === '/core/auth/wait' && method === 'GET') return waitForApproval(request, env)
-	if (path === '/core/state' && method === 'POST') return reportState(request, env)
-	if (path === '/core/storage' && method === 'POST')
-		return reportStorage(request, env, await requireListedCore(request, env))
-	if (path === '/core/access' && method === 'PUT') return replaceAccess(request, env)
-	if (path === '/core/access' && method === 'POST') return grantAccess(request, env)
-	if (path === '/core/access' && method === 'DELETE') return revokeAccess(request, env)
+function parseAccessRevocation(raw: unknown): AccessRevocation {
+	const body = objectBody(raw)
+	return {
+		user_id: stringField(body, 'user_id', 64),
+		server_id: stringField(body, 'server_id', 64),
+		keep_core: body.keep_core === true,
+	}
+}
+
+function parseForgottenServer(raw: unknown): ForgottenServer {
+	const body = objectBody(raw)
+	return {
+		server_id: stringField(body, 'server_id', 64),
+		share_id: body.share_id == null ? null : stringField(body, 'share_id', 64),
+	}
+}
+
+/**
+ * App: the account's own Cores, then the ones it was invited to. Nobody else is told where a Core
+ * is.
+ */
+async function listCores(request: Request, env: Env): Promise<ListedCore[]> {
+	const user = await requireUser(request, env)
+	const rows = await env.DB.prepare(
+		'SELECT * FROM cores WHERE owner_id = ?1 OR id IN (SELECT core_id FROM core_access WHERE user_id = ?1) ORDER BY owner_id = ?1 DESC, created',
+	)
+		.bind(user.id)
+		.all<CoreRow>()
+	return rows.results.map((row) => publicCore(row, user.id))
+}
+
+/**
+ * App: the owner takes a Core off the account. Its key stops working at once; the Core notices on
+ * its next call and signs out on its own. Its server-first shares go with it: only that Core could
+ * write them.
+ */
+async function removeCore(request: Request, env: Env, id: string) {
+	const user = await requireUser(request, env)
+	const deleted = await env.DB.prepare('DELETE FROM cores WHERE id = ? AND owner_id = ?')
+		.bind(id, user.id)
+		.run()
+	if (!deleted.meta.changes) throw new ApiError(404, 'not_found', 'Core not found')
+	const shares = (
+		await env.DB.prepare(
+			'DELETE FROM shared_instances WHERE core_id = ? AND owner_id = ? RETURNING id',
+		)
+			.bind(id, user.id)
+			.all<{ id: string }>()
+	).results
+	for (const share of shares) await sweepFiles(env, share.id)
+}
+
+export const coreRoutes: Route[] = [
+	route(cores.RequestSignInCode, parseNewSignInCode, async ({ request, env, body }) =>
+		requestCode(request, env, await body()),
+	),
+	route(cores.PollSignIn, noBody, ({ request, env }) => pollCode(request, env)),
+	route(cores.WaitForSignIn, noBody, ({ request, env }) => waitForApproval(request, env)),
+	route(cores.ReportState, parseStateReport, ({ request, env, body }) =>
+		reportState(request, env, body),
+	),
+	route(
+		cores.ReportStorage,
+		parseStorageReport,
+		async ({ request, env, body }) => {
+			const core = await requireListedCore(request, env)
+			return reportStorage(env, core, await body())
+		},
+		MAX_REPORT_BODY,
+	),
+	route(cores.ReplaceAccess, parseAccessDirectory, ({ request, env, body }) =>
+		replaceAccess(request, env, body),
+	),
+	route(cores.GrantAccess, parseAccessGrant, ({ request, env, body }) =>
+		grantAccess(request, env, body),
+	),
+	route(cores.RevokeAccess, parseAccessRevocation, ({ request, env, body }) =>
+		revokeAccess(request, env, body),
+	),
 	// A server was deleted or stopped following an instance: its players and links go. With
 	// `share_id`, only while it still follows that share.
-	if (path === '/core/players' && method === 'DELETE') {
+	route(cores.ForgetPlayers, parseForgottenServer, async ({ request, env, body }) => {
 		const core = await requireListedCore(request, env)
-		const body = await readJson(request)
-		const shareId =
-			body.share_id === undefined || body.share_id === null
-				? null
-				: stringField(body, 'share_id', 64)
-		await forgetServer(env, core.id, stringField(body, 'server_id', 64), shareId)
-		return new Response(null, { status: 204 })
-	}
-	if (path === '/cores/approve/lookup' && method === 'POST') return lookupCode(request, env)
-	if (path === '/cores/approve' && method === 'POST') return approveCode(request, env)
-	if (path === '/cores' && method === 'GET') {
-		// The account's own Cores, then the ones it was invited to. Nobody else is told where a
-		// Core is.
-		const user = await requireUser(request, env)
-		const rows = await env.DB.prepare(
-			'SELECT * FROM cores WHERE owner_id = ?1 OR id IN (SELECT core_id FROM core_access WHERE user_id = ?1) ORDER BY owner_id = ?1 DESC, created',
-		)
-			.bind(user.id)
-			.all<CoreRow>()
-		return json(rows.results.map((row) => publicCore(row, user.id)))
-	}
-	const ticket = path.match(/^\/cores\/([^/]+)\/ticket$/)
-	if (ticket && method === 'POST') return issueTicket(request, env, decodeURIComponent(ticket[1]))
-	// The owner takes a Core off the account. Its key stops working at once; the Core notices on
-	// its next call and signs out on its own.
-	const core = path.match(/^\/cores\/([^/]+)$/)
-	if (core && method === 'DELETE') {
-		const user = await requireUser(request, env)
-		const id = decodeURIComponent(core[1])
-		const deleted = await env.DB.prepare('DELETE FROM cores WHERE id = ? AND owner_id = ?')
-			.bind(id, user.id)
-			.run()
-		if (!deleted.meta.changes) throw new ApiError(404, 'not_found', 'Core not found')
-		// Its server-first shares go with it: only that Core could write them.
-		const shares = (
-			await env.DB.prepare(
-				'DELETE FROM shared_instances WHERE core_id = ? AND owner_id = ? RETURNING id',
-			)
-				.bind(id, user.id)
-				.all<{ id: string }>()
-		).results
-		for (const share of shares) await sweepFiles(env, share.id)
-		return new Response(null, { status: 204 })
-	}
-	return null
-}
+		const { server_id: serverId, share_id: shareId } = await body()
+		await forgetServer(env, core.id, serverId, shareId)
+	}),
+	route(cores.LookUpSignInCode, parseEnteredCode, ({ request, env, body }) =>
+		lookupCode(request, env, body),
+	),
+	route(cores.ApproveSignInCode, parseEnteredCode, ({ request, env, body }) =>
+		approveCode(request, env, body),
+	),
+	route(cores.ListCores, noBody, ({ request, env }) => listCores(request, env)),
+	route(cores.IssueTicket, noBody, ({ request, env, params }) =>
+		issueTicket(request, env, params.id),
+	),
+	route(cores.RemoveCore, noBody, ({ request, env, params }) =>
+		removeCore(request, env, params.id),
+	),
+]

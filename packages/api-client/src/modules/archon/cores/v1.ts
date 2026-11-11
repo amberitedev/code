@@ -1,3 +1,6 @@
+import { cores } from '@amberite/contracts'
+
+import { ApiCallError } from '../../../contracts/errors'
 import { AbstractModule } from '../../../core/abstract-module'
 import { ModrinthApiError } from '../../../core/errors'
 import type { RequestOptions } from '../../../types/request'
@@ -65,25 +68,23 @@ export class ArchonCoresV1Module extends AbstractModule {
 	 * cannot be worked out keeps its plain address, so it does not take the other Cores down with it.
 	 */
 	public list(): Promise<Archon.Cores.v1.Core[]> {
-		const cores = this.client
-			.request<Archon.Cores.v1.Core[]>('/cores', { api: 'labrinth', version: 3, method: 'GET' })
-			.then(async (list) => {
-				const settled = await Promise.allSettled(list.map((core) => this.route(core)))
-				this.routes = new Map(
-					list.map((core, index) => {
-						const result = settled[index]
-						const plain = { base: core.address, address: core.address }
-						return [core.id, result.status === 'fulfilled' ? result.value : plain]
-					}),
-				)
-				this.listed = list
-				return list
-			})
-		cores.catch(() => {
-			if (this.cores === cores) this.cores = null
+		const listing = this.client.backend.call(cores.ListCores).then(async (list) => {
+			const settled = await Promise.allSettled(list.map((core) => this.route(core)))
+			this.routes = new Map(
+				list.map((core, index) => {
+					const result = settled[index]
+					const plain = { base: core.address, address: core.address }
+					return [core.id, result.status === 'fulfilled' ? result.value : plain]
+				}),
+			)
+			this.listed = list
+			return list
 		})
-		this.cores = cores
-		return cores
+		listing.catch(() => {
+			if (this.cores === listing) this.cores = null
+		})
+		this.cores = listing
+		return listing
 	}
 
 	/**
@@ -92,13 +93,7 @@ export class ArchonCoresV1Module extends AbstractModule {
 	 */
 	public async lookup(code: string): Promise<Archon.Cores.v1.PendingCore> {
 		try {
-			return await this.client.request('/cores/approve/lookup', {
-				api: 'labrinth',
-				version: 3,
-				method: 'POST',
-				body: { code },
-				retry: false,
-			})
+			return await this.client.backend.call(cores.LookUpSignInCode, { body: { code } })
 		} catch (error) {
 			throw approvalError(error)
 		}
@@ -110,13 +105,7 @@ export class ArchonCoresV1Module extends AbstractModule {
 	 */
 	public async approve(code: string): Promise<void> {
 		try {
-			await this.client.request('/cores/approve', {
-				api: 'labrinth',
-				version: 3,
-				method: 'POST',
-				body: { code },
-				retry: false,
-			})
+			await this.client.backend.call(cores.ApproveSignInCode, { body: { code } })
 		} catch (error) {
 			throw approvalError(error)
 		}
@@ -135,15 +124,11 @@ export class ArchonCoresV1Module extends AbstractModule {
 			console.warn(`Core ${core.id} was not told it was removed; it learns from the backend`, error)
 		})
 		await access.signOut(core.id).catch(() => undefined)
-		await this.client
-			.request(`/cores/${encodeURIComponent(core.id)}`, {
-				api: 'labrinth',
-				version: 3,
-				method: 'DELETE',
-			})
-			.catch((error) => {
+		await this.client.backend
+			.call(cores.RemoveCore, { params: { id: core.id } })
+			.catch((error: unknown) => {
 				// Already gone, which is what was asked for.
-				if (!(error instanceof ModrinthApiError && error.statusCode === 404)) throw error
+				if (!(error instanceof ApiCallError && error.code === 'not_found')) throw error
 			})
 		for (const [serverId, coreId] of this.serverCores) {
 			if (coreId === core.id) this.serverCores.delete(serverId)
@@ -369,13 +354,20 @@ export class ArchonCoresV1Module extends AbstractModule {
 }
 
 function approvalError(error: unknown): CoreApprovalError {
-	const status = error instanceof ModrinthApiError ? error.statusCode : undefined
-	if (status === 404) return new CoreApprovalError('wrong_code')
-	if (status === 410) return new CoreApprovalError('expired')
-	if (status === 429) return new CoreApprovalError('too_many_attempts')
-	if (status === 409) return new CoreApprovalError('already_signed_in')
-	if (status === 401) return new CoreApprovalError('failed', 'Sign in to add a Core.')
-	if (status === undefined)
+	if (!(error instanceof ApiCallError))
 		return new CoreApprovalError('failed', 'Could not reach Amberite. Check your connection.')
-	return new CoreApprovalError('failed')
+	switch (error.code) {
+		case 'wrong_code':
+			return new CoreApprovalError('wrong_code')
+		case 'code_expired':
+			return new CoreApprovalError('expired')
+		case 'too_many_attempts':
+			return new CoreApprovalError('too_many_attempts')
+		case 'already_signed_in':
+			return new CoreApprovalError('already_signed_in')
+		case 'invalid_credentials':
+			return new CoreApprovalError('failed', 'Sign in to add a Core.')
+		default:
+			return new CoreApprovalError('failed')
+	}
 }

@@ -27,12 +27,9 @@ use sqlx::SqliteConnection;
 use ts_rs::TS;
 use uuid::Uuid;
 
-use super::{
-    CoreState,
-    activity::Action,
-    backend::{Grant, Remove},
-    internal,
-};
+use contracts::backend::cores::{AccessGrant, AccessRevocation};
+
+use super::{CoreState, activity::Action, internal};
 use crate::{
     access::{
         Caller, Dangerous, Level, activity, fresh_ticket, now, owed::OwedCall,
@@ -68,6 +65,16 @@ pub enum Role {
     /// Everything a viewer can, plus running, console, files, settings, and backups. Runs code on
     /// the host machine.
     Editor,
+}
+
+impl Role {
+    /// As it is serialized.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Viewer => "viewer",
+            Self::Editor => "editor",
+        }
+    }
 }
 
 /// A user as their last ticket named them.
@@ -265,11 +272,11 @@ pub async fn invite(
     .map_err(internal)?;
     owe(
         &mut tx,
-        &OwedCall::Grant(Grant {
+        &OwedCall::Grant(AccessGrant {
             user: user_id.clone(),
             server_id: server_id.clone(),
             server_name: server.name,
-            role: invite.role,
+            role: invite.role.name().into(),
         }),
     )
     .await
@@ -380,7 +387,7 @@ pub async fn owe_removal(
     .await?;
     owe(
         conn,
-        &OwedCall::Remove(Remove {
+        &OwedCall::Remove(AccessRevocation {
             user_id: user_id.into(),
             server_id: server_id.into(),
             keep_core,

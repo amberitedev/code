@@ -2,13 +2,17 @@
 //! makes a session (`sessions::sign_in`) or authorizes one dangerous action
 //! (`access::fresh_ticket`), and is good for one use either way.
 
-use contracts::{ApiError, ErrorCode};
+use contracts::{
+    ApiError, ErrorCode,
+    tickets::{SessionTicket, TICKET_ISSUER, Ticket, TicketKind},
+};
+use serde::Deserialize;
 use sqlx::SqliteConnection;
 
-use sharing_storage::keys::{ISSUER, LEEWAY_S};
+use sharing_storage::keys::LEEWAY_S;
 
 use super::keys::Keys;
-use crate::api::{backend::TicketClaims, internal};
+use crate::api::internal;
 
 fn invalid(description: &str) -> ApiError {
     ApiError::new(ErrorCode::TicketInvalid, description)
@@ -21,17 +25,19 @@ pub async fn verify(
     ticket: &str,
     core_id: &str,
     now: i64,
-) -> Result<TicketClaims, ApiError> {
+) -> Result<SessionTicket, ApiError> {
     let claims = keys.verify(ticket).await.map_err(invalid)?;
     // Pool tickets (the store's) are signed with the same keys and must never sign in.
-    if claims.get("kind").and_then(serde_json::Value::as_str) != Some("session")
-    {
+    let kind = claims
+        .get("kind")
+        .and_then(|kind| TicketKind::deserialize(kind).ok());
+    if kind != Some(SessionTicket::KIND) {
         return Err(invalid("That ticket is not for signing in."));
     }
-    let claims: TicketClaims = serde_json::from_value(claims)
+    let claims: SessionTicket = serde_json::from_value(claims)
         .map_err(|_| invalid("The ticket's claims are unreadable."))?;
 
-    if claims.iss != ISSUER {
+    if claims.iss != TICKET_ISSUER {
         return Err(invalid("The ticket is from another issuer."));
     }
     if claims.aud != core_id {
@@ -60,7 +66,7 @@ pub async fn verify(
 /// what the ticket authorizes, so the use and the record are one write.
 pub async fn spend(
     conn: &mut SqliteConnection,
-    claims: &TicketClaims,
+    claims: &SessionTicket,
     now: i64,
 ) -> Result<(), ApiError> {
     sqlx::query("DELETE FROM used_tickets WHERE expires_at < ?")
@@ -93,10 +99,10 @@ pub mod test_support {
     use super::*;
 
     /// Claims for `user` on `core`, issued at `iat`.
-    pub fn claims(user: &str, core: &str, iat: i64) -> TicketClaims {
-        TicketClaims {
-            iss: ISSUER.into(),
-            kind: "session".into(),
+    pub fn claims(user: &str, core: &str, iat: i64) -> SessionTicket {
+        SessionTicket {
+            iss: TICKET_ISSUER.into(),
+            kind: TicketKind::Session,
             sub: user.into(),
             name: format!("{user} name"),
             avatar_url: None,
@@ -140,6 +146,17 @@ mod tests {
         let ticket = signer.sign(&claims("u1", "core", NOW));
         let verified = verify(&keys, &ticket, "core", NOW + 10).await.unwrap();
         assert_eq!(verified.sub, "u1");
+
+        // Signed by the backend's own code (`apps/backend/tests/core-sync.api.test.mjs`).
+        let signed: serde_json::Value =
+            serde_json::from_str(include_str!("session-ticket.json")).unwrap();
+        keys.set(&serde_json::from_value(signed["keys"].clone()).unwrap())
+            .await;
+        let ticket = signed["ticket"].as_str().unwrap();
+        let issued_at = signed["issued_at"].as_i64().unwrap();
+        let verified = verify(&keys, ticket, "core", issued_at).await.unwrap();
+        assert_eq!(verified.sub, "owner");
+        assert_eq!(verified.exp, issued_at + 300);
     }
 
     #[tokio::test]
@@ -153,7 +170,7 @@ mod tests {
             ErrorCode::TicketInvalid
         );
         let mut pool = claims("u1", "core", NOW);
-        pool.kind = "fetch".into();
+        pool.kind = TicketKind::Fetch;
         assert_eq!(
             error(&keys, &signer.sign(&pool), NOW).await,
             ErrorCode::TicketInvalid,

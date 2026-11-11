@@ -1,7 +1,8 @@
 import { handleAccounts } from './accounts'
 import { ApiError, errorResponse, json } from './common/http'
+import { serve } from './common/router'
 import type { Env } from './common/types'
-import { handleCores } from './cores'
+import { coreRoutes } from './cores'
 import { handleVisibleServers } from './cores/servers'
 import { handleSharing } from './sharing'
 import { handleSocial } from './social'
@@ -43,7 +44,7 @@ export default {
 					(await handleFriendsSocket(request, env)) ??
 					(await handleVisibleServers(request, env)) ??
 					(await handleSharing(request, env)) ??
-					(await handleCores(request, env)) ??
+					(await serve(coreRoutes, request, env)) ??
 					(await handleAccounts(request, env)) ??
 					(await handleSocial(request, env)) ??
 					errorResponse(new ApiError(404, 'not_found', 'Not found'))

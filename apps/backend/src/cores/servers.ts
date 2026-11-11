@@ -1,5 +1,7 @@
+import type { VisibleServer } from '@amberite/contracts'
+
 import { requireUser } from '../common/auth'
-import { ApiError, json, routePath, stringField } from '../common/http'
+import { ApiError, json, routePath } from '../common/http'
 import { notifyMembers } from '../common/notifications'
 import type { Env } from '../common/types'
 
@@ -7,7 +9,6 @@ import type { Env } from '../common/types'
 // each with the shared instance it follows. The people that instance is shared with read the list
 // and join by the Minecraft address; nobody else is given it.
 
-const MAX_SERVERS = 100
 /**
  * A server name, in UTF-16 units. Core's own limit, 64 characters (`create` in
  * `apps/core/src/api/servers.rs`), is the real one; this is loose enough for every name it allows.
@@ -17,31 +18,6 @@ export const MAX_SERVER_NAME = 256
 /** SQL for "this account owns the shared instance bound as `?1` or has joined it". */
 const sharedWith = (account: string) =>
 	`EXISTS (SELECT 1 FROM shared_instance_users m WHERE m.instance_id = ?1 AND m.user_id = ${account} AND m.joined_at IS NOT NULL)`
-
-/** A server a Core shows to the people its instance is shared with. */
-interface VisibleServer {
-	id: string
-	name: string
-	address: string
-	instance: string
-}
-
-/** The `servers` list of a Core's report. */
-export function parseServers(servers: unknown): VisibleServer[] {
-	if (!Array.isArray(servers) || servers.length > MAX_SERVERS)
-		throw new ApiError(400, 'invalid_input', 'Invalid servers')
-	return servers.map((server: unknown) => {
-		if (!server || typeof server !== 'object')
-			throw new ApiError(400, 'invalid_input', 'Invalid servers')
-		const body: Record<string, unknown> = { ...server }
-		return {
-			id: stringField(body, 'id', 64),
-			name: stringField(body, 'name', MAX_SERVER_NAME),
-			address: stringField(body, 'address', 261),
-			instance: stringField(body, 'shared_instance_id', 64),
-		}
-	})
-}
 
 /**
  * Make `servers` the whole list this Core shows to friends, writing only the rows that changed. A
@@ -54,7 +30,7 @@ export async function writeServers(
 	servers: VisibleServer[],
 ) {
 	const stored = await env.DB.prepare(
-		'SELECT server_id AS id, name, address, instance_id AS instance FROM visible_servers WHERE core_id = ?',
+		'SELECT server_id AS id, name, address, instance_id AS shared_instance_id FROM visible_servers WHERE core_id = ?',
 	)
 		.bind(core.id)
 		.all<VisibleServer>()
@@ -67,7 +43,7 @@ export async function writeServers(
 			!old ||
 			old.name !== server.name ||
 			old.address !== server.address ||
-			old.instance !== server.instance
+			old.shared_instance_id !== server.shared_instance_id
 		)
 	})
 	const remove = (id: string) =>
@@ -82,13 +58,20 @@ export async function writeServers(
 			remove(server.id),
 			env.DB.prepare(
 				`INSERT OR REPLACE INTO visible_servers (instance_id,core_id,server_id,name,address) SELECT ?1,?3,?4,?5,?6 WHERE ${sharedWith('?2')}`,
-			).bind(server.instance, core.owner_id, core.id, server.id, server.name, server.address),
+			).bind(
+				server.shared_instance_id,
+				core.owner_id,
+				core.id,
+				server.id,
+				server.name,
+				server.address,
+			),
 		]),
 	]
 	if (!statements.length) return
 	await env.DB.batch(statements)
 	const touched = [...removed, ...changed, ...changed.map((server) => before.get(server.id))]
-	const instances = new Set(touched.flatMap((row) => (row ? [row.instance] : [])))
+	const instances = new Set(touched.flatMap((row) => (row ? [row.shared_instance_id] : [])))
 	await Promise.all(
 		[...instances].map((id) => notifyMembers(env, id, 'shared_instance_servers', core.owner_id)),
 	)

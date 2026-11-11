@@ -7,6 +7,7 @@ use std::marker::PhantomData;
 use bytes::Bytes;
 use serde::{Serialize, de::DeserializeOwned};
 
+pub mod backend;
 #[cfg(feature = "client")]
 pub mod client;
 pub mod error;
@@ -15,6 +16,7 @@ pub mod rules;
 #[cfg(feature = "server")]
 pub mod server;
 mod side;
+pub mod tickets;
 #[cfg(feature = "ts")]
 pub mod ts;
 

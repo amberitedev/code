@@ -81,7 +81,7 @@ function isAccountPath(path: string): boolean {
 	const pathname = path.split('?')[0] ?? path
 	if (/^\/(?:_internal\/)?admin\/user(?:\/|$)/.test(pathname)) return true
 	if (['/user_email', '/user_discord'].includes(pathname)) return true
-	return /^\/(auth|globals|session|sessions|friend|friends|block|blocks|notification|notifications|pat|user|users|cores)(\/|$)/.test(
+	return /^\/(auth|globals|session|sessions|friend|friends|block|blocks|notification|notifications|pat|user|users)(\/|$)/.test(
 		pathname,
 	)
 }

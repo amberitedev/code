@@ -832,7 +832,7 @@ async fn remove_server(
     crate::access::sync::owe(
         &mut tx,
         &crate::access::owed::OwedCall::ForgetPlayers(
-            crate::access::owed::ForgetPlayers {
+            contracts::backend::cores::ForgottenServer {
                 server_id: id.into(),
                 share_id: None,
             },

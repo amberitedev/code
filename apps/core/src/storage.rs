@@ -24,6 +24,7 @@ use axum::{
     http::{HeaderValue, Method, StatusCode, Uri, header},
     response::{IntoResponse, Response},
 };
+use contracts::backend::cores::{PullOrder, StorageAnswer, StorageReport};
 use contracts::{ApiError, ErrorCode};
 use hyper_util::{
     client::legacy::{Client as HttpClient, connect::HttpConnector},
@@ -44,7 +45,6 @@ use tracing::{info, warn};
 use crate::{
     access::{owed::OwedCall, sync},
     api::{
-        backend::{PullOrder, StorageAnswer, StorageReport},
         internal,
         storage::{StorageSettings, StorageStatus},
     },

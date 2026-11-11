@@ -140,7 +140,7 @@ mod tests {
 
     use crate::{
         ApiError, Auth, BodyKind, Empty, Endpoint, ErrorCode, Json, Method,
-        PROTOCOL_VERSION, limits, rules,
+        PROTOCOL_VERSION, backend, limits, rules, tickets,
     };
 
     const PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/ts/contracts.ts");
@@ -167,14 +167,18 @@ export interface Endpoint<P = unknown, Q = unknown, B = unknown, R = unknown> {
             ApiError::decl(&cfg),
             ErrorCode::decl(&cfg),
         ]
+        .into_iter()
+        .chain(tickets::ts_types())
         .map(|declaration| format!("\nexport {declaration}\n"))
-        .concat();
+        .collect::<String>();
         format!(
             "// Generated from packages/contracts by ts-rs. Do not edit.\n\
              // Regenerate: cargo test -p contracts -- --ignored write_ts\n\n\
-             export const PROTOCOL_VERSION = {PROTOCOL_VERSION}\n{declarations}{ENDPOINT}{}{}",
+             export const PROTOCOL_VERSION = {PROTOCOL_VERSION}\n{declarations}{ENDPOINT}{}{}{}{}",
             limits::ts(),
             rules::ts(),
+            tickets::ts(),
+            backend::cores::ts(),
         )
     }
 

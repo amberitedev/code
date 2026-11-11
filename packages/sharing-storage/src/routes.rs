@@ -21,7 +21,10 @@ use axum::{
     routing::{get, post},
 };
 use bytes::Bytes;
-use contracts::{ApiError, ErrorCode};
+use contracts::{
+    ApiError, ErrorCode,
+    tickets::{FetchTicket, PullTicket, StoreTicket, Ticket},
+};
 use futures::{StreamExt, TryStreamExt};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
@@ -30,8 +33,7 @@ use tokio_util::io::{ReaderStream, StreamReader};
 use crate::{
     Store, io_error, now,
     objects::{self, Hash, VersionList, WriteError},
-    pull, tar,
-    tickets::{self, Claims},
+    pull, tar, tickets,
 };
 
 pub(crate) fn router(store: Arc<Store>) -> Router {
@@ -64,17 +66,15 @@ fn root_of(text: &str) -> Result<Hash, ApiError> {
 }
 
 impl Store {
-    async fn ticket(
+    async fn ticket<T: Ticket>(
         &self,
         headers: &HeaderMap,
-        kind: &'static str,
         root: &Hash,
-    ) -> Result<Claims, ApiError> {
+    ) -> Result<T, ApiError> {
         let ticket = bearer(headers).ok_or_else(|| {
             ApiError::new(ErrorCode::TicketInvalid, "This needs a ticket.")
         })?;
-        tickets::verify(&self.keys, ticket, &self.core_id, kind, root, now())
-            .await
+        tickets::verify(&self.keys, ticket, &self.core_id, root, now()).await
     }
 
     /// The fetch ticket for `root`. Only a refused ticket counts against its address's rate, so
@@ -86,7 +86,7 @@ impl Store {
         headers: &HeaderMap,
         extensions: &Extensions,
         root: &Hash,
-    ) -> Result<Claims, ApiError> {
+    ) -> Result<FetchTicket, ApiError> {
         let address = headers
             .get("x-forwarded-for")
             .and_then(|value| value.to_str().ok())
@@ -104,7 +104,7 @@ impl Store {
                 "Too many refused requests from this address. Wait a minute.",
             ));
         }
-        self.ticket(headers, tickets::FETCH, root)
+        self.ticket(headers, root)
             .await
             .inspect_err(|_| self.limits.refused(address))
     }
@@ -129,7 +129,7 @@ async fn have(
     body: Bytes,
 ) -> Result<Json<HaveAnswer>, ApiError> {
     let root = root_of(&root)?;
-    store.ticket(&headers, tickets::STORE, &root).await?;
+    store.ticket::<StoreTicket>(&headers, &root).await?;
     let Have { objects } = serde_json::from_slice(&body)
         .map_err(|_| invalid("Send { objects: [hash...] }."))?;
     let mut missing = Vec::new();
@@ -171,7 +171,7 @@ async fn upload(
     body: Body,
 ) -> Result<Json<Uploaded>, ApiError> {
     let root = root_of(&root)?;
-    let claims = store.ticket(&headers, tickets::STORE, &root).await?;
+    let claims: StoreTicket = store.ticket(&headers, &root).await?;
     if store.is_stored(&root) {
         return Ok(Json(Uploaded {
             complete: true,
@@ -192,7 +192,7 @@ async fn upload(
     tar.body().read_to_end(&mut json).await.map_err(bad_tar)?;
     let list: VersionList = serde_json::from_slice(&json)
         .map_err(|_| invalid("version.json is unreadable."))?;
-    store.begin(&root, list.clone(), claims.bytes).await?;
+    store.begin(&root, list.clone(), Some(claims.bytes)).await?;
     while let Some(entry) = tar.next().await.map_err(bad_tar)? {
         let hash = Hash::parse(&entry.name).ok_or_else(|| {
             invalid("Every entry after version.json is named by its hash.")
@@ -336,18 +336,18 @@ async fn pull_version(
     headers: HeaderMap,
 ) -> Result<Json<Pulled>, ApiError> {
     let root = root_of(&root)?;
-    let claims = store.ticket(&headers, tickets::PULL, &root).await?;
+    let claims: PullTicket = store.ticket(&headers, &root).await?;
     if store.is_stored(&root) {
         return Ok(Json(Pulled { complete: true }));
     }
-    let source = claims.source.expect("verify requires it on pull tickets");
-    let complete = pull::pull(&store, &root, &source).await?;
+    let complete = pull::pull(&store, &root, &claims.source).await?;
     Ok(Json(Pulled { complete }))
 }
 
 #[cfg(test)]
 pub mod tests {
     use axum::http::{Method, Request};
+    use contracts::backend::cores::HeldVersion;
     use http_body_util::BodyExt;
     use serde_json::{Value, json};
     use sha2::{Digest, Sha256};
@@ -356,7 +356,7 @@ pub mod tests {
     use super::*;
     use crate::{
         keys::{Keys, test_support::Signer},
-        local::{Caps, HeldVersion},
+        local::Caps,
         objects::{GRACE_S, Layout, list_of},
         tar::test_support::tar,
         tickets::test_support::ticket,

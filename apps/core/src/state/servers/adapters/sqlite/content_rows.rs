@@ -9,10 +9,11 @@ use std::collections::{HashMap, HashSet};
 
 use bedrock::state::{ContentRequirement, ModLoader};
 use chrono::{DateTime, TimeZone, Utc};
+use contracts::backend::cores::ForgottenServer;
 use sqlx::{SqliteExecutor, SqlitePool};
 
 use crate::{
-    access::owed::{ForgetPlayers, OwedCall},
+    access::owed::OwedCall,
     access::sync::owe,
     state::servers::domain::pack::ServerOn,
     state::servers::model::{
@@ -767,7 +768,7 @@ async fn forget_players(
 ) -> sqlx::Result<()> {
     owe(
         tx,
-        &OwedCall::ForgetPlayers(ForgetPlayers {
+        &OwedCall::ForgetPlayers(ForgottenServer {
             server_id: server_id.into(),
             share_id,
         }),

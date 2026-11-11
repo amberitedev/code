@@ -16,7 +16,7 @@ bytes = { workspace = true }
 chrono = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 color-eyre = { workspace = true }
-contracts = { workspace = true, features = ["server"] }
+contracts = { workspace = true, features = ["client", "server"] }
 futures = { workspace = true }
 hex = { workspace = true }
 reqwest = { workspace = true, features = ["json", "rustls-no-provider", "stream"] }
@@ -30,8 +30,6 @@ tokio = { workspace = true, features = ["full"] }
 tokio-util = { workspace = true, features = ["io"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
-# The key set is part of Core's generated TypeScript.
-ts-rs = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 walkdir = "2.5"
 

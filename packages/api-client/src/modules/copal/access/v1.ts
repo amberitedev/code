@@ -1,3 +1,5 @@
+import { cores } from '@amberite/contracts'
+
 import { AbstractModule } from '../../../core/abstract-module'
 import { ModrinthApiError } from '../../../core/errors'
 import type { CoreCallError, CoreSessions } from '../../../types/client'
@@ -29,10 +31,7 @@ export class CopalAccessV1Module extends AbstractModule {
 
 	/** A ticket for `coreId`, for its owner or someone invited to one of its servers. */
 	public async ticket(coreId: string): Promise<string> {
-		const { ticket } = await this.client.request<{ ticket: string }>(
-			`/cores/${encodeURIComponent(coreId)}/ticket`,
-			{ api: 'labrinth', version: 3, method: 'POST', retry: false },
-		)
+		const { ticket } = await this.client.backend.call(cores.IssueTicket, { params: { id: coreId } })
 		return ticket
 	}
 

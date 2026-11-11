@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { createHash, generateKeyPairSync, verify } from 'node:crypto'
+import { readFile, writeFile } from 'node:fs/promises'
 import test from 'node:test'
 
 import { startBackend } from './worker.mjs'
@@ -7,6 +8,11 @@ import { startBackend } from './worker.mjs'
 const { privateKey, publicKey } = generateKeyPairSync('ed25519')
 const kid = 'test-key'
 const TICKET_KEY = JSON.stringify({ ...privateKey.export({ format: 'jwk' }), kid })
+/**
+ * A session ticket signed here, which Core's ticket test verifies. It lives in Core's folder so
+ * that a change to it runs that test. `WRITE_TICKET=1` signs a new one.
+ */
+const SIGNED_TICKET = new URL('../../core/src/access/session-ticket.json', import.meta.url)
 
 /** A backend with accounts `owner`, `friend`, `other` and `stranger`, and Core `core` owned by `owner`. */
 async function withCore(name, run) {
@@ -112,7 +118,8 @@ test('tickets carry the user and the Core, for the owner and the access director
 
 		const response = await call('POST', '/cores/core/ticket', undefined, 'mra_owner')
 		assert.equal(response.status, 200)
-		const { header, claims, valid } = decode((await response.json()).ticket)
+		const { ticket } = await response.json()
+		const { header, claims, valid } = decode(ticket)
 		assert.ok(valid, 'the signature verifies with the public key')
 		assert.deepEqual(header, { alg: 'EdDSA', typ: 'JWT', kid })
 		assert.equal(claims.iss, 'amberite')
@@ -123,6 +130,23 @@ test('tickets carry the user and the Core, for the owner and the access director
 		assert.equal(claims.exp - claims.iat, 300)
 		assert.ok(Math.abs(claims.iat - Date.now() / 1000) < 60)
 		assert.equal(typeof claims.jti, 'string')
+		if (process.env.WRITE_TICKET) {
+			const key = { ...publicKey.export({ format: 'jwk' }), kid }
+			const signed = { keys: { keys: [key] }, ticket, issued_at: claims.iat }
+			await writeFile(SIGNED_TICKET, JSON.stringify(signed, null, '\t') + '\n')
+		}
+		const signed = JSON.parse(await readFile(SIGNED_TICKET, 'utf8'))
+		const [, signedClaims] = signed.ticket.split('.')
+		const shape = (value) =>
+			Object.entries(value).map(([key, field]) => [
+				key,
+				Array.isArray(field) ? 'array' : field === null ? 'null' : typeof field,
+			])
+		assert.deepEqual(
+			shape(JSON.parse(Buffer.from(signedClaims, 'base64url').toString())),
+			shape(claims),
+			'Core verifies session-ticket.json: sign a new one with WRITE_TICKET=1',
+		)
 
 		const friend = await call('POST', '/cores/core/ticket', undefined, 'mra_friend')
 		assert.equal(friend.status, 200)
@@ -270,9 +294,16 @@ test('the old Core routes are gone, and a removed Core is told so on every route
 			assert.equal((await call(method, path, {})).status, 404, `${method} ${path}`)
 
 		assert.equal((await call('DELETE', '/cores/core', undefined, 'mra_owner')).status, 204)
-		const invite = { server_id: 'server', server_name: 'Server', role: 'editor', user: 'other' }
-		assert.equal((await call('POST', '/core/access', invite)).status, 410)
-		const revoke = { server_id: 'server', user_id: 'other' }
-		assert.equal((await call('DELETE', '/core/access', revoke)).status, 410)
+		// The key is checked before the body is read, so a body that does not fit is not the answer.
+		for (const [method, path] of [
+			['POST', '/core/state'],
+			['POST', '/core/storage'],
+			['PUT', '/core/access'],
+			['POST', '/core/access'],
+			['DELETE', '/core/access'],
+			['DELETE', '/core/players'],
+		])
+			assert.equal((await call(method, path, {})).status, 410, `${method} ${path}`)
+		assert.equal((await call('POST', '/core/storage', {}, 'not_a_key')).status, 401)
 	})
 })

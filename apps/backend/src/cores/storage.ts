@@ -1,4 +1,6 @@
-import { ApiError, json, readBytes } from '../common/http'
+import type { HeldVersion, PullOrder, StorageAnswer, StorageReport } from '@amberite/contracts'
+
+import { invalid, objectBody } from '../common/http'
 import type { Env } from '../common/types'
 import { UNCONFIRMED_TTL_MS, holders, place } from '../sharing/pool'
 import { versionReady } from '../sharing'
@@ -10,7 +12,7 @@ import { pullTicket } from './tickets'
 
 const MAX_VERSIONS = 10_000
 /** A report of `MAX_VERSIONS` versions is about a megabyte. */
-const MAX_REPORT_BODY = 2 * 1024 * 1024
+export const MAX_REPORT_BODY = 2 * 1024 * 1024
 /** Pull orders per report, so one report cannot ask a Core to copy everything at once. */
 const MAX_PULLS = 20
 /** A report that changed nothing still refreshes `reported` once it is this old. */
@@ -42,50 +44,46 @@ const STORAGE_FIELDS = [
 function natural(body: Record<string, unknown>, field: string): number {
 	const value = body[field]
 	if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0)
-		throw new ApiError(400, 'invalid_input', `Invalid ${field}`)
+		invalid(`Invalid ${field}`)
 	return value
 }
 
-function parseVersions(value: unknown): Map<string, number> {
-	if (!Array.isArray(value) || value.length > MAX_VERSIONS)
-		throw new ApiError(400, 'invalid_input', 'Invalid versions')
-	const versions = new Map<string, number>()
-	for (const entry of value) {
-		if (!entry || typeof entry !== 'object')
-			throw new ApiError(400, 'invalid_input', 'Invalid versions')
-		const body: Record<string, unknown> = { ...entry }
-		if (typeof body.root !== 'string' || !HASH.test(body.root))
-			throw new ApiError(400, 'invalid_input', 'Invalid root')
-		versions.set(body.root, natural(body, 'bytes'))
-	}
-	return versions
-}
-
-/** Core, signed in: its storage now. */
-export async function reportStorage(
-	request: Request,
-	env: Env,
-	core: { id: string; owner_id: string },
-) {
-	let body: unknown
-	try {
-		body = JSON.parse(new TextDecoder().decode(await readBytes(request, MAX_REPORT_BODY)))
-	} catch {
-		throw new ApiError(400, 'invalid_input', 'Invalid JSON')
-	}
-	if (!body || typeof body !== 'object' || Array.isArray(body))
-		throw new ApiError(400, 'invalid_input', 'Expected a JSON object')
-	const report = body as Record<string, unknown>
-	const next = {
-		enabled: report.enabled === true ? 1 : 0,
-		service: report.service === true ? 1 : 0,
+export function parseStorageReport(raw: unknown): StorageReport {
+	const report = objectBody(raw)
+	if (!Array.isArray(report.versions) || report.versions.length > MAX_VERSIONS)
+		invalid('Invalid versions')
+	return {
+		enabled: report.enabled === true,
+		service: report.service === true,
 		cap: natural(report, 'cap'),
 		used: natural(report, 'used'),
 		free: natural(report, 'free'),
 		egress_cap: natural(report, 'egress_cap'),
 		egress_today: natural(report, 'egress_today'),
+		versions: report.versions.map((entry: unknown): HeldVersion => {
+			const body = objectBody(entry)
+			if (typeof body.root !== 'string' || !HASH.test(body.root)) invalid('Invalid root')
+			return { root: body.root, bytes: natural(body, 'bytes') }
+		}),
 	}
-	const versions = parseVersions(report.versions)
+}
+
+/** Core, signed in: its storage now. */
+export async function reportStorage(
+	env: Env,
+	core: { id: string; owner_id: string },
+	report: StorageReport,
+): Promise<StorageAnswer> {
+	const next = {
+		enabled: report.enabled ? 1 : 0,
+		service: report.service ? 1 : 0,
+		cap: report.cap,
+		used: report.used,
+		free: report.free,
+		egress_cap: report.egress_cap,
+		egress_today: report.egress_today,
+	}
+	const versions = new Map(report.versions.map((version) => [version.root, version.bytes]))
 	const nowText = new Date().toISOString()
 
 	const stored = await env.DB.prepare('SELECT * FROM core_storage WHERE core_id = ?')
@@ -152,7 +150,7 @@ export async function reportStorage(
 
 	if (!next.enabled) await handOn(env, core)
 
-	return json({ drop: await dropList(env, core.id), pull: await pullList(env, core.id) })
+	return { drop: await dropList(env, core.id), pull: await pullList(env, core.id) }
 }
 
 /**
@@ -211,7 +209,7 @@ async function dropList(env: Env, coreId: string): Promise<string[]> {
  * Versions this Core should hold but does not, each with a pull ticket for the other holder that
  * has it: every kept ready version of every share homed or replicated here, newest first.
  */
-async function pullList(env: Env, coreId: string) {
+async function pullList(env: Env, coreId: string): Promise<PullOrder[]> {
 	const rows = await env.DB.prepare(
 		`SELECT DISTINCT v.version_hash, CASE WHEN i.home = ?1 THEN i.replica ELSE i.home END AS source
 		FROM shared_instance_versions v JOIN shared_instances i ON i.id = v.instance_id

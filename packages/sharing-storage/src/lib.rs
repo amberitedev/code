@@ -36,12 +36,12 @@ use std::{
 };
 
 use color_eyre::eyre::{Result, WrapErr};
-use contracts::{ApiError, ErrorCode};
+use contracts::{ApiError, ErrorCode, backend::cores::HeldVersion};
 use tracing::{info, warn};
 
 use keys::{JsonFile, Keys};
 use limits::Limits;
-use local::{Caps, HeldVersion, Status};
+use local::{Caps, Status};
 pub use objects::Hash;
 use objects::{Index, Layout, ListState, VersionList};
 

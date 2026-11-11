@@ -8,7 +8,7 @@
 use ts_rs::{Config, TS};
 
 use super::{
-    access, activity, backend, console, content, eula, insight, logs, pairing,
+    access, activity, console, content, eula, insight, logs, pairing,
     performance, sessions, share, startup, storage, update,
 };
 
@@ -37,21 +37,6 @@ fn declarations() -> String {
         activity::ActivityPage::decl(&cfg),
         activity::ActivityEntry::decl(&cfg),
         activity::Action::decl(&cfg),
-        backend::TicketClaims::decl(&cfg),
-        sharing_storage::keys::PublicKeys::decl(&cfg),
-        sharing_storage::keys::PublicKey::decl(&cfg),
-        backend::StateReport::decl(&cfg),
-        backend::VisibleServer::decl(&cfg),
-        backend::AccessDirectory::decl(&cfg),
-        backend::Grant::decl(&cfg),
-        backend::Remove::decl(&cfg),
-        crate::access::owed::ForgetPlayers::decl(&cfg),
-        crate::access::owed::OwedCall::decl(&cfg),
-        backend::StorageReport::decl(&cfg),
-        sharing_storage::local::HeldVersion::decl(&cfg),
-        sharing_client::pool::PoolCore::decl(&cfg),
-        backend::StorageAnswer::decl(&cfg),
-        backend::PullOrder::decl(&cfg),
         content::EditedFiles::decl(&cfg),
         content::EditedFile::decl(&cfg),
         crate::state::servers::model::PendingChange::decl(&cfg),

@@ -12,12 +12,12 @@
 
 use std::{io, sync::Arc, time::Duration};
 
+use contracts::backend::cores::HeldVersion;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tokio::io::{
     AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader, Lines,
 };
 use tracing::warn;
-use ts_rs::TS;
 
 use crate::{Hash, Store};
 
@@ -46,14 +46,6 @@ pub struct Status {
     pub egress_today: u64,
     /// Every version the store holds whole.
     pub versions: Vec<HeldVersion>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-pub struct HeldVersion {
-    /// R, the version's root hash.
-    pub root: String,
-    /// The bytes of its objects.
-    pub bytes: u64,
 }
 
 #[derive(Serialize, Deserialize)]

@@ -34,15 +34,22 @@ export function stringField(body: Record<string, unknown>, key: string, max = 10
 }
 
 export async function readJson(request: Request): Promise<Record<string, unknown>> {
-	const text = new TextDecoder().decode(await readBytes(request, 65536))
-	let value: unknown
+	return objectBody(await readJsonBody(request, 65536))
+}
+
+export async function readJsonBody(request: Request, limit: number): Promise<unknown> {
+	const text = new TextDecoder().decode(await readBytes(request, limit))
 	try {
-		value = JSON.parse(text)
+		return JSON.parse(text)
 	} catch {
 		invalid('Invalid JSON')
 	}
+}
+
+/** A parsed body as an object to read fields from. */
+export function objectBody(value: unknown): Record<string, unknown> {
 	if (!value || typeof value !== 'object' || Array.isArray(value)) invalid('Expected a JSON object')
-	return value as Record<string, unknown>
+	return { ...value }
 }
 
 export async function readBytes(request: Request, limit: number): Promise<Uint8Array> {

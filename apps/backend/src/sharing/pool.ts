@@ -1,7 +1,9 @@
+import type { StoreHost } from '@amberite/contracts'
+
 import { isPrivateHost } from '../common/address'
 import { ApiError } from '../common/http'
 import type { Env } from '../common/types'
-import { type Holder, fetchTicket, storeTicket } from '../cores/tickets'
+import { fetchTicket, storeTicket } from '../cores/tickets'
 
 // The pool side of sharing: which Core holds a share, the manifest an owner's App sends, and the
 // tickets that let Apps talk to stores. The backend never
@@ -110,7 +112,7 @@ export function versionBytes(files: ManifestFile[]): number {
 
 const HOLDER_COLUMNS = 'id, address, public_address, cert_fingerprint'
 
-type Candidate = Holder & { owner_id: string; room: number }
+type Candidate = StoreHost & { owner_id: string; room: number }
 
 /**
  * Cores that may take a new share: storage on, running as a service with a public address that is
@@ -204,14 +206,14 @@ export async function place(
 }
 
 /** The Cores with these ids, in the given order, as the App reaches them. */
-export async function holders(env: Env, ids: (string | null)[]): Promise<Holder[]> {
+export async function holders(env: Env, ids: (string | null)[]): Promise<StoreHost[]> {
 	const wanted = ids.filter((id): id is string => id !== null)
 	if (!wanted.length) return []
 	const rows = await env.DB.prepare(
 		`SELECT ${HOLDER_COLUMNS} FROM cores WHERE id IN (SELECT value FROM json_each(?))`,
 	)
 		.bind(JSON.stringify(wanted))
-		.all<Holder>()
+		.all<StoreHost>()
 	return wanted.flatMap((id) => rows.results.filter((row) => row.id === id))
 }
 
@@ -220,19 +222,19 @@ export async function confirmedHolders(
 	env: Env,
 	ids: (string | null)[],
 	root: string,
-): Promise<Holder[]> {
+): Promise<StoreHost[]> {
 	const wanted = ids.filter((id): id is string => id !== null)
 	if (!wanted.length) return []
 	const rows = await env.DB.prepare(
 		`SELECT ${HOLDER_COLUMNS.replaceAll(', ', ', c.').replace('id', 'c.id')} FROM cores c JOIN core_holdings h ON h.core_id = c.id WHERE h.version_hash = ? AND c.id IN (SELECT value FROM json_each(?))`,
 	)
 		.bind(root, JSON.stringify(wanted))
-		.all<Holder>()
+		.all<StoreHost>()
 	return wanted.flatMap((id) => rows.results.filter((row) => row.id === id))
 }
 
 /** What a member needs to fetch a ready version: who holds it and a fetch ticket for it. */
-export async function poolAccess(env: Env, holderList: Holder[], root: string) {
+export async function poolAccess(env: Env, holderList: StoreHost[], root: string) {
 	return {
 		holders: holderList,
 		ticket: await fetchTicket(

@@ -1,6 +1,6 @@
 //! Who can do what: tickets, sessions, per-server roles, the local socket, the activity log, and
 //! backend sync. The request and response shapes are in `api::access`, `api::sessions`,
-//! `api::activity`, and `api::backend`.
+//! `api::activity`, and, for the backend, `contracts::backend::cores`.
 //!
 //! Every route takes a [`Caller`] and checks it: [`Caller::require`] for a role on one server,
 //! [`Caller::require_owner`] for the Core itself, and [`Dangerous`] for the owner's actions that

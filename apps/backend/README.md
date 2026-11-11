@@ -73,10 +73,10 @@ The App removes a Core by telling the Core first, with a ticket, and then callin
 `DELETE /cores/:id`. A Core that was off learns from the 410 at its next start.
 
 `POST /cores/:id/ticket` gives the App a ticket for one Core, to its owner or an account in that
-Core's directory: an Ed25519 JWT with `iss`, `kind: "session"`, `sub`, `name`, `avatar_url`,
-`aud` (the Core id), `iat`, `exp` five minutes later, and a random `jti`. It writes nothing. The
-Core verifies it against `public/core/keys.json`, served as a static asset at `/core/keys.json` so
-it costs no requests. The pool's `store`, `fetch`, and `pull` tickets are signed the same way.
+Core's directory: an Ed25519 JWT whose claims are a `SessionTicket` (`contracts::tickets`), good
+for five minutes. It writes nothing. The Core verifies it against `public/core/keys.json`, served
+as a static asset at `/core/keys.json` so it costs no requests. The pool's `store`, `fetch`, and
+`pull` tickets are signed the same way.
 
 `POST /core/storage` is a Core's storage report: what its store holds and how much room it has.
 The answer lists versions to drop and to pull.

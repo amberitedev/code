@@ -1,3 +1,5 @@
+import type * as Contracts from '@amberite/contracts'
+
 import type { Copal } from '../copal/types'
 import type { IconConfig } from '../../types/icons'
 import type { Labrinth } from '../labrinth/types'
@@ -5,35 +7,8 @@ import type { Labrinth } from '../labrinth/types'
 export namespace Archon {
 	export namespace Cores {
 		export namespace v1 {
-			/**
-			 * A Core the signed-in account may reach, as listed by the backend: one signed in to the
-			 * account, or one whose owner invited it to manage a server.
-			 */
-			export type Core = {
-				id: string
-				name: string
-				/** False for a Core the account was only invited to. Its owner manages it. */
-				owned: boolean
-				/** The Core's own version. Null until it has started once since it learned to report it. */
-				version: string | null
-				/** Where this Core is on its own network, reported by the Core itself. */
-				address: string
-				/** Where this Core is on the internet, once it has proven it can be reached there. */
-				public_address: string | null
-				/**
-				 * SHA-256 of the certificate this Core serves HTTPS with. The App trusts only this
-				 * certificate for this Core. Null for a Core that does not serve HTTPS yet.
-				 */
-				cert_fingerprint: string | null
-				created: string
-				last_seen: string
-			}
-
-			/** A Core waiting for the account to approve its sign-in code. */
-			export type PendingCore = {
-				/** The machine's name, shown so the user can tell it is their Core. */
-				name: string
-			}
+			export type Core = Contracts.ListedCore
+			export type PendingCore = Contracts.PendingCore
 
 			export type ApprovalFailure =
 				| 'wrong_code'

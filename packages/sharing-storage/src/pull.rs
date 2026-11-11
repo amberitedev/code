@@ -3,7 +3,7 @@
 //! to that Core's certificate, no proxy and no redirect, so it cannot be turned into a general
 //! downloader.
 
-use contracts::{ApiError, ErrorCode};
+use contracts::{ApiError, ErrorCode, tickets::PullSource};
 use sharing_client::net::{CoreAddress, ip};
 use sharing_client::pool::PoolCore;
 use tracing::info;
@@ -11,7 +11,6 @@ use tracing::info;
 use crate::{
     Store,
     objects::{self, Hash, VersionList, WriteError},
-    tickets::Source,
 };
 
 fn failed(description: impl std::fmt::Display) -> ApiError {
@@ -25,15 +24,19 @@ fn failed(description: impl std::fmt::Display) -> ApiError {
 pub(crate) async fn pull(
     store: &Store,
     root: &Hash,
-    source: &Source,
+    source: &PullSource,
 ) -> Result<bool, ApiError> {
-    let ticket = source.ticket().expect("verify requires a source ticket");
+    let ticket = &source.ticket;
+    let host = &source.core;
     let core = PoolCore {
-        // The certificate names the Core: the backend gives no id with a source.
-        id: source.core.cert_fingerprint.clone(),
-        address: address(source.address(), store.allow_private_sources)?,
+        id: host.id.clone(),
+        // Its public address when it has one.
+        address: address(
+            host.public_address.as_deref().unwrap_or(&host.address),
+            store.allow_private_sources,
+        )?,
         public_address: None,
-        cert_fingerprint: source.core.cert_fingerprint.clone(),
+        cert_fingerprint: host.cert_fingerprint.clone(),
     };
     let root_hex = root.to_string();
     let body = store

@@ -14,8 +14,15 @@ use std::{
     time::Duration,
 };
 
-use reqwest::{Method, StatusCode};
-use serde::Serialize;
+use contracts::{
+    Endpoint, Json,
+    backend::cores::{
+        AccessDirectory, ForgetPlayers, GrantAccess, ReplaceAccess,
+        ReportState, ReportStorage, RevokeAccess, StateReport,
+    },
+    client::{Body, CallError, Remote, Reply, call},
+};
+use reqwest::StatusCode;
 use sharing_client::backend::Backend;
 use sqlx::{SqliteConnection, SqlitePool};
 use tokio::sync::watch;
@@ -23,7 +30,6 @@ use tracing::{info, warn};
 
 use super::{Access, Changed, now, owed::OwedCall, pairing};
 use crate::{
-    api::backend::{AccessDirectory, StateReport, StorageAnswer},
     network::{forward::Network, public_ip},
     storage::Storage,
 };
@@ -260,13 +266,8 @@ impl Sync {
         .await
         .map_err(|error| Lost::Unreachable(error.to_string()))?;
         let result = async {
-            self.call(
-                key,
-                Method::PUT,
-                "/core/access",
-                &AccessDirectory { user_ids },
-            )
-            .await?;
+            self.call::<ReplaceAccess>(key, Json(AccessDirectory { user_ids }))
+                .await?;
             // This report covers any already owed.
             sqlx::query("DELETE FROM backend_owed WHERE call = ?")
                 .bind(
@@ -279,7 +280,7 @@ impl Sync {
                     Failure::Lost(Lost::Unreachable(error.to_string()))
                 })?;
             let state = self.state(&addresses.borrow());
-            self.call(key, Method::POST, "/core/state", &state).await
+            self.call::<ReportState>(key, Json(state)).await
         };
         match result.await {
             Ok(()) => Ok(()),
@@ -404,10 +405,12 @@ impl Sync {
                 if !current {
                     return Ok(());
                 }
-                self.call(key, Method::POST, "/core/access", grant).await
+                self.call::<GrantAccess>(key, Json(grant.clone()))
+                    .await
+                    .map(drop)
             }
             OwedCall::Remove(remove) => {
-                self.call(key, Method::DELETE, "/core/access", remove).await
+                self.call::<RevokeAccess>(key, Json(remove.clone())).await
             }
             OwedCall::DeleteShare { share_id } => {
                 // A server took the share again since, through the backend answering its
@@ -439,73 +442,56 @@ impl Sync {
                 )
             }
             OwedCall::ForgetPlayers(forget) => {
-                self.call(key, Method::DELETE, "/core/players", forget)
-                    .await
+                self.call::<ForgetPlayers>(key, Json(forget.clone())).await
             }
             OwedCall::ReportState => {
-                self.call(
-                    key,
-                    Method::POST,
-                    "/core/state",
-                    &self.state(addresses),
-                )
-                .await
+                self.call::<ReportState>(key, Json(self.state(addresses)))
+                    .await
             }
             OwedCall::ReportStorage => {
                 // A store that does not answer owes a report again once it runs.
                 let Some(report) = self.storage.report().await else {
                     return Ok(());
                 };
-                let answer: StorageAnswer = self
-                    .request(key, Method::POST, "/core/storage", &report)
-                    .await?
-                    .json()
-                    .await
-                    .map_err(|error| Failure::Refused(error.to_string()))?;
+                let answer =
+                    self.call::<ReportStorage>(key, Json(report)).await?;
                 self.storage.answer(answer);
                 Ok(())
             }
         }
     }
 
-    async fn call(
+    /// Send one call with this Core's key and return the backend's answer when it succeeded.
+    async fn call<E>(
         &self,
         key: &str,
-        method: Method,
-        path: &str,
-        body: &impl Serialize,
-    ) -> Result<(), Failure> {
-        self.request(key, method, path, body).await.map(drop)
-    }
-
-    /// Send one call and return the backend's answer when it succeeded.
-    async fn request(
-        &self,
-        key: &str,
-        method: Method,
-        path: &str,
-        body: &impl Serialize,
-    ) -> Result<reqwest::Response, Failure> {
-        let response = self
-            .http
-            .request(method, format!("{}{path}", self.backend_url))
-            .bearer_auth(key)
-            .timeout(CALL_TIMEOUT)
-            .json(body)
-            .send()
-            .await
-            .map_err(|error| {
-                Failure::Lost(Lost::Unreachable(error.to_string()))
-            })?;
-        let status = response.status();
-        if status.is_success() {
-            return Ok(response);
-        }
-        let problem = format!(
-            "{path} answered {status}: {}",
-            response.text().await.unwrap_or_default()
-        );
-        Err(failure(status, problem))
+        body: <E::Body as Body>::Input,
+    ) -> Result<<E::Response as Reply>::Output, Failure>
+    where
+        E: Endpoint<Params = (), Query = ()>,
+        E::Body: Body,
+        E::Response: Reply,
+    {
+        let remote = Remote {
+            http: &self.http,
+            base: &self.backend_url,
+            bearer: Some(key),
+            read_ticket: None,
+            timeout: Some(CALL_TIMEOUT),
+        };
+        call::<E>(&remote, &(), &(), body).await.map_err(|error| {
+            let problem = format!("{} failed: {error}", E::PATH);
+            match error {
+                CallError::Api { status, .. }
+                | CallError::Decode { status, .. } => {
+                    match StatusCode::from_u16(status) {
+                        Ok(status) => failure(status, problem),
+                        Err(_) => Failure::Refused(problem),
+                    }
+                }
+                _ => Failure::Lost(Lost::Unreachable(problem)),
+            }
+        })
     }
 
     /// Forget the owner and everything that came from them: their key, owed calls, every session,
@@ -542,14 +528,10 @@ mod tests {
         routing::any,
     };
 
+    use contracts::backend::cores::{AccessGrant, AccessRevocation};
+
     use super::*;
-    use crate::{
-        api::{
-            access::Role,
-            backend::{Grant, Remove},
-        },
-        db,
-    };
+    use crate::db;
 
     /// A backend that records every call and answers with the status at the front of `answers`,
     /// or 204 once it is empty.
@@ -693,13 +675,13 @@ mod tests {
         .execute(&sync.db)
         .await
         .unwrap();
-        let grant = OwedCall::Grant(Grant {
+        let grant = OwedCall::Grant(AccessGrant {
             user: "friend".into(),
             server_id: "s1".into(),
             server_name: "A".into(),
-            role: Role::Editor,
+            role: "editor".into(),
         });
-        let remove = OwedCall::Remove(Remove {
+        let remove = OwedCall::Remove(AccessRevocation {
             user_id: "other".into(),
             server_id: "s1".into(),
             keep_core: false,
