@@ -1,5 +1,5 @@
-//! app-lib's content model files (`packages/engine/src/state/instances/model/`), compiled in
-//! place. app-lib imports these types from here instead of compiling the files itself.
+//! The engine's content model files (`packages/engine/src/state/instances/model/`), compiled in
+//! place. The engine imports these types from here instead of compiling the files itself.
 
 #[path = "../../../../../engine/src/state/instances/model/content_entry.rs"]
 mod content_entry;
@@ -25,7 +25,7 @@ pub use self::manifest::*;
 mod link;
 pub use self::link::*;
 
-/// The error the borrowed `from_str` parsers return, as app-lib's `unknown_value` builds it.
+/// The error the borrowed `from_str` parsers return, as the engine's `unknown_value` builds it.
 fn unknown_value(kind: &str, value: &str) -> crate::Error {
     crate::ErrorKind::InputError(format!("unknown {kind} {value}")).into()
 }

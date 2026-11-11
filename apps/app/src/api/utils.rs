@@ -208,8 +208,8 @@ pub fn cancel_debug_info_export<R: Runtime>(
     }
 }
 
-/// Amberite's own deep links, next to the Modrinth ones app-lib parses. The frontend handles both
-/// in `handleCommand`, told apart by `event`.
+/// Amberite's own deep links, next to the Modrinth ones the engine parses. The frontend handles
+/// both in `handleCommand`, told apart by `event`.
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "event")]
 pub enum AmberiteCommand {
@@ -301,7 +301,7 @@ pub async fn handle_command<R: Runtime>(
     }
 
     tracing::info!("handle command: {command}");
-    // Amberite's own links go straight to the frontend; app-lib only knows the Modrinth ones.
+    // Amberite's own links go straight to the frontend; the engine only knows the Modrinth ones.
     if let Some(command) = amberite_command(&command) {
         use tauri::Emitter;
         app.emit("amberite-command", command)?;

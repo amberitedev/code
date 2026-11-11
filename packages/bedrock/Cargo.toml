@@ -4,12 +4,12 @@ edition.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 
-# cargo-shear cannot see the app-lib files bedrock compiles in place with #[path], which use these.
+# cargo-shear cannot see the engine files bedrock compiles in place with #[path], which use these.
 [package.metadata.cargo-shear]
 ignored = ["tokio-util"]
 
-# What the App and Copal both need that is not sharing: the content schema borrowed from app-lib,
-# clones of upstream code tangled with app-lib's State (`ports.toml`), `.mrpack` and Modrinth
+# What the App and Copal both need that is not sharing: the content schema borrowed from the engine,
+# clones of upstream code tangled with the engine's State (`ports.toml`), `.mrpack` and Modrinth
 # content rules, connections to Cores, disk space, and limits. Imports go one way:
 # modrinth-content-management -> bedrock -> sharing-client -> sharing-storage.
 [dependencies]
@@ -60,7 +60,7 @@ windows = { workspace = true, features = ["Win32_Foundation", "Win32_Storage_Fil
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
 
 [features]
-# app-lib's `export-ts`: the borrowed types derive their TypeScript there.
+# The engine's `export-ts`: the borrowed types derive their TypeScript there.
 export-ts = ["dep:postcard-bindgen", "dep:ts-rs"]
 
 [lints]
