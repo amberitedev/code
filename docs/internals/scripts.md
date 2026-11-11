@@ -13,7 +13,14 @@ vp i
 vp run dev
 ```
 
-Node 24.15 or newer is required.
+You need:
+
+- Node 24.15 or newer.
+- Rust through [rustup](https://rustup.rs). `rust-toolchain.toml` pins the version and rustup installs
+  it on the first build.
+- JDK 17 or newer. The engine's build runs Gradle 9, which uses `JAVA_HOME` when it is set and
+  `java` on `PATH` otherwise.
+- Tauri's [system packages](https://tauri.app/start/prerequisites/) for your platform.
 
 This repository is commonly worked on through [T3 Code](https://github.com/pingdotgg/t3code), a
 coding-agent app that gives each task an isolated Git worktree. When T3 Code creates a worktree, it

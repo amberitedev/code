@@ -1,7 +1,10 @@
 # Amberite
 
 Amberite is a Minecraft launcher for modding and sharing, with self-hosted servers. Run the Rust
-server (Copal, also called Core) on any machine and manage it from the desktop App.
+server (Core) on any machine and manage it from the desktop App.
+
+New code, folders, types and docs say Core. Copal names only the shipped program: its binary,
+crate, service, installer and release.
 
 You can think of Amberite as Modrinth Hosting, but free and better. Sharing is not tied to a Core
 and works for everyone.
