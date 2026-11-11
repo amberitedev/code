@@ -178,10 +178,10 @@ import {
 	useScrollIndicator,
 	useVIntl,
 } from '@modrinth/ui'
-import { openUrl } from '@tauri-apps/plugin-opener'
 import { computed, nextTick, ref } from 'vue'
 
 import { get_project, get_project_many, get_version, get_version_many } from '@/helpers/cache.js'
+import { openUrl } from '@/platform/opener'
 import { injectServerInstall } from '@/providers/server-install'
 
 type ExternalFileColumn = 'name'
