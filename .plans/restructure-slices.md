@@ -30,6 +30,12 @@ Changes made after the plan was written. They override the slice text below.
   merge commit with `node scripts/upstream-sync.ts origin/main > summary.json` on a clean checkout,
   not `git -c merge.directoryRenames=true merge`, then reword it to the slice title with
   `git commit --amend` (both parents stay).
+- **F2b (after F2, lane C worktree): `check:changed` compiles Rust tests in the shared build
+  folder.** F2's test step ran plain `cargo test`, which fills the worktree's own `target/` (22 GB
+  after one workspace run) and undid PR #117 for every worktree that touches Rust. The step now
+  runs `node scripts/dev-runner.ts test <crate>...`, under the runner's lock, priority and
+  `built-crates.json` record; a crate's own tests are trusted only in the checkout that compiled
+  them, because they can embed its path.
 
 ## Dependency table
 

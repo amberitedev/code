@@ -4,7 +4,7 @@
 // lint, typos and TOML on the changed files, typecheck and tests of the affected packages,
 // `dev:check` when the dev scripts change, and for Rust, `cargo fmt`, a build through the dev
 // runner (the same compile check `up` does, sharing its build folder), and the tests of every
-// workspace crate with a changed file.
+// workspace crate with a changed file, also through the runner and in that folder.
 //
 //   vp run check:changed          compare against the merge base with origin/main
 //   vp run check:changed <ref>    compare against the merge base with <ref>
@@ -51,8 +51,6 @@ type Step = {
 	readonly name: string
 	readonly command: string
 	readonly args: ReadonlyArray<string>
-	/** Added to this process's environment. */
-	readonly env?: Readonly<Record<string, string>>
 }
 const steps: Step[] = []
 const skipped: string[] = []
@@ -126,9 +124,8 @@ else {
 	if (tested.length > 0) {
 		steps.push({
 			name: 'rust tests',
-			command: 'cargo',
-			args: ['test', '--locked', ...tested.flatMap((crate) => ['-p', crate.name])],
-			env: { SQLX_OFFLINE: 'true' },
+			command: 'node',
+			args: ['scripts/dev-runner.ts', 'test', ...tested.map((crate) => crate.name)],
 		})
 	}
 }
@@ -136,7 +133,7 @@ else {
 console.log(`[check] ${changed.length} changed files since ${base.slice(0, 9)}`)
 const results = steps.map((step) => {
 	console.log(`\n[check] ${step.name}`)
-	const options = { cwd: root, env: { ...process.env, ...step.env }, stdio: 'inherit' } as const
+	const options = { cwd: root, stdio: 'inherit' } as const
 	// Windows runs vp through its .cmd shim, which needs the shell. File names are quoted for it.
 	const result =
 		process.platform === 'win32' && step.command === 'vp'
