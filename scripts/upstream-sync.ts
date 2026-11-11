@@ -18,9 +18,11 @@ import {
 	bucketOf,
 	changedPaths,
 	lines,
+	matches,
 	parseNameStatus,
 	removedPaths,
 } from './upstream-paths.ts'
+import { mergeMapped } from './upstream-merge.ts'
 
 type Commit = { sha: string; title: string }
 
@@ -52,14 +54,7 @@ const removed = removedPaths(config, (path) =>
 	Boolean(git('ls-tree', '-r', '--name-only', 'HEAD', '--', path)),
 )
 
-// --no-commit stops before committing even on a clean merge; it exits 1 when there are conflicts.
-// directoryRenames puts upstream's new files under our renamed folders.
-run('git', ['-c', 'merge.directoryRenames=true', 'merge', '--no-commit', '--no-ff', upstream])
-if (!run('git', ['rev-parse', '-q', '--verify', 'MERGE_HEAD'])) {
-	throw new Error(`git merge ${upstream} did not start a merge`)
-}
-
-// Before the conflict list, so a modify/delete conflict on a ported path is not added back.
+const merged = mergeMapped(upstream, config.renamed, process.cwd())
 for (const path of removed) {
 	if (git('ls-files', '--', path)) git('rm', '-r', '-q', '--force', '--', path)
 }
@@ -72,8 +67,7 @@ for (const [file, command] of Object.entries(LOCKFILES)) {
 	git('add', '--', file)
 }
 
-const conflicts = lines(git('diff', '--name-only', '--diff-filter=U'))
-if (conflicts.length > 0) git('add', '--', ...conflicts)
+const conflicts = merged.filter((path) => !matches(path, [...removed, ...Object.keys(LOCKFILES)]))
 git(
 	'commit',
 	'--no-verify',

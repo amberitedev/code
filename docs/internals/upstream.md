@@ -25,16 +25,17 @@ Merge step fails at checkout; replace the secret with a new token.
 Every key is an upstream path, a file or a folder. Upstream's commits name upstream paths, so the
 summary buckets commits by them; the script maps them through `renamed` before it touches our tree.
 
-- `ignore`: paths we never take. The merge deletes them every time, under both names, because git
-  leaves a modify/delete conflict inside a renamed folder at upstream's path.
+- `ignore`: paths we never take. The merge deletes them every time.
 - `renamed`: an upstream path prefix and the prefix it lives under here. The longest matching prefix
-  wins. The merge runs with `merge.directoryRenames=true`, so a file upstream adds to a renamed
-  folder lands under our name. Git finds the move on its own; the script uses this map only to
-  delete and bucket, so it must list every folder we moved.
+  wins. Before merging, the script moves these prefixes to our names in both the merge base and
+  upstream ([`upstream-merge.ts`](../../scripts/upstream-merge.ts)), so the merge pairs files by
+  path, not by git's similarity guess: upstream's edits, additions and deletions land at our name
+  however far our copy has drifted, and nothing comes back at upstream's path. It must list every
+  folder we moved.
 - `ported`: an upstream path and our file that does its job. Commits that touch it land in the
-  summary's `port` bucket. When our tree does not have it under our name, the merge deletes it under
-  both names, so a file we replaced never comes back. A ported path we still have merges as usual
-  and is only reported.
+  summary's `port` bucket. When our tree does not have it under our name, the merge deletes it, so a
+  file we replaced never comes back. A ported path we still have merges as usual and is only
+  reported.
 
 ## Porting rules
 
