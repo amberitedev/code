@@ -1,3 +1,7 @@
+import * as NodeChildProcess from 'node:child_process'
+import * as NodeFS from 'node:fs'
+import * as NodeOS from 'node:os'
+import * as NodePath from 'node:path'
 import { describe, expect, it } from 'vite-plus/test'
 
 import {
@@ -8,6 +12,7 @@ import {
 	isBrowserAllowedPort,
 	parseInput,
 	portsForOffset,
+	prepareCheckoutCrates,
 	processLabelsForMode,
 	programKey,
 	resolveStartOffset,
@@ -282,6 +287,83 @@ describe('dev runner program cache', () => {
 		).not.toBe(key)
 		expect(programKey(process.cwd(), { ...build, env: { TAURI_CONFIG: '{}' } })).not.toBe(key)
 		expect(programKey(process.cwd(), { ...build, cargoArgs: ['build', '--release'] })).not.toBe(key)
+	})
+
+	it('trusts shared output per build, and a crate tests only where they were compiled', () => {
+		const scratch = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), 'dev-runner-'))
+		const library = (checkout: string) => NodePath.join(checkout, 'packages', 'a', 'src', 'lib.rs')
+		const checkout = (name: string) => {
+			const dir = NodePath.join(scratch, name)
+			for (const crate of ['app', 'a']) {
+				NodeFS.mkdirSync(NodePath.join(dir, 'packages', crate, 'src'), { recursive: true })
+				NodeFS.writeFileSync(NodePath.join(dir, 'packages', crate, 'Cargo.toml'), crate)
+			}
+			NodeFS.writeFileSync(NodePath.join(dir, 'packages', 'app', 'src', 'main.rs'), 'fn main() {}')
+			NodeFS.writeFileSync(library(dir), 'pub fn a() {}')
+			NodeFS.writeFileSync(NodePath.join(dir, 'Cargo.lock'), 'lock')
+			NodeChildProcess.execFileSync('git', ['init', '-q'], { cwd: dir })
+			return dir
+		}
+		const shared = {
+			cacheDir: NodePath.join(scratch, 'target', 'dev-bin'),
+			cargoArgs: [],
+			cwd: scratch,
+			env: {},
+			ignoredInputs: [],
+			targetDir: NodePath.join(scratch, 'target'),
+		}
+		const program = {
+			...shared,
+			inputs: ['Cargo.lock', 'packages/app', 'packages/a'],
+			program: 'app',
+		}
+		const tests = {
+			...shared,
+			inputs: ['Cargo.lock', 'packages/a'],
+			programInputs: {},
+			tested: ['packages/a'],
+		}
+		const both = {
+			...tests,
+			inputs: program.inputs,
+			programInputs: { 'packages/app': program.inputs },
+			tested: ['packages/a', 'packages/app'],
+		}
+		/** How many crates the build compiles, recorded as if it succeeded. */
+		const compiles = (worktree: string, build: typeof program | typeof tests) => {
+			const prepared = prepareCheckoutCrates(worktree, build)
+			prepared.recordBuilt()
+			return prepared.changed
+		}
+		try {
+			const here = checkout('here')
+			const there = checkout('there')
+			expect(compiles(here, program)).toBe(2)
+			expect(compiles(here, tests)).toBe(1)
+			// The tests compiled the content the program was compiled from.
+			expect(compiles(here, program)).toBe(0)
+			expect(NodeFS.statSync(library(here)).mtime.getUTCFullYear()).toBe(2000)
+			expect(compiles(here, tests)).toBe(0)
+			// Same content elsewhere: the program serves it, but the tests hold this checkout's path.
+			expect(compiles(there, program)).toBe(0)
+			expect(compiles(there, tests)).toBe(1)
+			expect(NodeFS.statSync(library(there)).mtime.getUTCFullYear()).not.toBe(2000)
+			expect(compiles(here, tests)).toBe(1)
+			expect(compiles(here, program)).toBe(0)
+			NodeFS.writeFileSync(library(there), 'pub fn b() {}')
+			expect(compiles(there, tests)).toBe(1)
+			expect(compiles(here, program)).toBe(1)
+			expect(compiles(here, tests)).toBe(1)
+			// A program's own crate hashes with the program's loose inputs in its tests too.
+			expect(compiles(here, both)).toBe(2)
+			expect(compiles(here, tests)).toBe(0)
+			expect(compiles(here, program)).toBe(0)
+			// Compiling a crate's tests elsewhere ends every test run's trust in them here.
+			expect(compiles(there, both)).toBe(2)
+			expect(compiles(here, tests)).toBe(1)
+		} finally {
+			NodeFS.rmSync(scratch, { force: true, recursive: true })
+		}
 	})
 })
 

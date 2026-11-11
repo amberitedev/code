@@ -60,10 +60,14 @@ folder that is usually nothing.
 - `vp run down`: Stops this checkout's dev runner and everything it started.
 - `node scripts/dev-runner.ts build`: Compiles the App and Core for this checkout's Rust without
   starting anything. `check:changed` runs it when Rust changed.
+- `node scripts/dev-runner.ts test <package>...`: Runs one `cargo test` of the given Cargo packages
+  (such as `copal` or `engine`) in the primary checkout's `target/dev-shared`, like `build`. `check:changed` runs it for
+  the crates with a changed file.
 - `vp run check:changed [ref]`: CI's fast checks for the files changed since the merge base with
   `origin/main` (or `ref`): lint, typos, TOML, typecheck and tests of the affected packages,
-  `dev:check`, and for Rust `rustfmt`, a build, and `cargo test` of every workspace crate with a
-  changed file (except the ones CI leaves out). typos and tombi are skipped when not installed.
+  `dev:check`, and for Rust `rustfmt`, a build, and the tests of every workspace crate with a
+  changed file (except the ones CI leaves out), both through the runner. typos and tombi are
+  skipped when not installed.
 - `vp run dev:check`: Prints the processes, state directory, URLs, and ports that a full run would
   use without starting anything.
 
@@ -97,20 +101,31 @@ Nothing watches Rust files. After a Rust edit, restart with `down` then `up`, or
 `rs core` in the foreground runner; the key has changed, so the runner builds first. If a build
 fails, the process stays stopped until the next restart.
 
-Builds run one at a time across every checkout, at below-normal priority, so several agents
-restarting after Rust edits queue up instead of taking the whole machine.
+Builds and test runs go one at a time across every checkout, at below-normal priority, so several
+agents restarting after Rust edits queue up instead of taking the whole machine. A test run holds
+its turn until its tests finish, since another build would replace the test programs.
 
 Every checkout compiles into the primary checkout's `target/dev-shared`, like a pnpm store: each
 third-party crate is compiled once and kept once, whichever checkout needed it first. Only the
-runner compiles there; a plain `cargo` run uses `target` and cannot change what the runner trusts. `cargo clean` in the primary checkout
+runner compiles there, tests included; a plain `cargo` run, `cargo test` too, uses `target` and
+cannot change what the runner trusts. `cargo clean` in the primary checkout
 deletes `target/dev-shared` too, so every checkout compiles from scratch next time.
 
 Cargo decides what to recompile from file times alone, so in a shared folder a crate last compiled
 from another checkout can look finished here. `target/dev-shared/built-crates.json` records, for each crate in
-the repo, the content it was last compiled from and for which programs. Before a build, a crate
+the repo, the content it was last compiled from and for which programs and test runs: a crate
+compiled for a test run is a different build from the same crate in a program, and each set of
+tested crates is its own test run. Before a build, a crate
 that matches gets its files dated 2000, so Cargo keeps its output; any other crate gets the current
 time, so Cargo compiles it again. Inputs outside every crate folder, such as the App's version in
-`apps/app-frontend/package.json`, count toward the program's own crate. Switching between worktrees that differ only in `apps/app`
+`apps/app-frontend/package.json`, count toward the program's own crate, in its tests too. A crate's
+own tests can
+hold its checkout's path (`env!("CARGO_MANIFEST_DIR")`), which Cargo does not compare, so they
+are trusted only in the checkout that compiled them last; another checkout compiles that crate
+again. A test run also compiles again every local crate it uses that it has not used at that
+content before. A crate compiled again, even from the same content, is newer than the compiled
+crates that use it, so the next program build that runs Cargo compiles those again as well (for
+`path-util`, the engine and the App). Switching between worktrees that differ only in `apps/app`
 compiles that one crate (about 2.5 minutes); when `packages/engine` differs too, the engine compiles
 again as well (about 7 minutes).
 
@@ -260,8 +275,9 @@ The daily Modrinth merge, `upstream.json` and the porting rules are in [upstream
 
 ## Timings
 
-Setup, every Rust build, and every `up` append one JSON line to the primary checkout's
-`.data/timings.jsonl`, shared by all checkouts. Each line has `kind` (`setup`, `build`, `up`),
-the worktree, the result, and milliseconds per step: `install` and `data` for setup, `lockWait`
-and `compile` plus the number of repo crates compiled again for a build, and the wait until ready
-for `up`. It is the record for checking whether a change to the dev setup made it faster.
+Setup, every Rust build and test run, and every `up` append one JSON line to the primary checkout's
+`.data/timings.jsonl`, shared by all checkouts. Each line has `kind` (`setup`, `build`, `test`,
+`up`), the worktree, the result, and milliseconds per step: `install` and `data` for setup,
+`lockWait` and `compile` plus the number of repo crates compiled again for a build, the same plus
+`test` and the tested crates for a test run, and the wait until ready for `up`. It is the record for checking
+whether a change to the dev setup made it faster.
