@@ -37,7 +37,6 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 	 */
 	private _moduleNamespaces: Map<string, Record<string, AbstractModule>> = new Map()
 
-	private _backend?: ContractClient
 	private _local?: ContractClient
 	private _cores: Map<string, ContractClient> = new Map()
 
@@ -60,13 +59,12 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 		return this.config.coreSessions
 	}
 
-	/** Our account backend's routes, at the URL and with the session `SelfHostedFeature` uses. */
+	/** Our account backend's routes, at the URL and with the session the client's `SelfHostedFeature` uses. */
 	public get backend(): ContractClient {
-		if (this._backend) return this._backend
 		const selfHosted = this.features.find((feature) => feature instanceof SelfHostedFeature)
 		if (!selfHosted) throw new Error('This client has no account backend')
 		const transport = selfHosted.transport((input, init) => this.platformFetch(input, init))
-		return (this._backend = new ContractClient({
+		return new ContractClient({
 			...transport,
 			headers: async (endpoint) => {
 				const userAgent = await this.resolveUserAgent()
@@ -75,7 +73,7 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 					...(await transport.headers(endpoint)),
 				}
 			},
-		}))
+		})
 	}
 
 	/** The App's local server: engine and App routes. */

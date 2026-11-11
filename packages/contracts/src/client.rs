@@ -2,7 +2,7 @@
 
 use std::{fmt::Write, future::Future, time::Duration};
 
-use reqwest::{RequestBuilder, Response, header};
+use reqwest::{RequestBuilder, Response, StatusCode, header};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 
@@ -31,6 +31,9 @@ pub enum CallError {
         status: u16,
         source: serde_json::Error,
     },
+    /// A download resumed at a byte past 0 was answered without `206 Partial Content`.
+    #[error("the server ignored the requested range (HTTP {status})")]
+    RangeIgnored { status: u16 },
     /// A path segment would be empty, `.` or `..`, which would send the call to another route.
     #[error("`{value}` is not a valid `{name}` for {path}")]
     Params {
@@ -39,6 +42,9 @@ pub enum CallError {
         value: String,
     },
 }
+
+/// An [`ApiError`] is a code and a short description; a longer error body is refused unread.
+const MAX_ERROR_BYTES: usize = 64 * 1024;
 
 /// A request body the caller sends: the marker itself, or the body a [`Stream`] sends.
 pub trait Body {
@@ -79,7 +85,14 @@ pub async fn call_stream<E: Endpoint<Body = Empty, Response = Stream>>(
     if from > 0 {
         request = request.header(header::RANGE, format!("bytes={from}-"));
     }
-    check(request.send().await?).await
+    let response = check(request.send().await?).await?;
+    let status = response.status();
+    if from > 0 && status != StatusCode::PARTIAL_CONTENT {
+        return Err(CallError::RangeIgnored {
+            status: status.as_u16(),
+        });
+    }
+    Ok(response)
 }
 
 fn request<E: Endpoint>(
@@ -166,13 +179,22 @@ pub(crate) fn url<E: Endpoint>(
     Ok(url)
 }
 
-async fn check(response: Response) -> Result<Response, CallError> {
+async fn check(mut response: Response) -> Result<Response, CallError> {
     let status = response.status();
     if status.is_success() {
         return Ok(response);
     }
     let status = status.as_u16();
-    let bytes = response.bytes().await?;
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await? {
+        bytes.extend_from_slice(&chunk);
+        if bytes.len() > MAX_ERROR_BYTES {
+            return Err(CallError::Decode {
+                status,
+                source: serde::de::Error::custom("the error body is too long"),
+            });
+        }
+    }
     match serde_json::from_slice(&bytes) {
         Ok(error) => Err(CallError::Api { status, error }),
         Err(source) => Err(CallError::Decode { status, source }),
@@ -258,8 +280,8 @@ mod tests {
         net::TcpListener,
     };
 
-    use super::{CallError, Remote, call, url};
-    use crate::{Auth, Empty, Endpoint, ErrorCode, Json, Method};
+    use super::{CallError, MAX_ERROR_BYTES, Remote, call, call_stream, url};
+    use crate::{Auth, Empty, Endpoint, ErrorCode, Json, Method, Stream};
 
     #[derive(Serialize, Deserialize)]
     struct File {
@@ -302,33 +324,96 @@ mod tests {
         }
     }
 
-    /// The base of a server that answers one request with `response`.
-    async fn answer(response: &'static str) -> String {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let base = format!("http://{}", listener.local_addr().unwrap());
-        tokio::spawn(async move {
-            let (mut socket, _) = listener.accept().await.unwrap();
-            let _ = socket.read(&mut [0; 4096]).await;
-            socket.write_all(response.as_bytes()).await.unwrap();
-        });
-        base
+    struct Download;
+
+    impl Endpoint for Download {
+        const METHOD: Method = Method::Get;
+        const PATH: &'static str = "/v1/download";
+        const AUTH: Auth = Auth::None;
+        type Params = ();
+        type Query = ();
+        type Body = Empty;
+        type Response = Stream;
     }
 
-    async fn read_file(response: &'static str) -> CallError {
-        // Another crate in the workspace build turns on reqwest's `rustls-no-provider`.
-        let _ = rustls::crypto::ring::default_provider().install_default();
-        let http = Client::new();
-        let base = answer(response).await;
-        let remote = Remote {
-            http: &http,
-            base: &base,
-            bearer: None,
-            read_ticket: None,
-            timeout: None,
-        };
-        call::<ReadFile>(&remote, &file("a", "b"), &(), Empty)
+    /// A server that answers one request with `response`.
+    struct Server {
+        http: Client,
+        base: String,
+    }
+
+    impl Server {
+        async fn answer(response: String) -> Self {
+            // Another crate in the workspace build turns on reqwest's `rustls-no-provider`.
+            let _ = rustls::crypto::ring::default_provider().install_default();
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let base = format!("http://{}", listener.local_addr().unwrap());
+            tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let _ = socket.read(&mut [0; 4096]).await;
+                // The client may stop reading early.
+                let _ = socket.write_all(response.as_bytes()).await;
+            });
+            Self {
+                http: Client::new(),
+                base,
+            }
+        }
+
+        fn remote(&self) -> Remote<'_> {
+            Remote {
+                http: &self.http,
+                base: &self.base,
+                bearer: None,
+                read_ticket: None,
+                timeout: None,
+            }
+        }
+    }
+
+    async fn read_file(response: impl Into<String>) -> CallError {
+        let server = Server::answer(response.into()).await;
+        call::<ReadFile>(&server.remote(), &file("a", "b"), &(), Empty)
             .await
             .unwrap_err()
+    }
+
+    async fn resume(response: &str) -> Result<(), CallError> {
+        let server = Server::answer(response.into()).await;
+        call_stream::<Download>(&server.remote(), &(), &(), 10)
+            .await
+            .map(drop)
+    }
+
+    #[tokio::test]
+    async fn a_resumed_download_needs_the_range_it_asked_for() {
+        let error = resume(
+            "HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nwhole",
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(error, CallError::RangeIgnored { status: 200 }));
+
+        resume(
+            "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 10-13/14\r\n\
+             Content-Length: 4\r\nConnection: close\r\n\r\nrest",
+        )
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn an_error_body_is_read_only_up_to_the_cap() {
+        let body = format!(
+            "{{\"error\":\"not_found\",\"description\":\"Gone.\"}}{}",
+            " ".repeat(MAX_ERROR_BYTES)
+        );
+        let error = read_file(format!(
+            "HTTP/1.1 404 Not Found\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        ))
+        .await;
+        assert!(matches!(error, CallError::Decode { status: 404, .. }));
     }
 
     #[tokio::test]

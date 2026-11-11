@@ -1,6 +1,8 @@
 import type { Endpoint } from '@amberite/contracts'
 import { describe, expect, it } from 'vite-plus/test'
 
+import { SelfHostedFeature } from '../features/self-hosted'
+import { GenericModrinthClient } from '../platform/generic'
 import { ContractClient } from './client'
 import { ApiCallError } from './errors'
 
@@ -21,6 +23,15 @@ const deleteCache = {
 	body: 'empty',
 	response: 'empty',
 } as Endpoint<null, null, void, void>
+
+const download = {
+	method: 'GET',
+	path: '/v1/download',
+	auth: 'none',
+	dangerous: false,
+	body: 'empty',
+	response: 'stream',
+} as Endpoint<null, null, void, Response>
 
 type Sent = {
 	url: string
@@ -112,6 +123,15 @@ describe('ContractClient', () => {
 		})
 	})
 
+	it('resumes a download only from the range it asked for', async () => {
+		const ignored = serve(() => new Response('whole'))
+		await expect(ignored.client.stream(download, {}, 10)).rejects.toMatchObject({ status: 200 })
+		expect(ignored.sent[0].headers.Range).toBe('bytes=10-')
+
+		const resumed = serve(() => new Response('rest', { status: 206 }))
+		await expect(resumed.client.stream(download, {}, 10)).resolves.toBeInstanceOf(Response)
+	})
+
 	it('throws an unknown error when the body is not an ApiError', async () => {
 		const { client } = serve(() => new Response('Bad Gateway', { status: 502 }))
 
@@ -120,5 +140,18 @@ describe('ContractClient', () => {
 			code: 'unknown',
 			description: 'Bad Gateway',
 		})
+	})
+})
+
+describe('client.backend', () => {
+	it('follows the SelfHostedFeature the client has now', () => {
+		const backend = (baseUrl: string) =>
+			new SelfHostedFeature({ baseUrl, token: async () => undefined })
+		const first = backend('https://one.example')
+		const client = new GenericModrinthClient({ features: [first] })
+		expect(client.backend.url(deleteCache, null)).toBe('https://one.example/v1/cache')
+
+		client.removeFeature(first).addFeature(backend('https://two.example'))
+		expect(client.backend.url(deleteCache, null)).toBe('https://two.example/v1/cache')
 	})
 })

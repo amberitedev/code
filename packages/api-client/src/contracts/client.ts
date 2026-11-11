@@ -84,6 +84,10 @@ export class ContractClient {
 		const fetch = this.transport.fetch
 		const response = await fetch(url, { method: endpoint.method, headers, body })
 		if (!response.ok) throw await decodeError(response)
+		if (from && response.status !== 206) {
+			await response.body?.cancel()
+			throw new ApiCallError(response.status, 'unknown', 'The server ignored the requested range')
+		}
 		return response
 	}
 }
