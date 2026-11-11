@@ -7,14 +7,16 @@ description: Check a change in the real Amberite App through its browser bridge,
 
 ## Start it
 
-`vp run up 1` (or `1 2` for two accounts) starts the stack in the background and prints each App's
-bridge URL once it loads. Reuse a healthy stack from earlier in the task: `vp run status` prints
-the URLs again. Stop only what you started, with `vp run down`.
+`node scripts/dev-runner.ts up 1` (or `1 2` for two accounts) starts the stack in the background
+and prints each App's bridge URL once it loads. Do not use `vp run up`: on Windows, vp kills the
+background stack when it returns. Reuse a healthy stack from earlier in the task: `vp run status`
+prints the URLs again. Stop only what you started, with `vp run down`.
 
 ## Drive it
 
 - Each App serves itself at its bridge URL, and every native call goes to the real App. Open only
-  that URL in the preview. The raw App URL has no native calls, and the sign-in website hangs the
+  that URL in the preview. The `tab:` URL printed next to it needs the App's local API, which the
+  App does not serve yet. The raw App URL has no native calls, and the sign-in website hangs the
   preview tools.
 - Each App signs itself in as `scenario_<number>`, so screens behind an account work at once.
 - Use data that reaches the changed screen. Scenario 1's account has the richest data.
@@ -25,6 +27,6 @@ the URLs again. Stop only what you started, with `vp run down`.
 
 ## Hand it over
 
-When the developer wants to look themselves: `vp run down`, then `vp run up <scenarios>
---show-windows`, and say which window and screen to look at. Once the developer has a window, do
-not drive that App.
+When the developer wants to look themselves: `vp run down`, then
+`node scripts/dev-runner.ts up <scenarios> --show-windows`, and say which window and screen to look
+at. Once the developer has a window, do not drive that App.

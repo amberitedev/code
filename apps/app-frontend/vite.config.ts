@@ -99,6 +99,8 @@ export default defineConfig({
 		host: '127.0.0.1',
 		port: devPort,
 		strictPort: true,
+		// Dev tabs open each scenario on its own origin, scenario-<n>.localhost.
+		allowedHosts: ['.localhost'],
 		// Compiles the App and every page as the server starts. The first load is then quick, and
 		// opening a page for the first time no longer finds new dependencies and reloads the App.
 		warmup: {
