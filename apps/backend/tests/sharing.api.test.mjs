@@ -661,7 +661,7 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		await ok(await writePlayers({ ip: '198.51.100.4', port: 40000 }))
 		assert.equal(await linkedDomain(), '203.0.113.7:25570')
 		assert.equal((await writePlayers({ ip: 'evil.example', port: 1 })).status, 400)
-		await db.prepare('UPDATE shared_servers SET outside = NULL').run()
+		await db.prepare('UPDATE hosted_servers SET outside = NULL').run()
 		await db.prepare('UPDATE cores SET public_address = NULL WHERE id = ?').bind('core').run()
 		assert.deepEqual(
 			(await ok(await call(`/instances/${smp.id}/users`))).users.map((user) => user.id),
@@ -777,7 +777,9 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		// Checked when read: a member whose membership lapses no longer passes it on.
 		const setJoined = (value) =>
 			db
-				.prepare('UPDATE shared_members SET joined_at = ? WHERE instance_id = ? AND user_id = ?')
+				.prepare(
+					'UPDATE shared_instance_users SET joined_at = ? WHERE instance_id = ? AND user_id = ?',
+				)
 				.bind(value, smp.id, 'other')
 				.run()
 		await setJoined(null)
@@ -789,7 +791,7 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		assert.equal((await asFriend(`/instances/${smp.id}/versions`)).status, 401)
 		assert.equal(
 			await db
-				.prepare('SELECT 1 FROM shared_servers WHERE core_id = ? AND server_id = ?')
+				.prepare('SELECT 1 FROM hosted_servers WHERE core_id = ? AND server_id = ?')
 				.bind('core2', 'srv2')
 				.first(),
 			null,
@@ -955,7 +957,7 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		const join = (share, user) =>
 			db
 				.prepare(
-					"INSERT INTO shared_members (instance_id,user_id,join_type,joined_at) VALUES (?,?,'invite',?)",
+					"INSERT INTO shared_instance_users (instance_id,user_id,join_type,joined_at) VALUES (?,?,'invite',?)",
 				)
 				.bind(share, user, new Date().toISOString())
 				.run()
@@ -1003,7 +1005,7 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		const memberTicket = await readTicket(strangers.id, 'friend')
 		await code(await readFor(strangers.id, memberTicket), 404, 'version_not_found')
 		await db
-			.prepare("DELETE FROM shared_members WHERE instance_id = ? AND user_id = 'friend'")
+			.prepare("DELETE FROM shared_instance_users WHERE instance_id = ? AND user_id = 'friend'")
 			.bind(strangers.id)
 			.run()
 		await code(await readFor(strangers.id, memberTicket), 401, 'not_member')

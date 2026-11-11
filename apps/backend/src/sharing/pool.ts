@@ -224,7 +224,7 @@ export async function confirmedHolders(
 	const wanted = ids.filter((id): id is string => id !== null)
 	if (!wanted.length) return []
 	const rows = await env.DB.prepare(
-		`SELECT ${HOLDER_COLUMNS.replaceAll(', ', ', c.').replace('id', 'c.id')} FROM cores c JOIN core_holdings h ON h.core_id = c.id WHERE h.root = ? AND c.id IN (SELECT value FROM json_each(?))`,
+		`SELECT ${HOLDER_COLUMNS.replaceAll(', ', ', c.').replace('id', 'c.id')} FROM cores c JOIN core_holdings h ON h.core_id = c.id WHERE h.version_hash = ? AND c.id IN (SELECT value FROM json_each(?))`,
 	)
 		.bind(root, JSON.stringify(wanted))
 		.all<Holder>()
@@ -314,7 +314,7 @@ export async function shareVersions(
 	instanceId: string,
 ): Promise<ShareStorage['versions']> {
 	const rows = await env.DB.prepare(
-		'SELECT version, bytes, ready, created FROM shared_versions WHERE instance_id = ? AND (ready = 1 OR created > ?) ORDER BY version DESC',
+		'SELECT version, bytes, ready, created FROM shared_instance_versions WHERE instance_id = ? AND (ready = 1 OR created > ?) ORDER BY version DESC',
 	)
 		.bind(instanceId, new Date(Date.now() - UNCONFIRMED_TTL_MS).toISOString())
 		.all<{ version: number; bytes: number; ready: number; created: string }>()
@@ -337,7 +337,7 @@ export async function ownerShares(env: Env, ownerId: string): Promise<ShareStora
 	const [rows, own] = await Promise.all([
 		env.DB.prepare(
 			`SELECT i.id, i.name, i.home, i.replica, v.version, v.bytes, v.added, v.ready, v.created
-			FROM shared_instances i LEFT JOIN shared_versions v ON v.instance_id = i.id AND (v.ready = 1 OR v.created > ?2)
+			FROM shared_instances i LEFT JOIN shared_instance_versions v ON v.instance_id = i.id AND (v.ready = 1 OR v.created > ?2)
 			WHERE i.owner_id = ?1 ORDER BY i.created, i.id, v.version`,
 		)
 			.bind(ownerId, new Date(Date.now() - UNCONFIRMED_TTL_MS).toISOString())

@@ -54,7 +54,7 @@ type Instance = {
 type Version = {
 	instance_id: string
 	version: number
-	root: string
+	version_hash: string
 	bytes: number
 	added: number | null
 	ready: number
@@ -209,19 +209,19 @@ async function instance(env: Env, id: string): Promise<Instance> {
  * players with them, even before `dropServers` deletes the rows.
  */
 const LIVE_SERVER = `EXISTS (SELECT 1 FROM cores lc JOIN shared_instances li ON li.id = s.instance_id WHERE lc.id = s.core_id
-	AND (li.owner_id = lc.owner_id OR EXISTS (SELECT 1 FROM shared_members lm WHERE lm.instance_id = li.id AND lm.user_id = lc.owner_id AND lm.joined_at IS NOT NULL)))`
+	AND (li.owner_id = lc.owner_id OR EXISTS (SELECT 1 FROM shared_instance_users lm WHERE lm.instance_id = li.id AND lm.user_id = lc.owner_id AND lm.joined_at IS NOT NULL)))`
 
 /**
  * SQL joining a server's players (`p`) to the server (`s`), which names the share it follows.
  * Only servers that may pass it on (`LIVE_SERVER`), so everything players read goes through it.
  */
-const PLAYERS = `server_players p JOIN shared_servers s ON s.core_id = p.core_id AND s.server_id = p.server_id AND ${LIVE_SERVER}`
+const PLAYERS = `hosted_server_players p JOIN hosted_servers s ON s.core_id = p.core_id AND s.server_id = p.server_id AND ${LIVE_SERVER}`
 
 /** Whether `userId` owns the share or has joined it as a member. Players are not members. */
 async function joinedMember(env: Env, item: Instance, userId: string): Promise<boolean> {
 	if (item.owner_id === userId) return true
 	return !!(await env.DB.prepare(
-		'SELECT 1 FROM shared_members WHERE instance_id = ? AND user_id = ? AND joined_at IS NOT NULL',
+		'SELECT 1 FROM shared_instance_users WHERE instance_id = ? AND user_id = ? AND joined_at IS NOT NULL',
 	)
 		.bind(item.id, userId)
 		.first())
@@ -234,10 +234,10 @@ async function joinedMember(env: Env, item: Instance, userId: string): Promise<b
 function dropServers(env: Env, instanceId: string, ownerIds: string[]): D1PreparedStatement[] {
 	return ownerIds.flatMap((ownerId) => [
 		env.DB.prepare(
-			'DELETE FROM shared_links WHERE instance_id = ? AND server_id IS NOT NULL AND core_id IN (SELECT id FROM cores WHERE owner_id = ?)',
+			'DELETE FROM shared_instance_invites WHERE instance_id = ? AND server_id IS NOT NULL AND core_id IN (SELECT id FROM cores WHERE owner_id = ?)',
 		).bind(instanceId, ownerId),
 		env.DB.prepare(
-			'DELETE FROM shared_servers WHERE instance_id = ? AND core_id IN (SELECT id FROM cores WHERE owner_id = ?)',
+			'DELETE FROM hosted_servers WHERE instance_id = ? AND core_id IN (SELECT id FROM cores WHERE owner_id = ?)',
 		).bind(instanceId, ownerId),
 	])
 }
@@ -255,14 +255,14 @@ export async function forgetServer(
 	shareId: string | null = null,
 ): Promise<void> {
 	const server = await env.DB.prepare(
-		'SELECT instance_id FROM shared_servers WHERE core_id = ? AND server_id = ?',
+		'SELECT instance_id FROM hosted_servers WHERE core_id = ? AND server_id = ?',
 	)
 		.bind(coreId, serverId)
 		.first<{ instance_id: string }>()
 	if (!server || (shareId !== null && server.instance_id !== shareId)) return
 	// Keyed on the share read above, so a share followed in between keeps its players and links.
 	await env.DB.batch(
-		['shared_links', 'shared_servers'].map((table) =>
+		['shared_instance_invites', 'hosted_servers'].map((table) =>
 			env.DB.prepare(
 				`DELETE FROM ${table} WHERE core_id = ? AND server_id = ? AND instance_id = ?`,
 			).bind(coreId, serverId, server.instance_id),
@@ -283,7 +283,7 @@ async function member(
 ): Promise<void> {
 	if (item.owner_id === userId) return
 	const row = await env.DB.prepare(
-		`SELECT EXISTS (SELECT 1 FROM shared_members WHERE instance_id = ?1 AND user_id = ?2 AND (?3 OR joined_at IS NOT NULL))
+		`SELECT EXISTS (SELECT 1 FROM shared_instance_users WHERE instance_id = ?1 AND user_id = ?2 AND (?3 OR joined_at IS NOT NULL))
 			OR EXISTS (SELECT 1 FROM ${PLAYERS} WHERE s.instance_id = ?1 AND p.user_id = ?2 AND (?3 OR p.joined_at IS NOT NULL)) AS reads`,
 	)
 		.bind(item.id, userId, allowPending ? 1 : 0)
@@ -327,17 +327,17 @@ async function manifestText(env: Env, item: Pick<Version, 'instance_id' | 'versi
 async function versionResponse(env: Env, item: Instance, version: Version, userId: string | null) {
 	const manifest = await manifestText(env, version)
 	const extra: Record<string, unknown> = { version: version.version, ready: version.ready === 1 }
-	if (version.root !== EMPTY_ROOT) {
+	if (version.version_hash !== EMPTY_ROOT) {
 		if (version.ready) {
-			const holders = await confirmedHolders(env, [item.home, item.replica], version.root)
-			extra.pool = await poolAccess(env, holders, version.root)
+			const holders = await confirmedHolders(env, [item.home, item.replica], version.version_hash)
+			extra.pool = await poolAccess(env, holders, version.version_hash)
 		} else if (item.owner_id === userId && item.home) {
-			extra.store = await storeGrant(env, item.home, version.root, version.bytes)
+			extra.store = await storeGrant(env, item.home, version.version_hash, version.bytes)
 		}
 	}
 	if (item.owner_id === userId) {
 		const reports = await env.DB.prepare(
-			"SELECT COUNT(*) AS content FROM shared_reports WHERE instance_id = ? AND version = ? AND kind = 'content'",
+			"SELECT COUNT(*) AS content FROM shared_instance_reports WHERE instance_id = ? AND version = ? AND kind = 'content'",
 		)
 			.bind(item.id, version.version)
 			.first<{ content: number }>()
@@ -352,7 +352,7 @@ async function versionResponse(env: Env, item: Instance, version: Version, userI
 /** The newest complete version, or the one being uploaded when none is complete yet. */
 async function latestVersion(env: Env, id: string): Promise<Version> {
 	const result = await env.DB.prepare(
-		'SELECT * FROM shared_versions WHERE instance_id = ? ORDER BY ready DESC, version DESC LIMIT 1',
+		'SELECT * FROM shared_instance_versions WHERE instance_id = ? ORDER BY ready DESC, version DESC LIMIT 1',
 	)
 		.bind(id)
 		.first<Version>()
@@ -376,7 +376,7 @@ export async function sweepFiles(env: Env, id: string): Promise<void> {
 	} while (cursor)
 	const used = new Set(
 		(
-			await env.DB.prepare('SELECT version FROM shared_versions WHERE instance_id = ?')
+			await env.DB.prepare('SELECT version FROM shared_instance_versions WHERE instance_id = ?')
 				.bind(id)
 				.all<{ version: number }>()
 		).results.map((row) => manifestKey(id, row.version)),
@@ -394,9 +394,9 @@ export async function sweepFiles(env: Env, id: string): Promise<void> {
  */
 async function pruneVersions(env: Env, id: string, kept: number | null): Promise<void> {
 	const { results } = await env.DB.prepare(
-		`DELETE FROM shared_versions WHERE instance_id = ?1 AND (
-			version < (SELECT MIN(version) FROM (SELECT version FROM shared_versions WHERE instance_id = ?1 AND ready = 1 ORDER BY version DESC LIMIT ?2))
-			OR (ready = 0 AND version < (SELECT MAX(version) FROM shared_versions WHERE instance_id = ?1 AND ready = 1)))
+		`DELETE FROM shared_instance_versions WHERE instance_id = ?1 AND (
+			version < (SELECT MIN(version) FROM (SELECT version FROM shared_instance_versions WHERE instance_id = ?1 AND ready = 1 ORDER BY version DESC LIMIT ?2))
+			OR (ready = 0 AND version < (SELECT MAX(version) FROM shared_instance_versions WHERE instance_id = ?1 AND ready = 1)))
 		RETURNING version`,
 	)
 		.bind(id, kept ?? -1)
@@ -406,7 +406,7 @@ async function pruneVersions(env: Env, id: string, kept: number | null): Promise
 
 async function notifyReadyInvites(env: Env, id: string): Promise<void> {
 	const ready = await env.DB.prepare(
-		'SELECT 1 FROM shared_versions WHERE instance_id = ? AND ready = 1 LIMIT 1',
+		'SELECT 1 FROM shared_instance_versions WHERE instance_id = ? AND ready = 1 LIMIT 1',
 	)
 		.bind(id)
 		.first()
@@ -414,7 +414,7 @@ async function notifyReadyInvites(env: Env, id: string): Promise<void> {
 	const item = await instance(env, id)
 	const members = (
 		await env.DB.prepare(
-			'SELECT user_id FROM shared_members WHERE instance_id = ? AND joined_at IS NULL AND notified = 0',
+			'SELECT user_id FROM shared_instance_users WHERE instance_id = ? AND joined_at IS NULL AND notified = 0',
 		)
 			.bind(id)
 			.all<{ user_id: string }>()
@@ -439,7 +439,7 @@ async function notifyReadyInvites(env: Env, id: string): Promise<void> {
 			user: row.user_id,
 			name: item.name,
 			by: item.owner_id,
-			table: 'shared_members',
+			table: 'shared_instance_users',
 			rows: 'instance_id = ?1 AND user_id = ?2 AND joined_at IS NULL',
 			keys: [id, row.user_id],
 		})),
@@ -447,7 +447,7 @@ async function notifyReadyInvites(env: Env, id: string): Promise<void> {
 			user: row.user_id,
 			name: row.name,
 			by: row.owner_id,
-			table: 'server_players',
+			table: 'hosted_server_players',
 			rows: 'core_id = ?1 AND server_id = ?2 AND user_id = ?3 AND joined_at IS NULL',
 			keys: [row.core_id, row.server_id, row.user_id],
 		})),
@@ -493,7 +493,7 @@ async function notifyReadyInvites(env: Env, id: string): Promise<void> {
  */
 export async function versionReady(env: Env, id: string, version: number): Promise<void> {
 	const result = await env.DB.prepare(
-		'UPDATE shared_versions SET ready = 1 WHERE instance_id = ? AND version = ? AND ready = 0',
+		'UPDATE shared_instance_versions SET ready = 1 WHERE instance_id = ? AND version = ? AND ready = 0',
 	)
 		.bind(id, version)
 		.run()
@@ -581,13 +581,13 @@ async function createVersion(
 	// One push at a time: an unconfirmed version younger than its store ticket is still being
 	// uploaded, unless this push is the same version again, which resumes it.
 	const pending = await env.DB.prepare(
-		'SELECT * FROM shared_versions WHERE instance_id = ? AND ready = 0 ORDER BY version DESC LIMIT 1',
+		'SELECT * FROM shared_instance_versions WHERE instance_id = ? AND ready = 0 ORDER BY version DESC LIMIT 1',
 	)
 		.bind(item.id)
 		.first<Version>()
 	if (pending) {
 		const fresh = Date.parse(pending.created) > Date.now() - UNCONFIRMED_TTL_MS
-		if (fresh && pending.root === manifest.root) {
+		if (fresh && pending.version_hash === manifest.root) {
 			await env.FILES.put(manifestKey(item.id, pending.version), JSON.stringify(manifest))
 			return versionResponse(env, item, pending, userId)
 		}
@@ -598,7 +598,9 @@ async function createVersion(
 				'Another push of this instance is still uploading. Try again when it finishes.',
 				'push_in_flight',
 			)
-		await env.DB.prepare('DELETE FROM shared_versions WHERE instance_id = ? AND version = ?')
+		await env.DB.prepare(
+			'DELETE FROM shared_instance_versions WHERE instance_id = ? AND version = ?',
+		)
 			.bind(item.id, pending.version)
 			.run()
 	}
@@ -608,7 +610,7 @@ async function createVersion(
 	let added = bytes
 	if (bytes) {
 		const members = await env.DB.prepare(
-			`SELECT 1 FROM shared_members WHERE instance_id = ?1 AND join_type != 'owner' UNION ALL SELECT 1 FROM ${PLAYERS} WHERE s.instance_id = ?1 LIMIT 1`,
+			`SELECT 1 FROM shared_instance_users WHERE instance_id = ?1 AND join_type != 'owner' UNION ALL SELECT 1 FROM ${PLAYERS} WHERE s.instance_id = ?1 LIMIT 1`,
 		)
 			.bind(item.id)
 			.first()
@@ -627,7 +629,7 @@ async function createVersion(
 			)
 		const ready = (
 			await env.DB.prepare(
-				'SELECT version, bytes, added FROM shared_versions WHERE instance_id = ? AND ready = 1 ORDER BY version',
+				'SELECT version, bytes, added FROM shared_instance_versions WHERE instance_id = ? AND ready = 1 ORDER BY version',
 			)
 				.bind(item.id)
 				.all<Pick<Version, 'version' | 'bytes' | 'added'>>()
@@ -672,7 +674,7 @@ async function createVersion(
 	// a store ticket. The row starts unready, so nobody reads it before its manifest is in R2; a
 	// failed write takes the row back.
 	const version = await env.DB.prepare(
-		'INSERT INTO shared_versions (instance_id,version,root,bytes,added,ready,created) SELECT ?1,COALESCE(m,0)+1,?2,?3,?6,0,?4 FROM (SELECT MAX(version) AS m FROM shared_versions WHERE instance_id = ?1) WHERE NOT EXISTS (SELECT 1 FROM shared_versions WHERE instance_id = ?1 AND ready = 0 AND created > ?5) RETURNING *',
+		'INSERT INTO shared_instance_versions (instance_id,version,version_hash,bytes,added,ready,created) SELECT ?1,COALESCE(m,0)+1,?2,?3,?6,0,?4 FROM (SELECT MAX(version) AS m FROM shared_instance_versions WHERE instance_id = ?1) WHERE NOT EXISTS (SELECT 1 FROM shared_instance_versions WHERE instance_id = ?1 AND ready = 0 AND created > ?5) RETURNING *',
 	)
 		.bind(
 			item.id,
@@ -693,7 +695,9 @@ async function createVersion(
 	try {
 		await env.FILES.put(manifestKey(item.id, version.version), JSON.stringify(manifest))
 	} catch (error) {
-		await env.DB.prepare('DELETE FROM shared_versions WHERE instance_id = ? AND version = ?')
+		await env.DB.prepare(
+			'DELETE FROM shared_instance_versions WHERE instance_id = ? AND version = ?',
+		)
 			.bind(item.id, version.version)
 			.run()
 		throw error
@@ -701,7 +705,7 @@ async function createVersion(
 	// Ready at once with no files, or when the home already holds these exact objects.
 	const held =
 		bytes && home
-			? await env.DB.prepare('SELECT 1 FROM core_holdings WHERE core_id = ? AND root = ?')
+			? await env.DB.prepare('SELECT 1 FROM core_holdings WHERE core_id = ? AND version_hash = ?')
 					.bind(home, manifest.root)
 					.first()
 			: null
@@ -730,7 +734,7 @@ async function reportVersion(
 	if (kind !== 'object' && kind !== 'content')
 		throw new ApiError(400, 'invalid_input', 'Invalid kind')
 	await env.DB.prepare(
-		'INSERT OR REPLACE INTO shared_reports (instance_id,version,user_id,core_id,kind,created) VALUES (?,?,?,?,?,?)',
+		'INSERT OR REPLACE INTO shared_instance_reports (instance_id,version,user_id,core_id,kind,created) VALUES (?,?,?,?,?,?)',
 	)
 		.bind(item.id, version.version, userId, coreId, kind, now())
 		.run()
@@ -759,13 +763,13 @@ async function deleteVersion(
 		)
 	const neighbour = (direction: '<' | '>') =>
 		env.DB.prepare(
-			`SELECT version FROM shared_versions WHERE instance_id = ? AND ready = 1 AND version ${direction} ? ORDER BY version ${direction === '<' ? 'DESC' : 'ASC'} LIMIT 1`,
+			`SELECT version FROM shared_instance_versions WHERE instance_id = ? AND ready = 1 AND version ${direction} ? ORDER BY version ${direction === '<' ? 'DESC' : 'ASC'} LIMIT 1`,
 		)
 			.bind(item.id, version.version)
 			.first<{ version: number }>()
 	const [previous, next] = await Promise.all([neighbour('<'), neighbour('>')])
 	const remove = env.DB.prepare(
-		'DELETE FROM shared_versions WHERE instance_id = ? AND version = ?',
+		'DELETE FROM shared_instance_versions WHERE instance_id = ? AND version = ?',
 	).bind(item.id, version.version)
 	if (previous && next) {
 		const [after, before] = await Promise.all([
@@ -775,7 +779,7 @@ async function deleteVersion(
 		await env.DB.batch([
 			remove,
 			env.DB.prepare(
-				'UPDATE shared_versions SET added = ? WHERE instance_id = ? AND version = ?',
+				'UPDATE shared_instance_versions SET added = ? WHERE instance_id = ? AND version = ?',
 			).bind(addedBytes(after, before), item.id, next.version),
 		])
 	} else await remove.run()
@@ -837,7 +841,7 @@ async function installedOnce(env: Env, item: Instance, userId: string): Promise<
 
 async function usableLink(env: Env, id: string): Promise<Link> {
 	const link = await env.DB.prepare(
-		'SELECT * FROM shared_links WHERE id = ? AND expiration > ? AND (max_uses = 0 OR uses < max_uses)',
+		'SELECT * FROM shared_instance_invites WHERE id = ? AND expiration > ? AND (max_uses = 0 OR uses < max_uses)',
 	)
 		.bind(id, now())
 		.first<Link>()
@@ -855,7 +859,7 @@ async function previewInvite(env: Env, id: string, withVersion: boolean): Promis
 	const link = await usableLink(env, id)
 	const item = await instance(env, link.instance_id)
 	const ready = await env.DB.prepare(
-		'SELECT * FROM shared_versions WHERE instance_id = ? AND ready = 1 ORDER BY version DESC LIMIT 1',
+		'SELECT * FROM shared_instance_versions WHERE instance_id = ? AND ready = 1 ORDER BY version DESC LIMIT 1',
 	)
 		.bind(item.id)
 		.first<Version>()
@@ -864,7 +868,7 @@ async function previewInvite(env: Env, id: string, withVersion: boolean): Promis
 	// instance's members, whom players never see.
 	const server = link.server_id
 		? await env.DB.prepare(
-				'SELECT s.name, c.owner_id FROM shared_servers s JOIN cores c ON c.id = s.core_id WHERE s.core_id = ? AND s.server_id = ?',
+				'SELECT s.name, c.owner_id FROM hosted_servers s JOIN cores c ON c.id = s.core_id WHERE s.core_id = ? AND s.server_id = ?',
 			)
 				.bind(link.core_id, link.server_id)
 				.first<{ name: string; owner_id: string }>()
@@ -878,7 +882,7 @@ async function previewInvite(env: Env, id: string, withVersion: boolean): Promis
 		? []
 		: (
 				await env.DB.prepare(
-					'SELECT u.id,u.username AS name,u.avatar_url AS avatar,m.joined_at FROM shared_members m JOIN users u ON u.id = m.user_id WHERE m.instance_id = ?',
+					'SELECT u.id,u.username AS name,u.avatar_url AS avatar,m.joined_at FROM shared_instance_users m JOIN users u ON u.id = m.user_id WHERE m.instance_id = ?',
 				)
 					.bind(item.id)
 					.all()
@@ -923,10 +927,10 @@ async function invites(
 		if (request.method === 'POST') {
 			const [members, players] = await env.DB.batch([
 				env.DB.prepare(
-					'UPDATE shared_members SET joined_at = COALESCE(joined_at,?1) WHERE instance_id = ?2 AND user_id = ?3',
+					'UPDATE shared_instance_users SET joined_at = COALESCE(joined_at,?1) WHERE instance_id = ?2 AND user_id = ?3',
 				).bind(now(), item.id, userId),
 				env.DB.prepare(
-					'UPDATE server_players SET joined_at = COALESCE(joined_at,?1) WHERE user_id = ?3 AND (core_id, server_id) IN (SELECT core_id, server_id FROM shared_servers WHERE instance_id = ?2)',
+					'UPDATE hosted_server_players SET joined_at = COALESCE(joined_at,?1) WHERE user_id = ?3 AND (core_id, server_id) IN (SELECT core_id, server_id FROM hosted_servers WHERE instance_id = ?2)',
 				).bind(now(), item.id, userId),
 			])
 			if (!members?.meta.changes && !players?.meta.changes)
@@ -938,10 +942,10 @@ async function invites(
 		if (request.method === 'DELETE') {
 			const [members, players] = await env.DB.batch([
 				env.DB.prepare(
-					'DELETE FROM shared_members WHERE instance_id = ? AND user_id = ? AND joined_at IS NULL',
+					'DELETE FROM shared_instance_users WHERE instance_id = ? AND user_id = ? AND joined_at IS NULL',
 				).bind(item.id, userId),
 				env.DB.prepare(
-					'DELETE FROM server_players WHERE user_id = ?2 AND joined_at IS NULL AND (core_id, server_id) IN (SELECT core_id, server_id FROM shared_servers WHERE instance_id = ?1)',
+					'DELETE FROM hosted_server_players WHERE user_id = ?2 AND joined_at IS NULL AND (core_id, server_id) IN (SELECT core_id, server_id FROM hosted_servers WHERE instance_id = ?1)',
 				).bind(item.id, userId),
 			])
 			if (members?.meta.changes || players?.meta.changes)
@@ -950,18 +954,18 @@ async function invites(
 		}
 	}
 	if (inviteId && request.method === 'POST') {
-		const link = await env.DB.prepare('SELECT * FROM shared_links WHERE id = ?')
+		const link = await env.DB.prepare('SELECT * FROM shared_instance_invites WHERE id = ?')
 			.bind(inviteId)
 			.first<Link>()
 		// A server's link makes them a player of that server; any other makes them a member.
 		const joined = link?.server_id
 			? await env.DB.prepare(
-					'SELECT joined_at FROM server_players WHERE core_id = ? AND server_id = ? AND user_id = ?',
+					'SELECT joined_at FROM hosted_server_players WHERE core_id = ? AND server_id = ? AND user_id = ?',
 				)
 					.bind(link.core_id, link.server_id, userId)
 					.first<{ joined_at: string | null }>()
 			: await env.DB.prepare(
-					'SELECT joined_at FROM shared_members WHERE instance_id = ? AND user_id = ?',
+					'SELECT joined_at FROM shared_instance_users WHERE instance_id = ? AND user_id = ?',
 				)
 					.bind(item.id, userId)
 					.first<{ joined_at: string | null }>()
@@ -972,14 +976,14 @@ async function invites(
 		await env.DB.batch([
 			usable.server_id
 				? env.DB.prepare(
-						`INSERT INTO server_players (core_id,server_id,user_id,joined_at,join_type) SELECT l.core_id,l.server_id,?1,?2,'link' FROM shared_links l JOIN shared_servers s ON s.core_id = l.core_id AND s.server_id = l.server_id AND s.instance_id = l.instance_id WHERE ${LIVE_SERVER} AND l.id = ?3 AND l.expiration > ?2 AND (l.max_uses = 0 OR l.uses < l.max_uses) ON CONFLICT(core_id,server_id,user_id) DO UPDATE SET joined_at = excluded.joined_at,join_type = excluded.join_type`,
+						`INSERT INTO hosted_server_players (core_id,server_id,user_id,joined_at,join_type) SELECT l.core_id,l.server_id,?1,?2,'link' FROM shared_instance_invites l JOIN hosted_servers s ON s.core_id = l.core_id AND s.server_id = l.server_id AND s.instance_id = l.instance_id WHERE ${LIVE_SERVER} AND l.id = ?3 AND l.expiration > ?2 AND (l.max_uses = 0 OR l.uses < l.max_uses) ON CONFLICT(core_id,server_id,user_id) DO UPDATE SET joined_at = excluded.joined_at,join_type = excluded.join_type`,
 					).bind(userId, now(), inviteId)
 				: env.DB.prepare(
-						"INSERT INTO shared_members (instance_id,user_id,joined_at,join_type) SELECT instance_id,?,?,'link' FROM shared_links WHERE id = ? AND expiration > ? AND (max_uses = 0 OR uses < max_uses) ON CONFLICT(instance_id,user_id) DO UPDATE SET joined_at = excluded.joined_at,join_type = excluded.join_type",
+						"INSERT INTO shared_instance_users (instance_id,user_id,joined_at,join_type) SELECT instance_id,?,?,'link' FROM shared_instance_invites WHERE id = ? AND expiration > ? AND (max_uses = 0 OR uses < max_uses) ON CONFLICT(instance_id,user_id) DO UPDATE SET joined_at = excluded.joined_at,join_type = excluded.join_type",
 					).bind(userId, now(), inviteId, now()),
-			env.DB.prepare('UPDATE shared_links SET uses = uses + 1 WHERE id = ? AND changes() > 0').bind(
-				inviteId,
-			),
+			env.DB.prepare(
+				'UPDATE shared_instance_invites SET uses = uses + 1 WHERE id = ? AND changes() > 0',
+			).bind(inviteId),
 		])
 		await member(env, item, userId)
 		await installedOnce(env, item, userId)
@@ -992,14 +996,14 @@ async function invites(
 		return json(
 			(
 				await env.DB.prepare(
-					'SELECT id,expiration,max_uses,uses FROM shared_links WHERE instance_id = ? AND server_id IS NULL AND expiration > ? ORDER BY expiration',
+					'SELECT id,expiration,max_uses,uses FROM shared_instance_invites WHERE instance_id = ? AND server_id IS NULL AND expiration > ? ORDER BY expiration',
 				)
 					.bind(item.id, now())
 					.all()
 			).results,
 		)
 	if (request.method === 'DELETE' && inviteId) {
-		await env.DB.prepare('DELETE FROM shared_links WHERE id = ? AND instance_id = ?')
+		await env.DB.prepare('DELETE FROM shared_instance_invites WHERE id = ? AND instance_id = ?')
 			.bind(inviteId, item.id)
 			.run()
 		return empty()
@@ -1021,7 +1025,7 @@ async function createLink(
 	const maxUses = natural(body.max_uses, 0, 10000)
 	const expiration = new Date(Date.now() + (maxAge === 0 ? 31536000 : maxAge) * 1000).toISOString()
 	await env.DB.prepare(
-		'INSERT INTO shared_links (id,instance_id,expiration,max_uses,core_id,server_id) VALUES (?,?,?,?,?,?)',
+		'INSERT INTO shared_instance_invites (id,instance_id,expiration,max_uses,core_id,server_id) VALUES (?,?,?,?,?,?)',
 	)
 		.bind(id, instanceId, expiration, maxUses, server?.core_id ?? null, server?.server_id ?? null)
 		.run()
@@ -1046,13 +1050,13 @@ async function users(
 			)
 		const rows = (
 			await env.DB.prepare(
-				'SELECT user_id AS id,joined_at,join_type,last_played FROM shared_members WHERE instance_id = ?',
+				'SELECT user_id AS id,joined_at,join_type,last_played FROM shared_instance_users WHERE instance_id = ?',
 			)
 				.bind(item.id)
 				.all()
 		).results
 		const tokens = await env.DB.prepare(
-			'SELECT COUNT(*) AS count FROM shared_links WHERE instance_id = ? AND server_id IS NULL AND expiration > ? AND (max_uses = 0 OR uses < max_uses)',
+			'SELECT COUNT(*) AS count FROM shared_instance_invites WHERE instance_id = ? AND server_id IS NULL AND expiration > ? AND (max_uses = 0 OR uses < max_uses)',
 		)
 			.bind(item.id, now())
 			.first<{ count: number }>()
@@ -1067,16 +1071,15 @@ async function users(
 		if (ids.length) {
 			await env.DB.batch([
 				...ids.map((id) =>
-					env.DB.prepare('DELETE FROM shared_members WHERE instance_id = ? AND user_id = ?').bind(
-						item.id,
-						id,
-					),
+					env.DB.prepare(
+						'DELETE FROM shared_instance_users WHERE instance_id = ? AND user_id = ?',
+					).bind(item.id, id),
 				),
 				// Leaving a share a player reads also leaves the servers it came through.
 				...(ids.includes(userId)
 					? [
 							env.DB.prepare(
-								'DELETE FROM server_players WHERE user_id = ?2 AND (core_id, server_id) IN (SELECT core_id, server_id FROM shared_servers WHERE instance_id = ?1)',
+								'DELETE FROM hosted_server_players WHERE user_id = ?2 AND (core_id, server_id) IN (SELECT core_id, server_id FROM hosted_servers WHERE instance_id = ?1)',
 							).bind(item.id, userId),
 						]
 					: []),
@@ -1099,7 +1102,7 @@ async function users(
 			continue
 		}
 		await env.DB.prepare(
-			"INSERT OR IGNORE INTO shared_members (instance_id,user_id,join_type) VALUES (?,?,'invite')",
+			"INSERT OR IGNORE INTO shared_instance_users (instance_id,user_id,join_type) VALUES (?,?,'invite')",
 		)
 			.bind(item.id, id)
 			.run()
@@ -1130,7 +1133,7 @@ async function followShare(
 		own ||
 		item.owner_id === userId ||
 		(await env.DB.prepare(
-			'SELECT 1 FROM shared_members WHERE instance_id = ? AND user_id = ? AND joined_at IS NOT NULL',
+			'SELECT 1 FROM shared_instance_users WHERE instance_id = ? AND user_id = ? AND joined_at IS NOT NULL',
 		)
 			.bind(item.id, userId)
 			.first())
@@ -1151,13 +1154,13 @@ async function followShare(
 		outside: outsideAddress(body.outside),
 	}
 	const followed = await env.DB.prepare(
-		'SELECT instance_id FROM shared_servers WHERE core_id = ? AND server_id = ?',
+		'SELECT instance_id FROM hosted_servers WHERE core_id = ? AND server_id = ?',
 	)
 		.bind(coreId, serverId)
 		.first<{ instance_id: string }>()
 	if (followed && followed.instance_id !== item.id) await forgetServer(env, coreId, serverId)
 	await env.DB.prepare(
-		'INSERT INTO shared_servers (core_id,server_id,instance_id,name,port,outside) VALUES (?,?,?,?,?,?) ON CONFLICT(core_id,server_id) DO UPDATE SET name = excluded.name, port = excluded.port, outside = COALESCE(excluded.outside, outside)',
+		'INSERT INTO hosted_servers (core_id,server_id,instance_id,name,port,outside) VALUES (?,?,?,?,?,?) ON CONFLICT(core_id,server_id) DO UPDATE SET name = excluded.name, port = excluded.port, outside = COALESCE(excluded.outside, outside)',
 	)
 		.bind(coreId, serverId, item.id, server.name, server.port, server.outside)
 		.run()
@@ -1203,7 +1206,7 @@ function joinAddress(
 async function cameThrough(env: Env, item: Instance, userId: string) {
 	if (item.owner_id === userId) return null
 	return env.DB.prepare(
-		`SELECT s.*, c.address, c.public_address FROM ${PLAYERS} JOIN cores c ON c.id = s.core_id WHERE s.instance_id = ?1 AND p.user_id = ?2 AND NOT EXISTS (SELECT 1 FROM shared_members WHERE instance_id = ?1 AND user_id = ?2) ORDER BY p.joined_at IS NULL, p.joined_at LIMIT 1`,
+		`SELECT s.*, c.address, c.public_address FROM ${PLAYERS} JOIN cores c ON c.id = s.core_id WHERE s.instance_id = ?1 AND p.user_id = ?2 AND NOT EXISTS (SELECT 1 FROM shared_instance_users WHERE instance_id = ?1 AND user_id = ?2) ORDER BY p.joined_at IS NULL, p.joined_at LIMIT 1`,
 	)
 		.bind(item.id, userId)
 		.first<SharedServer & { address: string; public_address: string | null }>()
@@ -1231,7 +1234,7 @@ async function serverPlayers(
 		.first<{ owner_id: string }>()
 	if (!core) throw new ApiError(404, 'not_found', 'Core was not found', 'core_not_found')
 	const server = await env.DB.prepare(
-		'SELECT * FROM shared_servers WHERE core_id = ? AND server_id = ?',
+		'SELECT * FROM hosted_servers WHERE core_id = ? AND server_id = ?',
 	)
 		.bind(coreId, serverId)
 		.first<SharedServer>()
@@ -1239,7 +1242,8 @@ async function serverPlayers(
 	const shareOwner = server ? (await instance(env, server.instance_id)).owner_id === userId : false
 	const refused = () =>
 		new ApiError(403, 'forbidden', "Only the server's owner can share it", 'not_owner')
-	const links = 'FROM shared_links WHERE core_id = ? AND server_id = ? AND expiration > ?'
+	const links =
+		'FROM shared_instance_invites WHERE core_id = ? AND server_id = ? AND expiration > ?'
 
 	if (section === 'players' && !child && request.method === 'GET') {
 		// The people who manage servers on the Core see who plays there, as its owner does.
@@ -1251,7 +1255,7 @@ async function serverPlayers(
 		if (!coreOwner && !shareOwner && !manager) throw refused()
 		const users = (
 			await env.DB.prepare(
-				'SELECT user_id AS id, joined_at, join_type, NULL AS last_played FROM server_players WHERE core_id = ? AND server_id = ? ORDER BY joined_at IS NULL, joined_at',
+				'SELECT user_id AS id, joined_at, join_type, NULL AS last_played FROM hosted_server_players WHERE core_id = ? AND server_id = ? ORDER BY joined_at IS NULL, joined_at',
 			)
 				.bind(coreId, serverId)
 				.all()
@@ -1271,7 +1275,7 @@ async function serverPlayers(
 			await env.DB.batch(
 				ids.map((id) =>
 					env.DB.prepare(
-						'DELETE FROM server_players WHERE core_id = ? AND server_id = ? AND user_id = ?',
+						'DELETE FROM hosted_server_players WHERE core_id = ? AND server_id = ? AND user_id = ?',
 					).bind(coreId, serverId, id),
 				),
 			)
@@ -1288,7 +1292,9 @@ async function serverPlayers(
 			).results,
 		)
 	if (section === 'invites' && child && request.method === 'DELETE') {
-		await env.DB.prepare('DELETE FROM shared_links WHERE id = ? AND core_id = ? AND server_id = ?')
+		await env.DB.prepare(
+			'DELETE FROM shared_instance_invites WHERE id = ? AND core_id = ? AND server_id = ?',
+		)
 			.bind(child, coreId, serverId)
 			.run()
 		return empty()
@@ -1307,7 +1313,7 @@ async function serverPlayers(
 			continue
 		}
 		await env.DB.prepare(
-			"INSERT OR IGNORE INTO server_players (core_id,server_id,user_id,join_type) VALUES (?,?,?,'invite')",
+			"INSERT OR IGNORE INTO hosted_server_players (core_id,server_id,user_id,join_type) VALUES (?,?,?,'invite')",
 		)
 			.bind(coreId, serverId, id)
 			.run()
@@ -1336,7 +1342,7 @@ async function access(env: Env, item: Instance, userId: string): Promise<Respons
 	type ServerRow = { core_id: string; server_id: string; name: string }
 	const [members, players, links] = await Promise.all([
 		env.DB.prepare(
-			"SELECT u.id, u.username, u.avatar_url, m.joined_at, m.join_type FROM shared_members m JOIN users u ON u.id = m.user_id WHERE m.instance_id = ? AND m.join_type != 'owner' ORDER BY m.joined_at IS NULL, m.joined_at",
+			"SELECT u.id, u.username, u.avatar_url, m.joined_at, m.join_type FROM shared_instance_users m JOIN users u ON u.id = m.user_id WHERE m.instance_id = ? AND m.join_type != 'owner' ORDER BY m.joined_at IS NULL, m.joined_at",
 		)
 			.bind(item.id)
 			.all<Person>(),
@@ -1346,7 +1352,7 @@ async function access(env: Env, item: Instance, userId: string): Promise<Respons
 			.bind(item.id)
 			.all<Person & ServerRow>(),
 		env.DB.prepare(
-			'SELECT l.id, l.expiration, l.max_uses, l.uses, s.core_id, s.server_id, s.name FROM shared_links l JOIN shared_servers s ON s.core_id = l.core_id AND s.server_id = l.server_id WHERE l.instance_id = ? AND l.expiration > ? ORDER BY s.name, l.expiration',
+			'SELECT l.id, l.expiration, l.max_uses, l.uses, s.core_id, s.server_id, s.name FROM shared_instance_invites l JOIN hosted_servers s ON s.core_id = l.core_id AND s.server_id = l.server_id WHERE l.instance_id = ? AND l.expiration > ? ORDER BY s.name, l.expiration',
 		)
 			.bind(item.id, now())
 			.all<{ id: string; expiration: string; max_uses: number; uses: number } & ServerRow>(),
@@ -1456,7 +1462,9 @@ async function coreSharing(
 	if (child && (!/^\d+$/.test(child) || !Number.isSafeInteger(Number(child))))
 		throw new ApiError(400, 'invalid_input', 'Invalid shared version')
 	const version = child
-		? await env.DB.prepare('SELECT * FROM shared_versions WHERE instance_id = ? AND version = ?')
+		? await env.DB.prepare(
+				'SELECT * FROM shared_instance_versions WHERE instance_id = ? AND version = ?',
+			)
 				.bind(id, Number(child))
 				.first<Version>()
 		: await latestVersion(env, id)
@@ -1554,7 +1562,7 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 			// The caller's own shares, and with `include_joined` every share they can play too.
 			const query =
 				url.searchParams.get('include_joined') === 'true'
-					? `SELECT instance_id FROM shared_members WHERE user_id = ?1 AND joined_at IS NOT NULL UNION SELECT s.instance_id FROM ${PLAYERS} WHERE p.user_id = ?1 AND p.joined_at IS NOT NULL`
+					? `SELECT instance_id FROM shared_instance_users WHERE user_id = ?1 AND joined_at IS NOT NULL UNION SELECT s.instance_id FROM ${PLAYERS} WHERE p.user_id = ?1 AND p.joined_at IS NOT NULL`
 					: 'SELECT id AS instance_id FROM shared_instances WHERE owner_id = ?1'
 			return json(
 				(await env.DB.prepare(query).bind(user.id).all<{ instance_id: string }>()).results.map(
@@ -1570,7 +1578,7 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 					'INSERT INTO shared_instances (id,owner_id,name,created) VALUES (?,?,?,?)',
 				).bind(instanceId, user.id, name, now()),
 				env.DB.prepare(
-					"INSERT INTO shared_members (instance_id,user_id,joined_at,join_type) VALUES (?,?,?,'owner')",
+					"INSERT INTO shared_instance_users (instance_id,user_id,joined_at,join_type) VALUES (?,?,?,'owner')",
 				).bind(instanceId, user.id, now()),
 			])
 			return json({ id: instanceId })
@@ -1631,7 +1639,9 @@ export async function handleSharing(request: Request, env: Env): Promise<Respons
 		if (child && (!/^\d+$/.test(child) || !Number.isSafeInteger(Number(child))))
 			throw new ApiError(400, 'invalid_input', 'Invalid shared version')
 		const version = child
-			? await env.DB.prepare('SELECT * FROM shared_versions WHERE instance_id = ? AND version = ?')
+			? await env.DB.prepare(
+					'SELECT * FROM shared_instance_versions WHERE instance_id = ? AND version = ?',
+				)
 					.bind(id, Number(child))
 					.first<Version>()
 			: await latestVersion(env, id)

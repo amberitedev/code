@@ -55,8 +55,8 @@ API-client boundary. The local service does not proxy account session tokens to 
 running local backend. Its private account data persists in `.data/backend-proof/accounts.json` so
 running it again after a backend restart also proves persistence. It does not start a server.
 
-`pnpm test` in `apps/backend` runs the contract tests in wrangler's local runtime. The sharing test
-sends every request the App's sharing client and a Core's storage report send.
+`pnpm test` in `apps/backend` runs the black-box API tests in wrangler's local runtime. The sharing
+test sends every request the App's sharing client and a Core's storage report send.
 
 ## Cores
 

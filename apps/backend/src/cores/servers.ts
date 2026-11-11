@@ -16,7 +16,7 @@ export const MAX_SERVER_NAME = 256
 
 /** SQL for "this account owns the shared instance bound as `?1` or has joined it". */
 const sharedWith = (account: string) =>
-	`EXISTS (SELECT 1 FROM shared_members m WHERE m.instance_id = ?1 AND m.user_id = ${account} AND m.joined_at IS NOT NULL)`
+	`EXISTS (SELECT 1 FROM shared_instance_users m WHERE m.instance_id = ?1 AND m.user_id = ${account} AND m.joined_at IS NOT NULL)`
 
 /** A server a Core shows to the people its instance is shared with. */
 interface VisibleServer {

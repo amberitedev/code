@@ -179,7 +179,7 @@ test('state reports write only what changed', async () => {
 			.run()
 		await backend.db
 			.prepare(
-				"INSERT INTO shared_members (instance_id,user_id,joined_at,join_type) VALUES ('pack','owner','x','owner')",
+				"INSERT INTO shared_instance_users (instance_id,user_id,joined_at,join_type) VALUES ('pack','owner','x','owner')",
 			)
 			.run()
 		const server = {

@@ -74,7 +74,7 @@ export async function notifyMembers(
 	except: string | null = null,
 ): Promise<void> {
 	const { results } = await env.DB.prepare(
-		'SELECT user_id FROM shared_members WHERE instance_id = ? AND joined_at IS NOT NULL AND user_id IS NOT ?',
+		'SELECT user_id FROM shared_instance_users WHERE instance_id = ? AND joined_at IS NOT NULL AND user_id IS NOT ?',
 	)
 		.bind(instanceId, except)
 		.all<{ user_id: string }>()
