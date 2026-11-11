@@ -7,7 +7,7 @@ use std::sync::Arc;
 use axum::{Json, extract::State};
 use serde::{Deserialize, Serialize};
 
-use super::AppState;
+use super::CoreState;
 use crate::db;
 
 /// Response of `GET /health`. The CLI reads it too.
@@ -19,7 +19,7 @@ pub struct Health {
 }
 
 pub async fn get(
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
 ) -> Result<Json<Health>, axum::http::StatusCode> {
     let core_id = db::core_id(&state.db)
         .await

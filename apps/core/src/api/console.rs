@@ -13,7 +13,7 @@ use contracts::{ApiError, ErrorCode};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use super::{AppState, activity::Action};
+use super::{CoreState, activity::Action};
 use crate::access::{Caller, Level, activity};
 
 /// The longest command Core passes on.
@@ -28,7 +28,7 @@ pub struct SendCommand {
 /// `POST /servers/{id}/console`.
 pub async fn send(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path(id): Path<String>,
     Json(request): Json<SendCommand>,
 ) -> Result<StatusCode, ApiError> {

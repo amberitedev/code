@@ -16,7 +16,7 @@ use contracts::ApiError;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use super::AppState;
+use super::CoreState;
 use crate::access::{Caller, Peer};
 
 /// The settings to change. Absent ones stay. Bytes throughout.
@@ -56,7 +56,7 @@ pub struct StorageStatus {
 /// `GET /storage`.
 pub async fn get(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
 ) -> Result<Json<StorageStatus>, ApiError> {
     caller.require_owner()?;
     Ok(Json(state.storage.status().await?))
@@ -65,7 +65,7 @@ pub async fn get(
 /// `PATCH /storage`.
 pub async fn settings(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Json(change): Json<StorageSettings>,
 ) -> Result<Json<StorageStatus>, ApiError> {
     caller.require_owner()?;
@@ -74,7 +74,7 @@ pub async fn settings(
 
 /// `/store/...`. The local socket has no peer and counts as this machine.
 pub async fn forward(
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     peer: Option<Extension<Peer>>,
     request: Request,
 ) -> Response {

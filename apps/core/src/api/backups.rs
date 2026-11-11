@@ -31,7 +31,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::{
-    AppState, activity::Action, content::world, internal,
+    CoreState, activity::Action, content::world, internal,
     servers::WorldDownloadMethod,
 };
 use crate::{
@@ -295,7 +295,7 @@ fn backup_name(name: &str) -> Result<&str, ApiError> {
 
 /// Who started each operation, by user id, as the last ticket for them named them.
 async fn users(
-    state: &AppState,
+    state: &CoreState,
     operations: &[Operation],
 ) -> Result<HashMap<String, UserInfo>, ApiError> {
     let mut users = HashMap::new();
@@ -325,7 +325,7 @@ async fn users(
 
 /// The server's schedule and when it next comes due (`None` when scheduled backups are off).
 async fn slots(
-    state: &AppState,
+    state: &CoreState,
     id: &str,
 ) -> Result<(records::Schedule, Option<i64>), ApiError> {
     let schedule = records::schedule(&state.db, id).await.map_err(internal)?;
@@ -337,7 +337,7 @@ async fn slots(
 /// slot say when they rotate out: the newest after `keep` more scheduled backups, the oldest at
 /// the next one.
 async fn queue(
-    state: &AppState,
+    state: &CoreState,
     id: &str,
     schedule: &records::Schedule,
     next: Option<i64>,
@@ -441,7 +441,7 @@ async fn queue(
 /// `GET .../backups-queue`.
 pub async fn list(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
 ) -> Result<Json<BackupsQueueResponse>, ApiError> {
     caller.require(&state.db, &id, Level::Viewer).await?;
@@ -454,7 +454,7 @@ pub async fn list(
 /// scheduled backup is due.
 pub async fn list_with_options(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
 ) -> Result<Json<BackupsQueueWithOptionsResponse>, ApiError> {
     caller.require(&state.db, &id, Level::Viewer).await?;
@@ -495,7 +495,7 @@ pub async fn list_with_options(
 /// would be.
 pub async fn patch_options(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
     Query(query): Query<PatchOptionsQuery>,
     headers: HeaderMap,
@@ -580,7 +580,7 @@ pub async fn patch_options(
 /// free manual slot.
 pub async fn create(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
     Json(request): Json<BackupRequest>,
 ) -> Result<Json<PostBackupQueueResponse>, ApiError> {
@@ -606,7 +606,7 @@ pub async fn create(
 /// `PATCH .../backups/{bid}`: rename a backup.
 pub async fn rename(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid, backup)): Path<(String, String, String)>,
     Json(body): Json<PatchBackup>,
 ) -> Result<StatusCode, ApiError> {
@@ -641,7 +641,7 @@ pub async fn rename(
 /// undoes damage.
 pub async fn delete(
     Dangerous(caller): Dangerous,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid, backup)): Path<(String, String, String)>,
 ) -> Result<StatusCode, ApiError> {
     world(&id, &wid)?;
@@ -661,7 +661,7 @@ pub async fn delete(
 /// `POST .../backups-queue/delete-many`: as `delete`, for several.
 pub async fn delete_many(
     Dangerous(caller): Dangerous,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
     Json(request): Json<DeleteManyBackupRequest>,
 ) -> Result<StatusCode, ApiError> {
@@ -683,7 +683,7 @@ pub async fn delete_many(
 /// server. A dangerous action: owner only, with a fresh ticket.
 pub async fn restore(
     Dangerous(caller): Dangerous,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid, backup)): Path<(String, String, String)>,
     Json(_request): Json<BackupRequest>,
 ) -> Result<StatusCode, ApiError> {
@@ -707,7 +707,7 @@ pub async fn restore(
 /// `POST .../backups-queue/{bid}/retry`: queue a failed backup again.
 pub async fn retry(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid, backup)): Path<(String, String, String)>,
 ) -> Result<StatusCode, ApiError> {
     caller.require(&state.db, &id, Level::Editor).await?;
@@ -720,7 +720,7 @@ pub async fn retry(
 /// operation, `cancel` drops a queued one (a cancelled create takes its backup with it).
 pub async fn history(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid, kind, operation, action)): Path<(
         String,
         String,
@@ -767,7 +767,7 @@ pub async fn history(
 /// backup's zip, for a download that cannot send the session.
 pub async fn authorize_backup(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid, backup)): Path<(String, String, String)>,
 ) -> Result<Json<DownloadToken>, ApiError> {
     caller.require(&state.db, &id, Level::Editor).await?;
@@ -789,7 +789,7 @@ pub async fn authorize_backup(
 /// world as it is now.
 pub async fn authorize_world(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
 ) -> Result<Json<DownloadToken>, ApiError> {
     caller.require(&state.db, &id, Level::Editor).await?;
@@ -809,7 +809,7 @@ pub(super) fn expired_link() -> ApiError {
 /// Who is downloading: a link token for `target` on `server`, or a session in the header. Either
 /// way they must still be an editor of the server.
 pub(super) async fn downloader(
-    state: &AppState,
+    state: &CoreState,
     caller: Result<Caller, ApiError>,
     token: Option<&str>,
     server: &str,
@@ -904,7 +904,7 @@ impl Drop for Temporary {
 /// link token goes in `token`; a session in the header works too.
 pub async fn download_backup(
     caller: Result<Caller, ApiError>,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid, backup)): Path<(String, String, String)>,
     Query(query): Query<DownloadQuery>,
 ) -> Result<Response, ApiError> {
@@ -941,7 +941,7 @@ pub async fn download_backup(
 /// are now, copied as a backup is (hot when the server runs) and streamed, then removed.
 pub async fn download_world(
     caller: Result<Caller, ApiError>,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
     Query(query): Query<DownloadQuery>,
 ) -> Result<Response, ApiError> {
@@ -968,7 +968,7 @@ pub async fn download_world(
 /// `GET /v1/servers/{id}/worlds/{wid}/select-download`: the world downloads straight from Core.
 pub async fn select_download(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
 ) -> Result<Json<WorldDownloadMethod>, ApiError> {
     caller.require(&state.db, &id, Level::Editor).await?;

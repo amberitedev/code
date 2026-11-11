@@ -16,7 +16,7 @@ use contracts::{ApiError, ErrorCode};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use super::{AppState, activity::Action, internal};
+use super::{CoreState, activity::Action, internal};
 use crate::{
     access::{Caller, Dangerous, activity, fresh_ticket},
     update::{UpdateError, release::Channel, versions::FailedTrial},
@@ -94,7 +94,7 @@ impl From<UpdateError> for ApiError {
 /// `GET /update`.
 pub async fn get(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
 ) -> Result<Json<UpdateStatus>, ApiError> {
     caller.require_owner()?;
     Ok(Json(state.update.status().await?))
@@ -103,7 +103,7 @@ pub async fn get(
 /// `PATCH /update`.
 pub async fn settings(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     headers: HeaderMap,
     Json(request): Json<UpdateSettings>,
 ) -> Result<Json<UpdateStatus>, ApiError> {
@@ -127,7 +127,7 @@ pub async fn settings(
 /// `POST /update/check`.
 pub async fn check(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
 ) -> Result<Json<UpdateStatus>, ApiError> {
     caller.require_owner()?;
     Ok(Json(state.update.check().await?))
@@ -136,7 +136,7 @@ pub async fn check(
 /// `POST /update/apply`.
 pub async fn apply(
     Dangerous(caller): Dangerous,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Json(request): Json<ApplyUpdate>,
 ) -> Result<Json<Restarting>, ApiError> {
     if request.allow_downgrade && caller != Caller::Local {
@@ -162,7 +162,7 @@ pub async fn apply(
 /// `POST /update/rollback`.
 pub async fn rollback(
     Dangerous(caller): Dangerous,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
 ) -> Result<Json<Restarting>, ApiError> {
     let version = state.update.roll_back().await?;
     activity::log(

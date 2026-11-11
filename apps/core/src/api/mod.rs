@@ -66,7 +66,7 @@ const IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_BODY: usize = 10 * 1024 * 1024;
 
 /// What every route can reach.
-pub struct AppState {
+pub struct CoreState {
     pub db: SqlitePool,
     pub servers: Arc<crate::servers::Servers>,
     pub access: Arc<crate::access::Access>,
@@ -80,7 +80,7 @@ pub struct AppState {
 
 /// Every route. Each one checks its caller itself (see `access`); the network listener adds its
 /// own checks on top (see `network::tls`).
-pub fn router(state: Arc<AppState>) -> Router {
+pub fn router(state: Arc<CoreState>) -> Router {
     Router::new()
         .route("/health", get(health::get))
         .route("/sessions", post(sessions::sign_in).get(sessions::list))

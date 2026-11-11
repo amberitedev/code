@@ -28,7 +28,7 @@ use ts_rs::TS;
 use uuid::Uuid;
 
 use super::{
-    AppState,
+    CoreState,
     activity::Action,
     backend::{Grant, Remove},
     internal,
@@ -123,7 +123,7 @@ pub struct ServerRole {
 /// `GET /access/me`.
 pub async fn me(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
 ) -> Result<Json<MyAccess>, ApiError> {
     let Some(user_id) = caller.user_id() else {
         return Err(ApiError::new(
@@ -159,7 +159,7 @@ pub async fn me(
 /// `GET /servers/{id}/access`. Owner only.
 pub async fn list(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path(server_id): Path<String>,
 ) -> Result<Json<ServerAccess>, ApiError> {
     caller.require(&state.db, &server_id, Level::Owner).await?;
@@ -185,7 +185,7 @@ pub async fn list(
 /// notifies them again.
 pub async fn invite(
     Dangerous(caller): Dangerous,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path(server_id): Path<String>,
     Json(invite): Json<Invite>,
 ) -> Result<Json<Member>, ApiError> {
@@ -283,7 +283,7 @@ pub async fn invite(
 /// `PATCH /servers/{id}/access/{user_id}`.
 pub async fn change_role(
     Dangerous(caller): Dangerous,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((server_id, user_id)): Path<(String, String)>,
     Json(change): Json<ChangeRole>,
 ) -> Result<Json<Member>, ApiError> {
@@ -322,7 +322,7 @@ pub async fn change_role(
 /// Removing someone else is the owner's dangerous action; removing yourself is leaving.
 pub async fn remove(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     headers: HeaderMap,
     Path((server_id, user_id)): Path<(String, String)>,
 ) -> Result<StatusCode, ApiError> {
@@ -403,7 +403,7 @@ async fn owner_id(db: &sqlx::SqlitePool) -> sqlx::Result<Option<String>> {
 }
 
 async fn server(
-    state: &AppState,
+    state: &CoreState,
     id: &str,
 ) -> Result<server_rows::ServerRow, ApiError> {
     Ok(server_rows::get(&state.db, id)

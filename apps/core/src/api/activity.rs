@@ -15,7 +15,7 @@ use ts_rs::TS;
 use uuid::Uuid;
 
 use super::{
-    AppState,
+    CoreState,
     access::{Role, User},
     internal,
 };
@@ -24,7 +24,7 @@ use crate::access::{Caller, activity};
 /// `GET /activity`. Owner only.
 pub async fn list(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Query(query): Query<ActivityQuery>,
 ) -> Result<Json<ActivityPage>, ApiError> {
     caller.require_owner()?;

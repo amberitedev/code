@@ -32,7 +32,7 @@ use tokio::io::AsyncWriteExt;
 use ts_rs::TS;
 
 use super::{
-    AppState, activity::Action, internal, properties::PropertiesFields,
+    CoreState, activity::Action, internal, properties::PropertiesFields,
 };
 use crate::{
     access::{Caller, Level, activity},
@@ -337,7 +337,7 @@ pub fn world(id: &str, wid: &str) -> Result<(), ApiError> {
 }
 
 /// Take a server for a background install: its content, then the server itself.
-fn begin(state: &AppState, id: &str) -> Result<(Hold, Busy), ApiError> {
+fn begin(state: &CoreState, id: &str) -> Result<(Hold, Busy), ApiError> {
     let busy = state.content.busy(id)?;
     let hold = state.servers.hold(id).map_err(|error| match error {
         ServerError::AlreadyRunning => ApiError::new(
@@ -369,7 +369,7 @@ fn loader_of(loader: Modloader) -> Result<ModLoader, ApiError> {
 /// `GET .../addons`.
 pub async fn list(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
     Query(query): Query<AddonsQuery>,
 ) -> Result<Json<Addons>, ApiError> {
@@ -438,7 +438,7 @@ pub async fn list(
 /// `POST .../addons`: add a Modrinth project and the dependencies nothing provides yet.
 pub async fn add(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
     Json(request): Json<AddAddonRequest>,
 ) -> Result<StatusCode, ApiError> {
@@ -448,7 +448,7 @@ pub async fn add(
 /// `POST .../addons/install-many`.
 pub async fn add_many(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
     Json(requests): Json<Vec<AddAddonRequest>>,
 ) -> Result<StatusCode, ApiError> {
@@ -482,7 +482,7 @@ enum Change {
 }
 
 async fn change(
-    state: &AppState,
+    state: &CoreState,
     caller: &Caller,
     id: &str,
     wid: &str,
@@ -522,7 +522,7 @@ async fn change(
 /// `POST .../addons/delete`.
 pub async fn delete(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
     Json(item): Json<RemoveAddonRequest>,
 ) -> Result<StatusCode, ApiError> {
@@ -532,7 +532,7 @@ pub async fn delete(
 /// `POST .../addons/delete-many`.
 pub async fn delete_many(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
     Json(body): Json<RemoveAddonsRequest>,
 ) -> Result<StatusCode, ApiError> {
@@ -542,7 +542,7 @@ pub async fn delete_many(
 /// `POST .../addons/disable`.
 pub async fn disable(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
     Json(item): Json<RemoveAddonRequest>,
 ) -> Result<StatusCode, ApiError> {
@@ -552,7 +552,7 @@ pub async fn disable(
 /// `POST .../addons/enable`.
 pub async fn enable(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
     Json(item): Json<RemoveAddonRequest>,
 ) -> Result<StatusCode, ApiError> {
@@ -562,7 +562,7 @@ pub async fn enable(
 /// `POST .../addons/disable-many`.
 pub async fn disable_many(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
     Json(body): Json<RemoveAddonsRequest>,
 ) -> Result<StatusCode, ApiError> {
@@ -580,7 +580,7 @@ pub async fn disable_many(
 /// `POST .../addons/enable-many`.
 pub async fn enable_many(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
     Json(body): Json<RemoveAddonsRequest>,
 ) -> Result<StatusCode, ApiError> {
@@ -597,7 +597,7 @@ pub async fn enable_many(
 
 /// Refuses a server that follows an instance. Its instance's owner writes the share it reads,
 /// sides included, so it has no share or sides of its own.
-pub async fn server_first(state: &AppState, id: &str) -> Result<(), ApiError> {
+pub async fn server_first(state: &CoreState, id: &str) -> Result<(), ApiError> {
     let linked = content_rows::get_pack(&state.db, id)
         .await
         .map_err(internal)?
@@ -612,7 +612,7 @@ pub async fn server_first(state: &AppState, id: &str) -> Result<(), ApiError> {
 }
 
 async fn set_side(
-    state: &AppState,
+    state: &CoreState,
     caller: &Caller,
     id: &str,
     wid: &str,
@@ -639,7 +639,7 @@ async fn set_side(
 /// `POST .../addons/set-enabled-server`.
 pub async fn set_enabled_server(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
     Json(request): Json<SetAddonEnabledRequest>,
 ) -> Result<StatusCode, ApiError> {
@@ -649,7 +649,7 @@ pub async fn set_enabled_server(
 /// `POST .../addons/set-enabled-player`.
 pub async fn set_enabled_player(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
     Json(request): Json<SetAddonEnabledRequest>,
 ) -> Result<StatusCode, ApiError> {
@@ -659,7 +659,7 @@ pub async fn set_enabled_player(
 /// `POST .../addons/set-locked-side-toggle`.
 pub async fn set_side_toggle_locked(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
     Json(request): Json<SetAddonSideToggleLockedRequest>,
 ) -> Result<StatusCode, ApiError> {
@@ -681,7 +681,7 @@ pub async fn set_side_toggle_locked(
 /// `POST .../addons/complete-side-type-review`: nothing to do, since Core never asks for one.
 pub async fn complete_side_type_review(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
     Json(_): Json<CompleteSideTypeReviewRequest>,
 ) -> Result<StatusCode, ApiError> {
@@ -693,7 +693,7 @@ pub async fn complete_side_type_review(
 /// `GET .../addons/update?filename`: the file, with its newest version in `has_update`.
 pub async fn get_update(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
     Query(query): Query<AddonUpdateQuery>,
 ) -> Result<Json<Addon>, ApiError> {
@@ -730,7 +730,7 @@ pub async fn get_update(
 /// `POST .../addons/update`.
 pub async fn update(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
     Json(request): Json<UpdateAddonRequest>,
 ) -> Result<StatusCode, ApiError> {
@@ -748,7 +748,7 @@ pub async fn update(
 /// `POST .../addons/update-many`.
 pub async fn update_many(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
     Json(body): Json<UpdateAddonsRequest>,
 ) -> Result<StatusCode, ApiError> {
@@ -778,7 +778,7 @@ pub async fn update_many(
 /// its files stay. Nothing is ever erased, so `soft_override` changes nothing.
 pub async fn install(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
     Json(request): Json<InstallWorldContent>,
 ) -> Result<StatusCode, ApiError> {
@@ -892,7 +892,7 @@ pub async fn install(
 }
 
 fn spawn_pack(
-    state: &AppState,
+    state: &CoreState,
     hold: Hold,
     busy: Busy,
     source: PackSource,
@@ -922,7 +922,7 @@ fn spawn_pack(
 /// version is read before this returns, so one that cannot go fails the request.
 #[allow(clippy::too_many_arguments)]
 async fn install_instance(
-    state: &Arc<AppState>,
+    state: &Arc<CoreState>,
     id: &str,
     caller: &Caller,
     ticket: Option<String>,
@@ -1000,7 +1000,7 @@ async fn install_instance(
 /// a running server uses is removed.
 pub async fn repair(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
 ) -> Result<StatusCode, ApiError> {
     caller.require(&state.db, &id, Level::Editor).await?;
@@ -1055,7 +1055,7 @@ pub async fn repair(
 /// and a failed pack install is cleared.
 pub async fn unlink(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
 ) -> Result<StatusCode, ApiError> {
     caller.require(&state.db, &id, Level::Editor).await?;
@@ -1073,7 +1073,7 @@ pub async fn unlink(
 /// `GET .../content/modpack/update`: the pack, with its newest version in `has_update`.
 pub async fn modpack(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
 ) -> Result<Json<ModpackFields>, ApiError> {
     caller.require(&state.db, &id, Level::Viewer).await?;
@@ -1094,7 +1094,7 @@ pub async fn modpack(
 /// request, with no body here, which axum's optional `Json` would refuse.
 pub async fn update_modpack(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
     body: bytes::Bytes,
 ) -> Result<StatusCode, ApiError> {
@@ -1200,7 +1200,7 @@ fn bad_form(error: axum::extract::multipart::MultipartError) -> ApiError {
 /// `.mrpack` in the background. Parts: `file` and `properties` (JSON settings).
 pub async fn upload_modpack(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
     Query(query): Query<ModpackUploadQuery>,
     mut form: Multipart,
@@ -1277,7 +1277,7 @@ pub async fn upload_modpack(
 /// plugins and `.zip` datapacks, one `file` part each.
 pub async fn upload_addons(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
     mut form: Multipart,
 ) -> Result<StatusCode, ApiError> {
@@ -1313,7 +1313,7 @@ pub async fn upload_addons(
 /// pack placed them, with what a pack update wants for each.
 pub async fn edited(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path(id): Path<String>,
 ) -> Result<Json<EditedFiles>, ApiError> {
     caller.require(&state.db, &id, Level::Viewer).await?;
@@ -1324,7 +1324,7 @@ pub async fn edited(
 /// `POST /servers/{id}/content/edited`: keep or replace one file a pack update left alone.
 pub async fn decide(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path(id): Path<String>,
     Json(decision): Json<Decision>,
 ) -> Result<StatusCode, ApiError> {
@@ -1353,7 +1353,7 @@ pub struct EmbeddedIconQuery {
 /// jar, for files Modrinth has no icon for. An addon's `manifest.icon_embedded` says it has one.
 pub async fn embedded_icon(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
     Query(query): Query<EmbeddedIconQuery>,
 ) -> Result<([(axum::http::HeaderName, &'static str); 1], Vec<u8>), ApiError> {

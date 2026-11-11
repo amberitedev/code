@@ -37,7 +37,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::{
-    AppState,
+    CoreState,
     activity::Action,
     files::{blocking, changing, folder, locked},
     internal,
@@ -72,7 +72,7 @@ pub struct ServerIcon {
 }
 
 /// The owner passes `require` for any id, so a missing server is found here.
-async fn exists(state: &AppState, id: &str) -> Result<(), ApiError> {
+async fn exists(state: &CoreState, id: &str) -> Result<(), ApiError> {
     server_rows::get(&state.db, id)
         .await
         .map_err(internal)?
@@ -87,7 +87,7 @@ fn no_icon() -> ApiError {
 /// `GET /v1/servers/{id}/icon`.
 pub async fn get(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path(id): Path<String>,
     Query(query): Query<IconQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
@@ -119,7 +119,7 @@ pub async fn get(
 /// `PUT /v1/servers/{id}/icon`.
 pub async fn set(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path(id): Path<String>,
     body: Bytes,
 ) -> Result<Json<ServerIcon>, ApiError> {
@@ -131,7 +131,7 @@ pub async fn set(
 /// `PUT /v1/servers/{id}/icon/generated`.
 pub async fn set_generated(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path(id): Path<String>,
     mut form: Multipart,
 ) -> Result<Json<ServerIcon>, ApiError> {
@@ -171,7 +171,7 @@ pub async fn set_generated(
 
 /// Writes both icon files from `image` and keeps `config` with the game icon's hash.
 async fn write(
-    state: &AppState,
+    state: &CoreState,
     caller: &Caller,
     id: &str,
     image: Bytes,
@@ -207,7 +207,7 @@ async fn write(
 /// `GET /v1/servers/{id}/icon/metadata`.
 pub async fn metadata(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path(id): Path<String>,
 ) -> Result<Json<ServerIcon>, ApiError> {
     caller.require(&state.db, &id, Level::Viewer).await?;
@@ -297,7 +297,7 @@ fn png(image: &DynamicImage) -> Result<Vec<u8>, ApiError> {
 /// `DELETE /v1/servers/{id}/icon`.
 pub async fn delete(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
     caller.require(&state.db, &id, Level::Editor).await?;

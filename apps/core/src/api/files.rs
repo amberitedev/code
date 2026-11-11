@@ -32,7 +32,7 @@ use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 
 use super::{
-    AppState,
+    CoreState,
     activity::Action,
     backups::{DownloadQuery, DownloadToken, expired_link},
     content::{stage_field, world},
@@ -391,7 +391,7 @@ fn not_found(path: &str) -> ApiError {
 }
 
 pub(super) fn folder(
-    state: &AppState,
+    state: &CoreState,
     id: &str,
 ) -> Result<Arc<Folder>, ApiError> {
     Ok(Arc::new(
@@ -402,7 +402,7 @@ pub(super) fn folder(
 /// The folder, taken for a change: the same lock installs hold, so an edit never lands between
 /// an install's plan and its writes. Do the change through [`locked`].
 pub(super) fn changing(
-    state: &AppState,
+    state: &CoreState,
     id: &str,
 ) -> Result<(Arc<Folder>, Arc<Busy>), ApiError> {
     let busy = Arc::new(state.content.busy(id)?);
@@ -456,7 +456,7 @@ fn unix(time: std::io::Result<cap_std::time::SystemTime>) -> i64 {
 /// themselves, so the token is empty.
 pub async fn auth(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<JwtAuth>, ApiError> {
@@ -474,7 +474,7 @@ pub async fn auth(
 /// `GET fs/list`: one page of a folder, folders first.
 pub async fn list(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path(id): Path<String>,
     Query(query): Query<ListQuery>,
 ) -> Result<Json<DirectoryResponse>, ApiError> {
@@ -549,7 +549,7 @@ pub async fn list(
 /// `GET fs/download`: a file, streamed.
 pub async fn download(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path(id): Path<String>,
     Query(query): Query<PathQuery>,
 ) -> Result<Response, ApiError> {
@@ -562,7 +562,7 @@ pub async fn download(
 /// that cannot send the session.
 pub async fn authorize_file(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
     Query(query): Query<PathQuery>,
 ) -> Result<Json<DownloadToken>, ApiError> {
@@ -576,7 +576,7 @@ pub async fn authorize_file(
 /// `GET v1/worlds/{wid}/files/contents-raw`: the file its link token was made for, streamed.
 /// The token names the file, so this takes no session; `fs/download` is the route for one.
 pub async fn download_file(
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
     Query(query): Query<DownloadQuery>,
 ) -> Result<Response, ApiError> {
@@ -596,7 +596,7 @@ pub async fn download_file(
 
 /// A file of the server, streamed as an attachment.
 async fn stream_file(
-    state: &AppState,
+    state: &CoreState,
     id: &str,
     path: String,
 ) -> Result<Response, ApiError> {
@@ -635,7 +635,7 @@ async fn stream_file(
 
 /// Stream a request body into a staged file, as much as fits on the disk (`archive::room`).
 async fn stage_body(
-    state: &AppState,
+    state: &CoreState,
     id: &str,
     body: Body,
 ) -> Result<PathBuf, ApiError> {
@@ -704,7 +704,7 @@ async fn place(
 /// Take the folder for a change and write a staged file into it; the staged file is removed
 /// either way. `owned` lets it replace a server-owned file.
 async fn place_changing(
-    state: &AppState,
+    state: &CoreState,
     id: &str,
     path: String,
     staged: PathBuf,
@@ -744,7 +744,7 @@ fn refuse_owned(folder: &Folder, path: &str) -> Result<(), ApiError> {
 /// server-owned file.
 pub async fn create(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path(id): Path<String>,
     Query(query): Query<CreateQuery>,
     body: Body,
@@ -772,7 +772,7 @@ pub async fn create(
 /// server-owned file.
 pub async fn update(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path(id): Path<String>,
     Query(query): Query<PathQuery>,
     body: Body,
@@ -788,7 +788,7 @@ pub async fn update(
 /// `POST fs/move`. Never onto something that exists.
 pub async fn rename(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path(id): Path<String>,
     Json(request): Json<MoveRequest>,
 ) -> Result<StatusCode, ApiError> {
@@ -816,7 +816,7 @@ pub async fn rename(
 /// `DELETE fs/delete`. A folder with something in it needs `recursive`.
 pub async fn delete(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path(id): Path<String>,
     Query(query): Query<DeleteQuery>,
 ) -> Result<StatusCode, ApiError> {
@@ -848,7 +848,7 @@ pub async fn delete(
 /// install it as one.
 pub async fn unarchive(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path(id): Path<String>,
     Query(query): Query<UnarchiveQuery>,
 ) -> Result<Json<ExtractResult>, ApiError> {
@@ -924,7 +924,7 @@ pub async fn unarchive(
 /// operation left to dismiss or cancel.
 pub async fn operation(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, _action)): Path<(String, OperationAction)>,
     Query(_query): Query<OperationQuery>,
 ) -> Result<StatusCode, ApiError> {
@@ -935,7 +935,7 @@ pub async fn operation(
 /// `POST v1/worlds/{wid}/files/stat`.
 pub async fn stat(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
     Json(request): Json<FileStatRequest>,
 ) -> Result<Json<FileStatResponse>, ApiError> {
@@ -1021,7 +1021,7 @@ fn zip_error(error: zip::result::ZipError) -> ApiError {
 /// into `target`. Answers with one `application/json-seq` record once the zip is written.
 pub async fn zip(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
     Json(request): Json<ZipRequest>,
 ) -> Result<Response, ApiError> {
@@ -1139,7 +1139,7 @@ pub async fn zip(
 /// one they had for this world and scope.
 pub async fn open_session(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid, scope)): Path<(String, String, UploadScope)>,
 ) -> Result<Json<UploadSessionResponse>, ApiError> {
     caller.require(&state.db, &id, Level::Editor).await?;
@@ -1188,7 +1188,7 @@ pub async fn open_session(
 /// `GET v1/worlds/{wid}/{scope}/upload-session`: the caller's open session, if any.
 pub async fn get_session(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid, scope)): Path<(String, String, UploadScope)>,
 ) -> Result<Json<GetUploadSessionResponse>, ApiError> {
     caller.require(&state.db, &id, Level::Editor).await?;
@@ -1210,7 +1210,7 @@ pub async fn get_session(
 /// have all arrived.
 pub async fn upload_files(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid, scope, upload_id)): Path<(
         String,
         String,
@@ -1297,7 +1297,7 @@ pub async fn upload_files(
 /// their names say, never over a server-owned file; content goes through the content model.
 pub async fn finalize_session(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid, scope, upload_id)): Path<(
         String,
         String,
@@ -1371,7 +1371,7 @@ pub async fn finalize_session(
 /// finalized can no longer be cancelled.
 pub async fn cancel_session(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid, scope, upload_id)): Path<(
         String,
         String,

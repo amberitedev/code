@@ -23,7 +23,7 @@ use modrinth_content_management::VersionType;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{AppState, activity::Action, content::LinkedPackState, internal};
+use super::{CoreState, activity::Action, content::LinkedPackState, internal};
 use crate::{
     access::{Caller, Dangerous, Level, activity},
     installs::ModLoader,
@@ -476,7 +476,7 @@ fn join_address(
     }
 }
 
-fn net(state: &AppState, row: &server_rows::ServerRow) -> Net {
+fn net(state: &CoreState, row: &server_rows::ServerRow) -> Net {
     let game_port = u16::try_from(row.port).unwrap_or_default();
     // Known while the server runs and its port is forwarded, or open on a public address.
     let outside = state
@@ -498,7 +498,7 @@ fn net(state: &AppState, row: &server_rows::ServerRow) -> Net {
 
 /// Where `id` is in its run, from its `phase`, or how its last run ended when it has none.
 pub(super) async fn power_state(
-    state: &AppState,
+    state: &CoreState,
     id: &str,
     phase: Option<Phase>,
 ) -> sqlx::Result<ServerPowerState> {
@@ -520,7 +520,7 @@ pub(super) async fn power_state(
 /// What the hosting API shows for a server row, to a caller with `level` on it, reached at
 /// `host`.
 async fn server(
-    state: &AppState,
+    state: &CoreState,
     row: server_rows::ServerRow,
     level: Level,
     host: &str,
@@ -580,7 +580,7 @@ async fn server(
 
 /// The App instance a server follows, when its pack is a version of that instance's share.
 async fn linked_instance(
-    state: &AppState,
+    state: &CoreState,
     id: &str,
 ) -> Result<Option<LinkedInstance>, ApiError> {
     let Some(pack) = content_rows::get_pack(&state.db, id)
@@ -619,7 +619,7 @@ fn loader(stored: &str) -> Option<Loader> {
 /// `GET /modrinth/v0/servers`: every server the caller has a role on, on one page.
 pub async fn list(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     headers: HeaderMap,
 ) -> Result<Json<ServerGetResponse>, ApiError> {
     let mut servers = Vec::new();
@@ -646,7 +646,7 @@ pub async fn list(
 /// `GET /modrinth/v0/servers/{id}`.
 pub async fn get(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<Server>, ApiError> {
@@ -661,7 +661,7 @@ pub async fn get(
 /// `POST /local/servers`: an unconfigured server. Linked instances are step 4. Owner only.
 pub async fn create(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Json(request): Json<CreateServerRequest>,
 ) -> Result<Json<CreateServerResponse>, ApiError> {
     caller.require_owner()?;
@@ -684,7 +684,7 @@ pub async fn create(
 /// shim has the request; restart at once.
 pub async fn power(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path(id): Path<String>,
     Json(request): Json<PowerRequest>,
 ) -> Result<StatusCode, ApiError> {
@@ -720,7 +720,7 @@ pub async fn power(
 /// is refused.
 pub async fn reinstall(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path(id): Path<String>,
     Query(query): Query<ReinstallQuery>,
     Json(request): Json<ReinstallRequest>,
@@ -777,7 +777,7 @@ pub async fn reinstall(
 /// only, dangerous. Its activity history stays.
 pub async fn delete(
     Dangerous(caller): Dangerous,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
     server_rows::get(&state.db, &id)
@@ -809,7 +809,7 @@ pub async fn delete(
 /// Delete a held server's row, and with it every role on it and its own share and that share's
 /// history, owing the backend each removal and dropping its players. Returns who had a role.
 async fn remove_server(
-    state: &AppState,
+    state: &CoreState,
     caller: &Caller,
     id: &str,
 ) -> Result<Vec<String>, ApiError> {
@@ -864,7 +864,7 @@ async fn remove_server(
 /// session itself, so the token here is empty. Editors and the owner only.
 pub async fn ws_auth(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<WsAuth>, ApiError> {
@@ -879,7 +879,7 @@ pub async fn ws_auth(
 /// The hosting API's full view of a server reached at `host`, with its one world, whose id is
 /// the server's.
 async fn server_full(
-    state: &AppState,
+    state: &CoreState,
     row: server_rows::ServerRow,
     host: &str,
 ) -> Result<ServerFull, ApiError> {
@@ -971,7 +971,7 @@ async fn server_full(
 /// `GET /v1/servers`: every server the caller has a role on.
 pub async fn list_v1(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<ServerFull>>, ApiError> {
     let mut servers = Vec::new();
@@ -991,7 +991,7 @@ pub async fn list_v1(
 /// `GET /v1/servers/{id}`.
 pub async fn get_v1(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<ServerFull>, ApiError> {
@@ -1015,7 +1015,7 @@ pub struct PatchWorld {
 /// `PATCH /v1/servers/{id}/worlds/{wid}`.
 pub async fn patch_world(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
     Json(request): Json<PatchWorld>,
 ) -> Result<StatusCode, ApiError> {

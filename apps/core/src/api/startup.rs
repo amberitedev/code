@@ -19,7 +19,7 @@ use contracts::{ApiError, ErrorCode};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use super::{AppState, activity::Action, content::world, internal};
+use super::{CoreState, activity::Action, content::world, internal};
 use crate::{
     access::{Caller, Level, activity},
     installs::java,
@@ -123,7 +123,10 @@ pub struct JavaPath {
 const MAJORS: [u32; 5] = [8, 11, 17, 21, 25];
 
 /// What the startup routes report for a server: its command line and Java major.
-async fn report(state: &AppState, id: &str) -> Result<(String, u32), ApiError> {
+async fn report(
+    state: &CoreState,
+    id: &str,
+) -> Result<(String, u32), ApiError> {
     let server = server_rows::get(&state.db, id)
         .await
         .map_err(internal)?
@@ -144,7 +147,7 @@ async fn report(state: &AppState, id: &str) -> Result<(String, u32), ApiError> {
 
 /// Choose the managed Java major, or `None` for the one the version needs.
 async fn set_major(
-    state: &AppState,
+    state: &CoreState,
     caller: &Caller,
     id: &str,
     major: Option<u32>,
@@ -204,7 +207,7 @@ fn custom_command(
 /// `GET /modrinth/v0/servers/{id}/startup`.
 pub async fn get_v0(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path(id): Path<String>,
 ) -> Result<Json<StartupConfig>, ApiError> {
     caller.require(&state.db, &id, Level::Editor).await?;
@@ -221,7 +224,7 @@ pub async fn get_v0(
 /// `POST /modrinth/v0/servers/{id}/startup`: choose the Java major; null resets it.
 pub async fn update_v0(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path(id): Path<String>,
     Json(body): Json<UpdateStartupConfig>,
 ) -> Result<StatusCode, ApiError> {
@@ -245,7 +248,7 @@ pub async fn update_v0(
 /// `GET /v1/servers/{id}/worlds/{wid}/options/startup`.
 pub async fn get_v1(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
 ) -> Result<Json<RuntimeOptions>, ApiError> {
     caller.require(&state.db, &id, Level::Editor).await?;
@@ -263,7 +266,7 @@ pub async fn get_v1(
 /// command must be the one Core builds, and a null Java version resets it.
 pub async fn patch_v1(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
     Json(body): Json<PatchRuntimeOptions>,
 ) -> Result<StatusCode, ApiError> {
@@ -279,7 +282,7 @@ pub async fn patch_v1(
 /// to a file.
 pub async fn set_java_path(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path(id): Path<String>,
     Json(body): Json<JavaPath>,
 ) -> Result<StatusCode, ApiError> {

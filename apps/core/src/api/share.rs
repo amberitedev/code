@@ -33,7 +33,7 @@ use sharing_client::{
 use ts_rs::TS;
 
 use super::{
-    AppState,
+    CoreState,
     activity::Action,
     content::{server_first, world},
     internal,
@@ -116,7 +116,7 @@ pub struct SharedInstancePublishDiff {
 }
 
 /// The backend's share routes, reached with this Core's key.
-pub(super) async fn backend(state: &AppState) -> Result<Backend, ApiError> {
+pub(super) async fn backend(state: &CoreState) -> Result<Backend, ApiError> {
     let key: Option<String> =
         sqlx::query_scalar("SELECT backend_key FROM core WHERE id = 1")
             .fetch_optional(&state.db)
@@ -180,7 +180,7 @@ fn stage(folder: &Folder, path: &str, to: &FsPath) -> std::io::Result<()> {
 /// first push.
 pub async fn share(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
     Json(request): Json<ShareRequest>,
 ) -> Result<Json<ShareWorldContentResponse>, ApiError> {
@@ -371,7 +371,7 @@ fn locate_config(
 /// it can, so an unpaired Core deletes it when it pairs again or never needs to.
 pub async fn unshare(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
 ) -> Result<StatusCode, ApiError> {
     caller.require(&state.db, &id, Level::Owner).await?;
@@ -392,7 +392,7 @@ pub async fn unshare(
 /// `GET .../content/share/files`: the config files a push can carry.
 pub async fn files(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
 ) -> Result<Json<ShareableFilesResponse>, ApiError> {
     caller.require(&state.db, &id, Level::Editor).await?;
@@ -411,7 +411,7 @@ pub async fn files(
 
 /// The configs the latest version of the server's share carries. None when it has no share or
 /// the backend cannot be read now, which only leaves the files unmarked.
-async fn shared_configs(state: &AppState, id: &str) -> BTreeSet<String> {
+async fn shared_configs(state: &CoreState, id: &str) -> BTreeSet<String> {
     let latest = async {
         let Some(share_id) = server_rows::share_id(&state.db, id)
             .await
@@ -502,7 +502,7 @@ impl ShareFolder for ServerFolder<'_> {
 /// players can install, so the App pushes straight away.
 pub async fn diff(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
 ) -> Result<Json<SharedInstancePublishDiff>, ApiError> {
     caller.require(&state.db, &id, Level::Editor).await?;
@@ -550,7 +550,7 @@ pub async fn diff(
 /// first, as the App lists an instance's.
 pub async fn history(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
 ) -> Result<Json<Vec<SharedInstanceHistoryEntry>>, ApiError> {
     caller.require(&state.db, &id, Level::Owner).await?;
@@ -563,7 +563,7 @@ pub async fn history(
 /// push again. 204 once it is back; 202 while the version's loader or pack installs first.
 pub async fn restore(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid, version)): Path<(String, String, i32)>,
 ) -> Result<StatusCode, ApiError> {
     caller.require(&state.db, &id, Level::Owner).await?;
@@ -583,7 +583,7 @@ pub async fn restore(
 /// Refused while the server's content is busy, such as with a restore of that version.
 pub async fn delete_version(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid, version)): Path<(String, String, i32)>,
 ) -> Result<StatusCode, ApiError> {
     caller.require(&state.db, &id, Level::Owner).await?;

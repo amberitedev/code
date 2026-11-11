@@ -2,7 +2,7 @@
 //! and it is the only thing a session is looked up by, so the lookup's timing depends on the hash
 //! and never on the token.
 
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use contracts::{ApiError, ErrorCode};
 use ring::rand::{SecureRandom, SystemRandom};
 use sha2::{Digest, Sha256};

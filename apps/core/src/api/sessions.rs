@@ -20,7 +20,7 @@ use contracts::{ApiError, ErrorCode};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use super::{AppState, access::User, activity::Action, internal};
+use super::{CoreState, access::User, activity::Action, internal};
 use crate::access::{Caller, Peer, activity, fresh_ticket, now, sessions};
 
 #[derive(Debug, Clone, Deserialize, TS)]
@@ -58,7 +58,7 @@ pub struct Session {
 
 /// `POST /sessions`.
 pub async fn sign_in(
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     peer: Option<Extension<Peer>>,
     Json(request): Json<SignIn>,
 ) -> Result<Json<SignedIn>, ApiError> {
@@ -84,7 +84,7 @@ pub async fn sign_in(
 /// `GET /sessions`.
 pub async fn list(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
 ) -> Result<Json<Vec<Session>>, ApiError> {
     let only = if caller.is_owner() {
         None
@@ -105,7 +105,7 @@ pub async fn list(
 /// `DELETE /sessions/{id}`.
 pub async fn revoke(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
@@ -127,7 +127,7 @@ pub async fn revoke(
 /// `DELETE /sessions/current`.
 pub async fn sign_out(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
 ) -> Result<StatusCode, ApiError> {
     match &caller {
         Caller::Session { id, .. } => end(&state, &caller, id).await,
@@ -139,7 +139,7 @@ pub async fn sign_out(
 }
 
 async fn end(
-    state: &AppState,
+    state: &CoreState,
     caller: &Caller,
     id: &str,
 ) -> Result<StatusCode, ApiError> {

@@ -171,7 +171,7 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
         config.forward_ports && config.local_only().is_none(),
     ));
     tokio::spawn(Arc::clone(&network).run(Arc::clone(&servers)));
-    let state = Arc::new(api::AppState {
+    let state = Arc::new(api::CoreState {
         db: db.clone(),
         servers,
         access: Arc::clone(&access),

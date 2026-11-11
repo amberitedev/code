@@ -17,7 +17,7 @@ use contracts::{ApiError, ErrorCode};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use super::{AppState, activity::Action, internal};
+use super::{CoreState, activity::Action, internal};
 use crate::{
     access::{Caller, Level, activity},
     servers::{
@@ -56,7 +56,7 @@ pub struct Memory {
 }
 
 async fn performance(
-    state: &AppState,
+    state: &CoreState,
     id: &str,
 ) -> Result<Performance, ApiError> {
     let server = server_rows::get(&state.db, id)
@@ -76,7 +76,7 @@ async fn performance(
 /// `GET /servers/{id}/performance`.
 pub async fn get(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path(id): Path<String>,
 ) -> Result<Json<Performance>, ApiError> {
     caller.require(&state.db, &id, Level::Viewer).await?;
@@ -86,7 +86,7 @@ pub async fn get(
 /// `PUT /servers/{id}/memory`.
 pub async fn set_memory(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path(id): Path<String>,
     Json(request): Json<Memory>,
 ) -> Result<Json<Performance>, ApiError> {
@@ -112,7 +112,7 @@ pub async fn set_memory(
 /// `PUT /servers/{id}/flags`.
 pub async fn set_flags(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path(id): Path<String>,
     Json(request): Json<JvmFlags>,
 ) -> Result<Json<Performance>, ApiError> {
@@ -141,7 +141,7 @@ pub async fn set_flags(
 /// `PUT /servers/{id}/restarts`.
 pub async fn set_restarts(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path(id): Path<String>,
     Json(request): Json<Restarts>,
 ) -> Result<Json<Performance>, ApiError> {

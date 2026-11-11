@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use ts_rs::TS;
 
-use super::{AppState, activity::Action, internal};
+use super::{CoreState, activity::Action, internal};
 use crate::access::{Caller, activity, now};
 
 /// Where the EULA is, to show before accepting it.
@@ -51,7 +51,7 @@ pub async fn accept(db: &SqlitePool) -> sqlx::Result<()> {
 /// `GET /eula`.
 pub async fn get(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
 ) -> Result<Json<Eula>, ApiError> {
     caller.require_owner()?;
     Ok(Json(Eula {
@@ -63,7 +63,7 @@ pub async fn get(
 /// `POST /eula`.
 pub async fn post(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
 ) -> Result<Json<Eula>, ApiError> {
     caller.require_owner()?;
     let before = accepted_at(&state.db).await.map_err(internal)?;

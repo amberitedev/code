@@ -11,7 +11,7 @@ use contracts::ApiError;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use super::AppState;
+use super::CoreState;
 use crate::{access::Caller, servers::console};
 
 #[derive(Debug, Clone, Deserialize, TS)]
@@ -30,7 +30,7 @@ pub struct CoreLogs {
 /// `GET /logs`.
 pub async fn get(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Query(query): Query<LogsQuery>,
 ) -> Result<Json<CoreLogs>, ApiError> {
     caller.require_owner()?;

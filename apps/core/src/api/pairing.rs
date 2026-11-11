@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use ts_rs::TS;
 
-use super::{AppState, activity::Action, internal};
+use super::{CoreState, activity::Action, internal};
 use crate::access::{Caller, Changed, Dangerous, activity, pairing, sync};
 
 /// How long `POST /pairing/code` waits for the new code.
@@ -53,7 +53,7 @@ async fn status(db: &SqlitePool) -> Result<PairingStatus, ApiError> {
 /// `GET /pairing`.
 pub async fn get(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
 ) -> Result<Json<PairingStatus>, ApiError> {
     caller.require_owner()?;
     Ok(Json(status(&state.db).await?))
@@ -62,7 +62,7 @@ pub async fn get(
 /// `POST /pairing/code`.
 pub async fn new_code(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
 ) -> Result<Json<PairingStatus>, ApiError> {
     caller.require_owner()?;
     if pairing::paired(&state.db).await.map_err(internal)? {
@@ -96,7 +96,7 @@ pub async fn new_code(
 /// `DELETE /pairing`.
 pub async fn remove(
     Dangerous(caller): Dangerous,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
 ) -> Result<StatusCode, ApiError> {
     let mut tx = state.db.begin().await.map_err(internal)?;
     activity::record(&mut tx, caller.user_id(), None, &Action::CoreRemoved)

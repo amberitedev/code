@@ -11,7 +11,7 @@ use axum::{
 use contracts::ApiError;
 use serde::Deserialize;
 
-use super::{AppState, activity::Action, content::world, internal};
+use super::{CoreState, activity::Action, content::world, internal};
 use crate::{
     access::{Caller, Level, activity},
     state::servers::adapters::filesystem::properties,
@@ -83,7 +83,7 @@ fn fields(all: BTreeMap<String, String>) -> PropertiesFields {
 /// `GET .../properties`.
 pub async fn get(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
 ) -> Result<Json<PropertiesFields>, ApiError> {
     caller.require(&state.db, &id, Level::Editor).await?;
@@ -96,7 +96,7 @@ pub async fn get(
 /// set to null. Takes effect at the next start. Answers with the file as it is now.
 pub async fn patch(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
     Json(body): Json<PatchPropertiesFields>,
 ) -> Result<Json<PropertiesFields>, ApiError> {

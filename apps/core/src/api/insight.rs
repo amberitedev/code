@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use super::{
-    AppState, internal,
+    CoreState, internal,
     servers::{Reachability, ReachabilityState},
 };
 use crate::{
@@ -136,7 +136,7 @@ impl From<Report> for ReachabilityReport {
 }
 
 /// The hosting API's short form of a server's reachability.
-pub fn archon(state: &AppState, server_id: &str) -> Option<Reachability> {
+pub fn archon(state: &CoreState, server_id: &str) -> Option<Reachability> {
     let report = ReachabilityReport::from(state.network.report(server_id)?);
     Some(Reachability {
         state: match report.state {
@@ -150,7 +150,7 @@ pub fn archon(state: &AppState, server_id: &str) -> Option<Reachability> {
 
 /// What `level` may see of a server.
 async fn insight(
-    state: &AppState,
+    state: &CoreState,
     id: &str,
     level: Level,
 ) -> Result<ServerInsight, ApiError> {
@@ -181,7 +181,7 @@ async fn insight(
 /// `GET /servers/{id}/insight`.
 pub async fn get(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path(id): Path<String>,
 ) -> Result<Json<ServerInsight>, ApiError> {
     let level = caller.require(&state.db, &id, Level::Viewer).await?;
@@ -191,7 +191,7 @@ pub async fn get(
 /// `POST /servers/{id}/reachability`.
 pub async fn check(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path(id): Path<String>,
 ) -> Result<Json<ServerInsight>, ApiError> {
     let level = caller.require(&state.db, &id, Level::Editor).await?;
@@ -207,7 +207,7 @@ pub async fn check(
 /// `GET /machine`.
 pub async fn machine(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
 ) -> Result<Json<Machine>, ApiError> {
     caller.require_owner()?;
     let memory_mb = memory::machine_mb();

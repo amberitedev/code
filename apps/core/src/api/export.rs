@@ -12,7 +12,7 @@ use contracts::ApiError;
 use uuid::Uuid;
 
 use super::{
-    AppState,
+    CoreState,
     backups::{DownloadQuery, DownloadToken, downloader, zip_response},
     content::world,
     internal,
@@ -30,7 +30,7 @@ use crate::{
 /// export.
 pub async fn authorize(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
 ) -> Result<Json<DownloadToken>, ApiError> {
     caller.require(&state.db, &id, Level::Editor).await?;
@@ -44,7 +44,7 @@ pub async fn authorize(
 /// `token`; a session in the header works too.
 pub async fn export(
     caller: Result<Caller, ApiError>,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
     Query(query): Query<DownloadQuery>,
 ) -> Result<Response, ApiError> {

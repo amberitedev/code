@@ -15,7 +15,7 @@ use contracts::{ApiError, ErrorCode};
 use tokio::sync::{broadcast, mpsc};
 
 use super::{
-    AppState,
+    CoreState,
     activity::Action,
     servers::{ServerPowerState, power_state},
 };
@@ -42,7 +42,7 @@ const POWER_EVERY: std::time::Duration = std::time::Duration::from_millis(500);
 /// or its user loses the role, and when the session expires.
 pub async fn console(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     Path(id): Path<String>,
     upgrade: WebSocketUpgrade,
 ) -> Response {
@@ -67,7 +67,7 @@ pub async fn console(
 /// Whether `caller` may still read `server`'s console: their session is live and their role
 /// still allows it.
 async fn still_allowed(
-    state: &AppState,
+    state: &CoreState,
     caller: &Caller,
     server: &str,
 ) -> bool {
@@ -91,7 +91,7 @@ async fn still_allowed(
 }
 
 async fn console_socket(
-    state: Arc<AppState>,
+    state: Arc<CoreState>,
     caller: Caller,
     _guard: StreamGuard,
     mut changes: broadcast::Receiver<Changed>,
@@ -223,7 +223,7 @@ async fn console_socket(
 /// `id`'s power state at `phase`, as the hosting API's socket names it, or `None` when its last
 /// run could not be read. A killed server reads as stopped.
 async fn power_of(
-    state: &AppState,
+    state: &CoreState,
     id: &str,
     phase: Option<crate::servers::Phase>,
 ) -> Option<PowerState> {
@@ -249,7 +249,7 @@ async fn power_of(
 /// counts on from.
 async fn send_power(
     socket: &mut WebSocket,
-    state: &AppState,
+    state: &CoreState,
     id: &str,
     power: PowerState,
 ) -> Result<(), axum::Error> {

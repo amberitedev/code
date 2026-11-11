@@ -12,7 +12,7 @@ use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
-use super::{AppState, router};
+use super::{CoreState, router};
 use crate::{
     access::{
         self, Access,
@@ -56,7 +56,7 @@ async fn track(
 
 struct Core {
     _dir: tempfile::TempDir,
-    state: Arc<AppState>,
+    state: Arc<CoreState>,
     router: Router,
     signer: Signer,
     core_id: String,
@@ -129,7 +129,7 @@ async fn core() -> Core {
         crate::network::http().build().unwrap(),
         String::new(),
     ));
-    let state = Arc::new(AppState {
+    let state = Arc::new(CoreState {
         servers,
         access: Arc::new(Access::new(keys)),
         network: Arc::new(crate::network::forward::Network::off(db.clone())),

@@ -11,7 +11,7 @@ use super::{
 };
 use crate::{
     access::Access,
-    api::{self, AppState},
+    api::{self, CoreState},
     daemon::{accounts, folders, paths::Paths},
     db,
     servers::{
@@ -123,7 +123,7 @@ fn bad_arguments_are_refused() {
 }
 
 /// A Core with no backend serving the router on a local socket in a temporary folder.
-async fn core() -> (tempfile::TempDir, Arc<AppState>, Client) {
+async fn core() -> (tempfile::TempDir, Arc<CoreState>, Client) {
     let dir = tempfile::tempdir().unwrap();
     let paths = Paths::new(dir.path());
     folders::create(&paths, None).unwrap();
@@ -158,7 +158,7 @@ async fn core() -> (tempfile::TempDir, Arc<AppState>, Client) {
     )
     .await
     .unwrap();
-    let state = Arc::new(AppState {
+    let state = Arc::new(CoreState {
         servers,
         access: Arc::new(Access::new(keys)),
         content,

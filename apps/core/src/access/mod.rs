@@ -30,7 +30,7 @@ use contracts::{ApiError, ErrorCode};
 use tokio::sync::{Notify, broadcast};
 
 use crate::{
-    api::{AppState, access::Role, internal},
+    api::{CoreState, access::Role, internal},
     db,
 };
 
@@ -234,12 +234,12 @@ impl Caller {
     }
 }
 
-impl FromRequestParts<Arc<AppState>> for Caller {
+impl FromRequestParts<Arc<CoreState>> for Caller {
     type Rejection = ApiError;
 
     async fn from_request_parts(
         parts: &mut Parts,
-        state: &Arc<AppState>,
+        state: &Arc<CoreState>,
     ) -> Result<Self, ApiError> {
         if parts.extensions.get::<local::Local>().is_some() {
             return Ok(Self::Local);
@@ -265,12 +265,12 @@ impl FromRequestParts<Arc<AppState>> for Caller {
 /// needs a fresh ticket (see [`fresh_ticket`]); the local CLI needs none.
 pub struct Dangerous(pub Caller);
 
-impl FromRequestParts<Arc<AppState>> for Dangerous {
+impl FromRequestParts<Arc<CoreState>> for Dangerous {
     type Rejection = ApiError;
 
     async fn from_request_parts(
         parts: &mut Parts,
-        state: &Arc<AppState>,
+        state: &Arc<CoreState>,
     ) -> Result<Self, ApiError> {
         let caller = Caller::from_request_parts(parts, state).await?;
         Self::check(state, caller, &parts.headers).await
@@ -281,7 +281,7 @@ impl Dangerous {
     /// The extractor's checks, for a route where only some changes are dangerous, such as
     /// keeping fewer scheduled backups.
     pub async fn check(
-        state: &AppState,
+        state: &CoreState,
         caller: Caller,
         headers: &HeaderMap,
     ) -> Result<Self, ApiError> {
@@ -294,7 +294,7 @@ impl Dangerous {
 /// Check and use up the ticket in [`TICKET_HEADER`]: under five minutes old, never used, and for
 /// the session's own user. A stolen session alone cannot pass this. The local CLI always does.
 pub async fn fresh_ticket(
-    state: &AppState,
+    state: &CoreState,
     caller: &Caller,
     headers: &HeaderMap,
 ) -> Result<(), ApiError> {
