@@ -2,8 +2,9 @@
 
 // CI's fast checks for this branch's changes, so they fail here instead of after a push:
 // lint, typos and TOML on the changed files, typecheck and tests of the affected packages,
-// `dev:check` when the dev scripts change, and for Rust, `cargo fmt` and a build through the dev
-// runner (the same compile check `up` does, sharing its build folder).
+// `dev:check` when the dev scripts change, and for Rust, `cargo fmt`, a build through the dev
+// runner (the same compile check `up` does, sharing its build folder), and the tests of every
+// workspace crate with a changed file.
 //
 //   vp run check:changed          compare against the merge base with origin/main
 //   vp run check:changed <ref>    compare against the merge base with <ref>
@@ -50,9 +51,12 @@ type Step = {
 	readonly name: string
 	readonly command: string
 	readonly args: ReadonlyArray<string>
+	/** Added to this process's environment. */
+	readonly env?: Readonly<Record<string, string>>
 }
 const steps: Step[] = []
 const skipped: string[] = []
+const failed: string[] = []
 
 const scripts = matching(/\.(?:[cm]?[jt]s|vue)$/)
 if (scripts.length > 0) {
@@ -99,24 +103,80 @@ if (rust.length > 0) steps.push({ name: 'rustfmt', command: 'rustfmt', args: ['-
 if (touched.some((file) => /\.rs$|(?:^|\/)Cargo\.(?:toml|lock)$/.test(file))) {
 	steps.push({ name: 'rust build', command: 'node', args: ['scripts/dev-runner.ts', 'build'] })
 }
+// Files outside a crate's folder that its tests read (ci.yml's rust filter lists them too).
+const READ_BY_CRATE: Readonly<Record<string, string>> = {
+	'packages/api-client/src/modules/bedrock/limits.ts': 'bedrock',
+	'packages/api-client/src/modules/sharing/rules.ts': 'sharing-client',
+	'packages/assets/external/illustrations/minecraft_server_icon.png': 'theseus',
+}
+const crates = under('apps', 'packages') ? workspaceCrates() : []
+if (crates === 'no cargo') skipped.push('rust tests (cargo is not installed)')
+else if (crates === 'failed') failed.push('rust tests (cargo metadata failed)')
+else {
+	// The crates CI leaves out of the workspace tests (ci.yml, rust job).
+	const untested = new Set(['toasty', 'serde-binhum'])
+	const readBy = new Set(touched.flatMap((file) => READ_BY_CRATE[file] ?? []))
+	const tested = crates.filter(
+		(crate) => !untested.has(crate.name) && (under(crate.folder) || readBy.has(crate.name)),
+	)
+	if (tested.some((crate) => crate.name === 'theseus_gui')) {
+		// Tauri only checks that the frontend build folder exists, as in CI.
+		NodeFS.mkdirSync(NodePath.join(root, 'apps', 'app-frontend', 'dist'), { recursive: true })
+	}
+	if (tested.length > 0) {
+		steps.push({
+			name: 'rust tests',
+			command: 'cargo',
+			args: ['test', '--locked', ...tested.flatMap((crate) => ['-p', crate.name])],
+			env: { SQLX_OFFLINE: 'true' },
+		})
+	}
+}
 
 console.log(`[check] ${changed.length} changed files since ${base.slice(0, 9)}`)
 const results = steps.map((step) => {
 	console.log(`\n[check] ${step.name}`)
+	const options = { cwd: root, env: { ...process.env, ...step.env }, stdio: 'inherit' } as const
 	// Windows runs vp through its .cmd shim, which needs the shell. File names are quoted for it.
 	const result =
 		process.platform === 'win32' && step.command === 'vp'
 			? NodeChildProcess.spawnSync(
 					[step.command, ...step.args.map((arg) => `"${arg}"`)].join(' '),
-					{ cwd: root, shell: true, stdio: 'inherit' },
+					{ ...options, shell: true },
 				)
-			: NodeChildProcess.spawnSync(step.command, step.args, { cwd: root, stdio: 'inherit' })
+			: NodeChildProcess.spawnSync(step.command, step.args, options)
 	return { name: step.name, ok: result.status === 0 }
 })
 console.log('\n[check] summary')
 for (const { name, ok } of results) console.log(`  ${ok ? 'pass' : 'FAIL'}  ${name}`)
+for (const name of failed) console.log(`  FAIL  ${name}`)
 for (const name of skipped) console.log(`  skip  ${name}`)
-if (results.some((result) => !result.ok)) process.exitCode = 1
+if (failed.length > 0 || results.some((result) => !result.ok)) process.exitCode = 1
+
+/** The root workspace's crates, with folders relative to the checkout. */
+function workspaceCrates() {
+	const result = NodeChildProcess.spawnSync(
+		'cargo',
+		['metadata', '--no-deps', '--offline', '--format-version', '1'],
+		{ cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
+	)
+	if (result.error && 'code' in result.error && result.error.code === 'ENOENT') return 'no cargo'
+	if (result.error || result.status !== 0) {
+		console.error(result.error?.message ?? result.stderr.trim())
+		return 'failed'
+	}
+	const { packages } = JSON.parse(result.stdout) as {
+		packages: ReadonlyArray<{ manifest_path: string; name: string }>
+	}
+	const checkout = NodeFS.realpathSync.native(root)
+	return packages.map((crate) => ({
+		name: crate.name,
+		folder: NodePath.relative(checkout, NodePath.dirname(crate.manifest_path)).replaceAll(
+			'\\',
+			'/',
+		),
+	}))
+}
 
 function onPath(command: string): boolean {
 	const finder = process.platform === 'win32' ? 'where' : 'which'

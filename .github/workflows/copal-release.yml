@@ -60,6 +60,13 @@ jobs:
             *-beta | *-beta.* | *-alpha | *-alpha.*) ;;
             *-*) echo "::error::$version is on no channel. Use 1.2.0, 1.2.0-beta.N, or 1.2.0-alpha.N"; exit 1 ;;
           esac
+      # For the engine (packages/app-lib) the restructure adds to Copal: its build script runs Gradle
+      # and compiles in the settings from its .env.
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: 17
+      - run: cp packages/app-lib/.env.prod packages/app-lib/.env
       - run: cargo build -p copal --release --locked
       - name: Stage the binary
         shell: bash

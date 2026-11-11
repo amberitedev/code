@@ -676,8 +676,7 @@ export function createProcessSpecs(input: {
 			build: {
 				cargoArgs: ['build', '--package', 'copal'],
 				cwd: coreDir,
-				env: {},
-				ignoredInputs: [],
+				...appLibBuildSettings(input.paths, input.env),
 				inputs: workspaceInputs(input.paths, 'copal'),
 				program: programFile('copal'),
 				...workspaceBuildDirs(input.paths),
@@ -744,13 +743,7 @@ function createAppProcessSpec(input: {
 
 function appProgramBuild(paths: WorktreePaths, env: NodeJS.ProcessEnv): ProgramBuild {
 	const appDir = NodePath.join(paths.worktree, 'apps', 'app')
-	const appLibDir = NodePath.join(paths.worktree, 'packages', 'app-lib')
-	// The App library's build passes these to the compiler: from `.env`, or from the
-	// environment when that file is missing.
-	const compiled = Object.keys({
-		...readEnv(NodePath.join(appLibDir, '.env.prod')),
-		...readEnv(NodePath.join(appLibDir, '.env')),
-	}).flatMap((name) => (env[name] === undefined ? [] : [[name, env[name]]]))
+	const appLib = appLibBuildSettings(paths, env)
 	return {
 		// What `tauri dev` ran. Without `custom-protocol` the App loads its frontend from devUrl.
 		cargoArgs: [
@@ -763,16 +756,40 @@ function appProgramBuild(paths: WorktreePaths, env: NodeJS.ProcessEnv): ProgramB
 		],
 		cwd: appDir,
 		env: {
-			...Object.fromEntries(compiled),
+			...appLib.env,
 			TAURI_CONFIG: JSON.stringify(
 				JSON.parse(NodeFS.readFileSync(NodePath.join(appDir, 'tauri-local.conf.json'), 'utf8')),
 			),
 		},
-		ignoredInputs: [NodePath.join(appLibDir, '.env')],
+		ignoredInputs: appLib.ignoredInputs,
 		// The App's version comes from the frontend.
 		inputs: [...workspaceInputs(paths, 'theseus_gui'), 'apps/app-frontend/package.json'],
 		program: programFile('theseus_gui'),
 		...workspaceBuildDirs(paths),
+	}
+}
+
+/**
+ * app-lib's build passes these to the compiler: from its `.env`, or from the environment when that
+ * file is missing. Every program that may build app-lib takes them.
+ */
+function appLibBuildSettings(
+	paths: WorktreePaths,
+	env: NodeJS.ProcessEnv,
+): Pick<ProgramBuild, 'env' | 'ignoredInputs'> {
+	const appLibDir = NodePath.join(paths.worktree, 'packages', 'app-lib')
+	const names = Object.keys({
+		...readEnv(NodePath.join(appLibDir, '.env.prod')),
+		...readEnv(NodePath.join(appLibDir, '.env')),
+	})
+	return {
+		env: Object.fromEntries(
+			names.flatMap((name) => {
+				const value = env[name]
+				return value === undefined ? [] : [[name, value] as const]
+			}),
+		),
+		ignoredInputs: [NodePath.join(appLibDir, '.env')],
 	}
 }
 

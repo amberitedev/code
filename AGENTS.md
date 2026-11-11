@@ -107,8 +107,8 @@ instead of pointing at live state:
 ## Verifying
 
 - Before you push, run `vp run check:changed`. It runs CI's fast checks for changed files: lint,
-  typos, TOML, typecheck and tests of the affected packages, and for Rust `rustfmt` and a build.
-  CI still runs the full suites.
+  typos, TOML, typecheck and tests of the affected packages, and for Rust `rustfmt`, a build, and
+  the tests of changed crates. CI still runs the full suites.
 - Test behavior that can break, such as sharing and sync logic, Core and backend permission
   checks, persistence and migrations, external-format parsing (modpacks, Modrinth's API), race
   fixes, and the logic a bug fix changed. Leave out tests for what types already guarantee, trivial

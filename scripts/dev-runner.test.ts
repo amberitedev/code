@@ -214,7 +214,7 @@ describe('dev runner scenarios', () => {
 		const specs = createProcessSpecs({
 			accountWeb: true,
 			branch: 'feature',
-			env: {},
+			env: { MODRINTH_API_URL: 'https://api.example/v2/' },
 			hideWindows: true,
 			mode: 'dev',
 			paths,
@@ -244,10 +244,13 @@ describe('dev runner scenarios', () => {
 			)
 		}
 		expect(apps[0]!.build).toEqual(apps[1]!.build)
+		const core = specs.find((spec) => spec.label === 'core')?.build
 		// Core compiles this crate from outside its own folder.
-		expect(specs.find((spec) => spec.label === 'core')?.build?.inputs).toEqual(
+		expect(core?.inputs).toEqual(
 			expect.arrayContaining(['apps/core', 'Cargo.lock', 'packages/minecraft-meta-manifest']),
 		)
+		expect(core?.env).toEqual({ MODRINTH_API_URL: 'https://api.example/v2/' })
+		expect(core?.ignoredInputs).toEqual(apps[0]!.build?.ignoredInputs)
 		const cwd = process.cwd().replaceAll('\\', '/')
 		expect(apps.map((spec) => spec.env.THESEUS_CONFIG_DIR?.replaceAll('\\', '/'))).toEqual([
 			`${cwd}/.data/scenarios/1`,

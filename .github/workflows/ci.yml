@@ -1,7 +1,7 @@
 name: CI
 
 # The checks agents and people rely on instead of running the full suite locally.
-# Rust jobs only run when Rust files change; a skipped job counts as passing.
+# The Rust job only runs when a Rust input changes; a skipped job counts as passing.
 
 on:
   push:
@@ -32,8 +32,7 @@ jobs:
     name: Detect changes
     runs-on: ubuntu-latest
     outputs:
-      core: ${{ inputs.ref != '' || steps.filter.outputs.core == 'true' }}
-      app: ${{ inputs.ref != '' || steps.filter.outputs.app == 'true' }}
+      rust: ${{ inputs.ref != '' || steps.filter.outputs.rust == 'true' }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -44,28 +43,33 @@ jobs:
         id: filter
         with:
           filters: |
-            # Copal and the local crates it builds with (cargo metadata from apps/core).
-            core:
-              - apps/core/**
-              - packages/bedrock/**
-              - packages/minecraft-meta-manifest/**
-              - packages/modrinth-content-management/**
-              - packages/path-util/**
-              - packages/sharing-client/**
-              - packages/sharing-storage/**
-              - Cargo.toml
-              - Cargo.lock
-              - rust-toolchain.toml
-              - rustfmt.toml
-              - .cargo/**
-              - .github/workflows/ci.yml
-            app:
-              - apps/app/**
-              - packages/**/*.rs
+            rust:
+              - '**/*.rs'
               - '**/Cargo.toml'
               - Cargo.lock
               - rust-toolchain.toml
               - rustfmt.toml
+              - .cargo/**
+              # Whole crate folders: crates compile in or test against files of every type.
+              - apps/app/**
+              - apps/core/**
+              - packages/app-lib/**
+              - packages/ariadne/**
+              - packages/async-minecraft-ping/**
+              - packages/bedrock/**
+              - packages/browser-bridge/**
+              - packages/contracts/**
+              - packages/minecraft-meta-manifest/**
+              - packages/modrinth-content-management/**
+              - packages/path-util/**
+              - packages/serde-binhum/**
+              - packages/sharing-client/**
+              - packages/sharing-storage/**
+              - packages/toasty/**
+              # Read from outside a crate: two drift tests' generated files and an icon app-lib embeds.
+              - packages/api-client/src/modules/bedrock/limits.ts
+              - packages/api-client/src/modules/sharing/rules.ts
+              - packages/assets/external/illustrations/minecraft_server_icon.png
               - .github/workflows/ci.yml
 
   js:
@@ -102,32 +106,10 @@ jobs:
       - run: tombi lint
       - run: tombi fmt --check
 
-  core:
-    name: Core
+  rust:
+    name: Rust
     needs: changes
-    if: needs.changes.outputs.core == 'true'
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: apps/core
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ inputs.ref }}
-          persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@2b1f5e9b395427c92ee4e3331786ca3c37afe2d7 # v1.16.0
-        with:
-          components: rustfmt
-          cache-workspaces: apps/core
-      - run: cargo fmt --check
-      - run: cargo check --all-targets --locked
-      - run: cargo test
-      - run: sh -n scripts/install.sh
-
-  app:
-    name: App (Rust)
-    needs: changes
-    if: needs.changes.outputs.app == 'true'
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -146,12 +128,22 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@2b1f5e9b395427c92ee4e3331786ca3c37afe2d7 # v1.16.0
         with:
           components: rustfmt
-      - uses: cargo-bins/cargo-binstall@ead08b90bd7b2e6d81963fb9cf0b7239f66d5db4 # v1.21.0
+      - uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc # v2.86.7
+        with:
+          tool: cargo-shear@1.11.2
       - run: cp packages/app-lib/.env.staging packages/app-lib/.env
       # Tauri only checks that the frontend build folder exists; an empty one is enough to compile.
       - run: mkdir -p apps/app-frontend/dist
       - run: cargo fmt --all --check
-      - run: cargo binstall --no-confirm --force cargo-shear && cargo shear
+      - run: cargo shear
       - run: cargo check -p theseus_gui --features browser-bridge --locked
-      - run: cargo test -p theseus_gui --bin theseus_gui --locked cores
-      - run: cargo test -p browser-bridge --locked
+      # serde-binhum's only tests are upstream's README doctests, which lack their dependencies.
+      - run: cargo test --workspace --exclude toasty --exclude serde-binhum --locked
+      - run: sh -n apps/core/scripts/install.sh
+      # A cargo error fails the step, and theseus_gui proves the pattern matches tauri.
+      - name: Copal does not depend on Tauri
+        run: |
+          gui=$(cargo tree --locked -e normal -p theseus_gui --prefix none -f '{p}')
+          copal=$(cargo tree --locked -e normal -p copal --prefix none -f '{p}')
+          grep -q '^tauri v' <<< "$gui"
+          if grep '^tauri v' <<< "$copal"; then echo '::error::copal depends on tauri'; exit 1; fi
