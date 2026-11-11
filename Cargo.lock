@@ -2245,6 +2245,7 @@ dependencies = [
  "contracts",
  "http-body-util",
  "reqwest 0.13.5",
+ "rustls",
  "serde",
  "serde_json",
  "thiserror 2.0.21",

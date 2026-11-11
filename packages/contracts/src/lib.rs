@@ -93,7 +93,8 @@ pub struct Raw {
     pub bytes: Bytes,
 }
 
-/// A response read as it arrives and resumable from an offset, such as a file download.
+/// A body sent or read as it arrives rather than held whole, such as an upload or a resumable
+/// download.
 #[derive(Clone, Copy, Debug)]
 pub struct Stream;
 
@@ -110,6 +111,10 @@ impl RequestBody for Empty {
 
 impl RequestBody for Raw {
     const KIND: BodyKind = BodyKind::Raw;
+}
+
+impl RequestBody for Stream {
+    const KIND: BodyKind = BodyKind::Stream;
 }
 
 impl<T> ResponseBody for Json<T> {

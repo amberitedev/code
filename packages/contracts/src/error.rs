@@ -124,7 +124,9 @@ pub enum ErrorCode {
     DirectoryMovePermissionDenied,
     DirectoryMoveFailed,
     PermissionDenied,
-    ApiError,
+    /// Modrinth's API failed.
+    #[serde(rename = "api_error")]
+    ModrinthApi,
     MinecraftAuthNoProfile,
     MinecraftAuthTokenExpired,
     MinecraftAuthClockOutOfSync,
@@ -174,7 +176,8 @@ impl ErrorCode {
             | Self::TicketExpired
             | Self::TicketReused
             | Self::ClockWrong
-            | Self::NotLoggedIn => 401,
+            | Self::NotLoggedIn
+            | Self::MinecraftAuthTokenExpired => 401,
             Self::Forbidden
             | Self::AccountLocked
             | Self::Blacklisted
@@ -190,7 +193,17 @@ impl ErrorCode {
             | Self::SharedInstanceQuarantined
             | Self::SharedInstanceFileNotAllowed
             | Self::PermissionDenied
-            | Self::DirectoryMovePermissionDenied => 403,
+            | Self::DirectoryMovePermissionDenied
+            | Self::MinecraftAuthAgeVerification
+            | Self::MinecraftAuthBanned
+            | Self::MinecraftAuthRestricted
+            | Self::MinecraftAuthNoXboxProfile
+            | Self::MinecraftAuthNoProfile
+            | Self::MinecraftAuthTermsNotAccepted
+            | Self::MinecraftAuthRegionUnavailable
+            | Self::MinecraftAuthAdultVerification
+            | Self::MinecraftAuthUnderage
+            | Self::MinecraftAuthXstsRejected => 403,
             Self::NotFound
             | Self::WrongCode
             | Self::CoreNotFound
@@ -231,24 +244,13 @@ impl ErrorCode {
             | Self::MinecraftAuthRateLimited => 429,
             Self::Unsupported | Self::UnsupportedOperation => 501,
             Self::NetworkError
-            | Self::ApiError
+            | Self::ModrinthApi
             | Self::SharedInstancesApiError
             | Self::PoolFilesUnavailable
             | Self::PoolPushUnconfirmed
-            | Self::MinecraftAuthTokenExpired
             | Self::MinecraftAuthClockOutOfSync
             | Self::MinecraftAuthConnectionRefused
             | Self::MinecraftAuthNetwork
-            | Self::MinecraftAuthAgeVerification
-            | Self::MinecraftAuthBanned
-            | Self::MinecraftAuthRestricted
-            | Self::MinecraftAuthNoXboxProfile
-            | Self::MinecraftAuthNoProfile
-            | Self::MinecraftAuthTermsNotAccepted
-            | Self::MinecraftAuthRegionUnavailable
-            | Self::MinecraftAuthAdultVerification
-            | Self::MinecraftAuthUnderage
-            | Self::MinecraftAuthXstsRejected
             | Self::MinecraftAuthError => 502,
             Self::ConfigurationError
             | Self::MailError

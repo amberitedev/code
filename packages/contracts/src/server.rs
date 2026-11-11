@@ -3,7 +3,7 @@
 use std::future::Future;
 
 use axum::{
-    body::Bytes,
+    body::{Body, Bytes},
     extract::{FromRequest, FromRequestParts, Path, Query, Request},
     handler::Handler,
     http::{StatusCode, header},
@@ -11,11 +11,11 @@ use axum::{
     routing::{self, MethodRouter},
 };
 use serde::{
-    Deserialize, Serialize,
+    Serialize,
     de::{DeserializeOwned, value::UnitDeserializer},
 };
 
-use crate::{ApiError, Empty, Endpoint, ErrorCode, Json, Method, Raw};
+use crate::{ApiError, Empty, Endpoint, ErrorCode, Json, Method, Raw, Stream};
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
@@ -72,14 +72,15 @@ where
                 .map_err(|rejection| invalid(rejection.body_text()))?
                 .0
         } else {
-            E::Params::deserialize(
-                UnitDeserializer::<serde::de::value::Error>::new(),
-            )
-            .map_err(|error| invalid(error.to_string()))?
+            unit::<E::Params>().map_err(|error| invalid(error.to_string()))?
         };
-        let query = Query::<E::Query>::try_from_uri(&parts.uri)
-            .map_err(|rejection| invalid(rejection.body_text()))?
-            .0;
+        // A route without a query ignores one, such as a cache-busting `?v=`.
+        let query = match Query::<E::Query>::try_from_uri(&parts.uri) {
+            Ok(query) => query.0,
+            Err(rejection) => {
+                unit().map_err(|_| invalid(rejection.body_text()))?
+            }
+        };
         let body =
             E::Body::from_request(Request::from_parts(parts, body), state)
                 .await?;
@@ -89,6 +90,10 @@ where
             body,
         })
     }
+}
+
+fn unit<T: DeserializeOwned>() -> Result<T, serde::de::value::Error> {
+    T::deserialize(UnitDeserializer::new())
 }
 
 /// A request body the server reads.
@@ -148,6 +153,17 @@ impl FromBody for Raw {
     }
 }
 
+impl FromBody for Stream {
+    type Inner = Body;
+
+    async fn from_request<S: Send + Sync>(
+        request: Request,
+        _: &S,
+    ) -> Result<Body, ApiError> {
+        Ok(request.into_body())
+    }
+}
+
 impl<T: Serialize> IntoResponse for Json<T> {
     fn into_response(self) -> Response {
         axum::Json(self.0).into_response()
@@ -183,7 +199,7 @@ mod tests {
     use tower::ServiceExt;
 
     use super::{Req, route};
-    use crate::{ApiError, Auth, Endpoint, ErrorCode, Json, Method};
+    use crate::{ApiError, Auth, Empty, Endpoint, ErrorCode, Json, Method};
 
     #[derive(Serialize, Deserialize)]
     struct File {
@@ -226,7 +242,7 @@ mod tests {
             id: "a b/c".into(),
             path: "config/x y.json".into(),
         };
-        let url = crate::client::url::<RenameFile>("", &file);
+        let url = crate::client::url::<RenameFile>("", &file).unwrap();
         let request = Request::post(format!("{url}?limit=3"))
             .header("content-type", "application/json")
             .body(Body::from(body))
@@ -251,5 +267,32 @@ mod tests {
         assert_eq!(status, StatusCode::BAD_REQUEST);
         let error: ApiError = serde_json::from_slice(&body).unwrap();
         assert_eq!(error.error, ErrorCode::InvalidInput);
+    }
+
+    struct Ping;
+
+    impl Endpoint for Ping {
+        const METHOD: Method = Method::Get;
+        const PATH: &'static str = "/v1/ping";
+        const AUTH: Auth = Auth::None;
+        type Params = ();
+        type Query = ();
+        type Body = Empty;
+        type Response = Empty;
+    }
+
+    async fn ping(_: Req<Ping>) -> Empty {
+        Empty
+    }
+
+    #[tokio::test]
+    async fn a_route_without_a_query_ignores_one() {
+        let (path, handler) = route::<Ping, _, _, ()>(ping);
+        let response = Router::new()
+            .route(path, handler)
+            .oneshot(Request::get("/v1/ping?v=2").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
     }
 }

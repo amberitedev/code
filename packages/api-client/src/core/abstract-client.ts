@@ -65,7 +65,17 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 		if (this._backend) return this._backend
 		const selfHosted = this.features.find((feature) => feature instanceof SelfHostedFeature)
 		if (!selfHosted) throw new Error('This client has no account backend')
-		return (this._backend = new ContractClient(selfHosted.transport))
+		const transport = selfHosted.transport((input, init) => this.platformFetch(input, init))
+		return (this._backend = new ContractClient({
+			...transport,
+			headers: async (endpoint) => {
+				const userAgent = await this.resolveUserAgent()
+				return {
+					...(userAgent ? { 'User-Agent': userAgent } : {}),
+					...(await transport.headers(endpoint)),
+				}
+			},
+		}))
 	}
 
 	/** The App's local server: engine and App routes. */
@@ -516,6 +526,11 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 		return typeof archonSentryCapture === 'function'
 			? archonSentryCapture()
 			: archonSentryCapture === true
+	}
+
+	/** The fetch `client.backend` calls with. A platform whose requests skip the page's fetch overrides it. */
+	protected platformFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+		return fetch(input, init)
 	}
 
 	/**

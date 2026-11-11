@@ -31,11 +31,19 @@ pub enum CallError {
         status: u16,
         source: serde_json::Error,
     },
+    /// A path segment would be empty, `.` or `..`, which would send the call to another route.
+    #[error("`{value}` is not a valid `{name}` for {path}")]
+    Params {
+        path: &'static str,
+        name: String,
+        value: String,
+    },
 }
 
-/// A request body the caller sends.
+/// A request body the caller sends: the marker itself, or the body a [`Stream`] sends.
 pub trait Body {
-    fn attach(self, request: RequestBuilder) -> RequestBuilder;
+    type Input;
+    fn attach(input: Self::Input, request: RequestBuilder) -> RequestBuilder;
 }
 
 /// A response body the caller reads whole.
@@ -50,13 +58,13 @@ pub async fn call<E: Endpoint>(
     remote: &Remote<'_>,
     params: &E::Params,
     query: &E::Query,
-    body: E::Body,
+    body: <E::Body as Body>::Input,
 ) -> Result<<E::Response as Reply>::Output, CallError>
 where
     E::Body: Body,
     E::Response: Reply,
 {
-    let request = body.attach(request::<E>(remote, params, query));
+    let request = E::Body::attach(body, request::<E>(remote, params, query)?);
     E::Response::read(check(request.send().await?).await?).await
 }
 
@@ -67,7 +75,7 @@ pub async fn call_stream<E: Endpoint<Body = Empty, Response = Stream>>(
     query: &E::Query,
     from: u64,
 ) -> Result<Response, CallError> {
-    let mut request = request::<E>(remote, params, query);
+    let mut request = request::<E>(remote, params, query)?;
     if from > 0 {
         request = request.header(header::RANGE, format!("bytes={from}-"));
     }
@@ -78,7 +86,7 @@ fn request<E: Endpoint>(
     remote: &Remote<'_>,
     params: &E::Params,
     query: &E::Query,
-) -> RequestBuilder {
+) -> Result<RequestBuilder, CallError> {
     let method = match E::METHOD {
         Method::Get => reqwest::Method::GET,
         Method::Post => reqwest::Method::POST,
@@ -88,7 +96,7 @@ fn request<E: Endpoint>(
     };
     let mut request = remote
         .http
-        .request(method, url::<E>(remote.base, params))
+        .request(method, url::<E>(remote.base, params)?)
         .query(query);
     let token = match E::AUTH {
         Auth::None => None,
@@ -101,12 +109,15 @@ fn request<E: Endpoint>(
     if let Some(timeout) = remote.timeout {
         request = request.timeout(timeout);
     }
-    request
+    Ok(request)
 }
 
 /// `base` and the Endpoint's path with each `{name}` (or `{*name}`, which may hold slashes) filled
 /// from the matching field of `params`, percent-encoded.
-pub(crate) fn url<E: Endpoint>(base: &str, params: &E::Params) -> String {
+pub(crate) fn url<E: Endpoint>(
+    base: &str,
+    params: &E::Params,
+) -> Result<String, CallError> {
     let params = serde_json::to_value(params)
         .expect("an Endpoint's params serialize to JSON");
     let mut url = base.trim_end_matches('/').to_owned();
@@ -127,6 +138,20 @@ pub(crate) fn url<E: Endpoint>(base: &str, params: &E::Params) -> String {
             Value::Number(value) => value.to_string(),
             other => panic!("{} has no value for `{name}`: {other}", E::PATH),
         };
+        // URL parsers resolve dot segments, even percent-encoded ones.
+        let dot = |piece: &str| matches!(piece, "" | "." | "..");
+        let invalid = if keep_slashes {
+            value.split('/').any(dot)
+        } else {
+            dot(&value)
+        };
+        if invalid {
+            return Err(CallError::Params {
+                path: E::PATH,
+                name: name.to_owned(),
+                value,
+            });
+        }
         for byte in value.bytes() {
             if byte.is_ascii_alphanumeric()
                 || b"-._~".contains(&byte)
@@ -138,7 +163,7 @@ pub(crate) fn url<E: Endpoint>(base: &str, params: &E::Params) -> String {
             }
         }
     }
-    url
+    Ok(url)
 }
 
 async fn check(response: Response) -> Result<Response, CallError> {
@@ -155,22 +180,36 @@ async fn check(response: Response) -> Result<Response, CallError> {
 }
 
 impl<T: Serialize> Body for Json<T> {
-    fn attach(self, request: RequestBuilder) -> RequestBuilder {
-        request.json(&self.0)
+    type Input = Self;
+
+    fn attach(input: Self, request: RequestBuilder) -> RequestBuilder {
+        request.json(&input.0)
     }
 }
 
 impl Body for Empty {
-    fn attach(self, request: RequestBuilder) -> RequestBuilder {
+    type Input = Self;
+
+    fn attach(_: Self, request: RequestBuilder) -> RequestBuilder {
         request
     }
 }
 
 impl Body for Raw {
-    fn attach(self, request: RequestBuilder) -> RequestBuilder {
+    type Input = Self;
+
+    fn attach(input: Self, request: RequestBuilder) -> RequestBuilder {
         request
-            .header(header::CONTENT_TYPE, self.content_type)
-            .body(self.bytes)
+            .header(header::CONTENT_TYPE, input.content_type)
+            .body(input.bytes)
+    }
+}
+
+impl Body for Stream {
+    type Input = reqwest::Body;
+
+    fn attach(input: reqwest::Body, request: RequestBuilder) -> RequestBuilder {
+        request.body(input)
     }
 }
 
@@ -207,5 +246,107 @@ impl Reply for Raw {
             content_type,
             bytes: response.bytes().await?,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use reqwest::Client;
+    use serde::{Deserialize, Serialize};
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpListener,
+    };
+
+    use super::{CallError, Remote, call, url};
+    use crate::{Auth, Empty, Endpoint, ErrorCode, Json, Method};
+
+    #[derive(Serialize, Deserialize)]
+    struct File {
+        id: String,
+        path: String,
+    }
+
+    struct ReadFile;
+
+    impl Endpoint for ReadFile {
+        const METHOD: Method = Method::Get;
+        const PATH: &'static str = "/v1/instances/{id}/files/{*path}";
+        const AUTH: Auth = Auth::Session;
+        type Params = File;
+        type Query = ();
+        type Body = Empty;
+        type Response = Json<String>;
+    }
+
+    fn file(id: &str, path: &str) -> File {
+        File {
+            id: id.into(),
+            path: path.into(),
+        }
+    }
+
+    #[test]
+    fn a_param_cannot_leave_its_route() {
+        assert_eq!(
+            url::<ReadFile>("", &file("a", "config/x.json")).unwrap(),
+            "/v1/instances/a/files/config/x.json"
+        );
+        for (id, path) in
+            [("..", "x"), ("", "x"), ("a", "config/../.."), ("a", "./x")]
+        {
+            assert!(matches!(
+                url::<ReadFile>("", &file(id, path)),
+                Err(CallError::Params { .. })
+            ));
+        }
+    }
+
+    /// The base of a server that answers one request with `response`.
+    async fn answer(response: &'static str) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let _ = socket.read(&mut [0; 4096]).await;
+            socket.write_all(response.as_bytes()).await.unwrap();
+        });
+        base
+    }
+
+    async fn read_file(response: &'static str) -> CallError {
+        // Another crate in the workspace build turns on reqwest's `rustls-no-provider`.
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let http = Client::new();
+        let base = answer(response).await;
+        let remote = Remote {
+            http: &http,
+            base: &base,
+            bearer: None,
+            read_ticket: None,
+            timeout: None,
+        };
+        call::<ReadFile>(&remote, &file("a", "b"), &(), Empty)
+            .await
+            .unwrap_err()
+    }
+
+    #[tokio::test]
+    async fn the_client_reads_error_bodies() {
+        let error = read_file(
+            "HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\nContent-Length: 49\r\n\
+             Connection: close\r\n\r\n{\"error\":\"from_the_future\",\"description\":\"Gone.\"}",
+        )
+        .await;
+        assert!(matches!(
+            error,
+            CallError::Api { status: 404, error } if error.error == ErrorCode::Unknown
+        ));
+
+        let error = read_file(
+            "HTTP/1.1 502 Bad Gateway\r\nContent-Length: 11\r\nConnection: close\r\n\r\nBad Gateway",
+        )
+        .await;
+        assert!(matches!(error, CallError::Decode { status: 502, .. }));
     }
 }

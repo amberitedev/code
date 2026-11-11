@@ -8,9 +8,19 @@ use crate::{
     Empty, Endpoint, Json, Raw, RequestBody, ResponseBody, Stream, Upgrade,
 };
 
+/// The one ts-rs config every crate generates with: JSON gives `number`, not ts-rs's `bigint`.
+pub fn config() -> Config {
+    Config::default().with_large_int("number")
+}
+
 /// The TypeScript type a body marker carries.
 pub trait TsBody {
     fn ts(cfg: &Config) -> String;
+
+    /// The type a caller sends, where it differs from the type it reads.
+    fn request_ts(cfg: &Config) -> String {
+        Self::ts(cfg)
+    }
 }
 
 impl<T: TS> TsBody for Json<T> {
@@ -35,6 +45,10 @@ impl TsBody for Stream {
     fn ts(_: &Config) -> String {
         "Response".into()
     }
+
+    fn request_ts(_: &Config) -> String {
+        "Blob".into()
+    }
 }
 
 impl<S: TS, R: TS> TsBody for Upgrade<S, R> {
@@ -45,7 +59,7 @@ impl<S: TS, R: TS> TsBody for Upgrade<S, R> {
 
 /// `E` as a TypeScript `Endpoint` value, to place in its module's object. The types it names must
 /// be declared in the same file.
-pub fn endpoint<E>(cfg: &Config) -> String
+pub fn endpoint<E>() -> String
 where
     E: Endpoint,
     E::Params: TS,
@@ -53,6 +67,7 @@ where
     E::Body: TsBody,
     E::Response: TsBody,
 {
+    let cfg = &config();
     format!(
         "{{ method: {}, path: {}, auth: {}, dangerous: {}, body: {}, response: {} }} as Endpoint<{}, {}, {}, {}>",
         json(&E::METHOD),
@@ -63,7 +78,7 @@ where
         json(&<E::Response as ResponseBody>::KIND),
         E::Params::name(cfg),
         E::Query::name(cfg),
-        E::Body::ts(cfg),
+        E::Body::request_ts(cfg),
         E::Response::ts(cfg),
     )
 }
@@ -121,7 +136,7 @@ pub(crate) fn constant(
 
 #[cfg(test)]
 mod tests {
-    use ts_rs::{Config, TS};
+    use ts_rs::TS;
 
     use crate::{
         ApiError, Auth, BodyKind, Empty, Endpoint, ErrorCode, Json, Method,
@@ -144,7 +159,7 @@ export interface Endpoint<P = unknown, Q = unknown, B = unknown, R = unknown> {
 ";
 
     fn file() -> String {
-        let cfg = Config::default().with_large_int("number");
+        let cfg = super::config();
         let declarations = [
             Method::decl(&cfg),
             Auth::decl(&cfg),
@@ -188,15 +203,14 @@ export interface Endpoint<P = unknown, Q = unknown, B = unknown, R = unknown> {
         type Params = ();
         type Query = ();
         type Body = Empty;
-        type Response = Json<Vec<ErrorCode>>;
+        type Response = Json<u64>;
     }
 
     #[test]
     fn an_endpoint_is_the_object_contract_client_reads() {
-        let cfg = Config::default();
         assert_eq!(
-            super::endpoint::<ClearCache>(&cfg),
-            r#"{ method: "DELETE", path: "/v1/cache", auth: "session", dangerous: true, body: "empty", response: "json" } as Endpoint<null, null, void, Array<ErrorCode>>"#
+            super::endpoint::<ClearCache>(),
+            r#"{ method: "DELETE", path: "/v1/cache", auth: "session", dangerous: true, body: "empty", response: "json" } as Endpoint<null, null, void, number>"#
         );
     }
 }

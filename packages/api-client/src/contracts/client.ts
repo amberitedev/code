@@ -2,10 +2,12 @@ import type { BodyKind, Endpoint, ErrorCode } from '@amberite/contracts'
 
 import { ApiCallError } from './errors'
 
-/** Where a `ContractClient` sends its calls, and what every call carries. */
+/** Where a `ContractClient` sends its calls, and what each call carries. */
 export interface ContractTransport {
-	base(): Promise<string>
-	headers(): Promise<Record<string, string>>
+	/** A string when it is known up front, so `url` works before any call. */
+	base: string | (() => Promise<string>)
+	/** Given the route, so a transport can leave out credentials or attach a fresh ticket. */
+	headers(endpoint: Endpoint): Promise<Record<string, string>>
 	fetch: typeof fetch
 }
 
@@ -34,9 +36,11 @@ type Input = { params?: unknown; query?: unknown; body?: unknown }
 
 /** Calls the routes of one server, typed by their generated `Endpoint`s. */
 export class ContractClient {
-	private lastBase: string | undefined
+	private knownBase: string | undefined
 
-	constructor(private readonly transport: ContractTransport) {}
+	constructor(private readonly transport: ContractTransport) {
+		if (typeof transport.base === 'string') this.knownBase = trimBase(transport.base)
+	}
 
 	/** Throws `ApiCallError` when the route answers with an error. */
 	async call<E extends Endpoint>(endpoint: E, ...[input]: Args<E>): Promise<ResponseOf<E>> {
@@ -44,10 +48,10 @@ export class ContractClient {
 		return (await read(response, endpoint.response)) as ResponseOf<E>
 	}
 
-	/** The route's URL, for an `<img>` or a link. Known once a call has resolved the base. */
+	/** The route's URL, for an `<img>` or a link. An async base is known once a call resolved it. */
 	url<E extends Endpoint>(endpoint: E, params: ParamsOf<E>): string {
-		if (this.lastBase === undefined) throw new Error('No call has resolved the base URL yet')
-		return this.lastBase + fillPath(endpoint.path, params)
+		if (this.knownBase === undefined) throw new Error('No call has resolved the base URL yet')
+		return this.knownBase + fillPath(endpoint.path, params)
 	}
 
 	/** The response, to read as it arrives; `from` resumes a download at that byte. */
@@ -60,18 +64,23 @@ export class ContractClient {
 	}
 
 	private async send(endpoint: Endpoint, input: Input, from?: number): Promise<Response> {
-		this.lastBase = (await this.transport.base()).replace(/\/+$/, '')
-		const headers = { ...(await this.transport.headers()) }
+		const { base } = this.transport
+		const baseUrl = trimBase(typeof base === 'string' ? base : await base())
+		this.knownBase = baseUrl
+		const headers = { ...(await this.transport.headers(endpoint)) }
 		let body: BodyInit | undefined
 		if (endpoint.body === 'json') {
 			headers['Content-Type'] = 'application/json'
 			body = JSON.stringify(input.body)
-		} else if (endpoint.body === 'raw' && input.body instanceof Blob) {
+		} else if (
+			(endpoint.body === 'raw' || endpoint.body === 'stream') &&
+			input.body instanceof Blob
+		) {
 			headers['Content-Type'] = input.body.type || 'application/octet-stream'
 			body = input.body
 		}
 		if (from) headers.Range = `bytes=${from}-`
-		const url = this.lastBase + fillPath(endpoint.path, input.params) + search(input.query)
+		const url = baseUrl + fillPath(endpoint.path, input.params) + search(input.query)
 		const fetch = this.transport.fetch
 		const response = await fetch(url, { method: endpoint.method, headers, body })
 		if (!response.ok) throw await decodeError(response)
@@ -94,6 +103,10 @@ function read(response: Response, kind: BodyKind): unknown {
 	}
 }
 
+function trimBase(base: string): string {
+	return base.replace(/\/+$/, '')
+}
+
 /** Fills each `{name}` (or `{*name}`, which keeps its slashes) from `params`. */
 function fillPath(path: string, params: unknown): string {
 	return path.replace(/\{(\*?)(\w+)\}/g, (_, wildcard: string, name: string) => {
@@ -101,8 +114,12 @@ function fillPath(path: string, params: unknown): string {
 		if (typeof value !== 'string' && typeof value !== 'number') {
 			throw new Error(`${path} has no value for ${name}`)
 		}
-		const text = String(value)
-		return wildcard ? text.split('/').map(encodeURIComponent).join('/') : encodeURIComponent(text)
+		const pieces = wildcard ? String(value).split('/') : [String(value)]
+		// URL parsers resolve dot segments, even percent-encoded ones.
+		if (pieces.some((piece) => piece === '' || piece === '.' || piece === '..')) {
+			throw new Error(`${JSON.stringify(value)} is not a valid ${name} for ${path}`)
+		}
+		return pieces.map(encodeURIComponent).join('/')
 	})
 }
 

@@ -33,7 +33,7 @@ type Sent = {
 function serve(answer: () => Response) {
 	const sent: Sent[] = []
 	const client = new ContractClient({
-		base: async () => 'http://127.0.0.1:5000/secret/',
+		base: 'http://127.0.0.1:5000/secret/',
 		headers: async () => ({ Authorization: 'Bearer session' }),
 		fetch: async (input, init) => {
 			sent.push({
@@ -51,6 +51,9 @@ function serve(answer: () => Response) {
 describe('ContractClient', () => {
 	it('builds the URL, query and body from the endpoint', async () => {
 		const { client, sent } = serve(() => Response.json(['done']))
+		expect(client.url(renameFile, { id: 'i', path: 'p' })).toBe(
+			'http://127.0.0.1:5000/secret/v1/instances/i/files/p',
+		)
 
 		const answer = await client.call(renameFile, {
 			params: { id: 'a b/c', path: 'config/x y.json' },
@@ -71,9 +74,19 @@ describe('ContractClient', () => {
 			body: '{"name":"z"}',
 		})
 		expect(sent[1].url).toBe('http://127.0.0.1:5000/secret/v1/instances/a/files/b')
-		expect(client.url(renameFile, { id: 'i', path: 'p' })).toBe(
-			'http://127.0.0.1:5000/secret/v1/instances/i/files/p',
-		)
+	})
+
+	it('refuses a param that would reach another route', () => {
+		const { client } = serve(() => Response.json([]))
+
+		for (const params of [
+			{ id: '..', path: 'x' },
+			{ id: '', path: 'x' },
+			{ id: 'a', path: 'config/../..' },
+			{ id: 'a', path: './x' },
+		]) {
+			expect(() => client.url(renameFile, params)).toThrow('is not a valid')
+		}
 	})
 
 	it('sends no body and reads none for empty routes', async () => {

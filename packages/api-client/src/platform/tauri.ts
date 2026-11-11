@@ -59,6 +59,11 @@ export class TauriModrinthClient extends XHRUploadClient {
 		})
 	}
 
+	protected async platformFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+		const { fetch: tauriFetch } = await import('@tauri-apps/plugin-http')
+		return tauriFetch(input, init)
+	}
+
 	protected async executeRequest<T>(url: string, options: RequestOptions): Promise<T> {
 		try {
 			// Dynamically import Tauri HTTP plugin

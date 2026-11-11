@@ -25,16 +25,16 @@ export class SelfHostedFeature extends AbstractFeature {
 	}
 
 	/** `client.backend`'s way to the backend: the same URL and account session. */
-	get transport(): ContractTransport {
+	transport(fetch: typeof globalThis.fetch): ContractTransport {
 		return {
-			base: async () => this.config.baseUrl,
-			headers: async () => {
-				const token = await this.config.token()
+			base: this.config.baseUrl,
+			headers: async (endpoint) => {
+				const token = endpoint.auth === 'none' ? undefined : await this.config.token()
 				const headers: Record<string, string> = {}
 				if (token) headers.Authorization = `Bearer ${token}`
 				return headers
 			},
-			fetch: (input, init) => fetch(input, init),
+			fetch,
 		}
 	}
 }
