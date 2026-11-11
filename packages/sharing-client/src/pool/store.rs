@@ -12,7 +12,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use bedrock::net::{CoreAddress, ErrorBody, tls};
 use bytes::Bytes;
 use futures::stream::BoxStream;
 use futures::{Stream, StreamExt, TryStreamExt};
@@ -22,6 +21,7 @@ use tokio::io::AsyncReadExt;
 use ts_rs::TS;
 
 use crate::crypto::{DecryptError, Decryptor};
+use crate::net::{CoreAddress, ErrorBody, tls};
 
 /// A Core as the backend names it. `address` is tried first and `public_address` when the first
 /// does not connect, so a Core on the same network is reached directly.

@@ -13,12 +13,12 @@ pub use error::{BackendError, Unavailable};
 
 use std::time::Duration;
 
-use bedrock::net::ErrorBody;
 use modrinth_content_management::icons::IconConfig;
 use reqwest::{Method, StatusCode};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::json;
 
+use crate::net::ErrorBody;
 use crate::pool::Fault;
 use crate::versions::{ManifestFile, ShareVersion, VersionContent};
 

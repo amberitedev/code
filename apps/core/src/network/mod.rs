@@ -9,7 +9,7 @@ pub mod router;
 pub mod tls;
 
 /// One rule for public and private addresses, shared with the store and the App.
-pub use bedrock::net::ip::{is_private, is_public, is_shared_range};
+pub use sharing_client::net::ip::{is_private, is_public, is_shared_range};
 
 /// Where every reqwest client in Core starts. reqwest is built without a TLS provider so Core
 /// stays on ring, and it panics without one installed; installing it here rather than only in

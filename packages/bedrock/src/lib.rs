@@ -4,13 +4,10 @@
 //!    types from here instead of compiling the files itself.
 //! 2. Clones of upstream code too tangled with app-lib's `State` to borrow ([`upstream`]), each
 //!    declared in `ports.toml` with the upstream commit it came from.
-//! 3. Our own shared code: content rules ([`content`]), reaching Cores ([`net`]) and free disk
-//!    space ([`disk`]).
+//! 3. Our own shared code: content rules ([`content`]).
 
 pub mod content;
-pub mod disk;
 mod error;
-pub mod net;
 pub mod state;
 pub mod upstream;
 mod util;

@@ -12,7 +12,6 @@ name = "sharing_storage"
 [dependencies]
 axum = "0.8.4"
 base64 = { workspace = true }
-bedrock = { workspace = true }
 bytes = { workspace = true }
 chrono = { workspace = true }
 clap = { workspace = true, features = ["derive"] }

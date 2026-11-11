@@ -1,5 +1,6 @@
-use bedrock::net::ErrorBody;
 use reqwest::StatusCode;
+
+use crate::net::ErrorBody;
 
 /// Why the backend would not give a share.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]

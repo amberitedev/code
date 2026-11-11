@@ -1,9 +1,8 @@
 //! TLS to a Core, trusting only the certificate whose fingerprint the App learned at pairing
-//! (`bedrock::net::tls`).
+//! (`sharing_client::net::tls`).
 
 use std::{sync::Arc, time::Duration};
 
-use bedrock::net::{CoreAddress, tls};
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
 use hyper::{
@@ -11,6 +10,7 @@ use hyper::{
 };
 use hyper_util::rt::TokioIo;
 use rustls::pki_types::ServerName;
+use sharing_client::net::{CoreAddress, tls};
 use tokio::net::TcpStream;
 use tokio_rustls::{TlsConnector, client::TlsStream};
 

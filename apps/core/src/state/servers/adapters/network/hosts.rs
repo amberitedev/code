@@ -11,7 +11,7 @@ use reqwest::{
     redirect,
 };
 
-use bedrock::net::ip::is_public;
+use sharing_client::net::ip::is_public;
 
 use crate::installs::download;
 

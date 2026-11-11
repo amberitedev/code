@@ -11,13 +11,17 @@
 //! - `diff`: what one share content changes over another, for updates, pushes and history.
 //! - `history`: the versions an owner pushed, kept locally by the side that pushed them.
 //! - `crypto`: the pool's encryption.
+//! - `net`: reaching a Core, and the error body every server answers with.
+//! - `disk`: free disk space, checked before the store and Core write.
 
 pub mod backend;
 pub mod consume;
 pub mod crypto;
 pub mod diff;
+pub mod disk;
 pub mod history;
 pub mod install;
+pub mod net;
 pub mod pool;
 pub mod push;
 pub mod rules;

@@ -3,7 +3,7 @@
 //! to that Core's certificate, no proxy and no redirect, so it cannot be turned into a general
 //! downloader.
 
-use bedrock::net::{CoreAddress, ip};
+use sharing_client::net::{CoreAddress, ip};
 use sharing_client::pool::PoolCore;
 use tracing::info;
 

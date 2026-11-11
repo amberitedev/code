@@ -10,17 +10,15 @@ ignored = ["tokio-util"]
 
 # What the App and Copal both need that is not sharing: the content schema borrowed from the engine,
 # clones of upstream code tangled with the engine's State (`ports.toml`), `.mrpack` and Modrinth
-# content rules, connections to Cores, and disk space. Imports go one way:
+# content rules. Imports go one way:
 # modrinth-content-management -> bedrock -> sharing-client -> sharing-storage.
 [dependencies]
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 bytes = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
-contracts = { workspace = true }
 fs4 = { workspace = true, features = ["tokio"] }
 futures = { workspace = true }
-hex = { workspace = true }
 itertools = { workspace = true }
 json5 = { workspace = true }
 modrinth-content-management = { workspace = true }
@@ -53,12 +51,8 @@ zip = { workspace = true }
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
 
-[target."cfg(unix)".dependencies]
-nix = { version = "0.30.1", features = ["fs"] }
-
 [target."cfg(windows)".dependencies]
 windows = { workspace = true, features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
-windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
 
 [features]
 # The engine's `export-ts`: the borrowed types derive their TypeScript there.

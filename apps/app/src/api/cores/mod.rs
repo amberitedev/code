@@ -16,7 +16,6 @@ mod tls;
 
 use std::{collections::HashMap, sync::Arc};
 
-use bedrock::net::ErrorBody;
 use bytes::Bytes;
 use http_body_util::Full;
 use hyper::{
@@ -25,6 +24,7 @@ use hyper::{
 };
 use serde::Serialize;
 use serde_json::{Value, json};
+use sharing_client::net::ErrorBody;
 use tauri::{Manager, State, plugin::TauriPlugin};
 use tokio::{net::TcpListener, sync::Mutex};
 

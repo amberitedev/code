@@ -38,7 +38,7 @@ fn serve(answers: Vec<(u16, String)>) -> (String, Arc<Mutex<Vec<String>>>) {
 fn http() -> reqwest::Client {
     reqwest::Client::builder()
         .use_preconfigured_tls(
-            bedrock::net::tls::pinned_config([0; 32]).unwrap(),
+            sharing_client::net::tls::pinned_config([0; 32]).unwrap(),
         )
         .build()
         .unwrap()

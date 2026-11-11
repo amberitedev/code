@@ -239,7 +239,7 @@ impl Store {
                 self.index().pending.remove(root);
             }
         };
-        let free = bedrock::disk::free(self.layout.root())
+        let free = sharing_client::disk::free(self.layout.root())
             .inspect_err(|_| unreserve())?;
         if free < needed + contracts::limits::DISK_MARGIN_BYTES {
             unreserve();
@@ -331,7 +331,7 @@ impl Store {
         Ok(Status {
             cap: caps.cap,
             used,
-            free: bedrock::disk::free(self.layout.root())?,
+            free: sharing_client::disk::free(self.layout.root())?,
             egress_cap: caps.egress_cap,
             egress_today: self.limits.egress_today(),
             versions,

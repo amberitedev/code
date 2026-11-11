@@ -4,8 +4,9 @@ edition.workspace = true
 
 # What the App and Core share about sharing: the backend client for
 # share routes, the share version, the share file rules, the pool (store client, encryption and
-# fetch) and the writer that pushes a share's versions. The App and Core both push and read shares
-# with them, and the store pulls from other Cores with the store client.
+# fetch), the writer that pushes a share's versions, reaching Cores, and free disk space. The App
+# and Core both push and read shares with them, and the store pulls from other Cores with the store
+# client.
 [dependencies]
 bedrock = { workspace = true }
 bytes = { workspace = true }
@@ -19,6 +20,8 @@ modrinth-content-management = { workspace = true }
 path-util = { workspace = true }
 rand = { workspace = true }
 reqwest = { workspace = true, features = ["json", "rustls-no-provider", "stream"] }
+# The ring backend avoids aws-lc-sys's CMake build on Windows.
+rustls = { workspace = true, features = ["ring", "std", "tls12"] }
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true }
 sha1_smol = { workspace = true }
@@ -36,6 +39,12 @@ ts-rs = { workspace = true }
 [dev-dependencies]
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["fs", "io-util", "macros", "rt", "time"] }
+
+[target."cfg(unix)".dependencies]
+nix = { version = "0.30.1", features = ["fs"] }
+
+[target."cfg(windows)".dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
 
 [lints]
 workspace = true

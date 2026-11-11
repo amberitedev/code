@@ -316,7 +316,7 @@ async fn request_code(state: &Pairing<'_>) -> Result<Pending, String> {
             .bytes()
             .await
             .ok()
-            .and_then(|body| bedrock::net::ErrorBody::parse(&body))
+            .and_then(|body| sharing_client::net::ErrorBody::parse(&body))
             .unwrap_or_default();
         return Err(match body.error.as_str() {
             "already_signed_in" => "this Core is still listed under an account. Remove it in the App under Settings, Cores.".into(),

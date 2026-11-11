@@ -8,7 +8,7 @@ Code the App and Copal both need exists once, in these crates. The App (`package
 | `packages/contracts`                   | The protocol: Endpoints, `ApiError`, limits and share rules, generated to TS     | Ours. Imports none of ours.      |
 | `packages/modrinth-content-management` | Modrinth's content decisions: `resolve_content`, content and configuration diffs | Upstream's. Never edit; call it. |
 | `packages/bedrock`                     | Everything both sides share that is not sharing                                  | Ours.                            |
-| `packages/sharing-client`              | Everything about shares                                                          | Ours.                            |
+| `packages/sharing-client`              | Shares, reaching Cores, and free disk space                                      | Ours.                            |
 | `packages/sharing-storage`             | The store process                                                                | Ours.                            |
 
 Imports go one way: `modrinth-content-management` -> `bedrock` -> `sharing-client` ->
@@ -22,7 +22,7 @@ bedrock holds three kinds of code:
 2. Clones of upstream code tangled with the engine's `State` (`upstream/`), kept byte for byte where
    possible with all adaptation in one glue file, and declared in `packages/bedrock/ports.toml`.
    The App keeps the originals.
-3. Our own shared code: content rules, reaching Cores, and disk space.
+3. Our own shared code: content rules.
 
 sharing-client is one folder per concern: `backend` (the one client for the backend's share
 routes), `versions` (the share version, `RemovedFile`), `rules` (which files a share carries,
@@ -30,7 +30,9 @@ what `blocked` means, and the listing of pickable files), `push` (reading an own
 version, the version builder and the writer), `pool` (the store client and the fetch), `consume`
 (a version as a server takes it), `install` (the member install plan: a version's files at each
 side's paths, less its modpack, with the configs an update writes, keeps or deletes; each side
-applies it with its own writer), `diff` (the share diff both sides show) and `crypto`.
+applies it with its own writer), `diff` (the share diff both sides show), `crypto`, `net` (a
+Core's address, TLS pinned to its certificate, public IPs and the error body) and `disk` (free
+space).
 
 New and restructured Rust follows the engine's layout: `api/` for entry points, `state/<domain>/`
 with `model/` (plain types), `adapters/` (sqlite rows, filesystem, network), `commands/` (one
