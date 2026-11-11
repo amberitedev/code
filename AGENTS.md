@@ -85,8 +85,9 @@ another. Before calling work done, walk this list and say which entries applied:
 - Rust builds once per distinct set of Rust inputs, shared by every checkout. With no Rust changes,
   `up` compiles nothing. Otherwise it compiles only the repo's crates that changed, one build at a
   time across checkouts. `up` gives up waiting after 9 minutes; run it again to keep waiting.
-- Nothing watches Rust. After a Rust edit, `vp run down`, then `node scripts/dev-runner.ts up`
-  again. `up` stops and prints compiler errors, so it is also the check for Rust changes.
+- Nothing watches Rust. After a Rust edit, `vp run down`, then the same `up` command again,
+  with its mode and scenario numbers. `up` stops and prints compiler errors, so it is also the
+  check for Rust changes.
 - Backend-only work needs no App: `node scripts/dev-runner.ts up dev:backend` starts in seconds.
   `node scripts/dev-runner.ts up dev:core` starts only the Core. For the backend and Core together,
   start the full stack.
