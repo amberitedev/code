@@ -60,8 +60,9 @@ folder that is usually nothing.
 - `vp run down`: Stops this checkout's dev runner and everything it started.
 - `node scripts/dev-runner.ts build`: Compiles the App and Core for this checkout's Rust without
   starting anything. `check:changed` runs it when Rust changed.
-- `node scripts/dev-runner.ts test <crate>...`: Runs one `cargo test` of the crates in the same
-  shared build folder. `check:changed` runs it for the crates with a changed file.
+- `node scripts/dev-runner.ts test <package>...`: Runs one `cargo test` of the given Cargo packages
+  (such as `copal` or `engine`) in the primary checkout's `target/dev-shared`, like `build`. `check:changed` runs it for
+  the crates with a changed file.
 - `vp run check:changed [ref]`: CI's fast checks for the files changed since the merge base with
   `origin/main` (or `ref`): lint, typos, TOML, typecheck and tests of the affected packages,
   `dev:check`, and for Rust `rustfmt`, a build, and the tests of every workspace crate with a
@@ -117,9 +118,8 @@ compiled for a test run is a different build from the same crate in a program, a
 tested crates is its own test run. Before a build, a crate
 that matches gets its files dated 2000, so Cargo keeps its output; any other crate gets the current
 time, so Cargo compiles it again. Inputs outside every crate folder, such as the App's version in
-`apps/app-frontend/package.json`, count toward the program's own crate, but not when that crate is
-tested, so the App's or Core's crate compiles again whenever a build follows its tests or the
-reverse. A crate's own tests can
+`apps/app-frontend/package.json`, count toward the program's own crate, in its tests too. A crate's
+own tests can
 hold its checkout's path (`env!("CARGO_MANIFEST_DIR")`), which Cargo does not compare, so they
 are trusted only in the checkout that compiled them last; another checkout compiles that crate
 again. A test run also compiles again every local crate it uses that it has not used at that

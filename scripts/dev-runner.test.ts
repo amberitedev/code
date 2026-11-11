@@ -317,8 +317,18 @@ describe('dev runner program cache', () => {
 			inputs: ['Cargo.lock', 'packages/app', 'packages/a'],
 			program: 'app',
 		}
-		const tests = { ...shared, inputs: ['Cargo.lock', 'packages/a'], tested: ['packages/a'] }
-		const both = { ...tests, inputs: program.inputs, tested: ['packages/a', 'packages/app'] }
+		const tests = {
+			...shared,
+			inputs: ['Cargo.lock', 'packages/a'],
+			programInputs: {},
+			tested: ['packages/a'],
+		}
+		const both = {
+			...tests,
+			inputs: program.inputs,
+			programInputs: { 'packages/app': program.inputs },
+			tested: ['packages/a', 'packages/app'],
+		}
 		/** How many crates the build compiles, recorded as if it succeeded. */
 		const compiles = (worktree: string, build: typeof program | typeof tests) => {
 			const prepared = prepareCheckoutCrates(worktree, build)
@@ -344,10 +354,10 @@ describe('dev runner program cache', () => {
 			expect(compiles(there, tests)).toBe(1)
 			expect(compiles(here, program)).toBe(1)
 			expect(compiles(here, tests)).toBe(1)
-			// A program's own crate hashes without the program's loose inputs in its tests.
+			// A program's own crate hashes with the program's loose inputs in its tests too.
 			expect(compiles(here, both)).toBe(2)
 			expect(compiles(here, tests)).toBe(0)
-			expect(compiles(here, program)).toBe(1)
+			expect(compiles(here, program)).toBe(0)
 			// Compiling a crate's tests elsewhere ends every test run's trust in them here.
 			expect(compiles(there, both)).toBe(2)
 			expect(compiles(here, tests)).toBe(1)

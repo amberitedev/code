@@ -94,6 +94,8 @@ export type ProgramBuild = {
 }
 /** `cargo test` of some crates, compiled into the programs' build output the way they are. */
 export type TestBuild = Omit<ProgramBuild, 'program'> & {
+	/** The tested crates that are a program's own crate, by folder, with that program's inputs. */
+	readonly programInputs: Readonly<Record<string, ReadonlyArray<string>>>
 	/** The tested crates' folders, sorted, as `inputs` names them. */
 	readonly tested: ReadonlyArray<string>
 }
@@ -606,8 +608,16 @@ async function buildPrograms(paths: WorktreePaths): Promise<void> {
  * time like the programs, so a checkout that runs tests never fills its own `target`.
  */
 async function testCrates(paths: WorktreePaths, crates: ReadonlyArray<string>): Promise<void> {
-	const env = { ...readSharedEnv(paths), SQLX_OFFLINE: 'true' }
-	if (!(await runTests(paths, env, crates, testBuild(paths, env, crates)))) process.exitCode = 1
+	const known = new Set([...localCrates(paths.worktree).values()].map((crate) => crate.name))
+	const unknown = crates.filter((crate) => !known.has(crate))
+	if (crates.length === 0) throw new DevRunnerError('test needs the Cargo package names to test.')
+	if (unknown.length > 0) {
+		throw new DevRunnerError(`No workspace crate is named ${unknown.join(', ')}.`)
+	}
+	// As in CI, the env files reach the tests only through the engine's compiled settings.
+	const env = { ...process.env, SQLX_OFFLINE: 'true' }
+	const build = testBuild(paths, readSharedEnv(paths), crates)
+	if (!(await runTests(paths, env, crates, build))) process.exitCode = 1
 }
 
 function testBuild(
@@ -616,17 +626,31 @@ function testBuild(
 	crates: ReadonlyArray<string>,
 ): TestBuild {
 	const checkout = NodeFS.realpathSync.native(paths.worktree)
+	const tested = [...localCrates(paths.worktree).values()]
+		.filter((crate) => crates.includes(crate.name))
+		.map((crate) => ({
+			folder: NodePath.relative(checkout, crate.folder).replaceAll('\\', '/'),
+			name: crate.name,
+		}))
+	const programs = tested.flatMap(({ folder, name }) =>
+		name === 'copal' || name === 'theseus_gui'
+			? [[folder, programInputs(paths, name)] as const]
+			: [],
+	)
 	return {
-		// One run, so features unify across the crates as in CI's workspace run.
+		// One run, so the tested crates share one feature set, as they do in a single cargo test.
 		cargoArgs: ['test', '--locked', ...crates.flatMap((crate) => ['--package', crate])],
 		cwd: paths.worktree,
 		// The same compiled settings as the programs, so the crates they share stay compiled.
 		...engineBuildSettings(paths, env),
-		inputs: [...new Set(crates.flatMap((crate) => workspaceInputs(paths, crate, { tests: true })))],
-		tested: [...localCrates(paths.worktree).values()]
-			.filter((crate) => crates.includes(crate.name))
-			.map((crate) => NodePath.relative(checkout, crate.folder).replaceAll('\\', '/'))
-			.sort(),
+		inputs: [
+			...new Set([
+				...crates.flatMap((crate) => workspaceInputs(paths, crate, { tests: true })),
+				...programs.flatMap(([, inputs]) => inputs),
+			]),
+		],
+		programInputs: Object.fromEntries(programs),
+		tested: tested.map(({ folder }) => folder).sort(),
 		...workspaceBuildDirs(paths),
 	}
 }
@@ -772,7 +796,7 @@ export function createProcessSpecs(input: {
 				cargoArgs: ['build', '--package', 'copal'],
 				cwd: coreDir,
 				...engineBuildSettings(input.paths, input.env),
-				inputs: workspaceInputs(input.paths, 'copal'),
+				inputs: programInputs(input.paths, 'copal'),
 				program: programFile('copal'),
 				...workspaceBuildDirs(input.paths),
 			},
@@ -857,8 +881,7 @@ function appProgramBuild(paths: WorktreePaths, env: NodeJS.ProcessEnv): ProgramB
 			),
 		},
 		ignoredInputs: engine.ignoredInputs,
-		// The App's version comes from the frontend.
-		inputs: [...workspaceInputs(paths, 'theseus_gui'), 'apps/app-frontend/package.json'],
+		inputs: programInputs(paths, 'theseus_gui'),
 		program: programFile('theseus_gui'),
 		...workspaceBuildDirs(paths),
 	}
@@ -886,6 +909,16 @@ function engineBuildSettings(
 		),
 		ignoredInputs: [NodePath.join(engineDir, '.env')],
 	}
+}
+
+/** What the App's or Core's build reads. Its tests count the same files toward its own crate. */
+function programInputs(
+	paths: WorktreePaths,
+	packageName: 'copal' | 'theseus_gui',
+): ReadonlyArray<string> {
+	const inputs = workspaceInputs(paths, packageName)
+	// The App's version comes from the frontend.
+	return packageName === 'theseus_gui' ? [...inputs, 'apps/app-frontend/package.json'] : inputs
 }
 
 /**
@@ -1164,31 +1197,36 @@ export function prepareCheckoutCrates(
 		// First build into this folder: every crate compiles.
 	}
 	const tested = 'tested' in build ? build.tested : undefined
-	const buildName = tested ? `test ${tested.join(' ')}` : build.program
+	const buildName = 'tested' in build ? `test ${build.tested.join(' ')}` : build.program
 	const folders = build.inputs.filter((input) =>
 		NodeFS.existsSync(NodePath.join(worktree, input, 'Cargo.toml')),
 	)
 	const files = new Map<string, Array<[string, string]>>(folders.map((folder) => [folder, []]))
 	// Inputs outside every crate folder, such as the App's version in `package.json`, count toward
-	// the program's own crate (the first input folder). Cargo judges them through build scripts
-	// that recorded another checkout's paths, so only their content can say they changed. A test
-	// build leaves them out, since its tested crates compile in this checkout, whose paths Cargo
-	// judges. So its other crates hash as they do for the programs, but a program's own crate
-	// never matches between its program and its tests, and each compiles it again after the other.
+	// the program's own crate (the first input folder), in its tests too, so the two keep trusting
+	// each other's output. Cargo judges them through build scripts that recorded another checkout's
+	// paths, so only their content can say they changed.
+	const own = 'tested' in build ? build.programInputs : { [folders[0] ?? '']: build.inputs }
 	const loose: Array<[string, string]> = []
 	for (const [file, blob] of inputContents(worktree, build)) {
 		const folder = folders
 			.filter((candidate) => file.startsWith(`${candidate}/`))
 			.sort((left, right) => right.length - left.length)[0]
 		if (folder) files.get(folder)!.push([file, blob])
-		else if (!tested) loose.push([file, blob])
+		else loose.push([file, blob])
 	}
 	const hashes = new Map<string, string>()
 	const now = new Date()
 	let changed = 0
 	for (const [folder, entries] of files) {
 		const hash = NodeCrypto.createHash('sha256')
-		const hashed = folder === folders[0] ? [...entries, ...loose] : entries
+		const inputs = own[folder] ?? []
+		const hashed = [
+			...entries,
+			...loose.filter(([file]) =>
+				inputs.some((input) => file === input || file.startsWith(`${input}/`)),
+			),
+		]
 		for (const [file, blob] of hashed.sort(([left], [right]) => (left < right ? -1 : 1))) {
 			hash.update(file).update('\0').update(blob).update('\0')
 		}
