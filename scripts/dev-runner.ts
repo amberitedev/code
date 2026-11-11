@@ -621,7 +621,7 @@ function testBuild(
 		cargoArgs: ['test', '--locked', ...crates.flatMap((crate) => ['--package', crate])],
 		cwd: paths.worktree,
 		// The same compiled settings as the programs, so the crates they share stay compiled.
-		...appLibBuildSettings(paths, env),
+		...engineBuildSettings(paths, env),
 		inputs: [...new Set(crates.flatMap((crate) => workspaceInputs(paths, crate, { tests: true })))],
 		tested: [...localCrates(paths.worktree).values()]
 			.filter((crate) => crates.includes(crate.name))
