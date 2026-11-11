@@ -42,7 +42,6 @@ Find every marker with `git grep -n -E '^(<<<<<<<|=======|>>>>>>>)( |$)'`. Rules
   moves them, drop that part.
 - `upstream.json` ignore paths, and ported paths our tree no longer has, stay deleted. Never
   restore one; if upstream code imports from one, cut the import the same way earlier syncs did.
-- Files under a `renamed` folder keep our name. Resolve them there, never at upstream's path.
 - A lockfile marked `failed` in `summary.json` failed only because its manifest had markers.
   Regenerate it after the manifests are fixed (`cargo metadata --format-version 1`,
   `pnpm install --lockfile-only`).

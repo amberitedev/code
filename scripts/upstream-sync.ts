@@ -18,9 +18,11 @@ import {
 	bucketOf,
 	changedPaths,
 	lines,
+	matches,
 	parseNameStatus,
 	removedPaths,
 } from './upstream-paths.ts'
+import { mergeMapped } from './upstream-merge.ts'
 
 type Commit = { sha: string; title: string }
 
@@ -42,8 +44,9 @@ const config: UpstreamConfig = JSON.parse(NodeFS.readFileSync('upstream.json', '
 // Git quotes non-ASCII paths by default, and a quoted path matches no key in upstream.json.
 const unquoted = ['-c', 'core.quotePath=false'] as const
 
-const base = git('merge-base', 'HEAD', upstream)
-const upstreamSha = git('rev-parse', upstream)
+const upstreamSha = git('rev-parse', '--verify', `${upstream}^{commit}`)
+const [base, ...otherBases] = lines(git('merge-base', '--all', 'HEAD', upstreamSha))
+if (!base || otherBases.length > 0) throw new Error(`HEAD and ${upstream} need one merge base`)
 const ours = changedPaths(
 	parseNameStatus(git(...unquoted, 'diff', '--find-renames', '--name-status', base, 'HEAD')),
 )
@@ -52,28 +55,25 @@ const removed = removedPaths(config, (path) =>
 	Boolean(git('ls-tree', '-r', '--name-only', 'HEAD', '--', path)),
 )
 
-// --no-commit stops before committing even on a clean merge; it exits 1 when there are conflicts.
-// directoryRenames puts upstream's new files under our renamed folders.
-run('git', ['-c', 'merge.directoryRenames=true', 'merge', '--no-commit', '--no-ff', upstream])
-if (!run('git', ['rev-parse', '-q', '--verify', 'MERGE_HEAD'])) {
-	throw new Error(`git merge ${upstream} did not start a merge`)
-}
-
-// Before the conflict list, so a modify/delete conflict on a ported path is not added back.
+const merged = mergeMapped({
+	base,
+	upstream: upstreamSha,
+	renamed: config.renamed,
+	cwd: process.cwd(),
+})
 for (const path of removed) {
 	if (git('ls-files', '--', path)) git('rm', '-r', '-q', '--force', '--', path)
 }
 
 const lockfiles: Record<string, 'regenerated' | 'failed'> = {}
 for (const [file, command] of Object.entries(LOCKFILES)) {
-	git('checkout', upstream, '--', file)
+	git('checkout', upstreamSha, '--', file)
 	const [bin, ...args] = command
 	lockfiles[file] = run(bin, args) ? 'regenerated' : 'failed'
 	git('add', '--', file)
 }
 
-const conflicts = lines(git('diff', '--name-only', '--diff-filter=U'))
-if (conflicts.length > 0) git('add', '--', ...conflicts)
+const conflicts = merged.filter((path) => !matches(path, [...removed, ...Object.keys(LOCKFILES)]))
 git(
 	'commit',
 	'--no-verify',

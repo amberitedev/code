@@ -21,6 +21,15 @@ Changes made after the plan was written. They override the slice text below.
   developer chose the removal without knowing that, so it waits for their confirmation. F1 removes
   only `packages/moderation` and `.idea`, and leaves everything that mentions the blog untouched
   (`_typos.toml`, `packages/ui/package.json`, `ChangelogEntry.vue`, the two scripts, the skill).
+- **F3b `fix(upstream): the sync merges renamed folders by path, not by similarity`, after F4.**
+  F4's dry runs showed `merge.directoryRenames=true` is not enough: git pairs our moved files by
+  similarity, so upstream deletions and hash-named `.sqlx` replacements became rename/delete and
+  rename/rename conflicts, and files we had rewritten came back at `packages/app-lib`. F3b rewrites
+  the merge base and upstream trees through `renamed` and merges them with `git merge-tree`, so
+  every renamed path merges at our name. F7 and the later main syncs that say "as F7" make their
+  merge commit with `node scripts/upstream-sync.ts origin/main > summary.json` on a clean checkout,
+  not `git -c merge.directoryRenames=true merge`, then reword it to the slice title with
+  `git commit --amend` (both parents stay).
 
 ## Dependency table
 

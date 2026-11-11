@@ -24,6 +24,7 @@ const config: UpstreamConfig = {
 
 describe('ourPath', () => {
 	it.each([
+		['packages/app-lib', 'packages/engine'],
 		['packages/app-lib/src/state/mod.rs', 'packages/engine/src/state/mod.rs'],
 		['packages/app-lib/src/api/friends.rs', 'apps/app/src/friends/api.rs'],
 		['packages/app-lib-extra/src/lib.rs', 'packages/app-lib-extra/src/lib.rs'],
@@ -34,14 +35,12 @@ describe('ourPath', () => {
 })
 
 describe('removedPaths', () => {
-	it('deletes ignored paths and ported paths we no longer have, under both names', () => {
+	it('deletes ignored paths and ported paths we no longer have, under our names', () => {
 		const have = new Set(['packages/ariadne/src/networking'])
 		expect(removedPaths(config, (path) => have.has(path))).toEqual([
 			'apps/labrinth',
-			'packages/app-lib/AGENTS.md',
 			'packages/engine/AGENTS.md',
 			'apps/labrinth/src/routes/v3/friends.rs',
-			'packages/app-lib/src/api/users.rs',
 			'packages/engine/src/api/users.rs',
 		])
 	})
