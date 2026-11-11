@@ -56,6 +56,7 @@ type Step = {
 }
 const steps: Step[] = []
 const skipped: string[] = []
+const failed: string[] = []
 
 const scripts = matching(/\.(?:[cm]?[jt]s|vue)$/)
 if (scripts.length > 0) {
@@ -109,7 +110,8 @@ const READ_BY_CRATE: Readonly<Record<string, string>> = {
 	'packages/assets/external/illustrations/minecraft_server_icon.png': 'theseus',
 }
 const crates = under('apps', 'packages') ? workspaceCrates() : []
-if (crates === undefined) skipped.push('rust tests (cargo metadata failed)')
+if (crates === 'no cargo') skipped.push('rust tests (cargo is not installed)')
+else if (crates === 'failed') failed.push('rust tests (cargo metadata failed)')
 else {
 	// The crates CI leaves out of the workspace tests (ci.yml, rust job).
 	const untested = new Set(['toasty', 'serde-binhum'])
@@ -147,8 +149,9 @@ const results = steps.map((step) => {
 })
 console.log('\n[check] summary')
 for (const { name, ok } of results) console.log(`  ${ok ? 'pass' : 'FAIL'}  ${name}`)
+for (const name of failed) console.log(`  FAIL  ${name}`)
 for (const name of skipped) console.log(`  skip  ${name}`)
-if (results.some((result) => !result.ok)) process.exitCode = 1
+if (failed.length > 0 || results.some((result) => !result.ok)) process.exitCode = 1
 
 /** The root workspace's crates, with folders relative to the checkout. */
 function workspaceCrates() {
@@ -157,7 +160,11 @@ function workspaceCrates() {
 		['metadata', '--no-deps', '--offline', '--format-version', '1'],
 		{ cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
 	)
-	if (result.status !== 0) return undefined
+	if (result.error) return 'no cargo'
+	if (result.status !== 0) {
+		console.error(result.stderr.trim())
+		return 'failed'
+	}
 	const { packages } = JSON.parse(result.stdout) as {
 		packages: ReadonlyArray<{ manifest_path: string; name: string }>
 	}

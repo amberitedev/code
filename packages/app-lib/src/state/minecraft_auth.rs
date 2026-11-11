@@ -1891,13 +1891,20 @@ mod persistence_tests {
         pool
     }
 
-    fn credentials(uuid: Uuid, name: &str, active: bool) -> Credentials {
+    /// Seeds the profile cache, so `upsert` never asks Mojang for the profile.
+    async fn credentials(uuid: Uuid, name: &str, active: bool) -> Credentials {
+        let profile = MinecraftProfile {
+            id: uuid,
+            name: name.to_string(),
+            fetch_time: Some(Instant::now()),
+            ..MinecraftProfile::default()
+        };
+        PROFILE_CACHE
+            .lock()
+            .await
+            .insert(uuid, ProfileCacheEntry::Hit(Arc::new(profile.clone())));
         Credentials {
-            offline_profile: MinecraftProfile {
-                id: uuid,
-                name: name.to_string(),
-                ..MinecraftProfile::default()
-            },
+            offline_profile: profile,
             access_token: format!("access-{name}"),
             refresh_token: format!("refresh-{name}"),
             expires: Utc::now() + Duration::hours(1),
@@ -1907,15 +1914,16 @@ mod persistence_tests {
 
     #[tokio::test]
     async fn credentials_round_trip_and_selection_use_sqlite() {
-        crate::install_crypto_provider();
         let pool = pool().await;
         let first_uuid = Uuid::new_v4();
         let second_uuid = Uuid::new_v4();
         credentials(first_uuid, "Alex", true)
+            .await
             .upsert(&pool)
             .await
             .unwrap();
         credentials(second_uuid, "Steve", true)
+            .await
             .upsert(&pool)
             .await
             .unwrap();
