@@ -16,6 +16,7 @@ import {
 	type Bucket,
 	type UpstreamConfig,
 	bucketOf,
+	changedPaths,
 	lines,
 	parseNameStatus,
 	removedPaths,
@@ -41,7 +42,9 @@ const config: UpstreamConfig = JSON.parse(NodeFS.readFileSync('upstream.json', '
 
 const base = git('merge-base', 'HEAD', upstream)
 const upstreamSha = git('rev-parse', upstream)
-const ours = new Set(lines(git('diff', '--name-only', base, 'HEAD')))
+const ours = changedPaths(
+	parseNameStatus(git('diff', '--find-renames', '--name-status', base, 'HEAD')),
+)
 const commits = lines(git('rev-list', '--reverse', '--no-merges', `${base}..${upstream}`))
 const removed = removedPaths(config, (path) =>
 	Boolean(git('ls-tree', '-r', '--name-only', 'HEAD', '--', path)),

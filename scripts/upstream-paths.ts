@@ -1,5 +1,5 @@
 // Path rules for scripts/upstream-sync.ts. Keys in upstream.json are upstream paths; `renamed` maps
-// them to ours. Deletion and `ours` work on our paths, bucketing on upstream paths.
+// them to ours. `ours` holds our paths, bucketing works on upstream paths, deletion on both.
 
 export type UpstreamConfig = {
 	// Upstream paths we never take. Deleted from every merge.
@@ -32,12 +32,24 @@ export function ourPath(path: string, renamed: UpstreamConfig['renamed']) {
 	return to + path.slice(from.length)
 }
 
-// Our paths to delete from a merge. `have` answers for our tree before the merge.
+// Our paths whose content changed since the merge base. A file we only moved (R100) is not one.
+export function changedPaths(changes: Change[]) {
+	return new Set(
+		changes
+			.filter((change) => change.status !== 'R100')
+			.flatMap((change) => change.paths.slice(-1)),
+	)
+}
+
+// Paths to delete from a merge, under both names: git leaves a modify/delete conflict inside a
+// renamed folder at upstream's path. `have` answers for our tree before the merge.
 export function removedPaths(config: UpstreamConfig, have: (path: string) => boolean) {
-	const mapped = (paths: string[]) => paths.map((path) => ourPath(path, config.renamed))
+	const both = (path: string) => [...new Set([path, ourPath(path, config.renamed)])]
 	return [
-		...mapped(config.ignore),
-		...mapped(Object.keys(config.ported)).filter((path) => !have(path)),
+		...config.ignore.flatMap(both),
+		...Object.keys(config.ported)
+			.filter((path) => !have(ourPath(path, config.renamed)))
+			.flatMap(both),
 	]
 }
 

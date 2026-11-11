@@ -75,7 +75,7 @@ For each `port` commit, read its diff to the `upstream.json` ported paths it tou
 (`git show <sha> -- <paths>`) and carry the change into the file each one maps to, following the
 porting rules in `docs/internals/upstream.md`. Apply the same rules to any other merged change they
 cover. Port small changes in a commit titled `feat(<scope>): port <change> from upstream`, such as
-`feat(backend): port <change> from labrinth`. List larger ones in the PR instead of porting them.
+`feat(backend): port user bans from upstream`. List larger ones in the PR instead of porting them.
 
 ## 8. Push and open the PR
 

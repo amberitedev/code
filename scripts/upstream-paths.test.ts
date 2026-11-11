@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vite-plus/test'
 import {
 	type UpstreamConfig,
 	bucketOf,
+	changedPaths,
 	ourPath,
 	parseNameStatus,
 	removedPaths,
@@ -33,19 +34,25 @@ describe('ourPath', () => {
 })
 
 describe('removedPaths', () => {
-	it('deletes ignored paths and ported paths we no longer have, by our name', () => {
+	it('deletes ignored paths and ported paths we no longer have, under both names', () => {
 		const have = new Set(['packages/ariadne/src/networking'])
 		expect(removedPaths(config, (path) => have.has(path))).toEqual([
 			'apps/labrinth',
+			'packages/app-lib/AGENTS.md',
 			'packages/engine/AGENTS.md',
 			'apps/labrinth/src/routes/v3/friends.rs',
+			'packages/app-lib/src/api/users.rs',
 			'packages/engine/src/api/users.rs',
 		])
 	})
 })
 
 describe('bucketOf', () => {
-	const ours = new Set(['packages/engine/src/state/mod.rs'])
+	const ours = changedPaths(
+		parseNameStatus(
+			'M\tpackages/engine/src/state/mod.rs\nR100\tpackages/app-lib/src/state/dirs.rs\tpackages/engine/src/state/dirs.rs',
+		),
+	)
 
 	it.each([
 		[
@@ -71,7 +78,8 @@ describe('bucketOf', () => {
 			'other',
 		],
 		['a renamed path we changed', 'M\tpackages/app-lib/src/state/mod.rs', 'overlap'],
-		['a path we did not change', 'M\tpackages/app-lib/src/state/dirs.rs', 'other'],
+		['a renamed path we only moved', 'M\tpackages/app-lib/src/state/dirs.rs', 'other'],
+		['a path we did not change', 'M\tpackages/app-lib/src/state/fs.rs', 'other'],
 	] as const)('%s', (_, nameStatus, bucket) => {
 		expect(bucketOf(parseNameStatus(nameStatus), config, ours)).toBe(bucket)
 	})
