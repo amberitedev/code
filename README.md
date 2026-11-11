@@ -7,7 +7,7 @@ tied to a Core and works for everyone.
 ## Running it
 
 You need Node 24.15 or newer, [Vite+](https://viteplus.dev/guide/) (the `vp` command), Rust through
-[rustup](https://rustup.rs), a JDK, and Tauri's system packages.
+[rustup](https://rustup.rs), JDK 17 or newer, and Tauri's system packages.
 [docs/internals/scripts.md](docs/internals/scripts.md#first-checkout) has the details. Then:
 
 ```sh
