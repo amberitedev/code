@@ -54,8 +54,8 @@ impl DownloadMeta {
 
 #[derive(Debug)]
 pub struct IoSemaphore(pub Semaphore);
-#[derive(Debug)]
-pub struct FetchSemaphore(pub Semaphore);
+#[derive(Debug, Clone)]
+pub struct FetchSemaphore(pub Arc<Semaphore>);
 
 struct FetchFence {
     inner: Mutex<HashMap<&'static str, FenceInner>>,

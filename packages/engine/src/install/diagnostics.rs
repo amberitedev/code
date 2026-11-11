@@ -557,9 +557,7 @@ fn json_string<T: serde::Serialize>(value: &T) -> String {
 async fn latest_launcher_log_tail(
     directories: &DirectoryInfo,
 ) -> crate::Result<Option<(PathBuf, String)>> {
-    let Some(logs_dir) = directories.launcher_logs_dir() else {
-        return Ok(None);
-    };
+    let logs_dir = directories.launcher_logs_dir();
 
     let entries = match std::fs::read_dir(&logs_dir) {
         Ok(entries) => entries,

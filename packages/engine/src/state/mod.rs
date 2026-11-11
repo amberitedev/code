@@ -2,7 +2,7 @@
 use crate::ErrorKind;
 use crate::util::fetch::{FetchSemaphore, IoSemaphore};
 use anyhow::anyhow;
-use std::sync::atomic::AtomicBool;
+use std::path::PathBuf;
 use std::sync::{Arc, LazyLock};
 use tokio::sync::watch::Sender;
 use tokio::sync::{Mutex, OnceCell, Semaphore};
@@ -91,7 +91,6 @@ static STATE_STARTUP: LazyLock<Sender<StartupPhase>> =
     LazyLock::new(|| Sender::new(StartupPhase::Pending));
 static STATE_STARTUP_LOCK: Mutex<()> = Mutex::const_new(());
 pub struct State {
-    startup_complete: AtomicBool,
     /// Information on the location of files used in the launcher
     pub directories: DirectoryInfo,
     pub content_store: content_store::ContentStore,
@@ -112,47 +111,129 @@ pub struct State {
     /// Process manager
     pub process_manager: ProcessManager,
 
-    // NOTE: we explicitly must NOT store the app identifier in the state object,
-    // because creating the state object is fallible (e.g. database missing),
-    // but we rely on the app identifier to create the state (data dir).
-    //
-    // /// App identifier string (like com.modrinth.ModrinthApp)
-    // pub app_identifier: String,
     pub(crate) pool: SqlitePool,
 
     pub(crate) file_watcher: FileWatcher,
 }
 
 impl State {
+    /// Starts the App's engine once and makes it the process global.
     pub async fn init(app_identifier: String) -> crate::Result<()> {
         let _startup = STATE_STARTUP_LOCK.lock().await;
         let result = LAUNCHER_STATE
             .get_or_try_init(|| async {
                 STATE_STARTUP.send_replace(StartupPhase::Pending);
-                Self::initialize_state(app_identifier).await
+                let settings_dir =
+                    DirectoryInfo::initial_settings_dir_path(&app_identifier)
+                        .ok_or(ErrorKind::FSError(
+                        "could not find the application directory".to_string(),
+                    ))?;
+                let (state, watcher_events) = Self::open(settings_dir).await?;
+                // Fallible, so it runs before a background task can keep a rejected engine alive.
+                crate::self_hosted::accounts::bind_origin(&state.pool).await?;
+                state.spawn_background(watcher_events);
+                state.start_desktop();
+                Ok(state)
             })
             .await;
         STATE_STARTUP.send_replace(match &result {
             Ok(_) => StartupPhase::Ready,
             Err(error) => StartupPhase::Failed(format!("{error:#}")),
         });
-        let state = result?;
+        result.map(|_| ())
+    }
 
-        if state
-            .startup_complete
-            .load(std::sync::atomic::Ordering::Acquire)
-        {
-            return Ok(());
-        }
+    /// Opens a complete engine on `settings_dir` without touching the global. Its background
+    /// tasks hold a `Weak` and end once the last `Arc` is dropped.
+    pub async fn new(settings_dir: PathBuf) -> crate::Result<Arc<Self>> {
+        let (state, watcher_events) = Self::open(settings_dir).await?;
+        state.spawn_background(watcher_events);
+        Ok(state)
+    }
+
+    /// The fallible part of `new`; it spawns nothing.
+    #[tracing::instrument]
+    async fn open(
+        settings_dir: PathBuf,
+    ) -> crate::Result<(
+        Arc<Self>,
+        tokio::sync::mpsc::Receiver<notify_debouncer_mini::DebounceEventResult>,
+    )> {
+        tracing::info!("Connecting to app database");
+        let store_lock =
+            content_store::ContentStore::lock_process(&settings_dir).await?;
+        let pool = db::open(&settings_dir).await?;
+
+        tracing::info!("Fetching app settings");
+        let mut settings = Settings::get(&pool).await?;
+
+        let fetch_semaphore = FetchSemaphore(Arc::new(Semaphore::new(
+            settings.max_concurrent_downloads,
+        )));
+        let io_semaphore =
+            IoSemaphore(Semaphore::new(settings.max_concurrent_writes));
+        let api_semaphore = FetchSemaphore(Arc::new(Semaphore::new(
+            settings.max_concurrent_downloads,
+        )));
+
+        tracing::info!("Initializing directories");
+        DirectoryInfo::move_launcher_directory(
+            &mut settings,
+            &pool,
+            &io_semaphore,
+            &settings_dir,
+        )
+        .await?;
+
+        let directories =
+            DirectoryInfo::init(settings_dir, settings.custom_dir).await?;
+        let content_store = content_store::ContentStore::new(
+            &directories,
+            pool.clone(),
+            store_lock,
+        )
+        .await?;
+
+        tracing::info!("Initializing file watcher");
+        let (file_watcher, watcher_events) =
+            instances::watcher::init_watcher()?;
+
+        let state = Arc::new(Self {
+            directories,
+            content_store,
+            fetch_semaphore,
+            io_semaphore,
+            api_semaphore,
+            installs: Installs::new(),
+            instance_locks: InstanceLocks::default(),
+            synced_options: SyncedOptions::default(),
+            presence: Presence::init()?,
+            process_manager: ProcessManager::new(),
+            pool,
+            file_watcher,
+        });
+
         state.content_store.recover(None).await?;
-        crate::install::recovery::recover_interrupted_jobs(state).await?;
+        crate::install::recovery::recover_interrupted_jobs(&state).await?;
         state
             .content_store
             .recover_abandoned(&state.directories.install_backups_dir())
             .await?;
-        state
-            .startup_complete
-            .store(true, std::sync::atomic::Ordering::Release);
+        Ok((state, watcher_events))
+    }
+
+    fn spawn_background(
+        self: &Arc<Self>,
+        watcher_events: tokio::sync::mpsc::Receiver<
+            notify_debouncer_mini::DebounceEventResult,
+        >,
+    ) {
+        instances::watcher::watch_instance_events(
+            Arc::downgrade(self),
+            watcher_events,
+        );
+
+        let maintained = Arc::downgrade(self);
         tokio::spawn(async move {
             let mut interval =
                 tokio::time::interval(std::time::Duration::from_secs(600));
@@ -161,9 +242,12 @@ impl State {
             );
             loop {
                 interval.tick().await;
+                let Some(state) = maintained.upgrade() else {
+                    return;
+                };
                 if let Err(error) =
                     crate::api::instance::synced_packs::reconcile_retention(
-                        state,
+                        &state,
                     )
                     .await
                 {
@@ -177,7 +261,7 @@ impl State {
                     tracing::warn!("Expired cache cleanup deferred: {error}");
                 }
                 if let Err(error) =
-                    state.content_store.cleanup(state, false).await
+                    state.content_store.cleanup(&state, false).await
                 {
                     tracing::debug!(
                         "Shared content cache cleanup deferred: {error}"
@@ -186,14 +270,49 @@ impl State {
             }
         });
 
-        tokio::task::spawn(async move {
-            crate::api::instance::start_game_locale_indexer(Arc::clone(state));
+        let starting = Arc::downgrade(self);
+        tokio::spawn(async move {
+            let Some(state) = starting.upgrade() else {
+                return;
+            };
             instances::watcher::watch_instances_init(
                 &state.file_watcher,
                 &state.directories,
                 &state.pool,
             )
             .await;
+            if let Err(error) = refresh_all_instances(&state).await {
+                tracing::error!("Failed to refresh instances: {error}");
+            }
+            if let Err(error) = Settings::migrate(&state.pool).await {
+                tracing::error!("Failed to migrate settings: {error}");
+            }
+        });
+    }
+
+    /// Desktop-only startup; temporary (D-32).
+    pub fn start_desktop(self: &Arc<Self>) {
+        crate::api::instance::start_game_locale_indexer(Arc::clone(self));
+
+        let state = Arc::clone(self);
+        tokio::spawn(async move {
+            if let Ok(instances) =
+                instances::load_instance_rows(&state.pool).await
+            {
+                for instance in instances {
+                    if let Err(error) =
+                        crate::api::instance::reconcile_screenshots(
+                            &instance.id,
+                        )
+                        .await
+                    {
+                        tracing::warn!(
+                            "Failed to reconcile screenshots for {} at startup: {error}",
+                            instance.id
+                        );
+                    }
+                }
+            }
 
             if let Err(error) =
                 crate::api::instance::monitor_persisted_processes().await
@@ -217,8 +336,6 @@ impl State {
                     &state.pool,
                     &state.process_manager,
                 ),
-                refresh_all_instances(state),
-                Settings::migrate(&state.pool),
                 ModrinthCredentials::refresh_all(
                     &state.pool,
                     &state.fetch_semaphore,
@@ -238,10 +355,8 @@ impl State {
                     &state.process_manager,
                 )
                 .await;
-            let _ = FriendsSocket::socket_loop(Arc::clone(state)).await;
+            let _ = FriendsSocket::socket_loop(state).await;
         });
-
-        Ok(())
     }
 
     /// Get the current launcher state, waiting for initialization.
@@ -277,74 +392,113 @@ impl State {
     pub fn get_if_initialized() -> Option<Arc<Self>> {
         LAUNCHER_STATE.get().map(Arc::clone)
     }
+}
 
-    #[tracing::instrument]
-    async fn initialize_state(
-        app_identifier: String,
-    ) -> crate::Result<Arc<Self>> {
-        tracing::info!("Connecting to app database");
-        let settings_dir = DirectoryInfo::initial_settings_dir_path(
-            &app_identifier,
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::instances::adapters::sqlite::{
+        content_rows, instance_rows,
+    };
+    use std::path::Path;
+    use std::time::Duration;
+
+    async fn add_instance(state: &State, id: &str, path: &str) {
+        let now = chrono::Utc::now();
+        let content_set_id = format!("content-set:{id}");
+        let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await.unwrap();
+        instance_rows::insert_instance(
+            &Instance {
+                id: id.to_string(),
+                path: path.to_string(),
+                applied_content_set_id: Some(content_set_id.clone()),
+                install_stage: InstanceInstallStage::Installed,
+                launcher_feature_version: LauncherFeatureVersion::MOST_RECENT,
+                update_channel: ReleaseChannel::Release,
+                name: id.to_string(),
+                icon_path: None,
+                created: now,
+                modified: now,
+                last_played: None,
+                submitted_time_played: 0,
+                recent_time_played: 0,
+            },
+            &mut tx,
         )
-        .ok_or(ErrorKind::FSError(
-            "could not find the application directory".to_string(),
-        ))?;
-        let store_lock =
-            content_store::ContentStore::lock_process(&settings_dir).await?;
-        let pool = db::connect(&app_identifier).await?;
-
-        crate::self_hosted::accounts::bind_origin(&pool).await?;
-
-        tracing::info!("Fetching app settings");
-        let mut settings = Settings::get(&pool).await?;
-
-        let fetch_semaphore =
-            FetchSemaphore(Semaphore::new(settings.max_concurrent_downloads));
-        let io_semaphore =
-            IoSemaphore(Semaphore::new(settings.max_concurrent_writes));
-        let api_semaphore =
-            FetchSemaphore(Semaphore::new(settings.max_concurrent_downloads));
-
-        tracing::info!("Initializing directories");
-        DirectoryInfo::move_launcher_directory(
-            &mut settings,
-            &pool,
-            &io_semaphore,
-            &app_identifier,
+        .await
+        .unwrap();
+        content_rows::insert_content_set(
+            &ContentSet {
+                id: content_set_id,
+                instance_id: id.to_string(),
+                name: "Default".to_string(),
+                source_kind: ContentSourceKind::Local,
+                status: ContentSetStatus::Available,
+                game_version: "1.21.1".to_string(),
+                protocol_version: None,
+                loader: ModLoader::Fabric,
+                loader_version: None,
+                created: now,
+                modified: now,
+            },
+            &mut tx,
         )
-        .await?;
-
-        let directories =
-            DirectoryInfo::init(settings.custom_dir, &app_identifier).await?;
-        let content_store = content_store::ContentStore::new(
-            &directories,
-            pool.clone(),
-            store_lock,
+        .await
+        .unwrap();
+        instance_rows::upsert_instance_link(
+            id,
+            &InstanceLink::Unmanaged,
+            &mut tx,
         )
-        .await?;
+        .await
+        .unwrap();
+        instance_rows::upsert_instance_launch_overrides(
+            &InstanceLaunchOverrides::empty(id.to_string()),
+            &mut tx,
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+    }
 
-        let presence = Presence::init()?;
+    fn write(path: &Path) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, path.to_string_lossy().as_bytes()).unwrap();
+    }
 
-        tracing::info!("Initializing file watcher");
-        let file_watcher = instances::watcher::init_watcher().await?;
+    async fn content_paths(state: &State, id: &str) -> Vec<String> {
+        let mut paths: Vec<_> = sync_content_files(id, state)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|file| file.relative_path)
+            .collect();
+        paths.sort();
+        paths
+    }
 
-        let process_manager = ProcessManager::new();
+    #[tokio::test(flavor = "multi_thread")]
+    async fn two_engines_list_their_own_content() {
+        crate::install_crypto_provider();
+        let tmp = tempfile::tempdir().unwrap();
+        let (a_dir, b_dir) = (tmp.path().join("a"), tmp.path().join("b"));
+        write(&a_dir.join("profiles/Survival/mods/a.jar"));
+        write(&b_dir.join("profiles/Survival/mods/b.jar"));
+        write(&b_dir.join("profiles/Survival/resourcepacks/b.zip"));
 
-        Ok(Arc::new(Self {
-            startup_complete: AtomicBool::new(false),
-            directories,
-            content_store,
-            fetch_semaphore,
-            io_semaphore,
-            api_semaphore,
-            installs: Installs::new(),
-            instance_locks: InstanceLocks::default(),
-            synced_options: SyncedOptions::default(),
-            presence,
-            process_manager,
-            pool,
-            file_watcher,
-            // app_identifier,
-        }))
+        // A call that reaches the global waits forever instead of failing.
+        tokio::time::timeout(Duration::from_secs(60), async {
+            let a = State::new(a_dir).await.unwrap();
+            let b = State::new(b_dir).await.unwrap();
+            add_instance(&a, "a", "Survival").await;
+            add_instance(&b, "b", "Survival").await;
+
+            let (a_paths, b_paths) =
+                tokio::join!(content_paths(&a, "a"), content_paths(&b, "b"));
+            assert_eq!(a_paths, ["mods/a.jar"]);
+            assert_eq!(b_paths, ["mods/b.jar", "resourcepacks/b.zip"]);
+        })
+        .await
+        .expect("an engine call waited on the global");
     }
 }

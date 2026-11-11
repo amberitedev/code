@@ -92,15 +92,13 @@ pub async fn export_debug_info(
             &excluded_paths,
             &cancel,
         )?;
-        if let Some(logs_dir) = directories.launcher_logs_dir() {
-            collect_files(
-                &mut files,
-                &logs_dir,
-                "launcher_logs",
-                &excluded_paths,
-                &cancel,
-            )?;
-        }
+        collect_files(
+            &mut files,
+            &directories.launcher_logs_dir(),
+            "launcher_logs",
+            &excluded_paths,
+            &cancel,
+        )?;
         let instances_dir = directories.instances_dir();
         match std::fs::read_dir(&instances_dir) {
             Ok(entries) => {
@@ -224,7 +222,6 @@ pub async fn export_debug_info(
             &serde_json::json!({
                 "exported_at": chrono::Utc::now(),
                 "app_version": env!("CARGO_PKG_VERSION"),
-                "app_identifier": directories.app_identifier,
                 "os": std::env::consts::OS,
                 "os_version": sysinfo::System::long_os_version(),
                 "kernel_version": sysinfo::System::kernel_version(),

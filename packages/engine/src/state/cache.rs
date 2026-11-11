@@ -952,7 +952,7 @@ macro_rules! impl_cache_methods {
                     ) -> crate::Result<Vec<$type>>
                     {
                         let entry =
-                            CachedEntry::get_many(CacheValueType::$variant, ids, cache_behaviour, pool, fetch_semaphore).await?;
+                            CachedEntry::get_many(CacheValueType::$variant, ids, None, cache_behaviour, pool, fetch_semaphore).await?;
 
                         Ok(entry.into_iter().filter_map(|x| if let Some(CacheValue::$variant(value)) = x.data {
                             Some(value)
@@ -1003,7 +1003,6 @@ impl_cache_methods!(
     (Organization, Organization),
     (File, CachedFile),
     (LoaderManifest, CachedLoaderManifest),
-    (FileHash, CachedFileHash),
     (FileUpdate, CachedFileUpdate),
     (EmbeddedContentMetadata, CachedEmbeddedContentMetadata),
     (SearchResults, SearchResults),
@@ -1034,6 +1033,7 @@ impl CachedEntry {
         Ok(Self::get_many(
             type_,
             &[key],
+            None,
             cache_behaviour,
             pool,
             fetch_semaphore,
@@ -1043,10 +1043,39 @@ impl CachedEntry {
         .next())
     }
 
+    /// Hash keys are paths relative to `instances_dir`.
+    #[tracing::instrument(skip(pool, fetch_semaphore))]
+    pub async fn get_file_hash_many(
+        keys: &[&str],
+        instances_dir: &Path,
+        cache_behaviour: Option<CacheBehaviour>,
+        pool: &SqlitePool,
+        fetch_semaphore: &FetchSemaphore,
+    ) -> crate::Result<Vec<CachedFileHash>> {
+        let entries = Self::get_many(
+            CacheValueType::FileHash,
+            keys,
+            Some(instances_dir),
+            cache_behaviour,
+            pool,
+            fetch_semaphore,
+        )
+        .await?;
+        Ok(entries
+            .into_iter()
+            .filter_map(|entry| match entry.data {
+                Some(CacheValue::FileHash(hash)) => Some(hash),
+                _ => None,
+            })
+            .collect())
+    }
+
+    /// `instances_dir` is needed only for `FileHash`.
     #[tracing::instrument(skip(pool, fetch_semaphore))]
     pub async fn get_many(
         type_: CacheValueType,
         keys: &[&str],
+        instances_dir: Option<&Path>,
         cache_behaviour: Option<CacheBehaviour>,
         pool: &SqlitePool,
         fetch_semaphore: &FetchSemaphore,
@@ -1153,6 +1182,7 @@ impl CachedEntry {
             let res = Self::fetch_many(
                 type_,
                 remaining_keys.clone(),
+                instances_dir,
                 fetch_semaphore,
                 pool,
             )
@@ -1187,15 +1217,16 @@ impl CachedEntry {
                 || cache_behaviour
                     == CacheBehaviour::StaleWhileRevalidateSkipOffline)
         {
+            let pool = pool.clone();
+            let fetch_semaphore = fetch_semaphore.clone();
+            let instances_dir = instances_dir.map(Path::to_path_buf);
             tokio::task::spawn(async move {
-                // TODO: if possible- find a way to do this without invoking state get
-                let state = crate::state::State::get().await?;
-
                 let values = Self::fetch_many(
                     type_,
                     expired_keys,
-                    &state.api_semaphore,
-                    &state.pool,
+                    instances_dir.as_deref(),
+                    &fetch_semaphore,
+                    &pool,
                 )
                 .await?
                 .into_iter()
@@ -1203,7 +1234,7 @@ impl CachedEntry {
                 .collect::<Vec<_>>();
 
                 if !values.is_empty() {
-                    Self::upsert_many(&values, &state.pool).await?;
+                    Self::upsert_many(&values, &pool).await?;
                 }
 
                 Ok::<(), crate::Error>(())
@@ -1216,6 +1247,7 @@ impl CachedEntry {
     async fn fetch_many(
         type_: CacheValueType,
         keys: DashSet<impl Display + Eq + Hash + Serialize>,
+        instances_dir: Option<&Path>,
         fetch_semaphore: &FetchSemaphore,
         pool: &SqlitePool,
     ) -> crate::Result<Vec<(Self, bool)>> {
@@ -1645,9 +1677,11 @@ impl CachedEntry {
                 )
             }
             CacheValueType::FileHash => {
-                // TODO: Replace state call here
-                let state = crate::State::get().await?;
-                let instances_dir = state.directories.instances_dir();
+                let instances_dir =
+                    instances_dir.ok_or(ErrorKind::InputError(
+                        "file hashes are read with get_file_hash_many"
+                            .to_string(),
+                    ))?;
 
                 async fn hash_file(
                     instances_dir: &Path,
@@ -1699,7 +1733,7 @@ impl CachedEntry {
 
                 use futures::stream::StreamExt;
                 let results: Vec<_> = futures::stream::iter(keys)
-                    .map(|x| hash_file(&instances_dir, x.to_string()))
+                    .map(|x| hash_file(instances_dir, x.to_string()))
                     .buffer_unordered(64) // hash 64 files at once
                     .collect::<Vec<_>>()
                     .await

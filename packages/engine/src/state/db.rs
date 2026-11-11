@@ -15,11 +15,13 @@ pub(crate) async fn connect(
             "could not find valid config dir".to_string(),
         ))?;
 
-    crate::util::io::create_dir_all(&settings_dir).await?;
+    open(&settings_dir).await
+}
 
-    let db_path = settings_dir.join("app.db");
+pub(crate) async fn open(settings_dir: &Path) -> crate::Result<Pool<Sqlite>> {
+    crate::util::io::create_dir_all(settings_dir).await?;
 
-    connect_app_db(&db_path).await
+    connect_app_db(&settings_dir.join("app.db")).await
 }
 
 async fn connect_app_db(db_path: &Path) -> crate::Result<Pool<Sqlite>> {

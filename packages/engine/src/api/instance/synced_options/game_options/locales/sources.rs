@@ -98,6 +98,7 @@ pub(super) async fn snapshot_instance(
         scanned.iter().map(|f| f.hash_cache_key.as_str()).collect();
     let hashes = CachedEntry::get_file_hash_many(
         &keys,
+        &state.directories.instances_dir(),
         None,
         &state.pool,
         &state.api_semaphore,

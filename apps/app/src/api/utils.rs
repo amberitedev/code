@@ -106,10 +106,7 @@ pub async fn open_path<R: Runtime>(app: tauri::AppHandle<R>, path: PathBuf) {
 #[tauri::command]
 pub async fn show_launcher_logs_folder<R: Runtime>(app: tauri::AppHandle<R>) {
     if let Some(state) = engine::State::get_if_initialized() {
-        let path = state.directories.launcher_logs_dir().unwrap_or_default();
-        // failure to get folder just opens filesystem
-        // (ie: if in debug mode only and launcher_logs never created)
-        open_path(app, path).await;
+        open_path(app, state.directories.launcher_logs_dir()).await;
     }
 }
 

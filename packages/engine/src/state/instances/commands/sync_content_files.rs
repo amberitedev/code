@@ -100,6 +100,7 @@ pub(crate) async fn sync_instance_content_files(
         .collect::<Vec<_>>();
     let hashes = CachedEntry::get_file_hash_many(
         &cache_keys,
+        &state.directories.instances_dir(),
         None,
         &state.pool,
         &state.api_semaphore,
@@ -354,7 +355,7 @@ pub(crate) async fn sync_instance_content_files(
     tx.commit().await?;
     if changed {
         super::mark_shared_instance_stale(&instance.id, &state.pool).await?;
-        crate::api::instance::queue_game_locale_index();
+        state.synced_options.locales.queue();
     }
     Ok(stored)
 }

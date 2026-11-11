@@ -17,6 +17,22 @@ fn main() {
 
     set_env();
     build_java_jars();
+    embed_common_controls_manifest();
+}
+
+/// Tauri imports `TaskDialogIndirect`, which only Common Controls 6 exports, so the engine's own
+/// test binaries fail to load (STATUS_ENTRYPOINT_NOT_FOUND) without the manifest tauri-build gives
+/// the App.
+fn embed_common_controls_manifest() {
+    if env::var_os("CARGO_FEATURE_TAURI").is_none()
+        || env::var("CARGO_CFG_TARGET_ENV").as_deref() != Ok("msvc")
+    {
+        return;
+    }
+    println!("cargo::rustc-link-arg=/MANIFEST:EMBED");
+    println!(
+        "cargo::rustc-link-arg=/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'"
+    );
 }
 
 fn set_env() {

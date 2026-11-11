@@ -17,19 +17,22 @@ use notify_debouncer_mini::{
 };
 use sqlx::SqlitePool;
 use std::path::Path;
-use std::sync::LazyLock;
+use std::sync::{LazyLock, Weak};
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
     time::Duration,
 };
-use tokio::sync::{RwLock, mpsc::channel};
+use tokio::sync::{
+    RwLock,
+    mpsc::{Receiver, channel},
+};
 
 use super::adapters::sqlite::instance_rows;
 
 pub struct FileWatcher {
     watcher: RwLock<Debouncer<WriteOnlyWatcher>>,
-    instance_ids: Arc<RwLock<HashMap<String, String>>>,
+    instance_ids: RwLock<HashMap<String, String>>,
 }
 
 /// Wraps the platform watcher and drops read-only access events before they
@@ -154,11 +157,9 @@ fn queue_content_sync(instance_id: String, state: Arc<State>) {
     });
 }
 
-pub async fn init_watcher() -> crate::Result<FileWatcher> {
-    let (tx, mut rx) = channel(1);
-    let instance_ids = Arc::new(RwLock::new(HashMap::<String, String>::new()));
-    let event_instance_ids = instance_ids.clone();
-
+pub(crate) fn init_watcher()
+-> crate::Result<(FileWatcher, Receiver<DebounceEventResult>)> {
+    let (tx, rx) = channel(1);
     let file_watcher = new_debouncer_opt::<_, WriteOnlyWatcher>(
         notify_debouncer_mini::Config::default()
             .with_timeout(Duration::from_secs_f32(1.0)),
@@ -167,25 +168,33 @@ pub async fn init_watcher() -> crate::Result<FileWatcher> {
         },
     )?;
 
+    Ok((
+        FileWatcher {
+            watcher: RwLock::new(file_watcher),
+            instance_ids: RwLock::new(HashMap::new()),
+        },
+        rx,
+    ))
+}
+
+/// The loop ends when the engine drops, which drops the watcher and closes `rx`.
+pub(crate) fn watch_instance_events(
+    state: Weak<State>,
+    mut rx: Receiver<DebounceEventResult>,
+) {
     tokio::task::spawn(async move {
         let span = tracing::span!(tracing::Level::INFO, "init_watcher");
         tracing::info!(parent: &span, "Initing watcher");
-        let state = match State::get().await {
-            Ok(state) => state,
-            Err(error) => {
-                tracing::error!(
-                    parent: &span,
-                    "File watcher stopped, state failed to initialize: {error}"
-                );
-                return;
-            }
-        };
         while let Some(res) = rx.recv().await {
+            let Some(state) = state.upgrade() else {
+                return;
+            };
             let _span = span.enter();
 
             match res {
                 Ok(events) => {
-                    let instance_ids = event_instance_ids.read().await;
+                    let instance_ids =
+                        state.file_watcher.instance_ids.read().await;
                     let mut visited_instances = Vec::new();
                     let mut visited_screenshot_instances = Vec::new();
                     let mut pack_instances = HashSet::new();
@@ -249,7 +258,7 @@ pub async fn init_watcher() -> crate::Result<FileWatcher> {
                                     .or_default()
                                     .insert(file_name.to_owned());
                                 if file_name == "options.txt" {
-                                    crate::api::instance::queue_game_locale_index();
+                                    state.synced_options.locales.queue();
                                 }
                             }
                             if first_file_name
@@ -408,11 +417,6 @@ pub async fn init_watcher() -> crate::Result<FileWatcher> {
             }
         }
     });
-
-    Ok(FileWatcher {
-        watcher: RwLock::new(file_watcher),
-        instance_ids,
-    })
 }
 
 pub(crate) async fn watch_instances_init(
@@ -427,14 +431,6 @@ pub(crate) async fn watch_instances_init(
     for instance in instances {
         watch_instance_folder(&instance.id, &instance.path, watcher, dirs)
             .await;
-        if let Err(error) =
-            crate::api::instance::reconcile_screenshots(&instance.id).await
-        {
-            tracing::warn!(
-                "Failed to reconcile screenshots for {} during watcher initialization: {error}",
-                instance.id
-            );
-        }
     }
 }
 

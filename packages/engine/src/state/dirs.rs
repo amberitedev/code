@@ -5,7 +5,7 @@ use crate::state::Settings;
 use crate::util::fetch::IoSemaphore;
 use crate::{ErrorKind, LoadingBarType};
 use anyhow::Context;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tokio::fs;
 
 pub const CACHES_FOLDER_NAME: &str = "caches";
@@ -19,14 +19,9 @@ pub const STORE_FOLDER_NAME: &str = "store";
 pub struct DirectoryInfo {
     pub settings_dir: PathBuf, // Base settings directory- app database
     pub config_dir: PathBuf, // Base config directory- instances, minecraft downloads, etc. Changeable as a setting.
-    pub app_identifier: String,
 }
 
 impl DirectoryInfo {
-    pub fn get_initial_settings_dir(&self) -> Option<PathBuf> {
-        Self::initial_settings_dir_path(&self.app_identifier)
-    }
-
     // Get the settings directory
     // init() is not needed for this function
     pub fn initial_settings_dir_path(app_identifier: &str) -> Option<PathBuf> {
@@ -37,14 +32,9 @@ impl DirectoryInfo {
     /// Get all paths needed for Theseus to operate properly
     #[tracing::instrument]
     pub async fn init(
+        settings_dir: PathBuf,
         config_dir: Option<String>,
-        app_identifier: &str,
     ) -> crate::Result<Self> {
-        let settings_dir = Self::initial_settings_dir_path(app_identifier)
-            .ok_or(ErrorKind::FSError(
-                "could not find valid settings dir".to_string(),
-            ))?;
-
         fs::create_dir_all(&settings_dir)
             .await
             .context(ErrorKind::FSError(
@@ -57,7 +47,6 @@ impl DirectoryInfo {
         Ok(Self {
             settings_dir,
             config_dir,
-            app_identifier: app_identifier.to_owned(),
         })
     }
 
@@ -187,9 +176,8 @@ impl DirectoryInfo {
     }
 
     #[inline]
-    pub fn launcher_logs_dir(&self) -> Option<PathBuf> {
-        self.get_initial_settings_dir()
-            .map(|d| d.join(LAUNCHER_LOGS_FOLDER_NAME))
+    pub fn launcher_logs_dir(&self) -> PathBuf {
+        self.settings_dir.join(LAUNCHER_LOGS_FOLDER_NAME)
     }
 
     #[inline]
@@ -215,9 +203,9 @@ impl DirectoryInfo {
         settings: &mut Settings,
         pool: &sqlx::SqlitePool,
         _io_semaphore: &IoSemaphore,
-        app_identifier: &str,
+        settings_dir: &Path,
     ) -> crate::Result<()> {
-        Self::try_move_launcher_directory(settings, pool, app_identifier)
+        Self::try_move_launcher_directory(settings, pool, settings_dir)
             .await
             .context(ErrorKind::DirectoryMoveFailed)
     }
@@ -225,17 +213,13 @@ impl DirectoryInfo {
     async fn try_move_launcher_directory(
         settings: &mut Settings,
         pool: &sqlx::SqlitePool,
-        app_identifier: &str,
+        initial: &Path,
     ) -> crate::Result<()> {
-        let initial = DirectoryInfo::initial_settings_dir_path(app_identifier)
-            .ok_or(ErrorKind::FSError(
-                "could not find the app directory".to_string(),
-            ))?;
         let destination = settings
             .custom_dir
             .as_ref()
             .map(PathBuf::from)
-            .unwrap_or_else(|| initial.clone());
+            .unwrap_or_else(|| initial.to_path_buf());
         let previous = settings.prev_custom_dir.as_ref().map(PathBuf::from);
         let previous_root = match &previous {
             Some(previous) => Some(fs::canonicalize(previous).await?),
@@ -254,7 +238,7 @@ impl DirectoryInfo {
                     serde_json::from_str::<(PathBuf, PathBuf)>(&checkpoint)
                 })
                 .transpose()?;
-        let settings_root = fs::canonicalize(&initial).await?;
+        let settings_root = fs::canonicalize(initial).await?;
         let mut locked_roots = std::collections::HashSet::from([settings_root]);
         let mut move_locks = Vec::new();
         let pending_roots = pending_move

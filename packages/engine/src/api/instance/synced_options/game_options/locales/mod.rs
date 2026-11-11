@@ -78,9 +78,15 @@ struct Candidate {
     keys: BTreeMap<String, String>,
 }
 
+impl GameLocaleIndexer {
+    pub(crate) fn queue(&self) {
+        self.notify.notify_one();
+    }
+}
+
 pub(crate) fn queue_game_locale_index() {
     if let Some(state) = State::get_if_initialized() {
-        state.synced_options.locales.notify.notify_one();
+        state.synced_options.locales.queue();
     } else {
         tracing::warn!(
             "Game setting locales: cannot queue indexing before state initialization"
