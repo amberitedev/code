@@ -317,7 +317,8 @@ describe('dev runner program cache', () => {
 			inputs: ['Cargo.lock', 'packages/app', 'packages/a'],
 			program: 'app',
 		}
-		const tests = { ...shared, crate: 'a', inputs: ['Cargo.lock', 'packages/a'] }
+		const tests = { ...shared, inputs: ['Cargo.lock', 'packages/a'], tested: ['packages/a'] }
+		const both = { ...tests, inputs: program.inputs, tested: ['packages/a', 'packages/app'] }
 		/** How many crates the build compiles, recorded as if it succeeded. */
 		const compiles = (worktree: string, build: typeof program | typeof tests) => {
 			const prepared = prepareCheckoutCrates(worktree, build)
@@ -342,6 +343,13 @@ describe('dev runner program cache', () => {
 			NodeFS.writeFileSync(library(there), 'pub fn b() {}')
 			expect(compiles(there, tests)).toBe(1)
 			expect(compiles(here, program)).toBe(1)
+			expect(compiles(here, tests)).toBe(1)
+			// A program's own crate hashes without the program's loose inputs in its tests.
+			expect(compiles(here, both)).toBe(2)
+			expect(compiles(here, tests)).toBe(0)
+			expect(compiles(here, program)).toBe(1)
+			// Compiling a crate's tests elsewhere ends every test run's trust in them here.
+			expect(compiles(there, both)).toBe(2)
 			expect(compiles(here, tests)).toBe(1)
 		} finally {
 			NodeFS.rmSync(scratch, { force: true, recursive: true })
