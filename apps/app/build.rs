@@ -206,14 +206,6 @@ fn main() {
                     ),
             )
             .plugin(
-                "reports",
-                InlinedPlugin::new()
-                    .commands(&["reports_create"])
-                    .default_permission(
-                        DefaultPermissionRule::AllowAllCommands,
-                    ),
-            )
-            .plugin(
                 "instance",
                 InlinedPlugin::new()
                     .commands(&[
@@ -362,28 +354,6 @@ fn main() {
                 "shortcuts",
                 InlinedPlugin::new()
                     .commands(&["create_instance_shortcut"])
-                    .default_permission(
-                        DefaultPermissionRule::AllowAllCommands,
-                    ),
-            )
-            .plugin(
-                "users",
-                InlinedPlugin::new()
-                    .commands(&[
-                        "search_user",
-                        "get_user_profile",
-                        "get_user_projects",
-                        "get_user_organizations",
-                        "get_user_collections",
-                        "get_user_preferences",
-                        "patch_user_preferences",
-                        "patch_user",
-                        "change_user_avatar",
-                        "delete_user_avatar",
-                        "block_user",
-                        "unblock_user",
-                        "get_blocked_users",
-                    ])
                     .default_permission(
                         DefaultPermissionRule::AllowAllCommands,
                     ),

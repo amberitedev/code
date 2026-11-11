@@ -1,5 +1,6 @@
 import type { Labrinth } from '@modrinth/api-client'
-import { invoke } from '@tauri-apps/api/core'
+
+import { apiClient } from '@/platform/modrinth-client'
 
 // Converts user profile links from rendered Markdown/any dynamic content into app routes.
 export function parse_modrinth_user_link(href: string): string | null {
@@ -21,41 +22,34 @@ export function parse_modrinth_user_link(href: string): string | null {
 }
 
 export async function search_user(query: string): Promise<Labrinth.Users.v3.SearchUser[]> {
-	return await invoke<Labrinth.Users.v3.SearchUser[]>('plugin:users|search_user', { query })
+	return await apiClient.labrinth.users_v3.search(query)
 }
 
 export async function get_user_profile(userId: string): Promise<Labrinth.Users.v3.User> {
-	return await invoke<Labrinth.Users.v3.User>('plugin:users|get_user_profile', { userId })
+	return await apiClient.labrinth.users_v3.get(userId)
 }
 
 export async function get_user_projects(userId: string): Promise<Labrinth.Projects.v3.Project[]> {
-	return await invoke<Labrinth.Projects.v3.Project[]>('plugin:users|get_user_projects', {
-		userId,
-	})
+	return await apiClient.labrinth.users_v3.getProjects(userId)
 }
 
 export async function get_user_organizations(
 	userId: string,
 ): Promise<Labrinth.Organizations.v3.Organization[]> {
-	return await invoke<Labrinth.Organizations.v3.Organization[]>(
-		'plugin:users|get_user_organizations',
-		{ userId },
-	)
+	return await apiClient.labrinth.users_v2.getOrganizations(userId)
 }
 
 export async function get_user_collections(
 	userId: string,
 ): Promise<Labrinth.Collections.Collection[]> {
-	return await invoke<Labrinth.Collections.Collection[]>('plugin:users|get_user_collections', {
-		userId,
-	})
+	return await apiClient.labrinth.users_v2.getCollections(userId)
 }
 
 export async function patch_user(
 	userId: string,
 	patch: Partial<Pick<Labrinth.Users.v2.User, 'badges' | 'bio' | 'role' | 'username'>>,
 ): Promise<void> {
-	await invoke('plugin:users|patch_user', { userId, patch })
+	await apiClient.labrinth.users_v2.patch(userId, patch)
 }
 
 export async function change_user_avatar(
@@ -63,21 +57,21 @@ export async function change_user_avatar(
 	image: Uint8Array,
 	extension: string,
 ): Promise<void> {
-	await invoke('plugin:users|change_user_avatar', { userId, image, extension })
+	await apiClient.labrinth.users_v3.setAvatar(userId, new Blob([image.slice()]), extension)
 }
 
 export async function delete_user_avatar(userId: string): Promise<void> {
-	await invoke('plugin:users|delete_user_avatar', { userId })
+	await apiClient.labrinth.users_v2.deleteIcon(userId)
 }
 
 export async function block_user(userId: string): Promise<void> {
-	await invoke('plugin:users|block_user', { userId })
+	await apiClient.labrinth.blocked_users_v3.block(userId)
 }
 
 export async function unblock_user(userId: string): Promise<void> {
-	await invoke('plugin:users|unblock_user', { userId })
+	await apiClient.labrinth.blocked_users_v3.unblock(userId)
 }
 
 export async function get_blocked_users(): Promise<Labrinth.BlockedUsers.v3.BlockedUserId[]> {
-	return await invoke<Labrinth.BlockedUsers.v3.BlockedUserId[]>('plugin:users|get_blocked_users')
+	return await apiClient.labrinth.blocked_users_v3.list()
 }
