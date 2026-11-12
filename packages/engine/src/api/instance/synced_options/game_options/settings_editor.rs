@@ -11,7 +11,7 @@ use super::instance_support::{
 use super::write_shared_settings::sync_all_participating_instances;
 use crate::ErrorKind;
 use crate::state::{
-    CanonicalValue, GameOptionKind, State, StoredOption,
+    CanonicalValue, Engine, GameOptionKind, StoredOption,
     game_options_sync_is_enabled, load_game_option_preferences,
     load_game_options_sync_state, load_shared_game_options,
 };
@@ -41,7 +41,7 @@ fn validation_issue(
 /// It returns message IDs and setting details; the frontend provides the translated
 /// labels and explanations.
 pub(super) async fn load_settings_editor(
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<GameSettingsEditorState> {
     let (canonical_revision, catalog_revision) =
         load_game_options_sync_state(&state.pool, CATALOG_REVISION).await?;
@@ -194,7 +194,7 @@ pub(super) async fn load_settings_editor(
 }
 
 pub async fn get_config(
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<GameSettingsEditorState> {
     let _guard = state.synced_options.lock().await;
     load_settings_editor(state).await
@@ -202,7 +202,7 @@ pub async fn get_config(
 
 /// Previews how the user's unsaved changes would apply to their instances.
 pub async fn preview_changes(
-    state: &State,
+    state: &Engine,
     request: UpdateGameSettingsRequest,
 ) -> crate::Result<GameSettingsEditorState> {
     let _guard = state.synced_options.lock().await;
@@ -275,7 +275,7 @@ pub async fn preview_changes(
 /// Saves changes if nothing has changed since the modal opened, then updates each
 /// instance that can receive them.
 pub async fn save_changes(
-    state: &State,
+    state: &Engine,
     request: UpdateGameSettingsRequest,
 ) -> crate::Result<SaveGameSettingsResult> {
     let _guard = state.synced_options.lock().await;

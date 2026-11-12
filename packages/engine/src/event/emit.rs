@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 /*
    Events are how the engine tells its host what happened. The host creates an EventSink,
-   subscribes to it, and passes it to State; the emit_x functions send through it.
+   subscribes to it, and passes it to Engine; the emit_x functions send through it.
 
    For emit_loading() specifically, we need to initialize the loading bar with init_loading() first and pass the received loader in
 

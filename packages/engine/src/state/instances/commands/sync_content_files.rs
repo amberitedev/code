@@ -1,4 +1,4 @@
-use crate::State;
+use crate::Engine;
 use crate::state::content_store::{
     FileContent, InstanceFileStatus, InstanceFileStorage, content_file_path,
     file_path_on_disk,
@@ -18,7 +18,7 @@ use super::content_mutation::{
 
 pub(crate) async fn sync_content_files(
     instance_id: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Vec<InstanceFile>> {
     let instance =
         sqlite::instance_rows::get_instance_by_id(instance_id, &state.pool)
@@ -32,7 +32,7 @@ pub(crate) async fn sync_content_files(
 
 pub(crate) async fn sync_instance_content_files(
     instance: &Instance,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Vec<InstanceFile>> {
     let (snapshot, known_files, known_bindings) = {
         let instance_content =
@@ -365,7 +365,7 @@ async fn changed_outside_app(
     instance: &Instance,
     file: &InstanceFile,
     binding: &InstanceFileStorage,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<bool> {
     Ok(
         match state
@@ -390,7 +390,7 @@ async fn changed_outside_app(
 /// Minecraft must not be running for this instance.
 pub(crate) async fn reconcile_instance_renames(
     instance: &Instance,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<bool> {
     let files =
         sqlite::content_rows::get_instance_files(&instance.id, &state.pool)
@@ -544,7 +544,7 @@ pub(super) async fn normalize_legacy_content_files(
         crate::state::content_store::InstanceFileStorage,
     >,
     scanned: &[filesystem::ScannedContentFile],
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<bool> {
     let mut renames = Vec::new();
     for scanned in scanned {

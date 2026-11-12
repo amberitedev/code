@@ -9,7 +9,7 @@ use crate::state::instances::adapters::sqlite::{
 };
 use crate::util::fetch::sha1_file_async;
 use crate::util::io::IOError;
-use crate::{ErrorKind, State};
+use crate::{Engine, ErrorKind};
 use anyhow::Context;
 use chrono::{DateTime, Utc};
 use futures::stream::{self, StreamExt, TryStreamExt};
@@ -78,7 +78,7 @@ fn resolve_scanned_screenshot(
 }
 
 pub(super) async fn list_source_screenshots(
-    state: &State,
+    state: &Engine,
     source: InstanceScreenshotSource,
 ) -> crate::Result<Vec<InstanceScreenshot>> {
     let _lock = state.instance_locks.lock_screenshots(&source.id).await;
@@ -87,7 +87,7 @@ pub(super) async fn list_source_screenshots(
 }
 
 pub(crate) async fn reconcile_screenshots(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
 ) -> crate::Result<()> {
     let Some(source) =
@@ -180,7 +180,7 @@ fn scan_screenshots_dir(
 }
 
 pub(super) async fn reconcile_source_screenshots(
-    state: &State,
+    state: &Engine,
     source: &InstanceScreenshotSource,
     scanned: Vec<ScannedScreenshot>,
 ) -> crate::Result<Vec<InstanceScreenshot>> {

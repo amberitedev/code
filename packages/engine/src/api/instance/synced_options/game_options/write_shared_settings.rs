@@ -13,7 +13,7 @@ use super::pack_updates::materialize_pack_options_if_missing;
 use super::read_instance_changes::read_instance_changes_into_shared_settings;
 use super::source_selection::initialize_from_source_instance;
 use crate::state::{
-    CanonicalValue, InstanceMetadata, State, SyncedOption,
+    CanonicalValue, Engine, InstanceMetadata, SyncedOption,
     game_options_sync_is_enabled, load_game_option_preferences,
     load_game_options_sync_state, load_shared_game_options,
 };
@@ -26,7 +26,7 @@ struct AppliedSettings {
 
 pub(super) async fn sync_is_active_for_instance(
     metadata: &InstanceMetadata,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<bool> {
     Ok(metadata.synced_options.game_options
         && !synced_options::pending::contains(
@@ -41,7 +41,7 @@ pub(super) async fn sync_is_active_for_instance(
 pub(super) async fn remember_processed_sha(
     instance_id: &str,
     sha1: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let (canonical_revision, _) =
         load_game_options_sync_state(&state.pool, CATALOG_REVISION).await?;
@@ -67,7 +67,7 @@ pub(super) async fn remember_processed_sha(
 async fn apply_shared_settings_to_document(
     metadata: &InstanceMetadata,
     document: &mut GameOptionsDocument,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<AppliedSettings> {
     let values = load_shared_game_options(&state.pool).await?;
     let preferences = load_game_option_preferences(&state.pool).await?;
@@ -177,7 +177,7 @@ async fn apply_shared_settings_to_document(
 
 pub(super) async fn apply_shared_settings_to_instance(
     metadata: &InstanceMetadata,
-    state: &State,
+    state: &Engine,
     allow_protected: bool,
 ) -> crate::Result<SyncOutcome> {
     if !allow_protected && synced_options::sync_files_are_protected(metadata) {
@@ -235,7 +235,7 @@ pub(super) async fn apply_shared_settings_to_instance(
 
 pub(super) async fn capture_instance_options(
     metadata: &InstanceMetadata,
-    state: &State,
+    state: &Engine,
     allow_protected: bool,
 ) -> crate::Result<SyncOutcome> {
     if !allow_protected && synced_options::sync_files_are_protected(metadata) {
@@ -289,7 +289,7 @@ pub(super) async fn capture_instance_options(
 
 pub(in crate::api::instance) async fn capture_instance_file_change(
     metadata: &InstanceMetadata,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     capture_instance_options(metadata, state, false).await?;
     Ok(())
@@ -297,14 +297,14 @@ pub(in crate::api::instance) async fn capture_instance_file_change(
 
 pub(in crate::api::instance) async fn apply_instance_with_state(
     metadata: &InstanceMetadata,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     apply_shared_settings_to_instance(metadata, state, false).await?;
     Ok(())
 }
 
 pub(super) async fn sync_other_participating_instances(
-    state: &State,
+    state: &Engine,
     excluded_instance_id: Option<&str>,
 ) -> SaveGameSettingsResult {
     let mut result = SaveGameSettingsResult {
@@ -364,7 +364,7 @@ pub(super) async fn sync_other_participating_instances(
 }
 
 pub(crate) async fn sync_all_participating_instances(
-    state: &State,
+    state: &Engine,
 ) -> SaveGameSettingsResult {
     sync_other_participating_instances(state, None).await
 }

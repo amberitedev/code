@@ -8,7 +8,7 @@ mod storage;
 use super::catalog::{is_never_sync_key, setting_by_file_key};
 use super::options_file::{GameOptionsDocument, options_path, read_document};
 use crate::ErrorKind;
-use crate::state::{InstanceMetadata, State};
+use crate::state::{Engine, InstanceMetadata};
 use anyhow::bail;
 use archive::{ArchiveIndex, Translations};
 use serde::{Deserialize, Serialize};
@@ -84,7 +84,7 @@ impl GameLocaleIndexer {
     }
 }
 
-pub(crate) fn start_game_locale_indexer(state: Arc<State>) {
+pub(crate) fn start_game_locale_indexer(state: Arc<Engine>) {
     if state
         .synced_options
         .locales
@@ -136,7 +136,7 @@ pub(super) fn has_localizable_mod_settings(
 /// Records mod JAR hashes before saving new options.
 pub(super) async fn capture_observation(
     metadata: &InstanceMetadata,
-    state: &State,
+    state: &Engine,
 ) -> Option<String> {
     match sources::snapshot_instance(metadata, state).await {
         Ok(id) => Some(id),
@@ -178,7 +178,7 @@ pub(super) async fn record_observations(
 }
 
 async fn cached_archive(
-    state: &State,
+    state: &Engine,
     source: &ArchiveSource,
     cache: &mut HashMap<String, Arc<ArchiveIndex>>,
 ) -> crate::Result<Arc<ArchiveIndex>> {
@@ -194,7 +194,7 @@ async fn cached_archive(
 }
 
 #[tracing::instrument(skip_all, err)]
-async fn index_installed_sources(state: &State) -> crate::Result<()> {
+async fn index_installed_sources(state: &Engine) -> crate::Result<()> {
     let mut instances = crate::state::list_instances(&state.pool).await?;
     instances.sort_by(|a, b| a.instance.id.cmp(&b.instance.id));
     let mut candidates = Vec::new();
@@ -332,7 +332,7 @@ fn minecraft_locale(locale: &str) -> String {
 /// Loads translations for the settings shown in the modal.
 #[tracing::instrument(skip_all, fields(instance_id, locale, requested = option_ids.len(), refresh_sources), err)]
 pub async fn get_game_setting_locale_labels(
-    state: &State,
+    state: &Engine,
     instance_id: Option<&str>,
     locale: &str,
     option_ids: Vec<String>,

@@ -20,7 +20,7 @@ bedrock holds three kinds of code:
 1. Borrowed engine files, compiled in place with `#[path]` (`state/`). The engine imports those
    types from bedrock instead of compiling them. Prefer this for any engine file whose dependencies
    are small enough for bedrock to provide.
-2. Clones of upstream code tangled with the engine's `State` (`upstream/`), kept byte for byte where
+2. Clones of upstream code tangled with `engine::Engine` (`upstream/`), kept byte for byte where
    possible with all adaptation in one glue file, and declared in `packages/bedrock/ports.toml`.
    The App keeps the originals.
 3. Our own shared code: content rules.

@@ -2,20 +2,20 @@
 
 pub use crate::state::content_store::StoreUsage;
 pub use crate::{
-    State,
+    Engine,
     state::{Hooks, MemorySettings, Settings, WindowSize},
 };
 
-pub async fn store_usage(state: &State) -> crate::Result<StoreUsage> {
+pub async fn store_usage(state: &Engine) -> crate::Result<StoreUsage> {
     state.content_store.usage(state).await
 }
 
-pub async fn store_cleanup(state: &State) -> crate::Result<u64> {
+pub async fn store_cleanup(state: &Engine) -> crate::Result<u64> {
     state.content_store.cleanup(state, true).await
 }
 
 pub async fn store_set_cache_limit(
-    state: &State,
+    state: &Engine,
     bytes: u64,
 ) -> crate::Result<()> {
     state.content_store.set_cache_limit(bytes).await
@@ -23,7 +23,7 @@ pub async fn store_set_cache_limit(
 
 /// Gets entire settings
 #[tracing::instrument(skip(state))]
-pub async fn get(state: &State) -> crate::Result<Settings> {
+pub async fn get(state: &Engine) -> crate::Result<Settings> {
     let _guard = state.synced_options.lock().await;
     let mut settings = Settings::get(&state.pool).await?;
     if crate::state::game_options_sync_is_enabled(&state.pool).await?
@@ -39,7 +39,7 @@ pub async fn get(state: &State) -> crate::Result<Settings> {
 
 /// Sets entire settings
 #[tracing::instrument(skip(state))]
-pub async fn set(state: &State, settings: Settings) -> crate::Result<()> {
+pub async fn set(state: &Engine, settings: Settings) -> crate::Result<()> {
     let _guard = state.synced_options.lock().await;
     let current_settings = Settings::get(&state.pool).await?;
     let game_options_sync_enabled =
@@ -83,7 +83,7 @@ pub async fn cancel_directory_change(
     app_identifier: &str,
 ) -> crate::Result<()> {
     // This is called to handle state initialization errors due to folder migrations
-    // failing, so fetching a DB connection pool from `State::get` is not reliable here
+    // failing, so there may be no engine to take a DB connection pool from
     let pool = crate::state::db::connect(app_identifier).await?;
     let mut settings = Settings::get(&pool).await?;
     crate::state::move_app_directory::cancel_move(&pool).await?;

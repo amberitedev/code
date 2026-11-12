@@ -5,8 +5,8 @@ use crate::state::instances::{
     adapters::sqlite::{content_rows, instance_rows},
 };
 use crate::state::{
-    Hooks, InstanceInstallStage, LauncherFeatureVersion, MemorySettings,
-    ModLoader, ReleaseChannel, State, WindowSize,
+    Engine, Hooks, InstanceInstallStage, LauncherFeatureVersion,
+    MemorySettings, ModLoader, ReleaseChannel, WindowSize,
 };
 use anyhow::bail;
 use chrono::{DateTime, Utc};
@@ -109,7 +109,7 @@ pub struct AppliedContentSetPatch {
 pub(crate) async fn edit_instance(
     instance_id: &str,
     patch: EditInstance,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Instance> {
     let pool = &state.pool;
     let _runtime_lease = if patch.launch_overrides.is_some()

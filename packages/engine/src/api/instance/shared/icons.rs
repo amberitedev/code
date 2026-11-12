@@ -11,7 +11,7 @@ struct CachedServerIcon {
 
 #[tracing::instrument(skip(state))]
 pub async fn cache_shared_instance_server_icon(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
 ) -> crate::Result<Option<String>> {
     shared_instance_server_icon(instance_id, state).await
@@ -20,7 +20,7 @@ pub async fn cache_shared_instance_server_icon(
 #[tracing::instrument(skip(state))]
 pub(super) async fn shared_instance_server_icon(
     instance_id: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Option<String>> {
     let user_id = linked_amberite_user_id(state)
         .await?

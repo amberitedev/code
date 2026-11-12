@@ -1,5 +1,5 @@
 use super::orchestration::{SyncedOptionJoinResolution, synced_options_path};
-use crate::State;
+use crate::Engine;
 use crate::state::SyncedOption;
 use crate::util::io;
 use serde::{Deserialize, Serialize};
@@ -20,7 +20,7 @@ pub(super) struct PendingChange {
     pub action: PendingAction,
 }
 
-pub(super) async fn read(state: &State) -> crate::Result<Vec<PendingChange>> {
+pub(super) async fn read(state: &Engine) -> crate::Result<Vec<PendingChange>> {
     let path = synced_options_path(state).join("pending-changes.json");
     match tokio::fs::read(path).await {
         Ok(bytes) => Ok(serde_json::from_slice(&bytes)?),
@@ -31,7 +31,7 @@ pub(super) async fn read(state: &State) -> crate::Result<Vec<PendingChange>> {
     }
 }
 
-async fn write(changes: &[PendingChange], state: &State) -> crate::Result<()> {
+async fn write(changes: &[PendingChange], state: &Engine) -> crate::Result<()> {
     let directory = synced_options_path(state);
     io::create_dir_all(&directory).await?;
     let temporary = directory.join("pending-changes.json.tmp");
@@ -44,7 +44,7 @@ async fn write(changes: &[PendingChange], state: &State) -> crate::Result<()> {
 /// Callers hold the synced-options lock while updating or replaying requests.
 pub(super) async fn save(
     change: PendingChange,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let mut changes = read(state).await?;
     changes.retain(|previous| {
@@ -58,7 +58,7 @@ pub(super) async fn save(
 
 pub(super) async fn remove(
     change: &PendingChange,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let mut changes = read(state).await?;
     let previous_len = changes.len();
@@ -72,7 +72,7 @@ pub(super) async fn remove(
 pub(super) async fn cancel(
     option: SyncedOption,
     instance_id: Option<&str>,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let mut changes = read(state).await?;
     let previous_len = changes.len();
@@ -89,7 +89,7 @@ pub(super) async fn cancel(
 pub(in crate::api::instance) async fn contains(
     instance_id: &str,
     option: SyncedOption,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<bool> {
     Ok(read(state).await?.iter().any(|change| {
         change.instance_id == instance_id && change.option == option

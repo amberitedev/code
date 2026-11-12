@@ -3,8 +3,8 @@ use crate::state::instances::{
     adapters::sqlite::{content_rows, instance_rows},
 };
 use crate::state::{
-    CacheBehaviour, CachedEntry, CachedFileUpdate, ProjectType, ReleaseChannel,
-    State,
+    CacheBehaviour, CachedEntry, CachedFileUpdate, Engine, ProjectType,
+    ReleaseChannel,
 };
 use std::collections::HashMap;
 
@@ -29,7 +29,7 @@ struct UpdateCandidate {
 pub(crate) async fn check_content_updates(
     instance_id: &str,
     cache_behaviour: Option<CacheBehaviour>,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Vec<ContentUpdate>> {
     sync_content_files(instance_id, state).await?;
     check_content_updates_with_cache_behaviours(
@@ -43,7 +43,7 @@ pub(crate) async fn check_content_updates(
 
 pub(crate) async fn refresh_content_updates(
     instance_id: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     check_content_updates_with_cache_behaviours(
         instance_id,
@@ -60,7 +60,7 @@ async fn check_content_updates_with_cache_behaviours(
     instance_id: &str,
     cache_behaviour: Option<CacheBehaviour>,
     update_cache_behaviour: Option<CacheBehaviour>,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Vec<ContentUpdate>> {
     let instance = instance_rows::get_instance_by_id(instance_id, &state.pool)
         .await?
@@ -198,7 +198,7 @@ async fn check_content_updates_with_cache_behaviours(
 async fn installed_update_channels(
     candidates: &[UpdateCandidate],
     cache_behaviour: Option<CacheBehaviour>,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<HashMap<String, ReleaseChannel>> {
     let version_ids = candidates
         .iter()
@@ -263,7 +263,7 @@ fn update_cache_key(
 pub(super) async fn resolve_update_versions(
     updates: Vec<CachedFileUpdate>,
     cache_behaviour: Option<CacheBehaviour>,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<HashMap<String, Vec<crate::state::Version>>> {
     if updates.is_empty() {
         return Ok(HashMap::new());

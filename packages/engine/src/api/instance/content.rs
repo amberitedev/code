@@ -1,13 +1,13 @@
 use crate::state::{
-    CacheBehaviour, ContentFile, ContentItem, ContentSet, Dependency,
+    CacheBehaviour, ContentFile, ContentItem, ContentSet, Dependency, Engine,
     InstanceInstallCandidate, InstanceInstallTarget, LinkedModpackInfo,
-    ProjectType, State,
+    ProjectType,
 };
 use dashmap::DashMap;
 
 #[tracing::instrument(skip(state))]
 pub async fn sync_content_files(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
 ) -> crate::Result<Vec<crate::state::instances::InstanceFile>> {
     crate::state::sync_content_files(instance_id, state).await
@@ -15,7 +15,7 @@ pub async fn sync_content_files(
 
 #[tracing::instrument(skip(state))]
 pub async fn list_content_sets(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
 ) -> crate::Result<Vec<ContentSet>> {
     crate::state::list_content_sets(instance_id, &state.pool).await
@@ -23,7 +23,7 @@ pub async fn list_content_sets(
 
 #[tracing::instrument(skip(state))]
 pub async fn get_projects(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     cache_behaviour: Option<CacheBehaviour>,
 ) -> crate::Result<DashMap<String, ContentFile>> {
@@ -38,7 +38,7 @@ pub async fn get_projects(
 
 #[tracing::instrument(skip(state))]
 pub async fn get_installed_project_ids(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
 ) -> crate::Result<Vec<String>> {
     crate::state::get_installed_project_ids_for_instance(
@@ -51,7 +51,7 @@ pub async fn get_installed_project_ids(
 
 #[tracing::instrument(skip(state))]
 pub async fn get_install_candidates(
-    state: &State,
+    state: &Engine,
     project_id: &str,
     project_type: ProjectType,
     targets: Vec<InstanceInstallTarget>,
@@ -67,7 +67,7 @@ pub async fn get_install_candidates(
 
 #[tracing::instrument(skip(state))]
 pub async fn get_content_items(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     cache_behaviour: Option<CacheBehaviour>,
 ) -> crate::Result<Vec<ContentItem>> {
@@ -81,7 +81,7 @@ pub async fn get_content_items(
 
 #[tracing::instrument(skip(state))]
 pub async fn refresh_content_updates(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
 ) -> crate::Result<()> {
     crate::state::refresh_content_updates(instance_id, state).await
@@ -89,7 +89,7 @@ pub async fn refresh_content_updates(
 
 #[tracing::instrument(skip(state))]
 pub async fn get_linked_modpack_content(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     cache_behaviour: Option<CacheBehaviour>,
 ) -> crate::Result<Vec<ContentItem>> {
@@ -104,7 +104,7 @@ pub async fn get_linked_modpack_content(
 
 #[tracing::instrument(skip(state))]
 pub async fn get_dependencies_as_content_items(
-    state: &State,
+    state: &Engine,
     dependencies: Vec<Dependency>,
     cache_behaviour: Option<CacheBehaviour>,
 ) -> crate::Result<Vec<ContentItem>> {
@@ -120,7 +120,7 @@ pub async fn get_dependencies_as_content_items(
 
 #[tracing::instrument(skip(state))]
 pub async fn get_linked_modpack_info(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     cache_behaviour: Option<CacheBehaviour>,
 ) -> crate::Result<Option<LinkedModpackInfo>> {

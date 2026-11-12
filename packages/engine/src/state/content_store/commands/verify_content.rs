@@ -5,14 +5,14 @@ use crate::state::content_store::{
     content_file_path,
 };
 use crate::state::instances;
-use crate::{ErrorKind, State};
+use crate::{Engine, ErrorKind};
 use anyhow::bail;
 
 impl ContentStore {
     pub(crate) async fn import_file(
         &self,
         source: &std::path::Path,
-        state: &State,
+        state: &Engine,
     ) -> crate::Result<StoredFileHandle> {
         let staged = self.stage_file(source).await?;
         let hash = staged.sha512.clone();

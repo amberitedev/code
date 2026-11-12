@@ -12,7 +12,7 @@ use super::options_file::{
 use super::read_instance_changes::custom_setting_id;
 use crate::ErrorKind;
 use crate::state::{
-    CanonicalValue, InstanceMetadata, State, load_game_option_preferences,
+    CanonicalValue, Engine, InstanceMetadata, load_game_option_preferences,
     load_game_options_sync_state, load_shared_game_options,
 };
 use anyhow::bail;
@@ -21,7 +21,7 @@ use chrono::Utc;
 /// Uses the selected instance's `options.txt` as the initial shared settings.
 pub(in crate::api::instance) async fn initialize_from_source_instance(
     metadata: &InstanceMetadata,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let path = options_path(metadata, state);
     if !path.exists() {
@@ -321,7 +321,7 @@ pub(in crate::api::instance) async fn initialize_from_source_instance(
 }
 
 pub async fn list_sync_sources(
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Vec<GameOptionsSourceCandidate>> {
     let _guard = state.synced_options.lock().await;
     let instances = crate::state::list_instances(&state.pool).await?;

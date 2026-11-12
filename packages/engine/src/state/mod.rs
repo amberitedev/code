@@ -1,12 +1,9 @@
 //! Theseus state management system
-use crate::ErrorKind;
 use crate::event::EventSink;
 use crate::util::fetch::{FetchSemaphore, IoSemaphore};
-use anyhow::anyhow;
 use std::path::PathBuf;
-use std::sync::{Arc, LazyLock};
-use tokio::sync::watch::Sender;
-use tokio::sync::{Mutex, OnceCell, Semaphore};
+use std::sync::Arc;
+use tokio::sync::Semaphore;
 
 use crate::self_hosted::accounts::AccountEndpoints;
 use crate::state::instances::watcher::FileWatcher;
@@ -85,17 +82,13 @@ pub mod attached_world_data;
 pub mod hidden_instances;
 pub mod server_join_log;
 
-enum StartupPhase {
-    Pending,
-    Ready,
-    Failed(String),
+pub struct EngineConfig {
+    pub settings_dir: PathBuf,
+    pub events: EventSink,
+    pub accounts: Option<AccountEndpoints>,
 }
 
-static LAUNCHER_STATE: OnceCell<Arc<State>> = OnceCell::const_new();
-static STATE_STARTUP: LazyLock<Sender<StartupPhase>> =
-    LazyLock::new(|| Sender::new(StartupPhase::Pending));
-static STATE_STARTUP_LOCK: Mutex<()> = Mutex::const_new(());
-pub struct State {
+pub struct Engine {
     /// Information on the location of files used in the launcher
     pub directories: DirectoryInfo,
     pub content_store: content_store::ContentStore,
@@ -126,51 +119,20 @@ pub struct State {
     pub sessions: Sessions,
 }
 
-impl State {
-    /// Starts the App's engine once and makes it the process global.
-    pub async fn init(
-        app_identifier: String,
-        events: EventSink,
-        accounts: Option<AccountEndpoints>,
-    ) -> crate::Result<()> {
-        let _startup = STATE_STARTUP_LOCK.lock().await;
-        let result = LAUNCHER_STATE
-            .get_or_try_init(|| async {
-                STATE_STARTUP.send_replace(StartupPhase::Pending);
-                let settings_dir =
-                    DirectoryInfo::initial_settings_dir_path(&app_identifier)
-                        .ok_or(ErrorKind::FSError(
-                        "could not find the application directory".to_string(),
-                    ))?;
-                let (state, watcher_events) =
-                    Self::open(settings_dir, events, accounts).await?;
-                // Fallible, so it runs before a background task can keep a rejected engine alive.
-                crate::self_hosted::accounts::bind_origin(
-                    &state.pool,
-                    &state.sessions,
-                )
-                .await?;
-                state.spawn_background(watcher_events);
-                state.start_desktop();
-                Ok(state)
-            })
-            .await;
-        STATE_STARTUP.send_replace(match &result {
-            Ok(_) => StartupPhase::Ready,
-            Err(error) => StartupPhase::Failed(format!("{error:#}")),
-        });
-        result.map(|_| ())
-    }
-
-    /// Opens a complete engine on `settings_dir` without touching the global. Its background
-    /// tasks hold a `Weak` and end once the last `Arc` is dropped.
-    pub async fn new(
-        settings_dir: PathBuf,
-        events: EventSink,
-        accounts: Option<AccountEndpoints>,
-    ) -> crate::Result<Arc<Self>> {
+impl Engine {
+    /// Opens an engine on `settings_dir`. Its background tasks hold a `Weak` and end once the
+    /// last `Arc` is dropped.
+    pub async fn new(config: EngineConfig) -> crate::Result<Arc<Self>> {
+        let EngineConfig {
+            settings_dir,
+            events,
+            accounts,
+        } = config;
         let (state, watcher_events) =
             Self::open(settings_dir, events, accounts).await?;
+        // Fallible, so it runs before a background task can keep a rejected engine alive.
+        crate::self_hosted::accounts::bind_origin(&state.pool, &state.sessions)
+            .await?;
         state.spawn_background(watcher_events);
         Ok(state)
     }
@@ -393,40 +355,6 @@ impl State {
             let _ = FriendsSocket::socket_loop(state).await;
         });
     }
-
-    /// Get the current launcher state, waiting for initialization.
-    pub async fn get() -> crate::Result<Arc<Self>> {
-        if let Some(state) = LAUNCHER_STATE.get() {
-            return Ok(Arc::clone(state));
-        }
-
-        let mut phases = STATE_STARTUP.subscribe();
-        let phase = phases
-            .wait_for(|phase| !matches!(phase, StartupPhase::Pending))
-            .await
-            .expect("the startup sender is static and never dropped");
-        match &*phase {
-            StartupPhase::Ready => Ok(Arc::clone(
-                LAUNCHER_STATE
-                    .get()
-                    .expect("state is set before startup is marked ready"),
-            )),
-            StartupPhase::Failed(message) => Err(anyhow!("{message}")),
-            StartupPhase::Pending => {
-                unreachable!(
-                    "wait_for returns only once the phase has left Pending"
-                )
-            }
-        }
-    }
-
-    pub fn initialized() -> bool {
-        LAUNCHER_STATE.initialized()
-    }
-
-    pub fn get_if_initialized() -> Option<Arc<Self>> {
-        LAUNCHER_STATE.get().map(Arc::clone)
-    }
 }
 
 #[cfg(test)]
@@ -436,9 +364,8 @@ mod tests {
         content_rows, instance_rows,
     };
     use std::path::Path;
-    use std::time::Duration;
 
-    pub(super) async fn add_instance(state: &State, id: &str, path: &str) {
+    pub(super) async fn add_instance(state: &Engine, id: &str, path: &str) {
         let now = chrono::Utc::now();
         let content_set_id = format!("content-set:{id}");
         let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await.unwrap();
@@ -496,12 +423,22 @@ mod tests {
         tx.commit().await.unwrap();
     }
 
+    pub(super) async fn engine(settings_dir: PathBuf) -> Arc<Engine> {
+        Engine::new(EngineConfig {
+            settings_dir,
+            events: EventSink::new(),
+            accounts: None,
+        })
+        .await
+        .unwrap()
+    }
+
     pub(super) fn write(path: &Path) {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, path.to_string_lossy().as_bytes()).unwrap();
     }
 
-    async fn content_paths(state: &State, id: &str) -> Vec<String> {
+    async fn content_paths(state: &Engine, id: &str) -> Vec<String> {
         let mut paths: Vec<_> = sync_content_files(id, state)
             .await
             .unwrap()
@@ -521,26 +458,20 @@ mod tests {
         write(&b_dir.join("profiles/Survival/mods/b.jar"));
         write(&b_dir.join("profiles/Survival/resourcepacks/b.zip"));
 
-        // A call that reaches the global waits forever instead of failing.
-        tokio::time::timeout(Duration::from_secs(60), async {
-            let a = State::new(a_dir, EventSink::new(), None).await.unwrap();
-            let b = State::new(b_dir, EventSink::new(), None).await.unwrap();
-            add_instance(&a, "a", "Survival").await;
-            add_instance(&b, "b", "Survival").await;
+        let (a, b) = (engine(a_dir).await, engine(b_dir).await);
+        add_instance(&a, "a", "Survival").await;
+        add_instance(&b, "b", "Survival").await;
 
-            let (a_paths, b_paths) =
-                tokio::join!(content_paths(&a, "a"), content_paths(&b, "b"));
-            assert_eq!(a_paths, ["mods/a.jar"]);
-            assert_eq!(b_paths, ["mods/b.jar", "resourcepacks/b.zip"]);
+        let (a_paths, b_paths) =
+            tokio::join!(content_paths(&a, "a"), content_paths(&b, "b"));
+        assert_eq!(a_paths, ["mods/a.jar"]);
+        assert_eq!(b_paths, ["mods/b.jar", "resourcepacks/b.zip"]);
 
-            let listed = crate::api::instance::list(&b).await.unwrap();
-            let ids: Vec<_> = listed
-                .iter()
-                .map(|metadata| &metadata.instance.id)
-                .collect();
-            assert_eq!(ids, ["b"]);
-        })
-        .await
-        .expect("an engine call waited on the global");
+        let listed = crate::api::instance::list(&b).await.unwrap();
+        let ids: Vec<_> = listed
+            .iter()
+            .map(|metadata| &metadata.instance.id)
+            .collect();
+        assert_eq!(ids, ["b"]);
     }
 }

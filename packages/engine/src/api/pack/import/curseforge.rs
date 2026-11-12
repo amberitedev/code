@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    State,
+    Engine,
     install::{InstallPhaseDetails, InstallProgressReporter},
     prelude::ModLoader,
     state::{AppliedContentSetPatch, EditInstance, InstanceInstallStage},
@@ -46,7 +46,7 @@ pub async fn is_valid_curseforge(instance_folder: PathBuf) -> bool {
 }
 
 pub async fn import_curseforge(
-    state: &State,
+    state: &Engine,
     curseforge_instance_folder: PathBuf, // instance's folder
     instance_id: &str,
     reporter: InstallProgressReporter,

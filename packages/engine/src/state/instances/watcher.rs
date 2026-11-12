@@ -1,4 +1,4 @@
-use crate::State;
+use crate::Engine;
 use crate::api::instance::CONFIG_DIRECTORY;
 use crate::event::emit::{emit_instance, emit_warning};
 use crate::event::{EventSink, InstancePayloadType};
@@ -91,7 +91,7 @@ impl Watcher for WriteOnlyWatcher {
     }
 }
 
-fn queue_content_sync(instance_id: String, state: Arc<State>) {
+fn queue_content_sync(instance_id: String, state: Arc<Engine>) {
     match state.file_watcher.content_syncs.entry(instance_id.clone()) {
         Entry::Occupied(mut entry) => {
             *entry.get_mut() = true;
@@ -185,7 +185,7 @@ pub(crate) fn init_watcher()
 
 /// The loop ends when the engine drops, which drops the watcher and closes `rx`.
 pub(crate) fn watch_instance_events(
-    state: Weak<State>,
+    state: Weak<Engine>,
     mut rx: Receiver<DebounceEventResult>,
 ) {
     tokio::task::spawn(async move {
@@ -600,7 +600,7 @@ mod tests {
     use super::*;
     use crate::state::instances::adapters::sqlite::content_rows;
     use crate::state::instances::commands::set_instance_install_stage;
-    use crate::state::tests::{add_instance, write};
+    use crate::state::tests::{add_instance, engine, write};
 
     #[tokio::test(flavor = "multi_thread")]
     async fn two_engines_queue_the_same_instance_id_separately() {
@@ -610,8 +610,7 @@ mod tests {
         write(&b_dir.join("profiles/Survival/mods/b.jar"));
 
         tokio::time::timeout(Duration::from_secs(60), async {
-            let a = State::new(a_dir, EventSink::new(), None).await.unwrap();
-            let b = State::new(b_dir, EventSink::new(), None).await.unwrap();
+            let (a, b) = (engine(a_dir).await, engine(b_dir).await);
             add_instance(&a, "same", "Survival").await;
             add_instance(&b, "same", "Survival").await;
             // A's sync keeps its queue entry while the instance installs.

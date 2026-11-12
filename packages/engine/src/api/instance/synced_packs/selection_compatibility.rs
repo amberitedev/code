@@ -1,4 +1,4 @@
-use crate::state::{InstanceMetadata, State};
+use crate::state::{Engine, InstanceMetadata};
 use parking_lot::Mutex;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -129,7 +129,7 @@ async fn read_zip_json_uncached(
 
 pub(super) async fn game_format(
     metadata: &InstanceMetadata,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Option<PackFormat>> {
     let content_set = &metadata.applied_content_set;
     let version = &content_set.game_version;
@@ -268,7 +268,7 @@ pub(super) async fn compatible(path: &Path, game: Option<PackFormat>) -> bool {
 pub(super) async fn warm(
     metadata: &InstanceMetadata,
     items: &[crate::state::ContentItem],
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     if game_format(metadata, state).await.ok().flatten().is_some() {
         let directory =

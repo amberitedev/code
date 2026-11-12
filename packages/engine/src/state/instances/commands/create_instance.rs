@@ -5,8 +5,8 @@ use crate::state::instances::{
     adapters::sqlite::{content_rows, instance_rows},
 };
 use crate::state::{
-    IconConfig, InstanceInstallStage, LauncherFeatureVersion, ModLoader,
-    ReleaseChannel, State,
+    Engine, IconConfig, InstanceInstallStage, LauncherFeatureVersion,
+    ModLoader, ReleaseChannel,
 };
 use crate::util::fetch;
 use crate::util::io;
@@ -30,7 +30,7 @@ pub struct CreateInstance {
 
 pub(crate) async fn create_instance(
     input: CreateInstance,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Instance> {
     trace!("Creating new instance. {}", input.name);
 
@@ -159,7 +159,7 @@ pub(crate) async fn create_instance(
 async fn resolve_instance_path(
     name: &str,
     path: Option<&str>,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<(String, std::path::PathBuf)> {
     let base_path = path
         .map(ToOwned::to_owned)
@@ -202,7 +202,7 @@ async fn path_available(
 pub(crate) async fn resolve_icon_path(
     icon_path: Option<&str>,
     ignore_missing_remote_icon: bool,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Option<String>> {
     let Some(icon) = icon_path else {
         return Ok(None);

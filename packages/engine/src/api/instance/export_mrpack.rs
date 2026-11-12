@@ -12,7 +12,7 @@ use crate::state::content_store::{
 };
 use crate::state::instances::adapters::sqlite::content_rows;
 use crate::state::{
-    CacheBehaviour, CachedEntry, InstanceMetadata, ModLoader, SideType, State,
+    CacheBehaviour, CachedEntry, Engine, InstanceMetadata, ModLoader, SideType,
     VersionEnvironment,
 };
 use crate::util::io::{self, IOError};
@@ -172,7 +172,7 @@ impl ExportSelectionNode {
 
 #[tracing::instrument(skip_all)]
 pub async fn export_mrpack(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     export_path: PathBuf,
     included_export_candidates: Vec<String>,
@@ -379,7 +379,7 @@ pub(crate) fn is_exportable_path(path: &str) -> bool {
 
 #[tracing::instrument(skip(state))]
 pub async fn get_pack_export_candidates(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
 ) -> crate::Result<Vec<PackExportCandidate>> {
     crate::state::instances::commands::sync_content_files(instance_id, state)
@@ -389,7 +389,7 @@ pub async fn get_pack_export_candidates(
 
 #[tracing::instrument(skip(state))]
 pub async fn get_pack_export_candidates_for_parent(
-    state: &crate::State,
+    state: &crate::Engine,
     instance_id: &str,
     parent: Option<SafeRelativeUtf8UnixPathBuf>,
 ) -> crate::Result<Vec<PackExportCandidate>> {
@@ -445,7 +445,7 @@ pub async fn get_pack_export_candidates_for_parent(
 }
 
 async fn build_pack_export_candidate(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     instance_base_dir: &PathBuf,
     path: &PathBuf,
@@ -527,7 +527,7 @@ fn logical_content_path(
 }
 
 async fn export_content(
-    state: &State,
+    state: &Engine,
     file: Option<&crate::state::InstanceFile>,
     path: &Path,
     is_symlink: bool,
@@ -620,7 +620,7 @@ fn get_mrpack_environment(
 
 #[tracing::instrument(skip_all)]
 pub async fn create_mrpack_json(
-    state: &State,
+    state: &Engine,
     metadata: &InstanceMetadata,
     version_id: String,
     description: Option<String>,

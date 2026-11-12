@@ -605,7 +605,7 @@ async fn read_file_response(
 }
 
 pub(crate) async fn fetch_content_file(
-    state: &crate::State,
+    state: &crate::Engine,
     mirrors: &[&str],
     sha512: Option<&str>,
     size: Option<u64>,

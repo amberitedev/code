@@ -9,7 +9,7 @@ use super::write_shared_settings::{
     sync_is_active_for_instance,
 };
 use crate::ErrorKind;
-use crate::state::{InstanceMetadata, State};
+use crate::state::{Engine, InstanceMetadata};
 use crate::util::io;
 use std::collections::HashSet;
 
@@ -25,7 +25,7 @@ pub(super) fn currently_launcher_owned_keys(
 
 /// Writes canonical settings to `options.txt` before launch.
 pub async fn sync_before_launch(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
 ) -> crate::Result<()> {
     let _guard = state.synced_options.lock().await;
@@ -43,7 +43,7 @@ pub async fn sync_before_launch(
 ///
 /// Stores the written file's hash so the watcher ignores the app's write.
 pub async fn apply_launcher_overrides(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     overrides: &[(String, String)],
 ) -> crate::Result<()> {

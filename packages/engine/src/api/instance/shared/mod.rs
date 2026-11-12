@@ -8,8 +8,8 @@ use crate::install::{
 use crate::state::instances::{InstanceLink, SharedInstanceAttachment};
 use crate::state::{
     AppliedContentSetPatch, CacheBehaviour, CachedEntry, ContentSetSyncStatus,
-    ContentSourceKind, EditInstance, IconConfig, ModLoader, ProjectType,
-    SharedInstanceRole, State,
+    ContentSourceKind, EditInstance, Engine, IconConfig, ModLoader,
+    ProjectType, SharedInstanceRole,
 };
 use crate::util::fetch::{
     INSECURE_NO_TIMEOUT_REQWEST_CLIENT, INSECURE_REQWEST_CLIENT,
@@ -108,7 +108,7 @@ pub use self::types::{
 };
 
 pub async fn can_active_user_use_shared_instances(
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<bool> {
     Ok(state.sessions.backend().is_some())
 }

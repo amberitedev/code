@@ -55,7 +55,7 @@ pub fn config() -> Option<&'static DevAppConfig> {
 /// without going through the website. Does nothing when an account is already active. The backend
 /// opens the session only for the runner's secret, which arrives in the environment.
 #[cfg(debug_assertions)]
-pub async fn sign_in(state: &engine::State) {
+pub async fn sign_in(state: &engine::Engine) {
     let Some(config) = config().filter(|config| config.auth_mode == "dev")
     else {
         return;
@@ -76,7 +76,7 @@ pub async fn sign_in(state: &engine::State) {
 
 #[cfg(debug_assertions)]
 async fn open_session(
-    state: &engine::State,
+    state: &engine::Engine,
     username: &str,
     backend_url: &str,
     secret: &str,

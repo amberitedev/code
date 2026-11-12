@@ -2,7 +2,7 @@ use super::content::get_projects;
 use crate::ErrorKind;
 use crate::server_address::ServerAddress;
 use crate::state::{
-    Credentials, InstanceLink, ProcessMetadata, Settings, State,
+    Credentials, Engine, InstanceLink, ProcessMetadata, Settings,
     game_options_sync_is_enabled, load_game_option_preferences,
 };
 use crate::util::fetch;
@@ -24,7 +24,7 @@ pub enum QuickPlayType {
 
 #[tracing::instrument(skip(state))]
 pub async fn run(
-    state: &Arc<State>,
+    state: &Arc<Engine>,
     instance_id: &str,
     quick_play_type: QuickPlayType,
 ) -> crate::Result<ProcessMetadata> {
@@ -53,7 +53,7 @@ pub async fn run(
 
 #[tracing::instrument(skip(state, credentials))]
 async fn run_credentials(
-    state: &Arc<State>,
+    state: &Arc<Engine>,
     instance_id: &str,
     credentials: &Credentials,
     quick_play_type: QuickPlayType,
@@ -309,7 +309,7 @@ fn server_play_project_id(link: &InstanceLink) -> Option<&String> {
     }
 }
 
-pub async fn kill(state: &State, instance_id: &str) -> crate::Result<()> {
+pub async fn kill(state: &Engine, instance_id: &str) -> crate::Result<()> {
     let processes =
         crate::api::process::get_by_instance_id(state, instance_id).await?;
 
@@ -322,7 +322,7 @@ pub async fn kill(state: &State, instance_id: &str) -> crate::Result<()> {
 
 #[tracing::instrument(skip(state))]
 pub async fn try_update_playtime_by_instance_id(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
 ) -> crate::Result<()> {
     let context =

@@ -4,7 +4,7 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ErrorKind, State,
+    Engine, ErrorKind,
     install::{InstallPhaseDetails, InstallProgressReporter},
     pack::{
         self,
@@ -126,7 +126,7 @@ pub async fn is_valid_atlauncher(instance_folder: PathBuf) -> bool {
 #[tracing::instrument(skip(state))]
 
 pub async fn import_atlauncher(
-    state: &crate::State,
+    state: &crate::Engine,
     atlauncher_base_path: PathBuf, // path to base atlauncher folder
     instance_folder: String,       // instance folder in atlauncher_base_path
     instance_id: &str,
@@ -194,7 +194,7 @@ pub async fn import_atlauncher(
 }
 
 async fn import_atlauncher_unmanaged(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     minecraft_folder: PathBuf,
     backup_name: String,

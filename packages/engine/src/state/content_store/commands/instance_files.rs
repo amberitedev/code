@@ -212,7 +212,7 @@ impl ContentStore {
     }
     pub(in crate::state::content_store) async fn any_instance_running(
         &self,
-        state: &crate::State,
+        state: &crate::Engine,
     ) -> crate::Result<bool> {
         for instance in
             crate::state::instances::load_instance_rows(&self.pool).await?

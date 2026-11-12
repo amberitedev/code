@@ -12,8 +12,8 @@ use crate::state::content_store::ContentStore;
 use crate::state::instances::adapters::sqlite::{content_rows, instance_rows};
 use crate::state::{
     ContentEntry, ContentSetRemoteRef, ContentSetRemoteRefType,
-    ContentSetSyncProvider, ContentSetSyncState, DirectoryInfo, InstanceFile,
-    InstanceMetadata, State,
+    ContentSetSyncProvider, ContentSetSyncState, DirectoryInfo, Engine,
+    InstanceFile, InstanceMetadata,
 };
 use crate::util::fetch::IoSemaphore;
 use anyhow::{Context, bail};
@@ -49,7 +49,7 @@ pub(super) async fn prepare_instance_update_backup(
     job_id: Uuid,
     metadata: &InstanceMetadata,
     scoped_paths: Option<Vec<String>>,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<PathBuf> {
     let _lease = state.content_store.lease().await;
     let _content_lock = state
@@ -209,7 +209,7 @@ fn instance_update_backup_dir(
 async fn recover_unrecorded_instance_update_backup(
     job: &mut store::InstallJobRecord,
     request: Option<&InstallRequest>,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     if job.state.paths.staging_dir.is_some()
         || !matches!(
@@ -278,7 +278,7 @@ pub(super) async fn clear_staging_dir(
 async fn restore_instance_update(
     staging_dir: &Path,
     rollback: &super::model::InstallRollbackState,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let instance_id = &rollback.instance.instance.id;
     let _content_lock = state.instance_locks.lock_content(instance_id).await;
@@ -595,7 +595,7 @@ async fn copy_symlink(source: &Path, target: &Path) -> crate::Result<()> {
     Ok(())
 }
 
-pub async fn recover_interrupted_jobs(state: &State) -> crate::Result<()> {
+pub async fn recover_interrupted_jobs(state: &Engine) -> crate::Result<()> {
     let jobs = store::list_interrupted_candidates(&state.pool).await?;
 
     for job in jobs {
@@ -615,7 +615,7 @@ pub async fn recover_interrupted_jobs(state: &State) -> crate::Result<()> {
     Ok(())
 }
 
-async fn recover_orphaned_install_stages(state: &State) -> crate::Result<()> {
+async fn recover_orphaned_install_stages(state: &Engine) -> crate::Result<()> {
     let jobs = store::list_all(&state.pool).await?;
     for instance in instance_rows::list_instances(&state.pool).await? {
         let needs_recovery = jobs.iter().any(|job| {
@@ -659,14 +659,14 @@ async fn recover_orphaned_install_stages(state: &State) -> crate::Result<()> {
 
 fn recover_interrupted_job<'a>(
     job: store::InstallJobRecord,
-    state: &'a State,
+    state: &'a Engine,
 ) -> impl Future<Output = crate::Result<()>> + Send + 'a {
     Box::pin(recover_interrupted_job_inner(job, state))
 }
 
 async fn recover_interrupted_job_inner(
     mut job: store::InstallJobRecord,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let request = store::get_request(job.id, &state.pool).await?;
     recover_unrecorded_instance_update_backup(
@@ -845,7 +845,7 @@ fn display_from_request(
 
 pub async fn apply_cleanup(
     job_state: &InstallJobState,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     match &job_state.cleanup {
         InstallCleanup::DeleteNewInstance { instance_id } => {

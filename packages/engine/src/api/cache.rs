@@ -9,7 +9,7 @@ macro_rules! impl_cache_methods {
             paste::paste! {
                 #[tracing::instrument(skip(state))]
                 pub async fn [<get_ $variant:snake>](
-                    state: &crate::State,
+                    state: &crate::Engine,
                     id: &str,
                     cache_behaviour: Option<CacheBehaviour>,
                 ) -> crate::Result<Option<$type>>
@@ -19,7 +19,7 @@ macro_rules! impl_cache_methods {
 
                 #[tracing::instrument(skip(state))]
                 pub async fn [<get_ $variant:snake _many>](
-                    state: &crate::State,
+                    state: &crate::Engine,
                     ids: &[&str],
                     cache_behaviour: Option<CacheBehaviour>,
                 ) -> crate::Result<Vec<$type>>
@@ -45,7 +45,7 @@ impl_cache_methods!(
 );
 
 pub async fn purge_cache_types(
-    state: &crate::State,
+    state: &crate::Engine,
     cache_types: &[CacheValueType],
 ) -> crate::Result<()> {
     CachedEntry::purge_cache_types(cache_types, &state.pool).await?;
@@ -57,7 +57,7 @@ pub async fn purge_cache_types(
 /// Uses the cache system with the ProjectVersions cache type.
 #[tracing::instrument(skip(state))]
 pub async fn get_project_versions(
-    state: &crate::State,
+    state: &crate::Engine,
     project_id: &str,
     cache_behaviour: Option<CacheBehaviour>,
 ) -> crate::Result<Option<Vec<Version>>> {
@@ -74,7 +74,7 @@ pub async fn get_project_versions(
 // Account summaries use the configured account service; public project authors
 // remain in CachedEntry's public Modrinth user cache.
 pub async fn get_user(
-    state: &crate::State,
+    state: &crate::Engine,
     id: &str,
     cache_behaviour: Option<CacheBehaviour>,
 ) -> crate::Result<Option<User>> {
@@ -85,7 +85,7 @@ pub async fn get_user(
 }
 
 pub async fn get_user_many(
-    state: &crate::State,
+    state: &crate::Engine,
     ids: &[&str],
     cache_behaviour: Option<CacheBehaviour>,
 ) -> crate::Result<Vec<User>> {

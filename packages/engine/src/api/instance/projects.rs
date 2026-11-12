@@ -3,7 +3,7 @@ use crate::event::InstancePayloadType;
 use crate::event::emit::emit_instance;
 use crate::state::instances::adapters::sqlite::instance_rows;
 use crate::state::{
-    CacheBehaviour, CachedEntry, ContentSourceKind, ProjectType, State,
+    CacheBehaviour, CachedEntry, ContentSourceKind, Engine, ProjectType,
 };
 use crate::util::fetch;
 use anyhow::bail;
@@ -24,7 +24,7 @@ pub struct InstallProjectWithDependenciesRequest {
 
 #[tracing::instrument(skip(state))]
 pub async fn update_project(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     project_path: &str,
     skip_send_event: Option<bool>,
@@ -54,7 +54,7 @@ pub async fn update_project(
 
 #[tracing::instrument(skip(state))]
 pub async fn add_project_from_version(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     version_id: &str,
     reason: fetch::DownloadReason,
@@ -80,7 +80,7 @@ pub async fn add_project_from_version(
 
 #[tracing::instrument(skip(state))]
 pub async fn install_project_with_dependencies(
-    state: &Arc<State>,
+    state: &Arc<Engine>,
     instance_id: &str,
     request: InstallProjectWithDependenciesRequest,
 ) -> crate::Result<ResolveContentPlan> {
@@ -178,7 +178,7 @@ fn plan_project_ids(plan: &ResolveContentPlan) -> Vec<String> {
 
 #[tracing::instrument(skip(state))]
 pub async fn switch_project_version_with_dependencies(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     project_path: &str,
     version_id: &str,
@@ -215,7 +215,7 @@ pub async fn switch_project_version_with_dependencies(
 
 #[tracing::instrument(skip(state))]
 pub async fn add_project_from_path(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     path: &Path,
     project_type: Option<ProjectType>,
@@ -238,7 +238,7 @@ pub async fn add_project_from_path(
 
 #[tracing::instrument(skip(state))]
 pub async fn is_file_on_modrinth(
-    state: &State,
+    state: &Engine,
     path: &Path,
 ) -> crate::Result<bool> {
     let (_, hash) = fetch::sha1_file_async(path).await?;
@@ -256,7 +256,7 @@ pub async fn is_file_on_modrinth(
 
 #[tracing::instrument(skip(state))]
 pub async fn toggle_disable_project(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     project: &str,
     desired_enabled: Option<bool>,
@@ -282,7 +282,7 @@ pub async fn toggle_disable_project(
 
 #[tracing::instrument(skip(state))]
 pub async fn remove_project(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     project: &str,
 ) -> crate::Result<()> {
@@ -306,7 +306,7 @@ pub async fn remove_project(
 
 #[tracing::instrument(skip(state))]
 pub async fn set_project_locked(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     project: &str,
     locked: bool,
@@ -329,7 +329,7 @@ pub async fn set_project_locked(
 async fn ensure_shared_instance_can_modify_project(
     instance_id: &str,
     project_path: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let metadata = crate::state::instances::commands::get_instance_metadata(
         instance_id,
@@ -365,7 +365,7 @@ async fn ensure_shared_instance_can_modify_project(
 async fn ensure_project_not_frozen(
     instance_id: &str,
     project_path: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     if crate::state::instances::commands::is_project_locked(
         instance_id,
@@ -385,7 +385,7 @@ async fn ensure_project_not_frozen(
 
 #[tracing::instrument(skip(state))]
 pub async fn update_managed_modrinth_version(
-    state: &Arc<State>,
+    state: &Arc<Engine>,
     instance_id: &str,
     version_id: &str,
 ) -> crate::Result<crate::install::InstallJobSnapshot> {
@@ -441,7 +441,7 @@ pub async fn update_managed_modrinth_version(
 
 #[tracing::instrument(skip(state))]
 pub async fn repair_managed_modrinth(
-    state: &Arc<State>,
+    state: &Arc<Engine>,
     instance_id: &str,
 ) -> crate::Result<crate::install::InstallJobSnapshot> {
     let metadata = crate::state::instances::commands::get_instance_metadata(
@@ -498,7 +498,7 @@ fn unmanaged_pack_error(instance_id: &str) -> ErrorKind {
 
 async fn ensure_instance_content_unlocked(
     instance_id: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     if instance_rows::is_instance_quarantined(instance_id, &state.pool).await? {
         bail!(quarantined_content_error());

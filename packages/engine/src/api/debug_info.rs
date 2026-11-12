@@ -2,7 +2,7 @@ use crate::state::db_backup::{
     copy_db_files, create_sqlite_snapshot, remove_partial_backup,
 };
 use crate::util::io::IOError;
-use crate::{ErrorKind, State};
+use crate::{Engine, ErrorKind};
 use serde::Serialize;
 use std::fs::File;
 use std::io::{BufWriter, Read, Write};
@@ -35,7 +35,7 @@ struct ExportFile {
 }
 
 pub async fn export_debug_info(
-    state: &State,
+    state: &Engine,
     export_path: PathBuf,
     cancel: CancellationToken,
     on_progress: impl Fn(DebugInfoExportProgress) + Send + Sync + 'static,

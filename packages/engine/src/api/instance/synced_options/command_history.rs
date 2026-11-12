@@ -6,14 +6,14 @@ use super::files::{
 use super::orchestration::{
     create_synced_directories, option_effective, synced_options_path,
 };
-use crate::State;
+use crate::Engine;
 use crate::state::{InstanceMetadata, SyncedOption};
 use crate::util::io;
 use std::path::PathBuf;
 
 const COMMAND_HISTORY_LIMIT: usize = 50;
 
-pub async fn get_command_history(state: &State) -> crate::Result<String> {
+pub async fn get_command_history(state: &Engine) -> crate::Result<String> {
     let _guard = state.synced_options.lock().await;
     let path = command_history_path(state);
     if !path.exists() {
@@ -23,7 +23,7 @@ pub async fn get_command_history(state: &State) -> crate::Result<String> {
 }
 
 pub async fn set_command_history(
-    state: &State,
+    state: &Engine,
     contents: &str,
 ) -> crate::Result<String> {
     let _guard = state.synced_options.lock().await;
@@ -36,7 +36,7 @@ pub async fn set_command_history(
 
 pub(super) async fn ensure_command_history(
     metadata: &InstanceMetadata,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     create_synced_directories(state).await?;
     let canonical = command_history_path(state);
@@ -75,7 +75,7 @@ pub(super) async fn ensure_command_history(
 
 pub(super) async fn reconcile_command_history(
     metadata: &InstanceMetadata,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     if !option_effective(metadata, SyncedOption::CommandHistory, state).await? {
         return Ok(());
@@ -118,7 +118,7 @@ pub(super) async fn reconcile_command_history(
     Ok(())
 }
 
-async fn refresh_command_history_links(state: &State) -> crate::Result<()> {
+async fn refresh_command_history_links(state: &Engine) -> crate::Result<()> {
     let instances = crate::state::list_instances(&state.pool).await?;
     for metadata in instances {
         if option_effective(&metadata, SyncedOption::CommandHistory, state)
@@ -142,7 +142,7 @@ pub(super) fn normalize_command_history(contents: &str) -> String {
 
 pub(super) async fn merge_command_history_from_instance(
     metadata: &InstanceMetadata,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let canonical_path = command_history_path(state);
     let canonical = if canonical_path.exists() {
@@ -181,6 +181,6 @@ pub(super) async fn merge_command_history_from_instance(
     Ok(())
 }
 
-pub(super) fn command_history_path(state: &State) -> PathBuf {
+pub(super) fn command_history_path(state: &Engine) -> PathBuf {
     synced_options_path(state).join(COMMAND_HISTORY_FILE)
 }

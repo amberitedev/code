@@ -8,7 +8,7 @@ use super::options_file::{
     GameOptionsDocument, options_path, read_document, sha1_bytes,
 };
 use crate::state::{
-    CanonicalValue, InstanceMetadata, State, StoredOption,
+    CanonicalValue, Engine, InstanceMetadata, StoredOption,
     game_options_sync_is_enabled,
 };
 use std::collections::BTreeMap;
@@ -28,7 +28,7 @@ pub(super) struct ParticipatingInstance {
 /// An instance may not have an `options.txt` until its first launch. It still takes
 /// part in sync, but its settings are marked as waiting for the file.
 pub(super) async fn load_participating_instances(
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Vec<ParticipatingInstance>> {
     if !game_options_sync_is_enabled(&state.pool).await? {
         return Ok(Vec::new());

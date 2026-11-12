@@ -5,7 +5,7 @@ use super::PackLibrary;
 use super::storage::{read_library, write_library};
 use crate::ErrorKind;
 use crate::state::instances::adapters::{filesystem, sqlite::content_rows};
-use crate::state::{InstanceMetadata, State};
+use crate::state::{Engine, InstanceMetadata};
 use anyhow::{Context, bail};
 use parking_lot::Mutex;
 use std::collections::{BTreeMap, BTreeSet};
@@ -30,17 +30,17 @@ struct Queue {
 pub(crate) struct PackSyncWorker {
     queue: Mutex<Queue>,
     pub(super) revision: AtomicU64,
-    engine: OnceLock<Weak<State>>,
+    engine: OnceLock<Weak<Engine>>,
 }
 
 impl PackSyncWorker {
     /// Lets the worker run; requests made before this only queue.
-    pub(crate) fn bind(&self, engine: Weak<State>) {
+    pub(crate) fn bind(&self, engine: Weak<Engine>) {
         let _ = self.engine.set(engine);
     }
 }
 
-pub(crate) fn queue_reconciliation(state: &State, instance_id: &str) {
+pub(crate) fn queue_reconciliation(state: &Engine, instance_id: &str) {
     state
         .synced_options
         .packs
@@ -51,13 +51,13 @@ pub(crate) fn queue_reconciliation(state: &State, instance_id: &str) {
     start(state);
 }
 
-pub(super) fn queue_all(state: &State) {
+pub(super) fn queue_all(state: &Engine) {
     state.synced_options.packs.queue.lock().all = true;
     start(state);
 }
 
 pub(crate) async fn flush(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
 ) -> Result<(), Arc<crate::Error>> {
     let (sender, receiver) = oneshot::channel();
@@ -87,7 +87,7 @@ pub(crate) async fn flush(
         .context("pack sync worker stopped before completing the request")?
 }
 
-fn start(state: &State) {
+fn start(state: &Engine) {
     let Some(state) = state
         .synced_options
         .packs
@@ -217,14 +217,14 @@ fn start(state: &State) {
 
 /// Releases the canonical-state lock for preparation and rejects outdated results.
 pub(super) struct Preparation<'a> {
-    state: &'a State,
+    state: &'a Engine,
     guard: Option<MutexGuard<'a, ()>>,
     metadata: &'a InstanceMetadata,
 }
 
 impl<'a> Preparation<'a> {
     pub(super) async fn new(
-        state: &'a State,
+        state: &'a Engine,
         metadata: &'a InstanceMetadata,
     ) -> Self {
         Self {
@@ -303,7 +303,7 @@ fn metadata_key(metadata: &InstanceMetadata) -> serde_json::Value {
 
 async fn fingerprint(
     metadata: &InstanceMetadata,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Vec<(String, String)>> {
     let directory = state.directories.instances_dir();
     let instance_path = metadata.instance.path.clone();

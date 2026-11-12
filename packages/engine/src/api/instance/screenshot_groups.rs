@@ -1,7 +1,7 @@
 use crate::event::emit::emit_instance;
 use crate::event::{EventSink, InstancePayloadType};
 use crate::state::instances::adapters::sqlite::screenshot_rows;
-use crate::{ErrorKind, State};
+use crate::{Engine, ErrorKind};
 use anyhow::bail;
 use serde::{Deserialize, Serialize};
 use sqlx::{Sqlite, Transaction};
@@ -45,7 +45,7 @@ fn validate_group_name(name: &str) -> crate::Result<&str> {
 }
 
 pub async fn list_screenshot_groups(
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Vec<ScreenshotGroup>> {
     Ok(screenshot_rows::list_groups(&state.pool)
         .await?
@@ -58,7 +58,7 @@ pub async fn list_screenshot_groups(
 }
 
 pub async fn create_screenshot_group(
-    state: &State,
+    state: &Engine,
     name: String,
     screenshot_ids: Vec<String>,
 ) -> crate::Result<ScreenshotGroup> {
@@ -95,7 +95,7 @@ pub async fn create_screenshot_group(
 }
 
 pub async fn rename_screenshot_group(
-    state: &State,
+    state: &Engine,
     id: String,
     new_name: String,
 ) -> crate::Result<ScreenshotGroup> {
@@ -120,7 +120,7 @@ pub async fn rename_screenshot_group(
 }
 
 pub async fn delete_screenshot_group(
-    state: &State,
+    state: &Engine,
     id: String,
 ) -> crate::Result<()> {
     let instance_ids = sqlx::query_scalar!(
@@ -148,7 +148,7 @@ pub async fn delete_screenshot_group(
 }
 
 pub async fn set_screenshot_group_memberships(
-    state: &State,
+    state: &Engine,
     updates: Vec<ScreenshotGroupMembershipUpdate>,
 ) -> crate::Result<()> {
     let updates = normalize_membership_updates(updates)?;
@@ -192,7 +192,7 @@ pub async fn set_screenshot_group_memberships(
 }
 
 pub async fn import_screenshot_groups(
-    state: &State,
+    state: &Engine,
     groups: Vec<ScreenshotGroupImport>,
 ) -> crate::Result<()> {
     if groups.is_empty() {

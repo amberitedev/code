@@ -3,15 +3,15 @@ use crate::event::InstancePayloadType;
 use crate::event::emit::emit_instance;
 use crate::state::instances::adapters::sqlite::instance_rows;
 use crate::state::{
-    CreateInstance, EditInstance, IconConfig, InstanceLink, InstanceMetadata,
-    InstanceSyncedOption, ModLoader, State,
+    CreateInstance, EditInstance, Engine, IconConfig, InstanceLink,
+    InstanceMetadata, InstanceSyncedOption, ModLoader,
 };
 
 use std::future::Future;
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn create(
-    state: &State,
+    state: &Engine,
     name: String,
     game_version: String,
     modloader: ModLoader,
@@ -35,7 +35,7 @@ pub(crate) fn create(
 #[tracing::instrument(skip(state))]
 #[allow(clippy::too_many_arguments)]
 async fn create_inner(
-    state: &State,
+    state: &Engine,
     name: String,
     game_version: String,
     modloader: ModLoader,
@@ -95,7 +95,7 @@ async fn create_inner(
 }
 
 pub async fn edit(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     patch: EditInstance,
 ) -> crate::Result<InstanceMetadata> {
@@ -131,7 +131,7 @@ pub async fn edit(
 }
 
 pub async fn set_synced_option(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     option: InstanceSyncedOption,
     enabled: bool,
@@ -157,7 +157,7 @@ pub async fn set_synced_option(
 }
 
 #[tracing::instrument(skip(state))]
-pub async fn remove(state: &State, instance_id: &str) -> crate::Result<()> {
+pub async fn remove(state: &Engine, instance_id: &str) -> crate::Result<()> {
     let instance =
         instance_rows::get_instance_display_info(instance_id, &state.pool)
             .await?;

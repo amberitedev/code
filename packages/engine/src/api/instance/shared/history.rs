@@ -22,7 +22,7 @@ use std::sync::Arc;
 const KEPT_SETTING: &str = "share_history_kept";
 
 /// The App's history: entries in the App's database, files retained in the content store.
-struct AppHistory<'a>(&'a State);
+struct AppHistory<'a>(&'a Engine);
 
 impl HistoryStore for AppHistory<'_> {
     type Error = crate::Error;
@@ -87,7 +87,7 @@ pub(super) async fn record_push(
     share_id: &str,
     content: &VersionContent,
     pushed: &Pushed,
-    state: &State,
+    state: &Engine,
 ) {
     let after = ShareVersion {
         version: pushed.version,
@@ -111,7 +111,7 @@ pub(super) async fn record_push(
 /// Deletes the whole history of `share_id`, once the share is gone.
 pub(super) async fn forget_share_history(
     share_id: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     history::prune(&AppHistory(state), share_id, Some(0)).await
 }
@@ -119,7 +119,7 @@ pub(super) async fn forget_share_history(
 /// The instance's share history, newest first. Only its owner has one.
 #[tracing::instrument(skip(state))]
 pub async fn get_shared_instance_history(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
 ) -> crate::Result<Vec<SharedInstanceHistoryEntry>> {
     let attachment = attachment(instance_id, state).await?;
@@ -153,7 +153,7 @@ fn entry_version(entry: &HistoryEntry) -> ShareVersion {
 /// owner pushes, so the instance is left with changes to push unless the version is the latest.
 #[tracing::instrument(skip(state))]
 pub async fn restore_shared_instance_version(
-    state: &Arc<State>,
+    state: &Arc<Engine>,
     instance_id: &str,
     version: i32,
 ) -> crate::Result<InstallJobSnapshot> {
@@ -197,7 +197,7 @@ pub async fn restore_shared_instance_version(
 /// stays (`sharing_client::history::delete_older`).
 #[tracing::instrument(skip(state))]
 pub async fn delete_shared_instance_version(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     version: i32,
 ) -> crate::Result<()> {
@@ -210,7 +210,7 @@ pub async fn delete_shared_instance_version(
 /// How many versions each share's history keeps, and how many each has now.
 #[tracing::instrument(skip(state))]
 pub async fn get_shared_history_settings(
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<SharedHistorySettings> {
     Ok(SharedHistorySettings {
         kept: AppHistory(state).kept().await?,
@@ -222,7 +222,7 @@ pub async fn get_shared_history_settings(
 /// deletes the rest now.
 #[tracing::instrument(skip(state))]
 pub async fn set_shared_history_kept(
-    state: &State,
+    state: &Engine,
     kept: Option<usize>,
 ) -> crate::Result<SharedHistorySettings> {
     let value = kept.map_or_else(|| "all".to_string(), |kept| kept.to_string());
@@ -237,7 +237,7 @@ pub async fn set_shared_history_kept(
 
 async fn attachment(
     instance_id: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<SharedInstanceAttachment> {
     shared_attachment(instance_id, state).await?.ok_or_else(|| {
         crate::ErrorKind::InputError(
@@ -249,7 +249,7 @@ async fn attachment(
 
 async fn owner_attachment(
     instance_id: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<SharedInstanceAttachment> {
     let attachment = attachment(instance_id, state).await?;
     if attachment.role != SharedInstanceRole::Owner {

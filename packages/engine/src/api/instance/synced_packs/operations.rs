@@ -14,8 +14,8 @@ use super::{
 use crate::event::{InstancePayloadType, emit::emit_instance};
 use crate::state::instances::commands;
 use crate::state::{
-    CacheBehaviour, CachedEntry, ContentItem, ContentSourceKind,
-    InstanceMetadata, ProjectType, State, SyncedOption, SyncedPackInfo,
+    CacheBehaviour, CachedEntry, ContentItem, ContentSourceKind, Engine,
+    InstanceMetadata, ProjectType, SyncedOption, SyncedPackInfo,
 };
 use crate::util::io;
 use crate::{ErrorKind, InvalidPack};
@@ -28,7 +28,7 @@ use uuid::Uuid;
 async fn source(
     instance_id: &str,
     project_path: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<(InstanceMetadata, ContentItem)> {
     let metadata = crate::state::get_instance(instance_id, &state.pool)
         .await?
@@ -66,7 +66,7 @@ async fn source(
 pub(super) async fn pack_from_item(
     mut item: ContentItem,
     metadata: &InstanceMetadata,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<SyncedPack> {
     pack_option(item.project_type)?;
     if !path_util::is_safe_file_name(&item.file_name)
@@ -194,7 +194,7 @@ fn existing_pack<'a>(
 }
 
 pub async fn get_pack_sync_preview(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     project_path: &str,
 ) -> crate::Result<PackSyncPreview> {
@@ -258,7 +258,7 @@ pub async fn get_pack_sync_preview(
 }
 
 pub async fn sync_pack(
-    state: &crate::State,
+    state: &crate::Engine,
     instance_id: &str,
     project_path: &str,
 ) -> crate::Result<()> {
@@ -268,7 +268,7 @@ pub async fn sync_pack(
 pub(in crate::api::instance) async fn seed_from_instance(
     metadata: &InstanceMetadata,
     option: SyncedOption,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     super::super::projects::ensure_metadata_content_unlocked(metadata)?;
     let instance_id = &metadata.instance.id;
@@ -353,7 +353,7 @@ pub(in crate::api::instance) async fn seed_from_instance(
 }
 
 pub(in crate::api::instance) async fn sync_new_pack(
-    state: &crate::State,
+    state: &crate::Engine,
     instance_id: &str,
     project_path: &str,
 ) {
@@ -372,7 +372,7 @@ pub(in crate::api::instance) async fn sync_new_pack(
 }
 
 async fn sync_pack_inner(
-    state: &crate::State,
+    state: &crate::Engine,
     instance_id: &str,
     project_path: &str,
     automatic: bool,
@@ -394,7 +394,7 @@ async fn sync_pack_inner(
 }
 
 async fn sync_pack_once(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     project_path: &str,
     automatic: bool,
@@ -504,7 +504,7 @@ async fn sync_pack_once(
 }
 
 pub async fn list_synced_packs(
-    state: &State,
+    state: &Engine,
     project_type: ProjectType,
 ) -> crate::Result<Vec<ContentItem>> {
     pack_option(project_type)?;
@@ -540,7 +540,7 @@ pub async fn list_synced_packs(
 }
 
 pub async fn upload_synced_pack(
-    state: &State,
+    state: &Engine,
     path: &Path,
     project_type: ProjectType,
     game_versions: Vec<String>,
@@ -619,7 +619,7 @@ pub async fn upload_synced_pack(
 }
 
 pub async fn set_synced_pack_enabled(
-    state: &State,
+    state: &Engine,
     pack_id: &str,
     enabled: bool,
 ) -> crate::Result<()> {
@@ -635,7 +635,7 @@ pub async fn set_synced_pack_enabled(
 }
 
 pub async fn remove_synced_pack(
-    state: &State,
+    state: &Engine,
     pack_id: &str,
 ) -> crate::Result<()> {
     let _guard = state.synced_options.lock().await;
@@ -650,7 +650,7 @@ pub async fn remove_synced_pack(
 }
 
 pub async fn desync_pack(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     pack_id: &str,
     mode: DesyncServerMode,

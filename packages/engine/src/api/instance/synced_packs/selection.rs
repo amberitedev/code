@@ -8,7 +8,7 @@ use super::selection_compatibility;
 use super::{PackLibrary, PackPlacement, SyncedPack};
 use crate::state::instances::adapters::sqlite::content_rows;
 use crate::state::{
-    ContentSourceKind, InstanceMetadata, ProjectType, State, SyncedOption,
+    ContentSourceKind, Engine, InstanceMetadata, ProjectType, SyncedOption,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -42,7 +42,7 @@ fn target_entry(metadata: &InstanceMetadata, entry: String) -> String {
 
 async fn local_sources(
     metadata: &InstanceMetadata,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<BTreeMap<String, ContentSourceKind>> {
     let (files, entries) = tokio::try_join!(
         content_rows::get_instance_files(&metadata.instance.id, &state.pool),
@@ -103,7 +103,7 @@ fn can_capture(
 pub(super) async fn selected_in_instance(
     metadata: &InstanceMetadata,
     project_path: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Option<bool>> {
     let Some(entry) = option_entry(project_path) else {
         return Ok(None);
@@ -118,7 +118,7 @@ pub(super) async fn selected_in_instance(
 pub(super) async fn capture_source_order(
     metadata: &InstanceMetadata,
     library: &mut PackLibrary,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let Some(options) = read_resource_pack_entries(metadata, state).await?
     else {
@@ -174,7 +174,7 @@ pub(super) async fn capture_source_order(
 pub(super) async fn capture(
     metadata: &InstanceMetadata,
     library: &mut PackLibrary,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Option<bool>> {
     if super::super::synced_options::pending::contains(
         &metadata.instance.id,
@@ -349,7 +349,7 @@ pub(super) async fn apply_removal(
     metadata: &InstanceMetadata,
     library: &mut PackLibrary,
     placement: Option<&PackPlacement>,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<bool> {
     let Some(placement) = placement else {
         return Ok(true);
@@ -401,7 +401,7 @@ pub(super) async fn apply(
     metadata: &InstanceMetadata,
     library: &mut PackLibrary,
     previous_placements: &BTreeMap<String, PackPlacement>,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<bool> {
     let directory = instance_dir(metadata, state);
     let global = get_global_options(state).await?;

@@ -2,7 +2,7 @@ use crate::ErrorKind;
 use crate::event::InstancePayloadType;
 use crate::event::emit::emit_instance;
 use crate::state::instances::adapters::sqlite::instance_rows;
-use crate::state::{EditInstance, IconConfig, State};
+use crate::state::{EditInstance, Engine, IconConfig};
 use crate::util::fetch::{sha1_async, write_atomic};
 use crate::util::io;
 use anyhow::{Context, bail};
@@ -30,7 +30,7 @@ static REMOTE_ICON_DOWNLOADS: tokio::sync::Semaphore =
     tokio::sync::Semaphore::const_new(4);
 
 pub async fn edit_icon(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     icon_path: Option<&Path>,
 ) -> crate::Result<()> {
@@ -49,7 +49,7 @@ pub async fn edit_icon(
 }
 
 pub async fn cache_icon_bytes(
-    state: &State,
+    state: &Engine,
     icon_bytes: Vec<u8>,
 ) -> crate::Result<String> {
     let icon_path = cache_icon(Bytes::from(icon_bytes), state).await?;
@@ -57,7 +57,7 @@ pub async fn cache_icon_bytes(
 }
 
 pub async fn cache_remote_icon(
-    state: &Arc<State>,
+    state: &Arc<Engine>,
     source: &str,
 ) -> crate::Result<PathBuf> {
     if !source.starts_with("https://") {
@@ -103,7 +103,7 @@ pub async fn cache_remote_icon(
 }
 
 async fn refresh_remote_icon(
-    state: &State,
+    state: &Engine,
     source: &str,
     mapping: &Path,
 ) -> crate::Result<PathBuf> {
@@ -154,7 +154,7 @@ fn is_cached_icon_filename(filename: &str) -> bool {
 }
 
 pub async fn edit_generated_icon(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     config: IconConfig,
     symbol_bytes: Vec<u8>,
@@ -175,7 +175,7 @@ pub async fn edit_generated_icon(
 }
 
 pub async fn edit_generated_icon_if_empty(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     config: IconConfig,
     symbol_bytes: Vec<u8>,
@@ -221,7 +221,7 @@ pub async fn edit_generated_icon_if_empty(
 }
 
 pub async fn cache_generated_icon(
-    state: &State,
+    state: &Engine,
     config: IconConfig,
     symbol_bytes: Vec<u8>,
     add_to_recents: bool,
@@ -241,7 +241,7 @@ pub async fn cache_generated_icon(
 }
 
 pub async fn get_recent_icon_configs(
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Vec<IconConfig>> {
     instance_rows::get_recent_instance_icon_configs(&state.pool).await
 }
@@ -249,7 +249,7 @@ pub async fn get_recent_icon_configs(
 async fn cache_generated_icon_with_state(
     config: IconConfig,
     symbol_bytes: Vec<u8>,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<String> {
     let background = validate_icon_config(&config)?;
     let icon_bytes = tokio::task::spawn_blocking(move || {
@@ -263,7 +263,7 @@ async fn cache_generated_icon_with_state(
 
 pub(crate) async fn cache_icon(
     bytes: Bytes,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<PathBuf> {
     let bytes = tokio::task::spawn_blocking(move || {
         if looks_like_svg(&bytes) {
@@ -279,7 +279,7 @@ pub(crate) async fn cache_icon(
 
 pub(crate) async fn cache_icon_from_path(
     icon_path: &Path,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<PathBuf> {
     let icon_path = icon_path.to_path_buf();
     let bytes = tokio::task::spawn_blocking(move || {
@@ -310,7 +310,7 @@ async fn apply_instance_icon(
     instance_id: &str,
     icon_path: Option<String>,
     icon_config: Option<IconConfig>,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let instance =
         instance_rows::get_instance_display_info(instance_id, &state.pool)
@@ -350,7 +350,7 @@ async fn apply_instance_icon(
 
 async fn write_cached_icon(
     bytes: Bytes,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<PathBuf> {
     if bytes.len() >= INSTANCE_ICON_MAX_BYTES {
         return Err(icon_too_large_error());

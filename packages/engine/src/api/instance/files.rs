@@ -3,7 +3,7 @@ use crate::state::content_store::{
     ReadableContent, content_file_path, validate_relative,
 };
 use crate::state::instances::adapters::sqlite::{content_rows, instance_rows};
-use crate::{ErrorKind, State};
+use crate::{Engine, ErrorKind};
 use anyhow::bail;
 use serde::Serialize;
 use std::collections::HashSet;
@@ -30,7 +30,7 @@ fn normalized(path: &str) -> &str {
 }
 
 async fn resolve(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     path: &str,
     writing: bool,
@@ -70,7 +70,7 @@ async fn resolve(
 }
 
 async fn local_destination(
-    state: &State,
+    state: &Engine,
     instance_path: &str,
     path: &str,
 ) -> crate::Result<PathBuf> {
@@ -96,7 +96,7 @@ struct ManagedPaths {
 }
 
 impl ManagedPaths {
-    async fn load(state: &State, instance_id: &str) -> crate::Result<Self> {
+    async fn load(state: &Engine, instance_id: &str) -> crate::Result<Self> {
         let bindings =
             content_store::instance_storage(&state.pool, instance_id).await?;
         let bound = bindings
@@ -159,7 +159,7 @@ pub(crate) struct InstanceFileWriter {
 
 impl InstanceFileWriter {
     pub(crate) async fn new(
-        state: &State,
+        state: &Engine,
         instance_id: &str,
     ) -> crate::Result<Self> {
         let instance =
@@ -175,7 +175,7 @@ impl InstanceFileWriter {
 
     pub(crate) async fn destination(
         &self,
-        state: &State,
+        state: &Engine,
         path: &str,
     ) -> crate::Result<PathBuf> {
         let path = normalized(path);
@@ -196,7 +196,7 @@ impl InstanceFileWriter {
     /// into place.
     pub(crate) async fn write_from_reader(
         &self,
-        state: &State,
+        state: &Engine,
         path: &str,
         reader: impl tokio::io::AsyncRead + Unpin,
         expected_size: u64,
@@ -239,7 +239,7 @@ impl InstanceFileWriter {
 }
 
 pub async fn list_instance_files(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     path: &str,
 ) -> crate::Result<Vec<InstanceFileItem>> {
@@ -310,7 +310,7 @@ pub async fn list_instance_files(
 }
 
 pub async fn read_instance_file(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     path: &str,
 ) -> crate::Result<Vec<u8>> {
@@ -319,7 +319,7 @@ pub async fn read_instance_file(
 }
 
 pub async fn validate_instance_file_write(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     path: &str,
 ) -> crate::Result<PathBuf> {
@@ -327,7 +327,7 @@ pub async fn validate_instance_file_write(
 }
 
 async fn instance_file_write_path(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     path: &str,
 ) -> crate::Result<PathBuf> {
@@ -338,7 +338,7 @@ async fn instance_file_write_path(
 }
 
 pub async fn write_instance_file(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     path: &str,
     bytes: &[u8],
@@ -386,7 +386,7 @@ pub async fn write_instance_file(
 }
 
 pub async fn create_instance_directory(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     path: &str,
 ) -> crate::Result<()> {
@@ -398,7 +398,7 @@ pub async fn create_instance_directory(
 }
 
 pub async fn rename_instance_file(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     source: &str,
     destination: &str,
@@ -417,7 +417,7 @@ pub async fn rename_instance_file(
 }
 
 pub async fn delete_instance_file(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     path: &str,
     recursive: bool,
@@ -438,7 +438,7 @@ pub async fn delete_instance_file(
 }
 
 pub async fn save_instance_file_as(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     source: &str,
     destination: &Path,

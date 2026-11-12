@@ -31,7 +31,8 @@ pub use event::{
 pub use logger::start_logger;
 pub use self_hosted::accounts::AccountEndpoints;
 pub use state::{
-    BackendSession, BackendSessionKind, ModrinthSession, Sessions, State,
+    BackendSession, BackendSessionKind, Engine, EngineConfig, ModrinthSession,
+    Sessions,
 };
 pub use util::fetch::DownloadReason;
 

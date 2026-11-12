@@ -21,7 +21,7 @@ use crate::state::{
 };
 use crate::util::io;
 use crate::util::rpc::RpcServerBuilder;
-use crate::{ErrorKind, State, get_resource_file};
+use crate::{Engine, ErrorKind, get_resource_file};
 use anyhow::{Context, bail};
 use chrono::Utc;
 use minecraft_meta_manifest as d;
@@ -161,7 +161,7 @@ pub async fn get_java_version_from_launch_context(
 }
 
 pub async fn get_loader_version_from_profile(
-    state: &crate::State,
+    state: &crate::Engine,
     game_version: &str,
     loader: ModLoader,
     loader_version: Option<&str>,
@@ -287,7 +287,7 @@ fn loader_versions_for_game_version<'a>(
 
 pub(crate) async fn resolve_java_for_launch(
     context: &InstanceLaunchContext,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<JavaVersion> {
     let _runtime_lease = state.content_store.runtime_cache_lock.read().await;
     let content_set = &context.applied_content_set;
@@ -356,7 +356,7 @@ pub(crate) async fn resolve_java_for_launch(
 /// refresh to pick up newly-released versions.
 pub async fn resolve_minecraft_manifest(
     game_version: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<(d::minecraft::Catalog, usize)> {
     let minecraft = crate::api::metadata::get_minecraft_versions(state).await?;
 
@@ -404,7 +404,7 @@ pub fn install_minecraft_with_reporter(
     context: &InstanceLaunchContext,
     repairing: bool,
     reporter: Option<InstallProgressReporter>,
-    state: &State,
+    state: &Engine,
 ) -> impl Future<Output = crate::Result<()>> + Send {
     Box::pin(install_minecraft_inner(context, repairing, reporter, state))
 }
@@ -413,7 +413,7 @@ async fn install_minecraft_inner(
     context: &InstanceLaunchContext,
     repairing: bool,
     reporter: Option<InstallProgressReporter>,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let instance = &context.instance;
     let content_set = &context.applied_content_set;
@@ -825,7 +825,7 @@ pub async fn install_minecraft_for_instance_id_with_reporter(
     instance_id: &str,
     repairing: bool,
     reporter: Option<InstallProgressReporter>,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let context =
         crate::state::instances::commands::get_instance_launch_context(
@@ -923,7 +923,7 @@ pub async fn launch_minecraft(
     post_exit_hook: Option<String>,
     context: &InstanceLaunchContext,
     mut quick_play_type: QuickPlayType,
-    state: &Arc<State>,
+    state: &Arc<Engine>,
 ) -> crate::Result<ProcessMetadata> {
     let instance = &context.instance;
     let content_set = &context.applied_content_set;

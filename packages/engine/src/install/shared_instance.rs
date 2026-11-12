@@ -18,8 +18,8 @@ use crate::api::instance::{
 use crate::api::pack::install_from::CreatePackLocation;
 use crate::state::instances::adapters::sqlite::content_rows;
 use crate::state::{
-    CachedEntry, ContentSetSyncStatus, ContentSourceKind, InstanceLink,
-    ProjectType, SharedInstanceAttachmentInput, SharedInstanceRole, State,
+    CachedEntry, ContentSetSyncStatus, ContentSourceKind, Engine, InstanceLink,
+    ProjectType, SharedInstanceAttachmentInput, SharedInstanceRole,
 };
 use crate::util::fetch::{DownloadReason, REQWEST_CLIENT};
 use anyhow::{Context, bail};
@@ -84,7 +84,7 @@ pub(super) async fn attach_pending_shared_instance(
 /// default server icon when it has none.
 pub(super) async fn linked_server_icon(
     data: &SharedInstanceInstallData,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<String> {
     match &data.server_manager_icon_url {
         Some(icon) => Ok(icon.clone()),
@@ -101,7 +101,7 @@ pub(super) async fn linked_server_icon(
 pub(super) async fn finalize_shared_instance_attachment(
     instance_id: &str,
     data: &SharedInstanceInstallData,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     // An owner who restored a kept version stays its owner, with changes to push unless the
     // version is the latest.
@@ -219,7 +219,7 @@ impl SharedInstanceApplyPlan {
     async fn build(
         metadata: &crate::state::InstanceMetadata,
         data: &SharedInstanceInstallData,
-        state: &State,
+        state: &Engine,
     ) -> crate::Result<Self> {
         if shared_instance_update_requires_full_apply(metadata, data) {
             return Ok(Self {
@@ -270,7 +270,7 @@ impl SharedInstanceApplyPlan {
 pub(super) fn apply_shared_instance_update(
     job_id: Uuid,
     job_state: &mut InstallJobState,
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     data: &SharedInstanceInstallData,
 ) -> impl std::future::Future<Output = crate::Result<()>> + Send {
@@ -288,7 +288,7 @@ pub(super) fn apply_shared_instance_update(
 async fn apply_shared_instance_update_inner(
     job_id: Uuid,
     job_state: &mut InstallJobState,
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     data: &SharedInstanceInstallData,
 ) -> crate::Result<()> {
@@ -339,7 +339,7 @@ async fn apply_shared_instance_update_inner(
 async fn reinstall_shared_instance(
     job_id: Uuid,
     job_state: &mut InstallJobState,
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     data: &SharedInstanceInstallData,
 ) -> crate::Result<()> {
@@ -377,7 +377,7 @@ async fn reinstall_shared_instance(
 async fn apply_shared_instance_changes(
     job_id: Uuid,
     job_state: &mut InstallJobState,
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     data: &SharedInstanceInstallData,
     plan: SharedInstanceApplyPlan,
@@ -493,7 +493,7 @@ async fn apply_shared_instance_changes(
 async fn remove_left_configs(
     instance_id: &str,
     data: &SharedInstanceInstallData,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     if data.removed_config_files.is_empty() {
         return Ok(());
@@ -556,7 +556,7 @@ pub(super) fn shared_instance_update_requires_full_apply(
 async fn current_shared_instance_content(
     metadata: &crate::state::InstanceMetadata,
     owner: Option<&OwnerSharedContent>,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<CurrentSharedInstanceContent> {
     let entries = content_rows::get_content_entries(
         &metadata.applied_content_set.id,
@@ -625,7 +625,7 @@ async fn current_shared_instance_content(
 async fn shared_modpack_toggles(
     metadata: &crate::state::InstanceMetadata,
     data: &SharedInstanceInstallData,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<SharedModpackChanges> {
     for removed in &data.removed_files {
         removed.validate()?;
@@ -710,7 +710,7 @@ struct SharedModpackChanges {
 async fn ensure_shared_instance_additions_enabled(
     instance_id: &str,
     data: &SharedInstanceInstallData,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let metadata = crate::state::instances::commands::get_instance_metadata(
         instance_id,
@@ -768,7 +768,7 @@ type OwnerSharedContent = Carried<SharedInstanceExternalFileKey>;
 /// for a member's update.
 async fn owner_shared_content(
     data: &SharedInstanceInstallData,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Option<OwnerSharedContent>> {
     let Some(mut content) = data.restore.clone() else {
         return Ok(None);
@@ -817,7 +817,7 @@ fn replaced_by_shared_update(
 
 async fn desired_shared_instance_content(
     data: &SharedInstanceInstallData,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<DesiredSharedInstanceContent> {
     let versions_by_id =
         shared_instance_versions_by_id(&data.modrinth_ids, state).await?;
@@ -865,7 +865,7 @@ async fn desired_shared_instance_content(
 
 async fn shared_instance_versions_by_id(
     version_ids: &[String],
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<HashMap<String, crate::state::Version>> {
     if version_ids.is_empty() {
         return Ok(HashMap::new());
@@ -903,7 +903,7 @@ async fn shared_instance_versions_by_id(
 pub(super) fn apply_shared_instance_content(
     job_id: Uuid,
     job_state: &mut InstallJobState,
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     data: &SharedInstanceInstallData,
 ) -> impl std::future::Future<Output = crate::Result<()>> + Send {
@@ -921,7 +921,7 @@ pub(super) fn apply_shared_instance_content(
 async fn apply_shared_instance_content_inner(
     job_id: Uuid,
     job_state: &mut InstallJobState,
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     data: &SharedInstanceInstallData,
 ) -> crate::Result<()> {
@@ -961,7 +961,7 @@ async fn apply_shared_instance_content_inner(
 async fn install_shared_instance_base(
     job_id: Uuid,
     job_state: &mut InstallJobState,
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     data: &SharedInstanceInstallData,
 ) -> crate::Result<()> {
@@ -1056,7 +1056,7 @@ async fn install_shared_instance_base(
 async fn install_shared_instance_additions(
     job_id: Uuid,
     job_state: &mut InstallJobState,
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     data: &SharedInstanceInstallData,
 ) -> crate::Result<()> {
@@ -1130,7 +1130,7 @@ async fn install_shared_instance_additions(
 async fn remove_existing_shared_instance_content(
     instance_id: &str,
     data: &SharedInstanceInstallData,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let metadata = crate::state::instances::commands::get_instance_metadata(
         instance_id,
@@ -1183,7 +1183,7 @@ async fn remove_existing_shared_instance_content(
 /// Top-level instance entries removed when a shared instance starts over.
 pub(super) async fn fresh_start_removed_paths(
     instance_id: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Vec<String>> {
     let metadata = crate::state::instances::commands::get_instance_metadata(
         instance_id,
@@ -1210,7 +1210,7 @@ pub(super) async fn fresh_start_removed_paths(
 
 async fn clear_shared_instance_for_fresh_start(
     instance_id: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     for file in
         content_rows::get_instance_files(instance_id, &state.pool).await?
@@ -1296,7 +1296,7 @@ struct SharedInstanceModInstall<'a> {
 async fn install_shared_instance_downloads(
     job_id: Uuid,
     job_state: &mut InstallJobState,
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     mods: Vec<SharedInstanceModInstall<'_>>,
     files: Vec<&SharedInstanceExternalFileData>,
@@ -1418,7 +1418,7 @@ async fn install_shared_instance_mod(
     instance_id: &str,
     install: SharedInstanceModInstall<'_>,
     size: u64,
-    state: &State,
+    state: &Engine,
     downloaded: &DownloadedBytes,
 ) -> crate::Result<()> {
     let counted = AtomicU64::new(0);
@@ -1477,7 +1477,7 @@ async fn report_shared_instance_installs(
     installs: impl futures::Stream<Item = crate::Result<()>>,
     job_id: Uuid,
     job_state: &mut InstallJobState,
-    state: &State,
+    state: &Engine,
     completed: &mut u64,
     total: u64,
     bytes: &DownloadedBytes,
@@ -1534,7 +1534,7 @@ async fn report_shared_instance_installs(
 async fn install_shared_instance_external_file(
     instance_id: &str,
     file: &SharedInstanceExternalFileData,
-    state: &State,
+    state: &Engine,
     downloaded: &DownloadedBytes,
 ) -> crate::Result<()> {
     validate_shared_instance_external_file_name(&file.file_name)?;
@@ -1674,7 +1674,7 @@ async fn download_shared_instance_external_file(
 async fn install_shared_instance_file(
     writer: &crate::api::instance::InstanceFileWriter,
     file: &SharedInstanceExternalFileData,
-    state: &State,
+    state: &Engine,
     downloaded: &DownloadedBytes,
 ) -> crate::Result<()> {
     if !CONFIG_SYNC_ENABLED {
@@ -1757,7 +1757,7 @@ async fn install_shared_instance_file(
 /// can be skipped. Without a hash from the server it is treated as changed.
 pub(crate) async fn instance_has_shared_file(
     writer: &crate::api::instance::InstanceFileWriter,
-    state: &State,
+    state: &Engine,
     file_name: &str,
     file_size: u64,
     sha1: Option<&str>,

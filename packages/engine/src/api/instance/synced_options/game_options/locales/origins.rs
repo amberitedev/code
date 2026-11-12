@@ -1,7 +1,7 @@
 use super::sources::{self, ArchiveSource, Snapshot};
 use super::{Observation, Origin, is_plain_label, mod_translation_key};
 use crate::ErrorKind;
-use crate::state::State;
+use crate::state::Engine;
 use crate::util::io;
 use anyhow::bail;
 use std::collections::{BTreeMap, HashMap};
@@ -23,7 +23,7 @@ pub(super) struct OriginResolver {
 impl OriginResolver {
     pub(super) async fn index_snapshot(
         &mut self,
-        state: &State,
+        state: &Engine,
         id: &str,
         snapshot: Snapshot,
     ) -> crate::Result<()> {
@@ -69,7 +69,7 @@ impl OriginResolver {
 
     pub(super) async fn resolve(
         &mut self,
-        state: &State,
+        state: &Engine,
         observation: &Observation,
     ) -> crate::Result<Option<Origin>> {
         let Some(key) = mod_translation_key(&observation.raw_key) else {
@@ -99,7 +99,7 @@ impl OriginResolver {
 
 /// A complete key index also caches misses until the archive hash changes.
 async fn load_archive_keys(
-    state: &State,
+    state: &Engine,
     source: &ArchiveSource,
 ) -> crate::Result<ArchiveKeys> {
     if !super::archive::valid_hash(&source.hash) {

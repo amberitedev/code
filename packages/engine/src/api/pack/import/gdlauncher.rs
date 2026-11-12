@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    State,
+    Engine,
     install::{InstallPhaseDetails, InstallProgressReporter},
     prelude::ModLoader,
     state::{AppliedContentSetPatch, EditInstance, InstanceInstallStage},
@@ -41,7 +41,7 @@ pub async fn is_valid_gdlauncher(instance_folder: PathBuf) -> bool {
 }
 
 pub async fn import_gdlauncher(
-    state: &State,
+    state: &Engine,
     gdlauncher_instance_folder: PathBuf, // instance's folder
     instance_id: &str,
     reporter: InstallProgressReporter,

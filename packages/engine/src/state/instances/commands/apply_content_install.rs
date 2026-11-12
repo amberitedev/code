@@ -5,7 +5,7 @@ use crate::state::instances::{
 };
 use crate::state::{
     CacheBehaviour, CachedEntry, Dependency, DependencyType, DirectoryInfo,
-    ModLoader, ProjectType, ReleaseChannel, State, Version,
+    Engine, ModLoader, ProjectType, ReleaseChannel, Version,
 };
 use crate::util::fetch::{self, DownloadMeta, DownloadReason};
 use crate::util::io;
@@ -51,7 +51,7 @@ pub(crate) struct InstanceInstallProjectRequest {
 }
 
 struct CachedEntryContentProvider<'a> {
-    state: &'a State,
+    state: &'a Engine,
     cache_behaviour: Option<CacheBehaviour>,
 }
 
@@ -184,7 +184,7 @@ fn target_preferences(
 pub(crate) async fn resolve_install_plan(
     instance_id: &str,
     request: InstanceInstallProjectRequest,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<ResolveContentPlan> {
     let instance = instance_rows::get_instance_by_id(instance_id, &state.pool)
         .await?
@@ -231,7 +231,7 @@ pub(crate) async fn resolve_install_plan(
 pub(crate) async fn install_resolved_content_plan(
     instance_id: &str,
     plan: &ResolveContentPlan,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Vec<String>> {
     let mut paths = vec![
         add_resolved_content(
@@ -261,7 +261,7 @@ pub(crate) async fn switch_project_version_with_dependencies(
     instance_id: &str,
     project_path: &str,
     version_id: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<String> {
     let version = CachedEntry::get_version(
         version_id,
@@ -344,7 +344,7 @@ async fn add_resolved_content(
     instance_id: &str,
     content: &ResolvedContent,
     reason: DownloadReason,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<String> {
     add_project_from_version(
         instance_id,
@@ -387,7 +387,7 @@ pub(crate) async fn add_project_from_version(
     reason: DownloadReason,
     dependent_on_version_id: Option<String>,
     source_kind: ContentSourceKind,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<String> {
     let downloaded = download_project_version(
         instance_id,
@@ -407,7 +407,7 @@ pub(crate) async fn download_project_version(
     version_id: &str,
     reason: DownloadReason,
     dependent_on_version_id: Option<String>,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<DownloadedProjectVersion> {
     download_project_version_with_progress(
         instance_id,
@@ -425,7 +425,7 @@ pub(crate) async fn download_project_version_with_progress(
     version_id: &str,
     reason: DownloadReason,
     dependent_on_version_id: Option<String>,
-    state: &State,
+    state: &Engine,
     progress: Option<&mut fetch::FetchProgressFn<'_>>,
 ) -> crate::Result<DownloadedProjectVersion> {
     let scope = resolve_content_scope(instance_id, None, &state.pool).await?;
@@ -493,7 +493,7 @@ pub(crate) async fn add_downloaded_project_version(
     instance_id: &str,
     downloaded: DownloadedProjectVersion,
     source_kind: ContentSourceKind,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<String> {
     add_downloaded_project_version_with_enabled(
         instance_id,
@@ -512,7 +512,7 @@ pub(crate) async fn add_downloaded_project_version_with_enabled(
     source_kind: ContentSourceKind,
     enabled: Option<bool>,
     replace_path: Option<&str>,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<String> {
     if !path_util::is_safe_file_name(&downloaded.file_name) {
         bail!(ErrorKind::InputError(
@@ -547,7 +547,7 @@ pub(crate) async fn add_project_from_path(
     instance_id: &str,
     path: &Path,
     project_type: Option<ProjectType>,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<String> {
     let file_name = path.file_name().and_then(|name| name.to_str()).ok_or(
         ErrorKind::InputError("invalid project filename".to_string()),
@@ -594,7 +594,7 @@ pub(crate) async fn add_project_bytes(
     source_kind: ContentSourceKind,
     project_id: Option<&str>,
     version_id: Option<&str>,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<String> {
     if !path_util::is_safe_file_name(file_name) {
         bail!(ErrorKind::InputError(
@@ -649,7 +649,7 @@ pub(crate) async fn add_project_bytes(
 pub(crate) async fn content_source_kind_for_project_path(
     instance_id: &str,
     project_path: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Option<ContentSourceKind>> {
     let scope = resolve_content_scope(instance_id, None, &state.pool).await?;
     let Some(file) = content_rows::get_instance_file_by_relative_path(
@@ -674,7 +674,7 @@ pub(crate) async fn content_source_kind_for_project_path(
 pub(crate) async fn is_project_locked(
     instance_id: &str,
     project_path: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<bool> {
     let scope = resolve_content_scope(instance_id, None, &state.pool).await?;
     content_rows::is_instance_file_locked(
@@ -689,7 +689,7 @@ pub(crate) async fn set_project_locked(
     instance_id: &str,
     project_path: &str,
     locked: bool,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let _content_lock = state.instance_locks.lock_content(instance_id).await;
     let scope = resolve_content_scope(instance_id, None, &state.pool).await?;
@@ -706,7 +706,7 @@ pub(crate) async fn rename_project_companion_file(
     instance_id: &str,
     old_project_path: &str,
     new_project_path: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let project_type = ProjectType::get_from_parent_folder(new_project_path);
     if project_type == Some(ProjectType::ShaderPack) {
@@ -741,7 +741,7 @@ pub(crate) async fn rename_project_companion_file(
 
 pub(crate) async fn list_project_files(
     instance_id: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Vec<InstalledContentFile>> {
     let scope = resolve_content_scope(instance_id, None, &state.pool).await?;
     let entries =

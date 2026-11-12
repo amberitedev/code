@@ -1,6 +1,6 @@
 use crate::state::{InstanceInstallStage, InstanceMetadata, SyncedOption};
 use crate::util::io;
-use crate::{ErrorKind, State};
+use crate::{Engine, ErrorKind};
 use quartz_nbt::NbtCompound;
 use sha1_smol::Sha1;
 use std::io::Cursor;
@@ -56,7 +56,7 @@ pub(in crate::api::instance) fn safe_instance_id(instance_id: &str) -> String {
 
 pub(in crate::api::instance) fn instance_dir(
     metadata: &InstanceMetadata,
-    state: &State,
+    state: &Engine,
 ) -> PathBuf {
     state
         .directories
@@ -76,7 +76,7 @@ pub(in crate::api::instance) fn sync_files_are_protected(
 
 pub(in crate::api::instance) async fn instance_is_running(
     metadata: &InstanceMetadata,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<bool> {
     crate::state::instance_has_running_process(&metadata.instance.id, state)
         .await
@@ -178,7 +178,7 @@ pub(in crate::api::instance) async fn begin_checkpoint(
     expected_sha1: &str,
     merge_base: Option<&[u8]>,
     source_revision: i64,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let option_name = option.as_str();
     sqlx::query!(
@@ -211,7 +211,7 @@ pub(in crate::api::instance) async fn finish_checkpoint(
     option: SyncedOption,
     variant: &str,
     mode: LinkMode,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let option_name = option.as_str();
     let link_mode = mode.as_str();
@@ -235,7 +235,7 @@ pub(in crate::api::instance) async fn finish_plain_checkpoint(
     instance_id: &str,
     option: SyncedOption,
     variant: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let option_name = option.as_str();
     sqlx::query!(
@@ -257,7 +257,7 @@ pub(in crate::api::instance) async fn checkpoint(
     instance_id: &str,
     option: SyncedOption,
     variant: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Option<SyncCheckpoint>> {
     let option_name = option.as_str();
     let row = sqlx::query!(

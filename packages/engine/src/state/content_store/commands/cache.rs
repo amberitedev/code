@@ -3,7 +3,7 @@ use crate::state::content_store::adapters::sqlite as catalog;
 use crate::state::content_store::{
     ContentStore, FileStorageKind, StoreUsage, StoredFileStatus,
 };
-use crate::{ErrorKind, State};
+use crate::{Engine, ErrorKind};
 use anyhow::{Context, bail};
 use std::collections::{HashMap, HashSet};
 
@@ -49,7 +49,7 @@ impl ContentStore {
         tx.commit().await?;
         Ok(())
     }
-    pub async fn usage(&self, state: &State) -> crate::Result<StoreUsage> {
+    pub async fn usage(&self, state: &Engine) -> crate::Result<StoreUsage> {
         let _lease = self.lease().await;
         let _runtime_lease = self.runtime_cache_lock.read().await;
         let runtime =
@@ -159,7 +159,7 @@ impl ContentStore {
 
     pub async fn cleanup(
         &self,
-        state: &State,
+        state: &Engine,
         purge_unused: bool,
     ) -> crate::Result<u64> {
         let _exclusive = self.cleanup_lock.try_write().map_err(|_| ErrorKind::ContentStoreError("the shared store is busy; try cleanup again after content operations finish".into()))?;

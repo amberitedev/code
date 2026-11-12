@@ -9,7 +9,7 @@ use super::*;
 
 #[tracing::instrument(skip(state))]
 pub async fn get_shared_instance_users(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
 ) -> crate::Result<SharedInstanceUsers> {
     let Some(attachment) = shared_attachment(instance_id, state).await? else {
@@ -21,7 +21,7 @@ pub async fn get_shared_instance_users(
 
 #[tracing::instrument(skip(state))]
 pub async fn invite_shared_instance_users(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     user_ids: Vec<String>,
 ) -> crate::Result<SharedInstanceUsers> {
@@ -56,7 +56,7 @@ pub async fn invite_shared_instance_users(
 
 #[tracing::instrument(skip(state, replace_invite_id))]
 pub async fn create_shared_instance_invite_link(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     max_age_seconds: Option<i32>,
     max_uses: Option<i32>,
@@ -126,7 +126,7 @@ pub async fn create_shared_instance_invite_link(
 
 #[tracing::instrument(skip(state))]
 pub async fn get_shared_instance_invites(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
 ) -> crate::Result<Vec<SharedInstanceInvite>> {
     let Some(attachment) = shared_attachment(instance_id, state).await? else {
@@ -148,7 +148,7 @@ pub async fn get_shared_instance_invites(
 
 #[tracing::instrument(skip(state, invite_id))]
 pub async fn revoke_shared_instance_invite(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     invite_id: String,
 ) -> crate::Result<()> {
@@ -165,7 +165,7 @@ pub async fn revoke_shared_instance_invite(
 
 #[tracing::instrument(skip(state))]
 pub async fn remove_shared_instance_users(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     user_ids: Vec<String>,
     has_pending_recipients: bool,
@@ -206,7 +206,7 @@ pub async fn remove_shared_instance_users(
 
 #[tracing::instrument(skip(state))]
 pub async fn accept_pending_shared_instance_invite(
-    state: &State,
+    state: &Engine,
     shared_instance_id: &str,
 ) -> crate::Result<()> {
     // Read access doesn't imply membership: staff and server members can read
@@ -235,7 +235,7 @@ pub async fn accept_pending_shared_instance_invite(
 
 #[tracing::instrument(skip(state))]
 pub async fn decline_pending_shared_instance_invite(
-    state: &State,
+    state: &Engine,
     shared_instance_id: &str,
 ) -> crate::Result<()> {
     decline_pending_remote_invite(shared_instance_id, state).await

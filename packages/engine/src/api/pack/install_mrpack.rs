@@ -1,4 +1,4 @@
-use crate::State;
+use crate::Engine;
 use crate::api::instance::CONFIG_FILE_EXTENSIONS;
 use crate::api::instance::GameOptionsPackSource;
 use crate::api::instance::synced_servers::MODPACK_SERVER_PATHS;
@@ -282,7 +282,7 @@ fn hash_zip_entry(
 }
 
 pub(crate) async fn get_external_files_from_mrpack(
-    state: &State,
+    state: &Engine,
     file: &CreatePackFile,
     mut progress: impl FnMut(u64, u64) -> crate::Result<()> + Send,
 ) -> crate::Result<Vec<String>> {
@@ -497,7 +497,7 @@ fn extract_zip_entry(
 }
 
 pub(crate) fn install_zipped_mrpack_files_with_reporter(
-    state: &State,
+    state: &Engine,
     create_pack: CreatePack,
     ignore_lock: bool,
     reason: DownloadReason,
@@ -517,7 +517,7 @@ pub(crate) fn install_zipped_mrpack_files_with_reporter(
 }
 
 async fn install_zipped_mrpack_files_with_reporter_inner(
-    state: &State,
+    state: &Engine,
     create_pack: CreatePack,
     ignore_lock: bool,
     reason: DownloadReason,
@@ -1365,7 +1365,7 @@ pub(crate) async fn mrpack_instance_paths(
 #[tracing::instrument(skip(state, mrpack_file))]
 
 pub async fn remove_all_related_files(
-    state: &State,
+    state: &Engine,
     instance_id: String,
     mrpack_file: CreatePackFile,
 ) -> crate::Result<()> {

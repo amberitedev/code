@@ -1,8 +1,8 @@
-use crate::state::{JavaVersion, State};
+use crate::state::{Engine, JavaVersion};
 use anyhow::Context;
 
 pub async fn get_optimal_jre_key(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
 ) -> crate::Result<Option<JavaVersion>> {
     let context =

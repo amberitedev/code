@@ -14,7 +14,7 @@ use io::IOError;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    State,
+    Engine,
     install::{
         InstallPhaseDetails, InstallPhaseId, InstallProgress,
         InstallProgressReporter,
@@ -122,7 +122,7 @@ pub async fn get_importable_instances(
 }
 
 pub(crate) fn import_instance_with_reporter<'a>(
-    state: &'a crate::State,
+    state: &'a crate::Engine,
     instance_id: &'a str,
     launcher_type: ImportLauncherType,
     base_path: PathBuf,
@@ -140,7 +140,7 @@ pub(crate) fn import_instance_with_reporter<'a>(
 }
 
 async fn import_instance_inner(
-    state: &crate::State,
+    state: &crate::Engine,
     instance_id: &str,
     launcher_type: ImportLauncherType,
     base_path: PathBuf,
@@ -355,7 +355,7 @@ pub async fn is_valid_importable_instance(
 
 #[tracing::instrument(skip(state))]
 pub async fn recache_icon(
-    state: &crate::State,
+    state: &crate::Engine,
     icon_path: PathBuf,
 ) -> crate::Result<Option<PathBuf>> {
     if tokio::fs::try_exists(&icon_path).await.unwrap_or(false) {
@@ -370,7 +370,7 @@ pub async fn recache_icon(
 }
 
 pub(crate) fn copy_dotminecraft_with_reporter<'a>(
-    state: &'a crate::State,
+    state: &'a crate::Engine,
     instance_id: &'a str,
     dotminecraft: PathBuf,
     io_semaphore: &'a IoSemaphore,
@@ -388,7 +388,7 @@ pub(crate) fn copy_dotminecraft_with_reporter<'a>(
 }
 
 async fn copy_dotminecraft_with_reporter_inner(
-    state: &crate::State,
+    state: &crate::Engine,
     instance_id: &str,
     dotminecraft: PathBuf,
     io_semaphore: &IoSemaphore,
@@ -603,7 +603,7 @@ async fn copy_dotminecraft_with_reporter_inner(
 pub(crate) async fn finish_import(
     instance_id: &str,
     dotminecraft: PathBuf,
-    state: &State,
+    state: &Engine,
     reporter: InstallProgressReporter,
     details: InstallPhaseDetails,
 ) -> crate::Result<()> {

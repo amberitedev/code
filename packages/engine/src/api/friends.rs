@@ -2,7 +2,7 @@ use crate::state::{FriendsSocket, UserFriend};
 use ariadne::users::UserStatus;
 
 #[tracing::instrument(skip(state))]
-pub async fn friends(state: &crate::State) -> crate::Result<Vec<UserFriend>> {
+pub async fn friends(state: &crate::Engine) -> crate::Result<Vec<UserFriend>> {
     let friends =
         FriendsSocket::friends(&state.api_semaphore, &state.sessions).await?;
 
@@ -10,7 +10,7 @@ pub async fn friends(state: &crate::State) -> crate::Result<Vec<UserFriend>> {
 }
 
 pub async fn friend_statuses(
-    state: &crate::State,
+    state: &crate::Engine,
 ) -> crate::Result<Vec<UserStatus>> {
     let statuses = state.presence.friends_socket.friend_statuses();
 
@@ -19,7 +19,7 @@ pub async fn friend_statuses(
 
 #[tracing::instrument(skip(state))]
 pub async fn add_friend(
-    state: &crate::State,
+    state: &crate::Engine,
     user_id: &str,
 ) -> crate::Result<()> {
     FriendsSocket::add_friend(user_id, &state.api_semaphore, &state.sessions)
@@ -30,7 +30,7 @@ pub async fn add_friend(
 
 #[tracing::instrument(skip(state))]
 pub async fn remove_friend(
-    state: &crate::State,
+    state: &crate::Engine,
     user_id: &str,
 ) -> crate::Result<()> {
     FriendsSocket::remove_friend(

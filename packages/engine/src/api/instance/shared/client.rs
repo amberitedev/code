@@ -181,7 +181,7 @@ pub(super) fn unavailable_reason(
 
 /// Runs one call while holding the API semaphore.
 async fn call<T>(
-    state: &State,
+    state: &Engine,
     request: impl Future<Output = Result<T, BackendError>>,
 ) -> crate::Result<T> {
     let _permit = state.api_semaphore.0.acquire().await?;
@@ -191,7 +191,7 @@ async fn call<T>(
 /// Runs one call on a share, telling an unavailable share apart. A revoked token without a
 /// session means the account signed out.
 async fn call_share<T>(
-    state: &State,
+    state: &Engine,
     request: impl Future<Output = Result<T, BackendError>>,
 ) -> crate::Result<SharedInstanceRemoteResponse<T>> {
     let _permit = state.api_semaphore.0.acquire().await?;
@@ -213,7 +213,7 @@ async fn call_share<T>(
 
 pub(super) async fn create_remote_instance(
     name: String,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<String> {
     let backend = share_backend(&state.sessions)?;
     call(state, backend.create_share(&name)).await
@@ -221,7 +221,7 @@ pub(super) async fn create_remote_instance(
 
 pub(super) async fn delete_remote_instance(
     shared_instance_id: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let backend = share_backend(&state.sessions)?;
     call(state, backend.delete_share(shared_instance_id)).await
@@ -230,7 +230,7 @@ pub(super) async fn delete_remote_instance(
 pub(super) async fn update_remote_instance(
     shared_instance_id: &str,
     name: String,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let backend = share_backend(&state.sessions)?;
     let _permit = state.api_semaphore.0.acquire().await?;
@@ -250,7 +250,7 @@ pub(super) async fn update_remote_instance(
 
 pub(super) async fn get_remote_instance_access(
     shared_instance_id: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<SharedInstanceRemoteResponse<RemoteInstanceResponse>> {
     let backend = share_backend(&state.sessions)?;
     Ok(
@@ -276,7 +276,7 @@ pub(super) async fn update_remote_instance_icon(
     shared_instance_id: &str,
     icon_path: Option<&str>,
     icon_config: Option<&IconConfig>,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     // An icon editor icon goes up as its settings alone; members draw it themselves.
     let icon = match (icon_config, icon_path) {
@@ -295,7 +295,7 @@ pub(super) async fn update_remote_instance_icon(
 
 pub(super) async fn get_remote_users(
     shared_instance_id: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<SharedInstanceUsers> {
     let backend = share_backend(&state.sessions)?;
     let users = call(
@@ -311,7 +311,7 @@ pub(super) async fn get_remote_users(
 pub(super) async fn get_remote_server_icon(
     instance_id: &str,
     etag: Option<&str>,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Option<reqwest::Response>> {
     let backend = share_backend(&state.sessions)?
         .with_timeout(std::time::Duration::from_secs(15));
@@ -320,7 +320,7 @@ pub(super) async fn get_remote_server_icon(
 
 pub(super) async fn get_latest_remote_version(
     shared_instance_id: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<ShareVersion> {
     match get_latest_remote_version_optional_unavailable(
         shared_instance_id,
@@ -337,7 +337,7 @@ pub(super) async fn get_latest_remote_version(
 
 pub(super) async fn get_latest_remote_version_optional_unavailable(
     shared_instance_id: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<SharedInstanceRemoteResponse<ShareVersion>> {
     let backend = share_backend(&state.sessions)?;
     call_share(state, backend.version(shared_instance_id, None)).await
@@ -346,7 +346,7 @@ pub(super) async fn get_latest_remote_version_optional_unavailable(
 pub(super) async fn add_remote_users(
     shared_instance_id: &str,
     user_ids: Vec<String>,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let backend = share_backend(&state.sessions)?;
     let failed =
@@ -363,7 +363,7 @@ pub(super) async fn add_remote_users(
 pub(super) async fn remove_remote_users(
     shared_instance_id: &str,
     user_ids: Vec<String>,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let backend = share_backend(&state.sessions)?;
     call(state, backend.remove_users(shared_instance_id, &user_ids)).await
@@ -371,7 +371,7 @@ pub(super) async fn remove_remote_users(
 
 pub(super) async fn accept_pending_remote_invite(
     shared_instance_id: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<bool> {
     let backend = share_backend(&state.sessions)?;
     call(state, backend.accept_pending_invite(shared_instance_id)).await
@@ -380,7 +380,7 @@ pub(super) async fn accept_pending_remote_invite(
 pub(super) async fn accept_shared_instance_invite(
     shared_instance_id: &str,
     invite_id: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let backend = share_backend(&state.sessions)?;
     call(state, backend.accept_invite(shared_instance_id, invite_id)).await
@@ -390,7 +390,7 @@ pub(super) async fn create_remote_invite(
     shared_instance_id: &str,
     max_age_seconds: i32,
     max_uses: i32,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<String> {
     let backend = share_backend(&state.sessions)?;
     call(
@@ -403,7 +403,7 @@ pub(super) async fn create_remote_invite(
 pub(super) async fn delete_remote_invite(
     shared_instance_id: &str,
     invite_id: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let backend = share_backend(&state.sessions)?;
     call(state, backend.delete_invite(shared_instance_id, invite_id)).await
@@ -411,7 +411,7 @@ pub(super) async fn delete_remote_invite(
 
 pub(super) async fn get_remote_invites(
     shared_instance_id: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Vec<InstanceInviteResponse>> {
     let backend = share_backend(&state.sessions)?;
     call(state, backend.invites(shared_instance_id)).await
@@ -420,7 +420,7 @@ pub(super) async fn get_remote_invites(
 /// An invite's preview, which anyone may read, signed in or not.
 pub(super) async fn get_shared_instance_invite_info(
     invite_id: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<InstanceInviteInfoResponse> {
     let base_url = state
         .sessions
@@ -439,14 +439,14 @@ pub(super) async fn get_shared_instance_invite_info(
 
 pub(super) async fn decline_pending_remote_invite(
     shared_instance_id: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let backend = share_backend(&state.sessions)?;
     call(state, backend.decline_pending_invite(shared_instance_id)).await
 }
 
 pub(super) async fn active_amberite_session_is_configured(
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<bool> {
     Ok(state.sessions.backend().is_some())
 }

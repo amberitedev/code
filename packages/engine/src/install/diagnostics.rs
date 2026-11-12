@@ -4,7 +4,7 @@ use super::model::{
     InstallPhaseDetails, InstallPhaseId, InstallProgress,
 };
 use super::store;
-use crate::state::{DirectoryInfo, ModrinthCredentials, Sessions, State};
+use crate::state::{DirectoryInfo, Engine, ModrinthCredentials, Sessions};
 use crate::util::io::format_bytes;
 use regex::{Captures, Regex};
 use sqlx::{Row, SqlitePool};
@@ -48,7 +48,7 @@ pub(super) fn install_step<
 
 pub async fn build_job_support_details(
     job: &store::InstallJobRecord,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<String> {
     let snapshot = job.snapshot(&state.installs);
     let mut details = String::new();

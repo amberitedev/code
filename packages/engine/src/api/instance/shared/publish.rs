@@ -10,7 +10,7 @@ use sharing_client::push;
 
 #[tracing::instrument(skip(state))]
 pub async fn unpublish_shared_instance(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
 ) -> crate::Result<()> {
     let _shared_instance_lock =
@@ -34,7 +34,7 @@ pub async fn unpublish_shared_instance(
 
 #[tracing::instrument(skip(state))]
 pub async fn unpublish_remote_shared_instance(
-    state: &State,
+    state: &Engine,
     shared_instance_id: &str,
 ) -> crate::Result<()> {
     delete_remote_instance(shared_instance_id, state).await
@@ -42,7 +42,7 @@ pub async fn unpublish_remote_shared_instance(
 
 #[tracing::instrument(skip(state))]
 pub async fn leave_remote_shared_instance(
-    state: &State,
+    state: &Engine,
     shared_instance_id: &str,
 ) -> crate::Result<()> {
     let Some(user_id) = linked_amberite_user_id(state).await? else {
@@ -56,7 +56,7 @@ pub async fn leave_remote_shared_instance(
 
 #[tracing::instrument(skip(state))]
 pub async fn unlink_shared_instance(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
 ) -> crate::Result<()> {
     let _shared_instance_lock =
@@ -79,7 +79,7 @@ pub async fn unlink_shared_instance(
 pub(super) async fn detach_local_shared_instance(
     instance_id: &str,
     link: InstanceLink,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let link_patch = match link {
         InstanceLink::SharedInstance {
@@ -127,7 +127,7 @@ pub(super) async fn detach_local_shared_instance(
 /// home copy there.
 #[tracing::instrument(skip(state, on_progress))]
 pub async fn publish_shared_instance(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     file_paths: Vec<String>,
     removed_paths: Vec<String>,
@@ -156,7 +156,7 @@ pub async fn publish_shared_instance(
 
 #[tracing::instrument(skip(state))]
 pub async fn get_shared_instance_publish_preview(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
 ) -> crate::Result<Option<SharedInstancePublishPreview>> {
     let metadata = crate::state::get_instance(instance_id, &state.pool)
@@ -218,7 +218,7 @@ pub async fn get_shared_instance_publish_preview(
 
 pub(super) async fn shared_instance_install_modpack(
     version: &ShareVersion,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Option<crate::install::SharedInstanceInstallModpack>> {
     let Some(modpack_id) = version.modpack_id() else {
         return Ok(None);
@@ -265,7 +265,7 @@ pub(super) fn shared_instance_loader_version(
 pub(super) async fn current_shared_content(
     metadata: &crate::state::InstanceMetadata,
     include_local_content: bool,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<(Vec<String>, BTreeMap<ExternalFileKey, Option<String>>)> {
     let entries = crate::state::instances::adapters::sqlite::content_rows::get_content_entries(
 		&metadata.applied_content_set.id, &state.pool,
@@ -350,7 +350,7 @@ pub(super) struct CurrentPublishSnapshot {
 /// IDs that other members can resolve; retain installed files as uploads.
 pub(super) async fn collect_publish_snapshot(
     metadata: &crate::state::InstanceMetadata,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<CurrentPublishSnapshot> {
     let instance_path = state
         .directories
@@ -539,7 +539,7 @@ pub(super) async fn collect_publish_snapshot(
 
 pub(super) async fn shared_project_names(
     project_ids: &HashSet<String>,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<HashMap<String, String>> {
     let project_id_refs =
         project_ids.iter().map(String::as_str).collect::<Vec<_>>();
@@ -582,7 +582,7 @@ pub(super) async fn set_shared_instance_publish_status(
     attachment: &SharedInstanceAttachment,
     latest_version: i32,
     has_changes: bool,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let (status, applied_version) = if has_changes {
         (ContentSetSyncStatus::Stale, attachment.applied_version)
@@ -606,7 +606,7 @@ pub(super) async fn publish_shared_instance_inner(
     removed_paths: &[String],
     server_core: Option<&str>,
     on_progress: &(dyn Fn(u64, u64) + Send + Sync),
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let mut report = PublishReport::new(instance_id, file_paths);
     let result = publish_shared_instance_reported(
@@ -630,7 +630,7 @@ async fn publish_shared_instance_reported(
     server_core: Option<&str>,
     on_progress: &(dyn Fn(u64, u64) + Send + Sync),
     report: &mut PublishReport,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let publishing_account = linked_amberite_user_id(state).await?;
     let attachment = shared_attachment(instance_id, state).await?.ok_or(
@@ -753,7 +753,7 @@ pub(super) async fn publish_current_content(
     server_core: Option<&str>,
     on_progress: &(dyn Fn(u64, u64) + Send + Sync),
     report: &mut PublishReport,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<i32> {
     let _store_lease = state.content_store.lease().await;
     let metadata = crate::state::get_instance(instance_id, &state.pool)
@@ -1019,7 +1019,7 @@ async fn shared_file_candidates(
     instance_path: &str,
     local_files: &[SharedInstancePublishFile],
     selected_paths: &[String],
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Vec<ExternalFileCandidate>> {
     let local_files = local_files
         .iter()
@@ -1087,7 +1087,7 @@ pub(super) fn ensure_shareable_link(link: &InstanceLink) -> crate::Result<()> {
 async fn external_file_sources(
     instance_path: &str,
     candidates: &[ExternalFileCandidate],
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Vec<crate::state::content_store::ReadableContent>> {
     let sources = candidates
         .iter()
@@ -1102,7 +1102,7 @@ async fn external_file_sources(
 async fn external_file_source(
     instance_path: &str,
     candidate: &ExternalFileCandidate,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<crate::state::content_store::ReadableContent> {
     Ok(match &candidate.source {
         ExternalFileSource::InstanceFile(file_path) => {
@@ -1120,7 +1120,7 @@ async fn external_file_source(
 
 pub(super) async fn shared_attachment(
     instance_id: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Option<SharedInstanceAttachment>> {
     Ok(crate::state::get_instance(instance_id, &state.pool)
         .await?
@@ -1131,7 +1131,7 @@ pub(crate) async fn sync_shared_instance_icon(
     instance_id: &str,
     icon_path: Option<&str>,
     icon_config: Option<&IconConfig>,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let Some(attachment) = shared_attachment(instance_id, state).await? else {
         return Ok(());
@@ -1147,7 +1147,7 @@ pub(crate) async fn sync_shared_instance_icon(
 pub(super) async fn shared_instance_for_invites(
     instance_id: &str,
     user_count: usize,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<(crate::state::InstanceMetadata, SharedInstanceAttachment)> {
     tracing::debug!(instance_id, user_count, "Sharing instance for invite");
     let (metadata, attachment) =
@@ -1169,7 +1169,7 @@ pub(super) async fn shared_instance_for_invites(
 /// first invite, or before the instance's first server.
 pub(super) async fn owned_shared_instance(
     instance_id: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<(crate::state::InstanceMetadata, SharedInstanceAttachment)> {
     let metadata = crate::state::get_instance(instance_id, &state.pool)
         .await?
@@ -1245,7 +1245,7 @@ async fn ensure_owner_up_to_date(
     instance_id: &str,
     attachment: &SharedInstanceAttachment,
     latest_version: i32,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     if attachment
         .applied_version

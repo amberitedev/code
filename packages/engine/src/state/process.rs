@@ -1,5 +1,5 @@
+use crate::Engine;
 use crate::ErrorKind;
-use crate::State;
 use crate::event::emit::{emit_instance, emit_process};
 use crate::event::{EventSink, InstancePayloadType, ProcessPayloadType};
 use crate::event::{LogEvent, LogPayload};
@@ -116,7 +116,7 @@ pub(crate) async fn running_process_start_times(
 
 pub(crate) async fn instance_has_running_process(
     instance_id: &str,
-    state: &crate::State,
+    state: &crate::Engine,
 ) -> crate::Result<bool> {
     if state
         .process_manager
@@ -206,7 +206,7 @@ impl ProcessManager {
         xml_logging: bool,
         main_class_keep_alive: TempDir,
         rpc_server: RpcServer,
-        state: &Arc<State>,
+        state: &Arc<Engine>,
         post_process_init: impl AsyncFnOnce(
             &ProcessMetadata,
             &RpcServer,
@@ -928,7 +928,7 @@ impl Process {
         post_exit_env_vars: Vec<(String, String)>,
         uuid: Uuid,
         persisted_process: Option<(i64, i64)>,
-        state: Arc<State>,
+        state: Arc<Engine>,
     ) -> crate::Result<()> {
         async fn update_playtime(
             last_updated_playtime: &mut Instant,

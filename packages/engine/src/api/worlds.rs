@@ -12,7 +12,7 @@ pub use crate::util::server_ping::{
     ServerGameProfile, ServerPlayers, ServerStatus, ServerVersion,
 };
 use crate::util::{io, server_ping};
-use crate::{ErrorKind, Result, State, launcher};
+use crate::{Engine, ErrorKind, Result, launcher};
 use anyhow::Context;
 use async_minecraft_ping::ServerDescription;
 
@@ -193,7 +193,7 @@ impl From<ServerPackStatus> for Option<bool> {
 }
 
 pub async fn get_recent_worlds(
-    state: &State,
+    state: &Engine,
     limit: usize,
     display_statuses: EnumSet<DisplayStatus>,
 ) -> Result<Vec<WorldWithInstance>> {
@@ -254,7 +254,7 @@ pub async fn get_recent_worlds(
 }
 
 pub async fn get_instance_worlds(
-    state: &crate::State,
+    state: &crate::Engine,
     instance_id: &str,
 ) -> Result<Vec<World>> {
     get_all_worlds_in_instance(
@@ -265,7 +265,7 @@ pub async fn get_instance_worlds(
     .await
 }
 
-async fn resolve_instance_id(instance: &str, state: &State) -> Result<String> {
+async fn resolve_instance_id(instance: &str, state: &Engine) -> Result<String> {
     resolve_instance_identity(instance, state)
         .await
         .map(|(instance_id, _)| instance_id)
@@ -273,7 +273,7 @@ async fn resolve_instance_id(instance: &str, state: &State) -> Result<String> {
 
 async fn resolve_instance_identity(
     instance: &str,
-    state: &State,
+    state: &Engine,
 ) -> Result<(String, String)> {
     let row = sqlx::query!(
         "
@@ -298,7 +298,7 @@ async fn resolve_instance_identity(
 
 #[tracing::instrument(name = "worlds_instance", skip_all, fields(instance_id))]
 async fn get_all_worlds_in_instance(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     instance_dir: &Path,
 ) -> Result<Vec<World>> {
@@ -362,7 +362,7 @@ async fn get_singleplayer_worlds_in_instance(
 }
 
 pub async fn get_singleplayer_world(
-    state: &State,
+    state: &Engine,
     instance: &str,
     world: &str,
 ) -> Result<World> {
@@ -466,7 +466,7 @@ fn read_hardcore(data: &NbtCompound) -> bool {
 }
 
 async fn get_server_worlds_in_instance(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     _instance_dir: &Path,
     worlds: &mut Vec<World>,
@@ -538,7 +538,7 @@ fn attach_world_data_to_world(world: &mut World, data: &AttachedWorldData) {
 }
 
 pub async fn set_world_display_status(
-    state: &State,
+    state: &Engine,
     instance: &str,
     world_type: WorldType,
     world_id: &str,
@@ -827,7 +827,7 @@ async fn try_get_world_session_lock(
 }
 
 pub async fn add_server_to_instance(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     name: String,
     address: String,
@@ -885,7 +885,7 @@ pub async fn add_server_to_instance(
 }
 
 pub async fn ensure_managed_server_in_instance(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     name: String,
     address: String,
@@ -904,7 +904,7 @@ pub async fn ensure_managed_server_in_instance(
 }
 
 pub async fn edit_server_in_instance(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     index: usize,
     name: String,
@@ -928,7 +928,7 @@ pub async fn edit_server_in_instance(
 }
 
 pub async fn remove_server_from_instance(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     index: usize,
 ) -> Result<()> {
@@ -944,7 +944,7 @@ pub async fn remove_server_from_instance(
 }
 
 pub async fn get_instance_protocol_version(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
 ) -> Result<Option<ProtocolVersion>> {
     let metadata = crate::api::instance::get(state, instance_id).await?.ok_or(

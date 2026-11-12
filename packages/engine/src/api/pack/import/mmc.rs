@@ -4,7 +4,7 @@ use anyhow::bail;
 use serde::{Deserialize, Serialize, de};
 
 use crate::{
-    ErrorKind, State,
+    Engine, ErrorKind,
     install::{InstallPhaseDetails, InstallProgressReporter},
     pack::{
         import::{self, finish_import},
@@ -178,7 +178,7 @@ async fn load_instance_cfg(file_path: &Path) -> crate::Result<MMCInstance> {
 
 // #[tracing::instrument]
 pub async fn import_mmc(
-    state: &crate::State,
+    state: &crate::Engine,
     mmc_base_path: PathBuf,  // path to base mmc folder
     instance_folder: String, // instance folder in mmc_base_path
     instance_id: &str,
@@ -268,7 +268,7 @@ pub async fn import_mmc(
 }
 
 async fn import_mmc_unmanaged(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     minecraft_folder: PathBuf,
     backup_name: String,

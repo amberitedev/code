@@ -63,7 +63,7 @@ use uuid::Uuid;
 
 pub use crate::state::MinecraftSkinVariant;
 use crate::{
-    ErrorKind, State,
+    Engine, ErrorKind,
     state::{
         MinecraftCharacterExpressionState, MinecraftProfile,
         minecraft_skins::{
@@ -264,7 +264,7 @@ pub enum UrlOrBlob {
 /// Gets the capes for the selected Minecraft profile.
 /// Only one cape can be equipped.
 #[tracing::instrument(skip(state))]
-pub async fn get_available_capes(state: &State) -> crate::Result<Vec<Cape>> {
+pub async fn get_available_capes(state: &Engine) -> crate::Result<Vec<Cape>> {
     let selected_credentials = Credentials::get_default_credential(&state.pool)
         .await?
         .ok_or(ErrorKind::NotLoggedIn)?;
@@ -302,7 +302,7 @@ pub async fn get_available_capes(state: &State) -> crate::Result<Vec<Cape>> {
 /// a different model variant or cape, the saved row is updated and returned as equipped.
 /// Exactly one returned skin is marked as equipped.
 #[tracing::instrument(skip(state))]
-pub async fn get_available_skins(state: &State) -> crate::Result<Vec<Skin>> {
+pub async fn get_available_skins(state: &Engine) -> crate::Result<Vec<Skin>> {
     let Some(selected_credentials) =
         Credentials::get_default_credential(&state.pool).await?
     else {
@@ -523,7 +523,7 @@ pub async fn get_available_skins(state: &State) -> crate::Result<Vec<Skin>> {
 /// Bundled default skins are only persisted when they have an associated cape.
 #[tracing::instrument(skip(state, texture_blob))]
 pub async fn add_and_equip_custom_skin(
-    state: &Arc<State>,
+    state: &Arc<Engine>,
     texture_blob: Bytes,
     variant: MinecraftSkinVariant,
     cape: Option<Cape>,
@@ -581,7 +581,7 @@ pub async fn add_and_equip_custom_skin(
 }
 
 async fn add_and_equip_custom_skin_now(
-    state: &State,
+    state: &Engine,
     selected_credentials: &Credentials,
     texture_blob: Bytes,
     variant: MinecraftSkinVariant,
@@ -689,7 +689,7 @@ async fn add_and_equip_custom_skin_now(
 ///
 /// This does not check whether a custom skin exists in the app database.
 #[tracing::instrument(skip(state))]
-pub async fn equip_skin(state: &Arc<State>, skin: Skin) -> crate::Result<()> {
+pub async fn equip_skin(state: &Arc<Engine>, skin: Skin) -> crate::Result<()> {
     let selected_credentials = Credentials::get_default_credential(&state.pool)
         .await?
         .ok_or(ErrorKind::NotLoggedIn)?;
@@ -707,7 +707,7 @@ pub async fn equip_skin(state: &Arc<State>, skin: Skin) -> crate::Result<()> {
 }
 
 async fn equip_skin_now(
-    state: &State,
+    state: &Engine,
     selected_credentials: &Credentials,
     skin: &Skin,
 ) -> crate::Result<()> {
@@ -761,7 +761,7 @@ async fn equip_skin_now(
 }
 
 async fn persist_equipped_skin(
-    state: &State,
+    state: &Engine,
     profile: &MinecraftProfile,
     skin: &Skin,
     texture_blob: &[u8],
@@ -835,7 +835,7 @@ async fn persist_equipped_skin(
 /// skin, letting the user choose another skin, etc.
 #[tracing::instrument(skip(state))]
 pub async fn remove_custom_skin(
-    state: &State,
+    state: &Engine,
     skin: Skin,
 ) -> crate::Result<()> {
     let selected_credentials = Credentials::get_default_credential(&state.pool)
@@ -863,7 +863,7 @@ pub async fn remove_custom_skin(
 /// Persists the custom saved skin order for the currently selected Minecraft profile.
 #[tracing::instrument(skip(state))]
 pub async fn set_custom_skin_order(
-    state: &State,
+    state: &Engine,
     texture_keys: Vec<String>,
 ) -> crate::Result<()> {
     let selected_credentials = Credentials::get_default_credential(&state.pool)
@@ -884,7 +884,7 @@ pub async fn set_custom_skin_order(
 /// queue a separate equip operation after saving the local row.
 #[tracing::instrument(skip(state, texture_blob))]
 pub async fn save_custom_skin(
-    state: &State,
+    state: &Engine,
     mut skin: Skin,
     texture_blob: Bytes,
     variant: MinecraftSkinVariant,
@@ -971,7 +971,7 @@ pub async fn save_custom_skin(
 /// Unequips the currently equipped skin for the currently selected Minecraft profile, resetting
 /// it to one of the default skins and unequipping any cape.
 #[tracing::instrument(skip(state))]
-pub async fn unequip_skin(state: &Arc<State>) -> crate::Result<()> {
+pub async fn unequip_skin(state: &Arc<Engine>) -> crate::Result<()> {
     let selected_credentials = Credentials::get_default_credential(&state.pool)
         .await?
         .ok_or(ErrorKind::NotLoggedIn)?;
@@ -988,7 +988,7 @@ pub async fn unequip_skin(state: &Arc<State>) -> crate::Result<()> {
 }
 
 async fn unequip_skin_now(
-    state: &State,
+    state: &Engine,
     selected_credentials: &Credentials,
 ) -> crate::Result<()> {
     let profile = selected_credentials.online_profile_fresh().await.ok_or(
@@ -1029,7 +1029,7 @@ pub async fn normalize_skin_texture(
 /// skin selection is still applied for those boundary cases.
 #[tracing::instrument(skip(state))]
 pub async fn flush_pending_skin_change(
-    state: &Arc<State>,
+    state: &Arc<Engine>,
 ) -> crate::Result<()> {
     flush_pending_skin_change_inner(state, None).await
 }
@@ -1037,7 +1037,7 @@ pub async fn flush_pending_skin_change(
 /// Sends any pending skin change for a specific Minecraft account immediately.
 #[tracing::instrument(skip(state))]
 pub async fn flush_pending_skin_change_for_profile(
-    state: &Arc<State>,
+    state: &Arc<Engine>,
     profile_id: Uuid,
 ) -> crate::Result<()> {
     flush_pending_skin_change_inner(
@@ -1048,7 +1048,7 @@ pub async fn flush_pending_skin_change_for_profile(
 }
 
 async fn set_pending_skin_change(
-    state: &Arc<State>,
+    state: &Arc<Engine>,
     change: PendingSkinChange,
 ) {
     let profile_id = change.profile_id();
@@ -1070,7 +1070,7 @@ async fn set_pending_skin_change(
 }
 
 fn schedule_pending_skin_change_flush(
-    state: &Arc<State>,
+    state: &Arc<Engine>,
     profile_id: Uuid,
     generation: u64,
 ) {
@@ -1147,7 +1147,7 @@ enum PendingSkinChangeFilter {
 }
 
 async fn flush_pending_skin_change_inner(
-    state: &Arc<State>,
+    state: &Arc<Engine>,
     filter: Option<PendingSkinChangeFilter>,
 ) -> crate::Result<()> {
     let _guard = SKIN_CHANGE_FLUSH_LOCK.lock().await;
@@ -1210,7 +1210,7 @@ async fn flush_pending_skin_change_inner(
 }
 
 async fn execute_pending_skin_change(
-    state: &State,
+    state: &Engine,
     change: &PendingSkinChange,
 ) -> crate::Result<()> {
     match change {
@@ -1277,7 +1277,7 @@ pub async fn get_dragged_skin_data(
 }
 
 async fn preserve_current_profile_skin(
-    state: &State,
+    state: &Engine,
     profile: &MinecraftProfile,
 ) -> crate::Result<()> {
     let current_skin = profile.current_skin()?;

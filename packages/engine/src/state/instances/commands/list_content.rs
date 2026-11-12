@@ -16,7 +16,7 @@ use crate::state::{
     VersionEnvironment, VersionV3,
 };
 use crate::util::fetch::{DownloadMeta, DownloadReason, FetchSemaphore};
-use crate::{ErrorKind, State};
+use crate::{Engine, ErrorKind};
 use anyhow::{Context, bail};
 use dashmap::DashMap;
 use sqlx::SqlitePool;
@@ -65,7 +65,7 @@ pub(crate) async fn get_content_projects(
     instance_id: &str,
     content_set_id: Option<&str>,
     cache_behaviour: Option<CacheBehaviour>,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<DashMap<String, ContentFile>> {
     let resolved = resolve_content_scope_with_instance(
         instance_id,
@@ -86,7 +86,7 @@ pub(crate) async fn get_content_projects(
 pub(crate) async fn get_installed_project_ids_for_instance(
     instance_id: &str,
     content_set_id: Option<&str>,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Vec<String>> {
     let projects =
         get_content_projects(instance_id, content_set_id, None, state).await?;
@@ -197,7 +197,7 @@ pub(crate) async fn list_content(
     instance_id: &str,
     content_set_id: Option<&str>,
     cache_behaviour: Option<CacheBehaviour>,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Vec<ContentItem>> {
     list_content_inner(
         instance_id,
@@ -213,7 +213,7 @@ pub(crate) async fn list_content(
 pub(crate) async fn list_indexed_content(
     instance_id: &str,
     cache_behaviour: Option<CacheBehaviour>,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Vec<ContentItem>> {
     list_content_inner(
         instance_id,
@@ -228,7 +228,7 @@ pub(crate) async fn list_indexed_content(
 
 pub(crate) async fn list_pack_content(
     instance_id: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Vec<ContentItem>> {
     list_content_inner(
         instance_id,
@@ -247,7 +247,7 @@ async fn list_content_inner(
     cache_behaviour: Option<CacheBehaviour>,
     packs_only: bool,
     read_mode: ContentReadMode,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Vec<ContentItem>> {
     let resolved = resolve_content_scope_with_instance(
         instance_id,
@@ -326,7 +326,7 @@ pub(crate) async fn list_linked_modpack_content(
     instance_id: &str,
     content_set_id: Option<&str>,
     cache_behaviour: Option<CacheBehaviour>,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Vec<ContentItem>> {
     let resolved = resolve_content_scope_with_instance(
         instance_id,
@@ -426,7 +426,7 @@ pub(crate) async fn get_linked_modpack_info(
     instance_id: &str,
     content_set_id: Option<&str>,
     cache_behaviour: Option<CacheBehaviour>,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Option<LinkedModpackInfo>> {
     let resolved = resolve_content_scope_with_instance(
         instance_id,
@@ -689,7 +689,7 @@ async fn resolve_content_scope_with_instance(
 async fn content_projects_for_scope(
     resolved: &ResolvedContentScope,
     cache_behaviour: Option<CacheBehaviour>,
-    state: &State,
+    state: &Engine,
     filter: ContentFilter<'_>,
 ) -> crate::Result<DashMap<String, ContentFile>> {
     content_projects_for_scope_inner(
@@ -706,7 +706,7 @@ async fn content_projects_for_scope(
 async fn content_projects_for_scope_inner(
     resolved: &ResolvedContentScope,
     cache_behaviour: Option<CacheBehaviour>,
-    state: &State,
+    state: &Engine,
     filter: ContentFilter<'_>,
     packs_only: bool,
     read_mode: ContentReadMode,
@@ -981,7 +981,7 @@ async fn content_files_to_content_items(
     loader: ModLoader,
     files: &[(String, ContentFile)],
     cache_behaviour: Option<CacheBehaviour>,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Vec<ContentItem>> {
     let project_ids = files
         .iter()
@@ -1432,7 +1432,7 @@ async fn get_cached_modpack_identifiers(
 async fn get_modpack_identifiers(
     version_id: &str,
     content_set: &ContentSet,
-    state: &State,
+    state: &Engine,
     pool: &SqlitePool,
     fetch_semaphore: &FetchSemaphore,
     sessions: &Sessions,

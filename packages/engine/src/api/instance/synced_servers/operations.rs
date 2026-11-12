@@ -4,7 +4,7 @@ use super::super::synced_options::{
     instance_option_supported, sha1_bytes, sha1_file, sync_files_are_protected,
 };
 use crate::state::{InstanceMetadata, SyncedOption};
-use crate::{ErrorKind, State};
+use crate::{Engine, ErrorKind};
 use anyhow::bail;
 use quartz_nbt::NbtCompound;
 use uuid::Uuid;
@@ -38,7 +38,7 @@ fn normalized_server_address(data: &NbtCompound) -> (String, u16) {
 
 async fn sync_candidates(
     metadata: &InstanceMetadata,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Vec<NbtCompound>> {
     let locals = load_local(&metadata.instance.id, state).await?;
     let mut servers =
@@ -63,7 +63,7 @@ async fn sync_candidates(
 
 pub(in crate::api::instance) async fn seed_servers(
     metadata: &InstanceMetadata,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     if is_modpack_link(&metadata.link)
         && (!pack_state_matches_link(metadata, state).await?
@@ -97,7 +97,7 @@ pub(in crate::api::instance) async fn seed_servers(
 
 pub(in crate::api::instance) async fn merge_servers_from_instance(
     metadata: &InstanceMetadata,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     if is_modpack_link(&metadata.link)
         && (!pack_state_matches_link(metadata, state).await?
@@ -142,7 +142,7 @@ pub(in crate::api::instance) async fn merge_servers_from_instance(
 
 pub(in crate::api::instance) async fn ensure_servers(
     metadata: &InstanceMetadata,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     if is_modpack_link(&metadata.link)
         && !pack_state_matches_link(metadata, state).await?
@@ -173,7 +173,7 @@ pub(in crate::api::instance) async fn ensure_servers(
 
 pub(in crate::api::instance) async fn detach_servers(
     metadata: &InstanceMetadata,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let generated = generated_path(state, &metadata.instance.id);
     let local = instance_dir(metadata, state).join(SERVERS_FILE);
@@ -182,7 +182,7 @@ pub(in crate::api::instance) async fn detach_servers(
 
 pub(in crate::api::instance) async fn reconcile_servers(
     metadata: &InstanceMetadata,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     if !effective(metadata, state).await? {
         return Ok(());
@@ -409,7 +409,7 @@ fn match_projection_entries<'a>(
 #[tracing::instrument(name = "server_records", skip_all, fields(instance_id = %metadata.instance.id))]
 pub(crate) async fn list_server_records(
     metadata: &InstanceMetadata,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Vec<ServerRecord>> {
     if participating(metadata, state).await? {
         let (canonical, locals) =
@@ -421,7 +421,7 @@ pub(crate) async fn list_server_records(
 
 async fn list_server_records_locked(
     metadata: &InstanceMetadata,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Vec<ServerRecord>> {
     if participating(metadata, state).await? {
         return compose_records(metadata, state).await;
@@ -431,7 +431,7 @@ async fn list_server_records_locked(
 
 async fn list_local_server_records(
     metadata: &InstanceMetadata,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Vec<ServerRecord>> {
     Ok(
         read_servers(&instance_dir(metadata, state).join(SERVERS_FILE))
@@ -453,7 +453,7 @@ async fn list_local_server_records(
 pub(crate) async fn ensure_managed_server(
     metadata: &InstanceMetadata,
     data: NbtCompound,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let _guard = state.synced_options.lock().await;
     let path = instance_dir(metadata, state).join(SERVERS_FILE);
@@ -582,7 +582,7 @@ pub(crate) async fn ensure_managed_server(
 /// Removes the servers [`ensure_managed_server`] added to an instance.
 pub(crate) async fn remove_managed_servers(
     instance_id: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let _guard = state.synced_options.lock().await;
     let metadata = crate::state::get_instance(instance_id, &state.pool)
@@ -624,7 +624,7 @@ pub(crate) async fn remove_managed_servers(
 pub(crate) async fn add_user_server(
     metadata: &InstanceMetadata,
     mut data: NbtCompound,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<String> {
     let _guard = state.synced_options.lock().await;
     let id = Uuid::new_v4().to_string();
@@ -653,7 +653,7 @@ async fn update_server_locked(
     metadata: &InstanceMetadata,
     server_id: &str,
     data: NbtCompound,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     if participating(metadata, state).await? {
         let records = compose_records(metadata, state).await?;
@@ -694,7 +694,7 @@ pub(crate) async fn update_server_by_index(
     name: String,
     address: String,
     accept_textures: Option<bool>,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let _guard = state.synced_options.lock().await;
     if participating(metadata, state).await? {
@@ -724,7 +724,7 @@ pub(crate) async fn update_server_by_index(
 async fn remove_server_locked(
     metadata: &InstanceMetadata,
     server_id: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     if !participating(metadata, state).await? {
         bail!(ErrorKind::InputError(
@@ -753,7 +753,7 @@ async fn remove_server_locked(
 pub(crate) async fn remove_server_by_index(
     metadata: &InstanceMetadata,
     index: usize,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let _guard = state.synced_options.lock().await;
     if participating(metadata, state).await? {
@@ -778,7 +778,7 @@ pub(crate) async fn remove_server_by_index(
 }
 
 pub async fn desync_server(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     server_id: &str,
     mode: DesyncServerMode,
@@ -834,7 +834,7 @@ pub async fn desync_server(
 }
 
 pub async fn list_synced_servers(
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Vec<SyncedServer>> {
     let _guard = state.synced_options.lock().await;
     Ok(read_canonical(state)
@@ -859,7 +859,7 @@ pub async fn list_synced_servers(
 }
 
 pub async fn update_synced_server(
-    state: &State,
+    state: &Engine,
     server: SyncedServer,
 ) -> crate::Result<()> {
     let _guard = state.synced_options.lock().await;
@@ -879,7 +879,7 @@ pub async fn update_synced_server(
 }
 
 pub async fn remove_synced_server(
-    state: &State,
+    state: &Engine,
     server_id: &str,
 ) -> crate::Result<()> {
     let _guard = state.synced_options.lock().await;
@@ -895,7 +895,7 @@ pub async fn remove_synced_server(
 
 pub(super) async fn compose_instance(
     metadata: &InstanceMetadata,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let records = compose_records(metadata, state).await?;
     let bytes = servers_to_bytes(
@@ -933,7 +933,7 @@ pub(super) async fn compose_instance(
 
 async fn compose_records(
     metadata: &InstanceMetadata,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Vec<ServerRecord>> {
     let canonical = read_canonical(state).await?;
     let locals = load_local(&metadata.instance.id, state).await?;
@@ -975,7 +975,7 @@ fn merge_server_records(
     records
 }
 
-async fn regenerate_servers(state: &State) -> crate::Result<()> {
+async fn regenerate_servers(state: &Engine) -> crate::Result<()> {
     for metadata in crate::state::list_instances(&state.pool).await? {
         if effective(&metadata, state).await? {
             compose_instance(&metadata, state).await?;
@@ -986,7 +986,7 @@ async fn regenerate_servers(state: &State) -> crate::Result<()> {
 
 pub(super) async fn effective(
     metadata: &InstanceMetadata,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<bool> {
     if sync_files_are_protected(metadata)
         || instance_is_running(metadata, state).await?
@@ -998,7 +998,7 @@ pub(super) async fn effective(
 
 pub(super) async fn participating(
     metadata: &InstanceMetadata,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<bool> {
     if !instance_option_enabled(metadata, SyncedOption::MultiplayerServers) {
         return Ok(false);

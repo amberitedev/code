@@ -21,7 +21,7 @@ use crate::state::instances::adapters::sqlite::{
 use crate::state::{DirectoryInfo, InstanceLocks};
 use crate::util::fetch::sha1_file_async;
 use crate::util::io::{self, IOError};
-use crate::{ErrorKind, State};
+use crate::{Engine, ErrorKind};
 use anyhow::{Context, bail};
 
 const SCREENSHOTS_DIRECTORY: &str = "screenshots";
@@ -54,7 +54,7 @@ pub enum ScreenshotEditSaveMode {
 }
 
 pub async fn list_screenshots(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
 ) -> crate::Result<Vec<InstanceScreenshot>> {
     let source =
@@ -66,7 +66,7 @@ pub async fn list_screenshots(
 }
 
 pub async fn list_synced_screenshots(
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Vec<InstanceScreenshot>> {
     if !super::super::synced_options::get_global_options(state)
         .await?
@@ -79,14 +79,14 @@ pub async fn list_synced_screenshots(
 }
 
 pub async fn list_all_screenshots(
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Vec<InstanceScreenshot>> {
     let sources = instance_rows::list_screenshot_sources(&state.pool).await?;
     list_source_screenshot_sets(state, sources).await
 }
 
 async fn list_source_screenshot_sets(
-    state: &State,
+    state: &Engine,
     sources: Vec<InstanceScreenshotSource>,
 ) -> crate::Result<Vec<InstanceScreenshot>> {
     let mut screenshots =
@@ -116,7 +116,7 @@ async fn lock_instance_screenshots<'a>(
 }
 
 pub async fn delete_screenshots(
-    state: &State,
+    state: &Engine,
     keys: &[ScreenshotKey],
 ) -> crate::Result<()> {
     ensure_unique_keys(keys)?;
@@ -143,7 +143,7 @@ pub async fn delete_screenshots(
 }
 
 pub async fn export_screenshots(
-    state: &State,
+    state: &Engine,
     keys: &[ScreenshotKey],
     export_path: PathBuf,
 ) -> crate::Result<()> {
@@ -214,7 +214,7 @@ pub async fn export_screenshots(
 }
 
 pub async fn move_screenshots(
-    state: &State,
+    state: &Engine,
     keys: &[ScreenshotKey],
     target_instance_id: &str,
 ) -> crate::Result<Vec<ScreenshotKey>> {
@@ -282,7 +282,7 @@ pub async fn move_screenshots(
 }
 
 pub async fn get_screenshot_path(
-    state: &State,
+    state: &Engine,
     key: &ScreenshotKey,
 ) -> crate::Result<PathBuf> {
     validate_file_name(&key.file_name)?;
@@ -323,7 +323,7 @@ pub async fn get_screenshot_path(
 }
 
 pub async fn save_edited_screenshot(
-    state: &State,
+    state: &Engine,
     key: ScreenshotKey,
     png_bytes: Vec<u8>,
     mode: ScreenshotEditSaveMode,

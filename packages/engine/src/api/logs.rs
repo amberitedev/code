@@ -11,7 +11,7 @@ use tokio::{
 };
 
 use crate::{
-    ErrorKind, State,
+    Engine, ErrorKind,
     prelude::Credentials,
     util::io::{self, IOError},
 };
@@ -95,7 +95,7 @@ struct CompactedLog {
 
 async fn resolve_instance_path(
     instance: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<String> {
     sqlx::query_scalar!(
         "
@@ -247,7 +247,7 @@ async fn maybe_emit_log_compaction_warning(
 
 impl Logs {
     async fn build(
-        state: &State,
+        state: &Engine,
         log_type: LogType,
         age: SystemTime,
         instance_path: &str,
@@ -280,7 +280,7 @@ impl Logs {
 
 #[tracing::instrument(skip(state))]
 pub async fn get_logs_from_type(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     log_type: LogType,
     clear_contents: Option<bool>,
@@ -330,7 +330,7 @@ pub async fn get_logs_from_type(
 
 #[tracing::instrument(skip(state))]
 pub async fn get_logs(
-    state: &crate::State,
+    state: &crate::Engine,
     instance_id: &str,
     clear_contents: Option<bool>,
 ) -> crate::Result<Vec<Logs>> {
@@ -359,7 +359,7 @@ pub async fn get_logs(
 
 #[tracing::instrument(skip(state))]
 pub async fn get_logs_by_filename(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     log_type: LogType,
     filename: String,
@@ -382,7 +382,7 @@ pub async fn get_logs_by_filename(
 }
 
 async fn get_output_by_filename_from_path(
-    state: &State,
+    state: &Engine,
     instance_path: &str,
     log_type: LogType,
     file_name: &str,
@@ -438,7 +438,7 @@ async fn get_output_by_filename_from_path(
 
 #[tracing::instrument(skip(state))]
 pub async fn get_output_by_filename(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     log_type: LogType,
     file_name: &str,
@@ -450,7 +450,7 @@ pub async fn get_output_by_filename(
 
 #[tracing::instrument(skip(state))]
 pub async fn delete_logs(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
 ) -> crate::Result<()> {
     let instance_path = resolve_instance_path(instance_id, state).await?;
@@ -470,7 +470,7 @@ pub async fn delete_logs(
 
 #[tracing::instrument(skip(state))]
 pub async fn delete_logs_by_filename(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     log_type: LogType,
     filename: &str,
@@ -491,7 +491,7 @@ pub async fn delete_logs_by_filename(
 
 #[tracing::instrument(skip(state))]
 pub async fn get_live_log_buffer(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
 ) -> crate::Result<CensoredString> {
     let lines = state.process_manager.get_log_buffer(instance_id);
@@ -513,7 +513,7 @@ pub async fn get_live_log_buffer(
 }
 
 pub async fn clear_live_log_buffer(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
 ) -> crate::Result<()> {
     state.process_manager.remove_log_buffer(instance_id);
@@ -522,7 +522,7 @@ pub async fn clear_live_log_buffer(
 
 #[tracing::instrument(skip(state))]
 pub async fn get_latest_log_cursor(
-    state: &crate::State,
+    state: &crate::Engine,
     instance_id: &str,
     cursor: u64, // 0 to start at beginning of file
 ) -> crate::Result<LatestLogCursor> {
@@ -532,7 +532,7 @@ pub async fn get_latest_log_cursor(
 
 #[tracing::instrument(skip(state))]
 pub async fn get_generic_live_log_cursor(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     log_file_name: &str,
     mut cursor: u64, // 0 to start at beginning of file

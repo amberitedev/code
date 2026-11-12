@@ -3,13 +3,13 @@ pub use crate::launcher::profile::{
     loader_manifest_metadata_from_cache_key, merge_partial_version,
 };
 use crate::state::CachedEntry;
-use crate::{ErrorKind, State};
+use crate::{Engine, ErrorKind};
 pub use minecraft_meta_manifest::fabriclike::Manifest;
 pub use minecraft_meta_manifest::minecraft::Catalog as VersionManifest;
 
 #[tracing::instrument(skip(state))]
 pub async fn get_minecraft_versions(
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<VersionManifest> {
     let minecraft_versions = CachedEntry::get_minecraft_manifest(
         None,
@@ -25,7 +25,7 @@ pub async fn get_minecraft_versions(
 
 // #[tracing::instrument]
 pub async fn get_loader_versions(
-    state: &State,
+    state: &Engine,
     loader: &str,
 ) -> crate::Result<Manifest> {
     let cache_key = loader_manifest_metadata(loader).cache_key;

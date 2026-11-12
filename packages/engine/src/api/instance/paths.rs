@@ -1,10 +1,10 @@
-use crate::state::State;
+use crate::state::Engine;
 use crate::util::io;
 use std::path::PathBuf;
 
 #[tracing::instrument(skip(state))]
 pub async fn get_full_path(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
 ) -> crate::Result<PathBuf> {
     let path =
@@ -22,7 +22,7 @@ pub async fn get_full_path(
 
 #[tracing::instrument(skip(state))]
 pub async fn get_mod_full_path(
-    state: &crate::State,
+    state: &crate::Engine,
     instance_id: &str,
     project_path: &str,
 ) -> crate::Result<PathBuf> {

@@ -19,19 +19,19 @@ use sysinfo::{MemoryRefreshKind, RefreshKind};
 use crate::util::io;
 use crate::util::jre::extract_java_version;
 use crate::{
-    ErrorKind, LoadingBarType, State,
+    Engine, ErrorKind, LoadingBarType,
     util::jre::{self},
 };
 use anyhow::{Context, bail};
 
 pub async fn get_java_versions(
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<DashMap<u32, JavaVersion>> {
     JavaVersion::get_all(&state.pool).await
 }
 
 pub async fn set_java_version(
-    state: &State,
+    state: &Engine,
     java_version: JavaVersion,
 ) -> crate::Result<()> {
     let _runtime_lease = state.content_store.runtime_cache_lock.read().await;
@@ -42,7 +42,7 @@ pub async fn set_java_version(
 // Searches for jres on the system given a java version (ex: 1.8, 1.17, 1.18)
 // Allow higher allows for versions higher than the given version to be returned ('at least')
 pub async fn find_filtered_jres(
-    state: &State,
+    state: &Engine,
     java_version: Option<u32>,
 ) -> crate::Result<Vec<JavaVersion>> {
     let jres = jre::get_all_jre(&state.directories.java_versions_dir()).await?;
@@ -65,14 +65,14 @@ pub async fn find_filtered_jres(
 }
 
 pub async fn auto_install_java(
-    state: &crate::State,
+    state: &crate::Engine,
     java_version: u32,
 ) -> crate::Result<PathBuf> {
     auto_install_java_with_loading(state, java_version, true).await
 }
 
 pub async fn auto_install_java_with_loading(
-    state: &crate::State,
+    state: &crate::Engine,
     java_version: u32,
     show_loading: bool,
 ) -> crate::Result<PathBuf> {
@@ -80,7 +80,7 @@ pub async fn auto_install_java_with_loading(
 }
 
 pub async fn auto_install_java_with_reporter(
-    state: &crate::State,
+    state: &crate::Engine,
     java_version: u32,
     reporter: InstallProgressReporter,
 ) -> crate::Result<PathBuf> {
@@ -121,7 +121,7 @@ fn java_step_progress(current: u64) -> InstallProgress {
 }
 
 async fn auto_install_java_inner(
-    state: &State,
+    state: &Engine,
     java_version: u32,
     show_loading: bool,
     reporter: Option<InstallProgressReporter>,

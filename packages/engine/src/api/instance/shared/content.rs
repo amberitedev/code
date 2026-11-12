@@ -18,7 +18,7 @@ pub(super) async fn remote_config_update(
     instance_id: Option<&str>,
     applied_version: Option<i32>,
     latest: &ShareVersion,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<ConfigUpdate> {
     let applied = match (instance_id, applied_version) {
         (_, Some(version)) if version >= latest.version => {
@@ -74,7 +74,7 @@ pub(crate) async fn set_applied_files(
 #[tracing::instrument(skip(state))]
 pub(crate) async fn shared_modpack_files(
     modpack_id: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Vec<ModpackFile>> {
     let version = CachedEntry::get_version(
         modpack_id,
@@ -247,7 +247,7 @@ fn is_content_path(path: &str) -> bool {
 /// The share content `version` gives members, as the share diff reads it.
 pub(super) async fn remote_shared_content(
     version: &ShareVersion,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<ShareContent> {
     check_removed_files(version)?;
     let modpack = match version.modpack_id() {

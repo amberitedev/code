@@ -1,6 +1,6 @@
 use crate::ErrorKind;
 use crate::event::emit::emit_instance_groups_changed;
-use crate::state::State;
+use crate::state::Engine;
 use crate::state::instances::adapters::sqlite::instance_rows;
 use anyhow::bail;
 use serde::{Deserialize, Serialize};
@@ -67,7 +67,7 @@ fn normalize_membership_updates(
     Ok(updates)
 }
 
-pub async fn list_groups(state: &State) -> crate::Result<Vec<InstanceGroup>> {
+pub async fn list_groups(state: &Engine) -> crate::Result<Vec<InstanceGroup>> {
     Ok(instance_rows::list_instance_groups(&state.pool)
         .await?
         .into_iter()
@@ -76,7 +76,7 @@ pub async fn list_groups(state: &State) -> crate::Result<Vec<InstanceGroup>> {
 }
 
 pub async fn create_group(
-    state: &State,
+    state: &Engine,
     name: String,
 ) -> crate::Result<InstanceGroup> {
     let name = validate_group_name(&name)?;
@@ -90,14 +90,14 @@ pub async fn create_group(
 }
 
 pub async fn set_group_order(
-    state: &State,
+    state: &Engine,
     group_ids: Vec<String>,
 ) -> crate::Result<()> {
     instance_rows::set_instance_group_order(&group_ids, &state.pool).await
 }
 
 pub async fn set_group_memberships(
-    state: &State,
+    state: &Engine,
     updates: Vec<InstanceGroupMembershipUpdate>,
 ) -> crate::Result<()> {
     if updates.is_empty() {
@@ -160,7 +160,7 @@ pub async fn set_group_memberships(
 }
 
 pub async fn rename_group(
-    state: &State,
+    state: &Engine,
     id: String,
     new_name: String,
 ) -> crate::Result<InstanceGroup> {
@@ -212,7 +212,7 @@ pub async fn rename_group(
     })
 }
 
-pub async fn delete_group(state: &State, id: String) -> crate::Result<()> {
+pub async fn delete_group(state: &Engine, id: String) -> crate::Result<()> {
     if id == FAVORITES_GROUP_ID {
         bail!(ErrorKind::InputError(
             "Favorites cannot be deleted".to_string(),

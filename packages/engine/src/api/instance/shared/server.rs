@@ -11,7 +11,7 @@ use crate::state::VersionEnvironment;
 /// run servers. A share nobody else is in is still a share; it just has no members.
 #[tracing::instrument(skip(state))]
 pub async fn ensure_shared_instance(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
 ) -> crate::Result<SharedInstanceAttachment> {
     if let Some(attachment) = shared_attachment(instance_id, state).await? {
@@ -27,7 +27,7 @@ pub async fn ensure_shared_instance(
 /// only.
 pub(super) async fn server_only_versions(
     ids: impl IntoIterator<Item = &String>,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<HashSet<String>> {
     let mut ids = ids.into_iter().map(String::as_str).collect::<Vec<_>>();
     ids.sort_unstable();

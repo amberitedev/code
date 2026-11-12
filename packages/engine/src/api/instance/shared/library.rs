@@ -5,7 +5,7 @@ use crate::state::{
 
 #[tracing::instrument(skip(state))]
 pub async fn get_cached_shared_instance_library(
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Vec<CachedSharedInstanceSummary>> {
     let Some(user_id) =
         ModrinthCredentials::get_active_user_id(&state.pool).await?
@@ -24,7 +24,7 @@ pub async fn get_cached_shared_instance_library(
 
 #[tracing::instrument(skip(state, instances))]
 pub async fn cache_shared_instance_library(
-    state: &State,
+    state: &Engine,
     instances: Vec<CachedSharedInstanceSummary>,
 ) -> crate::Result<()> {
     let Some(user_id) =

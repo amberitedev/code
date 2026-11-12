@@ -1,12 +1,12 @@
 use crate::ErrorKind;
-use crate::state::State;
+use crate::state::Engine;
 use crate::state::instances::adapters::sqlite::instance_rows;
 use crate::util::io;
 use anyhow::bail;
 
 pub(crate) async fn remove_instance(
     instance_id: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let instance = instance_rows::get_instance_by_id(instance_id, &state.pool)
         .await?
@@ -43,7 +43,7 @@ pub(crate) async fn remove_instance(
 
 async fn delete_instance_row_and_locks(
     instance_id: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     // Keep these together so deleted instances cannot leave stale entries in the per-instance lock maps.
     instance_rows::delete_instance_by_id(instance_id, &state.pool).await?;

@@ -2,13 +2,13 @@
 use crate::ErrorKind;
 use crate::state::CachedEntry;
 pub use crate::{
-    State,
+    Engine,
     state::{Category, DonationPlatform, GameVersion, Loader},
 };
 
 /// Get category tags
 #[tracing::instrument(skip(state))]
-pub async fn get_category_tags(state: &State) -> crate::Result<Vec<Category>> {
+pub async fn get_category_tags(state: &Engine) -> crate::Result<Vec<Category>> {
     let categories = CachedEntry::get_categories(
         None,
         &state.pool,
@@ -23,7 +23,9 @@ pub async fn get_category_tags(state: &State) -> crate::Result<Vec<Category>> {
 
 /// Get report type tags
 #[tracing::instrument(skip(state))]
-pub async fn get_report_type_tags(state: &State) -> crate::Result<Vec<String>> {
+pub async fn get_report_type_tags(
+    state: &Engine,
+) -> crate::Result<Vec<String>> {
     let report_types = CachedEntry::get_report_types(
         None,
         &state.pool,
@@ -38,7 +40,7 @@ pub async fn get_report_type_tags(state: &State) -> crate::Result<Vec<String>> {
 
 /// Get loader tags
 #[tracing::instrument(skip(state))]
-pub async fn get_loader_tags(state: &State) -> crate::Result<Vec<Loader>> {
+pub async fn get_loader_tags(state: &Engine) -> crate::Result<Vec<Loader>> {
     let loaders = CachedEntry::get_loaders(
         None,
         &state.pool,
@@ -54,7 +56,7 @@ pub async fn get_loader_tags(state: &State) -> crate::Result<Vec<Loader>> {
 /// Get game version tags
 #[tracing::instrument(skip(state))]
 pub async fn get_game_version_tags(
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Vec<GameVersion>> {
     let game_versions = CachedEntry::get_game_versions(
         None,
@@ -71,7 +73,7 @@ pub async fn get_game_version_tags(
 /// Get donation platform tags
 #[tracing::instrument(skip(state))]
 pub async fn get_donation_platform_tags(
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Vec<DonationPlatform>> {
     let donation_platforms = CachedEntry::get_donation_platforms(
         None,

@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 #[tracing::instrument(skip(state))]
 pub async fn install_shared_instance(
-    state: &Arc<State>,
+    state: &Arc<Engine>,
     shared_instance_id: &str,
     name: String,
     manager_id: Option<String>,
@@ -37,7 +37,7 @@ pub async fn install_shared_instance(
 }
 
 async fn install_shared_instance_inner(
-    state: &Arc<State>,
+    state: &Arc<Engine>,
     shared_instance_id: &str,
     name: String,
     manager_id: Option<String>,
@@ -83,7 +83,7 @@ async fn install_shared_instance_inner(
 async fn is_remote_shared_instance_owner(
     shared_instance_id: &str,
     linked_user_id: Option<&str>,
-    state: &State,
+    state: &Engine,
 ) -> bool {
     let Some(linked_user_id) = linked_user_id else {
         return false;
@@ -107,7 +107,7 @@ async fn is_remote_shared_instance_owner(
 
 #[tracing::instrument(skip(state))]
 pub async fn dismiss_shared_instance_restored_notice(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
 ) -> crate::Result<()> {
     crate::state::set_shared_instance_restored_from_remote(
@@ -136,7 +136,7 @@ pub(super) fn shared_instance_invite_install_name(
 
 #[tracing::instrument(skip(state))]
 pub async fn get_shared_instance_install_preview(
-    state: &crate::State,
+    state: &crate::Engine,
     shared_instance_id: &str,
     name: String,
 ) -> crate::Result<SharedInstanceInstallPreview> {
@@ -151,7 +151,7 @@ pub async fn get_shared_instance_install_preview(
 }
 
 async fn get_shared_instance_install_preview_inner(
-    state: &State,
+    state: &Engine,
     shared_instance_id: &str,
     name: String,
 ) -> crate::Result<SharedInstanceInstallPreview> {
@@ -167,7 +167,7 @@ async fn get_shared_instance_install_preview_inner(
 
 #[tracing::instrument(skip(state, invite_id))]
 pub async fn get_shared_instance_invite_install_preview(
-    state: &State,
+    state: &Engine,
     invite_id: &str,
 ) -> crate::Result<SharedInstanceInviteInstallPreview> {
     let invite = get_shared_instance_invite_info(invite_id, state).await?;
@@ -209,7 +209,7 @@ pub async fn get_shared_instance_invite_install_preview(
 
 #[tracing::instrument(skip(state, invite_id))]
 pub async fn accept_shared_instance_invite_for_install(
-    state: &State,
+    state: &Engine,
     shared_instance_id: &str,
     invite_id: &str,
 ) -> crate::Result<()> {
@@ -245,7 +245,7 @@ pub(super) async fn shared_instance_install_preview_from_version(
     shared_instance_id: String,
     name: String,
     version: ShareVersion,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<SharedInstanceInstallPreview> {
     let (loader, _) = instance_loader(&version);
     let name = match name.trim() {
@@ -288,7 +288,7 @@ pub(super) async fn shared_instance_install_preview_from_version(
 
 #[tracing::instrument(skip(state))]
 pub async fn get_shared_instance_update_preview(
-    state: &crate::State,
+    state: &crate::Engine,
     instance_id: &str,
 ) -> crate::Result<Option<SharedInstanceUpdatePreview>> {
     crate::util::fetch::wait_for_local_api_rate_limit(
@@ -298,7 +298,7 @@ pub async fn get_shared_instance_update_preview(
 }
 
 async fn get_shared_instance_update_preview_inner(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
 ) -> crate::Result<Option<SharedInstanceUpdatePreview>> {
     let metadata = crate::state::get_instance(instance_id, &state.pool)
@@ -377,7 +377,7 @@ async fn get_shared_instance_update_preview_inner(
 
 pub(crate) async fn check_shared_instance_availability_before_launch(
     instance_id: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let metadata = crate::state::get_instance(instance_id, &state.pool)
         .await?
@@ -437,7 +437,7 @@ pub(crate) async fn check_shared_instance_availability_before_launch(
 
 #[tracing::instrument(skip(state))]
 pub async fn update_shared_instance(
-    state: &Arc<State>,
+    state: &Arc<Engine>,
     instance_id: &str,
 ) -> crate::Result<InstallJobSnapshot> {
     let metadata = crate::state::get_instance(instance_id, &state.pool)
@@ -469,7 +469,7 @@ fn member_attachment(
 /// as it fetches every config delta and reads the pack archive.
 pub(crate) async fn shared_instance_update_data(
     instance_id: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<SharedInstanceInstallData> {
     let metadata = crate::state::get_instance(instance_id, &state.pool)
         .await?
@@ -531,7 +531,7 @@ fn config_base_version(
 pub(super) async fn ensure_ready_remote_version_for_invite(
     instance_id: &str,
     attachment: &SharedInstanceAttachment,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     match get_latest_remote_version_optional_unavailable(&attachment.id, state)
         .await?
@@ -571,7 +571,7 @@ pub(super) async fn ensure_ready_remote_version_for_invite(
 pub(super) async fn get_latest_attached_remote_version(
     instance_id: &str,
     attachment: &SharedInstanceAttachment,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<ShareVersion> {
     if let SharedInstanceRemoteResponse::Unavailable(reason) =
         get_remote_instance_access(&attachment.id, state).await?
@@ -627,7 +627,7 @@ pub(super) async fn get_latest_attached_remote_version(
 
 pub(super) async fn shared_attachment_matches_current_user(
     attachment: &SharedInstanceAttachment,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<bool> {
     let Some(linked_user_id) = attachment.linked_user_id.as_deref() else {
         return Ok(false);
@@ -643,7 +643,7 @@ pub(super) async fn has_shared_instance_recipients(
     users: &SharedInstanceUsers,
     attachment: &SharedInstanceAttachment,
     has_pending_recipients: bool,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<bool> {
     if has_pending_recipients || users.tokens > 0 {
         return Ok(true);
@@ -662,7 +662,7 @@ pub(super) async fn handle_unavailable_shared_instance_if_current_user(
     instance_id: &str,
     attachment: &SharedInstanceAttachment,
     reason: SharedInstanceUnavailableReason,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     // A missing ID can belong to another API environment. Keep the attachment
     // so opening a production instance in a staging build cannot unlink it.
@@ -776,7 +776,7 @@ pub(super) async fn shared_instance_install_data(
     version: ShareVersion,
     configs: ConfigUpdate,
     history: Option<&[(ManifestFile, std::path::PathBuf)]>,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<SharedInstanceInstallData> {
     check_removed_files(&version)?;
     if !version.ready {
@@ -887,7 +887,7 @@ pub(super) async fn shared_instance_install_data(
 }
 
 pub(super) async fn linked_amberite_user_id(
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Option<String>> {
     Ok(state
         .sessions

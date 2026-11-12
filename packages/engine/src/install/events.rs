@@ -4,7 +4,7 @@ use super::model::{
 };
 use super::store;
 use crate::event::{Event, EventSink};
-use crate::state::{Installs, State};
+use crate::state::{Engine, Installs};
 use sqlx::SqlitePool;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -31,7 +31,7 @@ struct InstallProgressReporterState {
 }
 
 impl InstallProgressReporter {
-    pub fn new(job_id: Uuid, state: InstallJobState, engine: &State) -> Self {
+    pub fn new(job_id: Uuid, state: InstallJobState, engine: &Engine) -> Self {
         Self {
             job_id,
             pool: engine.pool.clone(),

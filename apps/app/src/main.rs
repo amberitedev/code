@@ -34,14 +34,25 @@ async fn initialize_state(
     handle: tauri::State<'_, engine_handle::EngineHandle>,
 ) -> api::Result<()> {
     tracing::info!("Initializing app state...");
-    State::init(
-        app.config().identifier.clone(),
-        sink.inner().clone(),
-        dev::accounts()?,
-    )
-    .await?;
-    let state = State::get().await?;
-    handle.set(std::sync::Arc::clone(&state));
+    let accounts = dev::accounts()?;
+    let state = handle
+        .get_or_start(|| async {
+            let settings_dir = DirectoryInfo::initial_settings_dir_path(
+                &app.config().identifier,
+            )
+            .ok_or(engine::ErrorKind::FSError(
+                "could not find the application directory".to_string(),
+            ))?;
+            let engine = Engine::new(engine::EngineConfig {
+                settings_dir,
+                events: sink.inner().clone(),
+                accounts,
+            })
+            .await?;
+            engine.start_desktop();
+            Ok(engine)
+        })
+        .await?;
     #[cfg(debug_assertions)]
     dev::sign_in(&state).await;
 
@@ -416,7 +427,7 @@ fn main() {
                     if let Some((update, data)) = &*update_data.0.lock().unwrap()
                     {
                         let state = app.state::<engine_handle::EngineHandle>().try_get();
-                        fn set_changelog_toast(state: Option<&State>, version: Option<String>) {
+                        fn set_changelog_toast(state: Option<&Engine>, version: Option<String>) {
                             let Some(state) = state else {
                                 return;
                             };

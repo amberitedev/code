@@ -7,7 +7,7 @@ use super::fullscreen::update_app_fullscreen_setting;
 use super::launch_overrides::currently_launcher_owned_keys;
 use super::options_file::{GameOptionsDocument, validate_raw_key_value};
 use crate::state::{
-    CanonicalValue, GameOptionKind, InstanceMetadata, State,
+    CanonicalValue, Engine, GameOptionKind, InstanceMetadata,
     load_game_option_preferences, load_game_options_sync_state,
     load_shared_game_options,
 };
@@ -23,7 +23,7 @@ pub(super) fn custom_setting_id(key: &str) -> String {
 pub(super) async fn read_instance_changes_into_shared_settings(
     metadata: &InstanceMetadata,
     document: &GameOptionsDocument,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<bool> {
     let values = load_shared_game_options(&state.pool).await?;
     let preferences = load_game_option_preferences(&state.pool).await?;
@@ -171,7 +171,7 @@ pub(super) async fn discover_custom_settings(
     metadata: &InstanceMetadata,
     document: &GameOptionsDocument,
     excluded_keys: &HashSet<String>,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<bool> {
     let existing = load_shared_game_options(&state.pool).await?;
     let preferences = load_game_option_preferences(&state.pool).await?;

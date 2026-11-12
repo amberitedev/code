@@ -14,7 +14,7 @@ pub enum ModrinthAuthFlow {
 
 #[tracing::instrument(skip(state))]
 pub async fn authenticate_begin_flow(
-    state: &crate::State,
+    state: &crate::Engine,
     flow: ModrinthAuthFlow,
 ) -> crate::Result<String> {
     if let Some(url) = crate::self_hosted::accounts::login_url(
@@ -41,7 +41,7 @@ pub async fn authenticate_begin_flow(
 
 #[tracing::instrument(skip(state, code))]
 pub async fn authenticate_finish_flow(
-    state: &crate::State,
+    state: &crate::Engine,
     code: &str,
 ) -> crate::Result<ModrinthCredentials> {
     let creds = crate::state::finish_login_flow(
@@ -70,11 +70,11 @@ pub async fn authenticate_finish_flow(
 }
 
 #[tracing::instrument(skip(state))]
-pub async fn logout(state: &crate::State) -> crate::Result<()> {
+pub async fn logout(state: &crate::Engine) -> crate::Result<()> {
     sign_out(state).await
 }
 
-async fn sign_out(state: &crate::State) -> crate::Result<()> {
+async fn sign_out(state: &crate::Engine) -> crate::Result<()> {
     ModrinthCredentials::deactivate_all(&state.pool).await?;
     crate::self_hosted::accounts::set_sessions(&state.sessions, None);
     state.presence.friends_socket.disconnect().await?;
@@ -84,14 +84,14 @@ async fn sign_out(state: &crate::State) -> crate::Result<()> {
 
 #[tracing::instrument(skip(state))]
 pub async fn get_all(
-    state: &crate::State,
+    state: &crate::Engine,
 ) -> crate::Result<Vec<ModrinthCredentials>> {
     ModrinthCredentials::get_all(&state.pool, &state.sessions).await
 }
 
 #[tracing::instrument(skip(state))]
 pub async fn set_active(
-    state: &crate::State,
+    state: &crate::Engine,
     user_id: &str,
 ) -> crate::Result<()> {
     let users =
@@ -112,7 +112,7 @@ pub async fn set_active(
 
 #[tracing::instrument(skip(state))]
 pub async fn remove_user(
-    state: &crate::State,
+    state: &crate::Engine,
     user_id: &str,
 ) -> crate::Result<()> {
     if let Some(creds) =
@@ -144,7 +144,7 @@ pub async fn remove_user(
     Ok(())
 }
 
-async fn reconnect_friends(state: &crate::State) -> crate::Result<()> {
+async fn reconnect_friends(state: &crate::Engine) -> crate::Result<()> {
     if let Err(error) = state.presence.friends_socket.disconnect().await {
         tracing::warn!("Failed to disconnect friends socket: {error}");
     }
@@ -168,7 +168,7 @@ async fn reconnect_friends(state: &crate::State) -> crate::Result<()> {
 
 #[tracing::instrument(skip(state))]
 pub async fn get_credentials(
-    state: &crate::State,
+    state: &crate::Engine,
 ) -> crate::Result<Option<ModrinthCredentials>> {
     let current = ModrinthCredentials::get_and_refresh(
         &state.pool,
@@ -200,11 +200,11 @@ mod tests {
             None,
         )
         .unwrap();
-        let state = crate::State::new(
-            dir.path().to_path_buf(),
-            crate::event::EventSink::new(),
-            Some(accounts),
-        )
+        let state = crate::Engine::new(crate::EngineConfig {
+            settings_dir: dir.path().to_path_buf(),
+            events: crate::event::EventSink::new(),
+            accounts: Some(accounts),
+        })
         .await
         .unwrap();
         let credentials = ModrinthCredentials {

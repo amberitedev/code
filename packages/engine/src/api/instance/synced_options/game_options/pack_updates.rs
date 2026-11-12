@@ -6,7 +6,7 @@ use super::write_shared_settings::{
     apply_shared_settings_to_instance, capture_instance_options,
     sync_is_active_for_instance,
 };
-use crate::state::{InstanceLink, InstanceMetadata, State, SyncedOption};
+use crate::state::{Engine, InstanceLink, InstanceMetadata, SyncedOption};
 use crate::util::io;
 use anyhow::bail;
 use encoding_rs::{UTF_8, UTF_16BE, UTF_16LE};
@@ -154,7 +154,7 @@ fn merge_default_keybindings(
 
 async fn read_pack_options_template(
     metadata: &InstanceMetadata,
-    state: &State,
+    state: &Engine,
     relative_path: &str,
 ) -> crate::Result<Option<(Vec<u8>, String, String)>> {
     let directory = super::super::instance_dir(metadata, state);
@@ -199,7 +199,7 @@ async fn read_pack_options_template(
 
 pub(super) async fn materialize_pack_options_if_missing(
     metadata: &InstanceMetadata,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let path = options_path(metadata, state);
     if options_target_exists(&path).await? {
@@ -218,7 +218,7 @@ pub(super) async fn materialize_pack_options_if_missing(
 
 pub(in crate::api::instance) async fn detach_instance(
     metadata: &InstanceMetadata,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let feature = SyncedOption::GameOptions.as_str();
     sqlx::query!(
@@ -238,7 +238,7 @@ pub(in crate::api::instance) async fn detach_instance(
 /// player changed in Minecraft.
 pub(in crate::api::instance) async fn prepare_instance_update_with_state(
     metadata: &InstanceMetadata,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     sqlx::query!(
         "DELETE FROM instance_game_option_update_state WHERE instance_id = ?",
@@ -293,7 +293,7 @@ pub(in crate::api::instance) async fn prepare_instance_update_with_state(
 /// Keeps the new modpack's `options.txt` as its default, then reapplies the user's
 /// shared settings.
 pub async fn capture_pack_base(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     source: Option<GameOptionsPackSource>,
 ) -> crate::Result<()> {

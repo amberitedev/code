@@ -13,7 +13,7 @@ use crate::util::fetch::{
     DownloadMeta, DownloadReason, FetchProgressFn, fetch,
     sha1_file_async_with_progress,
 };
-use crate::{ErrorKind, State};
+use crate::{Engine, ErrorKind};
 use anyhow::bail;
 use path_util::SafeRelativeUtf8UnixPathBuf;
 use serde::{Deserialize, Serialize};
@@ -178,7 +178,7 @@ pub struct CreatePackDescription {
 }
 
 pub async fn get_instance_from_pack(
-    state: &State,
+    state: &Engine,
     location: CreatePackLocation,
 ) -> crate::Result<CreatePackInstance> {
     match location {
@@ -304,7 +304,7 @@ pub async fn get_instance_from_pack(
 #[tracing::instrument(skip(state, reporter))]
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn generate_pack_from_version_id_with_reporter(
-    state: &State,
+    state: &Engine,
     project_id: String,
     version_id: String,
     title: String,
@@ -496,7 +496,7 @@ pub(crate) async fn generate_pack_from_version_id_with_reporter(
 #[tracing::instrument(skip(state))]
 
 pub async fn generate_pack_from_file(
-    state: &State,
+    state: &Engine,
     path: PathBuf,
     instance_id: String,
 ) -> crate::Result<CreatePack> {
@@ -525,7 +525,7 @@ pub async fn generate_pack_from_file(
 /// Sets generated instance attributes to the pack ones.
 /// This includes the pack name, icon, game version, loader version, and loader
 pub async fn set_instance_information(
-    state: &crate::State,
+    state: &crate::Engine,
     instance_id: String,
     description: &CreatePackDescription,
     backup_name: &str,

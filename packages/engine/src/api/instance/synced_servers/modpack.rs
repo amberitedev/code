@@ -6,7 +6,7 @@ use super::storage::{load_local, write_local_rows};
 use super::types::{LocalServer, ServerSource};
 use crate::state::{CachedEntry, InstanceLink, InstanceMetadata};
 use crate::util::fetch::{DownloadMeta, DownloadReason, fetch_mirrors};
-use crate::{ErrorKind, State};
+use crate::{Engine, ErrorKind};
 use quartz_nbt::NbtCompound;
 use std::io::{Cursor, Read};
 use uuid::Uuid;
@@ -18,7 +18,7 @@ pub(crate) const MODPACK_SERVER_PATHS: [&str; 3] = [
 ];
 
 pub(crate) async fn capture_modpack_server_override(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     source_path: Option<&str>,
 ) -> crate::Result<()> {
@@ -44,7 +44,7 @@ pub(crate) async fn capture_modpack_server_override(
 
 pub(crate) async fn discard_modpack_servers(
     instance_id: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let _guard = state.synced_options.lock().await;
     let metadata = crate::state::get_instance(instance_id, &state.pool)
@@ -59,7 +59,7 @@ pub(crate) async fn discard_modpack_servers(
 
 async fn discard_modpack_servers_for_instance(
     metadata: &InstanceMetadata,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let old_pack_servers = load_local(&metadata.instance.id, state)
         .await?
@@ -88,7 +88,7 @@ async fn discard_modpack_servers_for_instance(
 async fn replace_modpack_servers(
     metadata: &InstanceMetadata,
     servers: Vec<NbtCompound>,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let mut local = servers
         .into_iter()
@@ -131,7 +131,7 @@ async fn replace_modpack_servers(
 
 pub(super) async fn pack_state_matches_link(
     metadata: &InstanceMetadata,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<bool> {
     let row = sqlx::query!(
         "
@@ -150,7 +150,7 @@ pub(super) async fn pack_state_matches_link(
 
 pub(super) async fn pack_state_exists(
     instance_id: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<bool> {
     Ok(sqlx::query_scalar!(
         r#"
@@ -166,7 +166,7 @@ pub(super) async fn pack_state_exists(
 
 pub(super) async fn reconstruct_modpack_servers(
     metadata: &InstanceMetadata,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     if is_server_linked_shared_instance(metadata) {
         return discard_modpack_servers_for_instance(metadata, state).await;

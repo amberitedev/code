@@ -1,7 +1,7 @@
 use crate::ErrorKind;
 use crate::state::{
     CacheValue, CachedEmbeddedContentMetadata, CachedEntry, ContentFile,
-    EmbeddedContentMetadata, Instance, ModLoader, ProjectType, State,
+    EmbeddedContentMetadata, Engine, Instance, ModLoader, ProjectType,
 };
 use anyhow::Context;
 use bytes::Bytes;
@@ -494,7 +494,7 @@ pub(crate) async fn resolve_embedded_content_metadata(
     instance: &Instance,
     loader: ModLoader,
     files: &[(String, ContentFile)],
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<HashMap<String, EmbeddedContentMetadata>> {
     let tracked = crate::state::instances::adapters::sqlite::content_rows::get_instance_files(&instance.id, &state.pool).await?;
     let mut candidates = HashMap::new();

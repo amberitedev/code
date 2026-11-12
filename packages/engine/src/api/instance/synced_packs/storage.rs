@@ -5,17 +5,17 @@ use crate::state::content_store::{
     validate_relative,
 };
 use crate::state::instances::adapters::sqlite::{content_rows, instance_rows};
-use crate::state::{CachedEntry, State};
+use crate::state::{CachedEntry, Engine};
 use crate::util::io;
 use anyhow::bail;
 use bytes::Bytes;
 use std::path::PathBuf;
 
-fn directory(state: &State) -> PathBuf {
+fn directory(state: &Engine) -> PathBuf {
     state.directories.synced_options_dir().join("packs")
 }
 
-pub(super) async fn read_library(state: &State) -> crate::Result<PackLibrary> {
+pub(super) async fn read_library(state: &Engine) -> crate::Result<PackLibrary> {
     match io::read(directory(state).join("packs.json")).await {
         Ok(bytes) => {
             let mut library: PackLibrary = serde_json::from_slice(&bytes)?;
@@ -55,7 +55,7 @@ pub(super) async fn read_library(state: &State) -> crate::Result<PackLibrary> {
 
 pub(super) async fn write_library(
     library: &PackLibrary,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let _lease = state.content_store.lease().await;
     let previous = read_library(state).await?;
@@ -145,7 +145,7 @@ pub(super) async fn write_library(
 
 pub(super) async fn cache_bytes(
     bytes: Bytes,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<String> {
     let stored_file = state.content_store.store_bytes(&bytes).await?;
     state
@@ -161,7 +161,7 @@ pub(super) async fn cache_bytes(
 
 pub(super) async fn read_stored_file(
     pack: &SyncedPack,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<StoredFileHandle> {
     if let Some(stored_file) = state
         .content_store
@@ -224,7 +224,7 @@ pub(super) async fn read_stored_file(
         .stored_file)
 }
 
-pub(crate) async fn reconcile_retention(state: &State) -> crate::Result<()> {
+pub(crate) async fn reconcile_retention(state: &Engine) -> crate::Result<()> {
     let _guard = state.synced_options.lock().await;
     if tokio::fs::try_exists(directory(state)).await? {
         crate::state::content_store::sync_directory(&directory(state)).await?;
@@ -262,7 +262,7 @@ async fn recover_pack_from_instances(
     id: Option<&str>,
     pack: &SyncedPack,
     library: &PackLibrary,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<StoredFileHandle> {
     for instance in instance_rows::list_instances(&state.pool).await? {
         validate_instance_path(&instance.path)?;
@@ -310,7 +310,7 @@ async fn recover_pack_from_instances(
 async fn import_matching_pack(
     source: &std::path::Path,
     pack: &SyncedPack,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Option<StoredFileHandle>> {
     let Ok(crate::state::content_store::FileHashes { sha512, .. }) =
         hash_file(source).await

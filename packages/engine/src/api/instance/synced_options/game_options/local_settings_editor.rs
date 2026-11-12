@@ -11,7 +11,7 @@ use super::options_file::{
 };
 use super::read_instance_changes::custom_setting_id;
 use crate::ErrorKind;
-use crate::state::{CanonicalValue, GameOptionKind, InstanceMetadata, State};
+use crate::state::{CanonicalValue, Engine, GameOptionKind, InstanceMetadata};
 use crate::util::io;
 use anyhow::bail;
 use std::collections::HashSet;
@@ -78,7 +78,7 @@ fn editor_revision(metadata: &InstanceMetadata, input_bytes: &[u8]) -> String {
 
 async fn load_instance_document(
     instance_id: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<(
     InstanceMetadata,
     GameOptionsDocument,
@@ -250,7 +250,7 @@ fn encode_setting_value(
 
 async fn load_editor(
     instance_id: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<GameSettingsEditorState> {
     let (metadata, document, input_bytes, controlled_keys) =
         load_instance_document(instance_id, state).await?;
@@ -263,7 +263,7 @@ async fn load_editor(
 }
 
 pub async fn get_config(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
 ) -> crate::Result<GameSettingsEditorState> {
     let _guard = state.synced_options.lock().await;
@@ -271,7 +271,7 @@ pub async fn get_config(
 }
 
 pub async fn preview_changes(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     request: UpdateGameSettingsRequest,
 ) -> crate::Result<GameSettingsEditorState> {
@@ -331,7 +331,7 @@ pub async fn preview_changes(
 }
 
 pub async fn save_changes(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
     request: UpdateGameSettingsRequest,
 ) -> crate::Result<SaveGameSettingsResult> {

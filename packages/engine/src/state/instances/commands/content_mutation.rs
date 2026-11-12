@@ -7,7 +7,7 @@ use crate::state::content_store::{
 use crate::state::instances::adapters::sqlite::{content_rows, instance_rows};
 use crate::state::instances::{ContentSourceKind, InstanceFile};
 use crate::state::{
-    KnownModrinthFile, ProjectType, State, cache_file_hash_metadata,
+    Engine, KnownModrinthFile, ProjectType, cache_file_hash_metadata,
     file_modified_at_ns,
 };
 use anyhow::bail;
@@ -74,7 +74,7 @@ struct PendingContentChange {
 }
 
 pub(super) struct InstanceContent<'a> {
-    state: &'a State,
+    state: &'a Engine,
     instance: crate::state::Instance,
     content_set_id: Option<String>,
     _content_lock: OwnedMutexGuard<()>,
@@ -84,7 +84,7 @@ pub(super) struct InstanceContent<'a> {
 impl<'a> InstanceContent<'a> {
     pub(super) async fn lock(
         instance_id: &str,
-        state: &'a State,
+        state: &'a Engine,
     ) -> crate::Result<Self> {
         let content_lock = state.instance_locks.lock_content(instance_id).await;
         let store_lock = state.content_store.files_lock.lock().await;
@@ -658,7 +658,7 @@ impl<'a> InstanceContent<'a> {
 pub(crate) async fn install_stored_file(
     instance_id: &str,
     request: InstallContent<'_>,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<String> {
     let instance_content = InstanceContent::lock(instance_id, state).await?;
     match instance_content
@@ -674,7 +674,7 @@ pub(crate) async fn toggle_disable_project(
     instance_id: &str,
     project_path: &str,
     desired_enabled: Option<bool>,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<String> {
     let instance_content = InstanceContent::lock(instance_id, state).await?;
     match instance_content
@@ -692,7 +692,7 @@ pub(crate) async fn toggle_disable_project(
 pub(crate) async fn remove_project(
     instance_id: &str,
     project_path: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let instance_content = InstanceContent::lock(instance_id, state).await?;
     match instance_content

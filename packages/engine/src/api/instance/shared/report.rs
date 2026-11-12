@@ -233,7 +233,7 @@ fn optional_version(version: Option<i32>) -> String {
 
 #[tracing::instrument(skip(state))]
 pub async fn get_shared_instance_publish_support_details(
-    state: &crate::State,
+    state: &crate::Engine,
     instance_id: &str,
 ) -> crate::Result<Option<String>> {
     let details = state.publish_reports.0.lock().ok().and_then(|reports| {

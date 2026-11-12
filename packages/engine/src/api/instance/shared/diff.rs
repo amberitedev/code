@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 const CONFIG_HASH_CONCURRENCY: usize = 16;
 
 /// Modrinth's names through the App's cache.
-struct AppNames<'a>(&'a State);
+struct AppNames<'a>(&'a Engine);
 
 impl Names for AppNames<'_> {
     type Error = crate::Error;
@@ -55,7 +55,7 @@ async fn diff(
     before: &ShareContent,
     after: &ShareContent,
     options: &DiffOptions,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Vec<SharedInstanceUpdateDiff>> {
     share_diff(before, after, options, &AppNames(state))
         .await
@@ -74,7 +74,7 @@ pub(super) async fn shared_instance_update_diffs(
     version: &ShareVersion,
     written: &[ManifestFile],
     removed: &[ManifestFile],
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Vec<SharedInstanceUpdateDiff>> {
     // An owner's local files are part of their share, so their update compares them too.
     let is_owner = metadata
@@ -124,7 +124,7 @@ pub(super) async fn shared_instance_update_diffs(
 pub(super) async fn unedited_configs(
     instance_id: &str,
     left: &[ManifestFile],
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Vec<ManifestFile>> {
     Ok(configs_on_disk(instance_id, left, state)
         .await?
@@ -147,7 +147,7 @@ fn sha1s<'a>(
 async fn configs_on_disk<'a>(
     instance_id: &str,
     files: &'a [ManifestFile],
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Vec<&'a ManifestFile>> {
     use futures::{StreamExt, future::BoxFuture};
 
@@ -193,7 +193,7 @@ async fn configs_on_disk<'a>(
 pub(super) async fn shared_version_diffs(
     before: Option<&ShareVersion>,
     after: &ShareVersion,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<(Vec<SharedInstanceUpdateDiff>, ShareContent)> {
     let after = remote_shared_content(after, state).await?;
     let before = match before {
@@ -209,7 +209,7 @@ pub(super) async fn shared_instance_publish_diffs(
     metadata: &crate::state::InstanceMetadata,
     version: &ShareVersion,
     snapshot: &CurrentPublishSnapshot,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Vec<SharedInstanceUpdateDiff>> {
     let before = remote_shared_content(version, state).await?;
     let configuration = local_configuration(metadata);

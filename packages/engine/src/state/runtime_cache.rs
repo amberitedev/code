@@ -4,7 +4,7 @@ use crate::state::instances::adapters::sqlite::instance_rows;
 use crate::state::{
     DirectoryInfo, InstanceLaunchContext, JavaVersion, ModLoader,
 };
-use crate::{ErrorKind, State};
+use crate::{Engine, ErrorKind};
 use anyhow::bail;
 use minecraft_meta_manifest::minecraft::{AssetsIndex, LoggingConfiguration};
 use serde::de::DeserializeOwned;
@@ -27,7 +27,7 @@ pub(crate) struct RuntimeStorage {
 }
 
 impl RuntimeStorage {
-    pub async fn read(state: &State) -> crate::Result<Self> {
+    pub async fn read(state: &Engine) -> crate::Result<Self> {
         let mut contexts = Vec::new();
         let mut incomplete = false;
         for instance in instance_rows::list_instances(&state.pool).await? {

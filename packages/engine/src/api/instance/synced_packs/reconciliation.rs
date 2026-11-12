@@ -9,7 +9,7 @@ use crate::state::content_store::{StoredFileHandle, file_path_on_disk};
 use crate::state::instances::commands;
 use crate::state::{
     CacheBehaviour, CachedEntry, ContentItem, ContentItemVersion,
-    ContentSourceKind, InstanceMetadata, ProjectType, State, SyncedOption,
+    ContentSourceKind, Engine, InstanceMetadata, ProjectType, SyncedOption,
     SyncedPackInfo, Version,
 };
 use crate::util::fetch;
@@ -68,7 +68,7 @@ fn current_item<'a>(
 async fn capture_items(
     metadata: &InstanceMetadata,
     library: &mut PackLibrary,
-    state: &State,
+    state: &Engine,
     placements: BTreeMap<String, PackPlacement>,
     global: GlobalSyncedOptions,
     items: &[ContentItem],
@@ -132,7 +132,7 @@ async fn capture_items(
 async fn owns_file(
     metadata: &InstanceMetadata,
     placement: &PackPlacement,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<bool> {
     if placement.path.is_empty() {
         return Ok(false);
@@ -170,7 +170,7 @@ async fn toggle_pack(
     metadata: &InstanceMetadata,
     item: &ContentItem,
     enabled: bool,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<String> {
     commands::toggle_disable_project(
         &metadata.instance.id,
@@ -233,7 +233,7 @@ async fn prepare_pack(
     pack: &SyncedPack,
     library: &PackLibrary,
     items: &[ContentItem],
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<PreparedPack> {
     let mut prepared = PreparedPack::default();
     let previous = library
@@ -363,7 +363,7 @@ async fn apply_pack(
     pack: &SyncedPack,
     library: &mut PackLibrary,
     items: &mut Vec<ContentItem>,
-    state: &State,
+    state: &Engine,
     mut prepared: PreparedPack,
 ) -> crate::Result<()> {
     let instance_id = &metadata.instance.id;
@@ -651,7 +651,7 @@ async fn apply_pack(
 
 pub(super) async fn run_queued(
     instance_id: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let Some(metadata) =
         crate::state::get_instance(instance_id, &state.pool).await?
@@ -681,7 +681,7 @@ pub(super) async fn run_queued(
 async fn apply_instance_inner(
     metadata: &InstanceMetadata,
     library: &mut PackLibrary,
-    state: &State,
+    state: &Engine,
     removed_pack_id: Option<&str>,
     preparation: &mut super::worker::Preparation<'_>,
 ) -> crate::Result<()> {
@@ -976,7 +976,7 @@ async fn apply_instance_inner(
 pub(super) async fn apply_removal(
     pack_id: &str,
     library: &mut PackLibrary,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     library.resource_pack_order.retain(|id| id != pack_id);
     apply_all(library, state).await
@@ -984,7 +984,7 @@ pub(super) async fn apply_removal(
 
 pub(super) async fn apply_all(
     library: &mut PackLibrary,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let instances = crate::state::list_instances(&state.pool).await?;
     let ids = instances
@@ -1009,14 +1009,14 @@ pub(super) async fn apply_all(
 pub(in crate::api::instance) async fn reconcile(
     metadata: &InstanceMetadata,
     _option: SyncedOption,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     super::worker::queue_reconciliation(state, &metadata.instance.id);
     Ok(())
 }
 
 async fn capture_after_change(
-    state: &State,
+    state: &Engine,
     instance_id: &str,
 ) -> crate::Result<()> {
     let metadata = crate::state::get_instance(instance_id, &state.pool)
@@ -1061,12 +1061,12 @@ async fn capture_after_change(
     Ok(())
 }
 
-pub(in crate::api::instance) fn schedule_reconciliation(state: &crate::State) {
+pub(in crate::api::instance) fn schedule_reconciliation(state: &crate::Engine) {
     super::worker::queue_all(state);
 }
 
 pub(crate) async fn reconcile_after_content_change(
-    state: &crate::State,
+    state: &crate::Engine,
     instance_id: &str,
 ) {
     loop {
@@ -1093,7 +1093,7 @@ pub(crate) async fn reconcile_after_content_change(
 
 pub(in crate::api::instance) async fn capture_resource_pack_selection_change(
     metadata: &InstanceMetadata,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let mut library = read_library(state).await?;
     match super::selection::capture(metadata, &mut library, state).await? {
@@ -1106,7 +1106,7 @@ pub(in crate::api::instance) async fn capture_resource_pack_selection_change(
 
 pub(in crate::api::instance) async fn prepare_instance_update(
     metadata: &InstanceMetadata,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let mut library = read_library(state).await?;
     match super::selection::capture(metadata, &mut library, state).await {
@@ -1160,7 +1160,7 @@ pub(in crate::api::instance) async fn prepare_instance_update(
 pub(in crate::api::instance) async fn detach(
     metadata: &InstanceMetadata,
     option: SyncedOption,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let mut library = read_library(state).await?;
     let mut changed = false;
@@ -1194,7 +1194,7 @@ pub(in crate::api::instance) async fn detach(
 pub(in crate::api::instance) async fn decorate_content(
     instance_id: &str,
     items: &mut [ContentItem],
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let library = read_library(state).await?;
     let Some(placements) = library.instances.get(instance_id) else {

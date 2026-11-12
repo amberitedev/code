@@ -16,7 +16,7 @@ use crate::{
         LoadingBarId,
         emit::{emit_loading, loading_try_for_each_concurrent},
     },
-    state::State,
+    state::Engine,
     util::{fetch::*, io},
 };
 use anyhow::{Context, bail};
@@ -147,7 +147,7 @@ impl MinecraftDownloadProgress {
 }
 
 async fn fetch_minecraft_file(
-    st: &State,
+    st: &Engine,
     url: &str,
     sha1: Option<&str>,
     expected_size: Option<u64>,
@@ -227,7 +227,7 @@ fn should_download(path_exists: bool, force: bool) -> bool {
 /// Installed instances can outlive files in the shared runtime cache. Include
 /// processor-generated libraries so recovery also reruns the loader installer.
 pub(super) fn missing_runtime_file(
-    st: &State,
+    st: &Engine,
     version: &GameVersionInfo,
     java_arch: &str,
     minecraft_updated: bool,
@@ -269,7 +269,7 @@ pub(super) fn missing_runtime_file(
 }
 
 fn missing_client_bytes(
-    st: &State,
+    st: &Engine,
     version: &GameVersionInfo,
     force: bool,
 ) -> crate::Result<u64> {
@@ -293,7 +293,7 @@ fn missing_client_bytes(
 }
 
 fn missing_assets_index_bytes(
-    st: &State,
+    st: &Engine,
     version: &GameVersionInfo,
     force: bool,
 ) -> u64 {
@@ -310,7 +310,7 @@ fn missing_assets_index_bytes(
 }
 
 fn missing_log_config_bytes(
-    st: &State,
+    st: &Engine,
     version: &GameVersionInfo,
     force: bool,
 ) -> u64 {
@@ -334,7 +334,7 @@ fn missing_log_config_bytes(
 }
 
 fn missing_asset_bytes(
-    st: &State,
+    st: &Engine,
     with_legacy: bool,
     index: &AssetsIndex,
     force: bool,
@@ -360,7 +360,7 @@ fn missing_asset_bytes(
 }
 
 fn missing_library_bytes(
-    st: &State,
+    st: &Engine,
     libraries: &[Library],
     java_arch: &str,
     force: bool,
@@ -409,7 +409,7 @@ fn missing_library_bytes(
 }
 
 fn missing_initial_minecraft_bytes(
-    st: &State,
+    st: &Engine,
     version: &GameVersionInfo,
     java_arch: &str,
     force: bool,
@@ -429,7 +429,7 @@ fn missing_initial_minecraft_bytes(
 
 #[allow(clippy::too_many_arguments)]
 pub fn download_minecraft<'a>(
-    st: &'a State,
+    st: &'a Engine,
     version: &'a GameVersionInfo,
     loading_bar: Option<&'a LoadingBarId>,
     java_arch: &'a str,
@@ -452,7 +452,7 @@ pub fn download_minecraft<'a>(
 
 #[tracing::instrument(skip(st, version, reporter))]
 async fn download_minecraft_inner(
-    st: &State,
+    st: &Engine,
     version: &GameVersionInfo,
     loading_bar: Option<&LoadingBarId>,
     java_arch: &str,
@@ -527,7 +527,7 @@ async fn download_minecraft_inner(
 #[tracing::instrument(skip_all, fields(version = version.id.as_str(), loader = ?loader))]
 
 pub async fn download_version_info(
-    st: &State,
+    st: &Engine,
     version: &GameVersion,
     loader: Option<&LoaderVersion>,
     force: Option<bool>,
@@ -640,7 +640,7 @@ pub async fn download_version_info(
 #[tracing::instrument(skip_all)]
 
 pub async fn download_client(
-    st: &State,
+    st: &Engine,
     version_info: &GameVersionInfo,
     loading_bar: Option<&LoadingBarId>,
     force: bool,
@@ -690,7 +690,7 @@ pub async fn download_client(
 #[tracing::instrument(skip_all)]
 
 pub async fn download_assets_index(
-    st: &State,
+    st: &Engine,
     version: &GameVersionInfo,
     loading_bar: Option<&LoadingBarId>,
     force: bool,
@@ -746,7 +746,7 @@ pub async fn download_assets_index(
 #[tracing::instrument(skip(st, index))]
 
 pub async fn download_assets(
-    st: &State,
+    st: &Engine,
     with_legacy: bool,
     index: &AssetsIndex,
     loading_bar: Option<&LoadingBarId>,
@@ -843,7 +843,7 @@ pub async fn download_assets(
 #[tracing::instrument(skip(st, libraries))]
 #[allow(clippy::too_many_arguments)]
 pub async fn download_libraries(
-    st: &State,
+    st: &Engine,
     libraries: &[Library],
     version: &str,
     loading_bar: Option<&LoadingBarId>,
@@ -1056,7 +1056,7 @@ pub async fn download_libraries(
 
 #[tracing::instrument(skip_all)]
 pub async fn download_log_config(
-    st: &State,
+    st: &Engine,
     version_info: &GameVersionInfo,
     loading_bar: Option<&LoadingBarId>,
     force: bool,

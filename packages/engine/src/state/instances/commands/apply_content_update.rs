@@ -9,8 +9,8 @@ use crate::state::instances::{
     adapters::sqlite::{content_rows, instance_rows},
 };
 use crate::state::{
-    CacheBehaviour, CachedEntry, CachedFile, Dependency, DependencyType, State,
-    Version,
+    CacheBehaviour, CachedEntry, CachedFile, Dependency, DependencyType,
+    Engine, Version,
 };
 use crate::util::fetch::DownloadReason;
 use anyhow::bail;
@@ -93,7 +93,7 @@ struct ResolvedDependency {
 pub(crate) async fn update_project(
     instance_id: &str,
     project_path: &str,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<String> {
     let updates = check_content_updates(
         instance_id,
@@ -115,7 +115,7 @@ async fn apply_content_update(
     instance_id: &str,
     project_path: &str,
     update: &ContentUpdate,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<String> {
     let enabled = content_rows::get_instance_file_by_relative_path(
         instance_id,
@@ -162,7 +162,7 @@ pub(crate) async fn apply_bulk_update(
     instance_id: &str,
     plan: BulkUpdatePlan,
     reporter: InstallProgressReporter,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<()> {
     let download_total =
         plan.project_updates.len() + plan.dependency_additions.len();
@@ -272,7 +272,7 @@ async fn download_planned_projects(
     instance_id: &str,
     plan: &BulkUpdatePlan,
     reporter: &InstallProgressReporter,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Vec<DownloadedBulkProject>> {
     let planned = plan
         .project_updates
@@ -373,7 +373,7 @@ async fn download_planned_projects(
 pub(crate) async fn plan_bulk_update(
     instance_id: &str,
     selections: &[ContentUpdateSelection],
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<BulkUpdatePlan> {
     let shared_instance_member =
         is_shared_instance_member(instance_id, &state.pool).await?;
@@ -595,7 +595,7 @@ pub(crate) async fn plan_bulk_update(
 async fn bulk_updateable_project_paths(
     instance_id: &str,
     shared_instance_member: bool,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<HashSet<String>> {
     let items = super::list_content::list_content(
         instance_id,
@@ -621,7 +621,7 @@ async fn bulk_updateable_project_paths(
 async fn installed_projects(
     instance_id: &str,
     content_set: &ContentSet,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Vec<InstalledProject>> {
     let instance = instance_rows::get_instance_by_id(instance_id, &state.pool)
         .await?
@@ -707,7 +707,7 @@ async fn is_shared_instance_member(
 async fn dependency_closure(
     root_versions: Vec<Version>,
     content_set: &ContentSet,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<HashMap<String, ResolvedDependency>> {
     let mut output = HashMap::new();
     let mut stack = root_versions;
@@ -769,7 +769,7 @@ fn is_required_dependency(
 async fn resolve_dependency_version(
     dependency: &Dependency,
     content_set: &ContentSet,
-    state: &State,
+    state: &Engine,
     version_cache: &mut HashMap<String, Option<Version>>,
     project_versions_cache: &mut HashMap<String, Option<Vec<Version>>>,
 ) -> crate::Result<Option<Version>> {
@@ -795,7 +795,7 @@ async fn resolve_dependency_version(
 async fn cached_version(
     version_id: &str,
     version_cache: &mut HashMap<String, Option<Version>>,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Option<Version>> {
     if !version_cache.contains_key(version_id) {
         let version = CachedEntry::get_version(
@@ -815,7 +815,7 @@ async fn cached_version(
 async fn cached_project_versions(
     project_id: &str,
     project_versions_cache: &mut HashMap<String, Option<Vec<Version>>>,
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Option<Vec<Version>>> {
     if !project_versions_cache.contains_key(project_id) {
         let versions = CachedEntry::get_project_versions(

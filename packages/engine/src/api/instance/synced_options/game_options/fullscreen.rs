@@ -2,7 +2,7 @@
 
 use super::CATALOG_REVISION;
 use crate::state::{
-    CanonicalValue, State, load_game_option_preferences,
+    CanonicalValue, Engine, load_game_option_preferences,
     load_game_options_sync_state, load_shared_game_options,
 };
 use chrono::Utc;
@@ -11,7 +11,7 @@ use sqlx::{Sqlite, Transaction};
 const FULLSCREEN_OPTION_ID: &str = "fullscreen";
 
 pub(crate) async fn shared_fullscreen_value(
-    state: &State,
+    state: &Engine,
 ) -> crate::Result<Option<bool>> {
     let preferences = load_game_option_preferences(&state.pool).await?;
     if !preferences
@@ -33,7 +33,7 @@ pub(crate) async fn shared_fullscreen_value(
 }
 
 pub(crate) async fn update_shared_fullscreen_from_app(
-    state: &State,
+    state: &Engine,
     value: bool,
 ) -> crate::Result<bool> {
     let values = load_shared_game_options(&state.pool).await?;
