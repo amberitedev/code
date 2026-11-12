@@ -8,6 +8,7 @@ pub mod desktop;
 pub mod events;
 pub mod files;
 pub mod health;
+pub mod library;
 
 #[cfg(test)]
 mod tests {
@@ -33,6 +34,7 @@ mod tests {
             ThumbnailQuery,
         },
         health::CheckHealth,
+        library::{ListRecentIconConfigs, RecentIconConfigs},
     };
     use crate::server::events::{
         AmberiteCommand, AppEvent, Command, LocalEvent,
@@ -68,6 +70,7 @@ mod tests {
             AppEvent::decl(&cfg),
             Command::decl(&cfg),
             AmberiteCommand::decl(&cfg),
+            RecentIconConfigs::decl(&cfg),
         ]
         .map(|declaration| format!("\nexport {declaration}\n"))
         .concat();
@@ -75,7 +78,7 @@ mod tests {
             "// Generated from apps/app by ts-rs. Do not edit.\n\
              // Regenerate: cargo test -p theseus_gui -- --ignored write_ts\n\n\
              import type {{ CoreSession, Endpoint }} from './contracts'\n\
-             import type {{ CommandPayload, EngineEvent, FriendPayload, InstanceGroupsChangedPayload, OnboardingChecklist }} from './engine'\n\
+             import type {{ CommandPayload, EngineEvent, FriendPayload, IconConfig, InstanceGroupsChangedPayload, OnboardingChecklist }} from './engine'\n\
              {declarations}\n\
              export const health = {{\n\
              \tcheckHealth: {},\n\
@@ -109,6 +112,8 @@ mod tests {
              \tcreateShortcut: {},\n\
              \tcheckNetworkMetered: {},\n\
              \tlogFromWebview: {},\n\
+             export const library = {{\n\
+             \tlistRecentIconConfigs: {},\n\
              }}\n",
             endpoint::<CheckHealth>(),
             endpoint::<GetBoot>(),
@@ -131,6 +136,7 @@ mod tests {
             endpoint::<CreateShortcut>(),
             endpoint::<CheckNetworkMetered>(),
             endpoint::<LogFromWebview>(),
+            endpoint::<ListRecentIconConfigs>(),
         )
     }
 

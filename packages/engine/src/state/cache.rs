@@ -323,6 +323,7 @@ pub struct CachedFileUpdate {
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub enum ReleaseChannel {
     Release,
     Beta,

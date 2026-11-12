@@ -3,11 +3,19 @@
  * So, for example, addDefaultInstance creates a blank instance object, where the Rust struct is serialized,
  *  and deserialized into a usable JS object.
  */
-import { ContractClient, desktop, type IconConfig, type Labrinth } from '@modrinth/api-client'
+import {
+	ContractClient,
+	desktop,
+	type IconConfig,
+	instances,
+	type Labrinth,
+	library,
+} from '@modrinth/api-client'
 import { type ContentItem, type ContentOwner, getIconSymbolAsset } from '@modrinth/ui'
 import { Channel, invoke } from '@tauri-apps/api/core'
 
 import { localFileUrl, localTransport } from '@/platform/local'
+import { apiClient } from '@/platform/modrinth-client'
 
 import type { InstallJobSnapshot, SharedInstanceUpdateDiff } from './install'
 import type {
@@ -30,11 +38,13 @@ export async function remove(instanceId: string): Promise<void> {
 }
 
 export async function get(instanceId: string): Promise<GameInstance | null> {
-	return await invoke('plugin:instance|instance_get', { instanceId })
+	return await apiClient.local.call(instances.GetInstance, { params: { id: instanceId } })
 }
 
 export async function get_many(instanceIds: string[]): Promise<GameInstance[]> {
-	return await invoke('plugin:instance|instance_get_many', { instanceIds })
+	return await apiClient.local.call(instances.GetInstances, {
+		query: { ids: JSON.stringify(instanceIds) },
+	})
 }
 
 export async function get_projects(
@@ -434,7 +444,7 @@ export async function get_optimal_jre_key(instanceId: string): Promise<JavaVersi
 }
 
 export async function list(): Promise<GameInstance[]> {
-	return await invoke('plugin:instance|instance_list')
+	return await apiClient.local.call(instances.ListInstances)
 }
 
 export async function check_installed(instanceId: string, projectId: string): Promise<boolean> {
@@ -710,7 +720,7 @@ export async function shared_icon_path(
 }
 
 export async function get_recent_icon_configs(): Promise<IconConfig[]> {
-	return await invoke('plugin:instance|instance_get_recent_icon_configs')
+	return await apiClient.local.call(library.listRecentIconConfigs)
 }
 
 export type SharedInstanceUsers = {

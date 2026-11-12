@@ -11,12 +11,15 @@ const MAX_GROUP_NAME_LENGTH: usize = 256;
 pub const FAVORITES_GROUP_ID: &str = "group:favorites";
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", ts(rename = "InstanceGroupDefinition"))]
 pub struct InstanceGroup {
     pub id: String,
     pub name: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct InstanceGroupMembershipUpdate {
     pub instance_id: String,
     pub group_ids: Vec<String>,

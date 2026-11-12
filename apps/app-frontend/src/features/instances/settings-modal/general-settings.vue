@@ -45,7 +45,7 @@ type ReleaseChannel = GameInstance['update_channel']
 const releaseChannelOptions: ReleaseChannel[] = ['release', 'beta', 'alpha']
 
 const title = ref(instance.value.name)
-const icon: Ref<string | undefined> = ref(instance.value.icon_path)
+const icon: Ref<string | undefined> = ref(instance.value.icon_path ?? undefined)
 const iconConfig = ref<IconConfig | null>(instance.value.icon_config ?? null)
 const savingReleaseChannel = ref(false)
 const selectedReleaseChannel = ref<ReleaseChannel>(instance.value.update_channel)
@@ -58,7 +58,7 @@ const installing = computed(() => instance.value.install_stage !== 'installed')
 watch(
 	() => [instance.value.id, instance.value.icon_path, instance.value.icon_config] as const,
 	() => {
-		icon.value = instance.value.icon_path
+		icon.value = instance.value.icon_path ?? undefined
 		iconConfig.value = instance.value.icon_config ?? null
 	},
 )

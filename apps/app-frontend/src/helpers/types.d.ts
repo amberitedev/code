@@ -1,66 +1,14 @@
-import type { IconConfig } from '@modrinth/api-client'
+import type {
+	GameInstance as InstanceResponse,
+	InstanceLink as InstanceLinkResponse,
+} from '@modrinth/api-client'
 import type { ModrinthId } from '@modrinth/utils'
 
-export type GameInstance = {
-	id: string
-	path: string
-	install_stage: InstallStage
-	launcher_feature_version: string
+export type { SharedInstanceAttachment } from '@modrinth/api-client'
 
-	name: string
-	icon_path?: string
-	icon_config?: IconConfig | null
+export type GameInstance = Omit<InstanceResponse, 'link'> & { link: InstanceLink | null }
 
-	game_version: string
-	protocol_version?: number
-	loader: InstanceLoader
-	loader_version?: string
-
-	group_ids: string[]
-	synced_options: {
-		resource_packs: boolean
-		data_packs: boolean
-		game_options: boolean
-		command_history: boolean
-		multiplayer_servers: boolean
-		creative_hotbars: boolean
-		screenshots: boolean
-	}
-
-	link?: InstanceLink | null
-	shared_instance?: SharedInstanceAttachment | null
-	quarantined: boolean
-	update_channel: ReleaseChannel
-
-	created: Date
-	modified: Date
-	last_played?: Date
-
-	submitted_time_played: number
-	recent_time_played: number
-
-	java_path?: string
-	extra_launch_args?: string[]
-	custom_env_vars?: [string, string][]
-
-	memory?: MemorySettings
-	force_fullscreen?: boolean
-	game_resolution?: [number, number]
-	hooks: Hooks
-	visible_tabs: {
-		files: boolean
-		worlds: boolean
-		screenshots: boolean
-	}
-}
-
-type InstallStage =
-	| 'installed'
-	| 'minecraft_installing'
-	| 'pack_installed'
-	| 'pack_installing'
-	| 'not_installed'
-
+/** Every variant's ids, readable without narrowing. */
 type InstanceLinkIdentity = {
 	project_id?: ModrinthId | null
 	version_id?: ModrinthId | null
@@ -69,69 +17,9 @@ type InstanceLinkIdentity = {
 	content_version_id?: ModrinthId | null
 }
 
-export type InstanceLink = InstanceLinkIdentity &
-	(
-		| {
-				type: 'modrinth_modpack'
-				project_id: ModrinthId
-				version_id: ModrinthId
-		  }
-		| {
-				type: 'server_project'
-				project_id: ModrinthId
-		  }
-		| {
-				type: 'server_project_modpack'
-				server_project_id: ModrinthId
-				content_project_id?: ModrinthId | null
-				content_version_id: ModrinthId
-				project_id?: ModrinthId
-				version_id?: ModrinthId
-		  }
-		| {
-				type: 'imported_modpack'
-				project_id?: ModrinthId | null
-				version_id?: ModrinthId | null
-				name?: string | null
-				version_number?: string | null
-				filename?: string | null
-		  }
-		| {
-				type: 'modrinth_hosting'
-				server_id: string
-				instance_ids: string[]
-				active_instance_id?: string | null
-		  }
-		| {
-				type: 'shared_instance'
-				modpack_project_id?: ModrinthId | null
-				modpack_version_id?: ModrinthId | null
-		  }
-	)
-
-export type SharedInstanceAttachment = {
-	id: string
-	role: 'owner' | 'member'
-	manager_id?: string | null
-	server_manager_name?: string | null
-	server_manager_icon_url?: string | null
-	linked_user_id?: string | null
-	status:
-		| 'unknown'
-		| 'up_to_date'
-		| 'update_available'
-		| 'applying'
-		| 'stale'
-		| 'not_ready'
-		| 'error'
-	applied_version?: number | null
-	latest_version?: number | null
-	restored_from_remote?: boolean
-}
+export type InstanceLink = InstanceLinkIdentity & InstanceLinkResponse
 
 export type Instance = GameInstance
-
-type ReleaseChannel = 'release' | 'beta' | 'alpha'
 
 export type InstanceLoader = 'vanilla' | 'forge' | 'fabric' | 'quilt' | 'neoforge'
 

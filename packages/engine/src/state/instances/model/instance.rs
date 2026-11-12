@@ -10,6 +10,7 @@ pub use modrinth_content_management::icons::{IconBackground, IconConfig};
 #[derive(
     Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize,
 )]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct InstanceSyncedOptions {
     #[serde(default)]
     pub game_options: bool,

@@ -17,13 +17,18 @@ use std::{
 
 use axum::{
     Router,
-    extract::{Request, State},
+    extract::{FromRef, Request, State},
+    http::request::Parts,
     middleware::{self, Next},
     response::{IntoResponse, Response},
 };
 use contracts::{
-    Empty, Json,
+    ApiError, Empty, Json,
     server::{Req, route},
+};
+use engine::{
+    Engine,
+    access::{Access, BoxFuture, Caller, Permission},
 };
 use tauri::{Runtime, plugin::TauriPlugin};
 use url::Url;
@@ -32,6 +37,7 @@ use crate::{
     cores::{self, Cores},
     desktop::{self, AppSlot},
     engine_handle::EngineHandle,
+    library,
 };
 
 use endpoints::{
@@ -88,7 +94,8 @@ impl LocalServer {
         format!("http://127.0.0.1:{}/{}", self.port(), self.secret)
     }
 
-    /// `/health` and `/app/boot` answer from bind; `/events` waits for the engine.
+    /// `/health` and `/app/boot` answer from bind; `/events` and the routes over the engine wait
+    /// for it.
     pub fn router(
         &self,
         boot: Boot,
@@ -111,9 +118,21 @@ impl LocalServer {
                 async move { Json(boot) }
             });
         let (events_path, events) = events::route(events);
-        let waiting = Router::new().route(events_path, events).route_layer(
-            middleware::from_fn_with_state(engine.clone(), wait_for_engine),
-        );
+        let state = AppState {
+            engine: engine.clone(),
+            access: Arc::new(AppAccess),
+        };
+        let waiting = Router::new()
+            .route(events_path, events)
+            .merge(
+                engine::routes::routes()
+                    .merge(library::routes::routes())
+                    .with_state(state),
+            )
+            .route_layer(middleware::from_fn_with_state(
+                engine.clone(),
+                wait_for_engine,
+            ));
         let routes = Router::new()
             .route(health_path, health)
             .route(boot_path, boot)
@@ -167,6 +186,49 @@ impl LocalServer {
         if let Err(error) = axum::serve(listener, router).await {
             tracing::error!(%error, "The App's local server stopped");
         }
+    }
+}
+
+/// What the routes over the engine read.
+#[derive(Clone)]
+pub struct AppState {
+    engine: EngineHandle,
+    access: Arc<dyn Access>,
+}
+
+impl FromRef<AppState> for Arc<Engine> {
+    fn from_ref(state: &AppState) -> Self {
+        state
+            .engine
+            .try_get()
+            .expect("wait_for_engine holds these routes until the engine is up")
+    }
+}
+
+impl FromRef<AppState> for Arc<dyn Access> {
+    fn from_ref(state: &AppState) -> Self {
+        Arc::clone(&state.access)
+    }
+}
+
+/// The App's one local user may do everything.
+struct AppAccess;
+
+impl Access for AppAccess {
+    fn caller<'a>(
+        &'a self,
+        _: &'a Parts,
+    ) -> BoxFuture<'a, Result<Caller, ApiError>> {
+        Box::pin(async { Ok(Caller::Local) })
+    }
+
+    fn require<'a>(
+        &'a self,
+        _: &'a Caller,
+        _: Option<&'a str>,
+        _: Permission,
+    ) -> BoxFuture<'a, Result<Permission, ApiError>> {
+        Box::pin(async { Ok(Permission::Owner) })
     }
 }
 

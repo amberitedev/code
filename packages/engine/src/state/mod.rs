@@ -358,14 +358,14 @@ impl Engine {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::state::instances::adapters::sqlite::{
         content_rows, instance_rows,
     };
     use std::path::Path;
 
-    pub(super) async fn add_instance(state: &Engine, id: &str, path: &str) {
+    pub(crate) async fn add_instance(state: &Engine, id: &str, path: &str) {
         let now = chrono::Utc::now();
         let content_set_id = format!("content-set:{id}");
         let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await.unwrap();
@@ -423,7 +423,7 @@ mod tests {
         tx.commit().await.unwrap();
     }
 
-    pub(super) async fn engine(settings_dir: PathBuf) -> Arc<Engine> {
+    pub(crate) async fn engine(settings_dir: PathBuf) -> Arc<Engine> {
         Engine::new(EngineConfig {
             settings_dir,
             events: EventSink::new(),

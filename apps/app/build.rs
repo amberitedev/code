@@ -208,8 +208,6 @@ fn main() {
                 InlinedPlugin::new()
                     .commands(&[
                         "instance_remove",
-                        "instance_get",
-                        "instance_get_many",
                         "instance_get_projects",
                         "instance_get_installed_project_ids",
                         "instance_get_install_candidates",
@@ -263,13 +261,6 @@ fn main() {
                         "instance_set_synced_pack_enabled",
                         "instance_remove_synced_pack",
                         "instance_rebuild_synced_options",
-                        "instance_list",
-                        "instance_list_groups",
-                        "instance_create_group",
-                        "instance_rename_group",
-                        "instance_delete_group",
-                        "instance_set_group_order",
-                        "instance_set_group_memberships",
                         "instance_check_installed",
                         "instance_update_project",
                         "instance_add_project_from_version",
@@ -289,7 +280,6 @@ fn main() {
                         "instance_cache_icon",
                         "instance_edit_generated_icon",
                         "instance_cache_generated_icon",
-                        "instance_get_recent_icon_configs",
                         "instance_share_can_current_user_use",
                         "instance_share_get_users",
                         "instance_share_invite_users",
@@ -352,7 +342,6 @@ fn main() {
                     .commands(&[
                         "export_debug_info",
                         "cancel_debug_info_export",
-                        "progress_bars_list",
                         "get_opening_command",
                     ])
                     .default_permission(

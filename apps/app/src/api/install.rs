@@ -1,7 +1,7 @@
 use crate::api::Result;
-use crate::api::instance::InstanceLink;
 use crate::engine_handle::EngineHandle;
 use engine::data::ModLoader;
+use engine::endpoints::instances::InstanceLink;
 use engine::install::{
     InstallJobSnapshot, InstallModpackPreview, InstallPostInstallEdit,
 };

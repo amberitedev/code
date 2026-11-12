@@ -7,6 +7,16 @@ use ts_rs::TS;
 
 use crate::{
     api::pack::import::ImportLauncherType,
+    endpoints::{
+        groups::{
+            self, InstanceGroupRef, InstanceGroupUpdate, NewInstanceGroup,
+        },
+        instances::{
+            self, Instance, InstanceIds, InstanceLink, InstanceRef,
+            SharedInstanceAttachment,
+        },
+        loading,
+    },
     event::*,
     install::{
         InstallErrorContext, InstallErrorView, InstallJavaStep, InstallJobKind,
@@ -14,7 +24,12 @@ use crate::{
         InstallPhaseId, InstallProgress, InstallProgressSecondary,
         model::{InstallApiErrorDetails, InstallJobDisplay, InstallTarget},
     },
-    state::{Log4jEvent, ModLoader, OnboardingChecklist},
+    instance::{InstanceGroup, InstanceGroupMembershipUpdate},
+    state::{
+        Hooks, IconBackground, IconConfig, InstanceSyncedOptions,
+        InstanceTabVisibility, Log4jEvent, MemorySettings, ModLoader,
+        OnboardingChecklist, ReleaseChannel, SharedInstanceRole, WindowSize,
+    },
 };
 
 const PATH: &str =
@@ -49,6 +64,26 @@ fn file() -> String {
         LogPayload::decl(&cfg),
         LogEvent::decl(&cfg),
         Log4jEvent::decl(&cfg),
+        LoadingBar::decl(&cfg),
+        Instance::decl(&cfg),
+        InstanceLink::decl(&cfg),
+        SharedInstanceAttachment::decl(&cfg),
+        SharedInstanceRole::decl(&cfg),
+        InstanceSyncedOptions::decl(&cfg),
+        InstanceTabVisibility::decl(&cfg),
+        ReleaseChannel::decl(&cfg),
+        MemorySettings::decl(&cfg),
+        WindowSize::decl(&cfg),
+        Hooks::decl(&cfg),
+        IconConfig::decl(&cfg),
+        IconBackground::decl(&cfg),
+        InstanceRef::decl(&cfg),
+        InstanceIds::decl(&cfg),
+        InstanceGroup::decl(&cfg),
+        InstanceGroupMembershipUpdate::decl(&cfg),
+        InstanceGroupRef::decl(&cfg),
+        NewInstanceGroup::decl(&cfg),
+        InstanceGroupUpdate::decl(&cfg),
         // The payloads of the App's events that engine code still raises.
         FriendPayload::decl(&cfg),
         FriendStatusPayload::decl(&cfg),
@@ -58,9 +93,17 @@ fn file() -> String {
     ]
     .map(|declaration| format!("\nexport {declaration}\n"))
     .concat();
+    let modules = [
+        ("instances", instances::ts_entries()),
+        ("instanceGroups", groups::ts_entries()),
+        ("loadingBars", loading::ts_entries()),
+    ]
+    .map(|(name, entries)| format!("\nexport const {name} = {{\n{entries}}}\n"))
+    .concat();
     format!(
         "// Generated from packages/engine by ts-rs. Do not edit.\n\
-         // Regenerate: cargo test -p engine -- --ignored write_ts\n{declarations}"
+         // Regenerate: cargo test -p engine -- --ignored write_ts\n\n\
+         import type {{ Endpoint }} from './contracts'\n{declarations}{modules}"
     )
 }
 

@@ -15,6 +15,7 @@ mod cores;
 mod desktop;
 mod dev;
 mod engine_handle;
+mod library;
 mod server;
 
 #[cfg(target_os = "macos")]

@@ -343,16 +343,22 @@ async fn a_failed_start_answers_engine_unavailable() {
     let handle = EngineHandle::default();
     handle.set(Err(anyhow::anyhow!("the data folder is in use")));
     let local = local_with(handle);
-    let request = Request::get(format!("/{}/events", local.secret))
-        .header(HOST, &local.host)
-        .header(ORIGIN, "tauri://localhost")
-        .body(Body::empty())
-        .unwrap();
-    let response = local.send(request).await;
-    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    assert_eq!(
-        serde_json::from_slice::<Value>(&body).unwrap(),
-        json!({ "error": "engine_unavailable", "description": "the data folder is in use" })
-    );
+    for path in ["events", "instances", "app/library/recent-icon-configs"] {
+        let request = Request::get(format!("/{}/{path}", local.secret))
+            .header(HOST, &local.host)
+            .header(ORIGIN, "tauri://localhost")
+            .body(Body::empty())
+            .unwrap();
+        let response = local.send(request).await;
+        assert_eq!(
+            response.status(),
+            StatusCode::SERVICE_UNAVAILABLE,
+            "{path}"
+        );
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Value>(&body).unwrap(),
+            json!({ "error": "engine_unavailable", "description": "the data folder is in use" })
+        );
+    }
 }

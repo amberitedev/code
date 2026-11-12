@@ -3,14 +3,14 @@
  * So, for example, addDefaultInstance creates a blank instance object, where the Rust struct is serialized,
  *  and deserialized into a usable JS object.
  */
-import { ApiCallError, type Command, events } from '@modrinth/api-client'
+import { ApiCallError, type Command, events, loadingBars } from '@modrinth/api-client'
 import { invoke } from '@tauri-apps/api/core'
 
 import { apiClient } from '@/platform/modrinth-client'
 
 export interface LoadingBarType {
 	type?: string
-	version?: string
+	version?: string | number
 	instance_id?: string
 	instance_name?: string
 	pack_name?: string
@@ -42,8 +42,8 @@ export async function initialize_state(openEvents: () => Promise<void>) {
 }
 
 // Gets active progress bars
-export async function progress_bars_list() {
-	return await invoke<Record<string, LoadingBar>>('plugin:utils|progress_bars_list')
+export async function progress_bars_list(): Promise<Record<string, LoadingBar>> {
+	return await apiClient.local.call(loadingBars.ListLoadingBars)
 }
 
 // Get opening command

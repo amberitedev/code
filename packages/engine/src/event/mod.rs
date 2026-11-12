@@ -111,6 +111,7 @@ pub enum DesktopEvent {
 }
 
 #[derive(Serialize, Debug, Clone)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct LoadingBar {
     // loading_bar_uuid not be used directly by external functions as it may not reflect the current state of the loading bar/hashmap
     pub loading_bar_uuid: Uuid,

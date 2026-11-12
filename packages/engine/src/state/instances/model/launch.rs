@@ -4,6 +4,7 @@ use crate::state::{
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct InstanceTabVisibility {
     pub files: bool,
     pub worlds: bool,

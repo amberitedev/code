@@ -38,20 +38,9 @@ pub fn init<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
         .invoke_handler(tauri::generate_handler![
             export_debug_info,
             cancel_debug_info_export,
-            progress_bars_list,
             get_opening_command,
         ])
         .build()
-}
-
-// Lists active progress bars
-// Create a new HashMap with the same keys
-// Values provided should not be used directly, as they are not guaranteed to be up-to-date
-#[tauri::command]
-pub async fn progress_bars_list(
-    events: tauri::State<'_, engine::EventSink>,
-) -> Result<DashMap<uuid::Uuid, engine::LoadingBar>> {
-    Ok(events.loading_bars())
 }
 
 #[tauri::command]

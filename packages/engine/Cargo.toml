@@ -16,6 +16,7 @@ async-recursion = { workspace = true }
 async-trait = { workspace = true }
 async-tungstenite = { workspace = true, features = ["tokio-runtime", "tokio-rustls-webpki-roots"] }
 async-walkdir = { workspace = true }
+axum = { version = "0.8.4", default-features = false, features = ["json", "query"] }
 
 base64 = { workspace = true }
 bedrock = { workspace = true }
@@ -24,7 +25,7 @@ bytemuck = { workspace = true, features = ["extern_crate_alloc"] }
 bytes = { workspace = true, features = ["serde"] }
 chardetng = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
-contracts = { workspace = true, features = ["client"] }
+contracts = { workspace = true, features = ["client", "server"] }
 dashmap = { workspace = true, features = ["serde"] }
 data-url = { workspace = true }
 derive_more = { workspace = true, features = ["display"] }
@@ -127,6 +128,8 @@ zip = { workspace = true }
 contracts = { workspace = true, features = ["ts"] }
 # Turns `export-ts` on for the engine's own tests, which write its TypeScript.
 engine = { path = ".", features = ["export-ts"] }
+http-body-util = "0.1.3"
+tower = { version = "0.5.2", features = ["util"] }
 
 [build-dependencies]
 dotenvy = { workspace = true }
@@ -141,7 +144,7 @@ windows-core = { workspace = true }
 winreg = { workspace = true }
 
 [features]
-export-ts = ["bedrock/export-ts", "dep:ts-rs"]
+export-ts = ["bedrock/export-ts", "dep:ts-rs", "modrinth-content-management/ts"]
 tauri = ["dep:tauri"]
 
 [lints]

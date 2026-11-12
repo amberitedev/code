@@ -47,6 +47,7 @@ pub enum InstanceLink {
     Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize,
 )]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub enum SharedInstanceRole {
     Owner,
     #[default]

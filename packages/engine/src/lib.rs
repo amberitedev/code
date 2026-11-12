@@ -10,12 +10,15 @@ and launching Modrinth mod packs
 #[macro_use]
 mod util;
 
+pub mod access;
 mod api;
+pub mod endpoints;
 mod error;
 mod event;
 pub mod install;
 mod launcher;
 mod logger;
+pub mod routes;
 pub mod self_hosted;
 mod state;
 #[cfg(test)]
