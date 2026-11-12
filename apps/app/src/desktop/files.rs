@@ -27,7 +27,10 @@ use tokio_util::io::ReaderStream;
 use super::thumbnails;
 use crate::{
     engine_handle::EngineHandle,
-    server::endpoints::files::{CacheRemoteIcon, GetLocalFile, GetThumbnail},
+    server::endpoints::files::{
+        CacheRemoteIcon, FileStat, GetLocalFile, GetThumbnail, ReadLocalFile,
+        StatLocalFile,
+    },
 };
 
 pub fn routes(engine: EngineHandle) -> Router {
@@ -35,11 +38,69 @@ pub fn routes(engine: EngineHandle) -> Router {
     let (thumbnail_path, thumbnail) = route::<GetThumbnail, _, _, _>(thumbnail);
     let (remote_icon_path, remote_icon) =
         route::<CacheRemoteIcon, _, _, _>(cache_remote_icon);
+    let (read_path, read) = route::<ReadLocalFile, _, _, _>(read_file);
+    let (stat_path, stat) = route::<StatLocalFile, _, _, _>(stat_file);
     Router::new()
         .route(file_path, file)
         .route(thumbnail_path, thumbnail)
         .route(remote_icon_path, remote_icon)
+        .route(read_path, read)
+        .route(stat_path, stat)
         .with_state(engine)
+}
+
+async fn read_file(
+    Req { query, .. }: Req<ReadLocalFile>,
+) -> Result<Response, ApiError> {
+    let metadata = tokio::fs::metadata(&query.path)
+        .await
+        .map_err(|error| file_error(&query.path, &error))?;
+    if !metadata.is_file() {
+        return Err(not_a_file(&query.path));
+    }
+    let file = tokio::fs::File::open(&query.path)
+        .await
+        .map_err(|error| file_error(&query.path, &error))?;
+    Ok((
+        [(CONTENT_LENGTH, HeaderValue::from(metadata.len()))],
+        Body::from_stream(ReaderStream::new(file)),
+    )
+        .into_response())
+}
+
+async fn stat_file(
+    Req { query, .. }: Req<StatLocalFile>,
+) -> Result<Json<FileStat>, ApiError> {
+    let metadata = tokio::fs::metadata(&query.path)
+        .await
+        .map_err(|error| file_error(&query.path, &error))?;
+    if !metadata.is_file() {
+        return Err(not_a_file(&query.path));
+    }
+    let name = query.path.file_name().map_or_else(
+        || "file".to_owned(),
+        |name| name.to_string_lossy().into_owned(),
+    );
+    Ok(Json(FileStat {
+        name,
+        size: metadata.len(),
+    }))
+}
+
+fn file_error(path: &Path, error: &std::io::Error) -> ApiError {
+    let code = if error.kind() == std::io::ErrorKind::NotFound {
+        ErrorCode::NotFound
+    } else {
+        ErrorCode::InternalError
+    };
+    ApiError::new(code, format!("Could not read {}: {error}", path.display()))
+}
+
+fn not_a_file(path: &Path) -> ApiError {
+    ApiError::new(
+        ErrorCode::InvalidInput,
+        format!("{} is not a file.", path.display()),
+    )
 }
 
 async fn local_file(
@@ -189,12 +250,17 @@ fn not_found() -> Response {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use axum::http::{
         HeaderMap, StatusCode,
         header::{CACHE_CONTROL, ETAG, IF_NONE_MATCH},
     };
+    use contracts::{Empty, Endpoint, ErrorCode, Json, server::Req};
+    use http_body_util::BodyExt;
 
-    use super::{is_cached_icon, serve};
+    use super::{is_cached_icon, read_file, serve, stat_file};
+    use crate::server::endpoints::files::LocalFileQuery;
 
     #[tokio::test]
     async fn a_matching_etag_is_not_modified_until_the_file_changes() {
@@ -254,6 +320,42 @@ mod tests {
         for path in [folder.path().to_owned(), folder.path().join("missing")] {
             let response = serve(&path, false, &HeaderMap::new()).await;
             assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        }
+    }
+
+    fn query<E>(path: &Path) -> Req<E>
+    where
+        E: Endpoint<Params = (), Query = LocalFileQuery, Body = Empty>,
+    {
+        Req {
+            params: (),
+            query: LocalFileQuery {
+                path: path.to_owned(),
+            },
+            body: (),
+        }
+    }
+
+    #[tokio::test]
+    async fn fs_routes_read_a_file_and_refuse_a_folder() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("skin.png");
+        std::fs::write(&path, b"bytes").unwrap();
+
+        let response = read_file(query(&path)).await.unwrap();
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(&body[..], b"bytes");
+        let Json(stat) = stat_file(query(&path)).await.unwrap();
+        assert_eq!((stat.name.as_str(), stat.size), ("skin.png", 5));
+
+        let rows = [
+            (folder.path().to_owned(), ErrorCode::InvalidInput),
+            (folder.path().join("missing"), ErrorCode::NotFound),
+        ];
+        for (path, code) in rows {
+            let read = read_file(query(&path)).await.err().unwrap();
+            let stat = stat_file(query(&path)).await.err().unwrap();
+            assert_eq!((read.error, stat.error), (code, code), "{path:?}");
         }
     }
 }

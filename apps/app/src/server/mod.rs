@@ -25,7 +25,7 @@ use url::Url;
 
 use crate::{
     cores::{self, Cores},
-    desktop,
+    desktop::{self, AppSlot},
     engine_handle::EngineHandle,
 };
 
@@ -88,6 +88,7 @@ impl LocalServer {
         boot: Boot,
         events: events::Events,
         engine: EngineHandle,
+        app: AppSlot,
     ) -> Router {
         let guard = Arc::new(Guard::new(
             self.secret.clone(),
@@ -109,7 +110,7 @@ impl LocalServer {
             .route(boot_path, boot)
             .route(events_path, events)
             .merge(cores::routes(Arc::clone(&self.cores)))
-            .merge(desktop::files::routes(engine));
+            .merge(desktop::routes(engine, app));
         Router::new()
             .nest(&format!("/{}", self.secret), routes)
             .layer(middleware::from_fn_with_state(guard, guard::guard))

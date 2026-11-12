@@ -2,9 +2,6 @@
 	const internals = window.__TAURI_INTERNALS__
 	const label = internals?.metadata?.currentWebview?.label
 	if (window.top !== window || label !== 'main') return
-	if (typeof internals?.invoke !== 'function') return
-
-	const invoke = internals.invoke
 
 	function serialize(value) {
 		try {
@@ -36,10 +33,17 @@
 		console[method] = function (...args) {
 			const result = original.apply(this, args)
 			try {
+				// The local server's init script sets the base; it may run after this one.
+				const base = window.__AMBERITE_LOCAL__
+				if (!base) return result
 				if (method === 'trace') args.push(new Error('console.trace').stack)
-				void invoke('plugin:logs|logs_log_webview', {
-					level: method === 'log' ? 'info' : method,
-					message: args.map(serialize).join(' '),
+				void fetch(`${base}/app/webview-log`, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+						level: method === 'log' ? 'info' : method,
+						message: args.map(serialize).join(' '),
+					}),
 				}).catch(() => {})
 			} catch {}
 			return result

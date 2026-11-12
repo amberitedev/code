@@ -3,11 +3,11 @@
  * So, for example, addDefaultInstance creates a blank instance object, where the Rust struct is serialized,
  *  and deserialized into a usable JS object.
  */
-import type { IconConfig, Labrinth } from '@modrinth/api-client'
+import { ContractClient, desktop, type IconConfig, type Labrinth } from '@modrinth/api-client'
 import { type ContentItem, type ContentOwner, getIconSymbolAsset } from '@modrinth/ui'
 import { Channel, invoke } from '@tauri-apps/api/core'
 
-import { localFileUrl } from '@/platform/local'
+import { localFileUrl, localTransport } from '@/platform/local'
 
 import type { InstallJobSnapshot, SharedInstanceUpdateDiff } from './install'
 import type {
@@ -296,7 +296,9 @@ export async function move_screenshots(
 }
 
 export async function open_screenshot(key: ScreenshotKey): Promise<void> {
-	return await invoke('plugin:instance|instance_open_screenshot', { key })
+	return await new ContractClient(localTransport).call(desktop.openFolder, {
+		body: { folder: 'screenshot', ...key },
+	})
 }
 
 export async function set_synced_option(
@@ -392,7 +394,9 @@ export async function set_command_history(contents: string): Promise<string> {
 }
 
 export async function open_synced_options_folder(): Promise<void> {
-	return await invoke('plugin:instance|instance_open_synced_options_folder')
+	return await new ContractClient(localTransport).call(desktop.openFolder, {
+		body: { folder: 'synced_options' },
+	})
 }
 
 export type SyncedServer = {

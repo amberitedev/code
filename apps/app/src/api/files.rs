@@ -52,8 +52,6 @@ pub fn init<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
             files_select_external,
             files_save_external,
             files_release_external,
-            file_read_dragged_file,
-            file_local_info,
             file_upload_local,
             file_cancel_local_upload,
             file_list,
@@ -70,39 +68,6 @@ pub fn init<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
 pub struct ExtractDryRunResult {
     modpack_name: Option<String>,
     conflicting_files: Vec<String>,
-}
-
-#[tauri::command]
-pub async fn file_read_dragged_file(path: String) -> Result<Vec<u8>> {
-    let metadata = tokio::fs::metadata(&path).await?;
-    if !metadata.is_file() {
-        return Err(anyhow!("dropped path is not a file").into());
-    }
-
-    Ok(tokio::fs::read(path).await?)
-}
-
-#[derive(Serialize)]
-pub struct LocalFileInfo {
-    name: String,
-    size: u64,
-}
-
-#[tauri::command]
-pub async fn file_local_info(path: String) -> Result<LocalFileInfo> {
-    let metadata = tokio::fs::metadata(&path).await?;
-    if !metadata.is_file() {
-        return Err(anyhow!("path is not a file").into());
-    }
-
-    let name = std::path::Path::new(&path)
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "file".to_string());
-    Ok(LocalFileInfo {
-        name,
-        size: metadata.len(),
-    })
 }
 
 #[derive(Default)]

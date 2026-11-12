@@ -4,7 +4,6 @@ use crate::engine_handle::EngineHandle;
 use engine::minecraft_skins::{
     self, Bytes, Cape, MinecraftSkinVariant, Skin, UrlOrBlob,
 };
-use std::path::Path;
 
 pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     tauri::plugin::Builder::new("minecraft-skins")
@@ -20,7 +19,6 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
             flush_pending_skin_change,
             flush_pending_skin_change_for_profile,
             normalize_skin_texture,
-            get_dragged_skin_data,
         ])
         .build()
 }
@@ -170,13 +168,4 @@ pub async fn flush_pending_skin_change_for_profile(
 #[tauri::command]
 pub async fn normalize_skin_texture(texture: UrlOrBlob) -> Result<Bytes> {
     Ok(minecraft_skins::normalize_skin_texture(&texture).await?)
-}
-
-/// `invoke('plugin:minecraft-skins|get_dragged_skin_data', path)`
-///
-/// See also: [minecraft_skins::get_dragged_skin_data]
-#[tauri::command]
-pub async fn get_dragged_skin_data(path: String) -> Result<Bytes> {
-    let path = Path::new(&path);
-    Ok(minecraft_skins::get_dragged_skin_data(path).await?)
 }

@@ -1,7 +1,6 @@
 use crate::engine_handle::EngineHandle;
-use engine::{emit_warning, handler, prelude::app_db_backup_dir};
+use engine::{emit_warning, handler};
 use tauri::{Manager, Runtime};
-use tauri_plugin_opener::OpenerExt;
 use tokio::sync::broadcast;
 
 use crate::api::Result;
@@ -37,22 +36,12 @@ pub fn init<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
             }
         })
         .invoke_handler(tauri::generate_handler![
-            is_network_metered,
-            highlight_in_folder,
-            open_path,
-            show_launcher_logs_folder,
-            show_app_db_backups_folder,
             export_debug_info,
             cancel_debug_info_export,
             progress_bars_list,
             get_opening_command,
         ])
         .build()
-}
-
-#[tauri::command]
-pub async fn is_network_metered() -> Result<bool> {
-    Ok(engine::prelude::is_network_metered().await?)
 }
 
 // Lists active progress bars
@@ -63,51 +52,6 @@ pub async fn progress_bars_list(
     events: tauri::State<'_, engine::EventSink>,
 ) -> Result<DashMap<uuid::Uuid, engine::LoadingBar>> {
     Ok(events.loading_bars())
-}
-
-#[tauri::command]
-pub async fn highlight_in_folder<R: Runtime>(
-    app: tauri::AppHandle<R>,
-    path: PathBuf,
-) {
-    tauri::async_runtime::spawn_blocking(move || {
-        if let Err(e) = app.opener().reveal_item_in_dir(path) {
-            tracing::error!("Failed to highlight file in folder: {}", e);
-        }
-    })
-    .await
-    .ok();
-}
-
-#[tauri::command]
-pub async fn open_path<R: Runtime>(app: tauri::AppHandle<R>, path: PathBuf) {
-    tauri::async_runtime::spawn_blocking(move || {
-        if let Err(e) =
-            app.opener().open_path(path.to_string_lossy(), None::<&str>)
-        {
-            tracing::error!("Failed to open path: {}", e);
-        }
-    })
-    .await
-    .ok();
-}
-
-#[tauri::command]
-pub async fn show_launcher_logs_folder<R: Runtime>(app: tauri::AppHandle<R>) {
-    let state = app.state::<EngineHandle>().try_get();
-    if let Some(state) = state {
-        open_path(app, state.directories.launcher_logs_dir()).await;
-    }
-}
-
-#[tauri::command]
-pub async fn show_app_db_backups_folder<R: Runtime>(
-    app: tauri::AppHandle<R>,
-) -> Result<()> {
-    let path = app_db_backup_dir()?;
-    tokio::fs::create_dir_all(&path).await?;
-    open_path(app, path).await;
-    Ok(())
 }
 
 #[tauri::command]

@@ -40,11 +40,6 @@ export function releaseExternal(saveId: string): Promise<void> {
 	return invoke('plugin:files|files_release_external', { saveId })
 }
 
-export interface LocalFileInfo {
-	name: string
-	size: number
-}
-
 export interface LocalUploadRequest {
 	url: string
 	headers: Record<string, string>
@@ -61,10 +56,6 @@ export interface LocalUploadProgress {
 export interface LocalUploadResponse {
 	status: number
 	body: string
-}
-
-export function getLocalFileInfo(path: string): Promise<LocalFileInfo> {
-	return invoke('plugin:files|file_local_info', { path })
 }
 
 export function uploadLocal(

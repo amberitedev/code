@@ -4,12 +4,10 @@
 )]
 #![recursion_limit = "256"]
 
-use anyhow::Context;
 use engine::prelude::*;
 use native_dialog::{DialogBuilder, MessageLevel};
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{Listener, Manager};
-use tauri_plugin_fs::FsExt;
 
 mod api;
 mod cores;
@@ -57,9 +55,6 @@ async fn initialize_state(
     #[cfg(debug_assertions)]
     dev::sign_in(&state).await;
 
-    app.fs_scope()
-        .allow_directory(state.directories.instances_dir(), true)?;
-
     Ok(())
 }
 
@@ -92,15 +87,6 @@ pub use updater_impl::*;
 
 #[cfg(not(feature = "updater"))]
 pub use updater_impl_noop::*;
-
-// Toggles decorations
-#[tauri::command]
-async fn toggle_decorations(b: bool, window: tauri::Window) -> api::Result<()> {
-    window
-        .set_decorations(b)
-        .context("failed to toggle decorations")?;
-    Ok(())
-}
 
 #[tauri::command]
 fn restart_app(app: tauri::AppHandle) {
@@ -166,12 +152,14 @@ fn main() {
     let local_init = local.init_plugin();
     let events = server::events::Events::default();
     let engine = engine_handle::EngineHandle::default();
+    let desktop = desktop::AppSlot::default();
     let router = local.router(
         server::endpoints::boot::Boot::current(
             tauri_context.package_info().version.to_string(),
         ),
         events.clone(),
         engine.clone(),
+        desktop.clone(),
     );
     runtime.spawn(local.serve(router));
 
@@ -227,7 +215,6 @@ fn main() {
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_deep_link::init())
-        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init());
 
     #[cfg(target_os = "windows")]
@@ -292,6 +279,7 @@ fn main() {
                 .build(),
         )
         .setup(move |app| {
+            let _ = desktop.set(app.handle().clone());
             app.manage(events.engine.with_app(app.handle().clone()));
             app.manage(events.app);
 
@@ -370,7 +358,6 @@ fn main() {
         .plugin(api::minecraft_skins::init())
         .plugin(api::process::init())
         .plugin(api::settings::init())
-        .plugin(api::shortcuts::init())
         .plugin(api::tags::init())
         .plugin(api::utils::init())
         .plugin(api::cache::init())
@@ -386,7 +373,6 @@ fn main() {
             enqueue_update_for_installation,
             remove_enqueued_update,
             set_restart_after_pending_update,
-            toggle_decorations,
             show_window,
             restart_app,
         ]);

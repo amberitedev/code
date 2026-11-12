@@ -1,5 +1,5 @@
-//! Files on this computer, for an `<img>` or `<video>`. The secret path segment is their only
-//! credential, since such a load sends no headers, and any refusal is a bare 404.
+//! Files on this computer. An `<img>` or `<video>` load sends no headers, so for `/app/file` and
+//! `/app/thumbnail` the secret path segment is the only credential, and any refusal is a bare 404.
 
 use std::path::PathBuf;
 
@@ -46,6 +46,32 @@ impl Endpoint for CacheRemoteIcon {
     type Response = Json<PathBuf>;
 }
 
+/// The bytes of the file at `path`, for a page that reads a picked or dropped file.
+pub struct ReadLocalFile;
+
+impl Endpoint for ReadLocalFile {
+    const METHOD: Method = Method::Get;
+    const PATH: &'static str = "/app/fs/read";
+    const AUTH: Auth = Auth::None;
+    type Params = ();
+    type Query = LocalFileQuery;
+    type Body = Empty;
+    type Response = Stream;
+}
+
+/// The name and size of the file at `path`.
+pub struct StatLocalFile;
+
+impl Endpoint for StatLocalFile {
+    const METHOD: Method = Method::Get;
+    const PATH: &'static str = "/app/fs/stat";
+    const AUTH: Auth = Auth::None;
+    type Params = ();
+    type Query = LocalFileQuery;
+    type Body = Empty;
+    type Response = Json<FileStat>;
+}
+
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub struct LocalFileQuery {
@@ -63,4 +89,11 @@ pub struct ThumbnailQuery {
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub struct RemoteIcon {
     pub source: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct FileStat {
+    pub name: String,
+    pub size: u64,
 }

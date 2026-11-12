@@ -1,4 +1,4 @@
-use crate::api::Result;
+use anyhow::Result;
 use std::path::Path;
 use url::Url;
 

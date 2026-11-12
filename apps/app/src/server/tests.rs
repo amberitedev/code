@@ -15,7 +15,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tower::ServiceExt;
 
 use super::{
-    EngineHandle, LocalServer,
+    AppSlot, EngineHandle, LocalServer,
     endpoints::boot::{Boot, Platform},
     events::Events,
     guard::{APP_ORIGINS, Guard},
@@ -48,6 +48,7 @@ fn local() -> Local {
             boot(),
             Events::default(),
             EngineHandle::default(),
+            AppSlot::default(),
         ),
         secret: server.secret.clone(),
         host: format!("127.0.0.1:{}", server.port()),
@@ -235,8 +236,12 @@ async fn boot_answers_from_bind() {
         server.port()
     );
     let address = server.listener.local_addr().unwrap();
-    let router =
-        server.router(boot(), Events::default(), EngineHandle::default());
+    let router = server.router(
+        boot(),
+        Events::default(),
+        EngineHandle::default(),
+        AppSlot::default(),
+    );
     tokio::spawn(server.serve(router));
 
     let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
@@ -261,7 +266,12 @@ async fn the_event_socket_sends_events_as_json() {
     );
     let address = server.listener.local_addr().unwrap();
     let events = Events::default();
-    let router = server.router(boot(), events.clone(), EngineHandle::default());
+    let router = server.router(
+        boot(),
+        events.clone(),
+        EngineHandle::default(),
+        AppSlot::default(),
+    );
     tokio::spawn(server.serve(router));
 
     let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();

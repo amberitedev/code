@@ -18,11 +18,7 @@ use engine::server_address::ServerAddress;
 use engine::{DownloadReason, ErrorKind};
 use path_util::SafeRelativeUtf8UnixPathBuf;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use tauri::{AppHandle, Runtime};
-use tauri_plugin_fs::FsExt;
-use tauri_plugin_opener::OpenerExt;
 
 pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     tauri::plugin::Builder::new("instance")
@@ -63,7 +59,6 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
             instance_delete_screenshots,
             instance_export_screenshots,
             instance_move_screenshots,
-            instance_open_screenshot,
             instance_set_synced_option,
             instance_get_synced_option_join_preview,
             instance_get_synced_options_overview,
@@ -80,7 +75,6 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
             instance_save_local_game_option_changes,
             instance_get_command_history,
             instance_set_command_history,
-            instance_open_synced_options_folder,
             instance_list_synced_servers,
             instance_update_synced_server,
             instance_remove_synced_server,
@@ -778,41 +772,37 @@ pub async fn instance_get_mod_full_path(
 }
 
 #[tauri::command]
-pub async fn instance_list_screenshots<R: Runtime>(
+pub async fn instance_list_screenshots(
     handle: tauri::State<'_, EngineHandle>,
-    app_handle: AppHandle<R>,
     instance_id: &str,
 ) -> Result<Vec<InstanceScreenshot>> {
     let state = handle.get().await;
     let screenshots =
         engine::instance::list_screenshots(&state, instance_id).await?;
-    serialize_screenshots(&app_handle, screenshots)
+    Ok(serialize_screenshots(screenshots))
 }
 
 #[tauri::command]
-pub async fn instance_list_all_screenshots<R: Runtime>(
+pub async fn instance_list_all_screenshots(
     handle: tauri::State<'_, EngineHandle>,
-    app_handle: AppHandle<R>,
 ) -> Result<Vec<InstanceScreenshot>> {
     let state = handle.get().await;
     let screenshots = engine::instance::list_all_screenshots(&state).await?;
-    serialize_screenshots(&app_handle, screenshots)
+    Ok(serialize_screenshots(screenshots))
 }
 
 #[tauri::command]
-pub async fn instance_list_synced_screenshots<R: Runtime>(
+pub async fn instance_list_synced_screenshots(
     handle: tauri::State<'_, EngineHandle>,
-    app_handle: AppHandle<R>,
 ) -> Result<Vec<InstanceScreenshot>> {
     let state = handle.get().await;
     let screenshots = engine::instance::list_synced_screenshots(&state).await?;
-    serialize_screenshots(&app_handle, screenshots)
+    Ok(serialize_screenshots(screenshots))
 }
 
 #[tauri::command]
-pub async fn instance_save_edited_screenshot<R: Runtime>(
+pub async fn instance_save_edited_screenshot(
     handle: tauri::State<'_, EngineHandle>,
-    app_handle: AppHandle<R>,
     key: engine::instance::ScreenshotKey,
     png_bytes: Vec<u8>,
     mode: engine::instance::ScreenshotEditSaveMode,
@@ -821,7 +811,7 @@ pub async fn instance_save_edited_screenshot<R: Runtime>(
     let screenshot =
         engine::instance::save_edited_screenshot(&state, key, png_bytes, mode)
             .await?;
-    serialize_screenshot(&app_handle, screenshot)
+    Ok(serialize_screenshot_data(screenshot))
 }
 
 #[tauri::command]
@@ -918,21 +908,6 @@ pub async fn instance_move_screenshots(
         engine::instance::move_screenshots(&state, &keys, target_instance_id)
             .await?,
     )
-}
-
-#[tauri::command]
-pub async fn instance_open_screenshot<R: Runtime>(
-    handle: tauri::State<'_, EngineHandle>,
-    app_handle: AppHandle<R>,
-    key: engine::instance::ScreenshotKey,
-) -> Result<()> {
-    let state = handle.get().await;
-    let path = engine::instance::get_screenshot_path(&state, &key).await?;
-    app_handle
-        .opener()
-        .reveal_item_in_dir(path)
-        .map_err(|error| std::io::Error::other(error.to_string()))?;
-    Ok(())
 }
 
 #[tauri::command]
@@ -1135,20 +1110,6 @@ pub async fn instance_set_command_history(
 }
 
 #[tauri::command]
-pub async fn instance_open_synced_options_folder<R: Runtime>(
-    handle: tauri::State<'_, EngineHandle>,
-    app_handle: AppHandle<R>,
-) -> Result<()> {
-    let state = handle.get().await;
-    let path = engine::instance::get_synced_options_folder(&state).await?;
-    app_handle
-        .opener()
-        .open_path(path.to_string_lossy(), None::<&str>)
-        .map_err(|error| std::io::Error::other(error.to_string()))?;
-    Ok(())
-}
-
-#[tauri::command]
 pub async fn instance_list_synced_servers(
     handle: tauri::State<'_, EngineHandle>,
 ) -> Result<Vec<engine::instance::SyncedServer>> {
@@ -1279,36 +1240,13 @@ pub async fn instance_rebuild_synced_options(
     Ok(())
 }
 
-fn serialize_screenshots<R: Runtime>(
-    app_handle: &AppHandle<R>,
+fn serialize_screenshots(
     screenshots: Vec<engine::instance::InstanceScreenshot>,
-) -> Result<Vec<InstanceScreenshot>> {
-    let screenshot_directories = screenshots
-        .iter()
-        .filter_map(|screenshot| screenshot.path.parent())
-        .collect::<HashSet<_>>();
-    for directory in screenshot_directories {
-        app_handle
-            .fs_scope()
-            .allow_directory(directory, false)
-            .map_err(|error| std::io::Error::other(error.to_string()))?;
-    }
-
-    Ok(screenshots
+) -> Vec<InstanceScreenshot> {
+    screenshots
         .into_iter()
         .map(serialize_screenshot_data)
-        .collect())
-}
-
-fn serialize_screenshot<R: Runtime>(
-    app_handle: &AppHandle<R>,
-    screenshot: engine::instance::InstanceScreenshot,
-) -> Result<InstanceScreenshot> {
-    app_handle
-        .fs_scope()
-        .allow_file(&screenshot.path)
-        .map_err(|error| std::io::Error::other(error.to_string()))?;
-    Ok(serialize_screenshot_data(screenshot))
+        .collect()
 }
 
 fn serialize_screenshot_data(

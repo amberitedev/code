@@ -167,7 +167,7 @@ import {
 } from '@/pages/instance/query-options'
 import { createFileDownload } from '@/platform/adapters/file-download'
 import { createIconCache } from '@/platform/adapters/icon-cache'
-import { localFileUrl } from '@/platform/local'
+import { isNativeWindow, localFileUrl } from '@/platform/local'
 import { apiClient as tauriApiClient } from '@/platform/modrinth-client'
 import { openUrl } from '@/platform/opener'
 import { getVersion, type } from '@/platform/os'
@@ -465,14 +465,16 @@ function handleEditMenuAction(action) {
 }
 
 onMounted(async () => {
-	try {
-		const listeners = await Promise.all([
-			listen('edit-menu://undo', () => handleEditMenuAction('undo')),
-			listen('edit-menu://redo', () => handleEditMenuAction('redo')),
-		])
-		unlistenEditMenu = () => listeners.forEach((unlisten) => unlisten())
-	} catch (error) {
-		handleError(error)
+	if (isNativeWindow) {
+		try {
+			const listeners = await Promise.all([
+				listen('edit-menu://undo', () => handleEditMenuAction('undo')),
+				listen('edit-menu://redo', () => handleEditMenuAction('redo')),
+			])
+			unlistenEditMenu = () => listeners.forEach((unlisten) => unlisten())
+		} catch (error) {
+			handleError(error)
+		}
 	}
 
 	await useCheckDisableMouseover()
@@ -617,18 +619,20 @@ async function setupApp() {
 	}
 
 	Object.assign(appSettings.featureFlags, feature_flags)
-	isMaximized.value = await traceStartupStep('Read window maximized state', () =>
-		getCurrentWindow().isMaximized(),
-	)
-	isFullscreen.value = await traceStartupStep('Read window fullscreen state', () =>
-		getCurrentWindow().isFullscreen(),
-	)
+	if (isNativeWindow) {
+		isMaximized.value = await traceStartupStep('Read window maximized state', () =>
+			getCurrentWindow().isMaximized(),
+		)
+		isFullscreen.value = await traceStartupStep('Read window fullscreen state', () =>
+			getCurrentWindow().isFullscreen(),
+		)
+	}
 	os.value = await traceStartupStep('Read operating system', getOS)
 	const dev = await traceStartupStep('Read development mode', isDev)
 	isDevEnvironment.value = dev
 	const version = await traceStartupStep('Read app version', getVersion)
 	appSettings.nativeDecorations = native_decorations
-	if (os.value !== 'MacOS') {
+	if (isNativeWindow && os.value !== 'MacOS') {
 		await traceStartupStep('Apply window decorations', () =>
 			getCurrentWindow().setDecorations(native_decorations),
 		)
@@ -664,12 +668,14 @@ async function setupApp() {
 	debugStartup('App state initialized')
 	await traceStartupStep('Render initialized app', nextTick)
 
-	await traceStartupStep('Register window resize listener', () =>
-		getCurrentWindow().onResized(async () => {
-			isMaximized.value = await getCurrentWindow().isMaximized()
-			isFullscreen.value = await getCurrentWindow().isFullscreen()
-		}),
-	)
+	if (isNativeWindow) {
+		await traceStartupStep('Register window resize listener', () =>
+			getCurrentWindow().onResized(async () => {
+				isMaximized.value = await getCurrentWindow().isMaximized()
+				isFullscreen.value = await getCurrentWindow().isFullscreen()
+			}),
+		)
+	}
 
 	if (telemetry) {
 		initAnalytics()
@@ -736,6 +742,7 @@ traceStartupStep('Initialize backend state', () => initialize_state(connectAppEv
 	})
 
 const handleClose = async () => {
+	if (!isNativeWindow) return
 	await saveWindowState(StateFlags.ALL)
 	await getCurrentWindow().close()
 }
@@ -1265,7 +1272,7 @@ async function fetchIntercomToken() {
 }
 
 onMounted(() => {
-	invoke('show_window')
+	if (isNativeWindow) invoke('show_window')
 
 	error.setErrorModal(errorModal.value)
 	error.setMinecraftAuthErrorModal(minecraftAuthErrorModal.value)
@@ -1825,6 +1832,7 @@ function handleClick(e) {
 				target.href &&
 				['http://', 'https://', 'mailto:', 'tel:'].some((v) => target.href.startsWith(v)) &&
 				!target.classList.contains('router-link-active') &&
+				!target.href.startsWith(location.origin) &&
 				!target.href.startsWith('http://localhost') &&
 				!target.href.startsWith('https://tauri.localhost') &&
 				!target.href.startsWith('http://tauri.localhost')

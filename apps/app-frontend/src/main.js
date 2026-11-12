@@ -10,6 +10,7 @@ import { overlayScrollbarsDirective } from '@/directives/overlayScrollbars'
 import { installCrashScreen } from '@/features/crash'
 import { setupErrorReporting } from '@/helpers/error-reporting'
 import { debugStartup, traceStartupStep } from '@/helpers/startup-debug'
+import { isNativeWindow } from '@/platform/local'
 import { loadBoot } from '@/platform/os'
 import { getCurrentWindow } from '@/platform/window'
 import i18nPlugin from '@/plugins/i18n'
@@ -27,10 +28,13 @@ async function bootstrap() {
 	installCrashScreen(app, router)
 	if (!config.accountApiUrl) setupErrorReporting(app, router)
 
-	focusManager.setEventListener((setFocused) => {
-		const unlisten = getCurrentWindow().onFocusChanged(({ payload }) => setFocused(payload))
-		return () => void unlisten.then((stop) => stop())
-	})
+	// A tab keeps vue-query's own focus listener.
+	if (isNativeWindow) {
+		focusManager.setEventListener((setFocused) => {
+			const unlisten = getCurrentWindow().onFocusChanged(({ payload }) => setFocused(payload))
+			return () => void unlisten.then((stop) => stop())
+		})
+	}
 
 	app.use(VueQueryPlugin)
 	app.use(router)

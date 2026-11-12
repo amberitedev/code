@@ -4,6 +4,7 @@
 
 pub mod boot;
 pub mod cores;
+pub mod desktop;
 pub mod events;
 pub mod files;
 pub mod health;
@@ -19,10 +20,17 @@ mod tests {
             CheckCoreSession, ConnectCore, CoreSessionKey, CoreTarget,
             NewCoreSession, SignInToCore, SignOutOfCore,
         },
+        desktop::{
+            AppFolder, CheckNetworkMetered, CreateShortcut, DialogFilter,
+            ExternalLink, LocalPath, LogFromWebview, NewShortcut, OpenDialog,
+            OpenFolder, OpenPath, OpenUrl, PickFiles, PickSavePath, RevealPath,
+            SaveDialog, WebviewLog, WebviewLogLevel,
+        },
         events::EventSocket,
         files::{
-            CacheRemoteIcon, GetLocalFile, GetThumbnail, LocalFileQuery,
-            RemoteIcon, ThumbnailQuery,
+            CacheRemoteIcon, FileStat, GetLocalFile, GetThumbnail,
+            LocalFileQuery, ReadLocalFile, RemoteIcon, StatLocalFile,
+            ThumbnailQuery,
         },
         health::CheckHealth,
     };
@@ -46,6 +54,16 @@ mod tests {
             LocalFileQuery::decl(&cfg),
             ThumbnailQuery::decl(&cfg),
             RemoteIcon::decl(&cfg),
+            FileStat::decl(&cfg),
+            OpenDialog::decl(&cfg),
+            SaveDialog::decl(&cfg),
+            DialogFilter::decl(&cfg),
+            ExternalLink::decl(&cfg),
+            LocalPath::decl(&cfg),
+            AppFolder::decl(&cfg),
+            NewShortcut::decl(&cfg),
+            WebviewLog::decl(&cfg),
+            WebviewLogLevel::decl(&cfg),
             LocalEvent::decl(&cfg),
             AppEvent::decl(&cfg),
             Command::decl(&cfg),
@@ -78,6 +96,19 @@ mod tests {
              \tgetLocalFile: {},\n\
              \tgetThumbnail: {},\n\
              \tcacheRemoteIcon: {},\n\
+             \treadLocalFile: {},\n\
+             \tstatLocalFile: {},\n\
+             }}\n\n\
+             export const desktop = {{\n\
+             \tpickFiles: {},\n\
+             \tpickSavePath: {},\n\
+             \topenUrl: {},\n\
+             \topenPath: {},\n\
+             \trevealPath: {},\n\
+             \topenFolder: {},\n\
+             \tcreateShortcut: {},\n\
+             \tcheckNetworkMetered: {},\n\
+             \tlogFromWebview: {},\n\
              }}\n",
             endpoint::<CheckHealth>(),
             endpoint::<GetBoot>(),
@@ -89,6 +120,17 @@ mod tests {
             endpoint::<GetLocalFile>(),
             endpoint::<GetThumbnail>(),
             endpoint::<CacheRemoteIcon>(),
+            endpoint::<ReadLocalFile>(),
+            endpoint::<StatLocalFile>(),
+            endpoint::<PickFiles>(),
+            endpoint::<PickSavePath>(),
+            endpoint::<OpenUrl>(),
+            endpoint::<OpenPath>(),
+            endpoint::<RevealPath>(),
+            endpoint::<OpenFolder>(),
+            endpoint::<CreateShortcut>(),
+            endpoint::<CheckNetworkMetered>(),
+            endpoint::<LogFromWebview>(),
         )
     }
 

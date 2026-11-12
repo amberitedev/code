@@ -1,6 +1,8 @@
 import { arrayBufferToBase64 } from '@modrinth/utils/utils'
 import { invoke } from '@tauri-apps/api/core'
 
+import { readFile } from '@/platform/files'
+
 export interface Cape {
 	id: string
 	name: string
@@ -189,6 +191,5 @@ export async function flush_pending_skin_change_for_profile(profileId: string): 
 }
 
 export async function get_dragged_skin_data(path: string): Promise<Uint8Array> {
-	const data = await invoke<number[]>('plugin:minecraft-skins|get_dragged_skin_data', { path })
-	return new Uint8Array(data)
+	return await readFile(path)
 }

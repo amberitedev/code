@@ -1,8 +1,12 @@
+import { ContractClient, desktop } from '@modrinth/api-client'
 import { invoke } from '@tauri-apps/api/core'
 
 import { get_full_path, get_mod_full_path } from '@/helpers/instance'
 import { save } from '@/platform/dialog'
+import { localTransport } from '@/platform/local'
 import { getBoot } from '@/platform/os'
+
+const local = new ContractClient(localTransport)
 
 export async function isDev() {
 	return getBoot().dev
@@ -34,19 +38,19 @@ export async function getOS() {
 }
 
 export async function isNetworkMetered() {
-	return await invoke('plugin:utils|is_network_metered')
+	return await local.call(desktop.checkNetworkMetered)
 }
 
 export async function openPath(path) {
-	return await invoke('plugin:utils|open_path', { path })
+	return await local.call(desktop.openPath, { body: { path } })
 }
 
 export async function highlightInFolder(path) {
-	return await invoke('plugin:utils|highlight_in_folder', { path })
+	return await local.call(desktop.revealPath, { body: { path } })
 }
 
 export async function showLauncherLogsFolder() {
-	return await invoke('plugin:utils|show_launcher_logs_folder', {})
+	return await local.call(desktop.openFolder, { body: { folder: 'launcher_logs' } })
 }
 
 export async function createInstanceShortcut(instanceName, instanceId, options = {}) {
@@ -56,17 +60,19 @@ export async function createInstanceShortcut(instanceName, instanceId, options =
 
 	if (!outputPath) return null
 
-	return await invoke('plugin:shortcuts|create_instance_shortcut', {
-		instanceName,
-		instanceId,
-		outputPath,
-		server: options.server,
-		singleplayerWorld: options.singleplayerWorld,
+	return await local.call(desktop.createShortcut, {
+		body: {
+			instance_name: instanceName,
+			instance_id: instanceId,
+			output_path: outputPath,
+			server: options.server ?? null,
+			singleplayer_world: options.singleplayerWorld ?? null,
+		},
 	})
 }
 
 export async function showAppDbBackupsFolder() {
-	return await invoke('plugin:utils|show_app_db_backups_folder', {})
+	return await local.call(desktop.openFolder, { body: { folder: 'app_db_backups' } })
 }
 
 // Opens an instance's folder in the OS file explorer

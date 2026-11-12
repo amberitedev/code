@@ -1,5 +1,4 @@
 import { provideFilePicker } from '@modrinth/ui'
-import { invoke } from '@tauri-apps/api/core'
 
 import { open } from '@/platform/dialog'
 import { readFile } from '@/platform/files'
@@ -20,12 +19,6 @@ async function createFileFromPath(path: string, fallbackName: string, type?: str
 	return new File([bytes], name, type ? { type } : undefined)
 }
 
-async function createNativeFileFromPath(path: string, fallbackName: string, type?: string) {
-	const bytes = await invoke<number[]>('plugin:files|file_read_dragged_file', { path })
-	const name = getFileName(path, fallbackName)
-	return new File([new Uint8Array(bytes)], name, type ? { type } : undefined)
-}
-
 export function setupFilePickerProvider() {
 	provideFilePicker({
 		async pickFiles(options) {
@@ -40,7 +33,7 @@ export function setupFilePickerProvider() {
 					.map(getDialogPath)
 					.filter((path): path is string => !!path)
 					.map(async (path) => ({
-						file: await createNativeFileFromPath(path, 'file'),
+						file: await createFileFromPath(path, 'file'),
 						path,
 						previewUrl: localFileUrl(path),
 					})),

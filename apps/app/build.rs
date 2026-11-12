@@ -90,7 +90,6 @@ fn main() {
                         "logs_get_latest_log_cursor",
                         "logs_get_live_log_buffer",
                         "logs_clear_live_log_buffer",
-                        "logs_log_webview",
                     ])
                     .default_permission(
                         DefaultPermissionRule::AllowAllCommands,
@@ -122,7 +121,6 @@ fn main() {
                         "flush_pending_skin_change",
                         "flush_pending_skin_change_for_profile",
                         "normalize_skin_texture",
-                        "get_dragged_skin_data",
                     ])
                     .default_permission(
                         DefaultPermissionRule::AllowAllCommands,
@@ -238,7 +236,6 @@ fn main() {
                         "instance_delete_screenshots",
                         "instance_export_screenshots",
                         "instance_move_screenshots",
-                        "instance_open_screenshot",
                         "instance_set_synced_option",
                         "instance_get_synced_option_join_preview",
                         "instance_get_synced_options_overview",
@@ -255,7 +252,6 @@ fn main() {
                         "instance_save_local_game_option_changes",
                         "instance_get_command_history",
                         "instance_set_command_history",
-                        "instance_open_synced_options_folder",
                         "instance_list_synced_servers",
                         "instance_update_synced_server",
                         "instance_remove_synced_server",
@@ -351,22 +347,9 @@ fn main() {
                     ),
             )
             .plugin(
-                "shortcuts",
-                InlinedPlugin::new()
-                    .commands(&["create_instance_shortcut"])
-                    .default_permission(
-                        DefaultPermissionRule::AllowAllCommands,
-                    ),
-            )
-            .plugin(
                 "utils",
                 InlinedPlugin::new()
                     .commands(&[
-                        "is_network_metered",
-                        "highlight_in_folder",
-                        "open_path",
-                        "show_launcher_logs_folder",
-                        "show_app_db_backups_folder",
                         "export_debug_info",
                         "cancel_debug_info_export",
                         "progress_bars_list",
@@ -391,8 +374,6 @@ fn main() {
                         "files_select_external",
                         "files_save_external",
                         "files_release_external",
-                        "file_read_dragged_file",
-                        "file_local_info",
                         "file_upload_local",
                         "file_cancel_local_upload",
                     ])
