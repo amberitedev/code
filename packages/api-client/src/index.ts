@@ -40,7 +40,6 @@ export {
 } from './features/self-hosted'
 export { type VerboseLoggingConfig, VerboseLoggingFeature } from './features/verbose-logging'
 export type { InferredClientModules } from './modules'
-export { CoreApprovalError } from './modules/archon/cores/v1'
 export { SharedInstancesApiError } from './sharing/errors'
 export * from './modules/types'
 export { GenericModrinthClient } from './platform/generic'

@@ -1,13 +1,12 @@
 import type { AbstractModrinthClient } from '../core/abstract-client'
 import type { AbstractModule } from '../core/abstract-module'
+import { ArchonCoresV1Module } from '../cores/v1'
 import { SharedInstancesPlayersV1Module } from '../sharing/players/v1'
-import { SharedInstancesStorageV1Module } from '../sharing/storage/v1'
 import { ArchonActionsV1Module } from './archon/actions/v1'
 import { ArchonBackupRepositoriesInternalModule } from './archon/backup-repositories/internal'
 import { ArchonBackupsV1Module } from './archon/backups/v1'
 import { ArchonBackupsQueueV1Module } from './archon/backups-queue/v1'
 import { ArchonContentV1Module } from './archon/content/v1'
-import { ArchonCoresV1Module } from './archon/cores/v1'
 import { ArchonIconsV1Module } from './archon/icons/v1'
 import { ArchonNodesInternalModule } from './archon/nodes/internal'
 import { ArchonNoticesV0Module } from './archon/notices/v0'
@@ -46,7 +45,6 @@ import { LabrinthImagesV3Module } from './labrinth/images/v3'
 import { LabrinthLimitsV3Module } from './labrinth/limits/v3'
 import { LabrinthModerationInternalModule } from './labrinth/moderation/internal'
 import { LabrinthNotificationsV2Module } from './labrinth/notifications/v2'
-import { LabrinthNotificationsV3Module } from './labrinth/notifications/v3'
 import { LabrinthOAuthInternalModule } from './labrinth/oauth/internal'
 import { LabrinthOrganizationsV3Module } from './labrinth/organizations/v3'
 import { LabrinthPatsV2Module } from './labrinth/pats/v2'
@@ -132,7 +130,6 @@ export const MODULE_REGISTRY = {
 	labrinth_images_v3: LabrinthImagesV3Module,
 	labrinth_moderation_internal: LabrinthModerationInternalModule,
 	labrinth_notifications_v2: LabrinthNotificationsV2Module,
-	labrinth_notifications_v3: LabrinthNotificationsV3Module,
 	labrinth_oauth_internal: LabrinthOAuthInternalModule,
 	labrinth_organizations_v3: LabrinthOrganizationsV3Module,
 	labrinth_pats_v2: LabrinthPatsV2Module,
@@ -160,7 +157,6 @@ export const MODULE_REGISTRY = {
 	sharedinstances_instances_v1: SharedInstancesInstancesV1Module,
 	sharedinstances_moderation_v1: SharedInstancesModerationV1Module,
 	sharedinstances_players_v1: SharedInstancesPlayersV1Module,
-	sharedinstances_storage_v1: SharedInstancesStorageV1Module,
 	sharedinstances_users_v1: SharedInstancesUsersV1Module,
 } as const satisfies Record<string, ModuleConstructor>
 

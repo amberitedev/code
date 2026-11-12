@@ -1,13 +1,13 @@
+import type { ListedCore } from '@amberite/contracts'
 import { describe, expect, it } from 'vite-plus/test'
 
-import { SelfHostedFeature } from '../../../features/self-hosted'
-import { GenericModrinthClient } from '../../../platform/generic'
-import type { RequestOptions } from '../../../types/request'
-import type { Archon } from '../types'
+import { SelfHostedFeature } from '../features/self-hosted'
+import { GenericModrinthClient } from '../platform/generic'
+import type { RequestOptions } from '../types/request'
 
 const ACCOUNTS = 'https://accounts.example'
 const LOCAL = 'https://192.168.1.2:16662'
-const CORE: Archon.Cores.v1.Core = {
+const CORE: ListedCore = {
 	id: 'core',
 	name: 'Core',
 	owned: true,

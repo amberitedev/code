@@ -1,12 +1,12 @@
-import { type CoreSession, core as coreRoutes, cores } from '@amberite/contracts'
+import { type CoreSession, core as coreRoutes, cores, type ListedCore } from '@amberite/contracts'
 
-import { ApiCallError } from '../../../contracts/errors'
-import { AbstractModule } from '../../../core/abstract-module'
-import { ModrinthApiError } from '../../../core/errors'
-import type { CoreCallError, CoreSessions } from '../../../types/client'
-import type { RequestOptions } from '../../../types/request'
-import { coreNodeUrl } from '../../../utils/node-url'
-import type { Archon } from '../types'
+import { ApiCallError } from '../contracts/errors'
+import { AbstractModule } from '../core/abstract-module'
+import { ModrinthApiError } from '../core/errors'
+import type { Archon } from '../modules/archon/types'
+import type { CoreCallError, CoreSessions } from '../types/client'
+import type { RequestOptions } from '../types/request'
+import { coreNodeUrl } from '../utils/node-url'
 
 const SERVER_ID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
 /** How long a Core's local address may take to answer before its internet address is used. */
@@ -15,30 +15,11 @@ const LOCAL_ANSWER_MS = 2500
 const FAILURE_REFETCH_MS = 60_000
 
 /** What is needed to reach a Core: its addresses and the certificate to trust there. */
-type CoreLocation = Pick<Archon.Cores.v1.Core, 'id' | 'address' | 'cert_fingerprint'> &
-	Partial<Pick<Archon.Cores.v1.Core, 'public_address'>>
+type CoreLocation = Pick<ListedCore, 'id' | 'address' | 'cert_fingerprint'> &
+	Partial<Pick<ListedCore, 'public_address'>>
 
 /** Where requests to a Core go (`base`), and the Core address that reaches (`address`). */
 type Route = { base: string; address: string }
-
-const APPROVAL_MESSAGES: Record<Archon.Cores.v1.ApprovalFailure, string> = {
-	wrong_code: 'Code invalid. Please check your Core and try again.',
-	expired: 'That code has expired. Use the new code shown on your Core.',
-	too_many_attempts: 'Too many wrong codes. Wait a few minutes and try again.',
-	already_signed_in: 'That Core is already signed in to another account.',
-	failed: 'Could not add the Core. Please try again.',
-}
-
-/** Why a Core could not be added. `message` is ready to show. */
-export class CoreApprovalError extends Error {
-	constructor(
-		public readonly reason: Archon.Cores.v1.ApprovalFailure,
-		message = APPROVAL_MESSAGES[reason],
-	) {
-		super(message)
-		this.name = 'CoreApprovalError'
-	}
-}
 
 /**
  * The Cores the account may reach: the ones signed in to it, and the ones it was invited to manage
@@ -46,15 +27,16 @@ export class CoreApprovalError extends Error {
  * directly, with this device's session there (see `signIn`). Several Cores are treated as one:
  * their servers form one list, and a request for a server is sent to the Core that has it.
  *
- * A Core signs in on its own: it shows a code, and `approve` here is what binds it to the account.
- * The App never contacts a Core before it is listed.
+ * The App never contacts a Core before it is listed. Fetch the list again with `list` after it
+ * changes, such as when a Core is approved. It is `client.archon.cores_v1` because `packages/ui`
+ * and the archon modules reach Cores through it.
  */
 export class ArchonCoresV1Module extends AbstractModule {
-	private cores: Promise<Archon.Cores.v1.Core[]> | null = null
+	private cores: Promise<ListedCore[]> | null = null
 	/** When the list was last dropped because a Core did not answer. See `servers`. */
 	private droppedAfterFailureAt = 0
 	/** The Cores of the last list. */
-	private listed: Archon.Cores.v1.Core[] = []
+	private listed: ListedCore[] = []
 	/** Core id to where its requests go. See `route`. */
 	private routes = new Map<string, Route>()
 	/** Server id to the id of the Core that has it. */
@@ -70,7 +52,7 @@ export class ArchonCoresV1Module extends AbstractModule {
 	 * Fetch the Cores the account may reach from the backend, its own first. A Core whose route
 	 * cannot be worked out keeps its plain address, so it does not take the other Cores down with it.
 	 */
-	public list(): Promise<Archon.Cores.v1.Core[]> {
+	public list(): Promise<ListedCore[]> {
 		const listing = this.client.backend.call(cores.ListCores).then(async (list) => {
 			const settled = await Promise.allSettled(list.map((core) => this.route(core)))
 			this.routes = new Map(
@@ -91,37 +73,12 @@ export class ArchonCoresV1Module extends AbstractModule {
 	}
 
 	/**
-	 * Which Core is showing `code`, so the user can check it is theirs before approving. Throws a
-	 * `CoreApprovalError` for a wrong or expired code.
-	 */
-	public async lookup(code: string): Promise<Archon.Cores.v1.PendingCore> {
-		try {
-			return await this.client.backend.call(cores.LookUpSignInCode, { body: { code } })
-		} catch (error) {
-			throw approvalError(error)
-		}
-	}
-
-	/**
-	 * Approve the Core showing `code`: it signs in to the account and joins the list. The Core
-	 * learns of it on its own; refetch the list to see it.
-	 */
-	public async approve(code: string): Promise<void> {
-		try {
-			await this.client.backend.call(cores.ApproveSignInCode, { body: { code } })
-		} catch (error) {
-			throw approvalError(error)
-		}
-		this.cores = null
-	}
-
-	/**
 	 * Take a Core off the account. The Core is told first, with a fresh ticket: it ends every
 	 * session and shows a new pairing code. Then the backend forgets it and its key stops working.
 	 * A Core that cannot be told learns on its next call to the backend, so this works even while
 	 * the Core is off. Its servers and files stay.
 	 */
-	public async revoke(core: Archon.Cores.v1.Core): Promise<void> {
+	public async revoke(core: ListedCore): Promise<void> {
 		await this.client
 			.core(core.id)
 			.call(coreRoutes.Unpair)
@@ -189,7 +146,7 @@ export class ArchonCoresV1Module extends AbstractModule {
 	}
 
 	/** Sign in to `core` unless this device already holds a session there. */
-	public async ensureSession(core: Archon.Cores.v1.Core): Promise<void> {
+	public async ensureSession(core: ListedCore): Promise<void> {
 		if (await this.sessions().exists(core.id)) return
 		await this.signIn(core)
 	}
@@ -200,7 +157,7 @@ export class ArchonCoresV1Module extends AbstractModule {
 	 * request to the Core; the page never sees it. Throws a `ModrinthApiError` with Core's error,
 	 * such as `not_invited` or `clock_wrong`.
 	 */
-	public signIn(core: Archon.Cores.v1.Core): Promise<CoreSession> {
+	public signIn(core: ListedCore): Promise<CoreSession> {
 		const pending = this.signingIn.get(core.id)
 		if (pending) return pending
 		const signing = (async () => {
@@ -224,7 +181,7 @@ export class ArchonCoresV1Module extends AbstractModule {
 	}
 
 	/** The listed Core a request URL goes to, if any. */
-	public coreForUrl(url: string): Archon.Cores.v1.Core | undefined {
+	public coreForUrl(url: string): ListedCore | undefined {
 		return this.listed.find((core) => {
 			const base = this.routes.get(core.id)?.base
 			return base !== undefined && (url === base || url.startsWith(`${base}/`))
@@ -232,14 +189,14 @@ export class ArchonCoresV1Module extends AbstractModule {
 	}
 
 	/** The listed Core with this id. */
-	public async core(coreId: string): Promise<Archon.Cores.v1.Core> {
+	public async core(coreId: string): Promise<ListedCore> {
 		const core = (await this.known()).find((candidate) => candidate.id === coreId)
 		if (!core) throw new ModrinthApiError('This Core is not listed', { statusCode: 404 })
 		return core
 	}
 
 	/** The listed Core that has `serverId`. */
-	public async coreOf(serverId: string): Promise<Archon.Cores.v1.Core> {
+	public async coreOf(serverId: string): Promise<ListedCore> {
 		const cores = await this.known()
 		if (cores.length > 1 && !this.serverCores.has(serverId)) await this.servers()
 		const coreId = this.serverCores.get(serverId) ?? cores[0]?.id
@@ -254,7 +211,7 @@ export class ArchonCoresV1Module extends AbstractModule {
 	}
 
 	/** The address of a Core its requests reach: its local or its internet address. */
-	public address(core: Archon.Cores.v1.Core): string {
+	public address(core: ListedCore): string {
 		return this.routes.get(core.id)?.address ?? core.address
 	}
 
@@ -352,7 +309,7 @@ export class ArchonCoresV1Module extends AbstractModule {
 	 */
 	public async createServer(
 		name: string,
-		core: Archon.Cores.v1.Core,
+		core: ListedCore,
 		instance?: {
 			id: string
 			name: string
@@ -376,11 +333,11 @@ export class ArchonCoresV1Module extends AbstractModule {
 		return sessions
 	}
 
-	private known(): Promise<Archon.Cores.v1.Core[]> {
+	private known(): Promise<ListedCore[]> {
 		return this.cores ?? this.list()
 	}
 
-	private base(core: Archon.Cores.v1.Core): string {
+	private base(core: ListedCore): string {
 		return this.routes.get(core.id)?.base ?? core.address
 	}
 
@@ -441,23 +398,4 @@ function isCoreCallError(error: unknown): error is CoreCallError {
 		'error' in error &&
 		typeof error.error === 'string'
 	)
-}
-
-function approvalError(error: unknown): CoreApprovalError {
-	if (!(error instanceof ApiCallError))
-		return new CoreApprovalError('failed', 'Could not reach Amberite. Check your connection.')
-	switch (error.code) {
-		case 'wrong_code':
-			return new CoreApprovalError('wrong_code')
-		case 'code_expired':
-			return new CoreApprovalError('expired')
-		case 'too_many_attempts':
-			return new CoreApprovalError('too_many_attempts')
-		case 'already_signed_in':
-			return new CoreApprovalError('already_signed_in')
-		case 'invalid_credentials':
-			return new CoreApprovalError('failed', 'Sign in to add a Core.')
-		default:
-			return new CoreApprovalError('failed')
-	}
 }

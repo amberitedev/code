@@ -1,4 +1,4 @@
-import type { ShareStorage } from '@modrinth/api-client'
+import { sharing, type ShareStorage } from '@modrinth/api-client'
 import { injectModrinthClient, injectNotificationManager } from '@modrinth/ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 
@@ -19,7 +19,7 @@ export function useSharedStorage() {
 	const client = injectModrinthClient()
 	return useQuery({
 		queryKey: sharedStorageKey,
-		queryFn: () => client.sharedinstances.storage_v1.get(),
+		queryFn: () => client.backend.call(sharing.GetShareStorage),
 	})
 }
 

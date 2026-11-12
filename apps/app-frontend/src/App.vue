@@ -1,5 +1,5 @@
 <script setup>
-import { ModrinthApiError } from '@modrinth/api-client'
+import { ModrinthApiError, social } from '@modrinth/api-client'
 import {
 	ArrowLeftRightIcon,
 	CompassIcon,
@@ -1295,7 +1295,9 @@ useAppEvent('notification', handleLiveNotification, appEvents)
 
 async function markLiveNotificationRead(notification) {
 	try {
-		await tauriApiClient.labrinth.notifications_v2.markAsRead(notification.id)
+		await tauriApiClient.backend.call(social.ReadNotification, {
+			params: { id: String(notification.id) },
+		})
 	} catch (error) {
 		if (error instanceof ModrinthApiError && error.statusCode === 404) {
 			console.warn(`notification ${notification.id} could not be marked as read`, error)
@@ -1402,8 +1404,9 @@ async function replayUnreadNotifications() {
 	const refreshId = credentialsRefreshId
 	const generation = liveNotificationGeneration
 	try {
-		const notifications =
-			await tauriApiClient.labrinth.notifications_v2.getUserNotifications(userId)
+		const notifications = await tauriApiClient.backend.call(social.ListUserNotifications, {
+			params: { id: userId },
+		})
 		// The backend returns newest first; toasts should appear in the order they were sent.
 		for (const notification of notifications.filter((n) => !n.read).reverse()) {
 			if (refreshId !== credentialsRefreshId || generation !== liveNotificationGeneration) return

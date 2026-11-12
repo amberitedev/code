@@ -1,8 +1,7 @@
-import { core, type ErrorCode, PROTOCOL_VERSION } from '@amberite/contracts'
+import { core, type ErrorCode, type ListedCore, PROTOCOL_VERSION } from '@amberite/contracts'
 import { describe, expect, it } from 'vite-plus/test'
 
 import { ModrinthApiError } from '../core/errors'
-import type { Archon } from '../modules/archon/types'
 import { GenericModrinthClient } from '../platform/generic'
 import type { RequestOptions } from '../types/request'
 import { AuthFeature } from './auth'
@@ -14,7 +13,7 @@ const ACCOUNT = 'mra_account'
 /** The local proxy `connectCore` opens for the Core, with its capability path. */
 const PROXY = 'http://127.0.0.1:5000/c0ffee'
 const SERVER = '00000000-0000-4000-8000-000000000001'
-const CORE: Archon.Cores.v1.Core = {
+const CORE: ListedCore = {
 	id: 'core',
 	name: 'Core',
 	owned: true,

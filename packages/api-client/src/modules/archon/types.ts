@@ -1,24 +1,8 @@
-import type * as Contracts from '@amberite/contracts'
-
 import type { Copal } from '../copal/types'
 import type { IconConfig } from '../../types/icons'
 import type { Labrinth } from '../labrinth/types'
 
 export namespace Archon {
-	export namespace Cores {
-		export namespace v1 {
-			export type Core = Contracts.ListedCore
-			export type PendingCore = Contracts.PendingCore
-
-			export type ApprovalFailure =
-				| 'wrong_code'
-				| 'expired'
-				| 'too_many_attempts'
-				| 'already_signed_in'
-				| 'failed'
-		}
-	}
-
 	export namespace Nodes {
 		export namespace Internal {
 			export type Node = {

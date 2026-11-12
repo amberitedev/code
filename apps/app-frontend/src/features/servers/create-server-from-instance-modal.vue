@@ -11,7 +11,7 @@
 </template>
 
 <script setup lang="ts">
-import type { Archon } from '@modrinth/api-client'
+import type { ListedCore } from '@modrinth/api-client'
 import {
 	type CreationFlowContextValue,
 	CreationFlowModal,
@@ -45,7 +45,7 @@ const queryClient = useQueryClient()
 const flow = ref<InstanceType<typeof CreationFlowModal>>()
 const chooseCore = ref<InstanceType<typeof ChooseCoreModal>>()
 // The Core the server goes on, chosen before setup opens.
-let core: Archon.Cores.v1.Core | null = null
+let core: ListedCore | null = null
 
 // The project search belongs to the first step, which this flow skips.
 const noProjects = async () => ({ hits: [], total_hits: 0, offset: 0, limit: 0 })
