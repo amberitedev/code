@@ -26,10 +26,10 @@ use crate::{
     },
     instance::{InstanceGroup, InstanceGroupMembershipUpdate},
     state::{
-        ContentSetSyncStatus, Hooks, IconBackground, IconConfig,
-        InstanceInstallStage, InstanceSyncedOptions, InstanceTabVisibility,
-        Log4jEvent, MemorySettings, ModLoader, OnboardingChecklist,
-        ReleaseChannel, SharedInstanceRole, WindowSize,
+        ContentSetSyncStatus, Hooks, InstanceInstallStage,
+        InstanceSyncedOptions, InstanceTabVisibility, Log4jEvent,
+        MemorySettings, ModLoader, OnboardingChecklist, ReleaseChannel,
+        SharedInstanceRole, WindowSize,
     },
 };
 
@@ -78,8 +78,6 @@ fn file() -> String {
         MemorySettings::decl(&cfg),
         WindowSize::decl(&cfg),
         Hooks::decl(&cfg),
-        IconConfig::decl(&cfg),
-        IconBackground::decl(&cfg),
         InstanceRef::decl(&cfg),
         InstanceIds::decl(&cfg),
         InstanceGroup::decl(&cfg),
@@ -106,7 +104,7 @@ fn file() -> String {
     format!(
         "// Generated from packages/engine by ts-rs. Do not edit.\n\
          // Regenerate: cargo test -p engine -- --ignored write_ts\n\n\
-         import type {{ Endpoint }} from './contracts'\n{declarations}{modules}"
+         import type {{ Endpoint, SharedIconConfig }} from './contracts'\n{declarations}{modules}"
     )
 }
 

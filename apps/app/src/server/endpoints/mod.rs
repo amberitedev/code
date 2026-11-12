@@ -77,8 +77,8 @@ mod tests {
         format!(
             "// Generated from apps/app by ts-rs. Do not edit.\n\
              // Regenerate: cargo test -p theseus_gui -- --ignored write_ts\n\n\
-             import type {{ CoreSession, Endpoint }} from './contracts'\n\
-             import type {{ CommandPayload, EngineEvent, FriendPayload, IconConfig, InstanceGroupsChangedPayload, OnboardingChecklist }} from './engine'\n\
+             import type {{ CoreSession, Endpoint, SharedIconConfig }} from './contracts'\n\
+             import type {{ CommandPayload, EngineEvent, FriendPayload, InstanceGroupsChangedPayload, OnboardingChecklist }} from './engine'\n\
              {declarations}\n\
              export const health = {{\n\
              \tcheckHealth: {},\n\
@@ -112,6 +112,7 @@ mod tests {
              \tcreateShortcut: {},\n\
              \tcheckNetworkMetered: {},\n\
              \tlogFromWebview: {},\n\
+             }}\n\n\
              export const library = {{\n\
              \tlistRecentIconConfigs: {},\n\
              }}\n",

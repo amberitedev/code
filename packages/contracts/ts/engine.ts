@@ -1,7 +1,7 @@
 // Generated from packages/engine by ts-rs. Do not edit.
 // Regenerate: cargo test -p engine -- --ignored write_ts
 
-import type { Endpoint } from './contracts'
+import type { Endpoint, SharedIconConfig } from './contracts'
 
 export type EngineEvent = { "type": "loading", "payload": LoadingPayload } | { "type": "process", "payload": ProcessPayload } | { "type": "instance", "payload": InstancePayload } | { "type": "install_job", "payload": InstallJobSnapshot } | { "type": "warning", "payload": WarningPayload } | { "type": "log", "payload": LogPayload } | { "type": "ads_consent_required", "payload": boolean };
 
@@ -57,7 +57,7 @@ export type Log4jEvent = { timestamp_millis: number | null, logger_name: string 
 
 export type LoadingBar = { loading_bar_uuid: string, message: string, total: number, current: number, bar_type: LoadingBarType, };
 
-export type GameInstance = { id: string, path: string, install_stage: InstanceInstallStage, launcher_feature_version: string, name: string, icon_path: string | null, icon_config: IconConfig | null, game_version: string, protocol_version: number | null, loader: ModLoader, loader_version: string | null, group_ids: Array<string>, synced_options: InstanceSyncedOptions, link: InstanceLink | null, shared_instance: SharedInstanceAttachment | null, quarantined: boolean, update_channel: ReleaseChannel, created: string, modified: string, last_played: string | null, submitted_time_played: number, recent_time_played: number, java_path: string | null, extra_launch_args: Array<string> | null, custom_env_vars: Array<[string, string]> | null, memory: MemorySettings | null, force_fullscreen: boolean | null, game_resolution: WindowSize | null, hooks: Hooks, visible_tabs: InstanceTabVisibility, };
+export type GameInstance = { id: string, path: string, install_stage: InstanceInstallStage, launcher_feature_version: string, name: string, icon_path: string | null, icon_config: SharedIconConfig | null, game_version: string, protocol_version: number | null, loader: ModLoader, loader_version: string | null, group_ids: Array<string>, synced_options: InstanceSyncedOptions, link: InstanceLink | null, shared_instance: SharedInstanceAttachment | null, quarantined: boolean, update_channel: ReleaseChannel, created: string, modified: string, last_played: string | null, submitted_time_played: number, recent_time_played: number, java_path: string | null, extra_launch_args: Array<string> | null, custom_env_vars: Array<[string, string]> | null, memory: MemorySettings | null, force_fullscreen: boolean | null, game_resolution: WindowSize | null, hooks: Hooks, visible_tabs: InstanceTabVisibility, };
 
 export type InstanceLink = { "type": "modrinth_modpack", project_id: string, version_id: string, } | { "type": "server_project", project_id: string, } | { "type": "server_project_modpack", server_project_id: string, content_project_id: string | null, content_version_id: string, project_id: string | null, version_id: string | null, } | { "type": "imported_modpack", project_id: string | null, version_id: string | null, name: string | null, version_number: string | null, filename: string | null, } | { "type": "modrinth_hosting", server_id: string, instance_ids: Array<string>, active_instance_id: string | null, } | { "type": "shared_instance", modpack_project_id: string | null, modpack_version_id: string | null, };
 
@@ -80,10 +80,6 @@ export type MemorySettings = { maximum: number, };
 export type WindowSize = [number, number];
 
 export type Hooks = { pre_launch: string, wrapper: string, post_exit: string, };
-
-export type IconConfig = { background: IconBackground, symbol: string, };
-
-export type IconBackground = { "type": "color", value: string, } | { "type": "linear-top-down-gradient", top_color: string, bottom_color: string, };
 
 export type InstanceRef = { id: string, };
 

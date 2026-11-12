@@ -18,5 +18,5 @@ impl Endpoint for ListRecentIconConfigs {
 #[derive(Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub struct RecentIconConfigs(
-    #[cfg_attr(test, ts(type = "Array<IconConfig>"))] pub Vec<IconConfig>,
+    #[cfg_attr(test, ts(type = "Array<SharedIconConfig>"))] pub Vec<IconConfig>,
 );

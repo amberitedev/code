@@ -1,1 +1,4 @@
-export type { IconBackground, IconConfig } from '@amberite/contracts'
+export type {
+	SharedIconBackground as IconBackground,
+	SharedIconConfig as IconConfig,
+} from '@amberite/contracts'

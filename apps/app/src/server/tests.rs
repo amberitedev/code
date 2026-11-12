@@ -27,7 +27,6 @@ use super::{
     events::Events,
     guard::{APP_ORIGINS, Guard},
 };
-use crate::engine_handle::EngineHandle;
 
 fn boot() -> Boot {
     Boot {

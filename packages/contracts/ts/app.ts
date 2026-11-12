@@ -1,7 +1,7 @@
 // Generated from apps/app by ts-rs. Do not edit.
 // Regenerate: cargo test -p theseus_gui -- --ignored write_ts
 
-import type { CoreSession, Endpoint } from './contracts'
+import type { CoreSession, Endpoint, SharedIconConfig } from './contracts'
 import type { CommandPayload, EngineEvent, FriendPayload, InstanceGroupsChangedPayload, OnboardingChecklist } from './engine'
 
 export type Boot = { version: string, platform: Platform, os_version: string, 
@@ -68,6 +68,8 @@ export type Command = CommandPayload | AmberiteCommand;
 
 export type AmberiteCommand = { "event": "ApproveCore", code: string, };
 
+export type RecentIconConfigs = Array<SharedIconConfig>;
+
 export const health = {
 	checkHealth: { method: "GET", path: "/health", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
 }
@@ -105,4 +107,8 @@ export const desktop = {
 	createShortcut: { method: "POST", path: "/app/shortcuts", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, NewShortcut, string>,
 	checkNetworkMetered: { method: "GET", path: "/app/network/metered", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, boolean>,
 	logFromWebview: { method: "POST", path: "/app/webview-log", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, Array<WebviewLog>, void>,
+}
+
+export const library = {
+	listRecentIconConfigs: { method: "GET", path: "/app/library/recent-icon-configs", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, RecentIconConfigs>,
 }
