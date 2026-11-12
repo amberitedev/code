@@ -13,6 +13,7 @@ use tauri_plugin_fs::FsExt;
 
 mod api;
 mod cores;
+mod desktop;
 mod dev;
 mod engine_handle;
 mod server;
@@ -56,12 +57,6 @@ async fn initialize_state(
     #[cfg(debug_assertions)]
     dev::sign_in(&state).await;
 
-    app.asset_protocol_scope()
-        .allow_directory(state.directories.caches_dir(), true)?;
-    app.asset_protocol_scope()
-        .allow_directory(state.directories.caches_dir().join("icons"), true)?;
-    app.asset_protocol_scope()
-        .allow_directory(state.directories.icon_dir(), true)?;
     app.fs_scope()
         .allow_directory(state.directories.instances_dir(), true)?;
 
@@ -170,11 +165,13 @@ fn main() {
     .expect("failed to bind the App's local server");
     let local_init = local.init_plugin();
     let events = server::events::Events::default();
+    let engine = engine_handle::EngineHandle::default();
     let router = local.router(
         server::endpoints::boot::Boot::current(
             tauri_context.package_info().version.to_string(),
         ),
         events.clone(),
+        engine.clone(),
     );
     runtime.spawn(local.serve(router));
 
@@ -382,7 +379,7 @@ fn main() {
         .plugin(api::worlds::init())
         .manage(PendingUpdateData::default())
         .manage(RestartAfterPendingUpdate::default())
-        .manage(engine_handle::EngineHandle::default())
+        .manage(engine)
         .invoke_handler(tauri::generate_handler![
             initialize_state,
             get_update_size,

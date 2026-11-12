@@ -23,7 +23,11 @@ use contracts::{
 use tauri::{Runtime, plugin::TauriPlugin};
 use url::Url;
 
-use crate::cores::{self, Cores};
+use crate::{
+    cores::{self, Cores},
+    desktop,
+    engine_handle::EngineHandle,
+};
 
 use endpoints::{
     boot::{Boot, GetBoot},
@@ -79,7 +83,12 @@ impl LocalServer {
         format!("http://127.0.0.1:{}/{}", self.port(), self.secret)
     }
 
-    pub fn router(&self, boot: Boot, events: events::Events) -> Router {
+    pub fn router(
+        &self,
+        boot: Boot,
+        events: events::Events,
+        engine: EngineHandle,
+    ) -> Router {
         let guard = Arc::new(Guard::new(
             self.secret.clone(),
             self.port(),
@@ -99,7 +108,8 @@ impl LocalServer {
             .route(health_path, health)
             .route(boot_path, boot)
             .route(events_path, events)
-            .merge(cores::routes(Arc::clone(&self.cores)));
+            .merge(cores::routes(Arc::clone(&self.cores)))
+            .merge(desktop::files::routes(engine));
         Router::new()
             .nest(&format!("/{}", self.secret), routes)
             .layer(middleware::from_fn_with_state(guard, guard::guard))

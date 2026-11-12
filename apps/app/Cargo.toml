@@ -17,7 +17,6 @@ bytes = { workspace = true }
 chrono = { workspace = true }
 contracts = { workspace = true, features = ["server"] }
 dashmap = { workspace = true }
-either = { workspace = true }
 engine = { workspace = true, features = ["tauri"] }
 enumset = { workspace = true, features = ["serde"] }
 hkdf = { workspace = true }
@@ -49,10 +48,9 @@ tauri-plugin-window-state = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "macros", "net", "sync", "time"] }
 tokio-rustls = { version = "0.26.4", default-features = false, features = ["ring", "tls12"] }
-tokio-util = { workspace = true, features = ["rt"] }
+tokio-util = { workspace = true, features = ["io", "rt"] }
 tracing = { workspace = true }
 url = { workspace = true }
-urlencoding = { workspace = true }
 uuid = { workspace = true, features = ["serde", "v4"] }
 whoami = { workspace = true }
 zip = { workspace = true }
@@ -63,7 +61,7 @@ optional = true
 
 [dependencies.tauri]
 workspace = true
-features = ["devtools", "macos-private-api", "protocol-asset"]
+features = ["devtools", "macos-private-api"]
 
 [dev-dependencies]
 contracts = { workspace = true, features = ["server", "ts"] }

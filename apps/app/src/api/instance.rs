@@ -20,7 +20,7 @@ use path_util::SafeRelativeUtf8UnixPathBuf;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use tauri::{AppHandle, Manager, Runtime};
+use tauri::{AppHandle, Runtime};
 use tauri_plugin_fs::FsExt;
 use tauri_plugin_opener::OpenerExt;
 
@@ -182,7 +182,6 @@ pub struct InstanceScreenshot {
     pub modified_at: i64,
     pub group_id: Option<String>,
     pub path: PathBuf,
-    pub url: url::Url,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -1290,19 +1289,15 @@ fn serialize_screenshots<R: Runtime>(
         .collect::<HashSet<_>>();
     for directory in screenshot_directories {
         app_handle
-            .asset_protocol_scope()
-            .allow_directory(directory, false)
-            .map_err(|error| std::io::Error::other(error.to_string()))?;
-        app_handle
             .fs_scope()
             .allow_directory(directory, false)
             .map_err(|error| std::io::Error::other(error.to_string()))?;
     }
 
-    screenshots
+    Ok(screenshots
         .into_iter()
         .map(serialize_screenshot_data)
-        .collect()
+        .collect())
 }
 
 fn serialize_screenshot<R: Runtime>(
@@ -1310,24 +1305,16 @@ fn serialize_screenshot<R: Runtime>(
     screenshot: engine::instance::InstanceScreenshot,
 ) -> Result<InstanceScreenshot> {
     app_handle
-        .asset_protocol_scope()
-        .allow_file(&screenshot.path)
-        .map_err(|error| std::io::Error::other(error.to_string()))?;
-    app_handle
         .fs_scope()
         .allow_file(&screenshot.path)
         .map_err(|error| std::io::Error::other(error.to_string()))?;
-    serialize_screenshot_data(screenshot)
+    Ok(serialize_screenshot_data(screenshot))
 }
 
 fn serialize_screenshot_data(
     screenshot: engine::instance::InstanceScreenshot,
-) -> Result<InstanceScreenshot> {
-    let mut url = super::utils::tauri_convert_file_src(&screenshot.path)?;
-    url.query_pairs_mut()
-        .append_pair("revision", &screenshot.modified_at.to_string());
-
-    Ok(InstanceScreenshot {
+) -> InstanceScreenshot {
+    InstanceScreenshot {
         id: screenshot.id,
         instance_id: screenshot.instance_id,
         instance_name: screenshot.instance_name,
@@ -1336,8 +1323,7 @@ fn serialize_screenshot_data(
         modified_at: screenshot.modified_at,
         group_id: screenshot.group_id,
         path: screenshot.path,
-        url,
-    })
+    }
 }
 
 #[tauri::command]

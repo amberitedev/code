@@ -1,8 +1,9 @@
 import { provideFilePicker } from '@modrinth/ui'
-import { convertFileSrc, invoke } from '@tauri-apps/api/core'
+import { invoke } from '@tauri-apps/api/core'
 
 import { open } from '@/platform/dialog'
 import { readFile } from '@/platform/files'
+import { localFileUrl } from '@/platform/local'
 
 function getFileName(path: string, fallback: string) {
 	return path.split(/[\\/]/).pop() || fallback
@@ -41,7 +42,7 @@ export function setupFilePickerProvider() {
 					.map(async (path) => ({
 						file: await createNativeFileFromPath(path, 'file'),
 						path,
-						previewUrl: convertFileSrc(path),
+						previewUrl: localFileUrl(path),
 					})),
 			)
 		},
@@ -54,7 +55,7 @@ export function setupFilePickerProvider() {
 			const path = getDialogPath(result)
 			if (!path) return null
 			const file = await createFileFromPath(path, 'icon')
-			return { file, path, previewUrl: convertFileSrc(path) }
+			return { file, path, previewUrl: localFileUrl(path) }
 		},
 		async pickModpackFile(options) {
 			const result = await open({

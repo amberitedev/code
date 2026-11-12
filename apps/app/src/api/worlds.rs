@@ -1,6 +1,5 @@
 use crate::api::Result;
 use crate::engine_handle::EngineHandle;
-use either::Either;
 use engine::instance::{self, QuickPlayType, get_full_path};
 use engine::prelude::ProcessMetadata;
 use engine::server_address::ServerAddress;
@@ -10,7 +9,7 @@ use engine::worlds::{
     WorldType, WorldWithInstance,
 };
 use enumset::EnumSet;
-use tauri::{AppHandle, Manager, Runtime};
+use tauri::Runtime;
 
 pub fn init<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
     tauri::plugin::Builder::new("worlds")
@@ -37,76 +36,37 @@ pub fn init<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
 }
 
 #[tauri::command]
-pub async fn get_recent_worlds<R: Runtime>(
+pub async fn get_recent_worlds(
     handle: tauri::State<'_, EngineHandle>,
-    app_handle: AppHandle<R>,
     limit: usize,
     display_statuses: Option<EnumSet<DisplayStatus>>,
 ) -> Result<Vec<WorldWithInstance>> {
     let state = handle.get().await;
-    let mut result = worlds::get_recent_worlds(
+    Ok(worlds::get_recent_worlds(
         &state,
         limit,
         display_statuses.unwrap_or(EnumSet::all()),
     )
-    .await?;
-    for world in &mut result {
-        adapt_world_icon(&app_handle, &mut world.world);
-    }
-    Ok(result)
+    .await?)
 }
 
 #[tauri::command]
-pub async fn get_instance_worlds<R: Runtime>(
+pub async fn get_instance_worlds(
     handle: tauri::State<'_, EngineHandle>,
-    app_handle: AppHandle<R>,
     instance_id: &str,
 ) -> Result<Vec<World>> {
     let state = handle.get().await;
-    let mut result = worlds::get_instance_worlds(&state, instance_id).await?;
-    for world in &mut result {
-        adapt_world_icon(&app_handle, world);
-    }
-    Ok(result)
+    Ok(worlds::get_instance_worlds(&state, instance_id).await?)
 }
 
 #[tauri::command]
-pub async fn get_singleplayer_world<R: Runtime>(
+pub async fn get_singleplayer_world(
     handle: tauri::State<'_, EngineHandle>,
-    app_handle: AppHandle<R>,
     instance: &str,
     world: &str,
 ) -> Result<World> {
     let state = handle.get().await;
-    let mut world =
-        worlds::get_singleplayer_world(&state, instance, world).await?;
-    adapt_world_icon(&app_handle, &mut world);
-    Ok(world)
-}
-
-fn adapt_world_icon<R: Runtime>(app_handle: &AppHandle<R>, world: &mut World) {
-    if let Some(Either::Left(icon_path)) = &world.icon {
-        let icon_path = icon_path.clone();
-        if let Ok(new_url) = super::utils::tauri_convert_file_src(&icon_path) {
-            world.icon = Some(Either::Right(new_url));
-            if let Err(e) =
-                app_handle.asset_protocol_scope().allow_file(&icon_path)
-            {
-                tracing::warn!(
-                    "Failed to allow file access for icon {}: {}",
-                    icon_path.display(),
-                    e
-                );
-            }
-        } else {
-            tracing::warn!(
-                "Encountered invalid icon path for world {}: {}",
-                world.name,
-                icon_path.display()
-            );
-            world.icon = None;
-        }
-    }
+    Ok(worlds::get_singleplayer_world(&state, instance, world).await?)
 }
 
 #[tauri::command]

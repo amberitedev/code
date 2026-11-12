@@ -5,6 +5,7 @@
 pub mod boot;
 pub mod cores;
 pub mod events;
+pub mod files;
 pub mod health;
 
 #[cfg(test)]
@@ -19,6 +20,10 @@ mod tests {
             NewCoreSession, SignInToCore, SignOutOfCore,
         },
         events::EventSocket,
+        files::{
+            CacheRemoteIcon, GetLocalFile, GetThumbnail, LocalFileQuery,
+            RemoteIcon, ThumbnailQuery,
+        },
         health::CheckHealth,
     };
     use crate::server::events::{
@@ -38,6 +43,9 @@ mod tests {
             CoreTarget::decl(&cfg),
             NewCoreSession::decl(&cfg),
             CoreSessionKey::decl(&cfg),
+            LocalFileQuery::decl(&cfg),
+            ThumbnailQuery::decl(&cfg),
+            RemoteIcon::decl(&cfg),
             LocalEvent::decl(&cfg),
             AppEvent::decl(&cfg),
             Command::decl(&cfg),
@@ -65,6 +73,11 @@ mod tests {
              }}\n\n\
              export const events = {{\n\
              \teventSocket: {},\n\
+             }}\n\n\
+             export const localFiles = {{\n\
+             \tgetLocalFile: {},\n\
+             \tgetThumbnail: {},\n\
+             \tcacheRemoteIcon: {},\n\
              }}\n",
             endpoint::<CheckHealth>(),
             endpoint::<GetBoot>(),
@@ -73,6 +86,9 @@ mod tests {
             endpoint::<SignOutOfCore>(),
             endpoint::<CheckCoreSession>(),
             endpoint::<EventSocket>(),
+            endpoint::<GetLocalFile>(),
+            endpoint::<GetThumbnail>(),
+            endpoint::<CacheRemoteIcon>(),
         )
     }
 

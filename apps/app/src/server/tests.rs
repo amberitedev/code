@@ -15,7 +15,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tower::ServiceExt;
 
 use super::{
-    LocalServer,
+    EngineHandle, LocalServer,
     endpoints::boot::{Boot, Platform},
     events::Events,
     guard::{APP_ORIGINS, Guard},
@@ -44,7 +44,11 @@ struct Local {
 fn local() -> Local {
     let server = LocalServer::bind(None, None, None).unwrap();
     Local {
-        router: server.router(boot(), Events::default()),
+        router: server.router(
+            boot(),
+            Events::default(),
+            EngineHandle::default(),
+        ),
         secret: server.secret.clone(),
         host: format!("127.0.0.1:{}", server.port()),
         proxy_origin: format!(
@@ -73,11 +77,17 @@ impl Local {
 #[tokio::test]
 async fn a_request_without_the_secret_is_not_found() {
     let local = local();
-    let request = Request::get("/app/boot")
-        .header(HOST, &local.host)
-        .body(Body::empty())
-        .unwrap();
-    assert_eq!(local.send(request).await.status(), StatusCode::NOT_FOUND);
+    for path in ["/app/boot", "/app/file?path=Cargo.toml"] {
+        let request = Request::get(path)
+            .header(HOST, &local.host)
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(
+            local.send(request).await.status(),
+            StatusCode::NOT_FOUND,
+            "{path}"
+        );
+    }
 }
 
 #[tokio::test]
@@ -225,7 +235,8 @@ async fn boot_answers_from_bind() {
         server.port()
     );
     let address = server.listener.local_addr().unwrap();
-    let router = server.router(boot(), Events::default());
+    let router =
+        server.router(boot(), Events::default(), EngineHandle::default());
     tokio::spawn(server.serve(router));
 
     let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
@@ -250,7 +261,7 @@ async fn the_event_socket_sends_events_as_json() {
     );
     let address = server.listener.local_addr().unwrap();
     let events = Events::default();
-    let router = server.router(boot(), events.clone());
+    let router = server.router(boot(), events.clone(), EngineHandle::default());
     tokio::spawn(server.serve(router));
 
     let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();

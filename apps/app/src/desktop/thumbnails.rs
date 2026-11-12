@@ -3,51 +3,28 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::UNIX_EPOCH;
 
 use sha2::{Digest, Sha256};
-use tauri::{Manager, Runtime};
-use tauri_plugin_fs::FsExt;
 use tokio::sync::Semaphore;
-
-use super::Result;
-use crate::engine_handle::EngineHandle;
 
 static THUMBNAIL_WORKER: Semaphore = Semaphore::const_new(1);
 static GENERATED_THUMBNAILS: AtomicUsize = AtomicUsize::new(0);
 const CACHE_LIMIT: u64 = 128 * 1024 * 1024;
 
-#[tauri::command]
-pub async fn get_image_thumbnail<R: Runtime>(
-    app: tauri::AppHandle<R>,
-    handle: tauri::State<'_, EngineHandle>,
+/// The thumbnail of the image at `path` in `cache`, made once per version of the image.
+pub async fn thumbnail(
     path: PathBuf,
+    cache: PathBuf,
     size: u32,
-) -> Result<String> {
-    let path = tokio::fs::canonicalize(path).await?;
-    if !app.asset_protocol_scope().is_allowed(&path)
-        && !app.fs_scope().is_allowed(&path)
-    {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::PermissionDenied,
-            "Image is outside the permitted scope",
-        )
-        .into());
-    }
-    let cache = handle
-        .get()
-        .await
-        .directories
-        .caches_dir()
-        .join("thumbnails-v1");
+) -> std::io::Result<PathBuf> {
     let permit = THUMBNAIL_WORKER
         .acquire()
         .await
         .map_err(std::io::Error::other)?;
-    let thumbnail = tauri::async_runtime::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         let _permit = permit;
         create_thumbnail(&path, &cache, size.clamp(32, 512))
     })
     .await
-    .map_err(std::io::Error::other)??;
-    Ok(super::utils::tauri_convert_file_src(&thumbnail)?.to_string())
+    .map_err(std::io::Error::other)?
 }
 
 fn create_thumbnail(

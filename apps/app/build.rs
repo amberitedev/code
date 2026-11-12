@@ -371,8 +371,6 @@ fn main() {
                         "cancel_debug_info_export",
                         "progress_bars_list",
                         "get_opening_command",
-                        "get_image_thumbnail",
-                        "cache_remote_icon",
                     ])
                     .default_permission(
                         DefaultPermissionRule::AllowAllCommands,

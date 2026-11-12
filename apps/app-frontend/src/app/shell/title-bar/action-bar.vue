@@ -141,7 +141,6 @@ import {
 	type PopupNotificationStandard,
 	useVIntl,
 } from '@modrinth/ui'
-import { convertFileSrc } from '@tauri-apps/api/core'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
@@ -154,6 +153,7 @@ import { get_all as getRunningProcesses, kill as killProcess } from '@/helpers/p
 import type { LoadingBar } from '@/helpers/state'
 import { progress_bars_list } from '@/helpers/state'
 import type { GameInstance } from '@/helpers/types'
+import { localFileUrl } from '@/platform/local'
 
 const { handleError } = injectNotificationManager()
 const popupNotificationManager = injectPopupNotificationManager()
@@ -344,10 +344,10 @@ function getDisplayIconUrl(icon: string | null | undefined): string | null {
 	if (!icon) {
 		return null
 	}
-	if (/^(https?:|data:|blob:|asset:|tauri:)/.test(icon)) {
+	if (/^(https?:|data:|blob:)/.test(icon)) {
 		return icon
 	}
-	return convertFileSrc(icon)
+	return localFileUrl(icon)
 }
 
 function getNotification(): PopupNotificationStandard | null {

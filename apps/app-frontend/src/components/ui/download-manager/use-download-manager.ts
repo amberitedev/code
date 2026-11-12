@@ -5,7 +5,6 @@ import {
 	useFormatBytes,
 	useVIntl,
 } from '@modrinth/ui'
-import { convertFileSrc } from '@tauri-apps/api/core'
 import { computed, onMounted, onScopeDispose, ref, watch } from 'vue'
 
 import { useAppSettings } from '@/composables/use-app-settings'
@@ -22,6 +21,7 @@ import {
 	type InstallJobSnapshot,
 } from '@/helpers/install'
 import { get_many as getInstances } from '@/helpers/instance'
+import { localFileUrl } from '@/platform/local'
 import { injectAppEvents } from '@/providers/app-events'
 
 import { debugInfoExports, type DebugInfoExportTask } from './debug-info-export'
@@ -102,7 +102,7 @@ const publishMessages = defineMessages({
 
 function getIconUrl(icon: string | null | undefined): string | null {
 	if (!icon) return null
-	return /^(https?:|data:|blob:|asset:|tauri:)/.test(icon) ? icon : convertFileSrc(icon)
+	return /^(https?:|data:|blob:)/.test(icon) ? icon : localFileUrl(icon)
 }
 
 export function useDownloadManager() {

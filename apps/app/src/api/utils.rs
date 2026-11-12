@@ -10,10 +10,8 @@ use crate::api::oauth_utils::auth_code_reply::{
 };
 use crate::server::events::{AmberiteCommand, AppEvent, Command};
 use dashmap::DashMap;
-use engine::prelude::canonicalize;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use tokio_util::sync::CancellationToken;
-use url::Url;
 
 #[derive(Default)]
 pub struct DebugInfoExports(DashMap<(String, String), CancellationToken>);
@@ -48,20 +46,8 @@ pub fn init<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
             cancel_debug_info_export,
             progress_bars_list,
             get_opening_command,
-            super::thumbnails::get_image_thumbnail,
-            cache_remote_icon,
         ])
         .build()
-}
-
-#[tauri::command]
-pub async fn cache_remote_icon(
-    handle: tauri::State<'_, EngineHandle>,
-    source: &str,
-) -> Result<String> {
-    let state = handle.get().await;
-    let path = engine::instance::cache_remote_icon(&state, source).await?;
-    Ok(tauri_convert_file_src(&path)?.to_string())
 }
 
 #[tauri::command]
@@ -298,18 +284,4 @@ async fn accept_auth_deeplink(
         }
     }
     true
-}
-
-// Remove when (and if) https://github.com/tauri-apps/tauri/issues/12022 is implemented
-pub(crate) fn tauri_convert_file_src(path: &Path) -> Result<Url> {
-    #[cfg(any(windows, target_os = "android"))]
-    const BASE: &str = "http://asset.localhost/";
-    #[cfg(not(any(windows, target_os = "android")))]
-    const BASE: &str = "asset://localhost/";
-
-    let path = canonicalize(path)?;
-    let path = path.to_string_lossy();
-    let encoded = urlencoding::encode(&path);
-
-    Ok(Url::parse(&format!("{BASE}{encoded}"))?)
 }

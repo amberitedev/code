@@ -55,7 +55,7 @@ import {
 } from '@modrinth/ui'
 import { renderString } from '@modrinth/utils/parse'
 import { useQueries, useQuery, useQueryClient } from '@tanstack/vue-query'
-import { convertFileSrc, invoke } from '@tauri-apps/api/core'
+import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
@@ -167,6 +167,7 @@ import {
 } from '@/pages/instance/query-options'
 import { createFileDownload } from '@/platform/adapters/file-download'
 import { createIconCache } from '@/platform/adapters/icon-cache'
+import { localFileUrl } from '@/platform/local'
 import { apiClient as tauriApiClient } from '@/platform/modrinth-client'
 import { openUrl } from '@/platform/opener'
 import { getVersion, type } from '@/platform/os'
@@ -357,7 +358,7 @@ async function randomizeCreationIcon() {
 	creationGeneratedIcon.value = { path: generated.iconPath, config: generated.config }
 	return {
 		path: generated.iconPath,
-		previewUrl: convertFileSrc(generated.iconPath),
+		previewUrl: localFileUrl(generated.iconPath),
 	}
 }
 
@@ -374,7 +375,7 @@ function customizeContentInstallIcon() {
 function onCreationIconSaved(iconPath, config) {
 	creationGeneratedIcon.value = { path: iconPath, config }
 	if (creationIconTarget.value === 'content-install') {
-		modInstallModal.value?.setIcon(iconPath, convertFileSrc(iconPath))
+		modInstallModal.value?.setIcon(iconPath, localFileUrl(iconPath))
 		return
 	}
 
@@ -382,7 +383,7 @@ function onCreationIconSaved(iconPath, config) {
 	if (!context) return
 
 	context.instanceIcon.value = null
-	context.instanceIconUrl.value = convertFileSrc(iconPath)
+	context.instanceIconUrl.value = localFileUrl(iconPath)
 	context.instanceIconPath.value = iconPath
 }
 

@@ -6,6 +6,7 @@ import dayjs from 'dayjs'
 
 import { get_full_path } from '@/helpers/instance'
 import { openPath } from '@/helpers/utils'
+import { localFileUrl } from '@/platform/local'
 
 type BaseWorld = {
 	name: string
@@ -100,22 +101,36 @@ export type ProtocolVersion = {
 	legacy: boolean
 }
 
+/** A singleplayer world's icon arrives as a path; a server's is a `data:` URL. */
+function withIconUrl<W extends World>(world: W): W {
+	return world.type === 'singleplayer' && world.icon
+		? { ...world, icon: localFileUrl(world.icon) }
+		: world
+}
+
 export async function get_recent_worlds(
 	limit: number,
 	displayStatuses?: DisplayStatus[],
 ): Promise<WorldWithInstance[]> {
-	return await invoke('plugin:worlds|get_recent_worlds', { limit, displayStatuses })
+	const worlds = await invoke<WorldWithInstance[]>('plugin:worlds|get_recent_worlds', {
+		limit,
+		displayStatuses,
+	})
+	return worlds.map(withIconUrl)
 }
 
 export async function get_instance_worlds(instanceId: string): Promise<World[]> {
-	return await invoke('plugin:worlds|get_instance_worlds', { instanceId })
+	const worlds = await invoke<World[]>('plugin:worlds|get_instance_worlds', { instanceId })
+	return worlds.map(withIconUrl)
 }
 
 export async function get_singleplayer_world(
 	instance: string,
 	world: string,
 ): Promise<SingleplayerWorld> {
-	return await invoke('plugin:worlds|get_singleplayer_world', { instance, world })
+	return withIconUrl(
+		await invoke<SingleplayerWorld>('plugin:worlds|get_singleplayer_world', { instance, world }),
+	)
 }
 
 export async function set_world_display_status(

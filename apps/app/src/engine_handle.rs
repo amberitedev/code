@@ -2,18 +2,19 @@ use engine::Engine;
 use std::sync::Arc;
 use tokio::sync::{Mutex, watch};
 
-/// The engine Tauri commands run against, managed by the App. `initialize_state` sets it; a
-/// command that runs before then waits for it.
+/// The engine Tauri commands and local routes run against. `initialize_state` sets it; a call
+/// that comes before then waits for it. Clones share one engine.
+#[derive(Clone)]
 pub struct EngineHandle {
     engine: watch::Sender<Option<Arc<Engine>>>,
-    starting: Mutex<()>,
+    starting: Arc<Mutex<()>>,
 }
 
 impl Default for EngineHandle {
     fn default() -> Self {
         Self {
             engine: watch::Sender::new(None),
-            starting: Mutex::new(()),
+            starting: Arc::new(Mutex::new(())),
         }
     }
 }

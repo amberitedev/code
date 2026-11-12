@@ -5,7 +5,9 @@
  */
 import type { IconConfig, Labrinth } from '@modrinth/api-client'
 import { type ContentItem, type ContentOwner, getIconSymbolAsset } from '@modrinth/ui'
-import { Channel, convertFileSrc, invoke } from '@tauri-apps/api/core'
+import { Channel, invoke } from '@tauri-apps/api/core'
+
+import { localFileUrl } from '@/platform/local'
 
 import type { InstallJobSnapshot, SharedInstanceUpdateDiff } from './install'
 import type {
@@ -20,7 +22,7 @@ import type {
 export function getInstanceIconUrl(iconPath: string | null | undefined): string | null {
 	if (!iconPath) return null
 	if (iconPath.startsWith('http://') || iconPath.startsWith('https://')) return iconPath
-	return convertFileSrc(iconPath)
+	return localFileUrl(iconPath)
 }
 
 export async function remove(instanceId: string): Promise<void> {
@@ -156,7 +158,7 @@ export function adaptContentItems(items: ContentItem[]): ContentItem[] {
 			...item,
 			embedded_metadata: {
 				...embeddedMetadata,
-				icon_url: convertFileSrc(embeddedMetadata.icon_path),
+				icon_url: localFileUrl(embeddedMetadata.icon_path),
 			},
 		}
 	})
@@ -175,14 +177,21 @@ export type ScreenshotKey = {
 	file_name: string
 }
 
-export type InstanceScreenshot = ScreenshotKey & {
+type ScreenshotFile = ScreenshotKey & {
 	id: string
 	instance_name: string
 	created_at: string
 	modified_at: number
 	group_id?: string | null
 	path: string
+}
+
+export type InstanceScreenshot = ScreenshotFile & {
 	url: string
+}
+
+function withUrl(screenshot: ScreenshotFile): InstanceScreenshot {
+	return { ...screenshot, url: localFileUrl(screenshot.path, screenshot.modified_at) }
 }
 
 export type ScreenshotGroup = {
@@ -200,15 +209,24 @@ export type ScreenshotGroupImport = ScreenshotGroup & {
 }
 
 export async function list_instance_screenshots(instanceId: string): Promise<InstanceScreenshot[]> {
-	return await invoke('plugin:instance|instance_list_screenshots', { instanceId })
+	const screenshots = await invoke<ScreenshotFile[]>('plugin:instance|instance_list_screenshots', {
+		instanceId,
+	})
+	return screenshots.map(withUrl)
 }
 
 export async function list_all_screenshots(): Promise<InstanceScreenshot[]> {
-	return await invoke('plugin:instance|instance_list_all_screenshots')
+	const screenshots = await invoke<ScreenshotFile[]>(
+		'plugin:instance|instance_list_all_screenshots',
+	)
+	return screenshots.map(withUrl)
 }
 
 export async function list_synced_screenshots(): Promise<InstanceScreenshot[]> {
-	return await invoke('plugin:instance|instance_list_synced_screenshots')
+	const screenshots = await invoke<ScreenshotFile[]>(
+		'plugin:instance|instance_list_synced_screenshots',
+	)
+	return screenshots.map(withUrl)
 }
 
 export async function save_edited_screenshot(
@@ -216,11 +234,15 @@ export async function save_edited_screenshot(
 	pngBytes: Uint8Array,
 	mode: 'create_copy' | 'replace_edit',
 ): Promise<InstanceScreenshot> {
-	return await invoke('plugin:instance|instance_save_edited_screenshot', {
-		key,
-		pngBytes: Array.from(pngBytes),
-		mode,
-	})
+	const screenshot = await invoke<ScreenshotFile>(
+		'plugin:instance|instance_save_edited_screenshot',
+		{
+			key,
+			pngBytes: Array.from(pngBytes),
+			mode,
+		},
+	)
+	return withUrl(screenshot)
 }
 
 export async function list_screenshot_groups(): Promise<ScreenshotGroup[]> {

@@ -1,4 +1,4 @@
-import type { ContractTransport } from '@modrinth/api-client'
+import { type ContractTransport, localFiles } from '@modrinth/api-client'
 
 declare global {
 	interface Window {
@@ -43,4 +43,22 @@ export const localTransport: ContractTransport = {
 	base: localBase,
 	headers: async () => ({}),
 	fetch: (input, init) => fetch(input, init),
+}
+
+/**
+ * The App's URL for a file on this computer, for an `<img>` or `<video>`. A new `revision` makes the
+ * page load the file again; the App ignores its value.
+ */
+export function localFileUrl(path: string, revision?: string | number): string {
+	return localUrl(localFiles.getLocalFile.path, { path }, revision)
+}
+
+/** The App's URL for the image at `path`, scaled to fit `size` pixels. */
+export function localThumbnailUrl(path: string, size: number, revision?: string | number): string {
+	return localUrl(localFiles.getThumbnail.path, { path, size: String(size) }, revision)
+}
+
+function localUrl(route: string, query: Record<string, string>, revision?: string | number) {
+	if (revision !== undefined) query.revision = String(revision)
+	return `${localBase}${route}?${new URLSearchParams(query)}`
 }

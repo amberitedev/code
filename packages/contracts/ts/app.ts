@@ -26,6 +26,12 @@ export type NewCoreSession = { core_id: string, account: string, address: string
 
 export type CoreSessionKey = { core_id: string, account: string, };
 
+export type LocalFileQuery = { path: string, };
+
+export type ThumbnailQuery = { path: string, size: number, };
+
+export type RemoteIcon = { source: string, };
+
 export type LocalEvent = EngineEvent | AppEvent;
 
 export type AppEvent = { "type": "friend", "payload": FriendPayload } | { "type": "notification", "payload": unknown } | { "type": "onboarding_checklist", "payload": OnboardingChecklist } | { "type": "instance_groups_changed", "payload": InstanceGroupsChangedPayload } | { "type": "command", "payload": Command } | { "type": "game_option_locales_updated" } | { "type": "resync" };
@@ -51,4 +57,10 @@ export const pairedCores = {
 
 export const events = {
 	eventSocket: { method: "GET", path: "/events", auth: "none", dangerous: false, body: "empty", response: "upgrade" } as Endpoint<null, null, void, { receive: LocalEvent, send: null }>,
+}
+
+export const localFiles = {
+	getLocalFile: { method: "GET", path: "/app/file", auth: "none", dangerous: false, body: "empty", response: "stream" } as Endpoint<null, LocalFileQuery, void, Response>,
+	getThumbnail: { method: "GET", path: "/app/thumbnail", auth: "none", dangerous: false, body: "empty", response: "stream" } as Endpoint<null, ThumbnailQuery, void, Response>,
+	cacheRemoteIcon: { method: "POST", path: "/app/icons/remote", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, RemoteIcon, string>,
 }
