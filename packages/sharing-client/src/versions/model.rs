@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::RemovedFile;
-use crate::pool::PoolCore;
+use contracts::tickets::StoreHost;
 
 /// One version of a share.
 #[derive(Debug, Clone, Deserialize)]
@@ -77,14 +77,14 @@ pub struct ManifestFile {
 /// The holders of a ready version and the fetch ticket for it.
 #[derive(Debug, Clone, Deserialize)]
 pub struct PoolGrant {
-    pub holders: Vec<PoolCore>,
+    pub holders: Vec<StoreHost>,
     pub ticket: String,
 }
 
 /// The Core the owner stores an unconfirmed version on, and the store ticket for it.
 #[derive(Debug, Clone, Deserialize)]
 pub struct StoreGrant {
-    pub core: PoolCore,
+    pub core: StoreHost,
     pub ticket: String,
 }
 

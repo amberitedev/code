@@ -26,8 +26,8 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use contracts::ErrorCode;
 use contracts::limits::MAX_SHARE_BYTES;
+use contracts::{ErrorCode, Hash};
 use futures::future::BoxFuture;
 use futures::{StreamExt, TryStreamExt};
 use reqwest::StatusCode;
@@ -262,7 +262,7 @@ async fn push_hashed(
             key: (!crypto::is_content_type(&file.file_type)).then_some(*key),
         })
         .collect::<Vec<_>>();
-    let root = hex::encode(crypto::root(objects.iter().map(|o| o.object)));
+    let root = Hash(crypto::root(objects.iter().map(|o| o.object)));
 
     let created = backend
         .create_version(
@@ -270,7 +270,7 @@ async fn push_hashed(
             &NewVersion {
                 content,
                 external_files: &external_files,
-                root: root.clone(),
+                root: root.to_string(),
                 server_core,
             },
         )
@@ -286,7 +286,7 @@ async fn push_hashed(
             store,
             &grant.core,
             &grant.ticket,
-            &root,
+            root,
             &objects,
             on_event,
         )
@@ -295,7 +295,7 @@ async fn push_hashed(
             objects: sent.len(),
             files: external_files
                 .iter()
-                .filter(|file| sent.contains(&hex::encode(file.object)))
+                .filter(|file| sent.contains(&Hash(file.object)))
                 .map(|file| file.file_name.clone())
                 .collect(),
         });

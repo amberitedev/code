@@ -3,15 +3,12 @@
 //! names one version.
 
 use contracts::{
-    ApiError, ErrorCode,
+    ApiError, ErrorCode, Hash,
     tickets::{Audience, TICKET_ISSUER, Ticket, TicketKind},
 };
 use serde::Deserialize;
 
-use crate::{
-    keys::{JsonFile, Keys, LEEWAY_S},
-    objects::Hash,
-};
+use crate::keys::{JsonFile, Keys, LEEWAY_S};
 
 /// What every pool ticket is checked for before its kind's own claims are read.
 #[derive(Deserialize)]
@@ -161,7 +158,7 @@ mod tests {
             &signer,
             "store",
             json!("core"),
-            root.as_str(),
+            &root.to_string(),
             NOW,
             json!({ "bytes": 10 }),
         );
@@ -177,7 +174,7 @@ mod tests {
             &signer,
             "fetch",
             json!(["other", "core"]),
-            root.as_str(),
+            &root.to_string(),
             NOW,
             json!({}),
         );

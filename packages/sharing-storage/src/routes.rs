@@ -1,4 +1,5 @@
-//! The store's routes, which Copal forwards from its own port. Each takes a pool ticket.
+//! The store's routes ([`contracts::store`]), which Copal forwards from its own port. Each takes
+//! a pool ticket.
 
 use std::{
     io::{self, SeekFrom},
@@ -7,9 +8,9 @@ use std::{
 };
 
 use axum::{
-    Json, Router,
+    Router,
     body::Body,
-    extract::{ConnectInfo, Path, State},
+    extract::{ConnectInfo, State},
     http::{
         Extensions, HeaderMap, StatusCode,
         header::{
@@ -18,31 +19,40 @@ use axum::{
         },
     },
     response::{IntoResponse, Response},
-    routing::{get, post},
 };
-use bytes::Bytes;
 use contracts::{
-    ApiError, ErrorCode,
+    ApiError, ErrorCode, Hash, Json,
+    server::{Req, route},
+    store::{
+        GetObject, ListVersion, MissingObjects, ObjectHashes, PullVersion,
+        PulledVersion, UploadStatus, UploadVersion, UploadedVersion,
+        VersionHash, VersionList, VersionObject,
+    },
     tickets::{FetchTicket, PullTicket, StoreTicket, Ticket},
 };
 use futures::{StreamExt, TryStreamExt};
-use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio_util::io::{ReaderStream, StreamReader};
 
 use crate::{
     Store, io_error, now,
-    objects::{self, Hash, VersionList, WriteError},
+    objects::{self, ListExt, WriteError},
     pull, tar, tickets,
 };
 
 pub(crate) fn router(store: Arc<Store>) -> Router {
-    Router::new()
-        .route("/store/versions/{root}", get(list).post(upload))
-        .route("/store/versions/{root}/have", post(have))
-        .route("/store/versions/{root}/objects/{object}", get(object))
-        .route("/store/versions/{root}/pull", post(pull_version))
-        .with_state(store)
+    [
+        route::<ListVersion, _, _, _>(list),
+        route::<UploadVersion, _, _, _>(upload),
+        route::<MissingObjects, _, _, _>(have),
+        route::<GetObject, _, _, _>(object),
+        route::<PullVersion, _, _, _>(pull_version),
+    ]
+    .into_iter()
+    .fold(Router::new(), |router, (path, method)| {
+        router.route(path, method)
+    })
+    .with_state(store)
 }
 
 fn invalid(description: impl Into<String>) -> ApiError {
@@ -59,10 +69,6 @@ fn bearer(headers: &HeaderMap) -> Option<&str> {
         .to_str()
         .ok()?
         .strip_prefix("Bearer ")
-}
-
-fn root_of(text: &str) -> Result<Hash, ApiError> {
-    Hash::parse(text).ok_or_else(|| not_found("There is no such version."))
 }
 
 impl Store {
@@ -110,28 +116,17 @@ impl Store {
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct Have {
-    objects: Vec<Hash>,
-}
-
-#[derive(Debug, Serialize)]
-struct HaveAnswer {
-    missing: Vec<Hash>,
-    complete: bool,
-}
-
-/// `POST /store/versions/{root}/have`: which of these objects the store lacks.
 async fn have(
     State(store): State<Arc<Store>>,
-    Path(root): Path<String>,
     headers: HeaderMap,
-    body: Bytes,
-) -> Result<Json<HaveAnswer>, ApiError> {
-    let root = root_of(&root)?;
+    request: Req<MissingObjects>,
+) -> Result<Json<UploadStatus>, ApiError> {
+    let Req {
+        params: VersionHash { root },
+        body: ObjectHashes { objects },
+        ..
+    } = request;
     store.ticket::<StoreTicket>(&headers, &root).await?;
-    let Have { objects } = serde_json::from_slice(&body)
-        .map_err(|_| invalid("Send { objects: [hash...] }."))?;
     let mut missing = Vec::new();
     for hash in objects {
         if !tokio::fs::try_exists(store.layout.object(&hash))
@@ -141,17 +136,10 @@ async fn have(
             missing.push(hash);
         }
     }
-    Ok(Json(HaveAnswer {
+    Ok(Json(UploadStatus {
         missing,
         complete: store.is_stored(&root),
     }))
-}
-
-#[derive(Debug, Serialize)]
-struct Uploaded {
-    complete: bool,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    missing: Vec<Hash>,
 }
 
 fn bad_tar(error: io::Error) -> ApiError {
@@ -162,18 +150,19 @@ fn bad_tar(error: io::Error) -> ApiError {
     }
 }
 
-/// `POST /store/versions/{root}`: a tar of `version.json` and then objects. What arrives is
-/// kept even when the upload breaks off, so a retry sends only the rest.
 async fn upload(
     State(store): State<Arc<Store>>,
-    Path(root): Path<String>,
     headers: HeaderMap,
-    body: Body,
-) -> Result<Json<Uploaded>, ApiError> {
-    let root = root_of(&root)?;
+    request: Req<UploadVersion>,
+) -> Result<Json<UploadedVersion>, ApiError> {
+    let Req {
+        params: VersionHash { root },
+        body,
+        ..
+    } = request;
     let claims: StoreTicket = store.ticket(&headers, &root).await?;
     if store.is_stored(&root) {
-        return Ok(Json(Uploaded {
+        return Ok(Json(UploadedVersion {
             complete: true,
             missing: Vec::new(),
         }));
@@ -219,20 +208,19 @@ async fn upload(
             })?;
     }
     let missing = store.finish(&root).await?;
-    Ok(Json(Uploaded {
+    Ok(Json(UploadedVersion {
         complete: missing.is_empty(),
         missing,
     }))
 }
 
-/// `GET /store/versions/{root}`: the version's list.
 async fn list(
     State(store): State<Arc<Store>>,
-    Path(root): Path<String>,
     headers: HeaderMap,
     extensions: Extensions,
+    request: Req<ListVersion>,
 ) -> Result<Json<VersionList>, ApiError> {
-    let root = root_of(&root)?;
+    let VersionHash { root } = request.params;
     store.fetch_ticket(&headers, &extensions, &root).await?;
     let list = store
         .index()
@@ -251,15 +239,13 @@ fn range_start(headers: &HeaderMap) -> Option<u64> {
         .ok()
 }
 
-/// `GET /store/versions/{root}/objects/{object}`: one object's bytes, counted against the day's
-/// egress as they go.
 async fn object(
     State(store): State<Arc<Store>>,
-    Path((root, object)): Path<(String, String)>,
     headers: HeaderMap,
     extensions: Extensions,
+    request: Req<GetObject>,
 ) -> Result<Response, ApiError> {
-    let root = root_of(&root)?;
+    let VersionObject { root, object } = request.params;
     store.fetch_ticket(&headers, &extensions, &root).await?;
     let slot = store.limits.fetch_slot().ok_or_else(|| {
         ApiError::new(
@@ -268,7 +254,6 @@ async fn object(
         )
     })?;
     let not_held = || not_found("That object is not in this version.");
-    let object = Hash::parse(&object).ok_or_else(not_held)?;
     let list = store
         .index()
         .servable(&root)
@@ -324,24 +309,18 @@ async fn object(
         .expect("a valid response"))
 }
 
-#[derive(Debug, Serialize)]
-struct Pulled {
-    complete: bool,
-}
-
-/// `POST /store/versions/{root}/pull`: copy the version from the Core the ticket names.
 async fn pull_version(
     State(store): State<Arc<Store>>,
-    Path(root): Path<String>,
     headers: HeaderMap,
-) -> Result<Json<Pulled>, ApiError> {
-    let root = root_of(&root)?;
+    request: Req<PullVersion>,
+) -> Result<Json<PulledVersion>, ApiError> {
+    let VersionHash { root } = request.params;
     let claims: PullTicket = store.ticket(&headers, &root).await?;
     if store.is_stored(&root) {
-        return Ok(Json(Pulled { complete: true }));
+        return Ok(Json(PulledVersion { complete: true }));
     }
     let complete = pull::pull(&store, &root, &claims.source).await?;
-    Ok(Json(Pulled { complete }))
+    Ok(Json(PulledVersion { complete }))
 }
 
 #[cfg(test)]
@@ -405,7 +384,7 @@ pub mod tests {
                 &self.signer,
                 kind,
                 json!([self.core]),
-                root.as_str(),
+                &root.to_string(),
                 now(),
                 extra,
             )
@@ -472,7 +451,7 @@ pub mod tests {
             let json = serde_json::to_vec(list).unwrap();
             let names: Vec<String> = objects
                 .iter()
-                .map(|data| Hash::of_digest(&Sha256::digest(data)).to_string())
+                .map(|data| Hash(Sha256::digest(data).into()).to_string())
                 .collect();
             let mut entries: Vec<(&str, &[u8])> = vec![("version.json", &json)];
             entries.extend(
@@ -661,7 +640,7 @@ pub mod tests {
             &f.signer,
             "fetch",
             json!(["core"]),
-            root.as_str(),
+            &root.to_string(),
             now() - 7200,
             json!({}),
         );
@@ -670,7 +649,7 @@ pub mod tests {
             &f.signer,
             "fetch",
             json!(["other"]),
-            root.as_str(),
+            &root.to_string(),
             now(),
             json!({}),
         );
@@ -721,7 +700,7 @@ pub mod tests {
             .await
             .unwrap();
         assert_eq!(f.store.status().unwrap().versions.len(), 1);
-        let gone = list_of(&[b"gone"]).objects[0].hash.clone();
+        let gone = list_of(&[b"gone"]).objects[0].hash;
         let uri = format!("/store/versions/{root}/objects/{gone}");
         let fetch = f.ticket("fetch", &root, json!({}));
         let (code, ..) =

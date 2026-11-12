@@ -17,6 +17,8 @@ description: string, };
 
 export type ErrorCode = "invalid_input" | "invalid_credentials" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "conflict" | "rate_limited" | "internal_error" | "unsupported" | "account_locked" | "already_signed_in" | "code_expired" | "configuration_error" | "core_removed" | "duplicate_email" | "invalid_address" | "mail_error" | "no_storage" | "rate_limit" | "tickets_unavailable" | "too_many_attempts" | "too_many_invites" | "too_many_requests" | "unsupported_operation" | "username_taken" | "weak_password" | "wrong_code" | "blacklisted" | "core_not_found" | "current_version" | "endpoint_not_found" | "icon_not_found" | "instance_not_found" | "invite_invalid" | "invite_not_found" | "members_only" | "not_member" | "not_moderator" | "not_own_list" | "not_owner" | "push_in_flight" | "quarantined" | "share_too_large" | "storage_quota" | "too_many_files" | "version_not_found" | "already_friends" | "cannot_friend_self" | "own_friend_request" | "ticket_required" | "ticket_invalid" | "ticket_wrong_core" | "ticket_wrong_kind" | "ticket_expired" | "ticket_reused" | "clock_wrong" | "not_invited" | "disk_full" | "egress_spent" | "eula_not_accepted" | "not_managed" | "already_running" | "installing" | "no_ports" | "shared_instance_deleted" | "shared_instance_access_revoked" | "shared_instance_quarantined" | "shared_instances_api_error" | "shared_instance_file_not_allowed" | "shared_instance_owner_behind" | "shared_instance_limit_reached" | "pool_no_storage" | "pool_push_in_flight" | "pool_too_large" | "pool_disk_full" | "pool_egress_spent" | "pool_push_unconfirmed" | "pool_files_broken" | "pool_files_unavailable" | "hash_error" | "login_canceled" | "not_logged_in" | "no_loader_version" | "launcher_error" | "java_error" | "metadata_error" | "network_error" | "archive_error" | "path_error" | "filesystem_error" | "parse_error" | "database_error" | "directory_move_no_space" | "directory_move_permission_denied" | "directory_move_failed" | "permission_denied" | "api_error" | "minecraft_auth_no_profile" | "minecraft_auth_token_expired" | "minecraft_auth_clock_out_of_sync" | "minecraft_auth_rate_limited" | "minecraft_auth_service_unavailable" | "minecraft_auth_connection_refused" | "minecraft_auth_network" | "minecraft_auth_age_verification" | "minecraft_auth_banned" | "minecraft_auth_restricted" | "minecraft_auth_no_xbox_profile" | "minecraft_auth_terms_not_accepted" | "minecraft_auth_region_unavailable" | "minecraft_auth_adult_verification" | "minecraft_auth_underage" | "minecraft_auth_xsts_rejected" | "minecraft_auth_error" | "engine_unavailable" | "external_save_failed" | "sign_in_cancelled" | "unknown";
 
+export type Hash = string;
+
 export type TicketKind = "session" | "store" | "fetch" | "pull" | "read";
 
 export type SessionTicket = { iss: string, kind: TicketKind, 
@@ -917,4 +919,45 @@ export const core = {
 	SetJava: { method: "PUT", path: "/servers/{id}/java", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<ServerId, null, JavaPath, void>,
 	GetInsight: { method: "GET", path: "/servers/{id}/insight", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<ServerId, null, void, ServerInsight>,
 	CheckReachability: { method: "POST", path: "/servers/{id}/reachability", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<ServerId, null, void, ServerInsight>,
+}
+
+export type VersionList = { objects: Array<ListedObject>, };
+
+export type ListedObject = { hash: Hash, size: number, };
+
+export type VersionHash = { root: Hash, };
+
+export type VersionObject = { 
+/**
+ * The version's hash.
+ */
+root: Hash, 
+/**
+ * The object's hash.
+ */
+object: Hash, };
+
+export type ObjectHashes = { objects: Array<Hash>, };
+
+export type UploadStatus = { missing: Array<Hash>, 
+/**
+ * The version is stored whole, so nothing is left to send.
+ */
+complete: boolean, };
+
+export type UploadedVersion = { complete: boolean, 
+/**
+ * What the version still lacks, to send in another upload.
+ */
+missing?: Array<Hash>, };
+
+export type PulledVersion = { complete: boolean, };
+
+/** The store's routes, under a Core's `/store/`. */
+export const store = {
+	ListVersion: { method: "GET", path: "/store/versions/{root}", auth: "ticket", dangerous: false, body: "empty", response: "json" } as Endpoint<VersionHash, null, void, VersionList>,
+	UploadVersion: { method: "POST", path: "/store/versions/{root}", auth: "ticket", dangerous: false, body: "stream", response: "json" } as Endpoint<VersionHash, null, Blob, UploadedVersion>,
+	MissingObjects: { method: "POST", path: "/store/versions/{root}/have", auth: "ticket", dangerous: false, body: "json", response: "json" } as Endpoint<VersionHash, null, ObjectHashes, UploadStatus>,
+	GetObject: { method: "GET", path: "/store/versions/{root}/objects/{object}", auth: "ticket", dangerous: false, body: "empty", response: "stream" } as Endpoint<VersionObject, null, void, Response>,
+	PullVersion: { method: "POST", path: "/store/versions/{root}/pull", auth: "ticket", dangerous: false, body: "empty", response: "json" } as Endpoint<VersionHash, null, void, PulledVersion>,
 }

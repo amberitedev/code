@@ -1,5 +1,7 @@
 use std::future::Future;
 
+use contracts::Hash;
+
 use super::{FetchError, PoolFile, PoolObject, StoreClient};
 use crate::backend::Backend;
 
@@ -18,9 +20,8 @@ where
     Fut: Future<Output = Result<T, E>>,
 {
     let access = &file.access;
-    let root = hex::encode(access.root);
     let object = PoolObject {
-        root: &root,
+        root: Hash(access.root),
         holders: &access.holders,
         ticket: &access.ticket,
         object: file.object,

@@ -1,4 +1,4 @@
-//! The client for a Core's store routes (`/store/`),
+//! The client for a Core's store routes ([`contracts::store`]),
 //! used by an owner's App to store a version, by members' Apps and Cores to fetch its files, and
 //! by a store to pull a version from another Core.
 //! A Core serves HTTPS with a certificate it made itself, so each Core gets a client that trusts
@@ -13,28 +13,20 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use bytes::Bytes;
-use contracts::{ApiError, ErrorCode};
+use contracts::client::{CallError, Remote, call, call_limited, call_stream};
+use contracts::store::{
+    GetObject, ListVersion, MissingObjects, ObjectHashes, UploadStatus,
+    UploadVersion, UploadedVersion, VersionHash, VersionList, VersionObject,
+};
+use contracts::tickets::StoreHost;
+use contracts::{Empty, ErrorCode, Hash, Json};
+use futures::future::BoxFuture;
 use futures::stream::BoxStream;
 use futures::{Stream, StreamExt, TryStreamExt};
-use reqwest::StatusCode;
-use serde::{Deserialize, Serialize};
 use tokio::io::AsyncReadExt;
-use ts_rs::TS;
 
 use crate::crypto::{DecryptError, Decryptor};
 use crate::net::{CoreAddress, tls};
-
-/// A Core as the backend names it. `address` is tried first and `public_address` when the first
-/// does not connect, so a Core on the same network is reached directly.
-#[derive(Clone, Debug, Serialize, Deserialize, TS)]
-pub struct PoolCore {
-    pub id: String,
-    pub address: String,
-    #[serde(default)]
-    #[ts(optional = nullable)]
-    pub public_address: Option<String>,
-    pub cert_fingerprint: String,
-}
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -52,6 +44,34 @@ pub enum StoreError {
     Other(u16, String),
     #[error("could not reach the Core: {0}")]
     Http(#[from] reqwest::Error),
+}
+
+impl From<CallError> for StoreError {
+    fn from(error: CallError) -> Self {
+        match error {
+            CallError::Http(error) => Self::Http(error),
+            CallError::Api { status, error } => match error.error {
+                ErrorCode::DiskFull => Self::DiskFull,
+                ErrorCode::EgressSpent => Self::EgressSpent,
+                ErrorCode::RateLimited => Self::RateLimited,
+                ErrorCode::NotFound => Self::NotFound,
+                code @ (ErrorCode::TicketRequired
+                | ErrorCode::TicketInvalid
+                | ErrorCode::TicketReused
+                | ErrorCode::TicketExpired
+                | ErrorCode::TicketWrongCore
+                | ErrorCode::TicketWrongKind) => Self::Ticket(code),
+                _ => Self::Other(status, error.description),
+            },
+            error @ (CallError::Decode { status, .. }
+            | CallError::RangeIgnored { status }) => {
+                Self::Other(status, error.to_string())
+            }
+            error @ CallError::Params { .. } => {
+                Self::Other(0, error.to_string())
+            }
+        }
+    }
 }
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -82,9 +102,9 @@ pub struct StoreClient {
 /// One file of a version, as a member fetches it: where the version is, and the names and key
 /// that check and decrypt the object.
 pub struct PoolObject<'a> {
-    /// R, in hex.
-    pub root: &'a str,
-    pub holders: &'a [PoolCore],
+    /// R.
+    pub root: Hash,
+    pub holders: &'a [StoreHost],
     /// The fetch ticket for `root`.
     pub ticket: &'a str,
     /// C.
@@ -161,7 +181,7 @@ impl StoreClient {
         }
     }
 
-    fn client(&self, core: &PoolCore) -> Result<reqwest::Client, StoreError> {
+    fn client(&self, core: &StoreHost) -> Result<reqwest::Client, StoreError> {
         let fingerprint = tls::parse_fingerprint(&core.cert_fingerprint)
             .ok_or_else(|| {
                 StoreError::Other(0, "the Core's fingerprint is invalid".into())
@@ -189,7 +209,7 @@ impl StoreClient {
     }
 
     /// The addresses to try, the one that last worked first. Only `https://ip:port` ones.
-    fn addresses(&self, core: &PoolCore) -> Vec<String> {
+    fn addresses(&self, core: &StoreHost) -> Vec<String> {
         let remembered = self
             .addresses
             .lock()
@@ -213,30 +233,34 @@ impl StoreClient {
         addresses
     }
 
-    fn remember(&self, core: &PoolCore, address: &str) {
+    fn remember(&self, core: &StoreHost, address: &str) {
         self.addresses
             .lock()
             .expect("store addresses lock poisoned")
             .insert(core.id.clone(), address.to_string());
     }
 
-    /// Sends a request that can be rebuilt, moving to the next address when one does not
-    /// connect.
-    async fn send(
+    /// Makes a call that can be repeated, moving to the next address when one does not connect.
+    async fn send<'a, T>(
         &self,
-        core: &PoolCore,
-        request: impl Fn(&reqwest::Client, &str) -> reqwest::RequestBuilder,
-    ) -> Result<reqwest::Response, StoreError> {
+        core: &StoreHost,
+        call: impl Fn(
+            reqwest::Client,
+            String,
+        ) -> BoxFuture<'a, Result<T, CallError>>,
+    ) -> Result<T, StoreError> {
         let client = self.client(core)?;
         let mut unreachable = None;
         for address in self.addresses(core) {
-            match request(&client, &address).send().await {
-                Ok(response) => {
-                    self.remember(core, &address);
-                    return check(response).await;
+            match call(client.clone(), address.clone()).await {
+                Err(CallError::Http(error)) if error.is_connect() => {
+                    unreachable = Some(error);
                 }
-                Err(error) if error.is_connect() => unreachable = Some(error),
-                Err(error) => return Err(error.into()),
+                Err(CallError::Http(error)) => return Err(error.into()),
+                result => {
+                    self.remember(core, &address);
+                    return Ok(result?);
+                }
             }
         }
         Err(unreachable.map_or_else(
@@ -248,22 +272,26 @@ impl StoreClient {
     /// Which of `objects` the Core lacks for the version `root`.
     pub async fn have(
         &self,
-        core: &PoolCore,
+        core: &StoreHost,
         ticket: &str,
-        root: &str,
-        objects: &[String],
-    ) -> Result<Have, StoreError> {
-        let body = serde_json::json!({ "objects": objects });
-        Ok(self
-            .send(core, |client, address| {
-                client
-                    .post(format!("{address}/store/versions/{root}/have"))
-                    .bearer_auth(ticket)
-                    .json(&body)
+        root: Hash,
+        objects: Vec<Hash>,
+    ) -> Result<UploadStatus, StoreError> {
+        let body = Json(ObjectHashes { objects });
+        self.send(core, |http, address| {
+            let body = body.clone();
+            Box::pin(async move {
+                let remote = remote(&http, &address, ticket);
+                call::<MissingObjects>(
+                    &remote,
+                    &VersionHash { root },
+                    &(),
+                    body,
+                )
+                .await
             })
-            .await?
-            .json()
-            .await?)
+        })
+        .await
     }
 
     /// Streams the version's list and the given objects to the Core as one tar. `objects` are
@@ -271,25 +299,26 @@ impl StoreClient {
     /// sent.
     pub async fn upload(
         &self,
-        core: &PoolCore,
+        core: &StoreHost,
         ticket: &str,
-        root: &str,
-        list: &[ListedObject],
-        objects: impl IntoIterator<Item = (String, PathBuf)>,
+        root: Hash,
+        list: &VersionList,
+        objects: impl IntoIterator<Item = (Hash, PathBuf)>,
         uploaded: Arc<AtomicU64>,
-    ) -> Result<UploadOutcome, StoreError> {
+    ) -> Result<UploadedVersion, StoreError> {
         let sizes = list
+            .objects
             .iter()
-            .map(|object| (object.hash.as_str(), object.size))
+            .map(|object| (object.hash, object.size))
             .collect::<HashMap<_, _>>();
         let entries = objects
             .into_iter()
             .filter_map(|(hash, path)| {
-                let size = *sizes.get(hash.as_str())?;
-                Some((hash, path, size))
+                let size = *sizes.get(&hash)?;
+                Some((hash.to_string(), path, size))
             })
             .collect::<Vec<_>>();
-        let list = serde_json::to_vec(&serde_json::json!({ "objects": list }))
+        let list = serde_json::to_vec(list)
             .map_err(|error| StoreError::Other(0, error.to_string()))?;
         let body = tar_body(list, entries, uploaded);
         // The body streams once, so it goes to the address `have` just reached.
@@ -299,92 +328,70 @@ impl StoreClient {
                 "the Core has no usable address".into(),
             ));
         };
-        let response = self
-            .client(core)?
-            .post(format!("{address}/store/versions/{root}"))
-            .bearer_auth(ticket)
-            .header(reqwest::header::CONTENT_TYPE, "application/x-tar")
-            .body(reqwest::Body::wrap_stream(body))
-            .send()
-            .await?;
-        Ok(check(response).await?.json().await?)
+        Ok(call::<UploadVersion>(
+            &remote(&self.client(core)?, &address, ticket),
+            &VersionHash { root },
+            &(),
+            reqwest::Body::wrap_stream(body),
+        )
+        .await?)
     }
 
     /// The list of version `root` as the Core stored it, refused past
     /// [`MAX_VERSION_LIST_BYTES`](contracts::limits::MAX_VERSION_LIST_BYTES).
     pub async fn version_list(
         &self,
-        core: &PoolCore,
+        core: &StoreHost,
         ticket: &str,
-        root: &str,
-    ) -> Result<Vec<u8>, StoreError> {
-        let response = self
-            .send(core, |client, address| {
-                client
-                    .get(format!("{address}/store/versions/{root}"))
-                    .bearer_auth(ticket)
+        root: Hash,
+    ) -> Result<VersionList, StoreError> {
+        self.send(core, |http, address| {
+            Box::pin(async move {
+                call_limited::<ListVersion, _>(
+                    &remote(&http, &address, ticket),
+                    &VersionHash { root },
+                    &(),
+                    Empty,
+                    contracts::limits::MAX_VERSION_LIST_BYTES as usize,
+                )
+                .await
             })
-            .await?;
-        let mut body = Vec::new();
-        let mut chunks = response.bytes_stream();
-        while let Some(chunk) = chunks.try_next().await? {
-            body.extend_from_slice(&chunk);
-            if body.len() as u64 > contracts::limits::MAX_VERSION_LIST_BYTES {
-                return Err(StoreError::Other(
-                    0,
-                    "the version list is too large".into(),
-                ));
-            }
-        }
-        Ok(body)
+        })
+        .await
     }
 
-    /// The bytes of object `c` of version `root`, unchecked: the caller checks them against C.
+    /// The bytes of `object` of version `root`, unchecked: the caller checks them against C.
     pub async fn object_reader(
         &self,
-        core: &PoolCore,
+        core: &StoreHost,
         ticket: &str,
-        root: &str,
-        c: &str,
+        root: Hash,
+        object: Hash,
     ) -> Result<impl tokio::io::AsyncRead + Send + Unpin + use<>, StoreError>
     {
-        let response = self.object(core, ticket, root, c, 0).await?;
+        let response = self.object(core, ticket, root, object, 0).await?;
         Ok(tokio_util::io::StreamReader::new(
             response.bytes_stream().map_err(std::io::Error::other),
         ))
     }
 
-    /// The object `c` of version `root`, from byte `from` on.
+    /// `object` of version `root`, from byte `from` on.
     async fn object(
         &self,
-        core: &PoolCore,
+        core: &StoreHost,
         ticket: &str,
-        root: &str,
-        c: &str,
+        root: Hash,
+        object: Hash,
         from: u64,
     ) -> Result<reqwest::Response, StoreError> {
-        let response = self
-            .send(core, |client, address| {
-                let request = client
-                    .get(format!("{address}/store/versions/{root}/objects/{c}"))
-                    .bearer_auth(ticket);
-                if from > 0 {
-                    request.header(
-                        reqwest::header::RANGE,
-                        format!("bytes={from}-"),
-                    )
-                } else {
-                    request
-                }
+        self.send(core, |http, address| {
+            Box::pin(async move {
+                let remote = remote(&http, &address, ticket);
+                let params = VersionObject { root, object };
+                call_stream::<GetObject>(&remote, &params, &(), from).await
             })
-            .await?;
-        if from > 0 && response.status() != StatusCode::PARTIAL_CONTENT {
-            return Err(StoreError::Other(
-                response.status().as_u16(),
-                "the Core ignored the requested range".into(),
-            ));
-        }
-        Ok(response)
+        })
+        .await
     }
 
     /// Fetches one file from the first holder that serves it correctly, checked against C and
@@ -403,7 +410,7 @@ impl StoreClient {
     where
         Fut: Future<Output = Result<T, E>>,
     {
-        let object = hex::encode(file.object);
+        let object = Hash(file.object);
         for core in file.holders {
             let (writer, reader) = tokio::io::duplex(PIPE_SIZE);
             let decrypt = async {
@@ -417,7 +424,7 @@ impl StoreClient {
                         .fetch_once(
                             core,
                             file,
-                            &object,
+                            object,
                             &mut decryptor,
                             &mut writer,
                             downloaded,
@@ -464,7 +471,7 @@ impl StoreClient {
                 Err(error) => {
                     tracing::warn!(
                         core = %core.id,
-                        object,
+                        %object,
                         error = %error,
                         "Could not fetch a shared file from this Core"
                     );
@@ -485,9 +492,9 @@ impl StoreClient {
 
     async fn fetch_once(
         &self,
-        core: &PoolCore,
+        core: &StoreHost,
         file: &PoolObject<'_>,
-        object: &str,
+        object: Hash,
         decryptor: &mut Decryptor,
         writer: &mut tokio::io::DuplexStream,
         downloaded: &(dyn Fn(u64) + Sync),
@@ -521,53 +528,18 @@ fn is_transient(error: &AttemptError) -> bool {
     }
 }
 
-async fn check(
-    response: reqwest::Response,
-) -> Result<reqwest::Response, StoreError> {
-    if response.status().is_success() {
-        return Ok(response);
+fn remote<'a>(
+    http: &'a reqwest::Client,
+    address: &'a str,
+    ticket: &'a str,
+) -> Remote<'a> {
+    Remote {
+        http,
+        base: address,
+        bearer: None,
+        read_ticket: Some(ticket),
+        timeout: None,
     }
-    let status = response.status().as_u16();
-    let text = response.text().await.unwrap_or_default();
-    let Ok(body) = serde_json::from_str::<ApiError>(&text) else {
-        return Err(StoreError::Other(status, text));
-    };
-    Err(match body.error {
-        ErrorCode::DiskFull => StoreError::DiskFull,
-        ErrorCode::EgressSpent => StoreError::EgressSpent,
-        ErrorCode::RateLimited => StoreError::RateLimited,
-        ErrorCode::NotFound => StoreError::NotFound,
-        code @ (ErrorCode::TicketRequired
-        | ErrorCode::TicketInvalid
-        | ErrorCode::TicketReused
-        | ErrorCode::TicketExpired
-        | ErrorCode::TicketWrongCore
-        | ErrorCode::TicketWrongKind) => StoreError::Ticket(code),
-        _ => StoreError::Other(status, body.description),
-    })
-}
-
-#[derive(Debug, Deserialize)]
-pub struct Have {
-    #[serde(default)]
-    pub missing: Vec<String>,
-    /// Whether the version's list is already stored, which means nothing is left to send.
-    #[serde(default)]
-    pub complete: bool,
-}
-
-/// One entry of a version's list, sorted by hash.
-#[derive(Clone, Debug, Serialize)]
-pub struct ListedObject {
-    pub hash: String,
-    pub size: u64,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct UploadOutcome {
-    pub complete: bool,
-    #[serde(default)]
-    pub missing: Vec<String>,
 }
 
 const TAR_BLOCK: u64 = 512;

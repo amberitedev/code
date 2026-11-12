@@ -12,16 +12,19 @@ pub mod backend;
 pub mod client;
 pub mod core;
 pub mod error;
+mod hash;
 pub mod limits;
 pub mod rules;
 #[cfg(feature = "server")]
 pub mod server;
 mod side;
+pub mod store;
 pub mod tickets;
 #[cfg(feature = "ts")]
 pub mod ts;
 
 pub use error::{ApiError, ErrorCode};
+pub use hash::Hash;
 pub use side::Side;
 
 /// Bumped only when old and new sides can no longer talk to each other. Releases do not touch it.

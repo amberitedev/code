@@ -13,91 +13,39 @@
 
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
-    fmt, io,
+    io,
     path::{Path, PathBuf},
     sync::Arc,
     time::{Duration, SystemTime},
 };
 
-use serde::{Deserialize, Serialize};
+use contracts::{Hash, store::VersionList};
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 
 /// How long a dropped or abandoned list keeps its objects: the life of a fetch ticket.
 pub const GRACE_S: i64 = 6 * 3600;
 
-/// A SHA-256 as 64 lowercase hex characters: an object's name (C) or a version's (R). Sorting
-/// the text sorts the bytes.
-#[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
-)]
-#[serde(try_from = "String", into = "String")]
-pub struct Hash(String);
-
-impl Hash {
-    pub fn parse(text: &str) -> Option<Self> {
-        (text.len() == 64
-            && text.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')))
-        .then(|| Self(text.to_owned()))
-    }
-
-    pub fn of_digest(digest: &[u8]) -> Self {
-        Self(hex::encode(digest))
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl TryFrom<String> for Hash {
-    type Error = &'static str;
-
-    fn try_from(text: String) -> Result<Self, Self::Error> {
-        Self::parse(&text).ok_or("a hash is 64 lowercase hex characters")
-    }
-}
-
-impl From<Hash> for String {
-    fn from(hash: Hash) -> Self {
-        hash.0
-    }
-}
-
-impl fmt::Display for Hash {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Entry {
-    pub hash: Hash,
-    pub size: u64,
-}
-
-/// A version as the store sees it: its objects, sorted by hash.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct VersionList {
-    pub objects: Vec<Entry>,
-}
-
-impl VersionList {
-    /// R of the listed objects ([`sharing_client::crypto::root`]). It names the list once
+/// What the store reads from a [`VersionList`].
+pub trait ListExt {
+    /// The hash of the listed objects ([`sharing_client::crypto::root`]). It names the list once
     /// [`Self::check`] has found it sorted and without repeats.
-    pub fn root(&self) -> Hash {
-        Hash::of_digest(&sharing_client::crypto::root(self.objects.iter().map(
-            |entry| {
-                let mut hash = [0; 32];
-                hex::decode_to_slice(entry.hash.as_str(), &mut hash)
-                    .expect("a valid hash");
-                hash
-            },
-        )))
+    fn root(&self) -> Hash;
+    /// Require the list to be sorted, without repeats, and to name `root`.
+    fn check(&self, root: &Hash) -> Result<(), &'static str>;
+    fn bytes(&self) -> u64;
+    /// The listed size of `hash`, when the list has it.
+    fn size_of(&self, hash: &Hash) -> Option<u64>;
+}
+
+impl ListExt for VersionList {
+    fn root(&self) -> Hash {
+        Hash(sharing_client::crypto::root(
+            self.objects.iter().map(|entry| entry.hash.0),
+        ))
     }
 
-    /// Require the list to be sorted, without repeats, and to name `root`.
-    pub fn check(&self, root: &Hash) -> Result<(), &'static str> {
+    fn check(&self, root: &Hash) -> Result<(), &'static str> {
         if !self
             .objects
             .windows(2)
@@ -123,12 +71,11 @@ impl VersionList {
         Ok(())
     }
 
-    pub fn bytes(&self) -> u64 {
+    fn bytes(&self) -> u64 {
         self.objects.iter().map(|entry| entry.size).sum()
     }
 
-    /// The listed size of `hash`, when the list has it.
-    pub fn size_of(&self, hash: &Hash) -> Option<u64> {
+    fn size_of(&self, hash: &Hash) -> Option<u64> {
         self.objects
             .binary_search_by(|entry| entry.hash.cmp(hash))
             .ok()
@@ -173,8 +120,11 @@ impl Layout {
     }
 
     pub fn object(&self, hash: &Hash) -> PathBuf {
-        let name = hash.as_str();
-        self.objects().join(&name[..2]).join(&name[2..4]).join(name)
+        let name = hash.to_string();
+        self.objects()
+            .join(&name[..2])
+            .join(&name[2..4])
+            .join(&name)
     }
 
     /// A temporary file for `hash`, unique so two uploads of one object never share it.
@@ -297,7 +247,7 @@ impl Index {
     fn referenced(&self) -> HashSet<Hash> {
         self.lists()
             .flat_map(|list| &list.objects)
-            .map(|entry| entry.hash.clone())
+            .map(|entry| entry.hash)
             .collect()
     }
 }
@@ -340,9 +290,9 @@ pub async fn write_object(
         Ok((written, _)) if written != size => Err(WriteError::Mismatch(
             "An object is not the size its version lists.",
         )),
-        Ok((_, digest)) if Hash::of_digest(&digest) != *hash => Err(
-            WriteError::Mismatch("An object's bytes do not match its name."),
-        ),
+        Ok((_, digest)) if Hash(digest) != *hash => Err(WriteError::Mismatch(
+            "An object's bytes do not match its name.",
+        )),
         Ok(_) => tokio::fs::rename(&part, &target).await.map_err(Into::into),
     };
     if result.is_err() {
@@ -385,7 +335,7 @@ pub async fn missing(
     let mut missing = Vec::new();
     for entry in &list.objects {
         if !tokio::fs::try_exists(layout.object(&entry.hash)).await? {
-            missing.push(entry.hash.clone());
+            missing.push(entry.hash);
         }
     }
     Ok(missing)
@@ -454,8 +404,8 @@ fn remove(path: &Path) -> io::Result<()> {
 pub fn list_of(objects: &[&[u8]]) -> VersionList {
     let mut objects: Vec<_> = objects
         .iter()
-        .map(|bytes| Entry {
-            hash: Hash::of_digest(&Sha256::digest(bytes)),
+        .map(|bytes| contracts::store::ListedObject {
+            hash: Hash(Sha256::digest(bytes).into()),
             size: bytes.len() as u64,
         })
         .collect();
@@ -468,31 +418,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_lowercase_hex_of_the_right_length_is_a_hash() {
-        assert!(Hash::parse(&"a".repeat(64)).is_some());
-        for bad in [
-            "A".repeat(64),
-            "a".repeat(63),
-            "../".repeat(21) + "a",
-            "g".repeat(64),
-        ] {
-            assert!(Hash::parse(&bad).is_none(), "{bad}");
-        }
-        assert!(serde_json::from_str::<Hash>("\"../../etc/passwd\"").is_err());
-    }
-
-    #[test]
     fn the_root_is_the_hash_of_the_sorted_raw_hashes() {
         assert_eq!(
-            VersionList::default().root().as_str(),
+            VersionList::default().root().to_string(),
             "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         );
         let list = list_of(&[b"one", b"two"]);
         let mut raw = Vec::new();
         for entry in &list.objects {
-            raw.extend(hex::decode(entry.hash.as_str()).unwrap());
+            raw.extend(entry.hash.0);
         }
-        assert_eq!(list.root(), Hash::of_digest(&Sha256::digest(&raw)));
+        assert_eq!(list.root(), Hash(Sha256::digest(&raw).into()));
         assert!(list.check(&list.root()).is_ok());
         let mut unsorted = list.clone();
         unsorted.objects.reverse();
@@ -519,7 +455,7 @@ mod tests {
         ] {
             let path = layout.list(&root, state);
             let name = path.file_name().unwrap().to_str().unwrap();
-            assert_eq!(parse_list_name(name), Some((root.clone(), state)));
+            assert_eq!(parse_list_name(name), Some((root, state)));
         }
         assert_eq!(parse_list_name("x.json"), None);
         assert_eq!(parse_list_name(&format!("{root}.json.part")), None);

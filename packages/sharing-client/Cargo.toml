@@ -10,7 +10,7 @@ edition.workspace = true
 [dependencies]
 bytes = { workspace = true }
 chacha20poly1305 = { workspace = true }
-contracts = { workspace = true }
+contracts = { workspace = true, features = ["client"] }
 futures = { workspace = true }
 hex = { workspace = true }
 hkdf = { workspace = true }

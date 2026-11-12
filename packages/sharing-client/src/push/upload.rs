@@ -3,8 +3,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
+use contracts::Hash;
+use contracts::store::{ListedObject, VersionList};
+use contracts::tickets::StoreHost;
+
 use super::{Object, PushError, PushEvent};
-use crate::pool::{ListedObject, PoolCore, StoreClient};
+use crate::pool::StoreClient;
 
 /// Uploads rounds of whatever the Core still lacks until it holds the whole version.
 const UPLOAD_ROUNDS: usize = 3;
@@ -15,37 +19,36 @@ const UPLOAD_PROGRESS_INTERVAL: Duration = Duration::from_millis(200);
 /// version is sent again.
 pub(super) async fn store_version(
     store: &StoreClient,
-    core: &PoolCore,
+    core: &StoreHost,
     ticket: &str,
-    root: &str,
+    root: Hash,
     objects: &[Object],
     on_event: &mut (dyn FnMut(PushEvent<'_>) + Send),
-) -> Result<HashSet<String>, PushError> {
+) -> Result<HashSet<Hash>, PushError> {
     let paths = objects
         .iter()
-        .map(|object| (hex::encode(object.object), object.path.clone()))
+        .map(|object| (Hash(object.object), object.path.clone()))
         .collect::<HashMap<_, _>>();
     let mut list = objects
         .iter()
         .map(|object| ListedObject {
-            hash: hex::encode(object.object),
+            hash: Hash(object.object),
             size: object.size,
         })
         .collect::<Vec<_>>();
-    list.sort_by(|left, right| left.hash.cmp(&right.hash));
-    list.dedup_by(|left, right| left.hash == right.hash);
-    let hashes = list
-        .iter()
-        .map(|object| object.hash.clone())
-        .collect::<Vec<_>>();
+    list.sort_by_key(|object| object.hash);
+    list.dedup_by_key(|object| object.hash);
+    let hashes = list.iter().map(|object| object.hash).collect::<Vec<_>>();
+    let list = VersionList { objects: list };
 
-    let have = store.have(core, ticket, root, &hashes).await?;
+    let have = store.have(core, ticket, root, hashes).await?;
     if have.complete {
         return Ok(HashSet::new());
     }
     let mut missing = have.missing;
-    let requested = missing.iter().cloned().collect::<HashSet<_>>();
+    let requested = missing.iter().copied().collect::<HashSet<_>>();
     let total = list
+        .objects
         .iter()
         .filter(|object| requested.contains(&object.hash))
         .map(|object| object.size)
@@ -55,7 +58,7 @@ pub(super) async fn store_version(
     for _ in 0..UPLOAD_ROUNDS {
         let sending = missing
             .iter()
-            .filter_map(|hash| Some((hash.clone(), paths.get(hash)?.clone())))
+            .filter_map(|hash| Some((*hash, paths.get(hash)?.clone())))
             .collect::<Vec<_>>();
         let upload = store.upload(
             core,

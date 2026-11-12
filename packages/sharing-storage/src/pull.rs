@@ -3,14 +3,16 @@
 //! to that Core's certificate, no proxy and no redirect, so it cannot be turned into a general
 //! downloader.
 
-use contracts::{ApiError, ErrorCode, tickets::PullSource};
+use contracts::{
+    ApiError, ErrorCode, Hash,
+    tickets::{PullSource, StoreHost},
+};
 use sharing_client::net::{CoreAddress, ip};
-use sharing_client::pool::PoolCore;
 use tracing::info;
 
 use crate::{
     Store,
-    objects::{self, Hash, VersionList, WriteError},
+    objects::{self, ListExt, WriteError},
 };
 
 fn failed(description: impl std::fmt::Display) -> ApiError {
@@ -28,7 +30,7 @@ pub(crate) async fn pull(
 ) -> Result<bool, ApiError> {
     let ticket = &source.ticket;
     let host = &source.core;
-    let core = PoolCore {
+    let core = StoreHost {
         id: host.id.clone(),
         // Its public address when it has one.
         address: address(
@@ -38,21 +40,18 @@ pub(crate) async fn pull(
         public_address: None,
         cert_fingerprint: host.cert_fingerprint.clone(),
     };
-    let root_hex = root.to_string();
-    let body = store
+    let list = store
         .client
-        .version_list(&core, ticket, &root_hex)
+        .version_list(&core, ticket, *root)
         .await
         .map_err(failed)?;
-    let list: VersionList = serde_json::from_slice(&body)
-        .map_err(|_| failed("its version list is unreadable"))?;
     let missing = store.begin(root, list.clone(), None).await?;
     info!(%root, objects = missing.len(), "pulling a version");
     for hash in missing {
         let size = list.size_of(&hash).expect("missing objects are listed");
         let reader = store
             .client
-            .object_reader(&core, ticket, &root_hex, &hash.to_string())
+            .object_reader(&core, ticket, *root, hash)
             .await
             .map_err(failed)?;
         objects::write_object(&store.layout, &hash, size, reader)
@@ -180,7 +179,7 @@ mod tests {
                 &source.signer,
                 "pull",
                 json!("core"),
-                root.as_str(),
+                &root.to_string(),
                 crate::now(),
                 json!({ "source": {
                     "core": { "id": "source", "address": address, "public_address": null, "cert_fingerprint": fingerprint },

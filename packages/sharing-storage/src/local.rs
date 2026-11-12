@@ -12,14 +12,14 @@
 
 use std::{io, sync::Arc, time::Duration};
 
-use contracts::backend::cores::HeldVersion;
+use contracts::{Hash, backend::cores::HeldVersion};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tokio::io::{
     AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader, Lines,
 };
 use tracing::warn;
 
-use crate::{Hash, Store};
+use crate::Store;
 
 /// How long a call may take before Copal gives up on it.
 const CALL_TIMEOUT: Duration = Duration::from_secs(10);
@@ -277,7 +277,10 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::{objects::list_of, routes::tests::fixture};
+    use crate::{
+        objects::{ListExt, list_of},
+        routes::tests::fixture,
+    };
 
     /// A client talking to `store` over in-memory pipes, as Copal does to `copal store`.
     async fn connect(

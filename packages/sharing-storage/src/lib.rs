@@ -36,14 +36,15 @@ use std::{
 };
 
 use color_eyre::eyre::{Result, WrapErr};
-use contracts::{ApiError, ErrorCode, backend::cores::HeldVersion};
+use contracts::{
+    ApiError, ErrorCode, Hash, backend::cores::HeldVersion, store::VersionList,
+};
 use tracing::{info, warn};
 
 use keys::{JsonFile, Keys};
 use limits::Limits;
 use local::{Caps, Status};
-pub use objects::Hash;
-use objects::{Index, Layout, ListState, VersionList};
+use objects::{Index, Layout, ListExt, ListState};
 
 const GC_EVERY: Duration = Duration::from_secs(10 * 60);
 
@@ -177,7 +178,7 @@ impl Store {
             }
             (!index.pending.contains_key(root)).then(|| {
                 let at = now();
-                index.pending.insert(root.clone(), (at, Arc::clone(&list)));
+                index.pending.insert(*root, (at, Arc::clone(&list)));
                 at
             })
         };
@@ -235,7 +236,7 @@ impl Store {
         {
             let mut index = self.index();
             index.pending.remove(root);
-            index.stored.insert(root.clone(), list);
+            index.stored.insert(*root, list);
         }
         let _ = tokio::fs::remove_file(
             self.layout.list(root, ListState::Pending(at)),
@@ -260,7 +261,7 @@ impl Store {
             .await?;
             let mut index = self.index();
             index.stored.remove(root);
-            index.dropped.push((root.clone(), at, list));
+            index.dropped.push((*root, at, list));
             info!(%root, "dropped a version");
         }
         Ok(())

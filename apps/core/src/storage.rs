@@ -26,15 +26,14 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use contracts::backend::cores::{PullOrder, StorageAnswer, StorageReport};
-use contracts::{ApiError, ErrorCode};
+use contracts::client::{Remote, call};
+use contracts::store::{PullVersion, VersionHash};
+use contracts::{ApiError, Empty, ErrorCode, Hash};
 use hyper_util::{
     client::legacy::{Client as HttpClient, connect::HttpConnector},
     rt::TokioExecutor,
 };
-use sharing_storage::{
-    Hash,
-    local::{Caps, Client, Status},
-};
+use sharing_storage::local::{Caps, Client, Status};
 use sqlx::SqlitePool;
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
@@ -466,22 +465,17 @@ impl Storage {
         let complete = async {
             let root = Hash::parse(&order.root).ok_or("not a version")?;
             let port = self.port().ok_or("the store is not running")?;
-            let answer: serde_json::Value = self
-                .http
-                .post(format!(
-                    "http://127.0.0.1:{port}/store/versions/{root}/pull"
-                ))
-                .bearer_auth(&order.ticket)
-                .send()
+            let remote = Remote {
+                http: &self.http,
+                base: &format!("http://127.0.0.1:{port}"),
+                bearer: None,
+                read_ticket: Some(&order.ticket),
+                timeout: None,
+            };
+            call::<PullVersion>(&remote, &VersionHash { root }, &(), Empty)
                 .await
-                .map_err(|error| error.to_string())?
-                .json()
-                .await
-                .map_err(|error| error.to_string())?;
-            match answer["complete"].as_bool() {
-                Some(complete) => Ok(complete),
-                None => Err(answer.to_string()),
-            }
+                .map(|pulled| pulled.complete)
+                .map_err(|error| error.to_string())
         };
         let result: Result<bool, String> = complete.await;
         self.pulling

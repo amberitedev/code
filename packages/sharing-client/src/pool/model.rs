@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use contracts::tickets::StoreHost;
 use serde::{Deserialize, Serialize};
 
 use crate::crypto;
@@ -12,7 +13,7 @@ pub struct PoolAccess {
     pub version: i32,
     /// R.
     pub root: [u8; 32],
-    pub holders: Vec<super::PoolCore>,
+    pub holders: Vec<StoreHost>,
     /// The fetch ticket for R.
     pub ticket: String,
 }

@@ -74,6 +74,28 @@ where
     E::Response::read(check(request.send().await?).await?).await
 }
 
+/// [`call`] for a server trusted no further than its answer's first `max` bytes: a longer JSON
+/// answer is refused unread.
+pub async fn call_limited<E, T>(
+    remote: &Remote<'_>,
+    params: &E::Params,
+    query: &E::Query,
+    body: <E::Body as Body>::Input,
+    max: usize,
+) -> Result<T, CallError>
+where
+    E: Endpoint<Response = Json<T>>,
+    E::Body: Body,
+    T: DeserializeOwned,
+{
+    let request = E::Body::attach(body, request::<E>(remote, params, query)?);
+    let response = check(request.send().await?).await?;
+    let status = response.status().as_u16();
+    let bytes = read_up_to(response, max).await?;
+    serde_json::from_slice(&bytes)
+        .map_err(|source| CallError::Decode { status, source })
+}
+
 /// Starts a download at byte `from`, returning the response to read as it arrives.
 pub async fn call_stream<E: Endpoint<Body = Empty, Response = Stream>>(
     remote: &Remote<'_>,
@@ -179,26 +201,34 @@ pub fn url<E: Endpoint>(
     Ok(url)
 }
 
-async fn check(mut response: Response) -> Result<Response, CallError> {
-    let status = response.status();
-    if status.is_success() {
+async fn check(response: Response) -> Result<Response, CallError> {
+    if response.status().is_success() {
         return Ok(response);
     }
-    let status = status.as_u16();
-    let mut bytes = Vec::new();
-    while let Some(chunk) = response.chunk().await? {
-        bytes.extend_from_slice(&chunk);
-        if bytes.len() > MAX_ERROR_BYTES {
-            return Err(CallError::Decode {
-                status,
-                source: serde::de::Error::custom("the error body is too long"),
-            });
-        }
-    }
+    let status = response.status().as_u16();
+    let bytes = read_up_to(response, MAX_ERROR_BYTES).await?;
     match serde_json::from_slice(&bytes) {
         Ok(error) => Err(CallError::Api { status, error }),
         Err(source) => Err(CallError::Decode { status, source }),
     }
+}
+
+async fn read_up_to(
+    mut response: Response,
+    max: usize,
+) -> Result<Vec<u8>, CallError> {
+    let status = response.status().as_u16();
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await? {
+        bytes.extend_from_slice(&chunk);
+        if bytes.len() > max {
+            return Err(CallError::Decode {
+                status,
+                source: serde::de::Error::custom("the body is too long"),
+            });
+        }
+    }
+    Ok(bytes)
 }
 
 impl<T: Serialize> Body for Json<T> {
@@ -280,7 +310,10 @@ mod tests {
         net::TcpListener,
     };
 
-    use super::{CallError, MAX_ERROR_BYTES, Remote, call, call_stream, url};
+    use super::{
+        CallError, MAX_ERROR_BYTES, Remote, call, call_limited, call_stream,
+        url,
+    };
     use crate::{Auth, Empty, Endpoint, ErrorCode, Json, Method, Stream};
 
     #[derive(Serialize, Deserialize)]
@@ -402,8 +435,34 @@ mod tests {
         .unwrap();
     }
 
+    async fn read_limited(max: usize) -> Result<String, CallError> {
+        let server = Server::answer(
+            "HTTP/1.1 200 OK
+Content-Length: 7
+Connection: close
+
+\"short\""
+                .into(),
+        )
+        .await;
+        call_limited::<ReadFile, _>(
+            &server.remote(),
+            &file("a", "b"),
+            &(),
+            Empty,
+            max,
+        )
+        .await
+    }
+
     #[tokio::test]
-    async fn an_error_body_is_read_only_up_to_the_cap() {
+    async fn bodies_are_read_only_up_to_their_cap() {
+        assert_eq!(read_limited(7).await.unwrap(), "short");
+        assert!(matches!(
+            read_limited(6).await.unwrap_err(),
+            CallError::Decode { status: 200, .. }
+        ));
+
         let body = format!(
             "{{\"error\":\"not_found\",\"description\":\"Gone.\"}}{}",
             " ".repeat(MAX_ERROR_BYTES)
