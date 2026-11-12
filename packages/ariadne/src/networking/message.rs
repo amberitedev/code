@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientToServerMessage {
     StatusUpdate {
@@ -19,11 +20,13 @@ pub enum ClientToServerMessage {
     SocketSend {
         socket: Uuid,
         #[serde(with = "serde_bytes")]
+        #[cfg_attr(feature = "ts", ts(type = "Array<number>"))]
         data: Vec<u8>,
     },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerToClientMessage {
     StatusUpdate {
@@ -60,6 +63,7 @@ pub enum ServerToClientMessage {
     SocketData {
         socket: Uuid,
         #[serde(with = "serde_bytes")]
+        #[cfg_attr(feature = "ts", ts(type = "Array<number>"))]
         data: Vec<u8>,
     },
 }

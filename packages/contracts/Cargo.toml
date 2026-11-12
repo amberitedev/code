@@ -10,13 +10,14 @@ ignored = ["contracts"]
 
 # The protocol: the Endpoint machinery, the one error body, the protocol version, and the limits and
 # share rules. `client` and `server` add the transport glue, `ts` the TypeScript generator. It
-# imports none of our crates.
+# imports none of our crates, only upstream's ariadne for the friends socket's messages.
 [dependencies]
+ariadne = { workspace = true }
 axum = { version = "0.8.4", default-features = false, features = ["json", "query"], optional = true }
 bytes = { workspace = true }
 reqwest = { workspace = true, features = ["json"], optional = true }
 serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true, optional = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true, optional = true }
 ts-rs = { workspace = true, features = ["no-serde-warnings"], optional = true }
 
@@ -28,9 +29,9 @@ tokio = { workspace = true, features = ["io-util", "macros", "net", "rt"] }
 tower = { version = "0.5.2", features = ["util"] }
 
 [features]
-client = ["dep:reqwest", "dep:serde_json", "dep:thiserror"]
+client = ["dep:reqwest", "dep:thiserror"]
 server = ["dep:axum"]
-ts = ["dep:serde_json", "dep:ts-rs"]
+ts = ["ariadne/ts", "dep:ts-rs"]
 
 [lints]
 workspace = true

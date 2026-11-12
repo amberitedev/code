@@ -1,9 +1,15 @@
+import type {
+	ClientToServerMessage,
+	FriendsSocketMessage,
+	ServerToClientMessage,
+	UserStatus,
+} from '@amberite/contracts'
 import { DurableObject } from 'cloudflare:workers'
 import { requireSession } from '../common/auth'
 import type { Env } from '../common/types'
 
-type Presence = { user_id: string; profile_name: string | null; last_update: string }
-type Connection = { userId: string; sessionId: string; expires: string; presence: Presence }
+/** What each socket keeps through hibernation. */
+type Connection = { userId: string; sessionId: string; expires: string; presence: UserStatus }
 
 /**
  * One object per account keeps all its installations online through Worker hibernation.
@@ -34,29 +40,28 @@ export class FriendsHub extends DurableObject<Env> {
 			type: 'status_update',
 			status: connection.presence,
 		})
-		pair[1].send(
-			JSON.stringify({
-				type: 'friend_statuses',
-				statuses: statuses.filter((status) => status !== null),
-			}),
-		)
+		const sync: ServerToClientMessage = {
+			type: 'friend_statuses',
+			statuses: statuses.filter((status) => status !== null),
+		}
+		pair[1].send(JSON.stringify(sync))
 		return new Response(null, { status: 101, webSocket: pair[0] })
 	}
 
 	/** This account's presence, or null when none of its installations is online. */
-	status(): Presence | null {
+	status(): UserStatus | null {
 		const [socket] = this.online()
 		return socket ? attachment(socket).presence : null
 	}
 
 	/** Sends each message to every online installation of this account. */
-	notify(...messages: unknown[]): void {
+	notify(...messages: FriendsSocketMessage[]): void {
 		const texts = messages.map((message) => JSON.stringify(message))
 		for (const socket of this.online()) for (const text of texts) socket.send(text)
 	}
 
 	/** A friend's presence changed: passes it on and answers with this account's own. */
-	friendPresence(message: unknown): Presence | null {
+	friendPresence(message: ServerToClientMessage): UserStatus | null {
 		this.notify(message)
 		return this.status()
 	}
@@ -78,24 +83,18 @@ export class FriendsHub extends DurableObject<Env> {
 			socket.close(1007, 'Invalid JSON')
 			return
 		}
-		if (!message || typeof message !== 'object' || !('type' in message)) return
-		if (
-			message.type === 'status_update' &&
-			'profile_name' in message &&
-			(message.profile_name === null ||
-				(typeof message.profile_name === 'string' && message.profile_name.length <= 256))
-		) {
-			connection.presence = {
-				user_id: connection.userId,
-				profile_name: message.profile_name,
-				last_update: new Date().toISOString(),
-			}
-			socket.serializeAttachment(connection)
-			await this.broadcast(connection.userId, {
-				type: 'status_update',
-				status: connection.presence,
-			})
+		const update = statusUpdate(message)
+		if (!update) return
+		connection.presence = {
+			user_id: connection.userId,
+			profile_name: update.profile_name,
+			last_update: new Date().toISOString(),
 		}
+		socket.serializeAttachment(connection)
+		await this.broadcast(connection.userId, {
+			type: 'status_update',
+			status: connection.presence,
+		})
 	}
 
 	async webSocketClose(socket: WebSocket): Promise<void> {
@@ -156,7 +155,10 @@ export class FriendsHub extends DurableObject<Env> {
 	}
 
 	/** Sends a presence message to every friend, and returns each friend's own presence. */
-	private async broadcast(userId: string, message: unknown): Promise<(Presence | null)[]> {
+	private async broadcast(
+		userId: string,
+		message: ServerToClientMessage,
+	): Promise<(UserStatus | null)[]> {
 		return Promise.all(
 			(await friendIds(this.env, userId)).map((id) =>
 				this.env.FRIENDS.getByName(id).friendPresence(message),
@@ -174,6 +176,26 @@ function attachment(socket: WebSocket): Connection {
 	return socket.deserializeAttachment() as Connection
 }
 
+/**
+ * `message` when it is a valid status update. The App's other messages tunnel sockets between
+ * friends, which this backend does not do.
+ */
+function statusUpdate(
+	message: unknown,
+): Extract<ClientToServerMessage, { type: 'status_update' }> | null {
+	if (
+		message &&
+		typeof message === 'object' &&
+		'type' in message &&
+		message.type === 'status_update' &&
+		'profile_name' in message &&
+		(message.profile_name === null ||
+			(typeof message.profile_name === 'string' && message.profile_name.length <= 256))
+	)
+		return { type: 'status_update', profile_name: message.profile_name }
+	return null
+}
+
 async function friendIds(env: Env, userId: string): Promise<string[]> {
 	const { results } = await env.DB.prepare(
 		'SELECT CASE WHEN user_id = ? THEN friend_id ELSE user_id END AS id FROM friends WHERE accepted = 1 AND (user_id = ? OR friend_id = ?)',
@@ -183,24 +205,23 @@ async function friendIds(env: Env, userId: string): Promise<string[]> {
 	return results.map((row) => row.id)
 }
 
-export async function notifyUser(env: Env, userId: string, ...messages: unknown[]): Promise<void> {
+export async function notifyUser(
+	env: Env,
+	userId: string,
+	...messages: FriendsSocketMessage[]
+): Promise<void> {
 	await env.FRIENDS.getByName(userId).notify(...messages)
 }
 
-export async function friendsStatuses(env: Env, userId: string): Promise<Presence[]> {
+export async function friendsStatuses(env: Env, userId: string): Promise<UserStatus[]> {
 	const statuses = await Promise.all(
 		(await friendIds(env, userId)).map((id) => env.FRIENDS.getByName(id).status()),
 	)
 	return statuses.filter((status) => status !== null)
 }
 
-export async function handleFriendsSocket(request: Request, env: Env): Promise<Response | null> {
-	if (
-		!['/_internal/launcher_socket', '/v2/_internal/launcher_socket'].includes(
-			new URL(request.url).pathname,
-		)
-	)
-		return null
+/** Hands the App's socket to its account's `FriendsHub`. */
+export async function friendsSocket(request: Request, env: Env): Promise<Response> {
 	if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket')
 		return new Response('WebSocket required', { status: 426 })
 	const headers = new Headers(request.headers)

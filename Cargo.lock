@@ -325,6 +325,7 @@ dependencies = [
  "serde_cbor",
  "serde_json",
  "thiserror 2.0.21",
+ "ts-rs",
  "utoipa",
  "uuid 1.28.0",
 ]
@@ -2224,6 +2225,7 @@ dependencies = [
 name = "contracts"
 version = "0.0.0"
 dependencies = [
+ "ariadne",
  "axum",
  "bytes",
  "contracts",

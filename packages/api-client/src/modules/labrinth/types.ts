@@ -2524,22 +2524,6 @@ export namespace Labrinth {
 	}
 
 	export namespace Notifications {
-		export namespace v3 {
-			export type NotificationAction = Notifications.v2.NotificationAction
-			export type NotificationBody = Notifications.v2.NotificationBody
-			export type Notification = {
-				id: string
-				user_id: string
-				read: boolean
-				created: string
-				body: NotificationBody
-				name: string
-				text: string
-				link: string
-				actions: NotificationAction[]
-			}
-		}
-
 		export namespace v2 {
 			export type NotificationAction = {
 				title: string

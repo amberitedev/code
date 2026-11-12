@@ -1,6 +1,6 @@
 import type { Endpoint } from '@amberite/contracts'
 
-import { json, readJsonBody } from './http'
+import { invalid, json, readBytes, readJsonBody } from './http'
 import type { Env } from './types'
 
 type TypesOf<E> =
@@ -19,8 +19,14 @@ export interface Context<E extends Endpoint> {
 	body(): Promise<BodyOf<E>>
 }
 
-/** What a handler answers: the route's response, or the `101` of a socket it upgraded to. */
-type Answer<E extends Endpoint> = TypesOf<E>['response'] extends { receive: unknown; send: unknown }
+/**
+ * What a handler answers: the route's response, or for a socket, raw bytes or a stream, the
+ * `Response` it built with its own headers.
+ */
+type Answer<E extends Endpoint> = TypesOf<E>['response'] extends
+	| { receive: unknown; send: unknown }
+	| Blob
+	| Response
 	? Response
 	: TypesOf<E>['response']
 
@@ -30,18 +36,19 @@ export interface Route {
 	serve(request: Request, env: Env, params: Record<string, string>): Promise<Response>
 }
 
-/** Read a JSON body larger than this as too large unless the route allows more. */
-const MAX_JSON_BYTES = 65536
+/** Read a body larger than this as too large unless the route allows more. */
+const MAX_BODY_BYTES = 65536
 
 /**
- * `handle` as the route of `endpoint`. `parse` checks the untrusted body and returns it typed; a
- * body that does not fit throws `invalid_input`. A JSON body over `maxBytes` is refused unread.
+ * `handle` as the route of `endpoint`. `parse` checks the untrusted body (parsed JSON, or a `Blob`
+ * of raw bytes) and returns it typed; a body that does not fit throws `invalid_input`. A body over
+ * `maxBytes` is refused unread.
  */
 export function route<E extends Endpoint>(
 	endpoint: E,
 	parse: (raw: unknown) => BodyOf<E>,
 	handle: (context: Context<E>) => Promise<Answer<E>>,
-	maxBytes = MAX_JSON_BYTES,
+	maxBytes = MAX_BODY_BYTES,
 ): Route {
 	return {
 		method: endpoint.method,
@@ -52,8 +59,7 @@ export function route<E extends Endpoint>(
 				env,
 				// A route without `{name}` segments has `()` params, which arrive as `null`.
 				params: (Object.keys(params).length ? params : null) as TypesOf<E>['params'],
-				body: async () =>
-					parse(endpoint.body === 'json' ? await readJsonBody(request, maxBytes) : undefined),
+				body: async () => parse(await readBody(endpoint, request, maxBytes)),
 			})
 			if (answer instanceof Response) return answer
 			if (endpoint.response === 'empty') return new Response(null, { status: 204 })
@@ -62,12 +68,34 @@ export function route<E extends Endpoint>(
 	}
 }
 
+async function readBody(endpoint: Endpoint, request: Request, maxBytes: number) {
+	if (endpoint.body === 'json') return readJsonBody(request, maxBytes)
+	if (endpoint.body === 'raw')
+		return new Blob([await readBytes(request, maxBytes)], {
+			type: request.headers.get('Content-Type') ?? '',
+		})
+	return undefined
+}
+
 /** For routes without a body. */
 export function noBody(): void {}
 
-/** The response of the route `request` names, or null when none of `routes` does. */
-export async function serve(routes: Route[], request: Request, env: Env): Promise<Response | null> {
-	const segments = new URL(request.url).pathname.split('/').slice(1)
+/** For routes whose body is raw bytes. */
+export function rawBody(raw: unknown): Blob {
+	return raw instanceof Blob ? raw : invalid('Expected a body')
+}
+
+/**
+ * The response of the route `path` names, or null when none of `routes` does. `path` is the
+ * request's own unless the caller strips a prefix first.
+ */
+export async function serve(
+	routes: Route[],
+	request: Request,
+	env: Env,
+	path = new URL(request.url).pathname,
+): Promise<Response | null> {
+	const segments = path.split('/').slice(1)
 	for (const candidate of routes) {
 		if (candidate.method !== request.method) continue
 		const params = match(candidate.segments, segments)

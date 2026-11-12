@@ -345,3 +345,127 @@ export const cores = {
 	RemoveCore: { method: "DELETE", path: "/cores/{id}", auth: "account", dangerous: false, body: "empty", response: "empty" } as Endpoint<CoreId, null, void, void>,
 	Keys: { method: "GET", path: "/core/keys.json", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, PublicKeys>,
 }
+
+export type Never = never;
+
+export type Role = "developer" | "moderator" | "admin";
+
+export type UserCampaigns = { pride_26: Never | null, };
+
+export type UserLock = { locked_by: string, reason: string, created: string, };
+
+export type User = { id: string, username: string, avatar_url: string | null, raw_avatar_url: string | null, bio: string | null, created: string, role: Role, badges: number, campaigns: UserCampaigns, auth_providers: Array<Never> | null, email: string | null, email_verified: boolean | null, has_password: boolean | null, has_totp: boolean | null, payout_data: Never | null, stripe_customer_id: Never | null, github_id: Never | null, allow_friend_requests: boolean | null, eligibility_verified_at: string | null, lock?: UserLock | null, };
+
+export type SearchUser = { id: string, username: string, avatar_url: string | null, };
+
+export type UserFriend = { id: string, friend_id: string, accepted: boolean, created: string, };
+
+export type UserUpdate = { username?: string, bio?: string | null, allow_friend_requests?: boolean, };
+
+export type AllProjects = { projects: Array<Never>, organizations: Record<string, never>, };
+
+export type Theme = "light" | "dark" | "oled" | "retro";
+
+export type LayoutOption = "grid" | "rows";
+
+export type FriendPrivacy = "none" | "mutual" | "everyone";
+
+export type InvitePrivacy = "none" | "friends" | "everyone";
+
+export type AppearancePreferences = { auto: boolean, theme: Theme, };
+
+export type BehaviorPreferences = { minimize_app: boolean, refocus_on_game_close: boolean, hide_right_sidebar: boolean, show_jump_in: boolean, compact_instance_cards: boolean, show_play_time: boolean, hide_nametag: boolean, show_all_screenshots: boolean, show_files_tab_in_instances: boolean, show_worlds_tab_in_instances: boolean, show_screenshots_tab_in_instances: boolean, show_skin_selector_in_sidebar: boolean, 
+/**
+ * 0 to 255.
+ */
+quick_instance_count: number, warn_on_unknown_modpacks: boolean, skip_non_essential_warnings: boolean, };
+
+export type LocalizationPreferences = { 
+/**
+ * Letters, digits and dashes, at most 35.
+ */
+locale: string, };
+
+export type LayoutPreferences = { mods: LayoutOption, plugins: LayoutOption, datapacks: LayoutOption, shaders: LayoutOption, resourcepacks: LayoutOption, modpacks: LayoutOption, servers: LayoutOption, users: LayoutOption, };
+
+export type SidebarPreferences = { right_aligned_search: boolean, left_aligned_content: boolean, };
+
+export type SocialPreferences = { friend_privacy: FriendPrivacy, shared_instances_privacy: InvitePrivacy, hosting_access_privacy: InvitePrivacy, };
+
+export type UserPreferences = { appearance: AppearancePreferences, behavior: BehaviorPreferences, localization: LocalizationPreferences, layouts: LayoutPreferences, sidebars: SidebarPreferences, social: SocialPreferences, };
+
+export type PreferencesUpdate = { [S in keyof UserPreferences]?: Partial<UserPreferences[S]> };
+
+export type NotificationAction = { name: string, 
+/**
+ * The method and the route to call.
+ */
+action_route: [string, string], };
+
+export type Notification = { id: string, user_id: string, read: boolean, created: string, body: { type: string, [key: string]: unknown }, name: string, text: string, link: string, actions: Array<NotificationAction>, };
+
+export type SharedInstanceList = "shared_instance_users" | "shared_instance_servers";
+
+export type SharedInstanceChangeBody = { type: SharedInstanceList, shared_instance_id: string, };
+
+export type SharedInstanceChange = { body: SharedInstanceChangeBody, };
+
+export type UserStatus = { user_id: string, profile_name: string | null, last_update: string, };
+
+export type ServerToClientMessage = { "type": "status_update", status: UserStatus, } | { "type": "user_offline", id: string, } | { "type": "friend_statuses", statuses: Array<UserStatus>, } | { "type": "friend_request", from: string, } | { "type": "friend_request_rejected", from: string, } | { "type": "friend_socket_listening", user: string, socket: string, } | { "type": "friend_socket_stopped_listening", user: string, } | { "type": "socket_connected", to_socket: string, new_socket: string, } | { "type": "socket_closed", socket: string, } | { "type": "socket_data", socket: string, data: Array<number>, };
+
+export type ClientToServerMessage = { "type": "status_update", profile_name: string | null, } | { "type": "socket_listen", socket: string, } | { "type": "socket_close", socket: string, } | { "type": "socket_send", socket: string, data: Array<number>, };
+
+export type FriendsSocketMessage = ServerToClientMessage | Notification | SharedInstanceChange;
+
+export type UserRef = { id: string, };
+
+export type NotificationRef = { id: string, };
+
+export type AvatarRevision = { user_id: string, revision: string, };
+
+export type IdList = { ids: string, };
+
+export type UserSearch = { query: string, };
+
+export type IconFormat = { 
+/**
+ * `png`, `jpg`, `jpeg`, `gif` or `webp`.
+ */
+ext: string, };
+
+export type SocketCode = { code: string, };
+
+/** The backend's social routes, in labrinth's shapes. */
+export const social = {
+	SearchUsers: { method: "GET", path: "/users/search", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, UserSearch, void, Array<SearchUser>>,
+	GetUsers: { method: "GET", path: "/users", auth: "account", dangerous: false, body: "empty", response: "json" } as Endpoint<null, IdList, void, Array<User>>,
+	ListFriends: { method: "GET", path: "/friends", auth: "account", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<UserFriend>>,
+	ListFriendStatuses: { method: "GET", path: "/friends/status", auth: "account", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<UserStatus>>,
+	AddFriend: { method: "POST", path: "/friend/{id}", auth: "account", dangerous: false, body: "empty", response: "empty" } as Endpoint<UserRef, null, void, void>,
+	RemoveFriend: { method: "DELETE", path: "/friend/{id}", auth: "account", dangerous: false, body: "empty", response: "empty" } as Endpoint<UserRef, null, void, void>,
+	ListBlocks: { method: "GET", path: "/blocks", auth: "account", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<string>>,
+	BlockUser: { method: "POST", path: "/block/{id}", auth: "account", dangerous: false, body: "empty", response: "empty" } as Endpoint<UserRef, null, void, void>,
+	UnblockUser: { method: "DELETE", path: "/block/{id}", auth: "account", dangerous: false, body: "empty", response: "empty" } as Endpoint<UserRef, null, void, void>,
+	GetAvatar: { method: "GET", path: "/avatars/{user_id}/{revision}", auth: "none", dangerous: false, body: "empty", response: "raw" } as Endpoint<AvatarRevision, null, void, Blob>,
+	GetUser: { method: "GET", path: "/user/{id}", auth: "account", dangerous: false, body: "empty", response: "json" } as Endpoint<UserRef, null, void, User>,
+	ListUserProjects: { method: "GET", path: "/user/{id}/projects", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<UserRef, null, void, Array<Never>>,
+	ListUserOrganizations: { method: "GET", path: "/user/{id}/organizations", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<UserRef, null, void, Array<Never>>,
+	ListUserCollections: { method: "GET", path: "/user/{id}/collections", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<UserRef, null, void, Array<Never>>,
+	ListFollowedProjects: { method: "GET", path: "/user/{id}/follows", auth: "account", dangerous: false, body: "empty", response: "json" } as Endpoint<UserRef, null, void, Array<Never>>,
+	ListAllProjects: { method: "GET", path: "/user/{id}/all-projects", auth: "account", dangerous: false, body: "empty", response: "json" } as Endpoint<UserRef, null, void, AllProjects>,
+	EditUser: { method: "PATCH", path: "/user/{id}", auth: "account", dangerous: false, body: "json", response: "empty" } as Endpoint<UserRef, null, UserUpdate, void>,
+	DeleteUser: { method: "DELETE", path: "/user/{id}", auth: "account", dangerous: false, body: "empty", response: "empty" } as Endpoint<UserRef, null, void, void>,
+	GetPreferences: { method: "GET", path: "/user/{id}/preferences", auth: "account", dangerous: false, body: "empty", response: "json" } as Endpoint<UserRef, null, void, UserPreferences>,
+	EditPreferences: { method: "PATCH", path: "/user/{id}/preferences", auth: "account", dangerous: false, body: "json", response: "json" } as Endpoint<UserRef, null, PreferencesUpdate, UserPreferences>,
+	ChangeAvatar: { method: "PATCH", path: "/user/{id}/icon", auth: "account", dangerous: false, body: "raw", response: "empty" } as Endpoint<UserRef, IconFormat, Blob, void>,
+	RemoveAvatar: { method: "DELETE", path: "/user/{id}/icon", auth: "account", dangerous: false, body: "empty", response: "empty" } as Endpoint<UserRef, null, void, void>,
+	ListUserNotifications: { method: "GET", path: "/user/{id}/notifications", auth: "account", dangerous: false, body: "empty", response: "json" } as Endpoint<UserRef, null, void, Array<Notification>>,
+	GetNotification: { method: "GET", path: "/notification/{id}", auth: "account", dangerous: false, body: "empty", response: "json" } as Endpoint<NotificationRef, null, void, Notification>,
+	ReadNotification: { method: "PATCH", path: "/notification/{id}", auth: "account", dangerous: false, body: "empty", response: "empty" } as Endpoint<NotificationRef, null, void, void>,
+	DeleteNotification: { method: "DELETE", path: "/notification/{id}", auth: "account", dangerous: false, body: "empty", response: "empty" } as Endpoint<NotificationRef, null, void, void>,
+	GetNotifications: { method: "GET", path: "/notifications", auth: "account", dangerous: false, body: "empty", response: "json" } as Endpoint<null, IdList, void, Array<Notification>>,
+	ReadNotifications: { method: "PATCH", path: "/notifications", auth: "account", dangerous: false, body: "empty", response: "empty" } as Endpoint<null, IdList, void, void>,
+	DeleteNotifications: { method: "DELETE", path: "/notifications", auth: "account", dangerous: false, body: "empty", response: "empty" } as Endpoint<null, IdList, void, void>,
+	FriendsSocket: { method: "GET", path: "/launcher_socket", auth: "account", dangerous: false, body: "empty", response: "upgrade" } as Endpoint<null, SocketCode, void, { receive: FriendsSocketMessage, send: ClientToServerMessage }>,
+}

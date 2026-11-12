@@ -6,7 +6,6 @@ import { coreRoutes } from './cores'
 import { handleVisibleServers } from './cores/servers'
 import { handleSharing } from './sharing'
 import { handleSocial } from './social'
-import { handleFriendsSocket } from './social/socket'
 export { CoreSignIn } from './cores/sign-in'
 export { FriendsHub } from './social/socket'
 
@@ -41,7 +40,6 @@ export default {
 				response = json({ status: 'ok' })
 			} else
 				response =
-					(await handleFriendsSocket(request, env)) ??
 					(await handleVisibleServers(request, env)) ??
 					(await handleSharing(request, env)) ??
 					(await serve(coreRoutes, request, env)) ??

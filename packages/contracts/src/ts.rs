@@ -174,11 +174,12 @@ export interface Endpoint<P = unknown, Q = unknown, B = unknown, R = unknown> {
         format!(
             "// Generated from packages/contracts by ts-rs. Do not edit.\n\
              // Regenerate: cargo test -p contracts -- --ignored write_ts\n\n\
-             export const PROTOCOL_VERSION = {PROTOCOL_VERSION}\n{declarations}{ENDPOINT}{}{}{}{}",
+             export const PROTOCOL_VERSION = {PROTOCOL_VERSION}\n{declarations}{ENDPOINT}{}{}{}{}{}",
             limits::ts(),
             rules::ts(),
             tickets::ts(),
             backend::cores::ts(),
+            backend::social::ts(),
         )
     }
 

@@ -1,4 +1,4 @@
-import type { SharedInstances } from '@modrinth/api-client'
+import type { SharedInstanceList } from '@modrinth/api-client'
 import { type MaybeRefOrGetter, toValue } from 'vue'
 
 import { useAppEvent } from '@/composables/use-app-event'
@@ -9,7 +9,7 @@ import { useAppEvent } from '@/composables/use-app-event'
  * (re)connects, since events sent while it was down are lost.
  */
 export function useSharedInstanceEvent(
-	type: SharedInstances.LiveEvent['body']['type'],
+	type: SharedInstanceList,
 	sharedInstanceId: MaybeRefOrGetter<string | null | undefined>,
 	onChange: () => void,
 ) {
