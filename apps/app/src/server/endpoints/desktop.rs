@@ -111,7 +111,7 @@ impl Endpoint for CheckNetworkMetered {
     type Response = Json<bool>;
 }
 
-/// The native window's console, written to the App's log.
+/// Lines from the native window's console, in order, written to the App's log.
 pub struct LogFromWebview;
 
 impl Endpoint for LogFromWebview {
@@ -120,7 +120,7 @@ impl Endpoint for LogFromWebview {
     const AUTH: Auth = Auth::None;
     type Params = ();
     type Query = ();
-    type Body = Json<WebviewLog>;
+    type Body = Json<Vec<WebviewLog>>;
     type Response = Empty;
 }
 

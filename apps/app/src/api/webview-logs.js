@@ -26,6 +26,28 @@
 		}
 	}
 
+	// One request at a time, carrying every line logged meanwhile, keeps lines in order and leaves
+	// the page's other connections to the local server free.
+	let pending = []
+	let sending = false
+	function flush() {
+		const base = window.__AMBERITE_LOCAL__
+		if (sending || pending.length === 0 || !base) return
+		sending = true
+		const body = JSON.stringify(pending)
+		pending = []
+		fetch(`${base}/app/webview-log`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body,
+		})
+			.catch(() => {})
+			.finally(() => {
+				sending = false
+				flush()
+			})
+	}
+
 	for (const method of ['log', 'info', 'warn', 'error', 'debug', 'trace']) {
 		const original = console[method]
 		if (typeof original !== 'function') continue
@@ -34,17 +56,13 @@
 			const result = original.apply(this, args)
 			try {
 				// The local server's init script sets the base; it may run after this one.
-				const base = window.__AMBERITE_LOCAL__
-				if (!base) return result
+				if (!window.__AMBERITE_LOCAL__) return result
 				if (method === 'trace') args.push(new Error('console.trace').stack)
-				void fetch(`${base}/app/webview-log`, {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({
-						level: method === 'log' ? 'info' : method,
-						message: args.map(serialize).join(' '),
-					}),
-				}).catch(() => {})
+				pending.push({
+					level: method === 'log' ? 'info' : method,
+					message: args.map(serialize).join(' '),
+				})
+				queueMicrotask(flush)
 			} catch {}
 			return result
 		}

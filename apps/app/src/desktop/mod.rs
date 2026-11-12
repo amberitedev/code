@@ -17,13 +17,13 @@ use crate::engine_handle::EngineHandle;
 /// waits until then.
 pub type AppSlot = Arc<tokio::sync::SetOnce<tauri::AppHandle>>;
 
-pub fn routes(engine: EngineHandle, app: AppSlot) -> Router {
+pub fn routes(engine: EngineHandle, app: AppSlot, secret: &str) -> Router {
     files::routes(engine.clone())
         .merge(dialog::routes(app))
         .merge(opener::routes(engine))
         .merge(shortcuts::routes())
         .merge(network::routes())
-        .merge(webview_log::routes())
+        .merge(webview_log::routes(secret))
 }
 
 fn internal(error: impl Display) -> ApiError {

@@ -15,24 +15,8 @@ pub async fn thumbnail(
     cache: PathBuf,
     size: u32,
 ) -> std::io::Result<PathBuf> {
-    let permit = THUMBNAIL_WORKER
-        .acquire()
-        .await
-        .map_err(std::io::Error::other)?;
-    tokio::task::spawn_blocking(move || {
-        let _permit = permit;
-        create_thumbnail(&path, &cache, size.clamp(32, 512))
-    })
-    .await
-    .map_err(std::io::Error::other)?
-}
-
-fn create_thumbnail(
-    path: &Path,
-    cache: &Path,
-    size: u32,
-) -> std::io::Result<PathBuf> {
-    let metadata = std::fs::metadata(path)?;
+    let size = size.clamp(32, 512);
+    let metadata = tokio::fs::metadata(&path).await?;
     let modified = metadata
         .modified()?
         .duration_since(UNIX_EPOCH)
@@ -48,8 +32,35 @@ fn create_thumbnail(
         .map(|byte| format!("{byte:02x}"))
         .collect();
     let target = cache.join(format!("{hash}.png"));
-    if target.is_file() {
+    // A cache hit skips the worker queue: every queued request holds one of the page's six
+    // connections to the local server.
+    if tokio::fs::metadata(&target)
+        .await
+        .is_ok_and(|target| target.is_file())
+    {
         return Ok(target);
+    }
+    let permit = THUMBNAIL_WORKER
+        .acquire()
+        .await
+        .map_err(std::io::Error::other)?;
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        create_thumbnail(&path, &cache, &target, size)
+    })
+    .await
+    .map_err(std::io::Error::other)?
+}
+
+fn create_thumbnail(
+    path: &Path,
+    cache: &Path,
+    target: &Path,
+    size: u32,
+) -> std::io::Result<PathBuf> {
+    // Another request may have made it while this one waited for the worker.
+    if target.is_file() {
+        return Ok(target.to_owned());
     }
     std::fs::create_dir_all(cache)?;
     let mut reader = image::ImageReader::open(path)?.with_guessed_format()?;
@@ -65,15 +76,15 @@ fn create_thumbnail(
     thumbnail
         .save_with_format(&temporary, image::ImageFormat::Png)
         .map_err(std::io::Error::other)?;
-    std::fs::rename(&temporary, &target)?;
+    std::fs::rename(&temporary, target)?;
     if GENERATED_THUMBNAILS
         .fetch_add(1, Ordering::Relaxed)
         .is_multiple_of(32)
-        && let Err(error) = prune_cache(cache, &target)
+        && let Err(error) = prune_cache(cache, target)
     {
         tracing::warn!(%error, "Could not prune thumbnail cache");
     }
-    Ok(target)
+    Ok(target.to_owned())
 }
 
 fn prune_cache(cache: &Path, current: &Path) -> std::io::Result<()> {
@@ -102,4 +113,30 @@ fn prune_cache(cache: &Path, current: &Path) -> std::io::Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::{THUMBNAIL_WORKER, thumbnail};
+
+    #[tokio::test]
+    async fn a_cached_thumbnail_does_not_wait_for_the_worker() {
+        let folder = tempfile::tempdir().unwrap();
+        let source = folder.path().join("screenshot.png");
+        image::RgbImage::new(64, 64).save(&source).unwrap();
+        let cache = folder.path().join("thumbnails");
+        let made = thumbnail(source.clone(), cache.clone(), 32).await.unwrap();
+
+        let _busy = THUMBNAIL_WORKER.acquire().await.unwrap();
+        let cached = tokio::time::timeout(
+            Duration::from_secs(5),
+            thumbnail(source, cache, 32),
+        )
+        .await
+        .expect("a cache hit waited for the worker")
+        .unwrap();
+        assert_eq!(cached, made);
+    }
 }

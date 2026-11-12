@@ -110,7 +110,7 @@ impl LocalServer {
             .route(boot_path, boot)
             .route(events_path, events)
             .merge(cores::routes(Arc::clone(&self.cores)))
-            .merge(desktop::routes(engine, app));
+            .merge(desktop::routes(engine, app, &self.secret));
         Router::new()
             .nest(&format!("/{}", self.secret), routes)
             .layer(middleware::from_fn_with_state(guard, guard::guard))
