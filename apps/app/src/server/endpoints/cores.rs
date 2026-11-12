@@ -1,7 +1,7 @@
 //! Paired Cores: the proxy address that reaches each, and this device's session there. See
 //! `crate::cores`.
 
-use contracts::{Auth, Empty, Endpoint, Json, Method};
+use contracts::{Auth, Empty, Endpoint, Json, Method, core::CoreSession};
 use serde::{Deserialize, Serialize};
 
 /// Returns the base URL on the App's Core proxy that reaches the Core, trusting only the
@@ -78,14 +78,6 @@ pub struct NewCoreSession {
     pub fingerprint: String,
     pub ticket: String,
 }
-
-/// The session as the Core describes it.
-#[derive(Serialize)]
-#[serde(transparent)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-pub struct CoreSession(
-    #[cfg_attr(test, ts(type = "unknown"))] pub serde_json::Value,
-);
 
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]

@@ -15,8 +15,8 @@ mod tests {
     use super::{
         boot::{Boot, GetBoot, Platform},
         cores::{
-            CheckCoreSession, ConnectCore, CoreSession, CoreSessionKey,
-            CoreTarget, NewCoreSession, SignInToCore, SignOutOfCore,
+            CheckCoreSession, ConnectCore, CoreSessionKey, CoreTarget,
+            NewCoreSession, SignInToCore, SignOutOfCore,
         },
         events::EventSocket,
         health::CheckHealth,
@@ -37,7 +37,6 @@ mod tests {
             Platform::decl(&cfg),
             CoreTarget::decl(&cfg),
             NewCoreSession::decl(&cfg),
-            CoreSession::decl(&cfg),
             CoreSessionKey::decl(&cfg),
             LocalEvent::decl(&cfg),
             AppEvent::decl(&cfg),
@@ -49,7 +48,7 @@ mod tests {
         format!(
             "// Generated from apps/app by ts-rs. Do not edit.\n\
              // Regenerate: cargo test -p theseus_gui -- --ignored write_ts\n\n\
-             import type {{ Endpoint }} from './contracts'\n\
+             import type {{ CoreSession, Endpoint }} from './contracts'\n\
              import type {{ CommandPayload, EngineEvent, FriendPayload, InstanceGroupsChangedPayload, OnboardingChecklist }} from './engine'\n\
              {declarations}\n\
              export const health = {{\n\

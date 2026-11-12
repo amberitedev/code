@@ -1,7 +1,6 @@
 import {
 	type AbstractModrinthClient,
 	AuthFeature,
-	type Copal,
 	GenericModrinthClient,
 	NodeAuthFeature,
 	nodeAuthState,
@@ -46,9 +45,9 @@ export const apiClient: AbstractModrinthClient = new ModrinthClient({
 	coreSessions: {
 		// The App passes on the session as the Core described it.
 		signIn: async (coreId, address, fingerprint, ticket) =>
-			(await apiClient.local.call(pairedCores.signInToCore, {
+			apiClient.local.call(pairedCores.signInToCore, {
 				body: { core_id: coreId, account: await account(), address, fingerprint, ticket },
-			})) as Copal.Session,
+			}),
 		signOut: async (coreId) =>
 			apiClient.local.call(pairedCores.signOutOfCore, {
 				query: { core_id: coreId, account: await account() },

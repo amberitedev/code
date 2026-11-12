@@ -1,7 +1,7 @@
 // Generated from apps/app by ts-rs. Do not edit.
 // Regenerate: cargo test -p theseus_gui -- --ignored write_ts
 
-import type { Endpoint } from './contracts'
+import type { CoreSession, Endpoint } from './contracts'
 import type { CommandPayload, EngineEvent, FriendPayload, InstanceGroupsChangedPayload, OnboardingChecklist } from './engine'
 
 export type Boot = { version: string, platform: Platform, os_version: string, 
@@ -23,8 +23,6 @@ export type Platform = "windows" | "macos" | "linux";
 export type CoreTarget = { core_id: string, account: string, address: string, fingerprint: string, };
 
 export type NewCoreSession = { core_id: string, account: string, address: string, fingerprint: string, ticket: string, };
-
-export type CoreSession = unknown;
 
 export type CoreSessionKey = { core_id: string, account: string, };
 

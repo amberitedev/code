@@ -19,6 +19,7 @@ use axum::{Router, extract::State};
 use bytes::Bytes;
 use contracts::{
     ApiError, Empty, ErrorCode, Json,
+    core::CoreSession,
     server::{Req, route},
 };
 use http_body_util::Full;
@@ -33,7 +34,7 @@ use self::{
     tls::Target,
 };
 use crate::server::endpoints::cores::{
-    CheckCoreSession, ConnectCore, CoreSession, SignInToCore, SignOutOfCore,
+    CheckCoreSession, ConnectCore, SignInToCore, SignOutOfCore,
 };
 
 /// Core's own limit on a device name.
@@ -167,7 +168,9 @@ async fn sign_in(
         core_id: body.core_id,
     };
     cores.sessions.store(&key, token).await;
-    Ok(Json(CoreSession(signed["session"].take())))
+    serde_json::from_value(signed["session"].take())
+        .map(Json)
+        .map_err(unreachable)
 }
 
 /// Ends the session there through the first of the account's tunnels to the Core that answers.
