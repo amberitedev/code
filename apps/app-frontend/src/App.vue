@@ -204,7 +204,7 @@ const appTheme = useTheme()
 const quickInstances = useQuickInstanceLimit()
 const router = useRouter()
 const route = useRoute()
-const { channel: appEventChannel, events: appEvents } = setupAppEventsProvider()
+const { connect: connectAppEvents, events: appEvents } = setupAppEventsProvider()
 useInstanceMetadataRefresh(appEvents)
 const breadcrumbManager = createBreadcrumbManager()
 provideBreadcrumbManager(breadcrumbManager)
@@ -468,8 +468,6 @@ onMounted(async () => {
 		const listeners = await Promise.all([
 			listen('edit-menu://undo', () => handleEditMenuAction('undo')),
 			listen('edit-menu://redo', () => handleEditMenuAction('redo')),
-			// The App's own deep links while it is already running. See `handle_command` in apps/app.
-			listen('amberite-command', (event) => handleCommand(event.payload)),
 		])
 		unlistenEditMenu = () => listeners.forEach((unlisten) => unlisten())
 	} catch (error) {
@@ -722,7 +720,7 @@ const {
 } = useRouteLoading({ stateInitialized, stateFailed })
 provideLoadingState(loading)
 
-traceStartupStep('Initialize backend state', () => initialize_state(appEventChannel))
+traceStartupStep('Initialize backend state', () => initialize_state(connectAppEvents))
 	.then(() => {
 		traceStartupStep('Initialize frontend state', setupApp).catch((err) => {
 			stateFailed.value = true

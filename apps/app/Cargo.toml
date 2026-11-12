@@ -10,7 +10,7 @@ license = "GPL-3.0-only"
 [dependencies]
 aes-gcm = { workspace = true }
 anyhow = { workspace = true }
-axum = { version = "0.8.4", default-features = false, features = ["http1", "json", "query", "tokio"] }
+axum = { version = "0.8.4", default-features = false, features = ["http1", "json", "query", "tokio", "ws"] }
 
 base64 = { workspace = true }
 bytes = { workspace = true }
@@ -31,7 +31,6 @@ os_info = { version = "3.15.0", default-features = false }
 p256 = { workspace = true, features = ["ecdh"] }
 paste = { workspace = true }
 path-util = { workspace = true }
-postcard = { workspace = true }
 rand = { workspace = true }
 rustls = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
@@ -48,7 +47,7 @@ tauri-plugin-single-instance = { workspace = true }
 tauri-plugin-updater = { workspace = true }
 tauri-plugin-window-state = { workspace = true }
 tempfile = { workspace = true }
-tokio = { workspace = true, features = ["io-util", "net", "sync", "time"] }
+tokio = { workspace = true, features = ["io-util", "macros", "net", "sync", "time"] }
 tokio-rustls = { version = "0.26.4", default-features = false, features = ["ring", "tls12"] }
 tokio-util = { workspace = true, features = ["rt"] }
 tracing = { workspace = true }

@@ -569,6 +569,9 @@ export function useDownloadManager() {
 	)
 
 	const unlisten = events.on('install_job', applyJobUpdate)
+	const unlistenResync = events.on('resync', () => {
+		void refresh()
+	})
 	const unlistenInstance = events.on('instance', () => {
 		void refreshMetadata()
 	})
@@ -578,6 +581,7 @@ export function useDownloadManager() {
 	onScopeDispose(() => {
 		disposed = true
 		unlisten()
+		unlistenResync()
 		unlistenInstance()
 		if (clock) clearInterval(clock)
 		for (const timeout of copiedTimeouts.values()) clearTimeout(timeout)

@@ -3,7 +3,7 @@ use super::model::{
     InstallJobState, InstallPhaseDetails, InstallPhaseId, InstallProgress,
 };
 use super::store;
-use crate::event::{AppEvent, EventSink};
+use crate::event::{Event, EventSink};
 use crate::state::{Installs, State};
 use sqlx::SqlitePool;
 use std::sync::Arc;
@@ -226,6 +226,6 @@ pub async fn emit_install_job(
     events: &EventSink,
     snapshot: &InstallJobSnapshot,
 ) -> crate::Result<()> {
-    events.send(AppEvent::InstallJob(Arc::new(snapshot.clone())));
+    events.send(Event::InstallJob(Arc::new(snapshot.clone())));
     Ok(())
 }

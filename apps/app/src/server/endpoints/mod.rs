@@ -4,6 +4,7 @@
 
 pub mod boot;
 pub mod cores;
+pub mod events;
 pub mod health;
 
 #[cfg(test)]
@@ -17,7 +18,11 @@ mod tests {
             CheckCoreSession, ConnectCore, CoreSession, CoreSessionKey,
             CoreTarget, NewCoreSession, SignInToCore, SignOutOfCore,
         },
+        events::EventSocket,
         health::CheckHealth,
+    };
+    use crate::server::events::{
+        AmberiteCommand, AppEvent, Command, LocalEvent,
     };
 
     const PATH: &str = concat!(
@@ -34,13 +39,19 @@ mod tests {
             NewCoreSession::decl(&cfg),
             CoreSession::decl(&cfg),
             CoreSessionKey::decl(&cfg),
+            LocalEvent::decl(&cfg),
+            AppEvent::decl(&cfg),
+            Command::decl(&cfg),
+            AmberiteCommand::decl(&cfg),
         ]
         .map(|declaration| format!("\nexport {declaration}\n"))
         .concat();
         format!(
             "// Generated from apps/app by ts-rs. Do not edit.\n\
              // Regenerate: cargo test -p theseus_gui -- --ignored write_ts\n\n\
-             import type {{ Endpoint }} from './contracts'\n{declarations}\n\
+             import type {{ Endpoint }} from './contracts'\n\
+             import type {{ CommandPayload, EngineEvent, FriendPayload, InstanceGroupsChangedPayload, OnboardingChecklist }} from './engine'\n\
+             {declarations}\n\
              export const health = {{\n\
              \tcheckHealth: {},\n\
              }}\n\n\
@@ -52,6 +63,9 @@ mod tests {
              \tsignInToCore: {},\n\
              \tsignOutOfCore: {},\n\
              \tcheckCoreSession: {},\n\
+             }}\n\n\
+             export const events = {{\n\
+             \teventSocket: {},\n\
              }}\n",
             endpoint::<CheckHealth>(),
             endpoint::<GetBoot>(),
@@ -59,6 +73,7 @@ mod tests {
             endpoint::<SignInToCore>(),
             endpoint::<SignOutOfCore>(),
             endpoint::<CheckCoreSession>(),
+            endpoint::<EventSocket>(),
         )
     }
 

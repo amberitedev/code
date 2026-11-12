@@ -3,9 +3,8 @@
  * So, for example, addDefaultInstance creates a blank instance object, where the Rust struct is serialized,
  *  and deserialized into a usable JS object.
  */
-import { type Channel, invoke } from '@tauri-apps/api/core'
-
-import type { AppEvent } from '@/generated/app-events/AppEvent'
+import type { Command } from '@modrinth/api-client'
+import { invoke } from '@tauri-apps/api/core'
 
 export interface LoadingBarType {
 	type?: string
@@ -26,15 +25,12 @@ export interface LoadingBar {
 	bar_type?: LoadingBarType
 }
 
-export type OpeningCommand =
-	| Extract<AppEvent, { type: 'command' }>['payload']
-	// The App's own link: `amberite://approve/<code>` opens "Add Core" with the code filled in.
-	| { event: 'ApproveCore'; code: string }
-
 // Initialize the theseus API state
 // This should be called during the initializion/opening of the launcher
-export async function initialize_state(events: Channel<ArrayBuffer>) {
-	return await invoke<void>('initialize_state', { events })
+// The event socket opens first, so the engine's startup events reach the page.
+export async function initialize_state(openEvents: () => Promise<void>) {
+	await openEvents()
+	return await invoke<void>('initialize_state')
 }
 
 // Gets active progress bars
@@ -47,5 +43,5 @@ export async function progress_bars_list() {
 // This should be called once and only when the app is done booting up and ready to receive a command
 // Returns a Command struct- see events.js
 export async function get_opening_command() {
-	return await invoke<OpeningCommand | null>('plugin:utils|get_opening_command')
+	return await invoke<Command | null>('plugin:utils|get_opening_command')
 }

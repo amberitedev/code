@@ -18,14 +18,17 @@ mod launcher;
 mod logger;
 pub mod self_hosted;
 mod state;
+#[cfg(test)]
+mod ts;
 
 pub use api::*;
 pub use error::*;
 #[cfg(feature = "export-ts")]
 pub use event::export_app_event_bindings;
 pub use event::{
-    AppEvent, EventSink, LoadingBar, LoadingBarType, emit::emit_loading,
-    emit::emit_warning, emit::init_loading,
+    DesktopEvent, Event, EventSink, FriendPayload,
+    InstanceGroupsChangedPayload, LoadingBar, LoadingBarType,
+    emit::emit_loading, emit::emit_warning, emit::init_loading,
 };
 pub use logger::start_logger;
 pub use self_hosted::accounts::AccountEndpoints;

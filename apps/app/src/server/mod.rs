@@ -4,6 +4,7 @@
 
 mod boot;
 pub mod endpoints;
+pub mod events;
 pub mod guard;
 #[cfg(test)]
 mod tests;
@@ -78,7 +79,7 @@ impl LocalServer {
         format!("http://127.0.0.1:{}/{}", self.port(), self.secret)
     }
 
-    pub fn router(&self, boot: Boot) -> Router {
+    pub fn router(&self, boot: Boot, events: events::Events) -> Router {
         let guard = Arc::new(Guard::new(
             self.secret.clone(),
             self.port(),
@@ -93,9 +94,11 @@ impl LocalServer {
                 let boot = boot.clone();
                 async move { Json(boot) }
             });
+        let (events_path, events) = events::route(events);
         let routes = Router::new()
             .route(health_path, health)
             .route(boot_path, boot)
+            .route(events_path, events)
             .merge(cores::routes(Arc::clone(&self.cores)));
         Router::new()
             .nest(&format!("/{}", self.secret), routes)

@@ -780,7 +780,7 @@ impl Process {
             }
         }
 
-        events.send(crate::event::AppEvent::Log(LogPayload {
+        events.send(crate::event::Event::Log(LogPayload {
             instance_id: instance_id.to_string(),
             event: LogEvent::Log4j(event.clone()),
         }));
@@ -794,7 +794,7 @@ impl Process {
     ) {
         push_log_line(log_buffers, instance_id, message.to_string());
 
-        events.send(crate::event::AppEvent::Log(LogPayload {
+        events.send(crate::event::Event::Log(LogPayload {
             instance_id: instance_id.to_string(),
             event: LogEvent::Legacy {
                 message: message.to_string(),

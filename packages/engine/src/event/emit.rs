@@ -1,8 +1,9 @@
 use super::{EventSink, FriendPayload, LoadingBarId};
 use crate::event::{
-    AppEvent, CommandPayload, EventError, InstanceGroupsChangedPayload,
-    InstancePayload, InstancePayloadType, LoadingBar, LoadingBarType,
-    LoadingPayload, ProcessPayload, ProcessPayloadType, WarningPayload,
+    CommandPayload, DesktopEvent, Event, EventError,
+    InstanceGroupsChangedPayload, InstancePayload, InstancePayloadType,
+    LoadingBar, LoadingBarType, LoadingPayload, ProcessPayload,
+    ProcessPayloadType, WarningPayload,
 };
 use crate::state::OnboardingChecklist;
 use futures::prelude::*;
@@ -88,7 +89,7 @@ pub fn emit_loading(
     let display_frac = loading_bar.current / loading_bar.total;
 
     if f64::abs(display_frac - loading_bar.last_sent) > 0.005 {
-        events.send(AppEvent::Loading(LoadingPayload {
+        events.send(Event::Loading(LoadingPayload {
             fraction: if display_frac >= 1.0 {
                 None // by convention, when its done, we submit None
             // any further updates will be ignored (also sending None)
@@ -111,7 +112,7 @@ pub async fn emit_warning(
     events: &EventSink,
     message: &str,
 ) -> crate::Result<()> {
-    events.send(AppEvent::Warning(WarningPayload {
+    events.send(Event::Warning(WarningPayload {
         message: message.to_string(),
     }));
     tracing::warn!("{}", message);
@@ -126,7 +127,7 @@ pub async fn emit_command(
     command: CommandPayload,
 ) -> crate::Result<()> {
     tracing::debug!("Command: {}", serde_json::to_string(&command)?);
-    events.send(AppEvent::Command(command));
+    events.send(Event::Desktop(DesktopEvent::Command(command)));
     #[cfg(feature = "tauri")]
     if let Some(window) = events.get_main_window() {
         let _ = window.set_focus();
@@ -142,7 +143,7 @@ pub async fn emit_process(
     event: ProcessPayloadType,
     message: &str,
 ) -> crate::Result<()> {
-    events.send(AppEvent::Process(ProcessPayload {
+    events.send(Event::Process(ProcessPayload {
         instance_id: instance_id.to_string(),
         uuid: uuid.to_string(),
         event,
@@ -157,7 +158,7 @@ pub async fn emit_instance(
     instance_id: &str,
     event: InstancePayloadType,
 ) -> crate::Result<()> {
-    events.send(AppEvent::Instance(InstancePayload {
+    events.send(Event::Instance(InstancePayload {
         instance_id: instance_id.to_string(),
         event,
     }));
@@ -168,11 +169,11 @@ pub async fn emit_instance_groups_changed(
     events: &EventSink,
     instance_ids: &[String],
 ) -> crate::Result<()> {
-    events.send(AppEvent::InstanceGroupsChanged(
+    events.send(Event::Desktop(DesktopEvent::InstanceGroupsChanged(
         InstanceGroupsChangedPayload {
             instance_ids: instance_ids.to_vec(),
         },
-    ));
+    )));
     Ok(())
 }
 
@@ -180,7 +181,7 @@ pub async fn emit_onboarding_checklist(
     events: &EventSink,
     checklist: OnboardingChecklist,
 ) -> crate::Result<()> {
-    events.send(AppEvent::OnboardingChecklist(checklist));
+    events.send(Event::Desktop(DesktopEvent::OnboardingChecklist(checklist)));
     Ok(())
 }
 
@@ -188,7 +189,7 @@ pub async fn emit_friend(
     events: &EventSink,
     payload: FriendPayload,
 ) -> crate::Result<()> {
-    events.send(AppEvent::Friend(payload));
+    events.send(Event::Desktop(DesktopEvent::Friend(payload)));
     Ok(())
 }
 
@@ -196,7 +197,7 @@ pub async fn emit_notification(
     events: &EventSink,
     payload: Value,
 ) -> crate::Result<()> {
-    events.send(AppEvent::Notification(serde_json::to_string(&payload)?));
+    events.send(Event::Desktop(DesktopEvent::Notification(payload)));
     Ok(())
 }
 

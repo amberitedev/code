@@ -1,15 +1,13 @@
-use engine::{
-    emit_warning, handler,
-    prelude::{CommandPayload, app_db_backup_dir},
-};
-use serde::Serialize;
+use engine::{emit_warning, handler, prelude::app_db_backup_dir};
 use tauri::{Manager, Runtime};
 use tauri_plugin_opener::OpenerExt;
+use tokio::sync::broadcast;
 
 use crate::api::Result;
 use crate::api::oauth_utils::auth_code_reply::{
     normalize_deep_link_command, parse_auth_deeplink, submit_deeplink,
 };
+use crate::server::events::{AmberiteCommand, AppEvent, Command};
 use dashmap::DashMap;
 use engine::prelude::canonicalize;
 use std::path::{Path, PathBuf};
@@ -163,23 +161,6 @@ pub fn cancel_debug_info_export<R: Runtime>(
     }
 }
 
-/// Amberite's own deep links, next to the Modrinth ones the engine parses. The frontend handles
-/// both in `handleCommand`, told apart by `event`.
-#[derive(Debug, Clone, Serialize)]
-#[serde(tag = "event")]
-pub enum AmberiteCommand {
-    /// `amberite://approve/<code>`: open "Add Core" with the code a Core is showing filled in.
-    ApproveCore { code: String },
-}
-
-/// What the App was opened with: a Modrinth link or file, or an Amberite link.
-#[derive(Clone, Serialize)]
-#[serde(untagged)]
-pub enum OpeningCommand {
-    Modrinth(CommandPayload),
-    Amberite(AmberiteCommand),
-}
-
 /// The Amberite command behind a deep link, or `None` for anything else.
 fn amberite_command(command: &str) -> Option<AmberiteCommand> {
     let path = command.strip_prefix("amberite://")?.trim_end_matches('/');
@@ -196,11 +177,11 @@ fn amberite_command(command: &str) -> Option<AmberiteCommand> {
 async fn parse_opening_command(
     events: &engine::EventSink,
     command: &str,
-) -> Result<OpeningCommand> {
+) -> Result<Command> {
     if let Some(command) = amberite_command(command) {
-        return Ok(OpeningCommand::Amberite(command));
+        return Ok(Command::Amberite(command));
     }
-    Ok(OpeningCommand::Modrinth(
+    Ok(Command::Modrinth(
         handler::parse_command(events, command).await?,
     ))
 }
@@ -214,7 +195,7 @@ async fn parse_opening_command(
 pub async fn get_opening_command(
     state: tauri::State<'_, crate::macos::deep_link::InitialPayload>,
     events: tauri::State<'_, engine::EventSink>,
-) -> Result<Option<OpeningCommand>> {
+) -> Result<Option<Command>> {
     if crate::dev::config().is_some() {
         return Ok(None);
     }
@@ -236,7 +217,7 @@ pub async fn get_opening_command(
 #[cfg(not(target_os = "macos"))]
 pub async fn get_opening_command(
     events: tauri::State<'_, engine::EventSink>,
-) -> Result<Option<OpeningCommand>> {
+) -> Result<Option<Command>> {
     if crate::dev::config().is_some() {
         return Ok(None);
     }
@@ -265,8 +246,9 @@ pub async fn handle_command<R: Runtime>(
     tracing::info!("handle command: {command}");
     // Amberite's own links go straight to the frontend; the engine only knows the Modrinth ones.
     if let Some(command) = amberite_command(&command) {
-        use tauri::Emitter;
-        app.emit("amberite-command", command)?;
+        let _ = app
+            .state::<broadcast::Sender<AppEvent>>()
+            .send(AppEvent::Command(Command::Amberite(command)));
         if let Some(window) = app.get_window("main") {
             let _ = window.set_focus();
         }
@@ -278,7 +260,7 @@ pub async fn handle_command<R: Runtime>(
 async fn opening_command(
     events: &engine::EventSink,
     command: &str,
-) -> Result<Option<OpeningCommand>> {
+) -> Result<Option<Command>> {
     let command = normalize_deep_link_command(command);
     if accept_auth_deeplink(events, &command).await {
         return Ok(None);

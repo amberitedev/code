@@ -425,7 +425,14 @@ export async function wait_for_install_job(events: AppEvents, jobId: string) {
 			reject(err)
 		}
 
-		unlisten = events.on('install_job', resolveJob)
-		install_job_get(jobId).then(resolveJob).catch(rejectWait)
+		const fetchJob = () => install_job_get(jobId).then(resolveJob).catch(rejectWait)
+		const unlistenJob = events.on('install_job', resolveJob)
+		// A resync means the job's last event may be lost.
+		const unlistenResync = events.on('resync', fetchJob)
+		unlisten = () => {
+			unlistenJob()
+			unlistenResync()
+		}
+		void fetchJob()
 	})
 }

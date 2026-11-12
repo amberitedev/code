@@ -18,7 +18,7 @@ const EVENT_CAPACITY: usize = 4096;
 /// starts, so startup events reach it; with no subscriber, events are dropped.
 #[derive(Clone)]
 pub struct EventSink {
-    tx: broadcast::Sender<AppEvent>,
+    tx: broadcast::Sender<Event>,
     loading_bars: Arc<DashMap<Uuid, LoadingBar>>,
     #[cfg(feature = "tauri")]
     pub(crate) app: Option<tauri::AppHandle>,
@@ -34,19 +34,18 @@ impl EventSink {
         }
     }
 
+    /// The same sink, with the App's handle for the main window.
     #[cfg(feature = "tauri")]
-    pub fn with_app(app: tauri::AppHandle) -> Self {
-        Self {
-            app: Some(app),
-            ..Self::new()
-        }
+    pub fn with_app(mut self, app: tauri::AppHandle) -> Self {
+        self.app = Some(app);
+        self
     }
 
-    pub fn subscribe(&self) -> broadcast::Receiver<AppEvent> {
+    pub fn subscribe(&self) -> broadcast::Receiver<Event> {
         self.tx.subscribe()
     }
 
-    pub(crate) fn send(&self, event: AppEvent) {
+    pub(crate) fn send(&self, event: Event) {
         let _ = self.tx.send(event);
     }
 
@@ -76,37 +75,41 @@ impl std::fmt::Debug for EventSink {
     }
 }
 
-#[derive(Clone)]
-#[cfg_attr(
-    feature = "export-ts",
-    derive(ts_rs::TS, postcard_bindgen::PostcardBindings)
-)]
-#[serde_binhum::serde_binhum]
+#[derive(Clone, Serialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(tag = "type", content = "payload", rename_all = "snake_case")]
 #[cfg_attr(
     feature = "export-ts",
     ts(
+        rename = "EngineEvent",
         tag = "type",
         content = "payload",
-        rename_all = "snake_case",
-        export_to = "AppEvent.ts"
+        rename_all = "snake_case"
     )
 )]
-pub enum AppEvent {
+pub enum Event {
     Loading(LoadingPayload),
     Process(ProcessPayload),
     Instance(InstancePayload),
-    InstanceGroupsChanged(InstanceGroupsChangedPayload),
-    OnboardingChecklist(crate::state::OnboardingChecklist),
     InstallJob(std::sync::Arc<InstallJobSnapshot>),
-    Command(CommandPayload),
     Warning(WarningPayload),
-    Friend(FriendPayload),
-    Notification(
-        #[cfg_attr(feature = "export-ts", ts(type = "unknown"))] String,
-    ),
     Log(LogPayload),
     AdsConsentRequired(bool),
+    /// Raised by desktop code that still lives in the engine; the App sends it as its own event.
+    /// It does not serialize, so every socket loop maps or drops it. It goes once the desktop code
+    /// raising it lives in apps/app.
+    #[serde(skip)]
+    Desktop(DesktopEvent),
+}
+
+#[derive(Clone)]
+pub enum DesktopEvent {
+    Friend(FriendPayload),
+    Notification(serde_json::Value),
+    OnboardingChecklist(crate::state::OnboardingChecklist),
+    InstanceGroupsChanged(InstanceGroupsChangedPayload),
+    Command(CommandPayload),
+    GameOptionLocalesUpdated,
 }
 
 #[cfg(feature = "export-ts")]
@@ -120,7 +123,7 @@ pub fn export_app_event_bindings(
     let config = Config::default()
         .with_out_dir(output.clone())
         .with_large_int("number");
-    AppEvent::export_all(&config)?;
+    Event::export_all(&config)?;
 
     javascript::build_package(
         &output,
@@ -133,7 +136,6 @@ pub fn export_app_event_bindings(
             .module_structure(false)
             .esm_module(true),
         generate_bindings!(
-            AppEvent,
             LoadingBarType,
             LoadingPayload,
             WarningPayload,
@@ -208,7 +210,7 @@ impl Drop for LoadingBarId {
         let Self(loader_uuid, events) = self;
         if let Some((_, bar)) = events.loading_bars.remove(loader_uuid) {
             let fraction = bar.current / bar.total;
-            events.send(AppEvent::Loading(LoadingPayload {
+            events.send(Event::Loading(LoadingPayload {
                 fraction: None,
                 message: "Completed".to_string(),
                 event: bar.bar_type,
@@ -524,7 +526,7 @@ mod tests {
             .unwrap();
         assert!(matches!(
             received.try_recv(),
-            Ok(AppEvent::Instance(InstancePayload { instance_id, .. })) if instance_id == "a"
+            Ok(Event::Instance(InstancePayload { instance_id, .. })) if instance_id == "a"
         ));
     }
 }

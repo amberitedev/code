@@ -10,12 +10,14 @@ use axum::{
     },
     response::Response,
 };
+use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tower::ServiceExt;
 
 use super::{
     LocalServer,
     endpoints::boot::{Boot, Platform},
+    events::Events,
     guard::{APP_ORIGINS, Guard},
 };
 
@@ -42,7 +44,7 @@ struct Local {
 fn local() -> Local {
     let server = LocalServer::bind(None, None, None).unwrap();
     Local {
-        router: server.router(boot()),
+        router: server.router(boot(), Events::default()),
         secret: server.secret.clone(),
         host: format!("127.0.0.1:{}", server.port()),
         proxy_origin: format!(
@@ -223,7 +225,7 @@ async fn boot_answers_from_bind() {
         server.port()
     );
     let address = server.listener.local_addr().unwrap();
-    let router = server.router(boot());
+    let router = server.router(boot(), Events::default());
     tokio::spawn(server.serve(router));
 
     let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
@@ -232,4 +234,61 @@ async fn boot_answers_from_bind() {
     stream.read_to_string(&mut response).await.unwrap();
     assert!(response.starts_with("HTTP/1.1 200"), "{response}");
     assert!(response.contains(r#""version":"1.2.3""#), "{response}");
+}
+
+/// Through the guard and the upgrade, an engine event and an App event raised by engine code
+/// arrive as JSON.
+#[tokio::test]
+async fn the_event_socket_sends_events_as_json() {
+    let server = LocalServer::bind(None, None, None).unwrap();
+    let request = format!(
+        "GET /{}/events HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nOrigin: tauri://localhost\r\n\
+         Connection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\n\
+         Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n",
+        server.secret,
+        server.port()
+    );
+    let address = server.listener.local_addr().unwrap();
+    let events = Events::default();
+    let router = server.router(boot(), events.clone());
+    tokio::spawn(server.serve(router));
+
+    let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
+    stream.write_all(request.as_bytes()).await.unwrap();
+    let mut head = Vec::new();
+    while !head.ends_with(b"\r\n\r\n") {
+        head.push(stream.read_u8().await.unwrap());
+    }
+    assert!(
+        head.starts_with(b"HTTP/1.1 101"),
+        "{}",
+        String::from_utf8_lossy(&head)
+    );
+
+    engine::emit_warning(&events.engine, "low disk")
+        .await
+        .unwrap();
+    engine::handler::parse_and_emit_command(
+        &events.engine,
+        "modrinth://mod/sodium",
+    )
+    .await
+    .unwrap();
+    for expected in [
+        json!({ "type": "warning", "payload": { "message": "low disk" } }),
+        json!({ "type": "command", "payload": { "event": "InstallMod", "id": "sodium" } }),
+    ] {
+        // A short unmasked text frame: FIN and opcode, then the length.
+        let [opcode, length] = [
+            stream.read_u8().await.unwrap(),
+            stream.read_u8().await.unwrap(),
+        ];
+        assert_eq!(opcode, 0x81);
+        let mut payload = vec![0; usize::from(length)];
+        stream.read_exact(&mut payload).await.unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Value>(&payload).unwrap(),
+            expected
+        );
+    }
 }

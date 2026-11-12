@@ -124,6 +124,11 @@ whoami = { workspace = true }
 zbus = { workspace = true }
 zip = { workspace = true }
 
+[dev-dependencies]
+contracts = { workspace = true, features = ["ts"] }
+# Turns `export-ts` on for the engine's own tests, which write its TypeScript.
+engine = { path = ".", features = ["export-ts"] }
+
 [build-dependencies]
 dotenvy = { workspace = true }
 dunce = { workspace = true }
