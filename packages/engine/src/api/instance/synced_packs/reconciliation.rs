@@ -701,7 +701,7 @@ async fn apply_instance_inner(
         return Ok(());
     }
     let running = instance_is_running(metadata, state).await?;
-    let global = get_global_options().await?;
+    let global = get_global_options(state).await?;
     let has_packs = removed_pack_id.is_none()
         && library
             .packs
@@ -744,7 +744,7 @@ async fn apply_instance_inner(
         if capture_items(metadata, library, state, placements, global, &items)
             .await?
         {
-            super::worker::queue_all();
+            super::worker::queue_all(state);
         }
     }
     let previous_placements = library
@@ -1002,78 +1002,75 @@ pub(super) async fn apply_all(
         .resource_pack_order
         .retain(|id| library.packs.contains_key(id));
     write_library(library, state).await?;
-    super::worker::queue_all();
+    super::worker::queue_all(state);
     Ok(())
 }
 
 pub(in crate::api::instance) async fn reconcile(
     metadata: &InstanceMetadata,
     _option: SyncedOption,
-    _state: &State,
+    state: &State,
 ) -> crate::Result<()> {
-    super::worker::queue_reconciliation(&metadata.instance.id);
+    super::worker::queue_reconciliation(state, &metadata.instance.id);
     Ok(())
 }
 
-async fn capture_after_change(instance_id: &str) -> crate::Result<()> {
-    let state = State::get().await?;
+async fn capture_after_change(
+    state: &State,
+    instance_id: &str,
+) -> crate::Result<()> {
     let metadata = crate::state::get_instance(instance_id, &state.pool)
         .await?
         .ok_or(ErrorKind::InputError("unknown instance".to_owned()))?;
     let mut preparation =
-        super::worker::Preparation::new(&state, &metadata).await;
+        super::worker::Preparation::new(state, &metadata).await;
     let mut library = preparation.library().await?;
     let Some(placements) = library.instances.get(instance_id).cloned() else {
-        super::worker::queue_reconciliation(instance_id);
+        super::worker::queue_reconciliation(state, instance_id);
         return Ok(());
     };
     if sync_files_are_protected(&metadata)
-        || instance_is_running(&metadata, &state).await?
+        || instance_is_running(&metadata, state).await?
         || super::super::synced_options::pending::contains(
             instance_id,
             SyncedOption::ResourcePacks,
-            &state,
+            state,
         )
         .await?
     {
-        super::worker::queue_reconciliation(instance_id);
+        super::worker::queue_reconciliation(state, instance_id);
         return Ok(());
     }
     let items = preparation
         .run(&library, async {
-            let items =
-                commands::list_pack_content(instance_id, &state).await?;
-            super::selection_compatibility::warm(&metadata, &items, &state)
+            let items = commands::list_pack_content(instance_id, state).await?;
+            super::selection_compatibility::warm(&metadata, &items, state)
                 .await?;
             Ok(items)
         })
         .await?;
-    let global = get_global_options().await?;
-    if capture_items(
-        &metadata,
-        &mut library,
-        &state,
-        placements,
-        global,
-        &items,
-    )
-    .await?
+    let global = get_global_options(state).await?;
+    if capture_items(&metadata, &mut library, state, placements, global, &items)
+        .await?
     {
-        apply_all(&mut library, &state).await?;
+        apply_all(&mut library, state).await?;
     } else {
-        write_library(&library, &state).await?;
-        super::worker::queue_reconciliation(instance_id);
+        write_library(&library, state).await?;
+        super::worker::queue_reconciliation(state, instance_id);
     }
     Ok(())
 }
 
-pub(in crate::api::instance) fn schedule_reconciliation() {
-    super::worker::queue_all();
+pub(in crate::api::instance) fn schedule_reconciliation(state: &crate::State) {
+    super::worker::queue_all(state);
 }
 
-pub(crate) async fn reconcile_after_content_change(instance_id: &str) {
+pub(crate) async fn reconcile_after_content_change(
+    state: &crate::State,
+    instance_id: &str,
+) {
     loop {
-        match capture_after_change(instance_id).await {
+        match capture_after_change(state, instance_id).await {
             Err(error)
                 if matches!(
                     error.downcast_ref::<crate::ErrorKind>(),
@@ -1086,7 +1083,7 @@ pub(crate) async fn reconcile_after_content_change(instance_id: &str) {
                 tracing::warn!(
                     "Could not capture pack changes for {instance_id}: {error}"
                 );
-                super::worker::queue_reconciliation(instance_id);
+                super::worker::queue_reconciliation(state, instance_id);
                 return;
             }
             Ok(()) => return,
@@ -1120,7 +1117,7 @@ pub(in crate::api::instance) async fn prepare_instance_update(
             metadata.instance.id
         ),
     }
-    let global = get_global_options().await?;
+    let global = get_global_options(state).await?;
     let pending_ids = library
         .instances
         .get(&metadata.instance.id)
@@ -1206,7 +1203,7 @@ pub(in crate::api::instance) async fn decorate_content(
     let metadata = crate::state::get_instance(instance_id, &state.pool)
         .await?
         .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
-    let global = get_global_options().await?;
+    let global = get_global_options(state).await?;
     let instances = crate::state::list_instances(&state.pool).await?;
     for item in items {
         if !local(item) {

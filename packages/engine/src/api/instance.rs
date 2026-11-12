@@ -131,9 +131,8 @@ pub use self::synced_options::game_options::{
     sync_before_launch as sync_game_options_before_launch,
 };
 pub(crate) use self::synced_options::game_options::{
-    GameLocaleIndexer, queue_game_locale_index, shared_fullscreen_value,
-    start_game_locale_indexer, sync_all_participating_instances,
-    update_shared_fullscreen_from_app,
+    GameLocaleIndexer, shared_fullscreen_value, start_game_locale_indexer,
+    sync_all_participating_instances, update_shared_fullscreen_from_app,
 };
 pub use self::synced_options::{
     GlobalSyncedOptions, SyncedOptionCapability, SyncedOptionJoinAction,

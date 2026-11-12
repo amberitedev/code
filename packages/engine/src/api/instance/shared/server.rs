@@ -9,15 +9,15 @@ use crate::state::VersionEnvironment;
 
 /// The instance's share, created with its first version when it has none, so the instance can
 /// run servers. A share nobody else is in is still a share; it just has no members.
-#[tracing::instrument]
+#[tracing::instrument(skip(state))]
 pub async fn ensure_shared_instance(
+    state: &State,
     instance_id: &str,
 ) -> crate::Result<SharedInstanceAttachment> {
-    let state = State::get().await?;
-    if let Some(attachment) = shared_attachment(instance_id, &state).await? {
+    if let Some(attachment) = shared_attachment(instance_id, state).await? {
         return Ok(attachment);
     }
-    let (_, attachment) = owned_shared_instance(instance_id, &state).await?;
+    let (_, attachment) = owned_shared_instance(instance_id, state).await?;
     emit_instance(&state.events, instance_id, InstancePayloadType::Edited)
         .await?;
     Ok(attachment)

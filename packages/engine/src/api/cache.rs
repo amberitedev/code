@@ -7,23 +7,23 @@ macro_rules! impl_cache_methods {
     ($(($variant:ident, $type:ty)),*) => {
         $(
             paste::paste! {
-                #[tracing::instrument]
+                #[tracing::instrument(skip(state))]
                 pub async fn [<get_ $variant:snake>](
+                    state: &crate::State,
                     id: &str,
                     cache_behaviour: Option<CacheBehaviour>,
                 ) -> crate::Result<Option<$type>>
                 {
-                    let state = crate::State::get().await?;
                     Ok(CachedEntry::[<get_ $variant:snake _many>](&[id], cache_behaviour, &state.pool, &state.api_semaphore, &state.sessions).await?.into_iter().next())
                 }
 
-                #[tracing::instrument]
+                #[tracing::instrument(skip(state))]
                 pub async fn [<get_ $variant:snake _many>](
+                    state: &crate::State,
                     ids: &[&str],
                     cache_behaviour: Option<CacheBehaviour>,
                 ) -> crate::Result<Vec<$type>>
                 {
-                    let state = crate::State::get().await?;
                     let entries =
                         CachedEntry::[<get_ $variant:snake _many>](ids, None, &state.pool, &state.api_semaphore, &state.sessions).await?;
 
@@ -45,9 +45,9 @@ impl_cache_methods!(
 );
 
 pub async fn purge_cache_types(
+    state: &crate::State,
     cache_types: &[CacheValueType],
 ) -> crate::Result<()> {
-    let state = crate::State::get().await?;
     CachedEntry::purge_cache_types(cache_types, &state.pool).await?;
 
     Ok(())
@@ -55,12 +55,12 @@ pub async fn purge_cache_types(
 
 /// Get versions for a project (without changelogs for fast loading).
 /// Uses the cache system with the ProjectVersions cache type.
-#[tracing::instrument]
+#[tracing::instrument(skip(state))]
 pub async fn get_project_versions(
+    state: &crate::State,
     project_id: &str,
     cache_behaviour: Option<CacheBehaviour>,
 ) -> crate::Result<Option<Vec<Version>>> {
-    let state = crate::State::get().await?;
     CachedEntry::get_project_versions(
         project_id,
         cache_behaviour,
@@ -74,20 +74,21 @@ pub async fn get_project_versions(
 // Account summaries use the configured account service; public project authors
 // remain in CachedEntry's public Modrinth user cache.
 pub async fn get_user(
+    state: &crate::State,
     id: &str,
     cache_behaviour: Option<CacheBehaviour>,
 ) -> crate::Result<Option<User>> {
-    Ok(get_user_many(&[id], cache_behaviour)
+    Ok(get_user_many(state, &[id], cache_behaviour)
         .await?
         .into_iter()
         .next())
 }
 
 pub async fn get_user_many(
+    state: &crate::State,
     ids: &[&str],
     cache_behaviour: Option<CacheBehaviour>,
 ) -> crate::Result<Vec<User>> {
-    let state = crate::State::get().await?;
     if crate::self_hosted::accounts::enabled(&state.sessions) {
         return crate::self_hosted::accounts::users(
             ids,

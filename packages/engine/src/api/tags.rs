@@ -7,9 +7,8 @@ pub use crate::{
 };
 
 /// Get category tags
-#[tracing::instrument]
-pub async fn get_category_tags() -> crate::Result<Vec<Category>> {
-    let state = State::get().await?;
+#[tracing::instrument(skip(state))]
+pub async fn get_category_tags(state: &State) -> crate::Result<Vec<Category>> {
     let categories = CachedEntry::get_categories(
         None,
         &state.pool,
@@ -23,9 +22,8 @@ pub async fn get_category_tags() -> crate::Result<Vec<Category>> {
 }
 
 /// Get report type tags
-#[tracing::instrument]
-pub async fn get_report_type_tags() -> crate::Result<Vec<String>> {
-    let state = State::get().await?;
+#[tracing::instrument(skip(state))]
+pub async fn get_report_type_tags(state: &State) -> crate::Result<Vec<String>> {
     let report_types = CachedEntry::get_report_types(
         None,
         &state.pool,
@@ -39,9 +37,8 @@ pub async fn get_report_type_tags() -> crate::Result<Vec<String>> {
 }
 
 /// Get loader tags
-#[tracing::instrument]
-pub async fn get_loader_tags() -> crate::Result<Vec<Loader>> {
-    let state = State::get().await?;
+#[tracing::instrument(skip(state))]
+pub async fn get_loader_tags(state: &State) -> crate::Result<Vec<Loader>> {
     let loaders = CachedEntry::get_loaders(
         None,
         &state.pool,
@@ -55,9 +52,10 @@ pub async fn get_loader_tags() -> crate::Result<Vec<Loader>> {
 }
 
 /// Get game version tags
-#[tracing::instrument]
-pub async fn get_game_version_tags() -> crate::Result<Vec<GameVersion>> {
-    let state = State::get().await?;
+#[tracing::instrument(skip(state))]
+pub async fn get_game_version_tags(
+    state: &State,
+) -> crate::Result<Vec<GameVersion>> {
     let game_versions = CachedEntry::get_game_versions(
         None,
         &state.pool,
@@ -71,10 +69,10 @@ pub async fn get_game_version_tags() -> crate::Result<Vec<GameVersion>> {
 }
 
 /// Get donation platform tags
-#[tracing::instrument]
-pub async fn get_donation_platform_tags() -> crate::Result<Vec<DonationPlatform>>
-{
-    let state = State::get().await?;
+#[tracing::instrument(skip(state))]
+pub async fn get_donation_platform_tags(
+    state: &State,
+) -> crate::Result<Vec<DonationPlatform>> {
     let donation_platforms = CachedEntry::get_donation_platforms(
         None,
         &state.pool,

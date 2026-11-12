@@ -193,23 +193,24 @@ pub(super) async fn load_settings_editor(
     })
 }
 
-pub async fn get_config() -> crate::Result<GameSettingsEditorState> {
-    let state = State::get().await?;
+pub async fn get_config(
+    state: &State,
+) -> crate::Result<GameSettingsEditorState> {
     let _guard = state.synced_options.lock().await;
-    load_settings_editor(&state).await
+    load_settings_editor(state).await
 }
 
 /// Previews how the user's unsaved changes would apply to their instances.
 pub async fn preview_changes(
+    state: &State,
     request: UpdateGameSettingsRequest,
 ) -> crate::Result<GameSettingsEditorState> {
-    let state = State::get().await?;
     let _guard = state.synced_options.lock().await;
     if request.expected_catalog_revision != CATALOG_REVISION {
-        return load_settings_editor(&state).await;
+        return load_settings_editor(state).await;
     }
-    let mut editor_state = load_settings_editor(&state).await?;
-    let participants = load_participating_instances(&state).await?;
+    let mut editor_state = load_settings_editor(state).await?;
+    let participants = load_participating_instances(state).await?;
     for change in request.changes {
         let Some(setting) = editor_state
             .settings
@@ -274,9 +275,9 @@ pub async fn preview_changes(
 /// Saves changes if nothing has changed since the modal opened, then updates each
 /// instance that can receive them.
 pub async fn save_changes(
+    state: &State,
     request: UpdateGameSettingsRequest,
 ) -> crate::Result<SaveGameSettingsResult> {
-    let state = State::get().await?;
     let _guard = state.synced_options.lock().await;
     if !game_options_sync_is_enabled(&state.pool).await? {
         bail!(ErrorKind::InputError(
@@ -284,7 +285,7 @@ pub async fn save_changes(
                 .to_string(),
         ));
     }
-    let current_editor = load_settings_editor(&state).await?;
+    let current_editor = load_settings_editor(state).await?;
     let UpdateGameSettingsRequest {
         expected_summary_revision,
         expected_canonical_revision,
@@ -305,7 +306,7 @@ pub async fn save_changes(
         });
     }
     let stored_values = load_shared_game_options(&state.pool).await?;
-    let participants = load_participating_instances(&state).await?;
+    let participants = load_participating_instances(state).await?;
     let mut conflicts = Vec::new();
     let mut accepted = Vec::new();
 
@@ -511,7 +512,7 @@ pub async fn save_changes(
     tx.commit().await?;
 
     let write_result = if changed {
-        sync_all_participating_instances(&state).await
+        sync_all_participating_instances(state).await
     } else {
         SaveGameSettingsResult {
             state: None,
@@ -524,7 +525,7 @@ pub async fn save_changes(
         }
     };
     Ok(SaveGameSettingsResult {
-        state: Some(load_settings_editor(&state).await?),
+        state: Some(load_settings_editor(state).await?),
         conflicts,
         ..write_result
     })

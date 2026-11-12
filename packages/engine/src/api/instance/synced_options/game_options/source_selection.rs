@@ -316,18 +316,18 @@ pub(in crate::api::instance) async fn initialize_from_source_instance(
     )
     .await;
     tx.commit().await?;
-    super::locales::queue_game_locale_index();
+    state.synced_options.locales.queue();
     Ok(())
 }
 
-pub async fn list_sync_sources()
--> crate::Result<Vec<GameOptionsSourceCandidate>> {
-    let state = State::get().await?;
+pub async fn list_sync_sources(
+    state: &State,
+) -> crate::Result<Vec<GameOptionsSourceCandidate>> {
     let _guard = state.synced_options.lock().await;
     let instances = crate::state::list_instances(&state.pool).await?;
     let mut sources = Vec::with_capacity(instances.len());
     for metadata in instances {
-        let path = options_path(&metadata, &state);
+        let path = options_path(&metadata, state);
         let version_supported = supported_settings_cover_game_version(
             &metadata.applied_content_set.game_version,
         );

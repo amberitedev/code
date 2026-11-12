@@ -47,11 +47,11 @@ pub(crate) async fn create_instance(
 
         let loader_version = if input.loader != ModLoader::Vanilla {
             get_loader_version_from_profile(
+                state,
                 &input.game_version,
                 input.loader,
                 input.loader_version.as_deref(),
-                &state.directories,
-            )
+                &state.directories)
             .await?
             .map(|value| value.id)
         } else {
@@ -134,6 +134,7 @@ pub(crate) async fn create_instance(
         .await;
         if let Err(error) =
             crate::api::instance::reconcile_instance_synced_options(
+                state,
                 &instance.id,
             )
             .await

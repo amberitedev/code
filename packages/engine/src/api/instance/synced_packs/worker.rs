@@ -10,8 +10,8 @@ use anyhow::{Context, bail};
 use parking_lot::Mutex;
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, OnceLock, Weak};
 use std::time::Duration;
 use tokio::sync::{MutexGuard, oneshot};
 use tokio::time::Instant;
@@ -30,30 +30,36 @@ struct Queue {
 pub(crate) struct PackSyncWorker {
     queue: Mutex<Queue>,
     pub(super) revision: AtomicU64,
+    engine: OnceLock<Weak<State>>,
 }
 
-pub(crate) fn queue_reconciliation(instance_id: &str) {
-    if let Some(state) = State::get_if_initialized() {
-        state
-            .synced_options
-            .packs
-            .queue
-            .lock()
-            .instances
-            .insert(instance_id.to_owned());
-        start(state);
+impl PackSyncWorker {
+    /// Lets the worker run; requests made before this only queue.
+    pub(crate) fn bind(&self, engine: Weak<State>) {
+        let _ = self.engine.set(engine);
     }
 }
 
-pub(super) fn queue_all() {
-    if let Some(state) = State::get_if_initialized() {
-        state.synced_options.packs.queue.lock().all = true;
-        start(state);
-    }
+pub(crate) fn queue_reconciliation(state: &State, instance_id: &str) {
+    state
+        .synced_options
+        .packs
+        .queue
+        .lock()
+        .instances
+        .insert(instance_id.to_owned());
+    start(state);
 }
 
-pub(crate) async fn flush(instance_id: &str) -> Result<(), Arc<crate::Error>> {
-    let state = State::get().await?;
+pub(super) fn queue_all(state: &State) {
+    state.synced_options.packs.queue.lock().all = true;
+    start(state);
+}
+
+pub(crate) async fn flush(
+    state: &State,
+    instance_id: &str,
+) -> Result<(), Arc<crate::Error>> {
     let (sender, receiver) = oneshot::channel();
     {
         let mut queue = state.synced_options.packs.queue.lock();
@@ -81,7 +87,16 @@ pub(crate) async fn flush(instance_id: &str) -> Result<(), Arc<crate::Error>> {
         .context("pack sync worker stopped before completing the request")?
 }
 
-fn start(state: Arc<State>) {
+fn start(state: &State) {
+    let Some(state) = state
+        .synced_options
+        .packs
+        .engine
+        .get()
+        .and_then(Weak::upgrade)
+    else {
+        return;
+    };
     {
         let mut queue = state.synced_options.packs.queue.lock();
         if queue.running {
@@ -185,7 +200,7 @@ fn start(state: Arc<State>) {
                                 .lock()
                                 .retry_at
                                 .remove(&instance_id);
-                            start(state);
+                            start(&state);
                         });
                     }
                     _ => tracing::warn!(
@@ -307,7 +322,7 @@ async fn fingerprint(
     }
     files.push((
         "global-options".to_owned(),
-        serde_json::to_string(&get_global_options().await?)?,
+        serde_json::to_string(&get_global_options(state).await?)?,
     ));
     files.push((
         "running".to_owned(),

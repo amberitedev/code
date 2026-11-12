@@ -1,4 +1,5 @@
 use crate::api::Result;
+use crate::engine_handle::EngineHandle;
 use anyhow::Context;
 use dashmap::DashMap;
 use engine::data::{
@@ -525,24 +526,34 @@ fn edit_to_core(edit_instance: EditInstance) -> Result<CoreEditInstance> {
 }
 
 #[tauri::command]
-pub async fn instance_remove(instance_id: &str) -> Result<()> {
-    engine::instance::remove(instance_id).await?;
+pub async fn instance_remove(
+    handle: tauri::State<'_, EngineHandle>,
+    instance_id: &str,
+) -> Result<()> {
+    let state = handle.get().await;
+    engine::instance::remove(&state, instance_id).await?;
     Ok(())
 }
 
 #[tauri::command]
-pub async fn instance_get(instance_id: &str) -> Result<Option<Instance>> {
-    Ok(engine::instance::get(instance_id)
+pub async fn instance_get(
+    handle: tauri::State<'_, EngineHandle>,
+    instance_id: &str,
+) -> Result<Option<Instance>> {
+    let state = handle.get().await;
+    Ok(engine::instance::get(&state, instance_id)
         .await?
         .map(Instance::from))
 }
 
 #[tauri::command]
 pub async fn instance_get_many(
+    handle: tauri::State<'_, EngineHandle>,
     instance_ids: Vec<String>,
 ) -> Result<Vec<Instance>> {
+    let state = handle.get().await;
     let ids = instance_ids.iter().map(|x| &**x).collect::<Vec<&str>>();
-    Ok(engine::instance::get_many(&ids)
+    Ok(engine::instance::get_many(&state, &ids)
         .await?
         .into_iter()
         .map(Instance::from)
@@ -550,8 +561,11 @@ pub async fn instance_get_many(
 }
 
 #[tauri::command]
-pub async fn instance_list() -> Result<Vec<Instance>> {
-    Ok(engine::instance::list()
+pub async fn instance_list(
+    handle: tauri::State<'_, EngineHandle>,
+) -> Result<Vec<Instance>> {
+    let state = handle.get().await;
+    Ok(engine::instance::list(&state)
         .await?
         .into_iter()
         .map(Instance::from)
@@ -559,65 +573,94 @@ pub async fn instance_list() -> Result<Vec<Instance>> {
 }
 
 #[tauri::command]
-pub async fn instance_list_groups()
--> Result<Vec<engine::instance::InstanceGroup>> {
-    Ok(engine::instance::list_groups().await?)
+pub async fn instance_list_groups(
+    handle: tauri::State<'_, EngineHandle>,
+) -> Result<Vec<engine::instance::InstanceGroup>> {
+    let state = handle.get().await;
+    Ok(engine::instance::list_groups(&state).await?)
 }
 
 #[tauri::command]
 pub async fn instance_create_group(
+    handle: tauri::State<'_, EngineHandle>,
     name: String,
 ) -> Result<engine::instance::InstanceGroup> {
-    Ok(engine::instance::create_group(name).await?)
+    let state = handle.get().await;
+    Ok(engine::instance::create_group(&state, name).await?)
 }
 
 #[tauri::command]
 pub async fn instance_rename_group(
+    handle: tauri::State<'_, EngineHandle>,
     id: String,
     new_name: String,
 ) -> Result<engine::instance::InstanceGroup> {
-    Ok(engine::instance::rename_group(id, new_name).await?)
+    let state = handle.get().await;
+    Ok(engine::instance::rename_group(&state, id, new_name).await?)
 }
 
 #[tauri::command]
-pub async fn instance_delete_group(id: String) -> Result<()> {
-    Ok(engine::instance::delete_group(id).await?)
+pub async fn instance_delete_group(
+    handle: tauri::State<'_, EngineHandle>,
+    id: String,
+) -> Result<()> {
+    let state = handle.get().await;
+    Ok(engine::instance::delete_group(&state, id).await?)
 }
 
 #[tauri::command]
-pub async fn instance_set_group_order(group_ids: Vec<String>) -> Result<()> {
-    Ok(engine::instance::set_group_order(group_ids).await?)
+pub async fn instance_set_group_order(
+    handle: tauri::State<'_, EngineHandle>,
+    group_ids: Vec<String>,
+) -> Result<()> {
+    let state = handle.get().await;
+    Ok(engine::instance::set_group_order(&state, group_ids).await?)
 }
 
 #[tauri::command]
 pub async fn instance_set_group_memberships(
+    handle: tauri::State<'_, EngineHandle>,
     updates: Vec<engine::instance::InstanceGroupMembershipUpdate>,
 ) -> Result<()> {
-    Ok(engine::instance::set_group_memberships(updates).await?)
+    let state = handle.get().await;
+    Ok(engine::instance::set_group_memberships(&state, updates).await?)
 }
 
 #[tauri::command]
 pub async fn instance_get_projects(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: &str,
     cache_behaviour: Option<CacheBehaviour>,
 ) -> Result<DashMap<String, ContentFile>> {
-    Ok(engine::instance::get_projects(instance_id, cache_behaviour).await?)
+    let state = handle.get().await;
+    Ok(
+        engine::instance::get_projects(&state, instance_id, cache_behaviour)
+            .await?,
+    )
 }
 
 #[tauri::command]
 pub async fn instance_get_installed_project_ids(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: &str,
 ) -> Result<Vec<String>> {
-    Ok(engine::instance::get_installed_project_ids(instance_id).await?)
+    let state = handle.get().await;
+    Ok(
+        engine::instance::get_installed_project_ids(&state, instance_id)
+            .await?,
+    )
 }
 
 #[tauri::command]
 pub async fn instance_get_install_candidates(
+    handle: tauri::State<'_, EngineHandle>,
     project_id: &str,
     project_type: ProjectType,
     targets: Vec<InstanceInstallTarget>,
 ) -> Result<Vec<InstanceInstallCandidate>> {
+    let state = handle.get().await;
     Ok(engine::instance::get_install_candidates(
+        &state,
         project_id,
         project_type,
         targets,
@@ -627,40 +670,56 @@ pub async fn instance_get_install_candidates(
 
 #[tauri::command]
 pub async fn instance_content(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: &str,
     cache_behaviour: Option<CacheBehaviour>,
 ) -> Result<Vec<ContentItem>> {
-    instance_get_content_items(instance_id, cache_behaviour).await
+    instance_get_content_items(handle, instance_id, cache_behaviour).await
 }
 
 #[tauri::command]
 pub async fn instance_get_content_items(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: &str,
     cache_behaviour: Option<CacheBehaviour>,
 ) -> Result<Vec<ContentItem>> {
-    Ok(
-        engine::instance::get_content_items(instance_id, cache_behaviour)
-            .await?,
+    let state = handle.get().await;
+    Ok(engine::instance::get_content_items(
+        &state,
+        instance_id,
+        cache_behaviour,
     )
+    .await?)
 }
 
 #[tauri::command]
-pub async fn instance_sync_content_files(instance_id: &str) -> Result<()> {
-    engine::instance::sync_content_files(instance_id).await?;
+pub async fn instance_sync_content_files(
+    handle: tauri::State<'_, EngineHandle>,
+    instance_id: &str,
+) -> Result<()> {
+    let state = handle.get().await;
+    engine::instance::sync_content_files(&state, instance_id).await?;
     Ok(())
 }
 
 #[tauri::command]
-pub async fn instance_refresh_content_updates(instance_id: &str) -> Result<()> {
-    Ok(engine::instance::refresh_content_updates(instance_id).await?)
+pub async fn instance_refresh_content_updates(
+    handle: tauri::State<'_, EngineHandle>,
+    instance_id: &str,
+) -> Result<()> {
+    let state = handle.get().await;
+    Ok(engine::instance::refresh_content_updates(&state, instance_id).await?)
 }
 
 #[tauri::command]
 pub async fn instance_get_dependencies_as_content_items(
+    handle: tauri::State<'_, EngineHandle>,
     dependencies: Vec<Dependency>,
     cache_behaviour: Option<CacheBehaviour>,
 ) -> Result<Vec<ContentItem>> {
+    let state = handle.get().await;
     Ok(engine::instance::get_dependencies_as_content_items(
+        &state,
         dependencies,
         cache_behaviour,
     )
@@ -669,21 +728,13 @@ pub async fn instance_get_dependencies_as_content_items(
 
 #[tauri::command]
 pub async fn instance_get_linked_modpack_info(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: &str,
     cache_behaviour: Option<CacheBehaviour>,
 ) -> Result<Option<LinkedModpackInfo>> {
-    Ok(
-        engine::instance::get_linked_modpack_info(instance_id, cache_behaviour)
-            .await?,
-    )
-}
-
-#[tauri::command]
-pub async fn instance_get_linked_modpack_content(
-    instance_id: &str,
-    cache_behaviour: Option<CacheBehaviour>,
-) -> Result<Vec<ContentItem>> {
-    Ok(engine::instance::get_linked_modpack_content(
+    let state = handle.get().await;
+    Ok(engine::instance::get_linked_modpack_info(
+        &state,
         instance_id,
         cache_behaviour,
     )
@@ -691,125 +742,193 @@ pub async fn instance_get_linked_modpack_content(
 }
 
 #[tauri::command]
-pub async fn instance_get_full_path(instance_id: &str) -> Result<PathBuf> {
-    Ok(engine::instance::get_full_path(instance_id).await?)
+pub async fn instance_get_linked_modpack_content(
+    handle: tauri::State<'_, EngineHandle>,
+    instance_id: &str,
+    cache_behaviour: Option<CacheBehaviour>,
+) -> Result<Vec<ContentItem>> {
+    let state = handle.get().await;
+    Ok(engine::instance::get_linked_modpack_content(
+        &state,
+        instance_id,
+        cache_behaviour,
+    )
+    .await?)
+}
+
+#[tauri::command]
+pub async fn instance_get_full_path(
+    handle: tauri::State<'_, EngineHandle>,
+    instance_id: &str,
+) -> Result<PathBuf> {
+    let state = handle.get().await;
+    Ok(engine::instance::get_full_path(&state, instance_id).await?)
 }
 
 #[tauri::command]
 pub async fn instance_get_mod_full_path(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: &str,
     project_path: &str,
 ) -> Result<PathBuf> {
-    Ok(engine::instance::get_mod_full_path(instance_id, project_path).await?)
+    let state = handle.get().await;
+    Ok(
+        engine::instance::get_mod_full_path(&state, instance_id, project_path)
+            .await?,
+    )
 }
 
 #[tauri::command]
 pub async fn instance_list_screenshots<R: Runtime>(
+    handle: tauri::State<'_, EngineHandle>,
     app_handle: AppHandle<R>,
     instance_id: &str,
 ) -> Result<Vec<InstanceScreenshot>> {
-    let screenshots = engine::instance::list_screenshots(instance_id).await?;
+    let state = handle.get().await;
+    let screenshots =
+        engine::instance::list_screenshots(&state, instance_id).await?;
     serialize_screenshots(&app_handle, screenshots)
 }
 
 #[tauri::command]
 pub async fn instance_list_all_screenshots<R: Runtime>(
+    handle: tauri::State<'_, EngineHandle>,
     app_handle: AppHandle<R>,
 ) -> Result<Vec<InstanceScreenshot>> {
-    let screenshots = engine::instance::list_all_screenshots().await?;
+    let state = handle.get().await;
+    let screenshots = engine::instance::list_all_screenshots(&state).await?;
     serialize_screenshots(&app_handle, screenshots)
 }
 
 #[tauri::command]
 pub async fn instance_list_synced_screenshots<R: Runtime>(
+    handle: tauri::State<'_, EngineHandle>,
     app_handle: AppHandle<R>,
 ) -> Result<Vec<InstanceScreenshot>> {
-    let screenshots = engine::instance::list_synced_screenshots().await?;
+    let state = handle.get().await;
+    let screenshots = engine::instance::list_synced_screenshots(&state).await?;
     serialize_screenshots(&app_handle, screenshots)
 }
 
 #[tauri::command]
 pub async fn instance_save_edited_screenshot<R: Runtime>(
+    handle: tauri::State<'_, EngineHandle>,
     app_handle: AppHandle<R>,
     key: engine::instance::ScreenshotKey,
     png_bytes: Vec<u8>,
     mode: engine::instance::ScreenshotEditSaveMode,
 ) -> Result<InstanceScreenshot> {
+    let state = handle.get().await;
     let screenshot =
-        engine::instance::save_edited_screenshot(key, png_bytes, mode).await?;
+        engine::instance::save_edited_screenshot(&state, key, png_bytes, mode)
+            .await?;
     serialize_screenshot(&app_handle, screenshot)
 }
 
 #[tauri::command]
-pub async fn instance_list_screenshot_groups()
--> Result<Vec<engine::instance::ScreenshotGroup>> {
-    Ok(engine::instance::list_screenshot_groups().await?)
+pub async fn instance_list_screenshot_groups(
+    handle: tauri::State<'_, EngineHandle>,
+) -> Result<Vec<engine::instance::ScreenshotGroup>> {
+    let state = handle.get().await;
+    Ok(engine::instance::list_screenshot_groups(&state).await?)
 }
 
 #[tauri::command]
 pub async fn instance_create_screenshot_group(
+    handle: tauri::State<'_, EngineHandle>,
     name: String,
     screenshot_ids: Vec<String>,
 ) -> Result<engine::instance::ScreenshotGroup> {
-    Ok(engine::instance::create_screenshot_group(name, screenshot_ids).await?)
+    let state = handle.get().await;
+    Ok(
+        engine::instance::create_screenshot_group(&state, name, screenshot_ids)
+            .await?,
+    )
 }
 
 #[tauri::command]
 pub async fn instance_rename_screenshot_group(
+    handle: tauri::State<'_, EngineHandle>,
     id: String,
     new_name: String,
 ) -> Result<engine::instance::ScreenshotGroup> {
-    Ok(engine::instance::rename_screenshot_group(id, new_name).await?)
+    let state = handle.get().await;
+    Ok(engine::instance::rename_screenshot_group(&state, id, new_name).await?)
 }
 
 #[tauri::command]
-pub async fn instance_delete_screenshot_group(id: String) -> Result<()> {
-    Ok(engine::instance::delete_screenshot_group(id).await?)
+pub async fn instance_delete_screenshot_group(
+    handle: tauri::State<'_, EngineHandle>,
+    id: String,
+) -> Result<()> {
+    let state = handle.get().await;
+    Ok(engine::instance::delete_screenshot_group(&state, id).await?)
 }
 
 #[tauri::command]
 pub async fn instance_set_screenshot_group_memberships(
+    handle: tauri::State<'_, EngineHandle>,
     updates: Vec<engine::instance::ScreenshotGroupMembershipUpdate>,
 ) -> Result<()> {
-    Ok(engine::instance::set_screenshot_group_memberships(updates).await?)
+    let state = handle.get().await;
+    Ok(
+        engine::instance::set_screenshot_group_memberships(&state, updates)
+            .await?,
+    )
 }
 
 #[tauri::command]
 pub async fn instance_import_screenshot_groups(
+    handle: tauri::State<'_, EngineHandle>,
     groups: Vec<engine::instance::ScreenshotGroupImport>,
 ) -> Result<()> {
-    Ok(engine::instance::import_screenshot_groups(groups).await?)
+    let state = handle.get().await;
+    Ok(engine::instance::import_screenshot_groups(&state, groups).await?)
 }
 
 #[tauri::command]
 pub async fn instance_delete_screenshots(
+    handle: tauri::State<'_, EngineHandle>,
     keys: Vec<engine::instance::ScreenshotKey>,
 ) -> Result<()> {
-    Ok(engine::instance::delete_screenshots(&keys).await?)
+    let state = handle.get().await;
+    Ok(engine::instance::delete_screenshots(&state, &keys).await?)
 }
 
 #[tauri::command]
 pub async fn instance_export_screenshots(
+    handle: tauri::State<'_, EngineHandle>,
     keys: Vec<engine::instance::ScreenshotKey>,
     export_path: PathBuf,
 ) -> Result<()> {
-    Ok(engine::instance::export_screenshots(&keys, export_path).await?)
+    let state = handle.get().await;
+    Ok(
+        engine::instance::export_screenshots(&state, &keys, export_path)
+            .await?,
+    )
 }
 
 #[tauri::command]
 pub async fn instance_move_screenshots(
+    handle: tauri::State<'_, EngineHandle>,
     keys: Vec<engine::instance::ScreenshotKey>,
     target_instance_id: &str,
 ) -> Result<Vec<engine::instance::ScreenshotKey>> {
-    Ok(engine::instance::move_screenshots(&keys, target_instance_id).await?)
+    let state = handle.get().await;
+    Ok(
+        engine::instance::move_screenshots(&state, &keys, target_instance_id)
+            .await?,
+    )
 }
 
 #[tauri::command]
 pub async fn instance_open_screenshot<R: Runtime>(
+    handle: tauri::State<'_, EngineHandle>,
     app_handle: AppHandle<R>,
     key: engine::instance::ScreenshotKey,
 ) -> Result<()> {
-    let path = engine::instance::get_screenshot_path(&key).await?;
+    let state = handle.get().await;
+    let path = engine::instance::get_screenshot_path(&state, &key).await?;
     app_handle
         .opener()
         .reveal_item_in_dir(path)
@@ -819,13 +938,16 @@ pub async fn instance_open_screenshot<R: Runtime>(
 
 #[tauri::command]
 pub async fn instance_set_synced_option(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: &str,
     option: InstanceSyncedOption,
     enabled: bool,
     resolution: Option<engine::instance::SyncedOptionJoinResolution>,
 ) -> Result<Instance> {
+    let state = handle.get().await;
     Ok(Instance::from(
         engine::instance::set_synced_option(
+            &state,
             instance_id,
             option,
             enabled,
@@ -837,41 +959,57 @@ pub async fn instance_set_synced_option(
 
 #[tauri::command]
 pub async fn instance_get_synced_option_join_preview(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: &str,
     option: InstanceSyncedOption,
 ) -> Result<engine::instance::SyncedOptionJoinPreview> {
+    let state = handle.get().await;
+    Ok(engine::instance::get_synced_option_join_preview(
+        &state,
+        instance_id,
+        option,
+    )
+    .await?)
+}
+
+#[tauri::command]
+pub async fn instance_get_synced_options_overview(
+    handle: tauri::State<'_, EngineHandle>,
+    instance_id: &str,
+) -> Result<engine::instance::SyncedOptionsOverview> {
+    let state = handle.get().await;
     Ok(
-        engine::instance::get_synced_option_join_preview(instance_id, option)
+        engine::instance::get_synced_options_overview(&state, instance_id)
             .await?,
     )
 }
 
 #[tauri::command]
-pub async fn instance_get_synced_options_overview(
-    instance_id: &str,
-) -> Result<engine::instance::SyncedOptionsOverview> {
-    Ok(engine::instance::get_synced_options_overview(instance_id).await?)
+pub async fn instance_get_global_synced_options(
+    handle: tauri::State<'_, EngineHandle>,
+) -> Result<engine::instance::GlobalSyncedOptions> {
+    let state = handle.get().await;
+    Ok(engine::instance::get_global_synced_options(&state).await?)
 }
 
 #[tauri::command]
-pub async fn instance_get_global_synced_options()
--> Result<engine::instance::GlobalSyncedOptions> {
-    Ok(engine::instance::get_global_synced_options().await?)
-}
-
-#[tauri::command]
-pub async fn instance_get_initialized_synced_options()
--> Result<engine::instance::GlobalSyncedOptions> {
-    Ok(engine::instance::get_initialized_synced_options().await?)
+pub async fn instance_get_initialized_synced_options(
+    handle: tauri::State<'_, EngineHandle>,
+) -> Result<engine::instance::GlobalSyncedOptions> {
+    let state = handle.get().await;
+    Ok(engine::instance::get_initialized_synced_options(&state).await?)
 }
 
 #[tauri::command]
 pub async fn instance_set_global_synced_option(
+    handle: tauri::State<'_, EngineHandle>,
     option: InstanceSyncedOption,
     enabled: bool,
     base_instance_id: Option<String>,
 ) -> Result<engine::instance::GlobalSyncedOptions> {
+    let state = handle.get().await;
     Ok(engine::instance::set_global_synced_option(
+        &state,
         option,
         enabled,
         base_instance_id.as_deref(),
@@ -880,25 +1018,32 @@ pub async fn instance_set_global_synced_option(
 }
 
 #[tauri::command]
-pub async fn instance_list_game_options_sync_sources()
--> Result<Vec<engine::instance::GameOptionsSourceCandidate>> {
-    Ok(engine::instance::list_game_options_sync_sources().await?)
+pub async fn instance_list_game_options_sync_sources(
+    handle: tauri::State<'_, EngineHandle>,
+) -> Result<Vec<engine::instance::GameOptionsSourceCandidate>> {
+    let state = handle.get().await;
+    Ok(engine::instance::list_game_options_sync_sources(&state).await?)
 }
 
 #[tauri::command]
-pub async fn instance_get_synced_game_options_config()
--> Result<engine::instance::GameSettingsEditorState> {
-    Ok(engine::instance::get_synced_game_options_config().await?)
+pub async fn instance_get_synced_game_options_config(
+    handle: tauri::State<'_, EngineHandle>,
+) -> Result<engine::instance::GameSettingsEditorState> {
+    let state = handle.get().await;
+    Ok(engine::instance::get_synced_game_options_config(&state).await?)
 }
 
 #[tauri::command]
 pub async fn instance_get_game_setting_locale_labels(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: Option<String>,
     locale: String,
     option_ids: Vec<String>,
     refresh_sources: bool,
 ) -> Result<engine::instance::GameSettingLocaleLabels> {
+    let state = handle.get().await;
     Ok(engine::instance::get_game_setting_locale_labels(
+        &state,
         instance_id.as_deref(),
         &locale,
         option_ids,
@@ -909,31 +1054,49 @@ pub async fn instance_get_game_setting_locale_labels(
 
 #[tauri::command]
 pub async fn instance_preview_synced_game_option_changes(
+    handle: tauri::State<'_, EngineHandle>,
     request: engine::instance::UpdateGameSettingsRequest,
 ) -> Result<engine::instance::GameSettingsEditorState> {
-    Ok(engine::instance::preview_synced_game_option_changes(request).await?)
+    let state = handle.get().await;
+    Ok(
+        engine::instance::preview_synced_game_option_changes(&state, request)
+            .await?,
+    )
 }
 
 #[tauri::command]
 pub async fn instance_save_synced_game_option_changes(
+    handle: tauri::State<'_, EngineHandle>,
     request: engine::instance::UpdateGameSettingsRequest,
 ) -> Result<engine::instance::SaveGameSettingsResult> {
-    Ok(engine::instance::save_synced_game_option_changes(request).await?)
+    let state = handle.get().await;
+    Ok(
+        engine::instance::save_synced_game_option_changes(&state, request)
+            .await?,
+    )
 }
 
 #[tauri::command]
 pub async fn instance_get_local_game_options_config(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: &str,
 ) -> Result<engine::instance::GameSettingsEditorState> {
-    Ok(engine::instance::get_local_game_options_config(instance_id).await?)
+    let state = handle.get().await;
+    Ok(
+        engine::instance::get_local_game_options_config(&state, instance_id)
+            .await?,
+    )
 }
 
 #[tauri::command]
 pub async fn instance_preview_local_game_option_changes(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: &str,
     request: engine::instance::UpdateGameSettingsRequest,
 ) -> Result<engine::instance::GameSettingsEditorState> {
+    let state = handle.get().await;
     Ok(engine::instance::preview_local_game_option_changes(
+        &state,
         instance_id,
         request,
     )
@@ -942,30 +1105,43 @@ pub async fn instance_preview_local_game_option_changes(
 
 #[tauri::command]
 pub async fn instance_save_local_game_option_changes(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: &str,
     request: engine::instance::UpdateGameSettingsRequest,
 ) -> Result<engine::instance::SaveGameSettingsResult> {
-    Ok(
-        engine::instance::save_local_game_option_changes(instance_id, request)
-            .await?,
+    let state = handle.get().await;
+    Ok(engine::instance::save_local_game_option_changes(
+        &state,
+        instance_id,
+        request,
     )
+    .await?)
 }
 
 #[tauri::command]
-pub async fn instance_get_command_history() -> Result<String> {
-    Ok(engine::instance::get_command_history().await?)
+pub async fn instance_get_command_history(
+    handle: tauri::State<'_, EngineHandle>,
+) -> Result<String> {
+    let state = handle.get().await;
+    Ok(engine::instance::get_command_history(&state).await?)
 }
 
 #[tauri::command]
-pub async fn instance_set_command_history(contents: &str) -> Result<String> {
-    Ok(engine::instance::set_command_history(contents).await?)
+pub async fn instance_set_command_history(
+    handle: tauri::State<'_, EngineHandle>,
+    contents: &str,
+) -> Result<String> {
+    let state = handle.get().await;
+    Ok(engine::instance::set_command_history(&state, contents).await?)
 }
 
 #[tauri::command]
 pub async fn instance_open_synced_options_folder<R: Runtime>(
+    handle: tauri::State<'_, EngineHandle>,
     app_handle: AppHandle<R>,
 ) -> Result<()> {
-    let path = engine::instance::get_synced_options_folder().await?;
+    let state = handle.get().await;
+    let path = engine::instance::get_synced_options_folder(&state).await?;
     app_handle
         .opener()
         .open_path(path.to_string_lossy(), None::<&str>)
@@ -974,92 +1150,132 @@ pub async fn instance_open_synced_options_folder<R: Runtime>(
 }
 
 #[tauri::command]
-pub async fn instance_list_synced_servers()
--> Result<Vec<engine::instance::SyncedServer>> {
-    Ok(engine::instance::list_synced_servers().await?)
+pub async fn instance_list_synced_servers(
+    handle: tauri::State<'_, EngineHandle>,
+) -> Result<Vec<engine::instance::SyncedServer>> {
+    let state = handle.get().await;
+    Ok(engine::instance::list_synced_servers(&state).await?)
 }
 
 #[tauri::command]
 pub async fn instance_update_synced_server(
+    handle: tauri::State<'_, EngineHandle>,
     server: engine::instance::SyncedServer,
 ) -> Result<()> {
-    Ok(engine::instance::update_synced_server(server).await?)
+    let state = handle.get().await;
+    Ok(engine::instance::update_synced_server(&state, server).await?)
 }
 
 #[tauri::command]
-pub async fn instance_remove_synced_server(server_id: &str) -> Result<()> {
-    Ok(engine::instance::remove_synced_server(server_id).await?)
+pub async fn instance_remove_synced_server(
+    handle: tauri::State<'_, EngineHandle>,
+    server_id: &str,
+) -> Result<()> {
+    let state = handle.get().await;
+    Ok(engine::instance::remove_synced_server(&state, server_id).await?)
 }
 
 #[tauri::command]
 pub async fn instance_get_pack_sync_preview(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: &str,
     project_path: &str,
 ) -> Result<engine::instance::PackSyncPreview> {
-    Ok(
-        engine::instance::get_pack_sync_preview(instance_id, project_path)
-            .await?,
+    let state = handle.get().await;
+    Ok(engine::instance::get_pack_sync_preview(
+        &state,
+        instance_id,
+        project_path,
     )
+    .await?)
 }
 
 #[tauri::command]
 pub async fn instance_sync_pack(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: &str,
     project_path: &str,
 ) -> Result<()> {
-    Ok(engine::instance::sync_pack(instance_id, project_path).await?)
+    let state = handle.get().await;
+    Ok(engine::instance::sync_pack(&state, instance_id, project_path).await?)
 }
 
 #[tauri::command]
 pub async fn instance_desync_pack(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: &str,
     pack_id: &str,
     mode: engine::instance::DesyncServerMode,
 ) -> Result<()> {
-    Ok(engine::instance::desync_pack(instance_id, pack_id, mode).await?)
-}
-
-#[tauri::command]
-pub async fn instance_list_synced_packs(
-    project_type: ProjectType,
-) -> Result<Vec<ContentItem>> {
-    Ok(engine::instance::list_synced_packs(project_type).await?)
-}
-
-#[tauri::command]
-pub async fn instance_upload_synced_pack(
-    path: &Path,
-    project_type: ProjectType,
-    game_versions: Vec<String>,
-) -> Result<()> {
+    let state = handle.get().await;
     Ok(
-        engine::instance::upload_synced_pack(path, project_type, game_versions)
+        engine::instance::desync_pack(&state, instance_id, pack_id, mode)
             .await?,
     )
 }
 
 #[tauri::command]
-pub async fn instance_set_synced_pack_enabled(
-    pack_id: &str,
-    enabled: bool,
-) -> Result<()> {
-    Ok(engine::instance::set_synced_pack_enabled(pack_id, enabled).await?)
+pub async fn instance_list_synced_packs(
+    handle: tauri::State<'_, EngineHandle>,
+    project_type: ProjectType,
+) -> Result<Vec<ContentItem>> {
+    let state = handle.get().await;
+    Ok(engine::instance::list_synced_packs(&state, project_type).await?)
 }
 
 #[tauri::command]
-pub async fn instance_remove_synced_pack(pack_id: &str) -> Result<()> {
-    Ok(engine::instance::remove_synced_pack(pack_id).await?)
+pub async fn instance_upload_synced_pack(
+    handle: tauri::State<'_, EngineHandle>,
+    path: &Path,
+    project_type: ProjectType,
+    game_versions: Vec<String>,
+) -> Result<()> {
+    let state = handle.get().await;
+    Ok(engine::instance::upload_synced_pack(
+        &state,
+        path,
+        project_type,
+        game_versions,
+    )
+    .await?)
+}
+
+#[tauri::command]
+pub async fn instance_set_synced_pack_enabled(
+    handle: tauri::State<'_, EngineHandle>,
+    pack_id: &str,
+    enabled: bool,
+) -> Result<()> {
+    let state = handle.get().await;
+    Ok(
+        engine::instance::set_synced_pack_enabled(&state, pack_id, enabled)
+            .await?,
+    )
+}
+
+#[tauri::command]
+pub async fn instance_remove_synced_pack(
+    handle: tauri::State<'_, EngineHandle>,
+    pack_id: &str,
+) -> Result<()> {
+    let state = handle.get().await;
+    Ok(engine::instance::remove_synced_pack(&state, pack_id).await?)
 }
 
 #[tauri::command]
 pub async fn instance_rebuild_synced_options(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: Option<&str>,
 ) -> Result<()> {
+    let state = handle.get().await;
     if let Some(instance_id) = instance_id {
-        engine::instance::reconcile_instance_synced_options(instance_id)
-            .await?;
+        engine::instance::reconcile_instance_synced_options(
+            &state,
+            instance_id,
+        )
+        .await?;
     } else {
-        engine::instance::reconcile_all_synced_options().await?;
+        engine::instance::reconcile_all_synced_options(&state).await?;
     }
     Ok(())
 }
@@ -1126,20 +1342,24 @@ fn serialize_screenshot_data(
 
 #[tauri::command]
 pub async fn instance_get_optimal_jre_key(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: &str,
 ) -> Result<Option<JavaVersion>> {
-    Ok(engine::instance::get_optimal_jre_key(instance_id).await?)
+    let state = handle.get().await;
+    Ok(engine::instance::get_optimal_jre_key(&state, instance_id).await?)
 }
 
 #[tauri::command]
 pub async fn instance_check_installed(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: &str,
     project_id: &str,
 ) -> Result<bool> {
+    let state = handle.get().await;
     let check_project_id = project_id;
 
     if let Ok(projects) =
-        engine::instance::get_projects(instance_id, None).await
+        engine::instance::get_projects(&state, instance_id, None).await
     {
         Ok(projects.into_iter().any(|(_, project)| {
             project
@@ -1154,23 +1374,31 @@ pub async fn instance_check_installed(
 
 #[tauri::command]
 pub async fn instance_update_project(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: &str,
     project_path: &str,
 ) -> Result<String> {
-    Ok(
-        engine::instance::update_project(instance_id, project_path, None)
-            .await?,
+    let state = handle.get().await;
+    Ok(engine::instance::update_project(
+        &state,
+        instance_id,
+        project_path,
+        None,
     )
+    .await?)
 }
 
 #[tauri::command]
 pub async fn instance_add_project_from_version(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: &str,
     version_id: &str,
     reason: DownloadReason,
     dependent_on_version_id: Option<String>,
 ) -> Result<String> {
+    let state = handle.get().await;
     Ok(engine::instance::add_project_from_version(
+        &state,
         instance_id,
         version_id,
         reason,
@@ -1181,10 +1409,13 @@ pub async fn instance_add_project_from_version(
 
 #[tauri::command]
 pub async fn instance_install_project_with_dependencies(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: &str,
     request: InstallProjectWithDependenciesRequest,
 ) -> Result<ResolveContentPlan> {
+    let state = handle.get().await;
     Ok(engine::instance::install_project_with_dependencies(
+        &state,
         instance_id,
         request,
     )
@@ -1193,11 +1424,14 @@ pub async fn instance_install_project_with_dependencies(
 
 #[tauri::command]
 pub async fn instance_switch_project_version_with_dependencies(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: &str,
     project_path: &str,
     version_id: &str,
 ) -> Result<String> {
+    let state = handle.get().await;
     Ok(engine::instance::switch_project_version_with_dependencies(
+        &state,
         instance_id,
         project_path,
         version_id,
@@ -1207,11 +1441,14 @@ pub async fn instance_switch_project_version_with_dependencies(
 
 #[tauri::command]
 pub async fn instance_add_project_from_path(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: &str,
     project_path: &Path,
     project_type: Option<ProjectType>,
 ) -> Result<String> {
+    let state = handle.get().await;
     Ok(engine::instance::add_project_from_path(
+        &state,
         instance_id,
         project_path,
         project_type,
@@ -1220,17 +1457,24 @@ pub async fn instance_add_project_from_path(
 }
 
 #[tauri::command]
-pub async fn instance_is_file_on_modrinth(project_path: &Path) -> Result<bool> {
-    Ok(engine::instance::is_file_on_modrinth(project_path).await?)
+pub async fn instance_is_file_on_modrinth(
+    handle: tauri::State<'_, EngineHandle>,
+    project_path: &Path,
+) -> Result<bool> {
+    let state = handle.get().await;
+    Ok(engine::instance::is_file_on_modrinth(&state, project_path).await?)
 }
 
 #[tauri::command]
 pub async fn instance_toggle_disable_project(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: &str,
     project_path: &str,
     desired_enabled: Option<bool>,
 ) -> Result<String> {
+    let state = handle.get().await;
     Ok(engine::instance::toggle_disable_project(
+        &state,
         instance_id,
         project_path,
         desired_enabled,
@@ -1240,30 +1484,42 @@ pub async fn instance_toggle_disable_project(
 
 #[tauri::command]
 pub async fn instance_set_project_locked(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: &str,
     project_path: &str,
     locked: bool,
 ) -> Result<()> {
-    engine::instance::set_project_locked(instance_id, project_path, locked)
-        .await?;
+    let state = handle.get().await;
+    engine::instance::set_project_locked(
+        &state,
+        instance_id,
+        project_path,
+        locked,
+    )
+    .await?;
     Ok(())
 }
 
 #[tauri::command]
 pub async fn instance_remove_project(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: &str,
     project_path: &str,
 ) -> Result<()> {
-    engine::instance::remove_project(instance_id, project_path).await?;
+    let state = handle.get().await;
+    engine::instance::remove_project(&state, instance_id, project_path).await?;
     Ok(())
 }
 
 #[tauri::command]
 pub async fn instance_update_managed_modrinth_version(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: String,
     version_id: String,
 ) -> Result<engine::install::InstallJobSnapshot> {
+    let state = handle.get().await;
     Ok(engine::instance::update_managed_modrinth_version(
+        &state,
         &instance_id,
         &version_id,
     )
@@ -1272,13 +1528,16 @@ pub async fn instance_update_managed_modrinth_version(
 
 #[tauri::command]
 pub async fn instance_repair_managed_modrinth(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: &str,
 ) -> Result<engine::install::InstallJobSnapshot> {
-    Ok(engine::instance::repair_managed_modrinth(instance_id).await?)
+    let state = handle.get().await;
+    Ok(engine::instance::repair_managed_modrinth(&state, instance_id).await?)
 }
 
 #[tauri::command]
 pub async fn instance_export_mrpack(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: &str,
     export_location: PathBuf,
     included_overrides: Vec<String>,
@@ -1287,7 +1546,9 @@ pub async fn instance_export_mrpack(
     description: Option<String>,
     name: Option<String>,
 ) -> Result<()> {
+    let state = handle.get().await;
     engine::instance::export_mrpack(
+        &state,
         instance_id,
         export_location,
         included_overrides,
@@ -1302,10 +1563,13 @@ pub async fn instance_export_mrpack(
 
 #[tauri::command]
 pub async fn instance_get_pack_export_candidates(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: &str,
     parent: Option<SafeRelativeUtf8UnixPathBuf>,
 ) -> Result<Vec<engine::instance::PackExportCandidate>> {
+    let state = handle.get().await;
     Ok(engine::instance::get_pack_export_candidates_for_parent(
+        &state,
         instance_id,
         parent,
     )
@@ -1314,54 +1578,72 @@ pub async fn instance_get_pack_export_candidates(
 
 #[tauri::command]
 pub async fn instance_run(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: &str,
     server_address: Option<String>,
 ) -> Result<ProcessMetadata> {
+    let state = handle.get().await;
     let quick_play = match server_address {
         Some(addr) => QuickPlayType::Server(ServerAddress::Unresolved(addr)),
         None => QuickPlayType::None,
     };
-    Ok(engine::instance::run(instance_id, quick_play).await?)
+    Ok(engine::instance::run(&state, instance_id, quick_play).await?)
 }
 
 #[tauri::command]
-pub async fn instance_kill(instance_id: &str) -> Result<()> {
-    engine::instance::kill(instance_id).await?;
+pub async fn instance_kill(
+    handle: tauri::State<'_, EngineHandle>,
+    instance_id: &str,
+) -> Result<()> {
+    let state = handle.get().await;
+    engine::instance::kill(&state, instance_id).await?;
     Ok(())
 }
 
 #[tauri::command]
 pub async fn instance_edit(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: &str,
     edit_instance: EditInstance,
 ) -> Result<()> {
-    engine::instance::edit(instance_id, edit_to_core(edit_instance)?).await?;
+    let state = handle.get().await;
+    engine::instance::edit(&state, instance_id, edit_to_core(edit_instance)?)
+        .await?;
     Ok(())
 }
 
 #[tauri::command]
 pub async fn instance_edit_icon(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: &str,
     icon_path: Option<&Path>,
 ) -> Result<()> {
-    engine::instance::edit_icon(instance_id, icon_path).await?;
+    let state = handle.get().await;
+    engine::instance::edit_icon(&state, instance_id, icon_path).await?;
     Ok(())
 }
 
 #[tauri::command]
-pub async fn instance_cache_icon(icon_bytes: Vec<u8>) -> Result<String> {
-    Ok(engine::instance::cache_icon_bytes(icon_bytes).await?)
+pub async fn instance_cache_icon(
+    handle: tauri::State<'_, EngineHandle>,
+    icon_bytes: Vec<u8>,
+) -> Result<String> {
+    let state = handle.get().await;
+    Ok(engine::instance::cache_icon_bytes(&state, icon_bytes).await?)
 }
 
 #[tauri::command]
 pub async fn instance_edit_generated_icon(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: &str,
     config: engine::data::IconConfig,
     symbol_bytes: Vec<u8>,
     only_if_empty: Option<bool>,
 ) -> Result<Option<String>> {
+    let state = handle.get().await;
     if only_if_empty.unwrap_or(false) {
         return Ok(engine::instance::edit_generated_icon_if_empty(
+            &state,
             instance_id,
             config,
             symbol_bytes,
@@ -1371,6 +1653,7 @@ pub async fn instance_edit_generated_icon(
 
     Ok(Some(
         engine::instance::edit_generated_icon(
+            &state,
             instance_id,
             config,
             symbol_bytes,
@@ -1381,11 +1664,14 @@ pub async fn instance_edit_generated_icon(
 
 #[tauri::command]
 pub async fn instance_cache_generated_icon(
+    handle: tauri::State<'_, EngineHandle>,
     config: engine::data::IconConfig,
     symbol_bytes: Vec<u8>,
     add_to_recents: bool,
 ) -> Result<String> {
+    let state = handle.get().await;
     Ok(engine::instance::cache_generated_icon(
+        &state,
         config,
         symbol_bytes,
         add_to_recents,
@@ -1394,42 +1680,59 @@ pub async fn instance_cache_generated_icon(
 }
 
 #[tauri::command]
-pub async fn instance_get_recent_icon_configs()
--> Result<Vec<engine::data::IconConfig>> {
-    Ok(engine::instance::get_recent_icon_configs().await?)
+pub async fn instance_get_recent_icon_configs(
+    handle: tauri::State<'_, EngineHandle>,
+) -> Result<Vec<engine::data::IconConfig>> {
+    let state = handle.get().await;
+    Ok(engine::instance::get_recent_icon_configs(&state).await?)
 }
 
 #[tauri::command]
-pub async fn instance_share_can_current_user_use() -> Result<bool> {
-    Ok(engine::instance::can_active_user_use_shared_instances().await?)
+pub async fn instance_share_can_current_user_use(
+    handle: tauri::State<'_, EngineHandle>,
+) -> Result<bool> {
+    let state = handle.get().await;
+    Ok(engine::instance::can_active_user_use_shared_instances(&state).await?)
 }
 
 #[tauri::command]
 pub async fn instance_share_get_users(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: &str,
 ) -> Result<engine::instance::SharedInstanceUsers> {
-    Ok(engine::instance::get_shared_instance_users(instance_id).await?)
-}
-
-#[tauri::command]
-pub async fn instance_share_invite_users(
-    instance_id: &str,
-    user_ids: Vec<String>,
-) -> Result<engine::instance::SharedInstanceUsers> {
+    let state = handle.get().await;
     Ok(
-        engine::instance::invite_shared_instance_users(instance_id, user_ids)
+        engine::instance::get_shared_instance_users(&state, instance_id)
             .await?,
     )
 }
 
 #[tauri::command]
+pub async fn instance_share_invite_users(
+    handle: tauri::State<'_, EngineHandle>,
+    instance_id: &str,
+    user_ids: Vec<String>,
+) -> Result<engine::instance::SharedInstanceUsers> {
+    let state = handle.get().await;
+    Ok(engine::instance::invite_shared_instance_users(
+        &state,
+        instance_id,
+        user_ids,
+    )
+    .await?)
+}
+
+#[tauri::command]
 pub async fn instance_share_create_invite_link(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: &str,
     max_age_seconds: Option<i32>,
     max_uses: Option<i32>,
     replace_invite_id: Option<String>,
 ) -> Result<engine::instance::SharedInstanceInviteLink> {
+    let state = handle.get().await;
     Ok(engine::instance::create_shared_instance_invite_link(
+        &state,
         instance_id,
         max_age_seconds,
         max_uses,
@@ -1440,29 +1743,41 @@ pub async fn instance_share_create_invite_link(
 
 #[tauri::command]
 pub async fn instance_share_get_invites(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: &str,
 ) -> Result<Vec<engine::instance::SharedInstanceInvite>> {
-    Ok(engine::instance::get_shared_instance_invites(instance_id).await?)
-}
-
-#[tauri::command]
-pub async fn instance_share_revoke_invite(
-    instance_id: &str,
-    invite_id: String,
-) -> Result<()> {
+    let state = handle.get().await;
     Ok(
-        engine::instance::revoke_shared_instance_invite(instance_id, invite_id)
+        engine::instance::get_shared_instance_invites(&state, instance_id)
             .await?,
     )
 }
 
 #[tauri::command]
+pub async fn instance_share_revoke_invite(
+    handle: tauri::State<'_, EngineHandle>,
+    instance_id: &str,
+    invite_id: String,
+) -> Result<()> {
+    let state = handle.get().await;
+    Ok(engine::instance::revoke_shared_instance_invite(
+        &state,
+        instance_id,
+        invite_id,
+    )
+    .await?)
+}
+
+#[tauri::command]
 pub async fn instance_share_remove_users(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: &str,
     user_ids: Vec<String>,
     has_pending_recipients: bool,
 ) -> Result<engine::instance::SharedInstanceUsers> {
+    let state = handle.get().await;
     Ok(engine::instance::remove_shared_instance_users(
+        &state,
         instance_id,
         user_ids,
         has_pending_recipients,
@@ -1472,23 +1787,29 @@ pub async fn instance_share_remove_users(
 
 #[tauri::command]
 pub async fn instance_share_get_publish_preview(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: &str,
 ) -> Result<Option<engine::instance::SharedInstancePublishPreview>> {
-    Ok(
-        engine::instance::get_shared_instance_publish_preview(instance_id)
-            .await?,
+    let state = handle.get().await;
+    Ok(engine::instance::get_shared_instance_publish_preview(
+        &state,
+        instance_id,
     )
+    .await?)
 }
 
 #[tauri::command]
 pub async fn instance_share_publish(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: &str,
     file_paths: Vec<String>,
     removed_paths: Vec<String>,
     server_core_id: Option<String>,
     on_progress: tauri::ipc::Channel<(u64, u64)>,
 ) -> Result<SharedInstanceAttachment> {
+    let state = handle.get().await;
     Ok(engine::instance::publish_shared_instance(
+        &state,
         instance_id,
         file_paths,
         removed_paths,
@@ -1503,10 +1824,13 @@ pub async fn instance_share_publish(
 
 #[tauri::command]
 pub async fn instance_share_publish_support_details(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: &str,
 ) -> Result<Option<String>> {
+    let state = handle.get().await;
     Ok(
         engine::instance::get_shared_instance_publish_support_details(
+            &state,
             instance_id,
         )
         .await?,
@@ -1514,76 +1838,110 @@ pub async fn instance_share_publish_support_details(
 }
 
 #[tauri::command]
-pub async fn instance_share_unlink(instance_id: &str) -> Result<()> {
-    engine::instance::unlink_shared_instance(instance_id).await?;
+pub async fn instance_share_unlink(
+    handle: tauri::State<'_, EngineHandle>,
+    instance_id: &str,
+) -> Result<()> {
+    let state = handle.get().await;
+    engine::instance::unlink_shared_instance(&state, instance_id).await?;
     Ok(())
 }
 
 #[tauri::command]
-pub async fn instance_share_unpublish(instance_id: &str) -> Result<()> {
-    engine::instance::unpublish_shared_instance(instance_id).await?;
+pub async fn instance_share_unpublish(
+    handle: tauri::State<'_, EngineHandle>,
+    instance_id: &str,
+) -> Result<()> {
+    let state = handle.get().await;
+    engine::instance::unpublish_shared_instance(&state, instance_id).await?;
     Ok(())
 }
 
 #[tauri::command]
 pub async fn instance_share_ensure(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: &str,
 ) -> Result<SharedInstanceAttachment> {
-    Ok(engine::instance::ensure_shared_instance(instance_id)
-        .await?
-        .into())
+    let state = handle.get().await;
+    Ok(
+        engine::instance::ensure_shared_instance(&state, instance_id)
+            .await?
+            .into(),
+    )
 }
 
 #[tauri::command]
 pub async fn instance_share_unpublish_remote(
+    handle: tauri::State<'_, EngineHandle>,
     shared_instance_id: &str,
 ) -> Result<()> {
-    engine::instance::unpublish_remote_shared_instance(shared_instance_id)
-        .await?;
+    let state = handle.get().await;
+    engine::instance::unpublish_remote_shared_instance(
+        &state,
+        shared_instance_id,
+    )
+    .await?;
     Ok(())
 }
 
 #[tauri::command]
-pub async fn instance_share_get_cached_library()
--> Result<Vec<engine::data::CachedSharedInstanceSummary>> {
-    Ok(engine::instance::get_cached_shared_instance_library().await?)
+pub async fn instance_share_get_cached_library(
+    handle: tauri::State<'_, EngineHandle>,
+) -> Result<Vec<engine::data::CachedSharedInstanceSummary>> {
+    let state = handle.get().await;
+    Ok(engine::instance::get_cached_shared_instance_library(&state).await?)
 }
 
 #[tauri::command]
 pub async fn instance_share_cache_library(
+    handle: tauri::State<'_, EngineHandle>,
     instances: Vec<engine::data::CachedSharedInstanceSummary>,
 ) -> Result<()> {
-    engine::instance::cache_shared_instance_library(instances).await?;
+    let state = handle.get().await;
+    engine::instance::cache_shared_instance_library(&state, instances).await?;
     Ok(())
 }
 
 #[tauri::command]
-pub async fn instance_get_hidden_ids() -> Result<Vec<String>> {
-    Ok(engine::instance::get_hidden_instance_ids().await?)
+pub async fn instance_get_hidden_ids(
+    handle: tauri::State<'_, EngineHandle>,
+) -> Result<Vec<String>> {
+    let state = handle.get().await;
+    Ok(engine::instance::get_hidden_instance_ids(&state).await?)
 }
 
 #[tauri::command]
 pub async fn instance_set_hidden(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: &str,
     hidden: bool,
 ) -> Result<()> {
-    engine::instance::set_instance_hidden(instance_id, hidden).await?;
+    let state = handle.get().await;
+    engine::instance::set_instance_hidden(&state, instance_id, hidden).await?;
     Ok(())
 }
 
 #[tauri::command]
 pub async fn instance_share_dismiss_restored_notice(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: &str,
 ) -> Result<()> {
-    engine::instance::dismiss_shared_instance_restored_notice(instance_id)
-        .await?;
+    let state = handle.get().await;
+    engine::instance::dismiss_shared_instance_restored_notice(
+        &state,
+        instance_id,
+    )
+    .await?;
     Ok(())
 }
 
 #[tauri::command]
 pub async fn instance_share_leave_remote(
+    handle: tauri::State<'_, EngineHandle>,
     shared_instance_id: &str,
 ) -> Result<()> {
-    engine::instance::leave_remote_shared_instance(shared_instance_id).await?;
+    let state = handle.get().await;
+    engine::instance::leave_remote_shared_instance(&state, shared_instance_id)
+        .await?;
     Ok(())
 }

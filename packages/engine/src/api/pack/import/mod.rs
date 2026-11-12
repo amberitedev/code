@@ -124,14 +124,16 @@ pub async fn get_importable_instances(
     Ok(instances)
 }
 
-pub(crate) fn import_instance_with_reporter(
-    instance_id: &str,
+pub(crate) fn import_instance_with_reporter<'a>(
+    state: &'a crate::State,
+    instance_id: &'a str,
     launcher_type: ImportLauncherType,
     base_path: PathBuf,
     instance_folder: String,
     reporter: InstallProgressReporter,
-) -> impl Future<Output = crate::Result<()>> + Send + '_ {
+) -> impl Future<Output = crate::Result<()>> + Send + 'a {
     Box::pin(import_instance_inner(
+        state,
         instance_id,
         launcher_type,
         base_path,
@@ -141,6 +143,7 @@ pub(crate) fn import_instance_with_reporter(
 }
 
 async fn import_instance_inner(
+    state: &crate::State,
     instance_id: &str,
     launcher_type: ImportLauncherType,
     base_path: PathBuf,
@@ -155,6 +158,7 @@ async fn import_instance_inner(
     let res = match launcher_type {
         ImportLauncherType::MultiMC | ImportLauncherType::PrismLauncher => {
             mmc::import_mmc(
+                state,
                 base_path,       // path to base mmc folder
                 instance_folder, // instance folder in mmc_base_path
                 instance_id,
@@ -165,6 +169,7 @@ async fn import_instance_inner(
         }
         ImportLauncherType::ATLauncher => {
             atlauncher::import_atlauncher(
+                state,
                 base_path,       // path to atlauncher folder
                 instance_folder, // instance folder in atlauncher
                 instance_id,
@@ -175,6 +180,7 @@ async fn import_instance_inner(
         }
         ImportLauncherType::GDLauncher => {
             gdlauncher::import_gdlauncher(
+                state,
                 base_path.join("instances").join(instance_folder), // path to gdlauncher folder
                 instance_id,
                 reporter.clone(),
@@ -184,6 +190,7 @@ async fn import_instance_inner(
         }
         ImportLauncherType::Curseforge => {
             curseforge::import_curseforge(
+                state,
                 base_path.join("Instances").join(instance_folder), // path to curseforge folder
                 instance_id,
                 reporter.clone(),
@@ -208,6 +215,7 @@ async fn import_instance_inner(
                 {
                     matched = true;
                     Box::pin(import_instance_inner(
+                        state,
                         instance_id,
                         lt,
                         base_path,
@@ -233,7 +241,7 @@ async fn import_instance_inner(
         Ok(_) => {}
         Err(e) => {
             tracing::warn!("Import failed: {:?}", e);
-            let _ = crate::api::instance::remove(instance_id).await;
+            let _ = crate::api::instance::remove(state, instance_id).await;
             return Err(e);
         }
     }
@@ -348,15 +356,14 @@ pub async fn is_valid_importable_instance(
 
 /// Caches an image file in the filesystem into the cache directory, and returns the path to the cached file.
 
-#[tracing::instrument]
+#[tracing::instrument(skip(state))]
 pub async fn recache_icon(
+    state: &crate::State,
     icon_path: PathBuf,
 ) -> crate::Result<Option<PathBuf>> {
-    let state = crate::State::get().await?;
-
     if tokio::fs::try_exists(&icon_path).await.unwrap_or(false) {
         Ok(Some(
-            crate::api::instance::cache_icon_from_path(&icon_path, &state)
+            crate::api::instance::cache_icon_from_path(&icon_path, state)
                 .await?,
         ))
     } else {
@@ -366,6 +373,7 @@ pub async fn recache_icon(
 }
 
 pub(crate) fn copy_dotminecraft_with_reporter<'a>(
+    state: &'a crate::State,
     instance_id: &'a str,
     dotminecraft: PathBuf,
     io_semaphore: &'a IoSemaphore,
@@ -373,6 +381,7 @@ pub(crate) fn copy_dotminecraft_with_reporter<'a>(
     details: InstallPhaseDetails,
 ) -> impl Future<Output = crate::Result<()>> + Send + 'a {
     Box::pin(copy_dotminecraft_with_reporter_inner(
+        state,
         instance_id,
         dotminecraft,
         io_semaphore,
@@ -382,13 +391,13 @@ pub(crate) fn copy_dotminecraft_with_reporter<'a>(
 }
 
 async fn copy_dotminecraft_with_reporter_inner(
+    state: &crate::State,
     instance_id: &str,
     dotminecraft: PathBuf,
     io_semaphore: &IoSemaphore,
     reporter: InstallProgressReporter,
     details: InstallPhaseDetails,
 ) -> crate::Result<()> {
-    let state = crate::State::get().await?;
     let _lease = state.content_store.lease().await;
     let dotminecraft = tokio::fs::canonicalize(&dotminecraft).await?;
     let subfiles = get_all_subfiles(&dotminecraft, false).await?;
@@ -418,15 +427,14 @@ async fn copy_dotminecraft_with_reporter_inner(
     };
     let mut managed_paths = std::collections::HashSet::new();
     if let Some(source) = &source_instance {
-        if crate::state::instance_has_running_process(&source.id, &state)
-            .await?
+        if crate::state::instance_has_running_process(&source.id, state).await?
         {
             bail!(ErrorKind::InputError(
                 "stop the source instance before duplicating it".to_string(),
             ));
         }
         let files = crate::state::instances::commands::sync_content_files(
-            &source.id, &state,
+            &source.id, state,
         )
         .await?;
         let entries = if let Some(content_set) = &source.applied_content_set_id
@@ -485,13 +493,13 @@ async fn copy_dotminecraft_with_reporter_inner(
                     enabled_override: Some(file.enabled),
                     previous_path: None,
                 },
-                &state,
+                state,
             )
             .await?;
             if crate::state::instances::commands::is_project_locked(
                 &source.id,
                 &file.relative_path,
-                &state,
+                state,
             )
             .await?
             {
@@ -499,7 +507,7 @@ async fn copy_dotminecraft_with_reporter_inner(
                     instance_id,
                     &file.relative_path,
                     true,
-                    &state,
+                    state,
                 )
                 .await?;
             }
@@ -545,7 +553,7 @@ async fn copy_dotminecraft_with_reporter_inner(
                     enabled_override: Some(!relative.ends_with(".disabled")),
                     previous_path: None,
                 },
-                &state,
+                state,
             )
             .await?;
         } else {
@@ -603,6 +611,7 @@ pub(crate) async fn finish_import(
     details: InstallPhaseDetails,
 ) -> crate::Result<()> {
     copy_dotminecraft_with_reporter(
+        state,
         instance_id,
         dotminecraft,
         &state.io_semaphore,

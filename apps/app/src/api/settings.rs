@@ -1,4 +1,5 @@
 use crate::api::Result;
+use crate::engine_handle::EngineHandle;
 use engine::prelude::*;
 use tauri::Runtime;
 
@@ -16,33 +17,50 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
 }
 
 #[tauri::command]
-pub async fn store_usage() -> Result<settings::StoreUsage> {
-    Ok(settings::store_usage().await?)
+pub async fn store_usage(
+    handle: tauri::State<'_, EngineHandle>,
+) -> Result<settings::StoreUsage> {
+    let state = handle.get().await;
+    Ok(settings::store_usage(&state).await?)
 }
 
 #[tauri::command]
-pub async fn store_cleanup() -> Result<u64> {
-    Ok(settings::store_cleanup().await?)
+pub async fn store_cleanup(
+    handle: tauri::State<'_, EngineHandle>,
+) -> Result<u64> {
+    let state = handle.get().await;
+    Ok(settings::store_cleanup(&state).await?)
 }
 
 #[tauri::command]
-pub async fn store_set_cache_limit(bytes: u64) -> Result<()> {
-    Ok(settings::store_set_cache_limit(bytes).await?)
+pub async fn store_set_cache_limit(
+    handle: tauri::State<'_, EngineHandle>,
+    bytes: u64,
+) -> Result<()> {
+    let state = handle.get().await;
+    Ok(settings::store_set_cache_limit(&state, bytes).await?)
 }
 
 // Get full settings
 // invoke('plugin:settings|settings_get')
 #[tauri::command]
-pub async fn settings_get() -> Result<Settings> {
-    let res = settings::get().await?;
+pub async fn settings_get(
+    handle: tauri::State<'_, EngineHandle>,
+) -> Result<Settings> {
+    let state = handle.get().await;
+    let res = settings::get(&state).await?;
     Ok(res)
 }
 
 // Set full settings
 // invoke('plugin:settings|settings_set', settings)
 #[tauri::command]
-pub async fn settings_set(settings: Settings) -> Result<()> {
-    settings::set(settings).await?;
+pub async fn settings_set(
+    handle: tauri::State<'_, EngineHandle>,
+    settings: Settings,
+) -> Result<()> {
+    let state = handle.get().await;
+    settings::set(&state, settings).await?;
     Ok(())
 }
 

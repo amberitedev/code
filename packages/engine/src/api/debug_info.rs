@@ -35,6 +35,7 @@ struct ExportFile {
 }
 
 pub async fn export_debug_info(
+    state: &State,
     export_path: PathBuf,
     cancel: CancellationToken,
     on_progress: impl Fn(DebugInfoExportProgress) + Send + Sync + 'static,
@@ -44,10 +45,6 @@ pub async fn export_debug_info(
         processed_bytes: 0,
         total_bytes: None,
     });
-    let state = tokio::select! {
-        _ = cancel.cancelled() => return Ok(false),
-        state = State::get() => state?,
-    };
     let directories = state.directories.clone();
     let database_files = tempfile::tempdir()?;
     let database_snapshot = database_files.path().join("app.db");

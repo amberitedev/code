@@ -170,6 +170,7 @@ impl<'a> InstanceContent<'a> {
                 ProjectType::ResourcePack | ProjectType::DataPack
             ) {
                 crate::api::instance::queue_synced_pack_reconciliation(
+                    self.state,
                     &self.instance.id,
                 );
             }

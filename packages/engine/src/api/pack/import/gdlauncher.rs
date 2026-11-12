@@ -41,6 +41,7 @@ pub async fn is_valid_gdlauncher(instance_folder: PathBuf) -> bool {
 }
 
 pub async fn import_gdlauncher(
+    state: &State,
     gdlauncher_instance_folder: PathBuf, // instance's folder
     instance_id: &str,
     reporter: InstallProgressReporter,
@@ -69,7 +70,7 @@ pub async fn import_gdlauncher(
         .clone()
         .map(|b| gdlauncher_instance_folder.join(b));
     let icon = if let Some(icon) = icon {
-        recache_icon(icon).await?
+        recache_icon(state, icon).await?
     } else {
         None
     };
@@ -77,10 +78,10 @@ pub async fn import_gdlauncher(
     let game_version = config.loader.mc_version;
     let mod_loader = config.loader.loader_type;
     let loader_version = config.loader.loader_version;
-    let state = State::get().await?;
 
     let loader_version = if mod_loader != ModLoader::Vanilla {
         crate::launcher::get_loader_version_from_profile(
+            state,
             &game_version,
             mod_loader,
             loader_version.as_deref(),
@@ -92,6 +93,7 @@ pub async fn import_gdlauncher(
     };
 
     crate::api::instance::edit(
+        state,
         instance_id,
         EditInstance {
             install_stage: Some(InstanceInstallStage::PackInstalling),
@@ -119,7 +121,7 @@ pub async fn import_gdlauncher(
     finish_import(
         instance_id,
         gdlauncher_instance_folder,
-        &state,
+        state,
         reporter,
         details,
     )

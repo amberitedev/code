@@ -14,6 +14,7 @@ use tauri_plugin_fs::FsExt;
 mod api;
 mod cores;
 mod dev;
+mod engine_handle;
 mod server;
 
 #[cfg(target_os = "macos")]
@@ -30,6 +31,7 @@ mod updater_impl_noop;
 async fn initialize_state(
     app: tauri::AppHandle,
     sink: tauri::State<'_, engine::EventSink>,
+    handle: tauri::State<'_, engine_handle::EngineHandle>,
 ) -> api::Result<()> {
     tracing::info!("Initializing app state...");
     State::init(
@@ -38,10 +40,11 @@ async fn initialize_state(
         dev::accounts()?,
     )
     .await?;
-    #[cfg(debug_assertions)]
-    dev::sign_in().await;
-
     let state = State::get().await?;
+    handle.set(std::sync::Arc::clone(&state));
+    #[cfg(debug_assertions)]
+    dev::sign_in(&state).await;
+
     app.asset_protocol_scope()
         .allow_directory(state.directories.caches_dir(), true)?;
     app.asset_protocol_scope()
@@ -375,6 +378,7 @@ fn main() {
         .plugin(api::worlds::init())
         .manage(PendingUpdateData::default())
         .manage(RestartAfterPendingUpdate::default())
+        .manage(engine_handle::EngineHandle::default())
         .invoke_handler(tauri::generate_handler![
             initialize_state,
             get_update_size,
@@ -396,8 +400,12 @@ fn main() {
                 let _ = app;
 
                 if matches!(&event, tauri::RunEvent::ExitRequested { .. })
+                    && let Some(state) =
+                        app.state::<engine_handle::EngineHandle>().try_get()
                     && let Err(error) = tauri::async_runtime::block_on(
-                        engine::minecraft_skins::flush_pending_skin_change(),
+                        engine::minecraft_skins::flush_pending_skin_change(
+                            &state,
+                        ),
                     )
                 {
                     tracing::warn!(
@@ -414,11 +422,15 @@ fn main() {
                         .load(Ordering::Relaxed);
                     if let Some((update, data)) = &*update_data.0.lock().unwrap()
                     {
-                        fn set_changelog_toast(version: Option<String>) {
+                        let state = app.state::<engine_handle::EngineHandle>().try_get();
+                        fn set_changelog_toast(state: Option<&State>, version: Option<String>) {
+                            let Some(state) = state else {
+                                return;
+                            };
                             let toast_result: engine::Result<()> = tauri::async_runtime::block_on(async move {
-                                let mut settings = settings::get().await?;
+                                let mut settings = settings::get(state).await?;
                                 settings.pending_update_toast_for_version = version;
-                                settings::set(settings).await?;
+                                settings::set(state, settings).await?;
                                 Ok(())
                             });
                             if let Err(e) = toast_result {
@@ -435,7 +447,7 @@ fn main() {
 						let is_major_update = major.zip(minor).is_some_and(|version| {
 							version > (current_version.major, current_version.minor)
 						});
-						set_changelog_toast(is_major_update.then(|| update.version.clone()));
+						set_changelog_toast(state.as_deref(), is_major_update.then(|| update.version.clone()));
                         let update = if should_restart {
                             (**update).clone()
                         } else {
@@ -461,7 +473,7 @@ fn main() {
                                     "Pending update install failed (version {}): {e}",
                                     update.version
                                 );
-                                set_changelog_toast(None);
+                                set_changelog_toast(state.as_deref(), None);
 
                                 DialogBuilder::message()
                                     .set_level(MessageLevel::Error)

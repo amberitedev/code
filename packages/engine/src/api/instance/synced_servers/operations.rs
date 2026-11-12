@@ -778,22 +778,22 @@ pub(crate) async fn remove_server_by_index(
 }
 
 pub async fn desync_server(
+    state: &State,
     instance_id: &str,
     server_id: &str,
     mode: DesyncServerMode,
 ) -> crate::Result<()> {
-    let state = State::get().await?;
     let _guard = state.synced_options.lock().await;
     let metadata = crate::state::get_instance(instance_id, &state.pool)
         .await?
         .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
-    if !participating(&metadata, &state).await? {
+    if !participating(&metadata, state).await? {
         bail!(ErrorKind::InputError(
             "this instance is not participating in multiplayer server syncing"
                 .to_string(),
         ));
     }
-    let mut canonical = read_canonical(&state).await?;
+    let mut canonical = read_canonical(state).await?;
     let server = canonical
         .iter()
         .find(|server| server.id == server_id)
@@ -801,12 +801,12 @@ pub async fn desync_server(
         .ok_or(ErrorKind::InputError(
             "only a synced user server can be desynced".to_string(),
         ))?;
-    let local_position = compose_records(&metadata, &state)
+    let local_position = compose_records(&metadata, state)
         .await?
         .iter()
         .position(|record| record.id == server_id)
         .unwrap_or_default() as i64;
-    let mut locals = load_local(instance_id, &state).await?;
+    let mut locals = load_local(instance_id, state).await?;
     locals.push(LocalServer {
         id: Uuid::new_v4().to_string(),
         source: ServerSource::LocalDesynced,
@@ -822,21 +822,22 @@ pub async fn desync_server(
     let canonical_changed = commit_server_state(
         Some(&canonical),
         Some((instance_id, &locals)),
-        &state,
+        state,
     )
     .await?;
     if canonical_changed {
-        regenerate_servers(&state).await?;
+        regenerate_servers(state).await?;
     } else {
-        compose_instance(&metadata, &state).await?;
+        compose_instance(&metadata, state).await?;
     }
     Ok(())
 }
 
-pub async fn list_synced_servers() -> crate::Result<Vec<SyncedServer>> {
-    let state = State::get().await?;
+pub async fn list_synced_servers(
+    state: &State,
+) -> crate::Result<Vec<SyncedServer>> {
     let _guard = state.synced_options.lock().await;
-    Ok(read_canonical(&state)
+    Ok(read_canonical(state)
         .await?
         .into_iter()
         .map(|server| {
@@ -857,10 +858,12 @@ pub async fn list_synced_servers() -> crate::Result<Vec<SyncedServer>> {
         .collect())
 }
 
-pub async fn update_synced_server(server: SyncedServer) -> crate::Result<()> {
-    let state = State::get().await?;
+pub async fn update_synced_server(
+    state: &State,
+    server: SyncedServer,
+) -> crate::Result<()> {
     let _guard = state.synced_options.lock().await;
-    let mut canonical = read_canonical(&state).await?;
+    let mut canonical = read_canonical(state).await?;
     let target = canonical
         .iter_mut()
         .find(|candidate| candidate.id == server.id)
@@ -871,21 +874,23 @@ pub async fn update_synced_server(server: SyncedServer) -> crate::Result<()> {
         server.address,
         server.accept_textures,
     );
-    commit_server_state(Some(&canonical), None, &state).await?;
-    regenerate_servers(&state).await
+    commit_server_state(Some(&canonical), None, state).await?;
+    regenerate_servers(state).await
 }
 
-pub async fn remove_synced_server(server_id: &str) -> crate::Result<()> {
-    let state = State::get().await?;
+pub async fn remove_synced_server(
+    state: &State,
+    server_id: &str,
+) -> crate::Result<()> {
     let _guard = state.synced_options.lock().await;
-    let mut canonical = read_canonical(&state).await?;
+    let mut canonical = read_canonical(state).await?;
     let previous_len = canonical.len();
     canonical.retain(|server| server.id != server_id);
     if canonical.len() == previous_len {
         bail!(ErrorKind::InputError("unknown synced server".to_string()));
     }
-    commit_server_state(Some(&canonical), None, &state).await?;
-    regenerate_servers(&state).await
+    commit_server_state(Some(&canonical), None, state).await?;
+    regenerate_servers(state).await
 }
 
 pub(super) async fn compose_instance(

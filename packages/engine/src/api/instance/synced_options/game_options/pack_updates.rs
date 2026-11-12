@@ -293,15 +293,15 @@ pub(in crate::api::instance) async fn prepare_instance_update_with_state(
 /// Keeps the new modpack's `options.txt` as its default, then reapplies the user's
 /// shared settings.
 pub async fn capture_pack_base(
+    state: &State,
     instance_id: &str,
     source: Option<GameOptionsPackSource>,
 ) -> crate::Result<()> {
-    let state = State::get().await?;
     let _guard = state.synced_options.lock().await;
     let metadata = crate::state::get_instance(instance_id, &state.pool)
         .await?
         .ok_or(crate::ErrorKind::InputError("unknown instance".to_string()))?;
-    let path = options_path(&metadata, &state);
+    let path = options_path(&metadata, state);
     let feature = SyncedOption::GameOptions.as_str();
     sqlx::query!(
         "
@@ -340,7 +340,7 @@ pub async fn capture_pack_base(
     let captured = if let Some(template_path) = template_path {
         let template = read_pack_options_template(
             &metadata,
-            &state,
+            state,
             template_path,
         )
         .await?
@@ -352,10 +352,10 @@ pub async fn capture_pack_base(
         }
         Some(template)
     } else {
-        read_pack_options_template(&metadata, &state, "options.txt").await?
+        read_pack_options_template(&metadata, state, "options.txt").await?
     };
     if let Some((bytes, _, _)) =
-        read_pack_options_template(&metadata, &state, "options.txt").await?
+        read_pack_options_template(&metadata, state, "options.txt").await?
         && io::read(&path).await? != bytes
     {
         io::write(&path, bytes).await?;
@@ -394,9 +394,9 @@ pub async fn capture_pack_base(
     .execute(&state.pool)
     .await?;
 
-    if sync_is_active_for_instance(&metadata, &state).await?
+    if sync_is_active_for_instance(&metadata, state).await?
         && let Err(error) =
-            apply_shared_settings_to_instance(&metadata, &state, true).await
+            apply_shared_settings_to_instance(&metadata, state, true).await
     {
         tracing::warn!(
             "Captured the modpack options.txt for {}, but shared settings could not be overlaid yet: {error}",

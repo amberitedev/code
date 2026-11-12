@@ -282,6 +282,7 @@ fn hash_zip_entry(
 }
 
 pub(crate) async fn get_external_files_from_mrpack(
+    state: &State,
     file: &CreatePackFile,
     mut progress: impl FnMut(u64, u64) -> crate::Result<()> + Send,
 ) -> crate::Result<Vec<String>> {
@@ -396,7 +397,6 @@ pub(crate) async fn get_external_files_from_mrpack(
         return Ok(Vec::new());
     }
 
-    let state = State::get().await?;
     let hashes = candidates
         .iter()
         .map(|(_, hash)| hash.as_str())
@@ -497,14 +497,16 @@ fn extract_zip_entry(
 }
 
 pub(crate) fn install_zipped_mrpack_files_with_reporter(
+    state: &State,
     create_pack: CreatePack,
     ignore_lock: bool,
     reason: DownloadReason,
     reporter: InstallProgressReporter,
     ignore_modpack_servers: bool,
     preserve_icon: bool,
-) -> impl Future<Output = crate::Result<String>> + Send + 'static {
+) -> impl Future<Output = crate::Result<String>> + Send + '_ {
     Box::pin(install_zipped_mrpack_files_with_reporter_inner(
+        state,
         create_pack,
         ignore_lock,
         reason,
@@ -515,6 +517,7 @@ pub(crate) fn install_zipped_mrpack_files_with_reporter(
 }
 
 async fn install_zipped_mrpack_files_with_reporter_inner(
+    state: &State,
     create_pack: CreatePack,
     ignore_lock: bool,
     reason: DownloadReason,
@@ -522,8 +525,6 @@ async fn install_zipped_mrpack_files_with_reporter_inner(
     ignore_modpack_servers: bool,
     preserve_icon: bool,
 ) -> crate::Result<String> {
-    let state = &State::get().await?;
-
     let file = create_pack.file;
     let description = create_pack.description.clone();
     let icon = create_pack.description.icon;
@@ -544,7 +545,7 @@ async fn install_zipped_mrpack_files_with_reporter_inner(
         .await?;
     let mut zip_reader = MrpackZipReader::new(&file).await?;
     let instance_full_path =
-        crate::api::instance::get_full_path(&instance_id).await?;
+        crate::api::instance::get_full_path(state, &instance_id).await?;
     let modpack_details = InstallPhaseDetails::Modpack {
         project_id: project_id.clone(),
         version_id: version_id.clone(),
@@ -616,8 +617,12 @@ async fn install_zipped_mrpack_files_with_reporter_inner(
                     None,
                 )
                 .await?;
-            crate::api::instance::edit_icon(&instance_id, Some(&icon_path))
-                .await?;
+            crate::api::instance::edit_icon(
+                state,
+                &instance_id,
+                Some(&icon_path),
+            )
+            .await?;
             icon_exists = true;
         }
     }
@@ -685,6 +690,7 @@ async fn install_zipped_mrpack_files_with_reporter_inner(
     }
 
     set_instance_information(
+        state,
         instance_id.clone(),
         &description,
         &pack.name,
@@ -695,9 +701,11 @@ async fn install_zipped_mrpack_files_with_reporter_inner(
     )
     .await?;
 
-    let metadata = crate::api::instance::get(&instance_id).await?.ok_or(
-        crate::ErrorKind::InputError(format!("unknown instance {instance_id}")),
-    )?;
+    let metadata = crate::api::instance::get(state, &instance_id)
+        .await?
+        .ok_or(crate::ErrorKind::InputError(format!(
+            "unknown instance {instance_id}"
+        )))?;
     let instance_path = metadata.instance.path.clone();
     let download_meta = DownloadMeta {
         reason,
@@ -1250,12 +1258,14 @@ async fn install_zipped_mrpack_files_with_reporter_inner(
         .await?;
     } else {
         crate::api::instance::synced_servers::capture_modpack_server_override(
+            state,
             &instance_id,
             servers_override_path,
         )
         .await?;
     }
     if let Err(error) = crate::api::instance::capture_game_options_pack_base(
+        state,
         &instance_id,
         game_options_override_source,
     )
@@ -1265,15 +1275,22 @@ async fn install_zipped_mrpack_files_with_reporter_inner(
             "The modpack was installed, but its options.txt could not be captured for game-settings sync: {error}"
         );
     }
-    crate::api::instance::reconcile_instance_after_pack_update(&instance_id)
-        .await?;
+    crate::api::instance::reconcile_instance_after_pack_update(
+        state,
+        &instance_id,
+    )
+    .await?;
 
     // If the icon doesn't exist, we expect icon.png to be a potential icon.
     // If it doesn't exist, and an override to icon.png exists, cache and use that
     let potential_icon = instance_full_path.join("icon.png");
     if !icon_exists && potential_icon.exists() {
-        crate::api::instance::edit_icon(&instance_id, Some(&potential_icon))
-            .await?;
+        crate::api::instance::edit_icon(
+            state,
+            &instance_id,
+            Some(&potential_icon),
+        )
+        .await?;
     }
 
     crate::launcher::install_minecraft_for_instance_id_with_reporter(
@@ -1345,9 +1362,10 @@ pub(crate) async fn mrpack_instance_paths(
     Ok(paths)
 }
 
-#[tracing::instrument(skip(mrpack_file))]
+#[tracing::instrument(skip(state, mrpack_file))]
 
 pub async fn remove_all_related_files(
+    state: &State,
     instance_id: String,
     mrpack_file: CreatePackFile,
 ) -> crate::Result<()> {
@@ -1376,6 +1394,7 @@ pub async fn remove_all_related_files(
     }
 
     crate::api::instance::edit(
+        state,
         &instance_id,
         EditInstance {
             install_stage: Some(InstanceInstallStage::PackInstalling),
@@ -1387,12 +1406,13 @@ pub async fn remove_all_related_files(
     // First, remove all modrinth projects by their version hashes
     // Remove all modrinth projects by their version hashes
     // We need to do a fetch to get the project ids from Modrinth
-    let state = State::get().await?;
-    let metadata = crate::api::instance::get(&instance_id).await?.ok_or(
-        crate::ErrorKind::InputError(format!("unknown instance {instance_id}")),
-    )?;
+    let metadata = crate::api::instance::get(state, &instance_id)
+        .await?
+        .ok_or(crate::ErrorKind::InputError(format!(
+            "unknown instance {instance_id}"
+        )))?;
     let instance_full_path =
-        crate::api::instance::get_full_path(&instance_id).await?;
+        crate::api::instance::get_full_path(state, &instance_id).await?;
     let all_hashes = pack
         .files
         .iter()
@@ -1416,7 +1436,7 @@ pub async fn remove_all_related_files(
 
     for file in crate::state::instances::commands::list_project_files(
         &metadata.instance.id,
-        &state,
+        state,
     )
     .await?
     {
@@ -1426,7 +1446,7 @@ pub async fn remove_all_related_files(
             crate::state::instances::commands::remove_project(
                 &metadata.instance.id,
                 &file.relative_path,
-                &state,
+                state,
             )
             .await?;
         }
@@ -1441,7 +1461,7 @@ pub async fn remove_all_related_files(
             crate::state::instances::commands::remove_project(
                 &instance_id,
                 file.path.as_str(),
-                &state,
+                state,
             )
             .await?;
             continue;
@@ -1478,7 +1498,7 @@ pub async fn remove_all_related_files(
             crate::state::instances::commands::remove_project(
                 &instance_id,
                 relative_override_file_path.as_str(),
-                &state,
+                state,
             )
             .await?;
             continue;

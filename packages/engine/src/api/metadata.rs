@@ -7,9 +7,10 @@ use crate::{ErrorKind, State};
 pub use minecraft_meta_manifest::fabriclike::Manifest;
 pub use minecraft_meta_manifest::minecraft::Catalog as VersionManifest;
 
-#[tracing::instrument]
-pub async fn get_minecraft_versions() -> crate::Result<VersionManifest> {
-    let state = State::get().await?;
+#[tracing::instrument(skip(state))]
+pub async fn get_minecraft_versions(
+    state: &State,
+) -> crate::Result<VersionManifest> {
     let minecraft_versions = CachedEntry::get_minecraft_manifest(
         None,
         &state.pool,
@@ -23,8 +24,10 @@ pub async fn get_minecraft_versions() -> crate::Result<VersionManifest> {
 }
 
 // #[tracing::instrument]
-pub async fn get_loader_versions(loader: &str) -> crate::Result<Manifest> {
-    let state = State::get().await?;
+pub async fn get_loader_versions(
+    state: &State,
+    loader: &str,
+) -> crate::Result<Manifest> {
     let cache_key = loader_manifest_metadata(loader).cache_key;
     let loaders = CachedEntry::get_loader_manifest(
         &cache_key,

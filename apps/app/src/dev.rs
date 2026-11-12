@@ -55,7 +55,7 @@ pub fn config() -> Option<&'static DevAppConfig> {
 /// without going through the website. Does nothing when an account is already active. The backend
 /// opens the session only for the runner's secret, which arrives in the environment.
 #[cfg(debug_assertions)]
-pub async fn sign_in() {
+pub async fn sign_in(state: &engine::State) {
     let Some(config) = config().filter(|config| config.auth_mode == "dev")
     else {
         return;
@@ -67,18 +67,21 @@ pub async fn sign_in() {
     ) else {
         return;
     };
-    if let Err(error) = open_session(username, backend_url, &secret).await {
+    if let Err(error) =
+        open_session(state, username, backend_url, &secret).await
+    {
         tracing::warn!("Could not sign in as {username}: {error}");
     }
 }
 
 #[cfg(debug_assertions)]
 async fn open_session(
+    state: &engine::State,
     username: &str,
     backend_url: &str,
     secret: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    if engine::mr_auth::get_credentials().await?.is_some() {
+    if engine::mr_auth::get_credentials(state).await?.is_some() {
         return Ok(());
     }
     #[derive(Deserialize)]
@@ -102,7 +105,7 @@ async fn open_session(
         .text()
         .await?;
     let session: Session = serde_json::from_str(&response)?;
-    engine::mr_auth::authenticate_finish_flow(&session.session).await?;
+    engine::mr_auth::authenticate_finish_flow(state, &session.session).await?;
     Ok(())
 }
 

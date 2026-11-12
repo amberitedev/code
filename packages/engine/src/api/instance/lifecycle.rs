@@ -11,6 +11,7 @@ use std::future::Future;
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn create(
+    state: &State,
     name: String,
     game_version: String,
     modloader: ModLoader,
@@ -18,8 +19,9 @@ pub(crate) fn create(
     icon_path: Option<String>,
     icon_config: Option<IconConfig>,
     link: InstanceLink,
-) -> impl Future<Output = crate::Result<InstanceMetadata>> + Send + 'static {
+) -> impl Future<Output = crate::Result<InstanceMetadata>> + Send + '_ {
     Box::pin(create_inner(
+        state,
         name,
         game_version,
         modloader,
@@ -30,9 +32,10 @@ pub(crate) fn create(
     ))
 }
 
-#[tracing::instrument]
+#[tracing::instrument(skip(state))]
 #[allow(clippy::too_many_arguments)]
 async fn create_inner(
+    state: &State,
     name: String,
     game_version: String,
     modloader: ModLoader,
@@ -41,7 +44,6 @@ async fn create_inner(
     icon_config: Option<IconConfig>,
     link: InstanceLink,
 ) -> crate::Result<InstanceMetadata> {
-    let state = State::get().await?;
     if let Some(icon_config) = &icon_config {
         super::icon::validate_generated_icon_config(icon_config)?;
     }
@@ -56,7 +58,7 @@ async fn create_inner(
             icon_config,
             link,
         },
-        &state,
+        state,
     )
     .await?;
 
@@ -80,9 +82,9 @@ async fn create_inner(
     .await;
 
     if result.is_err() {
-        let _ = crate::state::remove_instance(&instance.id, &state).await;
+        let _ = crate::state::remove_instance(&instance.id, state).await;
     } else if let Err(error) =
-        crate::onboarding_checklist::mark_created_instance().await
+        crate::onboarding_checklist::mark_created_instance(state).await
     {
         tracing::warn!(
             "Failed to mark instance creation in onboarding checklist: {error}"
@@ -93,10 +95,10 @@ async fn create_inner(
 }
 
 pub async fn edit(
+    state: &State,
     instance_id: &str,
     patch: EditInstance,
 ) -> crate::Result<InstanceMetadata> {
-    let state = State::get().await?;
     if patch.content_set_patch.is_some()
         || patch.link.is_some()
         || patch.update_channel.is_some()
@@ -110,13 +112,13 @@ pub async fn edit(
             instance.install_stage,
         )?;
     }
-    crate::state::edit_instance(instance_id, patch, &state).await?;
+    crate::state::edit_instance(instance_id, patch, state).await?;
 
     let instance = crate::state::get_instance(instance_id, &state.pool)
         .await?
         .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
 
-    super::reconcile_instance_synced_options(instance_id).await?;
+    super::reconcile_instance_synced_options(state, instance_id).await?;
 
     emit_instance(
         &state.events,
@@ -129,12 +131,14 @@ pub async fn edit(
 }
 
 pub async fn set_synced_option(
+    state: &State,
     instance_id: &str,
     option: InstanceSyncedOption,
     enabled: bool,
     resolution: Option<super::SyncedOptionJoinResolution>,
 ) -> crate::Result<InstanceMetadata> {
     let instance = super::synced_options::set_instance_option(
+        state,
         instance_id,
         option,
         enabled,
@@ -143,7 +147,7 @@ pub async fn set_synced_option(
     .await?;
 
     emit_instance(
-        &State::get().await?.events,
+        &state.events,
         &instance.instance.id,
         InstancePayloadType::Edited,
     )
@@ -152,23 +156,22 @@ pub async fn set_synced_option(
     Ok(instance)
 }
 
-#[tracing::instrument]
-pub async fn remove(instance_id: &str) -> crate::Result<()> {
-    let state = State::get().await?;
+#[tracing::instrument(skip(state))]
+pub async fn remove(state: &State, instance_id: &str) -> crate::Result<()> {
     let instance =
         instance_rows::get_instance_display_info(instance_id, &state.pool)
             .await?;
     let _install_guards =
         crate::install::runner::cancel_jobs_for_instance_deletion(
             instance_id,
-            &state,
+            state,
         )
         .await?;
     if instance_rows::get_instance_by_id(instance_id, &state.pool)
         .await?
         .is_some()
     {
-        crate::state::remove_instance(instance_id, &state).await?;
+        crate::state::remove_instance(instance_id, state).await?;
     }
     crate::state::hidden_instances::forget_instance(instance_id, &state.pool)
         .await?;

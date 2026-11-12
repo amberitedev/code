@@ -1,4 +1,5 @@
 use crate::api::Result;
+use crate::engine_handle::EngineHandle;
 use anyhow::{Context, anyhow};
 use engine::ErrorKind;
 use serde::{Deserialize, Serialize};
@@ -204,19 +205,26 @@ pub async fn file_cancel_local_upload<R: Runtime>(
 
 #[tauri::command]
 pub async fn file_extract_zip(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: &str,
     file_path: &str,
     override_conflicts: bool,
     dry_run: bool,
 ) -> Result<Option<ExtractDryRunResult>> {
-    engine::instance::validate_instance_file_write(instance_id, file_path)
-        .await?;
+    let state = handle.get().await;
+    engine::instance::validate_instance_file_write(
+        &state,
+        instance_id,
+        file_path,
+    )
+    .await?;
     let parent = file_path
         .trim_start_matches('/')
         .rsplit_once('/')
         .map_or("", |(parent, _)| parent);
     let file_bytes =
-        engine::instance::read_instance_file(instance_id, file_path).await?;
+        engine::instance::read_instance_file(&state, instance_id, file_path)
+            .await?;
     let (mut zip_reader, names) = tokio::task::spawn_blocking(move || {
         let mut archive = zip::ZipArchive::new(Cursor::new(file_bytes))
             .context("failed to read zip file")?;
@@ -254,6 +262,7 @@ pub async fn file_extract_zip(
             format!("{parent}/{name}")
         };
         let resolved = engine::instance::validate_instance_file_write(
+            &state,
             instance_id,
             &target,
         )
@@ -294,6 +303,7 @@ pub async fn file_extract_zip(
         .with_context(|| format!("failed to read archive entry {path}"))??;
         zip_reader = archive;
         engine::instance::write_instance_file(
+            &state,
             instance_id,
             &path,
             &bytes,
@@ -306,25 +316,38 @@ pub async fn file_extract_zip(
 
 #[tauri::command]
 pub async fn file_list(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: &str,
     path: &str,
 ) -> Result<Vec<engine::instance::InstanceFileItem>> {
-    Ok(engine::instance::list_instance_files(instance_id, path).await?)
+    let state = handle.get().await;
+    Ok(
+        engine::instance::list_instance_files(&state, instance_id, path)
+            .await?,
+    )
 }
 
 #[tauri::command]
-pub async fn file_read(instance_id: &str, path: &str) -> Result<Vec<u8>> {
-    Ok(engine::instance::read_instance_file(instance_id, path).await?)
+pub async fn file_read(
+    handle: tauri::State<'_, EngineHandle>,
+    instance_id: &str,
+    path: &str,
+) -> Result<Vec<u8>> {
+    let state = handle.get().await;
+    Ok(engine::instance::read_instance_file(&state, instance_id, path).await?)
 }
 
 #[tauri::command]
 pub async fn file_write(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: &str,
     path: &str,
     bytes: Vec<u8>,
     create_only: bool,
 ) -> Result<()> {
+    let state = handle.get().await;
     Ok(engine::instance::write_instance_file(
+        &state,
         instance_id,
         path,
         &bytes,
@@ -335,46 +358,59 @@ pub async fn file_write(
 
 #[tauri::command]
 pub async fn file_create_directory(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: &str,
     path: &str,
 ) -> Result<()> {
-    Ok(engine::instance::create_instance_directory(instance_id, path).await?)
-}
-
-#[tauri::command]
-pub async fn file_rename(
-    instance_id: &str,
-    source: &str,
-    destination: &str,
-) -> Result<()> {
+    let state = handle.get().await;
     Ok(
-        engine::instance::rename_instance_file(
-            instance_id,
-            source,
-            destination,
-        )
-        .await?,
-    )
-}
-
-#[tauri::command]
-pub async fn file_delete(
-    instance_id: &str,
-    path: &str,
-    recursive: bool,
-) -> Result<()> {
-    Ok(
-        engine::instance::delete_instance_file(instance_id, path, recursive)
+        engine::instance::create_instance_directory(&state, instance_id, path)
             .await?,
     )
 }
 
 #[tauri::command]
+pub async fn file_rename(
+    handle: tauri::State<'_, EngineHandle>,
+    instance_id: &str,
+    source: &str,
+    destination: &str,
+) -> Result<()> {
+    let state = handle.get().await;
+    Ok(engine::instance::rename_instance_file(
+        &state,
+        instance_id,
+        source,
+        destination,
+    )
+    .await?)
+}
+
+#[tauri::command]
+pub async fn file_delete(
+    handle: tauri::State<'_, EngineHandle>,
+    instance_id: &str,
+    path: &str,
+    recursive: bool,
+) -> Result<()> {
+    let state = handle.get().await;
+    Ok(engine::instance::delete_instance_file(
+        &state,
+        instance_id,
+        path,
+        recursive,
+    )
+    .await?)
+}
+
+#[tauri::command]
 pub async fn file_save_as<R: Runtime>(
+    handle: tauri::State<'_, EngineHandle>,
     app: tauri::AppHandle<R>,
     instance_id: &str,
     file_path: &str,
 ) -> Result<()> {
+    let state = handle.get().await;
     let source = std::path::Path::new(file_path);
     let file_name = source
         .file_name()
@@ -394,6 +430,7 @@ pub async fn file_save_as<R: Runtime>(
         let dest_path =
             std::path::PathBuf::try_from(dest).context("invalid save path")?;
         engine::instance::save_instance_file_as(
+            &state,
             instance_id,
             file_path,
             &dest_path,

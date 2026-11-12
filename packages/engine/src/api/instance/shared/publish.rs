@@ -8,9 +8,11 @@ use crate::self_hosted::pool;
 use futures::{StreamExt, TryStreamExt};
 use sharing_client::push;
 
-#[tracing::instrument]
-pub async fn unpublish_shared_instance(instance_id: &str) -> crate::Result<()> {
-    let state = State::get().await?;
+#[tracing::instrument(skip(state))]
+pub async fn unpublish_shared_instance(
+    state: &State,
+    instance_id: &str,
+) -> crate::Result<()> {
     let _shared_instance_lock =
         state.instance_locks.lock_shared(instance_id).await;
     let metadata = crate::state::get_instance(instance_id, &state.pool)
@@ -21,40 +23,42 @@ pub async fn unpublish_shared_instance(instance_id: &str) -> crate::Result<()> {
     };
     ensure_owner(&attachment)?;
 
-    delete_remote_instance(&attachment.id, &state).await?;
-    super::history::forget_share_history(&attachment.id, &state).await?;
-    detach_local_shared_instance(instance_id, metadata.link, &state).await?;
+    delete_remote_instance(&attachment.id, state).await?;
+    super::history::forget_share_history(&attachment.id, state).await?;
+    detach_local_shared_instance(instance_id, metadata.link, state).await?;
     emit_instance(&state.events, instance_id, InstancePayloadType::Edited)
         .await?;
 
     Ok(())
 }
 
-#[tracing::instrument]
+#[tracing::instrument(skip(state))]
 pub async fn unpublish_remote_shared_instance(
+    state: &State,
     shared_instance_id: &str,
 ) -> crate::Result<()> {
-    let state = State::get().await?;
-    delete_remote_instance(shared_instance_id, &state).await
+    delete_remote_instance(shared_instance_id, state).await
 }
 
-#[tracing::instrument]
+#[tracing::instrument(skip(state))]
 pub async fn leave_remote_shared_instance(
+    state: &State,
     shared_instance_id: &str,
 ) -> crate::Result<()> {
-    let state = State::get().await?;
-    let Some(user_id) = linked_amberite_user_id(&state).await? else {
+    let Some(user_id) = linked_amberite_user_id(state).await? else {
         bail!(crate::ErrorKind::InputError(
             "you must be signed in to leave a shared instance".to_string(),
         ));
     };
 
-    remove_remote_users(shared_instance_id, vec![user_id], &state).await
+    remove_remote_users(shared_instance_id, vec![user_id], state).await
 }
 
-#[tracing::instrument]
-pub async fn unlink_shared_instance(instance_id: &str) -> crate::Result<()> {
-    let state = State::get().await?;
+#[tracing::instrument(skip(state))]
+pub async fn unlink_shared_instance(
+    state: &State,
+    instance_id: &str,
+) -> crate::Result<()> {
     let _shared_instance_lock =
         state.instance_locks.lock_shared(instance_id).await;
     let metadata = crate::state::get_instance(instance_id, &state.pool)
@@ -65,7 +69,7 @@ pub async fn unlink_shared_instance(instance_id: &str) -> crate::Result<()> {
     };
     ensure_member(&attachment)?;
 
-    detach_local_shared_instance(instance_id, metadata.link, &state).await?;
+    detach_local_shared_instance(instance_id, metadata.link, state).await?;
     emit_instance(&state.events, instance_id, InstancePayloadType::Edited)
         .await?;
 
@@ -121,28 +125,28 @@ pub(super) async fn detach_local_shared_instance(
 /// shared instances service asks for. `server_core` is a Core the owner owns
 /// that runs a linked server of this instance; the backend keeps the share's
 /// home copy there.
-#[tracing::instrument(skip(on_progress))]
+#[tracing::instrument(skip(state, on_progress))]
 pub async fn publish_shared_instance(
+    state: &State,
     instance_id: &str,
     file_paths: Vec<String>,
     removed_paths: Vec<String>,
     server_core: Option<String>,
     on_progress: &(dyn Fn(u64, u64) + Send + Sync),
 ) -> crate::Result<SharedInstanceAttachment> {
-    let state = State::get().await?;
     publish_shared_instance_inner(
         instance_id,
         &file_paths,
         &removed_paths,
         server_core.as_deref(),
         on_progress,
-        &state,
+        state,
     )
     .await?;
     emit_instance(&state.events, instance_id, InstancePayloadType::Edited)
         .await?;
 
-    shared_attachment(instance_id, &state).await?.ok_or(
+    shared_attachment(instance_id, state).await?.ok_or(
         crate::ErrorKind::InputError(
             "shared instance attachment was not persisted".to_string(),
         )
@@ -150,11 +154,11 @@ pub async fn publish_shared_instance(
     )
 }
 
-#[tracing::instrument]
+#[tracing::instrument(skip(state))]
 pub async fn get_shared_instance_publish_preview(
+    state: &State,
     instance_id: &str,
 ) -> crate::Result<Option<SharedInstancePublishPreview>> {
-    let state = State::get().await?;
     let metadata = crate::state::get_instance(instance_id, &state.pool)
         .await?
         .ok_or(crate::ErrorKind::InputError("unknown instance".to_string()))?;
@@ -164,8 +168,8 @@ pub async fn get_shared_instance_publish_preview(
     ensure_owner(&attachment)?;
 
     let (version, snapshot) = tokio::try_join!(
-        get_latest_remote_version_optional_unavailable(&attachment.id, &state,),
-        collect_publish_snapshot(&metadata, &state),
+        get_latest_remote_version_optional_unavailable(&attachment.id, state,),
+        collect_publish_snapshot(&metadata, state),
     )?;
     let version = match version {
         SharedInstanceRemoteResponse::Available(version) => version,
@@ -174,16 +178,16 @@ pub async fn get_shared_instance_publish_preview(
                 instance_id,
                 &attachment,
                 reason,
-                &state,
+                state,
             )
             .await?;
             return Err(shared_instance_unavailable_error(reason));
         }
     };
-    ensure_owner_up_to_date(instance_id, &attachment, version.version, &state)
+    ensure_owner_up_to_date(instance_id, &attachment, version.version, state)
         .await?;
     let diffs =
-        shared_instance_publish_diffs(&metadata, &version, &snapshot, &state)
+        shared_instance_publish_diffs(&metadata, &version, &snapshot, state)
             .await?;
     let shared = version
         .configs()
@@ -198,7 +202,7 @@ pub async fn get_shared_instance_publish_preview(
         &attachment,
         version.version,
         !diffs.is_empty(),
-        &state,
+        state,
     )
     .await?;
     emit_instance(&state.events, instance_id, InstancePayloadType::Edited)

@@ -123,9 +123,10 @@ pub async fn is_valid_atlauncher(instance_folder: PathBuf) -> bool {
     }
 }
 
-#[tracing::instrument]
+#[tracing::instrument(skip(state))]
 
 pub async fn import_atlauncher(
+    state: &crate::State,
     atlauncher_base_path: PathBuf, // path to base atlauncher folder
     instance_folder: String,       // instance folder in atlauncher_base_path
     instance_id: &str,
@@ -160,8 +161,8 @@ pub async fn import_atlauncher(
         .join(safe_pack_name + ".png");
     let icon = match (icon_path_primary.exists(), icon_path_secondary.exists())
     {
-        (true, _) => import::recache_icon(icon_path_primary).await?,
-        (_, true) => import::recache_icon(icon_path_secondary).await?,
+        (true, _) => import::recache_icon(state, icon_path_primary).await?,
+        (_, true) => import::recache_icon(state, icon_path_secondary).await?,
         _ => None,
     };
 
@@ -179,6 +180,7 @@ pub async fn import_atlauncher(
     let minecraft_folder = atlauncher_instance_path;
 
     import_atlauncher_unmanaged(
+        state,
         instance_id,
         minecraft_folder,
         backup_name,
@@ -192,6 +194,7 @@ pub async fn import_atlauncher(
 }
 
 async fn import_atlauncher_unmanaged(
+    state: &State,
     instance_id: &str,
     minecraft_folder: PathBuf,
     backup_name: String,
@@ -210,10 +213,10 @@ async fn import_atlauncher_unmanaged(
         )))?;
 
     let game_version = atinstance.id;
-    let state = State::get().await?;
 
     let loader_version = if mod_loader != ModLoader::Vanilla {
         crate::launcher::get_loader_version_from_profile(
+            state,
             &game_version,
             mod_loader,
             Some(&atinstance.launcher.loader_version.version),
@@ -234,6 +237,7 @@ async fn import_atlauncher_unmanaged(
         _ => None,
     };
     crate::api::instance::edit(
+        state,
         instance_id,
         EditInstance {
             install_stage: Some(InstanceInstallStage::PackInstalling),
@@ -263,7 +267,7 @@ async fn import_atlauncher_unmanaged(
     .await?;
 
     // Moves .minecraft folder over (ie: overrides such as resourcepacks, mods, etc)
-    finish_import(instance_id, minecraft_folder, &state, reporter, details)
+    finish_import(instance_id, minecraft_folder, state, reporter, details)
         .await?;
     Ok(())
 }

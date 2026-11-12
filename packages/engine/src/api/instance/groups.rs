@@ -67,8 +67,7 @@ fn normalize_membership_updates(
     Ok(updates)
 }
 
-pub async fn list_groups() -> crate::Result<Vec<InstanceGroup>> {
-    let state = State::get().await?;
+pub async fn list_groups(state: &State) -> crate::Result<Vec<InstanceGroup>> {
     Ok(instance_rows::list_instance_groups(&state.pool)
         .await?
         .into_iter()
@@ -76,9 +75,11 @@ pub async fn list_groups() -> crate::Result<Vec<InstanceGroup>> {
         .collect())
 }
 
-pub async fn create_group(name: String) -> crate::Result<InstanceGroup> {
+pub async fn create_group(
+    state: &State,
+    name: String,
+) -> crate::Result<InstanceGroup> {
     let name = validate_group_name(&name)?;
-    let state = State::get().await?;
     let id = Uuid::new_v4().to_string();
     instance_rows::create_instance_group(&id, name, &state.pool).await?;
 
@@ -88,12 +89,15 @@ pub async fn create_group(name: String) -> crate::Result<InstanceGroup> {
     })
 }
 
-pub async fn set_group_order(group_ids: Vec<String>) -> crate::Result<()> {
-    let state = State::get().await?;
+pub async fn set_group_order(
+    state: &State,
+    group_ids: Vec<String>,
+) -> crate::Result<()> {
     instance_rows::set_instance_group_order(&group_ids, &state.pool).await
 }
 
 pub async fn set_group_memberships(
+    state: &State,
     updates: Vec<InstanceGroupMembershipUpdate>,
 ) -> crate::Result<()> {
     if updates.is_empty() {
@@ -102,7 +106,6 @@ pub async fn set_group_memberships(
 
     let updates = normalize_membership_updates(updates)?;
 
-    let state = State::get().await?;
     let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await?;
     let unique_group_ids = updates
         .iter()
@@ -157,6 +160,7 @@ pub async fn set_group_memberships(
 }
 
 pub async fn rename_group(
+    state: &State,
     id: String,
     new_name: String,
 ) -> crate::Result<InstanceGroup> {
@@ -167,7 +171,6 @@ pub async fn rename_group(
     }
 
     let new_name = validate_group_name(&new_name)?;
-    let state = State::get().await?;
     let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await?;
 
     let instance_ids = sqlx::query_scalar!(
@@ -209,14 +212,13 @@ pub async fn rename_group(
     })
 }
 
-pub async fn delete_group(id: String) -> crate::Result<()> {
+pub async fn delete_group(state: &State, id: String) -> crate::Result<()> {
     if id == FAVORITES_GROUP_ID {
         bail!(ErrorKind::InputError(
             "Favorites cannot be deleted".to_string(),
         ));
     }
 
-    let state = State::get().await?;
     let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await?;
     let instance_ids = sqlx::query_scalar!(
         "

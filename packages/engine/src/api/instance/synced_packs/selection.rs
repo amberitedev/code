@@ -190,7 +190,7 @@ pub(super) async fn capture(
     else {
         return Ok(None);
     };
-    let global = get_global_options().await?;
+    let global = get_global_options(state).await?;
     if !global.get(SyncedOption::ResourcePacks)
         || !metadata.synced_options.resource_packs
     {
@@ -358,7 +358,9 @@ pub(super) async fn apply_removal(
         || placement.suspended
         || placement.error.is_some()
         || !metadata.synced_options.resource_packs
-        || !get_global_options().await?.get(SyncedOption::ResourcePacks)
+        || !get_global_options(state)
+            .await?
+            .get(SyncedOption::ResourcePacks)
     {
         return Ok(true);
     }
@@ -402,7 +404,7 @@ pub(super) async fn apply(
     state: &State,
 ) -> crate::Result<bool> {
     let directory = instance_dir(metadata, state);
-    let global = get_global_options().await?;
+    let global = get_global_options(state).await?;
     if !global.get(SyncedOption::ResourcePacks)
         || !metadata.synced_options.resource_packs
     {

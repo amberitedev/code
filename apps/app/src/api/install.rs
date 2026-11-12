@@ -1,5 +1,6 @@
 use crate::api::Result;
 use crate::api::instance::InstanceLink;
+use crate::engine_handle::EngineHandle;
 use engine::data::ModLoader;
 use engine::install::{
     InstallJobSnapshot, InstallModpackPreview, InstallPostInstallEdit,
@@ -87,15 +88,22 @@ impl InstallPostInstallEditRequest {
 
 #[tauri::command]
 pub async fn install_get_modpack_preview(
+    handle: tauri::State<'_, EngineHandle>,
     location: CreatePackLocation,
 ) -> Result<InstallModpackPreview> {
-    Ok(engine::pack::install_from::get_instance_from_pack(location).await?)
+    let state = handle.get().await;
+    Ok(
+        engine::pack::install_from::get_instance_from_pack(&state, location)
+            .await?,
+    )
 }
 
 #[tauri::command]
 pub async fn install_create_instance(
+    handle: tauri::State<'_, EngineHandle>,
     request: InstallCreateInstanceRequest,
 ) -> Result<InstallJobSnapshot> {
+    let state = handle.get().await;
     Ok(engine::install::create_instance(
         request.name.trim().to_string(),
         request.game_version,
@@ -107,28 +115,35 @@ pub async fn install_create_instance(
             Some(link) => link.into_core()?,
             None => engine::data::InstanceLink::Unmanaged,
         },
+        &state,
     )
     .await?)
 }
 
 #[tauri::command]
 pub async fn install_create_modpack_instance(
+    handle: tauri::State<'_, EngineHandle>,
     location: CreatePackLocation,
     post_install_edit: Option<InstallPostInstallEditRequest>,
 ) -> Result<InstallJobSnapshot> {
+    let state = handle.get().await;
     Ok(engine::install::create_modpack_instance(
         location,
         post_install_edit.map(|edit| edit.into_core()).transpose()?,
+        &state,
     )
     .await?)
 }
 
 #[tauri::command]
 pub async fn install_get_shared_instance_preview(
+    handle: tauri::State<'_, EngineHandle>,
     shared_instance_id: String,
     name: String,
 ) -> Result<SharedInstanceInstallPreview> {
+    let state = handle.get().await;
     Ok(engine::instance::get_shared_instance_install_preview(
+        &state,
         &shared_instance_id,
         name,
     )
@@ -137,11 +152,13 @@ pub async fn install_get_shared_instance_preview(
 
 #[tauri::command]
 pub async fn install_get_shared_instance_invite_preview(
+    handle: tauri::State<'_, EngineHandle>,
     invite_id: String,
 ) -> Result<SharedInstanceInviteInstallPreview> {
+    let state = handle.get().await;
     Ok(
         engine::instance::get_shared_instance_invite_install_preview(
-            &invite_id,
+            &state, &invite_id,
         )
         .await?,
     )
@@ -149,10 +166,13 @@ pub async fn install_get_shared_instance_invite_preview(
 
 #[tauri::command]
 pub async fn install_accept_shared_instance_invite(
+    handle: tauri::State<'_, EngineHandle>,
     shared_instance_id: String,
     invite_id: String,
 ) -> Result<()> {
+    let state = handle.get().await;
     Ok(engine::instance::accept_shared_instance_invite_for_install(
+        &state,
         &shared_instance_id,
         &invite_id,
     )
@@ -161,9 +181,12 @@ pub async fn install_accept_shared_instance_invite(
 
 #[tauri::command]
 pub async fn install_accept_pending_shared_instance_invite(
+    handle: tauri::State<'_, EngineHandle>,
     shared_instance_id: String,
 ) -> Result<()> {
+    let state = handle.get().await;
     Ok(engine::instance::accept_pending_shared_instance_invite(
+        &state,
         &shared_instance_id,
     )
     .await?)
@@ -171,16 +194,20 @@ pub async fn install_accept_pending_shared_instance_invite(
 
 #[tauri::command]
 pub async fn install_get_shared_instance_update_preview(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: String,
 ) -> Result<Option<SharedInstanceUpdatePreview>> {
-    Ok(
-        engine::instance::get_shared_instance_update_preview(&instance_id)
-            .await?,
+    let state = handle.get().await;
+    Ok(engine::instance::get_shared_instance_update_preview(
+        &state,
+        &instance_id,
     )
+    .await?)
 }
 
 #[tauri::command]
 pub async fn install_shared_instance(
+    handle: tauri::State<'_, EngineHandle>,
     shared_instance_id: String,
     name: String,
     manager_id: Option<String>,
@@ -189,7 +216,9 @@ pub async fn install_shared_instance(
     instance_icon_url: Option<String>,
     instance_icon_config: Option<engine::data::IconConfig>,
 ) -> Result<InstallJobSnapshot> {
+    let state = handle.get().await;
     Ok(engine::instance::install_shared_instance(
+        &state,
         &shared_instance_id,
         name,
         manager_id,
@@ -203,153 +232,209 @@ pub async fn install_shared_instance(
 
 #[tauri::command]
 pub async fn install_update_shared_instance(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: String,
 ) -> Result<InstallJobSnapshot> {
-    Ok(engine::instance::update_shared_instance(&instance_id).await?)
+    let state = handle.get().await;
+    Ok(engine::instance::update_shared_instance(&state, &instance_id).await?)
 }
 
 #[tauri::command]
 pub async fn install_get_shared_instance_history(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: String,
 ) -> Result<Vec<SharedInstanceHistoryEntry>> {
-    Ok(engine::instance::get_shared_instance_history(&instance_id).await?)
-}
-
-#[tauri::command]
-pub async fn install_restore_shared_instance_version(
-    instance_id: String,
-    version: i32,
-) -> Result<InstallJobSnapshot> {
+    let state = handle.get().await;
     Ok(
-        engine::instance::restore_shared_instance_version(
-            &instance_id,
-            version,
-        )
-        .await?,
-    )
-}
-
-#[tauri::command]
-pub async fn install_delete_shared_instance_version(
-    instance_id: String,
-    version: i32,
-) -> Result<()> {
-    Ok(
-        engine::instance::delete_shared_instance_version(&instance_id, version)
+        engine::instance::get_shared_instance_history(&state, &instance_id)
             .await?,
     )
 }
 
 #[tauri::command]
-pub async fn install_get_shared_history_settings()
--> Result<SharedHistorySettings> {
-    Ok(engine::instance::get_shared_history_settings().await?)
+pub async fn install_restore_shared_instance_version(
+    handle: tauri::State<'_, EngineHandle>,
+    instance_id: String,
+    version: i32,
+) -> Result<InstallJobSnapshot> {
+    let state = handle.get().await;
+    Ok(engine::instance::restore_shared_instance_version(
+        &state,
+        &instance_id,
+        version,
+    )
+    .await?)
+}
+
+#[tauri::command]
+pub async fn install_delete_shared_instance_version(
+    handle: tauri::State<'_, EngineHandle>,
+    instance_id: String,
+    version: i32,
+) -> Result<()> {
+    let state = handle.get().await;
+    Ok(engine::instance::delete_shared_instance_version(
+        &state,
+        &instance_id,
+        version,
+    )
+    .await?)
+}
+
+#[tauri::command]
+pub async fn install_get_shared_history_settings(
+    handle: tauri::State<'_, EngineHandle>,
+) -> Result<SharedHistorySettings> {
+    let state = handle.get().await;
+    Ok(engine::instance::get_shared_history_settings(&state).await?)
 }
 
 #[tauri::command]
 pub async fn install_set_shared_history_kept(
+    handle: tauri::State<'_, EngineHandle>,
     kept: Option<usize>,
 ) -> Result<SharedHistorySettings> {
-    Ok(engine::instance::set_shared_history_kept(kept).await?)
+    let state = handle.get().await;
+    Ok(engine::instance::set_shared_history_kept(&state, kept).await?)
 }
 
 #[tauri::command]
 pub async fn install_bulk_update_content(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: String,
     updates: Vec<engine::install::ContentUpdateSelection>,
 ) -> Result<InstallJobSnapshot> {
-    Ok(engine::install::bulk_update_content(instance_id, updates).await?)
+    let state = handle.get().await;
+    Ok(
+        engine::install::bulk_update_content(instance_id, updates, &state)
+            .await?,
+    )
 }
 
 #[tauri::command]
 pub async fn install_import_instance(
+    handle: tauri::State<'_, EngineHandle>,
     launcher_type: ImportLauncherType,
     base_path: PathBuf,
     instance_folder: String,
 ) -> Result<InstallJobSnapshot> {
+    let state = handle.get().await;
     Ok(engine::install::import_instance(
         launcher_type,
         base_path,
         instance_folder,
+        &state,
     )
     .await?)
 }
 
 #[tauri::command]
 pub async fn install_duplicate_instance(
+    handle: tauri::State<'_, EngineHandle>,
     source_instance_id: String,
 ) -> Result<InstallJobSnapshot> {
-    Ok(engine::install::duplicate_instance(source_instance_id).await?)
+    let state = handle.get().await;
+    Ok(engine::install::duplicate_instance(source_instance_id, &state).await?)
 }
 
 #[tauri::command]
 pub async fn install_existing_instance(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: String,
     force: bool,
 ) -> Result<InstallJobSnapshot> {
-    Ok(engine::install::install_existing_instance(instance_id, force).await?)
+    let state = handle.get().await;
+    Ok(
+        engine::install::install_existing_instance(instance_id, force, &state)
+            .await?,
+    )
 }
 
 #[tauri::command]
 pub async fn install_pack_to_existing_instance(
+    handle: tauri::State<'_, EngineHandle>,
     instance_id: String,
     location: CreatePackLocation,
     post_install_edit: Option<InstallPostInstallEditRequest>,
 ) -> Result<InstallJobSnapshot> {
+    let state = handle.get().await;
     Ok(engine::install::install_pack_to_existing_instance(
         instance_id,
         location,
         post_install_edit.map(|edit| edit.into_core()).transpose()?,
+        &state,
     )
     .await?)
 }
 
 #[tauri::command]
 pub async fn install_job_list(
+    handle: tauri::State<'_, EngineHandle>,
     include_finished: bool,
 ) -> Result<Vec<InstallJobSnapshot>> {
-    let state = engine::State::get().await?;
+    let state = handle.get().await;
     Ok(engine::install::list_jobs(include_finished, &state).await?)
 }
 
 #[tauri::command]
-pub async fn install_job_get(job_id: Uuid) -> Result<InstallJobSnapshot> {
-    let state = engine::State::get().await?;
+pub async fn install_job_get(
+    handle: tauri::State<'_, EngineHandle>,
+    job_id: Uuid,
+) -> Result<InstallJobSnapshot> {
+    let state = handle.get().await;
     Ok(engine::install::get_job(job_id, &state).await?)
 }
 
 #[tauri::command]
-pub async fn install_job_retry(job_id: Uuid) -> Result<InstallJobSnapshot> {
-    let state = engine::State::get().await?;
+pub async fn install_job_retry(
+    handle: tauri::State<'_, EngineHandle>,
+    job_id: Uuid,
+) -> Result<InstallJobSnapshot> {
+    let state = handle.get().await;
     Ok(engine::install::retry_job(job_id, &state).await?)
 }
 
 #[tauri::command]
-pub async fn install_job_pause(job_id: Uuid) -> Result<InstallJobSnapshot> {
-    let state = engine::State::get().await?;
+pub async fn install_job_pause(
+    handle: tauri::State<'_, EngineHandle>,
+    job_id: Uuid,
+) -> Result<InstallJobSnapshot> {
+    let state = handle.get().await;
     Ok(engine::install::pause_job(job_id, &state).await?)
 }
 
 #[tauri::command]
-pub async fn install_job_resume(job_id: Uuid) -> Result<InstallJobSnapshot> {
-    let state = engine::State::get().await?;
+pub async fn install_job_resume(
+    handle: tauri::State<'_, EngineHandle>,
+    job_id: Uuid,
+) -> Result<InstallJobSnapshot> {
+    let state = handle.get().await;
     Ok(engine::install::resume_job(job_id, &state).await?)
 }
 
 #[tauri::command]
-pub async fn install_job_cancel(job_id: Uuid) -> Result<InstallJobSnapshot> {
-    let state = engine::State::get().await?;
+pub async fn install_job_cancel(
+    handle: tauri::State<'_, EngineHandle>,
+    job_id: Uuid,
+) -> Result<InstallJobSnapshot> {
+    let state = handle.get().await;
     Ok(engine::install::cancel_job(job_id, &state).await?)
 }
 
 #[tauri::command]
-pub async fn install_job_dismiss(job_id: Uuid) -> Result<()> {
-    let state = engine::State::get().await?;
+pub async fn install_job_dismiss(
+    handle: tauri::State<'_, EngineHandle>,
+    job_id: Uuid,
+) -> Result<()> {
+    let state = handle.get().await;
     Ok(engine::install::dismiss_job(job_id, &state).await?)
 }
 
 #[tauri::command]
-pub async fn install_job_support_details(job_id: Uuid) -> Result<String> {
-    let state = engine::State::get().await?;
+pub async fn install_job_support_details(
+    handle: tauri::State<'_, EngineHandle>,
+    job_id: Uuid,
+) -> Result<String> {
+    let state = handle.get().await;
     Ok(engine::install::job_support_details(job_id, &state).await?)
 }

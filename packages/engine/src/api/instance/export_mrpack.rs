@@ -172,6 +172,7 @@ impl ExportSelectionNode {
 
 #[tracing::instrument(skip_all)]
 pub async fn export_mrpack(
+    state: &State,
     instance_id: &str,
     export_path: PathBuf,
     included_export_candidates: Vec<String>,
@@ -180,7 +181,6 @@ pub async fn export_mrpack(
     description: Option<String>,
     _name: Option<String>,
 ) -> crate::Result<()> {
-    let state = State::get().await?;
     let destination = Path::new(&export_path);
     let parent = destination.parent().ok_or(ErrorKind::InputError(
         "invalid export destination".to_string(),
@@ -202,7 +202,7 @@ pub async fn export_mrpack(
     }
     let _permit: tokio::sync::SemaphorePermit =
         state.io_semaphore.0.acquire().await?;
-    let metadata = get(instance_id).await?.context(format!(
+    let metadata = get(state, instance_id).await?.context(format!(
         "tried to export a nonexistent instance {instance_id}"
     ))?;
     let export_selection = ExportSelection::new(
@@ -210,10 +210,10 @@ pub async fn export_mrpack(
         excluded_export_candidates,
     );
 
-    let instance_base_path = get_full_path(instance_id).await?;
+    let instance_base_path = get_full_path(state, instance_id).await?;
     let version_id = version_id.unwrap_or("1.0.0".to_string());
     let mut packfile =
-        create_mrpack_json(&metadata, version_id, description).await?;
+        create_mrpack_json(state, &metadata, version_id, description).await?;
     packfile.files.retain(|f| {
         let logical = SafeRelativeUtf8UnixPathBuf::try_from(
             f.path.as_str().trim_end_matches(".disabled").to_string(),
@@ -267,7 +267,7 @@ pub async fn export_mrpack(
                 continue;
             }
             let Some(content) = export_content(
-                &state,
+                state,
                 stored_files.get(relative_path.as_str()),
                 &path,
                 file_type.is_symlink(),
@@ -377,22 +377,23 @@ pub(crate) fn is_exportable_path(path: &str) -> bool {
         .any(|suffix| path.ends_with(suffix))
 }
 
-#[tracing::instrument]
+#[tracing::instrument(skip(state))]
 pub async fn get_pack_export_candidates(
+    state: &State,
     instance_id: &str,
 ) -> crate::Result<Vec<PackExportCandidate>> {
-    let state = State::get().await?;
-    crate::state::instances::commands::sync_content_files(instance_id, &state)
+    crate::state::instances::commands::sync_content_files(instance_id, state)
         .await?;
-    get_pack_export_candidates_for_parent(instance_id, None).await
+    get_pack_export_candidates_for_parent(state, instance_id, None).await
 }
 
-#[tracing::instrument]
+#[tracing::instrument(skip(state))]
 pub async fn get_pack_export_candidates_for_parent(
+    state: &crate::State,
     instance_id: &str,
     parent: Option<SafeRelativeUtf8UnixPathBuf>,
 ) -> crate::Result<Vec<PackExportCandidate>> {
-    let instance_base_dir = get_full_path(instance_id).await?;
+    let instance_base_dir = get_full_path(state, instance_id).await?;
     let parent_dir = if let Some(parent) = parent {
         if parent.as_str().is_empty() || !is_path_exportable(&parent) {
             return Ok(Vec::new());
@@ -422,6 +423,7 @@ pub async fn get_pack_export_candidates_for_parent(
             let instance_base_dir = &instance_base_dir;
             async move {
                 build_pack_export_candidate(
+                    state,
                     instance_id,
                     instance_base_dir,
                     &path,
@@ -443,6 +445,7 @@ pub async fn get_pack_export_candidates_for_parent(
 }
 
 async fn build_pack_export_candidate(
+    state: &State,
     instance_id: &str,
     instance_base_dir: &PathBuf,
     path: &PathBuf,
@@ -452,7 +455,6 @@ async fn build_pack_export_candidate(
         return Ok(None);
     }
 
-    let state = State::get().await?;
     let metadata = tokio::fs::symlink_metadata(path)
         .await
         .map_err(|error| IOError::with_path(error, path))?;
@@ -467,7 +469,7 @@ async fn build_pack_export_candidate(
         )
         .await?;
         let Some(content) = export_content(
-            &state,
+            state,
             file.as_ref(),
             path,
             metadata.file_type().is_symlink(),
@@ -618,6 +620,7 @@ fn get_mrpack_environment(
 
 #[tracing::instrument(skip_all)]
 pub async fn create_mrpack_json(
+    state: &State,
     metadata: &InstanceMetadata,
     version_id: String,
     description: Option<String>,
@@ -649,8 +652,8 @@ pub async fn create_mrpack_json(
         metadata.applied_content_set.game_version.clone(),
     );
 
-    let state = State::get().await?;
     let projects = get_projects(
+        state,
         &metadata.instance.id,
         Some(CacheBehaviour::MustRevalidate),
     )

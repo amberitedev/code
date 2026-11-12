@@ -1,4 +1,5 @@
 use crate::api::Result;
+use crate::engine_handle::EngineHandle;
 use dashmap::DashMap;
 use engine::prelude::JavaVersion;
 use engine::prelude::*;
@@ -20,22 +21,31 @@ pub fn init<R: tauri::Runtime>() -> TauriPlugin<R> {
 }
 
 #[tauri::command]
-pub async fn get_java_versions() -> Result<DashMap<u32, JavaVersion>> {
-    Ok(jre::get_java_versions().await?)
+pub async fn get_java_versions(
+    handle: tauri::State<'_, EngineHandle>,
+) -> Result<DashMap<u32, JavaVersion>> {
+    let state = handle.get().await;
+    Ok(jre::get_java_versions(&state).await?)
 }
 
 #[tauri::command]
-pub async fn set_java_version(java_version: JavaVersion) -> Result<()> {
-    jre::set_java_version(java_version).await?;
+pub async fn set_java_version(
+    handle: tauri::State<'_, EngineHandle>,
+    java_version: JavaVersion,
+) -> Result<()> {
+    let state = handle.get().await;
+    jre::set_java_version(&state, java_version).await?;
     Ok(())
 }
 
 // Finds the installation of Java 8, if it exists
 #[tauri::command]
 pub async fn jre_find_filtered_jres(
+    handle: tauri::State<'_, EngineHandle>,
     version: Option<u32>,
 ) -> Result<Vec<JavaVersion>> {
-    Ok(jre::find_filtered_jres(version).await?)
+    let state = handle.get().await;
+    Ok(jre::find_filtered_jres(&state, version).await?)
 }
 
 // Validates JRE at a given path
@@ -53,8 +63,12 @@ pub async fn jre_test_jre(path: PathBuf, major_version: u32) -> Result<bool> {
 
 // Auto installs java for the given java version
 #[tauri::command]
-pub async fn jre_auto_install_java(java_version: u32) -> Result<PathBuf> {
-    Ok(jre::auto_install_java(java_version).await?)
+pub async fn jre_auto_install_java(
+    handle: tauri::State<'_, EngineHandle>,
+    java_version: u32,
+) -> Result<PathBuf> {
+    let state = handle.get().await;
+    Ok(jre::auto_install_java(&state, java_version).await?)
 }
 
 // Gets the maximum memory a system has available.

@@ -126,6 +126,7 @@ fn queue_content_sync(instance_id: String, state: Arc<State>) {
                 }
                 crate::state::sync_content_files(&instance_id, &state).await?;
                 crate::api::instance::queue_synced_pack_reconciliation(
+                    &state,
                     &instance_id,
                 );
                 Ok(true)
@@ -370,10 +371,12 @@ pub(crate) fn watch_instance_events(
                                         );
                                     } else {
                                         let events = state.events.clone();
+                                        let state = Arc::clone(&state);
                                         tokio::spawn(async move {
                                             if reconcile_screenshots
 												&& let Err(error) =
 													crate::api::instance::reconcile_screenshots(
+														&state,
 														&emit_instance_id,
 													)
 													.await
@@ -403,17 +406,19 @@ pub(crate) fn watch_instance_events(
 
                     for instance_id in pack_instances {
                         crate::api::instance::queue_synced_pack_reconciliation(
+                            &state,
                             &instance_id,
                         );
                     }
                     for (instance_id, file_names) in synced_option_files {
+                        let state = Arc::clone(&state);
                         tokio::spawn(async move {
                             for file_name in file_names {
                                 if let Err(error) =
                                     crate::api::instance::reconcile_synced_option_file(
+                                        &state,
                                         &instance_id,
-                                        &file_name,
-                                    )
+                                        &file_name)
                                     .await
                                 {
                                     tracing::error!(

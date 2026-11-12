@@ -9,12 +9,12 @@ struct CachedServerIcon {
     etag: Option<String>,
 }
 
-#[tracing::instrument]
+#[tracing::instrument(skip(state))]
 pub async fn cache_shared_instance_server_icon(
+    state: &State,
     instance_id: &str,
 ) -> crate::Result<Option<String>> {
-    let state = State::get().await?;
-    shared_instance_server_icon(instance_id, &state).await
+    shared_instance_server_icon(instance_id, state).await
 }
 
 #[tracing::instrument(skip(state))]

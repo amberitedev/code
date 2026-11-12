@@ -6,33 +6,29 @@ pub use crate::{
     state::{Hooks, MemorySettings, Settings, WindowSize},
 };
 
-pub async fn store_usage() -> crate::Result<StoreUsage> {
-    let state = State::get().await?;
-    state.content_store.usage(&state).await
+pub async fn store_usage(state: &State) -> crate::Result<StoreUsage> {
+    state.content_store.usage(state).await
 }
 
-pub async fn store_cleanup() -> crate::Result<u64> {
-    let state = State::get().await?;
-    state.content_store.cleanup(&state, true).await
+pub async fn store_cleanup(state: &State) -> crate::Result<u64> {
+    state.content_store.cleanup(state, true).await
 }
 
-pub async fn store_set_cache_limit(bytes: u64) -> crate::Result<()> {
-    State::get()
-        .await?
-        .content_store
-        .set_cache_limit(bytes)
-        .await
+pub async fn store_set_cache_limit(
+    state: &State,
+    bytes: u64,
+) -> crate::Result<()> {
+    state.content_store.set_cache_limit(bytes).await
 }
 
 /// Gets entire settings
-#[tracing::instrument]
-pub async fn get() -> crate::Result<Settings> {
-    let state = State::get().await?;
+#[tracing::instrument(skip(state))]
+pub async fn get(state: &State) -> crate::Result<Settings> {
     let _guard = state.synced_options.lock().await;
     let mut settings = Settings::get(&state.pool).await?;
     if crate::state::game_options_sync_is_enabled(&state.pool).await?
         && let Some(fullscreen) =
-            crate::api::instance::shared_fullscreen_value(&state).await?
+            crate::api::instance::shared_fullscreen_value(state).await?
         && settings.force_fullscreen != fullscreen
     {
         settings.force_fullscreen = fullscreen;
@@ -42,15 +38,14 @@ pub async fn get() -> crate::Result<Settings> {
 }
 
 /// Sets entire settings
-#[tracing::instrument]
-pub async fn set(settings: Settings) -> crate::Result<()> {
-    let state = State::get().await?;
+#[tracing::instrument(skip(state))]
+pub async fn set(state: &State, settings: Settings) -> crate::Result<()> {
     let _guard = state.synced_options.lock().await;
     let current_settings = Settings::get(&state.pool).await?;
     let game_options_sync_enabled =
         crate::state::game_options_sync_is_enabled(&state.pool).await?;
     let current_fullscreen = if game_options_sync_enabled {
-        crate::api::instance::shared_fullscreen_value(&state)
+        crate::api::instance::shared_fullscreen_value(state)
             .await?
             .unwrap_or(current_settings.force_fullscreen)
     } else {
@@ -60,7 +55,7 @@ pub async fn set(settings: Settings) -> crate::Result<()> {
     let shared_fullscreen_changed =
         if game_options_sync_enabled && fullscreen_changed {
             crate::api::instance::update_shared_fullscreen_from_app(
-                &state,
+                state,
                 settings.force_fullscreen,
             )
             .await?
@@ -71,8 +66,7 @@ pub async fn set(settings: Settings) -> crate::Result<()> {
 
     if shared_fullscreen_changed {
         let result =
-            crate::api::instance::sync_all_participating_instances(&state)
-                .await;
+            crate::api::instance::sync_all_participating_instances(state).await;
         if result.failed > 0 {
             tracing::warn!(
                 "Fullscreen was saved, but {} synced instance(s) could not be updated",

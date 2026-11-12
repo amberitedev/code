@@ -24,15 +24,17 @@ pub(super) fn currently_launcher_owned_keys(
 }
 
 /// Writes canonical settings to `options.txt` before launch.
-pub async fn sync_before_launch(instance_id: &str) -> crate::Result<()> {
-    let state = State::get().await?;
+pub async fn sync_before_launch(
+    state: &State,
+    instance_id: &str,
+) -> crate::Result<()> {
     let _guard = state.synced_options.lock().await;
     let metadata = crate::state::get_instance(instance_id, &state.pool)
         .await?
         .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
-    if sync_is_active_for_instance(&metadata, &state).await? {
+    if sync_is_active_for_instance(&metadata, state).await? {
         let _ =
-            apply_shared_settings_to_instance(&metadata, &state, false).await?;
+            apply_shared_settings_to_instance(&metadata, state, false).await?;
     }
     Ok(())
 }
@@ -41,23 +43,23 @@ pub async fn sync_before_launch(instance_id: &str) -> crate::Result<()> {
 ///
 /// Stores the written file's hash so the watcher ignores the app's write.
 pub async fn apply_launcher_overrides(
+    state: &State,
     instance_id: &str,
     overrides: &[(String, String)],
 ) -> crate::Result<()> {
     if overrides.is_empty() {
         return Ok(());
     }
-    let state = State::get().await?;
     let _guard = state.synced_options.lock().await;
     let metadata = crate::state::get_instance(instance_id, &state.pool)
         .await?
         .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
-    let path = options_path(&metadata, &state);
+    let path = options_path(&metadata, state);
     let (mut document, input_bytes) = if path.exists() {
         read_document(&path).await?
     } else {
         (
-            GameOptionsDocument::for_instance(&metadata, &state)
+            GameOptionsDocument::for_instance(&metadata, state)
                 .await?
                 .unwrap_or_else(GameOptionsDocument::empty),
             Vec::new(),
@@ -72,6 +74,6 @@ pub async fn apply_launcher_overrides(
     if output_bytes != input_bytes {
         io::write(&path, output_bytes).await?;
     }
-    remember_processed_sha(instance_id, &output_sha1, &state).await?;
+    remember_processed_sha(instance_id, &output_sha1, state).await?;
     Ok(())
 }

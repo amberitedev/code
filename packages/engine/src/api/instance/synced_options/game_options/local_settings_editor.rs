@@ -263,21 +263,21 @@ async fn load_editor(
 }
 
 pub async fn get_config(
+    state: &State,
     instance_id: &str,
 ) -> crate::Result<GameSettingsEditorState> {
-    let state = State::get().await?;
     let _guard = state.synced_options.lock().await;
-    load_editor(instance_id, &state).await
+    load_editor(instance_id, state).await
 }
 
 pub async fn preview_changes(
+    state: &State,
     instance_id: &str,
     request: UpdateGameSettingsRequest,
 ) -> crate::Result<GameSettingsEditorState> {
-    let state = State::get().await?;
     let _guard = state.synced_options.lock().await;
     let (metadata, document, input_bytes, controlled_keys) =
-        load_instance_document(instance_id, &state).await?;
+        load_instance_document(instance_id, state).await?;
     let mut editor = build_editor_state(
         &metadata,
         &document,
@@ -331,13 +331,13 @@ pub async fn preview_changes(
 }
 
 pub async fn save_changes(
+    state: &State,
     instance_id: &str,
     request: UpdateGameSettingsRequest,
 ) -> crate::Result<SaveGameSettingsResult> {
-    let state = State::get().await?;
     let _guard = state.synced_options.lock().await;
     let (metadata, mut document, input_bytes, controlled_keys) =
-        load_instance_document(instance_id, &state).await?;
+        load_instance_document(instance_id, state).await?;
     let current_editor = build_editor_state(
         &metadata,
         &document,
@@ -405,10 +405,10 @@ pub async fn save_changes(
     }
 
     if changed {
-        io::write(options_path(&metadata, &state), document.serialize()?)
+        io::write(options_path(&metadata, state), document.serialize()?)
             .await?;
     }
-    let refreshed = load_editor(instance_id, &state).await?;
+    let refreshed = load_editor(instance_id, state).await?;
     Ok(SaveGameSettingsResult {
         state: Some(refreshed),
         applied: u32::from(changed),

@@ -11,6 +11,7 @@ use modrinth_content_management::{
     ContentType, ResolutionPreferences, ResolveContentPlan,
 };
 use std::path::Path;
+use std::sync::Arc;
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct InstallProjectWithDependenciesRequest {
@@ -21,30 +22,27 @@ pub struct InstallProjectWithDependenciesRequest {
     pub selected: ResolutionPreferences,
 }
 
-#[tracing::instrument]
+#[tracing::instrument(skip(state))]
 pub async fn update_project(
+    state: &State,
     instance_id: &str,
     project_path: &str,
     skip_send_event: Option<bool>,
 ) -> crate::Result<String> {
-    let state = State::get().await?;
-    ensure_shared_instance_can_modify_project(
-        instance_id,
-        project_path,
-        &state,
-    )
-    .await?;
-    ensure_project_not_frozen(instance_id, project_path, &state).await?;
+    ensure_shared_instance_can_modify_project(instance_id, project_path, state)
+        .await?;
+    ensure_project_not_frozen(instance_id, project_path, state).await?;
     let path = crate::state::instances::commands::update_project(
         instance_id,
         project_path,
-        &state,
+        state,
     )
     .await?;
     if super::synced_packs::is_pack_path(project_path)
         || super::synced_packs::is_pack_path(&path)
     {
-        super::synced_packs::reconcile_after_content_change(instance_id).await;
+        super::synced_packs::reconcile_after_content_change(state, instance_id)
+            .await;
     }
     if !skip_send_event.unwrap_or(false) {
         emit_instance(&state.events, instance_id, InstancePayloadType::Edited)
@@ -54,15 +52,15 @@ pub async fn update_project(
     Ok(path)
 }
 
-#[tracing::instrument]
+#[tracing::instrument(skip(state))]
 pub async fn add_project_from_version(
+    state: &State,
     instance_id: &str,
     version_id: &str,
     reason: fetch::DownloadReason,
     dependent_on_version_id: Option<String>,
 ) -> crate::Result<String> {
-    let state = State::get().await?;
-    ensure_instance_content_unlocked(instance_id, &state).await?;
+    ensure_instance_content_unlocked(instance_id, state).await?;
     let project_path =
         crate::state::instances::commands::add_project_from_version(
             instance_id,
@@ -70,23 +68,23 @@ pub async fn add_project_from_version(
             reason,
             dependent_on_version_id,
             crate::state::ContentSourceKind::Local,
-            &state,
+            state,
         )
         .await?;
-    super::synced_packs::sync_new_pack(instance_id, &project_path).await;
+    super::synced_packs::sync_new_pack(state, instance_id, &project_path).await;
     emit_instance(&state.events, instance_id, InstancePayloadType::Edited)
         .await?;
 
     Ok(project_path)
 }
 
-#[tracing::instrument]
+#[tracing::instrument(skip(state))]
 pub async fn install_project_with_dependencies(
+    state: &Arc<State>,
     instance_id: &str,
     request: InstallProjectWithDependenciesRequest,
 ) -> crate::Result<ResolveContentPlan> {
-    let state = State::get().await?;
-    let metadata = super::get::get(instance_id)
+    let metadata = super::get::get(state, instance_id)
         .await?
         .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
     ensure_metadata_content_unlocked(&metadata)?;
@@ -98,13 +96,14 @@ pub async fn install_project_with_dependencies(
             content_type: request.content_type,
             selected: request.selected,
         },
-        &state,
+        state,
     )
     .await?;
 
     let instance_id = metadata.instance.id;
     let project_ids = plan_project_ids(&plan);
     let install_plan = plan.clone();
+    let state = Arc::clone(state);
     tokio::spawn(async move {
         let result = async {
 			let paths = crate::state::instances::commands::install_resolved_content_plan(
@@ -113,7 +112,7 @@ pub async fn install_project_with_dependencies(
 				&state,
 			).await?;
 			for path in paths {
-				super::synced_packs::sync_new_pack(&instance_id, &path).await;
+				super::synced_packs::sync_new_pack(&state, &instance_id, &path).await;
 			}
 			Ok::<(), crate::Error>(())
 		}.await;
@@ -177,21 +176,17 @@ fn plan_project_ids(plan: &ResolveContentPlan) -> Vec<String> {
     project_ids
 }
 
-#[tracing::instrument]
+#[tracing::instrument(skip(state))]
 pub async fn switch_project_version_with_dependencies(
+    state: &State,
     instance_id: &str,
     project_path: &str,
     version_id: &str,
 ) -> crate::Result<String> {
-    let state = State::get().await?;
-    ensure_shared_instance_can_modify_project(
-        instance_id,
-        project_path,
-        &state,
-    )
-    .await?;
-    ensure_project_not_frozen(instance_id, project_path, &state).await?;
-    let metadata = super::get::get(instance_id)
+    ensure_shared_instance_can_modify_project(instance_id, project_path, state)
+        .await?;
+    ensure_project_not_frozen(instance_id, project_path, state).await?;
+    let metadata = super::get::get(state, instance_id)
         .await?
         .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
     let path =
@@ -199,13 +194,14 @@ pub async fn switch_project_version_with_dependencies(
             instance_id,
             project_path,
             version_id,
-            &state,
+            state,
         )
         .await?;
     if super::synced_packs::is_pack_path(project_path)
         || super::synced_packs::is_pack_path(&path)
     {
-        super::synced_packs::reconcile_after_content_change(instance_id).await;
+        super::synced_packs::reconcile_after_content_change(state, instance_id)
+            .await;
     }
     emit_instance(
         &state.events,
@@ -217,32 +213,34 @@ pub async fn switch_project_version_with_dependencies(
     Ok(path)
 }
 
-#[tracing::instrument]
+#[tracing::instrument(skip(state))]
 pub async fn add_project_from_path(
+    state: &State,
     instance_id: &str,
     path: &Path,
     project_type: Option<ProjectType>,
 ) -> crate::Result<String> {
-    let state = State::get().await?;
-    ensure_instance_content_unlocked(instance_id, &state).await?;
+    ensure_instance_content_unlocked(instance_id, state).await?;
     let project_path =
         crate::state::instances::commands::add_project_from_path(
             instance_id,
             path,
             project_type,
-            &state,
+            state,
         )
         .await?;
-    super::synced_packs::sync_new_pack(instance_id, &project_path).await;
+    super::synced_packs::sync_new_pack(state, instance_id, &project_path).await;
     emit_instance(&state.events, instance_id, InstancePayloadType::Edited)
         .await?;
 
     Ok(project_path)
 }
 
-#[tracing::instrument]
-pub async fn is_file_on_modrinth(path: &Path) -> crate::Result<bool> {
-    let state = State::get().await?;
+#[tracing::instrument(skip(state))]
+pub async fn is_file_on_modrinth(
+    state: &State,
+    path: &Path,
+) -> crate::Result<bool> {
     let (_, hash) = fetch::sha1_file_async(path).await?;
     let files = CachedEntry::get_file_many(
         &[&hash],
@@ -256,24 +254,25 @@ pub async fn is_file_on_modrinth(path: &Path) -> crate::Result<bool> {
     Ok(!files.is_empty())
 }
 
-#[tracing::instrument]
+#[tracing::instrument(skip(state))]
 pub async fn toggle_disable_project(
+    state: &State,
     instance_id: &str,
     project: &str,
     desired_enabled: Option<bool>,
 ) -> crate::Result<String> {
-    let state = State::get().await?;
-    ensure_shared_instance_can_modify_project(instance_id, project, &state)
+    ensure_shared_instance_can_modify_project(instance_id, project, state)
         .await?;
     let res = crate::state::instances::commands::toggle_disable_project(
         instance_id,
         project,
         desired_enabled,
-        &state,
+        state,
     )
     .await?;
     if super::synced_packs::is_pack_path(project) {
-        super::synced_packs::reconcile_after_content_change(instance_id).await;
+        super::synced_packs::reconcile_after_content_change(state, instance_id)
+            .await;
     }
     emit_instance(&state.events, instance_id, InstancePayloadType::Edited)
         .await?;
@@ -281,22 +280,23 @@ pub async fn toggle_disable_project(
     Ok(res)
 }
 
-#[tracing::instrument]
+#[tracing::instrument(skip(state))]
 pub async fn remove_project(
+    state: &State,
     instance_id: &str,
     project: &str,
 ) -> crate::Result<()> {
-    let state = State::get().await?;
-    ensure_shared_instance_can_modify_project(instance_id, project, &state)
+    ensure_shared_instance_can_modify_project(instance_id, project, state)
         .await?;
     crate::state::instances::commands::remove_project(
         instance_id,
         project,
-        &state,
+        state,
     )
     .await?;
     if super::synced_packs::is_pack_path(project) {
-        super::synced_packs::reconcile_after_content_change(instance_id).await;
+        super::synced_packs::reconcile_after_content_change(state, instance_id)
+            .await;
     }
     emit_instance(&state.events, instance_id, InstancePayloadType::Edited)
         .await?;
@@ -304,20 +304,20 @@ pub async fn remove_project(
     Ok(())
 }
 
-#[tracing::instrument]
+#[tracing::instrument(skip(state))]
 pub async fn set_project_locked(
+    state: &State,
     instance_id: &str,
     project: &str,
     locked: bool,
 ) -> crate::Result<()> {
-    let state = State::get().await?;
-    ensure_shared_instance_can_modify_project(instance_id, project, &state)
+    ensure_shared_instance_can_modify_project(instance_id, project, state)
         .await?;
     crate::state::instances::commands::set_project_locked(
         instance_id,
         project,
         locked,
-        &state,
+        state,
     )
     .await?;
     emit_instance(&state.events, instance_id, InstancePayloadType::Edited)
@@ -383,12 +383,12 @@ async fn ensure_project_not_frozen(
     Ok(())
 }
 
-#[tracing::instrument]
+#[tracing::instrument(skip(state))]
 pub async fn update_managed_modrinth_version(
+    state: &Arc<State>,
     instance_id: &str,
     version_id: &str,
 ) -> crate::Result<crate::install::InstallJobSnapshot> {
-    let state = State::get().await?;
     let metadata = crate::state::instances::commands::get_instance_metadata(
         instance_id,
         &state.pool,
@@ -434,15 +434,16 @@ pub async fn update_managed_modrinth_version(
             icon_url: None,
         },
         post_install_edit,
+        state,
     )
     .await
 }
 
-#[tracing::instrument]
+#[tracing::instrument(skip(state))]
 pub async fn repair_managed_modrinth(
+    state: &Arc<State>,
     instance_id: &str,
 ) -> crate::Result<crate::install::InstallJobSnapshot> {
-    let state = State::get().await?;
     let metadata = crate::state::instances::commands::get_instance_metadata(
         instance_id,
         &state.pool,
@@ -484,6 +485,7 @@ pub async fn repair_managed_modrinth(
             icon_url: None,
         },
         post_install_edit,
+        state,
     )
     .await
 }

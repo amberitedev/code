@@ -137,11 +137,13 @@ pub(super) async fn finalize_shared_instance_attachment(
         )
         .await?;
         crate::api::instance::edit_icon(
+            state,
             instance_id,
             icon_path.as_deref().map(std::path::Path::new),
         )
         .await?;
         crate::api::worlds::ensure_managed_server_in_instance(
+            state,
             instance_id,
             data.server_manager_name
                 .clone()
@@ -341,7 +343,7 @@ async fn reinstall_shared_instance(
     instance_id: &str,
     data: &SharedInstanceInstallData,
 ) -> crate::Result<()> {
-    crate::api::instance::prepare_instance_update(instance_id).await?;
+    crate::api::instance::prepare_instance_update(state, instance_id).await?;
     if data.fresh_start {
         clear_shared_instance_for_fresh_start(instance_id, state).await?;
     } else {
@@ -353,6 +355,7 @@ async fn reinstall_shared_instance(
     if data.modpack.is_none() {
         if let Err(error) =
             crate::api::instance::capture_game_options_pack_base(
+                state,
                 instance_id,
                 None,
             )
@@ -363,6 +366,7 @@ async fn reinstall_shared_instance(
             );
         }
         Box::pin(crate::api::instance::reconcile_instance_after_pack_update(
+            state,
             instance_id,
         ))
         .await?;
@@ -471,6 +475,7 @@ async fn apply_shared_instance_changes(
     ensure_shared_instance_additions_enabled(instance_id, data, state).await?;
 
     crate::api::instance::edit(
+        state,
         instance_id,
         crate::state::EditInstance {
             name: Some(data.name.clone()),
@@ -962,6 +967,7 @@ async fn install_shared_instance_base(
 ) -> crate::Result<()> {
     if let Some(modpack) = data.modpack.clone() {
         crate::api::instance::edit(
+            state,
             instance_id,
             crate::state::EditInstance {
                 link: Some(shared_instance_link(Some(&modpack))),
@@ -992,6 +998,7 @@ async fn install_shared_instance_base(
         .await?;
     } else {
         crate::api::instance::edit(
+            state,
             instance_id,
             crate::state::EditInstance {
                 content_set_patch: Some(crate::state::AppliedContentSetPatch {
@@ -1107,6 +1114,7 @@ async fn install_shared_instance_additions(
     ensure_shared_instance_additions_enabled(instance_id, data, state).await?;
 
     crate::api::instance::edit(
+        state,
         instance_id,
         crate::state::EditInstance {
             name: Some(data.name.clone()),

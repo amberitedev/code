@@ -46,6 +46,7 @@ pub async fn is_valid_curseforge(instance_folder: PathBuf) -> bool {
 }
 
 pub async fn import_curseforge(
+    state: &State,
     curseforge_instance_folder: PathBuf, // instance's folder
     instance_id: &str,
     reporter: InstallProgressReporter,
@@ -68,12 +69,11 @@ pub async fn import_curseforge(
             .map_or("Unknown".to_string(), |a| a.to_string_lossy().to_string())
     );
 
-    let state = State::get().await?;
     // Recache Curseforge Icon if it exists
     let mut icon = None;
 
     if let Some(icon_path) = minecraft_instance.profile_image_path.clone() {
-        icon = recache_icon(icon_path).await?;
+        icon = recache_icon(state, icon_path).await?;
     } else if let Some(InstalledModpack {
         thumbnail_url: Some(thumbnail_url),
     }) = minecraft_instance.installed_modpack.clone()
@@ -87,8 +87,7 @@ pub async fn import_curseforge(
             &state.sessions,
         )
         .await?;
-        icon =
-            Some(crate::api::instance::cache_icon(icon_bytes, &state).await?);
+        icon = Some(crate::api::instance::cache_icon(icon_bytes, state).await?);
     }
 
     // base mod loader is always None for vanilla
@@ -115,6 +114,7 @@ pub async fn import_curseforge(
 
         let loader_version = if mod_loader != ModLoader::Vanilla {
             crate::launcher::get_loader_version_from_profile(
+                state,
                 &game_version,
                 mod_loader,
                 loader_version.as_deref(),
@@ -126,6 +126,7 @@ pub async fn import_curseforge(
         };
 
         crate::api::instance::edit(
+            state,
             instance_id,
             EditInstance {
                 install_stage: Some(InstanceInstallStage::PackInstalling),
@@ -150,6 +151,7 @@ pub async fn import_curseforge(
         .await?;
     } else {
         crate::api::instance::edit(
+            state,
             instance_id,
             EditInstance {
                 name: Some(
@@ -177,7 +179,7 @@ pub async fn import_curseforge(
     finish_import(
         instance_id,
         curseforge_instance_folder,
-        &state,
+        state,
         reporter,
         details,
     )

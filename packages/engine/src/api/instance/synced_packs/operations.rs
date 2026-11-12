@@ -194,13 +194,13 @@ fn existing_pack<'a>(
 }
 
 pub async fn get_pack_sync_preview(
+    state: &State,
     instance_id: &str,
     project_path: &str,
 ) -> crate::Result<PackSyncPreview> {
-    let state = State::get().await?;
-    let (metadata, item) = source(instance_id, project_path, &state).await?;
-    let candidate = pack_from_item(item, &metadata, &state).await?;
-    let library = read_library(&state).await?;
+    let (metadata, item) = source(instance_id, project_path, state).await?;
+    let candidate = pack_from_item(item, &metadata, state).await?;
+    let library = read_library(state).await?;
     let existing = existing_pack(&library, &candidate);
     let pack = existing.map_or(&candidate, |(_, pack)| pack);
     let versions = if let Some(project) = &pack.item.project {
@@ -218,7 +218,7 @@ pub async fn get_pack_sync_preview(
     } else {
         None
     };
-    let global = get_global_options().await?;
+    let global = get_global_options(state).await?;
     let instances = crate::state::list_instances(&state.pool)
         .await?
         .iter()
@@ -258,10 +258,11 @@ pub async fn get_pack_sync_preview(
 }
 
 pub async fn sync_pack(
+    state: &crate::State,
     instance_id: &str,
     project_path: &str,
 ) -> crate::Result<()> {
-    sync_pack_inner(instance_id, project_path, false).await
+    sync_pack_inner(state, instance_id, project_path, false).await
 }
 
 pub(in crate::api::instance) async fn seed_from_instance(
@@ -352,6 +353,7 @@ pub(in crate::api::instance) async fn seed_from_instance(
 }
 
 pub(in crate::api::instance) async fn sync_new_pack(
+    state: &crate::State,
     instance_id: &str,
     project_path: &str,
 ) {
@@ -360,7 +362,9 @@ pub(in crate::api::instance) async fn sync_new_pack(
     else {
         return;
     };
-    if let Err(error) = sync_pack_inner(instance_id, project_path, true).await {
+    if let Err(error) =
+        sync_pack_inner(state, instance_id, project_path, true).await
+    {
         tracing::warn!(
             "Installed {project_path} in {instance_id}, but could not sync it: {error}"
         );
@@ -368,12 +372,14 @@ pub(in crate::api::instance) async fn sync_new_pack(
 }
 
 async fn sync_pack_inner(
+    state: &crate::State,
     instance_id: &str,
     project_path: &str,
     automatic: bool,
 ) -> crate::Result<()> {
     loop {
-        match sync_pack_once(instance_id, project_path, automatic).await {
+        match sync_pack_once(state, instance_id, project_path, automatic).await
+        {
             Err(error)
                 if matches!(
                     error.downcast_ref::<crate::ErrorKind>(),
@@ -388,17 +394,17 @@ async fn sync_pack_inner(
 }
 
 async fn sync_pack_once(
+    state: &State,
     instance_id: &str,
     project_path: &str,
     automatic: bool,
 ) -> crate::Result<()> {
-    let state = State::get().await?;
     let initial_metadata = crate::state::get_instance(instance_id, &state.pool)
         .await?
         .ok_or(ErrorKind::InputError("unknown instance".to_owned()))?;
     let mut preparation =
-        super::worker::Preparation::new(&state, &initial_metadata).await;
-    let global = get_global_options().await?;
+        super::worker::Preparation::new(state, &initial_metadata).await;
+    let global = get_global_options(state).await?;
     if automatic {
         let metadata = crate::state::get_instance(instance_id, &state.pool)
             .await?
@@ -415,14 +421,14 @@ async fn sync_pack_once(
     let (metadata, item, candidate) = preparation
         .run(&library, async {
             let (metadata, item) =
-                source(instance_id, project_path, &state).await?;
+                source(instance_id, project_path, state).await?;
             let candidate =
-                pack_from_item(item.clone(), &metadata, &state).await?;
+                pack_from_item(item.clone(), &metadata, state).await?;
             Ok((metadata, item, candidate))
         })
         .await?;
     if let Err(error) =
-        super::selection::capture(&metadata, &mut library, &state).await
+        super::selection::capture(&metadata, &mut library, state).await
     {
         tracing::warn!(
             "Could not capture resource-pack selection before syncing {project_path}: {error}"
@@ -484,26 +490,26 @@ async fn sync_pack_once(
             },
         );
     if let Err(error) =
-        super::selection::capture_source_order(&metadata, &mut library, &state)
+        super::selection::capture_source_order(&metadata, &mut library, state)
             .await
     {
         tracing::warn!(
             "Could not read the source resource-pack order for {instance_id}: {error}"
         );
     }
-    apply_all(&mut library, &state).await?;
+    apply_all(&mut library, state).await?;
     emit_instance(&state.events, instance_id, InstancePayloadType::Synced)
         .await?;
     Ok(())
 }
 
 pub async fn list_synced_packs(
+    state: &State,
     project_type: ProjectType,
 ) -> crate::Result<Vec<ContentItem>> {
     pack_option(project_type)?;
-    let state = State::get().await?;
-    let library = read_library(&state).await?;
-    let global = get_global_options().await?;
+    let library = read_library(state).await?;
+    let global = get_global_options(state).await?;
     let instances = crate::state::list_instances(&state.pool).await?;
     Ok(library
         .packs
@@ -534,6 +540,7 @@ pub async fn list_synced_packs(
 }
 
 pub async fn upload_synced_pack(
+    state: &State,
     path: &Path,
     project_type: ProjectType,
     game_versions: Vec<String>,
@@ -544,8 +551,7 @@ pub async fn upload_synced_pack(
             "select the Minecraft versions this pack supports".to_string(),
         ));
     }
-    let state = State::get().await?;
-    if !get_global_options().await?.get(option) {
+    if !get_global_options(state).await?.get(option) {
         bail!(ErrorKind::InputError(
             "enable pack syncing before adding packs".to_string(),
         ));
@@ -564,14 +570,14 @@ pub async fn upload_synced_pack(
     .await??;
     let size = bytes.len() as u64;
     let sha1 = crate::util::fetch::sha1_async(bytes.clone()).await?;
-    let sha512 = cache_bytes(bytes, &state).await?;
+    let sha512 = cache_bytes(bytes, state).await?;
     let _guard = state.synced_options.lock().await;
-    if !get_global_options().await?.get(option) {
+    if !get_global_options(state).await?.get(option) {
         bail!(ErrorKind::InputError(
             "pack syncing was disabled while preparing the upload".to_owned(),
         ));
     }
-    let mut library = read_library(&state).await?;
+    let mut library = read_library(state).await?;
     if library
         .packs
         .values()
@@ -609,44 +615,46 @@ pub async fn upload_synced_pack(
             },
         },
     );
-    apply_all(&mut library, &state).await
+    apply_all(&mut library, state).await
 }
 
 pub async fn set_synced_pack_enabled(
+    state: &State,
     pack_id: &str,
     enabled: bool,
 ) -> crate::Result<()> {
-    let state = State::get().await?;
     let _guard = state.synced_options.lock().await;
-    let mut library = read_library(&state).await?;
+    let mut library = read_library(state).await?;
     let pack = library
         .packs
         .get_mut(pack_id)
         .ok_or(ErrorKind::InputError("unknown synced pack".to_string()))?;
     pack_option(pack.item.project_type)?;
     pack.item.enabled = enabled;
-    apply_all(&mut library, &state).await
+    apply_all(&mut library, state).await
 }
 
-pub async fn remove_synced_pack(pack_id: &str) -> crate::Result<()> {
-    let state = State::get().await?;
+pub async fn remove_synced_pack(
+    state: &State,
+    pack_id: &str,
+) -> crate::Result<()> {
     let _guard = state.synced_options.lock().await;
-    let mut library = read_library(&state).await?;
+    let mut library = read_library(state).await?;
     let pack = library
         .packs
         .get(pack_id)
         .ok_or(ErrorKind::InputError("unknown synced pack".to_string()))?;
     pack_option(pack.item.project_type)?;
     library.packs.remove(pack_id);
-    apply_removal(pack_id, &mut library, &state).await
+    apply_removal(pack_id, &mut library, state).await
 }
 
 pub async fn desync_pack(
+    state: &State,
     instance_id: &str,
     pack_id: &str,
     mode: DesyncServerMode,
 ) -> crate::Result<()> {
-    let state = State::get().await?;
     let _guard = state.synced_options.lock().await;
     let metadata = crate::state::get_instance(instance_id, &state.pool)
         .await?
@@ -658,7 +666,7 @@ pub async fn desync_pack(
                 .to_string(),
         ));
     }
-    let mut library = read_library(&state).await?;
+    let mut library = read_library(state).await?;
     let pack = library
         .packs
         .get(pack_id)
@@ -674,9 +682,9 @@ pub async fn desync_pack(
     placement.excluded = true;
     if mode == DesyncServerMode::RemoveFromOtherInstances {
         library.packs.remove(pack_id);
-        apply_removal(pack_id, &mut library, &state).await?;
+        apply_removal(pack_id, &mut library, state).await?;
     } else {
-        write_library(&library, &state).await?;
+        write_library(&library, state).await?;
     }
     emit_instance(&state.events, instance_id, InstancePayloadType::Synced)
         .await?;

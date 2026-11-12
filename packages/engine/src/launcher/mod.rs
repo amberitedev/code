@@ -161,6 +161,7 @@ pub async fn get_java_version_from_launch_context(
 }
 
 pub async fn get_loader_version_from_profile(
+    state: &crate::State,
     game_version: &str,
     loader: ModLoader,
     loader_version: Option<&str>,
@@ -179,7 +180,8 @@ pub async fn get_loader_version_from_profile(
     };
 
     let versions =
-        crate::api::metadata::get_loader_versions(loader.as_meta_str()).await?;
+        crate::api::metadata::get_loader_versions(state, loader.as_meta_str())
+            .await?;
 
     if let Some(loaders) =
         loader_versions_for_game_version(&versions, game_version)
@@ -294,6 +296,7 @@ pub(crate) async fn resolve_java_for_launch(
     let version = &minecraft.versions[version_index];
 
     let mut loader_version = get_loader_version_from_profile(
+        state,
         &content_set.game_version,
         content_set.loader,
         content_set.loader_version.as_deref(),
@@ -303,6 +306,7 @@ pub(crate) async fn resolve_java_for_launch(
 
     if content_set.loader != ModLoader::Vanilla && loader_version.is_none() {
         loader_version = get_loader_version_from_profile(
+            state,
             &content_set.game_version,
             content_set.loader,
             Some("stable"),
@@ -335,7 +339,7 @@ pub(crate) async fn resolve_java_for_launch(
     {
         (PathBuf::from(java_version.path), false)
     } else {
-        (crate::api::jre::auto_install_java(key).await?, true)
+        (crate::api::jre::auto_install_java(state, key).await?, true)
     };
 
     let java_version = crate::api::jre::check_jre(java_path).await?;
@@ -354,7 +358,7 @@ pub async fn resolve_minecraft_manifest(
     game_version: &str,
     state: &State,
 ) -> crate::Result<(d::minecraft::Catalog, usize)> {
-    let minecraft = crate::api::metadata::get_minecraft_versions().await?;
+    let minecraft = crate::api::metadata::get_minecraft_versions(state).await?;
 
     if let Some(idx) = minecraft
         .versions
@@ -482,21 +486,21 @@ async fn install_minecraft_inner(
     }
 
     let mut loader_version = get_loader_version_from_profile(
+        state,
         &content_set.game_version,
         content_set.loader,
         content_set.loader_version.as_deref(),
-        &state.directories,
-    )
+        &state.directories)
     .await?;
 
     // If no loader version is selected, try to select the stable version!
     if content_set.loader != ModLoader::Vanilla && loader_version.is_none() {
         loader_version = get_loader_version_from_profile(
+            state,
             &content_set.game_version,
             content_set.loader,
             Some("stable"),
-            &state.directories,
-        )
+            &state.directories)
         .await?;
 
         crate::state::instances::commands::set_applied_content_set_loader_version(
@@ -554,12 +558,12 @@ async fn install_minecraft_inner(
     } else {
         let path = if let Some(reporter) = &reporter {
             crate::api::jre::auto_install_java_with_reporter(
+                state,
                 key,
-                reporter.clone(),
-            )
+                reporter.clone())
             .await?
         } else {
-            crate::api::jre::auto_install_java_with_loading(key, true).await?
+            crate::api::jre::auto_install_java_with_loading(state, key, true).await?
         };
 
         (path, true)
@@ -767,6 +771,7 @@ async fn install_minecraft_inner(
 		.await?;
 		if let Err(error) =
 			crate::api::instance::reconcile_instance_synced_options(
+				state,
 				&instance.id,
 			)
 			.await
@@ -956,6 +961,7 @@ pub async fn launch_minecraft(
             .unwrap_or(0);
 
     let loader_version = get_loader_version_from_profile(
+        state,
         &content_set.game_version,
         content_set.loader,
         content_set.loader_version.as_deref(),
@@ -1071,6 +1077,7 @@ pub async fn launch_minecraft(
         let job = crate::install::install_existing_instance(
             instance.id.clone(),
             false,
+            state,
         )
         .await
         .context("starting repair install")?;
@@ -1210,7 +1217,7 @@ pub async fn launch_minecraft(
     command.envs(env_args.iter().cloned());
 
     if let Err(error) =
-        crate::api::instance::reconcile_synced_packs(&instance.id).await
+        crate::api::instance::reconcile_synced_packs(state, &instance.id).await
     {
         tracing::warn!(
             "Failed to reconcile synced packs before launching {}: {error}",
@@ -1218,9 +1225,11 @@ pub async fn launch_minecraft(
         );
     }
 
-    if let Err(error) =
-        crate::api::instance::sync_game_options_before_launch(&instance.id)
-            .await
+    if let Err(error) = crate::api::instance::sync_game_options_before_launch(
+        state,
+        &instance.id,
+    )
+    .await
     {
         tracing::warn!(
             "Failed to reconcile game options before launching {}: {error}",
@@ -1229,6 +1238,7 @@ pub async fn launch_minecraft(
     }
 
     crate::api::instance::apply_game_options_launcher_overrides(
+        state,
         &instance.id,
         mc_set_options,
     )

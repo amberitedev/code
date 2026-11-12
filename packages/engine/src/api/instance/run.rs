@@ -10,6 +10,7 @@ use crate::util::io::IOError;
 use anyhow::{Context, bail};
 use serde_json::json;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::process::Command;
 use tracing::{info, warn};
@@ -21,12 +22,12 @@ pub enum QuickPlayType {
     Server(ServerAddress),
 }
 
-#[tracing::instrument]
+#[tracing::instrument(skip(state))]
 pub async fn run(
+    state: &Arc<State>,
     instance_id: &str,
     quick_play_type: QuickPlayType,
 ) -> crate::Result<ProcessMetadata> {
-    let state = State::get().await?;
     if crate::state::instances::adapters::sqlite::instance_rows::is_instance_quarantined(
         instance_id,
         &state.pool,
@@ -39,7 +40,7 @@ pub async fn run(
     }
     super::shared::check_shared_instance_availability_before_launch(
         instance_id,
-        &state,
+        state,
     )
     .await?;
 
@@ -47,16 +48,16 @@ pub async fn run(
         .await?
         .ok_or(ErrorKind::NotLoggedIn)?;
 
-    run_credentials(instance_id, &default_account, quick_play_type).await
+    run_credentials(state, instance_id, &default_account, quick_play_type).await
 }
 
-#[tracing::instrument(skip(credentials))]
+#[tracing::instrument(skip(state, credentials))]
 async fn run_credentials(
+    state: &Arc<State>,
     instance_id: &str,
     credentials: &Credentials,
     quick_play_type: QuickPlayType,
 ) -> crate::Result<ProcessMetadata> {
-    let state = State::get().await?;
     let settings = Settings::get(&state.pool).await?;
     let context =
         crate::state::instances::commands::get_instance_launch_context(
@@ -150,7 +151,7 @@ async fn run_credentials(
             .as_ref()
             .expect("hooked launches always resolve their instance path");
         let java_version =
-            crate::launcher::resolve_java_for_launch(&context, &state).await?;
+            crate::launcher::resolve_java_for_launch(&context, state).await?;
 
         Some(crate::launcher::hooks::HookEnvironment::from_current_env(
             &env_args,
@@ -276,7 +277,7 @@ async fn run_credentials(
         }
     }
 
-    crate::minecraft_skins::flush_pending_skin_change().await?;
+    crate::minecraft_skins::flush_pending_skin_change(state).await?;
     crate::launcher::launch_minecraft(
         &java_args,
         &launch_env_args,
@@ -288,7 +289,7 @@ async fn run_credentials(
         post_exit_hook,
         &context,
         quick_play_type,
-        &state,
+        state,
     )
     .await
 }
@@ -308,10 +309,9 @@ fn server_play_project_id(link: &InstanceLink) -> Option<&String> {
     }
 }
 
-pub async fn kill(instance_id: &str) -> crate::Result<()> {
-    let state = State::get().await?;
+pub async fn kill(state: &State, instance_id: &str) -> crate::Result<()> {
     let processes =
-        crate::api::process::get_by_instance_id(instance_id).await?;
+        crate::api::process::get_by_instance_id(state, instance_id).await?;
 
     for process in processes {
         state.process_manager.kill(process.uuid).await?;
@@ -320,11 +320,11 @@ pub async fn kill(instance_id: &str) -> crate::Result<()> {
     Ok(())
 }
 
-#[tracing::instrument]
+#[tracing::instrument(skip(state))]
 pub async fn try_update_playtime_by_instance_id(
+    state: &State,
     instance_id: &str,
 ) -> crate::Result<()> {
-    let state = State::get().await?;
     let context =
         crate::state::instances::commands::get_instance_launch_context(
             instance_id,
@@ -360,7 +360,7 @@ pub async fn try_update_playtime_by_instance_id(
         });
         let mut hashmap: HashMap<String, serde_json::Value> = HashMap::new();
 
-        for (_, project) in get_projects(instance_id, None).await? {
+        for (_, project) in get_projects(state, instance_id, None).await? {
             if let Some(metadata) = project.metadata {
                 hashmap
                     .insert(metadata.version_id, playtime_update_json.clone());

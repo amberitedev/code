@@ -18,26 +18,26 @@ pub(crate) const MODPACK_SERVER_PATHS: [&str; 3] = [
 ];
 
 pub(crate) async fn capture_modpack_server_override(
+    state: &State,
     instance_id: &str,
     source_path: Option<&str>,
 ) -> crate::Result<()> {
-    let state = State::get().await?;
     let _guard = state.synced_options.lock().await;
     let metadata = crate::state::get_instance(instance_id, &state.pool)
         .await?
         .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
     let servers = if let Some(source_path) = source_path {
-        let path = instance_dir(&metadata, &state).join(source_path);
+        let path = instance_dir(&metadata, state).join(source_path);
         read_servers(&path).await?
     } else {
         Vec::new()
     };
-    replace_modpack_servers(&metadata, servers, &state).await?;
+    replace_modpack_servers(&metadata, servers, state).await?;
     // Installation owns these files until the new projection has been written.
-    if participating(&metadata, &state).await?
-        && !instance_is_running(&metadata, &state).await?
+    if participating(&metadata, state).await?
+        && !instance_is_running(&metadata, state).await?
     {
-        compose_instance(&metadata, &state).await?;
+        compose_instance(&metadata, state).await?;
     }
     Ok(())
 }

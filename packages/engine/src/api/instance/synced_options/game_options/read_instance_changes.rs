@@ -380,7 +380,7 @@ pub(super) async fn discover_custom_settings(
     .await;
     tx.commit().await?;
     if discovered {
-        super::locales::queue_game_locale_index();
+        state.synced_options.locales.queue();
     }
     Ok(discovered)
 }

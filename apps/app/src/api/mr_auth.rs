@@ -2,6 +2,7 @@ use crate::api::Result;
 use crate::api::oauth_utils;
 use crate::api::oauth_utils::auth_code_reply::AuthReplySession;
 use crate::api::oauth_utils::auth_seal::AuthSeal;
+use crate::engine_handle::EngineHandle;
 use anyhow::Context;
 use engine::ErrorKind;
 use engine::prelude::*;
@@ -29,15 +30,17 @@ pub fn init<R: tauri::Runtime>() -> TauriPlugin<R> {
 
 #[tauri::command]
 pub async fn modrinth_login<R: Runtime>(
+    handle: tauri::State<'_, EngineHandle>,
     app: tauri::AppHandle<R>,
     flow: mr_auth::ModrinthAuthFlow,
     add_account: Option<bool>,
 ) -> Result<ModrinthCredentials> {
+    let state = handle.get().await;
     let seal = AuthSeal::generate();
     let mut reply = AuthReplySession::start(seal.nonce().to_string());
     let auth_code_recv_socket = reply.socket_addr().await?;
     let auth_request_uri = auth_request_url(
-        &mr_auth::authenticate_begin_flow(flow).await?,
+        &mr_auth::authenticate_begin_flow(&state, flow).await?,
         &auth_code_recv_socket,
         &seal.public_key()?,
         seal.nonce(),
@@ -52,7 +55,8 @@ pub async fn modrinth_login<R: Runtime>(
         return Err(ErrorKind::LoginCanceled.into());
     };
     let session_token = seal.open(&auth_code)?;
-    let credentials = mr_auth::authenticate_finish_flow(&session_token).await?;
+    let credentials =
+        mr_auth::authenticate_finish_flow(&state, &session_token).await?;
 
     if let Some(main_window) = app.get_window("main") {
         main_window.set_focus().ok();
@@ -62,28 +66,43 @@ pub async fn modrinth_login<R: Runtime>(
 }
 
 #[tauri::command]
-pub async fn logout() -> Result<()> {
-    Ok(engine::mr_auth::logout().await?)
+pub async fn logout(handle: tauri::State<'_, EngineHandle>) -> Result<()> {
+    let state = handle.get().await;
+    Ok(engine::mr_auth::logout(&state).await?)
 }
 
 #[tauri::command]
-pub async fn get() -> Result<Option<ModrinthCredentials>> {
-    Ok(engine::mr_auth::get_credentials().await?)
+pub async fn get(
+    handle: tauri::State<'_, EngineHandle>,
+) -> Result<Option<ModrinthCredentials>> {
+    let state = handle.get().await;
+    Ok(engine::mr_auth::get_credentials(&state).await?)
 }
 
 #[tauri::command]
-pub async fn get_all() -> Result<Vec<ModrinthCredentials>> {
-    Ok(engine::mr_auth::get_all().await?)
+pub async fn get_all(
+    handle: tauri::State<'_, EngineHandle>,
+) -> Result<Vec<ModrinthCredentials>> {
+    let state = handle.get().await;
+    Ok(engine::mr_auth::get_all(&state).await?)
 }
 
 #[tauri::command]
-pub async fn set_active(user_id: String) -> Result<()> {
-    Ok(engine::mr_auth::set_active(&user_id).await?)
+pub async fn set_active(
+    handle: tauri::State<'_, EngineHandle>,
+    user_id: String,
+) -> Result<()> {
+    let state = handle.get().await;
+    Ok(engine::mr_auth::set_active(&state, &user_id).await?)
 }
 
 #[tauri::command]
-pub async fn remove_account(user_id: String) -> Result<()> {
-    Ok(engine::mr_auth::remove_user(&user_id).await?)
+pub async fn remove_account(
+    handle: tauri::State<'_, EngineHandle>,
+    user_id: String,
+) -> Result<()> {
+    let state = handle.get().await;
+    Ok(engine::mr_auth::remove_user(&state, &user_id).await?)
 }
 
 #[tauri::command]

@@ -12,11 +12,11 @@ pub enum ModrinthAuthFlow {
     SignUp,
 }
 
-#[tracing::instrument]
+#[tracing::instrument(skip(state))]
 pub async fn authenticate_begin_flow(
+    state: &crate::State,
     flow: ModrinthAuthFlow,
 ) -> crate::Result<String> {
-    let state = crate::State::get().await?;
     if let Some(url) = crate::self_hosted::accounts::login_url(
         &state.sessions,
         matches!(flow, ModrinthAuthFlow::SignUp),
@@ -39,12 +39,11 @@ pub async fn authenticate_begin_flow(
     .to_owned())
 }
 
-#[tracing::instrument(skip(code))]
+#[tracing::instrument(skip(state, code))]
 pub async fn authenticate_finish_flow(
+    state: &crate::State,
     code: &str,
 ) -> crate::Result<ModrinthCredentials> {
-    let state = crate::State::get().await?;
-
     let creds = crate::state::finish_login_flow(
         code,
         &state.api_semaphore,
@@ -58,22 +57,21 @@ pub async fn authenticate_finish_flow(
     crate::self_hosted::accounts::set_sessions(&state.sessions, Some(&creds));
 
     if let Err(error) =
-        crate::onboarding_checklist::mark_logged_into_modrinth().await
+        crate::onboarding_checklist::mark_logged_into_modrinth(state).await
     {
         tracing::warn!(
             "Failed to mark Modrinth login in onboarding checklist: {error}"
         );
     }
 
-    reconnect_friends(&state).await?;
+    reconnect_friends(state).await?;
 
     Ok(creds)
 }
 
-#[tracing::instrument]
-pub async fn logout() -> crate::Result<()> {
-    let state = crate::State::get().await?;
-    sign_out(&state).await
+#[tracing::instrument(skip(state))]
+pub async fn logout(state: &crate::State) -> crate::Result<()> {
+    sign_out(state).await
 }
 
 async fn sign_out(state: &crate::State) -> crate::Result<()> {
@@ -84,15 +82,18 @@ async fn sign_out(state: &crate::State) -> crate::Result<()> {
     Ok(())
 }
 
-#[tracing::instrument]
-pub async fn get_all() -> crate::Result<Vec<ModrinthCredentials>> {
-    let state = crate::State::get().await?;
+#[tracing::instrument(skip(state))]
+pub async fn get_all(
+    state: &crate::State,
+) -> crate::Result<Vec<ModrinthCredentials>> {
     ModrinthCredentials::get_all(&state.pool, &state.sessions).await
 }
 
-#[tracing::instrument]
-pub async fn set_active(user_id: &str) -> crate::Result<()> {
-    let state = crate::State::get().await?;
+#[tracing::instrument(skip(state))]
+pub async fn set_active(
+    state: &crate::State,
+    user_id: &str,
+) -> crate::Result<()> {
     let users =
         ModrinthCredentials::get_all(&state.pool, &state.sessions).await?;
     let Some(mut creds) =
@@ -104,14 +105,16 @@ pub async fn set_active(user_id: &str) -> crate::Result<()> {
     creds.active = true;
     creds.upsert(&state.pool).await?;
     crate::self_hosted::accounts::set_sessions(&state.sessions, Some(&creds));
-    reconnect_friends(&state).await?;
+    reconnect_friends(state).await?;
 
     Ok(())
 }
 
-#[tracing::instrument]
-pub async fn remove_user(user_id: &str) -> crate::Result<()> {
-    let state = crate::State::get().await?;
+#[tracing::instrument(skip(state))]
+pub async fn remove_user(
+    state: &crate::State,
+    user_id: &str,
+) -> crate::Result<()> {
     if let Some(creds) =
         ModrinthCredentials::get_all(&state.pool, &state.sessions)
             .await?
@@ -163,9 +166,10 @@ async fn reconnect_friends(state: &crate::State) -> crate::Result<()> {
     Ok(())
 }
 
-#[tracing::instrument]
-pub async fn get_credentials() -> crate::Result<Option<ModrinthCredentials>> {
-    let state = crate::State::get().await?;
+#[tracing::instrument(skip(state))]
+pub async fn get_credentials(
+    state: &crate::State,
+) -> crate::Result<Option<ModrinthCredentials>> {
     let current = ModrinthCredentials::get_and_refresh(
         &state.pool,
         &state.api_semaphore,

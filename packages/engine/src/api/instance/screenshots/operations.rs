@@ -54,34 +54,35 @@ pub enum ScreenshotEditSaveMode {
 }
 
 pub async fn list_screenshots(
+    state: &State,
     instance_id: &str,
 ) -> crate::Result<Vec<InstanceScreenshot>> {
-    let state = State::get().await?;
     let source =
         instance_rows::get_instance_screenshot_source(instance_id, &state.pool)
             .await?
             .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
 
-    list_source_screenshots(&state, source).await
+    list_source_screenshots(state, source).await
 }
 
-pub async fn list_synced_screenshots() -> crate::Result<Vec<InstanceScreenshot>>
-{
-    if !super::super::synced_options::get_global_options()
+pub async fn list_synced_screenshots(
+    state: &State,
+) -> crate::Result<Vec<InstanceScreenshot>> {
+    if !super::super::synced_options::get_global_options(state)
         .await?
         .screenshots
     {
         return Ok(Vec::new());
     }
-    let state = State::get().await?;
     let sources = instance_rows::list_screenshot_sources(&state.pool).await?;
-    list_source_screenshot_sets(&state, sources).await
+    list_source_screenshot_sets(state, sources).await
 }
 
-pub async fn list_all_screenshots() -> crate::Result<Vec<InstanceScreenshot>> {
-    let state = State::get().await?;
+pub async fn list_all_screenshots(
+    state: &State,
+) -> crate::Result<Vec<InstanceScreenshot>> {
     let sources = instance_rows::list_screenshot_sources(&state.pool).await?;
-    list_source_screenshot_sets(&state, sources).await
+    list_source_screenshot_sets(state, sources).await
 }
 
 async fn list_source_screenshot_sets(
@@ -114,9 +115,11 @@ async fn lock_instance_screenshots<'a>(
     locks
 }
 
-pub async fn delete_screenshots(keys: &[ScreenshotKey]) -> crate::Result<()> {
+pub async fn delete_screenshots(
+    state: &State,
+    keys: &[ScreenshotKey],
+) -> crate::Result<()> {
     ensure_unique_keys(keys)?;
-    let state = State::get().await?;
     let mut instance_ids = keys
         .iter()
         .map(|key| key.instance_id.as_str())
@@ -127,7 +130,7 @@ pub async fn delete_screenshots(keys: &[ScreenshotKey]) -> crate::Result<()> {
         lock_instance_screenshots(&state.instance_locks, instance_ids).await;
 
     for key in keys {
-        io::remove_file(get_screenshot_path(key).await?).await?;
+        io::remove_file(get_screenshot_path(state, key).await?).await?;
         screenshot_rows::delete_screenshot_by_key(
             &key.instance_id,
             &key.file_name,
@@ -140,6 +143,7 @@ pub async fn delete_screenshots(keys: &[ScreenshotKey]) -> crate::Result<()> {
 }
 
 pub async fn export_screenshots(
+    state: &State,
     keys: &[ScreenshotKey],
     export_path: PathBuf,
 ) -> crate::Result<()> {
@@ -150,7 +154,6 @@ pub async fn export_screenshots(
         ));
     }
 
-    let state = State::get().await?;
     let mut sources = HashMap::new();
     let mut archive_folders = HashMap::<String, String>::new();
     let mut used_archive_folders = HashSet::new();
@@ -182,7 +185,8 @@ pub async fn export_screenshots(
             }
         };
         let archive_name = format!("{archive_folder}/{}", key.file_name);
-        screenshots.push((archive_name, get_screenshot_path(key).await?));
+        screenshots
+            .push((archive_name, get_screenshot_path(state, key).await?));
     }
 
     tokio::task::spawn_blocking(move || -> crate::Result<()> {
@@ -210,6 +214,7 @@ pub async fn export_screenshots(
 }
 
 pub async fn move_screenshots(
+    state: &State,
     keys: &[ScreenshotKey],
     target_instance_id: &str,
 ) -> crate::Result<Vec<ScreenshotKey>> {
@@ -218,7 +223,6 @@ pub async fn move_screenshots(
         return Ok(Vec::new());
     }
 
-    let state = State::get().await?;
     let mut instance_ids = keys
         .iter()
         .map(|key| key.instance_id.as_str())
@@ -245,7 +249,7 @@ pub async fn move_screenshots(
             continue;
         }
 
-        let source_path = get_screenshot_path(key).await?;
+        let source_path = get_screenshot_path(state, key).await?;
         let target_path =
             available_target_path(&target_dir, &key.file_name).await?;
         io::rename_or_move(&source_path, &target_path)
@@ -278,11 +282,11 @@ pub async fn move_screenshots(
 }
 
 pub async fn get_screenshot_path(
+    state: &State,
     key: &ScreenshotKey,
 ) -> crate::Result<PathBuf> {
     validate_file_name(&key.file_name)?;
 
-    let state = State::get().await?;
     let source = instance_rows::get_instance_screenshot_source(
         &key.instance_id,
         &state.pool,
@@ -319,13 +323,13 @@ pub async fn get_screenshot_path(
 }
 
 pub async fn save_edited_screenshot(
+    state: &State,
     key: ScreenshotKey,
     png_bytes: Vec<u8>,
     mode: ScreenshotEditSaveMode,
 ) -> crate::Result<InstanceScreenshot> {
     validate_file_name(&key.file_name)?;
 
-    let state = State::get().await?;
     let source = instance_rows::get_instance_screenshot_source(
         &key.instance_id,
         &state.pool,
@@ -335,8 +339,7 @@ pub async fn save_edited_screenshot(
     let _lock = state.instance_locks.lock_screenshots(&source.id).await;
 
     let scanned = scan_source_screenshots(&state.directories, &source).await?;
-    let current =
-        reconcile_source_screenshots(&state, &source, scanned).await?;
+    let current = reconcile_source_screenshots(state, &source, scanned).await?;
     let source_screenshot = current
         .iter()
         .find(|screenshot| screenshot.file_name == key.file_name)
@@ -415,7 +418,7 @@ pub async fn save_edited_screenshot(
     }
     let scanned = scan_source_screenshots(&state.directories, &source).await?;
     let reconciled =
-        reconcile_source_screenshots(&state, &source, scanned).await?;
+        reconcile_source_screenshots(state, &source, scanned).await?;
     let mut saved = reconciled
         .into_iter()
         .find(|screenshot| screenshot.file_name == target_file_name)

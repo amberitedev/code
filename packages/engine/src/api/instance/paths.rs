@@ -2,9 +2,11 @@ use crate::state::State;
 use crate::util::io;
 use std::path::PathBuf;
 
-#[tracing::instrument]
-pub async fn get_full_path(instance_id: &str) -> crate::Result<PathBuf> {
-    let state = State::get().await?;
+#[tracing::instrument(skip(state))]
+pub async fn get_full_path(
+    state: &State,
+    instance_id: &str,
+) -> crate::Result<PathBuf> {
     let path =
         crate::state::instances::adapters::sqlite::instance_rows::get_instance_path_by_id(
             instance_id,
@@ -18,10 +20,11 @@ pub async fn get_full_path(instance_id: &str) -> crate::Result<PathBuf> {
     )?)
 }
 
-#[tracing::instrument]
+#[tracing::instrument(skip(state))]
 pub async fn get_mod_full_path(
+    state: &crate::State,
     instance_id: &str,
     project_path: &str,
 ) -> crate::Result<PathBuf> {
-    Ok(get_full_path(instance_id).await?.join(project_path))
+    Ok(get_full_path(state, instance_id).await?.join(project_path))
 }

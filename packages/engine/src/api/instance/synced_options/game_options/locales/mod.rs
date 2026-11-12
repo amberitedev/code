@@ -84,16 +84,6 @@ impl GameLocaleIndexer {
     }
 }
 
-pub(crate) fn queue_game_locale_index() {
-    if let Some(state) = State::get_if_initialized() {
-        state.synced_options.locales.queue();
-    } else {
-        tracing::warn!(
-            "Game setting locales: cannot queue indexing before state initialization"
-        );
-    }
-}
-
 pub(crate) fn start_game_locale_indexer(state: Arc<State>) {
     if state
         .synced_options
@@ -342,6 +332,7 @@ fn minecraft_locale(locale: &str) -> String {
 /// Loads translations for the settings shown in the modal.
 #[tracing::instrument(skip_all, fields(instance_id, locale, requested = option_ids.len(), refresh_sources), err)]
 pub async fn get_game_setting_locale_labels(
+    state: &State,
     instance_id: Option<&str>,
     locale: &str,
     option_ids: Vec<String>,
@@ -369,9 +360,8 @@ pub async fn get_game_setting_locale_labels(
             "invalid Minecraft locale".to_string()
         ));
     }
-    let state = State::get().await?;
     if refresh_sources {
-        queue_game_locale_index();
+        state.synced_options.locales.queue();
     }
     let scope = instance_id.unwrap_or("");
     let mut rows = storage::load(&state.pool, Some(scope)).await?;
@@ -399,7 +389,7 @@ pub async fn get_game_setting_locale_labels(
         })
         .map(|origin| origin.archive.hash.as_str())
         .collect();
-    let projects = sources::mod_projects(&state, &hashes.into_iter().collect::<Vec<_>>()).await
+    let projects = sources::mod_projects(state, &hashes.into_iter().collect::<Vec<_>>()).await
 		.unwrap_or_else(|error| {
 			tracing::warn!(%error, "Game setting locales: mod project metadata unavailable");
 			HashMap::new()
@@ -423,7 +413,7 @@ pub async fn get_game_setting_locale_labels(
             format!("{}:{}", origin.archive.hash, origin.nested_path);
         if !dictionaries.contains_key(&dictionary_id) {
             let index = match cached_archive(
-                &state,
+                state,
                 &origin.archive,
                 &mut archives,
             )

@@ -15,6 +15,7 @@ use sharing_client::history::{
 use sharing_client::push::Pushed;
 use sharing_client::versions::VersionContent;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// How many entries each share keeps: a number, or `all`. Unset keeps
 /// [`history::DEFAULT_KEPT`].
@@ -116,16 +117,16 @@ pub(super) async fn forget_share_history(
 }
 
 /// The instance's share history, newest first. Only its owner has one.
-#[tracing::instrument]
+#[tracing::instrument(skip(state))]
 pub async fn get_shared_instance_history(
+    state: &State,
     instance_id: &str,
 ) -> crate::Result<Vec<SharedInstanceHistoryEntry>> {
-    let state = State::get().await?;
-    let attachment = attachment(instance_id, &state).await?;
+    let attachment = attachment(instance_id, state).await?;
     if attachment.role != SharedInstanceRole::Owner {
         return Ok(Vec::new());
     }
-    Ok(history::list(&AppHistory(&state), &attachment.id)
+    Ok(history::list(&AppHistory(state), &attachment.id)
         .await?
         .into_iter()
         .map(SharedInstanceHistoryEntry::from)
@@ -150,18 +151,18 @@ fn entry_version(entry: &HistoryEntry) -> ShareVersion {
 /// Puts the owner's instance back to `version` from its history. What the share carried is
 /// replaced; what the owner added since their last push stays. Nothing reaches members until the
 /// owner pushes, so the instance is left with changes to push unless the version is the latest.
-#[tracing::instrument]
+#[tracing::instrument(skip(state))]
 pub async fn restore_shared_instance_version(
+    state: &Arc<State>,
     instance_id: &str,
     version: i32,
 ) -> crate::Result<InstallJobSnapshot> {
-    let state = State::get().await?;
     let metadata = crate::state::get_instance(instance_id, &state.pool)
         .await?
         .ok_or(crate::ErrorKind::InputError("unknown instance".to_string()))?;
-    let attachment = owner_attachment(instance_id, &state).await?;
+    let attachment = owner_attachment(instance_id, state).await?;
     let plan =
-        history::restore_plan(&AppHistory(&state), &attachment.id, version)
+        history::restore_plan(&AppHistory(state), &attachment.id, version)
             .await
             .map_err(history_error)?;
     let restored = entry_version(&plan.entry);
@@ -180,54 +181,58 @@ pub async fn restore_shared_instance_version(
         restored,
         plan.configs,
         Some(&plan.files),
-        &state,
+        state,
     )
     .await?;
     data.restore = Some(carried);
-    crate::install::update_shared_instance(instance_id.to_string(), Some(data))
-        .await
+    crate::install::update_shared_instance(
+        instance_id.to_string(),
+        Some(data),
+        state,
+    )
+    .await
 }
 
 /// Deletes `version` from the instance's share history. The newest entry is the last push, so it
 /// stays (`sharing_client::history::delete_older`).
-#[tracing::instrument]
+#[tracing::instrument(skip(state))]
 pub async fn delete_shared_instance_version(
+    state: &State,
     instance_id: &str,
     version: i32,
 ) -> crate::Result<()> {
-    let state = State::get().await?;
-    let attachment = owner_attachment(instance_id, &state).await?;
-    history::delete_older(&AppHistory(&state), &attachment.id, version)
+    let attachment = owner_attachment(instance_id, state).await?;
+    history::delete_older(&AppHistory(state), &attachment.id, version)
         .await
         .map_err(history_error)
 }
 
 /// How many versions each share's history keeps, and how many each has now.
-#[tracing::instrument]
-pub async fn get_shared_history_settings()
--> crate::Result<SharedHistorySettings> {
-    let state = State::get().await?;
+#[tracing::instrument(skip(state))]
+pub async fn get_shared_history_settings(
+    state: &State,
+) -> crate::Result<SharedHistorySettings> {
     Ok(SharedHistorySettings {
-        kept: AppHistory(&state).kept().await?,
+        kept: AppHistory(state).kept().await?,
         entries: history::counts(&state.pool).await?,
     })
 }
 
 /// Keeps the newest `kept` versions of every share's history, all of them when `None`, and
 /// deletes the rest now.
-#[tracing::instrument]
+#[tracing::instrument(skip(state))]
 pub async fn set_shared_history_kept(
+    state: &State,
     kept: Option<usize>,
 ) -> crate::Result<SharedHistorySettings> {
-    let state = State::get().await?;
     let value = kept.map_or_else(|| "all".to_string(), |kept| kept.to_string());
     crate::state::content_store::set_setting(&state.pool, KEPT_SETTING, &value)
         .await?;
-    let store = AppHistory(&state);
+    let store = AppHistory(state);
     for share_id in history::counts(&state.pool).await?.into_keys() {
         history::prune(&store, &share_id, kept).await?;
     }
-    get_shared_history_settings().await
+    get_shared_history_settings(state).await
 }
 
 async fn attachment(

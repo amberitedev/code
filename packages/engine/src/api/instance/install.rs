@@ -2,9 +2,9 @@ use crate::state::{JavaVersion, State};
 use anyhow::Context;
 
 pub async fn get_optimal_jre_key(
+    state: &State,
     instance_id: &str,
 ) -> crate::Result<Option<JavaVersion>> {
-    let state = State::get().await?;
     let context =
         crate::state::instances::commands::get_instance_launch_context(
             instance_id,
@@ -17,11 +17,12 @@ pub async fn get_optimal_jre_key(
     let (minecraft, version_index) =
         crate::launcher::resolve_minecraft_manifest(
             &context.applied_content_set.game_version,
-            &state,
+            state,
         )
         .await?;
     let version = &minecraft.versions[version_index];
     let loader_version = crate::launcher::get_loader_version_from_profile(
+        state,
         &context.applied_content_set.game_version,
         context.applied_content_set.loader,
         context.applied_content_set.loader_version.as_deref(),
@@ -29,7 +30,7 @@ pub async fn get_optimal_jre_key(
     )
     .await?;
     let version_info = crate::launcher::download::download_version_info(
-        &state,
+        state,
         version,
         loader_version.as_ref(),
         None,

@@ -1,3 +1,4 @@
+use crate::engine_handle::EngineHandle;
 use engine::{emit_warning, handler, prelude::app_db_backup_dir};
 use tauri::{Manager, Runtime};
 use tauri_plugin_opener::OpenerExt;
@@ -54,8 +55,12 @@ pub fn init<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
 }
 
 #[tauri::command]
-pub async fn cache_remote_icon(source: &str) -> Result<String> {
-    let path = engine::instance::cache_remote_icon(source).await?;
+pub async fn cache_remote_icon(
+    handle: tauri::State<'_, EngineHandle>,
+    source: &str,
+) -> Result<String> {
+    let state = handle.get().await;
+    let path = engine::instance::cache_remote_icon(&state, source).await?;
     Ok(tauri_convert_file_src(&path)?.to_string())
 }
 
@@ -103,7 +108,8 @@ pub async fn open_path<R: Runtime>(app: tauri::AppHandle<R>, path: PathBuf) {
 
 #[tauri::command]
 pub async fn show_launcher_logs_folder<R: Runtime>(app: tauri::AppHandle<R>) {
-    if let Some(state) = engine::State::get_if_initialized() {
+    let state = app.state::<EngineHandle>().try_get();
+    if let Some(state) = state {
         open_path(app, state.directories.launcher_logs_dir()).await;
     }
 }
@@ -122,6 +128,7 @@ pub async fn show_app_db_backups_folder<R: Runtime>(
 pub async fn export_debug_info<R: Runtime>(
     window: tauri::Window<R>,
     state: tauri::State<'_, DebugInfoExports>,
+    handle: tauri::State<'_, EngineHandle>,
     id: String,
     path: PathBuf,
     on_progress: tauri::ipc::Channel<
@@ -141,11 +148,16 @@ pub async fn export_debug_info<R: Runtime>(
             .into());
         }
     }
-    let result =
-        engine::debug_info::export_debug_info(path, cancel, move |progress| {
+    let engine_state = handle.get().await;
+    let result = engine::debug_info::export_debug_info(
+        &engine_state,
+        path,
+        cancel,
+        move |progress| {
             let _ = on_progress.send(progress);
-        })
-        .await;
+        },
+    )
+    .await;
     state.0.remove(&key);
     Ok(result?)
 }

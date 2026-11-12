@@ -8,6 +8,7 @@ use tauri_plugin_fs::FsExt;
 use tokio::sync::Semaphore;
 
 use super::Result;
+use crate::engine_handle::EngineHandle;
 
 static THUMBNAIL_WORKER: Semaphore = Semaphore::const_new(1);
 static GENERATED_THUMBNAILS: AtomicUsize = AtomicUsize::new(0);
@@ -16,6 +17,7 @@ const CACHE_LIMIT: u64 = 128 * 1024 * 1024;
 #[tauri::command]
 pub async fn get_image_thumbnail<R: Runtime>(
     app: tauri::AppHandle<R>,
+    handle: tauri::State<'_, EngineHandle>,
     path: PathBuf,
     size: u32,
 ) -> Result<String> {
@@ -29,8 +31,9 @@ pub async fn get_image_thumbnail<R: Runtime>(
         )
         .into());
     }
-    let cache = engine::State::get()
-        .await?
+    let cache = handle
+        .get()
+        .await
         .directories
         .caches_dir()
         .join("thumbnails-v1");

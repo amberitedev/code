@@ -13,6 +13,7 @@ use modrinth_content_management::icons::ValidatedIconBackground;
 use std::fs::File as StdFile;
 use std::io::{BufRead, BufReader, Cursor, Seek};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 const INSTANCE_ICON_MAX_BYTES: usize = 4 * 1024 * 1024;
 const INSTANCE_ICON_MAX_DIMENSION: u32 = 512;
@@ -29,13 +30,13 @@ static REMOTE_ICON_DOWNLOADS: tokio::sync::Semaphore =
     tokio::sync::Semaphore::const_new(4);
 
 pub async fn edit_icon(
+    state: &State,
     instance_id: &str,
     icon_path: Option<&Path>,
 ) -> crate::Result<()> {
-    let state = State::get().await?;
     let icon_path = if let Some(icon_path) = icon_path {
         Some(
-            cache_icon_from_path(icon_path, &state)
+            cache_icon_from_path(icon_path, state)
                 .await?
                 .to_string_lossy()
                 .to_string(),
@@ -44,22 +45,26 @@ pub async fn edit_icon(
         None
     };
 
-    apply_instance_icon(instance_id, icon_path, None, &state).await
+    apply_instance_icon(instance_id, icon_path, None, state).await
 }
 
-pub async fn cache_icon_bytes(icon_bytes: Vec<u8>) -> crate::Result<String> {
-    let state = State::get().await?;
-    let icon_path = cache_icon(Bytes::from(icon_bytes), &state).await?;
+pub async fn cache_icon_bytes(
+    state: &State,
+    icon_bytes: Vec<u8>,
+) -> crate::Result<String> {
+    let icon_path = cache_icon(Bytes::from(icon_bytes), state).await?;
     Ok(icon_path.to_string_lossy().to_string())
 }
 
-pub async fn cache_remote_icon(source: &str) -> crate::Result<PathBuf> {
+pub async fn cache_remote_icon(
+    state: &Arc<State>,
+    source: &str,
+) -> crate::Result<PathBuf> {
     if !source.starts_with("https://") {
         bail!(ErrorKind::InputError(
             "remote icons must use https".to_string(),
         ));
     }
-    let state = State::get().await?;
     let icons = state.directories.caches_dir().join("icons");
     let source_hash =
         sha1_async(Bytes::copy_from_slice(source.as_bytes())).await?;
@@ -77,9 +82,10 @@ pub async fn cache_remote_icon(source: &str) -> crate::Result<PathBuf> {
                 .is_some_and(|age| age < REMOTE_ICON_MAX_AGE);
             if !fresh {
                 let source = source.to_string();
+                let state = Arc::clone(state);
                 tokio::spawn(async move {
                     if let Err(error) =
-                        refresh_remote_icon(&source, &mapping).await
+                        refresh_remote_icon(&state, &source, &mapping).await
                     {
                         tracing::warn!(
                             source,
@@ -93,17 +99,17 @@ pub async fn cache_remote_icon(source: &str) -> crate::Result<PathBuf> {
         }
     }
 
-    refresh_remote_icon(source, &mapping).await
+    refresh_remote_icon(state, source, &mapping).await
 }
 
 async fn refresh_remote_icon(
+    state: &State,
     source: &str,
     mapping: &Path,
 ) -> crate::Result<PathBuf> {
-    let state = State::get().await?;
     let _permit = REMOTE_ICON_DOWNLOADS.acquire().await?;
     let bytes = download_remote_icon(source).await?;
-    let path = cache_icon(bytes, &state).await?;
+    let path = cache_icon(bytes, state).await?;
     let filename = path
         .file_name()
         .ok_or(ErrorKind::InputError(
@@ -148,20 +154,20 @@ fn is_cached_icon_filename(filename: &str) -> bool {
 }
 
 pub async fn edit_generated_icon(
+    state: &State,
     instance_id: &str,
     config: IconConfig,
     symbol_bytes: Vec<u8>,
 ) -> crate::Result<String> {
-    let state = State::get().await?;
     let icon_path =
-        cache_generated_icon_with_state(config.clone(), symbol_bytes, &state)
+        cache_generated_icon_with_state(config.clone(), symbol_bytes, state)
             .await?;
 
     apply_instance_icon(
         instance_id,
         Some(icon_path.clone()),
         Some(config),
-        &state,
+        state,
     )
     .await?;
 
@@ -169,13 +175,13 @@ pub async fn edit_generated_icon(
 }
 
 pub async fn edit_generated_icon_if_empty(
+    state: &State,
     instance_id: &str,
     config: IconConfig,
     symbol_bytes: Vec<u8>,
 ) -> crate::Result<Option<String>> {
-    let state = State::get().await?;
     let icon_path =
-        cache_generated_icon_with_state(config.clone(), symbol_bytes, &state)
+        cache_generated_icon_with_state(config.clone(), symbol_bytes, state)
             .await?;
     let instance =
         instance_rows::get_instance_display_info(instance_id, &state.pool)
@@ -197,7 +203,7 @@ pub async fn edit_generated_icon_if_empty(
         instance_id,
         Some(&icon_path),
         Some(&config),
-        &state,
+        state,
     )
     .await
     {
@@ -215,13 +221,13 @@ pub async fn edit_generated_icon_if_empty(
 }
 
 pub async fn cache_generated_icon(
+    state: &State,
     config: IconConfig,
     symbol_bytes: Vec<u8>,
     add_to_recents: bool,
 ) -> crate::Result<String> {
-    let state = State::get().await?;
     let icon_path =
-        cache_generated_icon_with_state(config.clone(), symbol_bytes, &state)
+        cache_generated_icon_with_state(config.clone(), symbol_bytes, state)
             .await?;
 
     if add_to_recents {
@@ -234,8 +240,9 @@ pub async fn cache_generated_icon(
     Ok(icon_path)
 }
 
-pub async fn get_recent_icon_configs() -> crate::Result<Vec<IconConfig>> {
-    let state = State::get().await?;
+pub async fn get_recent_icon_configs(
+    state: &State,
+) -> crate::Result<Vec<IconConfig>> {
     instance_rows::get_recent_instance_icon_configs(&state.pool).await
 }
 

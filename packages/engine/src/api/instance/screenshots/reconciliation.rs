@@ -87,9 +87,9 @@ pub(super) async fn list_source_screenshots(
 }
 
 pub(crate) async fn reconcile_screenshots(
+    state: &State,
     instance_id: &str,
 ) -> crate::Result<()> {
-    let state = State::get().await?;
     let Some(source) =
         instance_rows::get_instance_screenshot_source(instance_id, &state.pool)
             .await?
@@ -97,7 +97,7 @@ pub(crate) async fn reconcile_screenshots(
         return Ok(());
     };
 
-    list_source_screenshots(&state, source).await?;
+    list_source_screenshots(state, source).await?;
     Ok(())
 }
 

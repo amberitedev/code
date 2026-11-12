@@ -1,4 +1,5 @@
 use crate::api::Result;
+use crate::engine_handle::EngineHandle;
 use anyhow::Context;
 use chrono::{Duration, Utc};
 use engine::prelude::*;
@@ -29,9 +30,11 @@ pub async fn check_reachable() -> Result<()> {
 /// This begins the authentication flow quasi-synchronously, returning a URL to visit (that the user will sign in at)
 #[tauri::command]
 pub async fn login<R: Runtime>(
+    handle: tauri::State<'_, EngineHandle>,
     app: tauri::AppHandle<R>,
 ) -> Result<Option<Credentials>> {
-    let flow = minecraft_auth::begin_login().await?;
+    let state = handle.get().await;
+    let flow = minecraft_auth::begin_login(&state).await?;
 
     let start = Utc::now();
 
@@ -72,7 +75,8 @@ pub async fn login<R: Runtime>(
                 window.url()?.query_pairs().find(|x| x.0 == "code")
         {
             window.close()?;
-            let val = minecraft_auth::finish_login(&code.clone(), flow).await?;
+            let val = minecraft_auth::finish_login(&state, &code.clone(), flow)
+                .await?;
 
             return Ok(Some(val));
         }
@@ -85,23 +89,36 @@ pub async fn login<R: Runtime>(
 }
 
 #[tauri::command]
-pub async fn remove_user(user: uuid::Uuid) -> Result<()> {
-    Ok(minecraft_auth::remove_user(user).await?)
+pub async fn remove_user(
+    handle: tauri::State<'_, EngineHandle>,
+    user: uuid::Uuid,
+) -> Result<()> {
+    let state = handle.get().await;
+    Ok(minecraft_auth::remove_user(&state, user).await?)
 }
 
 #[tauri::command]
-pub async fn get_default_user() -> Result<Option<uuid::Uuid>> {
-    Ok(minecraft_auth::get_default_user().await?)
+pub async fn get_default_user(
+    handle: tauri::State<'_, EngineHandle>,
+) -> Result<Option<uuid::Uuid>> {
+    let state = handle.get().await;
+    Ok(minecraft_auth::get_default_user(&state).await?)
 }
 
 #[tauri::command]
-pub async fn set_default_user(user: uuid::Uuid) -> Result<()> {
-    Ok(minecraft_auth::set_default_user(user).await?)
+pub async fn set_default_user(
+    handle: tauri::State<'_, EngineHandle>,
+    user: uuid::Uuid,
+) -> Result<()> {
+    let state = handle.get().await;
+    Ok(minecraft_auth::set_default_user(&state, user).await?)
 }
 
 /// Get the account summaries displayed by the launcher.
 #[tauri::command]
-pub async fn get_users() -> Result<Vec<minecraft_auth::MinecraftAccountSummary>>
-{
-    Ok(minecraft_auth::users().await?)
+pub async fn get_users(
+    handle: tauri::State<'_, EngineHandle>,
+) -> Result<Vec<minecraft_auth::MinecraftAccountSummary>> {
+    let state = handle.get().await;
+    Ok(minecraft_auth::users(&state).await?)
 }

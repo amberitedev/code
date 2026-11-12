@@ -262,6 +262,7 @@ impl State {
             Arc::downgrade(self),
             watcher_events,
         );
+        self.synced_options.packs.bind(Arc::downgrade(self));
 
         let maintained = Arc::downgrade(self);
         tokio::spawn(async move {
@@ -332,6 +333,7 @@ impl State {
                 for instance in instances {
                     if let Err(error) =
                         crate::api::instance::reconcile_screenshots(
+                            &state,
                             &instance.id,
                         )
                         .await
@@ -345,7 +347,7 @@ impl State {
             }
 
             if let Err(error) =
-                crate::api::instance::monitor_persisted_processes().await
+                crate::api::instance::monitor_persisted_processes(&state).await
             {
                 tracing::error!(
                     "Failed to monitor persisted Minecraft processes: {error}"
@@ -353,7 +355,7 @@ impl State {
             }
 
             if let Err(error) =
-                crate::api::instance::reconcile_all_synced_options().await
+                crate::api::instance::reconcile_all_synced_options(&state).await
             {
                 tracing::error!(
                     "Failed to reconcile instance synced options during startup: {error}"
@@ -530,6 +532,13 @@ mod tests {
                 tokio::join!(content_paths(&a, "a"), content_paths(&b, "b"));
             assert_eq!(a_paths, ["mods/a.jar"]);
             assert_eq!(b_paths, ["mods/b.jar", "resourcepacks/b.zip"]);
+
+            let listed = crate::api::instance::list(&b).await.unwrap();
+            let ids: Vec<_> = listed
+                .iter()
+                .map(|metadata| &metadata.instance.id)
+                .collect();
+            assert_eq!(ids, ["b"]);
         })
         .await
         .expect("an engine call waited on the global");

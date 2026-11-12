@@ -7,42 +7,37 @@ use super::publish::*;
 use super::types::*;
 use super::*;
 
-#[tracing::instrument]
+#[tracing::instrument(skip(state))]
 pub async fn get_shared_instance_users(
+    state: &State,
     instance_id: &str,
 ) -> crate::Result<SharedInstanceUsers> {
-    let state = State::get().await?;
-    let Some(attachment) = shared_attachment(instance_id, &state).await? else {
+    let Some(attachment) = shared_attachment(instance_id, state).await? else {
         return Ok(SharedInstanceUsers::empty());
     };
 
-    get_remote_users(&attachment.id, &state).await
+    get_remote_users(&attachment.id, state).await
 }
 
-#[tracing::instrument]
+#[tracing::instrument(skip(state))]
 pub async fn invite_shared_instance_users(
+    state: &State,
     instance_id: &str,
     user_ids: Vec<String>,
 ) -> crate::Result<SharedInstanceUsers> {
-    let state = State::get().await?;
     let _shared_instance_lock =
         state.instance_locks.lock_shared(instance_id).await;
     let (metadata, attachment) =
-        shared_instance_for_invites(instance_id, user_ids.len(), &state)
-            .await?;
+        shared_instance_for_invites(instance_id, user_ids.len(), state).await?;
 
     ensure_owner(&attachment)?;
     if !user_ids.is_empty() {
-        ensure_ready_remote_version_for_invite(
-            instance_id,
-            &attachment,
-            &state,
-        )
-        .await?;
+        ensure_ready_remote_version_for_invite(instance_id, &attachment, state)
+            .await?;
         update_remote_instance(
             &attachment.id,
             shared_instance_name(metadata.instance.name.clone()),
-            &state,
+            state,
         )
         .await?;
         tracing::info!(
@@ -51,33 +46,33 @@ pub async fn invite_shared_instance_users(
             user_count = user_ids.len(),
             "Adding users to shared instance"
         );
-        add_remote_users(&attachment.id, user_ids.clone(), &state).await?;
+        add_remote_users(&attachment.id, user_ids.clone(), state).await?;
     }
     emit_instance(&state.events, instance_id, InstancePayloadType::Edited)
         .await?;
 
-    get_remote_users(&attachment.id, &state).await
+    get_remote_users(&attachment.id, state).await
 }
 
-#[tracing::instrument(skip(replace_invite_id))]
+#[tracing::instrument(skip(state, replace_invite_id))]
 pub async fn create_shared_instance_invite_link(
+    state: &State,
     instance_id: &str,
     max_age_seconds: Option<i32>,
     max_uses: Option<i32>,
     replace_invite_id: Option<String>,
 ) -> crate::Result<SharedInstanceInviteLink> {
-    let state = State::get().await?;
     let _shared_instance_lock =
         state.instance_locks.lock_shared(instance_id).await;
     let (metadata, attachment) =
-        shared_instance_for_invites(instance_id, 0, &state).await?;
+        shared_instance_for_invites(instance_id, 0, state).await?;
     ensure_owner(&attachment)?;
-    ensure_ready_remote_version_for_invite(instance_id, &attachment, &state)
+    ensure_ready_remote_version_for_invite(instance_id, &attachment, state)
         .await?;
     update_remote_instance(
         &attachment.id,
         shared_instance_name(metadata.instance.name),
-        &state,
+        state,
     )
     .await?;
 
@@ -100,7 +95,7 @@ pub async fn create_shared_instance_invite_link(
     let created_at = Utc::now();
 
     let invite_id =
-        create_remote_invite(&attachment.id, max_age_seconds, max_uses, &state)
+        create_remote_invite(&attachment.id, max_age_seconds, max_uses, state)
             .await?;
 
     // Amberite: the replaced link goes only once its replacement exists, and a failed delete takes
@@ -108,10 +103,10 @@ pub async fn create_shared_instance_invite_link(
     // links the same way (packages/ui use-server-players.ts).
     if let Some(replaced) = replace_invite_id
         && let Err(error) =
-            delete_remote_invite(&attachment.id, &replaced, &state).await
+            delete_remote_invite(&attachment.id, &replaced, state).await
     {
         if let Err(undo) =
-            delete_remote_invite(&attachment.id, &invite_id, &state).await
+            delete_remote_invite(&attachment.id, &invite_id, state).await
         {
             tracing::warn!(%undo, "could not take back a replacement invite link");
         }
@@ -129,17 +124,17 @@ pub async fn create_shared_instance_invite_link(
     })
 }
 
-#[tracing::instrument]
+#[tracing::instrument(skip(state))]
 pub async fn get_shared_instance_invites(
+    state: &State,
     instance_id: &str,
 ) -> crate::Result<Vec<SharedInstanceInvite>> {
-    let state = State::get().await?;
-    let Some(attachment) = shared_attachment(instance_id, &state).await? else {
+    let Some(attachment) = shared_attachment(instance_id, state).await? else {
         return Ok(Vec::new());
     };
     ensure_owner(&attachment)?;
 
-    Ok(get_remote_invites(&attachment.id, &state)
+    Ok(get_remote_invites(&attachment.id, state)
         .await?
         .into_iter()
         .map(|invite| SharedInstanceInvite {
@@ -151,51 +146,51 @@ pub async fn get_shared_instance_invites(
         .collect())
 }
 
-#[tracing::instrument(skip(invite_id))]
+#[tracing::instrument(skip(state, invite_id))]
 pub async fn revoke_shared_instance_invite(
+    state: &State,
     instance_id: &str,
     invite_id: String,
 ) -> crate::Result<()> {
-    let state = State::get().await?;
     let _shared_instance_lock =
         state.instance_locks.lock_shared(instance_id).await;
-    let Some(attachment) = shared_attachment(instance_id, &state).await? else {
+    let Some(attachment) = shared_attachment(instance_id, state).await? else {
         return Ok(());
     };
     ensure_owner(&attachment)?;
 
-    delete_remote_invite(&attachment.id, &invite_id, &state).await?;
+    delete_remote_invite(&attachment.id, &invite_id, state).await?;
     emit_instance(&state.events, instance_id, InstancePayloadType::Edited).await
 }
 
-#[tracing::instrument]
+#[tracing::instrument(skip(state))]
 pub async fn remove_shared_instance_users(
+    state: &State,
     instance_id: &str,
     user_ids: Vec<String>,
     has_pending_recipients: bool,
 ) -> crate::Result<SharedInstanceUsers> {
-    let state = State::get().await?;
     let _shared_instance_lock =
         state.instance_locks.lock_shared(instance_id).await;
-    let Some(attachment) = shared_attachment(instance_id, &state).await? else {
+    let Some(attachment) = shared_attachment(instance_id, state).await? else {
         return Ok(SharedInstanceUsers::empty());
     };
     ensure_owner(&attachment)?;
 
     if !user_ids.is_empty() {
-        remove_remote_users(&attachment.id, user_ids, &state).await?;
+        remove_remote_users(&attachment.id, user_ids, state).await?;
     }
 
-    let remaining_users = get_remote_users(&attachment.id, &state).await?;
+    let remaining_users = get_remote_users(&attachment.id, state).await?;
     if !has_shared_instance_recipients(
         &remaining_users,
         &attachment,
         has_pending_recipients,
-        &state,
+        state,
     )
     .await?
     {
-        delete_remote_instance(&attachment.id, &state).await?;
+        delete_remote_instance(&attachment.id, state).await?;
         crate::state::clear_shared_instance(instance_id, &state.pool).await?;
         emit_instance(&state.events, instance_id, InstancePayloadType::Edited)
             .await?;
@@ -209,16 +204,15 @@ pub async fn remove_shared_instance_users(
     Ok(remaining_users)
 }
 
-#[tracing::instrument]
+#[tracing::instrument(skip(state))]
 pub async fn accept_pending_shared_instance_invite(
+    state: &State,
     shared_instance_id: &str,
 ) -> crate::Result<()> {
-    let state = State::get().await?;
-
     // Read access doesn't imply membership: staff and server members can read
     // an instance while their invite is still pending.
     let has_access =
-        match get_remote_instance_access(shared_instance_id, &state).await? {
+        match get_remote_instance_access(shared_instance_id, state).await? {
             SharedInstanceRemoteResponse::Available(_) => true,
             SharedInstanceRemoteResponse::Unavailable(
                 SharedInstanceUnavailableReason::AccessRevoked,
@@ -228,7 +222,7 @@ pub async fn accept_pending_shared_instance_invite(
             }
         };
 
-    if accept_pending_remote_invite(shared_instance_id, &state).await?
+    if accept_pending_remote_invite(shared_instance_id, state).await?
         || has_access
     {
         return Ok(());
@@ -239,10 +233,10 @@ pub async fn accept_pending_shared_instance_invite(
     ))
 }
 
-#[tracing::instrument]
+#[tracing::instrument(skip(state))]
 pub async fn decline_pending_shared_instance_invite(
+    state: &State,
     shared_instance_id: &str,
 ) -> crate::Result<()> {
-    let state = State::get().await?;
-    decline_pending_remote_invite(shared_instance_id, &state).await
+    decline_pending_remote_invite(shared_instance_id, state).await
 }

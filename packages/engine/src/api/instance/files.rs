@@ -239,11 +239,11 @@ impl InstanceFileWriter {
 }
 
 pub async fn list_instance_files(
+    state: &State,
     instance_id: &str,
     path: &str,
 ) -> crate::Result<Vec<InstanceFileItem>> {
-    let state = State::get().await?;
-    let directory = resolve(&state, instance_id, path, false).await?;
+    let directory = resolve(state, instance_id, path, false).await?;
     let mut entries = fs::read_dir(directory.path()).await?;
     let mut output = Vec::new();
     while let Some(entry) = entries.next_entry().await? {
@@ -260,13 +260,13 @@ pub async fn list_instance_files(
             format!("{}/{name}", normalized(path))
         };
         let file_type = entry.file_type().await?;
-        let resolved = resolve(&state, instance_id, &relative, false).await;
+        let resolved = resolve(state, instance_id, &relative, false).await;
         let metadata = match &resolved {
             Ok(content) => fs::metadata(content.path()).await.ok(),
             Err(_) => None,
         };
         let read_only =
-            resolve(&state, instance_id, &relative, true).await.is_err();
+            resolve(state, instance_id, &relative, true).await.is_err();
         let count = if file_type.is_dir() && !file_type.is_symlink() {
             let mut children = fs::read_dir(entry.path()).await?;
             let mut count = 0;
@@ -310,20 +310,20 @@ pub async fn list_instance_files(
 }
 
 pub async fn read_instance_file(
+    state: &State,
     instance_id: &str,
     path: &str,
 ) -> crate::Result<Vec<u8>> {
-    let state = State::get().await?;
-    let content = resolve(&state, instance_id, path, false).await?;
+    let content = resolve(state, instance_id, path, false).await?;
     Ok(fs::read(content.path()).await?)
 }
 
 pub async fn validate_instance_file_write(
+    state: &State,
     instance_id: &str,
     path: &str,
 ) -> crate::Result<PathBuf> {
-    let state = State::get().await?;
-    instance_file_write_path(&state, instance_id, path).await
+    instance_file_write_path(state, instance_id, path).await
 }
 
 async fn instance_file_write_path(
@@ -338,15 +338,15 @@ async fn instance_file_write_path(
 }
 
 pub async fn write_instance_file(
+    state: &State,
     instance_id: &str,
     path: &str,
     bytes: &[u8],
     create_only: bool,
 ) -> crate::Result<()> {
-    let state = State::get().await?;
     let _instance = state.instance_locks.lock_content(instance_id).await;
     let _files = state.content_store.files_lock.lock().await;
-    let destination = resolve(&state, instance_id, path, true)
+    let destination = resolve(state, instance_id, path, true)
         .await?
         .path()
         .to_path_buf();
@@ -372,7 +372,7 @@ pub async fn write_instance_file(
         .await?
         .sync_all()
         .await?;
-    resolve(&state, instance_id, path, true).await?;
+    resolve(state, instance_id, path, true).await?;
     tokio::task::spawn_blocking(move || {
         if create_only {
             temporary.persist_noclobber(destination)
@@ -386,27 +386,27 @@ pub async fn write_instance_file(
 }
 
 pub async fn create_instance_directory(
+    state: &State,
     instance_id: &str,
     path: &str,
 ) -> crate::Result<()> {
-    let state = State::get().await?;
     let _instance = state.instance_locks.lock_content(instance_id).await;
     let _files = state.content_store.files_lock.lock().await;
-    let destination = resolve(&state, instance_id, path, true).await?;
+    let destination = resolve(state, instance_id, path, true).await?;
     fs::create_dir(destination.path()).await?;
     Ok(())
 }
 
 pub async fn rename_instance_file(
+    state: &State,
     instance_id: &str,
     source: &str,
     destination: &str,
 ) -> crate::Result<()> {
-    let state = State::get().await?;
     let _instance = state.instance_locks.lock_content(instance_id).await;
     let _files = state.content_store.files_lock.lock().await;
-    let source = resolve(&state, instance_id, source, true).await?;
-    let destination = resolve(&state, instance_id, destination, true).await?;
+    let source = resolve(state, instance_id, source, true).await?;
+    let destination = resolve(state, instance_id, destination, true).await?;
     if fs::symlink_metadata(destination.path()).await.is_ok() {
         bail!(ErrorKind::InputError(
             "the destination already exists".to_string()
@@ -417,14 +417,14 @@ pub async fn rename_instance_file(
 }
 
 pub async fn delete_instance_file(
+    state: &State,
     instance_id: &str,
     path: &str,
     recursive: bool,
 ) -> crate::Result<()> {
-    let state = State::get().await?;
     let _instance = state.instance_locks.lock_content(instance_id).await;
     let _files = state.content_store.files_lock.lock().await;
-    let path = resolve(&state, instance_id, path, true).await?;
+    let path = resolve(state, instance_id, path, true).await?;
     if fs::symlink_metadata(path.path()).await?.is_dir() {
         if recursive {
             fs::remove_dir_all(path.path()).await?;
@@ -438,11 +438,11 @@ pub async fn delete_instance_file(
 }
 
 pub async fn save_instance_file_as(
+    state: &State,
     instance_id: &str,
     source: &str,
     destination: &Path,
 ) -> crate::Result<()> {
-    let state = State::get().await?;
     let _files = state.content_store.files_lock.lock().await;
     let parent = destination.parent().ok_or(ErrorKind::InputError(
         "invalid save destination".to_string(),
@@ -466,7 +466,7 @@ pub async fn save_instance_file_as(
             "cannot save over a symbolic link".to_string()
         ));
     }
-    let content = resolve(&state, instance_id, source, false).await?;
+    let content = resolve(state, instance_id, source, false).await?;
     fs::copy(content.path(), destination).await?;
     Ok(())
 }

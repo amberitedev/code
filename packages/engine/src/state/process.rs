@@ -992,9 +992,11 @@ impl Process {
         state.process_manager.remove(uuid);
         clear_persisted_process(&state.pool, persisted_process).await;
         let sync_instance_id = instance_id.clone();
+        let sync_state = Arc::clone(&state);
         tokio::spawn(async move {
             if let Err(error) =
                 crate::api::instance::reconcile_instance_synced_options(
+                    &sync_state,
                     &sync_instance_id,
                 )
                 .await
@@ -1026,9 +1028,11 @@ impl Process {
         // Allow failure, it will be stored locally and sent next time
         // Sent in another thread as first call may take a couple seconds and hold up process ending
         let playtime_instance_id = instance_id.clone();
+        let playtime_state = Arc::clone(&state);
         tokio::spawn(async move {
             if let Err(e) =
                 crate::api::instance::try_update_playtime_by_instance_id(
+                    &playtime_state,
                     &playtime_instance_id,
                 )
                 .await

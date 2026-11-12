@@ -193,10 +193,10 @@ impl From<ServerPackStatus> for Option<bool> {
 }
 
 pub async fn get_recent_worlds(
+    state: &State,
     limit: usize,
     display_statuses: EnumSet<DisplayStatus>,
 ) -> Result<Vec<WorldWithInstance>> {
-    let state = State::get().await?;
     let instances_dir = state.directories.instances_dir();
 
     let mut instances = crate::state::list_instances(&state.pool).await?;
@@ -215,7 +215,7 @@ pub async fn get_recent_worlds(
         let instance_path = &instance.instance.path;
         let instance_dir = instances_dir.join(instance_path);
         let instance_worlds =
-            get_all_worlds_in_instance(instance_id, &instance_dir).await;
+            get_all_worlds_in_instance(state, instance_id, &instance_dir).await;
         if let Err(e) = instance_worlds {
             tracing::error!(
                 "Failed to get worlds for instance {}: {}",
@@ -253,9 +253,16 @@ pub async fn get_recent_worlds(
     Ok(result)
 }
 
-pub async fn get_instance_worlds(instance_id: &str) -> Result<Vec<World>> {
-    get_all_worlds_in_instance(instance_id, &get_full_path(instance_id).await?)
-        .await
+pub async fn get_instance_worlds(
+    state: &crate::State,
+    instance_id: &str,
+) -> Result<Vec<World>> {
+    get_all_worlds_in_instance(
+        state,
+        instance_id,
+        &get_full_path(state, instance_id).await?,
+    )
+    .await
 }
 
 async fn resolve_instance_id(instance: &str, state: &State) -> Result<String> {
@@ -291,15 +298,20 @@ async fn resolve_instance_identity(
 
 #[tracing::instrument(name = "worlds_instance", skip_all, fields(instance_id))]
 async fn get_all_worlds_in_instance(
+    state: &State,
     instance_id: &str,
     instance_dir: &Path,
 ) -> Result<Vec<World>> {
     let mut worlds = vec![];
     get_singleplayer_worlds_in_instance(instance_dir, &mut worlds).await?;
-    let state = State::get().await?;
 
-    get_server_worlds_in_instance(instance_id, instance_dir, &mut worlds)
-        .await?;
+    get_server_worlds_in_instance(
+        state,
+        instance_id,
+        instance_dir,
+        &mut worlds,
+    )
+    .await?;
 
     let attached_data =
         AttachedWorldData::get_all_for_instance(instance_id, &state.pool)
@@ -350,12 +362,12 @@ async fn get_singleplayer_worlds_in_instance(
 }
 
 pub async fn get_singleplayer_world(
+    state: &State,
     instance: &str,
     world: &str,
 ) -> Result<World> {
-    let state = State::get().await?;
     let (instance_id, instance_path) =
-        resolve_instance_identity(instance, &state).await?;
+        resolve_instance_identity(instance, state).await?;
     let instance_dir = state.directories.instances_dir().join(instance_path);
     let mut world =
         read_singleplayer_world(get_world_dir(&instance_dir, world)).await?;
@@ -454,16 +466,16 @@ fn read_hardcore(data: &NbtCompound) -> bool {
 }
 
 async fn get_server_worlds_in_instance(
+    state: &State,
     instance_id: &str,
     _instance_dir: &Path,
     worlds: &mut Vec<World>,
 ) -> Result<()> {
-    let state = State::get().await?;
     let metadata = crate::state::get_instance(instance_id, &state.pool)
         .await?
         .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
     let servers = crate::api::instance::synced_servers::list_server_records(
-        &metadata, &state,
+        &metadata, state,
     )
     .await?;
     if servers.is_empty() {
@@ -526,13 +538,13 @@ fn attach_world_data_to_world(world: &mut World, data: &AttachedWorldData) {
 }
 
 pub async fn set_world_display_status(
+    state: &State,
     instance: &str,
     world_type: WorldType,
     world_id: &str,
     display_status: DisplayStatus,
 ) -> Result<()> {
-    let state = State::get().await?;
-    let instance_id = resolve_instance_id(instance, &state).await?;
+    let instance_id = resolve_instance_id(instance, state).await?;
     attached_world_data::set_display_status(
         &instance_id,
         world_type,
@@ -815,6 +827,7 @@ async fn try_get_world_session_lock(
 }
 
 pub async fn add_server_to_instance(
+    state: &State,
     instance_id: &str,
     name: String,
     address: String,
@@ -822,9 +835,8 @@ pub async fn add_server_to_instance(
     project_id: Option<String>,
     content_kind: Option<String>,
 ) -> Result<usize> {
-    let state = State::get().await?;
     let (instance_id, _) =
-        resolve_instance_identity(instance_id, &state).await?;
+        resolve_instance_identity(instance_id, state).await?;
     let metadata = crate::state::get_instance(&instance_id, &state.pool)
         .await?
         .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
@@ -834,12 +846,12 @@ pub async fn add_server_to_instance(
         pack_status.into(),
     );
     let server_id = crate::api::instance::synced_servers::add_user_server(
-        &metadata, data, &state,
+        &metadata, data, state,
     )
     .await?;
     let insert_index =
         crate::api::instance::synced_servers::list_server_records(
-            &metadata, &state,
+            &metadata, state,
         )
         .await?
         .iter()
@@ -873,34 +885,34 @@ pub async fn add_server_to_instance(
 }
 
 pub async fn ensure_managed_server_in_instance(
+    state: &State,
     instance_id: &str,
     name: String,
     address: String,
 ) -> Result<()> {
-    let state = State::get().await?;
     let (instance_id, _) =
-        resolve_instance_identity(instance_id, &state).await?;
+        resolve_instance_identity(instance_id, state).await?;
     let metadata = crate::state::get_instance(&instance_id, &state.pool)
         .await?
         .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
     let data =
         crate::api::instance::synced_servers::server_data(name, address, None);
     crate::api::instance::synced_servers::ensure_managed_server(
-        &metadata, data, &state,
+        &metadata, data, state,
     )
     .await
 }
 
 pub async fn edit_server_in_instance(
+    state: &State,
     instance_id: &str,
     index: usize,
     name: String,
     address: String,
     pack_status: ServerPackStatus,
 ) -> Result<()> {
-    let state = State::get().await?;
     let (instance_id, _) =
-        resolve_instance_identity(instance_id, &state).await?;
+        resolve_instance_identity(instance_id, state).await?;
     let metadata = crate::state::get_instance(&instance_id, &state.pool)
         .await?
         .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
@@ -910,31 +922,32 @@ pub async fn edit_server_in_instance(
         name,
         address,
         pack_status.into(),
-        &state,
+        state,
     )
     .await
 }
 
 pub async fn remove_server_from_instance(
+    state: &State,
     instance_id: &str,
     index: usize,
 ) -> Result<()> {
-    let state = State::get().await?;
     let (instance_id, _) =
-        resolve_instance_identity(instance_id, &state).await?;
+        resolve_instance_identity(instance_id, state).await?;
     let metadata = crate::state::get_instance(&instance_id, &state.pool)
         .await?
         .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
     crate::api::instance::synced_servers::remove_server_by_index(
-        &metadata, index, &state,
+        &metadata, index, state,
     )
     .await
 }
 
 pub async fn get_instance_protocol_version(
+    state: &State,
     instance_id: &str,
 ) -> Result<Option<ProtocolVersion>> {
-    let metadata = crate::api::instance::get(instance_id).await?.ok_or(
+    let metadata = crate::api::instance::get(state, instance_id).await?.ok_or(
         ErrorKind::InputError(format!("could not find instance {instance_id}")),
     )?;
     if metadata.instance.install_stage != InstanceInstallStage::Installed {
@@ -952,16 +965,16 @@ pub async fn get_instance_protocol_version(
         return Ok(Some(*protocol_version));
     }
 
-    let state = State::get().await?;
     let (minecraft, version_index) =
         crate::launcher::resolve_minecraft_manifest(
             &metadata.applied_content_set.game_version,
-            &state,
+            state,
         )
         .await?;
     let version = &minecraft.versions[version_index];
 
     let loader_version = get_loader_version_from_profile(
+        state,
         &metadata.applied_content_set.game_version,
         metadata.applied_content_set.loader,
         metadata.applied_content_set.loader_version.as_deref(),
@@ -980,7 +993,6 @@ pub async fn get_instance_protocol_version(
             format!("{}-{}", version.id.clone(), it.id.clone())
         });
 
-    let state = State::get().await?;
     let client_path = state
         .directories
         .version_dir(&version_jar)

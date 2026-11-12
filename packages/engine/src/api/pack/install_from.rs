@@ -178,6 +178,7 @@ pub struct CreatePackDescription {
 }
 
 pub async fn get_instance_from_pack(
+    state: &State,
     location: CreatePackLocation,
 ) -> crate::Result<CreatePackInstance> {
     match location {
@@ -211,7 +212,7 @@ pub async fn get_instance_from_pack(
                 .saturating_add(external_file_hashing_bytes)
                 .max(1);
             let inspection = init_loading(
-                &State::get().await?.events,
+                &state.events,
                 LoadingBarType::PackImport {
                     pack_name: instance.name.clone(),
                 },
@@ -244,7 +245,6 @@ pub async fn get_instance_from_pack(
                 };
 
             let is_known_file = if hashes_archive {
-                let state = State::get().await?;
                 let (_, hash) =
                     sha1_file_async_with_progress(&path, |current, _| {
                         report_progress(current, 0, "Hashing local modpack");
@@ -276,6 +276,7 @@ pub async fn get_instance_from_pack(
 
             let external_files_in_modpack =
                 super::install_mrpack::get_external_files_from_mrpack(
+                    state,
                     &pack_file,
                     |current, _| {
                         report_progress(
@@ -300,9 +301,10 @@ pub async fn get_instance_from_pack(
     }
 }
 
-#[tracing::instrument(skip(reporter))]
+#[tracing::instrument(skip(state, reporter))]
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn generate_pack_from_version_id_with_reporter(
+    state: &State,
     project_id: String,
     version_id: String,
     title: String,
@@ -311,8 +313,6 @@ pub(crate) async fn generate_pack_from_version_id_with_reporter(
     reason: DownloadReason,
     reporter: InstallProgressReporter,
 ) -> crate::Result<CreatePack> {
-    let state = State::get().await?;
-
     let version = CachedEntry::get_version(
         &version_id,
         Some(CacheBehaviour::Bypass),
@@ -335,6 +335,7 @@ pub(crate) async fn generate_pack_from_version_id_with_reporter(
             .unwrap_or(ModLoader::Vanilla);
         let game_version = game_version.clone();
         crate::api::instance::edit(
+            state,
             &instance_id,
             EditInstance {
                 content_set_patch: Some(AppliedContentSetPatch {
@@ -363,9 +364,11 @@ pub(crate) async fn generate_pack_from_version_id_with_reporter(
             "specified version has no files".to_string(),
         ))?;
 
-    let metadata = crate::api::instance::get(&instance_id).await?.ok_or(
-        ErrorKind::InputError(format!("unknown instance {instance_id}")),
-    )?;
+    let metadata = crate::api::instance::get(state, &instance_id)
+        .await?
+        .ok_or(ErrorKind::InputError(format!(
+            "unknown instance {instance_id}"
+        )))?;
 
     let download_meta = DownloadMeta {
         reason,
@@ -419,7 +422,7 @@ pub(crate) async fn generate_pack_from_version_id_with_reporter(
         .build();
     reporter.set_context(context).await?;
     let file = crate::util::fetch::fetch_content_file(
-        &state,
+        state,
         &[&url],
         version
             .files
@@ -462,7 +465,7 @@ pub(crate) async fn generate_pack_from_version_id_with_reporter(
         )
         .await?;
 
-        Some(crate::api::instance::cache_icon(icon_bytes, &state).await?)
+        Some(crate::api::instance::cache_icon(icon_bytes, state).await?)
     } else {
         None
     };
@@ -470,6 +473,7 @@ pub(crate) async fn generate_pack_from_version_id_with_reporter(
     // Set the icon immediately so the UI shows it during download.
     if let Some(ref icon_path) = icon {
         let _ = crate::api::instance::edit_icon(
+            state,
             &instance_id,
             Some(icon_path.as_path()),
         )
@@ -489,16 +493,16 @@ pub(crate) async fn generate_pack_from_version_id_with_reporter(
     })
 }
 
-#[tracing::instrument]
+#[tracing::instrument(skip(state))]
 
 pub async fn generate_pack_from_file(
+    state: &State,
     path: PathBuf,
     instance_id: String,
 ) -> crate::Result<CreatePack> {
     let source_filename =
         path.file_name().map(|x| x.to_string_lossy().to_string());
 
-    let state = State::get().await?;
     let stored_file = state.content_store.store_file(&path).await?;
     Ok(CreatePack {
         file: CreatePackFile::Downloaded(
@@ -521,6 +525,7 @@ pub async fn generate_pack_from_file(
 /// Sets generated instance attributes to the pack ones.
 /// This includes the pack name, icon, game version, loader version, and loader
 pub async fn set_instance_information(
+    state: &crate::State,
     instance_id: String,
     description: &CreatePackDescription,
     backup_name: &str,
@@ -564,6 +569,7 @@ pub async fn set_instance_information(
     let mod_loader = mod_loader.unwrap_or(ModLoader::Vanilla);
     let loader_version = if mod_loader != ModLoader::Vanilla {
         crate::launcher::get_loader_version_from_profile(
+            state,
             game_version,
             mod_loader,
             loader_version.cloned().as_deref(),
@@ -591,7 +597,7 @@ pub async fn set_instance_information(
         }
         _ => None,
     };
-    let existing_link = crate::api::instance::get(&instance_id)
+    let existing_link = crate::api::instance::get(state, &instance_id)
         .await?
         .map(|metadata| metadata.link);
     let link = match existing_link {
@@ -623,6 +629,7 @@ pub async fn set_instance_information(
         _ => None,
     };
     crate::api::instance::edit(
+        state,
         &instance_id,
         EditInstance {
             install_stage: Some(InstanceInstallStage::PackInstalling),

@@ -8,9 +8,11 @@ use super::*;
 use crate::self_hosted::pool::{PoolAccess, PoolFile};
 use crate::state::BackendSessionKind;
 use sharing_client::install::ConfigUpdate;
+use std::sync::Arc;
 
-#[tracing::instrument]
+#[tracing::instrument(skip(state))]
 pub async fn install_shared_instance(
+    state: &Arc<State>,
     shared_instance_id: &str,
     name: String,
     manager_id: Option<String>,
@@ -21,6 +23,7 @@ pub async fn install_shared_instance(
 ) -> crate::Result<InstallJobSnapshot> {
     crate::util::fetch::wait_for_local_api_rate_limit(Box::pin(
         install_shared_instance_inner(
+            state,
             shared_instance_id,
             name,
             manager_id,
@@ -34,6 +37,7 @@ pub async fn install_shared_instance(
 }
 
 async fn install_shared_instance_inner(
+    state: &Arc<State>,
     shared_instance_id: &str,
     name: String,
     manager_id: Option<String>,
@@ -42,9 +46,8 @@ async fn install_shared_instance_inner(
     instance_icon_url: Option<String>,
     instance_icon_config: Option<IconConfig>,
 ) -> crate::Result<InstallJobSnapshot> {
-    let state = State::get().await?;
-    let version = get_latest_remote_version(shared_instance_id, &state).await?;
-    let configs = remote_config_update(None, None, &version, &state).await?;
+    let version = get_latest_remote_version(shared_instance_id, state).await?;
+    let configs = remote_config_update(None, None, &version, state).await?;
     let mut data = shared_instance_install_data(
         shared_instance_id,
         manager_id,
@@ -56,7 +59,7 @@ async fn install_shared_instance_inner(
         version,
         configs,
         None,
-        &state,
+        state,
     )
     .await?;
 
@@ -65,7 +68,7 @@ async fn install_shared_instance_inner(
         && is_remote_shared_instance_owner(
             shared_instance_id,
             data.linked_user_id.as_deref(),
-            &state,
+            state,
         )
         .await
     {
@@ -74,7 +77,7 @@ async fn install_shared_instance_inner(
         data.server_manager_icon_url = None;
     }
 
-    crate::install::create_shared_instance(data).await
+    crate::install::create_shared_instance(data, state).await
 }
 
 async fn is_remote_shared_instance_owner(
@@ -102,11 +105,11 @@ async fn is_remote_shared_instance_owner(
     }
 }
 
-#[tracing::instrument]
+#[tracing::instrument(skip(state))]
 pub async fn dismiss_shared_instance_restored_notice(
+    state: &State,
     instance_id: &str,
 ) -> crate::Result<()> {
-    let state = State::get().await?;
     crate::state::set_shared_instance_restored_from_remote(
         instance_id,
         false,
@@ -131,38 +134,43 @@ pub(super) fn shared_instance_invite_install_name(
     name.to_string()
 }
 
-#[tracing::instrument]
+#[tracing::instrument(skip(state))]
 pub async fn get_shared_instance_install_preview(
+    state: &crate::State,
     shared_instance_id: &str,
     name: String,
 ) -> crate::Result<SharedInstanceInstallPreview> {
     crate::util::fetch::wait_for_local_api_rate_limit(
-        get_shared_instance_install_preview_inner(shared_instance_id, name),
+        get_shared_instance_install_preview_inner(
+            state,
+            shared_instance_id,
+            name,
+        ),
     )
     .await
 }
 
 async fn get_shared_instance_install_preview_inner(
+    state: &State,
     shared_instance_id: &str,
     name: String,
 ) -> crate::Result<SharedInstanceInstallPreview> {
-    let state = State::get().await?;
-    let version = get_latest_remote_version(shared_instance_id, &state).await?;
+    let version = get_latest_remote_version(shared_instance_id, state).await?;
     shared_instance_install_preview_from_version(
         shared_instance_id.to_string(),
         name,
         version,
-        &state,
+        state,
     )
     .await
 }
 
-#[tracing::instrument(skip(invite_id))]
+#[tracing::instrument(skip(state, invite_id))]
 pub async fn get_shared_instance_invite_install_preview(
+    state: &State,
     invite_id: &str,
 ) -> crate::Result<SharedInstanceInviteInstallPreview> {
-    let state = State::get().await?;
-    let invite = get_shared_instance_invite_info(invite_id, &state).await?;
+    let invite = get_shared_instance_invite_info(invite_id, state).await?;
     let shared_instance_id = invite.instance_id;
     let instance_icon_url = invite.instance_icon;
     let inviter = invite.inviter;
@@ -180,7 +188,7 @@ pub async fn get_shared_instance_invite_install_preview(
         shared_instance_id.clone(),
         name,
         version,
-        &state,
+        state,
     )
     .await?;
     if instance_icon_url.is_some() {
@@ -199,18 +207,18 @@ pub async fn get_shared_instance_invite_install_preview(
     })
 }
 
-#[tracing::instrument(skip(invite_id))]
+#[tracing::instrument(skip(state, invite_id))]
 pub async fn accept_shared_instance_invite_for_install(
+    state: &State,
     shared_instance_id: &str,
     invite_id: &str,
 ) -> crate::Result<()> {
-    let state = State::get().await?;
-    match get_remote_instance_access(shared_instance_id, &state).await? {
+    match get_remote_instance_access(shared_instance_id, state).await? {
         SharedInstanceRemoteResponse::Available(_) => Ok(()),
         SharedInstanceRemoteResponse::Unavailable(
             SharedInstanceUnavailableReason::AccessRevoked,
         ) => {
-            accept_shared_instance_invite(shared_instance_id, invite_id, &state)
+            accept_shared_instance_invite(shared_instance_id, invite_id, state)
                 .await
         }
         SharedInstanceRemoteResponse::Unavailable(reason) => {
@@ -278,20 +286,21 @@ pub(super) async fn shared_instance_install_preview_from_version(
     })
 }
 
-#[tracing::instrument]
+#[tracing::instrument(skip(state))]
 pub async fn get_shared_instance_update_preview(
+    state: &crate::State,
     instance_id: &str,
 ) -> crate::Result<Option<SharedInstanceUpdatePreview>> {
     crate::util::fetch::wait_for_local_api_rate_limit(
-        get_shared_instance_update_preview_inner(instance_id),
+        get_shared_instance_update_preview_inner(state, instance_id),
     )
     .await
 }
 
 async fn get_shared_instance_update_preview_inner(
+    state: &State,
     instance_id: &str,
 ) -> crate::Result<Option<SharedInstanceUpdatePreview>> {
-    let state = State::get().await?;
     let metadata = crate::state::get_instance(instance_id, &state.pool)
         .await?
         .ok_or(crate::ErrorKind::InputError("unknown instance".to_string()))?;
@@ -300,13 +309,13 @@ async fn get_shared_instance_update_preview_inner(
     };
     if !attachment.role.is_member() && attachment.applied_version.is_none() {
         if let SharedInstanceRemoteResponse::Unavailable(reason) =
-            get_remote_instance_access(&attachment.id, &state).await?
+            get_remote_instance_access(&attachment.id, state).await?
         {
             handle_unavailable_shared_instance_if_current_user(
                 instance_id,
                 &attachment,
                 reason,
-                &state,
+                state,
             )
             .await?;
             return Err(shared_instance_unavailable_error(reason));
@@ -316,7 +325,7 @@ async fn get_shared_instance_update_preview_inner(
     }
 
     let version =
-        get_latest_attached_remote_version(instance_id, &attachment, &state)
+        get_latest_attached_remote_version(instance_id, &attachment, state)
             .await?;
     if !version.ready {
         return Ok(Some(SharedInstanceUpdatePreview {
@@ -337,18 +346,18 @@ async fn get_shared_instance_update_preview_inner(
             Some(&metadata.instance.id),
             config_base_version(&attachment, &version),
             &version,
-            &state,
+            state,
         )
         .await?;
         let removed =
-            unedited_configs(&metadata.instance.id, &configs.left, &state)
+            unedited_configs(&metadata.instance.id, &configs.left, state)
                 .await?;
         shared_instance_update_diffs(
             &metadata,
             &version,
             &configs.write,
             &removed,
-            &state,
+            state,
         )
         .await?
     } else {
@@ -408,6 +417,7 @@ pub(crate) async fn check_shared_instance_availability_before_launch(
     if let Some(server) = remote.linked_server
         && let Err(error) =
             crate::api::worlds::ensure_managed_server_in_instance(
+                state,
                 instance_id,
                 remote.name,
                 server.domain,
@@ -425,16 +435,17 @@ pub(crate) async fn check_shared_instance_availability_before_launch(
     Ok(())
 }
 
-#[tracing::instrument]
+#[tracing::instrument(skip(state))]
 pub async fn update_shared_instance(
+    state: &Arc<State>,
     instance_id: &str,
 ) -> crate::Result<InstallJobSnapshot> {
-    let state = State::get().await?;
     let metadata = crate::state::get_instance(instance_id, &state.pool)
         .await?
         .ok_or(crate::ErrorKind::InputError("unknown instance".to_string()))?;
     member_attachment(&metadata)?;
-    crate::install::update_shared_instance(instance_id.to_string(), None).await
+    crate::install::update_shared_instance(instance_id.to_string(), None, state)
+        .await
 }
 
 fn member_attachment(

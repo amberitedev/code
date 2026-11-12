@@ -107,6 +107,8 @@ pub use self::types::{
     SharedInstanceUser, SharedInstanceUsers,
 };
 
-pub async fn can_active_user_use_shared_instances() -> crate::Result<bool> {
-    Ok(State::get().await?.sessions.backend().is_some())
+pub async fn can_active_user_use_shared_instances(
+    state: &State,
+) -> crate::Result<bool> {
+    Ok(state.sessions.backend().is_some())
 }

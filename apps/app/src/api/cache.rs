@@ -1,4 +1,5 @@
 use crate::api::Result;
+use crate::engine_handle::EngineHandle;
 use engine::prelude::*;
 
 macro_rules! impl_cache_methods {
@@ -6,20 +7,23 @@ macro_rules! impl_cache_methods {
         $(
             paste::paste! {
                 #[tauri::command]
-                pub async fn [<get_ $variant:snake>](id: &str, cache_behaviour: Option<CacheBehaviour>) -> Result<Option<$type>>
+                pub async fn [<get_ $variant:snake>](handle: tauri::State<'_, EngineHandle>, id: &str, cache_behaviour: Option<CacheBehaviour>) -> Result<Option<$type>>
                 {
-                    Ok(engine::cache::[<get_ $variant:snake>](id, cache_behaviour).await?)
+                    let state = handle.get().await;
+                    Ok(engine::cache::[<get_ $variant:snake>](&state, id, cache_behaviour).await?)
                 }
 
                 #[tauri::command]
                 pub async fn [<get_ $variant:snake _many>](
+                    handle: tauri::State<'_, EngineHandle>,
                     ids: Vec<String>,
                     cache_behaviour: Option<CacheBehaviour>,
                 ) -> Result<Vec<$type>>
                 {
+                    let state = handle.get().await;
                     let ids = ids.iter().map(|x| &**x).collect::<Vec<&str>>();
                     let entries =
-                        engine::cache::[<get_ $variant:snake _many>](&*ids, cache_behaviour).await?;
+                        engine::cache::[<get_ $variant:snake _many>](&state, &*ids, cache_behaviour).await?;
 
                     Ok(entries)
                 }
@@ -65,17 +69,27 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
 }
 
 #[tauri::command]
-pub async fn purge_cache_types(cache_types: Vec<CacheValueType>) -> Result<()> {
-    Ok(engine::cache::purge_cache_types(&cache_types).await?)
+pub async fn purge_cache_types(
+    handle: tauri::State<'_, EngineHandle>,
+    cache_types: Vec<CacheValueType>,
+) -> Result<()> {
+    let state = handle.get().await;
+    Ok(engine::cache::purge_cache_types(&state, &cache_types).await?)
 }
 
 #[tauri::command]
 pub async fn get_project_versions(
+    handle: tauri::State<'_, EngineHandle>,
     project_id: &str,
     cache_behaviour: Option<CacheBehaviour>,
 ) -> Result<Option<Vec<Version>>> {
+    let state = handle.get().await;
     Ok(
-        engine::cache::get_project_versions(project_id, cache_behaviour)
-            .await?,
+        engine::cache::get_project_versions(
+            &state,
+            project_id,
+            cache_behaviour,
+        )
+        .await?,
     )
 }
