@@ -18,7 +18,7 @@ use std::{
 use axum::{
     Router,
     extract::{FromRef, Request, State},
-    http::request::Parts,
+    http::{header::UPGRADE, request::Parts},
     middleware::{self, Next},
     response::{IntoResponse, Response},
 };
@@ -122,6 +122,7 @@ impl LocalServer {
             engine: engine.clone(),
             access: Arc::new(AppAccess),
         };
+        // Every router over AppState merges here: its engine exists only behind wait_for_engine.
         let waiting = Router::new()
             .route(events_path, events)
             .merge(
@@ -232,11 +233,16 @@ impl Access for AppAccess {
     }
 }
 
+/// A page opening its event socket retries a failed start, as a reload did when the start was a
+/// command. The HTTP read that asks why a socket was refused only reads the failure.
 async fn wait_for_engine(
     State(engine): State<EngineHandle>,
     request: Request,
     next: Next,
 ) -> Response {
+    if request.headers().contains_key(UPGRADE) {
+        engine.retry();
+    }
     match engine.ready().await {
         Ok(_) => next.run(request).await,
         Err(error) => error.into_response(),

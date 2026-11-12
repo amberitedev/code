@@ -6,7 +6,8 @@ use super::endpoints;
 use crate::{
     ErrorKind,
     state::{
-        Hooks, IconConfig, InstanceLink as CoreInstanceLink, InstanceMetadata,
+        ContentSetSyncStatus, Hooks, IconConfig, InstanceInstallStage,
+        InstanceLink as CoreInstanceLink, InstanceMetadata,
         InstanceSyncedOptions, InstanceTabVisibility, MemorySettings,
         ModLoader, ReleaseChannel,
         SharedInstanceAttachment as CoreSharedInstanceAttachment,
@@ -43,7 +44,7 @@ pub struct InstanceIds {
 pub struct Instance {
     pub id: String,
     pub path: String,
-    pub install_stage: String,
+    pub install_stage: InstanceInstallStage,
     pub launcher_feature_version: String,
     pub name: String,
     pub icon_path: Option<String>,
@@ -118,7 +119,7 @@ pub struct SharedInstanceAttachment {
     pub server_manager_name: Option<String>,
     pub server_manager_icon_url: Option<String>,
     pub linked_user_id: Option<String>,
-    pub status: String,
+    pub status: ContentSetSyncStatus,
     pub applied_version: Option<i32>,
     pub latest_version: Option<i32>,
     pub restored_from_remote: bool,
@@ -133,7 +134,7 @@ impl From<CoreSharedInstanceAttachment> for SharedInstanceAttachment {
             server_manager_name: attachment.server_manager_name,
             server_manager_icon_url: attachment.server_manager_icon_url,
             linked_user_id: attachment.linked_user_id,
-            status: attachment.status.as_str().to_string(),
+            status: attachment.status,
             applied_version: attachment.applied_version,
             latest_version: attachment.latest_version,
             restored_from_remote: attachment.restored_from_remote,
@@ -146,7 +147,7 @@ impl From<InstanceMetadata> for Instance {
         Self {
             id: metadata.instance.id,
             path: metadata.instance.path,
-            install_stage: metadata.instance.install_stage.as_str().to_string(),
+            install_stage: metadata.instance.install_stage,
             launcher_feature_version: metadata
                 .instance
                 .launcher_feature_version

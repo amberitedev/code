@@ -7,7 +7,10 @@
 use anyhow::Context;
 use engine::prelude::*;
 use native_dialog::{DialogBuilder, MessageLevel};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use tauri::{Listener, Manager};
 
 mod api;
@@ -26,12 +29,12 @@ mod updater_impl;
 #[cfg(not(feature = "updater"))]
 mod updater_impl_noop;
 
-/// Starts the engine once, from setup, and signs a dev App in before its routes open.
+/// Starts the engine and signs a dev App in before its routes open. Setup runs it, and opening the
+/// event socket runs it again after a failure.
 async fn start_engine(
     app: tauri::AppHandle,
     events: engine::EventSink,
-    handle: engine_handle::EngineHandle,
-) {
+) -> anyhow::Result<Arc<Engine>> {
     tracing::info!("Initializing app state...");
     let started = async {
         let settings_dir =
@@ -46,14 +49,13 @@ async fn start_engine(
         state.start_desktop();
         #[cfg(debug_assertions)]
         dev::sign_in(&state).await;
-
         anyhow::Ok(state)
     }
     .await;
     if let Err(error) = &started {
         tracing::error!("The engine could not start: {error:#}");
     }
-    handle.set(started);
+    started
 }
 
 // Should be call once Vue has mounted the app
@@ -286,11 +288,9 @@ fn main() {
             let sink = events.engine.with_app(app.handle().clone());
             app.manage(sink.clone());
             app.manage(events.app);
-            tauri::async_runtime::spawn(start_engine(
-                app.handle().clone(),
-                sink,
-                app.state::<engine_handle::EngineHandle>().inner().clone(),
-            ));
+            let handle = app.handle().clone();
+            app.state::<engine_handle::EngineHandle>()
+                .start(move || start_engine(handle.clone(), sink.clone()));
 
             #[cfg(target_os = "macos")]
             {

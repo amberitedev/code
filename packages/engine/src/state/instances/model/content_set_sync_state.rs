@@ -26,6 +26,7 @@ impl ContentSetSyncProvider {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub enum ContentSetSyncStatus {
     Unknown,
     UpToDate,

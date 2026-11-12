@@ -32,12 +32,15 @@ export async function initialize_state(openEvents: () => Promise<void>) {
 	try {
 		await openEvents()
 	} catch (error) {
-		// A page cannot read why a socket was refused; over HTTP the same route says why the engine
-		// did not start.
+		// A page cannot read why a socket was refused, so it asks the same route over HTTP. A failed
+		// start answers with its code; a started engine, with axum's uncoded upgrade rejection, and
+		// then the handshake only timed out during a long start.
 		const refusal = await apiClient.local
 			.call(events.eventSocket)
 			.catch((refusal: unknown) => refusal)
-		throw refusal instanceof ApiCallError && refusal.code === 'engine_unavailable' ? refusal : error
+		if (!(refusal instanceof ApiCallError)) throw error
+		if (refusal.code !== 'unknown') throw refusal
+		await openEvents()
 	}
 }
 

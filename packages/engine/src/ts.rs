@@ -26,9 +26,10 @@ use crate::{
     },
     instance::{InstanceGroup, InstanceGroupMembershipUpdate},
     state::{
-        Hooks, IconBackground, IconConfig, InstanceSyncedOptions,
-        InstanceTabVisibility, Log4jEvent, MemorySettings, ModLoader,
-        OnboardingChecklist, ReleaseChannel, SharedInstanceRole, WindowSize,
+        ContentSetSyncStatus, Hooks, IconBackground, IconConfig,
+        InstanceInstallStage, InstanceSyncedOptions, InstanceTabVisibility,
+        Log4jEvent, MemorySettings, ModLoader, OnboardingChecklist,
+        ReleaseChannel, SharedInstanceRole, WindowSize,
     },
 };
 
@@ -67,8 +68,10 @@ fn file() -> String {
         LoadingBar::decl(&cfg),
         Instance::decl(&cfg),
         InstanceLink::decl(&cfg),
+        InstanceInstallStage::decl(&cfg),
         SharedInstanceAttachment::decl(&cfg),
         SharedInstanceRole::decl(&cfg),
+        ContentSetSyncStatus::decl(&cfg),
         InstanceSyncedOptions::decl(&cfg),
         InstanceTabVisibility::decl(&cfg),
         ReleaseChannel::decl(&cfg),

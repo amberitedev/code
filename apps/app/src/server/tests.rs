@@ -4,14 +4,20 @@ use axum::{
     http::{
         Request, StatusCode,
         header::{
-            ACCESS_CONTROL_ALLOW_ORIGIN, CONTENT_TYPE, HOST, ORIGIN, UPGRADE,
-            VARY,
+            ACCESS_CONTROL_ALLOW_ORIGIN, CONNECTION, CONTENT_TYPE, HOST,
+            ORIGIN, UPGRADE, VARY,
         },
     },
     response::Response,
 };
 use serde_json::{Value, json};
-use std::time::Duration;
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+    time::Duration,
+};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tower::ServiceExt;
 
@@ -74,6 +80,17 @@ impl Local {
             request = request.header(*name, *value);
         }
         self.send(request.body(Body::empty()).unwrap()).await
+    }
+
+    /// A GET from the App's origin to `path` under the secret, plus `headers`.
+    fn get(&self, path: &str, headers: &[(&str, &str)]) -> Request<Body> {
+        let mut request = Request::get(format!("/{}/{path}", self.secret))
+            .header(HOST, &self.host)
+            .header(ORIGIN, "tauri://localhost");
+        for (name, value) in headers {
+            request = request.header(*name, *value);
+        }
+        request.body(Body::empty()).unwrap()
     }
 
     async fn send(&self, request: Request<Body>) -> Response {
@@ -361,4 +378,66 @@ async fn a_failed_start_answers_engine_unavailable() {
             json!({ "error": "engine_unavailable", "description": "the data folder is in use" })
         );
     }
+}
+
+/// The page offers to retry or cancel a directory move only when it reads the move's own code.
+#[tokio::test]
+async fn a_failed_directory_move_keeps_its_code() {
+    let handle = EngineHandle::default();
+    handle.set(Err(anyhow::Error::new(engine::ErrorKind::NotEnoughSpace {
+        required: 1,
+    })
+    .context(engine::ErrorKind::DirectoryMoveFailed)));
+    let local = local_with(handle);
+    let response = local.send(local.get("events", &[])).await;
+    assert_eq!(response.status(), StatusCode::INSUFFICIENT_STORAGE);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(body["error"], "directory_move_no_space");
+}
+
+/// Opening the event socket retries a failed start, as a reload did when the start was a
+/// command; the HTTP read that asks why a socket was refused does not.
+#[tokio::test]
+async fn opening_the_socket_retries_a_failed_start() {
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let dir = Arc::new(tempfile::tempdir().unwrap());
+    let handle = EngineHandle::default();
+    handle.start({
+        let attempts = Arc::clone(&attempts);
+        move || {
+            let attempt = attempts.fetch_add(1, Ordering::SeqCst);
+            let dir = Arc::clone(&dir);
+            async move {
+                anyhow::ensure!(attempt > 0, "the data folder is in use");
+                engine::install_crypto_provider();
+                Ok(engine::Engine::new(engine::EngineConfig {
+                    settings_dir: dir.path().to_path_buf(),
+                    events: engine::EventSink::new(),
+                    accounts: None,
+                })
+                .await?)
+            }
+        }
+    });
+    let local = local_with(handle);
+
+    let probe = local.send(local.get("events", &[])).await;
+    assert_eq!(probe.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(attempts.load(Ordering::SeqCst), 1);
+
+    let socket = local
+        .send(local.get(
+            "events",
+            &[
+                (CONNECTION.as_str(), "Upgrade"),
+                (UPGRADE.as_str(), "websocket"),
+            ],
+        ))
+        .await;
+    // Past the gate: only the upgrade itself fails without a real connection.
+    assert_ne!(socket.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(attempts.load(Ordering::SeqCst), 2);
+    let instances = local.send(local.get("instances", &[])).await;
+    assert_eq!(instances.status(), StatusCode::OK);
 }
