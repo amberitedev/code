@@ -47,7 +47,6 @@ mod client;
 mod content;
 mod diff;
 mod history;
-mod icons;
 mod install;
 mod invites;
 mod library;
@@ -58,7 +57,6 @@ mod types;
 
 pub(crate) use self::client::share_backend;
 pub(crate) use self::content::{set_applied_files, shared_modpack_files};
-pub use self::icons::cache_shared_instance_server_icon;
 pub(crate) use self::install::{
     check_shared_instance_availability_before_launch,
     shared_instance_update_data,

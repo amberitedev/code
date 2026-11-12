@@ -664,10 +664,6 @@ expires: string, };
 
 export type ShareStorage = { used: number, allowance: number, 
 /**
- * How many versions each share keeps. Null keeps all of them.
- */
-kept_versions: number | null, 
-/**
  * Only the shares the account owns.
  */
 shares: Array<StoredShare>, };

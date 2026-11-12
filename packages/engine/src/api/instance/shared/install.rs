@@ -852,7 +852,6 @@ pub(super) async fn shared_instance_install_data(
         game_version: content.game_version,
         loader,
         loader_version: shared_instance_loader_version(loader_version),
-        fresh_start: false,
         restore: None,
         applied_files,
     })

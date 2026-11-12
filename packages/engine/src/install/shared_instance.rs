@@ -45,16 +45,6 @@ const MAX_SHARED_INSTANCE_INITIAL_BUFFER_SIZE: u64 = 8 * 1024 * 1024;
 const SHARED_INSTANCE_CONTENT_DOWNLOAD_CONCURRENCY: usize = 4;
 const SHARED_INSTANCE_FILE_DOWNLOAD_CONCURRENCY: usize = 64;
 const SHARED_INSTANCE_PROGRESS_INTERVAL: Duration = Duration::from_millis(500);
-/// Player data that survives a shared instance starting over. The synced
-/// option files are links managed by the launcher rather than pack content.
-const FRESH_START_KEPT_PATHS: [&str; 6] = [
-    "saves",
-    "screenshots",
-    "options.txt",
-    "servers.dat",
-    "hotbar.nbt",
-    "command_history.txt",
-];
 
 pub(super) async fn attach_pending_shared_instance(
     instance_id: &str,
@@ -345,12 +335,7 @@ async fn reinstall_shared_instance(
     data: &SharedInstanceInstallData,
 ) -> crate::Result<()> {
     crate::api::instance::prepare_instance_update(state, instance_id).await?;
-    if data.fresh_start {
-        clear_shared_instance_for_fresh_start(instance_id, state).await?;
-    } else {
-        remove_existing_shared_instance_content(instance_id, data, state)
-            .await?;
-    }
+    remove_existing_shared_instance_content(instance_id, data, state).await?;
     apply_shared_instance_content(job_id, job_state, state, instance_id, data)
         .await?;
     if data.modpack.is_none() {
@@ -546,8 +531,7 @@ pub(super) fn shared_instance_update_requires_full_apply(
         .as_ref()
         .map(|modpack| modpack.version_id.as_str());
 
-    data.fresh_start
-        || current_modpack_project_id != next_modpack_project_id
+    current_modpack_project_id != next_modpack_project_id
         || current_modpack_version_id != next_modpack_version_id
         || metadata.applied_content_set.game_version != data.game_version
         || metadata.applied_content_set.loader != data.loader
@@ -1176,69 +1160,6 @@ async fn remove_existing_shared_instance_content(
                 state,
             )
             .await?;
-        }
-    }
-    Ok(())
-}
-
-/// Top-level instance entries removed when a shared instance starts over.
-pub(super) async fn fresh_start_removed_paths(
-    instance_id: &str,
-    state: &Engine,
-) -> crate::Result<Vec<String>> {
-    let metadata = crate::state::instances::commands::get_instance_metadata(
-        instance_id,
-        &state.pool,
-    )
-    .await?
-    .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
-    let instance_path = state
-        .directories
-        .instances_dir()
-        .join(metadata.instance.path);
-    let mut entries = crate::util::io::read_dir(&instance_path).await?;
-    let mut paths = Vec::new();
-    while let Some(entry) = entries.next_entry().await? {
-        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
-            continue;
-        };
-        if !FRESH_START_KEPT_PATHS.contains(&name.as_str()) {
-            paths.push(name);
-        }
-    }
-    Ok(paths)
-}
-
-async fn clear_shared_instance_for_fresh_start(
-    instance_id: &str,
-    state: &Engine,
-) -> crate::Result<()> {
-    for file in
-        content_rows::get_instance_files(instance_id, &state.pool).await?
-    {
-        crate::state::instances::commands::remove_project(
-            instance_id,
-            &file.relative_path,
-            state,
-        )
-        .await?;
-    }
-    let metadata = crate::state::instances::commands::get_instance_metadata(
-        instance_id,
-        &state.pool,
-    )
-    .await?
-    .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
-    let instance_path = state
-        .directories
-        .instances_dir()
-        .join(metadata.instance.path);
-    for name in fresh_start_removed_paths(instance_id, state).await? {
-        let path = instance_path.join(name);
-        if tokio::fs::symlink_metadata(&path).await?.is_dir() {
-            crate::util::io::remove_dir_all(&path).await?;
-        } else {
-            crate::util::io::remove_file(&path).await?;
         }
     }
     Ok(())

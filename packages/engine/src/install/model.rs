@@ -273,8 +273,6 @@ pub struct SharedInstanceInstallData {
     pub game_version: String,
     pub loader: ModLoader,
     pub loader_version: Option<String>,
-    #[serde(default)]
-    pub fresh_start: bool,
     /// The version's whole manifest, which a member keeps once it applied the version.
     #[serde(default)]
     pub applied_files: Vec<contracts::backend::sharing::ExternalFile>,

@@ -473,8 +473,6 @@ pub struct SignedReadTicket {
 pub struct ShareStorage {
     pub used: u64,
     pub allowance: u64,
-    /// How many versions each share keeps. Null keeps all of them.
-    pub kept_versions: Option<u32>,
     /// Only the shares the account owns.
     pub shares: Vec<StoredShare>,
 }

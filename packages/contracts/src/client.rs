@@ -24,8 +24,9 @@ pub struct Remote<'a> {
 pub enum CallError {
     #[error("{} (HTTP {status})", error.description)]
     Api { status: u16, error: ApiError },
+    /// Without its URL, which can carry a read ticket in the query.
     #[error(transparent)]
-    Http(#[from] reqwest::Error),
+    Http(reqwest::Error),
     #[error("the response (HTTP {status}) could not be read: {source}")]
     Decode {
         status: u16,
@@ -41,6 +42,12 @@ pub enum CallError {
         name: String,
         value: String,
     },
+}
+
+impl From<reqwest::Error> for CallError {
+    fn from(error: reqwest::Error) -> Self {
+        Self::Http(error.without_url())
+    }
 }
 
 /// An [`ApiError`] is a code and a short description; a longer error body is refused unread.
@@ -416,6 +423,47 @@ mod tests {
         call_stream::<Download>(&server.remote(), &(), &(), 10)
             .await
             .map(drop)
+    }
+
+    #[derive(Serialize, Deserialize)]
+    struct Ticket {
+        read_ticket: String,
+    }
+
+    struct ReadWithTicket;
+
+    impl Endpoint for ReadWithTicket {
+        const METHOD: Method = Method::Get;
+        const PATH: &'static str = "/v1/read";
+        const AUTH: Auth = Auth::None;
+        type Params = ();
+        type Query = Ticket;
+        type Body = Empty;
+        type Response = Json<String>;
+    }
+
+    #[tokio::test]
+    async fn a_transport_error_leaves_the_query_out() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        drop(listener);
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let http = Client::new();
+        let remote = Remote {
+            http: &http,
+            base: &base,
+            bearer: None,
+            read_ticket: None,
+            timeout: None,
+        };
+        let query = Ticket {
+            read_ticket: "secret".into(),
+        };
+        let error = call::<ReadWithTicket>(&remote, &(), &query, Empty)
+            .await
+            .unwrap_err();
+        assert!(matches!(error, CallError::Http(_)));
+        assert!(!format!("{error} {error:?}").contains("secret"));
     }
 
     #[tokio::test]

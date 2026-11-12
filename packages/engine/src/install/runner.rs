@@ -9,8 +9,8 @@ use super::model::{
 use super::shared_instance::{
     apply_shared_instance_content, apply_shared_instance_update,
     attach_pending_shared_instance, finalize_shared_instance_attachment,
-    fresh_start_removed_paths, linked_server_icon, shared_instance_link,
-    shared_instance_pack_location, shared_instance_update_requires_full_apply,
+    linked_server_icon, shared_instance_link, shared_instance_pack_location,
+    shared_instance_update_requires_full_apply,
 };
 use super::{diagnostics, recovery, store};
 use crate::ErrorKind;
@@ -2261,11 +2261,6 @@ async fn update_backup_scope(
         InstallRequest::UpdateSharedInstance { instance_id, .. } => {
             let data = shared_update
                 .context("shared instance update data is missing")?;
-            if data.fresh_start {
-                return fresh_start_removed_paths(instance_id, state)
-                    .await
-                    .map(Some);
-            }
             paths.push(crate::api::instance::CONFIG_DIRECTORY.to_string());
             paths.extend(
                 data.external_files

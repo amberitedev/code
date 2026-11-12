@@ -18,8 +18,8 @@ import { fetchTicket, storeTicket } from '../cores/tickets'
 export const MAX_VERSION_FILES = 4096
 /** The manifest request body; 4,096 entries with keys are about 1 MB. */
 export const MAX_MANIFEST_BODY = 4 * 1024 * 1024
-/** Ready versions a share keeps, files included, when its owner has not chosen. */
-export const DEFAULT_KEPT_VERSIONS = 5
+/** Ready versions a share keeps, files included. */
+export const KEPT_VERSIONS = 5
 /** How long an unconfirmed version blocks the next push: the store ticket's life. */
 export const UNCONFIRMED_TTL_MS = 60 * 60_000
 /** A Core that has not reported its storage for this long takes no new shares. */
@@ -260,14 +260,6 @@ export async function versionUpload(
 	if (!core) throw new ApiError(503, 'no_storage', 'The Core holding this share is gone')
 	const { ticket, expires } = await storeTicket(env, core.id, root, bytes)
 	return { core, ticket, expires }
-}
-
-/** How many ready versions `ownerId`'s shares keep. Null keeps them all. */
-export async function keptVersions(env: Env, ownerId: string): Promise<number | null> {
-	const row = await env.DB.prepare('SELECT kept_versions FROM sharing_settings WHERE user_id = ?')
-		.bind(ownerId)
-		.first<{ kept_versions: number | null }>()
-	return row ? row.kept_versions : DEFAULT_KEPT_VERSIONS
 }
 
 /** The object names of a stored version, read from its manifest. */

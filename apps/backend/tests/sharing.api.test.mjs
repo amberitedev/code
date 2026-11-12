@@ -547,7 +547,6 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		const overview = await usage()
 		assert.equal(overview.used, 3 * GB)
 		assert.equal(overview.allowance, 3 * GB)
-		assert.equal(overview.kept_versions, 5)
 		const b = overview.shares.find((share) => share.id === shares[1].id)
 		assert.equal(b.counted, true)
 		assert.deepEqual(

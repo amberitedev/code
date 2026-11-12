@@ -36,11 +36,11 @@ import {
 	EMPTY_ROOT,
 	MAX_MANIFEST_BODY,
 	MAX_VERSION_FILES,
+	KEPT_VERSIONS,
 	UNCONFIRMED_TTL_MS,
 	addedBytes,
 	confirmedHolders,
 	externalFile,
-	keptVersions,
 	manifestKey,
 	ownerShares,
 	place,
@@ -388,18 +388,18 @@ export async function sweepFiles(env: Env, id: string): Promise<void> {
 }
 
 /**
- * Keeps the `kept` latest complete versions (all when null) and drops uploads abandoned before
- * the newest one, with their manifests. Deletes by name, so a push does not pay for listing the
+ * Keeps the latest `KEPT_VERSIONS` complete versions and drops uploads abandoned before the
+ * newest one, with their manifests. Deletes by name, so a push does not pay for listing the
  * instance's manifests. The Cores holding the files drop them at their next storage report.
  */
-async function pruneVersions(env: Env, id: string, kept: number | null): Promise<void> {
+async function pruneVersions(env: Env, id: string): Promise<void> {
 	const { results } = await env.DB.prepare(
 		`DELETE FROM shared_instance_versions WHERE instance_id = ?1 AND (
 			version < (SELECT MIN(version) FROM (SELECT version FROM shared_instance_versions WHERE instance_id = ?1 AND ready = 1 ORDER BY version DESC LIMIT ?2))
 			OR (ready = 0 AND version < (SELECT MAX(version) FROM shared_instance_versions WHERE instance_id = ?1 AND ready = 1)))
 		RETURNING version`,
 	)
-		.bind(id, kept ?? -1)
+		.bind(id, KEPT_VERSIONS)
 		.all<{ version: number }>()
 	if (results.length) await env.FILES.delete(results.map((row) => manifestKey(id, row.version)))
 }
@@ -499,8 +499,7 @@ export async function versionReady(env: Env, id: string, version: number): Promi
 		.run()
 	if (!result.meta.changes) return
 	await notifyReadyInvites(env, id)
-	const item = await instance(env, id)
-	await pruneVersions(env, id, await keptVersions(env, item.owner_id))
+	await pruneVersions(env, id)
 }
 
 /**
@@ -634,9 +633,8 @@ async function createVersion(
 				new Map(external.map((file) => [file.object, file.object_size])),
 				await versionObjects(env, item.id, previous.version),
 			)
-		const [shares, kept, own] = await Promise.all([
+		const [shares, own] = await Promise.all([
 			ownerShares(env, userId),
-			keptVersions(env, userId),
 			env.DB.prepare('SELECT id FROM cores WHERE owner_id = ?').bind(userId).all<{ id: string }>(),
 		])
 		const counted = [placement.home, placement.replica].some(
@@ -647,7 +645,7 @@ async function createVersion(
 			const others = shares
 				.filter((share) => share.id !== item.id)
 				.reduce((sum, share) => sum + share.used, 0)
-			if (others + shareUsage(kept === null ? after : after.slice(-kept)) > ALLOWANCE_BYTES)
+			if (others + shareUsage(after.slice(-KEPT_VERSIONS)) > ALLOWANCE_BYTES)
 				throw new ApiError(
 					413,
 					'storage_quota',
@@ -1547,15 +1545,10 @@ const accountRoutes = [
 		},
 	),
 	route(sharing.GetShareStorage, noBody, async ({ request, env }) => {
-		const user = await requireUser(request, env)
-		const [shares, kept] = await Promise.all([
-			ownerShares(env, user.id),
-			keptVersions(env, user.id),
-		])
+		const shares = await ownerShares(env, (await requireUser(request, env)).id)
 		return {
 			used: shares.reduce((sum, share) => sum + share.used, 0),
 			allowance: ALLOWANCE_BYTES,
-			kept_versions: kept,
 			shares,
 		}
 	}),

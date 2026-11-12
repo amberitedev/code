@@ -212,13 +212,6 @@ CREATE TABLE sharing_blacklist (
   user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE
 );
 
--- How many ready versions an account's shares keep, files included. No row keeps five, and a NULL
--- `kept_versions` keeps them all.
-CREATE TABLE sharing_settings (
-  user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-  kept_versions INTEGER
-);
-
 -- Servers a Core shows to the people an instance is shared with, written with that Core's key.
 -- Online state and player counts are not stored: the App pings `address`, the server's Minecraft
 -- address, itself.
