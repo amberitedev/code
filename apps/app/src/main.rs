@@ -74,7 +74,12 @@ async fn initialize_state(
     }
 
     tracing::info!("Initializing app state...");
-    State::init(app.config().identifier.clone(), sink.inner().clone()).await?;
+    State::init(
+        app.config().identifier.clone(),
+        sink.inner().clone(),
+        dev::accounts()?,
+    )
+    .await?;
     #[cfg(debug_assertions)]
     dev::sign_in().await;
 

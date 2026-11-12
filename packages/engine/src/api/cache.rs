@@ -14,7 +14,7 @@ macro_rules! impl_cache_methods {
                 ) -> crate::Result<Option<$type>>
                 {
                     let state = crate::State::get().await?;
-                    Ok(CachedEntry::[<get_ $variant:snake _many>](&[id], cache_behaviour, &state.pool, &state.api_semaphore).await?.into_iter().next())
+                    Ok(CachedEntry::[<get_ $variant:snake _many>](&[id], cache_behaviour, &state.pool, &state.api_semaphore, &state.sessions).await?.into_iter().next())
                 }
 
                 #[tracing::instrument]
@@ -25,7 +25,7 @@ macro_rules! impl_cache_methods {
                 {
                     let state = crate::State::get().await?;
                     let entries =
-                        CachedEntry::[<get_ $variant:snake _many>](ids, None, &state.pool, &state.api_semaphore).await?;
+                        CachedEntry::[<get_ $variant:snake _many>](ids, None, &state.pool, &state.api_semaphore, &state.sessions).await?;
 
                     Ok(entries)
                 }
@@ -66,6 +66,7 @@ pub async fn get_project_versions(
         cache_behaviour,
         &state.pool,
         &state.api_semaphore,
+        &state.sessions,
     )
     .await
 }
@@ -87,11 +88,11 @@ pub async fn get_user_many(
     cache_behaviour: Option<CacheBehaviour>,
 ) -> crate::Result<Vec<User>> {
     let state = crate::State::get().await?;
-    if crate::self_hosted::accounts::enabled() {
+    if crate::self_hosted::accounts::enabled(&state.sessions) {
         return crate::self_hosted::accounts::users(
             ids,
             &state.api_semaphore,
-            &state.pool,
+            &state.sessions,
         )
         .await;
     }
@@ -100,6 +101,7 @@ pub async fn get_user_many(
         cache_behaviour,
         &state.pool,
         &state.api_semaphore,
+        &state.sessions,
     )
     .await
 }

@@ -5,6 +5,7 @@
 use super::install::*;
 use super::*;
 use crate::ErrorKind;
+use crate::state::Sessions;
 use sharing_client::backend::{Backend, BackendError, ShareIcon, Unavailable};
 pub(super) use sharing_client::versions::{ManifestFile, ShareVersion};
 
@@ -115,28 +116,33 @@ pub(super) fn check_removed_files(version: &ShareVersion) -> crate::Result<()> {
 
 /// The share routes as the signed-in account. Uploads and pushes take `long` to have no
 /// overall timeout.
-fn backend_with(long: bool) -> crate::Result<Backend> {
-    let session = shared_clients_session()
-        .context("Amberite shared clients service is not configured")?;
-    let token = session.access_token.ok_or(ErrorKind::NotLoggedIn)?;
-    let https = session.base_url.starts_with("https://");
+fn backend_with(sessions: &Sessions, long: bool) -> crate::Result<Backend> {
+    if sessions.accounts.is_none() {
+        bail!("Amberite shared clients service is not configured");
+    }
+    let session = sessions.backend().ok_or(ErrorKind::NotLoggedIn)?;
+    let https = session.base_url.scheme() == "https";
     let http = match (long, https) {
         (false, true) => &REQWEST_CLIENT,
         (false, false) => &INSECURE_REQWEST_CLIENT,
         (true, true) => &NO_TIMEOUT_REQWEST_CLIENT,
         (true, false) => &INSECURE_NO_TIMEOUT_REQWEST_CLIENT,
     };
-    Ok(Backend::new((*http).clone(), session.base_url, token))
+    Ok(Backend::new(
+        (*http).clone(),
+        session.base_url.as_str(),
+        session.bearer,
+    ))
 }
 
 /// The share routes as the signed-in account.
-pub(crate) fn share_backend() -> crate::Result<Backend> {
-    backend_with(false)
+pub(crate) fn share_backend(sessions: &Sessions) -> crate::Result<Backend> {
+    backend_with(sessions, false)
 }
 
 /// The share routes as the signed-in account, without an overall timeout, for a push.
-pub(super) fn push_backend() -> crate::Result<Backend> {
-    backend_with(true)
+pub(super) fn push_backend(sessions: &Sessions) -> crate::Result<Backend> {
+    backend_with(sessions, true)
 }
 
 /// The App's error for a failed call. 5xx and unreachable backends are
@@ -209,7 +215,7 @@ pub(super) async fn create_remote_instance(
     name: String,
     state: &State,
 ) -> crate::Result<String> {
-    let backend = share_backend()?;
+    let backend = share_backend(&state.sessions)?;
     call(state, backend.create_share(&name)).await
 }
 
@@ -217,7 +223,7 @@ pub(super) async fn delete_remote_instance(
     shared_instance_id: &str,
     state: &State,
 ) -> crate::Result<()> {
-    let backend = share_backend()?;
+    let backend = share_backend(&state.sessions)?;
     call(state, backend.delete_share(shared_instance_id)).await
 }
 
@@ -226,7 +232,7 @@ pub(super) async fn update_remote_instance(
     name: String,
     state: &State,
 ) -> crate::Result<()> {
-    let backend = share_backend()?;
+    let backend = share_backend(&state.sessions)?;
     let _permit = state.api_semaphore.0.acquire().await?;
     match backend.rename_share(shared_instance_id, &name).await {
         Err(BackendError::Status {
@@ -246,7 +252,7 @@ pub(super) async fn get_remote_instance_access(
     shared_instance_id: &str,
     state: &State,
 ) -> crate::Result<SharedInstanceRemoteResponse<RemoteInstanceResponse>> {
-    let backend = share_backend()?;
+    let backend = share_backend(&state.sessions)?;
     Ok(
         match call_share(
             state,
@@ -280,7 +286,10 @@ pub(super) async fn update_remote_instance_icon(
         }
         (None, None) => None,
     };
-    let backend = backend_with(matches!(icon, Some(ShareIcon::Image(_))))?;
+    let backend = backend_with(
+        &state.sessions,
+        matches!(icon, Some(ShareIcon::Image(_))),
+    )?;
     call(state, backend.set_share_icon(shared_instance_id, icon)).await
 }
 
@@ -288,7 +297,7 @@ pub(super) async fn get_remote_users(
     shared_instance_id: &str,
     state: &State,
 ) -> crate::Result<SharedInstanceUsers> {
-    let backend = share_backend()?;
+    let backend = share_backend(&state.sessions)?;
     let users = call(
         state,
         backend.users::<RemoteSharedInstanceUsersResponse>(shared_instance_id),
@@ -304,8 +313,8 @@ pub(super) async fn get_remote_server_icon(
     etag: Option<&str>,
     state: &State,
 ) -> crate::Result<Option<reqwest::Response>> {
-    let backend =
-        share_backend()?.with_timeout(std::time::Duration::from_secs(15));
+    let backend = share_backend(&state.sessions)?
+        .with_timeout(std::time::Duration::from_secs(15));
     call(state, backend.server_icon(instance_id, etag)).await
 }
 
@@ -330,7 +339,7 @@ pub(super) async fn get_latest_remote_version_optional_unavailable(
     shared_instance_id: &str,
     state: &State,
 ) -> crate::Result<SharedInstanceRemoteResponse<ShareVersion>> {
-    let backend = share_backend()?;
+    let backend = share_backend(&state.sessions)?;
     call_share(state, backend.version(shared_instance_id, None)).await
 }
 
@@ -339,7 +348,7 @@ pub(super) async fn add_remote_users(
     user_ids: Vec<String>,
     state: &State,
 ) -> crate::Result<()> {
-    let backend = share_backend()?;
+    let backend = share_backend(&state.sessions)?;
     let failed =
         call(state, backend.add_users(shared_instance_id, &user_ids)).await?;
     if !failed.is_empty() {
@@ -356,7 +365,7 @@ pub(super) async fn remove_remote_users(
     user_ids: Vec<String>,
     state: &State,
 ) -> crate::Result<()> {
-    let backend = share_backend()?;
+    let backend = share_backend(&state.sessions)?;
     call(state, backend.remove_users(shared_instance_id, &user_ids)).await
 }
 
@@ -364,7 +373,7 @@ pub(super) async fn accept_pending_remote_invite(
     shared_instance_id: &str,
     state: &State,
 ) -> crate::Result<bool> {
-    let backend = share_backend()?;
+    let backend = share_backend(&state.sessions)?;
     call(state, backend.accept_pending_invite(shared_instance_id)).await
 }
 
@@ -373,7 +382,7 @@ pub(super) async fn accept_shared_instance_invite(
     invite_id: &str,
     state: &State,
 ) -> crate::Result<()> {
-    let backend = share_backend()?;
+    let backend = share_backend(&state.sessions)?;
     call(state, backend.accept_invite(shared_instance_id, invite_id)).await
 }
 
@@ -383,7 +392,7 @@ pub(super) async fn create_remote_invite(
     max_uses: i32,
     state: &State,
 ) -> crate::Result<String> {
-    let backend = share_backend()?;
+    let backend = share_backend(&state.sessions)?;
     call(
         state,
         backend.create_invite(shared_instance_id, max_age_seconds, max_uses),
@@ -396,7 +405,7 @@ pub(super) async fn delete_remote_invite(
     invite_id: &str,
     state: &State,
 ) -> crate::Result<()> {
-    let backend = share_backend()?;
+    let backend = share_backend(&state.sessions)?;
     call(state, backend.delete_invite(shared_instance_id, invite_id)).await
 }
 
@@ -404,7 +413,7 @@ pub(super) async fn get_remote_invites(
     shared_instance_id: &str,
     state: &State,
 ) -> crate::Result<Vec<InstanceInviteResponse>> {
-    let backend = share_backend()?;
+    let backend = share_backend(&state.sessions)?;
     call(state, backend.invites(shared_instance_id)).await
 }
 
@@ -413,14 +422,18 @@ pub(super) async fn get_shared_instance_invite_info(
     invite_id: &str,
     state: &State,
 ) -> crate::Result<InstanceInviteInfoResponse> {
-    let session = shared_clients_session()
+    let base_url = state
+        .sessions
+        .accounts
+        .as_ref()
+        .map(|accounts| &accounts.api)
         .context("Amberite shared clients service is not configured")?;
-    let http = if session.base_url.starts_with("https://") {
+    let http = if base_url.scheme() == "https" {
         &REQWEST_CLIENT
     } else {
         &INSECURE_REQWEST_CLIENT
     };
-    let backend = Backend::anonymous((*http).clone(), session.base_url);
+    let backend = Backend::anonymous((*http).clone(), base_url.as_str());
     call(state, backend.invite(invite_id)).await
 }
 
@@ -428,13 +441,12 @@ pub(super) async fn decline_pending_remote_invite(
     shared_instance_id: &str,
     state: &State,
 ) -> crate::Result<()> {
-    let backend = share_backend()?;
+    let backend = share_backend(&state.sessions)?;
     call(state, backend.decline_pending_invite(shared_instance_id)).await
 }
 
 pub(super) async fn active_amberite_session_is_configured(
-    _state: &State,
+    state: &State,
 ) -> crate::Result<bool> {
-    Ok(shared_clients_session()
-        .is_some_and(|session| session.access_token.is_some()))
+    Ok(state.sessions.backend().is_some())
 }

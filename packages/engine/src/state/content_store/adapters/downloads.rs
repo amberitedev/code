@@ -1,12 +1,12 @@
+use crate::state::Sessions;
 use crate::util::fetch::{
     self, DownloadMeta, DownloadedFile, FetchProgressFn, FetchSemaphore,
 };
-use sqlx::SqlitePool;
 use std::path::Path;
 
 pub(in crate::state::content_store) async fn download(
     staging: &Path,
-    pool: &SqlitePool,
+    sessions: &Sessions,
     mirrors: &[&str],
     metadata: Option<&DownloadMeta>,
     semaphore: &FetchSemaphore,
@@ -18,7 +18,7 @@ pub(in crate::state::content_store) async fn download(
         metadata,
         None,
         semaphore,
-        pool,
+        sessions,
         progress,
         Some(staging),
     )

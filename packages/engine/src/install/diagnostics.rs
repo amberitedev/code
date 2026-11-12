@@ -4,7 +4,7 @@ use super::model::{
     InstallPhaseDetails, InstallPhaseId, InstallProgress,
 };
 use super::store;
-use crate::state::{DirectoryInfo, ModrinthCredentials, State};
+use crate::state::{DirectoryInfo, ModrinthCredentials, Sessions, State};
 use crate::util::io::format_bytes;
 use regex::{Captures, Regex};
 use sqlx::{Row, SqlitePool};
@@ -80,7 +80,7 @@ pub async fn build_job_support_details(
     write_raw_snapshot(&mut details, &snapshot);
     write_latest_log(&mut details, &state.directories).await;
 
-    censor_support_text(details, &state.pool).await
+    censor_support_text(details, &state.pool, &state.sessions).await
 }
 
 fn result_summary(
@@ -614,8 +614,9 @@ fn read_file_tail(path: &Path, max_bytes: u64) -> crate::Result<String> {
 pub(crate) async fn censor_support_text(
     mut text: String,
     pool: &SqlitePool,
+    sessions: &Sessions,
 ) -> crate::Result<String> {
-    for credentials in ModrinthCredentials::get_all(pool).await? {
+    for credentials in ModrinthCredentials::get_all(pool, sessions).await? {
         replace_nonempty(
             &mut text,
             &credentials.session,

@@ -672,6 +672,7 @@ pub async fn create_mrpack_json(
         Some(CacheBehaviour::MustRevalidate),
         &state.pool,
         &state.api_semaphore,
+        &state.sessions,
     )
     .await?;
     let files = projects

@@ -214,7 +214,7 @@ pub(crate) async fn resolve_icon_path(
             None,
             None,
             &state.fetch_semaphore,
-            &state.pool,
+            &state.sessions,
         )
         .await
         {

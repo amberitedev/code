@@ -370,6 +370,7 @@ pub async fn resolve_minecraft_manifest(
         Some(crate::state::CacheBehaviour::MustRevalidate),
         &state.pool,
         &state.api_semaphore,
+        &state.sessions,
     )
     .await?
     .ok_or(ErrorKind::NoValueFor("minecraft versions".to_string()))?;

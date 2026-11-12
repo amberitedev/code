@@ -169,7 +169,7 @@ async fn fetch_minecraft_file(
             None,
             None,
             &st.fetch_semaphore,
-            &st.pool,
+            &st.sessions,
             None,
             &st.directories.store_staging_dir(),
         )
@@ -197,7 +197,7 @@ async fn fetch_minecraft_file(
         None,
         None,
         &st.fetch_semaphore,
-        &st.pool,
+        &st.sessions,
         Some(&mut progress_fn as &mut FetchProgressFn<'_>),
         &st.directories.store_staging_dir(),
     )
@@ -588,7 +588,7 @@ pub async fn download_version_info(
             None,
             None,
             &st.api_semaphore,
-            &st.pool,
+            &st.sessions,
         )
         .await
         .context(format!("fetching Minecraft {} version info", version.id))?;
@@ -614,7 +614,7 @@ pub async fn download_version_info(
                 None,
                 None,
                 &st.api_semaphore,
-                &st.pool,
+                &st.sessions,
             )
             .await
             .context(format!("fetching loader {} version info", loader.id))?;
@@ -1017,7 +1017,7 @@ pub async fn download_libraries(
                         None,
                         None,
                         &st.fetch_semaphore,
-                        &st.pool,
+                        &st.sessions,
                         None,
                         &st.directories.store_staging_dir(),
                     )

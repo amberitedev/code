@@ -2,6 +2,7 @@
 use super::io::{self, IOError};
 use crate::event::LoadingBarId;
 use crate::event::emit::emit_loading;
+use crate::state::Sessions;
 use crate::state::content_store::ContentStore;
 use crate::util::content_hash::{ContentHasher, temporary_file};
 use crate::{ErrorKind, LabrinthError};
@@ -497,7 +498,7 @@ pub async fn fetch_file(
     download_meta: Option<&DownloadMeta>,
     uri_path: Option<&'static str>,
     semaphore: &FetchSemaphore,
-    exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
+    sessions: &Sessions,
     progress: Option<&mut FetchProgressFn<'_>>,
     staging: &Path,
 ) -> crate::Result<DownloadedFile> {
@@ -512,7 +513,7 @@ pub async fn fetch_file(
         None,
         uri_path,
         semaphore,
-        exec,
+        sessions,
         &INSECURE_REQWEST_CLIENT,
         progress,
         true,
@@ -532,7 +533,7 @@ pub(crate) async fn fetch_file_mirrors_in(
     download_meta: Option<&DownloadMeta>,
     uri_path: Option<&'static str>,
     semaphore: &FetchSemaphore,
-    exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite> + Copy,
+    sessions: &Sessions,
     mut progress: Option<&mut FetchProgressFn<'_>>,
     staging: Option<&Path>,
 ) -> crate::Result<DownloadedFile> {
@@ -551,7 +552,7 @@ pub(crate) async fn fetch_file_mirrors_in(
             None,
             uri_path,
             semaphore,
-            exec,
+            sessions,
             &REQWEST_CLIENT,
             progress.as_deref_mut(),
             true,
@@ -619,6 +620,7 @@ pub(crate) async fn fetch_content_file(
             size,
             download_meta,
             &state.fetch_semaphore,
+            &state.sessions,
             progress,
         )
         .await?;
@@ -671,14 +673,14 @@ async fn read_memory_response(
     Ok(Bytes::from(bytes))
 }
 
-#[tracing::instrument(skip(semaphore))]
+#[tracing::instrument(skip(semaphore, sessions))]
 pub async fn fetch(
     url: &str,
     sha1: Option<&str>,
     download_meta: Option<&DownloadMeta>,
     uri_path: Option<&'static str>,
     semaphore: &FetchSemaphore,
-    exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
+    sessions: &Sessions,
 ) -> crate::Result<Bytes> {
     fetch_advanced(
         Method::GET,
@@ -690,19 +692,19 @@ pub async fn fetch(
         None,
         uri_path,
         semaphore,
-        exec,
+        sessions,
     )
     .await
 }
 
-#[tracing::instrument(skip(semaphore))]
+#[tracing::instrument(skip(semaphore, sessions))]
 pub async fn fetch_with_client(
     url: &str,
     sha1: Option<&str>,
     download_meta: Option<&DownloadMeta>,
     uri_path: Option<&'static str>,
     semaphore: &FetchSemaphore,
-    exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
+    sessions: &Sessions,
     client: &reqwest::Client,
 ) -> crate::Result<Bytes> {
     fetch_advanced_with_client(
@@ -715,13 +717,13 @@ pub async fn fetch_with_client(
         None,
         uri_path,
         semaphore,
-        exec,
+        sessions,
         client,
     )
     .await
 }
 
-#[tracing::instrument(skip(json_body, semaphore))]
+#[tracing::instrument(skip(json_body, semaphore, sessions))]
 pub async fn fetch_json<T>(
     method: Method,
     url: &str,
@@ -729,14 +731,14 @@ pub async fn fetch_json<T>(
     json_body: Option<serde_json::Value>,
     uri_path: Option<&'static str>,
     semaphore: &FetchSemaphore,
-    exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
+    sessions: &Sessions,
 ) -> crate::Result<T>
 where
     T: DeserializeOwned,
 {
     let result = fetch_advanced(
         method, url, sha1, json_body, None, None, None, uri_path, semaphore,
-        exec,
+        sessions,
     )
     .await?;
     let value = serde_json::from_slice(&result)?;
@@ -745,7 +747,7 @@ where
 
 /// Downloads a file with retry and checksum functionality, and a specific
 /// [`reqwest::Client`].
-#[tracing::instrument(skip(json_body, semaphore, header))]
+#[tracing::instrument(skip(json_body, semaphore, sessions, header))]
 #[allow(clippy::too_many_arguments)]
 pub async fn fetch_advanced(
     method: Method,
@@ -757,7 +759,7 @@ pub async fn fetch_advanced(
     loading_bar: Option<(&LoadingBarId, f64)>,
     uri_path: Option<&'static str>,
     semaphore: &FetchSemaphore,
-    exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
+    sessions: &Sessions,
 ) -> crate::Result<Bytes> {
     fetch_advanced_with_client(
         method,
@@ -769,13 +771,13 @@ pub async fn fetch_advanced(
         loading_bar,
         uri_path,
         semaphore,
-        exec,
+        sessions,
         &INSECURE_REQWEST_CLIENT,
     )
     .await
 }
 
-#[tracing::instrument(skip(json_body, semaphore, progress, header))]
+#[tracing::instrument(skip(json_body, semaphore, sessions, progress, header))]
 #[allow(clippy::too_many_arguments)]
 pub async fn fetch_advanced_with_progress(
     method: Method,
@@ -787,7 +789,7 @@ pub async fn fetch_advanced_with_progress(
     loading_bar: Option<(&LoadingBarId, f64)>,
     uri_path: Option<&'static str>,
     semaphore: &FetchSemaphore,
-    exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
+    sessions: &Sessions,
     progress: Option<&mut FetchProgressFn<'_>>,
 ) -> crate::Result<Bytes> {
     fetch_advanced_with_client_and_progress(
@@ -801,7 +803,7 @@ pub async fn fetch_advanced_with_progress(
         loading_bar,
         uri_path,
         semaphore,
-        exec,
+        sessions,
         &INSECURE_REQWEST_CLIENT,
         progress,
     )
@@ -809,7 +811,7 @@ pub async fn fetch_advanced_with_progress(
 }
 
 /// Downloads a file with retry and checksum functionality
-#[tracing::instrument(skip(json_body, semaphore, header))]
+#[tracing::instrument(skip(json_body, semaphore, sessions, header))]
 #[allow(clippy::too_many_arguments)]
 pub async fn fetch_advanced_with_client(
     method: Method,
@@ -821,7 +823,7 @@ pub async fn fetch_advanced_with_client(
     loading_bar: Option<(&LoadingBarId, f64)>,
     uri_path: Option<&'static str>,
     semaphore: &FetchSemaphore,
-    exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
+    sessions: &Sessions,
     client: &reqwest::Client,
 ) -> crate::Result<Bytes> {
     fetch_advanced_with_client_and_progress(
@@ -835,7 +837,7 @@ pub async fn fetch_advanced_with_client(
         loading_bar,
         uri_path,
         semaphore,
-        exec,
+        sessions,
         client,
         None,
     )
@@ -843,7 +845,7 @@ pub async fn fetch_advanced_with_client(
 }
 
 #[tracing::instrument(skip(
-    json_body, bytes_body, semaphore, client, progress, header
+    json_body, bytes_body, semaphore, sessions, client, progress, header
 ))]
 #[allow(clippy::too_many_arguments)]
 async fn fetch_advanced_with_client_and_progress(
@@ -857,7 +859,7 @@ async fn fetch_advanced_with_client_and_progress(
     loading_bar: Option<(&LoadingBarId, f64)>,
     uri_path: Option<&'static str>,
     semaphore: &FetchSemaphore,
-    exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
+    sessions: &Sessions,
     client: &reqwest::Client,
     progress: Option<&mut FetchProgressFn<'_>>,
 ) -> crate::Result<Bytes> {
@@ -872,7 +874,7 @@ async fn fetch_advanced_with_client_and_progress(
         loading_bar,
         uri_path,
         semaphore,
-        exec,
+        sessions,
         client,
         progress,
         false,
@@ -896,17 +898,18 @@ async fn fetch_advanced_with_target(
     loading_bar: Option<(&LoadingBarId, f64)>,
     uri_path: Option<&'static str>,
     semaphore: &FetchSemaphore,
-    exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
+    sessions: &Sessions,
     client: &reqwest::Client,
     mut progress: Option<&mut FetchProgressFn<'_>>,
     to_file: bool,
     file_staging: Option<&Path>,
 ) -> crate::Result<FetchBody> {
-    let routed_url = crate::self_hosted::accounts::route(url, uri_path);
+    let routed_url =
+        crate::self_hosted::accounts::route(sessions, url, uri_path);
     let url = routed_url.as_ref();
     let header = header.filter(|(name, _)| {
         !name.eq_ignore_ascii_case("authorization")
-            || crate::self_hosted::accounts::may_send_credentials(url)
+            || crate::self_hosted::accounts::may_send_credentials(sessions, url)
     });
     let is_api_url = url.starts_with(env!("MODRINTH_API_URL"))
         || url.starts_with(env!("MODRINTH_API_URL_V3"));
@@ -921,9 +924,8 @@ async fn fetch_advanced_with_target(
     let creds = if header
         .as_ref()
         .is_none_or(|x| &*x.0.to_lowercase() != "authorization")
-        && crate::self_hosted::accounts::may_send_credentials(url)
     {
-        crate::state::ModrinthCredentials::get_active(exec).await?
+        sessions.modrinth_token(url)
     } else {
         None
     };
@@ -995,7 +997,7 @@ async fn fetch_advanced_with_target(
         }
 
         if let Some(ref creds) = creds {
-            req = req.header("Authorization", &creds.session);
+            req = req.header("Authorization", creds);
         }
 
         if let Some((name, value)) = &download_meta_header {
@@ -1121,14 +1123,14 @@ async fn fetch_advanced_with_target(
 }
 
 /// Downloads a file from specified mirrors
-#[tracing::instrument(skip(semaphore))]
+#[tracing::instrument(skip(semaphore, sessions))]
 pub async fn fetch_mirrors(
     mirrors: &[&str],
     sha1: Option<&str>,
     download_meta: Option<&DownloadMeta>,
     uri_path: Option<&'static str>,
     semaphore: &FetchSemaphore,
-    exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite> + Copy,
+    sessions: &Sessions,
 ) -> crate::Result<Bytes> {
     if mirrors.is_empty() {
         bail!(ErrorKind::InputError("no mirrors provided".to_string()));
@@ -1141,7 +1143,7 @@ pub async fn fetch_mirrors(
             download_meta,
             uri_path,
             semaphore,
-            exec,
+            sessions,
             &REQWEST_CLIENT,
         )
         .await;
@@ -1155,22 +1157,19 @@ pub async fn fetch_mirrors(
 }
 
 /// Posts a JSON to a URL
-#[tracing::instrument(skip(json_body, semaphore))]
+#[tracing::instrument(skip(json_body, semaphore, sessions))]
 pub async fn post_json(
     url: &str,
     json_body: serde_json::Value,
     semaphore: &FetchSemaphore,
-    exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
+    sessions: &Sessions,
 ) -> crate::Result<()> {
     let _permit = semaphore.0.acquire().await?;
 
     let mut req = INSECURE_REQWEST_CLIENT.post(url).json(&json_body);
 
-    if crate::self_hosted::accounts::may_send_credentials(url)
-        && let Some(creds) =
-            crate::state::ModrinthCredentials::get_active(exec).await?
-    {
-        req = req.header("Authorization", &creds.session);
+    if let Some(creds) = sessions.modrinth_token(url) {
+        req = req.header("Authorization", creds);
     }
 
     req.send().await?.error_for_status()?;

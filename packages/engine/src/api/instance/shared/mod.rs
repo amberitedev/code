@@ -25,39 +25,6 @@ use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::collections::{HashMap, HashSet};
-use std::sync::{LazyLock, RwLock};
-
-#[derive(Clone)]
-pub(crate) struct SharedClientsSession {
-    pub base_url: String,
-    pub access_token: Option<String>,
-    pub user_id: Option<String>,
-}
-
-static SHARED_CLIENTS_SESSION: LazyLock<RwLock<Option<SharedClientsSession>>> =
-    LazyLock::new(|| RwLock::new(None));
-
-pub fn set_shared_clients_session(
-    base_url: String,
-    access_token: Option<String>,
-    user_id: Option<String>,
-) {
-    let session = Some(SharedClientsSession {
-        base_url: base_url.trim_end_matches('/').to_string(),
-        access_token: access_token.filter(|token| !token.trim().is_empty()),
-        user_id: user_id.filter(|id| !id.trim().is_empty()),
-    });
-    *SHARED_CLIENTS_SESSION
-        .write()
-        .expect("shared clients session lock poisoned") = session;
-}
-
-pub(crate) fn shared_clients_session() -> Option<SharedClientsSession> {
-    SHARED_CLIENTS_SESSION
-        .read()
-        .expect("shared clients session lock poisoned")
-        .clone()
-}
 
 pub(crate) use contracts::rules::SHAREABLE_CONFIG_EXTENSIONS as CONFIG_FILE_EXTENSIONS;
 pub(crate) use sharing_client::rules::CONFIG_FILE_TYPE;
@@ -141,6 +108,5 @@ pub use self::types::{
 };
 
 pub async fn can_active_user_use_shared_instances() -> crate::Result<bool> {
-    Ok(shared_clients_session()
-        .is_some_and(|session| session.access_token.is_some()))
+    Ok(State::get().await?.sessions.backend().is_some())
 }

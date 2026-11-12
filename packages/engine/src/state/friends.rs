@@ -3,7 +3,7 @@ use crate::data::ModrinthCredentials;
 use crate::event::emit::{emit_friend, emit_notification};
 use crate::event::{EventSink, FriendPayload};
 use crate::state::tunnel::InternalTunnelSocket;
-use crate::state::{ProcessManager, TunnelSocket};
+use crate::state::{ProcessManager, Sessions, TunnelSocket};
 use crate::util::fetch::{FetchSemaphore, fetch_advanced, fetch_json};
 use anyhow::bail;
 use ariadne::ids::UserId;
@@ -76,6 +76,7 @@ impl FriendsSocket {
         &self,
         exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite> + Copy,
         semaphore: &FetchSemaphore,
+        sessions: &Sessions,
         process_manager: &ProcessManager,
         events: &EventSink,
     ) -> crate::Result<()> {
@@ -85,12 +86,13 @@ impl FriendsSocket {
         }
 
         let credentials =
-            ModrinthCredentials::get_and_refresh(exec, semaphore).await?;
+            ModrinthCredentials::get_and_refresh(exec, semaphore, sessions)
+                .await?;
 
         if let Some(credentials) = credentials {
             let mut request = format!(
                 "{}_internal/launcher_socket?code={}",
-                crate::self_hosted::accounts::socket_base(),
+                crate::self_hosted::accounts::socket_base(sessions),
                 credentials.session
             )
             .into_client_request()?;
@@ -320,6 +322,7 @@ impl FriendsSocket {
                         .connect(
                             &state.pool,
                             &state.api_semaphore,
+                            &state.sessions,
                             &state.process_manager,
                             &state.events,
                         )
@@ -378,8 +381,8 @@ impl FriendsSocket {
 
     #[tracing::instrument(skip_all)]
     pub async fn friends(
-        exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite> + Copy,
         semaphore: &FetchSemaphore,
+        sessions: &Sessions,
     ) -> crate::Result<Vec<UserFriend>> {
         fetch_json(
             Method::GET,
@@ -388,7 +391,7 @@ impl FriendsSocket {
             None,
             Some("/v3/friends"),
             semaphore,
-            exec,
+            sessions,
         )
         .await
     }
@@ -401,11 +404,11 @@ impl FriendsSocket {
             .collect()
     }
 
-    #[tracing::instrument(skip(exec, semaphore))]
+    #[tracing::instrument(skip(semaphore, sessions))]
     pub async fn add_friend(
         user_id: &str,
-        exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite> + Copy,
         semaphore: &FetchSemaphore,
+        sessions: &Sessions,
     ) -> crate::Result<()> {
         let result = fetch_advanced(
             Method::POST,
@@ -417,7 +420,7 @@ impl FriendsSocket {
             None,
             Some("/v3/friend/:user_id"),
             semaphore,
-            exec,
+            sessions,
         )
         .await;
 
@@ -432,11 +435,11 @@ impl FriendsSocket {
         Ok(())
     }
 
-    #[tracing::instrument(skip(exec, semaphore))]
+    #[tracing::instrument(skip(semaphore, sessions))]
     pub async fn remove_friend(
         user_id: &str,
-        exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite> + Copy,
         semaphore: &FetchSemaphore,
+        sessions: &Sessions,
     ) -> crate::Result<()> {
         fetch_advanced(
             Method::DELETE,
@@ -448,7 +451,7 @@ impl FriendsSocket {
             None,
             Some("/v3/friend/:user_id"),
             semaphore,
-            exec,
+            sessions,
         )
         .await?;
 

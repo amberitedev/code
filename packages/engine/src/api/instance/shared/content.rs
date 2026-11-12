@@ -81,6 +81,7 @@ pub(crate) async fn shared_modpack_files(
         Some(CacheBehaviour::MustRevalidate),
         &state.pool,
         &state.api_semaphore,
+        &state.sessions,
     )
     .await?
     .ok_or(crate::ErrorKind::InputError(
@@ -210,6 +211,7 @@ pub(crate) async fn shared_modpack_files(
         Some(CacheBehaviour::MustRevalidate),
         &state.pool,
         &state.api_semaphore,
+        &state.sessions,
     )
     .await?
     .into_iter()

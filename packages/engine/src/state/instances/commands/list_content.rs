@@ -12,8 +12,8 @@ use crate::state::{
     CacheBehaviour, CachedEntry, CachedFile, ContentFile, ContentItem,
     ContentItemOwner, ContentItemProject, ContentItemVersion, Dependency,
     LinkedModpackInfo, ModLoader, Organization, OwnerType, Project,
-    ProjectType, ReleaseChannel, TeamMember, Version, VersionEnvironment,
-    VersionV3,
+    ProjectType, ReleaseChannel, Sessions, TeamMember, Version,
+    VersionEnvironment, VersionV3,
 };
 use crate::util::fetch::{DownloadMeta, DownloadReason, FetchSemaphore};
 use crate::{ErrorKind, State};
@@ -273,6 +273,7 @@ async fn list_content_inner(
                     &version_id,
                     &state.pool,
                     &state.api_semaphore,
+                    &state.sessions,
                 )
                 .await?
             }
@@ -380,6 +381,7 @@ pub(crate) async fn list_linked_modpack_content(
         state,
         &state.pool,
         &state.api_semaphore,
+        &state.sessions,
     )
     .await
     {
@@ -444,18 +446,21 @@ pub(crate) async fn get_linked_modpack_info(
             cache_behaviour,
             &state.pool,
             &state.api_semaphore,
+            &state.sessions,
         ),
         CachedEntry::get_version(
             &version_id,
             cache_behaviour,
             &state.pool,
             &state.api_semaphore,
+            &state.sessions,
         ),
         CachedEntry::get_project_versions(
             &project_id,
             cache_behaviour,
             &state.pool,
             &state.api_semaphore,
+            &state.sessions,
         ),
     )?;
     let version_project_id = version
@@ -470,12 +475,14 @@ pub(crate) async fn get_linked_modpack_info(
                     cache_behaviour,
                     &state.pool,
                     &state.api_semaphore,
+                    &state.sessions,
                 ),
                 CachedEntry::get_project_versions(
                     &version_project_id,
                     cache_behaviour,
                     &state.pool,
                     &state.api_semaphore,
+                    &state.sessions,
                 ),
             )?;
             (modpack_project.or(project), modpack_versions)
@@ -491,6 +498,7 @@ pub(crate) async fn get_linked_modpack_info(
             cache_behaviour,
             &state.pool,
             &state.api_semaphore,
+            &state.sessions,
         )
         .await?;
         org.map(|org| ContentItemOwner {
@@ -505,6 +513,7 @@ pub(crate) async fn get_linked_modpack_info(
             cache_behaviour,
             &state.pool,
             &state.api_semaphore,
+            &state.sessions,
         )
         .await?;
         team.and_then(|team| {
@@ -545,6 +554,7 @@ pub(crate) async fn dependencies_to_content_items(
     cache_behaviour: Option<CacheBehaviour>,
     pool: &SqlitePool,
     fetch_semaphore: &FetchSemaphore,
+    sessions: &Sessions,
 ) -> crate::Result<Vec<ContentItem>> {
     let project_ids = dependencies
         .iter()
@@ -563,6 +573,7 @@ pub(crate) async fn dependencies_to_content_items(
         cache_behaviour,
         pool,
         fetch_semaphore,
+        sessions,
     )
     .await?;
     let mut items = dependencies
@@ -745,6 +756,7 @@ async fn content_projects_for_scope_inner(
         cache_behaviour,
         &state.pool,
         &state.api_semaphore,
+        &state.sessions,
     )
     .await?;
     let file_info_by_hash = file_info
@@ -759,6 +771,7 @@ async fn content_projects_for_scope_inner(
             cache_behaviour,
             &state.pool,
             &state.api_semaphore,
+            &state.sessions,
         )
         .await?
     };
@@ -789,6 +802,7 @@ async fn content_projects_for_scope_inner(
         cache_behaviour,
         &state.pool,
         &state.api_semaphore,
+        &state.sessions,
     )
     .await?;
     let mut updates_by_hash =
@@ -902,6 +916,7 @@ async fn get_installed_update_channels(
     cache_behaviour: Option<CacheBehaviour>,
     pool: &SqlitePool,
     fetch_semaphore: &FetchSemaphore,
+    sessions: &Sessions,
 ) -> crate::Result<HashMap<String, ReleaseChannel>> {
     let version_ids = file_info_by_hash
         .values()
@@ -916,6 +931,7 @@ async fn get_installed_update_channels(
         cache_behaviour,
         pool,
         fetch_semaphore,
+        sessions,
     )
     .await?;
     let channels_by_version_id = versions
@@ -989,6 +1005,7 @@ async fn content_files_to_content_items(
         cache_behaviour,
         &state.pool,
         &state.api_semaphore,
+        &state.sessions,
     )
     .await?;
     let embedded_metadata =
@@ -1085,6 +1102,7 @@ async fn resolve_metadata(
     cache_behaviour: Option<CacheBehaviour>,
     pool: &SqlitePool,
     fetch_semaphore: &FetchSemaphore,
+    sessions: &Sessions,
 ) -> crate::Result<ResolvedMetadata> {
     let project_id_refs =
         project_ids.iter().map(String::as_str).collect::<Vec<_>>();
@@ -1102,6 +1120,7 @@ async fn resolve_metadata(
                             cache_behaviour,
                             pool,
                             fetch_semaphore,
+                            sessions,
                         )
                         .await
                     }
@@ -1115,6 +1134,7 @@ async fn resolve_metadata(
                             cache_behaviour,
                             pool,
                             fetch_semaphore,
+                            sessions,
                         )
                         .await
                     }
@@ -1128,6 +1148,7 @@ async fn resolve_metadata(
                             cache_behaviour,
                             pool,
                             fetch_semaphore,
+                            sessions,
                         )
                         .await
                     }
@@ -1158,6 +1179,7 @@ async fn resolve_metadata(
                         cache_behaviour,
                         pool,
                         fetch_semaphore,
+                        sessions,
                     )
                     .await
                 }
@@ -1171,6 +1193,7 @@ async fn resolve_metadata(
                         cache_behaviour,
                         pool,
                         fetch_semaphore,
+                        sessions,
                     )
                     .await
                 }
@@ -1383,10 +1406,15 @@ async fn get_cached_modpack_identifiers(
     version_id: &str,
     pool: &SqlitePool,
     fetch_semaphore: &FetchSemaphore,
+    sessions: &Sessions,
 ) -> crate::Result<Option<ModpackIdentifiers>> {
-    let Some(cached) =
-        CachedEntry::get_modpack_files(version_id, pool, fetch_semaphore)
-            .await?
+    let Some(cached) = CachedEntry::get_modpack_files(
+        version_id,
+        pool,
+        fetch_semaphore,
+        sessions,
+    )
+    .await?
     else {
         return Ok(None);
     };
@@ -1407,10 +1435,15 @@ async fn get_modpack_identifiers(
     state: &State,
     pool: &SqlitePool,
     fetch_semaphore: &FetchSemaphore,
+    sessions: &Sessions,
 ) -> crate::Result<ModpackIdentifiers> {
-    if let Some(cached) =
-        CachedEntry::get_modpack_files(version_id, pool, fetch_semaphore)
-            .await?
+    if let Some(cached) = CachedEntry::get_modpack_files(
+        version_id,
+        pool,
+        fetch_semaphore,
+        sessions,
+    )
+    .await?
     {
         if !cached.project_ids.is_empty() {
             return Ok(ModpackIdentifiers {
@@ -1424,9 +1457,14 @@ async fn get_modpack_identifiers(
             .iter()
             .map(String::as_str)
             .collect::<Vec<_>>();
-        let files =
-            CachedEntry::get_file_many(&hash_refs, None, pool, fetch_semaphore)
-                .await?;
+        let files = CachedEntry::get_file_many(
+            &hash_refs,
+            None,
+            pool,
+            fetch_semaphore,
+            sessions,
+        )
+        .await?;
         let project_ids = files
             .iter()
             .map(|file| file.project_id.clone())
@@ -1447,12 +1485,17 @@ async fn get_modpack_identifiers(
         });
     }
 
-    let version =
-        CachedEntry::get_version(version_id, None, pool, fetch_semaphore)
-            .await?
-            .ok_or(ErrorKind::InputError(format!(
-                "modpack version {version_id} not found"
-            )))?;
+    let version = CachedEntry::get_version(
+        version_id,
+        None,
+        pool,
+        fetch_semaphore,
+        sessions,
+    )
+    .await?
+    .ok_or(ErrorKind::InputError(format!(
+        "modpack version {version_id} not found"
+    )))?;
     let primary_file = version
         .files
         .iter()

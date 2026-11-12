@@ -104,6 +104,7 @@ pub(crate) async fn sync_instance_content_files(
         None,
         &state.pool,
         &state.api_semaphore,
+        &state.sessions,
     )
     .await?;
     let hashes_by_key = hashes

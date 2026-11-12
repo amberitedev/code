@@ -406,6 +406,7 @@ pub(crate) async fn get_external_files_from_mrpack(
         None,
         &state.pool,
         &state.api_semaphore,
+        &state.sessions,
     )
     .await
     {
@@ -748,6 +749,7 @@ async fn install_zipped_mrpack_files_with_reporter_inner(
             None,
             &state.pool,
             &state.api_semaphore,
+            &state.sessions,
         )
         .await?
         .into_iter()
@@ -1403,6 +1405,7 @@ pub async fn remove_all_related_files(
         None,
         &state.pool,
         &state.api_semaphore,
+        &state.sessions,
     )
     .await?;
 

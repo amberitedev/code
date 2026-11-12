@@ -1,15 +1,14 @@
 //! Compatibility with public hash endpoints when Modrinth's firewall blocks bulk requests.
-use crate::state::Version;
+use crate::state::{Sessions, Version};
 use crate::util::fetch::{FetchSemaphore, fetch_json};
 use futures::{StreamExt, TryStreamExt};
 use reqwest::{Method, StatusCode};
-use sqlx::SqlitePool;
 use std::collections::HashMap;
 
 pub(crate) async fn versions_by_hash(
     hashes: &[String],
     semaphore: &FetchSemaphore,
-    pool: &SqlitePool,
+    sessions: &Sessions,
 ) -> crate::Result<HashMap<String, Version>> {
     let result = fetch_json(
         Method::POST,
@@ -18,7 +17,7 @@ pub(crate) async fn versions_by_hash(
         Some(serde_json::json!({ "algorithm": "sha1", "hashes": hashes })),
         Some("/v2/version_files"),
         semaphore,
-        pool,
+        sessions,
     )
     .await;
     match result {
@@ -37,7 +36,7 @@ pub(crate) async fn versions_by_hash(
                 None,
                 "/v2/version_file/:hash",
                 semaphore,
-                pool,
+                sessions,
             )
             .await?;
             Ok(version.map(|version| (hash, version)))
@@ -67,9 +66,9 @@ async fn optional_version(
     body: Option<serde_json::Value>,
     route: &'static str,
     semaphore: &FetchSemaphore,
-    pool: &SqlitePool,
+    sessions: &Sessions,
 ) -> crate::Result<Option<Version>> {
-    match fetch_json(method, url, None, body, Some(route), semaphore, pool)
+    match fetch_json(method, url, None, body, Some(route), semaphore, sessions)
         .await
     {
         Ok(version) => Ok(Some(version)),

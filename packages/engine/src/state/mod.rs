@@ -8,6 +8,7 @@ use std::sync::{Arc, LazyLock};
 use tokio::sync::watch::Sender;
 use tokio::sync::{Mutex, OnceCell, Semaphore};
 
+use crate::self_hosted::accounts::AccountEndpoints;
 use crate::state::instances::watcher::FileWatcher;
 use sqlx::SqlitePool;
 
@@ -65,6 +66,9 @@ pub(crate) use self::instance_locks::InstanceLocks;
 mod presence;
 pub use self::presence::Presence;
 
+mod sessions;
+pub use self::sessions::*;
+
 mod synced_options;
 pub(crate) use self::synced_options::SyncedOptions;
 
@@ -118,6 +122,8 @@ pub struct State {
     pub(crate) file_watcher: FileWatcher,
 
     pub events: EventSink,
+
+    pub sessions: Sessions,
 }
 
 impl State {
@@ -125,6 +131,7 @@ impl State {
     pub async fn init(
         app_identifier: String,
         events: EventSink,
+        accounts: Option<AccountEndpoints>,
     ) -> crate::Result<()> {
         let _startup = STATE_STARTUP_LOCK.lock().await;
         let result = LAUNCHER_STATE
@@ -136,9 +143,13 @@ impl State {
                         "could not find the application directory".to_string(),
                     ))?;
                 let (state, watcher_events) =
-                    Self::open(settings_dir, events).await?;
+                    Self::open(settings_dir, events, accounts).await?;
                 // Fallible, so it runs before a background task can keep a rejected engine alive.
-                crate::self_hosted::accounts::bind_origin(&state.pool).await?;
+                crate::self_hosted::accounts::bind_origin(
+                    &state.pool,
+                    &state.sessions,
+                )
+                .await?;
                 state.spawn_background(watcher_events);
                 state.start_desktop();
                 Ok(state)
@@ -156,8 +167,10 @@ impl State {
     pub async fn new(
         settings_dir: PathBuf,
         events: EventSink,
+        accounts: Option<AccountEndpoints>,
     ) -> crate::Result<Arc<Self>> {
-        let (state, watcher_events) = Self::open(settings_dir, events).await?;
+        let (state, watcher_events) =
+            Self::open(settings_dir, events, accounts).await?;
         state.spawn_background(watcher_events);
         Ok(state)
     }
@@ -167,6 +180,7 @@ impl State {
     async fn open(
         settings_dir: PathBuf,
         events: EventSink,
+        accounts: Option<AccountEndpoints>,
     ) -> crate::Result<(
         Arc<Self>,
         tokio::sync::mpsc::Receiver<notify_debouncer_mini::DebounceEventResult>,
@@ -226,6 +240,7 @@ impl State {
             pool,
             file_watcher,
             events,
+            sessions: Sessions::new(accounts),
         });
 
         state.content_store.recover(None).await?;
@@ -354,6 +369,7 @@ impl State {
                 ModrinthCredentials::refresh_all(
                     &state.pool,
                     &state.fetch_semaphore,
+                    &state.sessions,
                 ),
             );
 
@@ -367,6 +383,7 @@ impl State {
                 .connect(
                     &state.pool,
                     &state.api_semaphore,
+                    &state.sessions,
                     &state.process_manager,
                     &state.events,
                 )
@@ -504,8 +521,8 @@ mod tests {
 
         // A call that reaches the global waits forever instead of failing.
         tokio::time::timeout(Duration::from_secs(60), async {
-            let a = State::new(a_dir, EventSink::new()).await.unwrap();
-            let b = State::new(b_dir, EventSink::new()).await.unwrap();
+            let a = State::new(a_dir, EventSink::new(), None).await.unwrap();
+            let b = State::new(b_dir, EventSink::new(), None).await.unwrap();
             add_instance(&a, "a", "Survival").await;
             add_instance(&b, "b", "Survival").await;
 

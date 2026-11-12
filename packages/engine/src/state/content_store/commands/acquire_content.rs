@@ -1,4 +1,5 @@
 use crate::ErrorKind;
+use crate::state::Sessions;
 use crate::state::content_store::adapters::downloads;
 use crate::state::content_store::adapters::filesystem;
 use crate::state::content_store::adapters::sqlite as catalog;
@@ -21,6 +22,7 @@ impl ContentStore {
         size: Option<u64>,
         download_meta: Option<&DownloadMeta>,
         semaphore: &FetchSemaphore,
+        sessions: &Sessions,
         progress: Option<&mut FetchProgressFn<'_>>,
     ) -> crate::Result<GetFileResult> {
         let sha512 = sha512.ok_or_else(|| {
@@ -38,7 +40,7 @@ impl ContentStore {
         }
         let download = downloads::download(
             &self.staging,
-            &self.pool,
+            sessions,
             mirrors,
             download_meta,
             semaphore,

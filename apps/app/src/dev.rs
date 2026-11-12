@@ -1,3 +1,4 @@
+use engine::AccountEndpoints;
 use serde::Deserialize;
 use std::env;
 use std::sync::OnceLock;
@@ -29,18 +30,21 @@ pub fn prepare() {
     let config = parse_config();
     #[cfg(not(debug_assertions))]
     let config = None;
-    let backend_url = config
-        .as_ref()
-        .and_then(|config| config.backend_url.clone())
-        .or_else(|| env::var("ACCOUNT_API_URL").ok());
-    if let Some(backend_url) = backend_url {
-        engine::self_hosted::accounts::configure(
-            &backend_url,
-            env::var("ACCOUNT_WEB_URL").ok().as_deref(),
-        )
-        .expect("valid account service configuration");
-    }
     let _ = CONFIG.set(config);
+}
+
+/// The account service the engine sends Modrinth account calls to, when one is configured.
+pub fn accounts() -> engine::Result<Option<AccountEndpoints>> {
+    config()
+        .and_then(|config| config.backend_url.clone())
+        .or_else(|| env::var("ACCOUNT_API_URL").ok())
+        .map(|backend_url| {
+            AccountEndpoints::new(
+                &backend_url,
+                env::var("ACCOUNT_WEB_URL").ok().as_deref(),
+            )
+        })
+        .transpose()
 }
 
 pub fn config() -> Option<&'static DevAppConfig> {

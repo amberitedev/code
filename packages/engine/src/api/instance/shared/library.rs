@@ -17,6 +17,7 @@ pub async fn get_cached_shared_instance_library()
         &user_id,
         &state.pool,
         &state.api_semaphore,
+        &state.sessions,
     )
     .await
 }

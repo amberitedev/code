@@ -67,6 +67,7 @@ impl ContentMetadataProvider for CachedEntryContentProvider<'_> {
             self.cache_behaviour,
             &self.state.pool,
             &self.state.api_semaphore,
+            &self.state.sessions,
         )
         .await
         .map_err(resolve_provider_error)?;
@@ -83,6 +84,7 @@ impl ContentMetadataProvider for CachedEntryContentProvider<'_> {
             self.cache_behaviour,
             &self.state.pool,
             &self.state.api_semaphore,
+            &self.state.sessions,
         )
         .await
         .map_err(resolve_provider_error)?;
@@ -266,6 +268,7 @@ pub(crate) async fn switch_project_version_with_dependencies(
         Some(CacheBehaviour::MustRevalidate),
         &state.pool,
         &state.api_semaphore,
+        &state.sessions,
     )
     .await?
     .ok_or(ErrorKind::InputError(format!(
@@ -438,6 +441,7 @@ pub(crate) async fn download_project_version_with_progress(
         None,
         &state.pool,
         &state.api_semaphore,
+        &state.sessions,
     )
     .await?
     .ok_or(ErrorKind::InputError(format!(

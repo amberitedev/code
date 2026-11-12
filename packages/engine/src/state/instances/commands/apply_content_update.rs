@@ -479,6 +479,7 @@ pub(crate) async fn plan_bulk_update(
         Some(CacheBehaviour::MustRevalidate),
         &state.pool,
         &state.api_semaphore,
+        &state.sessions,
     )
     .await?;
     let versions_by_id = versions
@@ -644,6 +645,7 @@ async fn installed_projects(
         Some(CacheBehaviour::MustRevalidate),
         &state.pool,
         &state.api_semaphore,
+        &state.sessions,
     )
     .await?;
     let file_info_by_hash = file_info
@@ -801,6 +803,7 @@ async fn cached_version(
             Some(CacheBehaviour::MustRevalidate),
             &state.pool,
             &state.api_semaphore,
+            &state.sessions,
         )
         .await?;
         version_cache.insert(version_id.to_string(), version);
@@ -820,6 +823,7 @@ async fn cached_project_versions(
             Some(CacheBehaviour::MustRevalidate),
             &state.pool,
             &state.api_semaphore,
+            &state.sessions,
         )
         .await?;
         project_versions_cache.insert(project_id.to_string(), versions);

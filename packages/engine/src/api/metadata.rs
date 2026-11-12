@@ -14,6 +14,7 @@ pub async fn get_minecraft_versions() -> crate::Result<VersionManifest> {
         None,
         &state.pool,
         &state.api_semaphore,
+        &state.sessions,
     )
     .await?
     .ok_or(ErrorKind::NoValueFor("minecraft versions".to_string()))?;
@@ -30,6 +31,7 @@ pub async fn get_loader_versions(loader: &str) -> crate::Result<Manifest> {
         None,
         &state.pool,
         &state.api_semaphore,
+        &state.sessions,
     )
     .await?
     .ok_or(ErrorKind::NoValueFor(format!("{loader} loader versions")))?;

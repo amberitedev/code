@@ -1,4 +1,4 @@
-use crate::state::{CacheBehaviour, CachedEntry};
+use crate::state::{CacheBehaviour, CachedEntry, Sessions};
 use crate::util::fetch::{FetchSemaphore, fetch_advanced};
 use chrono::{DateTime, Duration, TimeZone, Utc};
 use reqwest::Method;
@@ -17,6 +17,7 @@ impl ModrinthCredentials {
     pub async fn get_and_refresh(
         exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite> + Copy,
         semaphore: &FetchSemaphore,
+        sessions: &Sessions,
     ) -> crate::Result<Option<Self>> {
         let creds = Self::get_active(exec).await?;
 
@@ -37,7 +38,7 @@ impl ModrinthCredentials {
                     None,
                     Some("/v2/session/refresh"),
                     semaphore,
-                    exec,
+                    sessions,
                 )
                 .await
                 .ok()
@@ -47,12 +48,15 @@ impl ModrinthCredentials {
                     creds.session = value.session;
                     creds.expires = Utc::now() + Duration::weeks(2);
                     creds.upsert(exec).await?;
-                    crate::self_hosted::accounts::sync_sharing(Some(&creds));
+                    crate::self_hosted::accounts::set_sessions(
+                        sessions,
+                        Some(&creds),
+                    );
 
                     Ok(Some(creds))
                 } else {
                     Self::remove(&creds.user_id, exec).await?;
-                    crate::self_hosted::accounts::sync_sharing(None);
+                    crate::self_hosted::accounts::set_sessions(sessions, None);
 
                     Ok(None)
                 }
@@ -99,11 +103,12 @@ impl ModrinthCredentials {
 
     pub async fn get_all(
         exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
+        sessions: &Sessions,
     ) -> crate::Result<Vec<Self>> {
         let res: Vec<(String, i64, String, i64)> = sqlx::query_as(
             "SELECT users.id, users.active, users.session_id, users.expires FROM modrinth_users users JOIN self_hosted_account_origins origins ON origins.user_id = users.id WHERE origins.origin = ? ORDER BY users.rowid",
         )
-        .bind(crate::self_hosted::accounts::origin())
+        .bind(crate::self_hosted::accounts::origin(sessions))
         .fetch_all(exec)
         .await?;
 
@@ -185,16 +190,17 @@ impl ModrinthCredentials {
     pub(crate) async fn refresh_all(
         pool: &SqlitePool,
         fetch_semaphore: &FetchSemaphore,
+        sessions: &Sessions,
     ) -> crate::Result<()> {
-        let all = Self::get_all(pool).await?;
+        let all = Self::get_all(pool, sessions).await?;
 
         let user_ids = all.into_iter().map(|x| x.user_id).collect::<Vec<_>>();
 
-        if crate::self_hosted::accounts::enabled() {
+        if crate::self_hosted::accounts::enabled(sessions) {
             crate::self_hosted::accounts::users(
                 &user_ids.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
                 fetch_semaphore,
-                pool,
+                sessions,
             )
             .await?;
             return Ok(());
@@ -204,6 +210,7 @@ impl ModrinthCredentials {
             Some(CacheBehaviour::Bypass),
             pool,
             fetch_semaphore,
+            sessions,
         )
         .await?;
 
@@ -222,7 +229,7 @@ pub const fn get_signup_url() -> &'static str {
 pub async fn finish_login_flow(
     code: &str,
     semaphore: &FetchSemaphore,
-    exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
+    sessions: &Sessions,
 ) -> crate::Result<ModrinthCredentials> {
     // The authorization code actually is the access token, since labrinth doesn't
     // issue separate authorization codes. Therefore, this is equivalent to an
@@ -230,7 +237,7 @@ pub async fn finish_login_flow(
     // needed. TODO not do this for the reasons outlined at
     // https://oauth.net/2/grant-types/implicit/
 
-    let info = fetch_info(code, semaphore, exec).await?;
+    let info = fetch_info(code, semaphore, sessions).await?;
 
     Ok(ModrinthCredentials {
         session: code.to_string(),
@@ -243,7 +250,7 @@ pub async fn finish_login_flow(
 async fn fetch_info(
     token: &str,
     semaphore: &FetchSemaphore,
-    exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
+    sessions: &Sessions,
 ) -> crate::Result<crate::state::cache::User> {
     let result = fetch_advanced(
         Method::GET,
@@ -255,7 +262,7 @@ async fn fetch_info(
         None,
         Some("/v2/user"),
         semaphore,
-        exec,
+        sessions,
     )
     .await?;
     let value = serde_json::from_slice(&result)?;

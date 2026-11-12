@@ -1919,6 +1919,7 @@ async fn instance_icon_is_replaceable(
             None,
             &state.pool,
             &state.api_semaphore,
+            &state.sessions,
         )
         .await
         .ok()

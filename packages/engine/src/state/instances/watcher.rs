@@ -605,8 +605,8 @@ mod tests {
         write(&b_dir.join("profiles/Survival/mods/b.jar"));
 
         tokio::time::timeout(Duration::from_secs(60), async {
-            let a = State::new(a_dir, EventSink::new()).await.unwrap();
-            let b = State::new(b_dir, EventSink::new()).await.unwrap();
+            let a = State::new(a_dir, EventSink::new(), None).await.unwrap();
+            let b = State::new(b_dir, EventSink::new(), None).await.unwrap();
             add_instance(&a, "same", "Survival").await;
             add_instance(&b, "same", "Survival").await;
             // A's sync keeps its queue entry while the instance installs.

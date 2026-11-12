@@ -30,6 +30,7 @@ pub(super) async fn mod_projects(
         None,
         &state.pool,
         &state.api_semaphore,
+        &state.sessions,
     )
     .await?;
     let project_ids: std::collections::HashSet<_> =
@@ -39,6 +40,7 @@ pub(super) async fn mod_projects(
         None,
         &state.pool,
         &state.api_semaphore,
+        &state.sessions,
     )
     .await?;
     let projects: HashMap<_, _> = projects
@@ -102,6 +104,7 @@ pub(super) async fn snapshot_instance(
         None,
         &state.pool,
         &state.api_semaphore,
+        &state.sessions,
     )
     .await?;
     let by_path: BTreeMap<_, _> =

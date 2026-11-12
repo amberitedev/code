@@ -178,7 +178,7 @@ async fn auto_install_java_inner(
         None,
         None,
         &state.fetch_semaphore,
-        &state.pool,
+        &state.sessions,
     )
     .await?;
     if let Some(loading_bar) = &loading_bar {
@@ -249,7 +249,7 @@ async fn auto_install_java_inner(
                 loading_bar.as_ref().map(|loading_bar| (loading_bar, 80.0)),
                 None,
                 &state.fetch_semaphore,
-                &state.pool,
+                &state.sessions,
                 Some(&mut progress as &mut FetchProgressFn<'_>),
             )
             .await?
@@ -264,7 +264,7 @@ async fn auto_install_java_inner(
                 loading_bar.as_ref().map(|loading_bar| (loading_bar, 80.0)),
                 None,
                 &state.fetch_semaphore,
-                &state.pool,
+                &state.sessions,
             )
             .await?
         };

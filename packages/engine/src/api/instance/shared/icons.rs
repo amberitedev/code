@@ -1,4 +1,5 @@
 use super::client::get_remote_server_icon;
+use super::install::linked_amberite_user_id;
 use super::*;
 use std::path::PathBuf;
 
@@ -21,8 +22,8 @@ pub(super) async fn shared_instance_server_icon(
     instance_id: &str,
     state: &State,
 ) -> crate::Result<Option<String>> {
-    let user_id = shared_clients_session()
-        .and_then(|session| session.user_id)
+    let user_id = linked_amberite_user_id(state)
+        .await?
         .ok_or(crate::ErrorKind::NotLoggedIn)?;
     let key =
         sha1_smol::Sha1::from(format!("{user_id}:{instance_id}").as_bytes())

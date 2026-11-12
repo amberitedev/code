@@ -21,6 +21,7 @@ pub(crate) static STORE: LazyLock<StoreClient> =
 /// `sink` gets the plain bytes and is called afresh for each holder. It must fail unless it reads
 /// the file's full size.
 pub(crate) async fn fetch_file<T, Fut>(
+    sessions: &crate::state::Sessions,
     file: &PoolFile,
     downloaded: &(dyn Fn(u64) + Sync),
     sink: impl FnMut(tokio::io::DuplexStream) -> Fut,
@@ -28,7 +29,7 @@ pub(crate) async fn fetch_file<T, Fut>(
 where
     Fut: Future<Output = crate::Result<T>>,
 {
-    let backend = crate::api::instance::share_backend()?;
+    let backend = crate::api::instance::share_backend(sessions)?;
     sharing_client::pool::fetch(&STORE, &backend, file, downloaded, sink)
         .await
         .map_err(|error| match error {

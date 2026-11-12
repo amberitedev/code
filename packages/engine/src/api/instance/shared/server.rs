@@ -40,6 +40,7 @@ pub(super) async fn server_only_versions(
         None,
         &state.pool,
         &state.api_semaphore,
+        &state.sessions,
     )
     .await?
     .into_iter()

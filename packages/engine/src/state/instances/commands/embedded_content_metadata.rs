@@ -536,6 +536,7 @@ pub(crate) async fn resolve_embedded_content_metadata(
         None,
         &state.pool,
         &state.api_semaphore,
+        &state.sessions,
     )
     .await?;
     let mut resolved = HashMap::new();

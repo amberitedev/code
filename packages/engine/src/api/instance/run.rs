@@ -255,7 +255,7 @@ async fn run_credentials(
                         "server_id": &server_id,
                     }),
                     &state.api_semaphore,
-                    &state.pool,
+                    &state.sessions,
                 )
                 .await;
 
@@ -371,7 +371,7 @@ pub async fn try_update_playtime_by_instance_id(
             concat!(env!("MODRINTH_API_BASE_URL"), "analytics/playtime"),
             serde_json::to_value(hashmap)?,
             &state.api_semaphore,
-            &state.pool,
+            &state.sessions,
         )
         .await
     } else {

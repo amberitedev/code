@@ -191,6 +191,7 @@ pub(super) async fn read_stored_file(
         None,
         &state.pool,
         &state.api_semaphore,
+        &state.sessions,
     )
     .await?
     .ok_or(ErrorKind::InputError(
@@ -216,6 +217,7 @@ pub(super) async fn read_stored_file(
             Some(u64::from(file.size)),
             None,
             &state.fetch_semaphore,
+            &state.sessions,
             None,
         )
         .await?

@@ -105,10 +105,9 @@ pub use self::shared::{
     install_shared_instance, invite_shared_instance_users,
     leave_remote_shared_instance, publish_shared_instance,
     remove_shared_instance_users, restore_shared_instance_version,
-    revoke_shared_instance_invite, set_shared_clients_session,
-    set_shared_history_kept, unlink_shared_instance,
-    unpublish_remote_shared_instance, unpublish_shared_instance,
-    update_shared_instance,
+    revoke_shared_instance_invite, set_shared_history_kept,
+    unlink_shared_instance, unpublish_remote_shared_instance,
+    unpublish_shared_instance, update_shared_instance,
 };
 pub use self::synced_options::game_options::{
     CanonicalValue as GameOptionCanonicalValue, EditableGameSetting,

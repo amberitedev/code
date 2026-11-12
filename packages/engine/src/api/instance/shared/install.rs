@@ -6,6 +6,7 @@ use super::publish::*;
 use super::types::*;
 use super::*;
 use crate::self_hosted::pool::{PoolAccess, PoolFile};
+use crate::state::BackendSessionKind;
 use sharing_client::install::ConfigUpdate;
 
 #[tracing::instrument]
@@ -875,7 +876,13 @@ pub(super) async fn shared_instance_install_data(
 }
 
 pub(super) async fn linked_amberite_user_id(
-    _state: &State,
+    state: &State,
 ) -> crate::Result<Option<String>> {
-    Ok(shared_clients_session().and_then(|session| session.user_id))
+    Ok(state
+        .sessions
+        .backend()
+        .and_then(|session| match session.kind {
+            BackendSessionKind::User { user_id } => Some(user_id),
+            BackendSessionKind::CoreKey => None,
+        }))
 }

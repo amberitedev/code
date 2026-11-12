@@ -256,6 +256,7 @@ pub async fn get_instance_from_pack(
                     Some(CacheBehaviour::StaleWhileRevalidateSkipOffline),
                     &state.pool,
                     &state.api_semaphore,
+                    &state.sessions,
                 )
                 .await
                 {
@@ -317,6 +318,7 @@ pub(crate) async fn generate_pack_from_version_id_with_reporter(
         Some(CacheBehaviour::Bypass),
         &state.pool,
         &state.api_semaphore,
+        &state.sessions,
     )
     .await?
     .ok_or(ErrorKind::InputError(
@@ -456,7 +458,7 @@ pub(crate) async fn generate_pack_from_version_id_with_reporter(
             None,
             None,
             &state.fetch_semaphore,
-            &state.pool,
+            &state.sessions,
         )
         .await?;
 

@@ -114,6 +114,7 @@ pub async fn get_dependencies_as_content_items(
         cache_behaviour,
         &state.pool,
         &state.api_semaphore,
+        &state.sessions,
     )
     .await
 }

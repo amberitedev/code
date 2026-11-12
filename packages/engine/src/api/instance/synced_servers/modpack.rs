@@ -181,6 +181,7 @@ pub(super) async fn reconstruct_modpack_servers(
         None,
         &state.pool,
         &state.api_semaphore,
+        &state.sessions,
     )
     .await?
     .ok_or(ErrorKind::InputError(format!(
@@ -206,7 +207,7 @@ pub(super) async fn reconstruct_modpack_servers(
         Some(&download_meta),
         None,
         &state.api_semaphore,
-        &state.pool,
+        &state.sessions,
     )
     .await?;
     let servers = tokio::task::spawn_blocking(move || -> crate::Result<_> {

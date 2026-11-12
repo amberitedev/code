@@ -224,6 +224,7 @@ pub(super) async fn shared_instance_install_modpack(
         Some(CacheBehaviour::MustRevalidate),
         &state.pool,
         &state.api_semaphore,
+        &state.sessions,
     )
     .await?
     .ok_or(crate::ErrorKind::InputError(
@@ -234,6 +235,7 @@ pub(super) async fn shared_instance_install_modpack(
         Some(CacheBehaviour::MustRevalidate),
         &state.pool,
         &state.api_semaphore,
+        &state.sessions,
     )
     .await?;
 
@@ -282,6 +284,7 @@ pub(super) async fn current_shared_content(
         Some(CacheBehaviour::MustRevalidate),
         &state.pool,
         &state.api_semaphore,
+        &state.sessions,
     )
     .await?
     .into_iter()
@@ -425,6 +428,7 @@ pub(super) async fn collect_publish_snapshot(
         Some(CacheBehaviour::Bypass),
         &state.pool,
         &state.api_semaphore,
+        &state.sessions,
     )
     .await?
     .into_iter()
@@ -540,6 +544,7 @@ pub(super) async fn shared_project_names(
         Some(CacheBehaviour::Bypass),
         &state.pool,
         &state.api_semaphore,
+        &state.sessions,
     )
     .await?;
 
@@ -678,7 +683,7 @@ async fn publish_shared_instance_reported(
     )
     .await;
 
-    if crate::self_hosted::accounts::enabled()
+    if crate::self_hosted::accounts::enabled(&state.sessions)
         && (linked_amberite_user_id(state).await? != publishing_account
             || shared_attachment(instance_id, state)
                 .await?
@@ -824,7 +829,7 @@ pub(super) async fn publish_current_content(
             .join(&metadata.instance.path),
     );
     let result = push::push(
-        &push_backend()?,
+        &push_backend(&state.sessions)?,
         &pool::STORE,
         shared_instance_id,
         &content,

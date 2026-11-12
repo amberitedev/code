@@ -259,7 +259,7 @@ async fn prepare_pack(
 			&project.id,
 			Some(CacheBehaviour::MustRevalidate),
 			&state.pool,
-			&state.api_semaphore,
+			&state.api_semaphore, &state.sessions,
 		).await?.ok_or(ErrorKind::InputError(
 			"pack versions are temporarily unavailable; keeping the installed pack".to_owned(),
 		))?;
@@ -724,6 +724,7 @@ async fn apply_instance_inner(
                     None,
                     &state.pool,
                     &state.api_semaphore,
+                    &state.sessions,
                 )
                 .await?;
                 super::selection_compatibility::warm(metadata, &items, state)

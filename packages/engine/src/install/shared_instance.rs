@@ -778,6 +778,7 @@ async fn owner_shared_content(
         None,
         &state.pool,
         &state.api_semaphore,
+        &state.sessions,
     )
     .await?
     .into_iter()
@@ -873,6 +874,7 @@ async fn shared_instance_versions_by_id(
         None,
         &state.pool,
         &state.api_semaphore,
+        &state.sessions,
     )
     .await?;
     let versions_by_id = versions
@@ -1536,8 +1538,13 @@ async fn install_shared_instance_external_file(
             bytes
         }
         (None, Some(pool)) => {
-            fetch_pooled_shared_instance_external_file(file, pool, downloaded)
-                .await?
+            fetch_pooled_shared_instance_external_file(
+                file,
+                pool,
+                &state.sessions,
+                downloaded,
+            )
+            .await?
         }
         (None, None) => {
             download_shared_instance_external_file(file, downloaded).await?
@@ -1587,6 +1594,7 @@ fn shared_instance_initial_buffer_size(
 async fn fetch_pooled_shared_instance_external_file(
     file: &SharedInstanceExternalFileData,
     pool: &crate::self_hosted::pool::PoolFile,
+    sessions: &crate::state::Sessions,
     downloaded: &DownloadedBytes,
 ) -> crate::Result<Vec<u8>> {
     use tokio::io::AsyncReadExt;
@@ -1594,6 +1602,7 @@ async fn fetch_pooled_shared_instance_external_file(
     let capacity = shared_instance_initial_buffer_size(file)?;
     let limit = file.file_size.saturating_add(1);
     crate::self_hosted::pool::fetch_file(
+        sessions,
         pool,
         &|bytes| downloaded.add(bytes),
         |reader| async move {
@@ -1691,6 +1700,7 @@ async fn install_shared_instance_file(
     }
     if let Some(pool) = &file.pool {
         return crate::self_hosted::pool::fetch_file(
+            &state.sessions,
             pool,
             &|bytes| downloaded.add(bytes),
             |reader| {

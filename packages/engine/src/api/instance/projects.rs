@@ -249,6 +249,7 @@ pub async fn is_file_on_modrinth(path: &Path) -> crate::Result<bool> {
         Some(CacheBehaviour::Bypass),
         &state.pool,
         &state.api_semaphore,
+        &state.sessions,
     )
     .await?;
 

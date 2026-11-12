@@ -28,7 +28,10 @@ pub use event::{
     emit::emit_warning, emit::init_loading,
 };
 pub use logger::start_logger;
-pub use state::State;
+pub use self_hosted::accounts::AccountEndpoints;
+pub use state::{
+    BackendSession, BackendSessionKind, ModrinthSession, Sessions, State,
+};
 pub use util::fetch::DownloadReason;
 
 /// Installs `ring` as the process-wide rustls crypto provider.

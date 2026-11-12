@@ -91,6 +91,7 @@ async fn check_content_updates_with_cache_behaviours(
         cache_behaviour,
         &state.pool,
         &state.api_semaphore,
+        &state.sessions,
     )
     .await?;
     let file_info_by_hash = file_info
@@ -144,6 +145,7 @@ async fn check_content_updates_with_cache_behaviours(
         update_cache_behaviour,
         &state.pool,
         &state.api_semaphore,
+        &state.sessions,
     )
     .await?;
     let mut updates_by_hash =
@@ -207,6 +209,7 @@ async fn installed_update_channels(
         cache_behaviour,
         &state.pool,
         &state.api_semaphore,
+        &state.sessions,
     )
     .await?;
     let channels_by_version_id = versions
@@ -274,6 +277,7 @@ pub(super) async fn resolve_update_versions(
         cache_behaviour,
         &state.pool,
         &state.api_semaphore,
+        &state.sessions,
     )
     .await?;
     let versions_by_id = versions

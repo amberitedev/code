@@ -95,6 +95,7 @@ pub(super) async fn pack_from_item(
             None,
             &state.pool,
             &state.api_semaphore,
+            &state.sessions,
         )
         .await?
         .ok_or(ErrorKind::InvalidPack(InvalidPack::UnverifiedCompatibility))?
@@ -209,6 +210,7 @@ pub async fn get_pack_sync_preview(
                 Some(CacheBehaviour::MustRevalidate),
                 &state.pool,
                 &state.api_semaphore,
+                &state.sessions,
             )
             .await?
             .unwrap_or_default(),

@@ -84,7 +84,7 @@ pub async fn import_curseforge(
             None,
             None,
             &state.fetch_semaphore,
-            &state.pool,
+            &state.sessions,
         )
         .await?;
         icon =

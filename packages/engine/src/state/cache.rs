@@ -1,6 +1,7 @@
 use crate::ErrorKind;
 use crate::state::{
-    EmbeddedContentMetadata, ModLoader, ProjectType, SharedInstanceRole,
+    EmbeddedContentMetadata, ModLoader, ProjectType, Sessions,
+    SharedInstanceRole,
 };
 use crate::util::fetch::{FetchSemaphore, fetch_json};
 use anyhow::{Context, bail};
@@ -932,27 +933,29 @@ macro_rules! impl_cache_methods {
         impl CachedEntry {
             $(
                 paste::paste! {
-                    #[tracing::instrument(skip(pool, fetch_semaphore))]
+                    #[tracing::instrument(skip(pool, fetch_semaphore, sessions))]
                     pub async fn [<get_ $variant:snake>](
                         id: &str,
                         cache_behaviour: Option<CacheBehaviour>,
                         pool: &SqlitePool,
                         fetch_semaphore: &FetchSemaphore,
+                        sessions: &Sessions,
                     ) -> crate::Result<Option<$type>>
                     {
-                        Ok(Self::[<get_ $variant:snake _many>](&[id], cache_behaviour, pool, fetch_semaphore).await?.into_iter().next())
+                        Ok(Self::[<get_ $variant:snake _many>](&[id], cache_behaviour, pool, fetch_semaphore, sessions).await?.into_iter().next())
                     }
 
-                    #[tracing::instrument(skip(pool, fetch_semaphore))]
+                    #[tracing::instrument(skip(pool, fetch_semaphore, sessions))]
                     pub async fn [<get_ $variant:snake _many>](
                         ids: &[&str],
                         cache_behaviour: Option<CacheBehaviour>,
                         pool: &SqlitePool,
                         fetch_semaphore: &FetchSemaphore,
+                        sessions: &Sessions,
                     ) -> crate::Result<Vec<$type>>
                     {
                         let entry =
-                            CachedEntry::get_many(CacheValueType::$variant, ids, None, cache_behaviour, pool, fetch_semaphore).await?;
+                            CachedEntry::get_many(CacheValueType::$variant, ids, None, cache_behaviour, pool, fetch_semaphore, sessions).await?;
 
                         Ok(entry.into_iter().filter_map(|x| if let Some(CacheValue::$variant(value)) = x.data {
                             Some(value)
@@ -971,15 +974,16 @@ macro_rules! impl_cache_method_singular {
         impl CachedEntry {
             $(
                 paste::paste! {
-                    #[tracing::instrument(skip(pool, fetch_semaphore))]
+                    #[tracing::instrument(skip(pool, fetch_semaphore, sessions))]
                     pub async fn [<get_ $variant:snake>] (
                         cache_behaviour: Option<CacheBehaviour>,
                         pool: &SqlitePool,
                         fetch_semaphore: &FetchSemaphore,
+                        sessions: &Sessions,
                     ) -> crate::Result<Option<$type>>
                     {
                         let entry =
-                            CachedEntry::get(CacheValueType::$variant, DEFAULT_ID, cache_behaviour, pool, fetch_semaphore).await?;
+                            CachedEntry::get(CacheValueType::$variant, DEFAULT_ID, cache_behaviour, pool, fetch_semaphore, sessions).await?;
 
                         if let Some(CacheValue::$variant(value)) = entry.map(|x| x.data).flatten() {
                             Ok(Some(value))
@@ -1022,13 +1026,14 @@ impl_cache_method_singular!(
 );
 
 impl CachedEntry {
-    #[tracing::instrument(skip(pool, fetch_semaphore))]
+    #[tracing::instrument(skip(pool, fetch_semaphore, sessions))]
     pub async fn get(
         type_: CacheValueType,
         key: &str,
         cache_behaviour: Option<CacheBehaviour>,
         pool: &SqlitePool,
         fetch_semaphore: &FetchSemaphore,
+        sessions: &Sessions,
     ) -> crate::Result<Option<Self>> {
         Ok(Self::get_many(
             type_,
@@ -1037,6 +1042,7 @@ impl CachedEntry {
             cache_behaviour,
             pool,
             fetch_semaphore,
+            sessions,
         )
         .await?
         .into_iter()
@@ -1044,13 +1050,14 @@ impl CachedEntry {
     }
 
     /// Hash keys are paths relative to `instances_dir`.
-    #[tracing::instrument(skip(pool, fetch_semaphore))]
+    #[tracing::instrument(skip(pool, fetch_semaphore, sessions))]
     pub async fn get_file_hash_many(
         keys: &[&str],
         instances_dir: &Path,
         cache_behaviour: Option<CacheBehaviour>,
         pool: &SqlitePool,
         fetch_semaphore: &FetchSemaphore,
+        sessions: &Sessions,
     ) -> crate::Result<Vec<CachedFileHash>> {
         let entries = Self::get_many(
             CacheValueType::FileHash,
@@ -1059,6 +1066,7 @@ impl CachedEntry {
             cache_behaviour,
             pool,
             fetch_semaphore,
+            sessions,
         )
         .await?;
         Ok(entries
@@ -1071,7 +1079,7 @@ impl CachedEntry {
     }
 
     /// `instances_dir` is needed only for `FileHash`.
-    #[tracing::instrument(skip(pool, fetch_semaphore))]
+    #[tracing::instrument(skip(pool, fetch_semaphore, sessions))]
     pub async fn get_many(
         type_: CacheValueType,
         keys: &[&str],
@@ -1079,6 +1087,7 @@ impl CachedEntry {
         cache_behaviour: Option<CacheBehaviour>,
         pool: &SqlitePool,
         fetch_semaphore: &FetchSemaphore,
+        sessions: &Sessions,
     ) -> crate::Result<Vec<Self>> {
         if keys.is_empty() {
             return Ok(Vec::new());
@@ -1184,7 +1193,7 @@ impl CachedEntry {
                 remaining_keys.clone(),
                 instances_dir,
                 fetch_semaphore,
-                pool,
+                sessions,
             )
             .await;
 
@@ -1219,6 +1228,7 @@ impl CachedEntry {
         {
             let pool = pool.clone();
             let fetch_semaphore = fetch_semaphore.clone();
+            let sessions = sessions.clone();
             let instances_dir = instances_dir.map(Path::to_path_buf);
             tokio::task::spawn(async move {
                 let values = Self::fetch_many(
@@ -1226,7 +1236,7 @@ impl CachedEntry {
                     expired_keys,
                     instances_dir.as_deref(),
                     &fetch_semaphore,
-                    &pool,
+                    &sessions,
                 )
                 .await?
                 .into_iter()
@@ -1249,7 +1259,7 @@ impl CachedEntry {
         keys: DashSet<impl Display + Eq + Hash + Serialize>,
         instances_dir: Option<&Path>,
         fetch_semaphore: &FetchSemaphore,
-        pool: &SqlitePool,
+        sessions: &Sessions,
     ) -> crate::Result<Vec<(Self, bool)>> {
         async fn fetch_many_batched<T: DeserializeOwned>(
             method: Method,
@@ -1258,7 +1268,7 @@ impl CachedEntry {
             uri_path: Option<&'static str>,
             keys: &DashSet<impl Display + Eq + Hash + Serialize>,
             fetch_semaphore: &FetchSemaphore,
-            pool: &SqlitePool,
+            sessions: &Sessions,
         ) -> crate::Result<Vec<T>> {
             const MAX_REQUEST_SIZE: usize = 800;
 
@@ -1287,7 +1297,7 @@ impl CachedEntry {
                     None,
                     uri_path,
                     fetch_semaphore,
-                    pool,
+                    sessions,
                 )
             }))
             .await?;
@@ -1304,7 +1314,7 @@ impl CachedEntry {
                     $uri_path,
                     &keys,
                     &fetch_semaphore,
-                    &pool,
+                    &sessions,
                 )
                 .await?
                 .into_iter()
@@ -1367,7 +1377,7 @@ impl CachedEntry {
                             None,
                             $uri_path,
                             &fetch_semaphore,
-                            pool,
+                            sessions,
                         )
                         .await?,
                     )
@@ -1431,7 +1441,7 @@ impl CachedEntry {
                     Some("/v3/teams"),
                     &keys,
                     fetch_semaphore,
-                    pool,
+                    sessions,
                 )
                 .await?;
 
@@ -1471,7 +1481,7 @@ impl CachedEntry {
                     Some("/v3/organizations"),
                     &keys,
                     fetch_semaphore,
-                    pool,
+                    sessions,
                 )
                 .await?;
 
@@ -1526,7 +1536,7 @@ impl CachedEntry {
                     crate::self_hosted::public_content::versions_by_hash(
                         &hashes,
                         fetch_semaphore,
-                        pool,
+                        sessions,
                     )
                     .await?;
 
@@ -1599,7 +1609,7 @@ impl CachedEntry {
                             None,
                             None,
                             fetch_semaphore,
-                            pool,
+                            sessions,
                         )
                     },
                 ))
@@ -1841,7 +1851,7 @@ impl CachedEntry {
                                     })),
                                     Some("/v2/version_files/update_many"),
                                     fetch_semaphore,
-                                    pool,
+                                    sessions,
                                 )
                                 .await?;
 
@@ -1967,7 +1977,7 @@ impl CachedEntry {
                             None,
                             Some("/v2/search"),
                             fetch_semaphore,
-                            pool,
+                            sessions,
                         )
                     },
                 ))
@@ -2014,7 +2024,7 @@ impl CachedEntry {
                         None,
                         Some("/v2/project/:id/version"),
                         fetch_semaphore,
-                        pool,
+                        sessions,
                     )
                     .await
                     {
@@ -2060,7 +2070,7 @@ impl CachedEntry {
                             None,
                             Some("/v3/search"),
                             fetch_semaphore,
-                            pool,
+                            sessions,
                         )
                     },
                 ))
@@ -2322,6 +2332,7 @@ impl CachedEntry {
         version_id: &str,
         pool: &SqlitePool,
         fetch_semaphore: &FetchSemaphore,
+        sessions: &Sessions,
     ) -> crate::Result<Option<CachedModpackFiles>> {
         let entry = Self::get(
             CacheValueType::ModpackFiles,
@@ -2329,6 +2340,7 @@ impl CachedEntry {
             None,
             pool,
             fetch_semaphore,
+            sessions,
         )
         .await?;
 
@@ -2369,6 +2381,7 @@ impl CachedEntry {
         user_id: &str,
         pool: &SqlitePool,
         fetch_semaphore: &FetchSemaphore,
+        sessions: &Sessions,
     ) -> crate::Result<Vec<CachedSharedInstanceSummary>> {
         let entry = Self::get(
             CacheValueType::SharedInstanceLibrary,
@@ -2376,6 +2389,7 @@ impl CachedEntry {
             None,
             pool,
             fetch_semaphore,
+            sessions,
         )
         .await?;
 
@@ -2391,12 +2405,13 @@ impl CachedEntry {
     }
 
     /// Get versions for a project (without changelogs for fast loading)
-    #[tracing::instrument(skip(pool, fetch_semaphore))]
+    #[tracing::instrument(skip(pool, fetch_semaphore, sessions))]
     pub async fn get_project_versions(
         project_id: &str,
         cache_behaviour: Option<CacheBehaviour>,
         pool: &SqlitePool,
         fetch_semaphore: &FetchSemaphore,
+        sessions: &Sessions,
     ) -> crate::Result<Option<Vec<Version>>> {
         let entry = Self::get(
             CacheValueType::ProjectVersions,
@@ -2404,6 +2419,7 @@ impl CachedEntry {
             cache_behaviour,
             pool,
             fetch_semaphore,
+            sessions,
         )
         .await?;
 

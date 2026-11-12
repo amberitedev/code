@@ -30,6 +30,7 @@ impl Names for AppNames<'_> {
             Some(CacheBehaviour::Bypass),
             &self.0.pool,
             &self.0.api_semaphore,
+            &self.0.sessions,
         )
         .await?
         .into_iter()
@@ -94,7 +95,7 @@ pub(super) async fn shared_instance_update_diffs(
     after.version_ids.retain(|id| !server_only.contains(id));
     // Upstream shows every external file in both as updated. Amberite's manifest carries each
     // file's SHA-1, so a file the member already has is left out.
-    if !crate::self_hosted::accounts::enabled() {
+    if !crate::self_hosted::accounts::enabled(&state.sessions) {
         external_files.values_mut().for_each(|sha1| *sha1 = None);
         after
             .external_files
@@ -221,7 +222,7 @@ pub(super) async fn shared_instance_publish_diffs(
         let key = shared_external_file_key(&file.file_type, &file.file_name)?;
         let sha1 = match &file.source {
             ExternalFileSource::InstanceFile(path)
-                if crate::self_hosted::accounts::enabled() =>
+                if crate::self_hosted::accounts::enabled(&state.sessions) =>
             {
                 // One that cannot be read counts as changed.
                 Some(

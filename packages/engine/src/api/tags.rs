@@ -10,10 +10,14 @@ pub use crate::{
 #[tracing::instrument]
 pub async fn get_category_tags() -> crate::Result<Vec<Category>> {
     let state = State::get().await?;
-    let categories =
-        CachedEntry::get_categories(None, &state.pool, &state.api_semaphore)
-            .await?
-            .ok_or(ErrorKind::NoValueFor("category tags".to_string()))?;
+    let categories = CachedEntry::get_categories(
+        None,
+        &state.pool,
+        &state.api_semaphore,
+        &state.sessions,
+    )
+    .await?
+    .ok_or(ErrorKind::NoValueFor("category tags".to_string()))?;
 
     Ok(categories)
 }
@@ -22,10 +26,14 @@ pub async fn get_category_tags() -> crate::Result<Vec<Category>> {
 #[tracing::instrument]
 pub async fn get_report_type_tags() -> crate::Result<Vec<String>> {
     let state = State::get().await?;
-    let report_types =
-        CachedEntry::get_report_types(None, &state.pool, &state.api_semaphore)
-            .await?
-            .ok_or(ErrorKind::NoValueFor("report type tags".to_string()))?;
+    let report_types = CachedEntry::get_report_types(
+        None,
+        &state.pool,
+        &state.api_semaphore,
+        &state.sessions,
+    )
+    .await?
+    .ok_or(ErrorKind::NoValueFor("report type tags".to_string()))?;
 
     Ok(report_types)
 }
@@ -34,10 +42,14 @@ pub async fn get_report_type_tags() -> crate::Result<Vec<String>> {
 #[tracing::instrument]
 pub async fn get_loader_tags() -> crate::Result<Vec<Loader>> {
     let state = State::get().await?;
-    let loaders =
-        CachedEntry::get_loaders(None, &state.pool, &state.api_semaphore)
-            .await?
-            .ok_or(ErrorKind::NoValueFor("loader tags".to_string()))?;
+    let loaders = CachedEntry::get_loaders(
+        None,
+        &state.pool,
+        &state.api_semaphore,
+        &state.sessions,
+    )
+    .await?
+    .ok_or(ErrorKind::NoValueFor("loader tags".to_string()))?;
 
     Ok(loaders)
 }
@@ -46,10 +58,14 @@ pub async fn get_loader_tags() -> crate::Result<Vec<Loader>> {
 #[tracing::instrument]
 pub async fn get_game_version_tags() -> crate::Result<Vec<GameVersion>> {
     let state = State::get().await?;
-    let game_versions =
-        CachedEntry::get_game_versions(None, &state.pool, &state.api_semaphore)
-            .await?
-            .ok_or(ErrorKind::NoValueFor("game version tags".to_string()))?;
+    let game_versions = CachedEntry::get_game_versions(
+        None,
+        &state.pool,
+        &state.api_semaphore,
+        &state.sessions,
+    )
+    .await?
+    .ok_or(ErrorKind::NoValueFor("game version tags".to_string()))?;
 
     Ok(game_versions)
 }
@@ -63,6 +79,7 @@ pub async fn get_donation_platform_tags() -> crate::Result<Vec<DonationPlatform>
         None,
         &state.pool,
         &state.api_semaphore,
+        &state.sessions,
     )
     .await?
     .ok_or(ErrorKind::NoValueFor("donation platform tags".to_string()))?;
