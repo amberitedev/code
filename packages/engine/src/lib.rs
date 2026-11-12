@@ -23,8 +23,6 @@ mod ts;
 
 pub use api::*;
 pub use error::*;
-#[cfg(feature = "export-ts")]
-pub use event::export_app_event_bindings;
 pub use event::{
     DesktopEvent, Event, EventSink, FriendPayload,
     InstanceGroupsChangedPayload, LoadingBar, LoadingBarType,

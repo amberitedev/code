@@ -1,14 +1,16 @@
-import type { Copal } from '@modrinth/api-client'
-import type { IconConfig } from '@modrinth/api-client'
+import type {
+	Copal,
+	IconConfig,
+	InstallErrorView,
+	InstallJavaStep,
+	InstallJobSnapshot,
+	InstallJobStatus,
+	InstallPhaseId,
+	InstallProgress,
+	InstallProgressSecondary,
+} from '@modrinth/api-client'
 import { invoke } from '@tauri-apps/api/core'
 
-import type { InstallErrorView } from '@/generated/app-events/InstallErrorView'
-import type { InstallJavaStep } from '@/generated/app-events/InstallJavaStep'
-import type { InstallJobSnapshot } from '@/generated/app-events/InstallJobSnapshot'
-import type { InstallJobStatus } from '@/generated/app-events/InstallJobStatus'
-import type { InstallPhaseId } from '@/generated/app-events/InstallPhaseId'
-import type { InstallProgress } from '@/generated/app-events/InstallProgress'
-import type { InstallProgressSecondary } from '@/generated/app-events/InstallProgressSecondary'
 import type { AppEvents } from '@/providers/app-events'
 
 import type { InstanceLink, InstanceLoader } from './types'

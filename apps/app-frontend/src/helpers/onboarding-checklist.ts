@@ -1,6 +1,5 @@
+import type { OnboardingChecklist } from '@modrinth/api-client'
 import { invoke } from '@tauri-apps/api/core'
-
-import type { OnboardingChecklist } from '@/generated/app-events/OnboardingChecklist'
 
 export type { OnboardingChecklist }
 

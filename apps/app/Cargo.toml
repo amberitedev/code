@@ -98,7 +98,6 @@ browser-bridge = ["dep:browser-bridge"]
 # this feature is used for production builds where `devPath` points to the filesystem
 # DO NOT remove this
 custom-protocol = ["tauri/custom-protocol"]
-export-app-events = ["engine/export-ts"]
 updater = []
 
 [lints]

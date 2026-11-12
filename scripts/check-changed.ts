@@ -117,7 +117,7 @@ if (crates === 'no cargo') skipped.push('rust tests (cargo is not installed)')
 else if (crates === 'failed') failed.push('rust tests (cargo metadata failed)')
 else {
 	// The crates CI leaves out of the workspace tests (ci.yml, rust job).
-	const untested = new Set(['toasty', 'serde-binhum'])
+	const untested = new Set(['toasty'])
 	const readBy = new Set(touched.flatMap((file) => READ_BY_CRATE[file] ?? []))
 	const tested = crates.filter(
 		(crate) => !untested.has(crate.name) && (under(crate.folder) || readBy.has(crate.name)),

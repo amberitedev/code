@@ -62,7 +62,6 @@ jobs:
               - packages/minecraft-meta-manifest/**
               - packages/modrinth-content-management/**
               - packages/path-util/**
-              - packages/serde-binhum/**
               - packages/sharing-client/**
               - packages/sharing-storage/**
               - packages/toasty/**
@@ -135,8 +134,7 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo shear
       - run: cargo check -p theseus_gui --features browser-bridge --locked
-      # serde-binhum's only tests are upstream's README doctests, which lack their dependencies.
-      - run: cargo test --workspace --exclude toasty --exclude serde-binhum --locked
+      - run: cargo test --workspace --exclude toasty --locked
       - run: sh -n apps/core/scripts/install.sh
       # A cargo error fails the step, and theseus_gui proves the pattern matches tauri.
       - name: Copal does not depend on Tauri

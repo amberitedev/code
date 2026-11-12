@@ -125,13 +125,6 @@ fn main() {
         .expect("failed to create app async runtime");
     tauri::async_runtime::set(runtime.handle().clone());
 
-    #[cfg(feature = "export-app-events")]
-    engine::export_app_event_bindings(
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../app-frontend/src/generated/app-events"),
-    )
-    .expect("failed to export app event TypeScript bindings");
-
     /*
         tracing is set based on the environment variable RUST_LOG=xxx, depending on the amount of logs to show
             ERROR > WARN > INFO > DEBUG > TRACE

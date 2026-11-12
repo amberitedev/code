@@ -24,7 +24,6 @@ json5 = { workspace = true }
 modrinth-content-management = { workspace = true }
 parking_lot = { workspace = true }
 pathdiff = { workspace = true }
-postcard-bindgen = { workspace = true, features = ["generating", "std"], optional = true }
 reqwest = { workspace = true, features = ["json", "rustls-no-provider", "stream"] }
 # The ring backend avoids aws-lc-sys's CMake build on Windows.
 rustls = { workspace = true, features = ["ring", "std", "tls12"] }
@@ -56,7 +55,7 @@ windows = { workspace = true, features = ["Win32_Foundation", "Win32_Storage_Fil
 
 [features]
 # The engine's `export-ts`: the borrowed types derive their TypeScript there.
-export-ts = ["dep:postcard-bindgen", "dep:ts-rs"]
+export-ts = ["dep:ts-rs"]
 
 [lints]
 workspace = true

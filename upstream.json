@@ -47,6 +47,7 @@
 		"packages/modrinth-util",
 		"packages/muralpay",
 		"packages/neverbounce",
+		"packages/serde-binhum",
 		"packages/sqlx-tracing",
 		"packages/ui/AGENTS.md",
 		"packages/ui/src/components/sharing/server-sharing-update/ServerSharingUpdateModal.vue",

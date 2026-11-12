@@ -450,10 +450,7 @@ struct Process {
 }
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
-#[cfg_attr(
-    feature = "export-ts",
-    derive(ts_rs::TS, postcard_bindgen::PostcardBindings)
-)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct Log4jEvent {
     pub timestamp_millis: Option<i64>,
     pub logger_name: Option<String>,

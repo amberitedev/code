@@ -4,9 +4,9 @@ name = "engine"
 version = "1.0.0-local"
 edition.workspace = true
 
-[[bin]]
-name = "export_app_events"
-required-features = ["export-ts"]
+# The self dev-dependency only turns on a feature, so no code names it.
+[package.metadata.cargo-shear]
+ignored = ["engine"]
 
 [dependencies]
 anyhow = { workspace = true }
@@ -57,7 +57,6 @@ path-util = { workspace = true }
 pathdiff = { workspace = true }
 phf = { workspace = true }
 png = { workspace = true }
-postcard-bindgen = { workspace = true, features = ["generating", "std"], optional = true }
 quartz_nbt = { workspace = true, features = ["serde"] }
 quick-xml = { workspace = true, features = ["async-tokio"] }
 rand = { workspace = true }
@@ -78,7 +77,6 @@ rgb = { workspace = true }
 rustls = { workspace = true, features = ["logging", "ring", "std", "tls12"] }
 same-file = { workspace = true }
 serde = { workspace = true, features = ["derive", "rc"] }
-serde-binhum = { workspace = true }
 serde_ini = { workspace = true }
 serde_json = { workspace = true }
 serde_with = { workspace = true }
@@ -142,7 +140,7 @@ windows-core = { workspace = true }
 winreg = { workspace = true }
 
 [features]
-export-ts = ["bedrock/export-ts", "dep:postcard-bindgen", "dep:ts-rs"]
+export-ts = ["bedrock/export-ts", "dep:ts-rs"]
 tauri = ["dep:tauri"]
 
 [lints]
