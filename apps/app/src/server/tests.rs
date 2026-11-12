@@ -11,6 +11,7 @@ use axum::{
     response::Response,
 };
 use serde_json::{Value, json};
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tower::ServiceExt;
 
@@ -20,6 +21,7 @@ use super::{
     events::Events,
     guard::{APP_ORIGINS, Guard},
 };
+use crate::engine_handle::EngineHandle;
 
 fn boot() -> Boot {
     Boot {
@@ -42,12 +44,16 @@ struct Local {
 }
 
 fn local() -> Local {
+    local_with(EngineHandle::default())
+}
+
+fn local_with(engine: EngineHandle) -> Local {
     let server = LocalServer::bind(None, None, None).unwrap();
     Local {
         router: server.router(
             boot(),
             Events::default(),
-            EngineHandle::default(),
+            engine,
             AppSlot::default(),
         ),
         secret: server.secret.clone(),
@@ -252,10 +258,10 @@ async fn boot_answers_from_bind() {
     assert!(response.contains(r#""version":"1.2.3""#), "{response}");
 }
 
-/// Through the guard and the upgrade, an engine event and an App event raised by engine code
-/// arrive as JSON.
-#[tokio::test]
-async fn the_event_socket_sends_events_as_json() {
+/// The socket opens once the engine is up. Then, through the guard and the upgrade, an engine
+/// event and an App event raised by engine code arrive as JSON.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_event_socket_waits_for_the_engine_then_sends_events_as_json() {
     let server = LocalServer::bind(None, None, None).unwrap();
     let request = format!(
         "GET /{}/events HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nOrigin: tauri://localhost\r\n\
@@ -266,16 +272,34 @@ async fn the_event_socket_sends_events_as_json() {
     );
     let address = server.listener.local_addr().unwrap();
     let events = Events::default();
+    let handle = EngineHandle::default();
     let router = server.router(
         boot(),
         events.clone(),
-        EngineHandle::default(),
+        handle.clone(),
         AppSlot::default(),
     );
     tokio::spawn(server.serve(router));
 
     let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
     stream.write_all(request.as_bytes()).await.unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), stream.read_u8())
+            .await
+            .is_err(),
+        "the socket answered before the engine started"
+    );
+    engine::install_crypto_provider();
+    let dir = tempfile::tempdir().unwrap();
+    // Its own sink, so its startup events stay off this socket.
+    handle.set(Ok(engine::Engine::new(engine::EngineConfig {
+        settings_dir: dir.path().to_path_buf(),
+        events: engine::EventSink::new(),
+        accounts: None,
+    })
+    .await
+    .unwrap()));
+
     let mut head = Vec::new();
     while !head.ends_with(b"\r\n\r\n") {
         head.push(stream.read_u8().await.unwrap());
@@ -312,4 +336,23 @@ async fn the_event_socket_sends_events_as_json() {
             expected
         );
     }
+}
+
+#[tokio::test]
+async fn a_failed_start_answers_engine_unavailable() {
+    let handle = EngineHandle::default();
+    handle.set(Err(anyhow::anyhow!("the data folder is in use")));
+    let local = local_with(handle);
+    let request = Request::get(format!("/{}/events", local.secret))
+        .header(HOST, &local.host)
+        .header(ORIGIN, "tauri://localhost")
+        .body(Body::empty())
+        .unwrap();
+    let response = local.send(request).await;
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    assert_eq!(
+        serde_json::from_slice::<Value>(&body).unwrap(),
+        json!({ "error": "engine_unavailable", "description": "the data folder is in use" })
+    );
 }

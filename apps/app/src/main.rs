@@ -4,6 +4,7 @@
 )]
 #![recursion_limit = "256"]
 
+use anyhow::Context;
 use engine::prelude::*;
 use native_dialog::{DialogBuilder, MessageLevel};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -24,38 +25,34 @@ mod updater_impl;
 #[cfg(not(feature = "updater"))]
 mod updater_impl_noop;
 
-// Should be called in launcher initialization
-#[tracing::instrument(skip_all)]
-#[tauri::command]
-async fn initialize_state(
+/// Starts the engine once, from setup, and signs a dev App in before its routes open.
+async fn start_engine(
     app: tauri::AppHandle,
-    sink: tauri::State<'_, engine::EventSink>,
-    handle: tauri::State<'_, engine_handle::EngineHandle>,
-) -> api::Result<()> {
+    events: engine::EventSink,
+    handle: engine_handle::EngineHandle,
+) {
     tracing::info!("Initializing app state...");
-    let accounts = dev::accounts()?;
-    let state = handle
-        .get_or_start(|| async {
-            let settings_dir = DirectoryInfo::initial_settings_dir_path(
-                &app.config().identifier,
-            )
-            .ok_or(engine::ErrorKind::FSError(
-                "could not find the application directory".to_string(),
-            ))?;
-            let engine = Engine::new(engine::EngineConfig {
-                settings_dir,
-                events: sink.inner().clone(),
-                accounts,
-            })
-            .await?;
-            engine.start_desktop();
-            Ok(engine)
+    let started = async {
+        let settings_dir =
+            DirectoryInfo::initial_settings_dir_path(&app.config().identifier)
+                .context("could not find the application directory")?;
+        let state = Engine::new(engine::EngineConfig {
+            settings_dir,
+            events,
+            accounts: dev::accounts()?,
         })
         .await?;
-    #[cfg(debug_assertions)]
-    dev::sign_in(&state).await;
+        state.start_desktop();
+        #[cfg(debug_assertions)]
+        dev::sign_in(&state).await;
 
-    Ok(())
+        anyhow::Ok(state)
+    }
+    .await;
+    if let Err(error) = &started {
+        tracing::error!("The engine could not start: {error:#}");
+    }
+    handle.set(started);
 }
 
 // Should be call once Vue has mounted the app
@@ -285,8 +282,14 @@ fn main() {
         )
         .setup(move |app| {
             let _ = desktop.set(app.handle().clone());
-            app.manage(events.engine.with_app(app.handle().clone()));
+            let sink = events.engine.with_app(app.handle().clone());
+            app.manage(sink.clone());
             app.manage(events.app);
+            tauri::async_runtime::spawn(start_engine(
+                app.handle().clone(),
+                sink,
+                app.state::<engine_handle::EngineHandle>().inner().clone(),
+            ));
 
             #[cfg(target_os = "macos")]
             {
@@ -373,7 +376,6 @@ fn main() {
         .manage(RestartAfterPendingUpdate::default())
         .manage(engine)
         .invoke_handler(tauri::generate_handler![
-            initialize_state,
             get_update_size,
             enqueue_update_for_installation,
             remove_enqueued_update,

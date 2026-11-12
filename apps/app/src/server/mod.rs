@@ -15,7 +15,12 @@ use std::{
     sync::Arc,
 };
 
-use axum::{Router, middleware};
+use axum::{
+    Router,
+    extract::{Request, State},
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
+};
 use contracts::{
     Empty, Json,
     server::{Req, route},
@@ -83,6 +88,7 @@ impl LocalServer {
         format!("http://127.0.0.1:{}/{}", self.port(), self.secret)
     }
 
+    /// `/health` and `/app/boot` answer from bind; `/events` waits for the engine.
     pub fn router(
         &self,
         boot: Boot,
@@ -105,10 +111,13 @@ impl LocalServer {
                 async move { Json(boot) }
             });
         let (events_path, events) = events::route(events);
+        let waiting = Router::new().route(events_path, events).route_layer(
+            middleware::from_fn_with_state(engine.clone(), wait_for_engine),
+        );
         let routes = Router::new()
             .route(health_path, health)
             .route(boot_path, boot)
-            .route(events_path, events)
+            .merge(waiting)
             .merge(cores::routes(Arc::clone(&self.cores)))
             .merge(desktop::routes(engine, app, &self.secret));
         Router::new()
@@ -158,6 +167,17 @@ impl LocalServer {
         if let Err(error) = axum::serve(listener, router).await {
             tracing::error!(%error, "The App's local server stopped");
         }
+    }
+}
+
+async fn wait_for_engine(
+    State(engine): State<EngineHandle>,
+    request: Request,
+    next: Next,
+) -> Response {
+    match engine.ready().await {
+        Ok(_) => next.run(request).await,
+        Err(error) => error.into_response(),
     }
 }
 

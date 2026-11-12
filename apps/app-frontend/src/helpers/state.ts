@@ -3,8 +3,10 @@
  * So, for example, addDefaultInstance creates a blank instance object, where the Rust struct is serialized,
  *  and deserialized into a usable JS object.
  */
-import type { Command } from '@modrinth/api-client'
+import { ApiCallError, type Command, events } from '@modrinth/api-client'
 import { invoke } from '@tauri-apps/api/core'
+
+import { apiClient } from '@/platform/modrinth-client'
 
 export interface LoadingBarType {
 	type?: string
@@ -25,12 +27,18 @@ export interface LoadingBar {
 	bar_type?: LoadingBarType
 }
 
-// Initialize the theseus API state
-// This should be called during the initializion/opening of the launcher
-// The event socket opens first, so the engine's startup events reach the page.
+// Resolves once the engine is up: the App opens the event socket only then.
 export async function initialize_state(openEvents: () => Promise<void>) {
-	await openEvents()
-	return await invoke<void>('initialize_state')
+	try {
+		await openEvents()
+	} catch (error) {
+		// A page cannot read why a socket was refused; over HTTP the same route says why the engine
+		// did not start.
+		const refusal = await apiClient.local
+			.call(events.eventSocket)
+			.catch((refusal: unknown) => refusal)
+		throw refusal instanceof ApiCallError && refusal.code === 'engine_unavailable' ? refusal : error
+	}
 }
 
 // Gets active progress bars
