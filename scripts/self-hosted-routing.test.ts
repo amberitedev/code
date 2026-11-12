@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vite-plus/test'
+import { accounts, social } from '../packages/contracts/ts'
 import { AuthFeature } from '../packages/api-client/src/features/auth'
 import { SelfHostedFeature } from '../packages/api-client/src/features/self-hosted'
 import { GenericModrinthClient } from '../packages/api-client/src/platform/generic'
@@ -38,9 +39,24 @@ describe('self-hosted account routing through the complete client chain', () => 
 		const globals = await prepared('/globals', { version: 'internal', skipAuth: true })
 		expect(globals.url).toBe('http://127.0.0.1:8787/_internal/globals')
 	})
+	it('routes every account and social path the backend serves, and any sign-in, to it', async () => {
+		const paths = [...Object.values(accounts), ...Object.values(social)].map(({ path }) =>
+			path.replace(/\{\w+\}/g, 'some-id'),
+		)
+		for (const path of [...paths, '/auth/passkey/finish', '/users?ids=["a"]']) {
+			const request = await prepared(path)
+			expect(new URL(request.url).origin, path).toBe('http://127.0.0.1:8787')
+			expect(new Headers(request.options.headers).get('authorization'), path).toBe(
+				'Bearer local-session',
+			)
+		}
+	})
 	it('keeps public content and explicit public creator identities on Modrinth without local credentials', async () => {
 		for (const [path, options] of [
 			['/project/sodium', {}],
+			['/search?query=sodium', {}],
+			['/version/some-id', {}],
+			['/user/some-id/payouts', {}],
 			['/user/same-id', { accountSource: 'modrinth' }],
 		] as const) {
 			const request = await prepared(path, options)
@@ -70,10 +86,6 @@ describe('self-hosted account routing through the complete client chain', () => 
 			const request = await prepared(`/admin/user/private-id/${action}`, { version: 'internal' })
 			expect(request.url).toBe(`http://127.0.0.1:8787/_internal/admin/user/private-id/${action}`)
 			expect(new Headers(request.options.headers).get('authorization')).toBe('Bearer local-session')
-		}
-		for (const path of ['/user_email', '/user_discord']) {
-			const request = await prepared(path)
-			expect(new URL(request.url).origin).toBe('http://127.0.0.1:8787')
 		}
 	})
 	it('keeps anonymous login anonymous', async () => {

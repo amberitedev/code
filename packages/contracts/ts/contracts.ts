@@ -472,6 +472,122 @@ export const social = {
 	FriendsSocket: { method: "GET", path: "/launcher_socket", auth: "account", dangerous: false, body: "empty", response: "upgrade" } as Endpoint<null, SocketCode, void, { receive: FriendsSocketMessage, send: ClientToServerMessage }>,
 }
 
+export type Globals = { tax_compliance_thresholds: Record<string, number>, captcha_enabled: boolean, max_user_icon_size: number, max_project_icon_size: number, max_organization_icon_size: number, max_collection_icon_size: number, max_oauth_client_icon_size: number, max_gallery_image_size: number, };
+
+export type NewAccount = { username: string, password: string, email: string, account_consent?: boolean, 
+/**
+ * Also issue the App a session of its own.
+ */
+app_session?: boolean, };
+
+export type LoginCredentials = { 
+/**
+ * The username or the email.
+ */
+username: string, password: string, app_session?: boolean, };
+
+export type TwoFactorLogin = { code: string, flow: string, app_session?: boolean, };
+
+export type TwoFactorRequired = "2fa_required";
+
+export type TwoFactorChallenge = { error: TwoFactorRequired, description: string, flow: string, };
+
+export type LoginAnswer = TwoFactorChallenge | AuthSession;
+
+export type UserSession = { session: Never | null, id: string, user_id: string, created: string, last_login: string, expires: string, 
+/**
+ * Until when [`RefreshSession`] can rotate it.
+ */
+refresh_expires: string, user_agent: string, ip: string, os: Never | null, platform: Never | null, city: Never | null, country: Never | null, 
+/**
+ * Whether it is the session making the request.
+ */
+current: boolean, };
+
+export type AuthSession = { session: string, app_session?: string, id: string, user_id: string, created: string, last_login: string, expires: string, 
+/**
+ * Until when [`RefreshSession`] can rotate it.
+ */
+refresh_expires: string, user_agent: string, ip: string, os: Never | null, platform: Never | null, city: Never | null, country: Never | null, 
+/**
+ * Whether it is the session making the request.
+ */
+current: boolean, };
+
+export type SessionRef = { id: string, };
+
+export type PasswordReset = { 
+/**
+ * The username or the email.
+ */
+username: string, };
+
+export type PasswordUpdate = { flow?: string, old_password?: string, new_password?: string, };
+
+export type TwoFactorSecret = { 
+/**
+ * Base32, for the authenticator.
+ */
+secret: string, flow: string, };
+
+export type TwoFactorSetup = { code: string, flow: string, };
+
+export type BackupCodes = { backup_codes: Array<string>, };
+
+export type TwoFactorCode = { code: string, };
+
+export type EmailVerification = { flow: string, };
+
+export type EmailUpdate = { email: string, };
+
+export type LockReason = { reason: string, };
+
+export type ForcedPasswordReset = { email?: string, };
+
+/** The backend's account routes, in labrinth's shapes. */
+export const accounts = {
+	GetGlobals: { method: "GET", path: "/globals", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Globals>,
+	CreateAccount: { method: "POST", path: "/auth/create", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, NewAccount, AuthSession>,
+	ValidateNewAccount: { method: "POST", path: "/auth/create/validate", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, NewAccount, void>,
+	LogIn: { method: "POST", path: "/auth/login", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, LoginCredentials, LoginAnswer>,
+	LogInTwoFactor: { method: "POST", path: "/auth/login/2fa", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, TwoFactorLogin, AuthSession>,
+	RefreshSession: { method: "POST", path: "/session/refresh", auth: "account", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, AuthSession>,
+	ListSessions: { method: "GET", path: "/session/list", auth: "account", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<UserSession>>,
+	DeleteSession: { method: "DELETE", path: "/session/{id}", auth: "account", dangerous: false, body: "empty", response: "empty" } as Endpoint<SessionRef, null, void, void>,
+	RequestPasswordReset: { method: "POST", path: "/auth/password/reset", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, PasswordReset, void>,
+	ChangePassword: { method: "PATCH", path: "/auth/password", auth: "account", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, PasswordUpdate, void>,
+	StartTwoFactorSetup: { method: "POST", path: "/auth/2fa/get_secret", auth: "account", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, TwoFactorSecret>,
+	EnableTwoFactor: { method: "POST", path: "/auth/2fa", auth: "account", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, TwoFactorSetup, BackupCodes>,
+	DisableTwoFactor: { method: "DELETE", path: "/auth/2fa", auth: "account", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, TwoFactorCode, void>,
+	VerifyEmail: { method: "POST", path: "/auth/email/verify", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, EmailVerification, void>,
+	ResendVerifyEmail: { method: "POST", path: "/auth/email/resend_verify", auth: "account", dangerous: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
+	ChangeEmail: { method: "PATCH", path: "/auth/email", auth: "account", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, EmailUpdate, void>,
+	GetCurrentUser: { method: "GET", path: "/user", auth: "account", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, User>,
+	ListPasskeys: { method: "GET", path: "/auth/passkey", auth: "account", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<Never>>,
+	LockUser: { method: "PUT", path: "/admin/user/{id}/lock", auth: "account", dangerous: false, body: "json", response: "empty" } as Endpoint<UserRef, null, LockReason, void>,
+	UnlockUser: { method: "DELETE", path: "/admin/user/{id}/lock", auth: "account", dangerous: false, body: "empty", response: "empty" } as Endpoint<UserRef, null, void, void>,
+	RevokeUserSessions: { method: "DELETE", path: "/admin/user/{id}/sessions", auth: "account", dangerous: false, body: "empty", response: "empty" } as Endpoint<UserRef, null, void, void>,
+	ForcePasswordReset: { method: "POST", path: "/admin/user/{id}/password-reset", auth: "account", dangerous: false, body: "json", response: "empty" } as Endpoint<UserRef, null, ForcedPasswordReset, void>,
+	ResetUserTwoFactor: { method: "DELETE", path: "/admin/user/{id}/2fa", auth: "account", dangerous: false, body: "empty", response: "empty" } as Endpoint<UserRef, null, void, void>,
+}
+
+export type ScenarioLogin = { username: string, };
+
+export type EmailKind = "verify_email" | "reset_password";
+
+export type OutboxEmail = { id: string, recipient: string, kind: EmailKind, flow: string, created: string, };
+
+/** The local dev backend's routes. */
+export const dev = {
+	Session: { method: "POST", path: "/_dev/session", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, ScenarioLogin, AuthSession>,
+	Outbox: { method: "GET", path: "/_dev/outbox", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<OutboxEmail>>,
+}
+
+/** The backend's routes outside accounts, cores, dev and social, which have their own consts. */
+export const backend = {
+	CheckHealth: { method: "GET", path: "/health", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
+}
+
 /** The header a dangerous route's fresh ticket travels in. */
 export const TICKET_HEADER = "x-amberite-ticket"
 

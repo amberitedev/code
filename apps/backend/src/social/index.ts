@@ -10,9 +10,9 @@ import {
 
 import { accountLock, findUser, publicUser, requireUser } from '../common/auth'
 import { randomId } from '../common/crypto'
-import { ApiError, invalid, objectBody, routePath } from '../common/http'
+import { ApiError, invalid, objectBody } from '../common/http'
 import { notificationResponse, type NotificationRow } from '../common/notifications'
-import { type Route, noBody, rawBody, route, serve } from '../common/router'
+import { type Route, noBody, rawBody, route } from '../common/router'
 import type { Env, UserRow } from '../common/types'
 import { sweepFiles } from '../sharing'
 import {
@@ -310,7 +310,7 @@ async function changeNotifications(
 		.run()
 }
 
-const socialRoutes: Route[] = [
+export const socialRoutes: Route[] = [
 	route(social.SearchUsers, noBody, async ({ request, env }) => {
 		const query = (new URL(request.url).searchParams.get('query') ?? '').trim()
 		if (!query || query.length > 39) return []
@@ -477,8 +477,3 @@ const socialRoutes: Route[] = [
 	}),
 	route(social.FriendsSocket, noBody, async ({ request, env }) => friendsSocket(request, env)),
 ]
-
-/** The social routes, under any of the `/v2`, `/v3` and `/_internal` prefixes upstream uses. */
-export async function handleSocial(request: Request, env: Env): Promise<Response | null> {
-	return serve(socialRoutes, request, env, routePath(request).replace(/^\/_internal(?=\/)/, ''))
-}

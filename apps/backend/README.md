@@ -33,12 +33,13 @@ Locked accounts cannot authenticate, and a forced recovery flow can change their
 unlocking them. Reset links are tied to the account's email address. Forced recovery and its local
 outbox entry commit together. Revocation closes native friends sockets as well as HTTP sessions.
 The `/sessions` admin operation revokes all supported sessions; this backend does not issue PATs.
-Upstream's Discord-ID account lookup still depends on the unimplemented OAuth provider links.
 Preferences include the upstream launcher behavior settings, and avatars accept up to 512 KiB.
 Email verification and password resets write a local outbox, accessible only through the
-dev-runner secret. OAuth providers, outbound email, passkey authentication, newsletter delivery,
-PATs, and third-party OAuth authorization are not implemented. The corresponding auth methods
-return an explicit unsupported-operation error rather than accepting an unverified identity.
+dev-runner secret. OAuth providers, outbound email, passkey authentication and newsletter delivery
+are not implemented: any `/auth/` route the backend does not serve answers an explicit
+unsupported-operation error rather than accepting an unverified identity. Account routes the
+backend does not serve, such as PATs, OAuth apps, payouts, `user_email` and `user_discord`, go to
+Modrinth without the Amberite session.
 Captcha is disabled only for loopback local development. A production captcha provider is not
 configured, so password authentication outside local development returns a configuration error.
 

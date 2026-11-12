@@ -1,12 +1,22 @@
-// Upstream's pages read our backend's social routes through their labrinth modules and types. This
-// file fails to compile when a generated shape stops fitting the labrinth type it stands in for.
+// Upstream's pages read our backend's account and social routes through their labrinth modules and
+// types. This file fails to compile when a generated shape stops fitting the labrinth type it
+// stands in for.
 import type {
 	AllProjects,
+	AuthSession,
+	Globals,
+	LoginAnswer,
+	LoginCredentials,
+	NewAccount,
+	PasswordReset,
+	PasswordUpdate,
 	PreferencesUpdate,
 	SearchUser,
+	TwoFactorLogin,
 	User,
 	UserFriend,
 	UserPreferences,
+	UserSession,
 	UserUpdate,
 } from '@amberite/contracts'
 
@@ -45,9 +55,19 @@ export type LabrinthCompat = [
 	Assert<Fits<UserFriend, Labrinth.Friends.v3.UserFriend>>,
 	Assert<Fits<AllProjects, Labrinth.Users.v3.AllProjectsResponse>>,
 	Assert<Fits<UserPreferences, Labrinth.Users.v3.UserPreferences>>,
+	Assert<Fits<Globals, Labrinth.Globals.Internal.Globals>>,
+	Assert<Fits<LoginAnswer, Labrinth.Auth.v2.LoginResponse>>,
+	Assert<Fits<AuthSession, Labrinth.Auth.v2.AuthSessionResponse>>,
+	Assert<Fits<UserSession, Labrinth.Sessions.v2.Session>>,
 	// Request bodies go the other way: what upstream sends must fit what the backend takes.
 	Assert<Fits<Labrinth.Users.v3.PartialUserPreferences, PreferencesUpdate>>,
 	Assert<Fits<Labrinth.Users.v3.EditUserRequest, UserUpdate>>,
+	Assert<Fits<Labrinth.Auth.v2.CreateAccountRequest, NewAccount>>,
+	Assert<Fits<Labrinth.Auth.v2.ValidateCreateAccountRequest, NewAccount>>,
+	Assert<Fits<Labrinth.Auth.v2.LoginRequest, LoginCredentials>>,
+	Assert<Fits<Labrinth.Auth.v2.Login2FARequest, TwoFactorLogin>>,
+	Assert<Fits<Labrinth.Auth.v2.ResetPasswordRequest, PasswordReset>>,
+	Assert<Fits<Labrinth.Auth.v2.ChangePasswordRequest, PasswordUpdate>>,
 	// @ts-expect-error A field of another type does not fit.
 	Assert<Fits<{ id: number }, { id: string }>>,
 	// @ts-expect-error A null does not fit a required field.

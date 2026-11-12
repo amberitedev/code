@@ -4,7 +4,7 @@ import test from 'node:test'
 import { startBackend } from './worker.mjs'
 
 test('admin permissions, locked accounts, and forced recovery preserve upstream behavior', async () => {
-	const backend = await startBackend('admin-contract')
+	const backend = await startBackend('admin-contract', { LOCAL_DEV_SECRET: 'dev-secret' })
 	try {
 		const { db, session } = backend
 		for (const [id, role] of [
@@ -57,6 +57,16 @@ test('admin permissions, locked accounts, and forced recovery preserve upstream 
 		await call(`${adminPath}/lock`, 'DELETE')
 		await call('/auth/login', 'POST', { username: 'member', password }, 'member', 200)
 		await db.prepare("UPDATE users SET totp_secret = 'secret' WHERE id = 'member'").run()
+		const challenge = await call(
+			'/auth/login',
+			'POST',
+			{ username: 'member', password },
+			'member',
+			200,
+		)
+		assert.equal(challenge.error, '2fa_required')
+		assert.equal(typeof challenge.flow, 'string')
+		await call('/auth/passkey/start', 'POST', {}, 'member', 501)
 		await db
 			.prepare("INSERT INTO backup_codes (user_id,code_hash) VALUES ('member','backup')")
 			.run()
@@ -72,6 +82,27 @@ test('admin permissions, locked accounts, and forced recovery preserve upstream 
 		await session('member')
 		await call(`${adminPath}/sessions`, 'DELETE')
 		await call('/user', 'GET', undefined, 'member', 401)
+
+		async function devSession(username, secret) {
+			const response = await backend.fetch('http://localhost/_dev/session', {
+				method: 'POST',
+				headers: {
+					'content-type': 'application/json',
+					...(secret ? { 'x-local-dev-secret': secret } : {}),
+				},
+				body: JSON.stringify({ username }),
+			})
+			return { status: response.status, body: await response.json() }
+		}
+		assert.equal((await devSession('scenario', undefined)).status, 404)
+		assert.equal((await devSession('scenario', 'wrong')).status, 404)
+		assert.equal((await devSession('member', 'dev-secret')).status, 403)
+		const scenario = await devSession('scenario', 'dev-secret')
+		assert.equal(scenario.status, 200)
+		const user = await backend.fetch('http://localhost/v3/user', {
+			headers: { authorization: `Bearer ${scenario.body.session}` },
+		})
+		assert.equal((await user.json()).username, 'scenario')
 	} finally {
 		await backend.dispose()
 	}

@@ -1,3 +1,5 @@
+import { accounts, social } from '@amberite/contracts'
+
 import type { ContractTransport } from '../contracts/client'
 import { AbstractFeature, type FeatureConfig } from '../core/abstract-feature'
 import type { RequestContext } from '../types/request'
@@ -77,11 +79,20 @@ export async function routeSelfHostedRequest(
 	context.options.headers = normalizedHeaders
 }
 
+/** The segments of every path the backend serves for upstream's labrinth modules. */
+const accountPaths = [...Object.values(accounts), ...Object.values(social)].map(({ path }) =>
+	path.split('/'),
+)
+
 function isAccountPath(path: string): boolean {
-	const pathname = path.split('?')[0] ?? path
-	if (/^\/(?:_internal\/)?admin\/user(?:\/|$)/.test(pathname)) return true
-	if (['/user_email', '/user_discord'].includes(pathname)) return true
-	return /^\/(auth|globals|session|sessions|friend|friends|block|blocks|notification|notifications|pat|user|users)(\/|$)/.test(
-		pathname,
+	const segments = (path.split('?')[0] ?? path).split('/')
+	// The backend refuses every other sign-in method itself, so none reaches Modrinth.
+	if (segments[1] === 'auth') return true
+	return accountPaths.some(
+		(template) =>
+			template.length === segments.length &&
+			template.every((part, index) =>
+				part.startsWith('{') ? segments[index] !== '' : part === segments[index],
+			),
 	)
 }
