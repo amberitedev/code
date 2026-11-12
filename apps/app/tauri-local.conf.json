@@ -1,7 +1,7 @@
 {
 	"app": {
 		"security": {
-			"capabilities": ["core", "plugins", "dev"]
+			"capabilities": ["core", "plugins"]
 		}
 	}
 }

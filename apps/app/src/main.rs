@@ -411,7 +411,6 @@ fn main() {
         .plugin(api::files::init())
         .plugin(api::friends::init())
         .plugin(api::worlds::init())
-        .plugin(cores::init())
         .manage(PendingUpdateData::default())
         .manage(RestartAfterPendingUpdate::default())
         .manage(EventForwarder::default())

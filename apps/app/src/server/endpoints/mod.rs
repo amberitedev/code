@@ -3,6 +3,7 @@
 //! `cargo test -p theseus_gui -- --ignored write_ts`.
 
 pub mod boot;
+pub mod cores;
 pub mod health;
 
 #[cfg(test)]
@@ -12,6 +13,10 @@ mod tests {
 
     use super::{
         boot::{Boot, GetBoot, Platform},
+        cores::{
+            CheckCoreSession, ConnectCore, CoreSession, CoreSessionKey,
+            CoreTarget, NewCoreSession, SignInToCore, SignOutOfCore,
+        },
         health::CheckHealth,
     };
 
@@ -22,9 +27,16 @@ mod tests {
 
     fn file() -> String {
         let cfg = config();
-        let declarations = [Boot::decl(&cfg), Platform::decl(&cfg)]
-            .map(|declaration| format!("\nexport {declaration}\n"))
-            .concat();
+        let declarations = [
+            Boot::decl(&cfg),
+            Platform::decl(&cfg),
+            CoreTarget::decl(&cfg),
+            NewCoreSession::decl(&cfg),
+            CoreSession::decl(&cfg),
+            CoreSessionKey::decl(&cfg),
+        ]
+        .map(|declaration| format!("\nexport {declaration}\n"))
+        .concat();
         format!(
             "// Generated from apps/app by ts-rs. Do not edit.\n\
              // Regenerate: cargo test -p theseus_gui -- --ignored write_ts\n\n\
@@ -34,9 +46,19 @@ mod tests {
              }}\n\n\
              export const boot = {{\n\
              \tgetBoot: {},\n\
+             }}\n\n\
+             export const pairedCores = {{\n\
+             \tconnectCore: {},\n\
+             \tsignInToCore: {},\n\
+             \tsignOutOfCore: {},\n\
+             \tcheckCoreSession: {},\n\
              }}\n",
             endpoint::<CheckHealth>(),
             endpoint::<GetBoot>(),
+            endpoint::<ConnectCore>(),
+            endpoint::<SignInToCore>(),
+            endpoint::<SignOutOfCore>(),
+            endpoint::<CheckCoreSession>(),
         )
     }
 

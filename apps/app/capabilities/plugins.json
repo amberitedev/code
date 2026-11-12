@@ -40,12 +40,6 @@
 				},
 				{
 					"url": "http://127.0.0.1:8000/*"
-				},
-				{
-					"url": "http://*.taila228c5.ts.net/*"
-				},
-				{
-					"url": "https://*.taila228c5.ts.net/*"
 				}
 			]
 		},
@@ -95,7 +89,6 @@
 		"shortcuts:default",
 		"tags:default",
 		"utils:default",
-		"cores:default",
 		"friends:default",
 		"worlds:default"
 	]

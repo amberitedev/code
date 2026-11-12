@@ -19,10 +19,25 @@ backend_url: string | null, };
 
 export type Platform = "windows" | "macos" | "linux";
 
+export type CoreTarget = { core_id: string, account: string, address: string, fingerprint: string, };
+
+export type NewCoreSession = { core_id: string, account: string, address: string, fingerprint: string, ticket: string, };
+
+export type CoreSession = unknown;
+
+export type CoreSessionKey = { core_id: string, account: string, };
+
 export const health = {
 	checkHealth: { method: "GET", path: "/health", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
 }
 
 export const boot = {
 	getBoot: { method: "GET", path: "/app/boot", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Boot>,
+}
+
+export const pairedCores = {
+	connectCore: { method: "POST", path: "/app/cores/connect", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, CoreTarget, string>,
+	signInToCore: { method: "POST", path: "/app/cores/sessions", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, NewCoreSession, CoreSession>,
+	signOutOfCore: { method: "DELETE", path: "/app/cores/sessions", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<null, CoreSessionKey, void, void>,
+	checkCoreSession: { method: "GET", path: "/app/cores/sessions", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, CoreSessionKey, void, boolean>,
 }

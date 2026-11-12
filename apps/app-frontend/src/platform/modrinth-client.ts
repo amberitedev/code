@@ -1,15 +1,16 @@
 import {
 	type AbstractModrinthClient,
 	AuthFeature,
+	type Copal,
 	GenericModrinthClient,
 	NodeAuthFeature,
 	nodeAuthState,
+	pairedCores,
 	PanelVersionFeature,
 	SelfHostedFeature,
 	TauriModrinthClient,
 	VerboseLoggingFeature,
 } from '@modrinth/api-client'
-import { invoke } from '@tauri-apps/api/core'
 
 import { config } from '@/config'
 import { get as getModrinthCredentials } from '@/helpers/mr_auth'
@@ -35,28 +36,27 @@ export const apiClient: AbstractModrinthClient = new ModrinthClient({
 	labrinthBaseUrl: config.labrinthBaseUrl,
 	// With our own account backend, hosting is the account's own Cores, found through it.
 	selfHostedHosting: Boolean(config.accountApiUrl),
-	// A Core's own certificate is checked in Rust; the WebView talks to a local proxy instead,
-	// which adds this device's session for the account signed in. The WebView never holds it.
+	// A Core's own certificate is checked in Rust; the WebView talks to the App's Core proxy
+	// instead, which adds this device's session for the account signed in. The WebView never
+	// holds it.
 	connectCore: async (coreId, address, fingerprint) =>
-		invoke<string>('plugin:cores|core_connect', {
-			coreId,
-			account: await account(),
-			address,
-			fingerprint,
+		apiClient.local.call(pairedCores.connectCore, {
+			body: { core_id: coreId, account: await account(), address, fingerprint },
 		}),
 	coreSessions: {
+		// The App passes on the session as the Core described it.
 		signIn: async (coreId, address, fingerprint, ticket) =>
-			invoke('plugin:cores|core_sign_in', {
-				coreId,
-				account: await account(),
-				address,
-				fingerprint,
-				ticket,
-			}),
+			(await apiClient.local.call(pairedCores.signInToCore, {
+				body: { core_id: coreId, account: await account(), address, fingerprint, ticket },
+			})) as Copal.Session,
 		signOut: async (coreId) =>
-			invoke('plugin:cores|core_sign_out', { coreId, account: await account() }),
+			apiClient.local.call(pairedCores.signOutOfCore, {
+				query: { core_id: coreId, account: await account() },
+			}),
 		exists: async (coreId) =>
-			invoke('plugin:cores|core_session_exists', { coreId, account: await account() }),
+			apiClient.local.call(pairedCores.checkCoreSession, {
+				query: { core_id: coreId, account: await account() },
+			}),
 	},
 	archonBaseUrl: config.archonBaseUrl,
 	sharedInstancesBaseUrl: config.sharedInstancesBaseUrl,

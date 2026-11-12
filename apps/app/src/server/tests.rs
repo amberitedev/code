@@ -1,9 +1,12 @@
 use axum::{
     Router,
-    body::Body,
+    body::{Body, to_bytes},
     http::{
         Request, StatusCode,
-        header::{ACCESS_CONTROL_ALLOW_ORIGIN, HOST, ORIGIN, UPGRADE, VARY},
+        header::{
+            ACCESS_CONTROL_ALLOW_ORIGIN, CONTENT_TYPE, HOST, ORIGIN, UPGRADE,
+            VARY,
+        },
     },
     response::Response,
 };
@@ -32,6 +35,8 @@ struct Local {
     router: Router,
     secret: String,
     host: String,
+    /// The Core proxy's.
+    proxy_origin: String,
 }
 
 fn local() -> Local {
@@ -40,6 +45,10 @@ fn local() -> Local {
         router: server.router(boot()),
         secret: server.secret.clone(),
         host: format!("127.0.0.1:{}", server.port()),
+        proxy_origin: format!(
+            "http://127.0.0.1:{}",
+            server.proxy.local_addr().unwrap().port()
+        ),
     }
 }
 
@@ -96,13 +105,39 @@ async fn a_foreign_origin_is_refused() {
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
 
+/// Above all the Core proxy's, which serves other people's content.
 #[cfg(not(feature = "browser-bridge"))]
 #[tokio::test]
 async fn another_loopback_port_is_refused() {
-    let response = local()
-        .boot(&[(ORIGIN.as_str(), "http://127.0.0.1:1")])
-        .await;
+    let local = local();
+    let response = local.boot(&[(ORIGIN.as_str(), &local.proxy_origin)]).await;
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+/// Core content must never share the local server's origin.
+#[tokio::test]
+async fn cores_are_reached_on_the_proxy_port() {
+    let local = local();
+    let target = serde_json::json!({
+        "core_id": "core",
+        "account": "account",
+        "address": "https://127.0.0.1:1",
+        "fingerprint": "0".repeat(64),
+    });
+    let request = Request::post(format!("/{}/app/cores/connect", local.secret))
+        .header(HOST, &local.host)
+        .header(ORIGIN, "tauri://localhost")
+        .header(CONTENT_TYPE, "application/json")
+        .body(Body::from(target.to_string()))
+        .unwrap();
+    let response = local.send(request).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let base: String = serde_json::from_slice(&body).unwrap();
+    assert_eq!(
+        base,
+        format!("{}/{}/core/0", local.proxy_origin, local.secret)
+    );
 }
 
 #[tokio::test]

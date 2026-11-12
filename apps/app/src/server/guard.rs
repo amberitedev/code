@@ -1,6 +1,6 @@
-//! Who may use the local server. Any program on this machine can reach 127.0.0.1, and any website
-//! can through the user's browser, so a request needs the secret path segment and, from a browser,
-//! one of the App's own origins.
+//! Who may use the local server and the Core proxy. Any program on this machine can reach
+//! 127.0.0.1, and any website can through the user's browser, so a request needs the secret path
+//! segment and, from a browser, one of the App's own origins.
 
 use std::sync::Arc;
 #[cfg(debug_assertions)]
@@ -100,6 +100,77 @@ impl Guard {
         vite || (cfg!(all(debug_assertions, feature = "browser-bridge"))
             && loopback)
     }
+
+    /// The checks every request passes, in order. `Err` is the answer to send instead: a refusal,
+    /// or a preflight's. `Ok` holds the request's `Origin`, for [`allow`].
+    pub fn screen(
+        &self,
+        method: &Method,
+        path: &str,
+        headers: &HeaderMap,
+    ) -> Result<Option<HeaderValue>, Response> {
+        if !self.has_secret(path) {
+            return Err(refuse(
+                StatusCode::NOT_FOUND,
+                ErrorCode::NotFound,
+                "Not found.",
+            ));
+        }
+        if !self.has_host(headers) {
+            return Err(refuse(
+                StatusCode::MISDIRECTED_REQUEST,
+                ErrorCode::Forbidden,
+                "Only 127.0.0.1 and localhost reach the App.",
+            ));
+        }
+        // No caller shares this server's origin; a document that does could read what it serves.
+        if headers
+            .get("sec-fetch-site")
+            .is_some_and(|site| site == "same-origin")
+        {
+            return Err(refuse(
+                StatusCode::FORBIDDEN,
+                ErrorCode::Forbidden,
+                "Same-origin requests are refused.",
+            ));
+        }
+        let origin = headers.get(ORIGIN).cloned();
+        match &origin {
+            Some(origin)
+                if !origin.to_str().is_ok_and(|origin| self.allows(origin)) =>
+            {
+                return Err(refuse(
+                    StatusCode::FORBIDDEN,
+                    ErrorCode::Forbidden,
+                    "Only the Amberite App can use this address.",
+                ));
+            }
+            None if headers.contains_key(UPGRADE) => {
+                return Err(refuse(
+                    StatusCode::FORBIDDEN,
+                    ErrorCode::Forbidden,
+                    "A socket needs the App's origin.",
+                ));
+            }
+            _ => {}
+        }
+        if let Some(origin) = &origin
+            && method == Method::OPTIONS
+            && headers.contains_key(ACCESS_CONTROL_REQUEST_METHOD)
+        {
+            return Err(preflight(headers, origin.clone()));
+        }
+        Ok(origin)
+    }
+}
+
+/// Lets `origin` read the answer. `Vary` goes on without one too, so an `<img>` load's cached copy
+/// never answers a later fetch.
+pub fn allow(headers: &mut HeaderMap, origin: Option<HeaderValue>) {
+    headers.append(VARY, HeaderValue::from_static("Origin"));
+    if let Some(origin) = origin {
+        headers.insert(ACCESS_CONTROL_ALLOW_ORIGIN, origin);
+    }
 }
 
 pub async fn guard(
@@ -107,78 +178,31 @@ pub async fn guard(
     request: Request,
     next: Next,
 ) -> Response {
-    let headers = request.headers();
-    if !guard.has_secret(request.uri().path()) {
-        return refuse(
-            StatusCode::NOT_FOUND,
-            ErrorCode::NotFound,
-            "Not found.",
-        );
-    }
-    if !guard.has_host(headers) {
-        return refuse(
-            StatusCode::MISDIRECTED_REQUEST,
-            ErrorCode::Forbidden,
-            "Only 127.0.0.1 and localhost reach the App.",
-        );
-    }
-    // No caller of this server shares its origin; a document that does could read local files.
-    if headers
-        .get("sec-fetch-site")
-        .is_some_and(|site| site == "same-origin")
-    {
-        return refuse(
-            StatusCode::FORBIDDEN,
-            ErrorCode::Forbidden,
-            "Same-origin requests are refused.",
-        );
-    }
-    let origin = headers.get(ORIGIN).cloned();
-    match &origin {
-        Some(origin)
-            if !origin.to_str().is_ok_and(|origin| guard.allows(origin)) =>
-        {
-            return refuse(
-                StatusCode::FORBIDDEN,
-                ErrorCode::Forbidden,
-                "Only the Amberite App can use this address.",
-            );
-        }
-        None if headers.contains_key(UPGRADE) => {
-            return refuse(
-                StatusCode::FORBIDDEN,
-                ErrorCode::Forbidden,
-                "A socket needs the App's origin.",
-            );
-        }
-        _ => {}
-    }
-    if let Some(origin) = &origin
-        && request.method() == Method::OPTIONS
-        && headers.contains_key(ACCESS_CONTROL_REQUEST_METHOD)
-    {
-        return preflight(headers, origin.clone());
-    }
+    let origin = match guard.screen(
+        request.method(),
+        request.uri().path(),
+        request.headers(),
+    ) {
+        Ok(origin) => origin,
+        Err(answer) => return answer,
+    };
 
     #[cfg(debug_assertions)]
     let started = Instant::now();
     let mut response = next.run(request).await;
     let headers = response.headers_mut();
-    // Also without an Origin, so an `<img>` load's cached copy never answers a later fetch.
-    headers.append(VARY, HeaderValue::from_static("Origin"));
-    let Some(origin) = origin else {
-        return response;
-    };
     #[cfg(debug_assertions)]
-    if let Ok(timing) = HeaderValue::try_from(format!(
-        "app;dur={:.2}",
-        started.elapsed().as_secs_f64() * 1000.0
-    )) {
+    if let Some(origin) = &origin
+        && let Ok(timing) = HeaderValue::try_from(format!(
+            "app;dur={:.2}",
+            started.elapsed().as_secs_f64() * 1000.0
+        ))
+    {
         headers.insert("server-timing", timing);
         // Every caller is cross-origin, and a page reads Server-Timing only when this allows it.
         headers.insert("timing-allow-origin", origin.clone());
     }
-    headers.insert(ACCESS_CONTROL_ALLOW_ORIGIN, origin);
+    allow(headers, origin);
     response
 }
 

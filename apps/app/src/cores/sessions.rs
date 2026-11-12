@@ -91,12 +91,12 @@ impl Sessions {
         }
     }
 
-    /// A session held in memory only, for tests.
+    /// Holds a session in memory only, for tests.
     #[cfg(test)]
-    pub fn cached(key: &Key, token: Option<&str>) -> Self {
-        Self(Mutex::new(HashMap::from([(
-            key.clone(),
-            token.map(str::to_owned),
-        )])))
+    pub fn cache(&self, key: &Key, token: Option<&str>) {
+        self.0
+            .lock()
+            .expect("not poisoned")
+            .insert(key.clone(), token.map(str::to_owned));
     }
 }

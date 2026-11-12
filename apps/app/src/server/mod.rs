@@ -1,9 +1,10 @@
 //! The App's local HTTP API on 127.0.0.1, under a secret first path segment. It binds before Tauri
-//! builds, so the native window and tabs know its address before the frontend loads.
+//! builds, so the native window and tabs know its address before the frontend loads. The Core
+//! proxy (`crate::cores::proxy`) binds beside it, on a port of its own, behind the same secret.
 
 mod boot;
 pub mod endpoints;
-mod guard;
+pub mod guard;
 #[cfg(test)]
 mod tests;
 
@@ -21,6 +22,8 @@ use contracts::{
 use tauri::{Runtime, plugin::TauriPlugin};
 use url::Url;
 
+use crate::cores::{self, Cores};
+
 use endpoints::{
     boot::{Boot, GetBoot},
     health::CheckHealth,
@@ -32,6 +35,8 @@ pub struct LocalServer {
     pub secret: String,
     /// Where the frontend loads from in a debug build; its origin may call the server.
     dev_url: Option<Url>,
+    proxy: TcpListener,
+    cores: Arc<Cores>,
 }
 
 impl LocalServer {
@@ -45,10 +50,19 @@ impl LocalServer {
         let listener =
             TcpListener::bind((Ipv4Addr::LOCALHOST, port.unwrap_or(0)))?;
         listener.set_nonblocking(true)?;
+        let proxy = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?;
+        proxy.set_nonblocking(true)?;
+        let secret = secret.unwrap_or_else(new_secret);
+        let cores = Arc::new(Cores::new(format!(
+            "http://127.0.0.1:{}/{secret}",
+            proxy.local_addr()?.port()
+        )));
         Ok(Self {
             listener,
-            secret: secret.unwrap_or_else(new_secret),
+            secret,
             dev_url: dev_url.filter(|_| cfg!(debug_assertions)),
+            proxy,
+            cores,
         })
     }
 
@@ -81,7 +95,8 @@ impl LocalServer {
             });
         let routes = Router::new()
             .route(health_path, health)
-            .route(boot_path, boot);
+            .route(boot_path, boot)
+            .merge(cores::routes(Arc::clone(&self.cores)));
         Router::new()
             .nest(&format!("/{}", self.secret), routes)
             .layer(middleware::from_fn_with_state(guard, guard::guard))
@@ -114,7 +129,16 @@ impl LocalServer {
         )
     }
 
+    /// Serves the router and the Core proxy.
     pub async fn serve(self, router: Router) {
+        let proxy = tokio::net::TcpListener::from_std(self.proxy)
+            .expect("the listener is non-blocking");
+        let guard = Guard::new(
+            self.secret,
+            proxy.local_addr().expect("a bound listener").port(),
+            self.dev_url.as_ref(),
+        );
+        tokio::spawn(cores::proxy::serve(proxy, Arc::new(guard), self.cores));
         let listener = tokio::net::TcpListener::from_std(self.listener)
             .expect("the listener is non-blocking");
         if let Err(error) = axum::serve(listener, router).await {

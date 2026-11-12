@@ -403,19 +403,6 @@ fn main() {
                     ),
             )
             .plugin(
-                "cores",
-                InlinedPlugin::new()
-                    .commands(&[
-                        "core_connect",
-                        "core_sign_in",
-                        "core_sign_out",
-                        "core_session_exists",
-                    ])
-                    .default_permission(
-                        DefaultPermissionRule::AllowAllCommands,
-                    ),
-            )
-            .plugin(
                 "friends",
                 InlinedPlugin::new()
                     .commands(&[

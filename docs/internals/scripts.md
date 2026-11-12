@@ -98,8 +98,7 @@ the runner starts it without Cargo. That is the usual case in a worktree that do
 The six most recently used keys are kept.
 
 Nothing in the build depends on ports. The App is told where its frontend is, and whether to keep
-its window hidden, in `--amberite-dev-config` when it starts. `tauri-local.conf.json` turns on the
-`dev` capability, which lets a dev App call any Core address.
+its window hidden, in `--amberite-dev-config` when it starts.
 
 Nothing watches Rust files. After a Rust edit, restart with `down` then `up`, or `rs <scenario>` and
 `rs core` in the foreground runner; the key has changed, so the runner builds first. If a build
@@ -137,9 +136,8 @@ An older checkout that still runs its App from `target/dev-shared/debug` holds t
 renames it aside and builds again.
 
 A fresh dev Core belongs to nobody. Add it once from an App with the code in the `[core]` output;
-until then the Servers page asks for a Core. The dev App may call any Core address, which a
-packaged build does not allow yet. The App signs in to a Core with a ticket on its first request
-and keeps that session in the OS keychain; set `CORE_PROXY_LOG=1` before starting an App
+until then the Servers page asks for a Core. The App signs in to a Core with a ticket on its first
+request and keeps that session in the OS keychain; set `CORE_PROXY_LOG=1` before starting an App
 to log the head of every request its Core proxy sends, with the session token left out.
 
 The Worker runs through `wrangler dev --local`; D1, Durable Objects, and the R2 bucket that holds
