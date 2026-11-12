@@ -61,6 +61,13 @@ pub fn port_free(port: u16, local_only: Option<IpAddr>) -> bool {
         net::{SocketAddr, TcpListener, UdpSocket},
     };
 
+    // Windows Firewall prompts the developer for each test binary that listens beyond loopback.
+    #[cfg(test)]
+    assert!(
+        local_only.is_some(),
+        "tests open Servers with a loopback address"
+    );
+
     probed_ips(local_only)
         .into_iter()
         .map(|ip| SocketAddr::new(ip, port))
