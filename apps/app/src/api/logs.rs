@@ -120,6 +120,5 @@ pub async fn logs_get_live_log_buffer(
 /// Clear the live log buffer for an instance.
 #[tauri::command]
 pub async fn logs_clear_live_log_buffer(instance_id: &str) -> Result<()> {
-    logs::clear_live_log_buffer(instance_id);
-    Ok(())
+    Ok(logs::clear_live_log_buffer(instance_id).await?)
 }

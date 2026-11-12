@@ -1,10 +1,7 @@
-use std::collections::HashMap;
-use std::sync::{Arc, LazyLock, Mutex};
+use crate::state::Installs;
+use std::sync::Arc;
 use tokio::sync::watch;
 use uuid::Uuid;
-
-static CONTROLS: LazyLock<Mutex<HashMap<Uuid, Arc<InstallControl>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 tokio::task_local! {
     pub(crate) static CURRENT_INSTALL: Arc<InstallControl>;
@@ -103,12 +100,16 @@ impl InstallControl {
 pub(super) struct Registration {
     job_id: Uuid,
     pub control: Arc<InstallControl>,
+    installs: Arc<Installs>,
 }
 
 impl Drop for Registration {
     fn drop(&mut self) {
-        let mut controls =
-            CONTROLS.lock().unwrap_or_else(|error| error.into_inner());
+        let mut controls = self
+            .installs
+            .controls
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         if controls
             .get(&self.job_id)
             .is_some_and(|current| Arc::ptr_eq(current, &self.control))
@@ -118,26 +119,38 @@ impl Drop for Registration {
     }
 }
 
-pub(super) fn register(job_id: Uuid) -> Registration {
+pub(super) fn register(job_id: Uuid, installs: &Arc<Installs>) -> Registration {
     let (mode, _) = watch::channel(Mode::Running);
     let control = Arc::new(InstallControl { mode });
-    CONTROLS
+    installs
+        .controls
         .lock()
         .unwrap_or_else(|error| error.into_inner())
         .insert(job_id, control.clone());
-    Registration { job_id, control }
+    Registration {
+        job_id,
+        control,
+        installs: Arc::clone(installs),
+    }
 }
 
-pub(super) fn get(job_id: Uuid) -> Option<Arc<InstallControl>> {
-    CONTROLS
+pub(super) fn get(
+    job_id: Uuid,
+    installs: &Installs,
+) -> Option<Arc<InstallControl>> {
+    installs
+        .controls
         .lock()
         .unwrap_or_else(|error| error.into_inner())
         .get(&job_id)
         .cloned()
 }
 
-pub(super) fn snapshot(job_id: Uuid) -> (bool, bool, bool) {
-    let Some(control) = get(job_id) else {
+pub(super) fn snapshot(
+    job_id: Uuid,
+    installs: &Installs,
+) -> (bool, bool, bool) {
+    let Some(control) = get(job_id, installs) else {
         return (false, false, false);
     };
     let mode = *control.mode.borrow();
@@ -148,8 +161,11 @@ pub(super) fn snapshot(job_id: Uuid) -> (bool, bool, bool) {
     )
 }
 
-pub(super) async fn checkpoint(job_id: Uuid) -> crate::Result<()> {
-    if let Some(control) = get(job_id) {
+pub(super) async fn checkpoint(
+    job_id: Uuid,
+    installs: &Installs,
+) -> crate::Result<()> {
+    if let Some(control) = get(job_id, installs) {
         control.checkpoint().await?;
     }
     Ok(())

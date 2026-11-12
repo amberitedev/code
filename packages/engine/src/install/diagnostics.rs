@@ -50,7 +50,7 @@ pub async fn build_job_support_details(
     job: &store::InstallJobRecord,
     state: &State,
 ) -> crate::Result<String> {
-    let snapshot = job.snapshot();
+    let snapshot = job.snapshot(&state.installs);
     let mut details = String::new();
     let title = snapshot
         .display

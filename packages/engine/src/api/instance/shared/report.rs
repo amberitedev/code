@@ -5,10 +5,10 @@ use crate::util::io::format_bytes;
 use chrono::{DateTime, Utc};
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
-use std::sync::{LazyLock, Mutex};
+use std::sync::Mutex;
 
-static PUBLISH_REPORTS: LazyLock<Mutex<HashMap<String, PublishReport>>> =
-    LazyLock::new(Default::default);
+#[derive(Default)]
+pub(crate) struct PublishReports(Mutex<HashMap<String, PublishReport>>);
 
 pub(super) struct PublishReportFile {
     pub(super) file_name: String,
@@ -68,7 +68,11 @@ impl PublishReport {
         self.timeline.push((Utc::now(), description.into()));
     }
 
-    pub(super) fn finish(mut self, result: &crate::Result<()>) {
+    pub(super) fn finish(
+        mut self,
+        result: &crate::Result<()>,
+        reports: &PublishReports,
+    ) {
         match result {
             Ok(()) => self.step("Push succeeded"),
             Err(error) => {
@@ -79,7 +83,7 @@ impl PublishReport {
                 ));
             }
         }
-        if let Ok(mut reports) = PUBLISH_REPORTS.lock() {
+        if let Ok(mut reports) = reports.0.lock() {
             reports.insert(self.instance_id.clone(), self);
         }
     }
@@ -232,7 +236,7 @@ pub async fn get_shared_instance_publish_support_details(
     instance_id: &str,
 ) -> crate::Result<Option<String>> {
     let state = crate::State::get().await?;
-    let details = PUBLISH_REPORTS.lock().ok().and_then(|reports| {
+    let details = state.publish_reports.0.lock().ok().and_then(|reports| {
         reports.get(instance_id).map(PublishReport::render)
     });
     let Some(mut details) = details else {

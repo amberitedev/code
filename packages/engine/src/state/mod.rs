@@ -102,9 +102,10 @@ pub struct State {
     /// Semaphore to limit concurrent API requests. This is separate from the fetch semaphore
     /// to keep API functionality while the app is performing intensive tasks.
     pub api_semaphore: FetchSemaphore,
-    pub(crate) installs: Installs,
+    pub(crate) installs: Arc<Installs>,
     pub(crate) instance_locks: InstanceLocks,
     pub(crate) synced_options: SyncedOptions,
+    pub(crate) publish_reports: crate::api::instance::PublishReports,
 
     pub presence: Presence,
 
@@ -204,9 +205,10 @@ impl State {
             fetch_semaphore,
             io_semaphore,
             api_semaphore,
-            installs: Installs::new(),
+            installs: Arc::new(Installs::new()),
             instance_locks: InstanceLocks::default(),
             synced_options: SyncedOptions::default(),
+            publish_reports: Default::default(),
             presence: Presence::init()?,
             process_manager: ProcessManager::new(),
             pool,
@@ -403,7 +405,7 @@ mod tests {
     use std::path::Path;
     use std::time::Duration;
 
-    async fn add_instance(state: &State, id: &str, path: &str) {
+    pub(super) async fn add_instance(state: &State, id: &str, path: &str) {
         let now = chrono::Utc::now();
         let content_set_id = format!("content-set:{id}");
         let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await.unwrap();
@@ -461,7 +463,7 @@ mod tests {
         tx.commit().await.unwrap();
     }
 
-    fn write(path: &Path) {
+    pub(super) fn write(path: &Path) {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, path.to_string_lossy().as_bytes()).unwrap();
     }

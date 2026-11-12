@@ -20,7 +20,7 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitStatus;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 use std::time::Instant;
 use tempfile::TempDir;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -57,31 +57,13 @@ impl LogRingBuffer {
     }
 }
 
-static LOG_BUFFERS: LazyLock<DashMap<String, LogRingBuffer>> =
-    LazyLock::new(DashMap::new);
+type LogBuffers = DashMap<String, LogRingBuffer>;
 
-pub fn push_log_line(instance_id: &str, line: String) {
-    LOG_BUFFERS
+fn push_log_line(log_buffers: &LogBuffers, instance_id: &str, line: String) {
+    log_buffers
         .entry(instance_id.to_string())
         .or_insert_with(LogRingBuffer::new)
         .push(line);
-}
-
-pub fn get_log_buffer(instance_id: &str) -> Vec<String> {
-    LOG_BUFFERS
-        .get(instance_id)
-        .map(|buf| buf.get_all())
-        .unwrap_or_default()
-}
-
-pub fn clear_log_buffer(instance_id: &str) {
-    if let Some(mut buf) = LOG_BUFFERS.get_mut(instance_id) {
-        buf.clear();
-    }
-}
-
-pub fn remove_log_buffer(instance_id: &str) {
-    LOG_BUFFERS.remove(instance_id);
 }
 
 async fn clear_persisted_process(
@@ -184,6 +166,7 @@ pub(crate) async fn instance_has_running_process(
 
 pub struct ProcessManager {
     processes: DashMap<Uuid, Process>,
+    log_buffers: Arc<LogBuffers>,
 }
 
 impl Default for ProcessManager {
@@ -196,7 +179,19 @@ impl ProcessManager {
     pub fn new() -> Self {
         Self {
             processes: DashMap::new(),
+            log_buffers: Arc::default(),
         }
+    }
+
+    pub fn get_log_buffer(&self, instance_id: &str) -> Vec<String> {
+        self.log_buffers
+            .get(instance_id)
+            .map(|buf| buf.get_all())
+            .unwrap_or_default()
+    }
+
+    pub fn remove_log_buffer(&self, instance_id: &str) {
+        self.log_buffers.remove(instance_id);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -235,7 +230,9 @@ impl ProcessManager {
 
         let log_path = logs_folder.join(LAUNCHER_LOG_PATH);
 
-        clear_log_buffer(instance_id);
+        if let Some(mut buf) = self.log_buffers.get_mut(instance_id) {
+            buf.clear();
+        }
 
         {
             let mut log_file = OpenOptions::new()
@@ -326,6 +323,7 @@ impl ProcessManager {
             let instance_id = metadata.instance_id.clone();
             let instance_path = metadata.instance_path.clone();
             let pool = state.pool.clone();
+            let log_buffers = Arc::clone(&self.log_buffers);
             tokio::spawn(async move {
                 Process::process_output(
                     &instance_id,
@@ -334,6 +332,7 @@ impl ProcessManager {
                     log_path_clone,
                     xml_logging,
                     &pool,
+                    &log_buffers,
                 )
                 .await;
             });
@@ -345,6 +344,7 @@ impl ProcessManager {
             let instance_id = metadata.instance_id.clone();
             let instance_path = metadata.instance_path.clone();
             let pool = state.pool.clone();
+            let log_buffers = Arc::clone(&self.log_buffers);
             tokio::spawn(async move {
                 Process::process_output(
                     &instance_id,
@@ -353,6 +353,7 @@ impl ProcessManager {
                     log_path_clone,
                     xml_logging,
                     &pool,
+                    &log_buffers,
                 )
                 .await;
             });
@@ -466,6 +467,7 @@ impl Process {
         log_path: impl AsRef<Path>,
         xml_logging: bool,
         pool: &SqlitePool,
+        log_buffers: &LogBuffers,
     ) where
         R: tokio::io::AsyncRead + Unpin,
     {
@@ -583,6 +585,7 @@ impl Process {
                                 }
 
                                 Self::emit_log4j_event(
+                                    log_buffers,
                                     instance_id,
                                     &current_event,
                                 );
@@ -628,6 +631,7 @@ impl Process {
                                     }
 
                                     Self::emit_log4j_event(
+                                        log_buffers,
                                         instance_id,
                                         &current_event,
                                     );
@@ -654,7 +658,11 @@ impl Process {
                                     e
                                 );
                             }
-                            Self::emit_legacy_log(instance_id, &text);
+                            Self::emit_legacy_log(
+                                log_buffers,
+                                instance_id,
+                                &text,
+                            );
                         }
                     }
                     Ok(Event::CData(e)) if in_message || in_throwable => {
@@ -678,7 +686,11 @@ impl Process {
                     if let Err(e) = Self::append_to_log_file(&log_path, &line) {
                         tracing::warn!("Failed to write to log file: {}", e);
                     }
-                    Self::emit_legacy_log(instance_id, line.trim_ascii_end());
+                    Self::emit_legacy_log(
+                        log_buffers,
+                        instance_id,
+                        line.trim_ascii_end(),
+                    );
                     if let Err(e) = Self::maybe_handle_old_server_join_logging(
                         instance_id,
                         line.trim_ascii_end(),
@@ -738,13 +750,21 @@ impl Process {
         ))
     }
 
-    fn emit_log4j_event(instance_id: &str, event: &Log4jEvent) {
+    fn emit_log4j_event(
+        log_buffers: &LogBuffers,
+        instance_id: &str,
+        event: &Log4jEvent,
+    ) {
         if let Some(formatted) = Self::format_log4j_entry(event) {
-            push_log_line(instance_id, formatted.trim_end().to_string());
+            push_log_line(
+                log_buffers,
+                instance_id,
+                formatted.trim_end().to_string(),
+            );
         }
         if let Some(ref throwable) = event.throwable {
             for line in throwable.lines().filter(|l| !l.is_empty()) {
-                push_log_line(instance_id, line.to_string());
+                push_log_line(log_buffers, instance_id, line.to_string());
             }
         }
 
@@ -762,8 +782,12 @@ impl Process {
         }
     }
 
-    fn emit_legacy_log(instance_id: &str, message: &str) {
-        push_log_line(instance_id, message.to_string());
+    fn emit_legacy_log(
+        log_buffers: &LogBuffers,
+        instance_id: &str,
+        message: &str,
+    ) {
+        push_log_line(log_buffers, instance_id, message.to_string());
 
         #[cfg(feature = "tauri")]
         {

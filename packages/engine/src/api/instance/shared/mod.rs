@@ -126,6 +126,7 @@ pub use self::publish::{
     publish_shared_instance, unlink_shared_instance,
     unpublish_remote_shared_instance, unpublish_shared_instance,
 };
+pub(crate) use self::report::PublishReports;
 pub use self::report::get_shared_instance_publish_support_details;
 pub use self::server::ensure_shared_instance;
 pub use self::types::{

@@ -17,7 +17,7 @@ use notify_debouncer_mini::{
 };
 use sqlx::SqlitePool;
 use std::path::Path;
-use std::sync::{LazyLock, Weak};
+use std::sync::Weak;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -33,6 +33,7 @@ use super::adapters::sqlite::instance_rows;
 pub struct FileWatcher {
     watcher: RwLock<Debouncer<WriteOnlyWatcher>>,
     instance_ids: RwLock<HashMap<String, String>>,
+    content_syncs: DashMap<String, bool>,
 }
 
 /// Wraps the platform watcher and drops read-only access events before they
@@ -90,11 +91,8 @@ impl Watcher for WriteOnlyWatcher {
     }
 }
 
-static CONTENT_SYNCS: LazyLock<DashMap<String, bool>> =
-    LazyLock::new(DashMap::new);
-
 fn queue_content_sync(instance_id: String, state: Arc<State>) {
-    match CONTENT_SYNCS.entry(instance_id.clone()) {
+    match state.file_watcher.content_syncs.entry(instance_id.clone()) {
         Entry::Occupied(mut entry) => {
             *entry.get_mut() = true;
             return;
@@ -121,7 +119,9 @@ fn queue_content_sync(instance_id: String, state: Arc<State>) {
                 ) {
                     return Ok(false);
                 }
-                if let Some(mut queued) = CONTENT_SYNCS.get_mut(&instance_id) {
+                if let Some(mut queued) =
+                    state.file_watcher.content_syncs.get_mut(&instance_id)
+                {
                     *queued = false;
                 }
                 crate::state::sync_content_files(&instance_id, &state).await?;
@@ -143,7 +143,7 @@ fn queue_content_sync(instance_id: String, state: Arc<State>) {
             }
             let _ =
                 emit_instance(&instance_id, InstancePayloadType::Synced).await;
-            match CONTENT_SYNCS.entry(instance_id.clone()) {
+            match state.file_watcher.content_syncs.entry(instance_id.clone()) {
                 Entry::Occupied(mut entry) if *entry.get() => {
                     *entry.get_mut() = false
                 }
@@ -172,6 +172,7 @@ pub(crate) fn init_watcher()
         FileWatcher {
             watcher: RwLock::new(file_watcher),
             instance_ids: RwLock::new(HashMap::new()),
+            content_syncs: DashMap::new(),
         },
         rx,
     ))
@@ -577,4 +578,47 @@ fn crash_task(instance_id: String, pool: SqlitePool) {
             }
         };
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::instances::adapters::sqlite::content_rows;
+    use crate::state::instances::commands::set_instance_install_stage;
+    use crate::state::tests::{add_instance, write};
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn two_engines_queue_the_same_instance_id_separately() {
+        crate::install_crypto_provider();
+        let tmp = tempfile::tempdir().unwrap();
+        let (a_dir, b_dir) = (tmp.path().join("a"), tmp.path().join("b"));
+        write(&b_dir.join("profiles/Survival/mods/b.jar"));
+
+        tokio::time::timeout(Duration::from_secs(60), async {
+            let a = State::new(a_dir).await.unwrap();
+            let b = State::new(b_dir).await.unwrap();
+            add_instance(&a, "same", "Survival").await;
+            add_instance(&b, "same", "Survival").await;
+            // A's sync keeps its queue entry while the instance installs.
+            set_instance_install_stage(
+                "same",
+                InstanceInstallStage::MinecraftInstalling,
+                &a.pool,
+            )
+            .await
+            .unwrap();
+
+            queue_content_sync("same".to_string(), Arc::clone(&a));
+            queue_content_sync("same".to_string(), Arc::clone(&b));
+            while content_rows::get_instance_files("same", &b.pool)
+                .await
+                .unwrap()
+                .is_empty()
+            {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .expect("the second engine's sync never ran");
+    }
 }

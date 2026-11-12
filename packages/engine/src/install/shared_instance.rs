@@ -381,7 +381,7 @@ async fn apply_shared_instance_changes(
     update_progress(
         job_id,
         job_state,
-        &state.pool,
+        state,
         InstallPhaseId::PreparingInstance,
         InstallPhaseDetails::Instance {
             name: data.name.clone(),
@@ -394,7 +394,7 @@ async fn apply_shared_instance_changes(
         update_content_progress(
             job_id,
             job_state,
-            &state.pool,
+            state,
             0,
             content_change_count,
         )
@@ -921,7 +921,7 @@ async fn apply_shared_instance_content_inner(
     update_progress(
         job_id,
         job_state,
-        &state.pool,
+        state,
         InstallPhaseId::PreparingInstance,
         InstallPhaseDetails::Instance {
             name: data.name.clone(),
@@ -971,7 +971,7 @@ async fn install_shared_instance_base(
         update_progress(
             job_id,
             job_state,
-            &state.pool,
+            state,
             InstallPhaseId::ResolvingPack,
             modpack_details(&location),
         )
@@ -983,7 +983,7 @@ async fn install_shared_instance_base(
             instance_id.to_string(),
             DownloadReason::Modpack,
             true,
-            &state.pool,
+            state,
             data.linked_server.is_some(),
             data.linked_server.is_some(),
         )
@@ -1006,7 +1006,7 @@ async fn install_shared_instance_base(
         update_progress(
             job_id,
             job_state,
-            &state.pool,
+            state,
             InstallPhaseId::DownloadingMinecraft,
             InstallPhaseDetails::Minecraft {
                 game_version: data.game_version.clone(),
@@ -1027,7 +1027,7 @@ async fn install_shared_instance_base(
             Some(InstallProgressReporter::new(
                 job_id,
                 job_state.clone(),
-                state.pool.clone(),
+                state,
             )),
             state,
         )
@@ -1347,7 +1347,7 @@ async fn install_shared_instance_downloads(
         .buffer_unordered(SHARED_INSTANCE_CONTENT_DOWNLOAD_CONCURRENCY),
         job_id,
         job_state,
-        &state.pool,
+        state,
         &mut completed,
         total,
         &bytes,
@@ -1371,7 +1371,7 @@ async fn install_shared_instance_downloads(
         .buffer_unordered(SHARED_INSTANCE_CONTENT_DOWNLOAD_CONCURRENCY),
         job_id,
         job_state,
-        &state.pool,
+        state,
         &mut completed,
         total,
         &bytes,
@@ -1396,7 +1396,7 @@ async fn install_shared_instance_downloads(
         .buffer_unordered(SHARED_INSTANCE_FILE_DOWNLOAD_CONCURRENCY),
         job_id,
         job_state,
-        &state.pool,
+        state,
         &mut completed,
         total,
         &bytes,
@@ -1467,7 +1467,7 @@ async fn report_shared_instance_installs(
     installs: impl futures::Stream<Item = crate::Result<()>>,
     job_id: Uuid,
     job_state: &mut InstallJobState,
-    pool: &SqlitePool,
+    state: &State,
     completed: &mut u64,
     total: u64,
     bytes: &DownloadedBytes,
@@ -1475,7 +1475,7 @@ async fn report_shared_instance_installs(
     update_content_progress_with_bytes(
         job_id,
         job_state,
-        pool,
+        state,
         *completed,
         total,
         Some(bytes.progress()),
@@ -1500,6 +1500,7 @@ async fn report_shared_instance_installs(
                 update_live_content_progress(
                     job_id,
                     job_state,
+                    &state.installs,
                     *completed,
                     total,
                     Some(bytes.progress()),
@@ -1511,7 +1512,7 @@ async fn report_shared_instance_installs(
     update_content_progress_with_bytes(
         job_id,
         job_state,
-        pool,
+        state,
         *completed,
         total,
         Some(bytes.progress()),

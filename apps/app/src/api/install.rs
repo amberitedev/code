@@ -308,40 +308,48 @@ pub async fn install_pack_to_existing_instance(
 pub async fn install_job_list(
     include_finished: bool,
 ) -> Result<Vec<InstallJobSnapshot>> {
-    Ok(engine::install::list_jobs(include_finished).await?)
+    let state = engine::State::get().await?;
+    Ok(engine::install::list_jobs(include_finished, &state).await?)
 }
 
 #[tauri::command]
 pub async fn install_job_get(job_id: Uuid) -> Result<InstallJobSnapshot> {
-    Ok(engine::install::get_job(job_id).await?)
+    let state = engine::State::get().await?;
+    Ok(engine::install::get_job(job_id, &state).await?)
 }
 
 #[tauri::command]
 pub async fn install_job_retry(job_id: Uuid) -> Result<InstallJobSnapshot> {
-    Ok(engine::install::retry_job(job_id).await?)
+    let state = engine::State::get().await?;
+    Ok(engine::install::retry_job(job_id, &state).await?)
 }
 
 #[tauri::command]
 pub async fn install_job_pause(job_id: Uuid) -> Result<InstallJobSnapshot> {
-    Ok(engine::install::pause_job(job_id).await?)
+    let state = engine::State::get().await?;
+    Ok(engine::install::pause_job(job_id, &state).await?)
 }
 
 #[tauri::command]
 pub async fn install_job_resume(job_id: Uuid) -> Result<InstallJobSnapshot> {
-    Ok(engine::install::resume_job(job_id).await?)
+    let state = engine::State::get().await?;
+    Ok(engine::install::resume_job(job_id, &state).await?)
 }
 
 #[tauri::command]
 pub async fn install_job_cancel(job_id: Uuid) -> Result<InstallJobSnapshot> {
-    Ok(engine::install::cancel_job(job_id).await?)
+    let state = engine::State::get().await?;
+    Ok(engine::install::cancel_job(job_id, &state).await?)
 }
 
 #[tauri::command]
 pub async fn install_job_dismiss(job_id: Uuid) -> Result<()> {
-    Ok(engine::install::dismiss_job(job_id).await?)
+    let state = engine::State::get().await?;
+    Ok(engine::install::dismiss_job(job_id, &state).await?)
 }
 
 #[tauri::command]
 pub async fn install_job_support_details(job_id: Uuid) -> Result<String> {
-    Ok(engine::install::job_support_details(job_id).await?)
+    let state = engine::State::get().await?;
+    Ok(engine::install::job_support_details(job_id, &state).await?)
 }

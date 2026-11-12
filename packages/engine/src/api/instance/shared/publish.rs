@@ -606,7 +606,7 @@ pub(super) async fn publish_shared_instance_inner(
         state,
     )
     .await;
-    report.finish(&result);
+    report.finish(&result, &state.publish_reports);
     result
 }
 

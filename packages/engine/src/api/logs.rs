@@ -481,7 +481,7 @@ pub async fn get_live_log_buffer(
     instance_id: &str,
 ) -> crate::Result<CensoredString> {
     let state = State::get().await?;
-    let lines = crate::state::get_log_buffer(instance_id);
+    let lines = state.process_manager.get_log_buffer(instance_id);
     let joined = lines.join("\n");
     let compacted = compact_duplicate_lines(&joined);
 
@@ -494,8 +494,10 @@ pub async fn get_live_log_buffer(
     Ok(CensoredString::censor(compacted.output, &credentials))
 }
 
-pub fn clear_live_log_buffer(instance_id: &str) {
-    crate::state::remove_log_buffer(instance_id);
+pub async fn clear_live_log_buffer(instance_id: &str) -> crate::Result<()> {
+    let state = State::get().await?;
+    state.process_manager.remove_log_buffer(instance_id);
+    Ok(())
 }
 
 #[tracing::instrument]

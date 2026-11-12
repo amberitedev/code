@@ -77,8 +77,9 @@ pub use self::screenshots::{
 };
 pub(crate) use self::shared::{
     CONFIG_DIRECTORY, CONFIG_FILE_EXTENSIONS, CONFIG_FILE_TYPE,
-    CONFIG_SYNC_ENABLED, is_shareable_file_path, set_applied_files,
-    share_backend, shared_instance_update_data, shared_modpack_files,
+    CONFIG_SYNC_ENABLED, PublishReports, is_shareable_file_path,
+    set_applied_files, share_backend, shared_instance_update_data,
+    shared_modpack_files,
 };
 pub use self::shared::{
     SharedHistorySettings, SharedInstanceExternalFilePreview,

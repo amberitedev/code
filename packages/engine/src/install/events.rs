@@ -3,6 +3,7 @@ use super::model::{
     InstallJobState, InstallPhaseDetails, InstallPhaseId, InstallProgress,
 };
 use super::store;
+use crate::state::{Installs, State};
 use sqlx::SqlitePool;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -16,6 +17,7 @@ const CONTENT_PROGRESS_EMIT_STEPS: u64 = 25;
 pub struct InstallProgressReporter {
     job_id: Uuid,
     pool: SqlitePool,
+    installs: Arc<Installs>,
     state: Arc<Mutex<InstallProgressReporterState>>,
 }
 
@@ -27,10 +29,11 @@ struct InstallProgressReporterState {
 }
 
 impl InstallProgressReporter {
-    pub fn new(job_id: Uuid, state: InstallJobState, pool: SqlitePool) -> Self {
+    pub fn new(job_id: Uuid, state: InstallJobState, engine: &State) -> Self {
         Self {
             job_id,
-            pool,
+            pool: engine.pool.clone(),
+            installs: Arc::clone(&engine.installs),
             state: Arc::new(Mutex::new(InstallProgressReporterState {
                 job: state,
                 last_emitted_at: Instant::now(),
@@ -53,7 +56,7 @@ impl InstallProgressReporter {
         &self,
         context: InstallErrorContext,
     ) -> crate::Result<()> {
-        super::control::checkpoint(self.job_id).await?;
+        super::control::checkpoint(self.job_id, &self.installs).await?;
         self.update_context(Some(context), true).await
     }
 
@@ -61,7 +64,7 @@ impl InstallProgressReporter {
         &self,
         context: InstallErrorContext,
     ) -> crate::Result<()> {
-        super::control::checkpoint(self.job_id).await?;
+        super::control::checkpoint(self.job_id, &self.installs).await?;
         self.update_context(Some(context), false).await
     }
 
@@ -81,19 +84,29 @@ impl InstallProgressReporter {
             return Ok(());
         }
 
-        let record =
-            store::update_state(self.job_id, &state.job, &self.pool).await?;
+        let record = store::update_state(
+            self.job_id,
+            &state.job,
+            &self.pool,
+            &self.installs,
+        )
+        .await?;
         state.mark_emitted();
-        emit_install_job(&record.snapshot()).await
+        emit_install_job(&record.snapshot(&self.installs)).await
     }
 
     pub async fn persist(&self) -> crate::Result<InstallJobSnapshot> {
         let mut state = self.state.lock().await;
 
-        let record =
-            store::update_state(self.job_id, &state.job, &self.pool).await?;
+        let record = store::update_state(
+            self.job_id,
+            &state.job,
+            &self.pool,
+            &self.installs,
+        )
+        .await?;
         state.mark_emitted();
-        let snapshot = record.snapshot();
+        let snapshot = record.snapshot(&self.installs);
         emit_install_job(&snapshot).await?;
         Ok(snapshot)
     }
@@ -127,7 +140,7 @@ impl InstallProgressReporter {
         details: InstallPhaseDetails,
         events: Vec<InstallJobEventKind>,
     ) -> crate::Result<()> {
-        super::control::checkpoint(self.job_id).await?;
+        super::control::checkpoint(self.job_id, &self.installs).await?;
         let mut state = self.state.lock().await;
         let phase_started = state.job.progress.phase != phase
             || matches!(
@@ -146,18 +159,25 @@ impl InstallProgressReporter {
             if !state.should_emit() {
                 return Ok(());
             }
-            if let Some(snapshot) =
-                store::update_live_progress(self.job_id, &state.job)
-            {
+            if let Some(snapshot) = store::update_live_progress(
+                self.job_id,
+                &state.job,
+                &self.installs,
+            ) {
                 state.mark_emitted();
                 return emit_install_job(&snapshot).await;
             }
         }
 
-        let record =
-            store::update_state(self.job_id, &state.job, &self.pool).await?;
+        let record = store::update_state(
+            self.job_id,
+            &state.job,
+            &self.pool,
+            &self.installs,
+        )
+        .await?;
         state.mark_emitted();
-        emit_install_job(&record.snapshot()).await
+        emit_install_job(&record.snapshot(&self.installs)).await
     }
 }
 

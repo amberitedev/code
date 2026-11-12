@@ -700,12 +700,13 @@ async fn recover_interrupted_job_inner(
             InstallJobStatus::Canceled,
             &job.state,
             &state.pool,
+            &state.installs,
         )
         .await?
         {
             store::dismiss(job.id, &state.pool).await?;
             clear_staging_dir(&job.state, &state.content_store).await;
-            emit_install_job(&record.snapshot()).await?;
+            emit_install_job(&record.snapshot(&state.installs)).await?;
         }
 
         return Ok(());
@@ -759,13 +760,14 @@ async fn recover_interrupted_job_inner(
         InstallJobStatus::Interrupted,
         &job.state,
         &state.pool,
+        &state.installs,
     )
     .await?
     {
         if cleanup_succeeded {
             clear_staging_dir(&job.state, &state.content_store).await;
         }
-        emit_install_job(&record.snapshot()).await?;
+        emit_install_job(&record.snapshot(&state.installs)).await?;
     }
 
     Ok(())

@@ -3,19 +3,21 @@ use super::model::{
     InstallProgressState, InstallRequest,
 };
 use crate::ErrorKind;
+use crate::state::Installs;
 use anyhow::{Context, bail};
 use chrono::{DateTime, TimeZone, Utc};
 use sqlx::SqlitePool;
 use std::collections::HashMap;
-use std::sync::{Arc, LazyLock, Mutex, MutexGuard, Weak};
+use std::sync::{Arc, MutexGuard, Weak};
 use tokio::sync::Notify;
 use uuid::Uuid;
 
-static COMPLETION_NOTIFICATIONS: LazyLock<Mutex<HashMap<Uuid, Weak<Notify>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
-pub(super) fn completion_notification(id: Uuid) -> Arc<Notify> {
-    let mut notifications = COMPLETION_NOTIFICATIONS
+pub(super) fn completion_notification(
+    id: Uuid,
+    installs: &Installs,
+) -> Arc<Notify> {
+    let mut notifications = installs
+        .completions
         .lock()
         .unwrap_or_else(|error| error.into_inner());
     notifications.retain(|_, notification| notification.strong_count() > 0);
@@ -27,8 +29,9 @@ pub(super) fn completion_notification(id: Uuid) -> Arc<Notify> {
     notification
 }
 
-fn notify_completion(id: Uuid) {
-    let notifications = COMPLETION_NOTIFICATIONS
+fn notify_completion(id: Uuid, installs: &Installs) {
+    let notifications = installs
+        .completions
         .lock()
         .unwrap_or_else(|error| error.into_inner());
     if let Some(notification) = notifications.get(&id).and_then(Weak::upgrade) {
@@ -73,7 +76,7 @@ impl InstallJobRecord {
     }
 
     /// Active jobs report their live progress, which can be newer than the stored one.
-    pub fn snapshot(&self) -> InstallJobSnapshot {
+    pub(crate) fn snapshot(&self, installs: &Installs) -> InstallJobSnapshot {
         let active = is_active(self.status);
         let mut snapshot = InstallJobSnapshot {
             content_count: self.state.content_count,
@@ -96,8 +99,8 @@ impl InstallJobRecord {
             modified: self.modified.to_rfc3339(),
             finished: self.finished.map(|finished| finished.to_rfc3339()),
         };
-        set_controls(&mut snapshot, self.id, active);
-        if active && let Some(job) = live_jobs().get_mut(&self.id) {
+        set_controls(&mut snapshot, self.id, active, installs);
+        if active && let Some(job) = live_jobs(installs).get_mut(&self.id) {
             job.apply_progress(&mut snapshot);
             job.snapshot = Some(snapshot.clone());
         }
@@ -105,13 +108,11 @@ impl InstallJobRecord {
     }
 }
 
-/// Progress of jobs running in this process. It changes far more often than the
-/// rest of a job, so it is kept here instead of rewriting the stored job on
+/// Progress of a job running in this engine. It changes far more often than the
+/// rest of a job, so it is kept in memory instead of rewriting the stored job on
 /// every update.
-static LIVE_JOBS: LazyLock<Mutex<HashMap<Uuid, LiveJob>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
-struct LiveJob {
+#[derive(Debug)]
+pub(crate) struct LiveJob {
     progress: InstallProgressState,
     snapshot: Option<InstallJobSnapshot>,
 }
@@ -124,16 +125,25 @@ impl LiveJob {
     }
 }
 
-fn live_jobs() -> MutexGuard<'static, HashMap<Uuid, LiveJob>> {
-    LIVE_JOBS.lock().unwrap_or_else(|error| error.into_inner())
+fn live_jobs(installs: &Installs) -> MutexGuard<'_, HashMap<Uuid, LiveJob>> {
+    installs
+        .live_jobs
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
 }
 
 fn is_active(status: InstallJobStatus) -> bool {
     matches!(status, InstallJobStatus::Queued | InstallJobStatus::Running)
 }
 
-fn set_controls(snapshot: &mut InstallJobSnapshot, id: Uuid, active: bool) {
-    let (paused, canceling, controllable) = super::control::snapshot(id);
+fn set_controls(
+    snapshot: &mut InstallJobSnapshot,
+    id: Uuid,
+    active: bool,
+    installs: &Installs,
+) {
+    let (paused, canceling, controllable) =
+        super::control::snapshot(id, installs);
     snapshot.paused = active && paused;
     snapshot.canceling = active && canceling;
     snapshot.can_pause = active && controllable;
@@ -141,8 +151,8 @@ fn set_controls(snapshot: &mut InstallJobSnapshot, id: Uuid, active: bool) {
 }
 
 /// Keeps the live progress of a job in step with what was just stored for it.
-fn track_live_job(record: &InstallJobRecord) {
-    let mut jobs = live_jobs();
+fn track_live_job(record: &InstallJobRecord, installs: &Installs) {
+    let mut jobs = live_jobs(installs);
     if !is_active(record.status) {
         jobs.remove(&record.id);
         return;
@@ -161,13 +171,14 @@ fn track_live_job(record: &InstallJobRecord) {
 pub(super) fn update_live_progress(
     id: Uuid,
     state: &InstallJobState,
+    installs: &Installs,
 ) -> Option<InstallJobSnapshot> {
-    let mut jobs = live_jobs();
+    let mut jobs = live_jobs(installs);
     let job = jobs.get_mut(&id)?;
     let mut snapshot = job.snapshot.clone()?;
     job.progress = state.progress.clone();
     job.apply_progress(&mut snapshot);
-    set_controls(&mut snapshot, id, true);
+    set_controls(&mut snapshot, id, true, installs);
     job.snapshot = Some(snapshot.clone());
     Some(snapshot)
 }
@@ -176,9 +187,10 @@ pub(super) fn update_live_progress(
 async fn get_written(
     id: Uuid,
     pool: &SqlitePool,
+    installs: &Installs,
 ) -> crate::Result<InstallJobRecord> {
     let record = get_required(id, pool).await?;
-    track_live_job(&record);
+    track_live_job(&record, installs);
     Ok(record)
 }
 
@@ -435,10 +447,11 @@ pub async fn list_active_for_instance(
         .collect())
 }
 
-pub async fn update_state(
+pub(crate) async fn update_state(
     id: Uuid,
     state: &InstallJobState,
     pool: &SqlitePool,
+    installs: &Installs,
 ) -> crate::Result<InstallJobRecord> {
     let now = Utc::now();
     let json = serde_json::to_string(state)?;
@@ -469,14 +482,15 @@ pub async fn update_state(
         )));
     }
 
-    get_written(id, pool).await
+    get_written(id, pool, installs).await
 }
 
-pub async fn update_status(
+pub(crate) async fn update_status(
     id: Uuid,
     status: InstallJobStatus,
     state: &InstallJobState,
     pool: &SqlitePool,
+    installs: &Installs,
 ) -> crate::Result<InstallJobRecord> {
     let now = Utc::now();
     let finished = status.is_finished().then_some(now.timestamp());
@@ -504,18 +518,19 @@ pub async fn update_status(
 
     release_request(id, status, pool).await?;
     if status.is_finished() {
-        notify_completion(id);
+        notify_completion(id, installs);
     }
 
-    get_written(id, pool).await
+    get_written(id, pool, installs).await
 }
 
-pub async fn update_status_if(
+pub(crate) async fn update_status_if(
     id: Uuid,
     expected_status: InstallJobStatus,
     status: InstallJobStatus,
     state: &InstallJobState,
     pool: &SqlitePool,
+    installs: &Installs,
 ) -> crate::Result<Option<InstallJobRecord>> {
     let now = Utc::now();
     let finished = status.is_finished().then_some(now.timestamp());
@@ -549,17 +564,18 @@ pub async fn update_status_if(
 
     release_request(id, status, pool).await?;
     if status.is_finished() {
-        notify_completion(id);
+        notify_completion(id, installs);
     }
 
-    get_written(id, pool).await.map(Some)
+    get_written(id, pool, installs).await.map(Some)
 }
 
-pub async fn finish_active(
+pub(crate) async fn finish_active(
     id: Uuid,
     status: InstallJobStatus,
     state: &InstallJobState,
     pool: &SqlitePool,
+    installs: &Installs,
 ) -> crate::Result<Option<InstallJobRecord>> {
     let now = Utc::now();
     let finished = now.timestamp();
@@ -596,16 +612,17 @@ pub async fn finish_active(
 
     release_request(id, status, pool).await?;
     if status.is_finished() {
-        notify_completion(id);
+        notify_completion(id, installs);
     }
 
-    get_written(id, pool).await.map(Some)
+    get_written(id, pool, installs).await.map(Some)
 }
 
-pub async fn complete_success(
+pub(crate) async fn complete_success(
     id: Uuid,
     state: &InstallJobState,
     pool: &SqlitePool,
+    installs: &Installs,
 ) -> crate::Result<Option<InstallJobRecord>> {
     let Some(instance_id) = instance_id(state) else {
         bail!(ErrorKind::InputError(
@@ -663,9 +680,9 @@ pub async fn complete_success(
 
     transaction.commit().await?;
     release_request(id, InstallJobStatus::Succeeded, pool).await?;
-    notify_completion(id);
+    notify_completion(id, installs);
     crate::api::instance::queue_game_locale_index();
-    get_written(id, pool).await.map(Some)
+    get_written(id, pool, installs).await.map(Some)
 }
 
 pub async fn dismiss(id: Uuid, pool: &SqlitePool) -> crate::Result<()> {

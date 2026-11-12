@@ -1073,7 +1073,7 @@ pub async fn launch_minecraft(
                 job.job_id
             )),
         )?;
-        crate::install::runner::wait_for_job(job_id, &state.pool)
+        crate::install::runner::wait_for_job(job_id, state)
             .await
             .context("repairing missing runtime files")?;
         runtime_lease = state.content_store.runtime_cache_lock.read().await;
