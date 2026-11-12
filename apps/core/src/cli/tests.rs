@@ -1,5 +1,6 @@
 //! Argument parsing, and one round trip per command group through a real local socket.
 
+use contracts::core::{Channel, CoreRole, Schedule, Weekday};
 use std::sync::Arc;
 
 use clap::{CommandFactory, Parser};
@@ -14,11 +15,8 @@ use crate::{
     api::{self, CoreState},
     daemon::{accounts, folders, paths::Paths},
     db,
-    servers::{
-        Servers,
-        restarts::{Schedule, Weekday},
-    },
-    update::{Updater, release::Channel},
+    servers::Servers,
+    update::Updater,
 };
 
 fn parse(args: &str) -> Result<Cli, clap::Error> {
@@ -337,7 +335,7 @@ async fn access_commands_round_trip() {
         AccessCommand::Role {
             server: "survival".into(),
             user: "friend".into(),
-            role: api::access::Role::Editor,
+            role: CoreRole::Editor,
         },
     )
     .await

@@ -1,39 +1,30 @@
 //! `POST /servers/{id}/console`: send one command to a server's console and learn whether Core
-//! passed it on. [`SendCommand`] in, no body out. Editors and up. The console socket takes
-//! commands too, but answers none of them; this route reports why one was refused.
+//! passed it on. The console socket takes commands too, but answers none of them; this route
+//! reports why one was refused.
 
 use std::sync::Arc;
 
-use axum::{
-    Json,
-    extract::{Path, State},
-    http::StatusCode,
+use axum::extract::State;
+use contracts::{
+    ApiError, Empty, ErrorCode,
+    core::{Action, SendCommand},
+    server::Req,
 };
-use contracts::{ApiError, ErrorCode};
-use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
-use super::{CoreState, activity::Action};
+use super::CoreState;
 use crate::access::{Caller, Level, activity};
 
 /// The longest command Core passes on.
 const MAX_COMMAND: usize = 4096;
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-pub struct SendCommand {
-    /// One line, as typed into the server console, such as `say hello`.
-    pub command: String,
-}
-
-/// `POST /servers/{id}/console`.
 pub async fn send(
     caller: Caller,
     State(state): State<Arc<CoreState>>,
-    Path(id): Path<String>,
-    Json(request): Json<SendCommand>,
-) -> Result<StatusCode, ApiError> {
+    Req { params, body, .. }: Req<SendCommand>,
+) -> Result<Empty, ApiError> {
+    let id = params.id;
     caller.require(&state.db, &id, Level::Editor).await?;
-    let command = request.command;
+    let command = body.command;
     // A line break would run a second command the activity log never shows.
     if command.trim().is_empty()
         || command.len() > MAX_COMMAND
@@ -52,5 +43,5 @@ pub async fn send(
         Action::ConsoleCommand { command },
     )
     .await;
-    Ok(StatusCode::NO_CONTENT)
+    Ok(Empty)
 }

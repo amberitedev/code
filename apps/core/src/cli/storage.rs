@@ -1,11 +1,12 @@
 //! `copal storage`: this Core's storage for shared files, and whether it offers it to other
 //! people's shares or runs privately.
 
-use axum::http::Method;
 use color_eyre::eyre::Result;
+use contracts::core::{
+    ChangeStorage, GetStorage, StorageSettings, StorageStatus,
+};
 
-use super::{Client, Output};
-use crate::api::storage::{StorageSettings, StorageStatus};
+use super::{Client, Output, call::call};
 
 const GIB: u64 = 1024 * 1024 * 1024;
 
@@ -34,15 +35,13 @@ pub async fn run(client: &Client, args: StorageArgs) -> Result<Output> {
         cap: args.cap.map(gib),
         egress_cap: args.egress.map(gib),
     };
-    let status: StorageStatus = if change.enabled.is_none()
+    let status = if change.enabled.is_none()
         && change.cap.is_none()
         && change.egress_cap.is_none()
     {
-        client.get("/storage").await?
+        call::<GetStorage>(client, &(), &(), ()).await?
     } else {
-        client
-            .call(Method::PATCH, "/storage", Some(&change))
-            .await?
+        call::<ChangeStorage>(client, &(), &(), change).await?
     };
     Ok(Output::new(describe(&status), &status))
 }

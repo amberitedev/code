@@ -87,6 +87,19 @@ impl Client {
             Some(body) => Bytes::from(serde_json::to_vec(body)?),
             None => Bytes::new(),
         };
+        let body = self.send(method, path, body).await?;
+        let body: &[u8] = if body.is_empty() { b"null" } else { &body };
+        serde_json::from_slice(body)
+            .wrap_err("Core answered something this CLI cannot read")
+    }
+
+    /// Send a JSON request and return the body of a successful answer.
+    pub(super) async fn send(
+        &self,
+        method: Method,
+        path: &str,
+        body: Bytes,
+    ) -> Result<Bytes> {
         let mut sender = hyper::client::conn::http1::handshake(TokioIo::new(
             self.connect().await?,
         ))
@@ -123,9 +136,7 @@ impl Client {
                 ),
             }
         }
-        let body: &[u8] = if body.is_empty() { b"null" } else { &body };
-        serde_json::from_slice(body)
-            .wrap_err("Core answered something this CLI cannot read")
+        Ok(body)
     }
 
     /// A server's console socket, past its greeting. It sends `log` events as JSON text and

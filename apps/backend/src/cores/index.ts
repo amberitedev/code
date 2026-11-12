@@ -439,7 +439,7 @@ function parseAccessGrant(raw: unknown): AccessGrant {
 		user: stringField(body, 'user', 64),
 		server_id: stringField(body, 'server_id', 64),
 		server_name: stringField(body, 'server_name', MAX_SERVER_NAME),
-		role: stringField(body, 'role', 16),
+		role: body.role === 'viewer' || body.role === 'editor' ? body.role : invalid('Invalid role'),
 	}
 }
 

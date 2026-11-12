@@ -15,8 +15,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use contracts::core::FailedTrial;
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
 use crate::{daemon::paths::Paths, util::if_present};
 
@@ -39,26 +39,14 @@ pub struct State {
     pub failed_reason: Option<FailedTrial>,
 }
 
-/// How a version on trial failed, as the launcher saw it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "snake_case")]
-pub enum FailedTrial {
-    /// The OS would not run its binary.
-    NotStarted,
-    /// It ran, and exited before it answered a request.
-    Exited,
-    /// It ran, and did not answer a request within a minute.
-    NoAnswer,
-}
-
-impl FailedTrial {
-    /// What happened, for a person, after "Copal <version>".
-    pub fn describe(self) -> &'static str {
-        match self {
-            Self::NotStarted => "never started: this machine would not run it",
-            Self::Exited => "started, then exited before it answered",
-            Self::NoAnswer => "started, but did not answer within a minute",
+/// What happened, for a person, after "Copal <version>".
+pub fn describe_failure(trial: FailedTrial) -> &'static str {
+    match trial {
+        FailedTrial::NotStarted => {
+            "never started: this machine would not run it"
         }
+        FailedTrial::Exited => "started, then exited before it answered",
+        FailedTrial::NoAnswer => "started, but did not answer within a minute",
     }
 }
 

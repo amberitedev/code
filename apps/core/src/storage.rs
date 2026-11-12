@@ -9,6 +9,7 @@
 //! In development the store runs as the account running Core. Running it as an OS account of its
 //! own, with a folder Core cannot read, is the install-time follow-up the design asks for.
 
+use contracts::core::{StorageSettings, StorageStatus};
 use std::{
     collections::HashSet,
     net::IpAddr,
@@ -44,10 +45,7 @@ use tracing::{info, warn};
 
 use crate::{
     access::{owed::OwedCall, sync},
-    api::{
-        internal,
-        storage::{StorageSettings, StorageStatus},
-    },
+    api::internal,
     backups::space,
     daemon::paths::Paths,
 };

@@ -3,20 +3,16 @@
 //! and never on the token.
 
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use contracts::{ApiError, ErrorCode};
+use contracts::{
+    ApiError, ErrorCode,
+    core::{Action, CoreSession, CoreUser, SignedIn},
+};
 use ring::rand::{SecureRandom, SystemRandom};
 use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
 
 use super::{Caller, activity, keys::Keys, tickets};
-use crate::{
-    api::{
-        activity::Action,
-        internal,
-        sessions::{Session, SignedIn},
-    },
-    db,
-};
+use crate::{api::internal, db};
 
 /// A session ends this long after it was last used.
 pub const IDLE_S: i64 = 30 * 86_400;
@@ -175,7 +171,7 @@ type Row = (
     i64,
 );
 
-fn session(row: Row, current: Option<&str>) -> Session {
+fn session(row: Row, current: Option<&str>) -> CoreSession {
     let (
         id,
         user_id,
@@ -186,10 +182,10 @@ fn session(row: Row, current: Option<&str>) -> Session {
         last_used_at,
         expires_at,
     ) = row;
-    Session {
+    CoreSession {
         current: current == Some(id.as_str()),
         id,
-        user: crate::api::access::User {
+        user: CoreUser {
             name: name.unwrap_or_else(|| user_id.clone()),
             id: user_id,
             avatar_url,
@@ -206,7 +202,7 @@ pub async fn get(
     db: &SqlitePool,
     id: &str,
     current: Option<&str>,
-) -> sqlx::Result<Option<Session>> {
+) -> sqlx::Result<Option<CoreSession>> {
     let row: Option<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "{SESSION} WHERE s.id = ?"
     )))
@@ -222,7 +218,7 @@ pub async fn list(
     user: Option<&str>,
     current: Option<&str>,
     now: i64,
-) -> sqlx::Result<Vec<Session>> {
+) -> sqlx::Result<Vec<CoreSession>> {
     let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "{SESSION} WHERE (?1 IS NULL OR s.user_id = ?1) AND s.expires_at > ?2 \
          AND s.last_used_at > ?2 - ?3 ORDER BY s.user_id, s.created_at"

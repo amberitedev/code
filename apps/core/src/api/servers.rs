@@ -18,12 +18,12 @@ use axum::{
     http::{HeaderMap, StatusCode, header::HOST},
 };
 use chrono::{DateTime, Utc};
-use contracts::{ApiError, ErrorCode};
+use contracts::{ApiError, ErrorCode, core::Action};
 use modrinth_content_management::VersionType;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{CoreState, activity::Action, content::LinkedPackState, internal};
+use super::{CoreState, content::LinkedPackState, internal};
 use crate::{
     access::{Caller, Dangerous, Level, activity},
     installs::ModLoader,

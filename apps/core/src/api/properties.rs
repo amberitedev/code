@@ -8,10 +8,10 @@ use axum::{
     Json,
     extract::{Path, State},
 };
-use contracts::ApiError;
+use contracts::{ApiError, core::Action};
 use serde::Deserialize;
 
-use super::{CoreState, activity::Action, content::world, internal};
+use super::{CoreState, content::world, internal};
 use crate::{
     access::{Caller, Level, activity},
     state::servers::adapters::filesystem::properties,

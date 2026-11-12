@@ -15,11 +15,14 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
 };
-use contracts::{ApiError, ErrorCode};
+use contracts::{
+    ApiError, Empty, ErrorCode,
+    core::{Action, SetJava},
+    server::Req,
+};
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
-use super::{CoreState, activity::Action, content::world, internal};
+use super::{CoreState, content::world, internal};
 use crate::{
     access::{Caller, Level, activity},
     installs::java,
@@ -110,13 +113,6 @@ pub struct PatchRuntimeOptions {
     pub jre_vendor: Option<JreVendor>,
     #[serde(default)]
     pub startup_command: Option<String>,
-}
-
-/// Body of `PUT /servers/{id}/java`: a custom Java binary for this server, or `null` for the Java
-/// Core manages. An advanced override; it runs as `copal-servers`.
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-pub struct JavaPath {
-    pub path: Option<String>,
 }
 
 /// Java majors Core installs.
@@ -283,9 +279,9 @@ pub async fn patch_v1(
 pub async fn set_java_path(
     caller: Caller,
     State(state): State<Arc<CoreState>>,
-    Path(id): Path<String>,
-    Json(body): Json<JavaPath>,
-) -> Result<StatusCode, ApiError> {
+    Req { params, body, .. }: Req<SetJava>,
+) -> Result<Empty, ApiError> {
+    let id = params.id;
     caller.require(&state.db, &id, Level::Editor).await?;
     let server = server_rows::get(&state.db, &id)
         .await
@@ -309,5 +305,5 @@ pub async fn set_java_path(
     .await
     .map_err(internal)?;
     activity::log(&state.db, &caller, Some(&id), Action::SettingsChanged).await;
-    Ok(StatusCode::NO_CONTENT)
+    Ok(Empty)
 }

@@ -25,15 +25,13 @@ use axum::{
     extract::{Multipart, Path, Query, State, multipart::Field},
     http::{StatusCode, header::CONTENT_TYPE},
 };
-use contracts::{ApiError, ErrorCode};
+use contracts::{ApiError, ErrorCode, core::Action};
 use modrinth_content_management::{ContentType, VersionType};
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 use ts_rs::TS;
 
-use super::{
-    CoreState, activity::Action, internal, properties::PropertiesFields,
-};
+use super::{CoreState, internal, properties::PropertiesFields};
 use crate::{
     access::{Caller, Level, activity},
     installs::{ModLoader, shared::SharedDirs},

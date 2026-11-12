@@ -26,14 +26,13 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use chrono::{DateTime, Utc};
-use contracts::{ApiError, ErrorCode};
+use contracts::{ApiError, ErrorCode, core::Action};
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 
 use super::{
     CoreState,
-    activity::Action,
     backups::{DownloadQuery, DownloadToken, expired_link},
     content::{stage_field, world},
     internal,

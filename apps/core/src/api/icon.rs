@@ -27,7 +27,7 @@ use axum::{
     http::{StatusCode, header},
     response::IntoResponse,
 };
-use contracts::{ApiError, ErrorCode};
+use contracts::{ApiError, ErrorCode, core::Action};
 use image::{
     DynamicImage, ImageDecoder, ImageFormat, ImageReader, imageops::FilterType,
     metadata::Orientation,
@@ -38,7 +38,6 @@ use sha2::{Digest, Sha256};
 
 use super::{
     CoreState,
-    activity::Action,
     files::{blocking, changing, folder, locked},
     internal,
 };

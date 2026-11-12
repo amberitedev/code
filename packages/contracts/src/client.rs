@@ -127,7 +127,7 @@ fn request<E: Endpoint>(
 
 /// `base` and the Endpoint's path with each `{name}` (or `{*name}`, which may hold slashes) filled
 /// from the matching field of `params`, percent-encoded.
-pub(crate) fn url<E: Endpoint>(
+pub fn url<E: Endpoint>(
     base: &str,
     params: &E::Params,
 ) -> Result<String, CallError> {

@@ -11,12 +11,11 @@ use axum::{
     },
     response::{IntoResponse, Response},
 };
-use contracts::{ApiError, ErrorCode};
+use contracts::{ApiError, ErrorCode, core::Action};
 use tokio::sync::{broadcast, mpsc};
 
 use super::{
     CoreState,
-    activity::Action,
     servers::{ServerPowerState, power_state},
 };
 use crate::{

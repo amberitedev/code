@@ -1,6 +1,7 @@
+import type { Performance, Restarts } from '@amberite/contracts'
+
 import { AbstractModule } from '../../../core/abstract-module'
 import { coreNodeUrl } from '../../../utils/node-url'
-import type { Copal } from '../../copal/types'
 import type { Archon } from '../types'
 
 export class ArchonServersV1Module extends AbstractModule {
@@ -35,8 +36,8 @@ export class ArchonServersV1Module extends AbstractModule {
 	// A Core's own routes are unversioned (`/servers/:id/...`), so `servers` goes in the version slot.
 
 	/** A Core server's memory, JVM flags, and restart settings. */
-	public async getPerformance(serverId: string): Promise<Copal.Performance> {
-		return this.client.request<Copal.Performance>(`/${serverId}/performance`, {
+	public async getPerformance(serverId: string): Promise<Performance> {
+		return this.client.request<Performance>(`/${serverId}/performance`, {
 			api: 'archon',
 			version: 'servers',
 			method: 'GET',
@@ -44,8 +45,8 @@ export class ArchonServersV1Module extends AbstractModule {
 	}
 
 	/** Changes when a Core server restarts on its own. */
-	public async setRestarts(serverId: string, restarts: Copal.Restarts): Promise<Copal.Performance> {
-		return this.client.request<Copal.Performance>(`/${serverId}/restarts`, {
+	public async setRestarts(serverId: string, restarts: Restarts): Promise<Performance> {
+		return this.client.request<Performance>(`/${serverId}/restarts`, {
 			api: 'archon',
 			version: 'servers',
 			method: 'PUT',

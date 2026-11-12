@@ -10,7 +10,7 @@ export interface SelfHostedConfig extends FeatureConfig {
 /**
  * Routes private accounts and sharing without sending their sessions to public content services.
  * Every other request, including those to a Core, goes without an account token: a Core gets
- * this device's own session for it from the platform instead (see `copal.access_v1`).
+ * this device's own session for it from the platform instead (see `archon.cores_v1.signIn`).
  */
 export class SelfHostedFeature extends AbstractFeature {
 	declare protected config: SelfHostedConfig

@@ -183,7 +183,7 @@ impl Core {
                 request.header("authorization", format!("Bearer {token}"));
         }
         if let Some(ticket) = ticket {
-            request = request.header(access::TICKET_HEADER, ticket);
+            request = request.header(contracts::core::TICKET_HEADER, ticket);
         }
         let request = match body {
             Some(body) => request

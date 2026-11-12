@@ -7,7 +7,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Auth, Empty, Endpoint, Json, Method, Upgrade, tickets::PublicKeys,
+    Auth, Empty, Endpoint, Json, Method, Upgrade, core::CoreRole,
+    tickets::PublicKeys,
 };
 
 /// Body of [`RequestSignInCode`].
@@ -140,8 +141,8 @@ pub struct AccessGrant {
     pub user: String,
     pub server_id: String,
     pub server_name: String,
-    /// `viewer` or `editor`, shown in the invite.
-    pub role: String,
+    /// Shown in the invite.
+    pub role: CoreRole,
 }
 
 /// Who an invite went to.

@@ -2228,16 +2228,19 @@ dependencies = [
  "ariadne",
  "axum",
  "bytes",
+ "clap 4.6.7",
  "contracts",
  "http-body-util",
  "reqwest 0.13.5",
  "rustls",
  "serde",
  "serde_json",
+ "sqlx",
  "thiserror 2.0.21",
  "tokio",
  "tower",
  "ts-rs",
+ "uuid 1.28.0",
 ]
 
 [[package]]

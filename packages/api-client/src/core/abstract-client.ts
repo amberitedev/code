@@ -9,7 +9,7 @@ import { appendRequestParams } from '../utils/fetch'
 import type { AbstractFeature } from './abstract-feature'
 import type { AbstractModule } from './abstract-module'
 import type { AbstractSyncClient } from './abstract-sync'
-import { CoreSessionFeature } from '../features/core-session'
+import { CoreSessionFeature, coreSessionTransport, protocolChecked } from '../features/core-session'
 import { SelfHostedFeature } from '../features/self-hosted'
 import { AbstractUploadClient } from './abstract-upload-client'
 import type { AbstractWebSocketClient } from './abstract-websocket'
@@ -84,18 +84,23 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 		return (this._local = new ContractClient(transport))
 	}
 
-	/** A Core's routes: engine and Core routes. */
+	/**
+	 * A listed Core's routes: engine and Core routes. A call throws `ProtocolMismatch` when the Core
+	 * speaks another protocol version.
+	 */
 	public core(coreId: string): ContractClient {
 		const known = this._cores.get(coreId)
 		if (known) return known
-		const transport = this.config.coreTransport
-		if (!transport) throw new Error('This client cannot reach Cores')
-		const client = new ContractClient(transport(coreId))
+		const transport =
+			this.config.coreTransport?.(coreId) ??
+			coreSessionTransport(this, coreId, (input, init) => this.platformFetch(input, init))
+		const client = new ContractClient(
+			protocolChecked(transport, async () => (await this.archon.cores_v1.core(coreId)).owned),
+		)
 		this._cores.set(coreId, client)
 		return client
 	}
 
-	public readonly copal!: InferredClientModules['copal']
 	public readonly kyros!: InferredClientModules['kyros']
 	public readonly iso3166!: InferredClientModules['iso3166']
 	public readonly mclogs!: InferredClientModules['mclogs']

@@ -26,16 +26,17 @@ use axum::{
     extract::FromRequestParts,
     http::{HeaderMap, header::AUTHORIZATION, request::Parts},
 };
-use contracts::{ApiError, ErrorCode};
+use contracts::{
+    ApiError, ErrorCode,
+    core::{CoreRole, TICKET_HEADER},
+};
 use tokio::sync::{Notify, broadcast};
 
 use crate::{
-    api::{CoreState, access::Role, internal},
+    api::{CoreState, internal},
     db,
 };
 
-/// The header a dangerous action carries its fresh ticket in.
-pub const TICKET_HEADER: &str = "x-amberite-ticket";
 /// Live console streams one session may hold.
 const STREAMS_PER_SESSION: usize = 4;
 const SIGN_INS_PER_MINUTE: u32 = 10;
@@ -140,11 +141,11 @@ pub enum Level {
     Owner,
 }
 
-impl From<Role> for Level {
-    fn from(role: Role) -> Self {
+impl From<CoreRole> for Level {
+    fn from(role: CoreRole) -> Self {
         match role {
-            Role::Viewer => Self::Viewer,
-            Role::Editor => Self::Editor,
+            CoreRole::Viewer => Self::Viewer,
+            CoreRole::Editor => Self::Editor,
         }
     }
 }
@@ -199,7 +200,7 @@ impl Caller {
         if *owner {
             return Ok(Some(Level::Owner));
         }
-        let role: Option<Role> = sqlx::query_scalar(
+        let role: Option<CoreRole> = sqlx::query_scalar(
             "SELECT role FROM access WHERE server_id = ? AND user_id = ?",
         )
         .bind(server_id)

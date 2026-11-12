@@ -1,3 +1,5 @@
+import { core } from '@amberite/contracts'
+
 import { AbstractModule } from '../../../core/abstract-module'
 import { actionLog, onlyForOwner } from '../../copal/access/archon'
 import type { Archon } from '../types'
@@ -17,17 +19,18 @@ export class ArchonActionsV1Module extends AbstractModule {
 	): Promise<Archon.Actions.v1.ActionLogResponse> {
 		if (this.client.selfHostedHosting) {
 			// A Core's activity log, the owner's only. Its members name the users it mentions.
-			const access = this.client.copal.access_v1
-			const coreId = (await this.client.archon.cores_v1.coreOf(serverId)).id
+			const access = this.client.core((await this.client.archon.cores_v1.coreOf(serverId)).id)
 			const [page, members] = await Promise.all([
 				access
-					.activity(coreId, {
-						server_id: serverId,
-						limit: options.limit,
-						before: options.offset || undefined,
+					.call(core.ListActivity, {
+						query: {
+							server_id: serverId,
+							limit: options.limit,
+							before: options.offset || undefined,
+						},
 					})
 					.catch(onlyForOwner),
-				access.serverAccess(coreId, serverId).catch(onlyForOwner),
+				access.call(core.ListMembers, { params: { id: serverId } }).catch(onlyForOwner),
 			])
 			return actionLog(page ?? { entries: [], next_before: null }, members, options)
 		}

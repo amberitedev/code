@@ -1,10 +1,10 @@
-//! The HTTP API: Axum routes, one file per resource, each with typed request and response structs.
-//! The same router serves HTTPS and the local socket (see `access::local`).
+//! The HTTP API: Axum routes, one file per resource. The same router serves HTTPS and the local
+//! socket (see `access::local`).
 //!
-//! Hosting routes match the `Archon.*` shapes in
-//! `packages/api-client/src/modules/archon/types.ts`, which the App already sends. Routes only
-//! Amberite has (access, sessions, activity, backend sync) generate their TypeScript from these
-//! structs with `ts-rs`; see `typescript`.
+//! Routes only a Core has are `contracts::core` Endpoints. Hosting routes match the `Archon.*`
+//! shapes in `packages/api-client/src/modules/archon/types.ts`, which the App already sends; the
+//! share, diff, history and edited-file types among them generate their TypeScript here (see
+//! `typescript`).
 
 pub mod access;
 pub mod activity;
@@ -38,11 +38,12 @@ use std::{sync::Arc, time::Duration};
 use axum::{
     Router,
     extract::DefaultBodyLimit,
+    handler::Handler,
     http::StatusCode,
     routing::{any, delete, get, patch, post, put},
 };
 use color_eyre::eyre::{Result, eyre};
-use contracts::{ApiError, ErrorCode};
+use contracts::{ApiError, Endpoint, ErrorCode, core::*, server::route};
 use hyper_util::{
     rt::{TokioExecutor, TokioIo, TokioTimer},
     server::conn::auto::Builder,
@@ -77,39 +78,58 @@ pub struct CoreState {
     pub storage: Arc<crate::storage::Storage>,
 }
 
+/// Mounting an Endpoint's handler at its method and path.
+trait Endpoints {
+    fn endpoint<E: Endpoint, H: Handler<T, Arc<CoreState>>, T: 'static>(
+        self,
+        handler: H,
+    ) -> Self;
+}
+
+impl Endpoints for Router<Arc<CoreState>> {
+    fn endpoint<E: Endpoint, H: Handler<T, Arc<CoreState>>, T: 'static>(
+        self,
+        handler: H,
+    ) -> Self {
+        let (path, method) = route::<E, _, _, _>(handler);
+        self.route(path, method)
+    }
+}
+
 /// Every route. Each one checks its caller itself (see `access`); the network listener adds its
 /// own checks on top (see `network::tls`).
 pub fn router(state: Arc<CoreState>) -> Router {
     Router::new()
-        .route("/health", get(health::get))
-        .route("/sessions", post(sessions::sign_in).get(sessions::list))
-        .route("/sessions/current", delete(sessions::sign_out))
-        .route("/sessions/{id}", delete(sessions::revoke))
-        .route("/access/me", get(access::me))
-        .route(
-            "/servers/{id}/access",
-            get(access::list).post(access::invite),
-        )
-        .route(
-            "/servers/{id}/access/{user_id}",
-            delete(access::remove).patch(access::change_role),
-        )
-        .route("/activity", get(activity::list))
-        .route("/pairing", delete(pairing::remove).get(pairing::get))
-        .route("/pairing/code", post(pairing::new_code))
-        .route("/update", get(update::get).patch(update::settings))
-        .route("/update/check", post(update::check))
-        .route("/update/rollback", post(update::rollback))
-        .route("/storage", get(storage::get).patch(storage::settings))
-        .route("/eula", get(eula::get).post(eula::post))
-        .route("/logs", get(logs::get))
-        .route("/servers/{id}/performance", get(performance::get))
-        .route("/servers/{id}/memory", put(performance::set_memory))
-        .route("/servers/{id}/restarts", put(performance::set_restarts))
-        .route("/servers/{id}/console", post(console::send))
-        .route("/servers/{id}/flags", put(performance::set_flags))
-        .route("/servers/{id}/insight", get(insight::get))
-        .route("/machine", get(insight::machine))
+        .endpoint::<CheckHealth, _, _>(health::get)
+        .endpoint::<SignIn, _, _>(sessions::sign_in)
+        .endpoint::<ListSessions, _, _>(sessions::list)
+        .endpoint::<SignOut, _, _>(sessions::sign_out)
+        .endpoint::<RevokeSession, _, _>(sessions::revoke)
+        .endpoint::<GetMyAccess, _, _>(access::me)
+        .endpoint::<ListMembers, _, _>(access::list)
+        .endpoint::<InviteMember, _, _>(access::invite)
+        .endpoint::<ChangeRole, _, _>(access::change_role)
+        .endpoint::<RemoveMember, _, _>(access::remove)
+        .endpoint::<ListActivity, _, _>(activity::list)
+        .endpoint::<GetPairing, _, _>(pairing::get)
+        .endpoint::<RequestPairingCode, _, _>(pairing::new_code)
+        .endpoint::<Unpair, _, _>(pairing::remove)
+        .endpoint::<GetUpdate, _, _>(update::get)
+        .endpoint::<ChangeUpdateSettings, _, _>(update::settings)
+        .endpoint::<CheckForUpdate, _, _>(update::check)
+        .endpoint::<RollBack, _, _>(update::rollback)
+        .endpoint::<GetStorage, _, _>(storage::get)
+        .endpoint::<ChangeStorage, _, _>(storage::settings)
+        .endpoint::<GetEula, _, _>(eula::get)
+        .endpoint::<AcceptEula, _, _>(eula::post)
+        .endpoint::<GetLogs, _, _>(logs::get)
+        .endpoint::<GetPerformance, _, _>(performance::get)
+        .endpoint::<SetMemory, _, _>(performance::set_memory)
+        .endpoint::<SetRestarts, _, _>(performance::set_restarts)
+        .endpoint::<SendCommand, _, _>(console::send)
+        .endpoint::<SetFlags, _, _>(performance::set_flags)
+        .endpoint::<GetInsight, _, _>(insight::get)
+        .endpoint::<GetMachine, _, _>(insight::machine)
         .route("/modrinth/v0/servers", get(servers::list))
         .route("/modrinth/v0/servers/{id}", get(servers::get))
         .route("/modrinth/v0/servers/{id}/ws", get(servers::ws_auth))
@@ -134,7 +154,7 @@ pub fn router(state: Arc<CoreState>) -> Router {
             "/v1/servers/{id}/worlds/{wid}/options/startup",
             get(startup::get_v1).patch(startup::patch_v1),
         )
-        .route("/servers/{id}/java", put(startup::set_java_path))
+        .endpoint::<SetJava, _, _>(startup::set_java_path)
         .route(
             "/v1/servers/{id}/worlds/{wid}/backups-queue",
             get(backups::list).post(backups::create),
@@ -234,7 +254,7 @@ pub fn router(state: Arc<CoreState>) -> Router {
         ))
         // Starting a server answers once Java runs, and an install or update once it is done.
         .route("/modrinth/v0/servers/{id}/power", post(servers::power))
-        .route("/update/apply", post(update::apply))
+        .endpoint::<InstallUpdate, _, _>(update::apply)
         // A push uploads the server's files and waits for the store to confirm them.
         .route(
             "/v1/servers/{id}/worlds/{wid}/content/share",
@@ -245,7 +265,7 @@ pub fn router(state: Arc<CoreState>) -> Router {
             "/v1/servers/{id}/worlds/{wid}/content/share/history/{version}/restore",
             post(share::restore),
         )
-        .route("/servers/{id}/reachability", post(insight::check))
+        .endpoint::<CheckReachability, _, _>(insight::check)
         .route(
             "/modrinth/v0/servers/{id}/reinstall",
             post(servers::reinstall),

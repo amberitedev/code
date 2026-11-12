@@ -32,7 +32,7 @@ test('Core re-invites replace notifications and deliver them even when access al
 		const invite = {
 			server_id: 'server',
 			server_name: 'Server',
-			role: 'moderator',
+			role: 'editor',
 			user: 'friend',
 		}
 		await backend.db
@@ -40,6 +40,7 @@ test('Core re-invites replace notifications and deliver them even when access al
 			.bind('expired-core', Date.now() - 1000)
 			.run()
 		assert.equal((await call('POST', invite, 'mra_owner')).status, 401)
+		assert.equal((await call('POST', { ...invite, role: 'moderator' })).status, 400)
 		assert.equal((await call('GET', undefined, 'amc_test', '/cores')).status, 401)
 		await backend.db
 			.prepare(

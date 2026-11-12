@@ -9,21 +9,16 @@ use futures::StreamExt;
 use serde::Deserialize;
 use tokio_tungstenite::tungstenite::Message;
 
-use super::{Client, Output, Switch, on_off};
-use crate::{
-    api::{
-        console::SendCommand,
-        eula::Eula,
-        insight::{Machine, Reach, ServerInsight},
-        performance::{JvmFlags, Memory, Performance},
-        servers::{
-            CreateServerRequest, CreateServerResponse, PowerAction,
-            PowerRequest, ReinstallRequest, Server, ServerGetResponse,
-            ServerPowerState,
-        },
-        startup::JavaPath,
-    },
-    servers::restarts::{Schedule, TimeOfDay, Weekday},
+use contracts::core::{
+    AcceptEula, GetInsight, GetMachine, GetPerformance, JavaPath, JvmFlags,
+    Memory, Reach, Schedule, SendCommand, ServerId, ServerInsight, SetFlags,
+    SetJava, SetMemory, SetRestarts, TimeOfDay, Weekday,
+};
+
+use super::{Client, Output, Switch, call::call, on_off};
+use crate::api::servers::{
+    CreateServerRequest, CreateServerResponse, PowerAction, PowerRequest,
+    ReinstallRequest, Server, ServerGetResponse, ServerPowerState,
 };
 
 #[derive(Debug, Subcommand)]
@@ -165,7 +160,7 @@ pub async fn run(client: &Client, command: ServersCommand) -> Result<Output> {
                 ));
             }
             if accept_eula {
-                client.post::<Eula>("/eula", &()).await?;
+                call::<AcceptEula>(client, &(), &(), ()).await?;
             }
             Ok(Output::new(
                 format!(
@@ -215,7 +210,7 @@ pub async fn run(client: &Client, command: ServersCommand) -> Result<Output> {
             send(client, &server, &command).await?;
             Ok(Output::new(
                 format!("Sent to {}: {command}", server.name),
-                &SendCommand { command },
+                &contracts::core::ConsoleCommand { command },
             ))
         }
         ServersCommand::Console(ConsoleCommand::Attach { .. }) => {
@@ -223,9 +218,8 @@ pub async fn run(client: &Client, command: ServersCommand) -> Result<Output> {
         }
         ServersCommand::Info { server } => {
             let server = find(client, &server).await?;
-            let insight: ServerInsight = client
-                .get(&format!("/servers/{}/insight", server.server_id))
-                .await?;
+            let insight =
+                call::<GetInsight>(client, &id(&server), &(), ()).await?;
             // Best effort: a failed install's reason, as the App's content page shows it.
             let content: Option<Content> = client
                 .get(&format!(
@@ -248,29 +242,22 @@ pub async fn run(client: &Client, command: ServersCommand) -> Result<Output> {
             default_flags,
         } => {
             let server = find(client, &server).await?;
-            let mut performance: Performance =
-                client.get(&performance_path(&server)).await?;
+            let mut performance =
+                call::<GetPerformance>(client, &id(&server), &(), ()).await?;
             if let Some(memory_mb) = mb {
-                performance = client
-                    .call(
-                        Method::PUT,
-                        &format!("/servers/{}/memory", server.server_id),
-                        Some(&Memory { memory_mb }),
-                    )
-                    .await?;
+                let memory = Memory { memory_mb };
+                performance =
+                    call::<SetMemory>(client, &id(&server), &(), memory)
+                        .await?;
             }
             let changed = mb.is_some() || flags.is_some() || default_flags;
             if flags.is_some() || default_flags {
                 let flags = flags.map(|flags| {
                     flags.split_whitespace().map(str::to_owned).collect()
                 });
-                performance = client
-                    .call(
-                        Method::PUT,
-                        &format!("/servers/{}/flags", server.server_id),
-                        Some(&JvmFlags { flags }),
-                    )
-                    .await?;
+                let flags = JvmFlags { flags };
+                performance =
+                    call::<SetFlags>(client, &id(&server), &(), flags).await?;
             }
             let later = changed && server.power_state.is_some_and(is_up);
             let mut lines = vec![
@@ -290,7 +277,7 @@ pub async fn run(client: &Client, command: ServersCommand) -> Result<Output> {
                     performance.flags.join(" ")
                 ),
             ];
-            let machine: Machine = client.get("/machine").await?;
+            let machine = call::<GetMachine>(client, &(), &(), ()).await?;
             lines.extend(machine.warning);
             Ok(Output::new(lines.join("\n"), &performance))
         }
@@ -301,13 +288,7 @@ pub async fn run(client: &Client, command: ServersCommand) -> Result<Output> {
         } => {
             let server = find(client, &server).await?;
             let body = JavaPath { path: path.clone() };
-            client
-                .call::<()>(
-                    Method::PUT,
-                    &format!("/servers/{}/java", server.server_id),
-                    Some(&body),
-                )
-                .await?;
+            call::<SetJava>(client, &id(&server), &(), body.clone()).await?;
             let text = match path {
                 Some(path) => format!("{} runs {path}", server.name),
                 None => format!("{} runs the Java Core manages", server.name),
@@ -324,8 +305,8 @@ pub async fn run(client: &Client, command: ServersCommand) -> Result<Output> {
             no_smart,
         } => {
             let server = find(client, &server).await?;
-            let mut performance: Performance =
-                client.get(&performance_path(&server)).await?;
+            let mut performance =
+                call::<GetPerformance>(client, &id(&server), &(), ()).await?;
             let restarts = &mut performance.restarts;
             let before = restarts.clone();
             if let Some(crash) = crash {
@@ -347,13 +328,10 @@ pub async fn run(client: &Client, command: ServersCommand) -> Result<Output> {
                 restarts.smart_after_hours = None;
             }
             if *restarts != before {
-                performance = client
-                    .call(
-                        Method::PUT,
-                        &format!("/servers/{}/restarts", server.server_id),
-                        Some(&*restarts),
-                    )
-                    .await?;
+                let restarts = restarts.clone();
+                performance =
+                    call::<SetRestarts>(client, &id(&server), &(), restarts)
+                        .await?;
             }
             let restarts = &performance.restarts;
             let schedule = match restarts.schedule {
@@ -492,8 +470,10 @@ fn describe(server: &Server, insight: &ServerInsight) -> String {
     lines.join("\n")
 }
 
-fn performance_path(server: &Server) -> String {
-    format!("/servers/{}/performance", server.server_id)
+fn id(server: &Server) -> ServerId {
+    ServerId {
+        id: server.server_id.to_string(),
+    }
 }
 
 /// Every server.
@@ -609,14 +589,10 @@ async fn wait_offline(client: &Client, server: &Server) -> Result<Output> {
 
 /// Send one console command and wait for Core to say it passed it on.
 async fn send(client: &Client, server: &Server, command: &str) -> Result<()> {
-    client
-        .post(
-            &format!("/servers/{}/console", server.server_id),
-            &SendCommand {
-                command: command.to_owned(),
-            },
-        )
-        .await
+    let command = contracts::core::ConsoleCommand {
+        command: command.to_owned(),
+    };
+    call::<SendCommand>(client, &id(server), &(), command).await
 }
 
 /// A console event, with only what the CLI shows.

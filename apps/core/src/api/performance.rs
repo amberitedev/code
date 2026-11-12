@@ -1,59 +1,28 @@
 //! A server's memory, JVM flags, and restarts, which the App shows under performance.
-//!
-//! - `GET /servers/{id}/performance`: [`Performance`]. Viewers and up.
-//! - `PUT /servers/{id}/memory`: [`Memory`] in, [`Performance`] out. Editors and up.
-//! - `PUT /servers/{id}/flags`: [`JvmFlags`] in, [`Performance`] out. Editors and up.
-//! - `PUT /servers/{id}/restarts`: `Restarts` in, [`Performance`] out. Editors and up.
-//!
-//! A running server uses new memory and flags from its next start.
 
 use std::sync::Arc;
 
-use axum::{
-    Json,
-    extract::{Path, State},
+use axum::extract::State;
+use contracts::{
+    ApiError, ErrorCode, Json,
+    core::{
+        Action, GetPerformance, Performance, SetFlags, SetMemory, SetRestarts,
+    },
+    server::Req,
 };
-use contracts::{ApiError, ErrorCode};
-use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
-use super::{CoreState, activity::Action, internal};
+use super::{CoreState, internal};
 use crate::{
     access::{Caller, Level, activity},
-    servers::{
-        ServerError, memory,
-        restarts::{self, Restarts},
-    },
+    servers::{ServerError, memory, restarts},
     state::servers::adapters::sqlite::server_rows,
 };
 
 /// The least memory a server may have.
 pub const MIN_MEMORY_MB: u32 = 512;
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-pub struct Performance {
-    /// The most memory Java may use. Java starts with less and grows to it.
-    pub memory_mb: u32,
-    /// The JVM flags the server starts with.
-    pub flags: Vec<String>,
-    /// `flags` are the server's own rather than Core's tuned ones.
-    pub custom_flags: bool,
-    pub restarts: Restarts,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-pub struct JvmFlags {
-    /// The server's own flags, each starting with `-`. Null goes back to the tuned ones.
-    pub flags: Option<Vec<String>>,
-}
-
 /// The most flags a server may have.
 const MAX_FLAGS: usize = 64;
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-pub struct Memory {
-    pub memory_mb: u32,
-}
 
 async fn performance(
     state: &CoreState,
@@ -73,23 +42,26 @@ async fn performance(
     })
 }
 
-/// `GET /servers/{id}/performance`.
 pub async fn get(
     caller: Caller,
     State(state): State<Arc<CoreState>>,
-    Path(id): Path<String>,
+    request: Req<GetPerformance>,
 ) -> Result<Json<Performance>, ApiError> {
+    let id = request.params.id;
     caller.require(&state.db, &id, Level::Viewer).await?;
     Ok(Json(performance(&state, &id).await?))
 }
 
-/// `PUT /servers/{id}/memory`.
 pub async fn set_memory(
     caller: Caller,
     State(state): State<Arc<CoreState>>,
-    Path(id): Path<String>,
-    Json(request): Json<Memory>,
+    Req {
+        params,
+        body: request,
+        ..
+    }: Req<SetMemory>,
 ) -> Result<Json<Performance>, ApiError> {
+    let id = params.id;
     caller.require(&state.db, &id, Level::Editor).await?;
     // The owner passes `require` for any id, so a missing server is found here, before a write.
     performance(&state, &id).await?;
@@ -109,13 +81,16 @@ pub async fn set_memory(
     Ok(Json(performance(&state, &id).await?))
 }
 
-/// `PUT /servers/{id}/flags`.
 pub async fn set_flags(
     caller: Caller,
     State(state): State<Arc<CoreState>>,
-    Path(id): Path<String>,
-    Json(request): Json<JvmFlags>,
+    Req {
+        params,
+        body: request,
+        ..
+    }: Req<SetFlags>,
 ) -> Result<Json<Performance>, ApiError> {
+    let id = params.id;
     caller.require(&state.db, &id, Level::Editor).await?;
     if let Some(flags) = &request.flags
         && (flags.len() > MAX_FLAGS
@@ -138,13 +113,16 @@ pub async fn set_flags(
     Ok(Json(performance(&state, &id).await?))
 }
 
-/// `PUT /servers/{id}/restarts`.
 pub async fn set_restarts(
     caller: Caller,
     State(state): State<Arc<CoreState>>,
-    Path(id): Path<String>,
-    Json(request): Json<Restarts>,
+    Req {
+        params,
+        body: request,
+        ..
+    }: Req<SetRestarts>,
 ) -> Result<Json<Performance>, ApiError> {
+    let id = params.id;
     caller.require(&state.db, &id, Level::Editor).await?;
     performance(&state, &id).await?;
     if request.smart_after_hours == Some(0) {

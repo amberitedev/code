@@ -1,6 +1,7 @@
+import type { Action, ActivityPage, CoreRole, CoreUser, ServerAccess } from '@amberite/contracts'
+
 import { ModrinthApiError } from '../../../core/errors'
 import type { Archon } from '../../archon/types'
-import type { Copal } from '../types'
 
 // A Core's access and activity in the hosting API's shapes, so the upstream server pages
 // (`server_users_v1`, `actions_v1`) read a Core the way they read Modrinth Hosting.
@@ -10,13 +11,13 @@ const ROLE_SCOPES = {
 	owner: 'SERVER_ADMIN',
 	editor: 'BASE_READ | POWER_ACTIONS | EXEC_COMMANDS | FILES_WRITE | SETUP | BACKUPS | ADVANCED',
 	viewer: 'BASE_READ',
-} satisfies Record<Copal.Role | 'owner', Archon.ServerUsers.v1.UserScope>
+} satisfies Record<CoreRole | 'owner', Archon.ServerUsers.v1.UserScope>
 
 /** Shown as the actor of what the Core's local CLI did. */
 const LOCAL_CLI = 'core-cli'
 
 /** A server's owner and members. Everyone listed has access: a Core has no pending invites. */
-export function serverUsers(access: Copal.ServerAccess): Archon.ServerUsers.v1.ServerUser[] {
+export function serverUsers(access: ServerAccess): Archon.ServerUsers.v1.ServerUser[] {
 	return [
 		...(access.owner ? [serverUser(access.owner, 'owner', null)] : []),
 		...access.members.map((member) => serverUser(member.user, member.role, member.added_at)),
@@ -25,8 +26,8 @@ export function serverUsers(access: Copal.ServerAccess): Archon.ServerUsers.v1.S
 
 /** One person with `role` on a server, given it at `addedAt` (Unix seconds) when known. */
 export function serverUser(
-	user: Copal.User,
-	role: Copal.Role | 'owner',
+	user: CoreUser,
+	role: CoreRole | 'owner',
 	addedAt: number | null,
 ): Archon.ServerUsers.v1.ServerUser {
 	return {
@@ -43,7 +44,7 @@ export function onlyForOwner(error: unknown): null {
 }
 
 /** The Core role for a hosting role. Only editors and viewers can be given. */
-export function copalRole(role: Archon.ServerUsers.v1.ServerUserRole): Copal.Role {
+export function copalRole(role: Archon.ServerUsers.v1.ServerUserRole): CoreRole {
 	if (role === 'Editor') return 'editor'
 	if (role === 'Viewer') return 'viewer'
 	throw new ModrinthApiError(`A Core cannot give the role ${role}`, { statusCode: 400 })
@@ -55,8 +56,8 @@ export function copalRole(role: Archon.ServerUsers.v1.ServerUserRole): Copal.Rol
  * users, actions, and dates are filtered here, within the page.
  */
 export function actionLog(
-	page: Copal.ActivityPage,
-	access: Copal.ServerAccess | null,
+	page: ActivityPage,
+	access: ServerAccess | null,
 	options: Archon.Actions.v1.ListActionLogOptions,
 ): Archon.Actions.v1.ActionLogResponse {
 	const users: Archon.Actions.v1.ActionLogResponse['users'] = {
@@ -88,7 +89,7 @@ export function actionLog(
 	return { data, next_offset: page.next_before, users, addons: {}, versions: {} }
 }
 
-function hostingAction(action: Copal.Action): Archon.Actions.v1.Action {
+function hostingAction(action: Action): Archon.Actions.v1.Action {
 	switch (action.type) {
 		case 'invited':
 			return {
@@ -113,6 +114,6 @@ function hostingAction(action: Copal.Action): Archon.Actions.v1.Action {
 	}
 }
 
-function userResp(user: Copal.User): Archon.ServerUsers.v1.UserResp {
+function userResp(user: CoreUser): Archon.ServerUsers.v1.UserResp {
 	return { id: user.id, username: user.name, avatar_url: user.avatar_url }
 }

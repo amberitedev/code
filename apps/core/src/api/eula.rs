@@ -1,30 +1,21 @@
 //! The Minecraft EULA, accepted once by the owner for every server on this Core. No server
 //! starts before that. Owner only.
-//!
-//! - `GET /eula`: [`Eula`].
-//! - `POST /eula`: accept it. [`Eula`].
 
 use std::sync::Arc;
 
-use axum::{Json, extract::State};
-use contracts::ApiError;
-use serde::{Deserialize, Serialize};
+use axum::extract::State;
+use contracts::{
+    ApiError, Json,
+    core::{AcceptEula, Action, Eula, GetEula},
+    server::Req,
+};
 use sqlx::SqlitePool;
-use ts_rs::TS;
 
-use super::{CoreState, activity::Action, internal};
+use super::{CoreState, internal};
 use crate::access::{Caller, activity, now};
 
 /// Where the EULA is, to show before accepting it.
 pub const URL: &str = "https://aka.ms/MinecraftEULA";
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-pub struct Eula {
-    /// The EULA's address.
-    pub url: String,
-    /// Unix seconds. Null until the owner accepts it.
-    pub accepted_at: Option<i64>,
-}
 
 /// When the owner accepted the EULA, if they did.
 pub async fn accepted_at(db: &SqlitePool) -> sqlx::Result<Option<i64>> {
@@ -48,10 +39,10 @@ pub async fn accept(db: &SqlitePool) -> sqlx::Result<()> {
     Ok(())
 }
 
-/// `GET /eula`.
 pub async fn get(
     caller: Caller,
     State(state): State<Arc<CoreState>>,
+    _: Req<GetEula>,
 ) -> Result<Json<Eula>, ApiError> {
     caller.require_owner()?;
     Ok(Json(Eula {
@@ -60,10 +51,10 @@ pub async fn get(
     }))
 }
 
-/// `POST /eula`.
 pub async fn post(
     caller: Caller,
     State(state): State<Arc<CoreState>>,
+    _: Req<AcceptEula>,
 ) -> Result<Json<Eula>, ApiError> {
     caller.require_owner()?;
     let before = accepted_at(&state.db).await.map_err(internal)?;

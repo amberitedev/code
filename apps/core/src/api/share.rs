@@ -18,7 +18,7 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
 };
-use contracts::{ApiError, ErrorCode};
+use contracts::{ApiError, ErrorCode, core::Action};
 use serde::{Deserialize, Serialize};
 use sharing_client::{
     backend::{Backend, BackendError},
@@ -34,7 +34,6 @@ use ts_rs::TS;
 
 use super::{
     CoreState,
-    activity::Action,
     content::{server_first, world},
     internal,
 };

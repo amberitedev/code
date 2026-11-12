@@ -19,10 +19,11 @@ use std::{
 };
 
 use color_eyre::eyre::{Result, WrapErr};
+use contracts::core::FailedTrial;
 use tokio::process::{Child, Command};
 use tracing::{error, info, warn};
 
-use super::versions::{self, FailedTrial};
+use super::versions;
 use crate::daemon::paths::Paths;
 
 /// The exit code with which Core asks to be started again, now as the active version.
@@ -105,7 +106,7 @@ pub async fn run(
                 error!(
                     version,
                     "the new version {}; going back to the previous one",
-                    reason.describe()
+                    versions::describe_failure(reason)
                 );
                 drop(stdin);
                 let _ = child.kill().await;

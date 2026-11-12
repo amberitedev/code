@@ -2,23 +2,20 @@
 
 use std::time::Duration;
 
-use axum::http::Method;
 use clap::Subcommand;
 use color_eyre::eyre::Result;
+use contracts::core::{
+    AcceptEula, ApplyUpdate, ChangeUpdateSettings, Channel, CheckForUpdate,
+    CheckHealth, GetEula, GetLogs, GetMachine, GetPairing, GetUpdate, Health,
+    InstallUpdate, LogsQuery, Machine, PairingStatus, Reach,
+    RequestPairingCode, RollBack, UpdateSettings, UpdateStatus,
+};
 use serde::Serialize;
 
-use super::{Client, Output, Switch, local_time, on_off, servers};
+use super::{Client, Output, Switch, call::call, local_time, on_off, servers};
 use crate::{
     access::pairing,
-    api::{
-        eula::Eula,
-        health::Health,
-        insight::{Machine, Reach},
-        logs::CoreLogs,
-        pairing::PairingStatus,
-        update::{ApplyUpdate, Restarting, UpdateSettings, UpdateStatus},
-    },
-    update::{launcher, release::Channel, versions::FailedTrial},
+    update::{launcher, versions::describe_failure},
 };
 
 #[derive(Debug, Subcommand)]
@@ -54,10 +51,10 @@ pub async fn status(client: &Client) -> Result<Output> {
         pairing: PairingStatus,
         servers: Vec<crate::api::servers::Server>,
     }
-    let health: Health = client.get("/health").await?;
-    let update: UpdateStatus = client.get("/update").await?;
-    let machine: Machine = client.get("/machine").await?;
-    let pairing: PairingStatus = client.get("/pairing").await?;
+    let health = call::<CheckHealth>(client, &(), &(), ()).await?;
+    let update = call::<GetUpdate>(client, &(), &(), ()).await?;
+    let machine = call::<GetMachine>(client, &(), &(), ()).await?;
+    let pairing = call::<GetPairing>(client, &(), &(), ()).await?;
     let servers = servers::list(client).await?;
     let mut lines = vec![format!(
         "Core {} is running (id {})",
@@ -103,7 +100,7 @@ pub async fn status(client: &Client) -> Result<Output> {
 
 /// `copal pair`.
 pub async fn pair(client: &Client) -> Result<Output> {
-    let status: PairingStatus = client.post("/pairing/code", &()).await?;
+    let status = call::<RequestPairingCode>(client, &(), &(), ()).await?;
     Ok(Output::new(pairing_text(&status), &status))
 }
 
@@ -121,16 +118,17 @@ fn pairing_text(status: &PairingStatus) -> String {
 
 /// `copal logs`.
 pub async fn logs(client: &Client, lines: usize) -> Result<Output> {
-    let logs: CoreLogs = client.get(&format!("/logs?lines={lines}")).await?;
+    let query = LogsQuery { lines: Some(lines) };
+    let logs = call::<GetLogs>(client, &(), &query, ()).await?;
     Ok(Output::new(super::safe(&logs.lines.join("\n")), &logs))
 }
 
 /// `copal eula`.
 pub async fn eula(client: &Client, accept: bool) -> Result<Output> {
-    let eula: Eula = if accept {
-        client.post("/eula", &()).await?
+    let eula = if accept {
+        call::<AcceptEula>(client, &(), &(), ()).await?
     } else {
-        client.get("/eula").await?
+        call::<GetEula>(client, &(), &(), ()).await?
     };
     let text = match eula.accepted_at {
         Some(at) => format!(
@@ -150,23 +148,19 @@ pub async fn eula(client: &Client, accept: bool) -> Result<Output> {
 pub async fn update(client: &Client, command: UpdateCommand) -> Result<Output> {
     match command {
         UpdateCommand::Check => {
-            let status: UpdateStatus =
-                client.post("/update/check", &()).await?;
+            let status = call::<CheckForUpdate>(client, &(), &(), ()).await?;
             Ok(Output::new(describe(&status), &status))
         }
         UpdateCommand::Apply {
             allow_downgrade,
             retry,
         } => {
-            let restarting: Restarting = client
-                .post(
-                    "/update/apply",
-                    &ApplyUpdate {
-                        allow_downgrade,
-                        retry,
-                    },
-                )
-                .await?;
+            let apply = ApplyUpdate {
+                allow_downgrade,
+                retry,
+            };
+            let restarting =
+                call::<InstallUpdate>(client, &(), &(), apply).await?;
             Ok(restarted(client, restarting.version).await)
         }
         UpdateCommand::Channel { channel } => {
@@ -195,8 +189,7 @@ pub async fn update(client: &Client, command: UpdateCommand) -> Result<Output> {
             Ok(Output::new(text, &status))
         }
         UpdateCommand::Rollback => {
-            let restarting: Restarting =
-                client.post("/update/rollback", &()).await?;
+            let restarting = call::<RollBack>(client, &(), &(), ()).await?;
             Ok(restarted(client, restarting.version).await)
         }
     }
@@ -208,9 +201,9 @@ async fn settings(
     change: UpdateSettings,
 ) -> Result<UpdateStatus> {
     if change.channel.is_none() && change.auto_update.is_none() {
-        return client.get("/update").await;
+        return call::<GetUpdate>(client, &(), &(), ()).await;
     }
-    client.call(Method::PATCH, "/update", Some(&change)).await
+    call::<ChangeUpdateSettings>(client, &(), &(), change).await
 }
 
 fn describe(status: &UpdateStatus) -> String {
@@ -236,7 +229,7 @@ fn failed_update(status: &UpdateStatus) -> Option<String> {
     }
     let how = status
         .failed_reason
-        .map_or("did not prove healthy", FailedTrial::describe);
+        .map_or("did not prove healthy", describe_failure);
     Some(format!(
         "Copal {failed} was tried and rolled back: it {how}. Core stays on {} until a newer release; to try {failed} again: copal update apply --retry",
         status.version
@@ -275,15 +268,14 @@ async fn restarted(client: &Client, requested: String) -> Output {
     };
     // The launcher records how a trial failed; ask the version that took over.
     let how = match outcome {
-        RestartOutcome::WentBack => client
-            .get::<UpdateStatus>("/update")
+        RestartOutcome::WentBack => call::<GetUpdate>(client, &(), &(), ())
             .await
             .ok()
             .filter(|status| status.failed.as_deref() == Some(&*requested))
             .and_then(|status| status.failed_reason),
         _ => None,
     }
-    .map_or("did not prove healthy", FailedTrial::describe);
+    .map_or("did not prove healthy", describe_failure);
     let text = match (outcome, &running) {
         (RestartOutcome::Running, _) => format!("Core {requested} is running"),
         (RestartOutcome::WentBack, Some(running)) => format!(
@@ -312,7 +304,7 @@ async fn wait_for(client: &Client, version: &str) -> Option<String> {
     let checks = launcher::HEALTH_TIMEOUT.as_secs() + 30;
     for _ in 0..checks {
         tokio::time::sleep(Duration::from_secs(1)).await;
-        if let Ok(health) = client.get::<Health>("/health").await {
+        if let Ok(health) = call::<CheckHealth>(client, &(), &(), ()).await {
             if health.version == version {
                 return Some(health.version);
             }

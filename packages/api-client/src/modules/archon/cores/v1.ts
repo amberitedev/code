@@ -1,8 +1,9 @@
-import { cores } from '@amberite/contracts'
+import { type CoreSession, core as coreRoutes, cores } from '@amberite/contracts'
 
 import { ApiCallError } from '../../../contracts/errors'
 import { AbstractModule } from '../../../core/abstract-module'
 import { ModrinthApiError } from '../../../core/errors'
+import type { CoreCallError, CoreSessions } from '../../../types/client'
 import type { RequestOptions } from '../../../types/request'
 import { coreNodeUrl } from '../../../utils/node-url'
 import type { Archon } from '../types'
@@ -42,8 +43,8 @@ export class CoreApprovalError extends Error {
 /**
  * The Cores the account may reach: the ones signed in to it, and the ones it was invited to manage
  * a server on. The backend keeps the list and each Core's address; hosting calls go to a Core
- * directly, with this device's session there (see `copal.access_v1`). Several Cores are treated as
- * one: their servers form one list, and a request for a server is sent to the Core that has it.
+ * directly, with this device's session there (see `signIn`). Several Cores are treated as one:
+ * their servers form one list, and a request for a server is sent to the Core that has it.
  *
  * A Core signs in on its own: it shows a code, and `approve` here is what binds it to the account.
  * The App never contacts a Core before it is listed.
@@ -58,6 +59,8 @@ export class ArchonCoresV1Module extends AbstractModule {
 	private routes = new Map<string, Route>()
 	/** Server id to the id of the Core that has it. */
 	private serverCores = new Map<string, string>()
+	/** Sign-ins in flight, by Core id, so requests that fail together sign in once. */
+	private signingIn = new Map<string, Promise<CoreSession>>()
 
 	public getModuleID(): string {
 		return 'archon_cores_v1'
@@ -119,11 +122,16 @@ export class ArchonCoresV1Module extends AbstractModule {
 	 * the Core is off. Its servers and files stay.
 	 */
 	public async revoke(core: Archon.Cores.v1.Core): Promise<void> {
-		const access = this.client.copal.access_v1
-		await access.unpair(core.id).catch((error) => {
-			console.warn(`Core ${core.id} was not told it was removed; it learns from the backend`, error)
-		})
-		await access.signOut(core.id).catch(() => undefined)
+		await this.client
+			.core(core.id)
+			.call(coreRoutes.Unpair)
+			.catch((error: unknown) => {
+				console.warn(
+					`Core ${core.id} was not told it was removed; it learns from the backend`,
+					error,
+				)
+			})
+		await this.signOut(core.id).catch(() => undefined)
 		await this.client.backend
 			.call(cores.RemoveCore, { params: { id: core.id } })
 			.catch((error: unknown) => {
@@ -151,14 +159,68 @@ export class ArchonCoresV1Module extends AbstractModule {
 		const core = (await this.list()).find((candidate) => candidate.id === coreId)
 		if (!core) throw new ModrinthApiError('This invite is no longer available', { statusCode: 404 })
 		if (action === 'accept') {
-			await this.client.copal.access_v1.ensureSession(core)
+			await this.ensureSession(core)
 			this.serverCores.set(serverId, core.id)
 			return
 		}
-		await this.client.copal.access_v1.leave(core.id, serverId)
+		await this.leave(core.id, serverId)
 		// Declining the only server on that Core takes the Core out of the list.
 		this.serverCores.delete(serverId)
 		this.cores = null
+	}
+
+	/**
+	 * Give up your own role on a server. No ticket, so leaving works without the backend: it only
+	 * takes away what this device's session could do. Every session you have on the Core ends; the
+	 * App signs in again for what is left.
+	 */
+	public async leave(coreId: string, serverId: string): Promise<void> {
+		const core = this.client.core(coreId)
+		const { user } = await core.call(coreRoutes.GetMyAccess)
+		// RemoveMember is dangerous for removing someone else; removing yourself is not.
+		const leaveServer = { ...coreRoutes.RemoveMember, dangerous: false }
+		await core.call(leaveServer, { params: { id: serverId, user_id: user.id } })
+	}
+
+	/** A ticket for `coreId`, for its owner or someone invited to one of its servers. */
+	public async ticket(coreId: string): Promise<string> {
+		const { ticket } = await this.client.backend.call(cores.IssueTicket, { params: { id: coreId } })
+		return ticket
+	}
+
+	/** Sign in to `core` unless this device already holds a session there. */
+	public async ensureSession(core: Archon.Cores.v1.Core): Promise<void> {
+		if (await this.sessions().exists(core.id)) return
+		await this.signIn(core)
+	}
+
+	/**
+	 * Sign this device in to `core` with a fresh ticket, replacing any session it held. The
+	 * platform trades the ticket with the Core for a session of its own and adds it to every
+	 * request to the Core; the page never sees it. Throws a `ModrinthApiError` with Core's error,
+	 * such as `not_invited` or `clock_wrong`.
+	 */
+	public signIn(core: Archon.Cores.v1.Core): Promise<CoreSession> {
+		const pending = this.signingIn.get(core.id)
+		if (pending) return pending
+		const signing = (async () => {
+			const fingerprint = core.cert_fingerprint
+			if (!fingerprint)
+				throw new ModrinthApiError('This Core does not serve HTTPS yet', { statusCode: 400 })
+			const ticket = await this.ticket(core.id)
+			return this.sessions()
+				.signIn(core.id, this.address(core), fingerprint, ticket)
+				.catch((error: unknown) => {
+					throw coreError(error)
+				})
+		})().finally(() => this.signingIn.delete(core.id))
+		this.signingIn.set(core.id, signing)
+		return signing
+	}
+
+	/** Sign this device out of the Core, and forget its session even when the Core is off. */
+	public signOut(coreId: string): Promise<void> {
+		return this.sessions().signOut(coreId)
 	}
 
 	/** The listed Core a request URL goes to, if any. */
@@ -308,6 +370,12 @@ export class ArchonCoresV1Module extends AbstractModule {
 		return server
 	}
 
+	private sessions(): CoreSessions {
+		const sessions = this.client.coreSessions
+		if (!sessions) throw new Error('This platform cannot sign in to a Core')
+		return sessions
+	}
+
 	private known(): Promise<Archon.Cores.v1.Core[]> {
 		return this.cores ?? this.list()
 	}
@@ -351,6 +419,28 @@ export class ArchonCoresV1Module extends AbstractModule {
 		])
 		return answered ? local : open(core.public_address)
 	}
+}
+
+/** A platform sign-in failure as the error a Core request would have thrown. */
+function coreError(error: unknown): ModrinthApiError {
+	if (error instanceof ModrinthApiError) return error
+	if (isCoreCallError(error))
+		return new ModrinthApiError(error.description, {
+			statusCode: error.status ?? undefined,
+			responseData: { error: error.error, description: error.description },
+		})
+	return ModrinthApiError.fromUnknown(error)
+}
+
+function isCoreCallError(error: unknown): error is CoreCallError {
+	return (
+		typeof error === 'object' &&
+		error !== null &&
+		'description' in error &&
+		typeof error.description === 'string' &&
+		'error' in error &&
+		typeof error.error === 'string'
+	)
 }
 
 function approvalError(error: unknown): CoreApprovalError {

@@ -299,7 +299,9 @@ impl Servers {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{daemon::paths::Paths, db, servers::restarts::Restarts};
+    use contracts::core::Restarts;
+
+    use crate::{daemon::paths::Paths, db};
 
     #[test]
     fn three_crashes_in_ten_minutes_is_the_limit() {

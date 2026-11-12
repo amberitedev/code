@@ -1,20 +1,16 @@
 //! What Core knows about a server beyond its power state, and about the machine.
-//!
-//! - `GET /servers/{id}/insight`: [`ServerInsight`]. Viewers and up; the console lines of a
-//!   crash are for editors and up.
-//! - `POST /servers/{id}/reachability`: check the server's port again, answering once checked.
-//!   [`ServerInsight`]. Editors and up.
-//! - `GET /machine`: [`Machine`]. Owner only.
 
 use std::sync::Arc;
 
-use axum::{
-    Json,
-    extract::{Path, State},
+use axum::extract::State;
+use contracts::{
+    ApiError, Json,
+    core::{
+        CheckReachability, Crash, GetInsight, GetMachine, Machine, Reach,
+        ReachabilityCheck, ReachabilityReport, ServerInsight,
+    },
+    server::Req,
 };
-use contracts::ApiError;
-use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
 use super::{
     CoreState, internal,
@@ -28,82 +24,6 @@ use crate::{
     },
     servers::{ServerError, memory},
 };
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-pub struct ServerInsight {
-    /// Who is online, from Core's health check and join and leave lines. Empty while the server
-    /// does not run.
-    pub players: Vec<String>,
-    /// The health check answered this run, so `players` is checked, not only what join and
-    /// leave lines said.
-    pub players_checked: bool,
-    /// The server stopped answering Core's health check, so it is probably frozen. Offer a
-    /// restart.
-    pub frozen: bool,
-    /// Unix seconds of the server's last answer to the health check.
-    pub answered_at: Option<i64>,
-    /// Core stopped starting the server again after it crashed 3 times in 10 minutes.
-    pub crash_restart_stopped: bool,
-    /// The last crash, with the console lines before it for editors and up.
-    pub last_crash: Option<Crash>,
-    /// Whether players can join from the internet. Null while the server does not run or has
-    /// not been checked yet.
-    pub reachability: Option<ReachabilityReport>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-pub struct Crash {
-    /// Unix seconds.
-    pub at: i64,
-    pub exit_code: Option<i32>,
-    /// The console lines before the crash. Null for viewers: they can hold chat, addresses,
-    /// and anything a mod printed, which the console route keeps to editors.
-    pub last_lines: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-pub struct ReachabilityReport {
-    pub state: Reach,
-    /// The cause in one line.
-    pub title: String,
-    /// The one thing to do next, when there is something.
-    pub next_step: Option<String>,
-    /// Each test, in order.
-    pub checks: Vec<ReachabilityCheck>,
-    pub found: Vec<String>,
-    /// Every step of the fix, `next_step` first.
-    pub fix: Vec<String>,
-    /// Unix seconds.
-    pub checked_at: i64,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "snake_case")]
-pub enum Reach {
-    Reachable,
-    /// Forwarded, but not tested from the internet.
-    Unverified,
-    Unreachable,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-pub struct ReachabilityCheck {
-    /// Null when the test was not run or could not tell.
-    pub passed: Option<bool>,
-    pub text: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-pub struct Machine {
-    /// This machine's memory. Null when the OS does not say.
-    pub memory_mb: Option<u64>,
-    /// The memory every server together may use.
-    pub assigned_mb: i64,
-    /// Set when the servers together may use more than the machine has.
-    pub warning: Option<String>,
-    /// Whether the App can reach Core's API from the internet.
-    pub api_reachability: Option<ReachabilityReport>,
-}
 
 impl From<Report> for ReachabilityReport {
     fn from(report: Report) -> Self {
@@ -178,22 +98,22 @@ async fn insight(
     })
 }
 
-/// `GET /servers/{id}/insight`.
 pub async fn get(
     caller: Caller,
     State(state): State<Arc<CoreState>>,
-    Path(id): Path<String>,
+    request: Req<GetInsight>,
 ) -> Result<Json<ServerInsight>, ApiError> {
+    let id = request.params.id;
     let level = caller.require(&state.db, &id, Level::Viewer).await?;
     Ok(Json(insight(&state, &id, level).await?))
 }
 
-/// `POST /servers/{id}/reachability`.
 pub async fn check(
     caller: Caller,
     State(state): State<Arc<CoreState>>,
-    Path(id): Path<String>,
+    request: Req<CheckReachability>,
 ) -> Result<Json<ServerInsight>, ApiError> {
+    let id = request.params.id;
     let level = caller.require(&state.db, &id, Level::Editor).await?;
     if state.servers.phase(&id).is_none() {
         return Err(ServerError::NotRunning.into());
@@ -204,10 +124,10 @@ pub async fn check(
     Ok(Json(insight(&state, &id, level).await?))
 }
 
-/// `GET /machine`.
 pub async fn machine(
     caller: Caller,
     State(state): State<Arc<CoreState>>,
+    _: Req<GetMachine>,
 ) -> Result<Json<Machine>, ApiError> {
     caller.require_owner()?;
     let memory_mb = memory::machine_mb();

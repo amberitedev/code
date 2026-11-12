@@ -10,6 +10,7 @@ use serde::{Serialize, de::DeserializeOwned};
 pub mod backend;
 #[cfg(feature = "client")]
 pub mod client;
+pub mod core;
 pub mod error;
 pub mod limits;
 pub mod rules;

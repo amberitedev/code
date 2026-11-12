@@ -1,40 +1,25 @@
 //! Pairing as the owner sees it on this machine, and removing this Core from its account, which
-//! the App does before it deletes the Core on the backend.
-//!
-//! - `GET /pairing`: whether this Core is paired, and while it is not, the code it shows. The
-//!   owner only. [`PairingStatus`].
-//! - `POST /pairing/code`: drop the code shown and get a fresh one, while unpaired. The owner only.
-//!   [`PairingStatus`] once Core has the new code, within 20 seconds.
-//! - `DELETE /pairing`: dangerous, the owner only. The pairing is cleared, every session ends, and
-//!   Core shows a new pairing code. 204. A Core that was off when its owner removed it learns from
-//!   the backend instead, at its next start (see `access::sync`).
+//! the App does before it deletes the Core on the backend. A Core that was off when its owner
+//! removed it learns from the backend instead, at its next start (see `access::sync`).
 
 use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
 
-use axum::{Json, extract::State, http::StatusCode};
-use contracts::{ApiError, ErrorCode};
-use serde::{Deserialize, Serialize};
+use axum::extract::State;
+use contracts::{
+    ApiError, Empty, ErrorCode, Json,
+    core::{Action, GetPairing, PairingStatus, RequestPairingCode, Unpair},
+    server::Req,
+};
 use sqlx::SqlitePool;
-use ts_rs::TS;
 
-use super::{CoreState, activity::Action, internal};
+use super::{CoreState, internal};
 use crate::access::{Caller, Changed, Dangerous, activity, pairing, sync};
 
 /// How long `POST /pairing/code` waits for the new code.
 const NEW_CODE_WAIT: Duration = Duration::from_secs(20);
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-pub struct PairingStatus {
-    pub paired: bool,
-    /// The code to enter in the App, like `MZUX-D576`. Null once paired, and while Core is still
-    /// getting one from Amberite.
-    pub code: Option<String>,
-    /// Unix seconds.
-    pub expires_at: Option<i64>,
-}
 
 async fn status(db: &SqlitePool) -> Result<PairingStatus, ApiError> {
     let paired = pairing::paired(db).await.map_err(internal)?;
@@ -50,19 +35,19 @@ async fn status(db: &SqlitePool) -> Result<PairingStatus, ApiError> {
     })
 }
 
-/// `GET /pairing`.
 pub async fn get(
     caller: Caller,
     State(state): State<Arc<CoreState>>,
+    _: Req<GetPairing>,
 ) -> Result<Json<PairingStatus>, ApiError> {
     caller.require_owner()?;
     Ok(Json(status(&state.db).await?))
 }
 
-/// `POST /pairing/code`.
 pub async fn new_code(
     caller: Caller,
     State(state): State<Arc<CoreState>>,
+    _: Req<RequestPairingCode>,
 ) -> Result<Json<PairingStatus>, ApiError> {
     caller.require_owner()?;
     if pairing::paired(&state.db).await.map_err(internal)? {
@@ -93,11 +78,11 @@ pub async fn new_code(
     }
 }
 
-/// `DELETE /pairing`.
 pub async fn remove(
     Dangerous(caller): Dangerous,
     State(state): State<Arc<CoreState>>,
-) -> Result<StatusCode, ApiError> {
+    _: Req<Unpair>,
+) -> Result<Empty, ApiError> {
     let mut tx = state.db.begin().await.map_err(internal)?;
     activity::record(&mut tx, caller.user_id(), None, &Action::CoreRemoved)
         .await
@@ -107,5 +92,5 @@ pub async fn remove(
     let _ = state.access.changed.send(Changed::Everyone);
     // Sync notices and pairs again.
     state.access.owed.notify_one();
-    Ok(StatusCode::NO_CONTENT)
+    Ok(Empty)
 }

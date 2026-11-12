@@ -4,9 +4,8 @@
 use sqlx::{SqliteConnection, SqlitePool};
 
 use super::{Caller, now};
-use crate::api::{
-    access::User,
-    activity::{Action, ActivityEntry, ActivityPage, ActivityQuery},
+use contracts::core::{
+    Action, ActivityEntry, ActivityPage, ActivityQuery, CoreUser,
 };
 
 /// Record `action` by `user` (`None` for the local CLI) on `server` (`None` for the Core).
@@ -85,7 +84,7 @@ pub async fn page(
                 Some(ActivityEntry {
                     id,
                     at,
-                    user: user_id.map(|id| User {
+                    user: user_id.map(|id| CoreUser {
                         name: name.unwrap_or_else(|| id.clone()),
                         id,
                         avatar_url,
@@ -106,7 +105,9 @@ pub async fn page(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{api::access::Role, db};
+    use contracts::core::CoreRole;
+
+    use crate::db;
 
     #[tokio::test]
     async fn a_page_of_unknown_actions_still_leads_to_older_entries() {
@@ -152,7 +153,7 @@ mod tests {
                 Some(&server.to_string()),
                 &Action::Invited {
                     user_id: user.into(),
-                    role: Role::Editor,
+                    role: CoreRole::Editor,
                 },
             )
             .await
@@ -176,7 +177,7 @@ mod tests {
         assert_eq!(first.entries.len(), 2);
         assert!(matches!(
             &first.entries[0].action,
-            Action::Invited { user_id, role: Role::Editor } if user_id == "c"
+            Action::Invited { user_id, role: CoreRole::Editor } if user_id == "c"
         ));
         let rest = page(
             &db,

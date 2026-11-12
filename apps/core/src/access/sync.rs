@@ -528,7 +528,10 @@ mod tests {
         routing::any,
     };
 
-    use contracts::backend::cores::{AccessGrant, AccessRevocation};
+    use contracts::{
+        backend::cores::{AccessGrant, AccessRevocation},
+        core::CoreRole,
+    };
 
     use super::*;
     use crate::db;
@@ -679,7 +682,7 @@ mod tests {
             user: "friend".into(),
             server_id: "s1".into(),
             server_name: "A".into(),
-            role: "editor".into(),
+            role: CoreRole::Editor,
         });
         let remove = OwedCall::Remove(AccessRevocation {
             user_id: "other".into(),

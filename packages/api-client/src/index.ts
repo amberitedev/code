@@ -29,6 +29,7 @@ export {
 	type CircuitBreakerStorage,
 	InMemoryCircuitBreakerStorage,
 } from './features/circuit-breaker'
+export { protocolMismatch, ProtocolMismatch } from './features/core-session'
 export { type NodeAuth, type NodeAuthConfig, NodeAuthFeature } from './features/node-auth'
 export { PANEL_VERSION, PanelVersionFeature } from './features/panel-version'
 export { type BackoffStrategy, type RetryConfig, RetryFeature } from './features/retry'
@@ -40,7 +41,6 @@ export {
 export { type VerboseLoggingConfig, VerboseLoggingFeature } from './features/verbose-logging'
 export type { InferredClientModules } from './modules'
 export { CoreApprovalError } from './modules/archon/cores/v1'
-export { TICKET_HEADER } from './modules/copal/access/v1'
 export { SharedInstancesApiError } from './modules/shared-instances/errors'
 export * from './modules/types'
 export { GenericModrinthClient } from './platform/generic'

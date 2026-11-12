@@ -7,9 +7,9 @@
 //! with the key whose public half is [`PUBLIC_KEY`]. Every other release in the repository, such
 //! as the Modrinth App's, is ignored.
 
+use contracts::core::Channel;
 use semver::Version;
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
 /// The public half of the release signing key, in minisign's format. Its secret half is the
 /// `COPAL_MINISIGN_KEY` repository secret. The release workflow reads the key from the line
@@ -36,44 +36,18 @@ pub const TARGET: Option<&str> = if cfg!(all(windows, target_arch = "x86_64")) {
     None
 };
 
-/// A release channel. Each one also gets every release of the channels before it: beta gets
-/// stable releases, alpha gets both.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Serialize,
-    Deserialize,
-    TS,
-    sqlx::Type,
-    clap::ValueEnum,
-)]
-#[serde(rename_all = "lowercase")]
-#[sqlx(rename_all = "lowercase")]
-pub enum Channel {
-    Stable,
-    Beta,
-    Alpha,
-}
-
-impl Channel {
-    /// The channel `version` is released on: stable without a pre-release, beta for
-    /// `-beta.N`, alpha for `-alpha.N`, and none for any other pre-release.
-    pub fn of(version: &Version) -> Option<Self> {
-        let pre = version.pre.as_str();
-        if pre.is_empty() {
-            Some(Self::Stable)
-        } else if pre == "beta" || pre.starts_with("beta.") {
-            Some(Self::Beta)
-        } else if pre == "alpha" || pre.starts_with("alpha.") {
-            Some(Self::Alpha)
-        } else {
-            None
-        }
+/// The channel `version` is released on: stable without a pre-release, beta for `-beta.N`, alpha
+/// for `-alpha.N`, and none for any other pre-release.
+pub fn channel_of(version: &Version) -> Option<Channel> {
+    let pre = version.pre.as_str();
+    if pre.is_empty() {
+        Some(Channel::Stable)
+    } else if pre == "beta" || pre.starts_with("beta.") {
+        Some(Channel::Beta)
+    } else if pre == "alpha" || pre.starts_with("alpha.") {
+        Some(Channel::Alpha)
+    } else {
+        None
     }
 }
 
@@ -120,7 +94,7 @@ pub fn resolve(
         .iter()
         .filter_map(|release| Some((release.copal_version()?, release)))
         .filter(|(version, _)| {
-            Channel::of(version).is_some_and(|of| of <= channel)
+            channel_of(version).is_some_and(|of| of <= channel)
         })
         .max_by(|(a, _), (b, _)| a.cmp(b))
 }
@@ -210,7 +184,7 @@ impl Manifest {
                 found: self.version.clone(),
             });
         }
-        if Channel::of(&self.version) != Some(self.channel) {
+        if channel_of(&self.version) != Some(self.channel) {
             return Err(ManifestError::WrongChannel {
                 version: self.version.clone(),
             });

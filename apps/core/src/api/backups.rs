@@ -26,13 +26,12 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use chrono::{DateTime, Utc};
-use contracts::{ApiError, ErrorCode};
+use contracts::{ApiError, ErrorCode, core::Action};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::{
-    CoreState, activity::Action, content::world, internal,
-    servers::WorldDownloadMethod,
+    CoreState, content::world, internal, servers::WorldDownloadMethod,
 };
 use crate::{
     access::{Caller, Dangerous, Level, activity},

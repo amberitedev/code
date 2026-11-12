@@ -9,17 +9,21 @@ repository.workspace = true
 ignored = ["contracts"]
 
 # The protocol: the Endpoint machinery, the one error body, the protocol version, and the limits and
-# share rules. `client` and `server` add the transport glue, `ts` the TypeScript generator. It
-# imports none of our crates, only upstream's ariadne for the friends socket's messages.
+# share rules. `client` and `server` add the transport glue, `ts` the TypeScript generator, and
+# `sqlx` and `clap` the derives the Core stores and parses a few enums with. It imports none of our
+# crates, only upstream's ariadne for the friends socket's messages.
 [dependencies]
 ariadne = { workspace = true }
 axum = { version = "0.8.4", default-features = false, features = ["json", "query"], optional = true }
 bytes = { workspace = true }
+clap = { workspace = true, features = ["derive"], optional = true }
 reqwest = { workspace = true, features = ["json"], optional = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+sqlx = { workspace = true, features = ["derive"], optional = true }
 thiserror = { workspace = true, optional = true }
-ts-rs = { workspace = true, features = ["no-serde-warnings"], optional = true }
+ts-rs = { workspace = true, features = ["no-serde-warnings", "uuid-impl"], optional = true }
+uuid = { workspace = true, features = ["serde"] }
 
 [dev-dependencies]
 contracts = { path = ".", features = ["client", "server", "ts"] }
@@ -29,8 +33,10 @@ tokio = { workspace = true, features = ["io-util", "macros", "net", "rt"] }
 tower = { version = "0.5.2", features = ["util"] }
 
 [features]
+clap = ["dep:clap"]
 client = ["dep:reqwest", "dep:thiserror"]
 server = ["dep:axum"]
+sqlx = ["dep:sqlx"]
 ts = ["ariadne/ts", "dep:ts-rs"]
 
 [lints]
