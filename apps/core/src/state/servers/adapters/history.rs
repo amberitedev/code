@@ -68,7 +68,8 @@ impl HistoryStore for History<'_> {
 
 #[cfg(test)]
 mod tests {
-    use sharing_client::{history, push::Pushed, versions::ManifestFile};
+    use contracts::backend::sharing::ExternalFile;
+    use sharing_client::{history, push::Pushed};
 
     use super::*;
 
@@ -87,7 +88,7 @@ mod tests {
             store: &content_store,
             db: &db,
         };
-        let content = sharing_client::versions::VersionContent {
+        let content = contracts::backend::sharing::VersionContent {
             modrinth_ids: Vec::new(),
             modpack_id: None,
             removed_files: Vec::new(),
@@ -98,15 +99,16 @@ mod tests {
         let pushed = Pushed {
             version: 1,
             previous: None,
-            external_files: vec![ManifestFile {
+            external_files: vec![ExternalFile {
                 file_name: "config/a.toml".into(),
                 file_type: "config".into(),
+                url: None,
                 file_size: 5,
                 sha1: "s".into(),
-                sha256: [1; 32],
-                object: [2; 32],
+                sha256: contracts::Hash([1; 32]),
+                object: contracts::Hash([2; 32]),
                 object_size: 21,
-                key: Some([3; 32]),
+                key: Some(contracts::Hash([3; 32])),
             }],
             paths: vec![source.clone()],
         };

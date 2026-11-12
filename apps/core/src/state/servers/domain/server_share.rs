@@ -16,9 +16,9 @@ use crate::state::servers::{
     adapters::filesystem::content_files::{DISABLED, Listed},
     domain::sides::Sides,
 };
+use contracts::backend::sharing::RemovedFile;
 use sharing_client::install::ModpackFile;
 use sharing_client::push::ContentRow;
-use sharing_client::versions::RemovedFile;
 
 use modrinth_content_management::ContentType;
 
@@ -337,7 +337,9 @@ mod tests {
 
     #[test]
     fn a_removed_path_is_one_safe_archive_name() {
-        let removable = |name: &str| RemovedFile::path("mods", name).is_some();
+        let removable = |name: &str| {
+            sharing_client::versions::removed_path("mods", name).is_some()
+        };
         for name in ["a.jar", "a.zip", "a.jar.disabled", "CONFIG.jar"] {
             assert!(removable(name), "{name}");
         }

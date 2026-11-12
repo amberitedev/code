@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use sharing_client::backend::Backend;
+use sharing_client::shares::OwnedRemote;
 use tokio::sync::Notify;
 
 use super::{
@@ -45,7 +45,7 @@ pub async fn install_instance(
     owed: Arc<Notify>,
     id: &str,
     busy: Busy,
-    backend: Backend,
+    backend: OwnedRemote,
     version: ReadyVersion,
     install: InstanceInstall,
 ) -> Result<(), Error> {
@@ -69,7 +69,7 @@ pub async fn install_instance(
                 move |content, hold, progress| async move {
                     let written = shared::write_pack(
                         &content,
-                        &backend,
+                        &backend.remote(),
                         hold.id(),
                         version,
                         &instance_name,
@@ -115,7 +115,7 @@ pub async fn install_instance(
             tokio::spawn(async move {
                 let written = shared::write_pack(
                     &content,
-                    &backend,
+                    &backend.remote(),
                     &id,
                     version,
                     &instance_name,

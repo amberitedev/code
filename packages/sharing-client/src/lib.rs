@@ -1,8 +1,8 @@
 //! What the App and Core share about sharing. Laid out like app-lib,
 //! one folder per concern:
 //!
-//! - `backend`: the client for the backend's share routes.
-//! - `versions`: the share version as the backend gives and takes it.
+//! - `shares`: what both read the same way from the backend's share routes.
+//! - `versions`: a share version as both read it.
 //! - `rules`: which files a share may carry, and what a blocked file is.
 //! - `push`: the writer of a share's versions.
 //! - `pool`: the client for Cores' stores, and fetching a version's files from them.
@@ -13,7 +13,6 @@
 //! - `net`: reaching a Core.
 //! - `disk`: free disk space, checked before the store and Core write.
 
-pub mod backend;
 pub mod crypto;
 pub mod diff;
 pub mod disk;
@@ -23,4 +22,5 @@ pub mod net;
 pub mod pool;
 pub mod push;
 pub mod rules;
+pub mod shares;
 pub mod versions;

@@ -10,15 +10,18 @@ use bedrock::content::{
     Hashes, Index, IndexFile, Version, loader_dependency, mrpack_env,
 };
 use bedrock::state::ModLoader;
-use contracts::{ErrorCode, Side};
-use reqwest::StatusCode;
+use contracts::backend::sharing::{
+    GetLatestVersion, InstanceVersion, SharedInstanceId, VersionRead,
+};
+use contracts::client::{CallError, Remote, call};
+use contracts::{Empty, ErrorCode, Side};
 
-use sharing_client::backend::{Backend, BackendError, Unavailable};
 use sharing_client::install::{
     ModpackFile, Source, Step, config_update, install_plan,
 };
-use sharing_client::pool::{InvalidPoolEntry, PoolFile};
-use sharing_client::versions::ShareVersion;
+use sharing_client::pool::{InvalidPoolEntry, PoolFile, pool_access};
+use sharing_client::shares::{Unavailable, status};
+use sharing_client::versions::modpack_id;
 
 /// A share version as a server takes it. `S` is how the caller gets a modpack file's bytes.
 #[derive(Debug, Clone)]
@@ -60,7 +63,7 @@ pub trait Modrinth {
 #[derive(Debug, thiserror::Error)]
 pub enum ReadError {
     #[error(transparent)]
-    Backend(#[from] BackendError),
+    Backend(#[from] CallError),
     /// The backend refused the read (401 or 403), with the code it named (`Unknown` when it
     /// sent no error body) and its description.
     #[error("{description}")]
@@ -91,41 +94,43 @@ pub enum ServerPackError<E> {
 /// The latest version of a share, read with [`ready_version`] and ready for [`server_pack`].
 pub struct ReadyVersion {
     share_id: String,
-    version: ShareVersion,
+    version: InstanceVersion,
 }
 
-/// The latest version of the share `share_id`, when it is ready for a server. A Core reads this
-/// before it accepts an install, so a version that cannot go fails the request itself.
+/// The latest version of the share `share_id`, when it is ready for a server, read as the user
+/// whose `read_ticket` this is (as the Core's owner without one). A Core reads this before it
+/// accepts an install, so a version that cannot go fails the request itself.
 pub async fn ready_version(
-    backend: &Backend,
+    backend: &Remote<'_>,
     share_id: &str,
+    read_ticket: Option<String>,
 ) -> Result<ReadyVersion, ReadError> {
-    let version = match backend.version(share_id, None).await {
+    let id = SharedInstanceId {
+        id: share_id.to_owned(),
+    };
+    let query = VersionRead { read_ticket };
+    let version = match call::<GetLatestVersion>(backend, &id, &query, Empty)
+        .await
+    {
         Ok(version) => version,
-        Err(BackendError::Unavailable {
-            reason: Unavailable::Deleted,
-            ..
-        }) => return Err(ReadError::NoVersion),
-        Err(error)
-            if matches!(
-                error.status(),
-                Some(StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN)
-            ) =>
-        {
-            let status = error.status().unwrap_or_default();
-            let body = error.body();
-            let description = body
-                .map(|body| body.description.clone())
-                .filter(|description| !description.is_empty())
-                .unwrap_or_else(|| {
-                    format!(
-                        "The backend refused the read with status {status}."
-                    )
-                });
-            return Err(ReadError::Denied {
-                code: body.map_or(ErrorCode::Unknown, |body| body.error),
-                description,
-            });
+        Err(error) if Unavailable::of(&error) == Some(Unavailable::Deleted) => {
+            return Err(ReadError::NoVersion);
+        }
+        Err(error) if matches!(status(&error), Some(401 | 403)) => {
+            let (code, description) = match &error {
+                CallError::Api { error, .. } => {
+                    (error.error, error.description.clone())
+                }
+                _ => (ErrorCode::Unknown, String::new()),
+            };
+            let description = match description.is_empty() {
+                true => format!(
+                    "The backend refused the read with status {}.",
+                    status(&error).unwrap_or_default()
+                ),
+                false => description,
+            };
+            return Err(ReadError::Denied { code, description });
         }
         Err(error) => return Err(error.into()),
     };
@@ -149,8 +154,8 @@ pub async fn server_pack<M: Modrinth>(
     name: &str,
     modrinth: &M,
 ) -> Result<ServerPack<M::Source>, ServerPackError<M::Error>> {
-    let content = &version.content;
-    let modpack = match version.modpack_id() {
+    let content = &version.manifest.content;
+    let modpack = match modpack_id(&version) {
         Some(modpack) => modrinth
             .modpack_files(modpack)
             .await
@@ -160,7 +165,7 @@ pub async fn server_pack<M: Modrinth>(
     let plan = install_plan(
         &version,
         modpack,
-        config_update(&version.external_files, None),
+        config_update(&version.manifest.external_files, None),
         Side::Server,
     );
     let ids = &plan.modrinth_ids;
@@ -216,7 +221,7 @@ pub async fn server_pack<M: Modrinth>(
         dependencies.insert(loader.to_owned(), content.loader_version.clone());
     }
 
-    let access = version.pool_access(&share_id);
+    let access = pool_access(&version, &share_id);
     let mut pool_files = Vec::new();
     for (path, file) in plan.pool_files() {
         let access = access.clone().ok_or(ServerPackError::PoolUnavailable)?;

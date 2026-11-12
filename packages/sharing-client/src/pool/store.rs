@@ -13,6 +13,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use bytes::Bytes;
+use contracts::backend::sharing::FaultKind;
 use contracts::client::{CallError, Remote, call, call_limited, call_stream};
 use contracts::store::{
     GetObject, ListVersion, MissingObjects, ObjectHashes, UploadStatus,
@@ -102,15 +103,15 @@ pub struct StoreClient {
 /// One file of a version, as a member fetches it: where the version is, and the names and key
 /// that check and decrypt the object.
 pub struct PoolObject<'a> {
-    /// R.
+    /// The version's hash.
     pub root: Hash,
     pub holders: &'a [StoreHost],
     /// The fetch ticket for `root`.
     pub ticket: &'a str,
-    /// C.
+    /// The SHA-256 of the encrypted object.
     pub object: [u8; 32],
     pub object_size: u64,
-    /// P.
+    /// The SHA-256 of the plain bytes.
     pub plain: [u8; 32],
     pub key: [u8; 32],
 }
@@ -120,24 +121,6 @@ pub struct PoolObject<'a> {
 pub struct Fault {
     pub core: String,
     pub kind: FaultKind,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FaultKind {
-    /// The bytes did not hash to C: the Core's fault.
-    Object,
-    /// The bytes decrypted to another file than P: the manifest's fault.
-    Content,
-}
-
-impl FaultKind {
-    /// As `POST /v1/instances/:id/versions/:n/reports` names it.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Object => "object",
-            Self::Content => "content",
-        }
-    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -295,7 +278,7 @@ impl StoreClient {
     }
 
     /// Streams the version's list and the given objects to the Core as one tar. `objects` are
-    /// `(C, object file)` pairs; their sizes come from `list`. `uploaded` counts object bytes
+    /// `(object hash, object file)` pairs; their sizes come from `list`. `uploaded` counts object bytes
     /// sent.
     pub async fn upload(
         &self,
@@ -360,7 +343,7 @@ impl StoreClient {
         .await
     }
 
-    /// The bytes of `object` of version `root`, unchecked: the caller checks them against C.
+    /// The bytes of `object` of version `root`, unchecked: the caller checks them against `object`.
     pub async fn object_reader(
         &self,
         core: &StoreHost,
@@ -394,8 +377,8 @@ impl StoreClient {
         .await
     }
 
-    /// Fetches one file from the first holder that serves it correctly, checked against C and
-    /// then P. `sink` gets the plain bytes and is called afresh for each holder; only the
+    /// Fetches one file from the first holder that serves it correctly, checked against the object's
+    /// hash and then the plain bytes'. `sink` gets the plain bytes and is called afresh for each holder; only the
     /// result of a sink whose holder served the whole file correctly is returned, and the last
     /// chunk reaches it only once the file checks out. A dropped connection resumes from the
     /// last whole chunk, and a busy holder is waited for. Holders that served bad bytes are
@@ -563,7 +546,7 @@ fn tar_padding(size: u64) -> Bytes {
     ])
 }
 
-/// An uncompressed ustar stream: `version.json` first, then each object named by its C.
+/// An uncompressed ustar stream: `version.json` first, then each object named by its hash.
 fn tar_body(
     list: Vec<u8>,
     entries: Vec<(String, PathBuf, u64)>,

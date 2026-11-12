@@ -24,7 +24,7 @@ bytemuck = { workspace = true, features = ["extern_crate_alloc"] }
 bytes = { workspace = true, features = ["serde"] }
 chardetng = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
-contracts = { workspace = true }
+contracts = { workspace = true, features = ["client"] }
 dashmap = { workspace = true, features = ["serde"] }
 data-url = { workspace = true }
 derive_more = { workspace = true, features = ["display"] }
@@ -44,6 +44,7 @@ hickory-resolver = { workspace = true }
 httpdate = { workspace = true }
 image = { workspace = true, features = ["gif", "jpeg", "png", "webp"] }
 indexmap = { workspace = true }
+infer = { workspace = true }
 itertools = { workspace = true }
 json5 = { workspace = true }
 minecraft-meta-manifest = { workspace = true }

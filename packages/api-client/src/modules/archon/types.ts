@@ -618,7 +618,7 @@ export namespace Archon {
 						content_variant: 'instance'
 						instance: { id: string; name: string }
 						shared_instance_id: string
-						/** From `sharedinstances.instances_v1.getServerTicket` for this server's Core. */
+						/** From the backend's `sharing.IssueReadTicket` for this server's Core. */
 						ticket: string
 						properties?: PropertiesFields | null
 						restart?: boolean

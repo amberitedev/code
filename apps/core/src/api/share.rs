@@ -18,10 +18,14 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
 };
-use contracts::{ApiError, ErrorCode, core::Action};
+use contracts::backend::sharing::{
+    CreateSharedInstance, GetLatestVersion, InstanceVersion, NewSharedInstance,
+    SharedInstanceId, SharedInstanceUpdate, UpdateSharedInstance,
+};
+use contracts::client::{CallError, call};
+use contracts::{ApiError, Empty, ErrorCode, core::Action};
 use serde::{Deserialize, Serialize};
 use sharing_client::{
-    backend::{Backend, BackendError},
     diff::{DiffError, SharedInstanceUpdateDiff, share_diff},
     history::SharedInstanceHistoryEntry,
     push,
@@ -29,6 +33,7 @@ use sharing_client::{
         CONFIG_FILE_TYPE, FolderEntry, SCAN_HEAD_SIZE, ShareFolder,
         list_shareable,
     },
+    shares::{OwnedRemote, Unavailable},
 };
 use ts_rs::TS;
 
@@ -115,7 +120,9 @@ pub struct SharedInstancePublishDiff {
 }
 
 /// The backend's share routes, reached with this Core's key.
-pub(super) async fn backend(state: &CoreState) -> Result<Backend, ApiError> {
+pub(super) async fn backend(
+    state: &CoreState,
+) -> Result<OwnedRemote, ApiError> {
     let key: Option<String> =
         sqlx::query_scalar("SELECT backend_key FROM core WHERE id = 1")
             .fetch_optional(&state.db)
@@ -123,9 +130,12 @@ pub(super) async fn backend(state: &CoreState) -> Result<Backend, ApiError> {
             .map_err(internal)?
             .flatten();
     match (state.storage.backend_url(), key) {
-        (Some(url), Some(key)) => {
-            Ok(Backend::new(state.content.http.clone(), url, key))
-        }
+        (Some(url), Some(key)) => Ok(OwnedRemote {
+            http: state.content.http.clone(),
+            base: url.to_owned(),
+            bearer: Some(key),
+            timeout: None,
+        }),
         _ => Err(ApiError::new(
             ErrorCode::Conflict,
             "Pair this Core with an account to share its servers or follow an instance.",
@@ -154,12 +164,36 @@ pub(crate) fn push_error(error: push::PushError) -> ApiError {
 
 /// A share that is gone or no longer reachable with this Core's key (404, 401) is a
 /// conflict the caller can resolve; anything else is the backend's fault.
-pub(crate) fn backend_error(error: BackendError) -> ApiError {
-    let code = match error {
-        BackendError::Unavailable { .. } => ErrorCode::Conflict,
-        _ => ErrorCode::InternalError,
+pub(crate) fn backend_error(error: CallError) -> ApiError {
+    let code = match Unavailable::of(&error) {
+        Some(_) => ErrorCode::Conflict,
+        None => ErrorCode::InternalError,
     };
     ApiError::new(code, error.to_string())
+}
+
+/// The latest version members can install, or `None` while there is none.
+async fn latest_ready(
+    backend: &OwnedRemote,
+    share_id: &str,
+) -> Result<Option<InstanceVersion>, CallError> {
+    let id = SharedInstanceId {
+        id: share_id.to_owned(),
+    };
+    let latest = call::<GetLatestVersion>(
+        &backend.remote(),
+        &id,
+        &Default::default(),
+        Empty,
+    )
+    .await;
+    match latest {
+        Ok(version) => Ok(version.ready.then_some(version)),
+        Err(error) if Unavailable::of(&error) == Some(Unavailable::Deleted) => {
+            Ok(None)
+        }
+        Err(error) => Err(error),
+    }
 }
 
 /// Copy `path` out of the server folder to `to`, so the push reads bytes no link or later write
@@ -207,14 +241,24 @@ pub async fn share(
         .map_err(internal)?
     {
         Some(share_id) => {
-            match backend.rename_share(&share_id, &snapshot.name).await {
+            let rename = contracts::Json(SharedInstanceUpdate {
+                name: snapshot.name.clone(),
+            });
+            let id = SharedInstanceId {
+                id: share_id.clone(),
+            };
+            match call::<UpdateSharedInstance>(
+                &backend.remote(),
+                &id,
+                &(),
+                rename,
+            )
+            .await
+            {
                 Err(error)
                     if matches!(
-                        error.status(),
-                        Some(
-                            reqwest::StatusCode::FORBIDDEN
-                                | reqwest::StatusCode::NOT_FOUND
-                        )
+                        sharing_client::shares::status(&error),
+                        Some(403 | 404)
                     ) =>
                 {
                     None
@@ -229,10 +273,19 @@ pub async fn share(
     let share_id = match existing {
         Some(share_id) => share_id,
         None => {
-            let share_id = backend
-                .create_server_share(&snapshot.name, &id)
-                .await
-                .map_err(backend_error)?;
+            let share = contracts::Json(NewSharedInstance {
+                name: snapshot.name.clone(),
+                server_id: Some(id.clone()),
+            });
+            let share_id = call::<CreateSharedInstance>(
+                &backend.remote(),
+                &(),
+                &(),
+                share,
+            )
+            .await
+            .map_err(backend_error)?
+            .id;
             server_rows::set_share_id(&state.db, &id, Some(&share_id))
                 .await
                 .map_err(internal)?;
@@ -287,7 +340,7 @@ pub async fn share(
             .map_err(internal)?.map_err(internal)?
         };
         let pushed = push::push(
-            &backend,
+            &backend.remote(),
             &state.content.store,
             &share_id,
             &snapshot.content,
@@ -419,9 +472,7 @@ async fn shared_configs(state: &CoreState, id: &str) -> BTreeSet<String> {
             return Ok(None);
         };
         Ok::<_, ApiError>(
-            backend(state)
-                .await?
-                .latest_ready(&share_id)
+            latest_ready(&backend(state).await?, &share_id)
                 .await
                 .map_err(backend_error)?,
         )
@@ -429,7 +480,7 @@ async fn shared_configs(state: &CoreState, id: &str) -> BTreeSet<String> {
     match latest.await {
         Ok(latest) => latest
             .iter()
-            .flat_map(|version| version.configs())
+            .flat_map(sharing_client::versions::configs)
             .map(|file| file.file_name.clone())
             .collect(),
         Err(error) => {
@@ -514,16 +565,17 @@ pub async fn diff(
         .await
         .map_err(internal)?
         .ok_or_else(not_shared)?;
-    let latest = backend(&state)
-        .await?
-        .latest_ready(&share_id)
+    let latest = latest_ready(&backend(&state).await?, &share_id)
         .await
         .map_err(backend_error)?
         .ok_or_else(not_shared)?;
     let snapshot = snapshot(&state.content, &id).await?;
-    let (before, after) =
-        share_contents(&snapshot, &latest.content, &latest.external_files)
-            .await?;
+    let (before, after) = share_contents(
+        &snapshot,
+        &latest.manifest.content,
+        &latest.manifest.external_files,
+    )
+    .await?;
     let diffs =
         share_diff(&before, &after, &push_options(), &Names(&state.content))
             .await

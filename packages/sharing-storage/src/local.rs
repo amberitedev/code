@@ -3,7 +3,7 @@
 //! needed.
 //!
 //! - The store's first line says where its HTTP listener is: `{"listening": <port>}`.
-//! - Copal calls with `{"id": n, "call": "status"}`, `{"id": n, "call": "drop", "roots": [R…]}`,
+//! - Copal calls with `{"id": n, "call": "status"}`, `{"id": n, "call": "drop", "roots": [version hash…]}`,
 //!   or `{"id": n, "call": "config", "cap": bytes, "egress_cap": bytes}`.
 //! - The store answers each with `{"id": n, "ok": …}` ([`Status`] for `status`, `null` for the
 //!   others) or `{"id": n, "error": "…"}`.

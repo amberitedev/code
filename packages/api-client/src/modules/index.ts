@@ -1,5 +1,7 @@
 import type { AbstractModrinthClient } from '../core/abstract-client'
 import type { AbstractModule } from '../core/abstract-module'
+import { SharedInstancesPlayersV1Module } from '../sharing/players/v1'
+import { SharedInstancesStorageV1Module } from '../sharing/storage/v1'
 import { ArchonActionsV1Module } from './archon/actions/v1'
 import { ArchonBackupRepositoriesInternalModule } from './archon/backup-repositories/internal'
 import { ArchonBackupsV1Module } from './archon/backups/v1'
@@ -71,8 +73,6 @@ import { PurpurVersionsV2Module } from './purpur/v2'
 import { SharedInstancesInstancesV1Module } from './shared-instances/instances/v1'
 import { SharedInstancesInvitesV1Module } from './shared-instances/invites/v1'
 import { SharedInstancesModerationV1Module } from './shared-instances/moderation/v1'
-import { SharedInstancesPlayersV1Module } from './shared-instances/players/v1'
-import { SharedInstancesStorageV1Module } from './shared-instances/storage/v1'
 import { SharedInstancesUsersV1Module } from './shared-instances/users/v1'
 
 type ModuleConstructor = new (client: AbstractModrinthClient) => AbstractModule

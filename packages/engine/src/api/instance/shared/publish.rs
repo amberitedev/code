@@ -189,8 +189,7 @@ pub async fn get_shared_instance_publish_preview(
     let diffs =
         shared_instance_publish_diffs(&metadata, &version, &snapshot, state)
             .await?;
-    let shared = version
-        .configs()
+    let shared = sharing_client::versions::configs(&version)
         .map(|file| file.file_name.as_str())
         .collect::<HashSet<_>>();
     let mut files = snapshot.shared_files;
@@ -217,10 +216,10 @@ pub async fn get_shared_instance_publish_preview(
 }
 
 pub(super) async fn shared_instance_install_modpack(
-    version: &ShareVersion,
+    version: &InstanceVersion,
     state: &Engine,
 ) -> crate::Result<Option<crate::install::SharedInstanceInstallModpack>> {
-    let Some(modpack_id) = version.modpack_id() else {
+    let Some(modpack_id) = sharing_client::versions::modpack_id(version) else {
         return Ok(None);
     };
     let modpack_version = CachedEntry::get_version(
@@ -833,7 +832,7 @@ pub(super) async fn publish_current_content(
             .join(&metadata.instance.path),
     );
     let result = push::push(
-        &push_backend(&state.sessions)?,
+        &push_backend(&state.sessions)?.remote(),
         &pool::STORE,
         shared_instance_id,
         &content,

@@ -25,8 +25,9 @@ bedrock holds three kinds of code:
    The App keeps the originals.
 3. Our own shared code: content rules.
 
-sharing-client is one folder per concern: `backend` (the one client for the backend's share
-routes), `versions` (the share version, `RemovedFile`), `rules` (which files a share carries,
+sharing-client is one folder per concern: `shares` (how both sides read the backend's share
+routes, which they call through `contracts::backend::sharing`), `versions` (reading a share
+version and its `RemovedFile`s), `rules` (which files a share carries,
 what `blocked` means, and the listing of pickable files), `push` (reading an owner's rows into a
 version, the version builder and the writer), `pool` (the store client and the fetch), `install`
 (the member install plan: a version's files at each side's paths, less its modpack, with the

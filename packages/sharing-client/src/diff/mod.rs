@@ -19,7 +19,7 @@ use modrinth_content_management::{
 
 use crate::install::{ModpackFile, split_content};
 use crate::rules::{CONFIG_FILE_TYPE, content_type};
-use crate::versions::{ManifestFile, VersionContent};
+use contracts::backend::sharing::{ExternalFile, VersionContent};
 
 pub use model::{SharedInstanceUpdateDiff, SharedInstanceUpdateDiffType};
 
@@ -46,8 +46,8 @@ pub struct CarriedFile<'a> {
     pub sha1: Option<&'a str>,
 }
 
-impl<'a> From<&'a ManifestFile> for CarriedFile<'a> {
-    fn from(file: &'a ManifestFile) -> Self {
+impl<'a> From<&'a ExternalFile> for CarriedFile<'a> {
+    fn from(file: &'a ExternalFile) -> Self {
         Self {
             file_type: &file.file_type,
             file_name: &file.file_name,

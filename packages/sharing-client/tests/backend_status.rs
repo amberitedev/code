@@ -5,11 +5,12 @@ use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
 
 use contracts::ErrorCode;
-use sharing_client::backend::{Backend, Unavailable};
+use contracts::backend::sharing::VersionContent;
+use contracts::client::{CallError, Remote};
 use sharing_client::pool::StoreClient;
 use sharing_client::push::{self, KeptConfigs, LocateConfig, PushError};
 use sharing_client::rules::ShareScope;
-use sharing_client::versions::VersionContent;
+use sharing_client::shares::{Unavailable, delete_share};
 
 /// Answers each request with the next (status, body) and records each request line.
 fn serve(answers: Vec<(u16, String)>) -> (String, Arc<Mutex<Vec<String>>>) {
@@ -36,6 +37,17 @@ fn serve(answers: Vec<(u16, String)>) -> (String, Arc<Mutex<Vec<String>>>) {
     (url, seen)
 }
 
+/// The backend at `base`, called with a token.
+fn remote<'a>(http: &'a reqwest::Client, base: &'a str) -> Remote<'a> {
+    Remote {
+        http,
+        base,
+        bearer: Some("token"),
+        read_ticket: None,
+        timeout: None,
+    }
+}
+
 fn http() -> reqwest::Client {
     reqwest::Client::builder()
         .use_preconfigured_tls(
@@ -49,7 +61,7 @@ async fn push_against(
     answers: Vec<(u16, String)>,
 ) -> (Result<i32, PushError>, Vec<String>) {
     let (url, seen) = serve(answers);
-    let backend = Backend::new(http(), url, "token");
+    let http = http();
     let locate: &LocateConfig = &|_| Box::pin(async { Ok(None) });
     let kept = KeptConfigs {
         scope: ShareScope::Server,
@@ -66,7 +78,7 @@ async fn push_against(
         loader_version: String::new(),
     };
     let result = push::push(
-        &backend,
+        &remote(&http, &url),
         &StoreClient::new("token"),
         "share",
         &content,
@@ -103,7 +115,7 @@ async fn share_without_versions_gets_its_first() {
     let root =
         "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
     let created = format!(
-        r#"{{"modrinth_ids":[],"modpack_id":null,"removed_files":[],"game_version":"1.21.1","loader":"fabric","loader_version":"","root":"{root}","external_files":[],"version":1,"ready":true}}"#
+        r#"{{"modrinth_ids":[],"modpack_id":null,"removed_files":[],"game_version":"1.21.1","loader":"fabric","loader_version":"","version_hash":"{root}","external_files":[],"version":1,"ready":true}}"#
     );
     let (result, seen) = push_against(vec![
         (404, r#"{"error":"not_found","description":"x"}"#.into()),
@@ -126,19 +138,24 @@ async fn the_pool_refuses_a_version_by_its_code() {
 
 #[tokio::test]
 async fn deleting_a_gone_share_succeeds() {
+    let http = http();
     for status in [404, 410] {
         let (url, _) = serve(vec![(status, "{}".into())]);
-        let backend = Backend::new(http(), url, "token");
-        assert!(backend.delete_share("share").await.is_ok(), "{status}");
+        let result = delete_share(&remote(&http, &url), "share").await;
+        assert!(result.is_ok(), "{status}");
     }
     let (url, _) = serve(vec![(
         403,
         r#"{"error":"not_owner","description":"n"}"#.into(),
     )]);
-    let error = Backend::new(http(), url, "token")
-        .delete_share("share")
+    let error = delete_share(&remote(&http, &url), "share")
         .await
         .unwrap_err();
-    assert_eq!(error.status(), Some(reqwest::StatusCode::FORBIDDEN));
-    assert_eq!(error.body().unwrap().error, ErrorCode::NotOwner);
+    assert!(
+        matches!(
+            &error,
+            CallError::Api { status: 403, error } if error.error == ErrorCode::NotOwner
+        ),
+        "{error:?}"
+    );
 }

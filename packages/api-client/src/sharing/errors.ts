@@ -1,7 +1,7 @@
 import type { ErrorCode } from '@amberite/contracts'
 
-import { ModrinthApiError } from '../../core/errors'
-import { isModrinthErrorResponse } from '../../types/errors'
+import { ModrinthApiError } from '../core/errors'
+import { isModrinthErrorResponse } from '../types/errors'
 
 /**
  * A response the sharing backend refused. `status` and `code` say why, so a caller can tell a

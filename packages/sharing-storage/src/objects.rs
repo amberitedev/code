@@ -1,11 +1,12 @@
 //! The store's folder:
 //!
-//! - `objects/<2 hex>/<2 hex>/<C>`: one encrypted object, named by its hash. Written to a
+//! - `objects/<2 hex>/<2 hex>/<hash>`: one encrypted object, named by its hash. Written to a
 //!   `.part` file beside it and renamed only once the hash checks out.
-//! - `versions/<R>.json`: a stored version's list, `{ objects: [{ hash, size }] }`.
-//! - `versions/<R>.pending.<unix seconds>.json`: the list of an upload still under way, which
+//! - `versions/<hash>.json`: a stored version's list, `{ objects: [{ hash, size }] }`, named by
+//!   the version's hash.
+//! - `versions/<hash>.pending.<unix seconds>.json`: the list of an upload still under way, which
 //!   keeps its objects from cleanup until it completes or [`GRACE_S`] passes.
-//! - `versions/<R>.dropped.<unix seconds>.json`: a dropped list, kept [`GRACE_S`] so fetch
+//! - `versions/<hash>.dropped.<unix seconds>.json`: a dropped list, kept [`GRACE_S`] so fetch
 //!   tickets issued before the drop still work.
 //! - `keys.json`, `egress.json`: see `keys` and `limits`.
 //!

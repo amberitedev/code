@@ -348,6 +348,448 @@ export const cores = {
 	Keys: { method: "GET", path: "/core/keys.json", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, PublicKeys>,
 }
 
+export type SharedIconConfig = { background: SharedIconBackground, symbol: string, };
+
+export type SharedIconBackground = { "type": "color", value: string, } | { "type": "linear-top-down-gradient", top_color: string, bottom_color: string, };
+
+export type SharedInstanceId = { id: string, };
+
+export type InstanceInviteId = { id: string, invite_id: string, };
+
+export type InstanceVersionId = { id: string, version: number, };
+
+export type InviteId = { id: string, };
+
+export type IconUpload = { id: string, upload: string, };
+
+export type BlacklistedUser = { user_id: string, };
+
+export type ModeratedFile = { id: string, version: number, file: string, };
+
+export type CoreServerId = { core_id: string, server_id: string, };
+
+export type ServerInviteId = { core_id: string, server_id: string, invite_id: string, };
+
+export type SharedInstanceFilter = { 
+/**
+ * Only the caller's own id is allowed.
+ */
+user?: string, 
+/**
+ * Also the shares the caller joined or plays through a server.
+ */
+include_joined?: boolean, };
+
+export type NewSharedInstance = { name: string, 
+/**
+ * A Core key only: the server whose share this is. Its existing share is answered when it
+ * has one.
+ */
+server_id?: string, };
+
+export type CreatedId = { id: string, };
+
+export type SharedInstanceUpdate = { name: string, };
+
+export type SharedInstance = { name: string, 
+/**
+ * The URL of an uploaded image. Null for an icon editor icon, which `icon_config` holds.
+ */
+icon: string | null, icon_config: SharedIconConfig | null, quarantine: boolean, 
+/**
+ * Someone other than the owner joined it once.
+ */
+installed_once: boolean, 
+/**
+ * For a player, the server they came through, which the App adds to the instance's list.
+ */
+linked_server: LinkedServer | null, };
+
+export type LinkedServer = { 
+/**
+ * The Minecraft address, `host:port`.
+ */
+domain: string, region: string, online_status: OnlineStatus | null, };
+
+export type OnlineStatus = "unknown" | "running" | "stopped";
+
+export type InstanceUsers = { users: Array<InstanceUser>, 
+/**
+ * Invite links that still work.
+ */
+tokens: number, };
+
+export type InstanceUser = { id: string, 
+/**
+ * RFC 3339. Null while the invite is pending.
+ */
+joined_at: string | null, join_type: JoinType, 
+/**
+ * RFC 3339.
+ */
+last_played: string | null, };
+
+export type JoinType = "owner" | "invite" | "link";
+
+export type UserIds = { user_ids: Array<string>, };
+
+export type FailedInvites = { failed: Array<string>, };
+
+export type InviteLink = { id: string, 
+/**
+ * RFC 3339.
+ */
+expiration: string, 
+/**
+ * 0 for no limit.
+ */
+max_uses: number, uses: number, };
+
+export type NewInviteLink = { 
+/**
+ * Seconds, a week when absent. 0 is a year.
+ */
+max_age?: number, 
+/**
+ * 0, the default, for no limit.
+ */
+max_uses?: number, };
+
+export type Invite = { instance_id: string, instance_name: string, instance_icon: string | null, instance_icon_config: SharedIconConfig | null, 
+/**
+ * Empty while no version is ready.
+ */
+game_version: string, loader_version: string, inviter: Inviter | null, managers: Array<InviteManager>, 
+/**
+ * Empty for a server's link: players never see the share's members.
+ */
+instance_users: Array<InviteUser>, 
+/**
+ * With `?version=true`: the latest ready version, without file keys or download.
+ */
+version?: InstanceVersion, };
+
+export type Inviter = { id: string, name: string, avatar: string | null, };
+
+export type InviteManager = { "type": "user", id: string, name: string, avatar: string | null, } | { "type": "server", name: string, icon: string | null, };
+
+export type InviteUser = { id: string, name: string, avatar: string | null, joined_at: string | null, };
+
+export type InvitePreviewQuery = { 
+/**
+ * Adds the latest ready version.
+ */
+version?: boolean, };
+
+export type RemovedFile = { "type": "version", version_id: string, } | { "type": "path", parent: string, filename: string, };
+
+export type VersionContent = { 
+/**
+ * The Modrinth versions of its content.
+ */
+modrinth_ids: Array<string>, 
+/**
+ * The Modrinth version of the modpack it is based on.
+ */
+modpack_id: string | null, 
+/**
+ * Files of the modpack that members do not get. Only with a modpack.
+ */
+removed_files: Array<RemovedFile>, game_version: string, 
+/**
+ * `vanilla`, `fabric`, `forge`, `quilt` or `neoforge`.
+ */
+loader: string, 
+/**
+ * Empty for vanilla.
+ */
+loader_version: string, };
+
+export type VersionManifest = { 
+/**
+ * The hash of its sorted distinct object hashes, which names it on the stores.
+ */
+version_hash: Hash, external_files: Array<ExternalFile>, 
+/**
+ * The Modrinth versions of its content.
+ */
+modrinth_ids: Array<string>, 
+/**
+ * The Modrinth version of the modpack it is based on.
+ */
+modpack_id: string | null, 
+/**
+ * Files of the modpack that members do not get. Only with a modpack.
+ */
+removed_files: Array<RemovedFile>, game_version: string, 
+/**
+ * `vanilla`, `fabric`, `forge`, `quilt` or `neoforge`.
+ */
+loader: string, 
+/**
+ * Empty for vanilla.
+ */
+loader_version: string, };
+
+export type ExternalFile = { file_name: string, file_type: string, 
+/**
+ * Always null: the file is fetched from the stores by `object`.
+ */
+url: string | null, file_size: number, 
+/**
+ * What a member's install compares to skip a file it already has.
+ */
+sha1: string, 
+/**
+ * The SHA-256 of the plain bytes.
+ */
+sha256: Hash, 
+/**
+ * The SHA-256 of the encrypted object, which names it on the stores.
+ */
+object: Hash, object_size: number, 
+/**
+ * The file's own key. Absent for content files, whose key derives from `sha256`, and in an
+ * invite's preview, which carries no keys.
+ */
+key?: Hash, };
+
+export type InstanceVersion = { version: number, 
+/**
+ * Its files are on the stores, so members can install it.
+ */
+ready: boolean, 
+/**
+ * For a member, once it is ready and has files.
+ */
+download?: VersionDownload, 
+/**
+ * For its owner, while it is not ready.
+ */
+upload?: VersionUpload, 
+/**
+ * For its owner.
+ */
+reports?: VersionReports, 
+/**
+ * The hash of its sorted distinct object hashes, which names it on the stores.
+ */
+version_hash: Hash, external_files: Array<ExternalFile>, 
+/**
+ * The Modrinth versions of its content.
+ */
+modrinth_ids: Array<string>, 
+/**
+ * The Modrinth version of the modpack it is based on.
+ */
+modpack_id: string | null, 
+/**
+ * Files of the modpack that members do not get. Only with a modpack.
+ */
+removed_files: Array<RemovedFile>, game_version: string, 
+/**
+ * `vanilla`, `fabric`, `forge`, `quilt` or `neoforge`.
+ */
+loader: string, 
+/**
+ * Empty for vanilla.
+ */
+loader_version: string, };
+
+export type VersionDownload = { holders: Array<StoreHost>, ticket: string, };
+
+export type VersionUpload = { core: StoreHost, ticket: string, 
+/**
+ * RFC 3339.
+ */
+expires: string, };
+
+export type VersionReports = { 
+/**
+ * Members whose files decrypted to the wrong bytes.
+ */
+content: number, };
+
+export type NewInstanceVersion = { 
+/**
+ * The owner's Core that runs a server of this share, which then holds its files.
+ */
+server_core?: string, 
+/**
+ * The hash of its sorted distinct object hashes, which names it on the stores.
+ */
+version_hash: Hash, external_files: Array<ExternalFile>, 
+/**
+ * The Modrinth versions of its content.
+ */
+modrinth_ids: Array<string>, 
+/**
+ * The Modrinth version of the modpack it is based on.
+ */
+modpack_id: string | null, 
+/**
+ * Files of the modpack that members do not get. Only with a modpack.
+ */
+removed_files: Array<RemovedFile>, game_version: string, 
+/**
+ * `vanilla`, `fabric`, `forge`, `quilt` or `neoforge`.
+ */
+loader: string, 
+/**
+ * Empty for vanilla.
+ */
+loader_version: string, };
+
+export type VersionRead = { read_ticket?: string, };
+
+export type VersionFault = { core_id: string, kind: FaultKind, };
+
+export type FaultKind = "object" | "content";
+
+export type HostedServer = { core_id: string, server_id: string, name: string, 
+/**
+ * The Minecraft address to ping and join. Not shown to the member.
+ */
+address: string, host: ServerHost, };
+
+export type ServerHost = { id: string, username: string, avatar_url: string | null, };
+
+export type NewReadTicket = { core_id: string, };
+
+export type SignedReadTicket = { ticket: string, 
+/**
+ * RFC 3339.
+ */
+expires: string, };
+
+export type ShareStorage = { used: number, allowance: number, 
+/**
+ * How many versions each share keeps. Null keeps all of them.
+ */
+kept_versions: number | null, 
+/**
+ * Only the shares the account owns.
+ */
+shares: Array<StoredShare>, };
+
+export type StoredShare = { id: string, name: string, 
+/**
+ * It is on someone else's Core, so it counts against the allowance.
+ */
+counted: boolean, 
+/**
+ * What it counts against the allowance, 0 when not counted.
+ */
+used: number, 
+/**
+ * What its kept versions take, counted or not.
+ */
+size: number, 
+/**
+ * The account's own Cores holding it.
+ */
+cores: Array<string>, 
+/**
+ * Newest first.
+ */
+versions: Array<StoredVersion>, };
+
+export type StoredVersion = { version: number, 
+/**
+ * RFC 3339.
+ */
+created: string, bytes: number, ready: boolean, 
+/**
+ * The latest ready version, which members install. It cannot be deleted.
+ */
+current: boolean, };
+
+export type BlacklistStatus = { blacklisted: boolean, };
+
+export type FollowedShare = { instance_id: string, name: string, 
+/**
+ * The server's game port on its Core.
+ */
+port: number, 
+/**
+ * Where the Core's router opened it on the internet. Null while it has not, which keeps the
+ * last one known.
+ */
+outside: OutsideAddress | null, };
+
+export type OutsideAddress = { ip: string, port: number, };
+
+export type NewPlayers = { user_ids: Array<string>, instance_id: string, name: string, 
+/**
+ * The server's game port on its Core.
+ */
+port: number, 
+/**
+ * Where the Core's router opened it on the internet. Null while it has not, which keeps the
+ * last one known.
+ */
+outside: OutsideAddress | null, };
+
+export type NewPlayerLink = { instance_id: string, name: string, 
+/**
+ * The server's game port on its Core.
+ */
+port: number, 
+/**
+ * Where the Core's router opened it on the internet. Null while it has not, which keeps the
+ * last one known.
+ */
+outside: OutsideAddress | null, 
+/**
+ * Seconds, a week when absent. 0 is a year.
+ */
+max_age?: number, 
+/**
+ * 0, the default, for no limit.
+ */
+max_uses?: number, };
+
+/** The backend's shared instance routes, on upstream's `sharedinstances` v1 paths. */
+export const sharing = {
+	ListSharedInstances: { method: "GET", path: "/v1/instances", auth: "account", dangerous: false, body: "empty", response: "json" } as Endpoint<null, SharedInstanceFilter, void, Array<string>>,
+	CreateSharedInstance: { method: "POST", path: "/v1/instances", auth: "account", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, NewSharedInstance, CreatedId>,
+	GetSharedInstance: { method: "GET", path: "/v1/instances/{id}", auth: "account", dangerous: false, body: "empty", response: "json" } as Endpoint<SharedInstanceId, null, void, SharedInstance>,
+	UpdateSharedInstance: { method: "PATCH", path: "/v1/instances/{id}", auth: "account", dangerous: false, body: "json", response: "empty" } as Endpoint<SharedInstanceId, null, SharedInstanceUpdate, void>,
+	DeleteSharedInstance: { method: "DELETE", path: "/v1/instances/{id}", auth: "account", dangerous: false, body: "empty", response: "empty" } as Endpoint<SharedInstanceId, null, void, void>,
+	ListInstanceUsers: { method: "GET", path: "/v1/instances/{id}/users", auth: "account", dangerous: false, body: "empty", response: "json" } as Endpoint<SharedInstanceId, null, void, InstanceUsers>,
+	InviteInstanceUsers: { method: "POST", path: "/v1/instances/{id}/users", auth: "account", dangerous: false, body: "json", response: "json" } as Endpoint<SharedInstanceId, null, UserIds, FailedInvites>,
+	RemoveInstanceUsers: { method: "DELETE", path: "/v1/instances/{id}/users", auth: "account", dangerous: false, body: "json", response: "empty" } as Endpoint<SharedInstanceId, null, UserIds, void>,
+	ListInvites: { method: "GET", path: "/v1/instances/{id}/invites", auth: "account", dangerous: false, body: "empty", response: "json" } as Endpoint<SharedInstanceId, null, void, Array<InviteLink>>,
+	CreateInvite: { method: "POST", path: "/v1/instances/{id}/invites", auth: "account", dangerous: false, body: "json", response: "json" } as Endpoint<SharedInstanceId, null, NewInviteLink, CreatedId>,
+	AcceptPendingInvite: { method: "POST", path: "/v1/instances/{id}/invites/pending", auth: "account", dangerous: false, body: "empty", response: "empty" } as Endpoint<SharedInstanceId, null, void, void>,
+	DeclinePendingInvite: { method: "DELETE", path: "/v1/instances/{id}/invites/pending", auth: "account", dangerous: false, body: "empty", response: "empty" } as Endpoint<SharedInstanceId, null, void, void>,
+	AcceptInvite: { method: "POST", path: "/v1/instances/{id}/invites/{invite_id}", auth: "account", dangerous: false, body: "empty", response: "empty" } as Endpoint<InstanceInviteId, null, void, void>,
+	DeleteInvite: { method: "DELETE", path: "/v1/instances/{id}/invites/{invite_id}", auth: "account", dangerous: false, body: "empty", response: "empty" } as Endpoint<InstanceInviteId, null, void, void>,
+	GetInvite: { method: "GET", path: "/v1/invites/{id}", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<InviteId, InvitePreviewQuery, void, Invite>,
+	GetLatestVersion: { method: "GET", path: "/v1/instances/{id}/versions", auth: "account", dangerous: false, body: "empty", response: "json" } as Endpoint<SharedInstanceId, VersionRead, void, InstanceVersion>,
+	CreateVersion: { method: "POST", path: "/v1/instances/{id}/versions", auth: "account", dangerous: false, body: "json", response: "json" } as Endpoint<SharedInstanceId, null, NewInstanceVersion, InstanceVersion>,
+	GetVersion: { method: "GET", path: "/v1/instances/{id}/versions/{version}", auth: "account", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceVersionId, VersionRead, void, InstanceVersion>,
+	DeleteVersion: { method: "DELETE", path: "/v1/instances/{id}/versions/{version}", auth: "account", dangerous: false, body: "empty", response: "empty" } as Endpoint<InstanceVersionId, null, void, void>,
+	ReportVersion: { method: "POST", path: "/v1/instances/{id}/versions/{version}/reports", auth: "account", dangerous: false, body: "json", response: "empty" } as Endpoint<InstanceVersionId, null, VersionFault, void>,
+	SetIcon: { method: "PUT", path: "/v1/instances/{id}/icon", auth: "account", dangerous: false, body: "raw", response: "empty" } as Endpoint<SharedInstanceId, null, Blob, void>,
+	SetGeneratedIcon: { method: "PUT", path: "/v1/instances/{id}/icon/generated", auth: "account", dangerous: false, body: "json", response: "empty" } as Endpoint<SharedInstanceId, null, SharedIconConfig, void>,
+	RemoveIcon: { method: "DELETE", path: "/v1/instances/{id}/icon", auth: "account", dangerous: false, body: "empty", response: "empty" } as Endpoint<SharedInstanceId, null, void, void>,
+	GetIcon: { method: "GET", path: "/v1/icons/{id}/{upload}", auth: "none", dangerous: false, body: "empty", response: "raw" } as Endpoint<IconUpload, null, void, Blob>,
+	ListHostedServers: { method: "GET", path: "/v1/instances/{id}/servers", auth: "account", dangerous: false, body: "empty", response: "json" } as Endpoint<SharedInstanceId, null, void, Array<HostedServer>>,
+	IssueReadTicket: { method: "POST", path: "/v1/instances/{id}/server-ticket", auth: "account", dangerous: false, body: "json", response: "json" } as Endpoint<SharedInstanceId, null, NewReadTicket, SignedReadTicket>,
+	GetShareStorage: { method: "GET", path: "/v1/storage", auth: "account", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, ShareStorage>,
+	GetBlacklistStatus: { method: "GET", path: "/v1/blacklist/{user_id}", auth: "account", dangerous: false, body: "empty", response: "json" } as Endpoint<BlacklistedUser, null, void, BlacklistStatus>,
+	BlacklistUsers: { method: "POST", path: "/v1/moderation/blacklist", auth: "account", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, UserIds, void>,
+	UnblacklistUsers: { method: "DELETE", path: "/v1/moderation/blacklist", auth: "account", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, UserIds, void>,
+	DeleteModeratedFile: { method: "DELETE", path: "/v1/moderation/instances/{id}/versions/{version}/files/{file}", auth: "account", dangerous: false, body: "empty", response: "empty" } as Endpoint<ModeratedFile, null, void, void>,
+	ListPlayers: { method: "GET", path: "/v1/servers/{core_id}/{server_id}/players", auth: "account", dangerous: false, body: "empty", response: "json" } as Endpoint<CoreServerId, null, void, InstanceUsers>,
+	InvitePlayers: { method: "POST", path: "/v1/servers/{core_id}/{server_id}/players", auth: "account", dangerous: false, body: "json", response: "json" } as Endpoint<CoreServerId, null, NewPlayers, FailedInvites>,
+	RemovePlayers: { method: "DELETE", path: "/v1/servers/{core_id}/{server_id}/players", auth: "account", dangerous: false, body: "json", response: "empty" } as Endpoint<CoreServerId, null, UserIds, void>,
+	ListPlayerLinks: { method: "GET", path: "/v1/servers/{core_id}/{server_id}/invites", auth: "account", dangerous: false, body: "empty", response: "json" } as Endpoint<CoreServerId, null, void, Array<InviteLink>>,
+	CreatePlayerLink: { method: "POST", path: "/v1/servers/{core_id}/{server_id}/invites", auth: "account", dangerous: false, body: "json", response: "json" } as Endpoint<CoreServerId, null, NewPlayerLink, CreatedId>,
+	DeletePlayerLink: { method: "DELETE", path: "/v1/servers/{core_id}/{server_id}/invites/{invite_id}", auth: "account", dangerous: false, body: "empty", response: "empty" } as Endpoint<ServerInviteId, null, void, void>,
+}
+
 export type Never = never;
 
 export type Role = "developer" | "moderator" | "admin";
@@ -583,7 +1025,7 @@ export const dev = {
 	Outbox: { method: "GET", path: "/_dev/outbox", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<OutboxEmail>>,
 }
 
-/** The backend's routes outside accounts, cores, dev and social, which have their own consts. */
+/** The backend's routes outside accounts, cores, dev, sharing and social, which have their own consts. */
 export const backend = {
 	CheckHealth: { method: "GET", path: "/health", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
 }

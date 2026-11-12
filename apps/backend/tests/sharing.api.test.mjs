@@ -53,7 +53,7 @@ function file(file_name, file_type, size, key = file_type === 'config') {
 	}
 }
 
-/** R: the hash of the distinct object hashes, sorted, as raw bytes. */
+/** A version's hash: the hash of its distinct object hashes, sorted, as raw bytes. */
 function root(files) {
 	const objects = [...new Set(files.map((entry) => entry.object))].sort()
 	return sha256(Buffer.concat(objects.map((object) => Buffer.from(object, 'hex'))))
@@ -123,7 +123,7 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 			call(
 				`/instances/${id}/versions`,
 				'POST',
-				{ ...manifest, external_files: external, root: root(external) },
+				{ ...manifest, external_files: external, version_hash: root(external) },
 				user,
 			)
 		/** A Core's storage report, as `copal` sends it after an upload and once an hour. */
@@ -181,7 +181,6 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		assert.deepEqual([drawn.icon, drawn.icon_config], [null, iconConfig])
 		assert.equal((await send(info.icon, 'GET')).status, 404, 'the replaced image is gone')
 		assert.equal((await files.list({ prefix: `icons/${id}/` })).objects.length, 0)
-		await code(await call(`/instances/${id}/server-icon`), 404, 'icon_not_found')
 		// Inviting a batch invites those who accept invitations and names the rest.
 		assert.deepEqual(
 			await ok(await call(`/instances/${id}/users`, 'POST', { user_ids: ['friend', 'stranger'] })),
@@ -201,10 +200,10 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		const first = await ok(await push(id, []))
 		assert.equal(first.version, 1)
 		assert.equal(first.ready, true)
-		assert.equal(first.root, EMPTY_ROOT)
+		assert.equal(first.version_hash, EMPTY_ROOT)
 		assert.deepEqual(first.external_files, [])
-		assert.equal(first.store, undefined)
-		assert.equal(first.pool, undefined)
+		assert.equal(first.upload, undefined)
+		assert.equal(first.download, undefined)
 		assert.deepEqual(first.reports, { content: 0 })
 		assert.equal(await notifications(), 1, 'the friend is invited once a version is ready')
 
@@ -219,16 +218,16 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		const second = await ok(await push(id, [jar, config]))
 		assert.equal(second.version, 2)
 		assert.equal(second.ready, false)
-		assert.equal(second.root, root([jar, config]))
-		assert.equal(second.pool, undefined)
-		assert.equal(second.store.core.id, 'core2')
-		assert.equal(second.store.core.cert_fingerprint, 'f'.repeat(64))
-		assert.ok(Date.parse(second.store.expires) > Date.now() + 3_500_000)
-		const store = decode(second.store.ticket)
+		assert.equal(second.version_hash, root([jar, config]))
+		assert.equal(second.download, undefined)
+		assert.equal(second.upload.core.id, 'core2')
+		assert.equal(second.upload.core.cert_fingerprint, 'f'.repeat(64))
+		assert.ok(Date.parse(second.upload.expires) > Date.now() + 3_500_000)
+		const store = decode(second.upload.ticket)
 		assert.ok(store.valid)
 		assert.equal(store.claims.kind, 'store')
 		assert.equal(store.claims.aud, 'core2')
-		assert.equal(store.claims.root, second.root)
+		assert.equal(store.claims.root, second.version_hash)
 		assert.equal(store.claims.bytes, bytes([jar, config]))
 		assert.equal(store.claims.exp - store.claims.iat, 3600)
 		assert.deepEqual(
@@ -245,7 +244,7 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 					key,
 				}),
 			),
-			[jar, config].map((entry) => ({ url: `pool:${entry.object}`, ...entry, key: entry.key })),
+			[jar, config].map((entry) => ({ url: null, ...entry, key: entry.key })),
 		)
 		assert.deepEqual(await manifests(id), [`manifests/${id}/1`, `manifests/${id}/2`])
 		assert.deepEqual(
@@ -290,36 +289,36 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		// Pushing the same files again resumes the upload; other files wait for it.
 		const resumed = await ok(await push(id, [jar, config]))
 		assert.equal(resumed.version, 2)
-		assert.notEqual(resumed.store.ticket, second.store.ticket)
+		assert.notEqual(resumed.upload.ticket, second.upload.ticket)
 		await code(await push(id, [jar]), 409, 'push_in_flight')
 
 		// The Core confirms: the version is ready, and members get holders and a fetch ticket.
-		const held = [{ root: second.root, bytes: bytes([jar, config]) }]
+		const held = [{ root: second.version_hash, bytes: bytes([jar, config]) }]
 		assert.deepEqual(await ok(await report('core2', held)), { drop: [], pull: [] })
 		const latest = await ok(await call(`/instances/${id}/versions`, 'GET', undefined, 'mra_friend'))
 		assert.equal(latest.version, 2)
 		assert.equal(latest.ready, true)
 		assert.deepEqual(
-			{ ...latest, external_files: undefined, pool: undefined },
+			{ ...latest, external_files: undefined, download: undefined },
 			{
 				...manifest,
 				removed_files: [],
-				root: second.root,
+				version_hash: second.version_hash,
 				version: 2,
 				ready: true,
 				external_files: undefined,
-				pool: undefined,
+				download: undefined,
 			},
 		)
 		assert.deepEqual(
-			latest.pool.holders.map((core) => core.id),
+			latest.download.holders.map((core) => core.id),
 			['core2'],
 		)
-		const fetch = decode(latest.pool.ticket)
+		const fetch = decode(latest.download.ticket)
 		assert.ok(fetch.valid)
 		assert.equal(fetch.claims.kind, 'fetch')
 		assert.deepEqual(fetch.claims.aud, ['core2'])
-		assert.equal(fetch.claims.root, second.root)
+		assert.equal(fetch.claims.root, second.version_hash)
 		assert.equal(fetch.claims.exp - fetch.claims.iat, 6 * 3600)
 		assert.equal(
 			latest.external_files.find((entry) => entry.file_type === 'config').key,
@@ -340,8 +339,8 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 			[jar.file_name, config.file_name],
 		)
 		assert.ok(shown.external_files.every((entry) => entry.key === undefined))
-		assert.equal(shown.pool, undefined)
-		assert.equal(shown.store, undefined)
+		assert.equal(shown.download, undefined)
+		assert.equal(shown.upload, undefined)
 		assert.doesNotMatch(JSON.stringify(shown), /ticket/)
 		assert.equal((await preview('')).version, undefined)
 
@@ -398,7 +397,7 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 				await call(`/instances/${id}/versions`, 'POST', {
 					...manifest,
 					external_files: [jar],
-					root: root([config]),
+					version_hash: root([config]),
 				})
 			).status,
 			400,
@@ -409,12 +408,12 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		// An unchanged file keeps its object. Five versions are kept by default, files included:
 		// the sixth ready version prunes the first manifest, and the Core is told to drop the
 		// roots of versions no longer kept.
-		const pushed = [second.root]
+		const pushed = [second.version_hash]
 		for (let push_ = 0; push_ < 5; push_++) {
 			const changed = file(config.file_name, 'config', 30 + push_)
 			const version = await ok(await push(id, [jar, changed]))
 			assert.equal(version.ready, false)
-			pushed.push(version.root)
+			pushed.push(version.version_hash)
 			const answer = await ok(
 				await report(
 					'core2',
@@ -440,7 +439,7 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		)
 
 		// A home that already holds the exact objects makes a version ready at once.
-		const again = await ok(await report('core2', [{ root: current.root, bytes: 1 }]))
+		const again = await ok(await report('core2', [{ root: current.version_hash, bytes: 1 }]))
 		assert.deepEqual(again.drop, [])
 		const same = await ok(
 			await push(
@@ -450,14 +449,14 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		)
 		assert.equal(same.version, 8)
 		assert.equal(same.ready, true)
-		assert.equal(same.root, current.root)
+		assert.equal(same.version_hash, current.version_hash)
 
 		// A replica is told to pull the kept versions it lacks from the home. Versions 7 and 8
 		// have the same files, so that is one root.
 		await db.prepare('UPDATE shared_instances SET replica = ? WHERE id = ?').bind('core', id).run()
 		const replica = await ok(await report('core', []))
 		assert.equal(replica.pull.length, 1)
-		assert.equal(replica.pull[0].root, current.root)
+		assert.equal(replica.pull[0].root, current.version_hash)
 		const pull = decode(replica.pull[0].ticket)
 		assert.ok(pull.valid)
 		assert.equal(pull.claims.kind, 'pull')
@@ -467,13 +466,13 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		const inner = decode(pull.claims.source.ticket)
 		assert.equal(inner.claims.kind, 'fetch')
 		assert.deepEqual(inner.claims.aud, ['core2'])
-		await ok(await report('core', [{ root: current.root, bytes: 1 }]))
+		await ok(await report('core', [{ root: current.version_hash, bytes: 1 }]))
 		const both = await ok(await call(`/instances/${id}/versions`, 'GET', undefined, 'mra_friend'))
 		assert.deepEqual(
-			both.pool.holders.map((core) => core.id),
+			both.download.holders.map((core) => core.id),
 			['core2', 'core'],
 		)
-		assert.deepEqual(decode(both.pool.ticket).claims.aud, ['core2', 'core'])
+		assert.deepEqual(decode(both.download.ticket).claims.aud, ['core2', 'core'])
 
 		// Leaving and removal revoke access to versions.
 		await ok(await call(`/instances/${id}/users`, 'DELETE', { user_ids: ['friend'] }))
@@ -502,7 +501,7 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 			const share = await ok(await call('/instances', 'POST', { name }))
 			const big = file(`${name}.jar`, 'mod', GB - 16 * 1024)
 			const version = await ok(await push(share.id, [big]))
-			shares.push({ id: share.id, root: version.root, big })
+			shares.push({ id: share.id, root: version.version_hash, big })
 		}
 		// Versions still uploading count too, so pushes to several shares at once cannot pass.
 		const full = await ok(await call('/instances', 'POST', { name: 'Full' }))
@@ -542,7 +541,7 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		await ok(
 			await report(
 				'core2',
-				[shares[0].root, shares[1].root, b2.root].map((root) => ({ root, bytes: GB })),
+				[shares[0].root, shares[1].root, b2.version_hash].map((root) => ({ root, bytes: GB })),
 			),
 		)
 		const overview = await usage()
@@ -575,15 +574,6 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		assert.equal((await usage()).used, 2 * GB)
 		assert.deepEqual(await manifests(shares[1].id), [`manifests/${shares[1].id}/2`])
 
-		// Keeping fewer versions drops the older ones at once; keeping all prunes nothing.
-		assert.equal((await call('/storage', 'PATCH', { kept_versions: 0 })).status, 400)
-		assert.equal((await ok(await call('/storage', 'PATCH', { kept_versions: 1 }))).kept_versions, 1)
-		assert.deepEqual(await manifests(shares[0].id), [`manifests/${shares[0].id}/2`])
-		assert.equal(
-			(await ok(await call('/storage', 'PATCH', { kept_versions: null }))).kept_versions,
-			null,
-		)
-
 		// An instance with a server on the owner's Core is homed there, its replica on a Core
 		// friends can reach.
 		const served = await ok(await call('/instances', 'POST', { name: 'Served' }))
@@ -593,11 +583,11 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 			await call(`/instances/${served.id}/versions`, 'POST', {
 				...manifest,
 				external_files: [world],
-				root: root([world]),
+				version_hash: root([world]),
 				server_core: 'core',
 			}),
 		)
-		assert.equal(servedVersion.store.core.id, 'core')
+		assert.equal(servedVersion.upload.core.id, 'core')
 		const placed = async () => ({
 			...(await db
 				.prepare('SELECT home, replica FROM shared_instances WHERE id = ?')
@@ -613,13 +603,13 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		// With no one else's Core offering storage, the owner's own takes a share without a server.
 		const fallback = await ok(await call('/instances', 'POST', { name: 'Fallback' }))
 		const fallbackVersion = await ok(await push(fallback.id, [file('fallback.jar', 'mod', 1000)]))
-		assert.equal(fallbackVersion.store.core.id, 'core')
+		assert.equal(fallbackVersion.upload.core.id, 'core')
 
 		// An owner whose Core runs privately keeps every share there alone, using no allowance.
 		await ok(await report('core', [], { enabled: false }))
 		const alone = await ok(await call('/instances', 'POST', { name: 'Alone' }))
 		const aloneVersion = await ok(await push(alone.id, [file('alone.jar', 'mod', 1000)]))
-		assert.equal(aloneVersion.store.core.id, 'core')
+		assert.equal(aloneVersion.upload.core.id, 'core')
 		const aloneShare = (await usage()).shares.find((share) => share.id === alone.id)
 		assert.deepEqual([aloneShare.counted, aloneShare.used], [false, 0])
 
@@ -693,34 +683,14 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 				.version,
 			1,
 		)
-		// The Share tab lists both kinds, each with how they got access. Only its owner reads it.
+		// A member joins the share, a player the server.
 		assert.deepEqual(
-			(await ok(await call(`/instances/${smp.id}/access`))).users.map(
-				({ user, join_type, via }) => ({
-					id: user.id,
-					join_type,
-					via,
-				}),
-			),
-			[
-				{ id: 'stranger', join_type: 'link', via: { type: 'member' } },
-				{
-					id: 'friend',
-					join_type: 'invite',
-					via: { type: 'player', core_id: 'core', server_id: 'srv1', name: server.name },
-				},
-				{
-					id: 'other',
-					join_type: 'link',
-					via: { type: 'player', core_id: 'core', server_id: 'srv1', name: server.name },
-				},
-			],
+			(await ok(await call(`/instances/${smp.id}/users`))).users.map((user) => user.id),
+			['owner', 'stranger'],
 		)
-		await code(await asFriend(`/instances/${smp.id}/access`), 403, 'not_owner')
-		await code(
-			await call(`/instances/${smp.id}/access`, 'GET', undefined, 'amc_core'),
-			403,
-			'not_owner',
+		assert.deepEqual(
+			(await ok(await call('/servers/core/srv1/players'))).users.map((user) => user.id),
+			['friend', 'other'],
 		)
 		// Only the Core's owner or the share's owner removes a player; removal ends their access.
 		assert.equal(
@@ -763,16 +733,16 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		assert.equal((await ok(await asFriend(`/instances/${smp.id}/versions`))).version, 1)
 		// Players do not see the member list.
 		await code(await asFriend(`/instances/${smp.id}/users`), 403, 'members_only')
-		// The share's owner sees and can revoke every server's link.
+		// Each Core's owner sees their server's links.
 		assert.deepEqual(
-			(await ok(await call(`/instances/${smp.id}/access`))).links.map(({ id, server }) => [
-				id,
-				server.server_id,
-			]),
-			[
-				[memberLink.id, 'srv2'],
-				[serverLink.id, 'srv1'],
-			],
+			(await ok(await call('/servers/core2/srv2/invites', 'GET', undefined, 'mra_other'))).map(
+				(invite) => invite.id,
+			),
+			[memberLink.id],
+		)
+		assert.deepEqual(
+			(await ok(await call('/servers/core/srv1/invites'))).map((invite) => invite.id),
+			[serverLink.id],
 		)
 		// Checked when read: a member whose membership lapses no longer passes it on.
 		const setJoined = (value) =>
@@ -933,11 +903,9 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		// ticket that user's App got for this Core and share. Without one it reads as its owner.
 		const readFor = (share, ticket, core = 'core') =>
 			send(
-				`http://local.test/v1/instances/${share}/versions`,
+				`http://local.test/v1/instances/${share}/versions${ticket ? `?read_ticket=${encodeURIComponent(ticket)}` : ''}`,
 				'GET',
 				`amc_${core}`,
-				undefined,
-				ticket ? { 'x-amberite-read-ticket': ticket } : {},
 			)
 		const readTicket = async (share, user, core = 'core') => {
 			const { ticket } = await ok(
@@ -1012,9 +980,9 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		// A Core's read gets no owner extras, even of its owner's share still uploading.
 		const coreRead = await ok(await readFor(alone.id))
 		assert.equal(coreRead.ready, false)
-		assert.equal(coreRead.store, undefined)
+		assert.equal(coreRead.upload, undefined)
 		assert.equal(coreRead.reports, undefined)
-		assert.ok((await ok(await call(`/instances/${alone.id}/versions`))).store)
+		assert.ok((await ok(await call(`/instances/${alone.id}/versions`))).upload)
 
 		// Removing the Core from the account deletes its server-first shares.
 		await ok(await send('http://local.test/cores/core', 'DELETE', 'mra_owner'))
@@ -1034,7 +1002,7 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 				modpack_id,
 				removed_files,
 				external_files: [],
-				root: EMPTY_ROOT,
+				version_hash: EMPTY_ROOT,
 			})
 		for (const [bad, modpack] of [
 			[[removed[0]], null],

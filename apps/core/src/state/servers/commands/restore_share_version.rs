@@ -20,13 +20,13 @@ use std::{
     sync::Arc,
 };
 
+use contracts::backend::sharing::{ExternalFile, VersionContent};
 use sharing_client::{
     history::{
         self, RestorePlan,
         restore::{Carried, Origin, replaced},
     },
     install::{ContentProject, CurrentFile, DesiredFile, content_changes},
-    versions::{ManifestFile, VersionContent},
 };
 
 use super::{
@@ -509,8 +509,8 @@ async fn apply(
 /// A carried addon file by type and name, as the server's addons are keyed, or `None` for a file
 /// that is not an addon, such as a config.
 fn carried_key(
-    file: &ManifestFile,
-) -> Option<((String, String), &ManifestFile)> {
+    file: &ExternalFile,
+) -> Option<((String, String), &ExternalFile)> {
     kind(&file.file_type)
         .map(|_| ((file.file_type.clone(), file.file_name.clone()), file))
 }
@@ -657,17 +657,22 @@ mod tests {
                 let source = staged
                     .join(format!("{version}-{}", file_name.replace('/', "-")));
                 std::fs::write(&source, text).unwrap();
-                external_files.push(sharing_client::versions::ManifestFile {
-                    file_name: file_name.into(),
-                    file_type: file_type.into(),
-                    file_size: text.len() as u64,
-                    sha1: crate::installs::download::sha1_of(text.as_bytes())
+                external_files.push(
+                    contracts::backend::sharing::ExternalFile {
+                        file_name: file_name.into(),
+                        file_type: file_type.into(),
+                        url: None,
+                        file_size: text.len() as u64,
+                        sha1: crate::installs::download::sha1_of(
+                            text.as_bytes(),
+                        )
                         .unwrap(),
-                    sha256: [0; 32],
-                    object: [0; 32],
-                    object_size: 0,
-                    key: None,
-                });
+                        sha256: contracts::Hash([0; 32]),
+                        object: contracts::Hash([0; 32]),
+                        object_size: 0,
+                        key: None,
+                    },
+                );
                 sources.push(source);
             }
             let pushed = sharing_client::push::Pushed {

@@ -932,9 +932,8 @@ async fn install_instance(
 ) -> Result<(), ApiError> {
     let busy = state.content.busy(id)?;
     let backend = super::share::backend(state).await?;
-    let backend = match (ticket, caller) {
-        (Some(ticket), _) => backend.with_read_ticket(ticket),
-        (None, Caller::Local) => backend,
+    match (&ticket, caller) {
+        (Some(_), _) | (None, Caller::Local) => {}
         // Without a ticket the backend reads as the Core's owner, which is not who asked.
         (None, Caller::Session { .. }) => {
             return Err(ApiError::new(
@@ -942,37 +941,41 @@ async fn install_instance(
                 "An instance install needs a read ticket for this Core.",
             ));
         }
-    };
-    let version = consume::ready_version(&backend, &shared_instance_id)
-        .await
-        .map_err(|error| match error {
-            // The backend names why by its code. It checks the Core owner's account before the
-            // reader's, so a locked or blacklisted account is most likely the owner's.
-            consume::ReadError::Denied { code, description } => {
-                let message = match code {
-                    ErrorCode::NotMember => {
-                        "You no longer have access to this instance's share."
-                    }
-                    ErrorCode::TicketInvalid => {
-                        "The request to update the server expired. Try again."
-                    }
-                    ErrorCode::AccountLocked | ErrorCode::Blacklisted => {
-                        "The owner of this Core cannot use sharing right now."
-                    }
-                    _ => description.as_str(),
-                };
-                ApiError::new(ErrorCode::Forbidden, message)
-            }
-            consume::ReadError::Backend(error) => {
-                super::share::backend_error(error)
-            }
-            error @ consume::ReadError::NoVersion => {
-                ApiError::new(ErrorCode::NotFound, error.to_string())
-            }
-            error @ consume::ReadError::NotReady => {
-                ApiError::new(ErrorCode::Conflict, error.to_string())
-            }
-        })?;
+    }
+    let version = consume::ready_version(
+        &backend.remote(),
+        &shared_instance_id,
+        ticket,
+    )
+    .await
+    .map_err(|error| match error {
+        // The backend names why by its code. It checks the Core owner's account before the
+        // reader's, so a locked or blacklisted account is most likely the owner's.
+        consume::ReadError::Denied { code, description } => {
+            let message = match code {
+                ErrorCode::NotMember => {
+                    "You no longer have access to this instance's share."
+                }
+                ErrorCode::TicketInvalid => {
+                    "The request to update the server expired. Try again."
+                }
+                ErrorCode::AccountLocked | ErrorCode::Blacklisted => {
+                    "The owner of this Core cannot use sharing right now."
+                }
+                _ => description.as_str(),
+            };
+            ApiError::new(ErrorCode::Forbidden, message)
+        }
+        consume::ReadError::Backend(error) => {
+            super::share::backend_error(error)
+        }
+        error @ consume::ReadError::NoVersion => {
+            ApiError::new(ErrorCode::NotFound, error.to_string())
+        }
+        error @ consume::ReadError::NotReady => {
+            ApiError::new(ErrorCode::Conflict, error.to_string())
+        }
+    })?;
     install_instance::install_instance(
         &state.content,
         Arc::clone(&state.access.owed),

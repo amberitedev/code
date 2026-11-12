@@ -1,7 +1,6 @@
 use super::client::*;
 use super::content::{remote_config_update, remote_shared_content};
 use super::diff::*;
-use super::icons::shared_instance_server_icon;
 use super::publish::*;
 use super::types::*;
 use super::*;
@@ -173,7 +172,11 @@ pub async fn get_shared_instance_invite_install_preview(
     let invite = get_shared_instance_invite_info(invite_id, state).await?;
     let shared_instance_id = invite.instance_id;
     let instance_icon_url = invite.instance_icon;
-    let inviter = invite.inviter;
+    let inviter = invite.inviter.map(|inviter| SharedInstanceInviteCreator {
+        id: inviter.id,
+        name: inviter.name,
+        avatar: inviter.avatar,
+    });
     let instance_icon_config = invite.instance_icon_config;
     let (manager_id, server_manager_name, server_manager_icon_url) =
         shared_instance_invite_manager(invite.managers);
@@ -228,15 +231,12 @@ pub async fn accept_shared_instance_invite_for_install(
 }
 
 pub(super) fn shared_instance_invite_manager(
-    managers: Vec<InstanceInviteManagerResponse>,
+    managers: Vec<contracts::backend::sharing::InviteManager>,
 ) -> (Option<String>, Option<String>, Option<String>) {
+    use contracts::backend::sharing::InviteManager;
     match managers.into_iter().next() {
-        Some(InstanceInviteManagerResponse::User { id }) => {
-            (Some(id), None, None)
-        }
-        Some(InstanceInviteManagerResponse::Server { name, icon }) => {
-            (None, Some(name), icon)
-        }
+        Some(InviteManager::User { id, .. }) => (Some(id), None, None),
+        Some(InviteManager::Server { name, icon }) => (None, Some(name), icon),
         None => (None, None, None),
     }
 }
@@ -244,7 +244,7 @@ pub(super) fn shared_instance_invite_manager(
 pub(super) async fn shared_instance_install_preview_from_version(
     shared_instance_id: String,
     name: String,
-    version: ShareVersion,
+    version: InstanceVersion,
     state: &Engine,
 ) -> crate::Result<SharedInstanceInstallPreview> {
     let (loader, _) = instance_loader(&version);
@@ -275,14 +275,14 @@ pub(super) async fn shared_instance_install_preview_from_version(
         version: version.version,
         name,
         icon_url,
-        game_version: version.content.game_version,
+        game_version: version.manifest.content.game_version,
         loader,
         mod_count: content_version_ids.len() + external_file_count,
         external_file_count,
         modpack_version_id,
         content_version_ids,
         external_files,
-        removed_files: version.content.removed_files,
+        removed_files: version.manifest.content.removed_files,
     })
 }
 
@@ -344,7 +344,7 @@ async fn get_shared_instance_update_preview_inner(
     let diffs = if newer {
         let configs = remote_config_update(
             Some(&metadata.instance.id),
-            config_base_version(&attachment, &version),
+            attachment.applied_version,
             &version,
             state,
         )
@@ -479,10 +479,9 @@ pub(crate) async fn shared_instance_update_data(
     let version =
         get_latest_attached_remote_version(instance_id, &attachment, state)
             .await?;
-    let fresh_start = backtrack_version_changed(&attachment, &version);
     let configs = remote_config_update(
         Some(&metadata.instance.id),
-        config_base_version(&attachment, &version),
+        attachment.applied_version,
         &version,
         state,
     )
@@ -503,29 +502,7 @@ pub(crate) async fn shared_instance_update_data(
     .await?;
     data.role = attachment.role;
     data.restored_from_remote = attachment.restored_from_remote;
-    data.fresh_start = fresh_start;
     Ok(data)
-}
-
-/// Installing another modpack, or another version of it, makes the instance
-/// start over from the shared content published since then.
-fn backtrack_version_changed(
-    attachment: &SharedInstanceAttachment,
-    version: &ShareVersion,
-) -> bool {
-    attachment.applied_version.is_some()
-        && attachment.applied_backtrack_version != version.backtrack_version
-}
-
-fn config_base_version(
-    attachment: &SharedInstanceAttachment,
-    version: &ShareVersion,
-) -> Option<i32> {
-    if backtrack_version_changed(attachment, version) {
-        None
-    } else {
-        attachment.applied_version
-    }
 }
 
 pub(super) async fn ensure_ready_remote_version_for_invite(
@@ -572,7 +549,7 @@ pub(super) async fn get_latest_attached_remote_version(
     instance_id: &str,
     attachment: &SharedInstanceAttachment,
     state: &Engine,
-) -> crate::Result<ShareVersion> {
+) -> crate::Result<InstanceVersion> {
     if let SharedInstanceRemoteResponse::Unavailable(reason) =
         get_remote_instance_access(&attachment.id, state).await?
     {
@@ -725,9 +702,9 @@ pub(super) fn shared_instance_unavailable_message(
 /// version of their history, else through `access`, the version's pool. A restore never reaches
 /// the pool. A version whose files are in the pool but has no holders cannot be fetched.
 fn shared_instance_external_file_data(
-    file: ManifestFile,
+    file: ExternalFile,
     access: Option<&std::sync::Arc<PoolAccess>>,
-    history: Option<&[(ManifestFile, std::path::PathBuf)]>,
+    history: Option<&[(ExternalFile, std::path::PathBuf)]>,
 ) -> crate::Result<SharedInstanceExternalFileData> {
     let (local, pool) = match history {
         Some(history) => {
@@ -773,9 +750,9 @@ pub(super) async fn shared_instance_install_data(
     instance_icon_url: Option<String>,
     instance_icon_config: Option<IconConfig>,
     name: String,
-    version: ShareVersion,
+    version: InstanceVersion,
     configs: ConfigUpdate,
-    history: Option<&[(ManifestFile, std::path::PathBuf)]>,
+    history: Option<&[(ExternalFile, std::path::PathBuf)]>,
     state: &Engine,
 ) -> crate::Result<SharedInstanceInstallData> {
     check_removed_files(&version)?;
@@ -792,23 +769,13 @@ pub(super) async fn shared_instance_install_data(
                 return Err(shared_instance_unavailable_error(reason));
             }
         };
-    let (manager_id, server_manager_name, server_manager_icon_url) = if remote
-        .linked_server
-        .is_some()
-    {
-        let icon = match shared_instance_server_icon(shared_instance_id, state)
-            .await
-        {
-            Ok(icon) => icon,
-            Err(error) => {
-                tracing::warn!(%error, "Could not fetch shared instance server icon");
-                server_manager_icon_url
-            }
+    // A player's server has no icon: the backend keeps none.
+    let (manager_id, server_manager_name, server_manager_icon_url) =
+        if remote.linked_server.is_some() {
+            (None, Some(remote.name), None)
+        } else {
+            (manager_id, server_manager_name, server_manager_icon_url)
         };
-        (None, Some(remote.name), icon)
-    } else {
-        (manager_id, server_manager_name, server_manager_icon_url)
-    };
     let instance_icon_url = if remote.linked_server.is_some() {
         server_manager_icon_url.clone()
     } else if server_manager_name.is_some() {
@@ -833,9 +800,10 @@ pub(super) async fn shared_instance_install_data(
         &version,
         inherited,
         configs,
-        sharing_client::install::Side::Client,
+        contracts::Side::Client,
     );
-    let access = version.pool_access(shared_instance_id);
+    let access =
+        sharing_client::pool::pool_access(&version, shared_instance_id);
     let external_files = plan
         .pool_files()
         .map(|(_, file)| {
@@ -855,11 +823,16 @@ pub(super) async fn shared_instance_install_data(
         })
         .collect();
     let (loader, loader_version) = instance_loader(&version);
-    let content = version.content;
-    let applied_files = version.external_files.clone();
+    let content = version.manifest.content;
+    let applied_files = version.manifest.external_files;
 
     Ok(SharedInstanceInstallData {
-        linked_server: remote.linked_server,
+        linked_server: remote.linked_server.map(|server| {
+            crate::install::model::SharedInstanceLinkedServer {
+                domain: server.domain,
+                region: server.region,
+            }
+        }),
         shared_instance_id: shared_instance_id.to_string(),
         role: SharedInstanceRole::Member,
         restored_from_remote: false,
@@ -879,7 +852,6 @@ pub(super) async fn shared_instance_install_data(
         game_version: content.game_version,
         loader,
         loader_version: shared_instance_loader_version(loader_version),
-        backtrack_version: version.backtrack_version,
         fresh_start: false,
         restore: None,
         applied_files,

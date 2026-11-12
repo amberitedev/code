@@ -4,6 +4,7 @@
 
 use std::{collections::HashMap, sync::Arc};
 
+use contracts::backend::sharing::{ExternalFile, VersionContent};
 use modrinth_content_management::{
     CommonExternalFilePolicy, ContentSetConfiguration, ContentType,
     LoaderReference,
@@ -13,7 +14,6 @@ use sharing_client::{
     install::ModpackFile,
     push,
     rules::{CONFIG_FILE_TYPE, ShareScope},
-    versions::{ManifestFile, VersionContent},
 };
 
 use crate::{
@@ -169,7 +169,7 @@ pub fn configuration(content: &VersionContent) -> ContentSetConfiguration {
 pub fn version_content(
     snapshot: &Snapshot,
     content: &VersionContent,
-    files: &[ManifestFile],
+    files: &[ExternalFile],
 ) -> Result<ShareContent, Error> {
     let pack = if content.modpack_id.is_some()
         && content.modpack_id == snapshot.content.modpack_id
@@ -192,7 +192,7 @@ pub fn version_content(
 pub async fn share_contents(
     snapshot: &Snapshot,
     content: &VersionContent,
-    files: &[ManifestFile],
+    files: &[ExternalFile],
 ) -> Result<(ShareContent, ShareContent), Error> {
     let before = version_content(snapshot, content, files)?;
     // A push sends the server's addons as they are on disk, and every config still shared as

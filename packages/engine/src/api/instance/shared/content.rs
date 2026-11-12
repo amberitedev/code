@@ -1,4 +1,4 @@
-use super::client::{ManifestFile, ShareVersion, check_removed_files};
+use super::client::{ExternalFile, InstanceVersion, check_removed_files};
 use super::diff::remote_configuration;
 use super::*;
 use crate::api::pack::install_from::{
@@ -17,7 +17,7 @@ use std::collections::BTreeMap;
 pub(super) async fn remote_config_update(
     instance_id: Option<&str>,
     applied_version: Option<i32>,
-    latest: &ShareVersion,
+    latest: &InstanceVersion,
     state: &Engine,
 ) -> crate::Result<ConfigUpdate> {
     let applied = match (instance_id, applied_version) {
@@ -29,7 +29,10 @@ pub(super) async fn remote_config_update(
         }
         _ => None,
     };
-    Ok(config_update(&latest.external_files, applied.as_deref()))
+    Ok(config_update(
+        &latest.manifest.external_files,
+        applied.as_deref(),
+    ))
 }
 
 /// The manifest files of `version` of the share, as the instance applied it, while the App keeps
@@ -38,7 +41,7 @@ pub(super) async fn applied_files(
     instance_id: &str,
     version: i32,
     pool: &sqlx::SqlitePool,
-) -> crate::Result<Option<Vec<ManifestFile>>> {
+) -> crate::Result<Option<Vec<ExternalFile>>> {
     let files: Option<String> = sqlx::query_scalar(
         "SELECT files FROM shared_instance_applied_files WHERE instance_id = ? AND version = ?",
     )
@@ -56,7 +59,7 @@ pub(super) async fn applied_files(
 pub(crate) async fn set_applied_files(
     instance_id: &str,
     version: i32,
-    files: &[ManifestFile],
+    files: &[ExternalFile],
     pool: &sqlx::SqlitePool,
 ) -> crate::Result<()> {
     sqlx::query(
@@ -246,17 +249,21 @@ fn is_content_path(path: &str) -> bool {
 
 /// The share content `version` gives members, as the share diff reads it.
 pub(super) async fn remote_shared_content(
-    version: &ShareVersion,
+    version: &InstanceVersion,
     state: &Engine,
 ) -> crate::Result<ShareContent> {
     check_removed_files(version)?;
-    let modpack = match version.modpack_id() {
+    let modpack = match sharing_client::versions::modpack_id(version) {
         Some(modpack_id) => shared_modpack_files(modpack_id, state).await?,
         None => Vec::new(),
     };
     ShareContent::of(
-        &version.content,
-        version.external_files.iter().map(CarriedFile::from),
+        &version.manifest.content,
+        version
+            .manifest
+            .external_files
+            .iter()
+            .map(CarriedFile::from),
         modpack,
         remote_configuration(version),
     )

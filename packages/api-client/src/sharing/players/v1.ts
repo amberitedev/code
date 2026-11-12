@@ -1,15 +1,17 @@
-import { SharedInstancesModule } from '../module'
-import type { SharedInstances } from '../types'
+import { sharing } from '@amberite/contracts'
+
+import { AbstractModule } from '../../core/abstract-module'
+import type { SharedInstances } from '../../modules/shared-instances/types'
 
 /**
  * The players of a server: the people it is shared with, who get the content they need to play
  * there. Every call takes the server and the shared instance its world follows. Upstream a
  * server's players are the members of that shared instance, so off a Core these are its `users`
  * and `invites` calls. On a Core they are the server's own players, who read the share without
- * being its members. Both answer in the
- * shared instance's shapes, so the Play tab does not tell them apart.
+ * being its members. Both answer in the shared instance's shapes, so the Play tab does not tell
+ * them apart.
  */
-export class SharedInstancesPlayersV1Module extends SharedInstancesModule {
+export class SharedInstancesPlayersV1Module extends AbstractModule {
 	public getModuleID(): string {
 		return 'sharedinstances_players_v1'
 	}
@@ -20,11 +22,7 @@ export class SharedInstancesPlayersV1Module extends SharedInstancesModule {
 	): Promise<SharedInstances.Instances.v1.InstanceUsers> {
 		if (!this.client.selfHostedHosting)
 			return this.client.sharedinstances.instances_v1.getUsers(instanceId)
-		return this.request(await this.path(serverId, 'players'), {
-			api: 'sharedinstances',
-			version: 1,
-			method: 'GET',
-		})
+		return this.client.backend.call(sharing.ListPlayers, { params: await this.ids(serverId) })
 	}
 
 	/** Players whose privacy settings refuse the invite come back in `failed`. */
@@ -35,22 +33,17 @@ export class SharedInstancesPlayersV1Module extends SharedInstancesModule {
 	): Promise<{ failed: string[] }> {
 		if (!this.client.selfHostedHosting)
 			return this.client.sharedinstances.instances_v1.inviteUsers(instanceId, userIds)
-		return this.request(await this.path(serverId, 'players'), {
-			api: 'sharedinstances',
-			version: 1,
-			method: 'POST',
+		return this.client.backend.call(sharing.InvitePlayers, {
+			params: await this.ids(serverId),
 			body: { ...(await this.server(serverId, instanceId)), user_ids: userIds },
-			retry: false,
 		})
 	}
 
 	public async remove(serverId: string, instanceId: string, userIds: string[]): Promise<void> {
 		if (!this.client.selfHostedHosting)
 			return this.client.sharedinstances.instances_v1.removeUsers(instanceId, userIds)
-		return this.request(await this.path(serverId, 'players'), {
-			api: 'sharedinstances',
-			version: 1,
-			method: 'DELETE',
+		return this.client.backend.call(sharing.RemovePlayers, {
+			params: await this.ids(serverId),
 			body: { user_ids: userIds },
 		})
 	}
@@ -62,11 +55,7 @@ export class SharedInstancesPlayersV1Module extends SharedInstancesModule {
 	): Promise<SharedInstances.Invites.v1.InviteLink[]> {
 		if (!this.client.selfHostedHosting)
 			return this.client.sharedinstances.invites_v1.list(instanceId)
-		return this.request(await this.path(serverId, 'invites'), {
-			api: 'sharedinstances',
-			version: 1,
-			method: 'GET',
-		})
+		return this.client.backend.call(sharing.ListPlayerLinks, { params: await this.ids(serverId) })
 	}
 
 	public async createLink(
@@ -76,28 +65,23 @@ export class SharedInstancesPlayersV1Module extends SharedInstancesModule {
 	): Promise<{ id: string }> {
 		if (!this.client.selfHostedHosting)
 			return this.client.sharedinstances.invites_v1.create(instanceId, options)
-		return this.request(await this.path(serverId, 'invites'), {
-			api: 'sharedinstances',
-			version: 1,
-			method: 'POST',
+		return this.client.backend.call(sharing.CreatePlayerLink, {
+			params: await this.ids(serverId),
 			body: { ...(await this.server(serverId, instanceId)), ...options },
-			retry: false,
 		})
 	}
 
 	public async deleteLink(serverId: string, instanceId: string, inviteId: string): Promise<void> {
 		if (!this.client.selfHostedHosting)
 			return this.client.sharedinstances.invites_v1.delete(instanceId, inviteId)
-		return this.request(`${await this.path(serverId, 'invites')}/${encodeURIComponent(inviteId)}`, {
-			api: 'sharedinstances',
-			version: 1,
-			method: 'DELETE',
+		return this.client.backend.call(sharing.DeletePlayerLink, {
+			params: { ...(await this.ids(serverId)), invite_id: inviteId },
 		})
 	}
 
-	private async path(serverId: string, section: 'players' | 'invites') {
+	private async ids(serverId: string) {
 		const core = await this.client.archon.cores_v1.coreOf(serverId)
-		return `/servers/${encodeURIComponent(core.id)}/${encodeURIComponent(serverId)}/${section}`
+		return { core_id: core.id, server_id: serverId }
 	}
 
 	/**

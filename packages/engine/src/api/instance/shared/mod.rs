@@ -21,15 +21,14 @@ use modrinth_content_management::{
     CommonExternalFilePolicy, ContentSetConfiguration, ExternalFileKey,
     LoaderReference,
 };
-use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::collections::{HashMap, HashSet};
 
+use contracts::backend::sharing::RemovedFile;
 pub(crate) use contracts::rules::SHAREABLE_CONFIG_EXTENSIONS as CONFIG_FILE_EXTENSIONS;
 pub(crate) use sharing_client::rules::CONFIG_FILE_TYPE;
 use sharing_client::rules::ShareScope;
-use sharing_client::versions::RemovedFile;
 pub(crate) const CONFIG_SYNC_ENABLED: bool = true;
 pub(crate) const CONFIG_DIRECTORY: &str = "config";
 

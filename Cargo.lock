@@ -2221,6 +2221,7 @@ dependencies = [
  "clap 4.6.7",
  "contracts",
  "http-body-util",
+ "modrinth-content-management",
  "reqwest 0.13.5",
  "rustls",
  "serde",
@@ -3271,6 +3272,7 @@ dependencies = [
  "httpdate",
  "image",
  "indexmap 2.14.2",
+ "infer 0.22.0",
  "itertools 0.15.0",
  "json5",
  "minecraft-meta-manifest",
@@ -5871,6 +5873,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "tokio",
+ "ts-rs",
  "utoipa",
 ]
 

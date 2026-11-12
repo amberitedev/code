@@ -23,7 +23,7 @@ use contracts::{
     client::{Body, CallError, Remote, Reply, call},
 };
 use reqwest::StatusCode;
-use sharing_client::backend::Backend;
+use sharing_client::shares::delete_share;
 use sqlx::{SqliteConnection, SqlitePool};
 use tokio::sync::watch;
 use tracing::{info, warn};
@@ -429,17 +429,23 @@ impl Sync {
                 }
                 // Done on success, on a share already gone (`delete_share`'s 404 and 410), and
                 // on 403 `not_owner` (no longer this Core's), which is refused and dropped.
-                let backend =
-                    Backend::new(self.http.clone(), &self.backend_url, key)
-                        .with_timeout(CALL_TIMEOUT);
-                backend.delete_share(share_id).await.map_err(
-                    |error| match error.status() {
+                let remote = Remote {
+                    http: &self.http,
+                    base: &self.backend_url,
+                    bearer: Some(key),
+                    read_ticket: None,
+                    timeout: Some(CALL_TIMEOUT),
+                };
+                delete_share(&remote, share_id).await.map_err(|error| {
+                    match sharing_client::shares::status(&error)
+                        .and_then(|status| StatusCode::from_u16(status).ok())
+                    {
                         Some(status) => failure(status, error.to_string()),
                         None => {
                             Failure::Lost(Lost::Unreachable(error.to_string()))
                         }
-                    },
-                )
+                    }
+                })
             }
             OwedCall::ForgetPlayers(forget) => {
                 self.call::<ForgetPlayers>(key, Json(forget.clone())).await

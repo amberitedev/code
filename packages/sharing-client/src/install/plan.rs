@@ -1,7 +1,7 @@
 use contracts::Side;
 
 use crate::rules::CONFIG_FILE_TYPE;
-use crate::versions::{ManifestFile, ShareVersion};
+use contracts::backend::sharing::{ExternalFile, InstanceVersion};
 
 use super::{ConfigUpdate, ModpackFile, content_path, version_files};
 
@@ -26,7 +26,7 @@ pub enum Source<S> {
     /// The version's modpack, which places it.
     Modpack(ModpackFile<S>),
     /// The pool, as the manifest names it.
-    Pool(ManifestFile),
+    Pool(ExternalFile),
 }
 
 /// One thing an install does to a path.
@@ -36,11 +36,11 @@ pub enum Step<S> {
     /// is replaced (the App skips one with the same bytes; a Core keeps an owner's edit pending).
     Place { path: String, source: Source<S> },
     /// A config the version still shares and this update leaves as the member has it.
-    Keep { path: String, file: ManifestFile },
+    Keep { path: String, file: ExternalFile },
     /// Delete the file at `path` while it is still what the share sent (its SHA-1 is `file`'s):
     /// a config that left the share. A copy the member edited stays theirs. Checked when the
     /// writer gets to it, since the member may change it meanwhile.
-    Delete { path: String, file: ManifestFile },
+    Delete { path: String, file: ExternalFile },
 }
 
 /// What installing a share version does: the Modrinth versions it installs beside its modpack,
@@ -55,7 +55,7 @@ pub struct InstallPlan<S> {
 
 impl<S> InstallPlan<S> {
     /// The pool files the install writes, at their paths.
-    pub fn pool_files(&self) -> impl Iterator<Item = (&str, &ManifestFile)> {
+    pub fn pool_files(&self) -> impl Iterator<Item = (&str, &ExternalFile)> {
         self.steps.iter().filter_map(|step| match step {
             Step::Place {
                 path,
@@ -77,7 +77,7 @@ impl<S> InstallPlan<S> {
     }
 
     /// The configs that left the share, which the install deletes while they are unedited.
-    pub fn deleted(&self) -> impl Iterator<Item = (&str, &ManifestFile)> {
+    pub fn deleted(&self) -> impl Iterator<Item = (&str, &ExternalFile)> {
         self.steps.iter().filter_map(|step| match step {
             Step::Delete { path, file } => Some((path.as_str(), file)),
             _ => None,
@@ -93,7 +93,7 @@ impl<S> InstallPlan<S> {
 /// leave the share. Both the App and a Core plan their installs here and apply the steps with
 /// their own writer.
 pub fn install_plan<S>(
-    version: &ShareVersion,
+    version: &InstanceVersion,
     modpack: Vec<ModpackFile<S>>,
     configs: ConfigUpdate,
     side: Side,
@@ -107,13 +107,13 @@ pub fn install_plan<S>(
             source: Source::Modpack(file),
         })
         .collect::<Vec<_>>();
-    let written = |file: &ManifestFile| {
+    let written = |file: &ExternalFile| {
         configs
             .write
             .iter()
             .any(|written| written.file_name == file.file_name)
     };
-    for file in &version.external_files {
+    for file in &version.manifest.external_files {
         let Some(path) = side_path(side, &file.file_type, &file.file_name)
         else {
             continue;
@@ -146,40 +146,50 @@ pub fn install_plan<S>(
 mod tests {
     use super::*;
     use crate::install::config_update;
-    use crate::versions::{RemovedFile, VersionContent};
+    use contracts::Hash;
+    use contracts::backend::sharing::{VersionContent, VersionManifest};
 
-    fn manifest(file_type: &str, file_name: &str, sha256: u8) -> ManifestFile {
-        ManifestFile {
+    use crate::versions::removed_path;
+
+    fn manifest(file_type: &str, file_name: &str, sha256: u8) -> ExternalFile {
+        ExternalFile {
             file_name: file_name.into(),
             file_type: file_type.into(),
+            url: None,
             file_size: 1,
             sha1: format!("{sha256}"),
-            sha256: [sha256; 32],
-            object: [0; 32],
+            sha256: Hash([sha256; 32]),
+            object: Hash([0; 32]),
             object_size: 17,
             key: None,
         }
     }
 
-    fn version(files: Vec<ManifestFile>) -> ShareVersion {
-        ShareVersion {
+    fn version(files: Vec<ExternalFile>) -> InstanceVersion {
+        InstanceVersion {
+            manifest: VersionManifest {
+                content: VersionContent {
+                    modrinth_ids: vec![
+                        "pack".into(),
+                        "a".into(),
+                        "extra".into(),
+                    ],
+                    modpack_id: Some("pack".into()),
+                    removed_files: vec![
+                        removed_path("mods", "gone.jar").unwrap(),
+                    ],
+                    game_version: "1.21.1".into(),
+                    loader: "fabric".into(),
+                    loader_version: "0.16.0".into(),
+                },
+                version_hash: Hash([0; 32]),
+                external_files: files,
+            },
             version: 2,
             ready: true,
-            content: VersionContent {
-                modrinth_ids: vec!["pack".into(), "a".into(), "extra".into()],
-                modpack_id: Some("pack".into()),
-                removed_files: vec![
-                    RemovedFile::path("mods", "gone.jar").unwrap(),
-                ],
-                game_version: "1.21.1".into(),
-                loader: "fabric".into(),
-                loader_version: "0.16.0".into(),
-            },
-            root: [0; 32],
-            external_files: files,
-            pool: None,
-            store: None,
-            backtrack_version: None,
+            download: None,
+            upload: None,
+            reports: None,
         }
     }
 
@@ -234,7 +244,8 @@ mod tests {
             manifest(CONFIG_FILE_TYPE, "config/same.toml", 1),
             manifest(CONFIG_FILE_TYPE, "config/changed.toml", 2),
         ]);
-        let configs = config_update(&version.external_files, Some(&applied));
+        let configs =
+            config_update(&version.manifest.external_files, Some(&applied));
 
         let plan = install_plan(&version, modpack(), configs, Side::Client);
 
@@ -263,7 +274,7 @@ mod tests {
             manifest("shader", "glow.zip", 2),
             manifest(CONFIG_FILE_TYPE, "config/a.toml", 1),
         ]);
-        let configs = config_update(&version.external_files, None);
+        let configs = config_update(&version.manifest.external_files, None);
 
         let plan = install_plan(&version, modpack(), configs, Side::Server);
 

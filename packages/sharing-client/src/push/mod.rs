@@ -26,17 +26,22 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use contracts::backend::sharing::{
+    CreateVersion, ExternalFile, GetLatestVersion, GetVersion, InstanceVersion,
+    InstanceVersionId, NewInstanceVersion, SharedInstanceId, VersionContent,
+    VersionManifest,
+};
+use contracts::client::{CallError, Remote, call};
 use contracts::limits::MAX_SHARE_BYTES;
-use contracts::{ErrorCode, Hash};
+use contracts::{Empty, ErrorCode, Hash, Json};
 use futures::future::BoxFuture;
 use futures::{StreamExt, TryStreamExt};
-use reqwest::StatusCode;
 
-use crate::backend::{Backend, BackendError, NewVersion, Unavailable};
 use crate::crypto;
 use crate::pool::{StoreClient, StoreError};
 use crate::rules::ShareScope;
-use crate::versions::{ManifestFile, ShareVersion, VersionContent};
+use crate::shares::Unavailable;
+use crate::versions::configs;
 
 /// Files hashed or encrypted at once.
 const CONCURRENCY: usize = 4;
@@ -62,7 +67,7 @@ pub enum PushError {
     #[error(transparent)]
     Unavailable(Unavailable),
     #[error(transparent)]
-    Backend(BackendError),
+    Backend(CallError),
     #[error(transparent)]
     Store(#[from] StoreError),
     #[error("the Core did not accept every shared file; push again")]
@@ -73,13 +78,11 @@ pub enum PushError {
     Io(#[from] std::io::Error),
 }
 
-impl From<BackendError> for PushError {
-    fn from(error: BackendError) -> Self {
-        match error {
-            BackendError::Unavailable { reason, .. } => {
-                Self::Unavailable(reason)
-            }
-            error => Self::Backend(error),
+impl From<CallError> for PushError {
+    fn from(error: CallError) -> Self {
+        match Unavailable::of(&error) {
+            Some(reason) => Self::Unavailable(reason),
+            None => Self::Backend(error),
         }
     }
 }
@@ -129,9 +132,9 @@ pub enum PushEvent<'a> {
 pub struct Pushed {
     pub version: i32,
     /// The latest ready version before this push: the one it changed.
-    pub previous: Option<ShareVersion>,
+    pub previous: Option<InstanceVersion>,
     /// The version's files as its manifest lists them.
-    pub external_files: Vec<ManifestFile>,
+    pub external_files: Vec<ExternalFile>,
     /// Where the bytes of each of `external_files` are, in the same order. They stay readable
     /// for as long as the caller keeps the files it pushed.
     pub paths: Vec<PathBuf>,
@@ -142,7 +145,8 @@ struct Object {
     object: [u8; 32],
     size: u64,
     path: PathBuf,
-    /// P of the plaintext that was encrypted, which the push compares to the P it hashed.
+    /// The hash of the plain bytes that were encrypted, which the push compares to the hash
+    /// it read first.
     plain: [u8; 32],
 }
 
@@ -153,7 +157,7 @@ struct Object {
 /// them.
 #[allow(clippy::too_many_arguments)]
 pub async fn push(
-    backend: &Backend,
+    backend: &Remote<'_>,
     store: &StoreClient,
     share_id: &str,
     content: &VersionContent,
@@ -213,16 +217,16 @@ pub async fn push(
 
 #[allow(clippy::too_many_arguments)]
 async fn push_hashed(
-    backend: &Backend,
+    backend: &Remote<'_>,
     store: &StoreClient,
     share_id: &str,
     content: &VersionContent,
     server_core: Option<&str>,
-    previous: &[ShareVersion],
+    previous: &[InstanceVersion],
     hashed: &[HashedFile],
     folder: &Path,
     on_event: &mut (dyn FnMut(PushEvent<'_>) + Send),
-) -> Result<(i32, Vec<ManifestFile>), PushError> {
+) -> Result<(i32, Vec<ExternalFile>), PushError> {
     let keys = file_keys(previous, hashed);
     tokio::fs::create_dir_all(folder).await?;
     // Collected first so the stream holds plain futures, not a borrowing closure, which keeps
@@ -236,7 +240,7 @@ async fn push_hashed(
         .buffered(CONCURRENCY)
         .try_collect::<Vec<_>>()
         .await?;
-    // A file written to between hashing and encrypting would reach the Core with a P that its
+    // A file written to between hashing and encrypting would reach the Core with a hash that its
     // bytes no longer match, and every member's install would fail on it.
     if let Some(file) =
         hashed.iter().zip(&objects).find_map(|(file, object)| {
@@ -251,37 +255,45 @@ async fn push_hashed(
         .iter()
         .zip(&keys)
         .zip(&objects)
-        .map(|((file, key), object)| ManifestFile {
+        .map(|((file, key), object)| ExternalFile {
             file_name: file.file_name.clone(),
             file_type: file.file_type.clone(),
+            url: None,
             file_size: file.size,
             sha1: file.sha1.clone(),
-            sha256: file.sha256,
-            object: object.object,
+            sha256: Hash(file.sha256),
+            object: Hash(object.object),
             object_size: object.size,
-            key: (!crypto::is_content_type(&file.file_type)).then_some(*key),
+            key: (!crypto::is_content_type(&file.file_type))
+                .then_some(Hash(*key)),
         })
         .collect::<Vec<_>>();
     let root = Hash(crypto::root(objects.iter().map(|o| o.object)));
 
-    let created = backend
-        .create_version(
-            share_id,
-            &NewVersion {
-                content,
-                external_files: &external_files,
-                root: root.to_string(),
-                server_core,
+    let share = SharedInstanceId {
+        id: share_id.to_owned(),
+    };
+    let created = call::<CreateVersion>(
+        backend,
+        &share,
+        &(),
+        Json(NewInstanceVersion {
+            manifest: VersionManifest {
+                content: content.clone(),
+                version_hash: root,
+                external_files: external_files.clone(),
             },
-        )
-        .await
-        .map_err(refusal)?;
+            server_core: server_core.map(str::to_owned),
+        }),
+    )
+    .await
+    .map_err(refusal)?;
     on_event(PushEvent::Created(created.version));
     if created.ready {
         return Ok((created.version, external_files));
     }
 
-    if let Some(grant) = &created.store {
+    if let Some(grant) = &created.upload {
         let sent = upload::store_version(
             store,
             &grant.core,
@@ -295,7 +307,7 @@ async fn push_hashed(
             objects: sent.len(),
             files: external_files
                 .iter()
-                .filter(|file| sent.contains(&Hash(file.object)))
+                .filter(|file| sent.contains(&file.object))
                 .map(|file| file.file_name.clone())
                 .collect(),
         });
@@ -303,16 +315,14 @@ async fn push_hashed(
 
     for _ in 0..CONFIRM_ATTEMPTS {
         tokio::time::sleep(CONFIRM_INTERVAL).await;
-        match backend.version(share_id, Some(created.version)).await {
+        match version(backend, share_id, created.version).await {
             Ok(version) if version.ready => {
                 on_event(PushEvent::Confirmed);
                 return Ok((created.version, external_files));
             }
-            Ok(_)
-            | Err(BackendError::Unavailable {
-                reason: Unavailable::Deleted,
-                ..
-            }) => {}
+            Ok(_) => {}
+            Err(error)
+                if Unavailable::of(&error) == Some(Unavailable::Deleted) => {}
             Err(error) => return Err(error.into()),
         }
     }
@@ -321,17 +331,16 @@ async fn push_hashed(
 
 /// The pool's refusals of a new version, named by the backend's code. Every refusal over a
 /// limit (413) carries a description naming the limit, which is shown as is.
-fn refusal(error: BackendError) -> PushError {
-    if let BackendError::Status {
+fn refusal(error: CallError) -> PushError {
+    if let CallError::Api {
         status,
-        body: Some(body),
-        ..
+        error: body,
     } = &error
     {
         match body.error {
             ErrorCode::NoStorage => return PushError::NoStorage,
             ErrorCode::PushInFlight => return PushError::PushInFlight,
-            _ if *status == StatusCode::PAYLOAD_TOO_LARGE => {
+            _ if *status == 413 => {
                 return PushError::Refused(body.description.clone());
             }
             _ => {}
@@ -340,30 +349,47 @@ fn refusal(error: BackendError) -> PushError {
     error.into()
 }
 
+/// Version `number` of the share.
+async fn version(
+    backend: &Remote<'_>,
+    share_id: &str,
+    number: i32,
+) -> Result<InstanceVersion, CallError> {
+    let id = InstanceVersionId {
+        id: share_id.to_owned(),
+        version: number,
+    };
+    call::<GetVersion>(backend, &id, &Default::default(), Empty).await
+}
+
 /// The versions a push builds on: the latest one, then the version a crashed push left
 /// unconfirmed one past it, if there is one. A share without a version (404) is a new share; a
 /// token that no longer reaches it (401) fails the push.
 async fn previous_versions(
-    backend: &Backend,
+    backend: &Remote<'_>,
     share_id: &str,
-) -> Result<Vec<ShareVersion>, PushError> {
+) -> Result<Vec<InstanceVersion>, PushError> {
     let unless_missing =
-        |result: Result<ShareVersion, BackendError>| match result {
+        |result: Result<InstanceVersion, CallError>| match result {
             Ok(version) => Ok(Some(version)),
-            Err(BackendError::Unavailable {
-                reason: Unavailable::Deleted,
-                ..
-            }) => Ok(None),
+            Err(error)
+                if Unavailable::of(&error) == Some(Unavailable::Deleted) =>
+            {
+                Ok(None)
+            }
             Err(error) => Err(PushError::from(error)),
         };
-    let Some(latest) = unless_missing(backend.version(share_id, None).await)?
-    else {
+    let share = SharedInstanceId {
+        id: share_id.to_owned(),
+    };
+    let latest =
+        call::<GetLatestVersion>(backend, &share, &Default::default(), Empty)
+            .await;
+    let Some(latest) = unless_missing(latest)? else {
         return Ok(Vec::new());
     };
     let pending = if latest.ready {
-        unless_missing(
-            backend.version(share_id, Some(latest.version + 1)).await,
-        )?
+        unless_missing(version(backend, share_id, latest.version + 1).await)?
     } else {
         None
     };
@@ -373,7 +399,7 @@ async fn previous_versions(
 /// `files` plus the configs of the latest ready version that this push does not send again and
 /// that `kept` keeps. Reports the ones it leaves out.
 async fn with_kept_configs(
-    previous: &[ShareVersion],
+    previous: &[InstanceVersion],
     mut files: Vec<PushFile>,
     kept: KeptConfigs<'_>,
     on_event: &mut (dyn FnMut(PushEvent<'_>) + Send),
@@ -403,7 +429,10 @@ async fn with_kept_configs(
 }
 
 /// The configs of the latest ready version that `pushed` does not send again.
-fn kept_configs(previous: &[ShareVersion], pushed: &[PushFile]) -> Vec<String> {
+fn kept_configs(
+    previous: &[InstanceVersion],
+    pushed: &[PushFile],
+) -> Vec<String> {
     let Some(latest) = previous.first().filter(|version| version.ready) else {
         return Vec::new();
     };
@@ -411,8 +440,7 @@ fn kept_configs(previous: &[ShareVersion], pushed: &[PushFile]) -> Vec<String> {
         .iter()
         .map(|file| (file.file_type.as_str(), file.file_name.as_str()))
         .collect::<HashSet<_>>();
-    latest
-        .configs()
+    configs(latest)
         .filter(|file| {
             !pushed
                 .contains(&(file.file_type.as_str(), file.file_name.as_str()))
@@ -421,17 +449,20 @@ fn kept_configs(previous: &[ShareVersion], pushed: &[PushFile]) -> Vec<String> {
         .collect()
 }
 
-/// Each file's key. Content files derive theirs from P. Other files keep the key an earlier
-/// version gave the same P, so an unchanged file stays the same object and the Core already has
+/// Each file's key. Content files derive theirs from their plain bytes' hash. Other files keep
+/// the key an earlier version gave the same plain bytes, so an unchanged file stays the same object and the Core already has
 /// it, and get a new random key otherwise. A push that crashed after creating its version left
 /// it unconfirmed one past the latest ready one; its keys win, so pushing the same files again
-/// gives the same root and resumes that upload instead of waiting for it to expire.
-fn file_keys(previous: &[ShareVersion], files: &[HashedFile]) -> Vec<[u8; 32]> {
+/// gives the same version hash and resumes that upload instead of waiting for it to expire.
+fn file_keys(
+    previous: &[InstanceVersion],
+    files: &[HashedFile],
+) -> Vec<[u8; 32]> {
     let mut keys = HashMap::new();
     for file in previous
         .iter()
         .rev()
-        .flat_map(|version| &version.external_files)
+        .flat_map(|version| &version.manifest.external_files)
     {
         if let Some(key) = file.key {
             keys.entry(file.sha256).or_insert(key);
@@ -444,12 +475,14 @@ fn file_keys(previous: &[ShareVersion], files: &[HashedFile]) -> Vec<[u8; 32]> {
             if crypto::is_content_type(&file.file_type) {
                 return crypto::content_key(&file.sha256);
             }
-            *keys.entry(file.sha256).or_insert_with(rand::random)
+            keys.entry(Hash(file.sha256))
+                .or_insert_with(|| Hash(rand::random()))
+                .0
         })
         .collect()
 }
 
-/// Encrypts `source` into `folder`, named by its C once that is known.
+/// Encrypts `source` into `folder`, named by its hash once that is known.
 async fn encrypt_file(
     key: &[u8; 32],
     source: &Path,
@@ -479,40 +512,43 @@ mod tests {
         file_name: &str,
         p: u8,
         key: u8,
-    ) -> ManifestFile {
-        ManifestFile {
+    ) -> ExternalFile {
+        ExternalFile {
             file_name: file_name.into(),
             file_type: file_type.into(),
+            url: None,
             file_size: 1,
             sha1: "sha1".into(),
-            sha256: [p; 32],
-            object: [p ^ 0xff; 32],
+            sha256: Hash([p; 32]),
+            object: Hash([p ^ 0xff; 32]),
             object_size: 17,
-            key: Some([key; 32]),
+            key: Some(Hash([key; 32])),
         }
     }
 
     fn version(
         version: i32,
         ready: bool,
-        files: Vec<ManifestFile>,
-    ) -> ShareVersion {
-        ShareVersion {
+        files: Vec<ExternalFile>,
+    ) -> InstanceVersion {
+        InstanceVersion {
+            manifest: VersionManifest {
+                content: VersionContent {
+                    modrinth_ids: Vec::new(),
+                    modpack_id: None,
+                    removed_files: Vec::new(),
+                    game_version: "1.21.1".into(),
+                    loader: "fabric".into(),
+                    loader_version: String::new(),
+                },
+                version_hash: Hash([0; 32]),
+                external_files: files,
+            },
             version,
             ready,
-            content: VersionContent {
-                modrinth_ids: Vec::new(),
-                modpack_id: None,
-                removed_files: Vec::new(),
-                game_version: "1.21.1".into(),
-                loader: "fabric".into(),
-                loader_version: String::new(),
-            },
-            root: [0; 32],
-            external_files: files,
-            pool: None,
-            store: None,
-            backtrack_version: None,
+            download: None,
+            upload: None,
+            reports: None,
         }
     }
 

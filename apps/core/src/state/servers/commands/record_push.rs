@@ -23,8 +23,8 @@ pub async fn record_push(
         let before = match &pushed.previous {
             Some(previous) => version_content(
                 snapshot,
-                &previous.content,
-                &previous.external_files,
+                &previous.manifest.content,
+                &previous.manifest.external_files,
             )?,
             None => ShareContent::empty(configuration(&snapshot.content)),
         };

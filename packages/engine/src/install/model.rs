@@ -274,12 +274,10 @@ pub struct SharedInstanceInstallData {
     pub loader: ModLoader,
     pub loader_version: Option<String>,
     #[serde(default)]
-    pub backtrack_version: Option<String>,
-    #[serde(default)]
     pub fresh_start: bool,
     /// The version's whole manifest, which a member keeps once it applied the version.
     #[serde(default)]
-    pub applied_files: Vec<sharing_client::versions::ManifestFile>,
+    pub applied_files: Vec<contracts::backend::sharing::ExternalFile>,
     /// An owner's restore: what the share carried at the last push or carries in the restored
     /// version, which the restore may replace (`sharing_client::history::restore`). `None` for a
     /// member's install or update.
@@ -319,7 +317,7 @@ pub struct SharedInstanceRemovedConfig {
 }
 
 /// A file of the shared modpack members do not get, as the share version names it.
-pub use sharing_client::versions::RemovedFile;
+pub use contracts::backend::sharing::RemovedFile;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SharedInstanceInstallModpack {

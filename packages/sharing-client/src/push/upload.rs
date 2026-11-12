@@ -14,7 +14,7 @@ use crate::pool::StoreClient;
 const UPLOAD_ROUNDS: usize = 3;
 const UPLOAD_PROGRESS_INTERVAL: Duration = Duration::from_millis(200);
 
-/// Stores a version's objects on `core`, sending only those it lacks, and returns the C of each
+/// Stores a version's objects on `core`, sending only those it lacks, and returns the hash of each
 /// object it sent. Every object of a push is on disk, so one the Core lost since an earlier
 /// version is sent again.
 pub(super) async fn store_version(

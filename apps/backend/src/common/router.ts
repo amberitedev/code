@@ -21,14 +21,29 @@ export interface Context<E extends Endpoint> {
 
 /**
  * What a handler answers: the route's response, or for a socket, raw bytes or a stream, the
- * `Response` it built with its own headers.
+ * `Response` it built with its own headers. A JSON response may also come as text.
  */
 type Answer<E extends Endpoint> = TypesOf<E>['response'] extends
 	| { receive: unknown; send: unknown }
 	| Blob
 	| Response
 	? Response
-	: TypesOf<E>['response']
+	: TypesOf<E>['response'] | JsonText<TypesOf<E>['response']>
+
+/** JSON of a `T` kept as text, so the Worker sends it on without parsing it. */
+export class JsonText<T> {
+	declare readonly _type?: T
+	constructor(readonly text: string) {}
+}
+
+/** `text`, an object with fields, with `extra`'s fields added after its own. */
+export function spliceJson<T extends object, X extends object>(
+	text: JsonText<T>,
+	extra: X,
+): JsonText<T & X> {
+	const fields = JSON.stringify(extra).slice(1, -1)
+	return new JsonText(fields ? `${text.text.trimEnd().slice(0, -1)},${fields}}` : text.text)
+}
 
 export interface Route {
 	method: string
@@ -62,6 +77,10 @@ export function route<E extends Endpoint>(
 				body: async () => parse(await readBody(endpoint, request, maxBytes)),
 			})
 			if (answer instanceof Response) return answer
+			if (answer instanceof JsonText)
+				return new Response(answer.text, {
+					headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+				})
 			if (endpoint.response === 'empty') return new Response(null, { status: 204 })
 			return json(answer)
 		},

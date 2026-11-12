@@ -5,7 +5,6 @@ import { ApiError, errorResponse, routePath } from './common/http'
 import { noBody, route, serve } from './common/router'
 import type { Env } from './common/types'
 import { coreRoutes } from './cores'
-import { handleVisibleServers } from './cores/servers'
 import { devRoutes } from './dev'
 import { handleSharing } from './sharing'
 import { socialRoutes } from './social'
@@ -65,7 +64,6 @@ export default {
 			if (request.method === 'OPTIONS') response = new Response(null, { status: 204 })
 			else
 				response =
-					(await handleVisibleServers(request, env)) ??
 					(await handleSharing(request, env)) ??
 					(await serve(routes, request, env)) ??
 					(await serveLabrinth(request, env)) ??

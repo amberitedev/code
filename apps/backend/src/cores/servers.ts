@@ -1,8 +1,9 @@
-import type { VisibleServer } from '@amberite/contracts'
+import { sharing, type VisibleServer } from '@amberite/contracts'
 
 import { requireUser } from '../common/auth'
-import { ApiError, json, routePath } from '../common/http'
+import { ApiError } from '../common/http'
 import { notifyMembers } from '../common/notifications'
+import { noBody, route } from '../common/router'
 import type { Env } from '../common/types'
 
 // Servers visible to friends. A Core lists the servers whose "Visible to friends" setting is on,
@@ -81,41 +82,34 @@ export async function writeServers(
  * App: the servers other people host for a shared instance. Only given to the people the instance
  * is shared with. The caller's own Cores are left out; the App reads those from the Core itself.
  */
-async function listServers(request: Request, env: Env, instanceId: string) {
-	const user = await requireUser(request, env)
-	const member = await env.DB.prepare(`SELECT ${sharedWith('?2')} AS member`)
-		.bind(instanceId, user.id)
-		.first<{ member: number }>()
-	if (!member?.member) throw new ApiError(404, 'not_found', 'Shared instance was not found')
-	const rows = await env.DB.prepare(
-		`SELECT s.core_id,s.server_id,s.name,s.address,u.id AS host_id,u.username AS host_name,u.avatar_url AS host_avatar FROM visible_servers s JOIN cores c ON c.id = s.core_id JOIN users u ON u.id = c.owner_id WHERE s.instance_id = ?1 AND c.owner_id != ?2 AND ${sharedWith('c.owner_id')} ORDER BY s.name`,
-	)
-		.bind(instanceId, user.id)
-		.all<{
-			core_id: string
-			server_id: string
-			name: string
-			address: string
-			host_id: string
-			host_name: string
-			host_avatar: string | null
-		}>()
-	return json(
-		rows.results.map((row) => ({
+export const listHostedServers = route(
+	sharing.ListHostedServers,
+	noBody,
+	async ({ request, env, params }) => {
+		const user = await requireUser(request, env)
+		const member = await env.DB.prepare(`SELECT ${sharedWith('?2')} AS member`)
+			.bind(params.id, user.id)
+			.first<{ member: number }>()
+		if (!member?.member) throw new ApiError(404, 'not_found', 'Shared instance was not found')
+		const rows = await env.DB.prepare(
+			`SELECT s.core_id,s.server_id,s.name,s.address,u.id AS host_id,u.username AS host_name,u.avatar_url AS host_avatar FROM visible_servers s JOIN cores c ON c.id = s.core_id JOIN users u ON u.id = c.owner_id WHERE s.instance_id = ?1 AND c.owner_id != ?2 AND ${sharedWith('c.owner_id')} ORDER BY s.name`,
+		)
+			.bind(params.id, user.id)
+			.all<{
+				core_id: string
+				server_id: string
+				name: string
+				address: string
+				host_id: string
+				host_name: string
+				host_avatar: string | null
+			}>()
+		return rows.results.map((row) => ({
 			core_id: row.core_id,
 			server_id: row.server_id,
 			name: row.name,
 			address: row.address,
 			host: { id: row.host_id, username: row.host_name, avatar_url: row.host_avatar },
-		})),
-	)
-}
-
-export async function handleVisibleServers(request: Request, env: Env): Promise<Response | null> {
-	const path = routePath(request),
-		method = request.method
-	const instance = path.match(/^\/v1\/instances\/([^/]+)\/servers$/)
-	if (instance && method === 'GET')
-		return listServers(request, env, decodeURIComponent(instance[1]))
-	return null
-}
+		}))
+	},
+)

@@ -134,16 +134,7 @@ pub async fn get_shared_instance_invites(
     };
     ensure_owner(&attachment)?;
 
-    Ok(get_remote_invites(&attachment.id, state)
-        .await?
-        .into_iter()
-        .map(|invite| SharedInstanceInvite {
-            id: invite.id,
-            expiration: invite.expiration,
-            max_uses: invite.max_uses,
-            uses: invite.uses,
-        })
-        .collect())
+    get_remote_invites(&attachment.id, state).await
 }
 
 #[tracing::instrument(skip(state, invite_id))]

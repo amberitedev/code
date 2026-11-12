@@ -29,6 +29,7 @@ use sharing_client::history::restore::{Carried, Origin, replaced};
 use sharing_client::install::{
     ContentChanges, ContentProject, CurrentFile, DesiredFile, content_changes,
 };
+use sharing_client::versions::RemovedFileRules;
 use sqlx::SqlitePool;
 use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet};
@@ -164,7 +165,7 @@ pub(super) async fn finalize_shared_instance_attachment(
             linked_user_id: data.linked_user_id.clone(),
             status: ContentSetSyncStatus::UpToDate,
             applied_version: Some(data.version),
-            applied_backtrack_version: data.backtrack_version.clone(),
+            applied_backtrack_version: None,
             latest_version: Some(data.version),
         },
         &state.pool,

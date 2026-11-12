@@ -8,12 +8,12 @@ use super::install::shared_instance_install_data;
 use super::publish::*;
 use super::types::*;
 use super::*;
+use contracts::backend::sharing::{VersionContent, VersionManifest};
 use sharing_client::history::{
     self, HistoryEntry, HistoryError, HistoryStore, SharedInstanceHistoryEntry,
     restore::Carried,
 };
 use sharing_client::push::Pushed;
-use sharing_client::versions::VersionContent;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -89,15 +89,17 @@ pub(super) async fn record_push(
     pushed: &Pushed,
     state: &Engine,
 ) {
-    let after = ShareVersion {
+    let after = InstanceVersion {
+        manifest: VersionManifest {
+            content: content.clone(),
+            version_hash: contracts::Hash([0; 32]),
+            external_files: pushed.external_files.clone(),
+        },
         version: pushed.version,
         ready: true,
-        content: content.clone(),
-        root: [0; 32],
-        external_files: pushed.external_files.clone(),
-        pool: None,
-        store: None,
-        backtrack_version: None,
+        download: None,
+        upload: None,
+        reports: None,
     };
     let diffs = async {
         shared_version_diffs(pushed.previous.as_ref(), &after, state)
@@ -135,16 +137,18 @@ pub async fn get_shared_instance_history(
 
 /// An entry as the share version it recorded, for the code that reads versions. Its files are
 /// read from the history, so it names no pool.
-fn entry_version(entry: &HistoryEntry) -> ShareVersion {
-    ShareVersion {
+fn entry_version(entry: &HistoryEntry) -> InstanceVersion {
+    InstanceVersion {
+        manifest: VersionManifest {
+            content: entry.content.clone(),
+            version_hash: contracts::Hash([0; 32]),
+            external_files: entry.manifest().cloned().collect(),
+        },
         version: entry.version,
         ready: true,
-        content: entry.content.clone(),
-        root: [0; 32],
-        external_files: entry.manifest().cloned().collect(),
-        pool: None,
-        store: None,
-        backtrack_version: None,
+        download: None,
+        upload: None,
+        reports: None,
     }
 }
 

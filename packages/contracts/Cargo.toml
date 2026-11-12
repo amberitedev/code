@@ -11,12 +11,14 @@ ignored = ["contracts"]
 # The protocol: the Endpoint machinery, the one error body, the protocol version, and the limits and
 # share rules. `client` and `server` add the transport glue, `ts` the TypeScript generator, and
 # `sqlx` and `clap` the derives the Core stores and parses a few enums with. It imports none of our
-# crates, only upstream's ariadne for the friends socket's messages.
+# crates, only upstream's ariadne for the friends socket's messages and modrinth-content-management
+# for a shared instance's icon.
 [dependencies]
 ariadne = { workspace = true }
 axum = { version = "0.8.4", default-features = false, features = ["json", "query"], optional = true }
 bytes = { workspace = true }
 clap = { workspace = true, features = ["derive"], optional = true }
+modrinth-content-management = { workspace = true }
 reqwest = { workspace = true, features = ["json"], optional = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
@@ -37,7 +39,7 @@ clap = ["dep:clap"]
 client = ["dep:reqwest", "dep:thiserror"]
 server = ["dep:axum"]
 sqlx = ["dep:sqlx"]
-ts = ["ariadne/ts", "dep:ts-rs"]
+ts = ["ariadne/ts", "dep:ts-rs", "modrinth-content-management/ts"]
 
 [lints]
 workspace = true

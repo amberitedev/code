@@ -2,6 +2,7 @@ import { accounts, social } from '@amberite/contracts'
 
 import type { ContractTransport } from '../contracts/client'
 import { AbstractFeature, type FeatureConfig } from '../core/abstract-feature'
+import { SharedInstancesApiError } from '../sharing/errors'
 import type { RequestContext } from '../types/request'
 
 export interface SelfHostedConfig extends FeatureConfig {
@@ -21,9 +22,15 @@ export class SelfHostedFeature extends AbstractFeature {
 		super(config)
 	}
 
+	/** A refused sharing request throws `SharedInstancesApiError`, with its status and code. */
 	async execute<T>(next: () => Promise<T>, context: RequestContext): Promise<T> {
 		await routeSelfHostedRequest(context, this.config)
-		return next()
+		if (context.options.api !== 'sharedinstances') return next()
+		try {
+			return await next()
+		} catch (error) {
+			throw SharedInstancesApiError.from(error)
+		}
 	}
 
 	/** `client.backend`'s way to the backend: the same URL and account session. */

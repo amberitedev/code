@@ -71,9 +71,9 @@ async fn diff(
 /// update does to their config files ([`unedited_configs`] of what left the share is removed).
 pub(super) async fn shared_instance_update_diffs(
     metadata: &crate::state::InstanceMetadata,
-    version: &ShareVersion,
-    written: &[ManifestFile],
-    removed: &[ManifestFile],
+    version: &InstanceVersion,
+    written: &[ExternalFile],
+    removed: &[ExternalFile],
     state: &Engine,
 ) -> crate::Result<Vec<SharedInstanceUpdateDiff>> {
     // An owner's local files are part of their share, so their update compares them too.
@@ -123,9 +123,9 @@ pub(super) async fn shared_instance_update_diffs(
 /// so an update deletes them. A config the member edited stays theirs.
 pub(super) async fn unedited_configs(
     instance_id: &str,
-    left: &[ManifestFile],
+    left: &[ExternalFile],
     state: &Engine,
-) -> crate::Result<Vec<ManifestFile>> {
+) -> crate::Result<Vec<ExternalFile>> {
     Ok(configs_on_disk(instance_id, left, state)
         .await?
         .into_iter()
@@ -134,7 +134,7 @@ pub(super) async fn unedited_configs(
 }
 
 fn sha1s<'a>(
-    files: impl IntoIterator<Item = &'a ManifestFile>,
+    files: impl IntoIterator<Item = &'a ExternalFile>,
 ) -> BTreeMap<String, String> {
     files
         .into_iter()
@@ -146,9 +146,9 @@ fn sha1s<'a>(
 /// be checked counts as different.
 async fn configs_on_disk<'a>(
     instance_id: &str,
-    files: &'a [ManifestFile],
+    files: &'a [ExternalFile],
     state: &Engine,
-) -> crate::Result<Vec<&'a ManifestFile>> {
+) -> crate::Result<Vec<&'a ExternalFile>> {
     use futures::{StreamExt, future::BoxFuture};
 
     let files = files
@@ -166,7 +166,7 @@ async fn configs_on_disk<'a>(
     // the higher-ranked Send check.
     let checks = files
         .into_iter()
-        .map(|file| -> BoxFuture<'_, Option<&'a ManifestFile>> {
+        .map(|file| -> BoxFuture<'_, Option<&'a ExternalFile>> {
             Box::pin(async move {
                 crate::install::instance_has_shared_file(
                     writer,
@@ -191,8 +191,8 @@ async fn configs_on_disk<'a>(
 /// What `after` changed over `before`, two versions of the same share, for its version history,
 /// with what `after` holds. Without `before`, everything `after` holds is added.
 pub(super) async fn shared_version_diffs(
-    before: Option<&ShareVersion>,
-    after: &ShareVersion,
+    before: Option<&InstanceVersion>,
+    after: &InstanceVersion,
     state: &Engine,
 ) -> crate::Result<(Vec<SharedInstanceUpdateDiff>, ShareContent)> {
     let after = remote_shared_content(after, state).await?;
@@ -207,7 +207,7 @@ pub(super) async fn shared_version_diffs(
 /// An owner's push: `version`, the latest, then what a push of the instance sends now.
 pub(super) async fn shared_instance_publish_diffs(
     metadata: &crate::state::InstanceMetadata,
-    version: &ShareVersion,
+    version: &InstanceVersion,
     snapshot: &CurrentPublishSnapshot,
     state: &Engine,
 ) -> crate::Result<Vec<SharedInstanceUpdateDiff>> {
@@ -239,7 +239,9 @@ pub(super) async fn shared_instance_publish_diffs(
     }
     // A push sends every config still shared as the instance has it, so one the owner edited or
     // deleted is a change to review, as on Core.
-    let shared = version.configs().cloned().collect::<Vec<_>>();
+    let shared = sharing_client::versions::configs(version)
+        .cloned()
+        .collect::<Vec<_>>();
     let current =
         configs_on_disk(&metadata.instance.id, &shared, state).await?;
     let after = ShareContent {
@@ -285,12 +287,13 @@ fn local_configuration(
 }
 
 pub(super) fn remote_configuration(
-    version: &ShareVersion,
+    version: &InstanceVersion,
 ) -> ContentSetConfiguration {
     let (loader, loader_version) = instance_loader(version);
     ContentSetConfiguration {
-        modpack_version_id: version.modpack_id().map(str::to_owned),
-        game_version: version.content.game_version.clone(),
+        modpack_version_id: sharing_client::versions::modpack_id(version)
+            .map(str::to_owned),
+        game_version: version.manifest.content.game_version.clone(),
         loader: LoaderReference {
             name: loader.as_str().to_string(),
             version: Some(loader_version),

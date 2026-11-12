@@ -14,7 +14,7 @@ pub(super) struct PublishReportFile {
     pub(super) file_name: String,
     pub(super) file_type: String,
     pub(super) size: u64,
-    /// P, in hex.
+    /// The SHA-256 of the plain bytes, in hex.
     pub(super) sha256: String,
     pub(super) executable: bool,
 }

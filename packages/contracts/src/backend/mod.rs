@@ -5,6 +5,7 @@ use crate::{Auth, Empty, Endpoint, Method};
 pub mod accounts;
 pub mod cores;
 pub mod dev;
+pub mod sharing;
 pub mod social;
 
 /// Answers once the backend reaches its database.
@@ -23,7 +24,7 @@ impl Endpoint for CheckHealth {
 #[cfg(test)]
 pub(crate) fn ts() -> String {
     format!(
-        "\n/** The backend's routes outside accounts, cores, dev and social, which have their own consts. */\nexport const backend = {{\n\tCheckHealth: {},\n}}\n",
+        "\n/** The backend's routes outside accounts, cores, dev, sharing and social, which have their own consts. */\nexport const backend = {{\n\tCheckHealth: {},\n}}\n",
         crate::ts::endpoint::<CheckHealth>()
     )
 }

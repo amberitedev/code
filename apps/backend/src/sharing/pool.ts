@@ -1,4 +1,10 @@
-import type { StoreHost } from '@amberite/contracts'
+import type {
+	ExternalFile,
+	StoreHost,
+	StoredShare,
+	VersionDownload,
+	VersionUpload,
+} from '@amberite/contracts'
 
 import { isPrivateHost } from '../common/address'
 import { ApiError } from '../common/http'
@@ -18,7 +24,7 @@ export const DEFAULT_KEPT_VERSIONS = 5
 export const UNCONFIRMED_TTL_MS = 60 * 60_000
 /** A Core that has not reported its storage for this long takes no new shares. */
 const REPORT_FRESH_MS = 2 * 86_400_000
-/** R of a version with no files: SHA-256 of nothing. */
+/** The hash of a version with no files: SHA-256 of nothing. */
 export const EMPTY_ROOT = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
 /** Files encrypted with a key derived from their own content, so one copy serves every share. */
 const CONTENT_TYPES = new Set(['mod', 'resourcepack', 'shader', 'datapack'])
@@ -28,30 +34,12 @@ const SHA1 = /^[0-9a-f]{40}$/
 export const manifestKey = (instanceId: string, version: number) =>
 	`manifests/${instanceId}/${version}`
 
-/**
- * One `external_files` entry. The first fields are Modrinth's: `file_size` is the plain size and
- * `sha1` is what a member's install compares to skip a file it already has. The rest are the
- * pool's: P, C, the encrypted size, and the key of a non-content file.
- */
-export type ManifestFile = {
-	file_name: string
-	file_type: string
-	/** `pool:<C>`, for upstream code that expects a URL; nothing fetches it. */
-	url: string
-	file_size: number
-	sha1: string
-	sha256: string
-	object: string
-	object_size: number
-	key?: string
-}
-
 /** One `external_files` entry as the owner's App sends it. `name` is already validated. */
-export function manifestFile(
+export function externalFile(
 	entry: Record<string, unknown>,
 	file_name: string,
 	file_type: string,
-): ManifestFile {
+): ExternalFile {
 	const count = (field: string) => {
 		const value = entry[field]
 		if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0)
@@ -70,10 +58,10 @@ export function manifestFile(
 	if (object_size !== size + 16 * Math.max(1, Math.ceil(size / 1_048_576)))
 		throw new ApiError(400, 'invalid_input', `Invalid object_size for ${file_name}`)
 	const object = hash('object')
-	const file: ManifestFile = {
+	const file: ExternalFile = {
 		file_name,
 		file_type,
-		url: `pool:${object}`,
+		url: null,
 		file_size: size,
 		sha1: hash('sha1', SHA1),
 		sha256: hash('sha256'),
@@ -90,8 +78,8 @@ export function manifestFile(
 const hex = (bytes: ArrayBuffer) =>
 	Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, '0')).join('')
 
-/** R: the hash of the distinct object hashes, sorted, as raw bytes. */
-export async function root(objects: Iterable<string>): Promise<string> {
+/** A version's hash: the hash of its distinct object hashes, sorted, as raw bytes. */
+export async function versionHash(objects: Iterable<string>): Promise<string> {
 	const sorted = [...new Set(objects)].sort()
 	const bytes = new Uint8Array(sorted.length * 32)
 	sorted.forEach((object, index) => {
@@ -102,7 +90,7 @@ export async function root(objects: Iterable<string>): Promise<string> {
 }
 
 /** The distinct object bytes of a version. */
-export function versionBytes(files: ManifestFile[]): number {
+export function versionBytes(files: ExternalFile[]): number {
 	const seen = new Map<string, number>()
 	for (const file of files) seen.set(file.object, file.object_size)
 	let total = 0
@@ -205,6 +193,18 @@ export async function place(
 	return { home, replica: kept.find((id) => id !== home) ?? draw(others, [home]) }
 }
 
+/** A Core as `cores` holds it: one that does not serve HTTPS yet has no fingerprint. */
+type HolderRow = Omit<StoreHost, 'cert_fingerprint'> & { cert_fingerprint: string | null }
+
+/** The rows among `rows` with these ids, in the given order, that the App can reach. */
+function reachable(ids: string[], rows: HolderRow[]): StoreHost[] {
+	return ids.flatMap((id) =>
+		rows.flatMap(({ cert_fingerprint, ...row }) =>
+			row.id === id && cert_fingerprint !== null ? [{ ...row, cert_fingerprint }] : [],
+		),
+	)
+}
+
 /** The Cores with these ids, in the given order, as the App reaches them. */
 export async function holders(env: Env, ids: (string | null)[]): Promise<StoreHost[]> {
 	const wanted = ids.filter((id): id is string => id !== null)
@@ -213,8 +213,8 @@ export async function holders(env: Env, ids: (string | null)[]): Promise<StoreHo
 		`SELECT ${HOLDER_COLUMNS} FROM cores WHERE id IN (SELECT value FROM json_each(?))`,
 	)
 		.bind(JSON.stringify(wanted))
-		.all<StoreHost>()
-	return wanted.flatMap((id) => rows.results.filter((row) => row.id === id))
+		.all<HolderRow>()
+	return reachable(wanted, rows.results)
 }
 
 /** The Cores that confirmed holding `root` among `ids`. */
@@ -229,12 +229,16 @@ export async function confirmedHolders(
 		`SELECT ${HOLDER_COLUMNS.replaceAll(', ', ', c.').replace('id', 'c.id')} FROM cores c JOIN core_holdings h ON h.core_id = c.id WHERE h.version_hash = ? AND c.id IN (SELECT value FROM json_each(?))`,
 	)
 		.bind(root, JSON.stringify(wanted))
-		.all<StoreHost>()
-	return wanted.flatMap((id) => rows.results.filter((row) => row.id === id))
+		.all<HolderRow>()
+	return reachable(wanted, rows.results)
 }
 
 /** What a member needs to fetch a ready version: who holds it and a fetch ticket for it. */
-export async function poolAccess(env: Env, holderList: StoreHost[], root: string) {
+export async function versionDownload(
+	env: Env,
+	holderList: StoreHost[],
+	root: string,
+): Promise<VersionDownload> {
 	return {
 		holders: holderList,
 		ticket: await fetchTicket(
@@ -246,7 +250,12 @@ export async function poolAccess(env: Env, holderList: StoreHost[], root: string
 }
 
 /** What the owner needs to upload a version: the home Core and a store ticket for it. */
-export async function storeGrant(env: Env, homeId: string, root: string, bytes: number) {
+export async function versionUpload(
+	env: Env,
+	homeId: string,
+	root: string,
+	bytes: number,
+): Promise<VersionUpload> {
 	const [core] = await holders(env, [homeId])
 	if (!core) throw new ApiError(503, 'no_storage', 'The Core holding this share is gone')
 	const { ticket, expires } = await storeTicket(env, core.id, root, bytes)
@@ -269,7 +278,7 @@ export async function versionObjects(
 ): Promise<Map<string, number>> {
 	const stored = await env.FILES.get(manifestKey(instanceId, version))
 	const files = stored
-		? ((await stored.json()) as { external_files: ManifestFile[] }).external_files
+		? ((await stored.json()) as { external_files: ExternalFile[] }).external_files
 		: []
 	return new Map(files.map((file) => [file.object, file.object_size]))
 }
@@ -295,46 +304,12 @@ export function shareUsage(versions: CountedVersion[]): number {
 	)
 }
 
-export type ShareStorage = {
-	id: string
-	name: string
-	/** Whether it uses someone else's Core, so its usage counts against the allowance. */
-	counted: boolean
-	used: number
-	/** What its kept versions take, counted or not. */
-	size: number
-	/** The owner's own Cores holding it, as home or replica. */
-	cores: string[]
-	/** Newest first. `current` is the newest ready one, which members install. */
-	versions: { version: number; created: string; bytes: number; ready: boolean; current: boolean }[]
-}
-
-/** One share's kept versions as `ownerShares` lists them, for its members' version history. */
-export async function shareVersions(
-	env: Env,
-	instanceId: string,
-): Promise<ShareStorage['versions']> {
-	const rows = await env.DB.prepare(
-		'SELECT version, bytes, ready, created FROM shared_instance_versions WHERE instance_id = ? AND (ready = 1 OR created > ?) ORDER BY version DESC',
-	)
-		.bind(instanceId, new Date(Date.now() - UNCONFIRMED_TTL_MS).toISOString())
-		.all<{ version: number; bytes: number; ready: number; created: string }>()
-	const current = rows.results.find((row) => row.ready === 1)?.version
-	return rows.results.map((row) => ({
-		version: row.version,
-		created: row.created,
-		bytes: row.bytes,
-		ready: row.ready === 1,
-		current: row.version === current,
-	}))
-}
-
 /**
  * Every share `ownerId` owns, with its kept versions: the ready ones, and one still uploading
  * within its store ticket's life, so pushes to several shares at once cannot each see the others
  * as empty.
  */
-export async function ownerShares(env: Env, ownerId: string): Promise<ShareStorage[]> {
+export async function ownerShares(env: Env, ownerId: string): Promise<StoredShare[]> {
 	const [rows, own] = await Promise.all([
 		env.DB.prepare(
 			`SELECT i.id, i.name, i.home, i.replica, v.version, v.bytes, v.added, v.ready, v.created
@@ -356,7 +331,7 @@ export async function ownerShares(env: Env, ownerId: string): Promise<ShareStora
 		env.DB.prepare('SELECT id FROM cores WHERE owner_id = ?').bind(ownerId).all<{ id: string }>(),
 	])
 	const ownIds = new Set(own.results.map((core) => core.id))
-	const shares = new Map<string, ShareStorage & { kept: CountedVersion[] }>()
+	const shares = new Map<string, StoredShare & { kept: CountedVersion[] }>()
 	for (const row of rows.results) {
 		let share = shares.get(row.id)
 		if (!share) {

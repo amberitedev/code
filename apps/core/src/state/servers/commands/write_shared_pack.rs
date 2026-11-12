@@ -14,7 +14,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use sharing_client::backend::Backend;
+use contracts::client::Remote;
 use sharing_client::install::ModpackFile;
 use sharing_client::pool::{self, FetchError, PoolFile};
 
@@ -48,7 +48,7 @@ pub enum PackEntry {
 /// version.
 pub async fn write_pack(
     content: &Content,
-    backend: &Backend,
+    backend: &Remote<'_>,
     server_id: &str,
     version: ReadyVersion,
     name: &str,
@@ -203,10 +203,10 @@ impl share_pack::Modrinth for Lookup<'_> {
 }
 
 /// Fetch the file `name` from the first holder that serves it correctly, decrypted and checked
-/// against both C and P, into `path`, as a member's App does.
+/// against both the object's hash and the plain bytes', into `path`, as a member's App does.
 async fn fetch(
     content: &Content,
-    backend: &Backend,
+    backend: &Remote<'_>,
     name: &str,
     file: &PoolFile,
     path: &Path,

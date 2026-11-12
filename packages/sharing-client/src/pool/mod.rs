@@ -6,7 +6,5 @@ mod model;
 mod store;
 
 pub use fetch::fetch;
-pub use model::{InvalidPoolEntry, PoolAccess, PoolFile};
-pub use store::{
-    Fault, FaultKind, FetchError, PoolObject, StoreClient, StoreError,
-};
+pub use model::{InvalidPoolEntry, PoolAccess, PoolFile, pool_access};
+pub use store::{Fault, FetchError, PoolObject, StoreClient, StoreError};

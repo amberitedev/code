@@ -34,24 +34,6 @@ impl SharedInstanceUsers {
             tokens,
         }
     }
-
-    pub(super) fn from_user_ids(user_ids: Vec<String>) -> Self {
-        let users = user_ids
-            .iter()
-            .map(|user_id| SharedInstanceUser {
-                id: user_id.clone(),
-                joined_at: None,
-                join_type: SharedInstanceJoinType::Invite,
-                last_played: None,
-            })
-            .collect();
-
-        Self {
-            user_ids,
-            users,
-            tokens: 0,
-        }
-    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
