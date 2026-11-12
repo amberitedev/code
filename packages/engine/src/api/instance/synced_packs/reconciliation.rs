@@ -461,7 +461,12 @@ async fn apply_pack(
                 cached.enabled = pack.item.enabled;
             }
             if changed || joined {
-                emit_instance(instance_id, InstancePayloadType::Synced).await?;
+                emit_instance(
+                    &state.events,
+                    instance_id,
+                    InstancePayloadType::Synced,
+                )
+                .await?;
             }
             return Ok(());
         }
@@ -480,7 +485,12 @@ async fn apply_pack(
             commands::remove_project(instance_id, &previous.path, state)
                 .await?;
             items.retain(|item| item.file_path != previous.path);
-            emit_instance(instance_id, InstancePayloadType::Synced).await?;
+            emit_instance(
+                &state.events,
+                instance_id,
+                InstancePayloadType::Synced,
+            )
+            .await?;
         }
         library
             .instances
@@ -634,7 +644,8 @@ async fn apply_pack(
                 ..Default::default()
             },
         );
-    emit_instance(instance_id, InstancePayloadType::Synced).await?;
+    emit_instance(&state.events, instance_id, InstancePayloadType::Synced)
+        .await?;
     Ok(())
 }
 
@@ -662,7 +673,8 @@ pub(super) async fn run_queued(
     )
     .await?;
     write_library(&library, state).await?;
-    emit_instance(instance_id, InstancePayloadType::Synced).await?;
+    emit_instance(&state.events, instance_id, InstancePayloadType::Synced)
+        .await?;
     Ok(())
 }
 
@@ -912,8 +924,12 @@ async fn apply_instance_inner(
                 state,
             )
             .await?;
-            emit_instance(&metadata.instance.id, InstancePayloadType::Synced)
-                .await?;
+            emit_instance(
+                &state.events,
+                &metadata.instance.id,
+                InstancePayloadType::Synced,
+            )
+            .await?;
         }
         removed_ids.push(id);
     }

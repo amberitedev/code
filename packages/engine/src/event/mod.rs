@@ -1,102 +1,78 @@
 //! Theseus state management system
 use dashmap::DashMap;
-#[cfg(feature = "tauri")]
-use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "export-ts")]
 use std::path::PathBuf;
 use std::sync::Arc;
-#[cfg(feature = "tauri")]
-use tauri::ipc::{Channel, InvokeResponseBody};
-use tokio::sync::OnceCell;
+use tokio::sync::broadcast;
 use uuid::Uuid;
 
 use crate::install::InstallJobSnapshot;
 
 pub mod emit;
 
-// Global event state
-// Stores the Tauri app handle and other event-related state variables
-static EVENT_STATE: OnceCell<Arc<EventState>> = OnceCell::const_new();
-pub struct EventState {
-    /// Tauri app
+/// Log lines are an event each, so the buffer absorbs a burst before a slow subscriber lags.
+const EVENT_CAPACITY: usize = 4096;
+
+/// Where an engine sends its events. The host creates it and subscribes before the engine
+/// starts, so startup events reach it; with no subscriber, events are dropped.
+#[derive(Clone)]
+pub struct EventSink {
+    tx: broadcast::Sender<AppEvent>,
+    loading_bars: Arc<DashMap<Uuid, LoadingBar>>,
     #[cfg(feature = "tauri")]
-    pub app: tauri::AppHandle,
-    #[cfg(feature = "tauri")]
-    event_channel: RwLock<Channel<InvokeResponseBody>>,
-    pub loading_bars: DashMap<Uuid, LoadingBar>,
+    pub(crate) app: Option<tauri::AppHandle>,
 }
 
-impl EventState {
-    #[cfg(feature = "tauri")]
-    pub async fn init(
-        app: tauri::AppHandle,
-        event_channel: Channel<InvokeResponseBody>,
-    ) -> crate::Result<Arc<Self>> {
-        let state = EVENT_STATE
-            .get_or_try_init(|| async {
-                Ok::<_, crate::Error>(Arc::new(Self {
-                    app,
-                    event_channel: RwLock::new(event_channel.clone()),
-                    loading_bars: DashMap::new(),
-                }))
-            })
-            .await
-            .cloned()?;
-
-        *state.event_channel.write() = event_channel;
-        Ok(state)
-    }
-
-    #[cfg(not(feature = "tauri"))]
-    pub async fn init() -> crate::Result<Arc<Self>> {
-        EVENT_STATE
-            .get_or_try_init(|| async {
-                Ok(Arc::new(Self {
-                    loading_bars: DashMap::new(),
-                }))
-            })
-            .await
-            .cloned()
-    }
-
-    pub fn get() -> Arc<Self> {
-        EVENT_STATE
-            .get()
-            .expect("should be initialized when used")
-            .clone()
+impl EventSink {
+    pub fn new() -> Self {
+        Self {
+            tx: broadcast::Sender::new(EVENT_CAPACITY),
+            loading_bars: Arc::new(DashMap::new()),
+            #[cfg(feature = "tauri")]
+            app: None,
+        }
     }
 
     #[cfg(feature = "tauri")]
-    pub(crate) fn try_get() -> Option<Arc<Self>> {
-        EVENT_STATE.get().cloned()
+    pub fn with_app(app: tauri::AppHandle) -> Self {
+        Self {
+            app: Some(app),
+            ..Self::new()
+        }
     }
 
-    #[cfg(feature = "tauri")]
-    pub fn send(&self, event: AppEvent) -> crate::Result<()> {
-        let payload =
-            postcard::to_allocvec(&event).map_err(EventError::from)?;
-        self.event_channel
-            .read()
-            .send(InvokeResponseBody::Raw(payload))
-            .map_err(EventError::from)?;
-        Ok(())
+    pub fn subscribe(&self) -> broadcast::Receiver<AppEvent> {
+        self.tx.subscribe()
+    }
+
+    pub(crate) fn send(&self, event: AppEvent) {
+        let _ = self.tx.send(event);
     }
 
     // Values provided should not be used directly, as they are clones and are not guaranteed to be up-to-date
-    pub async fn list_progress_bars() -> crate::Result<DashMap<Uuid, LoadingBar>>
-    {
-        let value = Self::get();
-        Ok(value.loading_bars.clone())
+    pub fn loading_bars(&self) -> DashMap<Uuid, LoadingBar> {
+        (*self.loading_bars).clone()
     }
 
     /// The ads child webview makes the main window a multi-webview window,
     /// so Tauri's single-webview window lookup no longer returns it.
     #[cfg(feature = "tauri")]
-    pub async fn get_main_window() -> crate::Result<Option<tauri::Window>> {
+    pub fn get_main_window(&self) -> Option<tauri::Window> {
         use tauri::Manager;
-        let value = Self::get();
-        Ok(value.app.get_window("main"))
+        self.app.as_ref()?.get_window("main")
+    }
+}
+
+impl Default for EventSink {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl std::fmt::Debug for EventSink {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EventSink").finish_non_exhaustive()
     }
 }
 
@@ -221,54 +197,28 @@ pub struct LoadingBar {
     #[serde(skip)]
     pub last_sent: f64,
     pub bar_type: LoadingBarType,
-    #[cfg(feature = "cli")]
-    #[serde(skip)]
-    pub cli_progress_bar: indicatif::ProgressBar,
 }
 
-#[derive(Serialize, Debug, Clone)]
-pub struct LoadingBarId(Uuid);
+#[derive(Debug)]
+pub struct LoadingBarId(Uuid, EventSink);
 
 // When Loading bar id is dropped, we should remove it from the hashmap
 impl Drop for LoadingBarId {
     fn drop(&mut self) {
-        let loader_uuid = self.0;
-        tokio::spawn(async move {
-            let event_state = EventState::get();
-            #[cfg(any(feature = "tauri", feature = "cli"))]
-            if let Some((_, bar)) =
-                event_state.loading_bars.remove(&loader_uuid)
-            {
-                #[cfg(feature = "tauri")]
-                {
-                    let loader_uuid = bar.loading_bar_uuid;
-                    let event = bar.bar_type.clone();
-                    let fraction = bar.current / bar.total;
-
-                    let _ =
-                        event_state.send(AppEvent::Loading(LoadingPayload {
-                            fraction: None,
-                            message: "Completed".to_string(),
-                            event,
-                            loader_uuid: loader_uuid.to_string(),
-                        }));
-                    tracing::trace!(
-                        "Exited at {fraction} for loading bar: {:?}",
-                        loader_uuid
-                    );
-                }
-
-                // Emit event to indicatif progress bar arc
-                #[cfg(feature = "cli")]
-                {
-                    let cli_progress_bar = bar.cli_progress_bar;
-                    cli_progress_bar.finish();
-                }
-            }
-
-            #[cfg(not(any(feature = "tauri", feature = "cli")))]
-            event_state.loading_bars.remove(&loader_uuid);
-        });
+        let Self(loader_uuid, events) = self;
+        if let Some((_, bar)) = events.loading_bars.remove(loader_uuid) {
+            let fraction = bar.current / bar.total;
+            events.send(AppEvent::Loading(LoadingPayload {
+                fraction: None,
+                message: "Completed".to_string(),
+                event: bar.bar_type,
+                loader_uuid: loader_uuid.to_string(),
+            }));
+            tracing::trace!(
+                "Exited at {fraction} for loading bar: {:?}",
+                loader_uuid
+            );
+        }
     }
 }
 
@@ -546,12 +496,35 @@ mod log_types {
 pub enum EventError {
     #[error("Non-existent loading bar of key: {0}")]
     NoLoadingBar(Uuid),
+}
 
-    #[cfg(feature = "tauri")]
-    #[error("Postcard encoding error: {0}")]
-    PostcardEncode(#[from] postcard::Error),
+#[cfg(test)]
+mod tests {
+    use super::emit::{emit_instance, emit_loading, init_loading};
+    use super::*;
 
-    #[cfg(feature = "tauri")]
-    #[error("Tauri error: {0}")]
-    TauriError(#[from] tauri::Error),
+    #[tokio::test]
+    async fn loading_bars_need_no_subscriber_and_events_reach_one() {
+        let events = EventSink::new();
+        let bar = init_loading(
+            &events,
+            LoadingBarType::LegacyDataMigration,
+            1.0,
+            "Loading",
+        )
+        .await
+        .unwrap();
+        emit_loading(&bar, 1.0, None).unwrap();
+        drop(bar);
+        assert!(events.loading_bars().is_empty());
+
+        let mut received = events.subscribe();
+        emit_instance(&events, "a", InstancePayloadType::Edited)
+            .await
+            .unwrap();
+        assert!(matches!(
+            received.try_recv(),
+            Ok(AppEvent::Instance(InstancePayload { instance_id, .. })) if instance_id == "a"
+        ));
+    }
 }

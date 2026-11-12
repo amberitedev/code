@@ -151,7 +151,7 @@ pub async fn set_group_memberships(
         .into_iter()
         .map(|update| update.instance_id)
         .collect::<Vec<_>>();
-    emit_instance_groups_changed(&instance_ids).await?;
+    emit_instance_groups_changed(&state.events, &instance_ids).await?;
 
     Ok(())
 }
@@ -201,7 +201,7 @@ pub async fn rename_group(
 
     tx.commit().await?;
 
-    emit_instance_groups_changed(&instance_ids).await?;
+    emit_instance_groups_changed(&state.events, &instance_ids).await?;
 
     Ok(InstanceGroup {
         id,
@@ -247,7 +247,7 @@ pub async fn delete_group(id: String) -> crate::Result<()> {
 
     tx.commit().await?;
 
-    emit_instance_groups_changed(&instance_ids).await?;
+    emit_instance_groups_changed(&state.events, &instance_ids).await?;
 
     Ok(())
 }

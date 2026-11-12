@@ -419,6 +419,7 @@ async fn install_minecraft_inner(
     let loading_bar = if reporter.is_none() {
         Some(
             init_loading(
+                &state.events,
                 LoadingBarType::MinecraftDownload {
                     // If we are downloading minecraft for a profile, provide its name and uuid
                     instance_name: instance.name.clone(),
@@ -442,7 +443,8 @@ async fn install_minecraft_inner(
         &state.pool,
     )
     .await?;
-    emit_instance(&instance.id, InstancePayloadType::Edited).await?;
+    emit_instance(&state.events, &instance.id, InstancePayloadType::Edited)
+        .await?;
 
     let result = Box::pin(async {
     let instance_path =
@@ -773,7 +775,7 @@ async fn install_minecraft_inner(
 				instance.id
 			);
 		}
-		emit_instance(&instance.id, InstancePayloadType::Edited).await?;
+		emit_instance(&state.events, &instance.id, InstancePayloadType::Edited).await?;
 	}
     if let Some(loading_bar) = &loading_bar {
         emit_loading(loading_bar, 1.0, Some("Finished installing"))?;
@@ -796,8 +798,12 @@ async fn install_minecraft_inner(
                 "Failed to restore install stage for instance {}: {error}",
                 instance.id
             );
-        } else if let Err(error) =
-            emit_instance(&instance.id, InstancePayloadType::Edited).await
+        } else if let Err(error) = emit_instance(
+            &state.events,
+            &instance.id,
+            InstancePayloadType::Edited,
+        )
+        .await
         {
             tracing::error!(
                 "Failed to emit restored install stage for instance {}: {error}",
@@ -1273,9 +1279,7 @@ pub async fn launch_minecraft(
     // If in tauri, and the 'minimize on launch' setting is enabled, minimize the window
     #[cfg(feature = "tauri")]
     {
-        use crate::EventState;
-
-        let window = EventState::get_main_window().await?;
+        let window = state.events.get_main_window();
         if let Some(window) = window {
             let settings = crate::state::Settings::get(&state.pool).await?;
             if settings.hide_on_process_start {

@@ -24,7 +24,8 @@ pub async fn unpublish_shared_instance(instance_id: &str) -> crate::Result<()> {
     delete_remote_instance(&attachment.id, &state).await?;
     super::history::forget_share_history(&attachment.id, &state).await?;
     detach_local_shared_instance(instance_id, metadata.link, &state).await?;
-    emit_instance(instance_id, InstancePayloadType::Edited).await?;
+    emit_instance(&state.events, instance_id, InstancePayloadType::Edited)
+        .await?;
 
     Ok(())
 }
@@ -65,7 +66,8 @@ pub async fn unlink_shared_instance(instance_id: &str) -> crate::Result<()> {
     ensure_member(&attachment)?;
 
     detach_local_shared_instance(instance_id, metadata.link, &state).await?;
-    emit_instance(instance_id, InstancePayloadType::Edited).await?;
+    emit_instance(&state.events, instance_id, InstancePayloadType::Edited)
+        .await?;
 
     Ok(())
 }
@@ -137,7 +139,8 @@ pub async fn publish_shared_instance(
         &state,
     )
     .await?;
-    emit_instance(instance_id, InstancePayloadType::Edited).await?;
+    emit_instance(&state.events, instance_id, InstancePayloadType::Edited)
+        .await?;
 
     shared_attachment(instance_id, &state).await?.ok_or(
         crate::ErrorKind::InputError(
@@ -198,7 +201,8 @@ pub async fn get_shared_instance_publish_preview(
         &state,
     )
     .await?;
-    emit_instance(instance_id, InstancePayloadType::Edited).await?;
+    emit_instance(&state.events, instance_id, InstancePayloadType::Edited)
+        .await?;
 
     Ok(Some(SharedInstancePublishPreview {
         shared_instance_id: attachment.id,
@@ -1253,7 +1257,8 @@ async fn ensure_owner_up_to_date(
         &state.pool,
     )
     .await?;
-    emit_instance(instance_id, InstancePayloadType::Edited).await?;
+    emit_instance(&state.events, instance_id, InstancePayloadType::Edited)
+        .await?;
     bail!(crate::ErrorKind::SharedInstanceOwnerBehind)
 }
 

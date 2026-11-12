@@ -53,7 +53,8 @@ pub async fn invite_shared_instance_users(
         );
         add_remote_users(&attachment.id, user_ids.clone(), &state).await?;
     }
-    emit_instance(instance_id, InstancePayloadType::Edited).await?;
+    emit_instance(&state.events, instance_id, InstancePayloadType::Edited)
+        .await?;
 
     get_remote_users(&attachment.id, &state).await
 }
@@ -117,7 +118,8 @@ pub async fn create_shared_instance_invite_link(
         return Err(error);
     }
 
-    emit_instance(instance_id, InstancePayloadType::Edited).await?;
+    emit_instance(&state.events, instance_id, InstancePayloadType::Edited)
+        .await?;
 
     Ok(SharedInstanceInviteLink {
         invite_id,
@@ -163,7 +165,7 @@ pub async fn revoke_shared_instance_invite(
     ensure_owner(&attachment)?;
 
     delete_remote_invite(&attachment.id, &invite_id, &state).await?;
-    emit_instance(instance_id, InstancePayloadType::Edited).await
+    emit_instance(&state.events, instance_id, InstancePayloadType::Edited).await
 }
 
 #[tracing::instrument]
@@ -195,12 +197,14 @@ pub async fn remove_shared_instance_users(
     {
         delete_remote_instance(&attachment.id, &state).await?;
         crate::state::clear_shared_instance(instance_id, &state.pool).await?;
-        emit_instance(instance_id, InstancePayloadType::Edited).await?;
+        emit_instance(&state.events, instance_id, InstancePayloadType::Edited)
+            .await?;
 
         return Ok(SharedInstanceUsers::empty());
     }
 
-    emit_instance(instance_id, InstancePayloadType::Edited).await?;
+    emit_instance(&state.events, instance_id, InstancePayloadType::Edited)
+        .await?;
 
     Ok(remaining_users)
 }

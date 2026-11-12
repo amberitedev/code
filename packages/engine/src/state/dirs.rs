@@ -1,5 +1,6 @@
 //! Theseus directory information
 pub(crate) mod move_app_directory;
+use crate::event::EventSink;
 use crate::event::emit::{emit_loading, init_loading};
 use crate::state::Settings;
 use crate::util::fetch::IoSemaphore;
@@ -198,14 +199,15 @@ impl DirectoryInfo {
         std::env::var_os(name).map(PathBuf::from)
     }
 
-    #[tracing::instrument(skip(settings, pool, _io_semaphore))]
+    #[tracing::instrument(skip(settings, pool, _io_semaphore, events))]
     pub async fn move_launcher_directory(
         settings: &mut Settings,
         pool: &sqlx::SqlitePool,
         _io_semaphore: &IoSemaphore,
         settings_dir: &Path,
+        events: &EventSink,
     ) -> crate::Result<()> {
-        Self::try_move_launcher_directory(settings, pool, settings_dir)
+        Self::try_move_launcher_directory(settings, pool, settings_dir, events)
             .await
             .context(ErrorKind::DirectoryMoveFailed)
     }
@@ -214,6 +216,7 @@ impl DirectoryInfo {
         settings: &mut Settings,
         pool: &sqlx::SqlitePool,
         initial: &Path,
+        events: &EventSink,
     ) -> crate::Result<()> {
         let destination = settings
             .custom_dir
@@ -262,6 +265,7 @@ impl DirectoryInfo {
             && moving
         {
             let loading = init_loading(
+                events,
                 LoadingBarType::DirectoryMove {
                     old: previous.to_string_lossy().into_owned(),
                     new: destination.to_string_lossy().into_owned(),

@@ -1,7 +1,7 @@
 use crate::State;
 use crate::api::instance::CONFIG_DIRECTORY;
-use crate::event::InstancePayloadType;
 use crate::event::emit::{emit_instance, emit_warning};
+use crate::event::{EventSink, InstancePayloadType};
 use crate::state::{
     DirectoryInfo, InstanceInstallStage, ProjectType, attached_world_data,
 };
@@ -141,8 +141,12 @@ fn queue_content_sync(instance_id: String, state: Arc<State>) {
                     "Content reconciliation deferred: {error}"
                 );
             }
-            let _ =
-                emit_instance(&instance_id, InstancePayloadType::Synced).await;
+            let _ = emit_instance(
+                &state.events,
+                &instance_id,
+                InstancePayloadType::Synced,
+            )
+            .await;
             match state.file_watcher.content_syncs.entry(instance_id.clone()) {
                 Entry::Occupied(mut entry) if *entry.get() => {
                     *entry.get_mut() = false
@@ -270,7 +274,11 @@ pub(crate) fn watch_instance_events(
                                     .as_ref()
                                     .is_some_and(|x| *x == "txt")
                             {
-                                crash_task(instance_id, state.pool.clone());
+                                crash_task(
+                                    instance_id,
+                                    state.pool.clone(),
+                                    state.events.clone(),
+                                );
                             } else if (is_screenshot_event
                                 && !visited_screenshot_instances
                                     .contains(&instance_id))
@@ -361,6 +369,7 @@ pub(crate) fn watch_instance_events(
                                             Arc::clone(&state),
                                         );
                                     } else {
+                                        let events = state.events.clone();
                                         tokio::spawn(async move {
                                             if reconcile_screenshots
 												&& let Err(error) =
@@ -374,6 +383,7 @@ pub(crate) fn watch_instance_events(
 												);
 											}
                                             let _ = emit_instance(
+                                                &events,
                                                 &emit_instance_id,
                                                 event,
                                             )
@@ -550,7 +560,7 @@ pub(crate) async fn unwatch_instance_folder(
     }
 }
 
-fn crash_task(instance_id: String, pool: SqlitePool) {
+fn crash_task(instance_id: String, pool: SqlitePool, events: EventSink) {
     tokio::task::spawn(async move {
         let res = async {
             let Some(instance) =
@@ -560,7 +570,7 @@ fn crash_task(instance_id: String, pool: SqlitePool) {
             };
 
             if instance.install_stage == InstanceInstallStage::Installed {
-                emit_warning(&format!(
+                emit_warning(&events, &format!(
 					"Instance {} has crashed! Visit the logs page to see a crash report.",
 					instance.name
 				))
@@ -595,8 +605,8 @@ mod tests {
         write(&b_dir.join("profiles/Survival/mods/b.jar"));
 
         tokio::time::timeout(Duration::from_secs(60), async {
-            let a = State::new(a_dir).await.unwrap();
-            let b = State::new(b_dir).await.unwrap();
+            let a = State::new(a_dir, EventSink::new()).await.unwrap();
+            let b = State::new(b_dir, EventSink::new()).await.unwrap();
             add_instance(&a, "same", "Survival").await;
             add_instance(&b, "same", "Survival").await;
             // A's sync keeps its queue entry while the instance installs.

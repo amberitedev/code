@@ -229,6 +229,7 @@ fn format_count(count: usize) -> String {
 }
 
 async fn maybe_emit_log_compaction_warning(
+    events: &crate::event::EventSink,
     file_name: &str,
     stats: LogCompactionStats,
 ) {
@@ -236,7 +237,7 @@ async fn maybe_emit_log_compaction_warning(
         return;
     }
 
-    let _ = crate::event::emit::emit_warning(&format!(
+    let _ = crate::event::emit::emit_warning(events, &format!(
         "Modrinth App has compacted {} repeated log lines in {} before displaying it for performance reasons.",
         format_count(stats.compacted_lines),
         file_name,
@@ -405,7 +406,12 @@ async fn get_output_by_filename_from_path(
             let mut reader = std::io::BufReader::new(gz);
             let compacted = read_compacted_log(&mut reader)
                 .map_err(|e| IOError::with_path(e, &path))?;
-            maybe_emit_log_compaction_warning(file_name, compacted.stats).await;
+            maybe_emit_log_compaction_warning(
+                &state.events,
+                file_name,
+                compacted.stats,
+            )
+            .await;
             return Ok(CensoredString::censor(compacted.output, &credentials));
         } else if ext == "log" || ext == "txt" {
             let file = std::fs::File::open(&path)
@@ -413,7 +419,12 @@ async fn get_output_by_filename_from_path(
             let mut reader = std::io::BufReader::new(file);
             let compacted = read_compacted_log(&mut reader)
                 .map_err(|e| IOError::with_path(e, &path))?;
-            maybe_emit_log_compaction_warning(file_name, compacted.stats).await;
+            maybe_emit_log_compaction_warning(
+                &state.events,
+                file_name,
+                compacted.stats,
+            )
+            .await;
             return Ok(CensoredString::censor(compacted.output, &credentials));
         }
     }
@@ -490,7 +501,12 @@ pub async fn get_live_log_buffer(
         .into_iter()
         .map(|x| x.1)
         .collect::<Vec<_>>();
-    maybe_emit_log_compaction_warning("live log", compacted.stats).await;
+    maybe_emit_log_compaction_warning(
+        &state.events,
+        "live log",
+        compacted.stats,
+    )
+    .await;
     Ok(CensoredString::censor(compacted.output, &credentials))
 }
 
@@ -560,7 +576,12 @@ pub async fn get_generic_live_log_cursor(
         .into_iter()
         .map(|x| x.1)
         .collect::<Vec<_>>();
-    maybe_emit_log_compaction_warning(log_file_name, compacted.stats).await;
+    maybe_emit_log_compaction_warning(
+        &state.events,
+        log_file_name,
+        compacted.stats,
+    )
+    .await;
     let output = CensoredString::censor(compacted.output, &credentials);
     Ok(LatestLogCursor {
         cursor,

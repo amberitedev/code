@@ -1,5 +1,6 @@
 //! Theseus state management system
 use crate::ErrorKind;
+use crate::event::EventSink;
 use crate::util::fetch::{FetchSemaphore, IoSemaphore};
 use anyhow::anyhow;
 use std::path::PathBuf;
@@ -115,11 +116,16 @@ pub struct State {
     pub(crate) pool: SqlitePool,
 
     pub(crate) file_watcher: FileWatcher,
+
+    pub events: EventSink,
 }
 
 impl State {
     /// Starts the App's engine once and makes it the process global.
-    pub async fn init(app_identifier: String) -> crate::Result<()> {
+    pub async fn init(
+        app_identifier: String,
+        events: EventSink,
+    ) -> crate::Result<()> {
         let _startup = STATE_STARTUP_LOCK.lock().await;
         let result = LAUNCHER_STATE
             .get_or_try_init(|| async {
@@ -129,7 +135,8 @@ impl State {
                         .ok_or(ErrorKind::FSError(
                         "could not find the application directory".to_string(),
                     ))?;
-                let (state, watcher_events) = Self::open(settings_dir).await?;
+                let (state, watcher_events) =
+                    Self::open(settings_dir, events).await?;
                 // Fallible, so it runs before a background task can keep a rejected engine alive.
                 crate::self_hosted::accounts::bind_origin(&state.pool).await?;
                 state.spawn_background(watcher_events);
@@ -146,16 +153,20 @@ impl State {
 
     /// Opens a complete engine on `settings_dir` without touching the global. Its background
     /// tasks hold a `Weak` and end once the last `Arc` is dropped.
-    pub async fn new(settings_dir: PathBuf) -> crate::Result<Arc<Self>> {
-        let (state, watcher_events) = Self::open(settings_dir).await?;
+    pub async fn new(
+        settings_dir: PathBuf,
+        events: EventSink,
+    ) -> crate::Result<Arc<Self>> {
+        let (state, watcher_events) = Self::open(settings_dir, events).await?;
         state.spawn_background(watcher_events);
         Ok(state)
     }
 
     /// The fallible part of `new`; it spawns nothing.
-    #[tracing::instrument]
+    #[tracing::instrument(skip(events))]
     async fn open(
         settings_dir: PathBuf,
+        events: EventSink,
     ) -> crate::Result<(
         Arc<Self>,
         tokio::sync::mpsc::Receiver<notify_debouncer_mini::DebounceEventResult>,
@@ -183,6 +194,7 @@ impl State {
             &pool,
             &io_semaphore,
             &settings_dir,
+            &events,
         )
         .await?;
 
@@ -213,6 +225,7 @@ impl State {
             process_manager: ProcessManager::new(),
             pool,
             file_watcher,
+            events,
         });
 
         state.content_store.recover(None).await?;
@@ -355,6 +368,7 @@ impl State {
                     &state.pool,
                     &state.api_semaphore,
                     &state.process_manager,
+                    &state.events,
                 )
                 .await;
             let _ = FriendsSocket::socket_loop(state).await;
@@ -490,8 +504,8 @@ mod tests {
 
         // A call that reaches the global waits forever instead of failing.
         tokio::time::timeout(Duration::from_secs(60), async {
-            let a = State::new(a_dir).await.unwrap();
-            let b = State::new(b_dir).await.unwrap();
+            let a = State::new(a_dir, EventSink::new()).await.unwrap();
+            let b = State::new(b_dir, EventSink::new()).await.unwrap();
             add_instance(&a, "a", "Survival").await;
             add_instance(&b, "b", "Survival").await;
 

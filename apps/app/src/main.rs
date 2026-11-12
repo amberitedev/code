@@ -7,9 +7,13 @@
 use anyhow::Context;
 use engine::prelude::*;
 use native_dialog::{DialogBuilder, MessageLevel};
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use tauri::async_runtime::JoinHandle;
+use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{Listener, Manager};
 use tauri_plugin_fs::FsExt;
+use tokio::sync::broadcast::error::RecvError;
 
 mod api;
 mod dev;
@@ -23,18 +27,54 @@ mod updater_impl;
 #[cfg(not(feature = "updater"))]
 mod updater_impl_noop;
 
+/// Forwards the engine's events to the current page; a reload replaces it.
+#[derive(Default)]
+struct EventForwarder(Mutex<Option<JoinHandle<()>>>);
+
 // Should be called in launcher initialization
 #[tracing::instrument(skip_all)]
 #[tauri::command]
 async fn initialize_state(
     app: tauri::AppHandle,
-    events: tauri::ipc::Channel<tauri::ipc::InvokeResponseBody>,
+    events: Channel<InvokeResponseBody>,
+    sink: tauri::State<'_, engine::EventSink>,
+    forwarder: tauri::State<'_, EventForwarder>,
 ) -> api::Result<()> {
     tracing::info!("Initializing app event state...");
-    engine::EventState::init(app.clone(), events).await?;
+    let mut received = sink.subscribe();
+    let forward = tauri::async_runtime::spawn(async move {
+        loop {
+            let event = match received.recv().await {
+                Ok(event) => event,
+                Err(RecvError::Lagged(skipped)) => {
+                    tracing::warn!("The frontend missed {skipped} app events");
+                    continue;
+                }
+                Err(RecvError::Closed) => return,
+            };
+            let frame = match postcard::to_allocvec(&event) {
+                Ok(frame) => frame,
+                Err(error) => {
+                    tracing::warn!("Failed to encode an app event: {error}");
+                    continue;
+                }
+            };
+            if let Err(error) = events.send(InvokeResponseBody::Raw(frame)) {
+                tracing::warn!("Failed to forward an app event: {error}");
+            }
+        }
+    });
+    if let Some(previous) = forwarder
+        .0
+        .lock()
+        .expect("the forwarder lock is never poisoned")
+        .replace(forward)
+    {
+        previous.abort();
+    }
 
     tracing::info!("Initializing app state...");
-    State::init(app.config().identifier.clone()).await?;
+    State::init(app.config().identifier.clone(), sink.inner().clone()).await?;
     #[cfg(debug_assertions)]
     dev::sign_in().await;
 
@@ -281,6 +321,8 @@ fn main() {
                 .build(),
         )
         .setup(|app| {
+            app.manage(engine::EventSink::with_app(app.handle().clone()));
+
             #[cfg(target_os = "macos")]
             {
                 let payload = macos::deep_link::get_or_init_payload(app);
@@ -366,6 +408,7 @@ fn main() {
         .plugin(api::cores::init())
         .manage(PendingUpdateData::default())
         .manage(RestartAfterPendingUpdate::default())
+        .manage(EventForwarder::default())
         .invoke_handler(tauri::generate_handler![
             initialize_state,
             get_update_size,

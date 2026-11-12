@@ -1,40 +1,23 @@
-use super::{FriendPayload, LoadingBarId};
-#[cfg(feature = "tauri")]
+use super::{EventSink, FriendPayload, LoadingBarId};
 use crate::event::{
-    AppEvent, InstanceGroupsChangedPayload, InstancePayload, LoadingPayload,
-    ProcessPayload, WarningPayload,
-};
-use crate::event::{
-    CommandPayload, EventError, InstancePayloadType, LoadingBar,
-    LoadingBarType, ProcessPayloadType,
+    AppEvent, CommandPayload, EventError, InstanceGroupsChangedPayload,
+    InstancePayload, InstancePayloadType, LoadingBar, LoadingBarType,
+    LoadingPayload, ProcessPayload, ProcessPayloadType, WarningPayload,
 };
 use crate::state::OnboardingChecklist;
 use futures::prelude::*;
 use serde_json::Value;
-#[cfg(feature = "tauri")]
-use tauri::Manager;
 use uuid::Uuid;
 
-#[cfg(feature = "cli")]
-const CLI_PROGRESS_BAR_TOTAL: u64 = 1000;
-
 /*
-   Events are a way we can communicate with the Tauri frontend from the Rust backend.
-   We include a feature flag for Tauri, so that we can compile this code without Tauri.
+   Events are how the engine tells its host what happened. The host creates an EventSink,
+   subscribes to it, and passes it to State; the emit_x functions send through it.
 
-   To use events, we need to do the following:
-    1) Make sure we are using the tauri feature flag
-    2) Initialize the EventState with EventState::init() *before* initializing the theseus State
-    3) Call emit_x functions to send events to the frontend
    For emit_loading() specifically, we need to initialize the loading bar with init_loading() first and pass the received loader in
 
    For example:
-   pub async fn loading_function() -> crate::Result<()> {
-        loading_function()).await;
-   }
-
-   pub async fn loading_function() -> crate::Result<()> {
-       let loading_bar = init_loading(LoadingBarType::StateInit, 100.0, "Loading something long...").await;
+   pub async fn loading_function(events: &EventSink) -> crate::Result<()> {
+       let loading_bar = init_loading(events, LoadingBarType::StateInit, 100.0, "Loading something long...").await?;
        for i in 0..100 {
            emit_loading(&loading_bar, 1.0, None)?;
            tokio::time::sleep(Duration::from_millis(100)).await;
@@ -48,25 +31,26 @@ const CLI_PROGRESS_BAR_TOTAL: u64 = 1000;
 /// title is the title of the loading bar
 /// The app will wait for this loading bar to finish before exiting, as it is considered safe.
 pub async fn init_loading(
+    events: &EventSink,
     bar_type: LoadingBarType,
     total: f64,
     title: &str,
 ) -> crate::Result<LoadingBarId> {
-    let key = init_loading_unsafe(bar_type, total, title).await?;
+    let key = init_loading_unsafe(events, bar_type, total, title).await?;
     Ok(key)
 }
 
 /// An unsafe loading bar can be created without adding it to the SafeProcesses list,
 /// meaning that the app won't ask to wait for it to finish before exiting.
 pub async fn init_loading_unsafe(
+    events: &EventSink,
     bar_type: LoadingBarType,
     total: f64,
     title: &str,
 ) -> crate::Result<LoadingBarId> {
-    let event_state = crate::EventState::get();
-    let key = LoadingBarId(Uuid::new_v4());
+    let key = LoadingBarId(Uuid::new_v4(), events.clone());
 
-    event_state.loading_bars.insert(
+    events.loading_bars.insert(
         key.0,
         LoadingBar {
             loading_bar_uuid: key.0,
@@ -75,20 +59,6 @@ pub async fn init_loading_unsafe(
             current: 0.0,
             last_sent: -1.0,
             bar_type,
-            #[cfg(feature = "cli")]
-            cli_progress_bar: {
-                let pb = indicatif::ProgressBar::new(CLI_PROGRESS_BAR_TOTAL);
-
-                pb.set_position(0);
-                pb.set_style(
-                    indicatif::ProgressStyle::default_bar()
-                        .template(
-                            "{spinner:.green} [{elapsed_precise}] [{bar:.lime/green}] {pos}/{len} {msg}",
-                        ).unwrap()
-                        .progress_chars("#>-"),
-                );
-                pb
-            },
         },
     );
     // attempt an initial loading_emit event to the frontend
@@ -107,10 +77,10 @@ pub fn emit_loading(
     increment_frac: f64,
     message: Option<&str>,
 ) -> crate::Result<()> {
-    let event_state = crate::EventState::get();
+    let LoadingBarId(uuid, events) = key;
 
-    let Some(mut loading_bar) = event_state.loading_bars.get_mut(&key.0) else {
-        return Err(EventError::NoLoadingBar(key.0).into());
+    let Some(mut loading_bar) = events.loading_bars.get_mut(uuid) else {
+        return Err(EventError::NoLoadingBar(*uuid).into());
     };
 
     // Tick up loading bar
@@ -118,22 +88,7 @@ pub fn emit_loading(
     let display_frac = loading_bar.current / loading_bar.total;
 
     if f64::abs(display_frac - loading_bar.last_sent) > 0.005 {
-        // Emit event to indicatif progress bar
-        #[cfg(feature = "cli")]
-        {
-            loading_bar.cli_progress_bar.set_message(
-                message
-                    .map(|x| x.to_string())
-                    .unwrap_or(loading_bar.message.clone()),
-            );
-            loading_bar.cli_progress_bar.set_position(
-                (display_frac * CLI_PROGRESS_BAR_TOTAL as f64).round() as u64,
-            );
-        }
-
-        //Emit event to tauri
-        #[cfg(feature = "tauri")]
-        event_state.send(AppEvent::Loading(LoadingPayload {
+        events.send(AppEvent::Loading(LoadingPayload {
             fraction: if display_frac >= 1.0 {
                 None // by convention, when its done, we submit None
             // any further updates will be ignored (also sending None)
@@ -143,10 +98,7 @@ pub fn emit_loading(
             message: message.unwrap_or(&loading_bar.message).to_string(),
             event: loading_bar.bar_type.clone(),
             loader_uuid: loading_bar.loading_bar_uuid.to_string(),
-        }))?;
-
-        #[cfg(not(any(feature = "cli", feature = "tauri")))]
-        let _ = message;
+        }));
 
         loading_bar.last_sent = display_frac;
     }
@@ -155,13 +107,13 @@ pub fn emit_loading(
 }
 
 // emit_warning(message)
-pub async fn emit_warning(message: &str) -> crate::Result<()> {
-    #[cfg(feature = "tauri")]
-    if let Some(event_state) = crate::EventState::try_get() {
-        event_state.send(AppEvent::Warning(WarningPayload {
-            message: message.to_string(),
-        }))?;
-    }
+pub async fn emit_warning(
+    events: &EventSink,
+    message: &str,
+) -> crate::Result<()> {
+    events.send(AppEvent::Warning(WarningPayload {
+        message: message.to_string(),
+    }));
     tracing::warn!("{}", message);
     Ok(())
 }
@@ -169,106 +121,82 @@ pub async fn emit_warning(message: &str) -> crate::Result<()> {
 // emit_command(CommandPayload::Something { something })
 // ie: installing a pack, opening an .mrpack, etc
 // Generally used for url deep links and file opens that we want to handle in the frontend
-pub async fn emit_command(command: CommandPayload) -> crate::Result<()> {
+pub async fn emit_command(
+    events: &EventSink,
+    command: CommandPayload,
+) -> crate::Result<()> {
     tracing::debug!("Command: {}", serde_json::to_string(&command)?);
+    events.send(AppEvent::Command(command));
     #[cfg(feature = "tauri")]
-    {
-        let event_state = crate::EventState::get();
-        event_state.send(AppEvent::Command(command))?;
-
-        if let Some(window) = event_state.app.get_window("main") {
-            let _ = window.set_focus();
-        }
+    if let Some(window) = events.get_main_window() {
+        let _ = window.set_focus();
     }
     Ok(())
 }
 
 // emit_process(uuid, pid, event, message)
-#[allow(unused_variables)]
 pub async fn emit_process(
+    events: &EventSink,
     instance_id: &str,
     uuid: Uuid,
     event: ProcessPayloadType,
     message: &str,
 ) -> crate::Result<()> {
-    #[cfg(feature = "tauri")]
-    {
-        let event_state = crate::EventState::get();
-        event_state.send(AppEvent::Process(ProcessPayload {
-            instance_id: instance_id.to_string(),
-            uuid: uuid.to_string(),
-            event,
-            message: message.to_string(),
-        }))?;
-    }
+    events.send(AppEvent::Process(ProcessPayload {
+        instance_id: instance_id.to_string(),
+        uuid: uuid.to_string(),
+        event,
+        message: message.to_string(),
+    }));
     Ok(())
 }
 
 // emit_instance(path, event)
-#[allow(unused_variables)]
 pub async fn emit_instance(
+    events: &EventSink,
     instance_id: &str,
     event: InstancePayloadType,
 ) -> crate::Result<()> {
-    #[cfg(feature = "tauri")]
-    {
-        let event_state = crate::EventState::get();
-        event_state.send(AppEvent::Instance(InstancePayload {
-            instance_id: instance_id.to_string(),
-            event,
-        }))?;
-    }
+    events.send(AppEvent::Instance(InstancePayload {
+        instance_id: instance_id.to_string(),
+        event,
+    }));
     Ok(())
 }
 
-#[allow(unused_variables)]
 pub async fn emit_instance_groups_changed(
+    events: &EventSink,
     instance_ids: &[String],
 ) -> crate::Result<()> {
-    #[cfg(feature = "tauri")]
-    {
-        let event_state = crate::EventState::get();
-        event_state.send(AppEvent::InstanceGroupsChanged(
-            InstanceGroupsChangedPayload {
-                instance_ids: instance_ids.to_vec(),
-            },
-        ))?;
-    }
+    events.send(AppEvent::InstanceGroupsChanged(
+        InstanceGroupsChangedPayload {
+            instance_ids: instance_ids.to_vec(),
+        },
+    ));
     Ok(())
 }
 
-#[allow(unused_variables)]
 pub async fn emit_onboarding_checklist(
+    events: &EventSink,
     checklist: OnboardingChecklist,
 ) -> crate::Result<()> {
-    #[cfg(feature = "tauri")]
-    {
-        let event_state = crate::EventState::get();
-        event_state.send(AppEvent::OnboardingChecklist(checklist))?;
-    }
+    events.send(AppEvent::OnboardingChecklist(checklist));
     Ok(())
 }
 
-#[allow(unused_variables)]
-pub async fn emit_friend(payload: FriendPayload) -> crate::Result<()> {
-    #[cfg(feature = "tauri")]
-    {
-        let event_state = crate::EventState::get();
-        event_state.send(AppEvent::Friend(payload))?;
-    }
-
+pub async fn emit_friend(
+    events: &EventSink,
+    payload: FriendPayload,
+) -> crate::Result<()> {
+    events.send(AppEvent::Friend(payload));
     Ok(())
 }
 
-#[allow(unused_variables)]
-pub async fn emit_notification(payload: Value) -> crate::Result<()> {
-    #[cfg(feature = "tauri")]
-    {
-        let event_state = crate::EventState::get();
-        event_state
-            .send(AppEvent::Notification(serde_json::to_string(&payload)?))?;
-    }
-
+pub async fn emit_notification(
+    events: &EventSink,
+    payload: Value,
+) -> crate::Result<()> {
+    events.send(AppEvent::Notification(serde_json::to_string(&payload)?));
     Ok(())
 }
 

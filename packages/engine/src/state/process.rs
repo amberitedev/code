@@ -1,8 +1,7 @@
 use crate::ErrorKind;
 use crate::State;
 use crate::event::emit::{emit_instance, emit_process};
-use crate::event::{InstancePayloadType, ProcessPayloadType};
-#[cfg(feature = "tauri")]
+use crate::event::{EventSink, InstancePayloadType, ProcessPayloadType};
 use crate::event::{LogEvent, LogPayload};
 use crate::util::io::IOError;
 use crate::util::rpc::RpcServer;
@@ -324,6 +323,7 @@ impl ProcessManager {
             let instance_path = metadata.instance_path.clone();
             let pool = state.pool.clone();
             let log_buffers = Arc::clone(&self.log_buffers);
+            let events = state.events.clone();
             tokio::spawn(async move {
                 Process::process_output(
                     &instance_id,
@@ -333,6 +333,7 @@ impl ProcessManager {
                     xml_logging,
                     &pool,
                     &log_buffers,
+                    &events,
                 )
                 .await;
             });
@@ -345,6 +346,7 @@ impl ProcessManager {
             let instance_path = metadata.instance_path.clone();
             let pool = state.pool.clone();
             let log_buffers = Arc::clone(&self.log_buffers);
+            let events = state.events.clone();
             tokio::spawn(async move {
                 Process::process_output(
                     &instance_id,
@@ -354,6 +356,7 @@ impl ProcessManager {
                     xml_logging,
                     &pool,
                     &log_buffers,
+                    &events,
                 )
                 .await;
             });
@@ -372,6 +375,7 @@ impl ProcessManager {
         ));
 
         emit_process(
+            &state.events,
             instance_id,
             metadata.uuid,
             ProcessPayloadType::Launched,
@@ -468,6 +472,7 @@ impl Process {
         xml_logging: bool,
         pool: &SqlitePool,
         log_buffers: &LogBuffers,
+        events: &EventSink,
     ) where
         R: tokio::io::AsyncRead + Unpin,
     {
@@ -586,6 +591,7 @@ impl Process {
 
                                 Self::emit_log4j_event(
                                     log_buffers,
+                                    events,
                                     instance_id,
                                     &current_event,
                                 );
@@ -625,6 +631,7 @@ impl Process {
 											&timestamp,
 											message,
 											pool,
+											events,
                                         ).await {
                                             tracing::error!("Failed to handle server join logging: {e}");
                                         }
@@ -632,6 +639,7 @@ impl Process {
 
                                     Self::emit_log4j_event(
                                         log_buffers,
+                                        events,
                                         instance_id,
                                         &current_event,
                                     );
@@ -660,6 +668,7 @@ impl Process {
                             }
                             Self::emit_legacy_log(
                                 log_buffers,
+                                events,
                                 instance_id,
                                 &text,
                             );
@@ -688,6 +697,7 @@ impl Process {
                     }
                     Self::emit_legacy_log(
                         log_buffers,
+                        events,
                         instance_id,
                         line.trim_ascii_end(),
                     );
@@ -695,6 +705,7 @@ impl Process {
                         instance_id,
                         line.trim_ascii_end(),
                         pool,
+                        events,
                     )
                     .await
                     {
@@ -752,6 +763,7 @@ impl Process {
 
     fn emit_log4j_event(
         log_buffers: &LogBuffers,
+        events: &EventSink,
         instance_id: &str,
         event: &Log4jEvent,
     ) {
@@ -768,41 +780,26 @@ impl Process {
             }
         }
 
-        #[cfg(feature = "tauri")]
-        {
-            let event_state = crate::EventState::get();
-            let _ = event_state.send(crate::event::AppEvent::Log(LogPayload {
-                instance_id: instance_id.to_string(),
-                event: LogEvent::Log4j(event.clone()),
-            }));
-        }
-        #[cfg(not(feature = "tauri"))]
-        {
-            let _ = (instance_id, event);
-        }
+        events.send(crate::event::AppEvent::Log(LogPayload {
+            instance_id: instance_id.to_string(),
+            event: LogEvent::Log4j(event.clone()),
+        }));
     }
 
     fn emit_legacy_log(
         log_buffers: &LogBuffers,
+        events: &EventSink,
         instance_id: &str,
         message: &str,
     ) {
         push_log_line(log_buffers, instance_id, message.to_string());
 
-        #[cfg(feature = "tauri")]
-        {
-            let event_state = crate::EventState::get();
-            let _ = event_state.send(crate::event::AppEvent::Log(LogPayload {
-                instance_id: instance_id.to_string(),
-                event: LogEvent::Legacy {
-                    message: message.to_string(),
-                },
-            }));
-        }
-        #[cfg(not(feature = "tauri"))]
-        {
-            let _ = (instance_id, message);
-        }
+        events.send(crate::event::AppEvent::Log(LogPayload {
+            instance_id: instance_id.to_string(),
+            event: LogEvent::Legacy {
+                message: message.to_string(),
+            },
+        }));
     }
 
     fn append_to_log_file(
@@ -821,6 +818,7 @@ impl Process {
         timestamp: &str,
         message: &str,
         pool: &SqlitePool,
+        events: &EventSink,
     ) -> crate::Result<()> {
         let timestamp = timestamp
             .parse::<i64>()
@@ -836,6 +834,7 @@ impl Process {
             message,
             timestamp,
             pool,
+            events,
         )
         .await
     }
@@ -844,6 +843,7 @@ impl Process {
         instance_id: &str,
         line: &str,
         pool: &SqlitePool,
+        events: &EventSink,
     ) -> crate::Result<()> {
         if let Some((timestamp, message)) = line.split_once(" [CLIENT] [INFO] ")
         {
@@ -858,6 +858,7 @@ impl Process {
                 message,
                 timestamp,
                 pool,
+                events,
             )
             .await
         } else {
@@ -866,6 +867,7 @@ impl Process {
                 line,
                 Utc::now(),
                 pool,
+                events,
             )
             .await
         }
@@ -876,6 +878,7 @@ impl Process {
         message: &str,
         timestamp: DateTime<Utc>,
         pool: &SqlitePool,
+        events: &EventSink,
     ) -> crate::Result<()> {
         let Some(host_port_string) = message.strip_prefix("Connecting to ")
         else {
@@ -900,8 +903,10 @@ impl Process {
         {
             let instance_id = instance_id.to_owned();
             let host = host.to_owned();
+            let events = events.clone();
             tokio::spawn(async move {
                 let _ = emit_instance(
+                    &events,
                     &instance_id,
                     InstancePayloadType::ServerJoined {
                         host,
@@ -1000,6 +1005,7 @@ impl Process {
             }
         });
         emit_process(
+            &state.events,
             &instance_id,
             uuid,
             ProcessPayloadType::Finished,
@@ -1059,8 +1065,7 @@ impl Process {
         {
             let settings = crate::state::Settings::get(&state.pool).await?;
             if settings.refocus_on_game_close
-                && let Some(window) =
-                    crate::EventState::get_main_window().await?
+                && let Some(window) = state.events.get_main_window()
             {
                 window.unminimize()?;
                 window.set_focus()?;

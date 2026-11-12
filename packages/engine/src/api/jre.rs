@@ -124,6 +124,7 @@ async fn auto_install_java_inner(
     let loading_bar = if show_loading {
         Some(
             init_loading(
+                &state.events,
                 LoadingBarType::JavaDownload {
                     version: java_version,
                 },

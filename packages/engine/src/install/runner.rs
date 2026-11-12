@@ -23,8 +23,8 @@ use crate::api::pack::install_mrpack::{
     install_zipped_mrpack_files_with_reporter, mrpack_instance_paths,
 };
 use crate::error_code;
-use crate::event::InstancePayloadType;
 use crate::event::emit::emit_instance;
+use crate::event::{EventSink, InstancePayloadType};
 use crate::state::instances::adapters::sqlite::content_rows;
 use crate::state::instances::commands::resolve_icon_path;
 use crate::state::{
@@ -347,7 +347,7 @@ async fn retry_job_inner(
             return Err(error);
         }
     };
-    emit_install_job(&record.snapshot(&state.installs)).await?;
+    emit_install_job(&state.events, &record.snapshot(&state.installs)).await?;
 
     if let Err(error) =
         diagnostics::install_step(job_id, "prepare_instance", || {
@@ -414,7 +414,7 @@ async fn retry_job_inner(
         return Err(error);
     }
     let registration = super::control::register(job_id, &state.installs);
-    emit_install_job(&record.snapshot(&state.installs)).await?;
+    emit_install_job(&state.events, &record.snapshot(&state.installs)).await?;
     spawn_job(job_id, registration, target_guard, Arc::clone(state));
 
     Ok(record.snapshot(&state.installs))
@@ -452,7 +452,7 @@ async fn set_job_paused(
     let snapshot = store::get_required(job_id, &state.pool)
         .await?
         .snapshot(&state.installs);
-    emit_install_job(&snapshot).await?;
+    emit_install_job(&state.events, &snapshot).await?;
     Ok(snapshot)
 }
 
@@ -476,7 +476,7 @@ pub async fn cancel_job(
     let snapshot = store::get_required(job_id, &state.pool)
         .await?
         .snapshot(&state.installs);
-    emit_install_job(&snapshot).await?;
+    emit_install_job(&state.events, &snapshot).await?;
     Ok(snapshot)
 }
 
@@ -523,7 +523,8 @@ pub(crate) async fn cancel_jobs_for_instance_deletion<'a>(
         };
 
         store::dismiss(job.id, &state.pool).await?;
-        emit_install_job(&record.snapshot(&state.installs)).await?;
+        emit_install_job(&state.events, &record.snapshot(&state.installs))
+            .await?;
     }
 
     for job in jobs {
@@ -572,7 +573,7 @@ async fn start_inner(
         &state.pool,
     )
     .await?;
-    emit_install_job(&record.snapshot(&state.installs)).await?;
+    emit_install_job(&state.events, &record.snapshot(&state.installs)).await?;
 
     if let Err(error) =
         diagnostics::install_step(id, "prepare_instance", || {
@@ -638,7 +639,7 @@ async fn start_inner(
         return Err(error);
     }
     let registration = super::control::register(id, &state.installs);
-    emit_install_job(&record.snapshot(&state.installs)).await?;
+    emit_install_job(&state.events, &record.snapshot(&state.installs)).await?;
     spawn_job(id, registration, target_guard, Arc::clone(&state));
     Ok(record.snapshot(&state.installs))
 }
@@ -808,8 +809,12 @@ async fn prepare_initial_instance(
                         &state.pool,
                     )
                     .await?;
-                    emit_instance(&instance_id, InstancePayloadType::Edited)
-                        .await?;
+                    emit_instance(
+                        &state.events,
+                        &instance_id,
+                        InstancePayloadType::Edited,
+                    )
+                    .await?;
                     Ok(())
                 },
             )
@@ -980,7 +985,7 @@ async fn run_job_inner(
     else {
         return Ok(());
     };
-    emit_install_job(&record.snapshot(&state.installs)).await?;
+    emit_install_job(&state.events, &record.snapshot(&state.installs)).await?;
 
     let mut result = match control.checkpoint().await {
         Ok(()) => {
@@ -1058,15 +1063,22 @@ async fn run_job_inner(
                 }
                 recovery::clear_staging_dir(&job_state, &state.content_store)
                     .await;
-                if let Err(error) =
-                    emit_instance(&instance_id, InstancePayloadType::Edited)
-                        .await
+                if let Err(error) = emit_instance(
+                    &state.events,
+                    &instance_id,
+                    InstancePayloadType::Edited,
+                )
+                .await
                 {
                     tracing::warn!(
                         "Failed to emit completed instance {instance_id}: {error}"
                     );
                 }
-                emit_install_job(&record.snapshot(&state.installs)).await?;
+                emit_install_job(
+                    &state.events,
+                    &record.snapshot(&state.installs),
+                )
+                .await?;
             }
         }
         Err(error) => {
@@ -1196,7 +1208,8 @@ async fn terminalize_failed_job_inner(
         if cleanup_succeeded {
             recovery::clear_staging_dir(&job_state, &state.content_store).await;
         }
-        emit_install_job(&record.snapshot(&state.installs)).await?;
+        emit_install_job(&state.events, &record.snapshot(&state.installs))
+            .await?;
     }
 
     Ok(())
@@ -1344,8 +1357,12 @@ async fn run_request(
                         state,
                     )
                     .await?;
-                    emit_instance(&instance_id, InstancePayloadType::Edited)
-                        .await?;
+                    emit_instance(
+                        &state.events,
+                        &instance_id,
+                        InstancePayloadType::Edited,
+                    )
+                    .await?;
 
                     Ok(Some(instance_id))
                 },
@@ -1451,8 +1468,12 @@ async fn run_request(
                         state,
                     )
                     .await?;
-                    emit_instance(&instance_id, InstancePayloadType::Edited)
-                        .await?;
+                    emit_instance(
+                        &state.events,
+                        &instance_id,
+                        InstancePayloadType::Edited,
+                    )
+                    .await?;
                     Ok(Some(instance_id))
                 },
             )
@@ -1672,8 +1693,12 @@ async fn run_request(
                         state,
                     )
                     .await?;
-                    emit_instance(&instance_id, InstancePayloadType::Edited)
-                        .await?;
+                    emit_instance(
+                        &state.events,
+                        &instance_id,
+                        InstancePayloadType::Edited,
+                    )
+                    .await?;
                     Ok(Some(instance_id))
                 },
             )
@@ -1715,7 +1740,8 @@ async fn apply_post_install_edit(
         },
     )
     .await?;
-    emit_instance(instance_id, InstancePayloadType::Edited).await?;
+    emit_instance(&state.events, instance_id, InstancePayloadType::Edited)
+        .await?;
 
     Ok(())
 }
@@ -2136,7 +2162,7 @@ async fn prepare_update_backup(
     let record =
         store::update_state(job_id, job_state, &state.pool, &state.installs)
             .await?;
-    emit_install_job(&record.snapshot(&state.installs)).await?;
+    emit_install_job(&state.events, &record.snapshot(&state.installs)).await?;
     super::control::checkpoint(job_id, &state.installs).await
 }
 
@@ -2310,7 +2336,8 @@ async fn lock_instance(instance_id: &str, state: &State) -> crate::Result<()> {
         &state.pool,
     )
     .await?;
-    emit_instance(instance_id, InstancePayloadType::Edited).await?;
+    emit_instance(&state.events, instance_id, InstancePayloadType::Edited)
+        .await?;
 
     Ok(())
 }
@@ -2327,7 +2354,7 @@ pub(super) async fn update_progress(
     let record =
         store::update_state(job_id, job_state, &state.pool, &state.installs)
             .await?;
-    emit_install_job(&record.snapshot(&state.installs)).await?;
+    emit_install_job(&state.events, &record.snapshot(&state.installs)).await?;
     Ok(())
 }
 
@@ -2366,12 +2393,12 @@ pub(super) async fn update_content_progress_with_bytes(
         && let Some(snapshot) =
             store::update_live_progress(job_id, job_state, &state.installs)
     {
-        return emit_install_job(&snapshot).await;
+        return emit_install_job(&state.events, &snapshot).await;
     }
     let record =
         store::update_state(job_id, job_state, &state.pool, &state.installs)
             .await?;
-    emit_install_job(&record.snapshot(&state.installs)).await?;
+    emit_install_job(&state.events, &record.snapshot(&state.installs)).await?;
     Ok(())
 }
 
@@ -2389,6 +2416,7 @@ pub(super) async fn update_live_content_progress(
     job_id: Uuid,
     job_state: &mut InstallJobState,
     installs: &Installs,
+    events: &EventSink,
     current: u64,
     total: u64,
     bytes: Option<InstallProgressSecondary>,
@@ -2401,7 +2429,7 @@ pub(super) async fn update_live_content_progress(
     });
     job_state.progress.details = InstallPhaseDetails::Empty;
     match store::update_live_progress(job_id, job_state, installs) {
-        Some(snapshot) => emit_install_job(&snapshot).await,
+        Some(snapshot) => emit_install_job(events, &snapshot).await,
         None => Ok(()),
     }
 }

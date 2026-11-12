@@ -112,7 +112,8 @@ pub async fn dismiss_shared_instance_restored_notice(
         &state.pool,
     )
     .await?;
-    emit_instance(instance_id, InstancePayloadType::Edited).await?;
+    emit_instance(&state.events, instance_id, InstancePayloadType::Edited)
+        .await?;
 
     Ok(())
 }
@@ -680,7 +681,8 @@ pub(super) async fn handle_unavailable_shared_instance_if_current_user(
             }
         }
     }
-    emit_instance(instance_id, InstancePayloadType::Edited).await?;
+    emit_instance(&state.events, instance_id, InstancePayloadType::Edited)
+        .await?;
 
     Ok(())
 }

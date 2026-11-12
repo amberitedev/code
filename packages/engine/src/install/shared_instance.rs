@@ -1501,6 +1501,7 @@ async fn report_shared_instance_installs(
                     job_id,
                     job_state,
                     &state.installs,
+                    &state.events,
                     *completed,
                     total,
                     Some(bytes.progress()),

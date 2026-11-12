@@ -208,7 +208,8 @@ pub async fn edit_generated_icon_if_empty(
         );
     }
 
-    emit_instance(&instance.id, InstancePayloadType::Edited).await?;
+    emit_instance(&state.events, &instance.id, InstancePayloadType::Edited)
+        .await?;
 
     Ok(Some(icon_path))
 }
@@ -334,7 +335,8 @@ async fn apply_instance_icon(
         );
     }
 
-    emit_instance(&instance.id, InstancePayloadType::Edited).await?;
+    emit_instance(&state.events, &instance.id, InstancePayloadType::Edited)
+        .await?;
 
     Ok(())
 }

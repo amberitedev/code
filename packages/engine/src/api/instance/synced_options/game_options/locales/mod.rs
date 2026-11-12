@@ -112,11 +112,9 @@ pub(crate) fn start_game_locale_indexer(state: Arc<State>) {
                 tracing::warn!(%error, "Game setting locales: indexing failed");
             }
             #[cfg(feature = "tauri")]
-            {
+            if let Some(app) = &state.events.app {
                 use tauri::Emitter;
-                if let Err(error) = crate::EventState::get()
-                    .app
-                    .emit("game-option-locales-updated", ())
+                if let Err(error) = app.emit("game-option-locales-updated", ())
                 {
                     tracing::warn!(%error, "Game setting locales: update event failed");
                 }

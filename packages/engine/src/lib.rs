@@ -24,7 +24,7 @@ pub use error::*;
 #[cfg(feature = "export-ts")]
 pub use event::export_app_event_bindings;
 pub use event::{
-    AppEvent, EventState, LoadingBar, LoadingBarType, emit::emit_loading,
+    AppEvent, EventSink, LoadingBar, LoadingBarType, emit::emit_loading,
     emit::emit_warning, emit::init_loading,
 };
 pub use logger::start_logger;

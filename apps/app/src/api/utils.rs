@@ -70,10 +70,10 @@ pub async fn is_network_metered() -> Result<bool> {
 // Create a new HashMap with the same keys
 // Values provided should not be used directly, as they are not guaranteed to be up-to-date
 #[tauri::command]
-pub async fn progress_bars_list()
--> Result<DashMap<uuid::Uuid, engine::LoadingBar>> {
-    let res = engine::EventState::list_progress_bars().await?;
-    Ok(res)
+pub async fn progress_bars_list(
+    events: tauri::State<'_, engine::EventSink>,
+) -> Result<DashMap<uuid::Uuid, engine::LoadingBar>> {
+    Ok(events.loading_bars())
 }
 
 #[tauri::command]
@@ -193,12 +193,15 @@ fn amberite_command(command: &str) -> Option<AmberiteCommand> {
     })
 }
 
-async fn parse_opening_command(command: &str) -> Result<OpeningCommand> {
+async fn parse_opening_command(
+    events: &engine::EventSink,
+    command: &str,
+) -> Result<OpeningCommand> {
     if let Some(command) = amberite_command(command) {
         return Ok(OpeningCommand::Amberite(command));
     }
     Ok(OpeningCommand::Modrinth(
-        handler::parse_command(command).await?,
+        handler::parse_command(events, command).await?,
     ))
 }
 
@@ -210,6 +213,7 @@ async fn parse_opening_command(command: &str) -> Result<OpeningCommand> {
 #[cfg(target_os = "macos")]
 pub async fn get_opening_command(
     state: tauri::State<'_, crate::macos::deep_link::InitialPayload>,
+    events: tauri::State<'_, engine::EventSink>,
 ) -> Result<Option<OpeningCommand>> {
     if crate::dev::config().is_some() {
         return Ok(None);
@@ -220,9 +224,9 @@ pub async fn get_opening_command(
         .map(|path| path.to_string_lossy().to_string());
 
     return if let Some(payload) = payload.as_ref() {
-        opening_command(payload).await
+        opening_command(&events, payload).await
     } else if let Some(cmd_arg) = cmd_arg {
-        opening_command(&cmd_arg).await
+        opening_command(&events, &cmd_arg).await
     } else {
         Ok(None)
     };
@@ -230,7 +234,9 @@ pub async fn get_opening_command(
 
 #[tauri::command]
 #[cfg(not(target_os = "macos"))]
-pub async fn get_opening_command() -> Result<Option<OpeningCommand>> {
+pub async fn get_opening_command(
+    events: tauri::State<'_, engine::EventSink>,
+) -> Result<Option<OpeningCommand>> {
     if crate::dev::config().is_some() {
         return Ok(None);
     }
@@ -239,7 +245,7 @@ pub async fn get_opening_command() -> Result<Option<OpeningCommand>> {
 
     let cmd_arg = cmd_arg.map(|path| path.to_string_lossy().to_string());
     if let Some(cmd) = cmd_arg {
-        return opening_command(&cmd).await;
+        return opening_command(&events, &cmd).await;
     }
     Ok(None)
 }
@@ -250,8 +256,9 @@ pub async fn handle_command<R: Runtime>(
     app: tauri::AppHandle<R>,
     command: String,
 ) -> Result<()> {
+    let events = app.state::<engine::EventSink>();
     let command = normalize_deep_link_command(&command);
-    if accept_auth_deeplink(&command).await {
+    if accept_auth_deeplink(&events, &command).await {
         return Ok(());
     }
 
@@ -265,20 +272,26 @@ pub async fn handle_command<R: Runtime>(
         }
         return Ok(());
     }
-    Ok(engine::handler::parse_and_emit_command(&command).await?)
+    Ok(engine::handler::parse_and_emit_command(&events, &command).await?)
 }
 
-async fn opening_command(command: &str) -> Result<Option<OpeningCommand>> {
+async fn opening_command(
+    events: &engine::EventSink,
+    command: &str,
+) -> Result<Option<OpeningCommand>> {
     let command = normalize_deep_link_command(command);
-    if accept_auth_deeplink(&command).await {
+    if accept_auth_deeplink(events, &command).await {
         return Ok(None);
     }
 
     tracing::info!("opening command {command}");
-    Ok(Some(parse_opening_command(&command).await?))
+    Ok(Some(parse_opening_command(events, &command).await?))
 }
 
-async fn accept_auth_deeplink(command: &str) -> bool {
+async fn accept_auth_deeplink(
+    events: &engine::EventSink,
+    command: &str,
+) -> bool {
     let Some((code, nonce)) = parse_auth_deeplink(command) else {
         return false;
     };
@@ -286,7 +299,7 @@ async fn accept_auth_deeplink(command: &str) -> bool {
     tracing::info!("Handling Modrinth auth deep link");
     if !submit_deeplink(code, &nonce) {
         const MESSAGE: &str = "Couldn't finish signing in. Please try again.";
-        if let Err(error) = emit_warning(MESSAGE).await {
+        if let Err(error) = emit_warning(events, MESSAGE).await {
             tracing::error!("{MESSAGE} ({error})");
         }
     }

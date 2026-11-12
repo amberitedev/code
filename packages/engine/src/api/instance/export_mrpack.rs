@@ -286,6 +286,7 @@ pub async fn export_mrpack(
         .iter()
         .fold(1_u64, |total, (_, _, size)| total.saturating_add(*size));
     let loading_bar = init_loading(
+        &state.events,
         LoadingBarType::PackExport {
             instance_id: metadata.instance.id.clone(),
             instance_name: metadata.instance.name.clone(),

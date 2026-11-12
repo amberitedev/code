@@ -211,6 +211,7 @@ pub async fn get_instance_from_pack(
                 .saturating_add(external_file_hashing_bytes)
                 .max(1);
             let inspection = init_loading(
+                &State::get().await?.events,
                 LoadingBarType::PackImport {
                     pack_name: instance.name.clone(),
                 },

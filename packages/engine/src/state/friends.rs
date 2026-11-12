@@ -1,7 +1,7 @@
 use crate::LabrinthError;
 use crate::data::ModrinthCredentials;
-use crate::event::FriendPayload;
 use crate::event::emit::{emit_friend, emit_notification};
+use crate::event::{EventSink, FriendPayload};
 use crate::state::tunnel::InternalTunnelSocket;
 use crate::state::{ProcessManager, TunnelSocket};
 use crate::util::fetch::{FetchSemaphore, fetch_advanced, fetch_json};
@@ -77,6 +77,7 @@ impl FriendsSocket {
         exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite> + Copy,
         semaphore: &FetchSemaphore,
         process_manager: &ProcessManager,
+        events: &EventSink,
     ) -> crate::Result<()> {
         let _connection_guard = self.connection_lock.lock().await;
         if self.is_connected().await {
@@ -126,6 +127,7 @@ impl FriendsSocket {
                         self.connection_generation.clone();
                     let statuses = self.user_statuses.clone();
                     let sockets = self.tunnel_sockets.clone();
+                    let events = events.clone();
 
                     tokio::spawn(async move {
                         let mut read_stream = read;
@@ -149,7 +151,7 @@ impl FriendsSocket {
                                                     if let Ok(notification) =
                                                         serde_json::from_str::<Value>(&text)
                                                     {
-                                                        let _ = Self::handle_notification(notification).await;
+                                                        let _ = Self::handle_notification(&events, notification).await;
                                                     }
                                                     None
                                                 }
@@ -164,7 +166,7 @@ impl FriendsSocket {
                                                     if let Ok(notification) =
                                                         serde_json::from_slice::<Value>(&bytes)
                                                     {
-                                                        let _ = Self::handle_notification(notification).await;
+                                                        let _ = Self::handle_notification(&events, notification).await;
                                                     }
                                                     None
                                                 }
@@ -193,25 +195,25 @@ impl FriendsSocket {
                                         match server_message {
                                             ServerToClientMessage::StatusUpdate { status } => {
                                                 statuses.insert(status.user_id, status.clone());
-                                                let _ = emit_friend(FriendPayload::StatusUpdate { user_status: status.into() }).await;
+                                                let _ = emit_friend(&events, FriendPayload::StatusUpdate { user_status: status.into() }).await;
                                             },
                                             ServerToClientMessage::UserOffline { id } => {
                                                 statuses.remove(&id);
-                                                let _ = emit_friend(FriendPayload::UserOffline { id: id.to_string() }).await;
+                                                let _ = emit_friend(&events, FriendPayload::UserOffline { id: id.to_string() }).await;
                                             }
                                             ServerToClientMessage::FriendStatuses { statuses: new_statuses } => {
                                                 statuses.clear();
                                                 new_statuses.into_iter().for_each(|status| {
                                                     statuses.insert(status.user_id, status);
                                                 });
-                                                let _ = emit_friend(FriendPayload::StatusSync).await;
+                                                let _ = emit_friend(&events, FriendPayload::StatusSync).await;
                                             }
                                             ServerToClientMessage::FriendRequest { from } => {
-                                                let _ = emit_friend(FriendPayload::FriendRequest { from: from.to_string() }).await;
+                                                let _ = emit_friend(&events, FriendPayload::FriendRequest { from: from.to_string() }).await;
                                             }
                                             ServerToClientMessage::FriendRequestRejected { from } => {
                                                 statuses.remove(&from);
-                                                let _ = emit_friend(FriendPayload::FriendRequestRejected { from: from.to_string() }).await;
+                                                let _ = emit_friend(&events, FriendPayload::FriendRequestRejected { from: from.to_string() }).await;
                                             },
 
                                             ServerToClientMessage::FriendSocketListening { .. } => {}, // TODO
@@ -275,7 +277,10 @@ impl FriendsSocket {
         Ok(())
     }
 
-    async fn handle_notification(notification: Value) -> crate::Result<()> {
+    async fn handle_notification(
+        events: &EventSink,
+        notification: Value,
+    ) -> crate::Result<()> {
         tracing::info!(
             notification = %notification,
             "Received websocket notification payload"
@@ -287,7 +292,7 @@ impl FriendsSocket {
             .and_then(Value::as_str)
             .is_some()
         {
-            emit_notification(notification).await?;
+            emit_notification(events, notification).await?;
         }
 
         Ok(())
@@ -316,6 +321,7 @@ impl FriendsSocket {
                             &state.pool,
                             &state.api_semaphore,
                             &state.process_manager,
+                            &state.events,
                         )
                         .await;
                 } else if connected

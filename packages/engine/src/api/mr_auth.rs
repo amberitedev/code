@@ -142,7 +142,12 @@ async fn reconnect_friends(state: &crate::State) -> crate::Result<()> {
     if let Err(error) = state
         .presence
         .friends_socket
-        .connect(&state.pool, &state.api_semaphore, &state.process_manager)
+        .connect(
+            &state.pool,
+            &state.api_semaphore,
+            &state.process_manager,
+            &state.events,
+        )
         .await
     {
         tracing::warn!("Failed to reconnect friends socket: {error}");

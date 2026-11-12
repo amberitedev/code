@@ -3,6 +3,7 @@ use super::model::{
     InstallJobState, InstallPhaseDetails, InstallPhaseId, InstallProgress,
 };
 use super::store;
+use crate::event::{AppEvent, EventSink};
 use crate::state::{Installs, State};
 use sqlx::SqlitePool;
 use std::sync::Arc;
@@ -18,6 +19,7 @@ pub struct InstallProgressReporter {
     job_id: Uuid,
     pool: SqlitePool,
     installs: Arc<Installs>,
+    events: EventSink,
     state: Arc<Mutex<InstallProgressReporterState>>,
 }
 
@@ -34,6 +36,7 @@ impl InstallProgressReporter {
             job_id,
             pool: engine.pool.clone(),
             installs: Arc::clone(&engine.installs),
+            events: engine.events.clone(),
             state: Arc::new(Mutex::new(InstallProgressReporterState {
                 job: state,
                 last_emitted_at: Instant::now(),
@@ -92,7 +95,7 @@ impl InstallProgressReporter {
         )
         .await?;
         state.mark_emitted();
-        emit_install_job(&record.snapshot(&self.installs)).await
+        emit_install_job(&self.events, &record.snapshot(&self.installs)).await
     }
 
     pub async fn persist(&self) -> crate::Result<InstallJobSnapshot> {
@@ -107,7 +110,7 @@ impl InstallProgressReporter {
         .await?;
         state.mark_emitted();
         let snapshot = record.snapshot(&self.installs);
-        emit_install_job(&snapshot).await?;
+        emit_install_job(&self.events, &snapshot).await?;
         Ok(snapshot)
     }
 
@@ -165,7 +168,7 @@ impl InstallProgressReporter {
                 &self.installs,
             ) {
                 state.mark_emitted();
-                return emit_install_job(&snapshot).await;
+                return emit_install_job(&self.events, &snapshot).await;
             }
         }
 
@@ -177,7 +180,7 @@ impl InstallProgressReporter {
         )
         .await?;
         state.mark_emitted();
-        emit_install_job(&record.snapshot(&self.installs)).await
+        emit_install_job(&self.events, &record.snapshot(&self.installs)).await
     }
 }
 
@@ -219,26 +222,10 @@ impl InstallProgressReporterState {
     }
 }
 
-#[allow(unused_variables)]
 pub async fn emit_install_job(
+    events: &EventSink,
     snapshot: &InstallJobSnapshot,
 ) -> crate::Result<()> {
-    #[cfg(feature = "tauri")]
-    {
-        let result: crate::Result<()> = (|| {
-            let event_state = crate::EventState::get();
-            event_state.send(crate::event::AppEvent::InstallJob(
-                std::sync::Arc::new(snapshot.clone()),
-            ))?;
-            Ok(())
-        })();
-        if let Err(error) = result {
-            tracing::warn!(
-                "Failed to emit install job {} update: {error}",
-                snapshot.job_id
-            );
-        }
-    }
-
+    events.send(AppEvent::InstallJob(Arc::new(snapshot.clone())));
     Ok(())
 }

@@ -1074,10 +1074,14 @@ fn schedule_pending_skin_change_flush(profile_id: Uuid, generation: u64) {
             },
         ))
         .await
+            && let Ok(state) = State::get().await
         {
-            let _ = crate::event::emit::emit_warning(&format!(
-                "Failed to apply pending Minecraft skin change: {error}"
-            ))
+            let _ = crate::event::emit::emit_warning(
+                &state.events,
+                &format!(
+                    "Failed to apply pending Minecraft skin change: {error}"
+                ),
+            )
             .await;
         }
     });

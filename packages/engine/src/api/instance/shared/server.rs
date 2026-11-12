@@ -18,7 +18,8 @@ pub async fn ensure_shared_instance(
         return Ok(attachment);
     }
     let (_, attachment) = owned_shared_instance(instance_id, &state).await?;
-    emit_instance(instance_id, InstancePayloadType::Edited).await?;
+    emit_instance(&state.events, instance_id, InstancePayloadType::Edited)
+        .await?;
     Ok(attachment)
 }
 

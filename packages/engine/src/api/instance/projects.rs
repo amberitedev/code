@@ -47,7 +47,8 @@ pub async fn update_project(
         super::synced_packs::reconcile_after_content_change(instance_id).await;
     }
     if !skip_send_event.unwrap_or(false) {
-        emit_instance(instance_id, InstancePayloadType::Edited).await?;
+        emit_instance(&state.events, instance_id, InstancePayloadType::Edited)
+            .await?;
     }
 
     Ok(path)
@@ -73,7 +74,8 @@ pub async fn add_project_from_version(
         )
         .await?;
     super::synced_packs::sync_new_pack(instance_id, &project_path).await;
-    emit_instance(instance_id, InstancePayloadType::Edited).await?;
+    emit_instance(&state.events, instance_id, InstancePayloadType::Edited)
+        .await?;
 
     Ok(project_path)
 }
@@ -118,6 +120,7 @@ pub async fn install_project_with_dependencies(
         match result {
             Ok(()) => {
                 if let Err(error) = emit_instance(
+                    &state.events,
                     &instance_id,
                     InstancePayloadType::ContentInstallFinished {
                         project_ids: project_ids.clone(),
@@ -129,9 +132,12 @@ pub async fn install_project_with_dependencies(
                         "Failed to emit content install finished event: {error}"
                     );
                 }
-                if let Err(error) =
-                    emit_instance(&instance_id, InstancePayloadType::Edited)
-                        .await
+                if let Err(error) = emit_instance(
+                    &state.events,
+                    &instance_id,
+                    InstancePayloadType::Edited,
+                )
+                .await
                 {
                     tracing::error!(
                         "Failed to emit instance edited event after content install: {error}"
@@ -140,6 +146,7 @@ pub async fn install_project_with_dependencies(
             }
             Err(error) => {
                 if let Err(emit_error) = emit_instance(
+                    &state.events,
                     &instance_id,
                     InstancePayloadType::ContentInstallFailed {
                         project_ids,
@@ -200,7 +207,12 @@ pub async fn switch_project_version_with_dependencies(
     {
         super::synced_packs::reconcile_after_content_change(instance_id).await;
     }
-    emit_instance(&metadata.instance.id, InstancePayloadType::Edited).await?;
+    emit_instance(
+        &state.events,
+        &metadata.instance.id,
+        InstancePayloadType::Edited,
+    )
+    .await?;
 
     Ok(path)
 }
@@ -222,7 +234,8 @@ pub async fn add_project_from_path(
         )
         .await?;
     super::synced_packs::sync_new_pack(instance_id, &project_path).await;
-    emit_instance(instance_id, InstancePayloadType::Edited).await?;
+    emit_instance(&state.events, instance_id, InstancePayloadType::Edited)
+        .await?;
 
     Ok(project_path)
 }
@@ -261,7 +274,8 @@ pub async fn toggle_disable_project(
     if super::synced_packs::is_pack_path(project) {
         super::synced_packs::reconcile_after_content_change(instance_id).await;
     }
-    emit_instance(instance_id, InstancePayloadType::Edited).await?;
+    emit_instance(&state.events, instance_id, InstancePayloadType::Edited)
+        .await?;
 
     Ok(res)
 }
@@ -283,7 +297,8 @@ pub async fn remove_project(
     if super::synced_packs::is_pack_path(project) {
         super::synced_packs::reconcile_after_content_change(instance_id).await;
     }
-    emit_instance(instance_id, InstancePayloadType::Edited).await?;
+    emit_instance(&state.events, instance_id, InstancePayloadType::Edited)
+        .await?;
 
     Ok(())
 }
@@ -304,7 +319,8 @@ pub async fn set_project_locked(
         &state,
     )
     .await?;
-    emit_instance(instance_id, InstancePayloadType::Edited).await?;
+    emit_instance(&state.events, instance_id, InstancePayloadType::Edited)
+        .await?;
 
     Ok(())
 }

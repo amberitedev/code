@@ -651,7 +651,8 @@ async fn recover_orphaned_install_stages(state: &State) -> crate::Result<()> {
             &state.pool,
         )
         .await?;
-        emit_instance(&instance.id, InstancePayloadType::Edited).await?;
+        emit_instance(&state.events, &instance.id, InstancePayloadType::Edited)
+            .await?;
     }
     Ok(())
 }
@@ -706,7 +707,8 @@ async fn recover_interrupted_job_inner(
         {
             store::dismiss(job.id, &state.pool).await?;
             clear_staging_dir(&job.state, &state.content_store).await;
-            emit_install_job(&record.snapshot(&state.installs)).await?;
+            emit_install_job(&state.events, &record.snapshot(&state.installs))
+                .await?;
         }
 
         return Ok(());
@@ -767,7 +769,8 @@ async fn recover_interrupted_job_inner(
         if cleanup_succeeded {
             clear_staging_dir(&job.state, &state.content_store).await;
         }
-        emit_install_job(&record.snapshot(&state.installs)).await?;
+        emit_install_job(&state.events, &record.snapshot(&state.installs))
+            .await?;
     }
 
     Ok(())
@@ -853,9 +856,12 @@ pub async fn apply_cleanup(
                 {
                     crate::state::remove_instance(instance_id, state).await?;
                 }
-                if let Err(error) =
-                    emit_instance(instance_id, InstancePayloadType::Removed)
-                        .await
+                if let Err(error) = emit_instance(
+                    &state.events,
+                    instance_id,
+                    InstancePayloadType::Removed,
+                )
+                .await
                 {
                     tracing::warn!(
                         "Failed to emit removed instance {instance_id}: {error}"
@@ -876,9 +882,12 @@ pub async fn apply_cleanup(
                     )
                     .await?;
                 }
-                if let Err(error) =
-                    emit_instance(instance_id, InstancePayloadType::Edited)
-                        .await
+                if let Err(error) = emit_instance(
+                    &state.events,
+                    instance_id,
+                    InstancePayloadType::Edited,
+                )
+                .await
                 {
                     tracing::warn!(
                         "Failed to emit restored instance {instance_id}: {error}"

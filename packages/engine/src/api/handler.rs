@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use crate::{
     ErrorKind,
     event::{
-        CommandPayload,
+        CommandPayload, EventSink,
         emit::{emit_command, emit_warning},
     },
     util::io,
@@ -16,7 +16,10 @@ use urlencoding::decode;
 /// Link is extracted value (link) in somewhat URL format, such as
 /// subdomain1/subdomain2
 /// (Does not include modrinth://)
-pub async fn handle_url(sublink: &str) -> crate::Result<CommandPayload> {
+pub async fn handle_url(
+    events: &EventSink,
+    sublink: &str,
+) -> crate::Result<CommandPayload> {
     Ok(match sublink.split_once('/') {
         // /mod/{id}   -    Installs a mod of mod id
         Some(("mod", id)) => CommandPayload::InstallMod { id: id.to_string() },
@@ -56,9 +59,12 @@ pub async fn handle_url(sublink: &str) -> crate::Result<CommandPayload> {
                     invite_id: decoded.to_string(),
                 },
                 Err(e) => {
-                    emit_warning(&format!(
-                        "Invalid UTF-8 in shared instance invite path: {e}"
-                    ))
+                    emit_warning(
+                        events,
+                        &format!(
+                            "Invalid UTF-8 in shared instance invite path: {e}"
+                        ),
+                    )
                     .await?;
                     return Err(e).context(ErrorKind::InputError(
                         "invalid UTF-8 in shared instance invite path"
@@ -86,6 +92,7 @@ pub async fn handle_url(sublink: &str) -> crate::Result<CommandPayload> {
 
             if server.is_some() && singleplayer_world.is_some() {
                 emit_warning(
+                    events,
                     "Invalid command, cannot launch both a server and a singleplayer world",
                 )
                 .await?;
@@ -102,9 +109,10 @@ pub async fn handle_url(sublink: &str) -> crate::Result<CommandPayload> {
                     singleplayer_world,
                 },
                 Err(e) => {
-                    emit_warning(&format!(
-                        "Invalid UTF-8 in instance path: {e}"
-                    ))
+                    emit_warning(
+                        events,
+                        &format!("Invalid UTF-8 in instance path: {e}"),
+                    )
                     .await?;
                     return Err(e).context(ErrorKind::InputError(
                         "invalid UTF-8 in instance path".to_string(),
@@ -113,9 +121,10 @@ pub async fn handle_url(sublink: &str) -> crate::Result<CommandPayload> {
             }
         }
         _ => {
-            emit_warning(&format!(
-                "Invalid command, unrecognized path: {sublink}"
-            ))
+            emit_warning(
+                events,
+                &format!("Invalid command, unrecognized path: {sublink}"),
+            )
             .await?;
             bail!(ErrorKind::InputError(format!(
                 "invalid command, unrecognized path {sublink}"
@@ -125,6 +134,7 @@ pub async fn handle_url(sublink: &str) -> crate::Result<CommandPayload> {
 }
 
 pub async fn parse_command(
+    events: &EventSink,
     command_string: &str,
 ) -> crate::Result<CommandPayload> {
     tracing::debug!("Parsing external command");
@@ -132,7 +142,7 @@ pub async fn parse_command(
     // modrinth://some-command
     // This occurs when following a web redirect link
     if let Some(sublink) = command_string.strip_prefix("modrinth://") {
-        Ok(handle_url(sublink).await?)
+        Ok(handle_url(events, sublink).await?)
     } else {
         // We assume anything else is a filepath to an .mrpack file
         let path = PathBuf::from(command_string);
@@ -144,10 +154,13 @@ pub async fn parse_command(
                 path: path.to_string_lossy().into_owned(),
             });
         }
-        emit_warning(&format!(
-            "Invalid command, unrecognized filetype: {}",
-            path.display()
-        ))
+        emit_warning(
+            events,
+            &format!(
+                "Invalid command, unrecognized filetype: {}",
+                path.display()
+            ),
+        )
         .await?;
         bail!(ErrorKind::InputError(format!(
             "invalid command, unrecognized filetype {}",
@@ -156,8 +169,11 @@ pub async fn parse_command(
     }
 }
 
-pub async fn parse_and_emit_command(command_string: &str) -> crate::Result<()> {
-    let command = parse_command(command_string).await?;
-    emit_command(command).await?;
+pub async fn parse_and_emit_command(
+    events: &EventSink,
+    command_string: &str,
+) -> crate::Result<()> {
+    let command = parse_command(events, command_string).await?;
+    emit_command(events, command).await?;
     Ok(())
 }

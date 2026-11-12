@@ -71,6 +71,7 @@ pub async fn enqueue_update_for_installation<R: Runtime>(
     let update = webview.resources_table().get::<Update>(rid)?;
 
     let progress = init_loading(
+        &webview.state::<engine::EventSink>(),
         LoadingBarType::LauncherUpdate {
             version: update.version.clone(),
             current_version: update.current_version.clone(),

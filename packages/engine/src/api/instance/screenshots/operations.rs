@@ -475,6 +475,7 @@ pub async fn save_edited_screenshot(
     saved.group_id = saved_row.group_id;
 
     let _ = emit_instance(
+        &state.events,
         &saved.instance_id,
         InstancePayloadType::ScreenshotsUpdated,
     )

@@ -29,7 +29,7 @@ async fn mark(item: OnboardingChecklistItem) -> crate::Result<()> {
     if let Some(checklist) =
         mark_onboarding_checklist_item(item, &state.pool).await?
     {
-        emit_onboarding_checklist(checklist).await?;
+        emit_onboarding_checklist(&state.events, checklist).await?;
     }
 
     Ok(())

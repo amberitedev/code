@@ -1,5 +1,5 @@
-use crate::event::InstancePayloadType;
 use crate::event::emit::emit_instance;
+use crate::event::{EventSink, InstancePayloadType};
 use crate::state::instances::adapters::sqlite::screenshot_rows;
 use crate::{ErrorKind, State};
 use anyhow::bail;
@@ -85,7 +85,7 @@ pub async fn create_screenshot_group(
     )
     .await?;
     tx.commit().await?;
-    emit_screenshot_updates(instance_ids).await;
+    emit_screenshot_updates(&state.events, instance_ids).await;
 
     Ok(ScreenshotGroup {
         id,
@@ -140,7 +140,7 @@ pub async fn delete_screenshot_group(id: String) -> crate::Result<()> {
             "unknown screenshot group {id}"
         )));
     }
-    emit_screenshot_updates(instance_ids).await;
+    emit_screenshot_updates(&state.events, instance_ids).await;
     Ok(())
 }
 
@@ -184,7 +184,7 @@ pub async fn set_screenshot_group_memberships(
         }
     }
     tx.commit().await?;
-    emit_screenshot_updates(instance_ids).await;
+    emit_screenshot_updates(&state.events, instance_ids).await;
     Ok(())
 }
 
@@ -236,7 +236,7 @@ pub async fn import_screenshot_groups(
         );
     }
     tx.commit().await?;
-    emit_screenshot_updates(affected_instance_ids).await;
+    emit_screenshot_updates(&state.events, affected_instance_ids).await;
     Ok(())
 }
 
@@ -329,10 +329,12 @@ async fn screenshot_instance_id(
 }
 
 async fn emit_screenshot_updates(
+    events: &EventSink,
     instance_ids: impl IntoIterator<Item = String>,
 ) {
     for instance_id in instance_ids {
         let _ = emit_instance(
+            events,
             &instance_id,
             InstancePayloadType::ScreenshotsUpdated,
         )

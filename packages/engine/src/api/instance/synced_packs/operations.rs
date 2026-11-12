@@ -490,7 +490,8 @@ async fn sync_pack_once(
         );
     }
     apply_all(&mut library, &state).await?;
-    emit_instance(instance_id, InstancePayloadType::Synced).await?;
+    emit_instance(&state.events, instance_id, InstancePayloadType::Synced)
+        .await?;
     Ok(())
 }
 
@@ -675,6 +676,7 @@ pub async fn desync_pack(
     } else {
         write_library(&library, &state).await?;
     }
-    emit_instance(instance_id, InstancePayloadType::Synced).await?;
+    emit_instance(&state.events, instance_id, InstancePayloadType::Synced)
+        .await?;
     Ok(())
 }

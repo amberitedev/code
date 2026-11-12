@@ -44,7 +44,6 @@ hickory-resolver = { workspace = true }
 httpdate = { workspace = true }
 image = { workspace = true, features = ["gif", "jpeg", "png", "webp"] }
 indexmap = { workspace = true }
-indicatif = { workspace = true, optional = true }
 itertools = { workspace = true }
 json5 = { workspace = true }
 minecraft-meta-manifest = { workspace = true }
@@ -58,7 +57,6 @@ path-util = { workspace = true }
 pathdiff = { workspace = true }
 phf = { workspace = true }
 png = { workspace = true }
-postcard = { workspace = true, optional = true }
 postcard-bindgen = { workspace = true, features = ["generating", "std"], optional = true }
 quartz_nbt = { workspace = true, features = ["serde"] }
 quick-xml = { workspace = true, features = ["async-tokio"] }
@@ -139,9 +137,8 @@ windows-core = { workspace = true }
 winreg = { workspace = true }
 
 [features]
-cli = ["dep:indicatif"]
 export-ts = ["bedrock/export-ts", "dep:postcard-bindgen", "dep:ts-rs"]
-tauri = ["dep:postcard", "dep:tauri"]
+tauri = ["dep:tauri"]
 
 [lints]
 workspace = true

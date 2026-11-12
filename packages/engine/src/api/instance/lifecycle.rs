@@ -61,7 +61,12 @@ async fn create_inner(
     .await?;
 
     let result = async {
-        emit_instance(&instance.id, InstancePayloadType::Created).await?;
+        emit_instance(
+            &state.events,
+            &instance.id,
+            InstancePayloadType::Created,
+        )
+        .await?;
 
         crate::state::get_instance(&instance.id, &state.pool)
             .await?
@@ -113,7 +118,12 @@ pub async fn edit(
 
     super::reconcile_instance_synced_options(instance_id).await?;
 
-    emit_instance(&instance.instance.id, InstancePayloadType::Edited).await?;
+    emit_instance(
+        &state.events,
+        &instance.instance.id,
+        InstancePayloadType::Edited,
+    )
+    .await?;
 
     Ok(instance)
 }
@@ -132,7 +142,12 @@ pub async fn set_synced_option(
     )
     .await?;
 
-    emit_instance(&instance.instance.id, InstancePayloadType::Edited).await?;
+    emit_instance(
+        &State::get().await?.events,
+        &instance.instance.id,
+        InstancePayloadType::Edited,
+    )
+    .await?;
 
     Ok(instance)
 }
@@ -159,7 +174,12 @@ pub async fn remove(instance_id: &str) -> crate::Result<()> {
         .await?;
 
     if let Some(instance) = instance {
-        emit_instance(&instance.id, InstancePayloadType::Removed).await?;
+        emit_instance(
+            &state.events,
+            &instance.id,
+            InstancePayloadType::Removed,
+        )
+        .await?;
     }
 
     Ok(())
