@@ -51,7 +51,10 @@ pub use local_settings_editor::{
     save_changes as save_local_changes,
 };
 pub(crate) use locales::{GameLocaleIndexer, start_game_locale_indexer};
-pub use locales::{GameSettingLocaleLabels, get_game_setting_locale_labels};
+pub use locales::{
+    GameSettingLocaleLabel, GameSettingLocaleLabels, GameSettingSource,
+    GameSettingSourceProject, get_game_setting_locale_labels,
+};
 pub use pack_updates::{GameOptionsPackSource, capture_pack_base};
 pub use settings_editor::{get_config, preview_changes, save_changes};
 pub use source_selection::list_sync_sources;

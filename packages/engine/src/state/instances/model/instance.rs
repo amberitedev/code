@@ -25,6 +25,7 @@ pub struct InstanceSyncedOptions {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum SyncedOption {
     GameOptions,

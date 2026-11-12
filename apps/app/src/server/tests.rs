@@ -440,3 +440,33 @@ async fn opening_the_socket_retries_a_failed_start() {
     let instances = local.send(local.get("instances", &[])).await;
     assert_eq!(instances.status(), StatusCode::OK);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_screenshot_edit_past_axums_default_body_limit_reaches_the_engine() {
+    engine::install_crypto_provider();
+    let dir = tempfile::tempdir().unwrap();
+    let handle = EngineHandle::default();
+    handle.set(Ok(engine::Engine::new(engine::EngineConfig {
+        settings_dir: dir.path().to_path_buf(),
+        events: engine::EventSink::new(),
+        accounts: None,
+    })
+    .await
+    .unwrap()));
+    let local = local_with(handle);
+    let request = Request::post(format!(
+        "/{}/app/screenshots/edits?instance_id=missing&file_name=a.png&mode=create_copy",
+        local.secret
+    ))
+    .header(HOST, &local.host)
+    .header(ORIGIN, "tauri://localhost")
+    .header(CONTENT_TYPE, "image/png")
+    .body(Body::from(vec![0u8; 3 * 1024 * 1024]))
+    .unwrap();
+
+    let response = local.send(request).await;
+
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(body["description"], "invalid input: unknown instance");
+}

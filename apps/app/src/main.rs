@@ -19,7 +19,9 @@ mod desktop;
 mod dev;
 mod engine_handle;
 mod library;
+mod screenshots;
 mod server;
+mod synced_options;
 
 #[cfg(target_os = "macos")]
 mod macos;

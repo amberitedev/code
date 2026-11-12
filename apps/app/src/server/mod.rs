@@ -37,7 +37,7 @@ use crate::{
     cores::{self, Cores},
     desktop::{self, AppSlot},
     engine_handle::EngineHandle,
-    library,
+    library, screenshots, synced_options,
 };
 
 use endpoints::{
@@ -128,6 +128,8 @@ impl LocalServer {
             .merge(
                 engine::routes::routes()
                     .merge(library::routes::routes())
+                    .merge(synced_options::routes::routes())
+                    .merge(screenshots::routes::routes())
                     .with_state(state),
             )
             .route_layer(middleware::from_fn_with_state(

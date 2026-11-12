@@ -64,6 +64,8 @@ features = ["devtools", "macos-private-api"]
 
 [dev-dependencies]
 contracts = { workspace = true, features = ["server", "ts"] }
+# App routes over engine types write those types' TypeScript too.
+engine = { workspace = true, features = ["export-ts"] }
 rcgen = "0.14.7"
 rustls = { workspace = true, features = ["std"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

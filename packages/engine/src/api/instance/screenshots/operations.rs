@@ -28,6 +28,7 @@ const SCREENSHOTS_DIRECTORY: &str = "screenshots";
 const SCREENSHOT_SCAN_CONCURRENCY: usize = 8;
 
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ScreenshotKey {
     pub instance_id: String,
     pub file_name: String,
@@ -46,7 +47,8 @@ pub struct InstanceScreenshot {
     pub path: PathBuf,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum ScreenshotEditSaveMode {
     CreateCopy,

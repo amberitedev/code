@@ -11,18 +11,22 @@ use uuid::Uuid;
 const MAX_GROUP_NAME_LENGTH: usize = 256;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ScreenshotGroup {
     pub id: String,
     pub name: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ScreenshotGroupMembershipUpdate {
     pub screenshot_id: String,
+    #[cfg_attr(feature = "export-ts", ts(optional = nullable))]
     pub group_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ScreenshotGroupImport {
     pub id: String,
     pub name: String,

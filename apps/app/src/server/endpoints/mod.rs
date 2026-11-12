@@ -2,13 +2,62 @@
 //! `cargo test -p theseus_gui` keeps fresh. Regenerate it with
 //! `cargo test -p theseus_gui -- --ignored write_ts`.
 
+/// Declares each route as a unit struct and, for the tests, the entries of its TypeScript module
+/// object, keyed by the name with a lowercase first letter.
+macro_rules! endpoints {
+    ($(
+        $(#[doc = $doc:literal])*
+        $name:ident: $method:ident $path:literal, $params:ty, $query:ty, $body:ty => $response:ty;
+    )+) => {
+        $(
+            $(#[doc = $doc])*
+            pub struct $name;
+
+            impl contracts::Endpoint for $name {
+                const METHOD: contracts::Method = contracts::Method::$method;
+                const PATH: &'static str = $path;
+                const AUTH: contracts::Auth = contracts::Auth::None;
+                type Params = $params;
+                type Query = $query;
+                type Body = $body;
+                type Response = $response;
+            }
+        )+
+
+        #[cfg(test)]
+        pub(super) fn ts_entries() -> String {
+            [$({
+                let name = stringify!($name);
+                format!(
+                    "\t{}{}: {},\n",
+                    name[..1].to_lowercase(),
+                    &name[1..],
+                    contracts::ts::endpoint::<$name>(),
+                )
+            }),+]
+            .concat()
+        }
+    };
+}
+
 pub mod boot;
 pub mod cores;
 pub mod desktop;
 pub mod events;
 pub mod files;
+pub mod game_options;
 pub mod health;
 pub mod library;
+pub mod screenshots;
+pub mod synced_options;
+pub mod synced_packs;
+
+/// The `{id}` of a route's path.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct IdParams {
+    pub id: String,
+}
 
 #[cfg(test)]
 mod tests {
@@ -16,6 +65,7 @@ mod tests {
     use ts_rs::TS;
 
     use super::{
+        IdParams,
         boot::{Boot, GetBoot, Platform},
         cores::{
             CheckCoreSession, ConnectCore, CoreSessionKey, CoreTarget,
@@ -33,12 +83,44 @@ mod tests {
             LocalFileQuery, ReadLocalFile, RemoteIcon, StatLocalFile,
             ThumbnailQuery,
         },
+        game_options::{self, GameSettingLabelsRequest},
         health::CheckHealth,
         library::{ListRecentIconConfigs, RecentIconConfigs},
+        screenshots::{
+            self, NewScreenshotGroup, ScreenshotEdit, ScreenshotExport,
+            ScreenshotFile, ScreenshotGroupUpdate, ScreenshotMove,
+        },
+        synced_options::{
+            self, CommandHistory, GlobalSyncedOptionUpdate,
+            InstanceSyncedOptionUpdate, SyncedOptionQuery,
+            SyncedOptionsRebuild,
+        },
+        synced_packs::{
+            self, DesyncQuery, InstancePack, InstancePackParams, NewSyncedPack,
+            SyncedPackQuery, SyncedPackType, SyncedPackUpdate, SyncedPacks,
+        },
     };
     use crate::server::events::{
         AmberiteCommand, AppEvent, Command, LocalEvent,
     };
+    use engine::instance::{
+        DesyncServerMode, EditableGameSetting, GameOptionCanonicalValue,
+        GameOptionCompatibility, GameOptionCompatibilityBucket,
+        GameOptionCompatibilityReason, GameOptionCompatibilityStatus,
+        GameOptionEditorChoice, GameOptionEditorDefinition, GameOptionKind,
+        GameOptionMappingKind, GameOptionValidationIssue, GameOptionValueState,
+        GameOptionsSourceCandidate, GameOptionsSourceIssue,
+        GameSettingCategory, GameSettingChange, GameSettingLocaleLabel,
+        GameSettingLocaleLabels, GameSettingSource, GameSettingSourceProject,
+        GameSettingsEditorState, GlobalSyncedOptions, PackSyncPreview,
+        PackSyncTarget, SaveGameSettingsResult, ScreenshotEditSaveMode,
+        ScreenshotGroup, ScreenshotGroupImport,
+        ScreenshotGroupMembershipUpdate, ScreenshotKey, SyncedOptionCapability,
+        SyncedOptionJoinAction, SyncedOptionJoinPreview,
+        SyncedOptionJoinResolution, SyncedOptionsOverview, SyncedServer,
+        UpdateGameSettingsRequest,
+    };
+    use engine::prelude::InstanceSyncedOption;
 
     const PATH: &str = concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -71,6 +153,66 @@ mod tests {
             Command::decl(&cfg),
             AmberiteCommand::decl(&cfg),
             RecentIconConfigs::decl(&cfg),
+            IdParams::decl(&cfg),
+            GameSettingsEditorState::decl(&cfg),
+            GameSettingCategory::decl(&cfg),
+            EditableGameSetting::decl(&cfg),
+            GameOptionKind::decl(&cfg),
+            GameOptionCanonicalValue::decl(&cfg),
+            GameOptionValueState::decl(&cfg),
+            GameOptionEditorDefinition::decl(&cfg),
+            GameOptionEditorChoice::decl(&cfg),
+            GameOptionCompatibility::decl(&cfg),
+            GameOptionCompatibilityBucket::decl(&cfg),
+            GameOptionCompatibilityStatus::decl(&cfg),
+            GameOptionMappingKind::decl(&cfg),
+            GameOptionCompatibilityReason::decl(&cfg),
+            GameOptionValidationIssue::decl(&cfg),
+            UpdateGameSettingsRequest::decl(&cfg),
+            GameSettingChange::decl(&cfg),
+            SaveGameSettingsResult::decl(&cfg),
+            GameOptionsSourceCandidate::decl(&cfg),
+            GameOptionsSourceIssue::decl(&cfg),
+            GameSettingLabelsRequest::decl(&cfg),
+            GameSettingLocaleLabels::decl(&cfg),
+            GameSettingLocaleLabel::decl(&cfg),
+            GameSettingSource::decl(&cfg),
+            GameSettingSourceProject::decl(&cfg),
+            InstanceSyncedOption::decl(&cfg),
+            InstanceSyncedOptionUpdate::decl(&cfg),
+            SyncedOptionJoinResolution::decl(&cfg),
+            SyncedOptionQuery::decl(&cfg),
+            SyncedOptionJoinPreview::decl(&cfg),
+            SyncedOptionJoinAction::decl(&cfg),
+            SyncedOptionsOverview::decl(&cfg),
+            SyncedOptionCapability::decl(&cfg),
+            GlobalSyncedOptions::decl(&cfg),
+            GlobalSyncedOptionUpdate::decl(&cfg),
+            SyncedOptionsRebuild::decl(&cfg),
+            CommandHistory::decl(&cfg),
+            SyncedServer::decl(&cfg),
+            SyncedPackType::decl(&cfg),
+            SyncedPackQuery::decl(&cfg),
+            SyncedPacks::decl(&cfg),
+            NewSyncedPack::decl(&cfg),
+            SyncedPackUpdate::decl(&cfg),
+            InstancePack::decl(&cfg),
+            InstancePackParams::decl(&cfg),
+            PackSyncPreview::decl(&cfg),
+            PackSyncTarget::decl(&cfg),
+            DesyncQuery::decl(&cfg),
+            DesyncServerMode::decl(&cfg),
+            ScreenshotFile::decl(&cfg),
+            ScreenshotKey::decl(&cfg),
+            ScreenshotEdit::decl(&cfg),
+            ScreenshotEditSaveMode::decl(&cfg),
+            ScreenshotExport::decl(&cfg),
+            ScreenshotMove::decl(&cfg),
+            ScreenshotGroup::decl(&cfg),
+            NewScreenshotGroup::decl(&cfg),
+            ScreenshotGroupUpdate::decl(&cfg),
+            ScreenshotGroupMembershipUpdate::decl(&cfg),
+            ScreenshotGroupImport::decl(&cfg),
         ]
         .map(|declaration| format!("\nexport {declaration}\n"))
         .concat();
@@ -115,7 +257,11 @@ mod tests {
              }}\n\n\
              export const library = {{\n\
              \tlistRecentIconConfigs: {},\n\
-             }}\n",
+             }}\n\n\
+             export const gameOptions = {{\n{}}}\n\n\
+             export const syncedOptions = {{\n{}}}\n\n\
+             export const syncedPacks = {{\n{}}}\n\n\
+             export const screenshots = {{\n{}}}\n",
             endpoint::<CheckHealth>(),
             endpoint::<GetBoot>(),
             endpoint::<ConnectCore>(),
@@ -138,6 +284,10 @@ mod tests {
             endpoint::<CheckNetworkMetered>(),
             endpoint::<LogFromWebview>(),
             endpoint::<ListRecentIconConfigs>(),
+            game_options::ts_entries(),
+            synced_options::ts_entries(),
+            synced_packs::ts_entries(),
+            screenshots::ts_entries(),
         )
     }
 

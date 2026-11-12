@@ -73,6 +73,7 @@ struct PackPlacement {
 }
 
 #[derive(Clone, Serialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct PackSyncTarget {
     pub instance_id: String,
     pub name: String,
@@ -82,7 +83,9 @@ pub struct PackSyncTarget {
 }
 
 #[derive(Clone, Serialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct PackSyncPreview {
+    #[cfg_attr(feature = "export-ts", ts(type = "unknown"))]
     pub pack: ContentItem,
     pub instances: Vec<PackSyncTarget>,
 }

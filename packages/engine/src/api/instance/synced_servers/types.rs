@@ -32,6 +32,7 @@ impl ServerSource {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum DesyncServerMode {
     KeepInOtherInstances,
@@ -39,10 +40,12 @@ pub enum DesyncServerMode {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct SyncedServer {
     pub id: String,
     pub name: String,
     pub address: String,
+    #[cfg_attr(feature = "export-ts", ts(optional = nullable))]
     pub accept_textures: Option<bool>,
 }
 

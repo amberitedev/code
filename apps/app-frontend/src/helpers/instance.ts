@@ -6,10 +6,23 @@
 import {
 	ContractClient,
 	desktop,
+	type GlobalSyncedOptions,
 	type IconConfig,
 	instances,
 	type Labrinth,
 	library,
+	type ScreenshotFile,
+	type ScreenshotGroup,
+	type ScreenshotGroupImport,
+	type ScreenshotGroupMembershipUpdate,
+	type ScreenshotKey,
+	screenshots,
+	type SyncedOption,
+	type SyncedOptionJoinPreview,
+	type SyncedOptionJoinResolution,
+	type SyncedOptionsOverview,
+	syncedOptions,
+	type SyncedServer,
 } from '@modrinth/api-client'
 import { type ContentItem, type ContentOwner, getIconSymbolAsset } from '@modrinth/ui'
 import { Channel, invoke } from '@tauri-apps/api/core'
@@ -182,19 +195,20 @@ export async function get_mod_full_path(instanceId: string, projectPath: string)
 	return await invoke('plugin:instance|instance_get_mod_full_path', { instanceId, projectPath })
 }
 
-export type ScreenshotKey = {
-	instance_id: string
-	file_name: string
-}
-
-type ScreenshotFile = ScreenshotKey & {
-	id: string
-	instance_name: string
-	created_at: string
-	modified_at: number
-	group_id?: string | null
-	path: string
-}
+export type {
+	GlobalSyncedOptions,
+	ScreenshotGroup,
+	ScreenshotGroupImport,
+	ScreenshotGroupMembershipUpdate,
+	ScreenshotKey,
+	SyncedOption,
+	SyncedOptionCapability,
+	SyncedOptionJoinAction,
+	SyncedOptionJoinPreview,
+	SyncedOptionJoinResolution,
+	SyncedOptionsOverview,
+	SyncedServer,
+} from '@modrinth/api-client'
 
 export type InstanceScreenshot = ScreenshotFile & {
 	url: string
@@ -204,39 +218,21 @@ function withUrl(screenshot: ScreenshotFile): InstanceScreenshot {
 	return { ...screenshot, url: localFileUrl(screenshot.path, screenshot.modified_at) }
 }
 
-export type ScreenshotGroup = {
-	id: string
-	name: string
-}
-
-export type ScreenshotGroupMembershipUpdate = {
-	screenshot_id: string
-	group_id?: string | null
-}
-
-export type ScreenshotGroupImport = ScreenshotGroup & {
-	screenshot_ids: string[]
-}
-
 export async function list_instance_screenshots(instanceId: string): Promise<InstanceScreenshot[]> {
-	const screenshots = await invoke<ScreenshotFile[]>('plugin:instance|instance_list_screenshots', {
-		instanceId,
+	const files = await apiClient.local.call(screenshots.listInstanceScreenshots, {
+		params: { id: instanceId },
 	})
-	return screenshots.map(withUrl)
+	return files.map(withUrl)
 }
 
 export async function list_all_screenshots(): Promise<InstanceScreenshot[]> {
-	const screenshots = await invoke<ScreenshotFile[]>(
-		'plugin:instance|instance_list_all_screenshots',
-	)
-	return screenshots.map(withUrl)
+	const files = await apiClient.local.call(screenshots.listScreenshots)
+	return files.map(withUrl)
 }
 
 export async function list_synced_screenshots(): Promise<InstanceScreenshot[]> {
-	const screenshots = await invoke<ScreenshotFile[]>(
-		'plugin:instance|instance_list_synced_screenshots',
-	)
-	return screenshots.map(withUrl)
+	const files = await apiClient.local.call(screenshots.listSyncedScreenshots)
+	return files.map(withUrl)
 }
 
 export async function save_edited_screenshot(
@@ -244,28 +240,23 @@ export async function save_edited_screenshot(
 	pngBytes: Uint8Array,
 	mode: 'create_copy' | 'replace_edit',
 ): Promise<InstanceScreenshot> {
-	const screenshot = await invoke<ScreenshotFile>(
-		'plugin:instance|instance_save_edited_screenshot',
-		{
-			key,
-			pngBytes: Array.from(pngBytes),
-			mode,
-		},
-	)
+	const screenshot = await apiClient.local.call(screenshots.saveEditedScreenshot, {
+		query: { ...key, mode },
+		body: new Blob([pngBytes.slice()], { type: 'image/png' }),
+	})
 	return withUrl(screenshot)
 }
 
 export async function list_screenshot_groups(): Promise<ScreenshotGroup[]> {
-	return await invoke('plugin:instance|instance_list_screenshot_groups')
+	return await apiClient.local.call(screenshots.listScreenshotGroups)
 }
 
 export async function create_screenshot_group(
 	name: string,
 	screenshotIds: string[],
 ): Promise<ScreenshotGroup> {
-	return await invoke('plugin:instance|instance_create_screenshot_group', {
-		name,
-		screenshotIds,
+	return await apiClient.local.call(screenshots.createScreenshotGroup, {
+		body: { name, screenshot_ids: screenshotIds },
 	})
 }
 
@@ -273,36 +264,43 @@ export async function rename_screenshot_group(
 	id: string,
 	newName: string,
 ): Promise<ScreenshotGroup> {
-	return await invoke('plugin:instance|instance_rename_screenshot_group', { id, newName })
+	return await apiClient.local.call(screenshots.renameScreenshotGroup, {
+		params: { id },
+		body: { name: newName },
+	})
 }
 
 export async function delete_screenshot_group(id: string): Promise<void> {
-	return await invoke('plugin:instance|instance_delete_screenshot_group', { id })
+	return await apiClient.local.call(screenshots.deleteScreenshotGroup, { params: { id } })
 }
 
 export async function set_screenshot_group_memberships(
 	updates: ScreenshotGroupMembershipUpdate[],
 ): Promise<void> {
-	return await invoke('plugin:instance|instance_set_screenshot_group_memberships', { updates })
+	return await apiClient.local.call(screenshots.setScreenshotGroupMemberships, { body: updates })
 }
 
 export async function import_screenshot_groups(groups: ScreenshotGroupImport[]): Promise<void> {
-	return await invoke('plugin:instance|instance_import_screenshot_groups', { groups })
+	return await apiClient.local.call(screenshots.importScreenshotGroups, { body: groups })
 }
 
 export async function delete_screenshots(keys: ScreenshotKey[]): Promise<void> {
-	return await invoke('plugin:instance|instance_delete_screenshots', { keys })
+	return await apiClient.local.call(screenshots.deleteScreenshots, { body: keys })
 }
 
 export async function export_screenshots(keys: ScreenshotKey[], exportPath: string): Promise<void> {
-	return await invoke('plugin:instance|instance_export_screenshots', { keys, exportPath })
+	return await apiClient.local.call(screenshots.exportScreenshots, {
+		body: { keys, export_path: exportPath },
+	})
 }
 
 export async function move_screenshots(
 	keys: ScreenshotKey[],
 	targetInstanceId: string,
 ): Promise<ScreenshotKey[]> {
-	return await invoke('plugin:instance|instance_move_screenshots', { keys, targetInstanceId })
+	return await apiClient.local.call(screenshots.moveScreenshots, {
+		body: { keys, target_instance_id: targetInstanceId },
+	})
 }
 
 export async function open_screenshot(key: ScreenshotKey): Promise<void> {
@@ -317,70 +315,43 @@ export async function set_synced_option(
 	enabled: boolean,
 	resolution?: SyncedOptionJoinResolution,
 ): Promise<GameInstance> {
-	return await invoke('plugin:instance|instance_set_synced_option', {
-		instanceId,
-		option,
-		enabled,
-		resolution,
+	await apiClient.local.call(syncedOptions.setInstanceSyncedOption, {
+		params: { id: instanceId },
+		body: { option, enabled, resolution },
 	})
+	const instance = await get(instanceId)
+	if (!instance) throw new Error(`Instance ${instanceId} is gone`)
+	return instance
 }
-
-export type SyncedOption =
-	| 'resource_packs'
-	| 'data_packs'
-	| 'game_options'
-	| 'command_history'
-	| 'multiplayer_servers'
-	| 'creative_hotbars'
-	| 'screenshots'
 
 export function isSyncedOptionAvailable(option: SyncedOption): boolean {
 	return option !== 'data_packs'
-}
-
-export type GlobalSyncedOptions = Record<SyncedOption, boolean>
-
-export type SyncedOptionJoinAction = 'seed_shared' | 'attach' | 'merge' | 'requires_resolution'
-
-export type SyncedOptionJoinResolution = 'use_synced' | 'use_instance'
-
-export type SyncedOptionJoinPreview = {
-	action: SyncedOptionJoinAction
-}
-
-export type SyncedOptionCapability = {
-	option: SyncedOption
-	supported: boolean
-	disabled_reason?: string | null
-}
-
-export type SyncedOptionsOverview = {
-	global_options: GlobalSyncedOptions
-	capabilities: SyncedOptionCapability[]
 }
 
 export async function get_synced_option_join_preview(
 	instanceId: string,
 	option: SyncedOption,
 ): Promise<SyncedOptionJoinPreview> {
-	return await invoke('plugin:instance|instance_get_synced_option_join_preview', {
-		instanceId,
-		option,
+	return await apiClient.local.call(syncedOptions.previewSyncedOptionJoin, {
+		params: { id: instanceId },
+		query: { option },
 	})
 }
 
 export async function get_synced_options_overview(
 	instanceId: string,
 ): Promise<SyncedOptionsOverview> {
-	return await invoke('plugin:instance|instance_get_synced_options_overview', { instanceId })
+	return await apiClient.local.call(syncedOptions.getInstanceSyncedOptions, {
+		params: { id: instanceId },
+	})
 }
 
 export async function get_global_synced_options(): Promise<GlobalSyncedOptions> {
-	return await invoke('plugin:instance|instance_get_global_synced_options')
+	return await apiClient.local.call(syncedOptions.getGlobalSyncedOptions)
 }
 
 export async function get_initialized_synced_options(): Promise<GlobalSyncedOptions> {
-	return await invoke('plugin:instance|instance_get_initialized_synced_options')
+	return await apiClient.local.call(syncedOptions.getInitializedSyncedOptions)
 }
 
 export async function set_global_synced_option(
@@ -388,19 +359,17 @@ export async function set_global_synced_option(
 	enabled: boolean,
 	baseInstanceId?: string,
 ): Promise<GlobalSyncedOptions> {
-	return await invoke('plugin:instance|instance_set_global_synced_option', {
-		option,
-		enabled,
-		baseInstanceId,
+	return await apiClient.local.call(syncedOptions.setGlobalSyncedOption, {
+		body: { option, enabled, base_instance_id: baseInstanceId },
 	})
 }
 
 export async function get_command_history(): Promise<string> {
-	return await invoke('plugin:instance|instance_get_command_history')
+	return await apiClient.local.call(syncedOptions.getCommandHistory)
 }
 
 export async function set_command_history(contents: string): Promise<string> {
-	return await invoke('plugin:instance|instance_set_command_history', { contents })
+	return await apiClient.local.call(syncedOptions.setCommandHistory, { body: { contents } })
 }
 
 export async function open_synced_options_folder(): Promise<void> {
@@ -409,27 +378,22 @@ export async function open_synced_options_folder(): Promise<void> {
 	})
 }
 
-export type SyncedServer = {
-	id: string
-	name: string
-	address: string
-	accept_textures?: boolean | null
-}
-
 export async function list_synced_servers(): Promise<SyncedServer[]> {
-	return await invoke('plugin:instance|instance_list_synced_servers')
+	return await apiClient.local.call(syncedOptions.listSyncedServers)
 }
 
 export async function update_synced_server(server: SyncedServer): Promise<void> {
-	return await invoke('plugin:instance|instance_update_synced_server', { server })
+	return await apiClient.local.call(syncedOptions.updateSyncedServer, { body: server })
 }
 
 export async function remove_synced_server(serverId: string): Promise<void> {
-	return await invoke('plugin:instance|instance_remove_synced_server', { serverId })
+	return await apiClient.local.call(syncedOptions.removeSyncedServer, { params: { id: serverId } })
 }
 
 export async function rebuild_synced_options(instanceId?: string): Promise<void> {
-	return await invoke('plugin:instance|instance_rebuild_synced_options', { instanceId })
+	return await apiClient.local.call(syncedOptions.rebuildSyncedOptions, {
+		body: { instance_id: instanceId },
+	})
 }
 
 export interface JavaVersion {
