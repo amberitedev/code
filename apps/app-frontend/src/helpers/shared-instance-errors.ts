@@ -1,4 +1,4 @@
-import { ModrinthApiError } from '@modrinth/api-client'
+import { ApiCallError, ModrinthApiError } from '@modrinth/api-client'
 import { defineMessages, injectNotificationManager, useVIntl } from '@modrinth/ui'
 
 import {
@@ -245,7 +245,11 @@ export function useSharedInstanceErrors() {
 		}
 
 		const message = getErrorMessage(error)
-		const status = error instanceof ModrinthApiError ? error.statusCode : undefined
+		// Errors from the App's and backend's routes carry a description ready to show.
+		const status =
+			error instanceof ModrinthApiError && !(error instanceof ApiCallError)
+				? error.statusCode
+				: undefined
 
 		addNotification({
 			type: 'error',
