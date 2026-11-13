@@ -39,8 +39,8 @@ use crate::{
     cores::{self, Cores},
     desktop::{self, AppSlot, updater::Updater},
     engine_handle::EngineHandle,
-    friends, import, launch, library, onboarding, screenshots, settings,
-    skins, synced_options,
+    friends, import, launch, library, onboarding, screenshots, settings, skins,
+    synced_options,
 };
 
 use endpoints::{

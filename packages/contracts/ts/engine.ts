@@ -159,6 +159,16 @@ export type InstanceServerUpdate = { name: string, address: string, pack_status:
 
 export type InstanceServerDesync = { server_id: string, mode: DesyncServerMode, };
 
+export type StoreUsage = { unique_bytes: number, shared_bytes: number, unused_cache_bytes: number, estimated_saved_bytes: number, private_copy_bytes: number, object_count: number, damaged_objects: number, cache_limit_bytes: number, };
+
+export type Settings = { max_concurrent_downloads: number, max_concurrent_writes: number, theme: AppTheme, locale: string, default_page: DefaultPage, collapsed_navigation: boolean, hide_nametag_skins_page: boolean, advanced_rendering: boolean, native_decorations: boolean, toggle_sidebar: boolean, sync_theme_across_devices: boolean, sync_behavior_across_devices: boolean, sync_features_across_devices: boolean, show_files_tab_in_instances: boolean, show_worlds_tab_in_instances: boolean, show_screenshots_tab_in_instances: boolean, show_skin_selector_in_sidebar: boolean, show_jump_in: boolean, always_show_copy_details: boolean, hide_installed_modpacks: boolean, advanced_filters_collapsed: boolean, dismissed_photosensitivity_filter_warning: boolean, friends_active_collapsed: boolean, friends_online_collapsed: boolean, friends_offline_collapsed: boolean, friends_pending_collapsed: boolean, telemetry: boolean, discord_rpc: boolean, personalized_ads: boolean, extra_launch_args: Array<string>, custom_env_vars: Array<[string, string]>, memory: MemorySettings, force_fullscreen: boolean, game_resolution: WindowSize, hide_on_process_start: boolean, refocus_on_game_close: boolean, compact_instance_cards: boolean, show_play_time: boolean, warn_on_unknown_modpacks: boolean, skip_non_essential_warnings: boolean, hooks: Hooks, custom_dir: string | null, prev_custom_dir: string | null, developer_mode: boolean, feature_flags: { [key in FeatureFlag]?: boolean }, skipped_update: string | null, pending_update_toast_for_version: string | null, auto_download_updates: boolean | null, version: number, };
+
+export type AppTheme = "dark" | "light" | "oled" | "retro" | "system";
+
+export type DefaultPage = "Home" | "Library";
+
+export type FeatureFlag = "page_path" | "project_background" | "server_ram_as_bytes_always_on" | "always_show_app_controls" | "show_sync_instances_update_modal" | "pride_fundraiser" | "servers_in_app" | "server_project_qa" | "i18n_debug" | "localhost_sign_in" | "show_version_environment_column";
+
 export type CategoryTag = { name: string, project_type: string, header: string, icon: string, };
 
 export type LoaderTag = { name: string, icon: string, supported_project_types: Array<string>, };
@@ -177,11 +187,7 @@ export type LoaderVersionGroup = { id: string, loaders: Array<LoaderVersion>, };
 
 export type CacheKey = { id: string, };
 
-export type CacheKeys = { 
-/**
- * A JSON array of ids.
- */
-ids: string, cacheBehaviour?: CacheBehaviour, };
+export type CacheKeys = { ids: Array<string>, cacheBehaviour?: CacheBehaviour, };
 
 export type CacheRead = { cacheBehaviour?: CacheBehaviour, };
 
@@ -300,6 +306,12 @@ export const worlds = {
 	RemoveInstanceServer: { method: "DELETE", path: "/instances/{id}/servers/{index}", auth: "session", dangerous: false, body: "empty", response: "empty" } as Endpoint<InstanceServerRef, null, void, void>,
 }
 
+export const contentStore = {
+	GetStoreUsage: { method: "GET", path: "/content-store/usage", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, StoreUsage>,
+	CleanStore: { method: "POST", path: "/content-store/cleanup", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, number>,
+	SetStoreCacheLimit: { method: "PUT", path: "/content-store/cache-limit", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, number, void>,
+}
+
 export const tags = {
 	GetCategoryTags: { method: "GET", path: "/tags/categories", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<CategoryTag>>,
 	GetLoaderTags: { method: "GET", path: "/tags/loaders", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<LoaderTag>>,
@@ -312,14 +324,14 @@ export const metadata = {
 
 export const cache = {
 	GetCachedProject: { method: "GET", path: "/cache/projects/{id}", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<CacheKey, CacheRead, void, ModrinthProject | null>,
-	GetCachedProjects: { method: "GET", path: "/cache/projects", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, CacheKeys, void, Array<ModrinthProject>>,
+	GetCachedProjects: { method: "POST", path: "/cache/projects", auth: "session", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, CacheKeys, Array<ModrinthProject>>,
 	GetCachedProjectVersions: { method: "GET", path: "/cache/projects/{id}/versions", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<CacheKey, CacheRead, void, Array<ModrinthVersion> | null>,
 	GetCachedProjectV3: { method: "GET", path: "/cache/v3/projects/{id}", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<CacheKey, CacheRead, void, ModrinthProjectV3 | null>,
-	GetCachedProjectsV3: { method: "GET", path: "/cache/v3/projects", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, CacheKeys, void, Array<ModrinthProjectV3>>,
+	GetCachedProjectsV3: { method: "POST", path: "/cache/v3/projects", auth: "session", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, CacheKeys, Array<ModrinthProjectV3>>,
 	GetCachedVersion: { method: "GET", path: "/cache/versions/{id}", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<CacheKey, CacheRead, void, ModrinthVersion | null>,
-	GetCachedVersions: { method: "GET", path: "/cache/versions", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, CacheKeys, void, Array<ModrinthVersion>>,
+	GetCachedVersions: { method: "POST", path: "/cache/versions", auth: "session", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, CacheKeys, Array<ModrinthVersion>>,
 	GetCachedUser: { method: "GET", path: "/cache/users/{id}", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<CacheKey, CacheRead, void, ModrinthUser | null>,
-	GetCachedUsers: { method: "GET", path: "/cache/users", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, CacheKeys, void, Array<ModrinthUser>>,
+	GetCachedUsers: { method: "POST", path: "/cache/users", auth: "session", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, CacheKeys, Array<ModrinthUser>>,
 	GetCachedTeam: { method: "GET", path: "/cache/teams/{id}", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<CacheKey, CacheRead, void, Array<ModrinthTeamMember> | null>,
 	GetCachedOrganization: { method: "GET", path: "/cache/organizations/{id}", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<CacheKey, CacheRead, void, ModrinthOrganization | null>,
 	GetCachedSearchResults: { method: "GET", path: "/cache/search", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, CacheSearch, void, ModrinthSearchResults | null>,

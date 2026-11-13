@@ -401,7 +401,9 @@ async fn cache_reads_take_the_helpers_query_names() {
     .unwrap();
     let router = super::routes().with_state(Host {
         engine,
-        access: Arc::new(FakeAccess { allow: true }),
+        access: Arc::new(FakeAccess {
+            granted: Some(Permission::Owner),
+        }),
     });
 
     let (status, user) = send(
@@ -438,7 +440,9 @@ async fn logs_are_read_and_deleted_by_file_name_only() {
     std::fs::write(&secret, "secret").unwrap();
     let router = super::routes().with_state(Host {
         engine,
-        access: Arc::new(FakeAccess { allow: true }),
+        access: Arc::new(FakeAccess {
+            granted: Some(Permission::Owner),
+        }),
     });
 
     let (status, logs) = send(

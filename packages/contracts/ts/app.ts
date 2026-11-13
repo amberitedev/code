@@ -2,7 +2,7 @@
 // Regenerate: cargo test -p theseus_gui -- --ignored write_ts
 
 import type { ApiError, CoreSession, Endpoint, SharedIconConfig, UserFriend, UserStatus } from './contracts'
-import type { CommandPayload, DesyncServerMode, EngineEvent, FriendPayload, InstanceGroupsChangedPayload, OnboardingChecklist } from './engine'
+import type { CommandPayload, DesyncServerMode, EngineEvent, FriendPayload, ImportLauncherType, InstallJobSnapshot, InstanceGroupsChangedPayload, JavaVersion, OnboardingChecklist, Settings } from './engine'
 
 export type Boot = { version: string, platform: Platform, os_version: string, 
 /**
@@ -388,6 +388,28 @@ export type SingleplayerJoin = { instance_id: string,
  */
 world: string, };
 
+export type InstanceVisibility = { instance_id: string, hidden: boolean, };
+
+export type OnboardingProgress = OnboardingChecklist;
+
+export type JavaTest = { path: string, major_version: number, };
+
+export type JavaAtPath = JavaVersion;
+
+export type Launcher = { launcher_type: ImportLauncherType, };
+
+export type LauncherFolder = { launcher_type: ImportLauncherType, base_path: string, };
+
+export type ImportableInstance = { launcher_type: ImportLauncherType, instance_folder: string, };
+
+export type InstanceToImport = { launcher_type: ImportLauncherType, base_path: string, 
+/**
+ * The folder's name under `base_path`.
+ */
+instance_folder: string, };
+
+export type ImportJob = InstallJobSnapshot;
+
 export const health = {
 	checkHealth: { method: "GET", path: "/health", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
 }
@@ -425,10 +447,15 @@ export const desktop = {
 	createShortcut: { method: "POST", path: "/app/shortcuts", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, NewShortcut, string>,
 	checkNetworkMetered: { method: "GET", path: "/app/network/metered", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, boolean>,
 	logFromWebview: { method: "POST", path: "/app/webview-log", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, Array<WebviewLog>, void>,
+	getOpeningCommand: { method: "GET", path: "/app/opening-command", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Command | null>,
+	getJavaAt: { method: "GET", path: "/app/java", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, LocalPath, void, JavaAtPath>,
+	testJavaAt: { method: "GET", path: "/app/java/test", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, JavaTest, void, boolean>,
 }
 
 export const library = {
 	listRecentIconConfigs: { method: "GET", path: "/app/library/recent-icon-configs", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, RecentIconConfigs>,
+	listHiddenInstances: { method: "GET", path: "/app/library/hidden-instances", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<string>>,
+	setInstanceHidden: { method: "PUT", path: "/app/library/hidden-instances", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, InstanceVisibility, void>,
 }
 
 export const gameOptions = {
@@ -540,4 +567,22 @@ export const localAccounts = {
 export const launch = {
 	joinServer: { method: "POST", path: "/app/launch/server", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, ServerJoin, void>,
 	joinSingleplayerWorld: { method: "POST", path: "/app/launch/singleplayer", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, SingleplayerJoin, void>,
+}
+
+export const settings = {
+	getSettings: { method: "GET", path: "/app/settings", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Settings>,
+	setSettings: { method: "PUT", path: "/app/settings", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, Settings, void>,
+	cancelDirectoryChange: { method: "DELETE", path: "/app/settings/directory-change", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
+}
+
+export const onboarding = {
+	getOnboardingChecklist: { method: "GET", path: "/app/onboarding/checklist", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, OnboardingProgress>,
+	skipCreateInstanceOnboarding: { method: "POST", path: "/app/onboarding/checklist/skip-create-instance", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
+}
+
+export const launcherImport = {
+	listImportableInstances: { method: "GET", path: "/app/import/instances", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, LauncherFolder, void, Array<string>>,
+	checkImportableInstance: { method: "GET", path: "/app/import/instance", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, ImportableInstance, void, boolean>,
+	getDefaultLauncherPath: { method: "GET", path: "/app/import/default-path", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, Launcher, void, string | null>,
+	importInstance: { method: "POST", path: "/app/import", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, InstanceToImport, ImportJob>,
 }
