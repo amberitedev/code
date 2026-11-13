@@ -62,7 +62,7 @@ export type WebviewLogLevel = "trace" | "debug" | "info" | "warn" | "error";
 
 export type LocalEvent = EngineEvent | AppEvent;
 
-export type AppEvent = { "type": "friend", "payload": FriendPayload } | { "type": "notification", "payload": unknown } | { "type": "onboarding_checklist", "payload": OnboardingChecklist } | { "type": "instance_groups_changed", "payload": InstanceGroupsChangedPayload } | { "type": "command", "payload": Command } | { "type": "game_option_locales_updated" } | { "type": "progress", "payload": { op: string, stage: string | null, done: number, total: number | null, } } | { "type": "op_ended", "payload": { op: string, error: ApiError | null, response: OpResponse | null, } } | { "type": "resync" };
+export type AppEvent = { "type": "friend", "payload": FriendPayload } | { "type": "notification", "payload": unknown } | { "type": "onboarding_checklist", "payload": OnboardingChecklist } | { "type": "instance_groups_changed", "payload": InstanceGroupsChangedPayload } | { "type": "command", "payload": Command } | { "type": "game_option_locales_updated" } | { "type": "progress", "payload": { op: string, stage: string | null, done: number, total: number | null, } } | { "type": "op_ended", "payload": { op: string, error: ApiError | null, response: OpResponse | null, } } | { "type": "resync" } | { "type": "engine_started", "payload": { error: ApiError | null, } };
 
 export type Command = CommandPayload | AmberiteCommand;
 

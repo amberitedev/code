@@ -75,6 +75,8 @@ export function setupAppEventsProvider() {
 			opening.onmessage = (message) => dispatch(JSON.parse(message.data) as LocalEvent)
 			opening.onopen = () => {
 				socket = opening
+				// Events raised while no socket was open are lost, ends of ops among them.
+				dispatch({ type: 'resync' })
 				resolve()
 			}
 			opening.onerror = () => reject(new Error("The App's event socket failed"))
@@ -84,11 +86,10 @@ export function setupAppEventsProvider() {
 		})
 	}
 
-	// Events raised while the socket was closed are lost, so a reopened socket is a resync.
 	function reopen() {
 		setTimeout(() => {
 			if (disposed) return
-			void connect().then(() => dispatch({ type: 'resync' }), reopen)
+			void connect().catch(reopen)
 		}, REOPEN_AFTER_MS)
 	}
 

@@ -4,8 +4,8 @@ use axum::{
     http::{
         Request, StatusCode,
         header::{
-            ACCESS_CONTROL_ALLOW_ORIGIN, CONNECTION, CONTENT_TYPE, HOST,
-            ORIGIN, UPGRADE, VARY,
+            ACCESS_CONTROL_ALLOW_ORIGIN, CONTENT_TYPE, HOST, ORIGIN, UPGRADE,
+            VARY,
         },
     },
     response::Response,
@@ -288,10 +288,11 @@ async fn boot_answers_from_bind() {
     assert!(response.contains(r#""version":"1.2.3""#), "{response}");
 }
 
-/// The socket opens once the engine is up. Then, through the guard and the upgrade, an engine
-/// event and an App event raised by engine code arrive as JSON.
-#[tokio::test(flavor = "multi_thread")]
-async fn the_event_socket_waits_for_the_engine_then_sends_events_as_json() {
+/// Serves a router over `engine` on a real listener, as a socket needs, and opens `/events`.
+async fn open_socket(
+    events: Events,
+    engine: EngineHandle,
+) -> tokio::net::TcpStream {
     let server = LocalServer::bind(None, None, None).unwrap();
     let request = format!(
         "GET /{}/events HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nOrigin: tauri://localhost\r\n\
@@ -301,12 +302,10 @@ async fn the_event_socket_waits_for_the_engine_then_sends_events_as_json() {
         server.port()
     );
     let address = server.listener.local_addr().unwrap();
-    let events = Events::default();
-    let handle = EngineHandle::default();
     let router = server.router(
         boot(),
-        events.clone(),
-        handle.clone(),
+        events,
+        engine,
         Arc::new(Presence::init().unwrap()),
         AppSlot::default(),
         Arc::new(Updater::new(AppSlot::default())),
@@ -316,33 +315,52 @@ async fn the_event_socket_waits_for_the_engine_then_sends_events_as_json() {
 
     let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
     stream.write_all(request.as_bytes()).await.unwrap();
-    assert!(
-        tokio::time::timeout(Duration::from_millis(200), stream.read_u8())
-            .await
-            .is_err(),
-        "the socket answered before the engine started"
-    );
-    engine::install_crypto_provider();
-    let dir = tempfile::tempdir().unwrap();
-    // Its own sink, so its startup events stay off this socket.
-    let config = crate::data_dir::engine_config(
-        dir.path().to_path_buf(),
-        engine::EventSink::new(),
-        None,
-    )
-    .await
-    .unwrap();
-    handle.set(Ok(engine::Engine::new(config).await.unwrap()));
-
     let mut head = Vec::new();
-    while !head.ends_with(b"\r\n\r\n") {
-        head.push(stream.read_u8().await.unwrap());
-    }
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !head.ends_with(b"\r\n\r\n") {
+            head.push(stream.read_u8().await.unwrap());
+        }
+    })
+    .await
+    .expect("the socket did not open");
     assert!(
         head.starts_with(b"HTTP/1.1 101"),
         "{}",
         String::from_utf8_lossy(&head)
     );
+    stream
+}
+
+/// The next event on a socket, as JSON.
+async fn next_event(stream: &mut tokio::net::TcpStream) -> Value {
+    tokio::time::timeout(Duration::from_secs(30), async {
+        // An unmasked text frame: FIN and opcode, then the length.
+        assert_eq!(stream.read_u8().await.unwrap(), 0x81);
+        let length = match stream.read_u8().await.unwrap() {
+            126 => usize::from(stream.read_u16().await.unwrap()),
+            length => usize::from(length),
+        };
+        let mut payload = vec![0; length];
+        stream.read_exact(&mut payload).await.unwrap();
+        serde_json::from_slice(&payload).unwrap()
+    })
+    .await
+    .expect("no event arrived")
+}
+
+/// The socket opens before the engine starts: the page sees startup events, such as a directory
+/// move's, and then how the start ended. The op list answers meanwhile, so a page that connects
+/// after an op ended learns that it did.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_event_socket_opens_before_the_engine_and_reports_its_start() {
+    let events = Events::default();
+    let handle = EngineHandle::default();
+    let mut socket = open_socket(events.clone(), handle.clone()).await;
+    let local = local_with(handle.clone());
+    let ops = local.send(local.get("app/ops", &[])).await;
+    assert_eq!(ops.status(), StatusCode::OK);
+    let body = to_bytes(ops.into_body(), usize::MAX).await.unwrap();
+    assert_eq!(serde_json::from_slice::<Value>(&body).unwrap(), json!([]));
 
     engine::emit_warning(&events.engine, "low disk")
         .await
@@ -353,23 +371,25 @@ async fn the_event_socket_waits_for_the_engine_then_sends_events_as_json() {
     )
     .await
     .unwrap();
-    for expected in [
-        json!({ "type": "warning", "payload": { "message": "low disk" } }),
-        json!({ "type": "command", "payload": { "event": "InstallMod", "id": "sodium" } }),
-    ] {
-        // A short unmasked text frame: FIN and opcode, then the length.
-        let [opcode, length] = [
-            stream.read_u8().await.unwrap(),
-            stream.read_u8().await.unwrap(),
-        ];
-        assert_eq!(opcode, 0x81);
-        let mut payload = vec![0; usize::from(length)];
-        stream.read_exact(&mut payload).await.unwrap();
-        assert_eq!(
-            serde_json::from_slice::<Value>(&payload).unwrap(),
-            expected
-        );
-    }
+    assert_eq!(
+        next_event(&mut socket).await,
+        json!({ "type": "warning", "payload": { "message": "low disk" } })
+    );
+    assert_eq!(
+        next_event(&mut socket).await,
+        json!({ "type": "command", "payload": { "event": "InstallMod", "id": "sodium" } })
+    );
+
+    handle.set(Err(anyhow::Error::new(engine::ErrorKind::NotEnoughSpace {
+        required: 1,
+    })
+    .context(engine::ErrorKind::DirectoryMoveFailed)));
+    let started = next_event(&mut socket).await;
+    assert_eq!(started["type"], "engine_started");
+    assert_eq!(
+        started["payload"]["error"]["error"],
+        "directory_move_no_space"
+    );
 }
 
 #[tokio::test]
@@ -378,7 +398,6 @@ async fn a_failed_start_answers_engine_unavailable() {
     handle.set(Err(anyhow::anyhow!("the data folder is in use")));
     let local = local_with(handle);
     for path in [
-        "events",
         "instances",
         "app/library/recent-icon-configs",
         "app/settings",
@@ -423,7 +442,7 @@ async fn a_failed_directory_move_keeps_its_code() {
     })
     .context(engine::ErrorKind::DirectoryMoveFailed)));
     let local = local_with(handle);
-    let response = local.send(local.get("events", &[])).await;
+    let response = local.send(local.get("instances", &[])).await;
     assert_eq!(response.status(), StatusCode::INSUFFICIENT_STORAGE);
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let body: Value = serde_json::from_slice(&body).unwrap();
@@ -431,8 +450,8 @@ async fn a_failed_directory_move_keeps_its_code() {
 }
 
 /// Opening the event socket retries a failed start, as a reload did when the start was a
-/// command; the HTTP read that asks why a socket was refused does not.
-#[tokio::test]
+/// command; an HTTP route only reads the failure.
+#[tokio::test(flavor = "multi_thread")]
 async fn opening_the_socket_retries_a_failed_start() {
     let attempts = Arc::new(AtomicUsize::new(0));
     let dir = Arc::new(tempfile::tempdir().unwrap());
@@ -455,24 +474,18 @@ async fn opening_the_socket_retries_a_failed_start() {
             }
         }
     });
-    let local = local_with(handle);
+    let local = local_with(handle.clone());
 
-    let probe = local.send(local.get("events", &[])).await;
+    let probe = local.send(local.get("instances", &[])).await;
     assert_eq!(probe.status(), StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(attempts.load(Ordering::SeqCst), 1);
 
-    let socket = local
-        .send(local.get(
-            "events",
-            &[
-                (CONNECTION.as_str(), "Upgrade"),
-                (UPGRADE.as_str(), "websocket"),
-            ],
-        ))
-        .await;
-    // Past the gate: only the upgrade itself fails without a real connection.
-    assert_ne!(socket.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let mut socket = open_socket(Events::default(), handle).await;
     assert_eq!(attempts.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        next_event(&mut socket).await,
+        json!({ "type": "engine_started", "payload": { "error": null } })
+    );
     let instances = local.send(local.get("instances", &[])).await;
     assert_eq!(instances.status(), StatusCode::OK);
 }

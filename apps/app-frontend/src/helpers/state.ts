@@ -3,9 +3,10 @@
  * So, for example, addDefaultInstance creates a blank instance object, where the Rust struct is serialized,
  *  and deserialized into a usable JS object.
  */
-import { ApiCallError, desktop, events, loadingBars } from '@modrinth/api-client'
+import { ApiCallError, desktop, loadingBars } from '@modrinth/api-client'
 
 import { apiClient } from '@/platform/modrinth-client'
+import type { AppEventPayload, AppEvents } from '@/providers/app-events'
 
 export interface LoadingBarType {
 	type?: string
@@ -26,21 +27,14 @@ export interface LoadingBar {
 	bar_type?: LoadingBarType
 }
 
-// Resolves once the engine is up: the App opens the event socket only then.
-export async function initialize_state(openEvents: () => Promise<void>) {
-	try {
-		await openEvents()
-	} catch (error) {
-		// A page cannot read why a socket was refused, so it asks the same route over HTTP. A failed
-		// start answers with its code; a started engine, with axum's uncoded upgrade rejection, and
-		// then the handshake only timed out during a long start.
-		const refusal = await apiClient.local
-			.call(events.eventSocket)
-			.catch((refusal: unknown) => refusal)
-		if (!(refusal instanceof ApiCallError)) throw error
-		if (refusal.code !== 'unknown') throw refusal
-		await openEvents()
-	}
+// Resolves once the engine is up. The event socket opens at once and reports how the start ended.
+export async function initialize_state(appEvents: AppEvents, openEvents: () => Promise<void>) {
+	const started = new Promise<AppEventPayload<'engine_started'>>((resolve) =>
+		appEvents.once('engine_started', resolve),
+	)
+	await openEvents()
+	const { error } = await started
+	if (error) throw new ApiCallError(503, error.error, error.description)
 }
 
 // Gets active progress bars

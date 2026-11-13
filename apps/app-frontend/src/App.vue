@@ -727,7 +727,7 @@ const {
 } = useRouteLoading({ stateInitialized, stateFailed })
 provideLoadingState(loading)
 
-traceStartupStep('Initialize backend state', () => initialize_state(connectAppEvents))
+traceStartupStep('Initialize backend state', () => initialize_state(appEvents, connectAppEvents))
 	.then(() => {
 		traceStartupStep('Initialize frontend state', setupApp).catch((err) => {
 			stateFailed.value = true

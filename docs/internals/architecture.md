@@ -156,7 +156,8 @@ upstream's pages reach our backend through `SelfHostedFeature` unchanged. Our sc
 
 The App's local server ([`server/mod.rs`](../../apps/app/src/server/mod.rs)) binds before Tauri
 builds, so the native window and tabs know its address before the frontend loads. `/health` and
-`/app/boot` answer from bind. The engine routes and `/events` wait until the engine is up.
+`/app/boot` answer from bind. The engine routes wait until the engine is up. `/events` opens at
+once, so the page sees startup's loading events, and then sends how the start ended.
 
 Any program on the machine can reach 127.0.0.1, and so can any website through the user's browser.
 The guard ([`guard.rs`](../../apps/app/src/server/guard.rs)) therefore puts every route under a

@@ -19,7 +19,7 @@ use std::{
 use axum::{
     Router,
     extract::{DefaultBodyLimit, FromRef, Request, State},
-    http::{header::UPGRADE, request::Parts},
+    http::request::Parts,
     middleware::{self, Next},
     response::{IntoResponse, Response},
 };
@@ -98,8 +98,8 @@ impl LocalServer {
         format!("http://127.0.0.1:{}/{}", self.port(), self.secret)
     }
 
-    /// `/health` and `/app/boot` answer from bind; `/events` and the routes over the engine wait
-    /// for it. `identifier` is Tauri's app identifier, which names the App's data folder.
+    /// `/health`, `/app/boot` and `/events` answer from bind; the routes over the engine wait for
+    /// it. `identifier` is Tauri's app identifier, which names the App's data folder.
     pub fn router(
         &self,
         boot: Boot,
@@ -134,7 +134,7 @@ impl LocalServer {
             app: app.clone(),
             events: events.engine.clone(),
         };
-        let (events_path, events) = events::route(events);
+        let (events_path, events) = events::route(events, engine.clone());
         // Updates come without the engine, so a release that cannot start it can still be fixed.
         let updates = ops::routes()
             .merge(desktop::updater::routes())
@@ -142,7 +142,6 @@ impl LocalServer {
         // Every other router over AppState merges here: its engine exists only behind
         // wait_for_engine.
         let waiting = Router::new()
-            .route(events_path, events)
             .merge(
                 engine::routes::routes()
                     // Only this desktop reaches it, and a Files tab upload can be any size.
@@ -170,6 +169,7 @@ impl LocalServer {
         let routes = Router::new()
             .route(health_path, health)
             .route(boot_path, boot)
+            .route(events_path, events)
             .merge(waiting)
             .merge(updates)
             .merge(cores::routes(Arc::clone(&self.cores)))
@@ -303,16 +303,11 @@ impl Access for AppAccess {
     }
 }
 
-/// A page opening its event socket retries a failed start, as a reload did when the start was a
-/// command. The HTTP read that asks why a socket was refused only reads the failure.
 async fn wait_for_engine(
     State(engine): State<EngineHandle>,
     request: Request,
     next: Next,
 ) -> Response {
-    if request.headers().contains_key(UPGRADE) {
-        engine.retry();
-    }
     match engine.ready().await {
         Ok(_) => next.run(request).await,
         Err(error) => error.into_response(),

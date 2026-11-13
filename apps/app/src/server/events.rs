@@ -15,6 +15,7 @@ use serde::Serialize;
 use tokio::sync::broadcast::{self, Receiver, error::RecvError};
 
 use super::endpoints::{events::EventSocket, ops::OpResponse};
+use crate::engine_handle::EngineHandle;
 
 const APP_EVENT_CAPACITY: usize = 256;
 
@@ -54,6 +55,10 @@ pub enum AppEvent {
     },
     /// This socket fell behind and lost events: refetch what is shown.
     Resync,
+    /// How the engine's start ended, `error` when it failed. Each socket gets it once.
+    EngineStarted {
+        error: Option<ApiError>,
+    },
 }
 
 /// A link or file the App was asked to open: a Modrinth one, which the engine parses, or an
@@ -123,13 +128,22 @@ impl Default for Events {
 }
 
 /// Subscribes before answering the upgrade, so the socket misses nothing raised after it opens.
-pub fn route(events: Events) -> (&'static str, MethodRouter) {
+/// It opens without waiting for the engine, so the page sees its startup. Opening it retries a
+/// failed start, as a reload did when the start was a command.
+pub fn route(
+    events: Events,
+    startup: EngineHandle,
+) -> (&'static str, MethodRouter) {
     contracts::server::route::<EventSocket, _, _, _>(
         move |upgrade: WebSocketUpgrade| {
             let engine = events.engine.subscribe();
             let app = events.app.subscribe();
+            startup.retry();
+            let startup = startup.clone();
             async move {
-                upgrade.on_upgrade(move |socket| forward(socket, engine, app))
+                upgrade.on_upgrade(move |socket| {
+                    forward(socket, startup, engine, app)
+                })
             }
         },
     )
@@ -137,12 +151,20 @@ pub fn route(events: Events) -> (&'static str, MethodRouter) {
 
 async fn forward(
     mut socket: WebSocket,
+    startup: EngineHandle,
     mut engine: Receiver<Event>,
     mut app: Receiver<AppEvent>,
 ) {
+    let ready = startup.ready();
+    tokio::pin!(ready);
+    let mut starting = true;
     loop {
         let event = tokio::select! {
             event = next(&mut engine, &mut app) => event,
+            started = &mut ready, if starting => {
+                starting = false;
+                Some(LocalEvent::App(AppEvent::EngineStarted { error: started.err() }))
+            }
             message = socket.recv() => match message {
                 Some(Ok(_)) => continue,
                 _ => return,
