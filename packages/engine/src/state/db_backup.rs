@@ -6,9 +6,7 @@ use std::time::Duration;
 
 const CURRENT_APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-pub(crate) async fn maybe_backup_existing_app_db(
-    db_path: &Path,
-) -> crate::Result<()> {
+pub async fn maybe_backup_existing_app_db(db_path: &Path) -> crate::Result<()> {
     if !db_path.try_exists()? {
         tracing::debug!(
             "Skipping pre-migration app database backup because {} does not exist",

@@ -277,7 +277,6 @@ pub async fn start_engine(paths: &Paths) -> Result<Arc<Engine>> {
         data_dir: paths.engine(),
         instances_dir: paths.servers(),
         logs_dir: None,
-        db_path: paths.engine().join("engine.db"),
         side: contracts::Side::Server,
         max_concurrent_downloads: 10,
         max_concurrent_writes: 10,
@@ -395,5 +394,19 @@ mod tests {
         assert!(lock(&paths).is_err());
         drop(first);
         assert!(lock(&paths).is_ok());
+    }
+
+    #[tokio::test]
+    async fn the_engine_database_holds_only_engine_tables() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::new(dir.path());
+        let engine = start_engine(&paths).await.unwrap();
+        let tables: Vec<String> = sqlx::query_scalar(
+            "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",
+        )
+        .fetch_all(engine.pool())
+        .await
+        .unwrap();
+        assert_eq!(tables, engine::state::db::TABLES);
     }
 }

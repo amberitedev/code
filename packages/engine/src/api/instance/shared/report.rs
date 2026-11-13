@@ -244,7 +244,5 @@ pub async fn get_shared_instance_publish_support_details(
     };
     write_latest_log(&mut details, &state.directories).await;
 
-    Ok(Some(
-        censor_support_text(details, &state.pool, &state.sessions).await?,
-    ))
+    Ok(Some(censor_support_text(details, state).await?))
 }

@@ -56,6 +56,7 @@ serde_with = { workspace = true }
 sha1_smol = { workspace = true }
 sha2 = { workspace = true }
 sharing-client = { workspace = true }
+shlex = { workspace = true }
 sqlx = { workspace = true, features = ["macros", "runtime-tokio", "sqlite"] }
 tauri-plugin-deep-link = { workspace = true }
 tauri-plugin-dialog = { workspace = true }

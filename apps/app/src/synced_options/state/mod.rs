@@ -1,9 +1,11 @@
 mod game_option_model;
 mod game_options;
+mod preferences;
 
 pub use self::game_option_model::{CanonicalValue, GameOptionKind};
 pub(crate) use self::game_option_model::{StoredOption, StoredPreference};
 pub(crate) use self::game_options::*;
+pub(crate) use self::preferences::*;
 
 use crate::synced_options::{GameLocaleIndexer, PackSyncWorker};
 use tokio::sync::{Mutex, MutexGuard};

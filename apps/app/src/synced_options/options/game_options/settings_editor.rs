@@ -45,9 +45,11 @@ pub(super) async fn load_settings_editor(
     state: &Engine,
 ) -> engine::Result<GameSettingsEditorState> {
     let (canonical_revision, catalog_revision) =
-        load_game_options_sync_state(state.pool(), CATALOG_REVISION).await?;
-    let values = load_shared_game_options(state.pool()).await?;
-    let preferences = load_game_option_preferences(state.pool()).await?;
+        load_game_options_sync_state(crate::db::pool(state), CATALOG_REVISION)
+            .await?;
+    let values = load_shared_game_options(crate::db::pool(state)).await?;
+    let preferences =
+        load_game_option_preferences(crate::db::pool(state)).await?;
     let participants = load_participating_instances(state).await?;
     let mut settings = Vec::new();
 
@@ -280,7 +282,7 @@ pub async fn save_changes(
     request: UpdateGameSettingsRequest,
 ) -> engine::Result<SaveGameSettingsResult> {
     let _guard = crate::hooks::synced_options(state).lock().await;
-    if !game_options_sync_is_enabled(state.pool()).await? {
+    if !game_options_sync_is_enabled(crate::db::pool(state)).await? {
         bail!(ErrorKind::InputError(
             "turn on game-settings sync before editing shared values"
                 .to_string(),
@@ -306,7 +308,8 @@ pub async fn save_changes(
             ..SaveGameSettingsResult::default()
         });
     }
-    let stored_values = load_shared_game_options(state.pool()).await?;
+    let stored_values =
+        load_shared_game_options(crate::db::pool(state)).await?;
     let participants = load_participating_instances(state).await?;
     let mut conflicts = Vec::new();
     let mut accepted = Vec::new();
@@ -380,7 +383,7 @@ pub async fn save_changes(
 
     let mut changed = false;
     let mut fullscreen_value = None;
-    let mut tx = state.pool().begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = crate::db::pool(state).begin_with("BEGIN IMMEDIATE").await?;
     for (setting, change) in accepted {
         let resulting_enabled =
             change.sync_enabled.unwrap_or(setting.sync_enabled);

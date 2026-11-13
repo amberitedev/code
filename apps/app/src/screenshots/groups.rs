@@ -51,7 +51,7 @@ fn validate_group_name(name: &str) -> engine::Result<&str> {
 pub async fn list_screenshot_groups(
     state: &Engine,
 ) -> engine::Result<Vec<ScreenshotGroup>> {
-    Ok(screenshot_rows::list_groups(state.pool())
+    Ok(screenshot_rows::list_groups(crate::db::pool(state))
         .await?
         .into_iter()
         .map(|group| ScreenshotGroup {
@@ -68,7 +68,7 @@ pub async fn create_screenshot_group(
 ) -> engine::Result<ScreenshotGroup> {
     let name = validate_group_name(&name)?;
     let id = Uuid::new_v4().to_string();
-    let mut tx = state.pool().begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = crate::db::pool(state).begin_with("BEGIN IMMEDIATE").await?;
 
     sqlx::query!(
         "UPDATE screenshot_groups SET display_order = display_order + 1",
@@ -109,7 +109,7 @@ pub async fn rename_screenshot_group(
         new_name,
         id,
     )
-    .execute(state.pool())
+    .execute(crate::db::pool(state))
     .await?;
     if result.rows_affected() == 0 {
         bail!(ErrorKind::InputError(format!(
@@ -136,11 +136,11 @@ pub async fn delete_screenshot_group(
 		",
         id,
     )
-    .fetch_all(state.pool())
+    .fetch_all(crate::db::pool(state))
     .await?;
     let result =
         sqlx::query!("DELETE FROM screenshot_groups WHERE id = ?", id,)
-            .execute(state.pool())
+            .execute(crate::db::pool(state))
             .await?;
     if result.rows_affected() == 0 {
         bail!(ErrorKind::InputError(format!(
@@ -160,7 +160,7 @@ pub async fn set_screenshot_group_memberships(
         return Ok(());
     }
 
-    let mut tx = state.pool().begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = crate::db::pool(state).begin_with("BEGIN IMMEDIATE").await?;
     let group_ids = updates
         .iter()
         .filter_map(|update| update.group_id.as_deref())
@@ -203,7 +203,7 @@ pub async fn import_screenshot_groups(
         return Ok(());
     }
 
-    let mut tx = state.pool().begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = crate::db::pool(state).begin_with("BEGIN IMMEDIATE").await?;
     let base_order = sqlx::query_scalar!(
         "SELECT COALESCE(MAX(display_order) + 1, 0) AS 'display_order!: i64' FROM screenshot_groups",
     )

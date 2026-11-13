@@ -3,6 +3,7 @@ use super::super::options::{
 };
 use super::PackLibrary;
 use super::storage::{read_library, write_library};
+use crate::synced_options::state::SyncedInstance;
 use anyhow::{Context, bail};
 use engine::ErrorKind;
 use engine::state::instances::adapters::{filesystem, sqlite::content_rows};
@@ -230,13 +231,13 @@ fn start(state: &Engine) {
 pub(super) struct Preparation<'a> {
     state: &'a Engine,
     guard: Option<MutexGuard<'a, ()>>,
-    metadata: &'a InstanceMetadata,
+    metadata: &'a SyncedInstance,
 }
 
 impl<'a> Preparation<'a> {
     pub(super) async fn new(
         state: &'a Engine,
-        metadata: &'a InstanceMetadata,
+        metadata: &'a SyncedInstance,
     ) -> Self {
         Self {
             state,
@@ -275,9 +276,9 @@ impl<'a> Preparation<'a> {
     }
 
     async fn validate_metadata(&self) -> engine::Result<()> {
-        let current = engine::state::get_instance(
+        let current = crate::synced_options::state::get_instance(
+            &self.state,
             &self.metadata.instance.id,
-            &self.state.pool(),
         )
         .await?;
         if current.as_ref().is_none_or(|current| {
@@ -293,7 +294,7 @@ impl<'a> Preparation<'a> {
     }
 }
 
-fn metadata_key(metadata: &InstanceMetadata) -> serde_json::Value {
+fn metadata_key(metadata: &SyncedInstance) -> serde_json::Value {
     let content_set = &metadata.applied_content_set;
     serde_json::json!([
         metadata.instance.path,
@@ -303,7 +304,7 @@ fn metadata_key(metadata: &InstanceMetadata) -> serde_json::Value {
         content_set.game_version,
         content_set.loader,
         content_set.loader_version,
-        metadata.synced_options,
+        metadata.synced,
         engine::instance::ensure_metadata_content_unlocked(metadata).is_ok(),
     ])
 }

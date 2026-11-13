@@ -40,7 +40,6 @@ pub use self::groups::{
 pub use self::icon::{
     cache_generated_icon, cache_icon_bytes, cache_remote_icon,
     edit_generated_icon, edit_generated_icon_if_empty, edit_icon,
-    get_recent_icon_configs,
 };
 pub(crate) use self::icon::{cache_icon, cache_icon_from_path};
 pub use self::install::get_optimal_jre_key;

@@ -606,9 +606,12 @@ async fn with_nobody_signed_in_the_account_reads_are_empty() {
     .await
     .unwrap();
     let engine = engine::Engine::new(config).await.unwrap();
-    crate::accounts::self_hosted::bind_origin(engine.pool(), &engine.sessions)
-        .await
-        .unwrap();
+    crate::accounts::self_hosted::bind_origin(
+        crate::db::pool(&engine),
+        &engine.sessions,
+    )
+    .await
+    .unwrap();
     handle.set(Ok(engine));
     let local = local_with(handle);
 

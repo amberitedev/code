@@ -201,6 +201,7 @@ impl ModrinthCredentials {
 
     pub(crate) async fn refresh_all(
         pool: &SqlitePool,
+        cache: &SqlitePool,
         fetch_semaphore: &FetchSemaphore,
         sessions: &Sessions,
     ) -> engine::Result<()> {
@@ -220,7 +221,7 @@ impl ModrinthCredentials {
         CachedEntry::get_user_many(
             &user_ids.iter().map(|x| &**x).collect::<Vec<_>>(),
             Some(CacheBehaviour::Bypass),
-            pool,
+            cache,
             fetch_semaphore,
             sessions,
         )

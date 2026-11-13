@@ -1,7 +1,9 @@
 //! Which instances share options, the shared command history and the shared server list.
 
+use std::collections::HashMap;
+
 use contracts::{Empty, Json};
-use engine::prelude::InstanceSyncedOption;
+use engine::prelude::{InstanceSyncedOption, InstanceSyncedOptions};
 use serde::{Deserialize, Serialize};
 
 use super::IdParams;
@@ -19,6 +21,9 @@ endpoints! {
         IdParams, SyncedOptionQuery, Empty => Json<SyncedOptionJoinPreview>;
     GetInstanceSyncedOptions: Get "/app/instances/{id}/synced-options",
         IdParams, (), Empty => Json<SyncedOptionsOverview>;
+    /// Which options each instance shares, by instance id.
+    ListInstancesSyncedOptions: Get "/app/synced-options/instances", (), (),
+        Empty => Json<HashMap<String, InstanceSyncedOptions>>;
     GetGlobalSyncedOptions: Get "/app/synced-options", (), (), Empty
         => Json<GlobalSyncedOptions>;
     /// Which options have shared files yet.

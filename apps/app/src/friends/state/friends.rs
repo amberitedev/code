@@ -320,7 +320,7 @@ impl FriendsSocket {
                     let _ = presence
                         .friends_socket
                         .connect(
-                            state.pool(),
+                            crate::db::pool(&state),
                             &state.api_semaphore,
                             &state.sessions,
                             &state.process_manager,

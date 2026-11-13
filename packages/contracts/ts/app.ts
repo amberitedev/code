@@ -2,7 +2,7 @@
 // Regenerate: cargo test -p theseus_gui -- --ignored write_ts
 
 import type { ApiError, CoreSession, Endpoint, SharedIconConfig, UserFriend, UserStatus } from './contracts'
-import type { CachedSharedInstanceSummary, CommandPayload, DesyncServerMode, EngineEvent, FriendPayload, ImportLauncherType, InstallJobSnapshot, InstanceGroupsChangedPayload, InstanceLink, JavaVersion, ModLoader, OnboardingChecklist, ProcessMetadata, ProjectType, Settings } from './engine'
+import type { CachedSharedInstanceSummary, CommandPayload, DesyncServerMode, EngineEvent, FriendPayload, ImportLauncherType, InstallJobSnapshot, InstanceGroupsChangedPayload, InstanceLink, InstanceSyncedOptions, JavaVersion, ModLoader, OnboardingChecklist, ProcessMetadata, ProjectType, Settings } from './engine'
 
 export type Boot = { version: string, platform: Platform, os_version: string, 
 /**
@@ -533,6 +533,7 @@ export const syncedOptions = {
 	setInstanceSyncedOption: { method: "PUT", path: "/app/instances/{id}/synced-options", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<IdParams, null, InstanceSyncedOptionUpdate, void>,
 	previewSyncedOptionJoin: { method: "GET", path: "/app/instances/{id}/synced-options/join-preview", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<IdParams, SyncedOptionQuery, void, SyncedOptionJoinPreview>,
 	getInstanceSyncedOptions: { method: "GET", path: "/app/instances/{id}/synced-options", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<IdParams, null, void, SyncedOptionsOverview>,
+	listInstancesSyncedOptions: { method: "GET", path: "/app/synced-options/instances", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, { [key in string]: InstanceSyncedOptions }>,
 	getGlobalSyncedOptions: { method: "GET", path: "/app/synced-options", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, GlobalSyncedOptions>,
 	getInitializedSyncedOptions: { method: "GET", path: "/app/synced-options/initialized", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, GlobalSyncedOptions>,
 	setGlobalSyncedOption: { method: "PUT", path: "/app/synced-options", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, GlobalSyncedOptionUpdate, GlobalSyncedOptions>,

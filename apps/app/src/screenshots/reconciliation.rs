@@ -187,7 +187,8 @@ pub(super) async fn reconcile_source_screenshots(
     scanned: Vec<ScannedScreenshot>,
 ) -> engine::Result<Vec<InstanceScreenshot>> {
     let existing =
-        screenshot_rows::list_screenshots(&source.id, state.pool()).await?;
+        screenshot_rows::list_screenshots(&source.id, crate::db::pool(state))
+            .await?;
     let mut unmatched_by_name = existing
         .into_iter()
         .map(|row| (row.file_name.clone(), row))
@@ -272,7 +273,7 @@ pub(super) async fn reconcile_source_screenshots(
         ));
     }
 
-    let mut tx = state.pool().begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = crate::db::pool(state).begin_with("BEGIN IMMEDIATE").await?;
     for row in unmatched_by_hash.into_values().flatten() {
         screenshot_rows::delete_screenshot(&row.id, &mut tx).await?;
     }

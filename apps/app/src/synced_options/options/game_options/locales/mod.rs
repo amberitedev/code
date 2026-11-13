@@ -211,7 +211,8 @@ async fn cached_archive(
 
 #[tracing::instrument(skip_all, err)]
 async fn index_installed_sources(state: &Engine) -> engine::Result<()> {
-    let mut instances = engine::state::list_instances(state.pool()).await?;
+    let mut instances =
+        crate::synced_options::state::list_instances(state).await?;
     instances.sort_by(|a, b| a.instance.id.cmp(&b.instance.id));
     let mut candidates = Vec::new();
     let mut resolver = origins::OriginResolver::default();
@@ -247,7 +248,8 @@ async fn index_installed_sources(state: &Engine) -> engine::Result<()> {
         resolver
             .index_snapshot(state, &snapshot_id, snapshot.clone())
             .await?;
-        let mut tx = state.pool().begin_with("BEGIN IMMEDIATE").await?;
+        let mut tx =
+            crate::db::pool(state).begin_with("BEGIN IMMEDIATE").await?;
         for (id, key) in &keys {
             let observation = Observation {
                 snapshot: snapshot_id.clone(),
@@ -270,7 +272,7 @@ async fn index_installed_sources(state: &Engine) -> engine::Result<()> {
             keys,
         });
     }
-    let rows = storage::load(state.pool(), None).await?;
+    let rows = storage::load(crate::db::pool(state), None).await?;
     for row in rows {
         if row.origin.is_some() {
             continue;
@@ -312,7 +314,7 @@ async fn index_installed_sources(state: &Engine) -> engine::Result<()> {
         for observation in observations {
             match resolver.resolve(state, &observation).await {
                 Ok(Some(origin)) => {
-                    storage::pin(state.pool(), &row, &origin).await?;
+                    storage::pin(crate::db::pool(state), &row, &origin).await?;
                     break;
                 }
                 Ok(None) => {}
@@ -380,12 +382,12 @@ pub async fn get_game_setting_locale_labels(
         crate::hooks::synced_options(state).locales.queue();
     }
     let scope = instance_id.unwrap_or("");
-    let mut rows = storage::load(state.pool(), Some(scope)).await?;
+    let mut rows = storage::load(crate::db::pool(state), Some(scope)).await?;
     if scope.is_empty() {
         let mut sourced: std::collections::HashSet<_> =
             rows.iter().map(|row| row.option_id.clone()).collect();
         // Unsaved global options have no provenance row; use an indexed local label until saved.
-        for row in storage::load(state.pool(), None).await? {
+        for row in storage::load(crate::db::pool(state), None).await? {
             if !row.scope.is_empty()
                 && requested.contains(&row.option_id)
                 && row.origin.is_some()

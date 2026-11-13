@@ -145,6 +145,17 @@ async fn follow(engine: Arc<Engine>, event: Event) {
             let result = match event {
                 InstancePayloadType::Created => {
                     if let Err(error) =
+                        crate::synced_options::state::insert_default_instance_sync_preferences(
+                            &instance_id,
+                            crate::db::pool(&engine),
+                        )
+                        .await
+                    {
+                        tracing::warn!(
+                            "Failed to give {instance_id} the default synced options: {error}"
+                        );
+                    }
+                    if let Err(error) =
                         crate::onboarding::mark_created_instance(&engine).await
                     {
                         tracing::warn!(
@@ -166,15 +177,14 @@ async fn follow(engine: Arc<Engine>, event: Event) {
                 }
                 InstancePayloadType::Removed => {
                     crate::hooks::forget_instance(&engine, &instance_id);
-                    if let Err(error) =
-                        crate::library::hidden_instances::forget_instance(
-                            &instance_id,
-                            engine.pool(),
-                        )
-                        .await
+                    if let Err(error) = crate::db::forget_instance(
+                        crate::db::pool(&engine),
+                        &instance_id,
+                    )
+                    .await
                     {
                         tracing::warn!(
-                            "Failed to forget hidden instance {instance_id}: {error}"
+                            "Failed to forget instance {instance_id}: {error}"
                         );
                     }
                     crate::synced_options::remove_generated_instance_files(
@@ -395,9 +405,18 @@ mod tests {
                 .unwrap()
                 .has_created_instance
         };
+        let synced = async || {
+            crate::synced_options::state::all_instance_synced_options(
+                crate::db::pool(&engine),
+            )
+            .await
+            .unwrap()
+            .contains_key(&id)
+        };
         assert!(!onboarding().await);
         follow(Arc::clone(&engine), event).await;
         assert!(onboarding().await);
+        assert!(synced().await);
 
         let generated =
             crate::synced_options::get_synced_options_folder(&engine)
@@ -410,7 +429,7 @@ mod tests {
             "user",
             &id,
             true,
-            engine.pool(),
+            crate::db::pool(&engine),
         );
         hidden.await.unwrap();
         let folder = instance::get_full_path(&engine, &id).await.unwrap();
@@ -423,9 +442,10 @@ mod tests {
         assert!(!generated.exists());
         let hidden = crate::library::hidden_instances::get_hidden_instance_ids(
             "user",
-            engine.pool(),
+            crate::db::pool(&engine),
         );
         assert!(hidden.await.unwrap().is_empty());
+        assert!(!synced().await);
 
         // An edit can still be in flight for an instance removed under it.
         let edited = Event::Instance(InstancePayload {

@@ -10,6 +10,7 @@ use super::{
     PackLibrary, PackPlacement, PackSyncPreview, PackSyncTarget, SyncedPack,
     pack_option, version_compatible,
 };
+use crate::synced_options::state::SyncedInstance;
 use anyhow::{Context, bail};
 use bytes::Bytes;
 use engine::server_list::DesyncServerMode;
@@ -29,10 +30,11 @@ async fn source(
     instance_id: &str,
     project_path: &str,
     state: &Engine,
-) -> engine::Result<(InstanceMetadata, ContentItem)> {
-    let metadata = engine::state::get_instance(instance_id, state.pool())
-        .await?
-        .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
+) -> engine::Result<(SyncedInstance, ContentItem)> {
+    let metadata =
+        crate::synced_options::state::get_instance(state, instance_id)
+            .await?
+            .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
     engine::instance::ensure_metadata_content_unlocked(&metadata)?;
     let option = ProjectType::get_from_parent_folder(project_path)
         .and_then(|project_type| pack_option(project_type).ok());
@@ -219,7 +221,7 @@ pub async fn get_pack_sync_preview(
         None
     };
     let global = get_global_options(state).await?;
-    let instances = engine::state::list_instances(state.pool())
+    let instances = crate::synced_options::state::list_instances(state)
         .await?
         .iter()
         .map(|instance| {
@@ -400,16 +402,17 @@ async fn sync_pack_once(
     automatic: bool,
 ) -> engine::Result<()> {
     let initial_metadata =
-        engine::state::get_instance(instance_id, state.pool())
+        crate::synced_options::state::get_instance(state, instance_id)
             .await?
             .ok_or(ErrorKind::InputError("unknown instance".to_owned()))?;
     let mut preparation =
         super::worker::Preparation::new(state, &initial_metadata).await;
     let global = get_global_options(state).await?;
     if automatic {
-        let metadata = engine::state::get_instance(instance_id, state.pool())
-            .await?
-            .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
+        let metadata =
+            crate::synced_options::state::get_instance(state, instance_id)
+                .await?
+                .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
         let option = ProjectType::get_from_parent_folder(project_path)
             .and_then(|project_type| pack_option(project_type).ok());
         if !option.is_some_and(|option| {
@@ -511,7 +514,7 @@ pub async fn list_synced_packs(
     pack_option(project_type)?;
     let library = read_library(state).await?;
     let global = get_global_options(state).await?;
-    let instances = engine::state::list_instances(state.pool()).await?;
+    let instances = crate::synced_options::state::list_instances(state).await?;
     Ok(library
         .packs
         .iter()
@@ -657,9 +660,10 @@ pub async fn desync_pack(
     mode: DesyncServerMode,
 ) -> engine::Result<()> {
     let _guard = crate::hooks::synced_options(state).lock().await;
-    let metadata = engine::state::get_instance(instance_id, state.pool())
-        .await?
-        .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
+    let metadata =
+        crate::synced_options::state::get_instance(state, instance_id)
+            .await?
+            .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
     engine::instance::ensure_metadata_content_unlocked(&metadata)?;
     if sync_files_are_protected(&metadata) {
         bail!(ErrorKind::InputError(

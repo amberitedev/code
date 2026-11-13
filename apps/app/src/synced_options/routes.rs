@@ -1,6 +1,7 @@
 //! Serves `crate::server::endpoints::{game_options, synced_options, synced_packs}` over the
 //! engine crate's synced-options code.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::{Router, extract::State};
@@ -8,7 +9,7 @@ use contracts::{
     ApiError, Empty, Json,
     server::{Req, route},
 };
-use engine::{Engine, routes::api_error};
+use engine::{Engine, data::InstanceSyncedOptions, routes::api_error};
 
 use super::{
     GameOptionsSourceCandidate, GameSettingLocaleLabels,
@@ -29,9 +30,10 @@ use crate::server::{
         synced_options::{
             GetCommandHistory, GetGlobalSyncedOptions,
             GetInitializedSyncedOptions, GetInstanceSyncedOptions,
-            ListSyncedServers, PreviewSyncedOptionJoin, RebuildSyncedOptions,
-            RemoveSyncedServer, SetCommandHistory, SetGlobalSyncedOption,
-            SetInstanceSyncedOption, UpdateSyncedServer,
+            ListInstancesSyncedOptions, ListSyncedServers,
+            PreviewSyncedOptionJoin, RebuildSyncedOptions, RemoveSyncedServer,
+            SetCommandHistory, SetGlobalSyncedOption, SetInstanceSyncedOption,
+            UpdateSyncedServer,
         },
         synced_packs::{
             DesyncPack, ListSyncedPacks, PreviewPackSync, RemoveSyncedPack,
@@ -57,6 +59,9 @@ pub fn routes() -> Router<AppState> {
         route::<SetInstanceSyncedOption, _, _, _>(set_instance_synced_option),
         route::<PreviewSyncedOptionJoin, _, _, _>(preview_synced_option_join),
         route::<GetInstanceSyncedOptions, _, _, _>(get_instance_synced_options),
+        route::<ListInstancesSyncedOptions, _, _, _>(
+            list_instances_synced_options,
+        ),
         route::<GetGlobalSyncedOptions, _, _, _>(get_global_synced_options),
         route::<GetInitializedSyncedOptions, _, _, _>(
             get_initialized_synced_options,
@@ -210,6 +215,18 @@ async fn get_instance_synced_options(
         .await
         .map(Json)
         .map_err(api_error)
+}
+
+async fn list_instances_synced_options(
+    State(engine): State<Arc<Engine>>,
+    _: Req<ListInstancesSyncedOptions>,
+) -> Answer<Json<HashMap<String, InstanceSyncedOptions>>> {
+    crate::synced_options::state::all_instance_synced_options(crate::db::pool(
+        &engine,
+    ))
+    .await
+    .map(Json)
+    .map_err(api_error)
 }
 
 async fn get_global_synced_options(

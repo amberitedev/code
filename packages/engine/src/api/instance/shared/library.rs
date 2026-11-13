@@ -1,17 +1,13 @@
 use super::*;
-use crate::state::{CachedEntry, CachedSharedInstanceSummary, accounts};
+use crate::state::{CachedEntry, CachedSharedInstanceSummary};
 
 #[tracing::instrument(skip(state))]
 pub async fn get_cached_shared_instance_library(
     state: &Engine,
+    user_id: &str,
 ) -> crate::Result<Vec<CachedSharedInstanceSummary>> {
-    let Some(user_id) = accounts::active_modrinth_user_id(&state.pool).await?
-    else {
-        return Ok(Vec::new());
-    };
-
     CachedEntry::get_shared_instance_library(
-        &user_id,
+        user_id,
         &state.pool,
         &state.api_semaphore,
         &state.sessions,
@@ -22,13 +18,9 @@ pub async fn get_cached_shared_instance_library(
 #[tracing::instrument(skip(state, instances))]
 pub async fn cache_shared_instance_library(
     state: &Engine,
+    user_id: &str,
     instances: Vec<CachedSharedInstanceSummary>,
 ) -> crate::Result<()> {
-    let Some(user_id) = accounts::active_modrinth_user_id(&state.pool).await?
-    else {
-        return Ok(());
-    };
-
-    CachedEntry::cache_shared_instance_library(&user_id, instances, &state.pool)
+    CachedEntry::cache_shared_instance_library(user_id, instances, &state.pool)
         .await
 }

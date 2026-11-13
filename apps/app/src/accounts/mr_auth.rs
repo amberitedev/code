@@ -1,5 +1,6 @@
 use crate::accounts::state::ModrinthCredentials;
 use crate::presence::Presence;
+use crate::settings::rows::SettingsRow;
 use anyhow::bail;
 use engine::data::{FeatureFlag, Settings};
 use serde::Deserialize;
@@ -26,7 +27,7 @@ pub async fn authenticate_begin_flow(
     ) {
         return Ok(url);
     }
-    let settings = Settings::get(state.pool()).await?;
+    let settings = Settings::get(crate::db::pool(state)).await?;
     let use_localhost = settings
         .feature_flags
         .get(&FeatureFlag::LocalhostSignIn)
@@ -59,9 +60,9 @@ pub async fn authenticate_finish_flow(
     )
     .await?;
 
-    creds.upsert(state.pool()).await?;
+    creds.upsert(crate::db::pool(state)).await?;
     sqlx::query("INSERT INTO self_hosted_account_origins (user_id,origin) VALUES (?,?) ON CONFLICT(user_id) DO UPDATE SET origin=excluded.origin")
-        .bind(&creds.user_id).bind(engine::self_hosted::accounts::origin(&state.sessions)).execute(state.pool()).await?;
+        .bind(&creds.user_id).bind(engine::self_hosted::accounts::origin(&state.sessions)).execute(crate::db::pool(state)).await?;
     crate::accounts::self_hosted::set_sessions(&state.sessions, Some(&creds));
 
     if let Err(error) =
@@ -89,7 +90,7 @@ async fn sign_out(
     state: &engine::Engine,
     presence: &Presence,
 ) -> engine::Result<()> {
-    ModrinthCredentials::deactivate_all(state.pool()).await?;
+    ModrinthCredentials::deactivate_all(crate::db::pool(state)).await?;
     crate::accounts::self_hosted::set_sessions(&state.sessions, None);
     presence.friends_socket.disconnect().await?;
 
@@ -100,7 +101,7 @@ async fn sign_out(
 pub async fn get_all(
     state: &engine::Engine,
 ) -> engine::Result<Vec<ModrinthCredentials>> {
-    ModrinthCredentials::get_all(state.pool(), &state.sessions).await
+    ModrinthCredentials::get_all(crate::db::pool(state), &state.sessions).await
 }
 
 #[tracing::instrument(skip(state, presence))]
@@ -110,7 +111,8 @@ pub async fn set_active(
     user_id: &str,
 ) -> engine::Result<()> {
     let users =
-        ModrinthCredentials::get_all(state.pool(), &state.sessions).await?;
+        ModrinthCredentials::get_all(crate::db::pool(state), &state.sessions)
+            .await?;
     let Some(mut creds) =
         users.into_iter().find(|creds| creds.user_id == user_id)
     else {
@@ -118,7 +120,7 @@ pub async fn set_active(
     };
 
     creds.active = true;
-    creds.upsert(state.pool()).await?;
+    creds.upsert(crate::db::pool(state)).await?;
     crate::accounts::self_hosted::set_sessions(&state.sessions, Some(&creds));
     reconnect_friends(state, presence).await?;
 
@@ -132,7 +134,7 @@ pub async fn remove_user(
     user_id: &str,
 ) -> engine::Result<()> {
     if let Some(creds) =
-        ModrinthCredentials::get_all(state.pool(), &state.sessions)
+        ModrinthCredentials::get_all(crate::db::pool(state), &state.sessions)
             .await?
             .into_iter()
             .find(|creds| creds.user_id == user_id)
@@ -143,9 +145,9 @@ pub async fn remove_user(
             tracing::warn!("Could not revoke account session: {error}");
         }
     }
-    ModrinthCredentials::remove(user_id, state.pool()).await?;
+    ModrinthCredentials::remove(user_id, crate::db::pool(state)).await?;
 
-    if ModrinthCredentials::get_active(state.pool())
+    if ModrinthCredentials::get_active(crate::db::pool(state))
         .await?
         .is_none()
     {
@@ -166,7 +168,7 @@ async fn reconnect_friends(
     if let Err(error) = presence
         .friends_socket
         .connect(
-            state.pool(),
+            crate::db::pool(state),
             &state.api_semaphore,
             &state.sessions,
             &state.process_manager,
@@ -186,7 +188,7 @@ pub async fn get_credentials(
     presence: &Presence,
 ) -> engine::Result<Option<ModrinthCredentials>> {
     let current = ModrinthCredentials::get_and_refresh(
-        state.pool(),
+        crate::db::pool(state),
         &state.api_semaphore,
         &state.sessions,
     )
@@ -231,7 +233,7 @@ mod tests {
             user_id: "user".into(),
             active: true,
         };
-        credentials.upsert(state.pool()).await.unwrap();
+        credentials.upsert(crate::db::pool(&state)).await.unwrap();
         crate::accounts::self_hosted::set_sessions(
             &state.sessions,
             Some(&credentials),

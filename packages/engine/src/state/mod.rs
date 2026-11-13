@@ -46,7 +46,6 @@ pub(crate) use self::instance_locks::InstanceLocks;
 mod sessions;
 pub use self::sessions::*;
 
-pub mod accounts;
 pub mod db;
 pub(crate) mod db_backup;
 
@@ -57,8 +56,6 @@ pub struct EngineConfig {
     pub data_dir: PathBuf,
     pub instances_dir: PathBuf,
     pub logs_dir: Option<PathBuf>,
-    /// app.db, which also holds the App's tables until they get their own database.
-    pub db_path: PathBuf,
     pub side: Side,
     pub max_concurrent_downloads: usize,
     pub max_concurrent_writes: usize,
@@ -67,10 +64,17 @@ pub struct EngineConfig {
     pub hooks: Option<Arc<dyn InstanceHooks>>,
 }
 
-/// Host work the engine's own instance changes wait on, and the host's view of an instance's
-/// server list. The App keeps synced options, packs and servers here; the defaults are an
-/// engine with nothing synced, which edits `servers.dat` directly.
+/// Host work the engine's own instance changes wait on, the host's view of an instance's server
+/// list, and the saved secrets logs hide. The App keeps synced options, packs and servers here;
+/// the defaults are an engine with nothing synced or saved, which edits `servers.dat` directly.
 pub trait InstanceHooks: std::any::Any + Send + Sync {
+    fn secrets<'a>(
+        &'a self,
+        _engine: &'a Engine,
+    ) -> BoxFuture<'a, crate::Result<SavedSecrets>> {
+        Box::pin(async { Ok(SavedSecrets::default()) })
+    }
+
     /// Runs before a modpack update, while the instance's files are as the user left them.
     fn before_pack_update<'a>(
         &'a self,
@@ -244,6 +248,19 @@ pub trait InstanceHooks: std::any::Any + Send + Sync {
 
 struct NoHooks;
 
+/// The host's saved accounts, which game logs and support details hide.
+#[derive(Default)]
+pub struct SavedSecrets {
+    pub minecraft: Vec<SavedMinecraftAccount>,
+    pub modrinth_sessions: Vec<String>,
+}
+
+pub struct SavedMinecraftAccount {
+    pub access_token: String,
+    pub name: String,
+    pub id: uuid::Uuid,
+}
+
 impl InstanceHooks for NoHooks {}
 
 /// What a pack update wrote over the instance.
@@ -341,7 +358,7 @@ impl Engine {
         Ok(state)
     }
 
-    /// The database, which also holds the App's tables.
+    /// engine.db.
     pub fn pool(&self) -> &SqlitePool {
         &self.pool
     }
@@ -369,7 +386,6 @@ impl Engine {
             data_dir,
             instances_dir,
             logs_dir,
-            db_path,
             side,
             max_concurrent_downloads,
             max_concurrent_writes,
@@ -378,15 +394,13 @@ impl Engine {
             hooks,
         } = config;
         let directories =
-            DirectoryInfo::init(&db_path, data_dir, instances_dir, logs_dir)
-                .await?;
+            DirectoryInfo::init(data_dir, instances_dir, logs_dir).await?;
 
-        tracing::info!("Connecting to app database");
-        let store_lock = content_store::ContentStore::lock_process(
-            &directories.settings_dir,
-        )
-        .await?;
-        let pool = db::open(&db_path).await?;
+        tracing::info!("Connecting to the engine database");
+        let store_lock =
+            content_store::ContentStore::lock_process(&directories.config_dir)
+                .await?;
+        let pool = db::open(&directories.config_dir).await?;
 
         let fetch_semaphore =
             FetchSemaphore(Arc::new(Semaphore::new(max_concurrent_downloads)));
@@ -484,9 +498,6 @@ impl Engine {
             if let Err(error) = refresh_all_instances(&state).await {
                 tracing::error!("Failed to refresh instances: {error}");
             }
-            if let Err(error) = Settings::migrate(&state.pool).await {
-                tracing::error!("Failed to migrate settings: {error}");
-            }
         });
     }
 
@@ -578,7 +589,6 @@ pub(crate) mod tests {
     pub(crate) fn config(dir: PathBuf) -> EngineConfig {
         EngineConfig {
             instances_dir: dir.join(INSTANCES_FOLDER_NAME),
-            db_path: dir.join("app.db"),
             data_dir: dir,
             logs_dir: None,
             side: Side::Client,

@@ -15,6 +15,17 @@ pub async fn get_all(state: &Engine) -> crate::Result<Vec<ProcessMetadata>> {
     Ok(processes)
 }
 
+/// Instances with a game process an earlier run recorded, which may still be running.
+pub async fn persisted_instance_ids(
+    state: &Engine,
+) -> crate::Result<Vec<String>> {
+    Ok(
+        sqlx::query_scalar!("SELECT DISTINCT instance_id FROM processes")
+            .fetch_all(&state.pool)
+            .await?,
+    )
+}
+
 pub async fn resolve_instance_id(
     state: &Engine,
     instance: &str,

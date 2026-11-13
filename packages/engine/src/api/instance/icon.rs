@@ -224,26 +224,8 @@ pub async fn cache_generated_icon(
     state: &Engine,
     config: IconConfig,
     symbol_bytes: Vec<u8>,
-    add_to_recents: bool,
 ) -> crate::Result<String> {
-    let icon_path =
-        cache_generated_icon_with_state(config.clone(), symbol_bytes, state)
-            .await?;
-
-    if add_to_recents {
-        let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await?;
-        instance_rows::update_recent_instance_icon_config(&config, &mut tx)
-            .await?;
-        tx.commit().await?;
-    }
-
-    Ok(icon_path)
-}
-
-pub async fn get_recent_icon_configs(
-    state: &Engine,
-) -> crate::Result<Vec<IconConfig>> {
-    instance_rows::get_recent_instance_icon_configs(&state.pool).await
+    cache_generated_icon_with_state(config, symbol_bytes, state).await
 }
 
 async fn cache_generated_icon_with_state(

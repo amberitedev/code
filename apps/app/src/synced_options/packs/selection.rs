@@ -6,6 +6,7 @@ use super::super::options::{get_global_options, instance_dir};
 use super::reconciliation::participating;
 use super::selection_compatibility;
 use super::{PackLibrary, PackPlacement, SyncedPack};
+use crate::synced_options::state::SyncedInstance;
 use engine::state::instances::adapters::sqlite::content_rows;
 use engine::state::{
     ContentSourceKind, Engine, InstanceMetadata, ProjectType, SyncedOption,
@@ -172,7 +173,7 @@ pub(super) async fn capture_source_order(
 }
 
 pub(super) async fn capture(
-    metadata: &InstanceMetadata,
+    metadata: &SyncedInstance,
     library: &mut PackLibrary,
     state: &Engine,
 ) -> engine::Result<Option<bool>> {
@@ -192,7 +193,7 @@ pub(super) async fn capture(
     };
     let global = get_global_options(state).await?;
     if !global.get(SyncedOption::ResourcePacks)
-        || !metadata.synced_options.resource_packs
+        || !metadata.synced.resource_packs
     {
         return Ok(None);
     }
@@ -346,7 +347,7 @@ pub(super) async fn capture(
 
 /// Returns false when the selection update must be deferred.
 pub(super) async fn apply_removal(
-    metadata: &InstanceMetadata,
+    metadata: &SyncedInstance,
     library: &mut PackLibrary,
     placement: Option<&PackPlacement>,
     state: &Engine,
@@ -357,7 +358,7 @@ pub(super) async fn apply_removal(
     if placement.excluded
         || placement.suspended
         || placement.error.is_some()
-        || !metadata.synced_options.resource_packs
+        || !metadata.synced.resource_packs
         || !get_global_options(state)
             .await?
             .get(SyncedOption::ResourcePacks)
@@ -398,7 +399,7 @@ pub(super) async fn apply_removal(
 
 /// Returns false when the selection update must be deferred.
 pub(super) async fn apply(
-    metadata: &InstanceMetadata,
+    metadata: &SyncedInstance,
     library: &mut PackLibrary,
     previous_placements: &BTreeMap<String, PackPlacement>,
     state: &Engine,
@@ -406,7 +407,7 @@ pub(super) async fn apply(
     let directory = instance_dir(metadata, state);
     let global = get_global_options(state).await?;
     if !global.get(SyncedOption::ResourcePacks)
-        || !metadata.synced_options.resource_packs
+        || !metadata.synced.resource_packs
     {
         return Ok(true);
     }

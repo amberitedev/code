@@ -6,6 +6,7 @@ use super::files::{
 use super::orchestration::{
     create_synced_directories, option_effective, synced_options_path,
 };
+use crate::synced_options::state::SyncedInstance;
 use engine::Engine;
 use engine::state::{InstanceMetadata, SyncedOption};
 use engine::util::io;
@@ -74,7 +75,7 @@ pub(super) async fn ensure_command_history(
 }
 
 pub(super) async fn reconcile_command_history(
-    metadata: &InstanceMetadata,
+    metadata: &SyncedInstance,
     state: &Engine,
 ) -> engine::Result<()> {
     if !option_effective(metadata, SyncedOption::CommandHistory, state).await? {
@@ -119,7 +120,7 @@ pub(super) async fn reconcile_command_history(
 }
 
 async fn refresh_command_history_links(state: &Engine) -> engine::Result<()> {
-    let instances = engine::state::list_instances(state.pool()).await?;
+    let instances = crate::synced_options::state::list_instances(state).await?;
     for metadata in instances {
         if option_effective(&metadata, SyncedOption::CommandHistory, state)
             .await?

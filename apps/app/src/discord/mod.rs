@@ -1,3 +1,4 @@
+use crate::settings::rows::SettingsRow;
 use std::sync::{Arc, atomic::AtomicBool};
 
 use discord_rich_presence::{

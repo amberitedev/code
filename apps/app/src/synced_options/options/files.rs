@@ -1,3 +1,4 @@
+use crate::synced_options::state::SyncedInstance;
 pub(crate) use engine::server_list::{
     nbt_from_bytes, nbt_to_bytes, read_nbt_file,
 };
@@ -95,21 +96,17 @@ pub(in crate::synced_options) fn option_can_apply_while_running(
 }
 
 pub(in crate::synced_options) fn instance_option_enabled(
-    metadata: &InstanceMetadata,
+    metadata: &SyncedInstance,
     option: SyncedOption,
 ) -> bool {
     match option {
-        SyncedOption::GameOptions => metadata.synced_options.game_options,
-        SyncedOption::CommandHistory => metadata.synced_options.command_history,
-        SyncedOption::MultiplayerServers => {
-            metadata.synced_options.multiplayer_servers
-        }
-        SyncedOption::CreativeHotbars => {
-            metadata.synced_options.creative_hotbars
-        }
-        SyncedOption::Screenshots => metadata.synced_options.screenshots,
-        SyncedOption::ResourcePacks => metadata.synced_options.resource_packs,
-        SyncedOption::DataPacks => metadata.synced_options.data_packs,
+        SyncedOption::GameOptions => metadata.synced.game_options,
+        SyncedOption::CommandHistory => metadata.synced.command_history,
+        SyncedOption::MultiplayerServers => metadata.synced.multiplayer_servers,
+        SyncedOption::CreativeHotbars => metadata.synced.creative_hotbars,
+        SyncedOption::Screenshots => metadata.synced.screenshots,
+        SyncedOption::ResourcePacks => metadata.synced.resource_packs,
+        SyncedOption::DataPacks => metadata.synced.data_packs,
     }
 }
 
@@ -202,7 +199,7 @@ pub(in crate::synced_options) async fn begin_checkpoint(
         merge_base,
         source_revision,
     )
-    .execute(state.pool())
+    .execute(crate::db::pool(state))
     .await?;
     Ok(())
 }
@@ -227,7 +224,7 @@ pub(in crate::synced_options) async fn finish_checkpoint(
         option_name,
         variant,
     )
-    .execute(state.pool())
+    .execute(crate::db::pool(state))
     .await?;
     Ok(())
 }
@@ -249,7 +246,7 @@ pub(in crate::synced_options) async fn finish_plain_checkpoint(
         option_name,
         variant,
     )
-    .execute(state.pool())
+    .execute(crate::db::pool(state))
     .await?;
     Ok(())
 }
@@ -272,7 +269,7 @@ pub(in crate::synced_options) async fn checkpoint(
         option_name,
         variant,
     )
-    .fetch_optional(state.pool())
+    .fetch_optional(crate::db::pool(state))
     .await?;
     row.map(|row| {
         Ok(SyncCheckpoint {

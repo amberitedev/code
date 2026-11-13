@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM instance_server_pack_state WHERE instance_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "1d8b177419f05f53afe3859f0e2a1cb93d3076fda02599cbfdf48d7bf7f23f5e"
+}

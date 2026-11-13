@@ -7,16 +7,17 @@ use super::catalog::*;
 use super::options_file::{
     GameOptionsDocument, options_path, read_document, sha1_bytes,
 };
+use crate::synced_options::state::SyncedInstance;
 use crate::synced_options::state::{
     CanonicalValue, StoredOption, game_options_sync_is_enabled,
 };
-use engine::state::{Engine, InstanceMetadata};
+use engine::state::Engine;
 use std::collections::BTreeMap;
 
 /// The instance data needed to decide whether a setting can be synced.
 #[derive(Clone)]
 pub(super) struct ParticipatingInstance {
-    metadata: InstanceMetadata,
+    metadata: SyncedInstance,
     deferred: bool,
     fullscreen_controlled: bool,
     pub(super) document: Option<GameOptionsDocument>,
@@ -30,13 +31,13 @@ pub(super) struct ParticipatingInstance {
 pub(super) async fn load_participating_instances(
     state: &Engine,
 ) -> engine::Result<Vec<ParticipatingInstance>> {
-    if !game_options_sync_is_enabled(state.pool()).await? {
+    if !game_options_sync_is_enabled(crate::db::pool(state)).await? {
         return Ok(Vec::new());
     }
-    let instances = engine::state::list_instances(state.pool()).await?;
+    let instances = crate::synced_options::state::list_instances(state).await?;
     let mut participants = Vec::new();
     for metadata in instances {
-        if !metadata.synced_options.game_options {
+        if !metadata.synced.game_options {
             continue;
         }
         let deferred = synced_options::sync_files_are_protected(&metadata)

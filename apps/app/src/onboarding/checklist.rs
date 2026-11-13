@@ -9,7 +9,7 @@ use super::state::{
 
 #[tracing::instrument(skip(state))]
 pub async fn get(state: &Engine) -> engine::Result<OnboardingChecklist> {
-    get_onboarding_checklist(state.pool()).await
+    get_onboarding_checklist(crate::db::pool(state)).await
 }
 
 #[tracing::instrument(skip(state))]
@@ -36,7 +36,7 @@ async fn mark(
     item: OnboardingChecklistItem,
 ) -> engine::Result<()> {
     if let Some(checklist) =
-        mark_onboarding_checklist_item(item, state.pool()).await?
+        mark_onboarding_checklist_item(item, crate::db::pool(state)).await?
     {
         emit_onboarding_checklist(&state.events, checklist).await?;
     }

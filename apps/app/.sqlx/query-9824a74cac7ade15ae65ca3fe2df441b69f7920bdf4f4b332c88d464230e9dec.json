@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n\t\tDELETE FROM recent_instance_icon_configs\n\t\tWHERE rowid NOT IN (\n\t\t\tSELECT rowid\n\t\t\tFROM recent_instance_icon_configs\n\t\t\tORDER BY used_at DESC, background, symbol\n\t\t\tLIMIT ?\n\t\t)\n\t\t",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "9824a74cac7ade15ae65ca3fe2df441b69f7920bdf4f4b332c88d464230e9dec"
+}

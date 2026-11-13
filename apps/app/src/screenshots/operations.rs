@@ -137,7 +137,7 @@ pub async fn delete_screenshots(
         screenshot_rows::delete_screenshot_by_key(
             &key.instance_id,
             &key.file_name,
-            state.pool(),
+            crate::db::pool(state),
         )
         .await?;
     }
@@ -271,7 +271,7 @@ pub async fn move_screenshots(
             &key.file_name,
             target_instance_id,
             &file_name,
-            state.pool(),
+            crate::db::pool(state),
         )
         .await?;
         moved_keys.push(ScreenshotKey {
@@ -349,7 +349,7 @@ pub async fn save_edited_screenshot(
     let source_row = screenshot_rows::get_screenshot_by_key(
         &key.instance_id,
         &key.file_name,
-        state.pool(),
+        crate::db::pool(state),
     )
     .await?
     .ok_or(ErrorKind::InputError("unknown screenshot".to_string()))?;
@@ -414,7 +414,8 @@ pub async fn save_edited_screenshot(
         let mut source_row = source_row.clone();
         source_row.content_hash = content_hash;
         source_row.file_size = file_size;
-        let mut tx = state.pool().begin_with("BEGIN IMMEDIATE").await?;
+        let mut tx =
+            crate::db::pool(state).begin_with("BEGIN IMMEDIATE").await?;
         screenshot_rows::update_screenshot(&source_row, &mut tx).await?;
         tx.commit().await?;
     }
@@ -430,7 +431,8 @@ pub async fn save_edited_screenshot(
 
     if copy_group {
         let result: engine::Result<()> = async {
-            let mut tx = state.pool().begin_with("BEGIN IMMEDIATE").await?;
+            let mut tx =
+                crate::db::pool(state).begin_with("BEGIN IMMEDIATE").await?;
             screenshot_rows::copy_group_membership(
                 &source_row.id,
                 &saved.id,
@@ -446,7 +448,7 @@ pub async fn save_edited_screenshot(
             let _ = screenshot_rows::delete_screenshot_by_key(
                 &source.id,
                 &target_file_name,
-                state.pool(),
+                crate::db::pool(state),
             )
             .await;
             return Err(error);
@@ -456,14 +458,15 @@ pub async fn save_edited_screenshot(
     let mut saved_row = screenshot_rows::get_screenshot_by_key(
         &saved.instance_id,
         &saved.file_name,
-        state.pool(),
+        crate::db::pool(state),
     )
     .await?
     .ok_or(ErrorKind::InputError(
         "could not load edited screenshot".to_string(),
     ))?;
     if !copy_group {
-        let mut tx = state.pool().begin_with("BEGIN IMMEDIATE").await?;
+        let mut tx =
+            crate::db::pool(state).begin_with("BEGIN IMMEDIATE").await?;
         if saved_row.created_at != source_row.created_at {
             saved_row.created_at = source_row.created_at;
             screenshot_rows::update_screenshot(&saved_row, &mut tx).await?;

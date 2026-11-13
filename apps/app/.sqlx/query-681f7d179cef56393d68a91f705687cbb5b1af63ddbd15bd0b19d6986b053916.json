@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n\t\tINSERT INTO instance_sync_preferences (instance_id, feature, enabled)\n\t\tSELECT ?, feature, new_instance_default\n\t\tFROM sync_feature_settings\n\t\tWHERE true\n\t\tON CONFLICT (instance_id, feature) DO NOTHING\n\t\t",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "681f7d179cef56393d68a91f705687cbb5b1af63ddbd15bd0b19d6986b053916"
+}

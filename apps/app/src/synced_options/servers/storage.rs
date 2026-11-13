@@ -25,14 +25,14 @@ async fn canonical_initialized(state: &Engine) -> engine::Result<bool> {
 		) AS "initialized!: bool"
 		"#,
     )
-    .fetch_one(state.pool())
+    .fetch_one(crate::db::pool(state))
     .await?)
 }
 
 pub(super) async fn read_canonical(
     state: &Engine,
 ) -> engine::Result<Vec<CanonicalServer>> {
-    read_canonical_with(state.pool()).await
+    read_canonical_with(crate::db::pool(state)).await
 }
 
 async fn read_canonical_with<'e>(
@@ -62,7 +62,7 @@ pub(super) async fn read_server_snapshot(
     instance_id: &str,
     state: &Engine,
 ) -> engine::Result<(Vec<CanonicalServer>, Vec<LocalServer>)> {
-    let mut tx = state.pool().begin().await?;
+    let mut tx = crate::db::pool(state).begin().await?;
     let canonical = read_canonical_with(&mut *tx).await?;
     let local = load_local_with(instance_id, &mut *tx).await?;
     tx.commit().await?;
@@ -74,7 +74,7 @@ pub(super) async fn commit_server_state(
     local: Option<(&str, &[LocalServer])>,
     state: &Engine,
 ) -> engine::Result<bool> {
-    let mut tx = state.pool().begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = crate::db::pool(state).begin_with("BEGIN IMMEDIATE").await?;
     let mut canonical_changed = false;
     if let Some(canonical) = canonical {
         canonical_changed = write_canonical_rows(&mut tx, canonical).await?;
@@ -188,7 +188,7 @@ pub(super) async fn server_revision(state: &Engine) -> engine::Result<i64> {
 		WHERE singleton = 1
 		"#,
     )
-    .fetch_optional(state.pool())
+    .fetch_optional(crate::db::pool(state))
     .await?
     .unwrap_or(0))
 }
@@ -197,7 +197,7 @@ pub(super) async fn load_local(
     instance_id: &str,
     state: &Engine,
 ) -> engine::Result<Vec<LocalServer>> {
-    load_local_with(instance_id, state.pool()).await
+    load_local_with(instance_id, crate::db::pool(state)).await
 }
 
 async fn load_local_with<'e>(
@@ -290,7 +290,7 @@ pub(super) async fn load_projection_entries(
 		",
         instance_id,
     )
-    .fetch_all(state.pool())
+    .fetch_all(crate::db::pool(state))
     .await?;
     rows.into_iter()
         .map(|row| {
@@ -316,7 +316,7 @@ pub(super) async fn begin_server_checkpoint(
     source_revision: i64,
     state: &Engine,
 ) -> engine::Result<()> {
-    let mut tx = state.pool().begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = crate::db::pool(state).begin_with("BEGIN IMMEDIATE").await?;
     sqlx::query!(
         "DELETE FROM instance_server_projection_entries WHERE instance_id = ?",
         instance_id,

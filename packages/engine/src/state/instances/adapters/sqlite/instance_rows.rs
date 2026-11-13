@@ -5,8 +5,7 @@ use crate::state::instances::{
     ContentSet, ContentSetStatus, ContentSetSyncStatus, ContentSourceKind,
     IconBackground, IconConfig, Instance, InstanceLaunchContext,
     InstanceLaunchOverrides, InstanceLaunchOverridesData, InstanceLink,
-    InstanceSyncedOption, InstanceSyncedOptions, SharedInstanceAttachment,
-    SharedInstanceRole, playtime_to_storage,
+    SharedInstanceAttachment, SharedInstanceRole, playtime_to_storage,
 };
 use crate::state::{
     InstanceInstallStage, LauncherFeatureVersion, ModLoader, ReleaseChannel,
@@ -170,7 +169,6 @@ pub(crate) struct InstanceMetadataRecord {
     pub link: InstanceLink,
     pub shared_instance: Option<SharedInstanceAttachment>,
     pub group_ids: Vec<String>,
-    pub synced_options: InstanceSyncedOptions,
     pub launch_overrides: InstanceLaunchOverrides,
 }
 
@@ -373,7 +371,6 @@ impl InstanceMetadataRow {
             link,
             shared_instance,
             group_ids,
-            synced_options: InstanceSyncedOptions::default(),
             launch_overrides,
         })
     }
@@ -509,75 +506,6 @@ pub async fn list_screenshot_sources(
     .await?;
 
     Ok(sources)
-}
-
-pub(crate) async fn get_instance_sync_preferences(
-    instance_id: &str,
-    pool: &SqlitePool,
-) -> crate::Result<InstanceSyncedOptions> {
-    let enabled_features = sqlx::query_scalar!(
-        "
-		SELECT feature
-		FROM instance_sync_preferences
-		WHERE instance_id = ? AND enabled = 1
-		",
-        instance_id,
-    )
-    .fetch_all(pool)
-    .await?
-    .into_iter()
-    .collect::<HashSet<_>>();
-
-    Ok(InstanceSyncedOptions {
-        game_options: enabled_features.contains("game_options"),
-        command_history: enabled_features.contains("command_history"),
-        multiplayer_servers: enabled_features.contains("multiplayer_servers"),
-        creative_hotbars: enabled_features.contains("creative_hotbars"),
-        screenshots: enabled_features.contains("screenshots"),
-        resource_packs: enabled_features.contains("resource_packs"),
-        data_packs: enabled_features.contains("data_packs"),
-    })
-}
-
-async fn attach_sync_preferences(
-    records: &mut [InstanceMetadataRecord],
-    pool: &SqlitePool,
-) -> crate::Result<()> {
-    let enabled_preferences = sqlx::query!(
-        "
-		SELECT instance_id, feature
-		FROM instance_sync_preferences
-		WHERE enabled = 1
-		",
-    )
-    .fetch_all(pool)
-    .await?;
-
-    for record in records {
-        for row in enabled_preferences
-            .iter()
-            .filter(|row| row.instance_id == record.instance.id)
-        {
-            match row.feature.as_str() {
-                "game_options" => record.synced_options.game_options = true,
-                "command_history" => {
-                    record.synced_options.command_history = true
-                }
-                "multiplayer_servers" => {
-                    record.synced_options.multiplayer_servers = true
-                }
-                "creative_hotbars" => {
-                    record.synced_options.creative_hotbars = true
-                }
-                "screenshots" => record.synced_options.screenshots = true,
-                "resource_packs" => record.synced_options.resource_packs = true,
-                "data_packs" => record.synced_options.data_packs = true,
-                _ => {}
-            }
-        }
-    }
-
-    Ok(())
 }
 
 pub(crate) async fn is_instance_quarantined<'e, E>(
@@ -769,8 +697,6 @@ pub(crate) async fn update_instance_icon_config(
         .bind(symbol)
         .execute(&mut **tx)
         .await?;
-
-        update_recent_instance_icon_config(config, tx).await?;
     } else {
         sqlx::query(
             "
@@ -818,74 +744,6 @@ pub(crate) async fn update_instance_icon_if_empty(
     Ok(true)
 }
 
-pub(crate) async fn update_recent_instance_icon_config(
-    config: &IconConfig,
-    tx: &mut Transaction<'_, Sqlite>,
-) -> crate::Result<()> {
-    let background = serde_json::to_string(&config.background)?;
-    let used_at = Utc::now().timestamp_millis();
-
-    sqlx::query(
-        "
-			INSERT INTO recent_instance_icon_configs (background, symbol, used_at)
-			VALUES (?, ?, ?)
-			ON CONFLICT (background, symbol) DO UPDATE SET
-				used_at = excluded.used_at
-			",
-    )
-    .bind(&background)
-    .bind(&config.symbol)
-    .bind(used_at)
-    .execute(&mut **tx)
-    .await?;
-
-    sqlx::query(
-        "
-			DELETE FROM recent_instance_icon_configs
-			WHERE rowid NOT IN (
-				SELECT rowid
-				FROM recent_instance_icon_configs
-				ORDER BY used_at DESC, background, symbol
-				LIMIT 16
-			)
-			",
-    )
-    .execute(&mut **tx)
-    .await?;
-
-    Ok(())
-}
-
-pub(crate) async fn get_recent_instance_icon_configs(
-    pool: &SqlitePool,
-) -> crate::Result<Vec<IconConfig>> {
-    let rows = sqlx::query_as::<_, IconConfigRow>(
-        "
-		SELECT background, symbol
-		FROM recent_instance_icon_configs
-		ORDER BY used_at DESC, background, symbol
-		LIMIT 16
-		",
-    )
-    .fetch_all(pool)
-    .await?;
-
-    rows.into_iter()
-        .map(|row| {
-            Ok(IconConfig {
-                background: deserialize_icon_background(row.background)?,
-                symbol: row.symbol,
-            })
-        })
-        .collect()
-}
-
-#[derive(sqlx::FromRow)]
-struct IconConfigRow {
-    background: String,
-    symbol: String,
-}
-
 fn deserialize_icon_background(
     background: String,
 ) -> crate::Result<IconBackground> {
@@ -907,13 +765,7 @@ pub(crate) async fn get_instance_metadata_by_id(
             .fetch_optional(pool)
             .await?;
 
-    let mut record = row.map(InstanceMetadataRow::into_record).transpose()?;
-    if let Some(record) = record.as_mut() {
-        record.synced_options =
-            get_instance_sync_preferences(&record.instance.id, pool).await?;
-    }
-
-    Ok(record)
+    row.map(InstanceMetadataRow::into_record).transpose()
 }
 
 pub(crate) async fn get_instance_metadata_many(
@@ -943,12 +795,9 @@ pub(crate) async fn get_instance_metadata_many(
     .fetch_all(pool)
     .await?;
 
-    let mut records = rows
-        .into_iter()
+    rows.into_iter()
         .map(InstanceMetadataRow::into_record)
-        .collect::<crate::Result<Vec<_>>>()?;
-    attach_sync_preferences(&mut records, pool).await?;
-    Ok(records)
+        .collect()
 }
 
 pub(crate) async fn list_instance_metadata(
@@ -959,12 +808,9 @@ pub(crate) async fn list_instance_metadata(
             .fetch_all(pool)
             .await?;
 
-    let mut records = rows
-        .into_iter()
+    rows.into_iter()
         .map(InstanceMetadataRow::into_record)
-        .collect::<crate::Result<Vec<_>>>()?;
-    attach_sync_preferences(&mut records, pool).await?;
-    Ok(records)
+        .collect()
 }
 
 pub(crate) async fn get_instance_launch_context(
@@ -1256,62 +1102,6 @@ pub(crate) async fn insert_instance(
         last_played,
         submitted_time_played,
         recent_time_played,
-    )
-    .execute(&mut **tx)
-    .await?;
-
-    Ok(())
-}
-
-pub async fn set_instance_sync_preference(
-    instance_id: &str,
-    option: InstanceSyncedOption,
-    enabled: bool,
-    pool: &SqlitePool,
-) -> crate::Result<()> {
-    let instance_exists = sqlx::query_scalar!(
-        r#"
-		SELECT EXISTS(SELECT 1 FROM instances WHERE id = ?)
-			AS "exists!: bool"
-		"#,
-        instance_id,
-    )
-    .fetch_one(pool)
-    .await?;
-
-    if !instance_exists {
-        bail!(ErrorKind::InputError("unknown instance".to_string()));
-    }
-
-    let option_name = option.as_str();
-    sqlx::query!(
-        "
-		INSERT INTO instance_sync_preferences (instance_id, feature, enabled)
-		VALUES (?, ?, ?)
-		ON CONFLICT (instance_id, feature) DO UPDATE SET
-			enabled = excluded.enabled
-		",
-        instance_id,
-        option_name,
-        enabled,
-    )
-    .execute(pool)
-    .await?;
-
-    Ok(())
-}
-
-pub(crate) async fn insert_default_instance_sync_preferences(
-    instance_id: &str,
-    tx: &mut Transaction<'_, Sqlite>,
-) -> crate::Result<()> {
-    sqlx::query!(
-        "
-		INSERT INTO instance_sync_preferences (instance_id, feature, enabled)
-		SELECT ?, feature, new_instance_default
-		FROM sync_feature_settings
-		",
-        instance_id,
     )
     .execute(&mut **tx)
     .await?;

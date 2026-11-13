@@ -7,23 +7,34 @@ use std::sync::Arc;
 
 use dashmap::DashMap;
 use engine::{
-    Engine, InstanceHooks, PackOverrides, PackServers,
+    Engine, InstanceHooks, PackOverrides, PackServers, SavedSecrets,
     access::BoxFuture,
     data::{ContentItem, InstanceMetadata},
     server_list::{DesyncServerMode, ServerRecord},
 };
 use quartz_nbt::NbtCompound;
+use sqlx::SqlitePool;
 use tokio::sync::{Mutex, OwnedMutexGuard};
 
 use crate::synced_options::{self as synced, state::SyncedOptions};
 
-#[derive(Default)]
 pub struct DesktopHooks {
+    pub(crate) db: SqlitePool,
     synced_options: SyncedOptions,
     screenshots: DashMap<String, Arc<Mutex<()>>>,
 }
 
-fn desktop(engine: &Engine) -> &DesktopHooks {
+impl DesktopHooks {
+    pub fn new(db: SqlitePool) -> Self {
+        Self {
+            db,
+            synced_options: SyncedOptions::default(),
+            screenshots: DashMap::default(),
+        }
+    }
+}
+
+pub(crate) fn desktop(engine: &Engine) -> &DesktopHooks {
     (engine.hooks() as &dyn Any)
         .downcast_ref()
         .expect("the App's engine carries DesktopHooks")
@@ -51,6 +62,13 @@ pub fn forget_instance(engine: &Engine, instance_id: &str) {
 }
 
 impl InstanceHooks for DesktopHooks {
+    fn secrets<'a>(
+        &'a self,
+        engine: &'a Engine,
+    ) -> BoxFuture<'a, engine::Result<SavedSecrets>> {
+        Box::pin(crate::accounts::saved_secrets(&self.db, &engine.sessions))
+    }
+
     fn before_pack_update<'a>(
         &'a self,
         engine: &'a Engine,
@@ -146,7 +164,11 @@ impl InstanceHooks for DesktopHooks {
         engine: &'a Engine,
         metadata: &'a InstanceMetadata,
     ) -> BoxFuture<'a, engine::Result<Vec<ServerRecord>>> {
-        Box::pin(synced::list_server_records(metadata, engine))
+        Box::pin(async move {
+            let metadata =
+                synced::state::with_synced_options(engine, metadata).await?;
+            synced::list_server_records(&metadata, engine).await
+        })
     }
 
     fn add_server<'a>(
@@ -155,7 +177,11 @@ impl InstanceHooks for DesktopHooks {
         metadata: &'a InstanceMetadata,
         data: NbtCompound,
     ) -> BoxFuture<'a, engine::Result<String>> {
-        Box::pin(synced::add_user_server(metadata, data, engine))
+        Box::pin(async move {
+            let metadata =
+                synced::state::with_synced_options(engine, metadata).await?;
+            synced::add_user_server(&metadata, data, engine).await
+        })
     }
 
     fn ensure_managed_server<'a>(
@@ -164,7 +190,11 @@ impl InstanceHooks for DesktopHooks {
         metadata: &'a InstanceMetadata,
         data: NbtCompound,
     ) -> BoxFuture<'a, engine::Result<()>> {
-        Box::pin(synced::ensure_managed_server(metadata, data, engine))
+        Box::pin(async move {
+            let metadata =
+                synced::state::with_synced_options(engine, metadata).await?;
+            synced::ensure_managed_server(&metadata, data, engine).await
+        })
     }
 
     fn update_server<'a>(
@@ -176,14 +206,19 @@ impl InstanceHooks for DesktopHooks {
         address: String,
         accept_textures: Option<bool>,
     ) -> BoxFuture<'a, engine::Result<()>> {
-        Box::pin(synced::update_server_by_index(
-            metadata,
-            index,
-            name,
-            address,
-            accept_textures,
-            engine,
-        ))
+        Box::pin(async move {
+            let metadata =
+                synced::state::with_synced_options(engine, metadata).await?;
+            synced::update_server_by_index(
+                &metadata,
+                index,
+                name,
+                address,
+                accept_textures,
+                engine,
+            )
+            .await
+        })
     }
 
     fn remove_server<'a>(
@@ -192,7 +227,11 @@ impl InstanceHooks for DesktopHooks {
         metadata: &'a InstanceMetadata,
         index: usize,
     ) -> BoxFuture<'a, engine::Result<()>> {
-        Box::pin(synced::remove_server_by_index(metadata, index, engine))
+        Box::pin(async move {
+            let metadata =
+                synced::state::with_synced_options(engine, metadata).await?;
+            synced::remove_server_by_index(&metadata, index, engine).await
+        })
     }
 
     fn remove_managed_servers<'a>(

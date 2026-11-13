@@ -452,6 +452,7 @@ pub(crate) async fn finish_app_directory_move(
             remove_migrated_tree(&source).await?;
         }
     }
+    crate::state::db::remove(&from).await?;
     content_store::set_setting(pool, "store_directory_move", "").await?;
     content_store::set_setting(pool, "store_directory_move_copied", "").await?;
     managed_content::clear_checkpoint(pool).await?;
@@ -509,14 +510,16 @@ pub(crate) async fn resume_completed_move(
     Ok(())
 }
 
-pub(crate) async fn cancel_move(pool: &SqlitePool) -> crate::Result<()> {
+pub(crate) async fn cancel_move(
+    pool: &SqlitePool,
+    prev_custom_dir: Option<&Path>,
+) -> crate::Result<()> {
     if let Some(checkpoint) =
         content_store::setting(pool, "store_directory_move").await?
         && !checkpoint.is_empty()
     {
         let (from, to): (PathBuf, PathBuf) = serde_json::from_str(&checkpoint)?;
-        let settings = crate::state::Settings::get(pool).await?;
-        let committed = match settings.prev_custom_dir.as_deref() {
+        let committed = match prev_custom_dir {
             Some(previous) => fs::canonicalize(previous).await? == to,
             None => false,
         };

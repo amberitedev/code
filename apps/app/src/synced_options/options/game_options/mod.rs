@@ -86,7 +86,10 @@ pub(in crate::synced_options) use write_shared_settings::{
 pub(in crate::synced_options) async fn canonical_exists(
     state: &engine::state::Engine,
 ) -> engine::Result<bool> {
-    crate::synced_options::state::shared_game_options_exist(state.pool()).await
+    crate::synced_options::state::shared_game_options_exist(crate::db::pool(
+        state,
+    ))
+    .await
 }
 
 const OPTIONS_FILE: &str = "options.txt";

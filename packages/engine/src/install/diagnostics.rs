@@ -4,10 +4,9 @@ use super::model::{
     InstallPhaseDetails, InstallPhaseId, InstallProgress,
 };
 use super::store;
-use crate::state::{DirectoryInfo, Engine, Sessions, accounts};
+use crate::state::{DirectoryInfo, Engine};
 use crate::util::io::format_bytes;
 use regex::{Captures, Regex};
-use sqlx::SqlitePool;
 use std::fmt::Write as _;
 use std::io::{Read, Seek, SeekFrom};
 use std::net::{Ipv4Addr, Ipv6Addr};
@@ -80,7 +79,7 @@ pub async fn build_job_support_details(
     write_raw_snapshot(&mut details, &snapshot);
     write_latest_log(&mut details, &state.directories).await;
 
-    censor_support_text(details, &state.pool, &state.sessions).await
+    censor_support_text(details, state).await
 }
 
 fn result_summary(
@@ -615,10 +614,9 @@ fn read_file_tail(path: &Path, max_bytes: u64) -> crate::Result<String> {
 
 pub(crate) async fn censor_support_text(
     mut text: String,
-    pool: &SqlitePool,
-    sessions: &Sessions,
+    state: &Engine,
 ) -> crate::Result<String> {
-    for session in accounts::modrinth_sessions(pool, sessions).await? {
+    for session in state.hooks().secrets(state).await?.modrinth_sessions {
         replace_nonempty(&mut text, &session, "{MODRINTH_ACCESS_TOKEN}");
     }
 

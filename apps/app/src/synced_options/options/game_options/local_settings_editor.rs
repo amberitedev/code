@@ -10,6 +10,8 @@ use super::options_file::{
     validate_raw_key_value,
 };
 use super::read_instance_changes::custom_setting_id;
+use crate::settings::rows::SettingsRow;
+use crate::synced_options::state::SyncedInstance;
 use crate::synced_options::state::{CanonicalValue, GameOptionKind};
 use anyhow::bail;
 use engine::ErrorKind;
@@ -81,17 +83,20 @@ async fn load_instance_document(
     instance_id: &str,
     state: &Engine,
 ) -> engine::Result<(
-    InstanceMetadata,
+    SyncedInstance,
     GameOptionsDocument,
     Vec<u8>,
     HashSet<String>,
 )> {
-    let metadata = engine::state::get_instance(instance_id, state.pool())
-        .await?
-        .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
-    if crate::synced_options::state::game_options_sync_is_enabled(state.pool())
-        .await?
-        && metadata.synced_options.game_options
+    let metadata =
+        crate::synced_options::state::get_instance(state, instance_id)
+            .await?
+            .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
+    if crate::synced_options::state::game_options_sync_is_enabled(
+        crate::db::pool(state),
+    )
+    .await?
+        && metadata.synced.game_options
     {
         bail!(ErrorKind::InputError(
             "this instance is using synced game settings".to_string()
@@ -113,7 +118,7 @@ async fn load_instance_document(
     let (document, input_bytes) = read_document(&path).await?;
     let mut controlled_keys = currently_launcher_owned_keys(&metadata);
     if metadata.launch_overrides.force_fullscreen.is_none()
-        && engine::state::Settings::get(state.pool())
+        && engine::state::Settings::get(crate::db::pool(state))
             .await?
             .force_fullscreen
     {

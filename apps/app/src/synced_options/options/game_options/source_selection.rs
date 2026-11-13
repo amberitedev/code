@@ -34,11 +34,13 @@ pub(in crate::synced_options) async fn initialize_from_source_instance(
     let (document, _) = read_document(&path).await?;
     let launcher_keys = currently_launcher_owned_keys(metadata);
     let entries = document.effective_entries();
-    let current_values = load_shared_game_options(state.pool()).await?;
+    let current_values =
+        load_shared_game_options(crate::db::pool(state)).await?;
     let current_preferences =
-        load_game_option_preferences(state.pool()).await?;
+        load_game_option_preferences(crate::db::pool(state)).await?;
     let (current_revision, _) =
-        load_game_options_sync_state(state.pool(), CATALOG_REVISION).await?;
+        load_game_options_sync_state(crate::db::pool(state), CATALOG_REVISION)
+            .await?;
     let now = Utc::now().timestamp();
     let source_version = metadata.applied_content_set.game_version.as_str();
     let source_id = metadata.instance.id.as_str();
@@ -48,7 +50,7 @@ pub(in crate::synced_options) async fn initialize_from_source_instance(
         } else {
             None
         };
-    let mut tx = state.pool().begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = crate::db::pool(state).begin_with("BEGIN IMMEDIATE").await?;
     let catalog_revision = CATALOG_REVISION as i64;
 
     sqlx::query!(
@@ -326,7 +328,7 @@ pub async fn list_sync_sources(
     state: &Engine,
 ) -> engine::Result<Vec<GameOptionsSourceCandidate>> {
     let _guard = crate::hooks::synced_options(state).lock().await;
-    let instances = engine::state::list_instances(state.pool()).await?;
+    let instances = crate::synced_options::state::list_instances(state).await?;
     let mut sources = Vec::with_capacity(instances.len());
     for metadata in instances {
         let path = options_path(&metadata, state);
@@ -414,10 +416,12 @@ pub async fn list_sync_sources(
         }
         sources.push(GameOptionsSourceCandidate {
             source_id: metadata.instance.id.clone(),
-            instance_id: metadata.instance.id,
-            name: metadata.instance.name,
-            icon_path: metadata.instance.icon_path,
-            game_version: Some(metadata.applied_content_set.game_version),
+            instance_id: metadata.metadata.instance.id,
+            name: metadata.metadata.instance.name,
+            icon_path: metadata.metadata.instance.icon_path,
+            game_version: Some(
+                metadata.metadata.applied_content_set.game_version,
+            ),
             eligible,
             disabled_reason,
             recognized_setting_count,

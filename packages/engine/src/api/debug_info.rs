@@ -47,7 +47,8 @@ pub async fn export_debug_info(
     });
     let directories = state.directories.clone();
     let database_files = tempfile::tempdir()?;
-    let database_snapshot = database_files.path().join("app.db");
+    let database_snapshot =
+        database_files.path().join(crate::state::db::DB_FILE);
     let mut connection = tokio::select! {
         _ = cancel.cancelled() => return Ok(false),
         connection = state.pool.acquire() => connection?,
@@ -60,7 +61,7 @@ pub async fn export_debug_info(
         );
         remove_partial_backup(&database_snapshot).await;
         copy_db_files(
-            &directories.settings_dir.join("app.db"),
+            &directories.config_dir.join(crate::state::db::DB_FILE),
             &database_snapshot,
         )
         .await?;
@@ -225,7 +226,6 @@ pub async fn export_debug_info(
                 "os_version": sysinfo::System::long_os_version(),
                 "kernel_version": sysinfo::System::kernel_version(),
                 "architecture": std::env::consts::ARCH,
-                "settings_dir": directories.settings_dir,
                 "config_dir": directories.config_dir,
             }),
         )?;

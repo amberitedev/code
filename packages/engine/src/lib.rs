@@ -43,7 +43,7 @@ pub use state::instances::commands::server_jar;
 pub use state::{
     BackendSession, BackendSessionKind, Engine, EngineConfig,
     GameOptionsPackSource, InstanceHooks, ModrinthSession, PackOverrides,
-    PackServers, ProcessManager, Sessions,
+    PackServers, ProcessManager, SavedMinecraftAccount, SavedSecrets, Sessions,
 };
 pub use util::content_hash::encode_hex;
 pub use util::fetch::{

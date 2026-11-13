@@ -7,6 +7,7 @@ use super::write_shared_settings::{
     apply_shared_settings_to_instance, remember_processed_sha,
     sync_is_active_for_instance,
 };
+use crate::synced_options::state::SyncedInstance;
 use crate::synced_options::state::{
     game_options_sync_is_enabled, load_game_option_preferences,
 };
@@ -31,9 +32,10 @@ pub async fn sync_before_launch(
     instance_id: &str,
 ) -> engine::Result<()> {
     let _guard = crate::hooks::synced_options(state).lock().await;
-    let metadata = engine::state::get_instance(instance_id, state.pool())
-        .await?
-        .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
+    let metadata =
+        crate::synced_options::state::get_instance(state, instance_id)
+            .await?
+            .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
     if sync_is_active_for_instance(&metadata, state).await? {
         let _ =
             apply_shared_settings_to_instance(&metadata, state, false).await?;
@@ -51,9 +53,10 @@ pub async fn apply_launcher_overrides(
     force_fullscreen: bool,
 ) -> engine::Result<()> {
     let _guard = crate::hooks::synced_options(state).lock().await;
-    let metadata = engine::state::get_instance(instance_id, state.pool())
-        .await?
-        .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
+    let metadata =
+        crate::synced_options::state::get_instance(state, instance_id)
+            .await?
+            .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
     let fullscreen = match metadata.launch_overrides.force_fullscreen {
         Some(fullscreen) => fullscreen,
         None if force_fullscreen
@@ -85,12 +88,12 @@ pub async fn apply_launcher_overrides(
 }
 
 async fn fullscreen_is_synced(
-    metadata: &InstanceMetadata,
+    metadata: &SyncedInstance,
     state: &Engine,
 ) -> engine::Result<bool> {
-    Ok(metadata.synced_options.game_options
-        && game_options_sync_is_enabled(state.pool()).await?
-        && load_game_option_preferences(state.pool())
+    Ok(metadata.synced.game_options
+        && game_options_sync_is_enabled(crate::db::pool(state)).await?
+        && load_game_option_preferences(crate::db::pool(state))
             .await?
             .get("fullscreen")
             .is_some_and(|preference| preference.enabled))

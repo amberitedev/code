@@ -3,6 +3,7 @@ use super::{
     PackLibrary, PackPlacement, SyncedPack, pack_option, pack_path, same_path,
     version_compatible,
 };
+use crate::synced_options::state::SyncedInstance;
 use anyhow::bail;
 use engine::ErrorKind;
 use engine::state::content_store::{StoredFileHandle, file_path_on_disk};
@@ -23,7 +24,7 @@ use super::super::options::{
 };
 
 pub(super) fn participating(
-    metadata: &InstanceMetadata,
+    metadata: &SyncedInstance,
     pack: &SyncedPack,
     global: GlobalSyncedOptions,
 ) -> bool {
@@ -66,7 +67,7 @@ fn current_item<'a>(
 }
 
 async fn capture_items(
-    metadata: &InstanceMetadata,
+    metadata: &SyncedInstance,
     library: &mut PackLibrary,
     state: &Engine,
     placements: BTreeMap<String, PackPlacement>,
@@ -654,7 +655,7 @@ pub(super) async fn run_queued(
     state: &Engine,
 ) -> engine::Result<()> {
     let Some(metadata) =
-        engine::state::get_instance(instance_id, state.pool()).await?
+        crate::synced_options::state::get_instance(state, instance_id).await?
     else {
         return Ok(());
     };
@@ -679,7 +680,7 @@ pub(super) async fn run_queued(
 }
 
 async fn apply_instance_inner(
-    metadata: &InstanceMetadata,
+    metadata: &SyncedInstance,
     library: &mut PackLibrary,
     state: &Engine,
     removed_pack_id: Option<&str>,
@@ -985,7 +986,7 @@ pub(super) async fn apply_all(
     library: &mut PackLibrary,
     state: &Engine,
 ) -> engine::Result<()> {
-    let instances = engine::state::list_instances(state.pool()).await?;
+    let instances = crate::synced_options::state::list_instances(state).await?;
     let ids = instances
         .iter()
         .map(|metadata| &metadata.instance.id)
@@ -1018,9 +1019,10 @@ async fn capture_after_change(
     state: &Engine,
     instance_id: &str,
 ) -> engine::Result<()> {
-    let metadata = engine::state::get_instance(instance_id, state.pool())
-        .await?
-        .ok_or(ErrorKind::InputError("unknown instance".to_owned()))?;
+    let metadata =
+        crate::synced_options::state::get_instance(state, instance_id)
+            .await?
+            .ok_or(ErrorKind::InputError("unknown instance".to_owned()))?;
     let mut preparation =
         super::worker::Preparation::new(state, &metadata).await;
     let mut library = preparation.library().await?;
@@ -1091,7 +1093,7 @@ pub async fn reconcile_after_content_change(
 }
 
 pub(in crate::synced_options) async fn capture_resource_pack_selection_change(
-    metadata: &InstanceMetadata,
+    metadata: &SyncedInstance,
     state: &Engine,
 ) -> engine::Result<()> {
     let mut library = read_library(state).await?;
@@ -1104,7 +1106,7 @@ pub(in crate::synced_options) async fn capture_resource_pack_selection_change(
 }
 
 pub(in crate::synced_options) async fn prepare_instance_update(
-    metadata: &InstanceMetadata,
+    metadata: &SyncedInstance,
     state: &Engine,
 ) -> engine::Result<()> {
     let mut library = read_library(state).await?;
@@ -1199,11 +1201,12 @@ pub(crate) async fn decorate_content(
     let Some(placements) = library.instances.get(instance_id) else {
         return Ok(());
     };
-    let metadata = engine::state::get_instance(instance_id, state.pool())
-        .await?
-        .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
+    let metadata =
+        crate::synced_options::state::get_instance(state, instance_id)
+            .await?
+            .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
     let global = get_global_options(state).await?;
-    let instances = engine::state::list_instances(state.pool()).await?;
+    let instances = crate::synced_options::state::list_instances(state).await?;
     for item in items {
         if !local(item) {
             continue;
@@ -1245,7 +1248,7 @@ pub(crate) async fn decorate_content(
 pub(super) fn synced_instance_ids(
     id: &str,
     library: &PackLibrary,
-    instances: &[InstanceMetadata],
+    instances: &[SyncedInstance],
     global: GlobalSyncedOptions,
 ) -> Vec<String> {
     let Some(pack) = library.packs.get(id) else {

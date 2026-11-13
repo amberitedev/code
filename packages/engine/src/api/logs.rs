@@ -12,7 +12,7 @@ use tokio::{
 
 use crate::{
     Engine, ErrorKind,
-    state::accounts::{SavedMinecraftAccount, minecraft_accounts},
+    state::SavedMinecraftAccount,
     util::io::{self, IOError},
 };
 
@@ -396,7 +396,7 @@ async fn get_output_by_filename_from_path(
 
     let path = logs_folder.join(file_name);
 
-    let credentials = minecraft_accounts(&state.pool).await?;
+    let credentials = state.hooks().secrets(state).await?.minecraft;
 
     if let Some(ext) = path.extension() {
         if ext == "gz" {
@@ -494,7 +494,7 @@ pub async fn get_live_log_buffer(
     let joined = lines.join("\n");
     let compacted = compact_duplicate_lines(&joined);
 
-    let credentials = minecraft_accounts(&state.pool).await?;
+    let credentials = state.hooks().secrets(state).await?.minecraft;
     maybe_emit_log_compaction_warning(
         &state.events,
         "live log",
@@ -569,7 +569,7 @@ pub async fn get_generic_live_log_cursor(
     let compacted = compact_duplicate_lines(&output);
     let cursor = cursor + bytes_read as u64; // Update cursor
 
-    let credentials = minecraft_accounts(&state.pool).await?;
+    let credentials = state.hooks().secrets(state).await?.minecraft;
     maybe_emit_log_compaction_warning(
         &state.events,
         log_file_name,

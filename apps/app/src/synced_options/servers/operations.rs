@@ -3,6 +3,7 @@ use super::super::options::{
     instance_dir, instance_is_running, instance_option_enabled,
     instance_option_supported, sha1_bytes, sha1_file, sync_files_are_protected,
 };
+use crate::synced_options::state::SyncedInstance;
 use anyhow::bail;
 use engine::state::{InstanceMetadata, SyncedOption};
 use engine::{Engine, ErrorKind};
@@ -182,7 +183,7 @@ pub(in crate::synced_options) async fn detach_servers(
 }
 
 pub(in crate::synced_options) async fn reconcile_servers(
-    metadata: &InstanceMetadata,
+    metadata: &SyncedInstance,
     state: &Engine,
 ) -> engine::Result<()> {
     if !effective(metadata, state).await? {
@@ -409,7 +410,7 @@ fn match_projection_entries<'a>(
 
 #[tracing::instrument(name = "server_records", skip_all, fields(instance_id = %metadata.instance.id))]
 pub(crate) async fn list_server_records(
-    metadata: &InstanceMetadata,
+    metadata: &SyncedInstance,
     state: &Engine,
 ) -> engine::Result<Vec<ServerRecord>> {
     if participating(metadata, state).await? {
@@ -421,7 +422,7 @@ pub(crate) async fn list_server_records(
 }
 
 async fn list_server_records_locked(
-    metadata: &InstanceMetadata,
+    metadata: &SyncedInstance,
     state: &Engine,
 ) -> engine::Result<Vec<ServerRecord>> {
     if participating(metadata, state).await? {
@@ -442,7 +443,7 @@ async fn list_local_server_records(
 /// A previously managed server with a different address is treated as the same
 /// server, so an address change replaces it instead of adding a second entry.
 pub(crate) async fn ensure_managed_server(
-    metadata: &InstanceMetadata,
+    metadata: &SyncedInstance,
     data: NbtCompound,
     state: &Engine,
 ) -> engine::Result<()> {
@@ -576,9 +577,10 @@ pub(crate) async fn remove_managed_servers(
     state: &Engine,
 ) -> engine::Result<()> {
     let _guard = crate::hooks::synced_options(state).lock().await;
-    let metadata = engine::state::get_instance(instance_id, state.pool())
-        .await?
-        .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
+    let metadata =
+        crate::synced_options::state::get_instance(state, instance_id)
+            .await?
+            .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
     let (managed, retained): (Vec<_>, Vec<_>) =
         load_local(&metadata.instance.id, state)
             .await?
@@ -613,7 +615,7 @@ pub(crate) async fn remove_managed_servers(
 }
 
 pub(crate) async fn add_user_server(
-    metadata: &InstanceMetadata,
+    metadata: &SyncedInstance,
     data: NbtCompound,
     state: &Engine,
 ) -> engine::Result<String> {
@@ -635,7 +637,7 @@ pub(crate) async fn add_user_server(
 }
 
 async fn update_server_locked(
-    metadata: &InstanceMetadata,
+    metadata: &SyncedInstance,
     server_id: &str,
     data: NbtCompound,
     state: &Engine,
@@ -674,7 +676,7 @@ async fn update_server_locked(
 }
 
 pub(crate) async fn update_server_by_index(
-    metadata: &InstanceMetadata,
+    metadata: &SyncedInstance,
     index: usize,
     name: String,
     address: String,
@@ -699,7 +701,7 @@ pub(crate) async fn update_server_by_index(
 }
 
 async fn remove_server_locked(
-    metadata: &InstanceMetadata,
+    metadata: &SyncedInstance,
     server_id: &str,
     state: &Engine,
 ) -> engine::Result<()> {
@@ -728,7 +730,7 @@ async fn remove_server_locked(
 }
 
 pub(crate) async fn remove_server_by_index(
-    metadata: &InstanceMetadata,
+    metadata: &SyncedInstance,
     index: usize,
     state: &Engine,
 ) -> engine::Result<()> {
@@ -754,9 +756,10 @@ pub async fn desync_server(
     mode: DesyncServerMode,
 ) -> engine::Result<()> {
     let _guard = crate::hooks::synced_options(state).lock().await;
-    let metadata = engine::state::get_instance(instance_id, state.pool())
-        .await?
-        .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
+    let metadata =
+        crate::synced_options::state::get_instance(state, instance_id)
+            .await?
+            .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
     if !participating(&metadata, state).await? {
         bail!(ErrorKind::InputError(
             "this instance is not participating in multiplayer server syncing"
@@ -946,7 +949,7 @@ fn merge_server_records(
 }
 
 async fn regenerate_servers(state: &Engine) -> engine::Result<()> {
-    for metadata in engine::state::list_instances(state.pool()).await? {
+    for metadata in crate::synced_options::state::list_instances(state).await? {
         if effective(&metadata, state).await? {
             compose_instance(&metadata, state).await?;
         }
@@ -955,7 +958,7 @@ async fn regenerate_servers(state: &Engine) -> engine::Result<()> {
 }
 
 pub(super) async fn effective(
-    metadata: &InstanceMetadata,
+    metadata: &SyncedInstance,
     state: &Engine,
 ) -> engine::Result<bool> {
     if sync_files_are_protected(metadata)
@@ -967,7 +970,7 @@ pub(super) async fn effective(
 }
 
 pub(super) async fn participating(
-    metadata: &InstanceMetadata,
+    metadata: &SyncedInstance,
     state: &Engine,
 ) -> engine::Result<bool> {
     if !instance_option_enabled(metadata, SyncedOption::MultiplayerServers) {
@@ -981,7 +984,7 @@ pub(super) async fn participating(
 		) AS "enabled!: bool"
 		"#,
     )
-    .fetch_one(state.pool())
+    .fetch_one(crate::db::pool(state))
     .await?;
 
     Ok(instance_option_supported(

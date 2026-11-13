@@ -2,8 +2,6 @@
 pub(crate) mod move_app_directory;
 use crate::event::EventSink;
 use crate::event::emit::{emit_loading, init_loading};
-use crate::state::Settings;
-use crate::util::fetch::IoSemaphore;
 use crate::{ErrorKind, LoadingBarType};
 use anyhow::Context;
 use std::path::{Path, PathBuf};
@@ -17,8 +15,7 @@ pub const STORE_FOLDER_NAME: &str = "store";
 
 #[derive(Clone, Debug)]
 pub struct DirectoryInfo {
-    pub settings_dir: PathBuf, // Base settings directory- app database
-    pub config_dir: PathBuf, // Base config directory- instances, minecraft downloads, etc. Changeable as a setting.
+    pub config_dir: PathBuf, // Base config directory- engine.db, instances, minecraft downloads, etc. Changeable as a setting.
     instances_dir: PathBuf,
     logs_dir: Option<PathBuf>,
 }
@@ -27,25 +24,17 @@ impl DirectoryInfo {
     /// Get all paths needed for Theseus to operate properly
     #[tracing::instrument]
     pub async fn init(
-        db_path: &Path,
         config_dir: PathBuf,
         instances_dir: PathBuf,
         logs_dir: Option<PathBuf>,
     ) -> crate::Result<Self> {
-        let settings_dir = db_path
-            .parent()
-            .ok_or(ErrorKind::FSError(
-                "the database path has no folder".to_string(),
-            ))?
-            .to_path_buf();
-        fs::create_dir_all(&settings_dir)
+        fs::create_dir_all(&config_dir)
             .await
             .context(ErrorKind::FSError(
                 "error creating Theseus config directory".to_string(),
             ))?;
 
         Ok(Self {
-            settings_dir,
             config_dir,
             instances_dir,
             logs_dir,
@@ -189,42 +178,51 @@ impl DirectoryInfo {
         self.config_dir.join(CACHES_FOLDER_NAME)
     }
 
-    #[tracing::instrument(skip(settings, pool, _io_semaphore, events))]
-    pub async fn move_launcher_directory(
-        settings: &mut Settings,
-        pool: &sqlx::SqlitePool,
-        _io_semaphore: &IoSemaphore,
+    /// Finishes a pending move of the data directory from `previous` to `destination`, engine.db
+    /// with it. `commit` records `destination` as the data directory; until then the move can be
+    /// cancelled.
+    #[tracing::instrument(skip(events, commit))]
+    pub(crate) async fn move_launcher_directory(
+        previous: Option<&Path>,
+        destination: &Path,
         settings_dir: &Path,
         events: &EventSink,
+        commit: impl AsyncFnOnce(&Path) -> crate::Result<()>,
     ) -> crate::Result<()> {
-        Self::try_move_launcher_directory(settings, pool, settings_dir, events)
-            .await
-            .context(ErrorKind::DirectoryMoveFailed)
+        Self::try_move_launcher_directory(
+            previous,
+            destination,
+            settings_dir,
+            events,
+            commit,
+        )
+        .await
+        .context(ErrorKind::DirectoryMoveFailed)
     }
 
     async fn try_move_launcher_directory(
-        settings: &mut Settings,
-        pool: &sqlx::SqlitePool,
+        previous: Option<&Path>,
+        destination: &Path,
         initial: &Path,
         events: &EventSink,
+        commit: impl AsyncFnOnce(&Path) -> crate::Result<()>,
     ) -> crate::Result<()> {
-        let destination = settings
-            .custom_dir
-            .as_ref()
-            .map(PathBuf::from)
-            .unwrap_or_else(|| initial.to_path_buf());
-        let previous = settings.prev_custom_dir.as_ref().map(PathBuf::from);
-        let previous_root = match &previous {
+        let previous_root = match previous {
             Some(previous) => Some(fs::canonicalize(previous).await?),
             None => None,
         };
-        fs::create_dir_all(&destination).await?;
-        let destination_root = fs::canonicalize(&destination).await?;
+        fs::create_dir_all(destination).await?;
+        let destination_root = fs::canonicalize(destination).await?;
         let moving = previous_root
             .as_ref()
             .is_some_and(|root| root != &destination_root);
+        let pool = super::db::open(match previous {
+            Some(previous) if moving => previous,
+            _ => destination,
+        })
+        .await?;
         let pending_move =
-            super::content_store::setting(pool, "store_directory_move")
+            super::content_store::setting(&pool, "store_directory_move")
                 .await?
                 .filter(|checkpoint| !checkpoint.is_empty())
                 .map(|checkpoint| {
@@ -239,9 +237,9 @@ impl DirectoryInfo {
             .into_iter()
             .flat_map(|(from, to)| [from, to]);
         for root in previous
-            .iter()
-            .chain(std::iter::once(&destination))
-            .chain(pending_roots)
+            .into_iter()
+            .chain(std::iter::once(destination))
+            .chain(pending_roots.map(PathBuf::as_path))
         {
             let root = fs::canonicalize(root).await?;
             if locked_roots.insert(root.clone()) {
@@ -251,7 +249,7 @@ impl DirectoryInfo {
                 );
             }
         }
-        if let Some(previous) = &previous
+        if let Some(previous) = previous
             && moving
         {
             let loading = init_loading(
@@ -266,28 +264,29 @@ impl DirectoryInfo {
             .await?;
             move_app_directory::move_app_directory(
                 previous,
-                &destination,
-                pool,
+                destination,
+                &pool,
             )
             .await?;
+            super::db::copy(&pool, destination).await?;
             emit_loading(&loading, 100.0, None)?;
-        }
-        if !moving {
-            move_app_directory::resume_completed_move(&destination, pool)
+        } else {
+            move_app_directory::resume_completed_move(destination, &pool)
                 .await?;
         }
-        settings.custom_dir = Some(destination.to_string_lossy().into_owned());
-        settings.prev_custom_dir.clone_from(&settings.custom_dir);
-        settings.update(pool).await?;
-        if let Some(previous) = &previous
+        pool.close().await;
+        commit(destination).await?;
+        if let Some(previous) = previous
             && moving
         {
+            let pool = super::db::open(destination).await?;
             move_app_directory::finish_app_directory_move(
                 previous,
-                &destination,
-                pool,
+                destination,
+                &pool,
             )
             .await?;
+            pool.close().await;
         }
         drop(move_locks);
         Ok(())

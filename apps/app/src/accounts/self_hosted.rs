@@ -196,7 +196,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let (pool, sessions) = (engine.pool(), &engine.sessions);
+        let (pool, sessions) = (crate::db::pool(&engine), &engine.sessions);
         credentials().upsert(pool).await.unwrap();
         sqlx::query("INSERT INTO app_metadata(key,value,updated_at) VALUES ('account_origin','https://another-service.example/',unixepoch())")
             .execute(pool).await.unwrap();

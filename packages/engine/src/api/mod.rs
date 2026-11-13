@@ -43,7 +43,10 @@ pub mod prelude {
         data::*,
         event::CommandPayload,
         install, instance, jre, metadata, pack, process, settings,
-        state::{ReleaseChannel, db_backup::app_db_backup_dir},
+        state::{
+            ReleaseChannel,
+            db_backup::{app_db_backup_dir, maybe_backup_existing_app_db},
+        },
         util::{
             io::{IOError, canonicalize},
             network::{is_network_metered, tcp_listen_any_loopback},

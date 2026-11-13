@@ -25,7 +25,6 @@ pub struct ContentStore {
     pub(crate) files_lock: Mutex<()>,
     pub(super) verified_files: VerifiedFiles,
     _process_lock: File,
-    _content_process_lock: Option<File>,
 }
 
 impl ContentStore {
@@ -59,13 +58,6 @@ impl ContentStore {
         fs::create_dir_all(dirs.content_store_dir()).await?;
         fs::create_dir_all(dirs.store_staging_dir()).await?;
         fs::create_dir_all(dirs.instances_dir()).await?;
-        let settings_root = fs::canonicalize(&dirs.settings_dir).await?;
-        let content_root = fs::canonicalize(&dirs.config_dir).await?;
-        let content_process_lock = if settings_root != content_root {
-            Some(Self::lock_process(&content_root).await?)
-        } else {
-            None
-        };
         Ok(Self {
             root: fs::canonicalize(dirs.content_store_dir()).await?,
             staging: fs::canonicalize(dirs.store_staging_dir()).await?,
@@ -78,7 +70,6 @@ impl ContentStore {
             files_lock: Mutex::new(()),
             verified_files: VerifiedFiles::default(),
             _process_lock: process_lock,
-            _content_process_lock: content_process_lock,
         })
     }
 

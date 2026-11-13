@@ -5,35 +5,58 @@ use sqlx::{Pool, Sqlite};
 use std::path::Path;
 use std::time::Duration;
 
-pub(crate) async fn open(db_path: &Path) -> crate::Result<Pool<Sqlite>> {
-    if let Some(dir) = db_path.parent() {
-        crate::util::io::create_dir_all(dir).await?;
-    }
+/// The engine's database, in its data directory.
+pub const DB_FILE: &str = "engine.db";
 
-    open_migrated_app_db(db_path).await
-}
+/// Every table of engine.db. A host keeps its own tables in its own database.
+pub const TABLES: &[&str] = &[
+    "_sqlx_migrations",
+    "app_metadata",
+    "attached_world_data",
+    "cache",
+    "install_job_requests",
+    "install_jobs",
+    "instance_content_entries",
+    "instance_content_locks",
+    "instance_content_set_remote_refs",
+    "instance_content_set_sync_state",
+    "instance_content_sets",
+    "instance_content_update_checks",
+    "instance_files",
+    "instance_group_memberships",
+    "instance_groups",
+    "instance_icon_configs",
+    "instance_launch_overrides",
+    "instance_links",
+    "instance_quarantines",
+    "instances",
+    "java_versions",
+    "join_log",
+    "processes",
+    "share_history",
+    "shared_instance_applied_files",
+    "store_blobs",
+    "store_instance_files",
+    "store_operations",
+    "store_retained_refs",
+];
 
-pub(crate) async fn connect_app_db(
-    db_path: &Path,
-) -> crate::Result<Pool<Sqlite>> {
-    if let Err(err) =
-        super::db_backup::maybe_backup_existing_app_db(db_path).await
-    {
-        tracing::warn!(
-            "Continuing without a pre-migration app database backup: {err}"
-        );
-    }
-    open(db_path).await
-}
+/// Opens and migrates `data_dir`'s engine.db.
+pub(crate) async fn open(data_dir: &Path) -> crate::Result<Pool<Sqlite>> {
+    crate::util::io::create_dir_all(data_dir).await?;
+    let conn_options = SqliteConnectOptions::new()
+        .filename(data_dir.join(DB_FILE))
+        .busy_timeout(Duration::from_secs(30))
+        .journal_mode(SqliteJournalMode::Wal)
+        .optimize_on_close(true, None)
+        .create_if_missing(true);
 
-async fn open_migrated_app_db(db_path: &Path) -> crate::Result<Pool<Sqlite>> {
-    let pool = open_app_db_pool(db_path).await?;
-
-    if let Err(err) = stale_data_cleanup(&pool).await {
-        tracing::warn!(
-            "Failed to clean up stale data from state database before migrations: {err}"
-        );
-    }
+    let pool = SqlitePoolOptions::new()
+        .max_connections(10)
+        .min_connections(1)
+        .idle_timeout(Duration::from_secs(120))
+        .connect_with(conn_options)
+        .await?;
 
     sqlx::migrate!().run(&pool).await?;
     // The share history table is sharing-client's, the same as Core's.
@@ -41,98 +64,50 @@ async fn open_migrated_app_db(db_path: &Path) -> crate::Result<Pool<Sqlite>> {
         .execute(&pool)
         .await?;
 
-    if let Err(err) = stale_data_cleanup(&pool).await {
-        tracing::warn!(
-            "Failed to clean up stale data from state database: {err}"
-        );
-    }
-
     Ok(pool)
 }
 
-async fn open_app_db_pool(db_path: &Path) -> crate::Result<Pool<Sqlite>> {
-    let conn_options = SqliteConnectOptions::new()
-        .filename(db_path)
-        .busy_timeout(Duration::from_secs(30))
-        .journal_mode(SqliteJournalMode::Wal)
-        .optimize_on_close(true, None)
-        .create_if_missing(true);
-
-    Ok(SqlitePoolOptions::new()
-        .max_connections(10)
-        .min_connections(1)
-        .idle_timeout(Duration::from_secs(120))
-        .connect_with(conn_options)
-        .await?)
+/// Replaces `data_dir`'s engine.db with a copy of `pool`'s.
+pub(crate) async fn copy(
+    pool: &Pool<Sqlite>,
+    data_dir: &Path,
+) -> crate::Result<()> {
+    let copy = data_dir.join(format!("{DB_FILE}.{}.tmp", uuid::Uuid::new_v4()));
+    super::db_backup::create_sqlite_snapshot(
+        &mut *pool.acquire().await?,
+        &copy,
+    )
+    .await?;
+    remove(data_dir).await?;
+    crate::util::io::rename_or_move(&copy, &data_dir.join(DB_FILE)).await?;
+    Ok(())
 }
 
-pub(crate) async fn record_current_app_version(
-    pool: &Pool<Sqlite>,
-) -> crate::Result<()> {
-    let previous_version = sqlx::query_scalar!(
-        "SELECT value FROM app_metadata WHERE key = 'app_version'"
-    )
-    .fetch_optional(pool)
-    .await?;
-    let already_used_sync_update = previous_version
-        .as_deref()
-        .and_then(|version| {
-            let mut parts = version.split('.');
-            Some((
-                parts.next()?.parse::<u64>().ok()?,
-                parts.next()?.parse::<u64>().ok()?,
-            ))
-        })
-        .is_some_and(|version| version >= (0, 20));
-
-    if env!("CARGO_PKG_VERSION").starts_with("0.20.")
-        && already_used_sync_update
-    {
-        let mut settings = super::Settings::get(pool).await?;
-        if settings.pending_update_toast_for_version.is_some() {
-            settings.pending_update_toast_for_version = None;
-            settings.update(pool).await?;
+/// Deletes `data_dir`'s engine.db, which must be closed.
+pub(crate) async fn remove(data_dir: &Path) -> crate::Result<()> {
+    for file in [DB_FILE, "engine.db-wal", "engine.db-shm"] {
+        match tokio::fs::remove_file(data_dir.join(file)).await {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                return Err(error.into());
+            }
+            _ => {}
         }
     }
-
-    sqlx::query!(
-        "
-		INSERT INTO app_metadata (key, value, updated_at)
-		VALUES ('app_version', ?, unixepoch())
-		ON CONFLICT(key) DO UPDATE SET
-			value = excluded.value,
-			updated_at = excluded.updated_at
-		",
-        env!("CARGO_PKG_VERSION"),
-    )
-    .execute(pool)
-    .await?;
-
     Ok(())
 }
 
-/// Cleans up data from the database that is no longer referenced, but must be
-/// kept around for a little while to allow users to recover from accidental
-/// deletions.
-async fn stale_data_cleanup(pool: &Pool<Sqlite>) -> crate::Result<()> {
-    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
-
-    let has_skin_tables = sqlx::query!(
-		"SELECT COUNT(*) AS \"count!: i64\" FROM sqlite_master WHERE type = 'table' AND name IN ('custom_minecraft_skins', 'minecraft_users')",
-	)
-	.fetch_one(&mut *tx)
-	.await?
-	.count == 2;
-
-    if has_skin_tables {
-        sqlx::query!(
-			"DELETE FROM custom_minecraft_skins WHERE minecraft_user_uuid NOT IN (SELECT uuid FROM minecraft_users)"
-		)
-		.execute(&mut *tx)
-		.await?;
+#[cfg(test)]
+mod tests {
+    #[tokio::test]
+    async fn engine_db_holds_only_engine_tables() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = super::open(dir.path()).await.unwrap();
+        let tables: Vec<String> = sqlx::query_scalar(
+            "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(tables, super::TABLES);
     }
-
-    tx.commit().await?;
-
-    Ok(())
 }

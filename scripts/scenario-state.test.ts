@@ -13,15 +13,19 @@ it('isolates a copied scenario database without modifying its primary source or 
 	mkdirSync(source, { recursive: true })
 	mkdirSync(target, { recursive: true })
 	try {
-		const original = new DatabaseSync(path.join(source, 'app.db'))
+		const originalApp = new DatabaseSync(path.join(source, 'app.db'))
+		originalApp.exec(
+			'CREATE TABLE settings(id INTEGER PRIMARY KEY,custom_dir TEXT,prev_custom_dir TEXT)',
+		)
+		originalApp.prepare('INSERT INTO settings VALUES(0,?,?)').run(source, source)
+		originalApp.close()
+		const original = new DatabaseSync(path.join(source, 'engine.db'))
 		original.exec(`
-			CREATE TABLE settings(id INTEGER PRIMARY KEY,custom_dir TEXT,prev_custom_dir TEXT);
 			CREATE TABLE instances(id TEXT,path TEXT,icon_path TEXT);
 			CREATE TABLE java_versions(path TEXT);
 			CREATE TABLE instance_launch_overrides(overrides BLOB);
 			CREATE TABLE processes(pid INTEGER);
 		`)
-		original.prepare('INSERT INTO settings VALUES(0,?,?)').run(source, source)
 		original
 			.prepare('INSERT INTO instances VALUES(?,?,?)')
 			.run('test', 'My instance', path.join(source, 'caches', 'icon.png'))
@@ -36,7 +40,8 @@ it('isolates a copied scenario database without modifying its primary source or 
 		)
 		original.exec('INSERT INTO processes VALUES(123)')
 		original.close()
-		copyFileSync(path.join(source, 'app.db'), path.join(target, 'app.db'))
+		for (const file of ['app.db', 'engine.db'])
+			copyFileSync(path.join(source, file), path.join(target, file))
 		expect(() =>
 			normalizeScenarioDatabase(worktree, target, [
 				`theseus_gui --amberite-dev-config ${JSON.stringify({ dataDir: target })}`,
@@ -48,12 +53,17 @@ it('isolates a copied scenario database without modifying its primary source or 
 		normalizeScenarioDatabase(worktree, target, [
 			`theseus_gui --amberite-dev-config ${JSON.stringify({ dataDir: `${target}0` })}`,
 		])
-		const copied = new DatabaseSync(path.join(target, 'app.db'), { readOnly: true })
+		const copiedApp = new DatabaseSync(path.join(target, 'app.db'), { readOnly: true })
 		try {
-			expect(copied.prepare('SELECT custom_dir,prev_custom_dir FROM settings').get()).toEqual({
+			expect(copiedApp.prepare('SELECT custom_dir,prev_custom_dir FROM settings').get()).toEqual({
 				custom_dir: target,
 				prev_custom_dir: target,
 			})
+		} finally {
+			copiedApp.close()
+		}
+		const copied = new DatabaseSync(path.join(target, 'engine.db'), { readOnly: true })
+		try {
 			expect(copied.prepare('SELECT path,icon_path FROM instances').get()).toEqual({
 				path: 'My instance',
 				icon_path: path.join(target, 'caches', 'icon.png'),

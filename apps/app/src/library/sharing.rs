@@ -46,7 +46,14 @@ async fn get_cached_shared_library(
     State(engine): State<Arc<Engine>>,
     _: Req<GetCachedSharedLibrary>,
 ) -> Result<Json<Vec<CachedSharedInstanceSummary>>, ApiError> {
-    engine::instance::get_cached_shared_instance_library(&engine)
+    let Some(user_id) =
+        crate::accounts::active_modrinth_user_id(crate::db::pool(&engine))
+            .await
+            .map_err(api_error)?
+    else {
+        return Ok(Json(Vec::new()));
+    };
+    engine::instance::get_cached_shared_instance_library(&engine, &user_id)
         .await
         .map(Json)
         .map_err(api_error)
@@ -56,7 +63,14 @@ async fn set_cached_shared_library(
     State(engine): State<Arc<Engine>>,
     Req { body, .. }: Req<SetCachedSharedLibrary>,
 ) -> Result<Empty, ApiError> {
-    engine::instance::cache_shared_instance_library(&engine, body)
+    let Some(user_id) =
+        crate::accounts::active_modrinth_user_id(crate::db::pool(&engine))
+            .await
+            .map_err(api_error)?
+    else {
+        return Ok(Empty);
+    };
+    engine::instance::cache_shared_instance_library(&engine, &user_id, body)
         .await
         .map(|()| Empty)
         .map_err(api_error)

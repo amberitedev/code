@@ -8,6 +8,7 @@ use super::orchestration::{
     backup_bytes, create_synced_directories, option_effective,
     seed_from_instance, synced_options_path,
 };
+use crate::synced_options::state::SyncedInstance;
 use engine::state::{InstanceMetadata, SyncedOption};
 use engine::util::io;
 use engine::{Engine, ErrorKind};
@@ -114,7 +115,7 @@ pub(super) async fn ensure_hotbar(
 }
 
 pub(super) async fn reconcile_hotbar(
-    metadata: &InstanceMetadata,
+    metadata: &SyncedInstance,
     state: &Engine,
 ) -> engine::Result<()> {
     if !option_effective(metadata, SyncedOption::CreativeHotbars, state).await?
@@ -417,7 +418,7 @@ fn family_data_versions_key(family: HotbarFamily) -> &'static str {
 }
 
 pub(super) async fn regenerate_hotbars(state: &Engine) -> engine::Result<()> {
-    let instances = engine::state::list_instances(state.pool()).await?;
+    let instances = crate::synced_options::state::list_instances(state).await?;
     for metadata in instances {
         if option_effective(&metadata, SyncedOption::CreativeHotbars, state)
             .await?
@@ -481,7 +482,7 @@ async fn remove_other_hotbar_checkpoint(
         instance_id,
         variant,
     )
-    .execute(state.pool())
+    .execute(crate::db::pool(state))
     .await?;
     Ok(())
 }
@@ -509,7 +510,7 @@ pub(super) async fn read_hotbar_state(
 		WHERE singleton = 1
         "#,
     )
-    .fetch_optional(state.pool())
+    .fetch_optional(crate::db::pool(state))
     .await?;
     if let Some(row) = row {
         return Ok(HotbarState {
@@ -535,7 +536,7 @@ pub(super) async fn hotbar_state_exists(
 		) AS "exists!: bool"
 		"#,
     )
-    .fetch_one(state.pool())
+    .fetch_one(crate::db::pool(state))
     .await?)
 }
 
@@ -582,7 +583,7 @@ pub(super) async fn write_hotbar_state(
         hotbar_state.revision,
         bytes,
     )
-    .execute(state.pool())
+    .execute(crate::db::pool(state))
     .await?;
     Ok(())
 }

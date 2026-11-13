@@ -19,9 +19,10 @@ pub async fn capture_modpack_server_override(
     source_path: Option<&str>,
 ) -> engine::Result<()> {
     let _guard = crate::hooks::synced_options(state).lock().await;
-    let metadata = engine::state::get_instance(instance_id, state.pool())
-        .await?
-        .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
+    let metadata =
+        crate::synced_options::state::get_instance(state, instance_id)
+            .await?
+            .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
     let servers = if let Some(source_path) = source_path {
         let path = instance_dir(&metadata, state).join(source_path);
         read_servers(&path).await?
@@ -43,9 +44,10 @@ pub async fn discard_modpack_servers(
     state: &Engine,
 ) -> engine::Result<()> {
     let _guard = crate::hooks::synced_options(state).lock().await;
-    let metadata = engine::state::get_instance(instance_id, state.pool())
-        .await?
-        .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
+    let metadata =
+        crate::synced_options::state::get_instance(state, instance_id)
+            .await?
+            .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
     discard_modpack_servers_for_instance(&metadata, state).await?;
     if effective(&metadata, state).await? {
         compose_instance(&metadata, state).await?;
@@ -106,7 +108,7 @@ async fn replace_modpack_servers(
         server.position = local.len() as i64;
         local.push(server.clone());
     }
-    let mut tx = state.pool().begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = crate::db::pool(state).begin_with("BEGIN IMMEDIATE").await?;
     write_local_rows(&mut tx, &metadata.instance.id, &local).await?;
     let version_id = modpack_version_id(&metadata.link);
     sqlx::query!(
@@ -137,7 +139,7 @@ pub(super) async fn pack_state_matches_link(
 		",
         metadata.instance.id,
     )
-    .fetch_optional(state.pool())
+    .fetch_optional(crate::db::pool(state))
     .await?;
     Ok(row.is_some_and(|row| {
         row.version_id.as_deref() == modpack_version_id(&metadata.link)
@@ -156,7 +158,7 @@ pub(super) async fn pack_state_exists(
 		"#,
         instance_id,
     )
-    .fetch_one(state.pool())
+    .fetch_one(crate::db::pool(state))
     .await?)
 }
 

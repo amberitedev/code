@@ -40,7 +40,7 @@ async fn list_recent_icon_configs(
     State(engine): State<Arc<Engine>>,
     _: Req<ListRecentIconConfigs>,
 ) -> Result<Json<RecentIconConfigs>, ApiError> {
-    engine::instance::get_recent_icon_configs(&engine)
+    super::recent_icons::list(crate::db::pool(&engine))
         .await
         .map(|configs| Json(RecentIconConfigs(configs)))
         .map_err(engine::routes::api_error)
@@ -80,15 +80,19 @@ async fn cache_generated_icon(
     State(engine): State<Arc<Engine>>,
     Req { body, .. }: Req<CacheGeneratedIcon>,
 ) -> Result<Json<String>, ApiError> {
-    engine::instance::cache_generated_icon(
+    let icon = engine::instance::cache_generated_icon(
         &engine,
-        body.config,
+        body.config.clone(),
         body.symbol_bytes,
-        body.add_to_recents,
     )
     .await
-    .map(Json)
-    .map_err(engine::routes::api_error)
+    .map_err(engine::routes::api_error)?;
+    if body.add_to_recents {
+        super::recent_icons::record(&body.config, crate::db::pool(&engine))
+            .await
+            .map_err(engine::routes::api_error)?;
+    }
+    Ok(Json(icon))
 }
 
 async fn set_generated_instance_icon(
@@ -100,7 +104,7 @@ async fn set_generated_instance_icon(
         engine::instance::edit_generated_icon_if_empty(
             &engine,
             id,
-            body.config,
+            body.config.clone(),
             body.symbol_bytes,
         )
         .await
@@ -108,11 +112,17 @@ async fn set_generated_instance_icon(
         engine::instance::edit_generated_icon(
             &engine,
             id,
-            body.config,
+            body.config.clone(),
             body.symbol_bytes,
         )
         .await
         .map(Some)
-    };
-    icon.map(Json).map_err(engine::routes::api_error)
+    }
+    .map_err(engine::routes::api_error)?;
+    if icon.is_some() {
+        super::recent_icons::record(&body.config, crate::db::pool(&engine))
+            .await
+            .map_err(engine::routes::api_error)?;
+    }
+    Ok(Json(icon))
 }

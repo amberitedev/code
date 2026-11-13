@@ -104,6 +104,7 @@
 		"apps/labrinth/src/routes/v3/notifications.rs": "apps/backend/src/social/index.ts",
 		"apps/labrinth/src/routes/v3/users.rs": "apps/backend/src/social/index.ts",
 		"apps/labrinth/src/sync/friends.rs": "apps/backend/src/social/socket.ts",
+		"packages/app-lib/migrations": "packages/engine/migrations/20261113120000_init.sql",
 		"packages/app-lib/src/api/friends.rs": "apps/app/src/friends/api.rs",
 		"packages/app-lib/src/api/handler.rs": "apps/app/src/desktop/deep_links.rs",
 		"packages/app-lib/src/api/instance/hidden.rs": "apps/app/src/library/hidden.rs",

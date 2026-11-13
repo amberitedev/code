@@ -6,6 +6,7 @@ use super::write_shared_settings::{
     apply_shared_settings_to_instance, capture_instance_options,
     sync_is_active_for_instance,
 };
+use crate::synced_options::state::SyncedInstance;
 use anyhow::bail;
 use encoding_rs::{UTF_8, UTF_16BE, UTF_16LE};
 use engine::GameOptionsPackSource;
@@ -196,7 +197,7 @@ pub(in crate::synced_options) async fn detach_instance(
         metadata.instance.id,
         feature,
     )
-    .execute(state.pool())
+    .execute(crate::db::pool(state))
     .await?;
     Ok(())
 }
@@ -204,14 +205,14 @@ pub(in crate::synced_options) async fn detach_instance(
 /// Before replacing modpack files, saves `options.txt` and shares any settings the
 /// player changed in Minecraft.
 pub(in crate::synced_options) async fn prepare_instance_update_with_state(
-    metadata: &InstanceMetadata,
+    metadata: &SyncedInstance,
     state: &Engine,
 ) -> engine::Result<()> {
     sqlx::query!(
         "DELETE FROM instance_game_option_update_state WHERE instance_id = ?",
         metadata.instance.id,
     )
-    .execute(state.pool())
+    .execute(crate::db::pool(state))
     .await?;
     if sync_is_active_for_instance(metadata, state).await? {
         let _ = capture_instance_options(metadata, state, true).await?;
@@ -252,7 +253,7 @@ pub(in crate::synced_options) async fn prepare_instance_update_with_state(
         sha1,
         bytes,
     )
-    .execute(state.pool())
+    .execute(crate::db::pool(state))
     .await?;
     Ok(())
 }
@@ -265,11 +266,12 @@ pub async fn capture_pack_base(
     source: Option<GameOptionsPackSource>,
 ) -> engine::Result<()> {
     let _guard = crate::hooks::synced_options(state).lock().await;
-    let metadata = engine::state::get_instance(instance_id, state.pool())
-        .await?
-        .ok_or(engine::ErrorKind::InputError(
-            "unknown instance".to_string(),
-        ))?;
+    let metadata =
+        crate::synced_options::state::get_instance(state, instance_id)
+            .await?
+            .ok_or(engine::ErrorKind::InputError(
+                "unknown instance".to_string(),
+            ))?;
     let path = options_path(&metadata, state);
     let feature = SyncedOption::GameOptions.as_str();
     sqlx::query!(
@@ -280,7 +282,7 @@ pub async fn capture_pack_base(
         instance_id,
         feature,
     )
-    .execute(state.pool())
+    .execute(crate::db::pool(state))
     .await?;
 
     if source.is_none() {
@@ -292,7 +294,7 @@ pub async fn capture_pack_base(
 			"#,
             instance_id,
         )
-        .fetch_optional(state.pool())
+        .fetch_optional(crate::db::pool(state))
         .await?;
         if let Some(pending) = pending {
             if pending.had_file {
@@ -354,13 +356,13 @@ pub async fn capture_pack_base(
         encoding,
         document_bytes,
     )
-    .execute(state.pool())
+    .execute(crate::db::pool(state))
     .await?;
     sqlx::query!(
         "DELETE FROM instance_game_option_update_state WHERE instance_id = ?",
         instance_id,
     )
-    .execute(state.pool())
+    .execute(crate::db::pool(state))
     .await?;
 
     if sync_is_active_for_instance(&metadata, state).await?

@@ -36,3 +36,44 @@ pub fn api_error(error: engine::Error) -> ApiError {
     .unwrap_or(ErrorCode::Unknown);
     ApiError::new(code, format!("{error:#}"))
 }
+
+/// The signed-in Modrinth user.
+pub async fn active_modrinth_user_id(
+    pool: &sqlx::SqlitePool,
+) -> engine::Result<Option<String>> {
+    Ok(
+        sqlx::query_scalar("SELECT id FROM modrinth_users WHERE active = TRUE")
+            .fetch_optional(pool)
+            .await?,
+    )
+}
+
+/// The saved accounts that game logs and support details hide: every Minecraft account, and the
+/// Modrinth sessions saved for this engine's account service.
+pub async fn saved_secrets(
+    pool: &sqlx::SqlitePool,
+    sessions: &engine::Sessions,
+) -> engine::Result<engine::SavedSecrets> {
+    let modrinth_sessions = sqlx::query_scalar(
+        "SELECT users.session_id FROM modrinth_users users JOIN self_hosted_account_origins origins ON origins.user_id = users.id WHERE origins.origin = ? ORDER BY users.rowid",
+    )
+    .bind(engine::self_hosted::accounts::origin(sessions))
+    .fetch_all(pool)
+    .await?;
+    let minecraft: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT uuid, username, access_token FROM minecraft_users",
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(engine::SavedSecrets {
+        minecraft: minecraft
+            .into_iter()
+            .map(|(id, name, access_token)| engine::SavedMinecraftAccount {
+                access_token,
+                name,
+                id: uuid::Uuid::parse_str(&id).unwrap_or_default(),
+            })
+            .collect(),
+        modrinth_sessions,
+    })
+}

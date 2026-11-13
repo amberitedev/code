@@ -13,6 +13,7 @@ mod accounts;
 mod api;
 mod cores;
 mod data_dir;
+mod db;
 mod desktop;
 mod dev;
 mod discord;
@@ -52,8 +53,11 @@ async fn start_engine(
         )
         .await?;
         let state = Engine::new(config).await?;
-        accounts::self_hosted::bind_origin(state.pool(), &state.sessions)
-            .await?;
+        accounts::self_hosted::bind_origin(
+            crate::db::pool(&state),
+            &state.sessions,
+        )
+        .await?;
         reactions::start(&state, Arc::clone(&presence), app.clone(), reacting);
         #[cfg(debug_assertions)]
         dev::sign_in(&state, &presence).await;

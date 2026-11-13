@@ -117,11 +117,6 @@ pub(crate) async fn create_instance(
 
         let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await?;
         instance_rows::insert_instance(&instance, &mut tx).await?;
-        instance_rows::insert_default_instance_sync_preferences(
-            &instance_id,
-            &mut tx,
-        )
-        .await?;
         if let Some(icon_config) = &input.icon_config {
             instance_rows::update_instance_icon_config(
                 &instance_id,

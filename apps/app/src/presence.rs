@@ -27,10 +27,11 @@ pub async fn start_presence(engine: Arc<Engine>, presence: Arc<Presence>) {
     let res = tokio::try_join!(
         presence.discord_rpc.clear_to_default(
             true,
-            engine.pool(),
+            crate::db::pool(&engine),
             &engine.process_manager,
         ),
         ModrinthCredentials::refresh_all(
+            crate::db::pool(&engine),
             engine.pool(),
             &engine.fetch_semaphore,
             &engine.sessions,
@@ -44,7 +45,7 @@ pub async fn start_presence(engine: Arc<Engine>, presence: Arc<Presence>) {
     let _ = presence
         .friends_socket
         .connect(
-            engine.pool(),
+            crate::db::pool(&engine),
             &engine.api_semaphore,
             &engine.sessions,
             &engine.process_manager,
@@ -58,7 +59,11 @@ pub async fn start_presence(engine: Arc<Engine>, presence: Arc<Presence>) {
 pub async fn show_presence(engine: &Engine, presence: &Presence) {
     let _ = presence
         .discord_rpc
-        .clear_to_default(true, engine.pool(), &engine.process_manager)
+        .clear_to_default(
+            true,
+            crate::db::pool(engine),
+            &engine.process_manager,
+        )
         .await;
     let playing = engine
         .process_manager

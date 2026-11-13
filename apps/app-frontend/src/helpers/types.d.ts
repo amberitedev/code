@@ -1,12 +1,17 @@
 import type {
 	GameInstance as InstanceResponse,
 	InstanceLink as InstanceLinkResponse,
+	InstanceSyncedOptions,
 } from '@modrinth/api-client'
 import type { ModrinthId } from '@modrinth/utils'
 
 export type { ContentFile, SharedInstanceAttachment } from '@modrinth/api-client'
 
-export type GameInstance = Omit<InstanceResponse, 'link'> & { link: InstanceLink | null }
+/** The engine's instance with the options it shares, which the App keeps. */
+export type GameInstance = Omit<InstanceResponse, 'link'> & {
+	link: InstanceLink | null
+	synced_options: InstanceSyncedOptions
+}
 
 /** Every variant's ids, readable without narrowing. */
 type InstanceLinkIdentity = {

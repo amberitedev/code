@@ -8,12 +8,14 @@ import {
 	type ContentItem as ContentItemResponse,
 	ContractClient,
 	desktop,
+	type GameInstance as InstanceResponse,
 	type GlobalSyncedOptions,
 	type IconConfig,
 	instanceContent,
 	instancePaths,
 	instances,
 	instanceSharing,
+	type InstanceSyncedOptions,
 	type Labrinth,
 	launch,
 	library,
@@ -62,14 +64,42 @@ export async function remove(instanceId: string): Promise<void> {
 	return await apiClient.local.call(instances.RemoveInstance, { params: { id: instanceId } })
 }
 
+const NOT_SYNCED: InstanceSyncedOptions = {
+	game_options: false,
+	command_history: false,
+	multiplayer_servers: false,
+	creative_hotbars: false,
+	screenshots: false,
+	resource_packs: false,
+	data_packs: false,
+}
+
+async function withSyncedOptions(read: Promise<InstanceResponse[]>): Promise<GameInstance[]> {
+	const [found, synced] = await Promise.all([
+		read,
+		apiClient.local.call(syncedOptions.listInstancesSyncedOptions),
+	])
+	return found.map((instance) => ({
+		...instance,
+		synced_options: synced[instance.id] ?? NOT_SYNCED,
+	}))
+}
+
 export async function get(instanceId: string): Promise<GameInstance | null> {
-	return await apiClient.local.call(instances.GetInstance, { params: { id: instanceId } })
+	const [instance] = await withSyncedOptions(
+		apiClient.local
+			.call(instances.GetInstance, { params: { id: instanceId } })
+			.then((instance) => (instance ? [instance] : [])),
+	)
+	return instance ?? null
 }
 
 export async function get_many(instanceIds: string[]): Promise<GameInstance[]> {
-	return await apiClient.local.call(instances.GetInstances, {
-		query: { ids: JSON.stringify(instanceIds) },
-	})
+	return await withSyncedOptions(
+		apiClient.local.call(instances.GetInstances, {
+			query: { ids: JSON.stringify(instanceIds) },
+		}),
+	)
 }
 
 export async function get_projects(
@@ -435,7 +465,7 @@ export async function get_optimal_jre_key(instanceId: string): Promise<JavaVersi
 }
 
 export async function list(): Promise<GameInstance[]> {
-	return await apiClient.local.call(instances.ListInstances)
+	return await withSyncedOptions(apiClient.local.call(instances.ListInstances))
 }
 
 export async function check_installed(instanceId: string, projectId: string): Promise<boolean> {
