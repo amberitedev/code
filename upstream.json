@@ -65,6 +65,8 @@
 		"packages/app-lib": "packages/engine"
 	},
 	"ported": {
+		"apps/app/src/api/friends.rs": "apps/app/src/friends/routes.rs",
+		"apps/app/src/api/minecraft_skins.rs": "apps/app/src/skins/routes.rs",
 		"apps/app/src/api/reports.rs": "apps/app-frontend/src/helpers/reports.ts",
 		"apps/app/src/api/users.rs": "apps/app-frontend/src/helpers/users.ts",
 		"apps/labrinth/src/database/models/blocked_user_item.rs": "apps/backend/src/social/index.ts",

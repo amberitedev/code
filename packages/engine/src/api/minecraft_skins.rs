@@ -206,6 +206,7 @@ impl PendingSkinChange {
 }
 
 #[derive(Clone, Deserialize, Serialize, Debug)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct Cape {
     /// An identifier for this cape, potentially unique to the owning player.
     pub id: Uuid,
@@ -219,19 +220,23 @@ pub struct Cape {
 }
 
 #[derive(Clone, Deserialize, Serialize, Debug)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct Skin {
     /// A key used to recognize this skin texture.
     pub texture_key: Arc<str>,
     /// The name of the skin, if available.
+    #[cfg_attr(feature = "export-ts", ts(optional = nullable))]
     pub name: Option<Arc<str>>,
     /// The section this skin should be grouped under, if available.
     #[serde(default)]
+    #[cfg_attr(feature = "export-ts", ts(optional = nullable))]
     pub section: Option<Arc<str>>,
     /// The variant of the skin model.
     pub variant: MinecraftSkinVariant,
     /// The UUID of the cape that this skin uses, if any.
     ///
     /// If `None`, this skin uses no cape.
+    #[cfg_attr(feature = "export-ts", ts(optional = nullable))]
     pub cape_id: Option<Uuid>,
     /// The URL of the skin PNG texture. Can also be a data URL.
     pub texture: Arc<Url>,
@@ -243,6 +248,7 @@ pub struct Skin {
 }
 
 #[derive(Clone, Deserialize, Serialize, Debug)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum SkinSource {
     /// A default Minecraft skin, which may be assigned to players at random by default.
@@ -255,6 +261,7 @@ pub enum SkinSource {
 
 /// Represents either a URL or a blob for a Minecraft skin PNG texture.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(untagged)]
 pub enum UrlOrBlob {
     Url(Url),

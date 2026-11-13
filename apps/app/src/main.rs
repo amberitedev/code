@@ -18,9 +18,11 @@ mod cores;
 mod desktop;
 mod dev;
 mod engine_handle;
+mod friends;
 mod library;
 mod screenshots;
 mod server;
+mod skins;
 mod synced_options;
 
 #[cfg(target_os = "macos")]
@@ -366,14 +368,12 @@ fn main() {
         .plugin(api::logs::init())
         .plugin(api::jre::init())
         .plugin(api::metadata::init())
-        .plugin(api::minecraft_skins::init())
         .plugin(api::process::init())
         .plugin(api::settings::init())
         .plugin(api::tags::init())
         .plugin(api::utils::init())
         .plugin(api::cache::init())
         .plugin(api::files::init())
-        .plugin(api::friends::init())
         .plugin(api::worlds::init())
         .manage(PendingUpdateData::default())
         .manage(RestartAfterPendingUpdate::default())

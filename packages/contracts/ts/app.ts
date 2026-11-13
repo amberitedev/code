@@ -1,7 +1,7 @@
 // Generated from apps/app by ts-rs. Do not edit.
 // Regenerate: cargo test -p theseus_gui -- --ignored write_ts
 
-import type { CoreSession, Endpoint, SharedIconConfig } from './contracts'
+import type { CoreSession, Endpoint, SharedIconConfig, UserFriend, UserStatus } from './contracts'
 import type { CommandPayload, EngineEvent, FriendPayload, InstanceGroupsChangedPayload, OnboardingChecklist } from './engine'
 
 export type Boot = { version: string, platform: Platform, os_version: string, 
@@ -190,6 +190,74 @@ export type ScreenshotGroupMembershipUpdate = { screenshot_id: string, group_id?
 
 export type ScreenshotGroupImport = { id: string, name: string, screenshot_ids: Array<string>, };
 
+export type Cape = { 
+/**
+ * An identifier for this cape, potentially unique to the owning player.
+ */
+id: string, 
+/**
+ * The name of the cape.
+ */
+name: string, 
+/**
+ * The URL of the cape PNG texture.
+ */
+texture: string, 
+/**
+ * Whether the cape is currently equipped in the Minecraft profile of its corresponding
+ * player.
+ */
+is_equipped: boolean, };
+
+export type Skin = { 
+/**
+ * A key used to recognize this skin texture.
+ */
+texture_key: string, 
+/**
+ * The name of the skin, if available.
+ */
+name?: string | null, 
+/**
+ * The section this skin should be grouped under, if available.
+ */
+section?: string | null, 
+/**
+ * The variant of the skin model.
+ */
+variant: SkinModel, 
+/**
+ * The UUID of the cape that this skin uses, if any.
+ *
+ * If `None`, this skin uses no cape.
+ */
+cape_id?: string | null, 
+/**
+ * The URL of the skin PNG texture. Can also be a data URL.
+ */
+texture: string, 
+/**
+ * The source of the skin, which represents how the app knows about it.
+ */
+source: SkinSource, 
+/**
+ * Whether the skin is currently equipped in the Minecraft profile of its corresponding
+ * player.
+ */
+is_equipped: boolean, };
+
+export type SkinModel = "CLASSIC" | "SLIM" | "UNKNOWN";
+
+export type SkinSource = "default" | "custom_external" | "custom";
+
+export type NewCustomSkin = { texture_blob: Array<number>, variant: SkinModel, cape?: Cape | null, };
+
+export type CustomSkinSave = { skin: Skin, texture_blob: Array<number>, variant: SkinModel, cape?: Cape | null, replace_texture: boolean, };
+
+export type SkinFlushQuery = { profile_id?: string | null, };
+
+export type UrlOrBlob = string | Array<number>;
+
 export const health = {
 	checkHealth: { method: "GET", path: "/health", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
 }
@@ -283,4 +351,24 @@ export const screenshots = {
 	deleteScreenshotGroup: { method: "DELETE", path: "/app/screenshot-groups/{id}", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<IdParams, null, void, void>,
 	setScreenshotGroupMemberships: { method: "PUT", path: "/app/screenshot-groups/memberships", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, Array<ScreenshotGroupMembershipUpdate>, void>,
 	importScreenshotGroups: { method: "POST", path: "/app/screenshot-groups/import", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, Array<ScreenshotGroupImport>, void>,
+}
+
+export const friends = {
+	listFriends: { method: "GET", path: "/app/friends", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<UserFriend>>,
+	listFriendStatuses: { method: "GET", path: "/app/friend-statuses", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<UserStatus>>,
+	addFriend: { method: "POST", path: "/app/friends/{id}", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<IdParams, null, void, void>,
+	removeFriend: { method: "DELETE", path: "/app/friends/{id}", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<IdParams, null, void, void>,
+}
+
+export const skins = {
+	listCapes: { method: "GET", path: "/app/skins/capes", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<Cape>>,
+	listSkins: { method: "GET", path: "/app/skins", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<Skin>>,
+	saveCustomSkin: { method: "POST", path: "/app/skins", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, CustomSkinSave, Skin>,
+	removeCustomSkin: { method: "DELETE", path: "/app/skins", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, Skin, void>,
+	setCustomSkinOrder: { method: "PUT", path: "/app/skins/order", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, Array<string>, void>,
+	addAndEquipCustomSkin: { method: "POST", path: "/app/skins/equipped", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, NewCustomSkin, Skin>,
+	equipSkin: { method: "PUT", path: "/app/skins/equipped", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, Skin, void>,
+	unequipSkin: { method: "DELETE", path: "/app/skins/equipped", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
+	flushPendingSkinChange: { method: "POST", path: "/app/skins/flush", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<null, SkinFlushQuery, void, void>,
+	normalizeSkinTexture: { method: "POST", path: "/app/skins/normalize", auth: "none", dangerous: false, body: "json", response: "raw" } as Endpoint<null, null, UrlOrBlob, Blob>,
 }

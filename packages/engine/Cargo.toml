@@ -113,8 +113,10 @@ tracing = { workspace = true }
 tracing-error = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["chrono", "env-filter"] }
 ts-rs = { workspace = true, features = [
+  "bytes-impl",
   "chrono-impl",
   "no-serde-warnings",
+  "url-impl",
   "uuid-impl",
 ], optional = true }
 url = { workspace = true, features = ["serde"] }

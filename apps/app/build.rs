@@ -107,26 +107,6 @@ fn main() {
                     ),
             )
             .plugin(
-                "minecraft-skins",
-                InlinedPlugin::new()
-                    .commands(&[
-                        "get_available_capes",
-                        "get_available_skins",
-                        "add_and_equip_custom_skin",
-                        "equip_skin",
-                        "remove_custom_skin",
-                        "save_custom_skin",
-                        "set_custom_skin_order",
-                        "unequip_skin",
-                        "flush_pending_skin_change",
-                        "flush_pending_skin_change_for_profile",
-                        "normalize_skin_texture",
-                    ])
-                    .default_permission(
-                        DefaultPermissionRule::AllowAllCommands,
-                    ),
-            )
-            .plugin(
                 "mr-auth",
                 InlinedPlugin::new()
                     .commands(&[
@@ -325,19 +305,6 @@ fn main() {
                         "files_release_external",
                         "file_upload_local",
                         "file_cancel_local_upload",
-                    ])
-                    .default_permission(
-                        DefaultPermissionRule::AllowAllCommands,
-                    ),
-            )
-            .plugin(
-                "friends",
-                InlinedPlugin::new()
-                    .commands(&[
-                        "friends",
-                        "friend_statuses",
-                        "add_friend",
-                        "remove_friend",
                     ])
                     .default_permission(
                         DefaultPermissionRule::AllowAllCommands,

@@ -46,7 +46,6 @@
 		"jre:default",
 		"logs:default",
 		"metadata:default",
-		"minecraft-skins:default",
 		"mr-auth:default",
 		"onboarding-checklist:default",
 		"instance:default",
@@ -57,7 +56,6 @@
 		"settings:default",
 		"tags:default",
 		"utils:default",
-		"friends:default",
 		"worlds:default"
 	]
 }

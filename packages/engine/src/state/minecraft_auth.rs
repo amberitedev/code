@@ -1421,6 +1421,8 @@ async fn minecraft_token(
 #[derive(
     sqlx::Type, Deserialize, Serialize, Debug, Copy, Clone, PartialEq, Eq,
 )]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", ts(rename = "SkinModel"))]
 #[serde(rename_all = "UPPERCASE")]
 #[sqlx(rename_all = "UPPERCASE")]
 pub enum MinecraftSkinVariant {

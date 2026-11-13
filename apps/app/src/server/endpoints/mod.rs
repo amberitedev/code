@@ -45,10 +45,12 @@ pub mod cores;
 pub mod desktop;
 pub mod events;
 pub mod files;
+pub mod friends;
 pub mod game_options;
 pub mod health;
 pub mod library;
 pub mod screenshots;
+pub mod skins;
 pub mod synced_options;
 pub mod synced_packs;
 
@@ -83,6 +85,7 @@ mod tests {
             LocalFileQuery, ReadLocalFile, RemoteIcon, StatLocalFile,
             ThumbnailQuery,
         },
+        friends,
         game_options::{self, GameSettingLabelsRequest},
         health::CheckHealth,
         library::{ListRecentIconConfigs, RecentIconConfigs},
@@ -90,6 +93,7 @@ mod tests {
             self, NewScreenshotGroup, ScreenshotEdit, ScreenshotExport,
             ScreenshotFile, ScreenshotGroupUpdate, ScreenshotMove,
         },
+        skins::{self, CustomSkinSave, NewCustomSkin, SkinFlushQuery},
         synced_options::{
             self, CommandHistory, GlobalSyncedOptionUpdate,
             InstanceSyncedOptionUpdate, SyncedOptionQuery,
@@ -119,6 +123,9 @@ mod tests {
         SyncedOptionJoinAction, SyncedOptionJoinPreview,
         SyncedOptionJoinResolution, SyncedOptionsOverview, SyncedServer,
         UpdateGameSettingsRequest,
+    };
+    use engine::minecraft_skins::{
+        Cape, MinecraftSkinVariant, Skin, SkinSource, UrlOrBlob,
     };
     use engine::prelude::InstanceSyncedOption;
 
@@ -213,13 +220,21 @@ mod tests {
             ScreenshotGroupUpdate::decl(&cfg),
             ScreenshotGroupMembershipUpdate::decl(&cfg),
             ScreenshotGroupImport::decl(&cfg),
+            Cape::decl(&cfg),
+            Skin::decl(&cfg),
+            MinecraftSkinVariant::decl(&cfg),
+            SkinSource::decl(&cfg),
+            NewCustomSkin::decl(&cfg),
+            CustomSkinSave::decl(&cfg),
+            SkinFlushQuery::decl(&cfg),
+            UrlOrBlob::decl(&cfg),
         ]
         .map(|declaration| format!("\nexport {declaration}\n"))
         .concat();
         format!(
             "// Generated from apps/app by ts-rs. Do not edit.\n\
              // Regenerate: cargo test -p theseus_gui -- --ignored write_ts\n\n\
-             import type {{ CoreSession, Endpoint, SharedIconConfig }} from './contracts'\n\
+             import type {{ CoreSession, Endpoint, SharedIconConfig, UserFriend, UserStatus }} from './contracts'\n\
              import type {{ CommandPayload, EngineEvent, FriendPayload, InstanceGroupsChangedPayload, OnboardingChecklist }} from './engine'\n\
              {declarations}\n\
              export const health = {{\n\
@@ -261,7 +276,9 @@ mod tests {
              export const gameOptions = {{\n{}}}\n\n\
              export const syncedOptions = {{\n{}}}\n\n\
              export const syncedPacks = {{\n{}}}\n\n\
-             export const screenshots = {{\n{}}}\n",
+             export const screenshots = {{\n{}}}\n\n\
+             export const friends = {{\n{}}}\n\n\
+             export const skins = {{\n{}}}\n",
             endpoint::<CheckHealth>(),
             endpoint::<GetBoot>(),
             endpoint::<ConnectCore>(),
@@ -288,6 +305,8 @@ mod tests {
             synced_options::ts_entries(),
             synced_packs::ts_entries(),
             screenshots::ts_entries(),
+            friends::ts_entries(),
+            skins::ts_entries(),
         )
     }
 
