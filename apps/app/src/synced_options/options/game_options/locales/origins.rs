@@ -1,9 +1,9 @@
 use super::sources::{self, ArchiveSource, Snapshot};
 use super::{Observation, Origin, is_plain_label, mod_translation_key};
-use crate::ErrorKind;
-use crate::state::Engine;
-use crate::util::io;
 use anyhow::bail;
+use engine::ErrorKind;
+use engine::state::Engine;
+use engine::util::io;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
@@ -26,7 +26,7 @@ impl OriginResolver {
         state: &Engine,
         id: &str,
         snapshot: Snapshot,
-    ) -> crate::Result<()> {
+    ) -> engine::Result<()> {
         if self.snapshots.contains_key(id) {
             return Ok(());
         }
@@ -71,7 +71,7 @@ impl OriginResolver {
         &mut self,
         state: &Engine,
         observation: &Observation,
-    ) -> crate::Result<Option<Origin>> {
+    ) -> engine::Result<Option<Origin>> {
         let Some(key) = mod_translation_key(&observation.raw_key) else {
             return Ok(None);
         };
@@ -101,7 +101,7 @@ impl OriginResolver {
 async fn load_archive_keys(
     state: &Engine,
     source: &ArchiveSource,
-) -> crate::Result<ArchiveKeys> {
+) -> engine::Result<ArchiveKeys> {
     if !super::archive::valid_hash(&source.hash) {
         bail!(ErrorKind::InputError(
             "invalid locale archive hash".to_string()

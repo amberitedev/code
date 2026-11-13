@@ -27,63 +27,6 @@ pub async fn store_set_cache_limit(
     state.content_store.set_cache_limit(bytes).await
 }
 
-/// Gets entire settings
-#[tracing::instrument(skip(state))]
-pub async fn get(state: &Engine) -> crate::Result<Settings> {
-    let _guard = state.synced_options.lock().await;
-    let mut settings = Settings::get(&state.pool).await?;
-    if crate::state::game_options_sync_is_enabled(&state.pool).await?
-        && let Some(fullscreen) =
-            crate::api::instance::shared_fullscreen_value(state).await?
-        && settings.force_fullscreen != fullscreen
-    {
-        settings.force_fullscreen = fullscreen;
-        settings.update(&state.pool).await?;
-    }
-    Ok(settings)
-}
-
-/// Sets entire settings
-#[tracing::instrument(skip(state))]
-pub async fn set(state: &Engine, settings: Settings) -> crate::Result<()> {
-    let _guard = state.synced_options.lock().await;
-    let current_settings = Settings::get(&state.pool).await?;
-    let game_options_sync_enabled =
-        crate::state::game_options_sync_is_enabled(&state.pool).await?;
-    let current_fullscreen = if game_options_sync_enabled {
-        crate::api::instance::shared_fullscreen_value(state)
-            .await?
-            .unwrap_or(current_settings.force_fullscreen)
-    } else {
-        current_settings.force_fullscreen
-    };
-    let fullscreen_changed = current_fullscreen != settings.force_fullscreen;
-    let shared_fullscreen_changed =
-        if game_options_sync_enabled && fullscreen_changed {
-            crate::api::instance::update_shared_fullscreen_from_app(
-                state,
-                settings.force_fullscreen,
-            )
-            .await?
-        } else {
-            false
-        };
-    settings.update(&state.pool).await?;
-
-    if shared_fullscreen_changed {
-        let result =
-            crate::api::instance::sync_all_participating_instances(state).await;
-        if result.failed > 0 {
-            tracing::warn!(
-                "Fullscreen was saved, but {} synced instance(s) could not be updated",
-                result.failed
-            );
-        }
-    }
-
-    Ok(())
-}
-
 /// Backs up and opens the database at `db_path`, records this version, and finishes a pending
 /// data-directory move, whose default destination is `settings_dir`. The App runs it before
 /// `Engine::new`; the returned settings name the data directory and the limits.

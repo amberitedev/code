@@ -1,12 +1,13 @@
-use crate::state::{InstanceInstallStage, InstanceMetadata, SyncedOption};
-use crate::util::io;
-use crate::{Engine, ErrorKind};
-use quartz_nbt::NbtCompound;
+pub(crate) use engine::server_list::{
+    nbt_from_bytes, nbt_to_bytes, read_nbt_file,
+};
+use engine::state::{InstanceInstallStage, InstanceMetadata, SyncedOption};
+use engine::util::io;
+use engine::{Engine, ErrorKind};
 use sha1_smol::Sha1;
-use std::io::Cursor;
 use std::path::{Path, PathBuf};
 
-pub(in crate::api::instance) struct SyncCheckpoint {
+pub(in crate::synced_options) struct SyncCheckpoint {
     pub expected_sha1: String,
     pub merge_base: Option<Vec<u8>>,
     pub source_revision: i64,
@@ -14,7 +15,7 @@ pub(in crate::api::instance) struct SyncCheckpoint {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(in crate::api::instance) enum CheckpointStatus {
+pub(in crate::synced_options) enum CheckpointStatus {
     Pending,
     Ready,
 }
@@ -30,7 +31,7 @@ impl CheckpointStatus {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(in crate::api::instance) enum LinkMode {
+pub(in crate::synced_options) enum LinkMode {
     Symbolic,
     #[cfg(windows)]
     Hard,
@@ -50,11 +51,11 @@ impl LinkMode {
     }
 }
 
-pub(in crate::api::instance) fn safe_instance_id(instance_id: &str) -> String {
+pub(in crate::synced_options) fn safe_instance_id(instance_id: &str) -> String {
     instance_id.replace([':', '/', '\\'], "_")
 }
 
-pub(in crate::api::instance) fn instance_dir(
+pub(in crate::synced_options) fn instance_dir(
     metadata: &InstanceMetadata,
     state: &Engine,
 ) -> PathBuf {
@@ -64,7 +65,7 @@ pub(in crate::api::instance) fn instance_dir(
         .join(&metadata.instance.path)
 }
 
-pub(in crate::api::instance) fn sync_files_are_protected(
+pub(in crate::synced_options) fn sync_files_are_protected(
     metadata: &InstanceMetadata,
 ) -> bool {
     matches!(
@@ -74,15 +75,15 @@ pub(in crate::api::instance) fn sync_files_are_protected(
     )
 }
 
-pub(in crate::api::instance) async fn instance_is_running(
+pub(in crate::synced_options) async fn instance_is_running(
     metadata: &InstanceMetadata,
     state: &Engine,
-) -> crate::Result<bool> {
-    crate::state::instance_has_running_process(&metadata.instance.id, state)
+) -> engine::Result<bool> {
+    engine::state::instance_has_running_process(&metadata.instance.id, state)
         .await
 }
 
-pub(in crate::api::instance) fn option_can_apply_while_running(
+pub(in crate::synced_options) fn option_can_apply_while_running(
     option: SyncedOption,
 ) -> bool {
     matches!(
@@ -93,7 +94,7 @@ pub(in crate::api::instance) fn option_can_apply_while_running(
     )
 }
 
-pub(in crate::api::instance) fn instance_option_enabled(
+pub(in crate::synced_options) fn instance_option_enabled(
     metadata: &InstanceMetadata,
     option: SyncedOption,
 ) -> bool {
@@ -112,10 +113,10 @@ pub(in crate::api::instance) fn instance_option_enabled(
     }
 }
 
-pub(in crate::api::instance) async fn ensure_link(
+pub(in crate::synced_options) async fn ensure_link(
     source: &Path,
     target: &Path,
-) -> crate::Result<LinkMode> {
+) -> engine::Result<LinkMode> {
     if let Some(parent) = target.parent() {
         io::create_dir_all(parent).await?;
     }
@@ -150,10 +151,10 @@ pub(in crate::api::instance) async fn ensure_link(
     }
 }
 
-pub(in crate::api::instance) async fn detach_link(
+pub(in crate::synced_options) async fn detach_link(
     source: &Path,
     target: &Path,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     if tokio::fs::symlink_metadata(target).await.is_err() {
         return Ok(());
     }
@@ -171,7 +172,7 @@ pub(in crate::api::instance) async fn detach_link(
     Ok(())
 }
 
-pub(in crate::api::instance) async fn begin_checkpoint(
+pub(in crate::synced_options) async fn begin_checkpoint(
     instance_id: &str,
     option: SyncedOption,
     variant: &str,
@@ -179,7 +180,7 @@ pub(in crate::api::instance) async fn begin_checkpoint(
     merge_base: Option<&[u8]>,
     source_revision: i64,
     state: &Engine,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     let option_name = option.as_str();
     sqlx::query!(
         "
@@ -201,18 +202,18 @@ pub(in crate::api::instance) async fn begin_checkpoint(
         merge_base,
         source_revision,
     )
-    .execute(&state.pool)
+    .execute(state.pool())
     .await?;
     Ok(())
 }
 
-pub(in crate::api::instance) async fn finish_checkpoint(
+pub(in crate::synced_options) async fn finish_checkpoint(
     instance_id: &str,
     option: SyncedOption,
     variant: &str,
     mode: LinkMode,
     state: &Engine,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     let option_name = option.as_str();
     let link_mode = mode.as_str();
     sqlx::query!(
@@ -226,17 +227,17 @@ pub(in crate::api::instance) async fn finish_checkpoint(
         option_name,
         variant,
     )
-    .execute(&state.pool)
+    .execute(state.pool())
     .await?;
     Ok(())
 }
 
-pub(in crate::api::instance) async fn finish_plain_checkpoint(
+pub(in crate::synced_options) async fn finish_plain_checkpoint(
     instance_id: &str,
     option: SyncedOption,
     variant: &str,
     state: &Engine,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     let option_name = option.as_str();
     sqlx::query!(
         "
@@ -248,17 +249,17 @@ pub(in crate::api::instance) async fn finish_plain_checkpoint(
         option_name,
         variant,
     )
-    .execute(&state.pool)
+    .execute(state.pool())
     .await?;
     Ok(())
 }
 
-pub(in crate::api::instance) async fn checkpoint(
+pub(in crate::synced_options) async fn checkpoint(
     instance_id: &str,
     option: SyncedOption,
     variant: &str,
     state: &Engine,
-) -> crate::Result<Option<SyncCheckpoint>> {
+) -> engine::Result<Option<SyncCheckpoint>> {
     let option_name = option.as_str();
     let row = sqlx::query!(
         r#"
@@ -271,7 +272,7 @@ pub(in crate::api::instance) async fn checkpoint(
         option_name,
         variant,
     )
-    .fetch_optional(&state.pool)
+    .fetch_optional(state.pool())
     .await?;
     row.map(|row| {
         Ok(SyncCheckpoint {
@@ -289,46 +290,12 @@ pub(in crate::api::instance) async fn checkpoint(
     .transpose()
 }
 
-pub(in crate::api::instance) async fn sha1_file(
+pub(in crate::synced_options) async fn sha1_file(
     path: &Path,
-) -> crate::Result<String> {
+) -> engine::Result<String> {
     Ok(Sha1::from(io::read(path).await?).digest().to_string())
 }
 
-pub(in crate::api::instance) fn sha1_bytes(bytes: &[u8]) -> String {
+pub(in crate::synced_options) fn sha1_bytes(bytes: &[u8]) -> String {
     Sha1::from(bytes).digest().to_string()
-}
-
-pub(in crate::api::instance) async fn read_nbt_file(
-    path: &Path,
-) -> crate::Result<NbtCompound> {
-    let bytes = io::read(path).await?;
-    let (root, _) = quartz_nbt::io::read_nbt(
-        &mut Cursor::new(bytes),
-        quartz_nbt::io::Flavor::Uncompressed,
-    )?;
-    Ok(root)
-}
-
-pub(in crate::api::instance) fn nbt_to_bytes(
-    root: &NbtCompound,
-) -> crate::Result<Vec<u8>> {
-    let mut bytes = Vec::new();
-    quartz_nbt::io::write_nbt(
-        &mut bytes,
-        None,
-        root,
-        quartz_nbt::io::Flavor::Uncompressed,
-    )?;
-    Ok(bytes)
-}
-
-pub(in crate::api::instance) fn nbt_from_bytes(
-    bytes: Vec<u8>,
-) -> crate::Result<NbtCompound> {
-    let (root, _) = quartz_nbt::io::read_nbt(
-        &mut Cursor::new(bytes),
-        quartz_nbt::io::Flavor::Uncompressed,
-    )?;
-    Ok(root)
 }

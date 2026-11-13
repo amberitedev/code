@@ -1,91 +1,15 @@
+pub use engine::server_list::{DesyncServerMode, ServerRecord, ServerSource};
 use quartz_nbt::NbtCompound;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
-#[serde(rename_all = "snake_case")]
-pub enum ServerSource {
-    UserSynced,
-    Modpack,
-    LinkedServerProject,
-    LocalDesynced,
-}
-
-impl ServerSource {
-    pub(super) fn as_str(self) -> &'static str {
-        match self {
-            Self::UserSynced => "user_synced",
-            Self::Modpack => "modpack",
-            Self::LinkedServerProject => "linked_server_project",
-            Self::LocalDesynced => "local_desynced",
-        }
-    }
-
-    pub(super) fn from_str(value: &str) -> Option<Self> {
-        match value {
-            "user_synced" => Some(Self::UserSynced),
-            "modpack" => Some(Self::Modpack),
-            "linked_server_project" => Some(Self::LinkedServerProject),
-            "local_desynced" => Some(Self::LocalDesynced),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
-#[serde(rename_all = "snake_case")]
-pub enum DesyncServerMode {
-    KeepInOtherInstances,
-    RemoveFromOtherInstances,
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct SyncedServer {
     pub id: String,
     pub name: String,
     pub address: String,
-    #[cfg_attr(feature = "export-ts", ts(optional = nullable))]
+    #[cfg_attr(test, ts(optional = nullable))]
     pub accept_textures: Option<bool>,
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct ServerRecord {
-    pub id: String,
-    pub source: ServerSource,
-    pub data: NbtCompound,
-}
-
-impl ServerRecord {
-    pub fn name(&self) -> String {
-        self.data
-            .get::<_, &str>("name")
-            .unwrap_or_default()
-            .to_string()
-    }
-
-    pub fn address(&self) -> String {
-        self.data
-            .get::<_, &str>("ip")
-            .unwrap_or_default()
-            .to_string()
-    }
-
-    pub fn icon(&self) -> Option<String> {
-        self.data.get::<_, &str>("icon").ok().map(ToOwned::to_owned)
-    }
-
-    pub fn hidden(&self) -> bool {
-        self.data.get::<_, i8>("hidden").unwrap_or(0) != 0
-    }
-
-    pub fn accept_textures(&self) -> Option<bool> {
-        self.data
-            .get::<_, i8>("acceptTextures")
-            .ok()
-            .map(|value| value != 0)
-    }
 }
 
 #[derive(Clone)]

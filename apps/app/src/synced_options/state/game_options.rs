@@ -1,4 +1,4 @@
-use crate::state::{GameOptionKind, StoredOption, StoredPreference};
+use super::{GameOptionKind, StoredOption, StoredPreference};
 use sqlx::SqlitePool;
 use std::collections::HashMap;
 
@@ -8,7 +8,7 @@ use std::collections::HashMap;
 /// whether sync is currently enabled.
 pub(crate) async fn shared_game_options_exist(
     pool: &SqlitePool,
-) -> crate::Result<bool> {
+) -> engine::Result<bool> {
     let exists = sqlx::query_scalar!(
         r#"
 		SELECT EXISTS(
@@ -24,7 +24,7 @@ pub(crate) async fn shared_game_options_exist(
 /// Returns whether game-settings sync is enabled for the app.
 pub(crate) async fn game_options_sync_is_enabled(
     pool: &SqlitePool,
-) -> crate::Result<bool> {
+) -> engine::Result<bool> {
     let enabled = sqlx::query_scalar!(
         r#"
 		SELECT globally_enabled AS "globally_enabled!: bool"
@@ -46,7 +46,7 @@ pub(crate) async fn game_options_sync_is_enabled(
 pub(crate) async fn load_game_options_sync_state(
     pool: &SqlitePool,
     current_catalog_revision: u32,
-) -> crate::Result<(u64, u32)> {
+) -> engine::Result<(u64, u32)> {
     let row = sqlx::query!(
         r#"
 		SELECT revision AS "revision!: i64",
@@ -72,7 +72,7 @@ pub(crate) async fn load_game_options_sync_state(
 /// belong to mods that are not installed in any synced instance right now.
 pub(crate) async fn load_shared_game_options(
     pool: &SqlitePool,
-) -> crate::Result<HashMap<String, StoredOption>> {
+) -> engine::Result<HashMap<String, StoredOption>> {
     let rows = sqlx::query!(
         r#"
 		SELECT option_id, kind, raw_key, canonical_value_json,
@@ -111,7 +111,7 @@ pub(crate) async fn load_shared_game_options(
 /// Loads whether sync is turned on for each setting.
 pub(crate) async fn load_game_option_preferences(
     pool: &SqlitePool,
-) -> crate::Result<HashMap<String, StoredPreference>> {
+) -> engine::Result<HashMap<String, StoredPreference>> {
     let rows = sqlx::query!(
         r#"
 		SELECT option_id, enabled AS "enabled!: bool",

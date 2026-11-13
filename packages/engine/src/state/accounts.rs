@@ -5,7 +5,7 @@ use sqlx::SqlitePool;
 use uuid::Uuid;
 
 /// The signed-in Modrinth user.
-pub(crate) async fn active_modrinth_user_id(
+pub async fn active_modrinth_user_id(
     pool: &SqlitePool,
 ) -> crate::Result<Option<String>> {
     Ok(

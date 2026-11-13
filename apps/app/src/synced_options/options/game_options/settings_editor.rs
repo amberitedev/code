@@ -9,14 +9,15 @@ use super::instance_support::{
     load_participating_instances, summary_revision,
 };
 use super::write_shared_settings::sync_all_participating_instances;
-use crate::ErrorKind;
-use crate::state::{
-    CanonicalValue, Engine, GameOptionKind, StoredOption,
-    game_options_sync_is_enabled, load_game_option_preferences,
-    load_game_options_sync_state, load_shared_game_options,
+use crate::synced_options::state::{
+    CanonicalValue, GameOptionKind, StoredOption, game_options_sync_is_enabled,
+    load_game_option_preferences, load_game_options_sync_state,
+    load_shared_game_options,
 };
 use anyhow::bail;
 use chrono::Utc;
+use engine::ErrorKind;
+use engine::state::Engine;
 
 fn validation_issue(
     sync_enabled: bool,
@@ -42,11 +43,11 @@ fn validation_issue(
 /// labels and explanations.
 pub(super) async fn load_settings_editor(
     state: &Engine,
-) -> crate::Result<GameSettingsEditorState> {
+) -> engine::Result<GameSettingsEditorState> {
     let (canonical_revision, catalog_revision) =
-        load_game_options_sync_state(&state.pool, CATALOG_REVISION).await?;
-    let values = load_shared_game_options(&state.pool).await?;
-    let preferences = load_game_option_preferences(&state.pool).await?;
+        load_game_options_sync_state(state.pool(), CATALOG_REVISION).await?;
+    let values = load_shared_game_options(state.pool()).await?;
+    let preferences = load_game_option_preferences(state.pool()).await?;
     let participants = load_participating_instances(state).await?;
     let mut settings = Vec::new();
 
@@ -195,8 +196,8 @@ pub(super) async fn load_settings_editor(
 
 pub async fn get_config(
     state: &Engine,
-) -> crate::Result<GameSettingsEditorState> {
-    let _guard = state.synced_options.lock().await;
+) -> engine::Result<GameSettingsEditorState> {
+    let _guard = crate::hooks::synced_options(state).lock().await;
     load_settings_editor(state).await
 }
 
@@ -204,8 +205,8 @@ pub async fn get_config(
 pub async fn preview_changes(
     state: &Engine,
     request: UpdateGameSettingsRequest,
-) -> crate::Result<GameSettingsEditorState> {
-    let _guard = state.synced_options.lock().await;
+) -> engine::Result<GameSettingsEditorState> {
+    let _guard = crate::hooks::synced_options(state).lock().await;
     if request.expected_catalog_revision != CATALOG_REVISION {
         return load_settings_editor(state).await;
     }
@@ -277,9 +278,9 @@ pub async fn preview_changes(
 pub async fn save_changes(
     state: &Engine,
     request: UpdateGameSettingsRequest,
-) -> crate::Result<SaveGameSettingsResult> {
-    let _guard = state.synced_options.lock().await;
-    if !game_options_sync_is_enabled(&state.pool).await? {
+) -> engine::Result<SaveGameSettingsResult> {
+    let _guard = crate::hooks::synced_options(state).lock().await;
+    if !game_options_sync_is_enabled(state.pool()).await? {
         bail!(ErrorKind::InputError(
             "turn on game-settings sync before editing shared values"
                 .to_string(),
@@ -305,7 +306,7 @@ pub async fn save_changes(
             ..SaveGameSettingsResult::default()
         });
     }
-    let stored_values = load_shared_game_options(&state.pool).await?;
+    let stored_values = load_shared_game_options(state.pool()).await?;
     let participants = load_participating_instances(state).await?;
     let mut conflicts = Vec::new();
     let mut accepted = Vec::new();
@@ -379,7 +380,7 @@ pub async fn save_changes(
 
     let mut changed = false;
     let mut fullscreen_value = None;
-    let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = state.pool().begin_with("BEGIN IMMEDIATE").await?;
     for (setting, change) in accepted {
         let resulting_enabled =
             change.sync_enabled.unwrap_or(setting.sync_enabled);

@@ -662,11 +662,10 @@ pub(super) async fn handle_unavailable_shared_instance_if_current_user(
             crate::state::clear_shared_instance(instance_id, &state.pool)
                 .await?;
             if attachment.server_manager_name.is_some() {
-                crate::api::instance::synced_servers::remove_managed_servers(
-                    instance_id,
-                    state,
-                )
-                .await?;
+                state
+                    .hooks()
+                    .remove_managed_servers(state, instance_id)
+                    .await?;
             }
         }
     }

@@ -7,12 +7,13 @@ use contracts::{
     ApiError, Empty, ErrorCode,
     server::{Req, route},
 };
-use engine::{instance::ScreenshotKey, prelude::app_db_backup_dir};
+use engine::prelude::app_db_backup_dir;
 use url::Url;
 
 use super::internal;
 use crate::{
     engine_handle::EngineHandle,
+    screenshots::ScreenshotKey,
     server::endpoints::desktop::{
         AppFolder, OpenFolder, OpenPath, OpenUrl, RevealPath,
     },
@@ -83,7 +84,7 @@ async fn open_folder(
         AppFolder::SyncedOptions => {
             let state = engine.get().await;
             open(
-                engine::instance::get_synced_options_folder(&state)
+                crate::synced_options::get_synced_options_folder(&state)
                     .await
                     .map_err(internal)?,
             )
@@ -99,7 +100,7 @@ async fn open_folder(
                 file_name,
             };
             reveal(
-                engine::instance::get_screenshot_path(&state, &key)
+                crate::screenshots::get_screenshot_path(&state, &key)
                     .await
                     .map_err(internal)?,
             )

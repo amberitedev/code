@@ -1,6 +1,6 @@
 // Before Minecraft 1.13, options.txt stored key bindings as numbers. This table
 // converts those numbers to the key names used by current versions.
-pub(in crate::api::instance) const LEGACY_KEY_BINDINGS: &[(i32, &str)] = &[
+pub(in crate::synced_options) const LEGACY_KEY_BINDINGS: &[(i32, &str)] = &[
     (0, "key.keyboard.unknown"),
     (1, "key.keyboard.escape"),
     (2, "key.keyboard.1"),

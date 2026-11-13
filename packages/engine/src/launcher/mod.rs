@@ -837,13 +837,13 @@ pub async fn read_protocol_version_from_jar(
 }
 
 #[derive(Deserialize, Debug)]
-pub(crate) struct GameVersionMetadata {
+pub struct GameVersionMetadata {
     pub(crate) protocol_version: Option<u32>,
-    pub(crate) world_version: Option<u32>,
+    pub world_version: Option<u32>,
 }
 
 /// Reads the game's embedded metadata, available from snapshot 18w47b onward.
-pub(crate) async fn read_game_version_metadata_from_jar(
+pub async fn read_game_version_metadata_from_jar(
     path: &Path,
 ) -> crate::Result<Option<GameVersionMetadata>> {
     let path = path.to_path_buf();

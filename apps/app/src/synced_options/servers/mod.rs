@@ -1,13 +1,10 @@
-mod codec;
 mod modpack;
 mod operations;
 mod storage;
 mod types;
 
-const SERVERS_FILE: &str = "servers.dat";
+use engine::server_list::SERVERS_FILE;
 
-pub(crate) use self::codec::server_data;
-pub(crate) use self::modpack::MODPACK_SERVER_PATHS;
 pub use self::modpack::{
     capture_modpack_server_override, discard_modpack_servers,
 };
@@ -24,4 +21,4 @@ pub(super) use self::operations::{
     reconcile_servers, seed_servers,
 };
 pub(super) use self::storage::canonical_exists;
-pub use self::types::{DesyncServerMode, ServerSource, SyncedServer};
+pub use self::types::SyncedServer;

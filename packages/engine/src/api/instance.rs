@@ -12,19 +12,13 @@ pub use files::{
 };
 mod get;
 mod groups;
-mod hidden;
 mod icon;
 mod install;
 mod lifecycle;
 mod paths;
 mod projects;
 mod run;
-mod screenshot_groups;
-mod screenshots;
 mod shared;
-mod synced_options;
-pub(crate) mod synced_packs;
-pub(crate) mod synced_servers;
 
 pub use self::content::{
     get_content_items, get_dependencies_as_content_items,
@@ -43,7 +37,6 @@ pub use self::groups::{
     create_group, delete_group, list_groups, rename_group,
     set_group_memberships, set_group_order,
 };
-pub use self::hidden::{get_hidden_instance_ids, set_instance_hidden};
 pub use self::icon::{
     cache_generated_icon, cache_icon_bytes, cache_remote_icon,
     edit_generated_icon, edit_generated_icon_if_empty, edit_icon,
@@ -51,30 +44,19 @@ pub use self::icon::{
 };
 pub(crate) use self::icon::{cache_icon, cache_icon_from_path};
 pub use self::install::get_optimal_jre_key;
-pub use self::lifecycle::{create, edit, remove, set_synced_option};
+pub use self::lifecycle::{create, edit, remove};
 pub use self::paths::{get_full_path, get_mod_full_path};
 pub use self::projects::{
     InstallProjectWithDependenciesRequest, add_project_from_path,
-    add_project_from_version, install_project_with_dependencies,
-    is_file_on_modrinth, remove_project, repair_managed_modrinth,
-    set_project_locked, switch_project_version_with_dependencies,
-    toggle_disable_project, update_managed_modrinth_version, update_project,
+    add_project_from_version, ensure_metadata_content_unlocked,
+    install_project_with_dependencies, is_file_on_modrinth, remove_project,
+    repair_managed_modrinth, set_project_locked,
+    switch_project_version_with_dependencies, toggle_disable_project,
+    update_managed_modrinth_version, update_project,
 };
 pub use self::run::{
     LaunchCredentials, LaunchDefaults, LaunchRequest, QuickPlayType, kill,
     launch, try_update_playtime_by_instance_id,
-};
-pub use self::screenshot_groups::{
-    ScreenshotGroup, ScreenshotGroupImport, ScreenshotGroupMembershipUpdate,
-    create_screenshot_group, delete_screenshot_group, import_screenshot_groups,
-    list_screenshot_groups, rename_screenshot_group,
-    set_screenshot_group_memberships,
-};
-pub use self::screenshots::{
-    InstanceScreenshot, ScreenshotEditSaveMode, ScreenshotKey,
-    delete_screenshots, export_screenshots, get_screenshot_path,
-    list_all_screenshots, list_screenshots, list_synced_screenshots,
-    move_screenshots, reconcile_screenshots, save_edited_screenshot,
 };
 pub(crate) use self::shared::{
     CONFIG_DIRECTORY, CONFIG_FILE_EXTENSIONS, CONFIG_FILE_TYPE,
@@ -108,63 +90,4 @@ pub use self::shared::{
     revoke_shared_instance_invite, set_shared_history_kept,
     unlink_shared_instance, unpublish_remote_shared_instance,
     unpublish_shared_instance, update_shared_instance,
-};
-pub use self::synced_options::game_options::queue_game_locale_index;
-pub use self::synced_options::game_options::{
-    CanonicalValue as GameOptionCanonicalValue, EditableGameSetting,
-    GameOptionCompatibility, GameOptionCompatibilityBucket,
-    GameOptionCompatibilityReason, GameOptionCompatibilityStatus,
-    GameOptionEditorChoice, GameOptionEditorDefinition, GameOptionKind,
-    GameOptionMappingKind, GameOptionValidationIssue, GameOptionValueState,
-    GameOptionsPackSource, GameOptionsSourceCandidate, GameOptionsSourceIssue,
-    GameSettingCategory, GameSettingChange, GameSettingLocaleLabel,
-    GameSettingLocaleLabels, GameSettingSource, GameSettingSourceProject,
-    GameSettingsEditorState, SaveGameSettingsResult, UpdateGameSettingsRequest,
-    apply_launcher_overrides as apply_game_options_launcher_overrides,
-    capture_pack_base as capture_game_options_pack_base,
-    get_config as get_synced_game_options_config,
-    get_game_setting_locale_labels,
-    get_local_config as get_local_game_options_config,
-    list_sync_sources as list_game_options_sync_sources,
-    preview_changes as preview_synced_game_option_changes,
-    preview_local_changes as preview_local_game_option_changes,
-    save_changes as save_synced_game_option_changes,
-    save_local_changes as save_local_game_option_changes,
-    sync_before_launch as sync_game_options_before_launch,
-};
-pub(crate) use self::synced_options::game_options::{
-    GameLocaleIndexer, shared_fullscreen_value,
-    sync_all_participating_instances, update_shared_fullscreen_from_app,
-};
-pub use self::synced_options::{
-    GlobalSyncedOptions, SyncedOptionCapability, SyncedOptionJoinAction,
-    SyncedOptionJoinPreview, SyncedOptionJoinResolution, SyncedOptionsOverview,
-    get_capabilities as get_synced_option_capabilities, get_command_history,
-    get_global_options as get_global_synced_options,
-    get_initialized_options as get_initialized_synced_options,
-    get_instance_option_join_preview as get_synced_option_join_preview,
-    get_overview as get_synced_options_overview, get_synced_options_folder,
-    set_command_history, set_global_option as set_global_synced_option,
-};
-pub use self::synced_options::{
-    prepare_instance_update, reconcile_all as reconcile_all_synced_options,
-    reconcile_changed_file as reconcile_synced_option_file,
-    reconcile_instance as reconcile_instance_synced_options,
-    reconcile_instance_after_pack_update, remove_generated_instance_files,
-    start as start_synced_options,
-};
-pub use self::synced_servers::{
-    DesyncServerMode, ServerSource, SyncedServer,
-    capture_modpack_server_override, desync_server, discard_modpack_servers,
-    list_synced_servers, remove_synced_server, update_synced_server,
-};
-
-pub(crate) use self::synced_packs::PackSyncWorker;
-pub use self::synced_packs::flush as reconcile_synced_packs;
-pub use self::synced_packs::{
-    PackSyncPreview, PackSyncTarget, desync_pack, get_pack_sync_preview,
-    list_synced_packs,
-    queue_reconciliation as queue_synced_pack_reconciliation,
-    reconcile_after_content_change as reconcile_synced_packs_after_content_change,
-    remove_synced_pack, set_synced_pack_enabled, sync_pack, upload_synced_pack,
 };

@@ -1,7 +1,7 @@
 use super::orchestration::{SyncedOptionJoinResolution, synced_options_path};
-use crate::Engine;
-use crate::state::SyncedOption;
-use crate::util::io;
+use engine::Engine;
+use engine::state::SyncedOption;
+use engine::util::io;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -20,7 +20,7 @@ pub(super) struct PendingChange {
     pub action: PendingAction,
 }
 
-pub(super) async fn read(state: &Engine) -> crate::Result<Vec<PendingChange>> {
+pub(super) async fn read(state: &Engine) -> engine::Result<Vec<PendingChange>> {
     let path = synced_options_path(state).join("pending-changes.json");
     match tokio::fs::read(path).await {
         Ok(bytes) => Ok(serde_json::from_slice(&bytes)?),
@@ -31,7 +31,10 @@ pub(super) async fn read(state: &Engine) -> crate::Result<Vec<PendingChange>> {
     }
 }
 
-async fn write(changes: &[PendingChange], state: &Engine) -> crate::Result<()> {
+async fn write(
+    changes: &[PendingChange],
+    state: &Engine,
+) -> engine::Result<()> {
     let directory = synced_options_path(state);
     io::create_dir_all(&directory).await?;
     let temporary = directory.join("pending-changes.json.tmp");
@@ -45,7 +48,7 @@ async fn write(changes: &[PendingChange], state: &Engine) -> crate::Result<()> {
 pub(super) async fn save(
     change: PendingChange,
     state: &Engine,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     let mut changes = read(state).await?;
     changes.retain(|previous| {
         previous.option != change.option
@@ -59,7 +62,7 @@ pub(super) async fn save(
 pub(super) async fn remove(
     change: &PendingChange,
     state: &Engine,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     let mut changes = read(state).await?;
     let previous_len = changes.len();
     changes.retain(|previous| previous != change);
@@ -73,7 +76,7 @@ pub(super) async fn cancel(
     option: SyncedOption,
     instance_id: Option<&str>,
     state: &Engine,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     let mut changes = read(state).await?;
     let previous_len = changes.len();
     changes.retain(|change| {
@@ -86,11 +89,11 @@ pub(super) async fn cancel(
     Ok(())
 }
 
-pub(in crate::api::instance) async fn contains(
+pub(in crate::synced_options) async fn contains(
     instance_id: &str,
     option: SyncedOption,
     state: &Engine,
-) -> crate::Result<bool> {
+) -> engine::Result<bool> {
     Ok(read(state).await?.iter().any(|change| {
         change.instance_id == instance_id && change.option == option
     }))

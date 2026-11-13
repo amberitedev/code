@@ -4,13 +4,12 @@ use std::path::PathBuf;
 
 use contracts::{Empty, Json};
 use engine::{
-    data::ContentItem,
-    instance::{DesyncServerMode, PackSyncPreview},
-    prelude::ProjectType,
+    data::ContentItem, prelude::ProjectType, server_list::DesyncServerMode,
 };
 use serde::{Deserialize, Serialize};
 
 use super::IdParams;
+use crate::synced_options::PackSyncPreview;
 
 endpoints! {
     ListSyncedPacks: Get "/app/synced-packs", (), SyncedPackQuery, Empty

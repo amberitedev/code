@@ -5,7 +5,7 @@ use contracts::{
     ApiError, Empty, Json,
     server::{Req, route},
 };
-use engine::{Engine, routes::api_error, settings};
+use engine::{Engine, routes::api_error};
 
 use crate::server::{
     AppState,
@@ -33,7 +33,7 @@ async fn get_settings(
     State(engine): State<Arc<Engine>>,
     _: Req<GetSettings>,
 ) -> Result<Json<AppSettings>, ApiError> {
-    settings::get(&engine)
+    super::get(&engine)
         .await
         .map(|settings| Json(AppSettings(settings)))
         .map_err(api_error)
@@ -43,7 +43,7 @@ async fn set_settings(
     State(engine): State<Arc<Engine>>,
     Req { body, .. }: Req<SetSettings>,
 ) -> Result<Empty, ApiError> {
-    settings::set(&engine, body.0)
+    super::set(&engine, body.0)
         .await
         .map(|()| Empty)
         .map_err(api_error)

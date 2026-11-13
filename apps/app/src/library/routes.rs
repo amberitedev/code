@@ -50,7 +50,7 @@ async fn list_hidden_instances(
     State(engine): State<Arc<Engine>>,
     _: Req<ListHiddenInstances>,
 ) -> Result<Json<Vec<String>>, ApiError> {
-    engine::instance::get_hidden_instance_ids(&engine)
+    crate::library::get_hidden_instance_ids(&engine)
         .await
         .map(Json)
         .map_err(engine::routes::api_error)
@@ -60,14 +60,10 @@ async fn set_instance_hidden(
     State(engine): State<Arc<Engine>>,
     Req { body, .. }: Req<SetInstanceHidden>,
 ) -> Result<Empty, ApiError> {
-    engine::instance::set_instance_hidden(
-        &engine,
-        &body.instance_id,
-        body.hidden,
-    )
-    .await
-    .map(|()| Empty)
-    .map_err(engine::routes::api_error)
+    crate::library::set_instance_hidden(&engine, &body.instance_id, body.hidden)
+        .await
+        .map(|()| Empty)
+        .map_err(engine::routes::api_error)
 }
 
 async fn cache_icon(

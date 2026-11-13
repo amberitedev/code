@@ -1,11 +1,11 @@
 use super::{EventSink, FriendPayload, LoadingBarId};
+use crate::event::OnboardingChecklist;
 use crate::event::{
     CommandPayload, DesktopEvent, Event, EventError,
     InstanceGroupsChangedPayload, InstancePayload, InstancePayloadType,
     LoadingBar, LoadingBarType, LoadingPayload, ProcessPayload,
     ProcessPayloadType, WarningPayload,
 };
-use crate::state::OnboardingChecklist;
 use futures::prelude::*;
 use serde_json::Value;
 use uuid::Uuid;

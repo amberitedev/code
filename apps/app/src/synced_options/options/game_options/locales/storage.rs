@@ -15,7 +15,7 @@ pub(super) struct OriginRow {
 pub(super) async fn load(
     pool: &SqlitePool,
     scope: Option<&str>,
-) -> crate::Result<Vec<OriginRow>> {
+) -> engine::Result<Vec<OriginRow>> {
     let rows = sqlx::query!(
         r#"SELECT scope, option_id, source_instance_id, source_game_version,
 		backfilled AS "backfilled!: bool", observation_json, origin_json
@@ -60,7 +60,7 @@ pub(super) async fn observe(
     instance_id: &str,
     game_version: &str,
     observation: &Observation,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     let json = serde_json::to_string(observation)?;
     sqlx::query!(
 		"INSERT INTO game_option_locale_origins
@@ -83,7 +83,7 @@ pub(super) async fn pin(
     pool: &SqlitePool,
     row: &OriginRow,
     origin: &Origin,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     let json = serde_json::to_string(origin)?;
     sqlx::query!(
         "UPDATE game_option_locale_origins SET origin_json = ?

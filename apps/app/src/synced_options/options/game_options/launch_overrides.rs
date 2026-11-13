@@ -7,12 +7,12 @@ use super::write_shared_settings::{
     apply_shared_settings_to_instance, remember_processed_sha,
     sync_is_active_for_instance,
 };
-use crate::ErrorKind;
-use crate::state::{
-    Engine, InstanceMetadata, game_options_sync_is_enabled,
-    load_game_option_preferences,
+use crate::synced_options::state::{
+    game_options_sync_is_enabled, load_game_option_preferences,
 };
-use crate::util::io;
+use engine::ErrorKind;
+use engine::state::{Engine, InstanceMetadata};
+use engine::util::io;
 use std::collections::HashSet;
 
 pub(super) fn currently_launcher_owned_keys(
@@ -29,9 +29,9 @@ pub(super) fn currently_launcher_owned_keys(
 pub async fn sync_before_launch(
     state: &Engine,
     instance_id: &str,
-) -> crate::Result<()> {
-    let _guard = state.synced_options.lock().await;
-    let metadata = crate::state::get_instance(instance_id, &state.pool)
+) -> engine::Result<()> {
+    let _guard = crate::hooks::synced_options(state).lock().await;
+    let metadata = engine::state::get_instance(instance_id, state.pool())
         .await?
         .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
     if sync_is_active_for_instance(&metadata, state).await? {
@@ -49,9 +49,9 @@ pub async fn apply_launcher_overrides(
     state: &Engine,
     instance_id: &str,
     force_fullscreen: bool,
-) -> crate::Result<()> {
-    let _guard = state.synced_options.lock().await;
-    let metadata = crate::state::get_instance(instance_id, &state.pool)
+) -> engine::Result<()> {
+    let _guard = crate::hooks::synced_options(state).lock().await;
+    let metadata = engine::state::get_instance(instance_id, state.pool())
         .await?
         .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
     let fullscreen = match metadata.launch_overrides.force_fullscreen {
@@ -87,10 +87,10 @@ pub async fn apply_launcher_overrides(
 async fn fullscreen_is_synced(
     metadata: &InstanceMetadata,
     state: &Engine,
-) -> crate::Result<bool> {
+) -> engine::Result<bool> {
     Ok(metadata.synced_options.game_options
-        && game_options_sync_is_enabled(&state.pool).await?
-        && load_game_option_preferences(&state.pool)
+        && game_options_sync_is_enabled(state.pool()).await?
+        && load_game_option_preferences(state.pool())
             .await?
             .get("fullscreen")
             .is_some_and(|preference| preference.enabled))

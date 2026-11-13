@@ -157,13 +157,17 @@ mod tests {
             ModrinthCredentials,
         },
     };
+    use crate::screenshots::{
+        ScreenshotEditSaveMode, ScreenshotGroup, ScreenshotGroupImport,
+        ScreenshotGroupMembershipUpdate, ScreenshotKey,
+    };
     use crate::server::events::{
         AmberiteCommand, AppEvent, Command, LocalEvent,
     };
     use crate::skins::minecraft_skins::{
         Cape, MinecraftSkinVariant, Skin, SkinSource, UrlOrBlob,
     };
-    use engine::instance::{
+    use crate::synced_options::{
         EditableGameSetting, GameOptionCanonicalValue, GameOptionCompatibility,
         GameOptionCompatibilityBucket, GameOptionCompatibilityReason,
         GameOptionCompatibilityStatus, GameOptionEditorChoice,
@@ -173,9 +177,7 @@ mod tests {
         GameSettingCategory, GameSettingChange, GameSettingLocaleLabel,
         GameSettingLocaleLabels, GameSettingSource, GameSettingSourceProject,
         GameSettingsEditorState, GlobalSyncedOptions, PackSyncPreview,
-        PackSyncTarget, SaveGameSettingsResult, ScreenshotEditSaveMode,
-        ScreenshotGroup, ScreenshotGroupImport,
-        ScreenshotGroupMembershipUpdate, ScreenshotKey, SyncedOptionCapability,
+        PackSyncTarget, SaveGameSettingsResult, SyncedOptionCapability,
         SyncedOptionJoinAction, SyncedOptionJoinPreview,
         SyncedOptionJoinResolution, SyncedOptionsOverview, SyncedServer,
         UpdateGameSettingsRequest,

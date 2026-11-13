@@ -7,10 +7,6 @@ pub use self::content_set_remote_ref::*;
 // manifest.rs are compiled by bedrock so Copal shares them.
 pub use bedrock::state::instances::model::*;
 
-mod game_options;
-pub use self::game_options::{CanonicalValue, GameOptionKind};
-pub(crate) use self::game_options::{StoredOption, StoredPreference};
-
 mod instance;
 pub use self::instance::*;
 

@@ -1,6 +1,6 @@
 //! Theseus state management system
 use crate::access::BoxFuture;
-use crate::api::instance::GameOptionsPackSource;
+use crate::api::server_list::{self, DesyncServerMode, ServerRecord};
 use crate::event::EventSink;
 use crate::util::fetch::{FetchSemaphore, IoSemaphore};
 use contracts::Side;
@@ -19,20 +19,11 @@ pub use self::dirs::*;
 // instance_types.rs is compiled by bedrock along with the content model.
 pub use bedrock::state::instance_types::*;
 
-pub(crate) mod instances;
+pub mod instances;
 pub use self::instances::*;
-pub(crate) use self::instances::{StoredOption, StoredPreference};
-pub(crate) use self::instances::{
-    game_options_sync_is_enabled, load_game_option_preferences,
-    load_game_options_sync_state, load_shared_game_options,
-    shared_game_options_exist,
-};
 
 mod settings;
 pub use self::settings::*;
-
-mod onboarding_checklist;
-pub use self::onboarding_checklist::*;
 
 mod process;
 pub use self::process::*;
@@ -55,15 +46,11 @@ pub(crate) use self::instance_locks::InstanceLocks;
 mod sessions;
 pub use self::sessions::*;
 
-mod synced_options;
-pub(crate) use self::synced_options::SyncedOptions;
-
-pub(crate) mod accounts;
+pub mod accounts;
 pub mod db;
 pub(crate) mod db_backup;
 
 pub mod attached_world_data;
-pub mod hidden_instances;
 pub mod server_join_log;
 
 pub struct EngineConfig {
@@ -77,30 +64,230 @@ pub struct EngineConfig {
     pub max_concurrent_writes: usize,
     pub events: EventSink,
     pub accounts: Option<AccountEndpoints>,
-    pub pack_hooks: Option<Arc<dyn PackUpdateHooks>>,
+    pub hooks: Option<Arc<dyn InstanceHooks>>,
 }
 
-/// Runs host work around a modpack update: `before` sees the instance's files as the user left
-/// them, `after` the pack's.
-pub trait PackUpdateHooks: Send + Sync {
+/// Host work the engine's own instance changes wait on, and the host's view of an instance's
+/// server list. The App keeps synced options, packs and servers here; the defaults are an
+/// engine with nothing synced, which edits `servers.dat` directly.
+pub trait InstanceHooks: std::any::Any + Send + Sync {
+    /// Runs before a modpack update, while the instance's files are as the user left them.
     fn before_pack_update<'a>(
         &'a self,
-        engine: &'a Engine,
-        instance_id: &'a str,
-    ) -> BoxFuture<'a, crate::Result<()>>;
+        _engine: &'a Engine,
+        _instance_id: &'a str,
+    ) -> BoxFuture<'a, crate::Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
 
+    /// Runs after a modpack update, over the pack's files.
     fn after_pack_update<'a>(
         &'a self,
+        _engine: &'a Engine,
+        _instance_id: &'a str,
+        _overrides: PackOverrides<'a>,
+    ) -> BoxFuture<'a, crate::Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    /// Held while an instance's folder is deleted.
+    fn removing<'a>(
+        &'a self,
+        _engine: &'a Engine,
+    ) -> BoxFuture<'a, Box<dyn Send + 'a>> {
+        Box::pin(async { Box::new(()) as Box<dyn Send> })
+    }
+
+    fn decorate_content<'a>(
+        &'a self,
+        _engine: &'a Engine,
+        _instance_id: &'a str,
+        _items: &'a mut [ContentItem],
+    ) -> BoxFuture<'a, crate::Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    /// A user installed `path` into the instance.
+    fn content_installed<'a>(
+        &'a self,
+        _engine: &'a Engine,
+        _instance_id: &'a str,
+        _path: &'a str,
+    ) -> BoxFuture<'a, ()> {
+        Box::pin(async {})
+    }
+
+    /// A user updated, toggled or removed the content at `paths`.
+    fn content_changed<'a>(
+        &'a self,
+        _engine: &'a Engine,
+        _instance_id: &'a str,
+        _paths: &'a [&'a str],
+    ) -> BoxFuture<'a, ()> {
+        Box::pin(async {})
+    }
+
+    fn list_servers<'a>(
+        &'a self,
         engine: &'a Engine,
-        instance_id: &'a str,
-        overrides: PackOverrides<'a>,
-    ) -> BoxFuture<'a, crate::Result<()>>;
+        metadata: &'a InstanceMetadata,
+    ) -> BoxFuture<'a, crate::Result<Vec<ServerRecord>>> {
+        Box::pin(async move {
+            server_list::list_local(&engine.servers_file(metadata)).await
+        })
+    }
+
+    /// Adds a server and returns its id.
+    fn add_server<'a>(
+        &'a self,
+        engine: &'a Engine,
+        metadata: &'a InstanceMetadata,
+        data: quartz_nbt::NbtCompound,
+    ) -> BoxFuture<'a, crate::Result<String>> {
+        Box::pin(async move {
+            server_list::add_local(&engine.servers_file(metadata), data)
+                .await?;
+            Ok(uuid::Uuid::new_v4().to_string())
+        })
+    }
+
+    /// Adds a server a linked server project needs, unless one at its address is listed.
+    fn ensure_managed_server<'a>(
+        &'a self,
+        engine: &'a Engine,
+        metadata: &'a InstanceMetadata,
+        data: quartz_nbt::NbtCompound,
+    ) -> BoxFuture<'a, crate::Result<()>> {
+        Box::pin(async move {
+            let path = engine.servers_file(metadata);
+            let address = server_list::server_identity_address(&data);
+            let listed =
+                server_list::read_servers(&path)
+                    .await?
+                    .iter()
+                    .any(|server| {
+                        server_list::server_identity_address(server) == address
+                    });
+            if listed {
+                return Ok(());
+            }
+            server_list::add_local(&path, data).await
+        })
+    }
+
+    fn update_server<'a>(
+        &'a self,
+        engine: &'a Engine,
+        metadata: &'a InstanceMetadata,
+        index: usize,
+        name: String,
+        address: String,
+        accept_textures: Option<bool>,
+    ) -> BoxFuture<'a, crate::Result<()>> {
+        Box::pin(async move {
+            server_list::update_local(
+                &engine.servers_file(metadata),
+                index,
+                name,
+                address,
+                accept_textures,
+            )
+            .await
+        })
+    }
+
+    fn remove_server<'a>(
+        &'a self,
+        engine: &'a Engine,
+        metadata: &'a InstanceMetadata,
+        index: usize,
+    ) -> BoxFuture<'a, crate::Result<()>> {
+        Box::pin(async move {
+            server_list::remove_local(&engine.servers_file(metadata), index)
+                .await
+        })
+    }
+
+    /// Removes the servers `ensure_managed_server` added.
+    fn remove_managed_servers<'a>(
+        &'a self,
+        _engine: &'a Engine,
+        _instance_id: &'a str,
+    ) -> BoxFuture<'a, crate::Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    /// Drops the servers a modpack supplied.
+    fn discard_modpack_servers<'a>(
+        &'a self,
+        _engine: &'a Engine,
+        _instance_id: &'a str,
+    ) -> BoxFuture<'a, crate::Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn desync_server<'a>(
+        &'a self,
+        _engine: &'a Engine,
+        _instance_id: &'a str,
+        _server_id: &'a str,
+        _mode: DesyncServerMode,
+    ) -> BoxFuture<'a, crate::Result<()>> {
+        Box::pin(async {
+            Err(crate::ErrorKind::InputError(
+                "server syncing is not available".to_string(),
+            )
+            .into())
+        })
+    }
 }
+
+struct NoHooks;
+
+impl InstanceHooks for NoHooks {}
 
 /// What a pack update wrote over the instance.
 pub struct PackOverrides<'a> {
     pub servers: PackServers<'a>,
     pub game_options: Option<GameOptionsPackSource>,
+}
+
+/// Where a modpack keeps the `options.txt` it ships.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GameOptionsPackSource {
+    ClientOverrides,
+    Overrides,
+    ClientOverridesYosbr,
+    OverridesYosbr,
+    ClientOverridesDefaultOptions,
+    OverridesDefaultOptions,
+}
+
+impl GameOptionsPackSource {
+    pub const YOSBR_OPTIONS_PATH: &str = "config/yosbr/options.txt";
+    pub const DEFAULT_OPTIONS_PATH: &str = "config/defaultoptions/options.txt";
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ClientOverrides
+            | Self::ClientOverridesYosbr
+            | Self::ClientOverridesDefaultOptions => "client_overrides",
+            Self::Overrides
+            | Self::OverridesYosbr
+            | Self::OverridesDefaultOptions => "overrides",
+        }
+    }
+
+    pub fn template_path(self) -> Option<&'static str> {
+        match self {
+            Self::ClientOverridesYosbr | Self::OverridesYosbr => {
+                Some(Self::YOSBR_OPTIONS_PATH)
+            }
+            Self::ClientOverridesDefaultOptions
+            | Self::OverridesDefaultOptions => Some(Self::DEFAULT_OPTIONS_PATH),
+            Self::ClientOverrides | Self::Overrides => None,
+        }
+    }
 }
 
 pub enum PackServers<'a> {
@@ -128,7 +315,6 @@ pub struct Engine {
     pub api_semaphore: FetchSemaphore,
     pub(crate) installs: Arc<Installs>,
     pub(crate) instance_locks: InstanceLocks,
-    pub(crate) synced_options: SyncedOptions,
     pub(crate) publish_reports: crate::api::instance::PublishReports,
 
     /// Process manager
@@ -142,7 +328,7 @@ pub struct Engine {
 
     pub sessions: Sessions,
 
-    pack_hooks: Option<Arc<dyn PackUpdateHooks>>,
+    hooks: Arc<dyn InstanceHooks>,
 }
 
 impl Engine {
@@ -155,9 +341,20 @@ impl Engine {
         Ok(state)
     }
 
-    /// The database, which also holds the App's account and skin tables.
+    /// The database, which also holds the App's tables.
     pub fn pool(&self) -> &SqlitePool {
         &self.pool
+    }
+
+    pub fn hooks(&self) -> &dyn InstanceHooks {
+        &*self.hooks
+    }
+
+    fn servers_file(&self, metadata: &InstanceMetadata) -> PathBuf {
+        self.directories
+            .instances_dir()
+            .join(&metadata.instance.path)
+            .join(server_list::SERVERS_FILE)
     }
 
     /// The fallible part of `new`; it spawns nothing.
@@ -178,7 +375,7 @@ impl Engine {
             max_concurrent_writes,
             events,
             accounts,
-            pack_hooks,
+            hooks,
         } = config;
         let directories =
             DirectoryInfo::init(&db_path, data_dir, instances_dir, logs_dir)
@@ -217,14 +414,13 @@ impl Engine {
             api_semaphore,
             installs: Arc::new(Installs::new()),
             instance_locks: InstanceLocks::default(),
-            synced_options: SyncedOptions::default(),
             publish_reports: Default::default(),
             process_manager: ProcessManager::new(),
             pool,
             file_watcher,
             events,
             sessions: Sessions::new(accounts),
-            pack_hooks,
+            hooks: hooks.unwrap_or_else(|| Arc::new(NoHooks)),
         });
 
         state.content_store.recover(None).await?;
@@ -298,10 +494,7 @@ impl Engine {
         &self,
         instance_id: &str,
     ) -> crate::Result<()> {
-        match &self.pack_hooks {
-            Some(hooks) => hooks.before_pack_update(self, instance_id).await,
-            None => Ok(()),
-        }
+        self.hooks.before_pack_update(self, instance_id).await
     }
 
     pub(crate) async fn after_pack_update(
@@ -309,12 +502,9 @@ impl Engine {
         instance_id: &str,
         overrides: PackOverrides<'_>,
     ) -> crate::Result<()> {
-        match &self.pack_hooks {
-            Some(hooks) => {
-                hooks.after_pack_update(self, instance_id, overrides).await
-            }
-            None => Ok(()),
-        }
+        self.hooks
+            .after_pack_update(self, instance_id, overrides)
+            .await
     }
 }
 
@@ -396,7 +586,7 @@ pub(crate) mod tests {
             max_concurrent_writes: 10,
             events: EventSink::new(),
             accounts: None,
-            pack_hooks: None,
+            hooks: None,
         }
     }
 
@@ -444,26 +634,5 @@ pub(crate) mod tests {
             .map(|metadata| &metadata.instance.id)
             .collect();
         assert_eq!(ids, ["b"]);
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn removal_waits_for_a_synced_options_pass_in_flight() {
-        crate::install_crypto_provider();
-        let tmp = tempfile::tempdir().unwrap();
-        write(&tmp.path().join("profiles/Survival/options.txt"));
-        let state = engine(tmp.path().to_path_buf()).await;
-        add_instance(&state, "a", "Survival").await;
-        let folder = state.directories.instances_dir().join("Survival");
-
-        let pass = state.synced_options.lock().await;
-        let removal = tokio::spawn({
-            let state = Arc::clone(&state);
-            async move { remove_instance("a", &state).await }
-        });
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-        assert!(folder.exists() && !removal.is_finished());
-        drop(pass);
-        removal.await.unwrap().unwrap();
-        assert!(!folder.exists());
     }
 }

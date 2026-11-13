@@ -12,23 +12,23 @@ use super::reconciliation::{
     list_source_screenshots, reconcile_source_screenshots,
     scan_source_screenshots,
 };
-use crate::event::InstancePayloadType;
-use crate::event::emit::emit_instance;
-use crate::state::instances::adapters::sqlite::{
-    instance_rows::{self, InstanceScreenshotSource},
-    screenshot_rows,
-};
-use crate::state::{DirectoryInfo, InstanceLocks};
-use crate::util::fetch::sha1_file_async;
-use crate::util::io::{self, IOError};
-use crate::{Engine, ErrorKind};
+use super::rows as screenshot_rows;
 use anyhow::{Context, bail};
+use engine::InstancePayloadType;
+use engine::emit_instance;
+use engine::state::DirectoryInfo;
+use engine::state::instances::adapters::sqlite::instance_rows::{
+    self, InstanceScreenshotSource,
+};
+use engine::util::fetch::sha1_file_async;
+use engine::util::io::{self, IOError};
+use engine::{Engine, ErrorKind};
 
 const SCREENSHOTS_DIRECTORY: &str = "screenshots";
 const SCREENSHOT_SCAN_CONCURRENCY: usize = 8;
 
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct ScreenshotKey {
     pub instance_id: String,
     pub file_name: String,
@@ -48,7 +48,7 @@ pub struct InstanceScreenshot {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum ScreenshotEditSaveMode {
     CreateCopy,
@@ -58,39 +58,41 @@ pub enum ScreenshotEditSaveMode {
 pub async fn list_screenshots(
     state: &Engine,
     instance_id: &str,
-) -> crate::Result<Vec<InstanceScreenshot>> {
-    let source =
-        instance_rows::get_instance_screenshot_source(instance_id, &state.pool)
-            .await?
-            .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
+) -> engine::Result<Vec<InstanceScreenshot>> {
+    let source = instance_rows::get_instance_screenshot_source(
+        instance_id,
+        state.pool(),
+    )
+    .await?
+    .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
 
     list_source_screenshots(state, source).await
 }
 
 pub async fn list_synced_screenshots(
     state: &Engine,
-) -> crate::Result<Vec<InstanceScreenshot>> {
-    if !super::super::synced_options::get_global_options(state)
+) -> engine::Result<Vec<InstanceScreenshot>> {
+    if !crate::synced_options::get_global_synced_options(state)
         .await?
         .screenshots
     {
         return Ok(Vec::new());
     }
-    let sources = instance_rows::list_screenshot_sources(&state.pool).await?;
+    let sources = instance_rows::list_screenshot_sources(state.pool()).await?;
     list_source_screenshot_sets(state, sources).await
 }
 
 pub async fn list_all_screenshots(
     state: &Engine,
-) -> crate::Result<Vec<InstanceScreenshot>> {
-    let sources = instance_rows::list_screenshot_sources(&state.pool).await?;
+) -> engine::Result<Vec<InstanceScreenshot>> {
+    let sources = instance_rows::list_screenshot_sources(state.pool()).await?;
     list_source_screenshot_sets(state, sources).await
 }
 
 async fn list_source_screenshot_sets(
     state: &Engine,
     sources: Vec<InstanceScreenshotSource>,
-) -> crate::Result<Vec<InstanceScreenshot>> {
+) -> engine::Result<Vec<InstanceScreenshot>> {
     let mut screenshots =
         stream::iter(sources.into_iter().map(|source| async move {
             list_source_screenshots(state, source).await
@@ -107,12 +109,12 @@ async fn list_source_screenshot_sets(
 }
 
 async fn lock_instance_screenshots<'a>(
-    instance_locks: &InstanceLocks,
+    state: &Engine,
     instance_ids: impl IntoIterator<Item = &'a str>,
 ) -> Vec<OwnedMutexGuard<()>> {
     let mut locks = Vec::new();
     for instance_id in instance_ids {
-        locks.push(instance_locks.lock_screenshots(instance_id).await);
+        locks.push(crate::hooks::lock_screenshots(state, instance_id).await);
     }
     locks
 }
@@ -120,7 +122,7 @@ async fn lock_instance_screenshots<'a>(
 pub async fn delete_screenshots(
     state: &Engine,
     keys: &[ScreenshotKey],
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     ensure_unique_keys(keys)?;
     let mut instance_ids = keys
         .iter()
@@ -128,15 +130,14 @@ pub async fn delete_screenshots(
         .collect::<Vec<_>>();
     instance_ids.sort_unstable();
     instance_ids.dedup();
-    let _locks =
-        lock_instance_screenshots(&state.instance_locks, instance_ids).await;
+    let _locks = lock_instance_screenshots(state, instance_ids).await;
 
     for key in keys {
         io::remove_file(get_screenshot_path(state, key).await?).await?;
         screenshot_rows::delete_screenshot_by_key(
             &key.instance_id,
             &key.file_name,
-            &state.pool,
+            state.pool(),
         )
         .await?;
     }
@@ -148,7 +149,7 @@ pub async fn export_screenshots(
     state: &Engine,
     keys: &[ScreenshotKey],
     export_path: PathBuf,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     ensure_unique_keys(keys)?;
     if keys.is_empty() {
         bail!(ErrorKind::InputError(
@@ -167,7 +168,7 @@ pub async fn export_screenshots(
             None => {
                 let source = instance_rows::get_instance_screenshot_source(
                     &key.instance_id,
-                    &state.pool,
+                    state.pool(),
                 )
                 .await?
                 .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
@@ -191,7 +192,7 @@ pub async fn export_screenshots(
             .push((archive_name, get_screenshot_path(state, key).await?));
     }
 
-    tokio::task::spawn_blocking(move || -> crate::Result<()> {
+    tokio::task::spawn_blocking(move || -> engine::Result<()> {
         let file = std::fs::File::create(&export_path)
             .map_err(|error| IOError::with_path(error, &export_path))?;
         let mut writer = ZipWriter::new(file);
@@ -219,7 +220,7 @@ pub async fn move_screenshots(
     state: &Engine,
     keys: &[ScreenshotKey],
     target_instance_id: &str,
-) -> crate::Result<Vec<ScreenshotKey>> {
+) -> engine::Result<Vec<ScreenshotKey>> {
     ensure_unique_keys(keys)?;
     if keys.is_empty() {
         return Ok(Vec::new());
@@ -232,11 +233,10 @@ pub async fn move_screenshots(
         .collect::<Vec<_>>();
     instance_ids.sort_unstable();
     instance_ids.dedup();
-    let _locks =
-        lock_instance_screenshots(&state.instance_locks, instance_ids).await;
+    let _locks = lock_instance_screenshots(state, instance_ids).await;
     let target_source = instance_rows::get_instance_screenshot_source(
         target_instance_id,
-        &state.pool,
+        state.pool(),
     )
     .await?
     .ok_or(ErrorKind::InputError("unknown target instance".to_string()))?;
@@ -271,7 +271,7 @@ pub async fn move_screenshots(
             &key.file_name,
             target_instance_id,
             &file_name,
-            &state.pool,
+            state.pool(),
         )
         .await?;
         moved_keys.push(ScreenshotKey {
@@ -286,12 +286,12 @@ pub async fn move_screenshots(
 pub async fn get_screenshot_path(
     state: &Engine,
     key: &ScreenshotKey,
-) -> crate::Result<PathBuf> {
+) -> engine::Result<PathBuf> {
     validate_file_name(&key.file_name)?;
 
     let source = instance_rows::get_instance_screenshot_source(
         &key.instance_id,
-        &state.pool,
+        state.pool(),
     )
     .await?
     .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
@@ -329,16 +329,16 @@ pub async fn save_edited_screenshot(
     key: ScreenshotKey,
     png_bytes: Vec<u8>,
     mode: ScreenshotEditSaveMode,
-) -> crate::Result<InstanceScreenshot> {
+) -> engine::Result<InstanceScreenshot> {
     validate_file_name(&key.file_name)?;
 
     let source = instance_rows::get_instance_screenshot_source(
         &key.instance_id,
-        &state.pool,
+        state.pool(),
     )
     .await?
     .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
-    let _lock = state.instance_locks.lock_screenshots(&source.id).await;
+    let _lock = crate::hooks::lock_screenshots(state, &source.id).await;
 
     let scanned = scan_source_screenshots(&state.directories, &source).await?;
     let current = reconcile_source_screenshots(state, &source, scanned).await?;
@@ -349,7 +349,7 @@ pub async fn save_edited_screenshot(
     let source_row = screenshot_rows::get_screenshot_by_key(
         &key.instance_id,
         &key.file_name,
-        &state.pool,
+        state.pool(),
     )
     .await?
     .ok_or(ErrorKind::InputError("unknown screenshot".to_string()))?;
@@ -368,7 +368,7 @@ pub async fn save_edited_screenshot(
                 "could not read screenshot dimensions".to_string(),
             ))?;
             let edited_dimensions = validate_png_dimensions(&png_bytes)?;
-            Ok::<_, crate::Error>((
+            Ok::<_, engine::Error>((
                 source_dimensions,
                 edited_dimensions,
                 png_bytes,
@@ -414,7 +414,7 @@ pub async fn save_edited_screenshot(
         let mut source_row = source_row.clone();
         source_row.content_hash = content_hash;
         source_row.file_size = file_size;
-        let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let mut tx = state.pool().begin_with("BEGIN IMMEDIATE").await?;
         screenshot_rows::update_screenshot(&source_row, &mut tx).await?;
         tx.commit().await?;
     }
@@ -429,8 +429,8 @@ pub async fn save_edited_screenshot(
         ))?;
 
     if copy_group {
-        let result: crate::Result<()> = async {
-            let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let result: engine::Result<()> = async {
+            let mut tx = state.pool().begin_with("BEGIN IMMEDIATE").await?;
             screenshot_rows::copy_group_membership(
                 &source_row.id,
                 &saved.id,
@@ -446,7 +446,7 @@ pub async fn save_edited_screenshot(
             let _ = screenshot_rows::delete_screenshot_by_key(
                 &source.id,
                 &target_file_name,
-                &state.pool,
+                state.pool(),
             )
             .await;
             return Err(error);
@@ -456,14 +456,14 @@ pub async fn save_edited_screenshot(
     let mut saved_row = screenshot_rows::get_screenshot_by_key(
         &saved.instance_id,
         &saved.file_name,
-        &state.pool,
+        state.pool(),
     )
     .await?
     .ok_or(ErrorKind::InputError(
         "could not load edited screenshot".to_string(),
     ))?;
     if !copy_group {
-        let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let mut tx = state.pool().begin_with("BEGIN IMMEDIATE").await?;
         if saved_row.created_at != source_row.created_at {
             saved_row.created_at = source_row.created_at;
             screenshot_rows::update_screenshot(&saved_row, &mut tx).await?;
@@ -492,7 +492,7 @@ pub async fn save_edited_screenshot(
 pub(super) async fn source_screenshots_dir(
     directories: &DirectoryInfo,
     source: &InstanceScreenshotSource,
-) -> crate::Result<PathBuf> {
+) -> engine::Result<PathBuf> {
     let instance_dir = directories.instances_dir().join(&source.path);
     let canonical_instance_dir =
         tokio::fs::canonicalize(&instance_dir)
@@ -514,7 +514,7 @@ pub(super) async fn source_screenshots_dir(
     Ok(screenshots_dir)
 }
 
-async fn ensure_directory_is_not_symlink(path: &Path) -> crate::Result<()> {
+async fn ensure_directory_is_not_symlink(path: &Path) -> engine::Result<()> {
     match tokio::fs::symlink_metadata(path).await {
         Ok(metadata) if metadata.file_type().is_symlink() => {
             bail!(ErrorKind::InputError(
@@ -534,7 +534,7 @@ async fn ensure_directory_is_not_symlink(path: &Path) -> crate::Result<()> {
 async fn available_target_path(
     target_dir: &Path,
     file_name: &str,
-) -> crate::Result<PathBuf> {
+) -> engine::Result<PathBuf> {
     validate_file_name(file_name)?;
     let original = target_dir.join(file_name);
     if !tokio::fs::try_exists(&original)
@@ -562,7 +562,7 @@ async fn available_target_path(
     unreachable!()
 }
 
-fn validate_png_dimensions(bytes: &[u8]) -> crate::Result<(u32, u32)> {
+fn validate_png_dimensions(bytes: &[u8]) -> engine::Result<(u32, u32)> {
     let validate = || -> Result<_, png::DecodingError> {
         let mut reader = png::Decoder::new(Cursor::new(bytes)).read_info()?;
         let dimensions = (reader.info().width, reader.info().height);
@@ -575,7 +575,7 @@ fn validate_png_dimensions(bytes: &[u8]) -> crate::Result<(u32, u32)> {
     ))
 }
 
-fn ensure_unique_keys(keys: &[ScreenshotKey]) -> crate::Result<()> {
+fn ensure_unique_keys(keys: &[ScreenshotKey]) -> engine::Result<()> {
     let mut unique = HashSet::new();
     if keys.iter().all(|key| unique.insert(key)) {
         return Ok(());
@@ -586,7 +586,7 @@ fn ensure_unique_keys(keys: &[ScreenshotKey]) -> crate::Result<()> {
     ))
 }
 
-fn validate_file_name(file_name: &str) -> crate::Result<()> {
+fn validate_file_name(file_name: &str) -> engine::Result<()> {
     let path = Path::new(file_name);
     let mut components = path.components();
     let is_single_file =

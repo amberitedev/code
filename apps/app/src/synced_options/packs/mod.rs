@@ -10,23 +10,25 @@ pub use worker::queue_reconciliation;
 
 pub(crate) use storage::reconcile_retention;
 
+pub(super) use operations::seed_from_instance;
+pub(crate) use operations::sync_new_pack;
 pub use operations::{
     desync_pack, get_pack_sync_preview, list_synced_packs, remove_synced_pack,
     set_synced_pack_enabled, sync_pack, upload_synced_pack,
 };
-pub(super) use operations::{seed_from_instance, sync_new_pack};
+pub(crate) use reconciliation::decorate_content;
 pub use reconciliation::reconcile_after_content_change;
 pub(super) use reconciliation::{
-    capture_resource_pack_selection_change, decorate_content, detach,
-    prepare_instance_update, reconcile, schedule_reconciliation,
+    capture_resource_pack_selection_change, detach, prepare_instance_update,
+    reconcile, schedule_reconciliation,
 };
 pub use worker::flush;
 
-use crate::state::{
+use anyhow::bail;
+use engine::state::{
     ContentItem, InstanceMetadata, ProjectType, SyncedOption, Version,
 };
-use crate::{ErrorKind, InvalidPack};
-use anyhow::bail;
+use engine::{ErrorKind, InvalidPack};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -74,7 +76,7 @@ struct PackPlacement {
 }
 
 #[derive(Clone, Serialize)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct PackSyncTarget {
     pub instance_id: String,
     pub name: String,
@@ -84,14 +86,14 @@ pub struct PackSyncTarget {
 }
 
 #[derive(Clone, Serialize)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct PackSyncPreview {
-    #[cfg_attr(feature = "export-ts", ts(type = "unknown"))]
+    #[cfg_attr(test, ts(type = "unknown"))]
     pub pack: ContentItem,
     pub instances: Vec<PackSyncTarget>,
 }
 
-fn pack_option(project_type: ProjectType) -> crate::Result<SyncedOption> {
+fn pack_option(project_type: ProjectType) -> engine::Result<SyncedOption> {
     let option = match project_type {
         ProjectType::ResourcePack => SyncedOption::ResourcePacks,
         ProjectType::DataPack => SyncedOption::DataPacks,
@@ -132,7 +134,7 @@ fn pack_path(pack: &SyncedPack, file_name: &str) -> String {
 }
 
 /// Whether a changed content path can affect pack syncing.
-pub(super) fn is_pack_path(path: &str) -> bool {
+pub(crate) fn is_pack_path(path: &str) -> bool {
     matches!(
         ProjectType::get_from_parent_folder(path),
         Some(ProjectType::ResourcePack | ProjectType::DataPack)

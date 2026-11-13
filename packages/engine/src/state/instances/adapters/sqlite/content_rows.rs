@@ -516,7 +516,7 @@ pub(crate) async fn delete_content_set_sync_state(
     Ok(())
 }
 
-pub(crate) async fn get_instance_files<'e, E>(
+pub async fn get_instance_files<'e, E>(
     instance_id: &str,
     exec: E,
 ) -> crate::Result<Vec<InstanceFile>>
@@ -539,7 +539,7 @@ where
     rows.into_iter().map(TryInto::try_into).collect()
 }
 
-pub(crate) async fn get_locked_instance_file_ids(
+pub async fn get_locked_instance_file_ids(
     instance_id: &str,
     pool: &SqlitePool,
 ) -> crate::Result<HashSet<String>> {
@@ -818,7 +818,7 @@ pub(crate) async fn restore_instance_content_snapshot(
     Ok(())
 }
 
-pub(crate) async fn get_content_entries<'e, E>(
+pub async fn get_content_entries<'e, E>(
     content_set_id: &str,
     exec: E,
 ) -> crate::Result<Vec<ContentEntry>>
@@ -873,7 +873,7 @@ pub(crate) struct UpsertInstanceFile<'a> {
     pub missing: bool,
 }
 
-pub(crate) async fn get_instance_file_by_relative_path(
+pub async fn get_instance_file_by_relative_path(
     instance_id: &str,
     relative_path: &str,
     pool: &SqlitePool,

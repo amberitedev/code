@@ -7,11 +7,9 @@ use contracts::{
     ApiError, Empty, Json,
     server::{Req, route},
 };
-use engine::{
-    Engine,
-    instance::{ScreenshotGroup, ScreenshotKey},
-    routes::api_error,
-};
+use engine::{Engine, routes::api_error};
+
+use super::{ScreenshotGroup, ScreenshotKey};
 
 use crate::server::{
     AppState,
@@ -54,7 +52,7 @@ pub fn routes() -> Router<AppState> {
 }
 
 fn files(
-    screenshots: Vec<engine::instance::InstanceScreenshot>,
+    screenshots: Vec<crate::screenshots::InstanceScreenshot>,
 ) -> Json<Vec<ScreenshotFile>> {
     Json(screenshots.into_iter().map(ScreenshotFile::from).collect())
 }
@@ -63,7 +61,7 @@ async fn list_instance_screenshots(
     State(engine): State<Arc<Engine>>,
     Req { params, .. }: Req<ListInstanceScreenshots>,
 ) -> Answer<Json<Vec<ScreenshotFile>>> {
-    engine::instance::list_screenshots(&engine, &params.id)
+    crate::screenshots::list_screenshots(&engine, &params.id)
         .await
         .map(files)
         .map_err(api_error)
@@ -73,7 +71,7 @@ async fn list_screenshots(
     State(engine): State<Arc<Engine>>,
     _: Req<ListScreenshots>,
 ) -> Answer<Json<Vec<ScreenshotFile>>> {
-    engine::instance::list_all_screenshots(&engine)
+    crate::screenshots::list_all_screenshots(&engine)
         .await
         .map(files)
         .map_err(api_error)
@@ -83,7 +81,7 @@ async fn list_synced_screenshots(
     State(engine): State<Arc<Engine>>,
     _: Req<ListSyncedScreenshots>,
 ) -> Answer<Json<Vec<ScreenshotFile>>> {
-    engine::instance::list_synced_screenshots(&engine)
+    crate::screenshots::list_synced_screenshots(&engine)
         .await
         .map(files)
         .map_err(api_error)
@@ -97,7 +95,7 @@ async fn save_edited_screenshot(
         instance_id: query.instance_id,
         file_name: query.file_name,
     };
-    engine::instance::save_edited_screenshot(
+    crate::screenshots::save_edited_screenshot(
         &engine,
         key,
         body.bytes.into(),
@@ -112,7 +110,7 @@ async fn delete_screenshots(
     State(engine): State<Arc<Engine>>,
     Req { body, .. }: Req<DeleteScreenshots>,
 ) -> Answer<Empty> {
-    engine::instance::delete_screenshots(&engine, &body)
+    crate::screenshots::delete_screenshots(&engine, &body)
         .await
         .map(|()| Empty)
         .map_err(api_error)
@@ -122,17 +120,21 @@ async fn export_screenshots(
     State(engine): State<Arc<Engine>>,
     Req { body, .. }: Req<ExportScreenshots>,
 ) -> Answer<Empty> {
-    engine::instance::export_screenshots(&engine, &body.keys, body.export_path)
-        .await
-        .map(|()| Empty)
-        .map_err(api_error)
+    crate::screenshots::export_screenshots(
+        &engine,
+        &body.keys,
+        body.export_path,
+    )
+    .await
+    .map(|()| Empty)
+    .map_err(api_error)
 }
 
 async fn move_screenshots(
     State(engine): State<Arc<Engine>>,
     Req { body, .. }: Req<MoveScreenshots>,
 ) -> Answer<Json<Vec<ScreenshotKey>>> {
-    engine::instance::move_screenshots(
+    crate::screenshots::move_screenshots(
         &engine,
         &body.keys,
         &body.target_instance_id,
@@ -146,7 +148,7 @@ async fn list_screenshot_groups(
     State(engine): State<Arc<Engine>>,
     _: Req<ListScreenshotGroups>,
 ) -> Answer<Json<Vec<ScreenshotGroup>>> {
-    engine::instance::list_screenshot_groups(&engine)
+    crate::screenshots::list_screenshot_groups(&engine)
         .await
         .map(Json)
         .map_err(api_error)
@@ -156,7 +158,7 @@ async fn create_screenshot_group(
     State(engine): State<Arc<Engine>>,
     Req { body, .. }: Req<CreateScreenshotGroup>,
 ) -> Answer<Json<ScreenshotGroup>> {
-    engine::instance::create_screenshot_group(
+    crate::screenshots::create_screenshot_group(
         &engine,
         body.name,
         body.screenshot_ids,
@@ -170,7 +172,7 @@ async fn rename_screenshot_group(
     State(engine): State<Arc<Engine>>,
     Req { params, body, .. }: Req<RenameScreenshotGroup>,
 ) -> Answer<Json<ScreenshotGroup>> {
-    engine::instance::rename_screenshot_group(&engine, params.id, body.name)
+    crate::screenshots::rename_screenshot_group(&engine, params.id, body.name)
         .await
         .map(Json)
         .map_err(api_error)
@@ -180,7 +182,7 @@ async fn delete_screenshot_group(
     State(engine): State<Arc<Engine>>,
     Req { params, .. }: Req<DeleteScreenshotGroup>,
 ) -> Answer<Empty> {
-    engine::instance::delete_screenshot_group(&engine, params.id)
+    crate::screenshots::delete_screenshot_group(&engine, params.id)
         .await
         .map(|()| Empty)
         .map_err(api_error)
@@ -190,7 +192,7 @@ async fn set_screenshot_group_memberships(
     State(engine): State<Arc<Engine>>,
     Req { body, .. }: Req<SetScreenshotGroupMemberships>,
 ) -> Answer<Empty> {
-    engine::instance::set_screenshot_group_memberships(&engine, body)
+    crate::screenshots::set_screenshot_group_memberships(&engine, body)
         .await
         .map(|()| Empty)
         .map_err(api_error)
@@ -200,7 +202,7 @@ async fn import_screenshot_groups(
     State(engine): State<Arc<Engine>>,
     Req { body, .. }: Req<ImportScreenshotGroups>,
 ) -> Answer<Empty> {
-    engine::instance::import_screenshot_groups(&engine, body)
+    crate::screenshots::import_screenshot_groups(&engine, body)
         .await
         .map(|()| Empty)
         .map_err(api_error)

@@ -28,7 +28,7 @@ impl ContentStore {
             )?))
     }
 
-    pub(crate) async fn lookup(
+    pub async fn lookup(
         &self,
         sha512: Option<&str>,
         size: Option<u64>,
@@ -154,7 +154,7 @@ impl ContentStore {
         Ok((stored_file.path == canonical).then_some(stored_file))
     }
 
-    pub(crate) async fn file_content(
+    pub async fn file_content(
         &self,
         file: &InstanceFile,
     ) -> crate::Result<FileContent> {
@@ -182,7 +182,7 @@ impl ContentStore {
         })
     }
 
-    pub(crate) async fn read_path(
+    pub async fn read_path(
         &self,
         file: &InstanceFile,
         instance_path: &str,

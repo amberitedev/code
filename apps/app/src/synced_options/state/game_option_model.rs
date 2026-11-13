@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 /// Minecraft versions sometimes store the same setting in different ways. We
 /// convert those formats into one of these values before syncing them.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
-#[cfg_attr(feature = "export-ts", ts(rename = "GameOptionCanonicalValue"))]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "GameOptionCanonicalValue"))]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum CanonicalValue {
     Bool(bool),
@@ -36,7 +36,7 @@ impl CanonicalValue {
 
 /// Whether a setting comes from Minecraft itself or was added by a mod.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum GameOptionKind {
     Vanilla,

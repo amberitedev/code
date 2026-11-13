@@ -1,14 +1,10 @@
 use std::path::PathBuf;
 
-use crate::{
-    ErrorKind,
-    event::{
-        CommandPayload, EventSink,
-        emit::{emit_command, emit_warning},
-    },
+use anyhow::{Context, bail};
+use engine::{
+    ErrorKind, EventSink, emit_command, emit_warning, prelude::CommandPayload,
     util::io,
 };
-use anyhow::{Context, bail};
 use url::form_urlencoded;
 use urlencoding::decode;
 
@@ -19,7 +15,7 @@ use urlencoding::decode;
 pub async fn handle_url(
     events: &EventSink,
     sublink: &str,
-) -> crate::Result<CommandPayload> {
+) -> engine::Result<CommandPayload> {
     Ok(match sublink.split_once('/') {
         // /mod/{id}   -    Installs a mod of mod id
         Some(("mod", id)) => CommandPayload::InstallMod { id: id.to_string() },
@@ -136,7 +132,7 @@ pub async fn handle_url(
 pub async fn parse_command(
     events: &EventSink,
     command_string: &str,
-) -> crate::Result<CommandPayload> {
+) -> engine::Result<CommandPayload> {
     tracing::debug!("Parsing external command");
 
     // modrinth://some-command
@@ -172,7 +168,7 @@ pub async fn parse_command(
 pub async fn parse_and_emit_command(
     events: &EventSink,
     command_string: &str,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     let command = parse_command(events, command_string).await?;
     emit_command(events, command).await?;
     Ok(())

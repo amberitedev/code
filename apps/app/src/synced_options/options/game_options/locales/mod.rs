@@ -7,10 +7,10 @@ mod storage;
 
 use super::catalog::{is_never_sync_key, setting_by_file_key};
 use super::options_file::{GameOptionsDocument, options_path, read_document};
-use crate::ErrorKind;
-use crate::state::{Engine, InstanceMetadata};
 use anyhow::bail;
 use archive::{ArchiveIndex, Translations};
+use engine::ErrorKind;
+use engine::state::{Engine, InstanceMetadata};
 use serde::{Deserialize, Serialize};
 use sources::{ArchiveSource, Snapshot};
 use std::collections::{BTreeMap, HashMap};
@@ -46,13 +46,13 @@ struct Origin {
 }
 
 #[derive(Default, Serialize)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct GameSettingLocaleLabels {
     pub settings: BTreeMap<String, GameSettingLocaleLabel>,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct GameSettingLocaleLabel {
     pub label: String,
     pub choices: BTreeMap<String, String>,
@@ -60,7 +60,7 @@ pub struct GameSettingLocaleLabel {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct GameSettingSource {
     pub instance_id: String,
     pub file_name: String,
@@ -69,7 +69,7 @@ pub struct GameSettingSource {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct GameSettingSourceProject {
     pub id: String,
     pub title: String,
@@ -90,25 +90,31 @@ impl GameLocaleIndexer {
 
 /// Reindexes mod setting labels soon, once for any number of calls before it runs.
 pub fn queue_game_locale_index(state: &Engine) {
-    state.synced_options.locales.queue();
+    crate::hooks::synced_options(state).locales.queue();
 }
 
 pub(crate) fn start_game_locale_indexer(
     state: Arc<Engine>,
     on_indexed: impl Fn() + Send + 'static,
 ) {
-    if state
-        .synced_options
+    if crate::hooks::synced_options(&state)
         .locales
         .started
         .swap(true, Ordering::AcqRel)
     {
         return;
     }
-    state.synced_options.locales.notify.notify_one();
+    crate::hooks::synced_options(&state)
+        .locales
+        .notify
+        .notify_one();
     tokio::spawn(async move {
         loop {
-            state.synced_options.locales.notify.notified().await;
+            crate::hooks::synced_options(&state)
+                .locales
+                .notify
+                .notified()
+                .await;
             tokio::time::sleep(std::time::Duration::from_millis(300)).await;
             if let Err(error) = index_installed_sources(&state).await {
                 tracing::warn!(%error, "Game setting locales: indexing failed");
@@ -191,7 +197,7 @@ async fn cached_archive(
     state: &Engine,
     source: &ArchiveSource,
     cache: &mut HashMap<String, Arc<ArchiveIndex>>,
-) -> crate::Result<Arc<ArchiveIndex>> {
+) -> engine::Result<Arc<ArchiveIndex>> {
     if let Some(index) = cache.get(&source.hash) {
         return Ok(index.clone());
     }
@@ -204,8 +210,8 @@ async fn cached_archive(
 }
 
 #[tracing::instrument(skip_all, err)]
-async fn index_installed_sources(state: &Engine) -> crate::Result<()> {
-    let mut instances = crate::state::list_instances(&state.pool).await?;
+async fn index_installed_sources(state: &Engine) -> engine::Result<()> {
+    let mut instances = engine::state::list_instances(state.pool()).await?;
     instances.sort_by(|a, b| a.instance.id.cmp(&b.instance.id));
     let mut candidates = Vec::new();
     let mut resolver = origins::OriginResolver::default();
@@ -241,7 +247,7 @@ async fn index_installed_sources(state: &Engine) -> crate::Result<()> {
         resolver
             .index_snapshot(state, &snapshot_id, snapshot.clone())
             .await?;
-        let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let mut tx = state.pool().begin_with("BEGIN IMMEDIATE").await?;
         for (id, key) in &keys {
             let observation = Observation {
                 snapshot: snapshot_id.clone(),
@@ -264,7 +270,7 @@ async fn index_installed_sources(state: &Engine) -> crate::Result<()> {
             keys,
         });
     }
-    let rows = storage::load(&state.pool, None).await?;
+    let rows = storage::load(state.pool(), None).await?;
     for row in rows {
         if row.origin.is_some() {
             continue;
@@ -306,7 +312,7 @@ async fn index_installed_sources(state: &Engine) -> crate::Result<()> {
         for observation in observations {
             match resolver.resolve(state, &observation).await {
                 Ok(Some(origin)) => {
-                    storage::pin(&state.pool, &row, &origin).await?;
+                    storage::pin(state.pool(), &row, &origin).await?;
                     break;
                 }
                 Ok(None) => {}
@@ -347,7 +353,7 @@ pub async fn get_game_setting_locale_labels(
     locale: &str,
     option_ids: Vec<String>,
     refresh_sources: bool,
-) -> crate::Result<GameSettingLocaleLabels> {
+) -> engine::Result<GameSettingLocaleLabels> {
     if option_ids.len() > 16_384 {
         bail!(ErrorKind::InputError(
             "too many requested game-setting labels".to_string()
@@ -371,15 +377,15 @@ pub async fn get_game_setting_locale_labels(
         ));
     }
     if refresh_sources {
-        state.synced_options.locales.queue();
+        crate::hooks::synced_options(state).locales.queue();
     }
     let scope = instance_id.unwrap_or("");
-    let mut rows = storage::load(&state.pool, Some(scope)).await?;
+    let mut rows = storage::load(state.pool(), Some(scope)).await?;
     if scope.is_empty() {
         let mut sourced: std::collections::HashSet<_> =
             rows.iter().map(|row| row.option_id.clone()).collect();
         // Unsaved global options have no provenance row; use an indexed local label until saved.
-        for row in storage::load(&state.pool, None).await? {
+        for row in storage::load(state.pool(), None).await? {
             if !row.scope.is_empty()
                 && requested.contains(&row.option_id)
                 && row.origin.is_some()

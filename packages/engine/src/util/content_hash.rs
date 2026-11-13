@@ -5,7 +5,7 @@ use tokio::io::{AsyncRead, AsyncWrite, BufReader, copy_buf};
 use tokio_util::io::InspectReader;
 
 #[derive(Debug, Eq, PartialEq)]
-pub(crate) struct FileHashes {
+pub struct FileHashes {
     pub sha512: String,
     pub size: u64,
 }
@@ -43,7 +43,7 @@ pub(crate) async fn temporary_file(
     Ok((File::from_std(file), path))
 }
 
-pub(crate) async fn hash_file(path: &Path) -> crate::Result<FileHashes> {
+pub async fn hash_file(path: &Path) -> crate::Result<FileHashes> {
     hash_file_with_progress(path, &|_| {}).await
 }
 

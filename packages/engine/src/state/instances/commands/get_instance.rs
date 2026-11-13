@@ -22,7 +22,7 @@ pub struct InstanceMetadata {
     pub launch_overrides: InstanceLaunchOverrides,
 }
 
-pub(crate) async fn get_instance(
+pub async fn get_instance(
     instance_id: &str,
     pool: &SqlitePool,
 ) -> crate::Result<Option<InstanceMetadata>> {
@@ -62,7 +62,7 @@ pub(crate) async fn get_instances_metadata(
         .collect())
 }
 
-pub(crate) async fn list_instances(
+pub async fn list_instances(
     pool: &SqlitePool,
 ) -> crate::Result<Vec<InstanceMetadata>> {
     let records = instance_rows::list_instance_metadata(pool).await?;

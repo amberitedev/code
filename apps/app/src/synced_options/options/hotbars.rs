@@ -8,9 +8,9 @@ use super::orchestration::{
     backup_bytes, create_synced_directories, option_effective,
     seed_from_instance, synced_options_path,
 };
-use crate::state::{InstanceMetadata, SyncedOption};
-use crate::util::io;
-use crate::{Engine, ErrorKind};
+use engine::state::{InstanceMetadata, SyncedOption};
+use engine::util::io;
+use engine::{Engine, ErrorKind};
 use quartz_nbt::{NbtCompound, NbtList, NbtTag};
 use std::path::PathBuf;
 
@@ -48,13 +48,12 @@ impl HotbarFamily {
 pub(super) async fn hotbar_family(
     metadata: &InstanceMetadata,
     state: &Engine,
-) -> crate::Result<HotbarFamily> {
-    let (manifest, version_index) =
-        crate::launcher::resolve_minecraft_manifest(
-            &metadata.applied_content_set.game_version,
-            state,
-        )
-        .await?;
+) -> engine::Result<HotbarFamily> {
+    let (manifest, version_index) = engine::resolve_minecraft_manifest(
+        &metadata.applied_content_set.game_version,
+        state,
+    )
+    .await?;
     let cutoff = manifest
         .versions
         .iter()
@@ -72,7 +71,9 @@ pub(super) async fn hotbar_family(
     )
 }
 
-pub(super) async fn backup_shared_hotbars(state: &Engine) -> crate::Result<()> {
+pub(super) async fn backup_shared_hotbars(
+    state: &Engine,
+) -> engine::Result<()> {
     let sync_state = read_hotbar_state(state).await?;
     let legacy = hotbar_family_root(&sync_state.nbt, HotbarFamily::Legacy);
     let components =
@@ -103,7 +104,7 @@ pub(super) async fn backup_shared_hotbars(state: &Engine) -> crate::Result<()> {
 pub(super) async fn ensure_hotbar(
     metadata: &InstanceMetadata,
     state: &Engine,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     create_synced_directories(state).await?;
     if !hotbar_state_exists(state).await? {
         seed_from_instance(metadata, SyncedOption::CreativeHotbars, state)
@@ -115,7 +116,7 @@ pub(super) async fn ensure_hotbar(
 pub(super) async fn reconcile_hotbar(
     metadata: &InstanceMetadata,
     state: &Engine,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     if !option_effective(metadata, SyncedOption::CreativeHotbars, state).await?
     {
         return Ok(());
@@ -198,7 +199,7 @@ pub(super) async fn reconcile_hotbar(
 pub(super) async fn instance_hotbars_differ_from_synced(
     metadata: &InstanceMetadata,
     state: &Engine,
-) -> crate::Result<bool> {
+) -> engine::Result<bool> {
     let local_path = instance_dir(metadata, state).join(HOTBAR_FILE);
     if !local_path.exists() {
         return Ok(false);
@@ -415,8 +416,8 @@ fn family_data_versions_key(family: HotbarFamily) -> &'static str {
     }
 }
 
-pub(super) async fn regenerate_hotbars(state: &Engine) -> crate::Result<()> {
-    let instances = crate::state::list_instances(&state.pool).await?;
+pub(super) async fn regenerate_hotbars(state: &Engine) -> engine::Result<()> {
+    let instances = engine::state::list_instances(state.pool()).await?;
     for metadata in instances {
         if option_effective(&metadata, SyncedOption::CreativeHotbars, state)
             .await?
@@ -430,7 +431,7 @@ pub(super) async fn regenerate_hotbars(state: &Engine) -> crate::Result<()> {
 async fn write_hotbar_projection(
     metadata: &InstanceMetadata,
     state: &Engine,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     let sync_state = read_hotbar_state(state).await?;
     let family = hotbar_family(metadata, state).await?;
     let root = hotbar_family_root(&sync_state.nbt, family);
@@ -468,7 +469,7 @@ async fn remove_other_hotbar_checkpoint(
     instance_id: &str,
     family: HotbarFamily,
     state: &Engine,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     let variant = family.as_str();
     sqlx::query!(
         "
@@ -480,7 +481,7 @@ async fn remove_other_hotbar_checkpoint(
         instance_id,
         variant,
     )
-    .execute(&state.pool)
+    .execute(state.pool())
     .await?;
     Ok(())
 }
@@ -499,7 +500,7 @@ pub(super) fn empty_hotbar_root() -> NbtCompound {
 
 pub(super) async fn read_hotbar_state(
     state: &Engine,
-) -> crate::Result<HotbarState> {
+) -> engine::Result<HotbarState> {
     let row = sqlx::query!(
         r#"
 		SELECT schema_version AS "schema_version!: i64",
@@ -508,7 +509,7 @@ pub(super) async fn read_hotbar_state(
 		WHERE singleton = 1
         "#,
     )
-    .fetch_optional(&state.pool)
+    .fetch_optional(state.pool())
     .await?;
     if let Some(row) = row {
         return Ok(HotbarState {
@@ -524,7 +525,9 @@ pub(super) async fn read_hotbar_state(
     })
 }
 
-pub(super) async fn hotbar_state_exists(state: &Engine) -> crate::Result<bool> {
+pub(super) async fn hotbar_state_exists(
+    state: &Engine,
+) -> engine::Result<bool> {
     Ok(sqlx::query_scalar!(
         r#"
 		SELECT EXISTS(
@@ -532,7 +535,7 @@ pub(super) async fn hotbar_state_exists(state: &Engine) -> crate::Result<bool> {
 		) AS "exists!: bool"
 		"#,
     )
-    .fetch_one(&state.pool)
+    .fetch_one(state.pool())
     .await?)
 }
 
@@ -563,7 +566,7 @@ pub(super) fn increment_hotbar_revision(state: &mut HotbarState) {
 pub(super) async fn write_hotbar_state(
     state: &Engine,
     hotbar_state: &HotbarState,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     let bytes = nbt_to_bytes(&hotbar_state.nbt)?;
     sqlx::query!(
         "
@@ -579,7 +582,7 @@ pub(super) async fn write_hotbar_state(
         hotbar_state.revision,
         bytes,
     )
-    .execute(&state.pool)
+    .execute(state.pool())
     .await?;
     Ok(())
 }

@@ -18,11 +18,12 @@ mod dev;
 mod discord;
 mod engine_handle;
 mod friends;
+mod hooks;
 mod import;
 mod launch;
 mod library;
+mod logger;
 mod onboarding;
-mod pack_hooks;
 mod presence;
 mod reactions;
 mod screenshots;
@@ -125,7 +126,7 @@ fn main() {
 
     let _log_guard =
         match data_dir::logs_dir(&tauri_context.config().identifier) {
-            Ok(logs_dir) => engine::start_logger(&logs_dir),
+            Ok(logs_dir) => logger::start_logger(&logs_dir),
             Err(error) => {
                 eprintln!("Could not start logger: {error:#}");
                 None
@@ -394,9 +395,9 @@ fn main() {
                                 return;
                             };
                             let toast_result: engine::Result<()> = tauri::async_runtime::block_on(async move {
-                                let mut settings = engine::settings::get(state).await?;
+                                let mut settings = crate::settings::get(state).await?;
                                 settings.pending_update_toast_for_version = version;
-                                engine::settings::set(state, settings).await?;
+                                crate::settings::set(state, settings).await?;
                                 Ok(())
                             });
                             if let Err(e) = toast_result {

@@ -1,5 +1,4 @@
-use super::super::DesyncServerMode;
-use super::super::synced_options::{
+use super::super::options::{
     get_global_options, instance_is_running, instance_option_enabled,
     option_can_apply_while_running, sync_files_are_protected,
 };
@@ -11,16 +10,17 @@ use super::{
     PackLibrary, PackPlacement, PackSyncPreview, PackSyncTarget, SyncedPack,
     pack_option, version_compatible,
 };
-use crate::event::{InstancePayloadType, emit::emit_instance};
-use crate::state::instances::commands;
-use crate::state::{
+use anyhow::{Context, bail};
+use bytes::Bytes;
+use engine::server_list::DesyncServerMode;
+use engine::state::instances::commands;
+use engine::state::{
     CacheBehaviour, CachedEntry, ContentItem, ContentSourceKind, Engine,
     InstanceMetadata, ProjectType, SyncedOption, SyncedPackInfo,
 };
-use crate::util::io;
-use crate::{ErrorKind, InvalidPack};
-use anyhow::{Context, bail};
-use bytes::Bytes;
+use engine::util::io;
+use engine::{ErrorKind, InvalidPack};
+use engine::{InstancePayloadType, emit_instance};
 use std::io::{Cursor, Read};
 use std::path::Path;
 use uuid::Uuid;
@@ -29,11 +29,11 @@ async fn source(
     instance_id: &str,
     project_path: &str,
     state: &Engine,
-) -> crate::Result<(InstanceMetadata, ContentItem)> {
-    let metadata = crate::state::get_instance(instance_id, &state.pool)
+) -> engine::Result<(InstanceMetadata, ContentItem)> {
+    let metadata = engine::state::get_instance(instance_id, state.pool())
         .await?
         .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
-    super::super::projects::ensure_metadata_content_unlocked(&metadata)?;
+    engine::instance::ensure_metadata_content_unlocked(&metadata)?;
     let option = ProjectType::get_from_parent_folder(project_path)
         .and_then(|project_type| pack_option(project_type).ok());
     if sync_files_are_protected(&metadata)
@@ -67,7 +67,7 @@ pub(super) async fn pack_from_item(
     mut item: ContentItem,
     metadata: &InstanceMetadata,
     state: &Engine,
-) -> crate::Result<SyncedPack> {
+) -> engine::Result<SyncedPack> {
     pack_option(item.project_type)?;
     if !path_util::is_safe_file_name(&item.file_name)
         || item.file_path
@@ -75,7 +75,7 @@ pub(super) async fn pack_from_item(
     {
         bail!(ErrorKind::InvalidPack(InvalidPack::InvalidPath));
     }
-    let file = crate::state::instances::adapters::sqlite::content_rows::get_instance_file_by_relative_path(&metadata.instance.id, &item.file_path, &state.pool).await?
+    let file = engine::state::instances::adapters::sqlite::content_rows::get_instance_file_by_relative_path(&metadata.instance.id, &item.file_path, state.pool()).await?
 		.ok_or(ErrorKind::InvalidPack(InvalidPack::NotRegistered))?;
     let source = state
         .content_store
@@ -93,7 +93,7 @@ pub(super) async fn pack_from_item(
         CachedEntry::get_version(
             &version.id,
             None,
-            &state.pool,
+            state.pool(),
             &state.api_semaphore,
             &state.sessions,
         )
@@ -103,7 +103,7 @@ pub(super) async fn pack_from_item(
     } else {
         vec![metadata.applied_content_set.game_version.clone()]
     };
-    let sha1 = crate::util::fetch::sha1_async(bytes.clone()).await?;
+    let sha1 = engine::util::fetch::sha1_async(bytes.clone()).await?;
     let sha512 = cache_bytes(bytes, state).await?;
     let selected = if item.project_type == ProjectType::ResourcePack {
         match super::selection::selected_in_instance(
@@ -143,7 +143,7 @@ pub(super) async fn pack_from_item(
 pub(super) fn validate_pack(
     bytes: &[u8],
     project_type: ProjectType,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     let mut archive = zip::ZipArchive::new(Cursor::new(bytes))
         .context(ErrorKind::InvalidPack(InvalidPack::NotZip))?;
     let mut metadata = String::new();
@@ -197,7 +197,7 @@ pub async fn get_pack_sync_preview(
     state: &Engine,
     instance_id: &str,
     project_path: &str,
-) -> crate::Result<PackSyncPreview> {
+) -> engine::Result<PackSyncPreview> {
     let (metadata, item) = source(instance_id, project_path, state).await?;
     let candidate = pack_from_item(item, &metadata, state).await?;
     let library = read_library(state).await?;
@@ -208,7 +208,7 @@ pub async fn get_pack_sync_preview(
             CachedEntry::get_project_versions(
                 &project.id,
                 Some(CacheBehaviour::MustRevalidate),
-                &state.pool,
+                state.pool(),
                 &state.api_semaphore,
                 &state.sessions,
             )
@@ -219,7 +219,7 @@ pub async fn get_pack_sync_preview(
         None
     };
     let global = get_global_options(state).await?;
-    let instances = crate::state::list_instances(&state.pool)
+    let instances = engine::state::list_instances(state.pool())
         .await?
         .iter()
         .map(|instance| {
@@ -258,19 +258,19 @@ pub async fn get_pack_sync_preview(
 }
 
 pub async fn sync_pack(
-    state: &crate::Engine,
+    state: &engine::Engine,
     instance_id: &str,
     project_path: &str,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     sync_pack_inner(state, instance_id, project_path, false).await
 }
 
-pub(in crate::api::instance) async fn seed_from_instance(
+pub(in crate::synced_options) async fn seed_from_instance(
     metadata: &InstanceMetadata,
     option: SyncedOption,
     state: &Engine,
-) -> crate::Result<()> {
-    super::super::projects::ensure_metadata_content_unlocked(metadata)?;
+) -> engine::Result<()> {
+    engine::instance::ensure_metadata_content_unlocked(metadata)?;
     let instance_id = &metadata.instance.id;
     let items = commands::list_pack_content(instance_id, state).await?;
     let mut candidates = Vec::new();
@@ -352,8 +352,8 @@ pub(in crate::api::instance) async fn seed_from_instance(
     write_library(&library, state).await
 }
 
-pub(in crate::api::instance) async fn sync_new_pack(
-    state: &crate::Engine,
+pub(crate) async fn sync_new_pack(
+    state: &engine::Engine,
     instance_id: &str,
     project_path: &str,
 ) {
@@ -372,18 +372,18 @@ pub(in crate::api::instance) async fn sync_new_pack(
 }
 
 async fn sync_pack_inner(
-    state: &crate::Engine,
+    state: &engine::Engine,
     instance_id: &str,
     project_path: &str,
     automatic: bool,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     loop {
         match sync_pack_once(state, instance_id, project_path, automatic).await
         {
             Err(error)
                 if matches!(
-                    error.downcast_ref::<crate::ErrorKind>(),
-                    Some(crate::ErrorKind::PackSyncChanged)
+                    error.downcast_ref::<engine::ErrorKind>(),
+                    Some(engine::ErrorKind::PackSyncChanged)
                 ) =>
             {
                 tokio::task::yield_now().await;
@@ -398,15 +398,16 @@ async fn sync_pack_once(
     instance_id: &str,
     project_path: &str,
     automatic: bool,
-) -> crate::Result<()> {
-    let initial_metadata = crate::state::get_instance(instance_id, &state.pool)
-        .await?
-        .ok_or(ErrorKind::InputError("unknown instance".to_owned()))?;
+) -> engine::Result<()> {
+    let initial_metadata =
+        engine::state::get_instance(instance_id, state.pool())
+            .await?
+            .ok_or(ErrorKind::InputError("unknown instance".to_owned()))?;
     let mut preparation =
         super::worker::Preparation::new(state, &initial_metadata).await;
     let global = get_global_options(state).await?;
     if automatic {
-        let metadata = crate::state::get_instance(instance_id, &state.pool)
+        let metadata = engine::state::get_instance(instance_id, state.pool())
             .await?
             .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
         let option = ProjectType::get_from_parent_folder(project_path)
@@ -506,11 +507,11 @@ async fn sync_pack_once(
 pub async fn list_synced_packs(
     state: &Engine,
     project_type: ProjectType,
-) -> crate::Result<Vec<ContentItem>> {
+) -> engine::Result<Vec<ContentItem>> {
     pack_option(project_type)?;
     let library = read_library(state).await?;
     let global = get_global_options(state).await?;
-    let instances = crate::state::list_instances(&state.pool).await?;
+    let instances = engine::state::list_instances(state.pool()).await?;
     Ok(library
         .packs
         .iter()
@@ -544,7 +545,7 @@ pub async fn upload_synced_pack(
     path: &Path,
     project_type: ProjectType,
     game_versions: Vec<String>,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     let option = pack_option(project_type)?;
     if game_versions.is_empty() {
         bail!(ErrorKind::InputError(
@@ -569,9 +570,9 @@ pub async fn upload_synced_pack(
     })
     .await??;
     let size = bytes.len() as u64;
-    let sha1 = crate::util::fetch::sha1_async(bytes.clone()).await?;
+    let sha1 = engine::util::fetch::sha1_async(bytes.clone()).await?;
     let sha512 = cache_bytes(bytes, state).await?;
-    let _guard = state.synced_options.lock().await;
+    let _guard = crate::hooks::synced_options(state).lock().await;
     if !get_global_options(state).await?.get(option) {
         bail!(ErrorKind::InputError(
             "pack syncing was disabled while preparing the upload".to_owned(),
@@ -622,8 +623,8 @@ pub async fn set_synced_pack_enabled(
     state: &Engine,
     pack_id: &str,
     enabled: bool,
-) -> crate::Result<()> {
-    let _guard = state.synced_options.lock().await;
+) -> engine::Result<()> {
+    let _guard = crate::hooks::synced_options(state).lock().await;
     let mut library = read_library(state).await?;
     let pack = library
         .packs
@@ -637,8 +638,8 @@ pub async fn set_synced_pack_enabled(
 pub async fn remove_synced_pack(
     state: &Engine,
     pack_id: &str,
-) -> crate::Result<()> {
-    let _guard = state.synced_options.lock().await;
+) -> engine::Result<()> {
+    let _guard = crate::hooks::synced_options(state).lock().await;
     let mut library = read_library(state).await?;
     let pack = library
         .packs
@@ -654,12 +655,12 @@ pub async fn desync_pack(
     instance_id: &str,
     pack_id: &str,
     mode: DesyncServerMode,
-) -> crate::Result<()> {
-    let _guard = state.synced_options.lock().await;
-    let metadata = crate::state::get_instance(instance_id, &state.pool)
+) -> engine::Result<()> {
+    let _guard = crate::hooks::synced_options(state).lock().await;
+    let metadata = engine::state::get_instance(instance_id, state.pool())
         .await?
         .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
-    super::super::projects::ensure_metadata_content_unlocked(&metadata)?;
+    engine::instance::ensure_metadata_content_unlocked(&metadata)?;
     if sync_files_are_protected(&metadata) {
         bail!(ErrorKind::InputError(
             "wait for the instance to finish installing before changing pack syncing"

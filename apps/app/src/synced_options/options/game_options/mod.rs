@@ -34,7 +34,7 @@ mod settings_editor;
 mod source_selection;
 mod write_shared_settings;
 
-pub use crate::state::{CanonicalValue, GameOptionKind};
+pub use crate::synced_options::state::{CanonicalValue, GameOptionKind};
 pub use api_types::{
     EditableGameSetting, GameOptionCompatibility,
     GameOptionCompatibilityBucket, GameOptionCompatibilityReason,
@@ -56,7 +56,7 @@ pub use locales::{
     GameSettingLocaleLabel, GameSettingLocaleLabels, GameSettingSource,
     GameSettingSourceProject, get_game_setting_locale_labels,
 };
-pub use pack_updates::{GameOptionsPackSource, capture_pack_base};
+pub use pack_updates::capture_pack_base;
 pub use settings_editor::{get_config, preview_changes, save_changes};
 pub use source_selection::list_sync_sources;
 
@@ -65,23 +65,23 @@ pub(crate) use fullscreen::{
 };
 pub(crate) use write_shared_settings::sync_all_participating_instances;
 
-pub(in crate::api::instance) use resource_pack_options::{
+pub(in crate::synced_options) use resource_pack_options::{
     ResourcePackOptionsUpdate, merge_resource_pack_entries,
     merge_resource_pack_order, read_resource_pack_entries,
 };
 
-pub(in crate::api::instance) use pack_updates::{
+pub(in crate::synced_options) use pack_updates::{
     detach_instance, prepare_instance_update_with_state,
 };
-pub(in crate::api::instance) use source_selection::initialize_from_source_instance;
-pub(in crate::api::instance) use write_shared_settings::{
+pub(in crate::synced_options) use source_selection::initialize_from_source_instance;
+pub(in crate::synced_options) use write_shared_settings::{
     apply_instance_with_state, capture_instance_file_change,
 };
 
-pub(in crate::api::instance) async fn canonical_exists(
-    state: &crate::state::Engine,
-) -> crate::Result<bool> {
-    crate::state::shared_game_options_exist(&state.pool).await
+pub(in crate::synced_options) async fn canonical_exists(
+    state: &engine::state::Engine,
+) -> engine::Result<bool> {
+    crate::synced_options::state::shared_game_options_exist(state.pool()).await
 }
 
 const OPTIONS_FILE: &str = "options.txt";

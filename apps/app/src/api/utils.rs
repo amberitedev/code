@@ -1,4 +1,4 @@
-use engine::{emit_warning, handler};
+use engine::emit_warning;
 use tauri::{Manager, Runtime};
 use tokio::sync::broadcast;
 
@@ -29,7 +29,7 @@ async fn parse_opening_command(
         return Ok(Command::Amberite(command));
     }
     Ok(Command::Modrinth(
-        handler::parse_command(events, command).await?,
+        crate::desktop::deep_links::parse_command(events, command).await?,
     ))
 }
 
@@ -101,7 +101,10 @@ pub async fn handle_command<R: Runtime>(
         }
         return Ok(());
     }
-    Ok(engine::handler::parse_and_emit_command(&events, &command).await?)
+    Ok(
+        crate::desktop::deep_links::parse_and_emit_command(&events, &command)
+            .await?,
+    )
 }
 
 async fn opening_command(

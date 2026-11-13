@@ -114,7 +114,7 @@ pub(crate) async fn running_process_start_times(
     .await?)
 }
 
-pub(crate) async fn instance_has_running_process(
+pub async fn instance_has_running_process(
     instance_id: &str,
     state: &crate::Engine,
 ) -> crate::Result<bool> {

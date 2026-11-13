@@ -3,7 +3,7 @@ use crate::util::io::{self, IOError};
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug)]
-pub(crate) struct ScannedContentFile {
+pub struct ScannedContentFile {
     pub relative_path: String,
     pub file_name: String,
     pub enabled: bool,
@@ -13,7 +13,7 @@ pub(crate) struct ScannedContentFile {
     pub has_linked_parent: bool,
 }
 
-pub(crate) fn scan_content_files(
+pub fn scan_content_files(
     instances_dir: &Path,
     instance_path: &str,
 ) -> crate::Result<Vec<ScannedContentFile>> {

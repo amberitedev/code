@@ -65,7 +65,7 @@ pub async fn authenticate_finish_flow(
     crate::accounts::self_hosted::set_sessions(&state.sessions, Some(&creds));
 
     if let Err(error) =
-        engine::onboarding_checklist::mark_logged_into_modrinth(state).await
+        crate::onboarding::mark_logged_into_modrinth(state).await
     {
         tracing::warn!(
             "Failed to mark Modrinth login in onboarding checklist: {error}"

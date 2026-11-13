@@ -35,7 +35,7 @@ pub(crate) struct InstalledContentFile {
     pub enabled: bool,
 }
 
-pub(crate) struct DownloadedProjectVersion {
+pub struct DownloadedProjectVersion {
     pub file_name: String,
     pub file: fetch::DownloadedFile,
     pub project_type: ProjectType,
@@ -43,7 +43,7 @@ pub(crate) struct DownloadedProjectVersion {
     pub version_id: String,
 }
 
-pub(crate) struct InstanceInstallProjectRequest {
+pub struct InstanceInstallProjectRequest {
     pub project_id: String,
     pub version_id: Option<String>,
     pub content_type: ContentType,
@@ -181,7 +181,7 @@ fn target_preferences(
     }
 }
 
-pub(crate) async fn resolve_install_plan(
+pub async fn resolve_install_plan(
     instance_id: &str,
     request: InstanceInstallProjectRequest,
     state: &Engine,
@@ -402,7 +402,7 @@ pub(crate) async fn add_project_from_version(
         .await
 }
 
-pub(crate) async fn download_project_version(
+pub async fn download_project_version(
     instance_id: &str,
     version_id: &str,
     reason: DownloadReason,
@@ -489,7 +489,7 @@ pub(crate) async fn download_project_version_with_progress(
     })
 }
 
-pub(crate) async fn add_downloaded_project_version(
+pub async fn add_downloaded_project_version(
     instance_id: &str,
     downloaded: DownloadedProjectVersion,
     source_kind: ContentSourceKind,
@@ -646,7 +646,7 @@ pub(crate) async fn add_project_bytes(
     .await
 }
 
-pub(crate) async fn content_source_kind_for_project_path(
+pub async fn content_source_kind_for_project_path(
     instance_id: &str,
     project_path: &str,
     state: &Engine,

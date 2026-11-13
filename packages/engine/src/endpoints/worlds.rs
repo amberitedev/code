@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{endpoints, instances::InstanceRef};
 use crate::{
-    instance::DesyncServerMode,
+    server_list::DesyncServerMode,
     worlds::{
         DisplayStatus, ProtocolVersion, ServerPackStatus, ServerStatus, World,
         WorldType, WorldWithInstance,

@@ -19,8 +19,8 @@ use super::api_types::{
 
 pub(super) use data_versions::LEGACY_DATA_VERSIONS;
 use known_vanilla_keys::{KNOWN_VANILLA_KEYS, NEVER_SYNC_KEYS};
-pub(in crate::api::instance) use legacy_key_bindings::LEGACY_KEY_BINDINGS;
-pub(in crate::api::instance) use version_changes::*;
+pub(in crate::synced_options) use legacy_key_bindings::LEGACY_KEY_BINDINGS;
+pub(in crate::synced_options) use version_changes::*;
 
 #[derive(Clone, Copy)]
 pub(super) enum SettingEditor {

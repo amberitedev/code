@@ -10,10 +10,11 @@ use super::options_file::{
     validate_raw_key_value,
 };
 use super::read_instance_changes::custom_setting_id;
-use crate::ErrorKind;
-use crate::state::{CanonicalValue, Engine, GameOptionKind, InstanceMetadata};
-use crate::util::io;
+use crate::synced_options::state::{CanonicalValue, GameOptionKind};
 use anyhow::bail;
+use engine::ErrorKind;
+use engine::state::{Engine, InstanceMetadata};
+use engine::util::io;
 use std::collections::HashSet;
 
 fn compatibility(controlled: bool) -> GameOptionCompatibility {
@@ -79,16 +80,17 @@ fn editor_revision(metadata: &InstanceMetadata, input_bytes: &[u8]) -> String {
 async fn load_instance_document(
     instance_id: &str,
     state: &Engine,
-) -> crate::Result<(
+) -> engine::Result<(
     InstanceMetadata,
     GameOptionsDocument,
     Vec<u8>,
     HashSet<String>,
 )> {
-    let metadata = crate::state::get_instance(instance_id, &state.pool)
+    let metadata = engine::state::get_instance(instance_id, state.pool())
         .await?
         .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
-    if crate::state::game_options_sync_is_enabled(&state.pool).await?
+    if crate::synced_options::state::game_options_sync_is_enabled(state.pool())
+        .await?
         && metadata.synced_options.game_options
     {
         bail!(ErrorKind::InputError(
@@ -111,7 +113,7 @@ async fn load_instance_document(
     let (document, input_bytes) = read_document(&path).await?;
     let mut controlled_keys = currently_launcher_owned_keys(&metadata);
     if metadata.launch_overrides.force_fullscreen.is_none()
-        && crate::state::Settings::get(&state.pool)
+        && engine::state::Settings::get(state.pool())
             .await?
             .force_fullscreen
     {
@@ -212,7 +214,7 @@ fn encode_setting_value(
     document: &GameOptionsDocument,
     setting: &EditableGameSetting,
     value: &CanonicalValue,
-) -> crate::Result<(String, String)> {
+) -> engine::Result<(String, String)> {
     let game_version = metadata.applied_content_set.game_version.as_str();
     if let Some(definition) = setting_by_id(&setting.option_id) {
         validate_canonical_value(Some(definition), value)?;
@@ -251,7 +253,7 @@ fn encode_setting_value(
 async fn load_editor(
     instance_id: &str,
     state: &Engine,
-) -> crate::Result<GameSettingsEditorState> {
+) -> engine::Result<GameSettingsEditorState> {
     let (metadata, document, input_bytes, controlled_keys) =
         load_instance_document(instance_id, state).await?;
     Ok(build_editor_state(
@@ -265,8 +267,8 @@ async fn load_editor(
 pub async fn get_config(
     state: &Engine,
     instance_id: &str,
-) -> crate::Result<GameSettingsEditorState> {
-    let _guard = state.synced_options.lock().await;
+) -> engine::Result<GameSettingsEditorState> {
+    let _guard = crate::hooks::synced_options(state).lock().await;
     load_editor(instance_id, state).await
 }
 
@@ -274,8 +276,8 @@ pub async fn preview_changes(
     state: &Engine,
     instance_id: &str,
     request: UpdateGameSettingsRequest,
-) -> crate::Result<GameSettingsEditorState> {
-    let _guard = state.synced_options.lock().await;
+) -> engine::Result<GameSettingsEditorState> {
+    let _guard = crate::hooks::synced_options(state).lock().await;
     let (metadata, document, input_bytes, controlled_keys) =
         load_instance_document(instance_id, state).await?;
     let mut editor = build_editor_state(
@@ -334,8 +336,8 @@ pub async fn save_changes(
     state: &Engine,
     instance_id: &str,
     request: UpdateGameSettingsRequest,
-) -> crate::Result<SaveGameSettingsResult> {
-    let _guard = state.synced_options.lock().await;
+) -> engine::Result<SaveGameSettingsResult> {
+    let _guard = crate::hooks::synced_options(state).lock().await;
     let (metadata, mut document, input_bytes, controlled_keys) =
         load_instance_document(instance_id, state).await?;
     let current_editor = build_editor_state(

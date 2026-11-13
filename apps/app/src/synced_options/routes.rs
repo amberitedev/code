@@ -8,15 +8,13 @@ use contracts::{
     ApiError, Empty, Json,
     server::{Req, route},
 };
-use engine::{
-    Engine,
-    instance::{
-        GameOptionsSourceCandidate, GameSettingLocaleLabels,
-        GameSettingsEditorState, GlobalSyncedOptions, PackSyncPreview,
-        SaveGameSettingsResult, SyncedOptionJoinPreview, SyncedOptionsOverview,
-        SyncedServer,
-    },
-    routes::api_error,
+use engine::{Engine, routes::api_error};
+
+use super::{
+    GameOptionsSourceCandidate, GameSettingLocaleLabels,
+    GameSettingsEditorState, GlobalSyncedOptions, PackSyncPreview,
+    SaveGameSettingsResult, SyncedOptionJoinPreview, SyncedOptionsOverview,
+    SyncedServer,
 };
 
 use crate::server::{
@@ -88,7 +86,7 @@ async fn list_game_options_sources(
     State(engine): State<Arc<Engine>>,
     _: Req<ListGameOptionsSources>,
 ) -> Answer<Json<Vec<GameOptionsSourceCandidate>>> {
-    engine::instance::list_game_options_sync_sources(&engine)
+    crate::synced_options::list_game_options_sync_sources(&engine)
         .await
         .map(Json)
         .map_err(api_error)
@@ -98,7 +96,7 @@ async fn get_synced_game_options(
     State(engine): State<Arc<Engine>>,
     _: Req<GetSyncedGameOptions>,
 ) -> Answer<Json<GameSettingsEditorState>> {
-    engine::instance::get_synced_game_options_config(&engine)
+    crate::synced_options::get_synced_game_options_config(&engine)
         .await
         .map(Json)
         .map_err(api_error)
@@ -108,7 +106,7 @@ async fn preview_synced_game_options(
     State(engine): State<Arc<Engine>>,
     Req { body, .. }: Req<PreviewSyncedGameOptions>,
 ) -> Answer<Json<GameSettingsEditorState>> {
-    engine::instance::preview_synced_game_option_changes(&engine, body)
+    crate::synced_options::preview_synced_game_option_changes(&engine, body)
         .await
         .map(Json)
         .map_err(api_error)
@@ -118,7 +116,7 @@ async fn save_synced_game_options(
     State(engine): State<Arc<Engine>>,
     Req { body, .. }: Req<SaveSyncedGameOptions>,
 ) -> Answer<Json<SaveGameSettingsResult>> {
-    engine::instance::save_synced_game_option_changes(&engine, body)
+    crate::synced_options::save_synced_game_option_changes(&engine, body)
         .await
         .map(Json)
         .map_err(api_error)
@@ -128,7 +126,7 @@ async fn get_instance_game_options(
     State(engine): State<Arc<Engine>>,
     Req { params, .. }: Req<GetInstanceGameOptions>,
 ) -> Answer<Json<GameSettingsEditorState>> {
-    engine::instance::get_local_game_options_config(&engine, &params.id)
+    crate::synced_options::get_local_game_options_config(&engine, &params.id)
         .await
         .map(Json)
         .map_err(api_error)
@@ -138,7 +136,7 @@ async fn preview_instance_game_options(
     State(engine): State<Arc<Engine>>,
     Req { params, body, .. }: Req<PreviewInstanceGameOptions>,
 ) -> Answer<Json<GameSettingsEditorState>> {
-    engine::instance::preview_local_game_option_changes(
+    crate::synced_options::preview_local_game_option_changes(
         &engine, &params.id, body,
     )
     .await
@@ -150,17 +148,19 @@ async fn save_instance_game_options(
     State(engine): State<Arc<Engine>>,
     Req { params, body, .. }: Req<SaveInstanceGameOptions>,
 ) -> Answer<Json<SaveGameSettingsResult>> {
-    engine::instance::save_local_game_option_changes(&engine, &params.id, body)
-        .await
-        .map(Json)
-        .map_err(api_error)
+    crate::synced_options::save_local_game_option_changes(
+        &engine, &params.id, body,
+    )
+    .await
+    .map(Json)
+    .map_err(api_error)
 }
 
 async fn get_game_setting_labels(
     State(engine): State<Arc<Engine>>,
     Req { body, .. }: Req<GetGameSettingLabels>,
 ) -> Answer<Json<GameSettingLocaleLabels>> {
-    engine::instance::get_game_setting_locale_labels(
+    crate::synced_options::get_game_setting_locale_labels(
         &engine,
         body.instance_id.as_deref(),
         &body.locale,
@@ -176,7 +176,7 @@ async fn set_instance_synced_option(
     State(engine): State<Arc<Engine>>,
     Req { params, body, .. }: Req<SetInstanceSyncedOption>,
 ) -> Answer<Empty> {
-    engine::instance::set_synced_option(
+    crate::synced_options::set_synced_option(
         &engine,
         &params.id,
         body.option,
@@ -192,7 +192,7 @@ async fn preview_synced_option_join(
     State(engine): State<Arc<Engine>>,
     Req { params, query, .. }: Req<PreviewSyncedOptionJoin>,
 ) -> Answer<Json<SyncedOptionJoinPreview>> {
-    engine::instance::get_synced_option_join_preview(
+    crate::synced_options::get_synced_option_join_preview(
         &engine,
         &params.id,
         query.option,
@@ -206,7 +206,7 @@ async fn get_instance_synced_options(
     State(engine): State<Arc<Engine>>,
     Req { params, .. }: Req<GetInstanceSyncedOptions>,
 ) -> Answer<Json<SyncedOptionsOverview>> {
-    engine::instance::get_synced_options_overview(&engine, &params.id)
+    crate::synced_options::get_synced_options_overview(&engine, &params.id)
         .await
         .map(Json)
         .map_err(api_error)
@@ -216,7 +216,7 @@ async fn get_global_synced_options(
     State(engine): State<Arc<Engine>>,
     _: Req<GetGlobalSyncedOptions>,
 ) -> Answer<Json<GlobalSyncedOptions>> {
-    engine::instance::get_global_synced_options(&engine)
+    crate::synced_options::get_global_synced_options(&engine)
         .await
         .map(Json)
         .map_err(api_error)
@@ -226,7 +226,7 @@ async fn get_initialized_synced_options(
     State(engine): State<Arc<Engine>>,
     _: Req<GetInitializedSyncedOptions>,
 ) -> Answer<Json<GlobalSyncedOptions>> {
-    engine::instance::get_initialized_synced_options(&engine)
+    crate::synced_options::get_initialized_synced_options(&engine)
         .await
         .map(Json)
         .map_err(api_error)
@@ -236,7 +236,7 @@ async fn set_global_synced_option(
     State(engine): State<Arc<Engine>>,
     Req { body, .. }: Req<SetGlobalSyncedOption>,
 ) -> Answer<Json<GlobalSyncedOptions>> {
-    engine::instance::set_global_synced_option(
+    crate::synced_options::set_global_synced_option(
         &engine,
         body.option,
         body.enabled,
@@ -253,13 +253,15 @@ async fn rebuild_synced_options(
 ) -> Answer<Empty> {
     match body.instance_id {
         Some(instance_id) => {
-            engine::instance::reconcile_instance_synced_options(
+            crate::synced_options::reconcile_instance_synced_options(
                 &engine,
                 &instance_id,
             )
             .await
         }
-        None => engine::instance::reconcile_all_synced_options(&engine).await,
+        None => {
+            crate::synced_options::reconcile_all_synced_options(&engine).await
+        }
     }
     .map(|()| Empty)
     .map_err(api_error)
@@ -269,7 +271,7 @@ async fn get_command_history(
     State(engine): State<Arc<Engine>>,
     _: Req<GetCommandHistory>,
 ) -> Answer<Json<String>> {
-    engine::instance::get_command_history(&engine)
+    crate::synced_options::get_command_history(&engine)
         .await
         .map(Json)
         .map_err(api_error)
@@ -279,7 +281,7 @@ async fn set_command_history(
     State(engine): State<Arc<Engine>>,
     Req { body, .. }: Req<SetCommandHistory>,
 ) -> Answer<Json<String>> {
-    engine::instance::set_command_history(&engine, &body.contents)
+    crate::synced_options::set_command_history(&engine, &body.contents)
         .await
         .map(Json)
         .map_err(api_error)
@@ -289,7 +291,7 @@ async fn list_synced_servers(
     State(engine): State<Arc<Engine>>,
     _: Req<ListSyncedServers>,
 ) -> Answer<Json<Vec<SyncedServer>>> {
-    engine::instance::list_synced_servers(&engine)
+    crate::synced_options::list_synced_servers(&engine)
         .await
         .map(Json)
         .map_err(api_error)
@@ -299,7 +301,7 @@ async fn update_synced_server(
     State(engine): State<Arc<Engine>>,
     Req { body, .. }: Req<UpdateSyncedServer>,
 ) -> Answer<Empty> {
-    engine::instance::update_synced_server(&engine, body)
+    crate::synced_options::update_synced_server(&engine, body)
         .await
         .map(|()| Empty)
         .map_err(api_error)
@@ -309,7 +311,7 @@ async fn remove_synced_server(
     State(engine): State<Arc<Engine>>,
     Req { params, .. }: Req<RemoveSyncedServer>,
 ) -> Answer<Empty> {
-    engine::instance::remove_synced_server(&engine, &params.id)
+    crate::synced_options::remove_synced_server(&engine, &params.id)
         .await
         .map(|()| Empty)
         .map_err(api_error)
@@ -319,7 +321,7 @@ async fn list_synced_packs(
     State(engine): State<Arc<Engine>>,
     Req { query, .. }: Req<ListSyncedPacks>,
 ) -> Answer<Json<SyncedPacks>> {
-    engine::instance::list_synced_packs(&engine, query.project_type.into())
+    crate::synced_options::list_synced_packs(&engine, query.project_type.into())
         .await
         .map(|packs| Json(SyncedPacks(packs)))
         .map_err(api_error)
@@ -329,7 +331,7 @@ async fn upload_synced_pack(
     State(engine): State<Arc<Engine>>,
     Req { body, .. }: Req<UploadSyncedPack>,
 ) -> Answer<Empty> {
-    engine::instance::upload_synced_pack(
+    crate::synced_options::upload_synced_pack(
         &engine,
         &body.path,
         body.project_type.into(),
@@ -344,17 +346,21 @@ async fn set_synced_pack_enabled(
     State(engine): State<Arc<Engine>>,
     Req { params, body, .. }: Req<SetSyncedPackEnabled>,
 ) -> Answer<Empty> {
-    engine::instance::set_synced_pack_enabled(&engine, &params.id, body.enabled)
-        .await
-        .map(|()| Empty)
-        .map_err(api_error)
+    crate::synced_options::set_synced_pack_enabled(
+        &engine,
+        &params.id,
+        body.enabled,
+    )
+    .await
+    .map(|()| Empty)
+    .map_err(api_error)
 }
 
 async fn remove_synced_pack(
     State(engine): State<Arc<Engine>>,
     Req { params, .. }: Req<RemoveSyncedPack>,
 ) -> Answer<Empty> {
-    engine::instance::remove_synced_pack(&engine, &params.id)
+    crate::synced_options::remove_synced_pack(&engine, &params.id)
         .await
         .map(|()| Empty)
         .map_err(api_error)
@@ -364,7 +370,7 @@ async fn preview_pack_sync(
     State(engine): State<Arc<Engine>>,
     Req { params, query, .. }: Req<PreviewPackSync>,
 ) -> Answer<Json<PackSyncPreview>> {
-    engine::instance::get_pack_sync_preview(
+    crate::synced_options::get_pack_sync_preview(
         &engine,
         &params.id,
         &query.project_path,
@@ -378,7 +384,7 @@ async fn sync_pack(
     State(engine): State<Arc<Engine>>,
     Req { params, body, .. }: Req<SyncPack>,
 ) -> Answer<Empty> {
-    engine::instance::sync_pack(&engine, &params.id, &body.project_path)
+    crate::synced_options::sync_pack(&engine, &params.id, &body.project_path)
         .await
         .map(|()| Empty)
         .map_err(api_error)
@@ -388,7 +394,7 @@ async fn desync_pack(
     State(engine): State<Arc<Engine>>,
     Req { params, query, .. }: Req<DesyncPack>,
 ) -> Answer<Empty> {
-    engine::instance::desync_pack(
+    crate::synced_options::desync_pack(
         &engine,
         &params.id,
         &params.pack_id,

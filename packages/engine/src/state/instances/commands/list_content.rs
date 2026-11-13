@@ -226,7 +226,7 @@ pub(crate) async fn list_indexed_content(
     .await
 }
 
-pub(crate) async fn list_pack_content(
+pub async fn list_pack_content(
     instance_id: &str,
     state: &Engine,
 ) -> crate::Result<Vec<ContentItem>> {

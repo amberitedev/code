@@ -21,7 +21,7 @@ pub(crate) async fn symlink_metadata_if_exists(
     }
 }
 
-pub(crate) async fn sync_directory(path: &Path) -> crate::Result<()> {
+pub async fn sync_directory(path: &Path) -> crate::Result<()> {
     #[cfg(unix)]
     File::open(path).await?.sync_all().await?;
     #[cfg(not(unix))]

@@ -10,19 +10,18 @@ pub use self::edit_instance::{
 
 mod get_instance;
 pub use self::get_instance::InstanceMetadata;
+pub use self::get_instance::{get_instance, list_instances};
 pub(crate) use self::get_instance::{
-    get_instance, get_instance_metadata, get_instances_metadata, list_instances,
+    get_instance_metadata, get_instances_metadata,
 };
 
-mod game_options;
-pub(crate) use self::game_options::*;
-
 mod list_content;
+pub use self::list_content::list_pack_content;
 pub(crate) use self::list_content::{
     dependencies_to_content_items, get_content_projects,
     get_installed_project_ids_for_instance, get_instance_install_candidates,
     get_linked_modpack_info, list_content, list_content_sets,
-    list_indexed_content, list_linked_modpack_content, list_pack_content,
+    list_indexed_content, list_linked_modpack_content,
 };
 
 mod embedded_content_metadata;
@@ -43,10 +42,10 @@ mod launch_context;
 pub(crate) use self::launch_context::*;
 
 mod apply_content_install;
-pub(crate) use self::apply_content_install::*;
+pub use self::apply_content_install::*;
 
 mod content_mutation;
-pub(crate) use self::content_mutation::{
+pub use self::content_mutation::{
     ContentOrigin, InstallContent, install_stored_file, remove_project,
     toggle_disable_project,
 };

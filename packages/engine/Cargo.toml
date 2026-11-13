@@ -107,8 +107,6 @@ tokio = { workspace = true, features = [
 tokio-util = { workspace = true, features = ["compat", "io", "io-util", "time"] }
 toml = { workspace = true }
 tracing = { workspace = true }
-tracing-error = { workspace = true }
-tracing-subscriber = { workspace = true, features = ["chrono", "env-filter"] }
 ts-rs = { workspace = true, features = [
   "bytes-impl",
   "chrono-impl",

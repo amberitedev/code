@@ -21,7 +21,7 @@ pub(crate) struct ScreenshotGroupRow {
 pub(crate) async fn list_screenshots(
     instance_id: &str,
     pool: &SqlitePool,
-) -> crate::Result<Vec<ScreenshotRow>> {
+) -> engine::Result<Vec<ScreenshotRow>> {
     Ok(sqlx::query_as!(
         ScreenshotRow,
         r#"
@@ -50,7 +50,7 @@ pub(crate) async fn get_screenshot_by_key(
     instance_id: &str,
     file_name: &str,
     pool: &SqlitePool,
-) -> crate::Result<Option<ScreenshotRow>> {
+) -> engine::Result<Option<ScreenshotRow>> {
     Ok(sqlx::query_as!(
         ScreenshotRow,
         r#"
@@ -79,7 +79,7 @@ pub(crate) async fn copy_group_membership(
     source_id: &str,
     edited_id: &str,
     tx: &mut Transaction<'_, Sqlite>,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     sqlx::query!(
         r#"
 		INSERT INTO screenshot_group_memberships (screenshot_id, group_id)
@@ -100,7 +100,7 @@ pub(crate) async fn copy_group_membership(
 pub(crate) async fn insert_screenshot(
     row: &ScreenshotRow,
     tx: &mut Transaction<'_, Sqlite>,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     sqlx::query!(
         "
 		INSERT INTO screenshots (
@@ -131,7 +131,7 @@ pub(crate) async fn insert_screenshot(
 pub(crate) async fn update_screenshot(
     row: &ScreenshotRow,
     tx: &mut Transaction<'_, Sqlite>,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     sqlx::query!(
         "
 		UPDATE screenshots
@@ -161,7 +161,7 @@ pub(crate) async fn update_screenshot(
 pub(crate) async fn delete_screenshot(
     id: &str,
     tx: &mut Transaction<'_, Sqlite>,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     sqlx::query!("DELETE FROM screenshots WHERE id = ?", id)
         .execute(&mut **tx)
         .await?;
@@ -175,7 +175,7 @@ pub(crate) async fn move_screenshot(
     target_instance_id: &str,
     target_file_name: &str,
     pool: &SqlitePool,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     sqlx::query!(
         "DELETE FROM screenshots WHERE instance_id = ? AND file_name = ?",
@@ -208,7 +208,7 @@ pub(crate) async fn delete_screenshot_by_key(
     instance_id: &str,
     file_name: &str,
     pool: &SqlitePool,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     sqlx::query!(
         "DELETE FROM screenshots WHERE instance_id = ? AND file_name = ?",
         instance_id,
@@ -222,7 +222,7 @@ pub(crate) async fn delete_screenshot_by_key(
 
 pub(crate) async fn list_groups(
     pool: &SqlitePool,
-) -> crate::Result<Vec<ScreenshotGroupRow>> {
+) -> engine::Result<Vec<ScreenshotGroupRow>> {
     Ok(sqlx::query_as!(
         ScreenshotGroupRow,
         "

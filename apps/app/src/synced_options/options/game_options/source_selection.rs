@@ -10,19 +10,20 @@ use super::options_file::{
     options_path, read_document, validate_raw_key_value,
 };
 use super::read_instance_changes::custom_setting_id;
-use crate::ErrorKind;
-use crate::state::{
-    CanonicalValue, Engine, InstanceMetadata, load_game_option_preferences,
-    load_game_options_sync_state, load_shared_game_options,
+use crate::synced_options::state::{
+    CanonicalValue, load_game_option_preferences, load_game_options_sync_state,
+    load_shared_game_options,
 };
 use anyhow::bail;
 use chrono::Utc;
+use engine::ErrorKind;
+use engine::state::{Engine, InstanceMetadata};
 
 /// Uses the selected instance's `options.txt` as the initial shared settings.
-pub(in crate::api::instance) async fn initialize_from_source_instance(
+pub(in crate::synced_options) async fn initialize_from_source_instance(
     metadata: &InstanceMetadata,
     state: &Engine,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     let path = options_path(metadata, state);
     if !path.exists() {
         bail!(ErrorKind::InputError(
@@ -33,10 +34,11 @@ pub(in crate::api::instance) async fn initialize_from_source_instance(
     let (document, _) = read_document(&path).await?;
     let launcher_keys = currently_launcher_owned_keys(metadata);
     let entries = document.effective_entries();
-    let current_values = load_shared_game_options(&state.pool).await?;
-    let current_preferences = load_game_option_preferences(&state.pool).await?;
+    let current_values = load_shared_game_options(state.pool()).await?;
+    let current_preferences =
+        load_game_option_preferences(state.pool()).await?;
     let (current_revision, _) =
-        load_game_options_sync_state(&state.pool, CATALOG_REVISION).await?;
+        load_game_options_sync_state(state.pool(), CATALOG_REVISION).await?;
     let now = Utc::now().timestamp();
     let source_version = metadata.applied_content_set.game_version.as_str();
     let source_id = metadata.instance.id.as_str();
@@ -46,7 +48,7 @@ pub(in crate::api::instance) async fn initialize_from_source_instance(
         } else {
             None
         };
-    let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = state.pool().begin_with("BEGIN IMMEDIATE").await?;
     let catalog_revision = CATALOG_REVISION as i64;
 
     sqlx::query!(
@@ -316,15 +318,15 @@ pub(in crate::api::instance) async fn initialize_from_source_instance(
     )
     .await;
     tx.commit().await?;
-    state.synced_options.locales.queue();
+    crate::hooks::synced_options(state).locales.queue();
     Ok(())
 }
 
 pub async fn list_sync_sources(
     state: &Engine,
-) -> crate::Result<Vec<GameOptionsSourceCandidate>> {
-    let _guard = state.synced_options.lock().await;
-    let instances = crate::state::list_instances(&state.pool).await?;
+) -> engine::Result<Vec<GameOptionsSourceCandidate>> {
+    let _guard = crate::hooks::synced_options(state).lock().await;
+    let instances = engine::state::list_instances(state.pool()).await?;
     let mut sources = Vec::with_capacity(instances.len());
     for metadata in instances {
         let path = options_path(&metadata, state);

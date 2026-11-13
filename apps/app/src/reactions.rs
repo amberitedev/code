@@ -44,7 +44,7 @@ pub fn start(
         Arc::clone(&presence),
     ));
     let app_events = app.state::<broadcast::Sender<AppEvent>>().inner().clone();
-    instance::start_synced_options(engine, move || {
+    crate::synced_options::start_synced_options(engine, move || {
         let _ = app_events.send(AppEvent::GameOptionLocalesUpdated);
     });
     tauri::async_runtime::spawn(react(
@@ -79,8 +79,10 @@ async fn react(
                 if let Some(engine) = engine.upgrade() {
                     tauri::async_runtime::spawn(async move {
                         if let Err(error) =
-                            instance::reconcile_all_synced_options(&engine)
-                                .await
+                            crate::synced_options::reconcile_all_synced_options(
+                                &engine,
+                            )
+                            .await
                         {
                             tracing::warn!(
                                 "Failed to reconcile synced options after missed events: {error}"
@@ -110,7 +112,7 @@ async fn react(
 async fn reaction(engine: &Engine, event: &Event) -> Option<Reaction> {
     match event {
         Event::Process(process) => {
-            let window = match engine::settings::get(engine).await {
+            let window = match crate::settings::get(engine).await {
                 Ok(settings) => match process.event {
                     ProcessPayloadType::Launched => settings
                         .hide_on_process_start
@@ -143,30 +145,39 @@ async fn follow(engine: Arc<Engine>, event: Event) {
             let result = match event {
                 InstancePayloadType::Created => {
                     if let Err(error) =
-                        engine::onboarding_checklist::mark_created_instance(
-                            &engine,
-                        )
-                        .await
+                        crate::onboarding::mark_created_instance(&engine).await
                     {
                         tracing::warn!(
                             "Failed to mark instance creation in onboarding checklist: {error}"
                         );
                     }
-                    instance::reconcile_instance_synced_options(
+                    crate::synced_options::reconcile_instance_synced_options(
                         &engine,
                         &instance_id,
                     )
                     .await
                 }
                 InstancePayloadType::Edited => {
-                    instance::reconcile_instance_synced_options(
+                    crate::synced_options::reconcile_instance_synced_options(
                         &engine,
                         &instance_id,
                     )
                     .await
                 }
                 InstancePayloadType::Removed => {
-                    instance::remove_generated_instance_files(
+                    crate::hooks::forget_instance(&engine, &instance_id);
+                    if let Err(error) =
+                        crate::library::hidden_instances::forget_instance(
+                            &instance_id,
+                            engine.pool(),
+                        )
+                        .await
+                    {
+                        tracing::warn!(
+                            "Failed to forget hidden instance {instance_id}: {error}"
+                        );
+                    }
+                    crate::synced_options::remove_generated_instance_files(
                         &instance_id,
                         &engine,
                     )
@@ -181,21 +192,22 @@ async fn follow(engine: Arc<Engine>, event: Event) {
             event: ProcessPayloadType::Finished,
             ..
         }) => {
-            let result = instance::reconcile_instance_synced_options(
-                &engine,
-                &instance_id,
-            )
-            .await;
+            let result =
+                crate::synced_options::reconcile_instance_synced_options(
+                    &engine,
+                    &instance_id,
+                )
+                .await;
             (instance_id, result)
         }
         Event::InstallJob(job)
             if matches!(job.status, InstallJobStatus::Succeeded) =>
         {
-            instance::queue_game_locale_index(&engine);
+            crate::synced_options::queue_game_locale_index(&engine);
             if let Some(instance_id) = &job.instance_id
                 && matches!(job.kind, InstallJobKind::BulkUpdateContent)
             {
-                instance::reconcile_synced_packs_after_content_change(
+                crate::synced_options::reconcile_synced_packs_after_content_change(
                     &engine,
                     instance_id,
                 )
@@ -240,21 +252,24 @@ async fn files_changed(engine: &Engine, instance_id: &str, paths: &[String]) {
         }
     }
     if packs {
-        instance::queue_synced_pack_reconciliation(engine, instance_id);
+        crate::synced_options::queue_synced_pack_reconciliation(
+            engine,
+            instance_id,
+        );
     }
     if locales {
-        instance::queue_game_locale_index(engine);
+        crate::synced_options::queue_game_locale_index(engine);
     }
     if screenshots
         && let Err(error) =
-            instance::reconcile_screenshots(engine, instance_id).await
+            crate::screenshots::reconcile_screenshots(engine, instance_id).await
     {
         tracing::warn!(
             "Failed to reconcile screenshots after filesystem change: {error}"
         );
     }
     for file_name in option_files {
-        if let Err(error) = instance::reconcile_synced_option_file(
+        if let Err(error) = crate::synced_options::reconcile_synced_option_file(
             engine,
             instance_id,
             file_name,
@@ -316,10 +331,10 @@ mod tests {
             (true, false, Some(WindowChange::Minimize), None),
             (false, true, None, Some(WindowChange::Restore)),
         ] {
-            let mut settings = engine::settings::get(&engine).await.unwrap();
+            let mut settings = crate::settings::get(&engine).await.unwrap();
             settings.hide_on_process_start = hide;
             settings.refocus_on_game_close = refocus;
-            engine::settings::set(&engine, settings).await.unwrap();
+            crate::settings::set(&engine, settings).await.unwrap();
 
             for (event, window) in [
                 (ProcessPayloadType::Launched, on_launch),
@@ -365,9 +380,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn created_and_removed_instances_are_followed() {
         let dir = tempfile::tempdir().unwrap();
-        let engine = crate::pack_hooks::tests::offline_engine(dir.path()).await;
+        let engine = crate::hooks::tests::offline_engine(dir.path()).await;
         let mut events = engine.events.subscribe();
-        let created = crate::pack_hooks::tests::create(&engine).await;
+        let created = crate::hooks::tests::create(&engine).await;
         let id = created.instance.id;
 
         let event = next_instance_event(&mut events, |event| {
@@ -375,7 +390,7 @@ mod tests {
         })
         .await;
         let onboarding = async || {
-            engine::onboarding_checklist::get(&engine)
+            crate::onboarding::get(&engine)
                 .await
                 .unwrap()
                 .has_created_instance
@@ -384,12 +399,20 @@ mod tests {
         follow(Arc::clone(&engine), event).await;
         assert!(onboarding().await);
 
-        let generated = instance::get_synced_options_folder(&engine)
-            .await
-            .unwrap()
-            .join("servers/generated")
-            .join(id.replace(':', "_"));
+        let generated =
+            crate::synced_options::get_synced_options_folder(&engine)
+                .await
+                .unwrap()
+                .join("servers/generated")
+                .join(id.replace(':', "_"));
         std::fs::create_dir_all(&generated).unwrap();
+        let hidden = crate::library::hidden_instances::set_instance_hidden(
+            "user",
+            &id,
+            true,
+            engine.pool(),
+        );
+        hidden.await.unwrap();
         let folder = instance::get_full_path(&engine, &id).await.unwrap();
         instance::remove(&engine, &id).await.unwrap();
         let removed = next_instance_event(&mut events, |event| {
@@ -398,6 +421,11 @@ mod tests {
         .await;
         follow(Arc::clone(&engine), removed).await;
         assert!(!generated.exists());
+        let hidden = crate::library::hidden_instances::get_hidden_instance_ids(
+            "user",
+            engine.pool(),
+        );
+        assert!(hidden.await.unwrap().is_empty());
 
         // An edit can still be in flight for an instance removed under it.
         let edited = Event::Instance(InstancePayload {
@@ -406,7 +434,7 @@ mod tests {
         });
         follow(Arc::clone(&engine), edited).await;
         assert!(!folder.exists());
-        instance::reconcile_instance_synced_options(&engine, &id)
+        crate::synced_options::reconcile_instance_synced_options(&engine, &id)
             .await
             .unwrap();
     }
@@ -414,10 +442,10 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn following_a_synced_instance_settles() {
         let dir = tempfile::tempdir().unwrap();
-        let engine = crate::pack_hooks::tests::offline_engine(dir.path()).await;
-        let id = crate::pack_hooks::tests::create(&engine).await.instance.id;
+        let engine = crate::hooks::tests::offline_engine(dir.path()).await;
+        let id = crate::hooks::tests::create(&engine).await.instance.id;
         // A library that places packs makes every pack pass emit Synced.
-        let packs = instance::get_synced_options_folder(&engine)
+        let packs = crate::synced_options::get_synced_options_folder(&engine)
             .await
             .unwrap()
             .join("packs");
@@ -427,7 +455,7 @@ mod tests {
             format!(r#"{{"packs":{{}},"instances":{{"{id}":{{}}}}}}"#),
         )
         .unwrap();
-        instance::start_synced_options(&engine, || {});
+        crate::synced_options::start_synced_options(&engine, || {});
         let mut events = engine.events.subscribe();
 
         follow(

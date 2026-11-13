@@ -8,7 +8,7 @@ use anyhow::{Context, bail};
 use std::collections::{HashMap, HashSet};
 
 impl ContentStore {
-    pub(crate) async fn retain(
+    pub async fn retain(
         &self,
         kind: &str,
         owner: &str,
@@ -23,7 +23,7 @@ impl ContentStore {
         Ok(())
     }
 
-    pub(crate) async fn replace_retained(
+    pub async fn replace_retained(
         &self,
         kind: &str,
         owner: &str,
@@ -39,11 +39,7 @@ impl ContentStore {
         Ok(())
     }
 
-    pub(crate) async fn release(
-        &self,
-        kind: &str,
-        owner: &str,
-    ) -> crate::Result<()> {
+    pub async fn release(&self, kind: &str, owner: &str) -> crate::Result<()> {
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         catalog::release(&mut tx, kind, owner).await?;
         tx.commit().await?;

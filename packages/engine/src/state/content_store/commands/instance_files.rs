@@ -146,7 +146,7 @@ impl ContentStore {
         Ok(())
     }
 
-    pub(crate) async fn instance_file_matches(
+    pub async fn instance_file_matches(
         &self,
         path: &Path,
         sha512: &str,

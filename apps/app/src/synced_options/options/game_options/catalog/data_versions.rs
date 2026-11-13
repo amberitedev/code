@@ -3,7 +3,7 @@ use phf::phf_map;
 /// https://minecraft.wiki/w/Module:Protocol_version/Versions
 /// Covers 1.10-pre1, which introduced the options version field, through
 /// 18w47a, the last snapshot without embedded `version.json` metadata.
-pub(in crate::api::instance) const LEGACY_DATA_VERSIONS: phf::Map<&str, u32> = phf_map! {
+pub(in crate::synced_options) const LEGACY_DATA_VERSIONS: phf::Map<&str, u32> = phf_map! {
     "18w47a" => 1912,
     "18w46a" => 1910,
     "18w45a" => 1908,

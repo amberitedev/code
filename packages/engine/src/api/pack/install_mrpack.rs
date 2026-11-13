@@ -1,7 +1,6 @@
 use crate::Engine;
 use crate::api::instance::CONFIG_FILE_EXTENSIONS;
-use crate::api::instance::GameOptionsPackSource;
-use crate::api::instance::synced_servers::MODPACK_SERVER_PATHS;
+use crate::api::server_list::MODPACK_SERVER_PATHS;
 use crate::event::emit::loading_try_for_each_concurrent;
 use crate::install::{
     InstallErrorContext, InstallJobEventKind, InstallPhaseDetails,
@@ -11,6 +10,7 @@ use crate::install::{
 use crate::pack::install_from::{
     EnvType, PackFile, PackFileHash, set_instance_information,
 };
+use crate::state::GameOptionsPackSource;
 use crate::state::instances::ContentSourceKind;
 use crate::state::instances::commands::{
     ContentOrigin, InstallContent, install_stored_file,

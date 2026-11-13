@@ -1,29 +1,25 @@
-use super::super::synced_options::{instance_dir, instance_is_running};
+use super::super::options::{instance_dir, instance_is_running};
 use super::SERVERS_FILE;
-use super::codec::{read_servers, servers_from_bytes, write_servers};
 use super::operations::{compose_instance, effective, participating};
 use super::storage::{load_local, write_local_rows};
 use super::types::{LocalServer, ServerSource};
-use crate::state::{CachedEntry, InstanceLink, InstanceMetadata};
-use crate::util::fetch::{DownloadMeta, DownloadReason, fetch_mirrors};
-use crate::{Engine, ErrorKind};
+use engine::server_list::{
+    MODPACK_SERVER_PATHS, read_servers, servers_from_bytes, write_servers,
+};
+use engine::state::{CachedEntry, InstanceLink, InstanceMetadata};
+use engine::util::fetch::{DownloadMeta, DownloadReason, fetch_mirrors};
+use engine::{Engine, ErrorKind};
 use quartz_nbt::NbtCompound;
 use std::io::{Cursor, Read};
 use uuid::Uuid;
-
-pub(crate) const MODPACK_SERVER_PATHS: [&str; 3] = [
-    "servers.dat",
-    "config/yosbr/servers.dat",
-    "config/defaultoptions/servers.dat",
-];
 
 pub async fn capture_modpack_server_override(
     state: &Engine,
     instance_id: &str,
     source_path: Option<&str>,
-) -> crate::Result<()> {
-    let _guard = state.synced_options.lock().await;
-    let metadata = crate::state::get_instance(instance_id, &state.pool)
+) -> engine::Result<()> {
+    let _guard = crate::hooks::synced_options(state).lock().await;
+    let metadata = engine::state::get_instance(instance_id, state.pool())
         .await?
         .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
     let servers = if let Some(source_path) = source_path {
@@ -45,9 +41,9 @@ pub async fn capture_modpack_server_override(
 pub async fn discard_modpack_servers(
     instance_id: &str,
     state: &Engine,
-) -> crate::Result<()> {
-    let _guard = state.synced_options.lock().await;
-    let metadata = crate::state::get_instance(instance_id, &state.pool)
+) -> engine::Result<()> {
+    let _guard = crate::hooks::synced_options(state).lock().await;
+    let metadata = engine::state::get_instance(instance_id, state.pool())
         .await?
         .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
     discard_modpack_servers_for_instance(&metadata, state).await?;
@@ -60,7 +56,7 @@ pub async fn discard_modpack_servers(
 async fn discard_modpack_servers_for_instance(
     metadata: &InstanceMetadata,
     state: &Engine,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     let old_pack_servers = load_local(&metadata.instance.id, state)
         .await?
         .into_iter()
@@ -89,7 +85,7 @@ async fn replace_modpack_servers(
     metadata: &InstanceMetadata,
     servers: Vec<NbtCompound>,
     state: &Engine,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     let mut local = servers
         .into_iter()
         .enumerate()
@@ -110,7 +106,7 @@ async fn replace_modpack_servers(
         server.position = local.len() as i64;
         local.push(server.clone());
     }
-    let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = state.pool().begin_with("BEGIN IMMEDIATE").await?;
     write_local_rows(&mut tx, &metadata.instance.id, &local).await?;
     let version_id = modpack_version_id(&metadata.link);
     sqlx::query!(
@@ -132,7 +128,7 @@ async fn replace_modpack_servers(
 pub(super) async fn pack_state_matches_link(
     metadata: &InstanceMetadata,
     state: &Engine,
-) -> crate::Result<bool> {
+) -> engine::Result<bool> {
     let row = sqlx::query!(
         "
 		SELECT version_id
@@ -141,7 +137,7 @@ pub(super) async fn pack_state_matches_link(
 		",
         metadata.instance.id,
     )
-    .fetch_optional(&state.pool)
+    .fetch_optional(state.pool())
     .await?;
     Ok(row.is_some_and(|row| {
         row.version_id.as_deref() == modpack_version_id(&metadata.link)
@@ -151,7 +147,7 @@ pub(super) async fn pack_state_matches_link(
 pub(super) async fn pack_state_exists(
     instance_id: &str,
     state: &Engine,
-) -> crate::Result<bool> {
+) -> engine::Result<bool> {
     Ok(sqlx::query_scalar!(
         r#"
 		SELECT EXISTS(
@@ -160,14 +156,14 @@ pub(super) async fn pack_state_exists(
 		"#,
         instance_id,
     )
-    .fetch_one(&state.pool)
+    .fetch_one(state.pool())
     .await?)
 }
 
 pub(super) async fn reconstruct_modpack_servers(
     metadata: &InstanceMetadata,
     state: &Engine,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     if is_server_linked_shared_instance(metadata) {
         return discard_modpack_servers_for_instance(metadata, state).await;
     }
@@ -179,7 +175,7 @@ pub(super) async fn reconstruct_modpack_servers(
     let version = CachedEntry::get_version(
         version_id,
         None,
-        &state.pool,
+        state.pool(),
         &state.api_semaphore,
         &state.sessions,
     )
@@ -210,7 +206,7 @@ pub(super) async fn reconstruct_modpack_servers(
         &state.sessions,
     )
     .await?;
-    let servers = tokio::task::spawn_blocking(move || -> crate::Result<_> {
+    let servers = tokio::task::spawn_blocking(move || -> engine::Result<_> {
         let mut archive = zip::ZipArchive::new(Cursor::new(mrpack))?;
         let mut selected = None;
         'paths: for path in MODPACK_SERVER_PATHS {

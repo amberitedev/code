@@ -214,15 +214,17 @@ pub async fn desync_instance_server(
     instance: InstanceAccess<Edit>,
     request: Req<DesyncInstanceServer>,
 ) -> Result<Empty, ApiError> {
-    crate::instance::desync_server(
-        &engine,
-        &instance.id,
-        &request.body.server_id,
-        request.body.mode,
-    )
-    .await
-    .map(|()| Empty)
-    .map_err(api_error)
+    engine
+        .hooks()
+        .desync_server(
+            &engine,
+            &instance.id,
+            &request.body.server_id,
+            request.body.mode,
+        )
+        .await
+        .map(|()| Empty)
+        .map_err(api_error)
 }
 
 pub async fn edit_instance_server(

@@ -44,7 +44,7 @@ pub async fn engine_config(
         max_concurrent_writes: settings.max_concurrent_writes,
         events,
         accounts,
-        pack_hooks: Some(Arc::new(crate::pack_hooks::PackHooks)),
+        hooks: Some(Arc::new(crate::hooks::DesktopHooks::default())),
     })
 }
 

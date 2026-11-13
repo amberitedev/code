@@ -44,12 +44,10 @@ pub async fn update_project(
         state,
     )
     .await?;
-    if super::synced_packs::is_pack_path(project_path)
-        || super::synced_packs::is_pack_path(&path)
-    {
-        super::synced_packs::reconcile_after_content_change(state, instance_id)
-            .await;
-    }
+    state
+        .hooks()
+        .content_changed(state, instance_id, &[project_path, &path])
+        .await;
     if !skip_send_event.unwrap_or(false) {
         emit_instance(&state.events, instance_id, InstancePayloadType::Edited)
             .await?;
@@ -77,7 +75,10 @@ pub async fn add_project_from_version(
             state,
         )
         .await?;
-    super::synced_packs::sync_new_pack(state, instance_id, &project_path).await;
+    state
+        .hooks()
+        .content_installed(state, instance_id, &project_path)
+        .await;
     emit_instance(&state.events, instance_id, InstancePayloadType::Edited)
         .await?;
 
@@ -118,7 +119,7 @@ pub async fn install_project_with_dependencies(
 				&state,
 			).await?;
 			for path in paths {
-				super::synced_packs::sync_new_pack(&state, &instance_id, &path).await;
+				state.hooks().content_installed(&state, &instance_id, &path).await;
 			}
 			Ok::<(), crate::Error>(())
 		}.await;
@@ -203,12 +204,10 @@ pub async fn switch_project_version_with_dependencies(
             state,
         )
         .await?;
-    if super::synced_packs::is_pack_path(project_path)
-        || super::synced_packs::is_pack_path(&path)
-    {
-        super::synced_packs::reconcile_after_content_change(state, instance_id)
-            .await;
-    }
+    state
+        .hooks()
+        .content_changed(state, instance_id, &[project_path, &path])
+        .await;
     emit_instance(
         &state.events,
         &metadata.instance.id,
@@ -235,7 +234,10 @@ pub async fn add_project_from_path(
             state,
         )
         .await?;
-    super::synced_packs::sync_new_pack(state, instance_id, &project_path).await;
+    state
+        .hooks()
+        .content_installed(state, instance_id, &project_path)
+        .await;
     emit_instance(&state.events, instance_id, InstancePayloadType::Edited)
         .await?;
 
@@ -276,10 +278,10 @@ pub async fn toggle_disable_project(
         state,
     )
     .await?;
-    if super::synced_packs::is_pack_path(project) {
-        super::synced_packs::reconcile_after_content_change(state, instance_id)
-            .await;
-    }
+    state
+        .hooks()
+        .content_changed(state, instance_id, &[project])
+        .await;
     emit_instance(&state.events, instance_id, InstancePayloadType::Edited)
         .await?;
 
@@ -300,10 +302,10 @@ pub async fn remove_project(
         state,
     )
     .await?;
-    if super::synced_packs::is_pack_path(project) {
-        super::synced_packs::reconcile_after_content_change(state, instance_id)
-            .await;
-    }
+    state
+        .hooks()
+        .content_changed(state, instance_id, &[project])
+        .await;
     emit_instance(&state.events, instance_id, InstancePayloadType::Edited)
         .await?;
 
@@ -516,7 +518,7 @@ async fn ensure_instance_content_unlocked(
     ensure_installation_content_unlocked(instance.install_stage)
 }
 
-pub(super) fn ensure_metadata_content_unlocked(
+pub fn ensure_metadata_content_unlocked(
     metadata: &crate::state::InstanceMetadata,
 ) -> crate::Result<()> {
     if metadata.quarantined {

@@ -2,16 +2,16 @@ use super::operations::{
     InstanceScreenshot, has_png_extension, sort_screenshots,
     source_screenshots_dir,
 };
-use crate::state::DirectoryInfo;
-use crate::state::instances::adapters::sqlite::{
-    instance_rows::{self, InstanceScreenshotSource},
-    screenshot_rows::{self, ScreenshotRow},
-};
-use crate::util::fetch::sha1_file_async;
-use crate::util::io::IOError;
-use crate::{Engine, ErrorKind};
+use super::rows::{self as screenshot_rows, ScreenshotRow};
 use anyhow::Context;
 use chrono::{DateTime, Utc};
+use engine::state::DirectoryInfo;
+use engine::state::instances::adapters::sqlite::instance_rows::{
+    self, InstanceScreenshotSource,
+};
+use engine::util::fetch::sha1_file_async;
+use engine::util::io::IOError;
+use engine::{Engine, ErrorKind};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -80,8 +80,8 @@ fn resolve_scanned_screenshot(
 pub(super) async fn list_source_screenshots(
     state: &Engine,
     source: InstanceScreenshotSource,
-) -> crate::Result<Vec<InstanceScreenshot>> {
-    let _lock = state.instance_locks.lock_screenshots(&source.id).await;
+) -> engine::Result<Vec<InstanceScreenshot>> {
+    let _lock = crate::hooks::lock_screenshots(state, &source.id).await;
     let scanned = scan_source_screenshots(&state.directories, &source).await?;
     reconcile_source_screenshots(state, &source, scanned).await
 }
@@ -89,10 +89,12 @@ pub(super) async fn list_source_screenshots(
 pub async fn reconcile_screenshots(
     state: &Engine,
     instance_id: &str,
-) -> crate::Result<()> {
-    let Some(source) =
-        instance_rows::get_instance_screenshot_source(instance_id, &state.pool)
-            .await?
+) -> engine::Result<()> {
+    let Some(source) = instance_rows::get_instance_screenshot_source(
+        instance_id,
+        state.pool(),
+    )
+    .await?
     else {
         return Ok(());
     };
@@ -104,7 +106,7 @@ pub async fn reconcile_screenshots(
 pub(super) async fn scan_source_screenshots(
     directories: &DirectoryInfo,
     source: &InstanceScreenshotSource,
-) -> crate::Result<Vec<ScannedScreenshot>> {
+) -> engine::Result<Vec<ScannedScreenshot>> {
     let instance_dir = directories.instances_dir().join(&source.path);
     if !tokio::fs::try_exists(&instance_dir)
         .await
@@ -120,7 +122,7 @@ pub(super) async fn scan_source_screenshots(
 
 fn scan_screenshots_dir(
     screenshots_dir: &Path,
-) -> crate::Result<Vec<ScannedScreenshot>> {
+) -> engine::Result<Vec<ScannedScreenshot>> {
     let entries = match std::fs::read_dir(screenshots_dir) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -183,9 +185,9 @@ pub(super) async fn reconcile_source_screenshots(
     state: &Engine,
     source: &InstanceScreenshotSource,
     scanned: Vec<ScannedScreenshot>,
-) -> crate::Result<Vec<InstanceScreenshot>> {
+) -> engine::Result<Vec<InstanceScreenshot>> {
     let existing =
-        screenshot_rows::list_screenshots(&source.id, &state.pool).await?;
+        screenshot_rows::list_screenshots(&source.id, state.pool()).await?;
     let mut unmatched_by_name = existing
         .into_iter()
         .map(|row| (row.file_name.clone(), row))
@@ -220,7 +222,7 @@ pub(super) async fn reconcile_source_screenshots(
                 i64::try_from(file_size).context(ErrorKind::InputError(
                     "screenshot is too large to index".to_string(),
                 ))?;
-            Ok::<_, crate::Error>((scanned, content_hash, matched))
+            Ok::<_, engine::Error>((scanned, content_hash, matched))
         },
     ))
     .buffer_unordered(SCREENSHOT_HASH_CONCURRENCY)
@@ -270,7 +272,7 @@ pub(super) async fn reconcile_source_screenshots(
         ));
     }
 
-    let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = state.pool().begin_with("BEGIN IMMEDIATE").await?;
     for row in unmatched_by_hash.into_values().flatten() {
         screenshot_rows::delete_screenshot(&row.id, &mut tx).await?;
     }

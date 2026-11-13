@@ -1,21 +1,21 @@
 //! API for interacting with Theseus
 pub mod cache;
 pub mod debug_info;
-pub mod handler;
 pub mod instance;
 pub mod jre;
 pub mod logs;
 pub mod metadata;
-pub mod onboarding_checklist;
 pub mod pack;
 pub mod process;
 pub mod server_address;
+pub mod server_list;
 pub mod settings;
 pub mod tags;
 pub mod upload;
 pub mod worlds;
 
 pub mod data {
+    pub use crate::event::OnboardingChecklist;
     pub use crate::state::{
         AppliedContentSetPatch, CacheBehaviour, CacheValueType, CachedEntry,
         CachedSharedInstanceSummary, ContentFile, ContentItem,
@@ -25,10 +25,10 @@ pub mod data {
         InstanceInstallTarget, InstanceLaunchOverridesPatch, InstanceLink,
         InstanceMetadata, InstanceSyncedOption, InstanceSyncedOptions,
         InstanceTabVisibility, JavaVersion, LinkedModpackInfo, MemorySettings,
-        ModLoader, OnboardingChecklist, Organization, OwnerType,
-        ProcessMetadata, Project, ProjectType, ProjectV3, SearchResult,
-        SearchResults, SearchResultsV3, Settings, SharedInstanceAttachment,
-        SharedInstanceRole, TeamMember, Theme, User, Version, WindowSize,
+        ModLoader, Organization, OwnerType, ProcessMetadata, Project,
+        ProjectType, ProjectV3, SearchResult, SearchResults, SearchResultsV3,
+        Settings, SharedInstanceAttachment, SharedInstanceRole, TeamMember,
+        Theme, User, Version, WindowSize,
     };
     pub use ariadne::users::UserStatus;
     pub use modrinth_content_management::{
@@ -42,8 +42,7 @@ pub mod prelude {
         Engine,
         data::*,
         event::CommandPayload,
-        install, instance, jre, metadata, onboarding_checklist, pack, process,
-        settings,
+        install, instance, jre, metadata, pack, process, settings,
         state::{ReleaseChannel, db_backup::app_db_backup_dir},
         util::{
             io::{IOError, canonicalize},

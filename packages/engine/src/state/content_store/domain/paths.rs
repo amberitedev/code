@@ -19,7 +19,7 @@ pub(crate) fn object_relative_path(sha512: &str) -> crate::Result<String> {
     Ok(format!("objects/{}/{}", &sha512[..2], sha512))
 }
 
-pub(crate) fn validate_relative(path: &str) -> crate::Result<()> {
+pub fn validate_relative(path: &str) -> crate::Result<()> {
     if path.is_empty()
         || path.contains('\\')
         || path.contains(':')
@@ -41,7 +41,7 @@ pub(crate) fn validate_relative(path: &str) -> crate::Result<()> {
     Ok(())
 }
 
-pub(crate) fn validate_instance_path(path: &str) -> crate::Result<()> {
+pub fn validate_instance_path(path: &str) -> crate::Result<()> {
     // Legacy instance names can end in dots or spaces; preserve their on-disk path.
     let normalized = path
         .split('/')
@@ -96,11 +96,11 @@ pub(crate) fn normalize(path: &Path) -> PathBuf {
 
 use crate::state::InstanceFile;
 
-pub(crate) fn content_file_path(file: &InstanceFile) -> String {
+pub fn content_file_path(file: &InstanceFile) -> String {
     file_path_on_disk(&file.relative_path, file.enabled)
 }
 
-pub(crate) fn file_path_on_disk(relative_path: &str, enabled: bool) -> String {
+pub fn file_path_on_disk(relative_path: &str, enabled: bool) -> String {
     let canonical = relative_path.trim_end_matches(".disabled");
     if enabled {
         canonical.to_string()

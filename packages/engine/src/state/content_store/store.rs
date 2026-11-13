@@ -82,7 +82,7 @@ impl ContentStore {
         })
     }
 
-    pub(crate) async fn lease(&self) -> Arc<OwnedRwLockReadGuard<()>> {
+    pub async fn lease(&self) -> Arc<OwnedRwLockReadGuard<()>> {
         Arc::new(self.cleanup_lock.clone().read_owned().await)
     }
 
@@ -102,7 +102,7 @@ impl ContentStore {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct StoredFileHandle {
+pub struct StoredFileHandle {
     pub metadata: StoredFileMetadata,
     pub path: PathBuf,
     pub(super) _guard: Arc<OwnedRwLockReadGuard<()>>,
@@ -116,7 +116,7 @@ pub(crate) struct StoredFileRecord {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) enum FileContent {
+pub enum FileContent {
     Unmanaged,
     Stored {
         storage: InstanceFileStorage,
@@ -126,13 +126,13 @@ pub(crate) enum FileContent {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) enum ReadableContent {
+pub enum ReadableContent {
     Local(PathBuf),
     Stored(StoredFileHandle),
 }
 
 impl ReadableContent {
-    pub(crate) fn path(&self) -> &Path {
+    pub fn path(&self) -> &Path {
         match self {
             Self::Local(path) => path,
             Self::Stored(stored_file) => &stored_file.path,
@@ -140,7 +140,7 @@ impl ReadableContent {
     }
 }
 
-pub(crate) struct GetFileResult {
+pub struct GetFileResult {
     pub stored_file: StoredFileHandle,
     pub reused: bool,
 }

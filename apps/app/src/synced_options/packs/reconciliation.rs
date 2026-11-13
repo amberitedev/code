@@ -3,21 +3,21 @@ use super::{
     PackLibrary, PackPlacement, SyncedPack, pack_option, pack_path, same_path,
     version_compatible,
 };
-use crate::ErrorKind;
-use crate::event::{InstancePayloadType, emit::emit_instance};
-use crate::state::content_store::{StoredFileHandle, file_path_on_disk};
-use crate::state::instances::commands;
-use crate::state::{
+use anyhow::bail;
+use engine::ErrorKind;
+use engine::state::content_store::{StoredFileHandle, file_path_on_disk};
+use engine::state::instances::commands;
+use engine::state::{
     CacheBehaviour, CachedEntry, ContentItem, ContentItemVersion,
     ContentSourceKind, Engine, InstanceMetadata, ProjectType, SyncedOption,
     SyncedPackInfo, Version,
 };
-use crate::util::fetch;
-use anyhow::bail;
+use engine::util::fetch;
+use engine::{InstancePayloadType, emit_instance};
 use modrinth_content_management::ResolutionPreferences;
 use std::collections::BTreeMap;
 
-use super::super::synced_options::{
+use super::super::options::{
     GlobalSyncedOptions, get_global_options, instance_dir, instance_is_running,
     instance_option_enabled, sync_files_are_protected,
 };
@@ -72,7 +72,7 @@ async fn capture_items(
     placements: BTreeMap<String, PackPlacement>,
     global: GlobalSyncedOptions,
     items: &[ContentItem],
-) -> crate::Result<bool> {
+) -> engine::Result<bool> {
     let mut shared_changed = false;
     for (id, mut placement) in placements {
         let Some(pack) = library.packs.get(&id).cloned() else {
@@ -133,11 +133,11 @@ async fn owns_file(
     metadata: &InstanceMetadata,
     placement: &PackPlacement,
     state: &Engine,
-) -> crate::Result<bool> {
+) -> engine::Result<bool> {
     if placement.path.is_empty() {
         return Ok(false);
     }
-    let Some(file) = crate::state::instances::adapters::sqlite::content_rows::get_instance_file_by_relative_path(&metadata.instance.id, &placement.path, &state.pool).await? else { return Ok(false); };
+    let Some(file) = engine::state::instances::adapters::sqlite::content_rows::get_instance_file_by_relative_path(&metadata.instance.id, &placement.path, state.pool()).await? else { return Ok(false); };
     let kind = commands::content_source_kind_for_project_path(
         &metadata.instance.id,
         &placement.path,
@@ -150,7 +150,7 @@ async fn owns_file(
     if file.sha1 != placement.sha1 {
         return Ok(false);
     }
-    let crate::state::content_store::FileContent::Stored {
+    let engine::state::content_store::FileContent::Stored {
         stored_file, ..
     } = state.content_store.file_content(&file).await?
     else {
@@ -160,7 +160,7 @@ async fn owns_file(
         .content_store
         .instance_file_matches(
             &instance_dir(metadata, state)
-                .join(crate::state::content_store::content_file_path(&file)),
+                .join(engine::state::content_store::content_file_path(&file)),
             &stored_file.metadata.sha512,
         )
         .await
@@ -171,7 +171,7 @@ async fn toggle_pack(
     item: &ContentItem,
     enabled: bool,
     state: &Engine,
-) -> crate::Result<String> {
+) -> engine::Result<String> {
     commands::toggle_disable_project(
         &metadata.instance.id,
         &item.file_path,
@@ -234,7 +234,7 @@ async fn prepare_pack(
     library: &PackLibrary,
     items: &[ContentItem],
     state: &Engine,
-) -> crate::Result<PreparedPack> {
+) -> engine::Result<PreparedPack> {
     let mut prepared = PreparedPack::default();
     let previous = library
         .instances
@@ -258,7 +258,7 @@ async fn prepare_pack(
         let versions = CachedEntry::get_project_versions(
 			&project.id,
 			Some(CacheBehaviour::MustRevalidate),
-			&state.pool,
+			state.pool(),
 			&state.api_semaphore, &state.sessions,
 		).await?.ok_or(ErrorKind::InputError(
 			"pack versions are temporarily unavailable; keeping the installed pack".to_owned(),
@@ -365,7 +365,7 @@ async fn apply_pack(
     items: &mut Vec<ContentItem>,
     state: &Engine,
     mut prepared: PreparedPack,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     let instance_id = &metadata.instance.id;
     let previous = library
         .instances
@@ -585,7 +585,7 @@ async fn apply_pack(
         }
     }
     let size = stored_file.metadata.size as u64;
-    let sha1 = crate::util::fetch::sha1_file_async(&stored_file.path)
+    let sha1 = engine::util::fetch::sha1_file_async(&stored_file.path)
         .await?
         .1;
     let path = commands::install_stored_file(
@@ -652,9 +652,9 @@ async fn apply_pack(
 pub(super) async fn run_queued(
     instance_id: &str,
     state: &Engine,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     let Some(metadata) =
-        crate::state::get_instance(instance_id, &state.pool).await?
+        engine::state::get_instance(instance_id, state.pool()).await?
     else {
         return Ok(());
     };
@@ -684,8 +684,8 @@ async fn apply_instance_inner(
     state: &Engine,
     removed_pack_id: Option<&str>,
     preparation: &mut super::worker::Preparation<'_>,
-) -> crate::Result<()> {
-    if super::super::synced_options::pending::contains(
+) -> engine::Result<()> {
+    if super::super::options::pending::contains(
         &metadata.instance.id,
         SyncedOption::ResourcePacks,
         state,
@@ -695,8 +695,7 @@ async fn apply_instance_inner(
         return Ok(());
     }
     if sync_files_are_protected(metadata)
-        || super::super::projects::ensure_metadata_content_unlocked(metadata)
-            .is_err()
+        || engine::instance::ensure_metadata_content_unlocked(metadata).is_err()
     {
         return Ok(());
     }
@@ -722,7 +721,7 @@ async fn apply_instance_inner(
                 let versions = CachedEntry::get_version_many(
                     &ids,
                     None,
-                    &state.pool,
+                    state.pool(),
                     &state.api_semaphore,
                     &state.sessions,
                 )
@@ -840,10 +839,10 @@ async fn apply_instance_inner(
                 Ok(prepared) => prepared,
                 Err(error)
                     if matches!(
-                        error.downcast_ref::<crate::ErrorKind>(),
+                        error.downcast_ref::<engine::ErrorKind>(),
                         Some(
-                            crate::ErrorKind::PackSyncChanged
-                                | crate::ErrorKind::RateLimited { .. }
+                            engine::ErrorKind::PackSyncChanged
+                                | engine::ErrorKind::RateLimited { .. }
                         )
                     ) =>
                 {
@@ -977,7 +976,7 @@ pub(super) async fn apply_removal(
     pack_id: &str,
     library: &mut PackLibrary,
     state: &Engine,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     library.resource_pack_order.retain(|id| id != pack_id);
     apply_all(library, state).await
 }
@@ -985,8 +984,8 @@ pub(super) async fn apply_removal(
 pub(super) async fn apply_all(
     library: &mut PackLibrary,
     state: &Engine,
-) -> crate::Result<()> {
-    let instances = crate::state::list_instances(&state.pool).await?;
+) -> engine::Result<()> {
+    let instances = engine::state::list_instances(state.pool()).await?;
     let ids = instances
         .iter()
         .map(|metadata| &metadata.instance.id)
@@ -1006,11 +1005,11 @@ pub(super) async fn apply_all(
     Ok(())
 }
 
-pub(in crate::api::instance) async fn reconcile(
+pub(in crate::synced_options) async fn reconcile(
     metadata: &InstanceMetadata,
     _option: SyncedOption,
     state: &Engine,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     super::worker::queue_reconciliation(state, &metadata.instance.id);
     Ok(())
 }
@@ -1018,8 +1017,8 @@ pub(in crate::api::instance) async fn reconcile(
 async fn capture_after_change(
     state: &Engine,
     instance_id: &str,
-) -> crate::Result<()> {
-    let metadata = crate::state::get_instance(instance_id, &state.pool)
+) -> engine::Result<()> {
+    let metadata = engine::state::get_instance(instance_id, state.pool())
         .await?
         .ok_or(ErrorKind::InputError("unknown instance".to_owned()))?;
     let mut preparation =
@@ -1031,7 +1030,7 @@ async fn capture_after_change(
     };
     if sync_files_are_protected(&metadata)
         || instance_is_running(&metadata, state).await?
-        || super::super::synced_options::pending::contains(
+        || super::super::options::pending::contains(
             instance_id,
             SyncedOption::ResourcePacks,
             state,
@@ -1061,20 +1060,20 @@ async fn capture_after_change(
     Ok(())
 }
 
-pub(in crate::api::instance) fn schedule_reconciliation(state: &crate::Engine) {
+pub(crate) fn schedule_reconciliation(state: &engine::Engine) {
     super::worker::queue_all(state);
 }
 
 pub async fn reconcile_after_content_change(
-    state: &crate::Engine,
+    state: &engine::Engine,
     instance_id: &str,
 ) {
     loop {
         match capture_after_change(state, instance_id).await {
             Err(error)
                 if matches!(
-                    error.downcast_ref::<crate::ErrorKind>(),
-                    Some(crate::ErrorKind::PackSyncChanged)
+                    error.downcast_ref::<engine::ErrorKind>(),
+                    Some(engine::ErrorKind::PackSyncChanged)
                 ) =>
             {
                 tokio::task::yield_now().await;
@@ -1091,10 +1090,10 @@ pub async fn reconcile_after_content_change(
     }
 }
 
-pub(in crate::api::instance) async fn capture_resource_pack_selection_change(
+pub(in crate::synced_options) async fn capture_resource_pack_selection_change(
     metadata: &InstanceMetadata,
     state: &Engine,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     let mut library = read_library(state).await?;
     match super::selection::capture(metadata, &mut library, state).await? {
         Some(true) => apply_all(&mut library, state).await?,
@@ -1104,10 +1103,10 @@ pub(in crate::api::instance) async fn capture_resource_pack_selection_change(
     Ok(())
 }
 
-pub(in crate::api::instance) async fn prepare_instance_update(
+pub(in crate::synced_options) async fn prepare_instance_update(
     metadata: &InstanceMetadata,
     state: &Engine,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     let mut library = read_library(state).await?;
     match super::selection::capture(metadata, &mut library, state).await {
         Ok(Some(true)) => apply_all(&mut library, state).await?,
@@ -1157,11 +1156,11 @@ pub(in crate::api::instance) async fn prepare_instance_update(
     Ok(())
 }
 
-pub(in crate::api::instance) async fn detach(
+pub(in crate::synced_options) async fn detach(
     metadata: &InstanceMetadata,
     option: SyncedOption,
     state: &Engine,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     let mut library = read_library(state).await?;
     let mut changed = false;
     if let Some(placements) = library.instances.get_mut(&metadata.instance.id) {
@@ -1191,20 +1190,20 @@ pub(in crate::api::instance) async fn detach(
     Ok(())
 }
 
-pub(in crate::api::instance) async fn decorate_content(
+pub(crate) async fn decorate_content(
     instance_id: &str,
     items: &mut [ContentItem],
     state: &Engine,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     let library = read_library(state).await?;
     let Some(placements) = library.instances.get(instance_id) else {
         return Ok(());
     };
-    let metadata = crate::state::get_instance(instance_id, &state.pool)
+    let metadata = engine::state::get_instance(instance_id, state.pool())
         .await?
         .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
     let global = get_global_options(state).await?;
-    let instances = crate::state::list_instances(&state.pool).await?;
+    let instances = engine::state::list_instances(state.pool()).await?;
     for item in items {
         if !local(item) {
             continue;

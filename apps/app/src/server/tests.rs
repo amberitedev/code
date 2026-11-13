@@ -347,7 +347,7 @@ async fn the_event_socket_waits_for_the_engine_then_sends_events_as_json() {
     engine::emit_warning(&events.engine, "low disk")
         .await
         .unwrap();
-    engine::handler::parse_and_emit_command(
+    crate::desktop::deep_links::parse_and_emit_command(
         &events.engine,
         "modrinth://mod/sodium",
     )

@@ -1,11 +1,11 @@
 //! The game settings editor, for the settings every synced instance shares and for one instance's
 //! own.
 
-use contracts::{Empty, Json};
-use engine::instance::{
+use crate::synced_options::{
     GameOptionsSourceCandidate, GameSettingLocaleLabels,
     GameSettingsEditorState, SaveGameSettingsResult, UpdateGameSettingsRequest,
 };
+use contracts::{Empty, Json};
 use serde::{Deserialize, Serialize};
 
 use super::IdParams;

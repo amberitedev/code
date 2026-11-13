@@ -1,4 +1,4 @@
-use crate::state::{Engine, InstanceMetadata};
+use engine::state::{Engine, InstanceMetadata};
 use parking_lot::Mutex;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -15,7 +15,7 @@ struct FileIdentity {
 }
 
 impl FileIdentity {
-    async fn read(path: &Path) -> crate::Result<Self> {
+    async fn read(path: &Path) -> engine::Result<Self> {
         let metadata = tokio::fs::metadata(path).await?;
         Ok(Self {
             size: metadata.len(),
@@ -47,7 +47,7 @@ pub(super) struct PackFormat {
 async fn read_zip_json(
     path: &Path,
     name: &str,
-) -> crate::Result<Option<Value>> {
+) -> engine::Result<Option<Value>> {
     let identity = FileIdentity::read(path).await?;
     let key = (path.to_path_buf(), name.to_owned());
     {
@@ -96,10 +96,10 @@ async fn read_zip_json(
 async fn read_zip_json_uncached(
     path: &Path,
     name: &str,
-) -> crate::Result<(Option<Value>, usize)> {
+) -> engine::Result<(Option<Value>, usize)> {
     let path = path.to_path_buf();
     let name = name.to_owned();
-    tokio::task::spawn_blocking(move || -> crate::Result<_> {
+    tokio::task::spawn_blocking(move || -> engine::Result<_> {
         let mut zip =
             zip::ZipArchive::new(BufReader::new(std::fs::File::open(path)?))?;
         let mut selected = None;
@@ -130,7 +130,7 @@ async fn read_zip_json_uncached(
 pub(super) async fn game_format(
     metadata: &InstanceMetadata,
     state: &Engine,
-) -> crate::Result<Option<PackFormat>> {
+) -> engine::Result<Option<PackFormat>> {
     let content_set = &metadata.applied_content_set;
     let version = &content_set.game_version;
     if let Some(minor) = version
@@ -267,14 +267,13 @@ pub(super) async fn compatible(path: &Path, game: Option<PackFormat>) -> bool {
 /// Populates archive metadata before the worker acquires the synced-option lock.
 pub(super) async fn warm(
     metadata: &InstanceMetadata,
-    items: &[crate::state::ContentItem],
+    items: &[engine::state::ContentItem],
     state: &Engine,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     if game_format(metadata, state).await.ok().flatten().is_some() {
-        let directory =
-            super::super::synced_options::instance_dir(metadata, state);
+        let directory = super::super::options::instance_dir(metadata, state);
         for item in items.iter().filter(|item| {
-            item.project_type == crate::state::ProjectType::ResourcePack
+            item.project_type == engine::state::ProjectType::ResourcePack
         }) {
             let _ =
                 read_zip_json(&directory.join(&item.file_path), "pack.mcmeta")

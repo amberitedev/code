@@ -2,31 +2,31 @@
 
 use super::super::{instance_is_running, sync_files_are_protected};
 use super::options_file::{options_path, read_document};
-use crate::ErrorKind;
-use crate::state::{Engine, InstanceMetadata};
-use crate::util::io;
 use anyhow::Context;
+use engine::ErrorKind;
+use engine::state::{Engine, InstanceMetadata};
+use engine::util::io;
 use std::collections::BTreeSet;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(in crate::api::instance) struct ResourcePackOptions {
+pub(in crate::synced_options) struct ResourcePackOptions {
     pub entries: Vec<String>,
     pub incompatible: Vec<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(in crate::api::instance) enum ResourcePackOptionsUpdate {
+pub(in crate::synced_options) enum ResourcePackOptionsUpdate {
     Deferred,
     Applied(ResourcePackOptions),
 }
 
-fn parse_entries(raw: &str) -> crate::Result<Vec<String>> {
+fn parse_entries(raw: &str) -> engine::Result<Vec<String>> {
     serde_json::from_str(raw).context(ErrorKind::InputError(
         "options.txt contains an invalid resourcePacks value".to_string(),
     ))
 }
 
-pub(in crate::api::instance) fn merge_resource_pack_order(
+pub(in crate::synced_options) fn merge_resource_pack_order(
     entries: &[String],
     managed: &BTreeSet<String>,
     selected: &[String],
@@ -48,10 +48,10 @@ pub(in crate::api::instance) fn merge_resource_pack_order(
     merged
 }
 
-pub(in crate::api::instance) async fn read_resource_pack_entries(
+pub(in crate::synced_options) async fn read_resource_pack_entries(
     metadata: &InstanceMetadata,
     state: &Engine,
-) -> crate::Result<Option<ResourcePackOptions>> {
+) -> engine::Result<Option<ResourcePackOptions>> {
     let path = options_path(metadata, state);
     if !path.exists() {
         return Ok(None);
@@ -70,12 +70,12 @@ pub(in crate::api::instance) async fn read_resource_pack_entries(
     }))
 }
 
-pub(in crate::api::instance) async fn merge_resource_pack_entries(
+pub(in crate::synced_options) async fn merge_resource_pack_entries(
     metadata: &InstanceMetadata,
     managed: &BTreeSet<String>,
     selected: &[String],
     state: &Engine,
-) -> crate::Result<ResourcePackOptionsUpdate> {
+) -> engine::Result<ResourcePackOptionsUpdate> {
     if sync_files_are_protected(metadata) {
         return Ok(ResourcePackOptionsUpdate::Deferred);
     }

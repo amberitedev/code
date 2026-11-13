@@ -1,13 +1,13 @@
-use super::super::synced_options::game_options::{
+use super::super::options::game_options::{
     ResourcePackOptionsUpdate, merge_resource_pack_entries,
     merge_resource_pack_order, read_resource_pack_entries,
 };
-use super::super::synced_options::{get_global_options, instance_dir};
+use super::super::options::{get_global_options, instance_dir};
 use super::reconciliation::participating;
 use super::selection_compatibility;
 use super::{PackLibrary, PackPlacement, SyncedPack};
-use crate::state::instances::adapters::sqlite::content_rows;
-use crate::state::{
+use engine::state::instances::adapters::sqlite::content_rows;
+use engine::state::{
     ContentSourceKind, Engine, InstanceMetadata, ProjectType, SyncedOption,
 };
 use std::collections::{BTreeMap, BTreeSet};
@@ -43,12 +43,12 @@ fn target_entry(metadata: &InstanceMetadata, entry: String) -> String {
 async fn local_sources(
     metadata: &InstanceMetadata,
     state: &Engine,
-) -> crate::Result<BTreeMap<String, ContentSourceKind>> {
+) -> engine::Result<BTreeMap<String, ContentSourceKind>> {
     let (files, entries) = tokio::try_join!(
-        content_rows::get_instance_files(&metadata.instance.id, &state.pool),
+        content_rows::get_instance_files(&metadata.instance.id, state.pool()),
         content_rows::get_content_entries(
             &metadata.applied_content_set.id,
-            &state.pool
+            state.pool()
         ),
     )?;
     let mut kinds = BTreeMap::new();
@@ -104,7 +104,7 @@ pub(super) async fn selected_in_instance(
     metadata: &InstanceMetadata,
     project_path: &str,
     state: &Engine,
-) -> crate::Result<Option<bool>> {
+) -> engine::Result<Option<bool>> {
     let Some(entry) = option_entry(project_path) else {
         return Ok(None);
     };
@@ -119,7 +119,7 @@ pub(super) async fn capture_source_order(
     metadata: &InstanceMetadata,
     library: &mut PackLibrary,
     state: &Engine,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     let Some(options) = read_resource_pack_entries(metadata, state).await?
     else {
         return Ok(());
@@ -175,8 +175,8 @@ pub(super) async fn capture(
     metadata: &InstanceMetadata,
     library: &mut PackLibrary,
     state: &Engine,
-) -> crate::Result<Option<bool>> {
-    if super::super::synced_options::pending::contains(
+) -> engine::Result<Option<bool>> {
+    if super::super::options::pending::contains(
         &metadata.instance.id,
         SyncedOption::ResourcePacks,
         state,
@@ -350,7 +350,7 @@ pub(super) async fn apply_removal(
     library: &mut PackLibrary,
     placement: Option<&PackPlacement>,
     state: &Engine,
-) -> crate::Result<bool> {
+) -> engine::Result<bool> {
     let Some(placement) = placement else {
         return Ok(true);
     };
@@ -402,7 +402,7 @@ pub(super) async fn apply(
     library: &mut PackLibrary,
     previous_placements: &BTreeMap<String, PackPlacement>,
     state: &Engine,
-) -> crate::Result<bool> {
+) -> engine::Result<bool> {
     let directory = instance_dir(metadata, state);
     let global = get_global_options(state).await?;
     if !global.get(SyncedOption::ResourcePacks)

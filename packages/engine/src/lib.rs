@@ -9,7 +9,7 @@ and launching Modrinth mod packs
 #![recursion_limit = "256"]
 
 #[macro_use]
-mod util;
+pub mod util;
 
 pub mod access;
 mod api;
@@ -18,10 +18,9 @@ mod error;
 mod event;
 pub mod install;
 mod launcher;
-mod logger;
 pub mod routes;
 pub mod self_hosted;
-mod state;
+pub mod state;
 #[cfg(test)]
 mod ts;
 
@@ -31,16 +30,20 @@ pub use event::{
     DesktopEvent, Event, EventSink, FriendPayload,
     InstanceGroupsChangedPayload, InstancePayload, InstancePayloadType,
     LoadingBar, LoadingBarType, ProcessPayload, ProcessPayloadType,
-    emit::emit_friend, emit::emit_loading, emit::emit_notification,
-    emit::emit_warning, emit::init_loading,
+    emit::emit_command, emit::emit_friend, emit::emit_instance,
+    emit::emit_loading, emit::emit_notification,
+    emit::emit_onboarding_checklist, emit::emit_warning, emit::init_loading,
 };
-pub use logger::start_logger;
+pub use launcher::{
+    read_game_version_metadata_from_jar, resolve_minecraft_manifest,
+};
 pub use self_hosted::accounts::AccountEndpoints;
 pub use state::INSTANCES_FOLDER_NAME;
 pub use state::instances::commands::server_jar;
 pub use state::{
-    BackendSession, BackendSessionKind, Engine, EngineConfig, ModrinthSession,
-    PackOverrides, PackServers, PackUpdateHooks, ProcessManager, Sessions,
+    BackendSession, BackendSessionKind, Engine, EngineConfig,
+    GameOptionsPackSource, InstanceHooks, ModrinthSession, PackOverrides,
+    PackServers, ProcessManager, Sessions,
 };
 pub use util::content_hash::encode_hex;
 pub use util::fetch::{

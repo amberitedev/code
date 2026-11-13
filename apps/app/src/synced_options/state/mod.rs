@@ -1,4 +1,11 @@
-use crate::api::instance::{GameLocaleIndexer, PackSyncWorker};
+mod game_option_model;
+mod game_options;
+
+pub use self::game_option_model::{CanonicalValue, GameOptionKind};
+pub(crate) use self::game_option_model::{StoredOption, StoredPreference};
+pub(crate) use self::game_options::*;
+
+use crate::synced_options::{GameLocaleIndexer, PackSyncWorker};
 use tokio::sync::{Mutex, MutexGuard};
 
 /// Coordinates options syncing across instances.

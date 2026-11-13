@@ -1,9 +1,9 @@
 use super::super::options_file::sha1_bytes;
 use super::archive::{self, ArchiveIndex};
-use crate::ErrorKind;
-use crate::state::{CachedEntry, Engine, InstanceMetadata, Project};
-use crate::util::{fetch, io};
 use anyhow::bail;
+use engine::ErrorKind;
+use engine::state::{CachedEntry, Engine, InstanceMetadata, Project};
+use engine::util::{fetch, io};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
@@ -24,11 +24,11 @@ pub(super) struct Snapshot {
 pub(super) async fn mod_projects(
     state: &Engine,
     hashes: &[&str],
-) -> crate::Result<HashMap<String, Project>> {
+) -> engine::Result<HashMap<String, Project>> {
     let files = CachedEntry::get_file_many(
         hashes,
         None,
-        &state.pool,
+        state.pool(),
         &state.api_semaphore,
         &state.sessions,
     )
@@ -38,7 +38,7 @@ pub(super) async fn mod_projects(
     let projects = CachedEntry::get_project_many(
         &project_ids.into_iter().collect::<Vec<_>>(),
         None,
-        &state.pool,
+        state.pool(),
         &state.api_semaphore,
         &state.sessions,
     )
@@ -69,7 +69,7 @@ pub(super) fn root(state: &Engine) -> PathBuf {
 pub(super) async fn write_json<T: Serialize>(
     path: &std::path::Path,
     data: &T,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     let parent = path.parent().ok_or(ErrorKind::InputError(
         "missing locale cache directory".to_string(),
     ))?;
@@ -81,14 +81,14 @@ pub(super) async fn write_json<T: Serialize>(
 pub(super) async fn snapshot_instance(
     metadata: &InstanceMetadata,
     state: &Engine,
-) -> crate::Result<String> {
+) -> engine::Result<String> {
     let version = &metadata.applied_content_set.game_version;
     let instance_dir = state
         .directories
         .instances_dir()
         .join(&metadata.instance.path);
     let scanned =
-        crate::state::instances::adapters::filesystem::scan_content_files(
+        engine::state::instances::adapters::filesystem::scan_content_files(
             &state.directories.instances_dir(),
             &metadata.instance.path,
         )?;
@@ -102,7 +102,7 @@ pub(super) async fn snapshot_instance(
         &keys,
         &state.directories.instances_dir(),
         None,
-        &state.pool,
+        state.pool(),
         &state.api_semaphore,
         &state.sessions,
     )
@@ -138,7 +138,7 @@ pub(super) async fn snapshot_instance(
 pub(super) async fn load_snapshot(
     state: &Engine,
     id: &str,
-) -> crate::Result<Snapshot> {
+) -> engine::Result<Snapshot> {
     if !archive::valid_hash(id) {
         bail!(ErrorKind::InputError(
             "invalid locale snapshot hash".to_string()
@@ -157,7 +157,7 @@ pub(super) async fn load_snapshot(
 pub(super) async fn archive_index(
     state: &Engine,
     source: &ArchiveSource,
-) -> crate::Result<ArchiveIndex> {
+) -> engine::Result<ArchiveIndex> {
     if !archive::valid_hash(&source.hash) {
         bail!(ErrorKind::InputError(
             "invalid locale archive hash".to_string()

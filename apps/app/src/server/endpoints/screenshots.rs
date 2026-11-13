@@ -2,11 +2,11 @@
 
 use std::path::PathBuf;
 
-use contracts::{Empty, Json, Raw};
-use engine::instance::{
+use crate::screenshots::{
     ScreenshotEditSaveMode, ScreenshotGroup, ScreenshotGroupImport,
     ScreenshotGroupMembershipUpdate, ScreenshotKey,
 };
+use contracts::{Empty, Json, Raw};
 use serde::{Deserialize, Serialize};
 
 use super::IdParams;
@@ -57,8 +57,8 @@ pub struct ScreenshotFile {
     pub path: PathBuf,
 }
 
-impl From<engine::instance::InstanceScreenshot> for ScreenshotFile {
-    fn from(screenshot: engine::instance::InstanceScreenshot) -> Self {
+impl From<crate::screenshots::InstanceScreenshot> for ScreenshotFile {
+    fn from(screenshot: crate::screenshots::InstanceScreenshot) -> Self {
         Self {
             id: screenshot.id,
             instance_id: screenshot.instance_id,

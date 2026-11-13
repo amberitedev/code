@@ -1,3 +1,4 @@
+use crate::api::server_list;
 use crate::data::ModLoader;
 use crate::instance::get_full_path;
 use crate::launcher::get_loader_version_from_profile;
@@ -152,7 +153,7 @@ pub enum WorldDetails {
     Server {
         index: usize,
         server_id: String,
-        source: crate::api::instance::ServerSource,
+        source: server_list::ServerSource,
         address: String,
         pack_status: ServerPackStatus,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -487,10 +488,7 @@ async fn get_server_worlds_in_instance(
     let metadata = crate::state::get_instance(instance_id, &state.pool)
         .await?
         .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
-    let servers = crate::api::instance::synced_servers::list_server_records(
-        &metadata, state,
-    )
-    .await?;
+    let servers = state.hooks().list_servers(state, &metadata).await?;
     if servers.is_empty() {
         return Ok(());
     }
@@ -853,19 +851,12 @@ pub async fn add_server_to_instance(
     let metadata = crate::state::get_instance(&instance_id, &state.pool)
         .await?
         .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
-    let data = crate::api::instance::synced_servers::server_data(
-        name,
-        address.clone(),
-        pack_status.into(),
-    );
-    let server_id = crate::api::instance::synced_servers::add_user_server(
-        &metadata, data, state,
-    )
-    .await?;
-    let insert_index =
-        crate::api::instance::synced_servers::list_server_records(
-            &metadata, state,
-        )
+    let data =
+        server_list::server_data(name, address.clone(), pack_status.into());
+    let server_id = state.hooks().add_server(state, &metadata, data).await?;
+    let insert_index = state
+        .hooks()
+        .list_servers(state, &metadata)
         .await?
         .iter()
         .position(|server| server.id == server_id)
@@ -908,12 +899,11 @@ pub async fn ensure_managed_server_in_instance(
     let metadata = crate::state::get_instance(&instance_id, &state.pool)
         .await?
         .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
-    let data =
-        crate::api::instance::synced_servers::server_data(name, address, None);
-    crate::api::instance::synced_servers::ensure_managed_server(
-        &metadata, data, state,
-    )
-    .await
+    let data = server_list::server_data(name, address, None);
+    state
+        .hooks()
+        .ensure_managed_server(state, &metadata, data)
+        .await
 }
 
 pub async fn edit_server_in_instance(
@@ -929,15 +919,17 @@ pub async fn edit_server_in_instance(
     let metadata = crate::state::get_instance(&instance_id, &state.pool)
         .await?
         .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
-    crate::api::instance::synced_servers::update_server_by_index(
-        &metadata,
-        index,
-        name,
-        address,
-        pack_status.into(),
-        state,
-    )
-    .await
+    state
+        .hooks()
+        .update_server(
+            state,
+            &metadata,
+            index,
+            name,
+            address,
+            pack_status.into(),
+        )
+        .await
 }
 
 pub async fn remove_server_from_instance(
@@ -950,10 +942,7 @@ pub async fn remove_server_from_instance(
     let metadata = crate::state::get_instance(&instance_id, &state.pool)
         .await?
         .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
-    crate::api::instance::synced_servers::remove_server_by_index(
-        &metadata, index, state,
-    )
-    .await
+    state.hooks().remove_server(state, &metadata, index).await
 }
 
 pub async fn get_instance_protocol_version(

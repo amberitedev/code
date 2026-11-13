@@ -3,7 +3,7 @@ use chrono::Utc;
 pub async fn get_hidden_instance_ids(
     user_id: &str,
     exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
-) -> crate::Result<Vec<String>> {
+) -> engine::Result<Vec<String>> {
     let rows = sqlx::query!(
         "
 		SELECT instance_id
@@ -24,7 +24,7 @@ pub async fn set_instance_hidden(
     instance_id: &str,
     hidden: bool,
     exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     if hidden {
         hide_instance(user_id, instance_id, exec).await
     } else {
@@ -36,7 +36,7 @@ async fn hide_instance(
     user_id: &str,
     instance_id: &str,
     exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     let hidden_at = Utc::now().timestamp();
 
     sqlx::query!(
@@ -59,7 +59,7 @@ async fn unhide_instance(
     user_id: &str,
     instance_id: &str,
     exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     sqlx::query!(
         "
 		DELETE FROM hidden_instances
@@ -77,7 +77,7 @@ async fn unhide_instance(
 pub async fn forget_instance(
     instance_id: &str,
     exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     sqlx::query!(
         "
 		DELETE FROM hidden_instances

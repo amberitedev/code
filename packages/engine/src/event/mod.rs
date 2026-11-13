@@ -89,11 +89,20 @@ pub enum Event {
     },
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+pub struct OnboardingChecklist {
+    pub has_created_instance: bool,
+    pub has_logged_into_minecraft: bool,
+    pub has_logged_into_modrinth: bool,
+    pub show_checklist: bool,
+}
+
 #[derive(Clone)]
 pub enum DesktopEvent {
     Friend(FriendPayload),
     Notification(serde_json::Value),
-    OnboardingChecklist(crate::state::OnboardingChecklist),
+    OnboardingChecklist(OnboardingChecklist),
     InstanceGroupsChanged(InstanceGroupsChangedPayload),
     Command(CommandPayload),
 }

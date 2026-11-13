@@ -181,7 +181,7 @@ pub(crate) struct InstanceDisplayInfo {
 }
 
 #[derive(Clone, Debug, sqlx::FromRow)]
-pub(crate) struct InstanceScreenshotSource {
+pub struct InstanceScreenshotSource {
     pub id: String,
     pub name: String,
     pub path: String,
@@ -477,7 +477,7 @@ where
     Ok(row)
 }
 
-pub(crate) async fn get_instance_screenshot_source(
+pub async fn get_instance_screenshot_source(
     instance_id: &str,
     pool: &SqlitePool,
 ) -> crate::Result<Option<InstanceScreenshotSource>> {
@@ -495,7 +495,7 @@ pub(crate) async fn get_instance_screenshot_source(
     Ok(source)
 }
 
-pub(crate) async fn list_screenshot_sources(
+pub async fn list_screenshot_sources(
     pool: &SqlitePool,
 ) -> crate::Result<Vec<InstanceScreenshotSource>> {
     let sources = sqlx::query_as::<_, InstanceScreenshotSource>(
@@ -984,9 +984,7 @@ pub(crate) async fn get_instance_launch_context(
         .transpose()
 }
 
-pub(crate) async fn list_instances(
-    pool: &SqlitePool,
-) -> crate::Result<Vec<Instance>> {
+pub async fn list_instances(pool: &SqlitePool) -> crate::Result<Vec<Instance>> {
     let rows = sqlx::query_as!(
         InstanceRow,
         "
@@ -1265,7 +1263,7 @@ pub(crate) async fn insert_instance(
     Ok(())
 }
 
-pub(crate) async fn set_instance_sync_preference(
+pub async fn set_instance_sync_preference(
     instance_id: &str,
     option: InstanceSyncedOption,
     enabled: bool,

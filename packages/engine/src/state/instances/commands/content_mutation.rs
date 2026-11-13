@@ -17,12 +17,12 @@ use tokio::fs;
 use tokio::sync::{MutexGuard, OwnedMutexGuard};
 
 #[derive(Clone, Copy)]
-pub(crate) struct ContentOrigin<'a> {
+pub struct ContentOrigin<'a> {
     pub project_id: &'a str,
     pub version_id: &'a str,
 }
 
-pub(crate) struct InstallContent<'a> {
+pub struct InstallContent<'a> {
     pub requested_path: &'a str,
     pub stored_file: &'a StoredFileHandle,
     pub project_type: ProjectType,
@@ -650,7 +650,7 @@ impl<'a> InstanceContent<'a> {
     }
 }
 
-pub(crate) async fn install_stored_file(
+pub async fn install_stored_file(
     instance_id: &str,
     request: InstallContent<'_>,
     state: &Engine,
@@ -665,7 +665,7 @@ pub(crate) async fn install_stored_file(
     }
 }
 
-pub(crate) async fn toggle_disable_project(
+pub async fn toggle_disable_project(
     instance_id: &str,
     project_path: &str,
     desired_enabled: Option<bool>,
@@ -684,7 +684,7 @@ pub(crate) async fn toggle_disable_project(
     }
 }
 
-pub(crate) async fn remove_project(
+pub async fn remove_project(
     instance_id: &str,
     project_path: &str,
     state: &Engine,

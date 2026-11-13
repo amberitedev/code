@@ -40,7 +40,7 @@ pub async fn finish_login(
 
 async fn mark_logged_into_minecraft(state: &engine::Engine) {
     if let Err(error) =
-        engine::onboarding_checklist::mark_logged_into_minecraft(state).await
+        crate::onboarding::mark_logged_into_minecraft(state).await
     {
         tracing::warn!(
             "Failed to mark Minecraft login in onboarding checklist: {error}"

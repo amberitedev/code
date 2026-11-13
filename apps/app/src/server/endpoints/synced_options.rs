@@ -1,16 +1,14 @@
 //! Which instances share options, the shared command history and the shared server list.
 
 use contracts::{Empty, Json};
-use engine::{
-    instance::{
-        GlobalSyncedOptions, SyncedOptionJoinPreview,
-        SyncedOptionJoinResolution, SyncedOptionsOverview, SyncedServer,
-    },
-    prelude::InstanceSyncedOption,
-};
+use engine::prelude::InstanceSyncedOption;
 use serde::{Deserialize, Serialize};
 
 use super::IdParams;
+use crate::synced_options::{
+    GlobalSyncedOptions, SyncedOptionJoinPreview, SyncedOptionJoinResolution,
+    SyncedOptionsOverview, SyncedServer,
+};
 
 endpoints! {
     /// Turns one option's sharing on or off for an instance.

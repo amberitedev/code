@@ -1,4 +1,4 @@
-use super::super::synced_options::{
+use super::super::options::{
     nbt_from_bytes, nbt_to_bytes, safe_instance_id, synced_options_path,
 };
 use super::SERVERS_FILE;
@@ -6,18 +6,18 @@ use super::types::{
     CanonicalServer, LocalServer, ProjectionEntry, ProjectionOwner,
     ServerRecord, ServerSource,
 };
-use crate::{Engine, ErrorKind};
+use engine::{Engine, ErrorKind};
 use sqlx::{Executor, Sqlite, Transaction};
 use std::collections::HashSet;
 use std::path::PathBuf;
 
-pub(in crate::api::instance) async fn canonical_exists(
+pub(in crate::synced_options) async fn canonical_exists(
     state: &Engine,
-) -> crate::Result<bool> {
+) -> engine::Result<bool> {
     canonical_initialized(state).await
 }
 
-async fn canonical_initialized(state: &Engine) -> crate::Result<bool> {
+async fn canonical_initialized(state: &Engine) -> engine::Result<bool> {
     Ok(sqlx::query_scalar!(
         r#"
 		SELECT EXISTS(
@@ -25,19 +25,19 @@ async fn canonical_initialized(state: &Engine) -> crate::Result<bool> {
 		) AS "initialized!: bool"
 		"#,
     )
-    .fetch_one(&state.pool)
+    .fetch_one(state.pool())
     .await?)
 }
 
 pub(super) async fn read_canonical(
     state: &Engine,
-) -> crate::Result<Vec<CanonicalServer>> {
-    read_canonical_with(&state.pool).await
+) -> engine::Result<Vec<CanonicalServer>> {
+    read_canonical_with(state.pool()).await
 }
 
 async fn read_canonical_with<'e>(
     executor: impl Executor<'e, Database = Sqlite>,
-) -> crate::Result<Vec<CanonicalServer>> {
+) -> engine::Result<Vec<CanonicalServer>> {
     let rows = sqlx::query!(
         "
 		SELECT id, nbt
@@ -61,8 +61,8 @@ async fn read_canonical_with<'e>(
 pub(super) async fn read_server_snapshot(
     instance_id: &str,
     state: &Engine,
-) -> crate::Result<(Vec<CanonicalServer>, Vec<LocalServer>)> {
-    let mut tx = state.pool.begin().await?;
+) -> engine::Result<(Vec<CanonicalServer>, Vec<LocalServer>)> {
+    let mut tx = state.pool().begin().await?;
     let canonical = read_canonical_with(&mut *tx).await?;
     let local = load_local_with(instance_id, &mut *tx).await?;
     tx.commit().await?;
@@ -73,8 +73,8 @@ pub(super) async fn commit_server_state(
     canonical: Option<&[CanonicalServer]>,
     local: Option<(&str, &[LocalServer])>,
     state: &Engine,
-) -> crate::Result<bool> {
-    let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await?;
+) -> engine::Result<bool> {
+    let mut tx = state.pool().begin_with("BEGIN IMMEDIATE").await?;
     let mut canonical_changed = false;
     if let Some(canonical) = canonical {
         canonical_changed = write_canonical_rows(&mut tx, canonical).await?;
@@ -109,7 +109,7 @@ pub(super) async fn commit_server_state(
 async fn write_canonical_rows(
     tx: &mut Transaction<'_, Sqlite>,
     servers: &[CanonicalServer],
-) -> crate::Result<bool> {
+) -> engine::Result<bool> {
     let current = sqlx::query!(
         "
 		SELECT id, position, nbt
@@ -180,7 +180,7 @@ async fn write_canonical_rows(
     Ok(true)
 }
 
-pub(super) async fn server_revision(state: &Engine) -> crate::Result<i64> {
+pub(super) async fn server_revision(state: &Engine) -> engine::Result<i64> {
     Ok(sqlx::query_scalar!(
         r#"
 		SELECT revision AS "revision!: i64"
@@ -188,7 +188,7 @@ pub(super) async fn server_revision(state: &Engine) -> crate::Result<i64> {
 		WHERE singleton = 1
 		"#,
     )
-    .fetch_optional(&state.pool)
+    .fetch_optional(state.pool())
     .await?
     .unwrap_or(0))
 }
@@ -196,14 +196,14 @@ pub(super) async fn server_revision(state: &Engine) -> crate::Result<i64> {
 pub(super) async fn load_local(
     instance_id: &str,
     state: &Engine,
-) -> crate::Result<Vec<LocalServer>> {
-    load_local_with(instance_id, &state.pool).await
+) -> engine::Result<Vec<LocalServer>> {
+    load_local_with(instance_id, state.pool()).await
 }
 
 async fn load_local_with<'e>(
     instance_id: &str,
     executor: impl Executor<'e, Database = Sqlite>,
-) -> crate::Result<Vec<LocalServer>> {
+) -> engine::Result<Vec<LocalServer>> {
     let rows = sqlx::query!(
         "
 		SELECT id, source, excluded_synced_server_id, nbt, position
@@ -237,7 +237,7 @@ pub(super) async fn write_local(
     instance_id: &str,
     servers: &[LocalServer],
     state: &Engine,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     commit_server_state(None, Some((instance_id, servers)), state).await?;
     Ok(())
 }
@@ -246,7 +246,7 @@ pub(super) async fn write_local_rows(
     tx: &mut Transaction<'_, Sqlite>,
     instance_id: &str,
     servers: &[LocalServer],
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     sqlx::query!(
         "DELETE FROM instance_servers WHERE instance_id = ?",
         instance_id,
@@ -280,7 +280,7 @@ pub(super) async fn write_local_rows(
 pub(super) async fn load_projection_entries(
     instance_id: &str,
     state: &Engine,
-) -> crate::Result<Vec<ProjectionEntry>> {
+) -> engine::Result<Vec<ProjectionEntry>> {
     let rows = sqlx::query!(
         "
 		SELECT server_id, owner, nbt, position
@@ -290,7 +290,7 @@ pub(super) async fn load_projection_entries(
 		",
         instance_id,
     )
-    .fetch_all(&state.pool)
+    .fetch_all(state.pool())
     .await?;
     rows.into_iter()
         .map(|row| {
@@ -315,8 +315,8 @@ pub(super) async fn begin_server_checkpoint(
     expected_sha1: &str,
     source_revision: i64,
     state: &Engine,
-) -> crate::Result<()> {
-    let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await?;
+) -> engine::Result<()> {
+    let mut tx = state.pool().begin_with("BEGIN IMMEDIATE").await?;
     sqlx::query!(
         "DELETE FROM instance_server_projection_entries WHERE instance_id = ?",
         instance_id,

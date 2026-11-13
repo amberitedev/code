@@ -74,7 +74,9 @@ pub async fn get_content_items(
     let mut items =
         crate::state::list_indexed_content(instance_id, cache_behaviour, state)
             .await?;
-    super::synced_packs::decorate_content(instance_id, &mut items, state)
+    state
+        .hooks()
+        .decorate_content(state, instance_id, &mut items)
         .await?;
     Ok(items)
 }

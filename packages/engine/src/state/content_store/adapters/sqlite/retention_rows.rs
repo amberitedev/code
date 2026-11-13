@@ -31,7 +31,7 @@ pub(in crate::state::content_store) async fn referenced_files(
     Ok(sqlx::query_scalar!("SELECT blob_sha512 FROM store_instance_files UNION SELECT blob_sha512 FROM store_retained_refs").fetch_all(pool).await?)
 }
 
-pub(crate) async fn retained_owners(
+pub async fn retained_owners(
     pool: &SqlitePool,
     kind: &str,
 ) -> crate::Result<Vec<String>> {

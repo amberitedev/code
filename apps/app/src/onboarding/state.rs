@@ -1,14 +1,5 @@
-use serde::{Deserialize, Serialize};
+use engine::data::OnboardingChecklist;
 use sqlx::{Executor, Sqlite};
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
-pub struct OnboardingChecklist {
-    pub has_created_instance: bool,
-    pub has_logged_into_minecraft: bool,
-    pub has_logged_into_modrinth: bool,
-    pub show_checklist: bool,
-}
 
 pub(crate) enum OnboardingChecklistItem {
     CreatedInstance,
@@ -18,7 +9,7 @@ pub(crate) enum OnboardingChecklistItem {
 
 pub(crate) async fn get_onboarding_checklist(
     exec: impl Executor<'_, Database = Sqlite>,
-) -> crate::Result<OnboardingChecklist> {
+) -> engine::Result<OnboardingChecklist> {
     let row = sqlx::query!(
         "
         SELECT
@@ -44,7 +35,7 @@ pub(crate) async fn get_onboarding_checklist(
 pub(crate) async fn mark_onboarding_checklist_item(
     item: OnboardingChecklistItem,
     pool: &sqlx::SqlitePool,
-) -> crate::Result<Option<OnboardingChecklist>> {
+) -> engine::Result<Option<OnboardingChecklist>> {
     let result = match item {
         OnboardingChecklistItem::CreatedInstance => {
             sqlx::query!(

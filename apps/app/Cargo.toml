@@ -17,6 +17,7 @@ axum = { version = "0.8.4", default-features = false, features = ["http1", "json
 base64 = { workspace = true }
 bytemuck = { workspace = true, features = ["extern_crate_alloc"] }
 bytes = { workspace = true }
+chardetng = { workspace = true }
 chrono = { workspace = true }
 contracts = { workspace = true, features = ["server"] }
 dashmap = { workspace = true }
@@ -24,6 +25,7 @@ data-url = { workspace = true }
 dirs = { workspace = true }
 discord-rich-presence = { workspace = true }
 either = { workspace = true }
+encoding_rs = { workspace = true }
 engine = { workspace = true }
 futures = { workspace = true, features = ["alloc", "async-await"] }
 heck = { workspace = true }
@@ -34,10 +36,16 @@ hyper-util = { workspace = true, features = ["tokio"] }
 image = { workspace = true, features = ["gif", "jpeg", "png", "webp"] }
 itertools = { workspace = true }
 keyring = { workspace = true }
+minecraft-meta-manifest = { workspace = true }
+modrinth-content-management = { workspace = true }
 native-dialog = { workspace = true }
 os_info = { version = "3.15.0", default-features = false }
 p256 = { workspace = true, features = ["ecdh", "ecdsa"] }
+parking_lot = { workspace = true }
+path-util = { workspace = true }
+phf = { workspace = true }
 png = { workspace = true }
+quartz_nbt = { workspace = true, features = ["serde"] }
 rand = { workspace = true }
 reqwest = { workspace = true, features = ["json", "multipart", "stream"] }
 rgb = { workspace = true }
@@ -45,6 +53,7 @@ rustls = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 serde_with = { workspace = true }
+sha1_smol = { workspace = true }
 sha2 = { workspace = true }
 sharing-client = { workspace = true }
 sqlx = { workspace = true, features = ["macros", "runtime-tokio", "sqlite"] }
@@ -61,9 +70,13 @@ tokio = { workspace = true, features = ["io-util", "macros", "net", "sync", "tim
 tokio-rustls = { version = "0.26.4", default-features = false, features = ["ring", "tls12"] }
 tokio-util = { workspace = true, features = ["compat", "io", "rt"] }
 tracing = { workspace = true }
+tracing-error = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["chrono", "env-filter"] }
 url = { workspace = true }
+urlencoding = { workspace = true }
 uuid = { workspace = true, features = ["serde", "v4"] }
 whoami = { workspace = true }
+zip = { workspace = true }
 
 [dependencies.tauri]
 workspace = true

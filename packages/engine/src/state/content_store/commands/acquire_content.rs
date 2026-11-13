@@ -15,7 +15,7 @@ use std::path::Path;
 use tokio::fs::File;
 
 impl ContentStore {
-    pub(crate) async fn get_or_download_file(
+    pub async fn get_or_download_file(
         &self,
         mirrors: &[&str],
         sha512: Option<&str>,
@@ -83,7 +83,7 @@ impl ContentStore {
         })
     }
 
-    pub(crate) async fn store_file(
+    pub async fn store_file(
         &self,
         source: &Path,
     ) -> crate::Result<StoredFileHandle> {
@@ -151,7 +151,7 @@ impl ContentStore {
         })
     }
 
-    pub(crate) async fn store_bytes(
+    pub async fn store_bytes(
         &self,
         bytes: &[u8],
     ) -> crate::Result<StoredFileHandle> {
@@ -176,7 +176,7 @@ impl ContentStore {
     ) -> crate::Result<(File, tempfile::TempPath)> {
         temporary_file(Some(&self.staging)).await
     }
-    pub(crate) fn require_staging_space(&self, size: u64) -> crate::Result<()> {
+    pub fn require_staging_space(&self, size: u64) -> crate::Result<()> {
         filesystem::require_staging_space(&self.staging, size)
     }
 

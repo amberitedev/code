@@ -5,7 +5,7 @@ use contracts::{
     ApiError, Empty, Json,
     server::{Req, route},
 };
-use engine::{Engine, onboarding_checklist, routes::api_error};
+use engine::{Engine, routes::api_error};
 
 use crate::server::{
     AppState,
@@ -28,7 +28,7 @@ async fn get_onboarding_checklist(
     State(engine): State<Arc<Engine>>,
     _: Req<GetOnboardingChecklist>,
 ) -> Result<Json<OnboardingProgress>, ApiError> {
-    onboarding_checklist::get(&engine)
+    super::get(&engine)
         .await
         .map(|checklist| Json(OnboardingProgress(checklist)))
         .map_err(api_error)
@@ -38,7 +38,7 @@ async fn skip_create_instance_onboarding(
     State(engine): State<Arc<Engine>>,
     _: Req<SkipCreateInstanceOnboarding>,
 ) -> Result<Empty, ApiError> {
-    onboarding_checklist::mark_created_instance(&engine)
+    super::mark_created_instance(&engine)
         .await
         .map(|()| Empty)
         .map_err(api_error)

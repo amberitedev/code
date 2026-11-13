@@ -439,7 +439,7 @@ impl DownloadedFile {
         })
     }
 
-    pub(crate) async fn store_file(
+    pub async fn store_file(
         &self,
         content_store: &ContentStore,
     ) -> crate::Result<crate::state::content_store::StoredFileHandle> {
@@ -605,7 +605,7 @@ async fn read_file_response(
     })
 }
 
-pub(crate) async fn fetch_content_file(
+pub async fn fetch_content_file(
     state: &crate::Engine,
     mirrors: &[&str],
     sha512: Option<&str>,

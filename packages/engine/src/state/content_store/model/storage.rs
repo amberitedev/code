@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct InstanceFileStorage {
+pub struct InstanceFileStorage {
     pub file_id: String,
     pub blob_sha512: String,
     pub storage_kind: FileStorageKind,
@@ -12,7 +12,7 @@ pub(crate) struct InstanceFileStorage {
 )]
 #[serde(rename_all = "snake_case")]
 #[sqlx(rename_all = "snake_case")]
-pub(crate) enum FileStorageKind {
+pub enum FileStorageKind {
     Reflink,
     Hardlink,
     Copy,
@@ -23,7 +23,7 @@ pub(crate) enum FileStorageKind {
 )]
 #[serde(rename_all = "snake_case")]
 #[sqlx(rename_all = "snake_case")]
-pub(crate) enum StoredFileStatus {
+pub enum StoredFileStatus {
     Ready,
     Quarantined,
     Deleting,

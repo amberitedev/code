@@ -7,9 +7,9 @@ use super::{
     SupportedSetting, ValueEncoding, VersionedKey,
     setting_available_for_version,
 };
-use crate::ErrorKind;
-use crate::state::{CanonicalValue, StoredOption};
+use crate::synced_options::state::{CanonicalValue, StoredOption};
 use anyhow::{Context, bail};
+use engine::ErrorKind;
 
 const GRAPHICS_VALUES: &[&str] = &["fast", "fancy", "fabulous", "custom"];
 const CLOUD_VALUES: &[&str] = &["false", "fast", "true"];
@@ -27,7 +27,7 @@ fn encode_string_token(value: &str) -> Option<String> {
     serde_json::to_string(value).ok()
 }
 
-pub(in crate::api::instance) const GRAPHICS_KEYS: &[VersionedKey] = &[
+pub(in crate::synced_options) const GRAPHICS_KEYS: &[VersionedKey] = &[
     VersionedKey {
         key: "fancyGraphics",
         since: "1.0",
@@ -48,7 +48,7 @@ pub(in crate::api::instance) const GRAPHICS_KEYS: &[VersionedKey] = &[
     },
 ];
 
-pub(in crate::api::instance) const AMBIENT_OCCLUSION_KEYS: &[VersionedKey] = &[
+pub(in crate::synced_options) const AMBIENT_OCCLUSION_KEYS: &[VersionedKey] = &[
     VersionedKey {
         key: "ao",
         since: "1.0",
@@ -69,7 +69,7 @@ pub(in crate::api::instance) const AMBIENT_OCCLUSION_KEYS: &[VersionedKey] = &[
     },
 ];
 
-pub(in crate::api::instance) const FOV_KEYS: &[VersionedKey] =
+pub(in crate::synced_options) const FOV_KEYS: &[VersionedKey] =
     &[VersionedKey {
         key: "fov",
         since: "1.0",
@@ -77,7 +77,7 @@ pub(in crate::api::instance) const FOV_KEYS: &[VersionedKey] =
         mapping: GameOptionMappingKind::Direct,
     }];
 
-pub(in crate::api::instance) const CLOUD_KEYS: &[VersionedKey] = &[
+pub(in crate::synced_options) const CLOUD_KEYS: &[VersionedKey] = &[
     VersionedKey {
         key: "clouds",
         since: "1.0",
@@ -98,7 +98,7 @@ pub(in crate::api::instance) const CLOUD_KEYS: &[VersionedKey] = &[
     },
 ];
 
-pub(in crate::api::instance) const CHAT_PREVIEW_KEYS: &[VersionedKey] = &[
+pub(in crate::synced_options) const CHAT_PREVIEW_KEYS: &[VersionedKey] = &[
     VersionedKey {
         key: "chatPreview",
         since: "1.19",
@@ -113,7 +113,7 @@ pub(in crate::api::instance) const CHAT_PREVIEW_KEYS: &[VersionedKey] = &[
     },
 ];
 
-pub(in crate::api::instance) const MENU_BACKGROUND_BLUR_KEYS:
+pub(in crate::synced_options) const MENU_BACKGROUND_BLUR_KEYS:
     &[VersionedKey] = &[
     VersionedKey {
         key: "menuBackgroundBlurriness",
@@ -129,7 +129,7 @@ pub(in crate::api::instance) const MENU_BACKGROUND_BLUR_KEYS:
     },
 ];
 
-pub(in crate::api::instance) const MASTER_VOLUME_KEYS: &[VersionedKey] = &[
+pub(in crate::synced_options) const MASTER_VOLUME_KEYS: &[VersionedKey] = &[
     VersionedKey {
         key: "sound",
         since: "1.0",
@@ -144,7 +144,7 @@ pub(in crate::api::instance) const MASTER_VOLUME_KEYS: &[VersionedKey] = &[
     },
 ];
 
-pub(in crate::api::instance) const MUSIC_VOLUME_KEYS: &[VersionedKey] = &[
+pub(in crate::synced_options) const MUSIC_VOLUME_KEYS: &[VersionedKey] = &[
     VersionedKey {
         key: "music",
         since: "1.0",
@@ -159,7 +159,7 @@ pub(in crate::api::instance) const MUSIC_VOLUME_KEYS: &[VersionedKey] = &[
     },
 ];
 
-pub(in crate::api::instance) const CAPE_KEYS: &[VersionedKey] = &[
+pub(in crate::synced_options) const CAPE_KEYS: &[VersionedKey] = &[
     VersionedKey {
         key: "showCape",
         since: "1.4.2",
@@ -174,7 +174,7 @@ pub(in crate::api::instance) const CAPE_KEYS: &[VersionedKey] = &[
     },
 ];
 
-pub(in crate::api::instance) const MUSIC_TOAST_KEYS: &[VersionedKey] = &[
+pub(in crate::synced_options) const MUSIC_TOAST_KEYS: &[VersionedKey] = &[
     VersionedKey {
         key: "showNowPlayingToast",
         since: "1.21.6",
@@ -189,7 +189,7 @@ pub(in crate::api::instance) const MUSIC_TOAST_KEYS: &[VersionedKey] = &[
     },
 ];
 
-pub(in crate::api::instance) const SWAP_OFFHAND_KEYS: &[VersionedKey] = &[
+pub(in crate::synced_options) const SWAP_OFFHAND_KEYS: &[VersionedKey] = &[
     VersionedKey {
         key: "key_key.swapHands",
         since: "1.9",
@@ -204,7 +204,7 @@ pub(in crate::api::instance) const SWAP_OFFHAND_KEYS: &[VersionedKey] = &[
     },
 ];
 
-pub(in crate::api::instance) fn release_version(
+pub(in crate::synced_options) fn release_version(
     version: &str,
 ) -> Option<(u32, u32, u32)> {
     let components = version
@@ -219,7 +219,7 @@ pub(in crate::api::instance) fn release_version(
     }
 }
 
-pub(in crate::api::instance) fn physical_variant_for_version<'a>(
+pub(in crate::synced_options) fn physical_variant_for_version<'a>(
     definition: &'a SupportedSetting,
     version: &str,
 ) -> Option<&'a VersionedKey> {
@@ -235,7 +235,7 @@ pub(in crate::api::instance) fn physical_variant_for_version<'a>(
     })
 }
 
-pub(in crate::api::instance) fn physical_variant_for_present_key<'a>(
+pub(in crate::synced_options) fn physical_variant_for_present_key<'a>(
     definition: &'a SupportedSetting,
     key: &str,
     version: &str,
@@ -250,11 +250,11 @@ pub(in crate::api::instance) fn physical_variant_for_present_key<'a>(
     })
 }
 
-pub(in crate::api::instance) fn uses_modern_key_tokens(version: &str) -> bool {
+pub(in crate::synced_options) fn uses_modern_key_tokens(version: &str) -> bool {
     release_version(version).is_some_and(|version| version >= (1, 13, 0))
 }
 
-pub(in crate::api::instance) fn split_key_binding(
+pub(in crate::synced_options) fn split_key_binding(
     value: &str,
 ) -> (&str, Option<&str>) {
     value
@@ -262,7 +262,7 @@ pub(in crate::api::instance) fn split_key_binding(
         .map_or((value, None), |(key, modifier)| (key, Some(modifier)))
 }
 
-pub(in crate::api::instance) fn append_key_modifier(
+pub(in crate::synced_options) fn append_key_modifier(
     mut key: String,
     modifier: Option<&str>,
 ) -> String {
@@ -273,7 +273,7 @@ pub(in crate::api::instance) fn append_key_modifier(
     key
 }
 
-pub(in crate::api::instance) fn legacy_key_binding_to_token(
+pub(in crate::synced_options) fn legacy_key_binding_to_token(
     value: &str,
 ) -> Option<String> {
     let (key, modifier) = split_key_binding(value);
@@ -291,7 +291,7 @@ pub(in crate::api::instance) fn legacy_key_binding_to_token(
     Some(append_key_modifier(token, modifier))
 }
 
-pub(in crate::api::instance) fn token_key_binding_to_legacy(
+pub(in crate::synced_options) fn token_key_binding_to_legacy(
     value: &str,
 ) -> Option<String> {
     let (token, modifier) = split_key_binding(value);
@@ -317,7 +317,7 @@ pub(in crate::api::instance) fn token_key_binding_to_legacy(
     Some(append_key_modifier(key.to_string(), modifier))
 }
 
-pub(in crate::api::instance) fn valid_modern_key_binding(value: &str) -> bool {
+pub(in crate::synced_options) fn valid_modern_key_binding(value: &str) -> bool {
     let (key, modifier) = split_key_binding(value);
     let key_valid = ["key.keyboard.", "key.mouse.", "scancode."]
         .into_iter()
@@ -340,7 +340,7 @@ pub(in crate::api::instance) fn valid_modern_key_binding(value: &str) -> bool {
         })
 }
 
-pub(in crate::api::instance) fn supported_settings_cover_game_version(
+pub(in crate::synced_options) fn supported_settings_cover_game_version(
     version: &str,
 ) -> bool {
     if version.contains('w') || version.contains("snapshot") {
@@ -361,7 +361,7 @@ pub(in crate::api::instance) fn supported_settings_cover_game_version(
     }
 }
 
-pub(in crate::api::instance) fn decode_value(
+pub(in crate::synced_options) fn decode_value(
     definition: &SupportedSetting,
     physical_key: &str,
     raw: &str,
@@ -479,7 +479,7 @@ pub(in crate::api::instance) fn decode_value(
     }
 }
 
-pub(in crate::api::instance) fn encode_value(
+pub(in crate::synced_options) fn encode_value(
     definition: &SupportedSetting,
     physical_key: &str,
     value: &CanonicalValue,
@@ -653,7 +653,7 @@ fn validate_value(
     definition: Option<&SupportedSetting>,
     value: &CanonicalValue,
     enforce_editor_increment: bool,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     if let Some(definition) = definition {
         let type_valid = match definition.encoding {
             ValueEncoding::Bool => matches!(value, CanonicalValue::Bool(_)),
@@ -791,21 +791,21 @@ fn validate_value(
     Ok(())
 }
 
-pub(in crate::api::instance) fn validate_canonical_value(
+pub(in crate::synced_options) fn validate_canonical_value(
     definition: Option<&SupportedSetting>,
     value: &CanonicalValue,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     validate_value(definition, value, true)
 }
 
-pub(in crate::api::instance) fn validate_file_value(
+pub(in crate::synced_options) fn validate_file_value(
     definition: Option<&SupportedSetting>,
     value: &CanonicalValue,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     validate_value(definition, value, false)
 }
 
-pub(in crate::api::instance) fn decode_value_for_version(
+pub(in crate::synced_options) fn decode_value_for_version(
     definition: &SupportedSetting,
     physical_key: &str,
     raw: &str,
@@ -825,7 +825,7 @@ pub(in crate::api::instance) fn decode_value_for_version(
     Some(value)
 }
 
-pub(in crate::api::instance) fn target_physical_key(
+pub(in crate::synced_options) fn target_physical_key(
     definition: Option<&SupportedSetting>,
     stored: &StoredOption,
     document: &GameOptionsDocument,
@@ -850,7 +850,7 @@ pub(in crate::api::instance) fn target_physical_key(
     }
 }
 
-pub(in crate::api::instance) fn observed_physical_key(
+pub(in crate::synced_options) fn observed_physical_key(
     definition: &SupportedSetting,
     document: &GameOptionsDocument,
     game_version: &str,
@@ -870,7 +870,7 @@ pub(in crate::api::instance) fn observed_physical_key(
         .map(|key| (*key).to_string())
 }
 
-pub(in crate::api::instance) fn alias_migration_needed(
+pub(in crate::synced_options) fn alias_migration_needed(
     definition: &SupportedSetting,
     document: &GameOptionsDocument,
     target_key: &str,
@@ -882,7 +882,7 @@ pub(in crate::api::instance) fn alias_migration_needed(
             .any(|key| *key != target_key && document.value(key).is_some())
 }
 
-pub(in crate::api::instance) fn physical_representation_supported_for_target(
+pub(in crate::synced_options) fn physical_representation_supported_for_target(
     definition: &SupportedSetting,
     physical_key: &str,
     raw: &str,
@@ -966,7 +966,7 @@ pub(in crate::api::instance) fn physical_representation_supported_for_target(
     })
 }
 
-pub(in crate::api::instance) fn format_decimal(value: f64) -> String {
+pub(in crate::synced_options) fn format_decimal(value: f64) -> String {
     let value = format!("{value:.8}");
     let value = value.trim_end_matches('0').trim_end_matches('.');
     if value == "-0" {

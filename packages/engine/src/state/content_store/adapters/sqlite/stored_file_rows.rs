@@ -4,7 +4,7 @@ use sqlx::SqlitePool;
 use std::collections::HashSet;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct StoredFileMetadata {
+pub struct StoredFileMetadata {
     pub sha512: String,
     pub size: i64,
     pub status: StoredFileStatus,

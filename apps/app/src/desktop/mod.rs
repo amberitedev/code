@@ -1,4 +1,5 @@
 mod debug_export;
+pub mod deep_links;
 mod dialog;
 mod external_save;
 pub mod files;

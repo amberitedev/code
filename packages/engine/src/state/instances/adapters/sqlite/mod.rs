@@ -1,3 +1,2 @@
-pub(crate) mod content_rows;
-pub(crate) mod instance_rows;
-pub(crate) mod screenshot_rows;
+pub mod content_rows;
+pub mod instance_rows;

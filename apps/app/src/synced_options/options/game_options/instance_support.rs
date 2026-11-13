@@ -7,10 +7,10 @@ use super::catalog::*;
 use super::options_file::{
     GameOptionsDocument, options_path, read_document, sha1_bytes,
 };
-use crate::state::{
-    CanonicalValue, Engine, InstanceMetadata, StoredOption,
-    game_options_sync_is_enabled,
+use crate::synced_options::state::{
+    CanonicalValue, StoredOption, game_options_sync_is_enabled,
 };
+use engine::state::{Engine, InstanceMetadata};
 use std::collections::BTreeMap;
 
 /// The instance data needed to decide whether a setting can be synced.
@@ -29,11 +29,11 @@ pub(super) struct ParticipatingInstance {
 /// part in sync, but its settings are marked as waiting for the file.
 pub(super) async fn load_participating_instances(
     state: &Engine,
-) -> crate::Result<Vec<ParticipatingInstance>> {
-    if !game_options_sync_is_enabled(&state.pool).await? {
+) -> engine::Result<Vec<ParticipatingInstance>> {
+    if !game_options_sync_is_enabled(state.pool()).await? {
         return Ok(Vec::new());
     }
-    let instances = crate::state::list_instances(&state.pool).await?;
+    let instances = engine::state::list_instances(state.pool()).await?;
     let mut participants = Vec::new();
     for metadata in instances {
         if !metadata.synced_options.game_options {
@@ -42,7 +42,7 @@ pub(super) async fn load_participating_instances(
         let deferred = synced_options::sync_files_are_protected(&metadata)
             || synced_options::pending::contains(
                 &metadata.instance.id,
-                crate::state::SyncedOption::GameOptions,
+                engine::state::SyncedOption::GameOptions,
                 state,
             )
             .await?;

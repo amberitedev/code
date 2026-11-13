@@ -6,11 +6,11 @@ use super::{
     MAX_KEY_BYTES, MAX_OPTIONS_BYTES, MAX_OPTIONS_LINES, MAX_VALUE_BYTES,
     OPTIONS_FILE,
 };
-use crate::ErrorKind;
-use crate::state::{Engine, InstanceMetadata};
-use crate::util::io;
 use anyhow::bail;
 use encoding_rs::{Encoding, UTF_8, UTF_16BE, UTF_16LE};
+use engine::ErrorKind;
+use engine::state::{Engine, InstanceMetadata};
+use engine::util::io;
 use sha1_smol::Sha1;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -61,7 +61,7 @@ impl GameOptionsDocument {
     pub(super) async fn for_instance(
         metadata: &InstanceMetadata,
         state: &Engine,
-    ) -> crate::Result<Option<Self>> {
+    ) -> engine::Result<Option<Self>> {
         let content_set = &metadata.applied_content_set;
         let version = &content_set.game_version;
         let version_jar = content_set.loader_version.as_ref().map_or_else(
@@ -73,7 +73,7 @@ impl GameOptionsDocument {
             .version_dir(&version_jar)
             .join(format!("{version_jar}.jar"));
         let embedded_version = if path.exists() {
-            crate::launcher::read_game_version_metadata_from_jar(&path)
+            engine::read_game_version_metadata_from_jar(&path)
                 .await?
                 .and_then(|metadata| metadata.world_version)
         } else {
@@ -94,7 +94,7 @@ impl GameOptionsDocument {
         Ok(Some(document))
     }
 
-    pub(super) fn parse(bytes: &[u8]) -> crate::Result<Self> {
+    pub(super) fn parse(bytes: &[u8]) -> engine::Result<Self> {
         if bytes.len() > MAX_OPTIONS_BYTES {
             bail!(ErrorKind::InputError(
                 "options.txt is too large to sync safely".to_string()
@@ -224,7 +224,7 @@ impl GameOptionsDocument {
         key: &str,
         value: &str,
         insert: bool,
-    ) -> crate::Result<bool> {
+    ) -> engine::Result<bool> {
         validate_raw_key_value(key, value)?;
         if let Some((index, _)) = self.effective_entries().get(key).copied() {
             let entry = self.lines[index].entry.as_mut().expect("entry index");
@@ -261,7 +261,7 @@ impl GameOptionsDocument {
         Ok(true)
     }
 
-    pub(super) fn serialize(&self) -> crate::Result<Vec<u8>> {
+    pub(super) fn serialize(&self) -> engine::Result<Vec<u8>> {
         let mut text = String::new();
         for line in &self.lines {
             match &line.entry {
@@ -291,7 +291,7 @@ impl GameOptionsDocument {
 pub(super) fn encode_without_bom(
     encoding: &'static Encoding,
     text: &str,
-) -> crate::Result<Vec<u8>> {
+) -> engine::Result<Vec<u8>> {
     if encoding == UTF_16LE || encoding == UTF_16BE {
         let mut encoded = Vec::with_capacity(text.len().saturating_mul(2));
         for unit in text.encode_utf16() {
@@ -318,7 +318,7 @@ pub(super) fn encode_without_bom(
 pub(super) fn validate_raw_key_value(
     key: &str,
     value: &str,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     if key.is_empty()
         || key.len() > MAX_KEY_BYTES
         || key.contains(':')
@@ -356,7 +356,7 @@ pub(super) fn sha1_bytes(bytes: &[u8]) -> String {
 /// The parser keeps its text encoding, line endings, comments, and duplicate keys.
 pub(super) async fn read_document(
     path: &Path,
-) -> crate::Result<(GameOptionsDocument, Vec<u8>)> {
+) -> engine::Result<(GameOptionsDocument, Vec<u8>)> {
     let metadata = tokio::fs::symlink_metadata(path)
         .await
         .map_err(|error| io::IOError::with_path(error, path))?;

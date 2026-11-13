@@ -293,11 +293,10 @@ async fn apply_shared_instance_update_inner(
     let plan = SharedInstanceApplyPlan::build(&metadata, data, state).await?;
 
     if !plan.configuration_changed && data.linked_server.is_some() {
-        crate::api::instance::synced_servers::discard_modpack_servers(
-            instance_id,
-            state,
-        )
-        .await?;
+        state
+            .hooks()
+            .discard_modpack_servers(state, instance_id)
+            .await?;
     }
 
     tracing::info!(%job_id, instance_id, full_apply = plan.configuration_changed, "Applying shared instance update");
@@ -1015,11 +1014,10 @@ async fn install_shared_instance_base(
         )
         .await?;
         if data.linked_server.is_some() {
-            crate::api::instance::synced_servers::discard_modpack_servers(
-                instance_id,
-                state,
-            )
-            .await?;
+            state
+                .hooks()
+                .discard_modpack_servers(state, instance_id)
+                .await?;
         }
     }
 

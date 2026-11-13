@@ -6,50 +6,17 @@ use super::write_shared_settings::{
     apply_shared_settings_to_instance, capture_instance_options,
     sync_is_active_for_instance,
 };
-use crate::state::{Engine, InstanceLink, InstanceMetadata, SyncedOption};
-use crate::util::io;
 use anyhow::bail;
 use encoding_rs::{UTF_8, UTF_16BE, UTF_16LE};
+use engine::GameOptionsPackSource;
+use engine::state::{Engine, InstanceLink, InstanceMetadata, SyncedOption};
+use engine::util::io;
 use std::io::ErrorKind;
 use std::path::Path;
 
-const YOSBR_OPTIONS_PATH: &str = "config/yosbr/options.txt";
-const DEFAULT_OPTIONS_PATH: &str = "config/defaultoptions/options.txt";
+const YOSBR_OPTIONS_PATH: &str = GameOptionsPackSource::YOSBR_OPTIONS_PATH;
+const DEFAULT_OPTIONS_PATH: &str = GameOptionsPackSource::DEFAULT_OPTIONS_PATH;
 const DEFAULT_KEYBINDINGS_PATH: &str = "config/defaultoptions/keybindings.txt";
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum GameOptionsPackSource {
-    ClientOverrides,
-    Overrides,
-    ClientOverridesYosbr,
-    OverridesYosbr,
-    ClientOverridesDefaultOptions,
-    OverridesDefaultOptions,
-}
-
-impl GameOptionsPackSource {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::ClientOverrides
-            | Self::ClientOverridesYosbr
-            | Self::ClientOverridesDefaultOptions => "client_overrides",
-            Self::Overrides
-            | Self::OverridesYosbr
-            | Self::OverridesDefaultOptions => "overrides",
-        }
-    }
-
-    fn template_path(self) -> Option<&'static str> {
-        match self {
-            Self::ClientOverridesYosbr | Self::OverridesYosbr => {
-                Some(YOSBR_OPTIONS_PATH)
-            }
-            Self::ClientOverridesDefaultOptions
-            | Self::OverridesDefaultOptions => Some(DEFAULT_OPTIONS_PATH),
-            Self::ClientOverrides | Self::Overrides => None,
-        }
-    }
-}
 
 fn detected_encoding_name(bytes: &[u8]) -> String {
     if bytes.starts_with(&[0xFF, 0xFE]) {
@@ -89,19 +56,19 @@ fn pack_version_id(metadata: &InstanceMetadata) -> Option<&str> {
 async fn read_pack_options(
     path: &Path,
     name: &str,
-) -> crate::Result<Option<(Vec<u8>, String, String)>> {
+) -> engine::Result<Option<(Vec<u8>, String, String)>> {
     let metadata = match tokio::fs::symlink_metadata(path).await {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(io::IOError::with_path(error, path).into()),
     };
     if metadata.file_type().is_symlink() {
-        bail!(crate::ErrorKind::InputError(format!(
+        bail!(engine::ErrorKind::InputError(format!(
             "refusing to capture a symlinked {name}"
         )));
     }
     if metadata.len() > MAX_OPTIONS_BYTES as u64 {
-        bail!(crate::ErrorKind::InputError(format!(
+        bail!(engine::ErrorKind::InputError(format!(
             "the modpack {name} is too large to capture for syncing"
         )));
     }
@@ -111,10 +78,10 @@ async fn read_pack_options(
     Ok(Some((bytes, sha1, encoding)))
 }
 
-async fn options_target_exists(path: &Path) -> crate::Result<bool> {
+async fn options_target_exists(path: &Path) -> engine::Result<bool> {
     match tokio::fs::symlink_metadata(path).await {
         Ok(metadata) if metadata.file_type().is_symlink() => {
-            bail!(crate::ErrorKind::InputError(
+            bail!(engine::ErrorKind::InputError(
                 "refusing to replace a symlinked options.txt".to_string()
             ))
         }
@@ -127,7 +94,7 @@ async fn options_target_exists(path: &Path) -> crate::Result<bool> {
 fn merge_default_keybindings(
     document: &mut GameOptionsDocument,
     keybindings: &GameOptionsDocument,
-) -> crate::Result<bool> {
+) -> engine::Result<bool> {
     let mut changed = false;
     for line in &keybindings.lines {
         let Some(entry) = &line.entry else {
@@ -156,7 +123,7 @@ async fn read_pack_options_template(
     metadata: &InstanceMetadata,
     state: &Engine,
     relative_path: &str,
-) -> crate::Result<Option<(Vec<u8>, String, String)>> {
+) -> engine::Result<Option<(Vec<u8>, String, String)>> {
     let directory = super::super::instance_dir(metadata, state);
     let captured =
         read_pack_options(&directory.join(relative_path), relative_path)
@@ -200,7 +167,7 @@ async fn read_pack_options_template(
 pub(super) async fn materialize_pack_options_if_missing(
     metadata: &InstanceMetadata,
     state: &Engine,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     let path = options_path(metadata, state);
     if options_target_exists(&path).await? {
         return Ok(());
@@ -216,10 +183,10 @@ pub(super) async fn materialize_pack_options_if_missing(
     Ok(())
 }
 
-pub(in crate::api::instance) async fn detach_instance(
+pub(in crate::synced_options) async fn detach_instance(
     metadata: &InstanceMetadata,
     state: &Engine,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     let feature = SyncedOption::GameOptions.as_str();
     sqlx::query!(
         "
@@ -229,22 +196,22 @@ pub(in crate::api::instance) async fn detach_instance(
         metadata.instance.id,
         feature,
     )
-    .execute(&state.pool)
+    .execute(state.pool())
     .await?;
     Ok(())
 }
 
 /// Before replacing modpack files, saves `options.txt` and shares any settings the
 /// player changed in Minecraft.
-pub(in crate::api::instance) async fn prepare_instance_update_with_state(
+pub(in crate::synced_options) async fn prepare_instance_update_with_state(
     metadata: &InstanceMetadata,
     state: &Engine,
-) -> crate::Result<()> {
+) -> engine::Result<()> {
     sqlx::query!(
         "DELETE FROM instance_game_option_update_state WHERE instance_id = ?",
         metadata.instance.id,
     )
-    .execute(&state.pool)
+    .execute(state.pool())
     .await?;
     if sync_is_active_for_instance(metadata, state).await? {
         let _ = capture_instance_options(metadata, state, true).await?;
@@ -255,13 +222,13 @@ pub(in crate::api::instance) async fn prepare_instance_update_with_state(
             .await
             .map_err(|error| io::IOError::with_path(error, &path))?;
         if file_metadata.file_type().is_symlink() {
-            bail!(crate::ErrorKind::InputError(
+            bail!(engine::ErrorKind::InputError(
                 "refusing to prepare a symlinked options.txt for a modpack update"
                     .to_string(),
             ));
         }
         if file_metadata.len() > MAX_OPTIONS_BYTES as u64 {
-            bail!(crate::ErrorKind::InputError(
+            bail!(engine::ErrorKind::InputError(
                 "options.txt is too large to preserve for a modpack update"
                     .to_string(),
             ));
@@ -285,7 +252,7 @@ pub(in crate::api::instance) async fn prepare_instance_update_with_state(
         sha1,
         bytes,
     )
-    .execute(&state.pool)
+    .execute(state.pool())
     .await?;
     Ok(())
 }
@@ -296,11 +263,13 @@ pub async fn capture_pack_base(
     state: &Engine,
     instance_id: &str,
     source: Option<GameOptionsPackSource>,
-) -> crate::Result<()> {
-    let _guard = state.synced_options.lock().await;
-    let metadata = crate::state::get_instance(instance_id, &state.pool)
+) -> engine::Result<()> {
+    let _guard = crate::hooks::synced_options(state).lock().await;
+    let metadata = engine::state::get_instance(instance_id, state.pool())
         .await?
-        .ok_or(crate::ErrorKind::InputError("unknown instance".to_string()))?;
+        .ok_or(engine::ErrorKind::InputError(
+            "unknown instance".to_string(),
+        ))?;
     let path = options_path(&metadata, state);
     let feature = SyncedOption::GameOptions.as_str();
     sqlx::query!(
@@ -311,7 +280,7 @@ pub async fn capture_pack_base(
         instance_id,
         feature,
     )
-    .execute(&state.pool)
+    .execute(state.pool())
     .await?;
 
     if source.is_none() {
@@ -323,7 +292,7 @@ pub async fn capture_pack_base(
 			"#,
             instance_id,
         )
-        .fetch_optional(&state.pool)
+        .fetch_optional(state.pool())
         .await?;
         if let Some(pending) = pending {
             if pending.had_file {
@@ -344,7 +313,7 @@ pub async fn capture_pack_base(
             template_path,
         )
         .await?
-        .ok_or(crate::ErrorKind::InputError(format!(
+        .ok_or(engine::ErrorKind::InputError(format!(
             "the modpack {template_path} defaults could not be materialized"
         )))?;
         if !options_target_exists(&path).await? {
@@ -385,13 +354,13 @@ pub async fn capture_pack_base(
         encoding,
         document_bytes,
     )
-    .execute(&state.pool)
+    .execute(state.pool())
     .await?;
     sqlx::query!(
         "DELETE FROM instance_game_option_update_state WHERE instance_id = ?",
         instance_id,
     )
-    .execute(&state.pool)
+    .execute(state.pool())
     .await?;
 
     if sync_is_active_for_instance(&metadata, state).await?

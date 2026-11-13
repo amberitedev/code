@@ -4,7 +4,7 @@ use crate::event::emit::emit_instance;
 use crate::state::instances::adapters::sqlite::instance_rows;
 use crate::state::{
     CreateInstance, EditInstance, Engine, IconConfig, InstanceLink,
-    InstanceMetadata, InstanceSyncedOption, ModLoader,
+    InstanceMetadata, ModLoader,
 };
 
 use std::future::Future;
@@ -129,32 +129,6 @@ pub async fn edit(
     Ok(instance)
 }
 
-pub async fn set_synced_option(
-    state: &Engine,
-    instance_id: &str,
-    option: InstanceSyncedOption,
-    enabled: bool,
-    resolution: Option<super::SyncedOptionJoinResolution>,
-) -> crate::Result<InstanceMetadata> {
-    let instance = super::synced_options::set_instance_option(
-        state,
-        instance_id,
-        option,
-        enabled,
-        resolution,
-    )
-    .await?;
-
-    emit_instance(
-        &state.events,
-        &instance.instance.id,
-        InstancePayloadType::Edited,
-    )
-    .await?;
-
-    Ok(instance)
-}
-
 #[tracing::instrument(skip(state))]
 pub async fn remove(state: &Engine, instance_id: &str) -> crate::Result<()> {
     let instance =
@@ -172,8 +146,6 @@ pub async fn remove(state: &Engine, instance_id: &str) -> crate::Result<()> {
     {
         crate::state::remove_instance(instance_id, state).await?;
     }
-    crate::state::hidden_instances::forget_instance(instance_id, &state.pool)
-        .await?;
 
     if let Some(instance) = instance {
         emit_instance(

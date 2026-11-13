@@ -1,12 +1,12 @@
-use super::super::synced_options::{
+use super::super::options::{
     get_global_options, instance_dir, instance_is_running, sha1_bytes,
 };
 use super::PackLibrary;
 use super::storage::{read_library, write_library};
-use crate::ErrorKind;
-use crate::state::instances::adapters::{filesystem, sqlite::content_rows};
-use crate::state::{Engine, InstanceMetadata};
 use anyhow::{Context, bail};
+use engine::ErrorKind;
+use engine::state::instances::adapters::{filesystem, sqlite::content_rows};
+use engine::state::{Engine, InstanceMetadata};
 use parking_lot::Mutex;
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
@@ -20,7 +20,7 @@ use tokio::time::Instant;
 struct Queue {
     instances: BTreeSet<String>,
     waiters:
-        BTreeMap<String, Vec<oneshot::Sender<Result<(), Arc<crate::Error>>>>>,
+        BTreeMap<String, Vec<oneshot::Sender<Result<(), Arc<engine::Error>>>>>,
     retry_at: BTreeMap<String, Instant>,
     all: bool,
     running: bool,
@@ -41,8 +41,7 @@ impl PackSyncWorker {
 }
 
 pub fn queue_reconciliation(state: &Engine, instance_id: &str) {
-    state
-        .synced_options
+    crate::hooks::synced_options(state)
         .packs
         .queue
         .lock()
@@ -52,17 +51,17 @@ pub fn queue_reconciliation(state: &Engine, instance_id: &str) {
 }
 
 pub(super) fn queue_all(state: &Engine) {
-    state.synced_options.packs.queue.lock().all = true;
+    crate::hooks::synced_options(state).packs.queue.lock().all = true;
     start(state);
 }
 
 pub async fn flush(
     state: &Engine,
     instance_id: &str,
-) -> Result<(), Arc<crate::Error>> {
+) -> Result<(), Arc<engine::Error>> {
     let (sender, receiver) = oneshot::channel();
     {
-        let mut queue = state.synced_options.packs.queue.lock();
+        let mut queue = crate::hooks::synced_options(state).packs.queue.lock();
         if let Some(retry_at) = queue.retry_at.get(instance_id) {
             let remaining = retry_at.saturating_duration_since(Instant::now());
             if !remaining.is_zero() {
@@ -88,8 +87,7 @@ pub async fn flush(
 }
 
 fn start(state: &Engine) {
-    let Some(state) = state
-        .synced_options
+    let Some(state) = crate::hooks::synced_options(state)
         .packs
         .engine
         .get()
@@ -98,7 +96,7 @@ fn start(state: &Engine) {
         return;
     };
     {
-        let mut queue = state.synced_options.packs.queue.lock();
+        let mut queue = crate::hooks::synced_options(&state).packs.queue.lock();
         if queue.running {
             return;
         }
@@ -108,13 +106,16 @@ fn start(state: &Engine) {
         loop {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             let all = std::mem::take(
-                &mut state.synced_options.packs.queue.lock().all,
+                &mut crate::hooks::synced_options(&state)
+                    .packs
+                    .queue
+                    .lock()
+                    .all,
             );
             if all {
-                match crate::state::list_instances(&state.pool).await {
+                match engine::state::list_instances(state.pool()).await {
                     Ok(instances) => {
-                        state
-                            .synced_options
+                        crate::hooks::synced_options(&state)
                             .packs
                             .queue
                             .lock()
@@ -129,14 +130,19 @@ fn start(state: &Engine) {
                         tracing::warn!(
                             "Could not enumerate pack sync targets: {error}"
                         );
-                        state.synced_options.packs.queue.lock().all = true;
+                        crate::hooks::synced_options(&state)
+                            .packs
+                            .queue
+                            .lock()
+                            .all = true;
                         tokio::time::sleep(std::time::Duration::from_secs(1))
                             .await;
                     }
                 }
             }
             let (instance_id, mut pending) = {
-                let mut queue = state.synced_options.packs.queue.lock();
+                let mut queue =
+                    crate::hooks::synced_options(&state).packs.queue.lock();
                 let next = queue
                     .waiters
                     .keys()
@@ -160,9 +166,12 @@ fn start(state: &Engine) {
                     .await
                     .map_err(Arc::new);
             if let Err(error) = &result {
-                match error.downcast_ref::<crate::ErrorKind>() {
-                    Some(crate::ErrorKind::PackSyncChanged) => {
-                        let mut queue = state.synced_options.packs.queue.lock();
+                match error.downcast_ref::<engine::ErrorKind>() {
+                    Some(engine::ErrorKind::PackSyncChanged) => {
+                        let mut queue = crate::hooks::synced_options(&state)
+                            .packs
+                            .queue
+                            .lock();
                         queue.instances.insert(instance_id.clone());
                         if !pending.is_empty() {
                             queue
@@ -173,12 +182,15 @@ fn start(state: &Engine) {
                         }
                         continue;
                     }
-                    Some(crate::ErrorKind::RateLimited { retry_in }) => {
+                    Some(engine::ErrorKind::RateLimited { retry_in }) => {
                         let retry_at = Instant::now()
                             + (*retry_in).max(Duration::from_secs(1));
                         {
                             let mut queue =
-                                state.synced_options.packs.queue.lock();
+                                crate::hooks::synced_options(&state)
+                                    .packs
+                                    .queue
+                                    .lock();
                             queue.instances.insert(instance_id.clone());
                             queue
                                 .retry_at
@@ -193,8 +205,7 @@ fn start(state: &Engine) {
                         let state = state.clone();
                         tokio::spawn(async move {
                             tokio::time::sleep_until(retry_at).await;
-                            state
-                                .synced_options
+                            crate::hooks::synced_options(&state)
                                 .packs
                                 .queue
                                 .lock()
@@ -230,19 +241,17 @@ impl<'a> Preparation<'a> {
         Self {
             state,
             metadata,
-            guard: Some(state.synced_options.lock().await),
+            guard: Some(crate::hooks::synced_options(state).lock().await),
         }
     }
 
     pub(super) async fn run<T>(
         &mut self,
         library: &PackLibrary,
-        work: impl Future<Output = crate::Result<T>>,
-    ) -> crate::Result<T> {
+        work: impl Future<Output = engine::Result<T>>,
+    ) -> engine::Result<T> {
         write_library(library, self.state).await?;
-        let revision = self
-            .state
-            .synced_options
+        let revision = crate::hooks::synced_options(self.state)
             .packs
             .revision
             .load(Ordering::Acquire);
@@ -250,11 +259,10 @@ impl<'a> Preparation<'a> {
         let before = fingerprint(self.metadata, self.state).await?;
         self.guard.take();
         let result = work.await;
-        self.guard = Some(self.state.synced_options.lock().await);
+        self.guard =
+            Some(crate::hooks::synced_options(self.state).lock().await);
         self.validate_metadata().await?;
-        if self
-            .state
-            .synced_options
+        if crate::hooks::synced_options(self.state)
             .packs
             .revision
             .load(Ordering::Acquire)
@@ -266,10 +274,10 @@ impl<'a> Preparation<'a> {
         result
     }
 
-    async fn validate_metadata(&self) -> crate::Result<()> {
-        let current = crate::state::get_instance(
+    async fn validate_metadata(&self) -> engine::Result<()> {
+        let current = engine::state::get_instance(
             &self.metadata.instance.id,
-            &self.state.pool,
+            &self.state.pool(),
         )
         .await?;
         if current.as_ref().is_none_or(|current| {
@@ -280,7 +288,7 @@ impl<'a> Preparation<'a> {
         Ok(())
     }
 
-    pub(super) async fn library(&self) -> crate::Result<PackLibrary> {
+    pub(super) async fn library(&self) -> engine::Result<PackLibrary> {
         read_library(self.state).await
     }
 }
@@ -296,15 +304,14 @@ fn metadata_key(metadata: &InstanceMetadata) -> serde_json::Value {
         content_set.loader,
         content_set.loader_version,
         metadata.synced_options,
-        super::super::projects::ensure_metadata_content_unlocked(metadata)
-            .is_ok(),
+        engine::instance::ensure_metadata_content_unlocked(metadata).is_ok(),
     ])
 }
 
 async fn fingerprint(
     metadata: &InstanceMetadata,
     state: &Engine,
-) -> crate::Result<Vec<(String, String)>> {
+) -> engine::Result<Vec<(String, String)>> {
     let directory = state.directories.instances_dir();
     let instance_path = metadata.instance.path.clone();
     let mut files = tokio::task::spawn_blocking(move || {
@@ -330,9 +337,9 @@ async fn fingerprint(
     ));
     files.push((
         "pending".to_owned(),
-        super::super::synced_options::pending::contains(
+        super::super::options::pending::contains(
             &metadata.instance.id,
-            crate::state::SyncedOption::ResourcePacks,
+            engine::state::SyncedOption::ResourcePacks,
             state,
         )
         .await?
@@ -340,7 +347,7 @@ async fn fingerprint(
     ));
     for id in content_rows::get_locked_instance_file_ids(
         &metadata.instance.id,
-        &state.pool,
+        state.pool(),
     )
     .await?
     {
@@ -348,7 +355,7 @@ async fn fingerprint(
     }
     let entries = content_rows::get_content_entries(
         &metadata.applied_content_set.id,
-        &state.pool,
+        state.pool(),
     )
     .await?;
     for entry in entries {
