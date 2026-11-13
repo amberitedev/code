@@ -16,7 +16,9 @@ use contracts::{
 use sqlx::SqlitePool;
 
 use super::{CoreState, internal};
-use crate::access::{Caller, Changed, Dangerous, activity, pairing, sync};
+use crate::access::{
+    Caller, Changed, Dangerous, activity, pairing, require_owner, sync,
+};
 
 /// How long `POST /pairing/code` waits for the new code.
 const NEW_CODE_WAIT: Duration = Duration::from_secs(20);
@@ -40,7 +42,7 @@ pub async fn get(
     State(state): State<Arc<CoreState>>,
     _: Req<GetPairing>,
 ) -> Result<Json<PairingStatus>, ApiError> {
-    caller.require_owner()?;
+    require_owner(&caller)?;
     Ok(Json(status(&state.db).await?))
 }
 
@@ -49,7 +51,7 @@ pub async fn new_code(
     State(state): State<Arc<CoreState>>,
     _: Req<RequestPairingCode>,
 ) -> Result<Json<PairingStatus>, ApiError> {
-    caller.require_owner()?;
+    require_owner(&caller)?;
     if pairing::paired(&state.db).await.map_err(internal)? {
         return Err(ApiError::new(
             ErrorCode::Conflict,

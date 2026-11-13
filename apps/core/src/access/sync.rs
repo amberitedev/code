@@ -28,7 +28,7 @@ use sqlx::{SqliteConnection, SqlitePool};
 use tokio::sync::watch;
 use tracing::{info, warn};
 
-use super::{Access, Changed, now, owed::OwedCall, pairing};
+use super::{Changed, CoreAccess, now, owed::OwedCall, pairing};
 use crate::{
     network::{forward::Network, public_ip},
     storage::Storage,
@@ -48,14 +48,14 @@ pub struct Sync {
     /// The API port and the address it listens on.
     pub port: u16,
     pub bind: IpAddr,
-    pub access: Arc<Access>,
+    pub access: Arc<CoreAccess>,
     pub storage: Arc<Storage>,
     /// Told the join IP whenever the addresses are looked up.
     pub network: Arc<Network>,
 }
 
 /// Owe the backend `call`, in the transaction of the change that needs it. Wake sync with
-/// `Access::owed` once it commits. A report already owed is not owed twice: it sends the state
+/// `CoreAccess::owed` once it commits. A report already owed is not owed twice: it sends the state
 /// as it is when it goes.
 pub async fn owe(
     conn: &mut SqliteConnection,
@@ -602,6 +602,7 @@ mod tests {
         .await
         .unwrap();
         let dir = tempfile::tempdir().unwrap();
+        let access = Arc::new(CoreAccess::new(db.clone(), keys));
         Sync {
             network: Arc::new(Network::off(db.clone())),
             storage: Arc::new(Storage::new(
@@ -619,7 +620,7 @@ mod tests {
             cert_fingerprint: "f".repeat(64),
             port: 16662,
             bind: IpAddr::V4(Ipv4Addr::LOCALHOST),
-            access: Arc::new(Access::new(keys)),
+            access,
         }
     }
 

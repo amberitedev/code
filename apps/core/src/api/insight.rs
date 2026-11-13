@@ -17,7 +17,7 @@ use super::{
     servers::{Reachability, ReachabilityState},
 };
 use crate::{
-    access::{Caller, Level},
+    access::{Caller, Permission, require_owner},
     network::{
         diagnosis::{Case, Mark},
         forward::{self, Report},
@@ -72,7 +72,7 @@ pub fn archon(state: &CoreState, server_id: &str) -> Option<Reachability> {
 async fn insight(
     state: &CoreState,
     id: &str,
-    level: Level,
+    level: Permission,
 ) -> Result<ServerInsight, ApiError> {
     let last_crash: Option<(i64, Option<i32>, Option<String>)> = sqlx::query_as(
         "SELECT ended_at, exit_code, last_lines FROM runs \
@@ -91,7 +91,7 @@ async fn insight(
         last_crash: last_crash.map(|(at, exit_code, last_lines)| Crash {
             at,
             exit_code,
-            last_lines: (level >= Level::Editor)
+            last_lines: (level >= Permission::Edit)
                 .then(|| last_lines.unwrap_or_default()),
         }),
         reachability: state.network.report(id).map(Into::into),
@@ -104,7 +104,7 @@ pub async fn get(
     request: Req<GetInsight>,
 ) -> Result<Json<ServerInsight>, ApiError> {
     let id = request.params.id;
-    let level = caller.require(&state.db, &id, Level::Viewer).await?;
+    let level = state.access.require(&caller, &id, Permission::View).await?;
     Ok(Json(insight(&state, &id, level).await?))
 }
 
@@ -114,7 +114,7 @@ pub async fn check(
     request: Req<CheckReachability>,
 ) -> Result<Json<ServerInsight>, ApiError> {
     let id = request.params.id;
-    let level = caller.require(&state.db, &id, Level::Editor).await?;
+    let level = state.access.require(&caller, &id, Permission::Edit).await?;
     if state.servers.phase(&id).is_none() {
         return Err(ServerError::NotRunning.into());
     }
@@ -129,7 +129,7 @@ pub async fn machine(
     State(state): State<Arc<CoreState>>,
     _: Req<GetMachine>,
 ) -> Result<Json<Machine>, ApiError> {
-    caller.require_owner()?;
+    require_owner(&caller)?;
     let memory_mb = memory::machine_mb();
     let assigned_mb = memory::assigned_mb(&state.db).await.map_err(internal)?;
     let warning = memory_mb

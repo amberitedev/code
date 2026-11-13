@@ -39,7 +39,7 @@ use super::{
     servers::JwtAuth,
 };
 use crate::{
-    access::{Caller, Level, activity, now},
+    access::{Caller, Permission, activity, now},
     backups::Target,
     state::servers::{
         Busy,
@@ -459,7 +459,7 @@ pub async fn auth(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<JwtAuth>, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     let host = headers
         .get(header::HOST)
         .and_then(|host| host.to_str().ok())
@@ -477,7 +477,7 @@ pub async fn list(
     Path(id): Path<String>,
     Query(query): Query<ListQuery>,
 ) -> Result<Json<DirectoryResponse>, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     let path = api_path(&query.path)?;
     let folder = folder(&state, &id)?;
     let mut items = blocking(move || {
@@ -552,7 +552,7 @@ pub async fn download(
     Path(id): Path<String>,
     Query(query): Query<PathQuery>,
 ) -> Result<Response, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     let path = inner_path(&query.path)?;
     stream_file(&state, &id, path).await
 }
@@ -565,7 +565,7 @@ pub async fn authorize_file(
     Path((id, wid)): Path<(String, String)>,
     Query(query): Query<PathQuery>,
 ) -> Result<Json<DownloadToken>, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     world(&id, &wid)?;
     let path = inner_path(&query.path)?;
     let token = state.backups.grant(caller, &id, Target::File(path));
@@ -589,7 +589,10 @@ pub async fn download_file(
     let Target::File(path) = grant.target else {
         return Err(expired_link());
     };
-    grant.caller.require(&state.db, &id, Level::Editor).await?;
+    state
+        .access
+        .require(&grant.caller, &id, Permission::Edit)
+        .await?;
     stream_file(&state, &id, path).await
 }
 
@@ -748,7 +751,7 @@ pub async fn create(
     Query(query): Query<CreateQuery>,
     body: Body,
 ) -> Result<StatusCode, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     let path = inner_path(&query.path)?;
     match query.kind {
         CreateKind::Directory => {
@@ -776,7 +779,7 @@ pub async fn update(
     Query(query): Query<PathQuery>,
     body: Body,
 ) -> Result<StatusCode, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     let path = inner_path(&query.path)?;
     let staged = stage_body(&state, &id, body).await?;
     place_changing(&state, &id, path, staged, true).await?;
@@ -791,7 +794,7 @@ pub async fn rename(
     Path(id): Path<String>,
     Json(request): Json<MoveRequest>,
 ) -> Result<StatusCode, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     let from = inner_path(&request.source)?;
     let to = inner_path(&request.destination)?;
     let (folder, busy) = changing(&state, &id)?;
@@ -819,7 +822,7 @@ pub async fn delete(
     Path(id): Path<String>,
     Query(query): Query<DeleteQuery>,
 ) -> Result<StatusCode, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     let path = inner_path(&query.path)?;
     let (folder, busy) = changing(&state, &id)?;
     locked(&busy, move || {
@@ -851,7 +854,7 @@ pub async fn unarchive(
     Path(id): Path<String>,
     Query(query): Query<UnarchiveQuery>,
 ) -> Result<Json<ExtractResult>, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     let source = inner_path(&query.src)?;
     let target = api_path(&query.trg)?;
     let (folder, busy) = changing(&state, &id)?;
@@ -927,7 +930,7 @@ pub async fn operation(
     Path((id, _action)): Path<(String, OperationAction)>,
     Query(_query): Query<OperationQuery>,
 ) -> Result<StatusCode, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -938,7 +941,7 @@ pub async fn stat(
     Path((id, wid)): Path<(String, String)>,
     Json(request): Json<FileStatRequest>,
 ) -> Result<Json<FileStatResponse>, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     world(&id, &wid)?;
     let path = api_path(&request.path)?;
     let folder = folder(&state, &id)?;
@@ -1024,7 +1027,7 @@ pub async fn zip(
     Path((id, wid)): Path<(String, String)>,
     Json(request): Json<ZipRequest>,
 ) -> Result<Response, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     world(&id, &wid)?;
     let (parent, include, target) = match request {
         ZipRequest::Directory { path } => {
@@ -1141,7 +1144,7 @@ pub async fn open_session(
     State(state): State<Arc<CoreState>>,
     Path((id, wid, scope)): Path<(String, String, UploadScope)>,
 ) -> Result<Json<UploadSessionResponse>, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     world(&id, &wid)?;
     let upload_id = uuid::Uuid::new_v4().to_string();
     let now = now();
@@ -1190,7 +1193,7 @@ pub async fn get_session(
     State(state): State<Arc<CoreState>>,
     Path((id, wid, scope)): Path<(String, String, UploadScope)>,
 ) -> Result<Json<GetUploadSessionResponse>, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     world(&id, &wid)?;
     let session = state
         .uploads
@@ -1218,7 +1221,7 @@ pub async fn upload_files(
     )>,
     mut form: Multipart,
 ) -> Result<Json<UploadSessionResponse>, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     world(&id, &wid)?;
     let turn =
         state
@@ -1304,7 +1307,7 @@ pub async fn finalize_session(
         String,
     )>,
 ) -> Result<Json<UploadSessionResponse>, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     world(&id, &wid)?;
     // The content lock first: while another change has it this answers 409 and the session
     // stays open for a retry, its files kept.
@@ -1378,7 +1381,7 @@ pub async fn cancel_session(
         String,
     )>,
 ) -> Result<Json<UploadSessionResponse>, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     world(&id, &wid)?;
     let (response, dir) =
         state

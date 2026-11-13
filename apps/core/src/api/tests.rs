@@ -15,7 +15,7 @@ use tower::ServiceExt;
 use super::{CoreState, router};
 use crate::{
     access::{
-        self, Access,
+        self, CoreAccess,
         local::Local,
         now, sessions,
         tickets::test_support::{Signer, claims},
@@ -68,6 +68,7 @@ async fn core() -> Core {
     let dir = tempfile::tempdir().unwrap();
     let paths = Paths::new(dir.path());
     folders::create(&paths, None).unwrap();
+    let engine = crate::daemon::start_engine(&paths).await.unwrap();
     let db = db::memory().await;
     let core_id = db::core_id(&db).await.unwrap();
     sqlx::query("UPDATE core SET owner_user_id = 'owner'")
@@ -131,7 +132,8 @@ async fn core() -> Core {
     ));
     let state = Arc::new(CoreState {
         servers,
-        access: Arc::new(Access::new(keys)),
+        engine,
+        access: Arc::new(CoreAccess::new(db.clone(), keys)),
         network: Arc::new(crate::network::forward::Network::off(db.clone())),
         db,
         content,
@@ -2103,4 +2105,32 @@ async fn a_server_exports_as_a_pack_once_per_link() {
 
     let (status, _) = core.send(export()).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "a link exports once");
+}
+
+#[tokio::test]
+async fn engine_wide_access_is_the_owners() {
+    let core = core().await;
+    let engine_access: Arc<dyn engine::access::Access> =
+        core.state.access.clone();
+    let session = |user: &str, owner| access::Caller::Session {
+        id: user.into(),
+        user_id: user.into(),
+        owner,
+    };
+    for (caller, allowed) in [
+        (access::Caller::Local, true),
+        (session("owner", true), true),
+        (session("editor", false), false),
+    ] {
+        let granted = engine_access
+            .require(&caller, None, access::Permission::View)
+            .await
+            .map_err(|error| error.error);
+        let expected = if allowed {
+            Ok(access::Permission::Owner)
+        } else {
+            Err(contracts::ErrorCode::Forbidden)
+        };
+        assert_eq!(granted, expected, "{caller:?}");
+    }
 }

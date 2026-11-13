@@ -11,14 +11,14 @@ use contracts::{
 };
 
 use super::{CoreState, internal};
-use crate::access::{Caller, activity};
+use crate::access::{Caller, activity, require_owner};
 
 pub async fn list(
     caller: Caller,
     State(state): State<Arc<CoreState>>,
     request: Req<ListActivity>,
 ) -> Result<Json<ActivityPage>, ApiError> {
-    caller.require_owner()?;
+    require_owner(&caller)?;
     Ok(Json(
         activity::page(&state.db, &request.query)
             .await

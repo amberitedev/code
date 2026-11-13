@@ -33,7 +33,7 @@ use ts_rs::TS;
 
 use super::{CoreState, internal, properties::PropertiesFields};
 use crate::{
-    access::{Caller, Level, activity},
+    access::{Caller, Permission, activity},
     installs::{ModLoader, shared::SharedDirs},
     servers::{Hold, ServerError},
     share_pack as consume,
@@ -371,7 +371,7 @@ pub async fn list(
     Path((id, wid)): Path<(String, String)>,
     Query(query): Query<AddonsQuery>,
 ) -> Result<Json<Addons>, ApiError> {
-    caller.require(&state.db, &id, Level::Viewer).await?;
+    state.access.require(&caller, &id, Permission::View).await?;
     world(&id, &wid)?;
     let server = server_rows::get(&state.db, &id)
         .await
@@ -450,7 +450,7 @@ pub async fn add_many(
     Path((id, wid)): Path<(String, String)>,
     Json(requests): Json<Vec<AddAddonRequest>>,
 ) -> Result<StatusCode, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     world(&id, &wid)?;
     let _busy = state.content.busy(&id)?;
     let result = async {
@@ -487,7 +487,7 @@ async fn change(
     items: &[RemoveAddonRequest],
     change: Change,
 ) -> Result<StatusCode, ApiError> {
-    caller.require(&state.db, id, Level::Editor).await?;
+    state.access.require(&caller, id, Permission::Edit).await?;
     world(id, wid)?;
     let _busy = state.content.busy(id)?;
     for item in items {
@@ -617,7 +617,7 @@ async fn set_side(
     request: SetAddonEnabledRequest,
     side: Side,
 ) -> Result<StatusCode, ApiError> {
-    caller.require(&state.db, id, Level::Editor).await?;
+    state.access.require(&caller, id, Permission::Edit).await?;
     world(id, wid)?;
     server_first(state, id).await?;
     let _busy = state.content.busy(id)?;
@@ -661,7 +661,7 @@ pub async fn set_side_toggle_locked(
     Path((id, wid)): Path<(String, String)>,
     Json(request): Json<SetAddonSideToggleLockedRequest>,
 ) -> Result<StatusCode, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     world(&id, &wid)?;
     server_first(&state, &id).await?;
     let _busy = state.content.busy(&id)?;
@@ -683,7 +683,7 @@ pub async fn complete_side_type_review(
     Path((id, wid)): Path<(String, String)>,
     Json(_): Json<CompleteSideTypeReviewRequest>,
 ) -> Result<StatusCode, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     world(&id, &wid)?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -695,7 +695,7 @@ pub async fn get_update(
     Path((id, wid)): Path<(String, String)>,
     Query(query): Query<AddonUpdateQuery>,
 ) -> Result<Json<Addon>, ApiError> {
-    caller.require(&state.db, &id, Level::Viewer).await?;
+    state.access.require(&caller, &id, Permission::View).await?;
     world(&id, &wid)?;
     let server = server_rows::get(&state.db, &id)
         .await
@@ -750,7 +750,7 @@ pub async fn update_many(
     Path((id, wid)): Path<(String, String)>,
     Json(body): Json<UpdateAddonsRequest>,
 ) -> Result<StatusCode, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     world(&id, &wid)?;
     let _busy = state.content.busy(&id)?;
     let result = async {
@@ -780,7 +780,7 @@ pub async fn install(
     Path((id, wid)): Path<(String, String)>,
     Json(request): Json<InstallWorldContent>,
 ) -> Result<StatusCode, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     world(&id, &wid)?;
     let server = server_rows::get(&state.db, &id)
         .await
@@ -1004,7 +1004,7 @@ pub async fn repair(
     State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
 ) -> Result<StatusCode, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     world(&id, &wid)?;
     let server = server_rows::get(&state.db, &id)
         .await
@@ -1059,7 +1059,7 @@ pub async fn unlink(
     State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
 ) -> Result<StatusCode, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     world(&id, &wid)?;
     let _busy = state.content.busy(&id)?;
     content_rows::unlink(&state.db, &id)
@@ -1077,7 +1077,7 @@ pub async fn modpack(
     State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
 ) -> Result<Json<ModpackFields>, ApiError> {
-    caller.require(&state.db, &id, Level::Viewer).await?;
+    state.access.require(&caller, &id, Permission::View).await?;
     world(&id, &wid)?;
     get_linked_modpack_info(&state.content, &id, true)
         .await?
@@ -1108,7 +1108,7 @@ pub async fn update_modpack(
             })?
             .force
     };
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     world(&id, &wid)?;
     let pack = content_rows::get_pack(&state.db, &id)
         .await
@@ -1206,7 +1206,7 @@ pub async fn upload_modpack(
     Query(query): Query<ModpackUploadQuery>,
     mut form: Multipart,
 ) -> Result<StatusCode, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     world(&id, &wid)?;
     let (hold, busy) = begin(&state, &id)?;
     let dirs = SharedDirs::new(state.servers.paths().root());
@@ -1282,7 +1282,7 @@ pub async fn upload_addons(
     Path((id, wid)): Path<(String, String)>,
     mut form: Multipart,
 ) -> Result<StatusCode, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     world(&id, &wid)?;
     let _busy = state.content.busy(&id)?;
     let staging = state
@@ -1317,7 +1317,7 @@ pub async fn edited(
     State(state): State<Arc<CoreState>>,
     Path(id): Path<String>,
 ) -> Result<Json<EditedFiles>, ApiError> {
-    caller.require(&state.db, &id, Level::Viewer).await?;
+    state.access.require(&caller, &id, Permission::View).await?;
     let files = list_edited_files(&state.content, &id).await?;
     Ok(Json(EditedFiles { files }))
 }
@@ -1329,7 +1329,7 @@ pub async fn decide(
     Path(id): Path<String>,
     Json(decision): Json<Decision>,
 ) -> Result<StatusCode, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     let _busy = state.content.busy(&id)?;
     let path = folder::clean(&decision.path).map_err(content::Error::from)?;
     decide_edited_file(
@@ -1358,7 +1358,7 @@ pub async fn embedded_icon(
     Path((id, wid)): Path<(String, String)>,
     Query(query): Query<EmbeddedIconQuery>,
 ) -> Result<([(axum::http::HeaderName, &'static str); 1], Vec<u8>), ApiError> {
-    caller.require(&state.db, &id, Level::Viewer).await?;
+    state.access.require(&caller, &id, Permission::View).await?;
     world(&id, &wid)?;
     let kind = match query.parent_directory.as_str() {
         "mods" => ContentType::Mod,

@@ -12,7 +12,7 @@ use contracts::{
 use sqlx::SqlitePool;
 
 use super::{CoreState, internal};
-use crate::access::{Caller, activity, now};
+use crate::access::{Caller, activity, now, require_owner};
 
 /// Where the EULA is, to show before accepting it.
 pub const URL: &str = "https://aka.ms/MinecraftEULA";
@@ -44,7 +44,7 @@ pub async fn get(
     State(state): State<Arc<CoreState>>,
     _: Req<GetEula>,
 ) -> Result<Json<Eula>, ApiError> {
-    caller.require_owner()?;
+    require_owner(&caller)?;
     Ok(Json(Eula {
         url: URL.into(),
         accepted_at: accepted_at(&state.db).await.map_err(internal)?,
@@ -56,7 +56,7 @@ pub async fn post(
     State(state): State<Arc<CoreState>>,
     _: Req<AcceptEula>,
 ) -> Result<Json<Eula>, ApiError> {
-    caller.require_owner()?;
+    require_owner(&caller)?;
     let before = accepted_at(&state.db).await.map_err(internal)?;
     accept(&state.db).await.map_err(internal)?;
     if before.is_none() {

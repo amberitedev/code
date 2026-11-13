@@ -20,6 +20,8 @@ color-eyre = { workspace = true }
 contracts = { workspace = true, features = ["clap", "client", "server", "sqlx"] }
 crab_nat = "0.8.1"
 dunce = { workspace = true }
+# The engine runs this Core's instances, as it runs the App's.
+engine = { workspace = true }
 futures = { workspace = true }
 hex = { workspace = true }
 http-body-util = "0.1.3"

@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{CoreState, content::world, internal};
 use crate::{
-    access::{Caller, Level, activity},
+    access::{Caller, Permission, activity},
     installs::java,
     servers::{ServerError, launch},
     state::servers::adapters::sqlite::server_rows,
@@ -206,7 +206,7 @@ pub async fn get_v0(
     State(state): State<Arc<CoreState>>,
     Path(id): Path<String>,
 ) -> Result<Json<StartupConfig>, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     let (invocation, major) = report(&state, &id).await?;
     Ok(Json(StartupConfig {
         original_invocation: invocation.clone(),
@@ -224,7 +224,7 @@ pub async fn update_v0(
     Path(id): Path<String>,
     Json(body): Json<UpdateStartupConfig>,
 ) -> Result<StatusCode, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     let (invocation, major) = report(&state, &id).await?;
     custom_command(body.invocation.as_deref(), &invocation)?;
     // The App sends back what it read. That name is lossy (Java 25 reads as `lts21`), so the
@@ -247,7 +247,7 @@ pub async fn get_v1(
     State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
 ) -> Result<Json<RuntimeOptions>, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     world(&id, &wid)?;
     let (invocation, major) = report(&state, &id).await?;
     Ok(Json(RuntimeOptions {
@@ -266,7 +266,7 @@ pub async fn patch_v1(
     Path((id, wid)): Path<(String, String)>,
     Json(body): Json<PatchRuntimeOptions>,
 ) -> Result<StatusCode, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     world(&id, &wid)?;
     let (invocation, _) = report(&state, &id).await?;
     custom_command(body.startup_command.as_deref(), &invocation)?;
@@ -282,7 +282,7 @@ pub async fn set_java_path(
     Req { params, body, .. }: Req<SetJava>,
 ) -> Result<Empty, ApiError> {
     let id = params.id;
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     let server = server_rows::get(&state.db, &id)
         .await
         .map_err(internal)?

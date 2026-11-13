@@ -43,7 +43,7 @@ impl ContentStore {
             Ok(()) => {}
             Err(fs4::TryLockError::WouldBlock) => {
                 bail!(ErrorKind::ContentStoreError(
-					"another Modrinth process is using this application directory"
+					"another Amberite process is using this data folder"
 						.into(),
 				));
             }

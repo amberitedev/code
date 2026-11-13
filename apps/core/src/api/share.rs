@@ -43,7 +43,7 @@ use super::{
     internal,
 };
 use crate::{
-    access::{Caller, Level, activity},
+    access::{Caller, Permission, activity},
     state::servers::{
         adapters::{
             filesystem::folder::{self, Folder},
@@ -217,7 +217,7 @@ pub async fn share(
     Path((id, wid)): Path<(String, String)>,
     Json(request): Json<ShareRequest>,
 ) -> Result<Json<ShareWorldContentResponse>, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     world(&id, &wid)?;
     server_first(&state, &id).await?;
     let mut configs = Vec::with_capacity(request.config_paths.len());
@@ -426,7 +426,10 @@ pub async fn unshare(
     State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
 ) -> Result<StatusCode, ApiError> {
-    caller.require(&state.db, &id, Level::Owner).await?;
+    state
+        .access
+        .require(&caller, &id, Permission::Owner)
+        .await?;
     world(&id, &wid)?;
     server_first(&state, &id).await?;
     if !drop_own_share(&state.content, &state.access.owed, &id)
@@ -447,7 +450,7 @@ pub async fn files(
     State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
 ) -> Result<Json<ShareableFilesResponse>, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     world(&id, &wid)?;
     server_first(&state, &id).await?;
     let folder =
@@ -555,7 +558,7 @@ pub async fn diff(
     State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
 ) -> Result<Json<SharedInstancePublishDiff>, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     world(&id, &wid)?;
     server_first(&state, &id).await?;
     let not_shared = || {
@@ -604,7 +607,10 @@ pub async fn history(
     State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
 ) -> Result<Json<Vec<SharedInstanceHistoryEntry>>, ApiError> {
-    caller.require(&state.db, &id, Level::Owner).await?;
+    state
+        .access
+        .require(&caller, &id, Permission::Owner)
+        .await?;
     world(&id, &wid)?;
     server_first(&state, &id).await?;
     Ok(Json(get_share_history(&state.content, &id).await?))
@@ -617,7 +623,10 @@ pub async fn restore(
     State(state): State<Arc<CoreState>>,
     Path((id, wid, version)): Path<(String, String, i32)>,
 ) -> Result<StatusCode, ApiError> {
-    caller.require(&state.db, &id, Level::Owner).await?;
+    state
+        .access
+        .require(&caller, &id, Permission::Owner)
+        .await?;
     world(&id, &wid)?;
     server_first(&state, &id).await?;
     let busy = state.content.busy(&id)?;
@@ -637,7 +646,10 @@ pub async fn delete_version(
     State(state): State<Arc<CoreState>>,
     Path((id, wid, version)): Path<(String, String, i32)>,
 ) -> Result<StatusCode, ApiError> {
-    caller.require(&state.db, &id, Level::Owner).await?;
+    state
+        .access
+        .require(&caller, &id, Permission::Owner)
+        .await?;
     world(&id, &wid)?;
     server_first(&state, &id).await?;
     let _busy = state.content.busy(&id)?;

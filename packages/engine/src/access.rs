@@ -10,13 +10,30 @@ use axum::{
 use contracts::{ApiError, ErrorCode};
 pub use futures::future::BoxFuture;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Caller {
+    /// The host's own user: the App's, or a Core's CLI on its local socket. Owns everything.
     Local,
     Session {
         id: String,
         user_id: String,
+        /// The user owns the host.
         owner: bool,
     },
+}
+
+impl Caller {
+    /// The signed-in user. `None` for the host's own local caller.
+    pub fn user_id(&self) -> Option<&str> {
+        match self {
+            Self::Local => None,
+            Self::Session { user_id, .. } => Some(user_id),
+        }
+    }
+
+    pub fn is_owner(&self) -> bool {
+        matches!(self, Self::Local | Self::Session { owner: true, .. })
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]

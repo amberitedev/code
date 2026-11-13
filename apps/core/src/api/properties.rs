@@ -13,7 +13,7 @@ use serde::Deserialize;
 
 use super::{CoreState, content::world, internal};
 use crate::{
-    access::{Caller, Level, activity},
+    access::{Caller, Permission, activity},
     state::servers::adapters::filesystem::properties,
 };
 
@@ -86,7 +86,7 @@ pub async fn get(
     State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
 ) -> Result<Json<PropertiesFields>, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     world(&id, &wid)?;
     let dir = state.servers.paths().server(&id);
     Ok(Json(fields(properties::read(&dir).map_err(internal)?)))
@@ -100,7 +100,7 @@ pub async fn patch(
     Path((id, wid)): Path<(String, String)>,
     Json(body): Json<PatchPropertiesFields>,
 ) -> Result<Json<PropertiesFields>, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     world(&id, &wid)?;
     let dir = state.servers.paths().server(&id);
     let mut changes: BTreeMap<String, Option<String>> =

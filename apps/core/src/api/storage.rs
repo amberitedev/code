@@ -16,14 +16,14 @@ use contracts::{
 };
 
 use super::CoreState;
-use crate::access::{Caller, Peer};
+use crate::access::{Caller, Peer, require_owner};
 
 pub async fn get(
     caller: Caller,
     State(state): State<Arc<CoreState>>,
     _: Req<GetStorage>,
 ) -> Result<Json<StorageStatus>, ApiError> {
-    caller.require_owner()?;
+    require_owner(&caller)?;
     Ok(Json(state.storage.status().await?))
 }
 
@@ -32,7 +32,7 @@ pub async fn settings(
     State(state): State<Arc<CoreState>>,
     request: Req<ChangeStorage>,
 ) -> Result<Json<StorageStatus>, ApiError> {
-    caller.require_owner()?;
+    require_owner(&caller)?;
     Ok(Json(state.storage.change(request.body).await?))
 }
 

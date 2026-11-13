@@ -670,7 +670,7 @@ pub async fn get_pack(
 
 /// Record the pack the server now follows. Its content set keeps its id and creation time
 /// across updates. Moving off the instance it followed, to a pack of its own or another
-/// instance, drops that instance's players as [`unlink`] does (wake sync with `Access::owed`
+/// instance, drops that instance's players as [`unlink`] does (wake sync with `CoreAccess::owed`
 /// after), and a pack of its own drops any version of it waiting to apply.
 /// The transactions here read before they write. They begin IMMEDIATE so they take the write
 /// lock first and wait for it; a deferred one fails at once with "database is locked" when another
@@ -793,7 +793,7 @@ pub async fn set_pack_error(
 /// Stop following the pack, and drop any waiting to apply. Its files stay, as files someone
 /// added; its client-only files are forgotten. A server that followed an instance owes the
 /// backend dropping its players, who got that instance's share through it; wake sync with
-/// `Access::owed` after.
+/// `CoreAccess::owed` after.
 pub async fn unlink(db: &SqlitePool, server_id: &str) -> sqlx::Result<()> {
     let mut tx = db.begin_with("BEGIN IMMEDIATE").await?;
     let followed: Option<String> = sqlx::query_scalar(

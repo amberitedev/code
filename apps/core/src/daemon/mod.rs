@@ -18,6 +18,7 @@ use std::{
 };
 
 use color_eyre::eyre::{Result, WrapErr, bail, eyre};
+use engine::{BackendSession, BackendSessionKind, Engine};
 use tracing::{info, warn};
 use tracing_subscriber::{
     EnvFilter, layer::SubscriberExt, util::SubscriberInitExt,
@@ -117,6 +118,7 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
     folders::create(&paths, None)?;
     logging(&paths, "copal");
     let _lock = lock(&paths)?;
+    engine::install_crypto_provider();
 
     let db = db::open(&paths.database()).await?;
     let core_id = db::core_id(&db).await?;
@@ -131,7 +133,19 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
         config.backend_url.as_deref(),
     )
     .await?;
-    let access = Arc::new(access::Access::new(keys));
+    let access = Arc::new(access::CoreAccess::new(db.clone(), keys));
+    let engine = start_engine(&paths).await?;
+    let backend_key: Option<String> =
+        sqlx::query_scalar("SELECT backend_key FROM core WHERE id = 1")
+            .fetch_one(&db)
+            .await?;
+    if let (Some(url), Some(key)) = (&config.backend_url, backend_key) {
+        engine.sessions.set_backend_session(Some(BackendSession {
+            base_url: url.parse()?,
+            bearer: key,
+            kind: BackendSessionKind::CoreKey,
+        }));
+    }
     let storage = Arc::new(crate::storage::Storage::new(
         db.clone(),
         paths.clone(),
@@ -173,6 +187,7 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
     tokio::spawn(Arc::clone(&network).run(Arc::clone(&servers)));
     let state = Arc::new(api::CoreState {
         db: db.clone(),
+        engine,
         servers,
         access: Arc::clone(&access),
         content,
@@ -252,6 +267,24 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
         () = stop => info!("stopping; servers keep running"),
     }
     Ok(Exit::Stopped)
+}
+
+/// The engine on `<root>/engine`, whose instances are the servers. Nothing desktop starts.
+pub async fn start_engine(paths: &Paths) -> Result<Arc<Engine>> {
+    Engine::new(engine::EngineConfig {
+        data_dir: paths.engine(),
+        instances_dir: paths.servers(),
+        logs_dir: None,
+        db_path: paths.engine().join("engine.db"),
+        side: contracts::Side::Server,
+        max_concurrent_downloads: 10,
+        max_concurrent_writes: 10,
+        events: engine::EventSink::new(),
+        accounts: None,
+        pack_hooks: None,
+    })
+    .await
+    .map_err(|error| eyre!("the engine did not start: {error:#}"))
 }
 
 /// A TCP listener on `address`. An IPv6 one takes IPv6 only, so it can sit next to the IPv4

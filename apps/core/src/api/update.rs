@@ -14,7 +14,7 @@ use contracts::{
 
 use super::{CoreState, internal};
 use crate::{
-    access::{Caller, Dangerous, activity, fresh_ticket},
+    access::{Caller, Dangerous, activity, fresh_ticket, require_owner},
     update::UpdateError,
 };
 
@@ -39,7 +39,7 @@ pub async fn get(
     State(state): State<Arc<CoreState>>,
     _: Req<GetUpdate>,
 ) -> Result<Json<UpdateStatus>, ApiError> {
-    caller.require_owner()?;
+    require_owner(&caller)?;
     Ok(Json(state.update.status().await?))
 }
 
@@ -49,7 +49,7 @@ pub async fn settings(
     headers: HeaderMap,
     Req { body: request, .. }: Req<ChangeUpdateSettings>,
 ) -> Result<Json<UpdateStatus>, ApiError> {
-    caller.require_owner()?;
+    require_owner(&caller)?;
     // Turning auto-update on or changing the channel decides what Core installs next, so it is
     // as dangerous as installing it. Turning auto-update off is not.
     let (channel, _) = state.update.settings().await.map_err(internal)?;
@@ -71,7 +71,7 @@ pub async fn check(
     State(state): State<Arc<CoreState>>,
     _: Req<CheckForUpdate>,
 ) -> Result<Json<UpdateStatus>, ApiError> {
-    caller.require_owner()?;
+    require_owner(&caller)?;
     Ok(Json(state.update.check().await?))
 }
 

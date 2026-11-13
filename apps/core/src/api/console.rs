@@ -12,7 +12,7 @@ use contracts::{
 };
 
 use super::CoreState;
-use crate::access::{Caller, Level, activity};
+use crate::access::{Caller, Permission, activity};
 
 /// The longest command Core passes on.
 const MAX_COMMAND: usize = 4096;
@@ -23,7 +23,7 @@ pub async fn send(
     Req { params, body, .. }: Req<SendCommand>,
 ) -> Result<Empty, ApiError> {
     let id = params.id;
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     let command = body.command;
     // A line break would run a second command the activity log never shows.
     if command.trim().is_empty()

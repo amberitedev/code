@@ -18,7 +18,7 @@ use super::{
     internal,
 };
 use crate::{
-    access::{Caller, Level},
+    access::{Caller, Permission},
     backups::Target,
     servers::ServerError,
     state::servers::{
@@ -33,7 +33,7 @@ pub async fn authorize(
     State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
 ) -> Result<Json<DownloadToken>, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     world(&id, &wid)?;
     let token = state.backups.grant(caller, &id, Target::Pack);
     Ok(Json(DownloadToken { token }))

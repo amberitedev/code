@@ -19,7 +19,9 @@ use super::{
     servers::{ServerPowerState, power_state},
 };
 use crate::{
-    access::{Caller, Changed, Level, StreamGuard, activity, now, sessions},
+    access::{
+        Caller, Changed, Permission, StreamGuard, activity, now, sessions,
+    },
     servers::{console, restarts::run_started_at},
 };
 
@@ -48,7 +50,9 @@ pub async fn console(
     // Before the role check, so a change from here on is never missed; the socket checks again
     // before it shows anything, for the changes before.
     let changes = state.access.changed.subscribe();
-    if let Err(error) = caller.require(&state.db, &id, Level::Editor).await {
+    if let Err(error) =
+        state.access.require(&caller, &id, Permission::Edit).await
+    {
         return error.into_response();
     }
     let Some(guard) = state.access.open_stream(&caller) else {
@@ -84,8 +88,8 @@ async fn still_allowed(
         }
     }
     matches!(
-        caller.level(&state.db, server).await,
-        Ok(Some(level)) if level >= Level::Editor
+        state.access.level(&caller, server).await,
+        Ok(Some(level)) if level >= Permission::Edit
     )
 }
 

@@ -2290,6 +2290,7 @@ dependencies = [
  "contracts",
  "crab_nat",
  "dunce",
+ "engine",
  "flate2",
  "futures",
  "hex",

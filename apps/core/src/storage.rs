@@ -104,7 +104,7 @@ pub struct Storage {
     running: watch::Sender<Option<Running>>,
     /// A forwarded upload may have stored something.
     stored: Notify,
-    /// Wakes backend sync (`Access::owed`).
+    /// Wakes backend sync (`CoreAccess::owed`).
     owed: Arc<Notify>,
     pulling: Mutex<HashSet<String>>,
     forwarder: HttpClient<HttpConnector, Body>,

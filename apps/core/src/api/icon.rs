@@ -42,7 +42,7 @@ use super::{
     internal,
 };
 use crate::{
-    access::{Caller, Level, activity},
+    access::{Caller, Permission, activity},
     servers::ServerError,
     state::servers::adapters::sqlite::server_rows,
 };
@@ -90,7 +90,7 @@ pub async fn get(
     Path(id): Path<String>,
     Query(query): Query<IconQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
-    caller.require(&state.db, &id, Level::Viewer).await?;
+    state.access.require(&caller, &id, Permission::View).await?;
     exists(&state, &id).await?;
     let folder = folder(&state, &id)?;
     let names: &[&str] = if query.original {
@@ -122,7 +122,7 @@ pub async fn set(
     Path(id): Path<String>,
     body: Bytes,
 ) -> Result<Json<ServerIcon>, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     exists(&state, &id).await?;
     write(&state, &caller, &id, body, None).await.map(Json)
 }
@@ -134,7 +134,7 @@ pub async fn set_generated(
     Path(id): Path<String>,
     mut form: Multipart,
 ) -> Result<Json<ServerIcon>, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     exists(&state, &id).await?;
     let bad_form = |error: axum::extract::multipart::MultipartError| {
         ApiError::new(ErrorCode::InvalidInput, error.body_text())
@@ -209,7 +209,7 @@ pub async fn metadata(
     State(state): State<Arc<CoreState>>,
     Path(id): Path<String>,
 ) -> Result<Json<ServerIcon>, ApiError> {
-    caller.require(&state.db, &id, Level::Viewer).await?;
+    state.access.require(&caller, &id, Permission::View).await?;
     exists(&state, &id).await?;
     let folder = folder(&state, &id)?;
     let game = blocking(move || {
@@ -299,7 +299,7 @@ pub async fn delete(
     State(state): State<Arc<CoreState>>,
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     exists(&state, &id).await?;
     let (folder, busy) = changing(&state, &id)?;
     locked(&busy, move || {

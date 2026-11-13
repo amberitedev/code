@@ -34,7 +34,7 @@ use super::{
     CoreState, content::world, internal, servers::WorldDownloadMethod,
 };
 use crate::{
-    access::{Caller, Dangerous, Level, activity},
+    access::{Caller, Dangerous, Permission, activity},
     backups::{
         self, SLOTS, Target,
         records::{
@@ -443,7 +443,7 @@ pub async fn list(
     State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
 ) -> Result<Json<BackupsQueueResponse>, ApiError> {
-    caller.require(&state.db, &id, Level::Viewer).await?;
+    state.access.require(&caller, &id, Permission::View).await?;
     world(&id, &wid)?;
     let (schedule, next) = slots(&state, &id).await?;
     Ok(Json(queue(&state, &id, &schedule, next).await?))
@@ -456,7 +456,7 @@ pub async fn list_with_options(
     State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
 ) -> Result<Json<BackupsQueueWithOptionsResponse>, ApiError> {
-    caller.require(&state.db, &id, Level::Viewer).await?;
+    state.access.require(&caller, &id, Permission::View).await?;
     world(&id, &wid)?;
     let (schedule, next) = slots(&state, &id).await?;
     let queue = queue(&state, &id, &schedule, next).await?;
@@ -500,7 +500,7 @@ pub async fn patch_options(
     headers: HeaderMap,
     Json(body): Json<PatchWorldBackupOptions>,
 ) -> Result<Json<PatchWorldBackupOptionsResponse>, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     world(&id, &wid)?;
     let current = records::schedule(&state.db, &id).await.map_err(internal)?;
     let interval_hours = body.interval.unwrap_or(current.interval_hours);
@@ -583,7 +583,7 @@ pub async fn create(
     Path((id, wid)): Path<(String, String)>,
     Json(request): Json<BackupRequest>,
 ) -> Result<Json<PostBackupQueueResponse>, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     world(&id, &wid)?;
     let name = backup_name(&request.name)?;
     let (backup, _) = state
@@ -609,7 +609,7 @@ pub async fn rename(
     Path((id, wid, backup)): Path<(String, String, String)>,
     Json(body): Json<PatchBackup>,
 ) -> Result<StatusCode, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     world(&id, &wid)?;
     let Some(name) = body.name.as_deref() else {
         return Ok(StatusCode::NO_CONTENT);
@@ -709,7 +709,7 @@ pub async fn retry(
     State(state): State<Arc<CoreState>>,
     Path((id, wid, backup)): Path<(String, String, String)>,
 ) -> Result<StatusCode, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     world(&id, &wid)?;
     state.backups.retry(&id, &backup, caller.user_id()).await?;
     Ok(StatusCode::ACCEPTED)
@@ -728,7 +728,7 @@ pub async fn history(
         HistoryAction,
     )>,
 ) -> Result<StatusCode, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     world(&id, &wid)?;
     let found = records::operation(&state.db, operation)
         .await
@@ -769,7 +769,7 @@ pub async fn authorize_backup(
     State(state): State<Arc<CoreState>>,
     Path((id, wid, backup)): Path<(String, String, String)>,
 ) -> Result<Json<DownloadToken>, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     world(&id, &wid)?;
     records::backup(&state.db, &id, &backup)
         .await
@@ -791,7 +791,7 @@ pub async fn authorize_world(
     State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
 ) -> Result<Json<DownloadToken>, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     world(&id, &wid)?;
     let token = state.backups.grant(caller, &id, Target::World);
     Ok(Json(DownloadToken { token }))
@@ -825,7 +825,10 @@ pub(super) async fn downloader(
             .ok_or_else(expired_link)?,
         None => caller?,
     };
-    caller.require(&state.db, server, Level::Editor).await?;
+    state
+        .access
+        .require(&caller, server, Permission::Edit)
+        .await?;
     Ok(caller)
 }
 
@@ -970,7 +973,7 @@ pub async fn select_download(
     State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
 ) -> Result<Json<WorldDownloadMethod>, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     world(&id, &wid)?;
     Ok(Json(WorldDownloadMethod::DirectNodeDownload))
 }

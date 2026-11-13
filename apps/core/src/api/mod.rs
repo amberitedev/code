@@ -37,13 +37,14 @@ use std::{sync::Arc, time::Duration};
 
 use axum::{
     Router,
-    extract::DefaultBodyLimit,
+    extract::{DefaultBodyLimit, FromRef},
     handler::Handler,
     http::StatusCode,
     routing::{any, delete, get, patch, post, put},
 };
 use color_eyre::eyre::{Result, eyre};
 use contracts::{ApiError, Endpoint, ErrorCode, core::*, server::route};
+use engine::{Engine, access::Access};
 use hyper_util::{
     rt::{TokioExecutor, TokioIo, TokioTimer},
     server::conn::auto::Builder,
@@ -68,8 +69,9 @@ const MAX_BODY: usize = 10 * 1024 * 1024;
 /// What every route can reach.
 pub struct CoreState {
     pub db: SqlitePool,
+    pub engine: Arc<Engine>,
     pub servers: Arc<crate::servers::Servers>,
-    pub access: Arc<crate::access::Access>,
+    pub access: Arc<crate::access::CoreAccess>,
     pub content: Arc<crate::state::servers::Content>,
     pub backups: Arc<crate::backups::Backups>,
     pub uploads: files::Uploads,
@@ -78,16 +80,33 @@ pub struct CoreState {
     pub storage: Arc<crate::storage::Storage>,
 }
 
+/// The router's state. Routes take `State<Arc<CoreState>>`; the engine's extractors find
+/// [`Access`] through it.
+#[derive(Clone)]
+pub struct Shared(pub Arc<CoreState>);
+
+impl FromRef<Shared> for Arc<CoreState> {
+    fn from_ref(shared: &Shared) -> Self {
+        Arc::clone(&shared.0)
+    }
+}
+
+impl FromRef<Shared> for Arc<dyn Access> {
+    fn from_ref(shared: &Shared) -> Self {
+        Arc::clone(&shared.0.access) as Self
+    }
+}
+
 /// Mounting an Endpoint's handler at its method and path.
 trait Endpoints {
-    fn endpoint<E: Endpoint, H: Handler<T, Arc<CoreState>>, T: 'static>(
+    fn endpoint<E: Endpoint, H: Handler<T, Shared>, T: 'static>(
         self,
         handler: H,
     ) -> Self;
 }
 
-impl Endpoints for Router<Arc<CoreState>> {
-    fn endpoint<E: Endpoint, H: Handler<T, Arc<CoreState>>, T: 'static>(
+impl Endpoints for Router<Shared> {
+    fn endpoint<E: Endpoint, H: Handler<T, Shared>, T: 'static>(
         self,
         handler: H,
     ) -> Self {
@@ -325,7 +344,7 @@ pub fn router(state: Arc<CoreState>) -> Router {
         // The pool's store streams uploads and downloads of any size, with its own caps.
         .route("/store/{*rest}", any(storage::forward))
         .layer(DefaultBodyLimit::disable())
-        .with_state(state)
+        .with_state(Shared(state))
         .layer(TraceLayer::new_for_http())
 }
 

@@ -26,7 +26,7 @@ pub struct Folder {
 
 /// Every top-level folder. `runs/` and `servers/` hold one folder per server, which inherits the
 /// access of its parent.
-pub const FOLDERS: [Folder; 11] = [
+pub const FOLDERS: [Folder; 12] = [
     Folder {
         name: "db",
         servers: ServersAccess::None,
@@ -61,6 +61,11 @@ pub const FOLDERS: [Folder; 11] = [
         name: "content-store",
         servers: ServersAccess::None,
         holds: "files of the shares' history. See `state::servers::adapters::history`",
+    },
+    Folder {
+        name: "engine",
+        servers: ServersAccess::None,
+        holds: "the engine's database, store, metadata and caches",
     },
     Folder {
         name: "logs",
@@ -246,9 +251,18 @@ impl Paths {
         self.root.join("content-store")
     }
 
+    /// The engine's own data. Its instances are the [`Self::servers`].
+    pub fn engine(&self) -> PathBuf {
+        self.root.join("engine")
+    }
+
+    pub fn servers(&self) -> PathBuf {
+        self.root.join("servers")
+    }
+
     /// One server's folder: the only place `copal-servers` can write.
     pub fn server(&self, server_id: &str) -> PathBuf {
-        self.root.join("servers").join(server_id)
+        self.servers().join(server_id)
     }
 
     /// The shared install store. See `installs::shared::SharedDirs`.
@@ -294,6 +308,7 @@ mod tests {
             paths.logs(),
             paths.store(),
             paths.content_store(),
+            paths.engine(),
             paths.server("a"),
             paths.meta(),
             paths.java(),

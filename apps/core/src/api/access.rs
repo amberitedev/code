@@ -22,8 +22,8 @@ use sqlx::SqliteConnection;
 use super::{CoreState, internal};
 use crate::{
     access::{
-        Caller, Dangerous, Level, activity, fresh_ticket, now, owed::OwedCall,
-        sync::owe,
+        Caller, Dangerous, Permission, activity, fresh_ticket, now,
+        owed::OwedCall, require_owner, sync::owe,
     },
     servers::ServerError,
     state::servers::adapters::sqlite::server_rows,
@@ -76,7 +76,10 @@ pub async fn list(
     request: Req<ListMembers>,
 ) -> Result<Json<ServerAccess>, ApiError> {
     let server_id = request.params.id;
-    caller.require(&state.db, &server_id, Level::Owner).await?;
+    state
+        .access
+        .require(&caller, &server_id, Permission::Owner)
+        .await?;
     server(&state, &server_id).await?;
     let owner = match owner_id(&state.db).await.map_err(internal)? {
         Some(id) => Some(user(&state.db, &id).await.map_err(internal)?),
@@ -246,7 +249,7 @@ pub async fn remove(
 ) -> Result<Empty, ApiError> {
     let (server_id, user_id) = (request.params.id, request.params.user_id);
     if caller.user_id() != Some(user_id.as_str()) {
-        caller.require_owner()?;
+        require_owner(&caller)?;
         fresh_ticket(&state, &caller, &headers).await?;
     }
     let mut tx = state.db.begin().await.map_err(internal)?;

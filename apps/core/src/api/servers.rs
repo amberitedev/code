@@ -25,7 +25,7 @@ use uuid::Uuid;
 
 use super::{CoreState, content::LinkedPackState, internal};
 use crate::{
-    access::{Caller, Dangerous, Level, activity},
+    access::{Caller, Dangerous, Permission, activity, require_owner},
     installs::ModLoader,
     servers::{Phase, ServerError, launch},
     state::servers::{
@@ -443,13 +443,13 @@ impl From<ServerError> for ApiError {
 /// App shows each role only what it may do. The owner is `SERVER_ADMIN`; editors read, power,
 /// console, files, setup, backups, and advanced settings; viewers read. Every value survives JSON
 /// as a JavaScript number, which `u64::MAX` does not: it reads as 2^64, no bits at all.
-fn permissions(level: Level) -> u64 {
+fn permissions(level: Permission) -> u64 {
     const BASE_READ: u64 = 1 << 63;
     match level {
-        Level::Owner => !0 << 15,
+        Permission::Owner => !0 << 15,
         // BASE_READ down to ADVANCED, bits 63 to 57.
-        Level::Editor => 0b111_1111 << 57,
-        Level::Viewer => BASE_READ,
+        Permission::Edit => 0b111_1111 << 57,
+        Permission::View => BASE_READ,
     }
 }
 
@@ -522,7 +522,7 @@ pub(super) async fn power_state(
 async fn server(
     state: &CoreState,
     row: server_rows::ServerRow,
-    level: Level,
+    level: Permission,
     host: &str,
 ) -> Result<Server, ApiError> {
     let power_state = power_state(state, &row.id, state.servers.phase(&row.id))
@@ -624,8 +624,11 @@ pub async fn list(
 ) -> Result<Json<ServerGetResponse>, ApiError> {
     let mut servers = Vec::new();
     for row in server_rows::list(&state.db).await.map_err(internal)? {
-        if let Some(level) =
-            caller.level(&state.db, &row.id).await.map_err(internal)?
+        if let Some(level) = state
+            .access
+            .level(&caller, &row.id)
+            .await
+            .map_err(internal)?
         {
             servers.push(server(&state, row, level, host(&headers)).await?);
         }
@@ -650,7 +653,7 @@ pub async fn get(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<Server>, ApiError> {
-    let level = caller.require(&state.db, &id, Level::Viewer).await?;
+    let level = state.access.require(&caller, &id, Permission::View).await?;
     let row = server_rows::get(&state.db, &id)
         .await
         .map_err(internal)?
@@ -664,7 +667,7 @@ pub async fn create(
     State(state): State<Arc<CoreState>>,
     Json(request): Json<CreateServerRequest>,
 ) -> Result<Json<CreateServerResponse>, ApiError> {
-    caller.require_owner()?;
+    require_owner(&caller)?;
     let name = request.name.trim();
     if name.is_empty() || name.chars().count() > 64 {
         return Err(ApiError::new(
@@ -688,7 +691,7 @@ pub async fn power(
     Path(id): Path<String>,
     Json(request): Json<PowerRequest>,
 ) -> Result<StatusCode, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     let action = match request.action {
         PowerAction::Start => Action::ServerStarted,
         PowerAction::Stop => Action::ServerStopped,
@@ -725,7 +728,7 @@ pub async fn reinstall(
     Query(query): Query<ReinstallQuery>,
     Json(request): Json<ReinstallRequest>,
 ) -> Result<StatusCode, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     let ReinstallRequest::Loader {
         loader,
         loader_version,
@@ -868,7 +871,7 @@ pub async fn ws_auth(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<WsAuth>, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     let host = host(&headers);
     Ok(Json(WsAuth {
         url: format!("{host}/servers/{id}/ws"),
@@ -976,8 +979,9 @@ pub async fn list_v1(
 ) -> Result<Json<Vec<ServerFull>>, ApiError> {
     let mut servers = Vec::new();
     for row in server_rows::list(&state.db).await.map_err(internal)? {
-        if caller
-            .level(&state.db, &row.id)
+        if state
+            .access
+            .level(&caller, &row.id)
             .await
             .map_err(internal)?
             .is_some()
@@ -995,7 +999,7 @@ pub async fn get_v1(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<ServerFull>, ApiError> {
-    caller.require(&state.db, &id, Level::Viewer).await?;
+    state.access.require(&caller, &id, Permission::View).await?;
     let row = server_rows::get(&state.db, &id)
         .await
         .map_err(internal)?
@@ -1019,7 +1023,7 @@ pub async fn patch_world(
     Path((id, wid)): Path<(String, String)>,
     Json(request): Json<PatchWorld>,
 ) -> Result<StatusCode, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     super::content::world(&id, &wid)?;
     server_rows::get(&state.db, &id)
         .await

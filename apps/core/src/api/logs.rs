@@ -10,14 +10,17 @@ use contracts::{
 };
 
 use super::CoreState;
-use crate::{access::Caller, servers::console};
+use crate::{
+    access::{Caller, require_owner},
+    servers::console,
+};
 
 pub async fn get(
     caller: Caller,
     State(state): State<Arc<CoreState>>,
     request: Req<GetLogs>,
 ) -> Result<Json<CoreLogs>, ApiError> {
-    caller.require_owner()?;
+    require_owner(&caller)?;
     let count = request.query.lines.unwrap_or(100).clamp(1, 1000);
     let lines = match newest(state.servers.paths().logs()) {
         Some(path) => console::tail(&path, count)

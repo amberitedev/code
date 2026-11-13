@@ -11,7 +11,7 @@ use super::{
     machine::UpdateCommand, servers::ServersCommand,
 };
 use crate::{
-    access::Access,
+    access::CoreAccess,
     api::{self, CoreState},
     daemon::{accounts, folders, paths::Paths},
     db,
@@ -125,6 +125,7 @@ async fn core() -> (tempfile::TempDir, Arc<CoreState>, Client) {
     let dir = tempfile::tempdir().unwrap();
     let paths = Paths::new(dir.path());
     folders::create(&paths, None).unwrap();
+    let engine = crate::daemon::start_engine(&paths).await.unwrap();
     let db = db::memory().await;
     let core_id = db::core_id(&db).await.unwrap();
     let keys = crate::access::keys::load(
@@ -158,7 +159,8 @@ async fn core() -> (tempfile::TempDir, Arc<CoreState>, Client) {
     .unwrap();
     let state = Arc::new(CoreState {
         servers,
-        access: Arc::new(Access::new(keys)),
+        engine,
+        access: Arc::new(CoreAccess::new(db.clone(), keys)),
         content,
         backups,
         uploads: api::files::Uploads::default(),

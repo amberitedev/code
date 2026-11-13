@@ -18,7 +18,7 @@ use crate::{
 
 /// Let go of the server's own share, if it has one, in the caller's transaction: the server
 /// stops being shared now, and the backend is owed the share's deletion. Wake sync with
-/// `Access::owed` and [`release_history`] once it commits. Returns the share, if there was one.
+/// `CoreAccess::owed` and [`release_history`] once it commits. Returns the share, if there was one.
 pub async fn owe_share_deletion(
     conn: &mut SqliteConnection,
     id: &str,

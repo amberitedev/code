@@ -13,7 +13,7 @@ Code the App and Copal both need exists once, in these crates. The App (`package
 
 Imports go one way: `bedrock` and `sharing-client` each import `modrinth-content-management`,
 `sharing-storage` imports `sharing-client`, and every crate may import `contracts`. sharing-client
-never imports bedrock, and Copal never depends on the engine.
+never imports bedrock. Copal runs its own engine (`CoreState::engine`).
 
 bedrock holds three kinds of code:
 
