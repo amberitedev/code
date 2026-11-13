@@ -34,6 +34,7 @@ pub fn routes() -> Router<AppState> {
 }
 
 async fn save_external_file(
+    State(engine): State<Arc<Engine>>,
     State(ops): State<Arc<Ops>>,
     Req { body, .. }: Req<SaveExternalFile>,
 ) -> Result<StatusCode, ApiError> {
@@ -43,6 +44,9 @@ async fn save_external_file(
         .ok_or_else(|| {
             ApiError::new(ErrorCode::InvalidInput, "Unsupported download URL")
         })?;
+    engine::instance::check_save_destination(&engine, &body.path)
+        .await
+        .map_err(api_error)?;
     ops.start(body.op.clone(), |op| async move {
         op.until_cancelled(download(&op, url, body)).await
     })

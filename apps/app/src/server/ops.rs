@@ -6,16 +6,18 @@ use std::{future::Future, sync::Arc};
 
 use axum::{Router, extract::State, http::StatusCode};
 use contracts::{
-    ApiError, Empty, ErrorCode,
+    ApiError, Empty, ErrorCode, Json,
     server::{Req, route},
 };
 use dashmap::{DashMap, mapref::entry::Entry};
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 
+use crate::desktop::internal;
+
 use super::{
     AppState,
-    endpoints::ops::{CancelOp, OpResponse},
+    endpoints::ops::{CancelOp, ListOps, OpResponse},
     events::AppEvent,
 };
 
@@ -62,10 +64,13 @@ impl Ops {
             events: self.events.clone(),
         });
         let ops = Arc::clone(self);
+        // Its own task, so a panic in the work still ends the op.
+        let work = tokio::spawn(work);
         tokio::spawn(async move {
             let (error, response) = match work.await {
-                Ok(response) => (None, response),
-                Err(error) => (Some(error), None),
+                Ok(Ok(response)) => (None, response),
+                Ok(Err(error)) => (Some(error), None),
+                Err(error) => (Some(internal(error)), None),
             };
             ops.running.remove(&op);
             let _ = ops.events.send(AppEvent::OpEnded {
@@ -75,6 +80,10 @@ impl Ops {
             });
         });
         Ok(StatusCode::ACCEPTED)
+    }
+
+    fn running(&self) -> Vec<String> {
+        self.running.iter().map(|op| op.key().clone()).collect()
     }
 
     fn cancel(&self, op: &str) -> Result<Empty, ApiError> {
@@ -129,8 +138,18 @@ pub fn cancelled() -> ApiError {
 }
 
 pub fn routes() -> Router<AppState> {
-    let (path, cancel) = route::<CancelOp, _, _, _>(cancel_op);
-    Router::new().route(path, cancel)
+    let (list_path, list) = route::<ListOps, _, _, _>(list_ops);
+    let (cancel_path, cancel) = route::<CancelOp, _, _, _>(cancel_op);
+    Router::new()
+        .route(list_path, list)
+        .route(cancel_path, cancel)
+}
+
+async fn list_ops(
+    State(ops): State<Arc<Ops>>,
+    _: Req<ListOps>,
+) -> Json<Vec<String>> {
+    Json(ops.running())
 }
 
 async fn cancel_op(
@@ -142,6 +161,8 @@ async fn cancel_op(
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use tokio::sync::oneshot;
 
     use super::*;
@@ -187,6 +208,23 @@ mod tests {
             ops.cancel("export").unwrap_err().error,
             ErrorCode::NotFound
         );
+    }
+
+    #[tokio::test]
+    async fn a_panicking_op_ends_with_internal_error_and_frees_its_id() {
+        let (ops, mut events) = ops();
+        ops.start("export".into(), |_| async { panic!("work failed") })
+            .unwrap();
+
+        let ended = tokio::time::timeout(Duration::from_secs(5), events.recv())
+            .await
+            .expect("the op never ended");
+        assert!(matches!(
+            ended.unwrap(),
+            AppEvent::OpEnded { op, error: Some(error), response: None }
+                if op == "export" && error.error == ErrorCode::InternalError
+        ));
+        assert!(ops.start("export".into(), |_| async { Ok(None) }).is_ok());
     }
 
     #[tokio::test]

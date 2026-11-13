@@ -478,19 +478,54 @@ async fn a_screenshot_edit_past_axums_default_body_limit_reaches_the_engine() {
     assert_eq!(body["description"], "invalid input: unknown instance");
 }
 
-/// Only a release build finds, downloads and installs a real update.
 #[tokio::test(flavor = "multi_thread")]
-async fn without_the_updater_no_update_is_found_or_downloaded() {
+async fn an_external_save_into_the_apps_instances_is_refused() {
     engine::install_crypto_provider();
     let dir = tempfile::tempdir().unwrap();
-    let handle = EngineHandle::default();
-    handle.set(Ok(engine::Engine::new(engine::EngineConfig {
+    let engine = engine::Engine::new(engine::EngineConfig {
         settings_dir: dir.path().to_path_buf(),
         events: engine::EventSink::new(),
         accounts: None,
     })
     .await
-    .unwrap()));
+    .unwrap();
+    let path = engine.directories.instances_dir().join("world.zip");
+    let handle = EngineHandle::default();
+    handle.set(Ok(engine));
+    let local = local_with(handle);
+    let request =
+        Request::post(format!("/{}/app/ops/external-save", local.secret))
+            .header(HOST, &local.host)
+            .header(ORIGIN, "tauri://localhost")
+            .header(CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({
+                    "op": "save",
+                    "path": path,
+                    "url": "http://127.0.0.1:9/world.zip",
+                    "headers": {},
+                })
+                .to_string(),
+            ))
+            .unwrap();
+
+    let response = local.send(request).await;
+
+    assert_ne!(response.status(), StatusCode::ACCEPTED, "the save started");
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(
+        body["description"],
+        "invalid input: save a copy outside the store and instance directories"
+    );
+}
+
+/// Only a release build finds, downloads and installs a real update. The routes answer without the
+/// engine, since an update is how a release that cannot start it gets fixed.
+#[tokio::test]
+async fn without_the_updater_no_update_is_found_or_downloaded() {
+    let handle = EngineHandle::default();
+    handle.set(Err(anyhow::anyhow!("the data folder is in use")));
     let local = &local_with(handle);
     let send = |request: axum::http::request::Builder, body: Option<Value>| {
         let request = request

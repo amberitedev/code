@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 use super::IdParams;
 
 endpoints! {
+    /// The ids of the running ops: one missing from it has ended, its `OpEnded` perhaps lost.
+    ListOps: Get "/app/ops", (), (), Empty => Json<Vec<String>>;
     /// Stops a running op, which ends with `cancelled`.
     CancelOp: Delete "/app/ops/{id}", IdParams, (), Empty => Empty;
     /// Zips the App's logs and database to `path`. Stages: preparing, exporting, finishing.

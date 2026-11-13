@@ -498,6 +498,7 @@ export const skins = {
 }
 
 export const ops = {
+	listOps: { method: "GET", path: "/app/ops", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<string>>,
 	cancelOp: { method: "DELETE", path: "/app/ops/{id}", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<IdParams, null, void, void>,
 	exportDebugInfo: { method: "POST", path: "/app/ops/debug-export", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, DebugExport, void>,
 	saveExternalFile: { method: "POST", path: "/app/ops/external-save", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, ExternalSave, void>,

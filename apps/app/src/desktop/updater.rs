@@ -12,7 +12,7 @@ use contracts::{
     server::{Req, route},
 };
 use engine::{
-    Engine, LoadingBarType, emit_loading, init_loading, launcher_user_agent,
+    EventSink, LoadingBarType, emit_loading, init_loading, launcher_user_agent,
     routes::api_error,
 };
 use tauri::http::{HeaderValue, header::ACCEPT};
@@ -156,7 +156,7 @@ async fn size(
 }
 
 async fn download(
-    State(engine): State<Arc<Engine>>,
+    State(events): State<EventSink>,
     State(ops): State<Arc<Ops>>,
     State(updater): State<Arc<Updater>>,
     Req { body, .. }: Req<DownloadUpdate>,
@@ -164,7 +164,7 @@ async fn download(
     let update = updater.available()?;
     ops.start(body.op, |op| async move {
         let progress = init_loading(
-            &engine.events,
+            &events,
             LoadingBarType::LauncherUpdate {
                 version: update.version.clone(),
                 current_version: update.current_version.clone(),

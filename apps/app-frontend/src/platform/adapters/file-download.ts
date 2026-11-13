@@ -75,6 +75,7 @@ export function createFileDownload(
 				if (response) {
 					throw new ModrinthApiError(`Download failed with status ${response.status}`, {
 						statusCode: response.status,
+						responseData: parseBody(response.body),
 					})
 				}
 			}
@@ -150,5 +151,14 @@ export function createFileDownload(
 				finished = true
 			}
 		},
+	}
+}
+
+/** A JSON error body as data, so a Core's `invalid_credentials` 401 can sign in again. */
+function parseBody(body: string): unknown {
+	try {
+		return JSON.parse(body)
+	} catch {
+		return body
 	}
 }

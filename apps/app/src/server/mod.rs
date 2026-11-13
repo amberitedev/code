@@ -28,7 +28,7 @@ use contracts::{
     server::{Req, route},
 };
 use engine::{
-    Engine,
+    Engine, EventSink,
     access::{Access, BoxFuture, Caller, Permission},
 };
 use tauri::{Runtime, plugin::TauriPlugin};
@@ -121,15 +121,21 @@ impl LocalServer {
                 async move { Json(boot) }
             });
         let ops = Arc::new(ops::Ops::new(events.app.clone()));
-        let (events_path, events) = events::route(events);
         let state = AppState {
             engine: engine.clone(),
             access: Arc::new(AppAccess),
             ops,
             updater,
             app: app.clone(),
+            events: events.engine.clone(),
         };
-        // Every router over AppState merges here: its engine exists only behind wait_for_engine.
+        let (events_path, events) = events::route(events);
+        // Updates come without the engine, so a release that cannot start it can still be fixed.
+        let updates = ops::routes()
+            .merge(desktop::updater::routes())
+            .with_state(state.clone());
+        // Every other router over AppState merges here: its engine exists only behind
+        // wait_for_engine.
         let waiting = Router::new()
             .route(events_path, events)
             .merge(
@@ -139,9 +145,7 @@ impl LocalServer {
                     .merge(screenshots::routes::routes())
                     .merge(friends::routes::routes())
                     .merge(skins::routes::routes())
-                    .merge(ops::routes())
                     .merge(desktop::op_routes())
-                    .merge(desktop::updater::routes())
                     .merge(accounts::routes::routes())
                     .with_state(state),
             )
@@ -153,6 +157,7 @@ impl LocalServer {
             .route(health_path, health)
             .route(boot_path, boot)
             .merge(waiting)
+            .merge(updates)
             .merge(cores::routes(Arc::clone(&self.cores)))
             .merge(desktop::routes(engine, app, &self.secret));
         Router::new()
@@ -213,6 +218,7 @@ pub struct AppState {
     ops: Arc<ops::Ops>,
     updater: Arc<Updater>,
     app: AppSlot,
+    events: EventSink,
 }
 
 impl FromRef<AppState> for Arc<Engine> {
@@ -239,6 +245,12 @@ impl FromRef<AppState> for Arc<ops::Ops> {
 impl FromRef<AppState> for Arc<Updater> {
     fn from_ref(state: &AppState) -> Self {
         Arc::clone(&state.updater)
+    }
+}
+
+impl FromRef<AppState> for EventSink {
+    fn from_ref(state: &AppState) -> Self {
+        state.events.clone()
     }
 }
 

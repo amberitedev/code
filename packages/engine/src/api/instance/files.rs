@@ -444,6 +444,17 @@ pub async fn save_instance_file_as(
     destination: &Path,
 ) -> crate::Result<()> {
     let _files = state.content_store.files_lock.lock().await;
+    check_save_destination(state, destination).await?;
+    let content = resolve(state, instance_id, source, false).await?;
+    fs::copy(content.path(), destination).await?;
+    Ok(())
+}
+
+/// Refuses a save into the App's own store or instance directories, or over a symbolic link.
+pub async fn check_save_destination(
+    state: &Engine,
+    destination: &Path,
+) -> crate::Result<()> {
     let parent = destination.parent().ok_or(ErrorKind::InputError(
         "invalid save destination".to_string(),
     ))?;
@@ -466,7 +477,5 @@ pub async fn save_instance_file_as(
             "cannot save over a symbolic link".to_string()
         ));
     }
-    let content = resolve(state, instance_id, source, false).await?;
-    fs::copy(content.path(), destination).await?;
     Ok(())
 }
