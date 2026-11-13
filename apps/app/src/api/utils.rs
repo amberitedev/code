@@ -8,12 +8,6 @@ use crate::api::oauth_utils::auth_code_reply::{
 };
 use crate::server::events::{AmberiteCommand, AppEvent, Command};
 
-pub fn init<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
-    tauri::plugin::Builder::new("utils")
-        .invoke_handler(tauri::generate_handler![get_opening_command])
-        .build()
-}
-
 /// The Amberite command behind a deep link, or `None` for anything else.
 fn amberite_command(command: &str) -> Option<AmberiteCommand> {
     let path = command.strip_prefix("amberite://")?.trim_end_matches('/');
@@ -30,7 +24,7 @@ fn amberite_command(command: &str) -> Option<AmberiteCommand> {
 async fn parse_opening_command(
     events: &engine::EventSink,
     command: &str,
-) -> Result<Command> {
+) -> engine::Result<Command> {
     if let Some(command) = amberite_command(command) {
         return Ok(Command::Amberite(command));
     }
@@ -43,15 +37,15 @@ async fn parse_opening_command(
 // For example, if a user clicks on an .mrpack to open the app.
 // This should be called once and only when the app is done booting up and ready to receive a command
 // Returns a Command struct- see events.js
-#[tauri::command]
 #[cfg(target_os = "macos")]
 pub async fn get_opening_command(
-    state: tauri::State<'_, crate::macos::deep_link::InitialPayload>,
-    events: tauri::State<'_, engine::EventSink>,
-) -> Result<Option<Command>> {
+    app: &tauri::AppHandle,
+) -> engine::Result<Option<Command>> {
     if crate::dev::config().is_some() {
         return Ok(None);
     }
+    let state = crate::macos::deep_link::get_or_init_payload(app);
+    let events = app.state::<engine::EventSink>();
     let payload = state.payload.lock().await;
     let cmd_arg = std::env::args_os()
         .nth(1)
@@ -66,14 +60,14 @@ pub async fn get_opening_command(
     };
 }
 
-#[tauri::command]
 #[cfg(not(target_os = "macos"))]
 pub async fn get_opening_command(
-    events: tauri::State<'_, engine::EventSink>,
-) -> Result<Option<Command>> {
+    app: &tauri::AppHandle,
+) -> engine::Result<Option<Command>> {
     if crate::dev::config().is_some() {
         return Ok(None);
     }
+    let events = app.state::<engine::EventSink>();
     // Tauri is not CLI, we use arguments as path to file to call
     let cmd_arg = std::env::args_os().nth(1);
 
@@ -113,7 +107,7 @@ pub async fn handle_command<R: Runtime>(
 async fn opening_command(
     events: &engine::EventSink,
     command: &str,
-) -> Result<Option<Command>> {
+) -> engine::Result<Option<Command>> {
     let command = normalize_deep_link_command(command);
     if accept_auth_deeplink(events, &command).await {
         return Ok(None);

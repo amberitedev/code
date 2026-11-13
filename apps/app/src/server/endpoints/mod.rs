@@ -51,8 +51,10 @@ pub mod game_options;
 pub mod health;
 pub mod launch;
 pub mod library;
+pub mod onboarding;
 pub mod ops;
 pub mod screenshots;
+pub mod settings;
 pub mod skins;
 pub mod synced_options;
 pub mod synced_packs;
@@ -80,9 +82,9 @@ mod tests {
         },
         desktop::{
             AppFolder, CheckNetworkMetered, CreateShortcut, DialogFilter,
-            ExternalLink, LocalPath, LogFromWebview, NewShortcut, OpenDialog,
-            OpenFolder, OpenPath, OpenUrl, PickFiles, PickSavePath, RevealPath,
-            SaveDialog, WebviewLog, WebviewLogLevel,
+            ExternalLink, GetOpeningCommand, LocalPath, LogFromWebview,
+            NewShortcut, OpenDialog, OpenFolder, OpenPath, OpenUrl, PickFiles,
+            PickSavePath, RevealPath, SaveDialog, WebviewLog, WebviewLogLevel,
         },
         events::EventSocket,
         files::{
@@ -96,7 +98,14 @@ mod tests {
         launch::{
             JoinServer, JoinSingleplayerWorld, ServerJoin, SingleplayerJoin,
         },
-        library::{ListRecentIconConfigs, RecentIconConfigs},
+        library::{
+            InstanceVisibility, ListHiddenInstances, ListRecentIconConfigs,
+            RecentIconConfigs, SetInstanceHidden,
+        },
+        onboarding::{
+            GetOnboardingChecklist, OnboardingProgress,
+            SkipCreateInstanceOnboarding,
+        },
         ops::{
             self, DebugExport, ExternalSave, InstanceFileSave, LocalUpload,
             OpResponse,
@@ -104,6 +113,9 @@ mod tests {
         screenshots::{
             self, NewScreenshotGroup, ScreenshotEdit, ScreenshotExport,
             ScreenshotFile, ScreenshotGroupUpdate, ScreenshotMove,
+        },
+        settings::{
+            AppSettings, CancelDirectoryChange, GetSettings, SetSettings,
         },
         skins::{self, CustomSkinSave, NewCustomSkin, SkinFlushQuery},
         synced_options::{
@@ -267,6 +279,9 @@ mod tests {
             ModrinthAuthFlow::decl(&cfg),
             ServerJoin::decl(&cfg),
             SingleplayerJoin::decl(&cfg),
+            InstanceVisibility::decl(&cfg),
+            AppSettings::decl(&cfg),
+            OnboardingProgress::decl(&cfg),
         ]
         .map(|declaration| format!("\nexport {declaration}\n"))
         .concat();
@@ -274,7 +289,7 @@ mod tests {
             "// Generated from apps/app by ts-rs. Do not edit.\n\
              // Regenerate: cargo test -p theseus_gui -- --ignored write_ts\n\n\
              import type {{ ApiError, CoreSession, Endpoint, SharedIconConfig, UserFriend, UserStatus }} from './contracts'\n\
-             import type {{ CommandPayload, DesyncServerMode, EngineEvent, FriendPayload, InstanceGroupsChangedPayload, OnboardingChecklist }} from './engine'\n\
+             import type {{ CommandPayload, DesyncServerMode, EngineEvent, FriendPayload, InstanceGroupsChangedPayload, OnboardingChecklist, Settings }} from './engine'\n\
              {declarations}\n\
              export const health = {{\n\
              \tcheckHealth: {},\n\
@@ -308,9 +323,12 @@ mod tests {
              \tcreateShortcut: {},\n\
              \tcheckNetworkMetered: {},\n\
              \tlogFromWebview: {},\n\
+             \tgetOpeningCommand: {},\n\
              }}\n\n\
              export const library = {{\n\
              \tlistRecentIconConfigs: {},\n\
+             \tlistHiddenInstances: {},\n\
+             \tsetInstanceHidden: {},\n\
              }}\n\n\
              export const gameOptions = {{\n{}}}\n\n\
              export const syncedOptions = {{\n{}}}\n\n\
@@ -324,6 +342,15 @@ mod tests {
              export const launch = {{\n\
              \tjoinServer: {},\n\
              \tjoinSingleplayerWorld: {},\n\
+             }}\n\n\
+             export const settings = {{\n\
+             \tgetSettings: {},\n\
+             \tsetSettings: {},\n\
+             \tcancelDirectoryChange: {},\n\
+             }}\n\n\
+             export const onboarding = {{\n\
+             \tgetOnboardingChecklist: {},\n\
+             \tskipCreateInstanceOnboarding: {},\n\
              }}\n",
             endpoint::<CheckHealth>(),
             endpoint::<GetBoot>(),
@@ -346,7 +373,10 @@ mod tests {
             endpoint::<CreateShortcut>(),
             endpoint::<CheckNetworkMetered>(),
             endpoint::<LogFromWebview>(),
+            endpoint::<GetOpeningCommand>(),
             endpoint::<ListRecentIconConfigs>(),
+            endpoint::<ListHiddenInstances>(),
+            endpoint::<SetInstanceHidden>(),
             game_options::ts_entries(),
             synced_options::ts_entries(),
             synced_packs::ts_entries(),
@@ -358,6 +388,11 @@ mod tests {
             accounts::ts_entries(),
             endpoint::<JoinServer>(),
             endpoint::<JoinSingleplayerWorld>(),
+            endpoint::<GetSettings>(),
+            endpoint::<SetSettings>(),
+            endpoint::<CancelDirectoryChange>(),
+            endpoint::<GetOnboardingChecklist>(),
+            endpoint::<SkipCreateInstanceOnboarding>(),
         )
     }
 

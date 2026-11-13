@@ -367,7 +367,13 @@ async fn a_failed_start_answers_engine_unavailable() {
     let handle = EngineHandle::default();
     handle.set(Err(anyhow::anyhow!("the data folder is in use")));
     let local = local_with(handle);
-    for path in ["events", "instances", "app/library/recent-icon-configs"] {
+    for path in [
+        "events",
+        "instances",
+        "app/library/recent-icon-configs",
+        "app/settings",
+        "app/onboarding/checklist",
+    ] {
         let request = Request::get(format!("/{}/{path}", local.secret))
             .header(HOST, &local.host)
             .header(ORIGIN, "tauri://localhost")

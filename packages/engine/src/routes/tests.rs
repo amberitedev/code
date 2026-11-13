@@ -162,7 +162,7 @@ async fn the_library_reads_and_groups_instances_in_the_helpers_shapes() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_denied_caller_sees_no_instances_and_cannot_touch_groups() {
+async fn a_denied_caller_sees_no_instances_and_touches_no_groups_or_store() {
     let dir = tempfile::tempdir().unwrap();
     let router = host(&dir, false).await;
 
@@ -182,6 +182,14 @@ async fn a_denied_caller_sees_no_instances_and_cannot_touch_groups() {
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
+    for (method, uri, body) in [
+        ("GET", "/content-store/usage", None),
+        ("POST", "/content-store/cleanup", None),
+        ("PUT", "/content-store/cache-limit", Some(json!(0))),
+    ] {
+        let (status, _) = send(&router, method, uri, body).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{uri}");
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]

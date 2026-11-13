@@ -3,8 +3,7 @@
  * So, for example, addDefaultInstance creates a blank instance object, where the Rust struct is serialized,
  *  and deserialized into a usable JS object.
  */
-import { ApiCallError, type Command, events, loadingBars } from '@modrinth/api-client'
-import { invoke } from '@tauri-apps/api/core'
+import { ApiCallError, desktop, events, loadingBars } from '@modrinth/api-client'
 
 import { apiClient } from '@/platform/modrinth-client'
 
@@ -54,5 +53,5 @@ export async function progress_bars_list(): Promise<Record<string, LoadingBar>> 
 // This should be called once and only when the app is done booting up and ready to receive a command
 // Returns a Command struct- see events.js
 export async function get_opening_command() {
-	return await invoke<Command | null>('plugin:utils|get_opening_command')
+	return await apiClient.local.call(desktop.getOpeningCommand)
 }

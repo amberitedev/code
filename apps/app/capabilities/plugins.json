@@ -45,14 +45,11 @@
 		"jre:default",
 		"logs:default",
 		"metadata:default",
-		"onboarding-checklist:default",
 		"instance:default",
 		"install:default",
 		"process:default",
 		"cache:default",
 		"files:default",
-		"settings:default",
-		"tags:default",
-		"utils:default"
+		"tags:default"
 	]
 }

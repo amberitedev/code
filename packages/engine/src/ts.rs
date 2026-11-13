@@ -15,7 +15,7 @@ use crate::{
             self, Instance, InstanceIds, InstanceLink, InstanceRef,
             SharedInstanceAttachment,
         },
-        loading,
+        loading, store,
         worlds::{
             self, InstanceServerDesync, InstanceServerRef,
             InstanceServerUpdate, ManagedInstanceServer, NewInstanceServer,
@@ -35,10 +35,11 @@ use crate::{
         ServerSource,
     },
     state::{
-        ContentSetSyncStatus, Hooks, InstanceInstallStage,
-        InstanceSyncedOptions, InstanceTabVisibility, Log4jEvent,
-        MemorySettings, ModLoader, OnboardingChecklist, ReleaseChannel,
-        SharedInstanceRole, WindowSize,
+        ContentSetSyncStatus, DefaultPage, FeatureFlag, Hooks,
+        InstanceInstallStage, InstanceSyncedOptions, InstanceTabVisibility,
+        Log4jEvent, MemorySettings, ModLoader, OnboardingChecklist,
+        ReleaseChannel, Settings, SharedInstanceRole, Theme, WindowSize,
+        content_store::StoreUsage,
     },
     worlds::{
         DisplayStatus, ProtocolVersion, ServerGameProfile, ServerPackStatus,
@@ -123,6 +124,11 @@ fn file() -> String {
         ManagedInstanceServer::decl(&cfg),
         InstanceServerUpdate::decl(&cfg),
         InstanceServerDesync::decl(&cfg),
+        StoreUsage::decl(&cfg),
+        Settings::decl(&cfg),
+        Theme::decl(&cfg),
+        DefaultPage::decl(&cfg),
+        FeatureFlag::decl(&cfg),
         // The payloads of the App's events that engine code still raises.
         FriendPayload::decl(&cfg),
         FriendStatusPayload::decl(&cfg),
@@ -137,6 +143,7 @@ fn file() -> String {
         ("instanceGroups", groups::ts_entries()),
         ("loadingBars", loading::ts_entries()),
         ("worlds", worlds::ts_entries()),
+        ("contentStore", store::ts_entries()),
     ]
     .map(|(name, entries)| format!("\nexport const {name} = {{\n{entries}}}\n"))
     .concat();

@@ -1,8 +1,9 @@
-import type { OnboardingChecklist } from '@modrinth/api-client'
-import { invoke } from '@tauri-apps/api/core'
+import { onboarding, type OnboardingChecklist } from '@modrinth/api-client'
+
+import { apiClient } from '@/platform/modrinth-client'
 
 export type { OnboardingChecklist }
 
 export async function getOnboardingChecklist(): Promise<OnboardingChecklist> {
-	return await invoke('plugin:onboarding-checklist|get_onboarding_checklist')
+	return await apiClient.local.call(onboarding.getOnboardingChecklist)
 }

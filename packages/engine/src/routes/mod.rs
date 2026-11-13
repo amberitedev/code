@@ -4,6 +4,7 @@
 mod groups;
 mod instances;
 mod loading;
+mod store;
 #[cfg(test)]
 mod tests;
 mod worlds;
@@ -14,7 +15,7 @@ use axum::{Router, extract::FromRef};
 use contracts::{ApiError, ErrorCode, server::route};
 use serde::Deserialize;
 
-pub use self::{groups::*, instances::*, loading::*, worlds::*};
+pub use self::{groups::*, instances::*, loading::*, store::*, worlds::*};
 use crate::{
     Engine,
     access::Access,
@@ -26,6 +27,7 @@ use crate::{
         },
         instances::{GetInstance, GetInstances, ListInstances},
         loading::ListLoadingBars,
+        store::{CleanStore, GetStoreUsage, SetStoreCacheLimit},
         worlds::{
             AddInstanceServer, BackupWorld, DeleteWorld, DesyncInstanceServer,
             EditInstanceServer, EnsureManagedInstanceServer,
@@ -74,6 +76,9 @@ where
         route::<DesyncInstanceServer, _, _, _>(desync_instance_server),
         route::<EditInstanceServer, _, _, _>(edit_instance_server),
         route::<RemoveInstanceServer, _, _, _>(remove_instance_server),
+        route::<GetStoreUsage, _, _, _>(get_store_usage),
+        route::<CleanStore, _, _, _>(clean_store),
+        route::<SetStoreCacheLimit, _, _, _>(set_store_cache_limit),
     ]
     .into_iter()
     .fold(Router::new(), |router, (path, method)| {

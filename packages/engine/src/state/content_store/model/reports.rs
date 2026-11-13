@@ -1,6 +1,7 @@
 use serde::Serialize;
 
 #[derive(Serialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct StoreUsage {
     pub unique_bytes: u64,
     pub shared_bytes: u64,

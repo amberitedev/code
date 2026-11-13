@@ -6,6 +6,8 @@ use std::path::PathBuf;
 use contracts::{Auth, Empty, Endpoint, Json, Method};
 use serde::{Deserialize, Serialize};
 
+use crate::server::events::Command;
+
 /// Asks the person to pick files or folders. `None` when they cancel.
 pub struct PickFiles;
 
@@ -122,6 +124,20 @@ impl Endpoint for LogFromWebview {
     type Query = ();
     type Body = Json<Vec<WebviewLog>>;
     type Response = Empty;
+}
+
+/// The file or link the App was opened with, or on macOS the first one it was asked to open.
+/// Read it once, when the page is ready to act on it.
+pub struct GetOpeningCommand;
+
+impl Endpoint for GetOpeningCommand {
+    const METHOD: Method = Method::Get;
+    const PATH: &'static str = "/app/opening-command";
+    const AUTH: Auth = Auth::None;
+    type Params = ();
+    type Query = ();
+    type Body = Empty;
+    type Response = Json<Option<Command>>;
 }
 
 #[derive(Serialize, Deserialize)]

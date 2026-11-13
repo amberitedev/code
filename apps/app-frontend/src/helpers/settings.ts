@@ -3,12 +3,13 @@
  * So, for example, addDefaultInstance creates a blank instance object, where the Rust struct is serialized,
  *  and deserialized into a usable JS object.
  */
+import { type Settings, settings as settingsRoutes } from '@modrinth/api-client'
 import { queryOptions } from '@tanstack/vue-query'
-import { invoke } from '@tauri-apps/api/core'
 
 import type { FeatureFlag } from '@/composables/use-app-settings.ts'
 import type { ColorTheme } from '@/composables/use-theme.ts'
 import type { Hooks, MemorySettings, WindowSize } from '@/helpers/types'
+import { apiClient } from '@/platform/modrinth-client'
 
 // Settings object
 /*
@@ -129,14 +130,14 @@ export function parseEnvVars(input: string | undefined | null): [string, string]
 
 // Get full settings object
 export async function get() {
-	return (await invoke('plugin:settings|settings_get')) as AppSettings
+	return (await apiClient.local.call(settingsRoutes.getSettings)) as AppSettings
 }
 
 // Set full settings object
 export async function set(settings: AppSettings) {
-	return await invoke('plugin:settings|settings_set', { settings })
+	return await apiClient.local.call(settingsRoutes.setSettings, { body: settings as Settings })
 }
 
 export async function cancel_directory_change(): Promise<void> {
-	return await invoke('plugin:settings|cancel_directory_change')
+	return await apiClient.local.call(settingsRoutes.cancelDirectoryChange)
 }

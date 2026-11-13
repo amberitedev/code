@@ -8,6 +8,7 @@ use std::collections::HashMap;
 // Types
 /// Global Theseus settings
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct Settings {
     pub max_concurrent_downloads: usize,
     pub max_concurrent_writes: usize,
@@ -93,6 +94,7 @@ fn default_true() -> bool {
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, Eq, Hash, PartialEq)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub enum FeatureFlag {
     PagePath,
     ProjectBackground,
@@ -432,6 +434,7 @@ impl Settings {
 /// Theseus theme
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS), ts(rename = "AppTheme"))]
 pub enum Theme {
     Dark,
     Light,
@@ -493,6 +496,7 @@ pub struct Hooks {
 
 /// Opening window to start with
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub enum DefaultPage {
     Home,
     Library,

@@ -19,9 +19,11 @@ mod engine_handle;
 mod friends;
 mod launch;
 mod library;
+mod onboarding;
 mod reactions;
 mod screenshots;
 mod server;
+mod settings;
 mod skins;
 mod synced_options;
 
@@ -340,7 +342,6 @@ fn main() {
         });
 
     builder = builder
-        .plugin(api::onboarding_checklist::init())
         .plugin(api::import::init())
         .plugin(api::install::init())
         .plugin(api::instance::init())
@@ -348,9 +349,7 @@ fn main() {
         .plugin(api::jre::init())
         .plugin(api::metadata::init())
         .plugin(api::process::init())
-        .plugin(api::settings::init())
         .plugin(api::tags::init())
-        .plugin(api::utils::init())
         .plugin(api::cache::init())
         .plugin(api::files::init())
         .manage(updater)
@@ -392,9 +391,9 @@ fn main() {
                                 return;
                             };
                             let toast_result: engine::Result<()> = tauri::async_runtime::block_on(async move {
-                                let mut settings = settings::get(state).await?;
+                                let mut settings = engine::settings::get(state).await?;
                                 settings.pending_update_toast_for_version = version;
-                                settings::set(state, settings).await?;
+                                engine::settings::set(state, settings).await?;
                                 Ok(())
                             });
                             if let Err(e) = toast_result {
