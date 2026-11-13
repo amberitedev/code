@@ -2,6 +2,7 @@ import type { AbstractModrinthClient } from '../core/abstract-client'
 import { actions } from './actions'
 import { backups } from './backups'
 import { backupsQueue } from './backups-queue'
+import { content } from './content'
 import { filesV1 } from './files'
 import { kyrosBackups } from './kyros-backups'
 import { kyrosContent } from './kyros-content'
@@ -26,6 +27,7 @@ export function withCoreHosting(client: AbstractModrinthClient): void {
 	Object.assign(archon.properties_v1, properties(client))
 	Object.assign(archon.server_users_v1, serverUsers(client))
 	Object.assign(archon.actions_v1, actions(client))
+	Object.assign(archon.content_v1, content(client))
 	const { kyros } = client
 	Object.assign(kyros.backups_v1, kyrosBackups(client))
 	Object.assign(kyros.files_v1, filesV1(client))

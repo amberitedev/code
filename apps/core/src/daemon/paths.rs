@@ -26,7 +26,7 @@ pub struct Folder {
 
 /// Every top-level folder. `runs/` and `servers/` hold one folder per server, which inherits the
 /// access of its parent.
-pub const FOLDERS: [Folder; 12] = [
+pub const FOLDERS: [Folder; 11] = [
     Folder {
         name: "db",
         servers: ServersAccess::None,
@@ -56,11 +56,6 @@ pub const FOLDERS: [Folder; 12] = [
         name: "store",
         servers: ServersAccess::None,
         holds: "encrypted shared files of the pool. See `store`",
-    },
-    Folder {
-        name: "content-store",
-        servers: ServersAccess::None,
-        holds: "files of the shares' history. See `state::servers::adapters::history`",
     },
     Folder {
         name: "engine",
@@ -110,7 +105,7 @@ impl Paths {
     }
 
     pub fn database(&self) -> PathBuf {
-        self.root.join("db").join("copal.db")
+        self.root.join("db").join("core.db")
     }
 
     /// The self-signed certificate the App pins, and its key.
@@ -245,12 +240,6 @@ impl Paths {
         self.root.join("store")
     }
 
-    /// The content store clone (`bedrock::upstream::store`), which keeps the files of the
-    /// shares' history.
-    pub fn content_store(&self) -> PathBuf {
-        self.root.join("content-store")
-    }
-
     /// The engine's own data. Its instances are the [`Self::servers`].
     pub fn engine(&self) -> PathBuf {
         self.root.join("engine")
@@ -307,7 +296,6 @@ mod tests {
             paths.staging("a"),
             paths.logs(),
             paths.store(),
-            paths.content_store(),
             paths.engine(),
             paths.server("a"),
             paths.meta(),

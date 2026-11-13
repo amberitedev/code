@@ -1,6 +1,7 @@
 export * from '@amberite/contracts'
 export * from './contracts'
 export { AbstractModrinthClient } from './core/abstract-client'
+export type * as Copal from './core-hosting/copal'
 export { AbstractFeature, type FeatureConfig } from './core/abstract-feature'
 export {
 	AbstractSyncClient,

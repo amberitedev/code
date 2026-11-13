@@ -9,7 +9,12 @@ use std::{
     io::{Read, Seek},
 };
 
-use bedrock::content::{Env, SideType, ids_from_cdn};
+mod index;
+
+pub use self::index::{
+    Env, Hashes, Index, IndexFile, Platform, SideType, ids_from_cdn, platform,
+    read_index,
+};
 
 use crate::server_jar::{
     self, Environment as JarEnvironment, Platform as JarPlatform,
@@ -169,36 +174,12 @@ pub enum PackError {
     NoRoom(#[from] NoRoom),
 }
 
-/// `modrinth.index.json`, as bedrock models it for both sides.
-pub use bedrock::content::{Index, IndexFile};
-
 /// What Modrinth knows about a file of a pack, found by its hash.
 #[derive(Debug, Clone)]
 pub struct KnownFile {
     pub project_id: String,
     pub version_id: String,
     pub environment: Option<VersionEnvironment>,
-}
-
-/// Read and check a pack's index.
-pub fn read_index<R: Read + Seek>(
-    archive: &mut zip::ZipArchive<R>,
-) -> Result<Index, PackError> {
-    bedrock::content::read_index(archive).map_err(
-        |bedrock::content::IndexError::NotAPack(reason)| {
-            PackError::NotAPack(reason)
-        },
-    )
-}
-
-/// The loader and versions a pack runs on, as bedrock reads them.
-pub use bedrock::content::PackPlatform as Platform;
-
-/// The platform a pack runs on; one that names no Minecraft version is not a pack.
-pub fn platform(index: &Index) -> Result<Platform, PackError> {
-    bedrock::content::platform(index).ok_or_else(|| {
-        PackError::NotAPack("it names no Minecraft version".into())
-    })
 }
 
 /// How Minecraft `version` orders against `than` when both are releases (`1.20.1`, `26.3`),

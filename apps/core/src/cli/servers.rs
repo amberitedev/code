@@ -206,20 +206,7 @@ pub async fn run(client: &Client, command: ServersCommand) -> Result<Output> {
             let server = find(client, &server).await?;
             let insight =
                 call::<GetInsight>(client, &id(&server), &(), ()).await?;
-            // Best effort: a failed install's reason, as the App's content page shows it.
-            let content: Option<Content> = client
-                .get(&format!(
-                    "/v1/servers/{id}/worlds/{id}/addons?addons=false",
-                    id = server.id
-                ))
-                .await
-                .ok();
-            let text = describe(&server, &insight);
-            let text = match content.as_ref().and_then(Content::failure) {
-                Some(failure) => format!("{text}\n  {}", super::safe(&failure)),
-                None => text,
-            };
-            Ok(Output::new(text, &insight))
+            Ok(Output::new(describe(&server, &insight), &insight))
         }
         ServersCommand::Memory {
             server,
@@ -345,44 +332,6 @@ pub async fn run(client: &Client, command: ServersCommand) -> Result<Output> {
                 &performance,
             ))
         }
-    }
-}
-
-/// What `copal servers info` reads of a server's content: `api::content::Addons`.
-#[derive(Debug, Default, Deserialize)]
-struct Content {
-    #[serde(default)]
-    installing: Option<String>,
-    #[serde(default)]
-    error: Option<ContentError>,
-    #[serde(default)]
-    modpack: Option<Modpack>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ContentError {
-    message: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct Modpack {
-    #[serde(default)]
-    error: Option<String>,
-}
-
-impl Content {
-    /// Why its last install failed, while nothing installs: the background install's error,
-    /// or the one recorded on the pack, which outlives a restart of Core.
-    fn failure(&self) -> Option<String> {
-        if self.installing.is_some() {
-            return None;
-        }
-        let reason = self
-            .error
-            .as_ref()
-            .map(|error| error.message.clone())
-            .or_else(|| self.modpack.as_ref()?.error.clone())?;
-        Some(format!("last install failed: {reason}"))
     }
 }
 

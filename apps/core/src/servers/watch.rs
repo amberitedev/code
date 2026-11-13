@@ -22,7 +22,7 @@ use super::{
 };
 use crate::{
     access::now,
-    state::servers::adapters::sqlite::server_rows::{self, Outcome},
+    servers::server_rows::{self, Outcome},
 };
 
 /// Crashes within [`CRASH_WINDOW`] after which Core leaves a server stopped.
@@ -335,13 +335,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let paths = Paths::new(dir.path());
         crate::daemon::folders::create(&paths, None).unwrap();
-        let servers = Servers::open(
-            paths,
-            db::memory().await,
-            Some(std::net::Ipv4Addr::LOCALHOST.into()),
-        )
-        .await
-        .unwrap();
+        let servers = Servers::open_for_test(paths, db::memory().await).await;
         (dir, servers)
     }
 

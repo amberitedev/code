@@ -59,7 +59,6 @@ impl DownloadError {
 pub enum Hash<'a> {
     Sha1(&'a str),
     Sha256(&'a str),
-    Sha512(&'a str),
     /// Some library mirrors publish none.
     Unknown,
 }
@@ -67,7 +66,6 @@ pub enum Hash<'a> {
 enum Hasher {
     Sha1(sha1::Sha1),
     Sha256(sha2::Sha256),
-    Sha512(sha2::Sha512),
     None,
 }
 
@@ -76,7 +74,6 @@ impl Hasher {
         match hash {
             Hash::Sha1(_) => Self::Sha1(sha1::Sha1::new()),
             Hash::Sha256(_) => Self::Sha256(sha2::Sha256::new()),
-            Hash::Sha512(_) => Self::Sha512(sha2::Sha512::new()),
             Hash::Unknown => Self::None,
         }
     }
@@ -85,7 +82,6 @@ impl Hasher {
         match self {
             Self::Sha1(hasher) => hasher.update(bytes),
             Self::Sha256(hasher) => hasher.update(bytes),
-            Self::Sha512(hasher) => hasher.update(bytes),
             Self::None => {}
         }
     }
@@ -94,13 +90,10 @@ impl Hasher {
         let actual = match self {
             Self::Sha1(hasher) => hex::encode(hasher.finalize()),
             Self::Sha256(hasher) => hex::encode(hasher.finalize()),
-            Self::Sha512(hasher) => hex::encode(hasher.finalize()),
             Self::None => return true,
         };
         match hash {
-            Hash::Sha1(expected)
-            | Hash::Sha256(expected)
-            | Hash::Sha512(expected) => {
+            Hash::Sha1(expected) | Hash::Sha256(expected) => {
                 expected.is_empty() || actual.eq_ignore_ascii_case(expected)
             }
             Hash::Unknown => true,
@@ -330,20 +323,6 @@ fn staging_path(path: &Path) -> PathBuf {
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_default();
     path.with_file_name(format!(".{name}.{}.part", uuid::Uuid::new_v4()))
-}
-
-/// The SHA-1 of everything `reader` holds, hex encoded.
-pub fn sha1_of(mut reader: impl std::io::Read) -> std::io::Result<String> {
-    let mut hasher = sha1::Sha1::new();
-    let mut buffer = vec![0; 64 * 1024];
-    loop {
-        let read = reader.read(&mut buffer)?;
-        if read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..read]);
-    }
-    Ok(hex::encode(hasher.finalize()))
 }
 
 /// Whether the file at `path` has `hash`. A missing file has none.

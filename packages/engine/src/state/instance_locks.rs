@@ -19,6 +19,18 @@ impl InstanceLocks {
         lock(&self.content, instance_id).await
     }
 
+    pub(crate) fn try_lock_content(
+        &self,
+        instance_id: &str,
+    ) -> Option<OwnedMutexGuard<()>> {
+        self.content
+            .entry(instance_id.to_string())
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone()
+            .try_lock_owned()
+            .ok()
+    }
+
     pub(crate) async fn lock_shared(
         &self,
         instance_id: &str,

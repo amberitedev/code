@@ -17,24 +17,23 @@ use axum::{
     },
     response::{IntoResponse, Response},
 };
+pub use contracts::core::{
+    BackupTask, BackupTaskState as BackupState, CoreEvent,
+};
 use contracts::{
     ApiError, ErrorCode,
-    core::{ClientMessage, ServerPower, Topic},
+    core::{ClientMessage, PowerState, ServerPower, Topic},
 };
 use engine::Event;
-use serde::Serialize;
 use tokio::sync::{
     broadcast::{self, error::RecvError},
     mpsc,
 };
-use ts_rs::TS;
-use uuid::Uuid;
 
 use super::{CoreState, servers::power_state};
 use crate::{
     access::{Caller, Changed, Permission, StreamGuard, now},
     servers::{Phase, console, restarts::run_started_at},
-    state::servers::{GameVersionChange, InstallProgressItem},
 };
 
 /// Console lines a new console subscription starts with.
@@ -48,77 +47,6 @@ const POWER_EVERY: Duration = Duration::from_millis(500);
 const CONSOLE_CAPACITY: usize = 256;
 /// How often a console follower checks whether anyone still reads it.
 const FOLLOWER_IDLE_CHECK: Duration = Duration::from_secs(5);
-
-/// What the Core sends on `/events`, beside the engine's events.
-#[derive(Debug, Clone, Serialize, TS)]
-#[serde(tag = "type", content = "payload", rename_all = "snake_case")]
-pub enum CoreEvent {
-    /// A console line, without Core's health checks.
-    Console { server: String, line: String },
-    /// `uptime` is how many seconds a running server has been up.
-    Power {
-        server: String,
-        state: PowerState,
-        uptime: Option<u64>,
-    },
-    Backup {
-        server: String,
-        id: Uuid,
-        task: BackupTask,
-        state: BackupState,
-        progress: f64,
-        start_time: Option<i64>,
-        finish_time: Option<i64>,
-    },
-    /// A content install's items, on the `Server` topic.
-    InstallProgress {
-        server: String,
-        items: Vec<InstallProgressItem>,
-    },
-    /// A content install ended, with why it failed, on the `Server` topic.
-    InstallResult {
-        server: String,
-        error: Option<String>,
-        game_version: Option<GameVersionChange>,
-    },
-    /// The caller may not, or no longer, see `topic`.
-    Ended {
-        #[ts(type = "Topic")]
-        topic: Topic,
-        #[ts(type = "ApiError")]
-        error: ApiError,
-    },
-    /// This socket fell behind and lost events: refetch what is shown.
-    Resync,
-}
-
-/// Mirrors Archon.Websocket.v0.PowerState.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
-#[serde(rename_all = "lowercase")]
-pub enum PowerState {
-    Running,
-    Stopped,
-    Starting,
-    Stopping,
-    Crashed,
-}
-
-/// Mirrors Archon.Websocket.v0.BackupTask.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
-#[serde(rename_all = "lowercase")]
-pub enum BackupTask {
-    Create,
-    Restore,
-}
-
-/// Mirrors Archon.Websocket.v0.BackupState.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
-#[serde(rename_all = "lowercase")]
-pub enum BackupState {
-    Ongoing,
-    Done,
-    Failed,
-}
 
 pub async fn socket(
     caller: Caller,
@@ -358,7 +286,7 @@ impl Loop {
         Ok(())
     }
 
-    /// The server's power and content installs, as a `Server` subscription starts with.
+    /// The server's power, as a `Server` subscription starts with.
     async fn snapshot(
         &self,
         socket: &mut WebSocket,
@@ -368,23 +296,12 @@ impl Loop {
         let power = power_of(&self.state, server, phase)
             .await
             .unwrap_or(PowerState::Stopped);
-        send(socket, &power_event(&self.state, server, power).await).await?;
-        let items = self.state.content.activity(server).items;
-        send(
-            socket,
-            &CoreEvent::InstallProgress {
-                server: server.to_owned(),
-                items,
-            },
-        )
-        .await
+        send(socket, &power_event(&self.state, server, power).await).await
     }
 
     fn wants(&self, event: &CoreEvent) -> bool {
         let topic = match event {
-            CoreEvent::Power { server, .. }
-            | CoreEvent::InstallProgress { server, .. }
-            | CoreEvent::InstallResult { server, .. } => {
+            CoreEvent::Power { server, .. } => {
                 Topic::Server { id: server.clone() }
             }
             CoreEvent::Backup { server, .. } => {
@@ -454,7 +371,7 @@ fn forward(
 
 async fn send(
     socket: &mut WebSocket,
-    event: &impl Serialize,
+    event: &impl serde::Serialize,
 ) -> Result<(), Closed> {
     let text = serde_json::to_string(event).expect("events serialize");
     socket

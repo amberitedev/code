@@ -1,6 +1,7 @@
 import type { AbstractModrinthClient } from '../core/abstract-client'
 import type { KyrosContentV1Module } from '../modules/kyros/content/v1'
 import type { Adapter } from './adapter'
+import { installPackFile, unsupported } from './content'
 import { link, linkUrl } from './links'
 
 declare module '../modules/kyros/content/v1' {
@@ -15,8 +16,21 @@ declare module '../modules/kyros/content/v1' {
 const exportMrpack = (worldId: string) =>
 	`/v1/worlds/${encodeURIComponent(worldId)}/content/export-mrpack`
 
+/** A Core server has one world, with the server's id. */
 export function kyrosContent(client: AbstractModrinthClient): Adapter<KyrosContentV1Module> {
 	return {
+		getEmbeddedAddonIcon: () => unsupported('send the logos inside jars'),
+		uploadModpackFile(worldId, file, properties, options) {
+			if (!file) return unsupported('keep an earlier upload to install again')
+			return installPackFile(
+				client,
+				worldId,
+				file,
+				{ backup_id: null },
+				properties,
+				options?.onProgress,
+			)
+		},
 		authorizeMrpackExport: (nodeUrlHost, worldId) =>
 			link(client, nodeUrlHost, exportMrpack(worldId)),
 		getMrpackExportUrl: (nodeUrlHost, worldId, token) =>

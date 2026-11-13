@@ -244,3 +244,29 @@ impl ContentStore {
         Ok(reclaimed)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn retained_content_survives_cleanup_until_released() {
+        crate::install_crypto_provider();
+        let dir = tempfile::tempdir().unwrap();
+        let engine = crate::state::tests::engine(dir.path().into()).await;
+        let store = &engine.content_store;
+
+        let stored = store.store_bytes(b"a pushed config").await.unwrap();
+        let sha512 = stored.metadata.sha512.clone();
+        assert_eq!(std::fs::read(&stored.path).unwrap(), b"a pushed config");
+        drop(stored);
+        store
+            .retain("share_history", "1", std::slice::from_ref(&sha512))
+            .await
+            .unwrap();
+        store.cleanup(&engine, true).await.unwrap();
+        assert!(store.lookup(Some(&sha512), None).await.unwrap().is_some());
+
+        store.release("share_history", "1").await.unwrap();
+        store.cleanup(&engine, true).await.unwrap();
+        assert!(store.lookup(Some(&sha512), None).await.unwrap().is_none());
+    }
+}

@@ -1194,6 +1194,7 @@ pub(super) async fn owned_shared_instance(
             tracing::info!(instance_id, "Creating shared instance");
             let remote_id = create_remote_instance(
                 shared_instance_name(metadata.instance.name.clone()),
+                instance_id,
                 state,
             )
             .await?;

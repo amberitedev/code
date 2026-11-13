@@ -152,6 +152,26 @@ pub struct LoaderInstall {
     pub game_version: String,
 }
 
+/// Body of `ShareServer`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct SharePush {
+    /// Files to send with this version. Files sent earlier stay shared while the server has
+    /// them, unless they are in `removed_paths`.
+    pub file_paths: Vec<String>,
+    pub removed_paths: Vec<String>,
+    /// Restart a running server once the version is out.
+    pub restart: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct SharedServer {
+    pub shared_instance_id: String,
+    pub version: Option<i32>,
+    pub restarted: bool,
+}
+
 /// How a server starts, and what it shares.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
@@ -362,6 +382,8 @@ pub(super) fn ts_types() -> Vec<String> {
         PowerAction::decl(&cfg),
         PowerChange::decl(&cfg),
         LoaderInstall::decl(&cfg),
+        SharePush::decl(&cfg),
+        SharedServer::decl(&cfg),
         ServerSetup::decl(&cfg),
         JavaMajor::decl(&cfg),
         ServerProperties::decl(&cfg),

@@ -10,12 +10,12 @@ use crate::{
     access::{Edit, EngineAccess, InstanceAccess, Owner, View},
     endpoints::content::{
         AddProjectFromVersion, CheckProjectInstalled, GetLinkedModpack,
-        InstallProjectWithDependencies, ListContentItems,
+        InstallModpack, InstallProjectWithDependencies, ListContentItems,
         ListDependencyContentItems, ListInstallCandidates,
         ListInstalledProjectIds, ListInstanceProjects,
         ListLinkedModpackContent, ListPackExportCandidates,
         RefreshContentUpdates, RemoveProject, RepairModpack, SetProjectLocked,
-        SwitchProjectVersion, SyncContentFiles, ToggleProject,
+        SwitchProjectVersion, SyncContentFiles, ToggleProject, UnlinkModpack,
         UpdateModpackVersion, UpdateProject,
     },
     endpoints::content::{
@@ -101,8 +101,24 @@ pub async fn list_content_items(
         request.query.cache_behaviour,
     )
     .await
-    .map(Json)
+    .map(|items| Json(without_host_paths(&engine, items)))
     .map_err(api_error)
+}
+
+/// A server engine's callers are remote: an embedded icon's cached copy is a path on its host.
+fn without_host_paths(
+    engine: &Engine,
+    mut items: Vec<ContentItem>,
+) -> Vec<ContentItem> {
+    if engine.side == contracts::Side::Server {
+        for metadata in items
+            .iter_mut()
+            .filter_map(|item| item.embedded_metadata.as_mut())
+        {
+            metadata.icon_path = None;
+        }
+    }
+    items
 }
 
 pub async fn refresh_content_updates(
@@ -169,7 +185,7 @@ pub async fn list_linked_modpack_content(
         request.query.cache_behaviour,
     )
     .await
-    .map(Json)
+    .map(|items| Json(without_host_paths(&engine, items)))
     .map_err(api_error)
 }
 
@@ -281,6 +297,22 @@ pub async fn remove_project(
         .map_err(api_error)
 }
 
+pub async fn install_modpack(
+    State(engine): State<Arc<Engine>>,
+    instance: InstanceAccess<Edit>,
+    request: Req<InstallModpack>,
+) -> Answer<InstallJobSnapshot> {
+    instance::install_modrinth_modpack(
+        &engine,
+        &instance.id,
+        &request.body.project_id,
+        &request.body.version_id,
+    )
+    .await
+    .map(Json)
+    .map_err(api_error)
+}
+
 pub async fn update_modpack_version(
     State(engine): State<Arc<Engine>>,
     instance: InstanceAccess<Edit>,
@@ -293,6 +325,24 @@ pub async fn update_modpack_version(
     )
     .await
     .map(Json)
+    .map_err(api_error)
+}
+
+pub async fn unlink_modpack(
+    State(engine): State<Arc<Engine>>,
+    instance: InstanceAccess<Edit>,
+    _: Req<UnlinkModpack>,
+) -> Result<Empty, ApiError> {
+    instance::edit(
+        &engine,
+        &instance.id,
+        crate::state::EditInstance {
+            link: Some(crate::state::InstanceLink::Unmanaged),
+            ..Default::default()
+        },
+    )
+    .await
+    .map(|_| Empty)
     .map_err(api_error)
 }
 

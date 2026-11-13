@@ -174,7 +174,7 @@ fn sync_dir(dir: &Path) -> io::Result<()> {
 
 /// The database and its WAL files, which only make sense together.
 fn database_files(dir: &Path) -> [PathBuf; 3] {
-    ["copal.db", "copal.db-wal", "copal.db-shm"].map(|name| dir.join(name))
+    ["core.db", "core.db-wal", "core.db-shm"].map(|name| dir.join(name))
 }
 
 /// Copy the database aside before a new version migrates it. Only while no Core runs. The copy
@@ -311,7 +311,7 @@ mod tests {
     fn the_database_copy_comes_back_whole() {
         let (_dir, paths) = paths();
         let db = paths.database();
-        let wal = db.with_file_name("copal.db-wal");
+        let wal = db.with_file_name("core.db-wal");
         std::fs::write(&db, "before").unwrap();
         save_database(&paths).unwrap();
         // The new version migrates and leaves a WAL the old one never had.

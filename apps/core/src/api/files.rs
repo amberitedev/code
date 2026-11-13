@@ -36,17 +36,95 @@ use engine::{
     sandbox::{self, Folder},
 };
 
-use super::{
-    CoreState,
-    content::{stage_field, world},
-    internal,
-};
+use super::{CoreState, internal, world};
 use crate::{
     access::{Caller, Permission, activity, now},
-    state::servers::{
-        Busy, commands::apply_content_install::add_uploaded_file, domain::pack,
-    },
+    installs::ModLoader,
+    servers::platform,
 };
+
+/// The engine's lock on a server's content, which its installs hold between a plan and its
+/// writes.
+type Busy = tokio::sync::OwnedMutexGuard<()>;
+
+/// The disk, not the request: the same one may go once there is room.
+fn no_room(error: NoRoom) -> ApiError {
+    ApiError::new(ErrorCode::Conflict, error.to_string())
+}
+
+fn archive_error(error: ArchiveError) -> ApiError {
+    match error {
+        ArchiveError::NoRoom(error) => no_room(error),
+        error => ApiError::new(ErrorCode::InvalidInput, error.to_string()),
+    }
+}
+
+/// Stream one multipart field into `path`, as much as fits on the disk (`archive::room`).
+async fn stage_field(
+    field: &mut axum::extract::multipart::Field<'_>,
+    path: &std::path::Path,
+) -> Result<(), ApiError> {
+    let parent = path.parent().unwrap_or(path);
+    tokio::fs::create_dir_all(parent).await.map_err(internal)?;
+    let room = archive::room(parent).map_err(internal)?;
+    let result = async {
+        let mut file = tokio::fs::File::create(path).await.map_err(internal)?;
+        let mut written = 0u64;
+        while let Some(chunk) = field.chunk().await.map_err(|error| {
+            ApiError::new(ErrorCode::InvalidInput, error.body_text())
+        })? {
+            written += chunk.len() as u64;
+            if written > room {
+                return Err(no_room(NoRoom {
+                    what: "the upload".into(),
+                    needed: None,
+                    room,
+                }));
+            }
+            file.write_all(&chunk).await.map_err(internal)?;
+        }
+        file.flush().await.map_err(internal)
+    }
+    .await;
+    // Whatever stopped it, a client gone or a full disk, nothing half-written stays.
+    if result.is_err() {
+        let _ = tokio::fs::remove_file(path).await;
+    }
+    result
+}
+
+/// Where an uploaded addon goes: a `.jar` in `plugins/` on Paper and `mods/` otherwise, a `.zip`
+/// in the world's `datapacks/`. The engine indexes it once it is there.
+async fn content_path(
+    state: &CoreState,
+    folder: &Folder,
+    id: &str,
+    name: &str,
+) -> Result<String, ApiError> {
+    let invalid =
+        |reason: String| ApiError::new(ErrorCode::InvalidInput, reason);
+    let name =
+        sandbox::clean(name).map_err(|error| invalid(error.to_string()))?;
+    if name.contains('/') {
+        return Err(invalid(format!("{name} is not a file name.")));
+    }
+    let paper = platform::platform(&state.engine, id)
+        .await
+        .map_err(engine::routes::api_error)?
+        .is_some_and(|platform| platform.loader == ModLoader::Paper);
+    Ok(
+        match name.rsplit_once('.').map(|(_, extension)| extension) {
+            Some("zip") => format!("{}/datapacks/{name}", folder.level_name()),
+            Some("jar") if paper => format!("plugins/{name}"),
+            Some("jar") => format!("mods/{name}"),
+            _ => {
+                return Err(invalid(format!(
+                    "{name} is neither a .jar nor a datapack .zip."
+                )));
+            }
+        },
+    )
+}
 
 /// Query of GET `fs/download` and `files/contents-raw`, and PUT `fs/update`. Mirrors the `path`
 /// param of `KyrosFilesV0Module.downloadFile` and `.updateFile`.
@@ -400,7 +478,12 @@ pub(super) fn changing(
     state: &CoreState,
     id: &str,
 ) -> Result<(Arc<Folder>, Arc<Busy>), ApiError> {
-    let busy = Arc::new(state.content.busy(id)?);
+    let busy = Arc::new(state.engine.try_lock_instance(id).ok_or_else(|| {
+        ApiError::new(
+            ErrorCode::Conflict,
+            "The server is busy with another change to its content; try again when it is done.",
+        )
+    })?);
     Ok((folder(state, id)?, busy))
 }
 
@@ -638,12 +721,11 @@ async fn stage_body(
             })?;
             written += chunk.len() as u64;
             if written > room {
-                return Err(crate::state::servers::Error::from(NoRoom {
+                return Err(no_room(NoRoom {
                     what: "the upload".into(),
                     needed: None,
                     room,
-                })
-                .into());
+                }));
             }
             file.write_all(&chunk).await.map_err(internal)?;
         }
@@ -845,20 +927,17 @@ pub async fn unarchive(
             .flatten()
             .ok_or_else(|| not_found(&source))?
             .into_std();
-        let mut zip = zip::ZipArchive::new(file).map_err(|error| {
-            ApiError::from(crate::state::servers::Error::from(
-                ArchiveError::from(error),
-            ))
-        })?;
-        let modpack_name =
-            pack::read_index(&mut zip).ok().map(|index| index.name);
+        let mut zip = zip::ZipArchive::new(file)
+            .map_err(|error| archive_error(ArchiveError::from(error)))?;
+        let modpack_name = engine::pack::server::read_index(&mut zip)
+            .ok()
+            .map(|index| index.name);
         let level = folder.level_name();
         let destination = |entry: &str| match &target {
             Some(target) => format!("{target}/{entry}"),
             None => entry.to_owned(),
         };
-        let entries = archive::entries(&mut zip)
-            .map_err(crate::state::servers::Error::from)?;
+        let entries = archive::entries(&mut zip).map_err(archive_error)?;
         let conflicting_files: Vec<String> = entries
             .iter()
             .filter(|(_, is_dir)| !is_dir)
@@ -884,7 +963,7 @@ pub async fn unarchive(
                 for path in created.iter().rev() {
                     let _ = folder.remove(path);
                 }
-                return Err(crate::state::servers::Error::from(error).into());
+                return Err(archive_error(error));
             }
         }
         Ok(ExtractResult {
@@ -1318,7 +1397,8 @@ pub async fn finalize_session(
             }
             UploadScope::Content => {
                 for (name, staged) in &files {
-                    add_uploaded_file(&state.content, &id, name, staged)
+                    let path = content_path(&state, &folder, &id, name).await?;
+                    place(Arc::clone(&folder), &busy, path, staged.clone())
                         .await?;
                 }
             }

@@ -12,7 +12,6 @@
 //!   versions/<version_id>/server-args.txt    how a Forge or NeoForge build starts
 //!   paper/paper-<game_version>-<build>.jar    Paper builds
 //!   installers/<loader>-<version>-installer.jar  Forge and NeoForge installers
-//!   packs/<sha1>.mrpack                       packs servers follow
 //! ```
 //!
 //! `version_id` is the merged id: `{game_version}` for vanilla, or
@@ -74,10 +73,5 @@ impl SharedDirs {
     /// read it as `copal-servers`, which may read `meta/` but not write it.
     pub fn installer(&self, name: &str) -> PathBuf {
         self.root.join("installers").join(name)
-    }
-
-    /// A pack a server follows, by the SHA-1 of its `.mrpack`.
-    pub fn pack(&self, sha1: &str) -> PathBuf {
-        self.root.join("packs").join(format!("{sha1}.mrpack"))
     }
 }

@@ -438,6 +438,8 @@ desired_enabled?: boolean | null, };
 
 export type ProjectLock = { project_path: string, locked: boolean, };
 
+export type ModpackProject = { project_id: string, version_id: string, };
+
 export type ModpackVersion = { version_id: string, };
 
 export type ExportCandidatesQuery = { parent?: string, };
@@ -695,7 +697,9 @@ export const instanceContent = {
 	ToggleProject: { method: "POST", path: "/instances/{id}/projects/toggle", auth: "session", dangerous: false, body: "json", response: "json" } as Endpoint<InstanceRef, null, ProjectToggle, string>,
 	SetProjectLocked: { method: "PUT", path: "/instances/{id}/projects/locked", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<InstanceRef, null, ProjectLock, void>,
 	RemoveProject: { method: "POST", path: "/instances/{id}/projects/remove", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<InstanceRef, null, ProjectPath, void>,
+	InstallModpack: { method: "POST", path: "/instances/{id}/modpack", auth: "session", dangerous: false, body: "json", response: "json" } as Endpoint<InstanceRef, null, ModpackProject, InstallJobSnapshot>,
 	UpdateModpackVersion: { method: "POST", path: "/instances/{id}/modpack/update", auth: "session", dangerous: false, body: "json", response: "json" } as Endpoint<InstanceRef, null, ModpackVersion, InstallJobSnapshot>,
+	UnlinkModpack: { method: "POST", path: "/instances/{id}/modpack/unlink", auth: "session", dangerous: false, body: "empty", response: "empty" } as Endpoint<InstanceRef, null, void, void>,
 	RepairModpack: { method: "POST", path: "/instances/{id}/modpack/repair", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceRef, null, void, InstallJobSnapshot>,
 	ListPackExportCandidates: { method: "GET", path: "/instances/{id}/export-candidates", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceRef, ExportCandidatesQuery, void, Array<PackExportCandidate>>,
 	SetSide: { method: "POST", path: "/instances/{id}/content/side", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<InstanceRef, null, SideChange, void>,

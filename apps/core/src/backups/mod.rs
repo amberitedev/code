@@ -697,13 +697,20 @@ impl Backups {
     /// Core looked and found nothing new. A server that is starting, stopping, installing, or
     /// busy with another backup operation is left for the next check.
     pub async fn queue_due(&self) -> Result<(), Error> {
-        let servers: Vec<String> = sqlx::query_scalar(
-            "SELECT id FROM servers WHERE game_version IS NOT NULL",
-        )
-        .fetch_all(&self.db)
-        .await?;
+        let servers: Vec<String> = sqlx::query_scalar("SELECT id FROM servers")
+            .fetch_all(&self.db)
+            .await?;
         let now = now();
         for server_id in servers {
+            let installed = crate::servers::platform::platform(
+                self.servers.engine(),
+                &server_id,
+            )
+            .await
+            .is_ok_and(|platform| platform.is_some());
+            if !installed {
+                continue;
+            }
             let Some(due) = self.due(&server_id).await? else {
                 continue;
             };

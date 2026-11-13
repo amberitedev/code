@@ -20,8 +20,9 @@ use crate::{
         cache::{self, CacheKey, CacheKeys, CacheRead, CacheSearch},
         content::{
             self, DependencyContentQuery, ExportCandidatesQuery,
-            InstallCandidatesQuery, ModpackVersion, NewProject, ProjectIdQuery,
-            ProjectLock, ProjectPath, ProjectToggle, ProjectVersionSwitch,
+            InstallCandidatesQuery, ModpackProject, ModpackVersion, NewProject,
+            ProjectIdQuery, ProjectLock, ProjectPath, ProjectToggle,
+            ProjectVersionSwitch,
         },
         content::{EditedDecision, SideChange, SidesUnlocked},
         files::{
@@ -296,6 +297,7 @@ fn file() -> String {
         ProjectVersionSwitch::decl(&cfg),
         ProjectToggle::decl(&cfg),
         ProjectLock::decl(&cfg),
+        ModpackProject::decl(&cfg),
         ModpackVersion::decl(&cfg),
         ExportCandidatesQuery::decl(&cfg),
         PackExportCandidate::decl(&cfg),

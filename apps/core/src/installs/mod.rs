@@ -13,14 +13,13 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    servers::{Hold, ServerError, Servers, launch},
-    state::servers::adapters::sqlite::server_rows::ServerRow,
+use crate::servers::{
+    Hold, ServerError, Servers, launch, server_rows::ServerRow,
 };
 use shared::SharedDirs;
 
-/// The server software a server runs, as `servers.loader` stores it. Same values as the engine's
-/// `ModLoader`, which packs and content sets name; a pack's loader converts with `From`.
+/// The server software a server runs. Same values as the engine's `ModLoader`, which its content
+/// set names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ModLoader {
@@ -44,7 +43,7 @@ impl ModLoader {
         }
     }
 
-    /// From `servers.loader`, or a loader name in any case.
+    /// A loader name in any case.
     pub fn parse(name: &str) -> Option<Self> {
         [
             Self::Vanilla,
@@ -72,9 +71,9 @@ impl ModLoader {
     }
 }
 
-impl From<bedrock::state::ModLoader> for ModLoader {
-    fn from(loader: bedrock::state::ModLoader) -> Self {
-        use bedrock::state::ModLoader as Modded;
+impl From<engine::state::ModLoader> for ModLoader {
+    fn from(loader: engine::state::ModLoader) -> Self {
+        use engine::state::ModLoader as Modded;
         match loader {
             Modded::Vanilla => Self::Vanilla,
             Modded::Fabric => Self::Fabric,
@@ -82,6 +81,19 @@ impl From<bedrock::state::ModLoader> for ModLoader {
             Modded::Forge => Self::Forge,
             Modded::NeoForge => Self::NeoForge,
             Modded::Paper => Self::Paper,
+        }
+    }
+}
+
+impl From<ModLoader> for engine::state::ModLoader {
+    fn from(loader: ModLoader) -> Self {
+        match loader {
+            ModLoader::Vanilla => Self::Vanilla,
+            ModLoader::Fabric => Self::Fabric,
+            ModLoader::Quilt => Self::Quilt,
+            ModLoader::Forge => Self::Forge,
+            ModLoader::NeoForge => Self::NeoForge,
+            ModLoader::Paper => Self::Paper,
         }
     }
 }
@@ -149,14 +161,10 @@ pub async fn install(
     }
     let paths = servers.paths();
     let dirs = SharedDirs::new(paths.root());
-    let target = ServerRow {
-        loader: Some(loader.as_str().into()),
-        game_version: Some(game_version.into()),
-        ..server.clone()
-    };
     progress(0.0);
     // Held until the install is done, so the patch check keeps the Java the installer runs.
-    let (java, _lease) = launch::java_for(paths, http, &target).await?;
+    let (java, _lease) =
+        launch::java_for(paths, http, server, Some(game_version)).await?;
     progress(0.2);
     let rest = |share: f64| progress(0.2 + share * 0.8);
     let installed = match loader {

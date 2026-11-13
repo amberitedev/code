@@ -391,6 +391,35 @@ async fn ensure_project_not_frozen(
     Ok(())
 }
 
+/// Installs a Modrinth modpack version over the instance, which then follows that modpack.
+#[tracing::instrument(skip(state))]
+pub async fn install_modrinth_modpack(
+    state: &Arc<Engine>,
+    instance_id: &str,
+    project_id: &str,
+    version_id: &str,
+) -> crate::Result<crate::install::InstallJobSnapshot> {
+    let metadata = crate::state::instances::commands::get_instance_metadata(
+        instance_id,
+        &state.pool,
+    )
+    .await?
+    .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
+    ensure_metadata_content_unlocked(&metadata)?;
+    crate::install::install_pack_to_existing_instance(
+        metadata.instance.id,
+        crate::api::pack::install_from::CreatePackLocation::FromVersionId {
+            project_id: project_id.to_string(),
+            version_id: version_id.to_string(),
+            title: metadata.instance.name.clone(),
+            icon_url: None,
+        },
+        None,
+        state,
+    )
+    .await
+}
+
 #[tracing::instrument(skip(state))]
 pub async fn update_managed_modrinth_version(
     state: &Arc<Engine>,

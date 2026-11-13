@@ -47,7 +47,11 @@ endpoints! {
     ToggleProject: Post "/instances/{id}/projects/toggle", InstanceRef, (), Json<ProjectToggle> => Json<String>;
     SetProjectLocked: Put "/instances/{id}/projects/locked", InstanceRef, (), Json<ProjectLock> => Empty;
     RemoveProject: Post "/instances/{id}/projects/remove", InstanceRef, (), Json<ProjectPath> => Empty;
+    /// Installs a Modrinth modpack version over the instance, which then follows it.
+    InstallModpack: Post "/instances/{id}/modpack", InstanceRef, (), Json<ModpackProject> => Json<InstallJobSnapshot>;
     UpdateModpackVersion: Post "/instances/{id}/modpack/update", InstanceRef, (), Json<ModpackVersion> => Json<InstallJobSnapshot>;
+    /// Stops following the modpack. Its files stay.
+    UnlinkModpack: Post "/instances/{id}/modpack/unlink", InstanceRef, (), Empty => Empty;
     RepairModpack: Post "/instances/{id}/modpack/repair", InstanceRef, (), Empty => Json<InstallJobSnapshot>;
     /// The direct children of `parent` (the instance's folder when absent) an mrpack export can
     /// include.
@@ -131,6 +135,13 @@ pub struct ProjectLock {
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ModpackVersion {
+    pub version_id: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+pub struct ModpackProject {
+    pub project_id: String,
     pub version_id: String,
 }
 

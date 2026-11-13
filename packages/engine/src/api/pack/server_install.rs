@@ -426,7 +426,7 @@ async fn apply(
                         && let Some((project, version)) = index.files[n]
                             .downloads
                             .iter()
-                            .find_map(|url| bedrock::content::ids_from_cdn(url))
+                            .find_map(|url| server::ids_from_cdn(url))
                     {
                         row.project_id = Some(project);
                         row.version_id = Some(version);

@@ -26,7 +26,7 @@ use crate::{
         owed::OwedCall, require_owner, sync::owe,
     },
     servers::ServerError,
-    state::servers::adapters::sqlite::server_rows,
+    servers::server_rows,
 };
 
 /// People with a role on any server of this Core, at most. The backend's directory holds no

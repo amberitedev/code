@@ -118,13 +118,16 @@ pub(super) async fn forget_share_history(
     history::prune(&AppHistory(state), share_id, Some(0)).await
 }
 
-/// The instance's share history, newest first. Only its owner has one.
+/// The instance's share history, newest first. Only its owner has one; an instance with no share
+/// has none.
 #[tracing::instrument(skip(state))]
 pub async fn get_shared_instance_history(
     state: &Engine,
     instance_id: &str,
 ) -> crate::Result<Vec<SharedInstanceHistoryEntry>> {
-    let attachment = attachment(instance_id, state).await?;
+    let Some(attachment) = shared_attachment(instance_id, state).await? else {
+        return Ok(Vec::new());
+    };
     if attachment.role != SharedInstanceRole::Owner {
         return Ok(Vec::new());
     }

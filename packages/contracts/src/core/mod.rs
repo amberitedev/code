@@ -17,7 +17,7 @@ pub use servers::*;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Auth, Empty, Endpoint, Json, Method};
+use crate::{Auth, Empty, Endpoint, Json, Method, Stream};
 
 /// The header a dangerous route's fresh ticket travels in.
 pub const TICKET_HEADER: &str = "x-amberite-ticket";
@@ -174,6 +174,11 @@ endpoints! {
     ChangePower: Post "/servers/{id}/power", Session, ServerId, (), Json<PowerChange>, Empty;
     /// Install a loader on a stopped server, answering once it is done. Editors and up.
     InstallLoader: Post "/servers/{id}/reinstall", Session, ServerId, (), Json<LoaderInstall>, Empty;
+    /// Install an `.mrpack`, the body, over a stopped server. It goes on in the background.
+    /// Editors and up.
+    InstallModpackFile: Post "/servers/{id}/modpack-file", Session, ServerId, (), Stream, Empty;
+    /// Push a version of the server's own share, which the first push creates. Editors and up.
+    ShareServer: Post "/servers/{id}/share", Session, ServerId, (), Json<SharePush>, Json<SharedServer>;
     /// Viewers and up.
     GetSetup: Get "/servers/{id}/setup", Session, ServerId, (), Empty, Json<ServerSetup>;
     /// The managed Java the server runs, from its next start. Editors and up.

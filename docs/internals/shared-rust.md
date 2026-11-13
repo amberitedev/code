@@ -7,7 +7,7 @@ Code the App and Copal both need exists once, in these crates. The App (`package
 | -------------------------------------- | -------------------------------------------------------------------------------- | -------------------------------- |
 | `packages/contracts`                   | The protocol: Endpoints, `ApiError`, limits and share rules, generated to TS     | Ours. Imports none of ours.      |
 | `packages/modrinth-content-management` | Modrinth's content decisions: `resolve_content`, content and configuration diffs | Upstream's. Never edit; call it. |
-| `packages/bedrock`                     | Everything both sides share that is not sharing                                  | Ours.                            |
+| `packages/bedrock`                     | The engine's content schema, borrowed in place                                   | Ours.                            |
 | `packages/sharing-client`              | Shares, reaching Cores, and free disk space                                      | Ours.                            |
 | `packages/sharing-storage`             | The store process                                                                | Ours.                            |
 
@@ -15,15 +15,8 @@ Imports go one way: `bedrock` and `sharing-client` each import `modrinth-content
 `sharing-storage` imports `sharing-client`, and every crate may import `contracts`. sharing-client
 never imports bedrock. Copal runs its own engine (`CoreState::engine`).
 
-bedrock holds three kinds of code:
-
-1. Borrowed engine files, compiled in place with `#[path]` (`state/`). The engine imports those
-   types from bedrock instead of compiling them. Prefer this for any engine file whose dependencies
-   are small enough for bedrock to provide.
-2. Clones of upstream code tangled with `engine::Engine` (`upstream/`), kept byte for byte where
-   possible with all adaptation in one glue file, and declared in `packages/bedrock/ports.toml`.
-   The App keeps the originals.
-3. Our own shared code: content rules.
+bedrock holds only borrowed engine files, compiled in place with `#[path]` (`state/`). The engine
+imports those types from bedrock instead of compiling them.
 
 sharing-client is one folder per concern: `shares` (how both sides read the backend's share
 routes, which they call through `contracts::backend::sharing`), `versions` (reading a share

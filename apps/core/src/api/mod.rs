@@ -1,16 +1,15 @@
 //! The HTTP API: Axum routes, one file per resource. The same router serves HTTPS and the local
 //! socket (see `access::local`).
 //!
-//! Routes only a Core has are `contracts::core` Endpoints. The content, share, file, icon and
-//! download routes match the `Archon.*` and `Kyros.*` shapes in `packages/api-client/src/modules`;
-//! the share, diff, history and edited-file types among them generate their TypeScript here (see
-//! `typescript`).
+//! Routes only a Core has are `contracts::core` Endpoints. A server's content and share are the
+//! engine's routes (`engine_mount`). The file, icon and download routes match the `Kyros.*` shapes
+//! in `packages/api-client/src/modules`.
 
 pub mod access;
 pub mod activity;
 pub mod backups;
 pub mod console;
-pub mod content;
+mod engine_mount;
 pub mod eula;
 pub mod events;
 pub mod export;
@@ -24,13 +23,10 @@ pub mod performance;
 pub mod properties;
 pub mod servers;
 pub mod sessions;
-pub mod share;
 pub mod startup;
 pub mod storage;
 #[cfg(test)]
 mod tests;
-#[cfg(test)]
-mod typescript;
 pub mod update;
 
 use std::{sync::Arc, time::Duration};
@@ -59,6 +55,18 @@ pub fn internal(error: impl std::fmt::Display) -> ApiError {
     ApiError::new(ErrorCode::InternalError, format!("{error:#}"))
 }
 
+/// The one world of a server has the server's id.
+pub fn world(id: &str, wid: &str) -> Result<(), ApiError> {
+    if id.eq_ignore_ascii_case(wid) {
+        Ok(())
+    } else {
+        Err(ApiError::new(
+            ErrorCode::NotFound,
+            format!("There is no world {wid}."),
+        ))
+    }
+}
+
 /// The longest a request may take, except the routes that wait on a server.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long a connection may sit without a request, or take to send one's headers.
@@ -72,7 +80,6 @@ pub struct CoreState {
     pub engine: Arc<Engine>,
     pub servers: Arc<crate::servers::Servers>,
     pub access: Arc<crate::access::CoreAccess>,
-    pub content: Arc<crate::state::servers::Content>,
     pub backups: Arc<crate::backups::Backups>,
     pub uploads: files::Uploads,
     pub update: Arc<crate::update::Updater>,
@@ -89,6 +96,12 @@ pub struct Shared(pub Arc<CoreState>);
 impl FromRef<Shared> for Arc<CoreState> {
     fn from_ref(shared: &Shared) -> Self {
         Arc::clone(&shared.0)
+    }
+}
+
+impl FromRef<Shared> for Arc<Engine> {
+    fn from_ref(shared: &Shared) -> Self {
+        Arc::clone(&shared.0.engine)
     }
 }
 
@@ -179,46 +192,7 @@ pub fn router(state: Arc<CoreState>) -> Router {
         .route("/v1/servers/{id}/icon/generated", put(icon::set_generated))
         .route("/modrinth/v0/servers/{id}/fs", get(files::auth))
         .endpoint::<SetJava, _, _>(startup::set_java_path)
-        .route("/v1/servers/{id}/worlds/{wid}/addons/delete", post(content::delete))
-        .route("/v1/servers/{id}/worlds/{wid}/addons/delete-many", post(content::delete_many))
-        .route("/v1/servers/{id}/worlds/{wid}/addons/disable", post(content::disable))
-        .route("/v1/servers/{id}/worlds/{wid}/addons/enable", post(content::enable))
-        .route("/v1/servers/{id}/worlds/{wid}/addons/disable-many", post(content::disable_many))
-        .route("/v1/servers/{id}/worlds/{wid}/addons/enable-many", post(content::enable_many))
-        .route(
-            "/v1/servers/{id}/worlds/{wid}/addons/set-enabled-server",
-            post(content::set_enabled_server),
-        )
-        .route(
-            "/v1/servers/{id}/worlds/{wid}/addons/set-enabled-player",
-            post(content::set_enabled_player),
-        )
-        .route(
-            "/v1/servers/{id}/worlds/{wid}/addons/set-locked-side-toggle",
-            post(content::set_side_toggle_locked),
-        )
-        .route(
-            "/v1/servers/{id}/worlds/{wid}/addons/complete-side-type-review",
-            post(content::complete_side_type_review),
-        )
-        .route("/v1/servers/{id}/worlds/{wid}/content/share/diff", get(share::diff))
-        .route("/v1/servers/{id}/worlds/{wid}/content/share/files", get(share::files))
-        .route("/v1/servers/{id}/worlds/{wid}/content/share/history", get(share::history))
-        .route(
-            "/v1/servers/{id}/worlds/{wid}/content/share/history/{version}",
-            delete(share::delete_version),
-        )
-        .route("/v1/servers/{id}/worlds/{wid}/content", post(content::install))
-        .route("/v1/servers/{id}/worlds/{wid}/content/repair", post(content::repair))
-        .route("/v1/servers/{id}/worlds/{wid}/content/unlink-modpack", post(content::unlink))
-        .route(
-            "/v1/servers/{id}/worlds/{wid}/content/modpack/update",
-            get(content::modpack).post(content::update_modpack),
-        )
-        .route(
-            "/servers/{id}/v1/worlds/{wid}/content/embedded-icon",
-            get(content::embedded_icon),
-        )
+        .merge(engine_mount::routes())
         .route("/servers/{id}/modrinth/v0/fs/list", get(files::list))
         .route("/servers/{id}/modrinth/v0/fs/download", get(files::download))
         .route("/servers/{id}/modrinth/v0/fs/move", post(files::rename))
@@ -241,31 +215,13 @@ pub fn router(state: Arc<CoreState>) -> Router {
         // Starting a server answers once Java runs, and an install or update once it is done.
         .endpoint::<ChangePower, _, _>(servers::power)
         .endpoint::<InstallUpdate, _, _>(update::apply)
-        // A push uploads the server's files and waits for the store to confirm them.
-        .route(
-            "/v1/servers/{id}/worlds/{wid}/content/share",
-            post(share::share).delete(share::unshare),
-        )
-        // A restore downloads the version's Modrinth files and writes them before it answers.
-        .route(
-            "/v1/servers/{id}/worlds/{wid}/content/share/history/{version}/restore",
-            post(share::restore),
-        )
         .endpoint::<CheckReachability, _, _>(insight::check)
         .endpoint::<InstallLoader, _, _>(servers::install)
+        // A push uploads the server's files and waits for the store to confirm them.
+        .endpoint::<ShareServer, _, _>(servers::share)
         // Adding and updating addons download them first, as does taking the pack's version of
-        // an edited file.
-        .route(
-            "/servers/{id}/content/edited",
-            get(content::edited).post(content::decide),
-        )
-        .route("/v1/servers/{id}/worlds/{wid}/addons", get(content::list).post(content::add))
-        .route("/v1/servers/{id}/worlds/{wid}/addons/install-many", post(content::add_many))
-        .route(
-            "/v1/servers/{id}/worlds/{wid}/addons/update",
-            get(content::get_update).post(content::update),
-        )
-        .route("/v1/servers/{id}/worlds/{wid}/addons/update-many", post(content::update_many))
+        // an edited file, and a pack's install or update backs the world up first.
+        .merge(engine_mount::long_routes())
         .route(
             "/servers/{id}/v1/worlds/{wid}/{scope}/upload-session/{upload}/finalize",
             post(files::finalize_session),
@@ -291,14 +247,7 @@ pub fn router(state: Arc<CoreState>) -> Router {
         )
         .layer(DefaultBodyLimit::max(MAX_BODY))
         // Uploads stream to disk with their own cap: the disk's free space (`archive::room`).
-        .route(
-            "/servers/{id}/v1/worlds/{wid}/content/upload-modpack-file",
-            post(content::upload_modpack),
-        )
-        .route(
-            "/servers/{id}/v1/worlds/{wid}/content/upload-addon-file",
-            post(content::upload_addons),
-        )
+        .endpoint::<InstallModpackFile, _, _>(servers::install_modpack_file)
         .route(
             "/servers/{id}/v1/worlds/{wid}/{scope}/upload-session/{upload}/files",
             post(files::upload_files),

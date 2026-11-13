@@ -4,54 +4,19 @@ edition.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 
-# cargo-shear cannot see the engine files bedrock compiles in place with #[path], which use these.
-[package.metadata.cargo-shear]
-ignored = ["tokio-util"]
-
-# What the App and Copal both need that is not sharing: the content schema borrowed from the engine,
-# clones of upstream code tangled with the engine's State (`ports.toml`), `.mrpack` and Modrinth
-# content rules. Imports go one way:
-# modrinth-content-management -> bedrock -> sharing-client -> sharing-storage.
+# The engine's content schema, borrowed in place with `#[path]` so both sides share one definition.
 [dependencies]
 anyhow = { workspace = true }
-async-trait = { workspace = true }
-bytes = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
-fs4 = { workspace = true, features = ["tokio"] }
-futures = { workspace = true }
-itertools = { workspace = true }
-json5 = { workspace = true }
 modrinth-content-management = { workspace = true }
-parking_lot = { workspace = true }
-pathdiff = { workspace = true }
-reqwest = { workspace = true, features = ["json", "rustls-no-provider", "stream"] }
-# The ring backend avoids aws-lc-sys's CMake build on Windows.
-rustls = { workspace = true, features = ["ring", "std", "tls12"] }
-same-file = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true }
-sha2 = { workspace = true }
-sqlx = { workspace = true, features = ["macros", "runtime-tokio", "sqlite"] }
-tempfile = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["fs", "io-util", "macros", "rt", "sync", "time"] }
-tokio-util = { workspace = true, features = ["io"] }
-toml = { workspace = true }
-tracing = { workspace = true }
 ts-rs = { workspace = true, features = [
   "chrono-impl",
   "no-serde-warnings",
   "uuid-impl",
 ], optional = true }
-url = { workspace = true }
 uuid = { workspace = true, features = ["serde", "v4"] }
-zip = { workspace = true }
-
-[dev-dependencies]
-tokio = { workspace = true, features = ["macros", "rt"] }
-
-[target."cfg(windows)".dependencies]
-windows = { workspace = true, features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
 
 [features]
 # The engine's `export-ts`: the borrowed types derive their TypeScript there.

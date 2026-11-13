@@ -14,8 +14,7 @@ use contracts::{
 use super::{CoreState, internal};
 use crate::{
     access::{Caller, Permission, activity},
-    servers::{ServerError, memory, restarts},
-    state::servers::adapters::sqlite::server_rows,
+    servers::{ServerError, memory, restarts, server_rows},
 };
 
 /// The least memory a server may have.

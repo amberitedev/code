@@ -31,7 +31,7 @@ use contracts::{
 };
 use uuid::Uuid;
 
-use super::{CoreState, content::world, internal};
+use super::{CoreState, internal, world};
 use crate::{
     access::{Caller, Dangerous, Permission, activity},
     backups::{
@@ -39,7 +39,7 @@ use crate::{
         records::{self, Kind, OpKind, OpState, State as BackupRowState},
     },
     servers::ServerError,
-    state::servers::adapters::sqlite::server_rows,
+    servers::server_rows,
 };
 
 impl From<backups::Error> for ApiError {

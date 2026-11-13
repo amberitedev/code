@@ -1185,6 +1185,14 @@ export type Topic = { "type": "instance", id: string, } | { "type": "installs" }
 
 export type ClientMessage = { "type": "subscribe", topic: Topic, } | { "type": "unsubscribe", topic: Topic, };
 
+export type CoreEvent = { "type": "console", "payload": { server: string, line: string, } } | { "type": "power", "payload": { server: string, state: PowerState, uptime: number | null, } } | { "type": "backup", "payload": { server: string, id: string, task: BackupTask, state: BackupTaskState, progress: number, start_time: number | null, finish_time: number | null, } } | { "type": "ended", "payload": { topic: Topic, error: ApiError, } } | { "type": "resync" };
+
+export type PowerState = "running" | "stopped" | "starting" | "stopping" | "crashed";
+
+export type BackupTask = "create" | "restore";
+
+export type BackupTaskState = "ongoing" | "done" | "failed";
+
 export type CoreServer = { id: string, name: string, 
 /**
  * Null until the Core is paired.
@@ -1281,6 +1289,19 @@ loader: string,
  * Null for the newest.
  */
 loader_version: string | null, game_version: string, };
+
+export type SharePush = { 
+/**
+ * Files to send with this version. Files sent earlier stay shared while the server has
+ * them, unless they are in `removed_paths`.
+ */
+file_paths: Array<string>, removed_paths: Array<string>, 
+/**
+ * Restart a running server once the version is out.
+ */
+restart: boolean, };
+
+export type SharedServer = { shared_instance_id: string, version: number | null, restarted: boolean, };
 
 export type ServerSetup = { 
 /**
@@ -1711,6 +1732,8 @@ export const core = {
 	DeleteServer: { method: "DELETE", path: "/servers/{id}", auth: "session", dangerous: true, body: "empty", response: "empty" } as Endpoint<ServerId, null, void, void>,
 	ChangePower: { method: "POST", path: "/servers/{id}/power", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<ServerId, null, PowerChange, void>,
 	InstallLoader: { method: "POST", path: "/servers/{id}/reinstall", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<ServerId, null, LoaderInstall, void>,
+	InstallModpackFile: { method: "POST", path: "/servers/{id}/modpack-file", auth: "session", dangerous: false, body: "stream", response: "empty" } as Endpoint<ServerId, null, Blob, void>,
+	ShareServer: { method: "POST", path: "/servers/{id}/share", auth: "session", dangerous: false, body: "json", response: "json" } as Endpoint<ServerId, null, SharePush, SharedServer>,
 	GetSetup: { method: "GET", path: "/servers/{id}/setup", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<ServerId, null, void, ServerSetup>,
 	SetJavaVersion: { method: "PUT", path: "/servers/{id}/java-version", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<ServerId, null, JavaMajor, void>,
 	GetProperties: { method: "GET", path: "/servers/{id}/properties", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<ServerId, null, void, ServerProperties>,

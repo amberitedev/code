@@ -134,7 +134,7 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
     )
     .await?;
     let access = Arc::new(access::CoreAccess::new(db.clone(), keys));
-    let engine = start_engine(&paths).await?;
+    let engine = start_engine(&paths, config.backend_url.as_deref()).await?;
     let storage = Arc::new(crate::storage::Storage::new(
         db.clone(),
         paths.clone(),
@@ -144,19 +144,21 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
         Arc::clone(&access.owed),
     ));
     storage.start();
-    let servers =
-        Servers::open(paths.clone(), db.clone(), config.local_only()).await?;
+    let servers = Servers::open(
+        paths.clone(),
+        db.clone(),
+        Arc::clone(&engine),
+        config.local_only(),
+    )
+    .await?;
+    let java = (paths.clone(), servers.http().clone());
+    tokio::spawn(async move {
+        crate::installs::java::update_all(&java.0, &java.1).await
+    });
     let backups = crate::backups::Backups::open(
         paths.clone(),
         db.clone(),
         Arc::clone(&servers),
-    )
-    .await?;
-    let content = crate::state::servers::Content::open(
-        paths.clone(),
-        db.clone(),
-        Arc::clone(&servers),
-        Arc::clone(&backups),
     )
     .await?;
     let update = Arc::new(Updater::new(
@@ -179,7 +181,6 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
         engine,
         servers,
         access: Arc::clone(&access),
-        content,
         backups,
         uploads: api::files::Uploads::default(),
         update: Arc::clone(&update),
@@ -189,12 +190,6 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
     });
     tokio::spawn(api::events::watch_power(Arc::clone(&state)));
     let router = api::router(Arc::clone(&state));
-    tokio::spawn(
-        crate::state::servers::commands::apply_pending_on_stop::apply_pending_on_stop(
-            Arc::clone(&state.content),
-            Arc::clone(&state.access.owed),
-        ),
-    );
     match config.backend_url.clone() {
         Some(backend_url) => {
             tokio::spawn(access::sync::run(Arc::new(access::sync::Sync {
@@ -261,8 +256,17 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
     Ok(Exit::Stopped)
 }
 
-/// The engine on `<root>/engine`, whose instances are the servers. Nothing desktop starts.
-pub async fn start_engine(paths: &Paths) -> Result<Arc<Engine>> {
+/// The engine on `<root>/engine`, whose instances are the servers. Nothing desktop starts. Its
+/// share calls go to `backend_url` with the Core's key (`access::sync`).
+pub async fn start_engine(
+    paths: &Paths,
+    backend_url: Option<&str>,
+) -> Result<Arc<Engine>> {
+    engine::install_crypto_provider();
+    let accounts = backend_url
+        .map(|url| engine::AccountEndpoints::new(url, None))
+        .transpose()
+        .map_err(|error| eyre!("{error:#}"))?;
     Engine::new(engine::EngineConfig {
         data_dir: paths.engine(),
         instances_dir: paths.servers(),
@@ -271,7 +275,7 @@ pub async fn start_engine(paths: &Paths) -> Result<Arc<Engine>> {
         max_concurrent_downloads: 10,
         max_concurrent_writes: 10,
         events: engine::EventSink::new(),
-        accounts: None,
+        accounts,
         hooks: None,
     })
     .await
@@ -390,7 +394,7 @@ mod tests {
     async fn the_engine_database_holds_only_engine_tables() {
         let dir = tempfile::tempdir().unwrap();
         let paths = Paths::new(dir.path());
-        let engine = start_engine(&paths).await.unwrap();
+        let engine = start_engine(&paths, None).await.unwrap();
         let tables: Vec<String> = sqlx::query_scalar(
             "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",
         )

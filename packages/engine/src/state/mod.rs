@@ -371,6 +371,14 @@ impl Engine {
         &*self.hooks
     }
 
+    /// The lock an instance's installs and content changes hold, or `None` while one does.
+    pub fn try_lock_instance(
+        &self,
+        instance_id: &str,
+    ) -> Option<tokio::sync::OwnedMutexGuard<()>> {
+        self.instance_locks.try_lock_content(instance_id)
+    }
+
     fn servers_file(&self, metadata: &InstanceMetadata) -> PathBuf {
         self.directories
             .instances_dir()

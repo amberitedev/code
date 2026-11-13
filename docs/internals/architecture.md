@@ -10,8 +10,8 @@ details.
 Some of the design is still landing. Until each slice below merges, its line is true and the text
 that contradicts it is not:
 
-- Until D5 to D7: a Core keeps content, sharing, server installs and files in `apps/core`, keeps
-  `copal.db`, and does not mount `engine::routes`.
+- Until D6 and D7: a Core keeps server installs and files in `apps/core`. Its servers do not yet
+  follow an App instance's share through the engine.
 - Until D10: `packages/bedrock` and `shared-rust.md` exist.
 
 ## Rules
@@ -197,6 +197,12 @@ user everything. A Core's `CoreAccess` ([`access/mod.rs`](../../apps/core/src/ac
 maps the session to an account and checks owner, Editor or Viewer: no role is 404, a role too low
 is 403. Nothing in a request can change which `Access` runs. Sessions, tickets and revalidation
 are Core concepts and stay on `CoreAccess`.
+
+A Core does not mount `engine::routes()`. It mounts the routes
+[`engine_mount.rs`](../../apps/core/src/api/engine_mount.rs) lists: one whose body or answer is a
+host path, or that reaches the whole engine or runs code on the host (the edit-instance route's
+launch hooks and Java path), would hand a server's members the Core's machine. Each change it
+mounts holds the server first, so content never changes under a running server or an install.
 
 ## Events, and resync when one is lost
 

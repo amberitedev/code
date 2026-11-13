@@ -146,7 +146,7 @@ mod platform {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{db, state::servers::adapters::sqlite::server_rows};
+    use crate::{db, servers::server_rows};
 
     #[test]
     fn the_heap_starts_small_and_custom_flags_replace_the_tuned_ones() {

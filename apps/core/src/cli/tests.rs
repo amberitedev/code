@@ -125,7 +125,7 @@ async fn core() -> (tempfile::TempDir, Arc<CoreState>, Client) {
     let dir = tempfile::tempdir().unwrap();
     let paths = Paths::new(dir.path());
     folders::create(&paths, None).unwrap();
-    let engine = crate::daemon::start_engine(&paths).await.unwrap();
+    let engine = crate::daemon::start_engine(&paths, None).await.unwrap();
     let db = db::memory().await;
     let core_id = db::core_id(&db).await.unwrap();
     let keys = crate::access::keys::load(
@@ -138,6 +138,7 @@ async fn core() -> (tempfile::TempDir, Arc<CoreState>, Client) {
     let servers = Servers::open(
         paths.clone(),
         db.clone(),
+        Arc::clone(&engine),
         Some(std::net::Ipv4Addr::LOCALHOST.into()),
     )
     .await
@@ -149,19 +150,10 @@ async fn core() -> (tempfile::TempDir, Arc<CoreState>, Client) {
     )
     .await
     .unwrap();
-    let content = crate::state::servers::Content::open(
-        paths.clone(),
-        db.clone(),
-        Arc::clone(&servers),
-        Arc::clone(&backups),
-    )
-    .await
-    .unwrap();
     let state = Arc::new(CoreState {
         servers,
         engine,
         access: Arc::new(CoreAccess::new(db.clone(), keys)),
-        content,
         backups,
         uploads: api::files::Uploads::default(),
         update: Arc::new(Updater::new(
@@ -412,7 +404,7 @@ impl UnwrapServers for Result<Cli, clap::Error> {
 }
 
 #[tokio::test]
-async fn failed_backups_and_installs_say_why() {
+async fn failed_backups_say_why() {
     let (_dir, state, client) = core().await;
     let server = state.servers.create("Survival").await.unwrap().id;
     let backup = uuid::Uuid::new_v4().to_string();
@@ -447,37 +439,5 @@ async fn failed_backups_and_installs_say_why() {
             .contains("create failed: Core may not read world/level.dat"),
         "{}",
         list.text
-    );
-
-    sqlx::query(
-        "INSERT INTO server_content_sets (id, server_id, name, source_kind, status, \
-         game_version, loader, created, modified, version_number, sha1, error) \
-         VALUES ('set', ?, 'Pack', 'imported_modpack', 'available', '26.3', 'fabric', 0, 0, \
-         '1', 'abc', 'the pack is for Minecraft 26.2')",
-    )
-    .bind(&server)
-    .execute(&state.db)
-    .await
-    .unwrap();
-    sqlx::query(
-        "INSERT INTO server_links (server_id, link_kind) VALUES (?, 'imported_modpack')",
-    )
-    .bind(&server)
-    .execute(&state.db)
-    .await
-    .unwrap();
-    let info = super::servers::run(
-        &client,
-        ServersCommand::Info {
-            server: "survival".into(),
-        },
-    )
-    .await
-    .unwrap();
-    assert!(
-        info.text
-            .contains("last install failed: the pack is for Minecraft 26.2"),
-        "{}",
-        info.text
     );
 }

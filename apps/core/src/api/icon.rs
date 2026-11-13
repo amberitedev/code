@@ -44,7 +44,7 @@ use super::{
 use crate::{
     access::{Caller, Permission, activity},
     servers::ServerError,
-    state::servers::adapters::sqlite::server_rows,
+    servers::server_rows,
 };
 
 const GAME_ICON: &str = "server-icon.png";

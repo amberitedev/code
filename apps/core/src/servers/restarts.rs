@@ -278,7 +278,7 @@ async fn countdown(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{db, state::servers::adapters::sqlite::server_rows};
+    use crate::{db, servers::server_rows};
 
     fn utc(text: &str) -> DateTime<chrono::Utc> {
         text.parse().unwrap()
@@ -437,13 +437,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let paths = crate::daemon::paths::Paths::new(dir.path());
         crate::daemon::folders::create(&paths, None).unwrap();
-        let servers = Servers::open(
-            paths,
-            db::memory().await,
-            Some(std::net::Ipv4Addr::LOCALHOST.into()),
-        )
-        .await
-        .unwrap();
+        let servers = Servers::open_for_test(paths, db::memory().await).await;
         let id = servers.create("A").await.unwrap().id;
         let lock = servers.pretend_running(&id);
         (dir, servers, id, lock)

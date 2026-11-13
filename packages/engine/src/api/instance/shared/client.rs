@@ -190,14 +190,18 @@ fn share(id: &str) -> SharedInstanceId {
     SharedInstanceId { id: id.to_owned() }
 }
 
+/// A server engine calls with its host's Core key, which owns the share of server
+/// `instance_id`.
 pub(super) async fn create_remote_instance(
     name: String,
+    instance_id: &str,
     state: &Engine,
 ) -> crate::Result<String> {
     let backend = share_backend(&state.sessions)?;
     let body = Json(NewSharedInstance {
         name,
-        server_id: None,
+        server_id: (state.side == contracts::Side::Server)
+            .then(|| instance_id.to_owned()),
     });
     let created = send::<CreateSharedInstance>(state, &backend, &(), &(), body)
         .await?

@@ -15,8 +15,7 @@ use super::{CoreState, internal};
 use crate::{
     access::{Caller, Permission, activity},
     installs::java,
-    servers::ServerError,
-    state::servers::adapters::sqlite::server_rows,
+    servers::{ServerError, platform, server_rows},
 };
 
 /// Java majors Core installs.
@@ -43,12 +42,15 @@ async fn set_major(
         .ok_or_else(|| ServerError::NotFound(id.into()))?;
     // The major the version needs is the default, not a choice: stored, it would pin the server
     // to it after a game version change.
-    let needed = match &server.game_version {
-        Some(game_version) => Some(
+    let platform = platform::platform(&state.engine, id)
+        .await
+        .map_err(engine::routes::api_error)?;
+    let needed = match platform {
+        Some(platform) => Some(
             java::java_requirement(
-                &state.content.http,
+                state.servers.http(),
                 state.servers.paths().root(),
-                game_version,
+                &platform.game_version,
             )
             .await,
         ),

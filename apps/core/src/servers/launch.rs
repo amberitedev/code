@@ -11,6 +11,7 @@ use color_eyre::eyre::Result;
 pub use engine::sandbox::property_key;
 
 use super::shim::{Launch, PROTOCOL};
+use super::{platform::Platform, server_rows::ServerRow};
 use crate::{
     daemon::{folders, paths::Paths},
     installs::{
@@ -20,7 +21,6 @@ use crate::{
             version_info::merged_version_id,
         },
     },
-    state::servers::adapters::sqlite::server_rows::ServerRow,
 };
 
 /// Why a server cannot start yet.
@@ -31,12 +31,8 @@ pub enum NotReady {
 }
 
 /// What is installed on a server, or why nothing is.
-fn installed(server: &ServerRow) -> Result<(ModLoader, &str), NotReady> {
-    let loader = server.loader.as_deref().and_then(ModLoader::parse);
-    match (loader, server.game_version.as_deref()) {
-        (Some(loader), Some(game_version)) => Ok((loader, game_version)),
-        _ => Err(NotReady::NotInstalled),
-    }
+fn installed(platform: Option<&Platform>) -> Result<&Platform, NotReady> {
+    platform.ok_or(NotReady::NotInstalled)
 }
 
 /// Everything the shim needs to start `server`, and the lease on its Java (see `java::Lease`).
@@ -45,10 +41,11 @@ pub async fn prepare(
     paths: &Paths,
     http: &reqwest::Client,
     server: &ServerRow,
+    platform: Option<&Platform>,
     run_id: &str,
     local_only: Option<IpAddr>,
 ) -> Result<(Launch, Option<java::Lease>)> {
-    installed(server)?;
+    let installed = installed(platform)?;
 
     let dir = paths.server(&server.id);
     folders::create_server_folder(&dir)?;
@@ -60,13 +57,14 @@ pub async fn prepare(
     )?;
     set_address(&dir, server.port, local_only)?;
 
-    let (java, lease) = java_for(paths, http, server).await?;
+    let (java, lease) =
+        java_for(paths, http, server, Some(&installed.game_version)).await?;
     let memory = server.memory_mb;
     let launch = Launch {
         v: PROTOCOL,
         run_id: run_id.to_owned(),
         java,
-        args: args(paths, server)?,
+        args: args(paths, server, installed)?,
         dir,
         memory_limit_mb: memory_limit(memory),
     };
@@ -74,8 +72,13 @@ pub async fn prepare(
 }
 
 /// The arguments after `java`: memory, the temporary folder, and what the loader starts from.
-pub fn args(paths: &Paths, server: &ServerRow) -> Result<Vec<String>> {
-    let (loader, game_version) = installed(server)?;
+pub fn args(
+    paths: &Paths,
+    server: &ServerRow,
+    platform: &Platform,
+) -> Result<Vec<String>> {
+    let (loader, game_version) =
+        (platform.loader, platform.game_version.as_str());
     let dir = paths.server(&server.id);
     let memory = server.memory_mb;
     // The heap and tuned flags first: `memory::use_flags` replaces those in place.
@@ -86,7 +89,7 @@ pub fn args(paths: &Paths, server: &ServerRow) -> Result<Vec<String>> {
         format!("-Duser.home={}", dir.display()),
     ]);
     let dirs = SharedDirs::new(paths.root());
-    let loader_version = server.loader_version.as_deref().unwrap_or_default();
+    let loader_version = platform.loader_version.as_deref().unwrap_or_default();
     match loader {
         ModLoader::Vanilla | ModLoader::Fabric | ModLoader::Quilt => {
             let version_id =
@@ -127,31 +130,33 @@ pub fn args(paths: &Paths, server: &ServerRow) -> Result<Vec<String>> {
     Ok(args)
 }
 
-/// The Java major `server` runs on: the one the owner chose, or the one its Minecraft version
-/// needs.
+/// The Java major `server` runs `game_version` on: the one the owner chose, or the one the
+/// Minecraft version needs.
 pub async fn java_major(
     paths: &Paths,
     http: &reqwest::Client,
     server: &ServerRow,
+    game_version: Option<&str>,
 ) -> Result<u32> {
     if let Some(major) = server.java_version {
         return Ok(u32::try_from(major)?);
     }
-    let (_, game_version) = installed(server)?;
+    let game_version = game_version.ok_or(NotReady::NotInstalled)?;
     Ok(java::java_requirement(http, paths.root(), game_version).await)
 }
 
-/// The Java `server` runs with: its custom path, or the managed Java of its major, downloaded
-/// when missing.
+/// The Java `server` runs `game_version` with: its custom path, or the managed Java of its
+/// major, downloaded when missing.
 pub async fn java_for(
     paths: &Paths,
     http: &reqwest::Client,
     server: &ServerRow,
+    game_version: Option<&str>,
 ) -> Result<(PathBuf, Option<java::Lease>)> {
     if let Some(path) = &server.java_path {
         return Ok((PathBuf::from(path), None));
     }
-    let major = java_major(paths, http, server).await?;
+    let major = java_major(paths, http, server, game_version).await?;
     let (binary, lease) = java::ensure(paths, http, major).await?;
     Ok((binary, Some(lease)))
 }

@@ -23,36 +23,8 @@ use crate::{
     daemon::{folders, paths::Paths},
     db,
     servers::Servers,
-    state::servers::{
-        ContentSourceKind, TrackedFile, adapters::sqlite::content_rows,
-    },
     update::Updater,
 };
-
-/// Record `path` as a file an uploaded pack placed, with the hash `as placed` and its Modrinth
-/// project and version, if any.
-async fn track(
-    db: &sqlx::SqlitePool,
-    server: &str,
-    path: &str,
-    project: Option<(&str, &str)>,
-) {
-    content_rows::upsert_tracked_file(
-        db,
-        server,
-        &TrackedFile {
-            relative_path: path.into(),
-            source_kind: ContentSourceKind::ImportedModpack,
-            sha1: "as placed".into(),
-            size: 0,
-            project_id: project.map(|(project, _)| project.into()),
-            version_id: project.map(|(_, version)| version.into()),
-            pending: None,
-        },
-    )
-    .await
-    .unwrap();
-}
 
 struct Core {
     _dir: tempfile::TempDir,
@@ -68,7 +40,7 @@ async fn core() -> Core {
     let dir = tempfile::tempdir().unwrap();
     let paths = Paths::new(dir.path());
     folders::create(&paths, None).unwrap();
-    let engine = crate::daemon::start_engine(&paths).await.unwrap();
+    let engine = crate::daemon::start_engine(&paths, None).await.unwrap();
     let db = db::memory().await;
     let core_id = db::core_id(&db).await.unwrap();
     sqlx::query("UPDATE core SET owner_user_id = 'owner'")
@@ -78,6 +50,7 @@ async fn core() -> Core {
     let servers = Servers::open(
         paths.clone(),
         db.clone(),
+        Arc::clone(&engine),
         Some(std::net::Ipv4Addr::LOCALHOST.into()),
     )
     .await
@@ -108,14 +81,6 @@ async fn core() -> Core {
     )
     .await
     .unwrap();
-    let content = crate::state::servers::Content::open(
-        servers.paths().clone(),
-        db.clone(),
-        Arc::clone(&servers),
-        Arc::clone(&backups),
-    )
-    .await
-    .unwrap();
     let storage = Arc::new(crate::storage::Storage::new(
         db.clone(),
         paths.clone(),
@@ -136,7 +101,6 @@ async fn core() -> Core {
         access: Arc::new(CoreAccess::new(db.clone(), keys)),
         network: Arc::new(crate::network::forward::Network::off(db.clone())),
         db,
-        content,
         backups,
         uploads: super::files::Uploads::default(),
         update,
@@ -677,50 +641,61 @@ async fn content_and_files_follow_the_role_table() {
     let server = core.server.clone();
     let editor = core.sign_in("editor").await;
     let viewer = core.sign_in("viewer").await;
+    sqlx::query("INSERT INTO access (server_id, user_id, role, added_at) VALUES (?, 'stranger', 'viewer', 0)")
+        .bind(&server)
+        .execute(&core.state.db)
+        .await
+        .unwrap();
+    let stranger = core.sign_in("stranger").await;
+    sqlx::query("DELETE FROM access WHERE user_id = 'stranger'")
+        .execute(&core.state.db)
+        .await
+        .unwrap();
     let fs = format!("/servers/{server}/modrinth/v0/fs");
-    let world = format!("/v1/servers/{server}/worlds/{server}");
+    let instance = format!("/instances/{server}");
 
     // Viewers see the content list and what the owner edited, nothing else.
-    let (status, addons) = core
-        .call(
-            Method::GET,
-            &format!("{world}/addons"),
-            Some(&viewer),
-            None,
-            None,
-        )
-        .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(addons["addons"], json!([]));
+    for uri in [
+        format!("{instance}/content"),
+        format!("{instance}/content/edited"),
+    ] {
+        let (status, list) = core
+            .call(Method::GET, &uri, Some(&viewer), None, None)
+            .await;
+        assert_eq!((status, list), (StatusCode::OK, json!([])), "{uri}");
+        let (status, _) = core
+            .call(Method::GET, &uri, Some(&stranger), None, None)
+            .await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "no role reads as no server");
+    }
     for (method, uri) in [
         (Method::GET, format!("{fs}/list?path=/&page=1&page_size=10")),
         (Method::GET, format!("/servers/{server}/properties")),
-        (Method::POST, format!("{world}/content/repair")),
+        (Method::POST, format!("{instance}/content/repair")),
+        (Method::POST, format!("{instance}/modpack/unlink")),
+        (Method::GET, format!("{instance}/shared/publish-preview")),
     ] {
         let (status, _) =
             core.call(method, &uri, Some(&viewer), None, None).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "{uri}");
     }
-    let (status, _) = core
-        .call(
-            Method::GET,
-            &format!("/servers/{server}/content/edited"),
-            Some(&viewer),
-            None,
-            None,
-        )
-        .await;
-    assert_eq!(status, StatusCode::OK);
-    let (status, _) = core
-        .call(
-            Method::GET,
-            &format!("/v1/servers/{server}/worlds/another/addons"),
-            Some(&viewer),
-            None,
-            None,
-        )
-        .await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "a server has one world");
+    // Engine routes a Core does not serve: their bodies or answers carry host paths, or they
+    // reach past the server.
+    for (method, uri) in [
+        (Method::PATCH, instance.clone()),
+        (Method::GET, "/instances".to_owned()),
+        (Method::POST, format!("{instance}/install")),
+    ] {
+        let (status, _) =
+            core.call(method, &uri, Some(&editor), None, None).await;
+        assert!(
+            matches!(
+                status,
+                StatusCode::NOT_FOUND | StatusCode::METHOD_NOT_ALLOWED
+            ),
+            "{uri}: {status}"
+        );
+    }
 
     // Editors use the files, inside the server folder only.
     let create = format!("{fs}/create?path=/config/a.toml&type=file");
@@ -751,7 +726,7 @@ async fn content_and_files_follow_the_role_table() {
     let (status, _) = raw(
         &core,
         Method::GET,
-        &format!("{fs}/download?path=/../../db/copal.db"),
+        &format!("{fs}/download?path=/../../db/core.db"),
         &editor,
         "",
     )
@@ -791,68 +766,65 @@ async fn content_and_files_follow_the_role_table() {
         .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(read["properties"]["motd"], "Edited");
-
-    // A file the pack placed and the owner changed is listed as edited.
-    track(&core.state.db, &server, "config/a.toml", None).await;
-    let (_, edited) = core
-        .call(
-            Method::GET,
-            &format!("/servers/{server}/content/edited"),
-            Some(&viewer),
-            None,
-            None,
-        )
-        .await;
-    assert_eq!(
-        edited,
-        json!({ "files": [{ "path": "config/a.toml", "deleted": false, "pending": null }] })
-    );
 }
 
 #[tokio::test]
-async fn an_upload_over_a_pack_file_counts_as_the_owners_edit() {
+async fn content_changes_wait_for_a_stopped_server_and_a_pack_update_backs_up_first()
+ {
     let core = core().await;
     let server = core.server.clone();
     let editor = core.sign_in("editor").await;
-    track(&core.state.db, &server, "mods/a.jar", Some(("P", "V"))).await;
-    let boundary = "copal-test";
-    let body = format!(
-        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.jar\"\r\n\r\npatched\r\n--{boundary}--\r\n"
-    );
-    let request = Request::builder()
-        .method(Method::POST)
-        .uri(format!(
-            "/servers/{server}/v1/worlds/{server}/content/upload-addon-file"
-        ))
-        .header("authorization", format!("Bearer {editor}"))
-        .header(
-            "content-type",
-            format!("multipart/form-data; boundary={boundary}"),
-        )
-        .body(Body::from(body))
-        .unwrap();
-    let (status, _) = core.send(request).await;
-    assert_eq!(status, StatusCode::NO_CONTENT);
+    let viewer = core.sign_in("viewer").await;
+    let instance = format!("/instances/{server}");
+    let unlink = format!("{instance}/modpack/unlink");
 
-    let (row, _) =
-        content_rows::get_tracked_file(&core.state.db, &server, "mods/a.jar")
-            .await
+    // A running server's content stays as it is.
+    let shim =
+        crate::servers::shim::try_lock(core.state.servers.paths(), &server)
             .unwrap()
             .unwrap();
+    let (status, _) = core
+        .call(Method::POST, &unlink, Some(&viewer), None, None)
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "the role is checked first");
+    let (_, error) = core
+        .call(Method::POST, &unlink, Some(&editor), None, None)
+        .await;
+    assert_eq!(error["error"], "already_running");
+    drop(shim);
+
+    let (status, _) = core
+        .call(Method::POST, &unlink, Some(&editor), None, None)
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
     assert_eq!(
-        (row.source_kind, row.sha1.as_str()),
-        (ContentSourceKind::ImportedModpack, "as placed")
+        core.count(
+            "SELECT COUNT(*) FROM activity WHERE action LIKE '%content_changed%'"
+        )
+        .await,
+        1
     );
-    let (_, edited) = core
+
+    // The backup is made before the engine sees the update, which it refuses: the server
+    // follows no pack.
+    let world = core.state.servers.paths().server(&server).join("world");
+    std::fs::create_dir_all(&world).unwrap();
+    std::fs::write(world.join("level.dat"), "level").unwrap();
+    let (status, _) = core
         .call(
-            Method::GET,
-            &format!("/servers/{server}/content/edited"),
+            Method::POST,
+            &format!("{instance}/modpack/update"),
             Some(&editor),
             None,
-            None,
+            Some(json!({ "version_id": "v" })),
         )
         .await;
-    assert_eq!(edited["files"][0]["path"], "mods/a.jar");
+    assert!(!status.is_success());
+    assert_eq!(
+        core.count("SELECT COUNT(*) FROM backups WHERE kind = 'pre_update'")
+            .await,
+        1
+    );
 }
 
 #[tokio::test]
@@ -1364,156 +1336,12 @@ async fn slot_options_rotate_scheduled_backups_as_the_owners_dangerous_action()
 }
 
 #[tokio::test]
-async fn a_pack_update_takes_an_empty_body_sent_as_json() {
-    let core = core().await;
-    let server = core.server.clone();
-    let editor = core.sign_in("editor").await;
-    let uri =
-        format!("/v1/servers/{server}/worlds/{server}/content/modpack/update");
-    // The App's client sends `Content-Type: application/json` with no body. The server follows
-    // no pack, so getting past the body means 404.
-    let send = |body: &'static str| {
-        Request::builder()
-            .method(Method::POST)
-            .uri(&uri)
-            .header("authorization", format!("Bearer {editor}"))
-            .header("content-type", "application/json")
-            .body(Body::from(body))
-            .unwrap()
-    };
-    let (status, _) = core.send(send("")).await;
-    assert_eq!(status, StatusCode::NOT_FOUND);
-    let (status, _) = core.send(send(r#"{"force":true}"#)).await;
-    assert_eq!(status, StatusCode::NOT_FOUND);
-    let (status, _) = core.send(send("{")).await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
-}
-
-#[tokio::test]
-async fn sides_decide_what_the_server_runs_and_what_players_get() {
-    let core = core().await;
-    let server = core.server.clone();
-    let editor = core.sign_in("editor").await;
-    sqlx::query(
-        "UPDATE servers SET loader = 'fabric', game_version = '1.21.1' WHERE id = ?",
-    )
-    .bind(&server)
-    .execute(&core.state.db)
-    .await
-    .unwrap();
-    let mods = core.state.servers.paths().server(&server).join("mods");
-    std::fs::create_dir_all(&mods).unwrap();
-    for name in ["client.jar", "server.jar"] {
-        std::fs::write(mods.join(name), name).unwrap();
-    }
-    let addons = format!("/v1/servers/{server}/worlds/{server}/addons");
-    let set = |route: &str, filename: &str, enabled: bool| {
-        let uri = format!("{addons}/{route}");
-        let body =
-            json!({ "kind": "mod", "filename": filename, "enabled": enabled });
-        let (core, editor) = (&core, &editor);
-        async move {
-            core.call(Method::POST, &uri, Some(editor), None, Some(body))
-                .await
-        }
-    };
-    assert_eq!(
-        set("set-enabled-server", "client.jar", false).await.0,
-        StatusCode::NO_CONTENT
-    );
-    assert_eq!(
-        set("set-enabled-player", "server.jar", false).await.0,
-        StatusCode::NO_CONTENT
-    );
-    // Off for the server, the file no longer loads; off for players, it still does.
-    assert!(mods.join("client.jar.disabled").exists());
-    assert!(mods.join("server.jar").exists());
-
-    let (_, listed) = core
-        .call(Method::GET, &addons, Some(&editor), None, None)
-        .await;
-    let sides = |filename: &str| {
-        let addon = listed["addons"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|addon| addon["filename"] == filename)
-            .unwrap();
-        (
-            addon["disabled"].as_bool().unwrap(),
-            addon["disabled_server"].as_bool().unwrap(),
-            addon["disabled_player"].as_bool().unwrap(),
-        )
-    };
-    assert_eq!(sides("client.jar"), (false, true, false));
-    assert_eq!(sides("server.jar"), (false, false, true));
-
-    // Disabling it outright turns it off for both sides.
-    let (status, _) = core
-        .call(
-            Method::POST,
-            &format!("{addons}/disable"),
-            Some(&editor),
-            None,
-            Some(json!({ "kind": "mod", "filename": "client.jar" })),
-        )
-        .await;
-    assert_eq!(status, StatusCode::NO_CONTENT);
-    let (_, listed) = core
-        .call(Method::GET, &addons, Some(&editor), None, None)
-        .await;
-    let client = listed["addons"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|addon| addon["filename"] == "client.jar")
-        .unwrap();
-    assert_eq!(client["disabled"], true);
-    assert_eq!(client["disabled_server"], false);
-
-    // A server that follows an instance has neither sides nor a share of its own.
-    sqlx::query(
-        "INSERT INTO server_content_sets (id, server_id, name, source_kind, status, game_version, \
-         loader, created, modified, version_number, sha1) VALUES ('set', ?, 'I', \
-         'shared_instance', 'available', '1.21.1', 'fabric', 0, 0, '1', 'x')",
-    )
-    .bind(&server)
-    .execute(&core.state.db)
-    .await
-    .unwrap();
-    sqlx::query(
-        "INSERT INTO server_links (server_id, link_kind, shared_instance_id, \
-         shared_instance_version, instance_id, instance_name) \
-         VALUES (?, 'shared_instance', 's', 1, 'i', 'I')",
-    )
-    .bind(&server)
-    .execute(&core.state.db)
-    .await
-    .unwrap();
-    assert_eq!(
-        set("set-enabled-player", "server.jar", true).await.0,
-        StatusCode::CONFLICT
-    );
-    let (status, _) = core
-        .call(
-            Method::POST,
-            &format!("/v1/servers/{server}/worlds/{server}/content/share"),
-            Some(&editor),
-            None,
-            Some(json!({ "config_paths": [] })),
-        )
-        .await;
-    assert_eq!(status, StatusCode::CONFLICT);
-}
-
-#[tokio::test]
 async fn only_the_owner_reads_and_changes_a_servers_share_history() {
     let core = core().await;
     let server = core.server.clone();
     let owner = core.sign_in("owner").await;
     let editor = core.sign_in("editor").await;
-    let history =
-        format!("/v1/servers/{server}/worlds/{server}/content/share/history");
+    let history = format!("/instances/{server}/shared/history");
 
     for (method, uri) in [
         (Method::GET, history.clone()),
@@ -1538,162 +1366,7 @@ async fn only_the_owner_reads_and_changes_a_servers_share_history() {
             None,
         )
         .await;
-    assert_eq!(status, StatusCode::NOT_FOUND);
-}
-
-#[tokio::test]
-async fn a_client_only_pack_file_is_placed_for_the_server_and_taken_back() {
-    use std::io::Write;
-
-    use crate::{
-        installs::shared::SharedDirs,
-        state::servers::{
-            ContentSet, ContentSetStatus, InstanceLink, Pack, SkippedFile,
-        },
-    };
-
-    let core = core().await;
-    let server = core.server.clone();
-    let editor = core.sign_in("editor").await;
-    sqlx::query(
-        "UPDATE servers SET loader = 'fabric', game_version = '1.21.1' WHERE id = ?",
-    )
-    .bind(&server)
-    .execute(&core.state.db)
-    .await
-    .unwrap();
-    // A pack whose only file is a jar of `overrides/` that says it runs on clients only.
-    let zip = |files: &[(&str, &[u8])]| {
-        let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
-        for (name, body) in files {
-            zip.start_file(*name, zip::write::SimpleFileOptions::default())
-                .unwrap();
-            zip.write_all(body).unwrap();
-        }
-        zip.finish().unwrap().into_inner()
-    };
-    let jar = zip(&[(
-        "fabric.mod.json",
-        br#"{"schemaVersion":1,"id":"menu","version":"1","environment":"client"}"#,
-    )]);
-    let pack = zip(&[
-        (
-            "modrinth.index.json",
-            br#"{"formatVersion":1,"game":"minecraft","versionId":"1","name":"Pack",
-            "dependencies":{"minecraft":"1.21.1","fabric-loader":"0.16.0"},"files":[]}"#,
-        ),
-        ("overrides/mods/menu.jar", &jar),
-    ]);
-    let dirs = SharedDirs::new(core.state.servers.paths().root());
-    std::fs::create_dir_all(dirs.pack("x").parent().unwrap()).unwrap();
-    std::fs::write(dirs.pack("pack"), &pack).unwrap();
-    content_rows::set_pack(
-        &core.state.db,
-        &server,
-        &Pack {
-            set: ContentSet {
-                id: "set".into(),
-                instance_id: server.clone(),
-                name: "Pack".into(),
-                source_kind: ContentSourceKind::ImportedModpack,
-                status: ContentSetStatus::Available,
-                game_version: "1.21.1".into(),
-                protocol_version: None,
-                loader: bedrock::state::ModLoader::Fabric,
-                loader_version: None,
-                created: chrono::Utc::now(),
-                modified: chrono::Utc::now(),
-            },
-            link: InstanceLink::ImportedModpack {
-                project_id: None,
-                version_id: None,
-                name: None,
-                version_number: None,
-                filename: None,
-            },
-            share: None,
-            version_number: "1".into(),
-            summary: None,
-            sha1: "pack".into(),
-            error: None,
-        },
-    )
-    .await
-    .unwrap();
-    let jar_sha1 = hex::encode(sha1::Digest::finalize(
-        <sha1::Sha1 as sha1::Digest>::new_with_prefix(&jar),
-    ));
-    content_rows::set_skipped_files(
-        &core.state.db,
-        &server,
-        &[SkippedFile {
-            relative_path: "mods/menu.jar".into(),
-            sha1: jar_sha1,
-            size: jar.len() as u64,
-            project_id: None,
-            version_id: None,
-        }],
-    )
-    .await
-    .unwrap();
-
-    let addons = format!("/v1/servers/{server}/worlds/{server}/addons");
-    let set_server = |enabled: bool| {
-        let uri = format!("{addons}/set-enabled-server");
-        let body = json!({ "kind": "mod", "filename": "menu.jar", "enabled": enabled });
-        let (core, editor) = (&core, &editor);
-        async move {
-            core.call(Method::POST, &uri, Some(editor), None, Some(body))
-                .await
-                .0
-        }
-    };
-    let menu = || async {
-        let (_, listed) = core
-            .call(Method::GET, &addons, Some(&editor), None, None)
-            .await;
-        listed["addons"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|addon| addon["filename"] == "menu.jar")
-            .cloned()
-            .unwrap()
-    };
-    let on_disk = core
-        .state
-        .servers
-        .paths()
-        .server(&server)
-        .join("mods/menu.jar");
-    assert_eq!(menu().await["installed"], false);
-
-    // On for the server: Core places it from the pack and records the override.
-    assert_eq!(set_server(true).await, StatusCode::NO_CONTENT);
-    assert_eq!(std::fs::read(&on_disk).unwrap(), jar);
-    let listed = menu().await;
-    assert_eq!(listed.get("installed"), None);
-    assert_eq!(listed["disabled_server"], false);
-    assert_eq!(listed["from_modpack"], true);
-    assert_eq!(
-        content_rows::get_server_overrides(&core.state.db, &server)
-            .await
-            .unwrap()
-            .paths,
-        std::collections::HashSet::from(["mods/menu.jar".to_owned()])
-    );
-
-    // Off again: the file goes and it is client only once more.
-    assert_eq!(set_server(false).await, StatusCode::NO_CONTENT);
-    assert!(!on_disk.exists());
-    assert_eq!(menu().await["installed"], false);
-    assert!(
-        content_rows::get_server_overrides(&core.state.db, &server)
-            .await
-            .unwrap()
-            .paths
-            .is_empty()
-    );
+    assert!(!status.is_success(), "a server not shared has no version 1");
 }
 
 #[tokio::test]
@@ -1741,48 +1414,6 @@ async fn the_owner_changes_storage_and_the_store_is_forwarded_to() {
 }
 
 #[tokio::test]
-async fn a_failed_install_tells_the_app_why() {
-    use super::{content::Installing, events::CoreEvent};
-    use crate::state::servers::InstallProgressKey;
-    let core = core().await;
-    let content = &core.state.content;
-    let mut events = content.events.subscribe();
-    content.spawn(
-        core.state.servers.hold(&core.server).unwrap(),
-        content.busy(&core.server).unwrap(),
-        Installing::Modpack,
-        |_, _, progress| async move {
-            let key = InstallProgressKey::LocalModpack {
-                filename: "pack".into(),
-            };
-            progress.set("files", &key, 0.5);
-            Err(crate::state::servers::Error::Invalid("too large".into()))
-        },
-    );
-    // The App reads an install's end from its items: a percent, then the error.
-    let mut seen = Vec::new();
-    while let Ok(event) = events.recv().await {
-        match event {
-            CoreEvent::InstallProgress { items, .. } => seen.push(
-                items
-                    .into_iter()
-                    .map(|item| (item.progress, item.error))
-                    .collect::<Vec<_>>(),
-            ),
-            CoreEvent::InstallResult { .. } => break,
-            _ => {}
-        }
-    }
-    assert_eq!(
-        seen,
-        [
-            vec![(Some(50.0), None)],
-            vec![(Some(50.0), Some("too large".to_owned()))],
-        ]
-    );
-}
-
-#[tokio::test]
 async fn editors_set_the_servers_name_and_update_channel() {
     let core = core().await;
     let server = core.server.clone();
@@ -1826,73 +1457,6 @@ async fn editors_set_the_servers_name_and_update_channel() {
         .await;
     assert_eq!(after["name"], "Survival");
     assert_eq!(channel(&after), "beta", "a rename keeps the channel");
-}
-
-#[tokio::test]
-async fn a_jar_modrinth_does_not_know_shows_its_own_name_and_logo() {
-    use std::io::Write;
-
-    let core = core().await;
-    let server = core.server.clone();
-    let viewer = core.sign_in("viewer").await;
-    sqlx::query("UPDATE servers SET loader = 'fabric', game_version = '1.21.1' WHERE id = ?")
-        .bind(&server)
-        .execute(&core.state.db)
-        .await
-        .unwrap();
-    let mut jar = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
-    let options = zip::write::SimpleFileOptions::default();
-    jar.start_file("fabric.mod.json", options).unwrap();
-    jar.write_all(
-        br#"{"id":"x","name":"Mystery Mod","version":"1.0","icon":"logo.png"}"#,
-    )
-    .unwrap();
-    jar.start_file("logo.png", options).unwrap();
-    jar.write_all(b"not really a png").unwrap();
-    let mods = core.state.servers.paths().server(&server).join("mods");
-    std::fs::create_dir_all(&mods).unwrap();
-    std::fs::write(
-        mods.join("mystery.jar"),
-        jar.finish().unwrap().into_inner(),
-    )
-    .unwrap();
-
-    let (status, list) = core
-        .call(
-            Method::GET,
-            &format!("/v1/servers/{server}/worlds/{server}/addons"),
-            Some(&viewer),
-            None,
-            None,
-        )
-        .await;
-    assert_eq!(status, StatusCode::OK);
-    let manifest = &list["addons"][0]["manifest"];
-    assert_eq!(manifest["name"], "Mystery Mod");
-    assert_eq!(manifest["platform"], "fabric");
-    assert_eq!(manifest["environment"], "client_and_server");
-    assert_eq!(manifest["icon_embedded"], true);
-
-    let icon = |directory: &str| {
-        Request::builder()
-            .uri(format!(
-                "/servers/{server}/v1/worlds/{server}/content/embedded-icon?parent_directory={directory}&filename=mystery.jar"
-            ))
-            .header("authorization", format!("Bearer {viewer}"))
-            .body(Body::empty())
-            .unwrap()
-    };
-    let response = core.router.clone().oneshot(icon("mods")).await.unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(response.headers()["content-type"], "image/png");
-    let bytes = response.into_body().collect().await.unwrap().to_bytes();
-    assert_eq!(&bytes[..], b"not really a png");
-    let (status, _) = core.send(icon("plugins")).await;
-    assert_eq!(
-        status,
-        StatusCode::NOT_FOUND,
-        "the file is a mod, not a plugin"
-    );
 }
 
 #[tokio::test]
@@ -2037,11 +1601,17 @@ async fn a_server_exports_as_a_pack_once_per_link() {
     let server = core.server.clone();
     let editor = core.sign_in("editor").await;
     let viewer = core.sign_in("viewer").await;
-    sqlx::query("UPDATE servers SET loader = 'fabric', loader_version = '0.16.0', game_version = '1.21.1' WHERE id = ?")
-        .bind(&server)
-        .execute(&core.state.db)
-        .await
-        .unwrap();
+    crate::servers::platform::set(
+        &core.state.engine,
+        &server,
+        &crate::servers::platform::Platform {
+            loader: crate::installs::ModLoader::Fabric,
+            game_version: "1.21.1".into(),
+            loader_version: Some("0.16.0".into()),
+        },
+    )
+    .await
+    .unwrap();
     let config = core.state.servers.paths().server(&server).join("config");
     std::fs::create_dir_all(config.join("sub")).unwrap();
     std::fs::write(config.join("sub/a.toml"), "a = 1").unwrap();
@@ -2061,7 +1631,7 @@ async fn a_server_exports_as_a_pack_once_per_link() {
     );
     let bytes = response.into_body().collect().await.unwrap().to_bytes();
     let mut pack = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
-    let index = bedrock::content::read_index(&mut pack).unwrap();
+    let index = engine::pack::server::read_index(&mut pack).unwrap();
     assert_eq!(index.name, "A");
     assert_eq!(index.dependencies["minecraft"], "1.21.1");
     assert_eq!(index.dependencies["fabric-loader"], "0.16.0");
@@ -2168,7 +1738,6 @@ async fn revoking_a_role_ends_the_console_and_keeps_the_socket() {
     let mut socket = core.events(&editor).await;
     subscribe(&mut socket, json!({ "type": "server", "id": server })).await;
     assert_eq!(next(&mut socket).await.unwrap()["type"], "power");
-    assert_eq!(next(&mut socket).await.unwrap()["type"], "install_progress");
     let console = json!({ "type": "console", "id": server });
     subscribe(&mut socket, console.clone()).await;
 
@@ -2195,7 +1764,6 @@ async fn ending_the_session_closes_the_socket() {
     subscribe(&mut socket, json!({ "type": "server", "id": core.server }))
         .await;
     next(&mut socket).await.unwrap();
-    next(&mut socket).await.unwrap();
 
     let (status, _) = core
         .call(
@@ -2217,7 +1785,6 @@ async fn a_lagged_subscriber_gets_resync_and_the_servers_state_again() {
     let mut socket = core.events(&editor).await;
     subscribe(&mut socket, json!({ "type": "server", "id": core.server }))
         .await;
-    next(&mut socket).await.unwrap();
     next(&mut socket).await.unwrap();
 
     for _ in 0..300 {

@@ -1,11 +1,17 @@
-import { type ClientMessage, core, type Topic } from '@amberite/contracts'
+import {
+	type ClientMessage,
+	core,
+	type CoreEvent,
+	type EngineEvent,
+	type InstallJobSnapshot,
+	type Topic,
+} from '@amberite/contracts'
 import mitt from 'mitt'
 
 import type { AbstractModrinthClient } from '../core/abstract-client'
 import { AbstractSyncClient, type SyncEmitterEvents } from '../core/abstract-sync'
 import { AbstractWebSocketClient, type WebSocketConnection } from '../core/abstract-websocket'
 import type { Archon } from '../modules/archon/types'
-import type { Copal } from '../modules/copal/types'
 
 type WSEvent = Archon.Websocket.v0.WSEvent
 
@@ -64,6 +70,7 @@ export class CoreWebSocketClient extends AbstractWebSocketClient {
 					{ type: 'server', id: serverId },
 					{ type: 'backups', id: serverId },
 					{ type: 'console', id: serverId },
+					{ type: 'installs' },
 				]
 				for (const topic of topics) {
 					ws.send(JSON.stringify({ type: 'subscribe', topic } satisfies ClientMessage))
@@ -72,7 +79,12 @@ export class CoreWebSocketClient extends AbstractWebSocketClient {
 
 			ws.onmessage = (message) => {
 				if (!current()) return
-				const event = JSON.parse(message.data) as Copal.CoreEvent
+				const event = JSON.parse(message.data) as CoreEvent | EngineEvent
+				if (event.type === 'install_job') {
+					if (event.payload.instance_id !== serverId) return
+					for (const archon of fromInstallJob(serverId, event.payload)) this.emit(serverId, archon)
+					return
+				}
 				// The `server` topic answers first: with the power state, or `ended` without access.
 				if (event.type === 'ended' && event.payload.topic.type === 'server') {
 					connection.authenticated = false
@@ -160,7 +172,40 @@ export class CoreWebSocketClient extends AbstractWebSocketClient {
 	}
 }
 
-function toArchon(event: Copal.CoreEvent): WSEvent[] {
+/** A server's content installs are the engine's install jobs on its instance, which has its id. */
+function fromInstallJob(serverId: string, job: InstallJobSnapshot): WSEvent[] {
+	switch (job.status) {
+		case 'queued':
+		case 'running': {
+			const progress = job.progress
+			return [
+				{
+					event: 'install-progress',
+					items: [
+						{
+							world_id: serverId,
+							key: { type: 'local_modpack', filename: job.display?.title ?? '' },
+							id: job.job_id,
+							progress:
+								progress && progress.total > 0
+									? Math.floor((progress.current / progress.total) * 100)
+									: null,
+							error: null,
+						},
+					],
+				},
+			]
+		}
+		case 'succeeded':
+			return [{ event: 'installation-result', result: 'ok' }]
+		case 'failed':
+		case 'interrupted':
+		case 'canceled':
+			return [{ event: 'installation-result', result: 'err', reason: job.error?.message }]
+	}
+}
+
+function toArchon(event: CoreEvent | EngineEvent): WSEvent[] {
 	switch (event.type) {
 		case 'console':
 			return [{ event: 'log', stream: 'stdout', message: event.payload.line }]
@@ -173,17 +218,11 @@ function toArchon(event: Copal.CoreEvent): WSEvent[] {
 			const { server: _, ...progress } = event.payload
 			return [{ event: 'backup-progress', ...progress }]
 		}
-		case 'install_progress':
-			return [{ event: 'install-progress', items: event.payload.items }]
-		case 'install_result':
-			return [
-				event.payload.error === null
-					? { event: 'installation-result', result: 'ok' }
-					: { event: 'installation-result', result: 'err', reason: event.payload.error },
-			]
-		// The Core sends a server's power and installs again after a resync.
+		// The Core sends a server's power again after a resync.
 		case 'ended':
 		case 'resync':
+			return []
+		default:
 			return []
 	}
 }

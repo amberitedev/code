@@ -1,5 +1,8 @@
 //! Copal, Amberite's self-hosted Minecraft server manager.
 
+// The engine's share and install futures nest deeper than the default allows.
+#![recursion_limit = "256"]
+
 mod access;
 mod api;
 mod backups;
@@ -9,8 +12,6 @@ mod db;
 mod installs;
 mod network;
 mod servers;
-mod share_pack;
-mod state;
 mod storage;
 mod update;
 mod util;
