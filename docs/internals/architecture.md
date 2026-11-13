@@ -10,9 +10,6 @@ details.
 Some of the design is still landing. Until each slice below merges, its line is true and the text
 that contradicts it is not:
 
-- Until A38: one `app.db` holds the engine's and the App's tables, and
-  `packages/engine/.cargo/config.toml` has no sqlx comment yet.
-- Until A39: the engine still links `ariadne`, `discord-rich-presence`, `winreg` and `windows`.
 - Until D5 to D7: a Core keeps content, sharing, server installs and files in `apps/core`, keeps
   `copal.db`, and does not mount `engine::routes`.
 - Until D9: the Core's server routes keep Archon's shapes. Until D10: `packages/bedrock` and
