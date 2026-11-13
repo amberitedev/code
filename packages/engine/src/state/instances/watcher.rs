@@ -18,11 +18,7 @@ use notify_debouncer_mini::{
 use sqlx::SqlitePool;
 use std::path::Path;
 use std::sync::Weak;
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-    time::Duration,
-};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::sync::{
     RwLock,
     mpsc::{Receiver, channel},
@@ -125,10 +121,6 @@ fn queue_content_sync(instance_id: String, state: Arc<Engine>) {
                     *queued = false;
                 }
                 crate::state::sync_content_files(&instance_id, &state).await?;
-                crate::api::instance::queue_synced_pack_reconciliation(
-                    &state,
-                    &instance_id,
-                );
                 Ok(true)
             }
             .await;
@@ -203,9 +195,8 @@ pub(crate) fn watch_instance_events(
                         state.file_watcher.instance_ids.read().await;
                     let mut visited_instances = Vec::new();
                     let mut visited_screenshot_instances = Vec::new();
-                    let mut pack_instances = HashSet::new();
-                    let mut synced_option_files =
-                        HashMap::<String, HashSet<String>>::new();
+                    let mut changed_files =
+                        HashMap::<String, Vec<String>>::new();
 
                     for e in &events {
                         let mut instance_path = None;
@@ -238,35 +229,35 @@ pub(crate) fn watch_instance_events(
                                 .skip_while(|x| x.as_os_str() != instance_path)
                                 .nth(1)
                                 .map(|x| x.as_os_str());
-                            if first_file_name.as_ref().is_some_and(|name| {
-                                *name == "resourcepacks" || *name == "datapacks"
-                            }) {
-                                pack_instances.insert(instance_id.clone());
+                            let sync_content =
+                                first_file_name.as_ref().is_some_and(|name| {
+                                    ProjectType::iterator().any(
+                                        |project_type| {
+                                            *name == project_type.get_folder()
+                                        },
+                                    )
+                                });
+                            if !sync_content {
+                                changed_files
+                                    .entry(instance_id.clone())
+                                    .or_default()
+                                    .push(
+                                        e.path
+                                            .components()
+                                            .skip_while(|x| {
+                                                x.as_os_str() != instance_path
+                                            })
+                                            .skip(1)
+                                            .map(|x| {
+                                                x.as_os_str().to_string_lossy()
+                                            })
+                                            .collect::<Vec<_>>()
+                                            .join("/"),
+                                    );
                             }
                             let is_screenshot_event = first_file_name
                                 .as_ref()
                                 .is_some_and(|name| *name == "screenshots");
-                            if let Some(file_name) = first_file_name
-                                .as_ref()
-                                .and_then(|name| name.to_str())
-                                .filter(|name| {
-                                    matches!(
-                                        *name,
-                                        "command_history.txt"
-                                            | "hotbar.nbt"
-                                            | "options.txt"
-                                            | "servers.dat"
-                                    )
-                                })
-                            {
-                                synced_option_files
-                                    .entry(instance_id.clone())
-                                    .or_default()
-                                    .insert(file_name.to_owned());
-                                if file_name == "options.txt" {
-                                    state.synced_options.locales.queue();
-                                }
-                            }
                             if first_file_name
                                 .as_ref()
                                 .is_some_and(|x| *x == "crash-reports")
@@ -349,21 +340,6 @@ pub(crate) fn watch_instance_events(
                                 };
                                 if let Some(event) = event {
                                     let emit_instance_id = instance_id.clone();
-                                    let reconcile_screenshots = matches!(
-                                        &event,
-                                        InstancePayloadType::ScreenshotsUpdated
-                                    );
-                                    let sync_content = first_file_name
-                                        .as_ref()
-                                        .is_some_and(|name| {
-                                            ProjectType::iterator().any(
-                                                |project_type| {
-                                                    *name
-                                                        == project_type
-                                                            .get_folder()
-                                                },
-                                            )
-                                        });
                                     if sync_content {
                                         queue_content_sync(
                                             emit_instance_id,
@@ -371,20 +347,7 @@ pub(crate) fn watch_instance_events(
                                         );
                                     } else {
                                         let events = state.events.clone();
-                                        let state = Arc::clone(&state);
                                         tokio::spawn(async move {
-                                            if reconcile_screenshots
-												&& let Err(error) =
-													crate::api::instance::reconcile_screenshots(
-														&state,
-														&emit_instance_id,
-													)
-													.await
-											{
-												tracing::error!(
-													"Failed to reconcile screenshots after filesystem change: {error}"
-												);
-											}
                                             let _ = emit_instance(
                                                 &events,
                                                 &emit_instance_id,
@@ -404,28 +367,10 @@ pub(crate) fn watch_instance_events(
                         }
                     }
 
-                    for instance_id in pack_instances {
-                        crate::api::instance::queue_synced_pack_reconciliation(
-                            &state,
-                            &instance_id,
-                        );
-                    }
-                    for (instance_id, file_names) in synced_option_files {
-                        let state = Arc::clone(&state);
-                        tokio::spawn(async move {
-                            for file_name in file_names {
-                                if let Err(error) =
-                                    crate::api::instance::reconcile_synced_option_file(
-                                        &state,
-                                        &instance_id,
-                                        &file_name)
-                                    .await
-                                {
-                                    tracing::error!(
-                                        "Failed to reconcile {file_name} after filesystem change: {error}"
-                                    );
-                                }
-                            }
+                    for (instance_id, paths) in changed_files {
+                        state.events.send(crate::event::Event::FilesChanged {
+                            instance_id,
+                            paths,
                         });
                     }
                 }

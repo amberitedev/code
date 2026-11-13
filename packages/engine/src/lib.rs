@@ -29,16 +29,16 @@ pub use api::*;
 pub use error::*;
 pub use event::{
     DesktopEvent, Event, EventSink, FriendPayload,
-    InstanceGroupsChangedPayload, LoadingBar, LoadingBarType, ProcessPayload,
-    ProcessPayloadType, emit::emit_loading, emit::emit_warning,
-    emit::init_loading,
+    InstanceGroupsChangedPayload, InstancePayload, InstancePayloadType,
+    LoadingBar, LoadingBarType, ProcessPayload, ProcessPayloadType,
+    emit::emit_loading, emit::emit_warning, emit::init_loading,
 };
 pub use logger::start_logger;
 pub use self_hosted::accounts::AccountEndpoints;
 pub use state::INSTANCES_FOLDER_NAME;
 pub use state::{
     BackendSession, BackendSessionKind, Engine, EngineConfig, ModrinthSession,
-    Sessions,
+    PackOverrides, PackServers, PackUpdateHooks, Sessions,
 };
 pub use util::fetch::DownloadReason;
 

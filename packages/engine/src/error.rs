@@ -221,10 +221,6 @@ pub enum ErrorKind {
     #[error("error stripping prefix: {0}")]
     StripPrefixError(#[from] std::path::StripPrefixError),
 
-    #[cfg(feature = "tauri")]
-    #[error("Tauri error: {0}")]
-    TauriError(#[from] tauri::Error),
-
     #[error("error interacting with database: {0}")]
     Sqlx(#[from] sqlx::Error),
 

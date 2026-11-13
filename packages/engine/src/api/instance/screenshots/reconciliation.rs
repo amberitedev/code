@@ -86,7 +86,7 @@ pub(super) async fn list_source_screenshots(
     reconcile_source_screenshots(state, &source, scanned).await
 }
 
-pub(crate) async fn reconcile_screenshots(
+pub async fn reconcile_screenshots(
     state: &Engine,
     instance_id: &str,
 ) -> crate::Result<()> {

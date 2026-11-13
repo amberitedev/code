@@ -51,7 +51,8 @@ pub(crate) async fn create_instance(
                 &input.game_version,
                 input.loader,
                 input.loader_version.as_deref(),
-                &state.directories)
+                &state.directories,
+            )
             .await?
             .map(|value| value.id)
         } else {
@@ -132,18 +133,6 @@ pub(crate) async fn create_instance(
             &state.directories,
         )
         .await;
-        if let Err(error) =
-            crate::api::instance::reconcile_instance_synced_options(
-                state,
-                &instance.id,
-            )
-            .await
-        {
-            tracing::warn!(
-                "Failed to reconcile synced options for newly created instance {}: {error}",
-                instance.id
-            );
-        }
 
         Ok(instance)
     }

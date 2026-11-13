@@ -1250,36 +1250,15 @@ async fn install_zipped_mrpack_files_with_reporter_inner(
         }
     }
 
-    if ignore_modpack_servers {
-        crate::api::instance::synced_servers::discard_modpack_servers(
-            &instance_id,
-            state,
-        )
-        .await?;
-    } else {
-        crate::api::instance::synced_servers::capture_modpack_server_override(
-            state,
-            &instance_id,
-            servers_override_path,
-        )
-        .await?;
-    }
-    if let Err(error) = crate::api::instance::capture_game_options_pack_base(
-        state,
-        &instance_id,
-        game_options_override_source,
-    )
-    .await
-    {
-        tracing::warn!(
-            "The modpack was installed, but its options.txt could not be captured for game-settings sync: {error}"
-        );
-    }
-    crate::api::instance::reconcile_instance_after_pack_update(
-        state,
-        &instance_id,
-    )
-    .await?;
+    let overrides = crate::state::PackOverrides {
+        servers: if ignore_modpack_servers {
+            crate::state::PackServers::Ignored
+        } else {
+            crate::state::PackServers::Pack(servers_override_path)
+        },
+        game_options: game_options_override_source,
+    };
+    state.after_pack_update(&instance_id, overrides).await?;
 
     // If the icon doesn't exist, we expect icon.png to be a potential icon.
     // If it doesn't exist, and an override to icon.png exists, cache and use that

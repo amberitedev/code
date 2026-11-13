@@ -3306,7 +3306,6 @@ dependencies = [
  "shlex 2.0.1",
  "sqlx",
  "sysinfo",
- "tauri",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",

@@ -95,7 +95,6 @@ sqlx = { workspace = true, features = [
   "uuid",
 ] }
 sysinfo = { workspace = true, features = ["disk", "system"] }
-tauri = { workspace = true, features = ["unstable"], optional = true }
 tempfile = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = [
@@ -153,7 +152,6 @@ export-ts = [
   "minecraft-meta-manifest/ts",
   "modrinth-content-management/ts",
 ]
-tauri = ["dep:tauri"]
 
 [lints]
 workspace = true

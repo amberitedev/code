@@ -1090,27 +1090,9 @@ async fn run_job_inner(
                 &job_state,
                 &state.pool,
                 &state.installs,
-                &state.synced_options.locales,
             )
             .await?
             {
-                if let Err(error) =
-                    crate::api::instance::reconcile_instance_synced_options(
-                        state,
-                        &instance_id,
-                    )
-                    .await
-                {
-                    tracing::warn!(
-                        "Failed to reconcile synced options after installing {instance_id}: {error}"
-                    );
-                }
-                if matches!(request, InstallRequest::BulkUpdateContent { .. }) {
-                    Box::pin(crate::api::instance::synced_packs::reconcile_after_content_change(
-						state,
-						&instance_id,
-					)).await;
-                }
                 recovery::clear_staging_dir(&job_state, &state.content_store)
                     .await;
                 if let Err(error) = emit_instance(
@@ -1598,11 +1580,7 @@ async fn run_request(
                         job_id, request, None, job_state, state,
                     )
                     .await?;
-                    crate::api::instance::prepare_instance_update(
-                        state,
-                        &instance_id,
-                    )
-                    .await?;
+                    state.before_pack_update(&instance_id).await?;
                     let preserve_icon =
                         !instance_icon_is_replaceable(&instance_id, state)
                             .await?;

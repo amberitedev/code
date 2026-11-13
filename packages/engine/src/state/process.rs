@@ -989,21 +989,6 @@ impl Process {
 
         state.process_manager.remove(uuid);
         clear_persisted_process(&state.pool, persisted_process).await;
-        let sync_instance_id = instance_id.clone();
-        let sync_state = Arc::clone(&state);
-        tokio::spawn(async move {
-            if let Err(error) =
-                crate::api::instance::reconcile_instance_synced_options(
-                    &sync_state,
-                    &sync_instance_id,
-                )
-                .await
-            {
-                tracing::warn!(
-                    "Failed to reconcile synced options after closing {sync_instance_id}: {error}"
-                );
-            }
-        });
         emit_process(
             &state.events,
             &instance_id,

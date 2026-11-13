@@ -1,4 +1,6 @@
 //! Theseus state management system
+use crate::access::BoxFuture;
+use crate::api::instance::GameOptionsPackSource;
 use crate::event::EventSink;
 use crate::util::fetch::{FetchSemaphore, IoSemaphore};
 use contracts::Side;
@@ -94,6 +96,39 @@ pub struct EngineConfig {
     pub max_concurrent_writes: usize,
     pub events: EventSink,
     pub accounts: Option<AccountEndpoints>,
+    pub pack_hooks: Option<Arc<dyn PackUpdateHooks>>,
+}
+
+/// Runs host work around a modpack update: `before` sees the instance's files as the user left
+/// them, `after` the pack's.
+pub trait PackUpdateHooks: Send + Sync {
+    fn before_pack_update<'a>(
+        &'a self,
+        engine: &'a Engine,
+        instance_id: &'a str,
+    ) -> BoxFuture<'a, crate::Result<()>>;
+
+    fn after_pack_update<'a>(
+        &'a self,
+        engine: &'a Engine,
+        instance_id: &'a str,
+        overrides: PackOverrides<'a>,
+    ) -> BoxFuture<'a, crate::Result<()>>;
+}
+
+/// What a pack update wrote over the instance.
+pub struct PackOverrides<'a> {
+    pub servers: PackServers<'a>,
+    pub game_options: Option<GameOptionsPackSource>,
+}
+
+pub enum PackServers<'a> {
+    /// The update left the server list alone.
+    Untouched,
+    /// The instance ignores the pack's servers.
+    Ignored,
+    /// The pack's server list file, if it has one.
+    Pack(Option<&'a str>),
 }
 
 pub struct Engine {
@@ -127,6 +162,8 @@ pub struct Engine {
     pub events: EventSink,
 
     pub sessions: Sessions,
+
+    pack_hooks: Option<Arc<dyn PackUpdateHooks>>,
 }
 
 impl Engine {
@@ -160,6 +197,7 @@ impl Engine {
             max_concurrent_writes,
             events,
             accounts,
+            pack_hooks,
         } = config;
         let directories =
             DirectoryInfo::init(&db_path, data_dir, instances_dir, logs_dir)
@@ -206,6 +244,7 @@ impl Engine {
             file_watcher,
             events,
             sessions: Sessions::new(accounts),
+            pack_hooks,
         });
 
         state.content_store.recover(None).await?;
@@ -227,7 +266,6 @@ impl Engine {
             Arc::downgrade(self),
             watcher_events,
         );
-        self.synced_options.packs.bind(Arc::downgrade(self));
 
         let maintained = Arc::downgrade(self);
         tokio::spawn(async move {
@@ -241,16 +279,6 @@ impl Engine {
                 let Some(state) = maintained.upgrade() else {
                     return;
                 };
-                if let Err(error) =
-                    crate::api::instance::synced_packs::reconcile_retention(
-                        &state,
-                    )
-                    .await
-                {
-                    tracing::warn!(
-                        "Synced-pack retention pass deferred: {error}"
-                    );
-                }
                 if let Err(error) =
                     CachedEntry::purge_long_expired(&state.pool).await
                 {
@@ -286,47 +314,27 @@ impl Engine {
         });
     }
 
-    /// Desktop-only startup; temporary (D-32).
-    pub fn start_desktop(self: &Arc<Self>) {
-        crate::api::instance::start_game_locale_indexer(Arc::clone(self));
+    pub(crate) async fn before_pack_update(
+        &self,
+        instance_id: &str,
+    ) -> crate::Result<()> {
+        match &self.pack_hooks {
+            Some(hooks) => hooks.before_pack_update(self, instance_id).await,
+            None => Ok(()),
+        }
+    }
 
-        let state = Arc::clone(self);
-        tokio::spawn(async move {
-            if let Ok(instances) =
-                instances::load_instance_rows(&state.pool).await
-            {
-                for instance in instances {
-                    if let Err(error) =
-                        crate::api::instance::reconcile_screenshots(
-                            &state,
-                            &instance.id,
-                        )
-                        .await
-                    {
-                        tracing::warn!(
-                            "Failed to reconcile screenshots for {} at startup: {error}",
-                            instance.id
-                        );
-                    }
-                }
+    pub(crate) async fn after_pack_update(
+        &self,
+        instance_id: &str,
+        overrides: PackOverrides<'_>,
+    ) -> crate::Result<()> {
+        match &self.pack_hooks {
+            Some(hooks) => {
+                hooks.after_pack_update(self, instance_id, overrides).await
             }
-
-            if let Err(error) =
-                crate::api::instance::monitor_persisted_processes(&state).await
-            {
-                tracing::error!(
-                    "Failed to monitor persisted Minecraft processes: {error}"
-                );
-            }
-
-            if let Err(error) =
-                crate::api::instance::reconcile_all_synced_options(&state).await
-            {
-                tracing::error!(
-                    "Failed to reconcile instance synced options during startup: {error}"
-                );
-            }
-        });
+            None => Ok(()),
+        }
     }
 }
 
@@ -408,6 +416,7 @@ pub(crate) mod tests {
             max_concurrent_writes: 10,
             events: EventSink::new(),
             accounts: None,
+            pack_hooks: None,
         }
     }
 

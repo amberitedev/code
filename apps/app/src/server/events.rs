@@ -102,9 +102,6 @@ impl From<Event> for LocalEvent {
             DesktopEvent::Command(command) => {
                 AppEvent::Command(Command::Modrinth(command))
             }
-            DesktopEvent::GameOptionLocalesUpdated => {
-                AppEvent::GameOptionLocalesUpdated
-            }
         })
     }
 }
@@ -152,6 +149,9 @@ async fn forward(
             },
         };
         let Some(event) = event else { return };
+        if matches!(event, LocalEvent::Engine(Event::FilesChanged { .. })) {
+            continue;
+        }
         let text = match serde_json::to_string(&event) {
             Ok(text) => text,
             Err(error) => {

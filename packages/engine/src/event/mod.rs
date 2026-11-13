@@ -79,6 +79,13 @@ pub enum Event {
     /// raising it lives in apps/app.
     #[serde(skip)]
     Desktop(DesktopEvent),
+    /// Files in an instance changed, as paths relative to its folder. Content files are reported
+    /// once the engine has indexed them. In-process only: socket loops drop it.
+    #[serde(skip)]
+    FilesChanged {
+        instance_id: String,
+        paths: Vec<String>,
+    },
 }
 
 #[derive(Clone)]
@@ -88,7 +95,6 @@ pub enum DesktopEvent {
     OnboardingChecklist(crate::state::OnboardingChecklist),
     InstanceGroupsChanged(InstanceGroupsChangedPayload),
     Command(CommandPayload),
-    GameOptionLocalesUpdated,
 }
 
 #[derive(Serialize, Debug, Clone)]

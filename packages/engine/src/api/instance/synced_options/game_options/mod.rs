@@ -50,6 +50,7 @@ pub use local_settings_editor::{
     get_config as get_local_config, preview_changes as preview_local_changes,
     save_changes as save_local_changes,
 };
+pub use locales::queue_game_locale_index;
 pub(crate) use locales::{GameLocaleIndexer, start_game_locale_indexer};
 pub use locales::{
     GameSettingLocaleLabel, GameSettingLocaleLabels, GameSettingSource,

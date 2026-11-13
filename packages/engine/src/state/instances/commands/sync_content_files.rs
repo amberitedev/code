@@ -308,11 +308,10 @@ pub(crate) async fn sync_instance_content_files(
         .iter()
         .filter(|file| !present_ids.contains(file.id.as_str()) && !file.missing)
         .collect::<Vec<_>>();
-    let changed = renamed
-        || normalized
-        || !unbound.is_empty()
-        || !missing.is_empty()
-        || files.iter().any(|file| {
+    let changed_paths = missing
+        .iter()
+        .copied()
+        .chain(files.iter().filter(|file| {
             existing
                 .iter()
                 .find(|previous| previous.id == file.id)
@@ -322,7 +321,13 @@ pub(crate) async fn sync_instance_content_files(
                         || previous.sha1 != file.sha1
                         || previous.relative_path != file.relative_path
                 })
-        });
+        }))
+        .map(|file| file.relative_path.clone())
+        .collect::<Vec<_>>();
+    let changed = renamed
+        || normalized
+        || !unbound.is_empty()
+        || !changed_paths.is_empty();
     let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await?;
     for file_id in &unbound {
         crate::state::content_store::remove_file_storage(&mut tx, file_id)
@@ -356,7 +361,10 @@ pub(crate) async fn sync_instance_content_files(
     tx.commit().await?;
     if changed {
         super::mark_shared_instance_stale(&instance.id, &state.pool).await?;
-        state.synced_options.locales.queue();
+        state.events.send(crate::event::Event::FilesChanged {
+            instance_id: instance.id.clone(),
+            paths: changed_paths,
+        });
     }
     Ok(stored)
 }

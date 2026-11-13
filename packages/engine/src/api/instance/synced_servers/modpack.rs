@@ -17,7 +17,7 @@ pub(crate) const MODPACK_SERVER_PATHS: [&str; 3] = [
     "config/defaultoptions/servers.dat",
 ];
 
-pub(crate) async fn capture_modpack_server_override(
+pub async fn capture_modpack_server_override(
     state: &Engine,
     instance_id: &str,
     source_path: Option<&str>,
@@ -42,7 +42,7 @@ pub(crate) async fn capture_modpack_server_override(
     Ok(())
 }
 
-pub(crate) async fn discard_modpack_servers(
+pub async fn discard_modpack_servers(
     instance_id: &str,
     state: &Engine,
 ) -> crate::Result<()> {

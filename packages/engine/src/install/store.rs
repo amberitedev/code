@@ -623,7 +623,6 @@ pub(crate) async fn complete_success(
     state: &InstallJobState,
     pool: &SqlitePool,
     installs: &Installs,
-    locales: &crate::api::instance::GameLocaleIndexer,
 ) -> crate::Result<Option<InstallJobRecord>> {
     let Some(instance_id) = instance_id(state) else {
         bail!(ErrorKind::InputError(
@@ -682,7 +681,6 @@ pub(crate) async fn complete_success(
     transaction.commit().await?;
     release_request(id, InstallJobStatus::Succeeded, pool).await?;
     notify_completion(id, installs);
-    locales.queue();
     get_written(id, pool, installs).await.map(Some)
 }
 

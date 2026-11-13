@@ -11,7 +11,6 @@ pub(crate) async fn remove_instance(
     let instance = instance_rows::get_instance_by_id(instance_id, &state.pool)
         .await?
         .ok_or(crate::ErrorKind::InputError("unknown instance".to_string()))?;
-    let _synced_options_lock = state.synced_options.lock().await;
     let _content_lock = state.instance_locks.lock_content(instance_id).await;
     let _store_lock = state.content_store.files_lock.lock().await;
     let _store_lease = state.content_store.lease().await;
@@ -21,8 +20,6 @@ pub(crate) async fn remove_instance(
         ));
     }
     state.content_store.recover(Some(instance_id)).await?;
-    crate::api::instance::remove_generated_instance_files(instance_id, state)
-        .await?;
 
     delete_instance_row_and_locks(&instance.id, state).await?;
     super::super::watcher::unwatch_instance_folder(

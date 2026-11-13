@@ -165,15 +165,10 @@ impl<'a> InstanceContent<'a> {
             {
                 tracing::warn!(instance_id = %self.instance.id, %error, "Content installed, but metadata caching failed");
             }
-            if matches!(
-                project_type,
-                ProjectType::ResourcePack | ProjectType::DataPack
-            ) {
-                crate::api::instance::queue_synced_pack_reconciliation(
-                    self.state,
-                    &self.instance.id,
-                );
-            }
+            self.state.events.send(crate::event::Event::FilesChanged {
+                instance_id: self.instance.id.clone(),
+                paths: vec![file.relative_path.clone()],
+            });
         }
         Ok(output)
     }

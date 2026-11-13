@@ -50,8 +50,7 @@ pub use self::icon::{
 };
 pub(crate) use self::icon::{cache_icon, cache_icon_from_path};
 pub use self::install::get_optimal_jre_key;
-pub(crate) use self::lifecycle::create;
-pub use self::lifecycle::{edit, remove, set_synced_option};
+pub use self::lifecycle::{create, edit, remove, set_synced_option};
 pub use self::paths::{get_full_path, get_mod_full_path};
 pub use self::projects::{
     InstallProjectWithDependenciesRequest, add_project_from_path,
@@ -70,12 +69,11 @@ pub use self::screenshot_groups::{
     list_screenshot_groups, rename_screenshot_group,
     set_screenshot_group_memberships,
 };
-pub(crate) use self::screenshots::reconcile_screenshots;
 pub use self::screenshots::{
     InstanceScreenshot, ScreenshotEditSaveMode, ScreenshotKey,
     delete_screenshots, export_screenshots, get_screenshot_path,
     list_all_screenshots, list_screenshots, list_synced_screenshots,
-    move_screenshots, save_edited_screenshot,
+    move_screenshots, reconcile_screenshots, save_edited_screenshot,
 };
 pub(crate) use self::shared::{
     CONFIG_DIRECTORY, CONFIG_FILE_EXTENSIONS, CONFIG_FILE_TYPE,
@@ -110,6 +108,7 @@ pub use self::shared::{
     unlink_shared_instance, unpublish_remote_shared_instance,
     unpublish_shared_instance, update_shared_instance,
 };
+pub use self::synced_options::game_options::queue_game_locale_index;
 pub use self::synced_options::game_options::{
     CanonicalValue as GameOptionCanonicalValue, EditableGameSetting,
     GameOptionCompatibility, GameOptionCompatibilityBucket,
@@ -133,7 +132,7 @@ pub use self::synced_options::game_options::{
     sync_before_launch as sync_game_options_before_launch,
 };
 pub(crate) use self::synced_options::game_options::{
-    GameLocaleIndexer, shared_fullscreen_value, start_game_locale_indexer,
+    GameLocaleIndexer, shared_fullscreen_value,
     sync_all_participating_instances, update_shared_fullscreen_from_app,
 };
 pub use self::synced_options::{
@@ -146,26 +145,25 @@ pub use self::synced_options::{
     get_overview as get_synced_options_overview, get_synced_options_folder,
     set_command_history, set_global_option as set_global_synced_option,
 };
-pub(crate) use self::synced_options::{
-    monitor_persisted_processes, prepare_instance_update,
-    reconcile_changed_file as reconcile_synced_option_file,
-    reconcile_instance_after_pack_update, remove_generated_instance_files,
-};
 pub use self::synced_options::{
-    reconcile_all as reconcile_all_synced_options,
+    prepare_instance_update, reconcile_all as reconcile_all_synced_options,
+    reconcile_changed_file as reconcile_synced_option_file,
     reconcile_instance as reconcile_instance_synced_options,
+    reconcile_instance_after_pack_update, remove_generated_instance_files,
+    start as start_synced_options,
 };
 pub use self::synced_servers::{
-    DesyncServerMode, ServerSource, SyncedServer, desync_server,
+    DesyncServerMode, ServerSource, SyncedServer,
+    capture_modpack_server_override, desync_server, discard_modpack_servers,
     list_synced_servers, remove_synced_server, update_synced_server,
 };
 
+pub(crate) use self::synced_packs::PackSyncWorker;
 pub use self::synced_packs::flush as reconcile_synced_packs;
 pub use self::synced_packs::{
     PackSyncPreview, PackSyncTarget, desync_pack, get_pack_sync_preview,
-    list_synced_packs, remove_synced_pack, set_synced_pack_enabled, sync_pack,
-    upload_synced_pack,
-};
-pub(crate) use self::synced_packs::{
-    PackSyncWorker, queue_reconciliation as queue_synced_pack_reconciliation,
+    list_synced_packs,
+    queue_reconciliation as queue_synced_pack_reconciliation,
+    reconcile_after_content_change as reconcile_synced_packs_after_content_change,
+    remove_synced_pack, set_synced_pack_enabled, sync_pack, upload_synced_pack,
 };

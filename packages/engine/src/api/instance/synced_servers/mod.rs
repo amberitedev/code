@@ -7,9 +7,9 @@ mod types;
 const SERVERS_FILE: &str = "servers.dat";
 
 pub(crate) use self::codec::server_data;
-pub(crate) use self::modpack::discard_modpack_servers;
-pub(crate) use self::modpack::{
-    MODPACK_SERVER_PATHS, capture_modpack_server_override,
+pub(crate) use self::modpack::MODPACK_SERVER_PATHS;
+pub use self::modpack::{
+    capture_modpack_server_override, discard_modpack_servers,
 };
 pub(crate) use self::operations::{
     add_user_server, ensure_managed_server, list_server_records,

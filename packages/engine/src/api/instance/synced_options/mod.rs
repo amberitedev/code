@@ -22,10 +22,8 @@ pub use self::orchestration::{
     SyncedOptionJoinPreview, SyncedOptionJoinResolution, SyncedOptionsOverview,
     get_capabilities, get_global_options, get_initialized_options,
     get_instance_option_join_preview, get_overview, get_synced_options_folder,
-    reconcile_all, reconcile_changed_file, reconcile_instance,
-    set_global_option, set_instance_option, synced_options_path,
-};
-pub(crate) use self::orchestration::{
-    monitor_persisted_processes, prepare_instance_update,
-    reconcile_instance_after_pack_update, remove_generated_instance_files,
+    prepare_instance_update, reconcile_all, reconcile_changed_file,
+    reconcile_instance, reconcile_instance_after_pack_update,
+    remove_generated_instance_files, set_global_option, set_instance_option,
+    start, synced_options_path,
 };

@@ -769,18 +769,6 @@ async fn install_minecraft_inner(
 			&state.pool,
 		)
 		.await?;
-		if let Err(error) =
-			crate::api::instance::reconcile_instance_synced_options(
-				state,
-				&instance.id,
-			)
-			.await
-		{
-			tracing::warn!(
-				"Failed to reconcile synced options after installing {}: {error}",
-				instance.id
-			);
-		}
 		emit_instance(&state.events, &instance.id, InstancePayloadType::Edited).await?;
 	}
     if let Some(loading_bar) = &loading_bar {

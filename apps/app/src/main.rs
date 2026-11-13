@@ -21,6 +21,7 @@ mod import;
 mod launch;
 mod library;
 mod onboarding;
+mod pack_hooks;
 mod reactions;
 mod screenshots;
 mod server;
@@ -47,7 +48,6 @@ async fn start_engine(
         )
         .await?;
         let state = Engine::new(config).await?;
-        state.start_desktop();
         reactions::start(&state, app.clone(), reacting);
         #[cfg(debug_assertions)]
         dev::sign_in(&state).await;

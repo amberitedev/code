@@ -994,6 +994,68 @@ pub(crate) async fn monitor_persisted_processes(
     Ok(())
 }
 
+/// Starts the desktop's synced options: the pack worker, the locale indexer, which calls
+/// `on_locales_indexed` after each pass, the startup reconciles and the pack retention pass.
+pub fn start(
+    engine: &Arc<Engine>,
+    on_locales_indexed: impl Fn() + Send + 'static,
+) {
+    engine.synced_options.packs.bind(Arc::downgrade(engine));
+    super::game_options::start_game_locale_indexer(
+        Arc::clone(engine),
+        on_locales_indexed,
+    );
+
+    let state = Arc::clone(engine);
+    tokio::spawn(async move {
+        if let Ok(instances) =
+            crate::state::instances::load_instance_rows(&state.pool).await
+        {
+            for instance in instances {
+                if let Err(error) = crate::api::instance::reconcile_screenshots(
+                    &state,
+                    &instance.id,
+                )
+                .await
+                {
+                    tracing::warn!(
+                        "Failed to reconcile screenshots for {} at startup: {error}",
+                        instance.id
+                    );
+                }
+            }
+        }
+        if let Err(error) = monitor_persisted_processes(&state).await {
+            tracing::error!(
+                "Failed to monitor persisted Minecraft processes: {error}"
+            );
+        }
+        if let Err(error) = reconcile_all(&state).await {
+            tracing::error!(
+                "Failed to reconcile instance synced options during startup: {error}"
+            );
+        }
+    });
+
+    let maintained = Arc::downgrade(engine);
+    tokio::spawn(async move {
+        let mut interval =
+            tokio::time::interval(std::time::Duration::from_secs(600));
+        interval
+            .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            interval.tick().await;
+            let Some(state) = maintained.upgrade() else {
+                return;
+            };
+            if let Err(error) = synced_packs::reconcile_retention(&state).await
+            {
+                tracing::warn!("Synced-pack retention pass deferred: {error}");
+            }
+        }
+    });
+}
+
 /// Keeps reconciliation state on the heap so callers do not inherit its size.
 pub fn reconcile_instance<'a>(
     state: &'a Engine,
@@ -1008,13 +1070,16 @@ async fn reconcile_instance_inner(
 ) -> crate::Result<()> {
     let _guard = state.synced_options.lock().await;
     apply_pending_changes(state).await?;
-    let metadata = crate::state::get_instance(instance_id, &state.pool)
-        .await?
-        .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
+    // Instances are removed without this lock, so one can vanish before its reconcile runs.
+    let Some(metadata) =
+        crate::state::get_instance(instance_id, &state.pool).await?
+    else {
+        return Ok(());
+    };
     reconcile_instance_with_state(&metadata, state, false).await
 }
 
-pub(crate) async fn reconcile_instance_after_pack_update(
+pub async fn reconcile_instance_after_pack_update(
     state: &Engine,
     instance_id: &str,
 ) -> crate::Result<()> {
@@ -1025,7 +1090,7 @@ pub(crate) async fn reconcile_instance_after_pack_update(
     reconcile_instance_with_state(&metadata, state, true).await
 }
 
-pub(crate) async fn prepare_instance_update(
+pub async fn prepare_instance_update(
     state: &Engine,
     instance_id: &str,
 ) -> crate::Result<()> {
@@ -1198,10 +1263,11 @@ pub fn synced_options_path(state: &Engine) -> PathBuf {
     state.directories.synced_options_dir()
 }
 
-pub(crate) async fn remove_generated_instance_files(
+pub async fn remove_generated_instance_files(
     instance_id: &str,
     state: &Engine,
 ) -> crate::Result<()> {
+    let _guard = state.synced_options.lock().await;
     let instance_id = safe_instance_id(instance_id);
     for path in [
         synced_options_path(state)

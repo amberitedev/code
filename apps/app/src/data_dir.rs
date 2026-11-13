@@ -2,6 +2,7 @@ use anyhow::Context;
 use contracts::Side;
 use engine::{AccountEndpoints, EngineConfig, EventSink};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 const DB_FILE: &str = "app.db";
 const LOGS_FOLDER: &str = "launcher_logs";
@@ -43,6 +44,7 @@ pub async fn engine_config(
         max_concurrent_writes: settings.max_concurrent_writes,
         events,
         accounts,
+        pack_hooks: Some(Arc::new(crate::pack_hooks::PackHooks)),
     })
 }
 

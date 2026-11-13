@@ -18,7 +18,7 @@ chrono = { workspace = true }
 contracts = { workspace = true, features = ["server"] }
 dashmap = { workspace = true }
 dirs = { workspace = true }
-engine = { workspace = true, features = ["tauri"] }
+engine = { workspace = true }
 hkdf = { workspace = true }
 http-body-util = "0.1.3"
 hyper = { workspace = true, features = ["client", "http1", "server"] }
@@ -59,7 +59,7 @@ optional = true
 
 [dependencies.tauri]
 workspace = true
-features = ["devtools", "macos-private-api"]
+features = ["devtools", "macos-private-api", "unstable"]
 
 [dev-dependencies]
 contracts = { workspace = true, features = ["server", "ts"] }

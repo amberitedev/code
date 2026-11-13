@@ -1065,7 +1065,7 @@ pub(in crate::api::instance) fn schedule_reconciliation(state: &crate::Engine) {
     super::worker::queue_all(state);
 }
 
-pub(crate) async fn reconcile_after_content_change(
+pub async fn reconcile_after_content_change(
     state: &crate::Engine,
     instance_id: &str,
 ) {

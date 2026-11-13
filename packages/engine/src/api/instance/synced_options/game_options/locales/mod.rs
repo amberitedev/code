@@ -88,7 +88,15 @@ impl GameLocaleIndexer {
     }
 }
 
-pub(crate) fn start_game_locale_indexer(state: Arc<Engine>) {
+/// Reindexes mod setting labels soon, once for any number of calls before it runs.
+pub fn queue_game_locale_index(state: &Engine) {
+    state.synced_options.locales.queue();
+}
+
+pub(crate) fn start_game_locale_indexer(
+    state: Arc<Engine>,
+    on_indexed: impl Fn() + Send + 'static,
+) {
     if state
         .synced_options
         .locales
@@ -105,9 +113,7 @@ pub(crate) fn start_game_locale_indexer(state: Arc<Engine>) {
             if let Err(error) = index_installed_sources(&state).await {
                 tracing::warn!(%error, "Game setting locales: indexing failed");
             }
-            state.events.send(crate::event::Event::Desktop(
-                crate::event::DesktopEvent::GameOptionLocalesUpdated,
-            ));
+            on_indexed();
         }
     });
 }

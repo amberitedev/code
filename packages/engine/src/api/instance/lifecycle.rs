@@ -10,7 +10,7 @@ use crate::state::{
 use std::future::Future;
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn create(
+pub fn create(
     state: &Engine,
     name: String,
     game_version: String,
@@ -83,12 +83,6 @@ async fn create_inner(
 
     if result.is_err() {
         let _ = crate::state::remove_instance(&instance.id, state).await;
-    } else if let Err(error) =
-        crate::onboarding_checklist::mark_created_instance(state).await
-    {
-        tracing::warn!(
-            "Failed to mark instance creation in onboarding checklist: {error}"
-        );
     }
 
     result
@@ -117,8 +111,6 @@ pub async fn edit(
     let instance = crate::state::get_instance(instance_id, &state.pool)
         .await?
         .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
-
-    super::reconcile_instance_synced_options(state, instance_id).await?;
 
     emit_instance(
         &state.events,

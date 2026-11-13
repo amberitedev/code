@@ -40,7 +40,7 @@ impl PackSyncWorker {
     }
 }
 
-pub(crate) fn queue_reconciliation(state: &Engine, instance_id: &str) {
+pub fn queue_reconciliation(state: &Engine, instance_id: &str) {
     state
         .synced_options
         .packs
