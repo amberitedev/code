@@ -106,13 +106,7 @@ export default defineConfig({
 		overrides: [
 			{
 				files: ['apps/app-frontend/src/**'],
-				excludeFiles: [
-					'apps/app-frontend/src/platform/window.ts',
-					// They still call Tauri commands. A file leaves this list once its calls are App routes.
-					'apps/app-frontend/src/helpers/instance.ts',
-					'apps/app-frontend/src/platform/app-lib/icons/commands.ts',
-					'apps/app-frontend/src/platform/app-lib/shared-instances/commands.ts',
-				],
+				excludeFiles: ['apps/app-frontend/src/platform/window.ts'],
 				rules: {
 					'eslint/no-restricted-imports': [
 						'error',
