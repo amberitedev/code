@@ -89,16 +89,13 @@ impl Guard {
         }
         let loopback =
             matches!(url.host(), Some(url::Host::Ipv4(ip)) if ip.is_loopback());
-        let vite = self.dev_port.is_some_and(|port| {
+        self.dev_port.is_some_and(|port| {
             url.port() == Some(port)
                 && (loopback
                     || url.host_str().is_some_and(|host| {
                         host == "localhost" || host.ends_with(".localhost")
                     }))
-        });
-        // The browser bridge serves the frontend from a port of its own the App is not told.
-        vite || (cfg!(all(debug_assertions, feature = "browser-bridge"))
-            && loopback)
+        })
     }
 
     /// The checks every request passes, in order. `Err` is the answer to send instead: a refusal,

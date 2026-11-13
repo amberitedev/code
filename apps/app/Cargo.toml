@@ -66,10 +66,6 @@ url = { workspace = true }
 uuid = { workspace = true, features = ["serde", "v4"] }
 whoami = { workspace = true }
 
-[dependencies.browser-bridge]
-path = "../../packages/browser-bridge"
-optional = true
-
 [dependencies.tauri]
 workspace = true
 features = ["devtools", "macos-private-api", "unstable"]
@@ -106,7 +102,6 @@ features = [
 # by default Tauri runs in production mode
 # when `tauri dev` runs it is executed with `cargo run --no-default-features` if `devPath` is an URL
 default = ["custom-protocol"]
-browser-bridge = ["dep:browser-bridge"]
 # this feature is used for production builds where `devPath` points to the filesystem
 # DO NOT remove this
 custom-protocol = ["tauri/custom-protocol"]

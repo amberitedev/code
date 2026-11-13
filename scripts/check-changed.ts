@@ -33,7 +33,6 @@ const matching = (pattern: RegExp) => changed.filter((file) => pattern.test(file
 // The packages CI typechecks and tests (ci.yml, js job), and what reaches each.
 const PACKAGES = [
 	{ name: '@amberite/backend', test: true, reachedBy: ['apps/backend', 'packages/contracts'] },
-	{ name: '@amberite/browser-bridge', test: true, reachedBy: ['packages/browser-bridge'] },
 	{
 		name: '@modrinth/app-frontend',
 		test: false,

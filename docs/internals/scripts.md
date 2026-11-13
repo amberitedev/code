@@ -46,20 +46,20 @@ folder that is usually nothing.
 - `vp run dev:core`: Starts only Core. It pairs with the Worker and checks App sign-in tickets
   against the Worker's public key, so start `dev:backend` too.
 - `node scripts/dev-runner.ts up 1 2`: Starts the same stack in the background, waits until every
-  service answers and every App's page loads through its browser bridge, then prints each App's
-  bridge URL and `tab:` URL. There is no `vp run up`: on Windows, `vp run` puts its command in a
+  service answers, every App answers on its local API, and the frontend serves the App's page, then
+  prints each App's `tab:` URL. There is no `vp run up`: on Windows, `vp run` puts its command in a
   job that kills every process in it when vp exits, the background stack included. The tab URL
-  opens the App in a plain browser tab on its own origin, where most native calls do not work; use
-  the bridge URL. In a new checkout the frontend spends a minute or two preparing its dependencies;
-  that happens inside `up`. It writes to `.data/dev.log` and returns after 9 minutes if the stack
+  opens the App in a plain browser tab on its own origin. In a new checkout the frontend spends a
+  minute or two preparing its dependencies; that happens inside `up`. It writes to
+  `.data/dev.log` and returns after 9 minutes if the stack
   is still compiling; run it again to keep waiting. It fails at once when a Rust build fails, or
   when the App's entry module does not compile, printing the compiler error; the stack keeps
   running. An optional mode comes first: `node scripts/dev-runner.ts up dev:backend`. Unlike
   `vp run dev`, it leaves out the account sign-in
-  website and keeps App windows off the desktop, because agents use Apps through the browser
-  bridge. `--show-windows` shows them; on a stack already running hidden it fails, so run `down`
+  website and keeps App windows off the desktop, because agents use Apps from browser tabs.
+  `--show-windows` shows them; on a stack already running hidden it fails, so run `down`
   first.
-- `vp run status`: Prints what is running, whether it is ready, and each App's URLs. Exits
+- `vp run status`: Prints what is running, whether it is ready, and each App's tab URL. Exits
   non-zero when the stack is not ready.
 - `vp run down`: Stops this checkout's dev runner and everything it started.
 - `node scripts/dev-runner.ts build`: Compiles the App and Core for this checkout's Rust without
@@ -186,8 +186,8 @@ Keep backend, Core, and scenarios together when copying the dataset.
 Worktree setup copies `backend`, `core`, and `scenarios` from the primary checkout's `.data/` without
 overwriting existing state.
 
-`runtime.json` holds the runner's PID, the ports, and each scenario's `bridgeUrl` and `tabUrl` while
-the stack is running. The PID and URLs are removed when it stops.
+`runtime.json` holds the runner's PID, the ports, and each scenario's `tabUrl` while the stack is
+running. The PID and URLs are removed when it stops.
 
 ### Regenerating the sharing dataset
 
@@ -196,7 +196,7 @@ Share tab lists scenario 2 as a member, and scenario 2's copy shows no wrong-acc
 member's instance has no Share tab). Rebuild it in a worktree, through the Apps, and hand it over
 by copying; test data never leaves a worktree on its own.
 
-1. `node scripts/dev-runner.ts up 1 2` and open both bridge URLs.
+1. `node scripts/dev-runner.ts up 1 2` and open both tab URLs.
 2. In App 1, delete every instance whose Share tab says "Wrong account" (Instance settings, General,
    Delete instance). Such a record points at a shared instance the backend no longer has, and the
    locked Share tab offers no other way out.
@@ -234,7 +234,7 @@ an existing backend, use the same `PORT_OFFSET` if that backend shifted from its
 offset; read the ports in the runner output first.
 
 Each App also gets a local API address, `http://127.0.0.1:<port>/<secret>`, which the runner passes
-in its dev config and adds to both of the App's URLs as `#local=<address>`. The secret is in
+in its dev config and adds to the App's tab URL as `#local=<address>`. The secret is in
 `runtime.json` and the `up` and `status` output, never in `.data/dev.log`.
 
 Treat the `[dev-runner]` output and `.data/runtime.json` as authoritative. The preferred ports are

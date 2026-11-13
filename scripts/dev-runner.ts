@@ -33,7 +33,6 @@ const BUILD_LOCK = 'building'
 const BUILT_CRATES = 'built-crates.json'
 // Given to an unchanged crate's files so Cargo trusts its compiled output.
 const TRUSTED_FILE_TIME = new Date('2000-01-01T00:00:00Z')
-const BRIDGE_READY = /browser bridge ready.*?url=(http:\/\/[\d.]+:\d+)/
 const FETCH_BAD_PORTS = new Set([
 	0, 1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 79, 87, 95, 101, 102,
 	103, 104, 109, 110, 111, 113, 115, 117, 119, 123, 135, 137, 139, 143, 161, 179, 389, 427, 465,
@@ -66,7 +65,7 @@ type RunnerInput = {
 	/** The account sign-in website. Only a person signing in by hand needs it. */
 	readonly accountWeb: boolean
 	readonly dryRun: boolean
-	/** Apps run without a window on the desktop and are used through the browser bridge. */
+	/** Apps run without a window on the desktop and are used from browser tabs. */
 	readonly hideWindows: boolean
 	readonly mode: DevMode
 	readonly scenarios: ReadonlyArray<number>
@@ -136,9 +135,7 @@ type RuntimeFile = {
 		readonly dataDir: string
 		readonly number: number
 		readonly username: string
-		/** Serves this scenario's real App to a browser. Set once the App has started. */
-		bridgeUrl?: string
-		/** Opens this scenario's frontend in a plain browser tab, on its own origin. */
+		/** Opens this scenario's App in a plain browser tab, on its own origin. */
 		readonly tabUrl?: string
 	}>
 	readonly source: string
@@ -272,20 +269,11 @@ async function pickLocalAddresses(
 	)
 }
 
-/** The URL with the App's local API base in its `#local=` fragment, where the frontend reads it. */
-export function withLocalBase(url: string, address: LocalAddress): string {
-	const located = new URL(url)
-	located.hash = `local=${encodeURIComponent(`http://127.0.0.1:${address.port}/${address.secret}`)}`
-	return located.href
-}
-
+/** The App's local API base goes in the `#local=` fragment, where the frontend reads it. */
 export function scenarioTabUrl(scenario: number, vitePort: number, address: LocalAddress): string {
-	return withLocalBase(`http://scenario-${scenario}.localhost:${vitePort}`, address)
-}
-
-/** The browser bridge URL an App prints once it is usable, if this log line is that one. */
-export function bridgeUrlFromLine(line: string): string | undefined {
-	return BRIDGE_READY.exec(line)?.[1]
+	const url = new URL(`http://scenario-${scenario}.localhost:${vitePort}`)
+	url.hash = `local=${encodeURIComponent(`http://127.0.0.1:${address.port}/${address.secret}`)}`
+	return url.href
 }
 
 export function processLabelsForMode(mode: DevMode, accountWeb = true): ReadonlyArray<string> {
@@ -308,7 +296,7 @@ async function main(): Promise<void> {
 		const hasMode = DEV_MODES.some((mode) => mode === args[0])
 		return up(paths, {
 			...parseInput(hasMode ? args : ['dev', ...args], defaultScenarios),
-			// Apps sign themselves in and are used through the browser bridge.
+			// Apps sign themselves in and are used from browser tabs.
 			accountWeb: false,
 			hideWindows: !commandArgs.includes('--show-windows'),
 		})
@@ -392,14 +380,6 @@ async function main(): Promise<void> {
 		},
 	}
 	writeRuntimeFile(paths, runtime)
-	const setBridgeUrl = (label: string, bridgeUrl: string | undefined) => {
-		const scenario = runtime.scenarios.find((entry) => `app:${entry.number}` === label)
-		if (!scenario) return
-		const located = bridgeUrl && withLocalBase(bridgeUrl, localAddresses.get(scenario.number)!)
-		if (scenario.bridgeUrl === located) return
-		scenario.bridgeUrl = located
-		writeRuntimeFile(paths, runtime)
-	}
 	const setBuildFailed = (label: string, failed: boolean) => {
 		if ((runtime.buildFailed === label) === failed) return
 		runtime.buildFailed = failed ? label : undefined
@@ -431,7 +411,6 @@ async function main(): Promise<void> {
 	const start = async (spec: ProcessSpec) => {
 		const token = Symbol(spec.label)
 		starts.set(spec.label, token)
-		setBridgeUrl(spec.label, undefined)
 		let program: string | undefined
 		if (spec.build) {
 			setBuildFailed(spec.label, false)
@@ -454,13 +433,7 @@ async function main(): Promise<void> {
 			if (!dataDir) throw new DevRunnerError('App scenario is missing its data directory.')
 			normalizeScenarioDatabase(paths.worktree, dataDir, runningAppCommands())
 		}
-		const running = spawnProcess(paths.worktree, spec, program, (line) => {
-			const bridgeUrl = bridgeUrlFromLine(line)
-			if (!bridgeUrl) return
-			setBridgeUrl(spec.label, bridgeUrl)
-			// Runner output can be .data/dev.log, so it never carries the `#local=` secret.
-			runnerLog('info', `${spec.label} ready ${bridgeUrl}`)
-		})
+		const running = spawnProcess(paths.worktree, spec, program)
 		processes.set(spec.label, running)
 		void running.done.then(
 			(code) => handleProcessExit(spec, running, code),
@@ -915,7 +888,7 @@ function createAppProcessSpec(input: {
 		cwd: NodePath.join(input.paths.worktree, 'apps', 'app'),
 		env: {
 			...input.env,
-			RUST_LOG: 'engine=warn,theseus_gui=warn,browser_bridge=info,webview=off',
+			RUST_LOG: 'engine=warn,theseus_gui=warn,webview=off',
 			THESEUS_CONFIG_DIR: dataDir,
 			WEBVIEW2_USER_DATA_FOLDER: NodePath.join(dataDir, 'webview2'),
 		},
@@ -928,14 +901,7 @@ function appProgramBuild(paths: WorktreePaths, env: NodeJS.ProcessEnv): ProgramB
 	const engine = engineBuildSettings(paths, env)
 	return {
 		// What `tauri dev` ran. Without `custom-protocol` the App loads its frontend from devUrl.
-		cargoArgs: [
-			'build',
-			'--package',
-			'theseus_gui',
-			'--no-default-features',
-			'--features',
-			'browser-bridge',
-		],
+		cargoArgs: ['build', '--package', 'theseus_gui', '--no-default-features'],
 		cwd: appDir,
 		env: {
 			...engine.env,
@@ -1458,7 +1424,6 @@ function spawnProcess(
 	worktree: string,
 	spec: ProcessSpec,
 	program: string | undefined,
-	onLine: (line: string) => void,
 ): RunningProcess {
 	const child = NodeChildProcess.spawn(
 		program ?? process.execPath,
@@ -1472,8 +1437,8 @@ function spawnProcess(
 		},
 	)
 	runnerLog('info', `${spec.label} PID ${child.pid ?? 'unavailable'}`)
-	pipeOutput(child.stdout, spec.label, process.stdout, onLine)
-	pipeOutput(child.stderr, spec.label, process.stderr, onLine)
+	pipeOutput(child.stdout, spec.label, process.stdout)
+	pipeOutput(child.stderr, spec.label, process.stderr)
 
 	const done = new Promise<number>((resolve, reject) => {
 		child.once('error', (error) =>
@@ -1774,7 +1739,6 @@ function stoppedRuntime(runtime: RuntimeFile): RuntimeFile {
 		pid: undefined,
 		scenarios: runtime.scenarios.map((scenario) => ({
 			...scenario,
-			bridgeUrl: undefined,
 			tabUrl: undefined,
 		})),
 	}
@@ -1820,29 +1784,43 @@ function processIsDevRunner(pid: number): boolean {
 }
 
 async function runtimeIsReady(runtime: RuntimeFile): Promise<boolean> {
-	if (runtime.scenarios.some((scenario) => !scenario.bridgeUrl)) return false
 	const open = await Promise.all(
 		requiredPortNames(runtime.mode, runtime.accountWeb).map((name) =>
 			portIsOpen(runtime.ports[name]),
 		),
 	)
 	if (!open.every(Boolean)) return false
-	const serving = await Promise.all(
-		runtime.scenarios.map((scenario) => appPageLoads(scenario.bridgeUrl!)),
+	const answering = await Promise.all(
+		runtime.scenarios.map((scenario) => appAnswers(scenario.tabUrl)),
 	)
-	return serving.every(Boolean)
+	if (!answering.every(Boolean)) return false
+	return runtime.scenarios.length === 0 || appPageLoads(runtime.urls.app)
+}
+
+/** Whether a scenario's App answers on the local API base its tab URL carries. */
+async function appAnswers(tabUrl: string | undefined): Promise<boolean> {
+	const base = tabUrl && new URLSearchParams(new URL(tabUrl).hash.slice(1)).get('local')
+	if (!base) return false
+	try {
+		const response = await fetch(`${base}/health`, { signal: AbortSignal.timeout(2_000) })
+		return response.ok
+	} catch {
+		return false
+	}
 }
 
 /**
- * Whether the App's page loads through a bridge: the modules that start it (the entry, and the App
+ * Whether the frontend serves the App's page: the modules that start it (the entry, and the App
  * and routes it imports) and the dependencies they import. In a new checkout the frontend server
  * spends a minute or two preparing those, and holds the requests until it is done, so asking here
  * keeps that wait inside `up`.
  */
-async function appPageLoads(bridgeUrl: string): Promise<boolean> {
+async function appPageLoads(frontendUrl: string): Promise<boolean> {
 	/** The file's text, or `undefined` when the server answered with an error. */
 	const load = async (path: string) => {
-		const response = await fetch(new URL(path, bridgeUrl), { signal: AbortSignal.timeout(60_000) })
+		const response = await fetch(new URL(path, frontendUrl), {
+			signal: AbortSignal.timeout(60_000),
+		})
 		const text = await response.text()
 		if (response.status === 500) throw new PageError(path, text)
 		return response.ok ? text : undefined
@@ -1923,10 +1901,7 @@ async function printStatus(paths: WorktreePaths): Promise<boolean> {
 	}
 	if (labels.includes('core')) runnerLog('info', `Core ${runtime.urls.core}`)
 	for (const scenario of runtime.scenarios) {
-		runnerLog(
-			'info',
-			`App ${scenario.number} (${scenario.username}) ${scenario.bridgeUrl ?? 'starting'}`,
-		)
+		runnerLog('info', `App ${scenario.number} (${scenario.username})`)
 		if (scenario.tabUrl) runnerLog('info', `  tab: ${scenario.tabUrl}`)
 	}
 	runnerLog('info', `log ${devLogPath(paths)}`)

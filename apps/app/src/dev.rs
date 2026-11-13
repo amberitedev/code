@@ -15,7 +15,7 @@ pub struct DevAppConfig {
     pub username: Option<String>,
     /// Where the frontend is served. One dev build then works with any checkout's ports.
     pub dev_url: Option<tauri::Url>,
-    /// Keeps the native window off the desktop; the App is used through the browser bridge.
+    /// Keeps the native window off the desktop; the App is used from a browser tab.
     #[serde(default)]
     pub hide_window: bool,
     /// The local server's address, which the runner prints in tab URLs.

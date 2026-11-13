@@ -164,11 +164,6 @@ fn main() {
 
     let mut builder = tauri::Builder::default().plugin(local_init);
 
-    #[cfg(all(debug_assertions, feature = "browser-bridge"))]
-    {
-        builder = builder.plugin(browser_bridge::init());
-    }
-
     #[cfg(target_os = "macos")]
     {
         builder = builder

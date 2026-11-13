@@ -2,7 +2,6 @@ import 'overlayscrollbars/overlayscrollbars.css'
 
 import { installTooltipDirective } from '@modrinth/ui'
 import { focusManager, VueQueryPlugin } from '@tanstack/vue-query'
-import { invoke } from '@tauri-apps/api/core'
 import { createApp } from 'vue'
 
 import { applyDevAppConfig, config } from '@/config'
@@ -12,7 +11,7 @@ import { setupErrorReporting } from '@/helpers/error-reporting'
 import { debugStartup, traceStartupStep } from '@/helpers/startup-debug'
 import { isNativeWindow } from '@/platform/local'
 import { loadBoot } from '@/platform/os'
-import { getCurrentWindow } from '@/platform/window'
+import { getCurrentWindow, showWindow } from '@/platform/window'
 import i18nPlugin from '@/plugins/i18n'
 import i18nDebugPlugin from '@/plugins/i18n-debug'
 
@@ -67,5 +66,5 @@ bootstrap().catch((error) => {
 	console.error(error)
 	const reason = error instanceof Error ? error.message : String(error)
 	document.getElementById('app')?.replaceChildren(`Amberite could not start. ${reason}`)
-	void invoke('show_window').catch(() => {})
+	void showWindow().catch(() => {})
 })

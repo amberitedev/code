@@ -78,7 +78,7 @@ another. Before calling work done, walk this list and say which entries applied:
   wait for it and do not run `vp i`. It ends with `done` or `failed` (with the error). A dead pid,
   `failed`, or no file at all means run `vp run setup` yourself.
 - `node scripts/dev-runner.ts up 1 2` starts the backend, one Core, and the Apps for scenarios 1
-  and 2 in the background, and returns once each App loads, printing its bridge URL. There is no
+  and 2 in the background, and returns once each App loads, printing its tab URL. There is no
   `vp run up`: on Windows, vp kills everything its command started when it returns, the background
   stack included. `vp run status` prints the URLs again; `vp run down` stops only this checkout's
   stack. The log is `.data/dev.log`. `vp run dev` is the same stack in the foreground with App
@@ -93,7 +93,7 @@ another. Before calling work done, walk this list and say which entries applied:
   `node scripts/dev-runner.ts up dev:core` starts only the Core. For the backend and Core together,
   start the full stack.
 - Ports derive from the worktree path and are stable across restarts. Read the real ones and the
-  bridge URLs from `vp run status`, since occupied ports shift.
+  tab URLs from `vp run status`, since occupied ports shift.
 - Never kill by process name, path, or worktree string. Several worktrees run stacks at once, and
   your own agent's command line holds this worktree's path. Stop what you started with
   `vp run down`, or kill only a PID you captured at spawn.

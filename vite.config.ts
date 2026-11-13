@@ -106,7 +106,15 @@ export default defineConfig({
 		overrides: [
 			{
 				files: ['apps/app-frontend/src/**'],
-				excludeFiles: ['apps/app-frontend/src/platform/**'],
+				excludeFiles: [
+					'apps/app-frontend/src/platform/window.ts',
+					// They still call Tauri commands. A file leaves this list once its calls are App routes.
+					'apps/app-frontend/src/helpers/install.ts',
+					'apps/app-frontend/src/helpers/instance.ts',
+					'apps/app-frontend/src/pages/instance/files/index.vue',
+					'apps/app-frontend/src/platform/app-lib/icons/commands.ts',
+					'apps/app-frontend/src/platform/app-lib/shared-instances/commands.ts',
+				],
 				rules: {
 					'eslint/no-restricted-imports': [
 						'error',
@@ -116,13 +124,12 @@ export default defineConfig({
 									group: [
 										'@tauri-apps/plugin-*',
 										'@tauri-apps/api/*',
-										'!@tauri-apps/api/core',
 										'!@tauri-apps/api/event',
 										'!@tauri-apps/plugin-http',
 									],
 									allowTypeImports: true,
 									message:
-										'Import it from @/platform/{os,dialog,opener,window,files}, or add a wrapper there.',
+										'Window chrome comes from @/platform/window; everything else is an App route.',
 								},
 							],
 						},

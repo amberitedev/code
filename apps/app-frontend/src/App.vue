@@ -55,7 +55,6 @@ import {
 } from '@modrinth/ui'
 import { renderString } from '@modrinth/utils/parse'
 import { useQueries, useQuery, useQueryClient } from '@tanstack/vue-query'
-import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
@@ -172,7 +171,7 @@ import { isNativeWindow, localFileUrl } from '@/platform/local'
 import { apiClient as tauriApiClient } from '@/platform/modrinth-client'
 import { openUrl } from '@/platform/opener'
 import { getVersion, type } from '@/platform/os'
-import { getCurrentWindow, saveWindowState, StateFlags } from '@/platform/window'
+import { getCurrentWindow, saveWindowState, showWindow, StateFlags } from '@/platform/window'
 import {
 	appUpdateState,
 	downloadAvailableAppUpdate,
@@ -1273,7 +1272,7 @@ async function fetchIntercomToken() {
 }
 
 onMounted(() => {
-	if (isNativeWindow) invoke('show_window')
+	if (isNativeWindow) showWindow()
 
 	error.setErrorModal(errorModal.value)
 	error.setMinecraftAuthErrorModal(minecraftAuthErrorModal.value)

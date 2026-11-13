@@ -1,6 +1,6 @@
 ---
 name: test-app
-description: Check a change in the real Amberite App through its browser bridge, with scenario test accounts, and hand a window to the developer. Use for any App change a person can see.
+description: Check a change in the real Amberite App from a browser tab, with scenario test accounts, and hand a window to the developer. Use for any App change a person can see.
 ---
 
 # Test the App
@@ -8,15 +8,16 @@ description: Check a change in the real Amberite App through its browser bridge,
 ## Start it
 
 `node scripts/dev-runner.ts up 1` (or `1 2` for two accounts) starts the stack in the background
-and prints each App's bridge URL once it loads. There is no `vp run up`: on Windows, vp kills the
+and prints each App's `tab:` URL once it loads. There is no `vp run up`: on Windows, vp kills the
 background stack when it returns. Reuse a healthy stack from earlier in the task: `vp run status`
 prints the URLs again. Stop only what you started, with `vp run down`.
 
 ## Drive it
 
-- Each App serves itself at its bridge URL, and every native call goes to the real App. Open only
-  that URL in the preview, not the `tab:` URL printed next to it. The raw App URL has no native
-  calls, and the sign-in website hangs the preview tools.
+- Open each App's `tab:` URL in the preview. Each tab is its own origin and talks to its own App,
+  so two tabs are two accounts side by side. Do not open the bare frontend URL: it reaches no App,
+  and the sign-in website hangs the preview tools.
+- A screen that still calls a Tauri command fails in a tab and works only in the native window.
 - Each App signs itself in as `scenario_<number>`, so screens behind an account work at once.
 - Use data that reaches the changed screen. Scenario 1's account has the richest data.
 - A full-screen "Something broke" (`[data-crash-screen]`) means a page threw while rendering. Its

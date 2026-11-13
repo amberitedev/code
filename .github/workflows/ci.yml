@@ -56,7 +56,6 @@ jobs:
               - packages/ariadne/**
               - packages/async-minecraft-ping/**
               - packages/bedrock/**
-              - packages/browser-bridge/**
               - packages/contracts/**
               - packages/engine/**
               - packages/minecraft-meta-manifest/**
@@ -83,9 +82,9 @@ jobs:
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
-      - run: pnpm --filter @amberite/backend --filter @amberite/browser-bridge --filter @modrinth/app-frontend typecheck
+      - run: pnpm --filter @amberite/backend --filter @modrinth/app-frontend typecheck
       - run: pnpm test:unit
-      - run: pnpm --filter @amberite/backend --filter @amberite/browser-bridge test
+      - run: pnpm --filter @amberite/backend test
       - run: pnpm dev:check
 
   hygiene:
@@ -133,7 +132,6 @@ jobs:
       - run: mkdir -p apps/app-frontend/dist
       - run: cargo fmt --all --check
       - run: cargo shear
-      - run: cargo check -p theseus_gui --features browser-bridge --locked
       - run: cargo test --workspace --exclude toasty --locked
       - run: sh -n apps/core/scripts/install.sh
       # A cargo error fails the step, and theseus_gui proves the pattern matches tauri.

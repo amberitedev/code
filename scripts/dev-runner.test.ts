@@ -5,7 +5,6 @@ import * as NodePath from 'node:path'
 import { describe, expect, it } from 'vite-plus/test'
 
 import {
-	bridgeUrlFromLine,
 	createProcessSpecs,
 	createRuntimeEnvironment,
 	findFirstAvailableOffset,
@@ -18,7 +17,6 @@ import {
 	resolveStartOffset,
 	scenarioTabUrl,
 	scenarioUsername,
-	withLocalBase,
 } from './dev-runner.ts'
 
 describe('dev runner ports', () => {
@@ -251,7 +249,7 @@ describe('dev runner scenarios', () => {
 			})
 			expect(JSON.stringify(app.build)).not.toContain('1420')
 			expect(app.build?.inputs).toEqual(
-				expect.arrayContaining(['Cargo.lock', 'apps/app', 'packages/browser-bridge']),
+				expect.arrayContaining(['Cargo.lock', 'apps/app', 'packages/engine']),
 			)
 		}
 		expect(apps[0]!.build).toEqual(apps[1]!.build)
@@ -378,20 +376,10 @@ describe('dev runner program cache', () => {
 	})
 })
 
-describe('dev runner readiness', () => {
-	it('reads the browser bridge URL from the line the App prints', () => {
-		expect(
-			bridgeUrlFromLine(
-				'2026-10-11T15:33:26.147268Z  INFO browser_bridge: Amberite browser bridge ready url=http://127.0.0.1:64463',
-			),
-		).toBe('http://127.0.0.1:64463')
-		expect(bridgeUrlFromLine('Browser bridge Vite WebSocket proxy failed')).toBeUndefined()
-	})
-
-	it("carries the App's local API base on the bridge and tab URLs", () => {
-		const address = { port: 50001, secret: 'ab12' }
-		const local = '#local=http%3A%2F%2F127.0.0.1%3A50001%2Fab12'
-		expect(withLocalBase('http://127.0.0.1:64463', address)).toBe(`http://127.0.0.1:64463/${local}`)
-		expect(scenarioTabUrl(2, 1420, address)).toBe(`http://scenario-2.localhost:1420/${local}`)
+describe('dev runner tab URL', () => {
+	it("carries the App's local API base on the tab URL", () => {
+		expect(scenarioTabUrl(2, 1420, { port: 50001, secret: 'ab12' })).toBe(
+			'http://scenario-2.localhost:1420/#local=http%3A%2F%2F127.0.0.1%3A50001%2Fab12',
+		)
 	})
 })

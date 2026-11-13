@@ -153,7 +153,6 @@ async fn a_foreign_origin_is_refused() {
 }
 
 /// Above all the Core proxy's, which serves other people's content.
-#[cfg(not(feature = "browser-bridge"))]
 #[tokio::test]
 async fn another_loopback_port_is_refused() {
     let local = local();
