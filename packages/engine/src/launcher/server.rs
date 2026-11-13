@@ -56,6 +56,18 @@ pub async fn server_command(
         &context.instance.path,
         &engine.directories,
     )?;
+    if content_set.loader == ModLoader::Paper {
+        let build = content_set.loader_version.as_deref().ok_or(
+            ErrorKind::NoLoaderVersion {
+                loader: ModLoader::Paper,
+            },
+        )?;
+        return Ok(ServerCommand {
+            java: PathBuf::from(java.path),
+            args: paper::launch_args(engine, &content_set.game_version, build)?,
+            cwd,
+        });
+    }
     let (minecraft, index) =
         super::resolve_minecraft_manifest(&content_set.game_version, engine)
             .await?;
@@ -97,6 +109,7 @@ pub async fn server_command(
                 &loader_version.id,
             )?
         }
+        (ModLoader::Paper, _) => unreachable!("Paper returned above"),
         (loader, None) => bail!(ErrorKind::NoLoaderVersion { loader }),
     };
     Ok(ServerCommand {
@@ -145,7 +158,7 @@ fn launch_args(
         }
         ModLoader::Fabric => FABRIC_SERVER_MAIN,
         ModLoader::Quilt => QUILT_SERVER_MAIN,
-        ModLoader::Forge | ModLoader::NeoForge => {
+        ModLoader::Forge | ModLoader::NeoForge | ModLoader::Paper => {
             bail!(ErrorKind::LauncherError(format!(
                 "{loader:?} starts from its install's arguments"
             )))
