@@ -4,6 +4,7 @@
 use std::path::PathBuf;
 
 use contracts::{Auth, Empty, Endpoint, Json, Method};
+use engine::data::JavaVersion;
 use serde::{Deserialize, Serialize};
 
 use crate::server::events::Command;
@@ -140,6 +141,32 @@ impl Endpoint for GetOpeningCommand {
     type Response = Json<Option<Command>>;
 }
 
+/// The Java at a path the person gave, which fails when it is not one.
+pub struct GetJavaAt;
+
+impl Endpoint for GetJavaAt {
+    const METHOD: Method = Method::Get;
+    const PATH: &'static str = "/app/java";
+    const AUTH: Auth = Auth::None;
+    type Params = ();
+    type Query = LocalPath;
+    type Body = Empty;
+    type Response = Json<JavaAtPath>;
+}
+
+/// Whether the path is a Java of this major version.
+pub struct TestJavaAt;
+
+impl Endpoint for TestJavaAt {
+    const METHOD: Method = Method::Get;
+    const PATH: &'static str = "/app/java/test";
+    const AUTH: Auth = Auth::None;
+    type Params = ();
+    type Query = JavaTest;
+    type Body = Empty;
+    type Response = Json<bool>;
+}
+
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub struct OpenDialog {
@@ -221,3 +248,16 @@ pub enum WebviewLogLevel {
     Warn,
     Error,
 }
+
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct JavaTest {
+    pub path: PathBuf,
+    pub major_version: u32,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct JavaAtPath(
+    #[cfg_attr(test, ts(type = "JavaVersion"))] pub JavaVersion,
+);

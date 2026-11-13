@@ -10,10 +10,8 @@ use engine::instance::{
     SharedInstanceInstallPreview, SharedInstanceInviteInstallPreview,
     SharedInstanceUpdatePreview,
 };
-use engine::pack::import::ImportLauncherType;
 use engine::pack::install_from::CreatePackLocation;
 use serde::Deserialize;
-use std::path::PathBuf;
 use uuid::Uuid;
 
 pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
@@ -35,7 +33,6 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
             install_get_shared_history_settings,
             install_set_shared_history_kept,
             install_bulk_update_content,
-            install_import_instance,
             install_duplicate_instance,
             install_existing_instance,
             install_pack_to_existing_instance,
@@ -309,23 +306,6 @@ pub async fn install_bulk_update_content(
         engine::install::bulk_update_content(instance_id, updates, &state)
             .await?,
     )
-}
-
-#[tauri::command]
-pub async fn install_import_instance(
-    handle: tauri::State<'_, EngineHandle>,
-    launcher_type: ImportLauncherType,
-    base_path: PathBuf,
-    instance_folder: String,
-) -> Result<InstallJobSnapshot> {
-    let state = handle.get().await;
-    Ok(engine::install::import_instance(
-        launcher_type,
-        base_path,
-        instance_folder,
-        &state,
-    )
-    .await?)
 }
 
 #[tauri::command]

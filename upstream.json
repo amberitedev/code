@@ -68,6 +68,8 @@
 		"apps/app/src/api/auth.rs": "apps/app/src/accounts/routes.rs",
 		"apps/app/src/api/cache.rs": "packages/engine/src/routes/cache.rs",
 		"apps/app/src/api/friends.rs": "apps/app/src/friends/routes.rs",
+		"apps/app/src/api/import.rs": "apps/app/src/import/routes.rs",
+		"apps/app/src/api/jre.rs": "packages/engine/src/routes/jre.rs",
 		"apps/app/src/api/metadata.rs": "packages/engine/src/routes/metadata.rs",
 		"apps/app/src/api/minecraft_skins.rs": "apps/app/src/skins/routes.rs",
 		"apps/app/src/api/mr_auth.rs": "apps/app/src/accounts/routes.rs",

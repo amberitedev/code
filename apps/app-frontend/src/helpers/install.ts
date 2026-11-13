@@ -1,16 +1,19 @@
-import type {
-	Copal,
-	IconConfig,
-	InstallErrorView,
-	InstallJavaStep,
-	InstallJobSnapshot,
-	InstallJobStatus,
-	InstallPhaseId,
-	InstallProgress,
-	InstallProgressSecondary,
+import {
+	type Copal,
+	type IconConfig,
+	type ImportLauncherType,
+	type InstallErrorView,
+	type InstallJavaStep,
+	type InstallJobSnapshot,
+	type InstallJobStatus,
+	type InstallPhaseId,
+	type InstallProgress,
+	type InstallProgressSecondary,
+	launcherImport,
 } from '@modrinth/api-client'
 import { invoke } from '@tauri-apps/api/core'
 
+import { apiClient } from '@/platform/modrinth-client'
 import type { AppEvents } from '@/providers/app-events'
 
 import type { InstanceLink, InstanceLoader } from './types'
@@ -294,14 +297,16 @@ export async function install_set_shared_history_kept(kept: number | null) {
 }
 
 export async function install_import_instance(
-	launcherType: string,
+	launcherType: ImportLauncherType,
 	basePath: string,
 	instanceFolder: string,
 ) {
-	return await invoke<InstallJobSnapshot>('plugin:install|install_import_instance', {
-		launcherType,
-		basePath,
-		instanceFolder,
+	return await apiClient.local.call(launcherImport.importInstance, {
+		body: {
+			launcher_type: launcherType,
+			base_path: basePath,
+			instance_folder: instanceFolder,
+		},
 	})
 }
 

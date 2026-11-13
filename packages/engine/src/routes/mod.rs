@@ -4,6 +4,7 @@
 mod cache;
 mod groups;
 mod instances;
+mod jre;
 mod loading;
 mod logs;
 mod metadata;
@@ -21,8 +22,8 @@ use contracts::{ApiError, ErrorCode, server::route};
 use serde::Deserialize;
 
 pub use self::{
-    cache::*, groups::*, instances::*, loading::*, logs::*, metadata::*,
-    process::*, store::*, tags::*, worlds::*,
+    cache::*, groups::*, instances::*, jre::*, loading::*, logs::*,
+    metadata::*, process::*, store::*, tags::*, worlds::*,
 };
 use crate::{
     Engine,
@@ -41,6 +42,10 @@ use crate::{
             SetInstanceGroupOrder,
         },
         instances::{GetInstance, GetInstances, ListInstances},
+        jre::{
+            FindJavaInstalls, GetJavaVersions, GetSystemMemory, InstallJava,
+            SetJavaVersion,
+        },
         loading::ListLoadingBars,
         logs::{
             ClearLiveLog, DeleteInstanceLog, GetInstanceLogOutput, GetLiveLog,
@@ -129,6 +134,11 @@ where
         route::<ListProcesses, _, _, _>(list_processes),
         route::<ListInstanceProcesses, _, _, _>(list_instance_processes),
         route::<KillProcess, _, _, _>(kill_process),
+        route::<GetJavaVersions, _, _, _>(get_java_versions),
+        route::<SetJavaVersion, _, _, _>(set_java_version),
+        route::<FindJavaInstalls, _, _, _>(find_java_installs),
+        route::<InstallJava, _, _, _>(install_java),
+        route::<GetSystemMemory, _, _, _>(get_system_memory),
     ]
     .into_iter()
     .fold(Router::new(), |router, (path, method)| {

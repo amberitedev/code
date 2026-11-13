@@ -17,6 +17,7 @@ mod desktop;
 mod dev;
 mod engine_handle;
 mod friends;
+mod import;
 mod launch;
 mod library;
 mod onboarding;
@@ -342,11 +343,9 @@ fn main() {
         });
 
     builder = builder
-        .plugin(api::import::init())
         .plugin(api::install::init())
         .plugin(api::instance::init())
         .plugin(api::logs::init())
-        .plugin(api::jre::init())
         .plugin(api::files::init())
         .manage(updater)
         .manage(engine)

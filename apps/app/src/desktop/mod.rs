@@ -2,6 +2,7 @@ mod debug_export;
 mod dialog;
 mod external_save;
 pub mod files;
+mod jre;
 mod network;
 mod opener;
 mod opening;
@@ -29,6 +30,7 @@ pub fn routes(engine: EngineHandle, app: AppSlot, secret: &str) -> Router {
         .merge(opener::routes(engine))
         .merge(shortcuts::routes())
         .merge(network::routes())
+        .merge(jre::routes())
         .merge(webview_log::routes(secret))
 }
 

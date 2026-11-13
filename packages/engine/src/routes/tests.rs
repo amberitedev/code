@@ -201,6 +201,20 @@ async fn a_denied_caller_sees_no_instances_and_touches_no_groups_or_store() {
             "/processes/00000000-0000-0000-0000-000000000000/kill",
             None,
         ),
+        ("GET", "/java/versions", None),
+        (
+            "PUT",
+            "/java/versions",
+            Some(json!({
+                "parsed_version": 17,
+                "version": "17.0.1",
+                "architecture": "x86_64",
+                "path": "/bin/java",
+            })),
+        ),
+        ("GET", "/java/installs?version=17", None),
+        ("POST", "/java/installs", Some(json!(17))),
+        ("GET", "/system/memory", None),
     ] {
         let (status, _) = send(&router, method, uri, body).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "{uri}");

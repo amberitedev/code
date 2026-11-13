@@ -249,6 +249,10 @@ export type ProcessMetadata = { uuid: string, instance_id: string, instance_path
 
 export type ProcessRef = { uuid: string, };
 
+export type JavaVersion = { parsed_version: number, version: string, architecture: string, path: string, };
+
+export type JavaInstallsQuery = { version?: number, };
+
 export type FriendPayload = { "event": "friend_request", from: string, } | { "event": "user_offline", id: string, } | { "event": "status_update", user_status: FriendStatusPayload, } | { "event": "status_sync" } | { "event": "friend_request_rejected", from: string, };
 
 export type FriendStatusPayload = { user_id: string, profile_name: string | null, last_update: string, };
@@ -335,4 +339,12 @@ export const processes = {
 	ListProcesses: { method: "GET", path: "/processes", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<ProcessMetadata>>,
 	ListInstanceProcesses: { method: "GET", path: "/instances/{id}/processes", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceRef, null, void, Array<ProcessMetadata>>,
 	KillProcess: { method: "POST", path: "/processes/{uuid}/kill", auth: "session", dangerous: false, body: "empty", response: "empty" } as Endpoint<ProcessRef, null, void, void>,
+}
+
+export const java = {
+	GetJavaVersions: { method: "GET", path: "/java/versions", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, { [key in number]: JavaVersion }>,
+	SetJavaVersion: { method: "PUT", path: "/java/versions", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, JavaVersion, void>,
+	FindJavaInstalls: { method: "GET", path: "/java/installs", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, JavaInstallsQuery, void, Array<JavaVersion>>,
+	InstallJava: { method: "POST", path: "/java/installs", auth: "session", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, number, string>,
+	GetSystemMemory: { method: "GET", path: "/system/memory", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, number>,
 }

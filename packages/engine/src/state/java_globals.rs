@@ -3,6 +3,7 @@ use futures::TryStreamExt;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Clone)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct JavaVersion {
     pub parsed_version: u32,
     pub version: String,

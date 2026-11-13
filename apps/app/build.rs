@@ -9,34 +9,6 @@ fn main() {
         tauri_build::Attributes::new()
             .codegen(tauri_build::CodegenContext::new())
             .plugin(
-                "import",
-                InlinedPlugin::new()
-                    .commands(&[
-                        "get_importable_instances",
-                        "is_valid_importable_instance",
-                        "get_default_launcher_path",
-                    ])
-                    .default_permission(
-                        DefaultPermissionRule::AllowAllCommands,
-                    ),
-            )
-            .plugin(
-                "jre",
-                InlinedPlugin::new()
-                    .commands(&[
-                        "get_java_versions",
-                        "set_java_version",
-                        "jre_find_filtered_jres",
-                        "jre_get_jre",
-                        "jre_test_jre",
-                        "jre_auto_install_java",
-                        "jre_get_max_memory",
-                    ])
-                    .default_permission(
-                        DefaultPermissionRule::AllowAllCommands,
-                    ),
-            )
-            .plugin(
                 "install",
                 InlinedPlugin::new()
                     .commands(&[
@@ -56,7 +28,6 @@ fn main() {
                         "install_get_shared_history_settings",
                         "install_set_shared_history_kept",
                         "install_bulk_update_content",
-                        "install_import_instance",
                         "install_duplicate_instance",
                         "install_existing_instance",
                         "install_pack_to_existing_instance",

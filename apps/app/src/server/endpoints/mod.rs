@@ -49,6 +49,7 @@ pub mod files;
 pub mod friends;
 pub mod game_options;
 pub mod health;
+pub mod import;
 pub mod launch;
 pub mod library;
 pub mod onboarding;
@@ -82,9 +83,10 @@ mod tests {
         },
         desktop::{
             AppFolder, CheckNetworkMetered, CreateShortcut, DialogFilter,
-            ExternalLink, GetOpeningCommand, LocalPath, LogFromWebview,
-            NewShortcut, OpenDialog, OpenFolder, OpenPath, OpenUrl, PickFiles,
-            PickSavePath, RevealPath, SaveDialog, WebviewLog, WebviewLogLevel,
+            ExternalLink, GetJavaAt, GetOpeningCommand, JavaAtPath, JavaTest,
+            LocalPath, LogFromWebview, NewShortcut, OpenDialog, OpenFolder,
+            OpenPath, OpenUrl, PickFiles, PickSavePath, RevealPath, SaveDialog,
+            TestJavaAt, WebviewLog, WebviewLogLevel,
         },
         events::EventSocket,
         files::{
@@ -95,6 +97,11 @@ mod tests {
         friends,
         game_options::{self, GameSettingLabelsRequest},
         health::CheckHealth,
+        import::{
+            CheckImportableInstance, GetDefaultLauncherPath, ImportInstance,
+            ImportJob, ImportableInstance, InstanceToImport, Launcher,
+            LauncherFolder, ListImportableInstances,
+        },
         launch::{
             JoinServer, JoinSingleplayerWorld, ServerJoin, SingleplayerJoin,
         },
@@ -282,6 +289,13 @@ mod tests {
             InstanceVisibility::decl(&cfg),
             AppSettings::decl(&cfg),
             OnboardingProgress::decl(&cfg),
+            JavaTest::decl(&cfg),
+            JavaAtPath::decl(&cfg),
+            Launcher::decl(&cfg),
+            LauncherFolder::decl(&cfg),
+            ImportableInstance::decl(&cfg),
+            InstanceToImport::decl(&cfg),
+            ImportJob::decl(&cfg),
         ]
         .map(|declaration| format!("\nexport {declaration}\n"))
         .concat();
@@ -289,7 +303,7 @@ mod tests {
             "// Generated from apps/app by ts-rs. Do not edit.\n\
              // Regenerate: cargo test -p theseus_gui -- --ignored write_ts\n\n\
              import type {{ ApiError, CoreSession, Endpoint, SharedIconConfig, UserFriend, UserStatus }} from './contracts'\n\
-             import type {{ CommandPayload, DesyncServerMode, EngineEvent, FriendPayload, InstanceGroupsChangedPayload, OnboardingChecklist, Settings }} from './engine'\n\
+             import type {{ CommandPayload, DesyncServerMode, EngineEvent, FriendPayload, ImportLauncherType, InstallJobSnapshot, InstanceGroupsChangedPayload, JavaVersion, OnboardingChecklist, Settings }} from './engine'\n\
              {declarations}\n\
              export const health = {{\n\
              \tcheckHealth: {},\n\
@@ -324,6 +338,8 @@ mod tests {
              \tcheckNetworkMetered: {},\n\
              \tlogFromWebview: {},\n\
              \tgetOpeningCommand: {},\n\
+             \tgetJavaAt: {},\n\
+             \ttestJavaAt: {},\n\
              }}\n\n\
              export const library = {{\n\
              \tlistRecentIconConfigs: {},\n\
@@ -351,6 +367,12 @@ mod tests {
              export const onboarding = {{\n\
              \tgetOnboardingChecklist: {},\n\
              \tskipCreateInstanceOnboarding: {},\n\
+             }}\n\n\
+             export const launcherImport = {{\n\
+             \tlistImportableInstances: {},\n\
+             \tcheckImportableInstance: {},\n\
+             \tgetDefaultLauncherPath: {},\n\
+             \timportInstance: {},\n\
              }}\n",
             endpoint::<CheckHealth>(),
             endpoint::<GetBoot>(),
@@ -374,6 +396,8 @@ mod tests {
             endpoint::<CheckNetworkMetered>(),
             endpoint::<LogFromWebview>(),
             endpoint::<GetOpeningCommand>(),
+            endpoint::<GetJavaAt>(),
+            endpoint::<TestJavaAt>(),
             endpoint::<ListRecentIconConfigs>(),
             endpoint::<ListHiddenInstances>(),
             endpoint::<SetInstanceHidden>(),
@@ -393,6 +417,10 @@ mod tests {
             endpoint::<CancelDirectoryChange>(),
             endpoint::<GetOnboardingChecklist>(),
             endpoint::<SkipCreateInstanceOnboarding>(),
+            endpoint::<ListImportableInstances>(),
+            endpoint::<CheckImportableInstance>(),
+            endpoint::<GetDefaultLauncherPath>(),
+            endpoint::<ImportInstance>(),
         )
     }
 

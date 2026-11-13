@@ -19,6 +19,7 @@ use crate::{
             self, Instance, InstanceIds, InstanceLink, InstanceRef,
             SharedInstanceAttachment,
         },
+        jre::{self, JavaInstallsQuery},
         loading,
         logs::{self, LogFileRef, LogListing},
         metadata::{self, LoaderRef},
@@ -48,8 +49,8 @@ use crate::{
         CacheBehaviour, CacheValueType, Category, ContentSetSyncStatus,
         DefaultPage, Dependency, DependencyType, DonationLink, FeatureFlag,
         FileType, GalleryItem, GameVersion, Hooks, InstanceInstallStage,
-        InstanceSyncedOptions, InstanceTabVisibility, License, Loader,
-        Log4jEvent, MemorySettings, ModLoader, OnboardingChecklist,
+        InstanceSyncedOptions, InstanceTabVisibility, JavaVersion, License,
+        Loader, Log4jEvent, MemorySettings, ModLoader, OnboardingChecklist,
         Organization, ProcessMetadata, Project, ProjectV3, ReleaseChannel,
         SearchEntry, SearchResult, SearchResultV3, SearchResults,
         SearchResultsV3, Settings, SharedInstanceRole, SideType, TeamMember,
@@ -185,6 +186,8 @@ fn file() -> String {
         LogFileRef::decl(&cfg),
         ProcessMetadata::decl(&cfg),
         ProcessRef::decl(&cfg),
+        JavaVersion::decl(&cfg),
+        JavaInstallsQuery::decl(&cfg),
         // The payloads of the App's events that engine code still raises.
         FriendPayload::decl(&cfg),
         FriendStatusPayload::decl(&cfg),
@@ -205,6 +208,7 @@ fn file() -> String {
         ("cache", cache::ts_entries()),
         ("logs", logs::ts_entries()),
         ("processes", process::ts_entries()),
+        ("java", jre::ts_entries()),
     ]
     .map(|(name, entries)| format!("\nexport const {name} = {{\n{entries}}}\n"))
     .concat();
