@@ -14,13 +14,12 @@ use tokio::io::AsyncReadExt;
 use tokio_util::compat::FuturesAsyncReadCompatExt;
 use url::Url;
 
-use crate::{
-    ErrorKind, minecraft_skins::UrlOrBlob, util::fetch::INSECURE_REQWEST_CLIENT,
-};
+use crate::skins::minecraft_skins::UrlOrBlob;
+use engine::{ErrorKind, INSECURE_REQWEST_CLIENT};
 
 pub async fn url_to_data_stream(
     url: &Url,
-) -> crate::Result<impl Stream<Item = Result<Bytes, reqwest::Error>> + use<>> {
+) -> engine::Result<impl Stream<Item = Result<Bytes, reqwest::Error>> + use<>> {
     if url.scheme() == "data" {
         let data = DataUrl::process(url.as_str())?.decode_to_vec()?.0.into();
 
@@ -61,7 +60,7 @@ pub fn is_png(png_data: &[u8]) -> bool {
     png_data.starts_with(PNG_SIGNATURE)
 }
 
-pub fn dimensions(png_data: &[u8]) -> crate::Result<(u32, u32)> {
+pub fn dimensions(png_data: &[u8]) -> engine::Result<(u32, u32)> {
     if !is_png(png_data) {
         bail!(ErrorKind::InvalidPng);
     }
@@ -97,7 +96,7 @@ pub fn dimensions(png_data: &[u8]) -> crate::Result<(u32, u32)> {
 /// The normalized, processed is returned texture as a byte array in PNG format.
 pub async fn normalize_skin_texture(
     texture: &UrlOrBlob,
-) -> crate::Result<Bytes> {
+) -> engine::Result<Bytes> {
     let mut texture_data = Vec::with_capacity(8192);
     Box::pin(
         match texture {
@@ -183,7 +182,7 @@ pub async fn normalize_skin_texture(
 fn get_skin_texture_buffer<R: BufRead + Seek>(
     png_reader: &mut png::Reader<R>,
     is_legacy_skin: bool,
-) -> crate::Result<Vec<Rgba<u8>>> {
+) -> engine::Result<Vec<Rgba<u8>>> {
     let output_buffer_size = png_reader
         .output_buffer_size()
         .expect("Reasonable skin texture size verified already");

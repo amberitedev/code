@@ -1,7 +1,10 @@
 use std::sync::Arc;
 
-use super::{DiscordGuard, FriendsSocket, ModrinthCredentials};
-use crate::Engine;
+use engine::Engine;
+
+use crate::accounts::state::ModrinthCredentials;
+use crate::discord::DiscordGuard;
+use crate::friends::state::FriendsSocket;
 
 /// Long-running social integrations.
 pub struct Presence {
@@ -10,7 +13,7 @@ pub struct Presence {
 }
 
 impl Presence {
-    pub(crate) fn init() -> crate::Result<Self> {
+    pub(crate) fn init() -> engine::Result<Self> {
         Ok(Self {
             discord_rpc: DiscordGuard::init()?,
             friends_socket: FriendsSocket::new(),
@@ -18,54 +21,50 @@ impl Presence {
     }
 }
 
-impl Engine {
-    /// Refreshes Modrinth sign-ins, connects Discord and the friends socket, then keeps the socket
-    /// connected. The friends socket waits for the refresh, which may replace its session.
-    pub async fn start_presence(self: Arc<Self>) {
-        let res = tokio::try_join!(
-            self.presence.discord_rpc.clear_to_default(
-                true,
-                &self.pool,
-                &self.process_manager,
-            ),
-            ModrinthCredentials::refresh_all(
-                &self.pool,
-                &self.fetch_semaphore,
-                &self.sessions,
-            ),
-        );
+/// Refreshes Modrinth sign-ins, connects Discord and the friends socket, then keeps the socket
+/// connected. The friends socket waits for the refresh, which may replace its session.
+pub async fn start_presence(engine: Arc<Engine>, presence: Arc<Presence>) {
+    let res = tokio::try_join!(
+        presence.discord_rpc.clear_to_default(
+            true,
+            engine.pool(),
+            &engine.process_manager,
+        ),
+        ModrinthCredentials::refresh_all(
+            engine.pool(),
+            &engine.fetch_semaphore,
+            &engine.sessions,
+        ),
+    );
 
-        if let Err(e) = res {
-            tracing::error!("Error running discord RPC: {e}");
-        }
-
-        let _ = self
-            .presence
-            .friends_socket
-            .connect(
-                &self.pool,
-                &self.api_semaphore,
-                &self.sessions,
-                &self.process_manager,
-                &self.events,
-            )
-            .await;
-        let _ = FriendsSocket::socket_loop(self).await;
+    if let Err(e) = res {
+        tracing::error!("Error running discord RPC: {e}");
     }
 
-    /// Shows the first running instance, or none, on Discord and to friends.
-    pub async fn show_presence(&self) {
-        let _ = self
-            .presence
-            .discord_rpc
-            .clear_to_default(true, &self.pool, &self.process_manager)
-            .await;
-        let playing = self
-            .process_manager
-            .get_all()
-            .into_iter()
-            .next()
-            .map(|process| process.instance_name);
-        let _ = self.presence.friends_socket.update_status(playing).await;
-    }
+    let _ = presence
+        .friends_socket
+        .connect(
+            engine.pool(),
+            &engine.api_semaphore,
+            &engine.sessions,
+            &engine.process_manager,
+            &engine.events,
+        )
+        .await;
+    let _ = FriendsSocket::socket_loop(engine, presence).await;
+}
+
+/// Shows the first running instance, or none, on Discord and to friends.
+pub async fn show_presence(engine: &Engine, presence: &Presence) {
+    let _ = presence
+        .discord_rpc
+        .clear_to_default(true, engine.pool(), &engine.process_manager)
+        .await;
+    let playing = engine
+        .process_manager
+        .get_all()
+        .into_iter()
+        .next()
+        .map(|process| process.instance_name);
+    let _ = presence.friends_socket.update_status(playing).await;
 }

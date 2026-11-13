@@ -1,4 +1,4 @@
-//! Serves `crate::server::endpoints::skins` over the engine crate's skin code.
+//! Serves `crate::server::endpoints::skins` over `crate::skins::minecraft_skins`.
 
 use std::sync::Arc;
 
@@ -7,12 +7,9 @@ use contracts::{
     ApiError, Empty, Json, Raw,
     server::{Req, route},
 };
-use engine::{
-    Engine,
-    minecraft_skins::{self, Cape, Skin},
-    routes::api_error,
-};
+use engine::Engine;
 
+use crate::accounts::api_error;
 use crate::server::{
     AppState,
     endpoints::skins::{
@@ -21,6 +18,7 @@ use crate::server::{
         SetCustomSkinOrder, UnequipSkin,
     },
 };
+use crate::skins::minecraft_skins::{self, Cape, Skin};
 
 type Answer<T> = Result<T, ApiError>;
 

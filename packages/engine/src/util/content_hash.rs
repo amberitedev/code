@@ -72,6 +72,6 @@ pub(crate) async fn copy_and_hash(
     Ok(hashes.finish(size))
 }
 
-pub(crate) fn encode_hex(bytes: &[u8]) -> String {
+pub fn encode_hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }

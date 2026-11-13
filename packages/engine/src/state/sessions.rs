@@ -45,12 +45,12 @@ impl Sessions {
         *self.backend.write().expect("sessions lock poisoned") = session;
     }
 
-    pub(crate) fn backend(&self) -> Option<BackendSession> {
+    pub fn backend(&self) -> Option<BackendSession> {
         self.backend.read().expect("sessions lock poisoned").clone()
     }
 
     /// The Modrinth session token, only for a URL allowed to receive it.
-    pub(crate) fn modrinth_token(&self, url: &str) -> Option<String> {
+    pub fn modrinth_token(&self, url: &str) -> Option<String> {
         if !may_send_credentials(self, url) {
             return None;
         }

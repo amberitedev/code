@@ -7,15 +7,11 @@ use reqwest::{Body, multipart::Part};
 use serde_json::json;
 use uuid::Uuid;
 
-use super::MinecraftSkinVariant;
-use crate::{
-    data::Credentials,
-    state::{
-        MINECRAFT_SERVICES_USER_AGENT, MinecraftProfile, PROFILE_CACHE,
-        ProfileCacheEntry,
-    },
-    util::fetch::INSECURE_REQWEST_CLIENT,
+use crate::accounts::state::{
+    Credentials, MINECRAFT_SERVICES_USER_AGENT, MinecraftProfile,
+    MinecraftSkinVariant, PROFILE_CACHE, ProfileCacheEntry,
 };
+use engine::INSECURE_REQWEST_CLIENT;
 
 /// Provides operations for interacting with capes on a Minecraft player profile.
 pub struct MinecraftCapeOperation;
@@ -24,7 +20,7 @@ impl MinecraftCapeOperation {
     pub async fn equip(
         credentials: &Credentials,
         cape_id: Uuid,
-    ) -> crate::Result<()> {
+    ) -> engine::Result<()> {
         update_profile_cache_from_response(
             INSECURE_REQWEST_CLIENT
 				.put("https://api.minecraftservices.com/minecraft/profile/capes/active")
@@ -44,7 +40,7 @@ impl MinecraftCapeOperation {
         Ok(())
     }
 
-    pub async fn unequip_any(credentials: &Credentials) -> crate::Result<()> {
+    pub async fn unequip_any(credentials: &Credentials) -> engine::Result<()> {
         update_profile_cache_from_response(
 			INSECURE_REQWEST_CLIENT
 				.delete("https://api.minecraftservices.com/minecraft/profile/capes/active")
@@ -69,7 +65,7 @@ impl MinecraftSkinOperation {
         credentials: &Credentials,
         texture: TextureStream,
         variant: MinecraftSkinVariant,
-    ) -> crate::Result<Option<Arc<MinecraftProfile>>>
+    ) -> engine::Result<Option<Arc<MinecraftProfile>>>
     where
         TextureStream: TryStream + Send + 'static,
         TextureStream::Error: Into<Box<dyn Error + Send + Sync>>,
@@ -111,7 +107,7 @@ impl MinecraftSkinOperation {
         Ok(profile)
     }
 
-    pub async fn unequip_any(credentials: &Credentials) -> crate::Result<()> {
+    pub async fn unequip_any(credentials: &Credentials) -> engine::Result<()> {
         update_profile_cache_from_response(
 			INSECURE_REQWEST_CLIENT
 				.delete("https://api.minecraftservices.com/minecraft/profile/skins/active")

@@ -27,6 +27,7 @@ use super::{
     events::Events,
     guard::{APP_ORIGINS, Guard},
 };
+use crate::presence::Presence;
 
 fn boot() -> Boot {
     Boot {
@@ -65,6 +66,7 @@ fn local_with(engine: EngineHandle) -> Local {
             boot(),
             Events::default(),
             engine,
+            Arc::new(Presence::init().unwrap()),
             app,
             Arc::clone(&updater),
             data.path().to_string_lossy().into_owned(),
@@ -272,6 +274,7 @@ async fn boot_answers_from_bind() {
         boot(),
         Events::default(),
         EngineHandle::default(),
+        Arc::new(Presence::init().unwrap()),
         AppSlot::default(),
         Arc::new(Updater::new(AppSlot::default())),
         "test".into(),
@@ -305,6 +308,7 @@ async fn the_event_socket_waits_for_the_engine_then_sends_events_as_json() {
         boot(),
         events.clone(),
         handle.clone(),
+        Arc::new(Presence::init().unwrap()),
         AppSlot::default(),
         Arc::new(Updater::new(AppSlot::default())),
         "test".into(),
@@ -602,7 +606,11 @@ async fn with_nobody_signed_in_the_account_reads_are_empty() {
     )
     .await
     .unwrap();
-    handle.set(Ok(engine::Engine::new(config).await.unwrap()));
+    let engine = engine::Engine::new(config).await.unwrap();
+    crate::accounts::self_hosted::bind_origin(engine.pool(), &engine.sessions)
+        .await
+        .unwrap();
+    handle.set(Ok(engine));
     let local = local_with(handle);
 
     for (path, empty) in [

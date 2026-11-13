@@ -1,10 +1,7 @@
-use crate::LabrinthError;
-use crate::data::ModrinthCredentials;
-use crate::event::emit::{emit_friend, emit_notification};
-use crate::event::{EventSink, FriendPayload};
-use crate::state::tunnel::InternalTunnelSocket;
-use crate::state::{ProcessManager, Sessions, TunnelSocket};
-use crate::util::fetch::{FetchSemaphore, fetch_advanced, fetch_json};
+use super::TunnelSocket;
+use super::tunnel::InternalTunnelSocket;
+use crate::accounts::state::ModrinthCredentials;
+use crate::presence::Presence;
 use anyhow::bail;
 use ariadne::ids::UserId;
 use ariadne::networking::message::{
@@ -19,6 +16,11 @@ use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use dashmap::DashMap;
 use either::Either;
+use engine::LabrinthError;
+use engine::{
+    EventSink, FetchSemaphore, FriendPayload, ProcessManager, Sessions,
+    emit_friend, emit_notification, fetch_advanced, fetch_json,
+};
 use futures::{SinkExt, StreamExt};
 use reqwest::Method;
 use reqwest::header::HeaderValue;
@@ -79,7 +81,7 @@ impl FriendsSocket {
         sessions: &Sessions,
         process_manager: &ProcessManager,
         events: &EventSink,
-    ) -> crate::Result<()> {
+    ) -> engine::Result<()> {
         let _connection_guard = self.connection_lock.lock().await;
         if self.is_connected().await {
             return Ok(());
@@ -92,14 +94,14 @@ impl FriendsSocket {
         if let Some(credentials) = credentials {
             let mut request = format!(
                 "{}_internal/launcher_socket?code={}",
-                crate::self_hosted::accounts::socket_base(sessions),
+                engine::self_hosted::accounts::socket_base(sessions),
                 credentials.session
             )
             .into_client_request()?;
 
             request.headers_mut().insert(
                 "User-Agent",
-                HeaderValue::from_str(&crate::launcher_user_agent()).unwrap(),
+                HeaderValue::from_str(&engine::launcher_user_agent()).unwrap(),
             );
 
             let res = connect_async(request).await;
@@ -271,7 +273,7 @@ impl FriendsSocket {
                         "Error connecting to friends socket: {e:?}"
                     );
 
-                    return Err(crate::Error::from(e));
+                    return Err(engine::Error::from(e));
                 }
             }
         }
@@ -282,7 +284,7 @@ impl FriendsSocket {
     async fn handle_notification(
         events: &EventSink,
         notification: Value,
-    ) -> crate::Result<()> {
+    ) -> engine::Result<()> {
         tracing::info!(
             notification = %notification,
             "Received websocket notification payload"
@@ -301,14 +303,16 @@ impl FriendsSocket {
     }
 
     #[tracing::instrument(skip_all)]
-    pub async fn socket_loop(state: Arc<crate::Engine>) -> crate::Result<()> {
+    pub async fn socket_loop(
+        state: Arc<engine::Engine>,
+        presence: Arc<Presence>,
+    ) -> engine::Result<()> {
         tokio::task::spawn(async move {
             let mut last_connection = Utc::now();
             let mut last_ping = Utc::now();
 
             loop {
-                let connected =
-                    state.presence.friends_socket.is_connected().await;
+                let connected = presence.friends_socket.is_connected().await;
 
                 if !connected
                     && Utc::now().signed_duration_since(last_connection)
@@ -316,11 +320,10 @@ impl FriendsSocket {
                 {
                     last_connection = Utc::now();
                     last_ping = Utc::now();
-                    let _ = state
-                        .presence
+                    let _ = presence
                         .friends_socket
                         .connect(
-                            &state.pool,
+                            state.pool(),
                             &state.api_semaphore,
                             &state.sessions,
                             &state.process_manager,
@@ -332,8 +335,7 @@ impl FriendsSocket {
                         > chrono::Duration::seconds(10)
                 {
                     last_ping = Utc::now();
-                    let mut write =
-                        state.presence.friends_socket.write.write().await;
+                    let mut write = presence.friends_socket.write.write().await;
                     if let Some(write) = write.as_mut() {
                         let _ = write.send(Message::Ping(Bytes::new())).await;
                     }
@@ -347,7 +349,7 @@ impl FriendsSocket {
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn disconnect(&self) -> crate::Result<()> {
+    pub async fn disconnect(&self) -> engine::Result<()> {
         let _connection_guard = self.connection_lock.lock().await;
         self.connection_generation.fetch_add(1, Ordering::AcqRel);
 
@@ -369,7 +371,7 @@ impl FriendsSocket {
     pub async fn update_status(
         &self,
         instance_name: Option<String>,
-    ) -> crate::Result<()> {
+    ) -> engine::Result<()> {
         Self::send_message(
             &self.write,
             ClientToServerMessage::StatusUpdate {
@@ -383,7 +385,7 @@ impl FriendsSocket {
     pub async fn friends(
         semaphore: &FetchSemaphore,
         sessions: &Sessions,
-    ) -> crate::Result<Vec<UserFriend>> {
+    ) -> engine::Result<Vec<UserFriend>> {
         fetch_json(
             Method::GET,
             concat!(env!("MODRINTH_API_URL_V3"), "friends"),
@@ -409,7 +411,7 @@ impl FriendsSocket {
         user_id: &str,
         semaphore: &FetchSemaphore,
         sessions: &Sessions,
-    ) -> crate::Result<()> {
+    ) -> engine::Result<()> {
         let result = fetch_advanced(
             Method::POST,
             &format!("{}friend/{user_id}", env!("MODRINTH_API_URL_V3")),
@@ -440,7 +442,7 @@ impl FriendsSocket {
         user_id: &str,
         semaphore: &FetchSemaphore,
         sessions: &Sessions,
-    ) -> crate::Result<()> {
+    ) -> engine::Result<()> {
         fetch_advanced(
             Method::DELETE,
             &format!("{}friend/{user_id}", env!("MODRINTH_API_URL_V3")),
@@ -459,7 +461,7 @@ impl FriendsSocket {
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn open_port(&self, port: u16) -> crate::Result<TunnelSocket> {
+    pub async fn open_port(&self, port: u16) -> engine::Result<TunnelSocket> {
         let socket_id = Uuid::new_v4();
         let socket = self.tunnel_sockets.entry(socket_id).insert(Arc::new(
             InternalTunnelSocket::Listening(SocketAddr::new(
@@ -483,7 +485,7 @@ impl FriendsSocket {
         &self,
         socket_id: Uuid,
         socket: impl Deref<Target = Arc<InternalTunnelSocket>>,
-    ) -> crate::Result<TunnelSocket> {
+    ) -> engine::Result<TunnelSocket> {
         Ok(TunnelSocket {
             socket_id,
             write: self.write.clone(),
@@ -521,7 +523,7 @@ impl FriendsSocket {
     pub(super) async fn send_message(
         write: &WriteSocket,
         message: ClientToServerMessage,
-    ) -> crate::Result<()> {
+    ) -> engine::Result<()> {
         let serialized = match message.serialize()? {
             Either::Left(text) => Message::text(text),
             Either::Right(bytes) => Message::binary(bytes),

@@ -15,6 +15,7 @@ use engine::{
 use tauri::{AppHandle, Manager};
 use tokio::sync::broadcast::{self, Receiver, error::RecvError};
 
+use crate::presence::{Presence, show_presence, start_presence};
 use crate::server::events::AppEvent;
 
 #[derive(Debug, PartialEq)]
@@ -32,17 +33,31 @@ enum WindowChange {
 
 /// Connects presence, starts synced options and reacts to `events`, which must be subscribed
 /// before the engine starts so no event is missed.
-pub fn start(engine: &Arc<Engine>, app: AppHandle, events: Receiver<Event>) {
-    tauri::async_runtime::spawn(Arc::clone(engine).start_presence());
+pub fn start(
+    engine: &Arc<Engine>,
+    presence: Arc<Presence>,
+    app: AppHandle,
+    events: Receiver<Event>,
+) {
+    tauri::async_runtime::spawn(start_presence(
+        Arc::clone(engine),
+        Arc::clone(&presence),
+    ));
     let app_events = app.state::<broadcast::Sender<AppEvent>>().inner().clone();
     instance::start_synced_options(engine, move || {
         let _ = app_events.send(AppEvent::GameOptionLocalesUpdated);
     });
-    tauri::async_runtime::spawn(react(Arc::downgrade(engine), app, events));
+    tauri::async_runtime::spawn(react(
+        Arc::downgrade(engine),
+        presence,
+        app,
+        events,
+    ));
 }
 
 async fn react(
     engine: Weak<Engine>,
+    presence: Arc<Presence>,
     app: AppHandle,
     mut events: Receiver<Event>,
 ) {
@@ -84,7 +99,7 @@ async fn react(
         if reaction.presence
             && let Some(engine) = engine.upgrade()
         {
-            engine.show_presence().await;
+            show_presence(&engine, &presence).await;
         }
         if let Some(change) = reaction.window {
             change_window(&app, change);

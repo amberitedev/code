@@ -1,12 +1,12 @@
-use crate::state::{CacheBehaviour, CachedEntry, Sessions};
-use crate::util::fetch::{FetchSemaphore, fetch_advanced};
 use chrono::{DateTime, Duration, TimeZone, Utc};
+use engine::data::{CacheBehaviour, CachedEntry, User};
+use engine::{FetchSemaphore, Sessions, fetch_advanced};
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct ModrinthCredentials {
     pub session: String,
     pub expires: DateTime<Utc>,
@@ -19,7 +19,7 @@ impl ModrinthCredentials {
         exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite> + Copy,
         semaphore: &FetchSemaphore,
         sessions: &Sessions,
-    ) -> crate::Result<Option<Self>> {
+    ) -> engine::Result<Option<Self>> {
         let creds = Self::get_active(exec).await?;
 
         if let Some(mut creds) = creds {
@@ -49,7 +49,7 @@ impl ModrinthCredentials {
                     creds.session = value.session;
                     creds.expires = Utc::now() + Duration::weeks(2);
                     creds.upsert(exec).await?;
-                    crate::self_hosted::accounts::set_sessions(
+                    crate::accounts::self_hosted::set_sessions(
                         sessions,
                         Some(&creds),
                     );
@@ -57,7 +57,7 @@ impl ModrinthCredentials {
                     Ok(Some(creds))
                 } else {
                     Self::remove(&creds.user_id, exec).await?;
-                    crate::self_hosted::accounts::set_sessions(sessions, None);
+                    crate::accounts::self_hosted::set_sessions(sessions, None);
 
                     Ok(None)
                 }
@@ -71,7 +71,7 @@ impl ModrinthCredentials {
 
     pub async fn get_active(
         exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
-    ) -> crate::Result<Option<Self>> {
+    ) -> engine::Result<Option<Self>> {
         let res = sqlx::query!(
             "
             SELECT
@@ -94,22 +94,14 @@ impl ModrinthCredentials {
         }))
     }
 
-    pub async fn get_active_user_id(
-        exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
-    ) -> crate::Result<Option<String>> {
-        Ok(Self::get_active(exec)
-            .await?
-            .map(|credentials| credentials.user_id))
-    }
-
     pub async fn get_all(
         exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
         sessions: &Sessions,
-    ) -> crate::Result<Vec<Self>> {
+    ) -> engine::Result<Vec<Self>> {
         let res: Vec<(String, i64, String, i64)> = sqlx::query_as(
             "SELECT users.id, users.active, users.session_id, users.expires FROM modrinth_users users JOIN self_hosted_account_origins origins ON origins.user_id = users.id WHERE origins.origin = ? ORDER BY users.rowid",
         )
-        .bind(crate::self_hosted::accounts::origin(sessions))
+        .bind(engine::self_hosted::accounts::origin(sessions))
         .fetch_all(exec)
         .await?;
 
@@ -130,7 +122,7 @@ impl ModrinthCredentials {
     pub async fn upsert(
         &self,
         exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite> + Copy,
-    ) -> crate::Result<()> {
+    ) -> engine::Result<()> {
         let expires = self.expires.timestamp();
 
         if self.active {
@@ -159,7 +151,7 @@ impl ModrinthCredentials {
 
     pub async fn deactivate_all(
         exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
-    ) -> crate::Result<()> {
+    ) -> engine::Result<()> {
         sqlx::query!(
             "
                 UPDATE modrinth_users
@@ -175,7 +167,7 @@ impl ModrinthCredentials {
     pub async fn remove(
         user_id: &str,
         exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
-    ) -> crate::Result<()> {
+    ) -> engine::Result<()> {
         sqlx::query!(
             "
             DELETE FROM modrinth_users WHERE id = $1
@@ -192,13 +184,13 @@ impl ModrinthCredentials {
         pool: &SqlitePool,
         fetch_semaphore: &FetchSemaphore,
         sessions: &Sessions,
-    ) -> crate::Result<()> {
+    ) -> engine::Result<()> {
         let all = Self::get_all(pool, sessions).await?;
 
         let user_ids = all.into_iter().map(|x| x.user_id).collect::<Vec<_>>();
 
-        if crate::self_hosted::accounts::enabled(sessions) {
-            crate::self_hosted::accounts::users(
+        if engine::self_hosted::accounts::enabled(sessions) {
+            engine::self_hosted::accounts::users(
                 &user_ids.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
                 fetch_semaphore,
                 sessions,
@@ -231,7 +223,7 @@ pub async fn finish_login_flow(
     code: &str,
     semaphore: &FetchSemaphore,
     sessions: &Sessions,
-) -> crate::Result<ModrinthCredentials> {
+) -> engine::Result<ModrinthCredentials> {
     // The authorization code actually is the access token, since labrinth doesn't
     // issue separate authorization codes. Therefore, this is equivalent to an
     // implicit OAuth grant flow, and no additional exchanging or finalization is
@@ -252,7 +244,7 @@ async fn fetch_info(
     token: &str,
     semaphore: &FetchSemaphore,
     sessions: &Sessions,
-) -> crate::Result<crate::state::cache::User> {
+) -> engine::Result<User> {
     let result = fetch_advanced(
         Method::GET,
         concat!(env!("MODRINTH_API_URL"), "user"),

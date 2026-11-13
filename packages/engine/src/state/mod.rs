@@ -40,22 +40,11 @@ pub use self::process::*;
 mod java_globals;
 pub use self::java_globals::*;
 
-mod discord;
-pub use self::discord::*;
-
-mod minecraft_auth;
-pub use self::minecraft_auth::*;
-
-pub mod minecraft_skins;
-
 mod cache;
 pub use self::cache::*;
 
 pub mod content_store;
 pub(crate) mod runtime_cache;
-
-mod friends;
-pub use self::friends::*;
 
 mod installs;
 pub(crate) use self::installs::Installs;
@@ -63,23 +52,15 @@ pub(crate) use self::installs::Installs;
 mod instance_locks;
 pub(crate) use self::instance_locks::InstanceLocks;
 
-mod presence;
-pub use self::presence::Presence;
-
 mod sessions;
 pub use self::sessions::*;
 
 mod synced_options;
 pub(crate) use self::synced_options::SyncedOptions;
 
-mod tunnel;
-pub use self::tunnel::*;
-
+pub(crate) mod accounts;
 pub mod db;
 pub(crate) mod db_backup;
-mod mr_auth;
-
-pub use self::mr_auth::*;
 
 pub mod attached_world_data;
 pub mod hidden_instances;
@@ -150,8 +131,6 @@ pub struct Engine {
     pub(crate) synced_options: SyncedOptions,
     pub(crate) publish_reports: crate::api::instance::PublishReports,
 
-    pub presence: Presence,
-
     /// Process manager
     pub process_manager: ProcessManager,
 
@@ -172,11 +151,13 @@ impl Engine {
     /// dropped.
     pub async fn new(config: EngineConfig) -> crate::Result<Arc<Self>> {
         let (state, watcher_events) = Self::open(config).await?;
-        // Fallible, so it runs before a background task can keep a rejected engine alive.
-        crate::self_hosted::accounts::bind_origin(&state.pool, &state.sessions)
-            .await?;
         state.spawn_background(watcher_events);
         Ok(state)
+    }
+
+    /// The database, which also holds the App's account and skin tables.
+    pub fn pool(&self) -> &SqlitePool {
+        &self.pool
     }
 
     /// The fallible part of `new`; it spawns nothing.
@@ -238,7 +219,6 @@ impl Engine {
             instance_locks: InstanceLocks::default(),
             synced_options: SyncedOptions::default(),
             publish_reports: Default::default(),
-            presence: Presence::init()?,
             process_manager: ProcessManager::new(),
             pool,
             file_watcher,

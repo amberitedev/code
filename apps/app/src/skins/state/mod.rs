@@ -4,7 +4,7 @@ use futures::{Stream, StreamExt, stream};
 use sqlx::SqlitePool;
 use uuid::{Uuid, fmt::Hyphenated};
 
-use super::MinecraftSkinVariant;
+use crate::accounts::state::MinecraftSkinVariant;
 
 pub mod mojang_api;
 
@@ -52,7 +52,7 @@ impl CustomMinecraftSkin {
         cape_id: Option<Uuid>,
         insert_position: CustomMinecraftSkinInsertPosition,
         db: &SqlitePool,
-    ) -> crate::Result<()> {
+    ) -> engine::Result<()> {
         let minecraft_user_id = minecraft_user_id.as_hyphenated();
         let cape_id = cape_id.map(|id| id.hyphenated());
 
@@ -134,7 +134,7 @@ impl CustomMinecraftSkin {
         minecraft_user_id: Uuid,
         texture_key: &str,
         db: impl sqlx::Acquire<'_, Database = sqlx::Sqlite>,
-    ) -> crate::Result<Option<Self>> {
+    ) -> engine::Result<Option<Self>> {
         let minecraft_user_id = minecraft_user_id.as_hyphenated();
 
         sqlx::query_as!(
@@ -163,7 +163,7 @@ impl CustomMinecraftSkin {
         offset: u32,
         count: u32,
         db: impl sqlx::Acquire<'_, Database = sqlx::Sqlite>,
-    ) -> crate::Result<impl Stream<Item = Self>> {
+    ) -> engine::Result<impl Stream<Item = Self>> {
         let minecraft_user_id = minecraft_user_id.as_hyphenated();
 
         Ok(stream::iter(sqlx::query!(
@@ -187,7 +187,7 @@ impl CustomMinecraftSkin {
     pub async fn get_all(
         minecraft_user_id: Uuid,
         db: impl sqlx::Acquire<'_, Database = sqlx::Sqlite>,
-    ) -> crate::Result<impl Stream<Item = Self>> {
+    ) -> engine::Result<impl Stream<Item = Self>> {
         // Limit ourselves to 2048 skins, so that memory usage even when storing base64
         // PNG data of a 64x64 texture with random pixels stays around ~150 MiB
         Self::get_many(minecraft_user_id, 0, 2048, db).await
@@ -196,7 +196,7 @@ impl CustomMinecraftSkin {
     pub async fn texture_blob(
         &self,
         db: impl sqlx::Acquire<'_, Database = sqlx::Sqlite>,
-    ) -> crate::Result<Vec<u8>> {
+    ) -> engine::Result<Vec<u8>> {
         Ok(sqlx::query_scalar!(
             "SELECT texture FROM custom_minecraft_skin_textures WHERE texture_key = ?",
             self.texture_key
@@ -209,7 +209,7 @@ impl CustomMinecraftSkin {
         &self,
         minecraft_user_id: Uuid,
         db: impl sqlx::Acquire<'_, Database = sqlx::Sqlite>,
-    ) -> crate::Result<()> {
+    ) -> engine::Result<()> {
         let minecraft_user_id = minecraft_user_id.as_hyphenated();
 
         sqlx::query!(
@@ -227,7 +227,7 @@ impl CustomMinecraftSkin {
         minecraft_user_id: Uuid,
         texture_keys: &[String],
         db: &SqlitePool,
-    ) -> crate::Result<()> {
+    ) -> engine::Result<()> {
         let minecraft_user_id = minecraft_user_id.as_hyphenated();
         let mut transaction = db.begin_with("BEGIN IMMEDIATE").await?;
 

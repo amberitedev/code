@@ -31,16 +31,21 @@ pub use event::{
     DesktopEvent, Event, EventSink, FriendPayload,
     InstanceGroupsChangedPayload, InstancePayload, InstancePayloadType,
     LoadingBar, LoadingBarType, ProcessPayload, ProcessPayloadType,
-    emit::emit_loading, emit::emit_warning, emit::init_loading,
+    emit::emit_friend, emit::emit_loading, emit::emit_notification,
+    emit::emit_warning, emit::init_loading,
 };
 pub use logger::start_logger;
 pub use self_hosted::accounts::AccountEndpoints;
 pub use state::INSTANCES_FOLDER_NAME;
 pub use state::{
     BackendSession, BackendSessionKind, Engine, EngineConfig, ModrinthSession,
-    PackOverrides, PackServers, PackUpdateHooks, Sessions,
+    PackOverrides, PackServers, PackUpdateHooks, ProcessManager, Sessions,
 };
-pub use util::fetch::DownloadReason;
+pub use util::content_hash::encode_hex;
+pub use util::fetch::{
+    DownloadReason, FetchSemaphore, INSECURE_REQWEST_CLIENT, fetch_advanced,
+    fetch_json,
+};
 
 /// Installs `ring` as the process-wide rustls crypto provider.
 ///

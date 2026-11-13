@@ -3,16 +3,13 @@
 use anyhow::Context;
 use reqwest::StatusCode;
 
-use crate::Engine;
-use crate::state::{Credentials, MinecraftLoginFlow};
-pub use crate::state::{
-    MinecraftAccountSummary, MinecraftCape, MinecraftCharacterExpressionState,
-    MinecraftProfile, MinecraftSkin, StagedMinecraftLogin,
-};
-use crate::util::fetch::INSECURE_REQWEST_CLIENT;
+pub use crate::accounts::state::MinecraftAccountSummary;
+use crate::accounts::state::{Credentials, MinecraftLoginFlow};
+use engine::Engine;
+use engine::INSECURE_REQWEST_CLIENT;
 
 #[tracing::instrument]
-pub async fn check_reachable() -> crate::Result<()> {
+pub async fn check_reachable() -> engine::Result<()> {
     let resp = INSECURE_REQWEST_CLIENT
         .get("https://sessionserver.mojang.com/session/minecraft/hasJoined")
         .send()
@@ -25,25 +22,8 @@ pub async fn check_reachable() -> crate::Result<()> {
 }
 
 #[tracing::instrument(skip(state))]
-pub async fn begin_login(state: &Engine) -> crate::Result<MinecraftLoginFlow> {
-    crate::state::login_begin(&state.pool).await
-}
-
-#[tracing::instrument(skip(state))]
-pub async fn begin_login_with_prompt(
-    state: &Engine,
-    select_account: bool,
-) -> crate::Result<MinecraftLoginFlow> {
-    crate::state::login_begin_with_prompt(select_account, &state.pool).await
-}
-
-#[tracing::instrument(skip(state))]
-pub async fn begin_login_staged_with_prompt(
-    state: &Engine,
-    select_account: bool,
-) -> crate::Result<MinecraftLoginFlow> {
-    crate::state::login_begin_staged_with_prompt(select_account, &state.pool)
-        .await
+pub async fn begin_login(state: &Engine) -> engine::Result<MinecraftLoginFlow> {
+    crate::accounts::state::login_begin(state.pool()).await
 }
 
 #[tracing::instrument(skip_all)]
@@ -51,34 +31,16 @@ pub async fn finish_login(
     state: &Engine,
     code: &str,
     flow: MinecraftLoginFlow,
-) -> crate::Result<Credentials> {
+) -> engine::Result<Credentials> {
     let credentials =
-        crate::state::login_finish(code, flow, &state.pool).await?;
+        crate::accounts::state::login_finish(code, flow, state.pool()).await?;
     mark_logged_into_minecraft(state).await;
     Ok(credentials)
 }
 
-#[tracing::instrument(skip_all)]
-pub async fn finish_login_staged(
-    state: &Engine,
-    code: &str,
-    flow: MinecraftLoginFlow,
-) -> crate::Result<StagedMinecraftLogin> {
-    crate::state::login_finish_staged(code, flow, &state.pool).await
-}
-
-pub async fn commit_staged_login(
-    state: &Engine,
-    staged: StagedMinecraftLogin,
-) -> crate::Result<Credentials> {
-    let credentials = staged.commit(&state.pool).await?;
-    mark_logged_into_minecraft(state).await;
-    Ok(credentials)
-}
-
-async fn mark_logged_into_minecraft(state: &crate::Engine) {
+async fn mark_logged_into_minecraft(state: &engine::Engine) {
     if let Err(error) =
-        crate::onboarding_checklist::mark_logged_into_minecraft(state).await
+        engine::onboarding_checklist::mark_logged_into_minecraft(state).await
     {
         tracing::warn!(
             "Failed to mark Minecraft login in onboarding checklist: {error}"
@@ -89,8 +51,8 @@ async fn mark_logged_into_minecraft(state: &crate::Engine) {
 #[tracing::instrument(skip(state))]
 pub async fn get_default_user(
     state: &Engine,
-) -> crate::Result<Option<uuid::Uuid>> {
-    let user = Credentials::get_default_credential(&state.pool).await?;
+) -> engine::Result<Option<uuid::Uuid>> {
+    let user = Credentials::get_default_credential(state.pool()).await?;
     Ok(user.map(|user| user.offline_profile.id))
 }
 
@@ -98,14 +60,14 @@ pub async fn get_default_user(
 pub async fn set_default_user(
     state: &Engine,
     user: uuid::Uuid,
-) -> crate::Result<()> {
-    let users = Credentials::get_all(&state.pool).await?;
+) -> engine::Result<()> {
+    let users = Credentials::get_all(state.pool()).await?;
     let (_, mut user) = users
         .remove(&user)
         .context(format!("tried to get nonexistent user with ID {user}"))?;
 
     user.active = true;
-    user.upsert(&state.pool).await?;
+    user.upsert(state.pool()).await?;
 
     Ok(())
 }
@@ -115,17 +77,17 @@ pub async fn set_default_user(
 pub async fn remove_user(
     state: &Engine,
     uuid: uuid::Uuid,
-) -> crate::Result<()> {
-    let users = Credentials::get_all(&state.pool).await?;
+) -> engine::Result<()> {
+    let users = Credentials::get_all(state.pool()).await?;
 
     if let Some((uuid, user)) = users.remove(&uuid) {
-        Credentials::remove(uuid, &state.pool).await?;
+        Credentials::remove(uuid, state.pool()).await?;
 
         if user.active
             && let Some((_, mut user)) = users.into_iter().next()
         {
             user.active = true;
-            user.upsert(&state.pool).await?;
+            user.upsert(state.pool()).await?;
         }
     }
 
@@ -136,8 +98,8 @@ pub async fn remove_user(
 #[tracing::instrument(skip(state))]
 pub async fn users(
     state: &Engine,
-) -> crate::Result<Vec<MinecraftAccountSummary>> {
-    let users = Credentials::get_all(&state.pool).await?;
+) -> engine::Result<Vec<MinecraftAccountSummary>> {
+    let users = Credentials::get_all(state.pool()).await?;
     let mut summaries = Vec::with_capacity(users.len());
     for (_, credentials) in users {
         summaries.push(credentials.account_summary().await);
@@ -149,6 +111,6 @@ pub async fn users(
 #[tracing::instrument(skip(state))]
 pub async fn default_credential(
     state: &Engine,
-) -> crate::Result<Option<Credentials>> {
-    Credentials::get_default_credential(&state.pool).await
+) -> engine::Result<Option<Credentials>> {
+    Credentials::get_default_credential(state.pool()).await
 }

@@ -12,7 +12,7 @@ use tokio::{
 
 use crate::{
     Engine, ErrorKind,
-    prelude::Credentials,
+    state::accounts::{SavedMinecraftAccount, minecraft_accounts},
     util::io::{self, IOError},
 };
 
@@ -46,7 +46,10 @@ pub struct LatestLogCursor {
 #[serde(transparent)]
 pub struct CensoredString(String);
 impl CensoredString {
-    pub fn censor(mut s: String, credentials_list: &[Credentials]) -> Self {
+    pub(crate) fn censor(
+        mut s: String,
+        credentials_list: &[SavedMinecraftAccount],
+    ) -> Self {
         let Ok(username) = whoami::username_os() else {
             return Self(
                 "[Log withheld: unable to determine computer username]".into(),
@@ -62,21 +65,15 @@ impl CensoredString {
             .replace(&format!("/{username}/"), "/{COMPUTER_USERNAME}/")
             .replace(&format!("\\{username}\\"), "\\{COMPUTER_USERNAME}\\");
         for credentials in credentials_list {
-            // Use the offline profile to guarantee that this function does not cause
-            // Mojang API request, and is never delayed by a network request. The offline
-            // profile is optimistically updated on upsert from time to time anyway
             s = s
                 .replace(&credentials.access_token, "{MINECRAFT_ACCESS_TOKEN}")
+                .replace(&credentials.name, "{MINECRAFT_USERNAME}")
                 .replace(
-                    &credentials.offline_profile.name,
-                    "{MINECRAFT_USERNAME}",
-                )
-                .replace(
-                    &credentials.offline_profile.id.as_simple().to_string(),
+                    &credentials.id.as_simple().to_string(),
                     "{MINECRAFT_UUID}",
                 )
                 .replace(
-                    &credentials.offline_profile.id.as_hyphenated().to_string(),
+                    &credentials.id.as_hyphenated().to_string(),
                     "{MINECRAFT_UUID}",
                 );
         }
@@ -399,11 +396,7 @@ async fn get_output_by_filename_from_path(
 
     let path = logs_folder.join(file_name);
 
-    let credentials = Credentials::get_all(&state.pool)
-        .await?
-        .into_iter()
-        .map(|x| x.1)
-        .collect::<Vec<_>>();
+    let credentials = minecraft_accounts(&state.pool).await?;
 
     if let Some(ext) = path.extension() {
         if ext == "gz" {
@@ -501,11 +494,7 @@ pub async fn get_live_log_buffer(
     let joined = lines.join("\n");
     let compacted = compact_duplicate_lines(&joined);
 
-    let credentials = Credentials::get_all(&state.pool)
-        .await?
-        .into_iter()
-        .map(|x| x.1)
-        .collect::<Vec<_>>();
+    let credentials = minecraft_accounts(&state.pool).await?;
     maybe_emit_log_compaction_warning(
         &state.events,
         "live log",
@@ -580,11 +569,7 @@ pub async fn get_generic_live_log_cursor(
     let compacted = compact_duplicate_lines(&output);
     let cursor = cursor + bytes_read as u64; // Update cursor
 
-    let credentials = Credentials::get_all(&state.pool)
-        .await?
-        .into_iter()
-        .map(|x| x.1)
-        .collect::<Vec<_>>();
+    let credentials = minecraft_accounts(&state.pool).await?;
     maybe_emit_log_compaction_warning(
         &state.events,
         log_file_name,

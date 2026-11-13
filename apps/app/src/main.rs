@@ -15,6 +15,7 @@ mod cores;
 mod data_dir;
 mod desktop;
 mod dev;
+mod discord;
 mod engine_handle;
 mod friends;
 mod import;
@@ -22,6 +23,7 @@ mod launch;
 mod library;
 mod onboarding;
 mod pack_hooks;
+mod presence;
 mod reactions;
 mod screenshots;
 mod server;
@@ -37,6 +39,7 @@ mod macos;
 async fn start_engine(
     app: tauri::AppHandle,
     events: engine::EventSink,
+    presence: Arc<presence::Presence>,
 ) -> anyhow::Result<Arc<Engine>> {
     tracing::info!("Initializing app state...");
     let started = async {
@@ -48,9 +51,11 @@ async fn start_engine(
         )
         .await?;
         let state = Engine::new(config).await?;
-        reactions::start(&state, app.clone(), reacting);
+        accounts::self_hosted::bind_origin(state.pool(), &state.sessions)
+            .await?;
+        reactions::start(&state, Arc::clone(&presence), app.clone(), reacting);
         #[cfg(debug_assertions)]
-        dev::sign_in(&state).await;
+        dev::sign_in(&state, &presence).await;
         anyhow::Ok(state)
     }
     .await;
@@ -138,6 +143,10 @@ fn main() {
     let local_init = local.init_plugin();
     let events = server::events::Events::default();
     let engine = engine_handle::EngineHandle::default();
+    let presence = Arc::new(
+        presence::Presence::init()
+            .expect("failed to set up Discord and the friends socket"),
+    );
     let desktop = desktop::AppSlot::default();
     let updater = Arc::new(desktop::updater::Updater::new(desktop.clone()));
     let router = local.router(
@@ -146,6 +155,7 @@ fn main() {
         ),
         events.clone(),
         engine.clone(),
+        Arc::clone(&presence),
         desktop.clone(),
         Arc::clone(&updater),
         tauri_context.config().identifier.clone(),
@@ -278,8 +288,13 @@ fn main() {
             app.manage(sink.clone());
             app.manage(events.app);
             let handle = app.handle().clone();
-            app.state::<engine_handle::EngineHandle>()
-                .start(move || start_engine(handle.clone(), sink.clone()));
+            app.state::<engine_handle::EngineHandle>().start(move || {
+                start_engine(
+                    handle.clone(),
+                    sink.clone(),
+                    Arc::clone(&presence),
+                )
+            });
 
             #[cfg(target_os = "macos")]
             {
@@ -363,7 +378,7 @@ fn main() {
                     && let Some(state) =
                         app.state::<engine_handle::EngineHandle>().try_get()
                     && let Err(error) = tauri::async_runtime::block_on(
-                        engine::minecraft_skins::flush_pending_skin_change(
+                        skins::minecraft_skins::flush_pending_skin_change(
                             &state,
                         ),
                     )

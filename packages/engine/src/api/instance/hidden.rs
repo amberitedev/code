@@ -1,12 +1,11 @@
 use crate::ErrorKind;
-use crate::state::{Engine, ModrinthCredentials, hidden_instances};
+use crate::state::{Engine, accounts, hidden_instances};
 
 #[tracing::instrument(skip(state))]
 pub async fn get_hidden_instance_ids(
     state: &Engine,
 ) -> crate::Result<Vec<String>> {
-    let Some(user_id) =
-        ModrinthCredentials::get_active_user_id(&state.pool).await?
+    let Some(user_id) = accounts::active_modrinth_user_id(&state.pool).await?
     else {
         return Ok(Vec::new());
     };
@@ -20,7 +19,7 @@ pub async fn set_instance_hidden(
     instance_id: &str,
     hidden: bool,
 ) -> crate::Result<()> {
-    let user_id = ModrinthCredentials::get_active_user_id(&state.pool)
+    let user_id = accounts::active_modrinth_user_id(&state.pool)
         .await?
         .ok_or(ErrorKind::NotLoggedIn)?;
 

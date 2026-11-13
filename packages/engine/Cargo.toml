@@ -18,10 +18,8 @@ async-tungstenite = { workspace = true, features = ["tokio-runtime", "tokio-rust
 async-walkdir = { workspace = true }
 axum = { version = "0.8.4", default-features = false, features = ["json", "query"] }
 
-base64 = { workspace = true }
 bedrock = { workspace = true }
 bon = { workspace = true }
-bytemuck = { workspace = true, features = ["extern_crate_alloc"] }
 bytes = { workspace = true, features = ["serde"] }
 chardetng = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
@@ -39,7 +37,6 @@ flate2 = { workspace = true }
 fs4 = { workspace = true, features = ["tokio"] }
 futures = { workspace = true, features = ["alloc", "async-await"] }
 governor = { workspace = true }
-heck = { workspace = true }
 hex = { workspace = true }
 hickory-resolver = { workspace = true }
 httpdate = { workspace = true }
@@ -52,7 +49,6 @@ minecraft-meta-manifest = { workspace = true }
 modrinth-content-management = { workspace = true }
 notify = { workspace = true }
 notify-debouncer-mini = { workspace = true }
-p256 = { workspace = true, features = ["ecdsa"] }
 parking_lot = { workspace = true }
 paste = { workspace = true }
 path-util = { workspace = true }
@@ -75,7 +71,6 @@ reqwest = { workspace = true, features = [
   "stream",
   "system-proxy",
 ] }
-rgb = { workspace = true }
 rustls = { workspace = true, features = ["logging", "ring", "std", "tls12"] }
 same-file = { workspace = true }
 serde = { workspace = true, features = ["derive", "rc"] }

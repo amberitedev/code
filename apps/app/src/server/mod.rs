@@ -39,8 +39,9 @@ use crate::{
     cores::{self, Cores},
     desktop::{self, AppSlot, updater::Updater},
     engine_handle::EngineHandle,
-    friends, import, launch, library, onboarding, screenshots, settings, skins,
-    synced_options,
+    friends, import, launch, library, onboarding,
+    presence::Presence,
+    screenshots, settings, skins, synced_options,
 };
 
 use endpoints::{
@@ -104,6 +105,7 @@ impl LocalServer {
         boot: Boot,
         events: events::Events,
         engine: EngineHandle,
+        presence: Arc<Presence>,
         app: AppSlot,
         updater: Arc<Updater>,
         identifier: String,
@@ -125,6 +127,7 @@ impl LocalServer {
         let ops = Arc::new(ops::Ops::new(events.app.clone()));
         let state = AppState {
             engine: engine.clone(),
+            presence,
             access: Arc::new(AppAccess),
             ops,
             updater,
@@ -224,6 +227,7 @@ impl LocalServer {
 #[derive(Clone)]
 pub struct AppState {
     engine: EngineHandle,
+    presence: Arc<Presence>,
     access: Arc<dyn Access>,
     ops: Arc<ops::Ops>,
     updater: Arc<Updater>,
@@ -237,6 +241,12 @@ impl FromRef<AppState> for Arc<Engine> {
             .engine
             .try_get()
             .expect("wait_for_engine holds these routes until the engine is up")
+    }
+}
+
+impl FromRef<AppState> for Arc<Presence> {
+    fn from_ref(state: &AppState) -> Self {
+        Arc::clone(&state.presence)
     }
 }
 

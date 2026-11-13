@@ -1,14 +1,11 @@
 use super::*;
-use crate::state::{
-    CachedEntry, CachedSharedInstanceSummary, ModrinthCredentials,
-};
+use crate::state::{CachedEntry, CachedSharedInstanceSummary, accounts};
 
 #[tracing::instrument(skip(state))]
 pub async fn get_cached_shared_instance_library(
     state: &Engine,
 ) -> crate::Result<Vec<CachedSharedInstanceSummary>> {
-    let Some(user_id) =
-        ModrinthCredentials::get_active_user_id(&state.pool).await?
+    let Some(user_id) = accounts::active_modrinth_user_id(&state.pool).await?
     else {
         return Ok(Vec::new());
     };
@@ -27,8 +24,7 @@ pub async fn cache_shared_instance_library(
     state: &Engine,
     instances: Vec<CachedSharedInstanceSummary>,
 ) -> crate::Result<()> {
-    let Some(user_id) =
-        ModrinthCredentials::get_active_user_id(&state.pool).await?
+    let Some(user_id) = accounts::active_modrinth_user_id(&state.pool).await?
     else {
         return Ok(());
     };

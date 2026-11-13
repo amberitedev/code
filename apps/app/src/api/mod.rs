@@ -1,4 +1,4 @@
-use engine::error_code;
+use crate::accounts::error_code;
 use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
 
@@ -6,8 +6,6 @@ pub mod instance;
 pub mod logs;
 pub mod shortcuts;
 pub mod utils;
-
-pub(crate) mod oauth_utils;
 
 pub type Result<T> = std::result::Result<T, CommandError>;
 

@@ -1,4 +1,4 @@
-//! Serves `crate::server::endpoints::friends` over the engine crate's friends code.
+//! Serves `crate::server::endpoints::friends` over `crate::friends::api`.
 
 use std::sync::Arc;
 
@@ -10,6 +10,9 @@ use contracts::{
     server::{Req, route},
 };
 use engine::{Engine, prelude::UserStatus, routes::api_error};
+
+use super::api;
+use crate::presence::Presence;
 
 use crate::server::{
     AppState,
@@ -37,7 +40,7 @@ async fn list_friends(
     State(engine): State<Arc<Engine>>,
     _: Req<ListFriends>,
 ) -> Answer<Json<Vec<UserFriend>>> {
-    let friends = engine::friends::friends(&engine).await.map_err(api_error)?;
+    let friends = api::friends(&engine).await.map_err(api_error)?;
     Ok(Json(
         friends
             .into_iter()
@@ -54,10 +57,10 @@ async fn list_friends(
 }
 
 async fn list_friend_statuses(
-    State(engine): State<Arc<Engine>>,
+    State(presence): State<Arc<Presence>>,
     _: Req<ListFriendStatuses>,
 ) -> Answer<Json<Vec<UserStatus>>> {
-    engine::friends::friend_statuses(&engine)
+    api::friend_statuses(&presence)
         .await
         .map(Json)
         .map_err(api_error)
@@ -67,7 +70,7 @@ async fn add_friend(
     State(engine): State<Arc<Engine>>,
     Req { params, .. }: Req<AddFriend>,
 ) -> Answer<Empty> {
-    engine::friends::add_friend(&engine, &params.id)
+    api::add_friend(&engine, &params.id)
         .await
         .map(|()| Empty)
         .map_err(api_error)
@@ -77,7 +80,7 @@ async fn remove_friend(
     State(engine): State<Arc<Engine>>,
     Req { params, .. }: Req<RemoveFriend>,
 ) -> Answer<Empty> {
-    engine::friends::remove_friend(&engine, &params.id)
+    api::remove_friend(&engine, &params.id)
         .await
         .map(|()| Empty)
         .map_err(api_error)

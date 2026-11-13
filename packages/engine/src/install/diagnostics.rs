@@ -4,7 +4,7 @@ use super::model::{
     InstallPhaseDetails, InstallPhaseId, InstallProgress,
 };
 use super::store;
-use crate::state::{DirectoryInfo, Engine, ModrinthCredentials, Sessions};
+use crate::state::{DirectoryInfo, Engine, Sessions, accounts};
 use crate::util::io::format_bytes;
 use regex::{Captures, Regex};
 use sqlx::SqlitePool;
@@ -618,12 +618,8 @@ pub(crate) async fn censor_support_text(
     pool: &SqlitePool,
     sessions: &Sessions,
 ) -> crate::Result<String> {
-    for credentials in ModrinthCredentials::get_all(pool, sessions).await? {
-        replace_nonempty(
-            &mut text,
-            &credentials.session,
-            "{MODRINTH_ACCESS_TOKEN}",
-        );
+    for session in accounts::modrinth_sessions(pool, sessions).await? {
+        replace_nonempty(&mut text, &session, "{MODRINTH_ACCESS_TOKEN}");
     }
 
     text = censor_tokens(text);

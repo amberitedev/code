@@ -1,15 +1,11 @@
 //! API for interacting with Theseus
 pub mod cache;
 pub mod debug_info;
-pub mod friends;
 pub mod handler;
 pub mod instance;
 pub mod jre;
 pub mod logs;
 pub mod metadata;
-pub mod minecraft_auth;
-pub mod minecraft_skins;
-pub mod mr_auth;
 pub mod onboarding_checklist;
 pub mod pack;
 pub mod process;
@@ -21,19 +17,18 @@ pub mod worlds;
 
 pub mod data {
     pub use crate::state::{
-        AppliedContentSetPatch, CacheBehaviour, CacheValueType,
+        AppliedContentSetPatch, CacheBehaviour, CacheValueType, CachedEntry,
         CachedSharedInstanceSummary, ContentFile, ContentItem,
         ContentItemOwner, ContentItemProject, ContentItemVersion,
-        CreateInstance, Credentials, Dependency, DirectoryInfo, EditInstance,
+        CreateInstance, Dependency, DirectoryInfo, EditInstance, FeatureFlag,
         Hooks, IconBackground, IconConfig, InstanceInstallCandidate,
         InstanceInstallTarget, InstanceLaunchOverridesPatch, InstanceLink,
         InstanceMetadata, InstanceSyncedOption, InstanceSyncedOptions,
         InstanceTabVisibility, JavaVersion, LinkedModpackInfo, MemorySettings,
-        ModLoader, ModrinthCredentials, OnboardingChecklist, Organization,
-        OwnerType, ProcessMetadata, Project, ProjectType, ProjectV3,
-        SearchResult, SearchResults, SearchResultsV3, Settings,
-        SharedInstanceAttachment, SharedInstanceRole, TeamMember, Theme, User,
-        UserFriend, Version, WindowSize,
+        ModLoader, OnboardingChecklist, Organization, OwnerType,
+        ProcessMetadata, Project, ProjectType, ProjectV3, SearchResult,
+        SearchResults, SearchResultsV3, Settings, SharedInstanceAttachment,
+        SharedInstanceRole, TeamMember, Theme, User, Version, WindowSize,
     };
     pub use ariadne::users::UserStatus;
     pub use modrinth_content_management::{
@@ -47,8 +42,8 @@ pub mod prelude {
         Engine,
         data::*,
         event::CommandPayload,
-        install, instance, jre, metadata, minecraft_auth, mr_auth,
-        onboarding_checklist, pack, process, settings,
+        install, instance, jre, metadata, onboarding_checklist, pack, process,
+        settings,
         state::{ReleaseChannel, db_backup::app_db_backup_dir},
         util::{
             io::{IOError, canonicalize},

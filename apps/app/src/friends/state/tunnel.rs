@@ -1,5 +1,5 @@
-use crate::state::FriendsSocket;
-use crate::state::friends::{TunnelSockets, WriteSocket};
+use super::FriendsSocket;
+use super::friends::{TunnelSockets, WriteSocket};
 use ariadne::networking::message::ClientToServerMessage;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -25,7 +25,7 @@ impl TunnelSocket {
         self.socket_id
     }
 
-    pub async fn shutdown(self) -> crate::Result<()> {
+    pub async fn shutdown(self) -> engine::Result<()> {
         if self.sockets.remove(&self.socket_id).is_some() {
             FriendsSocket::send_message(
                 &self.write,

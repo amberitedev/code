@@ -10,32 +10,45 @@ license = "GPL-3.0-only"
 [dependencies]
 aes-gcm = { workspace = true }
 anyhow = { workspace = true }
+ariadne = { workspace = true }
+async-tungstenite = { workspace = true, features = ["tokio-runtime", "tokio-rustls-webpki-roots"] }
 axum = { version = "0.8.4", default-features = false, features = ["http1", "json", "query", "tokio", "ws"] }
 
 base64 = { workspace = true }
+bytemuck = { workspace = true, features = ["extern_crate_alloc"] }
 bytes = { workspace = true }
 chrono = { workspace = true }
 contracts = { workspace = true, features = ["server"] }
 dashmap = { workspace = true }
+data-url = { workspace = true }
 dirs = { workspace = true }
+discord-rich-presence = { workspace = true }
+either = { workspace = true }
 engine = { workspace = true }
+futures = { workspace = true, features = ["alloc", "async-await"] }
+heck = { workspace = true }
 hkdf = { workspace = true }
 http-body-util = "0.1.3"
 hyper = { workspace = true, features = ["client", "http1", "server"] }
 hyper-util = { workspace = true, features = ["tokio"] }
 image = { workspace = true, features = ["gif", "jpeg", "png", "webp"] }
+itertools = { workspace = true }
 keyring = { workspace = true }
 native-dialog = { workspace = true }
 os_info = { version = "3.15.0", default-features = false }
-p256 = { workspace = true, features = ["ecdh"] }
+p256 = { workspace = true, features = ["ecdh", "ecdsa"] }
 path-util = { workspace = true }
+png = { workspace = true }
 rand = { workspace = true }
+reqwest = { workspace = true, features = ["json", "multipart", "stream"] }
+rgb = { workspace = true }
 rustls = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 serde_with = { workspace = true }
 sha2 = { workspace = true }
 sharing-client = { workspace = true }
+sqlx = { workspace = true, features = ["macros", "runtime-tokio", "sqlite"] }
 tauri-plugin-deep-link = { workspace = true }
 tauri-plugin-dialog = { workspace = true }
 tauri-plugin-http = { workspace = true }
@@ -44,9 +57,10 @@ tauri-plugin-single-instance = { workspace = true }
 tauri-plugin-updater = { workspace = true }
 tauri-plugin-window-state = { workspace = true }
 tempfile = { workspace = true }
+thiserror = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "macros", "net", "sync", "time"] }
 tokio-rustls = { version = "0.26.4", default-features = false, features = ["ring", "tls12"] }
-tokio-util = { workspace = true, features = ["io", "rt"] }
+tokio-util = { workspace = true, features = ["compat", "io", "rt"] }
 tracing = { workspace = true }
 url = { workspace = true }
 uuid = { workspace = true, features = ["serde", "v4"] }
@@ -71,6 +85,7 @@ tower = { version = "0.5.2", features = ["util"] }
 ts-rs = { workspace = true }
 
 [build-dependencies]
+dotenvy = { workspace = true }
 tauri-build = { workspace = true, features = ["codegen"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]

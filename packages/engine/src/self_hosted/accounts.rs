@@ -1,7 +1,4 @@
-use crate::state::{
-    BackendSession, BackendSessionKind, ModrinthCredentials, ModrinthSession,
-    Sessions, User,
-};
+use crate::state::{Sessions, User};
 use crate::util::fetch::{FetchSemaphore, fetch_json};
 use reqwest::{Method, Url};
 use std::borrow::Cow;
@@ -44,6 +41,11 @@ pub fn enabled(sessions: &Sessions) -> bool {
     sessions.accounts.is_some()
 }
 
+/// The account service's API, when the host routes accounts to one.
+pub fn api(sessions: &Sessions) -> Option<&Url> {
+    sessions.accounts.as_ref().map(|config| &config.api)
+}
+
 pub fn login_url(sessions: &Sessions, sign_up: bool) -> Option<String> {
     sessions.accounts.as_ref().map(|config| {
         format!(
@@ -54,7 +56,7 @@ pub fn login_url(sessions: &Sessions, sign_up: bool) -> Option<String> {
     })
 }
 
-pub(crate) fn socket_base(sessions: &Sessions) -> &str {
+pub fn socket_base(sessions: &Sessions) -> &str {
     sessions
         .accounts
         .as_ref()
@@ -105,32 +107,9 @@ pub(crate) fn may_send_credentials(sessions: &Sessions, url: &str) -> bool {
         || url.starts_with("https://cdn.modrinth.com/")
 }
 
-/// Signs the engine in as `credentials`, the account now active in the database, or out.
-pub(crate) fn set_sessions(
-    sessions: &Sessions,
-    credentials: Option<&ModrinthCredentials>,
-) {
-    sessions.set_modrinth_session(credentials.map(|credentials| {
-        ModrinthSession {
-            token: credentials.session.clone(),
-        }
-    }));
-    sessions.set_backend_session(
-        sessions.accounts.as_ref().zip(credentials).map(
-            |(config, credentials)| BackendSession {
-                base_url: config.api.clone(),
-                bearer: credentials.session.clone(),
-                kind: BackendSessionKind::User {
-                    user_id: credentials.user_id.clone(),
-                },
-            },
-        ),
-    );
-}
-
 /// Local accounts bypass the public author cache, where the same ID could refer
 /// to a completely different person embedded in a Modrinth project team.
-pub(crate) async fn users(
+pub async fn users(
     ids: &[&str],
     semaphore: &FetchSemaphore,
     sessions: &Sessions,
@@ -148,107 +127,25 @@ pub(crate) async fn users(
     .await
 }
 
-pub(crate) fn origin(sessions: &Sessions) -> &str {
+pub fn origin(sessions: &Sessions) -> &str {
     sessions
         .accounts
         .as_ref()
         .map_or(env!("MODRINTH_API_URL"), |config| config.api.as_str())
 }
 
-/// Copied development data may contain credentials for a different service.
-/// Deactivate them before any requests; preserve the rows for the original app.
-pub(crate) async fn bind_origin(
-    pool: &sqlx::SqlitePool,
-    sessions: &Sessions,
-) -> crate::Result<()> {
-    let origin = origin(sessions);
-    let previous: Option<String> = sqlx::query_scalar(
-        "SELECT value FROM app_metadata WHERE key = 'account_origin'",
-    )
-    .fetch_optional(pool)
-    .await?;
-    sqlx::query("CREATE TABLE IF NOT EXISTS self_hosted_account_origins (user_id TEXT PRIMARY KEY REFERENCES modrinth_users(id) ON DELETE CASCADE, origin TEXT NOT NULL)")
-        .execute(pool).await?;
-    // Existing saved accounts belong to the service recorded before this startup.
-    sqlx::query("INSERT OR IGNORE INTO self_hosted_account_origins (user_id,origin) SELECT id,? FROM modrinth_users")
-        .bind(previous.as_deref().unwrap_or(env!("MODRINTH_API_URL")))
-        .execute(pool).await?;
-    if previous.as_deref().unwrap_or(env!("MODRINTH_API_URL")) != origin {
-        sqlx::query("UPDATE modrinth_users SET active = FALSE")
-            .execute(pool)
-            .await?;
-    }
-    sqlx::query("INSERT INTO app_metadata (key,value,updated_at) VALUES ('account_origin',?,unixepoch()) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at").bind(origin).execute(pool).await?;
-    set_sessions(
-        sessions,
-        ModrinthCredentials::get_active(pool).await?.as_ref(),
-    );
-    Ok(())
-}
-
-pub(crate) async fn revoke(
-    credentials: &ModrinthCredentials,
-    semaphore: &FetchSemaphore,
-    sessions: &Sessions,
-) -> crate::Result<()> {
-    if !enabled(sessions) {
-        return Ok(());
-    }
-    #[derive(serde::Deserialize)]
-    struct Session {
-        id: String,
-        current: bool,
-    }
-    let response = crate::util::fetch::fetch_advanced(
-        Method::GET,
-        concat!(env!("MODRINTH_API_URL"), "session/list"),
-        None,
-        None,
-        Some(("Authorization", &credentials.session)),
-        None,
-        None,
-        Some("/v2/session/list"),
-        semaphore,
-        sessions,
-    )
-    .await?;
-    let listed: Vec<Session> = serde_json::from_slice(&response)?;
-    if let Some(session) = listed.into_iter().find(|session| session.current) {
-        crate::util::fetch::fetch_advanced(
-            Method::DELETE,
-            &format!("{}session/{}", env!("MODRINTH_API_URL"), session.id),
-            None,
-            None,
-            Some(("Authorization", &credentials.session)),
-            None,
-            None,
-            Some("/v2/session/:id"),
-            semaphore,
-            sessions,
-        )
-        .await?;
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn credentials() -> ModrinthCredentials {
-        ModrinthCredentials {
-            session: "imported-session".into(),
-            expires: chrono::Utc::now() + chrono::Duration::days(1),
-            user_id: "imported-user".into(),
-            active: true,
-        }
-    }
+    use crate::state::ModrinthSession;
 
     fn signed_in(accounts: Option<&str>) -> Sessions {
         let sessions = Sessions::new(
             accounts.map(|api| AccountEndpoints::new(api, None).unwrap()),
         );
-        set_sessions(&sessions, Some(&credentials()));
+        sessions.set_modrinth_session(Some(ModrinthSession {
+            token: "imported-session".into(),
+        }));
         sessions
     }
 
@@ -286,66 +183,12 @@ mod tests {
         for (accounts, url, allowed) in cases {
             let sessions = signed_in(accounts);
             assert_eq!(
-                sessions.backend().is_some(),
-                accounts.is_some(),
-                "{url}"
-            );
-            assert_eq!(
                 sessions.modrinth_token(url).as_deref(),
                 allowed.then_some("imported-session"),
                 "{url}"
             );
-            set_sessions(&sessions, None);
+            sessions.set_modrinth_session(None);
             assert_eq!(sessions.modrinth_token(url), None, "{url}");
-            assert!(sessions.backend().is_none());
         }
-    }
-
-    #[tokio::test]
-    async fn imported_accounts_cannot_be_reactivated_on_another_service() {
-        let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
-        sqlx::migrate!().run(&pool).await.unwrap();
-        credentials().upsert(&pool).await.unwrap();
-        sqlx::query("INSERT INTO app_metadata(key,value,updated_at) VALUES ('account_origin','https://another-service.example/',unixepoch())")
-            .execute(&pool).await.unwrap();
-        let sessions = signed_in(Some("https://accounts.example/"));
-        assert!(sessions.backend().is_some());
-        bind_origin(&pool, &sessions).await.unwrap();
-        assert!(
-            sessions
-                .modrinth_token("https://accounts.example/v2/user")
-                .is_none()
-        );
-        assert!(sessions.backend().is_none());
-        assert!(
-            ModrinthCredentials::get_active(&pool)
-                .await
-                .unwrap()
-                .is_none()
-        );
-        assert!(
-            ModrinthCredentials::get_all(&pool, &sessions)
-                .await
-                .unwrap()
-                .is_empty()
-        );
-        let count: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM modrinth_users")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(count, 1);
-        // A restart must not relabel foreign credentials as belonging to this service.
-        bind_origin(&pool, &sessions).await.unwrap();
-        assert!(
-            ModrinthCredentials::get_all(&pool, &sessions)
-                .await
-                .unwrap()
-                .is_empty()
-        );
     }
 }

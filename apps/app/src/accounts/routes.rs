@@ -1,4 +1,4 @@
-//! Serves `crate::server::endpoints::accounts` over the engine crate's sign-in code.
+//! Serves `crate::server::endpoints::accounts` over the App's sign-in code.
 
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
@@ -7,13 +7,7 @@ use contracts::{
     ApiError, Empty, ErrorCode, Json,
     server::{Req, route},
 };
-use engine::{
-    Engine,
-    minecraft_auth::{self, MinecraftAccountSummary},
-    mr_auth,
-    prelude::ModrinthCredentials,
-    routes::api_error,
-};
+use engine::Engine;
 use tauri::{Manager, UserAttentionType, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_opener::OpenerExt;
 use tokio::time::Instant;
@@ -21,11 +15,18 @@ use url::Url;
 use uuid::Uuid;
 
 use crate::{
-    api::oauth_utils::{
-        auth_code_reply::{AuthReplySession, cancel_pending_auth},
-        auth_seal::AuthSeal,
+    accounts::{
+        api_error,
+        minecraft_auth::{self, MinecraftAccountSummary},
+        mr_auth,
+        oauth_utils::{
+            auth_code_reply::{AuthReplySession, cancel_pending_auth},
+            auth_seal::AuthSeal,
+        },
+        state::ModrinthCredentials,
     },
     desktop::{AppSlot, internal},
+    presence::Presence,
     server::{
         AppState,
         endpoints::accounts::{
@@ -181,6 +182,7 @@ async fn remove_minecraft_account(
 /// deep link; `crate::api::utils` delivers the deep link.
 async fn sign_in_to_modrinth(
     State(engine): State<Arc<Engine>>,
+    State(presence): State<Arc<Presence>>,
     State(app): State<AppSlot>,
     Req { body, .. }: Req<SignInToModrinth>,
 ) -> Answer<Json<ModrinthCredentials>> {
@@ -204,7 +206,7 @@ async fn sign_in_to_modrinth(
 
     let session_token = modrinth_session(reply, &seal).await?;
     let credentials =
-        mr_auth::authenticate_finish_flow(&engine, &session_token)
+        mr_auth::authenticate_finish_flow(&engine, &presence, &session_token)
             .await
             .map_err(api_error)?;
 
@@ -233,9 +235,10 @@ async fn cancel_modrinth_sign_in(_: Req<CancelModrinthSignIn>) -> Empty {
 
 async fn sign_out_of_modrinth(
     State(engine): State<Arc<Engine>>,
+    State(presence): State<Arc<Presence>>,
     _: Req<SignOutOfModrinth>,
 ) -> Answer<Empty> {
-    mr_auth::logout(&engine)
+    mr_auth::logout(&engine, &presence)
         .await
         .map(|()| Empty)
         .map_err(api_error)
@@ -243,9 +246,10 @@ async fn sign_out_of_modrinth(
 
 async fn get_active_modrinth_account(
     State(engine): State<Arc<Engine>>,
+    State(presence): State<Arc<Presence>>,
     _: Req<GetActiveModrinthAccount>,
 ) -> Answer<Json<Option<ModrinthCredentials>>> {
-    mr_auth::get_credentials(&engine)
+    mr_auth::get_credentials(&engine, &presence)
         .await
         .map(Json)
         .map_err(api_error)
@@ -260,9 +264,10 @@ async fn list_modrinth_accounts(
 
 async fn set_active_modrinth_account(
     State(engine): State<Arc<Engine>>,
+    State(presence): State<Arc<Presence>>,
     Req { body, .. }: Req<SetActiveModrinthAccount>,
 ) -> Answer<Empty> {
-    mr_auth::set_active(&engine, &body)
+    mr_auth::set_active(&engine, &presence, &body)
         .await
         .map(|()| Empty)
         .map_err(api_error)
@@ -270,9 +275,10 @@ async fn set_active_modrinth_account(
 
 async fn remove_modrinth_account(
     State(engine): State<Arc<Engine>>,
+    State(presence): State<Arc<Presence>>,
     Req { params, .. }: Req<RemoveModrinthAccount>,
 ) -> Answer<Empty> {
-    mr_auth::remove_user(&engine, &params.id)
+    mr_auth::remove_user(&engine, &presence, &params.id)
         .await
         .map(|()| Empty)
         .map_err(api_error)

@@ -1,10 +1,10 @@
 //! The Minecraft and Modrinth accounts signed in on this computer.
 
-use contracts::{Empty, Json};
-use engine::{
+use crate::accounts::{
     minecraft_auth::MinecraftAccountSummary, mr_auth::ModrinthAuthFlow,
-    prelude::ModrinthCredentials,
+    state::ModrinthCredentials,
 };
+use contracts::{Empty, Json};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 

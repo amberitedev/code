@@ -7,7 +7,7 @@ use discord_rich_presence::{
 use sqlx::SqlitePool;
 use tokio::sync::RwLock;
 
-use crate::state::ProcessManager;
+use engine::ProcessManager;
 
 pub struct DiscordGuard {
     client: Arc<RwLock<DiscordIpcClient>>,
@@ -17,7 +17,7 @@ pub struct DiscordGuard {
 impl DiscordGuard {
     /// Initialize discord IPC client, and attempt to connect to it
     /// If it fails, it will still return a DiscordGuard, but the client will be unconnected
-    pub fn init() -> crate::Result<DiscordGuard> {
+    pub fn init() -> engine::Result<DiscordGuard> {
         let dipc = DiscordIpcClient::new("1123683254248148992");
 
         Ok(DiscordGuard {
@@ -49,9 +49,9 @@ impl DiscordGuard {
         msg: &str,
         reconnect_if_fail: bool,
         pool: &SqlitePool,
-    ) -> crate::Result<()> {
+    ) -> engine::Result<()> {
         // Check if discord is disabled, and if so, clear the activity instead
-        let settings = crate::state::Settings::get(pool).await?;
+        let settings = engine::data::Settings::get(pool).await?;
         if !settings.discord_rpc {
             Ok(self.clear_activity(true).await?)
         } else {
@@ -65,7 +65,7 @@ impl DiscordGuard {
         &self,
         msg: &str,
         reconnect_if_fail: bool,
-    ) -> crate::Result<()> {
+    ) -> engine::Result<()> {
         // Attempt to connect if not connected. Do not continue if it fails, as the client.set_activity can panic if it never was connected
         if !self.retry_if_not_ready().await {
             return Ok(());
@@ -99,7 +99,7 @@ impl DiscordGuard {
     pub async fn clear_activity(
         &self,
         reconnect_if_fail: bool,
-    ) -> crate::Result<()> {
+    ) -> engine::Result<()> {
         // Attempt to connect if not connected. Do not continue if it fails, as the client.clear_activity can panic if it never was connected
         if !self.retry_if_not_ready().await {
             return Ok(());
@@ -127,8 +127,8 @@ impl DiscordGuard {
         reconnect_if_fail: bool,
         pool: &SqlitePool,
         process_manager: &ProcessManager,
-    ) -> crate::Result<()> {
-        let settings = crate::state::Settings::get(pool).await?;
+    ) -> engine::Result<()> {
+        let settings = engine::data::Settings::get(pool).await?;
         if !settings.discord_rpc {
             println!("Discord is disabled, clearing activity");
             return self.clear_activity(true).await;

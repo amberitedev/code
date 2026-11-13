@@ -1,10 +1,10 @@
-use crate::ErrorKind;
-use crate::util::fetch::INSECURE_REQWEST_CLIENT;
 use anyhow::Context;
 use base64::Engine;
 use base64::prelude::{BASE64_STANDARD, BASE64_URL_SAFE_NO_PAD};
 use chrono::{DateTime, Duration, TimeZone, Utc};
 use dashmap::DashMap;
+use engine::ErrorKind;
+use engine::INSECURE_REQWEST_CLIENT;
 use futures::TryStreamExt;
 use heck::ToTitleCase;
 use p256::ecdsa::signature::Signer;
@@ -176,44 +176,22 @@ pub struct MinecraftLoginFlow {
     pub challenge: String,
     pub session_id: String,
     pub auth_request_uri: String,
-    #[serde(skip)]
-    staged_device: Option<StoredDeviceTokenPair>,
 }
 
 #[tracing::instrument]
 pub async fn login_begin(
     exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite> + Copy,
-) -> crate::Result<MinecraftLoginFlow> {
-    login_begin_inner(true, true, exec).await
-}
-
-#[tracing::instrument]
-pub async fn login_begin_with_prompt(
-    select_account: bool,
-    exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite> + Copy,
-) -> crate::Result<MinecraftLoginFlow> {
-    login_begin_inner(select_account, true, exec).await
-}
-
-#[tracing::instrument]
-pub async fn login_begin_staged_with_prompt(
-    select_account: bool,
-    exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite> + Copy,
-) -> crate::Result<MinecraftLoginFlow> {
-    login_begin_inner(select_account, false, exec).await
+) -> engine::Result<MinecraftLoginFlow> {
+    login_begin_inner(true, exec).await
 }
 
 async fn login_begin_inner(
     select_account: bool,
-    persist_device: bool,
     exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite> + Copy,
-) -> crate::Result<MinecraftLoginFlow> {
-    let (pair, current_date) = DeviceTokenPair::refresh_and_get_device_token(
-        Utc::now(),
-        exec,
-        persist_device,
-    )
-    .await?;
+) -> engine::Result<MinecraftLoginFlow> {
+    let (pair, current_date) =
+        DeviceTokenPair::refresh_and_get_device_token(Utc::now(), exec, true)
+            .await?;
 
     let verifier = generate_oauth_challenge();
     let result = sha2::Sha256::digest(&verifier);
@@ -229,17 +207,11 @@ async fn login_begin_inner(
     .await
     {
         Ok((session_id, redirect_uri)) => {
-            let staged_device = if persist_device {
-                None
-            } else {
-                Some(StoredDeviceTokenPair::try_from(&pair)?)
-            };
             return Ok(MinecraftLoginFlow {
                 verifier,
                 challenge,
                 session_id,
                 auth_request_uri: redirect_uri.value.msa_oauth_redirect,
-                staged_device,
             });
         }
         Err(err) => return Err(err.into()),
@@ -251,39 +223,10 @@ pub async fn login_finish(
     code: &str,
     flow: MinecraftLoginFlow,
     exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite> + Copy,
-) -> crate::Result<Credentials> {
-    Ok(login_finish_inner(code, flow, exec, true)
-        .await?
-        .credentials)
-}
-
-#[tracing::instrument(skip_all)]
-pub async fn login_finish_staged(
-    code: &str,
-    flow: MinecraftLoginFlow,
-    exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite> + Copy,
-) -> crate::Result<StagedMinecraftLogin> {
-    login_finish_inner(code, flow, exec, false).await
-}
-
-async fn login_finish_inner(
-    code: &str,
-    flow: MinecraftLoginFlow,
-    exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite> + Copy,
-    persist: bool,
-) -> crate::Result<StagedMinecraftLogin> {
-    let pair = match flow.staged_device.clone() {
-        Some(stored) => DeviceTokenPair::try_from(stored)?,
-        None => {
-            DeviceTokenPair::refresh_and_get_device_token(
-                Utc::now(),
-                exec,
-                persist,
-            )
-            .await?
-            .0
-        }
-    };
+) -> engine::Result<Credentials> {
+    let (pair, _) =
+        DeviceTokenPair::refresh_and_get_device_token(Utc::now(), exec, true)
+            .await?;
 
     let oauth_token = oauth_token(code, &flow.verifier).await?;
     let sisu_authorize = sisu_authorize(
@@ -330,14 +273,9 @@ async fn login_finish_inner(
         ..credentials.offline_profile
     };
 
-    if persist {
-        credentials.upsert(exec).await?;
-    }
+    credentials.upsert(exec).await?;
 
-    Ok(StagedMinecraftLogin {
-        credentials,
-        device_token: StoredDeviceTokenPair::try_from(&pair)?,
-    })
+    Ok(credentials)
 }
 
 #[derive(Deserialize, Debug)]
@@ -356,78 +294,15 @@ pub struct Credentials {
 }
 
 #[derive(Serialize, Debug, Clone)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct MinecraftAccountSummary {
     pub profile: MinecraftProfile,
     pub expires: DateTime<Utc>,
     pub active: bool,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-struct StoredDeviceTokenPair {
-    token: DeviceToken,
-    key_id: Uuid,
-    private_key: String,
-    x: String,
-    y: String,
-}
-
-pub struct StagedMinecraftLogin {
-    pub credentials: Credentials,
-    device_token: StoredDeviceTokenPair,
-}
-
-impl StagedMinecraftLogin {
-    pub async fn commit(
-        self,
-        exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite> + Copy,
-    ) -> crate::Result<Credentials> {
-        DeviceTokenPair::try_from(self.device_token)?
-            .upsert(exec)
-            .await?;
-        self.credentials.upsert(exec).await?;
-        Ok(self.credentials)
-    }
-}
-
-impl TryFrom<&DeviceTokenPair> for StoredDeviceTokenPair {
-    type Error = crate::Error;
-
-    fn try_from(value: &DeviceTokenPair) -> crate::Result<Self> {
-        Ok(Self {
-            token: value.token.clone(),
-            key_id: value.key.id,
-            private_key: value
-                .key
-                .key
-                .to_pkcs8_pem(LineEnding::default())
-                .map_err(MinecraftAuthenticationError::PEMSerialize)?
-                .to_string(),
-            x: value.key.x.clone(),
-            y: value.key.y.clone(),
-        })
-    }
-}
-
-impl TryFrom<StoredDeviceTokenPair> for DeviceTokenPair {
-    type Error = crate::Error;
-
-    fn try_from(value: StoredDeviceTokenPair) -> crate::Result<Self> {
-        Ok(Self {
-            token: value.token,
-            key: DeviceTokenKey {
-                id: value.key_id,
-                key: SigningKey::from_pkcs8_pem(&value.private_key)
-                    .map_err(MinecraftAuthenticationError::PEMSerialize)?,
-                x: value.x,
-                y: value.y,
-            },
-        })
-    }
-}
-
 /// An entry in the player profile cache, keyed by player UUID.
-pub(super) enum ProfileCacheEntry {
+pub(crate) enum ProfileCacheEntry {
     /// A cached profile that is valid, even though it may be stale.
     Hit(Arc<MinecraftProfile>),
     /// A negative profile fetch result due to an authentication error,
@@ -446,7 +321,7 @@ pub(super) enum ProfileCacheEntry {
 /// The cache has to be static because credential objects are short lived
 /// and disposable, and in the future several threads may be interested in
 /// profile data.
-pub(super) static PROFILE_CACHE: Mutex<
+pub(crate) static PROFILE_CACHE: Mutex<
     HashMap<Uuid, ProfileCacheEntry, BuildHasherDefault<DefaultHasher>>,
 > = Mutex::const_new(HashMap::with_hasher(BuildHasherDefault::new()));
 
@@ -492,7 +367,7 @@ impl Credentials {
     async fn refresh(
         &mut self,
         exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite> + Copy,
-    ) -> crate::Result<()> {
+    ) -> engine::Result<()> {
         // Use a margin of 5 minutes to give e.g. Minecraft and potentially
         // other operations that depend on a fresh token 5 minutes to complete
         // from now, and deal with some classes of clock skew
@@ -689,7 +564,7 @@ impl Credentials {
     #[tracing::instrument]
     pub async fn get_default_credential(
         exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite> + Copy,
-    ) -> crate::Result<Option<Credentials>> {
+    ) -> engine::Result<Option<Credentials>> {
         let credentials = Self::get_active(exec).await?;
 
         if let Some(mut creds) = credentials {
@@ -736,7 +611,7 @@ impl Credentials {
     /// to refresh them if they are expired.
     pub async fn get_active(
         exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite> + Copy,
-    ) -> crate::Result<Option<Self>> {
+    ) -> engine::Result<Option<Self>> {
         let res = sqlx::query!(
             "
             SELECT
@@ -773,7 +648,7 @@ impl Credentials {
 
     pub async fn get_all(
         exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite> + Copy,
-    ) -> crate::Result<DashMap<Uuid, Self>> {
+    ) -> engine::Result<DashMap<Uuid, Self>> {
         let res = sqlx::query!(
             "
             SELECT
@@ -814,7 +689,7 @@ impl Credentials {
     pub async fn upsert(
         &self,
         exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite> + Copy,
-    ) -> crate::Result<()> {
+    ) -> engine::Result<()> {
         let profile = self.maybe_online_profile().await;
         let expires = self.expires.timestamp();
         let uuid = profile.id.as_hyphenated().to_string();
@@ -857,7 +732,7 @@ impl Credentials {
     pub async fn remove(
         uuid: Uuid,
         exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
-    ) -> crate::Result<()> {
+    ) -> engine::Result<()> {
         let uuid = uuid.as_hyphenated().to_string();
 
         sqlx::query!(
@@ -922,7 +797,7 @@ impl DeviceTokenPair {
         current_date: DateTime<Utc>,
         exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite> + Copy,
         persist: bool,
-    ) -> crate::Result<(Self, DateTime<Utc>)> {
+    ) -> engine::Result<(Self, DateTime<Utc>)> {
         let pair = Self::get(exec).await?;
 
         if let Some(mut pair) = pair {
@@ -957,7 +832,7 @@ impl DeviceTokenPair {
 
     async fn get(
         exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
-    ) -> crate::Result<Option<Self>> {
+    ) -> engine::Result<Option<Self>> {
         let res = sqlx::query!(
             r#"
             SELECT
@@ -1001,7 +876,7 @@ impl DeviceTokenPair {
     pub async fn upsert(
         &self,
         exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
-    ) -> crate::Result<()> {
+    ) -> engine::Result<()> {
         let uuid = self.key.id.as_hyphenated().to_string();
         let issue_instant = self.token.issue_instant.timestamp();
         let not_after = self.token.not_after.timestamp();
@@ -1422,8 +1297,8 @@ async fn minecraft_token(
 #[derive(
     sqlx::Type, Deserialize, Serialize, Debug, Copy, Clone, PartialEq, Eq,
 )]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
-#[cfg_attr(feature = "export-ts", ts(rename = "SkinModel"))]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "SkinModel"))]
 #[serde(rename_all = "UPPERCASE")]
 #[sqlx(rename_all = "UPPERCASE")]
 pub enum MinecraftSkinVariant {
@@ -1438,7 +1313,7 @@ pub enum MinecraftSkinVariant {
 }
 
 #[derive(Deserialize, Serialize, Debug, Copy, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "UPPERCASE")]
 pub enum MinecraftCharacterExpressionState {
     /// This expression is selected for being displayed ingame.
@@ -1454,7 +1329,7 @@ pub enum MinecraftCharacterExpressionState {
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct MinecraftSkin {
     /// The UUID of this skin object.
     ///
@@ -1525,7 +1400,7 @@ fn normalize_skin_alias_case<'de, D: Deserializer<'de>>(
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct MinecraftCape {
     /// The UUID of the cape.
     pub id: Uuid,
@@ -1539,7 +1414,7 @@ pub struct MinecraftCape {
 }
 
 #[derive(Deserialize, Serialize, Debug, Default, Clone)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct MinecraftProfile {
     /// The UUID of the player.
     #[serde(default)]
@@ -1576,7 +1451,7 @@ impl MinecraftProfile {
     }
 
     /// Returns the currently selected skin for this profile.
-    pub fn current_skin(&self) -> crate::Result<&MinecraftSkin> {
+    pub fn current_skin(&self) -> engine::Result<&MinecraftSkin> {
         self.skins
             .iter()
             .find(|skin| {

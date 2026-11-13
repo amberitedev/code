@@ -1,9 +1,9 @@
 //! The selected Minecraft account's skins and capes.
 
-use contracts::{Empty, Json, Raw};
-use engine::minecraft_skins::{
+use crate::skins::minecraft_skins::{
     Bytes, Cape, MinecraftSkinVariant, Skin, UrlOrBlob,
 };
+use contracts::{Empty, Json, Raw};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 

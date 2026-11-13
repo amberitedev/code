@@ -2,7 +2,9 @@ use std::sync::{Arc, LazyLock};
 
 use url::Url;
 
-use crate::{minecraft_skins::SkinSource, state::MinecraftSkinVariant};
+use crate::{
+    accounts::state::MinecraftSkinVariant, skins::minecraft_skins::SkinSource,
+};
 
 use super::super::super::Skin;
 

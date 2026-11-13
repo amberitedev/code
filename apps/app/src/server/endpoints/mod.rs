@@ -139,8 +139,19 @@ mod tests {
         },
         updates::{self, AvailableUpdate, RestartAfterUpdate, UpdateDownload},
     };
+    use crate::accounts::{
+        mr_auth::ModrinthAuthFlow,
+        state::{
+            MinecraftAccountSummary, MinecraftCape,
+            MinecraftCharacterExpressionState, MinecraftProfile, MinecraftSkin,
+            ModrinthCredentials,
+        },
+    };
     use crate::server::events::{
         AmberiteCommand, AppEvent, Command, LocalEvent,
+    };
+    use crate::skins::minecraft_skins::{
+        Cape, MinecraftSkinVariant, Skin, SkinSource, UrlOrBlob,
     };
     use engine::instance::{
         EditableGameSetting, GameOptionCanonicalValue, GameOptionCompatibility,
@@ -159,19 +170,8 @@ mod tests {
         SyncedOptionJoinResolution, SyncedOptionsOverview, SyncedServer,
         UpdateGameSettingsRequest,
     };
-    use engine::minecraft_skins::{
-        Cape, MinecraftSkinVariant, Skin, SkinSource, UrlOrBlob,
-    };
     use engine::pack::install_from::CreatePackLocation;
     use engine::prelude::InstanceSyncedOption;
-    use engine::{
-        minecraft_auth::{
-            MinecraftAccountSummary, MinecraftCape,
-            MinecraftCharacterExpressionState, MinecraftProfile, MinecraftSkin,
-        },
-        mr_auth::ModrinthAuthFlow,
-        prelude::ModrinthCredentials,
-    };
 
     const PATH: &str = concat!(
         env!("CARGO_MANIFEST_DIR"),

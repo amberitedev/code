@@ -37,7 +37,7 @@ async fn join_server(
     launch(&engine, &join.instance_id, QuickPlayType::Server(address))
         .await
         .map(|_| Empty)
-        .map_err(engine::routes::api_error)
+        .map_err(crate::accounts::api_error)
 }
 
 async fn join_singleplayer_world(
@@ -49,7 +49,7 @@ async fn join_singleplayer_world(
     launch(&engine, &join.instance_id, world)
         .await
         .map(|_| Empty)
-        .map_err(engine::routes::api_error)
+        .map_err(crate::accounts::api_error)
 }
 
 /// Launches an instance as the active Minecraft account, after applying this desktop's pending
@@ -59,7 +59,7 @@ pub async fn launch(
     instance_id: &str,
     quick_play: QuickPlayType,
 ) -> engine::Result<ProcessMetadata> {
-    let account = engine::minecraft_auth::default_credential(engine)
+    let account = crate::accounts::minecraft_auth::default_credential(engine)
         .await?
         .ok_or(engine::ErrorKind::NotLoggedIn)?;
 
@@ -82,7 +82,7 @@ pub async fn launch(
         quick_play,
     };
     engine::instance::launch(engine, instance_id, request, async || {
-        engine::minecraft_skins::flush_pending_skin_change(engine).await?;
+        crate::skins::minecraft_skins::flush_pending_skin_change(engine).await?;
         if let Err(error) =
             engine::instance::reconcile_synced_packs(engine, instance_id).await
         {
