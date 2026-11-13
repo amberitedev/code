@@ -75,6 +75,7 @@ pub struct InstallCreateInstanceRequest {
 
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
 pub struct PackInstall {
     pub location: CreatePackLocation,
     #[cfg_attr(test, ts(optional = nullable))]
@@ -109,5 +110,31 @@ impl InstallPostInstallEdit {
             icon_path: self.icon_path,
             link: self.link.map(InstanceLink::into_core).transpose()?,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::PackInstall;
+
+    #[test]
+    fn a_pack_install_keeps_or_clears_the_icon() {
+        for (edit, icon_path) in [
+            (json!({}), None),
+            (json!({ "iconPath": null }), Some(None)),
+            (
+                json!({ "iconPath": "icon.png" }),
+                Some(Some("icon.png".into())),
+            ),
+        ] {
+            let install: PackInstall = serde_json::from_value(json!({
+                "location": { "type": "fromFile", "path": "pack.mrpack" },
+                "postInstallEdit": edit,
+            }))
+            .unwrap();
+            assert_eq!(install.post_install_edit.unwrap().icon_path, icon_path);
+        }
     }
 }

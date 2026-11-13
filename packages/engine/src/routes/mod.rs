@@ -19,10 +19,7 @@ mod worlds;
 
 use std::sync::Arc;
 
-use axum::{
-    Router,
-    extract::{DefaultBodyLimit, FromRef},
-};
+use axum::{Router, extract::FromRef};
 use contracts::{ApiError, ErrorCode, server::route};
 use serde::Deserialize;
 
@@ -92,8 +89,6 @@ where
     Arc<Engine>: FromRef<S>,
     Arc<dyn Access>: FromRef<S>,
 {
-    let (write_path, write) =
-        route::<WriteInstanceFile, _, _, _>(write_instance_file);
     [
         route::<ListInstances, _, _, _>(list_instances),
         route::<GetInstances, _, _, _>(get_instances),
@@ -164,8 +159,8 @@ where
         route::<GetSystemMemory, _, _, _>(get_system_memory),
         route::<ListInstanceFiles, _, _, _>(list_instance_files),
         route::<ReadInstanceFile, _, _, _>(read_instance_file),
-        // An upload is often past axum's 2 MB default.
-        (write_path, write.layer(DefaultBodyLimit::disable())),
+        // The host sets the body cap; an upload is often past axum's 2 MB default.
+        route::<WriteInstanceFile, _, _, _>(write_instance_file),
         route::<CreateInstanceDirectory, _, _, _>(create_instance_directory),
         route::<MoveInstanceFile, _, _, _>(move_instance_file),
         route::<DeleteInstanceFile, _, _, _>(delete_instance_file),

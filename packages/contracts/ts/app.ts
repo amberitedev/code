@@ -420,7 +420,7 @@ unknownFile: boolean, externalFilesInModpack: Array<string>, };
 
 export type InstallCreateInstanceRequest = { name: string, gameVersion: string, loader: ModLoader, loaderVersion: string | null, iconPath: string | null, iconConfig?: SharedIconConfig | null, link?: InstanceLink | null, };
 
-export type PackInstall = { location: CreatePackLocation, post_install_edit?: InstallPostInstallEdit | null, };
+export type PackInstall = { location: CreatePackLocation, postInstallEdit?: InstallPostInstallEdit | null, };
 
 export type InstallPostInstallEdit = { name?: string | null, 
 /**

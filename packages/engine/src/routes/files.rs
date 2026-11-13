@@ -5,7 +5,7 @@ use std::{
 
 use anyhow::Context;
 use axum::extract::State;
-use contracts::{ApiError, Empty, Json, Raw, server::Req};
+use contracts::{ApiError, Empty, ErrorCode, Json, Raw, server::Req};
 
 use super::api_error;
 use crate::{
@@ -17,14 +17,30 @@ use crate::{
         ReadInstanceFile, WriteInstanceFile,
     },
     instance::{self, InstanceFileItem},
+    state::content_store::validate_relative,
 };
+
+/// A caller's path stays inside the instance's folder. The engine refuses one that leaves it too,
+/// but as an internal error. A leading `/` is the folder itself, as the engine reads it.
+fn inside_instance(path: &str) -> Result<&str, ApiError> {
+    let relative = path.trim_start_matches('/');
+    if relative.is_empty() || validate_relative(relative).is_ok() {
+        Ok(path)
+    } else {
+        Err(ApiError::new(
+            ErrorCode::InvalidInput,
+            format!("{path:?} is not a path inside the instance's folder"),
+        ))
+    }
+}
 
 pub async fn list_instance_files(
     State(engine): State<Arc<Engine>>,
     instance: InstanceAccess<Edit>,
     request: Req<ListInstanceFiles>,
 ) -> Result<Json<Vec<InstanceFileItem>>, ApiError> {
-    instance::list_instance_files(&engine, &instance.id, &request.query.path)
+    let path = inside_instance(&request.query.path)?;
+    instance::list_instance_files(&engine, &instance.id, path)
         .await
         .map(Json)
         .map_err(api_error)
@@ -35,13 +51,10 @@ pub async fn read_instance_file(
     instance: InstanceAccess<Edit>,
     request: Req<ReadInstanceFile>,
 ) -> Result<Raw, ApiError> {
-    let bytes = instance::read_instance_file(
-        &engine,
-        &instance.id,
-        &request.query.path,
-    )
-    .await
-    .map_err(api_error)?;
+    let path = inside_instance(&request.query.path)?;
+    let bytes = instance::read_instance_file(&engine, &instance.id, path)
+        .await
+        .map_err(api_error)?;
     Ok(Raw {
         content_type: "application/octet-stream".to_owned(),
         bytes: bytes.into(),
@@ -56,7 +69,7 @@ pub async fn write_instance_file(
     instance::write_instance_file(
         &engine,
         &instance.id,
-        &request.query.path,
+        inside_instance(&request.query.path)?,
         &request.body.bytes,
         request.query.create_only,
     )
@@ -70,14 +83,11 @@ pub async fn create_instance_directory(
     instance: InstanceAccess<Edit>,
     request: Req<CreateInstanceDirectory>,
 ) -> Result<Empty, ApiError> {
-    instance::create_instance_directory(
-        &engine,
-        &instance.id,
-        &request.query.path,
-    )
-    .await
-    .map(|()| Empty)
-    .map_err(api_error)
+    let path = inside_instance(&request.query.path)?;
+    instance::create_instance_directory(&engine, &instance.id, path)
+        .await
+        .map(|()| Empty)
+        .map_err(api_error)
 }
 
 pub async fn move_instance_file(
@@ -88,8 +98,8 @@ pub async fn move_instance_file(
     instance::rename_instance_file(
         &engine,
         &instance.id,
-        &request.body.source,
-        &request.body.destination,
+        inside_instance(&request.body.source)?,
+        inside_instance(&request.body.destination)?,
     )
     .await
     .map(|()| Empty)
@@ -104,7 +114,7 @@ pub async fn delete_instance_file(
     instance::delete_instance_file(
         &engine,
         &instance.id,
-        &request.query.path,
+        inside_instance(&request.query.path)?,
         request.query.recursive,
     )
     .await
@@ -121,7 +131,7 @@ pub async fn extract_instance_zip(
     extract_zip(
         &engine,
         &instance.id,
-        &body.path,
+        inside_instance(&body.path)?,
         body.override_conflicts,
         body.dry_run,
     )

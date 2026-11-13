@@ -18,7 +18,7 @@ use std::{
 
 use axum::{
     Router,
-    extract::{FromRef, Request, State},
+    extract::{DefaultBodyLimit, FromRef, Request, State},
     http::{header::UPGRADE, request::Parts},
     middleware::{self, Next},
     response::{IntoResponse, Response},
@@ -142,6 +142,8 @@ impl LocalServer {
             .route(events_path, events)
             .merge(
                 engine::routes::routes()
+                    // Only this desktop reaches it, and a Files tab upload can be any size.
+                    .layer(DefaultBodyLimit::disable())
                     .merge(library::routes::routes())
                     .merge(library::install::routes())
                     .merge(synced_options::routes::routes())

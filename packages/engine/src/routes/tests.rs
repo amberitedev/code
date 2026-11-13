@@ -3,7 +3,7 @@ use std::sync::Arc;
 use axum::{
     Router,
     body::Body,
-    extract::FromRef,
+    extract::{DefaultBodyLimit, FromRef},
     http::{Request, StatusCode, request::Parts},
 };
 use contracts::{ApiError, ErrorCode};
@@ -505,9 +505,20 @@ fn has_file_named(dir: &std::path::Path, name: &str) -> bool {
 #[tokio::test(flavor = "multi_thread")]
 async fn the_files_tab_writes_reads_moves_and_deletes_raw_bytes() {
     let dir = tempfile::tempdir().unwrap();
-    let router = host(&dir, true).await;
+    let routes = host(&dir, true).await;
     let files = "/instances/local%3Aa/files";
-    // Past axum's 2 MB default body limit.
+    let capped = routes.clone().layer(DefaultBodyLimit::max(1024));
+    let (status, _) = send_raw(
+        &capped,
+        "PUT",
+        &format!("{files}/content?path=capped.bin&create_only=false"),
+        vec![7u8; 2048],
+    )
+    .await;
+    // The host's cap holds: contracts answers a body past it as invalid input.
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    // Past axum's 2 MB default, which the App lifts.
+    let router = routes.layer(DefaultBodyLimit::disable());
     let bytes = vec![7u8; 3 * 1024 * 1024];
 
     let write = format!("{files}/content?path=config%2Fbig.bin&create_only=");
@@ -530,7 +541,7 @@ async fn the_files_tab_writes_reads_moves_and_deletes_raw_bytes() {
     let (status, _) = send(
         &router,
         "POST",
-        &format!("{files}/directories?path=saves"),
+        &format!("{files}/directories?path=notes"),
         None,
     )
     .await;
@@ -539,27 +550,32 @@ async fn the_files_tab_writes_reads_moves_and_deletes_raw_bytes() {
         &router,
         "POST",
         &format!("{files}/move"),
-        Some(json!({ "source": "config/big.bin", "destination": "saves/big.bin" })),
+        Some(json!({ "source": "config/big.bin", "destination": "notes/big.bin" })),
     )
     .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
     let (_, listed) =
-        send(&router, "GET", &format!("{files}?path=saves"), None).await;
-    assert_eq!(listed[0]["path"], "saves/big.bin");
+        send(&router, "GET", &format!("{files}?path=notes"), None).await;
+    assert_eq!(listed[0]["path"], "notes/big.bin");
     assert_eq!(listed[0]["type"], "file");
     assert_eq!(listed[0]["size"], bytes.len());
 
     let (status, _) = send(
         &router,
         "DELETE",
-        &format!("{files}?path=saves&recursive=true"),
+        &format!("{files}?path=notes&recursive=true"),
         None,
     )
     .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
     let (_, root) = send(&router, "GET", &format!("{files}?path="), None).await;
-    assert_eq!(root.as_array().unwrap().len(), 1);
-    assert_eq!(root[0]["path"], "config");
+    let root: Vec<_> = root
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["path"].as_str().unwrap())
+        .collect();
+    assert!(root.contains(&"config") && !root.contains(&"notes"));
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -588,7 +604,7 @@ async fn the_files_tab_refuses_paths_that_leave_the_instance() {
             vec![1],
         )
         .await;
-        assert!(!status.is_success(), "{path} was written");
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{path} was written");
         let (status, _) = send(
             &router,
             "POST",
@@ -596,11 +612,11 @@ async fn the_files_tab_refuses_paths_that_leave_the_instance() {
             Some(json!({ "source": "inside.txt", "destination": path.replace("%2F", "/").replace("%3A", ":") })),
         )
         .await;
-        assert!(!status.is_success(), "{path} was a move target");
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{path} was a move target");
     }
     let (status, _) =
         send(&router, "GET", &format!("{files}?path=.."), None).await;
-    assert!(!status.is_success());
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 
     let mut archive = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
     archive

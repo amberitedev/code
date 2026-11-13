@@ -114,7 +114,7 @@ export async function install_create_modpack_instance(
 	postInstallEdit?: InstallPostInstallEdit | null,
 ) {
 	return await apiClient.local.call(localInstalls.createModpackInstance, {
-		body: { location, post_install_edit: postInstallEdit },
+		body: { location, postInstallEdit },
 	})
 }
 
@@ -178,7 +178,7 @@ export async function install_update_shared_instance(instanceId: string) {
 	return await apiClient.local.call(installs.UpdateSharedInstance, { params: { id: instanceId } })
 }
 
-/** The owner's history of the instance's share, newest first. Empty for a member. */
+/** The share's history, newest first. Empty when the instance joined the share as a member. */
 export async function install_get_shared_instance_history(instanceId: string) {
 	return await apiClient.local.call(installs.GetSharedInstanceHistory, {
 		params: { id: instanceId },
@@ -242,7 +242,7 @@ export async function install_pack_to_existing_instance(
 ) {
 	return await apiClient.local.call(localInstalls.installPackToInstance, {
 		params: { id: instanceId },
-		body: { location, post_install_edit: postInstallEdit },
+		body: { location, postInstallEdit },
 	})
 }
 

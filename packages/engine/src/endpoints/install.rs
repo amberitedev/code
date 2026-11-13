@@ -18,7 +18,8 @@ endpoints! {
     UpdateInstanceContent: Post "/instances/{id}/content-updates", InstanceRef, (), Json<Vec<ContentUpdateSelection>> => Json<InstallJobSnapshot>;
     GetSharedInstanceUpdatePreview: Get "/instances/{id}/shared/update-preview", InstanceRef, (), Empty => Json<Option<SharedInstanceUpdatePreview>>;
     UpdateSharedInstance: Post "/instances/{id}/shared/update", InstanceRef, (), Empty => Json<InstallJobSnapshot>;
-    /// The share's pushed versions, newest first. Empty for a member.
+    /// The share's pushed versions, newest first. Empty when the instance joined the share as a
+    /// member rather than owning it.
     GetSharedInstanceHistory: Get "/instances/{id}/shared/history", InstanceRef, (), Empty => Json<Vec<SharedInstanceHistoryEntry>>;
     /// Puts the instance back to a version from its history, leaving it to push.
     RestoreSharedInstanceVersion: Post "/instances/{id}/shared/history/{version}/restore", SharedVersionRef, (), Empty => Json<InstallJobSnapshot>;

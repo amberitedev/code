@@ -54,6 +54,7 @@ const messages = defineMessages({
 	},
 })
 
+// Only joins paths for display and Open in folder, so the listing never waits on it.
 const instanceRootQuery = useQuery(
 	computed(() => ({
 		queryKey: instanceKeys.rootPath(instancePage.instanceId.value),
@@ -84,10 +85,6 @@ function isReadOnly(path: string): boolean {
 	)
 }
 
-async function writeBytes(path: string, bytes: Uint8Array<ArrayBuffer>, createOnly = false) {
-	await writeInstanceFile(instanceId.value, path, new Blob([bytes]), createOnly)
-}
-
 function directoryQueryOptions(dirPath: string) {
 	return {
 		queryKey: instanceKeys.files(instancePage.instanceId.value, dirPath),
@@ -102,7 +99,7 @@ function directoryQueryOptions(dirPath: string) {
 const directoryQuery = useQuery(
 	computed(() => ({
 		...directoryQueryOptions(currentPath.value),
-		enabled: !!instanceRoot.value,
+		enabled: !!instanceId.value,
 		refetchOnMount: 'always' as const,
 	})),
 )
@@ -127,11 +124,6 @@ watch(directoryQuery.error, (queryError) => {
 		items.value = []
 		firstPaintPending.value = false
 	}
-})
-watch(instanceRootQuery.error, (queryError) => {
-	if (!queryError) return
-	error.value = queryError
-	firstPaintPending.value = false
 })
 
 // Marks every cached folder of this instance stale and re-reads the open one, so a folder changed
@@ -171,7 +163,7 @@ async function handleCreateItem(name: string, type: 'file' | 'directory') {
 		if (type === 'directory') {
 			await createInstanceDirectory(instanceId.value, targetPath)
 		} else {
-			await writeBytes(targetPath, new Uint8Array(), true)
+			await writeInstanceFile(instanceId.value, targetPath, new Blob(), true)
 		}
 		await refresh()
 	} catch (e) {
@@ -233,7 +225,7 @@ async function handleReadFileAsBlob(path: string): Promise<Blob> {
 }
 
 async function handleWriteFile(path: string, content: string) {
-	await writeBytes(path, new TextEncoder().encode(content))
+	await writeInstanceFile(instanceId.value, path, new Blob([content]))
 }
 
 async function handleDownloadFile(path: string, fileName: string) {
@@ -273,9 +265,8 @@ async function handleUploadFiles(files: File[]) {
 	try {
 		for (const file of files) {
 			uploadState.value.currentFileName = file.name
-			const buffer = await file.arrayBuffer()
 			const targetPath = currentPath.value ? `${currentPath.value}/${file.name}` : file.name
-			await writeBytes(targetPath, new Uint8Array(buffer))
+			await writeInstanceFile(instanceId.value, targetPath, file)
 			uploadState.value.completedFiles++
 			uploadState.value.uploadedBytes += file.size
 			uploadState.value.currentFileProgress = 1

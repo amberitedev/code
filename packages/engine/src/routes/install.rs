@@ -1,3 +1,7 @@
+//! Ports upstream's `apps/app/src/api/install.rs`. Its installs from a file on the desktop are
+//! App routes in `apps/app/src/library/install.rs`, and its launcher import is in
+//! `apps/app/src/import/routes.rs`.
+
 use std::sync::Arc;
 
 use axum::extract::State;
