@@ -19,10 +19,8 @@ use crate::{
 };
 use shared::SharedDirs;
 
-/// The server software a server runs, as `servers.loader` stores it. App-lib's `ModLoader`
-/// (`bedrock::state::ModLoader`), which packs and content sets name, plus Paper. App-lib's is
-/// borrowed from its own file and has no Paper, so this one stays beside it; a pack's loader
-/// converts with `From`.
+/// The server software a server runs, as `servers.loader` stores it. Same values as the engine's
+/// `ModLoader`, which packs and content sets name; a pack's loader converts with `From`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ModLoader {
@@ -83,6 +81,7 @@ impl From<bedrock::state::ModLoader> for ModLoader {
             Modded::Quilt => Self::Quilt,
             Modded::Forge => Self::Forge,
             Modded::NeoForge => Self::NeoForge,
+            Modded::Paper => Self::Paper,
         }
     }
 }

@@ -138,7 +138,11 @@ CREATE TABLE instance_files (
 
 	sha1 TEXT NOT NULL,
 	size INTEGER NOT NULL,
+	-- On a server: a client-only file of the pack, never on its disk.
 	missing INTEGER NOT NULL DEFAULT 0,
+	-- On a server: a pack update found the file edited and left it, because the new pack
+	-- changed or removed it. Cleared when the owner keeps or replaces it.
+	pending TEXT NULL CHECK (pending IN ('changed', 'removed')),
 
 	added_at INTEGER NOT NULL,
 	modified_at INTEGER NOT NULL,
@@ -154,7 +158,8 @@ CREATE TABLE instance_content_entries (
 	content_set_id TEXT NOT NULL,
 	file_id TEXT NULL,
 
-	project_type TEXT NOT NULL,
+	-- Null only on a server, for a pack file outside a content folder, such as a config.
+	project_type TEXT NULL,
 	project_id TEXT NULL,
 	version_id TEXT NULL,
 
@@ -162,6 +167,11 @@ CREATE TABLE instance_content_entries (
 	server_requirement TEXT NOT NULL,
 	client_requirement TEXT NOT NULL,
 	enabled INTEGER NOT NULL DEFAULT 1,
+	-- Someone set the sides by hand.
+	sides_unlocked INTEGER NOT NULL DEFAULT 0,
+	-- On a server: a client-only file of the pack someone turned on for the server. Pack updates
+	-- keep it placed.
+	server_override INTEGER NOT NULL DEFAULT 0,
 
 	added_at INTEGER NOT NULL,
 	modified_at INTEGER NOT NULL,

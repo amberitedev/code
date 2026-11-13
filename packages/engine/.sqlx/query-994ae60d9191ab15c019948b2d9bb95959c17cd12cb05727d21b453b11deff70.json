@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n\t\tUPDATE instance_files\n\t\tSET\n\t\t\tmissing = ?,\n\t\t\tmodified_at = ?\n\t\tWHERE id = ?\n\t\tRETURNING\n\t\t\tid,\n\t\t\tinstance_id,\n\t\t\trelative_path,\n\t\t\tfile_name,\n\t\t\tenabled,\n\t\t\tsha1,\n\t\t\tsize,\n\t\t\tmissing,\n\t\t\tadded_at,\n\t\t\tmodified_at\n\t\t",
+  "query": "\n\t\tUPDATE instance_files\n\t\tSET\n\t\t\tmissing = ?,\n\t\t\tmodified_at = ?\n\t\tWHERE id = ?\n\t\tRETURNING\n\t\t\tid,\n\t\t\tinstance_id,\n\t\t\trelative_path,\n\t\t\tfile_name,\n\t\t\tenabled,\n\t\t\tsha1,\n\t\t\tsize,\n\t\t\tmissing,\n\t\t\tpending,\n\t\t\tadded_at,\n\t\t\tmodified_at\n\t\t",
   "describe": {
     "columns": [
       {
@@ -92,8 +92,19 @@
         }
       },
       {
-        "name": "added_at",
+        "name": "pending",
         "ordinal": 8,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "instance_files",
+            "name": "pending"
+          }
+        }
+      },
+      {
+        "name": "added_at",
+        "ordinal": 9,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -104,7 +115,7 @@
       },
       {
         "name": "modified_at",
-        "ordinal": 9,
+        "ordinal": 10,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -126,9 +137,10 @@
       false,
       false,
       false,
+      true,
       false,
       false
     ]
   },
-  "hash": "6d76a6f26705044500983aaae9796a39ac667278b0c805da2320384a37c3baa1"
+  "hash": "994ae60d9191ab15c019948b2d9bb95959c17cd12cb05727d21b453b11deff70"
 }

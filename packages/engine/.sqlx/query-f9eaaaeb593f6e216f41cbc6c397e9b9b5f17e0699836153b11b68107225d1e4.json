@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n\t\tSELECT *\n\t\tFROM instance_content_entries\n\t\tWHERE id = ?\n\t\t",
+  "query": "\n\t\t\tINSERT INTO instance_content_entries (\n\t\t\t\tid,\n\t\t\t\tinstance_id,\n\t\t\t\tcontent_set_id,\n\t\t\t\tfile_id,\n\t\t\t\tproject_type,\n\t\t\t\tproject_id,\n\t\t\t\tversion_id,\n\t\t\t\tsource_kind,\n\t\t\t\tserver_requirement,\n\t\t\t\tclient_requirement,\n\t\t\t\tenabled,\n\t\t\t\tadded_at,\n\t\t\t\tmodified_at\n\t\t\t)\n\t\t\tVALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n\t\t\tON CONFLICT (content_set_id, project_id, version_id)\n\t\t\t\tWHERE file_id IS NULL\n\t\t\t\t\tAND project_id IS NOT NULL\n\t\t\t\t\tAND version_id IS NOT NULL\n\t\t\tDO UPDATE SET\n\t\t\t\tinstance_id = excluded.instance_id,\n\t\t\t\tproject_type = excluded.project_type,\n\t\t\t\tsource_kind = excluded.source_kind,\n\t\t\t\tserver_requirement = excluded.server_requirement,\n\t\t\t\tclient_requirement = excluded.client_requirement,\n\t\t\t\tenabled = excluded.enabled,\n\t\t\t\tmodified_at = excluded.modified_at\n\t\t\tRETURNING\n\t\t\t\tid,\n\t\t\t\tinstance_id,\n\t\t\t\tcontent_set_id,\n\t\t\t\tfile_id,\n\t\t\t\tproject_type AS \"project_type!\",\n\t\t\t\tproject_id,\n\t\t\t\tversion_id,\n\t\t\t\tsource_kind,\n\t\t\t\tserver_requirement,\n\t\t\t\tclient_requirement,\n\t\t\t\tenabled,\n\t\t\t\tsides_unlocked,\n\t\t\t\tserver_override,\n\t\t\t\tadded_at,\n\t\t\t\tmodified_at\n\t\t\t",
   "describe": {
     "columns": [
       {
@@ -48,7 +48,7 @@
         }
       },
       {
-        "name": "project_type",
+        "name": "project_type!",
         "ordinal": 4,
         "type_info": "Text",
         "origin": {
@@ -125,8 +125,30 @@
         }
       },
       {
-        "name": "added_at",
+        "name": "sides_unlocked",
         "ordinal": 11,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "instance_content_entries",
+            "name": "sides_unlocked"
+          }
+        }
+      },
+      {
+        "name": "server_override",
+        "ordinal": 12,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "instance_content_entries",
+            "name": "server_override"
+          }
+        }
+      },
+      {
+        "name": "added_at",
+        "ordinal": 13,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -137,7 +159,7 @@
       },
       {
         "name": "modified_at",
-        "ordinal": 12,
+        "ordinal": 14,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -148,16 +170,18 @@
       }
     ],
     "parameters": {
-      "Right": 1
+      "Right": 12
     },
     "nullable": [
       false,
       false,
       false,
       true,
+      true,
+      true,
+      true,
       false,
-      true,
-      true,
+      false,
       false,
       false,
       false,
@@ -166,5 +190,5 @@
       false
     ]
   },
-  "hash": "eff7928f6ef38c2fa7d59897814a157bbe19a6f443e34c1452119f2bb6a3e1e1"
+  "hash": "f9eaaaeb593f6e216f41cbc6c397e9b9b5f17e0699836153b11b68107225d1e4"
 }

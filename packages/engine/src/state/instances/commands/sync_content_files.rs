@@ -6,8 +6,10 @@ use crate::state::content_store::{
 use crate::state::instances::adapters::{filesystem, sqlite};
 use crate::state::instances::{Instance, InstanceFile};
 use crate::state::{
-    CachedEntry, InstanceInstallStage, ProjectType, file_hash_cache_key,
+    CachedEntry, InstanceInstallStage, ModLoader, ProjectType,
+    file_hash_cache_key,
 };
+use crate::util::sandbox::Folder;
 use chrono::Utc;
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
@@ -34,6 +36,9 @@ pub(crate) async fn sync_instance_content_files(
     instance: &Instance,
     state: &Engine,
 ) -> crate::Result<Vec<InstanceFile>> {
+    if state.side == contracts::Side::Server {
+        return sync_server_content_files(instance, state).await;
+    }
     let (snapshot, known_files, known_bindings) = {
         let instance_content =
             InstanceContent::lock(&instance.id, state).await?;
@@ -282,6 +287,7 @@ pub(crate) async fn sync_instance_content_files(
             sha1: hash.hash.clone(),
             size: scanned.size,
             missing: false,
+            pending: None,
             added_at: previous
                 .map(|file| file.added_at)
                 .unwrap_or_else(Utc::now),
@@ -623,6 +629,175 @@ pub(crate) fn project_type_for_file(
     file: &InstanceFile,
 ) -> Option<ProjectType> {
     filesystem::project_type_from_relative_path(&file.relative_path)
+}
+
+/// A server's addon files on disk, registered so the content routes find them. The rows a pack
+/// install keeps (configs, client-only files, sides) are its own, and are left alone.
+async fn sync_server_content_files(
+    instance: &Instance,
+    state: &Engine,
+) -> crate::Result<Vec<InstanceFile>> {
+    let content = InstanceContent::lock(&instance.id, state).await?;
+    let loader = sqlite::content_rows::get_applied_content_set(
+        &instance.id,
+        &state.pool,
+    )
+    .await?
+    .map_or(ModLoader::Vanilla, |set| set.loader);
+    let dir = state.directories.instances_dir().join(&instance.path);
+    let existing =
+        sqlite::content_rows::get_instance_files(&instance.id, &state.pool)
+            .await?;
+    let tracked = sqlite::server_rows::tracked_files(&state.pool, &instance.id)
+        .await?
+        .into_iter()
+        .map(|(row, _)| row.relative_path)
+        .collect::<HashSet<_>>();
+    let known = existing
+        .iter()
+        .map(|file| file.relative_path.clone())
+        .collect::<HashSet<_>>();
+    let (scanned, new_files) = tokio::task::spawn_blocking(move || {
+        let Ok(folder) = Folder::open(&dir) else {
+            return (Vec::new(), HashMap::new());
+        };
+        let scanned = scan_server_addons(&folder, loader);
+        let new_files = scanned
+            .iter()
+            .filter(|addon| !known.contains(&addon.path))
+            .filter_map(|addon| {
+                let sha1 = folder.sha1(&addon.on_disk()).ok()??;
+                Some((addon.path.clone(), sha1))
+            })
+            .collect::<HashMap<_, _>>();
+        (scanned, new_files)
+    })
+    .await?;
+    let on_disk = scanned
+        .iter()
+        .map(|addon| addon.path.as_str())
+        .collect::<HashSet<_>>();
+    let mut changed_paths = Vec::new();
+    let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await?;
+    for addon in &scanned {
+        let previous = existing
+            .iter()
+            .find(|file| file.relative_path == addon.path);
+        let file = match previous {
+            Some(file) if file.missing || file.enabled == addon.enabled => {
+                continue;
+            }
+            Some(file) => InstanceFile {
+                enabled: addon.enabled,
+                modified_at: Utc::now(),
+                ..file.clone()
+            },
+            None => {
+                let Some(sha1) = new_files.get(&addon.path) else {
+                    continue;
+                };
+                let now = Utc::now();
+                InstanceFile {
+                    id: instance_file_id(),
+                    instance_id: instance.id.clone(),
+                    relative_path: addon.path.clone(),
+                    file_name: addon.file_name().to_owned(),
+                    enabled: addon.enabled,
+                    sha1: sha1.clone(),
+                    size: addon.size,
+                    missing: false,
+                    pending: None,
+                    added_at: now,
+                    modified_at: now,
+                }
+            }
+        };
+        sqlite::content_rows::upsert_instance_file(&file, &mut tx).await?;
+        changed_paths.push(addon.path.clone());
+    }
+    for file in &existing {
+        if !file.missing
+            && !on_disk.contains(file.relative_path.as_str())
+            && !tracked.contains(&file.relative_path)
+            && crate::api::pack::server::project_type_of(&file.relative_path)
+                .is_some()
+        {
+            sqlite::content_rows::remove_instance_file_by_relative_path(
+                &instance.id,
+                &file.relative_path,
+                &mut tx,
+            )
+            .await?;
+            changed_paths.push(file.relative_path.clone());
+        }
+    }
+    tx.commit().await?;
+    drop(content);
+    if !changed_paths.is_empty() {
+        state.events.send(crate::event::Event::FilesChanged {
+            instance_id: instance.id.clone(),
+            paths: changed_paths,
+        });
+    }
+    sqlite::content_rows::get_instance_files(&instance.id, &state.pool).await
+}
+
+/// An addon file on a server's disk.
+struct ServerAddon {
+    /// The enabled path, which its row uses.
+    path: String,
+    enabled: bool,
+    size: u64,
+}
+
+impl ServerAddon {
+    fn on_disk(&self) -> String {
+        file_path_on_disk(&self.path, self.enabled)
+    }
+
+    fn file_name(&self) -> &str {
+        self.path.rsplit('/').next().unwrap_or(&self.path)
+    }
+}
+
+/// Every addon file in the folders a server with `loader` reads: plugins on Paper, mods on a
+/// modded server, and datapacks in its world on all of them.
+fn scan_server_addons(folder: &Folder, loader: ModLoader) -> Vec<ServerAddon> {
+    let datapacks = format!("{}/datapacks", folder.level_name());
+    let folders = match loader {
+        ModLoader::Paper => vec![ProjectType::Plugin.get_folder(), &datapacks],
+        ModLoader::Vanilla => vec![datapacks.as_str()],
+        _ => vec![ProjectType::Mod.get_folder(), &datapacks],
+    };
+    let mut addons = Vec::new();
+    for dir in folders {
+        let Ok(entries) =
+            folder.open_dir(Some(dir)).and_then(|dir| dir.entries())
+        else {
+            continue;
+        };
+        for entry in entries.filter_map(Result::ok) {
+            let Ok(name) = entry.file_name().into_string() else {
+                continue;
+            };
+            let Ok(metadata) = entry.metadata() else {
+                continue;
+            };
+            let enabled_name = name.trim_end_matches(".disabled");
+            if !metadata.is_file()
+                || !(enabled_name.ends_with(".jar")
+                    || enabled_name.ends_with(".zip"))
+            {
+                continue;
+            }
+            addons.push(ServerAddon {
+                path: format!("{dir}/{enabled_name}"),
+                enabled: enabled_name.len() == name.len(),
+                size: metadata.len(),
+            });
+        }
+    }
+    addons
 }
 
 pub(super) fn instance_file_id() -> String {

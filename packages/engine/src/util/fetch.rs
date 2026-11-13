@@ -1314,8 +1314,130 @@ pub async fn sha1_file_async_with_progress(
     Ok((size, hasher.digest().to_string()))
 }
 
+/// The client a server engine downloads pack content with: only allowed hosts, public
+/// addresses and checked redirects (`pack_hosts`).
+pub(crate) fn pack_client() -> reqwest::Result<reqwest::Client> {
+    crate::util::pack_hosts::client(reqwest_client_builder_with_timeout())
+}
+
+/// The hash a pack file is checked against.
+#[derive(Clone, Copy)]
+pub(crate) enum PackHash<'a> {
+    Sha1(&'a str),
+    Sha512(&'a str),
+}
+
+/// Download `url` with a server engine's pack client into `path`, checked against `hash`, and cut
+/// off once it passes `limit` bytes. The file at `path` is only ever whole and checked.
+pub(crate) async fn fetch_pack_file(
+    client: &reqwest::Client,
+    url: &str,
+    path: &Path,
+    hash: PackHash<'_>,
+    limit: u64,
+) -> crate::Result<()> {
+    use sha1::Digest;
+
+    let allowed = reqwest::Url::parse(url)
+        .is_ok_and(|parsed| crate::util::pack_hosts::allowed(&parsed, false));
+    if !allowed {
+        bail!(ErrorKind::InputError(format!(
+            "{url} is not on a host packs may download from"
+        )));
+    }
+    let staged = path.with_extension("part");
+    let mut last = None;
+    for _ in 0..=FETCH_ATTEMPTS {
+        let attempt = async {
+            let mut response = client
+                .get(url)
+                .send()
+                .await
+                .and_then(reqwest::Response::error_for_status)
+                .with_context(|| format!("failed to download {url}"))?;
+            let mut file = File::create(&staged)
+                .await
+                .map_err(|e| IOError::with_path(e, &staged))?;
+            let (mut sha1, mut sha512) =
+                (sha1::Sha1::new(), sha2::Sha512::new());
+            let mut written = 0u64;
+            while let Some(chunk) = response
+                .chunk()
+                .await
+                .with_context(|| format!("failed to read {url}"))?
+            {
+                written = written.saturating_add(chunk.len() as u64);
+                if written > limit {
+                    bail!(ErrorKind::InputError(format!(
+                        "{url} does not fit on the disk"
+                    )));
+                }
+                sha1.update(&chunk);
+                sha512.update(&chunk);
+                file.write_all(&chunk)
+                    .await
+                    .map_err(|e| IOError::with_path(e, &staged))?;
+            }
+            file.sync_all()
+                .await
+                .map_err(|e| IOError::with_path(e, &staged))?;
+            let matches = match hash {
+                PackHash::Sha1(expected) => {
+                    hex::encode(sha1.finalize()).eq_ignore_ascii_case(expected)
+                }
+                PackHash::Sha512(expected) => hex::encode(sha512.finalize())
+                    .eq_ignore_ascii_case(expected),
+            };
+            if !matches {
+                bail!(ErrorKind::InputError(format!(
+                    "{url} does not have the hash the pack lists"
+                )));
+            }
+            tokio::fs::rename(&staged, path)
+                .await
+                .map_err(|e| IOError::with_path(e, path))?;
+            Ok(())
+        }
+        .await;
+        match attempt {
+            Ok(()) => return Ok(()),
+            Err(error) => {
+                let _ = tokio::fs::remove_file(&staged).await;
+                last = Some(error);
+            }
+        }
+    }
+    Err(last.unwrap_or_else(|| {
+        ErrorKind::InputError(format!("{url} was not downloaded")).into()
+    }))
+}
+
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn a_pack_url_on_a_private_address_is_refused() {
+        crate::install_crypto_provider();
+        let client = super::pack_client().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.jar");
+        for url in [
+            "https://127.0.0.1/a.jar",
+            "https://192.168.1.1/a.jar",
+            "https://localhost/a.jar",
+        ] {
+            let fetched = super::fetch_pack_file(
+                &client,
+                url,
+                &path,
+                super::PackHash::Sha1("aa"),
+                u64::MAX,
+            )
+            .await;
+            assert!(fetched.is_err(), "{url}");
+            assert!(!path.exists(), "{url}");
+        }
+    }
+
     use super::*;
     use chrono::{TimeDelta, Utc};
 

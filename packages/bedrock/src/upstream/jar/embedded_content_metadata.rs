@@ -79,7 +79,9 @@ fn inspect_content_archive<R: Read + Seek>(
         ))?;
     let project_type = infer_project_type(&mut archive)?;
     let (metadata, icon) = match project_type {
-        ProjectType::Mod => inspect_mod(&mut archive, loader),
+        ProjectType::Mod | ProjectType::Plugin => {
+            inspect_mod(&mut archive, loader)
+        }
         ProjectType::DataPack | ProjectType::ResourcePack => {
             inspect_pack(&mut archive)
         }
@@ -208,7 +210,7 @@ fn metadata_order(loader: Option<ModLoader>) -> [ModMetadataKind; 5] {
             ModMetadataKind::Fabric,
             ModMetadataKind::Quilt,
         ],
-        Some(ModLoader::Vanilla) | None => [
+        Some(ModLoader::Vanilla | ModLoader::Paper) | None => [
             ModMetadataKind::Fabric,
             ModMetadataKind::Quilt,
             ModMetadataKind::NeoForge,

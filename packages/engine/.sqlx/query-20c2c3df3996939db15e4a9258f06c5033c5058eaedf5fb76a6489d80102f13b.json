@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n\t\tSELECT *\n\t\tFROM instance_content_entries\n\t\tWHERE content_set_id = ?\n\t\tORDER BY added_at ASC, id ASC\n\t\t",
+  "query": "\n\t\t\tINSERT INTO instance_content_entries (\n\t\t\t\tid,\n\t\t\t\tinstance_id,\n\t\t\t\tcontent_set_id,\n\t\t\t\tfile_id,\n\t\t\t\tproject_type,\n\t\t\t\tproject_id,\n\t\t\t\tversion_id,\n\t\t\t\tsource_kind,\n\t\t\t\tserver_requirement,\n\t\t\t\tclient_requirement,\n\t\t\t\tenabled,\n\t\t\t\tadded_at,\n\t\t\t\tmodified_at\n\t\t\t)\n\t\t\tVALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n\t\t\tRETURNING\n\t\t\t\tid,\n\t\t\t\tinstance_id,\n\t\t\t\tcontent_set_id,\n\t\t\t\tfile_id,\n\t\t\t\tproject_type AS \"project_type!\",\n\t\t\t\tproject_id,\n\t\t\t\tversion_id,\n\t\t\t\tsource_kind,\n\t\t\t\tserver_requirement,\n\t\t\t\tclient_requirement,\n\t\t\t\tenabled,\n\t\t\t\tsides_unlocked,\n\t\t\t\tserver_override,\n\t\t\t\tadded_at,\n\t\t\t\tmodified_at\n\t\t\t",
   "describe": {
     "columns": [
       {
@@ -48,7 +48,7 @@
         }
       },
       {
-        "name": "project_type",
+        "name": "project_type!",
         "ordinal": 4,
         "type_info": "Text",
         "origin": {
@@ -125,8 +125,30 @@
         }
       },
       {
-        "name": "added_at",
+        "name": "sides_unlocked",
         "ordinal": 11,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "instance_content_entries",
+            "name": "sides_unlocked"
+          }
+        }
+      },
+      {
+        "name": "server_override",
+        "ordinal": 12,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "instance_content_entries",
+            "name": "server_override"
+          }
+        }
+      },
+      {
+        "name": "added_at",
+        "ordinal": 13,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -137,7 +159,7 @@
       },
       {
         "name": "modified_at",
-        "ordinal": 12,
+        "ordinal": 14,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -148,16 +170,18 @@
       }
     ],
     "parameters": {
-      "Right": 1
+      "Right": 12
     },
     "nullable": [
       false,
       false,
       false,
       true,
+      true,
+      true,
+      true,
       false,
-      true,
-      true,
+      false,
       false,
       false,
       false,
@@ -166,5 +190,5 @@
       false
     ]
   },
-  "hash": "1f0fe2b4a4c39b3083cd34f4816d2d2c7babd876d979d275ad62cf70cde678fe"
+  "hash": "20c2c3df3996939db15e4a9258f06c5033c5058eaedf5fb76a6489d80102f13b"
 }

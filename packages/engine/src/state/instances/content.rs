@@ -25,6 +25,25 @@ pub struct ContentItem {
     pub embedded_metadata: Option<EmbeddedContentMetadata>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub synced_pack: Option<SyncedPackInfo>,
+    /// Where the addon runs, on a server engine.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server: Option<ServerSides>,
+}
+
+/// Where an addon of a server runs.
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, Default)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+pub struct ServerSides {
+    /// Off for the server alone: its file is `.disabled`, and players still get it.
+    pub disabled_server: bool,
+    /// Off for players: the server runs it, and its share leaves it out.
+    pub disabled_player: bool,
+    /// Someone set the sides by hand.
+    pub sides_unlocked: bool,
+    /// A client-only file of the pack someone turned on for the server.
+    pub server_override: bool,
+    /// False for a client-only file of the pack, which is never on the server's disk.
+    pub installed: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

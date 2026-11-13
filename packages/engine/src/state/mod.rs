@@ -346,6 +346,9 @@ pub struct Engine {
 
     pub sessions: Sessions,
 
+    /// A server engine's client for the files a pack downloads (`pack_hosts`).
+    pub(crate) pack_client: Option<reqwest::Client>,
+
     hooks: Arc<dyn InstanceHooks>,
 }
 
@@ -418,7 +421,11 @@ impl Engine {
 
         tracing::info!("Initializing file watcher");
         let (file_watcher, watcher_events) =
-            instances::watcher::init_watcher()?;
+            instances::watcher::init_watcher(side)?;
+        let pack_client = match side {
+            Side::Server => Some(crate::util::fetch::pack_client()?),
+            Side::Client => None,
+        };
 
         let state = Arc::new(Self {
             side,
@@ -436,6 +443,7 @@ impl Engine {
             file_watcher,
             events,
             sessions: Sessions::new(accounts),
+            pack_client,
             hooks: hooks.unwrap_or_else(|| Arc::new(NoHooks)),
         });
 

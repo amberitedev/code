@@ -796,10 +796,7 @@ pub(super) async fn shared_instance_install_data(
     // The modpack's install places its own files, so only what the version adds is installed:
     // its Modrinth versions, the pool files it places and the configs that left the share.
     let plan = sharing_client::install::install_plan(
-        &version,
-        inherited,
-        configs,
-        contracts::Side::Client,
+        &version, inherited, configs, state.side,
     );
     let access =
         sharing_client::pool::pool_access(&version, shared_instance_id);

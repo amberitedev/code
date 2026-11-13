@@ -18,6 +18,7 @@ mod lifecycle;
 mod paths;
 mod projects;
 mod run;
+mod server_content;
 mod shared;
 
 pub use self::content::{
@@ -57,6 +58,11 @@ pub use self::projects::{
 pub use self::run::{
     LaunchCredentials, LaunchDefaults, LaunchRequest, QuickPlayType, kill,
     launch, try_update_playtime_by_instance_id,
+};
+pub use self::server_content::{
+    ContentSide, EditedFile, complete_side_review, decide_edited, edited_files,
+    place_client_only, repair_content, set_content_side,
+    set_content_sides_unlocked,
 };
 pub(crate) use self::shared::{
     CONFIG_DIRECTORY, CONFIG_FILE_EXTENSIONS, CONFIG_FILE_TYPE,

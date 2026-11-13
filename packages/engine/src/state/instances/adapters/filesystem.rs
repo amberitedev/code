@@ -101,7 +101,9 @@ fn is_scannable_project_file(
     };
 
     match project_type {
-        ProjectType::Mod => extension.eq_ignore_ascii_case("jar"),
+        ProjectType::Mod | ProjectType::Plugin => {
+            extension.eq_ignore_ascii_case("jar")
+        }
         ProjectType::DataPack
         | ProjectType::ResourcePack
         | ProjectType::ShaderPack => {

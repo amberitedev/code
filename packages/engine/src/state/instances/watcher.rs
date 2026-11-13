@@ -6,6 +6,7 @@ use crate::state::{
     DirectoryInfo, InstanceInstallStage, ProjectType, attached_world_data,
 };
 use crate::worlds::WorldType;
+use contracts::Side;
 use dashmap::{DashMap, mapref::entry::Entry};
 use notify::event::{AccessKind, AccessMode};
 use notify::{
@@ -31,6 +32,7 @@ use tokio::sync::{
 use super::adapters::sqlite::instance_rows;
 
 pub struct FileWatcher {
+    side: Side,
     watcher: RwLock<Debouncer<WriteOnlyWatcher>>,
     instance_ids: RwLock<HashMap<String, String>>,
     content_syncs: DashMap<String, bool>,
@@ -158,8 +160,9 @@ fn queue_content_sync(instance_id: String, state: Arc<Engine>) {
     });
 }
 
-pub(crate) fn init_watcher()
--> crate::Result<(FileWatcher, Receiver<DebounceEventResult>)> {
+pub(crate) fn init_watcher(
+    side: Side,
+) -> crate::Result<(FileWatcher, Receiver<DebounceEventResult>)> {
     let (tx, rx) = channel(1);
     let file_watcher = new_debouncer_opt::<_, WriteOnlyWatcher>(
         notify_debouncer_mini::Config::default()
@@ -171,6 +174,7 @@ pub(crate) fn init_watcher()
 
     Ok((
         FileWatcher {
+            side,
             watcher: RwLock::new(file_watcher),
             instance_ids: RwLock::new(HashMap::new()),
             content_syncs: DashMap::new(),
@@ -235,11 +239,8 @@ pub(crate) fn watch_instance_events(
                                 .map(|x| x.as_os_str());
                             let sync_content =
                                 first_file_name.as_ref().is_some_and(|name| {
-                                    ProjectType::iterator().any(
-                                        |project_type| {
-                                            *name == project_type.get_folder()
-                                        },
-                                    )
+                                    content_folders(state.side)
+                                        .any(|folder| *name == folder)
                                 });
                             if !sync_content
                                 && let Some(name) =
@@ -407,13 +408,17 @@ pub(crate) async fn watch_instance_folder(
     }
 
     let mut to_watch = Vec::new();
-    for sub_path in watched_subpaths() {
+    for sub_path in watched_subpaths(watcher.side) {
         let full_path = full_instance_path.join(sub_path);
 
         let meta = tokio::fs::symlink_metadata(&full_path).await;
         let exists = meta.is_ok();
         let is_symlink = meta.ok().is_some_and(|m| m.file_type().is_symlink());
 
+        // A server makes the folders it uses itself.
+        if !exists && watcher.side == Side::Server {
+            continue;
+        }
         if !exists
             && !is_symlink
             && !sub_path.contains(".")
@@ -457,13 +462,30 @@ pub(crate) async fn watch_instance_folder(
         .insert(instance_path.to_string(), instance_id.to_string());
 }
 
-fn watched_subpaths() -> impl Iterator<Item = &'static str> {
-    ProjectType::iterator().map(|x| x.get_folder()).chain([
-        "crash-reports",
-        "saves",
-        "screenshots",
-        CONFIG_DIRECTORY,
-    ])
+/// The folders whose files are content. A server's datapacks are inside its world, which is not
+/// watched: it is written all the time while the server runs.
+fn content_folders(side: Side) -> impl Iterator<Item = &'static str> {
+    let folders: Vec<_> = match side {
+        Side::Client => {
+            ProjectType::iterator().map(|x| x.get_folder()).collect()
+        }
+        Side::Server => vec![
+            ProjectType::Mod.get_folder(),
+            ProjectType::Plugin.get_folder(),
+        ],
+    };
+    folders.into_iter()
+}
+
+fn watched_subpaths(side: Side) -> impl Iterator<Item = &'static str> {
+    let client_only: &[&str] = match side {
+        Side::Client => &["saves", "screenshots"],
+        Side::Server => &[],
+    };
+    content_folders(side)
+        .chain(["crash-reports"])
+        .chain(client_only.iter().copied())
+        .chain([CONFIG_DIRECTORY])
 }
 
 pub(crate) async fn unwatch_instance_folder(
@@ -483,7 +505,7 @@ pub(crate) async fn unwatch_instance_folder(
     drop(instance_ids);
 
     let full_instance_path = dirs.instances_dir().join(instance_path);
-    let mut watched_paths = watched_subpaths()
+    let mut watched_paths = watched_subpaths(watcher.side)
         .map(|sub_path| full_instance_path.join(sub_path))
         .collect::<Vec<_>>();
     watched_paths.push(full_instance_path);

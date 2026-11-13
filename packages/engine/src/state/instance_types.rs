@@ -82,6 +82,7 @@ pub enum ModLoader {
     Fabric,
     Quilt,
     NeoForge,
+    Paper,
 }
 
 impl ModLoader {
@@ -92,6 +93,7 @@ impl ModLoader {
             Self::Fabric => "fabric",
             Self::Quilt => "quilt",
             Self::NeoForge => "neoforge",
+            Self::Paper => "paper",
         }
     }
 
@@ -102,6 +104,7 @@ impl ModLoader {
             Self::Fabric => "fabric",
             Self::Quilt => "quilt",
             Self::NeoForge => "neo",
+            Self::Paper => "paper",
         }
     }
 
@@ -112,6 +115,7 @@ impl ModLoader {
             "fabric" => Self::Fabric,
             "quilt" => Self::Quilt,
             "neoforge" => Self::NeoForge,
+            "paper" => Self::Paper,
             _ => Self::Vanilla,
         }
     }
@@ -149,6 +153,7 @@ pub enum ProjectType {
     ResourcePack,
     #[serde(alias = "shader")]
     ShaderPack,
+    Plugin,
 }
 
 impl ProjectType {
@@ -160,6 +165,11 @@ impl ProjectType {
             Some(ProjectType::Mod)
         } else if loaders.iter().any(|x| x == "datapack") {
             Some(ProjectType::DataPack)
+        } else if loaders
+            .iter()
+            .any(|x| ProjectType::Plugin.get_loaders().contains(&&**x))
+        {
+            Some(ProjectType::Plugin)
         } else if loaders.iter().any(|x| ["iris", "optifine"].contains(&&**x)) {
             Some(ProjectType::ShaderPack)
         } else if loaders
@@ -197,6 +207,7 @@ impl ProjectType {
             "datapacks" => Some(ProjectType::DataPack),
             "resourcepacks" => Some(ProjectType::ResourcePack),
             "shaderpacks" => Some(ProjectType::ShaderPack),
+            "plugins" => Some(ProjectType::Plugin),
             _ => None,
         }
     }
@@ -207,6 +218,7 @@ impl ProjectType {
             ProjectType::DataPack => "datapack",
             ProjectType::ResourcePack => "resourcepack",
             ProjectType::ShaderPack => "shader",
+            ProjectType::Plugin => "plugin",
         }
     }
 
@@ -218,6 +230,7 @@ impl ProjectType {
             "shader" | "shaderpack" | "shaderpacks" => {
                 Some(ProjectType::ShaderPack)
             }
+            "plugin" | "plugins" => Some(ProjectType::Plugin),
             _ => None,
         }
     }
@@ -228,6 +241,7 @@ impl ProjectType {
             ProjectType::DataPack => "datapacks",
             ProjectType::ResourcePack => "resourcepacks",
             ProjectType::ShaderPack => "shaderpacks",
+            ProjectType::Plugin => "plugins",
         }
     }
 
@@ -237,6 +251,7 @@ impl ProjectType {
             ProjectType::DataPack => &["datapack"],
             ProjectType::ResourcePack => &["vanilla", "canvas", "minecraft"],
             ProjectType::ShaderPack => &["iris", "optifine"],
+            ProjectType::Plugin => &["paper", "spigot", "bukkit"],
         }
     }
 
@@ -259,6 +274,7 @@ impl From<ProjectType> for modrinth_content_management::ContentType {
             ProjectType::DataPack => Self::DataPack,
             ProjectType::ResourcePack => Self::ResourcePack,
             ProjectType::ShaderPack => Self::Shader,
+            ProjectType::Plugin => Self::Plugin,
         }
     }
 }

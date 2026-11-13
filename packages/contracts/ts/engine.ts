@@ -45,7 +45,7 @@ export type InstallErrorContext = { operation: string, source_path?: string, tar
 
 export type ImportLauncherType = "MultiMC" | "PrismLauncher" | "ATLauncher" | "GDLauncher" | "Curseforge" | "Unknown";
 
-export type ModLoader = "vanilla" | "forge" | "fabric" | "quilt" | "neoforge";
+export type ModLoader = "vanilla" | "forge" | "fabric" | "quilt" | "neoforge" | "paper";
 
 export type WarningPayload = { message: string, };
 
@@ -372,11 +372,15 @@ export type ContentFile = { hash: string, file_name: string, enabled: boolean, l
 
 export type FileMetadata = { project_id: string, version_id: string, };
 
-export type ProjectType = "mod" | "datapack" | "resourcepack" | "shaderpack";
+export type ProjectType = "mod" | "datapack" | "resourcepack" | "shaderpack" | "plugin";
 
 export type ContentSourceKind = "local" | "modrinth_modpack" | "server_project" | "modrinth_hosting" | "imported_modpack" | "shared_instance";
 
-export type ContentItem = { file_name: string, file_path: string, id: string, size: number, enabled: boolean, locked: boolean, project_type: ProjectType, project: ContentItemProject | null, version: ContentItemVersion | null, environment: VersionEnvironment | null, owner: ContentItemOwner | null, has_update: boolean, update_version_id: string | null, date_added: string | null, source_kind: ContentSourceKind | null, embedded_metadata: EmbeddedContentMetadata | null, synced_pack?: SyncedPackInfo | null, };
+export type ContentItem = { file_name: string, file_path: string, id: string, size: number, enabled: boolean, locked: boolean, project_type: ProjectType, project: ContentItemProject | null, version: ContentItemVersion | null, environment: VersionEnvironment | null, owner: ContentItemOwner | null, has_update: boolean, update_version_id: string | null, date_added: string | null, source_kind: ContentSourceKind | null, embedded_metadata: EmbeddedContentMetadata | null, synced_pack?: SyncedPackInfo | null, 
+/**
+ * Where the addon runs, on a server engine.
+ */
+server?: ServerSides | null, };
 
 export type ContentItemProject = { id: string, slug: string | null, title: string, icon_url: string | null, license: ModrinthLicense, categories: Array<string>, additional_categories: Array<string>, };
 
@@ -441,6 +445,52 @@ export type ExportCandidatesQuery = { parent?: string, };
 export type PackExportCandidate = { path: string, type: PackExportCandidateType, size?: number, modified?: number, count?: number, disabled: boolean, defaultSelected: boolean, };
 
 export type PackExportCandidateType = "directory" | "file";
+
+export type ServerSides = { 
+/**
+ * Off for the server alone: its file is `.disabled`, and players still get it.
+ */
+disabled_server: boolean, 
+/**
+ * Off for players: the server runs it, and its share leaves it out.
+ */
+disabled_player: boolean, 
+/**
+ * Someone set the sides by hand.
+ */
+sides_unlocked: boolean, 
+/**
+ * A client-only file of the pack someone turned on for the server.
+ */
+server_override: boolean, 
+/**
+ * False for a client-only file of the pack, which is never on the server's disk.
+ */
+installed: boolean, };
+
+export type ContentSide = "server" | "player";
+
+export type EditedFile = { 
+/**
+ * Relative to the server folder, with forward slashes.
+ */
+path: string, 
+/**
+ * The owner deleted it (or disabled it) rather than changed it.
+ */
+deleted: boolean, 
+/**
+ * What the last pack update wants for it; null when nothing waits on a decision.
+ */
+pending: PendingChange | null, };
+
+export type PendingChange = "changed" | "removed";
+
+export type SideChange = { project_path: string, side: ContentSide, enabled: boolean, };
+
+export type SidesUnlocked = { project_path: string, unlocked: boolean, };
+
+export type EditedDecision = { path: string, replace: boolean, };
 
 export type SharedInstanceUsers = { user_ids: Array<string>, users: Array<SharedInstanceUser>, tokens: number, };
 
@@ -648,6 +698,13 @@ export const instanceContent = {
 	UpdateModpackVersion: { method: "POST", path: "/instances/{id}/modpack/update", auth: "session", dangerous: false, body: "json", response: "json" } as Endpoint<InstanceRef, null, ModpackVersion, InstallJobSnapshot>,
 	RepairModpack: { method: "POST", path: "/instances/{id}/modpack/repair", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceRef, null, void, InstallJobSnapshot>,
 	ListPackExportCandidates: { method: "GET", path: "/instances/{id}/export-candidates", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceRef, ExportCandidatesQuery, void, Array<PackExportCandidate>>,
+	SetSide: { method: "POST", path: "/instances/{id}/content/side", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<InstanceRef, null, SideChange, void>,
+	SetSidesUnlocked: { method: "POST", path: "/instances/{id}/content/sides-unlocked", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<InstanceRef, null, SidesUnlocked, void>,
+	CompleteSideReview: { method: "POST", path: "/instances/{id}/content/side-review", auth: "session", dangerous: false, body: "empty", response: "empty" } as Endpoint<InstanceRef, null, void, void>,
+	RepairContent: { method: "POST", path: "/instances/{id}/content/repair", auth: "session", dangerous: false, body: "empty", response: "empty" } as Endpoint<InstanceRef, null, void, void>,
+	EditedFiles: { method: "GET", path: "/instances/{id}/content/edited", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceRef, null, void, Array<EditedFile>>,
+	DecideEdited: { method: "POST", path: "/instances/{id}/content/edited", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<InstanceRef, null, EditedDecision, void>,
+	PlaceClientOnly: { method: "POST", path: "/instances/{id}/content/client-only", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<InstanceRef, null, ProjectPath, void>,
 }
 
 export const instanceSharing = {

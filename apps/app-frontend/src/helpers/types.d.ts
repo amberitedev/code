@@ -26,7 +26,7 @@ export type InstanceLink = InstanceLinkIdentity & InstanceLinkResponse
 
 export type Instance = GameInstance
 
-export type InstanceLoader = 'vanilla' | 'forge' | 'fabric' | 'quilt' | 'neoforge'
+export type InstanceLoader = 'vanilla' | 'forge' | 'fabric' | 'quilt' | 'neoforge' | 'paper'
 
 export type ContentSourceKind =
 	| 'local'

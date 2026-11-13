@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n\t\t\tINSERT INTO instance_content_entries (\n\t\t\t\tid,\n\t\t\t\tinstance_id,\n\t\t\t\tcontent_set_id,\n\t\t\t\tfile_id,\n\t\t\t\tproject_type,\n\t\t\t\tproject_id,\n\t\t\t\tversion_id,\n\t\t\t\tsource_kind,\n\t\t\t\tserver_requirement,\n\t\t\t\tclient_requirement,\n\t\t\t\tenabled,\n\t\t\t\tadded_at,\n\t\t\t\tmodified_at\n\t\t\t)\n\t\t\tVALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n\t\t\tON CONFLICT (content_set_id, file_id)\n\t\t\t\tWHERE file_id IS NOT NULL\n\t\t\tDO UPDATE SET\n\t\t\t\tinstance_id = excluded.instance_id,\n\t\t\t\tproject_type = excluded.project_type,\n\t\t\t\tproject_id = excluded.project_id,\n\t\t\t\tversion_id = excluded.version_id,\n\t\t\t\tsource_kind = excluded.source_kind,\n\t\t\t\tserver_requirement = excluded.server_requirement,\n\t\t\t\tclient_requirement = excluded.client_requirement,\n\t\t\t\tenabled = excluded.enabled,\n\t\t\t\tmodified_at = excluded.modified_at\n\t\t\tRETURNING\n\t\t\t\tid,\n\t\t\t\tinstance_id,\n\t\t\t\tcontent_set_id,\n\t\t\t\tfile_id,\n\t\t\t\tproject_type,\n\t\t\t\tproject_id,\n\t\t\t\tversion_id,\n\t\t\t\tsource_kind,\n\t\t\t\tserver_requirement,\n\t\t\t\tclient_requirement,\n\t\t\t\tenabled,\n\t\t\t\tadded_at,\n\t\t\t\tmodified_at\n\t\t\t",
+  "query": "\n\t\tSELECT\n\t\t\tid, instance_id, content_set_id, file_id, project_type AS \"project_type!\", project_id,\n\t\t\tversion_id, source_kind, server_requirement, client_requirement, enabled,\n\t\t\tsides_unlocked, server_override, added_at, modified_at\n\t\tFROM instance_content_entries\n\t\tWHERE content_set_id = ? AND file_id = ? AND project_type IS NOT NULL\n\t\tORDER BY modified_at DESC\n\t\tLIMIT 1\n\t\t",
   "describe": {
     "columns": [
       {
@@ -48,7 +48,7 @@
         }
       },
       {
-        "name": "project_type",
+        "name": "project_type!",
         "ordinal": 4,
         "type_info": "Text",
         "origin": {
@@ -125,8 +125,30 @@
         }
       },
       {
-        "name": "added_at",
+        "name": "sides_unlocked",
         "ordinal": 11,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "instance_content_entries",
+            "name": "sides_unlocked"
+          }
+        }
+      },
+      {
+        "name": "server_override",
+        "ordinal": 12,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "instance_content_entries",
+            "name": "server_override"
+          }
+        }
+      },
+      {
+        "name": "added_at",
+        "ordinal": 13,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -137,7 +159,7 @@
       },
       {
         "name": "modified_at",
-        "ordinal": 12,
+        "ordinal": 14,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -148,16 +170,18 @@
       }
     ],
     "parameters": {
-      "Right": 13
+      "Right": 2
     },
     "nullable": [
       false,
       false,
       false,
       true,
+      true,
+      true,
+      true,
       false,
-      true,
-      true,
+      false,
       false,
       false,
       false,
@@ -166,5 +190,5 @@
       false
     ]
   },
-  "hash": "fbdf27acfedbf52fe79ef2db7cf29b5cd8b86308ef1202b3f06570bbb6e1419e"
+  "hash": "fe67d3e90cd5d843df20523f02d693f720d4eb660363d1a9064856175ce776c8"
 }

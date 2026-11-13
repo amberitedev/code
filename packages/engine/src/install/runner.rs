@@ -1818,6 +1818,10 @@ async fn remove_existing_pack_content(
     state: &Engine,
     instance_id: &str,
 ) -> crate::Result<HashSet<String>> {
+    // A server's pack install plans the update over the files it tracks, edits included.
+    if state.side == contracts::Side::Server {
+        return Ok(HashSet::new());
+    }
     let metadata = crate::state::instances::commands::get_instance_metadata(
         instance_id,
         &state.pool,

@@ -525,7 +525,8 @@ pub(crate) async fn add_downloaded_project_version_with_enabled(
         InstallContent {
             requested_path: &format!(
                 "{}/{}",
-                downloaded.project_type.get_folder(),
+                content_folder(state, instance_id, downloaded.project_type)
+                    .await?,
                 downloaded.file_name
             ),
             stored_file: &stored_file,
@@ -570,7 +571,7 @@ pub(crate) async fn add_project_from_path(
         InstallContent {
             requested_path: &format!(
                 "{}/{}",
-                project_type.get_folder(),
+                content_folder(state, instance_id, project_type).await?,
                 file_name
             ),
             stored_file: &stored_file,
@@ -626,7 +627,7 @@ pub(crate) async fn add_project_bytes(
         InstallContent {
             requested_path: &format!(
                 "{}/{}",
-                project_type.get_folder(),
+                content_folder(state, instance_id, project_type).await?,
                 file_name
             ),
             stored_file: &stored_file,
@@ -644,6 +645,29 @@ pub(crate) async fn add_project_bytes(
         state,
     )
     .await
+}
+
+/// The folder content of `project_type` goes in. A server keeps datapacks in its world, which
+/// `server.properties` names.
+async fn content_folder(
+    state: &Engine,
+    instance_id: &str,
+    project_type: ProjectType,
+) -> crate::Result<String> {
+    if state.side == contracts::Side::Client
+        || project_type != ProjectType::DataPack
+    {
+        return Ok(project_type.get_folder().to_owned());
+    }
+    let instance = instance_rows::get_instance_by_id(instance_id, &state.pool)
+        .await?
+        .ok_or_else(|| ErrorKind::InputError("unknown instance".to_string()))?;
+    let dir = state.directories.instances_dir().join(&instance.path);
+    let level = tokio::task::spawn_blocking(move || {
+        crate::util::sandbox::level_name(&dir)
+    })
+    .await?;
+    Ok(format!("{level}/datapacks"))
 }
 
 pub async fn content_source_kind_for_project_path(

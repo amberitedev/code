@@ -18,8 +18,12 @@ use crate::{
         SwitchProjectVersion, SyncContentFiles, ToggleProject,
         UpdateModpackVersion, UpdateProject,
     },
+    endpoints::content::{
+        CompleteSideReview, DecideEdited, EditedFiles, PlaceClientOnly,
+        RepairContent, SetSide, SetSidesUnlocked,
+    },
     install::InstallJobSnapshot,
-    instance::{self, PackExportCandidate},
+    instance::{self, EditedFile, PackExportCandidate},
     state::{
         ContentFile, ContentItem, InstanceInstallCandidate, LinkedModpackInfo,
     },
@@ -315,5 +319,105 @@ pub async fn list_pack_export_candidates(
     )
     .await
     .map(Json)
+    .map_err(api_error)
+}
+
+pub async fn set_side(
+    State(engine): State<Arc<Engine>>,
+    instance: InstanceAccess<Edit>,
+    request: Req<SetSide>,
+) -> Result<Empty, ApiError> {
+    let change = request.body;
+    instance::set_content_side(
+        &engine,
+        &instance.id,
+        &change.project_path,
+        change.side,
+        change.enabled,
+    )
+    .await
+    .map(|()| Empty)
+    .map_err(api_error)
+}
+
+pub async fn set_sides_unlocked(
+    State(engine): State<Arc<Engine>>,
+    instance: InstanceAccess<Edit>,
+    request: Req<SetSidesUnlocked>,
+) -> Result<Empty, ApiError> {
+    let change = request.body;
+    instance::set_content_sides_unlocked(
+        &engine,
+        &instance.id,
+        &change.project_path,
+        change.unlocked,
+    )
+    .await
+    .map(|()| Empty)
+    .map_err(api_error)
+}
+
+pub async fn complete_side_review(
+    State(engine): State<Arc<Engine>>,
+    instance: InstanceAccess<Edit>,
+    _: Req<CompleteSideReview>,
+) -> Result<Empty, ApiError> {
+    instance::complete_side_review(&engine, &instance.id)
+        .await
+        .map(|()| Empty)
+        .map_err(api_error)
+}
+
+pub async fn repair_content(
+    State(engine): State<Arc<Engine>>,
+    instance: InstanceAccess<Edit>,
+    _: Req<RepairContent>,
+) -> Result<Empty, ApiError> {
+    instance::repair_content(&engine, &instance.id)
+        .await
+        .map(|()| Empty)
+        .map_err(api_error)
+}
+
+pub async fn edited_files(
+    State(engine): State<Arc<Engine>>,
+    instance: InstanceAccess<View>,
+    _: Req<EditedFiles>,
+) -> Answer<Vec<EditedFile>> {
+    instance::edited_files(&engine, &instance.id)
+        .await
+        .map(Json)
+        .map_err(api_error)
+}
+
+pub async fn decide_edited(
+    State(engine): State<Arc<Engine>>,
+    instance: InstanceAccess<Edit>,
+    request: Req<DecideEdited>,
+) -> Result<Empty, ApiError> {
+    let decision = request.body;
+    instance::decide_edited(
+        &engine,
+        &instance.id,
+        &decision.path,
+        decision.replace,
+    )
+    .await
+    .map(|()| Empty)
+    .map_err(api_error)
+}
+
+pub async fn place_client_only(
+    State(engine): State<Arc<Engine>>,
+    instance: InstanceAccess<Edit>,
+    request: Req<PlaceClientOnly>,
+) -> Result<Empty, ApiError> {
+    instance::place_client_only(
+        &engine,
+        &instance.id,
+        &request.body.project_path,
+    )
+    .await
+    .map(|()| Empty)
     .map_err(api_error)
 }

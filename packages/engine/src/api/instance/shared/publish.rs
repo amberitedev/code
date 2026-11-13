@@ -299,7 +299,13 @@ pub(super) async fn current_shared_content(
         let include_entry = entry.source_kind.is_shared_instance_managed()
             || (include_local_content
                 && entry.source_kind == ContentSourceKind::Local);
-        if !include_entry || !entry.enabled {
+        if !include_entry
+            || !entry.enabled
+            || !sharing_client::rules::shares_content(entry.project_type.into())
+            || (state.side == contracts::Side::Server
+                && entry.client_requirement
+                    == crate::state::ContentRequirement::Unsupported)
+        {
             continue;
         }
         let Some(file) = entry.file_id.as_ref().and_then(|id| files.get(id))

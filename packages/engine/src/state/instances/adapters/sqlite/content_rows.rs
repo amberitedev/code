@@ -5,7 +5,7 @@ use crate::state::instances::{
     ContentEntry, ContentRequirement, ContentSet, ContentSetRemoteRef,
     ContentSetRemoteRefType, ContentSetStatus, ContentSetSyncProvider,
     ContentSetSyncState, ContentSetSyncStatus, ContentSourceKind,
-    ContentUpdateCheck, InstanceFile,
+    ContentUpdateCheck, InstanceFile, PendingChange,
 };
 use crate::state::{ModLoader, ProjectType, ReleaseChannel};
 use anyhow::bail;
@@ -105,6 +105,7 @@ pub(crate) struct InstanceFileRow {
     pub sha1: String,
     pub size: i64,
     pub missing: i64,
+    pub pending: Option<String>,
     pub added_at: i64,
     pub modified_at: i64,
 }
@@ -122,6 +123,7 @@ impl TryFrom<InstanceFileRow> for InstanceFile {
             sha1: row.sha1,
             size: unsigned(row.size, "size")?,
             missing: row.missing == 1,
+            pending: row.pending.as_deref().and_then(PendingChange::from_str),
             added_at: timestamp(row.added_at),
             modified_at: timestamp(row.modified_at),
         })
@@ -141,6 +143,8 @@ pub(crate) struct ContentEntryRow {
     pub server_requirement: String,
     pub client_requirement: String,
     pub enabled: i64,
+    pub sides_unlocked: i64,
+    pub server_override: i64,
     pub added_at: i64,
     pub modified_at: i64,
 }
@@ -165,6 +169,8 @@ impl TryFrom<ContentEntryRow> for ContentEntry {
                 &row.client_requirement,
             )?,
             enabled: row.enabled == 1,
+            sides_unlocked: row.sides_unlocked == 1,
+            server_override: row.server_override == 1,
             added_at: timestamp(row.added_at),
             modified_at: timestamp(row.modified_at),
         })
@@ -644,6 +650,7 @@ pub(crate) async fn set_instance_file_missing(
 			sha1,
 			size,
 			missing,
+			pending,
 			added_at,
 			modified_at
 		",
@@ -704,6 +711,7 @@ pub(crate) async fn upsert_instance_file(
 			sha1,
 			size,
 			missing,
+			pending,
 			added_at,
 			modified_at
 		",
@@ -739,6 +747,8 @@ async fn insert_content_entry(
     let server_requirement = entry.server_requirement.as_str();
     let client_requirement = entry.client_requirement.as_str();
     let enabled = i64::from(entry.enabled);
+    let sides_unlocked = i64::from(entry.sides_unlocked);
+    let server_override = i64::from(entry.server_override);
     let added_at = entry.added_at.timestamp();
     let modified_at = entry.modified_at.timestamp();
 
@@ -756,10 +766,12 @@ async fn insert_content_entry(
 			server_requirement,
 			client_requirement,
 			enabled,
+			sides_unlocked,
+			server_override,
 			added_at,
 			modified_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		",
     )
     .bind(id)
@@ -773,6 +785,8 @@ async fn insert_content_entry(
     .bind(server_requirement)
     .bind(client_requirement)
     .bind(enabled)
+    .bind(sides_unlocked)
+    .bind(server_override)
     .bind(added_at)
     .bind(modified_at)
     .execute(&mut **tx)
@@ -828,9 +842,12 @@ where
     let rows = sqlx::query_as!(
         ContentEntryRow,
         "
-		SELECT *
+		SELECT
+			id, instance_id, content_set_id, file_id, project_type AS \"project_type!\", project_id,
+			version_id, source_kind, server_requirement, client_requirement, enabled,
+			sides_unlocked, server_override, added_at, modified_at
 		FROM instance_content_entries
-		WHERE content_set_id = ?
+		WHERE content_set_id = ? AND project_type IS NOT NULL
 		ORDER BY added_at ASC, id ASC
 		",
         content_set_id,
@@ -908,6 +925,7 @@ pub(crate) async fn upsert_instance_file_from_parts(
         sha1: input.sha1.to_string(),
         size: input.size,
         missing: input.missing,
+        pending: None,
         added_at: now,
         modified_at: now,
     };
@@ -1086,9 +1104,12 @@ pub(crate) async fn get_content_entry_by_id(
     let row = sqlx::query_as!(
         ContentEntryRow,
         "
-		SELECT *
+		SELECT
+			id, instance_id, content_set_id, file_id, project_type AS \"project_type!\", project_id,
+			version_id, source_kind, server_requirement, client_requirement, enabled,
+			sides_unlocked, server_override, added_at, modified_at
 		FROM instance_content_entries
-		WHERE id = ?
+		WHERE id = ? AND project_type IS NOT NULL
 		",
         id,
     )
@@ -1106,9 +1127,12 @@ pub(crate) async fn get_content_entry_by_file(
     let row = sqlx::query_as!(
         ContentEntryRow,
         "
-		SELECT *
+		SELECT
+			id, instance_id, content_set_id, file_id, project_type AS \"project_type!\", project_id,
+			version_id, source_kind, server_requirement, client_requirement, enabled,
+			sides_unlocked, server_override, added_at, modified_at
 		FROM instance_content_entries
-		WHERE content_set_id = ? AND file_id = ?
+		WHERE content_set_id = ? AND file_id = ? AND project_type IS NOT NULL
 		ORDER BY modified_at DESC
 		LIMIT 1
 		",
@@ -1169,13 +1193,15 @@ pub(crate) async fn upsert_content_entry_from_parts(
 				instance_id,
 				content_set_id,
 				file_id,
-				project_type,
+				project_type AS \"project_type!\",
 				project_id,
 				version_id,
 				source_kind,
 				server_requirement,
 				client_requirement,
 				enabled,
+				sides_unlocked,
+				server_override,
 				added_at,
 				modified_at
 			",
@@ -1234,13 +1260,15 @@ pub(crate) async fn upsert_content_entry_from_parts(
 				instance_id,
 				content_set_id,
 				file_id,
-				project_type,
+				project_type AS \"project_type!\",
 				project_id,
 				version_id,
 				source_kind,
 				server_requirement,
 				client_requirement,
 				enabled,
+				sides_unlocked,
+				server_override,
 				added_at,
 				modified_at
 			",
@@ -1284,13 +1312,15 @@ pub(crate) async fn upsert_content_entry_from_parts(
 				instance_id,
 				content_set_id,
 				file_id,
-				project_type,
+				project_type AS \"project_type!\",
 				project_id,
 				version_id,
 				source_kind,
 				server_requirement,
 				client_requirement,
 				enabled,
+				sides_unlocked,
+				server_override,
 				added_at,
 				modified_at
 			",

@@ -173,6 +173,12 @@ pub(crate) fn content_folder(
         .map(|(_, folder)| folder)
 }
 
+/// Whether a share carries content of `content_type`: never a plugin, which runs only on the
+/// server, or a modpack, which is not content.
+pub fn shares_content(content_type: ContentType) -> bool {
+    content_folder(content_type).is_some()
+}
+
 fn is_content_folder(path: &str) -> bool {
     CONTENT_FOLDERS.iter().any(|(_, folder)| *folder == path)
 }
@@ -221,6 +227,8 @@ mod tests {
         assert_eq!(content_folder(ContentType::DataPack), Some("datapacks"));
         assert_eq!(content_type("plugin"), None);
         assert_eq!(content_folder(ContentType::ModPack), None);
+        assert!(!shares_content(ContentType::Plugin));
+        assert!(shares_content(ContentType::Mod));
     }
 
     #[test]

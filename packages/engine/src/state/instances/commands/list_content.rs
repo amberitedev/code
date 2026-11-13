@@ -12,7 +12,7 @@ use crate::state::{
     CacheBehaviour, CachedEntry, CachedFile, ContentFile, ContentItem,
     ContentItemOwner, ContentItemProject, ContentItemVersion, Dependency,
     LinkedModpackInfo, ModLoader, Organization, OwnerType, Project,
-    ProjectType, ReleaseChannel, Sessions, TeamMember, Version,
+    ProjectType, ReleaseChannel, ServerSides, Sessions, TeamMember, Version,
     VersionEnvironment, VersionV3,
 };
 use crate::util::fetch::{DownloadMeta, DownloadReason, FetchSemaphore};
@@ -597,6 +597,7 @@ pub(crate) async fn dependencies_to_content_items(
 
             Some(ContentItem {
                 synced_pack: None,
+                server: None,
                 file_name: version
                     .and_then(|version| version.files.first())
                     .map(|file| file.filename.clone())
@@ -815,7 +816,8 @@ async fn content_projects_for_scope_inner(
     let output = DashMap::new();
 
     for file in files {
-        if file.missing {
+        // On a server, a missing file is a client-only file of the pack, listed as not installed.
+        if file.missing && state.side == contracts::Side::Client {
             continue;
         }
 
@@ -1054,6 +1056,7 @@ async fn content_files_to_content_items(
 
             ContentItem {
                 synced_pack: None,
+                server: None,
                 file_name: file.file_name.clone(),
                 file_path: path.clone(),
                 id: file.hash.clone(),
@@ -1083,9 +1086,50 @@ async fn content_files_to_content_items(
             }
         })
         .collect::<Vec<_>>();
+    if state.side == contracts::Side::Server {
+        add_server_sides(&instance.id, &mut items, state).await?;
+    }
     sort_content_items(&mut items);
 
     Ok(items)
+}
+
+async fn add_server_sides(
+    instance_id: &str,
+    items: &mut [ContentItem],
+    state: &Engine,
+) -> crate::Result<()> {
+    let sides = sqlite::server_rows::tracked_files(&state.pool, instance_id)
+        .await?
+        .into_iter()
+        .map(|(row, sides)| (row.relative_path, sides))
+        .collect::<HashMap<_, _>>();
+    let skipped = sqlite::server_rows::skipped_files(&state.pool, instance_id)
+        .await?
+        .into_iter()
+        .map(|file| file.relative_path)
+        .collect::<HashSet<_>>();
+    for item in items {
+        let recorded = sides.get(&item.file_path);
+        let unsupported = |requirement| {
+            requirement == crate::state::ContentRequirement::Unsupported
+        };
+        let installed = !skipped.contains(&item.file_path);
+        item.server = Some(ServerSides {
+            disabled_server: !installed
+                || (!item.enabled
+                    && recorded.is_some_and(|sides| {
+                        unsupported(sides.server_requirement)
+                    })),
+            disabled_player: recorded
+                .is_some_and(|sides| unsupported(sides.client_requirement)),
+            sides_unlocked: recorded.is_some_and(|sides| sides.unlocked),
+            server_override: recorded
+                .is_some_and(|sides| sides.server_override),
+            installed,
+        });
+    }
+    Ok(())
 }
 
 struct ResolvedMetadata {

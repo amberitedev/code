@@ -599,6 +599,7 @@ pub async fn upload_synced_pack(
             selected: (project_type == ProjectType::ResourcePack)
                 .then_some(false),
             item: ContentItem {
+                server: None,
                 id,
                 file_name,
                 file_path: String::new(),

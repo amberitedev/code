@@ -2,6 +2,7 @@ use super::content::get_projects;
 use super::get::get;
 use super::paths::get_full_path;
 use crate::ErrorKind;
+use crate::api::pack::server::{EntrySides, project_type_of};
 use crate::event::LoadingBarType;
 use crate::event::emit::{emit_loading, init_loading};
 use crate::pack::install_from::{
@@ -10,10 +11,10 @@ use crate::pack::install_from::{
 use crate::state::content_store::{
     FileContent, ReadableContent, content_file_path, is_managed_content_path,
 };
-use crate::state::instances::adapters::sqlite::content_rows;
+use crate::state::instances::adapters::sqlite::{content_rows, server_rows};
 use crate::state::{
-    CacheBehaviour, CachedEntry, Engine, InstanceMetadata, ModLoader, SideType,
-    VersionEnvironment,
+    CacheBehaviour, CachedEntry, ContentRequirement, Engine, InstanceMetadata,
+    ModLoader, ProjectType, SideType, VersionEnvironment,
 };
 use crate::util::io::{self, IOError};
 use anyhow::{Context, anyhow, bail};
@@ -239,6 +240,7 @@ pub async fn export_mrpack(
             .into_iter()
             .map(|file| (content_file_path(&file), file))
             .collect::<HashMap<_, _>>();
+    let server_sides = server_export_sides(state, instance_id).await?;
     let mut override_files = Vec::new();
     let mut directories = vec![instance_base_path.clone()];
     while let Some(directory) = directories.pop() {
@@ -284,7 +286,27 @@ pub async fn export_mrpack(
             };
             let size = tokio::fs::metadata(content.path()).await?.len();
             ensure_standard_zip_file_size(size)?;
-            override_files.push((content, relative_path, size));
+            let entry = match &server_sides {
+                Some(sides) => {
+                    let sides = sides
+                        .get(logical_path.as_str())
+                        .copied()
+                        .unwrap_or_else(|| {
+                            ExportSides::of(
+                                logical_path.as_str(),
+                                logical_path.as_str() == relative_path.as_str(),
+                                None,
+                            )
+                        });
+                    format!(
+                        "{}/{}",
+                        sides.folder(),
+                        sides.pack_path(logical_path.as_str())
+                    )
+                }
+                None => format!("overrides/{relative_path}"),
+            };
+            override_files.push((content, entry, size));
         }
     }
 
@@ -324,7 +346,7 @@ fn ensure_standard_zip_file_size(size: u64) -> crate::Result<()> {
 
 fn write_mrpack_archive<W, F>(
     writer: W,
-    override_files: Vec<(ReadableContent, SafeRelativeUtf8UnixPathBuf, u64)>,
+    override_files: Vec<(ReadableContent, String, u64)>,
     packfile_data: &[u8],
     mut emit_progress: F,
 ) -> crate::Result<()>
@@ -337,10 +359,10 @@ where
     let mut writer = ZipWriter::new(writer);
     let mut buffer = vec![0_u8; EXPORT_COPY_BUFFER_SIZE];
 
-    for (content, relative_path, _) in override_files {
+    for (content, entry, _) in override_files {
         let path = content.path();
         writer
-            .start_file(format!("overrides/{relative_path}"), options)
+            .start_file(entry, options)
             .map_err(std::io::Error::from)?;
         let mut source = std::fs::File::open(path)
             .map_err(|error| IOError::with_path(error, path))?;
@@ -598,6 +620,95 @@ fn pack_get_relative_path(
     )?)
 }
 
+/// Which sides take an addon of a server's export.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ExportSides {
+    /// Off for both sides.
+    disabled: bool,
+    /// Never a plugin or a world's datapack, which only a server reads.
+    for_players: bool,
+    for_server: bool,
+}
+
+impl ExportSides {
+    /// The sides of the addon at its enabled `path`, which is `.disabled` on disk unless
+    /// `enabled`.
+    fn of(path: &str, enabled: bool, recorded: Option<&EntrySides>) -> Self {
+        let unsupported =
+            |requirement| requirement == ContentRequirement::Unsupported;
+        let disabled_server = !enabled
+            && recorded
+                .is_some_and(|sides| unsupported(sides.server_requirement));
+        let server_only = matches!(
+            project_type_of(path),
+            Some(ProjectType::Plugin | ProjectType::DataPack)
+        );
+        Self {
+            disabled: !enabled && !disabled_server,
+            for_players: !server_only
+                && !recorded
+                    .is_some_and(|sides| unsupported(sides.client_requirement)),
+            for_server: !disabled_server,
+        }
+    }
+
+    /// Where it goes as an override: `overrides/` for both sides, else the one side's folder.
+    fn folder(self) -> &'static str {
+        match (self.disabled, self.for_players, self.for_server) {
+            (true, _, _) | (false, true, true) => "overrides",
+            (false, true, false) => "client-overrides",
+            (false, false, _) => "server-overrides",
+        }
+    }
+
+    /// Its path in the pack: off for both sides it keeps `.disabled`, as upstream's export does.
+    fn pack_path(self, path: &str) -> String {
+        if self.disabled {
+            format!("{path}.disabled")
+        } else {
+            path.to_owned()
+        }
+    }
+
+    /// Narrows a Modrinth version's `env` to the sides the server has it on for.
+    fn narrow(self, env: &mut HashMap<EnvType, SideType>) {
+        if !self.for_players {
+            env.insert(EnvType::Client, SideType::Unsupported);
+        }
+        if !self.for_server {
+            env.insert(EnvType::Server, SideType::Unsupported);
+        }
+    }
+}
+
+/// On a server engine, the sides of every addon it tracks, by enabled path.
+async fn server_export_sides(
+    state: &Engine,
+    instance_id: &str,
+) -> crate::Result<Option<HashMap<String, ExportSides>>> {
+    if state.side != contracts::Side::Server {
+        return Ok(None);
+    }
+    let enabled = content_rows::get_instance_files(instance_id, &state.pool)
+        .await?
+        .into_iter()
+        .map(|file| (file.relative_path, file.enabled))
+        .collect::<HashMap<_, _>>();
+    Ok(Some(
+        server_rows::tracked_files(&state.pool, instance_id)
+            .await?
+            .into_iter()
+            .map(|(row, sides)| {
+                let enabled =
+                    enabled.get(&row.relative_path).copied().unwrap_or(true);
+                let export =
+                    ExportSides::of(&row.relative_path, enabled, Some(&sides));
+                (row.relative_path, export)
+            })
+            .collect(),
+    ))
+}
+
 fn get_mrpack_environment(
     environment: Option<VersionEnvironment>,
 ) -> HashMap<EnvType, SideType> {
@@ -719,6 +830,21 @@ pub async fn create_mrpack_json(
             }))
         })
         .collect::<crate::Result<Vec<PackFile>>>()?;
+    let mut files = files;
+    if let Some(sides) =
+        server_export_sides(state, &metadata.instance.id).await?
+    {
+        for file in &mut files {
+            let logical = file.path.as_str().trim_end_matches(".disabled");
+            let Some(sides) = sides.get(logical).copied() else {
+                continue;
+            };
+            if let Some(env) = file.env.as_mut() {
+                sides.narrow(env);
+            }
+            file.path = sides.pack_path(logical).try_into()?;
+        }
+    }
 
     Ok(PackFormat {
         game: "minecraft".to_string(),
@@ -729,4 +855,69 @@ pub async fn create_mrpack_json(
         files,
         dependencies,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sides(disabled_server: bool, disabled_player: bool) -> EntrySides {
+        let requirement = |off| {
+            if off {
+                ContentRequirement::Unsupported
+            } else {
+                ContentRequirement::Required
+            }
+        };
+        EntrySides {
+            server_requirement: requirement(disabled_server),
+            client_requirement: requirement(disabled_player),
+            ..EntrySides::default()
+        }
+    }
+
+    #[test]
+    fn a_modrinth_file_keeps_its_sides_narrowed_by_the_server_s_own() {
+        let mut env =
+            get_mrpack_environment(Some(VersionEnvironment::ClientAndServer));
+        ExportSides::of("mods/a.jar", true, Some(&sides(false, true)))
+            .narrow(&mut env);
+        assert_eq!(
+            (&env[&EnvType::Client], &env[&EnvType::Server]),
+            (&SideType::Unsupported, &SideType::Required)
+        );
+
+        let mut env =
+            get_mrpack_environment(Some(VersionEnvironment::ClientOnly));
+        ExportSides::of("mods/a.jar", false, Some(&sides(true, false)))
+            .narrow(&mut env);
+        assert_eq!(
+            (&env[&EnvType::Client], &env[&EnvType::Server]),
+            (&SideType::Required, &SideType::Unsupported)
+        );
+    }
+
+    #[test]
+    fn a_file_modrinth_does_not_know_goes_to_the_overrides_of_its_sides() {
+        let entry = |path: &str, enabled, recorded: Option<EntrySides>| {
+            let sides = ExportSides::of(path, enabled, recorded.as_ref());
+            format!("{}/{}", sides.folder(), sides.pack_path(path))
+        };
+        assert_eq!(
+            entry("mods/a.jar", true, Some(sides(false, false))),
+            "overrides/mods/a.jar"
+        );
+        assert_eq!(
+            entry("mods/a.jar", false, Some(sides(true, false))),
+            "client-overrides/mods/a.jar"
+        );
+        assert_eq!(
+            entry("plugins/a.jar", true, None),
+            "server-overrides/plugins/a.jar"
+        );
+        assert_eq!(
+            entry("mods/a.jar", false, None),
+            "overrides/mods/a.jar.disabled"
+        );
+    }
 }
