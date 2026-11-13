@@ -2,7 +2,6 @@ use crate::accounts::error_code;
 use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
 
-pub mod instance;
 pub mod logs;
 pub mod shortcuts;
 pub mod utils;

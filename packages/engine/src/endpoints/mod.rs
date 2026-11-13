@@ -12,6 +12,7 @@ pub mod loading;
 pub mod logs;
 pub mod metadata;
 pub mod process;
+pub mod sharing;
 pub mod store;
 pub mod tags;
 pub mod worlds;

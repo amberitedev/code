@@ -43,6 +43,7 @@ use crate::{
         logs::{self, LogFileRef, LogListing},
         metadata::{self, LoaderRef},
         process::{self, ProcessRef},
+        sharing::{self, NewSharedInviteLink, SharedUsersRemoval},
         store, tags,
         worlds::{
             self, InstanceServerDesync, InstanceServerRef,
@@ -65,9 +66,12 @@ use crate::{
         PackExportCandidate, PackExportCandidateType, ServerSource,
         SharedHistorySettings, SharedInstanceExternalFilePreview,
         SharedInstanceHistoryEntry, SharedInstanceInstallPreview,
-        SharedInstanceInviteCreator, SharedInstanceInviteInstallPreview,
-        SharedInstanceUpdateDiff, SharedInstanceUpdateDiffType,
-        SharedInstanceUpdatePreview,
+        SharedInstanceInvite, SharedInstanceInviteCreator,
+        SharedInstanceInviteInstallPreview, SharedInstanceInviteLink,
+        SharedInstanceJoinType, SharedInstancePublishFile,
+        SharedInstancePublishPreview, SharedInstanceUpdateDiff,
+        SharedInstanceUpdateDiffType, SharedInstanceUpdatePreview,
+        SharedInstanceUser, SharedInstanceUsers,
     },
     logs::{CensoredString, LogType, Logs},
     metadata::Manifest,
@@ -93,6 +97,8 @@ use crate::{
         World, WorldDetails, WorldType, WorldWithInstance,
     },
 };
+
+use crate::state::CachedSharedInstanceSummary;
 
 const PATH: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/../contracts/ts/engine.ts");
@@ -280,6 +286,16 @@ fn file() -> String {
         ExportCandidatesQuery::decl(&cfg),
         PackExportCandidate::decl(&cfg),
         PackExportCandidateType::decl(&cfg),
+        SharedInstanceUsers::decl(&cfg),
+        SharedInstanceUser::decl(&cfg),
+        SharedInstanceJoinType::decl(&cfg),
+        SharedUsersRemoval::decl(&cfg),
+        SharedInstanceInvite::decl(&cfg),
+        SharedInstanceInviteLink::decl(&cfg),
+        NewSharedInviteLink::decl(&cfg),
+        SharedInstancePublishPreview::decl(&cfg),
+        SharedInstancePublishFile::decl(&cfg),
+        CachedSharedInstanceSummary::decl(&cfg),
         // The payloads of the App's events that engine code still raises.
         FriendPayload::decl(&cfg),
         FriendStatusPayload::decl(&cfg),
@@ -304,13 +320,14 @@ fn file() -> String {
         ("instanceFiles", files::ts_entries()),
         ("installs", installs::ts_entries()),
         ("instanceContent", content::ts_entries()),
+        ("instanceSharing", sharing::ts_entries()),
     ]
     .map(|(name, entries)| format!("\nexport const {name} = {{\n{entries}}}\n"))
     .concat();
     format!(
         "// Generated from packages/engine by ts-rs. Do not edit.\n\
          // Regenerate: cargo test -p engine -- --ignored write_ts\n\n\
-         import type {{ Endpoint, RemovedFile, SharedIconConfig }} from './contracts'\n{declarations}{modules}"
+         import type {{ Endpoint, RemovedFile, SharedIconConfig, UserIds }} from './contracts'\n{declarations}{modules}"
     )
 }
 

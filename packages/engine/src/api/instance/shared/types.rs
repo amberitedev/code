@@ -5,6 +5,7 @@ pub use sharing_client::diff::{
 pub use sharing_client::history::SharedInstanceHistoryEntry;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct SharedInstanceUsers {
     pub user_ids: Vec<String>,
     #[serde(default)]
@@ -37,6 +38,7 @@ impl SharedInstanceUsers {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct SharedInstanceUser {
     pub id: String,
     pub joined_at: Option<DateTime<Utc>>,
@@ -46,6 +48,7 @@ pub struct SharedInstanceUser {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub enum SharedInstanceJoinType {
     Owner,
     Invite,
@@ -92,6 +95,7 @@ pub struct SharedInstanceUpdatePreview {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct SharedInstancePublishPreview {
     pub shared_instance_id: String,
     pub latest_version: i32,
@@ -101,6 +105,7 @@ pub struct SharedInstancePublishPreview {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct SharedInstancePublishFile {
     pub path: String,
     pub size: u64,
@@ -112,6 +117,7 @@ pub struct SharedInstancePublishFile {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct SharedInstanceInviteLink {
     pub invite_id: String,
     pub expires_at: DateTime<Utc>,
@@ -120,6 +126,7 @@ pub struct SharedInstanceInviteLink {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct SharedInstanceInvite {
     pub id: String,
     pub expiration: DateTime<Utc>,

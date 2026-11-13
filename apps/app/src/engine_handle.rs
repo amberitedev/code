@@ -3,7 +3,7 @@ use engine::{Engine, access::BoxFuture};
 use std::sync::{Arc, OnceLock};
 use tokio::sync::watch;
 
-/// The engine App setup starts, shared by Tauri commands and the local server's engine routes.
+/// The engine App setup starts, which the local server's routes wait for.
 #[derive(Clone)]
 pub struct EngineHandle {
     startup: watch::Sender<Startup>,

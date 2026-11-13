@@ -198,6 +198,7 @@ pub struct CachedSharedInstanceLibrary {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct CachedSharedInstanceSummary {
     pub shared_instance_id: String,
     pub role: SharedInstanceRole,

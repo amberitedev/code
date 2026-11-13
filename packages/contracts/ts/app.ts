@@ -2,7 +2,7 @@
 // Regenerate: cargo test -p theseus_gui -- --ignored write_ts
 
 import type { ApiError, CoreSession, Endpoint, SharedIconConfig, UserFriend, UserStatus } from './contracts'
-import type { CommandPayload, DesyncServerMode, EngineEvent, FriendPayload, ImportLauncherType, InstallJobSnapshot, InstanceGroupsChangedPayload, InstanceLink, JavaVersion, ModLoader, OnboardingChecklist, ProcessMetadata, ProjectType, Settings } from './engine'
+import type { CachedSharedInstanceSummary, CommandPayload, DesyncServerMode, EngineEvent, FriendPayload, ImportLauncherType, InstallJobSnapshot, InstanceGroupsChangedPayload, InstanceLink, JavaVersion, ModLoader, OnboardingChecklist, ProcessMetadata, ProjectType, Settings } from './engine'
 
 export type Boot = { version: string, platform: Platform, os_version: string, 
 /**
@@ -452,6 +452,21 @@ export type GeneratedInstanceIcon = { config: SharedIconConfig,
  */
 symbol_bytes: Array<number>, only_if_empty: boolean, };
 
+export type SharePublish = { op: string, instance_id: string, 
+/**
+ * The instance's files this version sends, by their path in the instance.
+ */
+file_paths: Array<string>, 
+/**
+ * Files the latest version shares that this one drops.
+ */
+removed_paths: Array<string>, 
+/**
+ * A Core the account owns that runs a server of this instance, which keeps the share's
+ * home copy.
+ */
+server_core_id: string | null, };
+
 export const health = {
 	checkHealth: { method: "GET", path: "/health", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
 }
@@ -647,4 +662,11 @@ export const instancePaths = {
 	checkFileOnModrinth: { method: "POST", path: "/app/content/on-modrinth", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, LocalContentFile, boolean>,
 	exportMrpack: { method: "POST", path: "/app/instances/{id}/export-mrpack", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<IdParams, null, MrpackExport, void>,
 	setInstanceIconFromPath: { method: "PUT", path: "/app/instances/{id}/icon", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<IdParams, null, LocalIcon, void>,
+}
+
+export const localSharing = {
+	canUseSharedInstances: { method: "GET", path: "/app/sharing/available", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, boolean>,
+	getCachedSharedLibrary: { method: "GET", path: "/app/sharing/library", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<CachedSharedInstanceSummary>>,
+	setCachedSharedLibrary: { method: "PUT", path: "/app/sharing/library", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, Array<CachedSharedInstanceSummary>, void>,
+	publishSharedInstance: { method: "POST", path: "/app/ops/shared-instance-publish", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, SharePublish, void>,
 }

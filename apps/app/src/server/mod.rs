@@ -149,6 +149,7 @@ impl LocalServer {
                     .layer(DefaultBodyLimit::disable())
                     .merge(library::routes::routes())
                     .merge(library::install::routes())
+                    .merge(library::sharing::routes())
                     .merge(synced_options::routes::routes())
                     .merge(screenshots::routes::routes())
                     .merge(friends::routes::routes())

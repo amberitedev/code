@@ -1,7 +1,7 @@
 // Generated from packages/engine by ts-rs. Do not edit.
 // Regenerate: cargo test -p engine -- --ignored write_ts
 
-import type { Endpoint, RemovedFile, SharedIconConfig } from './contracts'
+import type { Endpoint, RemovedFile, SharedIconConfig, UserIds } from './contracts'
 
 export type EngineEvent = { "type": "loading", "payload": LoadingPayload } | { "type": "process", "payload": ProcessPayload } | { "type": "instance", "payload": InstancePayload } | { "type": "install_job", "payload": InstallJobSnapshot } | { "type": "warning", "payload": WarningPayload } | { "type": "log", "payload": LogPayload } | { "type": "ads_consent_required", "payload": boolean };
 
@@ -420,6 +420,38 @@ export type PackExportCandidate = { path: string, type: PackExportCandidateType,
 
 export type PackExportCandidateType = "directory" | "file";
 
+export type SharedInstanceUsers = { user_ids: Array<string>, users: Array<SharedInstanceUser>, tokens: number, };
+
+export type SharedInstanceUser = { id: string, joined_at: string | null, join_type: SharedInstanceJoinType, last_played: string | null, };
+
+export type SharedInstanceJoinType = "owner" | "invite" | "link";
+
+export type SharedUsersRemoval = { user_ids: Array<string>, has_pending_recipients: boolean, };
+
+export type SharedInstanceInvite = { id: string, expiration: string, maxUses: number, uses: number, };
+
+export type SharedInstanceInviteLink = { inviteId: string, expiresAt: string, maxUses: number, };
+
+export type NewSharedInviteLink = { max_age_seconds: number | null, max_uses: number | null, 
+/**
+ * The link this one replaces, deleted once it exists.
+ */
+replace_invite_id: string | null, };
+
+export type SharedInstancePublishPreview = { sharedInstanceId: string, latestVersion: number, diffs: Array<SharedInstanceUpdateDiff>, files: Array<SharedInstancePublishFile>, };
+
+export type SharedInstancePublishFile = { path: string, size: number, 
+/**
+ * In the instance, but a share cannot carry it (see `sharing_client::rules`).
+ */
+blocked: boolean, 
+/**
+ * The share's latest version carries it.
+ */
+shared: boolean, };
+
+export type CachedSharedInstanceSummary = { shared_instance_id: string, role: SharedInstanceRole, manager_id: string | null, name: string, icon_url: string | null, game_version: string, loader: ModLoader, };
+
 export type FriendPayload = { "event": "friend_request", from: string, } | { "event": "user_offline", id: string, } | { "event": "status_update", user_status: FriendStatusPayload, } | { "event": "status_sync" } | { "event": "friend_request_rejected", from: string, };
 
 export type FriendStatusPayload = { user_id: string, profile_name: string | null, last_update: string, };
@@ -583,4 +615,21 @@ export const instanceContent = {
 	UpdateModpackVersion: { method: "POST", path: "/instances/{id}/modpack/update", auth: "session", dangerous: false, body: "json", response: "json" } as Endpoint<InstanceRef, null, ModpackVersion, InstallJobSnapshot>,
 	RepairModpack: { method: "POST", path: "/instances/{id}/modpack/repair", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceRef, null, void, InstallJobSnapshot>,
 	ListPackExportCandidates: { method: "GET", path: "/instances/{id}/export-candidates", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceRef, ExportCandidatesQuery, void, Array<PackExportCandidate>>,
+}
+
+export const instanceSharing = {
+	GetSharedInstanceUsers: { method: "GET", path: "/instances/{id}/shared/users", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceRef, null, void, SharedInstanceUsers>,
+	InviteSharedInstanceUsers: { method: "POST", path: "/instances/{id}/shared/users", auth: "session", dangerous: false, body: "json", response: "json" } as Endpoint<InstanceRef, null, UserIds, SharedInstanceUsers>,
+	RemoveSharedInstanceUsers: { method: "POST", path: "/instances/{id}/shared/users/remove", auth: "session", dangerous: false, body: "json", response: "json" } as Endpoint<InstanceRef, null, SharedUsersRemoval, SharedInstanceUsers>,
+	ListSharedInstanceInvites: { method: "GET", path: "/instances/{id}/shared/invites", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceRef, null, void, Array<SharedInstanceInvite>>,
+	CreateSharedInstanceInviteLink: { method: "POST", path: "/instances/{id}/shared/invites", auth: "session", dangerous: false, body: "json", response: "json" } as Endpoint<InstanceRef, null, NewSharedInviteLink, SharedInstanceInviteLink>,
+	RevokeSharedInstanceInvite: { method: "DELETE", path: "/instances/{id}/shared/invites/{invite_id}", auth: "session", dangerous: false, body: "empty", response: "empty" } as Endpoint<SharedInstanceInviteRef, null, void, void>,
+	GetSharedInstancePublishPreview: { method: "GET", path: "/instances/{id}/shared/publish-preview", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceRef, null, void, SharedInstancePublishPreview | null>,
+	GetSharedInstancePublishSupportDetails: { method: "GET", path: "/instances/{id}/shared/publish-support-details", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceRef, null, void, string | null>,
+	EnsureSharedInstance: { method: "PUT", path: "/instances/{id}/shared", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceRef, null, void, SharedInstanceAttachment>,
+	UnpublishSharedInstance: { method: "DELETE", path: "/instances/{id}/shared", auth: "session", dangerous: false, body: "empty", response: "empty" } as Endpoint<InstanceRef, null, void, void>,
+	UnlinkSharedInstance: { method: "POST", path: "/instances/{id}/shared/unlink", auth: "session", dangerous: false, body: "empty", response: "empty" } as Endpoint<InstanceRef, null, void, void>,
+	DismissSharedInstanceRestoredNotice: { method: "DELETE", path: "/instances/{id}/shared/restored-notice", auth: "session", dangerous: false, body: "empty", response: "empty" } as Endpoint<InstanceRef, null, void, void>,
+	UnpublishRemoteSharedInstance: { method: "DELETE", path: "/shared-instances/{id}", auth: "session", dangerous: false, body: "empty", response: "empty" } as Endpoint<SharedInstanceRef, null, void, void>,
+	LeaveRemoteSharedInstance: { method: "POST", path: "/shared-instances/{id}/leave", auth: "session", dangerous: false, body: "empty", response: "empty" } as Endpoint<SharedInstanceRef, null, void, void>,
 }

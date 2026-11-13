@@ -617,6 +617,8 @@ async fn with_nobody_signed_in_the_account_reads_are_empty() {
         ("app/accounts/minecraft/default", Value::Null),
         ("app/accounts/modrinth", json!([])),
         ("app/accounts/modrinth/active", Value::Null),
+        ("app/sharing/available", json!(false)),
+        ("app/sharing/library", json!([])),
     ] {
         let response = local.send(local.get(path, &[])).await;
         assert_eq!(response.status(), StatusCode::OK, "{path}");

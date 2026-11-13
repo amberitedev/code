@@ -4,6 +4,7 @@
  *  and deserialized into a usable JS object.
  */
 import {
+	ApiCallError,
 	type ContentItem as ContentItemResponse,
 	ContractClient,
 	desktop,
@@ -12,9 +13,11 @@ import {
 	instanceContent,
 	instancePaths,
 	instances,
+	instanceSharing,
 	type Labrinth,
 	launch,
 	library,
+	localSharing,
 	type ProjectType,
 	type ScreenshotFile,
 	type ScreenshotGroup,
@@ -22,6 +25,10 @@ import {
 	type ScreenshotGroupMembershipUpdate,
 	type ScreenshotKey,
 	screenshots,
+	type SharedInstanceInvite,
+	type SharedInstanceInviteLink,
+	type SharedInstancePublishPreview,
+	type SharedInstanceUsers,
 	type SyncedOption,
 	type SyncedOptionJoinPreview,
 	type SyncedOptionJoinResolution,
@@ -30,12 +37,12 @@ import {
 	type SyncedServer,
 } from '@modrinth/api-client'
 import { type ContentItem, type ContentOwner, getIconSymbolAsset } from '@modrinth/ui'
-import { Channel, invoke } from '@tauri-apps/api/core'
 
 import { localFileUrl, localTransport } from '@/platform/local'
 import { apiClient } from '@/platform/modrinth-client'
+import { runOp } from '@/platform/ops'
 
-import type { InstallJobSnapshot, SharedInstanceUpdateDiff } from './install'
+import type { InstallJobSnapshot } from './install'
 import type {
 	CacheBehaviour,
 	ContentFile,
@@ -719,61 +726,34 @@ export async function get_recent_icon_configs(): Promise<IconConfig[]> {
 	return await apiClient.local.call(library.listRecentIconConfigs)
 }
 
-export type SharedInstanceUsers = {
-	user_ids: string[]
-	users: SharedInstanceUser[]
-	tokens: number
-}
-
-export type SharedInstanceJoinType = 'owner' | 'invite' | 'link'
-
-export type SharedInstanceUser = {
-	id: string
-	joined_at?: string | null
-	join_type: SharedInstanceJoinType
-	last_played?: string | null
-}
-
-export interface SharedInstancePublishPreview {
-	sharedInstanceId: string
-	latestVersion: number
-	diffs: SharedInstanceUpdateDiff[]
-	files: SharedInstancePublishFile[]
-}
-
-export interface SharedInstancePublishFile {
-	path: string
-	size: number
-	blocked: boolean
-	shared: boolean
-}
-
-export interface SharedInstanceInviteLink {
-	inviteId: string
-	expiresAt: string
-	maxUses: number
-}
-
-export type SharedInstanceInvite = {
-	id: string
-	expiration: string
-	maxUses: number
-	uses: number
-}
+export type {
+	SharedInstanceInvite,
+	SharedInstanceInviteLink,
+	SharedInstanceJoinType,
+	SharedInstancePublishFile,
+	SharedInstancePublishPreview,
+	SharedInstanceUser,
+	SharedInstanceUsers,
+} from '@modrinth/api-client'
 
 export async function can_current_user_use_shared_instances(): Promise<boolean> {
-	return await invoke('plugin:instance|instance_share_can_current_user_use')
+	return await apiClient.local.call(localSharing.canUseSharedInstances)
 }
 
 export async function get_shared_instance_users(instanceId: string): Promise<SharedInstanceUsers> {
-	return await invoke('plugin:instance|instance_share_get_users', { instanceId })
+	return await apiClient.local.call(instanceSharing.GetSharedInstanceUsers, {
+		params: { id: instanceId },
+	})
 }
 
 export async function invite_shared_instance_users(
 	instanceId: string,
 	userIds: string[],
 ): Promise<SharedInstanceUsers> {
-	return await invoke('plugin:instance|instance_share_invite_users', { instanceId, userIds })
+	return await apiClient.local.call(instanceSharing.InviteSharedInstanceUsers, {
+		params: { id: instanceId },
+		body: { user_ids: userIds },
+	})
 }
 
 export async function create_shared_instance_invite_link(
@@ -784,23 +764,31 @@ export async function create_shared_instance_invite_link(
 		replaceInviteId?: string
 	} = {},
 ): Promise<SharedInstanceInviteLink> {
-	return await invoke('plugin:instance|instance_share_create_invite_link', {
-		instanceId,
-		...options,
+	return await apiClient.local.call(instanceSharing.CreateSharedInstanceInviteLink, {
+		params: { id: instanceId },
+		body: {
+			max_age_seconds: options.maxAgeSeconds ?? null,
+			max_uses: options.maxUses ?? null,
+			replace_invite_id: options.replaceInviteId ?? null,
+		},
 	})
 }
 
 export async function get_shared_instance_invites(
 	instanceId: string,
 ): Promise<SharedInstanceInvite[]> {
-	return await invoke('plugin:instance|instance_share_get_invites', { instanceId })
+	return await apiClient.local.call(instanceSharing.ListSharedInstanceInvites, {
+		params: { id: instanceId },
+	})
 }
 
 export async function revoke_shared_instance_invite(
 	instanceId: string,
 	inviteId: string,
 ): Promise<void> {
-	return await invoke('plugin:instance|instance_share_revoke_invite', { instanceId, inviteId })
+	return await apiClient.local.call(instanceSharing.RevokeSharedInstanceInvite, {
+		params: { id: instanceId, invite_id: inviteId },
+	})
 }
 
 export async function remove_shared_instance_users(
@@ -808,17 +796,18 @@ export async function remove_shared_instance_users(
 	userIds: string[],
 	hasPendingRecipients: boolean,
 ): Promise<SharedInstanceUsers> {
-	return await invoke('plugin:instance|instance_share_remove_users', {
-		instanceId,
-		userIds,
-		hasPendingRecipients,
+	return await apiClient.local.call(instanceSharing.RemoveSharedInstanceUsers, {
+		params: { id: instanceId },
+		body: { user_ids: userIds, has_pending_recipients: hasPendingRecipients },
 	})
 }
 
 export async function get_shared_instance_publish_preview(
 	instanceId: string,
 ): Promise<SharedInstancePublishPreview | null> {
-	return await invoke('plugin:instance|instance_share_get_publish_preview', { instanceId })
+	return await apiClient.local.call(instanceSharing.GetSharedInstancePublishPreview, {
+		params: { id: instanceId },
+	})
 }
 
 /**
@@ -832,32 +821,52 @@ export async function publish_shared_instance(
 	serverCoreId: string | null,
 	onProgress: (uploadedBytes: number, totalBytes: number) => void,
 ): Promise<SharedInstanceAttachment> {
-	return await invoke('plugin:instance|instance_share_publish', {
-		instanceId,
-		filePaths,
-		removedPaths,
-		serverCoreId,
-		onProgress: new Channel<[number, number]>(([uploaded, total]) => onProgress(uploaded, total)),
-	})
+	const op = crypto.randomUUID()
+	const { error } = await runOp(
+		op,
+		() =>
+			apiClient.local.call(localSharing.publishSharedInstance, {
+				body: {
+					op,
+					instance_id: instanceId,
+					file_paths: filePaths,
+					removed_paths: removedPaths,
+					server_core_id: serverCoreId,
+				},
+			}),
+		({ done, total }) => onProgress(done, total ?? done),
+	)
+	if (error) throw new ApiCallError(500, error.error, error.description)
+	const attachment = (await get(instanceId))?.shared_instance
+	if (!attachment) throw new Error(`Instance ${instanceId} has no share`)
+	return attachment
 }
 
 export async function get_shared_instance_publish_support_details(
 	instanceId: string,
 ): Promise<string | null> {
-	return await invoke('plugin:instance|instance_share_publish_support_details', { instanceId })
+	return await apiClient.local.call(instanceSharing.GetSharedInstancePublishSupportDetails, {
+		params: { id: instanceId },
+	})
 }
 
 export async function unlink_shared_instance(instanceId: string): Promise<void> {
-	return await invoke('plugin:instance|instance_share_unlink', { instanceId })
+	return await apiClient.local.call(instanceSharing.UnlinkSharedInstance, {
+		params: { id: instanceId },
+	})
 }
 
 export async function unpublish_shared_instance(instanceId: string): Promise<void> {
-	return await invoke('plugin:instance|instance_share_unpublish', { instanceId })
+	return await apiClient.local.call(instanceSharing.UnpublishSharedInstance, {
+		params: { id: instanceId },
+	})
 }
 
 /** The instance's share, created with its first version when it has none, so it can run servers. */
 export async function ensure_shared_instance(
 	instanceId: string,
 ): Promise<SharedInstanceAttachment> {
-	return await invoke('plugin:instance|instance_share_ensure', { instanceId })
+	return await apiClient.local.call(instanceSharing.EnsureSharedInstance, {
+		params: { id: instanceId },
+	})
 }

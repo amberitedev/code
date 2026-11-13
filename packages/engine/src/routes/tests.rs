@@ -765,3 +765,59 @@ async fn install_jobs_are_read_and_controlled_through_their_instance() {
         (StatusCode::OK, json!([]))
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn only_an_owner_manages_a_share_and_an_unshared_instance_reads_empty() {
+    let dir = tempfile::tempdir().unwrap();
+    let editor = host_granting(&dir, Some(Permission::Edit)).await;
+    let shared = "/instances/local%3Aa/shared";
+    for (method, uri, body) in [
+        (
+            "POST",
+            format!("{shared}/users"),
+            Some(json!({ "user_ids": ["u"] })),
+        ),
+        ("GET", format!("{shared}/invites"), None),
+        ("DELETE", format!("{shared}/invites/i"), None),
+        ("PUT", shared.to_owned(), None),
+        ("DELETE", shared.to_owned(), None),
+        ("POST", format!("{shared}/unlink"), None),
+        ("DELETE", "/shared-instances/s".to_owned(), None),
+        ("POST", "/shared-instances/s/leave".to_owned(), None),
+    ] {
+        let (status, _) = send(&editor, method, &uri, body).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{method} {uri}");
+    }
+    assert_eq!(
+        send(
+            &editor,
+            "DELETE",
+            &format!("{shared}/restored-notice"),
+            None
+        )
+        .await
+        .0,
+        StatusCode::NO_CONTENT
+    );
+
+    let dir = tempfile::tempdir().unwrap();
+    let owner = host(&dir, true).await;
+    assert_eq!(
+        send(&owner, "GET", &format!("{shared}/users"), None).await,
+        (
+            StatusCode::OK,
+            json!({ "user_ids": [], "users": [], "tokens": 0 })
+        )
+    );
+    for (uri, empty) in [
+        ("invites", json!([])),
+        ("publish-preview", Value::Null),
+        ("publish-support-details", Value::Null),
+    ] {
+        assert_eq!(
+            send(&owner, "GET", &format!("{shared}/{uri}"), None).await,
+            (StatusCode::OK, empty),
+            "{uri}"
+        );
+    }
+}

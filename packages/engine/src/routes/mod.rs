@@ -13,6 +13,7 @@ mod loading;
 mod logs;
 mod metadata;
 mod process;
+mod sharing;
 mod store;
 mod tags;
 #[cfg(test)]
@@ -28,7 +29,7 @@ use serde::Deserialize;
 pub use self::{
     cache::*, content::*, files::*, groups::*, install::*, instances::*,
     jre::*, lifecycle::*, loading::*, logs::*, metadata::*, process::*,
-    store::*, tags::*, worlds::*,
+    sharing::*, store::*, tags::*, worlds::*,
 };
 use crate::{
     Engine,
@@ -87,6 +88,16 @@ use crate::{
         },
         metadata::GetLoaderManifest,
         process::{KillProcess, ListInstanceProcesses, ListProcesses},
+        sharing::{
+            CreateSharedInstanceInviteLink,
+            DismissSharedInstanceRestoredNotice, EnsureSharedInstance,
+            GetSharedInstancePublishPreview,
+            GetSharedInstancePublishSupportDetails, GetSharedInstanceUsers,
+            InviteSharedInstanceUsers, LeaveRemoteSharedInstance,
+            ListSharedInstanceInvites, RemoveSharedInstanceUsers,
+            RevokeSharedInstanceInvite, UnlinkSharedInstance,
+            UnpublishRemoteSharedInstance, UnpublishSharedInstance,
+        },
         store::{CleanStore, GetStoreUsage, SetStoreCacheLimit},
         tags::{GetCategoryTags, GetGameVersionTags, GetLoaderTags},
         worlds::{
@@ -237,6 +248,40 @@ where
             get_shared_instance_invite_preview,
         ),
         route::<GetSharedHistorySettings, _, _, _>(get_shared_history_settings),
+        route::<GetSharedInstanceUsers, _, _, _>(get_shared_instance_users),
+        route::<InviteSharedInstanceUsers, _, _, _>(
+            invite_shared_instance_users,
+        ),
+        route::<RemoveSharedInstanceUsers, _, _, _>(
+            remove_shared_instance_users,
+        ),
+        route::<ListSharedInstanceInvites, _, _, _>(
+            list_shared_instance_invites,
+        ),
+        route::<CreateSharedInstanceInviteLink, _, _, _>(
+            create_shared_instance_invite_link,
+        ),
+        route::<RevokeSharedInstanceInvite, _, _, _>(
+            revoke_shared_instance_invite,
+        ),
+        route::<GetSharedInstancePublishPreview, _, _, _>(
+            get_shared_instance_publish_preview,
+        ),
+        route::<GetSharedInstancePublishSupportDetails, _, _, _>(
+            get_shared_instance_publish_support_details,
+        ),
+        route::<EnsureSharedInstance, _, _, _>(ensure_shared_instance),
+        route::<UnpublishSharedInstance, _, _, _>(unpublish_shared_instance),
+        route::<UnlinkSharedInstance, _, _, _>(unlink_shared_instance),
+        route::<DismissSharedInstanceRestoredNotice, _, _, _>(
+            dismiss_shared_instance_restored_notice,
+        ),
+        route::<UnpublishRemoteSharedInstance, _, _, _>(
+            unpublish_remote_shared_instance,
+        ),
+        route::<LeaveRemoteSharedInstance, _, _, _>(
+            leave_remote_shared_instance,
+        ),
         route::<SetSharedHistoryKept, _, _, _>(set_shared_history_kept),
         route::<ListInstallJobs, _, _, _>(list_install_jobs),
         route::<GetInstallJob, _, _, _>(get_install_job),

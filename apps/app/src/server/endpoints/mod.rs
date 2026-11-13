@@ -58,6 +58,7 @@ pub mod onboarding;
 pub mod ops;
 pub mod screenshots;
 pub mod settings;
+pub mod sharing;
 pub mod skins;
 pub mod synced_options;
 pub mod synced_packs;
@@ -135,6 +136,7 @@ mod tests {
             ScreenshotFile, ScreenshotGroupUpdate, ScreenshotMove,
         },
         settings::{CancelDirectoryChange, GetSettings, SetSettings},
+        sharing::{self, SharePublish},
         skins::{self, CustomSkinSave, NewCustomSkin, SkinFlushQuery},
         synced_options::{
             self, CommandHistory, GlobalSyncedOptionUpdate,
@@ -320,6 +322,7 @@ mod tests {
             LocalIcon::decl(&cfg),
             GeneratedIcon::decl(&cfg),
             GeneratedInstanceIcon::decl(&cfg),
+            SharePublish::decl(&cfg),
         ]
         .map(|declaration| format!("\nexport {declaration}\n"))
         .concat();
@@ -327,7 +330,7 @@ mod tests {
             "// Generated from apps/app by ts-rs. Do not edit.\n\
              // Regenerate: cargo test -p theseus_gui -- --ignored write_ts\n\n\
              import type {{ ApiError, CoreSession, Endpoint, SharedIconConfig, UserFriend, UserStatus }} from './contracts'\n\
-             import type {{ CommandPayload, DesyncServerMode, EngineEvent, FriendPayload, ImportLauncherType, InstallJobSnapshot, InstanceGroupsChangedPayload, InstanceLink, JavaVersion, ModLoader, OnboardingChecklist, ProcessMetadata, ProjectType, Settings }} from './engine'\n\
+             import type {{ CachedSharedInstanceSummary, CommandPayload, DesyncServerMode, EngineEvent, FriendPayload, ImportLauncherType, InstallJobSnapshot, InstanceGroupsChangedPayload, InstanceLink, JavaVersion, ModLoader, OnboardingChecklist, ProcessMetadata, ProjectType, Settings }} from './engine'\n\
              {declarations}\n\
              export const health = {{\n\
              \tcheckHealth: {},\n\
@@ -403,7 +406,8 @@ mod tests {
              \timportInstance: {},\n\
              }}\n\n\
              export const localInstalls = {{\n{}}}\n\n\
-             export const instancePaths = {{\n{}}}\n",
+             export const instancePaths = {{\n{}}}\n\n\
+             export const localSharing = {{\n{}}}\n",
             endpoint::<CheckHealth>(),
             endpoint::<GetBoot>(),
             endpoint::<ConnectCore>(),
@@ -457,6 +461,7 @@ mod tests {
             endpoint::<ImportInstance>(),
             install::ts_entries(),
             instance_paths::ts_entries(),
+            sharing::ts_entries(),
         )
     }
 
