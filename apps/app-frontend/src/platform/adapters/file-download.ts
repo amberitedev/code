@@ -1,9 +1,4 @@
-import {
-	type AbstractModrinthClient,
-	type DownloadSink,
-	getNodeBaseUrl,
-	ModrinthApiError,
-} from '@modrinth/api-client'
+import { type AbstractModrinthClient, ModrinthApiError } from '@modrinth/api-client'
 import type { FileDownloadProvider } from '@modrinth/ui'
 
 import { type ExternalFileProgress, saveExternal } from '@/platform/app-lib/files/commands'
@@ -65,10 +60,10 @@ export function createFileDownload(
 			const originHeaders: Record<string, string> = client.selfHostedHosting
 				? { Origin: window.location.origin }
 				: {}
-			const saveUrl = async (url: string, headers: Record<string, string> = {}) => {
+			const saveUrl = async (url: string) => {
 				if (cancelled) throw new Error('Download cancelled')
 				const { error, response } = await saveExternal(
-					{ op: saveId, path, url, headers: { ...originHeaders, ...headers } },
+					{ op: saveId, path, url, headers: originHeaders },
 					onProgress,
 				)
 				if (error) throw new ModrinthApiError(error.description)
@@ -79,7 +74,6 @@ export function createFileDownload(
 					})
 				}
 			}
-			const sink: DownloadSink = (url, options) => saveUrl(url, options.headers)
 
 			try {
 				switch (file.type) {
@@ -109,15 +103,8 @@ export function createFileDownload(
 							file.nodeUrlHost,
 							file.worldId,
 						)
-						await client.download(
-							`/worlds/${encodeURIComponent(file.worldId)}/files/download-full-zip`,
-							{
-								api: getNodeBaseUrl(file.nodeUrlHost),
-								version: 'v1',
-								params: { token },
-								skipAuth: true,
-							},
-							sink,
+						await saveUrl(
+							client.kyros.files_v1.getFullWorldDownloadUrl(file.nodeUrlHost, file.worldId, token),
 						)
 						break
 					}

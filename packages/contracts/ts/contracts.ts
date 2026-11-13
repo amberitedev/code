@@ -1172,6 +1172,15 @@ code: string | null,
  */
 expires_at: number | null, };
 
+export type NewDownloadLink = { 
+/**
+ * The exact path and query the link will GET, such as
+ * `/servers/{id}/v1/worlds/{id}/files/contents-raw?path=server.properties`.
+ */
+path: string, };
+
+export type DownloadLink = { token: string, };
+
 export type Topic = { "type": "instance", id: string, } | { "type": "installs" } | { "type": "console", id: string, } | { "type": "server", id: string, } | { "type": "backups", id: string, };
 
 export type ClientMessage = { "type": "subscribe", topic: Topic, } | { "type": "unsubscribe", topic: Topic, };
@@ -1679,6 +1688,7 @@ export const core = {
 	InviteMember: { method: "POST", path: "/servers/{id}/access", auth: "session", dangerous: true, body: "json", response: "json" } as Endpoint<ServerId, null, NewMember, Member>,
 	ChangeRole: { method: "PATCH", path: "/servers/{id}/access/{user_id}", auth: "session", dangerous: true, body: "json", response: "json" } as Endpoint<MemberId, null, MemberUpdate, Member>,
 	RemoveMember: { method: "DELETE", path: "/servers/{id}/access/{user_id}", auth: "session", dangerous: true, body: "empty", response: "empty" } as Endpoint<MemberId, null, void, void>,
+	CreateDownloadLink: { method: "POST", path: "/links", auth: "session", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, NewDownloadLink, DownloadLink>,
 	ListActivity: { method: "GET", path: "/activity", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, ActivityQuery, void, ActivityPage>,
 	GetPairing: { method: "GET", path: "/pairing", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, PairingStatus>,
 	RequestPairingCode: { method: "POST", path: "/pairing/code", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, PairingStatus>,

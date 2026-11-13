@@ -1,7 +1,7 @@
 //! A server's files, under `/servers/{id}`: `modrinth/v0/fs/` list, download, create, update, move,
 //! and delete; `v1/worlds/{wid}/files/stat` and `.../files/zip`; `v1/fs/unarchive`;
-//! `v1/fs/ops/{action}`; `v1/worlds/{wid}/files/contents-raw` and its `authorize`, the download
-//! a browser follows with a link token; and the upload sessions at
+//! `v1/fs/ops/{action}`; `v1/worlds/{wid}/files/contents-raw`, the download a native save
+//! follows with a link (`access::links`); and the upload sessions at
 //! `v1/worlds/{wid}/{scope}/upload-session` (create, get, files, finalize, cancel). Mirrors
 //! `Kyros.Files` and `Kyros.UploadSessions` in `packages/api-client/src/modules/kyros/types.ts`.
 //! Also `GET /modrinth/v0/servers/{id}/fs`, where the App learns the base of these routes.
@@ -38,20 +38,18 @@ use engine::{
 
 use super::{
     CoreState,
-    backups::{DownloadQuery, DownloadToken, expired_link},
     content::{stage_field, world},
     internal,
 };
 use crate::{
     access::{Caller, Permission, activity, now},
-    backups::Target,
     state::servers::{
         Busy, commands::apply_content_install::add_uploaded_file, domain::pack,
     },
 };
 
-/// Query of GET `fs/download` and PUT `fs/update`. Mirrors the `path` param of
-/// `KyrosFilesV0Module.downloadFile` and `.updateFile`.
+/// Query of GET `fs/download` and `files/contents-raw`, and PUT `fs/update`. Mirrors the `path`
+/// param of `KyrosFilesV0Module.downloadFile` and `.updateFile`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct PathQuery {
     pub path: String,
@@ -563,42 +561,16 @@ pub async fn download(
     stream_file(&state, &id, path).await
 }
 
-/// `GET v1/worlds/{wid}/files/contents-raw/authorize`: a link token for one file, for a download
-/// that cannot send the session.
-pub async fn authorize_file(
+/// `GET v1/worlds/{wid}/files/contents-raw?path=`: a file, streamed, as `fs/download` does.
+pub async fn download_file(
     caller: Caller,
     State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
     Query(query): Query<PathQuery>,
-) -> Result<Json<DownloadToken>, ApiError> {
-    state.access.require(&caller, &id, Permission::Edit).await?;
-    world(&id, &wid)?;
-    let path = inner_path(&query.path)?;
-    let token = state.backups.grant(caller, &id, Target::File(path));
-    Ok(Json(DownloadToken { token }))
-}
-
-/// `GET v1/worlds/{wid}/files/contents-raw`: the file its link token was made for, streamed.
-/// The token names the file, so this takes no session; `fs/download` is the route for one.
-pub async fn download_file(
-    State(state): State<Arc<CoreState>>,
-    Path((id, wid)): Path<(String, String)>,
-    Query(query): Query<DownloadQuery>,
 ) -> Result<Response, ApiError> {
     world(&id, &wid)?;
-    let grant = query
-        .token
-        .as_deref()
-        .and_then(|token| state.backups.take(token))
-        .filter(|grant| grant.server_id == id)
-        .ok_or_else(expired_link)?;
-    let Target::File(path) = grant.target else {
-        return Err(expired_link());
-    };
-    state
-        .access
-        .require(&grant.caller, &id, Permission::Edit)
-        .await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
+    let path = inner_path(&query.path)?;
     stream_file(&state, &id, path).await
 }
 

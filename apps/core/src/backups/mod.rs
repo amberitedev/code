@@ -29,7 +29,6 @@ pub mod records;
 pub mod space;
 
 use std::{
-    collections::HashMap,
     io::{self, Read, Write},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
@@ -48,7 +47,7 @@ use engine::{
 };
 
 use crate::{
-    access::{Caller, now},
+    access::now,
     api::events::{BackupState, BackupTask, CoreEvent},
     daemon::paths::Paths,
     servers::{Phase, ServerError, Servers, console},
@@ -84,8 +83,6 @@ const KEEP_PRE_UPDATE: u32 = 2;
 const RETRY_FAILED: i64 = 3600;
 /// How often the schedule is checked.
 const SCHEDULE_TICK: Duration = Duration::from_secs(60);
-/// How long a download link works, once.
-const DOWNLOAD_GRANT: Duration = Duration::from_secs(300);
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -105,27 +102,6 @@ pub enum Error {
     Database(#[from] sqlx::Error),
 }
 
-/// What a download link may fetch.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Target {
-    /// The server's worlds as they are now.
-    World,
-    Backup(String),
-    /// One file of the server, by its cleaned path.
-    File(String),
-    /// The server's content as a `.mrpack`.
-    Pack,
-}
-
-/// A download link someone with access asked for: single use, for a few minutes.
-#[derive(Debug, Clone)]
-pub struct Grant {
-    pub caller: Caller,
-    pub server_id: String,
-    pub target: Target,
-    expires: Instant,
-}
-
 /// The backup engine. One per Core.
 pub struct Backups {
     paths: Paths,
@@ -138,7 +114,6 @@ pub struct Backups {
     finished: broadcast::Sender<i64>,
     /// Held while copying a server, for a backup or a download of its world.
     copying: tokio::sync::Mutex<()>,
-    grants: Mutex<HashMap<String, Grant>>,
     /// Servers a restore could not put back, held so they never start on a half-restored world
     /// until someone looks (the old files are in the restore's folder).
     stuck: Mutex<Vec<crate::servers::Hold>>,
@@ -159,7 +134,6 @@ impl Backups {
             wake: Notify::new(),
             finished: broadcast::channel(64).0,
             copying: tokio::sync::Mutex::new(()),
-            grants: Mutex::default(),
             stuck: Mutex::default(),
         });
         backups.recover_restores().await;
@@ -822,43 +796,6 @@ impl Backups {
         server_id: &str,
     ) -> Result<Option<i64>, Error> {
         Ok(self.due(server_id).await?.map(|due| due.at))
-    }
-
-    /// A single-use link for `target`, valid for five minutes.
-    pub fn grant(
-        &self,
-        caller: Caller,
-        server_id: &str,
-        target: Target,
-    ) -> String {
-        let mut bytes = [0u8; 32];
-        ring::rand::SecureRandom::fill(
-            &ring::rand::SystemRandom::new(),
-            &mut bytes,
-        )
-        .expect("the system has randomness");
-        let token = hex::encode(bytes);
-        let mut grants = self.grants.lock().expect("not poisoned");
-        grants.retain(|_, grant| grant.expires > Instant::now());
-        grants.insert(
-            token.clone(),
-            Grant {
-                caller,
-                server_id: server_id.to_owned(),
-                target,
-                expires: Instant::now() + DOWNLOAD_GRANT,
-            },
-        );
-        token
-    }
-
-    /// Use up a download link.
-    pub fn take(&self, token: &str) -> Option<Grant> {
-        self.grants
-            .lock()
-            .expect("not poisoned")
-            .remove(token)
-            .filter(|grant| grant.expires > Instant::now())
     }
 }
 

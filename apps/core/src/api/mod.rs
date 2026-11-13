@@ -131,6 +131,7 @@ pub fn router(state: Arc<CoreState>) -> Router {
         .endpoint::<InviteMember, _, _>(access::invite)
         .endpoint::<ChangeRole, _, _>(access::change_role)
         .endpoint::<RemoveMember, _, _>(access::remove)
+        .endpoint::<CreateDownloadLink, _, _>(crate::access::links::create)
         .endpoint::<ListActivity, _, _>(activity::list)
         .endpoint::<GetPairing, _, _>(pairing::get)
         .endpoint::<RequestPairingCode, _, _>(pairing::new_code)
@@ -178,22 +179,6 @@ pub fn router(state: Arc<CoreState>) -> Router {
         .route("/v1/servers/{id}/icon/generated", put(icon::set_generated))
         .route("/modrinth/v0/servers/{id}/fs", get(files::auth))
         .endpoint::<SetJava, _, _>(startup::set_java_path)
-        .route(
-            "/servers/{id}/v1/worlds/{wid}/backups/{bid}/download/authorize",
-            get(backups::authorize_backup),
-        )
-        .route(
-            "/servers/{id}/v1/worlds/{wid}/files/download-full-zip/authorize",
-            get(backups::authorize_world),
-        )
-        .route(
-            "/servers/{id}/v1/worlds/{wid}/files/contents-raw/authorize",
-            get(files::authorize_file),
-        )
-        .route(
-            "/servers/{id}/v1/worlds/{wid}/content/export-mrpack/authorize",
-            get(export::authorize),
-        )
         .route("/v1/servers/{id}/worlds/{wid}/addons/delete", post(content::delete))
         .route("/v1/servers/{id}/worlds/{wid}/addons/delete-many", post(content::delete_many))
         .route("/v1/servers/{id}/worlds/{wid}/addons/disable", post(content::disable))
@@ -324,7 +309,16 @@ pub fn router(state: Arc<CoreState>) -> Router {
         .route("/store/{*rest}", any(storage::forward))
         .layer(DefaultBodyLimit::disable())
         .with_state(Shared(state))
-        .layer(TraceLayer::new_for_http())
+        // Without the query, which can hold a download link (`access::links`).
+        .layer(TraceLayer::new_for_http().make_span_with(
+            |request: &axum::extract::Request| {
+                tracing::debug_span!(
+                    "request",
+                    method = %request.method(),
+                    path = %request.uri().path(),
+                )
+            },
+        ))
 }
 
 /// Serve HTTP/1 or HTTP/2, with upgrades for the `/events` socket, on one connection. A connection

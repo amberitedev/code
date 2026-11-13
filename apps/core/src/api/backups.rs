@@ -1,7 +1,7 @@
 //! A server's backups: the list and its schedule, creating, renaming, restoring and deleting
-//! them, and their operations. Also the downloads a browser follows with a link token:
-//! `GET /servers/{id}/v1/worlds/{wid}/backups/{bid}/download` and `.../files/download-full-zip`,
-//! each with its `authorize` (`kyros/backups/v1.ts`, `kyros/files/v1.ts`).
+//! them, and their operations. Also the downloads, which a native save follows with a link
+//! (`access::links`): `GET /servers/{id}/v1/worlds/{wid}/backups/{bid}/download` and
+//! `.../files/download-full-zip`.
 //!
 //! Core has [`SLOTS`] backup slots per server, split between scheduled and manual backups; the
 //! schedule's `keep` is the scheduled share.
@@ -14,7 +14,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use axum::{
     body::Body,
-    extract::{Path, Query, State},
+    extract::{Path, State},
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
 };
@@ -29,35 +29,18 @@ use contracts::{
     },
     server::Req,
 };
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::{CoreState, content::world, internal};
 use crate::{
     access::{Caller, Dangerous, Permission, activity},
     backups::{
-        self, SLOTS, Target,
+        self, SLOTS,
         records::{self, Kind, OpKind, OpState, State as BackupRowState},
     },
     servers::ServerError,
     state::servers::adapters::sqlite::server_rows,
 };
-
-/// Response of the download `authorize` routes: a link token for one download in the next five
-/// minutes. Mirrors Kyros.Backups.v1.BackupDownloadAuthorization and the
-/// Kyros.Files.v1 authorizations.
-#[derive(Debug, Clone, Serialize)]
-pub struct DownloadToken {
-    pub token: String,
-}
-
-/// Query of the download routes. A browser follows the link, so the token travels in the query.
-/// Mirrors the `token` param of `getDownloadUrl` and the `Kyros.Files.v1` download URLs.
-#[derive(Debug, Clone, Deserialize)]
-pub struct DownloadQuery {
-    #[serde(default)]
-    pub token: Option<String>,
-}
 
 impl From<backups::Error> for ApiError {
     fn from(error: backups::Error) -> Self {
@@ -475,76 +458,6 @@ async fn operation(
     Ok(Empty)
 }
 
-/// `GET /servers/{id}/v1/worlds/{wid}/backups/{bid}/download/authorize`: a link token for the
-/// backup's zip, for a download that cannot send the session.
-pub async fn authorize_backup(
-    caller: Caller,
-    State(state): State<Arc<CoreState>>,
-    Path((id, wid, backup)): Path<(String, String, String)>,
-) -> Result<Json<DownloadToken>, ApiError> {
-    state.access.require(&caller, &id, Permission::Edit).await?;
-    world(&id, &wid)?;
-    records::backup(&state.db, &id, &backup)
-        .await
-        .map_err(internal)?
-        .ok_or_else(|| {
-            ApiError::new(
-                ErrorCode::NotFound,
-                format!("There is no backup {backup}."),
-            )
-        })?;
-    let token = state.backups.grant(caller, &id, Target::Backup(backup));
-    Ok(Json(DownloadToken { token }))
-}
-
-/// `GET /servers/{id}/v1/worlds/{wid}/files/download-full-zip/authorize`: a link token for the
-/// world as it is now.
-pub async fn authorize_world(
-    caller: Caller,
-    State(state): State<Arc<CoreState>>,
-    Path((id, wid)): Path<(String, String)>,
-) -> Result<Json<DownloadToken>, ApiError> {
-    state.access.require(&caller, &id, Permission::Edit).await?;
-    world(&id, &wid)?;
-    let token = state.backups.grant(caller, &id, Target::World);
-    Ok(Json(DownloadToken { token }))
-}
-
-/// The answer to a link token that is unknown, used, or past its five minutes.
-pub(super) fn expired_link() -> ApiError {
-    ApiError::new(
-        ErrorCode::InvalidCredentials,
-        "This download link has expired or was used.",
-    )
-}
-
-/// Who is downloading: a link token for `target` on `server`, or a session in the header. Either
-/// way they must still be an editor of the server.
-pub(super) async fn downloader(
-    state: &CoreState,
-    caller: Result<Caller, ApiError>,
-    token: Option<&str>,
-    server: &str,
-    target: &Target,
-) -> Result<Caller, ApiError> {
-    let caller = match token {
-        Some(token) => state
-            .backups
-            .take(token)
-            .filter(|grant| {
-                grant.server_id == server && grant.target == *target
-            })
-            .map(|grant| grant.caller)
-            .ok_or_else(expired_link)?,
-        None => caller?,
-    };
-    state
-        .access
-        .require(&caller, server, Permission::Edit)
-        .await?;
-    Ok(caller)
-}
-
 /// A zip streamed to the client, saved as `name` with `extension`. A `temporary` file is removed
 /// once the response is done with it.
 pub(super) fn zip_response(
@@ -615,19 +528,14 @@ impl Drop for Temporary {
     }
 }
 
-/// `GET /servers/{id}/v1/worlds/{wid}/backups/{bid}/download`: a backup's zip, streamed. The
-/// link token goes in `token`; a session in the header works too.
+/// `GET /servers/{id}/v1/worlds/{wid}/backups/{bid}/download`: a backup's zip, streamed.
 pub async fn download_backup(
-    caller: Result<Caller, ApiError>,
+    caller: Caller,
     State(state): State<Arc<CoreState>>,
     Path((id, wid, backup)): Path<(String, String, String)>,
-    Query(query): Query<DownloadQuery>,
 ) -> Result<Response, ApiError> {
     world(&id, &wid)?;
-    let target = Target::Backup(backup.clone());
-    let caller =
-        downloader(&state, caller, query.token.as_deref(), &id, &target)
-            .await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     let found = records::backup(&state.db, &id, &backup)
         .await
         .map_err(internal)?
@@ -655,15 +563,12 @@ pub async fn download_backup(
 /// `GET /servers/{id}/v1/worlds/{wid}/files/download-full-zip`: the world and settings as they
 /// are now, copied as a backup is (hot when the server runs) and streamed, then removed.
 pub async fn download_world(
-    caller: Result<Caller, ApiError>,
+    caller: Caller,
     State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
-    Query(query): Query<DownloadQuery>,
 ) -> Result<Response, ApiError> {
     world(&id, &wid)?;
-    let caller =
-        downloader(&state, caller, query.token.as_deref(), &id, &Target::World)
-            .await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     let server = server_rows::get(&state.db, &id)
         .await
         .map_err(internal)?

@@ -117,6 +117,10 @@ endpoints! {
     /// except that a member may remove themselves to leave, which needs no ticket.
     RemoveMember: Delete "/servers/{id}/access/{user_id}", Session, MemberId, (), Empty, Empty, dangerous;
 
+    /// A link for a download that cannot send the session, such as a native save. Editors and up
+    /// of the server in the path.
+    CreateDownloadLink: Post "/links", Session, (), (), Json<NewDownloadLink>, Json<DownloadLink>;
+
     /// The activity log, newest first. Owner only.
     ListActivity: Get "/activity", Session, (), ActivityQuery, Empty, Json<ActivityPage>;
 

@@ -1,56 +1,34 @@
 //! Exporting a server's content as a Modrinth `.mrpack` (`state::servers::commands::export_mrpack`).
-//! The App saves it natively, so it asks for a link token first, as for a world download.
+//! The App saves it natively, so it asks for a link first (`access::links`), as for a world
+//! download.
 
 use std::sync::Arc;
 
 use axum::{
-    Json,
-    extract::{Path, Query, State},
+    extract::{Path, State},
     response::Response,
 };
 use contracts::ApiError;
 use uuid::Uuid;
 
-use super::{
-    CoreState,
-    backups::{DownloadQuery, DownloadToken, downloader, zip_response},
-    content::world,
-    internal,
-};
+use super::{CoreState, backups::zip_response, content::world, internal};
 use crate::{
     access::{Caller, Permission},
-    backups::Target,
     servers::ServerError,
     state::servers::{
         adapters::sqlite::server_rows, commands::export_mrpack::export_mrpack,
     },
 };
 
-/// `GET /servers/{id}/v1/worlds/{wid}/content/export-mrpack/authorize`: a link token for one
-/// export.
-pub async fn authorize(
+/// `GET /servers/{id}/v1/worlds/{wid}/content/export-mrpack`: the server's content as an
+/// `.mrpack`, written to its staging folder, streamed, then removed.
+pub async fn export(
     caller: Caller,
     State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,
-) -> Result<Json<DownloadToken>, ApiError> {
-    state.access.require(&caller, &id, Permission::Edit).await?;
-    world(&id, &wid)?;
-    let token = state.backups.grant(caller, &id, Target::Pack);
-    Ok(Json(DownloadToken { token }))
-}
-
-/// `GET /servers/{id}/v1/worlds/{wid}/content/export-mrpack`: the server's content as an
-/// `.mrpack`, written to its staging folder, streamed, then removed. The link token goes in
-/// `token`; a session in the header works too.
-pub async fn export(
-    caller: Result<Caller, ApiError>,
-    State(state): State<Arc<CoreState>>,
-    Path((id, wid)): Path<(String, String)>,
-    Query(query): Query<DownloadQuery>,
 ) -> Result<Response, ApiError> {
     world(&id, &wid)?;
-    downloader(&state, caller, query.token.as_deref(), &id, &Target::Pack)
-        .await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     let server = server_rows::get(&state.db, &id)
         .await
         .map_err(internal)?

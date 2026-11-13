@@ -220,6 +220,22 @@ pub struct PairingStatus {
     pub expires_at: Option<i64>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct NewDownloadLink {
+    /// The exact path and query the link will GET, such as
+    /// `/servers/{id}/v1/worlds/{id}/files/contents-raw?path=server.properties`.
+    pub path: String,
+}
+
+/// Sent as `?link=` on a GET of the path it was made for: once, within five minutes, and only
+/// while its maker may still make it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct DownloadLink {
+    pub token: String,
+}
+
 #[cfg(test)]
 pub(super) fn ts_types() -> Vec<String> {
     use ts_rs::TS;
@@ -242,5 +258,7 @@ pub(super) fn ts_types() -> Vec<String> {
         ActivityEntry::decl(&cfg),
         Action::decl(&cfg),
         PairingStatus::decl(&cfg),
+        NewDownloadLink::decl(&cfg),
+        DownloadLink::decl(&cfg),
     ]
 }

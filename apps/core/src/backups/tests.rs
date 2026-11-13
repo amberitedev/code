@@ -316,18 +316,6 @@ async fn a_failed_backup_leaves_nothing_behind() {
 }
 
 #[tokio::test]
-async fn a_download_link_works_once() {
-    let setup = setup().await;
-    let token =
-        setup
-            .backups
-            .grant(Caller::Local, &setup.server, Target::World);
-    let grant = setup.backups.take(&token).unwrap();
-    assert_eq!(grant.target, Target::World);
-    assert!(setup.backups.take(&token).is_none());
-}
-
-#[tokio::test]
 async fn a_cancelled_operation_never_runs_and_a_claimed_one_cannot_be_cancelled()
  {
     let dir = tempfile::tempdir().unwrap();

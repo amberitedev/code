@@ -197,6 +197,17 @@ impl Core {
         self.send(request.unwrap()).await
     }
 
+    /// A download link to `path` made with `token`'s session, and the URI that uses it.
+    async fn link(&self, token: &str, path: &str) -> (StatusCode, String) {
+        let body = Some(json!({ "path": path }));
+        let (status, link) = self
+            .call(Method::POST, "/links", Some(token), None, body)
+            .await;
+        let separator = if path.contains('?') { '&' } else { '?' };
+        let token = link["token"].as_str().unwrap_or_default();
+        (status, format!("{path}{separator}link={token}"))
+    }
+
     async fn send(&self, request: Request<Body>) -> (StatusCode, Value) {
         let response = self.router.clone().oneshot(request).await.unwrap();
         let status = response.status();
@@ -905,38 +916,40 @@ async fn restores_need_the_owners_fresh_ticket_and_downloads_a_link_or_a_session
         .await;
     assert_eq!(status, StatusCode::ACCEPTED);
 
-    // A link token works once, for the backup it names.
+    // A link works once, for the exact path it was made for, while its maker may still make it.
     let download = format!(
         "/servers/{server}/v1/worlds/{server}/backups/{backup}/download"
     );
-    let (status, _) = core
-        .call(
-            Method::GET,
-            &format!("{download}/authorize"),
-            Some(&viewer),
-            None,
-            None,
-        )
-        .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    let (status, token) = core
-        .call(
-            Method::GET,
-            &format!("{download}/authorize"),
-            Some(&editor),
-            None,
-            None,
-        )
-        .await;
+    let (status, _) = core.link(&viewer, &download).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "a viewer cannot download");
+    let (status, link) = core.link(&editor, &download).await;
     assert_eq!(status, StatusCode::OK);
-    let link = format!("{download}?token={}", token["token"].as_str().unwrap());
-    let request = || Request::builder().uri(&link).body(Body::empty()).unwrap();
-    let response = core.router.clone().oneshot(request()).await.unwrap();
+    let get =
+        |uri: &str| Request::builder().uri(uri).body(Body::empty()).unwrap();
+    let response = core.router.clone().oneshot(get(&link)).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let bytes = response.into_body().collect().await.unwrap().to_bytes();
     assert!(bytes.starts_with(b"PK"), "a zip");
-    let (status, _) = core.send(request()).await;
+    let (status, _) = core.send(get(&link)).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "a second use");
+    let (_, link) = core.link(&editor, &download).await;
+    let token = link.rsplit_once("link=").unwrap().1;
+    let world =
+        format!("/servers/{server}/v1/worlds/{server}/files/download-full-zip");
+    let (status, _) = core.send(get(&format!("{world}?link={token}"))).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "another path");
+    let (status, _) = core.send(get(&link)).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "spent on the other path");
+    let (_, link) = core.link(&editor, &download).await;
+    let demote = |role: &'static str| {
+        sqlx::query("UPDATE access SET role = ? WHERE user_id = 'editor'")
+            .bind(role)
+            .execute(&core.state.db)
+    };
+    demote("viewer").await.unwrap();
+    let (status, _) = core.send(get(&link)).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "no longer an editor");
+    demote("editor").await.unwrap();
     let (status, _) = core
         .call(Method::GET, &download, Some(&viewer), None, None)
         .await;
@@ -946,7 +959,7 @@ async fn restores_need_the_owners_fresh_ticket_and_downloads_a_link_or_a_session
         "a viewer's session does not download"
     );
 
-    // One file of the server, the same way; the token names the file.
+    // One file of the server, named in the query.
     std::fs::write(
         core.state
             .servers
@@ -956,25 +969,16 @@ async fn restores_need_the_owners_fresh_ticket_and_downloads_a_link_or_a_session
         "motd=Hi\n",
     )
     .unwrap();
-    let file =
-        format!("/servers/{server}/v1/worlds/{server}/files/contents-raw");
-    let (status, token) = core
-        .call(
-            Method::GET,
-            &format!("{file}/authorize?path=server.properties"),
-            Some(&editor),
-            None,
-            None,
+    let (status, link) = core
+        .link(
+            &editor,
+            &format!(
+                "/servers/{server}/v1/worlds/{server}/files/contents-raw?path=server.properties"
+            ),
         )
         .await;
     assert_eq!(status, StatusCode::OK);
-    let link = format!("{file}?token={}", token["token"].as_str().unwrap());
-    let response = core
-        .router
-        .clone()
-        .oneshot(Request::builder().uri(&link).body(Body::empty()).unwrap())
-        .await
-        .unwrap();
+    let response = core.router.clone().oneshot(get(&link)).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let bytes = response.into_body().collect().await.unwrap().to_bytes();
     assert_eq!(&bytes[..], b"motd=Hi\n");
@@ -2041,27 +2045,14 @@ async fn a_server_exports_as_a_pack_once_per_link() {
     let config = core.state.servers.paths().server(&server).join("config");
     std::fs::create_dir_all(config.join("sub")).unwrap();
     std::fs::write(config.join("sub/a.toml"), "a = 1").unwrap();
-    let authorize = format!(
-        "/servers/{server}/v1/worlds/{server}/content/export-mrpack/authorize"
-    );
+    let path =
+        format!("/servers/{server}/v1/worlds/{server}/content/export-mrpack");
 
-    let (status, _) = core
-        .call(Method::GET, &authorize, Some(&viewer), None, None)
-        .await;
+    let (status, _) = core.link(&viewer, &path).await;
     assert_eq!(status, StatusCode::FORBIDDEN, "a viewer may not export");
-    let (status, token) = core
-        .call(Method::GET, &authorize, Some(&editor), None, None)
-        .await;
+    let (status, link) = core.link(&editor, &path).await;
     assert_eq!(status, StatusCode::OK);
-    let export = || {
-        Request::builder()
-            .uri(format!(
-                "/servers/{server}/v1/worlds/{server}/content/export-mrpack?token={}",
-                token["token"].as_str().unwrap()
-            ))
-            .body(Body::empty())
-            .unwrap()
-    };
+    let export = || Request::builder().uri(&link).body(Body::empty()).unwrap();
     let response = core.router.clone().oneshot(export()).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(

@@ -1,5 +1,5 @@
-//! Who can do what: tickets, sessions, per-server roles, the local socket, the activity log, and
-//! backend sync. The request and response shapes are in `api::access`, `api::sessions`,
+//! Who can do what: tickets, sessions, download links, per-server roles, the local socket, the
+//! activity log, and backend sync. The request and response shapes are in `api::access`, `api::sessions`,
 //! `api::activity`, and, for the backend, `contracts::backend::cores`.
 //!
 //! Every route takes a [`Caller`] and checks it: [`CoreAccess::require`] for a role on one server,
@@ -8,6 +8,7 @@
 
 pub mod activity;
 pub mod keys;
+pub mod links;
 pub mod local;
 pub mod owed;
 pub mod pairing;
@@ -60,6 +61,7 @@ pub struct CoreAccess {
     pub owed: Arc<Notify>,
     /// Asks the pairing loop for a fresh code (`copal pair`).
     pub new_code: Notify,
+    links: links::Links,
     streams: Mutex<HashMap<String, usize>>,
     sign_ins: Mutex<HashMap<IpAddr, (Instant, u32)>>,
 }
@@ -79,6 +81,7 @@ impl CoreAccess {
             changed: broadcast::channel(64).0,
             owed: Arc::new(Notify::new()),
             new_code: Notify::new(),
+            links: links::Links::default(),
             streams: Mutex::default(),
             sign_ins: Mutex::default(),
         }
@@ -228,6 +231,9 @@ impl Access for CoreAccess {
         Box::pin(async move {
             if request.extensions.get::<local::Local>().is_some() {
                 return Ok(Caller::Local);
+            }
+            if let Some((token, path)) = links::split(&request.uri) {
+                return self.redeem(token, &path).await;
             }
             let token = request
                 .headers
