@@ -7,6 +7,8 @@ use std::{
 
 use modrinth_content_management::{ContentType, DependencyType};
 
+use engine::sandbox;
+
 use super::check_content_updates::{
     check_content_updates, check_modpack_update,
 };
@@ -17,10 +19,7 @@ use crate::{
         LinkedPackState, ModpackFields, ModpackSpec, Pack, SkippedFile,
         TrackedFile,
         adapters::{
-            filesystem::{
-                content_files::{DISABLED, Listed},
-                folder,
-            },
+            filesystem::content_files::{DISABLED, Listed},
             network::modrinth,
             sqlite::content_rows,
         },
@@ -238,7 +237,7 @@ fn mark_client_dependencies(
 
 /// The jar on disk for `listed`, opened without following a link.
 pub fn open_jar(
-    folder: &folder::Folder,
+    folder: &sandbox::Folder,
     listed: &Listed,
 ) -> Option<std::fs::File> {
     let on_disk = if listed.disabled {
@@ -256,7 +255,7 @@ pub async fn manifests(
     id: &str,
     loader: Option<ModLoader>,
     listed: &[Listed],
-) -> HashMap<String, bedrock::upstream::jar::Manifest> {
+) -> HashMap<String, engine::server_jar::Manifest> {
     let jars: Vec<Listed> = listed
         .iter()
         .filter(|listed| {
@@ -271,7 +270,7 @@ pub async fn manifests(
     let root = content.paths.server(id);
     let id = id.to_owned();
     tokio::task::spawn_blocking(move || {
-        let Ok(folder) = folder::Folder::open(&root) else {
+        let Ok(folder) = sandbox::Folder::open(&root) else {
             return HashMap::new();
         };
         jars.into_iter()

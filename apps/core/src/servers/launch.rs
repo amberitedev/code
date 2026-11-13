@@ -8,6 +8,7 @@ use std::{
 };
 
 use color_eyre::eyre::Result;
+pub use engine::sandbox::property_key;
 
 use super::shim::{Launch, PROTOCOL};
 use crate::{
@@ -202,16 +203,6 @@ fn set_address(
         lines.push(format!("server-ip={ip}"));
     }
     write_server_file(&path, format!("{}\n", lines.join("\n")).as_bytes())
-}
-
-/// The key of a `server.properties` line, or `None` for comments and blank lines.
-pub fn property_key(line: &str) -> Option<&str> {
-    let line = line.trim_start();
-    if line.is_empty() || line.starts_with(['#', '!']) {
-        return None;
-    }
-    let end = line.find(['=', ':']).unwrap_or(line.len());
-    Some(line[..end].trim_end())
 }
 
 /// Files in a server folder are written by mods too: never follow a link they planted, and

@@ -75,7 +75,7 @@ pub struct Addon {
     pub owner: Option<ContentOwner>,
     pub icon_url: Option<String>,
     /// What the jar says about itself, for mods and plugins.
-    pub manifest: Option<bedrock::upstream::jar::Manifest>,
+    pub manifest: Option<engine::server_jar::Manifest>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub installed: Option<bool>,
 }

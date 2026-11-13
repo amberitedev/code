@@ -43,9 +43,8 @@ impl ContentStore {
             Ok(()) => {}
             Err(fs4::TryLockError::WouldBlock) => {
                 bail!(ErrorKind::ContentStoreError(
-					"another Amberite process is using this data folder"
-						.into(),
-				));
+                    "another Amberite process is using this data folder".into(),
+                ));
             }
             Err(fs4::TryLockError::Error(error)) => return Err(error.into()),
         }

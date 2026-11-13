@@ -18,6 +18,12 @@ use futures::{StreamExt, TryStreamExt};
 
 use tracing::{info, warn};
 
+use engine::{
+    archive::{self, NoRoom},
+    pack_hosts,
+    sandbox::{self, Folder},
+};
+
 use crate::{
     installs::{
         self, ModLoader,
@@ -31,12 +37,8 @@ use crate::{
         Progress, PropertiesFields, SharedInstanceLink, TrackedFile,
         adapters::filesystem::content_files::DISABLED,
         adapters::{
-            filesystem::{
-                archive::{self, NoRoom},
-                folder::{self, Folder},
-                properties,
-            },
-            network::{content_download, hosts, modrinth},
+            filesystem::properties,
+            network::{content_download, modrinth},
             sqlite::{content_rows, server_rows},
         },
         domain::pack::{
@@ -424,7 +426,7 @@ pub(super) async fn fetch_modrinth_pack(
 fn allowed_url(url: &str) -> Result<reqwest::Url, Error> {
     reqwest::Url::parse(url)
         .ok()
-        .filter(|url| hosts::allowed(url, false))
+        .filter(|url| pack_hosts::allowed(url, false))
         .ok_or_else(|| {
             Error::Invalid(format!(
                 "{url} is not on a host packs may download from."
@@ -631,7 +633,7 @@ async fn apply(
             }
             // A path that became the server's since the plan is only forgotten.
             Step::Delete(row)
-                if folder::is_server_owned(
+                if sandbox::is_server_owned(
                     &row.relative_path,
                     &folder.level_name(),
                 ) =>

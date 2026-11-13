@@ -37,6 +37,8 @@ use sharing_client::{
 };
 use ts_rs::TS;
 
+use engine::sandbox::{self, Folder};
+
 use super::{
     CoreState,
     content::{server_first, world},
@@ -45,10 +47,7 @@ use super::{
 use crate::{
     access::{Caller, Permission, activity},
     state::servers::{
-        adapters::{
-            filesystem::folder::{self, Folder},
-            sqlite::server_rows,
-        },
+        adapters::sqlite::server_rows,
         commands::{
             delete_share_version::delete_share_version,
             drop_own_share::drop_own_share,
@@ -222,7 +221,7 @@ pub async fn share(
     server_first(&state, &id).await?;
     let mut configs = Vec::with_capacity(request.config_paths.len());
     for path in &request.config_paths {
-        let path = folder::clean(path.trim_start_matches('/'))
+        let path = sandbox::clean(path.trim_start_matches('/'))
             .map_err(crate::state::servers::Error::from)?;
         if !SCOPE.carries(&path) {
             return Err(ApiError::new(

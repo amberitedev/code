@@ -61,8 +61,8 @@ impl ModLoader {
     }
 
     /// The jar metadata a server with this loader reads first. Vanilla reads none first.
-    pub fn jar_platform(self) -> Option<bedrock::upstream::jar::Platform> {
-        use bedrock::upstream::jar::Platform;
+    pub fn jar_platform(self) -> Option<engine::server_jar::Platform> {
+        use engine::server_jar::Platform;
         Some(match self {
             Self::Fabric => Platform::Fabric,
             Self::Quilt => Platform::Quilt,
@@ -287,7 +287,7 @@ async fn remove_installer_leftovers(dir: &Path, installer: Option<&str>) {
     let log = installer.map(|installer| format!("{installer}.log"));
     let removed =
         tokio::task::spawn_blocking(move || -> std::io::Result<()> {
-            let folder = crate::state::servers::adapters::filesystem::folder::Folder::open(&dir)?;
+            let folder = engine::sandbox::Folder::open(&dir)?;
             let mut leftovers: Vec<String> = log.into_iter().collect();
             if let Ok(tmp) = folder.open_dir(Some("tmp")) {
                 for entry in tmp.entries()?.filter_map(Result::ok) {

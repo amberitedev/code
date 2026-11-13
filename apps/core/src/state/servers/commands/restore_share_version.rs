@@ -29,6 +29,8 @@ use sharing_client::{
     install::{ContentProject, CurrentFile, DesiredFile, content_changes},
 };
 
+use engine::sandbox::{self, Folder};
+
 use super::{
     apply_content_install::{kind_of, place_version, target},
     content_mutation::remove_project,
@@ -43,9 +45,8 @@ use crate::{
         Busy, Content, ContentSourceKind, Error, GameVersionChange, Installing,
         Progress, TrackedFile,
         adapters::{
-            filesystem::{
-                content_files::{self, DISABLED, addon_path, kind_folder},
-                folder::{self, Folder},
+            filesystem::content_files::{
+                self, DISABLED, addon_path, kind_folder,
             },
             network::modrinth::Version,
             sqlite::{content_rows, server_rows},
@@ -517,7 +518,7 @@ fn carried_key(
 
 /// A config's path in the server folder, as a push of the server checks it.
 fn config_path(file_name: &str) -> Result<String, Error> {
-    let path = folder::clean(file_name.trim_start_matches('/'))?;
+    let path = sandbox::clean(file_name.trim_start_matches('/'))?;
     if !SCOPE.carries(&path) {
         return Err(Error::Invalid(format!("{path} cannot be restored.")));
     }

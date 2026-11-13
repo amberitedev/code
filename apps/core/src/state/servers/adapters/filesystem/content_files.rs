@@ -4,13 +4,9 @@
 
 use modrinth_content_management::ContentType;
 
-use crate::{
-    installs::ModLoader,
-    state::servers::{
-        Error,
-        adapters::filesystem::folder::{self, Folder},
-    },
-};
+use engine::sandbox::{self, Folder};
+
+use crate::{installs::ModLoader, state::servers::Error};
 
 /// Added to an addon's file name to disable it.
 pub const DISABLED: &str = ".disabled";
@@ -125,7 +121,7 @@ pub fn addon_path(
     kind: ContentType,
     filename: &str,
 ) -> Result<String, Error> {
-    let name = folder::clean(filename.trim_end_matches(DISABLED))?;
+    let name = sandbox::clean(filename.trim_end_matches(DISABLED))?;
     if name.contains('/') {
         return Err(Error::Invalid(format!("{filename} is not a file name.")));
     }

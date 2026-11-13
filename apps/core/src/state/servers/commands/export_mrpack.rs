@@ -17,16 +17,17 @@ use bedrock::content::{
 };
 use modrinth_content_management::ContentType;
 
+use engine::{
+    archive::{self, NoRoom},
+    sandbox::Folder,
+};
+
 use crate::{
     installs::ModLoader,
     state::servers::{
         Content, EntrySides, Error,
         adapters::{
-            filesystem::{
-                archive::{self, NoRoom},
-                content_files::{self, DISABLED},
-                folder::Folder,
-            },
+            filesystem::content_files::{self, DISABLED},
             sqlite::{content_rows, server_rows::ServerRow},
         },
         domain::sides::Sides,

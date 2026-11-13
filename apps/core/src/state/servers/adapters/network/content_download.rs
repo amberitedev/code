@@ -5,12 +5,11 @@
 
 use std::path::Path;
 
+use engine::archive::{self, NoRoom};
+
 use crate::{
     installs::download::{self, DownloadError, FileDownload, Hash, Progress},
-    state::servers::{
-        Error,
-        adapters::filesystem::archive::{self, NoRoom},
-    },
+    state::servers::Error,
 };
 
 /// Download `url` into `path` with `http`, the client for allowed hosts. The room is read when

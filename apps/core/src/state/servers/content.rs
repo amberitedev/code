@@ -19,6 +19,11 @@ use tokio::sync::{OwnedMutexGuard, broadcast};
 use tracing::{info, warn};
 use uuid::Uuid;
 
+use engine::{
+    archive, pack_hosts,
+    sandbox::{self, Sha1Cache},
+};
+
 use crate::{
     backups::Backups,
     daemon::paths::Paths,
@@ -28,14 +33,7 @@ use crate::{
     servers::{Hold, ServerError, Servers},
     state::servers::{
         GameVersionChange, InstallProgressKey, Installing,
-        adapters::{
-            filesystem::{
-                archive,
-                folder::{self, Sha1Cache},
-            },
-            network::{hosts, modrinth},
-        },
-        domain::pack,
+        adapters::network::modrinth, domain::pack,
     },
 };
 
@@ -66,7 +64,7 @@ pub enum Error {
     #[error(transparent)]
     NoRoom(#[from] archive::NoRoom),
     #[error(transparent)]
-    Path(#[from] folder::PathError),
+    Path(#[from] sandbox::PathError),
     #[error(transparent)]
     Install(#[from] installs::InstallError),
     #[error(transparent)]
@@ -97,7 +95,7 @@ pub struct Content {
     pub servers: Arc<Servers>,
     /// Core's own fixed sources. See `installs::download::client`.
     pub http: reqwest::Client,
-    /// Pack content, from allowed hosts only. See `hosts`.
+    /// Pack content, from allowed hosts only. See `pack_hosts`.
     pub downloads: reqwest::Client,
     pub modrinth: modrinth::Modrinth,
     /// Copal's one client for Cores' stores, for every push and every share fetch.
@@ -108,7 +106,7 @@ pub struct Content {
     /// SHA-1s of server files, kept while a file is unchanged (`needs_update`).
     pub sha1s: Arc<Sha1Cache>,
     /// What addon jars say about themselves, for the content list.
-    pub manifests: bedrock::upstream::jar::Cache,
+    pub manifests: engine::server_jar::Cache,
     /// Updates back the world up first.
     pub backups: Arc<Backups>,
     activity: Mutex<HashMap<String, Activity>>,
@@ -144,14 +142,14 @@ impl Content {
         .map_err(|error| color_eyre::eyre::eyre!("{error:#}"))?;
         let content = Arc::new(Self {
             modrinth: modrinth::Modrinth::new(http.clone()),
-            manifests: bedrock::upstream::jar::Cache::default(),
+            manifests: engine::server_jar::Cache::default(),
             store: sharing_client::pool::StoreClient::new(concat!(
                 "copal/",
                 env!("CARGO_PKG_VERSION")
             )),
             content_store,
             sha1s: Arc::default(),
-            downloads: hosts::client()?,
+            downloads: pack_hosts::client(download::builder())?,
             http,
             paths,
             db,

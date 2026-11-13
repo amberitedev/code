@@ -18,13 +18,14 @@ use contracts::client::Remote;
 use sharing_client::install::ModpackFile;
 use sharing_client::pool::{self, FetchError, PoolFile};
 
+use engine::archive::{self, NoRoom};
+
 use super::install_pack as install;
 use crate::{
     installs::{ModLoader, shared::SharedDirs},
     share_pack::{self, ReadyVersion, ServerPackError},
     state::servers::{
         Content, Error,
-        adapters::filesystem::archive::{self, NoRoom},
         domain::pack::{self, IndexFile, Source},
     },
 };

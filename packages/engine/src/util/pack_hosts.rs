@@ -13,8 +13,6 @@ use reqwest::{
 
 use sharing_client::net::ip::is_public;
 
-use crate::installs::download;
-
 /// Where a pack's files may come from, as Modrinth's pack format allows.
 const HOSTS: [&str; 4] = [
     "cdn.modrinth.com",
@@ -101,10 +99,12 @@ impl Resolve for PublicResolver {
     }
 }
 
-/// The client for pack content. Every URL still goes through [`allowed`] first, because the
-/// resolver never sees a URL that names an IP address.
-pub fn client() -> reqwest::Result<reqwest::Client> {
-    download::builder()
+/// The client for pack content, from the host's `builder`. Every URL still goes through
+/// [`allowed`] first, because the resolver never sees a URL that names an IP address.
+pub fn client(
+    builder: reqwest::ClientBuilder,
+) -> reqwest::Result<reqwest::Client> {
+    builder
         .https_only(true)
         .dns_resolver(Arc::new(PublicResolver))
         .redirect(redirect::Policy::custom(|attempt| {
@@ -195,7 +195,8 @@ mod tests {
     #[tokio::test]
     async fn the_client_refuses_a_url_off_the_list() {
         // localhost is never resolved: the resolver refuses names off the list first.
-        let error = client()
+        crate::install_crypto_provider();
+        let error = client(reqwest::Client::builder())
             .unwrap()
             .get("https://localhost/a.jar")
             .send()

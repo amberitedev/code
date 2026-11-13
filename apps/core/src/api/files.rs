@@ -7,8 +7,8 @@
 //! Also `GET /modrinth/v0/servers/{id}/fs`, where the App learns the base of these routes.
 //!
 //! Editors and the owner only: the files hold the world and every setting. Every path goes
-//! through `state::servers::adapters::filesystem::folder`, so nothing reaches outside the server folder, links included.
-//! Uploads and unpacking never replace server-owned files (see `folder::is_server_owned`);
+//! through `engine::sandbox`, so nothing reaches outside the server folder, links included.
+//! Uploads and unpacking never replace server-owned files (see `sandbox::is_server_owned`);
 //! `fs/update` is an explicit edit and may change them. `fs/copy` and the v0 `fs/zip` have no
 //! caller in the App and are not served.
 
@@ -31,6 +31,11 @@ use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 
+use engine::{
+    archive::{self, ArchiveError, NoRoom},
+    sandbox::{self, Folder},
+};
+
 use super::{
     CoreState,
     backups::{DownloadQuery, DownloadToken, expired_link},
@@ -42,13 +47,7 @@ use crate::{
     access::{Caller, Permission, activity, now},
     backups::Target,
     state::servers::{
-        Busy,
-        adapters::filesystem::{
-            archive::{self, ArchiveError, NoRoom},
-            folder::{self, Folder},
-        },
-        commands::apply_content_install::add_uploaded_file,
-        domain::pack,
+        Busy, commands::apply_content_install::add_uploaded_file, domain::pack,
     },
 };
 
@@ -410,7 +409,7 @@ pub(super) fn changing(
 
 /// A path the App sent, checked. `None` is the server folder itself.
 fn api_path(path: &str) -> Result<Option<String>, ApiError> {
-    folder::from_api(path).map_err(|error| {
+    sandbox::from_api(path).map_err(|error| {
         ApiError::new(ErrorCode::InvalidInput, error.to_string())
     })
 }
@@ -729,7 +728,7 @@ async fn place_changing(
 
 /// Refuse to replace a server-owned file that exists.
 fn refuse_owned(folder: &Folder, path: &str) -> Result<(), ApiError> {
-    if folder::is_server_owned(path, &folder.level_name())
+    if sandbox::is_server_owned(path, &folder.level_name())
         && folder.exists(path)
     {
         return Err(ApiError::new(
@@ -896,7 +895,7 @@ pub async fn unarchive(
                 archive::extract(&folder, &mut zip, room, |entry| {
                     let path = destination(entry);
                     let exists = folder.exists(&path);
-                    let owned = folder::is_server_owned(&path, &level);
+                    let owned = sandbox::is_server_owned(&path, &level);
                     if !exists {
                         created.push(path.clone());
                     }
@@ -1000,13 +999,14 @@ fn zip_tree(
                 .map_err(zip_error)?;
             zip_tree(
                 zip,
-                &folder::open_child(dir, &name, &path).map_err(internal)?,
+                &sandbox::open_child(dir, &name, &path).map_err(internal)?,
                 &format!("{path}/"),
             )?;
         } else if kind.is_file() {
             zip.start_file(&path, options).map_err(zip_error)?;
             std::io::copy(
-                &mut folder::open_plain(dir, &name, &path).map_err(internal)?,
+                &mut sandbox::open_plain(dir, &name, &path)
+                    .map_err(internal)?,
                 zip,
             )
             .map_err(internal)?;
@@ -1046,7 +1046,7 @@ pub async fn zip(
         } => {
             let include = include
                 .iter()
-                .map(|name| folder::clean(name.trim_matches('/')))
+                .map(|name| sandbox::clean(name.trim_matches('/')))
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|error| {
                     ApiError::new(ErrorCode::InvalidInput, error.to_string())
@@ -1253,7 +1253,7 @@ pub async fn upload_files(
                     inner_path(&name)?;
                 }
                 UploadScope::Content => {
-                    folder::clean(&name).map_err(|error| {
+                    sandbox::clean(&name).map_err(|error| {
                         ApiError::new(
                             ErrorCode::InvalidInput,
                             error.to_string(),

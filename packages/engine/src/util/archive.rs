@@ -15,7 +15,7 @@ use sharing_client::disk::label;
 /// What Core may still write on the disk at a path: its free space less the margin it keeps.
 pub use sharing_client::disk::room;
 
-use super::folder::{self, Folder, PathError};
+use super::sandbox::{self, Folder, PathError};
 
 /// An entry this small never counts as a zip bomb, whatever its ratio: a short file of one
 /// repeated byte packs to almost nothing, and the disk check still covers it.
@@ -105,7 +105,7 @@ pub fn entries<R: Read + Seek>(
         }
         let is_dir = entry.is_dir();
         let path =
-            folder::clean(name.trim_end_matches('/')).map_err(|error| {
+            sandbox::clean(name.trim_end_matches('/')).map_err(|error| {
                 refuse(match error {
                     PathError::Escapes(_) => "it leaves the folder".into(),
                     PathError::Invalid(_) => "it is not a usable name".into(),

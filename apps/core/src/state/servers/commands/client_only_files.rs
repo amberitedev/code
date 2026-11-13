@@ -5,15 +5,14 @@
 
 use std::sync::Arc;
 
+use engine::sandbox::Folder;
+
 use super::install_pack::{place_one, read_pack};
 use crate::{
     installs::shared::SharedDirs,
     state::servers::{
         Content, EntrySides, Error, SkippedFile, TrackedFile,
-        adapters::{
-            filesystem::{content_files::DISABLED, folder::Folder},
-            sqlite::content_rows,
-        },
+        adapters::{filesystem::content_files::DISABLED, sqlite::content_rows},
     },
 };
 

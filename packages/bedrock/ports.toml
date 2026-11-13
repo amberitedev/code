@@ -30,8 +30,7 @@ upstream = "packages/app-lib/src/state/instances/commands/embedded_content_metad
 commit = "d39674ce0096fb88fd128459988e4c1de8102648"
 # The parsing half only: `resolve_embedded_content_metadata` and `metadata_cache_key` (app-lib's
 # cache and State) are cut, with the imports only they used. `EmbeddedContentMetadata` comes from
-# the glue (`jar/mod.rs`), and the last lines declare Copal's additions (`jar/server.rs`) as a
-# child module so they can use the private parsers.
+# the glue (`jar/mod.rs`).
 adapted = ["embedded_content_metadata.rs"]
 
 # Small upstream definitions copied into our own files. Each copy names its source in a comment.

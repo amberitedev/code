@@ -631,3 +631,5 @@ pub(crate) async fn resolve_embedded_content_metadata(
 fn metadata_cache_key(hash: &str, loader: ModLoader) -> String {
     format!("{hash}-{}", loader.as_str())
 }
+
+pub mod server;

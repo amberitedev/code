@@ -10,21 +10,18 @@ use std::{
 };
 
 use bedrock::content::{
-    Env, SideType, Version, VersionEnvironment, ids_from_cdn, server_takes,
+    Env, JarEnvironment, SideType, Version, VersionEnvironment, ids_from_cdn,
+    server_takes,
 };
-use bedrock::upstream::jar::{
-    Environment as JarEnvironment, Platform as JarPlatform,
+use engine::{
+    archive::{self, ArchiveError, NoRoom},
+    pack_hosts,
+    sandbox::{self, PathError},
+    server_jar::{self, Platform as JarPlatform},
 };
 
 use crate::state::servers::{
     ContentSourceKind, Pending, SkippedFile, TrackedFile,
-    adapters::{
-        filesystem::{
-            archive::{self, ArchiveError, NoRoom},
-            folder::{self, PathError},
-        },
-        network::hosts,
-    },
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -133,7 +130,7 @@ pub struct Wanted {
 /// `config/a.toml` as one file (see `Folder::case_insensitive`), exact otherwise.
 pub fn fold(path: &str, case_insensitive: bool) -> String {
     if case_insensitive {
-        folder::fold_case(path)
+        sandbox::fold_case(path)
     } else {
         path.to_owned()
     }
@@ -175,7 +172,7 @@ pub fn candidates<R: Read + Seek>(
     let mut candidates = Vec::new();
     for (n, file) in index.files.iter().enumerate() {
         candidates.push(Candidate {
-            path: folder::clean(&file.path)?,
+            path: sandbox::clean(&file.path)?,
             wanted: Wanted {
                 sha1: file.hashes.sha1.to_ascii_lowercase(),
                 source: Source::Download(n),
@@ -246,9 +243,18 @@ fn jar_environment<R: Read + Seek>(
         .read_to_end(&mut bytes)
         .ok()?;
     let mut jar = zip::ZipArchive::new(std::io::Cursor::new(bytes)).ok()?;
-    bedrock::upstream::jar::inspect(&mut jar, loader)?
+    server_jar::inspect(&mut jar, loader)?
         .manifest
         .environment
+        .map(|environment| match environment {
+            server_jar::Environment::ClientAndServer => {
+                JarEnvironment::ClientAndServer
+            }
+            server_jar::Environment::ClientOnly => JarEnvironment::ClientOnly,
+            server_jar::Environment::DedicatedServerOnly => {
+                JarEnvironment::DedicatedServerOnly
+            }
+        })
 }
 
 /// Where Modrinth says each file runs, by SHA-1, with its version: what
@@ -308,7 +314,7 @@ pub fn split(
         let usable = matches!(candidate.wanted.source, Source::Override(_))
             || candidate.downloads.iter().any(|url| {
                 reqwest::Url::parse(url)
-                    .is_ok_and(|url| hosts::allowed(&url, false))
+                    .is_ok_and(|url| pack_hosts::allowed(&url, false))
             });
         // A file turned on by hand stays client only rather than fail the whole pack.
         if !usable && on {
@@ -459,7 +465,7 @@ pub fn plan(
             ..row.clone()
         });
         let row = row.as_ref();
-        if folder::is_server_owned(path, disk.level_name) {
+        if sandbox::is_server_owned(path, disk.level_name) {
             if on_disk.is_none() {
                 steps.push(Step::Place {
                     path: path.clone(),
@@ -553,7 +559,7 @@ pub fn plan(
             continue;
         }
         // The path became the server's (its world was renamed to it): never deleted.
-        if folder::is_server_owned(&row.relative_path, disk.level_name) {
+        if sandbox::is_server_owned(&row.relative_path, disk.level_name) {
             steps.push(Step::Forget(row.relative_path.clone()));
             continue;
         }

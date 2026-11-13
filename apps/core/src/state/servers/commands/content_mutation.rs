@@ -3,15 +3,16 @@
 use bedrock::state::ContentRequirement;
 use modrinth_content_management::ContentType;
 
+use engine::sandbox::Folder;
+
 use super::client_only_files::{
     place_client_only_file, return_client_only_file,
 };
 use crate::state::servers::{
     Content, ContentSourceKind, EntrySides, Error, TrackedFile,
     adapters::{
-        filesystem::{
-            content_files::{DISABLED, addon_path, locate, rename_enabled},
-            folder::Folder,
+        filesystem::content_files::{
+            DISABLED, addon_path, locate, rename_enabled,
         },
         sqlite::content_rows,
     },

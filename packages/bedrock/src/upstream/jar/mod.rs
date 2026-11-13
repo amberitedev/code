@@ -1,7 +1,6 @@
 //! What a mod, plugin or pack archive says about itself. A clone of the parsing half of app-lib's
-//! `state/instances/commands/embedded_content_metadata.rs` (see `ports.toml`), with Copal's
-//! additions beside it in `server.rs`: Paper and Bukkit `plugin.yml`, the sides Fabric and Quilt
-//! name, and warnings for malformed metadata or several mods in one jar.
+//! `state/instances/commands/embedded_content_metadata.rs` (see `ports.toml`). Copal's additions
+//! live in the engine's `server_jar`; only [`Environment`] stays here, for [`crate::content`].
 //!
 //! This file is the glue: what the clone needs from app-lib that bedrock does not borrow.
 
@@ -10,10 +9,13 @@ use serde::{Deserialize, Serialize};
 #[allow(dead_code)]
 mod embedded_content_metadata;
 
-pub use embedded_content_metadata::server::{
-    Cache, Environment, Inspection, Manifest, Platform, Warnings, inspect,
-    read_icon,
-};
+/// The sides a jar's metadata names. A copy of the engine's `server_jar::Environment`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Environment {
+    ClientAndServer,
+    ClientOnly,
+    DedicatedServerOnly,
+}
 
 /// What a jar's own metadata names. A copy of app-lib's `EmbeddedContentMetadata`
 /// (`state/instances/content.rs`), which the App's original reader returns.

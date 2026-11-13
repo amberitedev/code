@@ -15,6 +15,11 @@ use modrinth_content_management::{
 };
 use tracing::warn;
 
+use engine::{
+    archive, pack_hosts,
+    sandbox::{self, Folder},
+};
+
 use super::sync_content_files::identify;
 use crate::{
     installs::{
@@ -24,13 +29,9 @@ use crate::{
     state::servers::{
         Content, ContentSourceKind, EntrySides, Error, TrackedFile,
         adapters::{
-            filesystem::{
-                archive,
-                content_files::{DISABLED, kind_folder},
-                folder::{self, Folder},
-            },
+            filesystem::content_files::{DISABLED, kind_folder},
             network::{
-                content_download, hosts,
+                content_download,
                 modrinth::{self, Version},
             },
             sqlite::{content_rows, server_rows},
@@ -214,7 +215,7 @@ pub async fn place_version(
     let file = version.primary().ok_or_else(|| {
         Error::Invalid(format!("Version {} has no file.", version.id))
     })?;
-    let name = folder::clean(&file.filename)?;
+    let name = sandbox::clean(&file.filename)?;
     if name.contains('/') {
         return Err(Error::Invalid(format!(
             "{} is not a file name.",
@@ -224,7 +225,7 @@ pub async fn place_version(
     let path = format!("{dir}/{name}");
     let url = reqwest::Url::parse(&file.url)
         .ok()
-        .filter(|url| hosts::allowed(url, false))
+        .filter(|url| pack_hosts::allowed(url, false))
         .ok_or_else(|| {
             Error::Invalid(format!("{} is not on an allowed host.", file.url))
         })?;
@@ -344,7 +345,7 @@ pub async fn add_uploaded_file(
                 Error::NotFound(format!("There is no server {server_id}."))
             })?;
     let loader = server.loader.as_deref().and_then(ModLoader::parse);
-    let name = folder::clean(filename)?;
+    let name = sandbox::clean(filename)?;
     if name.contains('/') {
         return Err(Error::Invalid(format!("{filename} is not a file name.")));
     }

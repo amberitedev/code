@@ -16,16 +16,15 @@ use sharing_client::{
     rules::{CONFIG_FILE_TYPE, ShareScope},
 };
 
+use engine::sandbox::{Folder, Sha1Cache};
+
 use crate::{
     installs::ModLoader,
     servers::ServerError,
     state::servers::{
         Content, Error,
         adapters::{
-            filesystem::{
-                content_files,
-                folder::{Folder, Sha1Cache},
-            },
+            filesystem::content_files,
             history::History,
             network::modrinth::ModrinthError,
             sqlite::{content_rows, server_rows},

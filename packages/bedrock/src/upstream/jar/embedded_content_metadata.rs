@@ -487,7 +487,3 @@ fn read_entry<R: Read + Seek>(
         .ok()?;
     (bytes.len() as u64 <= max_bytes).then_some(bytes)
 }
-
-// Amberite: Copal's additions, which read the same files with the parsers above.
-#[path = "server.rs"]
-pub(super) mod server;

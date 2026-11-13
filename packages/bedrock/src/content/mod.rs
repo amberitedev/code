@@ -6,6 +6,7 @@ pub mod adapters;
 pub mod domain;
 pub mod model;
 
+pub use crate::upstream::jar::Environment as JarEnvironment;
 pub use adapters::modrinth::{Modrinth, ModrinthError};
 pub use adapters::mrpack::{IndexError, read_index};
 pub use domain::channel::{

@@ -37,6 +37,7 @@ pub use event::{
 pub use logger::start_logger;
 pub use self_hosted::accounts::AccountEndpoints;
 pub use state::INSTANCES_FOLDER_NAME;
+pub use state::instances::commands::server_jar;
 pub use state::{
     BackendSession, BackendSessionKind, Engine, EngineConfig, ModrinthSession,
     PackOverrides, PackServers, PackUpdateHooks, ProcessManager, Sessions,
@@ -46,6 +47,7 @@ pub use util::fetch::{
     DownloadReason, FetchSemaphore, INSECURE_REQWEST_CLIENT, fetch_advanced,
     fetch_json,
 };
+pub use util::{archive, pack_hosts, sandbox};
 
 /// Installs `ring` as the process-wide rustls crypto provider.
 ///

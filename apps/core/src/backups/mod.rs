@@ -42,15 +42,16 @@ use tokio::sync::{Notify, broadcast};
 use tracing::{info, warn};
 use uuid::Uuid;
 
+use engine::{
+    archive,
+    sandbox::{self, Folder},
+};
+
 use crate::{
     access::{Caller, now},
     daemon::paths::Paths,
     event::{BackupState, BackupTask, WsEvent},
     servers::{Phase, ServerError, Servers, console},
-    state::servers::adapters::filesystem::{
-        archive,
-        folder::{self, Folder},
-    },
     util::if_present,
 };
 use records::{Kind, OpKind, OpState, Operation};
@@ -944,7 +945,7 @@ impl Manifest {
         };
         let worlds_ok = self.worlds.len() <= 3
             && self.worlds.iter().enumerate().all(|(n, world)| {
-                folder::clean(world).is_ok_and(|clean| clean == *world)
+                sandbox::clean(world).is_ok_and(|clean| clean == *world)
                     && [
                         level.clone(),
                         format!("{level}_nether"),
@@ -964,7 +965,7 @@ impl Manifest {
         // Each root once, none inside another, compared without case as Windows and macOS do:
         // a root swapped twice would overwrite its own rollback copy.
         let roots: Vec<String> =
-            self.roots().map(|root| folder::fold_case(root)).collect();
+            self.roots().map(|root| sandbox::fold_case(root)).collect();
         let overlap = roots.iter().enumerate().any(|(n, a)| {
             roots.iter().skip(n + 1).any(|b| {
                 a == b
@@ -1049,7 +1050,7 @@ fn files(folder: &Folder) -> Result<Listing, Error> {
 
 /// Refuse a path a restore would refuse.
 fn restorable(path: &str) -> Result<(), Error> {
-    match folder::clean(path) {
+    match sandbox::clean(path) {
         Ok(clean) if clean == path => Ok(()),
         _ => Err(Error::Conflict(format!(
             "{path} has a name a backup cannot hold; rename it and back up again."
@@ -1092,7 +1093,7 @@ fn walk(
         }
         restorable(&path)?;
         if kind.is_dir() {
-            let child = folder::open_child(dir, &name, &path)?;
+            let child = sandbox::open_child(dir, &name, &path)?;
             folders.push(path.clone());
             walk(&child, &path, files, folders)?;
         } else if kind.is_file() {

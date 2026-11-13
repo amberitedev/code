@@ -7,7 +7,8 @@
 //! are also checked by [`clean`] first, so they fail with a clear reason and mean the same thing
 //! on every OS.
 //!
-//! Files and folders Core creates here stay writable by `copal-servers` (see `daemon::folders`).
+//! Files and folders Core creates here stay writable by `copal-servers` (see Core's
+//! `daemon::folders`).
 
 use std::{
     collections::HashMap,
@@ -20,7 +21,7 @@ use std::{
 use cap_fs_ext::DirExt;
 use cap_std::{ambient_authority, fs::Dir};
 
-use crate::{installs::download::sha1_of, servers::launch};
+use super::archive::Hashing;
 
 /// Why a path is refused.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -133,13 +134,30 @@ pub fn is_server_owned(path: &str, level_name: &str) -> bool {
     .any(|world| path == world || path.starts_with(&format!("{world}/")))
 }
 
-/// The world folder `server.properties` names, `world` by default.
+/// The key of a `server.properties` line, or `None` for comments and blank lines.
+pub fn property_key(line: &str) -> Option<&str> {
+    let line = line.trim_start();
+    if line.is_empty() || line.starts_with(['#', '!']) {
+        return None;
+    }
+    let end = line.find(['=', ':']).unwrap_or(line.len());
+    Some(line[..end].trim_end())
+}
+
+/// The world folder `server.properties` names, `world` by default. At most 1 MB of it is read.
 pub fn level_name(server_dir: &Path) -> String {
-    launch::read_server_file(&server_dir.join("server.properties"))
+    Folder::open(server_dir)
+        .and_then(|folder| folder.open_file("server.properties"))
         .ok()
+        .flatten()
+        .and_then(|file| {
+            let mut text = String::new();
+            file.take(1024 * 1024).read_to_string(&mut text).ok()?;
+            Some(text)
+        })
         .and_then(|text| {
             text.lines().find_map(|line| {
-                (launch::property_key(line) == Some("level-name"))
+                (property_key(line) == Some("level-name"))
                     .then(|| {
                         line.split_once(['=', ':'])
                             .map(|(_, v)| v.trim().to_owned())
@@ -336,7 +354,11 @@ impl Folder {
     /// The SHA-1 of the file at `path`, or `None` when there is no plain file there.
     pub fn sha1(&self, path: &str) -> io::Result<Option<String>> {
         match self.open_file(path) {
-            Ok(Some(file)) => sha1_of(file.into_std()).map(Some),
+            Ok(Some(file)) => {
+                let mut reader = Hashing::new(file);
+                io::copy(&mut reader, &mut io::sink())?;
+                Ok(Some(reader.finish()))
+            }
             Ok(None) => Ok(None),
             Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
                 Ok(None)

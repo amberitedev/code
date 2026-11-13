@@ -31,6 +31,11 @@ use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 use ts_rs::TS;
 
+use engine::{
+    archive::{self, NoRoom},
+    sandbox,
+};
+
 use super::{CoreState, internal, properties::PropertiesFields};
 use crate::{
     access::{Caller, Permission, activity},
@@ -40,11 +45,7 @@ use crate::{
     state::servers::{
         self as content, Busy,
         adapters::{
-            filesystem::{
-                archive::{self, NoRoom},
-                content_files::{self, Listed},
-                folder,
-            },
+            filesystem::content_files::{self, Listed},
             sqlite::{content_rows, server_rows},
         },
         commands::{
@@ -381,7 +382,7 @@ pub async fn list(
     let addons = if query.addons == Some(false) {
         None
     } else {
-        let folder = folder::Folder::open(&state.servers.paths().server(&id))
+        let folder = sandbox::Folder::open(&state.servers.paths().server(&id))
             .map_err(internal)?;
         let listed: Vec<Listed> =
             content_files::scan(&folder, loader).into_iter().collect();
@@ -701,7 +702,7 @@ pub async fn get_update(
         .await
         .map_err(internal)?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
-    let folder = folder::Folder::open(&state.servers.paths().server(&id))
+    let folder = sandbox::Folder::open(&state.servers.paths().server(&id))
         .map_err(internal)?;
     let loader = server.loader.as_deref().and_then(ModLoader::parse);
     let listed = content_files::find(&folder, loader, &query.filename)
@@ -1331,7 +1332,7 @@ pub async fn decide(
 ) -> Result<StatusCode, ApiError> {
     state.access.require(&caller, &id, Permission::Edit).await?;
     let _busy = state.content.busy(&id)?;
-    let path = folder::clean(&decision.path).map_err(content::Error::from)?;
+    let path = sandbox::clean(&decision.path).map_err(content::Error::from)?;
     decide_edited_file(
         &state.content,
         &id,
@@ -1378,7 +1379,7 @@ pub async fn embedded_icon(
     let content = Arc::clone(&state.content);
     let root = state.servers.paths().server(&id);
     let icon = tokio::task::spawn_blocking(move || {
-        let folder = folder::Folder::open(&root).ok()?;
+        let folder = sandbox::Folder::open(&root).ok()?;
         let listed = content_files::find(&folder, loader, &query.filename)
             .filter(|listed| listed.kind == kind)?;
         let key = format!("{id}/{}", listed.path);
@@ -1390,10 +1391,8 @@ pub async fn embedded_icon(
                 loader.and_then(ModLoader::jar_platform),
             )?
             .icon?;
-        let bytes = bedrock::upstream::jar::read_icon(
-            open_jar(&folder, &listed)?,
-            &path,
-        )?;
+        let bytes =
+            engine::server_jar::read_icon(open_jar(&folder, &listed)?, &path)?;
         Some((path, bytes))
     })
     .await

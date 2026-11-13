@@ -4,14 +4,13 @@ use std::{collections::HashSet, sync::Arc};
 
 use bedrock::content::least_stable;
 
+use engine::sandbox::Folder;
+
 use super::apply_content_install::{place_version, resolve, target};
 use crate::state::servers::{
     Content, ContentSourceKind, Error, TrackedFile,
     adapters::{
-        filesystem::{
-            content_files::{DISABLED, find, kind_folder},
-            folder::Folder,
-        },
+        filesystem::content_files::{DISABLED, find, kind_folder},
         sqlite::content_rows,
     },
 };
