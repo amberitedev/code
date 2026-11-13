@@ -19,7 +19,6 @@ contracts = { workspace = true, features = ["server"] }
 dashmap = { workspace = true }
 dirs = { workspace = true }
 engine = { workspace = true, features = ["tauri"] }
-enumset = { workspace = true, features = ["serde"] }
 hkdf = { workspace = true }
 http-body-util = "0.1.3"
 hyper = { workspace = true, features = ["client", "http1", "server"] }

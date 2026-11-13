@@ -121,11 +121,11 @@ mod tests {
         AmberiteCommand, AppEvent, Command, LocalEvent,
     };
     use engine::instance::{
-        DesyncServerMode, EditableGameSetting, GameOptionCanonicalValue,
-        GameOptionCompatibility, GameOptionCompatibilityBucket,
-        GameOptionCompatibilityReason, GameOptionCompatibilityStatus,
-        GameOptionEditorChoice, GameOptionEditorDefinition, GameOptionKind,
-        GameOptionMappingKind, GameOptionValidationIssue, GameOptionValueState,
+        EditableGameSetting, GameOptionCanonicalValue, GameOptionCompatibility,
+        GameOptionCompatibilityBucket, GameOptionCompatibilityReason,
+        GameOptionCompatibilityStatus, GameOptionEditorChoice,
+        GameOptionEditorDefinition, GameOptionKind, GameOptionMappingKind,
+        GameOptionValidationIssue, GameOptionValueState,
         GameOptionsSourceCandidate, GameOptionsSourceIssue,
         GameSettingCategory, GameSettingChange, GameSettingLocaleLabel,
         GameSettingLocaleLabels, GameSettingSource, GameSettingSourceProject,
@@ -229,7 +229,6 @@ mod tests {
             PackSyncPreview::decl(&cfg),
             PackSyncTarget::decl(&cfg),
             DesyncQuery::decl(&cfg),
-            DesyncServerMode::decl(&cfg),
             ScreenshotFile::decl(&cfg),
             ScreenshotKey::decl(&cfg),
             ScreenshotEdit::decl(&cfg),
@@ -275,7 +274,7 @@ mod tests {
             "// Generated from apps/app by ts-rs. Do not edit.\n\
              // Regenerate: cargo test -p theseus_gui -- --ignored write_ts\n\n\
              import type {{ ApiError, CoreSession, Endpoint, SharedIconConfig, UserFriend, UserStatus }} from './contracts'\n\
-             import type {{ CommandPayload, EngineEvent, FriendPayload, InstanceGroupsChangedPayload, OnboardingChecklist }} from './engine'\n\
+             import type {{ CommandPayload, DesyncServerMode, EngineEvent, FriendPayload, InstanceGroupsChangedPayload, OnboardingChecklist }} from './engine'\n\
              {declarations}\n\
              export const health = {{\n\
              \tcheckHealth: {},\n\

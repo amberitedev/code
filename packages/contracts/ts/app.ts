@@ -2,7 +2,7 @@
 // Regenerate: cargo test -p theseus_gui -- --ignored write_ts
 
 import type { ApiError, CoreSession, Endpoint, SharedIconConfig, UserFriend, UserStatus } from './contracts'
-import type { CommandPayload, EngineEvent, FriendPayload, InstanceGroupsChangedPayload, OnboardingChecklist } from './engine'
+import type { CommandPayload, DesyncServerMode, EngineEvent, FriendPayload, InstanceGroupsChangedPayload, OnboardingChecklist } from './engine'
 
 export type Boot = { version: string, platform: Platform, os_version: string, 
 /**
@@ -165,8 +165,6 @@ export type PackSyncPreview = { pack: unknown, instances: Array<PackSyncTarget>,
 export type PackSyncTarget = { instance_id: string, name: string, game_version: string, compatible: boolean, participating: boolean, };
 
 export type DesyncQuery = { mode: DesyncServerMode, };
-
-export type DesyncServerMode = "keep_in_other_instances" | "remove_from_other_instances";
 
 export type ScreenshotFile = { id: string, instance_id: string, instance_name: string, file_name: string, created_at: string, modified_at: number, group_id: string | null, path: string, };
 
@@ -382,6 +380,14 @@ export type ModrinthSignIn = { flow: ModrinthAuthFlow, add_account: boolean, };
 
 export type ModrinthAuthFlow = "sign-in" | "sign-up";
 
+export type ServerJoin = { instance_id: string, address: string, };
+
+export type SingleplayerJoin = { instance_id: string, 
+/**
+ * The world's folder in `saves`.
+ */
+world: string, };
+
 export const health = {
 	checkHealth: { method: "GET", path: "/health", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
 }
@@ -529,4 +535,9 @@ export const localAccounts = {
 	listModrinthAccounts: { method: "GET", path: "/app/accounts/modrinth", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<ModrinthCredentials>>,
 	setActiveModrinthAccount: { method: "PUT", path: "/app/accounts/modrinth/active", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, string, void>,
 	removeModrinthAccount: { method: "DELETE", path: "/app/accounts/modrinth/{id}", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<IdParams, null, void, void>,
+}
+
+export const launch = {
+	joinServer: { method: "POST", path: "/app/launch/server", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, ServerJoin, void>,
+	joinSingleplayerWorld: { method: "POST", path: "/app/launch/singleplayer", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, SingleplayerJoin, void>,
 }

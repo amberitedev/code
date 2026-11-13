@@ -455,13 +455,14 @@ async fn a_screenshot_edit_past_axums_default_body_limit_reaches_the_engine() {
     engine::install_crypto_provider();
     let dir = tempfile::tempdir().unwrap();
     let handle = EngineHandle::default();
-    handle.set(Ok(engine::Engine::new(engine::EngineConfig {
-        settings_dir: dir.path().to_path_buf(),
-        events: engine::EventSink::new(),
-        accounts: None,
-    })
+    let config = crate::data_dir::engine_config(
+        dir.path().to_path_buf(),
+        engine::EventSink::new(),
+        None,
+    )
     .await
-    .unwrap()));
+    .unwrap();
+    handle.set(Ok(engine::Engine::new(config).await.unwrap()));
     let local = local_with(handle);
     let request = Request::post(format!(
         "/{}/app/screenshots/edits?instance_id=missing&file_name=a.png&mode=create_copy",
@@ -484,13 +485,14 @@ async fn a_screenshot_edit_past_axums_default_body_limit_reaches_the_engine() {
 async fn an_external_save_into_the_apps_instances_is_refused() {
     engine::install_crypto_provider();
     let dir = tempfile::tempdir().unwrap();
-    let engine = engine::Engine::new(engine::EngineConfig {
-        settings_dir: dir.path().to_path_buf(),
-        events: engine::EventSink::new(),
-        accounts: None,
-    })
+    let config = crate::data_dir::engine_config(
+        dir.path().to_path_buf(),
+        engine::EventSink::new(),
+        None,
+    )
     .await
     .unwrap();
+    let engine = engine::Engine::new(config).await.unwrap();
     let path = engine.directories.instances_dir().join("world.zip");
     let handle = EngineHandle::default();
     handle.set(Ok(engine));
@@ -569,13 +571,14 @@ async fn with_nobody_signed_in_the_account_reads_are_empty() {
     engine::install_crypto_provider();
     let dir = tempfile::tempdir().unwrap();
     let handle = EngineHandle::default();
-    handle.set(Ok(engine::Engine::new(engine::EngineConfig {
-        settings_dir: dir.path().to_path_buf(),
-        events: engine::EventSink::new(),
-        accounts: None,
-    })
+    let config = crate::data_dir::engine_config(
+        dir.path().to_path_buf(),
+        engine::EventSink::new(),
+        None,
+    )
     .await
-    .unwrap()));
+    .unwrap();
+    handle.set(Ok(engine::Engine::new(config).await.unwrap()));
     let local = local_with(handle);
 
     for (path, empty) in [
