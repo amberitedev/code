@@ -8,6 +8,7 @@ use crate::{
     util::{io::IOError, platform::classpath_separator},
 };
 use anyhow::Context;
+use contracts::Side;
 use dunce::canonicalize;
 use itertools::Itertools;
 use minecraft_meta_manifest::minecraft::LoggingConfiguration;
@@ -428,6 +429,7 @@ pub fn get_processor_arguments(
     libraries_path: &Path,
     arguments: &[impl AsRef<str>],
     data: &indexmap::IndexMap<String, SidedDataEntry>,
+    side: Side,
 ) -> crate::Result<Vec<String>> {
     // We use iterator combinators to make sure that 1 input argument maps
     // to exactly 1 output argument. Otherwise you might get issues that take
@@ -463,8 +465,11 @@ pub fn get_processor_arguments(
 
                 // replace variables like `{PATH}` to their real values
                 for (key, entry) in data {
-                    let replacement = if let Some(arg) =
-                        entry.client.strip_prefix('[')
+                    let value = match side {
+                        Side::Client => &entry.client,
+                        Side::Server => &entry.server,
+                    };
+                    let replacement = if let Some(arg) = value.strip_prefix('[')
                         && let Some(lib_key) = arg.strip_suffix(']')
                     {
                         // if the value of `PATH` in `data` is also a library key,
@@ -472,7 +477,7 @@ pub fn get_processor_arguments(
                         get_lib_path(libraries_path, lib_key, true)?
                     } else {
                         // otherwise we just take the value in `data` literally
-                        entry.client.clone()
+                        value.clone()
                     };
 
                     arg = arg.replace(&format!("{{{key}}}"), &replacement);

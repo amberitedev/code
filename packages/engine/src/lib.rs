@@ -34,6 +34,7 @@ pub use event::{
     emit::emit_loading, emit::emit_notification,
     emit::emit_onboarding_checklist, emit::emit_warning, emit::init_loading,
 };
+pub use launcher::server;
 pub use launcher::{
     read_game_version_metadata_from_jar, resolve_minecraft_manifest,
 };

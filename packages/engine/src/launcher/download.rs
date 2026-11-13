@@ -524,6 +524,112 @@ async fn download_minecraft_inner(
     Ok(())
 }
 
+/// A server's download set: the server jar of `game_version` and the libraries, with no assets,
+/// natives or log config.
+#[allow(clippy::too_many_arguments)]
+pub fn download_server<'a>(
+    st: &'a Engine,
+    version: &'a GameVersionInfo,
+    game_version: &'a str,
+    loading_bar: Option<&'a LoadingBarId>,
+    java_arch: &'a str,
+    force: bool,
+    minecraft_updated: bool,
+    reporter: Option<InstallProgressReporter>,
+    phase_details: InstallPhaseDetails,
+) -> impl Future<Output = crate::Result<()>> + Send + 'a {
+    Box::pin(async move {
+        let libraries: Vec<Library> = version
+            .libraries
+            .iter()
+            .filter(|library| !library.is_native())
+            .cloned()
+            .collect();
+        let progress = match reporter {
+            Some(reporter) => Some(
+                MinecraftDownloadProgress::new(
+                    reporter,
+                    phase_details,
+                    missing_server_bytes(st, version, game_version, force)?
+                        + missing_library_bytes(
+                            st,
+                            &libraries,
+                            java_arch,
+                            force,
+                            minecraft_updated,
+                        )?,
+                )
+                .await?,
+            ),
+            None => None,
+        };
+        let (server, libraries) = tokio::join! {
+            Box::pin(download_server_jar(st, version, game_version, force, progress.clone())),
+            Box::pin(download_libraries(st, &libraries, &version.id, loading_bar, 80.0, java_arch, force, minecraft_updated, progress)),
+        };
+        server.context("downloading server")?;
+        libraries.context("downloading libraries")?;
+        Ok(())
+    })
+}
+
+fn server_download<'a>(
+    version: &'a GameVersionInfo,
+    game_version: &str,
+) -> crate::Result<&'a d::minecraft::Download> {
+    Ok(version
+        .downloads
+        .get(&d::minecraft::DownloadType::Server)
+        .ok_or(ErrorKind::LauncherError(format!(
+            "Minecraft {game_version} has no server download"
+        )))?)
+}
+
+fn missing_server_bytes(
+    st: &Engine,
+    version: &GameVersionInfo,
+    game_version: &str,
+    force: bool,
+) -> crate::Result<u64> {
+    let path = super::server::server_jar_path(&st.directories, game_version);
+    Ok(if should_download(path.exists(), force) {
+        server_download(version, game_version)?.size as u64
+    } else {
+        0
+    })
+}
+
+async fn download_server_jar(
+    st: &Engine,
+    version: &GameVersionInfo,
+    game_version: &str,
+    force: bool,
+    progress: Option<MinecraftDownloadProgress>,
+) -> crate::Result<()> {
+    let download = server_download(version, game_version)?;
+    let path = super::server::server_jar_path(&st.directories, game_version);
+    if should_download(path.exists(), force) {
+        let bytes = fetch_minecraft_file(
+            st,
+            download.url.as_str(),
+            Some(&download.sha1.to_string()),
+            Some(download.size as u64),
+            progress,
+            InstallErrorContext::new("download Minecraft server")
+                .minecraft_version(game_version.to_string())
+                .file_path("server.jar".to_string())
+                .target_path(path.display().to_string())
+                .build(),
+        )
+        .await?;
+        bytes
+            .copy_to(&path, &st.io_semaphore)
+            .await
+            .context(format!("writing server jar to {}", path.display()))?;
+    }
+    Ok(())
+}
+
 #[tracing::instrument(skip_all, fields(version = version.id.as_str(), loader = ?loader))]
 
 pub async fn download_version_info(

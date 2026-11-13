@@ -24,6 +24,7 @@ use crate::util::rpc::RpcServerBuilder;
 use crate::{Engine, ErrorKind, get_resource_file};
 use anyhow::{Context, bail};
 use chrono::Utc;
+use contracts::Side;
 use minecraft_meta_manifest as d;
 use minecraft_meta_manifest::fabriclike::{LoaderVersion, Manifest};
 use minecraft_meta_manifest::minecraft::{LoggingSide, RuleAction};
@@ -41,6 +42,7 @@ mod library;
 pub mod download;
 pub(crate) mod profile;
 pub mod quick_play_version;
+pub mod server;
 
 // All nones -> disallowed
 // 1+ true -> allowed
@@ -602,23 +604,54 @@ async fn install_minecraft_inner(
             )
             .await?;
     }
-	download::download_minecraft(
-		state,
-		&version_info,
-		loading_bar.as_ref(),
-		&java_version.architecture,
-		repairing,
-		minecraft_updated,
-		reporter.clone(),
-		phase_details.clone(),
-	)
-	.await?;
+	match state.side {
+		Side::Client => download::download_minecraft(
+			state,
+			&version_info,
+			loading_bar.as_ref(),
+			&java_version.architecture,
+			repairing,
+			minecraft_updated,
+			reporter.clone(),
+			phase_details.clone(),
+		)
+		.await?,
+		Side::Server => download::download_server(
+			state,
+			&version_info,
+			&version.id,
+			loading_bar.as_ref(),
+			&java_version.architecture,
+			repairing,
+			minecraft_updated,
+			reporter.clone(),
+			phase_details.clone(),
+		)
+		.await?,
+	}
 
     let client_path = state
         .directories
         .version_dir(&version_jar)
         .join(format!("{version_jar}.jar"));
-    if let Some(processors) = &version_info.processors {
+    let server_jar = server::server_jar_path(&state.directories, &version.id);
+    let forge_server = match (state.side, &loader_version) {
+        (Side::Server, Some(loader_version)) => {
+            server::forge::prepare(
+                state,
+                content_set.loader,
+                &version.id,
+                &loader_version.id,
+                &java_version.path,
+                &instance_path,
+            )
+            .await?
+        }
+        _ => None,
+    };
+    if let Some(processors) = &version_info.processors
+        && !matches!(forge_server, Some(server::forge::ForgeServer::Installed))
+    {
         let libraries_dir = state.directories.libraries_dir();
 
         if let Some(ref mut data) = version_info.data {
@@ -626,19 +659,29 @@ async fn install_minecraft_inner(
                 data;
                 "SIDE":
                     client => "client",
-                    server => "";
+                    server => "server";
                 "MINECRAFT_JAR" :
                     client => client_path.to_string_lossy(),
-                    server => "";
+                    server => server_jar.to_string_lossy();
                 "MINECRAFT_VERSION":
                     client => content_set.game_version.clone(),
-                    server => "";
+                    server => content_set.game_version.clone();
                 "ROOT":
                     client => instance_path.to_string_lossy(),
-                    server => "";
+                    server => instance_path.to_string_lossy();
                 "LIBRARY_DIR":
                     client => libraries_dir.to_string_lossy(),
-                    server => "";
+                    server => libraries_dir.to_string_lossy();
+            }
+            if let Some(server::forge::ForgeServer::Steps { installer, .. }) =
+                &forge_server
+            {
+                processor_rules! {
+                    data;
+                    "INSTALLER":
+                        client => "",
+                        server => installer.to_string_lossy();
+                }
             }
 
             if let Some(loading_bar) = &loading_bar {
@@ -665,9 +708,7 @@ async fn install_minecraft_inner(
 
             // Forge processors (90-100)
             for (index, processor) in processors.iter().enumerate() {
-                if let Some(sides) = &processor.sides
-                    && !sides.contains(&String::from("client"))
-                {
+                if !server::runs_on(processor, state.side) {
                     if let Some(reporter) = &reporter {
                         reporter
                             .update(
@@ -713,6 +754,7 @@ async fn install_minecraft_inner(
                         &libraries_dir,
                         &processor.args,
                         data,
+                        state.side,
                     )?)
                     .output()
                     .await
@@ -754,7 +796,21 @@ async fn install_minecraft_inner(
         }
     }
 
-    let protocol_version = read_protocol_version_from_jar(client_path).await?;
+    if let Some(server::forge::ForgeServer::Steps { args, .. }) = &forge_server {
+        server::forge::record_launch_args(
+            state,
+            &version_jar,
+            args,
+            &java_version.architecture,
+        )
+        .await?;
+    }
+
+    let protocol_version = read_protocol_version_from_jar(match state.side {
+        Side::Client => client_path,
+        Side::Server => server_jar,
+    })
+    .await?;
 
     crate::state::instances::commands::set_applied_content_set_protocol_version(
         &instance.id,
