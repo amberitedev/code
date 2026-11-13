@@ -43,7 +43,7 @@ async fn play_instance(
     launch(&engine, &play.instance_id, quick_play)
         .await
         .map(Json)
-        .map_err(engine::routes::api_error)
+        .map_err(crate::accounts::api_error)
 }
 
 async fn join_server(
