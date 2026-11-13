@@ -146,6 +146,10 @@ async fn server(
             .fetch_one(&state.db)
             .await
             .map_err(internal)?;
+    let eula_accepted = super::eula::accepted_at(&state.db)
+        .await
+        .map_err(internal)?
+        .is_some();
     Ok(CoreServer {
         net: net(state, &row),
         linked_instance: linked_instance(state, &row.id).await?,
@@ -173,6 +177,7 @@ async fn server(
         game_version: row.game_version,
         power,
         created_at,
+        eula_accepted,
     })
 }
 
@@ -239,17 +244,21 @@ pub async fn create(
     Req { body, .. }: Req<CreateServer>,
 ) -> Result<Json<ServerId>, ApiError> {
     require_owner(&caller)?;
-    let name = body.name.trim();
+    let row = state.servers.create(server_name(&body.name)?).await?;
+    activity::log(&state.db, &caller, Some(&row.id), Action::ServerCreated)
+        .await;
+    Ok(Json(ServerId { id: row.id }))
+}
+
+fn server_name(name: &str) -> Result<&str, ApiError> {
+    let name = name.trim();
     if name.is_empty() || name.chars().count() > 64 {
         return Err(ApiError::new(
             ErrorCode::InvalidInput,
             "A server name has 1 to 64 characters.",
         ));
     }
-    let row = state.servers.create(name).await?;
-    activity::log(&state.db, &caller, Some(&row.id), Action::ServerCreated)
-        .await;
-    Ok(Json(ServerId { id: row.id }))
+    Ok(name)
 }
 
 pub async fn change(
@@ -263,6 +272,13 @@ pub async fn change(
         .await
         .map_err(internal)?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
+    if let Some(name) = &body.name {
+        server_rows::set_name(&state.db, &id, server_name(name)?)
+            .await
+            .map_err(internal)?;
+        activity::log(&state.db, &caller, Some(&id), Action::SettingsChanged)
+            .await;
+    }
     if let Some(channel) = body.update_channel {
         server_rows::set_update_channel(&state.db, &id, version_type(channel))
             .await

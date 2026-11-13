@@ -1,7 +1,7 @@
 import { $fetch, FetchError } from 'ofetch'
 
 import { ModrinthApiError } from '../core/errors'
-import { CoreWebSocketClient } from '../core-hosting/sockets'
+import { CoreSyncClient, CoreWebSocketClient } from '../core-hosting/sockets'
 import type { ClientConfig } from '../types/client'
 import type { RequestOptions } from '../types/request'
 import { appendRequestParams, parseResponseErrorData, toFetchBody } from '../utils/fetch'
@@ -40,7 +40,7 @@ export class GenericModrinthClient extends XHRUploadClient {
 			configurable: false,
 		})
 		Object.defineProperty(this.archon, 'sync', {
-			value: new GenericSyncClient(this),
+			value: this.selfHostedHosting ? new CoreSyncClient(this) : new GenericSyncClient(this),
 			writable: false,
 			enumerable: true,
 			configurable: false,

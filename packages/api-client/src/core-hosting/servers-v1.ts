@@ -94,7 +94,7 @@ export function serversV1(client: AbstractModrinthClient): Adapter<ArchonServers
 				await coreOf(client, serverId)
 			).call(core.ChangeServer, {
 				params: { id: serverId },
-				body: { update_channel: body.update_channel },
+				body: { name: null, update_channel: body.update_channel },
 			})
 		},
 		// The world downloads straight from the Core.

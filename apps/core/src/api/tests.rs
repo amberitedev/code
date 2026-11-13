@@ -233,10 +233,11 @@ async fn each_role_reaches_only_what_the_table_gives_it() {
         .unwrap();
 
     let get = format!("/servers/{server}");
-    let (status, _) = core
+    let (status, detail) = core
         .call(Method::GET, &get, Some(&viewer), None, None)
         .await;
     assert_eq!(status, StatusCode::OK);
+    assert_eq!(detail["eula_accepted"], false);
     let (status, _) = core
         .call(Method::GET, &get, Some(&stranger), None, None)
         .await;
@@ -255,6 +256,12 @@ async fn each_role_reaches_only_what_the_table_gives_it() {
         error["error"], "eula_not_accepted",
         "allowed, but the EULA is not accepted"
     );
+    core.call(Method::POST, "/eula", Some(&owner), None, None)
+        .await;
+    let (_, detail) = core
+        .call(Method::GET, &get, Some(&viewer), None, None)
+        .await;
+    assert_eq!(detail["eula_accepted"], true);
 
     let create = Some(json!({ "name": "B" }));
     let (status, _) = core
@@ -1772,7 +1779,7 @@ async fn a_failed_install_tells_the_app_why() {
 }
 
 #[tokio::test]
-async fn editors_set_the_servers_update_channel() {
+async fn editors_set_the_servers_name_and_update_channel() {
     let core = core().await;
     let server = core.server.clone();
     let editor = core.sign_in("editor").await;
@@ -1799,6 +1806,22 @@ async fn editors_set_the_servers_update_channel() {
         .call(Method::GET, &detail, Some(&viewer), None, None)
         .await;
     assert_eq!(channel(&after), "beta");
+
+    let blank = Some(json!({ "name": "  " }));
+    let (_, error) = core
+        .call(Method::PATCH, &detail, Some(&editor), None, blank)
+        .await;
+    assert_eq!(error["error"], "invalid_input");
+    let renamed = Some(json!({ "name": " Survival " }));
+    let (status, _) = core
+        .call(Method::PATCH, &detail, Some(&editor), None, renamed)
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, after) = core
+        .call(Method::GET, &detail, Some(&viewer), None, None)
+        .await;
+    assert_eq!(after["name"], "Survival");
+    assert_eq!(channel(&after), "beta", "a rename keeps the channel");
 }
 
 #[tokio::test]

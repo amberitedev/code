@@ -34,6 +34,8 @@ pub struct CoreServer {
     /// Unix seconds.
     pub created_at: i64,
     pub update_channel: UpdateChannel,
+    /// The owner accepted the Minecraft EULA for every server on this Core. None starts before.
+    pub eula_accepted: bool,
 }
 
 /// Where players join a server.
@@ -118,6 +120,8 @@ pub struct NewServer {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct ServerUpdate {
+    /// 1 to 64 characters, trimmed.
+    pub name: Option<String>,
     pub update_channel: Option<UpdateChannel>,
 }
 

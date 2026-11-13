@@ -648,7 +648,8 @@ mod tests {
             "loader": null, "loader_version": null, "game_version": null,
             "net": {"ip": null, "port": 25565, "outside": null, "game_port": 25565},
             "power": "offline", "linked_instance": null, "reachability": null, "players": null,
-            "memory_mb": 2048, "created_at": 0, "update_channel": "release"
+            "memory_mb": 2048, "created_at": 0, "update_channel": "release",
+            "eula_accepted": false
         }))
         .unwrap()
     }

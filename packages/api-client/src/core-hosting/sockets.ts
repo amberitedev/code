@@ -2,6 +2,7 @@ import { type ClientMessage, core, type Topic } from '@amberite/contracts'
 import mitt from 'mitt'
 
 import type { AbstractModrinthClient } from '../core/abstract-client'
+import { AbstractSyncClient, type SyncEmitterEvents } from '../core/abstract-sync'
 import { AbstractWebSocketClient, type WebSocketConnection } from '../core/abstract-websocket'
 import type { Archon } from '../modules/archon/types'
 import type { Copal } from '../modules/copal/types'
@@ -13,6 +14,19 @@ type WSEventMap = {
 }
 
 const NORMAL_CLOSURE = 1000
+
+/** A Core has no sync stream: its servers' changes come over `CoreWebSocketClient`. */
+export class CoreSyncClient extends AbstractSyncClient {
+	protected emitter = mitt<SyncEmitterEvents>()
+
+	async safeConnectServer(): Promise<void> {}
+
+	disconnect(serverId: string): void {
+		this.clearListeners(serverId)
+	}
+
+	disconnectAll(): void {}
+}
 
 /**
  * The hosting panel's per-server socket on a Core: a Core's `/events` socket subscribed to one

@@ -408,36 +408,63 @@ describe('the server access page on a Core', () => {
 	})
 })
 
+const SERVER_ON_CORE: CoreServer = {
+	id: SERVER,
+	name: 'A',
+	owner_id: 'owner',
+	role: null,
+	installing: false,
+	loader: null,
+	loader_version: null,
+	game_version: null,
+	net: { ip: null, port: 25565, outside: null, game_port: 25565 },
+	power: 'offline',
+	linked_instance: null,
+	reachability: null,
+	players: null,
+	memory_mb: 2048,
+	created_at: 0,
+	update_channel: 'release',
+	eula_accepted: true,
+}
+
 describe('a server on a Core', () => {
 	it('shows each role its own permissions', async () => {
 		const api = new FakeClient()
-		const server: CoreServer = {
-			id: SERVER,
-			name: 'A',
-			owner_id: 'owner',
-			role: null,
-			installing: false,
-			loader: null,
-			loader_version: null,
-			game_version: null,
-			net: { ip: null, port: 25565, outside: null, game_port: 25565 },
-			power: 'offline',
-			linked_instance: null,
-			reachability: null,
-			players: null,
-			memory_mb: 2048,
-			created_at: 0,
-			update_channel: 'release',
-		}
 		for (const [role, permissions] of [
 			[null, 0xffff_ffff_ffff_8000],
 			['editor', 0xfe00_0000_0000_0000],
 			['viewer', 2 ** 63],
 		] as const) {
-			api.answers = [{ ...server, role }]
+			api.answers = [{ ...SERVER_ON_CORE, role }]
 			const shown = await api.archon.servers_v0.get(SERVER)
 			expect(shown.current_user_permissions).toBe(permissions)
 		}
+	})
+
+	it('names the EULA on its page until the owner accepts it', async () => {
+		const api = new FakeClient()
+		api.answers = [{ ...SERVER_ON_CORE, eula_accepted: false }, SERVER_ON_CORE]
+		const [notice] = (await api.archon.servers_v0.get(SERVER)).notices
+		expect(notice.message).toContain('Minecraft EULA')
+		expect((await api.archon.servers_v0.get(SERVER)).notices).toEqual([])
+	})
+
+	it('is renamed on its Core', async () => {
+		const api = new FakeClient()
+		await api.archon.servers_v0.updateName(SERVER, 'Survival')
+		const [renamed] = api.toCore()
+		expect(renamed).toMatchObject({
+			url: `${PROXY}/servers/${SERVER}`,
+			method: 'PATCH',
+			body: { name: 'Survival', update_channel: null },
+		})
+	})
+
+	it('opens no sync stream, since its changes come over the event socket', async () => {
+		const api = new FakeClient()
+		await api.archon.sync.safeConnectServer(SERVER)
+		expect(api.archon.sync.getStatus(SERVER)).toBeNull()
 	})
 })
 

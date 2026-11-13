@@ -55,6 +55,17 @@ function isJdkName(name: string): name is JdkName {
 	return name in JDK_MAJORS
 }
 
+/** Shown on the server's page until the owner accepts the EULA; no server starts before that. */
+const EULA_NOTICE: Archon.Servers.v0.Notice = {
+	id: 0,
+	dismissable: false,
+	title: 'Minecraft EULA',
+	message:
+		'Servers on this Core start once its owner accepts the Minecraft EULA: run `copal eula` on the Core to read it, then `copal eula --accept`.',
+	level: 'warn',
+	announced: '',
+}
+
 function reachability(report: ReachabilityReport): Archon.Servers.v0.Reachability {
 	return { state: report.state, cause: report.state === 'reachable' ? null : report.title }
 }
@@ -79,7 +90,7 @@ export function archonServer(server: CoreServer, base: string): Archon.Servers.v
 		sftp_password: '',
 		sftp_host: '',
 		datacenter: '',
-		notices: [],
+		notices: server.eula_accepted ? [] : [EULA_NOTICE],
 		node: { token: '', instance: coreNodeUrl(base, server.id) },
 		flows: { intro: false },
 		is_medal: false,
@@ -128,6 +139,14 @@ export function serversV0(client: AbstractModrinthClient): Adapter<ArchonServers
 			return archonServer(server, await base(serverId))
 		},
 		list: () => cores.servers(),
+		async updateName(serverId, name) {
+			await (
+				await coreOf(client, serverId)
+			).call(core.ChangeServer, {
+				params: { id: serverId },
+				body: { name, update_channel: null },
+			})
+		},
 		async getFilesystemAuth(serverId) {
 			const auth = await client.request<Archon.Servers.v0.JWTAuth>(`/servers/${serverId}/fs`, {
 				api: 'archon',

@@ -253,6 +253,19 @@ pub async fn set_icon_config(
     Ok(())
 }
 
+pub async fn set_name(
+    db: &SqlitePool,
+    id: &str,
+    name: &str,
+) -> sqlx::Result<()> {
+    sqlx::query("UPDATE servers SET name = ? WHERE id = ?")
+        .bind(name)
+        .bind(id)
+        .execute(db)
+        .await?;
+    Ok(())
+}
+
 pub async fn set_update_channel(
     db: &SqlitePool,
     id: &str,

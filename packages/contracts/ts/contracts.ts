@@ -1208,7 +1208,11 @@ players: Array<string> | null, memory_mb: number,
 /**
  * Unix seconds.
  */
-created_at: number, update_channel: UpdateChannel, };
+created_at: number, update_channel: UpdateChannel, 
+/**
+ * The owner accepted the Minecraft EULA for every server on this Core. None starts before.
+ */
+eula_accepted: boolean, };
 
 export type ServerNet = { 
 /**
@@ -1249,7 +1253,11 @@ export type NewServer = {
  */
 name: string, };
 
-export type ServerUpdate = { update_channel: UpdateChannel | null, };
+export type ServerUpdate = { 
+/**
+ * 1 to 64 characters, trimmed.
+ */
+name: string | null, update_channel: UpdateChannel | null, };
 
 export type PowerAction = "start" | "stop" | "restart" | "kill";
 
