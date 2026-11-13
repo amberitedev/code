@@ -20,7 +20,9 @@ use crate::{
             SharedInstanceAttachment,
         },
         loading,
+        logs::{self, LogFileRef, LogListing},
         metadata::{self, LoaderRef},
+        process::{self, ProcessRef},
         store, tags,
         worlds::{
             self, InstanceServerDesync, InstanceServerRef,
@@ -40,6 +42,7 @@ use crate::{
         DesyncServerMode, InstanceGroup, InstanceGroupMembershipUpdate,
         ServerSource,
     },
+    logs::{CensoredString, LogType, Logs},
     metadata::Manifest,
     state::{
         CacheBehaviour, CacheValueType, Category, ContentSetSyncStatus,
@@ -47,10 +50,11 @@ use crate::{
         FileType, GalleryItem, GameVersion, Hooks, InstanceInstallStage,
         InstanceSyncedOptions, InstanceTabVisibility, License, Loader,
         Log4jEvent, MemorySettings, ModLoader, OnboardingChecklist,
-        Organization, Project, ProjectV3, ReleaseChannel, SearchEntry,
-        SearchResult, SearchResultV3, SearchResults, SearchResultsV3, Settings,
-        SharedInstanceRole, SideType, TeamMember, Theme, User, Version,
-        VersionFile, WindowSize, content_store::StoreUsage,
+        Organization, ProcessMetadata, Project, ProjectV3, ReleaseChannel,
+        SearchEntry, SearchResult, SearchResultV3, SearchResults,
+        SearchResultsV3, Settings, SharedInstanceRole, SideType, TeamMember,
+        Theme, User, Version, VersionFile, WindowSize,
+        content_store::StoreUsage,
     },
     worlds::{
         DisplayStatus, ProtocolVersion, ServerGameProfile, ServerPackStatus,
@@ -174,6 +178,13 @@ fn file() -> String {
         SearchResultsV3::decl(&cfg),
         SearchResultV3::decl(&cfg),
         serde_json::Value::decl(&cfg),
+        Logs::decl(&cfg),
+        LogType::decl(&cfg),
+        CensoredString::decl(&cfg),
+        LogListing::decl(&cfg),
+        LogFileRef::decl(&cfg),
+        ProcessMetadata::decl(&cfg),
+        ProcessRef::decl(&cfg),
         // The payloads of the App's events that engine code still raises.
         FriendPayload::decl(&cfg),
         FriendStatusPayload::decl(&cfg),
@@ -192,6 +203,8 @@ fn file() -> String {
         ("tags", tags::ts_entries()),
         ("metadata", metadata::ts_entries()),
         ("cache", cache::ts_entries()),
+        ("logs", logs::ts_entries()),
+        ("processes", process::ts_entries()),
     ]
     .map(|(name, entries)| format!("\nexport const {name} = {{\n{entries}}}\n"))
     .concat();

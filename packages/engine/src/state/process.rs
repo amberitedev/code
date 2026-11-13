@@ -433,6 +433,7 @@ impl ProcessManager {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ProcessMetadata {
     pub uuid: Uuid,
     pub instance_id: String,

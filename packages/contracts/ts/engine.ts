@@ -231,6 +231,24 @@ export type ModrinthSearchResultV3 = { hits: Array<JsonValue>, page: number, hit
 
 export type JsonValue = number | string | boolean | Array<JsonValue> | { [key in string]: JsonValue } | null;
 
+export type Logs = { log_type: LogType, filename: string, age: number, output: CensoredString | null, };
+
+export type LogType = "InfoLog" | "CrashReport";
+
+export type CensoredString = string;
+
+export type LogListing = { 
+/**
+ * Leaves out each log's output.
+ */
+clearContents?: boolean, };
+
+export type LogFileRef = { id: string, log_type: LogType, filename: string, };
+
+export type ProcessMetadata = { uuid: string, instance_id: string, instance_path: string, instance_name: string, start_time: string, };
+
+export type ProcessRef = { uuid: string, };
+
 export type FriendPayload = { "event": "friend_request", from: string, } | { "event": "user_offline", id: string, } | { "event": "status_update", user_status: FriendStatusPayload, } | { "event": "status_sync" } | { "event": "friend_request_rejected", from: string, };
 
 export type FriendStatusPayload = { user_id: string, profile_name: string | null, last_update: string, };
@@ -303,4 +321,18 @@ export const cache = {
 	GetCachedSearchResults: { method: "GET", path: "/cache/search", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, CacheSearch, void, ModrinthSearchResults | null>,
 	GetCachedSearchResultsV3: { method: "GET", path: "/cache/v3/search", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, CacheSearch, void, ModrinthSearchResultsV3 | null>,
 	PurgeCache: { method: "POST", path: "/cache/purge", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, Array<CacheValueType>, void>,
+}
+
+export const logs = {
+	ListInstanceLogs: { method: "GET", path: "/instances/{id}/logs", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceRef, LogListing, void, Array<Logs>>,
+	GetInstanceLogOutput: { method: "GET", path: "/instances/{id}/logs/{log_type}/{filename}", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<LogFileRef, null, void, CensoredString>,
+	DeleteInstanceLog: { method: "DELETE", path: "/instances/{id}/logs/{log_type}/{filename}", auth: "session", dangerous: false, body: "empty", response: "empty" } as Endpoint<LogFileRef, null, void, void>,
+	GetLiveLog: { method: "GET", path: "/instances/{id}/live-log", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceRef, null, void, CensoredString>,
+	ClearLiveLog: { method: "DELETE", path: "/instances/{id}/live-log", auth: "session", dangerous: false, body: "empty", response: "empty" } as Endpoint<InstanceRef, null, void, void>,
+}
+
+export const processes = {
+	ListProcesses: { method: "GET", path: "/processes", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<ProcessMetadata>>,
+	ListInstanceProcesses: { method: "GET", path: "/instances/{id}/processes", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceRef, null, void, Array<ProcessMetadata>>,
+	KillProcess: { method: "POST", path: "/processes/{uuid}/kill", auth: "session", dangerous: false, body: "empty", response: "empty" } as Endpoint<ProcessRef, null, void, void>,
 }

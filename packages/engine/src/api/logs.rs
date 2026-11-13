@@ -17,6 +17,7 @@ use crate::{
 };
 
 #[derive(Serialize, Debug)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct Logs {
     pub log_type: LogType,
     pub filename: String,
@@ -25,6 +26,7 @@ pub struct Logs {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, Eq, PartialEq)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub enum LogType {
     InfoLog,
     CrashReport,
@@ -40,6 +42,7 @@ pub struct LatestLogCursor {
 }
 
 #[derive(Serialize, Debug)] // Not deserialize
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(transparent)]
 pub struct CensoredString(String);
 impl CensoredString {

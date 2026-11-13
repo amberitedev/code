@@ -193,6 +193,14 @@ async fn a_denied_caller_sees_no_instances_and_touches_no_groups_or_store() {
         ("GET", "/metadata/loaders/fabric", None),
         ("GET", "/cache/projects/sodium", None),
         ("POST", "/cache/purge", Some(json!(["project"]))),
+        ("GET", "/instances/local%3Aa/logs", None),
+        ("DELETE", "/instances/local%3Aa/live-log", None),
+        ("GET", "/processes", None),
+        (
+            "POST",
+            "/processes/00000000-0000-0000-0000-000000000000/kill",
+            None,
+        ),
     ] {
         let (status, _) = send(&router, method, uri, body).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "{uri}");
@@ -403,4 +411,50 @@ async fn cache_reads_take_the_helpers_query_names() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(users[0]["id"], "u1");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn logs_are_read_and_deleted_by_file_name_only() {
+    crate::install_crypto_provider();
+    let dir = tempfile::tempdir().unwrap();
+    let engine = engine(dir.path().to_path_buf()).await;
+    add_instance(&engine, "local:a", "Survival").await;
+    let logs_dir = engine.directories.instance_logs_dir("Survival");
+    let secret = engine.directories.instances_dir().join("secret.log");
+    std::fs::create_dir_all(&logs_dir).unwrap();
+    std::fs::write(logs_dir.join("latest.log"), "[main] ready").unwrap();
+    std::fs::write(&secret, "secret").unwrap();
+    let router = super::routes().with_state(Host {
+        engine,
+        access: Arc::new(FakeAccess { allow: true }),
+    });
+
+    let (status, logs) = send(
+        &router,
+        "GET",
+        "/instances/local%3Aa/logs?clearContents=true",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(logs[0]["filename"], "latest.log");
+    assert_eq!(logs[0]["log_type"], "InfoLog");
+    assert_eq!(logs[0]["output"], Value::Null);
+
+    let file = "/instances/local%3Aa/logs/InfoLog/latest.log";
+    let (status, output) = send(&router, "GET", file, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(output.as_str().unwrap().contains("ready"));
+
+    let escape = "/instances/local%3Aa/logs/InfoLog/..%2F..%2Fsecret.log";
+    for method in ["GET", "DELETE"] {
+        let (status, error) = send(&router, method, escape, None).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{method}");
+        assert_eq!(error["error"], "invalid_input");
+    }
+    assert!(secret.exists());
+
+    let (status, _) = send(&router, "DELETE", file, None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert!(!logs_dir.join("latest.log").exists());
 }

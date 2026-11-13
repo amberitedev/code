@@ -5,7 +5,9 @@ mod cache;
 mod groups;
 mod instances;
 mod loading;
+mod logs;
 mod metadata;
+mod process;
 mod store;
 mod tags;
 #[cfg(test)]
@@ -19,8 +21,8 @@ use contracts::{ApiError, ErrorCode, server::route};
 use serde::Deserialize;
 
 pub use self::{
-    cache::*, groups::*, instances::*, loading::*, metadata::*, store::*,
-    tags::*, worlds::*,
+    cache::*, groups::*, instances::*, loading::*, logs::*, metadata::*,
+    process::*, store::*, tags::*, worlds::*,
 };
 use crate::{
     Engine,
@@ -40,7 +42,12 @@ use crate::{
         },
         instances::{GetInstance, GetInstances, ListInstances},
         loading::ListLoadingBars,
+        logs::{
+            ClearLiveLog, DeleteInstanceLog, GetInstanceLogOutput, GetLiveLog,
+            ListInstanceLogs,
+        },
         metadata::GetLoaderManifest,
+        process::{KillProcess, ListInstanceProcesses, ListProcesses},
         store::{CleanStore, GetStoreUsage, SetStoreCacheLimit},
         tags::{GetCategoryTags, GetGameVersionTags, GetLoaderTags},
         worlds::{
@@ -114,6 +121,14 @@ where
             get_cached_search_results_v3,
         ),
         route::<PurgeCache, _, _, _>(purge_cache),
+        route::<ListInstanceLogs, _, _, _>(list_instance_logs),
+        route::<GetInstanceLogOutput, _, _, _>(get_instance_log_output),
+        route::<DeleteInstanceLog, _, _, _>(delete_instance_log),
+        route::<GetLiveLog, _, _, _>(get_live_log),
+        route::<ClearLiveLog, _, _, _>(clear_live_log),
+        route::<ListProcesses, _, _, _>(list_processes),
+        route::<ListInstanceProcesses, _, _, _>(list_instance_processes),
+        route::<KillProcess, _, _, _>(kill_process),
     ]
     .into_iter()
     .fold(Router::new(), |router, (path, method)| {

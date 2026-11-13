@@ -347,7 +347,6 @@ fn main() {
         .plugin(api::instance::init())
         .plugin(api::logs::init())
         .plugin(api::jre::init())
-        .plugin(api::process::init())
         .plugin(api::files::init())
         .manage(updater)
         .manage(engine)

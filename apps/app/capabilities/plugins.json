@@ -43,10 +43,8 @@
 		},
 		"import:default",
 		"jre:default",
-		"logs:default",
 		"instance:default",
 		"install:default",
-		"process:default",
 		"files:default"
 	]
 }

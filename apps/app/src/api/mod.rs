@@ -7,7 +7,6 @@ pub mod install;
 pub mod instance;
 pub mod jre;
 pub mod logs;
-pub mod process;
 pub mod shortcuts;
 pub mod utils;
 

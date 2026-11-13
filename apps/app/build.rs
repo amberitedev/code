@@ -37,23 +37,6 @@ fn main() {
                     ),
             )
             .plugin(
-                "logs",
-                InlinedPlugin::new()
-                    .commands(&[
-                        "logs_get_logs",
-                        "logs_get_logs_by_filename",
-                        "logs_get_output_by_filename",
-                        "logs_delete_logs",
-                        "logs_delete_logs_by_filename",
-                        "logs_get_latest_log_cursor",
-                        "logs_get_live_log_buffer",
-                        "logs_clear_live_log_buffer",
-                    ])
-                    .default_permission(
-                        DefaultPermissionRule::AllowAllCommands,
-                    ),
-            )
-            .plugin(
                 "install",
                 InlinedPlugin::new()
                     .commands(&[
@@ -85,19 +68,6 @@ fn main() {
                         "install_job_cancel",
                         "install_job_dismiss",
                         "install_job_support_details",
-                    ])
-                    .default_permission(
-                        DefaultPermissionRule::AllowAllCommands,
-                    ),
-            )
-            .plugin(
-                "process",
-                InlinedPlugin::new()
-                    .commands(&[
-                        "process_get_all",
-                        "process_get_by_instance_id",
-                        "process_kill",
-                        "process_wait_for",
                     ])
                     .default_permission(
                         DefaultPermissionRule::AllowAllCommands,
