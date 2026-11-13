@@ -9,33 +9,6 @@ fn main() {
         tauri_build::Attributes::new()
             .codegen(tauri_build::CodegenContext::new())
             .plugin(
-                "cache",
-                InlinedPlugin::new()
-                    .commands(&[
-                        "get_project",
-                        "get_project_many",
-                        "get_project_v3",
-                        "get_project_v3_many",
-                        "get_version",
-                        "get_version_many",
-                        "get_user",
-                        "get_user_many",
-                        "get_team",
-                        "get_team_many",
-                        "get_organization",
-                        "get_organization_many",
-                        "get_search_results",
-                        "get_search_results_many",
-                        "get_search_results_v3",
-                        "get_search_results_v3_many",
-                        "purge_cache_types",
-                        "get_project_versions",
-                    ])
-                    .default_permission(
-                        DefaultPermissionRule::AllowAllCommands,
-                    ),
-            )
-            .plugin(
                 "import",
                 InlinedPlugin::new()
                     .commands(&[
@@ -75,17 +48,6 @@ fn main() {
                         "logs_get_latest_log_cursor",
                         "logs_get_live_log_buffer",
                         "logs_clear_live_log_buffer",
-                    ])
-                    .default_permission(
-                        DefaultPermissionRule::AllowAllCommands,
-                    ),
-            )
-            .plugin(
-                "metadata",
-                InlinedPlugin::new()
-                    .commands(&[
-                        "metadata_get_game_versions",
-                        "metadata_get_loader_versions",
                     ])
                     .default_permission(
                         DefaultPermissionRule::AllowAllCommands,
@@ -198,20 +160,6 @@ fn main() {
                         "instance_share_dismiss_restored_notice",
                         "instance_export_mrpack",
                         "instance_get_pack_export_candidates",
-                    ])
-                    .default_permission(
-                        DefaultPermissionRule::AllowAllCommands,
-                    ),
-            )
-            .plugin(
-                "tags",
-                InlinedPlugin::new()
-                    .commands(&[
-                        "tags_get_categories",
-                        "tags_get_report_types",
-                        "tags_get_loaders",
-                        "tags_get_game_versions",
-                        "tags_get_donation_platforms",
                     ])
                     .default_permission(
                         DefaultPermissionRule::AllowAllCommands,

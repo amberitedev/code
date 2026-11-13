@@ -44,12 +44,9 @@
 		"import:default",
 		"jre:default",
 		"logs:default",
-		"metadata:default",
 		"instance:default",
 		"install:default",
 		"process:default",
-		"cache:default",
-		"files:default",
-		"tags:default"
+		"files:default"
 	]
 }

@@ -13,6 +13,8 @@ use crate::{
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts", ts(rename = "LoaderManifest"))]
 pub struct Manifest {
     pub game_versions: Vec<GameVersion>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -21,15 +23,19 @@ pub struct Manifest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts", ts(rename = "LoaderGameVersion"))]
 pub struct GameVersion {
     pub id: String,
     pub stable: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub version_group: Option<String>,
     pub loaders: Vec<LoaderVersion>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct LoaderVersion {
     pub id: String,
     pub url: Url,
@@ -37,6 +43,8 @@ pub struct LoaderVersion {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts", ts(rename = "LoaderVersionGroup"))]
 pub struct VersionGroup {
     pub id: String,
     pub loaders: Vec<LoaderVersion>,

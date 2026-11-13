@@ -24,6 +24,7 @@ const EXPIRED_CACHE_RETENTION_SECS: i64 = 7 * 24 * 60 * 60;
 
 #[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub enum CacheValueType {
     Project,
     ProjectV3,
@@ -257,12 +258,16 @@ pub enum CacheValue {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", ts(rename = "ModrinthSearchResults"))]
 pub struct SearchResults {
     pub search: String,
     pub result: SearchResult,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", ts(rename = "ModrinthSearchResult"))]
 pub struct SearchResult {
     pub hits: Vec<SearchEntry>,
     pub offset: u32,
@@ -271,6 +276,8 @@ pub struct SearchResult {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", ts(rename = "ModrinthSearchEntry"))]
 pub struct SearchEntry {
     pub project_id: String,
     pub project_type: String,
@@ -296,12 +303,16 @@ pub struct SearchEntry {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", ts(rename = "ModrinthSearchResultsV3"))]
 pub struct SearchResultsV3 {
     pub search: String,
     pub result: SearchResultV3,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", ts(rename = "ModrinthSearchResultV3"))]
 pub struct SearchResultV3 {
     pub hits: Vec<serde_json::Value>,
     #[serde(default)]
@@ -490,6 +501,8 @@ pub struct CachedFile {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", ts(rename = "ModrinthProject"))]
 pub struct Project {
     pub id: String,
     pub slug: Option<String>,
@@ -536,6 +549,12 @@ pub struct Project {
 
 /// Uses serde_json::Value for flexibility since the v3. properly typed in frontend
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", ts(rename = "ModrinthProjectV3"))]
+#[cfg_attr(
+    feature = "export-ts",
+    ts(type = "{ id: string, slug: string | null, [key: string]: JsonValue }")
+)]
 pub struct ProjectV3 {
     pub id: String,
     pub slug: Option<String>,
@@ -544,6 +563,8 @@ pub struct ProjectV3 {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", ts(rename = "ModrinthLicense"))]
 pub struct License {
     pub id: String,
     pub name: String,
@@ -551,6 +572,8 @@ pub struct License {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", ts(rename = "ModrinthGalleryItem"))]
 pub struct GalleryItem {
     pub url: String,
     pub raw_url: String,
@@ -562,6 +585,8 @@ pub struct GalleryItem {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", ts(rename = "ModrinthDonationLink"))]
 pub struct DonationLink {
     pub id: String,
     pub platform: String,
@@ -570,6 +595,8 @@ pub struct DonationLink {
 
 #[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq)]
 #[serde(rename_all = "kebab-case")]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", ts(rename = "ModrinthSideType"))]
 pub enum SideType {
     Required,
     Optional,
@@ -578,6 +605,8 @@ pub enum SideType {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", ts(rename = "ModrinthVersion"))]
 pub struct Version {
     pub id: String,
     pub project_id: String,
@@ -626,6 +655,8 @@ pub enum VersionEnvironment {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", ts(rename = "ModrinthVersionFile"))]
 pub struct VersionFile {
     pub hashes: HashMap<String, String>,
     pub url: String,
@@ -637,6 +668,8 @@ pub struct VersionFile {
 
 #[derive(Serialize, Deserialize, Copy, Clone, Debug)]
 #[serde(rename_all = "kebab-case")]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", ts(rename = "ModrinthFileType"))]
 pub enum FileType {
     RequiredResourcePack,
     OptionalResourcePack,
@@ -649,6 +682,8 @@ pub enum FileType {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", ts(rename = "ModrinthDependency"))]
 pub struct Dependency {
     pub version_id: Option<String>,
     pub project_id: Option<String>,
@@ -658,6 +693,8 @@ pub struct Dependency {
 
 #[derive(Serialize, Deserialize, Copy, Clone, Debug)]
 #[serde(rename_all = "lowercase")]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", ts(rename = "ModrinthDependencyType"))]
 pub enum DependencyType {
     Required,
     Optional,
@@ -666,6 +703,8 @@ pub enum DependencyType {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", ts(rename = "ModrinthTeamMember"))]
 pub struct TeamMember {
     pub team_id: String,
     pub user: User,
@@ -675,6 +714,8 @@ pub struct TeamMember {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", ts(rename = "ModrinthUser"))]
 pub struct User {
     pub id: String,
     pub username: String,
@@ -687,6 +728,8 @@ pub struct User {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", ts(rename = "ModrinthOrganization"))]
 pub struct Organization {
     pub id: String,
     pub slug: String,
@@ -699,6 +742,8 @@ pub struct Organization {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", ts(rename = "CategoryTag"))]
 pub struct Category {
     pub name: String,
     pub project_type: String,
@@ -707,6 +752,8 @@ pub struct Category {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", ts(rename = "LoaderTag"))]
 pub struct Loader {
     pub name: String,
     pub icon: PathBuf,
@@ -720,6 +767,8 @@ pub struct DonationPlatform {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", ts(rename = "GameVersionTag"))]
 pub struct GameVersion {
     pub version: String,
     pub version_type: String,
@@ -906,6 +955,7 @@ impl CacheValue {
     Deserialize, Serialize, PartialEq, Eq, Debug, Copy, Clone, Default,
 )]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub enum CacheBehaviour {
     /// Serve expired data. If fetch fails / launcher is offline, errors are ignored
     /// and expired data is served

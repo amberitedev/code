@@ -7,13 +7,10 @@ pub mod install;
 pub mod instance;
 pub mod jre;
 pub mod logs;
-pub mod metadata;
 pub mod process;
 pub mod shortcuts;
-pub mod tags;
 pub mod utils;
 
-pub mod cache;
 pub mod files;
 
 pub(crate) mod oauth_utils;

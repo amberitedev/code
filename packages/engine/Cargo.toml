@@ -116,6 +116,7 @@ ts-rs = { workspace = true, features = [
   "bytes-impl",
   "chrono-impl",
   "no-serde-warnings",
+  "serde-json-impl",
   "url-impl",
   "uuid-impl",
 ], optional = true }
@@ -146,7 +147,12 @@ windows-core = { workspace = true }
 winreg = { workspace = true }
 
 [features]
-export-ts = ["bedrock/export-ts", "dep:ts-rs", "modrinth-content-management/ts"]
+export-ts = [
+  "bedrock/export-ts",
+  "dep:ts-rs",
+  "minecraft-meta-manifest/ts",
+  "modrinth-content-management/ts",
+]
 tauri = ["dep:tauri"]
 
 [lints]

@@ -14,7 +14,10 @@ use tower::ServiceExt;
 use crate::{
     Engine,
     access::{Access, BoxFuture, Caller, Permission},
-    state::tests::{add_instance, engine},
+    state::{
+        CacheValue, CachedEntry,
+        tests::{add_instance, engine},
+    },
 };
 
 /// Grants up to `granted` on everything, and denies the rest with 403.
@@ -186,6 +189,10 @@ async fn a_denied_caller_sees_no_instances_and_touches_no_groups_or_store() {
         ("GET", "/content-store/usage", None),
         ("POST", "/content-store/cleanup", None),
         ("PUT", "/content-store/cache-limit", Some(json!(0))),
+        ("GET", "/tags/loaders", None),
+        ("GET", "/metadata/loaders/fabric", None),
+        ("GET", "/cache/projects/sodium", None),
+        ("POST", "/cache/purge", Some(json!(["project"]))),
     ] {
         let (status, _) = send(&router, method, uri, body).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "{uri}");
@@ -351,4 +358,49 @@ fn world_with_instance(world: &Value) -> Value {
     let mut world = world.clone();
     world["instance_id"] = json!("local:a");
     world
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cache_reads_take_the_helpers_query_names() {
+    crate::install_crypto_provider();
+    let dir = tempfile::tempdir().unwrap();
+    let engine = engine(dir.path().to_path_buf()).await;
+    let user = serde_json::from_value(json!({
+        "id": "u1",
+        "username": "Ilai",
+        "avatar_url": null,
+        "bio": null,
+        "created": "2024-01-01T00:00:00Z",
+        "role": "developer",
+    }))
+    .unwrap();
+    CachedEntry::upsert_many(
+        [&CacheValue::User(user).get_entry()],
+        &engine.pool,
+    )
+    .await
+    .unwrap();
+    let router = super::routes().with_state(Host {
+        engine,
+        access: Arc::new(FakeAccess { allow: true }),
+    });
+
+    let (status, user) = send(
+        &router,
+        "GET",
+        "/cache/users/u1?cacheBehaviour=must_revalidate",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(user["username"], "Ilai");
+    let (status, users) = send(
+        &router,
+        "GET",
+        "/cache/users?ids=%5B%22u1%22%5D&cacheBehaviour=stale_while_revalidate",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(users[0]["id"], "u1");
 }

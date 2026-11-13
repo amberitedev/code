@@ -159,6 +159,78 @@ export type InstanceServerUpdate = { name: string, address: string, pack_status:
 
 export type InstanceServerDesync = { server_id: string, mode: DesyncServerMode, };
 
+export type CategoryTag = { name: string, project_type: string, header: string, icon: string, };
+
+export type LoaderTag = { name: string, icon: string, supported_project_types: Array<string>, };
+
+export type GameVersionTag = { version: string, version_type: string, date: string, major: boolean, };
+
+export type LoaderRef = { loader: string, };
+
+export type LoaderManifest = { gameVersions: Array<LoaderGameVersion>, versionGroups?: Array<LoaderVersionGroup>, };
+
+export type LoaderGameVersion = { id: string, stable: boolean, versionGroup?: string, loaders: Array<LoaderVersion>, };
+
+export type LoaderVersion = { id: string, url: string, stable: boolean, };
+
+export type LoaderVersionGroup = { id: string, loaders: Array<LoaderVersion>, };
+
+export type CacheKey = { id: string, };
+
+export type CacheKeys = { 
+/**
+ * A JSON array of ids.
+ */
+ids: string, cacheBehaviour?: CacheBehaviour, };
+
+export type CacheRead = { cacheBehaviour?: CacheBehaviour, };
+
+export type CacheSearch = { id: string, cacheBehaviour?: CacheBehaviour, };
+
+export type CacheBehaviour = "stale_while_revalidate_skip_offline" | "stale_while_revalidate" | "must_revalidate" | "bypass";
+
+export type CacheValueType = "project" | "project_v3" | "version" | "version_v3" | "user" | "team" | "organization" | "file" | "loader_manifest" | "minecraft_manifest" | "categories" | "report_types" | "loaders" | "game_versions" | "donation_platforms" | "file_hash" | "file_update" | "search_results" | "search_results_v3" | "modpack_files" | "embedded_content_metadata" | "project_versions" | "shared_instance_library";
+
+export type ModrinthProject = { id: string, slug: string | null, project_type: string, team: string, organization: string | null, title: string, description: string, body: string, published: string, updated: string, approved: string | null, status: string, license: ModrinthLicense, client_side: ModrinthSideType, server_side: ModrinthSideType, downloads: number, followers: number, categories: Array<string>, additional_categories: Array<string>, game_versions: Array<string>, loaders: Array<string>, versions: Array<string>, icon_url: string | null, raw_icon_url: string | null, issues_url: string | null, source_url: string | null, wiki_url: string | null, discord_url: string | null, donation_urls: Array<ModrinthDonationLink> | null, gallery: Array<ModrinthGalleryItem>, color: number | null, };
+
+export type ModrinthProjectV3 = { id: string, slug: string | null, [key: string]: JsonValue };
+
+export type ModrinthLicense = { id: string, name: string, url: string | null, };
+
+export type ModrinthGalleryItem = { url: string, raw_url: string, featured: boolean, title: string | null, description: string | null, created: string, ordering: number, };
+
+export type ModrinthDonationLink = { id: string, platform: string, url: string, };
+
+export type ModrinthSideType = "required" | "optional" | "unsupported" | "unknown";
+
+export type ModrinthVersion = { id: string, project_id: string, author_id: string, featured: boolean, name: string, version_number: string, changelog: string | null, changelog_url: string | null, date_published: string, downloads: number, version_type: string, files: Array<ModrinthVersionFile>, dependencies: Array<ModrinthDependency>, game_versions: Array<string>, loaders: Array<string>, };
+
+export type ModrinthVersionFile = { hashes: { [key in string]: string }, url: string, filename: string, primary: boolean, size: number, file_type: ModrinthFileType | null, };
+
+export type ModrinthFileType = "required-resource-pack" | "optional-resource-pack" | "sources-jar" | "dev-jar" | "javadoc-jar" | "signature" | "unknown";
+
+export type ModrinthDependency = { version_id: string | null, project_id: string | null, file_name: string | null, dependency_type: ModrinthDependencyType, };
+
+export type ModrinthDependencyType = "required" | "optional" | "incompatible" | "embedded";
+
+export type ModrinthUser = { id: string, username: string, avatar_url: string | null, bio: string | null, created: string, role: string, badges: number, };
+
+export type ModrinthTeamMember = { team_id: string, user: ModrinthUser, is_owner: boolean, role: string, ordering: number, };
+
+export type ModrinthOrganization = { id: string, slug: string, name: string, team_id: string, description: string, icon_url: string | null, color: number | null, members: Array<ModrinthTeamMember>, };
+
+export type ModrinthSearchResults = { search: string, result: ModrinthSearchResult, };
+
+export type ModrinthSearchResult = { hits: Array<ModrinthSearchEntry>, offset: number, limit: number, total_hits: number, };
+
+export type ModrinthSearchEntry = { project_id: string, project_type: string, slug: string | null, author: string, title: string, description: string, categories: Array<string>, display_categories: Array<string>, versions: Array<string>, downloads: number, follows: number, icon_url: string, date_created: string, date_modified: string, latest_version: string, license: string, client_side: string, server_side: string, gallery: Array<string>, featured_gallery: string | null, color: number | null, };
+
+export type ModrinthSearchResultsV3 = { search: string, result: ModrinthSearchResultV3, };
+
+export type ModrinthSearchResultV3 = { hits: Array<JsonValue>, page: number, hits_per_page: number, total_hits: number, };
+
+export type JsonValue = number | string | boolean | Array<JsonValue> | { [key in string]: JsonValue } | null;
+
 export type FriendPayload = { "event": "friend_request", from: string, } | { "event": "user_offline", id: string, } | { "event": "status_update", user_status: FriendStatusPayload, } | { "event": "status_sync" } | { "event": "friend_request_rejected", from: string, };
 
 export type FriendStatusPayload = { user_id: string, profile_name: string | null, last_update: string, };
@@ -204,4 +276,31 @@ export const worlds = {
 	DesyncInstanceServer: { method: "POST", path: "/instances/{id}/servers/desync", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<InstanceRef, null, InstanceServerDesync, void>,
 	EditInstanceServer: { method: "PUT", path: "/instances/{id}/servers/{index}", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<InstanceServerRef, null, InstanceServerUpdate, void>,
 	RemoveInstanceServer: { method: "DELETE", path: "/instances/{id}/servers/{index}", auth: "session", dangerous: false, body: "empty", response: "empty" } as Endpoint<InstanceServerRef, null, void, void>,
+}
+
+export const tags = {
+	GetCategoryTags: { method: "GET", path: "/tags/categories", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<CategoryTag>>,
+	GetLoaderTags: { method: "GET", path: "/tags/loaders", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<LoaderTag>>,
+	GetGameVersionTags: { method: "GET", path: "/tags/game-versions", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<GameVersionTag>>,
+}
+
+export const metadata = {
+	GetLoaderManifest: { method: "GET", path: "/metadata/loaders/{loader}", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<LoaderRef, null, void, LoaderManifest>,
+}
+
+export const cache = {
+	GetCachedProject: { method: "GET", path: "/cache/projects/{id}", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<CacheKey, CacheRead, void, ModrinthProject | null>,
+	GetCachedProjects: { method: "GET", path: "/cache/projects", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, CacheKeys, void, Array<ModrinthProject>>,
+	GetCachedProjectVersions: { method: "GET", path: "/cache/projects/{id}/versions", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<CacheKey, CacheRead, void, Array<ModrinthVersion> | null>,
+	GetCachedProjectV3: { method: "GET", path: "/cache/v3/projects/{id}", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<CacheKey, CacheRead, void, ModrinthProjectV3 | null>,
+	GetCachedProjectsV3: { method: "GET", path: "/cache/v3/projects", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, CacheKeys, void, Array<ModrinthProjectV3>>,
+	GetCachedVersion: { method: "GET", path: "/cache/versions/{id}", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<CacheKey, CacheRead, void, ModrinthVersion | null>,
+	GetCachedVersions: { method: "GET", path: "/cache/versions", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, CacheKeys, void, Array<ModrinthVersion>>,
+	GetCachedUser: { method: "GET", path: "/cache/users/{id}", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<CacheKey, CacheRead, void, ModrinthUser | null>,
+	GetCachedUsers: { method: "GET", path: "/cache/users", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, CacheKeys, void, Array<ModrinthUser>>,
+	GetCachedTeam: { method: "GET", path: "/cache/teams/{id}", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<CacheKey, CacheRead, void, Array<ModrinthTeamMember> | null>,
+	GetCachedOrganization: { method: "GET", path: "/cache/organizations/{id}", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<CacheKey, CacheRead, void, ModrinthOrganization | null>,
+	GetCachedSearchResults: { method: "GET", path: "/cache/search", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, CacheSearch, void, ModrinthSearchResults | null>,
+	GetCachedSearchResultsV3: { method: "GET", path: "/cache/v3/search", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, CacheSearch, void, ModrinthSearchResultsV3 | null>,
+	PurgeCache: { method: "POST", path: "/cache/purge", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, Array<CacheValueType>, void>,
 }

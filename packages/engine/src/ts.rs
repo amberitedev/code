@@ -3,11 +3,15 @@
 //! `cargo test -p engine -- --ignored write_ts`.
 
 use contracts::ts::config;
+use minecraft_meta_manifest::fabriclike::{
+    GameVersion as LoaderGameVersion, LoaderVersion, VersionGroup,
+};
 use ts_rs::TS;
 
 use crate::{
     api::pack::import::ImportLauncherType,
     endpoints::{
+        cache::{self, CacheKey, CacheKeys, CacheRead, CacheSearch},
         groups::{
             self, InstanceGroupRef, InstanceGroupUpdate, NewInstanceGroup,
         },
@@ -15,7 +19,9 @@ use crate::{
             self, Instance, InstanceIds, InstanceLink, InstanceRef,
             SharedInstanceAttachment,
         },
-        loading, store,
+        loading,
+        metadata::{self, LoaderRef},
+        store, tags,
         worlds::{
             self, InstanceServerDesync, InstanceServerRef,
             InstanceServerUpdate, ManagedInstanceServer, NewInstanceServer,
@@ -34,12 +40,17 @@ use crate::{
         DesyncServerMode, InstanceGroup, InstanceGroupMembershipUpdate,
         ServerSource,
     },
+    metadata::Manifest,
     state::{
-        ContentSetSyncStatus, DefaultPage, FeatureFlag, Hooks,
-        InstanceInstallStage, InstanceSyncedOptions, InstanceTabVisibility,
+        CacheBehaviour, CacheValueType, Category, ContentSetSyncStatus,
+        DefaultPage, Dependency, DependencyType, DonationLink, FeatureFlag,
+        FileType, GalleryItem, GameVersion, Hooks, InstanceInstallStage,
+        InstanceSyncedOptions, InstanceTabVisibility, License, Loader,
         Log4jEvent, MemorySettings, ModLoader, OnboardingChecklist,
-        ReleaseChannel, Settings, SharedInstanceRole, Theme, WindowSize,
-        content_store::StoreUsage,
+        Organization, Project, ProjectV3, ReleaseChannel, SearchEntry,
+        SearchResult, SearchResultV3, SearchResults, SearchResultsV3, Settings,
+        SharedInstanceRole, SideType, TeamMember, Theme, User, Version,
+        VersionFile, WindowSize, content_store::StoreUsage,
     },
     worlds::{
         DisplayStatus, ProtocolVersion, ServerGameProfile, ServerPackStatus,
@@ -129,6 +140,40 @@ fn file() -> String {
         Theme::decl(&cfg),
         DefaultPage::decl(&cfg),
         FeatureFlag::decl(&cfg),
+        Category::decl(&cfg),
+        Loader::decl(&cfg),
+        GameVersion::decl(&cfg),
+        LoaderRef::decl(&cfg),
+        Manifest::decl(&cfg),
+        LoaderGameVersion::decl(&cfg),
+        LoaderVersion::decl(&cfg),
+        VersionGroup::decl(&cfg),
+        CacheKey::decl(&cfg),
+        CacheKeys::decl(&cfg),
+        CacheRead::decl(&cfg),
+        CacheSearch::decl(&cfg),
+        CacheBehaviour::decl(&cfg),
+        CacheValueType::decl(&cfg),
+        Project::decl(&cfg),
+        ProjectV3::decl(&cfg),
+        License::decl(&cfg),
+        GalleryItem::decl(&cfg),
+        DonationLink::decl(&cfg),
+        SideType::decl(&cfg),
+        Version::decl(&cfg),
+        VersionFile::decl(&cfg),
+        FileType::decl(&cfg),
+        Dependency::decl(&cfg),
+        DependencyType::decl(&cfg),
+        User::decl(&cfg),
+        TeamMember::decl(&cfg),
+        Organization::decl(&cfg),
+        SearchResults::decl(&cfg),
+        SearchResult::decl(&cfg),
+        SearchEntry::decl(&cfg),
+        SearchResultsV3::decl(&cfg),
+        SearchResultV3::decl(&cfg),
+        serde_json::Value::decl(&cfg),
         // The payloads of the App's events that engine code still raises.
         FriendPayload::decl(&cfg),
         FriendStatusPayload::decl(&cfg),
@@ -144,6 +189,9 @@ fn file() -> String {
         ("loadingBars", loading::ts_entries()),
         ("worlds", worlds::ts_entries()),
         ("contentStore", store::ts_entries()),
+        ("tags", tags::ts_entries()),
+        ("metadata", metadata::ts_entries()),
+        ("cache", cache::ts_entries()),
     ]
     .map(|(name, entries)| format!("\nexport const {name} = {{\n{entries}}}\n"))
     .concat();

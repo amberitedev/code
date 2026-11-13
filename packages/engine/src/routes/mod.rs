@@ -1,10 +1,13 @@
 //! The engine's HTTP API. Each handler is a `pub fn`, so a host can mount one itself, wrapped in
 //! its own hook. A host's state gives the engine and its [`Access`].
 
+mod cache;
 mod groups;
 mod instances;
 mod loading;
+mod metadata;
 mod store;
+mod tags;
 #[cfg(test)]
 mod tests;
 mod worlds;
@@ -15,11 +18,21 @@ use axum::{Router, extract::FromRef};
 use contracts::{ApiError, ErrorCode, server::route};
 use serde::Deserialize;
 
-pub use self::{groups::*, instances::*, loading::*, store::*, worlds::*};
+pub use self::{
+    cache::*, groups::*, instances::*, loading::*, metadata::*, store::*,
+    tags::*, worlds::*,
+};
 use crate::{
     Engine,
     access::Access,
     endpoints::{
+        cache::{
+            GetCachedOrganization, GetCachedProject, GetCachedProjectV3,
+            GetCachedProjectVersions, GetCachedProjects, GetCachedProjectsV3,
+            GetCachedSearchResults, GetCachedSearchResultsV3, GetCachedTeam,
+            GetCachedUser, GetCachedUsers, GetCachedVersion, GetCachedVersions,
+            PurgeCache,
+        },
         groups::{
             CreateInstanceGroup, DeleteInstanceGroup, ListInstanceGroups,
             RenameInstanceGroup, SetInstanceGroupMemberships,
@@ -27,7 +40,9 @@ use crate::{
         },
         instances::{GetInstance, GetInstances, ListInstances},
         loading::ListLoadingBars,
+        metadata::GetLoaderManifest,
         store::{CleanStore, GetStoreUsage, SetStoreCacheLimit},
+        tags::{GetCategoryTags, GetGameVersionTags, GetLoaderTags},
         worlds::{
             AddInstanceServer, BackupWorld, DeleteWorld, DesyncInstanceServer,
             EditInstanceServer, EnsureManagedInstanceServer,
@@ -79,6 +94,26 @@ where
         route::<GetStoreUsage, _, _, _>(get_store_usage),
         route::<CleanStore, _, _, _>(clean_store),
         route::<SetStoreCacheLimit, _, _, _>(set_store_cache_limit),
+        route::<GetCategoryTags, _, _, _>(get_category_tags),
+        route::<GetLoaderTags, _, _, _>(get_loader_tags),
+        route::<GetGameVersionTags, _, _, _>(get_game_version_tags),
+        route::<GetLoaderManifest, _, _, _>(get_loader_manifest),
+        route::<GetCachedProject, _, _, _>(get_cached_project),
+        route::<GetCachedProjects, _, _, _>(get_cached_projects),
+        route::<GetCachedProjectVersions, _, _, _>(get_cached_project_versions),
+        route::<GetCachedProjectV3, _, _, _>(get_cached_project_v3),
+        route::<GetCachedProjectsV3, _, _, _>(get_cached_projects_v3),
+        route::<GetCachedVersion, _, _, _>(get_cached_version),
+        route::<GetCachedVersions, _, _, _>(get_cached_versions),
+        route::<GetCachedUser, _, _, _>(get_cached_user),
+        route::<GetCachedUsers, _, _, _>(get_cached_users),
+        route::<GetCachedTeam, _, _, _>(get_cached_team),
+        route::<GetCachedOrganization, _, _, _>(get_cached_organization),
+        route::<GetCachedSearchResults, _, _, _>(get_cached_search_results),
+        route::<GetCachedSearchResultsV3, _, _, _>(
+            get_cached_search_results_v3,
+        ),
+        route::<PurgeCache, _, _, _>(purge_cache),
     ]
     .into_iter()
     .fold(Router::new(), |router, (path, method)| {

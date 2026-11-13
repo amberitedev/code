@@ -1,10 +1,13 @@
 //! The engine's Endpoints, over its own types. `crate::routes` serves them; their TypeScript goes
 //! to `packages/contracts/ts/engine.ts` with the engine's other wire types.
 
+pub mod cache;
 pub mod groups;
 pub mod instances;
 pub mod loading;
+pub mod metadata;
 pub mod store;
+pub mod tags;
 pub mod worlds;
 
 /// Declares each route as a unit struct and, for the tests, the entries of its TypeScript module
