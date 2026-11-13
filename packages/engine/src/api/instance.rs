@@ -42,6 +42,7 @@ pub use self::icon::{
     edit_generated_icon, edit_generated_icon_if_empty, edit_icon,
 };
 pub(crate) use self::icon::{cache_icon, cache_icon_from_path};
+pub use self::icon::{edit_icon_image, read_icon, remove_icon};
 pub use self::install::get_optimal_jre_key;
 pub use self::lifecycle::{create, edit, remove};
 pub use self::paths::{get_full_path, get_mod_full_path};

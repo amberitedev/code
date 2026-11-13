@@ -333,6 +333,7 @@ pub struct Engine {
     pub(crate) installs: Arc<Installs>,
     pub(crate) instance_locks: InstanceLocks,
     pub(crate) publish_reports: crate::api::instance::PublishReports,
+    pub(crate) uploads: crate::routes::Uploads,
 
     /// Process manager
     pub process_manager: ProcessManager,
@@ -429,6 +430,7 @@ impl Engine {
             installs: Arc::new(Installs::new()),
             instance_locks: InstanceLocks::default(),
             publish_reports: Default::default(),
+            uploads: Default::default(),
             process_manager: ProcessManager::new(),
             pool,
             file_watcher,

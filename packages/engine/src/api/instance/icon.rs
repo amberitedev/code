@@ -48,6 +48,66 @@ pub async fn edit_icon(
     apply_instance_icon(instance_id, icon_path, None, state).await
 }
 
+/// Makes `image` the instance's icon, kept with the icon editor's `config` it was made from.
+pub async fn edit_icon_image(
+    state: &Engine,
+    instance_id: &str,
+    image: Vec<u8>,
+    config: Option<IconConfig>,
+) -> crate::Result<()> {
+    if let Some(config) = &config {
+        validate_icon_config(config)?;
+    }
+    let icon_path = cache_icon(Bytes::from(image), state).await?;
+    apply_instance_icon(
+        instance_id,
+        Some(icon_path.to_string_lossy().to_string()),
+        config,
+        state,
+    )
+    .await
+}
+
+/// The instance's icon, read only from the icon cache, so an `icon_path` naming any other file
+/// is never served.
+pub async fn read_icon(
+    state: &Engine,
+    instance_id: &str,
+) -> crate::Result<Option<Vec<u8>>> {
+    let instance = instance_rows::get_instance_by_id(instance_id, &state.pool)
+        .await?
+        .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
+    let Some(name) = instance
+        .icon_path
+        .as_deref()
+        .and_then(|path| Path::new(path).file_name()?.to_str())
+        .filter(|name| is_cached_icon_filename(name))
+    else {
+        return Ok(None);
+    };
+    let path = state.directories.caches_dir().join("icons").join(name);
+    match tokio::fs::read(&path).await {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(io::IOError::with_path(error, &path).into()),
+    }
+}
+
+/// Clears the instance's icon; `false` when it had none.
+pub async fn remove_icon(
+    state: &Engine,
+    instance_id: &str,
+) -> crate::Result<bool> {
+    let instance = instance_rows::get_instance_by_id(instance_id, &state.pool)
+        .await?
+        .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
+    if instance.icon_path.is_none() {
+        return Ok(false);
+    }
+    apply_instance_icon(instance_id, None, None, state).await?;
+    Ok(true)
+}
+
 pub async fn cache_icon_bytes(
     state: &Engine,
     icon_bytes: Vec<u8>,

@@ -821,3 +821,332 @@ async fn only_an_owner_manages_a_share_and_an_unshared_instance_reads_empty() {
         );
     }
 }
+
+async fn server_host(dir: &tempfile::TempDir) -> (Router, std::path::PathBuf) {
+    crate::install_crypto_provider();
+    let engine = Engine::new(crate::state::EngineConfig {
+        side: contracts::Side::Server,
+        ..crate::state::tests::config(dir.path().to_path_buf())
+    })
+    .await
+    .unwrap();
+    add_instance(&engine, "local:a", "Survival").await;
+    let root = engine.directories.instances_dir().join("Survival");
+    std::fs::create_dir_all(&root).unwrap();
+    let router = super::routes().with_state(Host {
+        engine,
+        access: Arc::new(FakeAccess {
+            granted: Some(Permission::Owner),
+        }),
+    });
+    (router, root)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn files_need_an_editor_and_a_viewer_reads_only_the_icon() {
+    let dir = tempfile::tempdir().unwrap();
+    let viewer = host_granting(&dir, Some(Permission::View)).await;
+    let files = "/instances/local%3Aa/files";
+    let uploads = "/instances/local%3Aa/uploads";
+    for (method, uri, body) in [
+        ("GET", format!("{files}?path="), None),
+        ("GET", format!("{files}/content?path=a.txt"), None),
+        (
+            "PUT",
+            format!("{files}/content?path=a.txt&create_only=false"),
+            None,
+        ),
+        ("POST", format!("{files}/directories?path=notes"), None),
+        (
+            "POST",
+            format!("{files}/move"),
+            Some(json!({ "source": "a", "destination": "b" })),
+        ),
+        ("DELETE", format!("{files}?path=a&recursive=true"), None),
+        (
+            "POST",
+            format!("{files}/extract"),
+            Some(
+                json!({ "path": "a.zip", "override_conflicts": false, "dry_run": true }),
+            ),
+        ),
+        ("GET", format!("{files}/stat?path=a"), None),
+        (
+            "POST",
+            format!("{files}/zip"),
+            Some(json!({ "target_type": "Directory", "path": "config" })),
+        ),
+        (
+            "POST",
+            uploads.to_owned(),
+            Some(json!({ "scope": "files" })),
+        ),
+        ("GET", format!("{uploads}?scope=files"), None),
+        ("POST", format!("{uploads}/u/files?path=a.txt"), None),
+        ("POST", format!("{uploads}/u/finalize"), None),
+        ("DELETE", format!("{uploads}/u"), None),
+        ("PUT", "/instances/local%3Aa/icon".to_owned(), None),
+        (
+            "PUT",
+            "/instances/local%3Aa/icon/edited".to_owned(),
+            Some(json!({ "config": null, "image": [] })),
+        ),
+        ("DELETE", "/instances/local%3Aa/icon".to_owned(), None),
+    ] {
+        let (status, _) = send(&viewer, method, &uri, body).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{method} {uri}");
+    }
+    let (status, _) =
+        send(&viewer, "GET", "/instances/local%3Aa/icon", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "allowed, but there is none");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_icon_is_set_from_an_image_or_the_editor_then_removed() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = host(&dir, true).await;
+    let icon = "/instances/local%3Aa/icon";
+    let mut wide = Vec::new();
+    image::RgbaImage::new(1024, 512)
+        .write_to(
+            &mut std::io::Cursor::new(&mut wide),
+            image::ImageFormat::Png,
+        )
+        .unwrap();
+
+    let (status, _) =
+        send_raw(&router, "PUT", icon, b"not an image".to_vec()).await;
+    assert!(!status.is_success());
+    let (status, _) = send_raw(&router, "PUT", icon, wide.clone()).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, read) = send_raw(&router, "GET", icon, Vec::new()).await;
+    assert_eq!(status, StatusCode::OK);
+    let read = image::load_from_memory(&read).unwrap();
+    assert_eq!((read.width(), read.height()), (512, 256), "shape kept");
+    let (_, instance) =
+        send(&router, "GET", "/instances/local%3Aa", None).await;
+    assert_eq!(instance["icon_config"], Value::Null);
+
+    let config = json!({ "background": { "type": "color", "value": "#c78aff" }, "symbol": "dusk_block" });
+    let (status, _) = send(
+        &router,
+        "PUT",
+        &format!("{icon}/edited"),
+        Some(json!({ "config": config, "image": wide })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, instance) =
+        send(&router, "GET", "/instances/local%3Aa", None).await;
+    assert_eq!(instance["icon_config"], config);
+
+    assert_eq!(
+        send(&router, "DELETE", icon, None).await.0,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        send(&router, "GET", icon, None).await.0,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        send(&router, "DELETE", icon, None).await.0,
+        StatusCode::NOT_FOUND
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_servers_files_stay_in_its_folder_and_never_replace_what_it_owns() {
+    let dir = tempfile::tempdir().unwrap();
+    let (router, root) = server_host(&dir).await;
+    let files = "/instances/local%3Aa/files";
+    let write = |path: &str, create_only: bool| {
+        format!("{files}/content?path={path}&create_only={create_only}")
+    };
+
+    let (status, _) = send_raw(
+        &router,
+        "PUT",
+        &write("config%2Fa.toml", true),
+        b"x = 1".to_vec(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) =
+        send_raw(&router, "PUT", &write("config%2Fa.toml", true), vec![1])
+            .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let (status, listed) =
+        send(&router, "GET", &format!("{files}?path=config"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(listed[0]["path"], "config/a.toml");
+    assert_eq!(listed[0]["size"], 5);
+    let (status, read) = send_raw(
+        &router,
+        "GET",
+        &format!("{files}/content?path=config%2Fa.toml"),
+        Vec::new(),
+    )
+    .await;
+    assert_eq!((status, &read[..]), (StatusCode::OK, &b"x = 1"[..]));
+    let (status, stat) =
+        send(&router, "GET", &format!("{files}/stat?path=config"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(stat["type"], "directory");
+    for path in [
+        "..%2Fescape.txt",
+        "a%2F..%2F..%2Fescape.txt",
+        "C%3A%2Fescape.txt",
+    ] {
+        let (status, _) =
+            send_raw(&router, "PUT", &write(path, false), vec![1]).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{path}");
+    }
+    assert!(!has_file_named(dir.path(), "escape.txt"));
+
+    // A write is an explicit edit and may change a server-owned file; nothing else replaces one.
+    let (status, _) = send_raw(
+        &router,
+        "PUT",
+        &write("server.properties", false),
+        b"motd=Edited\n".to_vec(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let mut archive = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    for (name, body) in [
+        ("server.properties", "motd=Theirs\n"),
+        ("mods/a.jar", "jar"),
+    ] {
+        archive
+            .start_file(name, zip::write::SimpleFileOptions::default())
+            .unwrap();
+        std::io::Write::write_all(&mut archive, body.as_bytes()).unwrap();
+    }
+    let archive = archive.finish().unwrap().into_inner();
+    send_raw(&router, "PUT", &write("upload.zip", false), archive).await;
+    let extract = |dry_run: bool| {
+        Some(
+            json!({ "path": "upload.zip", "target": "", "override_conflicts": true, "dry_run": dry_run }),
+        )
+    };
+    let (status, dry) =
+        send(&router, "POST", &format!("{files}/extract"), extract(true)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(dry["conflicting_files"], json!(["server.properties"]));
+    let (status, _) =
+        send(&router, "POST", &format!("{files}/extract"), extract(false))
+            .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        std::fs::read_to_string(root.join("mods/a.jar")).unwrap(),
+        "jar"
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join("server.properties")).unwrap(),
+        "motd=Edited\n"
+    );
+
+    let uploads = "/instances/local%3Aa/uploads";
+    let open =
+        || send(&router, "POST", uploads, Some(json!({ "scope": "files" })));
+    let (_, upload) = open().await;
+    let upload = upload["upload_id"].as_str().unwrap().to_owned();
+    for path in ["config%2Fb.toml", "server.properties"] {
+        let (status, _) = send_raw(
+            &router,
+            "POST",
+            &format!("{uploads}/{upload}/files?path={path}"),
+            b"y = 2".to_vec(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{path}");
+    }
+    let (status, _) = send(
+        &router,
+        "POST",
+        &format!("{uploads}/{upload}/finalize"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert!(!root.join("config/b.toml").exists(), "all or nothing");
+    let (_, upload) = open().await;
+    let upload = upload["upload_id"].as_str().unwrap().to_owned();
+    send_raw(
+        &router,
+        "POST",
+        &format!("{uploads}/{upload}/files?path=config%2Fb.toml"),
+        b"y = 2".to_vec(),
+    )
+    .await;
+    let (status, finalized) = send(
+        &router,
+        "POST",
+        &format!("{uploads}/{upload}/finalize"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(finalized["status"], "finalized");
+    assert_eq!(
+        std::fs::read_to_string(root.join("config/b.toml")).unwrap(),
+        "y = 2"
+    );
+
+    let (status, _) = send(
+        &router,
+        "POST",
+        &format!("{files}/zip"),
+        Some(json!({ "target_type": "Directory", "path": "config" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let mut zipped = zip::ZipArchive::new(
+        std::fs::File::open(root.join("config.zip")).unwrap(),
+    )
+    .unwrap();
+    let mut names: Vec<_> = (0..zipped.len())
+        .map(|index| {
+            zipped.by_index(index).unwrap().name().unwrap().into_owned()
+        })
+        .collect();
+    names.sort_unstable();
+    assert_eq!(names, ["config/", "config/a.toml", "config/b.toml"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_servers_file_routes_follow_no_link() {
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::write(outside.path().join("secret.txt"), "secret").unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let (router, root) = server_host(&dir).await;
+    let link = root.join("linked");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(outside.path(), &link).unwrap();
+    #[cfg(windows)]
+    assert!(
+        std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&link)
+            .arg(outside.path())
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    let file = "/instances/local%3Aa/files/content?path=linked%2Fsecret.txt";
+    let (status, _) = send_raw(&router, "GET", file, Vec::new()).await;
+    assert!(!status.is_success());
+    let (status, _) = send_raw(
+        &router,
+        "PUT",
+        &format!("{file}&create_only=false"),
+        b"overwritten".to_vec(),
+    )
+    .await;
+    assert!(!status.is_success());
+    assert_eq!(
+        std::fs::read_to_string(outside.path().join("secret.txt")).unwrap(),
+        "secret"
+    );
+}

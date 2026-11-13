@@ -277,9 +277,31 @@ export type InstanceFileDelete = { path: string,
  */
 recursive: boolean, };
 
-export type InstanceZipExtract = { path: string, override_conflicts: boolean, dry_run: boolean, };
+export type InstanceZipExtract = { path: string, target?: string, override_conflicts: boolean, dry_run: boolean, };
 
 export type ExtractDryRunResult = { modpack_name: string | null, conflicting_files: Array<string>, };
+
+export type InstanceFileStat = { name: string, path: string, size: number, type: InstanceFileKind, modified: string, created: string, };
+
+export type InstanceFileKind = "regular" | "directory" | "symlink" | "other";
+
+export type InstanceZipRequest = { "target_type": "Directory", path: string, } | { "target_type": "ManyPaths", parent: string, include: Array<string>, target: string, };
+
+export type InstanceUploadRef = { id: string, upload: string, };
+
+export type InstanceUploadScope = { scope: UploadScope, };
+
+export type UploadScope = "content" | "files";
+
+export type InstanceUploadStatus = "active" | "uploading" | "finalizing" | "cancelled" | "finalized";
+
+export type InstanceUpload = { upload_id: string, status: InstanceUploadStatus, created_at: number, updated_at: number, last_upload_at: number | null, expires_at: number, entry_count: number, uploaded_byte_count: number, };
+
+export type EditedInstanceIcon = { config: SharedIconConfig, 
+/**
+ * The icon the editor drew, as an image.
+ */
+image: Array<number>, };
 
 export type InstanceInstall = { force: boolean, };
 
@@ -566,6 +588,17 @@ export const instanceFiles = {
 	MoveInstanceFile: { method: "POST", path: "/instances/{id}/files/move", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<InstanceRef, null, InstanceFileMove, void>,
 	DeleteInstanceFile: { method: "DELETE", path: "/instances/{id}/files", auth: "session", dangerous: false, body: "empty", response: "empty" } as Endpoint<InstanceRef, InstanceFileDelete, void, void>,
 	ExtractInstanceZip: { method: "POST", path: "/instances/{id}/files/extract", auth: "session", dangerous: false, body: "json", response: "json" } as Endpoint<InstanceRef, null, InstanceZipExtract, ExtractDryRunResult | null>,
+	StatInstanceFile: { method: "GET", path: "/instances/{id}/files/stat", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceRef, InstanceFilePath, void, InstanceFileStat>,
+	ZipInstanceFiles: { method: "POST", path: "/instances/{id}/files/zip", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<InstanceRef, null, InstanceZipRequest, void>,
+	OpenInstanceUpload: { method: "POST", path: "/instances/{id}/uploads", auth: "session", dangerous: false, body: "json", response: "json" } as Endpoint<InstanceRef, null, InstanceUploadScope, InstanceUpload>,
+	GetInstanceUpload: { method: "GET", path: "/instances/{id}/uploads", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceRef, InstanceUploadScope, void, InstanceUpload | null>,
+	AddInstanceUploadFile: { method: "POST", path: "/instances/{id}/uploads/{upload}/files", auth: "session", dangerous: false, body: "stream", response: "json" } as Endpoint<InstanceUploadRef, InstanceFilePath, Blob, InstanceUpload>,
+	FinalizeInstanceUpload: { method: "POST", path: "/instances/{id}/uploads/{upload}/finalize", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceUploadRef, null, void, InstanceUpload>,
+	CancelInstanceUpload: { method: "DELETE", path: "/instances/{id}/uploads/{upload}", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceUploadRef, null, void, InstanceUpload>,
+	GetInstanceIcon: { method: "GET", path: "/instances/{id}/icon", auth: "session", dangerous: false, body: "empty", response: "raw" } as Endpoint<InstanceRef, null, void, Blob>,
+	SetInstanceIcon: { method: "PUT", path: "/instances/{id}/icon", auth: "session", dangerous: false, body: "raw", response: "empty" } as Endpoint<InstanceRef, null, Blob, void>,
+	SetEditedInstanceIcon: { method: "PUT", path: "/instances/{id}/icon/edited", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<InstanceRef, null, EditedInstanceIcon, void>,
+	RemoveInstanceIcon: { method: "DELETE", path: "/instances/{id}/icon", auth: "session", dangerous: false, body: "empty", response: "empty" } as Endpoint<InstanceRef, null, void, void>,
 }
 
 export const installs = {
