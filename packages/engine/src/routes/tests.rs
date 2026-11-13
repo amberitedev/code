@@ -474,3 +474,174 @@ async fn logs_are_read_and_deleted_by_file_name_only() {
     assert_eq!(status, StatusCode::NO_CONTENT);
     assert!(!logs_dir.join("latest.log").exists());
 }
+
+async fn send_raw(
+    router: &Router,
+    method: &str,
+    uri: &str,
+    body: Vec<u8>,
+) -> (StatusCode, Vec<u8>) {
+    let request = Request::builder()
+        .method(method)
+        .uri(uri)
+        .body(Body::from(body))
+        .unwrap();
+    let response = router.clone().oneshot(request).await.unwrap();
+    let status = response.status();
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    (status, bytes.to_vec())
+}
+
+fn has_file_named(dir: &std::path::Path, name: &str) -> bool {
+    std::fs::read_dir(dir).unwrap().any(|entry| {
+        let entry = entry.unwrap();
+        entry.file_name() == name
+            || (entry.file_type().unwrap().is_dir()
+                && has_file_named(&entry.path(), name))
+    })
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_files_tab_writes_reads_moves_and_deletes_raw_bytes() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = host(&dir, true).await;
+    let files = "/instances/local%3Aa/files";
+    // Past axum's 2 MB default body limit.
+    let bytes = vec![7u8; 3 * 1024 * 1024];
+
+    let write = format!("{files}/content?path=config%2Fbig.bin&create_only=");
+    let (status, _) =
+        send_raw(&router, "PUT", &format!("{write}false"), bytes.clone()).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) =
+        send_raw(&router, "PUT", &format!("{write}true"), vec![1]).await;
+    assert!(!status.is_success());
+    let (status, read) = send_raw(
+        &router,
+        "GET",
+        &format!("{files}/content?path=config%2Fbig.bin"),
+        Vec::new(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(read == bytes);
+
+    let (status, _) = send(
+        &router,
+        "POST",
+        &format!("{files}/directories?path=saves"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) = send(
+        &router,
+        "POST",
+        &format!("{files}/move"),
+        Some(json!({ "source": "config/big.bin", "destination": "saves/big.bin" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, listed) =
+        send(&router, "GET", &format!("{files}?path=saves"), None).await;
+    assert_eq!(listed[0]["path"], "saves/big.bin");
+    assert_eq!(listed[0]["type"], "file");
+    assert_eq!(listed[0]["size"], bytes.len());
+
+    let (status, _) = send(
+        &router,
+        "DELETE",
+        &format!("{files}?path=saves&recursive=true"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, root) = send(&router, "GET", &format!("{files}?path="), None).await;
+    assert_eq!(root.as_array().unwrap().len(), 1);
+    assert_eq!(root[0]["path"], "config");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_files_tab_refuses_paths_that_leave_the_instance() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = host(&dir, true).await;
+    let files = "/instances/local%3Aa/files";
+    let (status, _) = send_raw(
+        &router,
+        "PUT",
+        &format!("{files}/content?path=inside.txt&create_only=false"),
+        Vec::new(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    for path in [
+        "..%2Fescape.txt",
+        "a%2F..%2F..%2Fescape.txt",
+        "C%3A%2Fescape.txt",
+    ] {
+        let (status, _) = send_raw(
+            &router,
+            "PUT",
+            &format!("{files}/content?path={path}&create_only=false"),
+            vec![1],
+        )
+        .await;
+        assert!(!status.is_success(), "{path} was written");
+        let (status, _) = send(
+            &router,
+            "POST",
+            &format!("{files}/move"),
+            Some(json!({ "source": "inside.txt", "destination": path.replace("%2F", "/").replace("%3A", ":") })),
+        )
+        .await;
+        assert!(!status.is_success(), "{path} was a move target");
+    }
+    let (status, _) =
+        send(&router, "GET", &format!("{files}?path=.."), None).await;
+    assert!(!status.is_success());
+
+    let mut archive = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    archive
+        .start_file("../escape.txt", zip::write::SimpleFileOptions::default())
+        .unwrap();
+    std::io::Write::write_all(&mut archive, b"out").unwrap();
+    let archive = archive.finish().unwrap().into_inner();
+    send_raw(
+        &router,
+        "PUT",
+        &format!("{files}/content?path=slip.zip&create_only=false"),
+        archive,
+    )
+    .await;
+    let (status, _) = send(
+        &router,
+        "POST",
+        &format!("{files}/extract"),
+        Some(json!({ "path": "slip.zip", "override_conflicts": true, "dry_run": false })),
+    )
+    .await;
+    assert!(!status.is_success());
+
+    #[cfg(unix)]
+    {
+        let outside = dir.path().join("outside");
+        std::fs::create_dir(&outside).unwrap();
+        std::fs::write(outside.join("secret.txt"), "secret").unwrap();
+        std::os::unix::fs::symlink(
+            &outside,
+            dir.path().join("profiles/Survival/link"),
+        )
+        .unwrap();
+        let (status, _) = send_raw(
+            &router,
+            "GET",
+            &format!("{files}/content?path=link%2Fsecret.txt"),
+            Vec::new(),
+        )
+        .await;
+        assert!(!status.is_success());
+    }
+
+    assert!(!has_file_named(dir.path(), "escape.txt"));
+}

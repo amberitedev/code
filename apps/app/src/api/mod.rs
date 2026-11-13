@@ -8,8 +8,6 @@ pub mod logs;
 pub mod shortcuts;
 pub mod utils;
 
-pub mod files;
-
 pub(crate) mod oauth_utils;
 
 pub type Result<T> = std::result::Result<T, CommandError>;

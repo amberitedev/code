@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { EditingFile, ExtractDryRunResult, FileItem, UploadState } from '@modrinth/ui'
+import type { EditingFile, FileItem, UploadState } from '@modrinth/ui'
 import {
 	commonMessages,
 	defineMessages,
@@ -11,13 +11,21 @@ import {
 	useVIntl,
 } from '@modrinth/ui'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
-import { invoke } from '@tauri-apps/api/core'
 import { computed, ref, watch } from 'vue'
 
 import { useAppEvent } from '@/composables/use-app-event'
 import { get_full_path } from '@/helpers/instance'
 import { highlightInFolder } from '@/helpers/utils'
-import { saveInstanceFileAs } from '@/platform/app-lib/files/commands'
+import {
+	createInstanceDirectory,
+	deleteInstanceFile,
+	extractInstanceZip,
+	listInstanceFiles,
+	moveInstanceFile,
+	readInstanceFile,
+	saveInstanceFileAs,
+	writeInstanceFile,
+} from '@/platform/app-lib/files/commands'
 import { save } from '@/platform/dialog'
 
 import { injectInstancePage } from '../instance-context'
@@ -65,7 +73,7 @@ const editingFile = ref<EditingFile | null>(null)
 debug('setup: start, instance.id =', instanceId.value)
 
 async function listDirectory(dirPath: string): Promise<FileItem[]> {
-	return invoke('plugin:files|file_list', { instanceId: instanceId.value, path: dirPath })
+	return listInstanceFiles(instanceId.value, dirPath)
 }
 
 function isReadOnly(path: string): boolean {
@@ -76,13 +84,8 @@ function isReadOnly(path: string): boolean {
 	)
 }
 
-async function writeBytes(path: string, bytes: Uint8Array, createOnly = false) {
-	await invoke('plugin:files|file_write', {
-		instanceId: instanceId.value,
-		path,
-		bytes: Array.from(bytes),
-		createOnly,
-	})
+async function writeBytes(path: string, bytes: Uint8Array<ArrayBuffer>, createOnly = false) {
+	await writeInstanceFile(instanceId.value, path, new Blob([bytes]), createOnly)
 }
 
 function directoryQueryOptions(dirPath: string) {
@@ -166,10 +169,7 @@ async function handleCreateItem(name: string, type: 'file' | 'directory') {
 	const targetPath = currentPath.value ? `${currentPath.value}/${name}` : name
 	try {
 		if (type === 'directory') {
-			await invoke('plugin:files|file_create_directory', {
-				instanceId: instanceId.value,
-				path: targetPath,
-			})
+			await createInstanceDirectory(instanceId.value, targetPath)
 		} else {
 			await writeBytes(targetPath, new Uint8Array(), true)
 		}
@@ -187,11 +187,7 @@ async function handleRenameItem(path: string, newName: string) {
 	const parentDir = path.includes('/') ? path.substring(0, path.lastIndexOf('/')) : ''
 	const newPath = parentDir ? `${parentDir}/${newName}` : newName
 	try {
-		await invoke('plugin:files|file_rename', {
-			instanceId: instanceId.value,
-			source: path,
-			destination: newPath,
-		})
+		await moveInstanceFile(instanceId.value, path, newPath)
 		await refresh()
 	} catch (e) {
 		addNotification({
@@ -204,7 +200,7 @@ async function handleRenameItem(path: string, newName: string) {
 
 async function handleMoveItem(source: string, destination: string) {
 	try {
-		await invoke('plugin:files|file_rename', { instanceId: instanceId.value, source, destination })
+		await moveInstanceFile(instanceId.value, source, destination)
 		await refresh()
 	} catch (e) {
 		addNotification({
@@ -217,7 +213,7 @@ async function handleMoveItem(source: string, destination: string) {
 
 async function handleDeleteItem(path: string, recursive: boolean) {
 	try {
-		await invoke('plugin:files|file_delete', { instanceId: instanceId.value, path, recursive })
+		await deleteInstanceFile(instanceId.value, path, recursive)
 		await refresh()
 	} catch (e) {
 		addNotification({
@@ -229,19 +225,11 @@ async function handleDeleteItem(path: string, recursive: boolean) {
 }
 
 async function handleReadFile(path: string): Promise<string> {
-	const bytes = await invoke<number[]>('plugin:files|file_read', {
-		instanceId: instanceId.value,
-		path,
-	})
-	return new TextDecoder().decode(new Uint8Array(bytes))
+	return (await readInstanceFile(instanceId.value, path)).text()
 }
 
 async function handleReadFileAsBlob(path: string): Promise<Blob> {
-	const bytes = await invoke<number[]>('plugin:files|file_read', {
-		instanceId: instanceId.value,
-		path,
-	})
-	return new Blob([new Uint8Array(bytes)])
+	return readInstanceFile(instanceId.value, path)
 }
 
 async function handleWriteFile(path: string, content: string) {
@@ -306,12 +294,7 @@ async function handleUploadFiles(files: File[]) {
 
 async function handleExtractFile(path: string, override: boolean, dry: boolean) {
 	try {
-		return await invoke<ExtractDryRunResult>('plugin:files|file_extract_zip', {
-			instanceId: instanceId.value,
-			filePath: path,
-			overrideConflicts: override,
-			dryRun: dry,
-		})
+		return await extractInstanceZip(instanceId.value, path, override, dry)
 	} catch (e) {
 		addNotification({
 			title: formatMessage(commonMessages.extractFailedLabel),

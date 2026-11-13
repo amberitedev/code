@@ -12,10 +12,15 @@ use std::time::UNIX_EPOCH;
 use tokio::fs;
 
 #[derive(Serialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct InstanceFileItem {
     pub name: String,
     #[serde(rename = "type")]
+    #[cfg_attr(
+        feature = "export-ts",
+        ts(type = "\"file\" | \"directory\" | \"symlink\"")
+    )]
     pub kind: String,
     pub path: String,
     pub modified: u64,

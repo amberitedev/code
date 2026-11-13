@@ -2,6 +2,7 @@
 //! its own hook. A host's state gives the engine and its [`Access`].
 
 mod cache;
+mod files;
 mod groups;
 mod instances;
 mod jre;
@@ -17,12 +18,15 @@ mod worlds;
 
 use std::sync::Arc;
 
-use axum::{Router, extract::FromRef};
+use axum::{
+    Router,
+    extract::{DefaultBodyLimit, FromRef},
+};
 use contracts::{ApiError, ErrorCode, server::route};
 use serde::Deserialize;
 
 pub use self::{
-    cache::*, groups::*, instances::*, jre::*, loading::*, logs::*,
+    cache::*, files::*, groups::*, instances::*, jre::*, loading::*, logs::*,
     metadata::*, process::*, store::*, tags::*, worlds::*,
 };
 use crate::{
@@ -35,6 +39,11 @@ use crate::{
             GetCachedSearchResults, GetCachedSearchResultsV3, GetCachedTeam,
             GetCachedUser, GetCachedUsers, GetCachedVersion, GetCachedVersions,
             PurgeCache,
+        },
+        files::{
+            CreateInstanceDirectory, DeleteInstanceFile, ExtractInstanceZip,
+            ListInstanceFiles, MoveInstanceFile, ReadInstanceFile,
+            WriteInstanceFile,
         },
         groups::{
             CreateInstanceGroup, DeleteInstanceGroup, ListInstanceGroups,
@@ -71,6 +80,8 @@ where
     Arc<Engine>: FromRef<S>,
     Arc<dyn Access>: FromRef<S>,
 {
+    let (write_path, write) =
+        route::<WriteInstanceFile, _, _, _>(write_instance_file);
     [
         route::<ListInstances, _, _, _>(list_instances),
         route::<GetInstances, _, _, _>(get_instances),
@@ -139,6 +150,14 @@ where
         route::<FindJavaInstalls, _, _, _>(find_java_installs),
         route::<InstallJava, _, _, _>(install_java),
         route::<GetSystemMemory, _, _, _>(get_system_memory),
+        route::<ListInstanceFiles, _, _, _>(list_instance_files),
+        route::<ReadInstanceFile, _, _, _>(read_instance_file),
+        // An upload is often past axum's 2 MB default.
+        (write_path, write.layer(DefaultBodyLimit::disable())),
+        route::<CreateInstanceDirectory, _, _, _>(create_instance_directory),
+        route::<MoveInstanceFile, _, _, _>(move_instance_file),
+        route::<DeleteInstanceFile, _, _, _>(delete_instance_file),
+        route::<ExtractInstanceZip, _, _, _>(extract_instance_zip),
     ]
     .into_iter()
     .fold(Router::new(), |router, (path, method)| {

@@ -51,7 +51,6 @@ tracing = { workspace = true }
 url = { workspace = true }
 uuid = { workspace = true, features = ["serde", "v4"] }
 whoami = { workspace = true }
-zip = { workspace = true }
 
 [dependencies.browser-bridge]
 path = "../../packages/browser-bridge"

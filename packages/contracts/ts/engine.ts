@@ -259,6 +259,28 @@ export type JavaVersion = { parsed_version: number, version: string, architectur
 
 export type JavaInstallsQuery = { version?: number, };
 
+export type InstanceFileItem = { name: string, type: "file" | "directory" | "symlink", path: string, modified: number, created: number, size: number | null, count: number | null, readOnly: boolean, };
+
+export type InstanceFilePath = { path: string, };
+
+export type InstanceFileWrite = { path: string, 
+/**
+ * Refuses to replace a file already there.
+ */
+create_only: boolean, };
+
+export type InstanceFileMove = { source: string, destination: string, };
+
+export type InstanceFileDelete = { path: string, 
+/**
+ * Deletes a folder that is not empty.
+ */
+recursive: boolean, };
+
+export type InstanceZipExtract = { path: string, override_conflicts: boolean, dry_run: boolean, };
+
+export type ExtractDryRunResult = { modpack_name: string | null, conflicting_files: Array<string>, };
+
 export type FriendPayload = { "event": "friend_request", from: string, } | { "event": "user_offline", id: string, } | { "event": "status_update", user_status: FriendStatusPayload, } | { "event": "status_sync" } | { "event": "friend_request_rejected", from: string, };
 
 export type FriendStatusPayload = { user_id: string, profile_name: string | null, last_update: string, };
@@ -359,4 +381,14 @@ export const java = {
 	FindJavaInstalls: { method: "GET", path: "/java/installs", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, JavaInstallsQuery, void, Array<JavaVersion>>,
 	InstallJava: { method: "POST", path: "/java/installs", auth: "session", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, number, string>,
 	GetSystemMemory: { method: "GET", path: "/system/memory", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, number>,
+}
+
+export const instanceFiles = {
+	ListInstanceFiles: { method: "GET", path: "/instances/{id}/files", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceRef, InstanceFilePath, void, Array<InstanceFileItem>>,
+	ReadInstanceFile: { method: "GET", path: "/instances/{id}/files/content", auth: "session", dangerous: false, body: "empty", response: "raw" } as Endpoint<InstanceRef, InstanceFilePath, void, Blob>,
+	WriteInstanceFile: { method: "PUT", path: "/instances/{id}/files/content", auth: "session", dangerous: false, body: "raw", response: "empty" } as Endpoint<InstanceRef, InstanceFileWrite, Blob, void>,
+	CreateInstanceDirectory: { method: "POST", path: "/instances/{id}/files/directories", auth: "session", dangerous: false, body: "empty", response: "empty" } as Endpoint<InstanceRef, InstanceFilePath, void, void>,
+	MoveInstanceFile: { method: "POST", path: "/instances/{id}/files/move", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<InstanceRef, null, InstanceFileMove, void>,
+	DeleteInstanceFile: { method: "DELETE", path: "/instances/{id}/files", auth: "session", dangerous: false, body: "empty", response: "empty" } as Endpoint<InstanceRef, InstanceFileDelete, void, void>,
+	ExtractInstanceZip: { method: "POST", path: "/instances/{id}/files/extract", auth: "session", dangerous: false, body: "json", response: "json" } as Endpoint<InstanceRef, null, InstanceZipExtract, ExtractDryRunResult | null>,
 }

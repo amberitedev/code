@@ -347,7 +347,6 @@ fn main() {
         .plugin(api::install::init())
         .plugin(api::instance::init())
         .plugin(api::logs::init())
-        .plugin(api::files::init())
         .manage(updater)
         .manage(engine)
         .invoke_handler(tauri::generate_handler![show_window]);

@@ -12,6 +12,10 @@ use crate::{
     api::pack::import::ImportLauncherType,
     endpoints::{
         cache::{self, CacheKey, CacheKeys, CacheRead, CacheSearch},
+        files::{
+            self, ExtractDryRunResult, InstanceFileDelete, InstanceFileMove,
+            InstanceFilePath, InstanceFileWrite, InstanceZipExtract,
+        },
         groups::{
             self, InstanceGroupRef, InstanceGroupUpdate, NewInstanceGroup,
         },
@@ -40,8 +44,8 @@ use crate::{
         model::{InstallApiErrorDetails, InstallJobDisplay, InstallTarget},
     },
     instance::{
-        DesyncServerMode, InstanceGroup, InstanceGroupMembershipUpdate,
-        ServerSource,
+        DesyncServerMode, InstanceFileItem, InstanceGroup,
+        InstanceGroupMembershipUpdate, ServerSource,
     },
     logs::{CensoredString, LogType, Logs},
     metadata::Manifest,
@@ -188,6 +192,13 @@ fn file() -> String {
         ProcessRef::decl(&cfg),
         JavaVersion::decl(&cfg),
         JavaInstallsQuery::decl(&cfg),
+        InstanceFileItem::decl(&cfg),
+        InstanceFilePath::decl(&cfg),
+        InstanceFileWrite::decl(&cfg),
+        InstanceFileMove::decl(&cfg),
+        InstanceFileDelete::decl(&cfg),
+        InstanceZipExtract::decl(&cfg),
+        ExtractDryRunResult::decl(&cfg),
         // The payloads of the App's events that engine code still raises.
         FriendPayload::decl(&cfg),
         FriendStatusPayload::decl(&cfg),
@@ -209,6 +220,7 @@ fn file() -> String {
         ("logs", logs::ts_entries()),
         ("processes", process::ts_entries()),
         ("java", jre::ts_entries()),
+        ("instanceFiles", files::ts_entries()),
     ]
     .map(|(name, entries)| format!("\nexport const {name} = {{\n{entries}}}\n"))
     .concat();

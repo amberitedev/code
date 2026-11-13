@@ -2,6 +2,7 @@
 //! to `packages/contracts/ts/engine.ts` with the engine's other wire types.
 
 pub mod cache;
+pub mod files;
 pub mod groups;
 pub mod instances;
 pub mod jre;

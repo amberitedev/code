@@ -10242,7 +10242,6 @@ dependencies = [
  "uuid 1.28.0",
  "whoami",
  "windows 0.61.3",
- "zip 9.0.5",
 ]
 
 [[package]]

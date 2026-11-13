@@ -105,22 +105,6 @@ fn main() {
                     .default_permission(
                         DefaultPermissionRule::AllowAllCommands,
                     ),
-            )
-            .plugin(
-                "files",
-                InlinedPlugin::new()
-                    .commands(&[
-                        "file_extract_zip",
-                        "file_list",
-                        "file_read",
-                        "file_write",
-                        "file_create_directory",
-                        "file_rename",
-                        "file_delete",
-                    ])
-                    .default_permission(
-                        DefaultPermissionRule::AllowAllCommands,
-                    ),
             ),
     )
     .expect("Failed to run tauri-build");
