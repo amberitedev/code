@@ -344,7 +344,6 @@ fn main() {
         });
 
     builder = builder
-        .plugin(api::install::init())
         .plugin(api::instance::init())
         .plugin(api::logs::init())
         .manage(updater)

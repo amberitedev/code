@@ -4,6 +4,7 @@
 pub mod cache;
 pub mod files;
 pub mod groups;
+pub mod install;
 pub mod instances;
 pub mod jre;
 pub mod loading;

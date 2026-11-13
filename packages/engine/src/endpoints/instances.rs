@@ -184,7 +184,7 @@ impl From<InstanceMetadata> for Instance {
 }
 
 impl InstanceLink {
-    fn from_core(link: CoreInstanceLink) -> Option<Self> {
+    pub fn from_core(link: CoreInstanceLink) -> Option<Self> {
         match link {
             CoreInstanceLink::Unmanaged => None,
             CoreInstanceLink::ModrinthModpack {

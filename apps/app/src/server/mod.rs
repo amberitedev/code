@@ -143,6 +143,7 @@ impl LocalServer {
             .merge(
                 engine::routes::routes()
                     .merge(library::routes::routes())
+                    .merge(library::install::routes())
                     .merge(synced_options::routes::routes())
                     .merge(screenshots::routes::routes())
                     .merge(friends::routes::routes())

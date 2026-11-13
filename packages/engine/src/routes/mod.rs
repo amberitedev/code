@@ -4,6 +4,7 @@
 mod cache;
 mod files;
 mod groups;
+mod install;
 mod instances;
 mod jre;
 mod loading;
@@ -26,8 +27,8 @@ use contracts::{ApiError, ErrorCode, server::route};
 use serde::Deserialize;
 
 pub use self::{
-    cache::*, files::*, groups::*, instances::*, jre::*, loading::*, logs::*,
-    metadata::*, process::*, store::*, tags::*, worlds::*,
+    cache::*, files::*, groups::*, install::*, instances::*, jre::*,
+    loading::*, logs::*, metadata::*, process::*, store::*, tags::*, worlds::*,
 };
 use crate::{
     Engine,
@@ -49,6 +50,17 @@ use crate::{
             CreateInstanceGroup, DeleteInstanceGroup, ListInstanceGroups,
             RenameInstanceGroup, SetInstanceGroupMemberships,
             SetInstanceGroupOrder,
+        },
+        install::{
+            AcceptPendingSharedInstanceInvite, AcceptSharedInstanceInvite,
+            CancelInstallJob, DeleteSharedInstanceVersion, DismissInstallJob,
+            DuplicateInstance, GetInstallJob, GetInstallJobSupportDetails,
+            GetSharedHistorySettings, GetSharedInstanceHistory,
+            GetSharedInstanceInstallPreview, GetSharedInstanceInvitePreview,
+            GetSharedInstanceUpdatePreview, InstallInstance,
+            InstallSharedInstance, ListInstallJobs, PauseInstallJob,
+            RestoreSharedInstanceVersion, ResumeInstallJob, RetryInstallJob,
+            SetSharedHistoryKept, UpdateInstanceContent, UpdateSharedInstance,
         },
         instances::{GetInstance, GetInstances, ListInstances},
         jre::{
@@ -158,6 +170,45 @@ where
         route::<MoveInstanceFile, _, _, _>(move_instance_file),
         route::<DeleteInstanceFile, _, _, _>(delete_instance_file),
         route::<ExtractInstanceZip, _, _, _>(extract_instance_zip),
+        route::<InstallInstance, _, _, _>(install_instance),
+        route::<DuplicateInstance, _, _, _>(duplicate_instance),
+        route::<UpdateInstanceContent, _, _, _>(update_instance_content),
+        route::<GetSharedInstanceUpdatePreview, _, _, _>(
+            get_shared_instance_update_preview,
+        ),
+        route::<UpdateSharedInstance, _, _, _>(update_shared_instance),
+        route::<GetSharedInstanceHistory, _, _, _>(get_shared_instance_history),
+        route::<RestoreSharedInstanceVersion, _, _, _>(
+            restore_shared_instance_version,
+        ),
+        route::<DeleteSharedInstanceVersion, _, _, _>(
+            delete_shared_instance_version,
+        ),
+        route::<GetSharedInstanceInstallPreview, _, _, _>(
+            get_shared_instance_install_preview,
+        ),
+        route::<InstallSharedInstance, _, _, _>(install_shared_instance),
+        route::<AcceptSharedInstanceInvite, _, _, _>(
+            accept_shared_instance_invite,
+        ),
+        route::<AcceptPendingSharedInstanceInvite, _, _, _>(
+            accept_pending_shared_instance_invite,
+        ),
+        route::<GetSharedInstanceInvitePreview, _, _, _>(
+            get_shared_instance_invite_preview,
+        ),
+        route::<GetSharedHistorySettings, _, _, _>(get_shared_history_settings),
+        route::<SetSharedHistoryKept, _, _, _>(set_shared_history_kept),
+        route::<ListInstallJobs, _, _, _>(list_install_jobs),
+        route::<GetInstallJob, _, _, _>(get_install_job),
+        route::<RetryInstallJob, _, _, _>(retry_install_job),
+        route::<PauseInstallJob, _, _, _>(pause_install_job),
+        route::<ResumeInstallJob, _, _, _>(resume_install_job),
+        route::<CancelInstallJob, _, _, _>(cancel_install_job),
+        route::<DismissInstallJob, _, _, _>(dismiss_install_job),
+        route::<GetInstallJobSupportDetails, _, _, _>(
+            get_install_job_support_details,
+        ),
     ]
     .into_iter()
     .fold(Router::new(), |router, (path, method)| {

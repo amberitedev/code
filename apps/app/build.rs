@@ -9,42 +9,6 @@ fn main() {
         tauri_build::Attributes::new()
             .codegen(tauri_build::CodegenContext::new())
             .plugin(
-                "install",
-                InlinedPlugin::new()
-                    .commands(&[
-                        "install_get_modpack_preview",
-                        "install_create_instance",
-                        "install_create_modpack_instance",
-                        "install_get_shared_instance_preview",
-                        "install_accept_shared_instance_invite",
-                        "install_get_shared_instance_invite_preview",
-                        "install_accept_pending_shared_instance_invite",
-                        "install_get_shared_instance_update_preview",
-                        "install_shared_instance",
-                        "install_update_shared_instance",
-                        "install_get_shared_instance_history",
-                        "install_restore_shared_instance_version",
-                        "install_delete_shared_instance_version",
-                        "install_get_shared_history_settings",
-                        "install_set_shared_history_kept",
-                        "install_bulk_update_content",
-                        "install_duplicate_instance",
-                        "install_existing_instance",
-                        "install_pack_to_existing_instance",
-                        "install_job_list",
-                        "install_job_get",
-                        "install_job_retry",
-                        "install_job_pause",
-                        "install_job_resume",
-                        "install_job_cancel",
-                        "install_job_dismiss",
-                        "install_job_support_details",
-                    ])
-                    .default_permission(
-                        DefaultPermissionRule::AllowAllCommands,
-                    ),
-            )
-            .plugin(
                 "instance",
                 InlinedPlugin::new()
                     .commands(&[

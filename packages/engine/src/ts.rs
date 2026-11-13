@@ -19,6 +19,11 @@ use crate::{
         groups::{
             self, InstanceGroupRef, InstanceGroupUpdate, NewInstanceGroup,
         },
+        install::{
+            self as installs, InstallJobQuery, InstallJobRef, InstanceInstall,
+            SharedHistoryKept, SharedInstanceInstall, SharedInstanceInviteRef,
+            SharedInstanceName, SharedInstanceRef, SharedVersionRef,
+        },
         instances::{
             self, Instance, InstanceIds, InstanceLink, InstanceRef,
             SharedInstanceAttachment,
@@ -38,14 +43,19 @@ use crate::{
     },
     event::*,
     install::{
-        InstallErrorContext, InstallErrorView, InstallJavaStep, InstallJobKind,
-        InstallJobSnapshot, InstallJobStatus, InstallPhaseDetails,
-        InstallPhaseId, InstallProgress, InstallProgressSecondary,
+        ContentUpdateSelection, InstallErrorContext, InstallErrorView,
+        InstallJavaStep, InstallJobKind, InstallJobSnapshot, InstallJobStatus,
+        InstallPhaseDetails, InstallPhaseId, InstallProgress,
+        InstallProgressSecondary,
         model::{InstallApiErrorDetails, InstallJobDisplay, InstallTarget},
     },
     instance::{
         DesyncServerMode, InstanceFileItem, InstanceGroup,
-        InstanceGroupMembershipUpdate, ServerSource,
+        InstanceGroupMembershipUpdate, ServerSource, SharedHistorySettings,
+        SharedInstanceExternalFilePreview, SharedInstanceHistoryEntry,
+        SharedInstanceInstallPreview, SharedInstanceInviteCreator,
+        SharedInstanceInviteInstallPreview, SharedInstanceUpdateDiff,
+        SharedInstanceUpdateDiffType, SharedInstanceUpdatePreview,
     },
     logs::{CensoredString, LogType, Logs},
     metadata::Manifest,
@@ -199,6 +209,25 @@ fn file() -> String {
         InstanceFileDelete::decl(&cfg),
         InstanceZipExtract::decl(&cfg),
         ExtractDryRunResult::decl(&cfg),
+        InstanceInstall::decl(&cfg),
+        ContentUpdateSelection::decl(&cfg),
+        SharedVersionRef::decl(&cfg),
+        SharedInstanceRef::decl(&cfg),
+        SharedInstanceInviteRef::decl(&cfg),
+        SharedInstanceName::decl(&cfg),
+        SharedInstanceInstall::decl(&cfg),
+        SharedHistoryKept::decl(&cfg),
+        InstallJobQuery::decl(&cfg),
+        InstallJobRef::decl(&cfg),
+        SharedInstanceUpdatePreview::decl(&cfg),
+        SharedInstanceUpdateDiff::decl(&cfg),
+        SharedInstanceUpdateDiffType::decl(&cfg),
+        SharedInstanceHistoryEntry::decl(&cfg),
+        SharedInstanceInstallPreview::decl(&cfg),
+        SharedInstanceExternalFilePreview::decl(&cfg),
+        SharedInstanceInviteInstallPreview::decl(&cfg),
+        SharedInstanceInviteCreator::decl(&cfg),
+        SharedHistorySettings::decl(&cfg),
         // The payloads of the App's events that engine code still raises.
         FriendPayload::decl(&cfg),
         FriendStatusPayload::decl(&cfg),
@@ -221,13 +250,14 @@ fn file() -> String {
         ("processes", process::ts_entries()),
         ("java", jre::ts_entries()),
         ("instanceFiles", files::ts_entries()),
+        ("installs", installs::ts_entries()),
     ]
     .map(|(name, entries)| format!("\nexport const {name} = {{\n{entries}}}\n"))
     .concat();
     format!(
         "// Generated from packages/engine by ts-rs. Do not edit.\n\
          // Regenerate: cargo test -p engine -- --ignored write_ts\n\n\
-         import type {{ Endpoint, SharedIconConfig }} from './contracts'\n{declarations}{modules}"
+         import type {{ Endpoint, RemovedFile, SharedIconConfig }} from './contracts'\n{declarations}{modules}"
     )
 }
 

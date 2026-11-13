@@ -50,6 +50,7 @@ pub mod friends;
 pub mod game_options;
 pub mod health;
 pub mod import;
+pub mod install;
 pub mod launch;
 pub mod library;
 pub mod onboarding;
@@ -101,6 +102,10 @@ mod tests {
             CheckImportableInstance, GetDefaultLauncherPath, ImportInstance,
             ImportJob, ImportableInstance, InstanceToImport, Launcher,
             LauncherFolder, ListImportableInstances,
+        },
+        install::{
+            self, InstallCreateInstanceRequest, InstallModpackPreview,
+            InstallPostInstallEdit, PackInstall,
         },
         launch::{
             JoinServer, JoinSingleplayerWorld, ServerJoin, SingleplayerJoin,
@@ -157,6 +162,7 @@ mod tests {
     use engine::minecraft_skins::{
         Cape, MinecraftSkinVariant, Skin, SkinSource, UrlOrBlob,
     };
+    use engine::pack::install_from::CreatePackLocation;
     use engine::prelude::InstanceSyncedOption;
     use engine::{
         minecraft_auth::{
@@ -293,6 +299,11 @@ mod tests {
             ImportableInstance::decl(&cfg),
             InstanceToImport::decl(&cfg),
             ImportJob::decl(&cfg),
+            CreatePackLocation::decl(&cfg),
+            InstallModpackPreview::decl(&cfg),
+            InstallCreateInstanceRequest::decl(&cfg),
+            PackInstall::decl(&cfg),
+            InstallPostInstallEdit::decl(&cfg),
         ]
         .map(|declaration| format!("\nexport {declaration}\n"))
         .concat();
@@ -300,7 +311,7 @@ mod tests {
             "// Generated from apps/app by ts-rs. Do not edit.\n\
              // Regenerate: cargo test -p theseus_gui -- --ignored write_ts\n\n\
              import type {{ ApiError, CoreSession, Endpoint, SharedIconConfig, UserFriend, UserStatus }} from './contracts'\n\
-             import type {{ CommandPayload, DesyncServerMode, EngineEvent, FriendPayload, ImportLauncherType, InstallJobSnapshot, InstanceGroupsChangedPayload, JavaVersion, OnboardingChecklist, Settings }} from './engine'\n\
+             import type {{ CommandPayload, DesyncServerMode, EngineEvent, FriendPayload, ImportLauncherType, InstallJobSnapshot, InstanceGroupsChangedPayload, InstanceLink, JavaVersion, ModLoader, OnboardingChecklist, Settings }} from './engine'\n\
              {declarations}\n\
              export const health = {{\n\
              \tcheckHealth: {},\n\
@@ -370,7 +381,8 @@ mod tests {
              \tcheckImportableInstance: {},\n\
              \tgetDefaultLauncherPath: {},\n\
              \timportInstance: {},\n\
-             }}\n",
+             }}\n\n\
+             export const localInstalls = {{\n{}}}\n",
             endpoint::<CheckHealth>(),
             endpoint::<GetBoot>(),
             endpoint::<ConnectCore>(),
@@ -418,6 +430,7 @@ mod tests {
             endpoint::<CheckImportableInstance>(),
             endpoint::<GetDefaultLauncherPath>(),
             endpoint::<ImportInstance>(),
+            install::ts_entries(),
         )
     }
 

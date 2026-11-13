@@ -54,6 +54,7 @@ pub enum SharedInstanceJoinType {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct SharedInstanceInstallPreview {
     pub shared_instance_id: String,
     pub version: i32,
@@ -72,6 +73,7 @@ pub struct SharedInstanceInstallPreview {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct SharedInstanceExternalFilePreview {
     pub file_name: String,
     pub file_type: String,
@@ -79,6 +81,7 @@ pub struct SharedInstanceExternalFilePreview {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct SharedInstanceUpdatePreview {
     pub shared_instance_id: String,
     pub current_version: Option<i32>,
@@ -126,6 +129,7 @@ pub struct SharedInstanceInvite {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct SharedInstanceInviteInstallPreview {
     pub shared_instance_id: String,
     pub inviter: Option<SharedInstanceInviteCreator>,
@@ -138,6 +142,7 @@ pub struct SharedInstanceInviteInstallPreview {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct SharedInstanceInviteCreator {
     pub id: String,
     pub name: String,
@@ -147,6 +152,7 @@ pub struct SharedInstanceInviteCreator {
 /// How many versions each share's local history keeps (`None` for all), and how many each
 /// share has now, by share id.
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct SharedHistorySettings {
     pub kept: Option<usize>,
     pub entries: HashMap<String, usize>,

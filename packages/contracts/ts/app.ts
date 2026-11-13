@@ -2,7 +2,7 @@
 // Regenerate: cargo test -p theseus_gui -- --ignored write_ts
 
 import type { ApiError, CoreSession, Endpoint, SharedIconConfig, UserFriend, UserStatus } from './contracts'
-import type { CommandPayload, DesyncServerMode, EngineEvent, FriendPayload, ImportLauncherType, InstallJobSnapshot, InstanceGroupsChangedPayload, JavaVersion, OnboardingChecklist, Settings } from './engine'
+import type { CommandPayload, DesyncServerMode, EngineEvent, FriendPayload, ImportLauncherType, InstallJobSnapshot, InstanceGroupsChangedPayload, InstanceLink, JavaVersion, ModLoader, OnboardingChecklist, Settings } from './engine'
 
 export type Boot = { version: string, platform: Platform, os_version: string, 
 /**
@@ -410,6 +410,24 @@ instance_folder: string, };
 
 export type ImportJob = InstallJobSnapshot;
 
+export type CreatePackLocation = { "type": "fromVersionId", project_id: string, version_id: string, title: string, icon_url?: string | null, } | { "type": "fromFile", path: string, };
+
+export type InstallModpackPreview = { name: string, gameVersion: string, modloader: ModLoader, loaderVersion: string | null, icon: string | null, iconUrl: string | null, link: InstanceLink | null, 
+/**
+ * Modrinth does not know the file.
+ */
+unknownFile: boolean, externalFilesInModpack: Array<string>, };
+
+export type InstallCreateInstanceRequest = { name: string, gameVersion: string, loader: ModLoader, loaderVersion: string | null, iconPath: string | null, iconConfig?: SharedIconConfig | null, link?: InstanceLink | null, };
+
+export type PackInstall = { location: CreatePackLocation, post_install_edit?: InstallPostInstallEdit | null, };
+
+export type InstallPostInstallEdit = { name?: string | null, 
+/**
+ * Absent keeps the pack's icon; `null` removes it.
+ */
+iconPath?: string | null, link?: InstanceLink | null, };
+
 export const health = {
 	checkHealth: { method: "GET", path: "/health", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
 }
@@ -585,4 +603,11 @@ export const launcherImport = {
 	checkImportableInstance: { method: "GET", path: "/app/import/instance", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, ImportableInstance, void, boolean>,
 	getDefaultLauncherPath: { method: "GET", path: "/app/import/default-path", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, Launcher, void, string | null>,
 	importInstance: { method: "POST", path: "/app/import", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, InstanceToImport, ImportJob>,
+}
+
+export const localInstalls = {
+	previewModpack: { method: "POST", path: "/app/install/modpack-preview", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, CreatePackLocation, InstallModpackPreview>,
+	createInstance: { method: "POST", path: "/app/install/instances", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, InstallCreateInstanceRequest, InstallJobSnapshot>,
+	createModpackInstance: { method: "POST", path: "/app/install/modpack-instances", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, PackInstall, InstallJobSnapshot>,
+	installPackToInstance: { method: "POST", path: "/app/install/instances/{id}/pack", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<IdParams, null, PackInstall, InstallJobSnapshot>,
 }

@@ -216,6 +216,7 @@ pub enum InstallRequest {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ContentUpdateSelection {
     pub project_path: String,
     pub version_id: String,

@@ -14,6 +14,7 @@ use tower::ServiceExt;
 use crate::{
     Engine,
     access::{Access, BoxFuture, Caller, Permission},
+    install::{InstallJobStatus, InstallRequest, model::InstallJobState},
     state::{
         CacheValue, CachedEntry,
         tests::{add_instance, engine},
@@ -644,4 +645,72 @@ async fn the_files_tab_refuses_paths_that_leave_the_instance() {
     }
 
     assert!(!has_file_named(dir.path(), "escape.txt"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn install_jobs_are_read_and_controlled_through_their_instance() {
+    crate::install_crypto_provider();
+    let dir = tempfile::tempdir().unwrap();
+    let engine = engine(dir.path().to_path_buf()).await;
+    add_instance(&engine, "local:a", "Survival").await;
+    let request = InstallRequest::InstallExistingInstance {
+        instance_id: "local:a".to_owned(),
+        force: false,
+    };
+    let id = uuid::Uuid::new_v4();
+    crate::install::store::insert(
+        id,
+        &request,
+        &InstallJobState::new(&request),
+        InstallJobStatus::Failed,
+        &engine.pool,
+    )
+    .await
+    .unwrap();
+    let router = |allow: bool| {
+        super::routes().with_state(Host {
+            engine: Arc::clone(&engine),
+            access: Arc::new(FakeAccess {
+                granted: allow.then_some(Permission::Owner),
+            }),
+        })
+    };
+    let job = format!("/install-jobs/{id}");
+
+    let denied = router(false);
+    assert_eq!(
+        send(&denied, "GET", "/install-jobs?include_finished=true", None).await,
+        (StatusCode::OK, json!([]))
+    );
+    assert_eq!(
+        send(&denied, "GET", &job, None).await.0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        send(&denied, "DELETE", &job, None).await.0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        send(&denied, "GET", "/shared-history", None).await.0,
+        StatusCode::FORBIDDEN
+    );
+
+    let allowed = router(true);
+    let (_, listed) =
+        send(&allowed, "GET", "/install-jobs?include_finished=true", None)
+            .await;
+    assert_eq!(listed[0]["job_id"], id.to_string());
+    let (status, read) = send(&allowed, "GET", &job, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(read["instance_id"], "local:a");
+    assert_eq!(read["status"], "failed");
+    assert_eq!(
+        send(&allowed, "DELETE", &job, None).await.0,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        send(&allowed, "GET", "/install-jobs?include_finished=true", None)
+            .await,
+        (StatusCode::OK, json!([]))
+    );
 }

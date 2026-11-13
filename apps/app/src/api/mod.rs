@@ -2,7 +2,6 @@ use engine::error_code;
 use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
 
-pub mod install;
 pub mod instance;
 pub mod logs;
 pub mod shortcuts;

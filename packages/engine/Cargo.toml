@@ -148,6 +148,7 @@ winreg = { workspace = true }
 [features]
 export-ts = [
   "bedrock/export-ts",
+  "contracts/ts",
   "dep:ts-rs",
   "minecraft-meta-manifest/ts",
   "modrinth-content-management/ts",

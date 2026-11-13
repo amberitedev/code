@@ -91,12 +91,14 @@ pub enum PackDependency {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase", tag = "type")]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub enum CreatePackLocation {
     // Create a pack from a modrinth version ID (such as a modpack)
     FromVersionId {
         project_id: String,
         version_id: String,
         title: String,
+        #[cfg_attr(feature = "export-ts", ts(optional = nullable))]
         icon_url: Option<String>,
     },
     // Create a pack from a file (such as an .mrpack for installing from a file, or a folder name for importing)

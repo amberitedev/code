@@ -1,7 +1,7 @@
 // Generated from packages/engine by ts-rs. Do not edit.
 // Regenerate: cargo test -p engine -- --ignored write_ts
 
-import type { Endpoint, SharedIconConfig } from './contracts'
+import type { Endpoint, RemovedFile, SharedIconConfig } from './contracts'
 
 export type EngineEvent = { "type": "loading", "payload": LoadingPayload } | { "type": "process", "payload": ProcessPayload } | { "type": "instance", "payload": InstancePayload } | { "type": "install_job", "payload": InstallJobSnapshot } | { "type": "warning", "payload": WarningPayload } | { "type": "log", "payload": LogPayload } | { "type": "ads_consent_required", "payload": boolean };
 
@@ -281,6 +281,69 @@ export type InstanceZipExtract = { path: string, override_conflicts: boolean, dr
 
 export type ExtractDryRunResult = { modpack_name: string | null, conflicting_files: Array<string>, };
 
+export type InstanceInstall = { force: boolean, };
+
+export type ContentUpdateSelection = { project_path: string, version_id: string, };
+
+export type SharedVersionRef = { id: string, version: number, };
+
+export type SharedInstanceRef = { id: string, };
+
+export type SharedInstanceInviteRef = { id: string, invite_id: string, };
+
+export type SharedInstanceName = { name: string, };
+
+export type SharedInstanceInstall = { name: string, manager_id: string | null, server_manager_name: string | null, server_manager_icon_url: string | null, instance_icon_url: string | null, instance_icon_config: SharedIconConfig | null, };
+
+export type SharedHistoryKept = { kept: number | null, };
+
+export type InstallJobQuery = { include_finished: boolean, };
+
+export type InstallJobRef = { id: string, };
+
+export type SharedInstanceUpdatePreview = { sharedInstanceId: string, currentVersion: number | null, latestVersion: number, updateAvailable: boolean, diffs: Array<SharedInstanceUpdateDiff>, };
+
+export type SharedInstanceUpdateDiff = { type: SharedInstanceUpdateDiffType, projectId: string | null, projectName: string | null, 
+/**
+ * A file without a Modrinth project, by its name in its type's folder.
+ */
+fileName: string | null, currentVersionName: string | null, newVersionName: string | null, configFileCount?: number, configFileNames?: Array<string>, 
+/**
+ * A removal of something the owner had turned off, which members never ran.
+ */
+disabled?: boolean, };
+
+export type SharedInstanceUpdateDiffType = "added" | "removed" | "updated" | "modpack_linked" | "modpack_updated" | "modpack_unlinked" | "game_version_updated" | "loader_updated" | "config_files_updated";
+
+export type SharedInstanceHistoryEntry = { version: number, 
+/**
+ * When the push finished, in milliseconds since the Unix epoch.
+ */
+created: number, gameVersion: string, 
+/**
+ * The share's loader name, such as `fabric`, or `vanilla` for a server without a client
+ * loader.
+ */
+loader: string, loaderVersion: string, 
+/**
+ * Projects and files, not counting config files.
+ */
+contentCount: number, diffs: Array<SharedInstanceUpdateDiff>, 
+/**
+ * Paths of the config files it changed, or of all it holds without a base.
+ */
+configFiles: Array<string>, };
+
+export type SharedInstanceInstallPreview = { sharedInstanceId: string, version: number, name: string, iconUrl: string | null, gameVersion: string, loader: ModLoader, modCount: number, externalFileCount: number, modpackVersionId: string | null, contentVersionIds: Array<string>, externalFiles: Array<SharedInstanceExternalFilePreview>, removedFiles: Array<RemovedFile>, };
+
+export type SharedInstanceExternalFilePreview = { fileName: string, fileType: string, };
+
+export type SharedInstanceInviteInstallPreview = { sharedInstanceId: string, inviter: SharedInstanceInviteCreator | null, managerId: string | null, serverManagerName: string | null, serverManagerIconUrl: string | null, instanceIconUrl: string | null, instanceIconConfig: SharedIconConfig | null, preview: SharedInstanceInstallPreview, };
+
+export type SharedInstanceInviteCreator = { id: string, name: string, avatar: string | null, };
+
+export type SharedHistorySettings = { kept: number | null, entries: { [key in string]: number }, };
+
 export type FriendPayload = { "event": "friend_request", from: string, } | { "event": "user_offline", id: string, } | { "event": "status_update", user_status: FriendStatusPayload, } | { "event": "status_sync" } | { "event": "friend_request_rejected", from: string, };
 
 export type FriendStatusPayload = { user_id: string, profile_name: string | null, last_update: string, };
@@ -391,4 +454,30 @@ export const instanceFiles = {
 	MoveInstanceFile: { method: "POST", path: "/instances/{id}/files/move", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<InstanceRef, null, InstanceFileMove, void>,
 	DeleteInstanceFile: { method: "DELETE", path: "/instances/{id}/files", auth: "session", dangerous: false, body: "empty", response: "empty" } as Endpoint<InstanceRef, InstanceFileDelete, void, void>,
 	ExtractInstanceZip: { method: "POST", path: "/instances/{id}/files/extract", auth: "session", dangerous: false, body: "json", response: "json" } as Endpoint<InstanceRef, null, InstanceZipExtract, ExtractDryRunResult | null>,
+}
+
+export const installs = {
+	InstallInstance: { method: "POST", path: "/instances/{id}/install", auth: "session", dangerous: false, body: "json", response: "json" } as Endpoint<InstanceRef, null, InstanceInstall, InstallJobSnapshot>,
+	DuplicateInstance: { method: "POST", path: "/instances/{id}/duplicate", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceRef, null, void, InstallJobSnapshot>,
+	UpdateInstanceContent: { method: "POST", path: "/instances/{id}/content-updates", auth: "session", dangerous: false, body: "json", response: "json" } as Endpoint<InstanceRef, null, Array<ContentUpdateSelection>, InstallJobSnapshot>,
+	GetSharedInstanceUpdatePreview: { method: "GET", path: "/instances/{id}/shared/update-preview", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceRef, null, void, SharedInstanceUpdatePreview | null>,
+	UpdateSharedInstance: { method: "POST", path: "/instances/{id}/shared/update", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceRef, null, void, InstallJobSnapshot>,
+	GetSharedInstanceHistory: { method: "GET", path: "/instances/{id}/shared/history", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceRef, null, void, Array<SharedInstanceHistoryEntry>>,
+	RestoreSharedInstanceVersion: { method: "POST", path: "/instances/{id}/shared/history/{version}/restore", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<SharedVersionRef, null, void, InstallJobSnapshot>,
+	DeleteSharedInstanceVersion: { method: "DELETE", path: "/instances/{id}/shared/history/{version}", auth: "session", dangerous: false, body: "empty", response: "empty" } as Endpoint<SharedVersionRef, null, void, void>,
+	GetSharedInstanceInstallPreview: { method: "GET", path: "/shared-instances/{id}/install-preview", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<SharedInstanceRef, SharedInstanceName, void, SharedInstanceInstallPreview>,
+	InstallSharedInstance: { method: "POST", path: "/shared-instances/{id}/install", auth: "session", dangerous: false, body: "json", response: "json" } as Endpoint<SharedInstanceRef, null, SharedInstanceInstall, InstallJobSnapshot>,
+	AcceptSharedInstanceInvite: { method: "POST", path: "/shared-instances/{id}/invites/{invite_id}/accept", auth: "session", dangerous: false, body: "empty", response: "empty" } as Endpoint<SharedInstanceInviteRef, null, void, void>,
+	AcceptPendingSharedInstanceInvite: { method: "POST", path: "/shared-instances/{id}/accept", auth: "session", dangerous: false, body: "empty", response: "empty" } as Endpoint<SharedInstanceRef, null, void, void>,
+	GetSharedInstanceInvitePreview: { method: "GET", path: "/shared-instance-invites/{id}/install-preview", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<SharedInstanceRef, null, void, SharedInstanceInviteInstallPreview>,
+	GetSharedHistorySettings: { method: "GET", path: "/shared-history", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, SharedHistorySettings>,
+	SetSharedHistoryKept: { method: "PUT", path: "/shared-history/kept", auth: "session", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, SharedHistoryKept, SharedHistorySettings>,
+	ListInstallJobs: { method: "GET", path: "/install-jobs", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, InstallJobQuery, void, Array<InstallJobSnapshot>>,
+	GetInstallJob: { method: "GET", path: "/install-jobs/{id}", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstallJobRef, null, void, InstallJobSnapshot>,
+	RetryInstallJob: { method: "POST", path: "/install-jobs/{id}/retry", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstallJobRef, null, void, InstallJobSnapshot>,
+	PauseInstallJob: { method: "POST", path: "/install-jobs/{id}/pause", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstallJobRef, null, void, InstallJobSnapshot>,
+	ResumeInstallJob: { method: "POST", path: "/install-jobs/{id}/resume", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstallJobRef, null, void, InstallJobSnapshot>,
+	CancelInstallJob: { method: "POST", path: "/install-jobs/{id}/cancel", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstallJobRef, null, void, InstallJobSnapshot>,
+	DismissInstallJob: { method: "DELETE", path: "/install-jobs/{id}", auth: "session", dangerous: false, body: "empty", response: "empty" } as Endpoint<InstallJobRef, null, void, void>,
+	GetInstallJobSupportDetails: { method: "GET", path: "/install-jobs/{id}/support-details", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstallJobRef, null, void, string>,
 }

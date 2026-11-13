@@ -41,7 +41,6 @@
 				}
 			]
 		},
-		"instance:default",
-		"install:default"
+		"instance:default"
 	]
 }
