@@ -13,12 +13,9 @@ import { ModrinthApiError } from '../core/errors'
 import type { RequestContext } from '../types/request'
 
 /**
- * Requests to a listed Core. The client adds this itself when `ClientConfig.coreSessions` is set,
- * innermost, so it acts on each attempt as it is sent:
- *
- * - A `dangerous` request gets a fresh ticket in `TICKET_HEADER`.
- * - A request Core answers with 401 `invalid_credentials` (no session, or it ended) signs in with a
- *   new ticket once and is sent again. Any other 401, such as a refused ticket, is the answer.
+ * Requests to a listed Core. The client adds this itself when `ClientConfig.coreSessions` is set.
+ * A request Core answers with 401 `invalid_credentials` (no session, or it ended) signs in with a
+ * new ticket once and is sent again. Any other 401, such as a refused ticket, is the answer.
  */
 export class CoreSessionFeature extends AbstractFeature {
 	constructor(private readonly client: AbstractModrinthClient) {
@@ -36,20 +33,12 @@ export class CoreSessionFeature extends AbstractFeature {
 		const cores = this.client.archon.cores_v1
 		const core = cores.coreForUrl(context.url)
 		if (!core) return next()
-		const send = async () => {
-			if (context.options.dangerous)
-				context.options.headers = {
-					...context.options.headers,
-					[TICKET_HEADER]: await cores.ticket(core.id),
-				}
-			return next()
-		}
 		try {
-			return await send()
+			return await next()
 		} catch (error) {
 			if (!signedOut(error)) throw error
 			await cores.signIn(core)
-			return send()
+			return next()
 		}
 	}
 }

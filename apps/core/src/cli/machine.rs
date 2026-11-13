@@ -49,7 +49,7 @@ pub async fn status(client: &Client) -> Result<Output> {
         update: UpdateStatus,
         machine: Machine,
         pairing: PairingStatus,
-        servers: Vec<crate::api::servers::Server>,
+        servers: Vec<contracts::core::CoreServer>,
     }
     let health = call::<CheckHealth>(client, &(), &(), ()).await?;
     let update = call::<GetUpdate>(client, &(), &(), ()).await?;

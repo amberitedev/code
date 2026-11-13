@@ -1176,6 +1176,219 @@ export type Topic = { "type": "instance", id: string, } | { "type": "installs" }
 
 export type ClientMessage = { "type": "subscribe", topic: Topic, } | { "type": "unsubscribe", topic: Topic, };
 
+export type CoreServer = { id: string, name: string, 
+/**
+ * Null until the Core is paired.
+ */
+owner_id: string | null, 
+/**
+ * The caller's role. Null for the owner, who has every role.
+ */
+role: CoreRole | null, 
+/**
+ * Its loader or pack is installing now.
+ */
+installing: boolean, 
+/**
+ * `vanilla`, `fabric`, `quilt`, `forge`, `neoforge` or `paper`. Null until installed.
+ */
+loader: string | null, loader_version: string | null, game_version: string | null, net: ServerNet, power: ServerPower, 
+/**
+ * The App instance it follows.
+ */
+linked_instance: LinkedInstance | null, 
+/**
+ * Whether players can join from the internet. Null while it does not run.
+ */
+reachability: ReachabilityReport | null, 
+/**
+ * Who is online. Null while it does not run.
+ */
+players: Array<string> | null, memory_mb: number, 
+/**
+ * Unix seconds.
+ */
+created_at: number, update_channel: UpdateChannel, };
+
+export type ServerNet = { 
+/**
+ * With `port`, where players join from the internet: the router's address when it forwarded
+ * another port than the game port, otherwise the Core's.
+ */
+ip: string | null, port: number, 
+/**
+ * Where the server is on the internet, while it runs and is forwarded or public.
+ */
+outside: JoinAddress | null, 
+/**
+ * The port the server listens on.
+ */
+game_port: number, };
+
+export type JoinAddress = { ip: string, port: number, };
+
+export type ServerPower = "offline" | "starting" | "running" | "stopping" | "crashed" | "killed";
+
+export type LinkedInstance = { 
+/**
+ * The App's id for the instance.
+ */
+id: string, name: string, state: LinkedPackState, error: string | null, shared_instance_id: string | null, 
+/**
+ * The version of the instance's share the server runs.
+ */
+version: number | null, };
+
+export type LinkedPackState = "up_to_date" | "downloading" | "pending" | "applying" | "failed";
+
+export type UpdateChannel = "release" | "beta" | "alpha";
+
+export type NewServer = { 
+/**
+ * 1 to 64 characters.
+ */
+name: string, };
+
+export type ServerUpdate = { update_channel: UpdateChannel | null, };
+
+export type PowerAction = "start" | "stop" | "restart" | "kill";
+
+export type PowerChange = { action: PowerAction, };
+
+export type LoaderInstall = { 
+/**
+ * As [`CoreServer::loader`] names it.
+ */
+loader: string, 
+/**
+ * Null for the newest.
+ */
+loader_version: string | null, game_version: string, };
+
+export type ServerSetup = { 
+/**
+ * The Java major it runs. Null until installed.
+ */
+java_version: number | null, 
+/**
+ * The command line it runs, as people read it. Null until installed.
+ */
+invocation: string | null, 
+/**
+ * The share it reads: its instance's when it follows one, else its own once it is shared.
+ */
+shared_instance_id: string | null, 
+/**
+ * It has changes its own share's latest version does not. Always false while it follows an
+ * instance.
+ */
+shared_instance_needs_update: boolean, 
+/**
+ * The Core machine's CPU threads.
+ */
+cpus: number, };
+
+export type JavaMajor = { 
+/**
+ * A Java major the Core installs (8, 11, 17, 21 or 25), or null for the one the Minecraft
+ * version needs.
+ */
+major: number | null, };
+
+export type ServerProperties = { properties: { [key in string]: string }, };
+
+export type PropertiesUpdate = { 
+/**
+ * Null removes the key.
+ */
+properties: { [key in string]: string | null }, };
+
+export type ServerBackups = { backups: Array<ServerBackup>, schedule: BackupSchedule, 
+/**
+ * Unix seconds. Null while scheduled backups are off.
+ */
+next_scheduled_at: number | null, };
+
+export type BackupSchedule = { interval_hours: number, keep: number, slots: number, };
+
+export type ServerBackup = { id: string, name: string, 
+/**
+ * Unix seconds.
+ */
+created_at: number, state: BackupState, kind: BackupKind, 
+/**
+ * Unix seconds. Set on scheduled backups that hold a slot: when later scheduled backups push
+ * it out.
+ */
+rotates_at: number | null, operations: Array<BackupOperation>, };
+
+export type BackupState = "queued" | "running" | "done" | "failed";
+
+export type BackupKind = "manual" | "scheduled" | "pre_update";
+
+export type BackupOperation = { id: number, kind: OperationKind, state: OperationState, 
+/**
+ * Unix seconds, as are the other times.
+ */
+queued_at: number, started_at: number | null, ended_at: number | null, error: string | null, 
+/**
+ * Someone dismissed it once it ended.
+ */
+acked: boolean, 
+/**
+ * Who started it. Null for the schedule.
+ */
+user: CoreUser | null, };
+
+export type OperationKind = "create" | "restore";
+
+export type OperationState = "queued" | "running" | "done" | "failed" | "cancelled";
+
+export type NewBackup = { 
+/**
+ * 1 to 64 characters.
+ */
+name: string, };
+
+export type CreatedBackup = { id: string, };
+
+export type BackupUpdate = { name: string, };
+
+export type BackupIds = { ids: Array<string>, };
+
+export type ScheduleUpdate = { 
+/**
+ * Hourly at most, every 744 hours at least.
+ */
+interval_hours: number | null, 
+/**
+ * 0 turns scheduled backups off.
+ */
+keep: number | null, 
+/**
+ * Keeping fewer than there are deletes the oldest scheduled backups. Without this the change
+ * is only described; with it, it is the owner's dangerous action.
+ */
+delete_excess: boolean, };
+
+export type ScheduleChange = { applied: boolean, 
+/**
+ * The scheduled backups the change deletes, or deleted once applied.
+ */
+excess: Array<string>, };
+
+export type BackupRef = { 
+/**
+ * The server.
+ */
+id: string, backup_id: string, };
+
+export type OperationRef = { 
+/**
+ * The server.
+ */
+id: string, operation_id: number, };
+
 export type UpdateStatus = { 
 /**
  * The running version.
@@ -1473,6 +1686,27 @@ export const core = {
 	AcceptEula: { method: "POST", path: "/eula", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Eula>,
 	GetLogs: { method: "GET", path: "/logs", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, LogsQuery, void, CoreLogs>,
 	GetMachine: { method: "GET", path: "/machine", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Machine>,
+	ListServers: { method: "GET", path: "/servers", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<CoreServer>>,
+	CreateServer: { method: "POST", path: "/servers", auth: "session", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, NewServer, ServerId>,
+	GetServer: { method: "GET", path: "/servers/{id}", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<ServerId, null, void, CoreServer>,
+	ChangeServer: { method: "PATCH", path: "/servers/{id}", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<ServerId, null, ServerUpdate, void>,
+	DeleteServer: { method: "DELETE", path: "/servers/{id}", auth: "session", dangerous: true, body: "empty", response: "empty" } as Endpoint<ServerId, null, void, void>,
+	ChangePower: { method: "POST", path: "/servers/{id}/power", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<ServerId, null, PowerChange, void>,
+	InstallLoader: { method: "POST", path: "/servers/{id}/reinstall", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<ServerId, null, LoaderInstall, void>,
+	GetSetup: { method: "GET", path: "/servers/{id}/setup", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<ServerId, null, void, ServerSetup>,
+	SetJavaVersion: { method: "PUT", path: "/servers/{id}/java-version", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<ServerId, null, JavaMajor, void>,
+	GetProperties: { method: "GET", path: "/servers/{id}/properties", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<ServerId, null, void, ServerProperties>,
+	ChangeProperties: { method: "PATCH", path: "/servers/{id}/properties", auth: "session", dangerous: false, body: "json", response: "json" } as Endpoint<ServerId, null, PropertiesUpdate, ServerProperties>,
+	ListBackups: { method: "GET", path: "/servers/{id}/backups", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<ServerId, null, void, ServerBackups>,
+	CreateBackup: { method: "POST", path: "/servers/{id}/backups", auth: "session", dangerous: false, body: "json", response: "json" } as Endpoint<ServerId, null, NewBackup, CreatedBackup>,
+	ChangeBackupSchedule: { method: "PATCH", path: "/servers/{id}/backups/schedule", auth: "session", dangerous: false, body: "json", response: "json" } as Endpoint<ServerId, null, ScheduleUpdate, ScheduleChange>,
+	DeleteBackups: { method: "POST", path: "/servers/{id}/backups/delete", auth: "session", dangerous: true, body: "json", response: "empty" } as Endpoint<ServerId, null, BackupIds, void>,
+	RenameBackup: { method: "PATCH", path: "/servers/{id}/backups/{backup_id}", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<BackupRef, null, BackupUpdate, void>,
+	DeleteBackup: { method: "DELETE", path: "/servers/{id}/backups/{backup_id}", auth: "session", dangerous: true, body: "empty", response: "empty" } as Endpoint<BackupRef, null, void, void>,
+	RestoreBackup: { method: "POST", path: "/servers/{id}/backups/{backup_id}/restore", auth: "session", dangerous: true, body: "empty", response: "empty" } as Endpoint<BackupRef, null, void, void>,
+	RetryBackup: { method: "POST", path: "/servers/{id}/backups/{backup_id}/retry", auth: "session", dangerous: false, body: "empty", response: "empty" } as Endpoint<BackupRef, null, void, void>,
+	AckOperation: { method: "POST", path: "/servers/{id}/backups/operations/{operation_id}/ack", auth: "session", dangerous: false, body: "empty", response: "empty" } as Endpoint<OperationRef, null, void, void>,
+	CancelOperation: { method: "POST", path: "/servers/{id}/backups/operations/{operation_id}/cancel", auth: "session", dangerous: false, body: "empty", response: "empty" } as Endpoint<OperationRef, null, void, void>,
 	GetPerformance: { method: "GET", path: "/servers/{id}/performance", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<ServerId, null, void, Performance>,
 	SetMemory: { method: "PUT", path: "/servers/{id}/memory", auth: "session", dangerous: false, body: "json", response: "json" } as Endpoint<ServerId, null, Memory, Performance>,
 	SetFlags: { method: "PUT", path: "/servers/{id}/flags", auth: "session", dangerous: false, body: "json", response: "json" } as Endpoint<ServerId, null, JvmFlags, Performance>,

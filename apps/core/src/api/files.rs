@@ -41,7 +41,6 @@ use super::{
     backups::{DownloadQuery, DownloadToken, expired_link},
     content::{stage_field, world},
     internal,
-    servers::JwtAuth,
 };
 use crate::{
     access::{Caller, Permission, activity, now},
@@ -448,6 +447,14 @@ fn unix(time: std::io::Result<cap_std::time::SystemTime>) -> i64 {
         .map(cap_std::time::SystemTime::into_std)
         .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
         .map_or(0, |since| since.as_secs() as i64)
+}
+
+/// Response of GET `/modrinth/v0/servers/{id}/fs`: where the file API is and the token for it.
+/// Mirrors Archon.Servers.v0.JWTAuth.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JwtAuth {
+    pub url: String,
+    pub token: String,
 }
 
 /// `GET /modrinth/v0/servers/{id}/fs`: where the file routes are. They check the session

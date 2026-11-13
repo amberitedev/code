@@ -75,11 +75,7 @@ async function create(ctx: CreationFlowContextValue) {
 	const instance = { id: props.instance.id, name: props.instance.name }
 	try {
 		if (!core) throw new Error('No Core was chosen')
-		// A new server starts out visible to the people the instance is shared with.
-		const { id } = await client.archon.cores_v1.createServer(instance.name, core, {
-			...instance,
-			shared_instance_id: props.instance.shared_instance?.id ?? null,
-		})
+		const { id } = await client.archon.cores_v1.createServer(instance.name, core)
 		flow.value?.hide()
 		// Nobody else sees the server of an instance that is not shared.
 		if (props.instance.shared_instance) notifyHomeAddressOnce(addNotification, formatMessage)

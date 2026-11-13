@@ -2,7 +2,6 @@
 
 use std::time::Duration;
 
-use axum::http::Method;
 use clap::{ArgGroup, Subcommand};
 use color_eyre::eyre::{Result, bail};
 use futures::StreamExt;
@@ -10,16 +9,14 @@ use serde::Deserialize;
 use tokio_tungstenite::tungstenite::Message;
 
 use contracts::core::{
-    AcceptEula, GetInsight, GetMachine, GetPerformance, JavaPath, JvmFlags,
-    Memory, Reach, Schedule, SendCommand, ServerId, ServerInsight, SetFlags,
-    SetJava, SetMemory, SetRestarts, TimeOfDay, Weekday,
+    AcceptEula, ChangePower, CoreServer as Server, CreateServer, DeleteServer,
+    GetInsight, GetMachine, GetPerformance, GetServer, InstallLoader, JavaPath,
+    JvmFlags, ListServers, LoaderInstall, Memory, NewServer, PowerAction,
+    PowerChange, Reach, Schedule, SendCommand, ServerId, ServerInsight,
+    ServerPower, SetFlags, SetJava, SetMemory, SetRestarts, TimeOfDay, Weekday,
 };
 
 use super::{Client, Output, Switch, call::call, on_off};
-use crate::api::servers::{
-    CreateServerRequest, CreateServerResponse, PowerAction, PowerRequest,
-    ReinstallRequest, Server, ServerGetResponse, ServerPowerState,
-};
 
 #[derive(Debug, Subcommand)]
 pub enum ServersCommand {
@@ -127,26 +124,21 @@ pub async fn run(client: &Client, command: ServersCommand) -> Result<Output> {
             version,
             accept_eula,
         } => {
-            let created: CreateServerResponse = client
-                .post(
-                    "/local/servers",
-                    &CreateServerRequest {
-                        name,
-                        instance: None,
-                    },
-                )
-                .await?;
-            let id = created.id.to_string();
-            let installed = client
-                .post::<()>(
-                    &format!("/modrinth/v0/servers/{id}/reinstall?hard=false"),
-                    &ReinstallRequest::Loader {
-                        loader: "vanilla".into(),
-                        loader_version: None,
-                        game_version: Some(version.clone()),
-                    },
-                )
-                .await;
+            let created =
+                call::<CreateServer>(client, &(), &(), NewServer { name })
+                    .await?;
+            let id = created.id.clone();
+            let installed = call::<InstallLoader>(
+                client,
+                &created,
+                &(),
+                LoaderInstall {
+                    loader: "vanilla".into(),
+                    loader_version: None,
+                    game_version: version.clone(),
+                },
+            )
+            .await;
             // The server exists from here on, so a failed install names it and how to remove it.
             // `--json` keeps the shape of every other failure, with the server's id added.
             if let Err(error) = installed {
@@ -171,15 +163,9 @@ pub async fn run(client: &Client, command: ServersCommand) -> Result<Output> {
         }
         ServersCommand::Delete { server } => {
             let server = find(client, &server).await?;
-            client
-                .call::<()>(
-                    Method::DELETE,
-                    &format!("/local/servers/{}", server.server_id),
-                    None::<&()>,
-                )
-                .await?;
+            call::<DeleteServer>(client, &id(&server), &(), ()).await?;
             Ok(Output::new(
-                format!("Deleted {} ({})", server.name, server.server_id),
+                format!("Deleted {} ({})", server.name, server.id),
                 &server,
             ))
         }
@@ -224,7 +210,7 @@ pub async fn run(client: &Client, command: ServersCommand) -> Result<Output> {
             let content: Option<Content> = client
                 .get(&format!(
                     "/v1/servers/{id}/worlds/{id}/addons?addons=false",
-                    id = server.server_id
+                    id = server.id
                 ))
                 .await
                 .ok();
@@ -259,7 +245,7 @@ pub async fn run(client: &Client, command: ServersCommand) -> Result<Output> {
                 performance =
                     call::<SetFlags>(client, &id(&server), &(), flags).await?;
             }
-            let later = changed && server.power_state.is_some_and(is_up);
+            let later = changed && is_up(server.power);
             let mut lines = vec![
                 format!(
                     "{}: up to {} MB{}",
@@ -405,10 +391,10 @@ fn describe(server: &Server, insight: &ServerInsight) -> String {
     let mut lines = vec![format!(
         "{}  {}  port {}",
         server.name,
-        server.power_state.map_or("unknown", state_name),
+        state_name(server.power),
         server.net.game_port
     )];
-    if server.power_state.is_some_and(is_up) {
+    if is_up(server.power) {
         let players = if insight.players.is_empty() {
             "nobody".to_owned()
         } else {
@@ -423,7 +409,7 @@ fn describe(server: &Server, insight: &ServerInsight) -> String {
         lines.push(if insight.frozen {
             format!(
                 "  FROZEN: it stopped answering. Restart it with: copal servers restart {}",
-                server.server_id
+                server.id
             )
         } else if insight.answered_at.is_some() {
             "  answering".into()
@@ -472,15 +458,13 @@ fn describe(server: &Server, insight: &ServerInsight) -> String {
 
 fn id(server: &Server) -> ServerId {
     ServerId {
-        id: server.server_id.to_string(),
+        id: server.id.clone(),
     }
 }
 
 /// Every server.
 pub async fn list(client: &Client) -> Result<Vec<Server>> {
-    let response: ServerGetResponse =
-        client.get("/modrinth/v0/servers").await?;
-    Ok(response.servers)
+    call::<ListServers>(client, &(), &(), ()).await
 }
 
 /// One line per server.
@@ -493,9 +477,9 @@ pub fn table(servers: &[Server]) -> String {
         .map(|server| {
             format!(
                 "{}  {:<9} {:<10} port {:<5}  {}",
-                server.server_id,
-                server.power_state.map_or("unknown", state_name),
-                server.mc_version.as_deref().unwrap_or("-"),
+                server.id,
+                state_name(server.power),
+                server.game_version.as_deref().unwrap_or("-"),
                 server.net.game_port,
                 server.name,
             )
@@ -514,8 +498,7 @@ fn pick(servers: Vec<Server>, query: &str) -> Result<Server> {
     let mut matches: Vec<Server> = servers
         .into_iter()
         .filter(|server| {
-            let id = server.server_id.to_string();
-            id.starts_with(&query_lower)
+            server.id.starts_with(&query_lower)
                 || server.name.to_lowercase() == query_lower
         })
         .collect();
@@ -528,23 +511,21 @@ fn pick(servers: Vec<Server>, query: &str) -> Result<Server> {
     }
 }
 
-fn state_name(state: ServerPowerState) -> &'static str {
+fn state_name(state: ServerPower) -> &'static str {
     match state {
-        ServerPowerState::Offline => "stopped",
-        ServerPowerState::Starting => "starting",
-        ServerPowerState::Running => "running",
-        ServerPowerState::Stopping => "stopping",
-        ServerPowerState::Crashed => "crashed",
-        ServerPowerState::Killed => "killed",
+        ServerPower::Offline => "stopped",
+        ServerPower::Starting => "starting",
+        ServerPower::Running => "running",
+        ServerPower::Stopping => "stopping",
+        ServerPower::Crashed => "crashed",
+        ServerPower::Killed => "killed",
     }
 }
 
-fn is_up(state: ServerPowerState) -> bool {
+fn is_up(state: ServerPower) -> bool {
     matches!(
         state,
-        ServerPowerState::Starting
-            | ServerPowerState::Running
-            | ServerPowerState::Stopping
+        ServerPower::Starting | ServerPower::Running | ServerPower::Stopping
     )
 }
 
@@ -553,37 +534,26 @@ async fn power(
     server: &Server,
     action: PowerAction,
 ) -> Result<()> {
-    client
-        .post(
-            &format!("/modrinth/v0/servers/{}/power", server.server_id),
-            &PowerRequest { action },
-        )
-        .await
+    call::<ChangePower>(client, &id(server), &(), PowerChange { action }).await
 }
 
 /// The server as it is now, with `what` said about it.
 async fn done(client: &Client, server: &Server, what: &str) -> Result<Output> {
-    let server: Server = client
-        .get(&format!("/modrinth/v0/servers/{}", server.server_id))
-        .await?;
+    let server = call::<GetServer>(client, &id(server), &(), ()).await?;
     Ok(Output::new(format!("{} {what}", server.name), &server))
 }
 
 /// Wait, with no time limit, until the server's Java has exited.
 async fn wait_offline(client: &Client, server: &Server) -> Result<Output> {
     loop {
-        let now: Server = client
-            .get(&format!("/modrinth/v0/servers/{}", server.server_id))
-            .await?;
-        match now.power_state {
-            Some(state) if !is_up(state) => {
-                return Ok(Output::new(
-                    format!("{} is {}", now.name, state_name(state)),
-                    &now,
-                ));
-            }
-            _ => tokio::time::sleep(Duration::from_millis(500)).await,
+        let now = call::<GetServer>(client, &id(server), &(), ()).await?;
+        if !is_up(now.power) {
+            return Ok(Output::new(
+                format!("{} is {}", now.name, state_name(now.power)),
+                &now,
+            ));
         }
+        tokio::time::sleep(Duration::from_millis(500)).await;
     }
 }
 
@@ -616,7 +586,7 @@ struct Payload {
 /// says why on stderr.
 pub async fn attach(client: &Client, server: &str, json: bool) -> Result<()> {
     let server = find(client, server).await?;
-    let mut console = client.console(&server.server_id.to_string()).await?;
+    let mut console = client.console(&server.id).await?;
     eprintln!(
         "Attached to {}. Lines you type go to the server; Ctrl+C leaves it running.",
         server.name
@@ -673,18 +643,14 @@ mod tests {
     use super::*;
 
     fn server(id: &str, name: &str) -> Server {
-        let mut server: Server = serde_json::from_value(serde_json::json!({
-            "server_id": id, "name": name, "owner_id": "", "net": {"ip": null, "port": 25565, "domain": "", "outside": null, "game_port": 25565},
-            "game": "Minecraft", "backup_quota": 0, "used_backup_quota": 0, "status": "available",
-            "suspension_reason": null, "loader": null, "loader_version": null, "mc_version": null,
-            "upstream": null, "sftp_username": "", "sftp_password": "", "sftp_host": "",
-            "datacenter": "", "notices": [], "node": null, "flows": {"intro": false}, "is_medal": false,
-            "current_user_permissions": 0, "locked_since": null, "linked_instance": null,
-            "reachability": null
+        serde_json::from_value(serde_json::json!({
+            "id": id, "name": name, "owner_id": null, "role": null, "installing": false,
+            "loader": null, "loader_version": null, "game_version": null,
+            "net": {"ip": null, "port": 25565, "outside": null, "game_port": 25565},
+            "power": "offline", "linked_instance": null, "reachability": null, "players": null,
+            "memory_mb": 2048, "created_at": 0, "update_channel": "release"
         }))
-        .unwrap();
-        server.name = name.into();
-        server
+        .unwrap()
     }
 
     #[test]

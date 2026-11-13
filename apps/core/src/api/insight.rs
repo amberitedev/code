@@ -12,10 +12,7 @@ use contracts::{
     server::Req,
 };
 
-use super::{
-    CoreState, internal,
-    servers::{Reachability, ReachabilityState},
-};
+use super::{CoreState, internal};
 use crate::{
     access::{Caller, Permission, require_owner},
     network::{
@@ -53,19 +50,6 @@ impl From<Report> for ReachabilityReport {
             checked_at: report.at,
         }
     }
-}
-
-/// The hosting API's short form of a server's reachability.
-pub fn archon(state: &CoreState, server_id: &str) -> Option<Reachability> {
-    let report = ReachabilityReport::from(state.network.report(server_id)?);
-    Some(Reachability {
-        state: match report.state {
-            Reach::Reachable => ReachabilityState::Reachable,
-            Reach::Unverified => ReachabilityState::Unverified,
-            Reach::Unreachable => ReachabilityState::Unreachable,
-        },
-        cause: (report.state != Reach::Reachable).then_some(report.title),
-    })
 }
 
 /// What `level` may see of a server.

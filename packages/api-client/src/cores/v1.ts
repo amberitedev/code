@@ -3,10 +3,10 @@ import { type CoreSession, core as coreRoutes, cores, type ListedCore } from '@a
 import { ApiCallError } from '../contracts/errors'
 import { AbstractModule } from '../core/abstract-module'
 import { ModrinthApiError } from '../core/errors'
+import { archonServer } from '../core-hosting/servers-v0'
 import type { Archon } from '../modules/archon/types'
 import type { CoreCallError, CoreSessions } from '../types/client'
 import type { RequestOptions } from '../types/request'
-import { coreNodeUrl } from '../utils/node-url'
 
 const SERVER_ID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
 /** How long a Core's local address may take to answer before its internet address is used. */
@@ -259,19 +259,10 @@ export class ArchonCoresV1Module extends AbstractModule {
 	 * makes the next call ask the backend for the list again, at most once every
 	 * `FAILURE_REFETCH_MS`, so polling while a Core is down does not redo the routing every time.
 	 */
-	public async servers(
-		options?: Archon.Servers.v0.GetServersOptions,
-	): Promise<Archon.Servers.v0.ServerGetResponse> {
+	public async servers(): Promise<Archon.Servers.v0.ServerGetResponse> {
 		const cores = await this.known()
 		const results = await Promise.allSettled(
-			cores.map((core) =>
-				this.client.request<Archon.Servers.v0.ServerGetResponse>('/servers', {
-					api: this.base(core),
-					version: 'modrinth/v0',
-					method: 'GET',
-					params: { limit: options?.limit ?? 100, offset: options?.offset ?? 0 },
-				}),
-			),
+			cores.map((core) => this.client.core(core.id).call(coreRoutes.ListServers)),
 		)
 		const merged: Archon.Servers.v0.ServerGetResponse = {
 			servers: [],
@@ -284,13 +275,10 @@ export class ArchonCoresV1Module extends AbstractModule {
 				merged.offline_cores?.push(cores[index].id)
 				return
 			}
-			for (const server of result.value.servers) {
-				this.serverCores.set(server.server_id, cores[index].id)
-				// The node is the Core itself, reached as the list was. See `coreNodeUrl`.
-				const instance = coreNodeUrl(this.base(cores[index]), server.server_id)
-				merged.servers.push({ ...server, node: { token: '', instance } })
+			for (const server of result.value) {
+				this.serverCores.set(server.id, cores[index].id)
+				merged.servers.push(archonServer(server, this.base(cores[index])))
 			}
-			Object.assign(merged.users, result.value.users)
 		})
 		const failure = results.find((result) => result.status === 'rejected')
 		// A Core that did not answer may have moved or changed its certificate: ask the backend again.
@@ -303,26 +291,9 @@ export class ArchonCoresV1Module extends AbstractModule {
 		return merged
 	}
 
-	/**
-	 * Create an unconfigured server on a Core. Pass `instance` when it is created from an App
-	 * instance: the server is linked right away and waits for the instance to be uploaded.
-	 */
-	public async createServer(
-		name: string,
-		core: ListedCore,
-		instance?: {
-			id: string
-			name: string
-			visible_to_friends?: boolean
-			shared_instance_id?: string | null
-		},
-	): Promise<{ id: string }> {
-		const server = await this.client.request<{ id: string }>('/servers', {
-			api: this.base(core),
-			version: 'local',
-			method: 'POST',
-			body: { name, instance },
-		})
+	/** Create an empty server on a Core. */
+	public async createServer(name: string, core: ListedCore): Promise<{ id: string }> {
+		const server = await this.client.core(core.id).call(coreRoutes.CreateServer, { body: { name } })
 		this.serverCores.set(server.id, core.id)
 		return server
 	}

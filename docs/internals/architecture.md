@@ -12,8 +12,7 @@ that contradicts it is not:
 
 - Until D5 to D7: a Core keeps content, sharing, server installs and files in `apps/core`, keeps
   `copal.db`, and does not mount `engine::routes`.
-- Until D9: the Core's server routes keep Archon's shapes. Until D10: `packages/bedrock` and
-  `shared-rust.md` exist.
+- Until D10: `packages/bedrock` and `shared-rust.md` exist.
 
 ## Rules
 

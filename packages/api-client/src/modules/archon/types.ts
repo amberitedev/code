@@ -854,13 +854,6 @@ export namespace Archon {
 				version: number | null
 			}
 
-			/** The parts of a linked server's sharing settings to change. */
-			export type LinkedInstanceSettings = {
-				visible_to_friends?: boolean
-				/** `{ id: null }` once the instance is no longer shared. */
-				shared_instance?: { id: string | null }
-			}
-
 			export type SuspensionLift = {
 				/** When the server is suspended again. */
 				until: string
@@ -1664,8 +1657,6 @@ export namespace Archon {
 			export type WSStatsEvent = {
 				event: 'stats'
 				cpu_percent: number
-				/** Core supplies process memory as a percentage of total host RAM. */
-				memory_percent?: number | null
 				ram_usage_bytes: number
 				ram_total_bytes: number
 				storage_usage_bytes: number

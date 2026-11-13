@@ -153,11 +153,7 @@ async function createServer(config: CreationFlowContextValue) {
 	const instance = config.instanceSelection.value
 	try {
 		if (!core) throw new Error('No Core was chosen')
-		const { id } = await client.archon.cores_v1.createServer(
-			serverName(config),
-			core,
-			instance ? { id: instance.id, name: instance.name } : undefined,
-		)
+		const { id } = await client.archon.cores_v1.createServer(serverName(config), core)
 		try {
 			await install(id, config)
 		} catch (cause) {

@@ -5,11 +5,13 @@
 
 mod access;
 mod events;
+mod hosting;
 mod machine;
 mod servers;
 
 pub use access::*;
 pub use events::*;
+pub use hosting::*;
 pub use machine::*;
 pub use servers::*;
 
@@ -153,6 +155,50 @@ endpoints! {
     /// Owner only.
     GetMachine: Get "/machine", Session, (), (), Empty, Json<Machine>;
 
+    /// Every server the caller has a role on.
+    ListServers: Get "/servers", Session, (), (), Empty, Json<Vec<CoreServer>>;
+    /// An empty server, to install a loader or pack on. Owner only.
+    CreateServer: Post "/servers", Session, (), (), Json<NewServer>, Json<ServerId>;
+    /// Viewers and up.
+    GetServer: Get "/servers/{id}", Session, ServerId, (), Empty, Json<CoreServer>;
+    /// Editors and up.
+    ChangeServer: Patch "/servers/{id}", Session, ServerId, (), Json<ServerUpdate>, Empty;
+    /// A stopped server, with its world, files and backups, and every role on it. Owner only.
+    DeleteServer: Delete "/servers/{id}", Session, ServerId, (), Empty, Empty, dangerous;
+    /// Start answers once Java runs, stop and kill once the server has the request, restart at
+    /// once. Editors and up.
+    ChangePower: Post "/servers/{id}/power", Session, ServerId, (), Json<PowerChange>, Empty;
+    /// Install a loader on a stopped server, answering once it is done. Editors and up.
+    InstallLoader: Post "/servers/{id}/reinstall", Session, ServerId, (), Json<LoaderInstall>, Empty;
+    /// Viewers and up.
+    GetSetup: Get "/servers/{id}/setup", Session, ServerId, (), Empty, Json<ServerSetup>;
+    /// The managed Java the server runs, from its next start. Editors and up.
+    SetJavaVersion: Put "/servers/{id}/java-version", Session, ServerId, (), Json<JavaMajor>, Empty;
+    /// Editors and up: the file can hold secrets, such as a resource pack URL.
+    GetProperties: Get "/servers/{id}/properties", Session, ServerId, (), Empty, Json<ServerProperties>;
+    /// Editors and up. Answers with the file as it is now.
+    ChangeProperties: Patch "/servers/{id}/properties", Session, ServerId, (), Json<PropertiesUpdate>, Json<ServerProperties>;
+    /// Viewers and up.
+    ListBackups: Get "/servers/{id}/backups", Session, ServerId, (), Empty, Json<ServerBackups>;
+    /// Back up the server as it is, hot when it runs, into a free manual slot. Editors and up.
+    CreateBackup: Post "/servers/{id}/backups", Session, ServerId, (), Json<NewBackup>, Json<CreatedBackup>;
+    /// Editors and up. Deleting the excess scheduled backups is the owner's, with the ticket.
+    ChangeBackupSchedule: Patch "/servers/{id}/backups/schedule", Session, ServerId, (), Json<ScheduleUpdate>, Json<ScheduleChange>;
+    /// Owner only: backups are what undoes damage.
+    DeleteBackups: Post "/servers/{id}/backups/delete", Session, ServerId, (), Json<BackupIds>, Empty, dangerous;
+    /// Editors and up.
+    RenameBackup: Patch "/servers/{id}/backups/{backup_id}", Session, BackupRef, (), Json<BackupUpdate>, Empty;
+    /// Owner only.
+    DeleteBackup: Delete "/servers/{id}/backups/{backup_id}", Session, BackupRef, (), Empty, Empty, dangerous;
+    /// Queue a restore over the stopped server's world, after a backup of it. Owner only.
+    RestoreBackup: Post "/servers/{id}/backups/{backup_id}/restore", Session, BackupRef, (), Empty, Empty, dangerous;
+    /// Queue a failed backup again. Editors and up.
+    RetryBackup: Post "/servers/{id}/backups/{backup_id}/retry", Session, BackupRef, (), Empty, Empty;
+    /// Stop showing an operation that ended. Editors and up.
+    AckOperation: Post "/servers/{id}/backups/operations/{operation_id}/ack", Session, OperationRef, (), Empty, Empty;
+    /// Drop a queued operation; a cancelled backup goes with it. Editors and up.
+    CancelOperation: Post "/servers/{id}/backups/operations/{operation_id}/cancel", Session, OperationRef, (), Empty, Empty;
+
     /// Viewers and up.
     GetPerformance: Get "/servers/{id}/performance", Session, ServerId, (), Empty, Json<Performance>;
     /// Used from the server's next start. Editors and up.
@@ -185,6 +231,7 @@ pub(crate) fn ts() -> String {
     .into_iter()
     .chain(access::ts_types())
     .chain(events::ts_types())
+    .chain(hosting::ts_types())
     .chain(machine::ts_types())
     .chain(servers::ts_types())
     .map(|declaration| format!("\nexport {declaration}\n"))

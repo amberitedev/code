@@ -65,7 +65,7 @@ use crate::{
 
 // The content list and edited files are what `state::servers::commands` produce.
 pub use crate::state::servers::model::{
-    Addon, EditedFile, Installing, LinkedPackState, ModpackFields, ModpackSpec,
+    Addon, EditedFile, Installing, ModpackFields, ModpackSpec,
 };
 
 /// Why the last install failed. Mirrors the `error` object of Archon.Content.v1.Addons.

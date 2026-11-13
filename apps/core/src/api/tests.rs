@@ -232,7 +232,7 @@ async fn each_role_reaches_only_what_the_table_gives_it() {
         .await
         .unwrap();
 
-    let get = format!("/modrinth/v0/servers/{server}");
+    let get = format!("/servers/{server}");
     let (status, _) = core
         .call(Method::GET, &get, Some(&viewer), None, None)
         .await;
@@ -242,26 +242,25 @@ async fn each_role_reaches_only_what_the_table_gives_it() {
         .await;
     assert_eq!(status, StatusCode::NOT_FOUND, "no role reads as no server");
 
-    let power = format!("/modrinth/v0/servers/{server}/power");
-    let start = Some(json!({ "action": "Start" }));
+    let power = format!("/servers/{server}/power");
+    let start = Some(json!({ "action": "start" }));
     let (status, _) = core
         .call(Method::POST, &power, Some(&viewer), None, start.clone())
         .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
-    let (status, _) = core
+    let (_, error) = core
         .call(Method::POST, &power, Some(&editor), None, start)
         .await;
     assert_eq!(
-        status,
-        StatusCode::CONFLICT,
-        "allowed, but nothing is installed to start"
+        error["error"], "eula_not_accepted",
+        "allowed, but the EULA is not accepted"
     );
 
     let create = Some(json!({ "name": "B" }));
     let (status, _) = core
         .call(
             Method::POST,
-            "/local/servers",
+            "/servers",
             Some(&editor),
             None,
             create.clone(),
@@ -269,7 +268,7 @@ async fn each_role_reaches_only_what_the_table_gives_it() {
         .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     let (status, _) = core
-        .call(Method::POST, "/local/servers", Some(&owner), None, create)
+        .call(Method::POST, "/servers", Some(&owner), None, create)
         .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
@@ -285,29 +284,17 @@ async fn each_role_reaches_only_what_the_table_gives_it() {
     assert_eq!(page["entries"][0]["action"]["type"], "server_created");
 
     let (_, list) = core
-        .call(
-            Method::GET,
-            "/modrinth/v0/servers",
-            Some(&editor),
-            None,
-            None,
-        )
+        .call(Method::GET, "/servers", Some(&editor), None, None)
         .await;
     assert_eq!(
-        list["servers"].as_array().unwrap().len(),
+        list.as_array().unwrap().len(),
         1,
         "friends see only their servers"
     );
     let (_, list) = core
-        .call(
-            Method::GET,
-            "/modrinth/v0/servers",
-            Some(&owner),
-            None,
-            None,
-        )
+        .call(Method::GET, "/servers", Some(&owner), None, None)
         .await;
-    assert_eq!(list["servers"].as_array().unwrap().len(), 2);
+    assert_eq!(list.as_array().unwrap().len(), 2);
     let (_, me) = core
         .call(Method::GET, "/access/me", Some(&editor), None, None)
         .await;
@@ -456,7 +443,7 @@ async fn dangerous_actions_need_a_fresh_ticket_of_the_owner() {
     );
 
     // Deleting a server takes a ticket too, and drops everyone's role on it.
-    let delete = format!("/local/servers/{}", core.server);
+    let delete = format!("/servers/{}", core.server);
     assert_eq!(
         core.call(Method::DELETE, &delete, Some(&owner), None, None)
             .await
@@ -689,7 +676,7 @@ async fn content_and_files_follow_the_role_table() {
     assert_eq!(addons["addons"], json!([]));
     for (method, uri) in [
         (Method::GET, format!("{fs}/list?path=/&page=1&page_size=10")),
-        (Method::GET, format!("{world}/properties")),
+        (Method::GET, format!("/servers/{server}/properties")),
         (Method::POST, format!("{world}/content/repair")),
     ] {
         let (status, _) =
@@ -778,14 +765,14 @@ async fn content_and_files_follow_the_role_table() {
     let (status, read) = core
         .call(
             Method::GET,
-            &format!("{world}/properties"),
+            &format!("/servers/{server}/properties"),
             Some(&editor),
             None,
             None,
         )
         .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(read["known"]["motd"], "Edited");
+    assert_eq!(read["properties"]["motd"], "Edited");
 
     // A file the pack placed and the owner changed is listed as edited.
     track(&core.state.db, &server, "config/a.toml", None).await;
@@ -858,7 +845,7 @@ async fn restores_need_the_owners_fresh_ticket_and_downloads_a_link_or_a_session
     let owner = core.sign_in("owner").await;
     let editor = core.sign_in("editor").await;
     let viewer = core.sign_in("viewer").await;
-    let queue = format!("/v1/servers/{server}/worlds/{server}/backups-queue");
+    let queue = format!("/servers/{server}/backups");
 
     let name = Some(json!({ "name": "First" }));
     let (status, _) = core
@@ -879,8 +866,8 @@ async fn restores_need_the_owners_fresh_ticket_and_downloads_a_link_or_a_session
     let (_, list) = core
         .call(Method::GET, &queue, Some(&viewer), None, None)
         .await;
-    assert_eq!(list["backups"][0]["status"], "done");
-    assert_eq!(list["backups"][0]["history"][0]["state"], "completed");
+    assert_eq!(list["backups"][0]["state"], "done");
+    assert_eq!(list["backups"][0]["operations"][0]["state"], "done");
 
     let restore = format!("{queue}/{backup}/restore");
     let (status, _) = core
@@ -889,12 +876,12 @@ async fn restores_need_the_owners_fresh_ticket_and_downloads_a_link_or_a_session
             &restore,
             Some(&editor),
             Some(&core.ticket("editor")),
-            name.clone(),
+            None,
         )
         .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "only the owner restores");
     let (status, error) = core
-        .call(Method::POST, &restore, Some(&owner), None, name.clone())
+        .call(Method::POST, &restore, Some(&owner), None, None)
         .await;
     assert_eq!(
         (status, error["error"].as_str()),
@@ -906,7 +893,7 @@ async fn restores_need_the_owners_fresh_ticket_and_downloads_a_link_or_a_session
             &restore,
             Some(&owner),
             Some(&core.ticket("owner")),
-            name,
+            None,
         )
         .await;
     assert_eq!(status, StatusCode::ACCEPTED);
@@ -1191,24 +1178,18 @@ async fn a_member_leaves_a_server_without_a_ticket() {
 }
 
 #[tokio::test]
-async fn each_role_is_shown_its_own_permissions() {
+async fn each_role_is_shown_its_own_role() {
     let core = core().await;
-    let uri = format!("/modrinth/v0/servers/{}", core.server);
+    let uri = format!("/servers/{}", core.server);
     for (user, expected) in [
-        ("owner", 0xFFFF_FFFF_FFFF_8000),
-        ("editor", 0xFE00_0000_0000_0000),
-        ("viewer", 1 << 63),
+        ("owner", Value::Null),
+        ("editor", json!("editor")),
+        ("viewer", json!("viewer")),
     ] {
         let token = core.sign_in(user).await;
         let (_, server) =
             core.call(Method::GET, &uri, Some(&token), None, None).await;
-        assert_eq!(
-            server["current_user_permissions"].as_u64(),
-            Some(expected),
-            "{user}"
-        );
-        // The App reads this as a JavaScript number: it must survive a double exactly.
-        assert_eq!(expected as f64 as u64, expected);
+        assert_eq!(server["role"], expected, "{user}");
     }
 }
 
@@ -1222,21 +1203,16 @@ async fn slot_options_rotate_scheduled_backups_as_the_owners_dangerous_action()
     let owner = core.sign_in("owner").await;
     let editor = core.sign_in("editor").await;
     let viewer = core.sign_in("viewer").await;
-    let queue = format!("/v1/servers/{server}/worlds/{server}/backups-queue");
-    let options = format!("{queue}/with-options");
-    let get = || core.call(Method::GET, &options, Some(&viewer), None, None);
-    let patch = |token, ticket: Option<String>, acknowledged: bool, body| {
+    let backups = format!("/servers/{server}/backups");
+    let schedule = format!("{backups}/schedule");
+    let get = || core.call(Method::GET, &backups, Some(&viewer), None, None);
+    let patch = |token, ticket: Option<String>, body| {
         let core = &core;
-        let options = &options;
+        let schedule = &schedule;
         async move {
-            let path = if acknowledged {
-                format!("{options}?ar=true")
-            } else {
-                options.clone()
-            };
             core.call(
                 Method::PATCH,
-                &path,
+                schedule,
                 Some(token),
                 ticket.as_deref(),
                 Some(body),
@@ -1249,10 +1225,10 @@ async fn slot_options_rotate_scheduled_backups_as_the_owners_dangerous_action()
     let (status, body) = get().await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
-        body["options"],
-        json!({ "split_automatic": 7, "split_manual": 8, "limit": 15, "interval": 24 })
+        body["schedule"],
+        json!({ "interval_hours": 24, "keep": 7, "slots": 15 })
     );
-    assert!(!body["next_auto_backup_at"].is_null());
+    assert!(!body["next_scheduled_at"].is_null());
 
     // Two scheduled backups, as the schedule makes them, each holding a slot.
     for _ in 0..2 {
@@ -1269,7 +1245,7 @@ async fn slot_options_rotate_scheduled_backups_as_the_owners_dangerous_action()
         .as_array()
         .unwrap()
         .iter()
-        .filter(|backup| backup["automated"] == true)
+        .filter(|backup| backup["kind"] == "scheduled")
         .collect();
     assert_eq!(scheduled.len(), 2);
     assert!(
@@ -1282,77 +1258,70 @@ async fn slot_options_rotate_scheduled_backups_as_the_owners_dangerous_action()
     let (status, body) = patch(
         &editor,
         None,
-        false,
-        json!({ "split_automatic": 10, "split_manual": 5, "interval": 12 }),
+        json!({ "keep": 10, "interval_hours": 12, "delete_excess": false }),
     )
     .await;
     assert_eq!((status, &body["applied"]), (StatusCode::OK, &json!(true)));
     let (status, _) = patch(
         &editor,
         None,
-        false,
-        json!({ "split_automatic": 1, "split_manual": 1 }),
+        json!({ "keep": 16, "interval_hours": null, "delete_excess": false }),
     )
     .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "the slots add up to 15");
+    assert_eq!(status, StatusCode::BAD_REQUEST, "there are 15 slots");
 
     // Fewer scheduled slots than backups: named first, then deleted, which is the owner's
     // with a ticket.
-    let fewer = json!({ "split_automatic": 1, "split_manual": 14 });
-    let (status, body) = patch(&editor, None, false, fewer.clone()).await;
+    let fewer = |delete_excess| json!({ "keep": 1, "interval_hours": null, "delete_excess": delete_excess });
+    let (status, body) = patch(&editor, None, fewer(false)).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["applied"], false);
-    assert_eq!(body["backup_ids"].as_array().unwrap().len(), 1);
-    let oldest = body["backup_ids"][0].clone();
+    assert_eq!(body["excess"].as_array().unwrap().len(), 1);
+    let oldest = body["excess"][0].clone();
     let (status, _) =
-        patch(&editor, Some(core.ticket("editor")), true, fewer.clone()).await;
+        patch(&editor, Some(core.ticket("editor")), fewer(true)).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
-    let (status, error) = patch(&owner, None, true, fewer.clone()).await;
+    let (status, error) = patch(&owner, None, fewer(true)).await;
     assert_eq!(
         (status, error["error"].as_str()),
         (StatusCode::UNAUTHORIZED, Some("ticket_required"))
     );
     let (_, body) = get().await;
-    assert_eq!(
-        body["options"]["split_automatic"], 10,
-        "unchanged until then"
-    );
+    assert_eq!(body["schedule"]["keep"], 10, "unchanged until then");
     let (status, body) =
-        patch(&owner, Some(core.ticket("owner")), true, fewer).await;
+        patch(&owner, Some(core.ticket("owner")), fewer(true)).await;
     assert_eq!((status, &body["applied"]), (StatusCode::OK, &json!(true)));
     let (_, body) = get().await;
-    assert_eq!(body["options"]["split_automatic"], 1);
-    let backups = body["backups"].as_array().unwrap();
-    assert_eq!(backups.len(), 1);
-    assert_ne!(backups[0]["id"], oldest, "the oldest went");
+    assert_eq!(body["schedule"]["keep"], 1);
+    let listed = body["backups"].as_array().unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_ne!(listed[0]["id"], oldest, "the oldest went");
 
     // Off: nothing is due, every slot is manual, and the last scheduled backup went too.
     let (status, body) = patch(
         &owner,
         Some(core.ticket("owner")),
-        true,
-        json!({ "split_automatic": 0, "split_manual": 15 }),
+        json!({ "keep": 0, "interval_hours": null, "delete_excess": true }),
     )
     .await;
     assert_eq!((status, &body["applied"]), (StatusCode::OK, &json!(true)));
     let (_, body) = get().await;
-    assert!(body["next_auto_backup_at"].is_null());
-    assert_eq!(body["options"]["split_manual"], 15);
+    assert!(body["next_scheduled_at"].is_null());
+    assert_eq!(body["schedule"]["keep"], 0);
     assert!(body["backups"].as_array().unwrap().is_empty());
 
     // A manual backup takes a manual slot; renaming is the editor's.
     let (status, _) = patch(
         &editor,
         None,
-        false,
-        json!({ "split_automatic": 14, "split_manual": 1 }),
+        json!({ "keep": 14, "interval_hours": null, "delete_excess": false }),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
     let (status, created) = core
         .call(
             Method::POST,
-            &queue,
+            &backups,
             Some(&editor),
             None,
             Some(json!({ "name": "One" })),
@@ -1362,17 +1331,14 @@ async fn slot_options_rotate_scheduled_backups_as_the_owners_dangerous_action()
     let (status, _) = core
         .call(
             Method::POST,
-            &queue,
+            &backups,
             Some(&editor),
             None,
             Some(json!({ "name": "Two" })),
         )
         .await;
     assert_eq!(status, StatusCode::CONFLICT, "the one manual slot is taken");
-    let rename = format!(
-        "/v1/servers/{server}/worlds/{server}/backups/{}",
-        created["id"].as_str().unwrap()
-    );
+    let rename = format!("{backups}/{}", created["id"].as_str().unwrap());
     let renamed = Some(json!({ "name": "Renamed" }));
     let (status, _) = core
         .call(Method::PATCH, &rename, Some(&viewer), None, renamed.clone())
@@ -1806,15 +1772,13 @@ async fn a_failed_install_tells_the_app_why() {
 }
 
 #[tokio::test]
-async fn editors_set_the_worlds_update_channel() {
+async fn editors_set_the_servers_update_channel() {
     let core = core().await;
     let server = core.server.clone();
     let editor = core.sign_in("editor").await;
     let viewer = core.sign_in("viewer").await;
-    let detail = format!("/v1/servers/{server}");
-    let world = format!("/v1/servers/{server}/worlds/{server}");
-    let channel =
-        |detail: &Value| detail["worlds"][0]["update_channel"].clone();
+    let detail = format!("/servers/{server}");
+    let channel = |detail: &Value| detail["update_channel"].clone();
 
     let (_, before) = core
         .call(Method::GET, &detail, Some(&viewer), None, None)
@@ -1823,11 +1787,11 @@ async fn editors_set_the_worlds_update_channel() {
 
     let beta = Some(json!({ "update_channel": "beta" }));
     let (status, _) = core
-        .call(Method::PATCH, &world, Some(&viewer), None, beta.clone())
+        .call(Method::PATCH, &detail, Some(&viewer), None, beta.clone())
         .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     let (status, _) = core
-        .call(Method::PATCH, &world, Some(&editor), None, beta)
+        .call(Method::PATCH, &detail, Some(&editor), None, beta)
         .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
 

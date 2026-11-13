@@ -70,14 +70,6 @@ impl Client {
         self.call(Method::GET, path, None::<&()>).await
     }
 
-    pub async fn post<T: DeserializeOwned>(
-        &self,
-        path: &str,
-        body: &impl Serialize,
-    ) -> Result<T> {
-        self.call(Method::POST, path, Some(body)).await
-    }
-
     /// Send a request and read the answer as `T`. An empty answer reads as `null`, so `()`
     /// takes it.
     pub async fn call<T: DeserializeOwned>(

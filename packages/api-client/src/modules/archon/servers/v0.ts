@@ -1,6 +1,5 @@
 import { AbstractModule } from '../../../core/abstract-module'
 import type { UploadHandle, UploadProgress } from '../../../types/upload'
-import { coreNodeUrl } from '../../../utils/node-url'
 import type { Archon } from '../types'
 
 export class ArchonServersV0Module extends AbstractModule {
@@ -13,15 +12,11 @@ export class ArchonServersV0Module extends AbstractModule {
 	 * GET /modrinth/v0/servers/:id
 	 */
 	public async get(serverId: string): Promise<Archon.Servers.v0.Server> {
-		const server = await this.client.request<Archon.Servers.v0.Server>(`/servers/${serverId}`, {
+		return this.client.request<Archon.Servers.v0.Server>(`/servers/${serverId}`, {
 			api: 'archon',
 			method: 'GET',
 			version: 'modrinth/v0',
 		})
-		if (!this.client.selfHostedHosting) return server
-		// The node is the Core itself, reached as this request was. See `coreNodeUrl`.
-		const base = await this.client.archon.cores_v1.hostingUrl(`/servers/${serverId}`)
-		return { ...server, node: { token: '', instance: coreNodeUrl(base, serverId) } }
 	}
 
 	/**
@@ -31,8 +26,6 @@ export class ArchonServersV0Module extends AbstractModule {
 	public async list(
 		options?: Archon.Servers.v0.GetServersOptions,
 	): Promise<Archon.Servers.v0.ServerGetResponse> {
-		if (this.client.selfHostedHosting) return this.client.archon.cores_v1.servers(options)
-
 		const params = new URLSearchParams()
 		if (options?.limit) params.set('limit', options.limit.toString())
 		if (options?.offset) params.set('offset', options.offset.toString())
@@ -52,14 +45,11 @@ export class ArchonServersV0Module extends AbstractModule {
 	 * GET /modrinth/v0/servers/:id/fs
 	 */
 	public async getFilesystemAuth(serverId: string): Promise<Archon.Servers.v0.JWTAuth> {
-		const auth = await this.client.request<Archon.Servers.v0.JWTAuth>(`/servers/${serverId}/fs`, {
+		return this.client.request<Archon.Servers.v0.JWTAuth>(`/servers/${serverId}/fs`, {
 			api: 'archon',
 			version: 'modrinth/v0',
 			method: 'GET',
 		})
-		if (!this.client.selfHostedHosting) return auth
-		const base = await this.client.archon.cores_v1.hostingUrl(`/servers/${serverId}`)
-		return { ...auth, url: coreNodeUrl(base, serverId) }
 	}
 
 	/**
@@ -67,12 +57,6 @@ export class ArchonServersV0Module extends AbstractModule {
 	 * GET /modrinth/v0/servers/:id/ws
 	 */
 	public async getWebSocketAuth(serverId: string): Promise<Archon.Websocket.v0.WSAuth> {
-		if (this.client.selfHostedHosting) {
-			// A Core's `/events` socket, at the base requests to it go to: on the App, its local
-			// proxy, which speaks plain HTTP and adds the session. See `CoreWebSocketClient`.
-			const base = await this.client.archon.cores_v1.hostingUrl(`/servers/${serverId}`)
-			return { url: `${base.replace(/^http/, 'ws')}/events`, token: '' }
-		}
 		return this.client.request<Archon.Websocket.v0.WSAuth>(`/servers/${serverId}/ws`, {
 			api: 'archon',
 			version: 'modrinth/v0',

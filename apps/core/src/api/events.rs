@@ -19,7 +19,7 @@ use axum::{
 };
 use contracts::{
     ApiError, ErrorCode,
-    core::{ClientMessage, Topic},
+    core::{ClientMessage, ServerPower, Topic},
 };
 use engine::Event;
 use serde::Serialize;
@@ -30,10 +30,7 @@ use tokio::sync::{
 use ts_rs::TS;
 use uuid::Uuid;
 
-use super::{
-    CoreState,
-    servers::{ServerPowerState, power_state},
-};
+use super::{CoreState, servers::power_state};
 use crate::{
     access::{Caller, Changed, Permission, StreamGuard, now},
     servers::{Phase, console, restarts::run_started_at},
@@ -608,13 +605,11 @@ async fn power_of(
         }
     };
     Some(match power {
-        ServerPowerState::Starting => PowerState::Starting,
-        ServerPowerState::Running => PowerState::Running,
-        ServerPowerState::Stopping => PowerState::Stopping,
-        ServerPowerState::Crashed => PowerState::Crashed,
-        ServerPowerState::Offline | ServerPowerState::Killed => {
-            PowerState::Stopped
-        }
+        ServerPower::Starting => PowerState::Starting,
+        ServerPower::Running => PowerState::Running,
+        ServerPower::Stopping => PowerState::Stopping,
+        ServerPower::Crashed => PowerState::Crashed,
+        ServerPower::Offline | ServerPower::Killed => PowerState::Stopped,
     })
 }
 

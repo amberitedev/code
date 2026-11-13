@@ -1,7 +1,7 @@
 import type { Action, ActivityPage, CoreRole, CoreUser, ServerAccess } from '@amberite/contracts'
 
-import { ModrinthApiError } from '../../../core/errors'
-import type { Archon } from '../../archon/types'
+import { ModrinthApiError } from '../core/errors'
+import type { Archon } from '../modules/archon/types'
 
 // A Core's access and activity in the hosting API's shapes, so the upstream server pages
 // (`server_users_v1`, `actions_v1`) read a Core the way they read Modrinth Hosting.

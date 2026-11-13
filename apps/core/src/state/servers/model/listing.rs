@@ -80,17 +80,7 @@ pub struct Addon {
     pub installed: Option<bool>,
 }
 
-/// Where a linked server is with the newest version pushed to it. Mirrors
-/// Archon.Content.v1.LinkedPackState.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum LinkedPackState {
-    UpToDate,
-    Downloading,
-    Pending,
-    Applying,
-    Failed,
-}
+pub use contracts::core::LinkedPackState;
 
 /// What a world is installing. Mirrors the `installing` union of Archon.Content.v1.Addons.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

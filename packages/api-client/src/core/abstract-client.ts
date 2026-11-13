@@ -1,6 +1,7 @@
 import { ContractClient } from '../contracts/client'
 import type { InferredClientModules } from '../modules'
 import { buildModuleStructure } from '../modules'
+import { withCoreHosting } from '../core-hosting'
 import type { BaseUrlConfig, ClientConfig } from '../types/client'
 import type { DownloadSink } from '../types/download'
 import type { RequestContext, RequestOptions } from '../types/request'
@@ -119,9 +120,9 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 			...config,
 		}
 		this.features = config.features ?? []
-		// Innermost, so a ticket is fetched for each attempt as it is sent.
 		if (config.coreSessions) this.features.unshift(new CoreSessionFeature(this))
 		this.initializeModules()
+		if (this.selfHostedHosting) withCoreHosting(this)
 	}
 
 	/**

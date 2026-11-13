@@ -1,4 +1,10 @@
-import { core, type ErrorCode, type ListedCore, PROTOCOL_VERSION } from '@amberite/contracts'
+import {
+	core,
+	type CoreServer,
+	type ErrorCode,
+	type ListedCore,
+	PROTOCOL_VERSION,
+} from '@amberite/contracts'
 import { describe, expect, it } from 'vite-plus/test'
 
 import { ModrinthApiError } from '../core/errors'
@@ -142,7 +148,7 @@ describe('Core sessions', () => {
 
 	it('signs in once and retries a Core request its session no longer works for', async () => {
 		const api = new FakeClient()
-		api.answers = [coreError('invalid_credentials'), { servers: [], users: {} }]
+		api.answers = [coreError('invalid_credentials'), []]
 		await api.archon.cores_v1.servers()
 		expect(api.signIns).toHaveLength(1)
 
@@ -150,8 +156,8 @@ describe('Core sessions', () => {
 		expect(await api.core(CORE.id).call(core.GetMyAccess)).toEqual({ owner: true })
 		expect(api.signIns).toHaveLength(2)
 		expect(api.toCore().map((request) => request.url)).toEqual([
-			`${PROXY}/modrinth/v0/servers`,
-			`${PROXY}/modrinth/v0/servers`,
+			`${PROXY}/servers`,
+			`${PROXY}/servers`,
 			`${PROXY}/access/me`,
 			`${PROXY}/access/me`,
 		])
@@ -182,7 +188,7 @@ describe('Core sessions', () => {
 		await api.core(CORE.id).call(core.GetMyAccess)
 
 		const [deleted, invited, me] = api.toCore()
-		expect(deleted.url).toBe(`${PROXY}/local/servers/${SERVER}`)
+		expect(deleted.url).toBe(`${PROXY}/servers/${SERVER}`)
 		expect(header(deleted.headers, 'X-Amberite-Ticket')).toBe('ticket-1')
 		expect(header(invited.headers, 'X-Amberite-Ticket')).toBe('ticket-2')
 		expect(header(me.headers, 'X-Amberite-Ticket')).toBeUndefined()
@@ -211,7 +217,7 @@ describe('Core sessions', () => {
 		const api = new FakeClient()
 		await api.archon.servers_v1.deleteLocal(SERVER)
 		await api.core(CORE.id).call(core.GetMyAccess)
-		api.answers = [{ servers: [], users: {} }]
+		api.answers = [[]]
 		await api.archon.cores_v1.servers()
 		expect(api.toCore()).toHaveLength(3)
 		for (const { headers } of api.sent.filter((request) => request.url.startsWith(PROXY)))
@@ -399,6 +405,39 @@ describe('the server access page on a Core', () => {
 		api.routes[`${PROXY}/activity`] = forbidden()
 		api.routes[`${PROXY}/servers/${SERVER}/access`] = forbidden()
 		expect((await api.archon.actions_v1.list(SERVER)).data).toEqual([])
+	})
+})
+
+describe('a server on a Core', () => {
+	it('shows each role its own permissions', async () => {
+		const api = new FakeClient()
+		const server: CoreServer = {
+			id: SERVER,
+			name: 'A',
+			owner_id: 'owner',
+			role: null,
+			installing: false,
+			loader: null,
+			loader_version: null,
+			game_version: null,
+			net: { ip: null, port: 25565, outside: null, game_port: 25565 },
+			power: 'offline',
+			linked_instance: null,
+			reachability: null,
+			players: null,
+			memory_mb: 2048,
+			created_at: 0,
+			update_channel: 'release',
+		}
+		for (const [role, permissions] of [
+			[null, 0xffff_ffff_ffff_8000],
+			['editor', 0xfe00_0000_0000_0000],
+			['viewer', 2 ** 63],
+		] as const) {
+			api.answers = [{ ...server, role }]
+			const shown = await api.archon.servers_v0.get(SERVER)
+			expect(shown.current_user_permissions).toBe(permissions)
+		}
 	})
 })
 

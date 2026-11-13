@@ -37,7 +37,7 @@ pub async fn run(client: &Client, command: AccessCommand) -> Result<Output> {
         AccessCommand::List { server } => {
             let server = servers::find(client, &server).await?;
             let id = ServerId {
-                id: server.server_id.to_string(),
+                id: server.id.clone(),
             };
             let access = call::<ListMembers>(client, &id, &(), ()).await?;
             let mut lines = vec![match &access.owner {
@@ -56,9 +56,9 @@ pub async fn run(client: &Client, command: AccessCommand) -> Result<Output> {
         }
         AccessCommand::Role { server, user, role } => {
             let server = servers::find(client, &server).await?;
-            let member = member(client, &server.server_id, &user).await?;
+            let member = member(client, &server.id, &user).await?;
             let id = MemberId {
-                id: server.server_id.to_string(),
+                id: server.id.clone(),
                 user_id: member.user.id,
             };
             let member =
@@ -76,9 +76,9 @@ pub async fn run(client: &Client, command: AccessCommand) -> Result<Output> {
         }
         AccessCommand::Remove { server, user } => {
             let server = servers::find(client, &server).await?;
-            let member = member(client, &server.server_id, &user).await?;
+            let member = member(client, &server.id, &user).await?;
             let id = MemberId {
-                id: server.server_id.to_string(),
+                id: server.id.clone(),
                 user_id: member.user.id.clone(),
             };
             call::<RemoveMember>(client, &id, &(), ()).await?;
@@ -149,11 +149,11 @@ pub async fn run(client: &Client, command: AccessCommand) -> Result<Output> {
 /// The member of a server `query` names: their id or their name.
 async fn member(
     client: &Client,
-    server_id: &uuid::Uuid,
+    server_id: &str,
     query: &str,
 ) -> Result<Member> {
     let id = ServerId {
-        id: server_id.to_string(),
+        id: server_id.to_owned(),
     };
     let access = call::<ListMembers>(client, &id, &(), ()).await?;
     let lower = query.to_lowercase();

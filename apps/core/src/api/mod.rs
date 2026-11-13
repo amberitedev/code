@@ -1,9 +1,9 @@
 //! The HTTP API: Axum routes, one file per resource. The same router serves HTTPS and the local
 //! socket (see `access::local`).
 //!
-//! Routes only a Core has are `contracts::core` Endpoints. Hosting routes match the `Archon.*`
-//! shapes in `packages/api-client/src/modules/archon/types.ts`, which the App already sends; the
-//! share, diff, history and edited-file types among them generate their TypeScript here (see
+//! Routes only a Core has are `contracts::core` Endpoints. The content, share, file, icon and
+//! download routes match the `Archon.*` and `Kyros.*` shapes in `packages/api-client/src/modules`;
+//! the share, diff, history and edited-file types among them generate their TypeScript here (see
 //! `typescript`).
 
 pub mod access;
@@ -40,7 +40,7 @@ use axum::{
     extract::{DefaultBodyLimit, FromRef},
     handler::Handler,
     http::StatusCode,
-    routing::{any, delete, get, patch, post, put},
+    routing::{any, delete, get, post, put},
 };
 use color_eyre::eyre::{Result, eyre};
 use contracts::{ApiError, Endpoint, ErrorCode, core::*, server::route};
@@ -151,13 +151,25 @@ pub fn router(state: Arc<CoreState>) -> Router {
         .endpoint::<SetFlags, _, _>(performance::set_flags)
         .endpoint::<GetInsight, _, _>(insight::get)
         .endpoint::<GetMachine, _, _>(insight::machine)
-        .route("/modrinth/v0/servers", get(servers::list))
-        .route("/modrinth/v0/servers/{id}", get(servers::get))
-        .route("/local/servers", post(servers::create))
-        .route("/local/servers/{id}", delete(servers::delete))
-        .route("/v1/servers", get(servers::list_v1))
-        .route("/v1/servers/{id}", get(servers::get_v1))
-        .route("/v1/servers/{id}/worlds/{wid}", patch(servers::patch_world))
+        .endpoint::<ListServers, _, _>(servers::list)
+        .endpoint::<CreateServer, _, _>(servers::create)
+        .endpoint::<GetServer, _, _>(servers::get)
+        .endpoint::<ChangeServer, _, _>(servers::change)
+        .endpoint::<DeleteServer, _, _>(servers::delete)
+        .endpoint::<GetSetup, _, _>(servers::setup)
+        .endpoint::<SetJavaVersion, _, _>(startup::set_java_version)
+        .endpoint::<GetProperties, _, _>(properties::get)
+        .endpoint::<ChangeProperties, _, _>(properties::change)
+        .endpoint::<ListBackups, _, _>(backups::list)
+        .endpoint::<CreateBackup, _, _>(backups::create)
+        .endpoint::<ChangeBackupSchedule, _, _>(backups::change_schedule)
+        .endpoint::<DeleteBackups, _, _>(backups::delete_many)
+        .endpoint::<RenameBackup, _, _>(backups::rename)
+        .endpoint::<DeleteBackup, _, _>(backups::delete)
+        .endpoint::<RestoreBackup, _, _>(backups::restore)
+        .endpoint::<RetryBackup, _, _>(backups::retry)
+        .endpoint::<AckOperation, _, _>(backups::ack)
+        .endpoint::<CancelOperation, _, _>(backups::cancel)
         .route(
             "/v1/servers/{id}/icon",
             get(icon::get).put(icon::set).delete(icon::delete),
@@ -165,33 +177,7 @@ pub fn router(state: Arc<CoreState>) -> Router {
         .route("/v1/servers/{id}/icon/metadata", get(icon::metadata))
         .route("/v1/servers/{id}/icon/generated", put(icon::set_generated))
         .route("/modrinth/v0/servers/{id}/fs", get(files::auth))
-        .route(
-            "/modrinth/v0/servers/{id}/startup",
-            get(startup::get_v0).post(startup::update_v0),
-        )
-        .route(
-            "/v1/servers/{id}/worlds/{wid}/options/startup",
-            get(startup::get_v1).patch(startup::patch_v1),
-        )
         .endpoint::<SetJava, _, _>(startup::set_java_path)
-        .route(
-            "/v1/servers/{id}/worlds/{wid}/backups-queue",
-            get(backups::list).post(backups::create),
-        )
-        .route(
-            "/v1/servers/{id}/worlds/{wid}/backups-queue/with-options",
-            get(backups::list_with_options).patch(backups::patch_options),
-        )
-        .route("/v1/servers/{id}/worlds/{wid}/backups-queue/delete-many", post(backups::delete_many))
-        .route("/v1/servers/{id}/worlds/{wid}/backups-queue/{bid}", delete(backups::delete))
-        .route("/v1/servers/{id}/worlds/{wid}/backups-queue/{bid}/restore", post(backups::restore))
-        .route("/v1/servers/{id}/worlds/{wid}/backups-queue/{bid}/retry", post(backups::retry))
-        .route(
-            "/v1/servers/{id}/worlds/{wid}/backups-queue/history/{kind}/{operation}/{action}",
-            post(backups::history),
-        )
-        .route("/v1/servers/{id}/worlds/{wid}/backups/{bid}", patch(backups::rename))
-        .route("/v1/servers/{id}/worlds/{wid}/select-download", get(backups::select_download))
         .route(
             "/servers/{id}/v1/worlds/{wid}/backups/{bid}/download/authorize",
             get(backups::authorize_backup),
@@ -207,10 +193,6 @@ pub fn router(state: Arc<CoreState>) -> Router {
         .route(
             "/servers/{id}/v1/worlds/{wid}/content/export-mrpack/authorize",
             get(export::authorize),
-        )
-        .route(
-            "/v1/servers/{id}/worlds/{wid}/properties",
-            get(properties::get).patch(properties::patch),
         )
         .route("/v1/servers/{id}/worlds/{wid}/addons/delete", post(content::delete))
         .route("/v1/servers/{id}/worlds/{wid}/addons/delete-many", post(content::delete_many))
@@ -272,7 +254,7 @@ pub fn router(state: Arc<CoreState>) -> Router {
             REQUEST_TIMEOUT,
         ))
         // Starting a server answers once Java runs, and an install or update once it is done.
-        .route("/modrinth/v0/servers/{id}/power", post(servers::power))
+        .endpoint::<ChangePower, _, _>(servers::power)
         .endpoint::<InstallUpdate, _, _>(update::apply)
         // A push uploads the server's files and waits for the store to confirm them.
         .route(
@@ -285,10 +267,7 @@ pub fn router(state: Arc<CoreState>) -> Router {
             post(share::restore),
         )
         .endpoint::<CheckReachability, _, _>(insight::check)
-        .route(
-            "/modrinth/v0/servers/{id}/reinstall",
-            post(servers::reinstall),
-        )
+        .endpoint::<InstallLoader, _, _>(servers::install)
         // Adding and updating addons download them first, as does taking the pack's version of
         // an edited file.
         .route(
