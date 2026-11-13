@@ -591,7 +591,7 @@ pub async fn instance_run(
         Some(addr) => QuickPlayType::Server(ServerAddress::Unresolved(addr)),
         None => QuickPlayType::None,
     };
-    Ok(engine::instance::run(&state, instance_id, quick_play).await?)
+    Ok(crate::launch::launch(&state, instance_id, quick_play).await?)
 }
 
 #[tauri::command]

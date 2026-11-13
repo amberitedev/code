@@ -56,7 +56,7 @@ pub(super) fn queue_all(state: &Engine) {
     start(state);
 }
 
-pub(crate) async fn flush(
+pub async fn flush(
     state: &Engine,
     instance_id: &str,
 ) -> Result<(), Arc<crate::Error>> {

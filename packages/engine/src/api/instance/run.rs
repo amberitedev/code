@@ -2,8 +2,7 @@ use super::content::get_projects;
 use crate::ErrorKind;
 use crate::server_address::ServerAddress;
 use crate::state::{
-    Credentials, Engine, InstanceLink, ProcessMetadata, Settings,
-    game_options_sync_is_enabled, load_game_option_preferences,
+    Engine, Hooks, InstanceLink, MemorySettings, ProcessMetadata, WindowSize,
 };
 use crate::util::fetch;
 use crate::util::io::IOError;
@@ -14,6 +13,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::process::Command;
 use tracing::{info, warn};
+use uuid::Uuid;
 
 #[derive(Debug, Clone)]
 pub enum QuickPlayType {
@@ -22,12 +22,35 @@ pub enum QuickPlayType {
     Server(ServerAddress),
 }
 
+/// The Minecraft account a launch signs in as.
+pub struct LaunchCredentials {
+    pub username: String,
+    pub uuid: Uuid,
+    pub access_token: String,
+}
+
+/// The host's launch settings, used where the instance sets no override.
+pub struct LaunchDefaults {
+    pub extra_launch_args: Vec<String>,
+    pub custom_env_vars: Vec<(String, String)>,
+    pub memory: MemorySettings,
+    pub game_resolution: WindowSize,
+    pub hooks: Hooks,
+}
+
+pub struct LaunchRequest {
+    pub credentials: LaunchCredentials,
+    pub defaults: LaunchDefaults,
+    pub quick_play: QuickPlayType,
+}
+
+/// Checks the instance may launch and repairs missing runtime files. Hosts call it before they
+/// update the instance's files for a [`launch`].
 #[tracing::instrument(skip(state))]
-pub async fn run(
+pub async fn ensure_installed(
     state: &Arc<Engine>,
     instance_id: &str,
-    quick_play_type: QuickPlayType,
-) -> crate::Result<ProcessMetadata> {
+) -> crate::Result<()> {
     if crate::state::instances::adapters::sqlite::instance_rows::is_instance_quarantined(
         instance_id,
         &state.pool,
@@ -44,21 +67,6 @@ pub async fn run(
     )
     .await?;
 
-    let default_account = Credentials::get_default_credential(&state.pool)
-        .await?
-        .ok_or(ErrorKind::NotLoggedIn)?;
-
-    run_credentials(state, instance_id, &default_account, quick_play_type).await
-}
-
-#[tracing::instrument(skip(state, credentials))]
-async fn run_credentials(
-    state: &Arc<Engine>,
-    instance_id: &str,
-    credentials: &Credentials,
-    quick_play_type: QuickPlayType,
-) -> crate::Result<ProcessMetadata> {
-    let settings = Settings::get(&state.pool).await?;
     let context =
         crate::state::instances::commands::get_instance_launch_context(
             instance_id,
@@ -68,19 +76,29 @@ async fn run_credentials(
         .context(format!(
             "tried to run a nonexistent instance {instance_id}"
         ))?;
-    let instance_sync_preferences =
-        crate::state::instances::adapters::sqlite::instance_rows::get_instance_sync_preferences(
+    crate::launcher::ensure_installed(&context, state).await
+}
+
+#[tracing::instrument(skip(state, request))]
+pub async fn launch(
+    state: &Arc<Engine>,
+    instance_id: &str,
+    request: LaunchRequest,
+) -> crate::Result<ProcessMetadata> {
+    let LaunchRequest {
+        credentials,
+        defaults,
+        quick_play,
+    } = request;
+    let context =
+        crate::state::instances::commands::get_instance_launch_context(
             instance_id,
             &state.pool,
         )
-        .await?;
-    let fullscreen_is_shared = game_options_sync_is_enabled(&state.pool)
         .await?
-        && instance_sync_preferences.game_options
-        && load_game_option_preferences(&state.pool)
-            .await?
-            .get("fullscreen")
-            .is_some_and(|preference| preference.enabled);
+        .context(format!(
+            "tried to run a nonexistent instance {instance_id}"
+        ))?;
     if crate::state::instances::adapters::sqlite::instance_rows::is_instance_quarantined(
         instance_id,
         &state.pool,
@@ -97,42 +115,42 @@ async fn run_credentials(
         .hooks
         .pre_launch
         .as_ref()
-        .or(settings.hooks.pre_launch.as_ref())
+        .or(defaults.hooks.pre_launch.as_ref())
         .filter(|hook_command| !hook_command.is_empty());
 
     let java_args = context
         .launch_overrides
         .extra_launch_args
         .clone()
-        .unwrap_or(settings.extra_launch_args);
+        .unwrap_or(defaults.extra_launch_args);
 
     let wrapper = context
         .launch_overrides
         .hooks
         .wrapper
         .clone()
-        .or(settings.hooks.wrapper)
+        .or(defaults.hooks.wrapper)
         .filter(|hook_command| !hook_command.is_empty());
 
     let env_args = context
         .launch_overrides
         .custom_env_vars
         .clone()
-        .unwrap_or(settings.custom_env_vars);
+        .unwrap_or(defaults.custom_env_vars);
 
     let post_exit_hook = context
         .launch_overrides
         .hooks
         .post_exit
         .clone()
-        .or(settings.hooks.post_exit)
+        .or(defaults.hooks.post_exit)
         .filter(|hook_command| !hook_command.is_empty());
 
-    let memory = context.launch_overrides.memory.unwrap_or(settings.memory);
+    let memory = context.launch_overrides.memory.unwrap_or(defaults.memory);
     let resolution = context
         .launch_overrides
         .game_resolution
-        .unwrap_or(settings.game_resolution);
+        .unwrap_or(defaults.game_resolution);
     let has_hook_commands = pre_launch_hook.is_some()
         || wrapper.is_some()
         || post_exit_hook.is_some();
@@ -221,27 +239,20 @@ async fn run_credentials(
         })
         .filter(|hook_command| !hook_command.is_empty());
 
-    let mut mc_set_options: Vec<(String, String)> = vec![];
-    if let Some(fullscreen) = context.launch_overrides.force_fullscreen {
-        mc_set_options.push(("fullscreen".to_string(), fullscreen.to_string()));
-    } else if settings.force_fullscreen && !fullscreen_is_shared {
-        mc_set_options.push(("fullscreen".to_string(), "true".to_string()));
-    }
-
     if let Some(project_id) = server_play_project_id(&context.link)
         && !project_id.trim().is_empty()
     {
         let server_id = uuid::Uuid::new_v4().to_string();
         let join_result = fetch::INSECURE_REQWEST_CLIENT
-			.post("https://sessionserver.mojang.com/session/minecraft/join")
-			.json(&json!({
-				"accessToken": &credentials.access_token,
-				"selectedProfile": credentials.offline_profile.id.simple().to_string(),
-				"serverId": &server_id,
-			}))
-			.timeout(Duration::from_secs(5))
-			.send()
-			.await;
+            .post("https://sessionserver.mojang.com/session/minecraft/join")
+            .json(&json!({
+                "accessToken": &credentials.access_token,
+                "selectedProfile": credentials.uuid.simple().to_string(),
+                "serverId": &server_id,
+            }))
+            .timeout(Duration::from_secs(5))
+            .send()
+            .await;
 
         match join_result {
             Ok(resp) if resp.status().is_success() => {
@@ -252,7 +263,7 @@ async fn run_credentials(
                     ),
                     json!({
                         "project_id": project_id,
-                        "username": &credentials.offline_profile.name,
+                        "username": &credentials.username,
                         "server_id": &server_id,
                     }),
                     &state.api_semaphore,
@@ -277,18 +288,16 @@ async fn run_credentials(
         }
     }
 
-    crate::minecraft_skins::flush_pending_skin_change(state).await?;
     crate::launcher::launch_minecraft(
         &java_args,
         &launch_env_args,
-        &mc_set_options,
         &wrapper,
         &memory,
         &resolution,
-        credentials,
+        &credentials,
         post_exit_hook,
         &context,
-        quick_play_type,
+        quick_play,
         state,
     )
     .await

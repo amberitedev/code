@@ -2,14 +2,16 @@
 
 use super::options_file::{
     GameOptionsDocument, options_path, read_document, sha1_bytes,
-    validate_raw_key_value,
 };
 use super::write_shared_settings::{
     apply_shared_settings_to_instance, remember_processed_sha,
     sync_is_active_for_instance,
 };
 use crate::ErrorKind;
-use crate::state::{Engine, InstanceMetadata};
+use crate::state::{
+    Engine, InstanceMetadata, game_options_sync_is_enabled,
+    load_game_option_preferences,
+};
 use crate::util::io;
 use std::collections::HashSet;
 
@@ -39,21 +41,28 @@ pub async fn sync_before_launch(
     Ok(())
 }
 
-/// Applies launcher settings, such as forced fullscreen, after shared settings.
+/// Applies the instance's fullscreen override after shared settings, or the App's
+/// `force_fullscreen` when fullscreen is not synced for the instance.
 ///
 /// Stores the written file's hash so the watcher ignores the app's write.
 pub async fn apply_launcher_overrides(
     state: &Engine,
     instance_id: &str,
-    overrides: &[(String, String)],
+    force_fullscreen: bool,
 ) -> crate::Result<()> {
-    if overrides.is_empty() {
-        return Ok(());
-    }
     let _guard = state.synced_options.lock().await;
     let metadata = crate::state::get_instance(instance_id, &state.pool)
         .await?
         .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
+    let fullscreen = match metadata.launch_overrides.force_fullscreen {
+        Some(fullscreen) => fullscreen,
+        None if force_fullscreen
+            && !fullscreen_is_synced(&metadata, state).await? =>
+        {
+            true
+        }
+        None => return Ok(()),
+    };
     let path = options_path(&metadata, state);
     let (mut document, input_bytes) = if path.exists() {
         read_document(&path).await?
@@ -65,10 +74,7 @@ pub async fn apply_launcher_overrides(
             Vec::new(),
         )
     };
-    for (key, value) in overrides {
-        validate_raw_key_value(key, value)?;
-        document.set(key, value, true)?;
-    }
+    document.set("fullscreen", &fullscreen.to_string(), true)?;
     let output_bytes = document.serialize()?;
     let output_sha1 = sha1_bytes(&output_bytes);
     if output_bytes != input_bytes {
@@ -76,4 +82,16 @@ pub async fn apply_launcher_overrides(
     }
     remember_processed_sha(instance_id, &output_sha1, state).await?;
     Ok(())
+}
+
+async fn fullscreen_is_synced(
+    metadata: &InstanceMetadata,
+    state: &Engine,
+) -> crate::Result<bool> {
+    Ok(metadata.synced_options.game_options
+        && game_options_sync_is_enabled(&state.pool).await?
+        && load_game_option_preferences(&state.pool)
+            .await?
+            .get("fullscreen")
+            .is_some_and(|preference| preference.enabled))
 }

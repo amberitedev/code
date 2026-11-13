@@ -19,7 +19,7 @@ pub(super) use reconciliation::{
     capture_resource_pack_selection_change, decorate_content, detach,
     prepare_instance_update, reconcile, schedule_reconciliation,
 };
-pub(crate) use worker::flush;
+pub use worker::flush;
 
 use crate::state::{
     ContentItem, InstanceMetadata, ProjectType, SyncedOption, Version,

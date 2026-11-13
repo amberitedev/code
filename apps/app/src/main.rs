@@ -17,6 +17,7 @@ mod desktop;
 mod dev;
 mod engine_handle;
 mod friends;
+mod launch;
 mod library;
 mod screenshots;
 mod server;

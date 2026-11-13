@@ -1,9 +1,8 @@
 //! Minecraft CLI argument logic
-use crate::instance::QuickPlayType;
+use crate::instance::{LaunchCredentials, QuickPlayType};
 use crate::launcher::library::LibraryExt;
 use crate::launcher::quick_play_version::QuickPlayServerVersion;
 use crate::launcher::{QuickPlayVersion, parse_rules};
-use crate::state::Credentials;
 use crate::{
     state::{MemorySettings, WindowSize},
     util::{io::IOError, platform::classpath_separator},
@@ -237,10 +236,10 @@ fn parse_jvm_argument(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub async fn get_minecraft_arguments(
+pub fn get_minecraft_arguments(
     arguments: Option<&[Argument]>,
     legacy_arguments: Option<&str>,
-    credentials: &Credentials,
+    credentials: &LaunchCredentials,
     version: &str,
     asset_index_name: &str,
     game_directory: &Path,
@@ -251,8 +250,6 @@ pub async fn get_minecraft_arguments(
     quick_play_type: &QuickPlayType,
     quick_play_version: QuickPlayVersion,
 ) -> crate::Result<Vec<String>> {
-    let access_token = credentials.access_token.clone();
-    let profile = credentials.maybe_online_profile().await;
     let mut parsed_arguments = Vec::new();
 
     if let Some(arguments) = arguments {
@@ -262,9 +259,9 @@ pub async fn get_minecraft_arguments(
             |arg| {
                 parse_minecraft_argument(
                     arg,
-                    &access_token,
-                    &profile.name,
-                    profile.id,
+                    &credentials.access_token,
+                    &credentials.username,
+                    credentials.uuid,
                     version,
                     asset_index_name,
                     game_directory,
@@ -281,9 +278,9 @@ pub async fn get_minecraft_arguments(
         for x in legacy_arguments.split(' ') {
             parsed_arguments.push(parse_minecraft_argument(
                 &x.replace(' ', TEMPORARY_REPLACE_CHAR),
-                &access_token,
-                &profile.name,
-                profile.id,
+                &credentials.access_token,
+                &credentials.username,
+                credentials.uuid,
                 version,
                 asset_index_name,
                 game_directory,
@@ -523,4 +520,54 @@ pub async fn get_processor_main_class(
     .await??;
 
     Ok(main_class)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::launcher::quick_play_version::QuickPlaySingleplayerVersion;
+
+    #[test]
+    fn minecraft_arguments_carry_the_given_credentials() {
+        let dir = tempfile::tempdir().unwrap();
+        let uuid = Uuid::new_v4();
+        let credentials = LaunchCredentials {
+            username: "Steve".to_string(),
+            uuid,
+            access_token: "token".to_string(),
+        };
+
+        let arguments = get_minecraft_arguments(
+            None,
+            Some(
+                "--username ${auth_player_name} --uuid ${auth_uuid} --accessToken ${auth_access_token}",
+            ),
+            &credentials,
+            "1.21.1",
+            "17",
+            dir.path(),
+            dir.path(),
+            &VersionType::Release,
+            WindowSize(854, 480),
+            "x86_64",
+            &QuickPlayType::None,
+            QuickPlayVersion {
+                server: QuickPlayServerVersion::Builtin,
+                singleplayer: QuickPlaySingleplayerVersion::Builtin,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            arguments,
+            [
+                "--username",
+                "Steve",
+                "--uuid",
+                &uuid.simple().to_string(),
+                "--accessToken",
+                "token",
+            ]
+        );
+    }
 }

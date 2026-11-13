@@ -7,7 +7,7 @@ use super::store;
 use crate::state::{DirectoryInfo, Engine, ModrinthCredentials, Sessions};
 use crate::util::io::format_bytes;
 use regex::{Captures, Regex};
-use sqlx::{Row, SqlitePool};
+use sqlx::SqlitePool;
 use std::fmt::Write as _;
 use std::io::{Read, Seek, SeekFrom};
 use std::net::{Ipv4Addr, Ipv6Addr};
@@ -626,30 +626,22 @@ pub(crate) async fn censor_support_text(
         );
     }
 
-    for token in minecraft_tokens(pool).await? {
-        replace_nonempty(&mut text, &token, "{MINECRAFT_TOKEN}");
-    }
-
+    text = censor_tokens(text);
     text = censor_ip_addresses(text);
 
     Ok(text)
 }
 
-async fn minecraft_tokens(
-    pool: &sqlx::SqlitePool,
-) -> crate::Result<Vec<String>> {
-    let rows =
-        sqlx::query("SELECT access_token, refresh_token FROM minecraft_users")
-            .fetch_all(pool)
-            .await?;
-    let mut tokens = Vec::with_capacity(rows.len() * 2);
+fn censor_tokens(text: String) -> String {
+    let text = Regex::new(r"(--accessToken\s+)\S+")
+        .expect("valid access token regex")
+        .replace_all(&text, "${1}{MINECRAFT_TOKEN}")
+        .into_owned();
 
-    for row in rows {
-        tokens.push(row.try_get("access_token")?);
-        tokens.push(row.try_get("refresh_token")?);
-    }
-
-    Ok(tokens)
+    Regex::new(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*")
+        .expect("valid JWT regex")
+        .replace_all(&text, "{TOKEN}")
+        .into_owned()
 }
 
 fn replace_nonempty(text: &mut String, value: &str, replacement: &str) {
@@ -687,4 +679,22 @@ fn censor_ip_addresses(text: String) -> String {
             }
         })
         .into_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn censor_tokens_removes_access_tokens_and_jwts() {
+        let jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.c2lnbmF0dXJl";
+        let text = format!(
+            "--username Steve --accessToken opaque-token --version 1.21\nauth {jwt} done"
+        );
+
+        assert_eq!(
+            censor_tokens(text),
+            "--username Steve --accessToken {MINECRAFT_TOKEN} --version 1.21\nauth {TOKEN} done"
+        );
+    }
 }

@@ -61,7 +61,8 @@ pub use self::projects::{
     toggle_disable_project, update_managed_modrinth_version, update_project,
 };
 pub use self::run::{
-    QuickPlayType, kill, run, try_update_playtime_by_instance_id,
+    LaunchCredentials, LaunchDefaults, LaunchRequest, QuickPlayType,
+    ensure_installed, kill, launch, try_update_playtime_by_instance_id,
 };
 pub use self::screenshot_groups::{
     ScreenshotGroup, ScreenshotGroupImport, ScreenshotGroupMembershipUpdate,
@@ -159,12 +160,12 @@ pub use self::synced_servers::{
     list_synced_servers, remove_synced_server, update_synced_server,
 };
 
+pub use self::synced_packs::flush as reconcile_synced_packs;
 pub use self::synced_packs::{
     PackSyncPreview, PackSyncTarget, desync_pack, get_pack_sync_preview,
     list_synced_packs, remove_synced_pack, set_synced_pack_enabled, sync_pack,
     upload_synced_pack,
 };
 pub(crate) use self::synced_packs::{
-    PackSyncWorker, flush as reconcile_synced_packs,
-    queue_reconciliation as queue_synced_pack_reconciliation,
+    PackSyncWorker, queue_reconciliation as queue_synced_pack_reconciliation,
 };

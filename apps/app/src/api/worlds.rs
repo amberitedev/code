@@ -1,6 +1,6 @@
 use crate::api::Result;
 use crate::engine_handle::EngineHandle;
-use engine::instance::{self, QuickPlayType, get_full_path};
+use engine::instance::{QuickPlayType, get_full_path};
 use engine::prelude::ProcessMetadata;
 use engine::server_address::ServerAddress;
 use engine::worlds;
@@ -247,9 +247,12 @@ pub async fn start_join_singleplayer_world(
     world: String,
 ) -> Result<ProcessMetadata> {
     let state = handle.get().await;
-    let process =
-        instance::run(&state, instance_id, QuickPlayType::Singleplayer(world))
-            .await?;
+    let process = crate::launch::launch(
+        &state,
+        instance_id,
+        QuickPlayType::Singleplayer(world),
+    )
+    .await?;
 
     Ok(process)
 }
@@ -261,7 +264,7 @@ pub async fn start_join_server(
     address: &str,
 ) -> Result<ProcessMetadata> {
     let state = handle.get().await;
-    let process = instance::run(
+    let process = crate::launch::launch(
         &state,
         instance_id,
         QuickPlayType::Server(ServerAddress::Unresolved(address.to_owned())),
