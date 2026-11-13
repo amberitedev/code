@@ -905,9 +905,6 @@ async fn fetch_advanced_with_target(
     to_file: bool,
     file_staging: Option<&Path>,
 ) -> crate::Result<FetchBody> {
-    let routed_url =
-        crate::self_hosted::accounts::route(sessions, url, uri_path);
-    let url = routed_url.as_ref();
     let header = header.filter(|(name, _)| {
         !name.eq_ignore_ascii_case("authorization")
             || crate::self_hosted::accounts::may_send_credentials(sessions, url)

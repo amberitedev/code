@@ -1,3 +1,9 @@
+#[cfg(debug_assertions)]
+use contracts::{
+    Json,
+    backend::dev::{ScenarioLogin, Session},
+    client::{Remote, call},
+};
 use engine::AccountEndpoints;
 use serde::Deserialize;
 use std::env;
@@ -91,27 +97,24 @@ async fn open_session(
     {
         return Ok(());
     }
-    #[derive(Deserialize)]
-    struct Session {
-        session: String,
-    }
-    // Startup waits on this, so a backend that is reloading must not hold the App on its splash.
-    let response = tauri_plugin_http::reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()?
-        .post(format!(
-            "{}/_dev/session",
-            backend_url.trim_end_matches('/')
-        ))
-        .header("Content-Type", "application/json")
-        .header("X-Local-Dev-Secret", secret)
-        .body(serde_json::json!({ "username": username }).to_string())
-        .send()
-        .await?
-        .error_for_status()?
-        .text()
-        .await?;
-    let session: Session = serde_json::from_str(&response)?;
+    let http = reqwest::Client::builder()
+        .default_headers(reqwest::header::HeaderMap::from_iter([(
+            reqwest::header::HeaderName::from_static("x-local-dev-secret"),
+            reqwest::header::HeaderValue::from_str(secret)?,
+        )]))
+        .build()?;
+    let backend = Remote {
+        http: &http,
+        base: backend_url,
+        bearer: None,
+        read_ticket: None,
+        // Startup waits on this, so a backend that is reloading must not hold the App on its splash.
+        timeout: Some(std::time::Duration::from_secs(10)),
+    };
+    let login = ScenarioLogin {
+        username: username.to_owned(),
+    };
+    let session = call::<Session>(&backend, &(), &(), Json(login)).await?;
     crate::accounts::mr_auth::authenticate_finish_flow(
         state,
         presence,

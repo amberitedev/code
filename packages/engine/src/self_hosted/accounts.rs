@@ -1,7 +1,6 @@
 use crate::state::{Sessions, User};
 use crate::util::fetch::{FetchSemaphore, fetch_json};
 use reqwest::{Method, Url};
-use std::borrow::Cow;
 
 /// The account service the host routes Modrinth account calls to.
 #[derive(Debug)]
@@ -63,38 +62,6 @@ pub fn socket_base(sessions: &Sessions) -> &str {
         .map_or(env!("MODRINTH_SOCKET_URL"), |config| config.socket.as_str())
 }
 
-/// Only account routes move. Projects, versions, teams and CDN bytes stay public.
-pub(crate) fn route<'a>(
-    sessions: &Sessions,
-    url: &'a str,
-    path: Option<&str>,
-) -> Cow<'a, str> {
-    let Some(config) = &sessions.accounts else {
-        return Cow::Borrowed(url);
-    };
-    let Some(path) = path else {
-        return Cow::Borrowed(url);
-    };
-    let private = path.starts_with("/v2/user")
-        || path.starts_with("/v3/user")
-        || path.starts_with("/v2/session")
-        || path.starts_with("/v3/friend")
-        || path.starts_with("/v3/block")
-        || path.starts_with("/v2/notification")
-        || path.starts_with("/v3/notification");
-    if private {
-        for (base, version) in [
-            (env!("MODRINTH_API_URL"), "v2/"),
-            (env!("MODRINTH_API_URL_V3"), "v3/"),
-        ] {
-            if let Some(suffix) = url.strip_prefix(base) {
-                return Cow::Owned(format!("{}{version}{suffix}", config.api));
-            }
-        }
-    }
-    Cow::Borrowed(url)
-}
-
 pub(crate) fn may_send_credentials(sessions: &Sessions, url: &str) -> bool {
     if let Some(config) = &sessions.accounts {
         return Url::parse(url).is_ok_and(|url| {
@@ -117,10 +84,10 @@ pub async fn users(
     let ids = urlencoding::encode(&serde_json::to_string(ids)?).into_owned();
     fetch_json(
         Method::GET,
-        &format!("{}users?ids={ids}", env!("MODRINTH_API_URL")),
+        &format!("{}users?ids={ids}", origin(sessions)),
         None,
         None,
-        Some("/v2/users"),
+        None,
         semaphore,
         sessions,
     )

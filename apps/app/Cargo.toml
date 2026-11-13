@@ -19,7 +19,7 @@ bytemuck = { workspace = true, features = ["extern_crate_alloc"] }
 bytes = { workspace = true }
 chardetng = { workspace = true }
 chrono = { workspace = true }
-contracts = { workspace = true, features = ["server"] }
+contracts = { workspace = true, features = ["client", "server"] }
 dashmap = { workspace = true }
 data-url = { workspace = true }
 dirs = { workspace = true }

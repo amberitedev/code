@@ -137,12 +137,8 @@ pub async fn remove_user(
             .into_iter()
             .find(|creds| creds.user_id == user_id)
     {
-        if let Err(error) = crate::accounts::self_hosted::revoke(
-            &creds,
-            &state.api_semaphore,
-            &state.sessions,
-        )
-        .await
+        if let Err(error) =
+            crate::accounts::self_hosted::revoke(&creds, &state.sessions).await
         {
             tracing::warn!("Could not revoke account session: {error}");
         }

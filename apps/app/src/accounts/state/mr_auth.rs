@@ -1,5 +1,10 @@
+use crate::accounts::self_hosted::remote;
 use chrono::{DateTime, Duration, TimeZone, Utc};
+use contracts::Empty;
+use contracts::backend::accounts::{GetCurrentUser, RefreshSession};
+use contracts::client::call;
 use engine::data::{CacheBehaviour, CachedEntry, User};
+use engine::self_hosted::accounts::api;
 use engine::{FetchSemaphore, Sessions, fetch_advanced};
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
@@ -29,24 +34,38 @@ impl ModrinthCredentials {
                     session: String,
                 }
 
-                let resp = fetch_advanced(
-                    Method::POST,
-                    concat!(env!("MODRINTH_API_URL"), "session/refresh"),
-                    None,
-                    None,
-                    Some(("Authorization", &*creds.session)),
-                    None,
-                    None,
-                    Some("/v2/session/refresh"),
-                    semaphore,
-                    sessions,
-                )
-                .await
-                .ok()
-                .and_then(|resp| serde_json::from_slice::<Session>(&resp).ok());
+                let refreshed = match api(sessions) {
+                    Some(api) => call::<RefreshSession>(
+                        &remote(api, &creds.session),
+                        &(),
+                        &(),
+                        Empty,
+                    )
+                    .await
+                    .ok()
+                    .map(|answer| answer.session),
+                    None => fetch_advanced(
+                        Method::POST,
+                        concat!(env!("MODRINTH_API_URL"), "session/refresh"),
+                        None,
+                        None,
+                        Some(("Authorization", &*creds.session)),
+                        None,
+                        None,
+                        Some("/v2/session/refresh"),
+                        semaphore,
+                        sessions,
+                    )
+                    .await
+                    .ok()
+                    .and_then(|resp| {
+                        serde_json::from_slice::<Session>(&resp).ok()
+                    })
+                    .map(|value| value.session),
+                };
 
-                if let Some(value) = resp {
-                    creds.session = value.session;
+                if let Some(session) = refreshed {
+                    creds.session = session;
                     creds.expires = Utc::now() + Duration::weeks(2);
                     creds.upsert(exec).await?;
                     crate::accounts::self_hosted::set_sessions(
@@ -230,21 +249,26 @@ pub async fn finish_login_flow(
     // needed. TODO not do this for the reasons outlined at
     // https://oauth.net/2/grant-types/implicit/
 
-    let info = fetch_info(code, semaphore, sessions).await?;
+    let user_id = fetch_user_id(code, semaphore, sessions).await?;
 
     Ok(ModrinthCredentials {
         session: code.to_string(),
         expires: Utc::now() + Duration::weeks(2),
-        user_id: info.id,
+        user_id,
         active: true,
     })
 }
 
-async fn fetch_info(
+async fn fetch_user_id(
     token: &str,
     semaphore: &FetchSemaphore,
     sessions: &Sessions,
-) -> engine::Result<User> {
+) -> engine::Result<String> {
+    if let Some(api) = api(sessions) {
+        let user = call::<GetCurrentUser>(&remote(api, token), &(), &(), Empty)
+            .await?;
+        return Ok(user.id);
+    }
     let result = fetch_advanced(
         Method::GET,
         concat!(env!("MODRINTH_API_URL"), "user"),
@@ -258,7 +282,7 @@ async fn fetch_info(
         sessions,
     )
     .await?;
-    let value = serde_json::from_slice(&result)?;
+    let user: User = serde_json::from_slice(&result)?;
 
-    Ok(value)
+    Ok(user.id)
 }

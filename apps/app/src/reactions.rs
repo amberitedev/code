@@ -10,7 +10,7 @@ use engine::data::ProjectType;
 use engine::install::{InstallJobKind, InstallJobStatus};
 use engine::{
     DesktopEvent, Engine, Event, InstancePayload, InstancePayloadType,
-    ProcessPayload, ProcessPayloadType, instance,
+    ProcessPayload, ProcessPayloadType,
 };
 use tauri::{AppHandle, Manager};
 use tokio::sync::broadcast::{self, Receiver, error::RecvError};
@@ -303,7 +303,7 @@ fn change_window(app: &AppHandle, change: WindowChange) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use engine::{ProcessPayload, prelude::CommandPayload};
+    use engine::{ProcessPayload, instance, prelude::CommandPayload};
 
     fn process(event: ProcessPayloadType) -> Event {
         Event::Process(ProcessPayload {

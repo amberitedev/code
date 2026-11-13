@@ -1,5 +1,6 @@
 use super::TunnelSocket;
 use super::tunnel::InternalTunnelSocket;
+use crate::accounts::self_hosted::{backend, remote};
 use crate::accounts::state::ModrinthCredentials;
 use crate::presence::Presence;
 use anyhow::bail;
@@ -13,7 +14,12 @@ use async_tungstenite::tokio::{ConnectStream, connect_async};
 use async_tungstenite::tungstenite::Message;
 use async_tungstenite::tungstenite::client::IntoClientRequest;
 use bytes::Bytes;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
+use contracts::backend::social::{
+    AddFriend, ListFriends, RemoveFriend, UserFriend, UserRef,
+};
+use contracts::client::{CallError, call};
+use contracts::{Empty, ErrorCode};
 use dashmap::DashMap;
 use either::Either;
 use engine::LabrinthError;
@@ -24,7 +30,6 @@ use engine::{
 use futures::{SinkExt, StreamExt};
 use reqwest::Method;
 use reqwest::header::HeaderValue;
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::net::SocketAddr;
 use std::ops::Deref;
@@ -46,14 +51,6 @@ pub struct FriendsSocket {
     connection_generation: Arc<AtomicU64>,
     user_statuses: Arc<DashMap<UserId, UserStatus>>,
     tunnel_sockets: TunnelSockets,
-}
-
-#[derive(Deserialize, Serialize)]
-pub struct UserFriend {
-    pub id: String,
-    pub friend_id: String,
-    pub accepted: bool,
-    pub created: DateTime<Utc>,
 }
 
 impl Default for FriendsSocket {
@@ -386,6 +383,10 @@ impl FriendsSocket {
         semaphore: &FetchSemaphore,
         sessions: &Sessions,
     ) -> engine::Result<Vec<UserFriend>> {
+        if let Some(session) = backend(sessions)? {
+            let backend = remote(&session.base_url, &session.bearer);
+            return Ok(call::<ListFriends>(&backend, &(), &(), Empty).await?);
+        }
         fetch_json(
             Method::GET,
             concat!(env!("MODRINTH_API_URL_V3"), "friends"),
@@ -412,6 +413,18 @@ impl FriendsSocket {
         semaphore: &FetchSemaphore,
         sessions: &Sessions,
     ) -> engine::Result<()> {
+        if let Some(session) = backend(sessions)? {
+            let backend = remote(&session.base_url, &session.bearer);
+            let user = UserRef { id: user_id.into() };
+            return match call::<AddFriend>(&backend, &user, &(), Empty).await {
+                Err(CallError::Api { error, .. })
+                    if error.error == ErrorCode::NotFound =>
+                {
+                    bail!("no user found with username \"{user_id}\"")
+                }
+                result => Ok(result?),
+            };
+        }
         let result = fetch_advanced(
             Method::POST,
             &format!("{}friend/{user_id}", env!("MODRINTH_API_URL_V3")),
@@ -443,6 +456,12 @@ impl FriendsSocket {
         semaphore: &FetchSemaphore,
         sessions: &Sessions,
     ) -> engine::Result<()> {
+        if let Some(session) = backend(sessions)? {
+            let backend = remote(&session.base_url, &session.bearer);
+            let user = UserRef { id: user_id.into() };
+            call::<RemoveFriend>(&backend, &user, &(), Empty).await?;
+            return Ok(());
+        }
         fetch_advanced(
             Method::DELETE,
             &format!("{}friend/{user_id}", env!("MODRINTH_API_URL_V3")),

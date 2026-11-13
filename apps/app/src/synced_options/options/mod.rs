@@ -18,12 +18,13 @@ pub(super) use self::files::{
 };
 pub(super) use self::orchestration::instance_option_supported;
 pub use self::orchestration::{
-    GlobalSyncedOptions, SyncedOptionCapability, SyncedOptionJoinAction,
-    SyncedOptionJoinPreview, SyncedOptionJoinResolution, SyncedOptionsOverview,
-    get_global_options, get_initialized_options,
+    GlobalSyncedOptions, SyncedOptionJoinPreview, SyncedOptionJoinResolution,
+    SyncedOptionsOverview, get_global_options, get_initialized_options,
     get_instance_option_join_preview, get_overview, get_synced_options_folder,
     prepare_instance_update, reconcile_all, reconcile_changed_file,
     reconcile_instance, reconcile_instance_after_pack_update,
     remove_generated_instance_files, set_global_option, set_synced_option,
     start, synced_options_path,
 };
+#[cfg(test)]
+pub use self::orchestration::{SyncedOptionCapability, SyncedOptionJoinAction};

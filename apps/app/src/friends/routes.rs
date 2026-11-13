@@ -3,7 +3,6 @@
 use std::sync::Arc;
 
 use axum::{Router, extract::State};
-use chrono::SecondsFormat;
 use contracts::{
     ApiError, Empty, Json,
     backend::social::UserFriend,
@@ -40,20 +39,7 @@ async fn list_friends(
     State(engine): State<Arc<Engine>>,
     _: Req<ListFriends>,
 ) -> Answer<Json<Vec<UserFriend>>> {
-    let friends = api::friends(&engine).await.map_err(api_error)?;
-    Ok(Json(
-        friends
-            .into_iter()
-            .map(|friend| UserFriend {
-                id: friend.id,
-                friend_id: friend.friend_id,
-                accepted: friend.accepted,
-                created: friend
-                    .created
-                    .to_rfc3339_opts(SecondsFormat::AutoSi, true),
-            })
-            .collect(),
-    ))
+    api::friends(&engine).await.map(Json).map_err(api_error)
 }
 
 async fn list_friend_statuses(

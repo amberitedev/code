@@ -1,11 +1,35 @@
+use contracts::Empty;
+use contracts::backend::accounts::{DeleteSession, ListSessions, SessionRef};
+use contracts::client::{Remote, call};
 use engine::self_hosted::accounts::{api, enabled, origin};
 use engine::{
-    BackendSession, BackendSessionKind, FetchSemaphore, ModrinthSession,
-    Sessions,
+    BackendSession, BackendSessionKind, ErrorKind, INSECURE_REQWEST_CLIENT,
+    ModrinthSession, Sessions,
 };
-use reqwest::Method;
+use reqwest::Url;
 
 use crate::accounts::state::ModrinthCredentials;
+
+/// The backend at `base`, called as `bearer`.
+pub(crate) fn remote<'a>(base: &'a Url, bearer: &'a str) -> Remote<'a> {
+    Remote {
+        http: &INSECURE_REQWEST_CLIENT,
+        base: base.as_str(),
+        bearer: Some(bearer),
+        read_ticket: None,
+        timeout: None,
+    }
+}
+
+/// The signed-in account's backend session, or `None` when accounts go to Modrinth.
+pub(crate) fn backend(
+    sessions: &Sessions,
+) -> engine::Result<Option<BackendSession>> {
+    if !enabled(sessions) {
+        return Ok(None);
+    }
+    Ok(Some(sessions.backend().ok_or(ErrorKind::NotLoggedIn)?))
+}
 
 /// Signs the engine in as `credentials`, the account now active in the database, or out.
 pub(crate) fn set_sessions(
@@ -61,43 +85,23 @@ pub(crate) async fn bind_origin(
 
 pub(crate) async fn revoke(
     credentials: &ModrinthCredentials,
-    semaphore: &FetchSemaphore,
     sessions: &Sessions,
 ) -> engine::Result<()> {
-    if !enabled(sessions) {
+    let Some(api) = api(sessions) else {
         return Ok(());
-    }
-    #[derive(serde::Deserialize)]
-    struct Session {
-        id: String,
-        current: bool,
-    }
-    let response = engine::fetch_advanced(
-        Method::GET,
-        concat!(env!("MODRINTH_API_URL"), "session/list"),
-        None,
-        None,
-        Some(("Authorization", &credentials.session)),
-        None,
-        None,
-        Some("/v2/session/list"),
-        semaphore,
-        sessions,
-    )
-    .await?;
-    let listed: Vec<Session> = serde_json::from_slice(&response)?;
-    if let Some(session) = listed.into_iter().find(|session| session.current) {
-        engine::fetch_advanced(
-            Method::DELETE,
-            &format!("{}session/{}", env!("MODRINTH_API_URL"), session.id),
-            None,
-            None,
-            Some(("Authorization", &credentials.session)),
-            None,
-            None,
-            Some("/v2/session/:id"),
-            semaphore,
-            sessions,
+    };
+    let backend = remote(api, &credentials.session);
+    let listed = call::<ListSessions>(&backend, &(), &(), Empty).await?;
+    if let Some(session) =
+        listed.into_iter().find(|session| session.details.current)
+    {
+        call::<DeleteSession>(
+            &backend,
+            &SessionRef {
+                id: session.details.id,
+            },
+            &(),
+            Empty,
         )
         .await?;
     }
@@ -115,6 +119,60 @@ mod tests {
             user_id: "imported-user".into(),
             active: true,
         }
+    }
+
+    #[tokio::test]
+    async fn account_calls_go_to_the_backend_with_the_session() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        engine::install_crypto_provider();
+        let listener =
+            tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let api = format!("http://{}/api", listener.local_addr().unwrap());
+        let request = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut head = vec![0; 4096];
+            let read = socket.read(&mut head).await.unwrap();
+            socket
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n[]")
+                .await
+                .unwrap();
+            String::from_utf8_lossy(&head[..read]).to_lowercase()
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let engine = engine::Engine::new(
+            crate::data_dir::engine_config(
+                dir.path().to_path_buf(),
+                engine::EventSink::new(),
+                Some(engine::AccountEndpoints::new(&api, None).unwrap()),
+            )
+            .await
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+        set_sessions(&engine.sessions, Some(&credentials()));
+
+        let friends = crate::friends::state::FriendsSocket::friends(
+            &engine.api_semaphore,
+            &engine.sessions,
+        )
+        .await
+        .unwrap();
+
+        assert!(friends.is_empty());
+        let request = request.await.unwrap();
+        assert!(request.starts_with("get /api/friends "), "{request}");
+        assert!(
+            request.contains("\r\nauthorization: bearer imported-session\r\n"),
+            "{request}"
+        );
+        assert_eq!(
+            engine
+                .sessions
+                .modrinth_token(concat!(env!("MODRINTH_API_URL"), "project/x")),
+            None
+        );
     }
 
     #[tokio::test]

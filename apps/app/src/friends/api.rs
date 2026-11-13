@@ -1,6 +1,7 @@
-use crate::friends::state::{FriendsSocket, UserFriend};
+use crate::friends::state::FriendsSocket;
 use crate::presence::Presence;
 use ariadne::users::UserStatus;
+use contracts::backend::social::UserFriend;
 
 #[tracing::instrument(skip(state))]
 pub async fn friends(

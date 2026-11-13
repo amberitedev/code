@@ -34,16 +34,20 @@ mod settings_editor;
 mod source_selection;
 mod write_shared_settings;
 
+#[cfg(test)]
 pub use crate::synced_options::state::{CanonicalValue, GameOptionKind};
+#[cfg(test)]
 pub use api_types::{
     EditableGameSetting, GameOptionCompatibility,
     GameOptionCompatibilityBucket, GameOptionCompatibilityReason,
     GameOptionCompatibilityStatus, GameOptionEditorChoice,
     GameOptionEditorDefinition, GameOptionMappingKind,
-    GameOptionValidationIssue, GameOptionValueState,
-    GameOptionsSourceCandidate, GameOptionsSourceIssue, GameSettingCategory,
-    GameSettingChange, GameSettingsEditorState, SaveGameSettingsResult,
-    UpdateGameSettingsRequest,
+    GameOptionValidationIssue, GameOptionValueState, GameOptionsSourceIssue,
+    GameSettingCategory, GameSettingChange,
+};
+pub use api_types::{
+    GameOptionsSourceCandidate, GameSettingsEditorState,
+    SaveGameSettingsResult, UpdateGameSettingsRequest,
 };
 pub use launch_overrides::{apply_launcher_overrides, sync_before_launch};
 pub use local_settings_editor::{
@@ -52,10 +56,11 @@ pub use local_settings_editor::{
 };
 pub use locales::queue_game_locale_index;
 pub(crate) use locales::{GameLocaleIndexer, start_game_locale_indexer};
+#[cfg(test)]
 pub use locales::{
-    GameSettingLocaleLabel, GameSettingLocaleLabels, GameSettingSource,
-    GameSettingSourceProject, get_game_setting_locale_labels,
+    GameSettingLocaleLabel, GameSettingSource, GameSettingSourceProject,
 };
+pub use locales::{GameSettingLocaleLabels, get_game_setting_locale_labels};
 pub use pack_updates::capture_pack_base;
 pub use settings_editor::{get_config, preview_changes, save_changes};
 pub use source_selection::list_sync_sources;
