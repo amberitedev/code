@@ -2263,7 +2263,6 @@ dependencies = [
  "image",
  "libc",
  "minisign-verify",
- "modrinth-content-management",
  "netdev",
  "nix 0.30.1",
  "rcgen",

@@ -178,7 +178,6 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
         servers,
         access: Arc::clone(&access),
         backups,
-        uploads: api::files::Uploads::default(),
         update: Arc::clone(&update),
         network: Arc::clone(&network),
         storage: Arc::clone(&storage),

@@ -1,16 +1,16 @@
-//! The engine's content and share routes on a Core, behind `CoreAccess`. Only the routes listed
-//! here are mounted: none whose body or answer carries a host path, none of the engine-wide routes
-//! for settings, the store, caches, Java or processes, and not the engine's edit-instance route,
-//! which writes launch hooks, Java and environment variables (`api::servers` changes a server's
-//! name and update channel itself). A change is logged, and holds the server unless it touches
-//! none of its files, so it is refused while the server runs or installs; its [`Hook`] says what
+//! The engine's content, share, file, upload and icon routes on a Core, behind `CoreAccess`. Only
+//! the routes listed here are mounted: none whose body or answer carries a host path, none of the
+//! engine-wide routes for settings, the store, caches, Java or processes, and not the engine's
+//! edit-instance route, which writes launch hooks, Java and environment variables (`api::servers`
+//! changes a server's name and update channel itself). A change is logged; a content change also
+//! holds the server, so it is refused while the server runs or installs. Its [`Hook`] says what
 //! else it does.
 
-use std::{sync::Arc, time::Duration};
+use std::{io::Cursor, sync::Arc, time::Duration};
 
 use axum::{
     Router,
-    extract::{FromRequestParts, RawPathParams, Request, State},
+    extract::{FromRequestParts, Path, RawPathParams, Request, State},
     handler::Handler,
     response::{IntoResponse, Response},
 };
@@ -24,22 +24,23 @@ use engine::{
     Engine,
     access::{Edit, InstanceAccess},
     data::ResolveContentPlan,
-    endpoints::{content::*, install::*, sharing::*},
+    endpoints::{content::*, files::*, install::*, sharing::*},
     instance::SharedInstancePublishPreview,
     routes::{self as engine_routes, api_error},
 };
 use futures::future::BoxFuture;
+use uuid::Uuid;
 
-use super::{CoreState, Shared, internal};
+use super::{CoreState, Shared, backups::zip_response, internal, world};
 use crate::{
     access::{Caller, Permission, activity, owed::OwedCall},
-    servers::Hold,
+    servers::{Hold, ServerError, server_rows},
 };
 
 #[derive(Clone, Copy)]
 struct Hook {
     level: Permission,
-    /// Hold the server: the change writes its files.
+    /// Refused while the server runs or installs (`Servers::hold`).
     hold: bool,
     /// Back the world up before the change.
     backup: bool,
@@ -48,6 +49,8 @@ struct Hook {
     /// The change is an engine install job, which installs the server software too. The server
     /// stays held until the job ends.
     job: bool,
+    /// Logged as a settings change, and Minecraft's `server-icon.png` follows the icon.
+    icon: bool,
 }
 
 const EDIT: Hook = Hook {
@@ -56,6 +59,7 @@ const EDIT: Hook = Hook {
     backup: false,
     forget_players: false,
     job: false,
+    icon: false,
 };
 const OWNER: Hook = Hook {
     level: Permission::Owner,
@@ -70,6 +74,12 @@ const BACKUP_JOB: Hook = Hook {
     backup: true,
     ..JOB
 };
+/// A server's files change while it runs, as they would by hand.
+const FILE: Hook = Hook {
+    hold: false,
+    ..EDIT
+};
+const ICON: Hook = Hook { icon: true, ..FILE };
 
 /// Routes that answer within the request timeout.
 pub fn routes() -> Router<Shared> {
@@ -104,6 +114,30 @@ pub fn routes() -> Router<Shared> {
             },
             unlink_shared_instance,
         )),
+        route::<ListInstanceFiles, _, _, _>(list_instance_files),
+        route::<StatInstanceFile, _, _, _>(stat_instance_file),
+        route::<CreateInstanceDirectory, _, _, _>(change(
+            FILE,
+            create_instance_directory,
+        )),
+        route::<MoveInstanceFile, _, _, _>(change(FILE, move_instance_file)),
+        route::<DeleteInstanceFile, _, _, _>(change(
+            FILE,
+            delete_instance_file,
+        )),
+        route::<OpenInstanceUpload, _, _, _>(open_instance_upload),
+        route::<GetInstanceUpload, _, _, _>(get_instance_upload),
+        route::<CancelInstanceUpload, _, _, _>(cancel_instance_upload),
+        route::<GetInstanceIcon, _, _, _>(get_instance_icon),
+        route::<SetInstanceIcon, _, _, _>(change(ICON, set_instance_icon)),
+        route::<SetEditedInstanceIcon, _, _, _>(change(
+            ICON,
+            set_edited_instance_icon,
+        )),
+        route::<RemoveInstanceIcon, _, _, _>(change(
+            ICON,
+            remove_instance_icon,
+        )),
     ]
     .into_iter()
     .fold(Router::new(), |router, (path, method)| {
@@ -111,8 +145,8 @@ pub fn routes() -> Router<Shared> {
     })
 }
 
-/// Routes that download, or back the world up, first, which can take longer than the request
-/// timeout, and reads at the same paths.
+/// Routes that download, or back the world up, first, or go through whole files and folders, which
+/// can take longer than the request timeout, and reads at the same paths.
 pub fn long_routes() -> Router<Shared> {
     use engine_routes::*;
     [
@@ -151,11 +185,101 @@ pub fn long_routes() -> Router<Shared> {
             },
             restore_shared_instance_version,
         )),
+        route::<ReadInstanceFile, _, _, _>(read_instance_file),
+        route::<ExtractInstanceZip, _, _, _>(extract_zip),
+        route::<ZipInstanceFiles, _, _, _>(change(FILE, zip_instance_files)),
+        route::<FinalizeInstanceUpload, _, _, _>(change(
+            FILE,
+            finalize_instance_upload,
+        )),
     ]
     .into_iter()
     .fold(Router::new(), |router, (path, method)| {
         router.route(path, method)
     })
+    .route(
+        "/servers/{id}/v1/worlds/{wid}/content/export-mrpack",
+        axum::routing::get(export_mrpack),
+    )
+}
+
+/// Routes whose body is a file of any size.
+pub fn upload_routes() -> Router<Shared> {
+    use engine_routes::*;
+    [
+        route::<WriteInstanceFile, _, _, _>(change(FILE, write_instance_file)),
+        route::<AddInstanceUploadFile, _, _, _>(add_instance_upload_file),
+    ]
+    .into_iter()
+    .fold(Router::new(), |router, (path, method)| {
+        router.route(path, method)
+    })
+}
+
+/// A dry run changes nothing, so only a real one is logged.
+async fn extract_zip(
+    State(state): State<Arc<CoreState>>,
+    engine: State<Arc<Engine>>,
+    instance: InstanceAccess<Edit>,
+    request: Req<ExtractInstanceZip>,
+) -> Result<Json<Option<ExtractDryRunResult>>, ApiError> {
+    let (caller, id) = (instance.caller.clone(), instance.id.clone());
+    let dry_run = request.body.dry_run;
+    let extracted =
+        engine_routes::extract_instance_zip(engine, instance, request).await?;
+    if !dry_run {
+        activity::log(&state.db, &caller, Some(&id), Action::ContentChanged)
+            .await;
+    }
+    Ok(extracted)
+}
+
+/// `GET /servers/{id}/v1/worlds/{wid}/content/export-mrpack`: the server's content as an
+/// `.mrpack`, written to its staging folder, streamed, then removed. The App saves it natively, so
+/// it asks for a link first (`access::links`). A server exports what upstream's export selects by
+/// default: its content folders and `config/`.
+async fn export_mrpack(
+    caller: Caller,
+    State(state): State<Arc<CoreState>>,
+    Path((id, wid)): Path<(String, String)>,
+) -> Result<Response, ApiError> {
+    world(&id, &wid)?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
+    let server = server_rows::get(&state.db, &id)
+        .await
+        .map_err(internal)?
+        .ok_or_else(|| ServerError::NotFound(id.clone()))?;
+    let staging = state.servers.paths().staging(&id);
+    tokio::fs::create_dir_all(&staging)
+        .await
+        .map_err(internal)?;
+    let path = staging.join(format!("export-{}.mrpack", Uuid::new_v4()));
+    let level =
+        engine::sandbox::Folder::open(&state.servers.paths().server(&id))
+            .map_err(internal)?
+            .level_name();
+    let included = ["mods", "plugins", "config"]
+        .map(str::to_owned)
+        .into_iter()
+        .chain([format!("{level}/datapacks")])
+        .collect();
+    let exported = engine::instance::export_mrpack(
+        &state.engine,
+        &id,
+        path.clone(),
+        included,
+        Vec::new(),
+        None,
+        None,
+        None,
+    )
+    .await;
+    if let Err(error) = exported {
+        let _ = tokio::fs::remove_file(&path).await;
+        return Err(api_error(error));
+    }
+    let file = std::fs::File::open(&path).map_err(internal)?;
+    Ok(zip_response(file, &server.name, "mrpack", Some(path)))
 }
 
 /// What a push would change, for editors: the engine's route is for the share's owner, and on a
@@ -235,10 +359,7 @@ where
         .expect("an instance route has an {id} segment");
     let state = Arc::clone(&shared.0);
     state.access.require(&caller, &id, hook.level).await?;
-    let hold = match hook.hold {
-        true => Some(state.servers.hold(&id)?),
-        false => None,
-    };
+    let hold = hook.hold.then(|| state.servers.hold(&id)).transpose()?;
     if hook.backup {
         state.backups.pre_update(&id).await?;
     }
@@ -254,16 +375,56 @@ where
     if !response.status().is_success() {
         return Ok(response);
     }
-    activity::log(&state.db, &caller, Some(&id), Action::ContentChanged).await;
+    let action = match hook.icon {
+        true => Action::SettingsChanged,
+        false => Action::ContentChanged,
+    };
+    activity::log(&state.db, &caller, Some(&id), action).await;
     if let Some(share_id) = share {
         forget_players(&state, &id, share_id).await?;
     }
-    if hook.job
-        && let Some(hold) = hold
+    if hook.icon
+        && let Err(error) = game_icon(&state, &id).await
     {
+        tracing::warn!(server = %id, error = %error.description, "could not write server-icon.png");
+    }
+    if let Some(hold) = hold.filter(|_| hook.job) {
         tokio::spawn(finish_job(state, hold));
     }
     Ok(response)
+}
+
+/// Write the server's icon as Minecraft's `server-icon.png`, the 64x64 PNG it shows in the
+/// multiplayer list from its next start, or remove it with the icon.
+async fn game_icon(state: &CoreState, id: &str) -> Result<(), ApiError> {
+    const GAME_ICON: &str = "server-icon.png";
+    let icon = engine::instance::read_icon(&state.engine, id)
+        .await
+        .map_err(api_error)?;
+    let folder =
+        engine::sandbox::Folder::open(&state.servers.paths().server(id))
+            .map_err(internal)?;
+    tokio::task::spawn_blocking(move || match icon {
+        Some(icon) => {
+            let mut png = Vec::new();
+            image::load_from_memory(&icon)
+                .map_err(internal)?
+                .resize_to_fill(64, 64, image::imageops::FilterType::Lanczos3)
+                .write_to(&mut Cursor::new(&mut png), image::ImageFormat::Png)
+                .map_err(internal)?;
+            folder
+                .write(GAME_ICON, &mut png.as_slice())
+                .map(drop)
+                .map_err(internal)
+        }
+        // Only a plain file: `remove` would also take a folder by that name, and its contents.
+        None if folder.metadata(GAME_ICON).is_ok_and(|meta| meta.is_file()) => {
+            folder.remove(GAME_ICON).map_err(internal)
+        }
+        None => Ok(()),
+    })
+    .await
+    .map_err(internal)?
 }
 
 /// Owe the backend the removal of the players the server passed `share_id` on to.

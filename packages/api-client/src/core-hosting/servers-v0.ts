@@ -147,14 +147,11 @@ export function serversV0(client: AbstractModrinthClient): Adapter<ArchonServers
 				body: { name, update_channel: null },
 			})
 		},
-		async getFilesystemAuth(serverId) {
-			const auth = await client.request<Archon.Servers.v0.JWTAuth>(`/servers/${serverId}/fs`, {
-				api: 'archon',
-				version: 'modrinth/v0',
-				method: 'GET',
-			})
-			return { ...auth, url: coreNodeUrl(await base(serverId), serverId) }
-		},
+		// The file routes check the session themselves, so there is no token.
+		getFilesystemAuth: async (serverId) => ({
+			url: coreNodeUrl(await base(serverId), serverId),
+			token: '',
+		}),
 		async getWebSocketAuth(serverId) {
 			// A Core's `/events` socket, at the base requests to it go to. See `CoreWebSocketClient`.
 			return { url: `${(await base(serverId)).replace(/^http/, 'ws')}/events`, token: '' }

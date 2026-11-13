@@ -30,7 +30,6 @@ igd-next = { version = "0.17.1", features = ["aio_tokio"] }
 image = { workspace = true, features = ["gif", "jpeg", "png", "webp"] }
 # Checks the signature on Copal release manifests.
 minisign-verify = "0.2.4"
-modrinth-content-management = { workspace = true }
 netdev = "0.46.3"
 rcgen = "0.14.7"
 reqwest = { workspace = true, features = ["json", "rustls-no-provider", "stream"] }

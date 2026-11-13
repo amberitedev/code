@@ -1175,7 +1175,7 @@ expires_at: number | null, };
 export type NewDownloadLink = { 
 /**
  * The exact path and query the link will GET, such as
- * `/servers/{id}/v1/worlds/{id}/files/contents-raw?path=server.properties`.
+ * `/instances/{id}/files/content?path=server.properties`.
  */
 path: string, };
 

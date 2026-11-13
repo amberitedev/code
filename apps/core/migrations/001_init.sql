@@ -53,12 +53,7 @@ CREATE TABLE servers (
     -- Advanced override; null means the Java Core manages for this version.
     java_path TEXT,
     -- The managed Java major the owner chose; null means the one the Minecraft version needs.
-    java_version INTEGER,
-    -- The icon editor settings (JSON `IconConfig`) the server's icon was made from, and the
-    -- SHA-256 of the game icon they made. A game icon with another hash was replaced some other
-    -- way, so the settings no longer describe it.
-    icon_config TEXT,
-    icon_hash TEXT
+    java_version INTEGER
 );
 
 -- Every time a server ran. The live process identity (pid, start time, boot id) is in

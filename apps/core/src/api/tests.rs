@@ -102,7 +102,6 @@ async fn core() -> Core {
         network: Arc::new(crate::network::forward::Network::off(db.clone())),
         db,
         backups,
-        uploads: super::files::Uploads::default(),
         update,
         storage,
         consoles: Arc::default(),
@@ -651,8 +650,8 @@ async fn content_and_files_follow_the_role_table() {
         .execute(&core.state.db)
         .await
         .unwrap();
-    let fs = format!("/servers/{server}/modrinth/v0/fs");
     let instance = format!("/instances/{server}");
+    let files = format!("{instance}/files");
 
     // Viewers see the content list and what the owner edited, nothing else.
     for uri in [
@@ -668,8 +667,18 @@ async fn content_and_files_follow_the_role_table() {
             .await;
         assert_eq!(status, StatusCode::NOT_FOUND, "no role reads as no server");
     }
+    let (status, _) = core
+        .call(
+            Method::GET,
+            &format!("{files}?path="),
+            Some(&stranger),
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
     for (method, uri) in [
-        (Method::GET, format!("{fs}/list?path=/&page=1&page_size=10")),
+        (Method::GET, format!("{files}?path=")),
         (Method::GET, format!("/servers/{server}/properties")),
         (Method::POST, format!("{instance}/content/repair")),
         (Method::POST, format!("{instance}/modpack/unlink")),
@@ -697,63 +706,82 @@ async fn content_and_files_follow_the_role_table() {
         );
     }
 
-    // Editors use the files, inside the server folder only.
-    let create = format!("{fs}/create?path=/config/a.toml&type=file");
+    // Editors and the owner use the files, inside the server folder only.
+    let content = format!("{files}/content");
+    let write = format!("{content}?path=config/a.toml&create_only=true");
     assert_eq!(
-        raw(&core, Method::POST, &create, &editor, "x = 1").await.0,
+        raw(&core, Method::PUT, &write, &editor, "x = 1").await.0,
         StatusCode::NO_CONTENT
     );
-    let (status, list) = core
-        .call(
-            Method::GET,
-            &format!("{fs}/list?path=/config&page=1&page_size=10"),
-            Some(&editor),
-            None,
-            None,
-        )
-        .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(list["items"][0]["path"], "/config/a.toml");
+    let owner = core.sign_in("owner").await;
+    for token in [&editor, &owner] {
+        let (status, list) = core
+            .call(
+                Method::GET,
+                &format!("{files}?path=config"),
+                Some(token),
+                None,
+                None,
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(list[0]["path"], "config/a.toml");
+    }
     let (status, body) = raw(
         &core,
         Method::GET,
-        &format!("{fs}/download?path=/config/a.toml"),
+        &format!("{content}?path=config/a.toml"),
         &editor,
         "",
     )
     .await;
     assert_eq!((status, &body[..]), (StatusCode::OK, &b"x = 1"[..]));
-    let (status, _) = raw(
-        &core,
-        Method::GET,
-        &format!("{fs}/download?path=/../../db/core.db"),
-        &editor,
-        "",
-    )
-    .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
+    for path in ["../../db/core.db", "config/../../db/core.db"] {
+        let (status, _) = raw(
+            &core,
+            Method::GET,
+            &format!("{content}?path={path}"),
+            &editor,
+            "",
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{path}");
+    }
 
-    // An upload never replaces a server-owned file; an edit may.
-    let properties = format!("{fs}/create?path=/server.properties&type=file");
+    // A new file never replaces one; an edit may, and the server may run meanwhile.
+    let _shim =
+        crate::servers::shim::try_lock(core.state.servers.paths(), &server)
+            .unwrap()
+            .unwrap();
+    let properties = format!("{content}?path=server.properties");
+    let new_file = format!("{properties}&create_only=true");
     assert_eq!(
-        raw(&core, Method::POST, &properties, &editor, "motd=Mine\n")
+        raw(&core, Method::PUT, &new_file, &editor, "motd=Mine\n")
             .await
             .0,
         StatusCode::NO_CONTENT,
         "nothing to replace yet"
     );
     assert_eq!(
-        raw(&core, Method::POST, &properties, &editor, "motd=Theirs\n")
+        raw(&core, Method::PUT, &new_file, &editor, "motd=Theirs\n")
             .await
             .0,
         StatusCode::CONFLICT
     );
-    let update = format!("{fs}/update?path=/server.properties");
+    let edit = format!("{properties}&create_only=false");
     assert_eq!(
-        raw(&core, Method::PUT, &update, &editor, "motd=Edited\n")
+        raw(&core, Method::PUT, &edit, &editor, "motd=Edited\n")
             .await
             .0,
         StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        core.count(
+            "SELECT COUNT(*) FROM activity WHERE action LIKE '%content_changed%'"
+        )
+        .await,
+        3,
+        "each edit is logged"
     );
     let (status, read) = core
         .call(
@@ -968,7 +996,7 @@ async fn restores_need_the_owners_fresh_ticket_and_downloads_a_link_or_a_session
         .link(
             &editor,
             &format!(
-                "/servers/{server}/v1/worlds/{server}/files/contents-raw?path=server.properties"
+                "/instances/{server}/files/content?path=server.properties"
             ),
         )
         .await;
@@ -977,6 +1005,8 @@ async fn restores_need_the_owners_fresh_ticket_and_downloads_a_link_or_a_session
     assert_eq!(response.status(), StatusCode::OK);
     let bytes = response.into_body().collect().await.unwrap().to_bytes();
     assert_eq!(&bytes[..], b"motd=Hi\n");
+    let (status, _) = core.send(get(&link)).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "a file downloads once");
 
     // Deleting a backup is the owner's too.
     let delete = format!("{queue}/{backup}");
@@ -1571,21 +1601,7 @@ async fn an_icon_is_saved_for_minecraft_and_the_app_then_reset() {
     let core = core().await;
     let editor = core.sign_in("editor").await;
     let viewer = core.sign_in("viewer").await;
-    let uri = format!("/v1/servers/{}/icon", core.server);
-    let get = |uri: String, token: String| {
-        let request = Request::get(uri)
-            .header("authorization", format!("Bearer {token}"))
-            .body(Body::empty())
-            .unwrap();
-        let router = core.router.clone();
-        async move {
-            let response = router.oneshot(request).await.unwrap();
-            let status = response.status();
-            let bytes =
-                response.into_body().collect().await.unwrap().to_bytes();
-            (status, bytes)
-        }
-    };
+    let uri = format!("/instances/{}/icon", core.server);
     let put = |token: &str, body: Vec<u8>| {
         Request::put(&uri)
             .header("authorization", format!("Bearer {token}"))
@@ -1593,12 +1609,17 @@ async fn an_icon_is_saved_for_minecraft_and_the_app_then_reset() {
             .body(Body::from(body))
             .unwrap()
     };
+    let game_icon = core
+        .state
+        .servers
+        .paths()
+        .server(&core.server)
+        .join("server-icon.png");
 
-    assert_eq!(
-        get(uri.clone(), viewer.clone()).await.0,
-        StatusCode::NOT_FOUND
-    );
-
+    let (status, _) = core
+        .call(Method::GET, &uri, Some(&viewer), None, None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
     let mut wide = Vec::new();
     image::RgbaImage::new(1024, 512)
         .write_to(
@@ -1611,93 +1632,21 @@ async fn an_icon_is_saved_for_minecraft_and_the_app_then_reset() {
         StatusCode::FORBIDDEN
     );
     assert_eq!(
-        core.send(put(&editor, b"not an image".to_vec())).await.0,
-        StatusCode::BAD_REQUEST
+        core.send(put(&editor, wide)).await.0,
+        StatusCode::NO_CONTENT
     );
-    let (status, uploaded) = core.send(put(&editor, wide.clone())).await;
+    let (status, _) = core
+        .call(Method::GET, &uri, Some(&viewer), None, None)
+        .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(
-        uploaded["config"],
-        Value::Null,
-        "an uploaded image has no editor settings"
-    );
-
-    let (status, game) = get(uri.clone(), viewer.clone()).await;
-    assert_eq!(status, StatusCode::OK);
-    let game = image::load_from_memory(&game).unwrap();
+    let game = image::open(&game_icon).unwrap();
     assert_eq!((game.width(), game.height()), (64, 64));
-    let (_, original) =
-        get(format!("{uri}?original=true"), viewer.clone()).await;
-    let original = image::load_from_memory(&original).unwrap();
-    assert_eq!(
-        (original.width(), original.height()),
-        (512, 256),
-        "shrunk to fit, shape kept"
-    );
-    let server_dir = core.state.servers.paths().server(&core.server);
-    assert!(server_dir.join("server-icon.png").exists());
-
-    // An icon made in the icon editor keeps its settings until the icon is replaced.
-    let config = json!({ "background": { "type": "color", "value": "#c78aff" }, "symbol": "dusk_block" });
-    let boundary = "icon-boundary";
-    let mut form = Vec::new();
-    form.extend_from_slice(
-        format!(
-            "--{boundary}\r\nContent-Disposition: form-data; name=\"image\"; filename=\"icon.png\"\r\nContent-Type: image/png\r\n\r\n"
-        )
-        .as_bytes(),
-    );
-    form.extend_from_slice(&wide);
-    form.extend_from_slice(
-        format!(
-            "\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"config\"\r\n\r\n{config}\r\n--{boundary}--\r\n"
-        )
-        .as_bytes(),
-    );
-    let generated = Request::put(format!("{uri}/generated"))
-        .header("authorization", format!("Bearer {editor}"))
-        .header(
-            "content-type",
-            format!("multipart/form-data; boundary={boundary}"),
-        )
-        .body(Body::from(form))
-        .unwrap();
-    let (status, made) = core.send(generated).await;
-    assert_eq!(status, StatusCode::OK, "{made}");
-    assert_eq!(made["config"], config);
-    let (status, metadata) = core
-        .call(
-            Method::GET,
-            &format!("{uri}/metadata"),
-            Some(&viewer),
-            None,
-            None,
-        )
-        .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(metadata, made);
-    let (status, _) = core.send(put(&editor, wide)).await;
-    assert_eq!(status, StatusCode::OK);
-    let (_, metadata) = core
-        .call(
-            Method::GET,
-            &format!("{uri}/metadata"),
-            Some(&viewer),
-            None,
-            None,
-        )
-        .await;
-    assert_eq!(metadata["config"], Value::Null);
 
     let (status, _) = core
         .call(Method::DELETE, &uri, Some(&editor), None, None)
         .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
-    assert_eq!(
-        get(format!("{uri}?original=true"), viewer).await.0,
-        StatusCode::NOT_FOUND
-    );
-    assert!(!server_dir.join("server-icon.png").exists());
+    assert!(!game_icon.exists());
 }
 
 #[tokio::test]

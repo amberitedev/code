@@ -2,7 +2,7 @@ import type { AbstractModrinthClient } from '../core/abstract-client'
 import type { KyrosContentV1Module } from '../modules/kyros/content/v1'
 import type { Adapter } from './adapter'
 import { installPackFile, unsupported } from './content'
-import { link, linkUrl } from './links'
+import { link, linkUrl, serverPath } from './links'
 
 declare module '../modules/kyros/content/v1' {
 	interface KyrosContentV1Module {
@@ -13,8 +13,8 @@ declare module '../modules/kyros/content/v1' {
 	}
 }
 
-const exportMrpack = (worldId: string) =>
-	`/v1/worlds/${encodeURIComponent(worldId)}/content/export-mrpack`
+const exportMrpack = (nodeUrlHost: string, worldId: string) =>
+	serverPath(nodeUrlHost, `/v1/worlds/${encodeURIComponent(worldId)}/content/export-mrpack`)
 
 /** A Core server has one world, with the server's id. */
 export function kyrosContent(client: AbstractModrinthClient): Adapter<KyrosContentV1Module> {
@@ -32,8 +32,8 @@ export function kyrosContent(client: AbstractModrinthClient): Adapter<KyrosConte
 			)
 		},
 		authorizeMrpackExport: (nodeUrlHost, worldId) =>
-			link(client, nodeUrlHost, exportMrpack(worldId)),
+			link(client, nodeUrlHost, exportMrpack(nodeUrlHost, worldId)),
 		getMrpackExportUrl: (nodeUrlHost, worldId, token) =>
-			linkUrl(nodeUrlHost, exportMrpack(worldId), token),
+			linkUrl(nodeUrlHost, exportMrpack(nodeUrlHost, worldId), token),
 	}
 }

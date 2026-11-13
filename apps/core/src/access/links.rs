@@ -78,15 +78,16 @@ async fn allowed(
     caller: &Caller,
     path: &str,
 ) -> Result<(), ApiError> {
-    let server = path
-        .strip_prefix("/servers/")
+    let server = ["/servers/", "/instances/"]
+        .into_iter()
+        .find_map(|prefix| path.strip_prefix(prefix))
         .and_then(|rest| rest.split_once('/'))
         .map(|(server, _)| server)
         .filter(|server| !server.is_empty())
         .ok_or_else(|| {
             ApiError::new(
                 ErrorCode::InvalidInput,
-                "A link is for a path under /servers/{id}/.",
+                "A link is for a path under /servers/{id}/ or /instances/{id}/.",
             )
         })?;
     access.require(caller, server, Permission::Edit).await?;

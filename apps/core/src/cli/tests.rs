@@ -155,7 +155,6 @@ async fn core() -> (tempfile::TempDir, Arc<CoreState>, Client) {
         engine,
         access: Arc::new(CoreAccess::new(db.clone(), keys)),
         backups,
-        uploads: api::files::Uploads::default(),
         update: Arc::new(Updater::new(
             paths.clone(),
             db.clone(),

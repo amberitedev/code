@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vite-plus/test'
 import { ModrinthApiError } from '../core/errors'
 import { GenericModrinthClient } from '../platform/generic'
 import type { RequestOptions } from '../types/request'
+import { clearNodeAuthState, setNodeAuthState } from '../state/node-auth'
 import { AuthFeature } from './auth'
 import { ProtocolMismatch, protocolMismatch } from './core-session'
 import { SelfHostedFeature } from './self-hosted'
@@ -471,14 +472,23 @@ describe('a server on a Core', () => {
 describe('URLs a Core names', () => {
 	it('keep the proxy base, with its capability, for the event socket and the files', async () => {
 		const api = new FakeClient()
-		// Core names the host it was reached at, without the capability.
-		api.answers = [{ url: `127.0.0.1:5000/servers/${SERVER}`, token: '' }]
 		const socket = await api.archon.servers_v0.getWebSocketAuth(SERVER)
 		expect(socket.url).toBe('ws://127.0.0.1:5000/c0ffee/events')
 
 		const files = await api.archon.servers_v0.getFilesystemAuth(SERVER)
 		expect(files.url).toBe(`${PROXY}/servers/${SERVER}`)
-		await api.kyros.files_v0.downloadFileWithAuth(files, '/server.properties')
-		expect(api.sent.at(-1)?.url).toBe(`${PROXY}/servers/${SERVER}/modrinth/v0/fs/download`)
+		// The open panel's server, which upstream's file methods do not name.
+		setNodeAuthState(
+			() => files,
+			async () => {},
+		)
+		try {
+			await api.kyros.files_v0.downloadFile('/logs/latest.log')
+		} finally {
+			clearNodeAuthState()
+		}
+		expect(api.sent.at(-1)?.url).toBe(
+			`${PROXY}/instances/${SERVER}/files/content?path=%2Flogs%2Flatest.log`,
+		)
 	})
 })

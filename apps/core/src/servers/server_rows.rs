@@ -166,37 +166,6 @@ pub async fn set_java(
     Ok(())
 }
 
-/// The icon editor settings of the server's icon and the hash of the game icon they made, or
-/// `None` for an icon that was uploaded as an image.
-pub async fn icon_config(
-    db: &SqlitePool,
-    server_id: &str,
-) -> sqlx::Result<Option<(String, String)>> {
-    let row: Option<(Option<String>, Option<String>)> = sqlx::query_as(
-        "SELECT icon_config, icon_hash FROM servers WHERE id = ?",
-    )
-    .bind(server_id)
-    .fetch_optional(db)
-    .await?;
-    Ok(row.and_then(|(config, hash)| config.zip(hash)))
-}
-
-pub async fn set_icon_config(
-    db: &SqlitePool,
-    server_id: &str,
-    config: Option<(&str, &str)>,
-) -> sqlx::Result<()> {
-    sqlx::query(
-        "UPDATE servers SET icon_config = ?, icon_hash = ? WHERE id = ?",
-    )
-    .bind(config.map(|(config, _)| config))
-    .bind(config.map(|(_, hash)| hash))
-    .bind(server_id)
-    .execute(db)
-    .await?;
-    Ok(())
-}
-
 pub async fn set_name(
     db: &SqlitePool,
     id: &str,

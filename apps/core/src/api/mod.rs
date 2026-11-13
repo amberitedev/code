@@ -1,9 +1,9 @@
 //! The HTTP API: Axum routes, one file per resource. The same router serves HTTPS and the local
 //! socket (see `access::local`).
 //!
-//! Routes only a Core has are `contracts::core` Endpoints. A server's content and share are the
-//! engine's routes (`engine_mount`). The file, icon and download routes match the `Kyros.*` shapes
-//! in `packages/api-client/src/modules`.
+//! Routes only a Core has are `contracts::core` Endpoints. A server's content, share, files and
+//! icon are the engine's routes (`engine_mount`). The download routes match the `Kyros.*` shapes in
+//! `packages/api-client/src/modules`.
 
 pub mod access;
 pub mod activity;
@@ -12,10 +12,7 @@ pub mod console;
 mod engine_mount;
 pub mod eula;
 pub mod events;
-pub mod export;
-pub mod files;
 pub mod health;
-mod icon;
 pub mod insight;
 pub mod logs;
 pub mod pairing;
@@ -36,7 +33,7 @@ use axum::{
     extract::{DefaultBodyLimit, FromRef},
     handler::Handler,
     http::StatusCode,
-    routing::{any, delete, get, post, put},
+    routing::{any, get},
 };
 use color_eyre::eyre::{Result, eyre};
 use contracts::{ApiError, Endpoint, ErrorCode, core::*, server::route};
@@ -81,7 +78,6 @@ pub struct CoreState {
     pub servers: Arc<crate::servers::Servers>,
     pub access: Arc<crate::access::CoreAccess>,
     pub backups: Arc<crate::backups::Backups>,
-    pub uploads: files::Uploads,
     pub update: Arc<crate::update::Updater>,
     pub network: Arc<crate::network::forward::Network>,
     pub storage: Arc<crate::storage::Storage>,
@@ -184,29 +180,8 @@ pub fn router(state: Arc<CoreState>) -> Router {
         .endpoint::<RetryBackup, _, _>(backups::retry)
         .endpoint::<AckOperation, _, _>(backups::ack)
         .endpoint::<CancelOperation, _, _>(backups::cancel)
-        .route(
-            "/v1/servers/{id}/icon",
-            get(icon::get).put(icon::set).delete(icon::delete),
-        )
-        .route("/v1/servers/{id}/icon/metadata", get(icon::metadata))
-        .route("/v1/servers/{id}/icon/generated", put(icon::set_generated))
-        .route("/modrinth/v0/servers/{id}/fs", get(files::auth))
         .endpoint::<SetJava, _, _>(startup::set_java_path)
         .merge(engine_mount::routes())
-        .route("/servers/{id}/modrinth/v0/fs/list", get(files::list))
-        .route("/servers/{id}/modrinth/v0/fs/download", get(files::download))
-        .route("/servers/{id}/modrinth/v0/fs/move", post(files::rename))
-        .route("/servers/{id}/modrinth/v0/fs/delete", delete(files::delete))
-        .route("/servers/{id}/v1/fs/ops/{action}", post(files::operation))
-        .route("/servers/{id}/v1/worlds/{wid}/files/stat", post(files::stat))
-        .route(
-            "/servers/{id}/v1/worlds/{wid}/{scope}/upload-session",
-            get(files::get_session).post(files::open_session),
-        )
-        .route(
-            "/servers/{id}/v1/worlds/{wid}/{scope}/upload-session/{upload}",
-            delete(files::cancel_session),
-        )
         // Applies to the routes above only.
         .layer(TimeoutLayer::with_status_code(
             StatusCode::REQUEST_TIMEOUT,
@@ -220,14 +195,9 @@ pub fn router(state: Arc<CoreState>) -> Router {
         // A push uploads the server's files and waits for the store to confirm them.
         .endpoint::<ShareServer, _, _>(servers::share)
         // Adding and updating addons download them first, as does taking the pack's version of
-        // an edited file, and a pack's install or update backs the world up first.
+        // an edited file, and a pack's install or update backs the world up first. Reading,
+        // unpacking, zipping, uploading and exporting files go through them whole.
         .merge(engine_mount::long_routes())
-        .route(
-            "/servers/{id}/v1/worlds/{wid}/{scope}/upload-session/{upload}/finalize",
-            post(files::finalize_session),
-        )
-        .route("/servers/{id}/v1/fs/unarchive", post(files::unarchive))
-        .route("/servers/{id}/v1/worlds/{wid}/files/zip", post(files::zip))
         // Downloads stream for as long as they take.
         .route(
             "/servers/{id}/v1/worlds/{wid}/backups/{bid}/download",
@@ -237,23 +207,10 @@ pub fn router(state: Arc<CoreState>) -> Router {
             "/servers/{id}/v1/worlds/{wid}/files/download-full-zip",
             get(backups::download_world),
         )
-        .route(
-            "/servers/{id}/v1/worlds/{wid}/files/contents-raw",
-            get(files::download_file),
-        )
-        .route(
-            "/servers/{id}/v1/worlds/{wid}/content/export-mrpack",
-            get(export::export),
-        )
         .layer(DefaultBodyLimit::max(MAX_BODY))
         // Uploads stream to disk with their own cap: the disk's free space (`archive::room`).
         .endpoint::<InstallModpackFile, _, _>(servers::install_modpack_file)
-        .route(
-            "/servers/{id}/v1/worlds/{wid}/{scope}/upload-session/{upload}/files",
-            post(files::upload_files),
-        )
-        .route("/servers/{id}/modrinth/v0/fs/create", post(files::create))
-        .route("/servers/{id}/modrinth/v0/fs/update", put(files::update))
+        .merge(engine_mount::upload_routes())
         // The pool's store streams uploads and downloads of any size, with its own caps.
         .route("/store/{*rest}", any(storage::forward))
         .layer(DefaultBodyLimit::disable())

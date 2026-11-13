@@ -224,7 +224,7 @@ pub struct PairingStatus {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct NewDownloadLink {
     /// The exact path and query the link will GET, such as
-    /// `/servers/{id}/v1/worlds/{id}/files/contents-raw?path=server.properties`.
+    /// `/instances/{id}/files/content?path=server.properties`.
     pub path: String,
 }
 
