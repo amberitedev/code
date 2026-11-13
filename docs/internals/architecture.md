@@ -10,7 +10,7 @@ details.
 Some of the design is still landing. Until each slice below merges, its line is true and the text
 that contradicts it is not:
 
-- Until D6 and D7: a Core keeps server installs and files in `apps/core`. Its servers do not yet
+- Until D7: a Core keeps server files in `apps/core`. Its servers do not yet
   follow an App instance's share through the engine.
 
 ## Rules

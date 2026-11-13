@@ -169,7 +169,8 @@ pub async fn get_loader_version_from_profile(
     loader_version: Option<&str>,
     directories: &DirectoryInfo,
 ) -> crate::Result<Option<LoaderVersion>> {
-    if loader == ModLoader::Vanilla {
+    // Paper is not on launcher-meta: a Paper server runs vanilla's version info.
+    if matches!(loader, ModLoader::Vanilla | ModLoader::Paper) {
         return Ok(None);
     }
 
@@ -496,7 +497,9 @@ async fn install_minecraft_inner(
     .await?;
 
     // If no loader version is selected, try to select the stable version!
-    if content_set.loader != ModLoader::Vanilla && loader_version.is_none() {
+    if !matches!(content_set.loader, ModLoader::Vanilla | ModLoader::Paper)
+        && loader_version.is_none()
+    {
         loader_version = get_loader_version_from_profile(
             state,
             &content_set.game_version,
@@ -629,6 +632,21 @@ async fn install_minecraft_inner(
 		)
 		.await?,
 	}
+    if state.side == Side::Server && content_set.loader == ModLoader::Paper {
+        let build = server::paper::install(
+            state,
+            &version.id,
+            content_set.loader_version.as_deref(),
+            repairing,
+        )
+        .await?;
+        crate::state::instances::commands::set_applied_content_set_loader_version(
+            &instance.id,
+            Some(build.as_str()),
+            &state.pool,
+        )
+        .await?;
+    }
 
     let client_path = state
         .directories

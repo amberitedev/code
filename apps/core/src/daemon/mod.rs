@@ -151,10 +151,6 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
         config.local_only(),
     )
     .await?;
-    let java = (paths.clone(), servers.http().clone());
-    tokio::spawn(async move {
-        crate::installs::java::update_all(&java.0, &java.1).await
-    });
     let backups = crate::backups::Backups::open(
         paths.clone(),
         db.clone(),
@@ -257,7 +253,8 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
 }
 
 /// The engine on `<root>/engine`, whose instances are the servers. Nothing desktop starts. Its
-/// share calls go to `backend_url` with the Core's key (`access::sync`).
+/// game files and Java go in `<root>/meta`, which servers may read and run. Its share calls go
+/// to `backend_url` with the Core's key (`access::sync`).
 pub async fn start_engine(
     paths: &Paths,
     backend_url: Option<&str>,
@@ -271,6 +268,7 @@ pub async fn start_engine(
         data_dir: paths.engine(),
         instances_dir: paths.servers(),
         logs_dir: None,
+        metadata_dir: Some(paths.meta()),
         side: contracts::Side::Server,
         max_concurrent_downloads: 10,
         max_concurrent_writes: 10,

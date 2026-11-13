@@ -14,7 +14,6 @@ use contracts::{
 use super::{CoreState, internal};
 use crate::{
     access::{Caller, Permission, activity},
-    installs::java,
     servers::{ServerError, platform, server_rows},
 };
 
@@ -46,14 +45,11 @@ async fn set_major(
         .await
         .map_err(engine::routes::api_error)?;
     let needed = match platform {
-        Some(platform) => Some(
-            java::java_requirement(
-                state.servers.http(),
-                state.servers.paths().root(),
-                &platform.game_version,
-            )
-            .await,
-        ),
+        Some(platform) => {
+            engine::server::java_major(&state.engine, &platform.game_version)
+                .await
+                .ok()
+        }
         None => None,
     };
     let chosen = major.filter(|major| Some(*major) != needed);

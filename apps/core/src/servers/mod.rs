@@ -21,7 +21,6 @@ mod watch;
 use std::{
     collections::{HashMap, HashSet},
     net::IpAddr,
-    path::PathBuf,
     process::Child,
     sync::{Arc, Mutex, Weak},
     time::{Duration, Instant},
@@ -120,7 +119,6 @@ pub struct Servers {
     db: SqlitePool,
     /// Each server is the engine instance with its id, which holds its content.
     engine: Arc<Engine>,
-    http: reqwest::Client,
     /// See `Config::local_only`.
     local_only: Option<IpAddr>,
     live: Mutex<HashMap<String, Live>>,
@@ -186,12 +184,10 @@ impl Servers {
         engine: Arc<Engine>,
         local_only: Option<IpAddr>,
     ) -> Result<Arc<Self>> {
-        let http = crate::installs::download::client()?;
         let servers = Arc::new_cyclic(|me| Self {
             paths,
             db,
             engine,
-            http,
             local_only,
             live: Mutex::new(HashMap::new()),
             deleted: Mutex::default(),
@@ -219,11 +215,6 @@ impl Servers {
 
     pub fn engine(&self) -> &Engine {
         &self.engine
-    }
-
-    /// Core's client for its own fixed sources, such as installs.
-    pub fn http(&self) -> &reqwest::Client {
-        &self.http
     }
 
     /// Where the server is in its run, or `None` without a shim.
@@ -555,12 +546,12 @@ impl Servers {
                 .map_err(|error| {
                     ServerError::Other(color_eyre::eyre::eyre!("{error:#}"))
                 })?;
-        // The lease keeps its Java until the shim runs it, when the launch spec does.
-        let (mut launch, _java) = launch::prepare(
+        let launch = launch::prepare(
             &self.paths,
-            &self.http,
+            &self.engine,
             server,
             platform.as_ref(),
+            memory::flags(&self.db, id).await?,
             run_id,
             self.local_only,
         )
@@ -571,9 +562,7 @@ impl Servers {
                 Err(error) => ServerError::Other(error),
             }
         })?;
-        if let Some(flags) = memory::flags(&self.db, id).await? {
-            memory::use_flags(&mut launch.args, flags);
-        }
+        self.open_meta().await?;
         std::fs::create_dir_all(self.paths.run(id))?;
         // What an earlier run left must not be mistaken for this one's.
         for stale in [self.paths.run_record(id), self.paths.run_status(id)] {
@@ -664,6 +653,21 @@ impl Servers {
         tokio::task::spawn_blocking(move || shim::java::share_with_core(&dir))
             .await
             .map_err(std::io::Error::other)??;
+        Ok(())
+    }
+
+    /// Let servers read and run the engine's game files in `meta/` (see
+    /// `daemon::folders::open_to_servers`). Nothing to do in development.
+    async fn open_meta(&self) -> Result<(), ServerError> {
+        if crate::daemon::install::InstallRecord::load(&self.paths)?.is_none() {
+            return Ok(());
+        }
+        let meta = self.paths.meta();
+        tokio::task::spawn_blocking(move || {
+            crate::daemon::folders::open_to_servers(&meta)
+        })
+        .await
+        .map_err(std::io::Error::other)??;
         Ok(())
     }
 
@@ -925,79 +929,6 @@ impl Servers {
             id: id.into(),
         })
     }
-
-    /// Run an installer, such as Forge's, through a shim like a server run: as `copal-servers`,
-    /// in the server folder, its output in `console.log`. Waits for it to exit; fails unless it
-    /// exits with 0. Not recorded as a run.
-    pub async fn run_installer(
-        &self,
-        hold: &Hold,
-        java: PathBuf,
-        args: Vec<String>,
-    ) -> Result<(), ServerError> {
-        let id = hold.id.as_str();
-        let run_id = uuid::Uuid::new_v4().to_string();
-        let dir = self.paths.server(id);
-        crate::daemon::folders::create_server_folder(&dir)?;
-        crate::daemon::folders::create_server_folder(&dir.join("tmp"))?;
-        std::fs::create_dir_all(self.paths.run(id))?;
-        for stale in [self.paths.run_record(id), self.paths.run_status(id)] {
-            if_present(std::fs::remove_file(stale))?;
-        }
-        let mut full_args = vec![
-            "-Xmx1G".to_owned(),
-            format!("-Djava.io.tmpdir={}", dir.join("tmp").display()),
-            format!("-Duser.home={}", dir.display()),
-        ];
-        full_args.extend(args);
-        shim::write_json(
-            &self.paths.launch_spec(id),
-            &shim::Launch {
-                v: shim::PROTOCOL,
-                run_id: run_id.clone(),
-                java,
-                args: full_args,
-                dir,
-                memory_limit_mb: launch::memory_limit(1024),
-            },
-        )?;
-        let mut child = shim::spawn(&self.paths, id)?;
-        tokio::task::spawn_blocking(move || child.wait())
-            .await
-            .map_err(std::io::Error::other)??;
-        let status =
-            shim::read_versioned::<ExitStatus>(&self.paths.run_status(id))
-                .ok()
-                .filter(|status| status.run_id == run_id);
-        match status {
-            Some(ExitStatus {
-                exit_code: Some(0), ..
-            }) => Ok(()),
-            status => {
-                let lines = console::tail(&self.paths.console_log(id), 5)
-                    .map(|(lines, _)| {
-                        lines.join(
-                            "
-",
-                        )
-                    })
-                    .unwrap_or_default();
-                let reason = status
-                    .as_ref()
-                    .and_then(|status| status.error.clone())
-                    .or_else(|| {
-                        status.and_then(|status| status.exit_code).map(|code| {
-                            format!("the installer exited with {code}")
-                        })
-                    })
-                    .unwrap_or_else(|| "the installer did not finish".into());
-                Err(ServerError::StartFailed(format!(
-                    "{reason}
-{lines}"
-                )))
-            }
-        }
-    }
 }
 
 #[cfg(test)]
@@ -1064,7 +995,7 @@ mod tests {
             &servers.engine,
             &server.id,
             &platform::Platform {
-                loader: crate::installs::ModLoader::Vanilla,
+                loader: engine::state::ModLoader::Vanilla,
                 game_version: "1.21.1".into(),
                 loader_version: None,
             },

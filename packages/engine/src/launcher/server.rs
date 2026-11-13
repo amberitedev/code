@@ -4,7 +4,9 @@
 pub(super) mod forge;
 pub mod paper;
 
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 
 use anyhow::bail;
 use contracts::Side;
@@ -117,6 +119,48 @@ pub async fn server_command(
         args,
         cwd,
     })
+}
+
+/// The Java major Minecraft `game_version` runs on.
+pub async fn java_major(
+    engine: &Engine,
+    game_version: &str,
+) -> crate::Result<u32> {
+    let (minecraft, index) =
+        super::resolve_minecraft_manifest(game_version, engine).await?;
+    let info = super::download::download_version_info(
+        engine,
+        &minecraft.versions[index],
+        None,
+        None,
+        None,
+        None,
+    )
+    .await?;
+    Ok(info
+        .java_version
+        .as_ref()
+        .map_or(8, |java| java.major_version))
+}
+
+/// Stops a vendor download once it passes `limit` bytes, so a broken or hostile vendor cannot
+/// fill a server host's disk.
+fn capped(
+    limit: u64,
+) -> impl FnMut(u64, u64) -> Pin<Box<dyn Future<Output = crate::Result<()>> + Send>>
++ Send {
+    move |received, total| {
+        let over = received.max(total) > limit;
+        Box::pin(async move {
+            if over {
+                bail!(ErrorKind::LauncherError(format!(
+                    "the download is larger than {} MiB",
+                    limit / 1024 / 1024
+                )));
+            }
+            Ok(())
+        })
+    }
 }
 
 /// The vanilla server jar of `game_version`, which every loader on that version shares.

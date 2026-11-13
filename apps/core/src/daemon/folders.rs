@@ -86,6 +86,37 @@ pub fn create_server_folder(path: &std::path::Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Let `copal-servers` read everything in `path`, a folder it may read such as `meta/`, and run
+/// what its owner may run. The engine writes files only their owner can read. Links are left
+/// alone. Nothing to do on Windows, where a new file inherits its folder's permissions.
+pub fn open_to_servers(path: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        for entry in walkdir::WalkDir::new(path).follow_links(false) {
+            let entry = entry?;
+            if entry.path_is_symlink() {
+                continue;
+            }
+            let mode = entry.metadata()?.permissions().mode() & 0o7777;
+            let wanted = if entry.file_type().is_dir() || mode & 0o100 != 0 {
+                0o050
+            } else {
+                0o040
+            };
+            if mode & wanted != wanted {
+                std::fs::set_permissions(
+                    entry.path(),
+                    std::fs::Permissions::from_mode(mode | wanted),
+                )?;
+            }
+        }
+    }
+    #[cfg(windows)]
+    let _ = path;
+    Ok(())
+}
+
 #[cfg(unix)]
 mod platform {
     use std::{

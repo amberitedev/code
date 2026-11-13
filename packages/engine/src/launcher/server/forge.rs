@@ -10,7 +10,7 @@ use anyhow::bail;
 use reqwest::Method;
 use tokio::process::Command;
 
-use super::checked;
+use super::{capped, checked};
 use crate::data::ModLoader;
 use crate::state::DirectoryInfo;
 use crate::util::fetch::{fetch_advanced, fetch_file, write_atomic};
@@ -108,7 +108,7 @@ async fn installer(
         None,
         &state.fetch_semaphore,
         &state.sessions,
-        None,
+        Some(&mut capped(256 * 1024 * 1024)),
         &state.directories.store_staging_dir(),
     )
     .await?
@@ -421,6 +421,67 @@ mod tests {
         assert_eq!(
             referenced,
             ["cpw/a.jar", "org/b.jar", "net/c.jar", "net/d.jar"]
+        );
+    }
+
+    async fn directories(data: &Path) -> DirectoryInfo {
+        DirectoryInfo::init(data.to_owned(), data.join("servers"), None, None)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_build_installed_from_launcher_meta_starts_from_the_store() {
+        let data = tempfile::tempdir().unwrap();
+        let directories = directories(data.path()).await;
+        let path = server_args_path(&directories, "1.21.1-21.1.265");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "-p\n/m/libraries/a.jar\nMain").unwrap();
+        let server = tempfile::tempdir().unwrap();
+        assert_eq!(
+            launch_args(
+                &directories,
+                server.path(),
+                ModLoader::NeoForge,
+                "1.21.1",
+                "21.1.265"
+            )
+            .unwrap(),
+            ["-p", "/m/libraries/a.jar", "Main", "--nogui"]
+        );
+    }
+
+    #[tokio::test]
+    async fn an_old_forge_folder_starts_from_its_jar() {
+        let data = tempfile::tempdir().unwrap();
+        let directories = directories(data.path()).await;
+        let dir = tempfile::tempdir().unwrap();
+        for name in [
+            "forge-1.12.2-14.23.5.2860.jar",
+            "forge-1.12.2-14.23.5.2860-installer.jar",
+        ] {
+            std::fs::write(dir.path().join(name), "").unwrap();
+        }
+        assert_eq!(
+            launch_args(
+                &directories,
+                dir.path(),
+                ModLoader::Forge,
+                "1.12.2",
+                "14.23.5.2860"
+            )
+            .unwrap(),
+            ["-jar", "forge-1.12.2-14.23.5.2860.jar", "--nogui"]
+        );
+        assert!(
+            launch_args(
+                &directories,
+                dir.path(),
+                ModLoader::NeoForge,
+                "1.21.1",
+                "21.1.77"
+            )
+            .is_err()
         );
     }
 }

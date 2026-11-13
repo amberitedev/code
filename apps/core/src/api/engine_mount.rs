@@ -31,8 +31,7 @@ use futures::future::BoxFuture;
 use super::{CoreState, Shared, internal};
 use crate::{
     access::{Caller, Permission, activity, owed::OwedCall},
-    installs,
-    servers::{Hold, platform, server_rows},
+    servers::Hold,
 };
 
 #[derive(Clone, Copy)]
@@ -42,8 +41,8 @@ struct Hook {
     backup: bool,
     /// The share's players lose it: the server stops passing it on.
     forget_players: bool,
-    /// The change is an engine install job. The server stays held until the job ends, then Core
-    /// installs the server software the instance records (`installs`).
+    /// The change is an engine install job, which installs the server software too. The server
+    /// stays held until the job ends.
     job: bool,
 }
 
@@ -253,12 +252,11 @@ async fn forget_players(
     Ok(())
 }
 
-/// Wait for the engine's install jobs on the held server to end, then install what it records.
-/// Once the server is let go, its instance reads as edited, so a panel fetches it again and sees
-/// the install done.
+/// Hold the server until the engine's install jobs on it end. Once the server is let go, its
+/// instance reads as edited, so a panel fetches it again and sees the install done.
 pub(super) async fn finish_job(state: Arc<CoreState>, hold: Hold) {
     let id = hold.id().to_owned();
-    install_after_jobs(&state, &hold).await;
+    wait_for_jobs(&state, &id).await;
     drop(hold);
     let _ = engine::emit_instance(
         &state.engine.events,
@@ -268,11 +266,10 @@ pub(super) async fn finish_job(state: Arc<CoreState>, hold: Hold) {
     .await;
 }
 
-async fn install_after_jobs(state: &Arc<CoreState>, hold: &Hold) {
-    let id = hold.id().to_owned();
+async fn wait_for_jobs(state: &CoreState, id: &str) {
     loop {
         match engine::install::store::list_active_for_instance(
-            &id,
+            id,
             state.engine.pool(),
         )
         .await
@@ -285,41 +282,4 @@ async fn install_after_jobs(state: &Arc<CoreState>, hold: &Hold) {
             }
         }
     }
-    if let Err(error) = install_server(state, hold).await {
-        tracing::warn!(server = %id, error = %error.description, "could not install the server software");
-    }
-}
-
-/// Core's own install of the loader and Minecraft version the held server's instance records,
-/// which its runs start from.
-async fn install_server(
-    state: &CoreState,
-    hold: &Hold,
-) -> Result<(), ApiError> {
-    let Some(platform) = platform::platform(&state.engine, hold.id())
-        .await
-        .map_err(api_error)?
-    else {
-        return Ok(());
-    };
-    let row = server_rows::get(&state.db, hold.id())
-        .await
-        .map_err(internal)?
-        .ok_or_else(|| {
-            ApiError::new(ErrorCode::NotFound, "There is no such server.")
-        })?;
-    installs::install(
-        &state.servers,
-        hold,
-        state.servers.http(),
-        &row,
-        platform.loader,
-        &platform.game_version,
-        platform.loader_version.as_deref(),
-        false,
-        &|_| {},
-    )
-    .await
-    .map(drop)
-    .map_err(internal)
 }

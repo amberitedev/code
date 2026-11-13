@@ -216,10 +216,7 @@ pub async fn install_existing_instance(
     .await
 }
 
-pub(crate) async fn wait_for_job(
-    job_id: Uuid,
-    state: &Engine,
-) -> crate::Result<()> {
+pub async fn wait_for_job(job_id: Uuid, state: &Engine) -> crate::Result<()> {
     let completion = store::completion_notification(job_id, &state.installs);
     loop {
         // Register before reading so completion during the query cannot be missed.

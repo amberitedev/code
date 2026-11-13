@@ -1631,7 +1631,7 @@ async fn a_server_exports_as_a_pack_once_per_link() {
         &core.state.engine,
         &server,
         &crate::servers::platform::Platform {
-            loader: crate::installs::ModLoader::Fabric,
+            loader: engine::state::ModLoader::Fabric,
             game_version: "1.21.1".into(),
             loader_version: Some("0.16.0".into()),
         },

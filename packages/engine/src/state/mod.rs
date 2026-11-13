@@ -56,6 +56,8 @@ pub struct EngineConfig {
     pub data_dir: PathBuf,
     pub instances_dir: PathBuf,
     pub logs_dir: Option<PathBuf>,
+    /// Where game files go: versions, libraries, loaders and Java. `None` is `data_dir/meta`.
+    pub metadata_dir: Option<PathBuf>,
     pub side: Side,
     pub max_concurrent_downloads: usize,
     pub max_concurrent_writes: usize,
@@ -398,6 +400,7 @@ impl Engine {
             data_dir,
             instances_dir,
             logs_dir,
+            metadata_dir,
             side,
             max_concurrent_downloads,
             max_concurrent_writes,
@@ -405,8 +408,13 @@ impl Engine {
             accounts,
             hooks,
         } = config;
-        let directories =
-            DirectoryInfo::init(data_dir, instances_dir, logs_dir).await?;
+        let directories = DirectoryInfo::init(
+            data_dir,
+            instances_dir,
+            logs_dir,
+            metadata_dir,
+        )
+        .await?;
 
         tracing::info!("Connecting to the engine database");
         let store_lock =
@@ -609,6 +617,7 @@ pub(crate) mod tests {
             instances_dir: dir.join(INSTANCES_FOLDER_NAME),
             data_dir: dir,
             logs_dir: None,
+            metadata_dir: None,
             side: Side::Client,
             max_concurrent_downloads: 10,
             max_concurrent_writes: 10,

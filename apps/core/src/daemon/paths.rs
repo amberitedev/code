@@ -1,5 +1,5 @@
 //! The data folder. Its layout is the isolation story: Core runs as the `copal` OS account and
-//! every server, installer, and custom Java runs as `copal-servers`, which may touch only what
+//! every server and custom Java runs as `copal-servers`, which may touch only what
 //! [`FOLDERS`] grants it. `copal install` creates the folders with these permissions (see
 //! `daemon::folders`); nothing else may put a file Core trusts somewhere `copal-servers` can write.
 //!
@@ -26,7 +26,7 @@ pub struct Folder {
 
 /// Every top-level folder. `runs/` and `servers/` hold one folder per server, which inherits the
 /// access of its parent.
-pub const FOLDERS: [Folder; 11] = [
+pub const FOLDERS: [Folder; 10] = [
     Folder {
         name: "db",
         servers: ServersAccess::None,
@@ -60,7 +60,7 @@ pub const FOLDERS: [Folder; 11] = [
     Folder {
         name: "engine",
         servers: ServersAccess::None,
-        holds: "the engine's database, store, metadata and caches",
+        holds: "the engine's database, store and caches",
     },
     Folder {
         name: "logs",
@@ -75,12 +75,7 @@ pub const FOLDERS: [Folder; 11] = [
     Folder {
         name: "meta",
         servers: ServersAccess::ReadOnly,
-        holds: "server jars, libraries",
-    },
-    Folder {
-        name: "java",
-        servers: ServersAccess::ReadOnly,
-        holds: "Java runtimes",
+        holds: "the engine's game files: server jars, libraries, loaders, Java runtimes",
     },
 ];
 
@@ -254,15 +249,9 @@ impl Paths {
         self.servers().join(server_id)
     }
 
-    /// The shared install store. See `installs::shared::SharedDirs`.
-    #[allow(dead_code)] // Wired in step 4: installs reach the store through this.
+    /// The engine's game files, which every server runs from.
     pub fn meta(&self) -> PathBuf {
         self.root.join("meta")
-    }
-
-    /// Managed Java runtimes, one folder per major version.
-    pub fn java(&self) -> PathBuf {
-        self.root.join("java")
     }
 }
 
@@ -299,7 +288,6 @@ mod tests {
             paths.engine(),
             paths.server("a"),
             paths.meta(),
-            paths.java(),
         ];
         for path in used {
             let top = path.strip_prefix("data").unwrap().components().next();

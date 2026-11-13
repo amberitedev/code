@@ -48,6 +48,7 @@ pub async fn engine_config(
         instances_dir: data_dir.join(engine::INSTANCES_FOLDER_NAME),
         data_dir,
         logs_dir: Some(settings_dir.join(LOGS_FOLDER)),
+        metadata_dir: None,
         side: Side::Client,
         max_concurrent_downloads: settings.max_concurrent_downloads,
         max_concurrent_writes: settings.max_concurrent_writes,

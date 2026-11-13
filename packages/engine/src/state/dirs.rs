@@ -18,6 +18,7 @@ pub struct DirectoryInfo {
     pub config_dir: PathBuf, // Base config directory- engine.db, instances, minecraft downloads, etc. Changeable as a setting.
     instances_dir: PathBuf,
     logs_dir: Option<PathBuf>,
+    metadata_dir: Option<PathBuf>,
 }
 
 impl DirectoryInfo {
@@ -27,6 +28,7 @@ impl DirectoryInfo {
         config_dir: PathBuf,
         instances_dir: PathBuf,
         logs_dir: Option<PathBuf>,
+        metadata_dir: Option<PathBuf>,
     ) -> crate::Result<Self> {
         fs::create_dir_all(&config_dir)
             .await
@@ -38,6 +40,7 @@ impl DirectoryInfo {
             config_dir,
             instances_dir,
             logs_dir,
+            metadata_dir,
         })
     }
 
@@ -56,7 +59,9 @@ impl DirectoryInfo {
     /// Get the Minecraft instance metadata directory
     #[inline]
     pub fn metadata_dir(&self) -> PathBuf {
-        self.config_dir.join(METADATA_FOLDER_NAME)
+        self.metadata_dir
+            .clone()
+            .unwrap_or_else(|| self.config_dir.join(METADATA_FOLDER_NAME))
     }
 
     pub fn install_backups_dir(&self) -> PathBuf {

@@ -24,7 +24,6 @@ use tokio::io::AsyncWriteExt;
 use super::{CoreState, engine_mount, internal};
 use crate::{
     access::{Caller, Dangerous, Permission, activity, require_owner},
-    installs::ModLoader,
     servers::{
         Phase, ServerError, launch,
         platform::{self, Platform},
@@ -177,7 +176,7 @@ async fn server(
         id: row.id,
         name: row.name,
         owner_id,
-        loader: installed.then(|| ModLoader::from(set.loader).to_string()),
+        loader: installed.then(|| set.loader.as_str().to_owned()),
         loader_version: set.loader_version.filter(|_| installed),
         game_version: installed.then_some(set.game_version),
         power,
@@ -310,8 +309,8 @@ pub async fn power(
     Ok(Empty)
 }
 
-/// Install a loader on a stopped server, as a bare install through the content routes does, but
-/// answering once it is done.
+/// Install a loader on a stopped server through the engine's install job for it, answering once
+/// the job is done. Its progress reaches the event socket as the job's events.
 pub async fn install(
     caller: Caller,
     State(state): State<Arc<CoreState>>,
@@ -319,14 +318,14 @@ pub async fn install(
 ) -> Result<Empty, ApiError> {
     let id = params.id;
     state.access.require(&caller, &id, Permission::Edit).await?;
-    let Some(loader) = ModLoader::parse(&body.loader) else {
+    let Some(loader) = platform::parse_loader(&body.loader) else {
         return Err(ApiError::new(
             ErrorCode::InvalidInput,
             "Core installs Vanilla, Fabric, Quilt, Forge, NeoForge, and Paper.",
         ));
     };
     let hold = state.servers.hold(&id)?;
-    let row = server_rows::get(&state.db, &id)
+    server_rows::get(&state.db, &id)
         .await
         .map_err(internal)?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
@@ -337,26 +336,13 @@ pub async fn install(
     {
         state.backups.pre_update(&id).await?;
     }
-    let loader_version = crate::installs::install(
-        &state.servers,
-        &hold,
-        state.servers.http(),
-        &row,
-        loader,
-        &body.game_version,
-        body.loader_version.as_deref(),
-        false,
-        &|_| {},
-    )
-    .await
-    .map_err(internal)?;
-    platform::set(
+    platform::install(
         &state.engine,
         &id,
         &Platform {
             loader,
             game_version: body.game_version,
-            loader_version,
+            loader_version: body.loader_version,
         },
     )
     .await
@@ -617,24 +603,26 @@ pub async fn setup(
         .await
         .map_err(internal)?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
-    let paths = state.servers.paths();
     let (java_version, invocation) =
         match platform::platform(&state.engine, &id)
             .await
             .map_err(api_error)?
         {
             Some(platform) => (
-                launch::java_major(
-                    paths,
-                    state.servers.http(),
-                    &row,
-                    Some(&platform.game_version),
-                )
-                .await
-                .ok(),
-                launch::args(paths, &row, &platform)
+                launch::java_major(&state.engine, &row, &platform.game_version)
+                    .await
+                    .ok(),
+                engine::server::server_command(&state.engine, &id)
+                    .await
                     .ok()
-                    .map(|args| launch::invocation(&args)),
+                    .map(|command| {
+                        launch::invocation(&launch::args(
+                            state.servers.paths(),
+                            &row,
+                            None,
+                            command.args,
+                        ))
+                    }),
             ),
             None => (None, None),
         };

@@ -39,7 +39,6 @@ use engine::{
 use super::{CoreState, internal, world};
 use crate::{
     access::{Caller, Permission, activity, now},
-    installs::ModLoader,
     servers::platform,
 };
 
@@ -111,7 +110,9 @@ async fn content_path(
     let paper = platform::platform(&state.engine, id)
         .await
         .map_err(engine::routes::api_error)?
-        .is_some_and(|platform| platform.loader == ModLoader::Paper);
+        .is_some_and(|platform| {
+            platform.loader == engine::state::ModLoader::Paper
+        });
     Ok(
         match name.rsplit_once('.').map(|(_, extension)| extension) {
             Some("zip") => format!("{}/datapacks/{name}", folder.level_name()),

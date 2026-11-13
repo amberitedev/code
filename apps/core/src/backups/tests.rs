@@ -24,7 +24,7 @@ async fn setup() -> Setup {
         servers.engine(),
         &server,
         &crate::servers::platform::Platform {
-            loader: crate::installs::ModLoader::Vanilla,
+            loader: engine::state::ModLoader::Vanilla,
             game_version: "1.21.1".into(),
             loader_version: None,
         },

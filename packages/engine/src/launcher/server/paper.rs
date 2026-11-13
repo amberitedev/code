@@ -10,7 +10,7 @@ use reqwest::Method;
 use serde::Deserialize;
 use sha2::Digest;
 
-use super::checked;
+use super::{capped, checked};
 use crate::state::DirectoryInfo;
 use crate::util::fetch::{fetch_file, fetch_json};
 use crate::{Engine, ErrorKind};
@@ -94,7 +94,7 @@ pub async fn install(
         None,
         &engine.fetch_semaphore,
         &engine.sessions,
-        None,
+        Some(&mut capped(512 * 1024 * 1024)),
         &engine.directories.store_staging_dir(),
     )
     .await?;
