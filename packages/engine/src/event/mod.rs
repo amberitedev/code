@@ -18,8 +18,6 @@ const EVENT_CAPACITY: usize = 4096;
 pub struct EventSink {
     tx: broadcast::Sender<Event>,
     loading_bars: Arc<DashMap<Uuid, LoadingBar>>,
-    #[cfg(feature = "tauri")]
-    pub(crate) app: Option<tauri::AppHandle>,
 }
 
 impl EventSink {
@@ -27,16 +25,7 @@ impl EventSink {
         Self {
             tx: broadcast::Sender::new(EVENT_CAPACITY),
             loading_bars: Arc::new(DashMap::new()),
-            #[cfg(feature = "tauri")]
-            app: None,
         }
-    }
-
-    /// The same sink, with the App's handle for the main window.
-    #[cfg(feature = "tauri")]
-    pub fn with_app(mut self, app: tauri::AppHandle) -> Self {
-        self.app = Some(app);
-        self
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<Event> {
@@ -50,14 +39,6 @@ impl EventSink {
     // Values provided should not be used directly, as they are clones and are not guaranteed to be up-to-date
     pub fn loading_bars(&self) -> DashMap<Uuid, LoadingBar> {
         (*self.loading_bars).clone()
-    }
-
-    /// The ads child webview makes the main window a multi-webview window,
-    /// so Tauri's single-webview window lookup no longer returns it.
-    #[cfg(feature = "tauri")]
-    pub fn get_main_window(&self) -> Option<tauri::Window> {
-        use tauri::Manager;
-        self.app.as_ref()?.get_window("main")
     }
 }
 

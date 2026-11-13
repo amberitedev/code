@@ -128,10 +128,6 @@ pub async fn emit_command(
 ) -> crate::Result<()> {
     tracing::debug!("Command: {}", serde_json::to_string(&command)?);
     events.send(Event::Desktop(DesktopEvent::Command(command)));
-    #[cfg(feature = "tauri")]
-    if let Some(window) = events.get_main_window() {
-        let _ = window.set_focus();
-    }
     Ok(())
 }
 

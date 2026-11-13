@@ -19,6 +19,7 @@ mod engine_handle;
 mod friends;
 mod launch;
 mod library;
+mod reactions;
 mod screenshots;
 mod server;
 mod skins;
@@ -35,6 +36,7 @@ async fn start_engine(
 ) -> anyhow::Result<Arc<Engine>> {
     tracing::info!("Initializing app state...");
     let started = async {
+        let reacting = events.subscribe();
         let config = data_dir::engine_config(
             data_dir::resolve(&app.config().identifier)?,
             events,
@@ -43,6 +45,7 @@ async fn start_engine(
         .await?;
         let state = Engine::new(config).await?;
         state.start_desktop();
+        reactions::start(&state, app.clone(), reacting);
         #[cfg(debug_assertions)]
         dev::sign_in(&state).await;
         anyhow::Ok(state)
@@ -267,7 +270,7 @@ fn main() {
         )
         .setup(move |app| {
             let _ = desktop.set(app.handle().clone());
-            let sink = events.engine.with_app(app.handle().clone());
+            let sink = events.engine;
             app.manage(sink.clone());
             app.manage(events.app);
             let handle = app.handle().clone();

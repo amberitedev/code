@@ -1054,25 +1054,6 @@ impl Process {
             tracing::warn!("Failed to write exit status to log file: {}", e);
         }
 
-        let _ = state
-            .presence
-            .discord_rpc
-            .clear_to_default(true, &state.pool, &state.process_manager)
-            .await;
-
-        let _ = state.presence.friends_socket.update_status(None).await;
-
-        #[cfg(feature = "tauri")]
-        {
-            let settings = crate::state::Settings::get(&state.pool).await?;
-            if settings.refocus_on_game_close
-                && let Some(window) = state.events.get_main_window()
-            {
-                window.unminimize()?;
-                window.set_focus()?;
-            }
-        }
-
         if mc_exit_status.success() {
             // We do not wait on the post exist command to finish running! We let it spawn + run on its own.
             // This behaviour may be changed in the future

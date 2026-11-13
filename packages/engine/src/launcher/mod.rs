@@ -1338,30 +1338,6 @@ pub async fn launch_minecraft(
     )
     .await?;
 
-    // If in tauri, and the 'minimize on launch' setting is enabled, minimize the window
-    #[cfg(feature = "tauri")]
-    {
-        let window = state.events.get_main_window();
-        if let Some(window) = window {
-            let settings = crate::state::Settings::get(&state.pool).await?;
-            if settings.hide_on_process_start {
-                window.minimize()?;
-            }
-        }
-    }
-
-    let _ = state
-        .presence
-        .discord_rpc
-        .set_activity(&format!("Playing {}", instance.name), true, &state.pool)
-        .await;
-
-    let _ = state
-        .presence
-        .friends_socket
-        .update_status(Some(instance.name.clone()))
-        .await;
-
     // Create Minecraft child by inserting it into the state
     // This also spawns the process and prepares the subsequent processes
     state

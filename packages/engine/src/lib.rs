@@ -29,8 +29,9 @@ pub use api::*;
 pub use error::*;
 pub use event::{
     DesktopEvent, Event, EventSink, FriendPayload,
-    InstanceGroupsChangedPayload, LoadingBar, LoadingBarType,
-    emit::emit_loading, emit::emit_warning, emit::init_loading,
+    InstanceGroupsChangedPayload, LoadingBar, LoadingBarType, ProcessPayload,
+    ProcessPayloadType, emit::emit_loading, emit::emit_warning,
+    emit::init_loading,
 };
 pub use logger::start_logger;
 pub use self_hosted::accounts::AccountEndpoints;
