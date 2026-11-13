@@ -1,7 +1,7 @@
 // Generated from apps/app by ts-rs. Do not edit.
 // Regenerate: cargo test -p theseus_gui -- --ignored write_ts
 
-import type { CoreSession, Endpoint, SharedIconConfig, UserFriend, UserStatus } from './contracts'
+import type { ApiError, CoreSession, Endpoint, SharedIconConfig, UserFriend, UserStatus } from './contracts'
 import type { CommandPayload, EngineEvent, FriendPayload, InstanceGroupsChangedPayload, OnboardingChecklist } from './engine'
 
 export type Boot = { version: string, platform: Platform, os_version: string, 
@@ -62,7 +62,7 @@ export type WebviewLogLevel = "trace" | "debug" | "info" | "warn" | "error";
 
 export type LocalEvent = EngineEvent | AppEvent;
 
-export type AppEvent = { "type": "friend", "payload": FriendPayload } | { "type": "notification", "payload": unknown } | { "type": "onboarding_checklist", "payload": OnboardingChecklist } | { "type": "instance_groups_changed", "payload": InstanceGroupsChangedPayload } | { "type": "command", "payload": Command } | { "type": "game_option_locales_updated" } | { "type": "resync" };
+export type AppEvent = { "type": "friend", "payload": FriendPayload } | { "type": "notification", "payload": unknown } | { "type": "onboarding_checklist", "payload": OnboardingChecklist } | { "type": "instance_groups_changed", "payload": InstanceGroupsChangedPayload } | { "type": "command", "payload": Command } | { "type": "game_option_locales_updated" } | { "type": "progress", "payload": { op: string, stage: string | null, done: number, total: number | null, } } | { "type": "op_ended", "payload": { op: string, error: ApiError | null, response: OpResponse | null, } } | { "type": "resync" };
 
 export type Command = CommandPayload | AmberiteCommand;
 
@@ -258,6 +258,28 @@ export type SkinFlushQuery = { profile_id?: string | null, };
 
 export type UrlOrBlob = string | Array<number>;
 
+export type DebugExport = { op: string, path: string, };
+
+export type ExternalSave = { op: string, path: string, url: string, headers: { [key in string]: string }, };
+
+export type LocalUpload = { op: string, url: string, headers: { [key in string]: string }, path: string, 
+/**
+ * The name a multipart upload sends, the name of `path` by default.
+ */
+file_name: string | null, 
+/**
+ * Sends the file as this multipart form field rather than as the raw body.
+ */
+multipart_field: string | null, };
+
+export type InstanceFileSave = { op: string, instance_id: string, 
+/**
+ * The file's path in the instance.
+ */
+path: string, destination: string, };
+
+export type OpResponse = { status: number, body: string, };
+
 export const health = {
 	checkHealth: { method: "GET", path: "/health", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
 }
@@ -371,4 +393,12 @@ export const skins = {
 	unequipSkin: { method: "DELETE", path: "/app/skins/equipped", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
 	flushPendingSkinChange: { method: "POST", path: "/app/skins/flush", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<null, SkinFlushQuery, void, void>,
 	normalizeSkinTexture: { method: "POST", path: "/app/skins/normalize", auth: "none", dangerous: false, body: "json", response: "raw" } as Endpoint<null, null, UrlOrBlob, Blob>,
+}
+
+export const ops = {
+	cancelOp: { method: "DELETE", path: "/app/ops/{id}", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<IdParams, null, void, void>,
+	exportDebugInfo: { method: "POST", path: "/app/ops/debug-export", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, DebugExport, void>,
+	saveExternalFile: { method: "POST", path: "/app/ops/external-save", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, ExternalSave, void>,
+	uploadLocalFile: { method: "POST", path: "/app/ops/upload", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, LocalUpload, void>,
+	saveInstanceFileAs: { method: "POST", path: "/app/ops/instance-file-save", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, InstanceFileSave, void>,
 }

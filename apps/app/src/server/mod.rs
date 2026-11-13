@@ -6,6 +6,7 @@ mod boot;
 pub mod endpoints;
 pub mod events;
 pub mod guard;
+pub mod ops;
 #[cfg(test)]
 mod tests;
 
@@ -117,10 +118,12 @@ impl LocalServer {
                 let boot = boot.clone();
                 async move { Json(boot) }
             });
+        let ops = Arc::new(ops::Ops::new(events.app.clone()));
         let (events_path, events) = events::route(events);
         let state = AppState {
             engine: engine.clone(),
             access: Arc::new(AppAccess),
+            ops,
         };
         // Every router over AppState merges here: its engine exists only behind wait_for_engine.
         let waiting = Router::new()
@@ -132,6 +135,8 @@ impl LocalServer {
                     .merge(screenshots::routes::routes())
                     .merge(friends::routes::routes())
                     .merge(skins::routes::routes())
+                    .merge(ops::routes())
+                    .merge(desktop::op_routes())
                     .with_state(state),
             )
             .route_layer(middleware::from_fn_with_state(
@@ -199,6 +204,7 @@ impl LocalServer {
 pub struct AppState {
     engine: EngineHandle,
     access: Arc<dyn Access>,
+    ops: Arc<ops::Ops>,
 }
 
 impl FromRef<AppState> for Arc<Engine> {
@@ -213,6 +219,12 @@ impl FromRef<AppState> for Arc<Engine> {
 impl FromRef<AppState> for Arc<dyn Access> {
     fn from_ref(state: &AppState) -> Self {
         Arc::clone(&state.access)
+    }
+}
+
+impl FromRef<AppState> for Arc<ops::Ops> {
+    fn from_ref(state: &AppState) -> Self {
+        Arc::clone(&state.ops)
     }
 }
 

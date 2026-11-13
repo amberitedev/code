@@ -279,11 +279,7 @@ fn main() {
             .plugin(
                 "utils",
                 InlinedPlugin::new()
-                    .commands(&[
-                        "export_debug_info",
-                        "cancel_debug_info_export",
-                        "get_opening_command",
-                    ])
+                    .commands(&["get_opening_command"])
                     .default_permission(
                         DefaultPermissionRule::AllowAllCommands,
                     ),
@@ -299,12 +295,6 @@ fn main() {
                         "file_create_directory",
                         "file_rename",
                         "file_delete",
-                        "file_save_as",
-                        "files_select_external",
-                        "files_save_external",
-                        "files_release_external",
-                        "file_upload_local",
-                        "file_cancel_local_upload",
                     ])
                     .default_permission(
                         DefaultPermissionRule::AllowAllCommands,

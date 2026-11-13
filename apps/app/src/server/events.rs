@@ -5,6 +5,7 @@ use axum::{
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
     routing::MethodRouter,
 };
+use contracts::ApiError;
 use engine::{
     DesktopEvent, Event, EventSink, FriendPayload,
     InstanceGroupsChangedPayload, data::OnboardingChecklist,
@@ -13,7 +14,7 @@ use engine::{
 use serde::Serialize;
 use tokio::sync::broadcast::{self, Receiver, error::RecvError};
 
-use super::endpoints::events::EventSocket;
+use super::endpoints::{events::EventSocket, ops::OpResponse};
 
 const APP_EVENT_CAPACITY: usize = 256;
 
@@ -37,6 +38,20 @@ pub enum AppEvent {
     ),
     Command(Command),
     GameOptionLocalesUpdated,
+    /// How far a long operation (`crate::server::ops`) has got.
+    Progress {
+        op: String,
+        stage: Option<String>,
+        done: u64,
+        total: Option<u64>,
+    },
+    /// A long operation finished, failed or was cancelled. `response` is what the server it called
+    /// answered, which the caller reads as it would its own request's.
+    OpEnded {
+        op: String,
+        error: Option<ApiError>,
+        response: Option<OpResponse>,
+    },
     /// This socket fell behind and lost events: refetch what is shown.
     Resync,
 }

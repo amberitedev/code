@@ -5,15 +5,10 @@ import {
 	ModrinthApiError,
 } from '@modrinth/api-client'
 import type { FileDownloadProvider } from '@modrinth/ui'
-import { Channel } from '@tauri-apps/api/core'
 
-import {
-	type ExternalFileError,
-	type ExternalFileProgress,
-	releaseExternal,
-	saveExternal,
-	selectExternal,
-} from '@/platform/app-lib/files/commands'
+import { type ExternalFileProgress, saveExternal } from '@/platform/app-lib/files/commands'
+import { save } from '@/platform/dialog'
+import { cancelOp } from '@/platform/ops'
 
 export interface FileDownloadTask {
 	update: (progress: ExternalFileProgress) => void
@@ -36,34 +31,34 @@ export function createFileDownload(
 ): FileDownloadProvider {
 	return {
 		async download(file) {
-			const saveId = await selectExternal(
-				file.filename,
-				file.type === 'server-mrpack'
-					? { name: 'Modrinth Modpack', extensions: ['mrpack'] }
-					: file.type === 'server-backup' || file.type === 'server-world'
-						? { name: 'ZIP archive', extensions: ['zip'] }
-						: null,
-			).catch((error: ExternalFileError) => {
-				throw new Error(error.message ?? String(error))
+			const path = await save({
+				defaultPath: file.filename.split(/[/\\]/).pop() || 'download',
+				filters:
+					file.type === 'server-mrpack'
+						? [{ name: 'Modrinth Modpack', extensions: ['mrpack'] }]
+						: file.type === 'server-backup' || file.type === 'server-world'
+							? [{ name: 'ZIP archive', extensions: ['zip'] }]
+							: [],
 			})
-			if (!saveId) return false
+			if (!path) return false
 
+			const saveId = crypto.randomUUID()
 			let cancelled = false
 			let finished = false
-			let savedFilename = file.filename
+			const savedFilename = path.split(/[/\\]/).pop() ?? path
 			const task = trackDownload(
 				saveId,
 				file.filename,
 				async () => {
 					cancelled = true
-					await releaseExternal(saveId)
+					await cancelOp(saveId).catch(() => undefined)
 				},
 				{ serverId: file.serverId, serverName: file.serverName },
 			)
-			const onProgress = new Channel<ExternalFileProgress>((progress) => {
+			const onProgress = (progress: ExternalFileProgress) => {
 				if (cancelled || finished) return
 				task.update(progress)
-			})
+			}
 
 			// A Core download goes through the App's local proxy, which serves only the App:
 			// the native download names the App's origin, as the WebView's own requests do.
@@ -72,16 +67,14 @@ export function createFileDownload(
 				: {}
 			const saveUrl = async (url: string, headers: Record<string, string> = {}) => {
 				if (cancelled) throw new Error('Download cancelled')
-				try {
-					savedFilename = await saveExternal(
-						saveId,
-						{ url, headers: { ...originHeaders, ...headers } },
-						onProgress,
-					)
-				} catch (error) {
-					const nativeError = error as ExternalFileError
-					throw new ModrinthApiError(nativeError.message ?? String(error), {
-						statusCode: nativeError.statusCode,
+				const { error, response } = await saveExternal(
+					{ op: saveId, path, url, headers: { ...originHeaders, ...headers } },
+					onProgress,
+				)
+				if (error) throw new ModrinthApiError(error.description)
+				if (response) {
+					throw new ModrinthApiError(`Download failed with status ${response.status}`, {
+						statusCode: response.status,
 					})
 				}
 			}
@@ -155,7 +148,6 @@ export function createFileDownload(
 				throw error
 			} finally {
 				finished = true
-				await releaseExternal(saveId).catch(() => undefined)
 			}
 		},
 	}

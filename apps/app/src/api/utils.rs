@@ -1,4 +1,3 @@
-use crate::engine_handle::EngineHandle;
 use engine::{emit_warning, handler};
 use tauri::{Manager, Runtime};
 use tokio::sync::broadcast;
@@ -8,88 +7,11 @@ use crate::api::oauth_utils::auth_code_reply::{
     normalize_deep_link_command, parse_auth_deeplink, submit_deeplink,
 };
 use crate::server::events::{AmberiteCommand, AppEvent, Command};
-use dashmap::DashMap;
-use std::path::PathBuf;
-use tokio_util::sync::CancellationToken;
-
-#[derive(Default)]
-pub struct DebugInfoExports(DashMap<(String, String), CancellationToken>);
 
 pub fn init<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
     tauri::plugin::Builder::new("utils")
-        .setup(|app, _| {
-            app.manage(DebugInfoExports::default());
-            Ok(())
-        })
-        .on_event(|app, event| {
-            if let tauri::RunEvent::WindowEvent {
-                label,
-                event: tauri::WindowEvent::Destroyed,
-                ..
-            } = event
-            {
-                for export in &app.state::<DebugInfoExports>().0 {
-                    if &export.key().0 == label {
-                        export.value().cancel();
-                    }
-                }
-            }
-        })
-        .invoke_handler(tauri::generate_handler![
-            export_debug_info,
-            cancel_debug_info_export,
-            get_opening_command,
-        ])
+        .invoke_handler(tauri::generate_handler![get_opening_command])
         .build()
-}
-
-#[tauri::command]
-pub async fn export_debug_info<R: Runtime>(
-    window: tauri::Window<R>,
-    state: tauri::State<'_, DebugInfoExports>,
-    handle: tauri::State<'_, EngineHandle>,
-    id: String,
-    path: PathBuf,
-    on_progress: tauri::ipc::Channel<
-        engine::debug_info::DebugInfoExportProgress,
-    >,
-) -> Result<bool> {
-    let key = (window.label().to_string(), id);
-    let cancel = CancellationToken::new();
-    match state.0.entry(key.clone()) {
-        dashmap::mapref::entry::Entry::Vacant(entry) => {
-            entry.insert(cancel.clone());
-        }
-        dashmap::mapref::entry::Entry::Occupied(_) => {
-            return Err(std::io::Error::other(
-                "Debug info export is already running",
-            )
-            .into());
-        }
-    }
-    let engine_state = handle.get().await;
-    let result = engine::debug_info::export_debug_info(
-        &engine_state,
-        path,
-        cancel,
-        move |progress| {
-            let _ = on_progress.send(progress);
-        },
-    )
-    .await;
-    state.0.remove(&key);
-    Ok(result?)
-}
-
-#[tauri::command]
-pub fn cancel_debug_info_export<R: Runtime>(
-    window: tauri::Window<R>,
-    state: tauri::State<'_, DebugInfoExports>,
-    id: String,
-) {
-    if let Some(cancel) = state.0.get(&(window.label().to_string(), id)) {
-        cancel.cancel();
-    }
 }
 
 /// The Amberite command behind a deep link, or `None` for anything else.

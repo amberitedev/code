@@ -49,6 +49,7 @@ pub mod friends;
 pub mod game_options;
 pub mod health;
 pub mod library;
+pub mod ops;
 pub mod screenshots;
 pub mod skins;
 pub mod synced_options;
@@ -89,6 +90,10 @@ mod tests {
         game_options::{self, GameSettingLabelsRequest},
         health::CheckHealth,
         library::{ListRecentIconConfigs, RecentIconConfigs},
+        ops::{
+            self, DebugExport, ExternalSave, InstanceFileSave, LocalUpload,
+            OpResponse,
+        },
         screenshots::{
             self, NewScreenshotGroup, ScreenshotEdit, ScreenshotExport,
             ScreenshotFile, ScreenshotGroupUpdate, ScreenshotMove,
@@ -228,13 +233,18 @@ mod tests {
             CustomSkinSave::decl(&cfg),
             SkinFlushQuery::decl(&cfg),
             UrlOrBlob::decl(&cfg),
+            DebugExport::decl(&cfg),
+            ExternalSave::decl(&cfg),
+            LocalUpload::decl(&cfg),
+            InstanceFileSave::decl(&cfg),
+            OpResponse::decl(&cfg),
         ]
         .map(|declaration| format!("\nexport {declaration}\n"))
         .concat();
         format!(
             "// Generated from apps/app by ts-rs. Do not edit.\n\
              // Regenerate: cargo test -p theseus_gui -- --ignored write_ts\n\n\
-             import type {{ CoreSession, Endpoint, SharedIconConfig, UserFriend, UserStatus }} from './contracts'\n\
+             import type {{ ApiError, CoreSession, Endpoint, SharedIconConfig, UserFriend, UserStatus }} from './contracts'\n\
              import type {{ CommandPayload, EngineEvent, FriendPayload, InstanceGroupsChangedPayload, OnboardingChecklist }} from './engine'\n\
              {declarations}\n\
              export const health = {{\n\
@@ -278,7 +288,8 @@ mod tests {
              export const syncedPacks = {{\n{}}}\n\n\
              export const screenshots = {{\n{}}}\n\n\
              export const friends = {{\n{}}}\n\n\
-             export const skins = {{\n{}}}\n",
+             export const skins = {{\n{}}}\n\n\
+             export const ops = {{\n{}}}\n",
             endpoint::<CheckHealth>(),
             endpoint::<GetBoot>(),
             endpoint::<ConnectCore>(),
@@ -307,6 +318,7 @@ mod tests {
             screenshots::ts_entries(),
             friends::ts_entries(),
             skins::ts_entries(),
+            ops::ts_entries(),
         )
     }
 

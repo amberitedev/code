@@ -148,6 +148,7 @@ pub enum ErrorCode {
     EngineUnavailable,
     ExternalSaveFailed,
     SignInCancelled,
+    Cancelled,
 
     #[serde(other)]
     Unknown,
@@ -225,7 +226,8 @@ impl ErrorCode {
             | Self::PoolPushInFlight
             | Self::SharedInstanceOwnerBehind
             | Self::LoginCanceled
-            | Self::SignInCancelled => 409,
+            | Self::SignInCancelled
+            | Self::Cancelled => 409,
             Self::CodeExpired
             | Self::CoreRemoved
             | Self::SharedInstanceDeleted => 410,

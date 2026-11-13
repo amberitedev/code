@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/vue-query'
 import { onScopeDispose } from 'vue'
 
 import { localTransport } from '@/platform/local'
+import { dispatchOpEvent } from '@/platform/ops'
 import {
 	type AppEventHandler,
 	type AppEvents,
@@ -47,6 +48,7 @@ export function setupAppEventsProvider() {
 	function dispatch(event: LocalEvent) {
 		// The socket fell behind and lost events, so nothing shown can be trusted.
 		if (event.type === 'resync') void queryClient.invalidateQueries()
+		dispatchOpEvent(event)
 		const eventHandlers = handlers.get(event.type)
 		if (!eventHandlers) return
 

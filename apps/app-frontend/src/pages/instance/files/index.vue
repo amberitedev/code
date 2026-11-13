@@ -17,6 +17,8 @@ import { computed, ref, watch } from 'vue'
 import { useAppEvent } from '@/composables/use-app-event'
 import { get_full_path } from '@/helpers/instance'
 import { highlightInFolder } from '@/helpers/utils'
+import { saveInstanceFileAs } from '@/platform/app-lib/files/commands'
+import { save } from '@/platform/dialog'
 
 import { injectInstancePage } from '../instance-context'
 import { instanceKeys } from '../query-options'
@@ -246,11 +248,16 @@ async function handleWriteFile(path: string, content: string) {
 	await writeBytes(path, new TextEncoder().encode(content))
 }
 
-async function handleDownloadFile(path: string, _fileName: string) {
-	await invoke('plugin:files|file_save_as', {
-		instanceId: instanceId.value,
-		filePath: path,
+async function handleDownloadFile(path: string, fileName: string) {
+	const destination = await save({ defaultPath: fileName })
+	if (!destination) return
+	const { error } = await saveInstanceFileAs({
+		op: crypto.randomUUID(),
+		instance_id: instanceId.value,
+		path,
+		destination,
 	})
+	if (error) throw new Error(error.description)
 }
 
 const uploadState = ref<UploadState>({
