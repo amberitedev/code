@@ -43,9 +43,12 @@ The sync merges upstream's code; these rules say where an upstream change goes w
 leaves it unreachable or in the wrong place.
 
 - An `api/` function or `#[tauri::command]` with a frontend helper that calls `invoke` becomes an
-  Endpoint declared next to its types in the engine and a handler that takes the `Engine`. Only the
-  helper's body changes, to call `client.local`; its name and signature stay upstream's.
-- A new event becomes an `Event` variant on the socket.
+  Endpoint declared next to its types in the engine and a handler that takes the `Engine`. When its
+  body or answer carries a host filesystem path, it becomes an App Endpoint instead
+  ([architecture](architecture.md#one-protocol)). Only the helper's body changes, to call
+  `client.local`; its name and signature stay upstream's.
+- A new engine event becomes a variant of the engine's `Event`, and a new desktop event a variant
+  of the App's `AppEvent`. Both reach the UI on the `/events` socket.
 - A new plugin call becomes an App route.
 - A change to a desktop domain (accounts, skins, friends, Discord, settings and the like) goes to
   that domain's folder, `apps/app/src/<domain>`, and its migrations to the App's migrations.

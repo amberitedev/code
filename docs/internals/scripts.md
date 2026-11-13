@@ -26,8 +26,8 @@ This repository is commonly worked on through [T3 Code](https://github.com/pingd
 coding-agent app that gives each task an isolated Git worktree. When T3 Code creates a worktree, it
 runs `node scripts/setup-worktree.ts` from `t3.json`. The script installs dependencies (retrying once,
 because two worktrees set up at the same time can collide on the shared Git config), copies the
-`backend`, `core`, and `scenarios` development data from the primary checkout, and copies the App
-library's `.env`. The scenario copy leaves out Minecraft's game assets (`meta/assets`) and the App
+`backend`, `core`, and `scenarios` development data from the primary checkout, and copies the
+engine's `.env`. The scenario copy leaves out Minecraft's game assets (`meta/assets`) and the App
 window's browser caches; they are most of the files and are fetched again when needed. It does not
 overwrite anything already in the worktree, so it is safe to run again. `.data/setup.json` records
 whether it is `running` (with its `pid`), `done`, or `failed` (with an `error`). Any exit,
@@ -86,7 +86,7 @@ The key is a hash of everything that goes into the build:
 
 - Both: the root `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `.cargo`, the Cargo arguments,
   and the folders of the program's crate and every local crate it builds with, as
-  `cargo metadata` reports them. Crates it does not use, such as labrinth, can change without a
+  `cargo metadata` reports them. Crates it does not use, such as `toasty`, can change without a
   rebuild. Also `packages/engine/.env` and the variables named in that file and `.env.prod`,
   which the engine's build compiles in.
 - App, also: `apps/app-frontend/package.json` (the App's version) and

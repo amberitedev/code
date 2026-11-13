@@ -40,8 +40,9 @@ full Modrinth experience, so users can keep it as their main launcher with Amber
 on top.
 
 Amberite ports Modrinth's social backend from `apps/labrinth` (friends, profiles, sharing, etc.) to
-`apps/backend` (Cloudflare Workers and D1) while keeping the same schemas and contracts. Amberite
-runs this backend itself, with relevant upstream changes carried over.
+`apps/backend` (Cloudflare Workers and D1) while keeping the same schemas and contracts. We do not
+keep `apps/labrinth`; read it at `modrinth/main`. Amberite runs this backend itself, with relevant
+upstream changes carried over.
 
 ## A note from ilai
 
@@ -53,6 +54,10 @@ The rest of this document is meant to help you navigate the codebase and make ch
 
 Of note: most Amberite work is done by agents in T3 Code worktrees, several at once. Be careful
 with dev stacks, data, and processes that belong to another worktree or to the developer.
+
+Rust imports go one way: `contracts` <- `sharing-client` <- `engine` <- `apps/app`, `apps/core`.
+The design, and the rules a review checks it against, are in
+[architecture](docs/internals/architecture.md).
 
 ## Hit every surface
 

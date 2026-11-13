@@ -55,8 +55,9 @@ parents. Never rebase, squash, or recreate it.
 
 ## 5. Check
 
-Run focused checks on what changed: `cargo check -p <crate>` for changed Rust crates, and
-`vp run --filter <workspace> typecheck` plus `vp lint <files>` for changed workspaces. A crate this
+Run focused checks on what changed: `node scripts/dev-runner.ts test <crate>...` for changed Rust
+crates (it compiles in the shared build folder; plain `cargo` fills this checkout's own `target/`),
+and `vp run --filter <workspace> typecheck` plus `vp lint <files>` for changed workspaces. A crate this
 machine cannot build (missing Java or WebKit) is left to CI; say so in the PR. Fix failures in the
 merge commit (amend again), not in a follow-up commit.
 
