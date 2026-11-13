@@ -281,7 +281,7 @@ pub async fn start_engine(paths: &Paths) -> Result<Arc<Engine>> {
         max_concurrent_writes: 10,
         events: engine::EventSink::new(),
         accounts: None,
-        pack_hooks: None,
+        hooks: None,
     })
     .await
     .map_err(|error| eyre!("the engine did not start: {error:#}"))
