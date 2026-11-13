@@ -17,9 +17,9 @@ use crate::{
     state::tests::{add_instance, engine},
 };
 
-/// Allows everything, or denies everything with 403.
+/// Grants up to `granted` on everything, and denies the rest with 403.
 struct FakeAccess {
-    allow: bool,
+    granted: Option<Permission>,
 }
 
 impl Access for FakeAccess {
@@ -37,10 +37,9 @@ impl Access for FakeAccess {
         permission: Permission,
     ) -> BoxFuture<'a, Result<Permission, ApiError>> {
         Box::pin(async move {
-            if self.allow {
-                Ok(permission)
-            } else {
-                Err(ApiError::new(ErrorCode::Forbidden, "denied"))
+            match self.granted {
+                Some(granted) if permission <= granted => Ok(permission),
+                _ => Err(ApiError::new(ErrorCode::Forbidden, "denied")),
             }
         })
     }
@@ -88,12 +87,19 @@ async fn send(
 }
 
 async fn host(dir: &tempfile::TempDir, allow: bool) -> Router {
+    host_granting(dir, allow.then_some(Permission::Owner)).await
+}
+
+async fn host_granting(
+    dir: &tempfile::TempDir,
+    granted: Option<Permission>,
+) -> Router {
     crate::install_crypto_provider();
     let engine = engine(dir.path().to_path_buf()).await;
     add_instance(&engine, "local:a", "Survival").await;
     super::routes().with_state(Host {
         engine,
-        access: Arc::new(FakeAccess { allow }),
+        access: Arc::new(FakeAccess { granted }),
     })
 }
 
@@ -280,6 +286,57 @@ async fn worlds_and_servers_are_read_and_edited_through_their_routes() {
     let (_, worlds) =
         send(&router, "GET", "/instances/local%3Aa/worlds", None).await;
     assert_eq!(worlds, json!([world]));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn world_routes_refuse_a_folder_outside_saves() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = host(&dir, true).await;
+    let instance = dir
+        .path()
+        .join(crate::INSTANCES_FOLDER_NAME)
+        .join("Survival");
+    std::fs::create_dir_all(instance.join("saves/World1")).unwrap();
+    let outside = instance.join("outside");
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::write(outside.join("keep.txt"), "").unwrap();
+    let absolute = outside
+        .to_string_lossy()
+        .replace('%', "%25")
+        .replace(['/', '\\'], "%2F")
+        .replace(':', "%3A")
+        .replace(' ', "%20");
+
+    for world in ["World1%2F..%2F..%2Foutside", &absolute] {
+        let (status, error) = send(
+            &router,
+            "DELETE",
+            &format!("/instances/local%3Aa/saves/{world}"),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{world}");
+        assert_eq!(error["error"], "invalid_input");
+    }
+    assert!(outside.join("keep.txt").exists());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn desyncing_a_server_needs_owner_over_the_engine() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = host_granting(&dir, Some(Permission::Edit)).await;
+
+    let (status, _) = send(
+        &router,
+        "POST",
+        "/instances/local%3Aa/servers/desync",
+        Some(json!({
+            "server_id": "synced",
+            "mode": "remove_from_other_instances",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
 fn world_with_instance(world: &Value) -> Value {

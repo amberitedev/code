@@ -61,8 +61,8 @@ pub use self::projects::{
     toggle_disable_project, update_managed_modrinth_version, update_project,
 };
 pub use self::run::{
-    LaunchCredentials, LaunchDefaults, LaunchRequest, QuickPlayType,
-    ensure_installed, kill, launch, try_update_playtime_by_instance_id,
+    LaunchCredentials, LaunchDefaults, LaunchRequest, QuickPlayType, kill,
+    launch, try_update_playtime_by_instance_id,
 };
 pub use self::screenshot_groups::{
     ScreenshotGroup, ScreenshotGroupImport, ScreenshotGroupMembershipUpdate,

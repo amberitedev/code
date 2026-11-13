@@ -1,4 +1,7 @@
-use std::sync::Arc;
+use std::{
+    path::{Component, Path},
+    sync::Arc,
+};
 
 use axum::extract::State;
 use contracts::{ApiError, Empty, ErrorCode, Json, server::Req};
@@ -104,7 +107,8 @@ pub async fn get_singleplayer_world(
     instance: InstanceAccess<View>,
     request: Req<GetSingleplayerWorld>,
 ) -> Result<Json<World>, ApiError> {
-    worlds::get_singleplayer_world(&engine, &instance.id, &request.params.world)
+    let world = world_folder(&request.params.world)?;
+    worlds::get_singleplayer_world(&engine, &instance.id, world)
         .await
         .map(Json)
         .map_err(api_error)
@@ -118,7 +122,7 @@ pub async fn delete_world(
     let path = get_full_path(&engine, &instance.id)
         .await
         .map_err(api_error)?;
-    worlds::delete_world(&path, &request.params.world)
+    worlds::delete_world(&path, world_folder(&request.params.world)?)
         .await
         .map(|()| Empty)
         .map_err(api_error)
@@ -132,7 +136,8 @@ pub async fn rename_world(
     let path = get_full_path(&engine, &instance.id)
         .await
         .map_err(api_error)?;
-    worlds::rename_world(&path, &request.params.world, &request.body.name)
+    let world = world_folder(&request.params.world)?;
+    worlds::rename_world(&path, world, &request.body.name)
         .await
         .map(|()| Empty)
         .map_err(api_error)
@@ -146,7 +151,7 @@ pub async fn reset_world_icon(
     let path = get_full_path(&engine, &instance.id)
         .await
         .map_err(api_error)?;
-    worlds::reset_world_icon(&path, &request.params.world)
+    worlds::reset_world_icon(&path, world_folder(&request.params.world)?)
         .await
         .map(|()| Empty)
         .map_err(api_error)
@@ -160,7 +165,7 @@ pub async fn backup_world(
     let path = get_full_path(&engine, &instance.id)
         .await
         .map_err(api_error)?;
-    worlds::backup_world(&path, &request.params.world)
+    worlds::backup_world(&path, world_folder(&request.params.world)?)
         .await
         .map(Json)
         .map_err(api_error)
@@ -202,8 +207,10 @@ pub async fn ensure_managed_instance_server(
     .map_err(api_error)
 }
 
+/// Needs Owner over the engine: desyncing can drop the server from every participating instance.
 pub async fn desync_instance_server(
     State(engine): State<Arc<Engine>>,
+    _: EngineAccess<Owner>,
     instance: InstanceAccess<Edit>,
     request: Req<DesyncInstanceServer>,
 ) -> Result<Empty, ApiError> {
@@ -250,4 +257,16 @@ pub async fn remove_instance_server(
     .await
     .map(|()| Empty)
     .map_err(api_error)
+}
+
+/// The world's folder in `saves`, refused when it names any other path.
+fn world_folder(world: &str) -> Result<&str, ApiError> {
+    let mut components = Path::new(world).components();
+    match (components.next(), components.next()) {
+        (Some(Component::Normal(_)), None) => Ok(world),
+        _ => Err(ApiError::new(
+            ErrorCode::InvalidInput,
+            "a world is one folder in saves",
+        )),
+    }
 }

@@ -44,46 +44,14 @@ pub struct LaunchRequest {
     pub quick_play: QuickPlayType,
 }
 
-/// Checks the instance may launch and repairs missing runtime files. Hosts call it before they
-/// update the instance's files for a [`launch`].
-#[tracing::instrument(skip(state))]
-pub async fn ensure_installed(
-    state: &Arc<Engine>,
-    instance_id: &str,
-) -> crate::Result<()> {
-    if crate::state::instances::adapters::sqlite::instance_rows::is_instance_quarantined(
-        instance_id,
-        &state.pool,
-    )
-    .await?
-    {
-        bail!(ErrorKind::InputError(
-            "this instance has been quarantined".to_string(),
-        ));
-    }
-    super::shared::check_shared_instance_availability_before_launch(
-        instance_id,
-        state,
-    )
-    .await?;
-
-    let context =
-        crate::state::instances::commands::get_instance_launch_context(
-            instance_id,
-            &state.pool,
-        )
-        .await?
-        .context(format!(
-            "tried to run a nonexistent instance {instance_id}"
-        ))?;
-    crate::launcher::ensure_installed(&context, state).await
-}
-
-#[tracing::instrument(skip(state, request))]
+/// Launches the instance. `before_spawn` runs where the host may still change the instance's
+/// files: after every check, the pre-launch hook and any repair install, before the game starts.
+#[tracing::instrument(skip(state, request, before_spawn))]
 pub async fn launch(
     state: &Arc<Engine>,
     instance_id: &str,
     request: LaunchRequest,
+    before_spawn: impl AsyncFnOnce() -> crate::Result<()>,
 ) -> crate::Result<ProcessMetadata> {
     let LaunchRequest {
         credentials,
@@ -109,6 +77,11 @@ pub async fn launch(
             "this instance has been quarantined".to_string(),
         ));
     }
+    super::shared::check_shared_instance_availability_before_launch(
+        instance_id,
+        state,
+    )
+    .await?;
 
     let pre_launch_hook = context
         .launch_overrides
@@ -298,6 +271,7 @@ pub async fn launch(
         post_exit_hook,
         &context,
         quick_play,
+        before_spawn,
         state,
     )
     .await

@@ -16,8 +16,8 @@ use crate::launcher::quick_play_version::{
 use crate::server_address::{ServerAddress, parse_server_address};
 use crate::state::server_join_log::JoinLogEntry;
 use crate::state::{
-    DirectoryInfo, Instance, InstanceInstallStage, InstanceLaunchContext,
-    InstanceLink, JavaVersion, MemorySettings, ProcessMetadata, WindowSize,
+    DirectoryInfo, InstanceInstallStage, InstanceLaunchContext, InstanceLink,
+    JavaVersion, MemorySettings, ProcessMetadata, WindowSize,
 };
 use crate::util::io;
 use crate::util::rpc::RpcServerBuilder;
@@ -910,7 +910,24 @@ fn link_project_and_version(
     }
 }
 
-fn check_install_stage(instance: &Instance) -> crate::Result<()> {
+#[tracing::instrument(skip_all)]
+#[allow(clippy::too_many_arguments)]
+pub async fn launch_minecraft(
+    java_args: &[String],
+    env_args: &[(String, String)],
+    wrapper: &Option<String>,
+    memory: &MemorySettings,
+    resolution: &WindowSize,
+    credentials: &LaunchCredentials,
+    post_exit_hook: Option<String>,
+    context: &InstanceLaunchContext,
+    mut quick_play_type: QuickPlayType,
+    before_spawn: impl AsyncFnOnce() -> crate::Result<()>,
+    state: &Arc<Engine>,
+) -> crate::Result<ProcessMetadata> {
+    let instance = &context.instance;
+    let content_set = &context.applied_content_set;
+
     if instance.install_stage == InstanceInstallStage::PackInstalling
         || instance.install_stage == InstanceInstallStage::MinecraftInstalling
     {
@@ -925,23 +942,11 @@ fn check_install_stage(instance: &Instance) -> crate::Result<()> {
         ));
     }
 
-    Ok(())
-}
+    let mut runtime_lease = state.content_store.runtime_cache_lock.read().await;
 
-struct ResolvedRuntime {
-    minecraft: d::minecraft::Catalog,
-    version_index: usize,
-    minecraft_updated: bool,
-    version_jar: String,
-    version_info: VersionInfo,
-    java_version: JavaVersion,
-}
-
-async fn resolve_runtime(
-    context: &InstanceLaunchContext,
-    state: &Engine,
-) -> crate::Result<ResolvedRuntime> {
-    let content_set = &context.applied_content_set;
+    let instance_path =
+        get_instance_full_path(&instance.path, &state.directories)
+            .context("resolving instance path")?;
 
     let (minecraft, version_index) =
         resolve_minecraft_manifest(&content_set.game_version, state)
@@ -1022,106 +1027,6 @@ async fn resolve_runtime(
         "missing correct java installation".to_string(),
     ))?;
 
-    Ok(ResolvedRuntime {
-        minecraft,
-        version_index,
-        minecraft_updated,
-        version_jar,
-        version_info,
-        java_version,
-    })
-}
-
-async fn repair_runtime(
-    instance_id: &str,
-    state: &Arc<Engine>,
-) -> crate::Result<()> {
-    let job = crate::install::install_existing_instance(
-        instance_id.to_owned(),
-        false,
-        state,
-    )
-    .await
-    .context("starting repair install")?;
-    let job_id = uuid::Uuid::parse_str(&job.job_id).context(
-        ErrorKind::LauncherError(format!(
-            "parsing repair install job id {}",
-            job.job_id
-        )),
-    )?;
-    crate::install::runner::wait_for_job(job_id, state)
-        .await
-        .context("repairing missing runtime files")?;
-    Ok(())
-}
-
-/// Repairs missing runtime files, so the host can update the instance's files over a complete
-/// install before [`launch_minecraft`].
-pub(crate) async fn ensure_installed(
-    context: &InstanceLaunchContext,
-    state: &Arc<Engine>,
-) -> crate::Result<()> {
-    let instance = &context.instance;
-    check_install_stage(instance)?;
-    if crate::state::instance_has_running_process(&instance.id, state).await? {
-        bail!(ErrorKind::LauncherError(format!(
-            "instance {} is already running",
-            instance.id
-        )));
-    }
-
-    let runtime_lease = state.content_store.runtime_cache_lock.read().await;
-    let runtime = resolve_runtime(context, state).await?;
-    let missing = download::missing_runtime_file(
-        state,
-        &runtime.version_info,
-        &runtime.java_version.architecture,
-        runtime.minecraft_updated,
-    )?;
-    drop(runtime_lease);
-
-    if let Some(path) = missing {
-        tracing::info!(instance_id = %instance.id, path = %path.display(), "Restoring missing Minecraft runtime files before launch");
-        repair_runtime(&instance.id, state).await?;
-    }
-    Ok(())
-}
-
-#[tracing::instrument(skip_all)]
-#[allow(clippy::too_many_arguments)]
-pub async fn launch_minecraft(
-    java_args: &[String],
-    env_args: &[(String, String)],
-    wrapper: &Option<String>,
-    memory: &MemorySettings,
-    resolution: &WindowSize,
-    credentials: &LaunchCredentials,
-    post_exit_hook: Option<String>,
-    context: &InstanceLaunchContext,
-    mut quick_play_type: QuickPlayType,
-    state: &Arc<Engine>,
-) -> crate::Result<ProcessMetadata> {
-    let instance = &context.instance;
-    let content_set = &context.applied_content_set;
-
-    check_install_stage(instance)?;
-
-    let mut runtime_lease = state.content_store.runtime_cache_lock.read().await;
-
-    let instance_path =
-        get_instance_full_path(&instance.path, &state.directories)
-            .context("resolving instance path")?;
-
-    let ResolvedRuntime {
-        minecraft,
-        version_index,
-        minecraft_updated,
-        version_jar,
-        version_info,
-        java_version,
-    } = resolve_runtime(context, state).await?;
-    let version = &minecraft.versions[version_index];
-
     // Test jre version
     let java_version =
         crate::api::jre::check_jre(java_version.path.clone().into())
@@ -1169,7 +1074,22 @@ pub async fn launch_minecraft(
     )? {
         tracing::info!(instance_id = %instance.id, path = %path.display(), "Restoring missing Minecraft runtime files before launch");
         drop(runtime_lease);
-        repair_runtime(&instance.id, state).await?;
+        let job = crate::install::install_existing_instance(
+            instance.id.clone(),
+            false,
+            state,
+        )
+        .await
+        .context("starting repair install")?;
+        let job_id = uuid::Uuid::parse_str(&job.job_id).context(
+            ErrorKind::LauncherError(format!(
+                "parsing repair install job id {}",
+                job.job_id
+            )),
+        )?;
+        crate::install::runner::wait_for_job(job_id, state)
+            .await
+            .context("repairing missing runtime files")?;
         runtime_lease = state.content_store.runtime_cache_lock.read().await;
     }
     let _runtime_lease = runtime_lease;
@@ -1294,6 +1214,8 @@ pub async fn launch_minecraft(
     command.env_remove("_JAVA_OPTIONS");
 
     command.envs(env_args.iter().cloned());
+
+    before_spawn().await?;
 
     crate::state::instances::commands::sync_content_files(&instance.id, state)
         .await
