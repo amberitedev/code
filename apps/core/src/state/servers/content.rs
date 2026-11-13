@@ -6,8 +6,7 @@
 //!
 //! One change at a time per server: a second one is refused as busy rather than queued. Loader and
 //! pack installs run in the background, hold the server so it cannot start, and report progress
-//! and their result to the server's console sockets as `install-progress` and
-//! `installation-result`.
+//! and their result on the server's `/events` topic as `install_progress` and `install_result`.
 
 use std::{
     collections::HashMap,
@@ -25,14 +24,13 @@ use engine::{
 };
 
 use crate::{
+    api::events::CoreEvent,
     backups::Backups,
     daemon::paths::Paths,
-    // The websocket's events, which Core sends progress and results on.
-    event::{InstallProgressItem, InstallationResult, WsEvent},
     installs::{self, download},
     servers::{Hold, ServerError, Servers},
     state::servers::{
-        GameVersionChange, InstallProgressKey, Installing,
+        GameVersionChange, InstallProgressItem, InstallProgressKey, Installing,
         adapters::network::modrinth, domain::pack,
     },
 };
@@ -111,9 +109,8 @@ pub struct Content {
     pub backups: Arc<Backups>,
     activity: Mutex<HashMap<String, Activity>>,
     busy: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
-    /// Install progress and results, by server, on the channel backups use. Console sockets
-    /// pass them on.
-    pub events: broadcast::Sender<(String, WsEvent)>,
+    /// Install progress and results, on the channel backups use. `/events` sockets pass them on.
+    pub events: broadcast::Sender<CoreEvent>,
 }
 
 /// One server's content, taken for a change. Dropping it lets the next change in.
@@ -253,12 +250,12 @@ impl Content {
         }
     }
 
-    fn emit(&self, server_id: &str, event: WsEvent) {
-        let _ = self.events.send((server_id.to_owned(), event));
+    fn emit(&self, event: CoreEvent) {
+        let _ = self.events.send(event);
     }
 
     /// Run an install in the background with the server held and its content taken. Its
-    /// progress and result go to the server's console sockets.
+    /// progress and result go to the server's `/events` topic.
     pub fn spawn<F, Fut>(
         self: &Arc<Self>,
         hold: Hold,
@@ -298,15 +295,11 @@ impl Content {
                 }
             }
             progress.finish(error.as_deref());
-            content.emit(
-                &server_id,
-                WsEvent::InstallationResult(match error {
-                    None => InstallationResult::Ok { game_version },
-                    Some(reason) => InstallationResult::Err {
-                        reason: Some(reason),
-                    },
-                }),
-            );
+            content.emit(CoreEvent::InstallResult {
+                server: server_id,
+                error,
+                game_version,
+            });
         });
     }
 }
@@ -344,12 +337,10 @@ impl Progress {
             }
         });
         if changed {
-            self.content.emit(
-                &self.server_id,
-                WsEvent::InstallProgress {
-                    items: activity.items,
-                },
-            );
+            self.content.emit(CoreEvent::InstallProgress {
+                server: self.server_id.clone(),
+                items: activity.items,
+            });
         }
     }
 
@@ -366,11 +357,9 @@ impl Progress {
                 }
             }
         });
-        self.content.emit(
-            &self.server_id,
-            WsEvent::InstallProgress {
-                items: activity.items,
-            },
-        );
+        self.content.emit(CoreEvent::InstallProgress {
+            server: self.server_id.clone(),
+            items: activity.items,
+        });
     }
 }

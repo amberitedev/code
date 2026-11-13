@@ -1168,6 +1168,10 @@ code: string | null,
  */
 expires_at: number | null, };
 
+export type Topic = { "type": "instance", id: string, } | { "type": "installs" } | { "type": "console", id: string, } | { "type": "server", id: string, } | { "type": "backups", id: string, };
+
+export type ClientMessage = { "type": "subscribe", topic: Topic, } | { "type": "unsubscribe", topic: Topic, };
+
 export type UpdateStatus = { 
 /**
  * The running version.

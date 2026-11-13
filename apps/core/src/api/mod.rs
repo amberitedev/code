@@ -78,6 +78,7 @@ pub struct CoreState {
     pub update: Arc<crate::update::Updater>,
     pub network: Arc<crate::network::forward::Network>,
     pub storage: Arc<crate::storage::Storage>,
+    pub consoles: Arc<events::Consoles>,
 }
 
 /// The router's state. Routes take `State<Arc<CoreState>>`; the engine's extractors find
@@ -120,6 +121,7 @@ impl Endpoints for Router<Shared> {
 pub fn router(state: Arc<CoreState>) -> Router {
     Router::new()
         .endpoint::<CheckHealth, _, _>(health::get)
+        .route("/events", get(events::socket))
         .endpoint::<SignIn, _, _>(sessions::sign_in)
         .endpoint::<ListSessions, _, _>(sessions::list)
         .endpoint::<SignOut, _, _>(sessions::sign_out)
@@ -151,8 +153,6 @@ pub fn router(state: Arc<CoreState>) -> Router {
         .endpoint::<GetMachine, _, _>(insight::machine)
         .route("/modrinth/v0/servers", get(servers::list))
         .route("/modrinth/v0/servers/{id}", get(servers::get))
-        .route("/modrinth/v0/servers/{id}/ws", get(servers::ws_auth))
-        .route("/servers/{id}/ws", get(events::console))
         .route("/local/servers", post(servers::create))
         .route("/local/servers/{id}", delete(servers::delete))
         .route("/v1/servers", get(servers::list_v1))
@@ -348,7 +348,7 @@ pub fn router(state: Arc<CoreState>) -> Router {
         .layer(TraceLayer::new_for_http())
 }
 
-/// Serve HTTP/1 or HTTP/2, with upgrades for the console socket, on one connection. A connection
+/// Serve HTTP/1 or HTTP/2, with upgrades for the `/events` socket, on one connection. A connection
 /// that sends no request for [`IDLE_TIMEOUT`] is closed.
 pub async fn serve_connection<I>(io: I, router: Router) -> Result<()>
 where

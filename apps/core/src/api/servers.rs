@@ -244,14 +244,6 @@ pub struct JwtAuth {
     pub token: String,
 }
 
-/// Response of GET `/modrinth/v0/servers/{id}/ws`: the console socket and a ticket for it.
-/// Mirrors Archon.Websocket.v0.WSAuth.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WsAuth {
-    pub url: String,
-    pub token: String,
-}
-
 /// Mirrors the `action` of `ArchonServersV0Module.power`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PowerAction {
@@ -861,22 +853,6 @@ async fn remove_server(
         drop_own_share::release_history(&state.content, &share_id).await;
     }
     Ok(members)
-}
-
-/// `GET /modrinth/v0/servers/{id}/ws`: where the console socket is. The socket checks the
-/// session itself, so the token here is empty. Editors and the owner only.
-pub async fn ws_auth(
-    caller: Caller,
-    State(state): State<Arc<CoreState>>,
-    headers: HeaderMap,
-    Path(id): Path<String>,
-) -> Result<Json<WsAuth>, ApiError> {
-    state.access.require(&caller, &id, Permission::Edit).await?;
-    let host = host(&headers);
-    Ok(Json(WsAuth {
-        url: format!("{host}/servers/{id}/ws"),
-        token: String::new(),
-    }))
 }
 
 /// The hosting API's full view of a server reached at `host`, with its one world, whose id is

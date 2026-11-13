@@ -403,15 +403,12 @@ describe('the server access page on a Core', () => {
 })
 
 describe('URLs a Core names', () => {
-	it('keep the proxy base, with its capability, for the console and the files', async () => {
+	it('keep the proxy base, with its capability, for the event socket and the files', async () => {
 		const api = new FakeClient()
 		// Core names the host it was reached at, without the capability.
-		api.answers = [
-			{ url: `127.0.0.1:5000/servers/${SERVER}/ws`, token: '' },
-			{ url: `127.0.0.1:5000/servers/${SERVER}`, token: '' },
-		]
+		api.answers = [{ url: `127.0.0.1:5000/servers/${SERVER}`, token: '' }]
 		const socket = await api.archon.servers_v0.getWebSocketAuth(SERVER)
-		expect(socket.url).toBe(`ws://127.0.0.1:5000/c0ffee/servers/${SERVER}/ws`)
+		expect(socket.url).toBe('ws://127.0.0.1:5000/c0ffee/events')
 
 		const files = await api.archon.servers_v0.getFilesystemAuth(SERVER)
 		expect(files.url).toBe(`${PROXY}/servers/${SERVER}`)

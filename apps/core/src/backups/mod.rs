@@ -49,8 +49,8 @@ use engine::{
 
 use crate::{
     access::{Caller, now},
+    api::events::{BackupState, BackupTask, CoreEvent},
     daemon::paths::Paths,
-    event::{BackupState, BackupTask, WsEvent},
     servers::{Phase, ServerError, Servers, console},
     util::if_present,
 };
@@ -131,8 +131,8 @@ pub struct Backups {
     paths: Paths,
     db: SqlitePool,
     servers: Arc<Servers>,
-    /// Progress for console sockets, by server. Content installs share it.
-    pub events: broadcast::Sender<(String, WsEvent)>,
+    /// Events for `/events` sockets: backup progress, content installs and power changes.
+    pub events: broadcast::Sender<CoreEvent>,
     wake: Notify,
     /// The ids of operations as they finish.
     finished: broadcast::Sender<i64>,
@@ -890,9 +890,9 @@ async fn saved(
     matches!(tokio::time::timeout(wait, reported).await, Ok(true))
 }
 
-/// Tell console sockets how far an operation is.
+/// Tell `/events` sockets how far an operation is.
 fn send_progress(
-    events: &broadcast::Sender<(String, WsEvent)>,
+    events: &broadcast::Sender<CoreEvent>,
     operation: &Operation,
     task: BackupTask,
     state: BackupState,
@@ -900,17 +900,15 @@ fn send_progress(
     started: i64,
     finished: Option<i64>,
 ) {
-    let _ = events.send((
-        operation.server_id.clone(),
-        WsEvent::BackupProgress {
-            id: Uuid::parse_str(&operation.backup_id).unwrap_or_default(),
-            task,
-            state,
-            progress,
-            start_time: Some(started),
-            finish_time: finished,
-        },
-    ));
+    let _ = events.send(CoreEvent::Backup {
+        server: operation.server_id.clone(),
+        id: Uuid::parse_str(&operation.backup_id).unwrap_or_default(),
+        task,
+        state,
+        progress,
+        start_time: Some(started),
+        finish_time: finished,
+    });
 }
 
 /// The world folders of a server folder, by name.

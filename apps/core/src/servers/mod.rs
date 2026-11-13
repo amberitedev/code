@@ -216,6 +216,14 @@ impl Servers {
         self.live().get(id).map(|live| live.phase)
     }
 
+    /// Every server with a shim, and where it is in its run.
+    pub fn phases(&self) -> HashMap<String, Phase> {
+        self.live()
+            .iter()
+            .map(|(id, live)| (id.clone(), live.phase))
+            .collect()
+    }
+
     fn set_phase(&self, id: &str, phase: Phase) {
         if let Some(live) = self.live().get_mut(id) {
             live.phase = phase;

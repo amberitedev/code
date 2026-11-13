@@ -40,7 +40,7 @@ use crate::{
     db,
 };
 
-/// Live console streams one session may hold.
+/// `/events` sockets one session may hold.
 const STREAMS_PER_SESSION: usize = 4;
 const SIGN_INS_PER_MINUTE: u32 = 10;
 
@@ -53,8 +53,8 @@ pub fn now() -> i64 {
 pub struct CoreAccess {
     db: SqlitePool,
     pub keys: keys::Keys,
-    /// Users whose sessions or roles changed. Live console streams listen and close when their
-    /// session or role is gone.
+    /// Users whose sessions or roles changed. `/events` sockets listen, and end what their
+    /// session or role no longer allows.
     pub changed: broadcast::Sender<Changed>,
     /// Wakes backend sync when a call is owed.
     pub owed: Arc<Notify>,
@@ -99,7 +99,7 @@ impl CoreAccess {
         *count <= SIGN_INS_PER_MINUTE
     }
 
-    /// Hold one of a session's console streams until the guard drops. `None` at the cap.
+    /// Hold one of a session's `/events` sockets until the guard drops. `None` at the cap.
     pub fn open_stream(
         self: &Arc<Self>,
         caller: &Caller,
@@ -115,9 +115,26 @@ impl CoreAccess {
         *open += 1;
         Some(StreamGuard(Some((Arc::clone(self), id.clone()))))
     }
+
+    /// Whether `caller`'s session is still live: not ended, expired, or idle past
+    /// `sessions::IDLE_S`. The local CLI's always is.
+    pub async fn revalidate(&self, caller: &Caller) -> bool {
+        let Caller::Session { id, .. } = caller else {
+            return true;
+        };
+        let live = sqlx::query(
+            "SELECT 1 FROM sessions WHERE id = ?1 AND expires_at > ?2 AND last_used_at > ?2 - ?3",
+        )
+        .bind(id)
+        .bind(now())
+        .bind(sessions::IDLE_S)
+        .fetch_optional(&self.db)
+        .await;
+        matches!(live, Ok(Some(_)))
+    }
 }
 
-/// One open console stream of a session. The local CLI's are not counted.
+/// One open `/events` socket of a session. The local CLI's are not counted.
 pub struct StreamGuard(Option<(Arc<CoreAccess>, String)>);
 
 impl Drop for StreamGuard {

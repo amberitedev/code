@@ -1,10 +1,13 @@
-//! HTTP and the console socket over Core's local socket, which only `copal` and the owner may
+//! HTTP and the `/events` socket over Core's local socket, which only `copal` and the owner may
 //! open. A request that arrives this way is the owner's, with no token or ticket.
 
 use axum::http::{Method, Request, header};
 use bytes::Bytes;
 use color_eyre::eyre::{Result, WrapErr, bail};
-use contracts::ApiError;
+use contracts::{
+    ApiError,
+    core::{ClientMessage, Topic},
+};
 use http_body_util::{BodyExt, Full};
 use hyper_util::rt::TokioIo;
 use serde::{Serialize, de::DeserializeOwned};
@@ -139,31 +142,30 @@ impl Client {
         Ok(body)
     }
 
-    /// A server's console socket, past its greeting. It sends `log` events as JSON text and
-    /// takes `command` messages.
+    /// The `/events` socket, subscribed to a server's console. It sends `console` events as JSON
+    /// text, or `ended` when Core refused the subscription.
     pub async fn console(
         &self,
         server_id: &str,
     ) -> Result<WebSocketStream<Box<dyn Stream>>> {
-        use futures::{SinkExt, StreamExt};
+        use futures::SinkExt;
         use tokio_tungstenite::tungstenite::Message;
 
         let (mut socket, _) = tokio_tungstenite::client_async(
-            format!("ws://copal/servers/{server_id}/ws"),
+            "ws://copal/events",
             self.connect().await?,
         )
         .await
-        .wrap_err("Core refused the console")?;
-        // The hosting API's greeting. The local socket is the owner, so the token is not read.
+        .wrap_err("Core refused the event socket")?;
+        let subscribe = ClientMessage::Subscribe {
+            topic: Topic::Console {
+                id: server_id.to_owned(),
+            },
+        };
         socket
-            .send(Message::text(r#"{"event":"auth","jwt":""}"#))
+            .send(Message::text(serde_json::to_string(&subscribe)?))
             .await?;
-        match socket.next().await {
-            Some(Ok(Message::Text(text))) if text.contains("auth-ok") => {
-                Ok(socket)
-            }
-            _ => bail!("Core closed the console"),
-        }
+        Ok(socket)
     }
 
     async fn connect(&self) -> Result<Box<dyn Stream>> {

@@ -595,11 +595,19 @@ async fn send(client: &Client, server: &Server, command: &str) -> Result<()> {
     call::<SendCommand>(client, &id(server), &(), command).await
 }
 
-/// A console event, with only what the CLI shows.
+/// An `/events` message, with only what the CLI shows.
 #[derive(Debug, Deserialize)]
 struct Event {
-    event: String,
-    message: Option<String>,
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(default)]
+    payload: Payload,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct Payload {
+    line: Option<String>,
+    error: Option<contracts::ApiError>,
 }
 
 /// `copal servers console attach`: print the console as it comes, and send each line typed.
@@ -629,13 +637,16 @@ pub async fn attach(client: &Client, server: &str, json: bool) -> Result<()> {
         tokio::select! {
             message = console.next() => match message {
                 Some(Ok(Message::Text(text))) => {
+                    let event = serde_json::from_str::<Event>(&text);
                     if json {
                         println!("{text}");
-                    } else if let Ok(Event { event, message: Some(message) }) =
-                        serde_json::from_str(&text)
-                        && event == "log"
+                    } else if let Ok(Event { kind, payload: Payload { line: Some(line), .. } }) = &event
+                        && kind == "console"
                     {
-                        println!("{}", super::safe(&message));
+                        println!("{}", super::safe(line));
+                    }
+                    if let Ok(Event { payload: Payload { error: Some(error), .. }, .. }) = event {
+                        return Err(super::client::Refused(error).into());
                     }
                 }
                 Some(Ok(Message::Close(_))) | None => {

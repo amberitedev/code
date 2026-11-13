@@ -196,7 +196,9 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
         update: Arc::clone(&update),
         network: Arc::clone(&network),
         storage: Arc::clone(&storage),
+        consoles: Arc::default(),
     });
+    tokio::spawn(api::events::watch_power(Arc::clone(&state)));
     let router = api::router(Arc::clone(&state));
     tokio::spawn(
         crate::state::servers::commands::apply_pending_on_stop::apply_pending_on_stop(

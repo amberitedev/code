@@ -61,7 +61,7 @@ pub enum Restored {
     /// The server is back to the version.
     Now,
     /// The version's loader or pack installs first, in the background; the install's progress
-    /// and result go to the server's console sockets.
+    /// and result go to the server's `/events` topic.
     Background,
 }
 

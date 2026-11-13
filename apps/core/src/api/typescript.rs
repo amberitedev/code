@@ -1,5 +1,5 @@
-//! TypeScript for the share, diff, history and edited-file types of Core's hosting routes,
-//! generated with `ts-rs` into one file in `packages/api-client`, so a shape that differs between
+//! TypeScript for the share, diff, history and edited-file types of Core's hosting routes, and
+//! the events of its `/events` socket, generated with `ts-rs` into one file in `packages/api-client`, so a shape that differs between
 //! Core and the App is a type error. Core's own routes are in `contracts::core`.
 //!
 //! `cargo test -p copal` fails when the file differs from what the structs generate. Regenerate it
@@ -25,7 +25,14 @@ fn declarations() -> String {
         crate::state::servers::model::PendingChange::decl(&cfg),
         content::Decision::decl(&cfg),
         content::Choice::decl(&cfg),
-        crate::event::GameVersionChange::decl(&cfg),
+        crate::state::servers::GameVersionChange::decl(&cfg),
+        super::events::CoreEvent::decl(&cfg),
+        super::events::PowerState::decl(&cfg),
+        super::events::BackupTask::decl(&cfg),
+        super::events::BackupState::decl(&cfg),
+        crate::state::servers::InstallProgressItem::decl(&cfg),
+        crate::state::servers::InstallProgressKey::decl(&cfg),
+        crate::state::servers::ContentPlatform::decl(&cfg),
         share::SharedInstancePublishDiff::decl(&cfg),
         sharing_client::diff::SharedInstanceUpdateDiff::decl(&cfg),
         sharing_client::diff::SharedInstanceUpdateDiffType::decl(&cfg),
@@ -39,7 +46,8 @@ fn declarations() -> String {
 fn file() -> String {
     format!(
         "// Generated from apps/core by ts-rs. Do not edit.\n\
-         // Regenerate: pnpm --filter @amberite/core types\n\n{}",
+         // Regenerate: pnpm --filter @amberite/core types\n\n\
+         import type {{ ApiError, Topic }} from '@amberite/contracts'\n\n{}",
         declarations()
     )
 }

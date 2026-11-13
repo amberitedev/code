@@ -4,10 +4,12 @@
 //! header.
 
 mod access;
+mod events;
 mod machine;
 mod servers;
 
 pub use access::*;
+pub use events::*;
 pub use machine::*;
 pub use servers::*;
 
@@ -182,6 +184,7 @@ pub(crate) fn ts() -> String {
     ]
     .into_iter()
     .chain(access::ts_types())
+    .chain(events::ts_types())
     .chain(machine::ts_types())
     .chain(servers::ts_types())
     .map(|declaration| format!("\nexport {declaration}\n"))

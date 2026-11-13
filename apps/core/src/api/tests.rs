@@ -141,6 +141,7 @@ async fn core() -> Core {
         uploads: super::files::Uploads::default(),
         update,
         storage,
+        consoles: Arc::default(),
     });
     Core {
         _dir: dir,
@@ -240,16 +241,6 @@ async fn each_role_reaches_only_what_the_table_gives_it() {
         .call(Method::GET, &get, Some(&stranger), None, None)
         .await;
     assert_eq!(status, StatusCode::NOT_FOUND, "no role reads as no server");
-
-    let console = format!("/modrinth/v0/servers/{server}/ws");
-    let (status, _) = core
-        .call(Method::GET, &console, Some(&viewer), None, None)
-        .await;
-    assert_eq!(status, StatusCode::FORBIDDEN, "viewers get no console");
-    let (status, _) = core
-        .call(Method::GET, &console, Some(&editor), None, None)
-        .await;
-    assert_eq!(status, StatusCode::OK);
 
     let power = format!("/modrinth/v0/servers/{server}/power");
     let start = Some(json!({ "action": "Start" }));
@@ -1774,8 +1765,8 @@ async fn the_owner_changes_storage_and_the_store_is_forwarded_to() {
 
 #[tokio::test]
 async fn a_failed_install_tells_the_app_why() {
-    use super::content::Installing;
-    use crate::event::{InstallProgressKey, WsEvent};
+    use super::{content::Installing, events::CoreEvent};
+    use crate::state::servers::InstallProgressKey;
     let core = core().await;
     let content = &core.state.content;
     let mut events = content.events.subscribe();
@@ -1793,15 +1784,15 @@ async fn a_failed_install_tells_the_app_why() {
     );
     // The App reads an install's end from its items: a percent, then the error.
     let mut seen = Vec::new();
-    while let Ok((_, event)) = events.recv().await {
+    while let Ok(event) = events.recv().await {
         match event {
-            WsEvent::InstallProgress { items } => seen.push(
+            CoreEvent::InstallProgress { items, .. } => seen.push(
                 items
                     .into_iter()
                     .map(|item| (item.progress, item.error))
                     .collect::<Vec<_>>(),
             ),
-            WsEvent::InstallationResult(_) => break,
+            CoreEvent::InstallResult { .. } => break,
             _ => {}
         }
     }
@@ -2133,4 +2124,131 @@ async fn engine_wide_access_is_the_owners() {
         };
         assert_eq!(granted, expected, "{caller:?}");
     }
+}
+
+type EventSocket = tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>;
+
+impl Core {
+    /// The `/events` socket of `token`'s session, over loopback.
+    async fn events(&self, token: &str) -> EventSocket {
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+
+        let listener =
+            tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let router = self.router.clone();
+        tokio::spawn(async move { axum::serve(listener, router).await });
+        let mut request = format!("ws://{address}/events")
+            .into_client_request()
+            .unwrap();
+        request.headers_mut().insert(
+            "authorization",
+            format!("Bearer {token}").parse().unwrap(),
+        );
+        let stream = tokio::net::TcpStream::connect(address).await.unwrap();
+        tokio_tungstenite::client_async(request, stream)
+            .await
+            .unwrap()
+            .0
+    }
+}
+
+async fn subscribe(socket: &mut EventSocket, topic: Value) {
+    use futures::SinkExt;
+
+    let message = json!({ "type": "subscribe", "topic": topic });
+    socket
+        .send(tokio_tungstenite::tungstenite::Message::text(
+            message.to_string(),
+        ))
+        .await
+        .unwrap();
+}
+
+/// The next event, or `None` once the socket closes.
+async fn next(socket: &mut EventSocket) -> Option<Value> {
+    use futures::StreamExt;
+    use tokio_tungstenite::tungstenite::Message;
+
+    let wait = std::time::Duration::from_secs(10);
+    loop {
+        match tokio::time::timeout(wait, socket.next()).await.unwrap() {
+            Some(Ok(Message::Text(text))) => {
+                return Some(serde_json::from_str(&text).unwrap());
+            }
+            Some(Ok(Message::Close(_)) | Err(_)) | None => return None,
+            Some(Ok(_)) => {}
+        }
+    }
+}
+
+#[tokio::test]
+async fn revoking_a_role_ends_the_console_and_keeps_the_socket() {
+    let core = core().await;
+    let server = core.server.clone();
+    let editor = core.sign_in("editor").await;
+    let mut socket = core.events(&editor).await;
+    subscribe(&mut socket, json!({ "type": "server", "id": server })).await;
+    assert_eq!(next(&mut socket).await.unwrap()["type"], "power");
+    assert_eq!(next(&mut socket).await.unwrap()["type"], "install_progress");
+    let console = json!({ "type": "console", "id": server });
+    subscribe(&mut socket, console.clone()).await;
+
+    sqlx::query("UPDATE access SET role = 'viewer' WHERE user_id = 'editor'")
+        .execute(&core.state.db)
+        .await
+        .unwrap();
+    core.state.access.changed("editor");
+    let ended = next(&mut socket).await.unwrap();
+    assert_eq!(ended["type"], "ended");
+    assert_eq!(ended["payload"]["topic"], console);
+    assert_eq!(ended["payload"]["error"]["error"], "forbidden");
+
+    subscribe(&mut socket, console).await;
+    let refused = next(&mut socket).await.expect("the socket stays open");
+    assert_eq!(refused["payload"]["error"]["error"], "forbidden");
+}
+
+#[tokio::test]
+async fn ending_the_session_closes_the_socket() {
+    let core = core().await;
+    let editor = core.sign_in("editor").await;
+    let mut socket = core.events(&editor).await;
+    subscribe(&mut socket, json!({ "type": "server", "id": core.server }))
+        .await;
+    next(&mut socket).await.unwrap();
+    next(&mut socket).await.unwrap();
+
+    let (status, _) = core
+        .call(
+            Method::DELETE,
+            "/sessions/current",
+            Some(&editor),
+            None,
+            None,
+        )
+        .await;
+    assert!(status.is_success());
+    assert_eq!(next(&mut socket).await, None);
+}
+
+#[tokio::test]
+async fn a_lagged_subscriber_gets_resync_and_the_servers_state_again() {
+    let core = core().await;
+    let editor = core.sign_in("editor").await;
+    let mut socket = core.events(&editor).await;
+    subscribe(&mut socket, json!({ "type": "server", "id": core.server }))
+        .await;
+    next(&mut socket).await.unwrap();
+    next(&mut socket).await.unwrap();
+
+    for _ in 0..300 {
+        let _ = core
+            .state
+            .backups
+            .events
+            .send(super::events::CoreEvent::Resync);
+    }
+    assert_eq!(next(&mut socket).await.unwrap()["type"], "resync");
+    assert_eq!(next(&mut socket).await.unwrap()["type"], "power");
 }

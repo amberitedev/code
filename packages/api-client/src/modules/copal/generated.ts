@@ -1,6 +1,8 @@
 // Generated from apps/core by ts-rs. Do not edit.
 // Regenerate: pnpm --filter @amberite/core types
 
+import type { ApiError, Topic } from '@amberite/contracts'
+
 export type EditedFiles = { files: Array<EditedFile>, };
 
 export type EditedFile = { 
@@ -24,6 +26,20 @@ export type Decision = { path: string, choice: Choice, };
 export type Choice = "keep" | "replace";
 
 export type GameVersionChange = { from: string, to: string, };
+
+export type CoreEvent = { "type": "console", "payload": { server: string, line: string, } } | { "type": "power", "payload": { server: string, state: PowerState, uptime: number | null, } } | { "type": "backup", "payload": { server: string, id: string, task: BackupTask, state: BackupState, progress: number, start_time: number | null, finish_time: number | null, } } | { "type": "install_progress", "payload": { server: string, items: Array<InstallProgressItem>, } } | { "type": "install_result", "payload": { server: string, error: string | null, game_version: GameVersionChange | null, } } | { "type": "ended", "payload": { topic: Topic, error: ApiError, } } | { "type": "resync" };
+
+export type PowerState = "running" | "stopped" | "starting" | "stopping" | "crashed";
+
+export type BackupTask = "create" | "restore";
+
+export type BackupState = "ongoing" | "done" | "failed";
+
+export type InstallProgressItem = { world_id: string, key: InstallProgressKey, id: string, progress: number | null, error: string | null, };
+
+export type InstallProgressKey = { "type": "modrinth_modpack", project_id: string, version_id: string, } | { "type": "local_modpack", filename: string, } | { "type": "platform", platform: ContentPlatform, platform_version: string, game_version: string, };
+
+export type ContentPlatform = "forge" | "neoforge" | "fabric" | "quilt" | "paper" | "vanilla";
 
 export type SharedInstancePublishDiff = { shared_instance_id: string, latest_version: number, has_changes: boolean, 
 /**

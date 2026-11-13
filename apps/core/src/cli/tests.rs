@@ -179,6 +179,7 @@ async fn core() -> (tempfile::TempDir, Arc<CoreState>, Client) {
             false,
             Arc::new(tokio::sync::Notify::new()),
         )),
+        consoles: Arc::default(),
         db,
     });
     let router = api::router(Arc::clone(&state));

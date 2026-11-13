@@ -1,6 +1,5 @@
 //! `POST /servers/{id}/console`: send one command to a server's console and learn whether Core
-//! passed it on. The console socket takes commands too, but answers none of them; this route
-//! reports why one was refused.
+//! passed it on, or why it was refused. The `/events` socket only reads the console.
 
 use std::sync::Arc;
 
