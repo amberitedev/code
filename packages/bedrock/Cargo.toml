@@ -4,6 +4,10 @@ edition.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 
+# Only the engine files borrowed with `#[path]` use these, and shear does not follow `#[path]`.
+[package.metadata.cargo-shear]
+ignored = ["chrono", "modrinth-content-management", "serde", "ts-rs", "uuid"]
+
 # The engine's content schema, borrowed in place with `#[path]` so both sides share one definition.
 [dependencies]
 anyhow = { workspace = true }
