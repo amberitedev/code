@@ -177,3 +177,113 @@ async fn a_denied_caller_sees_no_instances_and_cannot_touch_groups() {
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn worlds_and_servers_are_read_and_edited_through_their_routes() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = host(&dir, true).await;
+    let save = dir
+        .path()
+        .join(crate::INSTANCES_FOLDER_NAME)
+        .join("Survival/saves/World1");
+    std::fs::create_dir_all(&save).unwrap();
+    let mut data = quartz_nbt::NbtCompound::new();
+    data.insert("LevelName", "Old");
+    let mut root = quartz_nbt::NbtCompound::new();
+    root.insert("Data", data);
+    let mut level = Vec::new();
+    quartz_nbt::io::write_nbt(
+        &mut level,
+        None,
+        &root,
+        quartz_nbt::io::Flavor::GzCompressed,
+    )
+    .unwrap();
+    std::fs::write(save.join("level.dat"), level).unwrap();
+
+    let (status, index) = send(
+        &router,
+        "POST",
+        "/instances/local%3Aa/servers",
+        Some(json!({
+            "name": "Hub",
+            "address": "hub.example.com",
+            "pack_status": "prompt",
+            "project_id": null,
+            "content_kind": null,
+        })),
+    )
+    .await;
+    assert_eq!((status, index), (StatusCode::OK, json!(0)));
+    let (status, _) = send(
+        &router,
+        "PUT",
+        "/instances/local%3Aa/servers/0",
+        Some(json!({
+            "name": "Lobby",
+            "address": "hub.example.com",
+            "pack_status": "enabled",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) = send(
+        &router,
+        "PUT",
+        "/instances/local%3Aa/worlds/display-status",
+        Some(json!({
+            "world_type": "server",
+            "world_id": "hub.example.com",
+            "display_status": "hidden",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) = send(
+        &router,
+        "PUT",
+        "/instances/local%3Aa/saves/World1/name",
+        Some(json!({ "name": "New" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let (_, world) =
+        send(&router, "GET", "/instances/local%3Aa/saves/World1", None).await;
+    assert_eq!(world["name"], "New");
+    let (_, worlds) =
+        send(&router, "GET", "/instances/local%3Aa/worlds", None).await;
+    let server = worlds
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|world| world["type"] == "server")
+        .unwrap();
+    assert_eq!(server["name"], "Lobby");
+    assert_eq!(server["pack_status"], "enabled");
+    assert_eq!(server["display_status"], "hidden");
+
+    let (_, shown) = send(
+        &router,
+        "GET",
+        "/worlds/recent?limit=10&display_statuses=%5B%22normal%22%2C%22favorite%22%5D",
+        None,
+    )
+    .await;
+    assert_eq!(shown, json!([world_with_instance(&world)]));
+    let (_, all) = send(&router, "GET", "/worlds/recent?limit=10", None).await;
+    assert_eq!(all.as_array().unwrap().len(), 2);
+
+    let (status, _) =
+        send(&router, "DELETE", "/instances/local%3Aa/servers/0", None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, worlds) =
+        send(&router, "GET", "/instances/local%3Aa/worlds", None).await;
+    assert_eq!(worlds, json!([world]));
+}
+
+fn world_with_instance(world: &Value) -> Value {
+    let mut world = world.clone();
+    world["instance_id"] = json!("local:a");
+    world
+}

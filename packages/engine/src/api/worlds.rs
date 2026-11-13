@@ -38,24 +38,30 @@ use tracing::Instrument;
 use url::Url;
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct WorldWithInstance {
     pub instance_id: String,
     #[serde(flatten)]
+    #[cfg_attr(feature = "export-ts", ts(flatten))]
     pub world: World,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct World {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "export-ts", ts(optional))]
     pub last_played: Option<DateTime<Utc>>,
     #[serde(
         skip_serializing_if = "Option::is_none",
         with = "either::serde_untagged_optional"
     )]
+    #[cfg_attr(feature = "export-ts", ts(type = "string", optional))]
     pub icon: Option<Either<PathBuf, Url>>,
     pub display_status: DisplayStatus,
     #[serde(flatten)]
+    #[cfg_attr(feature = "export-ts", ts(flatten))]
     pub details: WorldDetails,
 }
 
@@ -78,6 +84,7 @@ impl World {
 #[derive(
     Serialize, Deserialize, Debug, Copy, Clone, PartialEq, Eq, Hash, Default,
 )]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum WorldType {
     #[default]
@@ -103,6 +110,7 @@ impl WorldType {
 }
 
 #[derive(Deserialize, Serialize, EnumSetType, Debug, Default)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 #[enumset(serialize_repr = "list")]
 pub enum DisplayStatus {
@@ -132,6 +140,7 @@ impl DisplayStatus {
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum WorldDetails {
     Singleplayer {
@@ -147,13 +156,16 @@ pub enum WorldDetails {
         address: String,
         pack_status: ServerPackStatus,
         #[serde(skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "export-ts", ts(optional))]
         project_id: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "export-ts", ts(optional))]
         content_kind: Option<String>,
     },
 }
 
 #[derive(Deserialize, Serialize, Debug, Copy, Clone, Default)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum SingleplayerGameMode {
     #[default]
@@ -164,6 +176,7 @@ pub enum SingleplayerGameMode {
 }
 
 #[derive(Deserialize, Serialize, Debug, Copy, Clone, Default)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum ServerPackStatus {
     Enabled,

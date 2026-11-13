@@ -16,6 +16,12 @@ use crate::{
             SharedInstanceAttachment,
         },
         loading,
+        worlds::{
+            self, InstanceServerDesync, InstanceServerRef,
+            InstanceServerUpdate, ManagedInstanceServer, NewInstanceServer,
+            RecentWorldsQuery, ServerStatusQuery, WorldDisplayStatusUpdate,
+            WorldRename, WorldSaveRef,
+        },
     },
     event::*,
     install::{
@@ -24,12 +30,20 @@ use crate::{
         InstallPhaseId, InstallProgress, InstallProgressSecondary,
         model::{InstallApiErrorDetails, InstallJobDisplay, InstallTarget},
     },
-    instance::{InstanceGroup, InstanceGroupMembershipUpdate},
+    instance::{
+        DesyncServerMode, InstanceGroup, InstanceGroupMembershipUpdate,
+        ServerSource,
+    },
     state::{
         ContentSetSyncStatus, Hooks, InstanceInstallStage,
         InstanceSyncedOptions, InstanceTabVisibility, Log4jEvent,
         MemorySettings, ModLoader, OnboardingChecklist, ReleaseChannel,
         SharedInstanceRole, WindowSize,
+    },
+    worlds::{
+        DisplayStatus, ProtocolVersion, ServerGameProfile, ServerPackStatus,
+        ServerPlayers, ServerStatus, ServerVersion, SingleplayerGameMode,
+        World, WorldDetails, WorldType, WorldWithInstance,
     },
 };
 
@@ -85,6 +99,30 @@ fn file() -> String {
         InstanceGroupRef::decl(&cfg),
         NewInstanceGroup::decl(&cfg),
         InstanceGroupUpdate::decl(&cfg),
+        World::decl(&cfg),
+        WorldWithInstance::decl(&cfg),
+        WorldDetails::decl(&cfg),
+        WorldType::decl(&cfg),
+        DisplayStatus::decl(&cfg),
+        SingleplayerGameMode::decl(&cfg),
+        ServerPackStatus::decl(&cfg),
+        ServerSource::decl(&cfg),
+        DesyncServerMode::decl(&cfg),
+        ProtocolVersion::decl(&cfg),
+        ServerStatus::decl(&cfg),
+        ServerPlayers::decl(&cfg),
+        ServerGameProfile::decl(&cfg),
+        ServerVersion::decl(&cfg),
+        RecentWorldsQuery::decl(&cfg),
+        ServerStatusQuery::decl(&cfg),
+        WorldSaveRef::decl(&cfg),
+        InstanceServerRef::decl(&cfg),
+        WorldDisplayStatusUpdate::decl(&cfg),
+        WorldRename::decl(&cfg),
+        NewInstanceServer::decl(&cfg),
+        ManagedInstanceServer::decl(&cfg),
+        InstanceServerUpdate::decl(&cfg),
+        InstanceServerDesync::decl(&cfg),
         // The payloads of the App's events that engine code still raises.
         FriendPayload::decl(&cfg),
         FriendStatusPayload::decl(&cfg),
@@ -98,6 +136,7 @@ fn file() -> String {
         ("instances", instances::ts_entries()),
         ("instanceGroups", groups::ts_entries()),
         ("loadingBars", loading::ts_entries()),
+        ("worlds", worlds::ts_entries()),
     ]
     .map(|(name, entries)| format!("\nexport const {name} = {{\n{entries}}}\n"))
     .concat();

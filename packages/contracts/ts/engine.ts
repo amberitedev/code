@@ -99,6 +99,66 @@ export type NewInstanceGroup = { name: string, };
 
 export type InstanceGroupUpdate = { name: string, };
 
+export type World = { name: string, last_played?: string, icon?: string, display_status: DisplayStatus, } & ({ "type": "singleplayer", path: string, game_mode: SingleplayerGameMode, hardcore: boolean, locked: boolean, } | { "type": "server", index: number, server_id: string, source: ServerSource, address: string, pack_status: ServerPackStatus, project_id?: string, content_kind?: string, });
+
+export type WorldWithInstance = { instance_id: string, name: string, last_played?: string, icon?: string, display_status: DisplayStatus, } & ({ "type": "singleplayer", path: string, game_mode: SingleplayerGameMode, hardcore: boolean, locked: boolean, } | { "type": "server", index: number, server_id: string, source: ServerSource, address: string, pack_status: ServerPackStatus, project_id?: string, content_kind?: string, });
+
+export type WorldDetails = { "type": "singleplayer", path: string, game_mode: SingleplayerGameMode, hardcore: boolean, locked: boolean, } | { "type": "server", index: number, server_id: string, source: ServerSource, address: string, pack_status: ServerPackStatus, project_id?: string, content_kind?: string, };
+
+export type WorldType = "singleplayer" | "server";
+
+export type DisplayStatus = "normal" | "hidden" | "favorite";
+
+export type SingleplayerGameMode = "survival" | "creative" | "adventure" | "spectator";
+
+export type ServerPackStatus = "enabled" | "disabled" | "prompt";
+
+export type ServerSource = "user_synced" | "modpack" | "linked_server_project" | "local_desynced";
+
+export type DesyncServerMode = "keep_in_other_instances" | "remove_from_other_instances";
+
+export type ProtocolVersion = { version: number, legacy: boolean, };
+
+export type ServerStatus = { description?: string | object, players?: ServerPlayers, version?: ServerVersion, favicon?: string, enforcesSecureChat: boolean, ping?: number, };
+
+export type ServerPlayers = { max: number, online: number, sample: Array<ServerGameProfile>, };
+
+export type ServerGameProfile = { id: string, name: string, };
+
+export type ServerVersion = { name: string, protocol: number, legacy: boolean, };
+
+export type RecentWorldsQuery = { limit: number, 
+/**
+ * A JSON array of statuses; every status when absent.
+ */
+display_statuses: string | null, };
+
+export type ServerStatusQuery = { address: string, protocol_version: number | null, legacy: boolean, };
+
+export type WorldSaveRef = { id: string, 
+/**
+ * The world's folder in `saves`.
+ */
+world: string, };
+
+export type InstanceServerRef = { id: string, index: number, };
+
+export type WorldDisplayStatusUpdate = { world_type: WorldType, 
+/**
+ * A singleplayer world's folder or a server's address.
+ */
+world_id: string, display_status: DisplayStatus, };
+
+export type WorldRename = { name: string, };
+
+export type NewInstanceServer = { name: string, address: string, pack_status: ServerPackStatus, project_id: string | null, content_kind: string | null, };
+
+export type ManagedInstanceServer = { name: string, address: string, };
+
+export type InstanceServerUpdate = { name: string, address: string, pack_status: ServerPackStatus, };
+
+export type InstanceServerDesync = { server_id: string, mode: DesyncServerMode, };
+
 export type FriendPayload = { "event": "friend_request", from: string, } | { "event": "user_offline", id: string, } | { "event": "status_update", user_status: FriendStatusPayload, } | { "event": "status_sync" } | { "event": "friend_request_rejected", from: string, };
 
 export type FriendStatusPayload = { user_id: string, profile_name: string | null, last_update: string, };
@@ -126,4 +186,22 @@ export const instanceGroups = {
 
 export const loadingBars = {
 	ListLoadingBars: { method: "GET", path: "/loading-bars", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, { [key in string]: LoadingBar }>,
+}
+
+export const worlds = {
+	ListRecentWorlds: { method: "GET", path: "/worlds/recent", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, RecentWorldsQuery, void, Array<WorldWithInstance>>,
+	GetServerStatus: { method: "GET", path: "/server-status", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, ServerStatusQuery, void, ServerStatus>,
+	ListInstanceWorlds: { method: "GET", path: "/instances/{id}/worlds", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceRef, null, void, Array<World>>,
+	SetWorldDisplayStatus: { method: "PUT", path: "/instances/{id}/worlds/display-status", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<InstanceRef, null, WorldDisplayStatusUpdate, void>,
+	GetInstanceProtocolVersion: { method: "GET", path: "/instances/{id}/protocol-version", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceRef, null, void, ProtocolVersion | null>,
+	GetSingleplayerWorld: { method: "GET", path: "/instances/{id}/saves/{world}", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<WorldSaveRef, null, void, World>,
+	DeleteWorld: { method: "DELETE", path: "/instances/{id}/saves/{world}", auth: "session", dangerous: false, body: "empty", response: "empty" } as Endpoint<WorldSaveRef, null, void, void>,
+	RenameWorld: { method: "PUT", path: "/instances/{id}/saves/{world}/name", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<WorldSaveRef, null, WorldRename, void>,
+	ResetWorldIcon: { method: "DELETE", path: "/instances/{id}/saves/{world}/icon", auth: "session", dangerous: false, body: "empty", response: "empty" } as Endpoint<WorldSaveRef, null, void, void>,
+	BackupWorld: { method: "POST", path: "/instances/{id}/saves/{world}/backups", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<WorldSaveRef, null, void, number>,
+	AddInstanceServer: { method: "POST", path: "/instances/{id}/servers", auth: "session", dangerous: false, body: "json", response: "json" } as Endpoint<InstanceRef, null, NewInstanceServer, number>,
+	EnsureManagedInstanceServer: { method: "PUT", path: "/instances/{id}/servers/managed", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<InstanceRef, null, ManagedInstanceServer, void>,
+	DesyncInstanceServer: { method: "POST", path: "/instances/{id}/servers/desync", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<InstanceRef, null, InstanceServerDesync, void>,
+	EditInstanceServer: { method: "PUT", path: "/instances/{id}/servers/{index}", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<InstanceServerRef, null, InstanceServerUpdate, void>,
+	RemoveInstanceServer: { method: "DELETE", path: "/instances/{id}/servers/{index}", auth: "session", dangerous: false, body: "empty", response: "empty" } as Endpoint<InstanceServerRef, null, void, void>,
 }

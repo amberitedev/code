@@ -268,32 +268,6 @@ fn main() {
                     .default_permission(
                         DefaultPermissionRule::AllowAllCommands,
                     ),
-            )
-            .plugin(
-                "worlds",
-                InlinedPlugin::new()
-                    .commands(&[
-                        "get_recent_worlds",
-                        "get_instance_worlds",
-                        "get_singleplayer_world",
-                        "set_world_display_status",
-                        "rename_world",
-                        "reset_world_icon",
-                        "backup_world",
-                        "delete_world",
-                        "add_server_to_instance",
-                        "ensure_managed_server_in_instance",
-                        "edit_server_in_instance",
-                        "remove_server_from_instance",
-                        "desync_server",
-                        "get_instance_protocol_version",
-                        "get_server_status",
-                        "start_join_singleplayer_world",
-                        "start_join_server",
-                    ])
-                    .default_permission(
-                        DefaultPermissionRule::AllowAllCommands,
-                    ),
             ),
     )
     .expect("Failed to run tauri-build");

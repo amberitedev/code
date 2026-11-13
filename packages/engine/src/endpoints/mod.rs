@@ -4,6 +4,7 @@
 pub mod groups;
 pub mod instances;
 pub mod loading;
+pub mod worlds;
 
 /// Declares each route as a unit struct and, for the tests, the entries of its TypeScript module
 /// object. Every engine route is called with the host's session.

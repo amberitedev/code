@@ -350,7 +350,6 @@ fn main() {
         .plugin(api::utils::init())
         .plugin(api::cache::init())
         .plugin(api::files::init())
-        .plugin(api::worlds::init())
         .manage(updater)
         .manage(engine)
         .invoke_handler(tauri::generate_handler![show_window]);

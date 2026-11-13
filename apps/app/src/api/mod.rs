@@ -17,7 +17,6 @@ pub mod utils;
 
 pub mod cache;
 pub mod files;
-pub mod worlds;
 
 pub(crate) mod oauth_utils;
 

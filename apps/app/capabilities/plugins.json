@@ -53,7 +53,6 @@
 		"files:default",
 		"settings:default",
 		"tags:default",
-		"utils:default",
-		"worlds:default"
+		"utils:default"
 	]
 }

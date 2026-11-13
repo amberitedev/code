@@ -37,24 +37,31 @@ fn cap_length(
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct ServerStatus {
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "export-ts", ts(type = "string | object", optional))]
     pub description: Option<Box<RawValue>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "export-ts", ts(optional))]
     pub players: Option<ServerPlayers>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "export-ts", ts(optional))]
     pub version: Option<ServerVersion>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "export-ts", ts(type = "string", optional))]
     pub favicon: Option<Url>,
     #[serde(default)]
     pub enforces_secure_chat: bool,
 
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "export-ts", ts(optional))]
     pub ping: Option<i64>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ServerPlayers {
     pub max: i32,
     pub online: i32,
@@ -63,12 +70,14 @@ pub struct ServerPlayers {
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ServerGameProfile {
     pub id: String,
     pub name: String,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ServerVersion {
     pub name: String,
     pub protocol: i32,

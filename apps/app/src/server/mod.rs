@@ -39,7 +39,7 @@ use crate::{
     cores::{self, Cores},
     desktop::{self, AppSlot, updater::Updater},
     engine_handle::EngineHandle,
-    friends, library, screenshots, skins, synced_options,
+    friends, launch, library, screenshots, skins, synced_options,
 };
 
 use endpoints::{
@@ -147,6 +147,7 @@ impl LocalServer {
                     .merge(skins::routes::routes())
                     .merge(desktop::op_routes())
                     .merge(accounts::routes::routes())
+                    .merge(launch::routes())
                     .with_state(state),
             )
             .route_layer(middleware::from_fn_with_state(

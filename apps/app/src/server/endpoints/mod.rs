@@ -49,6 +49,7 @@ pub mod files;
 pub mod friends;
 pub mod game_options;
 pub mod health;
+pub mod launch;
 pub mod library;
 pub mod ops;
 pub mod screenshots;
@@ -92,6 +93,9 @@ mod tests {
         friends,
         game_options::{self, GameSettingLabelsRequest},
         health::CheckHealth,
+        launch::{
+            JoinServer, JoinSingleplayerWorld, ServerJoin, SingleplayerJoin,
+        },
         library::{ListRecentIconConfigs, RecentIconConfigs},
         ops::{
             self, DebugExport, ExternalSave, InstanceFileSave, LocalUpload,
@@ -262,6 +266,8 @@ mod tests {
             ModrinthCredentials::decl(&cfg),
             ModrinthSignIn::decl(&cfg),
             ModrinthAuthFlow::decl(&cfg),
+            ServerJoin::decl(&cfg),
+            SingleplayerJoin::decl(&cfg),
         ]
         .map(|declaration| format!("\nexport {declaration}\n"))
         .concat();
@@ -315,7 +321,11 @@ mod tests {
              export const skins = {{\n{}}}\n\n\
              export const ops = {{\n{}}}\n\n\
              export const updates = {{\n{}}}\n\n\
-             export const localAccounts = {{\n{}}}\n",
+             export const localAccounts = {{\n{}}}\n\n\
+             export const launch = {{\n\
+             \tjoinServer: {},\n\
+             \tjoinSingleplayerWorld: {},\n\
+             }}\n",
             endpoint::<CheckHealth>(),
             endpoint::<GetBoot>(),
             endpoint::<ConnectCore>(),
@@ -347,6 +357,8 @@ mod tests {
             ops::ts_entries(),
             updates::ts_entries(),
             accounts::ts_entries(),
+            endpoint::<JoinServer>(),
+            endpoint::<JoinSingleplayerWorld>(),
         )
     }
 

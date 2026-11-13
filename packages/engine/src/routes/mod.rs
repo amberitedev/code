@@ -6,6 +6,7 @@ mod instances;
 mod loading;
 #[cfg(test)]
 mod tests;
+mod worlds;
 
 use std::sync::Arc;
 
@@ -13,7 +14,7 @@ use axum::{Router, extract::FromRef};
 use contracts::{ApiError, ErrorCode, server::route};
 use serde::Deserialize;
 
-pub use self::{groups::*, instances::*, loading::*};
+pub use self::{groups::*, instances::*, loading::*, worlds::*};
 use crate::{
     Engine,
     access::Access,
@@ -25,6 +26,13 @@ use crate::{
         },
         instances::{GetInstance, GetInstances, ListInstances},
         loading::ListLoadingBars,
+        worlds::{
+            AddInstanceServer, BackupWorld, DeleteWorld, DesyncInstanceServer,
+            EditInstanceServer, EnsureManagedInstanceServer,
+            GetInstanceProtocolVersion, GetServerStatus, GetSingleplayerWorld,
+            ListInstanceWorlds, ListRecentWorlds, RemoveInstanceServer,
+            RenameWorld, ResetWorldIcon, SetWorldDisplayStatus,
+        },
     },
 };
 
@@ -47,6 +55,25 @@ where
             set_instance_group_memberships,
         ),
         route::<ListLoadingBars, _, _, _>(list_loading_bars),
+        route::<ListRecentWorlds, _, _, _>(list_recent_worlds),
+        route::<GetServerStatus, _, _, _>(get_server_status),
+        route::<ListInstanceWorlds, _, _, _>(list_instance_worlds),
+        route::<SetWorldDisplayStatus, _, _, _>(set_world_display_status),
+        route::<GetInstanceProtocolVersion, _, _, _>(
+            get_instance_protocol_version,
+        ),
+        route::<GetSingleplayerWorld, _, _, _>(get_singleplayer_world),
+        route::<DeleteWorld, _, _, _>(delete_world),
+        route::<RenameWorld, _, _, _>(rename_world),
+        route::<ResetWorldIcon, _, _, _>(reset_world_icon),
+        route::<BackupWorld, _, _, _>(backup_world),
+        route::<AddInstanceServer, _, _, _>(add_instance_server),
+        route::<EnsureManagedInstanceServer, _, _, _>(
+            ensure_managed_instance_server,
+        ),
+        route::<DesyncInstanceServer, _, _, _>(desync_instance_server),
+        route::<EditInstanceServer, _, _, _>(edit_instance_server),
+        route::<RemoveInstanceServer, _, _, _>(remove_instance_server),
     ]
     .into_iter()
     .fold(Router::new(), |router, (path, method)| {

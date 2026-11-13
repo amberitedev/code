@@ -1,12 +1,35 @@
-import type { InstancePayload } from '@modrinth/api-client'
+import {
+	type DesyncServerMode,
+	type DisplayStatus,
+	type InstancePayload,
+	launch,
+	type ProtocolVersion,
+	type ServerPackStatus,
+	type ServerSource,
+	type ServerStatus,
+	type SingleplayerGameMode,
+	worlds as worldRoutes,
+	type WorldType,
+} from '@modrinth/api-client'
 import type { GameVersion } from '@modrinth/ui'
 import { autoToHTML } from '@sfirew/minecraft-motd-parser'
-import { invoke } from '@tauri-apps/api/core'
 import dayjs from 'dayjs'
 
 import { get_full_path } from '@/helpers/instance'
 import { openPath } from '@/helpers/utils'
 import { localFileUrl } from '@/platform/local'
+import { apiClient } from '@/platform/modrinth-client'
+
+export type {
+	DesyncServerMode,
+	DisplayStatus,
+	ProtocolVersion,
+	ServerPackStatus,
+	ServerSource,
+	ServerStatus,
+	SingleplayerGameMode,
+	WorldType,
+}
 
 type BaseWorld = {
 	name: string
@@ -15,9 +38,6 @@ type BaseWorld = {
 	display_status: DisplayStatus
 	type: WorldType
 }
-
-export type WorldType = 'singleplayer' | 'server'
-export type DisplayStatus = 'normal' | 'hidden' | 'favorite'
 
 export type SingleplayerWorld = BaseWorld & {
 	type: 'singleplayer'
@@ -38,67 +58,30 @@ export type ServerWorld = BaseWorld & {
 	content_kind?: string
 }
 
-export type ServerSource = 'user_synced' | 'modpack' | 'linked_server_project' | 'local_desynced'
-
-export type DesyncServerMode = 'keep_in_other_instances' | 'remove_from_other_instances'
-
 export type World = SingleplayerWorld | ServerWorld
 
 export type WorldWithInstance = {
 	instance_id: string
 } & World
 
-export type SingleplayerGameMode = 'survival' | 'creative' | 'adventure' | 'spectator'
-export type ServerPackStatus = 'enabled' | 'disabled' | 'prompt'
-
 export async function desync_server(
 	instanceId: string,
 	serverId: string,
 	mode: DesyncServerMode,
 ): Promise<void> {
-	return await invoke('plugin:worlds|desync_server', { instanceId, serverId, mode })
-}
-
-export type ServerStatus = {
-	// https://minecraft.wiki/w/Text_component_format
-	description?: string | Chat
-	players?: {
-		max: number
-		online: number
-		sample: { name: string; id: string }[]
-	}
-	version?: {
-		name: string
-		protocol: number
-		legacy: boolean
-	}
-	favicon?: string
-	enforces_secure_chat: boolean
-	ping?: number
-}
-
-export interface Chat {
-	text: string
-	bold: boolean
-	italic: boolean
-	underlined: boolean
-	strikethrough: boolean
-	obfuscated: boolean
-	color?: string
-	extra: Chat[]
+	return await apiClient.local.call(worldRoutes.DesyncInstanceServer, {
+		params: { id: instanceId },
+		body: { server_id: serverId, mode },
+	})
 }
 
 export type ServerData = {
 	refreshing: boolean
 	lastSuccessfulRefresh?: number
 	status?: ServerStatus
-	rawMotd?: string | Chat
+	// https://minecraft.wiki/w/Text_component_format
+	rawMotd?: ServerStatus['description']
 	renderedMotd?: string
-}
-
-export type ProtocolVersion = {
-	version: number
-	legacy: boolean
 }
 
 /** A singleplayer world's icon arrives as a path; a server's is a `data:` URL. */
@@ -112,15 +95,16 @@ export async function get_recent_worlds(
 	limit: number,
 	displayStatuses?: DisplayStatus[],
 ): Promise<WorldWithInstance[]> {
-	const worlds = await invoke<WorldWithInstance[]>('plugin:worlds|get_recent_worlds', {
-		limit,
-		displayStatuses,
+	const worlds = await apiClient.local.call(worldRoutes.ListRecentWorlds, {
+		query: { limit, display_statuses: displayStatuses ? JSON.stringify(displayStatuses) : null },
 	})
 	return worlds.map(withIconUrl)
 }
 
 export async function get_instance_worlds(instanceId: string): Promise<World[]> {
-	const worlds = await invoke<World[]>('plugin:worlds|get_instance_worlds', { instanceId })
+	const worlds = await apiClient.local.call(worldRoutes.ListInstanceWorlds, {
+		params: { id: instanceId },
+	})
 	return worlds.map(withIconUrl)
 }
 
@@ -128,9 +112,11 @@ export async function get_singleplayer_world(
 	instance: string,
 	world: string,
 ): Promise<SingleplayerWorld> {
-	return withIconUrl(
-		await invoke<SingleplayerWorld>('plugin:worlds|get_singleplayer_world', { instance, world }),
-	)
+	const found = await apiClient.local.call(worldRoutes.GetSingleplayerWorld, {
+		params: { id: instance, world },
+	})
+	if (found.type !== 'singleplayer') throw new Error(`${world} is not a singleplayer world`)
+	return withIconUrl(found)
 }
 
 export async function set_world_display_status(
@@ -139,11 +125,9 @@ export async function set_world_display_status(
 	worldId: string,
 	displayStatus: DisplayStatus,
 ): Promise<void> {
-	return await invoke('plugin:worlds|set_world_display_status', {
-		instance,
-		worldType,
-		worldId,
-		displayStatus,
+	return await apiClient.local.call(worldRoutes.SetWorldDisplayStatus, {
+		params: { id: instance },
+		body: { world_type: worldType, world_id: worldId, display_status: displayStatus },
 	})
 }
 
@@ -152,19 +136,22 @@ export async function rename_world(
 	world: string,
 	newName: string,
 ): Promise<void> {
-	return await invoke('plugin:worlds|rename_world', { instance, world, newName })
+	return await apiClient.local.call(worldRoutes.RenameWorld, {
+		params: { id: instance, world },
+		body: { name: newName },
+	})
 }
 
 export async function reset_world_icon(instance: string, world: string): Promise<void> {
-	return await invoke('plugin:worlds|reset_world_icon', { instance, world })
+	return await apiClient.local.call(worldRoutes.ResetWorldIcon, { params: { id: instance, world } })
 }
 
 export async function backup_world(instance: string, world: string): Promise<number> {
-	return await invoke('plugin:worlds|backup_world', { instance, world })
+	return await apiClient.local.call(worldRoutes.BackupWorld, { params: { id: instance, world } })
 }
 
 export async function delete_world(instance: string, world: string): Promise<void> {
-	return await invoke('plugin:worlds|delete_world', { instance, world })
+	return await apiClient.local.call(worldRoutes.DeleteWorld, { params: { id: instance, world } })
 }
 
 export async function add_server_to_instance(
@@ -175,13 +162,15 @@ export async function add_server_to_instance(
 	projectId?: string,
 	contentKind?: string,
 ): Promise<number> {
-	return await invoke('plugin:worlds|add_server_to_instance', {
-		instanceId,
-		name,
-		address,
-		packStatus,
-		projectId,
-		contentKind,
+	return await apiClient.local.call(worldRoutes.AddInstanceServer, {
+		params: { id: instanceId },
+		body: {
+			name,
+			address,
+			pack_status: packStatus,
+			project_id: projectId ?? null,
+			content_kind: contentKind ?? null,
+		},
 	})
 }
 
@@ -192,12 +181,9 @@ export async function edit_server_in_instance(
 	address: string,
 	packStatus: ServerPackStatus,
 ): Promise<void> {
-	return await invoke('plugin:worlds|edit_server_in_instance', {
-		instanceId,
-		index,
-		name,
-		address,
-		packStatus,
+	return await apiClient.local.call(worldRoutes.EditInstanceServer, {
+		params: { id: instanceId, index },
+		body: { name, address, pack_status: packStatus },
 	})
 }
 
@@ -205,31 +191,45 @@ export async function remove_server_from_instance(
 	instanceId: string,
 	index: number,
 ): Promise<void> {
-	return await invoke('plugin:worlds|remove_server_from_instance', { instanceId, index })
+	return await apiClient.local.call(worldRoutes.RemoveInstanceServer, {
+		params: { id: instanceId, index },
+	})
 }
 
 export async function get_instance_protocol_version(
 	instanceId: string,
 ): Promise<ProtocolVersion | null> {
-	return await invoke('plugin:worlds|get_instance_protocol_version', { instanceId })
+	return await apiClient.local.call(worldRoutes.GetInstanceProtocolVersion, {
+		params: { id: instanceId },
+	})
 }
 
 export async function get_server_status(
 	address: string,
 	protocolVersion: ProtocolVersion | null = null,
 ): Promise<ServerStatus> {
-	return await invoke('plugin:worlds|get_server_status', { address, protocolVersion })
+	return await apiClient.local.call(worldRoutes.GetServerStatus, {
+		query: {
+			address,
+			protocol_version: protocolVersion?.version ?? null,
+			legacy: protocolVersion?.legacy ?? false,
+		},
+	})
 }
 
 export async function start_join_singleplayer_world(
 	instanceId: string,
 	world: string,
 ): Promise<unknown> {
-	return await invoke('plugin:worlds|start_join_singleplayer_world', { instanceId, world })
+	return await apiClient.local.call(launch.joinSingleplayerWorld, {
+		body: { instance_id: instanceId, world },
+	})
 }
 
 export async function start_join_server(instanceId: string, address: string): Promise<unknown> {
-	return await invoke('plugin:worlds|start_join_server', { instanceId, address })
+	return await apiClient.local.call(launch.joinServer, {
+		body: { instance_id: instanceId, address },
+	})
 }
 
 export async function showWorldInFolder(instanceId: string, worldPath: string) {
@@ -391,10 +391,9 @@ export async function ensureManagedServerWorldExists(
 ) {
 	if (!instanceId || !serverName || !serverAddress) return
 	try {
-		await invoke('plugin:worlds|ensure_managed_server_in_instance', {
-			instanceId,
-			name: serverName,
-			address: serverAddress,
+		await apiClient.local.call(worldRoutes.EnsureManagedInstanceServer, {
+			params: { id: instanceId },
+			body: { name: serverName, address: serverAddress },
 		})
 	} catch (err) {
 		console.error('Failed to ensure managed server world exists:', err)

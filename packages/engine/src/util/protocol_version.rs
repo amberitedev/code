@@ -2,6 +2,7 @@ use phf::phf_map;
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Serialize, Debug, Copy, Clone)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ProtocolVersion {
     pub version: u32,
     pub legacy: bool,
