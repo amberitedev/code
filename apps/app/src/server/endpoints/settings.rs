@@ -40,6 +40,7 @@ impl Endpoint for CancelDirectoryChange {
     type Response = Empty;
 }
 
+/// Named the engine's `Settings` in TS, so the frontend has one settings type.
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "Settings"))]
 pub struct AppSettings(#[cfg_attr(test, ts(type = "Settings"))] pub Settings);

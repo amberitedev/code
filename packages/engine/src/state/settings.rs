@@ -106,6 +106,7 @@ pub enum FeatureFlag {
     ServerProjectQa,
     I18nDebug,
     LocalhostSignIn,
+    ShowVersionEnvironmentColumn,
 }
 
 impl Settings {

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use axum::extract::State;
-use contracts::{ApiError, Empty, ErrorCode, Json, server::Req};
+use contracts::{ApiError, Empty, Json, server::Req};
 
 use super::api_error;
 use crate::{
@@ -20,12 +20,6 @@ use crate::{
         TeamMember, User, Version,
     },
 };
-
-fn parse_ids(ids: &str) -> Result<Vec<String>, ApiError> {
-    serde_json::from_str(ids).map_err(|error| {
-        ApiError::new(ErrorCode::InvalidInput, error.to_string())
-    })
-}
 
 fn as_strs(ids: &[String]) -> Vec<&str> {
     ids.iter().map(String::as_str).collect()
@@ -51,11 +45,10 @@ pub async fn get_cached_projects(
     _: EngineAccess<Owner>,
     request: Req<GetCachedProjects>,
 ) -> Result<Json<Vec<Project>>, ApiError> {
-    let ids = parse_ids(&request.query.ids)?;
     cache::get_project_many(
         &engine,
-        &as_strs(&ids),
-        request.query.cache_behaviour,
+        &as_strs(&request.body.ids),
+        request.body.cache_behaviour,
     )
     .await
     .map(Json)
@@ -97,11 +90,10 @@ pub async fn get_cached_projects_v3(
     _: EngineAccess<Owner>,
     request: Req<GetCachedProjectsV3>,
 ) -> Result<Json<Vec<ProjectV3>>, ApiError> {
-    let ids = parse_ids(&request.query.ids)?;
     cache::get_project_v3_many(
         &engine,
-        &as_strs(&ids),
-        request.query.cache_behaviour,
+        &as_strs(&request.body.ids),
+        request.body.cache_behaviour,
     )
     .await
     .map(Json)
@@ -128,11 +120,10 @@ pub async fn get_cached_versions(
     _: EngineAccess<Owner>,
     request: Req<GetCachedVersions>,
 ) -> Result<Json<Vec<Version>>, ApiError> {
-    let ids = parse_ids(&request.query.ids)?;
     cache::get_version_many(
         &engine,
-        &as_strs(&ids),
-        request.query.cache_behaviour,
+        &as_strs(&request.body.ids),
+        request.body.cache_behaviour,
     )
     .await
     .map(Json)
@@ -155,11 +146,14 @@ pub async fn get_cached_users(
     _: EngineAccess<Owner>,
     request: Req<GetCachedUsers>,
 ) -> Result<Json<Vec<User>>, ApiError> {
-    let ids = parse_ids(&request.query.ids)?;
-    cache::get_user_many(&engine, &as_strs(&ids), request.query.cache_behaviour)
-        .await
-        .map(Json)
-        .map_err(api_error)
+    cache::get_user_many(
+        &engine,
+        &as_strs(&request.body.ids),
+        request.body.cache_behaviour,
+    )
+    .await
+    .map(Json)
+    .map_err(api_error)
 }
 
 pub async fn get_cached_team(

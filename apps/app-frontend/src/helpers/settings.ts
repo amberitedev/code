@@ -6,9 +6,6 @@
 import { type Settings, settings as settingsRoutes } from '@modrinth/api-client'
 import { queryOptions } from '@tanstack/vue-query'
 
-import type { FeatureFlag } from '@/composables/use-app-settings.ts'
-import type { ColorTheme } from '@/composables/use-theme.ts'
-import type { Hooks, MemorySettings, WindowSize } from '@/helpers/types'
 import { apiClient } from '@/platform/modrinth-client'
 
 // Settings object
@@ -34,65 +31,7 @@ Memorysettings {
 
 */
 
-export type AppSettings = {
-	max_concurrent_downloads: number
-	max_concurrent_writes: number
-
-	theme: ColorTheme
-	locale: string
-	default_page: 'Home' | 'Library'
-	collapsed_navigation: boolean
-	hide_nametag_skins_page: boolean
-	advanced_rendering: boolean
-	native_decorations: boolean
-	toggle_sidebar: boolean
-	sync_theme_across_devices: boolean
-	sync_behavior_across_devices: boolean
-	sync_features_across_devices: boolean
-	show_files_tab_in_instances: boolean
-	show_worlds_tab_in_instances: boolean
-	show_screenshots_tab_in_instances: boolean
-	show_skin_selector_in_sidebar: boolean
-
-	telemetry: boolean
-	discord_rpc: boolean
-	personalized_ads: boolean
-
-	extra_launch_args: string[]
-	custom_env_vars: [string, string][]
-	memory: MemorySettings
-	force_fullscreen: boolean
-	game_resolution: WindowSize
-	hide_on_process_start: boolean
-	show_jump_in: boolean
-	always_show_copy_details: boolean
-	hide_installed_modpacks: boolean
-	advanced_filters_collapsed: boolean
-	dismissed_photosensitivity_filter_warning: boolean
-	friends_active_collapsed: boolean
-	friends_online_collapsed: boolean
-	friends_offline_collapsed: boolean
-	friends_pending_collapsed: boolean
-	refocus_on_game_close: boolean
-	compact_instance_cards: boolean
-	show_play_time: boolean
-	warn_on_unknown_modpacks: boolean
-	skip_non_essential_warnings: boolean
-	hooks: Hooks
-
-	custom_dir?: string | null
-	prev_custom_dir?: string | null
-	migrated: boolean
-
-	developer_mode: boolean
-	feature_flags: Record<FeatureFlag, boolean>
-
-	skipped_update: string | null
-	pending_update_toast_for_version: string | null
-	auto_download_updates: boolean | null
-
-	version: number
-}
+export type AppSettings = Settings
 
 export const appSettingsKeys = {
 	all: ['app-settings'] as const,
@@ -130,12 +69,12 @@ export function parseEnvVars(input: string | undefined | null): [string, string]
 
 // Get full settings object
 export async function get() {
-	return (await apiClient.local.call(settingsRoutes.getSettings)) as AppSettings
+	return await apiClient.local.call(settingsRoutes.getSettings)
 }
 
 // Set full settings object
 export async function set(settings: AppSettings) {
-	return await apiClient.local.call(settingsRoutes.setSettings, { body: settings as Settings })
+	return await apiClient.local.call(settingsRoutes.setSettings, { body: settings })
 }
 
 export async function cancel_directory_change(): Promise<void> {

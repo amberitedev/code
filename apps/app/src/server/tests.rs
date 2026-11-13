@@ -47,6 +47,8 @@ struct Local {
     host: String,
     /// The Core proxy's.
     proxy_origin: String,
+    /// The App's data folder: an absolute identifier replaces the OS data folder it joins.
+    _data: tempfile::TempDir,
 }
 
 fn local() -> Local {
@@ -57,6 +59,7 @@ fn local_with(engine: EngineHandle) -> Local {
     let server = LocalServer::bind(None, None, None).unwrap();
     let app = AppSlot::default();
     let updater = Arc::new(Updater::new(app.clone()));
+    let data = tempfile::tempdir().unwrap();
     Local {
         router: server.router(
             boot(),
@@ -64,6 +67,7 @@ fn local_with(engine: EngineHandle) -> Local {
             engine,
             app,
             Arc::clone(&updater),
+            data.path().to_string_lossy().into_owned(),
         ),
         updater,
         secret: server.secret.clone(),
@@ -72,6 +76,7 @@ fn local_with(engine: EngineHandle) -> Local {
             "http://127.0.0.1:{}",
             server.proxy.local_addr().unwrap().port()
         ),
+        _data: data,
     }
 }
 
@@ -269,6 +274,7 @@ async fn boot_answers_from_bind() {
         EngineHandle::default(),
         AppSlot::default(),
         Arc::new(Updater::new(AppSlot::default())),
+        "test".into(),
     );
     tokio::spawn(server.serve(router));
 
@@ -301,6 +307,7 @@ async fn the_event_socket_waits_for_the_engine_then_sends_events_as_json() {
         handle.clone(),
         AppSlot::default(),
         Arc::new(Updater::new(AppSlot::default())),
+        "test".into(),
     );
     tokio::spawn(server.serve(router));
 
@@ -391,6 +398,17 @@ async fn a_failed_start_answers_engine_unavailable() {
             json!({ "error": "engine_unavailable", "description": "the data folder is in use" })
         );
     }
+
+    // The error page's way out of a failed directory move.
+    let request = Request::delete(format!(
+        "/{}/app/settings/directory-change",
+        local.secret
+    ))
+    .header(HOST, &local.host)
+    .header(ORIGIN, "tauri://localhost")
+    .body(Body::empty())
+    .unwrap();
+    assert_eq!(local.send(request).await.status(), StatusCode::NO_CONTENT);
 }
 
 /// The page offers to retry or cancel a directory move only when it reads the move's own code.

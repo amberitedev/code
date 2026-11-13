@@ -7,18 +7,19 @@ use crate::state::{
     SearchResults, SearchResultsV3, TeamMember, User, Version,
 };
 
+// The many-id reads are POSTs: a project's every version id overflows a request line.
 endpoints! {
     /// `null` when Modrinth has no such project. The id may be a slug.
     GetCachedProject: Get "/cache/projects/{id}", CacheKey, CacheRead, Empty => Json<Option<Project>>;
-    GetCachedProjects: Get "/cache/projects", (), CacheKeys, Empty => Json<Vec<Project>>;
+    GetCachedProjects: Post "/cache/projects", (), (), Json<CacheKeys> => Json<Vec<Project>>;
     /// The project's versions, without changelogs.
     GetCachedProjectVersions: Get "/cache/projects/{id}/versions", CacheKey, CacheRead, Empty => Json<Option<Vec<Version>>>;
     GetCachedProjectV3: Get "/cache/v3/projects/{id}", CacheKey, CacheRead, Empty => Json<Option<ProjectV3>>;
-    GetCachedProjectsV3: Get "/cache/v3/projects", (), CacheKeys, Empty => Json<Vec<ProjectV3>>;
+    GetCachedProjectsV3: Post "/cache/v3/projects", (), (), Json<CacheKeys> => Json<Vec<ProjectV3>>;
     GetCachedVersion: Get "/cache/versions/{id}", CacheKey, CacheRead, Empty => Json<Option<Version>>;
-    GetCachedVersions: Get "/cache/versions", (), CacheKeys, Empty => Json<Vec<Version>>;
+    GetCachedVersions: Post "/cache/versions", (), (), Json<CacheKeys> => Json<Vec<Version>>;
     GetCachedUser: Get "/cache/users/{id}", CacheKey, CacheRead, Empty => Json<Option<User>>;
-    GetCachedUsers: Get "/cache/users", (), CacheKeys, Empty => Json<Vec<User>>;
+    GetCachedUsers: Post "/cache/users", (), (), Json<CacheKeys> => Json<Vec<User>>;
     GetCachedTeam: Get "/cache/teams/{id}", CacheKey, CacheRead, Empty => Json<Option<Vec<TeamMember>>>;
     GetCachedOrganization: Get "/cache/organizations/{id}", CacheKey, CacheRead, Empty => Json<Option<Organization>>;
     /// `id` is the search's query string.
@@ -46,8 +47,7 @@ pub struct CacheRead {
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct CacheKeys {
-    /// A JSON array of ids.
-    pub ids: String,
+    pub ids: Vec<String>,
     #[cfg_attr(feature = "export-ts", ts(optional))]
     pub cache_behaviour: Option<CacheBehaviour>,
 }

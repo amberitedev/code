@@ -6,7 +6,7 @@ use contracts::{ApiError, Empty, Json, server::Req};
 use super::api_error;
 use crate::{
     Engine,
-    access::{EngineAccess, InstanceAccess, Owner, View},
+    access::{Access, Caller, InstanceAccess, Permission, View},
     endpoints::process::{KillProcess, ListInstanceProcesses, ListProcesses},
     process,
     state::ProcessMetadata,
@@ -14,10 +14,21 @@ use crate::{
 
 pub async fn list_processes(
     State(engine): State<Arc<Engine>>,
-    _: EngineAccess<Owner>,
+    State(access): State<Arc<dyn Access>>,
+    caller: Caller,
     _: Req<ListProcesses>,
 ) -> Result<Json<Vec<ProcessMetadata>>, ApiError> {
-    process::get_all(&engine).await.map(Json).map_err(api_error)
+    let mut visible = Vec::new();
+    for metadata in process::get_all(&engine).await.map_err(api_error)? {
+        if access
+            .require(&caller, Some(&metadata.instance_id), Permission::View)
+            .await
+            .is_ok()
+        {
+            visible.push(metadata);
+        }
+    }
+    Ok(Json(visible))
 }
 
 pub async fn list_instance_processes(
@@ -33,10 +44,19 @@ pub async fn list_instance_processes(
 
 pub async fn kill_process(
     State(engine): State<Arc<Engine>>,
-    _: EngineAccess<Owner>,
+    State(access): State<Arc<dyn Access>>,
+    caller: Caller,
     request: Req<KillProcess>,
 ) -> Result<Empty, ApiError> {
-    process::kill(&engine, request.params.uuid)
+    let uuid = request.params.uuid;
+    let running = process::get_all(&engine).await.map_err(api_error)?;
+    let Some(metadata) = running.into_iter().find(|it| it.uuid == uuid) else {
+        return Ok(Empty);
+    };
+    access
+        .require(&caller, Some(&metadata.instance_id), Permission::Edit)
+        .await?;
+    process::kill(&engine, uuid)
         .await
         .map(|()| Empty)
         .map_err(api_error)

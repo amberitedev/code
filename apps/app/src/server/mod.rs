@@ -98,7 +98,7 @@ impl LocalServer {
     }
 
     /// `/health` and `/app/boot` answer from bind; `/events` and the routes over the engine wait
-    /// for it.
+    /// for it. `identifier` is Tauri's app identifier, which names the App's data folder.
     pub fn router(
         &self,
         boot: Boot,
@@ -106,6 +106,7 @@ impl LocalServer {
         engine: EngineHandle,
         app: AppSlot,
         updater: Arc<Updater>,
+        identifier: String,
     ) -> Router {
         let guard = Arc::new(Guard::new(
             self.secret.clone(),
@@ -164,7 +165,7 @@ impl LocalServer {
             .merge(waiting)
             .merge(updates)
             .merge(cores::routes(Arc::clone(&self.cores)))
-            .merge(settings::routes::startup_routes(app.clone()))
+            .merge(settings::routes::startup_routes(identifier))
             .merge(desktop::routes(engine, app, &self.secret));
         Router::new()
             .nest(&format!("/{}", self.secret), routes)

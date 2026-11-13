@@ -16,7 +16,7 @@ export async function get_project(id, cacheBehaviour) {
 /** @returns {Promise<any>} */
 export async function get_project_many(ids, cacheBehaviour) {
 	return await apiClient.local.call(cache.GetCachedProjects, {
-		query: { ids: JSON.stringify(ids), cacheBehaviour },
+		body: { ids, cacheBehaviour },
 	})
 }
 
@@ -30,7 +30,7 @@ export async function get_project_v3(id, cacheBehaviour) {
 
 export async function get_project_v3_many(ids, cacheBehaviour) {
 	return await apiClient.local.call(cache.GetCachedProjectsV3, {
-		query: { ids: JSON.stringify(ids), cacheBehaviour },
+		body: { ids, cacheBehaviour },
 	})
 }
 
@@ -45,7 +45,7 @@ export async function get_version(id, cacheBehaviour) {
 /** @returns {Promise<any>} */
 export async function get_version_many(ids, cacheBehaviour) {
 	return await apiClient.local.call(cache.GetCachedVersions, {
-		query: { ids: JSON.stringify(ids), cacheBehaviour },
+		body: { ids, cacheBehaviour },
 	})
 }
 
@@ -59,7 +59,7 @@ export async function get_user(id, cacheBehaviour) {
 /** @returns {Promise<any>} */
 export async function get_user_many(ids, cacheBehaviour) {
 	return await apiClient.local.call(cache.GetCachedUsers, {
-		query: { ids: JSON.stringify(ids), cacheBehaviour },
+		body: { ids, cacheBehaviour },
 	})
 }
 

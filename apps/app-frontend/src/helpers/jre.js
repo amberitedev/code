@@ -21,8 +21,16 @@ export async function get_java_versions() {
 	return await apiClient.local.call(java.GetJavaVersions)
 }
 
+// A path typed into an empty slot comes without its version, so it is saved once it names a Java.
+// An empty path saves nothing: a slot cannot be cleared.
 export async function set_java_version(javaVersion) {
-	return await apiClient.local.call(java.SetJavaVersion, { body: javaVersion })
+	if (!javaVersion?.path) return
+	let body = javaVersion
+	if (javaVersion.parsed_version === undefined) {
+		body = await get_jre(javaVersion.path).catch(() => null)
+		if (!body) return
+	}
+	return await apiClient.local.call(java.SetJavaVersion, { body })
 }
 
 // Finds all the installation of Java 7, if it exists

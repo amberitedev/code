@@ -6,9 +6,11 @@ use super::{endpoints, instances::InstanceRef};
 use crate::state::ProcessMetadata;
 
 endpoints! {
-    /// Every running game. `Process` events report starts and exits.
+    /// The running games of every instance the caller may view. `Process` events report starts and
+    /// exits.
     ListProcesses: Get "/processes", (), (), Empty => Json<Vec<ProcessMetadata>>;
     ListInstanceProcesses: Get "/instances/{id}/processes", InstanceRef, (), Empty => Json<Vec<ProcessMetadata>>;
+    /// Needs Edit on the game's instance. A game that already exited is not an error.
     KillProcess: Post "/processes/{uuid}/kill", ProcessRef, (), Empty => Empty;
 }
 

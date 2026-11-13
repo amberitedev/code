@@ -173,10 +173,13 @@ async fn a_denied_caller_sees_no_instances_and_touches_no_groups_or_store() {
         send(&router, "GET", "/instances/local%3Aa", None).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert_eq!(error["error"], "forbidden");
-    assert_eq!(
-        send(&router, "GET", "/instances", None).await,
-        (StatusCode::OK, json!([]))
-    );
+    for list in ["/instances", "/processes"] {
+        assert_eq!(
+            send(&router, "GET", list, None).await,
+            (StatusCode::OK, json!([])),
+            "{list}"
+        );
+    }
     let (status, _) = send(
         &router,
         "POST",
@@ -195,12 +198,6 @@ async fn a_denied_caller_sees_no_instances_and_touches_no_groups_or_store() {
         ("POST", "/cache/purge", Some(json!(["project"]))),
         ("GET", "/instances/local%3Aa/logs", None),
         ("DELETE", "/instances/local%3Aa/live-log", None),
-        ("GET", "/processes", None),
-        (
-            "POST",
-            "/processes/00000000-0000-0000-0000-000000000000/kill",
-            None,
-        ),
         ("GET", "/java/versions", None),
         (
             "PUT",
@@ -416,11 +413,12 @@ async fn cache_reads_take_the_helpers_query_names() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(user["username"], "Ilai");
+    // Many ids go in a body: a project's every version id overflows a request line.
     let (status, users) = send(
         &router,
-        "GET",
-        "/cache/users?ids=%5B%22u1%22%5D&cacheBehaviour=stale_while_revalidate",
-        None,
+        "POST",
+        "/cache/users",
+        Some(json!({ "ids": ["u1"], "cacheBehaviour": "stale_while_revalidate" })),
     )
     .await;
     assert_eq!(status, StatusCode::OK);

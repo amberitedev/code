@@ -121,9 +121,7 @@ mod tests {
             self, NewScreenshotGroup, ScreenshotEdit, ScreenshotExport,
             ScreenshotFile, ScreenshotGroupUpdate, ScreenshotMove,
         },
-        settings::{
-            AppSettings, CancelDirectoryChange, GetSettings, SetSettings,
-        },
+        settings::{CancelDirectoryChange, GetSettings, SetSettings},
         skins::{self, CustomSkinSave, NewCustomSkin, SkinFlushQuery},
         synced_options::{
             self, CommandHistory, GlobalSyncedOptionUpdate,
@@ -287,7 +285,6 @@ mod tests {
             ServerJoin::decl(&cfg),
             SingleplayerJoin::decl(&cfg),
             InstanceVisibility::decl(&cfg),
-            AppSettings::decl(&cfg),
             OnboardingProgress::decl(&cfg),
             JavaTest::decl(&cfg),
             JavaAtPath::decl(&cfg),

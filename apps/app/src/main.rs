@@ -148,6 +148,7 @@ fn main() {
         engine.clone(),
         desktop.clone(),
         Arc::clone(&updater),
+        tauri_context.config().identifier.clone(),
     );
     runtime.spawn(local.serve(router));
 

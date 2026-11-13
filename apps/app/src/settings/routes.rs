@@ -7,13 +7,10 @@ use contracts::{
 };
 use engine::{Engine, routes::api_error, settings};
 
-use crate::{
-    desktop::AppSlot,
-    server::{
-        AppState,
-        endpoints::settings::{
-            AppSettings, CancelDirectoryChange, GetSettings, SetSettings,
-        },
+use crate::server::{
+    AppState,
+    endpoints::settings::{
+        AppSettings, CancelDirectoryChange, GetSettings, SetSettings,
     },
 };
 
@@ -23,11 +20,13 @@ pub fn routes() -> Router<AppState> {
     Router::new().route(get_path, get).route(set_path, set)
 }
 
-/// Routes that answer while the engine cannot start.
-pub fn startup_routes(app: AppSlot) -> Router {
+/// Routes that answer while the engine cannot start, so they wait on nothing.
+pub fn startup_routes(identifier: String) -> Router {
     let (path, method) =
         route::<CancelDirectoryChange, _, _, _>(cancel_directory_change);
-    Router::new().route(path, method).with_state(app)
+    Router::new()
+        .route(path, method)
+        .with_state(Arc::from(identifier))
 }
 
 async fn get_settings(
@@ -51,13 +50,11 @@ async fn set_settings(
 }
 
 async fn cancel_directory_change(
-    State(app): State<AppSlot>,
+    State(identifier): State<Arc<str>>,
     _: Req<CancelDirectoryChange>,
 ) -> Result<Empty, ApiError> {
-    crate::data_dir::cancel_directory_change(
-        &app.wait().await.config().identifier,
-    )
-    .await
-    .map(|()| Empty)
-    .map_err(api_error)
+    crate::data_dir::cancel_directory_change(&identifier)
+        .await
+        .map(|()| Empty)
+        .map_err(api_error)
 }
