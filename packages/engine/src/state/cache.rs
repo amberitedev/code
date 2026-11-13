@@ -639,6 +639,7 @@ pub struct VersionV3 {
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum VersionEnvironment {
     ClientAndServer,

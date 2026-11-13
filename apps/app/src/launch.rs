@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use axum::{Router, extract::State};
 use contracts::{
-    ApiError, Empty,
+    ApiError, Empty, Json,
     server::{Req, route},
 };
 use engine::Engine;
@@ -14,11 +14,12 @@ use engine::server_address::ServerAddress;
 
 use crate::server::{
     AppState,
-    endpoints::launch::{JoinServer, JoinSingleplayerWorld},
+    endpoints::launch::{JoinServer, JoinSingleplayerWorld, PlayInstance},
 };
 
 pub fn routes() -> Router<AppState> {
     [
+        route::<PlayInstance, _, _, _>(play_instance),
         route::<JoinServer, _, _, _>(join_server),
         route::<JoinSingleplayerWorld, _, _, _>(join_singleplayer_world),
     ]
@@ -26,6 +27,23 @@ pub fn routes() -> Router<AppState> {
     .fold(Router::new(), |router, (path, method)| {
         router.route(path, method)
     })
+}
+
+async fn play_instance(
+    State(engine): State<Arc<Engine>>,
+    request: Req<PlayInstance>,
+) -> Result<Json<ProcessMetadata>, ApiError> {
+    let play = request.body;
+    let quick_play = match play.server_address {
+        Some(address) => {
+            QuickPlayType::Server(ServerAddress::Unresolved(address))
+        }
+        None => QuickPlayType::None,
+    };
+    launch(&engine, &play.instance_id, quick_play)
+        .await
+        .map(Json)
+        .map_err(engine::routes::api_error)
 }
 
 async fn join_server(

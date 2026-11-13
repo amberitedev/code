@@ -118,6 +118,7 @@ impl ModLoader {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ContentFile {
     #[serde(skip)]
     pub on_disk_path: String,
@@ -133,12 +134,14 @@ pub struct ContentFile {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct FileMetadata {
     pub project_id: String,
     pub version_id: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
 pub enum ProjectType {
     Mod,

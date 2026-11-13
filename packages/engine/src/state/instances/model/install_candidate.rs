@@ -2,12 +2,14 @@ use crate::state::ModLoader;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct InstanceInstallTarget {
     pub game_version: String,
     pub loader: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct InstanceInstallCandidate {
     pub id: String,
     pub name: String,

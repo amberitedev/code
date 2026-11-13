@@ -4,13 +4,18 @@
  *  and deserialized into a usable JS object.
  */
 import {
+	type ContentItem as ContentItemResponse,
 	ContractClient,
 	desktop,
 	type GlobalSyncedOptions,
 	type IconConfig,
+	instanceContent,
+	instancePaths,
 	instances,
 	type Labrinth,
+	launch,
 	library,
+	type ProjectType,
 	type ScreenshotFile,
 	type ScreenshotGroup,
 	type ScreenshotGroupImport,
@@ -47,7 +52,7 @@ export function getInstanceIconUrl(iconPath: string | null | undefined): string 
 }
 
 export async function remove(instanceId: string): Promise<void> {
-	return await invoke('plugin:instance|instance_remove', { instanceId })
+	return await apiClient.local.call(instances.RemoveInstance, { params: { id: instanceId } })
 }
 
 export async function get(instanceId: string): Promise<GameInstance | null> {
@@ -64,11 +69,16 @@ export async function get_projects(
 	instanceId: string,
 	cacheBehaviour?: CacheBehaviour,
 ): Promise<Record<string, ContentFile>> {
-	return await invoke('plugin:instance|instance_get_projects', { instanceId, cacheBehaviour })
+	return await apiClient.local.call(instanceContent.ListInstanceProjects, {
+		params: { id: instanceId },
+		query: { cacheBehaviour },
+	})
 }
 
 export async function get_installed_project_ids(instanceId: string): Promise<string[]> {
-	return await invoke('plugin:instance|instance_get_installed_project_ids', { instanceId })
+	return await apiClient.local.call(instanceContent.ListInstalledProjectIds, {
+		params: { id: instanceId },
+	})
 }
 
 export type InstanceInstallTarget = {
@@ -91,10 +101,8 @@ export async function get_install_candidates(
 	projectType: string,
 	targets: InstanceInstallTarget[],
 ): Promise<InstanceInstallCandidate[]> {
-	return await invoke('plugin:instance|instance_get_install_candidates', {
-		projectId,
-		projectType,
-		targets,
+	return await apiClient.local.call(instanceContent.ListInstallCandidates, {
+		body: { project_id: projectId, project_type: projectType as ProjectType, targets },
 	})
 }
 
@@ -105,19 +113,23 @@ export async function get_content_items(
 	instanceId: string,
 	cacheBehaviour?: CacheBehaviour,
 ): Promise<ContentItem[]> {
-	const items = await invoke<ContentItem[]>('plugin:instance|instance_get_content_items', {
-		instanceId,
-		cacheBehaviour,
+	const items = await apiClient.local.call(instanceContent.ListContentItems, {
+		params: { id: instanceId },
+		query: { cacheBehaviour },
 	})
 	return adaptContentItems(items)
 }
 
 export async function refresh_content_updates(instanceId: string): Promise<void> {
-	return await invoke('plugin:instance|instance_refresh_content_updates', { instanceId })
+	return await apiClient.local.call(instanceContent.RefreshContentUpdates, {
+		params: { id: instanceId },
+	})
 }
 
 export async function sync_content_files(instanceId: string): Promise<void> {
-	return await invoke('plugin:instance|instance_sync_content_files', { instanceId })
+	return await apiClient.local.call(instanceContent.SyncContentFiles, {
+		params: { id: instanceId },
+	})
 }
 
 // Linked modpack info returned from backend
@@ -137,10 +149,10 @@ export async function get_linked_modpack_info(
 	instanceId: string,
 	cacheBehaviour?: CacheBehaviour,
 ): Promise<LinkedModpackInfo | null> {
-	return await invoke('plugin:instance|instance_get_linked_modpack_info', {
-		instanceId,
-		cacheBehaviour,
-	})
+	return (await apiClient.local.call(instanceContent.GetLinkedModpack, {
+		params: { id: instanceId },
+		query: { cacheBehaviour },
+	})) as LinkedModpackInfo | null
 }
 
 // Get content items that are part of the linked modpack
@@ -150,9 +162,9 @@ export async function get_linked_modpack_content(
 	instanceId: string,
 	cacheBehaviour?: CacheBehaviour,
 ): Promise<ContentItem[]> {
-	const items = await invoke<ContentItem[]>('plugin:instance|instance_get_linked_modpack_content', {
-		instanceId,
-		cacheBehaviour,
+	const items = await apiClient.local.call(instanceContent.ListLinkedModpackContent, {
+		params: { id: instanceId },
+		query: { cacheBehaviour },
 	})
 	return adaptContentItems(items)
 }
@@ -162,18 +174,23 @@ export async function get_dependencies_as_content_items(
 	dependencies: Labrinth.Versions.v3.Dependency[],
 	cacheBehaviour?: CacheBehaviour,
 ): Promise<ContentItem[]> {
-	const items = await invoke<ContentItem[]>(
-		'plugin:instance|instance_get_dependencies_as_content_items',
-		{
-			dependencies,
+	const items = await apiClient.local.call(instanceContent.ListDependencyContentItems, {
+		body: {
+			dependencies: dependencies.map((dependency) => ({
+				project_id: null,
+				version_id: null,
+				file_name: null,
+				...dependency,
+			})),
 			cacheBehaviour,
 		},
-	)
+	})
 	return adaptContentItems(items)
 }
 
-export function adaptContentItems(items: ContentItem[]): ContentItem[] {
-	return items.map((item) => {
+/** The engine sends `null` for a field the UI's `ContentItem` leaves out. */
+export function adaptContentItems(items: ContentItem[] | ContentItemResponse[]): ContentItem[] {
+	return (items as ContentItem[]).map((item) => {
 		const embeddedMetadata = item.embedded_metadata
 		if (!embeddedMetadata?.icon_path) return item
 
@@ -188,11 +205,14 @@ export function adaptContentItems(items: ContentItem[]): ContentItem[] {
 }
 
 export async function get_full_path(instanceId: string): Promise<string> {
-	return await invoke('plugin:instance|instance_get_full_path', { instanceId })
+	return await apiClient.local.call(instancePaths.getInstancePath, { params: { id: instanceId } })
 }
 
 export async function get_mod_full_path(instanceId: string, projectPath: string): Promise<string> {
-	return await invoke('plugin:instance|instance_get_mod_full_path', { instanceId, projectPath })
+	return await apiClient.local.call(instancePaths.getInstanceContentPath, {
+		params: { id: instanceId },
+		query: { project_path: projectPath },
+	})
 }
 
 export type {
@@ -404,7 +424,7 @@ export interface JavaVersion {
 }
 
 export async function get_optimal_jre_key(instanceId: string): Promise<JavaVersion | null> {
-	return await invoke('plugin:instance|instance_get_optimal_jre_key', { instanceId })
+	return await apiClient.local.call(instances.GetOptimalJava, { params: { id: instanceId } })
 }
 
 export async function list(): Promise<GameInstance[]> {
@@ -412,12 +432,18 @@ export async function list(): Promise<GameInstance[]> {
 }
 
 export async function check_installed(instanceId: string, projectId: string): Promise<boolean> {
-	return await invoke('plugin:instance|instance_check_installed', { instanceId, projectId })
+	return await apiClient.local.call(instanceContent.CheckProjectInstalled, {
+		params: { id: instanceId },
+		query: { project_id: projectId },
+	})
 }
 
 // Updates a specified project
 export async function update_project(instanceId: string, projectPath: string): Promise<string> {
-	return await invoke('plugin:instance|instance_update_project', { instanceId, projectPath })
+	return await apiClient.local.call(instanceContent.UpdateProject, {
+		params: { id: instanceId },
+		body: { project_path: projectPath },
+	})
 }
 
 // Add a project to an instance from a version
@@ -459,11 +485,9 @@ export async function add_project_from_version(
 	reason: DownloadReason,
 	dependentOnVersionId?: string,
 ): Promise<string> {
-	return await invoke('plugin:instance|instance_add_project_from_version', {
-		instanceId,
-		versionId,
-		reason,
-		dependentOnVersionId,
+	return await apiClient.local.call(instanceContent.AddProjectFromVersion, {
+		params: { id: instanceId },
+		body: { version_id: versionId, reason, dependent_on_version_id: dependentOnVersionId },
 	})
 }
 
@@ -471,9 +495,9 @@ export async function install_project_with_dependencies(
 	instanceId: string,
 	request: ResolveContentRequest,
 ): Promise<ResolveContentPlan> {
-	return await invoke('plugin:instance|instance_install_project_with_dependencies', {
-		instanceId,
-		request,
+	return await apiClient.local.call(instanceContent.InstallProjectWithDependencies, {
+		params: { id: instanceId },
+		body: request,
 	})
 }
 
@@ -482,10 +506,9 @@ export async function switch_project_version_with_dependencies(
 	projectPath: string,
 	versionId: string,
 ): Promise<string> {
-	return await invoke('plugin:instance|instance_switch_project_version_with_dependencies', {
-		instanceId,
-		projectPath,
-		versionId,
+	return await apiClient.local.call(instanceContent.SwitchProjectVersion, {
+		params: { id: instanceId },
+		body: { project_path: projectPath, version_id: versionId },
 	})
 }
 
@@ -496,15 +519,16 @@ export async function add_project_from_path(
 	projectPath: string,
 	projectType?: ContentFileProjectType,
 ): Promise<string> {
-	return await invoke('plugin:instance|instance_add_project_from_path', {
-		instanceId,
-		projectPath,
-		projectType,
+	return await apiClient.local.call(instancePaths.addProjectFromPath, {
+		params: { id: instanceId },
+		body: { path: projectPath, project_type: projectType },
 	})
 }
 
 export async function is_file_on_modrinth(projectPath: string): Promise<boolean> {
-	return await invoke('plugin:instance|instance_is_file_on_modrinth', { projectPath })
+	return await apiClient.local.call(instancePaths.checkFileOnModrinth, {
+		body: { path: projectPath },
+	})
 }
 
 // Toggle disabling a project
@@ -513,10 +537,9 @@ export async function toggle_disable_project(
 	projectPath: string,
 	desiredEnabled?: boolean,
 ): Promise<string> {
-	return await invoke('plugin:instance|instance_toggle_disable_project', {
-		instanceId,
-		projectPath,
-		desiredEnabled,
+	return await apiClient.local.call(instanceContent.ToggleProject, {
+		params: { id: instanceId },
+		body: { project_path: projectPath, desired_enabled: desiredEnabled },
 	})
 }
 
@@ -525,16 +548,18 @@ export async function set_project_locked(
 	projectPath: string,
 	locked: boolean,
 ): Promise<void> {
-	return await invoke('plugin:instance|instance_set_project_locked', {
-		instanceId,
-		projectPath,
-		locked,
+	return await apiClient.local.call(instanceContent.SetProjectLocked, {
+		params: { id: instanceId },
+		body: { project_path: projectPath, locked },
 	})
 }
 
 // Remove a project
 export async function remove_project(instanceId: string, projectPath: string): Promise<void> {
-	return await invoke('plugin:instance|instance_remove_project', { instanceId, projectPath })
+	return await apiClient.local.call(instanceContent.RemoveProject, {
+		params: { id: instanceId },
+		body: { project_path: projectPath },
+	})
 }
 
 // Update a managed Modrinth instance to a specific version
@@ -542,15 +567,15 @@ export async function update_managed_modrinth_version(
 	instanceId: string,
 	versionId: string,
 ): Promise<InstallJobSnapshot> {
-	return await invoke('plugin:instance|instance_update_managed_modrinth_version', {
-		instanceId,
-		versionId,
+	return await apiClient.local.call(instanceContent.UpdateModpackVersion, {
+		params: { id: instanceId },
+		body: { version_id: versionId },
 	})
 }
 
 // Repair a managed Modrinth instance
 export async function update_repair_modrinth(instanceId: string): Promise<InstallJobSnapshot> {
-	return await invoke('plugin:instance|instance_repair_managed_modrinth', { instanceId })
+	return await apiClient.local.call(instanceContent.RepairModpack, { params: { id: instanceId } })
 }
 
 // Export an instance to .mrpack
@@ -565,14 +590,16 @@ export async function export_instance_mrpack(
 	description?: string,
 	name?: string,
 ): Promise<void> {
-	return await invoke('plugin:instance|instance_export_mrpack', {
-		instanceId,
-		exportLocation,
-		includedOverrides,
-		excludedOverrides,
-		versionId,
-		description,
-		name,
+	return await apiClient.local.call(instancePaths.exportMrpack, {
+		params: { id: instanceId },
+		body: {
+			location: exportLocation,
+			included_overrides: includedOverrides,
+			excluded_overrides: excludedOverrides,
+			version_id: versionId,
+			description,
+			name,
+		},
 	})
 }
 
@@ -592,9 +619,9 @@ export async function get_pack_export_candidates(
 	instanceId: string,
 	parent?: string,
 ): Promise<PackExportCandidate[]> {
-	return await invoke('plugin:instance|instance_get_pack_export_candidates', {
-		instanceId,
-		parent: parent ?? null,
+	return await apiClient.local.call(instanceContent.ListPackExportCandidates, {
+		params: { id: instanceId },
+		query: { parent },
 	})
 }
 
@@ -604,11 +631,13 @@ export async function run(
 	instanceId: string,
 	serverAddress: string | null = null,
 ): Promise<unknown> {
-	return await invoke('plugin:instance|instance_run', { instanceId, serverAddress })
+	return await apiClient.local.call(launch.playInstance, {
+		body: { instance_id: instanceId, server_address: serverAddress },
+	})
 }
 
 export async function kill(instanceId: string): Promise<void> {
-	return await invoke('plugin:instance|instance_kill', { instanceId })
+	return await apiClient.local.call(instances.KillInstance, { params: { id: instanceId } })
 }
 
 // Edits an instance
@@ -616,12 +645,18 @@ export async function edit(
 	instanceId: string,
 	editInstance: { [K in keyof GameInstance]?: GameInstance[K] | null },
 ): Promise<void> {
-	return await invoke('plugin:instance|instance_edit', { instanceId, editInstance })
+	return await apiClient.local.call(instances.EditInstance, {
+		params: { id: instanceId },
+		body: editInstance,
+	})
 }
 
 // Edits an instance's icon
 export async function edit_icon(instanceId: string, iconPath: string | null): Promise<void> {
-	return await invoke('plugin:instance|instance_edit_icon', { instanceId, iconPath })
+	return await apiClient.local.call(instancePaths.setInstanceIconFromPath, {
+		params: { id: instanceId },
+		body: { path: iconPath },
+	})
 }
 
 export async function edit_generated_icon(
@@ -629,11 +664,12 @@ export async function edit_generated_icon(
 	config: IconConfig,
 	symbolBytes: number[],
 ): Promise<string> {
-	return await invoke('plugin:instance|instance_edit_generated_icon', {
-		instanceId,
-		config,
-		symbolBytes,
+	const path = await apiClient.local.call(library.setGeneratedInstanceIcon, {
+		params: { id: instanceId },
+		body: { config, symbol_bytes: symbolBytes, only_if_empty: false },
 	})
+	if (path === null) throw new Error('The instance icon was not set.')
+	return path
 }
 
 export async function edit_generated_icon_if_empty(
@@ -641,11 +677,9 @@ export async function edit_generated_icon_if_empty(
 	config: IconConfig,
 	symbolBytes: number[],
 ): Promise<boolean> {
-	const result = await invoke<string | null>('plugin:instance|instance_edit_generated_icon', {
-		instanceId,
-		config,
-		symbolBytes,
-		onlyIfEmpty: true,
+	const result = await apiClient.local.call(library.setGeneratedInstanceIcon, {
+		params: { id: instanceId },
+		body: { config, symbol_bytes: symbolBytes, only_if_empty: true },
 	})
 	return result !== null
 }
@@ -655,10 +689,8 @@ export async function cache_generated_icon(
 	symbolBytes: number[],
 	addToRecents = false,
 ): Promise<string> {
-	return await invoke('plugin:instance|instance_cache_generated_icon', {
-		config,
-		symbolBytes,
-		addToRecents,
+	return await apiClient.local.call(library.cacheGeneratedIcon, {
+		body: { config, symbol_bytes: symbolBytes, add_to_recents: addToRecents },
 	})
 }
 

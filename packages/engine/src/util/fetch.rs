@@ -30,6 +30,7 @@ use tracing::{debug, info, warn};
 pub const DOWNLOAD_META_HEADER: &str = "modrinth-download-meta";
 
 #[derive(Debug, derive_more::Display, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 #[display(rename_all = "snake_case")]
 pub enum DownloadReason {

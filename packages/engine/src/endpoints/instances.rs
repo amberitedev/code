@@ -6,10 +6,12 @@ use super::endpoints;
 use crate::{
     ErrorKind,
     state::{
-        ContentSetSyncStatus, Hooks, IconConfig, InstanceInstallStage,
+        AppliedContentSetPatch, ContentSetSyncStatus,
+        EditInstance as CoreEditInstance, Hooks, IconConfig,
+        InstanceInstallStage, InstanceLaunchOverridesPatch,
         InstanceLink as CoreInstanceLink, InstanceMetadata,
-        InstanceSyncedOptions, InstanceTabVisibility, MemorySettings,
-        ModLoader, ReleaseChannel,
+        InstanceSyncedOptions, InstanceTabVisibility, JavaVersion,
+        MemorySettings, ModLoader, ReleaseChannel,
         SharedInstanceAttachment as CoreSharedInstanceAttachment,
         SharedInstanceRole, WindowSize,
     },
@@ -22,12 +24,160 @@ endpoints! {
     GetInstances: Get "/instances/many", (), InstanceIds, Empty => Json<Vec<Instance>>;
     /// `null` when there is no such instance.
     GetInstance: Get "/instances/{id}", InstanceRef, (), Empty => Json<Option<Instance>>;
+    /// Deletes the instance and its folder.
+    RemoveInstance: Delete "/instances/{id}", InstanceRef, (), Empty => Empty;
+    EditInstance: Patch "/instances/{id}", InstanceRef, (), Json<InstanceUpdate> => Empty;
+    /// Stops the instance's running game.
+    KillInstance: Post "/instances/{id}/kill", InstanceRef, (), Empty => Empty;
+    /// The installed Java that suits the instance's game version, if any.
+    GetOptimalJava: Get "/instances/{id}/java", InstanceRef, (), Empty => Json<Option<JavaVersion>>;
 }
 
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct InstanceRef {
     pub id: String,
+}
+
+/// The fields to change; an absent field stays. On a field that can be unset, `null` unsets it.
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+pub struct InstanceUpdate {
+    #[cfg_attr(feature = "export-ts", ts(optional = nullable))]
+    pub name: Option<String>,
+    #[cfg_attr(feature = "export-ts", ts(optional = nullable))]
+    pub game_version: Option<String>,
+    #[cfg_attr(feature = "export-ts", ts(optional = nullable))]
+    pub loader: Option<ModLoader>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "serde_with::rust::double_option"
+    )]
+    #[cfg_attr(
+        feature = "export-ts",
+        ts(as = "Option<Option<String>>", optional)
+    )]
+    pub loader_version: Option<Option<String>>,
+    #[cfg_attr(feature = "export-ts", ts(optional = nullable))]
+    pub group_ids: Option<Vec<String>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "serde_with::rust::double_option"
+    )]
+    #[cfg_attr(
+        feature = "export-ts",
+        ts(as = "Option<Option<InstanceLink>>", optional)
+    )]
+    pub link: Option<Option<InstanceLink>>,
+    #[cfg_attr(feature = "export-ts", ts(optional = nullable))]
+    pub update_channel: Option<ReleaseChannel>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "serde_with::rust::double_option"
+    )]
+    #[cfg_attr(
+        feature = "export-ts",
+        ts(as = "Option<Option<String>>", optional)
+    )]
+    pub java_path: Option<Option<String>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "serde_with::rust::double_option"
+    )]
+    #[cfg_attr(
+        feature = "export-ts",
+        ts(as = "Option<Option<Vec<String>>>", optional)
+    )]
+    pub extra_launch_args: Option<Option<Vec<String>>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "serde_with::rust::double_option"
+    )]
+    #[cfg_attr(
+        feature = "export-ts",
+        ts(as = "Option<Option<Vec<(String, String)>>>", optional)
+    )]
+    pub custom_env_vars: Option<Option<Vec<(String, String)>>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "serde_with::rust::double_option"
+    )]
+    #[cfg_attr(
+        feature = "export-ts",
+        ts(as = "Option<Option<MemorySettings>>", optional)
+    )]
+    pub memory: Option<Option<MemorySettings>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "serde_with::rust::double_option"
+    )]
+    #[cfg_attr(
+        feature = "export-ts",
+        ts(as = "Option<Option<bool>>", optional)
+    )]
+    pub force_fullscreen: Option<Option<bool>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "serde_with::rust::double_option"
+    )]
+    #[cfg_attr(
+        feature = "export-ts",
+        ts(as = "Option<Option<WindowSize>>", optional)
+    )]
+    pub game_resolution: Option<Option<WindowSize>>,
+    #[cfg_attr(feature = "export-ts", ts(optional = nullable))]
+    pub hooks: Option<Hooks>,
+    #[cfg_attr(feature = "export-ts", ts(optional = nullable))]
+    pub visible_tabs: Option<InstanceTabVisibility>,
+}
+
+impl InstanceUpdate {
+    pub fn into_core(self) -> crate::Result<CoreEditInstance> {
+        Ok(CoreEditInstance {
+            install_stage: None,
+            launcher_feature_version: None,
+            name: self.name,
+            icon_path: None,
+            icon_config: None,
+            update_channel: self.update_channel,
+            group_ids: self.group_ids,
+            link: self
+                .link
+                .map(|link| match link {
+                    Some(link) => link.into_core(),
+                    None => Ok(CoreInstanceLink::Unmanaged),
+                })
+                .transpose()?,
+            launch_overrides: Some(InstanceLaunchOverridesPatch {
+                java_path: self.java_path,
+                extra_launch_args: self.extra_launch_args,
+                custom_env_vars: self.custom_env_vars,
+                memory: self.memory,
+                force_fullscreen: self.force_fullscreen,
+                game_resolution: self.game_resolution,
+                hooks: self.hooks,
+                visible_tabs: self.visible_tabs,
+            }),
+            content_set_patch: Some(AppliedContentSetPatch {
+                source_kind: None,
+                game_version: self.game_version,
+                protocol_version: Some(None),
+                loader: self.loader,
+                loader_version: self.loader_version,
+            }),
+            last_played: None,
+            submitted_time_played: None,
+            recent_time_played: None,
+        })
+    }
 }
 
 #[derive(Serialize, Deserialize)]

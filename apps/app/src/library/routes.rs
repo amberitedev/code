@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use axum::{Router, extract::State};
+use axum::{
+    Router,
+    extract::{DefaultBodyLimit, State},
+};
 use contracts::{
     ApiError, Empty, Json,
     server::{Req, route},
@@ -10,7 +13,8 @@ use engine::Engine;
 use crate::server::{
     AppState,
     endpoints::library::{
-        ListHiddenInstances, ListRecentIconConfigs, RecentIconConfigs,
+        CacheGeneratedIcon, CacheIcon, ListHiddenInstances,
+        ListRecentIconConfigs, RecentIconConfigs, SetGeneratedInstanceIcon,
         SetInstanceHidden,
     },
 };
@@ -20,11 +24,16 @@ pub fn routes() -> Router<AppState> {
         route::<ListRecentIconConfigs, _, _, _>(list_recent_icon_configs),
         route::<ListHiddenInstances, _, _, _>(list_hidden_instances),
         route::<SetInstanceHidden, _, _, _>(set_instance_hidden),
+        route::<CacheIcon, _, _, _>(cache_icon),
+        route::<CacheGeneratedIcon, _, _, _>(cache_generated_icon),
+        route::<SetGeneratedInstanceIcon, _, _, _>(set_generated_instance_icon),
     ]
     .into_iter()
     .fold(Router::new(), |router, (path, method)| {
         router.route(path, method)
     })
+    // The engine caps icons and symbols at 4 MiB, past axum's default body limit.
+    .layer(DefaultBodyLimit::disable())
 }
 
 async fn list_recent_icon_configs(
@@ -59,4 +68,55 @@ async fn set_instance_hidden(
     .await
     .map(|()| Empty)
     .map_err(engine::routes::api_error)
+}
+
+async fn cache_icon(
+    State(engine): State<Arc<Engine>>,
+    request: Req<CacheIcon>,
+) -> Result<Json<String>, ApiError> {
+    engine::instance::cache_icon_bytes(&engine, request.body.bytes.to_vec())
+        .await
+        .map(Json)
+        .map_err(engine::routes::api_error)
+}
+
+async fn cache_generated_icon(
+    State(engine): State<Arc<Engine>>,
+    Req { body, .. }: Req<CacheGeneratedIcon>,
+) -> Result<Json<String>, ApiError> {
+    engine::instance::cache_generated_icon(
+        &engine,
+        body.config,
+        body.symbol_bytes,
+        body.add_to_recents,
+    )
+    .await
+    .map(Json)
+    .map_err(engine::routes::api_error)
+}
+
+async fn set_generated_instance_icon(
+    State(engine): State<Arc<Engine>>,
+    Req { params, body, .. }: Req<SetGeneratedInstanceIcon>,
+) -> Result<Json<Option<String>>, ApiError> {
+    let id = &params.id;
+    let icon = if body.only_if_empty {
+        engine::instance::edit_generated_icon_if_empty(
+            &engine,
+            id,
+            body.config,
+            body.symbol_bytes,
+        )
+        .await
+    } else {
+        engine::instance::edit_generated_icon(
+            &engine,
+            id,
+            body.config,
+            body.symbol_bytes,
+        )
+        .await
+        .map(Some)
+    };
+    icon.map(Json).map_err(engine::routes::api_error)
 }

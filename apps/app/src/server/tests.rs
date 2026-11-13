@@ -624,3 +624,33 @@ async fn with_nobody_signed_in_the_account_reads_are_empty() {
         assert_eq!(serde_json::from_slice::<Value>(&body).unwrap(), empty);
     }
 }
+
+/// Playing needs a Minecraft account, so with none the route answers before a game could start.
+#[tokio::test(flavor = "multi_thread")]
+async fn playing_without_a_minecraft_account_is_refused() {
+    engine::install_crypto_provider();
+    let dir = tempfile::tempdir().unwrap();
+    let handle = EngineHandle::default();
+    let config = crate::data_dir::engine_config(
+        dir.path().to_path_buf(),
+        engine::EventSink::new(),
+        None,
+    )
+    .await
+    .unwrap();
+    handle.set(Ok(engine::Engine::new(config).await.unwrap()));
+    let local = local_with(handle);
+    let request =
+        Request::post(format!("/{}/app/launch/instance", local.secret))
+            .header(HOST, &local.host)
+            .header(ORIGIN, "tauri://localhost")
+            .header(CONTENT_TYPE, "application/json")
+            .body(Body::from(json!({ "instance_id": "local:a" }).to_string()))
+            .unwrap();
+
+    let response = local.send(request).await;
+
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(body["error"], "not_logged_in");
+}

@@ -37,7 +37,6 @@ keyring = { workspace = true }
 native-dialog = { workspace = true }
 os_info = { version = "3.15.0", default-features = false }
 p256 = { workspace = true, features = ["ecdh", "ecdsa"] }
-path-util = { workspace = true }
 png = { workspace = true }
 rand = { workspace = true }
 reqwest = { workspace = true, features = ["json", "multipart", "stream"] }

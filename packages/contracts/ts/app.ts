@@ -2,7 +2,7 @@
 // Regenerate: cargo test -p theseus_gui -- --ignored write_ts
 
 import type { ApiError, CoreSession, Endpoint, SharedIconConfig, UserFriend, UserStatus } from './contracts'
-import type { CommandPayload, DesyncServerMode, EngineEvent, FriendPayload, ImportLauncherType, InstallJobSnapshot, InstanceGroupsChangedPayload, InstanceLink, JavaVersion, ModLoader, OnboardingChecklist, Settings } from './engine'
+import type { CommandPayload, DesyncServerMode, EngineEvent, FriendPayload, ImportLauncherType, InstallJobSnapshot, InstanceGroupsChangedPayload, InstanceLink, JavaVersion, ModLoader, OnboardingChecklist, ProcessMetadata, ProjectType, Settings } from './engine'
 
 export type Boot = { version: string, platform: Platform, os_version: string, 
 /**
@@ -428,6 +428,30 @@ export type InstallPostInstallEdit = { name?: string | null,
  */
 iconPath?: string | null, link?: InstanceLink | null, };
 
+export type InstancePlay = { instance_id: string, server_address?: string | null, };
+
+export type ContentPathQuery = { project_path: string, };
+
+export type LocalProject = { path: string, project_type?: ProjectType | null, };
+
+export type LocalContentFile = { path: string, };
+
+export type MrpackExport = { location: string, included_overrides: Array<string>, excluded_overrides: Array<string>, version_id?: string | null, description?: string | null, name?: string | null, };
+
+export type LocalIcon = { path: string | null, };
+
+export type GeneratedIcon = { config: SharedIconConfig, 
+/**
+ * The symbol, a PNG.
+ */
+symbol_bytes: Array<number>, add_to_recents: boolean, };
+
+export type GeneratedInstanceIcon = { config: SharedIconConfig, 
+/**
+ * The symbol, a PNG.
+ */
+symbol_bytes: Array<number>, only_if_empty: boolean, };
+
 export const health = {
 	checkHealth: { method: "GET", path: "/health", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
 }
@@ -474,6 +498,9 @@ export const library = {
 	listRecentIconConfigs: { method: "GET", path: "/app/library/recent-icon-configs", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, RecentIconConfigs>,
 	listHiddenInstances: { method: "GET", path: "/app/library/hidden-instances", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<string>>,
 	setInstanceHidden: { method: "PUT", path: "/app/library/hidden-instances", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, InstanceVisibility, void>,
+	cacheIcon: { method: "POST", path: "/app/library/icons", auth: "none", dangerous: false, body: "raw", response: "json" } as Endpoint<null, null, Blob, string>,
+	cacheGeneratedIcon: { method: "POST", path: "/app/library/icons/generated", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, GeneratedIcon, string>,
+	setGeneratedInstanceIcon: { method: "PUT", path: "/app/instances/{id}/icon/generated", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<IdParams, null, GeneratedInstanceIcon, string | null>,
 }
 
 export const gameOptions = {
@@ -583,6 +610,7 @@ export const localAccounts = {
 }
 
 export const launch = {
+	playInstance: { method: "POST", path: "/app/launch/instance", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, InstancePlay, ProcessMetadata>,
 	joinServer: { method: "POST", path: "/app/launch/server", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, ServerJoin, void>,
 	joinSingleplayerWorld: { method: "POST", path: "/app/launch/singleplayer", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, SingleplayerJoin, void>,
 }
@@ -610,4 +638,13 @@ export const localInstalls = {
 	createInstance: { method: "POST", path: "/app/install/instances", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, InstallCreateInstanceRequest, InstallJobSnapshot>,
 	createModpackInstance: { method: "POST", path: "/app/install/modpack-instances", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, PackInstall, InstallJobSnapshot>,
 	installPackToInstance: { method: "POST", path: "/app/install/instances/{id}/pack", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<IdParams, null, PackInstall, InstallJobSnapshot>,
+}
+
+export const instancePaths = {
+	getInstancePath: { method: "GET", path: "/app/instances/{id}/path", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<IdParams, null, void, string>,
+	getInstanceContentPath: { method: "GET", path: "/app/instances/{id}/content-path", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<IdParams, ContentPathQuery, void, string>,
+	addProjectFromPath: { method: "POST", path: "/app/instances/{id}/projects/from-path", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<IdParams, null, LocalProject, string>,
+	checkFileOnModrinth: { method: "POST", path: "/app/content/on-modrinth", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, LocalContentFile, boolean>,
+	exportMrpack: { method: "POST", path: "/app/instances/{id}/export-mrpack", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<IdParams, null, MrpackExport, void>,
+	setInstanceIconFromPath: { method: "PUT", path: "/app/instances/{id}/icon", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<IdParams, null, LocalIcon, void>,
 }

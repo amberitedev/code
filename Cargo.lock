@@ -10139,7 +10139,6 @@ dependencies = [
  "native-dialog",
  "os_info",
  "p256",
- "path-util",
  "png 0.18.1",
  "rand 0.10.3",
  "rcgen",

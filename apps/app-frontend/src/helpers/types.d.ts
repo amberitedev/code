@@ -4,7 +4,7 @@ import type {
 } from '@modrinth/api-client'
 import type { ModrinthId } from '@modrinth/utils'
 
-export type { SharedInstanceAttachment } from '@modrinth/api-client'
+export type { ContentFile, SharedInstanceAttachment } from '@modrinth/api-client'
 
 export type GameInstance = Omit<InstanceResponse, 'link'> & { link: InstanceLink | null }
 
@@ -30,16 +30,6 @@ export type ContentSourceKind =
 	| 'modrinth_hosting'
 	| 'imported_modpack'
 	| 'shared_instance'
-
-export type ContentFile = {
-	enabled: boolean
-	locked: boolean
-	source_kind?: ContentSourceKind | null
-	metadata?: {
-		project_id: string
-		version_id: string
-	}
-}
 
 export type ContentFileProjectType = 'mod' | 'datapack' | 'resourcepack' | 'shaderpack'
 

@@ -14,11 +14,17 @@ use std::path::Path;
 use std::sync::Arc;
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct InstallProjectWithDependenciesRequest {
     pub project_id: String,
+    #[cfg_attr(feature = "export-ts", ts(optional = nullable))]
     pub version_id: Option<String>,
     pub content_type: ContentType,
     #[serde(default)]
+    #[cfg_attr(
+        feature = "export-ts",
+        ts(as = "Option<ResolutionPreferences>", optional)
+    )]
     pub selected: ResolutionPreferences,
 }
 

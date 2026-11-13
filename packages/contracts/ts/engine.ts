@@ -344,6 +344,82 @@ export type SharedInstanceInviteCreator = { id: string, name: string, avatar: st
 
 export type SharedHistorySettings = { kept: number | null, entries: { [key in string]: number }, };
 
+export type InstanceUpdate = { name?: string | null, game_version?: string | null, loader?: ModLoader | null, loader_version?: string | null, group_ids?: Array<string> | null, link?: InstanceLink | null, update_channel?: ReleaseChannel | null, java_path?: string | null, extra_launch_args?: Array<string> | null, custom_env_vars?: Array<[string, string]> | null, memory?: MemorySettings | null, force_fullscreen?: boolean | null, game_resolution?: WindowSize | null, hooks?: Hooks | null, visible_tabs?: InstanceTabVisibility | null, };
+
+export type ContentFile = { hash: string, file_name: string, enabled: boolean, locked: boolean, size: number, metadata: FileMetadata | null, update_version_id: string | null, project_type: ProjectType, source_kind: ContentSourceKind | null, };
+
+export type FileMetadata = { project_id: string, version_id: string, };
+
+export type ProjectType = "mod" | "datapack" | "resourcepack" | "shaderpack";
+
+export type ContentSourceKind = "local" | "modrinth_modpack" | "server_project" | "modrinth_hosting" | "imported_modpack" | "shared_instance";
+
+export type ContentItem = { file_name: string, file_path: string, id: string, size: number, enabled: boolean, locked: boolean, project_type: ProjectType, project: ContentItemProject | null, version: ContentItemVersion | null, environment: VersionEnvironment | null, owner: ContentItemOwner | null, has_update: boolean, update_version_id: string | null, date_added: string | null, source_kind: ContentSourceKind | null, embedded_metadata: EmbeddedContentMetadata | null, synced_pack?: SyncedPackInfo | null, };
+
+export type ContentItemProject = { id: string, slug: string | null, title: string, icon_url: string | null, license: ModrinthLicense, categories: Array<string>, additional_categories: Array<string>, };
+
+export type ContentItemVersion = { id: string, version_number: string, file_name: string, date_published: string | null, };
+
+export type ContentItemOwner = { id: string, name: string, avatar_url: string | null, type: OwnerType, };
+
+export type OwnerType = "user" | "organization";
+
+export type VersionEnvironment = "client_and_server" | "client_only" | "client_only_server_optional" | "singleplayer_only" | "server_only" | "server_only_client_optional" | "dedicated_server_only" | "client_or_server" | "client_or_server_prefers_both" | "unknown";
+
+export type EmbeddedContentMetadata = { name: string | null, version: string | null, icon_path: string | null, };
+
+export type SyncedPackInfo = { id: string, instance_ids: Array<string>, update_pending: boolean, };
+
+export type LinkedModpackInfo = { project: ModrinthProject, version: ModrinthVersion | null, owner: ContentItemOwner | null, has_update: boolean, update_version_id: string | null, update_version: ModrinthVersion | null, };
+
+export type InstanceInstallCandidate = { id: string, name: string, icon_path: string | null, game_version: string, loader: ModLoader, installed: boolean, compatible: boolean, };
+
+export type InstanceInstallTarget = { game_version: string, loader: string, };
+
+export type InstallCandidatesQuery = { project_id: string, project_type: ProjectType, targets: Array<InstanceInstallTarget>, };
+
+export type DependencyContentQuery = { dependencies: Array<ModrinthDependency>, cacheBehaviour?: CacheBehaviour, };
+
+export type ProjectIdQuery = { project_id: string, };
+
+export type NewProject = { version_id: string, reason: DownloadReason, dependent_on_version_id?: string | null, };
+
+export type DownloadReason = "standalone" | "dependency" | "modpack" | "update";
+
+export type InstallProjectWithDependenciesRequest = { project_id: string, version_id?: string | null, content_type: ContentType, selected?: ResolutionPreferences, };
+
+export type ContentType = "mod" | "plugin" | "datapack" | "resourcepack" | "shader" | "modpack";
+
+export type ResolutionPreferences = { game_versions?: Array<string>, loaders?: Array<string>, };
+
+export type ResolveContentPlan = { primary: ResolvedContent, dependencies: Array<ResolvedContent>, skipped: Array<SkippedContent>, };
+
+export type ResolvedContent = { project_id: string, version_id: string, dependent_on_version_id: string | null, };
+
+export type SkippedContent = { project_id: string, version_id: string | null, dependent_on_version_id: string | null, reason: SkippedReason, };
+
+export type SkippedReason = "already_installed" | "duplicate_project" | "conflicting_dependency" | "no_compatible_version" | "missing_version" | "quilt_fabric_api";
+
+export type ProjectPath = { project_path: string, };
+
+export type ProjectVersionSwitch = { project_path: string, version_id: string, };
+
+export type ProjectToggle = { project_path: string, 
+/**
+ * Flips the current state when absent.
+ */
+desired_enabled?: boolean | null, };
+
+export type ProjectLock = { project_path: string, locked: boolean, };
+
+export type ModpackVersion = { version_id: string, };
+
+export type ExportCandidatesQuery = { parent?: string, };
+
+export type PackExportCandidate = { path: string, type: PackExportCandidateType, size?: number, modified?: number, count?: number, disabled: boolean, defaultSelected: boolean, };
+
+export type PackExportCandidateType = "directory" | "file";
+
 export type FriendPayload = { "event": "friend_request", from: string, } | { "event": "user_offline", id: string, } | { "event": "status_update", user_status: FriendStatusPayload, } | { "event": "status_sync" } | { "event": "friend_request_rejected", from: string, };
 
 export type FriendStatusPayload = { user_id: string, profile_name: string | null, last_update: string, };
@@ -358,6 +434,10 @@ export const instances = {
 	ListInstances: { method: "GET", path: "/instances", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<GameInstance>>,
 	GetInstances: { method: "GET", path: "/instances/many", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, InstanceIds, void, Array<GameInstance>>,
 	GetInstance: { method: "GET", path: "/instances/{id}", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceRef, null, void, GameInstance | null>,
+	RemoveInstance: { method: "DELETE", path: "/instances/{id}", auth: "session", dangerous: false, body: "empty", response: "empty" } as Endpoint<InstanceRef, null, void, void>,
+	EditInstance: { method: "PATCH", path: "/instances/{id}", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<InstanceRef, null, InstanceUpdate, void>,
+	KillInstance: { method: "POST", path: "/instances/{id}/kill", auth: "session", dangerous: false, body: "empty", response: "empty" } as Endpoint<InstanceRef, null, void, void>,
+	GetOptimalJava: { method: "GET", path: "/instances/{id}/java", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceRef, null, void, JavaVersion | null>,
 }
 
 export const instanceGroups = {
@@ -480,4 +560,27 @@ export const installs = {
 	CancelInstallJob: { method: "POST", path: "/install-jobs/{id}/cancel", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstallJobRef, null, void, InstallJobSnapshot>,
 	DismissInstallJob: { method: "DELETE", path: "/install-jobs/{id}", auth: "session", dangerous: false, body: "empty", response: "empty" } as Endpoint<InstallJobRef, null, void, void>,
 	GetInstallJobSupportDetails: { method: "GET", path: "/install-jobs/{id}/support-details", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstallJobRef, null, void, string>,
+}
+
+export const instanceContent = {
+	ListInstanceProjects: { method: "GET", path: "/instances/{id}/projects", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceRef, CacheRead, void, { [key in string]: ContentFile }>,
+	ListInstalledProjectIds: { method: "GET", path: "/instances/{id}/projects/ids", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceRef, null, void, Array<string>>,
+	CheckProjectInstalled: { method: "GET", path: "/instances/{id}/projects/installed", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceRef, ProjectIdQuery, void, boolean>,
+	ListInstallCandidates: { method: "POST", path: "/install-candidates", auth: "session", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, InstallCandidatesQuery, Array<InstanceInstallCandidate>>,
+	ListContentItems: { method: "GET", path: "/instances/{id}/content", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceRef, CacheRead, void, Array<ContentItem>>,
+	RefreshContentUpdates: { method: "POST", path: "/instances/{id}/content/refresh-updates", auth: "session", dangerous: false, body: "empty", response: "empty" } as Endpoint<InstanceRef, null, void, void>,
+	SyncContentFiles: { method: "POST", path: "/instances/{id}/content/sync", auth: "session", dangerous: false, body: "empty", response: "empty" } as Endpoint<InstanceRef, null, void, void>,
+	ListDependencyContentItems: { method: "POST", path: "/content-items/dependencies", auth: "session", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, DependencyContentQuery, Array<ContentItem>>,
+	GetLinkedModpack: { method: "GET", path: "/instances/{id}/modpack", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceRef, CacheRead, void, LinkedModpackInfo | null>,
+	ListLinkedModpackContent: { method: "GET", path: "/instances/{id}/modpack/content", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceRef, CacheRead, void, Array<ContentItem>>,
+	AddProjectFromVersion: { method: "POST", path: "/instances/{id}/projects", auth: "session", dangerous: false, body: "json", response: "json" } as Endpoint<InstanceRef, null, NewProject, string>,
+	InstallProjectWithDependencies: { method: "POST", path: "/instances/{id}/projects/with-dependencies", auth: "session", dangerous: false, body: "json", response: "json" } as Endpoint<InstanceRef, null, InstallProjectWithDependenciesRequest, ResolveContentPlan>,
+	UpdateProject: { method: "POST", path: "/instances/{id}/projects/update", auth: "session", dangerous: false, body: "json", response: "json" } as Endpoint<InstanceRef, null, ProjectPath, string>,
+	SwitchProjectVersion: { method: "POST", path: "/instances/{id}/projects/switch-version", auth: "session", dangerous: false, body: "json", response: "json" } as Endpoint<InstanceRef, null, ProjectVersionSwitch, string>,
+	ToggleProject: { method: "POST", path: "/instances/{id}/projects/toggle", auth: "session", dangerous: false, body: "json", response: "json" } as Endpoint<InstanceRef, null, ProjectToggle, string>,
+	SetProjectLocked: { method: "PUT", path: "/instances/{id}/projects/locked", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<InstanceRef, null, ProjectLock, void>,
+	RemoveProject: { method: "POST", path: "/instances/{id}/projects/remove", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<InstanceRef, null, ProjectPath, void>,
+	UpdateModpackVersion: { method: "POST", path: "/instances/{id}/modpack/update", auth: "session", dangerous: false, body: "json", response: "json" } as Endpoint<InstanceRef, null, ModpackVersion, InstallJobSnapshot>,
+	RepairModpack: { method: "POST", path: "/instances/{id}/modpack/repair", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceRef, null, void, InstallJobSnapshot>,
+	ListPackExportCandidates: { method: "GET", path: "/instances/{id}/export-candidates", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceRef, ExportCandidatesQuery, void, Array<PackExportCandidate>>,
 }

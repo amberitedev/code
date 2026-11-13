@@ -579,7 +579,7 @@ async fn the_files_tab_writes_reads_moves_and_deletes_raw_bytes() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn the_files_tab_refuses_paths_that_leave_the_instance() {
+async fn file_and_content_routes_refuse_paths_that_leave_the_instance() {
     let dir = tempfile::tempdir().unwrap();
     let router = host(&dir, true).await;
     let files = "/instances/local%3Aa/files";
@@ -613,6 +613,14 @@ async fn the_files_tab_refuses_paths_that_leave_the_instance() {
         )
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{path} was a move target");
+        let (status, _) = send(
+            &router,
+            "POST",
+            "/instances/local%3Aa/projects/remove",
+            Some(json!({ "project_path": path.replace("%2F", "/").replace("%3A", ":") })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{path} was removed");
     }
     let (status, _) =
         send(&router, "GET", &format!("{files}?path=.."), None).await;
@@ -661,6 +669,33 @@ async fn the_files_tab_refuses_paths_that_leave_the_instance() {
     }
 
     assert!(!has_file_named(dir.path(), "escape.txt"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_editor_edits_an_instance_and_only_an_owner_removes_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = host_granting(&dir, Some(Permission::Edit)).await;
+    let instance = "/instances/local%3Aa";
+
+    let (status, _) = send(
+        &router,
+        "PATCH",
+        instance,
+        Some(json!({ "name": "Creative", "java_path": null })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, edited) = send(&router, "GET", instance, None).await;
+    assert_eq!(edited["name"], "Creative");
+    let (status, _) = send(&router, "DELETE", instance, None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let dir = tempfile::tempdir().unwrap();
+    let router = host(&dir, true).await;
+    let (status, _) = send(&router, "DELETE", instance, None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, removed) = send(&router, "GET", instance, None).await;
+    assert_eq!(removed, Value::Null);
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -154,6 +154,7 @@ impl LocalServer {
                     .merge(friends::routes::routes())
                     .merge(skins::routes::routes())
                     .merge(desktop::op_routes())
+                    .merge(desktop::instance_paths::routes())
                     .merge(accounts::routes::routes())
                     .merge(launch::routes())
                     .merge(settings::routes::routes())

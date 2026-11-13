@@ -5,6 +5,7 @@ use crate::state::{
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ContentItem {
     pub file_name: String,
     pub file_path: String,
@@ -27,6 +28,7 @@ pub struct ContentItem {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct SyncedPackInfo {
     pub id: String,
     pub instance_ids: Vec<String>,
@@ -34,6 +36,7 @@ pub struct SyncedPackInfo {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct EmbeddedContentMetadata {
     pub name: Option<String>,
     pub version: Option<String>,
@@ -49,6 +52,7 @@ impl EmbeddedContentMetadata {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ContentItemProject {
     pub id: String,
     pub slug: Option<String>,
@@ -60,6 +64,7 @@ pub struct ContentItemProject {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ContentItemVersion {
     pub id: String,
     pub version_number: String,
@@ -68,6 +73,7 @@ pub struct ContentItemVersion {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ContentItemOwner {
     pub id: String,
     pub name: String,
@@ -77,6 +83,7 @@ pub struct ContentItemOwner {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
 pub enum OwnerType {
     User,
@@ -84,6 +91,7 @@ pub enum OwnerType {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct LinkedModpackInfo {
     pub project: Project,
     pub version: Option<Version>,

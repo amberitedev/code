@@ -51,6 +51,7 @@ pub mod game_options;
 pub mod health;
 pub mod import;
 pub mod install;
+pub mod instance_paths;
 pub mod launch;
 pub mod library;
 pub mod onboarding;
@@ -107,12 +108,19 @@ mod tests {
             self, InstallCreateInstanceRequest, InstallModpackPreview,
             InstallPostInstallEdit, PackInstall,
         },
+        instance_paths::{
+            self, ContentPathQuery, LocalContentFile, LocalIcon, LocalProject,
+            MrpackExport,
+        },
         launch::{
-            JoinServer, JoinSingleplayerWorld, ServerJoin, SingleplayerJoin,
+            InstancePlay, JoinServer, JoinSingleplayerWorld, PlayInstance,
+            ServerJoin, SingleplayerJoin,
         },
         library::{
-            InstanceVisibility, ListHiddenInstances, ListRecentIconConfigs,
-            RecentIconConfigs, SetInstanceHidden,
+            CacheGeneratedIcon, CacheIcon, GeneratedIcon,
+            GeneratedInstanceIcon, InstanceVisibility, ListHiddenInstances,
+            ListRecentIconConfigs, RecentIconConfigs, SetGeneratedInstanceIcon,
+            SetInstanceHidden,
         },
         onboarding::{
             GetOnboardingChecklist, OnboardingProgress,
@@ -304,6 +312,14 @@ mod tests {
             InstallCreateInstanceRequest::decl(&cfg),
             PackInstall::decl(&cfg),
             InstallPostInstallEdit::decl(&cfg),
+            InstancePlay::decl(&cfg),
+            ContentPathQuery::decl(&cfg),
+            LocalProject::decl(&cfg),
+            LocalContentFile::decl(&cfg),
+            MrpackExport::decl(&cfg),
+            LocalIcon::decl(&cfg),
+            GeneratedIcon::decl(&cfg),
+            GeneratedInstanceIcon::decl(&cfg),
         ]
         .map(|declaration| format!("\nexport {declaration}\n"))
         .concat();
@@ -311,7 +327,7 @@ mod tests {
             "// Generated from apps/app by ts-rs. Do not edit.\n\
              // Regenerate: cargo test -p theseus_gui -- --ignored write_ts\n\n\
              import type {{ ApiError, CoreSession, Endpoint, SharedIconConfig, UserFriend, UserStatus }} from './contracts'\n\
-             import type {{ CommandPayload, DesyncServerMode, EngineEvent, FriendPayload, ImportLauncherType, InstallJobSnapshot, InstanceGroupsChangedPayload, InstanceLink, JavaVersion, ModLoader, OnboardingChecklist, Settings }} from './engine'\n\
+             import type {{ CommandPayload, DesyncServerMode, EngineEvent, FriendPayload, ImportLauncherType, InstallJobSnapshot, InstanceGroupsChangedPayload, InstanceLink, JavaVersion, ModLoader, OnboardingChecklist, ProcessMetadata, ProjectType, Settings }} from './engine'\n\
              {declarations}\n\
              export const health = {{\n\
              \tcheckHealth: {},\n\
@@ -353,6 +369,9 @@ mod tests {
              \tlistRecentIconConfigs: {},\n\
              \tlistHiddenInstances: {},\n\
              \tsetInstanceHidden: {},\n\
+             \tcacheIcon: {},\n\
+             \tcacheGeneratedIcon: {},\n\
+             \tsetGeneratedInstanceIcon: {},\n\
              }}\n\n\
              export const gameOptions = {{\n{}}}\n\n\
              export const syncedOptions = {{\n{}}}\n\n\
@@ -364,6 +383,7 @@ mod tests {
              export const updates = {{\n{}}}\n\n\
              export const localAccounts = {{\n{}}}\n\n\
              export const launch = {{\n\
+             \tplayInstance: {},\n\
              \tjoinServer: {},\n\
              \tjoinSingleplayerWorld: {},\n\
              }}\n\n\
@@ -382,7 +402,8 @@ mod tests {
              \tgetDefaultLauncherPath: {},\n\
              \timportInstance: {},\n\
              }}\n\n\
-             export const localInstalls = {{\n{}}}\n",
+             export const localInstalls = {{\n{}}}\n\n\
+             export const instancePaths = {{\n{}}}\n",
             endpoint::<CheckHealth>(),
             endpoint::<GetBoot>(),
             endpoint::<ConnectCore>(),
@@ -410,6 +431,9 @@ mod tests {
             endpoint::<ListRecentIconConfigs>(),
             endpoint::<ListHiddenInstances>(),
             endpoint::<SetInstanceHidden>(),
+            endpoint::<CacheIcon>(),
+            endpoint::<CacheGeneratedIcon>(),
+            endpoint::<SetGeneratedInstanceIcon>(),
             game_options::ts_entries(),
             synced_options::ts_entries(),
             synced_packs::ts_entries(),
@@ -419,6 +443,7 @@ mod tests {
             ops::ts_entries(),
             updates::ts_entries(),
             accounts::ts_entries(),
+            endpoint::<PlayInstance>(),
             endpoint::<JoinServer>(),
             endpoint::<JoinSingleplayerWorld>(),
             endpoint::<GetSettings>(),
@@ -431,6 +456,7 @@ mod tests {
             endpoint::<GetDefaultLauncherPath>(),
             endpoint::<ImportInstance>(),
             install::ts_entries(),
+            instance_paths::ts_entries(),
         )
     }
 

@@ -2,11 +2,13 @@
 //! its own hook. A host's state gives the engine and its [`Access`].
 
 mod cache;
+mod content;
 mod files;
 mod groups;
 mod install;
 mod instances;
 mod jre;
+mod lifecycle;
 mod loading;
 mod logs;
 mod metadata;
@@ -24,8 +26,9 @@ use contracts::{ApiError, ErrorCode, server::route};
 use serde::Deserialize;
 
 pub use self::{
-    cache::*, files::*, groups::*, install::*, instances::*, jre::*,
-    loading::*, logs::*, metadata::*, process::*, store::*, tags::*, worlds::*,
+    cache::*, content::*, files::*, groups::*, install::*, instances::*,
+    jre::*, lifecycle::*, loading::*, logs::*, metadata::*, process::*,
+    store::*, tags::*, worlds::*,
 };
 use crate::{
     Engine,
@@ -37,6 +40,16 @@ use crate::{
             GetCachedSearchResults, GetCachedSearchResultsV3, GetCachedTeam,
             GetCachedUser, GetCachedUsers, GetCachedVersion, GetCachedVersions,
             PurgeCache,
+        },
+        content::{
+            AddProjectFromVersion, CheckProjectInstalled, GetLinkedModpack,
+            InstallProjectWithDependencies, ListContentItems,
+            ListDependencyContentItems, ListInstallCandidates,
+            ListInstalledProjectIds, ListInstanceProjects,
+            ListLinkedModpackContent, ListPackExportCandidates,
+            RefreshContentUpdates, RemoveProject, RepairModpack,
+            SetProjectLocked, SwitchProjectVersion, SyncContentFiles,
+            ToggleProject, UpdateModpackVersion, UpdateProject,
         },
         files::{
             CreateInstanceDirectory, DeleteInstanceFile, ExtractInstanceZip,
@@ -59,7 +72,10 @@ use crate::{
             RestoreSharedInstanceVersion, ResumeInstallJob, RetryInstallJob,
             SetSharedHistoryKept, UpdateInstanceContent, UpdateSharedInstance,
         },
-        instances::{GetInstance, GetInstances, ListInstances},
+        instances::{
+            EditInstance, GetInstance, GetInstances, GetOptimalJava,
+            KillInstance, ListInstances, RemoveInstance,
+        },
         jre::{
             FindJavaInstalls, GetJavaVersions, GetSystemMemory, InstallJava,
             SetJavaVersion,
@@ -93,6 +109,34 @@ where
         route::<ListInstances, _, _, _>(list_instances),
         route::<GetInstances, _, _, _>(get_instances),
         route::<GetInstance, _, _, _>(get_instance),
+        route::<RemoveInstance, _, _, _>(remove_instance),
+        route::<EditInstance, _, _, _>(edit_instance),
+        route::<KillInstance, _, _, _>(kill_instance),
+        route::<GetOptimalJava, _, _, _>(get_optimal_java),
+        route::<ListInstanceProjects, _, _, _>(list_instance_projects),
+        route::<ListInstalledProjectIds, _, _, _>(list_installed_project_ids),
+        route::<CheckProjectInstalled, _, _, _>(check_project_installed),
+        route::<ListInstallCandidates, _, _, _>(list_install_candidates),
+        route::<ListContentItems, _, _, _>(list_content_items),
+        route::<RefreshContentUpdates, _, _, _>(refresh_content_updates),
+        route::<SyncContentFiles, _, _, _>(sync_content_files),
+        route::<ListDependencyContentItems, _, _, _>(
+            list_dependency_content_items,
+        ),
+        route::<GetLinkedModpack, _, _, _>(get_linked_modpack),
+        route::<ListLinkedModpackContent, _, _, _>(list_linked_modpack_content),
+        route::<AddProjectFromVersion, _, _, _>(add_project_from_version),
+        route::<InstallProjectWithDependencies, _, _, _>(
+            install_project_with_dependencies,
+        ),
+        route::<UpdateProject, _, _, _>(update_project),
+        route::<SwitchProjectVersion, _, _, _>(switch_project_version),
+        route::<ToggleProject, _, _, _>(toggle_project),
+        route::<SetProjectLocked, _, _, _>(set_project_locked),
+        route::<RemoveProject, _, _, _>(remove_project),
+        route::<UpdateModpackVersion, _, _, _>(update_modpack_version),
+        route::<RepairModpack, _, _, _>(repair_modpack),
+        route::<ListPackExportCandidates, _, _, _>(list_pack_export_candidates),
         route::<ListInstanceGroups, _, _, _>(list_instance_groups),
         route::<CreateInstanceGroup, _, _, _>(create_instance_group),
         route::<RenameInstanceGroup, _, _, _>(rename_instance_group),

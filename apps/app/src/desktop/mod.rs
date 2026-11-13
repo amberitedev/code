@@ -2,6 +2,7 @@ mod debug_export;
 mod dialog;
 mod external_save;
 pub mod files;
+pub mod instance_paths;
 mod jre;
 mod network;
 mod opener;

@@ -22,7 +22,7 @@ use crate::{
 
 /// A caller's path stays inside the instance's folder. The engine refuses one that leaves it too,
 /// but as an internal error. A leading `/` is the folder itself, as the engine reads it.
-fn inside_instance(path: &str) -> Result<&str, ApiError> {
+pub(super) fn inside_instance(path: &str) -> Result<&str, ApiError> {
     let relative = path.trim_start_matches('/');
     if relative.is_empty() || validate_relative(relative).is_ok() {
         Ok(path)

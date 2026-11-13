@@ -62,22 +62,28 @@ const NEVER_EXPORTABLE_PATH_PREFIXES: &[&str] = &[
 const NEVER_EXPORTABLE_PATH_SUFFIXES: &[&str] = &[".DS_Store"];
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct PackExportCandidate {
+    #[cfg_attr(feature = "export-ts", ts(as = "String"))]
     pub path: SafeRelativeUtf8UnixPathBuf,
     #[serde(rename = "type")]
     pub kind: PackExportCandidateType,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "export-ts", ts(optional))]
     pub size: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "export-ts", ts(optional))]
     pub modified: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "export-ts", ts(optional))]
     pub count: Option<usize>,
     pub disabled: bool,
     pub default_selected: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub enum PackExportCandidateType {
     Directory,
