@@ -240,7 +240,8 @@ pub async fn check_java_at_filepaths(
             tokio::task::spawn(async move { check_java_at_filepath(&p).await })
         })
         .buffer_unordered(64)
-        .filter_map(async |x| x.ok().and_then(Result::ok))
+        // An async closure here crashes rustc 1.95 under incremental compilation.
+        .filter_map(|x| async move { x.ok().and_then(Result::ok) })
         .collect()
         .await
 }
