@@ -7,10 +7,7 @@
 use anyhow::Context;
 use engine::prelude::*;
 use native_dialog::{DialogBuilder, MessageLevel};
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
-};
+use std::sync::Arc;
 use tauri::{Listener, Manager};
 
 mod api;
@@ -27,11 +24,6 @@ mod synced_options;
 
 #[cfg(target_os = "macos")]
 mod macos;
-
-#[cfg(feature = "updater")]
-mod updater_impl;
-#[cfg(not(feature = "updater"))]
-mod updater_impl_noop;
 
 /// Starts the engine and signs a dev App in before its routes open. Setup runs it, and opening the
 /// event socket runs it again after a failure.
@@ -86,29 +78,6 @@ fn show_window(app: tauri::AppHandle) {
     }
 }
 
-#[cfg(feature = "updater")]
-pub use updater_impl::*;
-
-#[cfg(not(feature = "updater"))]
-pub use updater_impl_noop::*;
-
-#[tauri::command]
-fn restart_app(app: tauri::AppHandle) {
-    app.restart();
-}
-
-#[derive(Default)]
-struct RestartAfterPendingUpdate(AtomicBool);
-
-#[tauri::command]
-async fn set_restart_after_pending_update(
-    should_restart: bool,
-    restart: tauri::State<'_, RestartAfterPendingUpdate>,
-) -> api::Result<()> {
-    restart.0.store(should_restart, Ordering::Relaxed);
-    Ok(())
-}
-
 // if Tauri app is called with arguments, then those arguments will be treated as commands
 // ie: deep links or filepaths for .mrpacks
 fn main() {
@@ -157,6 +126,7 @@ fn main() {
     let events = server::events::Events::default();
     let engine = engine_handle::EngineHandle::default();
     let desktop = desktop::AppSlot::default();
+    let updater = Arc::new(desktop::updater::Updater::new(desktop.clone()));
     let router = local.router(
         server::endpoints::boot::Boot::current(
             tauri_context.package_info().version.to_string(),
@@ -164,6 +134,7 @@ fn main() {
         events.clone(),
         engine.clone(),
         desktop.clone(),
+        Arc::clone(&updater),
     );
     runtime.spawn(local.serve(router));
 
@@ -375,17 +346,9 @@ fn main() {
         .plugin(api::cache::init())
         .plugin(api::files::init())
         .plugin(api::worlds::init())
-        .manage(PendingUpdateData::default())
-        .manage(RestartAfterPendingUpdate::default())
+        .manage(updater)
         .manage(engine)
-        .invoke_handler(tauri::generate_handler![
-            get_update_size,
-            enqueue_update_for_installation,
-            remove_enqueued_update,
-            set_restart_after_pending_update,
-            show_window,
-            restart_app,
-        ]);
+        .invoke_handler(tauri::generate_handler![show_window]);
 
     tracing::info!("Initializing app...");
     let app = builder.build(tauri_context);
@@ -412,13 +375,10 @@ fn main() {
 
                 #[cfg(feature = "updater")]
                 if matches!(&event, tauri::RunEvent::Exit) {
-                    let update_data = app.state::<PendingUpdateData>().inner();
-                    let should_restart = app
-                        .state::<RestartAfterPendingUpdate>()
-                        .0
-                        .load(Ordering::Relaxed);
-                    if let Some((update, data)) = &*update_data.0.lock().unwrap()
-                    {
+                    let updater =
+                        app.state::<Arc<desktop::updater::Updater>>();
+                    let should_restart = updater.restarts_after();
+                    if let Some((update, data)) = &updater.take_downloaded() {
                         let state = app.state::<engine_handle::EngineHandle>().try_get();
                         fn set_changelog_toast(state: Option<&Engine>, version: Option<String>) {
                             let Some(state) = state else {

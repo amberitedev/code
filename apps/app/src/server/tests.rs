@@ -22,7 +22,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tower::ServiceExt;
 
 use super::{
-    AppSlot, EngineHandle, LocalServer,
+    AppSlot, EngineHandle, LocalServer, Updater,
     endpoints::boot::{Boot, Platform},
     events::Events,
     guard::{APP_ORIGINS, Guard},
@@ -42,6 +42,7 @@ fn boot() -> Boot {
 
 struct Local {
     router: Router,
+    updater: Arc<Updater>,
     secret: String,
     host: String,
     /// The Core proxy's.
@@ -54,13 +55,17 @@ fn local() -> Local {
 
 fn local_with(engine: EngineHandle) -> Local {
     let server = LocalServer::bind(None, None, None).unwrap();
+    let app = AppSlot::default();
+    let updater = Arc::new(Updater::new(app.clone()));
     Local {
         router: server.router(
             boot(),
             Events::default(),
             engine,
-            AppSlot::default(),
+            app,
+            Arc::clone(&updater),
         ),
+        updater,
         secret: server.secret.clone(),
         host: format!("127.0.0.1:{}", server.port()),
         proxy_origin: format!(
@@ -263,6 +268,7 @@ async fn boot_answers_from_bind() {
         Events::default(),
         EngineHandle::default(),
         AppSlot::default(),
+        Arc::new(Updater::new(AppSlot::default())),
     );
     tokio::spawn(server.serve(router));
 
@@ -294,6 +300,7 @@ async fn the_event_socket_waits_for_the_engine_then_sends_events_as_json() {
         events.clone(),
         handle.clone(),
         AppSlot::default(),
+        Arc::new(Updater::new(AppSlot::default())),
     );
     tokio::spawn(server.serve(router));
 
@@ -469,4 +476,53 @@ async fn a_screenshot_edit_past_axums_default_body_limit_reaches_the_engine() {
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let body: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(body["description"], "invalid input: unknown instance");
+}
+
+/// Only a release build finds, downloads and installs a real update.
+#[tokio::test(flavor = "multi_thread")]
+async fn without_the_updater_no_update_is_found_or_downloaded() {
+    engine::install_crypto_provider();
+    let dir = tempfile::tempdir().unwrap();
+    let handle = EngineHandle::default();
+    handle.set(Ok(engine::Engine::new(engine::EngineConfig {
+        settings_dir: dir.path().to_path_buf(),
+        events: engine::EventSink::new(),
+        accounts: None,
+    })
+    .await
+    .unwrap()));
+    let local = &local_with(handle);
+    let send = |request: axum::http::request::Builder, body: Option<Value>| {
+        let request = request
+            .header(HOST, &local.host)
+            .header(ORIGIN, "tauri://localhost")
+            .header(CONTENT_TYPE, "application/json")
+            .body(body.map_or_else(Body::empty, |body| body.to_string().into()))
+            .unwrap();
+        async move {
+            let response = local.send(request).await;
+            let status = response.status();
+            let body =
+                to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            (status, serde_json::from_slice::<Value>(&body).ok())
+        }
+    };
+    let path = |path: &str| format!("/{}/{path}", local.secret);
+
+    let (_, check) = send(Request::post(path("app/updates/check")), None).await;
+    assert_eq!(check.unwrap()["error"], "unsupported");
+    let (status, download) = send(
+        Request::post(path("app/ops/update-download")),
+        Some(json!({ "op": "update" })),
+    )
+    .await;
+    assert_ne!(status, StatusCode::ACCEPTED, "a download op started");
+    assert_eq!(download.unwrap()["error"], "not_found");
+
+    send(
+        Request::put(path("app/updates/restart-after")),
+        Some(json!({ "restart": true })),
+    )
+    .await;
+    assert!(local.updater.restarts_after());
 }

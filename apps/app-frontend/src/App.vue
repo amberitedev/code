@@ -151,6 +151,7 @@ import { get_user_preferences } from '@/helpers/user-preferences.ts'
 import { parse_modrinth_user_link } from '@/helpers/users'
 import {
 	areUpdatesEnabled,
+	checkForUpdate,
 	enqueueUpdateForInstallation,
 	getOS,
 	getUpdateSize,
@@ -1666,7 +1667,7 @@ async function checkUpdates() {
 	}
 
 	async function performCheck() {
-		const update = await invoke('plugin:updater|check')
+		const update = await checkForUpdate()
 		if (!update) {
 			console.log('No update available')
 			return

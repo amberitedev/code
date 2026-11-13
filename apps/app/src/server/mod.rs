@@ -36,7 +36,7 @@ use url::Url;
 
 use crate::{
     cores::{self, Cores},
-    desktop::{self, AppSlot},
+    desktop::{self, AppSlot, updater::Updater},
     engine_handle::EngineHandle,
     friends, library, screenshots, skins, synced_options,
 };
@@ -103,6 +103,7 @@ impl LocalServer {
         events: events::Events,
         engine: EngineHandle,
         app: AppSlot,
+        updater: Arc<Updater>,
     ) -> Router {
         let guard = Arc::new(Guard::new(
             self.secret.clone(),
@@ -124,6 +125,7 @@ impl LocalServer {
             engine: engine.clone(),
             access: Arc::new(AppAccess),
             ops,
+            updater,
         };
         // Every router over AppState merges here: its engine exists only behind wait_for_engine.
         let waiting = Router::new()
@@ -137,6 +139,7 @@ impl LocalServer {
                     .merge(skins::routes::routes())
                     .merge(ops::routes())
                     .merge(desktop::op_routes())
+                    .merge(desktop::updater::routes())
                     .with_state(state),
             )
             .route_layer(middleware::from_fn_with_state(
@@ -205,6 +208,7 @@ pub struct AppState {
     engine: EngineHandle,
     access: Arc<dyn Access>,
     ops: Arc<ops::Ops>,
+    updater: Arc<Updater>,
 }
 
 impl FromRef<AppState> for Arc<Engine> {
@@ -225,6 +229,12 @@ impl FromRef<AppState> for Arc<dyn Access> {
 impl FromRef<AppState> for Arc<ops::Ops> {
     fn from_ref(state: &AppState) -> Self {
         Arc::clone(&state.ops)
+    }
+}
+
+impl FromRef<AppState> for Arc<Updater> {
+    fn from_ref(state: &AppState) -> Self {
+        Arc::clone(&state.updater)
     }
 }
 

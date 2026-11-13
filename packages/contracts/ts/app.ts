@@ -280,6 +280,12 @@ path: string, destination: string, };
 
 export type OpResponse = { status: number, body: string, };
 
+export type AvailableUpdate = { version: string, };
+
+export type UpdateDownload = { op: string, };
+
+export type RestartAfterUpdate = { restart: boolean, };
+
 export const health = {
 	checkHealth: { method: "GET", path: "/health", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
 }
@@ -401,4 +407,13 @@ export const ops = {
 	saveExternalFile: { method: "POST", path: "/app/ops/external-save", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, ExternalSave, void>,
 	uploadLocalFile: { method: "POST", path: "/app/ops/upload", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, LocalUpload, void>,
 	saveInstanceFileAs: { method: "POST", path: "/app/ops/instance-file-save", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, InstanceFileSave, void>,
+}
+
+export const updates = {
+	checkForUpdate: { method: "POST", path: "/app/updates/check", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, AvailableUpdate | null>,
+	getUpdateSize: { method: "GET", path: "/app/updates/size", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, number | null>,
+	downloadUpdate: { method: "POST", path: "/app/ops/update-download", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, UpdateDownload, void>,
+	discardDownloadedUpdate: { method: "DELETE", path: "/app/updates/downloaded", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
+	setRestartAfterUpdate: { method: "PUT", path: "/app/updates/restart-after", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, RestartAfterUpdate, void>,
+	restartApp: { method: "POST", path: "/app/restart", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
 }

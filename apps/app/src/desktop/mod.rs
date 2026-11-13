@@ -6,6 +6,7 @@ mod network;
 mod opener;
 mod shortcuts;
 mod thumbnails;
+pub mod updater;
 mod upload;
 mod webview_log;
 

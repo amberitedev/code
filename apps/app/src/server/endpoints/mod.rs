@@ -54,6 +54,7 @@ pub mod screenshots;
 pub mod skins;
 pub mod synced_options;
 pub mod synced_packs;
+pub mod updates;
 
 /// The `{id}` of a route's path.
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -108,6 +109,7 @@ mod tests {
             self, DesyncQuery, InstancePack, InstancePackParams, NewSyncedPack,
             SyncedPackQuery, SyncedPackType, SyncedPackUpdate, SyncedPacks,
         },
+        updates::{self, AvailableUpdate, RestartAfterUpdate, UpdateDownload},
     };
     use crate::server::events::{
         AmberiteCommand, AppEvent, Command, LocalEvent,
@@ -238,6 +240,9 @@ mod tests {
             LocalUpload::decl(&cfg),
             InstanceFileSave::decl(&cfg),
             OpResponse::decl(&cfg),
+            AvailableUpdate::decl(&cfg),
+            UpdateDownload::decl(&cfg),
+            RestartAfterUpdate::decl(&cfg),
         ]
         .map(|declaration| format!("\nexport {declaration}\n"))
         .concat();
@@ -289,7 +294,8 @@ mod tests {
              export const screenshots = {{\n{}}}\n\n\
              export const friends = {{\n{}}}\n\n\
              export const skins = {{\n{}}}\n\n\
-             export const ops = {{\n{}}}\n",
+             export const ops = {{\n{}}}\n\n\
+             export const updates = {{\n{}}}\n",
             endpoint::<CheckHealth>(),
             endpoint::<GetBoot>(),
             endpoint::<ConnectCore>(),
@@ -319,6 +325,7 @@ mod tests {
             friends::ts_entries(),
             skins::ts_entries(),
             ops::ts_entries(),
+            updates::ts_entries(),
         )
     }
 

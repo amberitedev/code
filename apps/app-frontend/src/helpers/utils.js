@@ -1,9 +1,9 @@
-import { ContractClient, desktop } from '@modrinth/api-client'
-import { invoke } from '@tauri-apps/api/core'
+import { ContractClient, desktop, updates } from '@modrinth/api-client'
 
 import { get_full_path, get_mod_full_path } from '@/helpers/instance'
 import { save } from '@/platform/dialog'
 import { localTransport } from '@/platform/local'
+import { runOp } from '@/platform/ops'
 import { getBoot } from '@/platform/os'
 
 const local = new ContractClient(localTransport)
@@ -16,20 +16,27 @@ export async function areUpdatesEnabled() {
 	return getBoot().updates_enabled
 }
 
-export async function getUpdateSize(updateRid) {
-	return await invoke('get_update_size', { rid: updateRid })
+export async function checkForUpdate() {
+	return await local.call(updates.checkForUpdate)
 }
 
-export async function enqueueUpdateForInstallation(updateRid) {
-	return await invoke('enqueue_update_for_installation', { rid: updateRid })
+// The App keeps the update its last check found, so the rid is unused.
+export async function getUpdateSize(_updateRid) {
+	return await local.call(updates.getUpdateSize)
+}
+
+export async function enqueueUpdateForInstallation(_updateRid) {
+	const op = crypto.randomUUID()
+	const { error } = await runOp(op, () => local.call(updates.downloadUpdate, { body: { op } }))
+	if (error) throw new Error(error.description)
 }
 
 export async function removeEnqueuedUpdate() {
-	return await invoke('remove_enqueued_update')
+	return await local.call(updates.discardDownloadedUpdate)
 }
 
 export async function setRestartAfterPendingUpdate(should_restart) {
-	return await invoke('set_restart_after_pending_update', { shouldRestart: should_restart })
+	return await local.call(updates.setRestartAfterUpdate, { body: { restart: should_restart } })
 }
 
 // One of 'Windows', 'Linux', 'MacOS'
@@ -87,7 +94,7 @@ export async function highlightModInInstance(instanceId, projectPath) {
 }
 
 export async function restartApp() {
-	return await invoke('restart_app')
+	return await local.call(updates.restartApp)
 }
 
 export const releaseColor = (releaseType) => {
