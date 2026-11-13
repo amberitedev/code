@@ -1,3 +1,4 @@
+use crate::ErrorKind;
 use crate::launcher::get_loader_version_from_profile;
 use crate::state::instances::{
     ContentSet, ContentSetStatus, ContentSourceKind, Instance,
@@ -10,6 +11,7 @@ use crate::state::{
 };
 use crate::util::fetch;
 use crate::util::io;
+use anyhow::bail;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
@@ -18,6 +20,7 @@ use uuid::Uuid;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CreateInstance {
+    pub id: Option<String>,
     pub name: String,
     pub path: Option<String>,
     pub game_version: String,
@@ -34,6 +37,20 @@ pub(crate) async fn create_instance(
 ) -> crate::Result<Instance> {
     trace!("Creating new instance. {}", input.name);
 
+    let instance_id = match input.id {
+        Some(id) => {
+            if instance_rows::get_instance_by_id(&id, &state.pool)
+                .await?
+                .is_some()
+            {
+                bail!(ErrorKind::InputError(format!(
+                    "instance id {id} is already in use"
+                )));
+            }
+            id
+        }
+        None => format!("local:{}", Uuid::new_v4()),
+    };
     let (path, full_path) =
         resolve_instance_path(&input.name, input.path.as_deref(), state)
             .await?;
@@ -66,7 +83,6 @@ pub(crate) async fn create_instance(
         )
         .await?;
         let now = Utc::now();
-        let instance_id = format!("local:{}", Uuid::new_v4());
         let content_set_id = format!("content-set:{}", Uuid::new_v4());
         let instance = Instance {
             id: instance_id.clone(),
@@ -150,9 +166,18 @@ async fn resolve_instance_path(
     path: Option<&str>,
     state: &Engine,
 ) -> crate::Result<(String, std::path::PathBuf)> {
-    let base_path = path
-        .map(ToOwned::to_owned)
-        .unwrap_or_else(|| sanitize_instance_name(name));
+    if let Some(path) = path {
+        crate::state::content_store::validate_relative(path)?;
+        let full_path = state.directories.instances_dir().join(path);
+        if !path_available(path, &full_path, &state.pool).await? {
+            bail!(ErrorKind::InputError(format!(
+                "instance folder {path} is already in use"
+            )));
+        }
+        return Ok((path.to_owned(), full_path));
+    }
+
+    let base_path = sanitize_instance_name(name);
     crate::state::content_store::validate_relative(&base_path)?;
     let mut path = base_path.clone();
     let mut full_path = state.directories.instances_dir().join(&path);
@@ -257,4 +282,55 @@ fn sanitize_instance_name(input: &str) -> String {
         )
         .trim_end_matches(['.', ' '])
         .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn input(id: &str, folder: &str) -> CreateInstance {
+        CreateInstance {
+            id: Some(id.to_string()),
+            name: "Server".to_string(),
+            path: Some(folder.to_string()),
+            game_version: "1.21.1".to_string(),
+            loader: ModLoader::Vanilla,
+            loader_version: None,
+            icon_path: None,
+            icon_config: None,
+            link: InstanceLink::Unmanaged,
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_host_chooses_the_id_and_folder() {
+        crate::install_crypto_provider();
+        let tmp = tempfile::tempdir().unwrap();
+        let servers = tmp.path().join("servers");
+        let state = Engine::new(crate::state::EngineConfig {
+            instances_dir: servers.clone(),
+            ..crate::state::tests::config(tmp.path().join("engine"))
+        })
+        .await
+        .unwrap();
+        let id = Uuid::new_v4().to_string();
+
+        let instance = create_instance(input(&id, &id), &state).await.unwrap();
+        assert_eq!(
+            (instance.id.as_str(), instance.path.as_str()),
+            (&*id, &*id)
+        );
+        assert!(servers.join(&id).is_dir());
+
+        let other = Uuid::new_v4().to_string();
+        assert!(create_instance(input(&id, &other), &state).await.is_err());
+        assert!(create_instance(input(&other, &id), &state).await.is_err());
+        assert!(
+            create_instance(input(&other, "../escape"), &state)
+                .await
+                .is_err()
+        );
+        assert!(!servers.join(&other).exists());
+        assert!(!tmp.path().join("escape").exists());
+    }
 }

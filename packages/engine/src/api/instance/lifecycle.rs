@@ -19,6 +19,8 @@ pub fn create(
     icon_path: Option<String>,
     icon_config: Option<IconConfig>,
     link: InstanceLink,
+    id: Option<String>,
+    folder: Option<String>,
 ) -> impl Future<Output = crate::Result<InstanceMetadata>> + Send + '_ {
     Box::pin(create_inner(
         state,
@@ -29,6 +31,8 @@ pub fn create(
         icon_path,
         icon_config,
         link,
+        id,
+        folder,
     ))
 }
 
@@ -43,14 +47,17 @@ async fn create_inner(
     icon_path: Option<String>,
     icon_config: Option<IconConfig>,
     link: InstanceLink,
+    id: Option<String>,
+    folder: Option<String>,
 ) -> crate::Result<InstanceMetadata> {
     if let Some(icon_config) = &icon_config {
         super::icon::validate_generated_icon_config(icon_config)?;
     }
     let instance = crate::state::create_instance(
         CreateInstance {
+            id,
             name,
-            path: None,
+            path: folder,
             game_version,
             loader: modloader,
             loader_version,

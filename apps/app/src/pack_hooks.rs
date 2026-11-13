@@ -99,6 +99,8 @@ pub(crate) mod tests {
             None,
             None,
             InstanceLink::Unmanaged,
+            None,
+            None,
         )
         .await
         .unwrap()

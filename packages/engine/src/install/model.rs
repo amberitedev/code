@@ -176,6 +176,8 @@ pub enum InstallRequest {
         #[serde(default)]
         icon_config: Option<IconConfig>,
         link: InstanceLink,
+        id: Option<String>,
+        folder: Option<String>,
     },
     CreateModpackInstance {
         location: CreatePackLocation,

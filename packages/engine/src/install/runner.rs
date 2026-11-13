@@ -90,6 +90,8 @@ pub async fn create_instance(
     icon_path: Option<String>,
     icon_config: Option<IconConfig>,
     link: InstanceLink,
+    id: Option<String>,
+    folder: Option<String>,
     state: &Arc<Engine>,
 ) -> crate::Result<InstallJobSnapshot> {
     start(
@@ -102,6 +104,8 @@ pub async fn create_instance(
             icon_path,
             icon_config,
             link,
+            id,
+            folder,
         },
     )
     .await
@@ -698,6 +702,8 @@ async fn prepare_initial_instance(
             icon_path,
             icon_config,
             link,
+            id,
+            folder,
         } => {
             diagnostics::install_step(
                 job_id,
@@ -712,6 +718,8 @@ async fn prepare_initial_instance(
                         icon_path,
                         icon_config,
                         link,
+                        id,
+                        folder,
                     ))
                     .await?;
                     set_display(
@@ -770,6 +778,8 @@ async fn prepare_initial_instance(
                         icon_path,
                         None,
                         link,
+                        None,
+                        None,
                     ))
                     .await?;
                     set_display(
@@ -839,6 +849,8 @@ async fn prepare_initial_instance(
                         icon_path,
                         icon_config,
                         shared_link,
+                        None,
+                        None,
                     ))
                     .await?;
                     set_display(
@@ -881,6 +893,8 @@ async fn prepare_initial_instance(
                         None,
                         None,
                         InstanceLink::Unmanaged,
+                        None,
+                        None,
                     ))
                     .await?;
                     set_display(
@@ -916,6 +930,8 @@ async fn prepare_initial_instance(
                         metadata.instance.icon_path,
                         None,
                         metadata.link,
+                        None,
+                        None,
                     ))
                     .await?;
                     set_display(
@@ -1262,6 +1278,8 @@ async fn run_request(
             icon_path: _,
             icon_config: _,
             link: _,
+            id: _,
+            folder: _,
         } => {
             diagnostics::install_step(
                 job_id,
