@@ -10203,6 +10203,7 @@ dependencies = [
  "chrono",
  "contracts",
  "dashmap",
+ "dirs 7.0.0",
  "engine",
  "enumset",
  "hkdf",

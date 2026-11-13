@@ -202,9 +202,8 @@ mod tests {
         )
         .unwrap();
         let state = crate::Engine::new(crate::EngineConfig {
-            settings_dir: dir.path().to_path_buf(),
-            events: crate::event::EventSink::new(),
             accounts: Some(accounts),
+            ..crate::state::tests::config(dir.path().to_path_buf())
         })
         .await
         .unwrap();

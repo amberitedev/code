@@ -67,7 +67,13 @@ async fn open_folder(
 ) -> Result<Empty, ApiError> {
     match body {
         AppFolder::LauncherLogs => {
-            open(engine.get().await.directories.launcher_logs_dir()).await
+            let path = engine
+                .get()
+                .await
+                .directories
+                .launcher_logs_dir()
+                .ok_or_else(|| internal("the engine keeps no launcher logs"))?;
+            open(path).await
         }
         AppFolder::AppDbBackups => {
             let path = app_db_backup_dir().map_err(internal)?;

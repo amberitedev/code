@@ -315,13 +315,14 @@ async fn the_event_socket_waits_for_the_engine_then_sends_events_as_json() {
     engine::install_crypto_provider();
     let dir = tempfile::tempdir().unwrap();
     // Its own sink, so its startup events stay off this socket.
-    handle.set(Ok(engine::Engine::new(engine::EngineConfig {
-        settings_dir: dir.path().to_path_buf(),
-        events: engine::EventSink::new(),
-        accounts: None,
-    })
+    let config = crate::data_dir::engine_config(
+        dir.path().to_path_buf(),
+        engine::EventSink::new(),
+        None,
+    )
     .await
-    .unwrap()));
+    .unwrap();
+    handle.set(Ok(engine::Engine::new(config).await.unwrap()));
 
     let mut head = Vec::new();
     while !head.ends_with(b"\r\n\r\n") {
@@ -417,12 +418,13 @@ async fn opening_the_socket_retries_a_failed_start() {
             async move {
                 anyhow::ensure!(attempt > 0, "the data folder is in use");
                 engine::install_crypto_provider();
-                Ok(engine::Engine::new(engine::EngineConfig {
-                    settings_dir: dir.path().to_path_buf(),
-                    events: engine::EventSink::new(),
-                    accounts: None,
-                })
-                .await?)
+                let config = crate::data_dir::engine_config(
+                    dir.path().to_path_buf(),
+                    engine::EventSink::new(),
+                    None,
+                )
+                .await?;
+                Ok(engine::Engine::new(config).await?)
             }
         }
     });

@@ -1,5 +1,3 @@
-use crate::ErrorKind;
-use crate::state::DirectoryInfo;
 use sqlx::sqlite::{
     SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions,
 };
@@ -7,24 +5,17 @@ use sqlx::{Pool, Sqlite};
 use std::path::Path;
 use std::time::Duration;
 
-pub(crate) async fn connect(
-    app_identifier: &str,
+pub(crate) async fn open(db_path: &Path) -> crate::Result<Pool<Sqlite>> {
+    if let Some(dir) = db_path.parent() {
+        crate::util::io::create_dir_all(dir).await?;
+    }
+
+    open_migrated_app_db(db_path).await
+}
+
+pub(crate) async fn connect_app_db(
+    db_path: &Path,
 ) -> crate::Result<Pool<Sqlite>> {
-    let settings_dir = DirectoryInfo::initial_settings_dir_path(app_identifier)
-        .ok_or(ErrorKind::FSError(
-            "could not find valid config dir".to_string(),
-        ))?;
-
-    open(&settings_dir).await
-}
-
-pub(crate) async fn open(settings_dir: &Path) -> crate::Result<Pool<Sqlite>> {
-    crate::util::io::create_dir_all(settings_dir).await?;
-
-    connect_app_db(&settings_dir.join("app.db")).await
-}
-
-async fn connect_app_db(db_path: &Path) -> crate::Result<Pool<Sqlite>> {
     if let Err(err) =
         super::db_backup::maybe_backup_existing_app_db(db_path).await
     {
@@ -32,7 +23,7 @@ async fn connect_app_db(db_path: &Path) -> crate::Result<Pool<Sqlite>> {
             "Continuing without a pre-migration app database backup: {err}"
         );
     }
-    open_migrated_app_db(db_path).await
+    open(db_path).await
 }
 
 async fn open_migrated_app_db(db_path: &Path) -> crate::Result<Pool<Sqlite>> {
@@ -49,7 +40,6 @@ async fn open_migrated_app_db(db_path: &Path) -> crate::Result<Pool<Sqlite>> {
     sqlx::raw_sql(sharing_client::history::SCHEMA)
         .execute(&pool)
         .await?;
-    record_current_app_version(&pool).await?;
 
     if let Err(err) = stale_data_cleanup(&pool).await {
         tracing::warn!(
@@ -76,7 +66,9 @@ async fn open_app_db_pool(db_path: &Path) -> crate::Result<Pool<Sqlite>> {
         .await?)
 }
 
-async fn record_current_app_version(pool: &Pool<Sqlite>) -> crate::Result<()> {
+pub(crate) async fn record_current_app_version(
+    pool: &Pool<Sqlite>,
+) -> crate::Result<()> {
     let previous_version = sqlx::query_scalar!(
         "SELECT value FROM app_metadata WHERE key = 'app_version'"
     )

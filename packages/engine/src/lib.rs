@@ -33,6 +33,7 @@ pub use event::{
 };
 pub use logger::start_logger;
 pub use self_hosted::accounts::AccountEndpoints;
+pub use state::INSTANCES_FOLDER_NAME;
 pub use state::{
     BackendSession, BackendSessionKind, Engine, EngineConfig, ModrinthSession,
     Sessions,

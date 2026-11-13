@@ -69,6 +69,6 @@ pub async fn cancel_directory_change<R: Runtime>(
     app: tauri::AppHandle<R>,
 ) -> Result<()> {
     let identifier = &app.config().identifier;
-    settings::cancel_directory_change(identifier).await?;
+    crate::data_dir::cancel_directory_change(identifier).await?;
     Ok(())
 }

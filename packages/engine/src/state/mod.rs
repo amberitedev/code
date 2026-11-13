@@ -1,6 +1,7 @@
 //! Theseus state management system
 use crate::event::EventSink;
 use crate::util::fetch::{FetchSemaphore, IoSemaphore};
+use contracts::Side;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
@@ -83,12 +84,21 @@ pub mod hidden_instances;
 pub mod server_join_log;
 
 pub struct EngineConfig {
-    pub settings_dir: PathBuf,
+    pub data_dir: PathBuf,
+    pub instances_dir: PathBuf,
+    pub logs_dir: Option<PathBuf>,
+    /// app.db, which also holds the App's tables until they get their own database.
+    pub db_path: PathBuf,
+    pub side: Side,
+    pub max_concurrent_downloads: usize,
+    pub max_concurrent_writes: usize,
     pub events: EventSink,
     pub accounts: Option<AccountEndpoints>,
 }
 
 pub struct Engine {
+    pub side: Side,
+
     /// Information on the location of files used in the launcher
     pub directories: DirectoryInfo,
     pub content_store: content_store::ContentStore,
@@ -120,16 +130,11 @@ pub struct Engine {
 }
 
 impl Engine {
-    /// Opens an engine on `settings_dir`. Its background tasks hold a `Weak` and end once the
-    /// last `Arc` is dropped.
+    /// Opens an engine on the folders `config` names, as they are: the host has finished any
+    /// directory move first. Its background tasks hold a `Weak` and end once the last `Arc` is
+    /// dropped.
     pub async fn new(config: EngineConfig) -> crate::Result<Arc<Self>> {
-        let EngineConfig {
-            settings_dir,
-            events,
-            accounts,
-        } = config;
-        let (state, watcher_events) =
-            Self::open(settings_dir, events, accounts).await?;
+        let (state, watcher_events) = Self::open(config).await?;
         // Fallible, so it runs before a background task can keep a rejected engine alive.
         crate::self_hosted::accounts::bind_origin(&state.pool, &state.sessions)
             .await?;
@@ -138,44 +143,41 @@ impl Engine {
     }
 
     /// The fallible part of `new`; it spawns nothing.
-    #[tracing::instrument(skip(events))]
+    #[tracing::instrument(skip_all)]
     async fn open(
-        settings_dir: PathBuf,
-        events: EventSink,
-        accounts: Option<AccountEndpoints>,
+        config: EngineConfig,
     ) -> crate::Result<(
         Arc<Self>,
         tokio::sync::mpsc::Receiver<notify_debouncer_mini::DebounceEventResult>,
     )> {
+        let EngineConfig {
+            data_dir,
+            instances_dir,
+            logs_dir,
+            db_path,
+            side,
+            max_concurrent_downloads,
+            max_concurrent_writes,
+            events,
+            accounts,
+        } = config;
+        let directories =
+            DirectoryInfo::init(&db_path, data_dir, instances_dir, logs_dir)
+                .await?;
+
         tracing::info!("Connecting to app database");
-        let store_lock =
-            content_store::ContentStore::lock_process(&settings_dir).await?;
-        let pool = db::open(&settings_dir).await?;
-
-        tracing::info!("Fetching app settings");
-        let mut settings = Settings::get(&pool).await?;
-
-        let fetch_semaphore = FetchSemaphore(Arc::new(Semaphore::new(
-            settings.max_concurrent_downloads,
-        )));
-        let io_semaphore =
-            IoSemaphore(Semaphore::new(settings.max_concurrent_writes));
-        let api_semaphore = FetchSemaphore(Arc::new(Semaphore::new(
-            settings.max_concurrent_downloads,
-        )));
-
-        tracing::info!("Initializing directories");
-        DirectoryInfo::move_launcher_directory(
-            &mut settings,
-            &pool,
-            &io_semaphore,
-            &settings_dir,
-            &events,
+        let store_lock = content_store::ContentStore::lock_process(
+            &directories.settings_dir,
         )
         .await?;
+        let pool = db::open(&db_path).await?;
 
-        let directories =
-            DirectoryInfo::init(settings_dir, settings.custom_dir).await?;
+        let fetch_semaphore =
+            FetchSemaphore(Arc::new(Semaphore::new(max_concurrent_downloads)));
+        let io_semaphore = IoSemaphore(Semaphore::new(max_concurrent_writes));
+        let api_semaphore =
+            FetchSemaphore(Arc::new(Semaphore::new(max_concurrent_downloads)));
+
         let content_store = content_store::ContentStore::new(
             &directories,
             pool.clone(),
@@ -188,6 +190,7 @@ impl Engine {
             instances::watcher::init_watcher()?;
 
         let state = Arc::new(Self {
+            side,
             directories,
             content_store,
             fetch_semaphore,
@@ -423,14 +426,23 @@ pub(crate) mod tests {
         tx.commit().await.unwrap();
     }
 
-    pub(crate) async fn engine(settings_dir: PathBuf) -> Arc<Engine> {
-        Engine::new(EngineConfig {
-            settings_dir,
+    /// An App engine keeping everything in `dir`.
+    pub(crate) fn config(dir: PathBuf) -> EngineConfig {
+        EngineConfig {
+            instances_dir: dir.join(INSTANCES_FOLDER_NAME),
+            db_path: dir.join("app.db"),
+            data_dir: dir,
+            logs_dir: None,
+            side: Side::Client,
+            max_concurrent_downloads: 10,
+            max_concurrent_writes: 10,
             events: EventSink::new(),
             accounts: None,
-        })
-        .await
-        .unwrap()
+        }
+    }
+
+    pub(crate) async fn engine(dir: PathBuf) -> Arc<Engine> {
+        Engine::new(config(dir)).await.unwrap()
     }
 
     pub(super) fn write(path: &Path) {

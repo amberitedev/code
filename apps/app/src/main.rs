@@ -4,7 +4,6 @@
 )]
 #![recursion_limit = "256"]
 
-use anyhow::Context;
 use engine::prelude::*;
 use native_dialog::{DialogBuilder, MessageLevel};
 use std::sync::Arc;
@@ -13,6 +12,7 @@ use tauri::{Listener, Manager};
 mod accounts;
 mod api;
 mod cores;
+mod data_dir;
 mod desktop;
 mod dev;
 mod engine_handle;
@@ -34,15 +34,13 @@ async fn start_engine(
 ) -> anyhow::Result<Arc<Engine>> {
     tracing::info!("Initializing app state...");
     let started = async {
-        let settings_dir =
-            DirectoryInfo::initial_settings_dir_path(&app.config().identifier)
-                .context("could not find the application directory")?;
-        let state = Engine::new(engine::EngineConfig {
-            settings_dir,
+        let config = data_dir::engine_config(
+            data_dir::resolve(&app.config().identifier)?,
             events,
-            accounts: dev::accounts()?,
-        })
+            dev::accounts()?,
+        )
         .await?;
+        let state = Engine::new(config).await?;
         state.start_desktop();
         #[cfg(debug_assertions)]
         dev::sign_in(&state).await;
@@ -113,7 +111,14 @@ fn main() {
         tauri_context.config_mut().build.dev_url = Some(dev_url);
     }
 
-    let _log_guard = engine::start_logger(&tauri_context.config().identifier);
+    let _log_guard =
+        match data_dir::logs_dir(&tauri_context.config().identifier) {
+            Ok(logs_dir) => engine::start_logger(&logs_dir),
+            Err(error) => {
+                eprintln!("Could not start logger: {error:#}");
+                None
+            }
+        };
 
     tracing::info!("Initialized tracing subscriber. Loading Modrinth App!");
 

@@ -89,13 +89,15 @@ pub async fn export_debug_info(
             &excluded_paths,
             &cancel,
         )?;
-        collect_files(
-            &mut files,
-            &directories.launcher_logs_dir(),
-            "launcher_logs",
-            &excluded_paths,
-            &cancel,
-        )?;
+        if let Some(logs_dir) = directories.launcher_logs_dir() {
+            collect_files(
+                &mut files,
+                &logs_dir,
+                "launcher_logs",
+                &excluded_paths,
+                &cancel,
+            )?;
+        }
         let instances_dir = directories.instances_dir();
         match std::fs::read_dir(&instances_dir) {
             Ok(entries) => {

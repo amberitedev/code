@@ -1,5 +1,5 @@
 /*
-    tracing is set basd on the environment variable RUST_LOG=xxx, depending on the amount of logs to show
+    tracing is set based on the environment variable RUST_LOG=xxx, depending on the amount of logs to show
         ERROR > WARN > INFO > DEBUG > TRACE
     eg. RUST_LOG=info will show info, warn, and error logs
         RUST_LOG="engine=trace" will show *all* messages but from engine only (and not dependencies using similar crates)
@@ -18,7 +18,7 @@
 // Handling for the live development logging
 // This will log to the console, and will not log to a file
 #[cfg(debug_assertions)]
-pub fn start_logger(_app_identifier: &str) -> Option<()> {
+pub fn start_logger(_logs_dir: &std::path::Path) -> Option<()> {
     use tracing_subscriber::prelude::*;
 
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
@@ -73,31 +73,20 @@ fn prune_session_logs(logs_dir: &std::path::Path) {
 // Handling for the live production logging
 // This will log to a file in the logs directory, and will not show any logs in the console
 #[cfg(not(debug_assertions))]
-pub fn start_logger(app_identifier: &str) -> Option<()> {
-    use crate::prelude::DirectoryInfo;
+pub fn start_logger(logs_dir: &std::path::Path) -> Option<()> {
     use chrono::Local;
     use std::fs::OpenOptions;
     use tracing_subscriber::fmt::time::ChronoLocal;
     use tracing_subscriber::prelude::*;
 
-    // Initialize and get logs directory path
-    let logs_dir = if let Some(d) =
-        DirectoryInfo::launcher_logs_dir_path(app_identifier)
-    {
-        d
-    } else {
-        eprintln!("Could not start logger");
-        return None;
-    };
-
     let log_file_name =
         format!("session_{}.log", Local::now().format("%Y%m%d_%H%M%S"));
     let log_file_path = logs_dir.join(log_file_name);
 
-    if let Err(err) = std::fs::create_dir_all(&logs_dir) {
+    if let Err(err) = std::fs::create_dir_all(logs_dir) {
         eprintln!("Could not create logs directory: {err}");
     }
-    prune_session_logs(&logs_dir);
+    prune_session_logs(logs_dir);
 
     let file = match OpenOptions::new()
         .create(true)

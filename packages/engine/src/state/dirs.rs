@@ -10,7 +10,6 @@ use std::path::{Path, PathBuf};
 use tokio::fs;
 
 pub const CACHES_FOLDER_NAME: &str = "caches";
-pub const LAUNCHER_LOGS_FOLDER_NAME: &str = "launcher_logs";
 pub const INSTANCES_FOLDER_NAME: &str = "profiles";
 pub const METADATA_FOLDER_NAME: &str = "meta";
 pub const SYNCED_OPTIONS_FOLDER_NAME: &str = "synced-options";
@@ -20,34 +19,36 @@ pub const STORE_FOLDER_NAME: &str = "store";
 pub struct DirectoryInfo {
     pub settings_dir: PathBuf, // Base settings directory- app database
     pub config_dir: PathBuf, // Base config directory- instances, minecraft downloads, etc. Changeable as a setting.
+    instances_dir: PathBuf,
+    logs_dir: Option<PathBuf>,
 }
 
 impl DirectoryInfo {
-    // Get the settings directory
-    // init() is not needed for this function
-    pub fn initial_settings_dir_path(app_identifier: &str) -> Option<PathBuf> {
-        Self::env_path("THESEUS_CONFIG_DIR")
-            .or_else(|| Some(dirs::data_dir()?.join(app_identifier)))
-    }
-
     /// Get all paths needed for Theseus to operate properly
     #[tracing::instrument]
     pub async fn init(
-        settings_dir: PathBuf,
-        config_dir: Option<String>,
+        db_path: &Path,
+        config_dir: PathBuf,
+        instances_dir: PathBuf,
+        logs_dir: Option<PathBuf>,
     ) -> crate::Result<Self> {
+        let settings_dir = db_path
+            .parent()
+            .ok_or(ErrorKind::FSError(
+                "the database path has no folder".to_string(),
+            ))?
+            .to_path_buf();
         fs::create_dir_all(&settings_dir)
             .await
             .context(ErrorKind::FSError(
                 "error creating Theseus config directory".to_string(),
             ))?;
 
-        let config_dir =
-            config_dir.map_or_else(|| settings_dir.clone(), PathBuf::from);
-
         Ok(Self {
             settings_dir,
             config_dir,
+            instances_dir,
+            logs_dir,
         })
     }
 
@@ -154,7 +155,7 @@ impl DirectoryInfo {
     /// Get the instances directory
     #[inline]
     pub fn instances_dir(&self) -> PathBuf {
-        self.config_dir.join(INSTANCES_FOLDER_NAME)
+        self.instances_dir.clone()
     }
 
     #[inline]
@@ -176,27 +177,16 @@ impl DirectoryInfo {
             .join("crash-reports")
     }
 
+    /// None when the host keeps no launcher logs.
     #[inline]
-    pub fn launcher_logs_dir(&self) -> PathBuf {
-        self.settings_dir.join(LAUNCHER_LOGS_FOLDER_NAME)
-    }
-
-    #[inline]
-    pub fn launcher_logs_dir_path(app_identifier: &str) -> Option<PathBuf> {
-        Self::initial_settings_dir_path(app_identifier)
-            .map(|d| d.join(LAUNCHER_LOGS_FOLDER_NAME))
+    pub fn launcher_logs_dir(&self) -> Option<PathBuf> {
+        self.logs_dir.clone()
     }
 
     /// Get the cache directory for Theseus
     #[inline]
     pub fn caches_dir(&self) -> PathBuf {
         self.config_dir.join(CACHES_FOLDER_NAME)
-    }
-
-    /// Get path from environment variable
-    #[inline]
-    fn env_path(name: &str) -> Option<PathBuf> {
-        std::env::var_os(name).map(PathBuf::from)
     }
 
     #[tracing::instrument(skip(settings, pool, _io_semaphore, events))]
