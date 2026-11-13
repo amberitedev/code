@@ -503,6 +503,9 @@ await refreshLoadingBars()
 useAppEvent('loading', async () => {
 	await refreshLoadingBars()
 })
+useAppEvent('resync', async () => {
+	await Promise.all([refresh(), refreshLoadingBars()])
+})
 
 function openDownloadToast() {
 	updateNotification(true)

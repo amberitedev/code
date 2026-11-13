@@ -162,6 +162,8 @@ useAppEvent('process', (e) => {
 	}
 })
 
+useAppEvent('resync', checkProcess)
+
 onMounted(() => {
 	checkProcess()
 })

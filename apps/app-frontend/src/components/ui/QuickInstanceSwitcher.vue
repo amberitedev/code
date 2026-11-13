@@ -181,6 +181,7 @@ const onDividerPointerUp = (event) => {
 if (instancesQuery.data.value === undefined) await instancesQuery.suspense().catch(handleError)
 
 useAppEvent('process', checkProcesses)
+useAppEvent('resync', checkProcesses)
 
 onMounted(() => {
 	resizeObserver = new ResizeObserver(updateMaxAuto)

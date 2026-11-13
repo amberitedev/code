@@ -969,6 +969,7 @@ function fetchDeferredServerData(project) {
 
 fetchProjectData().catch(handleError)
 
+useAppEvent('resync', updateServerPlayState)
 useAppEvent('process', (e) => {
 	if (
 		e.event === 'finished' &&
