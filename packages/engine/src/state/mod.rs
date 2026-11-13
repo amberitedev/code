@@ -465,4 +465,25 @@ pub(crate) mod tests {
             .collect();
         assert_eq!(ids, ["b"]);
     }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn removal_waits_for_a_synced_options_pass_in_flight() {
+        crate::install_crypto_provider();
+        let tmp = tempfile::tempdir().unwrap();
+        write(&tmp.path().join("profiles/Survival/options.txt"));
+        let state = engine(tmp.path().to_path_buf()).await;
+        add_instance(&state, "a", "Survival").await;
+        let folder = state.directories.instances_dir().join("Survival");
+
+        let pass = state.synced_options.lock().await;
+        let removal = tokio::spawn({
+            let state = Arc::clone(&state);
+            async move { remove_instance("a", &state).await }
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        assert!(folder.exists() && !removal.is_finished());
+        drop(pass);
+        removal.await.unwrap().unwrap();
+        assert!(!folder.exists());
+    }
 }

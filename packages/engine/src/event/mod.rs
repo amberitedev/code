@@ -79,8 +79,9 @@ pub enum Event {
     /// raising it lives in apps/app.
     #[serde(skip)]
     Desktop(DesktopEvent),
-    /// Files in an instance changed, as paths relative to its folder. Content files are reported
-    /// once the engine has indexed them. In-process only: socket loops drop it.
+    /// Files in an instance changed, as paths relative to its folder: content files once the
+    /// engine has indexed them, anything else as the top-level entry holding it. In-process only:
+    /// socket loops drop it.
     #[serde(skip)]
     FilesChanged {
         instance_id: String,

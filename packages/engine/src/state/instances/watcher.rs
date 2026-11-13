@@ -18,7 +18,11 @@ use notify_debouncer_mini::{
 use sqlx::SqlitePool;
 use std::path::Path;
 use std::sync::Weak;
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{
+    collections::{BTreeSet, HashMap},
+    sync::Arc,
+    time::Duration,
+};
 use tokio::sync::{
     RwLock,
     mpsc::{Receiver, channel},
@@ -196,7 +200,7 @@ pub(crate) fn watch_instance_events(
                     let mut visited_instances = Vec::new();
                     let mut visited_screenshot_instances = Vec::new();
                     let mut changed_files =
-                        HashMap::<String, Vec<String>>::new();
+                        HashMap::<String, BTreeSet<String>>::new();
 
                     for e in &events {
                         let mut instance_path = None;
@@ -237,23 +241,14 @@ pub(crate) fn watch_instance_events(
                                         },
                                     )
                                 });
-                            if !sync_content {
+                            if !sync_content
+                                && let Some(name) =
+                                    first_file_name.and_then(|x| x.to_str())
+                            {
                                 changed_files
                                     .entry(instance_id.clone())
                                     .or_default()
-                                    .push(
-                                        e.path
-                                            .components()
-                                            .skip_while(|x| {
-                                                x.as_os_str() != instance_path
-                                            })
-                                            .skip(1)
-                                            .map(|x| {
-                                                x.as_os_str().to_string_lossy()
-                                            })
-                                            .collect::<Vec<_>>()
-                                            .join("/"),
-                                    );
+                                    .insert(name.to_owned());
                             }
                             let is_screenshot_event = first_file_name
                                 .as_ref()
@@ -367,10 +362,10 @@ pub(crate) fn watch_instance_events(
                         }
                     }
 
-                    for (instance_id, paths) in changed_files {
+                    for (instance_id, names) in changed_files {
                         state.events.send(crate::event::Event::FilesChanged {
                             instance_id,
-                            paths,
+                            paths: names.into_iter().collect(),
                         });
                     }
                 }

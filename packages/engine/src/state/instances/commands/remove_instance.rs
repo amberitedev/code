@@ -11,6 +11,8 @@ pub(crate) async fn remove_instance(
     let instance = instance_rows::get_instance_by_id(instance_id, &state.pool)
         .await?
         .ok_or(crate::ErrorKind::InputError("unknown instance".to_string()))?;
+    // A synced-options pass in flight writes into the folder this deletes.
+    let _synced_options_lock = state.synced_options.lock().await;
     let _content_lock = state.instance_locks.lock_content(instance_id).await;
     let _store_lock = state.content_store.files_lock.lock().await;
     let _store_lease = state.content_store.lease().await;

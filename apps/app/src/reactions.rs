@@ -1,7 +1,7 @@
 //! The desktop follows engine events: Discord and friends status show the running instance, the
 //! main window hides on launch and returns on exit, and it comes forward for an opened link.
 //! Synced options, packs, screenshots, setting labels and onboarding catch up with each instance
-//! as it is created, edited, synced, changed on disk, removed, installed or closed.
+//! as it is created, edited, changed on disk, removed, installed or closed.
 
 use std::collections::BTreeSet;
 use std::sync::{Arc, Weak};
@@ -149,13 +149,6 @@ async fn follow(engine: Arc<Engine>, event: Event) {
                         &instance_id,
                     )
                     .await
-                }
-                InstancePayloadType::Synced => {
-                    instance::queue_synced_pack_reconciliation(
-                        &engine,
-                        &instance_id,
-                    );
-                    Ok(())
                 }
                 InstancePayloadType::Removed => {
                     instance::remove_generated_instance_files(
@@ -401,5 +394,54 @@ mod tests {
         instance::reconcile_instance_synced_options(&engine, &id)
             .await
             .unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn following_a_synced_instance_settles() {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = crate::pack_hooks::tests::offline_engine(dir.path()).await;
+        let id = crate::pack_hooks::tests::create(&engine).await.instance.id;
+        // A library that places packs makes every pack pass emit Synced.
+        let packs = instance::get_synced_options_folder(&engine)
+            .await
+            .unwrap()
+            .join("packs");
+        std::fs::create_dir_all(&packs).unwrap();
+        std::fs::write(
+            packs.join("packs.json"),
+            format!(r#"{{"packs":{{}},"instances":{{"{id}":{{}}}}}}"#),
+        )
+        .unwrap();
+        instance::start_synced_options(&engine, || {});
+        let mut events = engine.events.subscribe();
+
+        follow(
+            Arc::clone(&engine),
+            Event::Instance(InstancePayload {
+                instance_id: id.clone(),
+                event: InstancePayloadType::Synced,
+            }),
+        )
+        .await;
+        let mut synced = 0;
+        while let Ok(event) = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            events.recv(),
+        )
+        .await
+        {
+            let event = event.unwrap();
+            if matches!(
+                &event,
+                Event::Instance(InstancePayload {
+                    event: InstancePayloadType::Synced,
+                    ..
+                })
+            ) {
+                synced += 1;
+                assert!(synced < 5, "following Synced keeps re-running packs");
+            }
+            follow(Arc::clone(&engine), event).await;
+        }
     }
 }

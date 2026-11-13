@@ -1070,7 +1070,7 @@ async fn reconcile_instance_inner(
 ) -> crate::Result<()> {
     let _guard = state.synced_options.lock().await;
     apply_pending_changes(state).await?;
-    // Instances are removed without this lock, so one can vanish before its reconcile runs.
+    // Reconciles queued by events can run after their instance is removed.
     let Some(metadata) =
         crate::state::get_instance(instance_id, &state.pool).await?
     else {
