@@ -6,7 +6,10 @@ use reqwest::{RequestBuilder, Response, StatusCode, header};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 
-use crate::{ApiError, Auth, Empty, Endpoint, Json, Method, Raw, Stream};
+use crate::{
+    ApiError, Auth, Empty, Endpoint, Json, Method, Raw, Stream,
+    tickets::READ_TICKET_HEADER,
+};
 
 /// The server a call goes to and the credentials it may need.
 #[derive(Clone, Copy)]
@@ -15,7 +18,8 @@ pub struct Remote<'a> {
     /// Everything before the Endpoint's path, such as `https://example.com`.
     pub base: &'a str,
     pub bearer: Option<&'a str>,
-    /// Sent in place of `bearer` to [`Auth::Ticket`] routes.
+    /// Sent in place of `bearer` to [`Auth::Ticket`] routes, and beside it to [`Auth::Account`]
+    /// ones in [`READ_TICKET_HEADER`].
     pub read_ticket: Option<&'a str>,
     pub timeout: Option<Duration>,
 }
@@ -147,6 +151,11 @@ fn request<E: Endpoint>(
     };
     if let Some(token) = token {
         request = request.bearer_auth(token);
+    }
+    if E::AUTH == Auth::Account
+        && let Some(ticket) = remote.read_ticket
+    {
+        request = request.header(READ_TICKET_HEADER, ticket);
     }
     if let Some(timeout) = remote.timeout {
         request = request.timeout(timeout);
@@ -440,6 +449,55 @@ mod tests {
         type Query = Ticket;
         type Body = Empty;
         type Response = Json<String>;
+    }
+
+    struct ReadAsAccount;
+
+    impl Endpoint for ReadAsAccount {
+        const METHOD: Method = Method::Get;
+        const PATH: &'static str = "/v1/read";
+        const AUTH: Auth = Auth::Account;
+        type Params = ();
+        type Query = ();
+        type Body = Empty;
+        type Response = Json<String>;
+    }
+
+    #[tokio::test]
+    async fn a_read_ticket_goes_to_an_account_route_in_its_header() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let received = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut head = [0; 4096];
+            let read = socket.read(&mut head).await.unwrap();
+            let _ = socket
+                .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\n\"\"")
+                .await;
+            String::from_utf8_lossy(&head[..read]).to_lowercase()
+        });
+        let http = Client::new();
+        let remote = Remote {
+            http: &http,
+            base: &base,
+            bearer: Some("amc_key"),
+            read_ticket: Some("secret"),
+            timeout: None,
+        };
+        call::<ReadAsAccount>(&remote, &(), &(), Empty)
+            .await
+            .unwrap();
+        let request = received.await.unwrap();
+        assert!(request.starts_with("get /v1/read http/1.1"), "{request}");
+        assert!(
+            request.contains("authorization: bearer amc_key"),
+            "{request}"
+        );
+        assert!(
+            request.contains("x-amberite-read-ticket: secret"),
+            "{request}"
+        );
     }
 
     #[tokio::test]

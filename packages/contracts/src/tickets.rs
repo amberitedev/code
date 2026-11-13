@@ -7,6 +7,9 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 crate::consts! {
     /// The `iss` of every ticket the backend signs.
     TICKET_ISSUER: &str = "amberite";
+    /// The header a Core reading a share's versions for a user sends the read ticket that user's
+    /// App got for it in. Never the query, which request logs keep.
+    READ_TICKET_HEADER: &str = "x-amberite-read-ticket";
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

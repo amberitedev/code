@@ -174,6 +174,12 @@ export const SHAREABLE_CONFIG_EXTENSIONS: readonly string[] = ["json","json5","j
  */
 export const TICKET_ISSUER = "amberite"
 
+/**
+ * The header a Core reading a share's versions for a user sends the read ticket that user's
+ * App got for it in. Never the query, which request logs keep.
+ */
+export const READ_TICKET_HEADER = "x-amberite-read-ticket"
+
 export type NewSignInCode = { core_id: string, 
 /**
  * The machine's name, shown to the owner before they approve.
@@ -640,8 +646,6 @@ loader: string,
  */
 loader_version: string, };
 
-export type VersionRead = { read_ticket?: string, };
-
 export type VersionFault = { core_id: string, kind: FaultKind, };
 
 export type FaultKind = "object" | "content";
@@ -762,9 +766,9 @@ export const sharing = {
 	AcceptInvite: { method: "POST", path: "/v1/instances/{id}/invites/{invite_id}", auth: "account", dangerous: false, body: "empty", response: "empty" } as Endpoint<InstanceInviteId, null, void, void>,
 	DeleteInvite: { method: "DELETE", path: "/v1/instances/{id}/invites/{invite_id}", auth: "account", dangerous: false, body: "empty", response: "empty" } as Endpoint<InstanceInviteId, null, void, void>,
 	GetInvite: { method: "GET", path: "/v1/invites/{id}", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<InviteId, InvitePreviewQuery, void, Invite>,
-	GetLatestVersion: { method: "GET", path: "/v1/instances/{id}/versions", auth: "account", dangerous: false, body: "empty", response: "json" } as Endpoint<SharedInstanceId, VersionRead, void, InstanceVersion>,
+	GetLatestVersion: { method: "GET", path: "/v1/instances/{id}/versions", auth: "account", dangerous: false, body: "empty", response: "json" } as Endpoint<SharedInstanceId, null, void, InstanceVersion>,
 	CreateVersion: { method: "POST", path: "/v1/instances/{id}/versions", auth: "account", dangerous: false, body: "json", response: "json" } as Endpoint<SharedInstanceId, null, NewInstanceVersion, InstanceVersion>,
-	GetVersion: { method: "GET", path: "/v1/instances/{id}/versions/{version}", auth: "account", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceVersionId, VersionRead, void, InstanceVersion>,
+	GetVersion: { method: "GET", path: "/v1/instances/{id}/versions/{version}", auth: "account", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceVersionId, null, void, InstanceVersion>,
 	DeleteVersion: { method: "DELETE", path: "/v1/instances/{id}/versions/{version}", auth: "account", dangerous: false, body: "empty", response: "empty" } as Endpoint<InstanceVersionId, null, void, void>,
 	ReportVersion: { method: "POST", path: "/v1/instances/{id}/versions/{version}/reports", auth: "account", dangerous: false, body: "json", response: "empty" } as Endpoint<InstanceVersionId, null, VersionFault, void>,
 	SetIcon: { method: "PUT", path: "/v1/instances/{id}/icon", auth: "account", dangerous: false, body: "raw", response: "empty" } as Endpoint<SharedInstanceId, null, Blob, void>,

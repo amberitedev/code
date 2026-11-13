@@ -11,7 +11,7 @@ use bedrock::content::{
 };
 use bedrock::state::ModLoader;
 use contracts::backend::sharing::{
-    GetLatestVersion, InstanceVersion, SharedInstanceId, VersionRead,
+    GetLatestVersion, InstanceVersion, SharedInstanceId,
 };
 use contracts::client::{CallError, Remote, call};
 use contracts::{Empty, ErrorCode, Side};
@@ -108,8 +108,11 @@ pub async fn ready_version(
     let id = SharedInstanceId {
         id: share_id.to_owned(),
     };
-    let query = VersionRead { read_ticket };
-    let version = match call::<GetLatestVersion>(backend, &id, &query, Empty)
+    let backend = Remote {
+        read_ticket: read_ticket.as_deref(),
+        ..*backend
+    };
+    let version = match call::<GetLatestVersion>(&backend, &id, &(), Empty)
         .await
     {
         Ok(version) => version,

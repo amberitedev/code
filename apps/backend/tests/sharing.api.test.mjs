@@ -902,9 +902,11 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		// ticket that user's App got for this Core and share. Without one it reads as its owner.
 		const readFor = (share, ticket, core = 'core') =>
 			send(
-				`http://local.test/v1/instances/${share}/versions${ticket ? `?read_ticket=${encodeURIComponent(ticket)}` : ''}`,
+				`http://local.test/v1/instances/${share}/versions`,
 				'GET',
 				`amc_${core}`,
+				undefined,
+				ticket ? { 'x-amberite-read-ticket': ticket } : {},
 			)
 		const readTicket = async (share, user, core = 'core') => {
 			const { ticket } = await ok(

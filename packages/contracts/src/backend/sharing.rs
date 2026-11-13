@@ -403,16 +403,6 @@ pub struct NewInstanceVersion {
     pub server_core: Option<String>,
 }
 
-/// Query of the version reads. A Core reading for a user sends the ticket that user's App got
-/// for it ([`IssueReadTicket`]); without one it reads as its own owner.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct VersionRead {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "ts", ts(optional))]
-    pub read_ticket: Option<String>,
-}
-
 /// Body of [`ReportVersion`]: a member got bad bytes of a version from `core_id`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
@@ -662,9 +652,9 @@ endpoints! {
     AcceptInvite: Post "/v1/instances/{id}/invites/{invite_id}", Account, InstanceInviteId, (), Empty => Empty;
     DeleteInvite: Delete "/v1/instances/{id}/invites/{invite_id}", Account, InstanceInviteId, (), Empty => Empty;
     GetInvite: Get "/v1/invites/{id}", None, InviteId, InvitePreviewQuery, Empty => Json<Invite>;
-    GetLatestVersion: Get "/v1/instances/{id}/versions", Account, SharedInstanceId, VersionRead, Empty => Json<InstanceVersion>;
+    GetLatestVersion: Get "/v1/instances/{id}/versions", Account, SharedInstanceId, (), Empty => Json<InstanceVersion>;
     CreateVersion: Post "/v1/instances/{id}/versions", Account, SharedInstanceId, (), Json<NewInstanceVersion> => Json<InstanceVersion>;
-    GetVersion: Get "/v1/instances/{id}/versions/{version}", Account, InstanceVersionId, VersionRead, Empty => Json<InstanceVersion>;
+    GetVersion: Get "/v1/instances/{id}/versions/{version}", Account, InstanceVersionId, (), Empty => Json<InstanceVersion>;
     DeleteVersion: Delete "/v1/instances/{id}/versions/{version}", Account, InstanceVersionId, (), Empty => Empty;
     ReportVersion: Post "/v1/instances/{id}/versions/{version}/reports", Account, InstanceVersionId, (), Json<VersionFault> => Empty;
     SetIcon: Put "/v1/instances/{id}/icon", Account, SharedInstanceId, (), Raw => Empty;
@@ -731,7 +721,6 @@ pub(crate) fn ts() -> String {
         VersionUpload::decl(&cfg),
         VersionReports::decl(&cfg),
         NewInstanceVersion::decl(&cfg),
-        VersionRead::decl(&cfg),
         VersionFault::decl(&cfg),
         FaultKind::decl(&cfg),
         HostedServer::decl(&cfg),

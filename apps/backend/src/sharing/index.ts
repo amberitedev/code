@@ -12,6 +12,7 @@ import {
 	type NewInviteLink,
 	type NewSharedInstance,
 	type OutsideAddress,
+	READ_TICKET_HEADER,
 	type RemovedFile,
 	type SharedIconConfig,
 	type SharedInstanceUpdate,
@@ -1183,7 +1184,7 @@ async function coreVersion(request: Request, env: Env, id: string, version?: num
 	const core = await sharingCore(request, env)
 	const item = await instance(env, id)
 	if (item.core_id !== core.id || item.owner_id !== core.owner_id) {
-		const ticket = new URL(request.url).searchParams.get('read_ticket')
+		const ticket = request.headers.get(READ_TICKET_HEADER)
 		const reader = ticket ? await readTicketUser(env, ticket, core.id, id) : core.owner_id
 		if (!reader)
 			throw new ApiError(403, 'ticket_invalid', 'The read ticket is not for this Core and share')
