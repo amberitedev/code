@@ -10,6 +10,7 @@ use native_dialog::{DialogBuilder, MessageLevel};
 use std::sync::Arc;
 use tauri::{Listener, Manager};
 
+mod accounts;
 mod api;
 mod cores;
 mod desktop;
@@ -330,8 +331,6 @@ fn main() {
         });
 
     builder = builder
-        .plugin(api::auth::init())
-        .plugin(api::mr_auth::init())
         .plugin(api::onboarding_checklist::init())
         .plugin(api::import::init())
         .plugin(api::install::init())

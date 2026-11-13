@@ -9,21 +9,6 @@ fn main() {
         tauri_build::Attributes::new()
             .codegen(tauri_build::CodegenContext::new())
             .plugin(
-                "auth",
-                InlinedPlugin::new()
-                    .commands(&[
-                        "check_reachable",
-                        "login",
-                        "remove_user",
-                        "get_default_user",
-                        "set_default_user",
-                        "get_users",
-                    ])
-                    .default_permission(
-                        DefaultPermissionRule::AllowAllCommands,
-                    ),
-            )
-            .plugin(
                 "cache",
                 InlinedPlugin::new()
                     .commands(&[
@@ -101,22 +86,6 @@ fn main() {
                     .commands(&[
                         "metadata_get_game_versions",
                         "metadata_get_loader_versions",
-                    ])
-                    .default_permission(
-                        DefaultPermissionRule::AllowAllCommands,
-                    ),
-            )
-            .plugin(
-                "mr-auth",
-                InlinedPlugin::new()
-                    .commands(&[
-                        "modrinth_login",
-                        "logout",
-                        "get",
-                        "get_all",
-                        "set_active",
-                        "remove_account",
-                        "cancel_modrinth_login",
                     ])
                     .default_permission(
                         DefaultPermissionRule::AllowAllCommands,

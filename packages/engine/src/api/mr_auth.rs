@@ -6,6 +6,7 @@ const LOCALHOST_LOGIN_URL: &str = "http://localhost:3000/auth/sign-in";
 const LOCALHOST_SIGNUP_URL: &str = "http://localhost:3000/auth/sign-up";
 
 #[derive(Clone, Copy, Debug, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "kebab-case")]
 pub enum ModrinthAuthFlow {
     SignIn,

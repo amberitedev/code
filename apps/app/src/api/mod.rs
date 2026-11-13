@@ -2,14 +2,12 @@ use engine::error_code;
 use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
 
-pub mod auth;
 pub mod import;
 pub mod install;
 pub mod instance;
 pub mod jre;
 pub mod logs;
 pub mod metadata;
-pub mod mr_auth;
 pub mod onboarding_checklist;
 pub mod process;
 pub mod settings;
@@ -21,7 +19,7 @@ pub mod cache;
 pub mod files;
 pub mod worlds;
 
-mod oauth_utils;
+pub(crate) mod oauth_utils;
 
 pub type Result<T> = std::result::Result<T, CommandError>;
 

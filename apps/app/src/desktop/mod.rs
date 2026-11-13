@@ -37,6 +37,6 @@ pub fn op_routes() -> Router<AppState> {
         .merge(upload::routes())
 }
 
-fn internal(error: impl Display) -> ApiError {
+pub(crate) fn internal(error: impl Display) -> ApiError {
     ApiError::new(ErrorCode::InternalError, error.to_string())
 }

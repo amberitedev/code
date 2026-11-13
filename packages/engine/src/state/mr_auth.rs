@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ModrinthCredentials {
     pub session: String,
     pub expires: DateTime<Utc>,

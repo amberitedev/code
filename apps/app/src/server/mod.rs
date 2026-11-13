@@ -35,6 +35,7 @@ use tauri::{Runtime, plugin::TauriPlugin};
 use url::Url;
 
 use crate::{
+    accounts,
     cores::{self, Cores},
     desktop::{self, AppSlot, updater::Updater},
     engine_handle::EngineHandle,
@@ -126,6 +127,7 @@ impl LocalServer {
             access: Arc::new(AppAccess),
             ops,
             updater,
+            app: app.clone(),
         };
         // Every router over AppState merges here: its engine exists only behind wait_for_engine.
         let waiting = Router::new()
@@ -140,6 +142,7 @@ impl LocalServer {
                     .merge(ops::routes())
                     .merge(desktop::op_routes())
                     .merge(desktop::updater::routes())
+                    .merge(accounts::routes::routes())
                     .with_state(state),
             )
             .route_layer(middleware::from_fn_with_state(
@@ -209,6 +212,7 @@ pub struct AppState {
     access: Arc<dyn Access>,
     ops: Arc<ops::Ops>,
     updater: Arc<Updater>,
+    app: AppSlot,
 }
 
 impl FromRef<AppState> for Arc<Engine> {
@@ -235,6 +239,12 @@ impl FromRef<AppState> for Arc<ops::Ops> {
 impl FromRef<AppState> for Arc<Updater> {
     fn from_ref(state: &AppState) -> Self {
         Arc::clone(&state.updater)
+    }
+}
+
+impl FromRef<AppState> for AppSlot {
+    fn from_ref(state: &AppState) -> Self {
+        Arc::clone(&state.app)
     }
 }
 

@@ -5,7 +5,10 @@ use reqwest::StatusCode;
 
 use crate::Engine;
 use crate::state::{Credentials, MinecraftLoginFlow};
-pub use crate::state::{MinecraftAccountSummary, StagedMinecraftLogin};
+pub use crate::state::{
+    MinecraftAccountSummary, MinecraftCape, MinecraftCharacterExpressionState,
+    MinecraftProfile, MinecraftSkin, StagedMinecraftLogin,
+};
 use crate::util::fetch::INSECURE_REQWEST_CLIENT;
 
 #[tracing::instrument]

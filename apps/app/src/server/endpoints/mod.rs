@@ -40,6 +40,7 @@ macro_rules! endpoints {
     };
 }
 
+pub mod accounts;
 pub mod boot;
 pub mod cores;
 pub mod desktop;
@@ -70,6 +71,7 @@ mod tests {
 
     use super::{
         IdParams,
+        accounts::{self, MinecraftAccountParams, ModrinthSignIn},
         boot::{Boot, GetBoot, Platform},
         cores::{
             CheckCoreSession, ConnectCore, CoreSessionKey, CoreTarget,
@@ -135,6 +137,14 @@ mod tests {
         Cape, MinecraftSkinVariant, Skin, SkinSource, UrlOrBlob,
     };
     use engine::prelude::InstanceSyncedOption;
+    use engine::{
+        minecraft_auth::{
+            MinecraftAccountSummary, MinecraftCape,
+            MinecraftCharacterExpressionState, MinecraftProfile, MinecraftSkin,
+        },
+        mr_auth::ModrinthAuthFlow,
+        prelude::ModrinthCredentials,
+    };
 
     const PATH: &str = concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -243,6 +253,15 @@ mod tests {
             AvailableUpdate::decl(&cfg),
             UpdateDownload::decl(&cfg),
             RestartAfterUpdate::decl(&cfg),
+            MinecraftAccountSummary::decl(&cfg),
+            MinecraftProfile::decl(&cfg),
+            MinecraftSkin::decl(&cfg),
+            MinecraftCape::decl(&cfg),
+            MinecraftCharacterExpressionState::decl(&cfg),
+            MinecraftAccountParams::decl(&cfg),
+            ModrinthCredentials::decl(&cfg),
+            ModrinthSignIn::decl(&cfg),
+            ModrinthAuthFlow::decl(&cfg),
         ]
         .map(|declaration| format!("\nexport {declaration}\n"))
         .concat();
@@ -295,7 +314,8 @@ mod tests {
              export const friends = {{\n{}}}\n\n\
              export const skins = {{\n{}}}\n\n\
              export const ops = {{\n{}}}\n\n\
-             export const updates = {{\n{}}}\n",
+             export const updates = {{\n{}}}\n\n\
+             export const localAccounts = {{\n{}}}\n",
             endpoint::<CheckHealth>(),
             endpoint::<GetBoot>(),
             endpoint::<ConnectCore>(),
@@ -326,6 +346,7 @@ mod tests {
             skins::ts_entries(),
             ops::ts_entries(),
             updates::ts_entries(),
+            accounts::ts_entries(),
         )
     }
 

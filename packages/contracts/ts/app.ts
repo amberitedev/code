@@ -286,6 +286,102 @@ export type UpdateDownload = { op: string, };
 
 export type RestartAfterUpdate = { restart: boolean, };
 
+export type MinecraftAccountSummary = { profile: MinecraftProfile, expires: string, active: boolean, };
+
+export type MinecraftProfile = { 
+/**
+ * The UUID of the player.
+ */
+id: string, 
+/**
+ * The username of the player.
+ */
+name: string, 
+/**
+ * The skins the player is known to have.
+ *
+ * As of 2025-04-08, in the production Mojang profile endpoint every
+ * player has a single skin.
+ */
+skins: Array<MinecraftSkin>, 
+/**
+ * The capes the player is known to have.
+ */
+capes: Array<MinecraftCape>, };
+
+export type MinecraftSkin = { 
+/**
+ * The UUID of this skin object.
+ *
+ * As of 2025-04-08, in the production Mojang profile endpoint this UUID
+ * changes every time the player changes their skin, even if the skin
+ * texture is the same as before.
+ */
+id: string, 
+/**
+ * The selection state of the skin.
+ *
+ * As of 2025-04-08, in the production Mojang profile endpoint this
+ * is always `ACTIVE`, as only a single skin representing the current
+ * skin is returned.
+ */
+state: MinecraftCharacterExpressionState, 
+/**
+ * The URL to the skin texture.
+ *
+ * As of 2025-04-08, in the production Mojang profile endpoint the file
+ * name for this URL is a hash of the skin texture, so that different
+ * players using the same skin texture will share a texture URL.
+ */
+url: string, 
+/**
+ * A hash of the skin texture.
+ *
+ * As of 2025-04-08, in the production Mojang profile endpoint this
+ * is always set and the same as the file name of the skin texture URL.
+ */
+textureKey: string | null, 
+/**
+ * The player model variant this skin is for.
+ */
+variant: SkinModel, 
+/**
+ * User-friendly name for the skin.
+ *
+ * As of 2025-04-08, in the production Mojang profile endpoint this is
+ * only set if the player has not set a custom skin, and this skin object
+ * is therefore the default skin for the player's UUID.
+ */
+alias: string | null, };
+
+export type MinecraftCape = { 
+/**
+ * The UUID of the cape.
+ */
+id: string, 
+/**
+ * The selection state of the cape.
+ */
+state: MinecraftCharacterExpressionState, 
+/**
+ * The URL to the cape texture.
+ */
+url: string, 
+/**
+ * The user-friendly name for the cape.
+ */
+alias: string, };
+
+export type MinecraftCharacterExpressionState = "ACTIVE" | "INACTIVE" | "UNKNOWN";
+
+export type MinecraftAccountParams = { id: string, };
+
+export type ModrinthCredentials = { session: string, expires: string, user_id: string, active: boolean, };
+
+export type ModrinthSignIn = { flow: ModrinthAuthFlow, add_account: boolean, };
+
+export type ModrinthAuthFlow = "sign-in" | "sign-up";
+
 export const health = {
 	checkHealth: { method: "GET", path: "/health", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
 }
@@ -416,4 +512,20 @@ export const updates = {
 	discardDownloadedUpdate: { method: "DELETE", path: "/app/updates/downloaded", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
 	setRestartAfterUpdate: { method: "PUT", path: "/app/updates/restart-after", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, RestartAfterUpdate, void>,
 	restartApp: { method: "POST", path: "/app/restart", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
+}
+
+export const localAccounts = {
+	checkMinecraftReachable: { method: "GET", path: "/app/accounts/minecraft/reachable", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
+	signInToMinecraft: { method: "POST", path: "/app/accounts/minecraft/login", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, MinecraftAccountSummary>,
+	listMinecraftAccounts: { method: "GET", path: "/app/accounts/minecraft", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<MinecraftAccountSummary>>,
+	getDefaultMinecraftAccount: { method: "GET", path: "/app/accounts/minecraft/default", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, string | null>,
+	setDefaultMinecraftAccount: { method: "PUT", path: "/app/accounts/minecraft/default", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, string, void>,
+	removeMinecraftAccount: { method: "DELETE", path: "/app/accounts/minecraft/{id}", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<MinecraftAccountParams, null, void, void>,
+	signInToModrinth: { method: "POST", path: "/app/accounts/modrinth/login", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, ModrinthSignIn, ModrinthCredentials>,
+	cancelModrinthSignIn: { method: "DELETE", path: "/app/accounts/modrinth/login", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
+	signOutOfModrinth: { method: "POST", path: "/app/accounts/modrinth/logout", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
+	getActiveModrinthAccount: { method: "GET", path: "/app/accounts/modrinth/active", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, ModrinthCredentials | null>,
+	listModrinthAccounts: { method: "GET", path: "/app/accounts/modrinth", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<ModrinthCredentials>>,
+	setActiveModrinthAccount: { method: "PUT", path: "/app/accounts/modrinth/active", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, string, void>,
+	removeModrinthAccount: { method: "DELETE", path: "/app/accounts/modrinth/{id}", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<IdParams, null, void, void>,
 }

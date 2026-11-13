@@ -526,3 +526,30 @@ async fn without_the_updater_no_update_is_found_or_downloaded() {
     .await;
     assert!(local.updater.restarts_after());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn with_nobody_signed_in_the_account_reads_are_empty() {
+    engine::install_crypto_provider();
+    let dir = tempfile::tempdir().unwrap();
+    let handle = EngineHandle::default();
+    handle.set(Ok(engine::Engine::new(engine::EngineConfig {
+        settings_dir: dir.path().to_path_buf(),
+        events: engine::EventSink::new(),
+        accounts: None,
+    })
+    .await
+    .unwrap()));
+    let local = local_with(handle);
+
+    for (path, empty) in [
+        ("app/accounts/minecraft", json!([])),
+        ("app/accounts/minecraft/default", Value::Null),
+        ("app/accounts/modrinth", json!([])),
+        ("app/accounts/modrinth/active", Value::Null),
+    ] {
+        let response = local.send(local.get(path, &[])).await;
+        assert_eq!(response.status(), StatusCode::OK, "{path}");
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(serde_json::from_slice::<Value>(&body).unwrap(), empty);
+    }
+}

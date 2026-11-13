@@ -41,12 +41,10 @@
 				}
 			]
 		},
-		"auth:default",
 		"import:default",
 		"jre:default",
 		"logs:default",
 		"metadata:default",
-		"mr-auth:default",
 		"onboarding-checklist:default",
 		"instance:default",
 		"install:default",

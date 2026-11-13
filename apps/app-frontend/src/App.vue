@@ -1069,7 +1069,7 @@ async function signIn(flow = 'sign-in', addAccount = false) {
 		await login(flow, addAccount)
 		await fetchCredentials()
 	} catch (error) {
-		if (error?.code === 'login_canceled') {
+		if (error?.code === 'sign_in_cancelled') {
 			// user closed the login window
 		} else {
 			handleError(error)

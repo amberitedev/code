@@ -356,6 +356,7 @@ pub struct Credentials {
 }
 
 #[derive(Serialize, Debug, Clone)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct MinecraftAccountSummary {
     pub profile: MinecraftProfile,
     pub expires: DateTime<Utc>,
@@ -1437,6 +1438,7 @@ pub enum MinecraftSkinVariant {
 }
 
 #[derive(Deserialize, Serialize, Debug, Copy, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "UPPERCASE")]
 pub enum MinecraftCharacterExpressionState {
     /// This expression is selected for being displayed ingame.
@@ -1452,6 +1454,7 @@ pub enum MinecraftCharacterExpressionState {
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct MinecraftSkin {
     /// The UUID of this skin object.
     ///
@@ -1522,6 +1525,7 @@ fn normalize_skin_alias_case<'de, D: Deserializer<'de>>(
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct MinecraftCape {
     /// The UUID of the cape.
     pub id: Uuid,
@@ -1535,6 +1539,7 @@ pub struct MinecraftCape {
 }
 
 #[derive(Deserialize, Serialize, Debug, Default, Clone)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct MinecraftProfile {
     /// The UUID of the player.
     #[serde(default)]
