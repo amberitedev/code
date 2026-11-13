@@ -2,13 +2,14 @@
 
 use std::sync::Arc;
 
+use ariadne::users::UserStatus;
 use axum::{Router, extract::State};
 use contracts::{
     ApiError, Empty, Json,
     backend::social::UserFriend,
     server::{Req, route},
 };
-use engine::{Engine, prelude::UserStatus, routes::api_error};
+use engine::{Engine, routes::api_error};
 
 use super::api;
 use crate::presence::Presence;

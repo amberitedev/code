@@ -30,7 +30,6 @@ pub mod data {
         Settings, SharedInstanceAttachment, SharedInstanceRole, TeamMember,
         Theme, User, Version, WindowSize,
     };
-    pub use ariadne::users::UserStatus;
     pub use modrinth_content_management::{
         ContentType, ResolutionPreferences, ResolveContentPlan,
         ResolveContentRequest,

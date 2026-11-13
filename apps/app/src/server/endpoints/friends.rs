@@ -1,7 +1,7 @@
 //! The signed-in Modrinth user's friends and their presence.
 
+use ariadne::users::UserStatus;
 use contracts::{Empty, Json, backend::social::UserFriend};
-use engine::prelude::UserStatus;
 
 use super::IdParams;
 

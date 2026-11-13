@@ -3,7 +3,6 @@ use crate::data::ModLoader;
 use crate::util;
 use crate::util::io::IOError;
 use crate::util::jre::JREError;
-use async_tungstenite::tungstenite;
 use data_url::DataUrlError;
 use hickory_resolver::net::NetError;
 use serde::{Deserialize, Serialize};
@@ -83,11 +82,6 @@ pub enum ErrorKind {
     #[error("NBT data structure error: {0}")]
     NBTReprError(#[from] quartz_nbt::NbtReprError),
 
-    #[error("serialization error (websocket): {0}")]
-    WebsocketSerializationError(
-        #[from] ariadne::networking::serialization::SerializationError,
-    ),
-
     #[error("error parsing UUID: {0}")]
     UUIDError(#[from] uuid::Error),
 
@@ -117,9 +111,6 @@ pub enum ErrorKind {
 
     #[error("too many requests, retry in {}", format_duration(*.retry_in))]
     RateLimited { retry_in: Duration },
-
-    #[error("websocket error: {0}")]
-    WSError(#[from] async_tungstenite::tungstenite::Error),
 
     #[error("websocket closed before {0} could be received")]
     WSClosedError(String),
@@ -262,9 +253,6 @@ pub enum ErrorKind {
     #[error("deserialization error: {0}")]
     DeserializationError(#[from] serde::de::value::Error),
 
-    #[error("Discord IPC error: {0}")]
-    DiscordRichPresenceError(#[from] discord_rich_presence::error::Error),
-
     #[error("login canceled")]
     LoginCanceled,
 
@@ -375,7 +363,6 @@ impl ErrorKind {
             Self::NoValueFor(_) | Self::MetadataError(_) => "metadata_error",
             Self::FetchError(_)
             | Self::ApiIsDownError(_)
-            | Self::WSError(_)
             | Self::WSClosedError(_)
             | Self::DNSError(_)
             | Self::RateLimited { .. } => "network_error",
@@ -428,10 +415,7 @@ pub fn error_code(error: &Error) -> &'static str {
         kind.code()
     } else if error.is::<LabrinthError>() {
         "api_error"
-    } else if error.is::<reqwest::Error>()
-        || error.is::<tungstenite::Error>()
-        || error.is::<NetError>()
-    {
+    } else if error.is::<reqwest::Error>() || error.is::<NetError>() {
         "network_error"
     } else if error.is::<JREError>() {
         "java_error"

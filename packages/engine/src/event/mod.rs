@@ -329,16 +329,6 @@ pub struct FriendStatusPayload {
     pub last_update: String,
 }
 
-impl From<ariadne::users::UserStatus> for FriendStatusPayload {
-    fn from(status: ariadne::users::UserStatus) -> Self {
-        Self {
-            user_id: status.user_id.to_string(),
-            profile_name: status.profile_name,
-            last_update: status.last_update.to_rfc3339(),
-        }
-    }
-}
-
 pub use self::log_types::*;
 
 mod log_types {

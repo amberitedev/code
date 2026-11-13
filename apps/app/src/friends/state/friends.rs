@@ -24,8 +24,9 @@ use dashmap::DashMap;
 use either::Either;
 use engine::LabrinthError;
 use engine::{
-    EventSink, FetchSemaphore, FriendPayload, ProcessManager, Sessions,
-    emit_friend, emit_notification, fetch_advanced, fetch_json,
+    EventSink, FetchSemaphore, FriendPayload, FriendStatusPayload,
+    ProcessManager, Sessions, emit_friend, emit_notification, fetch_advanced,
+    fetch_json,
 };
 use futures::{SinkExt, StreamExt};
 use reqwest::Method;
@@ -196,7 +197,7 @@ impl FriendsSocket {
                                         match server_message {
                                             ServerToClientMessage::StatusUpdate { status } => {
                                                 statuses.insert(status.user_id, status.clone());
-                                                let _ = emit_friend(&events, FriendPayload::StatusUpdate { user_status: status.into() }).await;
+                                                let _ = emit_friend(&events, FriendPayload::StatusUpdate { user_status: FriendStatusPayload { user_id: status.user_id.to_string(), profile_name: status.profile_name, last_update: status.last_update.to_rfc3339() } }).await;
                                             },
                                             ServerToClientMessage::UserOffline { id } => {
                                                 statuses.remove(&id);

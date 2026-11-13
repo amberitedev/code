@@ -3214,11 +3214,9 @@ name = "engine"
 version = "1.0.0-local"
 dependencies = [
  "anyhow",
- "ariadne",
  "async-minecraft-ping",
  "async-recursion",
  "async-trait",
- "async-tungstenite",
  "async-walkdir",
  "axum",
  "bedrock",
@@ -3234,7 +3232,6 @@ dependencies = [
  "data-url",
  "derive_more 2.1.1",
  "dirs 7.0.0",
- "discord-rich-presence",
  "dotenvy",
  "dunce",
  "either",

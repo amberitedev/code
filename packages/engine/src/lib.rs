@@ -27,7 +27,7 @@ mod ts;
 pub use api::*;
 pub use error::*;
 pub use event::{
-    DesktopEvent, Event, EventSink, FriendPayload,
+    DesktopEvent, Event, EventSink, FriendPayload, FriendStatusPayload,
     InstanceGroupsChangedPayload, InstancePayload, InstancePayloadType,
     LoadingBar, LoadingBarType, ProcessPayload, ProcessPayloadType,
     emit::emit_command, emit::emit_friend, emit::emit_instance,

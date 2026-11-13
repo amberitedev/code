@@ -135,11 +135,11 @@ jobs:
       - run: cargo test --workspace --exclude toasty --locked
       - run: sh -n apps/core/scripts/install.sh
       # A cargo error fails the step, and theseus_gui proves the pattern matches tauri.
-      - name: Copal and the engine do not depend on Tauri
+      - name: Copal does not depend on Tauri, and the engine on no desktop crate
         run: |
           gui=$(cargo tree --locked -e normal -p theseus_gui --prefix none -f '{p}')
           copal=$(cargo tree --locked -e normal -p copal --prefix none -f '{p}')
           engine=$(cargo tree --locked -e normal -p engine --prefix none -f '{p}')
           grep -q '^tauri v' <<< "$gui"
           if grep '^tauri v' <<< "$copal"; then echo '::error::copal depends on tauri'; exit 1; fi
-          if grep '^tauri v' <<< "$engine"; then echo '::error::engine depends on tauri'; exit 1; fi
+          if grep -E '^(tauri|discord-rich-presence|async-tungstenite|p256) v' <<< "$engine"; then echo '::error::engine depends on a desktop crate'; exit 1; fi
