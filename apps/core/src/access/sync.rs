@@ -22,6 +22,7 @@ use contracts::{
     },
     client::{Body, CallError, Remote, Reply, call},
 };
+use engine::{BackendSession, BackendSessionKind, Sessions};
 use reqwest::StatusCode;
 use sharing_client::shares::delete_share;
 use sqlx::{SqliteConnection, SqlitePool};
@@ -52,6 +53,8 @@ pub struct Sync {
     pub storage: Arc<Storage>,
     /// Told the join IP whenever the addresses are looked up.
     pub network: Arc<Network>,
+    /// The engine's, which calls the backend with this Core's key.
+    pub sessions: Sessions,
 }
 
 /// Owe the backend `call`, in the transaction of the change that needs it. Wake sync with
@@ -181,13 +184,25 @@ pub async fn run(sync: Arc<Sync>) {
 }
 
 impl Sync {
+    /// The backend key, which the engine is given too.
     async fn key(&self) -> Option<String> {
-        sqlx::query_scalar("SELECT backend_key FROM core WHERE id = 1")
-            .fetch_optional(&self.db)
-            .await
-            .ok()
-            .flatten()
-            .flatten()
+        let key: Option<String> =
+            sqlx::query_scalar("SELECT backend_key FROM core WHERE id = 1")
+                .fetch_optional(&self.db)
+                .await
+                .ok()
+                .flatten()
+                .flatten();
+        self.sessions.set_backend_session(
+            key.clone().zip(self.backend_url.parse().ok()).map(
+                |(bearer, base_url)| BackendSession {
+                    base_url,
+                    bearer,
+                    kind: BackendSessionKind::CoreKey,
+                },
+            ),
+        );
+        key
     }
 
     /// This Core's addresses now. A failed public lookup keeps `previous`: no answer is not a
@@ -510,6 +525,7 @@ impl Sync {
         };
         match cleared.await {
             Ok(()) => {
+                self.sessions.set_backend_session(None);
                 let _ = self.access.changed.send(Changed::Everyone);
                 println!(
                     "\nThis Core was removed from its account. Its servers and files are untouched; pair it again to use it from the App.\n"
@@ -621,6 +637,7 @@ mod tests {
             port: 16662,
             bind: IpAddr::V4(Ipv4Addr::LOCALHOST),
             access,
+            sessions: Sessions::new(None),
         }
     }
 
@@ -763,11 +780,14 @@ mod tests {
         sync.send_due("amc_key", &addresses()).await.unwrap();
         assert!(owed(&sync).await.is_empty(), "a 404 is never retried");
 
+        assert_eq!(sync.key().await.as_deref(), Some("amc_key"));
+        assert_eq!(sync.sessions.backend().unwrap().bearer, "amc_key");
         let mut changed = sync.access.changed.subscribe();
         let lost = sync.connect("amc_key", &addresses()).await.unwrap_err();
         assert!(matches!(lost, Lost::Removed));
         sync.unpair().await;
         assert_eq!(changed.recv().await.unwrap(), Changed::Everyone);
+        assert!(sync.sessions.backend().is_none(), "the engine kept the key");
         assert_eq!(sync.key().await, None);
         for table in ["access", "sessions"] {
             let count: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(

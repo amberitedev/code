@@ -18,7 +18,7 @@ use std::{
 };
 
 use color_eyre::eyre::{Result, WrapErr, bail, eyre};
-use engine::{BackendSession, BackendSessionKind, Engine};
+use engine::Engine;
 use tracing::{info, warn};
 use tracing_subscriber::{
     EnvFilter, layer::SubscriberExt, util::SubscriberInitExt,
@@ -135,17 +135,6 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
     .await?;
     let access = Arc::new(access::CoreAccess::new(db.clone(), keys));
     let engine = start_engine(&paths).await?;
-    let backend_key: Option<String> =
-        sqlx::query_scalar("SELECT backend_key FROM core WHERE id = 1")
-            .fetch_one(&db)
-            .await?;
-    if let (Some(url), Some(key)) = (&config.backend_url, backend_key) {
-        engine.sessions.set_backend_session(Some(BackendSession {
-            base_url: url.parse()?,
-            bearer: key,
-            kind: BackendSessionKind::CoreKey,
-        }));
-    }
     let storage = Arc::new(crate::storage::Storage::new(
         db.clone(),
         paths.clone(),
@@ -219,6 +208,7 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
                 access: Arc::clone(&access),
                 storage,
                 network,
+                sessions: state.engine.sessions.clone(),
             })));
             tokio::spawn(
                 async move { state.access.keys.refresh_daily().await },

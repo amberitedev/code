@@ -29,7 +29,7 @@ pub enum BackendSessionKind {
 }
 
 impl Sessions {
-    pub(crate) fn new(accounts: Option<AccountEndpoints>) -> Self {
+    pub fn new(accounts: Option<AccountEndpoints>) -> Self {
         Self {
             modrinth: Arc::default(),
             backend: Arc::default(),
