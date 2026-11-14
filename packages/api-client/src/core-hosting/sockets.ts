@@ -14,6 +14,7 @@ import { AbstractWebSocketClient, type WebSocketConnection } from '../core/abstr
 import type { Archon } from '../modules/archon/types'
 
 type WSEvent = Archon.Websocket.v0.WSEvent
+type InstallProgressItem = Archon.Websocket.v0.InstallProgressItem
 
 type WSEventMap = {
 	[K in WSEvent as `${string}:${K['event']}`]: K
@@ -39,6 +40,9 @@ export class CoreSyncClient extends AbstractSyncClient {
  * server's topics, each event passed on as the hosting API's event the panel listens for. A
  * Viewer's console subscription ends at once, so they get no console. Commands go to
  * `POST /servers/{id}/console`.
+ *
+ * The panel opens once it has the server's install progress. `installs` is subscribed first, so
+ * the unfinished jobs it starts with have arrived when the power state authenticates the socket.
  */
 export class CoreWebSocketClient extends AbstractWebSocketClient {
 	protected emitter = mitt<WSEventMap>()
@@ -63,14 +67,17 @@ export class CoreWebSocketClient extends AbstractWebSocketClient {
 				isReconnecting: reconnectAttempts > 0,
 			}
 			this.connections.set(serverId, connection)
+			const installs = new Map<string, InstallProgressItem>()
+			const emitInstalls = () =>
+				this.emit(serverId, { event: 'install-progress', items: [...installs.values()] })
 			const current = () => this.connections.get(serverId) === connection
 
 			ws.onopen = () => {
 				const topics: Topic[] = [
+					{ type: 'installs' },
 					{ type: 'server', id: serverId },
 					{ type: 'backups', id: serverId },
 					{ type: 'console', id: serverId },
-					{ type: 'installs' },
 				]
 				for (const topic of topics) {
 					ws.send(JSON.stringify({ type: 'subscribe', topic } satisfies ClientMessage))
@@ -81,11 +88,26 @@ export class CoreWebSocketClient extends AbstractWebSocketClient {
 				if (!current()) return
 				const event = JSON.parse(message.data) as CoreEvent | EngineEvent
 				if (event.type === 'install_job') {
-					if (event.payload.instance_id !== serverId) return
-					for (const archon of fromInstallJob(serverId, event.payload)) this.emit(serverId, archon)
+					const job = event.payload
+					if (job.instance_id !== serverId) return
+					const item = toInstallItem(serverId, job)
+					const finished = job.status !== 'queued' && job.status !== 'running'
+					installs.set(job.job_id, item)
+					if (connection.authenticated) {
+						emitInstalls()
+						if (finished) this.emit(serverId, toInstallResult(item))
+					}
+					if (finished) installs.delete(job.job_id)
 					return
 				}
-				// The `server` topic answers first: with the power state, or `ended` without access.
+				// The Core resends the unfinished jobs after a resync.
+				if (event.type === 'resync') {
+					installs.clear()
+					if (connection.authenticated) emitInstalls()
+					return
+				}
+				// Of this server's topics, `server` answers first: with the power state, or `ended`
+				// without access.
 				if (event.type === 'ended' && event.payload.topic.type === 'server') {
 					connection.authenticated = false
 					this.emit(serverId, { event: 'auth-incorrect' })
@@ -98,6 +120,7 @@ export class CoreWebSocketClient extends AbstractWebSocketClient {
 					connection.reconnectAttempts = 0
 					connection.isReconnecting = false
 					this.emit(serverId, { event: 'auth-ok' })
+					emitInstalls()
 					resolve()
 				}
 				for (const archon of toArchon(event)) this.emit(serverId, archon)
@@ -172,37 +195,40 @@ export class CoreWebSocketClient extends AbstractWebSocketClient {
 	}
 }
 
-/** A server's content installs are the engine's install jobs on its instance, which has its id. */
-function fromInstallJob(serverId: string, job: InstallJobSnapshot): WSEvent[] {
+/**
+ * A server's content installs are the engine's install jobs on its instance, which has its id.
+ * A finished job reads as done (100) or failed (an error).
+ */
+function toInstallItem(serverId: string, job: InstallJobSnapshot): InstallProgressItem {
+	const item: InstallProgressItem = {
+		world_id: serverId,
+		key: { type: 'local_modpack', filename: job.display?.title ?? '' },
+		id: job.job_id,
+		progress: null,
+		error: null,
+	}
 	switch (job.status) {
 		case 'queued':
 		case 'running': {
 			const progress = job.progress
-			return [
-				{
-					event: 'install-progress',
-					items: [
-						{
-							world_id: serverId,
-							key: { type: 'local_modpack', filename: job.display?.title ?? '' },
-							id: job.job_id,
-							progress:
-								progress && progress.total > 0
-									? Math.floor((progress.current / progress.total) * 100)
-									: null,
-							error: null,
-						},
-					],
-				},
-			]
+			if (progress && progress.total > 0) {
+				item.progress = Math.floor((progress.current / progress.total) * 100)
+			}
+			return item
 		}
 		case 'succeeded':
-			return [{ event: 'installation-result', result: 'ok' }]
+			return { ...item, progress: 100 }
 		case 'failed':
 		case 'interrupted':
 		case 'canceled':
-			return [{ event: 'installation-result', result: 'err', reason: job.error?.message }]
+			return { ...item, error: job.error?.message ?? job.status }
 	}
+}
+
+function toInstallResult(item: InstallProgressItem): WSEvent {
+	return item.error === null
+		? { event: 'installation-result', result: 'ok' }
+		: { event: 'installation-result', result: 'err', reason: item.error }
 }
 
 function toArchon(event: CoreEvent | EngineEvent): WSEvent[] {
@@ -218,10 +244,6 @@ function toArchon(event: CoreEvent | EngineEvent): WSEvent[] {
 			const { server: _, ...progress } = event.payload
 			return [{ event: 'backup-progress', ...progress }]
 		}
-		// The Core sends a server's power again after a resync.
-		case 'ended':
-		case 'resync':
-			return []
 		default:
 			return []
 	}

@@ -14,7 +14,8 @@ use crate::ApiError;
 pub enum Topic {
     /// The engine's instance and process events for one instance.
     Instance { id: String },
-    /// The engine's install jobs, for every instance the caller may see.
+    /// The engine's install jobs, for every instance the caller may see, starting with the
+    /// unfinished ones.
     Installs,
     /// A server's console lines, starting with its last 200.
     Console { id: String },

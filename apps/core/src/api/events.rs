@@ -206,6 +206,9 @@ impl Loop {
                 for server in servers {
                     self.snapshot(socket, &server).await?;
                 }
+                if self.topics.contains_key(&Topic::Installs) {
+                    self.unfinished_jobs(socket).await?;
+                }
             }
         }
     }
@@ -243,14 +246,12 @@ impl Loop {
             }
             _ => None,
         };
-        let server = match &topic {
-            Topic::Server { id } => Some(id.clone()),
-            _ => None,
-        };
+        let start = topic.clone();
         self.topics.insert(topic, forward);
-        match server {
-            Some(server) => self.snapshot(socket, &server).await,
-            None => Ok(()),
+        match start {
+            Topic::Server { id } => self.snapshot(socket, &id).await,
+            Topic::Installs => self.unfinished_jobs(socket).await,
+            _ => Ok(()),
         }
     }
 
@@ -299,6 +300,27 @@ impl Loop {
         send(socket, &power_event(&self.state, server, power).await).await
     }
 
+    /// The unfinished install jobs the caller may see, as an `Installs` subscription starts with.
+    async fn unfinished_jobs(
+        &mut self,
+        socket: &mut WebSocket,
+    ) -> Result<(), Closed> {
+        let jobs = engine::install::list_jobs(false, &self.state.engine)
+            .await
+            .unwrap_or_else(|error| {
+                tracing::warn!(%error, "listing install jobs");
+                Vec::new()
+            });
+        for job in jobs {
+            if !job.status.is_finished()
+                && self.sees(job.instance_id.as_deref()).await
+            {
+                send(socket, &Event::InstallJob(Arc::new(job))).await?;
+            }
+        }
+        Ok(())
+    }
+
     fn wants(&self, event: &CoreEvent) -> bool {
         let topic = match event {
             CoreEvent::Power { server, .. } => {
@@ -320,29 +342,32 @@ impl Loop {
             Event::Instance(payload) => &payload.instance_id,
             Event::Process(payload) => &payload.instance_id,
             Event::InstallJob(job) => {
-                if !self.topics.contains_key(&Topic::Installs) {
-                    return false;
-                }
-                let Some(instance) = &job.instance_id else {
-                    return self.caller.is_owner();
-                };
-                if let Some(&visible) = self.visible.get(instance) {
-                    return visible;
-                }
-                let visible = self
-                    .state
-                    .access
-                    .require(&self.caller, instance, Permission::View)
-                    .await
-                    .is_ok();
-                self.visible.insert(instance.clone(), visible);
-                return visible;
+                return self.topics.contains_key(&Topic::Installs)
+                    && self.sees(job.instance_id.as_deref()).await;
             }
             _ => return false,
         };
         self.topics.contains_key(&Topic::Instance {
             id: instance.clone(),
         })
+    }
+
+    /// Whether the caller may see an install job on `instance`; one on no instance is the Owner's.
+    async fn sees(&mut self, instance: Option<&str>) -> bool {
+        let Some(instance) = instance else {
+            return self.caller.is_owner();
+        };
+        if let Some(&visible) = self.visible.get(instance) {
+            return visible;
+        }
+        let visible = self
+            .state
+            .access
+            .require(&self.caller, instance, Permission::View)
+            .await
+            .is_ok();
+        self.visible.insert(instance.to_owned(), visible);
+        visible
     }
 }
 

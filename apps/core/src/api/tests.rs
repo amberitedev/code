@@ -1779,6 +1779,39 @@ async fn ending_the_session_closes_the_socket() {
 }
 
 #[tokio::test]
+async fn an_installs_subscription_starts_with_the_unfinished_jobs() {
+    use engine::install::{
+        InstallJobStatus, InstallRequest, model::InstallJobState,
+    };
+
+    let core = core().await;
+    let request = InstallRequest::InstallExistingInstance {
+        instance_id: core.server.clone(),
+        force: false,
+    };
+    let job = uuid::Uuid::new_v4();
+    engine::install::store::insert(
+        job,
+        &request,
+        &InstallJobState::new(&request),
+        InstallJobStatus::Running,
+        core.state.engine.pool(),
+    )
+    .await
+    .unwrap();
+    let editor = core.sign_in("editor").await;
+    let mut socket = core.events(&editor).await;
+    subscribe(&mut socket, json!({ "type": "installs" })).await;
+    subscribe(&mut socket, json!({ "type": "server", "id": core.server }))
+        .await;
+
+    let running = next(&mut socket).await.unwrap();
+    assert_eq!(running["type"], "install_job");
+    assert_eq!(running["payload"]["job_id"], job.to_string());
+    assert_eq!(next(&mut socket).await.unwrap()["type"], "power");
+}
+
+#[tokio::test]
 async fn a_lagged_subscriber_gets_resync_and_the_servers_state_again() {
     let core = core().await;
     let editor = core.sign_in("editor").await;
