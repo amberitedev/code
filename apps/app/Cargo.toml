@@ -10,65 +10,91 @@ license = "GPL-3.0-only"
 [dependencies]
 aes-gcm = { workspace = true }
 anyhow = { workspace = true }
+ariadne = { workspace = true }
+async-tungstenite = { workspace = true, features = ["tokio-runtime", "tokio-rustls-webpki-roots"] }
+axum = { version = "0.8.4", default-features = false, features = ["http1", "json", "query", "tokio", "ws"] }
 
 base64 = { workspace = true }
-bedrock = { workspace = true }
+bytemuck = { workspace = true, features = ["extern_crate_alloc"] }
 bytes = { workspace = true }
+chardetng = { workspace = true }
 chrono = { workspace = true }
+contracts = { workspace = true, features = ["client", "server"] }
 dashmap = { workspace = true }
+data-url = { workspace = true }
+dirs = { workspace = true }
+discord-rich-presence = { workspace = true }
 either = { workspace = true }
-enumset = { workspace = true, features = ["serde"] }
+encoding_rs = { workspace = true }
+engine = { workspace = true }
+futures = { workspace = true, features = ["alloc", "async-await"] }
+heck = { workspace = true }
 hkdf = { workspace = true }
 http-body-util = "0.1.3"
 hyper = { workspace = true, features = ["client", "http1", "server"] }
 hyper-util = { workspace = true, features = ["tokio"] }
 image = { workspace = true, features = ["gif", "jpeg", "png", "webp"] }
+itertools = { workspace = true }
 keyring = { workspace = true }
+minecraft-meta-manifest = { workspace = true }
+modrinth-content-management = { workspace = true }
 native-dialog = { workspace = true }
-p256 = { workspace = true, features = ["ecdh"] }
-paste = { workspace = true }
+os_info = { version = "3.15.0", default-features = false }
+p256 = { workspace = true, features = ["ecdh", "ecdsa"] }
+parking_lot = { workspace = true }
 path-util = { workspace = true }
+phf = { workspace = true }
+png = { workspace = true }
+quartz_nbt = { workspace = true, features = ["serde"] }
 rand = { workspace = true }
+reqwest = { workspace = true, features = ["json", "multipart", "stream"] }
+rgb = { workspace = true }
 rustls = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 serde_with = { workspace = true }
+sha1_smol = { workspace = true }
 sha2 = { workspace = true }
+sharing-client = { workspace = true }
+shlex = { workspace = true }
+sqlx = { workspace = true, features = ["macros", "runtime-tokio", "sqlite"] }
 tauri-plugin-deep-link = { workspace = true }
 tauri-plugin-dialog = { workspace = true }
-tauri-plugin-fs = { workspace = true }
 tauri-plugin-http = { workspace = true }
 tauri-plugin-opener = { workspace = true }
-tauri-plugin-os = { workspace = true }
 tauri-plugin-single-instance = { workspace = true }
 tauri-plugin-updater = { workspace = true }
 tauri-plugin-window-state = { workspace = true }
 tempfile = { workspace = true }
-theseus = { workspace = true, features = ["tauri"] }
-tokio = { workspace = true, features = ["io-util", "net", "sync", "time"] }
-tokio-rustls = "0.26.4"
-tokio-util = { workspace = true, features = ["rt"] }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "macros", "net", "sync", "time"] }
+tokio-rustls = { version = "0.26.4", default-features = false, features = ["ring", "tls12"] }
+tokio-util = { workspace = true, features = ["compat", "io", "rt"] }
 tracing = { workspace = true }
+tracing-error = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["chrono", "env-filter"] }
 url = { workspace = true }
 urlencoding = { workspace = true }
 uuid = { workspace = true, features = ["serde", "v4"] }
 whoami = { workspace = true }
 zip = { workspace = true }
 
-[dependencies.browser-bridge]
-path = "../../packages/browser-bridge"
-optional = true
-
 [dependencies.tauri]
 workspace = true
-features = ["devtools", "macos-private-api", "protocol-asset"]
+features = ["devtools", "macos-private-api", "unstable"]
 
 [dev-dependencies]
+contracts = { workspace = true, features = ["server", "ts"] }
+# App routes over engine types write those types' TypeScript too.
+engine = { workspace = true, features = ["export-ts"] }
 rcgen = "0.14.7"
 rustls = { workspace = true, features = ["std"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tower = { version = "0.5.2", features = ["util"] }
+ts-rs = { workspace = true }
 
 [build-dependencies]
+dotenvy = { workspace = true }
 tauri-build = { workspace = true, features = ["codegen"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -89,11 +115,9 @@ features = [
 # by default Tauri runs in production mode
 # when `tauri dev` runs it is executed with `cargo run --no-default-features` if `devPath` is an URL
 default = ["custom-protocol"]
-browser-bridge = ["dep:browser-bridge"]
 # this feature is used for production builds where `devPath` points to the filesystem
 # DO NOT remove this
 custom-protocol = ["tauri/custom-protocol"]
-export-app-events = ["theseus/export-ts"]
 updater = []
 
 [lints]

@@ -525,7 +525,7 @@ onUnmounted(() => {
 						"
 						:instance-id="item.instance.id"
 						:instance-name="item.instance.name"
-						:instance-icon="item.instance.icon_path"
+						:instance-icon="item.instance.icon_path ?? undefined"
 						@refresh="() => (item.world.type === 'server' ? refreshServer(item.world.address) : {})"
 						@update="scheduleWorldsRefresh"
 						@play="

@@ -9,31 +9,6 @@ export class KyrosContentV1Module extends AbstractModule {
 		return 'kyros_content_v1'
 	}
 
-	/** Core: authorize one export of the server's content as a `.mrpack`. */
-	public async authorizeMrpackExport(
-		nodeUrlHost: string,
-		worldId: string,
-	): Promise<Kyros.Content.v1.MrpackExportAuthorization> {
-		return this.client.request<Kyros.Content.v1.MrpackExportAuthorization>(
-			`/worlds/${worldId}/content/export-mrpack/authorize`,
-			{
-				api: getNodeBaseUrl(nodeUrlHost),
-				version: 'v1',
-				method: 'GET',
-			},
-		)
-	}
-
-	/** Core: the URL of a previously authorized `.mrpack` export, which the Core writes as it is fetched. */
-	public getMrpackExportUrl(nodeUrlHost: string, worldId: string, token: string): string {
-		// Appended rather than resolved, so a node URL with a path (a Core server) keeps it.
-		const url = new URL(
-			`${getNodeBaseUrl(nodeUrlHost).replace(/\/$/, '')}/v1/worlds/${encodeURIComponent(worldId)}/content/export-mrpack`,
-		)
-		url.searchParams.set('token', token)
-		return url.toString()
-	}
-
 	/** GET /v1/worlds/:world_id/content/embedded-icon */
 	public async getEmbeddedAddonIcon(
 		worldId: string,

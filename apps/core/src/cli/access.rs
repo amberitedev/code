@@ -2,15 +2,14 @@
 //! someone needs their Amberite account, so invites come from the App. A user is named by their
 //! id or their name.
 
-use axum::http::Method;
 use clap::Subcommand;
 use color_eyre::eyre::{Result, bail};
-
-use super::{Client, Output, local_time, servers};
-use crate::api::{
-    access::{ChangeRole, Member, Role, ServerAccess},
-    sessions::Session,
+use contracts::core::{
+    ChangeRole, CoreRole, CoreSession, ListMembers, ListSessions, Member,
+    MemberId, MemberUpdate, RemoveMember, RevokeSession, ServerId, SessionId,
 };
+
+use super::{Client, Output, call::call, local_time, servers};
 
 #[derive(Debug, Subcommand)]
 pub enum AccessCommand {
@@ -20,7 +19,7 @@ pub enum AccessCommand {
     Role {
         server: String,
         user: String,
-        role: Role,
+        role: CoreRole,
     },
     /// Take someone off a server. Their sessions on this Core end at once.
     Remove { server: String, user: String },
@@ -37,9 +36,10 @@ pub async fn run(client: &Client, command: AccessCommand) -> Result<Output> {
     match command {
         AccessCommand::List { server } => {
             let server = servers::find(client, &server).await?;
-            let access: ServerAccess = client
-                .get(&format!("/servers/{}/access", server.server_id))
-                .await?;
+            let id = ServerId {
+                id: server.id.clone(),
+            };
+            let access = call::<ListMembers>(client, &id, &(), ()).await?;
             let mut lines = vec![match &access.owner {
                 Some(owner) => format!("{}  owner  {}", owner.id, owner.name),
                 None => "This Core is not paired with an owner yet".into(),
@@ -56,17 +56,14 @@ pub async fn run(client: &Client, command: AccessCommand) -> Result<Output> {
         }
         AccessCommand::Role { server, user, role } => {
             let server = servers::find(client, &server).await?;
-            let member = member(client, &server.server_id, &user).await?;
-            let member: Member = client
-                .call(
-                    Method::PATCH,
-                    &format!(
-                        "/servers/{}/access/{}",
-                        server.server_id, member.user.id
-                    ),
-                    Some(&ChangeRole { role }),
-                )
-                .await?;
+            let member = member(client, &server.id, &user).await?;
+            let id = MemberId {
+                id: server.id.clone(),
+                user_id: member.user.id,
+            };
+            let member =
+                call::<ChangeRole>(client, &id, &(), MemberUpdate { role })
+                    .await?;
             Ok(Output::new(
                 format!(
                     "{} is now {} on {}",
@@ -79,17 +76,12 @@ pub async fn run(client: &Client, command: AccessCommand) -> Result<Output> {
         }
         AccessCommand::Remove { server, user } => {
             let server = servers::find(client, &server).await?;
-            let member = member(client, &server.server_id, &user).await?;
-            client
-                .call::<()>(
-                    Method::DELETE,
-                    &format!(
-                        "/servers/{}/access/{}",
-                        server.server_id, member.user.id
-                    ),
-                    None::<&()>,
-                )
-                .await?;
+            let member = member(client, &server.id, &user).await?;
+            let id = MemberId {
+                id: server.id.clone(),
+                user_id: member.user.id.clone(),
+            };
+            call::<RemoveMember>(client, &id, &(), ()).await?;
             Ok(Output::new(
                 format!(
                     "{} was removed from {}",
@@ -99,7 +91,8 @@ pub async fn run(client: &Client, command: AccessCommand) -> Result<Output> {
             ))
         }
         AccessCommand::Sessions { user } => {
-            let mut sessions: Vec<Session> = client.get("/sessions").await?;
+            let mut sessions =
+                call::<ListSessions>(client, &(), &(), ()).await?;
             if let Some(user) = user {
                 let name = user.to_lowercase();
                 sessions.retain(|session| {
@@ -127,8 +120,8 @@ pub async fn run(client: &Client, command: AccessCommand) -> Result<Output> {
             Ok(Output::new(text, &sessions))
         }
         AccessCommand::Revoke { session } => {
-            let sessions: Vec<Session> = client.get("/sessions").await?;
-            let matches: Vec<&Session> = sessions
+            let sessions = call::<ListSessions>(client, &(), &(), ()).await?;
+            let matches: Vec<&CoreSession> = sessions
                 .iter()
                 .filter(|candidate| candidate.id.starts_with(&session))
                 .collect();
@@ -138,13 +131,10 @@ pub async fn run(client: &Client, command: AccessCommand) -> Result<Output> {
                     if matches.is_empty() { "no" } else { "several" }
                 );
             };
-            client
-                .call::<()>(
-                    Method::DELETE,
-                    &format!("/sessions/{}", session.id),
-                    None::<&()>,
-                )
-                .await?;
+            let id = SessionId {
+                id: session.id.clone(),
+            };
+            call::<RevokeSession>(client, &id, &(), ()).await?;
             Ok(Output::new(
                 format!(
                     "Ended the session of {} on {}",
@@ -159,11 +149,13 @@ pub async fn run(client: &Client, command: AccessCommand) -> Result<Output> {
 /// The member of a server `query` names: their id or their name.
 async fn member(
     client: &Client,
-    server_id: &uuid::Uuid,
+    server_id: &str,
     query: &str,
 ) -> Result<Member> {
-    let access: ServerAccess =
-        client.get(&format!("/servers/{server_id}/access")).await?;
+    let id = ServerId {
+        id: server_id.to_owned(),
+    };
+    let access = call::<ListMembers>(client, &id, &(), ()).await?;
     let lower = query.to_lowercase();
     let mut matches: Vec<Member> = access
         .members
@@ -179,9 +171,9 @@ async fn member(
     }
 }
 
-fn role_name(role: Role) -> &'static str {
+fn role_name(role: CoreRole) -> &'static str {
     match role {
-        Role::Viewer => "viewer",
-        Role::Editor => "editor",
+        CoreRole::Viewer => "viewer",
+        CoreRole::Editor => "editor",
     }
 }

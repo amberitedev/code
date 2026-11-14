@@ -8,7 +8,6 @@
 		"build": "cargo build -p copal --release",
 		"check": "cargo check -p copal",
 		"test": "cargo test -p copal",
-		"lint": "cargo fmt -p copal --check && cargo clippy -p copal --all-targets",
-		"types": "cargo test -p copal -- --ignored write_typescript"
+		"lint": "cargo fmt -p copal --check && cargo clippy -p copal --all-targets"
 	}
 }

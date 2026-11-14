@@ -1,11 +1,8 @@
-import { invoke } from '@tauri-apps/api/core'
+import { library } from '@modrinth/api-client'
+
+import { apiClient } from '@/platform/modrinth-client'
 
 /** Writes the icon bytes to the app's icon cache and returns the cached file path. */
 export function cacheIconBytes(iconBytes: number[]): Promise<string> {
-	return invoke('plugin:instance|instance_cache_icon', { iconBytes })
-}
-
-/** Downloads a remote icon into the app's icon cache and returns its asset URL. */
-export function cacheRemoteIcon(source: string): Promise<string> {
-	return invoke('plugin:utils|cache_remote_icon', { source })
+	return apiClient.local.call(library.cacheIcon, { body: new Blob([new Uint8Array(iconBytes)]) })
 }

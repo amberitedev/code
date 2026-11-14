@@ -1,26 +1,10 @@
+import { type Cape, type Skin, type SkinModel, skins } from '@modrinth/api-client'
 import { arrayBufferToBase64 } from '@modrinth/utils/utils'
-import { invoke } from '@tauri-apps/api/core'
 
-export interface Cape {
-	id: string
-	name: string
-	texture: string
-	is_equipped: boolean
-}
+import { readFile } from '@/platform/files'
+import { apiClient } from '@/platform/modrinth-client'
 
-export type SkinModel = 'CLASSIC' | 'SLIM' | 'UNKNOWN'
-export type SkinSource = 'default' | 'custom_external' | 'custom'
-
-export interface Skin {
-	texture_key: string
-	name?: string
-	section?: string
-	variant: SkinModel
-	cape_id?: string
-	texture: string
-	source: SkinSource
-	is_equipped: boolean
-}
+export type { Cape, Skin, SkinModel, SkinSource } from '@modrinth/api-client'
 
 export interface SkinTextureUrl {
 	original: string
@@ -111,11 +95,11 @@ export function filterDefaultSkins(list: Skin[]) {
 }
 
 export async function get_available_capes(): Promise<Cape[]> {
-	return invoke('plugin:minecraft-skins|get_available_capes', {})
+	return apiClient.local.call(skins.listCapes)
 }
 
 export async function get_available_skins(): Promise<Skin[]> {
-	return invoke('plugin:minecraft-skins|get_available_skins', {})
+	return apiClient.local.call(skins.listSkins)
 }
 
 export async function add_and_equip_custom_skin(
@@ -123,29 +107,21 @@ export async function add_and_equip_custom_skin(
 	variant: SkinModel,
 	cape?: Cape,
 ): Promise<Skin> {
-	return await invoke('plugin:minecraft-skins|add_and_equip_custom_skin', {
-		textureBlob,
-		variant,
-		cape,
+	return await apiClient.local.call(skins.addAndEquipCustomSkin, {
+		body: { texture_blob: Array.from(textureBlob), variant, cape },
 	})
 }
 
 export async function equip_skin(skin: Skin): Promise<void> {
-	await invoke('plugin:minecraft-skins|equip_skin', {
-		skin,
-	})
+	await apiClient.local.call(skins.equipSkin, { body: skin })
 }
 
 export async function remove_custom_skin(skin: Skin): Promise<void> {
-	await invoke('plugin:minecraft-skins|remove_custom_skin', {
-		skin,
-	})
+	await apiClient.local.call(skins.removeCustomSkin, { body: skin })
 }
 
 export async function set_custom_skin_order(textureKeys: string[]): Promise<void> {
-	await invoke('plugin:minecraft-skins|set_custom_skin_order', {
-		textureKeys,
-	})
+	await apiClient.local.call(skins.setCustomSkinOrder, { body: textureKeys })
 }
 
 export async function save_custom_skin(
@@ -155,12 +131,14 @@ export async function save_custom_skin(
 	cape: Cape | undefined,
 	replaceTexture: boolean,
 ): Promise<Skin> {
-	return await invoke('plugin:minecraft-skins|save_custom_skin', {
-		skin,
-		textureBlob,
-		variant,
-		cape,
-		replaceTexture,
+	return await apiClient.local.call(skins.saveCustomSkin, {
+		body: {
+			skin,
+			texture_blob: Array.from(textureBlob),
+			variant,
+			cape,
+			replace_texture: replaceTexture,
+		},
 	})
 }
 
@@ -171,24 +149,24 @@ export async function get_normalized_skin_texture(skin: Skin): Promise<string> {
 }
 
 export async function normalize_skin_texture(texture: Uint8Array | string): Promise<Uint8Array> {
-	return await invoke('plugin:minecraft-skins|normalize_skin_texture', { texture })
+	const png = await apiClient.local.call(skins.normalizeSkinTexture, {
+		body: typeof texture === 'string' ? texture : Array.from(texture),
+	})
+	return new Uint8Array(await png.arrayBuffer())
 }
 
 export async function unequip_skin(): Promise<void> {
-	await invoke('plugin:minecraft-skins|unequip_skin')
+	await apiClient.local.call(skins.unequipSkin)
 }
 
 export async function flush_pending_skin_change(): Promise<void> {
-	await invoke('plugin:minecraft-skins|flush_pending_skin_change')
+	await apiClient.local.call(skins.flushPendingSkinChange, { query: {} })
 }
 
 export async function flush_pending_skin_change_for_profile(profileId: string): Promise<void> {
-	await invoke('plugin:minecraft-skins|flush_pending_skin_change_for_profile', {
-		profileId,
-	})
+	await apiClient.local.call(skins.flushPendingSkinChange, { query: { profile_id: profileId } })
 }
 
 export async function get_dragged_skin_data(path: string): Promise<Uint8Array> {
-	const data = await invoke<number[]>('plugin:minecraft-skins|get_dragged_skin_data', { path })
-	return new Uint8Array(data)
+	return await readFile(path)
 }

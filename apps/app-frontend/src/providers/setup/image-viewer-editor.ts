@@ -3,7 +3,8 @@ import {
 	type ImageViewerEditorSource,
 	provideImageViewerEditor,
 } from '@modrinth/ui'
-import { readFile } from '@tauri-apps/plugin-fs'
+
+import { readFile } from '@/platform/files'
 
 export function setupImageViewerEditorProvider() {
 	provideImageViewerEditor({

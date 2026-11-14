@@ -4,10 +4,13 @@ use serde::{Deserialize, Serialize};
 use crate::shared::ContentType;
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct ResolutionPreferences {
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Vec<String>>", optional))]
     pub game_versions: Vec<String>,
     #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Vec<String>>", optional))]
     pub loaders: Vec<String>,
 }
 
@@ -55,6 +58,7 @@ impl VersionType {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct ResolveContentPlan {
     pub primary: ResolvedContent,
     pub dependencies: Vec<ResolvedContent>,
@@ -62,6 +66,7 @@ pub struct ResolveContentPlan {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct ResolvedContent {
     pub project_id: String,
     pub version_id: String,
@@ -69,6 +74,7 @@ pub struct ResolvedContent {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct SkippedContent {
     pub project_id: String,
     pub version_id: Option<String>,
@@ -77,6 +83,7 @@ pub struct SkippedContent {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum SkippedReason {
     AlreadyInstalled,

@@ -86,6 +86,54 @@ pub fn create_server_folder(path: &std::path::Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Let `copal-servers` read everything in `path`, a folder it may read such as `meta/`, and run
+/// what its owner may run. The engine writes files only their owner can read. Links are left
+/// alone. Nothing to do on Windows, where a new file inherits its folder's permissions.
+pub fn open_to_servers(path: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::{io::ErrorKind, os::unix::fs::PermissionsExt};
+        // Other servers' installs add, rename and remove entries while this walks.
+        let vanished = |error: &walkdir::Error| {
+            error
+                .io_error()
+                .is_some_and(|error| error.kind() == ErrorKind::NotFound)
+        };
+        for entry in walkdir::WalkDir::new(path).follow_links(false) {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(error) if vanished(&error) => continue,
+                Err(error) => return Err(error.into()),
+            };
+            if entry.path_is_symlink() {
+                continue;
+            }
+            let mode = match entry.metadata() {
+                Ok(metadata) => metadata.permissions().mode() & 0o7777,
+                Err(error) if vanished(&error) => continue,
+                Err(error) => return Err(error.into()),
+            };
+            let wanted = if entry.file_type().is_dir() || mode & 0o100 != 0 {
+                0o050
+            } else {
+                0o040
+            };
+            if mode & wanted != wanted
+                && let Err(error) = std::fs::set_permissions(
+                    entry.path(),
+                    std::fs::Permissions::from_mode(mode | wanted),
+                )
+                && error.kind() != ErrorKind::NotFound
+            {
+                return Err(error);
+            }
+        }
+    }
+    #[cfg(windows)]
+    let _ = path;
+    Ok(())
+}
+
 #[cfg(unix)]
 mod platform {
     use std::{

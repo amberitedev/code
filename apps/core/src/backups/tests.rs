@@ -3,9 +3,7 @@
 use std::io::{Read, Write};
 
 use super::*;
-use crate::{
-    daemon::folders, db, state::servers::adapters::sqlite::server_rows,
-};
+use crate::{daemon::folders, db, servers::server_rows};
 
 struct Setup {
     _dir: tempfile::TempDir,
@@ -20,17 +18,19 @@ async fn setup() -> Setup {
     let paths = Paths::new(dir.path());
     folders::create(&paths, None).unwrap();
     let db = db::memory().await;
-    let servers = Servers::open(
-        paths.clone(),
-        db.clone(),
-        Some(std::net::Ipv4Addr::LOCALHOST.into()),
+    let servers = Servers::open_for_test(paths.clone(), db.clone()).await;
+    let server = servers.create("A").await.unwrap().id;
+    crate::servers::platform::set(
+        servers.engine(),
+        &server,
+        &crate::servers::platform::Platform {
+            loader: engine::state::ModLoader::Vanilla,
+            game_version: "1.21.1".into(),
+            loader_version: None,
+        },
     )
     .await
     .unwrap();
-    let server = servers.create("A").await.unwrap().id;
-    server_rows::set_installed(&db, &server, "vanilla", "1.21.1", None)
-        .await
-        .unwrap();
     let world = paths.server(&server).join("world");
     std::fs::create_dir_all(world.join("region")).unwrap();
     std::fs::write(world.join("level.dat"), "level").unwrap();
@@ -316,18 +316,6 @@ async fn a_failed_backup_leaves_nothing_behind() {
 }
 
 #[tokio::test]
-async fn a_download_link_works_once() {
-    let setup = setup().await;
-    let token =
-        setup
-            .backups
-            .grant(Caller::Local, &setup.server, Target::World);
-    let grant = setup.backups.take(&token).unwrap();
-    assert_eq!(grant.target, Target::World);
-    assert!(setup.backups.take(&token).is_none());
-}
-
-#[tokio::test]
 async fn a_cancelled_operation_never_runs_and_a_claimed_one_cannot_be_cancelled()
  {
     let dir = tempfile::tempdir().unwrap();
@@ -335,13 +323,7 @@ async fn a_cancelled_operation_never_runs_and_a_claimed_one_cannot_be_cancelled(
     folders::create(&paths, None).unwrap();
     let db = db::memory().await;
     // No engine runs here, so nothing claims the operations but the test.
-    let servers = Servers::open(
-        paths,
-        db.clone(),
-        Some(std::net::Ipv4Addr::LOCALHOST.into()),
-    )
-    .await
-    .unwrap();
+    let servers = Servers::open_for_test(paths, db.clone()).await;
     let server = servers.create("A").await.unwrap().id;
     let queue = |name: &'static str| {
         let db = db.clone();

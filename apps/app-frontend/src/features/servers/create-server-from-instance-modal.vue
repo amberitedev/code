@@ -11,7 +11,7 @@
 </template>
 
 <script setup lang="ts">
-import type { Archon } from '@modrinth/api-client'
+import type { ListedCore } from '@modrinth/api-client'
 import {
 	type CreationFlowContextValue,
 	CreationFlowModal,
@@ -45,7 +45,7 @@ const queryClient = useQueryClient()
 const flow = ref<InstanceType<typeof CreationFlowModal>>()
 const chooseCore = ref<InstanceType<typeof ChooseCoreModal>>()
 // The Core the server goes on, chosen before setup opens.
-let core: Archon.Cores.v1.Core | null = null
+let core: ListedCore | null = null
 
 // The project search belongs to the first step, which this flow skips.
 const noProjects = async () => ({ hits: [], total_hits: 0, offset: 0, limit: 0 })
@@ -75,11 +75,7 @@ async function create(ctx: CreationFlowContextValue) {
 	const instance = { id: props.instance.id, name: props.instance.name }
 	try {
 		if (!core) throw new Error('No Core was chosen')
-		// A new server starts out visible to the people the instance is shared with.
-		const { id } = await client.archon.cores_v1.createServer(instance.name, core, {
-			...instance,
-			shared_instance_id: props.instance.shared_instance?.id ?? null,
-		})
+		const { id } = await client.archon.cores_v1.createServer(instance.name, core)
 		flow.value?.hide()
 		// Nobody else sees the server of an instance that is not shared.
 		if (props.instance.shared_instance) notifyHomeAddressOnce(addNotification, formatMessage)

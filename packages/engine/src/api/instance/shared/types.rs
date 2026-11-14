@@ -1,0 +1,166 @@
+use super::*;
+pub use sharing_client::diff::{
+    SharedInstanceUpdateDiff, SharedInstanceUpdateDiffType,
+};
+pub use sharing_client::history::SharedInstanceHistoryEntry;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+pub struct SharedInstanceUsers {
+    pub user_ids: Vec<String>,
+    #[serde(default)]
+    pub users: Vec<SharedInstanceUser>,
+    #[serde(default)]
+    pub tokens: i32,
+}
+
+impl SharedInstanceUsers {
+    pub(super) fn empty() -> Self {
+        Self {
+            user_ids: Vec::new(),
+            users: Vec::new(),
+            tokens: 0,
+        }
+    }
+
+    pub(super) fn from_users(
+        users: Vec<SharedInstanceUser>,
+        tokens: i32,
+    ) -> Self {
+        let user_ids = users.iter().map(|user| user.id.clone()).collect();
+
+        Self {
+            user_ids,
+            users,
+            tokens,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+pub struct SharedInstanceUser {
+    pub id: String,
+    pub joined_at: Option<DateTime<Utc>>,
+    pub join_type: SharedInstanceJoinType,
+    pub last_played: Option<DateTime<Utc>>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+pub enum SharedInstanceJoinType {
+    Owner,
+    Invite,
+    Link,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+pub struct SharedInstanceInstallPreview {
+    pub shared_instance_id: String,
+    pub version: i32,
+    pub name: String,
+    pub icon_url: Option<String>,
+    pub game_version: String,
+    pub loader: ModLoader,
+    pub mod_count: usize,
+    pub external_file_count: usize,
+    pub modpack_version_id: Option<String>,
+    pub content_version_ids: Vec<String>,
+    pub external_files: Vec<SharedInstanceExternalFilePreview>,
+    #[serde(default)]
+    pub removed_files: Vec<RemovedFile>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+pub struct SharedInstanceExternalFilePreview {
+    pub file_name: String,
+    pub file_type: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+pub struct SharedInstanceUpdatePreview {
+    pub shared_instance_id: String,
+    pub current_version: Option<i32>,
+    pub latest_version: i32,
+    pub update_available: bool,
+    pub diffs: Vec<SharedInstanceUpdateDiff>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+pub struct SharedInstancePublishPreview {
+    pub shared_instance_id: String,
+    pub latest_version: i32,
+    pub diffs: Vec<SharedInstanceUpdateDiff>,
+    pub files: Vec<SharedInstancePublishFile>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+pub struct SharedInstancePublishFile {
+    pub path: String,
+    pub size: u64,
+    /// In the instance, but a share cannot carry it (see `sharing_client::rules`).
+    pub blocked: bool,
+    /// The share's latest version carries it.
+    pub shared: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+pub struct SharedInstanceInviteLink {
+    pub invite_id: String,
+    pub expires_at: DateTime<Utc>,
+    pub max_uses: i32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+pub struct SharedInstanceInvite {
+    pub id: String,
+    pub expiration: DateTime<Utc>,
+    pub max_uses: i32,
+    pub uses: i32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+pub struct SharedInstanceInviteInstallPreview {
+    pub shared_instance_id: String,
+    pub inviter: Option<SharedInstanceInviteCreator>,
+    pub manager_id: Option<String>,
+    pub server_manager_name: Option<String>,
+    pub server_manager_icon_url: Option<String>,
+    pub instance_icon_url: Option<String>,
+    pub instance_icon_config: Option<IconConfig>,
+    pub preview: SharedInstanceInstallPreview,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+pub struct SharedInstanceInviteCreator {
+    pub id: String,
+    pub name: String,
+    pub avatar: Option<String>,
+}
+
+/// How many versions each share's local history keeps (`None` for all), and how many each
+/// share has now, by share id.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+pub struct SharedHistorySettings {
+    pub kept: Option<usize>,
+    pub entries: HashMap<String, usize>,
+}

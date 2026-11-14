@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n\t\tSELECT background, symbol\n\t\tFROM recent_instance_icon_configs\n\t\tORDER BY used_at DESC, background, symbol\n\t\tLIMIT ?\n\t\t",
+  "describe": {
+    "columns": [
+      {
+        "name": "background",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "recent_instance_icon_configs",
+            "name": "background"
+          }
+        }
+      },
+      {
+        "name": "symbol",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "recent_instance_icon_configs",
+            "name": "symbol"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "0ec9f6bd8a0c96ba9cea1b614d9b670db2324ba1b325474c39d15841d2403aa3"
+}

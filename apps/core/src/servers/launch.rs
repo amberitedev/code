@@ -1,5 +1,6 @@
 //! Preparing a server to start: its folder, `eula.txt`, its address in `server.properties`, Java,
-//! and the command line the shim runs, for every loader.
+//! and the command line the shim runs: the engine's command for the server, after Core's own
+//! JVM flags.
 
 use std::{
     io::{self, Read, Write},
@@ -7,20 +8,13 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use color_eyre::eyre::Result;
+use color_eyre::eyre::{Result, eyre};
+pub use engine::sandbox::property_key;
+use engine::{Engine, server::ServerCommand};
 
 use super::shim::{Launch, PROTOCOL};
-use crate::{
-    daemon::{folders, paths::Paths},
-    installs::{
-        ModLoader, forge, java,
-        shared::{
-            SharedDirs, launch::build_launch_tokens,
-            version_info::merged_version_id,
-        },
-    },
-    state::servers::adapters::sqlite::server_rows::ServerRow,
-};
+use super::{platform::Platform, server_rows::ServerRow};
+use crate::daemon::{folders, paths::Paths};
 
 /// Why a server cannot start yet.
 #[derive(Debug, thiserror::Error)]
@@ -29,25 +23,18 @@ pub enum NotReady {
     NotInstalled,
 }
 
-/// What is installed on a server, or why nothing is.
-fn installed(server: &ServerRow) -> Result<(ModLoader, &str), NotReady> {
-    let loader = server.loader.as_deref().and_then(ModLoader::parse);
-    match (loader, server.game_version.as_deref()) {
-        (Some(loader), Some(game_version)) => Ok((loader, game_version)),
-        _ => Err(NotReady::NotInstalled),
-    }
-}
-
-/// Everything the shim needs to start `server`, and the lease on its Java (see `java::Lease`).
+/// Everything the shim needs to start `server`, with `flags` (`memory::flags`) as its JVM flags.
 /// Writes `eula.txt` and the address first. `local_only` is `Config::local_only`.
 pub async fn prepare(
     paths: &Paths,
-    http: &reqwest::Client,
+    engine: &Engine,
     server: &ServerRow,
+    platform: Option<&Platform>,
+    flags: Option<Vec<String>>,
     run_id: &str,
     local_only: Option<IpAddr>,
-) -> Result<(Launch, Option<java::Lease>)> {
-    installed(server)?;
+) -> Result<Launch> {
+    platform.ok_or(NotReady::NotInstalled)?;
 
     let dir = paths.server(&server.id);
     folders::create_server_folder(&dir)?;
@@ -59,100 +46,102 @@ pub async fn prepare(
     )?;
     set_address(&dir, server.port, local_only)?;
 
-    let (java, lease) = java_for(paths, http, server).await?;
-    let memory = server.memory_mb;
-    let launch = Launch {
+    let command = engine::server::server_command(engine, &server.id)
+        .await
+        .map_err(|error| eyre!("{error:#}"))?;
+    let java = java_for(engine, server, &command).await?;
+    Ok(launch(paths, server, java, command, flags, run_id))
+}
+
+/// What the shim runs: `java`, Core's flags, then the engine's arguments, in the engine's folder.
+fn launch(
+    paths: &Paths,
+    server: &ServerRow,
+    java: PathBuf,
+    command: ServerCommand,
+    flags: Option<Vec<String>>,
+    run_id: &str,
+) -> Launch {
+    Launch {
         v: PROTOCOL,
         run_id: run_id.to_owned(),
         java,
-        args: args(paths, server)?,
-        dir,
-        memory_limit_mb: memory_limit(memory),
-    };
-    Ok((launch, lease))
+        args: args(paths, server, flags, command.args),
+        dir: command.cwd,
+        memory_limit_mb: memory_limit(server.memory_mb),
+    }
 }
 
-/// The arguments after `java`: memory, the temporary folder, and what the loader starts from.
-pub fn args(paths: &Paths, server: &ServerRow) -> Result<Vec<String>> {
-    let (loader, game_version) = installed(server)?;
+/// The arguments after `java`: the heap, the JVM flags (`flags`, or the tuned ones), the
+/// temporary folder and home, then `server_args`, which the loader starts from.
+pub fn args(
+    paths: &Paths,
+    server: &ServerRow,
+    flags: Option<Vec<String>>,
+    server_args: Vec<String>,
+) -> Vec<String> {
     let dir = paths.server(&server.id);
-    let memory = server.memory_mb;
-    // The heap and tuned flags first: `memory::use_flags` replaces those in place.
-    let mut args = super::memory::jvm(memory);
+    let mut args = super::memory::jvm(server.memory_mb);
+    if let Some(flags) = flags {
+        super::memory::use_flags(&mut args, flags);
+    }
     args.extend([
         format!("-Djava.io.tmpdir={}", dir.join("tmp").display()),
         // `copal-servers` has no home folder.
         format!("-Duser.home={}", dir.display()),
     ]);
-    let dirs = SharedDirs::new(paths.root());
-    let loader_version = server.loader_version.as_deref().unwrap_or_default();
-    match loader {
-        ModLoader::Vanilla | ModLoader::Fabric | ModLoader::Quilt => {
-            let version_id =
-                merged_version_id(game_version, loader, Some(loader_version));
-            let info = std::fs::read(dirs.version_info_path(&version_id))
-                .map_err(|_| NotReady::NotInstalled)?;
-            let tokens = build_launch_tokens(
-                &dirs,
-                &serde_json::from_slice(&info)?,
-                game_version,
-                loader,
-                std::env::consts::ARCH,
-            )?
-            .ok_or(NotReady::NotInstalled)?;
-            args.extend(tokens);
-        }
-        ModLoader::Paper => {
-            let jar = dirs.paper_jar(game_version, loader_version);
-            if !jar.is_file() {
-                return Err(NotReady::NotInstalled.into());
-            }
-            args.extend([
-                "-jar".into(),
-                jar.to_string_lossy().into_owned(),
-                "--nogui".into(),
-            ]);
-        }
-        ModLoader::Forge | ModLoader::NeoForge => {
-            args.extend(forge::launch_args(
-                &dirs,
-                &dir,
-                loader,
-                game_version,
-                loader_version,
-            )?)
-        }
-    }
-    Ok(args)
+    args.extend(server_args);
+    args
 }
 
-/// The Java major `server` runs on: the one the owner chose, or the one its Minecraft version
-/// needs.
-pub async fn java_major(
-    paths: &Paths,
-    http: &reqwest::Client,
+/// The Java `server` runs: its custom path, the engine's Java of the major its owner chose, or
+/// the one its Minecraft version needs, which the engine chose for `command`.
+async fn java_for(
+    engine: &Engine,
     server: &ServerRow,
+    command: &ServerCommand,
+) -> Result<PathBuf> {
+    if let Some(path) = &server.java_path {
+        return Ok(PathBuf::from(path));
+    }
+    let Some(major) = server.java_version else {
+        return Ok(command.java.clone());
+    };
+    let major = u32::try_from(major)?;
+    let installed = engine::jre::get_java_versions(engine)
+        .await
+        .map_err(|error| eyre!("{error:#}"))?
+        .get(&major)
+        .map(|java| PathBuf::from(&java.path));
+    if let Some(path) = installed {
+        return Ok(path);
+    }
+    let path =
+        engine::jre::auto_install_java_with_loading(engine, major, false)
+            .await
+            .map_err(|error| eyre!("{error:#}"))?;
+    let java = engine::jre::check_jre(path.clone())
+        .await
+        .map_err(|error| eyre!("{error:#}"))?;
+    engine::jre::set_java_version(engine, java)
+        .await
+        .map_err(|error| eyre!("{error:#}"))?;
+    Ok(path)
+}
+
+/// The Java major `server` runs `game_version` on: the one the owner chose, or the one the
+/// Minecraft version needs.
+pub async fn java_major(
+    engine: &Engine,
+    server: &ServerRow,
+    game_version: &str,
 ) -> Result<u32> {
     if let Some(major) = server.java_version {
         return Ok(u32::try_from(major)?);
     }
-    let (_, game_version) = installed(server)?;
-    Ok(java::java_requirement(http, paths.root(), game_version).await)
-}
-
-/// The Java `server` runs with: its custom path, or the managed Java of its major, downloaded
-/// when missing.
-pub async fn java_for(
-    paths: &Paths,
-    http: &reqwest::Client,
-    server: &ServerRow,
-) -> Result<(PathBuf, Option<java::Lease>)> {
-    if let Some(path) = &server.java_path {
-        return Ok((PathBuf::from(path), None));
-    }
-    let major = java_major(paths, http, server).await?;
-    let (binary, lease) = java::ensure(paths, http, major).await?;
-    Ok((binary, Some(lease)))
+    engine::server::java_major(engine, game_version)
+        .await
+        .map_err(|error| eyre!("{error:#}"))
 }
 
 /// The command line as people read it: `java` and the arguments, quoted where needed.
@@ -202,16 +191,6 @@ fn set_address(
         lines.push(format!("server-ip={ip}"));
     }
     write_server_file(&path, format!("{}\n", lines.join("\n")).as_bytes())
-}
-
-/// The key of a `server.properties` line, or `None` for comments and blank lines.
-pub fn property_key(line: &str) -> Option<&str> {
-    let line = line.trim_start();
-    if line.is_empty() || line.starts_with(['#', '!']) {
-        return None;
-    }
-    let end = line.find(['=', ':']).unwrap_or(line.len());
-    Some(line[..end].trim_end())
 }
 
 /// Files in a server folder are written by mods too: never follow a link they planted, and
@@ -339,6 +318,63 @@ mod tests {
         }
         assert!(write_server_file(&dir.path().join("eula.txt"), b"x").is_err());
         assert!(set_address(dir.path(), 25565, None).is_err());
+    }
+
+    #[test]
+    fn the_shim_runs_the_engines_command_after_cores_flags() {
+        let paths = Paths::new("data");
+        let server = ServerRow {
+            id: "a".into(),
+            name: "A".into(),
+            port: 25565,
+            memory_mb: 2048,
+            java_path: None,
+            java_version: None,
+        };
+        let dir = paths.server("a");
+        let core_flags = |flags: &[&str]| {
+            let mut args = vec!["-Xms512M".to_owned(), "-Xmx2048M".to_owned()];
+            args.extend(flags.iter().map(|flag| (*flag).to_owned()));
+            args.push(format!(
+                "-Djava.io.tmpdir={}",
+                dir.join("tmp").display()
+            ));
+            args.push(format!("-Duser.home={}", dir.display()));
+            args
+        };
+        let vanilla = ["-jar", "/meta/versions/1.21.1/server.jar", "--nogui"];
+        let fabric = [
+            "-cp",
+            "/meta/versions/1.21.1/server.jar:/meta/libraries/a.jar",
+            "net.fabricmc.loader.impl.launch.knot.KnotServer",
+            "--nogui",
+        ];
+        for (server_args, flags) in [
+            (&vanilla[..], None),
+            (&fabric[..], Some(vec!["-XX:+UseZGC".to_owned()])),
+        ] {
+            let command = ServerCommand {
+                java: "/meta/java_versions/zulu21/bin/java".into(),
+                args: server_args.iter().map(|arg| (*arg).to_owned()).collect(),
+                cwd: "/data/servers/a".into(),
+            };
+            let launch = launch(
+                &paths,
+                &server,
+                command.java.clone(),
+                command.clone(),
+                flags.clone(),
+                "run",
+            );
+            let mut expected = match flags {
+                Some(_) => core_flags(&["-XX:+UseZGC"]),
+                None => core_flags(&super::super::memory::TUNED_FLAGS),
+            };
+            expected.extend(command.args);
+            assert_eq!(launch.java, command.java);
+            assert_eq!(launch.args, expected);
+            assert_eq!(launch.dir, command.cwd);
+        }
     }
 
     #[test]

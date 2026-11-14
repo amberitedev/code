@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Archon } from '@modrinth/api-client'
+import type { ListedCore } from '@modrinth/api-client'
 import { Button, injectModrinthClient, injectNotificationManager, NewModal } from '@modrinth/ui'
 import { ref } from 'vue'
 
@@ -11,15 +11,15 @@ const client = injectModrinthClient()
 const { ensureCore } = injectCoreActions()
 const { addNotification } = injectNotificationManager()
 const modal = ref<InstanceType<typeof NewModal> | null>(null)
-const cores = ref<Archon.Cores.v1.Core[]>([])
-let settle: ((core: Archon.Cores.v1.Core | null) => void) | null = null
+const cores = ref<ListedCore[]>([])
+let settle: ((core: ListedCore | null) => void) | null = null
 
 /**
  * Resolves the Core to create a server on, or null if the user backs out or the account's Cores
  * cannot be loaded. Asks to add a Core first when there is none, and only asks which one when there
  * are several.
  */
-async function pick(): Promise<Archon.Cores.v1.Core | null> {
+async function pick(): Promise<ListedCore | null> {
 	try {
 		if (!(await ensureCore())) return null
 		// Servers are only created on the account's own Cores.
@@ -40,7 +40,7 @@ async function pick(): Promise<Archon.Cores.v1.Core | null> {
 	})
 }
 
-function choose(core: Archon.Cores.v1.Core | null) {
+function choose(core: ListedCore | null) {
 	settle?.(core)
 	settle = null
 	if (core) modal.value?.hide()

@@ -9,6 +9,7 @@
 //! In development the store runs as the account running Core. Running it as an OS account of its
 //! own, with a folder Core cannot read, is the install-time follow-up the design asks for.
 
+use contracts::core::{StorageSettings, StorageStatus};
 use std::{
     collections::HashSet,
     net::IpAddr,
@@ -24,14 +25,15 @@ use axum::{
     http::{HeaderValue, Method, StatusCode, Uri, header},
     response::{IntoResponse, Response},
 };
+use contracts::backend::cores::{PullOrder, StorageAnswer, StorageReport};
+use contracts::client::{Remote, call};
+use contracts::store::{PullVersion, VersionHash};
+use contracts::{ApiError, Empty, ErrorCode, Hash};
 use hyper_util::{
     client::legacy::{Client as HttpClient, connect::HttpConnector},
     rt::TokioExecutor,
 };
-use sharing_storage::{
-    Hash,
-    local::{Caps, Client, Status},
-};
+use sharing_storage::local::{Caps, Client, Status};
 use sqlx::SqlitePool;
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
@@ -42,11 +44,7 @@ use tracing::{info, warn};
 
 use crate::{
     access::{owed::OwedCall, sync},
-    api::{
-        backend::{PullOrder, StorageAnswer, StorageReport},
-        error::{ApiError, ErrorCode},
-        storage::{StorageSettings, StorageStatus},
-    },
+    api::internal,
     backups::space,
     daemon::paths::Paths,
 };
@@ -106,7 +104,7 @@ pub struct Storage {
     running: watch::Sender<Option<Running>>,
     /// A forwarded upload may have stored something.
     stored: Notify,
-    /// Wakes backend sync (`Access::owed`).
+    /// Wakes backend sync (`CoreAccess::owed`).
     owed: Arc<Notify>,
     pulling: Mutex<HashSet<String>>,
     forwarder: HttpClient<HttpConnector, Body>,
@@ -337,7 +335,7 @@ impl Storage {
 
     /// `GET /storage`.
     pub async fn status(&self) -> Result<StorageStatus, ApiError> {
-        let settings = self.settings().await?;
+        let settings = self.settings().await.map_err(internal)?;
         let running = self.store_status().await;
         let free = match &running {
             Some(status) => status.free,
@@ -369,7 +367,7 @@ impl Storage {
             || change.egress_cap.is_some_and(|cap| cap < 0)
         {
             return Err(ApiError::new(
-                ErrorCode::InvalidRequest,
+                ErrorCode::InvalidInput,
                 "The caps are bytes: more than zero for storage, zero or more for egress.",
             ));
         }
@@ -382,8 +380,9 @@ impl Storage {
         .bind(change.cap)
         .bind(change.egress_cap)
         .execute(&self.db)
-        .await?;
-        let settings = self.settings().await?;
+        .await
+        .map_err(internal)?;
+        let settings = self.settings().await.map_err(internal)?;
         // A store that is not running starts with the new caps.
         let running = self.running.borrow().clone();
         if let Some(running) = running {
@@ -466,22 +465,17 @@ impl Storage {
         let complete = async {
             let root = Hash::parse(&order.root).ok_or("not a version")?;
             let port = self.port().ok_or("the store is not running")?;
-            let answer: serde_json::Value = self
-                .http
-                .post(format!(
-                    "http://127.0.0.1:{port}/store/versions/{root}/pull"
-                ))
-                .bearer_auth(&order.ticket)
-                .send()
+            let remote = Remote {
+                http: &self.http,
+                base: &format!("http://127.0.0.1:{port}"),
+                bearer: None,
+                read_ticket: Some(&order.ticket),
+                timeout: None,
+            };
+            call::<PullVersion>(&remote, &VersionHash { root }, &(), Empty)
                 .await
-                .map_err(|error| error.to_string())?
-                .json()
-                .await
-                .map_err(|error| error.to_string())?;
-            match answer["complete"].as_bool() {
-                Some(complete) => Ok(complete),
-                None => Err(answer.to_string()),
-            }
+                .map(|pulled| pulled.complete)
+                .map_err(|error| error.to_string())
         };
         let result: Result<bool, String> = complete.await;
         self.pulling

@@ -1,0 +1,1273 @@
+use super::storage::{read_library, read_stored_file, write_library};
+use super::{
+    PackLibrary, PackPlacement, SyncedPack, pack_option, pack_path, same_path,
+    version_compatible,
+};
+use crate::synced_options::state::SyncedInstance;
+use anyhow::bail;
+use engine::ErrorKind;
+use engine::state::content_store::{StoredFileHandle, file_path_on_disk};
+use engine::state::instances::commands;
+use engine::state::{
+    CacheBehaviour, CachedEntry, ContentItem, ContentItemVersion,
+    ContentSourceKind, Engine, InstanceMetadata, ProjectType, SyncedOption,
+    SyncedPackInfo, Version,
+};
+use engine::util::fetch;
+use engine::{InstancePayloadType, emit_instance};
+use modrinth_content_management::ResolutionPreferences;
+use std::collections::BTreeMap;
+
+use super::super::options::{
+    GlobalSyncedOptions, get_global_options, instance_dir, instance_is_running,
+    instance_option_enabled, sync_files_are_protected,
+};
+
+pub(super) fn participating(
+    metadata: &SyncedInstance,
+    pack: &SyncedPack,
+    global: GlobalSyncedOptions,
+) -> bool {
+    pack_option(pack.item.project_type).is_ok_and(|option| {
+        global.get(option) && instance_option_enabled(metadata, option)
+    })
+}
+
+fn local(item: &ContentItem) -> bool {
+    item.source_kind
+        .is_none_or(|kind| kind == ContentSourceKind::Local)
+}
+
+fn current_item<'a>(
+    items: &'a [ContentItem],
+    pack: &SyncedPack,
+    placement: &PackPlacement,
+) -> Option<&'a ContentItem> {
+    items
+        .iter()
+        .find(|item| {
+            item.project_type == pack.item.project_type
+                && same_path(&item.file_path, &placement.path)
+                && pack.item.project.as_ref().is_none_or(|project| {
+                    item.project
+                        .as_ref()
+                        .is_some_and(|candidate| candidate.id == project.id)
+                })
+        })
+        .or_else(|| {
+            items.iter().find(|item| {
+                item.project_type == pack.item.project_type
+                    && pack.item.project.as_ref().is_some_and(|project| {
+                        item.project
+                            .as_ref()
+                            .is_some_and(|candidate| candidate.id == project.id)
+                    })
+            })
+        })
+}
+
+async fn capture_items(
+    metadata: &SyncedInstance,
+    library: &mut PackLibrary,
+    state: &Engine,
+    placements: BTreeMap<String, PackPlacement>,
+    global: GlobalSyncedOptions,
+    items: &[ContentItem],
+) -> engine::Result<bool> {
+    let mut shared_changed = false;
+    for (id, mut placement) in placements {
+        let Some(pack) = library.packs.get(&id).cloned() else {
+            continue;
+        };
+        if placement.excluded
+            || placement.suspended
+            || placement.pending
+            || placement.path.is_empty()
+            || placement.content_set_id != metadata.applied_content_set.id
+            || !participating(metadata, &pack, global)
+            || pack.item.enabled != placement.enabled
+        {
+            continue;
+        }
+        if let Some(item) = current_item(items, &pack, &placement) {
+            if !local(item) {
+                continue;
+            }
+            if item.enabled != placement.enabled {
+                if let Some(pack) = library.packs.get_mut(&id) {
+                    pack.item.enabled = item.enabled;
+                }
+                shared_changed = true;
+            }
+            if pack.item.project_type == ProjectType::ResourcePack
+                && placement.resource_pack_selection_path.is_none()
+            {
+                placement.resource_pack_selection_path =
+                    Some(placement.path.clone());
+            }
+            placement.path = item.file_path.clone();
+            placement.sha1 = item.id.clone();
+            placement.enabled = item.enabled;
+        } else if !instance_dir(metadata, state)
+            .join(file_path_on_disk(&placement.path, placement.enabled))
+            .exists()
+        {
+            placement.excluded = true;
+        }
+        library
+            .instances
+            .entry(metadata.instance.id.clone())
+            .or_default()
+            .insert(id, placement);
+    }
+    match super::selection::capture(metadata, library, state).await {
+        Ok(changed) => shared_changed |= changed.unwrap_or(false),
+        Err(error) => tracing::warn!(
+            "Could not capture resource-pack selection for {}: {error}",
+            metadata.instance.id
+        ),
+    }
+    Ok(shared_changed)
+}
+
+async fn owns_file(
+    metadata: &InstanceMetadata,
+    placement: &PackPlacement,
+    state: &Engine,
+) -> engine::Result<bool> {
+    if placement.path.is_empty() {
+        return Ok(false);
+    }
+    let Some(file) = engine::state::instances::adapters::sqlite::content_rows::get_instance_file_by_relative_path(&metadata.instance.id, &placement.path, state.pool()).await? else { return Ok(false); };
+    let kind = commands::content_source_kind_for_project_path(
+        &metadata.instance.id,
+        &placement.path,
+        state,
+    )
+    .await?;
+    if kind.is_some_and(|kind| kind != ContentSourceKind::Local) {
+        return Ok(false);
+    }
+    if file.sha1 != placement.sha1 {
+        return Ok(false);
+    }
+    let engine::state::content_store::FileContent::Stored {
+        stored_file, ..
+    } = state.content_store.file_content(&file).await?
+    else {
+        return Ok(false);
+    };
+    state
+        .content_store
+        .instance_file_matches(
+            &instance_dir(metadata, state)
+                .join(engine::state::content_store::content_file_path(&file)),
+            &stored_file.metadata.sha512,
+        )
+        .await
+}
+
+async fn toggle_pack(
+    metadata: &InstanceMetadata,
+    item: &ContentItem,
+    enabled: bool,
+    state: &Engine,
+) -> engine::Result<String> {
+    commands::toggle_disable_project(
+        &metadata.instance.id,
+        &item.file_path,
+        Some(enabled),
+        state,
+    )
+    .await
+}
+
+#[derive(Default)]
+struct PreparedPack {
+    compatible: bool,
+    version: Option<Version>,
+    stored_file: Option<StoredFileHandle>,
+    dependencies: Vec<commands::DownloadedProjectVersion>,
+    conflict: bool,
+    deferred: bool,
+    owned_previous: bool,
+}
+
+fn matching_item<'a>(
+    items: &'a [ContentItem],
+    pack: &SyncedPack,
+    previous: Option<&PackPlacement>,
+) -> Option<&'a ContentItem> {
+    previous
+        .filter(|placement| !placement.path.is_empty())
+        .and_then(|placement| current_item(items, pack, placement))
+        .or_else(|| {
+            items.iter().find(|item| {
+                local(item)
+                    && item.id == pack.sha1
+                    && item.project_type == pack.item.project_type
+            })
+        })
+}
+
+fn local_conflict(
+    items: &[ContentItem],
+    pack: &SyncedPack,
+    previous: Option<&PackPlacement>,
+    target_path: &str,
+) -> bool {
+    previous.is_none_or(|placement| placement.path.is_empty())
+        && matching_item(items, pack, previous).is_none()
+        && items.iter().any(|item| {
+            same_path(&item.file_path, target_path)
+                || pack.item.project.as_ref().is_some_and(|project| {
+                    item.project
+                        .as_ref()
+                        .is_some_and(|candidate| candidate.id == project.id)
+                })
+        })
+}
+
+async fn prepare_pack(
+    metadata: &InstanceMetadata,
+    id: &str,
+    pack: &SyncedPack,
+    library: &PackLibrary,
+    items: &[ContentItem],
+    state: &Engine,
+) -> engine::Result<PreparedPack> {
+    let mut prepared = PreparedPack::default();
+    let previous = library
+        .instances
+        .get(&metadata.instance.id)
+        .and_then(|placements| placements.get(id));
+    if local_conflict(
+        items,
+        pack,
+        previous,
+        &pack_path(pack, &pack.item.file_name),
+    ) {
+        prepared.conflict = true;
+        return Ok(prepared);
+    }
+    prepared.owned_previous = if let Some(previous) = previous {
+        owns_file(metadata, previous, state).await?
+    } else {
+        false
+    };
+    prepared.version = if let Some(project) = &pack.item.project {
+        let versions = CachedEntry::get_project_versions(
+			&project.id,
+			Some(CacheBehaviour::MustRevalidate),
+			state.pool(),
+			&state.api_semaphore, &state.sessions,
+		).await?.ok_or(ErrorKind::InputError(
+			"pack versions are temporarily unavailable; keeping the installed pack".to_owned(),
+		))?;
+        versions
+            .into_iter()
+            .filter(|version| {
+                version_compatible(pack, version, metadata)
+                    && !version.files.is_empty()
+            })
+            .max_by_key(|version| version.date_published)
+    } else {
+        None
+    };
+    if (pack.item.project.is_some() && prepared.version.is_none())
+        || (pack.item.project.is_none()
+            && !pack
+                .game_versions
+                .contains(&metadata.applied_content_set.game_version))
+    {
+        return Ok(prepared);
+    }
+    let file = prepared.version.as_ref().and_then(|version| {
+        version
+            .files
+            .iter()
+            .find(|file| file.primary)
+            .or_else(|| version.files.first())
+    });
+    let file_name = file
+        .map_or(pack.item.file_name.as_str(), |file| file.filename.as_str());
+    if !path_util::is_safe_file_name(file_name) {
+        bail!(ErrorKind::InputError("invalid pack filename".to_owned()));
+    }
+    if local_conflict(items, pack, previous, &pack_path(pack, file_name)) {
+        prepared.conflict = true;
+        return Ok(prepared);
+    }
+    let stored_file = if let Some(file) = file
+        && file.hashes.get("sha1") != Some(&pack.sha1)
+    {
+        let downloaded = fetch::fetch_content_file(
+            state,
+            &[file.url.as_str()],
+            file.hashes.get("sha512").map(String::as_str),
+            Some(u64::from(file.size)),
+            None,
+            None,
+        )
+        .await?;
+        downloaded.store_file(&state.content_store).await?
+    } else {
+        read_stored_file(pack, state).await?
+    };
+    let bytes = bytes::Bytes::from(tokio::fs::read(&stored_file.path).await?);
+    let project_type = pack.item.project_type;
+    tokio::task::spawn_blocking(move || {
+        super::operations::validate_pack(&bytes, project_type)
+    })
+    .await??;
+    prepared.stored_file = Some(stored_file);
+    if let (Some(project), Some(version)) =
+        (&pack.item.project, &prepared.version)
+        && !version.dependencies.is_empty()
+    {
+        let plan = commands::resolve_install_plan(
+            &metadata.instance.id,
+            commands::InstanceInstallProjectRequest {
+                project_id: project.id.clone(),
+                version_id: Some(version.id.clone()),
+                content_type: pack.item.project_type.into(),
+                selected: ResolutionPreferences::default(),
+            },
+            state,
+        )
+        .await?;
+        if !plan.dependencies.is_empty()
+            && instance_is_running(metadata, state).await?
+        {
+            prepared.deferred = true;
+            return Ok(prepared);
+        }
+        for dependency in plan.dependencies {
+            prepared.dependencies.push(
+                commands::download_project_version(
+                    &metadata.instance.id,
+                    &dependency.version_id,
+                    fetch::DownloadReason::Dependency,
+                    dependency.dependent_on_version_id,
+                    state,
+                )
+                .await?,
+            );
+        }
+    }
+    Ok(prepared)
+}
+
+async fn apply_pack(
+    metadata: &InstanceMetadata,
+    id: &str,
+    pack: &SyncedPack,
+    library: &mut PackLibrary,
+    items: &mut Vec<ContentItem>,
+    state: &Engine,
+    mut prepared: PreparedPack,
+) -> engine::Result<()> {
+    let instance_id = &metadata.instance.id;
+    let previous = library
+        .instances
+        .get(instance_id)
+        .and_then(|items| items.get(id))
+        .cloned();
+    if prepared.conflict {
+        let message = "A local copy of this pack already exists. Sync it from the content tab to include it.";
+        let placement = library
+            .instances
+            .entry(instance_id.clone())
+            .or_default()
+            .entry(id.to_owned())
+            .or_default();
+        if placement.error.as_deref() != Some(message) {
+            tracing::warn!(
+                "Could not sync pack {id} to {instance_id}: {message}"
+            );
+            placement.error = Some(message.to_owned());
+        }
+        return Ok(());
+    }
+    let resource_pack_selection_path =
+        previous.as_ref().and_then(|placement| {
+            placement.resource_pack_selection_path.clone().or_else(|| {
+                (!placement.path.is_empty()).then(|| placement.path.clone())
+            })
+        });
+    let resource_pack_selection_pending = previous
+        .as_ref()
+        .is_some_and(|placement| placement.resource_pack_selection_pending);
+    if previous
+        .as_ref()
+        .is_some_and(|placement| placement.excluded)
+    {
+        return Ok(());
+    }
+    let matching = previous
+        .as_ref()
+        .filter(|placement| !placement.path.is_empty())
+        .and_then(|placement| current_item(items, pack, placement))
+        .or_else(|| {
+            items.iter().find(|item| {
+                local(item)
+                    && item.id == pack.sha1
+                    && item.project_type == pack.item.project_type
+            })
+        })
+        .cloned();
+    if matching.as_ref().is_some_and(|item| !local(item)) {
+        bail!(ErrorKind::InputError(
+            "this pack is managed in this instance".to_string(),
+        ));
+    }
+    if let Some(item) = matching {
+        let is_source = previous
+            .as_ref()
+            .is_some_and(|placement| placement.is_source);
+        let compatible = is_source || prepared.compatible;
+        if compatible || item.locked {
+            let changed = item.enabled != pack.item.enabled;
+            let joined = previous
+                .as_ref()
+                .is_none_or(|placement| placement.suspended);
+            let path = if changed {
+                toggle_pack(metadata, &item, pack.item.enabled, state).await?
+            } else {
+                item.file_path.clone()
+            };
+            library
+                .instances
+                .entry(instance_id.clone())
+                .or_default()
+                .insert(
+                    id.to_string(),
+                    PackPlacement {
+                        is_source,
+                        path: path.clone(),
+                        sha1: item.id.clone(),
+                        enabled: pack.item.enabled,
+                        pending: !compatible,
+                        content_set_id: metadata.applied_content_set.id.clone(),
+                        resource_pack_selection_path,
+                        resource_pack_selection_pending,
+                        ..Default::default()
+                    },
+                );
+            if let Some(cached) = items
+                .iter_mut()
+                .find(|cached| cached.file_path == item.file_path)
+            {
+                cached.file_path = path;
+                cached.enabled = pack.item.enabled;
+            }
+            if changed || joined {
+                emit_instance(
+                    &state.events,
+                    instance_id,
+                    InstancePayloadType::Synced,
+                )
+                .await?;
+            }
+            return Ok(());
+        }
+    }
+    let version = prepared.version.take();
+    let compatible = if pack.item.project.is_some() {
+        version.is_some()
+    } else {
+        pack.game_versions
+            .contains(&metadata.applied_content_set.game_version)
+    };
+    if !compatible {
+        if let Some(previous) = &previous
+            && prepared.owned_previous
+        {
+            commands::remove_project(instance_id, &previous.path, state)
+                .await?;
+            items.retain(|item| item.file_path != previous.path);
+            emit_instance(
+                &state.events,
+                instance_id,
+                InstancePayloadType::Synced,
+            )
+            .await?;
+        }
+        library
+            .instances
+            .entry(instance_id.clone())
+            .or_default()
+            .insert(
+                id.to_string(),
+                PackPlacement {
+                    enabled: pack.item.enabled,
+                    content_set_id: metadata.applied_content_set.id.clone(),
+                    resource_pack_selection_path,
+                    resource_pack_selection_pending,
+                    ..Default::default()
+                },
+            );
+        return Ok(());
+    }
+    let file = version.as_ref().and_then(|version| {
+        version
+            .files
+            .iter()
+            .find(|file| file.primary)
+            .or_else(|| version.files.first())
+    });
+    let file_name = file
+        .map_or(pack.item.file_name.as_str(), |file| file.filename.as_str());
+    if !path_util::is_safe_file_name(file_name) {
+        bail!(ErrorKind::InputError("invalid pack filename".to_string()));
+    }
+    let target_path = pack_path(pack, file_name);
+    if previous
+        .as_ref()
+        .is_none_or(|placement| placement.path.is_empty())
+        && items.iter().any(|item| {
+            same_path(&item.file_path, &target_path)
+                || pack.item.project.as_ref().is_some_and(|project| {
+                    item.project
+                        .as_ref()
+                        .is_some_and(|candidate| candidate.id == project.id)
+                })
+        })
+    {
+        bail!(ErrorKind::InputError(
+            "a local copy of this pack already exists; sync it from the content tab to include it"
+                .to_string(),
+        ));
+    }
+    let target_base = target_path.trim_end_matches(".disabled");
+    for path in [target_base.to_string(), format!("{target_base}.disabled")] {
+        if instance_dir(metadata, state).join(&path).exists() {
+            let owned = if let Some(previous) = &previous {
+                same_path(&previous.path, &path)
+                    && previous.enabled != path.ends_with(".disabled")
+                    && prepared.owned_previous
+            } else {
+                false
+            };
+            if !owned {
+                bail!(ErrorKind::InputError(
+                    "an existing pack would be replaced".to_string(),
+                ));
+            }
+        }
+    }
+    let stored_file = prepared.stored_file.take().ok_or(
+        ErrorKind::InputError("pack contents were not prepared".to_owned()),
+    )?;
+    let mut pending = previous.clone().unwrap_or_default();
+    pending.pending = true;
+    library
+        .instances
+        .entry(instance_id.clone())
+        .or_default()
+        .insert(id.to_string(), pending);
+    write_library(library, state).await?;
+    if prepared.deferred {
+        return Ok(());
+    }
+    for dependency in prepared.dependencies {
+        let dependency_path = commands::add_downloaded_project_version(
+            instance_id,
+            dependency,
+            ContentSourceKind::Local,
+            state,
+        )
+        .await?;
+        if previous
+            .as_ref()
+            .is_some_and(|placement| placement.path == dependency_path)
+        {
+            prepared.owned_previous = false;
+        }
+    }
+    let size = stored_file.metadata.size as u64;
+    let sha1 = engine::util::fetch::sha1_file_async(&stored_file.path)
+        .await?
+        .1;
+    let path = commands::install_stored_file(
+        instance_id,
+        commands::InstallContent {
+            requested_path: &target_path,
+            stored_file: &stored_file,
+            project_type: pack.item.project_type,
+            source_kind: ContentSourceKind::Local,
+            origin: pack.item.project.as_ref().zip(version.as_ref()).map(
+                |(project, version)| commands::ContentOrigin {
+                    project_id: &project.id,
+                    version_id: &version.id,
+                },
+            ),
+            enabled_override: Some(pack.item.enabled),
+            previous_path: None,
+        },
+        state,
+    )
+    .await?;
+    if let Some(previous) = previous
+        && previous.path != path
+        && prepared.owned_previous
+    {
+        commands::remove_project(instance_id, &previous.path, state).await?;
+        items.retain(|item| item.file_path != previous.path);
+    }
+    let mut installed = pack.item.clone();
+    installed.id = sha1.clone();
+    installed.file_path = path.clone();
+    installed.file_name = file_name.to_string();
+    installed.size = size;
+    installed.source_kind = Some(ContentSourceKind::Local);
+    installed.version = version.as_ref().map(|version| ContentItemVersion {
+        id: version.id.clone(),
+        version_number: version.version_number.clone(),
+        file_name: installed.file_name.clone(),
+        date_published: Some(version.date_published.to_rfc3339()),
+    });
+    items.retain(|item| item.file_path != path);
+    items.push(installed);
+    library
+        .instances
+        .entry(instance_id.clone())
+        .or_default()
+        .insert(
+            id.to_string(),
+            PackPlacement {
+                path,
+                sha1,
+                enabled: pack.item.enabled,
+                content_set_id: metadata.applied_content_set.id.clone(),
+                resource_pack_selection_path,
+                resource_pack_selection_pending,
+                ..Default::default()
+            },
+        );
+    emit_instance(&state.events, instance_id, InstancePayloadType::Synced)
+        .await?;
+    Ok(())
+}
+
+pub(super) async fn run_queued(
+    instance_id: &str,
+    state: &Engine,
+) -> engine::Result<()> {
+    let Some(metadata) =
+        crate::synced_options::state::get_instance(state, instance_id).await?
+    else {
+        return Ok(());
+    };
+    let mut preparation =
+        super::worker::Preparation::new(state, &metadata).await;
+    let mut library = preparation.library().await?;
+    if library.packs.is_empty() && library.instances.is_empty() {
+        return Ok(());
+    }
+    apply_instance_inner(
+        &metadata,
+        &mut library,
+        state,
+        None,
+        &mut preparation,
+    )
+    .await?;
+    write_library(&library, state).await?;
+    emit_instance(&state.events, instance_id, InstancePayloadType::Synced)
+        .await?;
+    Ok(())
+}
+
+async fn apply_instance_inner(
+    metadata: &SyncedInstance,
+    library: &mut PackLibrary,
+    state: &Engine,
+    removed_pack_id: Option<&str>,
+    preparation: &mut super::worker::Preparation<'_>,
+) -> engine::Result<()> {
+    if super::super::options::pending::contains(
+        &metadata.instance.id,
+        SyncedOption::ResourcePacks,
+        state,
+    )
+    .await?
+    {
+        return Ok(());
+    }
+    if sync_files_are_protected(metadata)
+        || engine::instance::ensure_metadata_content_unlocked(metadata).is_err()
+    {
+        return Ok(());
+    }
+    let running = instance_is_running(metadata, state).await?;
+    let global = get_global_options(state).await?;
+    let has_packs = removed_pack_id.is_none()
+        && library
+            .packs
+            .values()
+            .any(|pack| participating(metadata, pack, global));
+    let (mut items, versions) = if has_packs {
+        preparation
+            .run(library, async {
+                let items =
+                    commands::list_pack_content(&metadata.instance.id, state)
+                        .await?;
+                let ids = items
+                    .iter()
+                    .filter_map(|item| {
+                        item.version.as_ref().map(|version| version.id.as_str())
+                    })
+                    .collect::<Vec<_>>();
+                let versions = CachedEntry::get_version_many(
+                    &ids,
+                    None,
+                    state.pool(),
+                    &state.api_semaphore,
+                    &state.sessions,
+                )
+                .await?;
+                super::selection_compatibility::warm(metadata, &items, state)
+                    .await?;
+                Ok((items, versions))
+            })
+            .await?
+    } else {
+        (Vec::new(), Vec::new())
+    };
+    if has_packs && !running {
+        let placements = library
+            .instances
+            .get(&metadata.instance.id)
+            .cloned()
+            .unwrap_or_default();
+        if capture_items(metadata, library, state, placements, global, &items)
+            .await?
+        {
+            super::worker::queue_all(state);
+        }
+    }
+    let previous_placements = library
+        .instances
+        .get(&metadata.instance.id)
+        .cloned()
+        .unwrap_or_default();
+    let packs = if removed_pack_id.is_none() {
+        library.packs.clone()
+    } else {
+        BTreeMap::default()
+    };
+    for (id, pack) in &packs {
+        if !participating(metadata, pack, global) {
+            continue;
+        }
+        if running
+            && (pack.item.project_type != ProjectType::ResourcePack
+                || previous_placements.get(id).is_some_and(|placement| {
+                    !placement.path.is_empty()
+                        && instance_dir(metadata, state)
+                            .join(file_path_on_disk(
+                                &placement.path,
+                                placement.enabled,
+                            ))
+                            .exists()
+                })
+                || items.iter().any(|item| {
+                    item.project_type == pack.item.project_type
+                        && (item.id == pack.sha1
+                            || same_path(
+                                &item.file_path,
+                                &pack_path(pack, &pack.item.file_name),
+                            )
+                            || pack.item.project.as_ref().is_some_and(
+                                |project| {
+                                    item.project.as_ref().is_some_and(
+                                        |candidate| candidate.id == project.id,
+                                    )
+                                },
+                            ))
+                }))
+        {
+            continue;
+        }
+        let previous = library
+            .instances
+            .get(&metadata.instance.id)
+            .and_then(|placements| placements.get(id));
+        if previous.is_some_and(|placement| placement.excluded) {
+            continue;
+        }
+        let matching = matching_item(&items, pack, previous);
+        let compatible = matching.is_some_and(|item| {
+            previous.is_some_and(|placement| placement.is_source)
+                || if pack.item.project.is_some() {
+                    item.version.as_ref().is_some_and(|installed| {
+                        versions.iter().any(|version| {
+                            version.id == installed.id
+                                && version_compatible(pack, version, metadata)
+                        })
+                    })
+                } else {
+                    pack.game_versions
+                        .contains(&metadata.applied_content_set.game_version)
+                }
+        });
+        let prepared = if local_conflict(
+            &items,
+            pack,
+            previous,
+            &pack_path(pack, &pack.item.file_name),
+        ) {
+            PreparedPack {
+                conflict: true,
+                ..Default::default()
+            }
+        } else if compatible
+            || matching.is_some_and(|item| item.locked || !local(item))
+        {
+            PreparedPack {
+                compatible,
+                ..Default::default()
+            }
+        } else {
+            match preparation
+                .run(
+                    library,
+                    prepare_pack(metadata, id, pack, library, &items, state),
+                )
+                .await
+            {
+                Ok(prepared) => prepared,
+                Err(error)
+                    if matches!(
+                        error.downcast_ref::<engine::ErrorKind>(),
+                        Some(
+                            engine::ErrorKind::PackSyncChanged
+                                | engine::ErrorKind::RateLimited { .. }
+                        )
+                    ) =>
+                {
+                    return Err(error);
+                }
+                Err(error) => {
+                    let placement = library
+                        .instances
+                        .entry(metadata.instance.id.clone())
+                        .or_default()
+                        .entry(id.clone())
+                        .or_default();
+                    let message = error.to_string();
+                    if placement.error.as_ref() != Some(&message) {
+                        tracing::warn!(
+                            "Could not prepare synced pack {id}: {error}"
+                        );
+                        placement.error = Some(message);
+                    }
+                    continue;
+                }
+            }
+        };
+        let mut refresh = !prepared.dependencies.is_empty();
+        if let Err(error) =
+            apply_pack(metadata, id, pack, library, &mut items, state, prepared)
+                .await
+        {
+            tracing::warn!(
+                "Could not sync pack {id} to {}: {error}",
+                metadata.instance.id
+            );
+            let placement = library
+                .instances
+                .entry(metadata.instance.id.clone())
+                .or_default()
+                .entry(id.clone())
+                .or_default();
+            placement.error = Some(error.to_string());
+            refresh = true;
+        }
+        if refresh {
+            items = preparation
+                .run(
+                    library,
+                    commands::list_pack_content(&metadata.instance.id, state),
+                )
+                .await?;
+        }
+    }
+    let placements = library
+        .instances
+        .get(&metadata.instance.id)
+        .cloned()
+        .unwrap_or_default();
+    let mut removed_ids = Vec::new();
+    for (id, placement) in placements {
+        if running
+            || library.packs.contains_key(&id)
+            || removed_pack_id.is_some_and(|removed| removed != id)
+        {
+            continue;
+        }
+        let included = ProjectType::get_from_parent_folder(&placement.path)
+            .and_then(|project_type| pack_option(project_type).ok())
+            .is_some_and(|option| {
+                global.get(option) && instance_option_enabled(metadata, option)
+            });
+        if included
+            && !placement.excluded
+            && !placement.suspended
+            && preparation
+                .run(library, owns_file(metadata, &placement, state))
+                .await?
+        {
+            commands::remove_project(
+                &metadata.instance.id,
+                &placement.path,
+                state,
+            )
+            .await?;
+            emit_instance(
+                &state.events,
+                &metadata.instance.id,
+                InstancePayloadType::Synced,
+            )
+            .await?;
+        }
+        removed_ids.push(id);
+    }
+    if has_packs {
+        preparation
+            .run(
+                library,
+                super::selection_compatibility::warm(metadata, &items, state),
+            )
+            .await?;
+    }
+    let selection_result = if let Some(pack_id) = removed_pack_id {
+        super::selection::apply_removal(
+            metadata,
+            library,
+            previous_placements.get(pack_id),
+            state,
+        )
+        .await
+    } else {
+        super::selection::apply(metadata, library, &previous_placements, state)
+            .await
+    };
+    match selection_result {
+        Ok(true) => {
+            if let Some(placements) =
+                library.instances.get_mut(&metadata.instance.id)
+            {
+                for id in removed_ids {
+                    placements.remove(&id);
+                }
+            }
+        }
+        Ok(false) => {}
+        Err(error) => tracing::warn!(
+            "Could not apply resource-pack selection for {}: {error}",
+            metadata.instance.id
+        ),
+    }
+    Ok(())
+}
+
+pub(super) async fn apply_removal(
+    pack_id: &str,
+    library: &mut PackLibrary,
+    state: &Engine,
+) -> engine::Result<()> {
+    library.resource_pack_order.retain(|id| id != pack_id);
+    apply_all(library, state).await
+}
+
+pub(super) async fn apply_all(
+    library: &mut PackLibrary,
+    state: &Engine,
+) -> engine::Result<()> {
+    let instances = crate::synced_options::state::list_instances(state).await?;
+    let ids = instances
+        .iter()
+        .map(|metadata| &metadata.instance.id)
+        .collect::<std::collections::BTreeSet<_>>();
+    library.instances.retain(|id, _| ids.contains(id));
+    library
+        .resource_pack_observations
+        .retain(|id, _| ids.contains(id));
+    library
+        .resource_pack_incompatible_observations
+        .retain(|id, _| ids.contains(id));
+    library
+        .resource_pack_order
+        .retain(|id| library.packs.contains_key(id));
+    write_library(library, state).await?;
+    super::worker::queue_all(state);
+    Ok(())
+}
+
+pub(in crate::synced_options) async fn reconcile(
+    metadata: &InstanceMetadata,
+    _option: SyncedOption,
+    state: &Engine,
+) -> engine::Result<()> {
+    super::worker::queue_reconciliation(state, &metadata.instance.id);
+    Ok(())
+}
+
+async fn capture_after_change(
+    state: &Engine,
+    instance_id: &str,
+) -> engine::Result<()> {
+    let metadata =
+        crate::synced_options::state::get_instance(state, instance_id)
+            .await?
+            .ok_or(ErrorKind::InputError("unknown instance".to_owned()))?;
+    let mut preparation =
+        super::worker::Preparation::new(state, &metadata).await;
+    let mut library = preparation.library().await?;
+    let Some(placements) = library.instances.get(instance_id).cloned() else {
+        super::worker::queue_reconciliation(state, instance_id);
+        return Ok(());
+    };
+    if sync_files_are_protected(&metadata)
+        || instance_is_running(&metadata, state).await?
+        || super::super::options::pending::contains(
+            instance_id,
+            SyncedOption::ResourcePacks,
+            state,
+        )
+        .await?
+    {
+        super::worker::queue_reconciliation(state, instance_id);
+        return Ok(());
+    }
+    let items = preparation
+        .run(&library, async {
+            let items = commands::list_pack_content(instance_id, state).await?;
+            super::selection_compatibility::warm(&metadata, &items, state)
+                .await?;
+            Ok(items)
+        })
+        .await?;
+    let global = get_global_options(state).await?;
+    if capture_items(&metadata, &mut library, state, placements, global, &items)
+        .await?
+    {
+        apply_all(&mut library, state).await?;
+    } else {
+        write_library(&library, state).await?;
+        super::worker::queue_reconciliation(state, instance_id);
+    }
+    Ok(())
+}
+
+pub(crate) fn schedule_reconciliation(state: &engine::Engine) {
+    super::worker::queue_all(state);
+}
+
+pub async fn reconcile_after_content_change(
+    state: &engine::Engine,
+    instance_id: &str,
+) {
+    loop {
+        match capture_after_change(state, instance_id).await {
+            Err(error)
+                if matches!(
+                    error.downcast_ref::<engine::ErrorKind>(),
+                    Some(engine::ErrorKind::PackSyncChanged)
+                ) =>
+            {
+                tokio::task::yield_now().await;
+            }
+            Err(error) => {
+                tracing::warn!(
+                    "Could not capture pack changes for {instance_id}: {error}"
+                );
+                super::worker::queue_reconciliation(state, instance_id);
+                return;
+            }
+            Ok(()) => return,
+        }
+    }
+}
+
+pub(in crate::synced_options) async fn capture_resource_pack_selection_change(
+    metadata: &SyncedInstance,
+    state: &Engine,
+) -> engine::Result<()> {
+    let mut library = read_library(state).await?;
+    match super::selection::capture(metadata, &mut library, state).await? {
+        Some(true) => apply_all(&mut library, state).await?,
+        Some(false) => write_library(&library, state).await?,
+        None => {}
+    }
+    Ok(())
+}
+
+pub(in crate::synced_options) async fn prepare_instance_update(
+    metadata: &SyncedInstance,
+    state: &Engine,
+) -> engine::Result<()> {
+    let mut library = read_library(state).await?;
+    match super::selection::capture(metadata, &mut library, state).await {
+        Ok(Some(true)) => apply_all(&mut library, state).await?,
+        Ok(_) => {}
+        Err(error) => tracing::warn!(
+            "Could not capture resource-pack selection before updating {}: {error}",
+            metadata.instance.id
+        ),
+    }
+    let global = get_global_options(state).await?;
+    let pending_ids = library
+        .instances
+        .get(&metadata.instance.id)
+        .into_iter()
+        .flat_map(|placements| placements.iter())
+        .filter_map(|(id, placement)| {
+            let pack = library.packs.get(id)?;
+            (pack.item.project_type == ProjectType::ResourcePack
+                && pack.selected.is_some()
+                && participating(metadata, pack, global)
+                && !placement.excluded
+                && !placement.suspended)
+                .then(|| id.clone())
+        })
+        .collect::<Vec<_>>();
+    let mut changed = library
+        .resource_pack_observations
+        .remove(&metadata.instance.id)
+        .is_some();
+    changed |= library
+        .resource_pack_incompatible_observations
+        .remove(&metadata.instance.id)
+        .is_some();
+    if let Some(placements) = library.instances.get_mut(&metadata.instance.id) {
+        for id in pending_ids {
+            if let Some(placement) = placements.get_mut(&id)
+                && !placement.resource_pack_selection_pending
+            {
+                placement.resource_pack_selection_pending = true;
+                changed = true;
+            }
+        }
+    }
+    if changed {
+        write_library(&library, state).await?;
+    }
+    Ok(())
+}
+
+pub(in crate::synced_options) async fn detach(
+    metadata: &InstanceMetadata,
+    option: SyncedOption,
+    state: &Engine,
+) -> engine::Result<()> {
+    let mut library = read_library(state).await?;
+    let mut changed = false;
+    if let Some(placements) = library.instances.get_mut(&metadata.instance.id) {
+        for (id, placement) in placements {
+            if library.packs.get(id).is_some_and(|pack| {
+                pack_option(pack.item.project_type).ok() == Some(option)
+            }) && !placement.suspended
+            {
+                placement.suspended = true;
+                changed = true;
+            }
+        }
+    }
+    if option == SyncedOption::ResourcePacks {
+        changed |= library
+            .resource_pack_observations
+            .remove(&metadata.instance.id)
+            .is_some();
+        changed |= library
+            .resource_pack_incompatible_observations
+            .remove(&metadata.instance.id)
+            .is_some();
+    }
+    if changed {
+        write_library(&library, state).await?;
+    }
+    Ok(())
+}
+
+pub(crate) async fn decorate_content(
+    instance_id: &str,
+    items: &mut [ContentItem],
+    state: &Engine,
+) -> engine::Result<()> {
+    let library = read_library(state).await?;
+    let Some(placements) = library.instances.get(instance_id) else {
+        return Ok(());
+    };
+    let metadata =
+        crate::synced_options::state::get_instance(state, instance_id)
+            .await?
+            .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
+    let global = get_global_options(state).await?;
+    let instances = crate::synced_options::state::list_instances(state).await?;
+    for item in items {
+        if !local(item) {
+            continue;
+        }
+        for (id, placement) in placements {
+            let Some(pack) = library.packs.get(id) else {
+                continue;
+            };
+            if !placement.excluded
+                && !placement.suspended
+                && same_path(&placement.path, &item.file_path)
+                && item.project_type == pack.item.project_type
+                && pack.item.project.as_ref().map_or_else(
+                    || item.id == placement.sha1,
+                    |project| {
+                        item.project
+                            .as_ref()
+                            .is_some_and(|candidate| candidate.id == project.id)
+                    },
+                )
+                && participating(&metadata, pack, global)
+            {
+                item.synced_pack = Some(SyncedPackInfo {
+                    id: id.clone(),
+                    instance_ids: synced_instance_ids(
+                        id, &library, &instances, global,
+                    ),
+                    update_pending: placement.pending
+                        || item.enabled != pack.item.enabled
+                        || placement.error.is_some(),
+                });
+                break;
+            }
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn synced_instance_ids(
+    id: &str,
+    library: &PackLibrary,
+    instances: &[SyncedInstance],
+    global: GlobalSyncedOptions,
+) -> Vec<String> {
+    let Some(pack) = library.packs.get(id) else {
+        return Vec::new();
+    };
+    instances
+        .iter()
+        .filter(|metadata| {
+            participating(metadata, pack, global)
+                && library
+                    .instances
+                    .get(&metadata.instance.id)
+                    .and_then(|items| items.get(id))
+                    .is_some_and(|placement| {
+                        !placement.excluded
+                            && !placement.suspended
+                            && !placement.path.is_empty()
+                    })
+        })
+        .map(|metadata| metadata.instance.id.clone())
+        .collect()
+}

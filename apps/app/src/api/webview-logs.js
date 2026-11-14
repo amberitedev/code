@@ -2,9 +2,6 @@
 	const internals = window.__TAURI_INTERNALS__
 	const label = internals?.metadata?.currentWebview?.label
 	if (window.top !== window || label !== 'main') return
-	if (typeof internals?.invoke !== 'function') return
-
-	const invoke = internals.invoke
 
 	function serialize(value) {
 		try {
@@ -29,6 +26,28 @@
 		}
 	}
 
+	// One request at a time, carrying every line logged meanwhile, keeps lines in order and leaves
+	// the page's other connections to the local server free.
+	let pending = []
+	let sending = false
+	function flush() {
+		const base = window.__AMBERITE_LOCAL__
+		if (sending || pending.length === 0 || !base) return
+		sending = true
+		const body = JSON.stringify(pending)
+		pending = []
+		fetch(`${base}/app/webview-log`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body,
+		})
+			.catch(() => {})
+			.finally(() => {
+				sending = false
+				flush()
+			})
+	}
+
 	for (const method of ['log', 'info', 'warn', 'error', 'debug', 'trace']) {
 		const original = console[method]
 		if (typeof original !== 'function') continue
@@ -36,11 +55,14 @@
 		console[method] = function (...args) {
 			const result = original.apply(this, args)
 			try {
+				// The local server's init script sets the base; it may run after this one.
+				if (!window.__AMBERITE_LOCAL__) return result
 				if (method === 'trace') args.push(new Error('console.trace').stack)
-				void invoke('plugin:logs|logs_log_webview', {
+				pending.push({
 					level: method === 'log' ? 'info' : method,
 					message: args.map(serialize).join(' '),
-				}).catch(() => {})
+				})
+				queueMicrotask(flush)
 			} catch {}
 			return result
 		}

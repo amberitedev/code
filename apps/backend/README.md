@@ -33,12 +33,13 @@ Locked accounts cannot authenticate, and a forced recovery flow can change their
 unlocking them. Reset links are tied to the account's email address. Forced recovery and its local
 outbox entry commit together. Revocation closes native friends sockets as well as HTTP sessions.
 The `/sessions` admin operation revokes all supported sessions; this backend does not issue PATs.
-Upstream's Discord-ID account lookup still depends on the unimplemented OAuth provider links.
 Preferences include the upstream launcher behavior settings, and avatars accept up to 512 KiB.
 Email verification and password resets write a local outbox, accessible only through the
-dev-runner secret. OAuth providers, outbound email, passkey authentication, newsletter delivery,
-PATs, and third-party OAuth authorization are not implemented. The corresponding auth methods
-return an explicit unsupported-operation error rather than accepting an unverified identity.
+dev-runner secret. OAuth providers, outbound email, passkey authentication and newsletter delivery
+are not implemented: any `/auth/` route the backend does not serve answers an explicit
+unsupported-operation error rather than accepting an unverified identity. Account routes the
+backend does not serve, such as PATs, OAuth apps, payouts, `user_email` and `user_discord`, go to
+Modrinth without the Amberite session.
 Captcha is disabled only for loopback local development. A production captcha provider is not
 configured, so password authentication outside local development returns a configuration error.
 
@@ -55,8 +56,8 @@ API-client boundary. The local service does not proxy account session tokens to 
 running local backend. Its private account data persists in `.data/backend-proof/accounts.json` so
 running it again after a backend restart also proves persistence. It does not start a server.
 
-`pnpm test` in `apps/backend` runs the contract tests in wrangler's local runtime. The sharing test
-sends every request the App's sharing client and a Core's storage report send.
+`pnpm test` in `apps/backend` runs the black-box API tests in wrangler's local runtime. The sharing
+test sends every request the App's sharing client and a Core's storage report send.
 
 ## Cores
 
@@ -73,10 +74,10 @@ The App removes a Core by telling the Core first, with a ticket, and then callin
 `DELETE /cores/:id`. A Core that was off learns from the 410 at its next start.
 
 `POST /cores/:id/ticket` gives the App a ticket for one Core, to its owner or an account in that
-Core's directory: an Ed25519 JWT with `iss`, `kind: "session"`, `sub`, `name`, `avatar_url`,
-`aud` (the Core id), `iat`, `exp` five minutes later, and a random `jti`. It writes nothing. The
-Core verifies it against `public/core/keys.json`, served as a static asset at `/core/keys.json` so
-it costs no requests. The pool's `store`, `fetch`, and `pull` tickets are signed the same way.
+Core's directory: an Ed25519 JWT whose claims are a `SessionTicket` (`contracts::tickets`), good
+for five minutes. It writes nothing. The Core verifies it against `public/core/keys.json`, served
+as a static asset at `/core/keys.json` so it costs no requests. The pool's `store`, `fetch`, and
+`pull` tickets are signed the same way.
 
 `POST /core/storage` is a Core's storage report: what its store holds and how much room it has.
 The answer lists versions to drop and to pull.

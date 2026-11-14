@@ -1,478 +1,81 @@
-//! Servers: `GET /modrinth/v0/servers`, `GET /modrinth/v0/servers/{id}` and its `power`,
-//! `fs`, `ws`, and `reinstall` routes; `GET /v1/servers`, `GET /v1/servers/{id}`,
-//! `PATCH /v1/servers/{id}/worlds/{wid}`, `GET /v1/servers/{id}/worlds/{wid}/select-download`,
-//! `DELETE /v1/servers/{id}/flows/intro`; and
-//! Amberite's `POST /local/servers` and `DELETE /local/servers/{id}`. Mirrors `Archon.Servers` in
-//! `packages/api-client/src/modules/archon/types.ts` (`archon/servers/v0.ts`, `archon/servers/v1.ts`,
-//! and `createServer` in `archon/cores/v1.ts`).
+//! Servers: listing, creating and deleting them, power, a loader install, the update channel and
+//! the setup a server runs with.
 
 use std::{
-    collections::BTreeMap,
     net::{IpAddr, SocketAddr},
     sync::Arc,
 };
 
-use axum::{
-    Json,
-    extract::{Path, Query, State},
-    http::{HeaderMap, StatusCode, header::HOST},
+use axum::extract::State;
+use contracts::{
+    ApiError, Empty, ErrorCode, Json,
+    core::{
+        Action, ChangePower, ChangeServer, CoreRole, CoreServer, CreateServer,
+        DeleteServer, GetServer, GetSetup, InstallLoader, InstallModpackFile,
+        JoinAddress, ListServers, PowerAction, ServerId, ServerNet,
+        ServerPower, ServerSetup, ShareServer, SharedServer, UpdateChannel,
+    },
+    server::Req,
 };
-use chrono::{DateTime, Utc};
-use modrinth_content_management::VersionType;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+use engine::{
+    routes::api_error,
+    state::{ReleaseChannel, SharedInstanceRole},
+};
+use futures::TryStreamExt;
+use tokio::io::AsyncWriteExt;
 
-use super::{
-    AppState,
-    activity::Action,
-    content::LinkedPackState,
-    error::{ApiError, ErrorCode},
-};
+use super::{CoreState, engine_mount, internal};
 use crate::{
-    access::{Caller, Dangerous, Level, activity},
-    installs::ModLoader,
-    servers::{Phase, ServerError, launch},
-    state::servers::{
-        adapters::sqlite::{content_rows, server_rows},
-        commands::{
-            drop_own_share, install_loader, list_content::linked_pack_state,
-            needs_update::needs_update,
-        },
+    access::{Caller, Dangerous, Permission, activity, require_owner},
+    servers::{
+        Phase, ServerError, launch,
+        platform::{self, Platform},
+        server_rows,
     },
 };
-
-/// Response of GET `/modrinth/v0/servers`. `users` is keyed by user id. Mirrors
-/// Archon.Servers.v0.ServerGetResponse.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ServerGetResponse {
-    pub servers: Vec<Server>,
-    pub pagination: Pagination,
-    pub users: BTreeMap<String, ServerOwner>,
-}
-
-/// Mirrors Archon.Servers.v0.Pagination.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Pagination {
-    pub current_page: u32,
-    pub page_size: u32,
-    pub total_pages: u32,
-    pub total_items: u32,
-}
-
-/// Mirrors Archon.Servers.v0.ServerOwner.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ServerOwner {
-    pub id: String,
-    pub username: String,
-    pub avatar_url: Option<String>,
-}
-
-/// Mirrors Archon.Servers.v0.Status.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ServerStatus {
-    Installing,
-    Broken,
-    Available,
-    Suspended,
-}
-
-/// Mirrors Archon.Servers.v0.Loader.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Loader {
-    Forge,
-    NeoForge,
-    Fabric,
-    Quilt,
-    Purpur,
-    Spigot,
-    Vanilla,
-    Paper,
-}
-
-/// Mirrors Archon.Servers.v0.Game.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Game {
-    Minecraft,
-}
-
-/// Mirrors Archon.Servers.v0.UpstreamKind.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum UpstreamKind {
-    Modpack,
-    None,
-}
-
-/// The Modrinth pack a server was installed from. Mirrors Archon.Servers.v0.Upstream.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Upstream {
-    pub kind: UpstreamKind,
-    pub version_id: String,
-    pub project_id: String,
-}
-
-/// Where players join the server. Mirrors Archon.Servers.v0.Net.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Net {
-    /// With `port`, the join address upstream's helper reads (packages/ui getHostingServerAddress).
-    /// See [`join_address`].
-    pub ip: Option<String>,
-    pub port: u16,
-    pub domain: String,
-    pub outside: Option<OutsideAddress>,
-    /// The port the server listens on. The App joins it here, at the Core's own address, when it
-    /// reaches the Core on its network; the backend gets it for players.
-    pub game_port: u16,
-}
-
-/// Where the server is on the internet. Mirrors the `outside` object of Archon.Servers.v0.Net.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OutsideAddress {
-    pub ip: String,
-    pub port: u16,
-}
-
-/// Mirrors the `state` union of Archon.Servers.v0.Reachability.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ReachabilityState {
-    Checking,
-    Reachable,
-    Unverified,
-    Unreachable,
-}
-
-/// Whether a running server can be joined from the internet; `cause` says why not. Mirrors
-/// Archon.Servers.v0.Reachability.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Reachability {
-    pub state: ReachabilityState,
-    pub cause: Option<String>,
-}
-
-/// Mirrors the Core-only `power_state` of Archon.Servers.v0.Server. `Offline`, `Crashed`, and
-/// `Killed` say how the last run ended: stopped (or never run), crashed, or force-killed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ServerPowerState {
-    Offline,
-    Starting,
-    Running,
-    Stopping,
-    Crashed,
-    Killed,
-}
-
-/// The App instance a server follows. Mirrors Archon.Servers.v0.LinkedInstance.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LinkedInstance {
-    pub id: String,
-    pub name: String,
-    pub state: LinkedPackState,
-    pub error: Option<String>,
-    pub visible_to_friends: bool,
-    pub shared_instance_id: Option<String>,
-    /// The version of the instance's share the server runs.
-    pub version: Option<i64>,
-}
-
-/// Mirrors Archon.Servers.v0.Notice.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Notice {
-    pub id: u32,
-    pub dismissable: bool,
-    pub title: String,
-    pub message: String,
-    pub level: String,
-    pub announced: DateTime<Utc>,
-}
-
-/// Mirrors Archon.Servers.v0.NodeInfo.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NodeInfo {
-    pub token: String,
-    pub instance: String,
-}
-
-/// Mirrors Archon.Servers.v0.Flows.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Flows {
-    pub intro: bool,
-}
-
-/// Response of GET `/modrinth/v0/servers/{id}`, and an item of GET `/modrinth/v0/servers`.
-/// `current_user_permissions` is a Modrinth scope bitset. `node` is this Core, as the host the
-/// request reached, under `/servers/{id}` (see `files::auth`). The SFTP fields, `datacenter`,
-/// `suspension_reason`, `notices`, and `is_medal` are Modrinth hosting fields Core fills with
-/// constants. Mirrors Archon.Servers.v0.Server.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Server {
-    pub server_id: Uuid,
-    pub name: String,
-    pub owner_id: String,
-    pub net: Net,
-    pub game: Game,
-    pub backup_quota: u32,
-    pub used_backup_quota: u32,
-    pub status: ServerStatus,
-    pub suspension_reason: Option<String>,
-    pub loader: Option<Loader>,
-    pub loader_version: Option<String>,
-    pub mc_version: Option<String>,
-    pub upstream: Option<Upstream>,
-    pub sftp_username: String,
-    pub sftp_password: String,
-    pub sftp_host: String,
-    pub datacenter: String,
-    pub notices: Vec<Notice>,
-    pub node: Option<NodeInfo>,
-    pub flows: Flows,
-    pub is_medal: bool,
-    pub current_user_permissions: u64,
-    pub locked_since: Option<DateTime<Utc>>,
-    pub linked_instance: Option<LinkedInstance>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub power_state: Option<ServerPowerState>,
-    pub reachability: Option<Reachability>,
-    /// Who is online, from Core's health check (see `servers::insight`). `None` while the
-    /// server does not run.
-    pub players: Option<Vec<String>>,
-}
-
-/// Response of GET `/modrinth/v0/servers/{id}/fs`: where the file API is and the token for it.
-/// Mirrors Archon.Servers.v0.JWTAuth.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct JwtAuth {
-    pub url: String,
-    pub token: String,
-}
-
-/// Response of GET `/modrinth/v0/servers/{id}/ws`: the console socket and a ticket for it.
-/// Mirrors Archon.Websocket.v0.WSAuth.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WsAuth {
-    pub url: String,
-    pub token: String,
-}
-
-/// Mirrors the `action` of `ArchonServersV0Module.power`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum PowerAction {
-    Start,
-    Stop,
-    Restart,
-    Kill,
-}
-
-/// Body of POST `/modrinth/v0/servers/{id}/power`. Mirrors the body of
-/// `ArchonServersV0Module.power`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PowerRequest {
-    pub action: PowerAction,
-}
-
-/// Query of POST `/modrinth/v0/servers/{id}/reinstall`. `hard` erases the server's data first.
-/// Mirrors the `hard` param of `ArchonServersV0Module.reinstall`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReinstallQuery {
-    pub hard: bool,
-}
-
-/// Body of POST `/modrinth/v0/servers/{id}/reinstall`, told apart by which fields it has. Mirrors
-/// Archon.Servers.v0.ReinstallRequest.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum ReinstallRequest {
-    /// Mirrors Archon.Servers.v0.ReinstallModpackRequest.
-    Modpack {
-        project_id: String,
-        #[serde(default)]
-        version_id: Option<String>,
-    },
-    /// Mirrors Archon.Servers.v0.ReinstallLoaderRequest.
-    Loader {
-        loader: String,
-        #[serde(default)]
-        loader_version: Option<String>,
-        #[serde(default)]
-        game_version: Option<String>,
-    },
-}
-
-/// Response of GET `/v1/servers/{id}/worlds/{wid}/select-download`, and a world's
-/// `download_method`. Mirrors Archon.Servers.v1.WorldDownloadMethod.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "method_type", rename_all = "snake_case")]
-pub enum WorldDownloadMethod {
-    DirectNodeDownload,
-    Backup { backup_id: Uuid },
-    Unavailable,
-}
-
-/// Response of GET `/v1/servers/{id}`, and an item of GET `/v1/servers`. `location` is this
-/// Core, as `node` is above. `subdomain`, `specs`, the SFTP fields, and `tags` are Modrinth
-/// hosting fields Core fills with constants. Mirrors Archon.Servers.v1.ServerFull.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ServerFull {
-    pub id: Uuid,
-    pub name: String,
-    pub subdomain: String,
-    pub specs: ServerResources,
-    pub sftp_username: String,
-    pub sftp_password: String,
-    pub tags: Vec<String>,
-    pub location: ServerLocation,
-    pub worlds: Vec<WorldFull>,
-}
-
-/// Mirrors Archon.Servers.v1.ServerResources.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ServerResources {
-    pub cpu: u32,
-    pub memory_mb: u32,
-    pub storage_mb: u64,
-    pub swap_mb: u32,
-}
-
-/// Mirrors Archon.Servers.v1.ServerLocation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "status", rename_all = "snake_case")]
-pub enum ServerLocation {
-    Assigned { location_metadata: LocationMetadata },
-    Unassigned,
-}
-
-/// Mirrors the `location_metadata` object of Archon.Servers.v1.ServerLocation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LocationMetadata {
-    pub region: String,
-    pub region_should_be_user_displayed: bool,
-    pub hostname: String,
-    pub url_host: String,
-    pub is_decommissioned_node: bool,
-}
-
-/// A server's world. Mirrors Archon.Servers.v1.WorldFull.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WorldFull {
-    pub id: Uuid,
-    pub name: String,
-    pub update_channel: VersionType,
-    pub created_at: DateTime<Utc>,
-    pub is_active: bool,
-    pub download_method: WorldDownloadMethod,
-    /// Always `[]`: this is the removed backups API; the App reads backups from the queue.
-    pub backups: [(); 0],
-    pub content: Option<WorldContentInfo>,
-    pub readiness: WorldReadiness,
-}
-
-/// Mirrors Archon.Servers.v1.WorldReadiness.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WorldReadiness {
-    pub data_synchronized_fetched: bool,
-}
-
-/// Mirrors Archon.Servers.v1.WorldContentInfo.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WorldContentInfo {
-    /// The share the server reads: its instance's, when it follows one, else its own once it is
-    /// shared (`api::share`). Only its own is written from the server.
-    pub shared_instance_id: Option<String>,
-    /// The server has changes its own share's latest version does not, so a push would change
-    /// something. Always false for a server that follows an instance: it has no share of its own.
-    pub shared_instance_needs_update: bool,
-    pub modloader: String,
-    pub modloader_version: String,
-    pub game_version: String,
-    pub java_version: Option<u32>,
-    pub invocation: Option<String>,
-    pub original_invocation: Option<String>,
-}
-
-/// Body of POST `/local/servers`: create an unconfigured server, linked to `instance` when it is
-/// created from an App instance. Mirrors the body of `ArchonCoresV1Module.createServer`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CreateServerRequest {
-    pub name: String,
-    #[serde(default)]
-    pub instance: Option<CreateServerInstance>,
-}
-
-/// The App instance a new server follows. Mirrors the `instance` argument of
-/// `ArchonCoresV1Module.createServer`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CreateServerInstance {
-    pub id: String,
-    pub name: String,
-    #[serde(default)]
-    pub visible_to_friends: Option<bool>,
-    #[serde(default)]
-    pub shared_instance_id: Option<String>,
-}
-
-/// Response of POST `/local/servers`. Mirrors the `{ id }` result of
-/// `ArchonCoresV1Module.createServer`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CreateServerResponse {
-    pub id: Uuid,
-}
 
 impl From<ServerError> for ApiError {
     fn from(error: ServerError) -> Self {
         let code = match &error {
             ServerError::NotFound(_) => ErrorCode::NotFound,
-            ServerError::AlreadyRunning
-            | ServerError::NotRunning
+            ServerError::AlreadyRunning => ErrorCode::AlreadyRunning,
+            ServerError::Installing => ErrorCode::Installing,
+            ServerError::Unmanaged => ErrorCode::NotManaged,
+            ServerError::NoPorts => ErrorCode::NoPorts,
+            ServerError::Eula => ErrorCode::EulaNotAccepted,
+            ServerError::NotRunning
             | ServerError::Starting
-            | ServerError::Installing
             | ServerError::BackingUp
-            | ServerError::Unmanaged
-            | ServerError::NoPorts
-            | ServerError::Eula
             | ServerError::NotReady(_)
             | ServerError::Shim(_) => ErrorCode::Conflict,
             ServerError::StartFailed(_) | ServerError::Other(_) => {
-                ErrorCode::Internal
+                ErrorCode::InternalError
             }
         };
         Self::new(code, format!("{error:#}"))
     }
 }
 
-impl From<sqlx::Error> for ApiError {
-    fn from(error: sqlx::Error) -> Self {
-        ServerError::from(error).into()
+fn update_channel(channel: ReleaseChannel) -> UpdateChannel {
+    match channel {
+        ReleaseChannel::Release => UpdateChannel::Release,
+        ReleaseChannel::Beta => UpdateChannel::Beta,
+        ReleaseChannel::Alpha => UpdateChannel::Alpha,
+    }
+}
+
+fn release_channel(channel: UpdateChannel) -> ReleaseChannel {
+    match channel {
+        UpdateChannel::Release => ReleaseChannel::Release,
+        UpdateChannel::Beta => ReleaseChannel::Beta,
+        UpdateChannel::Alpha => ReleaseChannel::Alpha,
     }
 }
 
 // Every route below checks the caller's role on the server, or that they own the Core.
 
-/// The Modrinth scope bits a level reads as (`serverPermissionBits` in `@modrinth/ui`), so the
-/// App shows each role only what it may do. The owner is `SERVER_ADMIN`; editors read, power,
-/// console, files, setup, backups, and advanced settings; viewers read. Every value survives JSON
-/// as a JavaScript number, which `u64::MAX` does not: it reads as 2^64, no bits at all.
-fn permissions(level: Level) -> u64 {
-    const BASE_READ: u64 = 1 << 63;
-    match level {
-        Level::Owner => !0 << 15,
-        // BASE_READ down to ADVANCED, bits 63 to 57.
-        Level::Editor => 0b111_1111 << 57,
-        Level::Viewer => BASE_READ,
-    }
-}
-
-/// The host a request reached Core at, which is where the App finds the server's node routes.
-fn host(headers: &HeaderMap) -> &str {
-    headers
-        .get(HOST)
-        .and_then(|host| host.to_str().ok())
-        .unwrap_or("localhost")
-}
-
 /// Where players join a server from the internet: the router's grant when it gave a different
-/// outside port than the game port, otherwise the Core's join IP and the game port. No domain.
+/// outside port than the game port, otherwise the Core's join IP and the game port.
 fn join_address(
     join_ip: Option<IpAddr>,
     game_port: u16,
@@ -486,7 +89,7 @@ fn join_address(
     }
 }
 
-fn net(state: &AppState, row: &server_rows::ServerRow) -> Net {
+fn net(state: &CoreState, row: &server_rows::ServerRow) -> ServerNet {
     let game_port = u16::try_from(row.port).unwrap_or_default();
     // Known while the server runs and its port is forwarded, or open on a public address.
     let outside = state
@@ -494,11 +97,10 @@ fn net(state: &AppState, row: &server_rows::ServerRow) -> Net {
         .report(&row.id)
         .and_then(|report| report.outside);
     let (ip, port) = join_address(state.network.join_ip(), game_port, outside);
-    Net {
+    ServerNet {
         ip: ip.map(|ip| ip.to_string()),
         port,
-        domain: String::new(),
-        outside: outside.map(|address| OutsideAddress {
+        outside: outside.map(|address| JoinAddress {
             ip: address.ip().to_string(),
             port: address.port(),
         }),
@@ -508,196 +110,195 @@ fn net(state: &AppState, row: &server_rows::ServerRow) -> Net {
 
 /// Where `id` is in its run, from its `phase`, or how its last run ended when it has none.
 pub(super) async fn power_state(
-    state: &AppState,
+    state: &CoreState,
     id: &str,
     phase: Option<Phase>,
-) -> sqlx::Result<ServerPowerState> {
+) -> sqlx::Result<ServerPower> {
     Ok(match phase {
-        Some(Phase::Starting) => ServerPowerState::Starting,
-        Some(Phase::Running | Phase::Unmanaged(_)) => ServerPowerState::Running,
-        Some(Phase::Stopping) => ServerPowerState::Stopping,
-        Some(Phase::Installing) => ServerPowerState::Offline,
+        Some(Phase::Starting) => ServerPower::Starting,
+        Some(Phase::Running | Phase::Unmanaged(_)) => ServerPower::Running,
+        Some(Phase::Stopping) => ServerPower::Stopping,
+        Some(Phase::Installing) => ServerPower::Offline,
         None => match server_rows::last_outcome(&state.db, id).await? {
-            Some(server_rows::Outcome::Crashed) => ServerPowerState::Crashed,
-            Some(server_rows::Outcome::Killed) => ServerPowerState::Killed,
-            Some(server_rows::Outcome::Stopped) | None => {
-                ServerPowerState::Offline
-            }
+            Some(server_rows::Outcome::Crashed) => ServerPower::Crashed,
+            Some(server_rows::Outcome::Killed) => ServerPower::Killed,
+            Some(server_rows::Outcome::Stopped) | None => ServerPower::Offline,
         },
     })
 }
 
-/// What the hosting API shows for a server row, to a caller with `level` on it, reached at
-/// `host`.
+/// A server row as a caller with `level` on it sees it.
 async fn server(
-    state: &AppState,
+    state: &CoreState,
     row: server_rows::ServerRow,
-    level: Level,
-    host: &str,
-) -> Result<Server, ApiError> {
-    let power_state =
-        power_state(state, &row.id, state.servers.phase(&row.id)).await?;
+    level: Permission,
+) -> Result<CoreServer, ApiError> {
+    let phase = state.servers.phase(&row.id);
+    let power = power_state(state, &row.id, phase).await.map_err(internal)?;
     let owner_id: Option<String> =
         sqlx::query_scalar("SELECT owner_user_id FROM core WHERE id = 1")
             .fetch_optional(&state.db)
-            .await?
+            .await
+            .map_err(internal)?
             .flatten();
-    let net = net(state, &row);
-    Ok(Server {
-        server_id: Uuid::parse_str(&row.id).unwrap_or_default(),
-        name: row.name,
-        owner_id: owner_id.unwrap_or_default(),
-        net,
-        game: Game::Minecraft,
-        backup_quota: 0,
-        used_backup_quota: 0,
-        status: if state.servers.phase(&row.id) == Some(Phase::Installing) {
-            ServerStatus::Installing
-        } else if row.game_version.is_some() {
-            ServerStatus::Available
-        } else {
-            ServerStatus::Installing
-        },
-        suspension_reason: None,
-        loader: row.loader.as_deref().and_then(loader),
-        loader_version: row.loader_version,
-        mc_version: row.game_version,
-        upstream: None,
-        sftp_username: String::new(),
-        sftp_password: String::new(),
-        sftp_host: String::new(),
-        datacenter: String::new(),
-        notices: Vec::new(),
-        node: Some(NodeInfo {
-            token: String::new(),
-            instance: format!("{host}/servers/{}", row.id),
-        }),
-        flows: Flows { intro: false },
-        is_medal: false,
-        current_user_permissions: permissions(level),
-        locked_since: None,
-        linked_instance: linked_instance(state, &row.id).await?,
-        power_state: Some(power_state),
-        reachability: super::insight::archon(state, &row.id),
+    let created_at: i64 =
+        sqlx::query_scalar("SELECT created_at FROM servers WHERE id = ?")
+            .bind(&row.id)
+            .fetch_one(&state.db)
+            .await
+            .map_err(internal)?;
+    let eula_accepted = super::eula::accepted_at(&state.db)
+        .await
+        .map_err(internal)?
+        .is_some();
+    let instance = engine::instance::get(&state.engine, &row.id)
+        .await
+        .map_err(api_error)?
+        .ok_or_else(|| ServerError::NotFound(row.id.clone()))?;
+    let linked_instance = super::follow::linked(
+        state,
+        &row.id,
+        instance.shared_instance.as_ref(),
+    )
+    .await?;
+    let set = instance.applied_content_set;
+    let installed = !set.game_version.is_empty();
+    Ok(CoreServer {
+        net: net(state, &row),
+        linked_instance,
+        reachability: state
+            .network
+            .report(&row.id)
+            .map(contracts::core::ReachabilityReport::from),
         players: state
             .servers
             .insight(&row.id)
             .map(|insight| insight.players.into_iter().collect()),
+        role: match level {
+            Permission::Owner => None,
+            Permission::Edit => Some(CoreRole::Editor),
+            Permission::View => Some(CoreRole::Viewer),
+        },
+        installing: phase == Some(Phase::Installing),
+        memory_mb: u32::try_from(row.memory_mb).unwrap_or_default(),
+        update_channel: update_channel(instance.instance.update_channel),
+        id: row.id,
+        name: row.name,
+        owner_id,
+        loader: installed.then(|| set.loader.as_str().to_owned()),
+        loader_version: set.loader_version.filter(|_| installed),
+        game_version: installed.then_some(set.game_version),
+        power,
+        created_at,
+        eula_accepted,
     })
 }
 
-/// The App instance a server follows, when its pack is a version of that instance's share.
-async fn linked_instance(
-    state: &AppState,
-    id: &str,
-) -> Result<Option<LinkedInstance>, ApiError> {
-    let Some(pack) = content_rows::get_pack(&state.db, id).await? else {
-        return Ok(None);
-    };
-    let Some(linked) = pack.share.clone() else {
-        return Ok(None);
-    };
-    Ok(Some(LinkedInstance {
-        id: linked.instance_id,
-        name: linked.instance_name,
-        state: linked_pack_state(&state.content, id, &pack).await?,
-        error: pack.error,
-        visible_to_friends: false,
-        shared_instance_id: Some(linked.shared_instance_id),
-        version: Some(linked.version),
-    }))
-}
-
-/// `servers.loader` as the hosting API names it.
-fn loader(stored: &str) -> Option<Loader> {
-    Some(match stored {
-        "vanilla" => Loader::Vanilla,
-        "fabric" => Loader::Fabric,
-        "quilt" => Loader::Quilt,
-        "forge" => Loader::Forge,
-        "neoforge" => Loader::NeoForge,
-        "paper" => Loader::Paper,
-        _ => return None,
-    })
-}
-
-/// `GET /modrinth/v0/servers`: every server the caller has a role on, on one page.
 pub async fn list(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-) -> Result<Json<ServerGetResponse>, ApiError> {
+    State(state): State<Arc<CoreState>>,
+    _: Req<ListServers>,
+) -> Result<Json<Vec<CoreServer>>, ApiError> {
     let mut servers = Vec::new();
-    for row in server_rows::list(&state.db).await? {
-        if let Some(level) = caller.level(&state.db, &row.id).await? {
-            servers.push(server(&state, row, level, host(&headers)).await?);
+    for row in server_rows::list(&state.db).await.map_err(internal)? {
+        if let Some(level) = state
+            .access
+            .level(&caller, &row.id)
+            .await
+            .map_err(internal)?
+        {
+            servers.push(server(&state, row, level).await?);
         }
     }
-    let count = servers.len() as u32;
-    Ok(Json(ServerGetResponse {
-        servers,
-        pagination: Pagination {
-            current_page: 1,
-            page_size: count,
-            total_pages: 1,
-            total_items: count,
-        },
-        users: BTreeMap::new(),
-    }))
+    Ok(Json(servers))
 }
 
-/// `GET /modrinth/v0/servers/{id}`.
 pub async fn get(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-    Path(id): Path<String>,
-) -> Result<Json<Server>, ApiError> {
-    let level = caller.require(&state.db, &id, Level::Viewer).await?;
+    State(state): State<Arc<CoreState>>,
+    Req { params, .. }: Req<GetServer>,
+) -> Result<Json<CoreServer>, ApiError> {
+    let id = params.id;
+    let level = state.access.require(&caller, &id, Permission::View).await?;
     let row = server_rows::get(&state.db, &id)
-        .await?
+        .await
+        .map_err(internal)?
         .ok_or(ServerError::NotFound(id))?;
-    Ok(Json(server(&state, row, level, host(&headers)).await?))
+    Ok(Json(server(&state, row, level).await?))
 }
 
-/// `POST /local/servers`: an unconfigured server. Linked instances are step 4. Owner only.
 pub async fn create(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
-    Json(request): Json<CreateServerRequest>,
-) -> Result<Json<CreateServerResponse>, ApiError> {
-    caller.require_owner()?;
-    let name = request.name.trim();
+    State(state): State<Arc<CoreState>>,
+    Req { body, .. }: Req<CreateServer>,
+) -> Result<Json<ServerId>, ApiError> {
+    require_owner(&caller)?;
+    let row = state.servers.create(server_name(&body.name)?).await?;
+    activity::log(&state.db, &caller, Some(&row.id), Action::ServerCreated)
+        .await;
+    Ok(Json(ServerId { id: row.id }))
+}
+
+fn server_name(name: &str) -> Result<&str, ApiError> {
+    let name = name.trim();
     if name.is_empty() || name.chars().count() > 64 {
         return Err(ApiError::new(
-            ErrorCode::InvalidRequest,
+            ErrorCode::InvalidInput,
             "A server name has 1 to 64 characters.",
         ));
     }
-    let row = state.servers.create(name).await?;
-    activity::log(&state.db, &caller, Some(&row.id), Action::ServerCreated)
-        .await;
-    Ok(Json(CreateServerResponse {
-        id: Uuid::parse_str(&row.id).unwrap_or_default(),
-    }))
+    Ok(name)
 }
 
-/// `POST /modrinth/v0/servers/{id}/power`. Start answers once Java runs; stop and kill once the
-/// shim has the request; restart at once.
+pub async fn change(
+    caller: Caller,
+    State(state): State<Arc<CoreState>>,
+    Req { params, body, .. }: Req<ChangeServer>,
+) -> Result<Empty, ApiError> {
+    let id = params.id;
+    state.access.require(&caller, &id, Permission::Edit).await?;
+    server_rows::get(&state.db, &id)
+        .await
+        .map_err(internal)?
+        .ok_or_else(|| ServerError::NotFound(id.clone()))?;
+    if let Some(name) = &body.name {
+        server_rows::set_name(&state.db, &id, server_name(name)?)
+            .await
+            .map_err(internal)?;
+        activity::log(&state.db, &caller, Some(&id), Action::SettingsChanged)
+            .await;
+    }
+    if let Some(channel) = body.update_channel {
+        engine::instance::edit(
+            &state.engine,
+            &id,
+            engine::state::EditInstance {
+                update_channel: Some(release_channel(channel)),
+                ..Default::default()
+            },
+        )
+        .await
+        .map_err(api_error)?;
+        activity::log(&state.db, &caller, Some(&id), Action::SettingsChanged)
+            .await;
+    }
+    Ok(Empty)
+}
+
 pub async fn power(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
-    Json(request): Json<PowerRequest>,
-) -> Result<StatusCode, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
-    let action = match request.action {
+    State(state): State<Arc<CoreState>>,
+    Req { params, body, .. }: Req<ChangePower>,
+) -> Result<Empty, ApiError> {
+    let id = params.id;
+    state.access.require(&caller, &id, Permission::Edit).await?;
+    let action = match body.action {
         PowerAction::Start => Action::ServerStarted,
         PowerAction::Stop => Action::ServerStopped,
         PowerAction::Kill => Action::ServerKilled,
         PowerAction::Restart => Action::ServerRestarted,
     };
-    match request.action {
+    match body.action {
         PowerAction::Start => state.servers.start(&id).await?,
         PowerAction::Stop => state.servers.stop(&id).await?,
         PowerAction::Kill => state.servers.kill(&id).await?,
@@ -714,74 +315,216 @@ pub async fn power(
         }
     }
     activity::log(&state.db, &caller, Some(&id), action).await;
-    Ok(StatusCode::NO_CONTENT)
+    Ok(Empty)
 }
 
-/// `POST /modrinth/v0/servers/{id}/reinstall`: install a loader on a stopped server, as a bare
-/// install through the content routes does, but answering once it is done. Never erases: `hard`
-/// is refused.
-pub async fn reinstall(
+/// Install a loader on a stopped server through the engine's install job for it, answering once
+/// the job is done. Its progress reaches the event socket as the job's events.
+pub async fn install(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
-    Query(query): Query<ReinstallQuery>,
-    Json(request): Json<ReinstallRequest>,
-) -> Result<StatusCode, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
-    let ReinstallRequest::Loader {
-        loader,
-        loader_version,
-        game_version: Some(game_version),
-    } = request
-    else {
+    State(state): State<Arc<CoreState>>,
+    Req { params, body, .. }: Req<InstallLoader>,
+) -> Result<Empty, ApiError> {
+    let id = params.id;
+    state.access.require(&caller, &id, Permission::Edit).await?;
+    let Some(loader) = platform::parse_loader(&body.loader) else {
         return Err(ApiError::new(
-            ErrorCode::InvalidRequest,
-            "Install packs through the content routes.",
+            ErrorCode::InvalidInput,
+            "Core installs Vanilla, Fabric, Quilt, Forge, NeoForge, and Paper.",
         ));
     };
-    let Some(loader) = ModLoader::parse(&loader).filter(|_| !query.hard) else {
-        return Err(ApiError::new(
-            ErrorCode::InvalidRequest,
-            "Core installs Vanilla, Fabric, Quilt, Forge, NeoForge, and Paper, and never erases a server.",
-        ));
-    };
-    let busy = state.content.busy(&id)?;
+    if state.servers.engine_installing(&id).await? {
+        return Err(ServerError::Installing.into());
+    }
     let hold = state.servers.hold(&id)?;
-    content_rows::unlink(&state.db, &id).await?;
-    state.access.owed.notify_one();
-    let progress = state.content.progress(&id);
-    let result = install_loader::install_loader(
-        &state.content,
-        &hold,
-        &progress,
+    server_rows::get(&state.db, &id)
+        .await
+        .map_err(internal)?
+        .ok_or_else(|| ServerError::NotFound(id.clone()))?;
+    if platform::platform(&state.engine, &id)
+        .await
+        .map_err(api_error)?
+        .is_some()
+    {
+        state.backups.pre_update(&id).await?;
+    }
+    let platform = Platform {
         loader,
-        &game_version,
-        loader_version.as_deref(),
-        false,
-    )
-    .await;
-    progress.finish(
-        result
-            .as_ref()
-            .err()
-            .map(|error| format!("{error:#}"))
-            .as_deref(),
-    );
-    result?;
-    drop((hold, busy));
+        game_version: body.game_version,
+        loader_version: body.loader_version,
+    };
+    // Not cancelled with the request: the job goes on, so the hold and the restore must too.
+    let engine = Arc::clone(&state.engine);
+    tokio::spawn(async move {
+        let installed = platform::install(&engine, hold.id(), &platform).await;
+        drop(hold);
+        installed
+    })
+    .await
+    .map_err(internal)?
+    .map_err(api_error)?;
     activity::log(&state.db, &caller, Some(&id), Action::ContentChanged).await;
-    Ok(StatusCode::NO_CONTENT)
+    Ok(Empty)
 }
 
-/// `DELETE /local/servers/{id}`: delete a stopped server, its world, and every role on it. Owner
-/// only, dangerous. Its activity history stays.
+/// Install the `.mrpack` in the body over the stopped server, in the background. It is staged in
+/// the server's run folder, which the server cannot write, with the disk's free space as its cap.
+pub async fn install_modpack_file(
+    caller: Caller,
+    State(state): State<Arc<CoreState>>,
+    Req { params, body, .. }: Req<InstallModpackFile>,
+) -> Result<Empty, ApiError> {
+    let id = params.id;
+    state.access.require(&caller, &id, Permission::Edit).await?;
+    let hold = state.servers.hold(&id)?;
+    let dir = state.servers.paths().run(&id);
+    tokio::fs::create_dir_all(&dir).await.map_err(internal)?;
+    let pack = dir.join("upload.mrpack");
+    let mut room = engine::archive::room(&dir).map_err(internal)?;
+    let mut file = tokio::fs::File::create(&pack).await.map_err(internal)?;
+    let mut chunks = body.into_data_stream();
+    while let Some(chunk) = chunks.try_next().await.map_err(|error| {
+        ApiError::new(ErrorCode::InvalidInput, error.to_string())
+    })? {
+        room = room.checked_sub(chunk.len() as u64).ok_or_else(|| {
+            ApiError::new(
+                ErrorCode::InvalidInput,
+                "The pack does not fit on the Core's disk.",
+            )
+        })?;
+        file.write_all(&chunk).await.map_err(internal)?;
+    }
+    file.flush().await.map_err(internal)?;
+    drop(file);
+    if platform::platform(&state.engine, &id)
+        .await
+        .map_err(api_error)?
+        .is_some()
+    {
+        state.backups.pre_update(&id).await?;
+    }
+    engine::install::install_pack_to_existing_instance(
+        id.clone(),
+        engine::pack::install_from::CreatePackLocation::FromFile { path: pack },
+        None,
+        &state.engine,
+    )
+    .await
+    .map_err(api_error)?;
+    activity::log(&state.db, &caller, Some(&id), Action::ContentChanged).await;
+    tokio::spawn(engine_mount::finish_job(Arc::clone(&state), hold));
+    Ok(Empty)
+}
+
+/// Push a version of the server's own share. The first push makes the share with a version of
+/// its own; the files it picks go out in a second.
+pub async fn share(
+    caller: Caller,
+    State(state): State<Arc<CoreState>>,
+    Req { params, body, .. }: Req<ShareServer>,
+) -> Result<Json<SharedServer>, ApiError> {
+    let id = params.id;
+    state.access.require(&caller, &id, Permission::Edit).await?;
+    let instance = engine::instance::get(&state.engine, &id)
+        .await
+        .map_err(api_error)?
+        .ok_or_else(|| ServerError::NotFound(id.clone()))?;
+    let shared = instance.shared_instance.is_some();
+    if state.servers.phase(&id) == Some(Phase::Installing) {
+        if shared {
+            return Err(ServerError::Installing.into());
+        }
+        // The share is made now, so it can be passed on, and its first version once the install
+        // let the server go, so it carries what was installed.
+        let attachment = engine::instance::ensure_unpublished_shared_instance(
+            &state.engine,
+            &id,
+        )
+        .await
+        .map_err(api_error)?;
+        activity::log(&state.db, &caller, Some(&id), Action::ContentChanged)
+            .await;
+        tokio::spawn(publish_after_install(Arc::clone(&state), id));
+        return Ok(Json(SharedServer {
+            shared_instance_id: attachment.id,
+            version: None,
+            restarted: false,
+        }));
+    }
+    if instance.applied_content_set.game_version.is_empty() {
+        return Err(ApiError::new(
+            ErrorCode::Conflict,
+            "Install Minecraft on this server before sharing it.",
+        ));
+    }
+    let mut attachment =
+        engine::instance::ensure_shared_instance(&state.engine, &id)
+            .await
+            .map_err(api_error)?;
+    if shared || !body.file_paths.is_empty() || !body.removed_paths.is_empty() {
+        let core_id = crate::db::core_id(&state.db).await.map_err(internal)?;
+        attachment = engine::instance::publish_shared_instance(
+            &state.engine,
+            &id,
+            body.file_paths,
+            body.removed_paths,
+            Some(core_id),
+            &|_, _| {},
+        )
+        .await
+        .map_err(api_error)?;
+    }
+    activity::log(&state.db, &caller, Some(&id), Action::ContentChanged).await;
+    let restarted = body.restart && state.servers.phase(&id).is_some();
+    if restarted {
+        let (state, id) = (Arc::clone(&state), id.clone());
+        tokio::spawn(async move {
+            if let Err(error) = state.servers.restart(&id).await {
+                tracing::warn!(server = %id, %error, "restart after a push failed");
+            }
+        });
+    }
+    Ok(Json(SharedServer {
+        shared_instance_id: attachment.id,
+        version: attachment.latest_version,
+        restarted,
+    }))
+}
+
+/// Publish the first version of a share made while the server installed, once it is let go.
+async fn publish_after_install(state: Arc<CoreState>, id: String) {
+    while state.servers.phase(&id) == Some(Phase::Installing) {
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+    let published = async {
+        let core_id = crate::db::core_id(&state.db).await.map_err(internal)?;
+        engine::instance::publish_shared_instance(
+            &state.engine,
+            &id,
+            Vec::new(),
+            Vec::new(),
+            Some(core_id),
+            &|_, _| {},
+        )
+        .await
+        .map_err(api_error)
+    }
+    .await;
+    if let Err(error) = published {
+        tracing::warn!(server = %id, error = %error.description, "could not publish the share's first version");
+    }
+}
+
+/// Its activity history stays.
 pub async fn delete(
     Dangerous(caller): Dangerous,
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
-) -> Result<StatusCode, ApiError> {
+    State(state): State<Arc<CoreState>>,
+    Req { params, .. }: Req<DeleteServer>,
+) -> Result<Empty, ApiError> {
+    let id = params.id;
     server_rows::get(&state.db, &id)
-        .await?
+        .await
+        .map_err(internal)?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
     if state.servers.hold_for_deletion(&id).is_err() {
         return Err(ApiError::new(
@@ -801,41 +544,68 @@ pub async fn delete(
     for user in &members {
         state.access.changed(user);
     }
-    state.servers.delete_folders(&id)?;
-    Ok(StatusCode::NO_CONTENT)
+    if let Err(error) = state.servers.delete_folders(&id).await {
+        tracing::warn!(server = %id, %error, "could not remove a deleted server's files");
+        return Err(ApiError::new(
+            ErrorCode::InternalError,
+            "The server was deleted, but some of its files could not be removed yet. Core removes them when it next starts.",
+        ));
+    }
+    Ok(Empty)
 }
 
-/// Delete a held server's row, and with it every role on it and its own share and that share's
-/// history, owing the backend each removal and dropping its players. Returns who had a role.
+/// Delete a held server's row, and with it every role on it and its own share's history, owing
+/// the backend each removal and the share's deletion and dropping its players. Returns who had a
+/// role.
 async fn remove_server(
-    state: &AppState,
+    state: &CoreState,
     caller: &Caller,
     id: &str,
 ) -> Result<Vec<String>, ApiError> {
-    let mut tx = state.db.begin().await?;
-    let share_id = drop_own_share::owe_share_deletion(&mut tx, id).await?;
+    let own_share = engine::instance::get(&state.engine, id)
+        .await
+        .map_err(api_error)?
+        .and_then(|instance| instance.shared_instance)
+        .filter(|share| share.role == SharedInstanceRole::Owner)
+        .map(|share| share.id);
+    let mut tx = state.db.begin().await.map_err(internal)?;
+    if let Some(share_id) = &own_share {
+        crate::access::sync::owe(
+            &mut tx,
+            &crate::access::owed::OwedCall::DeleteShare {
+                share_id: share_id.clone(),
+            },
+        )
+        .await
+        .map_err(internal)?;
+    }
     let members: Vec<String> =
         sqlx::query_scalar("SELECT user_id FROM access WHERE server_id = ?")
             .bind(id)
             .fetch_all(&mut *tx)
-            .await?;
+            .await
+            .map_err(internal)?;
     sqlx::query("DELETE FROM servers WHERE id = ?")
         .bind(id)
         .execute(&mut *tx)
-        .await?;
+        .await
+        .map_err(internal)?;
     // Its players, if it had any, lose what it shared with them.
     crate::access::sync::owe(
         &mut tx,
         &crate::access::owed::OwedCall::ForgetPlayers(
-            crate::access::owed::ForgetPlayers {
+            contracts::backend::cores::ForgottenServer {
                 server_id: id.into(),
                 share_id: None,
             },
         ),
     )
-    .await?;
+    .await
+    .map_err(internal)?;
     for user in &members {
-        super::access::owe_removal(&mut tx, user, id).await?;
+        super::access::owe_removal(&mut tx, user, id)
+            .await
+            .map_err(internal)?;
     }
     activity::record(
         &mut tx,
@@ -843,173 +613,78 @@ async fn remove_server(
         Some(id),
         &Action::ServerDeleted,
     )
-    .await?;
-    tx.commit().await?;
-    if let Some(share_id) = share_id {
-        drop_own_share::release_history(&state.content, &share_id).await;
+    .await
+    .map_err(internal)?;
+    tx.commit().await.map_err(internal)?;
+    if let Some(share_id) = own_share
+        && let Err(error) =
+            engine::instance::forget_share_history(&share_id, &state.engine)
+                .await
+    {
+        tracing::warn!(server = %id, %error, "could not forget the share's history");
     }
     Ok(members)
 }
 
-/// `GET /modrinth/v0/servers/{id}/ws`: where the console socket is. The socket checks the
-/// session itself, so the token here is empty. Editors and the owner only.
-pub async fn ws_auth(
+pub async fn setup(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-    Path(id): Path<String>,
-) -> Result<Json<WsAuth>, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
-    let host = host(&headers);
-    Ok(Json(WsAuth {
-        url: format!("{host}/servers/{id}/ws"),
-        token: String::new(),
-    }))
-}
-
-/// The hosting API's full view of a server reached at `host`, with its one world, whose id is
-/// the server's.
-async fn server_full(
-    state: &AppState,
-    row: server_rows::ServerRow,
-    host: &str,
-) -> Result<ServerFull, ApiError> {
-    let created_at: i64 =
-        sqlx::query_scalar("SELECT created_at FROM servers WHERE id = ?")
-            .bind(&row.id)
-            .fetch_one(&state.db)
-            .await?;
-    let created_at =
-        DateTime::<Utc>::from_timestamp(created_at, 0).unwrap_or_default();
-    let id = Uuid::parse_str(&row.id).unwrap_or_default();
-    let paths = state.servers.paths();
-    let invocation = launch::args(paths, &row)
-        .ok()
-        .map(|args| launch::invocation(&args));
-    // A server that follows an instance reads that instance's share; one that follows none has
-    // its own once it is shared.
-    let linked = content_rows::get_pack(&state.db, &row.id)
-        .await?
-        .and_then(|pack| pack.share.clone());
-    let (shared_instance_id, needs_update) = match linked {
-        Some(linked) => (Some(linked.shared_instance_id), false),
-        None => match server_rows::share_id(&state.db, &row.id).await? {
-            Some(share_id) => {
-                (Some(share_id), needs_update(&state.content, &row.id).await)
-            }
-            None => (None, false),
-        },
-    };
-    let content = match (&row.loader, &row.game_version) {
-        (Some(loader), Some(game_version)) => Some(WorldContentInfo {
-            shared_instance_id,
-            shared_instance_needs_update: needs_update,
-            modloader: loader.clone(),
-            modloader_version: row.loader_version.clone().unwrap_or_default(),
-            game_version: game_version.clone(),
-            java_version: launch::java_major(paths, &state.content.http, &row)
-                .await
-                .ok(),
-            original_invocation: invocation.clone(),
-            invocation,
-        }),
-        _ => None,
-    };
-    Ok(ServerFull {
-        id,
-        name: row.name.clone(),
-        subdomain: String::new(),
-        specs: ServerResources {
-            cpu: std::thread::available_parallelism()
-                .map_or(1, |cpus| cpus.get() as u32),
-            memory_mb: u32::try_from(row.memory_mb).unwrap_or_default(),
-            storage_mb: 0,
-            swap_mb: 0,
-        },
-        sftp_username: String::new(),
-        sftp_password: String::new(),
-        tags: Vec::new(),
-        location: ServerLocation::Assigned {
-            location_metadata: LocationMetadata {
-                region: String::new(),
-                region_should_be_user_displayed: false,
-                hostname: host.to_owned(),
-                url_host: format!("{host}/servers/{}", row.id),
-                is_decommissioned_node: false,
-            },
-        },
-        worlds: vec![WorldFull {
-            id,
-            name: row.name,
-            update_channel: row.update_channel,
-            created_at,
-            is_active: true,
-            download_method: WorldDownloadMethod::DirectNodeDownload,
-            backups: [],
-            content,
-            readiness: WorldReadiness {
-                data_synchronized_fetched: true,
-            },
-        }],
-    })
-}
-
-/// `GET /v1/servers`: every server the caller has a role on.
-pub async fn list_v1(
-    caller: Caller,
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-) -> Result<Json<Vec<ServerFull>>, ApiError> {
-    let mut servers = Vec::new();
-    for row in server_rows::list(&state.db).await? {
-        if caller.level(&state.db, &row.id).await?.is_some() {
-            servers.push(server_full(&state, row, host(&headers)).await?);
-        }
-    }
-    Ok(Json(servers))
-}
-
-/// `GET /v1/servers/{id}`.
-pub async fn get_v1(
-    caller: Caller,
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-    Path(id): Path<String>,
-) -> Result<Json<ServerFull>, ApiError> {
-    caller.require(&state.db, &id, Level::Viewer).await?;
+    State(state): State<Arc<CoreState>>,
+    Req { params, .. }: Req<GetSetup>,
+) -> Result<Json<ServerSetup>, ApiError> {
+    let id = params.id;
+    state.access.require(&caller, &id, Permission::View).await?;
     let row = server_rows::get(&state.db, &id)
-        .await?
-        .ok_or(ServerError::NotFound(id))?;
-    Ok(Json(server_full(&state, row, host(&headers)).await?))
-}
-
-/// Body of PATCH `/v1/servers/{id}/worlds/{wid}`. A world's `name` and `icon_data` are Modrinth
-/// hosting's: a Core's world is its server, named and iconed as the server. Mirrors
-/// Archon.Servers.v1.PatchWorld.
-#[derive(Debug, Clone, Deserialize)]
-pub struct PatchWorld {
-    #[serde(default)]
-    pub update_channel: Option<VersionType>,
-}
-
-/// `PATCH /v1/servers/{id}/worlds/{wid}`.
-pub async fn patch_world(
-    caller: Caller,
-    State(state): State<Arc<AppState>>,
-    Path((id, wid)): Path<(String, String)>,
-    Json(request): Json<PatchWorld>,
-) -> Result<StatusCode, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
-    super::content::world(&id, &wid)?;
-    server_rows::get(&state.db, &id)
-        .await?
+        .await
+        .map_err(internal)?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
-    if let Some(channel) = request.update_channel {
-        server_rows::set_update_channel(&state.db, &id, channel).await?;
-        activity::log(&state.db, &caller, Some(&id), Action::SettingsChanged)
-            .await;
-    }
-    Ok(StatusCode::NO_CONTENT)
+    let (java_version, invocation) =
+        match platform::platform(&state.engine, &id)
+            .await
+            .map_err(api_error)?
+        {
+            Some(platform) => (
+                launch::java_major(&state.engine, &row, &platform.game_version)
+                    .await
+                    .ok(),
+                engine::server::server_command(&state.engine, &id)
+                    .await
+                    .ok()
+                    .map(|command| {
+                        launch::invocation(&launch::args(
+                            state.servers.paths(),
+                            &row,
+                            None,
+                            command.args,
+                        ))
+                    }),
+            ),
+            None => (None, None),
+        };
+    let shared_instance_id = engine::instance::get(&state.engine, &id)
+        .await
+        .map_err(api_error)?
+        .and_then(|instance| instance.shared_instance)
+        .map(|share| share.id);
+    // Best effort: what a push would change, as the share's latest version reads.
+    let shared_instance_needs_update = match &shared_instance_id {
+        Some(_) => engine::instance::get_shared_instance_publish_preview(
+            &state.engine,
+            &id,
+        )
+        .await
+        .ok()
+        .flatten()
+        .is_some_and(|preview| !preview.diffs.is_empty()),
+        None => false,
+    };
+    Ok(Json(ServerSetup {
+        java_version,
+        invocation,
+        shared_instance_id,
+        shared_instance_needs_update,
+        cpus: std::thread::available_parallelism()
+            .map_or(1, |cpus| cpus.get() as u32),
+    }))
 }
 
 #[cfg(test)]

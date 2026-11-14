@@ -2,29 +2,21 @@
 
 use std::time::Duration;
 
-use axum::http::Method;
 use clap::{ArgGroup, Subcommand};
 use color_eyre::eyre::{Result, bail};
 use futures::StreamExt;
 use serde::Deserialize;
 use tokio_tungstenite::tungstenite::Message;
 
-use super::{Client, Output, Switch, on_off};
-use crate::{
-    api::{
-        console::SendCommand,
-        eula::Eula,
-        insight::{Machine, Reach, ServerInsight},
-        performance::{JvmFlags, Memory, Performance},
-        servers::{
-            CreateServerRequest, CreateServerResponse, PowerAction,
-            PowerRequest, ReinstallRequest, Server, ServerGetResponse,
-            ServerPowerState,
-        },
-        startup::JavaPath,
-    },
-    servers::restarts::{Schedule, TimeOfDay, Weekday},
+use contracts::core::{
+    AcceptEula, ChangePower, CoreServer as Server, CreateServer, DeleteServer,
+    GetInsight, GetMachine, GetPerformance, GetServer, InstallLoader, JavaPath,
+    JvmFlags, ListServers, LoaderInstall, Memory, NewServer, PowerAction,
+    PowerChange, Reach, Schedule, SendCommand, ServerId, ServerInsight,
+    ServerPower, SetFlags, SetJava, SetMemory, SetRestarts, TimeOfDay, Weekday,
 };
+
+use super::{Client, Output, Switch, call::call, on_off};
 
 #[derive(Debug, Subcommand)]
 pub enum ServersCommand {
@@ -132,26 +124,21 @@ pub async fn run(client: &Client, command: ServersCommand) -> Result<Output> {
             version,
             accept_eula,
         } => {
-            let created: CreateServerResponse = client
-                .post(
-                    "/local/servers",
-                    &CreateServerRequest {
-                        name,
-                        instance: None,
-                    },
-                )
-                .await?;
-            let id = created.id.to_string();
-            let installed = client
-                .post::<()>(
-                    &format!("/modrinth/v0/servers/{id}/reinstall?hard=false"),
-                    &ReinstallRequest::Loader {
-                        loader: "vanilla".into(),
-                        loader_version: None,
-                        game_version: Some(version.clone()),
-                    },
-                )
-                .await;
+            let created =
+                call::<CreateServer>(client, &(), &(), NewServer { name })
+                    .await?;
+            let id = created.id.clone();
+            let installed = call::<InstallLoader>(
+                client,
+                &created,
+                &(),
+                LoaderInstall {
+                    loader: "vanilla".into(),
+                    loader_version: None,
+                    game_version: version.clone(),
+                },
+            )
+            .await;
             // The server exists from here on, so a failed install names it and how to remove it.
             // `--json` keeps the shape of every other failure, with the server's id added.
             if let Err(error) = installed {
@@ -165,7 +152,7 @@ pub async fn run(client: &Client, command: ServersCommand) -> Result<Output> {
                 ));
             }
             if accept_eula {
-                client.post::<Eula>("/eula", &()).await?;
+                call::<AcceptEula>(client, &(), &(), ()).await?;
             }
             Ok(Output::new(
                 format!(
@@ -176,15 +163,9 @@ pub async fn run(client: &Client, command: ServersCommand) -> Result<Output> {
         }
         ServersCommand::Delete { server } => {
             let server = find(client, &server).await?;
-            client
-                .call::<()>(
-                    Method::DELETE,
-                    &format!("/local/servers/{}", server.server_id),
-                    None::<&()>,
-                )
-                .await?;
+            call::<DeleteServer>(client, &id(&server), &(), ()).await?;
             Ok(Output::new(
-                format!("Deleted {} ({})", server.name, server.server_id),
+                format!("Deleted {} ({})", server.name, server.id),
                 &server,
             ))
         }
@@ -215,7 +196,7 @@ pub async fn run(client: &Client, command: ServersCommand) -> Result<Output> {
             send(client, &server, &command).await?;
             Ok(Output::new(
                 format!("Sent to {}: {command}", server.name),
-                &SendCommand { command },
+                &contracts::core::ConsoleCommand { command },
             ))
         }
         ServersCommand::Console(ConsoleCommand::Attach { .. }) => {
@@ -223,23 +204,9 @@ pub async fn run(client: &Client, command: ServersCommand) -> Result<Output> {
         }
         ServersCommand::Info { server } => {
             let server = find(client, &server).await?;
-            let insight: ServerInsight = client
-                .get(&format!("/servers/{}/insight", server.server_id))
-                .await?;
-            // Best effort: a failed install's reason, as the App's content page shows it.
-            let content: Option<Content> = client
-                .get(&format!(
-                    "/v1/servers/{id}/worlds/{id}/addons?addons=false",
-                    id = server.server_id
-                ))
-                .await
-                .ok();
-            let text = describe(&server, &insight);
-            let text = match content.as_ref().and_then(Content::failure) {
-                Some(failure) => format!("{text}\n  {}", super::safe(&failure)),
-                None => text,
-            };
-            Ok(Output::new(text, &insight))
+            let insight =
+                call::<GetInsight>(client, &id(&server), &(), ()).await?;
+            Ok(Output::new(describe(&server, &insight), &insight))
         }
         ServersCommand::Memory {
             server,
@@ -248,31 +215,24 @@ pub async fn run(client: &Client, command: ServersCommand) -> Result<Output> {
             default_flags,
         } => {
             let server = find(client, &server).await?;
-            let mut performance: Performance =
-                client.get(&performance_path(&server)).await?;
+            let mut performance =
+                call::<GetPerformance>(client, &id(&server), &(), ()).await?;
             if let Some(memory_mb) = mb {
-                performance = client
-                    .call(
-                        Method::PUT,
-                        &format!("/servers/{}/memory", server.server_id),
-                        Some(&Memory { memory_mb }),
-                    )
-                    .await?;
+                let memory = Memory { memory_mb };
+                performance =
+                    call::<SetMemory>(client, &id(&server), &(), memory)
+                        .await?;
             }
             let changed = mb.is_some() || flags.is_some() || default_flags;
             if flags.is_some() || default_flags {
                 let flags = flags.map(|flags| {
                     flags.split_whitespace().map(str::to_owned).collect()
                 });
-                performance = client
-                    .call(
-                        Method::PUT,
-                        &format!("/servers/{}/flags", server.server_id),
-                        Some(&JvmFlags { flags }),
-                    )
-                    .await?;
+                let flags = JvmFlags { flags };
+                performance =
+                    call::<SetFlags>(client, &id(&server), &(), flags).await?;
             }
-            let later = changed && server.power_state.is_some_and(is_up);
+            let later = changed && is_up(server.power);
             let mut lines = vec![
                 format!(
                     "{}: up to {} MB{}",
@@ -290,7 +250,7 @@ pub async fn run(client: &Client, command: ServersCommand) -> Result<Output> {
                     performance.flags.join(" ")
                 ),
             ];
-            let machine: Machine = client.get("/machine").await?;
+            let machine = call::<GetMachine>(client, &(), &(), ()).await?;
             lines.extend(machine.warning);
             Ok(Output::new(lines.join("\n"), &performance))
         }
@@ -301,13 +261,7 @@ pub async fn run(client: &Client, command: ServersCommand) -> Result<Output> {
         } => {
             let server = find(client, &server).await?;
             let body = JavaPath { path: path.clone() };
-            client
-                .call::<()>(
-                    Method::PUT,
-                    &format!("/servers/{}/java", server.server_id),
-                    Some(&body),
-                )
-                .await?;
+            call::<SetJava>(client, &id(&server), &(), body.clone()).await?;
             let text = match path {
                 Some(path) => format!("{} runs {path}", server.name),
                 None => format!("{} runs the Java Core manages", server.name),
@@ -324,8 +278,8 @@ pub async fn run(client: &Client, command: ServersCommand) -> Result<Output> {
             no_smart,
         } => {
             let server = find(client, &server).await?;
-            let mut performance: Performance =
-                client.get(&performance_path(&server)).await?;
+            let mut performance =
+                call::<GetPerformance>(client, &id(&server), &(), ()).await?;
             let restarts = &mut performance.restarts;
             let before = restarts.clone();
             if let Some(crash) = crash {
@@ -347,13 +301,10 @@ pub async fn run(client: &Client, command: ServersCommand) -> Result<Output> {
                 restarts.smart_after_hours = None;
             }
             if *restarts != before {
-                performance = client
-                    .call(
-                        Method::PUT,
-                        &format!("/servers/{}/restarts", server.server_id),
-                        Some(&*restarts),
-                    )
-                    .await?;
+                let restarts = restarts.clone();
+                performance =
+                    call::<SetRestarts>(client, &id(&server), &(), restarts)
+                        .await?;
             }
             let restarts = &performance.restarts;
             let schedule = match restarts.schedule {
@@ -384,53 +335,15 @@ pub async fn run(client: &Client, command: ServersCommand) -> Result<Output> {
     }
 }
 
-/// What `copal servers info` reads of a server's content: `api::content::Addons`.
-#[derive(Debug, Default, Deserialize)]
-struct Content {
-    #[serde(default)]
-    installing: Option<String>,
-    #[serde(default)]
-    error: Option<ContentError>,
-    #[serde(default)]
-    modpack: Option<Modpack>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ContentError {
-    message: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct Modpack {
-    #[serde(default)]
-    error: Option<String>,
-}
-
-impl Content {
-    /// Why its last install failed, while nothing installs: the background install's error,
-    /// or the one recorded on the pack, which outlives a restart of Core.
-    fn failure(&self) -> Option<String> {
-        if self.installing.is_some() {
-            return None;
-        }
-        let reason = self
-            .error
-            .as_ref()
-            .map(|error| error.message.clone())
-            .or_else(|| self.modpack.as_ref()?.error.clone())?;
-        Some(format!("last install failed: {reason}"))
-    }
-}
-
 /// `copal servers info` as text.
 fn describe(server: &Server, insight: &ServerInsight) -> String {
     let mut lines = vec![format!(
         "{}  {}  port {}",
         server.name,
-        server.power_state.map_or("unknown", state_name),
+        state_name(server.power),
         server.net.game_port
     )];
-    if server.power_state.is_some_and(is_up) {
+    if is_up(server.power) {
         let players = if insight.players.is_empty() {
             "nobody".to_owned()
         } else {
@@ -445,7 +358,7 @@ fn describe(server: &Server, insight: &ServerInsight) -> String {
         lines.push(if insight.frozen {
             format!(
                 "  FROZEN: it stopped answering. Restart it with: copal servers restart {}",
-                server.server_id
+                server.id
             )
         } else if insight.answered_at.is_some() {
             "  answering".into()
@@ -492,15 +405,15 @@ fn describe(server: &Server, insight: &ServerInsight) -> String {
     lines.join("\n")
 }
 
-fn performance_path(server: &Server) -> String {
-    format!("/servers/{}/performance", server.server_id)
+fn id(server: &Server) -> ServerId {
+    ServerId {
+        id: server.id.clone(),
+    }
 }
 
 /// Every server.
 pub async fn list(client: &Client) -> Result<Vec<Server>> {
-    let response: ServerGetResponse =
-        client.get("/modrinth/v0/servers").await?;
-    Ok(response.servers)
+    call::<ListServers>(client, &(), &(), ()).await
 }
 
 /// One line per server.
@@ -513,9 +426,9 @@ pub fn table(servers: &[Server]) -> String {
         .map(|server| {
             format!(
                 "{}  {:<9} {:<10} port {:<5}  {}",
-                server.server_id,
-                server.power_state.map_or("unknown", state_name),
-                server.mc_version.as_deref().unwrap_or("-"),
+                server.id,
+                state_name(server.power),
+                server.game_version.as_deref().unwrap_or("-"),
                 server.net.game_port,
                 server.name,
             )
@@ -534,8 +447,7 @@ fn pick(servers: Vec<Server>, query: &str) -> Result<Server> {
     let mut matches: Vec<Server> = servers
         .into_iter()
         .filter(|server| {
-            let id = server.server_id.to_string();
-            id.starts_with(&query_lower)
+            server.id.starts_with(&query_lower)
                 || server.name.to_lowercase() == query_lower
         })
         .collect();
@@ -548,23 +460,21 @@ fn pick(servers: Vec<Server>, query: &str) -> Result<Server> {
     }
 }
 
-fn state_name(state: ServerPowerState) -> &'static str {
+fn state_name(state: ServerPower) -> &'static str {
     match state {
-        ServerPowerState::Offline => "stopped",
-        ServerPowerState::Starting => "starting",
-        ServerPowerState::Running => "running",
-        ServerPowerState::Stopping => "stopping",
-        ServerPowerState::Crashed => "crashed",
-        ServerPowerState::Killed => "killed",
+        ServerPower::Offline => "stopped",
+        ServerPower::Starting => "starting",
+        ServerPower::Running => "running",
+        ServerPower::Stopping => "stopping",
+        ServerPower::Crashed => "crashed",
+        ServerPower::Killed => "killed",
     }
 }
 
-fn is_up(state: ServerPowerState) -> bool {
+fn is_up(state: ServerPower) -> bool {
     matches!(
         state,
-        ServerPowerState::Starting
-            | ServerPowerState::Running
-            | ServerPowerState::Stopping
+        ServerPower::Starting | ServerPower::Running | ServerPower::Stopping
     )
 }
 
@@ -573,57 +483,50 @@ async fn power(
     server: &Server,
     action: PowerAction,
 ) -> Result<()> {
-    client
-        .post(
-            &format!("/modrinth/v0/servers/{}/power", server.server_id),
-            &PowerRequest { action },
-        )
-        .await
+    call::<ChangePower>(client, &id(server), &(), PowerChange { action }).await
 }
 
 /// The server as it is now, with `what` said about it.
 async fn done(client: &Client, server: &Server, what: &str) -> Result<Output> {
-    let server: Server = client
-        .get(&format!("/modrinth/v0/servers/{}", server.server_id))
-        .await?;
+    let server = call::<GetServer>(client, &id(server), &(), ()).await?;
     Ok(Output::new(format!("{} {what}", server.name), &server))
 }
 
 /// Wait, with no time limit, until the server's Java has exited.
 async fn wait_offline(client: &Client, server: &Server) -> Result<Output> {
     loop {
-        let now: Server = client
-            .get(&format!("/modrinth/v0/servers/{}", server.server_id))
-            .await?;
-        match now.power_state {
-            Some(state) if !is_up(state) => {
-                return Ok(Output::new(
-                    format!("{} is {}", now.name, state_name(state)),
-                    &now,
-                ));
-            }
-            _ => tokio::time::sleep(Duration::from_millis(500)).await,
+        let now = call::<GetServer>(client, &id(server), &(), ()).await?;
+        if !is_up(now.power) {
+            return Ok(Output::new(
+                format!("{} is {}", now.name, state_name(now.power)),
+                &now,
+            ));
         }
+        tokio::time::sleep(Duration::from_millis(500)).await;
     }
 }
 
 /// Send one console command and wait for Core to say it passed it on.
 async fn send(client: &Client, server: &Server, command: &str) -> Result<()> {
-    client
-        .post(
-            &format!("/servers/{}/console", server.server_id),
-            &SendCommand {
-                command: command.to_owned(),
-            },
-        )
-        .await
+    let command = contracts::core::ConsoleCommand {
+        command: command.to_owned(),
+    };
+    call::<SendCommand>(client, &id(server), &(), command).await
 }
 
-/// A console event, with only what the CLI shows.
+/// An `/events` message, with only what the CLI shows.
 #[derive(Debug, Deserialize)]
 struct Event {
-    event: String,
-    message: Option<String>,
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(default)]
+    payload: Payload,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct Payload {
+    line: Option<String>,
+    error: Option<contracts::ApiError>,
 }
 
 /// `copal servers console attach`: print the console as it comes, and send each line typed.
@@ -632,7 +535,7 @@ struct Event {
 /// says why on stderr.
 pub async fn attach(client: &Client, server: &str, json: bool) -> Result<()> {
     let server = find(client, server).await?;
-    let mut console = client.console(&server.server_id.to_string()).await?;
+    let mut console = client.console(&server.id).await?;
     eprintln!(
         "Attached to {}. Lines you type go to the server; Ctrl+C leaves it running.",
         server.name
@@ -653,13 +556,16 @@ pub async fn attach(client: &Client, server: &str, json: bool) -> Result<()> {
         tokio::select! {
             message = console.next() => match message {
                 Some(Ok(Message::Text(text))) => {
+                    let event = serde_json::from_str::<Event>(&text);
                     if json {
                         println!("{text}");
-                    } else if let Ok(Event { event, message: Some(message) }) =
-                        serde_json::from_str(&text)
-                        && event == "log"
+                    } else if let Ok(Event { kind, payload: Payload { line: Some(line), .. } }) = &event
+                        && kind == "console"
                     {
-                        println!("{}", super::safe(&message));
+                        println!("{}", super::safe(line));
+                    }
+                    if let Ok(Event { payload: Payload { error: Some(error), .. }, .. }) = event {
+                        return Err(super::client::Refused(error).into());
                     }
                 }
                 Some(Ok(Message::Close(_))) | None => {
@@ -686,18 +592,15 @@ mod tests {
     use super::*;
 
     fn server(id: &str, name: &str) -> Server {
-        let mut server: Server = serde_json::from_value(serde_json::json!({
-            "server_id": id, "name": name, "owner_id": "", "net": {"ip": null, "port": 25565, "domain": "", "outside": null, "game_port": 25565},
-            "game": "Minecraft", "backup_quota": 0, "used_backup_quota": 0, "status": "available",
-            "suspension_reason": null, "loader": null, "loader_version": null, "mc_version": null,
-            "upstream": null, "sftp_username": "", "sftp_password": "", "sftp_host": "",
-            "datacenter": "", "notices": [], "node": null, "flows": {"intro": false}, "is_medal": false,
-            "current_user_permissions": 0, "locked_since": null, "linked_instance": null,
-            "reachability": null
+        serde_json::from_value(serde_json::json!({
+            "id": id, "name": name, "owner_id": null, "role": null, "installing": false,
+            "loader": null, "loader_version": null, "game_version": null,
+            "net": {"ip": null, "port": 25565, "outside": null, "game_port": 25565},
+            "power": "offline", "linked_instance": null, "reachability": null, "players": null,
+            "memory_mb": 2048, "created_at": 0, "update_channel": "release",
+            "eula_accepted": false
         }))
-        .unwrap();
-        server.name = name.into();
-        server
+        .unwrap()
     }
 
     #[test]

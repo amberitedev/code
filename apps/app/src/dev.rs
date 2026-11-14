@@ -1,8 +1,15 @@
-use serde::{Deserialize, Serialize};
+#[cfg(debug_assertions)]
+use contracts::{
+    Json,
+    backend::dev::{ScenarioLogin, Session},
+    client::{Remote, call},
+};
+use engine::AccountEndpoints;
+use serde::Deserialize;
 use std::env;
 use std::sync::OnceLock;
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DevAppConfig {
     pub credential_namespace: String,
@@ -14,9 +21,12 @@ pub struct DevAppConfig {
     pub username: Option<String>,
     /// Where the frontend is served. One dev build then works with any checkout's ports.
     pub dev_url: Option<tauri::Url>,
-    /// Keeps the native window off the desktop; the App is used through the browser bridge.
+    /// Keeps the native window off the desktop; the App is used from a browser tab.
     #[serde(default)]
     pub hide_window: bool,
+    /// The local server's address, which the runner prints in tab URLs.
+    pub local_port: Option<u16>,
+    pub local_secret: Option<String>,
 }
 
 static CONFIG: OnceLock<Option<DevAppConfig>> = OnceLock::new();
@@ -26,18 +36,21 @@ pub fn prepare() {
     let config = parse_config();
     #[cfg(not(debug_assertions))]
     let config = None;
-    let backend_url = config
-        .as_ref()
-        .and_then(|config| config.backend_url.clone())
-        .or_else(|| env::var("ACCOUNT_API_URL").ok());
-    if let Some(backend_url) = backend_url {
-        theseus::self_hosted::accounts::configure(
-            &backend_url,
-            env::var("ACCOUNT_WEB_URL").ok().as_deref(),
-        )
-        .expect("valid account service configuration");
-    }
     let _ = CONFIG.set(config);
+}
+
+/// The account service the engine sends Modrinth account calls to, when one is configured.
+pub fn accounts() -> engine::Result<Option<AccountEndpoints>> {
+    config()
+        .and_then(|config| config.backend_url.clone())
+        .or_else(|| env::var("ACCOUNT_API_URL").ok())
+        .map(|backend_url| {
+            AccountEndpoints::new(
+                &backend_url,
+                env::var("ACCOUNT_WEB_URL").ok().as_deref(),
+            )
+        })
+        .transpose()
 }
 
 pub fn config() -> Option<&'static DevAppConfig> {
@@ -48,7 +61,10 @@ pub fn config() -> Option<&'static DevAppConfig> {
 /// without going through the website. Does nothing when an account is already active. The backend
 /// opens the session only for the runner's secret, which arrives in the environment.
 #[cfg(debug_assertions)]
-pub async fn sign_in() {
+pub async fn sign_in(
+    state: &engine::Engine,
+    presence: &crate::presence::Presence,
+) {
     let Some(config) = config().filter(|config| config.auth_mode == "dev")
     else {
         return;
@@ -60,42 +76,51 @@ pub async fn sign_in() {
     ) else {
         return;
     };
-    if let Err(error) = open_session(username, backend_url, &secret).await {
+    if let Err(error) =
+        open_session(state, presence, username, backend_url, &secret).await
+    {
         tracing::warn!("Could not sign in as {username}: {error}");
     }
 }
 
 #[cfg(debug_assertions)]
 async fn open_session(
+    state: &engine::Engine,
+    presence: &crate::presence::Presence,
     username: &str,
     backend_url: &str,
     secret: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    if theseus::mr_auth::get_credentials().await?.is_some() {
+    if crate::accounts::mr_auth::get_credentials(state, presence)
+        .await?
+        .is_some()
+    {
         return Ok(());
     }
-    #[derive(Deserialize)]
-    struct Session {
-        session: String,
-    }
-    // Startup waits on this, so a backend that is reloading must not hold the App on its splash.
-    let response = tauri_plugin_http::reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()?
-        .post(format!(
-            "{}/_dev/session",
-            backend_url.trim_end_matches('/')
-        ))
-        .header("Content-Type", "application/json")
-        .header("X-Local-Dev-Secret", secret)
-        .body(serde_json::json!({ "username": username }).to_string())
-        .send()
-        .await?
-        .error_for_status()?
-        .text()
-        .await?;
-    let session: Session = serde_json::from_str(&response)?;
-    theseus::mr_auth::authenticate_finish_flow(&session.session).await?;
+    let http = reqwest::Client::builder()
+        .default_headers(reqwest::header::HeaderMap::from_iter([(
+            reqwest::header::HeaderName::from_static("x-local-dev-secret"),
+            reqwest::header::HeaderValue::from_str(secret)?,
+        )]))
+        .build()?;
+    let backend = Remote {
+        http: &http,
+        base: backend_url,
+        bearer: None,
+        read_ticket: None,
+        // Startup waits on this, so a backend that is reloading must not hold the App on its splash.
+        timeout: Some(std::time::Duration::from_secs(10)),
+    };
+    let login = ScenarioLogin {
+        username: username.to_owned(),
+    };
+    let session = call::<Session>(&backend, &(), &(), Json(login)).await?;
+    crate::accounts::mr_auth::authenticate_finish_flow(
+        state,
+        presence,
+        &session.session,
+    )
+    .await?;
     Ok(())
 }
 

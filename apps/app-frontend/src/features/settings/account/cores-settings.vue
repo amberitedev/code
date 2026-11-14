@@ -1,5 +1,10 @@
 <script setup lang="ts">
-import type { Copal } from '@modrinth/api-client'
+import {
+	core as coreRoutes,
+	ProtocolMismatch,
+	type StorageSettings,
+	type StorageStatus,
+} from '@modrinth/api-client'
 import { InfoIcon, PlusIcon, UnlinkIcon, UpdatedIcon } from '@modrinth/assets'
 import {
 	Admonition,
@@ -64,19 +69,26 @@ const online = computed(() => {
 	return servers.value ? !servers.value.offline_cores?.includes(core.value.id) : undefined
 })
 
+/** The Core an update was installed on. Its storage is asked for again until it answers. */
+const updatedId = ref<string>()
 const storageKey = computed(() => ['core-storage', core.value?.id])
-const { data: storage } = useQuery({
+const { data: storage, error: storageError } = useQuery({
 	queryKey: storageKey,
-	queryFn: () => client.copal.storage_v1.get(core.value!.id),
+	queryFn: () => client.core(core.value!.id).call(coreRoutes.GetStorage),
 	enabled: computed(() => !!core.value && online.value === true),
 	staleTime: 30_000,
 	retry: false,
+	refetchInterval: (query) =>
+		updatedId.value === core.value?.id && query.state.error ? 5_000 : false,
 })
+const mismatch = computed(() =>
+	storageError.value instanceof ProtocolMismatch ? storageError.value : undefined,
+)
 
 // Each change carries the Core it was made on, since another can be picked before it lands.
 const change = useMutation({
-	mutationFn: ({ coreId, settings }: { coreId: string; settings: Copal.StorageSettings }) =>
-		client.copal.storage_v1.change(coreId, settings),
+	mutationFn: ({ coreId, settings }: { coreId: string; settings: StorageSettings }) =>
+		client.core(coreId).call(coreRoutes.ChangeStorage, { body: settings }),
 	onSuccess: (status, { coreId }) => queryClient.setQueryData(['core-storage', coreId], status),
 	onError: (cause, { coreId }) => {
 		console.error('Failed to change Core storage', cause)
@@ -131,12 +143,33 @@ watch(storage, resetSliders, { immediate: true })
 // Saves once the slider rests, on the Core it was moved on.
 const saveCapOn = useDebounceFn((coreId: string, field: 'cap' | 'egress_cap', gib: number) => {
 	const bytes = gib * GiB
-	const current = queryClient.getQueryData<Copal.StorageStatus>(['core-storage', coreId])
+	const current = queryClient.getQueryData<StorageStatus>(['core-storage', coreId])
 	if (bytes !== current?.[field]) change.mutate({ coreId, settings: { [field]: bytes } })
 }, 600)
 function saveCap(field: 'cap' | 'egress_cap', gib: number) {
 	if (core.value) void saveCapOn(core.value.id, field, gib)
 }
+
+const update = useMutation({
+	mutationFn: (coreId: string) => client.core(coreId).call(coreRoutes.InstallUpdate, { body: {} }),
+	onSuccess: ({ version }, coreId) => {
+		updatedId.value = coreId
+		void queryClient.invalidateQueries({ queryKey: ['core-storage', coreId] })
+		addNotification({
+			type: 'success',
+			title: `Updating ${core.value?.name ?? 'the Core'} to ${version}`,
+			text: 'It restarts in a moment.',
+		})
+	},
+	onError: (cause) => {
+		console.error('Failed to update Core', cause)
+		addNotification({
+			type: 'error',
+			title: `Could not update ${core.value?.name ?? 'the Core'}`,
+			text: cause instanceof Error ? cause.message : 'Try again in a moment.',
+		})
+	},
+})
 
 const confirmRemove = ref<InstanceType<typeof ConfirmModal>>()
 const removing = ref(false)
@@ -206,6 +239,18 @@ async function remove() {
 				{{ online ? 'Online' : 'Offline' }}
 			</span>
 		</div>
+
+		<Admonition v-if="mismatch" type="warning">
+			{{ mismatch.message }}
+			<template v-if="mismatch.side === 'core' && mismatch.owner" #actions>
+				<Button
+					:disabled="update.isPending.value || updatedId === core.id"
+					@click="update.mutate(core.id)"
+				>
+					<UpdatedIcon aria-hidden="true" /> Update this Core
+				</Button>
+			</template>
+		</Admonition>
 
 		<template v-if="storage">
 			<section class="flex flex-col gap-3" aria-labelledby="core-pool-title">

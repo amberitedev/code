@@ -17,11 +17,9 @@ use modrinth_content_management::{
     LoaderReference, diff_configuration, diff_content_sets,
 };
 
-use bedrock::state::ProjectType;
-
 use crate::install::{ModpackFile, split_content};
-use crate::rules::CONFIG_FILE_TYPE;
-use crate::versions::{ManifestFile, VersionContent};
+use crate::rules::{CONFIG_FILE_TYPE, content_type};
+use contracts::backend::sharing::{ExternalFile, VersionContent};
 
 pub use model::{SharedInstanceUpdateDiff, SharedInstanceUpdateDiffType};
 
@@ -48,8 +46,8 @@ pub struct CarriedFile<'a> {
     pub sha1: Option<&'a str>,
 }
 
-impl<'a> From<&'a ManifestFile> for CarriedFile<'a> {
-    fn from(file: &'a ManifestFile) -> Self {
+impl<'a> From<&'a ExternalFile> for CarriedFile<'a> {
+    fn from(file: &'a ExternalFile) -> Self {
         Self {
             file_type: &file.file_type,
             file_name: &file.file_name,
@@ -93,7 +91,7 @@ impl ShareContent {
         for file in split.unknown_modpack_files() {
             let key = file.path.split_once('/').and_then(|(parent, name)| {
                 Some(ExternalFileKey {
-                    content_type: ProjectType::from_name(parent)?.into(),
+                    content_type: content_type(parent)?,
                     path: name.to_owned(),
                 })
             });

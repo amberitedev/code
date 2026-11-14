@@ -263,6 +263,7 @@ useAppEvent('process', async (e) => {
 		await refreshValues()
 	}
 })
+useAppEvent('resync', refreshValues)
 
 const messages = defineMessages({
 	notSignedIn: {

@@ -1,0 +1,331 @@
+use crate::ErrorKind;
+use crate::launcher::get_loader_version_from_profile;
+use crate::state::instances::{
+    ContentSet, ContentSetStatus, ContentSourceKind, Instance,
+    InstanceLaunchOverrides, InstanceLink,
+    adapters::sqlite::{content_rows, instance_rows},
+};
+use crate::state::{
+    Engine, IconConfig, InstanceInstallStage, LauncherFeatureVersion,
+    ModLoader, ReleaseChannel,
+};
+use crate::util::fetch;
+use crate::util::io;
+use anyhow::bail;
+use chrono::Utc;
+use serde::{Deserialize, Serialize};
+use sqlx::SqlitePool;
+use tracing::{info, trace};
+use uuid::Uuid;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CreateInstance {
+    pub id: Option<String>,
+    pub name: String,
+    pub path: Option<String>,
+    pub game_version: String,
+    pub loader: ModLoader,
+    pub loader_version: Option<String>,
+    pub icon_path: Option<String>,
+    pub icon_config: Option<IconConfig>,
+    pub link: InstanceLink,
+}
+
+pub(crate) async fn create_instance(
+    input: CreateInstance,
+    state: &Engine,
+) -> crate::Result<Instance> {
+    trace!("Creating new instance. {}", input.name);
+
+    let instance_id = match input.id {
+        Some(id) => {
+            if instance_rows::get_instance_by_id(&id, &state.pool)
+                .await?
+                .is_some()
+            {
+                bail!(ErrorKind::InputError(format!(
+                    "instance id {id} is already in use"
+                )));
+            }
+            id
+        }
+        None => format!("local:{}", Uuid::new_v4()),
+    };
+    let (path, full_path) =
+        resolve_instance_path(&input.name, input.path.as_deref(), state)
+            .await?;
+    io::create_dir_all(&full_path).await?;
+
+    let result = async {
+        info!(
+            "Creating instance at path {}",
+            &io::canonicalize(&full_path)?.display()
+        );
+
+        let loader_version = if input.loader != ModLoader::Vanilla {
+            get_loader_version_from_profile(
+                state,
+                &input.game_version,
+                input.loader,
+                input.loader_version.as_deref(),
+                &state.directories,
+            )
+            .await?
+            .map(|value| value.id)
+        } else {
+            None
+        };
+
+        let icon_path = resolve_icon_path(
+            input.icon_path.as_deref(),
+            matches!(&input.link, InstanceLink::SharedInstance { .. }),
+            state,
+        )
+        .await?;
+        let now = Utc::now();
+        let content_set_id = format!("content-set:{}", Uuid::new_v4());
+        let instance = Instance {
+            id: instance_id.clone(),
+            path: path.clone(),
+            applied_content_set_id: Some(content_set_id.clone()),
+            install_stage: InstanceInstallStage::NotInstalled,
+            launcher_feature_version: LauncherFeatureVersion::MOST_RECENT,
+            update_channel: ReleaseChannel::Release,
+            name: input.name,
+            icon_path,
+            created: now,
+            modified: now,
+            last_played: None,
+            submitted_time_played: 0,
+            recent_time_played: 0,
+        };
+        let content_set = ContentSet {
+            id: content_set_id,
+            instance_id: instance_id.clone(),
+            name: "Default".to_string(),
+            source_kind: content_source_kind(&input.link),
+            status: ContentSetStatus::Available,
+            game_version: input.game_version,
+            protocol_version: None,
+            loader: input.loader,
+            loader_version,
+            created: now,
+            modified: now,
+        };
+        let launch_overrides =
+            InstanceLaunchOverrides::empty(instance_id.clone());
+
+        let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await?;
+        instance_rows::insert_instance(&instance, &mut tx).await?;
+        if let Some(icon_config) = &input.icon_config {
+            instance_rows::update_instance_icon_config(
+                &instance_id,
+                Some(icon_config),
+                &mut tx,
+            )
+            .await?;
+        }
+        content_rows::insert_content_set(&content_set, &mut tx).await?;
+        instance_rows::upsert_instance_link(&instance_id, &input.link, &mut tx)
+            .await?;
+        instance_rows::replace_instance_groups(&instance_id, &[], &mut tx)
+            .await?;
+        instance_rows::upsert_instance_launch_overrides(
+            &launch_overrides,
+            &mut tx,
+        )
+        .await?;
+        tx.commit().await?;
+
+        crate::state::instances::watcher::watch_instance_folder(
+            &instance.id,
+            &instance.path,
+            &state.file_watcher,
+            &state.directories,
+        )
+        .await;
+
+        Ok(instance)
+    }
+    .await;
+
+    if result.is_err() {
+        let _ = io::remove_dir_all(&full_path).await;
+    }
+
+    result
+}
+
+async fn resolve_instance_path(
+    name: &str,
+    path: Option<&str>,
+    state: &Engine,
+) -> crate::Result<(String, std::path::PathBuf)> {
+    if let Some(path) = path {
+        crate::state::content_store::validate_relative(path)?;
+        let full_path = state.directories.instances_dir().join(path);
+        if !path_available(path, &full_path, &state.pool).await? {
+            bail!(ErrorKind::InputError(format!(
+                "instance folder {path} is already in use"
+            )));
+        }
+        return Ok((path.to_owned(), full_path));
+    }
+
+    let base_path = sanitize_instance_name(name);
+    crate::state::content_store::validate_relative(&base_path)?;
+    let mut path = base_path.clone();
+    let mut full_path = state.directories.instances_dir().join(&path);
+
+    if path_available(&path, &full_path, &state.pool).await? {
+        return Ok((path, full_path));
+    }
+
+    let mut which = 1;
+    loop {
+        path = format!("{base_path} ({which})");
+        full_path = state.directories.instances_dir().join(&path);
+
+        if path_available(&path, &full_path, &state.pool).await? {
+            return Ok((path, full_path));
+        }
+
+        which += 1;
+    }
+}
+
+async fn path_available(
+    path: &str,
+    full_path: &std::path::Path,
+    pool: &SqlitePool,
+) -> crate::Result<bool> {
+    if full_path.exists() {
+        return Ok(false);
+    }
+
+    Ok(instance_rows::get_instance_by_path(path, pool)
+        .await?
+        .is_none())
+}
+
+pub(crate) async fn resolve_icon_path(
+    icon_path: Option<&str>,
+    ignore_missing_remote_icon: bool,
+    state: &Engine,
+) -> crate::Result<Option<String>> {
+    let Some(icon) = icon_path else {
+        return Ok(None);
+    };
+
+    let file = if icon.starts_with("https://") || icon.starts_with("http://") {
+        let bytes = match fetch::fetch(
+            icon,
+            None,
+            None,
+            None,
+            &state.fetch_semaphore,
+            &state.sessions,
+        )
+        .await
+        {
+            Ok(bytes) => bytes,
+            Err(error) if ignore_missing_remote_icon => {
+                tracing::warn!("Error while getting instance icon: {error}");
+                return Ok(None);
+            }
+            Err(error) => return Err(error),
+        };
+        crate::api::instance::cache_icon(bytes, state).await?
+    } else {
+        crate::api::instance::cache_icon_from_path(
+            &state.directories.caches_dir().join(icon),
+            state,
+        )
+        .await?
+    };
+
+    Ok(Some(file.to_string_lossy().to_string()))
+}
+
+fn content_source_kind(link: &InstanceLink) -> ContentSourceKind {
+    match link {
+        InstanceLink::Unmanaged => ContentSourceKind::Local,
+        InstanceLink::ModrinthModpack { .. } => {
+            ContentSourceKind::ModrinthModpack
+        }
+        InstanceLink::ServerProject { .. }
+        | InstanceLink::ServerProjectModpack { .. } => {
+            ContentSourceKind::ServerProject
+        }
+        InstanceLink::ModrinthHosting { .. } => {
+            ContentSourceKind::ModrinthHosting
+        }
+        InstanceLink::ImportedModpack { .. } => {
+            ContentSourceKind::ImportedModpack
+        }
+        InstanceLink::SharedInstance { .. } => {
+            ContentSourceKind::SharedInstance
+        }
+    }
+}
+
+fn sanitize_instance_name(input: &str) -> String {
+    input
+        .replace(
+            ['/', '\\', '?', '*', ':', '\'', '\"', '|', '<', '>', '!'],
+            "_",
+        )
+        .trim_end_matches(['.', ' '])
+        .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn input(id: &str, folder: &str) -> CreateInstance {
+        CreateInstance {
+            id: Some(id.to_string()),
+            name: "Server".to_string(),
+            path: Some(folder.to_string()),
+            game_version: "1.21.1".to_string(),
+            loader: ModLoader::Vanilla,
+            loader_version: None,
+            icon_path: None,
+            icon_config: None,
+            link: InstanceLink::Unmanaged,
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_host_chooses_the_id_and_folder() {
+        crate::install_crypto_provider();
+        let tmp = tempfile::tempdir().unwrap();
+        let servers = tmp.path().join("servers");
+        let state = Engine::new(crate::state::EngineConfig {
+            instances_dir: servers.clone(),
+            ..crate::state::tests::config(tmp.path().join("engine"))
+        })
+        .await
+        .unwrap();
+        let id = Uuid::new_v4().to_string();
+
+        let instance = create_instance(input(&id, &id), &state).await.unwrap();
+        assert_eq!(
+            (instance.id.as_str(), instance.path.as_str()),
+            (&*id, &*id)
+        );
+        assert!(servers.join(&id).is_dir());
+
+        let other = Uuid::new_v4().to_string();
+        assert!(create_instance(input(&id, &other), &state).await.is_err());
+        assert!(create_instance(input(&other, &id), &state).await.is_err());
+        assert!(
+            create_instance(input(&other, "../escape"), &state)
+                .await
+                .is_err()
+        );
+        assert!(!servers.join(&other).exists());
+        assert!(!tmp.path().join("escape").exists());
+    }
+}

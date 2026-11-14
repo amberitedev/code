@@ -1,5 +1,5 @@
 //! The data folder. Its layout is the isolation story: Core runs as the `copal` OS account and
-//! every server, installer, and custom Java runs as `copal-servers`, which may touch only what
+//! every server and custom Java runs as `copal-servers`, which may touch only what
 //! [`FOLDERS`] grants it. `copal install` creates the folders with these permissions (see
 //! `daemon::folders`); nothing else may put a file Core trusts somewhere `copal-servers` can write.
 //!
@@ -26,7 +26,7 @@ pub struct Folder {
 
 /// Every top-level folder. `runs/` and `servers/` hold one folder per server, which inherits the
 /// access of its parent.
-pub const FOLDERS: [Folder; 11] = [
+pub const FOLDERS: [Folder; 10] = [
     Folder {
         name: "db",
         servers: ServersAccess::None,
@@ -58,9 +58,9 @@ pub const FOLDERS: [Folder; 11] = [
         holds: "encrypted shared files of the pool. See `store`",
     },
     Folder {
-        name: "content-store",
+        name: "engine",
         servers: ServersAccess::None,
-        holds: "files of the shares' history. See `state::servers::adapters::history`",
+        holds: "the engine's database, store and caches",
     },
     Folder {
         name: "logs",
@@ -75,12 +75,7 @@ pub const FOLDERS: [Folder; 11] = [
     Folder {
         name: "meta",
         servers: ServersAccess::ReadOnly,
-        holds: "server jars, libraries",
-    },
-    Folder {
-        name: "java",
-        servers: ServersAccess::ReadOnly,
-        holds: "Java runtimes",
+        holds: "the engine's game files: server jars, libraries, loaders, Java runtimes",
     },
 ];
 
@@ -105,7 +100,7 @@ impl Paths {
     }
 
     pub fn database(&self) -> PathBuf {
-        self.root.join("db").join("copal.db")
+        self.root.join("db").join("core.db")
     }
 
     /// The self-signed certificate the App pins, and its key.
@@ -240,26 +235,23 @@ impl Paths {
         self.root.join("store")
     }
 
-    /// The content store clone (`bedrock::upstream::store`), which keeps the files of the
-    /// shares' history.
-    pub fn content_store(&self) -> PathBuf {
-        self.root.join("content-store")
+    /// The engine's own data. Its instances are the [`Self::servers`].
+    pub fn engine(&self) -> PathBuf {
+        self.root.join("engine")
+    }
+
+    pub fn servers(&self) -> PathBuf {
+        self.root.join("servers")
     }
 
     /// One server's folder: the only place `copal-servers` can write.
     pub fn server(&self, server_id: &str) -> PathBuf {
-        self.root.join("servers").join(server_id)
+        self.servers().join(server_id)
     }
 
-    /// The shared install store. See `installs::shared::SharedDirs`.
-    #[allow(dead_code)] // Wired in step 4: installs reach the store through this.
+    /// The engine's game files, which every server runs from.
     pub fn meta(&self) -> PathBuf {
         self.root.join("meta")
-    }
-
-    /// Managed Java runtimes, one folder per major version.
-    pub fn java(&self) -> PathBuf {
-        self.root.join("java")
     }
 }
 
@@ -293,10 +285,9 @@ mod tests {
             paths.staging("a"),
             paths.logs(),
             paths.store(),
-            paths.content_store(),
+            paths.engine(),
             paths.server("a"),
             paths.meta(),
-            paths.java(),
         ];
         for path in used {
             let top = path.strip_prefix("data").unwrap().components().next();

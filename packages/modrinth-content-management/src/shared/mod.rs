@@ -43,6 +43,7 @@ pub enum Error {
 )]
 #[serde(rename_all = "lowercase")]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub enum ContentType {
     Mod,
     Plugin,

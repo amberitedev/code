@@ -1,4 +1,5 @@
-import { invoke } from '@tauri-apps/api/core'
+import { config } from '@/config'
+import { apiClient } from '@/platform/modrinth-client'
 
 export type ReportItemType = 'project' | 'version' | 'user' | 'shared-instance'
 
@@ -14,6 +15,12 @@ export interface CreateReportResponse {
 	id: string
 }
 
-export async function create_report(request: CreateReportRequest) {
-	return await invoke<CreateReportResponse>('plugin:reports|reports_create', { request })
+export async function create_report(request: CreateReportRequest): Promise<CreateReportResponse> {
+	// The account backend does not take reports yet, and Modrinth has no record of its users or shares.
+	if (config.accountApiUrl && ['user', 'shared-instance'].includes(request.item_type)) {
+		throw new Error(
+			'Reporting local accounts and shared instances is not supported by this service yet.',
+		)
+	}
+	return await apiClient.labrinth.reports_v3.create(request)
 }

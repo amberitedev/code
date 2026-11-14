@@ -30,10 +30,7 @@ export class KyrosFilesV1Module extends AbstractModule {
 	 * Build the browser URL for a previously authorized file download.
 	 */
 	public getFileDownloadUrl(nodeUrlHost: string, worldId: string, token: string): string {
-		// Appended rather than resolved, so a node URL with a path (a Core server) keeps it.
-		const url = new URL(
-			`${getNodeBaseUrl(nodeUrlHost).replace(/\/$/, '')}/v1/worlds/${encodeURIComponent(worldId)}/files/contents-raw`,
-		)
+		const url = new URL(`/v1/worlds/${worldId}/files/contents-raw`, getNodeBaseUrl(nodeUrlHost))
 		url.searchParams.set('token', token)
 		return url.toString()
 	}
@@ -60,7 +57,8 @@ export class KyrosFilesV1Module extends AbstractModule {
 	 */
 	public getFullWorldDownloadUrl(nodeUrlHost: string, worldId: string, token: string): string {
 		const url = new URL(
-			`${getNodeBaseUrl(nodeUrlHost).replace(/\/$/, '')}/v1/worlds/${encodeURIComponent(worldId)}/files/download-full-zip`,
+			`/v1/worlds/${worldId}/files/download-full-zip`,
+			getNodeBaseUrl(nodeUrlHost),
 		)
 		url.searchParams.set('token', token)
 		return url.toString()

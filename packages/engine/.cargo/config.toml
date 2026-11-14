@@ -1,0 +1,15 @@
+[env]
+# packages/engine/.sqlx and apps/app/.sqlx are generated against each crate's own migrations; never
+# edit them. After changing a query or a migration, from the repository root with no other cargo
+# command running (Git Bash: `pwd -W` gives the Windows path sqlite needs):
+#   mkdir -p target/sqlx && rm -f target/sqlx/engine.db target/sqlx/app.db
+#   sqlite3 target/sqlx/engine.db < packages/engine/migrations/20261113120000_init.sql
+#   sqlite3 target/sqlx/app.db < apps/app/migrations/20261113120000_init.sql
+#   rm packages/engine/.sqlx/query-*.json apps/app/.sqlx/query-*.json
+#   touch packages/engine/src/lib.rs apps/app/src/main.rs
+#   SQLX_OFFLINE=false DATABASE_URL=sqlite:$(pwd -W)/target/sqlx/engine.db \
+#     SQLX_OFFLINE_DIR=$(pwd -W)/packages/engine/.sqlx cargo check -p engine --all-targets --features export-ts
+#   SQLX_OFFLINE=true cargo check -p theseus_gui --all-targets   # builds the engine offline; the App's own queries fail here
+#   SQLX_OFFLINE=false DATABASE_URL=sqlite:$(pwd -W)/target/sqlx/app.db \
+#     SQLX_OFFLINE_DIR=$(pwd -W)/apps/app/.sqlx cargo check -p theseus_gui --all-targets
+SQLX_OFFLINE = "true"

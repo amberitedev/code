@@ -3,19 +3,21 @@
 //! to that Core's certificate, no proxy and no redirect, so it cannot be turned into a general
 //! downloader.
 
-use bedrock::net::{CoreAddress, ip};
-use sharing_client::pool::PoolCore;
+use contracts::{
+    ApiError, ErrorCode, Hash,
+    tickets::{PullSource, StoreHost},
+};
+use sharing_client::net::{CoreAddress, ip};
 use tracing::info;
 
 use crate::{
-    Code, Store, StoreError,
-    objects::{self, Hash, VersionList, WriteError},
-    tickets::Source,
+    Store,
+    objects::{self, ListExt, WriteError},
 };
 
-fn failed(description: impl std::fmt::Display) -> StoreError {
-    StoreError::new(
-        Code::Conflict,
+fn failed(description: impl std::fmt::Display) -> ApiError {
+    ApiError::new(
+        ErrorCode::Conflict,
         format!("Could not copy from the other Core: {description}"),
     )
 }
@@ -24,31 +26,32 @@ fn failed(description: impl std::fmt::Display) -> StoreError {
 pub(crate) async fn pull(
     store: &Store,
     root: &Hash,
-    source: &Source,
-) -> Result<bool, StoreError> {
-    let ticket = source.ticket().expect("verify requires a source ticket");
-    let core = PoolCore {
-        // The certificate names the Core: the backend gives no id with a source.
-        id: source.core.cert_fingerprint.clone(),
-        address: address(source.address(), store.allow_private_sources)?,
+    source: &PullSource,
+) -> Result<bool, ApiError> {
+    let ticket = &source.ticket;
+    let host = &source.core;
+    let core = StoreHost {
+        id: host.id.clone(),
+        // Its public address when it has one.
+        address: address(
+            host.public_address.as_deref().unwrap_or(&host.address),
+            store.allow_private_sources,
+        )?,
         public_address: None,
-        cert_fingerprint: source.core.cert_fingerprint.clone(),
+        cert_fingerprint: host.cert_fingerprint.clone(),
     };
-    let root_hex = root.to_string();
-    let body = store
+    let list = store
         .client
-        .version_list(&core, ticket, &root_hex)
+        .version_list(&core, ticket, *root)
         .await
         .map_err(failed)?;
-    let list: VersionList = serde_json::from_slice(&body)
-        .map_err(|_| failed("its version list is unreadable"))?;
     let missing = store.begin(root, list.clone(), None).await?;
     info!(%root, objects = missing.len(), "pulling a version");
     for hash in missing {
         let size = list.size_of(&hash).expect("missing objects are listed");
         let reader = store
             .client
-            .object_reader(&core, ticket, &root_hex, &hash.to_string())
+            .object_reader(&core, ticket, *root, hash)
             .await
             .map_err(failed)?;
         objects::write_object(&store.layout, &hash, size, reader)
@@ -62,12 +65,9 @@ pub(crate) async fn pull(
 }
 
 /// `https://ip:port`, refused unless the IP is public or `allow_private` is set.
-pub fn address(
-    address: &str,
-    allow_private: bool,
-) -> Result<String, StoreError> {
+pub fn address(address: &str, allow_private: bool) -> Result<String, ApiError> {
     let invalid = |description: &str| {
-        StoreError::new(Code::InvalidRequest, description.to_owned())
+        ApiError::new(ErrorCode::InvalidInput, description.to_owned())
     };
     let address = CoreAddress::parse(address).map_err(|_| {
         invalid("The source Core's address must be https://ip:port.")
@@ -179,7 +179,7 @@ mod tests {
                 &source.signer,
                 "pull",
                 json!("core"),
-                root.as_str(),
+                &root.to_string(),
                 crate::now(),
                 json!({ "source": {
                     "core": { "id": "source", "address": address, "public_address": null, "cert_fingerprint": fingerprint },

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Archon } from '@modrinth/api-client'
+import type { Archon, ListedCore } from '@modrinth/api-client'
 import { LinkIcon, PlusIcon, SearchIcon, SettingsIcon, UpdatedIcon } from '@modrinth/assets'
 import {
 	Button,
@@ -40,7 +40,7 @@ const { openAddCore } = injectCoreActions()
 // Only once the account's Cores are known, so a slow or failed lookup never asks for a Core.
 const needsCore = computed(() => coresQuery.isSuccess.value && coresQuery.cores.value.length === 0)
 // The Core the new server goes on, chosen before setup opens.
-let core: Archon.Cores.v1.Core | null = null
+let core: ListedCore | null = null
 
 async function newServer() {
 	core = (await chooseCore.value?.pick()) ?? null
@@ -153,11 +153,7 @@ async function createServer(config: CreationFlowContextValue) {
 	const instance = config.instanceSelection.value
 	try {
 		if (!core) throw new Error('No Core was chosen')
-		const { id } = await client.archon.cores_v1.createServer(
-			serverName(config),
-			core,
-			instance ? { id: instance.id, name: instance.name } : undefined,
-		)
+		const { id } = await client.archon.cores_v1.createServer(serverName(config), core)
 		try {
 			await install(id, config)
 		} catch (cause) {

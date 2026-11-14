@@ -29,7 +29,6 @@ pub mod records;
 pub mod space;
 
 use std::{
-    collections::HashMap,
     io::{self, Read, Write},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
@@ -42,15 +41,16 @@ use tokio::sync::{Notify, broadcast};
 use tracing::{info, warn};
 use uuid::Uuid;
 
+use engine::{
+    archive,
+    sandbox::{self, Folder},
+};
+
 use crate::{
-    access::{Caller, now},
+    access::now,
+    api::events::{BackupState, BackupTask, CoreEvent},
     daemon::paths::Paths,
-    event::{BackupState, BackupTask, WsEvent},
     servers::{Phase, ServerError, Servers, console},
-    state::servers::adapters::filesystem::{
-        archive,
-        folder::{self, Folder},
-    },
     util::if_present,
 };
 use records::{Kind, OpKind, OpState, Operation};
@@ -83,8 +83,6 @@ const KEEP_PRE_UPDATE: u32 = 2;
 const RETRY_FAILED: i64 = 3600;
 /// How often the schedule is checked.
 const SCHEDULE_TICK: Duration = Duration::from_secs(60);
-/// How long a download link works, once.
-const DOWNLOAD_GRANT: Duration = Duration::from_secs(300);
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -104,40 +102,18 @@ pub enum Error {
     Database(#[from] sqlx::Error),
 }
 
-/// What a download link may fetch.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Target {
-    /// The server's worlds as they are now.
-    World,
-    Backup(String),
-    /// One file of the server, by its cleaned path.
-    File(String),
-    /// The server's content as a `.mrpack`.
-    Pack,
-}
-
-/// A download link someone with access asked for: single use, for a few minutes.
-#[derive(Debug, Clone)]
-pub struct Grant {
-    pub caller: Caller,
-    pub server_id: String,
-    pub target: Target,
-    expires: Instant,
-}
-
 /// The backup engine. One per Core.
 pub struct Backups {
     paths: Paths,
     db: SqlitePool,
     servers: Arc<Servers>,
-    /// Progress for console sockets, by server. Content installs share it.
-    pub events: broadcast::Sender<(String, WsEvent)>,
+    /// Events for `/events` sockets: backup progress, content installs and power changes.
+    pub events: broadcast::Sender<CoreEvent>,
     wake: Notify,
     /// The ids of operations as they finish.
     finished: broadcast::Sender<i64>,
     /// Held while copying a server, for a backup or a download of its world.
     copying: tokio::sync::Mutex<()>,
-    grants: Mutex<HashMap<String, Grant>>,
     /// Servers a restore could not put back, held so they never start on a half-restored world
     /// until someone looks (the old files are in the restore's folder).
     stuck: Mutex<Vec<crate::servers::Hold>>,
@@ -158,7 +134,6 @@ impl Backups {
             wake: Notify::new(),
             finished: broadcast::channel(64).0,
             copying: tokio::sync::Mutex::new(()),
-            grants: Mutex::default(),
             stuck: Mutex::default(),
         });
         backups.recover_restores().await;
@@ -722,13 +697,20 @@ impl Backups {
     /// Core looked and found nothing new. A server that is starting, stopping, installing, or
     /// busy with another backup operation is left for the next check.
     pub async fn queue_due(&self) -> Result<(), Error> {
-        let servers: Vec<String> = sqlx::query_scalar(
-            "SELECT id FROM servers WHERE game_version IS NOT NULL",
-        )
-        .fetch_all(&self.db)
-        .await?;
+        let servers: Vec<String> = sqlx::query_scalar("SELECT id FROM servers")
+            .fetch_all(&self.db)
+            .await?;
         let now = now();
         for server_id in servers {
+            let installed = crate::servers::platform::platform(
+                self.servers.engine(),
+                &server_id,
+            )
+            .await
+            .is_ok_and(|platform| platform.is_some());
+            if !installed {
+                continue;
+            }
             let Some(due) = self.due(&server_id).await? else {
                 continue;
             };
@@ -822,43 +804,6 @@ impl Backups {
     ) -> Result<Option<i64>, Error> {
         Ok(self.due(server_id).await?.map(|due| due.at))
     }
-
-    /// A single-use link for `target`, valid for five minutes.
-    pub fn grant(
-        &self,
-        caller: Caller,
-        server_id: &str,
-        target: Target,
-    ) -> String {
-        let mut bytes = [0u8; 32];
-        ring::rand::SecureRandom::fill(
-            &ring::rand::SystemRandom::new(),
-            &mut bytes,
-        )
-        .expect("the system has randomness");
-        let token = hex::encode(bytes);
-        let mut grants = self.grants.lock().expect("not poisoned");
-        grants.retain(|_, grant| grant.expires > Instant::now());
-        grants.insert(
-            token.clone(),
-            Grant {
-                caller,
-                server_id: server_id.to_owned(),
-                target,
-                expires: Instant::now() + DOWNLOAD_GRANT,
-            },
-        );
-        token
-    }
-
-    /// Use up a download link.
-    pub fn take(&self, token: &str) -> Option<Grant> {
-        self.grants
-            .lock()
-            .expect("not poisoned")
-            .remove(token)
-            .filter(|grant| grant.expires > Instant::now())
-    }
 }
 
 /// A server's schedule, come due or not yet. See [`Backups::due`].
@@ -889,9 +834,9 @@ async fn saved(
     matches!(tokio::time::timeout(wait, reported).await, Ok(true))
 }
 
-/// Tell console sockets how far an operation is.
+/// Tell `/events` sockets how far an operation is.
 fn send_progress(
-    events: &broadcast::Sender<(String, WsEvent)>,
+    events: &broadcast::Sender<CoreEvent>,
     operation: &Operation,
     task: BackupTask,
     state: BackupState,
@@ -899,17 +844,15 @@ fn send_progress(
     started: i64,
     finished: Option<i64>,
 ) {
-    let _ = events.send((
-        operation.server_id.clone(),
-        WsEvent::BackupProgress {
-            id: Uuid::parse_str(&operation.backup_id).unwrap_or_default(),
-            task,
-            state,
-            progress,
-            start_time: Some(started),
-            finish_time: finished,
-        },
-    ));
+    let _ = events.send(CoreEvent::Backup {
+        server: operation.server_id.clone(),
+        id: Uuid::parse_str(&operation.backup_id).unwrap_or_default(),
+        task,
+        state,
+        progress,
+        start_time: Some(started),
+        finish_time: finished,
+    });
 }
 
 /// The world folders of a server folder, by name.
@@ -944,7 +887,7 @@ impl Manifest {
         };
         let worlds_ok = self.worlds.len() <= 3
             && self.worlds.iter().enumerate().all(|(n, world)| {
-                folder::clean(world).is_ok_and(|clean| clean == *world)
+                sandbox::clean(world).is_ok_and(|clean| clean == *world)
                     && [
                         level.clone(),
                         format!("{level}_nether"),
@@ -964,7 +907,7 @@ impl Manifest {
         // Each root once, none inside another, compared without case as Windows and macOS do:
         // a root swapped twice would overwrite its own rollback copy.
         let roots: Vec<String> =
-            self.roots().map(|root| folder::fold_case(root)).collect();
+            self.roots().map(|root| sandbox::fold_case(root)).collect();
         let overlap = roots.iter().enumerate().any(|(n, a)| {
             roots.iter().skip(n + 1).any(|b| {
                 a == b
@@ -1049,7 +992,7 @@ fn files(folder: &Folder) -> Result<Listing, Error> {
 
 /// Refuse a path a restore would refuse.
 fn restorable(path: &str) -> Result<(), Error> {
-    match folder::clean(path) {
+    match sandbox::clean(path) {
         Ok(clean) if clean == path => Ok(()),
         _ => Err(Error::Conflict(format!(
             "{path} has a name a backup cannot hold; rename it and back up again."
@@ -1092,7 +1035,7 @@ fn walk(
         }
         restorable(&path)?;
         if kind.is_dir() {
-            let child = folder::open_child(dir, &name, &path)?;
+            let child = sandbox::open_child(dir, &name, &path)?;
             folders.push(path.clone());
             walk(&child, &path, files, folders)?;
         } else if kind.is_file() {

@@ -3,7 +3,9 @@
  * So, for example, addDefaultInstance creates a blank instance object, where the Rust struct is serialized,
  *  and deserialized into a usable JS object.
  */
-import { invoke } from '@tauri-apps/api/core'
+import { launcherImport } from '@modrinth/api-client'
+
+import { apiClient } from '@/platform/modrinth-client'
 
 import { install_import_instance } from './install'
 
@@ -28,7 +30,9 @@ import { install_import_instance } from './install'
 /// eg: get_importable_instances("MultiMC", "C:/MultiMC")
 /// returns ["Instance 1", "Instance 2"]
 export async function get_importable_instances(launcherType, basePath) {
-	return await invoke('plugin:import|get_importable_instances', { launcherType, basePath })
+	return await apiClient.local.call(launcherImport.listImportableInstances, {
+		query: { launcher_type: launcherType, base_path: basePath },
+	})
 }
 
 /// Import an instance from a launcher type and base path
@@ -39,9 +43,8 @@ export async function import_instance(launcherType, basePath, instanceFolder) {
 /// Checks if this instance is valid for importing, given a certain launcher type
 /// eg: is_valid_importable_instance("C:/MultiMC/Instance 1", "MultiMC")
 export async function is_valid_importable_instance(instanceFolder, launcherType) {
-	return await invoke('plugin:import|is_valid_importable_instance', {
-		instanceFolder,
-		launcherType,
+	return await apiClient.local.call(launcherImport.checkImportableInstance, {
+		query: { instance_folder: instanceFolder, launcher_type: launcherType },
 	})
 }
 
@@ -49,5 +52,7 @@ export async function is_valid_importable_instance(instanceFolder, launcherType)
 /// null if it can't be found or doesn't exist
 /// eg: get_default_launcher_path("MultiMC")
 export async function get_default_launcher_path(launcherType) {
-	return await invoke('plugin:import|get_default_launcher_path', { launcherType })
+	return await apiClient.local.call(launcherImport.getDefaultLauncherPath, {
+		query: { launcher_type: launcherType },
+	})
 }

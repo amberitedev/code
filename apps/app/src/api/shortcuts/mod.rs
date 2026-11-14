@@ -1,7 +1,6 @@
-use crate::api::Result;
+use anyhow::Result;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use tauri::Runtime;
 use url::Url;
 
 #[cfg(target_os = "linux")]
@@ -18,13 +17,6 @@ use macos::{SHORTCUT_EXTENSION, create_shortcut};
 #[cfg(target_os = "windows")]
 use windows::{SHORTCUT_EXTENSION, create_shortcut};
 
-pub fn init<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
-    tauri::plugin::Builder::new("shortcuts")
-        .invoke_handler(tauri::generate_handler![create_instance_shortcut])
-        .build()
-}
-
-#[tauri::command]
 pub async fn create_instance_shortcut(
     instance_name: String,
     instance_id: String,

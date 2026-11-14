@@ -1,28 +1,28 @@
 use std::collections::BTreeMap;
 
 use crate::rules::CONFIG_FILE_TYPE;
-use crate::versions::ManifestFile;
+use contracts::backend::sharing::ExternalFile;
 
 /// The config files an update from `applied` to `latest` touches.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ConfigUpdate {
     /// Configs of `latest` that are new or changed since `applied`, by path. Every version lists
     /// all configs it shares, so the rest stay as the member has them.
-    pub write: Vec<ManifestFile>,
+    pub write: Vec<ExternalFile>,
     /// Configs `applied` shared that `latest` no longer does, as `applied` sent them. A member
     /// deletes each one whose copy is still byte for byte what the share sent (its SHA-1 is
     /// this entry's), and keeps one they edited.
-    pub left: Vec<ManifestFile>,
+    pub left: Vec<ExternalFile>,
 }
 
 /// What an update to `latest` does to the configs of a member who applied `applied`. Without an
 /// applied version (a first install, or one the backend no longer keeps) every config is
 /// written and none is known to have left.
 pub fn config_update(
-    latest: &[ManifestFile],
-    applied: Option<&[ManifestFile]>,
+    latest: &[ExternalFile],
+    applied: Option<&[ExternalFile]>,
 ) -> ConfigUpdate {
-    let configs = |files: &[ManifestFile]| {
+    let configs = |files: &[ExternalFile]| {
         files
             .iter()
             .filter(|file| file.file_type == CONFIG_FILE_TYPE)
@@ -50,22 +50,25 @@ pub fn config_update(
 
 #[cfg(test)]
 mod tests {
+    use contracts::Hash;
+
     use super::*;
 
-    fn file(file_type: &str, file_name: &str, sha256: u8) -> ManifestFile {
-        ManifestFile {
+    fn file(file_type: &str, file_name: &str, sha256: u8) -> ExternalFile {
+        ExternalFile {
             file_name: file_name.to_string(),
             file_type: file_type.to_string(),
+            url: None,
             file_size: 1,
             sha1: String::new(),
-            sha256: [sha256; 32],
-            object: [0; 32],
+            sha256: Hash([sha256; 32]),
+            object: Hash([0; 32]),
             object_size: 17,
             key: None,
         }
     }
 
-    fn names(files: &[ManifestFile]) -> Vec<&str> {
+    fn names(files: &[ExternalFile]) -> Vec<&str> {
         files.iter().map(|file| file.file_name.as_str()).collect()
     }
 

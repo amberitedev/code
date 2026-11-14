@@ -1,0 +1,559 @@
+use super::TunnelSocket;
+use super::tunnel::InternalTunnelSocket;
+use crate::accounts::self_hosted::{backend, remote};
+use crate::accounts::state::ModrinthCredentials;
+use crate::presence::Presence;
+use anyhow::bail;
+use ariadne::ids::UserId;
+use ariadne::networking::message::{
+    ClientToServerMessage, ServerToClientMessage,
+};
+use ariadne::users::UserStatus;
+use async_tungstenite::WebSocketSender;
+use async_tungstenite::tokio::{ConnectStream, connect_async};
+use async_tungstenite::tungstenite::Message;
+use async_tungstenite::tungstenite::client::IntoClientRequest;
+use bytes::Bytes;
+use chrono::Utc;
+use contracts::backend::social::{
+    AddFriend, ListFriends, RemoveFriend, UserFriend, UserRef,
+};
+use contracts::client::{CallError, call};
+use contracts::{Empty, ErrorCode};
+use dashmap::DashMap;
+use either::Either;
+use engine::LabrinthError;
+use engine::{
+    EventSink, FetchSemaphore, FriendPayload, FriendStatusPayload,
+    ProcessManager, Sessions, emit_friend, emit_notification, fetch_advanced,
+    fetch_json,
+};
+use futures::{SinkExt, StreamExt};
+use reqwest::Method;
+use reqwest::header::HeaderValue;
+use serde_json::Value;
+use std::net::SocketAddr;
+use std::ops::Deref;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
+use tokio::net::tcp::OwnedReadHalf;
+use tokio::sync::{Mutex, RwLock};
+use uuid::Uuid;
+
+pub(super) type WriteSocket =
+    Arc<RwLock<Option<WebSocketSender<ConnectStream>>>>;
+pub(super) type TunnelSockets = Arc<DashMap<Uuid, Arc<InternalTunnelSocket>>>;
+
+pub struct FriendsSocket {
+    write: WriteSocket,
+    connection_lock: Mutex<()>,
+    connection_generation: Arc<AtomicU64>,
+    user_statuses: Arc<DashMap<UserId, UserStatus>>,
+    tunnel_sockets: TunnelSockets,
+}
+
+impl Default for FriendsSocket {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl FriendsSocket {
+    pub fn new() -> Self {
+        Self {
+            write: Arc::new(RwLock::new(None)),
+            connection_lock: Mutex::new(()),
+            connection_generation: Arc::new(AtomicU64::new(0)),
+            user_statuses: Arc::new(DashMap::new()),
+            tunnel_sockets: Arc::new(DashMap::new()),
+        }
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub async fn connect(
+        &self,
+        exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite> + Copy,
+        semaphore: &FetchSemaphore,
+        sessions: &Sessions,
+        process_manager: &ProcessManager,
+        events: &EventSink,
+    ) -> engine::Result<()> {
+        let _connection_guard = self.connection_lock.lock().await;
+        if self.is_connected().await {
+            return Ok(());
+        }
+
+        let credentials =
+            ModrinthCredentials::get_and_refresh(exec, semaphore, sessions)
+                .await?;
+
+        if let Some(credentials) = credentials {
+            let mut request = format!(
+                "{}_internal/launcher_socket?code={}",
+                engine::self_hosted::accounts::socket_base(sessions),
+                credentials.session
+            )
+            .into_client_request()?;
+
+            request.headers_mut().insert(
+                "User-Agent",
+                HeaderValue::from_str(&engine::launcher_user_agent()).unwrap(),
+            );
+
+            let res = connect_async(request).await;
+
+            match res {
+                Ok((socket, _)) => {
+                    tracing::info!("Connected to friends socket");
+                    let (write, read) = socket.split();
+                    let connection_generation = self
+                        .connection_generation
+                        .fetch_add(1, Ordering::AcqRel)
+                        + 1;
+
+                    {
+                        let mut write_lock = self.write.write().await;
+                        *write_lock = Some(write);
+                    }
+
+                    if let Some(process) = process_manager.get_all().first() {
+                        let _ = self
+                            .update_status(Some(process.instance_name.clone()))
+                            .await;
+                    }
+
+                    let write_handle = self.write.clone();
+                    let connection_generation_handle =
+                        self.connection_generation.clone();
+                    let statuses = self.user_statuses.clone();
+                    let sockets = self.tunnel_sockets.clone();
+                    let events = events.clone();
+
+                    tokio::spawn(async move {
+                        let mut read_stream = read;
+                        while let Some(msg_result) = read_stream.next().await {
+                            if connection_generation_handle
+                                .load(Ordering::Acquire)
+                                != connection_generation
+                            {
+                                break;
+                            }
+
+                            match msg_result {
+                                Ok(msg) => {
+                                    let server_message = match msg {
+                                        Message::Text(text) => {
+                                            match ServerToClientMessage::deserialize(
+                                                Either::Left(&text),
+                                            ) {
+                                                Ok(message) => Some(message),
+                                                Err(_) => {
+                                                    if let Ok(notification) =
+                                                        serde_json::from_str::<Value>(&text)
+                                                    {
+                                                        let _ = Self::handle_notification(&events, notification).await;
+                                                    }
+                                                    None
+                                                }
+                                            }
+                                        }
+                                        Message::Binary(bytes) => {
+                                            match ServerToClientMessage::deserialize(
+                                                Either::Right(&bytes),
+                                            ) {
+                                                Ok(message) => Some(message),
+                                                Err(_) => {
+                                                    if let Ok(notification) =
+                                                        serde_json::from_slice::<Value>(&bytes)
+                                                    {
+                                                        let _ = Self::handle_notification(&events, notification).await;
+                                                    }
+                                                    None
+                                                }
+                                            }
+                                        }
+                                        Message::Ping(bytes) => {
+                                            if let Some(write) = write_handle
+                                                .write()
+                                                .await
+                                                .as_mut()
+                                            {
+                                                let _ = write
+                                                    .send(Message::Pong(bytes))
+                                                    .await;
+                                            }
+
+                                            continue;
+                                        }
+                                        Message::Pong(_)
+                                        | Message::Frame(_) => continue,
+                                        Message::Close(_) => break,
+                                    };
+
+                                    if let Some(server_message) = server_message
+                                    {
+                                        match server_message {
+                                            ServerToClientMessage::StatusUpdate { status } => {
+                                                statuses.insert(status.user_id, status.clone());
+                                                let _ = emit_friend(&events, FriendPayload::StatusUpdate { user_status: FriendStatusPayload { user_id: status.user_id.to_string(), profile_name: status.profile_name, last_update: status.last_update.to_rfc3339() } }).await;
+                                            },
+                                            ServerToClientMessage::UserOffline { id } => {
+                                                statuses.remove(&id);
+                                                let _ = emit_friend(&events, FriendPayload::UserOffline { id: id.to_string() }).await;
+                                            }
+                                            ServerToClientMessage::FriendStatuses { statuses: new_statuses } => {
+                                                statuses.clear();
+                                                new_statuses.into_iter().for_each(|status| {
+                                                    statuses.insert(status.user_id, status);
+                                                });
+                                                let _ = emit_friend(&events, FriendPayload::StatusSync).await;
+                                            }
+                                            ServerToClientMessage::FriendRequest { from } => {
+                                                let _ = emit_friend(&events, FriendPayload::FriendRequest { from: from.to_string() }).await;
+                                            }
+                                            ServerToClientMessage::FriendRequestRejected { from } => {
+                                                statuses.remove(&from);
+                                                let _ = emit_friend(&events, FriendPayload::FriendRequestRejected { from: from.to_string() }).await;
+                                            },
+
+                                            ServerToClientMessage::FriendSocketListening { .. } => {}, // TODO
+                                            ServerToClientMessage::FriendSocketStoppedListening { .. } => {}, // TODO
+
+                                            ServerToClientMessage::SocketConnected { to_socket, new_socket } => {
+                                                if let Some(connected_to) = sockets.get(&to_socket)
+                                                    && let InternalTunnelSocket::Listening(local_addr) = *connected_to.value().clone()
+                                                        && let Ok(new_stream) = TcpStream::connect(local_addr).await {
+                                                            let (read, write) = new_stream.into_split();
+                                                            sockets.insert(new_socket, Arc::new(InternalTunnelSocket::Connected(Mutex::new(write))));
+                                                            Self::socket_read_loop(write_handle.clone(), read, new_socket);
+                                                            continue;
+                                                        }
+                                                let _ = Self::send_message(&write_handle, ClientToServerMessage::SocketClose { socket: new_socket }).await;
+                                            },
+                                            ServerToClientMessage::SocketClosed { socket } => {
+                                                sockets.remove_if(&socket, |_, x| matches!(*x.clone(), InternalTunnelSocket::Connected(_)));
+                                            },
+                                            ServerToClientMessage::SocketData { socket, data } => {
+                                                if let Some(mut socket) = sockets.get_mut(&socket)
+                                                    && let InternalTunnelSocket::Connected(ref stream) = *socket.value_mut().clone() {
+                                                        let _ = stream.lock().await.write_all(&data).await;
+                                                    }
+                                            },
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::error!(
+                                        "Error handling message from websocket server: {:?}",
+                                        e
+                                    );
+                                }
+                            }
+                        }
+
+                        if connection_generation_handle.load(Ordering::Acquire)
+                            == connection_generation
+                        {
+                            let mut write = write_handle.write().await;
+                            if connection_generation_handle
+                                .load(Ordering::Acquire)
+                                == connection_generation
+                            {
+                                *write = None;
+                            }
+                        }
+                    });
+                }
+                Err(e) => {
+                    tracing::error!(
+                        "Error connecting to friends socket: {e:?}"
+                    );
+
+                    return Err(engine::Error::from(e));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn handle_notification(
+        events: &EventSink,
+        notification: Value,
+    ) -> engine::Result<()> {
+        tracing::info!(
+            notification = %notification,
+            "Received websocket notification payload"
+        );
+
+        if notification
+            .get("body")
+            .and_then(|body| body.get("type"))
+            .and_then(Value::as_str)
+            .is_some()
+        {
+            emit_notification(events, notification).await?;
+        }
+
+        Ok(())
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub async fn socket_loop(
+        state: Arc<engine::Engine>,
+        presence: Arc<Presence>,
+    ) -> engine::Result<()> {
+        tokio::task::spawn(async move {
+            let mut last_connection = Utc::now();
+            let mut last_ping = Utc::now();
+
+            loop {
+                let connected = presence.friends_socket.is_connected().await;
+
+                if !connected
+                    && Utc::now().signed_duration_since(last_connection)
+                        > chrono::Duration::seconds(30)
+                {
+                    last_connection = Utc::now();
+                    last_ping = Utc::now();
+                    let _ = presence
+                        .friends_socket
+                        .connect(
+                            crate::db::pool(&state),
+                            &state.api_semaphore,
+                            &state.sessions,
+                            &state.process_manager,
+                            &state.events,
+                        )
+                        .await;
+                } else if connected
+                    && Utc::now().signed_duration_since(last_ping)
+                        > chrono::Duration::seconds(10)
+                {
+                    last_ping = Utc::now();
+                    let mut write = presence.friends_socket.write.write().await;
+                    if let Some(write) = write.as_mut() {
+                        let _ = write.send(Message::Ping(Bytes::new())).await;
+                    }
+                }
+
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            }
+        });
+
+        Ok(())
+    }
+
+    #[tracing::instrument(skip(self))]
+    pub async fn disconnect(&self) -> engine::Result<()> {
+        let _connection_guard = self.connection_lock.lock().await;
+        self.connection_generation.fetch_add(1, Ordering::AcqRel);
+
+        let mut write_lock = self.write.write().await;
+        let write_half = write_lock.take();
+        drop(write_lock);
+
+        self.user_statuses.clear();
+        self.tunnel_sockets.clear();
+
+        if let Some(mut write_half) = write_half {
+            SinkExt::close(&mut write_half).await?;
+        }
+
+        Ok(())
+    }
+
+    #[tracing::instrument(skip(self))]
+    pub async fn update_status(
+        &self,
+        instance_name: Option<String>,
+    ) -> engine::Result<()> {
+        Self::send_message(
+            &self.write,
+            ClientToServerMessage::StatusUpdate {
+                profile_name: instance_name,
+            },
+        )
+        .await
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub async fn friends(
+        semaphore: &FetchSemaphore,
+        sessions: &Sessions,
+    ) -> engine::Result<Vec<UserFriend>> {
+        if let Some(session) = backend(sessions)? {
+            let backend = remote(&session.base_url, &session.bearer);
+            return Ok(call::<ListFriends>(&backend, &(), &(), Empty).await?);
+        }
+        fetch_json(
+            Method::GET,
+            concat!(env!("MODRINTH_API_URL_V3"), "friends"),
+            None,
+            None,
+            Some("/v3/friends"),
+            semaphore,
+            sessions,
+        )
+        .await
+    }
+
+    #[tracing::instrument(skip(self))]
+    pub fn friend_statuses(&self) -> Vec<UserStatus> {
+        self.user_statuses
+            .iter()
+            .map(|x| x.value().clone())
+            .collect()
+    }
+
+    #[tracing::instrument(skip(semaphore, sessions))]
+    pub async fn add_friend(
+        user_id: &str,
+        semaphore: &FetchSemaphore,
+        sessions: &Sessions,
+    ) -> engine::Result<()> {
+        if let Some(session) = backend(sessions)? {
+            let backend = remote(&session.base_url, &session.bearer);
+            let user = UserRef { id: user_id.into() };
+            return match call::<AddFriend>(&backend, &user, &(), Empty).await {
+                Err(CallError::Api { error, .. })
+                    if error.error == ErrorCode::NotFound =>
+                {
+                    bail!("no user found with username \"{user_id}\"")
+                }
+                result => Ok(result?),
+            };
+        }
+        let result = fetch_advanced(
+            Method::POST,
+            &format!("{}friend/{user_id}", env!("MODRINTH_API_URL_V3")),
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some("/v3/friend/:user_id"),
+            semaphore,
+            sessions,
+        )
+        .await;
+
+        if let Err(ref e) = result
+            && let Some(e) = e.downcast_ref::<LabrinthError>()
+            && e.error == "not_found"
+        {
+            bail!("no user found with username \"{user_id}\"");
+        }
+        result?;
+
+        Ok(())
+    }
+
+    #[tracing::instrument(skip(semaphore, sessions))]
+    pub async fn remove_friend(
+        user_id: &str,
+        semaphore: &FetchSemaphore,
+        sessions: &Sessions,
+    ) -> engine::Result<()> {
+        if let Some(session) = backend(sessions)? {
+            let backend = remote(&session.base_url, &session.bearer);
+            let user = UserRef { id: user_id.into() };
+            call::<RemoveFriend>(&backend, &user, &(), Empty).await?;
+            return Ok(());
+        }
+        fetch_advanced(
+            Method::DELETE,
+            &format!("{}friend/{user_id}", env!("MODRINTH_API_URL_V3")),
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some("/v3/friend/:user_id"),
+            semaphore,
+            sessions,
+        )
+        .await?;
+
+        Ok(())
+    }
+
+    #[tracing::instrument(skip(self))]
+    pub async fn open_port(&self, port: u16) -> engine::Result<TunnelSocket> {
+        let socket_id = Uuid::new_v4();
+        let socket = self.tunnel_sockets.entry(socket_id).insert(Arc::new(
+            InternalTunnelSocket::Listening(SocketAddr::new(
+                "127.0.0.1".parse().unwrap(),
+                port,
+            )),
+        ));
+        Self::send_message(
+            &self.write,
+            ClientToServerMessage::SocketListen { socket: socket_id },
+        )
+        .await?;
+        self.create_tunnel_socket(socket_id, socket)
+    }
+
+    pub async fn is_connected(&self) -> bool {
+        self.write.read().await.is_some()
+    }
+
+    fn create_tunnel_socket(
+        &self,
+        socket_id: Uuid,
+        socket: impl Deref<Target = Arc<InternalTunnelSocket>>,
+    ) -> engine::Result<TunnelSocket> {
+        Ok(TunnelSocket {
+            socket_id,
+            write: self.write.clone(),
+            sockets: self.tunnel_sockets.clone(),
+            internal: socket.clone(),
+        })
+    }
+
+    fn socket_read_loop(
+        write: WriteSocket,
+        mut read_half: OwnedReadHalf,
+        socket_id: Uuid,
+    ) {
+        tokio::spawn(async move {
+            let mut read_buffer = [0u8; 8192];
+            loop {
+                match read_half.read(&mut read_buffer).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => {
+                        let _ = Self::send_message(
+                            &write,
+                            ClientToServerMessage::SocketSend {
+                                socket: socket_id,
+                                data: read_buffer[..n].to_vec(),
+                            },
+                        )
+                        .await;
+                    }
+                };
+            }
+        });
+    }
+
+    #[tracing::instrument(skip(write))]
+    pub(super) async fn send_message(
+        write: &WriteSocket,
+        message: ClientToServerMessage,
+    ) -> engine::Result<()> {
+        let serialized = match message.serialize()? {
+            Either::Left(text) => Message::text(text),
+            Either::Right(bytes) => Message::binary(bytes),
+        };
+
+        let mut write_lock = write.write().await;
+        if let Some(ref mut write_half) = *write_lock {
+            write_half.send(serialized).await?;
+        }
+
+        Ok(())
+    }
+}

@@ -1,40 +1,30 @@
+import { friends as friendRoutes, type UserFriend, type UserStatus } from '@modrinth/api-client'
 import type { User } from '@modrinth/utils'
-import { invoke } from '@tauri-apps/api/core'
 import type { Dayjs } from 'dayjs'
 import dayjs from 'dayjs'
 
 import { get_user_many } from '@/helpers/cache'
 import type { ModrinthCredentials } from '@/helpers/mr_auth'
+import { apiClient } from '@/platform/modrinth-client'
+
+export type { UserFriend, UserStatus }
 
 export const friendsQueryKey = (userId?: string | null) => ['friends', userId ?? null] as const
 
-export type UserStatus = {
-	user_id: string
-	profile_name: string | null
-	last_update: string
-}
-
-export type UserFriend = {
-	id: string
-	friend_id: string
-	accepted: boolean
-	created: string
-}
-
 export async function friends(): Promise<UserFriend[]> {
-	return await invoke('plugin:friends|friends')
+	return await apiClient.local.call(friendRoutes.listFriends)
 }
 
 export async function friend_statuses(): Promise<UserStatus[]> {
-	return await invoke('plugin:friends|friend_statuses')
+	return await apiClient.local.call(friendRoutes.listFriendStatuses)
 }
 
 export async function add_friend(userId: string): Promise<void> {
-	return await invoke('plugin:friends|add_friend', { userId })
+	return await apiClient.local.call(friendRoutes.addFriend, { params: { id: userId } })
 }
 
 export async function remove_friend(userId: string): Promise<void> {
-	return await invoke('plugin:friends|remove_friend', { userId })
+	return await apiClient.local.call(friendRoutes.removeFriend, { params: { id: userId } })
 }
 
 export type FriendWithUserData = {

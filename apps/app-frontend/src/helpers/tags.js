@@ -3,29 +3,26 @@
  * So, for example, addDefaultInstance creates a blank instance object, where the Rust struct is serialized,
  *  and deserialized into a usable JS object.
  */
-import { invoke } from '@tauri-apps/api/core'
+import { tags } from '@modrinth/api-client'
+
+import { apiClient } from '@/platform/modrinth-client'
+
+// Callers read some answers with Modrinth's own types, which the engine's cache types do not
+// match, so those stay untyped, as they were over invoke.
 
 // Gets cached category tags
 export async function get_categories() {
-	return await invoke('plugin:tags|tags_get_categories')
+	return await apiClient.local.call(tags.GetCategoryTags)
 }
 
 // Gets cached loaders tags
+/** @returns {Promise<any>} */
 export async function get_loaders() {
-	return await invoke('plugin:tags|tags_get_loaders')
+	return await apiClient.local.call(tags.GetLoaderTags)
 }
 
 // Gets cached game_versions tags
+/** @returns {Promise<any>} */
 export async function get_game_versions() {
-	return await invoke('plugin:tags|tags_get_game_versions')
-}
-
-// Gets cached donation_platforms tags
-export async function get_donation_platforms() {
-	return await invoke('plugin:tags|tags_get_donation_platforms')
-}
-
-// Gets cached licenses tags
-export async function get_report_types() {
-	return await invoke('plugin:tags|tags_get_report_types')
+	return await apiClient.local.call(tags.GetGameVersionTags)
 }

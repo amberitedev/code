@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n\t\tINSERT INTO recent_instance_icon_configs (background, symbol, used_at)\n\t\tVALUES (?, ?, ?)\n\t\tON CONFLICT (background, symbol) DO UPDATE SET\n\t\t\tused_at = excluded.used_at\n\t\t",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "a3eab95b4a35938901e2b29d2686a40d0fd22862b54611576f02e8b56596037d"
+}

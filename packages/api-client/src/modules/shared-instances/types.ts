@@ -1,16 +1,6 @@
 import type { IconConfig } from '../../types/icons'
 
 export namespace SharedInstances {
-	/**
-	 * Sent live to the members of a shared instance when its member list (`shared_instance_users`)
-	 * or the servers other members host for it (`shared_instance_servers`) changed, so an open page
-	 * fetches it again. It arrives over the friends socket shaped like a notification, but is not
-	 * stored and has no id.
-	 */
-	export type LiveEvent = {
-		body: { type: 'shared_instance_users' | 'shared_instance_servers'; shared_instance_id: string }
-	}
-
 	export namespace Invites {
 		export namespace v1 {
 			export type Inviter = {
@@ -84,16 +74,6 @@ export namespace SharedInstances {
 
 			export type JoinType = 'owner' | 'invite' | 'link'
 
-			/** A server someone else hosts for a shared instance and shows to its members. */
-			export type HostedServer = {
-				core_id: string
-				server_id: string
-				name: string
-				/** The Minecraft address to ping and join. Not shown to the member. */
-				address: string
-				host: { id: string; username: string; avatar_url: string | null }
-			}
-
 			export type InstanceUser = {
 				id: string
 				joined_at: string | null
@@ -131,43 +111,6 @@ export namespace SharedInstances {
 				game_version: string
 				loader: string
 				loader_version: string
-			}
-		}
-	}
-
-	export namespace Storage {
-		export namespace v1 {
-			export type StoredVersion = {
-				version: number
-				created: string
-				bytes: number
-				ready: boolean
-				/** The latest ready version. It cannot be deleted. */
-				current: boolean
-			}
-
-			export type StoredShare = {
-				id: string
-				name: string
-				/** False when the share uses none of the allowance: it is private or has no members. */
-				counted: boolean
-				/** Bytes this share counts against the allowance, 0 when not counted. */
-				used: number
-				/** Bytes its kept versions take, counted or not. */
-				size: number
-				/** The account's own Cores holding it. */
-				cores: string[]
-				/** Newest first. */
-				versions: StoredVersion[]
-			}
-
-			/** Only the shares the signed-in account owns. Sizes are in bytes. */
-			export type Storage = {
-				used: number
-				allowance: number
-				/** How many versions each share keeps, files included. Null keeps all of them. */
-				kept_versions: number | null
-				shares: StoredShare[]
 			}
 		}
 	}

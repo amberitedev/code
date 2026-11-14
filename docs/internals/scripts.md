@@ -13,14 +13,21 @@ vp i
 vp run dev
 ```
 
-Node 24.15 or newer is required.
+You need:
+
+- Node 24.15 or newer.
+- Rust through [rustup](https://rustup.rs). `rust-toolchain.toml` pins the version and rustup installs
+  it on the first build.
+- JDK 17 or newer. The engine's build runs Gradle 9, which uses `JAVA_HOME` when it is set and
+  `java` on `PATH` otherwise.
+- Tauri's [system packages](https://tauri.app/start/prerequisites/) for your platform.
 
 This repository is commonly worked on through [T3 Code](https://github.com/pingdotgg/t3code), a
 coding-agent app that gives each task an isolated Git worktree. When T3 Code creates a worktree, it
 runs `node scripts/setup-worktree.ts` from `t3.json`. The script installs dependencies (retrying once,
 because two worktrees set up at the same time can collide on the shared Git config), copies the
-`backend`, `core`, and `scenarios` development data from the primary checkout, and copies the App
-library's `.env`. The scenario copy leaves out Minecraft's game assets (`meta/assets`) and the App
+`backend`, `core`, and `scenarios` development data from the primary checkout, and copies the
+engine's `.env`. The scenario copy leaves out Minecraft's game assets (`meta/assets`) and the App
 window's browser caches; they are most of the files and are fetched again when needed. It does not
 overwrite anything already in the worktree, so it is safe to run again. `.data/setup.json` records
 whether it is `running` (with its `pid`), `done`, or `failed` (with an `error`). Any exit,
@@ -38,24 +45,33 @@ folder that is usually nothing.
   `dev:backend` first. Core and Minecraft servers are not needed for account/sharing work.
 - `vp run dev:core`: Starts only Core. It pairs with the Worker and checks App sign-in tickets
   against the Worker's public key, so start `dev:backend` too.
-- `vp run up 1 2`: Starts the same stack in the background, waits until every service answers
-  and every App's page loads through its browser bridge, then prints the bridge URLs. In a new
-  checkout the frontend spends a minute or two preparing its dependencies; that happens inside `up`. It writes to `.data/dev.log`
-  and returns after 9 minutes if the stack is still compiling; run it again to keep waiting. It
-  fails at once when a Rust build fails, or when the App's entry module does not compile, printing
-  the compiler error; the stack keeps running. An optional mode comes first:
-  `vp run up dev:backend`. Unlike `vp run dev`, it leaves out the account sign-in
-  website and keeps App windows off the desktop, because agents use Apps through the browser
-  bridge. `--show-windows` shows them; on a stack already running hidden it fails, so run `down`
+- `node scripts/dev-runner.ts up 1 2`: Starts the same stack in the background, waits until every
+  service answers, every App answers on its local API, and the frontend serves the App's page, then
+  prints each App's `tab:` URL. There is no `vp run up`: on Windows, `vp run` puts its command in a
+  job that kills every process in it when vp exits, the background stack included. The tab URL
+  opens the App in a plain browser tab on its own origin. In a new checkout the frontend spends a
+  minute or two preparing its dependencies; that happens inside `up`. It writes to
+  `.data/dev.log` and returns after 9 minutes if the stack
+  is still compiling; run it again to keep waiting. It fails at once when a Rust build fails, or
+  when the App's entry module does not compile, printing the compiler error; the stack keeps
+  running. An optional mode comes first: `node scripts/dev-runner.ts up dev:backend`. Unlike
+  `vp run dev`, it leaves out the account sign-in
+  website and keeps App windows off the desktop, because agents use Apps from browser tabs.
+  `--show-windows` shows them; on a stack already running hidden it fails, so run `down`
   first.
-- `vp run status`: Prints what is running, whether it is ready, and each App's bridge URL. Exits
+- `vp run status`: Prints what is running, whether it is ready, and each App's tab URL. Exits
   non-zero when the stack is not ready.
 - `vp run down`: Stops this checkout's dev runner and everything it started.
 - `node scripts/dev-runner.ts build`: Compiles the App and Core for this checkout's Rust without
   starting anything. `check:changed` runs it when Rust changed.
+- `node scripts/dev-runner.ts test <package>...`: Runs one `cargo test` of the given Cargo packages
+  (such as `copal` or `engine`) in the primary checkout's `target/dev-shared`, like `build`. `check:changed` runs it for
+  the crates with a changed file.
 - `vp run check:changed [ref]`: CI's fast checks for the files changed since the merge base with
   `origin/main` (or `ref`): lint, typos, TOML, typecheck and tests of the affected packages,
-  `dev:check`, and for Rust `rustfmt` and a build. typos and tombi are skipped when not installed.
+  `dev:check`, and for Rust `rustfmt`, a build, and the tests of every workspace crate with a
+  changed file (except the ones CI leaves out), both through the runner. typos and tombi are
+  skipped when not installed.
 - `vp run dev:check`: Prints the processes, state directory, URLs, and ports that a full run would
   use without starting anything.
 
@@ -70,10 +86,11 @@ The key is a hash of everything that goes into the build:
 
 - Both: the root `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `.cargo`, the Cargo arguments,
   and the folders of the program's crate and every local crate it builds with, as
-  `cargo metadata` reports them. Crates it does not use, such as labrinth, can change without a
-  rebuild.
-- App, also: `apps/app-frontend/package.json` (the App's version), `packages/app-lib/.env`, the
-  variables named in that file and `.env.prod`, and `apps/app/tauri-local.conf.json`.
+  `cargo metadata` reports them. Crates it does not use, such as `toasty`, can change without a
+  rebuild. Also `packages/engine/.env` and the variables named in that file and `.env.prod`,
+  which the engine's build compiles in.
+- App, also: `apps/app-frontend/package.json` (the App's version) and
+  `apps/app/tauri-local.conf.json`.
 
 Files are hashed by content as Git would store it, including edits and new files that are not
 committed, so the same Rust in two checkouts gives the same key. When the key already has a program,
@@ -81,37 +98,46 @@ the runner starts it without Cargo. That is the usual case in a worktree that do
 The six most recently used keys are kept.
 
 Nothing in the build depends on ports. The App is told where its frontend is, and whether to keep
-its window hidden, in `--amberite-dev-config` when it starts. `tauri-local.conf.json` turns on the
-`dev` capability, which lets a dev App call any Core address.
+its window hidden, in `--amberite-dev-config` when it starts.
 
 Nothing watches Rust files. After a Rust edit, restart with `down` then `up`, or `rs <scenario>` and
 `rs core` in the foreground runner; the key has changed, so the runner builds first. If a build
 fails, the process stays stopped until the next restart.
 
-Builds run one at a time across every checkout, at below-normal priority, so several agents
-restarting after Rust edits queue up instead of taking the whole machine.
+Builds and test runs go one at a time across every checkout, at below-normal priority, so several
+agents restarting after Rust edits queue up instead of taking the whole machine. A test run holds
+its turn until its tests finish, since another build would replace the test programs.
 
 Every checkout compiles into the primary checkout's `target/dev-shared`, like a pnpm store: each
 third-party crate is compiled once and kept once, whichever checkout needed it first. Only the
-runner compiles there; a plain `cargo` run uses `target` and cannot change what the runner trusts. `cargo clean` in the primary checkout
+runner compiles there, tests included; a plain `cargo` run, `cargo test` too, uses `target` and
+cannot change what the runner trusts. `cargo clean` in the primary checkout
 deletes `target/dev-shared` too, so every checkout compiles from scratch next time.
 
 Cargo decides what to recompile from file times alone, so in a shared folder a crate last compiled
 from another checkout can look finished here. `target/dev-shared/built-crates.json` records, for each crate in
-the repo, the content it was last compiled from and for which programs. Before a build, a crate
+the repo, the content it was last compiled from and for which programs and test runs: a crate
+compiled for a test run is a different build from the same crate in a program, and each set of
+tested crates is its own test run. Before a build, a crate
 that matches gets its files dated 2000, so Cargo keeps its output; any other crate gets the current
 time, so Cargo compiles it again. Inputs outside every crate folder, such as the App's version in
-`apps/app-frontend/package.json`, count toward the program's own crate. Switching between worktrees that differ only in `apps/app`
-compiles that one crate (about 2.5 minutes); when `packages/app-lib` differs too, theseus compiles
+`apps/app-frontend/package.json`, count toward the program's own crate, in its tests too. A crate's
+own tests can
+hold its checkout's path (`env!("CARGO_MANIFEST_DIR")`), which Cargo does not compare, so they
+are trusted only in the checkout that compiled them last; another checkout compiles that crate
+again. A test run also compiles again every local crate it uses that it has not used at that
+content before. A crate compiled again, even from the same content, is newer than the compiled
+crates that use it, so the next program build that runs Cargo compiles those again as well (for
+`path-util`, the engine and the App). Switching between worktrees that differ only in `apps/app`
+compiles that one crate (about 2.5 minutes); when `packages/engine` differs too, the engine compiles
 again as well (about 7 minutes).
 
 An older checkout that still runs its App from `target/dev-shared/debug` holds that file open; the runner
 renames it aside and builds again.
 
 A fresh dev Core belongs to nobody. Add it once from an App with the code in the `[core]` output;
-until then the Servers page asks for a Core. The dev App may call any Core address, which a
-packaged build does not allow yet. The App signs in to a Core with a ticket on its first request
-and keeps that session in the OS keychain; set `CORE_PROXY_LOG=1` before starting an App
+until then the Servers page asks for a Core. The App signs in to a Core with a ticket on its first
+request and keeps that session in the OS keychain; set `CORE_PROXY_LOG=1` before starting an App
 to log the head of every request its Core proxy sends, with the session token left out.
 
 The Worker runs through `wrangler dev --local`; D1, Durable Objects, and the R2 bucket that holds
@@ -160,8 +186,8 @@ Keep backend, Core, and scenarios together when copying the dataset.
 Worktree setup copies `backend`, `core`, and `scenarios` from the primary checkout's `.data/` without
 overwriting existing state.
 
-`runtime.json` holds the runner's PID, the ports, and each scenario's `bridgeUrl` while the stack is
-running. The PID and bridge URLs are removed when it stops.
+`runtime.json` holds the runner's PID, the ports, and each scenario's `tabUrl` while the stack is
+running. The PID and URLs are removed when it stops.
 
 ### Regenerating the sharing dataset
 
@@ -170,7 +196,7 @@ Share tab lists scenario 2 as a member, and scenario 2's copy shows no wrong-acc
 member's instance has no Share tab). Rebuild it in a worktree, through the Apps, and hand it over
 by copying; test data never leaves a worktree on its own.
 
-1. `vp run up 1 2` and open both bridge URLs.
+1. `node scripts/dev-runner.ts up 1 2` and open both tab URLs.
 2. In App 1, delete every instance whose Share tab says "Wrong account" (Instance settings, General,
    Delete instance). Such a record points at a shared instance the backend no longer has, and the
    locked Share tab offers no other way out.
@@ -207,13 +233,17 @@ advances the complete applicable set until it finds an available one. To start A
 an existing backend, use the same `PORT_OFFSET` if that backend shifted from its preferred
 offset; read the ports in the runner output first.
 
+Each App also gets a local API address, `http://127.0.0.1:<port>/<secret>`, which the runner passes
+in its dev config and adds to the App's tab URL as `#local=<address>`. The secret is in
+`runtime.json` and the `up` and `status` output, never in `.data/dev.log`.
+
 Treat the `[dev-runner]` output and `.data/runtime.json` as authoritative. The preferred ports are
 stable, but an occupied port can shift the actual run.
 
 ## Process ownership
 
 The dev runner stops its child processes when it receives Ctrl+C or the `quit` input command.
-A runner started with `vp run up` has no input; stop it with `vp run down`, which stops the
+A runner started with `up` has no input; stop it with `vp run down`, which stops the
 PID recorded in `.data/runtime.json` and nothing else. Never kill by a broad process name, command
 match, or worktree path: several worktrees may be running Node, Core, and Tauri at the same
 time, and a pattern can also match the agent doing the work.
@@ -247,23 +277,13 @@ errors and warnings to the same terminal; error and warning notifications are lo
 
 ## Upstream sync
 
-`.github/workflows/upstream-sync.yml` runs daily. When Modrinth has new commits and no earlier sync
-is waiting, it runs `node scripts/upstream-sync.ts` on a new `sync/upstream/N` branch and pushes it:
-one merge commit with both parents, the `ignore` paths from `upstream.json` deleted, lockfiles taken
-from Modrinth and pruned, and any conflict markers committed as they are. The run's
-`upstream-sync-N` artifact holds the script's JSON summary, the new commit titles, the merged
-Modrinth pull requests, and the diff of Modrinth's changelog. The `/upstream-sync` skill resolves
-the branch and opens the pull request. Merge it with a merge commit, never a squash.
-
-The workflow checks out and pushes with the `UPSTREAM_SYNC_TOKEN` secret, because GitHub never lets
-`GITHUB_TOKEN` push changes to `.github/workflows`. It is a fine-grained personal access token for
-`amberitedev/code` only, with Contents and Workflows set to read and write. When it expires the
-Merge step fails at checkout; replace the secret with a new token.
+The daily Modrinth merge, `upstream.json` and the porting rules are in [upstream](upstream.md).
 
 ## Timings
 
-Setup, every Rust build, and every `up` append one JSON line to the primary checkout's
-`.data/timings.jsonl`, shared by all checkouts. Each line has `kind` (`setup`, `build`, `up`),
-the worktree, the result, and milliseconds per step: `install` and `data` for setup, `lockWait`
-and `compile` plus the number of repo crates compiled again for a build, and the wait until ready
-for `up`. It is the record for checking whether a change to the dev setup made it faster.
+Setup, every Rust build and test run, and every `up` append one JSON line to the primary checkout's
+`.data/timings.jsonl`, shared by all checkouts. Each line has `kind` (`setup`, `build`, `test`,
+`up`), the worktree, the result, and milliseconds per step: `install` and `data` for setup,
+`lockWait` and `compile` plus the number of repo crates compiled again for a build, the same plus
+`test` and the tested crates for a test run, and the wait until ready for `up`. It is the record for checking
+whether a change to the dev setup made it faster.

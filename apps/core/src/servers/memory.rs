@@ -146,7 +146,7 @@ mod platform {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{db, state::servers::adapters::sqlite::server_rows};
+    use crate::{db, servers::server_rows};
 
     #[test]
     fn the_heap_starts_small_and_custom_flags_replace_the_tuned_ones() {
@@ -171,7 +171,7 @@ mod tests {
     #[tokio::test]
     async fn flags_are_set_and_reset() {
         let db = db::memory().await;
-        let server = server_rows::create(&db, "A", |_| true)
+        let server = server_rows::create(&db, "a", "A", |_| true)
             .await
             .unwrap()
             .unwrap();

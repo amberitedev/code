@@ -6,7 +6,9 @@ use std::collections::HashSet;
 
 use super::PushFile;
 use crate::rules::{CONFIG_FILE_TYPE, ShareScope};
-use crate::versions::{InvalidRemovedFile, RemovedFile, VersionContent};
+use contracts::backend::sharing::{RemovedFile, VersionContent};
+
+use crate::versions::{InvalidRemovedFile, RemovedFileRules};
 
 /// A new version as one side reads it from its own state.
 pub struct VersionInput {

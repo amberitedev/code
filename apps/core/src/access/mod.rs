@@ -1,13 +1,14 @@
-//! Who can do what: tickets, sessions, per-server roles, the local socket, the activity log, and
-//! backend sync. The request and response shapes are in `api::access`, `api::sessions`,
-//! `api::activity`, and `api::backend`.
+//! Who can do what: tickets, sessions, download links, per-server roles, the local socket, the
+//! activity log, and backend sync. The request and response shapes are in `api::access`, `api::sessions`,
+//! `api::activity`, and, for the backend, `contracts::backend::cores`.
 //!
-//! Every route takes a [`Caller`] and checks it: [`Caller::require`] for a role on one server,
-//! [`Caller::require_owner`] for the Core itself, and [`Dangerous`] for the owner's actions that
-//! need a fresh ticket.
+//! Every route takes a [`Caller`] and checks it: [`CoreAccess::require`] for a role on one server,
+//! [`require_owner`] for the Core itself, and [`Dangerous`] for the owner's actions that need a
+//! fresh ticket.
 
 pub mod activity;
 pub mod keys;
+pub mod links;
 pub mod local;
 pub mod owed;
 pub mod pairing;
@@ -26,20 +27,21 @@ use axum::{
     extract::FromRequestParts,
     http::{HeaderMap, header::AUTHORIZATION, request::Parts},
 };
+use contracts::{
+    ApiError, ErrorCode,
+    core::{CoreRole, TICKET_HEADER},
+};
+use engine::access::{Access, BoxFuture};
+pub use engine::access::{Caller, Permission};
+use sqlx::SqlitePool;
 use tokio::sync::{Notify, broadcast};
 
 use crate::{
-    api::{
-        AppState,
-        access::Role,
-        error::{ApiError, ErrorCode},
-    },
+    api::{CoreState, Shared, internal},
     db,
 };
 
-/// The header a dangerous action carries its fresh ticket in.
-pub const TICKET_HEADER: &str = "x-amberite-ticket";
-/// Live console streams one session may hold.
+/// `/events` sockets one session may hold.
 const STREAMS_PER_SESSION: usize = 4;
 const SIGN_INS_PER_MINUTE: u32 = 10;
 
@@ -48,16 +50,18 @@ pub fn now() -> i64 {
     chrono::Utc::now().timestamp()
 }
 
-/// Access state shared by every route.
-pub struct Access {
+/// Access state shared by every route, and the engine's [`Access`] on this Core.
+pub struct CoreAccess {
+    db: SqlitePool,
     pub keys: keys::Keys,
-    /// Users whose sessions or roles changed. Live console streams listen and close when their
-    /// session or role is gone.
+    /// Users whose sessions or roles changed. `/events` sockets listen, and end what their
+    /// session or role no longer allows.
     pub changed: broadcast::Sender<Changed>,
     /// Wakes backend sync when a call is owed.
     pub owed: Arc<Notify>,
     /// Asks the pairing loop for a fresh code (`copal pair`).
     pub new_code: Notify,
+    links: links::Links,
     streams: Mutex<HashMap<String, usize>>,
     sign_ins: Mutex<HashMap<IpAddr, (Instant, u32)>>,
 }
@@ -69,13 +73,15 @@ pub enum Changed {
     Everyone,
 }
 
-impl Access {
-    pub fn new(keys: keys::Keys) -> Self {
+impl CoreAccess {
+    pub fn new(db: SqlitePool, keys: keys::Keys) -> Self {
         Self {
+            db,
             keys,
             changed: broadcast::channel(64).0,
             owed: Arc::new(Notify::new()),
             new_code: Notify::new(),
+            links: links::Links::default(),
             streams: Mutex::default(),
             sign_ins: Mutex::default(),
         }
@@ -96,7 +102,7 @@ impl Access {
         *count <= SIGN_INS_PER_MINUTE
     }
 
-    /// Hold one of a session's console streams until the guard drops. `None` at the cap.
+    /// Hold one of a session's `/events` sockets until the guard drops. `None` at the cap.
     pub fn open_stream(
         self: &Arc<Self>,
         caller: &Caller,
@@ -112,10 +118,27 @@ impl Access {
         *open += 1;
         Some(StreamGuard(Some((Arc::clone(self), id.clone()))))
     }
+
+    /// Whether `caller`'s session is still live: not ended, expired, or idle past
+    /// `sessions::IDLE_S`. The local CLI's always is.
+    pub async fn revalidate(&self, caller: &Caller) -> bool {
+        let Caller::Session { id, .. } = caller else {
+            return true;
+        };
+        let live = sqlx::query(
+            "SELECT 1 FROM sessions WHERE id = ?1 AND expires_at > ?2 AND last_used_at > ?2 - ?3",
+        )
+        .bind(id)
+        .bind(now())
+        .bind(sessions::IDLE_S)
+        .fetch_optional(&self.db)
+        .await;
+        matches!(live, Ok(Some(_)))
+    }
 }
 
-/// One open console stream of a session. The local CLI's are not counted.
-pub struct StreamGuard(Option<(Arc<Access>, String)>);
+/// One open `/events` socket of a session. The local CLI's are not counted.
+pub struct StreamGuard(Option<(Arc<CoreAccess>, String)>);
 
 impl Drop for StreamGuard {
     fn drop(&mut self) {
@@ -135,100 +158,63 @@ impl Drop for StreamGuard {
 #[derive(Debug, Clone, Copy)]
 pub struct Peer(pub IpAddr);
 
-/// What a caller may do on one server. The owner has everything on every server.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Level {
-    Viewer,
-    Editor,
-    Owner,
-}
-
-impl From<Role> for Level {
-    fn from(role: Role) -> Self {
-        match role {
-            Role::Viewer => Self::Viewer,
-            Role::Editor => Self::Editor,
-        }
+pub fn require_owner(caller: &Caller) -> Result<(), ApiError> {
+    if caller.is_owner() {
+        Ok(())
+    } else {
+        Err(ApiError::new(
+            ErrorCode::Forbidden,
+            "Only this Core's owner can do that.",
+        ))
     }
 }
 
-/// Who made a request.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Caller {
-    /// The CLI over the local socket: the owner, with no token and no ticket.
-    Local,
-    Session {
-        /// The session's public id.
-        id: String,
-        user_id: String,
-        /// The user is this Core's owner.
-        owner: bool,
-    },
-}
-
-impl Caller {
-    /// The signed-in user. `None` for the local CLI.
-    pub fn user_id(&self) -> Option<&str> {
-        match self {
-            Self::Local => None,
-            Self::Session { user_id, .. } => Some(user_id),
-        }
-    }
-
-    pub fn is_owner(&self) -> bool {
-        matches!(self, Self::Local | Self::Session { owner: true, .. })
-    }
-
-    pub fn require_owner(&self) -> Result<(), ApiError> {
-        if self.is_owner() {
-            Ok(())
-        } else {
-            Err(ApiError::new(
-                ErrorCode::Forbidden,
-                "Only this Core's owner can do that.",
-            ))
-        }
-    }
-
+impl CoreAccess {
     /// The caller's level on `server_id`, `None` without a role there.
     pub async fn level(
         &self,
-        db: &sqlx::SqlitePool,
+        caller: &Caller,
         server_id: &str,
-    ) -> sqlx::Result<Option<Level>> {
-        let Self::Session { user_id, owner, .. } = self else {
-            return Ok(Some(Level::Owner));
+    ) -> sqlx::Result<Option<Permission>> {
+        let Caller::Session { user_id, owner, .. } = caller else {
+            return Ok(Some(Permission::Owner));
         };
         if *owner {
-            return Ok(Some(Level::Owner));
+            return Ok(Some(Permission::Owner));
         }
-        let role: Option<Role> = sqlx::query_scalar(
+        let role: Option<CoreRole> = sqlx::query_scalar(
             "SELECT role FROM access WHERE server_id = ? AND user_id = ?",
         )
         .bind(server_id)
         .bind(user_id)
-        .fetch_optional(db)
+        .fetch_optional(&self.db)
         .await?;
-        Ok(role.map(Level::from))
+        Ok(role.map(|role| match role {
+            CoreRole::Viewer => Permission::View,
+            CoreRole::Editor => Permission::Edit,
+        }))
     }
 
-    /// Require at least `level` on `server_id`. A caller with no role there gets the same 404 as
-    /// for a server that does not exist: friends never learn about the other servers.
+    /// Require at least `permission` on `server_id`, and return the caller's level. A caller with
+    /// no role there gets the same 404 as for a server that does not exist: friends never learn
+    /// about the other servers.
     pub async fn require(
         &self,
-        db: &sqlx::SqlitePool,
+        caller: &Caller,
         server_id: &str,
-        level: Level,
-    ) -> Result<Level, ApiError> {
-        match self.level(db, server_id).await? {
+        permission: Permission,
+    ) -> Result<Permission, ApiError> {
+        match self.level(caller, server_id).await.map_err(internal)? {
             None => Err(ApiError::new(
                 ErrorCode::NotFound,
                 format!("There is no server {server_id}."),
             )),
-            Some(has) if has < level => Err(ApiError::new(
+            Some(has) if has < permission => Err(ApiError::new(
                 ErrorCode::Forbidden,
-                match level {
-                    Level::Editor => "Viewers cannot do that on this server.",
+                match permission {
+                    Permission::Edit => {
+                        "Viewers cannot do that on this server."
+                    }
                     _ => "Only this Core's owner can do that.",
                 },
             )),
@@ -237,28 +223,48 @@ impl Caller {
     }
 }
 
-impl FromRequestParts<Arc<AppState>> for Caller {
-    type Rejection = ApiError;
+impl Access for CoreAccess {
+    fn caller<'a>(
+        &'a self,
+        request: &'a Parts,
+    ) -> BoxFuture<'a, Result<Caller, ApiError>> {
+        Box::pin(async move {
+            if request.extensions.get::<local::Local>().is_some() {
+                return Ok(Caller::Local);
+            }
+            if let Some((token, path)) = links::split(&request.uri) {
+                return self.redeem(token, &path).await;
+            }
+            let token = request
+                .headers
+                .get(AUTHORIZATION)
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.strip_prefix("Bearer "))
+                .ok_or_else(|| {
+                    ApiError::new(
+                        ErrorCode::InvalidCredentials,
+                        "Sign in to this Core with a ticket first.",
+                    )
+                })?;
+            sessions::authenticate(&self.db, token, now()).await
+        })
+    }
 
-    async fn from_request_parts(
-        parts: &mut Parts,
-        state: &Arc<AppState>,
-    ) -> Result<Self, ApiError> {
-        if parts.extensions.get::<local::Local>().is_some() {
-            return Ok(Self::Local);
-        }
-        let token = parts
-            .headers
-            .get(AUTHORIZATION)
-            .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.strip_prefix("Bearer "))
-            .ok_or_else(|| {
-                ApiError::new(
-                    ErrorCode::Unauthorized,
-                    "Sign in to this Core with a ticket first.",
-                )
-            })?;
-        sessions::authenticate(&state.db, token, now()).await
+    /// Without a server, only the owner gets in.
+    fn require<'a>(
+        &'a self,
+        caller: &'a Caller,
+        instance: Option<&'a str>,
+        permission: Permission,
+    ) -> BoxFuture<'a, Result<Permission, ApiError>> {
+        Box::pin(async move {
+            match instance {
+                Some(server_id) => {
+                    Self::require(self, caller, server_id, permission).await
+                }
+                None => require_owner(caller).map(|()| Permission::Owner),
+            }
+        })
     }
 }
 
@@ -268,15 +274,15 @@ impl FromRequestParts<Arc<AppState>> for Caller {
 /// needs a fresh ticket (see [`fresh_ticket`]); the local CLI needs none.
 pub struct Dangerous(pub Caller);
 
-impl FromRequestParts<Arc<AppState>> for Dangerous {
+impl FromRequestParts<Shared> for Dangerous {
     type Rejection = ApiError;
 
     async fn from_request_parts(
         parts: &mut Parts,
-        state: &Arc<AppState>,
+        state: &Shared,
     ) -> Result<Self, ApiError> {
         let caller = Caller::from_request_parts(parts, state).await?;
-        Self::check(state, caller, &parts.headers).await
+        Self::check(&state.0, caller, &parts.headers).await
     }
 }
 
@@ -284,11 +290,11 @@ impl Dangerous {
     /// The extractor's checks, for a route where only some changes are dangerous, such as
     /// keeping fewer scheduled backups.
     pub async fn check(
-        state: &AppState,
+        state: &CoreState,
         caller: Caller,
         headers: &HeaderMap,
     ) -> Result<Self, ApiError> {
-        caller.require_owner()?;
+        require_owner(&caller)?;
         fresh_ticket(state, &caller, headers).await?;
         Ok(Self(caller))
     }
@@ -297,7 +303,7 @@ impl Dangerous {
 /// Check and use up the ticket in [`TICKET_HEADER`]: under five minutes old, never used, and for
 /// the session's own user. A stolen session alone cannot pass this. The local CLI always does.
 pub async fn fresh_ticket(
-    state: &AppState,
+    state: &CoreState,
     caller: &Caller,
     headers: &HeaderMap,
 ) -> Result<(), ApiError> {
@@ -314,7 +320,7 @@ pub async fn fresh_ticket(
             )
         })?;
     let now = now();
-    let core_id = db::core_id(&state.db).await?;
+    let core_id = db::core_id(&state.db).await.map_err(internal)?;
     let claims =
         tickets::verify(&state.access.keys, ticket, &core_id, now).await?;
     if claims.sub != user_id {
@@ -323,6 +329,6 @@ pub async fn fresh_ticket(
             "The ticket is for someone else.",
         ));
     }
-    let mut conn = state.db.acquire().await?;
+    let mut conn = state.db.acquire().await.map_err(internal)?;
     tickets::spend(&mut conn, &claims, now).await
 }

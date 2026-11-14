@@ -7,9 +7,8 @@
 //! be picked, and both refuse them in a push.
 //!
 //! The server's rules are mirrored in `packages/ui/src/composables/server-sharing/config-files.ts`,
-//! which takes the extension list from `packages/api-client/src/modules/sharing/rules.ts`,
-//! generated from this file. `cargo test -p sharing-client` fails when that file is stale.
-//! Regenerate it with `cargo test -p sharing-client -- --ignored write_typescript`.
+//! which reads the folder and extensions from [`contracts::rules`] through the generated
+//! TypeScript.
 
 mod listing;
 
@@ -20,30 +19,20 @@ pub use listing::{
 
 use std::path::{Component, Path};
 
-use bedrock::state::ProjectType;
+use contracts::rules::{SERVER_SHARE_FOLDER, SHAREABLE_CONFIG_EXTENSIONS};
+use modrinth_content_management::ContentType;
 
 /// The manifest type of a single file the owner picked, named by its path.
 pub const CONFIG_FILE_TYPE: &str = "config";
 /// Leading bytes of each file passed to [`is_executable_content`].
 pub const SCAN_HEAD_SIZE: usize = 8192;
-/// The folder a server's shared files live in.
-pub const SERVER_SHARE_FOLDER: &str = "config";
-/// Extensions of the config files a server's share may carry.
-pub const CONFIG_EXTENSIONS: [&str; 14] = [
-    "json",
-    "json5",
-    "jsonc",
-    "yml",
-    "yaml",
-    "css",
-    "toml",
-    "txt",
-    "ini",
-    "cfg",
-    "conf",
-    "properties",
-    "xml",
-    "nbt",
+/// The folder of each content type an instance or server folder holds. Plugins and modpacks have
+/// none.
+const CONTENT_FOLDERS: [(ContentType, &str); 4] = [
+    (ContentType::Mod, "mods"),
+    (ContentType::DataPack, "datapacks"),
+    (ContentType::ResourcePack, "resourcepacks"),
+    (ContentType::Shader, "shaderpacks"),
 ];
 
 /// Extensions of executables, scripts and installers, which no share carries.
@@ -107,7 +96,7 @@ impl ShareScope {
             && match self {
                 Self::Instance { .. } => !is_executable_name(path),
                 Self::Server => extension(path).is_some_and(|extension| {
-                    CONFIG_EXTENSIONS.contains(&extension.as_str())
+                    SHAREABLE_CONFIG_EXTENSIONS.contains(&extension.as_str())
                 }),
             }
     }
@@ -163,9 +152,35 @@ fn extension(path: &str) -> Option<String> {
     Some(extension.to_ascii_lowercase())
 }
 
+/// The content type with a folder that `name` names, by its manifest type (`shader`) or its
+/// folder (`shaderpacks`).
+pub(crate) fn content_type(name: &str) -> Option<ContentType> {
+    CONTENT_FOLDERS
+        .into_iter()
+        .find(|(content_type, folder)| {
+            content_type.as_str() == name || *folder == name
+        })
+        .map(|(content_type, _)| content_type)
+}
+
+/// The folder content of `content_type` goes in.
+pub(crate) fn content_folder(
+    content_type: ContentType,
+) -> Option<&'static str> {
+    CONTENT_FOLDERS
+        .into_iter()
+        .find(|(listed, _)| *listed == content_type)
+        .map(|(_, folder)| folder)
+}
+
+/// Whether a share carries content of `content_type`: never a plugin, which runs only on the
+/// server, or a modpack, which is not content.
+pub fn shares_content(content_type: ContentType) -> bool {
+    content_folder(content_type).is_some()
+}
+
 fn is_content_folder(path: &str) -> bool {
-    ProjectType::iterator()
-        .any(|project_type| project_type.get_folder() == path)
+    CONTENT_FOLDERS.iter().any(|(_, folder)| *folder == path)
 }
 
 #[cfg(test)]
@@ -206,50 +221,19 @@ mod tests {
     }
 
     #[test]
+    fn content_types_are_named_by_type_or_folder() {
+        assert_eq!(content_type("shader"), Some(ContentType::Shader));
+        assert_eq!(content_type("shaderpacks"), Some(ContentType::Shader));
+        assert_eq!(content_folder(ContentType::DataPack), Some("datapacks"));
+        assert_eq!(content_type("plugin"), None);
+        assert_eq!(content_folder(ContentType::ModPack), None);
+        assert!(!shares_content(ContentType::Plugin));
+        assert!(shares_content(ContentType::Mod));
+    }
+
+    #[test]
     fn executables_are_blocked_by_their_bytes() {
         assert!(INSTANCE.blocked("options.txt", b"MZ\x90\x00\x03\x00\x00\x00"));
         assert!(!INSTANCE.blocked("options.txt", b"fov:90"));
-    }
-
-    mod typescript {
-        const PATH: &str = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../api-client/src/modules/sharing/rules.ts"
-        );
-
-        fn file() -> String {
-            let extensions = super::CONFIG_EXTENSIONS
-                .iter()
-                .map(|extension| format!("\t'{extension}',\n"))
-                .collect::<String>();
-            format!(
-                "// Generated from packages/sharing-client/src/rules/mod.rs. Do not edit.\n\
-                 // Regenerate: cargo test -p sharing-client -- --ignored write_typescript\n\n\
-                 /** The folder a server's shared files live in. */\n\
-                 export const SERVER_SHARE_FOLDER = '{}'\n\n\
-                 /** Extensions of the config files a server's share may carry. */\n\
-                 export const SHAREABLE_CONFIG_EXTENSIONS: readonly string[] = [\n{extensions}]\n",
-                super::SERVER_SHARE_FOLDER
-            )
-        }
-
-        #[test]
-        fn typescript_is_up_to_date() {
-            let written = std::fs::read_to_string(PATH).unwrap_or_default();
-            assert!(
-                written.replace("\r\n", "\n") == file(),
-                "{PATH} is out of date. Run: cargo test -p sharing-client -- --ignored write_typescript"
-            );
-        }
-
-        #[test]
-        #[ignore = "writes the generated file; run on purpose"]
-        fn write_typescript() {
-            std::fs::create_dir_all(
-                std::path::Path::new(PATH).parent().unwrap(),
-            )
-            .unwrap();
-            std::fs::write(PATH, file()).unwrap();
-        }
     }
 }

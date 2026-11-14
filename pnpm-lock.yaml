@@ -307,24 +307,9 @@ importers:
       '@tauri-apps/api':
         specifier: ^2.5.0
         version: 2.10.1
-      '@tauri-apps/plugin-dialog':
-        specifier: ^2.2.1
-        version: 2.6.0
-      '@tauri-apps/plugin-fs':
-        specifier: ^2.4.5
-        version: 2.4.5
       '@tauri-apps/plugin-http':
         specifier: ~2.5.7
         version: 2.5.7
-      '@tauri-apps/plugin-opener':
-        specifier: ^2.2.6
-        version: 2.5.3
-      '@tauri-apps/plugin-os':
-        specifier: ^2.2.1
-        version: 2.3.2
-      '@tauri-apps/plugin-updater':
-        specifier: ^2.7.1
-        version: 2.10.0
       '@tauri-apps/plugin-window-state':
         specifier: ^2.2.2
         version: 2.4.1
@@ -434,6 +419,9 @@ importers:
 
   apps/backend:
     dependencies:
+      '@amberite/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       zxcvbn:
         specifier: 4.4.2
         version: 4.4.2
@@ -458,6 +446,9 @@ importers:
 
   packages/api-client:
     dependencies:
+      '@amberite/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       mitt:
         specifier: ^3.0.1
         version: 3.0.1
@@ -545,66 +536,7 @@ importers:
         specifier: ^2.4.2
         version: 2.6.1
 
-  packages/browser-bridge:
-    devDependencies:
-      '@tauri-apps/api':
-        specifier: 2.10.1
-        version: 2.10.1
-      '@tauri-apps/plugin-dialog':
-        specifier: 2.4.0
-        version: 2.4.0
-      '@tauri-apps/plugin-fs':
-        specifier: 2.4.5
-        version: 2.4.5
-      '@tauri-apps/plugin-http':
-        specifier: 2.5.7
-        version: 2.5.7
-      '@tauri-apps/plugin-opener':
-        specifier: 2.5.0
-        version: 2.5.0
-      '@tauri-apps/plugin-os':
-        specifier: 2.3.1
-        version: 2.3.1
-      '@tauri-apps/plugin-window-state':
-        specifier: 2.4.0
-        version: 2.4.0
-      '@types/node':
-        specifier: ^24
-        version: 24.12.2
-      typescript:
-        specifier: ^5.9.3
-        version: 5.9.3
-      vitest:
-        specifier: 4.1.10
-        version: 4.1.10(@types/node@24.12.2)(@vitest/browser-preview@4.1.10)(@voidzero-dev/vite-plus-core@0.2.9(@types/node@24.12.2)(esbuild@0.28.1)(jiti@2.6.1)(sass@1.97.3)(terser@5.46.0)(typescript@5.9.3)(yaml@2.8.2))(jsdom@26.1.0(canvas@3.2.3)(supports-color@10.2.2))
-
-  packages/moderation:
-    dependencies:
-      '@modrinth/api-client':
-        specifier: workspace:*
-        version: link:../api-client
-      '@modrinth/assets':
-        specifier: workspace:*
-        version: link:../assets
-      '@modrinth/utils':
-        specifier: workspace:*
-        version: link:../utils
-      vue:
-        specifier: 3.5.27
-        version: 3.5.27(typescript@5.9.3)
-    devDependencies:
-      '@formatjs/cli':
-        specifier: ^6.2.12
-        version: 6.12.2(@vue/compiler-core@3.5.27)(vue@3.5.27(typescript@5.9.3))
-      '@modrinth/tooling-config':
-        specifier: workspace:*
-        version: link:../tooling-config
-      '@modrinth/ui':
-        specifier: workspace:*
-        version: link:../ui
-      typescript:
-        specifier: ^5.4.5
-        version: 5.9.3
+  packages/contracts: {}
 
   packages/tooling-config:
     dependencies:
@@ -3092,35 +3024,8 @@ packages:
     engines: {node: '>= 10'}
     hasBin: true
 
-  '@tauri-apps/plugin-dialog@2.4.0':
-    resolution: {integrity: sha512-OvXkrEBfWwtd8tzVCEXIvRfNEX87qs2jv6SqmVPiHcJjBhSF/GUvjqUNIDmKByb5N8nvDqVUM7+g1sXwdC/S9w==}
-
-  '@tauri-apps/plugin-dialog@2.6.0':
-    resolution: {integrity: sha512-q4Uq3eY87TdcYzXACiYSPhmpBA76shgmQswGkSVio4C82Sz2W4iehe9TnKYwbq7weHiL88Yw19XZm7v28+Micg==}
-
-  '@tauri-apps/plugin-fs@2.4.5':
-    resolution: {integrity: sha512-dVxWWGE6VrOxC7/jlhyE+ON/Cc2REJlM35R3PJX3UvFw2XwYhLGQVAIyrehenDdKjotipjYEVc4YjOl3qq90fA==}
-
   '@tauri-apps/plugin-http@2.5.7':
     resolution: {integrity: sha512-+F2lEH/c9b0zSsOXKq+5hZNcd9F4IIKCK1T17RqMwpCmVnx2aoqY8yIBccCd25HTYUb3j6NPVbRax/m00hKG8A==}
-
-  '@tauri-apps/plugin-opener@2.5.0':
-    resolution: {integrity: sha512-B0LShOYae4CZjN8leiNDbnfjSrTwoZakqKaWpfoH6nXiJwt6Rgj6RnVIffG3DoJiKsffRhMkjmBV9VeilSb4TA==}
-
-  '@tauri-apps/plugin-opener@2.5.3':
-    resolution: {integrity: sha512-CCcUltXMOfUEArbf3db3kCE7Ggy1ExBEBl51Ko2ODJ6GDYHRp1nSNlQm5uNCFY5k7/ufaK5Ib3Du/Zir19IYQQ==}
-
-  '@tauri-apps/plugin-os@2.3.1':
-    resolution: {integrity: sha512-ty5V8XDUIFbSnrk3zsFoP3kzN+vAufYzalJSlmrVhQTImIZa1aL1a03bOaP2vuBvfR+WDRC6NgV2xBl8G07d+w==}
-
-  '@tauri-apps/plugin-os@2.3.2':
-    resolution: {integrity: sha512-n+nXWeuSeF9wcEsSPmRnBEGrRgOy6jjkSU+UVCOV8YUGKb2erhDOxis7IqRXiRVHhY8XMKks00BJ0OAdkpf6+A==}
-
-  '@tauri-apps/plugin-updater@2.10.0':
-    resolution: {integrity: sha512-ljN8jPlnT0aSn8ecYhuBib84alxfMx6Hc8vJSKMJyzGbTPFZAC44T2I1QNFZssgWKrAlofvJqCC6Rr472JWfkQ==}
-
-  '@tauri-apps/plugin-window-state@2.4.0':
-    resolution: {integrity: sha512-hRSzPNi2NG0lPFthfVY0V5C1MyWN/gGaQtQYw7i9zZhLzrhZveHZ2omHG1rIiIsjfTGbO7fhjydSoeTTK9GqLw==}
 
   '@tauri-apps/plugin-window-state@2.4.1':
     resolution: {integrity: sha512-OuvdrzyY8Q5Dbzpj+GcrnV1iCeoZbcFdzMjanZMMcAEUNy/6PH5pxZPXpaZLOR7whlzXiuzx0L9EKZbH7zpdRw==}
@@ -8665,43 +8570,7 @@ snapshots:
       '@tauri-apps/cli-win32-ia32-msvc': 2.12.0
       '@tauri-apps/cli-win32-x64-msvc': 2.12.0
 
-  '@tauri-apps/plugin-dialog@2.4.0':
-    dependencies:
-      '@tauri-apps/api': 2.10.1
-
-  '@tauri-apps/plugin-dialog@2.6.0':
-    dependencies:
-      '@tauri-apps/api': 2.10.1
-
-  '@tauri-apps/plugin-fs@2.4.5':
-    dependencies:
-      '@tauri-apps/api': 2.10.1
-
   '@tauri-apps/plugin-http@2.5.7':
-    dependencies:
-      '@tauri-apps/api': 2.10.1
-
-  '@tauri-apps/plugin-opener@2.5.0':
-    dependencies:
-      '@tauri-apps/api': 2.10.1
-
-  '@tauri-apps/plugin-opener@2.5.3':
-    dependencies:
-      '@tauri-apps/api': 2.10.1
-
-  '@tauri-apps/plugin-os@2.3.1':
-    dependencies:
-      '@tauri-apps/api': 2.10.1
-
-  '@tauri-apps/plugin-os@2.3.2':
-    dependencies:
-      '@tauri-apps/api': 2.10.1
-
-  '@tauri-apps/plugin-updater@2.10.0':
-    dependencies:
-      '@tauri-apps/api': 2.10.1
-
-  '@tauri-apps/plugin-window-state@2.4.0':
     dependencies:
       '@tauri-apps/api': 2.10.1
 

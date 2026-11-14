@@ -1,0 +1,93 @@
+//! Theseus process management interface
+
+use crate::ErrorKind;
+use crate::state::ProcessMetadata;
+pub use crate::{
+    Engine,
+    state::{Hooks, MemorySettings, Settings, WindowSize},
+};
+use uuid::Uuid;
+
+// Gets each running stored process in the state
+#[tracing::instrument(skip(state))]
+pub async fn get_all(state: &Engine) -> crate::Result<Vec<ProcessMetadata>> {
+    let processes = state.process_manager.get_all();
+    Ok(processes)
+}
+
+/// Instances with a game process an earlier run recorded, which may still be running.
+pub async fn persisted_instance_ids(
+    state: &Engine,
+) -> crate::Result<Vec<String>> {
+    Ok(
+        sqlx::query_scalar!("SELECT DISTINCT instance_id FROM processes")
+            .fetch_all(&state.pool)
+            .await?,
+    )
+}
+
+pub async fn resolve_instance_id(
+    state: &Engine,
+    instance: &str,
+) -> crate::Result<String> {
+    resolve_instance_id_with_state(instance, state)
+        .await?
+        .ok_or(
+            ErrorKind::InputError(format!(
+                "unknown instance id or path {instance}"
+            ))
+            .into(),
+        )
+}
+
+async fn resolve_instance_id_with_state(
+    instance: &str,
+    state: &Engine,
+) -> crate::Result<Option<String>> {
+    sqlx::query_scalar!(
+        "
+		SELECT id
+		FROM instances
+		WHERE id = ? OR path = ?
+		ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END
+		LIMIT 1
+		",
+        instance,
+        instance,
+        instance,
+    )
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(Into::into)
+}
+
+// Gets the UUID of each stored process in the state by instance id
+#[tracing::instrument(skip(state))]
+pub async fn get_by_instance_id(
+    state: &Engine,
+    instance_id: &str,
+) -> crate::Result<Vec<ProcessMetadata>> {
+    let processes = state
+        .process_manager
+        .get_all()
+        .into_iter()
+        .filter(|x| x.instance_id == instance_id)
+        .collect();
+    Ok(processes)
+}
+
+// Kill a child process stored in the state by UUID, as a string
+#[tracing::instrument(skip(state))]
+pub async fn kill(state: &Engine, uuid: Uuid) -> crate::Result<()> {
+    state.process_manager.kill(uuid).await?;
+
+    Ok(())
+}
+
+// Wait for a child process stored in the state by UUID
+#[tracing::instrument(skip(state))]
+pub async fn wait_for(state: &Engine, uuid: Uuid) -> crate::Result<()> {
+    state.process_manager.wait_for(uuid).await?;
+
+    Ok(())
+}

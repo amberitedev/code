@@ -1,14 +1,5 @@
-//! Per-server roles: who besides the owner may see or manage each server.
-//!
-//! - `GET /access/me`: the caller's own access. [`MyAccess`].
-//! - `GET /servers/{id}/access`: the owner and members of a server. [`ServerAccess`].
-//! - `POST /servers/{id}/access`: invite someone, which grants the role at once. [`Invite`] in,
-//!   [`Member`] out. Owner only, dangerous.
-//! - `PATCH /servers/{id}/access/{user_id}`: change a role. [`ChangeRole`] in, [`Member`] out.
-//!   Owner only, dangerous.
-//! - `DELETE /servers/{id}/access/{user_id}`: remove someone; their sessions and console streams
-//!   end. Owner only, dangerous. A member may also remove themselves, to leave the server, with
-//!   no ticket: that only takes away what their own session could do.
+//! Per-server roles: who besides the owner may see or manage each server (see
+//! `contracts::core::ListMembers` and the routes after it).
 //!
 //! A dangerous action carries a fresh ticket in the `X-Amberite-Ticket` header, so every route
 //! asks for it the same way whatever its method and body. Invites and removals are also owed to
@@ -16,29 +7,26 @@
 
 use std::sync::Arc;
 
-use axum::{
-    Json,
-    extract::{Path, State},
-    http::{HeaderMap, StatusCode},
+use axum::{extract::State, http::HeaderMap};
+use contracts::{
+    ApiError, Empty, ErrorCode, Json,
+    backend::cores::{AccessGrant, AccessRevocation},
+    core::{
+        Action, ChangeRole, CoreRole, CoreUser, GetMyAccess, InviteMember,
+        ListMembers, Member, MyAccess, RemoveMember, ServerAccess, ServerRole,
+    },
+    server::Req,
 };
-use serde::{Deserialize, Serialize};
 use sqlx::SqliteConnection;
-use ts_rs::TS;
-use uuid::Uuid;
 
-use super::{
-    AppState,
-    activity::Action,
-    backend::{Grant, Remove},
-    error::{ApiError, ErrorCode},
-};
+use super::{CoreState, internal};
 use crate::{
     access::{
-        Caller, Dangerous, Level, activity, fresh_ticket, now, owed::OwedCall,
-        sync::owe,
+        Caller, Dangerous, Permission, activity, fresh_ticket, now,
+        owed::OwedCall, require_owner, sync::owe,
     },
     servers::ServerError,
-    state::servers::adapters::sqlite::server_rows,
+    servers::server_rows,
 };
 
 /// People with a role on any server of this Core, at most. The backend's directory holds no
@@ -46,91 +34,18 @@ use crate::{
 /// never be replaced there. The two must stay equal.
 pub const MAX_DIRECTORY: i64 = 1000;
 
-/// A role on one server. The owner has every role on every server and is never a member.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    TS,
-    sqlx::Type,
-    clap::ValueEnum,
-)]
-#[serde(rename_all = "snake_case")]
-#[sqlx(type_name = "TEXT", rename_all = "snake_case")]
-pub enum Role {
-    /// Sees status, players, content, and backups. No console: it carries chat and player IPs.
-    Viewer,
-    /// Everything a viewer can, plus running, console, files, settings, and backups. Runs code on
-    /// the host machine.
-    Editor,
-}
-
-/// A user as their last ticket named them.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-pub struct User {
-    pub id: String,
-    pub name: String,
-    pub avatar_url: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-pub struct Member {
-    pub user: User,
-    pub role: Role,
-    /// Unix seconds.
-    pub added_at: i64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-pub struct ServerAccess {
-    /// Null until the Core is paired.
-    pub owner: Option<User>,
-    pub members: Vec<Member>,
-}
-
-#[derive(Debug, Clone, Deserialize, TS)]
-pub struct Invite {
-    /// Shown until the invited user signs in and their own ticket names them.
-    pub user: User,
-    pub role: Role,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-pub struct ChangeRole {
-    pub role: Role,
-}
-
-#[derive(Debug, Clone, Serialize, TS)]
-pub struct MyAccess {
-    pub user: User,
-    /// The owner of this Core, with every role on every server.
-    pub owner: bool,
-    /// Empty for the owner.
-    pub servers: Vec<ServerRole>,
-}
-
-#[derive(Debug, Clone, Serialize, TS)]
-pub struct ServerRole {
-    pub server_id: Uuid,
-    pub role: Role,
-}
-
-/// `GET /access/me`.
 pub async fn me(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
+    _: Req<GetMyAccess>,
 ) -> Result<Json<MyAccess>, ApiError> {
     let Some(user_id) = caller.user_id() else {
         return Err(ApiError::new(
-            ErrorCode::InvalidRequest,
+            ErrorCode::InvalidInput,
             "The local CLI is this Core's owner and has no account here.",
         ));
     };
-    let servers: Vec<(String, Role)> = if caller.is_owner() {
+    let servers: Vec<(String, CoreRole)> = if caller.is_owner() {
         Vec::new()
     } else {
         sqlx::query_as(
@@ -138,10 +53,10 @@ pub async fn me(
         )
         .bind(user_id)
         .fetch_all(&state.db)
-        .await?
+        .await.map_err(internal)?
     };
     Ok(Json(MyAccess {
-        user: user(&state.db, user_id).await?,
+        user: user(&state.db, user_id).await.map_err(internal)?,
         owner: caller.is_owner(),
         servers: servers
             .into_iter()
@@ -155,16 +70,19 @@ pub async fn me(
     }))
 }
 
-/// `GET /servers/{id}/access`. Owner only.
 pub async fn list(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
-    Path(server_id): Path<String>,
+    State(state): State<Arc<CoreState>>,
+    request: Req<ListMembers>,
 ) -> Result<Json<ServerAccess>, ApiError> {
-    caller.require(&state.db, &server_id, Level::Owner).await?;
+    let server_id = request.params.id;
+    state
+        .access
+        .require(&caller, &server_id, Permission::Owner)
+        .await?;
     server(&state, &server_id).await?;
-    let owner = match owner_id(&state.db).await? {
-        Some(id) => Some(user(&state.db, &id).await?),
+    let owner = match owner_id(&state.db).await.map_err(internal)? {
+        Some(id) => Some(user(&state.db, &id).await.map_err(internal)?),
         None => None,
     };
     let rows: Vec<String> = sqlx::query_scalar(
@@ -172,7 +90,7 @@ pub async fn list(
     )
     .bind(&server_id)
     .fetch_all(&state.db)
-    .await?;
+    .await.map_err(internal)?;
     let mut members = Vec::new();
     for user_id in rows {
         members.push(member(&state.db, &server_id, &user_id).await?);
@@ -180,16 +98,18 @@ pub async fn list(
     Ok(Json(ServerAccess { owner, members }))
 }
 
-/// `POST /servers/{id}/access`. Inviting someone who already has a role sets the new one and
-/// notifies them again.
 pub async fn invite(
     Dangerous(caller): Dangerous,
-    State(state): State<Arc<AppState>>,
-    Path(server_id): Path<String>,
-    Json(invite): Json<Invite>,
+    State(state): State<Arc<CoreState>>,
+    Req {
+        params,
+        body: invite,
+        ..
+    }: Req<InviteMember>,
 ) -> Result<Json<Member>, ApiError> {
+    let server_id = params.id;
     let server = server(&state, &server_id).await?;
-    let User {
+    let CoreUser {
         id: user_id,
         name,
         avatar_url,
@@ -200,25 +120,28 @@ pub async fn invite(
         || name.chars().count() > 64
     {
         return Err(ApiError::new(
-            ErrorCode::InvalidRequest,
+            ErrorCode::InvalidInput,
             "Invite someone by their account id and name.",
         ));
     }
-    if owner_id(&state.db).await?.as_deref() == Some(user_id.as_str()) {
+    if owner_id(&state.db).await.map_err(internal)?.as_deref()
+        == Some(user_id.as_str())
+    {
         return Err(ApiError::new(
             ErrorCode::Conflict,
             "The owner already has every role on every server.",
         ));
     }
 
-    let mut tx = state.db.begin().await?;
+    let mut tx = state.db.begin().await.map_err(internal)?;
     let (known, people): (bool, i64) = sqlx::query_as(
         "SELECT EXISTS (SELECT 1 FROM access WHERE user_id = ?), \
          (SELECT COUNT(DISTINCT user_id) FROM access)",
     )
     .bind(&user_id)
     .fetch_one(&mut *tx)
-    .await?;
+    .await
+    .map_err(internal)?;
     if !known && people >= MAX_DIRECTORY {
         return Err(ApiError::new(
             ErrorCode::Conflict,
@@ -237,7 +160,7 @@ pub async fn invite(
     .bind(&avatar_url)
     .bind(now())
     .execute(&mut *tx)
-    .await?;
+    .await.map_err(internal)?;
     sqlx::query(
         "INSERT INTO access (server_id, user_id, role, added_at) VALUES (?, ?, ?, ?) \
          ON CONFLICT (server_id, user_id) DO UPDATE SET role = excluded.role",
@@ -247,7 +170,7 @@ pub async fn invite(
     .bind(invite.role)
     .bind(now())
     .execute(&mut *tx)
-    .await?;
+    .await.map_err(internal)?;
     activity::record(
         &mut tx,
         caller.user_id(),
@@ -257,31 +180,36 @@ pub async fn invite(
             role: invite.role,
         },
     )
-    .await?;
+    .await
+    .map_err(internal)?;
     owe(
         &mut tx,
-        &OwedCall::Grant(Grant {
+        &OwedCall::Grant(AccessGrant {
             user: user_id.clone(),
             server_id: server_id.clone(),
             server_name: server.name,
             role: invite.role,
         }),
     )
-    .await?;
-    tx.commit().await?;
+    .await
+    .map_err(internal)?;
+    tx.commit().await.map_err(internal)?;
     state.access.owed.notify_one();
     state.access.changed(&user_id);
     Ok(Json(member(&state.db, &server_id, &user_id).await?))
 }
 
-/// `PATCH /servers/{id}/access/{user_id}`.
 pub async fn change_role(
     Dangerous(caller): Dangerous,
-    State(state): State<Arc<AppState>>,
-    Path((server_id, user_id)): Path<(String, String)>,
-    Json(change): Json<ChangeRole>,
+    State(state): State<Arc<CoreState>>,
+    Req {
+        params,
+        body: change,
+        ..
+    }: Req<ChangeRole>,
 ) -> Result<Json<Member>, ApiError> {
-    let mut tx = state.db.begin().await?;
+    let (server_id, user_id) = (params.id, params.user_id);
+    let mut tx = state.db.begin().await.map_err(internal)?;
     let changed = sqlx::query(
         "UPDATE access SET role = ? WHERE server_id = ? AND user_id = ?",
     )
@@ -289,7 +217,8 @@ pub async fn change_role(
     .bind(&server_id)
     .bind(&user_id)
     .execute(&mut *tx)
-    .await?;
+    .await
+    .map_err(internal)?;
     if changed.rows_affected() == 0 {
         return Err(not_a_member());
     }
@@ -302,40 +231,43 @@ pub async fn change_role(
             role: change.role,
         },
     )
-    .await?;
-    tx.commit().await?;
+    .await
+    .map_err(internal)?;
+    tx.commit().await.map_err(internal)?;
     // An editor made a viewer loses the console at once.
     state.access.changed(&user_id);
     Ok(Json(member(&state.db, &server_id, &user_id).await?))
 }
 
-/// `DELETE /servers/{id}/access/{user_id}`. Every session the user has on this Core ends, and
-/// with them their console streams; their App signs in again with a ticket for what is left.
-/// Removing someone else is the owner's dangerous action; removing yourself is leaving.
+/// Every session the user has on this Core ends, and with them their console streams; their App
+/// signs in again with a ticket for what is left.
 pub async fn remove(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
+    State(state): State<Arc<CoreState>>,
     headers: HeaderMap,
-    Path((server_id, user_id)): Path<(String, String)>,
-) -> Result<StatusCode, ApiError> {
+    request: Req<RemoveMember>,
+) -> Result<Empty, ApiError> {
+    let (server_id, user_id) = (request.params.id, request.params.user_id);
     if caller.user_id() != Some(user_id.as_str()) {
-        caller.require_owner()?;
+        require_owner(&caller)?;
         fresh_ticket(&state, &caller, &headers).await?;
     }
-    let mut tx = state.db.begin().await?;
+    let mut tx = state.db.begin().await.map_err(internal)?;
     let removed =
         sqlx::query("DELETE FROM access WHERE server_id = ? AND user_id = ?")
             .bind(&server_id)
             .bind(&user_id)
             .execute(&mut *tx)
-            .await?;
+            .await
+            .map_err(internal)?;
     if removed.rows_affected() == 0 {
         return Err(not_a_member());
     }
     sqlx::query("DELETE FROM sessions WHERE user_id = ?")
         .bind(&user_id)
         .execute(&mut *tx)
-        .await?;
+        .await
+        .map_err(internal)?;
     activity::record(
         &mut tx,
         caller.user_id(),
@@ -344,12 +276,15 @@ pub async fn remove(
             user_id: user_id.clone(),
         },
     )
-    .await?;
-    owe_removal(&mut tx, &user_id, &server_id).await?;
-    tx.commit().await?;
+    .await
+    .map_err(internal)?;
+    owe_removal(&mut tx, &user_id, &server_id)
+        .await
+        .map_err(internal)?;
+    tx.commit().await.map_err(internal)?;
     state.access.owed.notify_one();
     state.access.changed(&user_id);
-    Ok(StatusCode::NO_CONTENT)
+    Ok(Empty)
 }
 
 /// Owe the backend `user_id` losing `server_id`, once their row is gone. They stay in the
@@ -367,7 +302,7 @@ pub async fn owe_removal(
     .await?;
     owe(
         conn,
-        &OwedCall::Remove(Remove {
+        &OwedCall::Remove(AccessRevocation {
             user_id: user_id.into(),
             server_id: server_id.into(),
             keep_core,
@@ -390,23 +325,24 @@ async fn owner_id(db: &sqlx::SqlitePool) -> sqlx::Result<Option<String>> {
 }
 
 async fn server(
-    state: &AppState,
+    state: &CoreState,
     id: &str,
 ) -> Result<server_rows::ServerRow, ApiError> {
     Ok(server_rows::get(&state.db, id)
-        .await?
+        .await
+        .map_err(internal)?
         .ok_or_else(|| ServerError::NotFound(id.into()))?)
 }
 
 /// A user as Core last heard of them. One it never heard of is named by their id.
-async fn user(db: &sqlx::SqlitePool, id: &str) -> sqlx::Result<User> {
+async fn user(db: &sqlx::SqlitePool, id: &str) -> sqlx::Result<CoreUser> {
     let row: Option<(String, Option<String>)> =
         sqlx::query_as("SELECT name, avatar_url FROM users WHERE id = ?")
             .bind(id)
             .fetch_optional(db)
             .await?;
     let (name, avatar_url) = row.unwrap_or_else(|| (id.into(), None));
-    Ok(User {
+    Ok(CoreUser {
         id: id.into(),
         name,
         avatar_url,
@@ -418,16 +354,17 @@ async fn member(
     server_id: &str,
     user_id: &str,
 ) -> Result<Member, ApiError> {
-    let (role, added_at): (Role, i64) = sqlx::query_as(
+    let (role, added_at): (CoreRole, i64) = sqlx::query_as(
         "SELECT role, added_at FROM access WHERE server_id = ? AND user_id = ?",
     )
     .bind(server_id)
     .bind(user_id)
     .fetch_optional(db)
-    .await?
+    .await
+    .map_err(internal)?
     .ok_or_else(not_a_member)?;
     Ok(Member {
-        user: user(db, user_id).await?,
+        user: user(db, user_id).await.map_err(internal)?,
         role,
         added_at,
     })

@@ -1,7 +1,9 @@
 import type { UnlistenFn } from '@tauri-apps/api/event'
 import type { DragDropEvent } from '@tauri-apps/api/webview'
-import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
-import { platform } from '@tauri-apps/plugin-os'
+
+import { isNativeWindow } from '@/platform/local'
+import { platform } from '@/platform/os'
+import { getCurrentWebviewWindow } from '@/platform/window'
 
 export type NativeDragDropEvent =
 	| { type: 'enter'; paths: string[]; position: { x: number; y: number } }
@@ -10,7 +12,8 @@ export type NativeDragDropEvent =
 	| { type: 'leave' }
 
 /**
- * Listens for native OS file drag & drop on the main window, with positions in CSS pixels.
+ * Listens for native OS file drag & drop on the main window, with positions in CSS pixels. A tab
+ * has no native window, so there it never fires.
  *
  * This must listen as a `WebviewWindow`. Depending on how the main webview is attached, Tauri emits
  * drag events either to `Webview` targets or to `Window` targets, and only a `WebviewWindow`
@@ -22,6 +25,7 @@ export type NativeDragDropEvent =
 export async function listenNativeDragDrop(
 	handler: (event: NativeDragDropEvent) => void | Promise<void>,
 ): Promise<UnlistenFn> {
+	if (!isNativeWindow) return () => {}
 	const scale = platform() === 'windows' ? window.devicePixelRatio || 1 : 1
 
 	return await getCurrentWebviewWindow().onDragDropEvent((event: { payload: DragDropEvent }) => {

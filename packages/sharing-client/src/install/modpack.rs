@@ -1,7 +1,9 @@
-use bedrock::state::ProjectType;
+use crate::rules::{CONFIG_FILE_TYPE, content_folder, content_type};
+use contracts::backend::sharing::{
+    InstanceVersion, RemovedFile, VersionContent,
+};
 
-use crate::rules::CONFIG_FILE_TYPE;
-use crate::versions::{RemovedFile, ShareVersion, VersionContent};
+use crate::versions::RemovedFileRules;
 
 /// A file a version's modpack places, as the caller read it from the modpack: an index entry or
 /// an override alike. `S` is how the caller gets its bytes, such as the index entry or the
@@ -72,20 +74,22 @@ pub fn content_path(file_type: &str, file_name: &str) -> Option<String> {
     if file_type == CONFIG_FILE_TYPE {
         return Some(file_name.to_owned());
     }
-    ProjectType::from_name(file_type)
-        .map(|kind| format!("{}/{file_name}", kind.get_folder()))
+    content_type(file_type)
+        .and_then(content_folder)
+        .map(|folder| format!("{folder}/{file_name}"))
 }
 
 /// `version`'s content less what its modpack places, from `modpack`, every file of the
 /// version's modpack as the caller reads it (empty without a modpack). The one place both sides
 /// split a version, for installs, previews and diffs alike.
 pub fn version_files<S>(
-    version: &ShareVersion,
+    version: &InstanceVersion,
     modpack: Vec<ModpackFile<S>>,
 ) -> VersionFiles<S> {
     split_content(
-        &version.content,
+        &version.manifest.content,
         version
+            .manifest
             .external_files
             .iter()
             .map(|file| (file.file_type.as_str(), file.file_name.as_str())),
@@ -134,40 +138,46 @@ pub fn split_content<'a, S>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::versions::ManifestFile;
+    use contracts::Hash;
+    use contracts::backend::sharing::{ExternalFile, VersionManifest};
+
+    use crate::versions::removed_path;
 
     fn version(
         modrinth_ids: &[&str],
         removed: Vec<RemovedFile>,
-    ) -> ShareVersion {
-        ShareVersion {
+    ) -> InstanceVersion {
+        InstanceVersion {
+            manifest: VersionManifest {
+                content: VersionContent {
+                    modrinth_ids: modrinth_ids
+                        .iter()
+                        .map(|id| id.to_string())
+                        .collect(),
+                    modpack_id: Some("pack".into()),
+                    removed_files: removed,
+                    game_version: "1.21.1".into(),
+                    loader: "fabric".into(),
+                    loader_version: "0.16.0".into(),
+                },
+                version_hash: Hash([0; 32]),
+                external_files: vec![ExternalFile {
+                    file_name: "carried.jar".into(),
+                    file_type: "mod".into(),
+                    url: None,
+                    file_size: 1,
+                    sha1: String::new(),
+                    sha256: Hash([0; 32]),
+                    object: Hash([0; 32]),
+                    object_size: 17,
+                    key: None,
+                }],
+            },
             version: 1,
             ready: true,
-            content: VersionContent {
-                modrinth_ids: modrinth_ids
-                    .iter()
-                    .map(|id| id.to_string())
-                    .collect(),
-                modpack_id: Some("pack".into()),
-                removed_files: removed,
-                game_version: "1.21.1".into(),
-                loader: "fabric".into(),
-                loader_version: "0.16.0".into(),
-            },
-            root: [0; 32],
-            external_files: vec![ManifestFile {
-                file_name: "carried.jar".into(),
-                file_type: "mod".into(),
-                file_size: 1,
-                sha1: String::new(),
-                sha256: [0; 32],
-                object: [0; 32],
-                object_size: 17,
-                key: None,
-            }],
-            pool: None,
-            store: None,
-            backtrack_version: None,
+            download: None,
+            upload: None,
+            reports: None,
         }
     }
 
@@ -185,7 +195,7 @@ mod tests {
     fn the_modpack_keeps_its_files_modrinth_does_not_know() {
         let version = version(
             &["pack", "a", "extra"],
-            vec![RemovedFile::path("mods", "gone.jar").unwrap()],
+            vec![removed_path("mods", "gone.jar").unwrap()],
         );
         let files = version_files(
             &version,

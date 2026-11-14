@@ -4,51 +4,70 @@
 )]
 #![recursion_limit = "256"]
 
-use anyhow::Context;
+use engine::prelude::*;
 use native_dialog::{DialogBuilder, MessageLevel};
-use std::env;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use tauri::{Listener, Manager};
-use tauri_plugin_fs::FsExt;
-use theseus::prelude::*;
 
+mod accounts;
 mod api;
+mod cores;
+mod data_dir;
+mod db;
+mod desktop;
 mod dev;
+mod discord;
+mod engine_handle;
+mod friends;
+mod hooks;
+mod import;
+mod launch;
+mod library;
+mod logger;
+mod onboarding;
+mod presence;
+mod reactions;
+mod screenshots;
+mod server;
+mod settings;
+mod skins;
+mod synced_options;
 
 #[cfg(target_os = "macos")]
 mod macos;
 
-#[cfg(feature = "updater")]
-mod updater_impl;
-#[cfg(not(feature = "updater"))]
-mod updater_impl_noop;
-
-// Should be called in launcher initialization
-#[tracing::instrument(skip_all)]
-#[tauri::command]
-async fn initialize_state(
+/// Starts the engine and signs a dev App in before its routes open. Setup runs it, and opening the
+/// event socket runs it again after a failure.
+async fn start_engine(
     app: tauri::AppHandle,
-    events: tauri::ipc::Channel<tauri::ipc::InvokeResponseBody>,
-) -> api::Result<()> {
-    tracing::info!("Initializing app event state...");
-    theseus::EventState::init(app.clone(), events).await?;
-
+    events: engine::EventSink,
+    presence: Arc<presence::Presence>,
+) -> anyhow::Result<Arc<Engine>> {
     tracing::info!("Initializing app state...");
-    State::init(app.config().identifier.clone()).await?;
-    #[cfg(debug_assertions)]
-    dev::sign_in().await;
-
-    let state = State::get().await?;
-    app.asset_protocol_scope()
-        .allow_directory(state.directories.caches_dir(), true)?;
-    app.asset_protocol_scope()
-        .allow_directory(state.directories.caches_dir().join("icons"), true)?;
-    app.asset_protocol_scope()
-        .allow_directory(state.directories.icon_dir(), true)?;
-    app.fs_scope()
-        .allow_directory(state.directories.instances_dir(), true)?;
-
-    Ok(())
+    let started = async {
+        let reacting = events.subscribe();
+        let config = data_dir::engine_config(
+            data_dir::resolve(&app.config().identifier)?,
+            events,
+            dev::accounts()?,
+        )
+        .await?;
+        let state = Engine::new(config).await?;
+        accounts::self_hosted::bind_origin(
+            crate::db::pool(&state),
+            &state.sessions,
+        )
+        .await?;
+        reactions::start(&state, Arc::clone(&presence), app.clone(), reacting);
+        #[cfg(debug_assertions)]
+        dev::sign_in(&state, &presence).await;
+        anyhow::Ok(state)
+    }
+    .await;
+    if let Err(error) = &started {
+        tracing::error!("The engine could not start: {error:#}");
+    }
+    started
 }
 
 // Should be call once Vue has mounted the app
@@ -75,59 +94,11 @@ fn show_window(app: tauri::AppHandle) {
     }
 }
 
-#[tauri::command]
-fn is_dev() -> bool {
-    cfg!(debug_assertions)
-}
-
-#[tauri::command]
-fn are_updates_enabled() -> bool {
-    cfg!(feature = "updater")
-        && env::var("MODRINTH_EXTERNAL_UPDATE_PROVIDER").is_err()
-}
-
-#[cfg(feature = "updater")]
-pub use updater_impl::*;
-
-#[cfg(not(feature = "updater"))]
-pub use updater_impl_noop::*;
-
-// Toggles decorations
-#[tauri::command]
-async fn toggle_decorations(b: bool, window: tauri::Window) -> api::Result<()> {
-    window
-        .set_decorations(b)
-        .context("failed to toggle decorations")?;
-    Ok(())
-}
-
-#[tauri::command]
-fn restart_app(app: tauri::AppHandle) {
-    app.restart();
-}
-
-#[derive(Default)]
-struct RestartAfterPendingUpdate(AtomicBool);
-
-#[tauri::command]
-fn get_amberite_dev_config() -> Option<dev::DevAppConfig> {
-    dev::config().cloned()
-}
-
-#[tauri::command]
-async fn set_restart_after_pending_update(
-    should_restart: bool,
-    restart: tauri::State<'_, RestartAfterPendingUpdate>,
-) -> api::Result<()> {
-    restart.0.store(should_restart, Ordering::Relaxed);
-    Ok(())
-}
-
 // if Tauri app is called with arguments, then those arguments will be treated as commands
 // ie: deep links or filepaths for .mrpacks
 fn main() {
     dev::prepare();
-    theseus::install_crypto_provider();
+    engine::install_crypto_provider();
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -135,25 +106,18 @@ fn main() {
         .expect("failed to create app async runtime");
     tauri::async_runtime::set(runtime.handle().clone());
 
-    #[cfg(feature = "export-app-events")]
-    theseus::export_app_event_bindings(
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../app-frontend/src/generated/app-events"),
-    )
-    .expect("failed to export app event TypeScript bindings");
-
     /*
-        tracing is set basd on the environment variable RUST_LOG=xxx, depending on the amount of logs to show
+        tracing is set based on the environment variable RUST_LOG=xxx, depending on the amount of logs to show
             ERROR > WARN > INFO > DEBUG > TRACE
         eg. RUST_LOG=info will show info, warn, and error logs
-            RUST_LOG="theseus=trace" will show *all* messages but from theseus only (and not dependencies using similar crates)
-            RUST_LOG="theseus=trace" will show *all* messages but from theseus only (and not dependencies using similar crates)
+            RUST_LOG="engine=trace" will show *all* messages but from engine only (and not dependencies using similar crates)
+            RUST_LOG="engine=trace" will show *all* messages but from engine only (and not dependencies using similar crates)
 
         Error messages returned to Tauri will display as traced error logs if they return an error.
         This will also include an attached span trace if the error is from a tracing error, and the level is set to info, debug, or trace
 
         on unix:
-            RUST_LOG="theseus=trace" {run command}
+            RUST_LOG="engine=trace" {run command}
 
     */
 
@@ -164,16 +128,46 @@ fn main() {
         tauri_context.config_mut().build.dev_url = Some(dev_url);
     }
 
-    let _log_guard = theseus::start_logger(&tauri_context.config().identifier);
+    let _log_guard =
+        match data_dir::logs_dir(&tauri_context.config().identifier) {
+            Ok(logs_dir) => logger::start_logger(&logs_dir),
+            Err(error) => {
+                eprintln!("Could not start logger: {error:#}");
+                None
+            }
+        };
 
     tracing::info!("Initialized tracing subscriber. Loading Modrinth App!");
 
-    let mut builder = tauri::Builder::default();
+    let local = server::LocalServer::bind(
+        dev::config().and_then(|config| config.local_port),
+        dev::config().and_then(|config| config.local_secret.clone()),
+        tauri_context.config().build.dev_url.clone(),
+    )
+    .expect("failed to bind the App's local server");
+    let local_init = local.init_plugin();
+    let events = server::events::Events::default();
+    let engine = engine_handle::EngineHandle::default();
+    let presence = Arc::new(
+        presence::Presence::init()
+            .expect("failed to set up Discord and the friends socket"),
+    );
+    let desktop = desktop::AppSlot::default();
+    let updater = Arc::new(desktop::updater::Updater::new(desktop.clone()));
+    let router = local.router(
+        server::endpoints::boot::Boot::current(
+            tauri_context.package_info().version.to_string(),
+        ),
+        events.clone(),
+        engine.clone(),
+        Arc::clone(&presence),
+        desktop.clone(),
+        Arc::clone(&updater),
+        tauri_context.config().identifier.clone(),
+    );
+    runtime.spawn(local.serve(router));
 
-    #[cfg(all(debug_assertions, feature = "browser-bridge"))]
-    {
-        builder = builder.plugin(browser_bridge::init());
-    }
+    let mut builder = tauri::Builder::default().plugin(local_init);
 
     #[cfg(target_os = "macos")]
     {
@@ -184,8 +178,8 @@ fn main() {
 
     #[cfg(feature = "updater")]
     {
+        use engine::launcher_user_agent;
         use tauri_plugin_http::reqwest::header::{HeaderValue, USER_AGENT};
-        use theseus::launcher_user_agent;
         builder = builder.plugin(
             tauri_plugin_updater::Builder::new()
                 .header(
@@ -218,11 +212,14 @@ fn main() {
 
     builder = builder
         .plugin(tauri_plugin_http::init())
-        .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_deep_link::init())
-        .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_opener::init());
+        // Links open through the local server's opener route.
+        .plugin(
+            tauri_plugin_opener::Builder::new()
+                .open_js_links_on_click(false)
+                .build(),
+        );
 
     #[cfg(target_os = "windows")]
     {
@@ -285,7 +282,20 @@ fn main() {
                 .with_state_flags(window_state_flags)
                 .build(),
         )
-        .setup(|app| {
+        .setup(move |app| {
+            let _ = desktop.set(app.handle().clone());
+            let sink = events.engine;
+            app.manage(sink.clone());
+            app.manage(events.app);
+            let handle = app.handle().clone();
+            app.state::<engine_handle::EngineHandle>().start(move || {
+                start_engine(
+                    handle.clone(),
+                    sink.clone(),
+                    Arc::clone(&presence),
+                )
+            });
+
             #[cfg(target_os = "macos")]
             {
                 let payload = macos::deep_link::get_or_init_payload(app);
@@ -349,43 +359,10 @@ fn main() {
         });
 
     builder = builder
-        .plugin(api::auth::init())
-        .plugin(api::mr_auth::init())
-        .plugin(api::onboarding_checklist::init())
-        .plugin(api::import::init())
-        .plugin(api::install::init())
-        .plugin(api::instance::init())
         .plugin(api::logs::init())
-        .plugin(api::jre::init())
-        .plugin(api::metadata::init())
-        .plugin(api::minecraft_skins::init())
-        .plugin(api::process::init())
-        .plugin(api::reports::init())
-        .plugin(api::settings::init())
-        .plugin(api::shortcuts::init())
-        .plugin(api::tags::init())
-        .plugin(api::users::init())
-        .plugin(api::utils::init())
-        .plugin(api::cache::init())
-        .plugin(api::files::init())
-        .plugin(api::friends::init())
-        .plugin(api::worlds::init())
-        .plugin(api::cores::init())
-        .manage(PendingUpdateData::default())
-        .manage(RestartAfterPendingUpdate::default())
-        .invoke_handler(tauri::generate_handler![
-            initialize_state,
-            is_dev,
-            are_updates_enabled,
-            get_update_size,
-            enqueue_update_for_installation,
-            remove_enqueued_update,
-            set_restart_after_pending_update,
-            toggle_decorations,
-            show_window,
-            restart_app,
-            get_amberite_dev_config,
-        ]);
+        .manage(updater)
+        .manage(engine)
+        .invoke_handler(tauri::generate_handler![show_window]);
 
     tracing::info!("Initializing app...");
     let app = builder.build(tauri_context);
@@ -397,8 +374,12 @@ fn main() {
                 let _ = app;
 
                 if matches!(&event, tauri::RunEvent::ExitRequested { .. })
+                    && let Some(state) =
+                        app.state::<engine_handle::EngineHandle>().try_get()
                     && let Err(error) = tauri::async_runtime::block_on(
-                        theseus::minecraft_skins::flush_pending_skin_change(),
+                        skins::minecraft_skins::flush_pending_skin_change(
+                            &state,
+                        ),
                     )
                 {
                     tracing::warn!(
@@ -408,18 +389,19 @@ fn main() {
 
                 #[cfg(feature = "updater")]
                 if matches!(&event, tauri::RunEvent::Exit) {
-                    let update_data = app.state::<PendingUpdateData>().inner();
-                    let should_restart = app
-                        .state::<RestartAfterPendingUpdate>()
-                        .0
-                        .load(Ordering::Relaxed);
-                    if let Some((update, data)) = &*update_data.0.lock().unwrap()
-                    {
-                        fn set_changelog_toast(version: Option<String>) {
-                            let toast_result: theseus::Result<()> = tauri::async_runtime::block_on(async move {
-                                let mut settings = settings::get().await?;
+                    let updater =
+                        app.state::<Arc<desktop::updater::Updater>>();
+                    let should_restart = updater.restarts_after();
+                    if let Some((update, data)) = &updater.take_downloaded() {
+                        let state = app.state::<engine_handle::EngineHandle>().try_get();
+                        fn set_changelog_toast(state: Option<&Engine>, version: Option<String>) {
+                            let Some(state) = state else {
+                                return;
+                            };
+                            let toast_result: engine::Result<()> = tauri::async_runtime::block_on(async move {
+                                let mut settings = crate::settings::get(state).await?;
                                 settings.pending_update_toast_for_version = version;
-                                settings::set(settings).await?;
+                                crate::settings::set(state, settings).await?;
                                 Ok(())
                             });
                             if let Err(e) = toast_result {
@@ -436,7 +418,7 @@ fn main() {
 						let is_major_update = major.zip(minor).is_some_and(|version| {
 							version > (current_version.major, current_version.minor)
 						});
-						set_changelog_toast(is_major_update.then(|| update.version.clone()));
+						set_changelog_toast(state.as_deref(), is_major_update.then(|| update.version.clone()));
                         let update = if should_restart {
                             (**update).clone()
                         } else {
@@ -462,7 +444,7 @@ fn main() {
                                     "Pending update install failed (version {}): {e}",
                                     update.version
                                 );
-                                set_changelog_toast(None);
+                                set_changelog_toast(state.as_deref(), None);
 
                                 DialogBuilder::message()
                                     .set_level(MessageLevel::Error)

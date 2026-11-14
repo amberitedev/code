@@ -2,22 +2,22 @@ import 'overlayscrollbars/overlayscrollbars.css'
 
 import { installTooltipDirective } from '@modrinth/ui'
 import { focusManager, VueQueryPlugin } from '@tanstack/vue-query'
-import { getCurrentWindow } from '@tauri-apps/api/window'
 import { createApp } from 'vue'
 
-import { config } from '@/config'
+import { applyDevAppConfig, config } from '@/config'
 import { overlayScrollbarsDirective } from '@/directives/overlayScrollbars'
 import { installCrashScreen } from '@/features/crash'
 import { setupErrorReporting } from '@/helpers/error-reporting'
 import { debugStartup, traceStartupStep } from '@/helpers/startup-debug'
+import { isNativeWindow } from '@/platform/local'
+import { loadBoot } from '@/platform/os'
+import { getCurrentWindow, showWindow } from '@/platform/window'
 import i18nPlugin from '@/plugins/i18n'
 import i18nDebugPlugin from '@/plugins/i18n-debug'
 
 async function bootstrap() {
-	if (import.meta.env.DEV) {
-		const { initializeDevRuntime } = await import('@/app/runtime/dev-config')
-		await initializeDevRuntime()
-	}
+	const boot = await loadBoot()
+	applyDevAppConfig({ backendUrl: boot.backend_url ?? undefined })
 	const [{ default: App }, { default: router }] = await Promise.all([
 		import('@/App.vue'),
 		import('@/routes'),
@@ -27,10 +27,13 @@ async function bootstrap() {
 	installCrashScreen(app, router)
 	if (!config.accountApiUrl) setupErrorReporting(app, router)
 
-	focusManager.setEventListener((setFocused) => {
-		const unlisten = getCurrentWindow().onFocusChanged(({ payload }) => setFocused(payload))
-		return () => void unlisten.then((stop) => stop())
-	})
+	// A tab keeps vue-query's own focus listener.
+	if (isNativeWindow) {
+		focusManager.setEventListener((setFocused) => {
+			const unlisten = getCurrentWindow().onFocusChanged(({ payload }) => setFocused(payload))
+			return () => void unlisten.then((stop) => stop())
+		})
+	}
 
 	app.use(VueQueryPlugin)
 	app.use(router)
@@ -58,4 +61,10 @@ async function bootstrap() {
 	await mount()
 }
 
-void bootstrap()
+// Until App.vue loads there is no crash screen, and a release window stays hidden.
+bootstrap().catch((error) => {
+	console.error(error)
+	const reason = error instanceof Error ? error.message : String(error)
+	document.getElementById('app')?.replaceChildren(`Amberite could not start. ${reason}`)
+	void showWindow().catch(() => {})
+})

@@ -1,0 +1,45 @@
+[package]
+name = "contracts"
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+# The dev-dependency on itself turns every feature on for this crate's own tests.
+[package.metadata.cargo-shear]
+ignored = ["contracts"]
+
+# The protocol: the Endpoint machinery, the one error body, the protocol version, and the limits and
+# share rules. `client` and `server` add the transport glue, `ts` the TypeScript generator, and
+# `sqlx` and `clap` the derives the Core stores and parses a few enums with. It imports none of our
+# crates, only upstream's ariadne for the friends socket's messages and modrinth-content-management
+# for a shared instance's icon.
+[dependencies]
+ariadne = { workspace = true }
+axum = { version = "0.8.4", default-features = false, features = ["json", "query"], optional = true }
+bytes = { workspace = true }
+clap = { workspace = true, features = ["derive"], optional = true }
+modrinth-content-management = { workspace = true }
+reqwest = { workspace = true, features = ["json"], optional = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sqlx = { workspace = true, features = ["derive"], optional = true }
+thiserror = { workspace = true, optional = true }
+ts-rs = { workspace = true, features = ["no-serde-warnings", "uuid-impl"], optional = true }
+uuid = { workspace = true, features = ["serde"] }
+
+[dev-dependencies]
+contracts = { path = ".", features = ["client", "server", "ts"] }
+http-body-util = "0.1.3"
+rustls = { workspace = true, features = ["ring"] }
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt"] }
+tower = { version = "0.5.2", features = ["util"] }
+
+[features]
+clap = ["dep:clap"]
+client = ["dep:reqwest", "dep:thiserror"]
+server = ["dep:axum"]
+sqlx = ["dep:sqlx"]
+ts = ["ariadne/ts", "dep:ts-rs", "modrinth-content-management/ts"]
+
+[lints]
+workspace = true

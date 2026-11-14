@@ -1,113 +1,57 @@
-import type { Copal } from '@modrinth/api-client'
-import type { IconConfig } from '@modrinth/api-client'
-import { invoke } from '@tauri-apps/api/core'
+import {
+	type CreatePackLocation,
+	type IconConfig,
+	type ImportLauncherType,
+	type InstallCreateInstanceRequest,
+	type InstallErrorView,
+	type InstallJavaStep,
+	type InstallJobSnapshot,
+	type InstallJobStatus,
+	type InstallModpackPreview,
+	type InstallPhaseId,
+	type InstallPostInstallEdit,
+	type InstallProgress,
+	type InstallProgressSecondary,
+	installs,
+	launcherImport,
+	localInstalls,
+	type SharedHistorySettings,
+	type SharedInstanceExternalFilePreview,
+	type SharedInstanceHistoryEntry,
+	type SharedInstanceInstallPreview,
+	type SharedInstanceInviteInstallPreview,
+	type SharedInstanceUpdateDiff,
+	type SharedInstanceUpdatePreview,
+} from '@modrinth/api-client'
 
-import type { InstallErrorView } from '@/generated/app-events/InstallErrorView'
-import type { InstallJavaStep } from '@/generated/app-events/InstallJavaStep'
-import type { InstallJobSnapshot } from '@/generated/app-events/InstallJobSnapshot'
-import type { InstallJobStatus } from '@/generated/app-events/InstallJobStatus'
-import type { InstallPhaseId } from '@/generated/app-events/InstallPhaseId'
-import type { InstallProgress } from '@/generated/app-events/InstallProgress'
-import type { InstallProgressSecondary } from '@/generated/app-events/InstallProgressSecondary'
+import { apiClient } from '@/platform/modrinth-client'
 import type { AppEvents } from '@/providers/app-events'
 
-import type { InstanceLink, InstanceLoader } from './types'
-
 export type {
+	CreatePackLocation,
+	InstallCreateInstanceRequest,
 	InstallErrorView,
 	InstallJavaStep,
 	InstallJobSnapshot,
 	InstallJobStatus,
+	InstallModpackPreview,
 	InstallPhaseId,
+	InstallPostInstallEdit,
 	InstallProgress,
 	InstallProgressSecondary,
+	SharedHistorySettings,
+	SharedInstanceExternalFilePreview,
+	SharedInstanceHistoryEntry,
+	SharedInstanceInstallPreview,
+	SharedInstanceInviteInstallPreview,
+	SharedInstanceUpdateDiff,
+	SharedInstanceUpdatePreview,
 }
 
 export type SharedInstanceUnavailableReason = 'deleted' | 'access_revoked' | 'quarantined'
 
-export interface PackLocationVersionId {
-	type: 'fromVersionId'
-	project_id: string
-	version_id: string
-	title: string
-	icon_url?: string | null
-}
-
-export interface PackLocationFile {
-	type: 'fromFile'
-	path: string
-}
-
-export type CreatePackLocation = PackLocationVersionId | PackLocationFile
-
-export interface InstallModpackPreview {
-	name: string
-	gameVersion: string
-	modloader: InstanceLoader
-	loaderVersion: string | null
-	icon?: string | null
-	iconUrl?: string | null
-	link?: InstanceLink | null
-	unknownFile: boolean
-	externalFilesInModpack: string[]
-}
-
-export interface InstallCreateInstanceRequest {
-	name: string
-	gameVersion: string
-	loader: InstanceLoader
-	loaderVersion: string | null
-	iconPath: string | null
-	iconConfig?: IconConfig | null
-	link?: InstanceLink | null
-}
-
-export interface InstallPostInstallEdit {
-	name?: string | null
-	iconPath?: string | null
-	link?: InstanceLink | null
-}
-
-export interface SharedInstanceInstallPreview {
-	sharedInstanceId: string
-	version: number
-	name: string
-	iconUrl?: string | null
-	gameVersion: string
-	loader: InstanceLoader
-	modCount: number
-	externalFileCount: number
-	modpackVersionId?: string | null
-	contentVersionIds: string[]
-	externalFiles: SharedInstanceExternalFilePreview[]
-}
-
-export interface SharedInstanceInviteInstallPreview {
-	sharedInstanceId: string
-	inviter?: { id: string; name: string; avatar: string | null } | null
-	managerId?: string | null
-	serverManagerName?: string | null
-	serverManagerIconUrl?: string | null
-	instanceIconUrl?: string | null
-	instanceIconConfig?: IconConfig | null
-	preview: SharedInstanceInstallPreview
-}
-
-export interface SharedInstanceExternalFilePreview {
-	fileName: string
-	fileType: string
-}
-
-export interface SharedInstanceUpdatePreview {
-	sharedInstanceId: string
-	currentVersion?: number | null
-	latestVersion: number
-	updateAvailable: boolean
-	diffs: SharedInstanceUpdateDiff[]
-}
-
-/** The App gives its share diffs in the same shape as a Core (`sharing_client::diff`). */
-export type SharedInstanceUpdateDiff = Copal.SharedInstanceUpdateDiff
+export type PackLocationVersionId = Extract<CreatePackLocation, { type: 'fromVersionId' }>
+export type PackLocationFile = Extract<CreatePackLocation, { type: 'fromFile' }>
 
 const SHARED_INSTANCE_UNAVAILABLE_ERROR_CODES: Record<string, SharedInstanceUnavailableReason> = {
 	shared_instance_deleted: 'deleted',
@@ -158,65 +102,54 @@ export function getErrorMessage(error: unknown): string {
 }
 
 export async function install_get_modpack_preview(location: CreatePackLocation) {
-	return await invoke<InstallModpackPreview>('plugin:install|install_get_modpack_preview', {
-		location,
-	})
+	return await apiClient.local.call(localInstalls.previewModpack, { body: location })
 }
 
 export async function install_create_instance(request: InstallCreateInstanceRequest) {
-	return await invoke<InstallJobSnapshot>('plugin:install|install_create_instance', { request })
+	return await apiClient.local.call(localInstalls.createInstance, { body: request })
 }
 
 export async function install_create_modpack_instance(
 	location: CreatePackLocation,
 	postInstallEdit?: InstallPostInstallEdit | null,
 ) {
-	return await invoke<InstallJobSnapshot>('plugin:install|install_create_modpack_instance', {
-		location,
-		postInstallEdit,
+	return await apiClient.local.call(localInstalls.createModpackInstance, {
+		body: { location, postInstallEdit },
 	})
 }
 
 export async function install_get_shared_instance_preview(sharedInstanceId: string, name: string) {
-	return await invoke<SharedInstanceInstallPreview>(
-		'plugin:install|install_get_shared_instance_preview',
-		{
-			sharedInstanceId,
-			name,
-		},
-	)
+	return await apiClient.local.call(installs.GetSharedInstanceInstallPreview, {
+		params: { id: sharedInstanceId },
+		query: { name },
+	})
 }
 
 export async function install_get_shared_instance_invite_preview(inviteId: string) {
-	return await invoke<SharedInstanceInviteInstallPreview>(
-		'plugin:install|install_get_shared_instance_invite_preview',
-		{ inviteId },
-	)
+	return await apiClient.local.call(installs.GetSharedInstanceInvitePreview, {
+		params: { id: inviteId },
+	})
 }
 
 export async function install_accept_shared_instance_invite(
 	sharedInstanceId: string,
 	inviteId: string,
 ) {
-	return await invoke<void>('plugin:install|install_accept_shared_instance_invite', {
-		sharedInstanceId,
-		inviteId,
+	return await apiClient.local.call(installs.AcceptSharedInstanceInvite, {
+		params: { id: sharedInstanceId, invite_id: inviteId },
 	})
 }
 
 export async function install_accept_pending_shared_instance_invite(sharedInstanceId: string) {
-	return await invoke<void>('plugin:install|install_accept_pending_shared_instance_invite', {
-		sharedInstanceId,
+	return await apiClient.local.call(installs.AcceptPendingSharedInstanceInvite, {
+		params: { id: sharedInstanceId },
 	})
 }
 
 export async function install_get_shared_instance_update_preview(instanceId: string) {
-	return await invoke<SharedInstanceUpdatePreview | null>(
-		'plugin:install|install_get_shared_instance_update_preview',
-		{
-			instanceId,
-		},
-	)
+	return await apiClient.local.call(installs.GetSharedInstanceUpdatePreview, {
+		params: { id: instanceId },
+	})
 }
 
 export async function install_shared_instance(
@@ -228,91 +161,77 @@ export async function install_shared_instance(
 	instanceIconUrl?: string | null,
 	instanceIconConfig?: IconConfig | null,
 ) {
-	return await invoke<InstallJobSnapshot>('plugin:install|install_shared_instance', {
-		sharedInstanceId,
-		name,
-		managerId,
-		serverManagerName,
-		serverManagerIconUrl,
-		instanceIconUrl,
-		instanceIconConfig,
+	return await apiClient.local.call(installs.InstallSharedInstance, {
+		params: { id: sharedInstanceId },
+		body: {
+			name,
+			manager_id: managerId ?? null,
+			server_manager_name: serverManagerName ?? null,
+			server_manager_icon_url: serverManagerIconUrl ?? null,
+			instance_icon_url: instanceIconUrl ?? null,
+			instance_icon_config: instanceIconConfig ?? null,
+		},
 	})
 }
 
 export async function install_update_shared_instance(instanceId: string) {
-	return await invoke<InstallJobSnapshot>('plugin:install|install_update_shared_instance', {
-		instanceId,
-	})
+	return await apiClient.local.call(installs.UpdateSharedInstance, { params: { id: instanceId } })
 }
 
-/** A pushed version as a History page shows it. The App and Core return the same shape. */
-export type SharedInstanceHistoryEntry = Copal.SharedInstanceHistoryEntry
-
-/** The owner's history of the instance's share, newest first. Empty for a member. */
+/** The share's history, newest first. Empty when the instance joined the share as a member. */
 export async function install_get_shared_instance_history(instanceId: string) {
-	return await invoke<SharedInstanceHistoryEntry[]>(
-		'plugin:install|install_get_shared_instance_history',
-		{ instanceId },
-	)
+	return await apiClient.local.call(installs.GetSharedInstanceHistory, {
+		params: { id: instanceId },
+	})
 }
 
 /** Owner only. Puts the instance back to a version from its history, leaving it to push. */
 export async function install_restore_shared_instance_version(instanceId: string, version: number) {
-	return await invoke<InstallJobSnapshot>(
-		'plugin:install|install_restore_shared_instance_version',
-		{ instanceId, version },
-	)
+	return await apiClient.local.call(installs.RestoreSharedInstanceVersion, {
+		params: { id: instanceId, version },
+	})
 }
 
 /** Owner only. Deletes a version from the share's history. The latest one stays. */
 export async function install_delete_shared_instance_version(instanceId: string, version: number) {
-	return await invoke<void>('plugin:install|install_delete_shared_instance_version', {
-		instanceId,
-		version,
+	return await apiClient.local.call(installs.DeleteSharedInstanceVersion, {
+		params: { id: instanceId, version },
 	})
 }
 
-/** How many versions each share's history on this computer keeps, and how many each has. */
-export interface SharedHistorySettings {
-	/** Null keeps every version. */
-	kept: number | null
-	/** Versions in each share's history, by share id. */
-	entries: Record<string, number>
-}
-
 export async function install_get_shared_history_settings() {
-	return await invoke<SharedHistorySettings>('plugin:install|install_get_shared_history_settings')
+	return await apiClient.local.call(installs.GetSharedHistorySettings)
 }
 
 /** Keeps the newest `kept` versions of every share's history (all when null) and deletes the rest. */
 export async function install_set_shared_history_kept(kept: number | null) {
-	return await invoke<SharedHistorySettings>('plugin:install|install_set_shared_history_kept', {
-		kept,
-	})
+	return await apiClient.local.call(installs.SetSharedHistoryKept, { body: { kept } })
 }
 
 export async function install_import_instance(
-	launcherType: string,
+	launcherType: ImportLauncherType,
 	basePath: string,
 	instanceFolder: string,
 ) {
-	return await invoke<InstallJobSnapshot>('plugin:install|install_import_instance', {
-		launcherType,
-		basePath,
-		instanceFolder,
+	return await apiClient.local.call(launcherImport.importInstance, {
+		body: {
+			launcher_type: launcherType,
+			base_path: basePath,
+			instance_folder: instanceFolder,
+		},
 	})
 }
 
 export async function install_duplicate_instance(sourceInstanceId: string) {
-	return await invoke<InstallJobSnapshot>('plugin:install|install_duplicate_instance', {
-		sourceInstanceId,
+	return await apiClient.local.call(installs.DuplicateInstance, {
+		params: { id: sourceInstanceId },
 	})
 }
 
 export async function install_existing_instance(instanceId: string, force: boolean) {
-	return await invoke<InstallJobSnapshot>('plugin:install|install_existing_instance', {
-		instanceId,
-		force,
+	return await apiClient.local.call(installs.InstallInstance, {
+		params: { id: instanceId },
+		body: { force },
 	})
 }
 
@@ -321,10 +240,9 @@ export async function install_pack_to_existing_instance(
 	location: CreatePackLocation,
 	postInstallEdit?: InstallPostInstallEdit | null,
 ) {
-	return await invoke<InstallJobSnapshot>('plugin:install|install_pack_to_existing_instance', {
-		instanceId,
-		location,
-		postInstallEdit,
+	return await apiClient.local.call(localInstalls.installPackToInstance, {
+		params: { id: instanceId },
+		body: { location, postInstallEdit },
 	})
 }
 
@@ -332,42 +250,46 @@ export async function install_bulk_update_content(
 	instanceId: string,
 	updates: { project_path: string; version_id: string }[],
 ) {
-	return await invoke<InstallJobSnapshot>('plugin:install|install_bulk_update_content', {
-		instanceId,
-		updates,
+	return await apiClient.local.call(installs.UpdateInstanceContent, {
+		params: { id: instanceId },
+		body: updates,
 	})
 }
 
 export async function install_job_list(includeFinished: boolean) {
-	return await invoke<InstallJobSnapshot[]>('plugin:install|install_job_list', { includeFinished })
+	return await apiClient.local.call(installs.ListInstallJobs, {
+		query: { include_finished: includeFinished },
+	})
 }
 
 export async function install_job_get(jobId: string) {
-	return await invoke<InstallJobSnapshot>('plugin:install|install_job_get', { jobId })
+	return await apiClient.local.call(installs.GetInstallJob, { params: { id: jobId } })
 }
 
 export async function install_job_retry(jobId: string) {
-	return await invoke<InstallJobSnapshot>('plugin:install|install_job_retry', { jobId })
+	return await apiClient.local.call(installs.RetryInstallJob, { params: { id: jobId } })
 }
 
 export async function install_job_cancel(jobId: string) {
-	return await invoke<InstallJobSnapshot>('plugin:install|install_job_cancel', { jobId })
+	return await apiClient.local.call(installs.CancelInstallJob, { params: { id: jobId } })
 }
 
 export async function install_job_pause(jobId: string) {
-	return await invoke<InstallJobSnapshot>('plugin:install|install_job_pause', { jobId })
+	return await apiClient.local.call(installs.PauseInstallJob, { params: { id: jobId } })
 }
 
 export async function install_job_resume(jobId: string) {
-	return await invoke<InstallJobSnapshot>('plugin:install|install_job_resume', { jobId })
+	return await apiClient.local.call(installs.ResumeInstallJob, { params: { id: jobId } })
 }
 
 export async function install_job_dismiss(jobId: string) {
-	return await invoke<void>('plugin:install|install_job_dismiss', { jobId })
+	return await apiClient.local.call(installs.DismissInstallJob, { params: { id: jobId } })
 }
 
 export async function install_job_support_details(jobId: string) {
-	return await invoke<string>('plugin:install|install_job_support_details', { jobId })
+	return await apiClient.local.call(installs.GetInstallJobSupportDetails, {
+		params: { id: jobId },
+	})
 }
 
 export function installJobInstanceId(job: InstallJobSnapshot): string | null {
@@ -425,7 +347,14 @@ export async function wait_for_install_job(events: AppEvents, jobId: string) {
 			reject(err)
 		}
 
-		unlisten = events.on('install_job', resolveJob)
-		install_job_get(jobId).then(resolveJob).catch(rejectWait)
+		const fetchJob = () => install_job_get(jobId).then(resolveJob).catch(rejectWait)
+		const unlistenJob = events.on('install_job', resolveJob)
+		// A resync means the job's last event may be lost.
+		const unlistenResync = events.on('resync', fetchJob)
+		unlisten = () => {
+			unlistenJob()
+			unlistenResync()
+		}
+		void fetchJob()
 	})
 }

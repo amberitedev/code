@@ -2,20 +2,17 @@
 //! and it is the only thing a session is looked up by, so the lookup's timing depends on the hash
 //! and never on the token.
 
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use contracts::{
+    ApiError, ErrorCode,
+    core::{Action, CoreSession, CoreUser, SignedIn},
+};
 use ring::rand::{SecureRandom, SystemRandom};
 use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
 
 use super::{Caller, activity, keys::Keys, tickets};
-use crate::{
-    api::{
-        activity::Action,
-        error::{ApiError, ErrorCode},
-        sessions::{Session, SignedIn},
-    },
-    db,
-};
+use crate::{api::internal, db};
 
 /// A session ends this long after it was last used.
 pub const IDLE_S: i64 = 30 * 86_400;
@@ -31,7 +28,7 @@ fn hash(token: &str) -> Vec<u8> {
 
 fn unauthorized() -> ApiError {
     ApiError::new(
-        ErrorCode::Unauthorized,
+        ErrorCode::InvalidCredentials,
         "This session ended. Sign in again with a ticket.",
     )
 }
@@ -48,21 +45,21 @@ pub async fn sign_in(
     let device_name = device_name.trim();
     if device_name.is_empty() || device_name.chars().count() > MAX_DEVICE_NAME {
         return Err(ApiError::new(
-            ErrorCode::InvalidRequest,
+            ErrorCode::InvalidInput,
             "A device name has 1 to 64 characters.",
         ));
     }
-    let core_id = db::core_id(db).await?;
+    let core_id = db::core_id(db).await.map_err(internal)?;
     let claims = tickets::verify(keys, ticket, &core_id, now).await?;
 
-    let mut tx = db.begin().await?;
+    let mut tx = db.begin().await.map_err(internal)?;
     let allowed: bool = sqlx::query_scalar(
         "SELECT EXISTS (SELECT 1 FROM core WHERE id = 1 AND owner_user_id = ?1) \
          OR EXISTS (SELECT 1 FROM access WHERE user_id = ?1)",
     )
     .bind(&claims.sub)
     .fetch_one(&mut *tx)
-    .await?;
+    .await.map_err(internal)?;
     if !allowed {
         return Err(ApiError::new(
             ErrorCode::NotInvited,
@@ -80,17 +77,17 @@ pub async fn sign_in(
     .bind(&claims.avatar_url)
     .bind(now)
     .execute(&mut *tx)
-    .await?;
+    .await.map_err(internal)?;
     sqlx::query("DELETE FROM sessions WHERE expires_at <= ?1 OR last_used_at <= ?1 - ?2")
         .bind(now)
         .bind(IDLE_S)
         .execute(&mut *tx)
-        .await?;
+        .await.map_err(internal)?;
 
     let mut bytes = [0; 32];
-    SystemRandom::new()
-        .fill(&mut bytes)
-        .map_err(|_| ApiError::new(ErrorCode::Internal, "No randomness."))?;
+    SystemRandom::new().fill(&mut bytes).map_err(|_| {
+        ApiError::new(ErrorCode::InternalError, "No randomness.")
+    })?;
     let token = URL_SAFE_NO_PAD.encode(bytes);
     let id = uuid::Uuid::new_v4().to_string();
     sqlx::query(
@@ -105,7 +102,7 @@ pub async fn sign_in(
     .bind(now)
     .bind(now + MAX_S)
     .execute(&mut *tx)
-    .await?;
+    .await.map_err(internal)?;
     activity::record(
         &mut tx,
         Some(&claims.sub),
@@ -115,10 +112,14 @@ pub async fn sign_in(
             device_name: device_name.into(),
         },
     )
-    .await?;
-    tx.commit().await?;
+    .await
+    .map_err(internal)?;
+    tx.commit().await.map_err(internal)?;
 
-    let session = get(db, &id, Some(&id)).await?.ok_or_else(unauthorized)?;
+    let session = get(db, &id, Some(&id))
+        .await
+        .map_err(internal)?
+        .ok_or_else(unauthorized)?;
     Ok(SignedIn { token, session })
 }
 
@@ -136,7 +137,8 @@ pub async fn authenticate(
     )
     .bind(hash(token))
     .fetch_optional(db)
-    .await?;
+    .await
+    .map_err(internal)?;
     let Some((id, user_id, last_used_at, expires_at, owner)) = row else {
         return Err(unauthorized());
     };
@@ -148,7 +150,8 @@ pub async fn authenticate(
             .bind(now)
             .bind(&id)
             .execute(db)
-            .await?;
+            .await
+            .map_err(internal)?;
     }
     Ok(Caller::Session { id, user_id, owner })
 }
@@ -168,7 +171,7 @@ type Row = (
     i64,
 );
 
-fn session(row: Row, current: Option<&str>) -> Session {
+fn session(row: Row, current: Option<&str>) -> CoreSession {
     let (
         id,
         user_id,
@@ -179,10 +182,10 @@ fn session(row: Row, current: Option<&str>) -> Session {
         last_used_at,
         expires_at,
     ) = row;
-    Session {
+    CoreSession {
         current: current == Some(id.as_str()),
         id,
-        user: crate::api::access::User {
+        user: CoreUser {
             name: name.unwrap_or_else(|| user_id.clone()),
             id: user_id,
             avatar_url,
@@ -199,7 +202,7 @@ pub async fn get(
     db: &SqlitePool,
     id: &str,
     current: Option<&str>,
-) -> sqlx::Result<Option<Session>> {
+) -> sqlx::Result<Option<CoreSession>> {
     let row: Option<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "{SESSION} WHERE s.id = ?"
     )))
@@ -215,7 +218,7 @@ pub async fn list(
     user: Option<&str>,
     current: Option<&str>,
     now: i64,
-) -> sqlx::Result<Vec<Session>> {
+) -> sqlx::Result<Vec<CoreSession>> {
     let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "{SESSION} WHERE (?1 IS NULL OR s.user_id = ?1) AND s.expires_at > ?2 \
          AND s.last_used_at > ?2 - ?3 ORDER BY s.user_id, s.created_at"
@@ -318,7 +321,7 @@ mod tests {
         let ticket = signer.sign(&claims("owner", &core, NOW));
         let long = "x".repeat(65);
         let error = sign_in(&db, &keys, &ticket, &long, NOW).await.unwrap_err();
-        assert_eq!(error.error, ErrorCode::InvalidRequest);
+        assert_eq!(error.error, ErrorCode::InvalidInput);
     }
 
     #[tokio::test]

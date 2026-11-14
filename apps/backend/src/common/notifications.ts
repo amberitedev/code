@@ -1,3 +1,5 @@
+import type { Notification, SharedInstanceList } from '@amberite/contracts'
+
 import { randomId } from './crypto'
 import type { Env } from './types'
 import { notifyUser } from '../social/socket'
@@ -10,8 +12,9 @@ export interface NotificationRow {
 	read: number
 }
 
-export function notificationResponse(row: NotificationRow) {
-	const body: Record<string, unknown> = JSON.parse(row.body)
+export function notificationResponse(row: NotificationRow): Notification {
+	// Every notification is stored with a `type`.
+	const body: Notification['body'] = JSON.parse(row.body)
 	const serverInvite = body.type === 'server_invite'
 	const invite = body.type === 'shared_instance_invite' || serverInvite
 	return {
@@ -43,7 +46,7 @@ export function notificationResponse(row: NotificationRow) {
 export async function addNotification(
 	env: Env,
 	userId: string,
-	body: Record<string, unknown>,
+	body: Notification['body'],
 ): Promise<string> {
 	const id = randomId()
 	const created = new Date().toISOString()
@@ -58,23 +61,19 @@ export async function addNotification(
 	return id
 }
 
-/** What a {@link notifyMembers} event says changed. Typed for the App in `SharedInstances.LiveEvent`. */
-export type MembersEvent = 'shared_instance_users' | 'shared_instance_servers'
-
 /**
  * Tells the online Apps of a shared instance's members that its member list or hosted servers
- * changed, so an open page fetches it again instead of polling. The event is shaped like a
- * notification so the App's socket passes it on, but it is not stored and has no id. `except` is
- * the account whose own action this was; its App already knows.
+ * changed, so an open page fetches it again instead of polling. `except` is the account whose own
+ * action this was; its App already knows.
  */
 export async function notifyMembers(
 	env: Env,
 	instanceId: string,
-	type: MembersEvent,
+	type: SharedInstanceList,
 	except: string | null = null,
 ): Promise<void> {
 	const { results } = await env.DB.prepare(
-		'SELECT user_id FROM shared_members WHERE instance_id = ? AND joined_at IS NOT NULL AND user_id IS NOT ?',
+		'SELECT user_id FROM shared_instance_users WHERE instance_id = ? AND joined_at IS NOT NULL AND user_id IS NOT ?',
 	)
 		.bind(instanceId, except)
 		.all<{ user_id: string }>()

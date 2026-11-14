@@ -1,51 +1,63 @@
-import { invoke } from '@tauri-apps/api/core'
-import { save } from '@tauri-apps/plugin-dialog'
+import { ContractClient, desktop, updates } from '@modrinth/api-client'
 
 import { get_full_path, get_mod_full_path } from '@/helpers/instance'
+import { save } from '@/platform/dialog'
+import { localTransport } from '@/platform/local'
+import { runOp } from '@/platform/ops'
+import { getBoot } from '@/platform/os'
+
+const local = new ContractClient(localTransport)
 
 export async function isDev() {
-	return await invoke('is_dev')
+	return getBoot().dev
 }
 
 export async function areUpdatesEnabled() {
-	return await invoke('are_updates_enabled')
+	return getBoot().updates_enabled
 }
 
-export async function getUpdateSize(updateRid) {
-	return await invoke('get_update_size', { rid: updateRid })
+export async function checkForUpdate() {
+	return await local.call(updates.checkForUpdate)
 }
 
-export async function enqueueUpdateForInstallation(updateRid) {
-	return await invoke('enqueue_update_for_installation', { rid: updateRid })
+// The App keeps the update its last check found, so the rid is unused.
+export async function getUpdateSize(_updateRid) {
+	return await local.call(updates.getUpdateSize)
+}
+
+export async function enqueueUpdateForInstallation(_updateRid) {
+	const op = crypto.randomUUID()
+	const { error } = await runOp(op, () => local.call(updates.downloadUpdate, { body: { op } }))
+	if (error) throw new Error(error.description)
 }
 
 export async function removeEnqueuedUpdate() {
-	return await invoke('remove_enqueued_update')
+	return await local.call(updates.discardDownloadedUpdate)
 }
 
 export async function setRestartAfterPendingUpdate(should_restart) {
-	return await invoke('set_restart_after_pending_update', { shouldRestart: should_restart })
+	return await local.call(updates.setRestartAfterUpdate, { body: { restart: should_restart } })
 }
 
 // One of 'Windows', 'Linux', 'MacOS'
 export async function getOS() {
-	return await invoke('plugin:utils|get_os')
+	return { windows: 'Windows', macos: 'MacOS', linux: 'Linux' }[getBoot().platform]
 }
 
 export async function isNetworkMetered() {
-	return await invoke('plugin:utils|is_network_metered')
+	return await local.call(desktop.checkNetworkMetered)
 }
 
 export async function openPath(path) {
-	return await invoke('plugin:utils|open_path', { path })
+	return await local.call(desktop.openPath, { body: { path } })
 }
 
 export async function highlightInFolder(path) {
-	return await invoke('plugin:utils|highlight_in_folder', { path })
+	return await local.call(desktop.revealPath, { body: { path } })
 }
 
 export async function showLauncherLogsFolder() {
-	return await invoke('plugin:utils|show_launcher_logs_folder', {})
+	return await local.call(desktop.openFolder, { body: { folder: 'launcher_logs' } })
 }
 
 export async function createInstanceShortcut(instanceName, instanceId, options = {}) {
@@ -55,17 +67,19 @@ export async function createInstanceShortcut(instanceName, instanceId, options =
 
 	if (!outputPath) return null
 
-	return await invoke('plugin:shortcuts|create_instance_shortcut', {
-		instanceName,
-		instanceId,
-		outputPath,
-		server: options.server,
-		singleplayerWorld: options.singleplayerWorld,
+	return await local.call(desktop.createShortcut, {
+		body: {
+			instance_name: instanceName,
+			instance_id: instanceId,
+			output_path: outputPath,
+			server: options.server ?? null,
+			singleplayer_world: options.singleplayerWorld ?? null,
+		},
 	})
 }
 
 export async function showAppDbBackupsFolder() {
-	return await invoke('plugin:utils|show_app_db_backups_folder', {})
+	return await local.call(desktop.openFolder, { body: { folder: 'app_db_backups' } })
 }
 
 // Opens an instance's folder in the OS file explorer
@@ -80,7 +94,7 @@ export async function highlightModInInstance(instanceId, projectPath) {
 }
 
 export async function restartApp() {
-	return await invoke('restart_app')
+	return await local.call(updates.restartApp)
 }
 
 export const releaseColor = (releaseType) => {

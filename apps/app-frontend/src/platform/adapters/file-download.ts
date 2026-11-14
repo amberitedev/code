@@ -1,19 +1,9 @@
-import {
-	type AbstractModrinthClient,
-	type DownloadSink,
-	getNodeBaseUrl,
-	ModrinthApiError,
-} from '@modrinth/api-client'
+import { type AbstractModrinthClient, ModrinthApiError } from '@modrinth/api-client'
 import type { FileDownloadProvider } from '@modrinth/ui'
-import { Channel } from '@tauri-apps/api/core'
 
-import {
-	type ExternalFileError,
-	type ExternalFileProgress,
-	releaseExternal,
-	saveExternal,
-	selectExternal,
-} from '@/platform/app-lib/files/commands'
+import { type ExternalFileProgress, saveExternal } from '@/platform/app-lib/files/commands'
+import { save } from '@/platform/dialog'
+import { cancelOp } from '@/platform/ops'
 
 export interface FileDownloadTask {
 	update: (progress: ExternalFileProgress) => void
@@ -36,56 +26,54 @@ export function createFileDownload(
 ): FileDownloadProvider {
 	return {
 		async download(file) {
-			const saveId = await selectExternal(
-				file.filename,
-				file.type === 'server-mrpack'
-					? { name: 'Modrinth Modpack', extensions: ['mrpack'] }
-					: file.type === 'server-backup' || file.type === 'server-world'
-						? { name: 'ZIP archive', extensions: ['zip'] }
-						: null,
-			).catch((error: ExternalFileError) => {
-				throw new Error(error.message ?? String(error))
+			const path = await save({
+				defaultPath: file.filename.split(/[/\\]/).pop() || 'download',
+				filters:
+					file.type === 'server-mrpack'
+						? [{ name: 'Modrinth Modpack', extensions: ['mrpack'] }]
+						: file.type === 'server-backup' || file.type === 'server-world'
+							? [{ name: 'ZIP archive', extensions: ['zip'] }]
+							: [],
 			})
-			if (!saveId) return false
+			if (!path) return false
 
+			const saveId = crypto.randomUUID()
 			let cancelled = false
 			let finished = false
-			let savedFilename = file.filename
+			const savedFilename = path.split(/[/\\]/).pop() ?? path
 			const task = trackDownload(
 				saveId,
 				file.filename,
 				async () => {
 					cancelled = true
-					await releaseExternal(saveId)
+					await cancelOp(saveId).catch(() => undefined)
 				},
 				{ serverId: file.serverId, serverName: file.serverName },
 			)
-			const onProgress = new Channel<ExternalFileProgress>((progress) => {
+			const onProgress = (progress: ExternalFileProgress) => {
 				if (cancelled || finished) return
 				task.update(progress)
-			})
+			}
 
 			// A Core download goes through the App's local proxy, which serves only the App:
 			// the native download names the App's origin, as the WebView's own requests do.
 			const originHeaders: Record<string, string> = client.selfHostedHosting
 				? { Origin: window.location.origin }
 				: {}
-			const saveUrl = async (url: string, headers: Record<string, string> = {}) => {
+			const saveUrl = async (url: string) => {
 				if (cancelled) throw new Error('Download cancelled')
-				try {
-					savedFilename = await saveExternal(
-						saveId,
-						{ url, headers: { ...originHeaders, ...headers } },
-						onProgress,
-					)
-				} catch (error) {
-					const nativeError = error as ExternalFileError
-					throw new ModrinthApiError(nativeError.message ?? String(error), {
-						statusCode: nativeError.statusCode,
+				const { error, response } = await saveExternal(
+					{ op: saveId, path, url, headers: originHeaders },
+					onProgress,
+				)
+				if (error) throw new ModrinthApiError(error.description)
+				if (response) {
+					throw new ModrinthApiError(`Download failed with status ${response.status}`, {
+						statusCode: response.status,
+						responseData: parseBody(response.body),
 					})
 				}
 			}
-			const sink: DownloadSink = (url, options) => saveUrl(url, options.headers)
 
 			try {
 				switch (file.type) {
@@ -115,15 +103,8 @@ export function createFileDownload(
 							file.nodeUrlHost,
 							file.worldId,
 						)
-						await client.download(
-							`/worlds/${encodeURIComponent(file.worldId)}/files/download-full-zip`,
-							{
-								api: getNodeBaseUrl(file.nodeUrlHost),
-								version: 'v1',
-								params: { token },
-								skipAuth: true,
-							},
-							sink,
+						await saveUrl(
+							client.kyros.files_v1.getFullWorldDownloadUrl(file.nodeUrlHost, file.worldId, token),
 						)
 						break
 					}
@@ -155,8 +136,16 @@ export function createFileDownload(
 				throw error
 			} finally {
 				finished = true
-				await releaseExternal(saveId).catch(() => undefined)
 			}
 		},
+	}
+}
+
+/** A JSON error body as data, so a Core's `invalid_credentials` 401 can sign in again. */
+function parseBody(body: string): unknown {
+	try {
+		return JSON.parse(body)
+	} catch {
+		return body
 	}
 }
