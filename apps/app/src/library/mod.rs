@@ -1,7 +1,7 @@
 mod hidden;
 pub mod hidden_instances;
 pub mod install;
-mod recent_icons;
+pub(crate) mod recent_icons;
 pub mod routes;
 pub mod sharing;
 

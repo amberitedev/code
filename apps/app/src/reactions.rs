@@ -1,7 +1,7 @@
 //! The desktop follows engine events: Discord and friends status show the running instance, the
 //! main window hides on launch and returns on exit, and it comes forward for an opened link.
-//! Synced options, packs, screenshots, setting labels and onboarding catch up with each instance
-//! as it is created, edited, changed on disk, removed, installed or closed.
+//! Synced options, packs, screenshots, setting labels, onboarding and recent icons catch up with
+//! each instance as it is created, edited, changed on disk, removed, installed or closed.
 
 use std::collections::BTreeSet;
 use std::sync::{Arc, Weak};
@@ -175,6 +175,13 @@ async fn follow(engine: Arc<Engine>, event: Event) {
                             "Failed to mark instance creation in onboarding checklist: {error}"
                         );
                     }
+                    if let Err(error) =
+                        remember_icon(&engine, &instance_id).await
+                    {
+                        tracing::warn!(
+                            "Failed to add {instance_id}'s icon to the recent icons: {error}"
+                        );
+                    }
                     crate::synced_options::reconcile_instance_synced_options(
                         &engine,
                         &instance_id,
@@ -249,6 +256,20 @@ async fn follow(engine: Arc<Engine>, event: Event) {
             "Synced options could not catch up with {instance_id}: {error}"
         );
     }
+}
+
+/// Puts a new instance's created icon among the icon editor's recents.
+async fn remember_icon(
+    engine: &Engine,
+    instance_id: &str,
+) -> engine::Result<()> {
+    let Some(config) = engine::instance::get(engine, instance_id)
+        .await?
+        .and_then(|metadata| metadata.icon_config)
+    else {
+        return Ok(());
+    };
+    crate::library::recent_icons::record(&config, crate::db::pool(engine)).await
 }
 
 async fn files_changed(engine: &Engine, instance_id: &str, paths: &[String]) {
@@ -326,6 +347,7 @@ fn change_window(app: &AppHandle, change: WindowChange) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use engine::data::{IconBackground, IconConfig, InstanceLink, ModLoader};
     use engine::{ProcessPayload, instance, prelude::CommandPayload};
 
     fn process(event: ProcessPayloadType) -> Event {
@@ -405,7 +427,26 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let engine = crate::hooks::tests::offline_engine(dir.path()).await;
         let mut events = engine.events.subscribe();
-        let created = crate::hooks::tests::create(&engine).await;
+        let icon = IconConfig {
+            background: IconBackground::Color {
+                value: "#123456".to_string(),
+            },
+            symbol: "cube".to_string(),
+        };
+        let created = instance::create(
+            &engine,
+            "Followed".to_string(),
+            "1.21.1".to_string(),
+            ModLoader::Vanilla,
+            None,
+            None,
+            Some(icon.clone()),
+            InstanceLink::Unmanaged,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
         let id = created.instance.id;
 
         let event = next_instance_event(&mut events, |event| {
@@ -430,6 +471,9 @@ mod tests {
         follow(Arc::clone(&engine), event).await;
         assert!(onboarding().await);
         assert!(synced().await);
+        let recents =
+            crate::library::recent_icons::list(crate::db::pool(&engine));
+        assert_eq!(recents.await.unwrap(), [icon]);
 
         let generated =
             crate::synced_options::get_synced_options_folder(&engine)
