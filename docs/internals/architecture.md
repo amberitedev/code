@@ -12,7 +12,6 @@ that contradicts it is not:
 
 - Until D6 and D7: a Core keeps server installs and files in `apps/core`. Its servers do not yet
   follow an App instance's share through the engine.
-- Until D10: `packages/bedrock` and `shared-rust.md` exist.
 
 ## Rules
 
@@ -47,6 +46,8 @@ Rust imports go `contracts` <- `sharing-client` <- `engine` <- `apps/app`, `apps
   the pool and the TLS pin. It is its own crate because the store needs it without the engine.
 - `packages/sharing-storage` is the store, a separate process from the Core on purpose: small, with
   no identity, keys or database of its own.
+- `packages/modrinth-content-management` is upstream's content decisions (`resolve_content`, the
+  content and configuration diffs). Call it instead of deciding content again.
 - `packages/api-client` is the one TypeScript client. Every UI call goes through it.
 
 Desktop domains (accounts, skins, friends, Discord, synced options, screenshots, settings,

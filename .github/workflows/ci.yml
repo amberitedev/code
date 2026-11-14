@@ -55,7 +55,6 @@ jobs:
               - apps/core/**
               - packages/ariadne/**
               - packages/async-minecraft-ping/**
-              - packages/bedrock/**
               - packages/contracts/**
               - packages/engine/**
               - packages/minecraft-meta-manifest/**

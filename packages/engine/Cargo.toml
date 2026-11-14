@@ -16,7 +16,6 @@ async-trait = { workspace = true }
 async-walkdir = { workspace = true }
 axum = { version = "0.8.4", default-features = false, features = ["json", "query"] }
 
-bedrock = { workspace = true }
 bon = { workspace = true }
 bytes = { workspace = true, features = ["serde"] }
 cap-fs-ext = "3.4"
@@ -143,7 +142,6 @@ winreg = { workspace = true }
 
 [features]
 export-ts = [
-  "bedrock/export-ts",
   "contracts/ts",
   "dep:ts-rs",
   "minecraft-meta-manifest/ts",
