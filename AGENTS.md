@@ -114,7 +114,7 @@ instead of pointing at live state:
   `.data/scenarios/<number>` is one App installation. Scenarios 1 to 4 are the default set; a new
   number makes another isolated App and account.
 - A scenario holds two databases: `engine.db` (instances, content, the cache) and `app.db` (accounts,
-  settings, synced options and the App's other tables). `.data/core` holds the Core's `db/copal.db`
+  settings, synced options and the App's other tables). `.data/core` holds the Core's `db/core.db`
   and its engine's `engine/engine.db`. Nothing joins across them, so copy each folder whole.
 - The backend, Core, and scenarios are one dataset. Copy them together.
 - Stop the affected process before copying SQLite files, and copy their `-wal` and `-shm` files with
