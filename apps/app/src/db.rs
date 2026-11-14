@@ -7,6 +7,7 @@ use sqlx::SqlitePool;
 use sqlx::sqlite::{
     SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions,
 };
+use std::collections::HashSet;
 use std::path::Path;
 use std::time::Duration;
 
@@ -101,6 +102,53 @@ async fn remove_orphaned_skins(pool: &SqlitePool) -> engine::Result<()> {
     Ok(())
 }
 
+/// Catches app.db up with the engine for Created and Removed events the App missed: forgets the
+/// rows of instances the engine no longer has and gives the rest the default sync preferences
+/// they lack.
+pub async fn reconcile_instances(engine: &Engine) -> engine::Result<()> {
+    let pool = pool(engine);
+    // Read before the engine's instances, so an instance created in between is not forgotten.
+    // The tables are those forget_instance deletes from.
+    let known: Vec<String> = sqlx::query_scalar(
+        "
+		SELECT instance_id FROM hidden_instances
+		UNION SELECT instance_id FROM instance_game_option_pack_bases
+		UNION SELECT instance_id FROM instance_game_option_update_state
+		UNION SELECT instance_id FROM instance_server_pack_state
+		UNION SELECT instance_id FROM instance_server_projection_entries
+		UNION SELECT instance_id FROM instance_servers
+		UNION SELECT instance_id FROM instance_sync_checkpoints
+		UNION SELECT instance_id FROM instance_sync_preferences
+		UNION SELECT instance_id FROM screenshots
+		",
+    )
+    .fetch_all(pool)
+    .await?;
+    let instances = engine::instance::list(engine)
+        .await?
+        .into_iter()
+        .map(|metadata| metadata.instance.id)
+        .collect::<HashSet<_>>();
+    for instance_id in known.iter().filter(|id| !instances.contains(*id)) {
+        forget_instance(pool, instance_id).await?;
+    }
+    let preferred: HashSet<String> = sqlx::query_scalar(
+        "SELECT DISTINCT instance_id FROM instance_sync_preferences",
+    )
+    .fetch_all(pool)
+    .await?
+    .into_iter()
+    .collect();
+    for instance_id in instances.difference(&preferred) {
+        crate::synced_options::state::insert_default_instance_sync_preferences(
+            instance_id,
+            pool,
+        )
+        .await?;
+    }
+    Ok(())
+}
+
 /// Deletes the App's rows about a removed instance.
 pub async fn forget_instance(
     pool: &SqlitePool,
@@ -160,4 +208,42 @@ pub async fn forget_instance(
         .await?;
     tx.commit().await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn reconciling_instances_fills_missed_defaults_and_forgets_removed_ones()
+     {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = crate::hooks::tests::offline_engine(dir.path()).await;
+        let id = crate::hooks::tests::create(&engine).await.instance.id;
+        let pool = pool(&engine);
+        crate::library::hidden_instances::set_instance_hidden(
+            "user", "removed", true, pool,
+        )
+        .await
+        .unwrap();
+        crate::synced_options::state::insert_default_instance_sync_preferences(
+            "removed", pool,
+        )
+        .await
+        .unwrap();
+        let synced = async || {
+            crate::synced_options::state::all_instance_synced_options(pool)
+                .await
+                .unwrap()
+        };
+        assert!(!synced().await.contains_key(&id));
+
+        reconcile_instances(&engine).await.unwrap();
+        assert!(synced().await.contains_key(&id));
+        assert!(!synced().await.contains_key("removed"));
+        let hidden = crate::library::hidden_instances::get_hidden_instance_ids(
+            "user", pool,
+        );
+        assert!(hidden.await.unwrap().is_empty());
+    }
 }

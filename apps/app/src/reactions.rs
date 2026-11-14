@@ -47,6 +47,10 @@ pub fn start(
     crate::synced_options::start_synced_options(engine, move || {
         let _ = app_events.send(AppEvent::GameOptionLocalesUpdated);
     });
+    let reconciling = Arc::clone(engine);
+    tauri::async_runtime::spawn(async move {
+        reconcile_instances(&reconciling).await;
+    });
     tauri::async_runtime::spawn(react(
         Arc::downgrade(engine),
         presence,
@@ -78,6 +82,7 @@ async fn react(
             Err(RecvError::Lagged(_)) => {
                 if let Some(engine) = engine.upgrade() {
                     tauri::async_runtime::spawn(async move {
+                        reconcile_instances(&engine).await;
                         if let Err(error) =
                             crate::synced_options::reconcile_all_synced_options(
                                 &engine,
@@ -106,6 +111,14 @@ async fn react(
         if let Some(change) = reaction.window {
             change_window(&app, change);
         }
+    }
+}
+
+async fn reconcile_instances(engine: &Engine) {
+    if let Err(error) = crate::db::reconcile_instances(engine).await {
+        tracing::warn!(
+            "Failed to catch up with the engine's instances: {error}"
+        );
     }
 }
 
