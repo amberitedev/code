@@ -92,23 +92,40 @@ pub fn create_server_folder(path: &std::path::Path) -> std::io::Result<()> {
 pub fn open_to_servers(path: &std::path::Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
+        use std::{io::ErrorKind, os::unix::fs::PermissionsExt};
+        // Other servers' installs add, rename and remove entries while this walks.
+        let vanished = |error: &walkdir::Error| {
+            error
+                .io_error()
+                .is_some_and(|error| error.kind() == ErrorKind::NotFound)
+        };
         for entry in walkdir::WalkDir::new(path).follow_links(false) {
-            let entry = entry?;
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(error) if vanished(&error) => continue,
+                Err(error) => return Err(error.into()),
+            };
             if entry.path_is_symlink() {
                 continue;
             }
-            let mode = entry.metadata()?.permissions().mode() & 0o7777;
+            let mode = match entry.metadata() {
+                Ok(metadata) => metadata.permissions().mode() & 0o7777,
+                Err(error) if vanished(&error) => continue,
+                Err(error) => return Err(error.into()),
+            };
             let wanted = if entry.file_type().is_dir() || mode & 0o100 != 0 {
                 0o050
             } else {
                 0o040
             };
-            if mode & wanted != wanted {
-                std::fs::set_permissions(
+            if mode & wanted != wanted
+                && let Err(error) = std::fs::set_permissions(
                     entry.path(),
                     std::fs::Permissions::from_mode(mode | wanted),
-                )?;
+                )
+                && error.kind() != ErrorKind::NotFound
+            {
+                return Err(error);
             }
         }
     }
