@@ -3,7 +3,9 @@
 //! the backend itself, fetches its files, and installs them (`content::shared` in Core). No file
 //! goes from the App to the server.
 
-use super::publish::{owned_shared_instance, shared_attachment};
+use super::publish::{
+    attach_new_shared_instance, owned_shared_instance, shared_attachment,
+};
 use super::*;
 use crate::state::VersionEnvironment;
 
@@ -21,6 +23,30 @@ pub async fn ensure_shared_instance(
     emit_instance(&state.events, instance_id, InstancePayloadType::Edited)
         .await?;
     Ok(attachment)
+}
+
+/// The instance's share, created with no version when it has none, for its owner to publish the
+/// first once there is something to share: a Core shares a server that is still installing.
+#[tracing::instrument(skip(state))]
+pub async fn ensure_unpublished_shared_instance(
+    state: &Engine,
+    instance_id: &str,
+) -> crate::Result<SharedInstanceAttachment> {
+    if let Some(attachment) = shared_attachment(instance_id, state).await? {
+        return Ok(attachment);
+    }
+    let metadata = crate::state::get_instance(instance_id, &state.pool)
+        .await?
+        .ok_or(crate::ErrorKind::InputError("unknown instance".to_string()))?;
+    attach_new_shared_instance(&metadata, state).await?;
+    emit_instance(&state.events, instance_id, InstancePayloadType::Edited)
+        .await?;
+    shared_attachment(instance_id, state).await?.ok_or_else(|| {
+        crate::ErrorKind::InputError(
+            "shared instance attachment was not persisted".to_string(),
+        )
+        .into()
+    })
 }
 
 /// The Modrinth versions among `ids` that players never run, so a change to one is for servers

@@ -103,23 +103,35 @@ pub(super) async fn install_pack_files(
     reporter: &InstallProgressReporter,
     details: InstallPhaseDetails,
 ) -> crate::Result<()> {
-    let kept = kept_pack(state, instance_id);
-    if let Some(parent) = kept.parent() {
-        tokio::fs::create_dir_all(parent).await?;
-    }
-    match file {
-        CreatePackFile::Bytes(bytes) => tokio::fs::write(&kept, bytes).await?,
-        CreatePackFile::Downloaded(downloaded) => {
-            tokio::fs::copy(downloaded.path(), &kept).await?;
-        }
-        CreatePackFile::Path(path) => {
-            tokio::fs::copy(path, &kept).await?;
-        }
-    }
+    keep(file, &kept_pack(state, instance_id)).await?;
     reporter
         .update(InstallPhaseId::DownloadingContent, None, details)
         .await?;
     install(state, &metadata(state, instance_id).await?, false).await
+}
+
+/// Write the pack to `kept` as a new file: the content store's files are read-only, and a copy
+/// (`fs::copy`) would be too, so the next pack could not replace it.
+async fn keep(file: &CreatePackFile, kept: &Path) -> crate::Result<()> {
+    if let Some(parent) = kept.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    let source = match file {
+        CreatePackFile::Bytes(bytes) => {
+            return Ok(tokio::fs::write(kept, bytes).await?);
+        }
+        CreatePackFile::Downloaded(downloaded) => downloaded.path(),
+        CreatePackFile::Path(path) => path.as_path(),
+    };
+    let (source, kept) = (source.to_owned(), kept.to_owned());
+    tokio::task::spawn_blocking(move || {
+        std::io::copy(
+            &mut std::fs::File::open(source)?,
+            &mut std::fs::File::create(kept)?,
+        )
+    })
+    .await??;
+    Ok(())
 }
 
 /// Place every file of the pack the instance follows that is missing, as it was installed.
@@ -661,6 +673,23 @@ mod tests {
             writer.write_all(text.as_bytes()).unwrap();
         }
         writer.finish().unwrap().into_inner()
+    }
+
+    #[tokio::test]
+    async fn a_pack_from_the_content_store_is_kept_so_the_next_one_replaces_it()
+    {
+        let tmp = tempfile::tempdir().unwrap();
+        let stored = tmp.path().join("stored.mrpack");
+        let kept = tmp.path().join("packs/s.mrpack");
+        std::fs::write(&stored, pack(&[])).unwrap();
+        let mut permissions = std::fs::metadata(&stored).unwrap().permissions();
+        permissions.set_readonly(true);
+        std::fs::set_permissions(&stored, permissions).unwrap();
+
+        let file = CreatePackFile::Path(stored.clone());
+        keep(&file, &kept).await.unwrap();
+        keep(&file, &kept).await.unwrap();
+        assert_eq!(std::fs::read(&kept).unwrap(), pack(&[]));
     }
 
     #[tokio::test(flavor = "multi_thread")]

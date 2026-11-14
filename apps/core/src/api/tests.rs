@@ -1370,6 +1370,32 @@ async fn only_the_owner_reads_and_changes_a_servers_share_history() {
 }
 
 #[tokio::test]
+async fn a_server_with_nothing_installed_is_not_shared() {
+    let core = core().await;
+    let owner = core.sign_in("owner").await;
+    let push =
+        json!({ "file_paths": [], "removed_paths": [], "restart": false });
+    let (status, error) = core
+        .call(
+            Method::POST,
+            &format!("/servers/{}/share", core.server),
+            Some(&owner),
+            None,
+            Some(push),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{error}");
+    assert!(
+        engine::instance::get(&core.state.engine, &core.server)
+            .await
+            .unwrap()
+            .unwrap()
+            .shared_instance
+            .is_none()
+    );
+}
+
+#[tokio::test]
 async fn the_owner_changes_storage_and_the_store_is_forwarded_to() {
     let core = core().await;
     let owner = core.sign_in("owner").await;
@@ -1809,6 +1835,28 @@ async fn an_installs_subscription_starts_with_the_unfinished_jobs() {
     assert_eq!(running["type"], "install_job");
     assert_eq!(running["payload"]["job_id"], job.to_string());
     assert_eq!(next(&mut socket).await.unwrap()["type"], "power");
+}
+
+#[tokio::test]
+async fn the_content_is_announced_once_an_install_lets_the_server_go() {
+    let core = core().await;
+    let mut events = core.state.engine.events.subscribe();
+    let hold = core.state.servers.hold(&core.server).unwrap();
+    super::engine_mount::finish_job(Arc::clone(&core.state), hold).await;
+
+    let edited = loop {
+        match events.try_recv() {
+            Ok(engine::Event::Instance(payload))
+                if payload.instance_id == core.server =>
+            {
+                break payload;
+            }
+            Ok(_) => {}
+            Err(error) => panic!("no edited event for the server: {error}"),
+        }
+    };
+    assert!(matches!(edited.event, engine::InstancePayloadType::Edited));
+    assert_eq!(core.state.servers.phase(&core.server), None);
 }
 
 #[tokio::test]

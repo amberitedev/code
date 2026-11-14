@@ -1190,43 +1190,7 @@ pub(super) async fn owned_shared_instance(
             attachment
         }
         None => {
-            ensure_shareable_link(&metadata.link)?;
-            tracing::info!(instance_id, "Creating shared instance");
-            let remote_id = create_remote_instance(
-                shared_instance_name(metadata.instance.name.clone()),
-                instance_id,
-                state,
-            )
-            .await?;
-            let linked_user_id = linked_amberite_user_id(state).await?;
-            tracing::info!(
-                instance_id,
-                shared_instance_id = %remote_id,
-                "Created remote shared instance"
-            );
-            crate::state::attach_shared_instance(
-                instance_id,
-                crate::state::SharedInstanceAttachmentInput {
-                    id: remote_id.clone(),
-                    role: SharedInstanceRole::Owner,
-                    restored_from_remote: false,
-                    manager_id: None,
-                    server_manager_name: None,
-                    server_manager_icon_url: None,
-                    linked_user_id,
-                    status: ContentSetSyncStatus::Unknown,
-                    applied_version: None,
-                    applied_backtrack_version: None,
-                    latest_version: None,
-                },
-                &state.pool,
-            )
-            .await?;
-            tracing::debug!(
-                instance_id,
-                shared_instance_id = %remote_id,
-                "Attached local instance as shared instance owner"
-            );
+            attach_new_shared_instance(&metadata, state).await?;
             publish_shared_instance_inner(
                 instance_id,
                 &[],
@@ -1245,6 +1209,52 @@ pub(super) async fn owned_shared_instance(
     };
 
     Ok((metadata, attachment))
+}
+
+/// A new share for the instance, attached with it as the owner and no version yet.
+pub(super) async fn attach_new_shared_instance(
+    metadata: &crate::state::InstanceMetadata,
+    state: &Engine,
+) -> crate::Result<()> {
+    let instance_id = metadata.instance.id.as_str();
+    ensure_shareable_link(&metadata.link)?;
+    tracing::info!(instance_id, "Creating shared instance");
+    let remote_id = create_remote_instance(
+        shared_instance_name(metadata.instance.name.clone()),
+        instance_id,
+        state,
+    )
+    .await?;
+    let linked_user_id = linked_amberite_user_id(state).await?;
+    tracing::info!(
+        instance_id,
+        shared_instance_id = %remote_id,
+        "Created remote shared instance"
+    );
+    crate::state::attach_shared_instance(
+        instance_id,
+        crate::state::SharedInstanceAttachmentInput {
+            id: remote_id.clone(),
+            role: SharedInstanceRole::Owner,
+            restored_from_remote: false,
+            manager_id: None,
+            server_manager_name: None,
+            server_manager_icon_url: None,
+            linked_user_id,
+            status: ContentSetSyncStatus::Unknown,
+            applied_version: None,
+            applied_backtrack_version: None,
+            latest_version: None,
+        },
+        &state.pool,
+    )
+    .await?;
+    tracing::debug!(
+        instance_id,
+        shared_instance_id = %remote_id,
+        "Attached local instance as shared instance owner"
+    );
+    Ok(())
 }
 
 async fn ensure_owner_up_to_date(

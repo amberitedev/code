@@ -424,11 +424,38 @@ pub async fn share(
 ) -> Result<Json<SharedServer>, ApiError> {
     let id = params.id;
     state.access.require(&caller, &id, Permission::Edit).await?;
-    let shared = engine::instance::get(&state.engine, &id)
+    let instance = engine::instance::get(&state.engine, &id)
         .await
         .map_err(api_error)?
-        .and_then(|instance| instance.shared_instance)
-        .is_some();
+        .ok_or_else(|| ServerError::NotFound(id.clone()))?;
+    let shared = instance.shared_instance.is_some();
+    if state.servers.phase(&id) == Some(Phase::Installing) {
+        if shared {
+            return Err(ServerError::Installing.into());
+        }
+        // The share is made now, so it can be passed on, and its first version once the install
+        // let the server go, so it carries what was installed.
+        let attachment = engine::instance::ensure_unpublished_shared_instance(
+            &state.engine,
+            &id,
+        )
+        .await
+        .map_err(api_error)?;
+        activity::log(&state.db, &caller, Some(&id), Action::ContentChanged)
+            .await;
+        tokio::spawn(publish_after_install(Arc::clone(&state), id));
+        return Ok(Json(SharedServer {
+            shared_instance_id: attachment.id,
+            version: None,
+            restarted: false,
+        }));
+    }
+    if instance.applied_content_set.game_version.is_empty() {
+        return Err(ApiError::new(
+            ErrorCode::Conflict,
+            "Install Minecraft on this server before sharing it.",
+        ));
+    }
     let mut attachment =
         engine::instance::ensure_shared_instance(&state.engine, &id)
             .await
@@ -461,6 +488,30 @@ pub async fn share(
         version: attachment.latest_version,
         restarted,
     }))
+}
+
+/// Publish the first version of a share made while the server installed, once it is let go.
+async fn publish_after_install(state: Arc<CoreState>, id: String) {
+    while state.servers.phase(&id) == Some(Phase::Installing) {
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+    let published = async {
+        let core_id = crate::db::core_id(&state.db).await.map_err(internal)?;
+        engine::instance::publish_shared_instance(
+            &state.engine,
+            &id,
+            Vec::new(),
+            Vec::new(),
+            Some(core_id),
+            &|_, _| {},
+        )
+        .await
+        .map_err(api_error)
+    }
+    .await;
+    if let Err(error) = published {
+        tracing::warn!(server = %id, error = %error.description, "could not publish the share's first version");
+    }
 }
 
 /// Its activity history stays.

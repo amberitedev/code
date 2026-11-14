@@ -43,6 +43,8 @@ export class CoreSyncClient extends AbstractSyncClient {
  *
  * The panel opens once it has the server's install progress. `installs` is subscribed first, so
  * the unfinished jobs it starts with have arrived when the power state authenticates the socket.
+ * A change to the server's content (its `instance` topic) reads as an install result, the one
+ * event on which the panel fetches the content again.
  */
 export class CoreWebSocketClient extends AbstractWebSocketClient {
 	protected emitter = mitt<WSEventMap>()
@@ -78,6 +80,7 @@ export class CoreWebSocketClient extends AbstractWebSocketClient {
 					{ type: 'server', id: serverId },
 					{ type: 'backups', id: serverId },
 					{ type: 'console', id: serverId },
+					{ type: 'instance', id: serverId },
 				]
 				for (const topic of topics) {
 					ws.send(JSON.stringify({ type: 'subscribe', topic } satisfies ClientMessage))
@@ -244,6 +247,16 @@ function toArchon(event: CoreEvent | EngineEvent): WSEvent[] {
 			const { server: _, ...progress } = event.payload
 			return [{ event: 'backup-progress', ...progress }]
 		}
+		case 'instance':
+			switch (event.payload.event) {
+				case 'edited':
+				case 'content_install_finished':
+					return [{ event: 'installation-result', result: 'ok' }]
+				case 'content_install_failed':
+					return [{ event: 'installation-result', result: 'err', reason: event.payload.message }]
+				default:
+					return []
+			}
 		default:
 			return []
 	}

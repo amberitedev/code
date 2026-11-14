@@ -254,7 +254,21 @@ async fn forget_players(
 }
 
 /// Wait for the engine's install jobs on the held server to end, then install what it records.
+/// Once the server is let go, its instance reads as edited, so a panel fetches it again and sees
+/// the install done.
 pub(super) async fn finish_job(state: Arc<CoreState>, hold: Hold) {
+    let id = hold.id().to_owned();
+    install_after_jobs(&state, &hold).await;
+    drop(hold);
+    let _ = engine::emit_instance(
+        &state.engine.events,
+        &id,
+        engine::InstancePayloadType::Edited,
+    )
+    .await;
+}
+
+async fn install_after_jobs(state: &Arc<CoreState>, hold: &Hold) {
     let id = hold.id().to_owned();
     loop {
         match engine::install::store::list_active_for_instance(
@@ -271,7 +285,7 @@ pub(super) async fn finish_job(state: Arc<CoreState>, hold: Hold) {
             }
         }
     }
-    if let Err(error) = install_server(&state, &hold).await {
+    if let Err(error) = install_server(state, hold).await {
         tracing::warn!(server = %id, error = %error.description, "could not install the server software");
     }
 }

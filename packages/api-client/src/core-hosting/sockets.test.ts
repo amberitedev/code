@@ -36,7 +36,7 @@ async function panelHears(answers: unknown[]) {
 	vi.stubGlobal('WebSocket', FakeSocket)
 	const client = new CoreWebSocketClient({} as AbstractModrinthClient)
 	const heard: Archon.Websocket.v0.WSEvent[] = []
-	for (const type of ['auth-ok', 'install-progress'] as const) {
+	for (const type of ['auth-ok', 'install-progress', 'installation-result'] as const) {
 		client.on(SERVER, type, (event) => heard.push(event))
 	}
 	const connected = client.connect(SERVER, { url: 'ws://core/events', token: '' })
@@ -87,6 +87,28 @@ describe('a Core server socket', () => {
 					},
 				],
 			},
+		])
+	})
+
+	it('has the content fetched again once the server changes it', async () => {
+		const edited = { type: 'instance', payload: { instance_id: SERVER, event: 'edited' } }
+		const failed = {
+			type: 'instance',
+			payload: {
+				instance_id: SERVER,
+				event: 'content_install_failed',
+				project_ids: ['p'],
+				message: 'no room',
+			},
+		}
+		const { heard, subscribed } = await panelHears([power, edited, failed])
+		expect(subscribed).toContainEqual({
+			type: 'subscribe',
+			topic: { type: 'instance', id: SERVER },
+		})
+		expect(heard.slice(2)).toEqual([
+			{ event: 'installation-result', result: 'ok' },
+			{ event: 'installation-result', result: 'err', reason: 'no room' },
 		])
 	})
 })

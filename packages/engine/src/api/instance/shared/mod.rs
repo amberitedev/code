@@ -92,7 +92,9 @@ pub use self::publish::{
 };
 pub(crate) use self::report::PublishReports;
 pub use self::report::get_shared_instance_publish_support_details;
-pub use self::server::ensure_shared_instance;
+pub use self::server::{
+    ensure_shared_instance, ensure_unpublished_shared_instance,
+};
 pub use self::types::{
     SharedHistorySettings, SharedInstanceExternalFilePreview,
     SharedInstanceHistoryEntry, SharedInstanceInstallPreview,
