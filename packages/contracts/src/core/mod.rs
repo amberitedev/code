@@ -179,6 +179,10 @@ endpoints! {
     InstallModpackFile: Post "/servers/{id}/modpack-file", Session, ServerId, (), Stream, Empty;
     /// Push a version of the server's own share, which the first push creates. Editors and up.
     ShareServer: Post "/servers/{id}/share", Session, ServerId, (), Json<SharePush>, Json<SharedServer>;
+    /// Apply the latest version of an App instance's share, which the server follows from then
+    /// on and its own share goes. A stopped server installs it now; a running one when it next
+    /// stops. Editors and up.
+    FollowInstance: Post "/servers/{id}/follow", Session, ServerId, (), Json<InstanceFollow>, Empty;
     /// Viewers and up.
     GetSetup: Get "/servers/{id}/setup", Session, ServerId, (), Empty, Json<ServerSetup>;
     /// The managed Java the server runs, from its next start. Editors and up.

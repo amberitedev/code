@@ -37,10 +37,24 @@ struct Core {
 
 /// A Core owned by `owner`, with one server where `editor` and `viewer` have those roles.
 async fn core() -> Core {
+    core_with_backend(None).await
+}
+
+/// [`core`], with its engine calling the backend at `backend` as the Core.
+async fn core_with_backend(backend: Option<&str>) -> Core {
     let dir = tempfile::tempdir().unwrap();
     let paths = Paths::new(dir.path());
     folders::create(&paths, None).unwrap();
-    let engine = crate::daemon::start_engine(&paths, None).await.unwrap();
+    let engine = crate::daemon::start_engine(&paths, backend).await.unwrap();
+    if let Some(backend) = backend {
+        engine
+            .sessions
+            .set_backend_session(Some(engine::BackendSession {
+                base_url: backend.parse().unwrap(),
+                bearer: "amc_key".into(),
+                kind: engine::BackendSessionKind::CoreKey,
+            }));
+    }
     let db = db::memory().await;
     let core_id = db::core_id(&db).await.unwrap();
     sqlx::query("UPDATE core SET owner_user_id = 'owner'")
@@ -861,6 +875,7 @@ async fn content_changes_wait_for_a_stopped_server_and_a_pack_update_backs_up_fi
     let world = core.state.servers.paths().server(&server).join("world");
     std::fs::create_dir_all(&world).unwrap();
     std::fs::write(world.join("level.dat"), "level").unwrap();
+    let mut events = core.state.engine.events.subscribe();
     let (status, _) = core
         .call(
             Method::POST,
@@ -875,6 +890,15 @@ async fn content_changes_wait_for_a_stopped_server_and_a_pack_update_backs_up_fi
         core.count("SELECT COUNT(*) FROM backups WHERE kind = 'pre_update'")
             .await,
         1
+    );
+    // The refusal ends the change for a panel that saw the server held.
+    assert!(
+        std::iter::from_fn(|| events.try_recv().ok()).any(|event| matches!(
+            event,
+            engine::Event::Instance(payload) if payload.instance_id == server
+                && matches!(payload.event, engine::InstancePayloadType::Edited)
+        )),
+        "the server is announced once let go"
     );
 }
 
@@ -1946,4 +1970,190 @@ async fn a_lagged_subscriber_gets_resync_and_the_servers_state_again() {
     }
     assert_eq!(next(&mut socket).await.unwrap()["type"], "resync");
     assert_eq!(next(&mut socket).await.unwrap()["type"], "power");
+}
+
+/// A backend that answers the latest version of a share, `version`, to the read ticket `ticket`.
+async fn share_versions(version: Arc<std::sync::atomic::AtomicI32>) -> String {
+    use axum::{extract::State, http::HeaderMap, routing::get};
+    use contracts::backend::sharing::{
+        InstanceVersion, VersionContent, VersionManifest,
+    };
+
+    let app = Router::new()
+        .route(
+            "/v1/instances/{id}/versions",
+            get(
+                |State(version): State<Arc<std::sync::atomic::AtomicI32>>,
+                 headers: HeaderMap| async move {
+                    if headers
+                        .get(contracts::tickets::READ_TICKET_HEADER)
+                        .is_none_or(|ticket| ticket != "ticket")
+                    {
+                        return Err(StatusCode::FORBIDDEN);
+                    }
+                    Ok(axum::Json(InstanceVersion {
+                        manifest: VersionManifest {
+                            content: VersionContent {
+                                modrinth_ids: Vec::new(),
+                                modpack_id: None,
+                                removed_files: Vec::new(),
+                                game_version: "1.21.1".into(),
+                                loader: "fabric".into(),
+                                loader_version: "0.16.0".into(),
+                            },
+                            version_hash: contracts::Hash([0; 32]),
+                            external_files: Vec::new(),
+                        },
+                        version: version
+                            .load(std::sync::atomic::Ordering::SeqCst),
+                        ready: true,
+                        download: None,
+                        upload: None,
+                        reports: None,
+                    }))
+                },
+            ),
+        )
+        .with_state(version);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, app).await });
+    url
+}
+
+fn follow_instance(ticket: &str) -> Value {
+    json!({
+        "instance": { "id": "app-instance", "name": "Our pack" },
+        "shared_instance_id": "share",
+        "ticket": ticket,
+        "restart": false,
+    })
+}
+
+#[tokio::test]
+async fn a_stopped_server_follows_an_instance_at_once() {
+    let version = Arc::new(std::sync::atomic::AtomicI32::new(2));
+    let core = core_with_backend(Some(&share_versions(version).await)).await;
+    let editor = core.sign_in("editor").await;
+    let follow = format!("/servers/{}/follow", core.server);
+
+    let (status, _) = core
+        .call(
+            Method::POST,
+            &follow,
+            Some(&editor),
+            None,
+            Some(follow_instance("another")),
+        )
+        .await;
+    assert!(!status.is_success(), "the share is read for who asked only");
+    let (status, error) = core
+        .call(
+            Method::POST,
+            &follow,
+            Some(&editor),
+            None,
+            Some(follow_instance("ticket")),
+        )
+        .await;
+    assert!(status.is_success(), "{error}");
+    let jobs = engine::install::list_jobs(true, &core.state.engine)
+        .await
+        .unwrap();
+    assert!(
+        jobs.iter().any(|job| job.instance_id.as_deref()
+            == Some(core.server.as_str())
+            && job.kind
+                == engine::install::InstallJobKind::UpdateSharedInstance),
+        "the version installs now"
+    );
+    let (_, server) = core
+        .call(
+            Method::GET,
+            &format!("/servers/{}", core.server),
+            Some(&editor),
+            None,
+            None,
+        )
+        .await;
+    let linked = &server["linked_instance"];
+    assert_eq!(linked["id"], "app-instance");
+    assert_eq!(linked["shared_instance_id"], "share");
+    assert_ne!(linked["state"], "pending");
+}
+
+#[tokio::test]
+async fn a_running_server_takes_the_newest_pushed_version_once_it_stops() {
+    let version = Arc::new(std::sync::atomic::AtomicI32::new(2));
+    let core =
+        core_with_backend(Some(&share_versions(Arc::clone(&version)).await))
+            .await;
+    let editor = core.sign_in("editor").await;
+    let follow = format!("/servers/{}/follow", core.server);
+    let pending = || {
+        core.count(
+            "SELECT COALESCE(json_extract(pending, '$.version'), 0) FROM follows",
+        )
+    };
+    tokio::spawn(super::follow::apply_on_stop(Arc::clone(&core.state)));
+
+    let shim = crate::servers::shim::try_lock(
+        core.state.servers.paths(),
+        &core.server,
+    )
+    .unwrap()
+    .unwrap();
+    let (status, error) = core
+        .call(
+            Method::POST,
+            &follow,
+            Some(&editor),
+            None,
+            Some(follow_instance("ticket")),
+        )
+        .await;
+    assert!(status.is_success(), "{error}");
+    assert_eq!(pending().await, 2);
+    let (_, server) = core
+        .call(
+            Method::GET,
+            &format!("/servers/{}", core.server),
+            Some(&editor),
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(server["linked_instance"]["state"], "pending");
+    assert_eq!(server["linked_instance"]["version"], Value::Null);
+
+    // A newer push replaces the version still waiting.
+    version.store(3, std::sync::atomic::Ordering::SeqCst);
+    core.call(
+        Method::POST,
+        &follow,
+        Some(&editor),
+        None,
+        Some(follow_instance("ticket")),
+    )
+    .await;
+    assert_eq!(pending().await, 3);
+
+    drop(shim);
+    let _ = core
+        .state
+        .servers
+        .events
+        .send(crate::servers::Lifecycle::Ended(core.server.clone()));
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        while pending().await != 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("the version applies once the server stops");
+    assert_eq!(
+        core.count("SELECT COUNT(*) FROM follows WHERE state = 'pending'")
+            .await,
+        0
+    );
 }

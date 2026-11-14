@@ -172,6 +172,28 @@ pub struct SharedServer {
     pub restarted: bool,
 }
 
+/// Body of `FollowInstance`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct InstanceFollow {
+    pub instance: FollowedInstance,
+    /// The instance's share, whose latest version the server applies.
+    pub shared_instance_id: String,
+    /// From the backend's `sharing.IssueReadTicket` for this Core: the Core reads the share for
+    /// the user who asked, and only while they can.
+    pub ticket: String,
+    /// Stop a running server to apply the version now, and start it again after.
+    pub restart: bool,
+}
+
+/// The App instance a server follows, as the App names it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct FollowedInstance {
+    pub id: String,
+    pub name: String,
+}
+
 /// How a server starts, and what it shares.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
@@ -384,6 +406,8 @@ pub(super) fn ts_types() -> Vec<String> {
         LoaderInstall::decl(&cfg),
         SharePush::decl(&cfg),
         SharedServer::decl(&cfg),
+        InstanceFollow::decl(&cfg),
+        FollowedInstance::decl(&cfg),
         ServerSetup::decl(&cfg),
         JavaMajor::decl(&cfg),
         ServerProperties::decl(&cfg),

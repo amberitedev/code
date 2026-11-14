@@ -49,6 +49,52 @@ pub async fn ensure_unpublished_shared_instance(
     })
 }
 
+/// What applying the latest version of share `shared_instance_id` to server `instance_id` takes,
+/// read for the user who sent `read_ticket`. It goes to [`crate::install::update_shared_instance`],
+/// which fetches the version's pool files for as long as the version's fetch ticket lasts.
+#[tracing::instrument(skip(state, read_ticket))]
+pub async fn followed_shared_instance_version(
+    state: &Engine,
+    instance_id: &str,
+    shared_instance_id: &str,
+    read_ticket: &str,
+) -> crate::Result<SharedInstanceInstallData> {
+    let metadata = crate::state::get_instance(instance_id, &state.pool)
+        .await?
+        .ok_or(crate::ErrorKind::InputError("unknown instance".to_string()))?;
+    let version = super::client::get_latest_remote_version_with_ticket(
+        shared_instance_id,
+        read_ticket,
+        state,
+    )
+    .await?;
+    let applied = metadata
+        .shared_instance
+        .filter(|attachment| attachment.id == shared_instance_id)
+        .and_then(|attachment| attachment.applied_version);
+    let configs = super::content::remote_config_update(
+        Some(instance_id),
+        applied,
+        &version,
+        state,
+    )
+    .await?;
+    super::install::shared_instance_install_data(
+        shared_instance_id,
+        None,
+        None,
+        None,
+        None,
+        None,
+        metadata.instance.name,
+        version,
+        configs,
+        None,
+        state,
+    )
+    .await
+}
+
 /// The Modrinth versions among `ids` that players never run, so a change to one is for servers
 /// only.
 pub(super) async fn server_only_versions(

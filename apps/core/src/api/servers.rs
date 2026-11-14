@@ -155,11 +155,17 @@ async fn server(
         .await
         .map_err(api_error)?
         .ok_or_else(|| ServerError::NotFound(row.id.clone()))?;
+    let linked_instance = super::follow::linked(
+        state,
+        &row.id,
+        instance.shared_instance.as_ref(),
+    )
+    .await?;
     let set = instance.applied_content_set;
     let installed = !set.game_version.is_empty();
     Ok(CoreServer {
         net: net(state, &row),
-        linked_instance: None,
+        linked_instance,
         reachability: state
             .network
             .report(&row.id)

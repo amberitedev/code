@@ -373,6 +373,14 @@ where
     };
     let response = handler.call(Request::from_parts(parts, body), shared).await;
     if !response.status().is_success() {
+        // A panel that saw the server held reads it again once it is let go.
+        drop(hold);
+        let _ = engine::emit_instance(
+            &state.engine.events,
+            &id,
+            engine::InstancePayloadType::Edited,
+        )
+        .await;
         return Ok(response);
     }
     let action = match hook.icon {
@@ -382,6 +390,7 @@ where
     activity::log(&state.db, &caller, Some(&id), action).await;
     if let Some(share_id) = share {
         forget_players(&state, &id, share_id).await?;
+        super::follow::forget(&state, &id).await.map_err(internal)?;
     }
     if hook.icon
         && let Err(error) = game_icon(&state, &id).await
@@ -428,7 +437,7 @@ async fn game_icon(state: &CoreState, id: &str) -> Result<(), ApiError> {
 }
 
 /// Owe the backend the removal of the players the server passed `share_id` on to.
-async fn forget_players(
+pub(super) async fn forget_players(
     state: &CoreState,
     id: &str,
     share_id: String,

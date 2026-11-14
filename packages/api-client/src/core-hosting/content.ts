@@ -330,7 +330,17 @@ export function content(client: AbstractModrinthClient): Adapter<ArchonContentV1
 					})
 					return
 				case 'instance':
-					return unsupported('follow an App instance yet')
+					await writeProperties(api, serverId, request.properties)
+					await api.call(core.FollowInstance, {
+						...params(serverId),
+						body: {
+							instance: request.instance,
+							shared_instance_id: request.shared_instance_id,
+							ticket: request.ticket,
+							restart: request.restart ?? false,
+						},
+					})
+					return
 			}
 		},
 		async repair(serverId) {

@@ -146,6 +146,7 @@ pub async fn remove(state: &Engine, instance_id: &str) -> crate::Result<()> {
     {
         crate::state::remove_instance(instance_id, state).await?;
     }
+    crate::api::pack::server_install::forget(state, instance_id).await?;
 
     if let Some(instance) = instance {
         emit_instance(

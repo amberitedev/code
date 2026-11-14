@@ -1303,6 +1303,23 @@ restart: boolean, };
 
 export type SharedServer = { shared_instance_id: string, version: number | null, restarted: boolean, };
 
+export type InstanceFollow = { instance: FollowedInstance, 
+/**
+ * The instance's share, whose latest version the server applies.
+ */
+shared_instance_id: string, 
+/**
+ * From the backend's `sharing.IssueReadTicket` for this Core: the Core reads the share for
+ * the user who asked, and only while they can.
+ */
+ticket: string, 
+/**
+ * Stop a running server to apply the version now, and start it again after.
+ */
+restart: boolean, };
+
+export type FollowedInstance = { id: string, name: string, };
+
 export type ServerSetup = { 
 /**
  * The Java major it runs. Null until installed.
@@ -1734,6 +1751,7 @@ export const core = {
 	InstallLoader: { method: "POST", path: "/servers/{id}/reinstall", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<ServerId, null, LoaderInstall, void>,
 	InstallModpackFile: { method: "POST", path: "/servers/{id}/modpack-file", auth: "session", dangerous: false, body: "stream", response: "empty" } as Endpoint<ServerId, null, Blob, void>,
 	ShareServer: { method: "POST", path: "/servers/{id}/share", auth: "session", dangerous: false, body: "json", response: "json" } as Endpoint<ServerId, null, SharePush, SharedServer>,
+	FollowInstance: { method: "POST", path: "/servers/{id}/follow", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<ServerId, null, InstanceFollow, void>,
 	GetSetup: { method: "GET", path: "/servers/{id}/setup", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<ServerId, null, void, ServerSetup>,
 	SetJavaVersion: { method: "PUT", path: "/servers/{id}/java-version", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<ServerId, null, JavaMajor, void>,
 	GetProperties: { method: "GET", path: "/servers/{id}/properties", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<ServerId, null, void, ServerProperties>,

@@ -761,13 +761,24 @@ pub(super) async fn shared_instance_install_data(
         ));
     }
 
-    let remote =
+    // A Core's key reads a share's versions but not its record, which holds nothing for a server.
+    let remote = if state.side == contracts::Side::Server {
+        contracts::backend::sharing::SharedInstance {
+            name: String::new(),
+            icon: None,
+            icon_config: None,
+            quarantine: false,
+            installed_once: false,
+            linked_server: None,
+        }
+    } else {
         match get_remote_instance_access(shared_instance_id, state).await? {
             SharedInstanceRemoteResponse::Available(remote) => remote,
             SharedInstanceRemoteResponse::Unavailable(reason) => {
                 return Err(shared_instance_unavailable_error(reason));
             }
-        };
+        }
+    };
     // A player's server has no icon: the backend keeps none.
     let (manager_id, server_manager_name, server_manager_icon_url) =
         if remote.linked_server.is_some() {

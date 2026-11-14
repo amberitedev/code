@@ -102,6 +102,8 @@ export function serversV1(client: AbstractModrinthClient): Adapter<ArchonServers
 		async deleteLocal(serverId) {
 			await (await coreOf(client, serverId)).call(core.DeleteServer, { params: { id: serverId } })
 		},
+		// A Core server never shows the intro (`flows.intro` is false), so there is none to end.
+		async endIntro() {},
 		async setLinkedInstance() {
 			throw new ApiCallError(501, 'unsupported', 'A Core decides who sees a linked server.')
 		},

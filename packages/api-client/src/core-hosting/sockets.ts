@@ -4,6 +4,7 @@ import {
 	type CoreEvent,
 	type EngineEvent,
 	type InstallJobSnapshot,
+	type InstancePayload,
 	type Topic,
 } from '@amberite/contracts'
 import mitt from 'mitt'
@@ -22,11 +23,23 @@ type WSEventMap = {
 
 const NORMAL_CLOSURE = 1000
 
-/** A Core has no sync stream: its servers' changes come over `CoreWebSocketClient`. */
+/**
+ * A Core has no sync stream: its servers' changes come over `CoreWebSocketClient`, which passes
+ * them on with {@link CoreSyncClient.changed}.
+ */
 export class CoreSyncClient extends AbstractSyncClient {
 	protected emitter = mitt<SyncEmitterEvents>()
 
 	async safeConnectServer(): Promise<void> {}
+
+	/**
+	 * The server's content or share changed, or an install let it go: the panel fetches its
+	 * details again, which say whether it installs and has changes to share. A transfer's end is
+	 * the sync event the panel does that on.
+	 */
+	changed(serverId: string): void {
+		this.emitSyncEvent(serverId, { type: 'server.transfer.done', target_node: '' })
+	}
 
 	disconnect(serverId: string): void {
 		this.clearListeners(serverId)
@@ -125,6 +138,10 @@ export class CoreWebSocketClient extends AbstractWebSocketClient {
 					this.emit(serverId, { event: 'auth-ok' })
 					emitInstalls()
 					resolve()
+				}
+				if (event.type === 'instance' && changesServer(event.payload)) {
+					const { sync } = this.modrinth.archon
+					if (sync instanceof CoreSyncClient) sync.changed(serverId)
 				}
 				for (const archon of toArchon(event)) this.emit(serverId, archon)
 			}
@@ -226,6 +243,13 @@ function toInstallItem(serverId: string, job: InstallJobSnapshot): InstallProgre
 		case 'canceled':
 			return { ...item, error: job.error?.message ?? job.status }
 	}
+}
+
+/** Whether the server's details may read differently after `payload`. */
+function changesServer({ event }: InstancePayload) {
+	return (
+		event === 'edited' || event === 'content_install_finished' || event === 'content_install_failed'
+	)
 }
 
 function toInstallResult(item: InstallProgressItem): WSEvent {

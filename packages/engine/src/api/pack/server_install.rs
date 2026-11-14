@@ -51,6 +51,25 @@ fn staging(state: &Engine, instance_id: &str) -> PathBuf {
         .join(instance_id)
 }
 
+/// Delete the pack a removed instance followed and what its last install staged.
+pub(crate) async fn forget(
+    state: &Engine,
+    instance_id: &str,
+) -> crate::Result<()> {
+    match tokio::fs::remove_file(kept_pack(state, instance_id)).await {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+            return Err(error.into());
+        }
+        _ => {}
+    }
+    match tokio::fs::remove_dir_all(staging(state, instance_id)).await {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+            Err(error.into())
+        }
+        _ => Ok(()),
+    }
+}
+
 /// The source kind every file of the instance's pack takes.
 pub(crate) fn pack_kind(link: &InstanceLink) -> ContentSourceKind {
     match link {
@@ -690,6 +709,25 @@ mod tests {
         keep(&file, &kept).await.unwrap();
         keep(&file, &kept).await.unwrap();
         assert_eq!(std::fs::read(&kept).unwrap(), pack(&[]));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn removing_a_server_deletes_the_pack_it_followed() {
+        crate::install_crypto_provider();
+        let tmp = tempfile::tempdir().unwrap();
+        let state = Engine::new(crate::state::EngineConfig {
+            side: Side::Server,
+            ..config(tmp.path().to_path_buf())
+        })
+        .await
+        .unwrap();
+        add_instance(&state, "s", "srv").await;
+        let kept = kept_pack(&state, "s");
+        std::fs::create_dir_all(kept.parent().unwrap()).unwrap();
+        std::fs::write(&kept, pack(&[])).unwrap();
+
+        crate::api::instance::remove(&state, "s").await.unwrap();
+        assert!(!kept.exists());
     }
 
     #[tokio::test(flavor = "multi_thread")]

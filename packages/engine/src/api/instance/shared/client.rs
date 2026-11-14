@@ -357,6 +357,29 @@ pub(super) async fn get_latest_remote_version_optional_unavailable(
     call_share(state, result).await
 }
 
+/// The latest version of a share a server follows, which a Core reads for the user who sent
+/// `read_ticket`.
+pub(super) async fn get_latest_remote_version_with_ticket(
+    shared_instance_id: &str,
+    read_ticket: &str,
+    state: &Engine,
+) -> crate::Result<InstanceVersion> {
+    let backend = share_backend(&state.sessions)?;
+    let remote = contracts::client::Remote {
+        read_ticket: Some(read_ticket),
+        ..backend.remote()
+    };
+    let _permit = state.api_semaphore.0.acquire().await?;
+    contracts::client::call::<GetLatestVersion>(
+        &remote,
+        &share(shared_instance_id),
+        &Default::default(),
+        Empty,
+    )
+    .await
+    .map_err(backend_error)
+}
+
 pub(super) async fn add_remote_users(
     shared_instance_id: &str,
     user_ids: Vec<String>,

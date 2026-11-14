@@ -56,6 +56,23 @@ CREATE TABLE servers (
     java_version INTEGER
 );
 
+-- The App instance a server follows. What version of the instance's share it runs is its engine
+-- instance's; this holds the App's names and the newest version pushed until it applies.
+CREATE TABLE follows (
+    server_id TEXT PRIMARY KEY REFERENCES servers (id) ON DELETE CASCADE,
+    -- The App's id and name for the instance.
+    instance_id TEXT NOT NULL,
+    instance_name TEXT NOT NULL,
+    shared_instance_id TEXT NOT NULL,
+    -- Null once the newest version pushed applied.
+    state TEXT CHECK (state IN ('pending', 'applying', 'failed')),
+    error TEXT,
+    -- The version waiting for the running server to stop (JSON of the engine's
+    -- `SharedInstanceInstallData`), and whether to start the server again once it applied.
+    pending TEXT,
+    start_after INTEGER NOT NULL DEFAULT 0
+);
+
 -- Every time a server ran. The live process identity (pid, start time, boot id) is in
 -- `runs/<server>/`; this is the history.
 CREATE TABLE runs (
