@@ -23,6 +23,7 @@ use contracts::{
 use engine::{
     Engine,
     access::{Edit, InstanceAccess},
+    data::ResolveContentPlan,
     endpoints::{content::*, install::*, sharing::*},
     instance::SharedInstancePublishPreview,
     routes::{self as engine_routes, api_error},
@@ -123,7 +124,7 @@ pub fn long_routes() -> Router<Shared> {
         )),
         route::<InstallProjectWithDependencies, _, _, _>(change(
             EDIT,
-            install_project_with_dependencies,
+            install_with_dependencies,
         )),
         route::<UpdateProject, _, _, _>(change(EDIT, update_project)),
         route::<SwitchProjectVersion, _, _, _>(change(
@@ -168,6 +169,26 @@ async fn publish_preview(
         .await
         .map(Json)
         .map_err(api_error)
+}
+
+/// The engine's route answers before the content is written. Here the answer waits for it, so the
+/// server stays held until it is and a failed download reaches the caller.
+async fn install_with_dependencies(
+    State(engine): State<Arc<Engine>>,
+    instance: InstanceAccess<Edit>,
+    request: Req<InstallProjectWithDependencies>,
+) -> Result<Json<ResolveContentPlan>, ApiError> {
+    let plan = engine::instance::resolve_project_with_dependencies(
+        &engine,
+        &instance.id,
+        request.body,
+    )
+    .await
+    .map_err(api_error)?;
+    engine::instance::install_content_plan(&engine, &instance.id, &plan)
+        .await
+        .map_err(api_error)?;
+    Ok(Json(plan))
 }
 
 /// `handler` behind `hook`.

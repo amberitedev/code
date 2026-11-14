@@ -65,9 +65,8 @@ pub(crate) use self::publish::sync_shared_instance_icon;
 
 pub use self::history::{
     delete_shared_instance_version, forget_share_history,
-    get_shared_history_settings,
-    get_shared_instance_history, restore_shared_instance_version,
-    set_shared_history_kept,
+    get_shared_history_settings, get_shared_instance_history,
+    restore_shared_instance_version, set_shared_history_kept,
 };
 pub use self::install::{
     accept_shared_instance_invite_for_install,
