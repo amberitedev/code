@@ -561,7 +561,10 @@ impl Servers {
 
     /// Whether the engine has an install job on the server, such as one it took up again after
     /// Core restarted.
-    async fn engine_installing(&self, id: &str) -> Result<bool, ServerError> {
+    pub async fn engine_installing(
+        &self,
+        id: &str,
+    ) -> Result<bool, ServerError> {
         engine::install::store::list_active_for_instance(id, self.engine.pool())
             .await
             .map(|jobs| !jobs.is_empty())

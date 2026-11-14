@@ -327,6 +327,9 @@ pub async fn install(
             "Core installs Vanilla, Fabric, Quilt, Forge, NeoForge, and Paper.",
         ));
     };
+    if state.servers.engine_installing(&id).await? {
+        return Err(ServerError::Installing.into());
+    }
     let hold = state.servers.hold(&id)?;
     server_rows::get(&state.db, &id)
         .await
@@ -339,18 +342,21 @@ pub async fn install(
     {
         state.backups.pre_update(&id).await?;
     }
-    platform::install(
-        &state.engine,
-        &id,
-        &Platform {
-            loader,
-            game_version: body.game_version,
-            loader_version: body.loader_version,
-        },
-    )
+    let platform = Platform {
+        loader,
+        game_version: body.game_version,
+        loader_version: body.loader_version,
+    };
+    // Not cancelled with the request: the job goes on, so the hold and the restore must too.
+    let engine = Arc::clone(&state.engine);
+    tokio::spawn(async move {
+        let installed = platform::install(&engine, hold.id(), &platform).await;
+        drop(hold);
+        installed
+    })
     .await
+    .map_err(internal)?
     .map_err(api_error)?;
-    drop(hold);
     activity::log(&state.db, &caller, Some(&id), Action::ContentChanged).await;
     Ok(Empty)
 }

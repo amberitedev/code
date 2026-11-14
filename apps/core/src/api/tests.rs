@@ -1919,6 +1919,45 @@ async fn an_installs_subscription_starts_with_the_unfinished_jobs() {
 }
 
 #[tokio::test]
+async fn a_loader_install_is_refused_while_the_engine_installs_the_server() {
+    use engine::install::{
+        InstallJobStatus, InstallRequest, model::InstallJobState,
+    };
+
+    let core = core().await;
+    // A job the engine took up again after Core restarted: no hold covers it.
+    let request = InstallRequest::InstallExistingInstance {
+        instance_id: core.server.clone(),
+        force: false,
+    };
+    engine::install::store::insert(
+        uuid::Uuid::new_v4(),
+        &request,
+        &InstallJobState::new(&request),
+        InstallJobStatus::Running,
+        core.state.engine.pool(),
+    )
+    .await
+    .unwrap();
+    let editor = core.sign_in("editor").await;
+    let (_, error) = core
+        .call(
+            Method::POST,
+            &format!("/servers/{}/reinstall", core.server),
+            Some(&editor),
+            None,
+            Some(json!({ "loader": "fabric", "loader_version": null, "game_version": "1.21.4" })),
+        )
+        .await;
+    assert_eq!(error["error"], "installing", "{error}");
+    let instance = engine::instance::get(&core.state.engine, &core.server)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(instance.applied_content_set.game_version, "");
+}
+
+#[tokio::test]
 async fn the_content_is_announced_once_an_install_lets_the_server_go() {
     let core = core().await;
     let mut events = core.state.engine.events.subscribe();
