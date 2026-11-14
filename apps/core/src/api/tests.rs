@@ -1370,6 +1370,64 @@ async fn only_the_owner_reads_and_changes_a_servers_share_history() {
 }
 
 #[tokio::test]
+async fn deleting_a_shared_server_owes_its_shares_deletion_and_forgets_its_history()
+ {
+    let core = core().await;
+    let owner = core.sign_in("owner").await;
+    let engine_db = sqlx::SqlitePool::connect_with(
+        sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(core.state.servers.paths().engine().join("engine.db")),
+    )
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO instance_links (instance_id, link_kind, shared_instance_id, shared_instance_role) \
+         VALUES (?, 'shared_instance', 'share-1', 'owner') ON CONFLICT (instance_id) DO UPDATE SET \
+         link_kind = excluded.link_kind, shared_instance_id = excluded.shared_instance_id, \
+         shared_instance_role = excluded.shared_instance_role",
+    )
+    .bind(&core.server)
+    .execute(&engine_db)
+    .await
+    .unwrap();
+    let entry = json!({
+        "version": 1,
+        "created": 0,
+        "content": { "modrinth_ids": [], "modpack_id": null, "removed_files": [], "game_version": "1.21.1", "loader": "vanilla", "loader_version": "" },
+        "files": [],
+        "diffs": [],
+    });
+    sqlx::query("INSERT INTO share_history (share_id, version, entry) VALUES ('share-1', 1, ?)")
+        .bind(entry.to_string())
+        .execute(&engine_db)
+        .await
+        .unwrap();
+
+    // No backend answers: the deletion is owed, and sync sends it once one does.
+    let (status, _) = core
+        .call(
+            Method::DELETE,
+            &format!("/servers/{}", core.server),
+            Some(&owner),
+            Some(&core.ticket("owner")),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(
+        core.count("SELECT COUNT(*) FROM backend_owed WHERE call LIKE '%\"delete_share\"%' AND call LIKE '%share-1%'").await,
+        1
+    );
+    let history: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM share_history WHERE share_id = 'share-1'",
+    )
+    .fetch_one(&engine_db)
+    .await
+    .unwrap();
+    assert_eq!(history, 0);
+}
+
+#[tokio::test]
 async fn a_server_with_nothing_installed_is_not_shared() {
     let core = core().await;
     let owner = core.sign_in("owner").await;

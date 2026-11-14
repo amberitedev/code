@@ -111,7 +111,7 @@ pub(super) async fn record_push(
 }
 
 /// Deletes the whole history of `share_id`, once the share is gone.
-pub(super) async fn forget_share_history(
+pub async fn forget_share_history(
     share_id: &str,
     state: &Engine,
 ) -> crate::Result<()> {

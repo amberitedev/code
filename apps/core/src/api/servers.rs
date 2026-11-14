@@ -17,7 +17,10 @@ use contracts::{
     },
     server::Req,
 };
-use engine::{routes::api_error, state::ReleaseChannel};
+use engine::{
+    routes::api_error,
+    state::{ReleaseChannel, SharedInstanceRole},
+};
 use futures::TryStreamExt;
 use tokio::io::AsyncWriteExt;
 
@@ -533,25 +536,31 @@ pub async fn delete(
     Ok(Empty)
 }
 
-/// Delete a held server's own share, and its row and with it every role on it, owing the backend
-/// each removal and dropping its players. Returns who had a role. A share the backend cannot
-/// delete now stays, as an unshare that fails does.
+/// Delete a held server's row, and with it every role on it and its own share's history, owing
+/// the backend each removal and the share's deletion and dropping its players. Returns who had a
+/// role.
 async fn remove_server(
     state: &CoreState,
     caller: &Caller,
     id: &str,
 ) -> Result<Vec<String>, ApiError> {
-    let shared = engine::instance::get(&state.engine, id)
+    let own_share = engine::instance::get(&state.engine, id)
         .await
         .map_err(api_error)?
-        .is_some_and(|instance| instance.shared_instance.is_some());
-    if shared
-        && let Err(error) =
-            engine::instance::unpublish_shared_instance(&state.engine, id).await
-    {
-        tracing::warn!(server = %id, %error, "could not delete the server's share");
-    }
+        .and_then(|instance| instance.shared_instance)
+        .filter(|share| share.role == SharedInstanceRole::Owner)
+        .map(|share| share.id);
     let mut tx = state.db.begin().await.map_err(internal)?;
+    if let Some(share_id) = &own_share {
+        crate::access::sync::owe(
+            &mut tx,
+            &crate::access::owed::OwedCall::DeleteShare {
+                share_id: share_id.clone(),
+            },
+        )
+        .await
+        .map_err(internal)?;
+    }
     let members: Vec<String> =
         sqlx::query_scalar("SELECT user_id FROM access WHERE server_id = ?")
             .bind(id)
@@ -589,6 +598,13 @@ async fn remove_server(
     .await
     .map_err(internal)?;
     tx.commit().await.map_err(internal)?;
+    if let Some(share_id) = own_share
+        && let Err(error) =
+            engine::instance::forget_share_history(&share_id, &state.engine)
+                .await
+    {
+        tracing::warn!(server = %id, %error, "could not forget the share's history");
+    }
     Ok(members)
 }
 

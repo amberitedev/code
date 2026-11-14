@@ -15,6 +15,8 @@ pub enum OwedCall {
     Grant(AccessGrant),
     /// `DELETE /core/access`.
     Remove(AccessRevocation),
+    /// `DELETE /v1/instances/{share_id}`: the own share of a server that was deleted.
+    DeleteShare { share_id: String },
     /// `DELETE /core/players`.
     ForgetPlayers(ForgottenServer),
     /// `POST /core/state` with the state at the time it is sent.

@@ -16,9 +16,12 @@ use std::{
 
 use contracts::{
     Endpoint, Json,
-    backend::cores::{
-        AccessDirectory, ForgetPlayers, GrantAccess, ReplaceAccess,
-        ReportState, ReportStorage, RevokeAccess, StateReport,
+    backend::{
+        cores::{
+            AccessDirectory, ForgetPlayers, GrantAccess, ReplaceAccess,
+            ReportState, ReportStorage, RevokeAccess, StateReport,
+        },
+        sharing::DeleteSharedInstance,
     },
     client::{Body, CallError, Remote, Reply, call},
 };
@@ -130,6 +133,19 @@ fn failure(status: StatusCode, problem: String) -> Failure {
         Failure::Lost(Lost::Unreachable(problem))
     } else {
         Failure::Refused(problem)
+    }
+}
+
+fn call_failure(path: &str, error: CallError) -> Failure {
+    let problem = format!("{path} failed: {error}");
+    match error {
+        CallError::Api { status, .. } | CallError::Decode { status, .. } => {
+            match StatusCode::from_u16(status) {
+                Ok(status) => failure(status, problem),
+                Err(_) => Failure::Refused(problem),
+            }
+        }
+        _ => Failure::Lost(Lost::Unreachable(problem)),
     }
 }
 
@@ -426,6 +442,17 @@ impl Sync {
             OwedCall::Remove(remove) => {
                 self.call::<RevokeAccess>(key, Json(remove.clone())).await
             }
+            OwedCall::DeleteShare { share_id } => {
+                // A share already gone counts as deleted.
+                sharing_client::shares::delete_share(
+                    &self.remote(key),
+                    share_id,
+                )
+                .await
+                .map_err(|error| {
+                    call_failure(DeleteSharedInstance::PATH, error)
+                })
+            }
             OwedCall::ForgetPlayers(forget) => {
                 self.call::<ForgetPlayers>(key, Json(forget.clone())).await
             }
@@ -457,26 +484,19 @@ impl Sync {
         E::Body: Body,
         E::Response: Reply,
     {
-        let remote = Remote {
+        call::<E>(&self.remote(key), &(), &(), body)
+            .await
+            .map_err(|error| call_failure(E::PATH, error))
+    }
+
+    fn remote<'a>(&'a self, key: &'a str) -> Remote<'a> {
+        Remote {
             http: &self.http,
             base: &self.backend_url,
             bearer: Some(key),
             read_ticket: None,
             timeout: Some(CALL_TIMEOUT),
-        };
-        call::<E>(&remote, &(), &(), body).await.map_err(|error| {
-            let problem = format!("{} failed: {error}", E::PATH);
-            match error {
-                CallError::Api { status, .. }
-                | CallError::Decode { status, .. } => {
-                    match StatusCode::from_u16(status) {
-                        Ok(status) => failure(status, problem),
-                        Err(_) => Failure::Refused(problem),
-                    }
-                }
-                _ => Failure::Lost(Lost::Unreachable(problem)),
-            }
-        })
+        }
     }
 
     /// Forget the owner and everything that came from them: their key, owed calls, every session,
@@ -508,7 +528,8 @@ mod tests {
     use std::sync::Mutex;
 
     use axum::{
-        Json, Router,
+        Router,
+        body::Bytes,
         extract::State,
         http::{HeaderMap, Method as AxumMethod, StatusCode as AxumStatus},
         routing::any,
@@ -541,12 +562,13 @@ mod tests {
                  method: AxumMethod,
                  uri: axum::http::Uri,
                  headers: HeaderMap,
-                 Json(body): Json<serde_json::Value>| async move {
+                 body: Bytes| async move {
                     assert_eq!(headers["authorization"], "Bearer amc_key");
                     backend.calls.lock().unwrap().push((
                         method.to_string(),
                         uri.path().into(),
-                        body,
+                        serde_json::from_slice(&body)
+                            .unwrap_or(serde_json::Value::Null),
                     ));
                     let mut answers = backend.answers.lock().unwrap();
                     let status = if answers.is_empty() {
@@ -680,6 +702,14 @@ mod tests {
         let mut conn = sync.db.acquire().await.unwrap();
         owe(&mut conn, &grant).await.unwrap();
         owe(&mut conn, &remove).await.unwrap();
+        owe(
+            &mut conn,
+            &OwedCall::DeleteShare {
+                share_id: "share-1".into(),
+            },
+        )
+        .await
+        .unwrap();
         drop(conn);
 
         // The backend fails the first call: it waits, and nothing after it overtakes it.
@@ -694,7 +724,7 @@ mod tests {
         );
         assert!(wait > Duration::from_secs(5) && wait <= backoff(1));
 
-        // Once due, both go in order, and the list is empty.
+        // Once due, all go in order, and the list is empty.
         sqlx::query("UPDATE backend_owed SET next_attempt_at = 0")
             .execute(&sync.db)
             .await
@@ -702,7 +732,7 @@ mod tests {
         sync.send_due("amc_key", &addresses()).await.unwrap();
         assert!(owed(&sync).await.is_empty());
         let calls = backend.calls.lock().unwrap().clone();
-        assert_eq!(calls.len(), 3);
+        assert_eq!(calls.len(), 4);
         assert_eq!(
             (calls[1].0.as_str(), calls[1].2["user"].as_str()),
             ("POST", Some("friend"))
@@ -710,6 +740,10 @@ mod tests {
         assert_eq!(
             (calls[2].0.as_str(), calls[2].2["user_id"].as_str()),
             ("DELETE", Some("other"))
+        );
+        assert_eq!(
+            (calls[3].0.as_str(), calls[3].1.as_str()),
+            ("DELETE", "/v1/instances/share-1")
         );
         assert_eq!(calls[1].2["role"], "editor");
 
@@ -723,7 +757,7 @@ mod tests {
         drop(conn);
         sync.send_due("amc_key", &addresses()).await.unwrap();
         assert!(owed(&sync).await.is_empty());
-        assert_eq!(backend.calls.lock().unwrap().len(), 3);
+        assert_eq!(backend.calls.lock().unwrap().len(), 4);
     }
 
     #[tokio::test]
