@@ -172,58 +172,77 @@ fn sync_dir(dir: &Path) -> io::Result<()> {
     Ok(())
 }
 
-/// The database and its WAL files, which only make sense together.
-fn database_files(dir: &Path) -> [PathBuf; 3] {
-    ["core.db", "core.db-wal", "core.db-shm"].map(|name| dir.join(name))
+/// Each database's folder and its file name: Core's own, and the engine's with each server's
+/// instance, content and share history.
+fn databases(paths: &Paths) -> [(PathBuf, &'static str); 2] {
+    let db = paths.database();
+    let db_dir = db.parent().expect("the database has a folder");
+    [
+        (db_dir.to_owned(), "core.db"),
+        (paths.engine(), engine::state::db::DB_FILE),
+    ]
 }
 
-/// Copy the database aside before a new version migrates it. Only while no Core runs. The copy
-/// is made in a staging folder and synced before it takes the place of the last one, so a copy
-/// that exists is whole.
+/// A database and its WAL files, which only make sense together.
+fn database_files(dir: &Path, name: &str) -> [PathBuf; 3] {
+    ["", "-wal", "-shm"].map(|suffix| dir.join(format!("{name}{suffix}")))
+}
+
+/// Copy the databases aside before a new version migrates them. Only while no Core runs. The
+/// copy is made in a staging folder and synced before it takes the place of the last one, so a
+/// copy that exists is whole.
 pub fn save_database(paths: &Paths) -> io::Result<()> {
     let copy = paths.database_before_update();
     let staged = copy.with_extension("new");
     if_present(std::fs::remove_dir_all(&staged))?;
     std::fs::create_dir_all(&staged)?;
-    let db = paths.database();
-    let db_dir = db.parent().expect("the database has a folder");
-    for (from, to) in database_files(db_dir).iter().zip(database_files(&staged))
-    {
-        if from.exists() {
-            copy_synced(from, &to)?;
+    for (dir, name) in databases(paths) {
+        for (from, to) in database_files(&dir, name)
+            .iter()
+            .zip(database_files(&staged, name))
+        {
+            if from.exists() {
+                copy_synced(from, &to)?;
+            }
         }
     }
     sync_dir(&staged)?;
     if_present(std::fs::remove_dir_all(&copy))?;
     std::fs::rename(&staged, &copy)?;
-    sync_dir(db_dir)
+    sync_dir(copy.parent().expect("the copy has a folder"))
 }
 
-/// Put back the database [`save_database`] copied. Only while no Core runs. Each file is copied
+/// Put back the databases [`save_database`] copied. Only while no Core runs. Each file is copied
 /// next to the live one, synced, then renamed over it, and the copy is left as it was, so a
 /// restore that is cut short can be done again from the start.
 pub fn restore_database(paths: &Paths) -> io::Result<()> {
-    let copy = database_files(&paths.database_before_update());
-    if !copy[0].exists() {
+    let copy = paths.database_before_update();
+    if !copy.join("core.db").exists() {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
             "no database was copied before the update",
         ));
     }
-    let db = paths.database();
-    let db_dir = db.parent().expect("the database has a folder");
-    for (from, to) in copy.iter().zip(database_files(db_dir)) {
-        if from.exists() {
-            let name = to.file_name().expect("a database file has a name");
-            let staged = to
-                .with_file_name(format!("{}.restore", name.to_string_lossy()));
-            copy_synced(from, &staged)?;
-            std::fs::rename(&staged, &to)?;
-        } else {
-            if_present(std::fs::remove_file(&to))?;
+    for (dir, name) in databases(paths) {
+        for (from, to) in database_files(&copy, name)
+            .iter()
+            .zip(database_files(&dir, name))
+        {
+            if from.exists() {
+                let file = to.file_name().expect("a database file has a name");
+                let staged = to.with_file_name(format!(
+                    "{}.restore",
+                    file.to_string_lossy()
+                ));
+                copy_synced(from, &staged)?;
+                std::fs::rename(&staged, &to)?;
+            } else {
+                if_present(std::fs::remove_file(&to))?;
+            }
         }
+        sync_dir(&dir)?;
     }
-    sync_dir(db_dir)
+    Ok(())
 }
 
 /// Copy the running binary into its version folder, so an update has a version to roll back
@@ -312,14 +331,25 @@ mod tests {
         let (_dir, paths) = paths();
         let db = paths.database();
         let wal = db.with_file_name("core.db-wal");
+        let engine_db = paths.engine().join("engine.db");
+        let engine_wal = paths.engine().join("engine.db-wal");
+        std::fs::create_dir_all(paths.engine()).unwrap();
         std::fs::write(&db, "before").unwrap();
+        std::fs::write(&engine_db, "engine before").unwrap();
         save_database(&paths).unwrap();
         // The new version migrates and leaves a WAL the old one never had.
         std::fs::write(&db, "migrated").unwrap();
         std::fs::write(&wal, "migrated wal").unwrap();
+        std::fs::write(&engine_db, "engine migrated").unwrap();
+        std::fs::write(&engine_wal, "engine migrated wal").unwrap();
         restore_database(&paths).unwrap();
         assert_eq!(std::fs::read_to_string(&db).unwrap(), "before");
         assert!(!wal.exists());
+        assert_eq!(
+            std::fs::read_to_string(&engine_db).unwrap(),
+            "engine before"
+        );
+        assert!(!engine_wal.exists());
     }
 
     #[test]
