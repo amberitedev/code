@@ -127,7 +127,47 @@ async fn auto_install_java_inner(
     reporter: Option<InstallProgressReporter>,
 ) -> crate::Result<PathBuf> {
     let _runtime_lease = state.content_store.runtime_cache_lock.read().await;
+    let slot = state
+        .content_store
+        .java_installs
+        .entry(java_version)
+        .or_default()
+        .clone();
+    install_once(
+        &slot,
+        install_java(state, java_version, show_loading, reporter),
+    )
+    .await
+}
 
+/// Runs `install` for one Java major at a time, since it replaces that major's folder. A call
+/// that waited on another takes the Java it installed.
+async fn install_once(
+    slot: &tokio::sync::Mutex<Option<PathBuf>>,
+    install: impl Future<Output = crate::Result<PathBuf>>,
+) -> crate::Result<PathBuf> {
+    let mut installed = match slot.try_lock() {
+        Ok(installed) => installed,
+        Err(_) => {
+            let installed = slot.lock().await;
+            if let Some(path) = &*installed {
+                return Ok(path.clone());
+            }
+            installed
+        }
+    };
+    *installed = None;
+    let path = install.await?;
+    *installed = Some(path.clone());
+    Ok(path)
+}
+
+async fn install_java(
+    state: &Engine,
+    java_version: u32,
+    show_loading: bool,
+    reporter: Option<InstallProgressReporter>,
+) -> crate::Result<PathBuf> {
     let loading_bar = if show_loading {
         Some(
             init_loading(
@@ -436,4 +476,39 @@ pub fn default_memory_max_mb() -> u32 {
 // Gets maximum memory in KiB.
 pub async fn get_max_memory() -> crate::Result<u64> {
     Ok(system_memory_bytes() / 1024)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[tokio::test]
+    async fn callers_waiting_on_a_java_install_take_its_java() {
+        let slot = tokio::sync::Mutex::new(None);
+        let runs = AtomicUsize::new(0);
+        let install = || async {
+            let run = runs.fetch_add(1, Ordering::SeqCst);
+            tokio::task::yield_now().await;
+            if run == 0 {
+                Err(ErrorKind::InputError("download failed".into()).into())
+            } else {
+                Ok(PathBuf::from(format!("java-{run}")))
+            }
+        };
+
+        let (failed, retried, joined) = tokio::join!(
+            install_once(&slot, install()),
+            install_once(&slot, install()),
+            install_once(&slot, install()),
+        );
+        assert!(failed.is_err());
+        assert_eq!(retried.unwrap(), PathBuf::from("java-1"));
+        assert_eq!(joined.unwrap(), PathBuf::from("java-1"));
+
+        assert_eq!(
+            install_once(&slot, install()).await.unwrap(),
+            PathBuf::from("java-2")
+        );
+    }
 }

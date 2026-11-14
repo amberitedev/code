@@ -20,6 +20,9 @@ pub struct ContentStore {
     pub(crate) pool: SqlitePool,
     pub(super) cleanup_lock: Arc<RwLock<()>>,
     pub(crate) runtime_cache_lock: RwLock<()>,
+    /// Per Java major, held while it installs, with the Java the last install put in place.
+    pub(crate) java_installs:
+        dashmap::DashMap<u32, Arc<Mutex<Option<PathBuf>>>>,
     pub(super) download_locks: [Mutex<()>; 64],
     pub(super) publish_locks: [Mutex<()>; 64],
     pub(crate) files_lock: Mutex<()>,
@@ -65,6 +68,7 @@ impl ContentStore {
             pool,
             cleanup_lock: Arc::new(RwLock::new(())),
             runtime_cache_lock: RwLock::new(()),
+            java_installs: Default::default(),
             download_locks: std::array::from_fn(|_| Mutex::new(())),
             publish_locks: std::array::from_fn(|_| Mutex::new(())),
             files_lock: Mutex::new(()),
