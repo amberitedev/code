@@ -9,7 +9,6 @@ import {
 	newestVersionForChannel,
 	useVIntl,
 } from '@modrinth/ui'
-import { openUrl } from '@tauri-apps/plugin-opener'
 import dayjs from 'dayjs'
 import { nextTick, type Ref, ref } from 'vue'
 import type { Router } from 'vue-router'
@@ -42,6 +41,7 @@ import {
 } from '@/helpers/instance'
 import { get_game_versions } from '@/helpers/tags'
 import type { GameInstance, InstanceLoader } from '@/helpers/types'
+import { openUrl } from '@/platform/opener'
 import type { AppEvents } from '@/providers/app-events'
 interface ModalRef {
 	show: (initialVersionId?: string) => void

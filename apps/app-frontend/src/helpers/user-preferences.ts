@@ -1,19 +1,17 @@
 import type { UserPreferencesContext } from '@modrinth/ui'
-import { invoke } from '@tauri-apps/api/core'
+
+import { apiClient } from '@/platform/modrinth-client'
 
 type UserPreferences = NonNullable<UserPreferencesContext['preferences']['value']>
 type PartialUserPreferences = Parameters<UserPreferencesContext['updatePreferences']>[0]
 
 export async function get_user_preferences(userId: string): Promise<UserPreferences> {
-	return await invoke<UserPreferences>('plugin:users|get_user_preferences', { userId })
+	return await apiClient.labrinth.users_v3.getPreferences(userId)
 }
 
 export async function patch_user_preferences(
 	userId: string,
 	preferences: PartialUserPreferences,
 ): Promise<UserPreferences> {
-	return await invoke<UserPreferences>('plugin:users|patch_user_preferences', {
-		userId,
-		preferences,
-	})
+	return await apiClient.labrinth.users_v3.patchPreferences(userId, preferences)
 }

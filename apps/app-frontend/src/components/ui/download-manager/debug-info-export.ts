@@ -1,8 +1,10 @@
-import { Channel, invoke } from '@tauri-apps/api/core'
-import { save } from '@tauri-apps/plugin-dialog'
+import { ContractClient, ops } from '@modrinth/api-client'
 import { computed, reactive, ref } from 'vue'
 
 import { toError } from '@/helpers/errors'
+import { save } from '@/platform/dialog'
+import { localTransport } from '@/platform/local'
+import { cancelOp, runOp } from '@/platform/ops'
 
 export interface DebugInfoExportProgress {
 	stage: 'preparing' | 'exporting' | 'finishing'
@@ -21,6 +23,8 @@ export interface DebugInfoExportTask extends DebugInfoExportProgress {
 	error?: string
 	cancel: () => Promise<void>
 }
+
+const local = new ContractClient(localTransport)
 
 export const debugInfoExports = ref(new Map<string, DebugInfoExportTask>())
 const selectingDestination = ref(false)
@@ -65,7 +69,7 @@ export async function exportDebugInfo(title: string) {
 				return
 			task.canceling = true
 			try {
-				await invoke('plugin:utils|cancel_debug_info_export', { id: task.id })
+				await cancelOp(task.id)
 			} catch (error) {
 				task.canceling = false
 				throw error
@@ -73,20 +77,22 @@ export async function exportDebugInfo(title: string) {
 		},
 	})
 	debugInfoExports.value.set(task.id, task)
-	const onProgress = new Channel<DebugInfoExportProgress>((progress) => {
-		if (task.status !== 'running') return
-		task.started = true
-		task.stage = progress.stage
-		task.processedBytes = progress.processedBytes
-		task.totalBytes = progress.totalBytes
-	})
 	try {
-		const saved = await invoke<boolean>('plugin:utils|export_debug_info', {
-			id: task.id,
-			path,
-			onProgress,
-		})
-		task.status = saved ? 'succeeded' : 'canceled'
+		const { error } = await runOp(
+			task.id,
+			() => local.call(ops.exportDebugInfo, { body: { op: task.id, path } }),
+			({ stage, done, total }) => {
+				if (task.status !== 'running') return
+				task.started = true
+				if (stage === 'preparing' || stage === 'exporting' || stage === 'finishing') {
+					task.stage = stage
+				}
+				task.processedBytes = done
+				task.totalBytes = total
+			},
+		)
+		if (error && error.error !== 'cancelled') throw new Error(error.description)
+		task.status = error ? 'canceled' : 'succeeded'
 	} catch (error) {
 		task.status = 'failed'
 		task.error = toError(error).message

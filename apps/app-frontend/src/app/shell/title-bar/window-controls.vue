@@ -38,13 +38,13 @@
 <script setup>
 import { MaximizeIcon, MinimizeIcon, RestoreIcon, XIcon } from '@modrinth/assets'
 import { IconButton } from '@modrinth/ui'
-import { getCurrentWindow } from '@tauri-apps/api/window'
-import { saveWindowState, StateFlags } from '@tauri-apps/plugin-window-state'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 
 import { useAppSettings } from '@/composables/use-app-settings.ts'
 import { get as getSettings } from '@/helpers/settings.ts'
 import { getOS } from '@/helpers/utils.js'
+import { isNativeWindow } from '@/platform/local'
+import { getCurrentWindow, saveWindowState, StateFlags } from '@/platform/window'
 
 const appSettings = useAppSettings()
 
@@ -57,8 +57,9 @@ const alwaysShowAppControls = computed(() => appSettings.getFeatureFlag('always_
 
 const showControls = computed(
 	() =>
-		alwaysShowAppControls.value ||
-		(!nativeDecorations.value && (os.value === 'Windows' || os.value === 'Linux')),
+		isNativeWindow &&
+		(alwaysShowAppControls.value ||
+			(!nativeDecorations.value && (os.value === 'Windows' || os.value === 'Linux'))),
 )
 
 function setWindowControlsWidth(width) {
@@ -82,6 +83,7 @@ watch(controlsEl, (el) => {
 })
 
 onMounted(async () => {
+	if (!isNativeWindow) return
 	os.value = await getOS()
 
 	const settings = await getSettings()

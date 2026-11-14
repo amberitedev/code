@@ -42,10 +42,10 @@
 <script setup>
 import { CalendarIcon, ExternalIcon } from '@modrinth/assets'
 import { Button, Card, ImageViewerEditor, useFormatDateTime } from '@modrinth/ui'
-import { openUrl } from '@tauri-apps/plugin-opener'
 import { computed, ref } from 'vue'
 
 import { trackEvent } from '@/helpers/analytics'
+import { openUrl } from '@/platform/opener'
 
 // The parent route view passes every tab's props. This tab has two root nodes, so without this Vue
 // warns about the ones it does not declare on every render and dev mode serializes them.

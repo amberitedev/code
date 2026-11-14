@@ -1,6 +1,7 @@
-import { getVersion } from '@tauri-apps/api/app'
 import { type App, createApp, ref } from 'vue'
 import type { Router } from 'vue-router'
+
+import { getVersion } from '@/platform/os'
 
 import CrashScreen from './crash-screen.vue'
 

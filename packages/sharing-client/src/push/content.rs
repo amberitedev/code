@@ -7,7 +7,9 @@
 use std::collections::HashSet;
 
 use crate::install::ModpackFile;
-use crate::versions::RemovedFile;
+use contracts::backend::sharing::RemovedFile;
+
+use crate::versions::removed_path;
 
 /// One content file members get from the owner's instance or server, as its side reads it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -78,7 +80,7 @@ pub fn removed_files<'a, S: 'a>(
             None => file
                 .path
                 .split_once('/')
-                .and_then(|(parent, name)| RemovedFile::path(parent, name)),
+                .and_then(|(parent, name)| removed_path(parent, name)),
         };
         if let Some(entry) = entry
             && !removed.contains(&entry)
@@ -163,7 +165,7 @@ mod tests {
                 RemovedFile::Version {
                     version_id: "a".into()
                 },
-                RemovedFile::path("mods", "cdn.jar").unwrap(),
+                removed_path("mods", "cdn.jar").unwrap(),
             ]
         );
     }

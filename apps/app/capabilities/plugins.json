@@ -4,17 +4,7 @@
 	"local": true,
 	"windows": ["main"],
 	"permissions": [
-		"dialog:allow-open",
 		"dialog:allow-confirm",
-		"opener:default",
-		"os:allow-platform",
-		"os:allow-version",
-		"os:allow-os-type",
-		"os:allow-family",
-		"os:allow-arch",
-		"os:allow-exe-extension",
-		"os:allow-locale",
-		"os:allow-hostname",
 		"deep-link:default",
 		"window-state:default",
 		"window-state:allow-restore-state",
@@ -48,65 +38,8 @@
 				},
 				{
 					"url": "http://127.0.0.1:8000/*"
-				},
-				{
-					"url": "http://*.taila228c5.ts.net/*"
-				},
-				{
-					"url": "https://*.taila228c5.ts.net/*"
 				}
 			]
-		},
-		"dialog:allow-save",
-		"fs:allow-read-dir",
-		"fs:allow-read-file",
-		"fs:allow-read-text-file",
-		"fs:allow-stat",
-		"fs:allow-exists",
-		{
-			"identifier": "fs:scope",
-			"allow": [
-				{
-					"path": "$APPDATA/profiles"
-				},
-				{
-					"path": "$APPDATA/profiles/**"
-				},
-				{
-					"path": "$APPCONFIG/profiles"
-				},
-				{
-					"path": "$APPCONFIG/profiles/**"
-				},
-				{
-					"path": "$CONFIG/profiles"
-				},
-				{
-					"path": "$CONFIG/profiles/**"
-				}
-			]
-		},
-		"auth:default",
-		"import:default",
-		"jre:default",
-		"logs:default",
-		"metadata:default",
-		"minecraft-skins:default",
-		"mr-auth:default",
-		"onboarding-checklist:default",
-		"instance:default",
-		"install:default",
-		"process:default",
-		"reports:default",
-		"cache:default",
-		"files:default",
-		"settings:default",
-		"shortcuts:default",
-		"tags:default",
-		"users:default",
-		"utils:default",
-		"cores:default",
-		"friends:default",
-		"worlds:default"
+		}
 	]
 }

@@ -9,6 +9,11 @@ pub const MAX_ICON_SYMBOL_LENGTH: usize = 64;
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(rename = "SharedIconBackground")
+)]
 pub enum IconBackground {
     /// A solid `#RRGGBB` color.
     Color { value: String },
@@ -25,6 +30,7 @@ pub enum IconBackground {
 /// Symbol IDs are defined by the frontend's symbol catalog, so only their format is validated.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(rename = "SharedIconConfig"))]
 pub struct IconConfig {
     pub background: IconBackground,
     pub symbol: String,

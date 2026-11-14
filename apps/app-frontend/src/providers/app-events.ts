@@ -1,12 +1,9 @@
+import type { LocalEvent } from '@modrinth/api-client'
 import { createContext } from '@modrinth/ui'
 
-import type { AppEvent } from '@/generated/app-events/AppEvent'
-
-export type AppEventType = AppEvent['type']
-export type AppEventPayload<Type extends AppEventType> = Extract<
-	AppEvent,
-	{ type: Type }
->['payload']
+export type AppEventType = LocalEvent['type']
+export type AppEventPayload<Type extends AppEventType> =
+	Extract<LocalEvent, { type: Type }> extends { payload: infer Payload } ? Payload : undefined
 export type AppEventHandler<Type extends AppEventType> = (
 	payload: AppEventPayload<Type>,
 ) => void | Promise<void>

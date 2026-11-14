@@ -16,7 +16,7 @@ use tracing::{debug, warn};
 
 use crate::daemon::paths::Paths;
 
-/// Marks a request that came over the local socket. `access::Caller` reads it as the owner.
+/// Marks a request that came over the local socket. `CoreAccess` reads it as the owner.
 #[derive(Debug, Clone, Copy)]
 pub struct Local;
 

@@ -1,4 +1,4 @@
-use crate::api::Result;
+use anyhow::Result;
 use std::{
     hash::{DefaultHasher, Hash, Hasher},
     path::Path,

@@ -30,8 +30,7 @@ use super::{
 };
 use crate::{
     access::now,
-    servers::{Lifecycle, Servers},
-    state::servers::adapters::sqlite::server_rows,
+    servers::{Lifecycle, Servers, server_rows},
 };
 
 /// The key of Core's own API mapping and report.

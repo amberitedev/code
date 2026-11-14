@@ -1,0 +1,11 @@
+{
+	"name": "@amberite/contracts",
+	"version": "0.0.0",
+	"private": true,
+	"license": "AGPL-3.0-only",
+	"type": "module",
+	"types": "./ts/index.ts",
+	"exports": {
+		".": "./ts/index.ts"
+	}
+}

@@ -1,7 +1,14 @@
 # Amberite
 
 Amberite is a Minecraft launcher for modding and sharing, with self-hosted servers. Run the Rust
-server (Copal, also called Core) on any machine and manage it from the desktop App.
+server (Core) on any machine and manage it from the desktop App.
+
+New code, folders, types and docs say Core. Copal names only the shipped program: its binary,
+crate, service, installer and release.
+
+Theseus is Modrinth's codename for the App. It survives in upstream names we keep: the App crate
+`theseus_gui`, the Java package `com.modrinth.theseus` and `theseus.jar`, the `modrinth/theseus`
+user agent, `THESEUS_CONFIG_DIR` and the `theseus-*.yml` workflows.
 
 You can think of Amberite as Modrinth Hosting, but free and better. Sharing is not tied to a Core
 and works for everyone.
@@ -33,8 +40,9 @@ full Modrinth experience, so users can keep it as their main launcher with Amber
 on top.
 
 Amberite ports Modrinth's social backend from `apps/labrinth` (friends, profiles, sharing, etc.) to
-`apps/backend` (Cloudflare Workers and D1) while keeping the same schemas and contracts. Amberite
-runs this backend itself, with relevant upstream changes carried over.
+`apps/backend` (Cloudflare Workers and D1) while keeping the same schemas and contracts. We do not
+keep `apps/labrinth`; read it at `modrinth/main`. Amberite runs this backend itself, with relevant
+upstream changes carried over.
 
 ## A note from ilai
 
@@ -47,6 +55,10 @@ The rest of this document is meant to help you navigate the codebase and make ch
 Of note: most Amberite work is done by agents in T3 Code worktrees, several at once. Be careful
 with dev stacks, data, and processes that belong to another worktree or to the developer.
 
+Rust imports go one way: `contracts` <- `sharing-client` <- `engine` <- `apps/app`, `apps/core`.
+The design, and the rules a review checks it against, are in
+[architecture](docs/internals/architecture.md).
+
 ## Hit every surface
 
 The most common defect in this repo is a change that works on the side you tested and is missing on
@@ -54,9 +66,10 @@ another. Before calling work done, walk this list and say which entries applied:
 
 - **Way in, way out.** If you added a way in, add the way out and the way to see it. Share needs
   unshare, invite needs revoke. A one-way door is an unfinished feature.
-- **One contract.** Every call between the App and a backend (Core, `apps/backend`) is typed in
-  `packages/api-client`. Values Rust owns, such as limits and share rules, are generated into
-  api-client, never typed twice.
+- **One contract.** Every call between the App and a backend (Core, `apps/backend`) is an
+  `Endpoint` whose TS is generated into `@amberite/contracts` and called through
+  `packages/api-client`. Values Rust owns, such as limits and share rules, are generated the same
+  way, never typed twice.
 - **Shared UI.** Changes to inherited Modrinth UI or `packages/ui` can affect screens outside the
   one you changed. Check its consumers before treating it as local.
 - **Docs.** Check whether the change makes existing guidance inaccurate. Apply the
@@ -69,19 +82,23 @@ another. Before calling work done, walk this list and say which entries applied:
 - Setup runs in the background. While `.data/setup.json` says `running` and its `pid` is alive,
   wait for it and do not run `vp i`. It ends with `done` or `failed` (with the error). A dead pid,
   `failed`, or no file at all means run `vp run setup` yourself.
-- `vp run up 1 2` starts the backend, one Core, and the Apps for scenarios 1 and 2 in the
-  background, and returns once each App loads, printing its bridge URL. `vp run status` prints them
-  again; `vp run down` stops only this checkout's stack. The log is `.data/dev.log`.
-  `vp run dev` is the same stack in the foreground with App windows, for a person at a terminal.
+- `node scripts/dev-runner.ts up 1 2` starts the backend, one Core, and the Apps for scenarios 1
+  and 2 in the background, and returns once each App loads, printing its tab URL. There is no
+  `vp run up`: on Windows, vp kills everything its command started when it returns, the background
+  stack included. `vp run status` prints the URLs again; `vp run down` stops only this checkout's
+  stack. The log is `.data/dev.log`. `vp run dev` is the same stack in the foreground with App
+  windows, for a person at a terminal.
 - Rust builds once per distinct set of Rust inputs, shared by every checkout. With no Rust changes,
   `up` compiles nothing. Otherwise it compiles only the repo's crates that changed, one build at a
   time across checkouts. `up` gives up waiting after 9 minutes; run it again to keep waiting.
-- Nothing watches Rust. After a Rust edit, `vp run down` then `vp run up`. `up` stops and prints
-  compiler errors, so it is also the check for Rust changes.
-- Backend-only work needs no App: `vp run up dev:backend` starts in seconds. `vp run up dev:core`
-  starts only the Core. For the backend and Core together, start the full stack.
+- Nothing watches Rust. After a Rust edit, `vp run down`, then the same `up` command again,
+  with its mode and scenario numbers. `up` stops and prints compiler errors, so it is also the
+  check for Rust changes.
+- Backend-only work needs no App: `node scripts/dev-runner.ts up dev:backend` starts in seconds.
+  `node scripts/dev-runner.ts up dev:core` starts only the Core. For the backend and Core together,
+  start the full stack.
 - Ports derive from the worktree path and are stable across restarts. Read the real ones and the
-  bridge URLs from `vp run status`, since occupied ports shift.
+  tab URLs from `vp run status`, since occupied ports shift.
 - Never kill by process name, path, or worktree string. Several worktrees run stacks at once, and
   your own agent's command line holds this worktree's path. Stop what you started with
   `vp run down`, or kill only a PID you captured at spawn.
@@ -96,6 +113,9 @@ instead of pointing at live state:
 - `.data/backend` and `.data/core` are shared by every App in the worktree.
   `.data/scenarios/<number>` is one App installation. Scenarios 1 to 4 are the default set; a new
   number makes another isolated App and account.
+- A scenario holds two databases: `engine.db` (instances, content, the cache) and `app.db` (accounts,
+  settings, synced options and the App's other tables). `.data/core` holds the Core's `db/core.db`
+  and its engine's `engine/engine.db`. Nothing joins across them, so copy each folder whole.
 - The backend, Core, and scenarios are one dataset. Copy them together.
 - Stop the affected process before copying SQLite files, and copy their `-wal` and `-shm` files with
   them.
@@ -104,8 +124,8 @@ instead of pointing at live state:
 ## Verifying
 
 - Before you push, run `vp run check:changed`. It runs CI's fast checks for changed files: lint,
-  typos, TOML, typecheck and tests of the affected packages, and for Rust `rustfmt` and a build.
-  CI still runs the full suites.
+  typos, TOML, typecheck and tests of the affected packages, and for Rust `rustfmt`, a build, and
+  the tests of changed crates. CI still runs the full suites.
 - Test behavior that can break, such as sharing and sync logic, Core and backend permission
   checks, persistence and migrations, external-format parsing (modpacks, Modrinth's API), race
   fixes, and the logic a bug fix changed. Leave out tests for what types already guarantee, trivial

@@ -7,6 +7,7 @@
 
 mod access;
 mod backups;
+mod call;
 pub mod client;
 mod machine;
 mod servers;

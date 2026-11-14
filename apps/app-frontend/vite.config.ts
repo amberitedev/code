@@ -7,7 +7,7 @@ import svgLoader from 'vite-svg-loader'
 import tauriConf from '../app/tauri.conf.json'
 
 const projectRootDir = resolve(__dirname)
-const appLibEnvDir = resolve(projectRootDir, '../../packages/app-lib')
+const engineEnvDir = resolve(projectRootDir, '../../packages/engine')
 const apiClientSource = resolve(projectRootDir, '../../packages/api-client/src/index.ts')
 const portArgumentIndex = process.argv.indexOf('--port')
 const devPort = portArgumentIndex === -1 ? 1420 : Number(process.argv[portArgumentIndex + 1])
@@ -16,8 +16,8 @@ if (!Number.isInteger(devPort) || devPort < 1 || devPort > 65535) {
 	throw new Error(`Invalid Vite port: ${process.argv[portArgumentIndex + 1]}`)
 }
 
-// Load .env from app-lib manually instead of using Vite's envDir, which would auto-load .env.local and override values
-const envFilePath = resolve(appLibEnvDir, '.env')
+// Load .env from the engine manually instead of using Vite's envDir, which would auto-load .env.local and override values
+const envFilePath = resolve(engineEnvDir, '.env')
 if (existsSync(envFilePath)) {
 	for (const line of readFileSync(envFilePath, 'utf-8').split('\n')) {
 		const trimmed = line.trim()

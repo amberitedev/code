@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { contentStore, type StoreUsage } from '@modrinth/api-client'
 import { LoaderCircleIcon, TrashIcon } from '@modrinth/assets'
 import {
 	type BarSegment,
@@ -12,17 +13,9 @@ import {
 	useVIntl,
 } from '@modrinth/ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
-import { invoke } from '@tauri-apps/api/core'
 import { computed, ref, watch } from 'vue'
 
-type StoreUsage = {
-	unique_bytes: number
-	shared_bytes: number
-	unused_cache_bytes: number
-	private_copy_bytes: number
-	object_count: number
-	cache_limit_bytes: number
-}
+import { apiClient } from '@/platform/modrinth-client'
 
 const { handleError } = injectNotificationManager()
 const { formatMessage } = useVIntl()
@@ -39,7 +32,7 @@ const {
 	networkMode: 'always',
 	queryFn: async () => {
 		const [usage] = await Promise.all([
-			invoke<StoreUsage>('plugin:settings|store_usage'),
+			apiClient.local.call(contentStore.GetStoreUsage),
 			new Promise<void>((resolve) => setTimeout(resolve, 1000)),
 		])
 		return usage
@@ -151,7 +144,7 @@ const segments = computed<BarSegment[]>(() => {
 
 const clearMutation = useMutation({
 	networkMode: 'always',
-	mutationFn: () => invoke<number>('plugin:settings|store_cleanup'),
+	mutationFn: () => apiClient.local.call(contentStore.CleanStore),
 	onSuccess: () => queryClient.invalidateQueries({ queryKey: storeUsageKey }),
 	onError: handleError,
 })
@@ -164,7 +157,8 @@ function clearUnused() {
 
 const cacheLimitMutation = useMutation({
 	networkMode: 'always',
-	mutationFn: (bytes: number) => invoke('plugin:settings|store_set_cache_limit', { bytes }),
+	mutationFn: (bytes: number) =>
+		apiClient.local.call(contentStore.SetStoreCacheLimit, { body: bytes }),
 	onSuccess: (_result, bytes) => {
 		queryClient.setQueryData<StoreUsage>(storeUsageKey, (usage) =>
 			usage ? { ...usage, cache_limit_bytes: bytes } : usage,

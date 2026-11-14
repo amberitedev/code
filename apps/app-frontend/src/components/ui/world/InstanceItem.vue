@@ -152,11 +152,14 @@ const stop = async (event: MouseEvent) => {
 useAppEvent('process', async () => {
 	await checkProcess()
 })
+useAppEvent('resync', async () => {
+	await checkProcess()
+})
 
 const checkProcess = async () => {
 	const runningProcesses = await get_by_instance_id(props.instance.id).catch(handleError)
 
-	playing.value = runningProcesses.length > 0
+	playing.value = !!runningProcesses?.length
 }
 
 onMounted(() => {

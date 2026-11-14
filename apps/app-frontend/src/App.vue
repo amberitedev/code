@@ -1,5 +1,5 @@
 <script setup>
-import { ModrinthApiError } from '@modrinth/api-client'
+import { ModrinthApiError, social } from '@modrinth/api-client'
 import {
 	ArrowLeftRightIcon,
 	CompassIcon,
@@ -55,14 +55,8 @@ import {
 } from '@modrinth/ui'
 import { renderString } from '@modrinth/utils/parse'
 import { useQueries, useQuery, useQueryClient } from '@tanstack/vue-query'
-import { getVersion } from '@tauri-apps/api/app'
-import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import { getCurrentWindow } from '@tauri-apps/api/window'
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
-import { openUrl } from '@tauri-apps/plugin-opener'
-import { type } from '@tauri-apps/plugin-os'
-import { saveWindowState, StateFlags } from '@tauri-apps/plugin-window-state'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 
@@ -156,6 +150,7 @@ import { get_user_preferences } from '@/helpers/user-preferences.ts'
 import { parse_modrinth_user_link } from '@/helpers/users'
 import {
 	areUpdatesEnabled,
+	checkForUpdate,
 	enqueueUpdateForInstallation,
 	getOS,
 	getUpdateSize,
@@ -172,7 +167,11 @@ import {
 } from '@/pages/instance/query-options'
 import { createFileDownload } from '@/platform/adapters/file-download'
 import { createIconCache } from '@/platform/adapters/icon-cache'
+import { isNativeWindow, localFileUrl } from '@/platform/local'
 import { apiClient as tauriApiClient } from '@/platform/modrinth-client'
+import { openUrl } from '@/platform/opener'
+import { getVersion, type } from '@/platform/os'
+import { getCurrentWindow, saveWindowState, showWindow, StateFlags } from '@/platform/window'
 import {
 	appUpdateState,
 	downloadAvailableAppUpdate,
@@ -206,7 +205,7 @@ const appTheme = useTheme()
 const quickInstances = useQuickInstanceLimit()
 const router = useRouter()
 const route = useRoute()
-const { channel: appEventChannel, events: appEvents } = setupAppEventsProvider()
+const { connect: connectAppEvents, events: appEvents } = setupAppEventsProvider()
 useInstanceMetadataRefresh(appEvents)
 const breadcrumbManager = createBreadcrumbManager()
 provideBreadcrumbManager(breadcrumbManager)
@@ -359,7 +358,7 @@ async function randomizeCreationIcon() {
 	creationGeneratedIcon.value = { path: generated.iconPath, config: generated.config }
 	return {
 		path: generated.iconPath,
-		previewUrl: convertFileSrc(generated.iconPath),
+		previewUrl: localFileUrl(generated.iconPath),
 	}
 }
 
@@ -376,7 +375,7 @@ function customizeContentInstallIcon() {
 function onCreationIconSaved(iconPath, config) {
 	creationGeneratedIcon.value = { path: iconPath, config }
 	if (creationIconTarget.value === 'content-install') {
-		modInstallModal.value?.setIcon(iconPath, convertFileSrc(iconPath))
+		modInstallModal.value?.setIcon(iconPath, localFileUrl(iconPath))
 		return
 	}
 
@@ -384,7 +383,7 @@ function onCreationIconSaved(iconPath, config) {
 	if (!context) return
 
 	context.instanceIcon.value = null
-	context.instanceIconUrl.value = convertFileSrc(iconPath)
+	context.instanceIconUrl.value = localFileUrl(iconPath)
 	context.instanceIconPath.value = iconPath
 }
 
@@ -466,16 +465,16 @@ function handleEditMenuAction(action) {
 }
 
 onMounted(async () => {
-	try {
-		const listeners = await Promise.all([
-			listen('edit-menu://undo', () => handleEditMenuAction('undo')),
-			listen('edit-menu://redo', () => handleEditMenuAction('redo')),
-			// The App's own deep links while it is already running. See `handle_command` in apps/app.
-			listen('amberite-command', (event) => handleCommand(event.payload)),
-		])
-		unlistenEditMenu = () => listeners.forEach((unlisten) => unlisten())
-	} catch (error) {
-		handleError(error)
+	if (isNativeWindow) {
+		try {
+			const listeners = await Promise.all([
+				listen('edit-menu://undo', () => handleEditMenuAction('undo')),
+				listen('edit-menu://redo', () => handleEditMenuAction('redo')),
+			])
+			unlistenEditMenu = () => listeners.forEach((unlisten) => unlisten())
+		} catch (error) {
+			handleError(error)
+		}
 	}
 
 	await useCheckDisableMouseover()
@@ -620,18 +619,20 @@ async function setupApp() {
 	}
 
 	Object.assign(appSettings.featureFlags, feature_flags)
-	isMaximized.value = await traceStartupStep('Read window maximized state', () =>
-		getCurrentWindow().isMaximized(),
-	)
-	isFullscreen.value = await traceStartupStep('Read window fullscreen state', () =>
-		getCurrentWindow().isFullscreen(),
-	)
+	if (isNativeWindow) {
+		isMaximized.value = await traceStartupStep('Read window maximized state', () =>
+			getCurrentWindow().isMaximized(),
+		)
+		isFullscreen.value = await traceStartupStep('Read window fullscreen state', () =>
+			getCurrentWindow().isFullscreen(),
+		)
+	}
 	os.value = await traceStartupStep('Read operating system', getOS)
 	const dev = await traceStartupStep('Read development mode', isDev)
 	isDevEnvironment.value = dev
 	const version = await traceStartupStep('Read app version', getVersion)
 	appSettings.nativeDecorations = native_decorations
-	if (os.value !== 'MacOS') {
+	if (isNativeWindow && os.value !== 'MacOS') {
 		await traceStartupStep('Apply window decorations', () =>
 			getCurrentWindow().setDecorations(native_decorations),
 		)
@@ -667,12 +668,14 @@ async function setupApp() {
 	debugStartup('App state initialized')
 	await traceStartupStep('Render initialized app', nextTick)
 
-	await traceStartupStep('Register window resize listener', () =>
-		getCurrentWindow().onResized(async () => {
-			isMaximized.value = await getCurrentWindow().isMaximized()
-			isFullscreen.value = await getCurrentWindow().isFullscreen()
-		}),
-	)
+	if (isNativeWindow) {
+		await traceStartupStep('Register window resize listener', () =>
+			getCurrentWindow().onResized(async () => {
+				isMaximized.value = await getCurrentWindow().isMaximized()
+				isFullscreen.value = await getCurrentWindow().isFullscreen()
+			}),
+		)
+	}
 
 	if (telemetry) {
 		initAnalytics()
@@ -724,7 +727,7 @@ const {
 } = useRouteLoading({ stateInitialized, stateFailed })
 provideLoadingState(loading)
 
-traceStartupStep('Initialize backend state', () => initialize_state(appEventChannel))
+traceStartupStep('Initialize backend state', () => initialize_state(appEvents, connectAppEvents))
 	.then(() => {
 		traceStartupStep('Initialize frontend state', setupApp).catch((err) => {
 			stateFailed.value = true
@@ -739,6 +742,7 @@ traceStartupStep('Initialize backend state', () => initialize_state(appEventChan
 	})
 
 const handleClose = async () => {
+	if (!isNativeWindow) return
 	await saveWindowState(StateFlags.ALL)
 	await getCurrentWindow().close()
 }
@@ -1064,7 +1068,7 @@ async function signIn(flow = 'sign-in', addAccount = false) {
 		await login(flow, addAccount)
 		await fetchCredentials()
 	} catch (error) {
-		if (error?.code === 'login_canceled') {
+		if (error?.code === 'sign_in_cancelled') {
 			// user closed the login window
 		} else {
 			handleError(error)
@@ -1268,7 +1272,7 @@ async function fetchIntercomToken() {
 }
 
 onMounted(() => {
-	invoke('show_window')
+	if (isNativeWindow) showWindow()
 
 	error.setErrorModal(errorModal.value)
 	error.setMinecraftAuthErrorModal(minecraftAuthErrorModal.value)
@@ -1291,7 +1295,9 @@ useAppEvent('notification', handleLiveNotification, appEvents)
 
 async function markLiveNotificationRead(notification) {
 	try {
-		await tauriApiClient.labrinth.notifications_v2.markAsRead(notification.id)
+		await tauriApiClient.backend.call(social.ReadNotification, {
+			params: { id: String(notification.id) },
+		})
 	} catch (error) {
 		if (error instanceof ModrinthApiError && error.statusCode === 404) {
 			console.warn(`notification ${notification.id} could not be marked as read`, error)
@@ -1398,8 +1404,9 @@ async function replayUnreadNotifications() {
 	const refreshId = credentialsRefreshId
 	const generation = liveNotificationGeneration
 	try {
-		const notifications =
-			await tauriApiClient.labrinth.notifications_v2.getUserNotifications(userId)
+		const notifications = await tauriApiClient.backend.call(social.ListUserNotifications, {
+			params: { id: userId },
+		})
 		// The backend returns newest first; toasts should appear in the order they were sent.
 		for (const notification of notifications.filter((n) => !n.read).reverse()) {
 			if (refreshId !== credentialsRefreshId || generation !== liveNotificationGeneration) return
@@ -1659,7 +1666,7 @@ async function checkUpdates() {
 	}
 
 	async function performCheck() {
-		const update = await invoke('plugin:updater|check')
+		const update = await checkForUpdate()
 		if (!update) {
 			console.log('No update available')
 			return
@@ -1828,6 +1835,7 @@ function handleClick(e) {
 				target.href &&
 				['http://', 'https://', 'mailto:', 'tel:'].some((v) => target.href.startsWith(v)) &&
 				!target.classList.contains('router-link-active') &&
+				!target.href.startsWith(location.origin) &&
 				!target.href.startsWith('http://localhost') &&
 				!target.href.startsWith('https://tauri.localhost') &&
 				!target.href.startsWith('http://tauri.localhost')

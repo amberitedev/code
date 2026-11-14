@@ -14,14 +14,17 @@ use std::{
 };
 
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use contracts::{
+    Empty,
+    backend::cores,
+    client::{Remote, call},
+    tickets::PublicKeys,
+};
 use ring::signature::{ED25519, UnparsedPublicKey};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tokio::sync::Mutex;
 use tracing::{debug, warn};
-use ts_rs::TS;
 
-/// The `iss` of every ticket the backend signs.
-pub const ISSUER: &str = "amberite";
 /// How far apart this machine's clock and the backend's may be.
 pub const LEEWAY_S: i64 = 60;
 
@@ -29,25 +32,6 @@ const REFRESH_EVERY_S: i64 = 24 * 3600;
 /// How long a failed daily refresh waits before trying again.
 const RETRY: Duration = Duration::from_secs(3600);
 const UNKNOWN_KID_EVERY: Duration = Duration::from_secs(600);
-
-/// The backend's ticket keys as a JWK set. A key stays listed for a day after it is replaced.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
-pub struct PublicKeys {
-    pub keys: Vec<PublicKey>,
-}
-
-/// One Ed25519 public key as a JWK.
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-pub struct PublicKey {
-    /// Always `OKP`.
-    pub kty: String,
-    /// Always `Ed25519`.
-    pub crv: String,
-    /// The id a ticket names in its `kid` header.
-    pub kid: String,
-    /// The key, base64url.
-    pub x: String,
-}
 
 /// Where [`Keys`] keeps the key set between runs.
 pub trait Persist: Send + Sync {
@@ -94,8 +78,8 @@ impl Persist for JsonFile {
 pub struct Keys<P> {
     persist: P,
     http: reqwest::Client,
-    /// `{backend}/core/keys.json`. `None` without a backend: only stored keys are used.
-    url: Option<String>,
+    /// The backend's URL. `None` without a backend: only stored keys are used.
+    backend_url: Option<String>,
     state: Mutex<State>,
 }
 
@@ -141,7 +125,7 @@ impl<P: Persist> Keys<P> {
         Self {
             persist,
             http,
-            url: backend_url.map(|url| format!("{url}/core/keys.json")),
+            backend_url: backend_url.map(str::to_owned),
             state: Mutex::new(State {
                 keys: parse(keys),
                 fetched_at,
@@ -187,7 +171,7 @@ impl<P: Persist> Keys<P> {
 
     /// Refetch the keys whenever they are a day old, for as long as the process runs.
     pub async fn refresh_daily(&self) {
-        if self.url.is_none() {
+        if self.backend_url.is_none() {
             return;
         }
         loop {
@@ -210,18 +194,17 @@ impl<P: Persist> Keys<P> {
 
     /// Download the keys, then take the lock only to store them.
     async fn fetch(&self) -> Result<(), String> {
-        let Some(url) = &self.url else {
+        let Some(base) = &self.backend_url else {
             return Err("this Core has no backend".into());
         };
-        let keys: PublicKeys = self
-            .http
-            .get(url)
-            .timeout(Duration::from_secs(20))
-            .send()
-            .await
-            .and_then(reqwest::Response::error_for_status)
-            .map_err(|error| error.to_string())?
-            .json()
+        let remote = Remote {
+            http: &self.http,
+            base,
+            bearer: None,
+            read_ticket: None,
+            timeout: Some(Duration::from_secs(20)),
+        };
+        let keys = call::<cores::Keys>(&remote, &(), &(), Empty)
             .await
             .map_err(|error| error.to_string())?;
         let mut state = self.state.lock().await;
@@ -325,6 +308,7 @@ impl<'a> Unverified<'a> {
 /// Signing tickets the way the backend does, for tests here and in Core.
 #[cfg(any(test, feature = "testing"))]
 pub mod test_support {
+    use contracts::tickets::PublicKey;
     use ring::{
         rand::SystemRandom,
         signature::{Ed25519KeyPair, KeyPair},
@@ -383,6 +367,7 @@ pub mod test_support {
 
 #[cfg(test)]
 mod tests {
+    use contracts::tickets::PublicKey;
     use serde_json::json;
 
     use super::{test_support::Signer, *};

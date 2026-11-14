@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM instance_game_option_pack_bases WHERE instance_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "103e1dde4cf3680fed3f1fd6bcac5810b4e36d900612d4735584e760c99ae9ec"
+}

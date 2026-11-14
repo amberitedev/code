@@ -11,10 +11,9 @@ use std::{
 };
 
 use chrono::{DateTime, Datelike, Days, NaiveTime, TimeZone};
-use serde::{Deserialize, Serialize};
+use contracts::core::{Restarts, Schedule, Weekday};
 use sqlx::SqlitePool;
 use tracing::{info, warn};
-use ts_rs::TS;
 
 use super::{Phase, Servers, insight::Insight};
 use crate::access::now;
@@ -28,102 +27,6 @@ const SMART_WARNINGS: [i64; 2] = [60, 10];
 const TICK: Duration = Duration::from_secs(15);
 /// How often a countdown checks that it still holds.
 const STEP: i64 = 1;
-
-/// A server's restart settings.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-pub struct Restarts {
-    /// Start the server again after a crash. On by default.
-    pub crash: bool,
-    /// A restart at a set time, with an in-game countdown.
-    pub schedule: Option<Schedule>,
-    /// Experimental: restart once nobody is online and the server has run this many hours,
-    /// after a minute's warning in the game.
-    pub smart_after_hours: Option<u32>,
-}
-
-impl Default for Restarts {
-    fn default() -> Self {
-        Self {
-            crash: true,
-            schedule: None,
-            smart_after_hours: None,
-        }
-    }
-}
-
-/// A scheduled restart, in the Core machine's local time.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(tag = "every", rename_all = "snake_case")]
-pub enum Schedule {
-    Daily {
-        #[ts(type = "string")]
-        at: TimeOfDay,
-    },
-    Weekly {
-        on: Weekday,
-        #[ts(type = "string")]
-        at: TimeOfDay,
-    },
-}
-
-/// `HH:MM`, 24-hour.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(try_from = "String", into = "String")]
-pub struct TimeOfDay {
-    pub hour: u8,
-    pub minute: u8,
-}
-
-impl TryFrom<String> for TimeOfDay {
-    type Error = String;
-
-    fn try_from(text: String) -> Result<Self, String> {
-        text.parse()
-    }
-}
-
-impl std::str::FromStr for TimeOfDay {
-    type Err = String;
-
-    fn from_str(text: &str) -> Result<Self, String> {
-        let invalid = || format!("{text} is not a time like 04:30");
-        let (hour, minute) = text.split_once(':').ok_or_else(invalid)?;
-        let hour: u8 = hour.parse().map_err(|_| invalid())?;
-        let minute: u8 = minute.parse().map_err(|_| invalid())?;
-        if hour > 23 || minute > 59 {
-            return Err(invalid());
-        }
-        Ok(Self { hour, minute })
-    }
-}
-
-impl From<TimeOfDay> for String {
-    fn from(time: TimeOfDay) -> Self {
-        format!("{:02}:{:02}", time.hour, time.minute)
-    }
-}
-
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    TS,
-    clap::ValueEnum,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum Weekday {
-    Monday,
-    Tuesday,
-    Wednesday,
-    Thursday,
-    Friday,
-    Saturday,
-    Sunday,
-}
 
 /// A server's settings, the defaults without a row.
 pub async fn get(db: &SqlitePool, server_id: &str) -> sqlx::Result<Restarts> {
@@ -167,17 +70,15 @@ pub async fn set(
     Ok(())
 }
 
-impl From<Weekday> for chrono::Weekday {
-    fn from(day: Weekday) -> Self {
-        match day {
-            Weekday::Monday => Self::Mon,
-            Weekday::Tuesday => Self::Tue,
-            Weekday::Wednesday => Self::Wed,
-            Weekday::Thursday => Self::Thu,
-            Weekday::Friday => Self::Fri,
-            Weekday::Saturday => Self::Sat,
-            Weekday::Sunday => Self::Sun,
-        }
+fn chrono_day(day: Weekday) -> chrono::Weekday {
+    match day {
+        Weekday::Monday => chrono::Weekday::Mon,
+        Weekday::Tuesday => chrono::Weekday::Tue,
+        Weekday::Wednesday => chrono::Weekday::Wed,
+        Weekday::Thursday => chrono::Weekday::Thu,
+        Weekday::Friday => chrono::Weekday::Fri,
+        Weekday::Saturday => chrono::Weekday::Sat,
+        Weekday::Sunday => chrono::Weekday::Sun,
     }
 }
 
@@ -191,7 +92,7 @@ pub fn next<Tz: TimeZone>(
 ) -> Option<DateTime<Tz>> {
     let (day, at) = match schedule {
         Schedule::Daily { at } => (None, at),
-        Schedule::Weekly { on, at } => (Some(chrono::Weekday::from(on)), at),
+        Schedule::Weekly { on, at } => (Some(chrono_day(on)), at),
     };
     let time = NaiveTime::from_hms_opt(at.hour.into(), at.minute.into(), 0)
         .expect("a checked time of day");
@@ -377,27 +278,7 @@ async fn countdown(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{db, state::servers::adapters::sqlite::server_rows};
-
-    #[test]
-    fn times_of_day_are_checked() {
-        let time: TimeOfDay = "04:30".parse().unwrap();
-        assert_eq!(String::from(time), "04:30");
-        for bad in ["4", "24:00", "12:60", "ab:cd", ""] {
-            assert!(bad.parse::<TimeOfDay>().is_err(), "{bad}");
-        }
-        let schedule: Schedule = serde_json::from_str(
-            r#"{"every":"weekly","on":"sunday","at":"05:00"}"#,
-        )
-        .unwrap();
-        assert_eq!(
-            schedule,
-            Schedule::Weekly {
-                on: Weekday::Sunday,
-                at: TimeOfDay { hour: 5, minute: 0 }
-            }
-        );
-    }
+    use crate::{db, servers::server_rows};
 
     fn utc(text: &str) -> DateTime<chrono::Utc> {
         text.parse().unwrap()
@@ -556,13 +437,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let paths = crate::daemon::paths::Paths::new(dir.path());
         crate::daemon::folders::create(&paths, None).unwrap();
-        let servers = Servers::open(
-            paths,
-            db::memory().await,
-            Some(std::net::Ipv4Addr::LOCALHOST.into()),
-        )
-        .await
-        .unwrap();
+        let servers = Servers::open_for_test(paths, db::memory().await).await;
         let id = servers.create("A").await.unwrap().id;
         let lock = servers.pretend_running(&id);
         (dir, servers, id, lock)
@@ -667,7 +542,7 @@ mod tests {
     #[tokio::test]
     async fn settings_default_until_set() {
         let db = db::memory().await;
-        let server = server_rows::create(&db, "A", |_| true)
+        let server = server_rows::create(&db, "a", "A", |_| true)
             .await
             .unwrap()
             .unwrap();

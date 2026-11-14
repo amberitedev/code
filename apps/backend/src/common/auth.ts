@@ -98,10 +98,9 @@ export function publicUser(user: UserRow, full = false) {
 	}
 }
 
-export function sessionResponse(row: SessionRow, session: string | null = null, current = false) {
+export function sessionDetails(row: SessionRow, current = false) {
 	return {
 		id: row.id,
-		session,
 		user_id: row.user_id,
 		created: row.created,
 		last_login: row.last_login,
@@ -170,7 +169,7 @@ export async function issueSession(
 			.first()
 		if (!claimed) unauthorized()
 	} else await insert.run()
-	return sessionResponse(row, token)
+	return { ...sessionDetails(row), session: token }
 }
 
 // Port of labrinth's issue_auth_sessions. The website asks for `app_session` when it signs the App
@@ -179,10 +178,10 @@ export async function issueAuthSessions(
 	request: Request,
 	env: Env,
 	userId: string,
-	appSession: unknown,
+	appSession: boolean | undefined,
 ) {
 	const session = await issueSession(request, env, userId)
-	if (appSession !== true) return session
+	if (!appSession) return session
 	return { ...session, app_session: (await issueSession(request, env, userId)).session }
 }
 

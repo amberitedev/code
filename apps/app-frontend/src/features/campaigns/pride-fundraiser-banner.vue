@@ -2,10 +2,10 @@
 import { CalendarIcon, UsersIcon, XIcon } from '@modrinth/assets'
 import { injectModrinthClient, ProgressBar } from '@modrinth/ui'
 import { useQuery } from '@tanstack/vue-query'
-import { openUrl } from '@tauri-apps/plugin-opener'
 import { computed, ref } from 'vue'
 
 import { useAppSettings } from '@/composables/use-app-settings'
+import { openUrl } from '@/platform/opener'
 
 const PRIDE_FUNDRAISER_END_DATE = new Date('2026-07-01T00:00:00Z').getTime()
 const appSettings = useAppSettings()

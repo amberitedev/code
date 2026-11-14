@@ -1,123 +1,61 @@
-//! The pool's tickets. The store checks them itself, with the backend's keys, so it stays the
-//! authority on what it serves. Each route takes one kind, and a ticket names one version:
-//!
-//! - `store`: upload `root`, at most `bytes` in all. `aud` is this Core.
-//! - `fetch`: read `root`. `aud` lists the Cores holding it.
-//! - `pull`: copy `root` from `source`, with the fetch ticket inside. `aud` is this Core.
+//! The pool's tickets ([`contracts::tickets`]). The store checks them itself, with the backend's
+//! keys, so it stays the authority on what it serves. Each route takes one kind, and a ticket
+//! names one version.
 
+use contracts::{
+    ApiError, ErrorCode, Hash,
+    tickets::{Audience, TICKET_ISSUER, Ticket, TicketKind},
+};
 use serde::Deserialize;
 
-use crate::{
-    Code, StoreError,
-    keys::{ISSUER, JsonFile, Keys, LEEWAY_S},
-    objects::Hash,
-};
+use crate::keys::{JsonFile, Keys, LEEWAY_S};
 
-pub const STORE: &str = "store";
-pub const FETCH: &str = "fetch";
-pub const PULL: &str = "pull";
-
-/// What a pool ticket grants, once verified.
-#[derive(Debug, Deserialize)]
-pub struct Claims {
-    pub root: Hash,
-    /// Store tickets: the most the version may hold.
-    #[serde(default)]
-    pub bytes: Option<u64>,
-    /// Pull tickets: where to copy from.
-    #[serde(default)]
-    pub source: Option<Source>,
-}
-
-/// The Core a pull copies from, as the backend lists holders, and a fetch ticket for it. The
-/// ticket may sit beside `core` or inside it.
-#[derive(Debug, Clone, Deserialize)]
-pub struct Source {
-    pub core: SourceCore,
-    #[serde(default)]
-    ticket: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct SourceCore {
-    /// `https://ip:port`.
-    pub address: String,
-    #[serde(default)]
-    pub public_address: Option<String>,
-    /// SHA-256 of its certificate, hex. The only certificate the pull accepts.
-    pub cert_fingerprint: String,
-    #[serde(default)]
-    ticket: Option<String>,
-}
-
-impl Source {
-    pub fn ticket(&self) -> Option<&str> {
-        self.ticket.as_deref().or(self.core.ticket.as_deref())
-    }
-
-    /// Where to reach it: its public address when it has one.
-    pub fn address(&self) -> &str {
-        self.core
-            .public_address
-            .as_deref()
-            .unwrap_or(&self.core.address)
-    }
-}
-
+/// What every pool ticket is checked for before its kind's own claims are read.
 #[derive(Deserialize)]
 struct Common {
     iss: String,
-    kind: String,
+    kind: TicketKind,
     aud: Audience,
     iat: i64,
     exp: i64,
+    #[serde(default)]
+    root: Option<Hash>,
 }
 
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum Audience {
-    One(String),
-    Many(Vec<String>),
+fn invalid(description: &str) -> ApiError {
+    ApiError::new(ErrorCode::TicketInvalid, description)
 }
 
-impl Audience {
-    fn contains(&self, core_id: &str) -> bool {
-        match self {
-            Self::One(one) => one == core_id,
-            Self::Many(many) => many.iter().any(|id| id == core_id),
-        }
-    }
-}
-
-fn invalid(description: &str) -> StoreError {
-    StoreError::new(Code::TicketInvalid, description)
-}
-
-/// The claims of `ticket`, required to be of `kind`, for this Core, for `root`, and current at
-/// `now`.
-pub async fn verify(
+/// The claims of `ticket`, required to be a `T`, for this Core, for `root`, and current at `now`.
+pub async fn verify<T: Ticket>(
     keys: &Keys<JsonFile>,
     ticket: &str,
     core_id: &str,
-    kind: &'static str,
     root: &Hash,
     now: i64,
-) -> Result<Claims, StoreError> {
+) -> Result<T, ApiError> {
     let value = keys.verify(ticket).await.map_err(invalid)?;
     let common: Common = serde_json::from_value(value.clone())
         .map_err(|_| invalid("The ticket's claims are unreadable."))?;
-    if common.iss != ISSUER {
+    if common.iss != TICKET_ISSUER {
         return Err(invalid("The ticket is from another issuer."));
     }
-    if common.kind != kind {
-        return Err(StoreError::new(
-            Code::TicketWrongKind,
-            format!("This needs a {kind} ticket."),
+    if common.kind != T::KIND {
+        return Err(ApiError::new(
+            ErrorCode::TicketWrongKind,
+            format!(
+                "This needs a {} ticket.",
+                format!("{:?}", T::KIND).to_lowercase()
+            ),
         ));
     }
-    if !common.aud.contains(core_id) {
-        return Err(StoreError::new(
-            Code::TicketWrongCore,
+    let for_core = match &common.aud {
+        Audience::One(one) => one == core_id,
+        Audience::Many(many) => many.iter().any(|id| id == core_id),
+    };
+    if !for_core {
+        return Err(ApiError::new(
+            ErrorCode::TicketWrongCore,
             "The ticket is for another Core.",
         ));
     }
@@ -127,36 +65,25 @@ pub async fn verify(
         ));
     }
     if now > common.exp + LEEWAY_S {
-        return Err(StoreError::new(
-            Code::TicketExpired,
+        return Err(ApiError::new(
+            ErrorCode::TicketExpired,
             "The ticket expired. Get a new one.",
         ));
     }
-    let claims: Claims = serde_json::from_value(value)
-        .map_err(|_| invalid("The ticket's claims are unreadable."))?;
-    if claims.root != *root {
+    if common.root.as_ref() != Some(root) {
         return Err(invalid("The ticket is for another version."));
     }
-    let complete = match kind {
-        STORE => claims.bytes.is_some(),
-        PULL => claims
-            .source
-            .as_ref()
-            .is_some_and(|source| source.ticket().is_some()),
-        _ => true,
-    };
-    if !complete {
-        return Err(invalid("The ticket is missing what its kind needs."));
-    }
-    Ok(claims)
+    serde_json::from_value(value)
+        .map_err(|_| invalid("The ticket is missing what its kind needs."))
 }
 
 /// Pool tickets as the backend signs them, for tests.
 #[cfg(test)]
 pub mod test_support {
+    use contracts::tickets::TICKET_ISSUER;
     use serde_json::{Value, json};
 
-    use crate::keys::{ISSUER, test_support::Signer};
+    use crate::keys::test_support::Signer;
 
     /// A ticket of `kind` for `root` on `aud`, issued at `iat` and good for an hour, with
     /// `extra` claims.
@@ -169,7 +96,7 @@ pub mod test_support {
         extra: Value,
     ) -> String {
         let mut claims = json!({
-            "iss": ISSUER,
+            "iss": TICKET_ISSUER,
             "kind": kind,
             "aud": aud,
             "root": root,
@@ -188,6 +115,7 @@ pub mod test_support {
 
 #[cfg(test)]
 mod tests {
+    use contracts::tickets::{FetchTicket, PullTicket, StoreTicket};
     use serde_json::json;
 
     use super::{test_support::ticket, *};
@@ -210,13 +138,12 @@ mod tests {
         Hash::parse(&"a".repeat(64)).unwrap()
     }
 
-    async fn code(
+    async fn code<T: Ticket + std::fmt::Debug>(
         keys: &Keys<JsonFile>,
         ticket: &str,
-        kind: &'static str,
         now: i64,
-    ) -> Code {
-        verify(keys, ticket, "core", kind, &root(), now)
+    ) -> ErrorCode {
+        verify::<T>(keys, ticket, "core", &root(), now)
             .await
             .unwrap_err()
             .error
@@ -229,44 +156,44 @@ mod tests {
         let root = root();
         let store = ticket(
             &signer,
-            STORE,
+            "store",
             json!("core"),
-            root.as_str(),
+            &root.to_string(),
             NOW,
             json!({ "bytes": 10 }),
         );
-        let claims = verify(&keys, &store, "core", STORE, &root, NOW)
+        let claims = verify::<StoreTicket>(&keys, &store, "core", &root, NOW)
             .await
             .unwrap();
-        assert_eq!(claims.bytes, Some(10));
+        assert_eq!(claims.bytes, 10);
         assert_eq!(
-            code(&keys, &store, FETCH, NOW).await,
-            Code::TicketWrongKind
+            code::<FetchTicket>(&keys, &store, NOW).await,
+            ErrorCode::TicketWrongKind
         );
         let fetch = ticket(
             &signer,
-            FETCH,
+            "fetch",
             json!(["other", "core"]),
-            root.as_str(),
+            &root.to_string(),
             NOW,
             json!({}),
         );
         assert!(
-            verify(&keys, &fetch, "core", FETCH, &root, NOW)
+            verify::<FetchTicket>(&keys, &fetch, "core", &root, NOW)
                 .await
                 .is_ok()
         );
         assert_eq!(
-            code(&keys, &fetch, STORE, NOW).await,
-            Code::TicketWrongKind
+            code::<StoreTicket>(&keys, &fetch, NOW).await,
+            ErrorCode::TicketWrongKind
         );
         let session = signer.sign(&json!({
-            "iss": ISSUER, "kind": "session", "sub": "u", "aud": "core",
+            "iss": TICKET_ISSUER, "kind": "session", "sub": "u", "aud": "core",
             "iat": NOW, "exp": NOW + 300, "jti": "j",
         }));
         assert_eq!(
-            code(&keys, &session, FETCH, NOW).await,
-            Code::TicketWrongKind
+            code::<FetchTicket>(&keys, &session, NOW).await,
+            ErrorCode::TicketWrongKind
         );
     }
 
@@ -276,31 +203,30 @@ mod tests {
         let (_dir, keys) = keys(&signer).await;
         let root = root().to_string();
         let other_core =
-            ticket(&signer, FETCH, json!(["other"]), &root, NOW, json!({}));
+            ticket(&signer, "fetch", json!(["other"]), &root, NOW, json!({}));
         assert_eq!(
-            code(&keys, &other_core, FETCH, NOW).await,
-            Code::TicketWrongCore
+            code::<FetchTicket>(&keys, &other_core, NOW).await,
+            ErrorCode::TicketWrongCore
         );
         let other_root = ticket(
             &signer,
-            FETCH,
+            "fetch",
             json!("core"),
             &"b".repeat(64),
             NOW,
             json!({}),
         );
         assert_eq!(
-            code(&keys, &other_root, FETCH, NOW).await,
-            Code::TicketInvalid
+            code::<FetchTicket>(&keys, &other_root, NOW).await,
+            ErrorCode::TicketInvalid
         );
         let fetch =
-            ticket(&signer, FETCH, json!("core"), &root, NOW, json!({}));
+            ticket(&signer, "fetch", json!("core"), &root, NOW, json!({}));
         assert!(
-            verify(
+            verify::<FetchTicket>(
                 &keys,
                 &fetch,
                 "core",
-                FETCH,
                 &Hash::parse(&root).unwrap(),
                 NOW + 3660
             )
@@ -308,51 +234,37 @@ mod tests {
             .is_ok()
         );
         assert_eq!(
-            code(&keys, &fetch, FETCH, NOW + 3661).await,
-            Code::TicketExpired
+            code::<FetchTicket>(&keys, &fetch, NOW + 3661).await,
+            ErrorCode::TicketExpired
         );
         assert_eq!(
-            code(&keys, &fetch, FETCH, NOW - 61).await,
-            Code::TicketInvalid
+            code::<FetchTicket>(&keys, &fetch, NOW - 61).await,
+            ErrorCode::TicketInvalid
         );
         let no_bytes =
-            ticket(&signer, STORE, json!("core"), &root, NOW, json!({}));
+            ticket(&signer, "store", json!("core"), &root, NOW, json!({}));
         assert_eq!(
-            code(&keys, &no_bytes, STORE, NOW).await,
-            Code::TicketInvalid
+            code::<StoreTicket>(&keys, &no_bytes, NOW).await,
+            ErrorCode::TicketInvalid
         );
         let no_source_ticket = ticket(
             &signer,
-            PULL,
+            "pull",
             json!("core"),
             &root,
             NOW,
             json!({ "source": { "core": { "address": "https://203.0.113.1:1", "cert_fingerprint": "00" } } }),
         );
         assert_eq!(
-            code(&keys, &no_source_ticket, PULL, NOW).await,
-            Code::TicketInvalid
+            code::<PullTicket>(&keys, &no_source_ticket, NOW).await,
+            ErrorCode::TicketInvalid
         );
         let stranger = Signer::new("k1");
         let forged =
-            ticket(&stranger, FETCH, json!("core"), &root, NOW, json!({}));
-        assert_eq!(code(&keys, &forged, FETCH, NOW).await, Code::TicketInvalid);
-    }
-
-    #[test]
-    fn a_source_ticket_may_sit_beside_or_inside_the_core() {
-        let beside: Source = serde_json::from_value(json!({
-            "core": { "id": "c", "address": "https://10.0.0.1:1", "public_address": "https://203.0.113.1:1", "cert_fingerprint": "f" },
-            "ticket": "t1",
-        }))
-        .unwrap();
-        assert_eq!(beside.ticket(), Some("t1"));
-        assert_eq!(beside.address(), "https://203.0.113.1:1");
-        let inside: Source = serde_json::from_value(json!({
-            "core": { "address": "https://10.0.0.1:1", "public_address": null, "cert_fingerprint": "f", "ticket": "t2" },
-        }))
-        .unwrap();
-        assert_eq!(inside.ticket(), Some("t2"));
-        assert_eq!(inside.address(), "https://10.0.0.1:1");
+            ticket(&stranger, "fetch", json!("core"), &root, NOW, json!({}));
+        assert_eq!(
+            code::<FetchTicket>(&keys, &forged, NOW).await,
+            ErrorCode::TicketInvalid
+        );
     }
 }

@@ -43,9 +43,6 @@ export class ArchonBackupsQueueV1Module extends AbstractModule {
 				method: 'PATCH',
 				body: request,
 				params: acknowledgeRotation ? { ar: 'true' } : undefined,
-				// Acknowledged, the change deletes the rotated backups: on a Core that takes a fresh
-				// ticket, as deleting them by hand does.
-				dangerous: acknowledgeRotation,
 			},
 		)
 	}
@@ -106,8 +103,6 @@ export class ArchonBackupsQueueV1Module extends AbstractModule {
 				api: 'archon',
 				version: 1,
 				method: 'DELETE',
-				// On a Core, deleting a backup takes a fresh ticket: backups are what undo damage.
-				dangerous: true,
 			},
 		)
 	}
@@ -121,7 +116,6 @@ export class ArchonBackupsQueueV1Module extends AbstractModule {
 				version: 1,
 				method: 'POST',
 				body: { backup_ids: backupIds } satisfies Archon.BackupsQueue.v1.DeleteManyBackupRequest,
-				dangerous: true,
 			},
 		)
 	}
@@ -135,7 +129,7 @@ export class ArchonBackupsQueueV1Module extends AbstractModule {
 	): Promise<void> {
 		await this.client.request<void>(
 			`/servers/${serverId}/worlds/${worldId}/backups-queue/${backupId}/restore`,
-			{ api: 'archon', version: 1, method: 'POST', body: request, dangerous: true },
+			{ api: 'archon', version: 1, method: 'POST', body: request },
 		)
 	}
 

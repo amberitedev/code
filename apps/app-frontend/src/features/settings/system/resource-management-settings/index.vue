@@ -1,10 +1,10 @@
 <script setup>
 import { BoxIcon, FolderSearchIcon } from '@modrinth/assets'
 import { defineMessages, IconButton, Input, Slider, useVIntl } from '@modrinth/ui'
-import { open } from '@tauri-apps/plugin-dialog'
 import { ref, watch } from 'vue'
 
 import { get, set } from '@/helpers/settings.ts'
+import { open } from '@/platform/dialog'
 
 import ContentStorageSettings from './content-storage.vue'
 

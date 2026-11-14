@@ -6,13 +6,13 @@ import {
 	provideAppearanceSettings,
 	useSavable,
 } from '@modrinth/ui'
-import { platform } from '@tauri-apps/plugin-os'
 import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
 
 import { useAppSettings } from '@/composables/use-app-settings.ts'
 import { type ColorTheme, isDarkTheme, useTheme } from '@/composables/use-theme.ts'
 import { injectAppSettingsModal } from '@/features/settings/app-settings-modal/context'
 import { type AppSettings, get, set } from '@/helpers/settings.ts'
+import { platform } from '@/platform/os'
 
 const theme = useTheme()
 const appSettings = useAppSettings()

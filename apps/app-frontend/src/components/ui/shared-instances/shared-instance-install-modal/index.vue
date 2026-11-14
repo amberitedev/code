@@ -280,7 +280,6 @@ import {
 	useVIntl,
 } from '@modrinth/ui'
 import { useQueryClient } from '@tanstack/vue-query'
-import { openUrl } from '@tauri-apps/plugin-opener'
 import { computed, nextTick, ref } from 'vue'
 
 import { config } from '@/config'
@@ -288,6 +287,7 @@ import { toError } from '@/helpers/errors'
 import type { SharedInstanceInstallPreview } from '@/helpers/install'
 import { create_report } from '@/helpers/reports'
 import { block_user } from '@/helpers/users'
+import { openUrl } from '@/platform/opener'
 
 import SharedInstanceInstallSummary from './shared-instance-install-summary.vue'
 import { useSharedInstancePreviewContent } from './use-shared-instance-preview-content'

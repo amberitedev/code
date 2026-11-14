@@ -11,7 +11,6 @@ import {
 import type { ButtonMenuOption, CardAction } from '@modrinth/ui'
 import { commonMessages, defineMessages, useDebugLogger, useVIntl } from '@modrinth/ui'
 import { useQueryClient } from '@tanstack/vue-query'
-import { openUrl } from '@tauri-apps/plugin-opener'
 import type { ComputedRef, Ref } from 'vue'
 import { onUnmounted, ref, shallowRef } from 'vue'
 import type { Router } from 'vue-router'
@@ -23,6 +22,7 @@ import { get_by_instance_id } from '@/helpers/process'
 import type { GameInstance } from '@/helpers/types'
 import { add_server_to_instance, getServerAddress } from '@/helpers/worlds'
 import { instanceKeys } from '@/pages/instance/query-options'
+import { openUrl } from '@/platform/opener'
 
 interface BrowseServerInstance {
 	id: string

@@ -61,7 +61,6 @@ import {
 	useVIntl,
 } from '@modrinth/ui'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
-import { openUrl } from '@tauri-apps/plugin-opener'
 import { computed, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -70,6 +69,7 @@ import { config } from '@/config'
 import { useServerHistory } from '@/features/share-history/use-server-history'
 import { get_user } from '@/helpers/cache'
 import { get as getCreds } from '@/helpers/mr_auth'
+import { openUrl } from '@/platform/opener'
 import { provideBreadcrumbParent, useBreadcrumb, useRootBreadcrumb } from '@/shared/breadcrumbs'
 import { useCachedServerIcon } from '@/shared/composables/use-cached-server-icon'
 

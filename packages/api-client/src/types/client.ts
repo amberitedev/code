@@ -1,5 +1,7 @@
+import type { ApiError, CoreSession } from '@amberite/contracts'
+
+import type { ContractTransport } from '../contracts/client'
 import type { AbstractFeature } from '../core/abstract-feature'
-import type { Copal } from '../modules/copal/types'
 import type { RequestContext } from './request'
 import type { LocalFileUploader } from './upload'
 
@@ -31,17 +33,12 @@ export type RequestHooks = {
  * Why the platform could not sign in to a Core: the error Core answered with, or `status` null
  * when it did not answer.
  */
-export type CoreCallError = { status: number | null; error: string; description: string }
+export type CoreCallError = ApiError & { status: number | null }
 
 /** See `ClientConfig.coreSessions`. Each call rejects with a `CoreCallError`. */
 export interface CoreSessions {
 	/** Trade `ticket` for a session on the Core `coreId` at `address`, replacing any held. */
-	signIn(
-		coreId: string,
-		address: string,
-		fingerprint: string,
-		ticket: string,
-	): Promise<Copal.Session>
+	signIn(coreId: string, address: string, fingerprint: string, ticket: string): Promise<CoreSession>
 	/** End this device's session on the Core, when it answers, and forget it either way. */
 	signOut(coreId: string): Promise<void>
 	/** Whether this device holds a session for the Core. It may have ended there since. */
@@ -68,9 +65,15 @@ export interface ClientConfig {
 
 	/**
 	 * This device's sessions on Cores, held by the platform outside the page: the page never sees
-	 * a session token, and `connectCore` adds it to each request. See `copal.access_v1`.
+	 * a session token, and `connectCore` adds it to each request. See `archon.cores_v1.signIn`.
 	 */
 	coreSessions?: CoreSessions
+
+	/** How `client.local` reaches the App's local server. */
+	localTransport?: ContractTransport
+
+	/** How `client.core(id)` reaches the Core `coreId`, in place of today's Core routing. */
+	coreTransport?: (coreId: string) => ContractTransport
 
 	/**
 	 * User agent string or provider for requests

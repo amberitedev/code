@@ -1,31 +1,21 @@
 import {
+	type AbstractModrinthClient,
 	AuthFeature,
+	GenericModrinthClient,
 	NodeAuthFeature,
 	nodeAuthState,
+	pairedCores,
 	PanelVersionFeature,
 	SelfHostedFeature,
 	TauriModrinthClient,
 	VerboseLoggingFeature,
 } from '@modrinth/api-client'
-import { getVersion } from '@tauri-apps/api/app'
-import { invoke } from '@tauri-apps/api/core'
 
 import { config } from '@/config'
 import { get as getModrinthCredentials } from '@/helpers/mr_auth'
 import { createLocalFileUploader } from '@/platform/adapters/local-file-upload'
-
-/**
- * The App version for the User-Agent, fetched once. A failed fetch is not kept, so the next
- * request asks again: a browser bridge tab can ask while the native page is still loading.
- */
-const getAppVersion = (() => {
-	let version: Promise<string> | undefined
-	return () =>
-		(version ??= getVersion().catch((error: unknown) => {
-			version = undefined
-			throw error
-		}))
-})()
+import { isNativeWindow, localTransport } from '@/platform/local'
+import { getVersion } from '@/platform/os'
 
 /** The account signed in. A Core session belongs to one account and one Core. */
 async function account(): Promise<string> {
@@ -35,40 +25,42 @@ async function account(): Promise<string> {
 }
 
 /**
- * The App's one client for Modrinth, the account backend, and Cores. Root setup provides it to
- * components; code outside components imports it directly.
+ * The App's one client for Modrinth, the account backend, Cores and its own local server. Root
+ * setup provides it to components; code outside components imports it directly. A tab has no
+ * Tauri HTTP plugin, so it uses `fetch`.
  */
-export const apiClient: TauriModrinthClient = new TauriModrinthClient({
-	userAgent: async () => `modrinth/theseus/${await getAppVersion()}`,
+const ModrinthClient = isNativeWindow ? TauriModrinthClient : GenericModrinthClient
+export const apiClient: AbstractModrinthClient = new ModrinthClient({
+	userAgent: async () => `modrinth/theseus/${await getVersion()}`,
 	labrinthBaseUrl: config.labrinthBaseUrl,
 	// With our own account backend, hosting is the account's own Cores, found through it.
 	selfHostedHosting: Boolean(config.accountApiUrl),
-	// A Core's own certificate is checked in Rust; the WebView talks to a local proxy instead,
-	// which adds this device's session for the account signed in. The WebView never holds it.
+	// A Core's own certificate is checked in Rust; the WebView talks to the App's Core proxy
+	// instead, which adds this device's session for the account signed in. The WebView never
+	// holds it.
 	connectCore: async (coreId, address, fingerprint) =>
-		invoke<string>('plugin:cores|core_connect', {
-			coreId,
-			account: await account(),
-			address,
-			fingerprint,
+		apiClient.local.call(pairedCores.connectCore, {
+			body: { core_id: coreId, account: await account(), address, fingerprint },
 		}),
 	coreSessions: {
+		// The App passes on the session as the Core described it.
 		signIn: async (coreId, address, fingerprint, ticket) =>
-			invoke('plugin:cores|core_sign_in', {
-				coreId,
-				account: await account(),
-				address,
-				fingerprint,
-				ticket,
+			apiClient.local.call(pairedCores.signInToCore, {
+				body: { core_id: coreId, account: await account(), address, fingerprint, ticket },
 			}),
 		signOut: async (coreId) =>
-			invoke('plugin:cores|core_sign_out', { coreId, account: await account() }),
+			apiClient.local.call(pairedCores.signOutOfCore, {
+				query: { core_id: coreId, account: await account() },
+			}),
 		exists: async (coreId) =>
-			invoke('plugin:cores|core_session_exists', { coreId, account: await account() }),
+			apiClient.local.call(pairedCores.checkCoreSession, {
+				query: { core_id: coreId, account: await account() },
+			}),
 	},
 	archonBaseUrl: config.archonBaseUrl,
 	sharedInstancesBaseUrl: config.sharedInstancesBaseUrl,
 	localFileUploader: createLocalFileUploader(),
+	localTransport,
 	features: [
 		...(config.accountApiUrl
 			? [

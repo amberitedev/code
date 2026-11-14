@@ -24,7 +24,16 @@ export function runningAppCommands(): string[] {
 	return result.stdout.split('\n').filter((line) => /theseus_gui|amberite/i.test(line))
 }
 
-/** A copied launcher database must never send instance writes or directory moves to its source. */
+function tablesOf(db: DatabaseSync): Set<unknown> {
+	return new Set(
+		db
+			.prepare("SELECT name FROM sqlite_master WHERE type='table'")
+			.all()
+			.map((row) => row.name),
+	)
+}
+
+/** A copied scenario's app.db and engine.db must never send instance writes or directory moves to their source. */
 export function normalizeScenarioDatabase(
 	worktree: string,
 	dataDir: string,
@@ -40,24 +49,23 @@ export function normalizeScenarioDatabase(
 	) {
 		throw new Error(`Stop the App using ${dataDir} before preparing its scenario database.`)
 	}
-	const databasePath = path.join(dataDir, 'app.db')
-	if (!existsSync(databasePath)) return
-	const relative = path.relative(realpathSync(worktree), realpathSync(databasePath))
-	if (relative.startsWith('..') || path.isAbsolute(relative))
-		throw new Error('Scenario database must stay inside the current worktree.')
-	const db = new DatabaseSync(databasePath)
+	const appPath = path.join(dataDir, 'app.db')
+	const enginePath = path.join(dataDir, 'engine.db')
+	if (!existsSync(appPath)) return
+	for (const databasePath of [appPath, enginePath].filter((file) => existsSync(file))) {
+		const relative = path.relative(realpathSync(worktree), realpathSync(databasePath))
+		if (relative.startsWith('..') || path.isAbsolute(relative))
+			throw new Error('Scenario database must stay inside the current worktree.')
+	}
+	const app = new DatabaseSync(appPath)
+	const engine = existsSync(enginePath) ? new DatabaseSync(enginePath) : undefined
 	try {
-		const tables = new Set(
-			db
-				.prepare("SELECT name FROM sqlite_master WHERE type='table'")
-				.all()
-				.map((row) => row.name),
-		)
-		if (!tables.has('settings')) return
-		const settings = db.prepare('SELECT custom_dir,prev_custom_dir FROM settings WHERE id=0').get()
+		if (!tablesOf(app).has('settings')) return
+		const settings = app.prepare('SELECT custom_dir,prev_custom_dir FROM settings WHERE id=0').get()
 		if (!settings) return
-		if (tables.has('instances')) {
-			for (const row of db.prepare('SELECT path FROM instances').all()) {
+		const tables = engine ? tablesOf(engine) : new Set()
+		if (engine && tables.has('instances')) {
+			for (const row of engine.prepare('SELECT path FROM instances').all()) {
 				if (
 					typeof row.path !== 'string' ||
 					path.isAbsolute(row.path) ||
@@ -93,50 +101,49 @@ export function normalizeScenarioDatabase(
 				)
 			return value
 		}
-		db.exec('BEGIN IMMEDIATE')
-		try {
-			db.prepare('UPDATE settings SET custom_dir=?,prev_custom_dir=? WHERE id=0').run(
-				dataDir,
-				dataDir,
-			)
-			for (const [table, column] of [
-				['instances', 'icon_path'],
-				['java_versions', 'path'],
-			] as const) {
-				if (!tables.has(table)) continue
-				for (const row of db
-					.prepare(`SELECT rowid AS row_id,${column} AS value FROM ${table}`)
-					.all()) {
-					if (typeof row.value === 'string')
-						db.prepare(`UPDATE ${table} SET ${column}=? WHERE rowid=?`).run(
-							rebase(row.value),
-							row.row_id,
-						)
+		if (engine) {
+			engine.exec('BEGIN IMMEDIATE')
+			try {
+				for (const [table, column] of [
+					['instances', 'icon_path'],
+					['java_versions', 'path'],
+				] as const) {
+					if (!tables.has(table)) continue
+					for (const row of engine
+						.prepare(`SELECT rowid AS row_id,${column} AS value FROM ${table}`)
+						.all()) {
+						if (typeof row.value === 'string')
+							engine
+								.prepare(`UPDATE ${table} SET ${column}=? WHERE rowid=?`)
+								.run(rebase(row.value), row.row_id)
+					}
 				}
-			}
-			for (const [table, column, binary] of [
-				['instance_launch_overrides', 'overrides', true],
-				['install_jobs', 'state', true],
-				['self_hosted_uploads', 'manifest', false],
-			] as const) {
-				if (!tables.has(table)) continue
-				for (const row of db
-					.prepare(`SELECT rowid AS row_id,json(${column}) AS value FROM ${table}`)
-					.all()) {
-					if (typeof row.value !== 'string') continue
-					const value = JSON.stringify(rebaseJson(JSON.parse(row.value)))
-					db.prepare(
-						`UPDATE ${table} SET ${column}=${binary ? 'jsonb(?)' : '?'} WHERE rowid=?`,
-					).run(value, row.row_id)
+				for (const [table, column] of [
+					['instance_launch_overrides', 'overrides'],
+					['install_jobs', 'state'],
+				] as const) {
+					if (!tables.has(table)) continue
+					for (const row of engine
+						.prepare(`SELECT rowid AS row_id,json(${column}) AS value FROM ${table}`)
+						.all()) {
+						if (typeof row.value !== 'string') continue
+						engine
+							.prepare(`UPDATE ${table} SET ${column}=jsonb(?) WHERE rowid=?`)
+							.run(JSON.stringify(rebaseJson(JSON.parse(row.value))), row.row_id)
+					}
 				}
+				if (roots.length && tables.has('processes')) engine.exec('DELETE FROM processes')
+				engine.exec('COMMIT')
+			} catch (error) {
+				engine.exec('ROLLBACK')
+				throw error
 			}
-			if (roots.length && tables.has('processes')) db.exec('DELETE FROM processes')
-			db.exec('COMMIT')
-		} catch (error) {
-			db.exec('ROLLBACK')
-			throw error
 		}
+		app
+			.prepare('UPDATE settings SET custom_dir=?,prev_custom_dir=? WHERE id=0')
+			.run(dataDir, dataDir)
 	} finally {
-		db.close()
+		engine?.close()
+		app.close()
 	}
 }

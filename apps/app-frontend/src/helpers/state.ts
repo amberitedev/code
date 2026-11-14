@@ -3,13 +3,14 @@
  * So, for example, addDefaultInstance creates a blank instance object, where the Rust struct is serialized,
  *  and deserialized into a usable JS object.
  */
-import { type Channel, invoke } from '@tauri-apps/api/core'
+import { ApiCallError, desktop, loadingBars } from '@modrinth/api-client'
 
-import type { AppEvent } from '@/generated/app-events/AppEvent'
+import { apiClient } from '@/platform/modrinth-client'
+import type { AppEventPayload, AppEvents } from '@/providers/app-events'
 
 export interface LoadingBarType {
 	type?: string
-	version?: string
+	version?: string | number
 	instance_id?: string
 	instance_name?: string
 	pack_name?: string
@@ -26,20 +27,19 @@ export interface LoadingBar {
 	bar_type?: LoadingBarType
 }
 
-export type OpeningCommand =
-	| Extract<AppEvent, { type: 'command' }>['payload']
-	// The App's own link: `amberite://approve/<code>` opens "Add Core" with the code filled in.
-	| { event: 'ApproveCore'; code: string }
-
-// Initialize the theseus API state
-// This should be called during the initializion/opening of the launcher
-export async function initialize_state(events: Channel<ArrayBuffer>) {
-	return await invoke<void>('initialize_state', { events })
+// Resolves once the engine is up. The event socket opens at once and reports how the start ended.
+export async function initialize_state(appEvents: AppEvents, openEvents: () => Promise<void>) {
+	const started = new Promise<AppEventPayload<'engine_started'>>((resolve) =>
+		appEvents.once('engine_started', resolve),
+	)
+	await openEvents()
+	const { error } = await started
+	if (error) throw new ApiCallError(503, error.error, error.description)
 }
 
 // Gets active progress bars
-export async function progress_bars_list() {
-	return await invoke<Record<string, LoadingBar>>('plugin:utils|progress_bars_list')
+export async function progress_bars_list(): Promise<Record<string, LoadingBar>> {
+	return await apiClient.local.call(loadingBars.ListLoadingBars)
 }
 
 // Get opening command
@@ -47,5 +47,5 @@ export async function progress_bars_list() {
 // This should be called once and only when the app is done booting up and ready to receive a command
 // Returns a Command struct- see events.js
 export async function get_opening_command() {
-	return await invoke<OpeningCommand | null>('plugin:utils|get_opening_command')
+	return await apiClient.local.call(desktop.getOpeningCommand)
 }

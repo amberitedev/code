@@ -1,0 +1,100 @@
+//! Syncs selected values from Minecraft's `options.txt` between instances.
+//!
+//! When sync is first enabled, the user chooses an instance to supply the initial
+//! values. Each instance keeps its own `options.txt`; we update only the selected
+//! settings and leave modpack defaults, comments, and disabled settings alone.
+//!
+//! The watcher imports enabled values whenever `options.txt` changes. After the
+//! app writes the file, it stores the file hash and ignores the matching watcher
+//! event. On conflict, the latest save is persisted.
+//!
+//! Minecraft has renamed and reformatted settings over time. `catalog`
+//! contains the file keys and conversions for the versions we support. Any other
+//! key is treated as a custom setting and copied as-is to every synced instance.
+//! Custom settings can be turned off individually in the settings screen.
+//!
+//! `catalog` will need to be checked every time a Minecraft update comes out. For maintenance reasons we will just
+//! do this for major releases, no snapshots/pre-releases.
+//!
+//! Launcher-enforced settings, such as fullscreen, are applied last and excluded
+//! when importing `options.txt`.
+
+mod api_types;
+mod catalog;
+mod fullscreen;
+mod instance_support;
+mod launch_overrides;
+mod local_settings_editor;
+mod locales;
+mod options_file;
+mod pack_updates;
+mod read_instance_changes;
+mod resource_pack_options;
+mod settings_editor;
+mod source_selection;
+mod write_shared_settings;
+
+#[cfg(test)]
+pub use crate::synced_options::state::{CanonicalValue, GameOptionKind};
+#[cfg(test)]
+pub use api_types::{
+    EditableGameSetting, GameOptionCompatibility,
+    GameOptionCompatibilityBucket, GameOptionCompatibilityReason,
+    GameOptionCompatibilityStatus, GameOptionEditorChoice,
+    GameOptionEditorDefinition, GameOptionMappingKind,
+    GameOptionValidationIssue, GameOptionValueState, GameOptionsSourceIssue,
+    GameSettingCategory, GameSettingChange,
+};
+pub use api_types::{
+    GameOptionsSourceCandidate, GameSettingsEditorState,
+    SaveGameSettingsResult, UpdateGameSettingsRequest,
+};
+pub use launch_overrides::{apply_launcher_overrides, sync_before_launch};
+pub use local_settings_editor::{
+    get_config as get_local_config, preview_changes as preview_local_changes,
+    save_changes as save_local_changes,
+};
+pub use locales::queue_game_locale_index;
+pub(crate) use locales::{GameLocaleIndexer, start_game_locale_indexer};
+#[cfg(test)]
+pub use locales::{
+    GameSettingLocaleLabel, GameSettingSource, GameSettingSourceProject,
+};
+pub use locales::{GameSettingLocaleLabels, get_game_setting_locale_labels};
+pub use pack_updates::capture_pack_base;
+pub use settings_editor::{get_config, preview_changes, save_changes};
+pub use source_selection::list_sync_sources;
+
+pub(crate) use fullscreen::{
+    shared_fullscreen_value, update_shared_fullscreen_from_app,
+};
+pub(crate) use write_shared_settings::sync_all_participating_instances;
+
+pub(in crate::synced_options) use resource_pack_options::{
+    ResourcePackOptionsUpdate, merge_resource_pack_entries,
+    merge_resource_pack_order, read_resource_pack_entries,
+};
+
+pub(in crate::synced_options) use pack_updates::{
+    detach_instance, prepare_instance_update_with_state,
+};
+pub(in crate::synced_options) use source_selection::initialize_from_source_instance;
+pub(in crate::synced_options) use write_shared_settings::{
+    apply_instance_with_state, capture_instance_file_change,
+};
+
+pub(in crate::synced_options) async fn canonical_exists(
+    state: &engine::state::Engine,
+) -> engine::Result<bool> {
+    crate::synced_options::state::shared_game_options_exist(crate::db::pool(
+        state,
+    ))
+    .await
+}
+
+const OPTIONS_FILE: &str = "options.txt";
+const CATALOG_REVISION: u32 = 6;
+const MAX_OPTIONS_BYTES: usize = 2 * 1024 * 1024;
+const MAX_OPTIONS_LINES: usize = 16_384;
+const MAX_KEY_BYTES: usize = 1_024;
+const MAX_VALUE_BYTES: usize = 32 * 1024;

@@ -30,8 +30,6 @@ import {
 	useVIntl,
 } from '@modrinth/ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
-import { getVersion } from '@tauri-apps/api/app'
-import { platform as getOsPlatform, version as getOsVersion } from '@tauri-apps/plugin-os'
 import { computed, ref } from 'vue'
 
 import { useAppSettings } from '@/composables/use-app-settings.ts'
@@ -53,6 +51,7 @@ import SyncingSettings from '@/features/settings/syncing/syncing-settings.vue'
 import ResourceManagementSettings from '@/features/settings/system/resource-management-settings/index.vue'
 import TroubleshootingSettings from '@/features/settings/system/troubleshooting-settings.vue'
 import { appSettingsKeys, appSettingsQueryOptions, set } from '@/helpers/settings.ts'
+import { getVersion, platform as getOsPlatform, version as getOsVersion } from '@/platform/os'
 import { injectAppUpdateDownloadProgress } from '@/providers/download-progress.ts'
 
 import { provideAppSettingsModal, type UnsavedChangesController } from './context'

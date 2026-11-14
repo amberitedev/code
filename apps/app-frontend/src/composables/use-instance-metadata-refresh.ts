@@ -1,6 +1,6 @@
+import type { InstancePayload } from '@modrinth/api-client'
 import { useQueryClient } from '@tanstack/vue-query'
 
-import type { InstancePayload } from '@/generated/app-events/InstancePayload'
 import { installJobInstanceId, isInstallJobFinished } from '@/helpers/install'
 import { syncedPackKeys } from '@/helpers/synced-packs'
 import { instanceKeys, instanceListQueryOptions } from '@/pages/instance/query-options'

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { EditingFile, ExtractDryRunResult, FileItem, UploadState } from '@modrinth/ui'
+import type { EditingFile, FileItem, UploadState } from '@modrinth/ui'
 import {
 	commonMessages,
 	defineMessages,
@@ -11,12 +11,22 @@ import {
 	useVIntl,
 } from '@modrinth/ui'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
-import { invoke } from '@tauri-apps/api/core'
 import { computed, ref, watch } from 'vue'
 
 import { useAppEvent } from '@/composables/use-app-event'
 import { get_full_path } from '@/helpers/instance'
 import { highlightInFolder } from '@/helpers/utils'
+import {
+	createInstanceDirectory,
+	deleteInstanceFile,
+	extractInstanceZip,
+	listInstanceFiles,
+	moveInstanceFile,
+	readInstanceFile,
+	saveInstanceFileAs,
+	writeInstanceFile,
+} from '@/platform/app-lib/files/commands'
+import { save } from '@/platform/dialog'
 
 import { injectInstancePage } from '../instance-context'
 import { instanceKeys } from '../query-options'
@@ -44,6 +54,7 @@ const messages = defineMessages({
 	},
 })
 
+// Only joins paths for display and Open in folder, so the listing never waits on it.
 const instanceRootQuery = useQuery(
 	computed(() => ({
 		queryKey: instanceKeys.rootPath(instancePage.instanceId.value),
@@ -63,7 +74,7 @@ const editingFile = ref<EditingFile | null>(null)
 debug('setup: start, instance.id =', instanceId.value)
 
 async function listDirectory(dirPath: string): Promise<FileItem[]> {
-	return invoke('plugin:files|file_list', { instanceId: instanceId.value, path: dirPath })
+	return listInstanceFiles(instanceId.value, dirPath)
 }
 
 function isReadOnly(path: string): boolean {
@@ -72,15 +83,6 @@ function isReadOnly(path: string): boolean {
 		normalized.split('/')[0].toLowerCase() === 'mods' ||
 		items.value.some((item) => item.path === normalized && item.readOnly === true)
 	)
-}
-
-async function writeBytes(path: string, bytes: Uint8Array, createOnly = false) {
-	await invoke('plugin:files|file_write', {
-		instanceId: instanceId.value,
-		path,
-		bytes: Array.from(bytes),
-		createOnly,
-	})
 }
 
 function directoryQueryOptions(dirPath: string) {
@@ -97,7 +99,7 @@ function directoryQueryOptions(dirPath: string) {
 const directoryQuery = useQuery(
 	computed(() => ({
 		...directoryQueryOptions(currentPath.value),
-		enabled: !!instanceRoot.value,
+		enabled: !!instanceId.value,
 		refetchOnMount: 'always' as const,
 	})),
 )
@@ -122,11 +124,6 @@ watch(directoryQuery.error, (queryError) => {
 		items.value = []
 		firstPaintPending.value = false
 	}
-})
-watch(instanceRootQuery.error, (queryError) => {
-	if (!queryError) return
-	error.value = queryError
-	firstPaintPending.value = false
 })
 
 // Marks every cached folder of this instance stale and re-reads the open one, so a folder changed
@@ -164,12 +161,9 @@ async function handleCreateItem(name: string, type: 'file' | 'directory') {
 	const targetPath = currentPath.value ? `${currentPath.value}/${name}` : name
 	try {
 		if (type === 'directory') {
-			await invoke('plugin:files|file_create_directory', {
-				instanceId: instanceId.value,
-				path: targetPath,
-			})
+			await createInstanceDirectory(instanceId.value, targetPath)
 		} else {
-			await writeBytes(targetPath, new Uint8Array(), true)
+			await writeInstanceFile(instanceId.value, targetPath, new Blob(), true)
 		}
 		await refresh()
 	} catch (e) {
@@ -185,11 +179,7 @@ async function handleRenameItem(path: string, newName: string) {
 	const parentDir = path.includes('/') ? path.substring(0, path.lastIndexOf('/')) : ''
 	const newPath = parentDir ? `${parentDir}/${newName}` : newName
 	try {
-		await invoke('plugin:files|file_rename', {
-			instanceId: instanceId.value,
-			source: path,
-			destination: newPath,
-		})
+		await moveInstanceFile(instanceId.value, path, newPath)
 		await refresh()
 	} catch (e) {
 		addNotification({
@@ -202,7 +192,7 @@ async function handleRenameItem(path: string, newName: string) {
 
 async function handleMoveItem(source: string, destination: string) {
 	try {
-		await invoke('plugin:files|file_rename', { instanceId: instanceId.value, source, destination })
+		await moveInstanceFile(instanceId.value, source, destination)
 		await refresh()
 	} catch (e) {
 		addNotification({
@@ -215,7 +205,7 @@ async function handleMoveItem(source: string, destination: string) {
 
 async function handleDeleteItem(path: string, recursive: boolean) {
 	try {
-		await invoke('plugin:files|file_delete', { instanceId: instanceId.value, path, recursive })
+		await deleteInstanceFile(instanceId.value, path, recursive)
 		await refresh()
 	} catch (e) {
 		addNotification({
@@ -227,30 +217,27 @@ async function handleDeleteItem(path: string, recursive: boolean) {
 }
 
 async function handleReadFile(path: string): Promise<string> {
-	const bytes = await invoke<number[]>('plugin:files|file_read', {
-		instanceId: instanceId.value,
-		path,
-	})
-	return new TextDecoder().decode(new Uint8Array(bytes))
+	return (await readInstanceFile(instanceId.value, path)).text()
 }
 
 async function handleReadFileAsBlob(path: string): Promise<Blob> {
-	const bytes = await invoke<number[]>('plugin:files|file_read', {
-		instanceId: instanceId.value,
-		path,
-	})
-	return new Blob([new Uint8Array(bytes)])
+	return readInstanceFile(instanceId.value, path)
 }
 
 async function handleWriteFile(path: string, content: string) {
-	await writeBytes(path, new TextEncoder().encode(content))
+	await writeInstanceFile(instanceId.value, path, new Blob([content]))
 }
 
-async function handleDownloadFile(path: string, _fileName: string) {
-	await invoke('plugin:files|file_save_as', {
-		instanceId: instanceId.value,
-		filePath: path,
+async function handleDownloadFile(path: string, fileName: string) {
+	const destination = await save({ defaultPath: fileName })
+	if (!destination) return
+	const { error } = await saveInstanceFileAs({
+		op: crypto.randomUUID(),
+		instance_id: instanceId.value,
+		path,
+		destination,
 	})
+	if (error) throw new Error(error.description)
 }
 
 const uploadState = ref<UploadState>({
@@ -278,9 +265,8 @@ async function handleUploadFiles(files: File[]) {
 	try {
 		for (const file of files) {
 			uploadState.value.currentFileName = file.name
-			const buffer = await file.arrayBuffer()
 			const targetPath = currentPath.value ? `${currentPath.value}/${file.name}` : file.name
-			await writeBytes(targetPath, new Uint8Array(buffer))
+			await writeInstanceFile(instanceId.value, targetPath, file)
 			uploadState.value.completedFiles++
 			uploadState.value.uploadedBytes += file.size
 			uploadState.value.currentFileProgress = 1
@@ -299,12 +285,7 @@ async function handleUploadFiles(files: File[]) {
 
 async function handleExtractFile(path: string, override: boolean, dry: boolean) {
 	try {
-		return await invoke<ExtractDryRunResult>('plugin:files|file_extract_zip', {
-			instanceId: instanceId.value,
-			filePath: path,
-			overrideConflicts: override,
-			dryRun: dry,
-		})
+		return await extractInstanceZip(instanceId.value, path, override, dry)
 	} catch (e) {
 		addNotification({
 			title: formatMessage(commonMessages.extractFailedLabel),

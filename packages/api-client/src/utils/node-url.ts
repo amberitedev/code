@@ -18,10 +18,9 @@ export function getNodeWebSocketUrl(url: string): string {
 }
 
 /**
- * Where a Core serves a server's node routes (files, downloads, the console socket): under
- * `/servers/{id}` of the base its requests go to, which is the App's local proxy, with its scheme
- * and its capability path. A Core names the host it was reached at instead, which the App cannot
- * use, so the client puts this in its place.
+ * A Core server's node URL: `/servers/{id}` of the base its requests go to, which is the App's
+ * local proxy, with its scheme and its capability path. Its downloads are under it, and the
+ * adapters find the server and its Core in it (`core-hosting/links.ts`).
  */
 export function coreNodeUrl(base: string, serverId: string): string {
 	return `${base.replace(/\/$/, '')}/servers/${serverId}`

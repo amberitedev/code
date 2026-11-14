@@ -10,7 +10,7 @@ use std::hash::Hash;
 use serde::{Deserialize, Serialize};
 
 use super::RestorePlan;
-use crate::versions::ManifestFile;
+use contracts::backend::sharing::ExternalFile;
 
 /// Where content on disk came from, as an update weighs it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,7 +54,7 @@ impl<K: Eq + Hash> Carried<K> {
     /// content, or `None` for one that is not content, such as a config.
     pub fn of(
         plan: &RestorePlan,
-        key: impl Fn(&ManifestFile) -> Option<K>,
+        key: impl Fn(&ExternalFile) -> Option<K>,
     ) -> Self {
         let entries = || plan.last.iter().chain([&plan.entry]);
         Self::new(

@@ -284,7 +284,6 @@ import {
 	useVIntl,
 } from '@modrinth/ui'
 import { useQueryClient } from '@tanstack/vue-query'
-import { openUrl } from '@tauri-apps/plugin-opener'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 import { computed, ref, shallowRef, watch } from 'vue'
@@ -314,6 +313,7 @@ import { get_loader_versions as getLoaderManifest } from '@/helpers/metadata'
 import { get_by_instance_id } from '@/helpers/process'
 import { getServerAddress } from '@/helpers/worlds'
 import { useServerInstallContent } from '@/platform/adapters/browse/server-install-content'
+import { openUrl } from '@/platform/opener'
 import { injectContentInstall } from '@/providers/content-install'
 import { injectServerInstall } from '@/providers/server-install'
 import { provideBreadcrumbParent, useBreadcrumb } from '@/shared/breadcrumbs'
@@ -969,6 +969,7 @@ function fetchDeferredServerData(project) {
 
 fetchProjectData().catch(handleError)
 
+useAppEvent('resync', updateServerPlayState)
 useAppEvent('process', (e) => {
 	if (
 		e.event === 'finished' &&

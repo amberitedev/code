@@ -1,5 +1,4 @@
 import { useDebugLogger, useVIntl } from '@modrinth/ui'
-import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { computed, type MaybeRefOrGetter, onScopeDispose, shallowRef, toValue, watch } from 'vue'
 
 import {
@@ -7,6 +6,7 @@ import {
 	type GameSettingLocaleLabel,
 	get_game_setting_locale_labels,
 } from '@/helpers/game-options'
+import { injectAppEvents } from '@/providers/app-events'
 
 export function useGameSettingLabels(
 	opened: MaybeRefOrGetter<boolean>,
@@ -14,6 +14,7 @@ export function useGameSettingLabels(
 	settings: MaybeRefOrGetter<EditableGameSetting[]>,
 ) {
 	const debug = useDebugLogger('GameSettingLabels')
+	const appEvents = injectAppEvents()
 	const { locale } = useVIntl()
 	const labels = shallowRef<Record<string, GameSettingLocaleLabel>>({})
 	const optionIds = computed(() =>
@@ -23,7 +24,7 @@ export function useGameSettingLabels(
 			.sort(),
 	)
 	let generation = 0
-	let stopListening: UnlistenFn | undefined
+	let stopListening: (() => void) | undefined
 	let refreshSources = false
 
 	debug('setup', { opened: toValue(opened), instanceId: toValue(instanceId), locale: locale.value })
@@ -83,9 +84,7 @@ export function useGameSettingLabels(
 		() => toValue(opened),
 		(active, _, onCleanup) => {
 			debug('modal state changed', { active, generation, optionCount: optionIds.value.length })
-			let cancelled = false
 			onCleanup(() => {
-				cancelled = true
 				stopListening?.()
 				stopListening = undefined
 				generation++
@@ -95,22 +94,11 @@ export function useGameSettingLabels(
 			if (!active) return
 			refreshSources = true
 			debug('registering locale update listener')
-			void listen('game-option-locales-updated', () => {
-				debug('received game-option-locales-updated')
+			stopListening = appEvents.on('game_option_locales_updated', () => {
+				debug('received game_option_locales_updated')
 				void refresh('locale update event')
 			})
-				.then((unlisten) => {
-					debug('locale update listener registered', { cancelled })
-					if (cancelled) unlisten()
-					else {
-						stopListening = unlisten
-						void refresh('listener registered')
-					}
-				})
-				.catch((error) => {
-					debug('locale update listener failed', { cancelled, error })
-					if (!cancelled) void refresh('listener failed')
-				})
+			void refresh('listener registered')
 		},
 		{ flush: 'sync' },
 	)

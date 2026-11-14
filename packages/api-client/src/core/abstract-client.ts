@@ -1,5 +1,7 @@
+import { ContractClient } from '../contracts/client'
 import type { InferredClientModules } from '../modules'
 import { buildModuleStructure } from '../modules'
+import { withCoreHosting } from '../core-hosting'
 import type { BaseUrlConfig, ClientConfig } from '../types/client'
 import type { DownloadSink } from '../types/download'
 import type { RequestContext, RequestOptions } from '../types/request'
@@ -8,7 +10,8 @@ import { appendRequestParams } from '../utils/fetch'
 import type { AbstractFeature } from './abstract-feature'
 import type { AbstractModule } from './abstract-module'
 import type { AbstractSyncClient } from './abstract-sync'
-import { CoreSessionFeature } from '../features/core-session'
+import { CoreSessionFeature, coreSessionTransport, protocolChecked } from '../features/core-session'
+import { SelfHostedFeature } from '../features/self-hosted'
 import { AbstractUploadClient } from './abstract-upload-client'
 import type { AbstractWebSocketClient } from './abstract-websocket'
 import { ModrinthApiError, ModrinthServerError } from './errors'
@@ -35,6 +38,9 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 	 */
 	private _moduleNamespaces: Map<string, Record<string, AbstractModule>> = new Map()
 
+	private _local?: ContractClient
+	private _cores: Map<string, ContractClient> = new Map()
+
 	public readonly labrinth!: InferredClientModules['labrinth']
 	public readonly archon!: ArchonClientModules & {
 		sockets: AbstractWebSocketClient
@@ -54,7 +60,48 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 		return this.config.coreSessions
 	}
 
-	public readonly copal!: InferredClientModules['copal']
+	/** Our account backend's routes, at the URL and with the session the client's `SelfHostedFeature` uses. */
+	public get backend(): ContractClient {
+		const selfHosted = this.features.find((feature) => feature instanceof SelfHostedFeature)
+		if (!selfHosted) throw new Error('This client has no account backend')
+		const transport = selfHosted.transport((input, init) => this.platformFetch(input, init))
+		return new ContractClient({
+			...transport,
+			headers: async (endpoint) => {
+				const userAgent = await this.resolveUserAgent()
+				return {
+					...(userAgent ? { 'User-Agent': userAgent } : {}),
+					...(await transport.headers(endpoint)),
+				}
+			},
+		})
+	}
+
+	/** The App's local server: engine and App routes. */
+	public get local(): ContractClient {
+		if (this._local) return this._local
+		const transport = this.config.localTransport
+		if (!transport) throw new Error('This client has no local server')
+		return (this._local = new ContractClient(transport))
+	}
+
+	/**
+	 * A listed Core's routes: engine and Core routes. A call throws `ProtocolMismatch` when the Core
+	 * speaks another protocol version.
+	 */
+	public core(coreId: string): ContractClient {
+		const known = this._cores.get(coreId)
+		if (known) return known
+		const transport =
+			this.config.coreTransport?.(coreId) ??
+			coreSessionTransport(this, coreId, (input, init) => this.platformFetch(input, init))
+		const client = new ContractClient(
+			protocolChecked(transport, async () => (await this.archon.cores_v1.core(coreId)).owned),
+		)
+		this._cores.set(coreId, client)
+		return client
+	}
+
 	public readonly kyros!: InferredClientModules['kyros']
 	public readonly iso3166!: InferredClientModules['iso3166']
 	public readonly mclogs!: InferredClientModules['mclogs']
@@ -73,9 +120,9 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 			...config,
 		}
 		this.features = config.features ?? []
-		// Innermost, so a ticket is fetched for each attempt as it is sent.
 		if (config.coreSessions) this.features.unshift(new CoreSessionFeature(this))
 		this.initializeModules()
+		if (this.selfHostedHosting) withCoreHosting(this)
 	}
 
 	/**
@@ -483,6 +530,11 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 		return typeof archonSentryCapture === 'function'
 			? archonSentryCapture()
 			: archonSentryCapture === true
+	}
+
+	/** The fetch `client.backend` calls with. A platform whose requests skip the page's fetch overrides it. */
+	protected platformFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+		return fetch(input, init)
 	}
 
 	/**

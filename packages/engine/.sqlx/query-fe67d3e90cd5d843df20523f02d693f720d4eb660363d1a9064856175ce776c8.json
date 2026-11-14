@@ -1,0 +1,194 @@
+{
+  "db_name": "SQLite",
+  "query": "\n\t\tSELECT\n\t\t\tid, instance_id, content_set_id, file_id, project_type AS \"project_type!\", project_id,\n\t\t\tversion_id, source_kind, server_requirement, client_requirement, enabled,\n\t\t\tsides_unlocked, server_override, added_at, modified_at\n\t\tFROM instance_content_entries\n\t\tWHERE content_set_id = ? AND file_id = ? AND project_type IS NOT NULL\n\t\tORDER BY modified_at DESC\n\t\tLIMIT 1\n\t\t",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "instance_content_entries",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "instance_id",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "instance_content_entries",
+            "name": "instance_id"
+          }
+        }
+      },
+      {
+        "name": "content_set_id",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "instance_content_entries",
+            "name": "content_set_id"
+          }
+        }
+      },
+      {
+        "name": "file_id",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "instance_content_entries",
+            "name": "file_id"
+          }
+        }
+      },
+      {
+        "name": "project_type!",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "instance_content_entries",
+            "name": "project_type"
+          }
+        }
+      },
+      {
+        "name": "project_id",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "instance_content_entries",
+            "name": "project_id"
+          }
+        }
+      },
+      {
+        "name": "version_id",
+        "ordinal": 6,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "instance_content_entries",
+            "name": "version_id"
+          }
+        }
+      },
+      {
+        "name": "source_kind",
+        "ordinal": 7,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "instance_content_entries",
+            "name": "source_kind"
+          }
+        }
+      },
+      {
+        "name": "server_requirement",
+        "ordinal": 8,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "instance_content_entries",
+            "name": "server_requirement"
+          }
+        }
+      },
+      {
+        "name": "client_requirement",
+        "ordinal": 9,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "instance_content_entries",
+            "name": "client_requirement"
+          }
+        }
+      },
+      {
+        "name": "enabled",
+        "ordinal": 10,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "instance_content_entries",
+            "name": "enabled"
+          }
+        }
+      },
+      {
+        "name": "sides_unlocked",
+        "ordinal": 11,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "instance_content_entries",
+            "name": "sides_unlocked"
+          }
+        }
+      },
+      {
+        "name": "server_override",
+        "ordinal": 12,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "instance_content_entries",
+            "name": "server_override"
+          }
+        }
+      },
+      {
+        "name": "added_at",
+        "ordinal": 13,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "instance_content_entries",
+            "name": "added_at"
+          }
+        }
+      },
+      {
+        "name": "modified_at",
+        "ordinal": 14,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "instance_content_entries",
+            "name": "modified_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "fe67d3e90cd5d843df20523f02d693f720d4eb660363d1a9064856175ce776c8"
+}

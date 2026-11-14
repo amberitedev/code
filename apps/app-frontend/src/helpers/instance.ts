@@ -3,11 +3,48 @@
  * So, for example, addDefaultInstance creates a blank instance object, where the Rust struct is serialized,
  *  and deserialized into a usable JS object.
  */
-import type { IconConfig, Labrinth } from '@modrinth/api-client'
+import {
+	ApiCallError,
+	type ContentItem as ContentItemResponse,
+	ContractClient,
+	desktop,
+	type GameInstance as InstanceResponse,
+	type GlobalSyncedOptions,
+	type IconConfig,
+	instanceContent,
+	instancePaths,
+	instances,
+	instanceSharing,
+	type InstanceSyncedOptions,
+	type Labrinth,
+	launch,
+	library,
+	localSharing,
+	type ProjectType,
+	type ScreenshotFile,
+	type ScreenshotGroup,
+	type ScreenshotGroupImport,
+	type ScreenshotGroupMembershipUpdate,
+	type ScreenshotKey,
+	screenshots,
+	type SharedInstanceInvite,
+	type SharedInstanceInviteLink,
+	type SharedInstancePublishPreview,
+	type SharedInstanceUsers,
+	type SyncedOption,
+	type SyncedOptionJoinPreview,
+	type SyncedOptionJoinResolution,
+	type SyncedOptionsOverview,
+	syncedOptions,
+	type SyncedServer,
+} from '@modrinth/api-client'
 import { type ContentItem, type ContentOwner, getIconSymbolAsset } from '@modrinth/ui'
-import { Channel, convertFileSrc, invoke } from '@tauri-apps/api/core'
 
-import type { InstallJobSnapshot, SharedInstanceUpdateDiff } from './install'
+import { localFileUrl, localTransport } from '@/platform/local'
+import { apiClient } from '@/platform/modrinth-client'
+import { runOp } from '@/platform/ops'
+
+import type { InstallJobSnapshot } from './install'
 import type {
 	CacheBehaviour,
 	ContentFile,
@@ -20,30 +57,65 @@ import type {
 export function getInstanceIconUrl(iconPath: string | null | undefined): string | null {
 	if (!iconPath) return null
 	if (iconPath.startsWith('http://') || iconPath.startsWith('https://')) return iconPath
-	return convertFileSrc(iconPath)
+	return localFileUrl(iconPath)
 }
 
 export async function remove(instanceId: string): Promise<void> {
-	return await invoke('plugin:instance|instance_remove', { instanceId })
+	return await apiClient.local.call(instances.RemoveInstance, { params: { id: instanceId } })
+}
+
+const NOT_SYNCED: InstanceSyncedOptions = {
+	game_options: false,
+	command_history: false,
+	multiplayer_servers: false,
+	creative_hotbars: false,
+	screenshots: false,
+	resource_packs: false,
+	data_packs: false,
+}
+
+async function withSyncedOptions(read: Promise<InstanceResponse[]>): Promise<GameInstance[]> {
+	const [found, synced] = await Promise.all([
+		read,
+		apiClient.local.call(syncedOptions.listInstancesSyncedOptions),
+	])
+	return found.map((instance) => ({
+		...instance,
+		synced_options: synced[instance.id] ?? NOT_SYNCED,
+	}))
 }
 
 export async function get(instanceId: string): Promise<GameInstance | null> {
-	return await invoke('plugin:instance|instance_get', { instanceId })
+	const [instance] = await withSyncedOptions(
+		apiClient.local
+			.call(instances.GetInstance, { params: { id: instanceId } })
+			.then((instance) => (instance ? [instance] : [])),
+	)
+	return instance ?? null
 }
 
 export async function get_many(instanceIds: string[]): Promise<GameInstance[]> {
-	return await invoke('plugin:instance|instance_get_many', { instanceIds })
+	return await withSyncedOptions(
+		apiClient.local.call(instances.GetInstances, {
+			query: { ids: JSON.stringify(instanceIds) },
+		}),
+	)
 }
 
 export async function get_projects(
 	instanceId: string,
 	cacheBehaviour?: CacheBehaviour,
 ): Promise<Record<string, ContentFile>> {
-	return await invoke('plugin:instance|instance_get_projects', { instanceId, cacheBehaviour })
+	return await apiClient.local.call(instanceContent.ListInstanceProjects, {
+		params: { id: instanceId },
+		query: { cacheBehaviour },
+	})
 }
 
 export async function get_installed_project_ids(instanceId: string): Promise<string[]> {
-	return await invoke('plugin:instance|instance_get_installed_project_ids', { instanceId })
+	return await apiClient.local.call(instanceContent.ListInstalledProjectIds, {
+		params: { id: instanceId },
+	})
 }
 
 export type InstanceInstallTarget = {
@@ -66,10 +138,8 @@ export async function get_install_candidates(
 	projectType: string,
 	targets: InstanceInstallTarget[],
 ): Promise<InstanceInstallCandidate[]> {
-	return await invoke('plugin:instance|instance_get_install_candidates', {
-		projectId,
-		projectType,
-		targets,
+	return await apiClient.local.call(instanceContent.ListInstallCandidates, {
+		body: { project_id: projectId, project_type: projectType as ProjectType, targets },
 	})
 }
 
@@ -80,19 +150,23 @@ export async function get_content_items(
 	instanceId: string,
 	cacheBehaviour?: CacheBehaviour,
 ): Promise<ContentItem[]> {
-	const items = await invoke<ContentItem[]>('plugin:instance|instance_get_content_items', {
-		instanceId,
-		cacheBehaviour,
+	const items = await apiClient.local.call(instanceContent.ListContentItems, {
+		params: { id: instanceId },
+		query: { cacheBehaviour },
 	})
 	return adaptContentItems(items)
 }
 
 export async function refresh_content_updates(instanceId: string): Promise<void> {
-	return await invoke('plugin:instance|instance_refresh_content_updates', { instanceId })
+	return await apiClient.local.call(instanceContent.RefreshContentUpdates, {
+		params: { id: instanceId },
+	})
 }
 
 export async function sync_content_files(instanceId: string): Promise<void> {
-	return await invoke('plugin:instance|instance_sync_content_files', { instanceId })
+	return await apiClient.local.call(instanceContent.SyncContentFiles, {
+		params: { id: instanceId },
+	})
 }
 
 // Linked modpack info returned from backend
@@ -112,10 +186,10 @@ export async function get_linked_modpack_info(
 	instanceId: string,
 	cacheBehaviour?: CacheBehaviour,
 ): Promise<LinkedModpackInfo | null> {
-	return await invoke('plugin:instance|instance_get_linked_modpack_info', {
-		instanceId,
-		cacheBehaviour,
-	})
+	return (await apiClient.local.call(instanceContent.GetLinkedModpack, {
+		params: { id: instanceId },
+		query: { cacheBehaviour },
+	})) as LinkedModpackInfo | null
 }
 
 // Get content items that are part of the linked modpack
@@ -125,9 +199,9 @@ export async function get_linked_modpack_content(
 	instanceId: string,
 	cacheBehaviour?: CacheBehaviour,
 ): Promise<ContentItem[]> {
-	const items = await invoke<ContentItem[]>('plugin:instance|instance_get_linked_modpack_content', {
-		instanceId,
-		cacheBehaviour,
+	const items = await apiClient.local.call(instanceContent.ListLinkedModpackContent, {
+		params: { id: instanceId },
+		query: { cacheBehaviour },
 	})
 	return adaptContentItems(items)
 }
@@ -137,18 +211,23 @@ export async function get_dependencies_as_content_items(
 	dependencies: Labrinth.Versions.v3.Dependency[],
 	cacheBehaviour?: CacheBehaviour,
 ): Promise<ContentItem[]> {
-	const items = await invoke<ContentItem[]>(
-		'plugin:instance|instance_get_dependencies_as_content_items',
-		{
-			dependencies,
+	const items = await apiClient.local.call(instanceContent.ListDependencyContentItems, {
+		body: {
+			dependencies: dependencies.map((dependency) => ({
+				project_id: null,
+				version_id: null,
+				file_name: null,
+				...dependency,
+			})),
 			cacheBehaviour,
 		},
-	)
+	})
 	return adaptContentItems(items)
 }
 
-export function adaptContentItems(items: ContentItem[]): ContentItem[] {
-	return items.map((item) => {
+/** The engine sends `null` for a field the UI's `ContentItem` leaves out. */
+export function adaptContentItems(items: ContentItem[] | ContentItemResponse[]): ContentItem[] {
+	return (items as ContentItem[]).map((item) => {
 		const embeddedMetadata = item.embedded_metadata
 		if (!embeddedMetadata?.icon_path) return item
 
@@ -156,59 +235,61 @@ export function adaptContentItems(items: ContentItem[]): ContentItem[] {
 			...item,
 			embedded_metadata: {
 				...embeddedMetadata,
-				icon_url: convertFileSrc(embeddedMetadata.icon_path),
+				icon_url: localFileUrl(embeddedMetadata.icon_path),
 			},
 		}
 	})
 }
 
 export async function get_full_path(instanceId: string): Promise<string> {
-	return await invoke('plugin:instance|instance_get_full_path', { instanceId })
+	return await apiClient.local.call(instancePaths.getInstancePath, { params: { id: instanceId } })
 }
 
 export async function get_mod_full_path(instanceId: string, projectPath: string): Promise<string> {
-	return await invoke('plugin:instance|instance_get_mod_full_path', { instanceId, projectPath })
+	return await apiClient.local.call(instancePaths.getInstanceContentPath, {
+		params: { id: instanceId },
+		query: { project_path: projectPath },
+	})
 }
 
-export type ScreenshotKey = {
-	instance_id: string
-	file_name: string
-}
+export type {
+	GlobalSyncedOptions,
+	ScreenshotGroup,
+	ScreenshotGroupImport,
+	ScreenshotGroupMembershipUpdate,
+	ScreenshotKey,
+	SyncedOption,
+	SyncedOptionCapability,
+	SyncedOptionJoinAction,
+	SyncedOptionJoinPreview,
+	SyncedOptionJoinResolution,
+	SyncedOptionsOverview,
+	SyncedServer,
+} from '@modrinth/api-client'
 
-export type InstanceScreenshot = ScreenshotKey & {
-	id: string
-	instance_name: string
-	created_at: string
-	modified_at: number
-	group_id?: string | null
-	path: string
+export type InstanceScreenshot = ScreenshotFile & {
 	url: string
 }
 
-export type ScreenshotGroup = {
-	id: string
-	name: string
-}
-
-export type ScreenshotGroupMembershipUpdate = {
-	screenshot_id: string
-	group_id?: string | null
-}
-
-export type ScreenshotGroupImport = ScreenshotGroup & {
-	screenshot_ids: string[]
+function withUrl(screenshot: ScreenshotFile): InstanceScreenshot {
+	return { ...screenshot, url: localFileUrl(screenshot.path, screenshot.modified_at) }
 }
 
 export async function list_instance_screenshots(instanceId: string): Promise<InstanceScreenshot[]> {
-	return await invoke('plugin:instance|instance_list_screenshots', { instanceId })
+	const files = await apiClient.local.call(screenshots.listInstanceScreenshots, {
+		params: { id: instanceId },
+	})
+	return files.map(withUrl)
 }
 
 export async function list_all_screenshots(): Promise<InstanceScreenshot[]> {
-	return await invoke('plugin:instance|instance_list_all_screenshots')
+	const files = await apiClient.local.call(screenshots.listScreenshots)
+	return files.map(withUrl)
 }
 
 export async function list_synced_screenshots(): Promise<InstanceScreenshot[]> {
-	return await invoke('plugin:instance|instance_list_synced_screenshots')
+	const files = await apiClient.local.call(screenshots.listSyncedScreenshots)
+	return files.map(withUrl)
 }
 
 export async function save_edited_screenshot(
@@ -216,24 +297,23 @@ export async function save_edited_screenshot(
 	pngBytes: Uint8Array,
 	mode: 'create_copy' | 'replace_edit',
 ): Promise<InstanceScreenshot> {
-	return await invoke('plugin:instance|instance_save_edited_screenshot', {
-		key,
-		pngBytes: Array.from(pngBytes),
-		mode,
+	const screenshot = await apiClient.local.call(screenshots.saveEditedScreenshot, {
+		query: { ...key, mode },
+		body: new Blob([pngBytes.slice()], { type: 'image/png' }),
 	})
+	return withUrl(screenshot)
 }
 
 export async function list_screenshot_groups(): Promise<ScreenshotGroup[]> {
-	return await invoke('plugin:instance|instance_list_screenshot_groups')
+	return await apiClient.local.call(screenshots.listScreenshotGroups)
 }
 
 export async function create_screenshot_group(
 	name: string,
 	screenshotIds: string[],
 ): Promise<ScreenshotGroup> {
-	return await invoke('plugin:instance|instance_create_screenshot_group', {
-		name,
-		screenshotIds,
+	return await apiClient.local.call(screenshots.createScreenshotGroup, {
+		body: { name, screenshot_ids: screenshotIds },
 	})
 }
 
@@ -241,40 +321,49 @@ export async function rename_screenshot_group(
 	id: string,
 	newName: string,
 ): Promise<ScreenshotGroup> {
-	return await invoke('plugin:instance|instance_rename_screenshot_group', { id, newName })
+	return await apiClient.local.call(screenshots.renameScreenshotGroup, {
+		params: { id },
+		body: { name: newName },
+	})
 }
 
 export async function delete_screenshot_group(id: string): Promise<void> {
-	return await invoke('plugin:instance|instance_delete_screenshot_group', { id })
+	return await apiClient.local.call(screenshots.deleteScreenshotGroup, { params: { id } })
 }
 
 export async function set_screenshot_group_memberships(
 	updates: ScreenshotGroupMembershipUpdate[],
 ): Promise<void> {
-	return await invoke('plugin:instance|instance_set_screenshot_group_memberships', { updates })
+	return await apiClient.local.call(screenshots.setScreenshotGroupMemberships, { body: updates })
 }
 
 export async function import_screenshot_groups(groups: ScreenshotGroupImport[]): Promise<void> {
-	return await invoke('plugin:instance|instance_import_screenshot_groups', { groups })
+	return await apiClient.local.call(screenshots.importScreenshotGroups, { body: groups })
 }
 
 export async function delete_screenshots(keys: ScreenshotKey[]): Promise<void> {
-	return await invoke('plugin:instance|instance_delete_screenshots', { keys })
+	return await apiClient.local.call(screenshots.deleteScreenshots, { body: keys })
 }
 
 export async function export_screenshots(keys: ScreenshotKey[], exportPath: string): Promise<void> {
-	return await invoke('plugin:instance|instance_export_screenshots', { keys, exportPath })
+	return await apiClient.local.call(screenshots.exportScreenshots, {
+		body: { keys, export_path: exportPath },
+	})
 }
 
 export async function move_screenshots(
 	keys: ScreenshotKey[],
 	targetInstanceId: string,
 ): Promise<ScreenshotKey[]> {
-	return await invoke('plugin:instance|instance_move_screenshots', { keys, targetInstanceId })
+	return await apiClient.local.call(screenshots.moveScreenshots, {
+		body: { keys, target_instance_id: targetInstanceId },
+	})
 }
 
 export async function open_screenshot(key: ScreenshotKey): Promise<void> {
-	return await invoke('plugin:instance|instance_open_screenshot', { key })
+	return await new ContractClient(localTransport).call(desktop.openFolder, {
+		body: { folder: 'screenshot', ...key },
+	})
 }
 
 export async function set_synced_option(
@@ -283,70 +372,43 @@ export async function set_synced_option(
 	enabled: boolean,
 	resolution?: SyncedOptionJoinResolution,
 ): Promise<GameInstance> {
-	return await invoke('plugin:instance|instance_set_synced_option', {
-		instanceId,
-		option,
-		enabled,
-		resolution,
+	await apiClient.local.call(syncedOptions.setInstanceSyncedOption, {
+		params: { id: instanceId },
+		body: { option, enabled, resolution },
 	})
+	const instance = await get(instanceId)
+	if (!instance) throw new Error(`Instance ${instanceId} is gone`)
+	return instance
 }
-
-export type SyncedOption =
-	| 'resource_packs'
-	| 'data_packs'
-	| 'game_options'
-	| 'command_history'
-	| 'multiplayer_servers'
-	| 'creative_hotbars'
-	| 'screenshots'
 
 export function isSyncedOptionAvailable(option: SyncedOption): boolean {
 	return option !== 'data_packs'
-}
-
-export type GlobalSyncedOptions = Record<SyncedOption, boolean>
-
-export type SyncedOptionJoinAction = 'seed_shared' | 'attach' | 'merge' | 'requires_resolution'
-
-export type SyncedOptionJoinResolution = 'use_synced' | 'use_instance'
-
-export type SyncedOptionJoinPreview = {
-	action: SyncedOptionJoinAction
-}
-
-export type SyncedOptionCapability = {
-	option: SyncedOption
-	supported: boolean
-	disabled_reason?: string | null
-}
-
-export type SyncedOptionsOverview = {
-	global_options: GlobalSyncedOptions
-	capabilities: SyncedOptionCapability[]
 }
 
 export async function get_synced_option_join_preview(
 	instanceId: string,
 	option: SyncedOption,
 ): Promise<SyncedOptionJoinPreview> {
-	return await invoke('plugin:instance|instance_get_synced_option_join_preview', {
-		instanceId,
-		option,
+	return await apiClient.local.call(syncedOptions.previewSyncedOptionJoin, {
+		params: { id: instanceId },
+		query: { option },
 	})
 }
 
 export async function get_synced_options_overview(
 	instanceId: string,
 ): Promise<SyncedOptionsOverview> {
-	return await invoke('plugin:instance|instance_get_synced_options_overview', { instanceId })
+	return await apiClient.local.call(syncedOptions.getInstanceSyncedOptions, {
+		params: { id: instanceId },
+	})
 }
 
 export async function get_global_synced_options(): Promise<GlobalSyncedOptions> {
-	return await invoke('plugin:instance|instance_get_global_synced_options')
+	return await apiClient.local.call(syncedOptions.getGlobalSyncedOptions)
 }
 
 export async function get_initialized_synced_options(): Promise<GlobalSyncedOptions> {
-	return await invoke('plugin:instance|instance_get_initialized_synced_options')
+	return await apiClient.local.call(syncedOptions.getInitializedSyncedOptions)
 }
 
 export async function set_global_synced_option(
@@ -354,46 +416,41 @@ export async function set_global_synced_option(
 	enabled: boolean,
 	baseInstanceId?: string,
 ): Promise<GlobalSyncedOptions> {
-	return await invoke('plugin:instance|instance_set_global_synced_option', {
-		option,
-		enabled,
-		baseInstanceId,
+	return await apiClient.local.call(syncedOptions.setGlobalSyncedOption, {
+		body: { option, enabled, base_instance_id: baseInstanceId },
 	})
 }
 
 export async function get_command_history(): Promise<string> {
-	return await invoke('plugin:instance|instance_get_command_history')
+	return await apiClient.local.call(syncedOptions.getCommandHistory)
 }
 
 export async function set_command_history(contents: string): Promise<string> {
-	return await invoke('plugin:instance|instance_set_command_history', { contents })
+	return await apiClient.local.call(syncedOptions.setCommandHistory, { body: { contents } })
 }
 
 export async function open_synced_options_folder(): Promise<void> {
-	return await invoke('plugin:instance|instance_open_synced_options_folder')
-}
-
-export type SyncedServer = {
-	id: string
-	name: string
-	address: string
-	accept_textures?: boolean | null
+	return await new ContractClient(localTransport).call(desktop.openFolder, {
+		body: { folder: 'synced_options' },
+	})
 }
 
 export async function list_synced_servers(): Promise<SyncedServer[]> {
-	return await invoke('plugin:instance|instance_list_synced_servers')
+	return await apiClient.local.call(syncedOptions.listSyncedServers)
 }
 
 export async function update_synced_server(server: SyncedServer): Promise<void> {
-	return await invoke('plugin:instance|instance_update_synced_server', { server })
+	return await apiClient.local.call(syncedOptions.updateSyncedServer, { body: server })
 }
 
 export async function remove_synced_server(serverId: string): Promise<void> {
-	return await invoke('plugin:instance|instance_remove_synced_server', { serverId })
+	return await apiClient.local.call(syncedOptions.removeSyncedServer, { params: { id: serverId } })
 }
 
 export async function rebuild_synced_options(instanceId?: string): Promise<void> {
-	return await invoke('plugin:instance|instance_rebuild_synced_options', { instanceId })
+	return await apiClient.local.call(syncedOptions.rebuildSyncedOptions, {
+		body: { instance_id: instanceId },
+	})
 }
 
 export interface JavaVersion {
@@ -404,20 +461,26 @@ export interface JavaVersion {
 }
 
 export async function get_optimal_jre_key(instanceId: string): Promise<JavaVersion | null> {
-	return await invoke('plugin:instance|instance_get_optimal_jre_key', { instanceId })
+	return await apiClient.local.call(instances.GetOptimalJava, { params: { id: instanceId } })
 }
 
 export async function list(): Promise<GameInstance[]> {
-	return await invoke('plugin:instance|instance_list')
+	return await withSyncedOptions(apiClient.local.call(instances.ListInstances))
 }
 
 export async function check_installed(instanceId: string, projectId: string): Promise<boolean> {
-	return await invoke('plugin:instance|instance_check_installed', { instanceId, projectId })
+	return await apiClient.local.call(instanceContent.CheckProjectInstalled, {
+		params: { id: instanceId },
+		query: { project_id: projectId },
+	})
 }
 
 // Updates a specified project
 export async function update_project(instanceId: string, projectPath: string): Promise<string> {
-	return await invoke('plugin:instance|instance_update_project', { instanceId, projectPath })
+	return await apiClient.local.call(instanceContent.UpdateProject, {
+		params: { id: instanceId },
+		body: { project_path: projectPath },
+	})
 }
 
 // Add a project to an instance from a version
@@ -459,11 +522,9 @@ export async function add_project_from_version(
 	reason: DownloadReason,
 	dependentOnVersionId?: string,
 ): Promise<string> {
-	return await invoke('plugin:instance|instance_add_project_from_version', {
-		instanceId,
-		versionId,
-		reason,
-		dependentOnVersionId,
+	return await apiClient.local.call(instanceContent.AddProjectFromVersion, {
+		params: { id: instanceId },
+		body: { version_id: versionId, reason, dependent_on_version_id: dependentOnVersionId },
 	})
 }
 
@@ -471,9 +532,9 @@ export async function install_project_with_dependencies(
 	instanceId: string,
 	request: ResolveContentRequest,
 ): Promise<ResolveContentPlan> {
-	return await invoke('plugin:instance|instance_install_project_with_dependencies', {
-		instanceId,
-		request,
+	return await apiClient.local.call(instanceContent.InstallProjectWithDependencies, {
+		params: { id: instanceId },
+		body: request,
 	})
 }
 
@@ -482,10 +543,9 @@ export async function switch_project_version_with_dependencies(
 	projectPath: string,
 	versionId: string,
 ): Promise<string> {
-	return await invoke('plugin:instance|instance_switch_project_version_with_dependencies', {
-		instanceId,
-		projectPath,
-		versionId,
+	return await apiClient.local.call(instanceContent.SwitchProjectVersion, {
+		params: { id: instanceId },
+		body: { project_path: projectPath, version_id: versionId },
 	})
 }
 
@@ -496,15 +556,16 @@ export async function add_project_from_path(
 	projectPath: string,
 	projectType?: ContentFileProjectType,
 ): Promise<string> {
-	return await invoke('plugin:instance|instance_add_project_from_path', {
-		instanceId,
-		projectPath,
-		projectType,
+	return await apiClient.local.call(instancePaths.addProjectFromPath, {
+		params: { id: instanceId },
+		body: { path: projectPath, project_type: projectType },
 	})
 }
 
 export async function is_file_on_modrinth(projectPath: string): Promise<boolean> {
-	return await invoke('plugin:instance|instance_is_file_on_modrinth', { projectPath })
+	return await apiClient.local.call(instancePaths.checkFileOnModrinth, {
+		body: { path: projectPath },
+	})
 }
 
 // Toggle disabling a project
@@ -513,10 +574,9 @@ export async function toggle_disable_project(
 	projectPath: string,
 	desiredEnabled?: boolean,
 ): Promise<string> {
-	return await invoke('plugin:instance|instance_toggle_disable_project', {
-		instanceId,
-		projectPath,
-		desiredEnabled,
+	return await apiClient.local.call(instanceContent.ToggleProject, {
+		params: { id: instanceId },
+		body: { project_path: projectPath, desired_enabled: desiredEnabled },
 	})
 }
 
@@ -525,16 +585,18 @@ export async function set_project_locked(
 	projectPath: string,
 	locked: boolean,
 ): Promise<void> {
-	return await invoke('plugin:instance|instance_set_project_locked', {
-		instanceId,
-		projectPath,
-		locked,
+	return await apiClient.local.call(instanceContent.SetProjectLocked, {
+		params: { id: instanceId },
+		body: { project_path: projectPath, locked },
 	})
 }
 
 // Remove a project
 export async function remove_project(instanceId: string, projectPath: string): Promise<void> {
-	return await invoke('plugin:instance|instance_remove_project', { instanceId, projectPath })
+	return await apiClient.local.call(instanceContent.RemoveProject, {
+		params: { id: instanceId },
+		body: { project_path: projectPath },
+	})
 }
 
 // Update a managed Modrinth instance to a specific version
@@ -542,15 +604,15 @@ export async function update_managed_modrinth_version(
 	instanceId: string,
 	versionId: string,
 ): Promise<InstallJobSnapshot> {
-	return await invoke('plugin:instance|instance_update_managed_modrinth_version', {
-		instanceId,
-		versionId,
+	return await apiClient.local.call(instanceContent.UpdateModpackVersion, {
+		params: { id: instanceId },
+		body: { version_id: versionId },
 	})
 }
 
 // Repair a managed Modrinth instance
 export async function update_repair_modrinth(instanceId: string): Promise<InstallJobSnapshot> {
-	return await invoke('plugin:instance|instance_repair_managed_modrinth', { instanceId })
+	return await apiClient.local.call(instanceContent.RepairModpack, { params: { id: instanceId } })
 }
 
 // Export an instance to .mrpack
@@ -565,14 +627,16 @@ export async function export_instance_mrpack(
 	description?: string,
 	name?: string,
 ): Promise<void> {
-	return await invoke('plugin:instance|instance_export_mrpack', {
-		instanceId,
-		exportLocation,
-		includedOverrides,
-		excludedOverrides,
-		versionId,
-		description,
-		name,
+	return await apiClient.local.call(instancePaths.exportMrpack, {
+		params: { id: instanceId },
+		body: {
+			location: exportLocation,
+			included_overrides: includedOverrides,
+			excluded_overrides: excludedOverrides,
+			version_id: versionId,
+			description,
+			name,
+		},
 	})
 }
 
@@ -592,9 +656,9 @@ export async function get_pack_export_candidates(
 	instanceId: string,
 	parent?: string,
 ): Promise<PackExportCandidate[]> {
-	return await invoke('plugin:instance|instance_get_pack_export_candidates', {
-		instanceId,
-		parent: parent ?? null,
+	return await apiClient.local.call(instanceContent.ListPackExportCandidates, {
+		params: { id: instanceId },
+		query: { parent },
 	})
 }
 
@@ -604,11 +668,13 @@ export async function run(
 	instanceId: string,
 	serverAddress: string | null = null,
 ): Promise<unknown> {
-	return await invoke('plugin:instance|instance_run', { instanceId, serverAddress })
+	return await apiClient.local.call(launch.playInstance, {
+		body: { instance_id: instanceId, server_address: serverAddress },
+	})
 }
 
 export async function kill(instanceId: string): Promise<void> {
-	return await invoke('plugin:instance|instance_kill', { instanceId })
+	return await apiClient.local.call(instances.KillInstance, { params: { id: instanceId } })
 }
 
 // Edits an instance
@@ -616,12 +682,18 @@ export async function edit(
 	instanceId: string,
 	editInstance: { [K in keyof GameInstance]?: GameInstance[K] | null },
 ): Promise<void> {
-	return await invoke('plugin:instance|instance_edit', { instanceId, editInstance })
+	return await apiClient.local.call(instances.EditInstance, {
+		params: { id: instanceId },
+		body: editInstance,
+	})
 }
 
 // Edits an instance's icon
 export async function edit_icon(instanceId: string, iconPath: string | null): Promise<void> {
-	return await invoke('plugin:instance|instance_edit_icon', { instanceId, iconPath })
+	return await apiClient.local.call(instancePaths.setInstanceIconFromPath, {
+		params: { id: instanceId },
+		body: { path: iconPath },
+	})
 }
 
 export async function edit_generated_icon(
@@ -629,11 +701,12 @@ export async function edit_generated_icon(
 	config: IconConfig,
 	symbolBytes: number[],
 ): Promise<string> {
-	return await invoke('plugin:instance|instance_edit_generated_icon', {
-		instanceId,
-		config,
-		symbolBytes,
+	const path = await apiClient.local.call(library.setGeneratedInstanceIcon, {
+		params: { id: instanceId },
+		body: { config, symbol_bytes: symbolBytes, only_if_empty: false },
 	})
+	if (path === null) throw new Error('The instance icon was not set.')
+	return path
 }
 
 export async function edit_generated_icon_if_empty(
@@ -641,11 +714,9 @@ export async function edit_generated_icon_if_empty(
 	config: IconConfig,
 	symbolBytes: number[],
 ): Promise<boolean> {
-	const result = await invoke<string | null>('plugin:instance|instance_edit_generated_icon', {
-		instanceId,
-		config,
-		symbolBytes,
-		onlyIfEmpty: true,
+	const result = await apiClient.local.call(library.setGeneratedInstanceIcon, {
+		params: { id: instanceId },
+		body: { config, symbol_bytes: symbolBytes, only_if_empty: true },
 	})
 	return result !== null
 }
@@ -655,10 +726,8 @@ export async function cache_generated_icon(
 	symbolBytes: number[],
 	addToRecents = false,
 ): Promise<string> {
-	return await invoke('plugin:instance|instance_cache_generated_icon', {
-		config,
-		symbolBytes,
-		addToRecents,
+	return await apiClient.local.call(library.cacheGeneratedIcon, {
+		body: { config, symbol_bytes: symbolBytes, add_to_recents: addToRecents },
 	})
 }
 
@@ -684,64 +753,37 @@ export async function shared_icon_path(
 }
 
 export async function get_recent_icon_configs(): Promise<IconConfig[]> {
-	return await invoke('plugin:instance|instance_get_recent_icon_configs')
+	return await apiClient.local.call(library.listRecentIconConfigs)
 }
 
-export type SharedInstanceUsers = {
-	user_ids: string[]
-	users: SharedInstanceUser[]
-	tokens: number
-}
-
-export type SharedInstanceJoinType = 'owner' | 'invite' | 'link'
-
-export type SharedInstanceUser = {
-	id: string
-	joined_at?: string | null
-	join_type: SharedInstanceJoinType
-	last_played?: string | null
-}
-
-export interface SharedInstancePublishPreview {
-	sharedInstanceId: string
-	latestVersion: number
-	diffs: SharedInstanceUpdateDiff[]
-	files: SharedInstancePublishFile[]
-}
-
-export interface SharedInstancePublishFile {
-	path: string
-	size: number
-	blocked: boolean
-	shared: boolean
-}
-
-export interface SharedInstanceInviteLink {
-	inviteId: string
-	expiresAt: string
-	maxUses: number
-}
-
-export type SharedInstanceInvite = {
-	id: string
-	expiration: string
-	maxUses: number
-	uses: number
-}
+export type {
+	SharedInstanceInvite,
+	SharedInstanceInviteLink,
+	SharedInstanceJoinType,
+	SharedInstancePublishFile,
+	SharedInstancePublishPreview,
+	SharedInstanceUser,
+	SharedInstanceUsers,
+} from '@modrinth/api-client'
 
 export async function can_current_user_use_shared_instances(): Promise<boolean> {
-	return await invoke('plugin:instance|instance_share_can_current_user_use')
+	return await apiClient.local.call(localSharing.canUseSharedInstances)
 }
 
 export async function get_shared_instance_users(instanceId: string): Promise<SharedInstanceUsers> {
-	return await invoke('plugin:instance|instance_share_get_users', { instanceId })
+	return await apiClient.local.call(instanceSharing.GetSharedInstanceUsers, {
+		params: { id: instanceId },
+	})
 }
 
 export async function invite_shared_instance_users(
 	instanceId: string,
 	userIds: string[],
 ): Promise<SharedInstanceUsers> {
-	return await invoke('plugin:instance|instance_share_invite_users', { instanceId, userIds })
+	return await apiClient.local.call(instanceSharing.InviteSharedInstanceUsers, {
+		params: { id: instanceId },
+		body: { user_ids: userIds },
+	})
 }
 
 export async function create_shared_instance_invite_link(
@@ -752,23 +794,31 @@ export async function create_shared_instance_invite_link(
 		replaceInviteId?: string
 	} = {},
 ): Promise<SharedInstanceInviteLink> {
-	return await invoke('plugin:instance|instance_share_create_invite_link', {
-		instanceId,
-		...options,
+	return await apiClient.local.call(instanceSharing.CreateSharedInstanceInviteLink, {
+		params: { id: instanceId },
+		body: {
+			max_age_seconds: options.maxAgeSeconds ?? null,
+			max_uses: options.maxUses ?? null,
+			replace_invite_id: options.replaceInviteId ?? null,
+		},
 	})
 }
 
 export async function get_shared_instance_invites(
 	instanceId: string,
 ): Promise<SharedInstanceInvite[]> {
-	return await invoke('plugin:instance|instance_share_get_invites', { instanceId })
+	return await apiClient.local.call(instanceSharing.ListSharedInstanceInvites, {
+		params: { id: instanceId },
+	})
 }
 
 export async function revoke_shared_instance_invite(
 	instanceId: string,
 	inviteId: string,
 ): Promise<void> {
-	return await invoke('plugin:instance|instance_share_revoke_invite', { instanceId, inviteId })
+	return await apiClient.local.call(instanceSharing.RevokeSharedInstanceInvite, {
+		params: { id: instanceId, invite_id: inviteId },
+	})
 }
 
 export async function remove_shared_instance_users(
@@ -776,17 +826,18 @@ export async function remove_shared_instance_users(
 	userIds: string[],
 	hasPendingRecipients: boolean,
 ): Promise<SharedInstanceUsers> {
-	return await invoke('plugin:instance|instance_share_remove_users', {
-		instanceId,
-		userIds,
-		hasPendingRecipients,
+	return await apiClient.local.call(instanceSharing.RemoveSharedInstanceUsers, {
+		params: { id: instanceId },
+		body: { user_ids: userIds, has_pending_recipients: hasPendingRecipients },
 	})
 }
 
 export async function get_shared_instance_publish_preview(
 	instanceId: string,
 ): Promise<SharedInstancePublishPreview | null> {
-	return await invoke('plugin:instance|instance_share_get_publish_preview', { instanceId })
+	return await apiClient.local.call(instanceSharing.GetSharedInstancePublishPreview, {
+		params: { id: instanceId },
+	})
 }
 
 /**
@@ -800,32 +851,52 @@ export async function publish_shared_instance(
 	serverCoreId: string | null,
 	onProgress: (uploadedBytes: number, totalBytes: number) => void,
 ): Promise<SharedInstanceAttachment> {
-	return await invoke('plugin:instance|instance_share_publish', {
-		instanceId,
-		filePaths,
-		removedPaths,
-		serverCoreId,
-		onProgress: new Channel<[number, number]>(([uploaded, total]) => onProgress(uploaded, total)),
-	})
+	const op = crypto.randomUUID()
+	const { error } = await runOp(
+		op,
+		() =>
+			apiClient.local.call(localSharing.publishSharedInstance, {
+				body: {
+					op,
+					instance_id: instanceId,
+					file_paths: filePaths,
+					removed_paths: removedPaths,
+					server_core_id: serverCoreId,
+				},
+			}),
+		({ done, total }) => onProgress(done, total ?? done),
+	)
+	if (error) throw new ApiCallError(500, error.error, error.description)
+	const attachment = (await get(instanceId))?.shared_instance
+	if (!attachment) throw new Error(`Instance ${instanceId} has no share`)
+	return attachment
 }
 
 export async function get_shared_instance_publish_support_details(
 	instanceId: string,
 ): Promise<string | null> {
-	return await invoke('plugin:instance|instance_share_publish_support_details', { instanceId })
+	return await apiClient.local.call(instanceSharing.GetSharedInstancePublishSupportDetails, {
+		params: { id: instanceId },
+	})
 }
 
 export async function unlink_shared_instance(instanceId: string): Promise<void> {
-	return await invoke('plugin:instance|instance_share_unlink', { instanceId })
+	return await apiClient.local.call(instanceSharing.UnlinkSharedInstance, {
+		params: { id: instanceId },
+	})
 }
 
 export async function unpublish_shared_instance(instanceId: string): Promise<void> {
-	return await invoke('plugin:instance|instance_share_unpublish', { instanceId })
+	return await apiClient.local.call(instanceSharing.UnpublishSharedInstance, {
+		params: { id: instanceId },
+	})
 }
 
 /** The instance's share, created with its first version when it has none, so it can run servers. */
 export async function ensure_shared_instance(
 	instanceId: string,
 ): Promise<SharedInstanceAttachment> {
-	return await invoke('plugin:instance|instance_share_ensure', { instanceId })
+	return await apiClient.local.call(instanceSharing.EnsureSharedInstance, {
+		params: { id: instanceId },
+	})
 }

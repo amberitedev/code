@@ -18,6 +18,7 @@ use std::{
 };
 
 use color_eyre::eyre::{Result, WrapErr, bail, eyre};
+use engine::Engine;
 use tracing::{info, warn};
 use tracing_subscriber::{
     EnvFilter, layer::SubscriberExt, util::SubscriberInitExt,
@@ -117,6 +118,7 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
     folders::create(&paths, None)?;
     logging(&paths, "copal");
     let _lock = lock(&paths)?;
+    engine::install_crypto_provider();
 
     let db = db::open(&paths.database()).await?;
     let core_id = db::core_id(&db).await?;
@@ -131,7 +133,8 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
         config.backend_url.as_deref(),
     )
     .await?;
-    let access = Arc::new(access::Access::new(keys));
+    let access = Arc::new(access::CoreAccess::new(db.clone(), keys));
+    let engine = start_engine(&paths, config.backend_url.as_deref()).await?;
     let storage = Arc::new(crate::storage::Storage::new(
         db.clone(),
         paths.clone(),
@@ -141,19 +144,17 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
         Arc::clone(&access.owed),
     ));
     storage.start();
-    let servers =
-        Servers::open(paths.clone(), db.clone(), config.local_only()).await?;
+    let servers = Servers::open(
+        paths.clone(),
+        db.clone(),
+        Arc::clone(&engine),
+        config.local_only(),
+    )
+    .await?;
     let backups = crate::backups::Backups::open(
         paths.clone(),
         db.clone(),
         Arc::clone(&servers),
-    )
-    .await?;
-    let content = crate::state::servers::Content::open(
-        paths.clone(),
-        db.clone(),
-        Arc::clone(&servers),
-        Arc::clone(&backups),
     )
     .await?;
     let update = Arc::new(Updater::new(
@@ -171,24 +172,20 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
         config.forward_ports && config.local_only().is_none(),
     ));
     tokio::spawn(Arc::clone(&network).run(Arc::clone(&servers)));
-    let state = Arc::new(api::AppState {
+    let state = Arc::new(api::CoreState {
         db: db.clone(),
+        engine,
         servers,
         access: Arc::clone(&access),
-        content,
         backups,
-        uploads: api::files::Uploads::default(),
         update: Arc::clone(&update),
         network: Arc::clone(&network),
         storage: Arc::clone(&storage),
+        consoles: Arc::default(),
     });
+    tokio::spawn(api::events::watch_power(Arc::clone(&state)));
+    tokio::spawn(api::follow::apply_on_stop(Arc::clone(&state)));
     let router = api::router(Arc::clone(&state));
-    tokio::spawn(
-        crate::state::servers::commands::apply_pending_on_stop::apply_pending_on_stop(
-            Arc::clone(&state.content),
-            Arc::clone(&state.access.owed),
-        ),
-    );
     match config.backend_url.clone() {
         Some(backend_url) => {
             tokio::spawn(access::sync::run(Arc::new(access::sync::Sync {
@@ -202,6 +199,7 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
                 access: Arc::clone(&access),
                 storage,
                 network,
+                sessions: state.engine.sessions.clone(),
             })));
             tokio::spawn(
                 async move { state.access.keys.refresh_daily().await },
@@ -252,6 +250,34 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
         () = stop => info!("stopping; servers keep running"),
     }
     Ok(Exit::Stopped)
+}
+
+/// The engine on `<root>/engine`, whose instances are the servers. Nothing desktop starts. Its
+/// game files and Java go in `<root>/meta`, which servers may read and run. Its share calls go
+/// to `backend_url` with the Core's key (`access::sync`).
+pub async fn start_engine(
+    paths: &Paths,
+    backend_url: Option<&str>,
+) -> Result<Arc<Engine>> {
+    engine::install_crypto_provider();
+    let accounts = backend_url
+        .map(|url| engine::AccountEndpoints::new(url, None))
+        .transpose()
+        .map_err(|error| eyre!("{error:#}"))?;
+    Engine::new(engine::EngineConfig {
+        data_dir: paths.engine(),
+        instances_dir: paths.servers(),
+        logs_dir: None,
+        metadata_dir: Some(paths.meta()),
+        side: contracts::Side::Server,
+        max_concurrent_downloads: 10,
+        max_concurrent_writes: 10,
+        events: engine::EventSink::new(),
+        accounts,
+        hooks: None,
+    })
+    .await
+    .map_err(|error| eyre!("the engine did not start: {error:#}"))
 }
 
 /// A TCP listener on `address`. An IPv6 one takes IPv6 only, so it can sit next to the IPv4
@@ -360,5 +386,19 @@ mod tests {
         assert!(lock(&paths).is_err());
         drop(first);
         assert!(lock(&paths).is_ok());
+    }
+
+    #[tokio::test]
+    async fn the_engine_database_holds_only_engine_tables() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::new(dir.path());
+        let engine = start_engine(&paths, None).await.unwrap();
+        let tables: Vec<String> = sqlx::query_scalar(
+            "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",
+        )
+        .fetch_all(engine.pool())
+        .await
+        .unwrap();
+        assert_eq!(tables, engine::state::db::TABLES);
     }
 }

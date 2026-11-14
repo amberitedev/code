@@ -26,7 +26,7 @@ use crate::diff::SharedInstanceUpdateDiff;
 use crate::install::{ConfigUpdate, config_update};
 use crate::push::Pushed;
 use crate::rules::CONFIG_FILE_TYPE;
-use crate::versions::{ManifestFile, VersionContent};
+use contracts::backend::sharing::{ExternalFile, VersionContent};
 
 /// The `share_history` table. The App and Core apply it after their own migrations; it only
 /// creates what is missing.
@@ -100,7 +100,7 @@ pub enum HistoryError<E> {
 #[derive(Debug, Clone)]
 pub struct RestorePlan {
     pub entry: HistoryEntry,
-    pub files: Vec<(ManifestFile, PathBuf)>,
+    pub files: Vec<(ExternalFile, PathBuf)>,
     /// The last push, which tells what the owner added since from what the share carried.
     pub last: Option<HistoryEntry>,
     /// Every config of the entry is written back. A config the last push shared and the entry
@@ -293,6 +293,8 @@ mod tests {
     use std::collections::{BTreeMap, BTreeSet};
     use std::sync::Mutex;
 
+    use contracts::Hash;
+
     use super::*;
 
     /// A store with blobs in memory, by the file's path, and entries in an in-memory database.
@@ -379,15 +381,16 @@ mod tests {
             previous: None,
             external_files: files
                 .iter()
-                .map(|name| ManifestFile {
+                .map(|name| ExternalFile {
                     file_name: (*name).into(),
                     file_type: "config".into(),
+                    url: None,
                     file_size: 1,
                     sha1: "s".into(),
-                    sha256: [1; 32],
-                    object: [2; 32],
+                    sha256: Hash([1; 32]),
+                    object: Hash([2; 32]),
                     object_size: 17,
-                    key: Some([3; 32]),
+                    key: Some(Hash([3; 32])),
                 })
                 .collect(),
             paths: files
@@ -437,7 +440,7 @@ mod tests {
         assert_eq!(plan.files[0].1, PathBuf::from("/source/1/config/a.toml"));
         assert_eq!(plan.last.as_ref().map(|last| last.version), Some(2));
         // Its configs are written back; one only the last push shared leaves.
-        let names = |files: &[ManifestFile]| {
+        let names = |files: &[ExternalFile]| {
             files
                 .iter()
                 .map(|file| file.file_name.clone())

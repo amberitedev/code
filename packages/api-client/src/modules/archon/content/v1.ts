@@ -1,5 +1,4 @@
 import { AbstractModule } from '../../../core/abstract-module'
-import type { UploadHandle, UploadProgress } from '../../../types/upload'
 import type { Archon } from '../types'
 
 export class ArchonContentV1Module extends AbstractModule {
@@ -11,7 +10,7 @@ export class ArchonContentV1Module extends AbstractModule {
 		serverId: string,
 		worldId: string,
 		configPaths: string[] = [],
-		options?: { timeout?: number; restart?: boolean; removedConfigPaths?: string[] },
+		options?: { timeout?: number; restart?: boolean },
 	): Promise<Archon.Content.v1.ShareWorldContentResponse> {
 		return this.client.request(
 			`/servers/${encodeURIComponent(serverId)}/worlds/${encodeURIComponent(worldId)}/content/share`,
@@ -21,11 +20,7 @@ export class ArchonContentV1Module extends AbstractModule {
 				method: 'POST',
 				timeout: options?.timeout ?? 600_000,
 				retry: false,
-				body: {
-					config_paths: configPaths,
-					removed_config_paths: options?.removedConfigPaths ?? [],
-					restart: options?.restart,
-				},
+				body: { config_paths: configPaths, restart: options?.restart },
 			},
 		)
 	}
@@ -55,59 +50,6 @@ export class ArchonContentV1Module extends AbstractModule {
 				api: 'archon',
 				version: 1,
 				method: 'GET',
-			},
-		)
-	}
-
-	/** Core only. Owner only. The versions of the server's own share its Core pushed, newest first. */
-	public async getShareHistory(
-		serverId: string,
-		worldId: string,
-	): Promise<Archon.Content.v1.SharedInstanceHistoryEntry[]> {
-		return this.client.request(
-			`/servers/${encodeURIComponent(serverId)}/worlds/${encodeURIComponent(worldId)}/content/share/history`,
-			{
-				api: 'archon',
-				version: 1,
-				method: 'GET',
-			},
-		)
-	}
-
-	/**
-	 * Core only. Owner only. Puts the server back to a version from its share's history, leaving it
-	 * to push. A version on another loader, Minecraft version or modpack installs that first, in the
-	 * background, and needs the server stopped.
-	 */
-	public async restoreShareVersion(
-		serverId: string,
-		worldId: string,
-		version: number,
-	): Promise<void> {
-		await this.client.request<void>(
-			`/servers/${encodeURIComponent(serverId)}/worlds/${encodeURIComponent(worldId)}/content/share/history/${version}/restore`,
-			{
-				api: 'archon',
-				version: 1,
-				method: 'POST',
-				retry: false,
-			},
-		)
-	}
-
-	/** Core only. Owner only. Deletes a version from the share's history. The latest one stays. */
-	public async deleteShareVersion(
-		serverId: string,
-		worldId: string,
-		version: number,
-	): Promise<void> {
-		await this.client.request<void>(
-			`/servers/${encodeURIComponent(serverId)}/worlds/${encodeURIComponent(worldId)}/content/share/history/${version}`,
-			{
-				api: 'archon',
-				version: 1,
-				method: 'DELETE',
-				retry: false,
 			},
 		)
 	}
@@ -449,40 +391,7 @@ export class ArchonContentV1Module extends AbstractModule {
 		)
 	}
 
-	/**
-	 * Core only. Uploads a `.mrpack` to a server on the Core and installs it.
-	 *
-	 * POST /servers/:server_id/v1/worlds/:world_id/content/upload-modpack-file
-	 */
-	public uploadModpackFile(
-		serverId: string,
-		worldId: string,
-		pack: File | Blob,
-		options?: {
-			/** World settings, used when the upload creates the server. */
-			properties?: Archon.Content.v1.PropertiesFields
-			onProgress?: (progress: UploadProgress) => void
-		},
-	): UploadHandle<void> {
-		const formData = new FormData()
-		formData.append('file', pack, 'modpack.mrpack')
-		formData.append('properties', JSON.stringify(options?.properties ?? {}))
-
-		return this.client.upload<void>(`/worlds/${worldId}/content/upload-modpack-file`, {
-			api: 'archon',
-			version: `servers/${serverId}/v1`,
-			formData,
-			params: { soft_override: 'true' },
-			onProgress: options?.onProgress,
-		})
-	}
-
-	/**
-	 * POST /v1/:server_id/worlds/:world_id/content/modpack/update
-	 *
-	 * On Core this applies the newest version pushed to a linked server now, restarting it if
-	 * it is running, and retries an update that failed.
-	 */
+	/** POST /v1/:server_id/worlds/:world_id/content/modpack/update */
 	public async updateModpack(serverId: string, worldId: string): Promise<void> {
 		await this.client.request<void>(
 			`/servers/${serverId}/worlds/${worldId}/content/modpack/update`,

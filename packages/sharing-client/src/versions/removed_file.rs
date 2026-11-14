@@ -1,15 +1,4 @@
-use serde::{Deserialize, Serialize};
-
-/// A file of a version's modpack that members do not get: by its Modrinth version, or, for a
-/// file Modrinth does not know, by its folder and file name. The App lists the modpack files the
-/// owner removed or turned off; a Core lists those a server-first server's owner removed or
-/// turned off for players.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum RemovedFile {
-    Version { version_id: String },
-    Path { parent: String, filename: String },
-}
+use contracts::backend::sharing::RemovedFile;
 
 /// A removed file the App and the backend would refuse.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -26,20 +15,29 @@ const PARENTS: [&str; 5] = [
 ];
 const SUFFIXES: [&str; 4] = [".jar", ".zip", ".jar.disabled", ".zip.disabled"];
 
-impl RemovedFile {
-    /// `parent/filename` as a removed path, or `None` when it is not one: one plain file name
-    /// of an addon archive in an addon folder.
-    pub fn path(parent: &str, filename: &str) -> Option<Self> {
-        let removed = Self::Path {
-            parent: parent.to_owned(),
-            filename: filename.to_owned(),
-        };
-        removed.validate().ok().map(|()| removed)
-    }
+/// `parent/filename` as a removed path, or `None` when it is not one: one plain file name of an
+/// addon archive in an addon folder.
+pub fn removed_path(parent: &str, filename: &str) -> Option<RemovedFile> {
+    let removed = RemovedFile::Path {
+        parent: parent.to_owned(),
+        filename: filename.to_owned(),
+    };
+    removed.validate().ok().map(|()| removed)
+}
 
+/// How the App, Core and backend read a [`RemovedFile`].
+pub trait RemovedFileRules {
     /// Whether this names the modpack file at `path`, with its Modrinth `version_id` when
     /// Modrinth knows it. A file turned off (`.disabled`) is the same file as when it is on.
-    pub fn matches(&self, version_id: Option<&str>, path: &str) -> bool {
+    fn matches(&self, version_id: Option<&str>, path: &str) -> bool;
+
+    /// Checks a removed path as the backend does: an addon folder, and one plain file name of
+    /// an addon archive without control characters.
+    fn validate(&self) -> Result<(), InvalidRemovedFile>;
+}
+
+impl RemovedFileRules for RemovedFile {
+    fn matches(&self, version_id: Option<&str>, path: &str) -> bool {
         match self {
             Self::Version {
                 version_id: removed,
@@ -53,9 +51,7 @@ impl RemovedFile {
         }
     }
 
-    /// Checks a removed path as the backend does: an addon folder, and one plain file name of
-    /// an addon archive without control characters.
-    pub fn validate(&self) -> Result<(), InvalidRemovedFile> {
+    fn validate(&self) -> Result<(), InvalidRemovedFile> {
         let Self::Path { parent, filename } = self else {
             return Ok(());
         };
@@ -73,7 +69,7 @@ mod tests {
 
     #[test]
     fn a_removed_modpack_file_matches_enabled_or_not() {
-        let removed = RemovedFile::path("mods", "a.jar.disabled").unwrap();
+        let removed = removed_path("mods", "a.jar.disabled").unwrap();
         assert!(removed.matches(None, "mods/a.jar"));
         assert!(removed.matches(None, "mods/a.jar.disabled"));
         assert!(!removed.matches(None, "mods/b.jar"));
@@ -86,10 +82,10 @@ mod tests {
 
     #[test]
     fn only_addon_archives_are_removed_paths() {
-        assert!(RemovedFile::path("mods", "a.jar").is_some());
-        assert!(RemovedFile::path("config", "a.jar").is_none());
-        assert!(RemovedFile::path("mods", "a.txt").is_none());
-        assert!(RemovedFile::path("mods", "../a.jar").is_none());
-        assert!(RemovedFile::path("mods", "a\u{7}.jar").is_none());
+        assert!(removed_path("mods", "a.jar").is_some());
+        assert!(removed_path("config", "a.jar").is_none());
+        assert!(removed_path("mods", "a.txt").is_none());
+        assert!(removed_path("mods", "../a.jar").is_none());
+        assert!(removed_path("mods", "a\u{7}.jar").is_none());
     }
 }

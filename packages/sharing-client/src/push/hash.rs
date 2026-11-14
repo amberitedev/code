@@ -14,7 +14,7 @@ pub struct HashedFile {
     pub size: u64,
     /// What a member's install compares to skip a file it already has.
     pub sha1: String,
-    /// P.
+    /// The SHA-256 of the plain bytes.
     pub sha256: [u8; 32],
     pub executable: bool,
     path: PathBuf,

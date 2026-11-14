@@ -142,6 +142,20 @@ macro_rules! base62_id {
 use crate as ariadne; // Hack because serde(from) and serde(into) don't work with $crate
 base62_id!(UserId);
 
+#[cfg(feature = "ts")]
+impl ts_rs::TS for UserId {
+    type WithoutGenerics = Self;
+    type OptionInnerType = Self;
+
+    fn name(_: &ts_rs::Config) -> String {
+        "string".into()
+    }
+
+    fn inline(cfg: &ts_rs::Config) -> String {
+        Self::name(cfg)
+    }
+}
+
 pub use {base62_id, impl_base62_display};
 
 pub mod base62_impl {

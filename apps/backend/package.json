@@ -12,6 +12,7 @@
 		"types": "wrangler types src/worker-configuration.d.ts --include-runtime=false"
 	},
 	"dependencies": {
+		"@amberite/contracts": "workspace:*",
 		"zxcvbn": "4.4.2"
 	},
 	"devDependencies": {

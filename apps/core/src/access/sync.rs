@@ -14,16 +14,25 @@ use std::{
     time::Duration,
 };
 
-use reqwest::{Method, StatusCode};
-use serde::Serialize;
-use sharing_client::backend::Backend;
+use contracts::{
+    Endpoint, Json,
+    backend::{
+        cores::{
+            AccessDirectory, ForgetPlayers, GrantAccess, ReplaceAccess,
+            ReportState, ReportStorage, RevokeAccess, StateReport,
+        },
+        sharing::DeleteSharedInstance,
+    },
+    client::{Body, CallError, Remote, Reply, call},
+};
+use engine::{BackendSession, BackendSessionKind, Sessions};
+use reqwest::StatusCode;
 use sqlx::{SqliteConnection, SqlitePool};
 use tokio::sync::watch;
 use tracing::{info, warn};
 
-use super::{Access, Changed, now, owed::OwedCall, pairing};
+use super::{Changed, CoreAccess, now, owed::OwedCall, pairing};
 use crate::{
-    api::backend::{AccessDirectory, StateReport, StorageAnswer},
     network::{forward::Network, public_ip},
     storage::Storage,
 };
@@ -42,14 +51,16 @@ pub struct Sync {
     /// The API port and the address it listens on.
     pub port: u16,
     pub bind: IpAddr,
-    pub access: Arc<Access>,
+    pub access: Arc<CoreAccess>,
     pub storage: Arc<Storage>,
     /// Told the join IP whenever the addresses are looked up.
     pub network: Arc<Network>,
+    /// The engine's, which calls the backend with this Core's key.
+    pub sessions: Sessions,
 }
 
 /// Owe the backend `call`, in the transaction of the change that needs it. Wake sync with
-/// `Access::owed` once it commits. A report already owed is not owed twice: it sends the state
+/// `CoreAccess::owed` once it commits. A report already owed is not owed twice: it sends the state
 /// as it is when it goes.
 pub async fn owe(
     conn: &mut SqliteConnection,
@@ -125,6 +136,19 @@ fn failure(status: StatusCode, problem: String) -> Failure {
     }
 }
 
+fn call_failure(path: &str, error: CallError) -> Failure {
+    let problem = format!("{path} failed: {error}");
+    match error {
+        CallError::Api { status, .. } | CallError::Decode { status, .. } => {
+            match StatusCode::from_u16(status) {
+                Ok(status) => failure(status, problem),
+                Err(_) => Failure::Refused(problem),
+            }
+        }
+        _ => Failure::Lost(Lost::Unreachable(problem)),
+    }
+}
+
 /// Wait before the next try after `failures` failures in a row: 10 seconds, doubling, at most an
 /// hour.
 fn backoff(failures: u32) -> Duration {
@@ -175,13 +199,25 @@ pub async fn run(sync: Arc<Sync>) {
 }
 
 impl Sync {
+    /// The backend key, which the engine is given too.
     async fn key(&self) -> Option<String> {
-        sqlx::query_scalar("SELECT backend_key FROM core WHERE id = 1")
-            .fetch_optional(&self.db)
-            .await
-            .ok()
-            .flatten()
-            .flatten()
+        let key: Option<String> =
+            sqlx::query_scalar("SELECT backend_key FROM core WHERE id = 1")
+                .fetch_optional(&self.db)
+                .await
+                .ok()
+                .flatten()
+                .flatten();
+        self.sessions.set_backend_session(
+            key.clone().zip(self.backend_url.parse().ok()).map(
+                |(bearer, base_url)| BackendSession {
+                    base_url,
+                    bearer,
+                    kind: BackendSessionKind::CoreKey,
+                },
+            ),
+        );
+        key
     }
 
     /// This Core's addresses now. A failed public lookup keeps `previous`: no answer is not a
@@ -260,13 +296,8 @@ impl Sync {
         .await
         .map_err(|error| Lost::Unreachable(error.to_string()))?;
         let result = async {
-            self.call(
-                key,
-                Method::PUT,
-                "/core/access",
-                &AccessDirectory { user_ids },
-            )
-            .await?;
+            self.call::<ReplaceAccess>(key, Json(AccessDirectory { user_ids }))
+                .await?;
             // This report covers any already owed.
             sqlx::query("DELETE FROM backend_owed WHERE call = ?")
                 .bind(
@@ -279,7 +310,7 @@ impl Sync {
                     Failure::Lost(Lost::Unreachable(error.to_string()))
                 })?;
             let state = self.state(&addresses.borrow());
-            self.call(key, Method::POST, "/core/state", &state).await
+            self.call::<ReportState>(key, Json(state)).await
         };
         match result.await {
             Ok(()) => Ok(()),
@@ -404,108 +435,68 @@ impl Sync {
                 if !current {
                     return Ok(());
                 }
-                self.call(key, Method::POST, "/core/access", grant).await
+                self.call::<GrantAccess>(key, Json(grant.clone()))
+                    .await
+                    .map(drop)
             }
             OwedCall::Remove(remove) => {
-                self.call(key, Method::DELETE, "/core/access", remove).await
+                self.call::<RevokeAccess>(key, Json(remove.clone())).await
             }
             OwedCall::DeleteShare { share_id } => {
-                // A server took the share again since, through the backend answering its
-                // existing share: it stays.
-                let taken: bool = sqlx::query_scalar(
-                    "SELECT EXISTS (SELECT 1 FROM servers WHERE share_id = ?)",
+                // A share already gone counts as deleted.
+                sharing_client::shares::delete_share(
+                    &self.remote(key),
+                    share_id,
                 )
-                .bind(share_id)
-                .fetch_one(&self.db)
                 .await
                 .map_err(|error| {
-                    Failure::Lost(Lost::Unreachable(error.to_string()))
-                })?;
-                if taken {
-                    return Ok(());
-                }
-                // Done on success, on a share already gone (`delete_share`'s 404 and 410), and
-                // on 403 `not_owner` (no longer this Core's), which is refused and dropped.
-                let backend =
-                    Backend::new(self.http.clone(), &self.backend_url, key)
-                        .with_timeout(CALL_TIMEOUT);
-                backend.delete_share(share_id).await.map_err(
-                    |error| match error.status() {
-                        Some(status) => failure(status, error.to_string()),
-                        None => {
-                            Failure::Lost(Lost::Unreachable(error.to_string()))
-                        }
-                    },
-                )
+                    call_failure(DeleteSharedInstance::PATH, error)
+                })
             }
             OwedCall::ForgetPlayers(forget) => {
-                self.call(key, Method::DELETE, "/core/players", forget)
-                    .await
+                self.call::<ForgetPlayers>(key, Json(forget.clone())).await
             }
             OwedCall::ReportState => {
-                self.call(
-                    key,
-                    Method::POST,
-                    "/core/state",
-                    &self.state(addresses),
-                )
-                .await
+                self.call::<ReportState>(key, Json(self.state(addresses)))
+                    .await
             }
             OwedCall::ReportStorage => {
                 // A store that does not answer owes a report again once it runs.
                 let Some(report) = self.storage.report().await else {
                     return Ok(());
                 };
-                let answer: StorageAnswer = self
-                    .request(key, Method::POST, "/core/storage", &report)
-                    .await?
-                    .json()
-                    .await
-                    .map_err(|error| Failure::Refused(error.to_string()))?;
+                let answer =
+                    self.call::<ReportStorage>(key, Json(report)).await?;
                 self.storage.answer(answer);
                 Ok(())
             }
         }
     }
 
-    async fn call(
+    /// Send one call with this Core's key and return the backend's answer when it succeeded.
+    async fn call<E>(
         &self,
         key: &str,
-        method: Method,
-        path: &str,
-        body: &impl Serialize,
-    ) -> Result<(), Failure> {
-        self.request(key, method, path, body).await.map(drop)
+        body: <E::Body as Body>::Input,
+    ) -> Result<<E::Response as Reply>::Output, Failure>
+    where
+        E: Endpoint<Params = (), Query = ()>,
+        E::Body: Body,
+        E::Response: Reply,
+    {
+        call::<E>(&self.remote(key), &(), &(), body)
+            .await
+            .map_err(|error| call_failure(E::PATH, error))
     }
 
-    /// Send one call and return the backend's answer when it succeeded.
-    async fn request(
-        &self,
-        key: &str,
-        method: Method,
-        path: &str,
-        body: &impl Serialize,
-    ) -> Result<reqwest::Response, Failure> {
-        let response = self
-            .http
-            .request(method, format!("{}{path}", self.backend_url))
-            .bearer_auth(key)
-            .timeout(CALL_TIMEOUT)
-            .json(body)
-            .send()
-            .await
-            .map_err(|error| {
-                Failure::Lost(Lost::Unreachable(error.to_string()))
-            })?;
-        let status = response.status();
-        if status.is_success() {
-            return Ok(response);
+    fn remote<'a>(&'a self, key: &'a str) -> Remote<'a> {
+        Remote {
+            http: &self.http,
+            base: &self.backend_url,
+            bearer: Some(key),
+            read_ticket: None,
+            timeout: Some(CALL_TIMEOUT),
         }
-        let problem = format!(
-            "{path} answered {status}: {}",
-            response.text().await.unwrap_or_default()
-        );
-        Err(failure(status, problem))
     }
 
     /// Forget the owner and everything that came from them: their key, owed calls, every session,
@@ -518,6 +509,7 @@ impl Sync {
         };
         match cleared.await {
             Ok(()) => {
+                self.sessions.set_backend_session(None);
                 let _ = self.access.changed.send(Changed::Everyone);
                 println!(
                     "\nThis Core was removed from its account. Its servers and files are untouched; pair it again to use it from the App.\n"
@@ -536,20 +528,20 @@ mod tests {
     use std::sync::Mutex;
 
     use axum::{
-        Json, Router,
+        Router,
+        body::Bytes,
         extract::State,
         http::{HeaderMap, Method as AxumMethod, StatusCode as AxumStatus},
         routing::any,
     };
 
-    use super::*;
-    use crate::{
-        api::{
-            access::Role,
-            backend::{Grant, Remove},
-        },
-        db,
+    use contracts::{
+        backend::cores::{AccessGrant, AccessRevocation},
+        core::CoreRole,
     };
+
+    use super::*;
+    use crate::db;
 
     /// A backend that records every call and answers with the status at the front of `answers`,
     /// or 204 once it is empty.
@@ -570,12 +562,13 @@ mod tests {
                  method: AxumMethod,
                  uri: axum::http::Uri,
                  headers: HeaderMap,
-                 Json(body): Json<serde_json::Value>| async move {
+                 body: Bytes| async move {
                     assert_eq!(headers["authorization"], "Bearer amc_key");
                     backend.calls.lock().unwrap().push((
                         method.to_string(),
                         uri.path().into(),
-                        body,
+                        serde_json::from_slice(&body)
+                            .unwrap_or(serde_json::Value::Null),
                     ));
                     let mut answers = backend.answers.lock().unwrap();
                     let status = if answers.is_empty() {
@@ -611,6 +604,7 @@ mod tests {
         .await
         .unwrap();
         let dir = tempfile::tempdir().unwrap();
+        let access = Arc::new(CoreAccess::new(db.clone(), keys));
         Sync {
             network: Arc::new(Network::off(db.clone())),
             storage: Arc::new(Storage::new(
@@ -628,7 +622,8 @@ mod tests {
             cert_fingerprint: "f".repeat(64),
             port: 16662,
             bind: IpAddr::V4(Ipv4Addr::LOCALHOST),
-            access: Arc::new(Access::new(keys)),
+            access,
+            sessions: Sessions::new(None),
         }
     }
 
@@ -693,13 +688,13 @@ mod tests {
         .execute(&sync.db)
         .await
         .unwrap();
-        let grant = OwedCall::Grant(Grant {
+        let grant = OwedCall::Grant(AccessGrant {
             user: "friend".into(),
             server_id: "s1".into(),
             server_name: "A".into(),
-            role: Role::Editor,
+            role: CoreRole::Editor,
         });
-        let remove = OwedCall::Remove(Remove {
+        let remove = OwedCall::Remove(AccessRevocation {
             user_id: "other".into(),
             server_id: "s1".into(),
             keep_core: false,
@@ -707,6 +702,14 @@ mod tests {
         let mut conn = sync.db.acquire().await.unwrap();
         owe(&mut conn, &grant).await.unwrap();
         owe(&mut conn, &remove).await.unwrap();
+        owe(
+            &mut conn,
+            &OwedCall::DeleteShare {
+                share_id: "share-1".into(),
+            },
+        )
+        .await
+        .unwrap();
         drop(conn);
 
         // The backend fails the first call: it waits, and nothing after it overtakes it.
@@ -721,7 +724,7 @@ mod tests {
         );
         assert!(wait > Duration::from_secs(5) && wait <= backoff(1));
 
-        // Once due, both go in order, and the list is empty.
+        // Once due, all go in order, and the list is empty.
         sqlx::query("UPDATE backend_owed SET next_attempt_at = 0")
             .execute(&sync.db)
             .await
@@ -729,7 +732,7 @@ mod tests {
         sync.send_due("amc_key", &addresses()).await.unwrap();
         assert!(owed(&sync).await.is_empty());
         let calls = backend.calls.lock().unwrap().clone();
-        assert_eq!(calls.len(), 3);
+        assert_eq!(calls.len(), 4);
         assert_eq!(
             (calls[1].0.as_str(), calls[1].2["user"].as_str()),
             ("POST", Some("friend"))
@@ -737,6 +740,10 @@ mod tests {
         assert_eq!(
             (calls[2].0.as_str(), calls[2].2["user_id"].as_str()),
             ("DELETE", Some("other"))
+        );
+        assert_eq!(
+            (calls[3].0.as_str(), calls[3].1.as_str()),
+            ("DELETE", "/v1/instances/share-1")
         );
         assert_eq!(calls[1].2["role"], "editor");
 
@@ -750,7 +757,7 @@ mod tests {
         drop(conn);
         sync.send_due("amc_key", &addresses()).await.unwrap();
         assert!(owed(&sync).await.is_empty());
-        assert_eq!(backend.calls.lock().unwrap().len(), 3);
+        assert_eq!(backend.calls.lock().unwrap().len(), 4);
     }
 
     #[tokio::test]
@@ -771,11 +778,14 @@ mod tests {
         sync.send_due("amc_key", &addresses()).await.unwrap();
         assert!(owed(&sync).await.is_empty(), "a 404 is never retried");
 
+        assert_eq!(sync.key().await.as_deref(), Some("amc_key"));
+        assert_eq!(sync.sessions.backend().unwrap().bearer, "amc_key");
         let mut changed = sync.access.changed.subscribe();
         let lost = sync.connect("amc_key", &addresses()).await.unwrap_err();
         assert!(matches!(lost, Lost::Removed));
         sync.unpair().await;
         assert_eq!(changed.recv().await.unwrap(), Changed::Everyone);
+        assert!(sync.sessions.backend().is_none(), "the engine kept the key");
         assert_eq!(sync.key().await, None);
         for table in ["access", "sessions"] {
             let count: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(

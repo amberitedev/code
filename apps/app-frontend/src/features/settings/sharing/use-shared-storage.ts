@@ -1,4 +1,4 @@
-import type { SharedInstances } from '@modrinth/api-client'
+import { sharing, type ShareStorage } from '@modrinth/api-client'
 import { injectModrinthClient, injectNotificationManager } from '@modrinth/ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 
@@ -19,7 +19,7 @@ export function useSharedStorage() {
 	const client = injectModrinthClient()
 	return useQuery({
 		queryKey: sharedStorageKey,
-		queryFn: () => client.sharedinstances.storage_v1.get(),
+		queryFn: () => client.backend.call(sharing.GetShareStorage),
 	})
 }
 
@@ -60,7 +60,7 @@ const SHARE_COLORS = ['bg-blue', 'bg-purple', 'bg-green', 'bg-orange', 'bg-red']
  * The shares that use the allowance, largest first, each with the color it has in the storage
  * bar. The rest are only on the owner's own Cores.
  */
-export function countedShares(storage: SharedInstances.Storage.v1.Storage) {
+export function countedShares(storage: ShareStorage) {
 	return storage.shares
 		.filter((share) => share.counted)
 		.sort((a, b) => b.used - a.used)

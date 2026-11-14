@@ -1,9 +1,11 @@
+import { ContractClient, localFiles } from '@modrinth/api-client'
 import type { IconCacheContext } from '@modrinth/ui'
-import { convertFileSrc } from '@tauri-apps/api/core'
 
-import { cacheIconBytes, cacheRemoteIcon } from '@/platform/app-lib/icons/commands'
+import { cacheIconBytes } from '@/platform/app-lib/icons/commands'
+import { localFileUrl, localTransport } from '@/platform/local'
 
 export function createIconCache(): IconCacheContext {
+	const local = new ContractClient(localTransport)
 	const pending = new Map<string, Promise<string>>()
 	const blobs = new WeakMap<Blob, Promise<string>>()
 	const resolvedUrls = new Map<string, string>()
@@ -16,7 +18,7 @@ export function createIconCache(): IconCacheContext {
 				const request = source
 					.arrayBuffer()
 					.then((buffer) => cacheIconBytes(Array.from(new Uint8Array(buffer))))
-					.then(convertFileSrc)
+					.then(localFileUrl)
 					.then((url) => {
 						resolvedBlobs.set(source, url)
 						return url
@@ -31,7 +33,9 @@ export function createIconCache(): IconCacheContext {
 			if (!source.startsWith('https://')) return Promise.resolve(source)
 			const existing = pending.get(source)
 			if (existing) return existing
-			const request = cacheRemoteIcon(source)
+			const request = local
+				.call(localFiles.cacheRemoteIcon, { body: { source } })
+				.then(localFileUrl)
 				.then((url) => {
 					resolvedUrls.set(source, url)
 					return url

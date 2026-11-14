@@ -1,14 +1,18 @@
-import { type Channel, invoke } from '@tauri-apps/api/core'
+import {
+	ContractClient,
+	type ExternalSave,
+	type ExtractDryRunResult,
+	type InstanceFileItem,
+	type InstanceFileSave,
+	instanceFiles,
+	type LocalUpload,
+	ops,
+} from '@modrinth/api-client'
 
-export interface ExternalFileFilter {
-	name: string
-	extensions: string[]
-}
+import { localTransport } from '@/platform/local'
+import { type OpEnd, runOp } from '@/platform/ops'
 
-export interface ExternalFileRequest {
-	url: string
-	headers: Record<string, string>
-}
+const local = new ContractClient(localTransport)
 
 export interface ExternalFileProgress {
 	stage: 'waiting' | 'downloading' | 'saving'
@@ -16,65 +20,92 @@ export interface ExternalFileProgress {
 	totalBytes: number | null
 }
 
-export interface ExternalFileError {
-	message?: string
-	statusCode?: number
-}
-
-export function selectExternal(
-	filename: string,
-	filter: ExternalFileFilter | null,
-): Promise<string | null> {
-	return invoke('plugin:files|files_select_external', { filename, filter })
-}
-
-export function saveExternal(
-	saveId: string,
-	request: ExternalFileRequest,
-	onProgress: Channel<ExternalFileProgress>,
-): Promise<string> {
-	return invoke('plugin:files|files_save_external', { saveId, request, onProgress })
-}
-
-export function releaseExternal(saveId: string): Promise<void> {
-	return invoke('plugin:files|files_release_external', { saveId })
-}
-
-export interface LocalFileInfo {
-	name: string
-	size: number
-}
-
-export interface LocalUploadRequest {
-	url: string
-	headers: Record<string, string>
-	path: string
-	fileName?: string
-	multipartField?: string
-}
-
 export interface LocalUploadProgress {
 	loaded: number
 	total: number
 }
 
-export interface LocalUploadResponse {
-	status: number
-	body: string
-}
-
-export function getLocalFileInfo(path: string): Promise<LocalFileInfo> {
-	return invoke('plugin:files|file_local_info', { path })
+export function saveExternal(
+	save: ExternalSave,
+	onProgress: (progress: ExternalFileProgress) => void,
+): Promise<OpEnd> {
+	return runOp(
+		save.op,
+		() => local.call(ops.saveExternalFile, { body: save }),
+		({ stage, done, total }) =>
+			onProgress({
+				stage: stage === 'downloading' || stage === 'saving' ? stage : 'waiting',
+				downloadedBytes: done,
+				totalBytes: total,
+			}),
+	)
 }
 
 export function uploadLocal(
-	uploadId: string,
-	request: LocalUploadRequest,
-	onProgress: Channel<LocalUploadProgress>,
-): Promise<LocalUploadResponse> {
-	return invoke('plugin:files|file_upload_local', { uploadId, request, onProgress })
+	upload: LocalUpload,
+	onProgress: (progress: LocalUploadProgress) => void,
+): Promise<OpEnd> {
+	return runOp(
+		upload.op,
+		() => local.call(ops.uploadLocalFile, { body: upload }),
+		({ done, total }) => onProgress({ loaded: done, total: total ?? done }),
+	)
 }
 
-export function cancelLocalUpload(uploadId: string): Promise<void> {
-	return invoke('plugin:files|file_cancel_local_upload', { uploadId })
+export function saveInstanceFileAs(save: InstanceFileSave): Promise<OpEnd> {
+	return runOp(save.op, () => local.call(ops.saveInstanceFileAs, { body: save }))
+}
+
+/** Paths are inside the instance's folder; `""` lists the folder itself. */
+export function listInstanceFiles(id: string, path: string): Promise<InstanceFileItem[]> {
+	return local.call(instanceFiles.ListInstanceFiles, { params: { id }, query: { path } })
+}
+
+export function readInstanceFile(id: string, path: string): Promise<Blob> {
+	return local.call(instanceFiles.ReadInstanceFile, { params: { id }, query: { path } })
+}
+
+export function writeInstanceFile(
+	id: string,
+	path: string,
+	contents: Blob,
+	createOnly = false,
+): Promise<void> {
+	return local.call(instanceFiles.WriteInstanceFile, {
+		params: { id },
+		query: { path, create_only: createOnly },
+		body: contents,
+	})
+}
+
+export function createInstanceDirectory(id: string, path: string): Promise<void> {
+	return local.call(instanceFiles.CreateInstanceDirectory, { params: { id }, query: { path } })
+}
+
+export function moveInstanceFile(id: string, source: string, destination: string): Promise<void> {
+	return local.call(instanceFiles.MoveInstanceFile, {
+		params: { id },
+		body: { source, destination },
+	})
+}
+
+export function deleteInstanceFile(id: string, path: string, recursive: boolean): Promise<void> {
+	return local.call(instanceFiles.DeleteInstanceFile, {
+		params: { id },
+		query: { path, recursive },
+	})
+}
+
+/** A dry run answers the files it would replace; a real run answers nothing. */
+export async function extractInstanceZip(
+	id: string,
+	path: string,
+	overrideConflicts: boolean,
+	dryRun: boolean,
+): Promise<ExtractDryRunResult | undefined> {
+	const result = await local.call(instanceFiles.ExtractInstanceZip, {
+		params: { id },
+		body: { path, override_conflicts: overrideConflicts, dry_run: dryRun },
+	})
+	return result ?? undefined
 }

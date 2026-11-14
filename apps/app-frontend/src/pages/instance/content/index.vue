@@ -119,8 +119,6 @@ import {
 	versionChangesGameVersion,
 } from '@modrinth/ui'
 import { queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
-import { open } from '@tauri-apps/plugin-dialog'
-import { openUrl } from '@tauri-apps/plugin-opener'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -153,6 +151,8 @@ import { get as getSettings, set as setSettings } from '@/helpers/settings'
 import { set_synced_pack_enabled, syncedPackKeys } from '@/helpers/synced-packs'
 import type { CacheBehaviour } from '@/helpers/types'
 import { highlightModInInstance } from '@/helpers/utils.js'
+import { open } from '@/platform/dialog'
+import { openUrl } from '@/platform/opener'
 import { injectContentInstall } from '@/providers/content-install'
 
 import { injectInstancePage } from '../instance-context'

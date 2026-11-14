@@ -1,4 +1,4 @@
-import { type Archon, ModrinthApiError, type SharedInstances } from '@modrinth/api-client'
+import { type Archon, type HostedServer, ModrinthApiError, sharing } from '@modrinth/api-client'
 import { serverListQueryOptions } from '@modrinth/ui'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, type MaybeRefOrGetter, ref, toValue, watch } from 'vue'
@@ -83,7 +83,7 @@ export function useLinkedServers(instanceId: MaybeRefOrGetter<string | undefined
 	return { servers, query }
 }
 
-export type HostedServer = SharedInstances.Instances.v1.HostedServer
+export type { HostedServer }
 
 /**
  * The servers other people host for a shared instance and show to its members. Empty when the
@@ -95,7 +95,10 @@ export function useHostedServers(sharedInstanceId: MaybeRefOrGetter<string | und
 	const queryKey = computed(() => ['shared-instance-servers', toValue(sharedInstanceId)] as const)
 	const query = useQuery({
 		queryKey,
-		queryFn: () => apiClient.sharedinstances.instances_v1.getServers(toValue(sharedInstanceId)!),
+		queryFn: () =>
+			apiClient.backend.call(sharing.ListHostedServers, {
+				params: { id: toValue(sharedInstanceId)! },
+			}),
 		enabled: () => !!toValue(sharedInstanceId),
 		retry: false,
 	})
@@ -173,7 +176,10 @@ export async function pushInstanceToServer(
 		apiClient.archon.cores_v1.coreOf(serverId),
 	])
 	// The Core reads the share for this user only, with this ticket.
-	const { ticket } = await apiClient.sharedinstances.instances_v1.getServerTicket(share.id, core.id)
+	const { ticket } = await apiClient.backend.call(sharing.IssueReadTicket, {
+		params: { id: share.id },
+		body: { core_id: core.id },
+	})
 	// A Core server has one world, with the server's own id.
 	const worldId = serverId
 	await apiClient.archon.content_v1.installContent(serverId, worldId, {

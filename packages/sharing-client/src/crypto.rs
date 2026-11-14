@@ -13,7 +13,7 @@ const TAG: usize = 16;
 /// Object bytes per chunk, for every chunk but the last.
 const OBJECT_CHUNK: usize = CHUNK + TAG;
 
-/// The key of a content file, derived from its plain hash P so the same jar is the same object
+/// The key of a content file, derived from its plain bytes' hash so the same jar is the same object
 /// whoever shares it.
 pub fn content_key(p: &[u8; 32]) -> [u8; 32] {
     let mut key = [0; 32];
@@ -21,13 +21,6 @@ pub fn content_key(p: &[u8; 32]) -> [u8; 32] {
         .expand(b"amberite-shared-file-v1", &mut key)
         .expect("32 bytes is a valid HKDF-SHA256 length");
     key
-}
-
-/// A hash written as 64 hex characters.
-pub fn parse_hash(text: &str) -> Option<[u8; 32]> {
-    let mut hash = [0; 32];
-    hex::decode_to_slice(text, &mut hash).ok()?;
-    Some(hash)
 }
 
 /// Content files get a derived key; every other file type gets a random one.
@@ -40,7 +33,7 @@ pub fn object_size(size: u64) -> u64 {
     size + TAG as u64 * size.div_ceil(CHUNK as u64).max(1)
 }
 
-/// R: the hash of a version's distinct objects, sorted, as raw bytes.
+/// A version's hash: the hash of its distinct object hashes, sorted, as raw bytes.
 pub fn root(objects: impl IntoIterator<Item = [u8; 32]>) -> [u8; 32] {
     let objects = objects
         .into_iter()
@@ -71,7 +64,8 @@ async fn read_up_to(
     Ok(buffer)
 }
 
-/// What [`encrypt`] produced: C, the object's size, and P of the plaintext it actually read.
+/// What [`encrypt`] produced: the object's hash and size, and the hash of the plain bytes it
+/// actually read.
 pub struct Encrypted {
     pub object: [u8; 32],
     pub size: u64,
@@ -170,7 +164,7 @@ impl Decryptor {
     }
 
     /// Streams the object from [`Self::offset`] on. Every chunk is checked before its plain
-    /// bytes are written, and the last chunk is written only after C and P both match, so a
+    /// bytes are written, and the last chunk is written only after both hashes match, so a
     /// writer that requires the full size never sees a wrong file complete.
     pub async fn run(
         &mut self,

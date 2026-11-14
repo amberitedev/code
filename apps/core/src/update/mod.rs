@@ -20,17 +20,15 @@ use std::{
     time::Duration,
 };
 
+use contracts::core::{Channel, UpdateStatus};
 use semver::Version;
 use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
 use tokio::{io::AsyncWriteExt, sync::Notify};
 use tracing::{info, warn};
 
-use crate::{
-    api::update::UpdateStatus, daemon::paths::Paths, servers::Servers,
-    util::if_present,
-};
-use release::{Channel, Manifest, ManifestError, Release};
+use crate::{daemon::paths::Paths, servers::Servers, util::if_present};
+use release::{Manifest, ManifestError, Release};
 
 /// Where releases are listed when `update_url` is not set.
 pub const RELEASES: &str =
@@ -307,7 +305,7 @@ impl Updater {
                 candidate.version,
                 state.failed_reason.map_or(
                     "it did not prove healthy",
-                    versions::FailedTrial::describe,
+                    versions::describe_failure,
                 ),
             ));
         }

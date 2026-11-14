@@ -18,7 +18,6 @@ import {
 	Toggle,
 	useVIntl,
 } from '@modrinth/ui'
-import { open } from '@tauri-apps/plugin-dialog'
 import { computed, readonly, ref, watch } from 'vue'
 
 import JavaDetectionModal from '@/components/ui/JavaDetectionModal.vue'
@@ -27,6 +26,7 @@ import useMemorySlider from '@/composables/useMemorySlider'
 import { edit, get_optimal_jre_key, type JavaVersion } from '@/helpers/instance'
 import { get, parseEnvVars, serializeEnvVars } from '@/helpers/settings.ts'
 import type { AppSettings } from '@/helpers/types'
+import { open } from '@/platform/dialog'
 
 import DefaultSettingsIntro from './default-settings-intro.vue'
 import { injectInstanceSettings } from './instance-settings-context'

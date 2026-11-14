@@ -31,13 +31,4 @@ export class LabrinthSessionsV2Module extends AbstractModule {
 			method: 'DELETE',
 		})
 	}
-
-	/** Rotate the current native Amberite session. */
-	public async refresh(): Promise<Labrinth.Sessions.v2.Session> {
-		return this.client.request<Labrinth.Sessions.v2.Session>('/session/refresh', {
-			api: 'labrinth',
-			version: 2,
-			method: 'POST',
-		})
-	}
 }

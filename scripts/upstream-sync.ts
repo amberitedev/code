@@ -6,21 +6,24 @@
 //
 // Usage: node scripts/upstream-sync.ts [upstream-ref] > summary.json   (default: modrinth/main)
 //
-// Paths listed under `ignore` in upstream.json are deleted from the merge, so they stay gone on
-// every sync. Conflict markers are committed as they are; resolving them is the skill's job.
+// upstream.json's keys are described in docs/internals/upstream.md. Conflict markers are committed
+// as they are; resolving them is the skill's job.
 
 import * as NodeChildProcess from 'node:child_process'
 import * as NodeFS from 'node:fs'
 
-type UpstreamConfig = {
-	// Upstream paths we never take. Deleted from every merge.
-	ignore: string[]
-	// Upstream labrinth paths that apps/backend ports. Read from modrinth/main, never merged.
-	watch: string[]
-}
+import {
+	type Bucket,
+	type UpstreamConfig,
+	bucketOf,
+	changedPaths,
+	lines,
+	matches,
+	parseNameStatus,
+	removedPaths,
+} from './upstream-paths.ts'
+import { mergeMapped } from './upstream-merge.ts'
 
-// Each new upstream commit lands in one bucket. See bucketOf for the order they are checked in.
-type Bucket = 'ignored' | 'watch' | 'new' | 'overlap' | 'other'
 type Commit = { sha: string; title: string }
 
 // Taken from Modrinth, then pruned and topped up to match our manifests. pnpm freezes the lockfile
@@ -38,32 +41,39 @@ const LOCKFILES = {
 
 const upstream = process.argv[2] ?? 'modrinth/main'
 const config: UpstreamConfig = JSON.parse(NodeFS.readFileSync('upstream.json', 'utf8'))
+// Git quotes non-ASCII paths by default, and a quoted path matches no key in upstream.json.
+const unquoted = ['-c', 'core.quotePath=false'] as const
 
-const base = git('merge-base', 'HEAD', upstream)
-const upstreamSha = git('rev-parse', upstream)
-const ours = new Set(lines(git('diff', '--name-only', base, 'HEAD')))
+const upstreamSha = git('rev-parse', '--verify', `${upstream}^{commit}`)
+const [base, ...otherBases] = lines(git('merge-base', '--all', 'HEAD', upstreamSha))
+if (!base || otherBases.length > 0) throw new Error(`HEAD and ${upstream} need one merge base`)
+const ours = changedPaths(
+	parseNameStatus(git(...unquoted, 'diff', '--find-renames', '--name-status', base, 'HEAD')),
+)
 const commits = lines(git('rev-list', '--reverse', '--no-merges', `${base}..${upstream}`))
+const removed = removedPaths(config, (path) =>
+	Boolean(git('ls-tree', '-r', '--name-only', 'HEAD', '--', path)),
+)
 
-// --no-commit stops before committing even on a clean merge; it exits 1 when there are conflicts.
-run('git', ['merge', '--no-commit', '--no-ff', upstream])
-if (!run('git', ['rev-parse', '-q', '--verify', 'MERGE_HEAD'])) {
-	throw new Error(`git merge ${upstream} did not start a merge`)
-}
-
-for (const path of config.ignore) {
+const merged = mergeMapped({
+	base,
+	upstream: upstreamSha,
+	renamed: config.renamed,
+	cwd: process.cwd(),
+})
+for (const path of removed) {
 	if (git('ls-files', '--', path)) git('rm', '-r', '-q', '--force', '--', path)
 }
 
 const lockfiles: Record<string, 'regenerated' | 'failed'> = {}
 for (const [file, command] of Object.entries(LOCKFILES)) {
-	git('checkout', upstream, '--', file)
+	git('checkout', upstreamSha, '--', file)
 	const [bin, ...args] = command
 	lockfiles[file] = run(bin, args) ? 'regenerated' : 'failed'
 	git('add', '--', file)
 }
 
-const conflicts = lines(git('diff', '--name-only', '--diff-filter=U'))
-if (conflicts.length > 0) git('add', '--', ...conflicts)
+const conflicts = merged.filter((path) => !matches(path, [...removed, ...Object.keys(LOCKFILES)]))
 git(
 	'commit',
 	'--no-verify',
@@ -75,13 +85,20 @@ git(
 
 const buckets: Record<Bucket, Commit[]> = {
 	ignored: [],
-	watch: [],
+	port: [],
 	new: [],
 	overlap: [],
 	other: [],
 }
 for (const sha of commits) {
-	buckets[bucketOf(sha)].push({ sha, title: git('log', '-1', '--format=%s', sha) })
+	// --find-renames shows a move as one change, so a moved page is not counted as a new one.
+	const changes = parseNameStatus(
+		git(...unquoted, 'show', '--find-renames', '--format=', '--name-status', sha),
+	)
+	buckets[bucketOf(changes, config, ours)].push({
+		sha,
+		title: git('log', '-1', '--format=%s', sha),
+	})
 }
 
 const summary = {
@@ -94,40 +111,6 @@ const summary = {
 	commits: buckets,
 }
 console.log(JSON.stringify(summary, null, 2))
-
-// Watch comes first because watch paths sit inside the ignored labrinth folder.
-function bucketOf(sha: string): Bucket {
-	// Renames show as `R<score>\told\tnew`, so a moved page is not counted as a new one.
-	const changes = lines(git('show', '--find-renames', '--format=', '--name-status', sha)).map(
-		(line) => {
-			const [status, ...paths] = line.split('\t')
-			return { added: status === 'A', paths }
-		},
-	)
-	const paths = changes.flatMap((change) => change.paths)
-	if (paths.some((path) => matches(path, config.watch))) return 'watch'
-	if (paths.every((path) => matches(path, config.ignore))) return 'ignored'
-	if (changes.some((change) => change.added && isNewSurface(change.paths[0]))) return 'new'
-	if (paths.some((path) => ours.has(path))) return 'overlap'
-	return 'other'
-}
-
-// A new app or package manifest, a new `*-page.vue`, or a new file under a pages or routes folder.
-function isNewSurface(path: string) {
-	return (
-		/^(apps|packages)\/[^/]+\/(package\.json|Cargo\.toml)$/.test(path) ||
-		/(^|\/)(pages|routes)\//.test(path) ||
-		path.endsWith('-page.vue')
-	)
-}
-
-function matches(path: string, prefixes: string[]) {
-	return prefixes.some((prefix) => path === prefix || path.startsWith(`${prefix}/`))
-}
-
-function lines(text: string) {
-	return text.split('\n').filter(Boolean)
-}
 
 function git(...args: string[]) {
 	return NodeChildProcess.execFileSync('git', args, {

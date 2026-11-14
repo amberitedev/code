@@ -8,7 +8,7 @@ on:
       - .github/workflows/theseus-build.yml
       - 'apps/app/**'
       - 'apps/app-frontend/**'
-      - 'packages/app-lib/**'
+      - 'packages/engine/**'
       - 'packages/app-macros/**'
       - 'packages/assets/**'
       - 'packages/ui/**'
@@ -146,10 +146,10 @@ jobs:
           echo "Setting application version to $APP_VERSION"
           echo "Using environment $BUILD_ENVIRONMENT"
           dasel put -f apps/app/Cargo.toml -t string -v "${APP_VERSION#v}" 'package.version'
-          dasel put -f packages/app-lib/Cargo.toml -t string -v "${APP_VERSION#v}" 'package.version'
+          dasel put -f packages/engine/Cargo.toml -t string -v "${APP_VERSION#v}" 'package.version'
           dasel put -f apps/app-frontend/package.json -t string -v "${APP_VERSION#v}" 'version'
 
-          cp "packages/app-lib/.env.${BUILD_ENVIRONMENT}" packages/app-lib/.env
+          cp "packages/engine/.env.${BUILD_ENVIRONMENT}" packages/engine/.env
 
       - name: Setup Turbo cache
         uses: rharkor/caching-for-turbo@56219402aacc0d06b650d898c222996dbc1191ec # v2.3.14

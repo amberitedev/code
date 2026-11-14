@@ -17,8 +17,13 @@ serde_path_to_error = { workspace = true }
 sha1 = { workspace = true }
 sha2 = { workspace = true }
 toasty = { workspace = true, optional = true }
+ts-rs = { workspace = true, features = [
+  "no-serde-warnings",
+  "url-impl",
+], optional = true }
 url = { workspace = true, features = ["serde"] }
 
 [features]
 default = []
 toasty = ["dep:toasty"]
+ts = ["dep:ts-rs"]

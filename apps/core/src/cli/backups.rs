@@ -1,18 +1,14 @@
-//! `copal backups ...`, on the backup routes of step 5 (`api::backups`). A server's one world has
-//! the server's id, so its backups are under `/v1/servers/{id}/worlds/{id}/backups-queue`.
+//! `copal backups ...`.
 
-use axum::http::Method;
 use clap::Subcommand;
 use color_eyre::eyre::{Result, bail};
-use uuid::Uuid;
-
-use super::{Client, Output, servers};
-use crate::api::backups::{
-    BackupQueueBackup as Backup, BackupQueueOperationType, BackupQueueState,
-    BackupRequest, BackupStatus, BackupsQueueResponse,
-    BackupsQueueWithOptionsResponse as WithOptions, PatchWorldBackupOptions,
-    PatchWorldBackupOptionsResponse, PostBackupQueueResponse,
+use contracts::core::{
+    BackupKind, BackupRef, BackupState, ChangeBackupSchedule, CreateBackup,
+    ListBackups, NewBackup, OperationKind, OperationState, RestoreBackup,
+    ScheduleUpdate, ServerBackup as Backup, ServerBackups, ServerId,
 };
+
+use super::{Client, Output, call::call, servers};
 
 #[derive(Debug, Subcommand)]
 pub enum BackupsCommand {
@@ -48,27 +44,25 @@ pub enum BackupsCommand {
 /// recorded.
 fn failure(backup: &Backup) -> Option<String> {
     let last = backup
-        .history
+        .operations
         .last()
-        .filter(|op| op.state == BackupQueueState::Failed)?;
+        .filter(|op| op.state == OperationState::Failed)?;
     Some(format!(
         "{} failed: {}",
-        match last.operation_type {
-            BackupQueueOperationType::Create => "create",
-            BackupQueueOperationType::Restore => "restore",
+        match last.kind {
+            OperationKind::Create => "create",
+            OperationKind::Restore => "restore",
         },
         last.error.as_deref().unwrap_or("no reason was recorded")
     ))
 }
 
-/// A backup's status as the API names it.
-fn status(status: BackupStatus) -> &'static str {
-    match status {
-        BackupStatus::Pending => "pending",
-        BackupStatus::InProgress => "in_progress",
-        BackupStatus::TimedOut => "timed_out",
-        BackupStatus::Error => "error",
-        BackupStatus::Done => "done",
+fn state(state: BackupState) -> &'static str {
+    match state {
+        BackupState::Queued => "queued",
+        BackupState::Running => "running",
+        BackupState::Failed => "failed",
+        BackupState::Done => "done",
     }
 }
 
@@ -76,7 +70,7 @@ pub async fn run(client: &Client, command: BackupsCommand) -> Result<Output> {
     match command {
         BackupsCommand::List { server } => {
             let server = servers::find(client, &server).await?;
-            let mut backups = list(client, &server.server_id).await?;
+            let mut backups = list(client, &server.id).await?.backups;
             backups.sort_by_key(|backup| std::cmp::Reverse(backup.created_at));
             let text = if backups.is_empty() {
                 format!("{} has no backups yet", server.name)
@@ -87,13 +81,14 @@ pub async fn run(client: &Client, command: BackupsCommand) -> Result<Output> {
                         let line = format!(
                             "{}  {}  {:<11} {}{}",
                             backup.id,
-                            backup
-                                .created_at
-                                .with_timezone(&chrono::Local)
-                                .format("%Y-%m-%d %H:%M"),
-                            status(backup.status),
+                            super::local_time(backup.created_at),
+                            state(backup.state),
                             backup.name,
-                            if backup.automated { " (scheduled)" } else { "" }
+                            if backup.kind == BackupKind::Manual {
+                                ""
+                            } else {
+                                " (scheduled)"
+                            }
                         );
                         // The reason is Core's text, which may quote file names: escaped.
                         match failure(backup) {
@@ -113,9 +108,13 @@ pub async fn run(client: &Client, command: BackupsCommand) -> Result<Output> {
             let name = name.unwrap_or_else(|| {
                 chrono::Local::now().format("%Y-%m-%d %H:%M").to_string()
             });
-            let created: PostBackupQueueResponse = client
-                .post(&queue(&server.server_id), &BackupRequest { name })
-                .await?;
+            let created = call::<CreateBackup>(
+                client,
+                &id(&server.id),
+                &(),
+                NewBackup { name },
+            )
+            .await?;
             Ok(Output::new(
                 format!("Backing up {} ({})", server.name, created.id),
                 &created,
@@ -123,20 +122,13 @@ pub async fn run(client: &Client, command: BackupsCommand) -> Result<Output> {
         }
         BackupsCommand::Restore { server, backup } => {
             let server = servers::find(client, &server).await?;
-            let backups = list(client, &server.server_id).await?;
+            let backups = list(client, &server.id).await?.backups;
             let backup = pick(&backups, &backup)?;
-            client
-                .post::<()>(
-                    &format!(
-                        "{}/{}/restore",
-                        queue(&server.server_id),
-                        backup.id
-                    ),
-                    &BackupRequest {
-                        name: format!("Before restoring {}", backup.name),
-                    },
-                )
-                .await?;
+            let target = BackupRef {
+                id: server.id.clone(),
+                backup_id: backup.id.clone(),
+            };
+            call::<RestoreBackup>(client, &target, &(), ()).await?;
             Ok(Output::new(
                 format!("Restoring {} on {}", backup.name, server.name),
                 backup,
@@ -149,55 +141,43 @@ pub async fn run(client: &Client, command: BackupsCommand) -> Result<Output> {
             keep,
         } => {
             let server = servers::find(client, &server).await?;
-            let path = format!("{}/with-options", queue(&server.server_id));
-            let mut current: WithOptions = client.get(&path).await?;
+            let mut current = list(client, &server.id).await?;
             let mut deleted = 0;
             if every.is_some() || off || keep.is_some() {
-                let split_automatic = if off {
-                    0
-                } else {
-                    keep.unwrap_or(current.options.split_automatic)
-                };
-                let Some(split_manual) =
-                    current.options.limit.checked_sub(split_automatic)
-                else {
+                let keep = if off { Some(0) } else { keep };
+                if keep.is_some_and(|keep| keep > current.schedule.slots) {
                     bail!(
                         "a server has {} backup slots in all",
-                        current.options.limit
+                        current.schedule.slots
                     );
-                };
+                }
                 // The owner at the keyboard: scheduled backups past the new slots go now.
-                let patched: PatchWorldBackupOptionsResponse = client
-                    .call(
-                        Method::PATCH,
-                        &format!("{path}?ar=true"),
-                        Some(&PatchWorldBackupOptions {
-                            split_automatic: Some(split_automatic),
-                            split_manual: Some(split_manual),
-                            interval: Some(
-                                every.unwrap_or(current.options.interval),
-                            ),
-                        }),
-                    )
-                    .await?;
-                deleted = patched.backup_ids.map_or(0, |ids| ids.len());
-                current = client.get(&path).await?;
+                let changed = call::<ChangeBackupSchedule>(
+                    client,
+                    &id(&server.id),
+                    &(),
+                    ScheduleUpdate {
+                        interval_hours: every,
+                        keep,
+                        delete_excess: true,
+                    },
+                )
+                .await?;
+                deleted = changed.excess.len();
+                current = list(client, &server.id).await?;
             }
-            let options = &current.options;
-            let mut text = match (
-                options.split_automatic,
-                current.next_auto_backup_at,
-            ) {
+            let schedule = &current.schedule;
+            let manual = schedule.slots.saturating_sub(schedule.keep);
+            let mut text = match (schedule.keep, current.next_scheduled_at) {
                 (0, _) | (_, None) => format!(
-                    "{}: no scheduled backups; {} manual slots",
-                    server.name, options.split_manual
+                    "{}: no scheduled backups; {manual} manual slots",
+                    server.name
                 ),
                 (keep, Some(next)) => format!(
-                    "{}: every {} hours, keeping the last {keep} ({} manual slots); next {}",
+                    "{}: every {} hours, keeping the last {keep} ({manual} manual slots); next {}",
                     server.name,
-                    options.interval,
-                    options.split_manual,
-                    next.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M")
+                    schedule.interval_hours,
+                    super::local_time(next)
                 ),
             };
             if deleted > 0 {
@@ -211,13 +191,14 @@ pub async fn run(client: &Client, command: BackupsCommand) -> Result<Output> {
     }
 }
 
-fn queue(server_id: &Uuid) -> String {
-    format!("/v1/servers/{server_id}/worlds/{server_id}/backups-queue")
+fn id(server_id: &str) -> ServerId {
+    ServerId {
+        id: server_id.to_owned(),
+    }
 }
 
-async fn list(client: &Client, server_id: &Uuid) -> Result<Vec<Backup>> {
-    let backups: BackupsQueueResponse = client.get(&queue(server_id)).await?;
-    Ok(backups.backups)
+async fn list(client: &Client, server_id: &str) -> Result<ServerBackups> {
+    call::<ListBackups>(client, &id(server_id), &(), ()).await
 }
 
 /// The backup `query` names: its id, the unique start of its id, or its name.
@@ -226,8 +207,7 @@ fn pick<'a>(backups: &'a [Backup], query: &str) -> Result<&'a Backup> {
     let matches: Vec<&Backup> = backups
         .iter()
         .filter(|backup| {
-            backup.id.to_string().starts_with(&lower)
-                || backup.name.to_lowercase() == lower
+            backup.id.starts_with(&lower) || backup.name.to_lowercase() == lower
         })
         .collect();
     match matches.as_slice() {

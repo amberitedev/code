@@ -36,9 +36,9 @@ export class KyrosBackupsV1Module extends AbstractModule {
 		backupId: string,
 		token: string,
 	): string {
-		// Appended rather than resolved, so a node URL with a path (a Core server) keeps it.
 		const url = new URL(
-			`${getNodeBaseUrl(nodeUrlHost).replace(/\/$/, '')}/v1/worlds/${encodeURIComponent(worldId)}/backups/${encodeURIComponent(backupId)}/download`,
+			`/v1/worlds/${worldId}/backups/${backupId}/download`,
+			getNodeBaseUrl(nodeUrlHost),
 		)
 		url.searchParams.set('token', token)
 		return url.toString()

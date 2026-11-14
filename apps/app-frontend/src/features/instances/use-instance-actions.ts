@@ -116,6 +116,7 @@ export function useInstanceActions(
 		onMounted(() => {
 			void checkProcess()
 		})
+		useAppEvent('resync', checkProcess)
 	}
 
 	const card = computed<InstanceCard>(() => ({

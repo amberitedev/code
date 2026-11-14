@@ -1,4 +1,6 @@
-import { ApiError, json, readBytes } from '../common/http'
+import type { HeldVersion, PullOrder, StorageAnswer, StorageReport } from '@amberite/contracts'
+
+import { invalid, objectBody } from '../common/http'
 import type { Env } from '../common/types'
 import { UNCONFIRMED_TTL_MS, holders, place } from '../sharing/pool'
 import { versionReady } from '../sharing'
@@ -10,7 +12,7 @@ import { pullTicket } from './tickets'
 
 const MAX_VERSIONS = 10_000
 /** A report of `MAX_VERSIONS` versions is about a megabyte. */
-const MAX_REPORT_BODY = 2 * 1024 * 1024
+export const MAX_REPORT_BODY = 2 * 1024 * 1024
 /** Pull orders per report, so one report cannot ask a Core to copy everything at once. */
 const MAX_PULLS = 20
 /** A report that changed nothing still refreshes `reported` once it is this old. */
@@ -42,50 +44,46 @@ const STORAGE_FIELDS = [
 function natural(body: Record<string, unknown>, field: string): number {
 	const value = body[field]
 	if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0)
-		throw new ApiError(400, 'invalid_input', `Invalid ${field}`)
+		invalid(`Invalid ${field}`)
 	return value
 }
 
-function parseVersions(value: unknown): Map<string, number> {
-	if (!Array.isArray(value) || value.length > MAX_VERSIONS)
-		throw new ApiError(400, 'invalid_input', 'Invalid versions')
-	const versions = new Map<string, number>()
-	for (const entry of value) {
-		if (!entry || typeof entry !== 'object')
-			throw new ApiError(400, 'invalid_input', 'Invalid versions')
-		const body: Record<string, unknown> = { ...entry }
-		if (typeof body.root !== 'string' || !HASH.test(body.root))
-			throw new ApiError(400, 'invalid_input', 'Invalid root')
-		versions.set(body.root, natural(body, 'bytes'))
-	}
-	return versions
-}
-
-/** Core, signed in: its storage now. */
-export async function reportStorage(
-	request: Request,
-	env: Env,
-	core: { id: string; owner_id: string },
-) {
-	let body: unknown
-	try {
-		body = JSON.parse(new TextDecoder().decode(await readBytes(request, MAX_REPORT_BODY)))
-	} catch {
-		throw new ApiError(400, 'invalid_input', 'Invalid JSON')
-	}
-	if (!body || typeof body !== 'object' || Array.isArray(body))
-		throw new ApiError(400, 'invalid_input', 'Expected a JSON object')
-	const report = body as Record<string, unknown>
-	const next = {
-		enabled: report.enabled === true ? 1 : 0,
-		service: report.service === true ? 1 : 0,
+export function parseStorageReport(raw: unknown): StorageReport {
+	const report = objectBody(raw)
+	if (!Array.isArray(report.versions) || report.versions.length > MAX_VERSIONS)
+		invalid('Invalid versions')
+	return {
+		enabled: report.enabled === true,
+		service: report.service === true,
 		cap: natural(report, 'cap'),
 		used: natural(report, 'used'),
 		free: natural(report, 'free'),
 		egress_cap: natural(report, 'egress_cap'),
 		egress_today: natural(report, 'egress_today'),
+		versions: report.versions.map((entry: unknown): HeldVersion => {
+			const body = objectBody(entry)
+			if (typeof body.root !== 'string' || !HASH.test(body.root)) invalid('Invalid root')
+			return { root: body.root, bytes: natural(body, 'bytes') }
+		}),
 	}
-	const versions = parseVersions(report.versions)
+}
+
+/** Core, signed in: its storage now. */
+export async function reportStorage(
+	env: Env,
+	core: { id: string; owner_id: string },
+	report: StorageReport,
+): Promise<StorageAnswer> {
+	const next = {
+		enabled: report.enabled ? 1 : 0,
+		service: report.service ? 1 : 0,
+		cap: report.cap,
+		used: report.used,
+		free: report.free,
+		egress_cap: report.egress_cap,
+		egress_today: report.egress_today,
+	}
+	const versions = new Map(report.versions.map((version) => [version.root, version.bytes]))
 	const nowText = new Date().toISOString()
 
 	const stored = await env.DB.prepare('SELECT * FROM core_storage WHERE core_id = ?')
@@ -96,11 +94,11 @@ export async function reportStorage(
 		STORAGE_FIELDS.some((field) => stored[field] !== next[field]) ||
 		Date.parse(stored.reported) < Date.now() - REFRESH_MS
 	const held = (
-		await env.DB.prepare('SELECT root, bytes FROM core_holdings WHERE core_id = ?')
+		await env.DB.prepare('SELECT version_hash, bytes FROM core_holdings WHERE core_id = ?')
 			.bind(core.id)
-			.all<{ root: string; bytes: number }>()
+			.all<{ version_hash: string; bytes: number }>()
 	).results
-	const before = new Map(held.map((row) => [row.root, row.bytes]))
+	const before = new Map(held.map((row) => [row.version_hash, row.bytes]))
 	const statements = [
 		...(changed
 			? [
@@ -120,18 +118,18 @@ export async function reportStorage(
 				]
 			: []),
 		...held
-			.filter((row) => !versions.has(row.root))
+			.filter((row) => !versions.has(row.version_hash))
 			.map((row) =>
-				env.DB.prepare('DELETE FROM core_holdings WHERE core_id = ? AND root = ?').bind(
+				env.DB.prepare('DELETE FROM core_holdings WHERE core_id = ? AND version_hash = ?').bind(
 					core.id,
-					row.root,
+					row.version_hash,
 				),
 			),
 		...[...versions]
 			.filter(([root, bytes]) => before.get(root) !== bytes)
 			.map(([root, bytes]) =>
 				env.DB.prepare(
-					'INSERT OR REPLACE INTO core_holdings (core_id,root,bytes,confirmed) VALUES (?,?,?,?)',
+					'INSERT OR REPLACE INTO core_holdings (core_id,version_hash,bytes,confirmed) VALUES (?,?,?,?)',
 				).bind(core.id, root, bytes, nowText),
 			),
 	]
@@ -142,7 +140,7 @@ export async function reportStorage(
 	if (newRoots.length) {
 		const confirmed = (
 			await env.DB.prepare(
-				'SELECT v.instance_id, v.version FROM shared_versions v JOIN shared_instances i ON i.id = v.instance_id WHERE v.ready = 0 AND i.home = ?1 AND v.root IN (SELECT value FROM json_each(?2))',
+				'SELECT v.instance_id, v.version FROM shared_instance_versions v JOIN shared_instances i ON i.id = v.instance_id WHERE v.ready = 0 AND i.home = ?1 AND v.version_hash IN (SELECT value FROM json_each(?2))',
 			)
 				.bind(core.id, JSON.stringify(newRoots))
 				.all<{ instance_id: string; version: number }>()
@@ -152,7 +150,7 @@ export async function reportStorage(
 
 	if (!next.enabled) await handOn(env, core)
 
-	return json({ drop: await dropList(env, core.id), pull: await pullList(env, core.id) })
+	return { drop: await dropList(env, core.id), pull: await pullList(env, core.id) }
 }
 
 /**
@@ -165,8 +163,8 @@ async function handOn(env: Env, core: { id: string; owner_id: string }) {
 	const shares = (
 		await env.DB.prepare(
 			`SELECT i.id, i.owner_id, i.home, i.replica,
-				(EXISTS (SELECT 1 FROM shared_members m WHERE m.instance_id = i.id AND m.join_type != 'owner')
-					OR EXISTS (SELECT 1 FROM server_players p JOIN shared_servers s USING (core_id, server_id) WHERE s.instance_id = i.id)) AS members
+				(EXISTS (SELECT 1 FROM shared_instance_users m WHERE m.instance_id = i.id AND m.join_type != 'owner')
+					OR EXISTS (SELECT 1 FROM hosted_server_players p JOIN hosted_servers s USING (core_id, server_id) WHERE s.instance_id = i.id)) AS members
 			FROM shared_instances i WHERE (i.home = ?1 OR i.replica = ?1) AND i.owner_id != ?2
 			AND i.home IS NOT NULL AND i.replica IS NOT NULL`,
 		)
@@ -193,41 +191,44 @@ async function handOn(env: Env, core: { id: string; owner_id: string }) {
 async function dropList(env: Env, coreId: string): Promise<string[]> {
 	const fresh = new Date(Date.now() - UNCONFIRMED_TTL_MS).toISOString()
 	const rows = await env.DB.prepare(
-		`SELECT h.root FROM core_holdings h WHERE h.core_id = ?1
-		AND h.root NOT IN (
-			SELECT v.root FROM shared_versions v JOIN shared_instances i ON i.id = v.instance_id
+		`SELECT h.version_hash FROM core_holdings h WHERE h.core_id = ?1
+		AND h.version_hash NOT IN (
+			SELECT v.version_hash FROM shared_instance_versions v JOIN shared_instances i ON i.id = v.instance_id
 			WHERE (i.home = ?1 OR i.replica = ?1) AND (v.ready = 1 OR v.created > ?2))
-		AND h.root NOT IN (
-			SELECT v.root FROM shared_versions v JOIN shared_instances i ON i.id = v.instance_id
+		AND h.version_hash NOT IN (
+			SELECT v.version_hash FROM shared_instance_versions v JOIN shared_instances i ON i.id = v.instance_id
 			WHERE (i.home = ?1 OR i.replica = ?1)
-			AND v.version = (SELECT MAX(v2.version) FROM shared_versions v2 JOIN core_holdings h2 ON h2.core_id = ?1 AND h2.root = v2.root WHERE v2.instance_id = i.id))`,
+			AND v.version = (SELECT MAX(v2.version) FROM shared_instance_versions v2 JOIN core_holdings h2 ON h2.core_id = ?1 AND h2.version_hash = v2.version_hash WHERE v2.instance_id = i.id))`,
 	)
 		.bind(coreId, fresh)
-		.all<{ root: string }>()
-	return rows.results.map((row) => row.root)
+		.all<{ version_hash: string }>()
+	return rows.results.map((row) => row.version_hash)
 }
 
 /**
  * Versions this Core should hold but does not, each with a pull ticket for the other holder that
  * has it: every kept ready version of every share homed or replicated here, newest first.
  */
-async function pullList(env: Env, coreId: string) {
+async function pullList(env: Env, coreId: string): Promise<PullOrder[]> {
 	const rows = await env.DB.prepare(
-		`SELECT DISTINCT v.root, CASE WHEN i.home = ?1 THEN i.replica ELSE i.home END AS source
-		FROM shared_versions v JOIN shared_instances i ON i.id = v.instance_id
+		`SELECT DISTINCT v.version_hash, CASE WHEN i.home = ?1 THEN i.replica ELSE i.home END AS source
+		FROM shared_instance_versions v JOIN shared_instances i ON i.id = v.instance_id
 		WHERE (i.home = ?1 OR i.replica = ?1) AND v.ready = 1
-		AND v.root NOT IN (SELECT root FROM core_holdings WHERE core_id = ?1)
-		AND EXISTS (SELECT 1 FROM core_holdings s WHERE s.root = v.root AND s.core_id = CASE WHEN i.home = ?1 THEN i.replica ELSE i.home END)
+		AND v.version_hash NOT IN (SELECT version_hash FROM core_holdings WHERE core_id = ?1)
+		AND EXISTS (SELECT 1 FROM core_holdings s WHERE s.version_hash = v.version_hash AND s.core_id = CASE WHEN i.home = ?1 THEN i.replica ELSE i.home END)
 		ORDER BY v.created DESC LIMIT ?2`,
 	)
 		.bind(coreId, MAX_PULLS)
-		.all<{ root: string; source: string }>()
+		.all<{ version_hash: string; source: string }>()
 	const sources = await holders(env, [...new Set(rows.results.map((row) => row.source))])
 	const orders = []
 	for (const row of rows.results) {
 		const source = sources.find((core) => core.id === row.source)
 		if (source)
-			orders.push({ root: row.root, ticket: await pullTicket(env, coreId, row.root, source) })
+			orders.push({
+				root: row.version_hash,
+				ticket: await pullTicket(env, coreId, row.version_hash, source),
+			})
 	}
 	return orders
 }

@@ -1,5 +1,7 @@
-import { invoke } from '@tauri-apps/api/core'
+import { onboarding } from '@modrinth/api-client'
+
+import { apiClient } from '@/platform/modrinth-client'
 
 export function skipCreateInstanceOnboarding(): Promise<void> {
-	return invoke('plugin:onboarding-checklist|skip_create_instance_onboarding')
+	return apiClient.local.call(onboarding.skipCreateInstanceOnboarding)
 }

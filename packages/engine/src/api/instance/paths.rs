@@ -1,0 +1,30 @@
+use crate::state::Engine;
+use crate::util::io;
+use std::path::PathBuf;
+
+#[tracing::instrument(skip(state))]
+pub async fn get_full_path(
+    state: &Engine,
+    instance_id: &str,
+) -> crate::Result<PathBuf> {
+    let path =
+        crate::state::instances::adapters::sqlite::instance_rows::get_instance_path_by_id(
+            instance_id,
+            &state.pool,
+        )
+        .await?
+        .ok_or(crate::ErrorKind::InputError("unknown instance".to_string()))?;
+
+    Ok(io::canonicalize(
+        state.directories.instances_dir().join(path),
+    )?)
+}
+
+#[tracing::instrument(skip(state))]
+pub async fn get_mod_full_path(
+    state: &crate::Engine,
+    instance_id: &str,
+    project_path: &str,
+) -> crate::Result<PathBuf> {
+    Ok(get_full_path(state, instance_id).await?.join(project_path))
+}

@@ -1,8 +1,10 @@
+import type { PreferencesUpdate, UserPreferences } from '@amberite/contracts'
+
 import { areFriends } from '../common/auth'
-import { invalid } from '../common/http'
+import { invalid, objectBody } from '../common/http'
 import type { Env, UserRow } from '../common/types'
 
-export const defaultPreferences = {
+export const defaultPreferences: UserPreferences = {
 	appearance: { auto: false, theme: 'dark' },
 	behavior: {
 		minimize_app: false,
@@ -40,33 +42,47 @@ export const defaultPreferences = {
 	},
 }
 
-export function preferences(user: UserRow): typeof defaultPreferences {
-	const stored: Record<string, Record<string, unknown>> = JSON.parse(user.preferences)
+/** `update` over `base`, section by section. */
+function merged(base: UserPreferences, update: PreferencesUpdate): UserPreferences {
 	return {
-		appearance: { ...defaultPreferences.appearance, ...stored.appearance },
-		behavior: { ...defaultPreferences.behavior, ...stored.behavior },
-		localization: { ...defaultPreferences.localization, ...stored.localization },
-		layouts: { ...defaultPreferences.layouts, ...stored.layouts },
-		sidebars: { ...defaultPreferences.sidebars, ...stored.sidebars },
-		social: { ...defaultPreferences.social, ...stored.social },
+		appearance: { ...base.appearance, ...update.appearance },
+		behavior: { ...base.behavior, ...update.behavior },
+		localization: { ...base.localization, ...update.localization },
+		layouts: { ...base.layouts, ...update.layouts },
+		sidebars: { ...base.sidebars, ...update.sidebars },
+		social: { ...base.social, ...update.social },
 	}
 }
 
-export function patchPreferences(user: UserRow, body: Record<string, unknown>) {
-	const current = preferences(user)
-	const next: Record<string, Record<string, unknown>> = structuredClone(current)
+export function preferences(user: UserRow): UserPreferences {
+	// Only `EditPreferences` writes it, with values `parsePreferencesUpdate` checked.
+	const stored: PreferencesUpdate = JSON.parse(user.preferences)
+	return merged(defaultPreferences, stored)
+}
+
+export function patchPreferences(user: UserRow, update: PreferencesUpdate): UserPreferences {
+	return merged(preferences(user), update)
+}
+
+export function parsePreferencesUpdate(raw: unknown): PreferencesUpdate {
+	const body = objectBody(raw)
+	assertPreferencesUpdate(body)
+	return body
+}
+
+function assertPreferencesUpdate(body: Record<string, unknown>): asserts body is PreferencesUpdate {
+	const defaults: Record<string, Record<string, unknown>> = defaultPreferences
 	for (const [section, value] of Object.entries(body)) {
 		if (
-			!Object.hasOwn(next, section) ||
+			!Object.hasOwn(defaults, section) ||
 			!value ||
 			typeof value !== 'object' ||
 			Array.isArray(value)
 		)
 			invalid('Invalid preferences')
 		for (const [key, item] of Object.entries(value)) {
-			if (!Object.hasOwn(next[section], key)) invalid('Invalid preference')
-			const previous = next[section][key]
-			if (typeof previous !== typeof item) invalid('Invalid preference value')
+			if (!Object.hasOwn(defaults[section], key)) invalid('Invalid preference')
+			if (typeof defaults[section][key] !== typeof item) invalid('Invalid preference value')
 			if (
 				section === 'behavior' &&
 				key === 'quick_instance_count' &&
@@ -95,10 +111,8 @@ export function patchPreferences(user: UserRow, body: Record<string, unknown>) {
 				(typeof item !== 'string' || item.length > 35 || !/^[a-zA-Z0-9-]+$/.test(item))
 			)
 				invalid('Invalid locale')
-			next[section][key] = item
 		}
 	}
-	return next
 }
 
 export async function blockedEitherWay(env: Env, first: string, second: string) {

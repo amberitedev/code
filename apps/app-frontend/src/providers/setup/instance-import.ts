@@ -1,11 +1,11 @@
 import { type AbstractWebNotificationManager, provideInstanceImport } from '@modrinth/ui'
-import { open } from '@tauri-apps/plugin-dialog'
 
 import {
 	get_default_launcher_path,
 	get_importable_instances,
 	import_instance,
 } from '@/helpers/import.js'
+import { open } from '@/platform/dialog'
 
 export function setupInstanceImportProvider(notificationManager: AbstractWebNotificationManager) {
 	const { handleError } = notificationManager

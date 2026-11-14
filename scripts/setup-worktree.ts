@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// Prepares a checkout for work: dependencies, development data, and the App library's environment
+// Prepares a checkout for work: dependencies, development data, and the engine's environment
 // file. T3 Code runs this when it creates a worktree (see t3.json); it is safe to run again by hand.
 // Progress is recorded in .data/setup.json so an agent that starts before this finishes can tell
 // "still running" from "never ran". While running it names this process's pid: a pid that no longer
@@ -12,7 +12,7 @@ import * as NodePath from 'node:path'
 import { copyDataEntry, DATA_ENTRIES } from './dev-data.ts'
 import { recordTiming } from './timings.ts'
 
-const ENV_FILE = NodePath.join('packages', 'app-lib', '.env')
+const ENV_FILE = NodePath.join('packages', 'engine', '.env')
 
 const worktree = git(['rev-parse', '--show-toplevel'], process.cwd())
 const primary = primaryWorktree(worktree)
@@ -88,9 +88,12 @@ function copyDevelopmentData(): void {
 
 // A copy, not a link: Windows only allows symlinks with Developer Mode or elevation.
 function copyEnvFile(): void {
-	const from = NodePath.join(primary, ENV_FILE)
+	// A primary checkout still on main keeps the engine at its old path.
+	const from = [ENV_FILE, NodePath.join('packages', 'app-lib', '.env')]
+		.map((file) => NodePath.join(primary, file))
+		.find((file) => NodeFS.existsSync(file))
 	const to = NodePath.join(worktree, ENV_FILE)
-	if (!NodeFS.existsSync(from) || NodeFS.existsSync(to)) return
+	if (from === undefined || NodeFS.existsSync(to)) return
 	NodeFS.copyFileSync(from, to)
 	console.log(`[setup] copied ${ENV_FILE}`)
 }

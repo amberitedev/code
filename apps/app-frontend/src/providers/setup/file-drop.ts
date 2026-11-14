@@ -1,19 +1,16 @@
 import { provideFileDrop } from '@modrinth/ui'
-import { invoke } from '@tauri-apps/api/core'
 
 import { listenNativeDragDrop } from '@/helpers/native-drag-drop'
-import { getLocalFileInfo } from '@/platform/app-lib/files/commands'
+import { readFile, statFile } from '@/platform/files'
+import { isNativeWindow } from '@/platform/local'
 
 function getFileName(path: string) {
 	return path.split(/[\\/]/).pop() || 'file'
 }
 
-async function readDraggedFile(path: string) {
-	const data = await invoke<number[]>('plugin:files|file_read_dragged_file', { path })
-	return new Uint8Array(data)
-}
-
+/** A tab has no native drops; `packages/ui` reads the browser's own drop events there. */
 export function setupFileDropProvider() {
+	if (!isNativeWindow) return
 	let nativeFileDropPaths: string[] = []
 
 	provideFileDrop({
@@ -46,7 +43,7 @@ export function setupFileDropProvider() {
 		},
 		async createFilesFromNativePaths(paths) {
 			return await Promise.all(
-				paths.map(async (path) => new File([await readDraggedFile(path)], getFileName(path))),
+				paths.map(async (path) => new File([await readFile(path)], getFileName(path))),
 			)
 		},
 		async resolveLocalFiles(paths) {
@@ -54,7 +51,7 @@ export function setupFileDropProvider() {
 				paths.map(async (path) => ({
 					kind: 'local' as const,
 					path,
-					...(await getLocalFileInfo(path)),
+					...(await statFile(path)),
 				})),
 			)
 		},

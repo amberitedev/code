@@ -42,33 +42,35 @@ CREATE TABLE pairing (
     poll_interval INTEGER NOT NULL
 );
 
+-- A server's content, loader and Minecraft version are its engine instance's, which has the
+-- server's id.
 CREATE TABLE servers (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     created_at INTEGER NOT NULL,
-    -- Null until content is installed: the App creates a server first, then installs into it.
-    -- Starting a server with either null is refused.
-    game_version TEXT,
-    loader TEXT CHECK (loader IN ('vanilla', 'fabric', 'quilt', 'forge', 'neoforge', 'paper')),
-    loader_version TEXT,
     port INTEGER NOT NULL UNIQUE,
     memory_mb INTEGER NOT NULL,
     -- Advanced override; null means the Java Core manages for this version.
     java_path TEXT,
     -- The managed Java major the owner chose; null means the one the Minecraft version needs.
-    java_version INTEGER,
-    -- The least stable Modrinth version type the server's addons and their dependencies are
-    -- picked from (a `VersionType`).
-    update_channel TEXT NOT NULL DEFAULT 'release'
-        CHECK (update_channel IN ('release', 'beta', 'alpha')),
-    -- The share of a server that follows no instance, which Core writes (`api::share`). Null
-    -- until the server is shared.
-    share_id TEXT,
-    -- The icon editor settings (JSON `IconConfig`) the server's icon was made from, and the
-    -- SHA-256 of the game icon they made. A game icon with another hash was replaced some other
-    -- way, so the settings no longer describe it.
-    icon_config TEXT,
-    icon_hash TEXT
+    java_version INTEGER
+);
+
+-- The App instance a server follows. What version of the instance's share it runs is its engine
+-- instance's; this holds the App's names and the newest version pushed until it applies.
+CREATE TABLE follows (
+    server_id TEXT PRIMARY KEY REFERENCES servers (id) ON DELETE CASCADE,
+    -- The App's id and name for the instance.
+    instance_id TEXT NOT NULL,
+    instance_name TEXT NOT NULL,
+    shared_instance_id TEXT NOT NULL,
+    -- Null once the newest version pushed applied.
+    state TEXT CHECK (state IN ('pending', 'applying', 'failed')),
+    error TEXT,
+    -- The version waiting for the running server to stop (JSON of the engine's
+    -- `SharedInstanceInstallData`), and whether to start the server again once it applied.
+    pending TEXT,
+    start_after INTEGER NOT NULL DEFAULT 0
 );
 
 -- Every time a server ran. The live process identity (pid, start time, boot id) is in
@@ -191,138 +193,6 @@ CREATE TABLE backup_schedules (
     -- When the schedule last came due with nothing new to back up, so the next due time Core
     -- reports is one it keeps.
     skipped_at INTEGER
-);
-
--- Content is the files on disk. These four tables record where each tracked file came from, in
--- app-lib's shape (`instance_links`, `instance_content_sets`, `instance_files`,
--- `instance_content_entries`) with `server` for `instance`. Copal's differences are marked
--- "Copal:". The rows are read and written by `state::servers::adapters::sqlite::content_rows`.
-
--- Where the pack a server follows came from: app-lib's `InstanceLink`, with the columns of the
--- variants a server has. A server that follows no pack has no row. Written and deleted with its
--- content set.
-CREATE TABLE server_links (
-    server_id TEXT PRIMARY KEY REFERENCES servers (id) ON DELETE CASCADE,
-    -- 'modrinth_modpack', 'imported_modpack' (a file the App uploaded), or 'shared_instance' (a
-    -- version of an App instance's share).
-    link_kind TEXT NOT NULL
-        CHECK (link_kind IN ('modrinth_modpack', 'imported_modpack', 'shared_instance')),
-    -- The Modrinth project and version of a 'modrinth_modpack', or of the pack an
-    -- 'imported_modpack' or 'shared_instance' is when known.
-    modrinth_project_id TEXT,
-    modrinth_version_id TEXT,
-    -- An 'imported_modpack' as its index names it, and the file it came in.
-    imported_name TEXT,
-    imported_version_number TEXT,
-    imported_filename TEXT,
-    -- The share of a 'shared_instance'.
-    shared_instance_id TEXT,
-    -- Copal: the version of the share the pack is, and the App instance it came from. app-lib
-    -- keeps an instance's applied share version with its shared-instance attachment.
-    shared_instance_version INTEGER,
-    instance_id TEXT,
-    instance_name TEXT
-);
-
--- The pack a server follows, as a content set. A server has at most one; unlinking deletes it
--- and keeps the files, as files someone added.
-CREATE TABLE server_content_sets (
-    id TEXT PRIMARY KEY,
-    -- Copal: one set per server.
-    server_id TEXT NOT NULL UNIQUE REFERENCES servers (id) ON DELETE CASCADE,
-    -- As the pack's index names it.
-    name TEXT NOT NULL,
-    -- 'modrinth_modpack', 'imported_modpack' (a file the App uploaded), or 'shared_instance' (a
-    -- version of an App instance's share).
-    source_kind TEXT NOT NULL,
-    status TEXT NOT NULL,
-    game_version TEXT NOT NULL,
-    protocol_version INTEGER,
-    loader TEXT NOT NULL,
-    loader_version TEXT,
-    created INTEGER NOT NULL,
-    modified INTEGER NOT NULL,
-    -- Copal: every column from here on, about the pack file itself. As the pack's index names
-    -- them.
-    version_number TEXT NOT NULL,
-    summary TEXT,
-    -- SHA-1 of the .mrpack, kept in `meta/packs/`.
-    sha1 TEXT NOT NULL,
-    -- Why the last install, update, or repair failed. Cleared by the next one that works, or by
-    -- unlinking.
-    error TEXT
-);
-
--- Every file Core tracks on a server, by the path it has when enabled.
-CREATE TABLE server_files (
-    id TEXT PRIMARY KEY,
-    server_id TEXT NOT NULL REFERENCES servers (id) ON DELETE CASCADE,
-    -- Relative to the server folder, with forward slashes: `mods/a.jar`, `config/b.toml`. A
-    -- disabled addon is on disk with `.disabled` added.
-    relative_path TEXT NOT NULL,
-    file_name TEXT NOT NULL,
-    -- As Core last left it; the disk decides.
-    enabled INTEGER NOT NULL,
-    -- SHA-1 of the file as Core placed it. A different hash on disk means the owner edited it.
-    sha1 TEXT NOT NULL,
-    -- As Core placed it; 0 for a file it found there rather than placed.
-    size INTEGER NOT NULL,
-    -- Copal: a file of the pack the server leaves out, client only, which is never on its disk.
-    missing INTEGER NOT NULL DEFAULT 0,
-    added_at INTEGER NOT NULL,
-    modified_at INTEGER NOT NULL,
-    UNIQUE (server_id, relative_path)
-);
-
--- Where each tracked file came from, and which sides it is on for.
-CREATE TABLE server_content_entries (
-    id TEXT PRIMARY KEY,
-    server_id TEXT NOT NULL REFERENCES servers (id) ON DELETE CASCADE,
-    -- Copal: the pack's set for a file the pack placed, null for one someone added.
-    content_set_id TEXT REFERENCES server_content_sets (id) ON DELETE SET NULL,
-    -- Copal: every entry is one file's.
-    file_id TEXT NOT NULL UNIQUE REFERENCES server_files (id) ON DELETE CASCADE,
-    -- A `ContentType` (`mod`, `plugin`, `datapack`, ...). Copal: null for a pack's other files,
-    -- such as configs.
-    project_type TEXT,
-    project_id TEXT,
-    version_id TEXT,
-    -- 'local' for a file someone on the server added, or the source kind of the pack's set.
-    source_kind TEXT NOT NULL,
-    -- 'unsupported' server side: the file is renamed `.disabled`, and players still get it.
-    server_requirement TEXT NOT NULL DEFAULT 'required',
-    -- 'unsupported' client side: the server runs it, and its share leaves it out.
-    client_requirement TEXT NOT NULL DEFAULT 'required',
-    -- Off for both sides.
-    enabled INTEGER NOT NULL DEFAULT 1,
-    added_at INTEGER NOT NULL,
-    modified_at INTEGER NOT NULL,
-    -- Copal: someone set the sides by hand.
-    sides_unlocked INTEGER NOT NULL DEFAULT 0,
-    -- Copal: a client-only file of the pack that someone turned on for the server, so Core placed
-    -- it. Pack updates keep it on the server; turning the server side off makes it client only
-    -- again.
-    server_override INTEGER NOT NULL DEFAULT 0,
-    -- Copal: a pack update found this file edited and left it alone: the new pack `changed` it
-    -- or `removed` it. Cleared when the App says keep or replace.
-    pending TEXT CHECK (pending IN ('changed', 'removed'))
-);
-CREATE INDEX server_content_entries_server ON server_content_entries (server_id);
-
--- A pack pushed while the server ran, applied when it next stops. Only the latest push waits.
--- Not a content set: nothing of it is on the server until it applies.
-CREATE TABLE pending_packs (
-    server_id TEXT PRIMARY KEY REFERENCES servers (id) ON DELETE CASCADE,
-    -- SHA-1 of the .mrpack, kept in `meta/packs/`.
-    sha1 TEXT NOT NULL,
-    instance_id TEXT NOT NULL,
-    instance_name TEXT NOT NULL,
-    shared_instance_id TEXT NOT NULL,
-    shared_version INTEGER NOT NULL,
-    -- Start the server again once the pack is in: the push asked for a restart.
-    start_after INTEGER NOT NULL,
-    -- Install it even for an older Minecraft than the world's, as the push asked.
-    force INTEGER NOT NULL
 );
 
 -- When a server restarts by itself. A server without a row has the defaults: crash restart on,

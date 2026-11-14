@@ -3,44 +3,45 @@
  * So, for example, addDefaultInstance creates a blank instance object, where the Rust struct is serialized,
  *  and deserialized into a usable JS object.
  */
-import { invoke } from '@tauri-apps/api/core'
+import {
+	localAccounts,
+	type ModrinthAuthFlow,
+	type ModrinthCredentials,
+} from '@modrinth/api-client'
 
-export type ModrinthCredentials = {
-	session: string
-	expires: string
-	user_id: string
-	active: boolean
-}
+import { apiClient } from '@/platform/modrinth-client'
 
-export type ModrinthAuthFlow = 'sign-in' | 'sign-up'
+export type { ModrinthAuthFlow, ModrinthCredentials }
 
 export async function login(
 	flow: ModrinthAuthFlow = 'sign-in',
 	addAccount = false,
 ): Promise<ModrinthCredentials> {
-	return await invoke('plugin:mr-auth|modrinth_login', { flow, addAccount })
+	return await apiClient.local.call(localAccounts.signInToModrinth, {
+		body: { flow, add_account: addAccount },
+	})
 }
 
 export async function logout(): Promise<void> {
-	return await invoke('plugin:mr-auth|logout')
+	return await apiClient.local.call(localAccounts.signOutOfModrinth)
 }
 
 export async function get(): Promise<ModrinthCredentials | null> {
-	return await invoke('plugin:mr-auth|get')
+	return await apiClient.local.call(localAccounts.getActiveModrinthAccount)
 }
 
 export async function getAll(): Promise<ModrinthCredentials[]> {
-	return await invoke('plugin:mr-auth|get_all')
+	return await apiClient.local.call(localAccounts.listModrinthAccounts)
 }
 
 export async function setActive(userId: string): Promise<void> {
-	return await invoke('plugin:mr-auth|set_active', { userId })
+	return await apiClient.local.call(localAccounts.setActiveModrinthAccount, { body: userId })
 }
 
 export async function removeUser(userId: string): Promise<void> {
-	return await invoke('plugin:mr-auth|remove_account', { userId })
+	return await apiClient.local.call(localAccounts.removeModrinthAccount, { params: { id: userId } })
 }
 
 export async function cancelLogin(): Promise<void> {
-	return await invoke('plugin:mr-auth|cancel_modrinth_login')
+	return await apiClient.local.call(localAccounts.cancelModrinthSignIn)
 }

@@ -3,7 +3,7 @@
 //! needed.
 //!
 //! - The store's first line says where its HTTP listener is: `{"listening": <port>}`.
-//! - Copal calls with `{"id": n, "call": "status"}`, `{"id": n, "call": "drop", "roots": [R…]}`,
+//! - Copal calls with `{"id": n, "call": "status"}`, `{"id": n, "call": "drop", "roots": [version hash…]}`,
 //!   or `{"id": n, "call": "config", "cap": bytes, "egress_cap": bytes}`.
 //! - The store answers each with `{"id": n, "ok": …}` ([`Status`] for `status`, `null` for the
 //!   others) or `{"id": n, "error": "…"}`.
@@ -12,14 +12,14 @@
 
 use std::{io, sync::Arc, time::Duration};
 
+use contracts::{Hash, backend::cores::HeldVersion};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tokio::io::{
     AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader, Lines,
 };
 use tracing::warn;
-use ts_rs::TS;
 
-use crate::{Hash, Store};
+use crate::Store;
 
 /// How long a call may take before Copal gives up on it.
 const CALL_TIMEOUT: Duration = Duration::from_secs(10);
@@ -46,14 +46,6 @@ pub struct Status {
     pub egress_today: u64,
     /// Every version the store holds whole.
     pub versions: Vec<HeldVersion>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-pub struct HeldVersion {
-    /// R, the version's root hash.
-    pub root: String,
-    /// The bytes of its objects.
-    pub bytes: u64,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -285,7 +277,10 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::{objects::list_of, routes::tests::fixture};
+    use crate::{
+        objects::{ListExt, list_of},
+        routes::tests::fixture,
+    };
 
     /// A client talking to `store` over in-memory pipes, as Copal does to `copal store`.
     async fn connect(

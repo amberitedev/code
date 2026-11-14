@@ -12,12 +12,12 @@ import {
 	Textarea,
 	useVIntl,
 } from '@modrinth/ui'
-import { save } from '@tauri-apps/plugin-dialog'
 import { ref, shallowRef } from 'vue'
 
 import { PackageIcon } from '@/assets/icons'
 import { export_instance_mrpack, get_pack_export_candidates } from '@/helpers/instance'
 import { highlightInFolder } from '@/helpers/utils'
+import { save } from '@/platform/dialog'
 
 const { handleError } = injectNotificationManager()
 const popupNotificationManager = injectPopupNotificationManager()

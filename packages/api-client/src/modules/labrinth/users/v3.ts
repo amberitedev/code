@@ -93,19 +93,6 @@ export class LabrinthUsersV3Module extends AbstractModule {
 		)
 	}
 
-	/** Edit the authenticated user's public profile. */
-	public async edit(
-		idOrUsername: string,
-		request: Labrinth.Users.v3.EditUserRequest,
-	): Promise<void> {
-		return this.client.request(`/user/${encodeURIComponent(idOrUsername)}`, {
-			api: 'labrinth',
-			version: 3,
-			method: 'PATCH',
-			body: request,
-		})
-	}
-
 	public async setAvatar(idOrUsername: string, image: Blob, extension: string): Promise<void> {
 		return this.client.request(`/user/${encodeURIComponent(idOrUsername)}/icon`, {
 			api: 'labrinth',
@@ -115,38 +102,6 @@ export class LabrinthUsersV3Module extends AbstractModule {
 			body: image,
 			params: { ext: extension },
 		})
-	}
-
-	public async deleteAvatar(idOrUsername: string): Promise<void> {
-		return this.client.request(`/user/${encodeURIComponent(idOrUsername)}/icon`, {
-			api: 'labrinth',
-			version: 3,
-			method: 'DELETE',
-		})
-	}
-
-	public async delete(idOrUsername: string): Promise<void> {
-		return this.client.request(`/user/${encodeURIComponent(idOrUsername)}`, {
-			api: 'labrinth',
-			version: 3,
-			method: 'DELETE',
-		})
-	}
-
-	/** Edit a user's saved preferences. The caller must own the account. */
-	public async editPreferences(
-		idOrUsername: string,
-		request: Labrinth.Users.v3.PartialUserPreferences,
-	): Promise<Labrinth.Users.v3.UserPreferences> {
-		return this.client.request<Labrinth.Users.v3.UserPreferences>(
-			`/user/${encodeURIComponent(idOrUsername)}/preferences`,
-			{
-				api: 'labrinth',
-				version: 3,
-				method: 'PATCH',
-				body: request,
-			},
-		)
 	}
 
 	/**

@@ -1,8 +1,9 @@
 //! Free disk space, checked before every backup and restore so a full disk refuses it up front
 //! instead of failing halfway.
 
-pub use bedrock::disk::free;
-use bedrock::{disk::label, limits::DISK_MARGIN_BYTES};
+use contracts::limits::DISK_MARGIN_BYTES;
+pub use sharing_client::disk::free;
+use sharing_client::disk::label;
 
 /// Not enough room on the Core's disk for a backup or restore.
 #[derive(Debug, thiserror::Error)]

@@ -1,13 +1,40 @@
-import { handleAccounts } from './accounts'
-import { ApiError, errorResponse, json } from './common/http'
+import { backend } from '@amberite/contracts'
+
+import { accountRoutes } from './accounts'
+import { ApiError, errorResponse, routePath } from './common/http'
+import { noBody, route, serve } from './common/router'
 import type { Env } from './common/types'
-import { handleCores } from './cores'
-import { handleVisibleServers } from './cores/servers'
+import { coreRoutes } from './cores'
+import { devRoutes } from './dev'
 import { handleSharing } from './sharing'
-import { handleSocial } from './social'
-import { handleFriendsSocket } from './social/socket'
+import { socialRoutes } from './social'
 export { CoreSignIn } from './cores/sign-in'
 export { FriendsHub } from './social/socket'
+
+const routes = [
+	route(backend.CheckHealth, noBody, async ({ env }) => {
+		await env.DB.prepare('SELECT 1 FROM users LIMIT 1').first()
+	}),
+	...devRoutes,
+	...coreRoutes,
+]
+
+const labrinthRoutes = [...accountRoutes, ...socialRoutes]
+
+/**
+ * labrinth's routes, under any of the `/v2`, `/v3` and `/_internal` prefixes upstream uses. Any
+ * other `/auth/` route is refused here, so no sign-in falls through to another handler.
+ */
+async function serveLabrinth(request: Request, env: Env): Promise<Response | null> {
+	const path = routePath(request).replace(/^\/_internal(?=\/)/, '')
+	const response = await serve(labrinthRoutes, request, env, path)
+	if (response || !path.startsWith('/auth/')) return response
+	throw new ApiError(
+		501,
+		'unsupported_operation',
+		'This authentication method has not been configured on this backend',
+	)
+}
 
 function corsOrigin(request: Request, env: Env): string | null {
 	const origin = request.headers.get('Origin')
@@ -17,7 +44,8 @@ function corsOrigin(request: Request, env: Env): string | null {
 		try {
 			const parsed = new URL(origin)
 			if (
-				['localhost', '127.0.0.1', '[::1]', 'tauri.localhost'].includes(parsed.hostname) ||
+				['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname) ||
+				parsed.hostname.endsWith('.localhost') ||
 				origin === 'tauri://localhost'
 			)
 				return origin
@@ -34,18 +62,12 @@ export default {
 		let response: Response
 		try {
 			if (request.method === 'OPTIONS') response = new Response(null, { status: 204 })
-			else if (new URL(request.url).pathname === '/health') {
-				await env.DB.prepare('SELECT 1 FROM users LIMIT 1').first()
-				response = json({ status: 'ok' })
-			} else
+			else
 				response =
-					(await handleFriendsSocket(request, env)) ??
-					(await handleVisibleServers(request, env)) ??
 					(await handleSharing(request, env)) ??
-					(await handleCores(request, env)) ??
-					(await handleAccounts(request, env)) ??
-					(await handleSocial(request, env)) ??
-					json({ error: 'not_found', description: 'Not found' }, 404)
+					(await serve(routes, request, env)) ??
+					(await serveLabrinth(request, env)) ??
+					errorResponse(new ApiError(404, 'not_found', 'Not found'))
 		} catch (error) {
 			if (error instanceof ApiError) response = errorResponse(error)
 			else {
@@ -55,7 +77,7 @@ export default {
 					new URL(request.url).pathname,
 					error,
 				)
-				response = json({ error: 'internal_error', description: 'An internal error occurred' }, 500)
+				response = errorResponse(new ApiError(500, 'internal_error', 'An internal error occurred'))
 			}
 		}
 		if (response.status === 101) return response

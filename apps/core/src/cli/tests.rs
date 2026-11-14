@@ -1,23 +1,22 @@
 //! Argument parsing, and one round trip per command group through a real local socket.
 
+use contracts::core::{Channel, CoreRole, Schedule, Weekday};
 use std::sync::Arc;
 
 use clap::{CommandFactory, Parser};
+use contracts::{ApiError, ErrorCode};
 
 use super::{
     Cli, Client, Command, access::AccessCommand, backups::BackupsCommand,
     machine::UpdateCommand, servers::ServersCommand,
 };
 use crate::{
-    access::Access,
-    api::{self, AppState},
+    access::CoreAccess,
+    api::{self, CoreState},
     daemon::{accounts, folders, paths::Paths},
     db,
-    servers::{
-        Servers,
-        restarts::{Schedule, Weekday},
-    },
-    update::{Updater, release::Channel},
+    servers::Servers,
+    update::Updater,
 };
 
 fn parse(args: &str) -> Result<Cli, clap::Error> {
@@ -94,12 +93,11 @@ fn console_text_cannot_drive_the_terminal() {
 
 #[test]
 fn errors_print_as_json_in_cores_shape() {
-    let error: color_eyre::Report =
-        super::client::Refused(crate::api::error::ApiError::new(
-            crate::api::error::ErrorCode::Conflict,
-            "the server is not running",
-        ))
-        .into();
+    let error: color_eyre::Report = super::client::Refused(ApiError::new(
+        ErrorCode::Conflict,
+        "the server is not running",
+    ))
+    .into();
     let json = super::json_for(&error);
     assert_eq!(json["error"], "conflict");
     assert_eq!(json["description"], "the server is not running");
@@ -123,10 +121,11 @@ fn bad_arguments_are_refused() {
 }
 
 /// A Core with no backend serving the router on a local socket in a temporary folder.
-async fn core() -> (tempfile::TempDir, Arc<AppState>, Client) {
+async fn core() -> (tempfile::TempDir, Arc<CoreState>, Client) {
     let dir = tempfile::tempdir().unwrap();
     let paths = Paths::new(dir.path());
     folders::create(&paths, None).unwrap();
+    let engine = crate::daemon::start_engine(&paths, None).await.unwrap();
     let db = db::memory().await;
     let core_id = db::core_id(&db).await.unwrap();
     let keys = crate::access::keys::load(
@@ -139,6 +138,7 @@ async fn core() -> (tempfile::TempDir, Arc<AppState>, Client) {
     let servers = Servers::open(
         paths.clone(),
         db.clone(),
+        Arc::clone(&engine),
         Some(std::net::Ipv4Addr::LOCALHOST.into()),
     )
     .await
@@ -150,20 +150,11 @@ async fn core() -> (tempfile::TempDir, Arc<AppState>, Client) {
     )
     .await
     .unwrap();
-    let content = crate::state::servers::Content::open(
-        paths.clone(),
-        db.clone(),
-        Arc::clone(&servers),
-        Arc::clone(&backups),
-    )
-    .await
-    .unwrap();
-    let state = Arc::new(AppState {
+    let state = Arc::new(CoreState {
         servers,
-        access: Arc::new(Access::new(keys)),
-        content,
+        engine,
+        access: Arc::new(CoreAccess::new(db.clone(), keys)),
         backups,
-        uploads: api::files::Uploads::default(),
         update: Arc::new(Updater::new(
             paths.clone(),
             db.clone(),
@@ -179,6 +170,7 @@ async fn core() -> (tempfile::TempDir, Arc<AppState>, Client) {
             false,
             Arc::new(tokio::sync::Notify::new()),
         )),
+        consoles: Arc::default(),
         db,
     });
     let router = api::router(Arc::clone(&state));
@@ -337,7 +329,7 @@ async fn access_commands_round_trip() {
         AccessCommand::Role {
             server: "survival".into(),
             user: "friend".into(),
-            role: api::access::Role::Editor,
+            role: CoreRole::Editor,
         },
     )
     .await
@@ -411,7 +403,7 @@ impl UnwrapServers for Result<Cli, clap::Error> {
 }
 
 #[tokio::test]
-async fn failed_backups_and_installs_say_why() {
+async fn failed_backups_say_why() {
     let (_dir, state, client) = core().await;
     let server = state.servers.create("Survival").await.unwrap().id;
     let backup = uuid::Uuid::new_v4().to_string();
@@ -446,37 +438,5 @@ async fn failed_backups_and_installs_say_why() {
             .contains("create failed: Core may not read world/level.dat"),
         "{}",
         list.text
-    );
-
-    sqlx::query(
-        "INSERT INTO server_content_sets (id, server_id, name, source_kind, status, \
-         game_version, loader, created, modified, version_number, sha1, error) \
-         VALUES ('set', ?, 'Pack', 'imported_modpack', 'available', '26.3', 'fabric', 0, 0, \
-         '1', 'abc', 'the pack is for Minecraft 26.2')",
-    )
-    .bind(&server)
-    .execute(&state.db)
-    .await
-    .unwrap();
-    sqlx::query(
-        "INSERT INTO server_links (server_id, link_kind) VALUES (?, 'imported_modpack')",
-    )
-    .bind(&server)
-    .execute(&state.db)
-    .await
-    .unwrap();
-    let info = super::servers::run(
-        &client,
-        ServersCommand::Info {
-            server: "survival".into(),
-        },
-    )
-    .await
-    .unwrap();
-    assert!(
-        info.text
-            .contains("last install failed: the pack is for Minecraft 26.2"),
-        "{}",
-        info.text
     );
 }

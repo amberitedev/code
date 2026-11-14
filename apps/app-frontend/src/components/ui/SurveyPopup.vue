@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { NotepadTextIcon, XIcon } from '@modrinth/assets'
 import { Button, defineMessages, injectNotificationManager, useVIntl } from '@modrinth/ui'
-import { type } from '@tauri-apps/plugin-os'
 import { $fetch } from 'ofetch'
 import { onMounted, ref } from 'vue'
 
 import { list } from '@/helpers/instance'
 import { get as getCreds } from '@/helpers/mr_auth.ts'
+import { type } from '@/platform/os'
 
 type Survey = {
 	id: string

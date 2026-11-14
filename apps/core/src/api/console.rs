@@ -1,49 +1,36 @@
 //! `POST /servers/{id}/console`: send one command to a server's console and learn whether Core
-//! passed it on. [`SendCommand`] in, no body out. Editors and up. The console socket takes
-//! commands too, but answers none of them; this route reports why one was refused.
+//! passed it on, or why it was refused. The `/events` socket only reads the console.
 
 use std::sync::Arc;
 
-use axum::{
-    Json,
-    extract::{Path, State},
-    http::StatusCode,
+use axum::extract::State;
+use contracts::{
+    ApiError, Empty, ErrorCode,
+    core::{Action, SendCommand},
+    server::Req,
 };
-use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
-use super::{
-    AppState,
-    activity::Action,
-    error::{ApiError, ErrorCode},
-};
-use crate::access::{Caller, Level, activity};
+use super::CoreState;
+use crate::access::{Caller, Permission, activity};
 
 /// The longest command Core passes on.
 const MAX_COMMAND: usize = 4096;
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-pub struct SendCommand {
-    /// One line, as typed into the server console, such as `say hello`.
-    pub command: String,
-}
-
-/// `POST /servers/{id}/console`.
 pub async fn send(
     caller: Caller,
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
-    Json(request): Json<SendCommand>,
-) -> Result<StatusCode, ApiError> {
-    caller.require(&state.db, &id, Level::Editor).await?;
-    let command = request.command;
+    State(state): State<Arc<CoreState>>,
+    Req { params, body, .. }: Req<SendCommand>,
+) -> Result<Empty, ApiError> {
+    let id = params.id;
+    state.access.require(&caller, &id, Permission::Edit).await?;
+    let command = body.command;
     // A line break would run a second command the activity log never shows.
     if command.trim().is_empty()
         || command.len() > MAX_COMMAND
         || command.contains(['\n', '\r'])
     {
         return Err(ApiError::new(
-            ErrorCode::InvalidRequest,
+            ErrorCode::InvalidInput,
             format!("Send one line of at most {MAX_COMMAND} characters."),
         ));
     }
@@ -55,5 +42,5 @@ pub async fn send(
         Action::ConsoleCommand { command },
     )
     .await;
-    Ok(StatusCode::NO_CONTENT)
+    Ok(Empty)
 }

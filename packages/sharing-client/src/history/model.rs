@@ -6,7 +6,7 @@ use ts_rs::TS;
 
 use crate::diff::{SharedInstanceUpdateDiff, SharedInstanceUpdateDiffType};
 use crate::rules::CONFIG_FILE_TYPE;
-use crate::versions::{ManifestFile, VersionContent};
+use contracts::backend::sharing::{ExternalFile, VersionContent};
 
 /// One push of a share, kept by the App or Core that made it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -25,14 +25,14 @@ pub struct HistoryEntry {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HistoryFile {
     #[serde(flatten)]
-    pub manifest: ManifestFile,
+    pub manifest: ExternalFile,
     /// The key of its copy in the store ([`super::HistoryStore::store_file`]).
     pub blob: String,
 }
 
 impl HistoryEntry {
     /// The version's manifest files.
-    pub fn manifest(&self) -> impl Iterator<Item = &ManifestFile> {
+    pub fn manifest(&self) -> impl Iterator<Item = &ExternalFile> {
         self.files.iter().map(|file| &file.manifest)
     }
 }

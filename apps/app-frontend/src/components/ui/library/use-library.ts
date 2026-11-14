@@ -8,6 +8,7 @@ import { computed, inject, type InjectionKey, provide, type Ref, ref, watch } fr
 import { useRoute, useRouter } from 'vue-router'
 
 import type { InstanceCard } from '@/features/instances/use-instance-actions'
+import { useAppEvent } from '@/composables/use-app-event'
 import { useInstanceMenu } from '@/features/instances/use-instance-menu'
 import { useHiddenInstances } from '@/features/library/hidden-instances/use-hidden-instances'
 import {
@@ -327,6 +328,7 @@ function createLibraryState(instances: Ref<GameInstance[]>) {
 	}
 
 	void refreshGroups()
+	useAppEvent('instance_groups_changed', refreshGroups)
 
 	const linkedProjectIds = computed(() =>
 		[

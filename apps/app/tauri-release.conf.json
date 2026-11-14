@@ -25,7 +25,7 @@
 	},
 	"app": {
 		"security": {
-			"capabilities": ["core", "plugins", "updater"]
+			"capabilities": ["core", "plugins"]
 		}
 	},
 	"plugins": {

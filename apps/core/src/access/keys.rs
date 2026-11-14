@@ -1,6 +1,7 @@
 //! The backend's public ticket keys ([`sharing_storage::keys`]), kept in Core's database.
 
-use sharing_storage::keys::{Persist, PublicKeys};
+use contracts::tickets::PublicKeys;
+use sharing_storage::keys::Persist;
 use sqlx::SqlitePool;
 
 pub type Keys = sharing_storage::keys::Keys<Db>;

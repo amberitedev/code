@@ -1,4 +1,5 @@
-//! The store's routes, which Copal forwards from its own port. Each takes a pool ticket.
+//! The store's routes ([`contracts::store`]), which Copal forwards from its own port. Each takes
+//! a pool ticket.
 
 use std::{
     io::{self, SeekFrom},
@@ -7,9 +8,9 @@ use std::{
 };
 
 use axum::{
-    Json, Router,
+    Router,
     body::Body,
-    extract::{ConnectInfo, Path, State},
+    extract::{ConnectInfo, State},
     http::{
         Extensions, HeaderMap, StatusCode,
         header::{
@@ -18,36 +19,48 @@ use axum::{
         },
     },
     response::{IntoResponse, Response},
-    routing::{get, post},
 };
-use bytes::Bytes;
+use contracts::{
+    ApiError, ErrorCode, Hash, Json,
+    server::{Req, route},
+    store::{
+        GetObject, ListVersion, MissingObjects, ObjectHashes, PullVersion,
+        PulledVersion, UploadStatus, UploadVersion, UploadedVersion,
+        VersionHash, VersionList, VersionObject,
+    },
+    tickets::{FetchTicket, PullTicket, StoreTicket, Ticket},
+};
 use futures::{StreamExt, TryStreamExt};
-use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio_util::io::{ReaderStream, StreamReader};
 
 use crate::{
-    Code, Store, StoreError, now,
-    objects::{self, Hash, VersionList, WriteError},
-    pull, tar,
-    tickets::{self, Claims},
+    Store, io_error, now,
+    objects::{self, ListExt, WriteError},
+    pull, tar, tickets,
 };
 
 pub(crate) fn router(store: Arc<Store>) -> Router {
-    Router::new()
-        .route("/store/versions/{root}", get(list).post(upload))
-        .route("/store/versions/{root}/have", post(have))
-        .route("/store/versions/{root}/objects/{object}", get(object))
-        .route("/store/versions/{root}/pull", post(pull_version))
-        .with_state(store)
+    [
+        route::<ListVersion, _, _, _>(list),
+        route::<UploadVersion, _, _, _>(upload),
+        route::<MissingObjects, _, _, _>(have),
+        route::<GetObject, _, _, _>(object),
+        route::<PullVersion, _, _, _>(pull_version),
+    ]
+    .into_iter()
+    .fold(Router::new(), |router, (path, method)| {
+        router.route(path, method)
+    })
+    .with_state(store)
 }
 
-fn invalid(description: impl Into<String>) -> StoreError {
-    StoreError::new(Code::InvalidRequest, description)
+fn invalid(description: impl Into<String>) -> ApiError {
+    ApiError::new(ErrorCode::InvalidInput, description)
 }
 
-fn not_found(description: &str) -> StoreError {
-    StoreError::new(Code::NotFound, description)
+fn not_found(description: &str) -> ApiError {
+    ApiError::new(ErrorCode::NotFound, description)
 }
 
 fn bearer(headers: &HeaderMap) -> Option<&str> {
@@ -58,22 +71,16 @@ fn bearer(headers: &HeaderMap) -> Option<&str> {
         .strip_prefix("Bearer ")
 }
 
-fn root_of(text: &str) -> Result<Hash, StoreError> {
-    Hash::parse(text).ok_or_else(|| not_found("There is no such version."))
-}
-
 impl Store {
-    async fn ticket(
+    async fn ticket<T: Ticket>(
         &self,
         headers: &HeaderMap,
-        kind: &'static str,
         root: &Hash,
-    ) -> Result<Claims, StoreError> {
+    ) -> Result<T, ApiError> {
         let ticket = bearer(headers).ok_or_else(|| {
-            StoreError::new(Code::TicketInvalid, "This needs a ticket.")
+            ApiError::new(ErrorCode::TicketInvalid, "This needs a ticket.")
         })?;
-        tickets::verify(&self.keys, ticket, &self.core_id, kind, root, now())
-            .await
+        tickets::verify(&self.keys, ticket, &self.core_id, root, now()).await
     }
 
     /// The fetch ticket for `root`. Only a refused ticket counts against its address's rate, so
@@ -85,7 +92,7 @@ impl Store {
         headers: &HeaderMap,
         extensions: &Extensions,
         root: &Hash,
-    ) -> Result<Claims, StoreError> {
+    ) -> Result<FetchTicket, ApiError> {
         let address = headers
             .get("x-forwarded-for")
             .and_then(|value| value.to_str().ok())
@@ -98,59 +105,44 @@ impl Store {
             })
             .unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST));
         if self.limits.limited(address) {
-            return Err(StoreError::new(
-                Code::RateLimited,
+            return Err(ApiError::new(
+                ErrorCode::RateLimited,
                 "Too many refused requests from this address. Wait a minute.",
             ));
         }
-        self.ticket(headers, tickets::FETCH, root)
+        self.ticket(headers, root)
             .await
             .inspect_err(|_| self.limits.refused(address))
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct Have {
-    objects: Vec<Hash>,
-}
-
-#[derive(Debug, Serialize)]
-struct HaveAnswer {
-    missing: Vec<Hash>,
-    complete: bool,
-}
-
-/// `POST /store/versions/{root}/have`: which of these objects the store lacks.
 async fn have(
     State(store): State<Arc<Store>>,
-    Path(root): Path<String>,
     headers: HeaderMap,
-    body: Bytes,
-) -> Result<Json<HaveAnswer>, StoreError> {
-    let root = root_of(&root)?;
-    store.ticket(&headers, tickets::STORE, &root).await?;
-    let Have { objects } = serde_json::from_slice(&body)
-        .map_err(|_| invalid("Send { objects: [hash...] }."))?;
+    request: Req<MissingObjects>,
+) -> Result<Json<UploadStatus>, ApiError> {
+    let Req {
+        params: VersionHash { root },
+        body: ObjectHashes { objects },
+        ..
+    } = request;
+    store.ticket::<StoreTicket>(&headers, &root).await?;
     let mut missing = Vec::new();
     for hash in objects {
-        if !tokio::fs::try_exists(store.layout.object(&hash)).await? {
+        if !tokio::fs::try_exists(store.layout.object(&hash))
+            .await
+            .map_err(io_error)?
+        {
             missing.push(hash);
         }
     }
-    Ok(Json(HaveAnswer {
+    Ok(Json(UploadStatus {
         missing,
         complete: store.is_stored(&root),
     }))
 }
 
-#[derive(Debug, Serialize)]
-struct Uploaded {
-    complete: bool,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    missing: Vec<Hash>,
-}
-
-fn bad_tar(error: io::Error) -> StoreError {
+fn bad_tar(error: io::Error) -> ApiError {
     if error.kind() == io::ErrorKind::InvalidData {
         invalid(error.to_string())
     } else {
@@ -158,18 +150,19 @@ fn bad_tar(error: io::Error) -> StoreError {
     }
 }
 
-/// `POST /store/versions/{root}`: a tar of `version.json` and then objects. What arrives is
-/// kept even when the upload breaks off, so a retry sends only the rest.
 async fn upload(
     State(store): State<Arc<Store>>,
-    Path(root): Path<String>,
     headers: HeaderMap,
-    body: Body,
-) -> Result<Json<Uploaded>, StoreError> {
-    let root = root_of(&root)?;
-    let claims = store.ticket(&headers, tickets::STORE, &root).await?;
+    request: Req<UploadVersion>,
+) -> Result<Json<UploadedVersion>, ApiError> {
+    let Req {
+        params: VersionHash { root },
+        body,
+        ..
+    } = request;
+    let claims: StoreTicket = store.ticket(&headers, &root).await?;
     if store.is_stored(&root) {
-        return Ok(Json(Uploaded {
+        return Ok(Json(UploadedVersion {
             complete: true,
             missing: Vec::new(),
         }));
@@ -181,14 +174,14 @@ async fn upload(
     let first = first
         .filter(|entry| entry.name == "version.json")
         .ok_or_else(|| invalid("The upload must start with version.json."))?;
-    if first.size > bedrock::limits::MAX_VERSION_LIST_BYTES {
+    if first.size > contracts::limits::MAX_VERSION_LIST_BYTES {
         return Err(invalid("version.json is too large."));
     }
     let mut json = Vec::new();
     tar.body().read_to_end(&mut json).await.map_err(bad_tar)?;
     let list: VersionList = serde_json::from_slice(&json)
         .map_err(|_| invalid("version.json is unreadable."))?;
-    store.begin(&root, list.clone(), claims.bytes).await?;
+    store.begin(&root, list.clone(), Some(claims.bytes)).await?;
     while let Some(entry) = tar.next().await.map_err(bad_tar)? {
         let hash = Hash::parse(&entry.name).ok_or_else(|| {
             invalid("Every entry after version.json is named by its hash.")
@@ -201,31 +194,33 @@ async fn upload(
                 "An object is not the size its version lists.",
             ));
         }
-        if tokio::fs::try_exists(store.layout.object(&hash)).await? {
+        if tokio::fs::try_exists(store.layout.object(&hash))
+            .await
+            .map_err(io_error)?
+        {
             continue;
         }
         objects::write_object(&store.layout, &hash, size, tar.body())
             .await
             .map_err(|error| match error {
                 WriteError::Mismatch(description) => invalid(description),
-                WriteError::Io(error) => error.into(),
+                WriteError::Io(error) => io_error(error),
             })?;
     }
     let missing = store.finish(&root).await?;
-    Ok(Json(Uploaded {
+    Ok(Json(UploadedVersion {
         complete: missing.is_empty(),
         missing,
     }))
 }
 
-/// `GET /store/versions/{root}`: the version's list.
 async fn list(
     State(store): State<Arc<Store>>,
-    Path(root): Path<String>,
     headers: HeaderMap,
     extensions: Extensions,
-) -> Result<Json<VersionList>, StoreError> {
-    let root = root_of(&root)?;
+    request: Req<ListVersion>,
+) -> Result<Json<VersionList>, ApiError> {
+    let VersionHash { root } = request.params;
     store.fetch_ticket(&headers, &extensions, &root).await?;
     let list = store
         .index()
@@ -244,32 +239,29 @@ fn range_start(headers: &HeaderMap) -> Option<u64> {
         .ok()
 }
 
-/// `GET /store/versions/{root}/objects/{object}`: one object's bytes, counted against the day's
-/// egress as they go.
 async fn object(
     State(store): State<Arc<Store>>,
-    Path((root, object)): Path<(String, String)>,
     headers: HeaderMap,
     extensions: Extensions,
-) -> Result<Response, StoreError> {
-    let root = root_of(&root)?;
+    request: Req<GetObject>,
+) -> Result<Response, ApiError> {
+    let VersionObject { root, object } = request.params;
     store.fetch_ticket(&headers, &extensions, &root).await?;
     let slot = store.limits.fetch_slot().ok_or_else(|| {
-        StoreError::new(
-            Code::RateLimited,
+        ApiError::new(
+            ErrorCode::RateLimited,
             "This Core is serving as many downloads as it can. Try again shortly.",
         )
     })?;
     let not_held = || not_found("That object is not in this version.");
-    let object = Hash::parse(&object).ok_or_else(not_held)?;
     let list = store
         .index()
         .servable(&root)
         .ok_or_else(|| not_found("This Core does not hold that version."))?;
     list.size_of(&object).ok_or_else(not_held)?;
     if store.limits.egress_today() >= store.caps().egress_cap {
-        return Err(StoreError::new(
-            Code::EgressSpent,
+        return Err(ApiError::new(
+            ErrorCode::EgressSpent,
             "This Core has sent all it may today.",
         ));
     }
@@ -278,9 +270,9 @@ async fn object(
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 return Err(not_held());
             }
-            file => file?,
+            file => file.map_err(io_error)?,
         };
-    let len = file.metadata().await?.len();
+    let len = file.metadata().await.map_err(io_error)?.len();
     let from = range_start(&headers);
     if from.is_some_and(|from| from >= len) {
         let mut refused =
@@ -293,7 +285,7 @@ async fn object(
         return Ok(refused);
     }
     let start = from.unwrap_or(0);
-    file.seek(SeekFrom::Start(start)).await?;
+    file.seek(SeekFrom::Start(start)).await.map_err(io_error)?;
     let counter = Arc::clone(&store);
     let stream =
         ReaderStream::new(file.take(len - start)).inspect(move |chunk| {
@@ -317,30 +309,24 @@ async fn object(
         .expect("a valid response"))
 }
 
-#[derive(Debug, Serialize)]
-struct Pulled {
-    complete: bool,
-}
-
-/// `POST /store/versions/{root}/pull`: copy the version from the Core the ticket names.
 async fn pull_version(
     State(store): State<Arc<Store>>,
-    Path(root): Path<String>,
     headers: HeaderMap,
-) -> Result<Json<Pulled>, StoreError> {
-    let root = root_of(&root)?;
-    let claims = store.ticket(&headers, tickets::PULL, &root).await?;
+    request: Req<PullVersion>,
+) -> Result<Json<PulledVersion>, ApiError> {
+    let VersionHash { root } = request.params;
+    let claims: PullTicket = store.ticket(&headers, &root).await?;
     if store.is_stored(&root) {
-        return Ok(Json(Pulled { complete: true }));
+        return Ok(Json(PulledVersion { complete: true }));
     }
-    let source = claims.source.expect("verify requires it on pull tickets");
-    let complete = pull::pull(&store, &root, &source).await?;
-    Ok(Json(Pulled { complete }))
+    let complete = pull::pull(&store, &root, &claims.source).await?;
+    Ok(Json(PulledVersion { complete }))
 }
 
 #[cfg(test)]
 pub mod tests {
     use axum::http::{Method, Request};
+    use contracts::backend::cores::HeldVersion;
     use http_body_util::BodyExt;
     use serde_json::{Value, json};
     use sha2::{Digest, Sha256};
@@ -349,7 +335,7 @@ pub mod tests {
     use super::*;
     use crate::{
         keys::{Keys, test_support::Signer},
-        local::{Caps, HeldVersion},
+        local::Caps,
         objects::{GRACE_S, Layout, list_of},
         tar::test_support::tar,
         tickets::test_support::ticket,
@@ -398,7 +384,7 @@ pub mod tests {
                 &self.signer,
                 kind,
                 json!([self.core]),
-                root.as_str(),
+                &root.to_string(),
                 now(),
                 extra,
             )
@@ -465,7 +451,7 @@ pub mod tests {
             let json = serde_json::to_vec(list).unwrap();
             let names: Vec<String> = objects
                 .iter()
-                .map(|data| Hash::of_digest(&Sha256::digest(data)).to_string())
+                .map(|data| Hash(Sha256::digest(data).into()).to_string())
                 .collect();
             let mut entries: Vec<(&str, &[u8])> = vec![("version.json", &json)];
             entries.extend(
@@ -561,7 +547,7 @@ pub mod tests {
         let (status, error) =
             f.json(Method::POST, &uri, &ticket, Body::from(body)).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
-        assert_eq!(error["error"], "invalid_request");
+        assert_eq!(error["error"], "invalid_input");
         let folder = f.store.layout.object(&list.objects[0].hash);
         assert!(!folder.exists());
         assert_eq!(
@@ -654,7 +640,7 @@ pub mod tests {
             &f.signer,
             "fetch",
             json!(["core"]),
-            root.as_str(),
+            &root.to_string(),
             now() - 7200,
             json!({}),
         );
@@ -663,7 +649,7 @@ pub mod tests {
             &f.signer,
             "fetch",
             json!(["other"]),
-            root.as_str(),
+            &root.to_string(),
             now(),
             json!({}),
         );
@@ -714,7 +700,7 @@ pub mod tests {
             .await
             .unwrap();
         assert_eq!(f.store.status().unwrap().versions.len(), 1);
-        let gone = list_of(&[b"gone"]).objects[0].hash.clone();
+        let gone = list_of(&[b"gone"]).objects[0].hash;
         let uri = format!("/store/versions/{root}/objects/{gone}");
         let fetch = f.ticket("fetch", &root, json!({}));
         let (code, ..) =

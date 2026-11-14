@@ -1,16 +1,21 @@
+import * as NodeChildProcess from 'node:child_process'
+import * as NodeFS from 'node:fs'
+import * as NodeOS from 'node:os'
+import * as NodePath from 'node:path'
 import { describe, expect, it } from 'vite-plus/test'
 
 import {
-	bridgeUrlFromLine,
 	createProcessSpecs,
 	createRuntimeEnvironment,
 	findFirstAvailableOffset,
 	isBrowserAllowedPort,
 	parseInput,
 	portsForOffset,
+	prepareCheckoutCrates,
 	processLabelsForMode,
 	programKey,
 	resolveStartOffset,
+	scenarioTabUrl,
 	scenarioUsername,
 } from './dev-runner.ts'
 
@@ -214,8 +219,12 @@ describe('dev runner scenarios', () => {
 		const specs = createProcessSpecs({
 			accountWeb: true,
 			branch: 'feature',
-			env: {},
+			env: { MODRINTH_API_URL: 'https://api.example/v2/' },
 			hideWindows: true,
+			localAddresses: new Map([
+				[1, { port: 50001, secret: 'one' }],
+				[3, { port: 50003, secret: 'three' }],
+			]),
 			mode: 'dev',
 			paths,
 			ports: portsForOffset(0),
@@ -240,14 +249,17 @@ describe('dev runner scenarios', () => {
 			})
 			expect(JSON.stringify(app.build)).not.toContain('1420')
 			expect(app.build?.inputs).toEqual(
-				expect.arrayContaining(['Cargo.lock', 'apps/app', 'packages/browser-bridge']),
+				expect.arrayContaining(['Cargo.lock', 'apps/app', 'packages/engine']),
 			)
 		}
 		expect(apps[0]!.build).toEqual(apps[1]!.build)
+		const core = specs.find((spec) => spec.label === 'core')?.build
 		// Core compiles this crate from outside its own folder.
-		expect(specs.find((spec) => spec.label === 'core')?.build?.inputs).toEqual(
+		expect(core?.inputs).toEqual(
 			expect.arrayContaining(['apps/core', 'Cargo.lock', 'packages/minecraft-meta-manifest']),
 		)
+		expect(core?.env).toEqual({ MODRINTH_API_URL: 'https://api.example/v2/' })
+		expect(core?.ignoredInputs).toEqual(apps[0]!.build?.ignoredInputs)
 		const cwd = process.cwd().replaceAll('\\', '/')
 		expect(apps.map((spec) => spec.env.THESEUS_CONFIG_DIR?.replaceAll('\\', '/'))).toEqual([
 			`${cwd}/.data/scenarios/1`,
@@ -256,6 +268,11 @@ describe('dev runner scenarios', () => {
 		expect(apps.map((spec) => JSON.parse(spec.args.at(-1)!).username)).toEqual([
 			'scenario_1',
 			'scenario_3',
+		])
+		// `rs` restarts an App from this spec, so it keeps its local address.
+		expect(apps.map((spec) => JSON.parse(spec.args.at(-1)!))).toMatchObject([
+			{ localPort: 50001, localSecret: 'one' },
+			{ localPort: 50003, localSecret: 'three' },
 		])
 	})
 })
@@ -280,15 +297,89 @@ describe('dev runner program cache', () => {
 		expect(programKey(process.cwd(), { ...build, env: { TAURI_CONFIG: '{}' } })).not.toBe(key)
 		expect(programKey(process.cwd(), { ...build, cargoArgs: ['build', '--release'] })).not.toBe(key)
 	})
+
+	it('trusts shared output per build, and a crate tests only where they were compiled', () => {
+		const scratch = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), 'dev-runner-'))
+		const library = (checkout: string) => NodePath.join(checkout, 'packages', 'a', 'src', 'lib.rs')
+		const checkout = (name: string) => {
+			const dir = NodePath.join(scratch, name)
+			for (const crate of ['app', 'a']) {
+				NodeFS.mkdirSync(NodePath.join(dir, 'packages', crate, 'src'), { recursive: true })
+				NodeFS.writeFileSync(NodePath.join(dir, 'packages', crate, 'Cargo.toml'), crate)
+			}
+			NodeFS.writeFileSync(NodePath.join(dir, 'packages', 'app', 'src', 'main.rs'), 'fn main() {}')
+			NodeFS.writeFileSync(library(dir), 'pub fn a() {}')
+			NodeFS.writeFileSync(NodePath.join(dir, 'Cargo.lock'), 'lock')
+			NodeChildProcess.execFileSync('git', ['init', '-q'], { cwd: dir })
+			return dir
+		}
+		const shared = {
+			cacheDir: NodePath.join(scratch, 'target', 'dev-bin'),
+			cargoArgs: [],
+			cwd: scratch,
+			env: {},
+			ignoredInputs: [],
+			targetDir: NodePath.join(scratch, 'target'),
+		}
+		const program = {
+			...shared,
+			inputs: ['Cargo.lock', 'packages/app', 'packages/a'],
+			program: 'app',
+		}
+		const tests = {
+			...shared,
+			inputs: ['Cargo.lock', 'packages/a'],
+			programInputs: {},
+			tested: ['packages/a'],
+		}
+		const both = {
+			...tests,
+			inputs: program.inputs,
+			programInputs: { 'packages/app': program.inputs },
+			tested: ['packages/a', 'packages/app'],
+		}
+		/** How many crates the build compiles, recorded as if it succeeded. */
+		const compiles = (worktree: string, build: typeof program | typeof tests) => {
+			const prepared = prepareCheckoutCrates(worktree, build)
+			prepared.recordBuilt()
+			return prepared.changed
+		}
+		try {
+			const here = checkout('here')
+			const there = checkout('there')
+			expect(compiles(here, program)).toBe(2)
+			expect(compiles(here, tests)).toBe(1)
+			// The tests compiled the content the program was compiled from.
+			expect(compiles(here, program)).toBe(0)
+			expect(NodeFS.statSync(library(here)).mtime.getUTCFullYear()).toBe(2000)
+			expect(compiles(here, tests)).toBe(0)
+			// Same content elsewhere: the program serves it, but the tests hold this checkout's path.
+			expect(compiles(there, program)).toBe(0)
+			expect(compiles(there, tests)).toBe(1)
+			expect(NodeFS.statSync(library(there)).mtime.getUTCFullYear()).not.toBe(2000)
+			expect(compiles(here, tests)).toBe(1)
+			expect(compiles(here, program)).toBe(0)
+			NodeFS.writeFileSync(library(there), 'pub fn b() {}')
+			expect(compiles(there, tests)).toBe(1)
+			expect(compiles(here, program)).toBe(1)
+			expect(compiles(here, tests)).toBe(1)
+			// A program's own crate hashes with the program's loose inputs in its tests too.
+			expect(compiles(here, both)).toBe(2)
+			expect(compiles(here, tests)).toBe(0)
+			expect(compiles(here, program)).toBe(0)
+			// Compiling a crate's tests elsewhere ends every test run's trust in them here.
+			expect(compiles(there, both)).toBe(2)
+			expect(compiles(here, tests)).toBe(1)
+		} finally {
+			NodeFS.rmSync(scratch, { force: true, recursive: true })
+		}
+	})
 })
 
-describe('dev runner readiness', () => {
-	it('reads the browser bridge URL from the line the App prints', () => {
-		expect(
-			bridgeUrlFromLine(
-				'2026-10-11T15:33:26.147268Z  INFO browser_bridge: Amberite browser bridge ready url=http://127.0.0.1:64463',
-			),
-		).toBe('http://127.0.0.1:64463')
-		expect(bridgeUrlFromLine('Browser bridge Vite WebSocket proxy failed')).toBeUndefined()
+describe('dev runner tab URL', () => {
+	it("carries the App's local API base on the tab URL", () => {
+		expect(scenarioTabUrl(2, 1420, { port: 50001, secret: 'ab12' })).toBe(
+			'http://scenario-2.localhost:1420/#local=http%3A%2F%2F127.0.0.1%3A50001%2Fab12',
+		)
 	})
 })

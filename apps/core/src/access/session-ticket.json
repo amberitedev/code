@@ -1,0 +1,14 @@
+{
+	"keys": {
+		"keys": [
+			{
+				"crv": "Ed25519",
+				"x": "NJJDoQIRhK5YQLe77lyKV4nCeof13B5rcp5vnJnaVss",
+				"kty": "OKP",
+				"kid": "test-key"
+			}
+		]
+	},
+	"ticket": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCIsImtpZCI6InRlc3Qta2V5In0.eyJpc3MiOiJhbWJlcml0ZSIsImtpbmQiOiJzZXNzaW9uIiwic3ViIjoib3duZXIiLCJuYW1lIjoib3duZXIiLCJhdmF0YXJfdXJsIjpudWxsLCJhdWQiOiJjb3JlIiwiaWF0IjoxNzk0NDIyODg4LCJleHAiOjE3OTQ0MjMxODgsImp0aSI6ImdxdjN1bTFqZzFYNHFnaFNwbXUwcjFXQjFldmFhYXltIn0.AmVKrL3x4b1C_gv3seol2xQUZu5ehcxEKC_qGfLVnYZO5b3WJN3uj8uVfL2MKi1Q9HUd3nrS8jPv_AQxWKReDA",
+	"issued_at": 1794422888
+}

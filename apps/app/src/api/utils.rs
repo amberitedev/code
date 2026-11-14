@@ -1,229 +1,12 @@
-use serde::{Deserialize, Serialize};
+use engine::emit_warning;
 use tauri::{Manager, Runtime};
-use tauri_plugin_opener::OpenerExt;
-use theseus::{
-    emit_warning, handler,
-    prelude::{CommandPayload, DirectoryInfo, app_db_backup_dir},
-};
+use tokio::sync::broadcast;
 
-use crate::api::Result;
-use crate::api::oauth_utils::auth_code_reply::{
+use crate::accounts::oauth_utils::auth_code_reply::{
     normalize_deep_link_command, parse_auth_deeplink, submit_deeplink,
 };
-use dashmap::DashMap;
-use std::path::{Path, PathBuf};
-use theseus::prelude::canonicalize;
-use tokio_util::sync::CancellationToken;
-use url::Url;
-
-#[derive(Default)]
-pub struct DebugInfoExports(DashMap<(String, String), CancellationToken>);
-
-pub fn init<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
-    tauri::plugin::Builder::new("utils")
-        .setup(|app, _| {
-            app.manage(DebugInfoExports::default());
-            Ok(())
-        })
-        .on_event(|app, event| {
-            if let tauri::RunEvent::WindowEvent {
-                label,
-                event: tauri::WindowEvent::Destroyed,
-                ..
-            } = event
-            {
-                for export in &app.state::<DebugInfoExports>().0 {
-                    if &export.key().0 == label {
-                        export.value().cancel();
-                    }
-                }
-            }
-        })
-        .invoke_handler(tauri::generate_handler![
-            get_os,
-            is_network_metered,
-            should_disable_mouseover,
-            highlight_in_folder,
-            open_path,
-            show_launcher_logs_folder,
-            show_app_db_backups_folder,
-            export_debug_info,
-            cancel_debug_info_export,
-            progress_bars_list,
-            get_opening_command,
-            super::thumbnails::get_image_thumbnail,
-            cache_remote_icon,
-        ])
-        .build()
-}
-
-#[tauri::command]
-pub async fn cache_remote_icon(source: &str) -> Result<String> {
-    let path = theseus::instance::cache_remote_icon(source).await?;
-    Ok(tauri_convert_file_src(&path)?.to_string())
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(clippy::enum_variant_names)]
-pub enum OS {
-    Windows,
-    Linux,
-    MacOS,
-}
-
-/// Gets OS
-#[tauri::command]
-pub fn get_os() -> OS {
-    #[cfg(target_os = "windows")]
-    let os = OS::Windows;
-    #[cfg(target_os = "linux")]
-    let os = OS::Linux;
-    #[cfg(target_os = "macos")]
-    let os = OS::MacOS;
-    os
-}
-
-#[tauri::command]
-pub async fn is_network_metered() -> Result<bool> {
-    Ok(theseus::prelude::is_network_metered().await?)
-}
-
-// Lists active progress bars
-// Create a new HashMap with the same keys
-// Values provided should not be used directly, as they are not guaranteed to be up-to-date
-#[tauri::command]
-pub async fn progress_bars_list()
--> Result<DashMap<uuid::Uuid, theseus::LoadingBar>> {
-    let res = theseus::EventState::list_progress_bars().await?;
-    Ok(res)
-}
-
-// disables mouseover and fixes a random crash error only fixed by recent versions of macos
-#[tauri::command]
-pub async fn should_disable_mouseover() -> bool {
-    if cfg!(target_os = "macos") {
-        // We try to match version to 12.2 or higher. If unrecognizable to pattern or lower, we default to the css with disabled mouseover for safety
-        if let tauri_plugin_os::Version::Semantic(major, minor, _) =
-            tauri_plugin_os::version()
-            && major >= 12
-            && minor >= 3
-        {
-            // Mac os version is 12.3 or higher, we allow mouseover
-            return false;
-        }
-        true
-    } else {
-        // Not macos, we allow mouseover
-        false
-    }
-}
-
-#[tauri::command]
-pub async fn highlight_in_folder<R: Runtime>(
-    app: tauri::AppHandle<R>,
-    path: PathBuf,
-) {
-    tauri::async_runtime::spawn_blocking(move || {
-        if let Err(e) = app.opener().reveal_item_in_dir(path) {
-            tracing::error!("Failed to highlight file in folder: {}", e);
-        }
-    })
-    .await
-    .ok();
-}
-
-#[tauri::command]
-pub async fn open_path<R: Runtime>(app: tauri::AppHandle<R>, path: PathBuf) {
-    tauri::async_runtime::spawn_blocking(move || {
-        if let Err(e) =
-            app.opener().open_path(path.to_string_lossy(), None::<&str>)
-        {
-            tracing::error!("Failed to open path: {}", e);
-        }
-    })
-    .await
-    .ok();
-}
-
-#[tauri::command]
-pub async fn show_launcher_logs_folder<R: Runtime>(app: tauri::AppHandle<R>) {
-    if let Some(d) = DirectoryInfo::global_handle_if_ready() {
-        let path = d.launcher_logs_dir().unwrap_or_default();
-        // failure to get folder just opens filesystem
-        // (ie: if in debug mode only and launcher_logs never created)
-        open_path(app, path).await;
-    }
-}
-
-#[tauri::command]
-pub async fn show_app_db_backups_folder<R: Runtime>(
-    app: tauri::AppHandle<R>,
-) -> Result<()> {
-    let path = app_db_backup_dir()?;
-    tokio::fs::create_dir_all(&path).await?;
-    open_path(app, path).await;
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn export_debug_info<R: Runtime>(
-    window: tauri::Window<R>,
-    state: tauri::State<'_, DebugInfoExports>,
-    id: String,
-    path: PathBuf,
-    on_progress: tauri::ipc::Channel<
-        theseus::debug_info::DebugInfoExportProgress,
-    >,
-) -> Result<bool> {
-    let key = (window.label().to_string(), id);
-    let cancel = CancellationToken::new();
-    match state.0.entry(key.clone()) {
-        dashmap::mapref::entry::Entry::Vacant(entry) => {
-            entry.insert(cancel.clone());
-        }
-        dashmap::mapref::entry::Entry::Occupied(_) => {
-            return Err(std::io::Error::other(
-                "Debug info export is already running",
-            )
-            .into());
-        }
-    }
-    let result =
-        theseus::debug_info::export_debug_info(path, cancel, move |progress| {
-            let _ = on_progress.send(progress);
-        })
-        .await;
-    state.0.remove(&key);
-    Ok(result?)
-}
-
-#[tauri::command]
-pub fn cancel_debug_info_export<R: Runtime>(
-    window: tauri::Window<R>,
-    state: tauri::State<'_, DebugInfoExports>,
-    id: String,
-) {
-    if let Some(cancel) = state.0.get(&(window.label().to_string(), id)) {
-        cancel.cancel();
-    }
-}
-
-/// Amberite's own deep links, next to the Modrinth ones app-lib parses. The frontend handles both
-/// in `handleCommand`, told apart by `event`.
-#[derive(Debug, Clone, Serialize)]
-#[serde(tag = "event")]
-pub enum AmberiteCommand {
-    /// `amberite://approve/<code>`: open "Add Core" with the code a Core is showing filled in.
-    ApproveCore { code: String },
-}
-
-/// What the App was opened with: a Modrinth link or file, or an Amberite link.
-#[derive(Clone, Serialize)]
-#[serde(untagged)]
-pub enum OpeningCommand {
-    Modrinth(CommandPayload),
-    Amberite(AmberiteCommand),
-}
+use crate::api::Result;
+use crate::server::events::{AmberiteCommand, AppEvent, Command};
 
 /// The Amberite command behind a deep link, or `None` for anything else.
 fn amberite_command(command: &str) -> Option<AmberiteCommand> {
@@ -238,12 +21,15 @@ fn amberite_command(command: &str) -> Option<AmberiteCommand> {
     })
 }
 
-async fn parse_opening_command(command: &str) -> Result<OpeningCommand> {
+async fn parse_opening_command(
+    events: &engine::EventSink,
+    command: &str,
+) -> engine::Result<Command> {
     if let Some(command) = amberite_command(command) {
-        return Ok(OpeningCommand::Amberite(command));
+        return Ok(Command::Amberite(command));
     }
-    Ok(OpeningCommand::Modrinth(
-        handler::parse_command(command).await?,
+    Ok(Command::Modrinth(
+        crate::desktop::deep_links::parse_command(events, command).await?,
     ))
 }
 
@@ -251,40 +37,43 @@ async fn parse_opening_command(command: &str) -> Result<OpeningCommand> {
 // For example, if a user clicks on an .mrpack to open the app.
 // This should be called once and only when the app is done booting up and ready to receive a command
 // Returns a Command struct- see events.js
-#[tauri::command]
 #[cfg(target_os = "macos")]
 pub async fn get_opening_command(
-    state: tauri::State<'_, crate::macos::deep_link::InitialPayload>,
-) -> Result<Option<OpeningCommand>> {
+    app: &tauri::AppHandle,
+) -> engine::Result<Option<Command>> {
     if crate::dev::config().is_some() {
         return Ok(None);
     }
+    let state = crate::macos::deep_link::get_or_init_payload(app);
+    let events = app.state::<engine::EventSink>();
     let payload = state.payload.lock().await;
     let cmd_arg = std::env::args_os()
         .nth(1)
         .map(|path| path.to_string_lossy().to_string());
 
     return if let Some(payload) = payload.as_ref() {
-        opening_command(payload).await
+        opening_command(&events, payload).await
     } else if let Some(cmd_arg) = cmd_arg {
-        opening_command(&cmd_arg).await
+        opening_command(&events, &cmd_arg).await
     } else {
         Ok(None)
     };
 }
 
-#[tauri::command]
 #[cfg(not(target_os = "macos"))]
-pub async fn get_opening_command() -> Result<Option<OpeningCommand>> {
+pub async fn get_opening_command(
+    app: &tauri::AppHandle,
+) -> engine::Result<Option<Command>> {
     if crate::dev::config().is_some() {
         return Ok(None);
     }
+    let events = app.state::<engine::EventSink>();
     // Tauri is not CLI, we use arguments as path to file to call
     let cmd_arg = std::env::args_os().nth(1);
 
     let cmd_arg = cmd_arg.map(|path| path.to_string_lossy().to_string());
     if let Some(cmd) = cmd_arg {
-        return opening_command(&cmd).await;
+        return opening_command(&events, &cmd).await;
     }
     Ok(None)
 }
@@ -295,35 +84,46 @@ pub async fn handle_command<R: Runtime>(
     app: tauri::AppHandle<R>,
     command: String,
 ) -> Result<()> {
+    let events = app.state::<engine::EventSink>();
     let command = normalize_deep_link_command(&command);
-    if accept_auth_deeplink(&command).await {
+    if accept_auth_deeplink(&events, &command).await {
         return Ok(());
     }
 
     tracing::info!("handle command: {command}");
-    // Amberite's own links go straight to the frontend; app-lib only knows the Modrinth ones.
+    // Amberite's own links go straight to the frontend; the engine only knows the Modrinth ones.
     if let Some(command) = amberite_command(&command) {
-        use tauri::Emitter;
-        app.emit("amberite-command", command)?;
+        let _ = app
+            .state::<broadcast::Sender<AppEvent>>()
+            .send(AppEvent::Command(Command::Amberite(command)));
         if let Some(window) = app.get_window("main") {
             let _ = window.set_focus();
         }
         return Ok(());
     }
-    Ok(theseus::handler::parse_and_emit_command(&command).await?)
+    Ok(
+        crate::desktop::deep_links::parse_and_emit_command(&events, &command)
+            .await?,
+    )
 }
 
-async fn opening_command(command: &str) -> Result<Option<OpeningCommand>> {
+async fn opening_command(
+    events: &engine::EventSink,
+    command: &str,
+) -> engine::Result<Option<Command>> {
     let command = normalize_deep_link_command(command);
-    if accept_auth_deeplink(&command).await {
+    if accept_auth_deeplink(events, &command).await {
         return Ok(None);
     }
 
     tracing::info!("opening command {command}");
-    Ok(Some(parse_opening_command(&command).await?))
+    Ok(Some(parse_opening_command(events, &command).await?))
 }
 
-async fn accept_auth_deeplink(command: &str) -> bool {
+async fn accept_auth_deeplink(
+    events: &engine::EventSink,
+    command: &str,
+) -> bool {
     let Some((code, nonce)) = parse_auth_deeplink(command) else {
         return false;
     };
@@ -331,23 +131,9 @@ async fn accept_auth_deeplink(command: &str) -> bool {
     tracing::info!("Handling Modrinth auth deep link");
     if !submit_deeplink(code, &nonce) {
         const MESSAGE: &str = "Couldn't finish signing in. Please try again.";
-        if let Err(error) = emit_warning(MESSAGE).await {
+        if let Err(error) = emit_warning(events, MESSAGE).await {
             tracing::error!("{MESSAGE} ({error})");
         }
     }
     true
-}
-
-// Remove when (and if) https://github.com/tauri-apps/tauri/issues/12022 is implemented
-pub(crate) fn tauri_convert_file_src(path: &Path) -> Result<Url> {
-    #[cfg(any(windows, target_os = "android"))]
-    const BASE: &str = "http://asset.localhost/";
-    #[cfg(not(any(windows, target_os = "android")))]
-    const BASE: &str = "asset://localhost/";
-
-    let path = canonicalize(path)?;
-    let path = path.to_string_lossy();
-    let encoded = urlencoding::encode(&path);
-
-    Ok(Url::parse(&format!("{BASE}{encoded}"))?)
 }

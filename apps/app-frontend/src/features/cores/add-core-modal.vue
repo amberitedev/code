@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Archon } from '@modrinth/api-client'
+import { ApiCallError, cores, type PendingCore } from '@modrinth/api-client'
 import { RightArrowIcon } from '@modrinth/assets'
 import { Button, injectModrinthClient, NewModal } from '@modrinth/ui'
 import { useQueryClient } from '@tanstack/vue-query'
@@ -18,7 +18,7 @@ const modal = ref<InstanceType<typeof NewModal> | null>(null)
 const code = ref('')
 // The code that was looked up and the Core behind it. Approval is the second step and always
 // sends this code, never whatever the inputs hold by then.
-const pending = ref<{ code: string; core: Archon.Cores.v1.PendingCore } | null>(null)
+const pending = ref<{ code: string; core: PendingCore } | null>(null)
 const error = ref('')
 const working = ref(false)
 let settle: ((added: boolean) => void) | null = null
@@ -79,12 +79,10 @@ async function lookup() {
 	working.value = true
 	error.value = ''
 	try {
-		const core = await client.archon.cores_v1.lookup(typed)
+		const core = await client.backend.call(cores.LookUpSignInCode, { body: { code: typed } })
 		if (started === opening) pending.value = { code: typed, core }
 	} catch (reason) {
-		if (started === opening)
-			error.value =
-				reason instanceof Error ? reason.message : 'Could not add the Core. Please try again.'
+		if (started === opening) error.value = approvalMessage(reason)
 	} finally {
 		working.value = false
 	}
@@ -97,21 +95,36 @@ async function approve() {
 	working.value = true
 	error.value = ''
 	try {
-		await client.archon.cores_v1.approve(current.code)
-		await Promise.all([
-			queryClient.invalidateQueries({ queryKey: coresQueryKey }),
-			queryClient.invalidateQueries({ queryKey: ['servers'] }),
-		])
+		await client.backend.call(cores.ApproveSignInCode, { body: { code: current.code } })
+		// The Core list is fetched again first: servers are found through it.
+		await queryClient.invalidateQueries({ queryKey: coresQueryKey })
+		await queryClient.invalidateQueries({ queryKey: ['servers'] })
 		if (started !== opening) return
 		settle?.(true)
 		settle = null
 		modal.value?.hide()
 	} catch (reason) {
-		if (started === opening)
-			error.value =
-				reason instanceof Error ? reason.message : 'Could not add the Core. Please try again.'
+		if (started === opening) error.value = approvalMessage(reason)
 	} finally {
 		working.value = false
+	}
+}
+
+function approvalMessage(reason: unknown) {
+	if (!(reason instanceof ApiCallError)) return 'Could not reach Amberite. Check your connection.'
+	switch (reason.code) {
+		case 'wrong_code':
+			return 'Code invalid. Please check your Core and try again.'
+		case 'code_expired':
+			return 'That code has expired. Use the new code shown on your Core.'
+		case 'too_many_attempts':
+			return 'Too many wrong codes. Wait a few minutes and try again.'
+		case 'already_signed_in':
+			return 'That Core is already signed in to another account.'
+		case 'invalid_credentials':
+			return 'Sign in to add a Core.'
+		default:
+			return 'Could not add the Core. Please try again.'
 	}
 }
 

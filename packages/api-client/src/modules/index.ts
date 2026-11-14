@@ -1,11 +1,12 @@
 import type { AbstractModrinthClient } from '../core/abstract-client'
 import type { AbstractModule } from '../core/abstract-module'
+import { ArchonCoresV1Module } from '../cores/v1'
+import { SharedInstancesPlayersV1Module } from '../sharing/players/v1'
 import { ArchonActionsV1Module } from './archon/actions/v1'
 import { ArchonBackupRepositoriesInternalModule } from './archon/backup-repositories/internal'
 import { ArchonBackupsV1Module } from './archon/backups/v1'
 import { ArchonBackupsQueueV1Module } from './archon/backups-queue/v1'
 import { ArchonContentV1Module } from './archon/content/v1'
-import { ArchonCoresV1Module } from './archon/cores/v1'
 import { ArchonIconsV1Module } from './archon/icons/v1'
 import { ArchonNodesInternalModule } from './archon/nodes/internal'
 import { ArchonNoticesV0Module } from './archon/notices/v0'
@@ -16,8 +17,6 @@ import { ArchonServersInternalModule } from './archon/servers/internal'
 import { ArchonServersV0Module } from './archon/servers/v0'
 import { ArchonServersV1Module } from './archon/servers/v1'
 import { ArchonTransfersInternalModule } from './archon/transfers/internal'
-import { CopalAccessV1Module } from './copal/access/v1'
-import { CopalStorageV1Module } from './copal/storage/v1'
 import { ISO3166Module } from './iso3166'
 import { KyrosBackupsV1Module } from './kyros/backups/v1'
 import { KyrosContentV1Module } from './kyros/content/v1'
@@ -46,7 +45,6 @@ import { LabrinthImagesV3Module } from './labrinth/images/v3'
 import { LabrinthLimitsV3Module } from './labrinth/limits/v3'
 import { LabrinthModerationInternalModule } from './labrinth/moderation/internal'
 import { LabrinthNotificationsV2Module } from './labrinth/notifications/v2'
-import { LabrinthNotificationsV3Module } from './labrinth/notifications/v3'
 import { LabrinthOAuthInternalModule } from './labrinth/oauth/internal'
 import { LabrinthOrganizationsV3Module } from './labrinth/organizations/v3'
 import { LabrinthPatsV2Module } from './labrinth/pats/v2'
@@ -73,8 +71,6 @@ import { PurpurVersionsV2Module } from './purpur/v2'
 import { SharedInstancesInstancesV1Module } from './shared-instances/instances/v1'
 import { SharedInstancesInvitesV1Module } from './shared-instances/invites/v1'
 import { SharedInstancesModerationV1Module } from './shared-instances/moderation/v1'
-import { SharedInstancesPlayersV1Module } from './shared-instances/players/v1'
-import { SharedInstancesStorageV1Module } from './shared-instances/storage/v1'
 import { SharedInstancesUsersV1Module } from './shared-instances/users/v1'
 
 type ModuleConstructor = new (client: AbstractModrinthClient) => AbstractModule
@@ -105,8 +101,6 @@ export const MODULE_REGISTRY = {
 	archon_servers_v0: ArchonServersV0Module,
 	archon_servers_v1: ArchonServersV1Module,
 	archon_transfers_internal: ArchonTransfersInternalModule,
-	copal_access_v1: CopalAccessV1Module,
-	copal_storage_v1: CopalStorageV1Module,
 	iso3166_data: ISO3166Module,
 	mclogs_insights_v1: MclogsInsightsV1Module,
 	mclogs_logs_v1: MclogsLogsV1Module,
@@ -136,7 +130,6 @@ export const MODULE_REGISTRY = {
 	labrinth_images_v3: LabrinthImagesV3Module,
 	labrinth_moderation_internal: LabrinthModerationInternalModule,
 	labrinth_notifications_v2: LabrinthNotificationsV2Module,
-	labrinth_notifications_v3: LabrinthNotificationsV3Module,
 	labrinth_oauth_internal: LabrinthOAuthInternalModule,
 	labrinth_organizations_v3: LabrinthOrganizationsV3Module,
 	labrinth_pats_v2: LabrinthPatsV2Module,
@@ -164,7 +157,6 @@ export const MODULE_REGISTRY = {
 	sharedinstances_instances_v1: SharedInstancesInstancesV1Module,
 	sharedinstances_moderation_v1: SharedInstancesModerationV1Module,
 	sharedinstances_players_v1: SharedInstancesPlayersV1Module,
-	sharedinstances_storage_v1: SharedInstancesStorageV1Module,
 	sharedinstances_users_v1: SharedInstancesUsersV1Module,
 } as const satisfies Record<string, ModuleConstructor>
 

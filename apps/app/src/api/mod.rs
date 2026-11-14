@@ -1,33 +1,10 @@
+use crate::accounts::error_code;
 use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
-use theseus::error_code;
 
-pub mod auth;
-pub mod import;
-pub mod install;
-pub mod instance;
-pub mod jre;
 pub mod logs;
-pub mod metadata;
-pub mod minecraft_skins;
-pub mod mr_auth;
-pub mod onboarding_checklist;
-pub mod process;
-pub mod reports;
-pub mod settings;
 pub mod shortcuts;
-pub mod tags;
-mod thumbnails;
-pub mod users;
 pub mod utils;
-
-pub mod cache;
-pub mod cores;
-pub mod files;
-pub mod friends;
-pub mod worlds;
-
-mod oauth_utils;
 
 pub type Result<T> = std::result::Result<T, CommandError>;
 

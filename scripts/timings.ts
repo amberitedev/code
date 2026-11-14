@@ -1,11 +1,11 @@
-// One line per setup, build, and start, in the primary checkout's `.data/timings.jsonl`, shared by
-// every checkout. It is how anyone checks whether a change to the dev setup made it faster.
+// One line per setup, build, test run, and start, in the primary checkout's `.data/timings.jsonl`,
+// shared by every checkout. It is how anyone checks whether a change to the dev setup made it faster.
 
 import * as NodeFS from 'node:fs'
 import * as NodePath from 'node:path'
 
 export type Timing = {
-	readonly kind: 'setup' | 'build' | 'up'
+	readonly kind: 'setup' | 'build' | 'test' | 'up'
 	readonly worktree: string
 	readonly result: 'ok' | 'failed' | 'cancelled' | 'waiting'
 	/** Milliseconds per step, plus `total`. */

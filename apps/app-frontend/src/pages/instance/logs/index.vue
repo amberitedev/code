@@ -200,6 +200,17 @@ useAppEvent('log', (payload) => {
 	}
 })
 
+// The buffer holds this run's whole live log, so it replaces lines a resync lost.
+useAppEvent('resync', async () => {
+	await liveConsoleHydration
+	invalidate()
+	void historicalLogsQuery.refetch()
+	liveConsoleHydrated = false
+	liveConsole.clear()
+	await hydrate().catch(handleError)
+	liveConsoleHydrated = true
+})
+
 useAppEvent('process', async (e) => {
 	if (e.instance_id !== instanceId.value) return
 	if (e.event === 'launched') {

@@ -10,28 +10,29 @@ pub mod console;
 pub mod insight;
 pub mod launch;
 pub mod memory;
+pub mod platform;
 pub mod process;
+pub mod properties;
 pub mod restarts;
+pub mod server_rows;
 pub mod shim;
 mod watch;
 
 use std::{
     collections::{HashMap, HashSet},
     net::IpAddr,
-    path::PathBuf,
     process::Child,
     sync::{Arc, Mutex, Weak},
     time::{Duration, Instant},
 };
 
 use color_eyre::eyre::Result;
+use engine::Engine;
 use sqlx::SqlitePool;
 use tokio::sync::broadcast;
 use tracing::{info, warn};
 
-use crate::state::servers::adapters::sqlite::server_rows::{
-    self, Ended, Outcome,
-};
+use self::server_rows::{Ended, Outcome};
 use crate::{daemon::paths::Paths, util::if_present};
 use shim::{Connection, ExitStatus, Message, RunRecord, ShimError};
 
@@ -116,7 +117,8 @@ struct Live {
 pub struct Servers {
     paths: Paths,
     db: SqlitePool,
-    http: reqwest::Client,
+    /// Each server is the engine instance with its id, which holds its content.
+    engine: Arc<Engine>,
     /// See `Config::local_only`.
     local_only: Option<IpAddr>,
     live: Mutex<HashMap<String, Live>>,
@@ -179,13 +181,13 @@ impl Servers {
     pub async fn open(
         paths: Paths,
         db: SqlitePool,
+        engine: Arc<Engine>,
         local_only: Option<IpAddr>,
     ) -> Result<Arc<Self>> {
-        let http = crate::installs::download::client()?;
         let servers = Arc::new_cyclic(|me| Self {
             paths,
             db,
-            http,
+            engine,
             local_only,
             live: Mutex::new(HashMap::new()),
             deleted: Mutex::default(),
@@ -198,9 +200,48 @@ impl Servers {
             retries: Mutex::default(),
             owner_actions: Mutex::default(),
         });
+        servers.remove_orphans().await?;
         servers.scan().await?;
         tokio::spawn(Arc::clone(&servers).watch());
         Ok(servers)
+    }
+
+    /// Remove the engine instances and server folders that have no server row: what a deletion
+    /// left when a file could not go, or when Core stopped between the two databases. A new
+    /// server's instance is made before its row, so a create cut short leaves the same.
+    async fn remove_orphans(&self) -> Result<()> {
+        let rows: HashSet<String> = server_rows::list(&self.db)
+            .await?
+            .into_iter()
+            .map(|row| row.id)
+            .collect();
+        let mut ids: HashSet<String> = engine::instance::list(&self.engine)
+            .await
+            .map_err(|error| color_eyre::eyre::eyre!("{error:#}"))?
+            .into_iter()
+            .map(|instance| instance.instance.id)
+            .collect();
+        if let Ok(folders) = std::fs::read_dir(self.paths.servers()) {
+            ids.extend(
+                folders
+                    .filter_map(Result::ok)
+                    .filter_map(|folder| folder.file_name().into_string().ok()),
+            );
+        }
+        for id in ids.difference(&rows) {
+            if shim::is_running(&self.paths, id) {
+                continue;
+            }
+            match self.delete_folders(id).await {
+                Ok(()) => {
+                    info!(server = %id, "removed a deleted server's files")
+                }
+                Err(error) => {
+                    warn!(server = %id, %error, "could not remove a deleted server's files");
+                }
+            }
+        }
+        Ok(())
     }
 
     fn live(&self) -> std::sync::MutexGuard<'_, HashMap<String, Live>> {
@@ -211,9 +252,21 @@ impl Servers {
         &self.paths
     }
 
+    pub fn engine(&self) -> &Engine {
+        &self.engine
+    }
+
     /// Where the server is in its run, or `None` without a shim.
     pub fn phase(&self, id: &str) -> Option<Phase> {
         self.live().get(id).map(|live| live.phase)
+    }
+
+    /// Every server with a shim, and where it is in its run.
+    pub fn phases(&self) -> HashMap<String, Phase> {
+        self.live()
+            .iter()
+            .map(|(id, live)| (id.clone(), live.phase))
+            .collect()
     }
 
     fn set_phase(&self, id: &str, phase: Phase) {
@@ -413,6 +466,9 @@ impl Servers {
         let server = server_rows::get(&self.db, id)
             .await?
             .ok_or_else(|| ServerError::NotFound(id.into()))?;
+        if self.engine_installing(id).await? {
+            return Err(ServerError::Installing);
+        }
         {
             let mut live = self.live();
             match crashed {
@@ -503,6 +559,20 @@ impl Servers {
         }
     }
 
+    /// Whether the engine has an install job on the server, such as one it took up again after
+    /// Core restarted.
+    pub async fn engine_installing(
+        &self,
+        id: &str,
+    ) -> Result<bool, ServerError> {
+        engine::install::store::list_active_for_instance(id, self.engine.pool())
+            .await
+            .map(|jobs| !jobs.is_empty())
+            .map_err(|error| {
+                ServerError::Other(color_eyre::eyre::eyre!("{error:#}"))
+            })
+    }
+
     async fn launch(
         &self,
         server: &server_rows::ServerRow,
@@ -512,11 +582,18 @@ impl Servers {
         if crate::api::eula::accepted_at(&self.db).await?.is_none() {
             return Err(ServerError::Eula);
         }
-        // The lease keeps its Java until the shim runs it, when the launch spec does.
-        let (mut launch, _java) = launch::prepare(
+        let platform =
+            platform::platform(&self.engine, id)
+                .await
+                .map_err(|error| {
+                    ServerError::Other(color_eyre::eyre::eyre!("{error:#}"))
+                })?;
+        let launch = launch::prepare(
             &self.paths,
-            &self.http,
+            &self.engine,
             server,
+            platform.as_ref(),
+            memory::flags(&self.db, id).await?,
             run_id,
             self.local_only,
         )
@@ -527,9 +604,7 @@ impl Servers {
                 Err(error) => ServerError::Other(error),
             }
         })?;
-        if let Some(flags) = memory::flags(&self.db, id).await? {
-            memory::use_flags(&mut launch.args, flags);
-        }
+        self.open_meta().await?;
         std::fs::create_dir_all(self.paths.run(id))?;
         // What an earlier run left must not be mistaken for this one's.
         for stale in [self.paths.run_record(id), self.paths.run_status(id)] {
@@ -620,6 +695,21 @@ impl Servers {
         tokio::task::spawn_blocking(move || shim::java::share_with_core(&dir))
             .await
             .map_err(std::io::Error::other)??;
+        Ok(())
+    }
+
+    /// Let servers read and run the engine's game files in `meta/` (see
+    /// `daemon::folders::open_to_servers`). Nothing to do in development.
+    async fn open_meta(&self) -> Result<(), ServerError> {
+        if crate::daemon::install::InstallRecord::load(&self.paths)?.is_none() {
+            return Ok(());
+        }
+        let meta = self.paths.meta();
+        tokio::task::spawn_blocking(move || {
+            crate::daemon::folders::open_to_servers(&meta)
+        })
+        .await
+        .map_err(std::io::Error::other)??;
         Ok(())
     }
 
@@ -789,20 +879,35 @@ impl Servers {
         self.start(id).await
     }
 
-    /// Create an unconfigured server.
+    /// Create an unconfigured server: its engine instance, then its row.
     pub async fn create(
         &self,
         name: &str,
     ) -> Result<server_rows::ServerRow, ServerError> {
-        let server = server_rows::create(&self.db, name, |port| {
-            server_rows::port_free(port, self.local_only)
-        })
-        .await?
-        .ok_or(ServerError::NoPorts)?;
-        crate::daemon::folders::create_server_folder(
-            &self.paths.server(&server.id),
-        )?;
-        Ok(server)
+        let id = uuid::Uuid::new_v4().to_string();
+        // The engine makes the folder; Core then gives it the server account's rights.
+        platform::create(&self.engine, &id, name)
+            .await
+            .map_err(|error| {
+                ServerError::Other(color_eyre::eyre::eyre!("{error:#}"))
+            })?;
+        let created = async {
+            crate::daemon::folders::create_server_folder(
+                &self.paths.server(&id),
+            )?;
+            server_rows::create(&self.db, &id, name, |port| {
+                server_rows::port_free(port, self.local_only)
+            })
+            .await?
+            .ok_or(ServerError::NoPorts)
+        }
+        .await;
+        if created.is_err()
+            && let Err(error) = self.delete_folders(&id).await
+        {
+            warn!(server = %id, %error, "could not remove a server that was not created");
+        }
+        created
     }
 
     /// Hold a stopped server for deletion, so it cannot start while its row and files go. Fails
@@ -822,8 +927,14 @@ impl Servers {
         self.deleted.lock().expect("not poisoned").remove(id);
     }
 
-    /// Remove a held server's world, run files, and backups, once its row is gone.
-    pub fn delete_folders(&self, id: &str) -> Result<(), ServerError> {
+    /// Remove a held server's engine instance, world, run files, and backups, once its row is
+    /// gone.
+    pub async fn delete_folders(&self, id: &str) -> Result<(), ServerError> {
+        engine::instance::remove(&self.engine, id)
+            .await
+            .map_err(|error| {
+                ServerError::Other(color_eyre::eyre::eyre!("{error:#}"))
+            })?;
         for folder in [
             self.paths.server(id),
             self.paths.run(id),
@@ -863,78 +974,21 @@ impl Servers {
             id: id.into(),
         })
     }
+}
 
-    /// Run an installer, such as Forge's, through a shim like a server run: as `copal-servers`,
-    /// in the server folder, its output in `console.log`. Waits for it to exit; fails unless it
-    /// exits with 0. Not recorded as a run.
-    pub async fn run_installer(
-        &self,
-        hold: &Hold,
-        java: PathBuf,
-        args: Vec<String>,
-    ) -> Result<(), ServerError> {
-        let id = hold.id.as_str();
-        let run_id = uuid::Uuid::new_v4().to_string();
-        let dir = self.paths.server(id);
-        crate::daemon::folders::create_server_folder(&dir)?;
-        crate::daemon::folders::create_server_folder(&dir.join("tmp"))?;
-        std::fs::create_dir_all(self.paths.run(id))?;
-        for stale in [self.paths.run_record(id), self.paths.run_status(id)] {
-            if_present(std::fs::remove_file(stale))?;
-        }
-        let mut full_args = vec![
-            "-Xmx1G".to_owned(),
-            format!("-Djava.io.tmpdir={}", dir.join("tmp").display()),
-            format!("-Duser.home={}", dir.display()),
-        ];
-        full_args.extend(args);
-        shim::write_json(
-            &self.paths.launch_spec(id),
-            &shim::Launch {
-                v: shim::PROTOCOL,
-                run_id: run_id.clone(),
-                java,
-                args: full_args,
-                dir,
-                memory_limit_mb: launch::memory_limit(1024),
-            },
-        )?;
-        let mut child = shim::spawn(&self.paths, id)?;
-        tokio::task::spawn_blocking(move || child.wait())
-            .await
-            .map_err(std::io::Error::other)??;
-        let status =
-            shim::read_versioned::<ExitStatus>(&self.paths.run_status(id))
-                .ok()
-                .filter(|status| status.run_id == run_id);
-        match status {
-            Some(ExitStatus {
-                exit_code: Some(0), ..
-            }) => Ok(()),
-            status => {
-                let lines = console::tail(&self.paths.console_log(id), 5)
-                    .map(|(lines, _)| {
-                        lines.join(
-                            "
-",
-                        )
-                    })
-                    .unwrap_or_default();
-                let reason = status
-                    .as_ref()
-                    .and_then(|status| status.error.clone())
-                    .or_else(|| {
-                        status.and_then(|status| status.exit_code).map(|code| {
-                            format!("the installer exited with {code}")
-                        })
-                    })
-                    .unwrap_or_else(|| "the installer did not finish".into());
-                Err(ServerError::StartFailed(format!(
-                    "{reason}
-{lines}"
-                )))
-            }
-        }
+#[cfg(test)]
+impl Servers {
+    /// A Core's servers in `paths`, on loopback, with an engine of their own.
+    pub async fn open_for_test(paths: Paths, db: SqlitePool) -> Arc<Self> {
+        let engine = crate::daemon::start_engine(&paths, None).await.unwrap();
+        Self::open(
+            paths,
+            db,
+            engine,
+            Some(std::net::Ipv4Addr::LOCALHOST.into()),
+        )
+        .await
+        .unwrap()
     }
 }
 
@@ -971,13 +1025,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let paths = Paths::new(dir.path());
         crate::daemon::folders::create(&paths, None).unwrap();
-        let servers = Servers::open(
-            paths,
-            db::memory().await,
-            Some(std::net::Ipv4Addr::LOCALHOST.into()),
-        )
-        .await
-        .unwrap();
+        let servers = Servers::open_for_test(paths, db::memory().await).await;
         (dir, servers)
     }
 
@@ -988,12 +1036,14 @@ mod tests {
 
         let (dir, servers) = servers().await;
         let server = servers.create("A").await.unwrap();
-        server_rows::set_installed(
-            &servers.db,
+        platform::set(
+            &servers.engine,
             &server.id,
-            "vanilla",
-            "1.21.1",
-            None,
+            &platform::Platform {
+                loader: engine::state::ModLoader::Vanilla,
+                game_version: "1.21.1".into(),
+                loader_version: None,
+            },
         )
         .await
         .unwrap();
@@ -1038,12 +1088,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn what_a_server_left_without_its_row_goes_at_start() {
+        let (_dir, servers) = servers().await;
+        let kept = servers.create("Kept").await.unwrap();
+        let gone = servers.create("Gone").await.unwrap();
+        sqlx::query("DELETE FROM servers WHERE id = ?")
+            .bind(&gone.id)
+            .execute(&servers.db)
+            .await
+            .unwrap();
+        // An engine removal that deleted the instance but not all of its folder.
+        let stray = servers.paths.server("stray");
+        std::fs::create_dir_all(stray.join("world")).unwrap();
+
+        let servers = Servers::open(
+            servers.paths.clone(),
+            servers.db.clone(),
+            Arc::clone(&servers.engine),
+            None,
+        )
+        .await
+        .unwrap();
+        let instance = |id: String| {
+            let engine = Arc::clone(&servers.engine);
+            async move { engine::instance::get(&engine, &id).await.unwrap() }
+        };
+        assert!(instance(gone.id.clone()).await.is_none());
+        assert!(!servers.paths.server(&gone.id).exists());
+        assert!(!stray.exists());
+        assert!(instance(kept.id.clone()).await.is_some());
+        assert!(servers.paths.server(&kept.id).exists());
+    }
+
+    #[tokio::test]
     async fn a_shim_started_by_a_core_that_died_is_adopted_when_it_appears() {
         let dir = tempfile::tempdir().unwrap();
         let paths = Paths::new(dir.path());
         crate::daemon::folders::create(&paths, None).unwrap();
         let db = db::memory().await;
-        let server = server_rows::create(&db, "A", |_| true)
+        let server = server_rows::create(&db, "a", "A", |_| true)
             .await
             .unwrap()
             .unwrap();
@@ -1066,13 +1149,7 @@ mod tests {
         )
         .unwrap();
 
-        let servers = Servers::open(
-            paths.clone(),
-            db.clone(),
-            Some(std::net::Ipv4Addr::LOCALHOST.into()),
-        )
-        .await
-        .unwrap();
+        let servers = Servers::open_for_test(paths.clone(), db.clone()).await;
         assert_eq!(servers.phase(&server.id), None);
         assert_eq!(
             server_rows::open_runs(&db, &server.id, i64::MAX)
@@ -1159,7 +1236,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let paths = Paths::new(dir.path());
         let db = db::memory().await;
-        let server = server_rows::create(&db, "A", |_| true)
+        let server = server_rows::create(&db, "a", "A", |_| true)
             .await
             .unwrap()
             .unwrap();
@@ -1170,13 +1247,7 @@ mod tests {
         )
         .unwrap();
 
-        let servers = Servers::open(
-            paths,
-            db,
-            Some(std::net::Ipv4Addr::LOCALHOST.into()),
-        )
-        .await
-        .unwrap();
+        let servers = Servers::open_for_test(paths, db).await;
         assert_eq!(servers.phase(&server.id), Some(Phase::Unmanaged(Some(1))));
         assert!(matches!(
             servers.stop(&server.id).await,
@@ -1193,7 +1264,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let paths = Paths::new(dir.path());
         let db = db::memory().await;
-        let server = server_rows::create(&db, "A", |_| true)
+        let server = server_rows::create(&db, "a", "A", |_| true)
             .await
             .unwrap()
             .unwrap();
@@ -1219,13 +1290,7 @@ mod tests {
         )
         .unwrap();
 
-        let servers = Servers::open(
-            paths,
-            db.clone(),
-            Some(std::net::Ipv4Addr::LOCALHOST.into()),
-        )
-        .await
-        .unwrap();
+        let servers = Servers::open_for_test(paths, db.clone()).await;
         assert_eq!(servers.phase(&server.id), None);
         let runs: Vec<(String, Outcome, Option<String>)> = sqlx::query_as(
             "SELECT id, outcome, last_lines FROM runs ORDER BY started_at",

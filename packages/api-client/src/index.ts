@@ -1,4 +1,7 @@
+export * from '@amberite/contracts'
+export * from './contracts'
 export { AbstractModrinthClient } from './core/abstract-client'
+export type * as Copal from './core-hosting/copal'
 export { AbstractFeature, type FeatureConfig } from './core/abstract-feature'
 export {
 	AbstractSyncClient,
@@ -27,6 +30,7 @@ export {
 	type CircuitBreakerStorage,
 	InMemoryCircuitBreakerStorage,
 } from './features/circuit-breaker'
+export { protocolMismatch, ProtocolMismatch } from './features/core-session'
 export { type NodeAuth, type NodeAuthConfig, NodeAuthFeature } from './features/node-auth'
 export { PANEL_VERSION, PanelVersionFeature } from './features/panel-version'
 export { type BackoffStrategy, type RetryConfig, RetryFeature } from './features/retry'
@@ -37,11 +41,7 @@ export {
 } from './features/self-hosted'
 export { type VerboseLoggingConfig, VerboseLoggingFeature } from './features/verbose-logging'
 export type { InferredClientModules } from './modules'
-export { CoreApprovalError } from './modules/archon/cores/v1'
-export * from './modules/bedrock/limits'
-export * from './modules/sharing/rules'
-export { TICKET_HEADER } from './modules/copal/access/v1'
-export { SharedInstancesApiError } from './modules/shared-instances/errors'
+export { SharedInstancesApiError } from './sharing/errors'
 export * from './modules/types'
 export { GenericModrinthClient } from './platform/generic'
 export type { NuxtClientConfig } from './platform/nuxt'
