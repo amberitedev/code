@@ -7,11 +7,6 @@ publish and follow shares. They do it with one engine and one protocol. This pag
 decisions behind that design, the reasons for them, and what was rejected. The code holds the
 details.
 
-Some of the design is still landing. Until each slice below merges, its line is true and the text
-that contradicts it is not:
-
-- Until D7: a Core keeps server files in `apps/core`.
-
 ## Rules
 
 A review checks a change against these.
