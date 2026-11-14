@@ -791,6 +791,28 @@ async fn content_changes_wait_for_a_stopped_server_and_a_pack_update_backs_up_fi
         .call(Method::POST, &unlink, Some(&editor), None, None)
         .await;
     assert_eq!(error["error"], "already_running");
+    // Share changes touch no files of the server.
+    let owner = core.sign_in("owner").await;
+    let (status, error) = core
+        .call(
+            Method::DELETE,
+            &format!("{instance}/shared"),
+            Some(&owner),
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{error}");
+    let (_, error) = core
+        .call(
+            Method::DELETE,
+            &format!("{instance}/shared/history/1"),
+            Some(&owner),
+            None,
+            None,
+        )
+        .await;
+    assert_ne!(error["error"], "already_running");
     drop(shim);
 
     let (status, _) = core
@@ -802,7 +824,8 @@ async fn content_changes_wait_for_a_stopped_server_and_a_pack_update_backs_up_fi
             "SELECT COUNT(*) FROM activity WHERE action LIKE '%content_changed%'"
         )
         .await,
-        1
+        2,
+        "the unshare and the unlink"
     );
 
     // The backup is made before the engine sees the update, which it refuses: the server

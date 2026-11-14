@@ -2,8 +2,9 @@
 //! here are mounted: none whose body or answer carries a host path, none of the engine-wide routes
 //! for settings, the store, caches, Java or processes, and not the engine's edit-instance route,
 //! which writes launch hooks, Java and environment variables (`api::servers` changes a server's
-//! name and update channel itself). A change holds the server, so it is refused while the server
-//! runs or installs, and is logged; its [`Hook`] says what else it does.
+//! name and update channel itself). A change is logged, and holds the server unless it touches
+//! none of its files, so it is refused while the server runs or installs; its [`Hook`] says what
+//! else it does.
 
 use std::{sync::Arc, time::Duration};
 
@@ -37,6 +38,8 @@ use crate::{
 #[derive(Clone, Copy)]
 struct Hook {
     level: Permission,
+    /// Hold the server: the change writes its files.
+    hold: bool,
     /// Back the world up before the change.
     backup: bool,
     /// The share's players lose it: the server stops passing it on.
@@ -48,6 +51,7 @@ struct Hook {
 
 const EDIT: Hook = Hook {
     level: Permission::Edit,
+    hold: true,
     backup: false,
     forget_players: false,
     job: false,
@@ -55,6 +59,10 @@ const EDIT: Hook = Hook {
 const OWNER: Hook = Hook {
     level: Permission::Owner,
     ..EDIT
+};
+const SHARE: Hook = Hook {
+    hold: false,
+    ..OWNER
 };
 const JOB: Hook = Hook { job: true, ..EDIT };
 const BACKUP_JOB: Hook = Hook {
@@ -81,11 +89,11 @@ pub fn routes() -> Router<Shared> {
         )),
         route::<UnlinkModpack, _, _, _>(change(EDIT, unlink_modpack)),
         route::<DeleteSharedInstanceVersion, _, _, _>(change(
-            OWNER,
+            SHARE,
             delete_shared_instance_version,
         )),
         route::<UnpublishSharedInstance, _, _, _>(change(
-            OWNER,
+            SHARE,
             unpublish_shared_instance,
         )),
         route::<UnlinkSharedInstance, _, _, _>(change(
@@ -206,7 +214,10 @@ where
         .expect("an instance route has an {id} segment");
     let state = Arc::clone(&shared.0);
     state.access.require(&caller, &id, hook.level).await?;
-    let hold = state.servers.hold(&id)?;
+    let hold = match hook.hold {
+        true => Some(state.servers.hold(&id)?),
+        false => None,
+    };
     if hook.backup {
         state.backups.pre_update(&id).await?;
     }
@@ -226,7 +237,9 @@ where
     if let Some(share_id) = share {
         forget_players(&state, &id, share_id).await?;
     }
-    if hook.job {
+    if hook.job
+        && let Some(hold) = hold
+    {
         tokio::spawn(finish_job(state, hold));
     }
     Ok(response)
