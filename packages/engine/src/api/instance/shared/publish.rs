@@ -369,7 +369,7 @@ pub(super) async fn collect_publish_snapshot(
                 None,
                 state,
             ),
-            collect_shareable_files(&instance_path),
+            collect_shareable_files(&instance_path, state.side),
         )?
     } else {
         (
@@ -818,7 +818,7 @@ pub(super) async fn publish_current_content(
         })
         .collect::<Vec<_>>();
     let (content, files) = push::build_version(
-        INSTANCE_SCOPE,
+        share_scope(state.side),
         push::VersionInput {
             modrinth_ids: snapshot.version_ids,
             modpack_id,
@@ -845,7 +845,7 @@ pub(super) async fn publish_current_content(
         server_core,
         files,
         push::KeptConfigs {
-            scope: INSTANCE_SCOPE,
+            scope: share_scope(state.side),
             removed: removed_paths,
             locate: &locate,
         },
@@ -991,17 +991,24 @@ fn push_error(error: push::PushError) -> crate::Error {
     }
 }
 
+const MAX_SERVER_LISTED: usize = 2000;
+
 /// The files the owner can pick for a push (`rules::list_shareable`), none marked shared yet.
 pub(super) async fn collect_shareable_files(
     instance_path: &std::path::Path,
+    side: contracts::Side,
 ) -> crate::Result<Vec<SharedInstancePublishFile>> {
     let instance_path = instance_path.to_path_buf();
+    let limit = match side {
+        contracts::Side::Client => usize::MAX,
+        contracts::Side::Server => MAX_SERVER_LISTED,
+    };
     let listed = tokio::task::spawn_blocking(move || {
         sharing_client::rules::list_shareable(
-            INSTANCE_SCOPE,
+            share_scope(side),
             &sharing_client::rules::DiskFolder(&instance_path),
             &Default::default(),
-            usize::MAX,
+            limit,
         )
     })
     .await
@@ -1314,4 +1321,81 @@ pub(super) fn ensure_member(
 
 pub(super) fn file_type(project_type: ProjectType) -> String {
     project_type.get_name().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use contracts::Side;
+
+    fn version_with(file_name: &str) -> push::VersionInput {
+        push::VersionInput {
+            modrinth_ids: Vec::new(),
+            modpack_id: None,
+            removed_files: Vec::new(),
+            game_version: "1.21.1".into(),
+            loader: "fabric".into(),
+            loader_version: None,
+            files: vec![push::PushFile {
+                file_name: file_name.into(),
+                file_type: CONFIG_FILE_TYPE.into(),
+                path: file_name.into(),
+            }],
+        }
+    }
+
+    #[tokio::test]
+    async fn a_server_shares_only_its_configs_and_an_instance_its_export() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        std::fs::create_dir_all(root.join("config")).unwrap();
+        std::fs::create_dir_all(root.join("world/region")).unwrap();
+        for path in [
+            "config/a.toml",
+            "server.properties",
+            "ops.json",
+            "options.txt",
+            "world/level.dat",
+            "world/region/r.0.0.mca",
+        ] {
+            std::fs::write(root.join(path), "x").unwrap();
+        }
+        let listed = async |side| {
+            collect_shareable_files(root, side)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|file| file.path)
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(listed(Side::Server).await, ["config/a.toml"]);
+        assert_eq!(
+            listed(Side::Client).await,
+            [
+                "config/a.toml",
+                "ops.json",
+                "options.txt",
+                "server.properties",
+                "world/level.dat",
+                "world/region/r.0.0.mca",
+            ]
+        );
+        for path in ["server.properties", "ops.json", "world/level.dat"] {
+            assert!(
+                push::build_version(
+                    share_scope(Side::Server),
+                    version_with(path)
+                )
+                .is_err()
+            );
+            assert!(
+                push::build_version(
+                    share_scope(Side::Client),
+                    version_with(path)
+                )
+                .is_ok()
+            );
+        }
+    }
 }

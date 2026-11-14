@@ -37,6 +37,15 @@ pub(crate) const INSTANCE_SCOPE: ShareScope = ShareScope::Instance {
     exportable: super::export_mrpack::is_exportable_path,
 };
 
+/// Where a share pushed from `side` takes its picked files: an App instance's export, or a Core
+/// server's config files.
+pub(crate) fn share_scope(side: contracts::Side) -> ShareScope {
+    match side {
+        contracts::Side::Client => INSTANCE_SCOPE,
+        contracts::Side::Server => ShareScope::Server,
+    }
+}
+
 /// Whether members can install a shared file at this instance-relative path.
 /// Content folders are shared through the content set instead.
 pub(crate) fn is_shareable_file_path(path: &str) -> bool {
