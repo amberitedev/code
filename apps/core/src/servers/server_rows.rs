@@ -110,6 +110,7 @@ pub async fn get(db: &SqlitePool, id: &str) -> sqlx::Result<Option<ServerRow>> {
 /// `free` accepts ([`port_free`] outside tests). `None` when every port is taken.
 pub async fn create(
     db: &SqlitePool,
+    id: &str,
     name: &str,
     free: impl Fn(u16) -> bool,
 ) -> sqlx::Result<Option<ServerRow>> {
@@ -125,12 +126,11 @@ pub async fn create(
         else {
             return Ok(None);
         };
-        let id = uuid::Uuid::new_v4().to_string();
         let inserted = sqlx::query(
             "INSERT INTO servers (id, name, created_at, port, memory_mb) \
              VALUES (?, ?, unixepoch(), ?, ?)",
         )
-        .bind(&id)
+        .bind(id)
         .bind(name)
         .bind(port)
         .bind(DEFAULT_MEMORY_MB)
@@ -141,7 +141,7 @@ pub async fn create(
                 if error.is_unique_violation() => {}
             inserted => {
                 inserted?;
-                return get(db, &id).await;
+                return get(db, id).await;
             }
         }
     }
@@ -376,7 +376,7 @@ mod tests {
     #[tokio::test]
     async fn a_run_is_recorded_once_with_its_crash_lines() {
         let db = db::memory().await;
-        let server = create(&db, "A", |_| true).await.unwrap().unwrap();
+        let server = create(&db, "a", "A", |_| true).await.unwrap().unwrap();
         assert_eq!(server.port, i64::from(*SERVER_PORTS.start()));
         start_run(&db, &server.id, "run", 1).await.unwrap();
         assert_eq!(
@@ -431,8 +431,8 @@ mod tests {
     #[tokio::test]
     async fn new_servers_take_the_next_free_port() {
         let db = db::memory().await;
-        let first = create(&db, "A", |_| true).await.unwrap().unwrap();
-        let second = create(&db, "B", |_| true).await.unwrap().unwrap();
+        let first = create(&db, "a", "A", |_| true).await.unwrap().unwrap();
+        let second = create(&db, "b", "B", |_| true).await.unwrap().unwrap();
         assert_eq!(second.port, first.port + 1);
     }
 
@@ -441,12 +441,12 @@ mod tests {
         let db = db::memory().await;
         let start = *SERVER_PORTS.start();
         let taken = [start, start + 1];
-        let server = create(&db, "A", |port| !taken.contains(&port))
+        let server = create(&db, "a", "A", |port| !taken.contains(&port))
             .await
             .unwrap()
             .unwrap();
         assert_eq!(server.port, i64::from(start + 2));
-        assert!(create(&db, "B", |_| false).await.unwrap().is_none());
+        assert!(create(&db, "b", "B", |_| false).await.unwrap().is_none());
     }
 
     #[test]

@@ -532,7 +532,13 @@ pub async fn delete(
     for user in &members {
         state.access.changed(user);
     }
-    state.servers.delete_folders(&id).await?;
+    if let Err(error) = state.servers.delete_folders(&id).await {
+        tracing::warn!(server = %id, %error, "could not remove a deleted server's files");
+        return Err(ApiError::new(
+            ErrorCode::InternalError,
+            "The server was deleted, but some of its files could not be removed yet. Core removes them when it next starts.",
+        ));
+    }
     Ok(Empty)
 }
 

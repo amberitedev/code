@@ -200,9 +200,48 @@ impl Servers {
             retries: Mutex::default(),
             owner_actions: Mutex::default(),
         });
+        servers.remove_orphans().await?;
         servers.scan().await?;
         tokio::spawn(Arc::clone(&servers).watch());
         Ok(servers)
+    }
+
+    /// Remove the engine instances and server folders that have no server row: what a deletion
+    /// left when a file could not go, or when Core stopped between the two databases. A new
+    /// server's instance is made before its row, so a create cut short leaves the same.
+    async fn remove_orphans(&self) -> Result<()> {
+        let rows: HashSet<String> = server_rows::list(&self.db)
+            .await?
+            .into_iter()
+            .map(|row| row.id)
+            .collect();
+        let mut ids: HashSet<String> = engine::instance::list(&self.engine)
+            .await
+            .map_err(|error| color_eyre::eyre::eyre!("{error:#}"))?
+            .into_iter()
+            .map(|instance| instance.instance.id)
+            .collect();
+        if let Ok(folders) = std::fs::read_dir(self.paths.servers()) {
+            ids.extend(
+                folders
+                    .filter_map(Result::ok)
+                    .filter_map(|folder| folder.file_name().into_string().ok()),
+            );
+        }
+        for id in ids.difference(&rows) {
+            if shim::is_running(&self.paths, id) {
+                continue;
+            }
+            match self.delete_folders(id).await {
+                Ok(()) => {
+                    info!(server = %id, "removed a deleted server's files")
+                }
+                Err(error) => {
+                    warn!(server = %id, %error, "could not remove a deleted server's files");
+                }
+            }
+        }
+        Ok(())
     }
 
     fn live(&self) -> std::sync::MutexGuard<'_, HashMap<String, Live>> {
@@ -837,32 +876,35 @@ impl Servers {
         self.start(id).await
     }
 
-    /// Create an unconfigured server and its engine instance.
+    /// Create an unconfigured server: its engine instance, then its row.
     pub async fn create(
         &self,
         name: &str,
     ) -> Result<server_rows::ServerRow, ServerError> {
-        let server = server_rows::create(&self.db, name, |port| {
-            server_rows::port_free(port, self.local_only)
-        })
-        .await?
-        .ok_or(ServerError::NoPorts)?;
+        let id = uuid::Uuid::new_v4().to_string();
         // The engine makes the folder; Core then gives it the server account's rights.
-        if let Err(error) =
-            platform::create(&self.engine, &server.id, name).await
-        {
-            sqlx::query("DELETE FROM servers WHERE id = ?")
-                .bind(&server.id)
-                .execute(&self.db)
-                .await?;
-            return Err(ServerError::Other(color_eyre::eyre::eyre!(
-                "{error:#}"
-            )));
+        platform::create(&self.engine, &id, name)
+            .await
+            .map_err(|error| {
+                ServerError::Other(color_eyre::eyre::eyre!("{error:#}"))
+            })?;
+        let created = async {
+            crate::daemon::folders::create_server_folder(
+                &self.paths.server(&id),
+            )?;
+            server_rows::create(&self.db, &id, name, |port| {
+                server_rows::port_free(port, self.local_only)
+            })
+            .await?
+            .ok_or(ServerError::NoPorts)
         }
-        crate::daemon::folders::create_server_folder(
-            &self.paths.server(&server.id),
-        )?;
-        Ok(server)
+        .await;
+        if created.is_err()
+            && let Err(error) = self.delete_folders(&id).await
+        {
+            warn!(server = %id, %error, "could not remove a server that was not created");
+        }
+        created
     }
 
     /// Hold a stopped server for deletion, so it cannot start while its row and files go. Fails
@@ -1043,12 +1085,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn what_a_server_left_without_its_row_goes_at_start() {
+        let (_dir, servers) = servers().await;
+        let kept = servers.create("Kept").await.unwrap();
+        let gone = servers.create("Gone").await.unwrap();
+        sqlx::query("DELETE FROM servers WHERE id = ?")
+            .bind(&gone.id)
+            .execute(&servers.db)
+            .await
+            .unwrap();
+        // An engine removal that deleted the instance but not all of its folder.
+        let stray = servers.paths.server("stray");
+        std::fs::create_dir_all(stray.join("world")).unwrap();
+
+        let servers = Servers::open(
+            servers.paths.clone(),
+            servers.db.clone(),
+            Arc::clone(&servers.engine),
+            None,
+        )
+        .await
+        .unwrap();
+        let instance = |id: String| {
+            let engine = Arc::clone(&servers.engine);
+            async move { engine::instance::get(&engine, &id).await.unwrap() }
+        };
+        assert!(instance(gone.id.clone()).await.is_none());
+        assert!(!servers.paths.server(&gone.id).exists());
+        assert!(!stray.exists());
+        assert!(instance(kept.id.clone()).await.is_some());
+        assert!(servers.paths.server(&kept.id).exists());
+    }
+
+    #[tokio::test]
     async fn a_shim_started_by_a_core_that_died_is_adopted_when_it_appears() {
         let dir = tempfile::tempdir().unwrap();
         let paths = Paths::new(dir.path());
         crate::daemon::folders::create(&paths, None).unwrap();
         let db = db::memory().await;
-        let server = server_rows::create(&db, "A", |_| true)
+        let server = server_rows::create(&db, "a", "A", |_| true)
             .await
             .unwrap()
             .unwrap();
@@ -1158,7 +1233,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let paths = Paths::new(dir.path());
         let db = db::memory().await;
-        let server = server_rows::create(&db, "A", |_| true)
+        let server = server_rows::create(&db, "a", "A", |_| true)
             .await
             .unwrap()
             .unwrap();
@@ -1186,7 +1261,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let paths = Paths::new(dir.path());
         let db = db::memory().await;
-        let server = server_rows::create(&db, "A", |_| true)
+        let server = server_rows::create(&db, "a", "A", |_| true)
             .await
             .unwrap()
             .unwrap();

@@ -542,7 +542,7 @@ mod tests {
     #[tokio::test]
     async fn settings_default_until_set() {
         let db = db::memory().await;
-        let server = server_rows::create(&db, "A", |_| true)
+        let server = server_rows::create(&db, "a", "A", |_| true)
             .await
             .unwrap()
             .unwrap();

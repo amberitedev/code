@@ -171,7 +171,7 @@ mod tests {
     #[tokio::test]
     async fn flags_are_set_and_reset() {
         let db = db::memory().await;
-        let server = server_rows::create(&db, "A", |_| true)
+        let server = server_rows::create(&db, "a", "A", |_| true)
             .await
             .unwrap()
             .unwrap();
