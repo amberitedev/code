@@ -57,6 +57,12 @@ pub fn config() -> Option<&'static DevAppConfig> {
     CONFIG.get().and_then(Option::as_ref)
 }
 
+/// Whether this App runs with no window on the desktop. It then never shows, raises or focuses
+/// one: agents use it from browser tabs while the developer uses the computer.
+pub fn window_hidden() -> bool {
+    config().is_some_and(|config| config.hide_window)
+}
+
 /// Sign a dev App in to its scenario account, so every App the dev runner starts is signed in
 /// without going through the website. Does nothing when an account is already active. The backend
 /// opens the session only for the runner's secret, which arrives in the environment.

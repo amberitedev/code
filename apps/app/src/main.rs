@@ -74,7 +74,7 @@ async fn start_engine(
 #[tracing::instrument(skip_all)]
 #[tauri::command]
 fn show_window(app: tauri::AppHandle) {
-    if dev::config().is_some_and(|config| config.hide_window) {
+    if dev::window_hidden() {
         return;
     }
     let win = app.get_window("main").unwrap();
@@ -126,6 +126,12 @@ fn main() {
         dev::config().and_then(|config| config.dev_url.clone())
     {
         tauri_context.config_mut().build.dev_url = Some(dev_url);
+    }
+    if dev::window_hidden() {
+        // A WebView takes keyboard focus as it is created, even in a window that is never shown.
+        for window in &mut tauri_context.config_mut().app.windows {
+            window.focus = false;
+        }
     }
 
     let _log_guard =
@@ -273,11 +279,18 @@ fn main() {
     let window_state_flags =
         window_state_flags | tauri_plugin_window_state::StateFlags::DECORATIONS;
 
+    // Restoring a maximized window shows and activates it for a moment, even one that stays hidden.
+    let untracked_windows: &[&str] = if dev::window_hidden() {
+        &["signin", "main"]
+    } else {
+        &["signin"]
+    };
+
     builder = builder
         .plugin(
             tauri_plugin_window_state::Builder::default()
                 .with_filename("app-window-state.json")
-                .with_denylist(&["signin"])
+                .with_denylist(untracked_windows)
                 // Restoring VISIBLE would override the hidden startup window.
                 .with_state_flags(window_state_flags)
                 .build(),
