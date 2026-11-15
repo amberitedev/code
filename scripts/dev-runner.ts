@@ -48,7 +48,7 @@ const FETCH_BAD_PORTS = new Set([
 ])
 
 export const DEV_MODES = ['dev', 'dev:app', 'dev:backend', 'dev:core'] as const
-const RUNNER_FLAGS = ['--dry-run', '--no-account-web', '--hide-windows', '--held']
+const RUNNER_FLAGS = ['--dry-run', '--no-account-web', '--hide-windows', '--held', '--background']
 export type DevMode = (typeof DEV_MODES)[number]
 export type DevPorts = {
 	readonly app: number
@@ -370,6 +370,7 @@ export function readStackShape(path: string, mode: DevMode): StackShape | undefi
 }
 
 async function main(): Promise<void> {
+	if (process.argv.includes('--background')) runInBackground()
 	const paths = resolveWorktreePaths()
 	const [command, ...commandArgs] = process.argv.slice(2)
 	if (command === 'up' || command === 'fixture') {
@@ -1938,12 +1939,16 @@ function migrateLocalBackend(paths: WorktreePaths, env: NodeJS.ProcessEnv): void
 		],
 		{
 			cwd: NodePath.join(paths.worktree, 'apps', 'backend'),
+			encoding: 'utf8',
 			env,
-			stdio: 'inherit',
 			windowsHide: true,
 		},
 	)
-	if (result.status !== 0) throw new DevRunnerError('Local account database migration failed.')
+	if (result.status !== 0) {
+		throw new DevRunnerError(
+			`Local account database migration failed.\n${result.stdout}${result.stderr}`,
+		)
+	}
 }
 
 /**
@@ -2173,27 +2178,85 @@ async function printStatus(paths: WorktreePaths): Promise<boolean> {
 	return ready
 }
 
-/** Starts a dev runner that outlives this command, writing to the dev log. */
-function startRunner(paths: WorktreePaths, input: RunnerInput): NodeChildProcess.ChildProcess {
+/** Where a command leaves its environment for the background runner it starts on Windows. */
+function runnerEnvPath(worktree: string): string {
+	return NodePath.join(worktree, '.data', 'runner-env.json')
+}
+
+/**
+ * Starts a dev runner that outlives this command and writes to the dev log. Returns its PID.
+ *
+ * On Windows `vp run` puts its command in a job that kills every process in it when vp returns,
+ * and a child cannot leave that job. So Windows itself is asked to create the runner, which makes
+ * it nobody's child. Such a process gets a fresh environment, so this one's is left in a file.
+ */
+function startRunner(paths: WorktreePaths, input: RunnerInput): number {
 	NodeFS.mkdirSync(paths.data, { recursive: true })
-	const log = NodeFS.openSync(devLogPath(paths), 'w')
-	// On Windows `vp run` puts its command in a kill-on-close job without breakaway, so a runner
-	// started through it dies when vp returns. Node cannot spawn outside that job.
-	const started = NodeChildProcess.spawn(
-		process.execPath,
-		[
-			NodeURL.fileURLToPath(import.meta.url),
-			input.mode,
-			...(input.accountWeb ? [] : ['--no-account-web']),
-			...(input.hideWindows ? ['--hide-windows'] : []),
-			...(input.held ? ['--held'] : []),
-		],
-		{ cwd: paths.worktree, detached: true, stdio: ['ignore', log, log], windowsHide: true },
-	)
-	started.unref()
-	NodeFS.closeSync(log)
-	runnerLog('info', `started PID ${started.pid}`)
-	return started
+	const args = [
+		NodeURL.fileURLToPath(import.meta.url),
+		input.mode,
+		...(input.accountWeb ? [] : ['--no-account-web']),
+		...(input.hideWindows ? ['--hide-windows'] : []),
+		...(input.held ? ['--held'] : []),
+		'--background',
+	]
+	let pid: number | undefined
+	if (process.platform === 'win32') {
+		NodeFS.writeFileSync(runnerEnvPath(paths.worktree), JSON.stringify(process.env), {
+			mode: 0o600,
+		})
+		// `ShowWindow = 0` keeps its console off the desktop.
+		const create = [
+			'$startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [uint16]0 }',
+			'(Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $env:RUNNER_COMMAND; CurrentDirectory = $env:RUNNER_DIRECTORY; ProcessStartupInformation = $startup }).ProcessId',
+		].join('; ')
+		const created = NodeChildProcess.spawnSync(
+			'powershell.exe',
+			['-NoProfile', '-Command', create],
+			{
+				encoding: 'utf8',
+				env: {
+					...process.env,
+					RUNNER_COMMAND: [process.execPath, ...args].map((part) => `"${part}"`).join(' '),
+					RUNNER_DIRECTORY: paths.worktree,
+				},
+				windowsHide: true,
+			},
+		)
+		pid = Number(created.stdout.trim()) || undefined
+		if (!pid) throw new DevRunnerError(`Could not start the dev runner. ${created.stderr.trim()}`)
+	} else {
+		const started = NodeChildProcess.spawn(process.execPath, args, {
+			cwd: paths.worktree,
+			detached: true,
+			stdio: 'ignore',
+		})
+		started.unref()
+		pid = started.pid
+		if (!pid) throw new DevRunnerError('Could not start the dev runner.')
+	}
+	runnerLog('info', `started PID ${pid}`)
+	return pid
+}
+
+/**
+ * What a runner with no terminal does first: take the environment of the command that started
+ * it, and write everything it and its programs print to the dev log.
+ */
+function runInBackground(): void {
+	const env = runnerEnvPath(process.cwd())
+	if (NodeFS.existsSync(env)) {
+		Object.assign(process.env, JSON.parse(NodeFS.readFileSync(env, 'utf8')))
+		NodeFS.rmSync(env)
+	}
+	NodeFS.mkdirSync(NodePath.join(process.cwd(), '.data'), { recursive: true })
+	const log = NodeFS.openSync(NodePath.join(process.cwd(), '.data', 'dev.log'), 'w')
+	const write = (chunk: string | Uint8Array) => {
+		NodeFS.writeSync(log, chunk as string)
+		return true
+	}
+	process.stdout.write = write as typeof process.stdout.write
+	process.stderr.write = write as typeof process.stderr.write
 }
 
 /** Sends the running dev runner one line, the way `rs` and `stop` reach it. */
@@ -2237,14 +2300,14 @@ async function applyFixture(paths: WorktreePaths, name: string, input: RunnerInp
 		})
 	/** The runner this command talks to, or an error once it can no longer finish the job. */
 	const runtime = (): RuntimeFile | undefined => {
-		if (started && started.exitCode !== null) {
+		if (started && !processIsRunning(started)) {
 			throw new DevRunnerError(`The dev runner stopped. See ${devLogPath(paths)}`)
 		}
 		const current = readLiveRuntime(paths)
 		if (current?.buildFailed) {
 			throw new DevRunnerError(`${current.buildFailed} did not build. See ${devLogPath(paths)}`)
 		}
-		return current && (!started || current.pid === started.pid) ? current : undefined
+		return current && (!started || current.pid === started) ? current : undefined
 	}
 	try {
 		while (!runtime()) await new Promise((resolve) => setTimeout(resolve, 200))
@@ -2310,7 +2373,7 @@ async function sendProgramCommand(
  * Starts the dev stack in the background and returns once it is ready to use.
  */
 async function up(paths: WorktreePaths, input: RunnerInput): Promise<void> {
-	let started: NodeChildProcess.ChildProcess | undefined
+	let started: number | undefined
 	const live = readLiveRuntime(paths)
 	// An App decides whether to show its window when it starts, so asking a running one is too late.
 	if (live?.hideWindows && !input.hideWindows) {
@@ -2338,7 +2401,7 @@ async function up(paths: WorktreePaths, input: RunnerInput): Promise<void> {
 		})
 	const deadline = Date.now() + UP_WAIT_MS
 	while (Date.now() < deadline) {
-		if (started && started.exitCode !== null) {
+		if (started && !processIsRunning(started)) {
 			runnerLog('error', `The dev runner stopped while starting. See ${devLogPath(paths)}`)
 			process.exitCode = 1
 			record('failed')
@@ -2346,7 +2409,7 @@ async function up(paths: WorktreePaths, input: RunnerInput): Promise<void> {
 		}
 		const runtime = readLiveRuntime(paths)
 		// A runtime file left by an earlier run does not describe the runner started above.
-		const current = runtime && (!started || runtime.pid === started.pid) ? runtime : undefined
+		const current = runtime && (!started || runtime.pid === started) ? runtime : undefined
 		if (current?.buildFailed) {
 			runnerLog('error', `${current.buildFailed} did not build. See ${devLogPath(paths)}`)
 			process.exitCode = 1
