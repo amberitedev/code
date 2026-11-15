@@ -6,25 +6,31 @@ import { restartIfPatched } from './call.ts'
 import { begin, state } from './context.ts'
 
 describe('restarting a patched program', () => {
-	it('is asked for once by calls made together, and again after it failed', async () => {
+	it('is asked for once by calls made together, and fails only with its own restart', async () => {
 		const answering = NodeHttp.createServer((_, response) => response.end('ok')).listen(0)
 		const sent: string[] = []
 		const requests: Record<string, string> = {}
+		// Left from before any request here: only what follows its own request counts.
+		const programs = { backend: 'failed' }
+		const backend = `http://127.0.0.1:${(answering.address() as AddressInfo).port}`
 		begin({
 			worktree: '',
 			primary: '',
 			data: '',
 			send: (command) => sent.push(command),
 			runtime: () => ({
-				// Left from before any request here: only an answer to its own request counts.
-				programs: { backend: 'failed' },
+				programs,
 				requests,
 				apps: [],
 				cores: [],
-				urls: { backend: `http://127.0.0.1:${(answering.address() as AddressInfo).port}` },
+				urls: { backend },
 			}),
 		})
-		const answer = (state: string) => (requests[sent.at(-1)!.split('#')[1]!] = state)
+		/** The runner finishing the latest request, leaving the program in `state`. */
+		const answer = (state: string) => {
+			programs.backend = state
+			requests[sent.at(-1)!.split('#')[1]!] = state
+		}
 		try {
 			state.dirty.add('backend')
 			const together = Promise.allSettled([
@@ -45,6 +51,15 @@ describe('restarting a patched program', () => {
 			// Nothing is patched now, so nothing more is asked.
 			await restartIfPatched('backend')
 			expect(sent).toHaveLength(2)
+
+			// Started, then gone before it ever answered: the wait ends with that failure.
+			await new Promise((resolve) => answering.close(resolve))
+			state.dirty.add('backend')
+			const exits = restartIfPatched('backend')
+			await expect.poll(() => sent.length).toBe(3)
+			answer('running')
+			programs.backend = 'failed'
+			await expect(exits).rejects.toThrow('did not start again')
 		} finally {
 			answering.close()
 		}

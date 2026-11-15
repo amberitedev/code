@@ -197,9 +197,13 @@ export async function restart(label: string): Promise<void> {
 	current().send(`rs ${label} #${request}`)
 	const deadline = Date.now() + 9 * 60_000
 	for (;;) {
-		const state = runtime().requests[request]
-		if (state && state !== 'running') throw new FixtureError(`${label} did not start again.`)
-		if (state && (await answers(label))) return
+		const now = runtime()
+		const answer = now.requests[request]
+		// Once answered, a failure is this start's: the new process can exit before it ever answers.
+		if (answer && (answer !== 'running' || now.programs[label] === 'failed')) {
+			throw new FixtureError(`${label} did not start again.`)
+		}
+		if (answer && (await answers(label))) return
 		if (Date.now() > deadline) throw new FixtureError(`${label} did not come back.`)
 		await sleep(100)
 	}
