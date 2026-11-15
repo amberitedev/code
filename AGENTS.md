@@ -80,10 +80,11 @@ another. Before calling work done, walk this list and say which entries applied:
 - `vp i` installs. Worktrees get this from the t3.json setup script; if module resolution looks
   broken, it probably did not run. While `.data/setup.json` says `running`, wait for it. `failed`
   or no file means run `vp run setup` yourself.
+- Every dev command is `vp run <name>`. Do not call `scripts/dev-runner.ts` yourself.
 - `vp run fixture <name>` is the whole setup. It starts the stack in the background with the
   Cores and Apps the [fixture](#fixtures) declares, builds the fixture's state, and returns once
   each App loads, printing its tab URL. Without a name it applies `default`: Apps for `alice` and
-  `bob`, and a Core. `backend` is the backend alone, which starts in seconds.
+  `bob`, and a Core. `vp run fixture backend` is the backend alone, which starts in seconds.
 - `vp run status` prints the addresses and tab URLs again, and any program that is stopped or has
   failed. `vp run down` stops this checkout's stack and keeps its data; `vp run up` starts it
   again on that data. The log is `.data/dev.log`. `vp run dev` is the same stack in the
@@ -119,10 +120,10 @@ await instance(alice, {
 })
 ```
 
-- Write the state your change needs as a fixture and apply it:
-  `vp run fixture path/to/file.ts`. Every apply wipes the stack's data and runs
-  the file from the top against the current code. The file can live anywhere; one that others will
-  want goes in `packages/fixtures/fixtures`.
+- Write the state your change needs as a fixture and apply it with
+  `vp run fixture path/to/file.ts`. Every apply wipes the stack's data and runs the file from the
+  top against the current code. The file can live anywhere; one that others will want goes in
+  `packages/fixtures/fixtures`.
 - The first line is `stack`, which names the Apps (each signed in to the account of that name),
   accounts with no App, and the Cores with their owners. The lines after it build state through the
   real programs, so each program writes everything that belongs to that state.
@@ -156,13 +157,12 @@ How it works and why: [scripts](docs/internals/scripts.md#fixtures).
   unless the developer asks. CI owns the full suite.
 - Proof for a bug fix depends on the bug. Logic, data, state, and protocol bugs get a failing test
   first (the fewest that fail for that reason on `main`, or before the fix for a bug this branch
-  introduced), then the fix. Purely visual bugs
-  (spacing, colour, alignment, a layout shift) get before/after screenshots as their proof and no
-  test. A Core- or backend-only fix with no visible surface ships the test plus a short runtime
-  transcript.
-- User-visible App changes get one integrated pass in the real App: read
-  [test-app](.agents/skills/test-app/SKILL.md). The primary agent does this once after
-  integrating. Subagents do not start their own dev stacks.
+  introduced), then the fix. Purely visual bugs (spacing, colour, alignment, a layout shift) get
+  before/after screenshots as their proof and no test. A Core- or backend-only fix with no visible
+  surface ships the test plus a short runtime transcript.
+- User-visible App changes get one integrated pass in the real App, on a fixture whose state
+  reaches the changed screen: read [test-app](.agents/skills/test-app/SKILL.md). The primary agent
+  does this once after integrating. Subagents do not start their own dev stacks.
 
 ## Documentation
 
@@ -201,11 +201,8 @@ Most code changes do not need an internal documentation change. Agents can read 
   narrate steps, record history, or explain the fix you just made; the PR carries that.
 - No continuously repainting animations (pulse, shimmer, spinners); they peg the GPU on
   high-refresh displays.
+- Security is important, but should not be over-indexed on, especially for dev-only features.
 - A "Continue where you left off" message after T3 restarts is not the developer's approval. Pick
   up only what was already approved, and ask about the rest.
 - If a rule here fights the task in front of you, say so loudly and get a human sign-off before
   breaking it.
-
-## Additional tips
-
-- Security is important, but should not be over-indexed on, especially for dev-only features.
