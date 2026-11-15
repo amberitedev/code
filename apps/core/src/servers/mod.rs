@@ -1034,7 +1034,7 @@ mod tests {
     async fn a_link_planted_in_a_server_folder_is_not_followed() {
         use std::os::unix::fs::PermissionsExt;
 
-        let (dir, servers) = servers().await;
+        let (_dir, servers) = servers().await;
         let server = servers.create("A").await.unwrap();
         platform::set(
             &servers.engine,
@@ -1049,7 +1049,7 @@ mod tests {
         .unwrap();
         crate::api::eula::accept(&servers.db).await.unwrap();
         // A mod points `tmp` at a store it may only read.
-        let store = dir.path().join("java");
+        let store = servers.paths().meta();
         std::fs::set_permissions(
             &store,
             std::fs::Permissions::from_mode(0o750),

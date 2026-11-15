@@ -173,7 +173,7 @@ mod platform {
     /// is the only way `copal-servers` can still open its own world.
     ///
     /// A file with more than one hard link is skipped too, and named in install's output. A
-    /// mod can hard-link a file it may read, such as one in `java/` or `meta/`, into its server
+    /// mod can hard-link a file it may read, such as one in `meta/`, into its server
     /// folder (where the OS allows it, as on macOS); changing that inode here would change the
     /// shared file as well.
     fn chown_tree(
@@ -272,7 +272,7 @@ mod platform {
 
         #[test]
         fn a_file_hard_linked_from_elsewhere_is_left_alone() {
-            // `shared` stands for a file in `java/` or `meta/` that a mod linked into its folder.
+            // `shared` stands for a file in `meta/` that a mod linked into its folder.
             let outside = tempfile::tempdir().unwrap();
             let shared = outside.path().join("shared");
             std::fs::write(&shared, "").unwrap();

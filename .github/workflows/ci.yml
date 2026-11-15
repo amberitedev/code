@@ -138,7 +138,7 @@ jobs:
       - run: mkdir -p apps/app-frontend/dist
       - run: cargo fmt --all --check
       - run: cargo shear
-      - run: cargo test --workspace --exclude toasty --locked
+      - run: cargo test --workspace --exclude toasty --locked --no-fail-fast
       - run: sh -n apps/core/scripts/install.sh
       # A cargo error fails the step, and theseus_gui proves the pattern matches tauri.
       - name: Copal does not depend on Tauri, and the engine on no desktop crate
