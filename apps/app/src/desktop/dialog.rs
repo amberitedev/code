@@ -7,7 +7,9 @@ use contracts::{
     ApiError, Json,
     server::{Req, route},
 };
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
+#[cfg(any(windows, target_os = "macos"))]
+use tauri::Manager;
 use tauri_plugin_dialog::{DialogExt, FileDialogBuilder, FilePath};
 use tokio::sync::oneshot;
 
