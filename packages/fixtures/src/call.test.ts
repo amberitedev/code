@@ -16,7 +16,8 @@ describe('restarting a patched program', () => {
 			data: '',
 			send: (command) => sent.push(command),
 			runtime: () => ({
-				programs: {},
+				// Left from before any request here: only an answer to its own request counts.
+				programs: { backend: 'failed' },
 				requests,
 				apps: [],
 				cores: [],
@@ -26,10 +27,14 @@ describe('restarting a patched program', () => {
 		const answer = (state: string) => (requests[sent.at(-1)!.split('#')[1]!] = state)
 		try {
 			state.dirty.add('backend')
-			const together = Promise.all([restartIfPatched('backend'), restartIfPatched('backend')])
+			const together = Promise.allSettled([
+				restartIfPatched('backend'),
+				restartIfPatched('backend'),
+			])
 			await expect.poll(() => sent.length).toBe(1)
 			answer('failed')
-			await expect(together).rejects.toThrow('did not start again')
+			// Both waited for the one restart, so both learn it failed.
+			expect((await together).map((call) => call.status)).toEqual(['rejected', 'rejected'])
 
 			// The failed restart left the program marked, so the next call asks again.
 			const again = restartIfPatched('backend')
