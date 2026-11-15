@@ -26,7 +26,7 @@ Follow these steps to set up your development environment:
 
 ```bash
 pnpm install
-pnpm app:dev
+vp run dev
 ```
 
 You should now have a development build of the app running with hot-reloading enabled. Any changes you make to the code will automatically refresh the app.

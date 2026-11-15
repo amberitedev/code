@@ -85,7 +85,7 @@ export function begin(value: Runner): void {
 export function current(): Runner {
 	if (!runner) {
 		throw new FixtureError(
-			'Fixture helpers only work in a file the fixture command runs: node scripts/dev-runner.ts fixture <file>',
+			'Fixture helpers only work in a file the fixture command runs: vp run fixture <file>',
 		)
 	}
 	return runner

@@ -47,9 +47,7 @@ const FETCH_BAD_PORTS = new Set([
 	6669, 6679, 6697, 10080,
 ])
 
-export const DEV_MODES = ['dev', 'dev:app', 'dev:backend', 'dev:core'] as const
-const RUNNER_FLAGS = ['--dry-run', '--no-account-web', '--hide-windows', '--held', '--background']
-export type DevMode = (typeof DEV_MODES)[number]
+const RUNNER_FLAGS = ['--no-account-web', '--hide-windows', '--held', '--background']
 export type DevPorts = {
 	readonly app: number
 	readonly backend: number
@@ -86,12 +84,10 @@ export type StackShape = {
 type RunnerInput = {
 	/** The account sign-in website. Only a person signing in by hand needs it. */
 	readonly accountWeb: boolean
-	readonly dryRun: boolean
 	/** Start only what holds no data, and leave the backend, Cores and Apps to a fixture. */
 	readonly held: boolean
 	/** Apps run without a window on the desktop and are used from browser tabs. */
 	readonly hideWindows: boolean
-	readonly mode: DevMode
 }
 /**
  * A Rust program the runner builds itself. It is built once per distinct set of inputs, copied
@@ -151,7 +147,6 @@ export type RuntimeFile = {
 	pid?: number
 	readonly branch: string
 	readonly dataDir: string
-	readonly mode: DevMode
 	/** False when the account sign-in website was left out, so nothing waits for its port. */
 	readonly accountWeb: boolean
 	/** A process whose Rust build failed. `up` stops waiting when it sees one. */
@@ -244,10 +239,9 @@ export function resolveStartOffset(input: {
 export async function findFirstAvailableOffset(input: {
 	readonly accountWeb?: boolean
 	readonly checkPort?: PortAvailabilityCheck
-	readonly mode: DevMode
 	readonly startOffset: number
 }): Promise<number> {
-	const requiredPorts = requiredPortNames(input.mode, input.accountWeb)
+	const requiredPorts = requiredPortNames(input.accountWeb)
 	const checkPort = input.checkPort ?? portIsAvailable
 
 	for (let offset = input.startOffset; offset <= MAX_PORT; offset += 1) {
@@ -321,30 +315,14 @@ export function appTabUrl(name: string, vitePort: number, address: LocalAddress)
 	return url.href
 }
 
-/** The programs a mode always runs. Cores and Apps come from the stack on top of these. */
-export function processLabelsForMode(mode: DevMode, accountWeb = true): ReadonlyArray<string> {
-	const labels = {
-		dev: ['backend', 'account-web', 'app-frontend'],
-		'dev:backend': ['backend', 'account-web'],
-		'dev:app': ['app-frontend'],
-		'dev:core': [],
-	}[mode]
+/** The programs every stack runs. Its Cores and Apps come on top of these. */
+export function sharedLabels(accountWeb = true): ReadonlyArray<string> {
+	const labels = ['backend', 'account-web', 'app-frontend']
 	return accountWeb ? labels : labels.filter((label) => label !== 'account-web')
 }
 
-/** Whether a mode runs the stack's Apps, and whether it runs its Cores. */
-function stackPartsForMode(mode: DevMode): { readonly apps: boolean; readonly cores: boolean } {
-	return {
-		apps: mode === 'dev' || mode === 'dev:app',
-		cores: mode === 'dev' || mode === 'dev:core',
-	}
-}
-
-/**
- * The stack file, or `undefined` before any fixture was applied. A mode that runs only part of a
- * stack takes that part.
- */
-export function readStackShape(path: string, mode: DevMode): StackShape | undefined {
+/** The stack file, or `undefined` before any fixture was applied. */
+export function readStackShape(path: string): StackShape | undefined {
 	if (!NodeFS.existsSync(path)) return undefined
 	let value: unknown
 	try {
@@ -361,12 +339,7 @@ export function readStackShape(path: string, mode: DevMode): StackShape | undefi
 	) {
 		throw new DevRunnerError(`${path} is not a stack file. Apply a fixture to write it again.`)
 	}
-	const parts = stackPartsForMode(mode)
-	return {
-		apps: parts.apps ? (value.apps as StackShape['apps']) : [],
-		cores: parts.cores ? value.cores : 0,
-		id: value.id,
-	}
+	return { apps: value.apps as StackShape['apps'], cores: value.cores, id: value.id }
 }
 
 async function main(): Promise<void> {
@@ -383,15 +356,13 @@ async function main(): Promise<void> {
 		if (command === 'fixture') {
 			if (args.length > 1) throw new DevRunnerError('fixture takes one name or file.')
 			return applyFixture(paths, args[0] ?? DEFAULT_FIXTURE, {
-				...parseInput(['dev']),
+				...parseInput([]),
 				...background,
 			})
 		}
-		// The mode is optional here: `up` means the full stack.
-		const hasMode = DEV_MODES.some((mode) => mode === args[0])
-		const input = { ...parseInput(hasMode ? args : ['dev', ...args]), ...background }
+		const input = { ...parseInput(args), ...background }
 		// A checkout that never had a fixture applied has no data to start on.
-		if (input.mode === 'dev' && !NodeFS.existsSync(paths.stack) && !readLiveRuntime(paths)) {
+		if (!NodeFS.existsSync(paths.stack) && !readLiveRuntime(paths)) {
 			return applyFixture(paths, DEFAULT_FIXTURE, input)
 		}
 		return up(paths, input)
@@ -404,7 +375,12 @@ async function main(): Promise<void> {
 	if (command === 'stop' || command === 'rs') return sendProgramCommand(paths, command, commandArgs)
 	if (command === 'build') return buildPrograms(paths)
 	if (command === 'test') return testCrates(paths, commandArgs)
-	const input = parseInput(process.argv.slice(2))
+	if (command !== 'dev') {
+		throw new DevRunnerError(
+			`Unknown command ${command ?? ''}. Expected fixture, up, dev, status, stop, rs, down, build or test.`,
+		)
+	}
+	const input = parseInput(commandArgs)
 	const { offset: startOffset, source } = resolveStartOffset({
 		devInstance: process.env.DEV_INSTANCE,
 		explicitOffset: process.env.PORT_OFFSET,
@@ -413,53 +389,30 @@ async function main(): Promise<void> {
 	})
 	const selectedOffset = await findFirstAvailableOffset({
 		accountWeb: input.accountWeb,
-		mode: input.mode,
 		startOffset,
 	})
 	const ports = portsForOffset(selectedOffset)
 	const branch = currentBranch(paths.worktree)
 	const env = createRuntimeEnvironment({ baseEnv: readSharedEnv(paths), ports })
-	const saved = readStackShape(paths.stack, input.mode)
-	// A full stack with no data yet starts held, and the default fixture then fills it.
-	const applyDefault = input.mode === 'dev' && !input.held && !saved
-	const held = input.held || applyDefault
-	const labels = processLabelsForMode(input.mode, input.accountWeb)
-	if (!input.dryRun) {
-		const secretPath = NodePath.join(paths.data, 'backend', 'dev-secret')
-		NodeFS.mkdirSync(NodePath.dirname(secretPath), { recursive: true })
-		if (!NodeFS.existsSync(secretPath))
-			NodeFS.writeFileSync(secretPath, NodeCrypto.randomBytes(32).toString('hex'), { mode: 0o600 })
-		env.LOCAL_DEV_SECRET = NodeFS.readFileSync(secretPath, 'utf8').trim()
-		if (labels.includes('backend')) {
-			prepareLocalBackend(paths, env)
-			// A fixture brings the backend's database with it.
-			if (!held) migrateLocalBackend(paths, env)
-		}
-	}
-	const shared = createSharedSpecs({
-		accountWeb: input.accountWeb,
-		env,
-		mode: input.mode,
-		paths,
-		ports,
-	})
-	printPlan({
-		branch,
-		mode: input.mode,
-		paths,
-		ports,
-		shape: held ? undefined : (saved ?? firstStackShape(input.mode)),
-		source,
-		specs: shared,
-	})
-	if (input.dryRun) return
+	const saved = readStackShape(paths.stack)
+	// A stack with no data yet starts held, and the default fixture then fills it.
+	const applyDefault = !input.held && !saved
+	const secretPath = NodePath.join(paths.data, 'backend', 'dev-secret')
+	NodeFS.mkdirSync(NodePath.dirname(secretPath), { recursive: true })
+	if (!NodeFS.existsSync(secretPath))
+		NodeFS.writeFileSync(secretPath, NodeCrypto.randomBytes(32).toString('hex'), { mode: 0o600 })
+	env.LOCAL_DEV_SECRET = NodeFS.readFileSync(secretPath, 'utf8').trim()
+	prepareLocalBackend(paths, env)
+	// A fixture brings the backend's database with it.
+	const started = input.held ? undefined : saved
+	if (started) migrateLocalBackend(paths, env)
+	const shared = createSharedSpecs({ accountWeb: input.accountWeb, env, paths, ports })
+	printPlan({ branch, paths, ports, shape: started, source, specs: shared })
 
-	NodeFS.mkdirSync(paths.data, { recursive: true })
 	const runtime: RuntimeFile = {
 		pid: process.pid,
 		branch,
 		dataDir: paths.data,
-		mode: input.mode,
 		accountWeb: input.accountWeb,
 		hideWindows: input.hideWindows,
 		ports,
@@ -619,7 +572,7 @@ async function main(): Promise<void> {
 		if (!stopping && starts.get(spec.label) === token) await startProgram(spec)
 	}
 
-	/** Whether the Apps and Cores change with the stack file, rather than being fixed by the mode. */
+	/** Whether a program is one of the stack's Apps and Cores, which change with the stack file. */
 	const isStackLabel = (label: string) => label.startsWith('app:') || label.startsWith('core:')
 	/** Stops everything that holds data, so a fixture can replace that data. */
 	const halt = async () => {
@@ -688,7 +641,7 @@ async function main(): Promise<void> {
 	}
 	/** Reads the stack file a fixture just wrote and starts it. */
 	const startSavedStack = async () => {
-		const shape = readStackShape(paths.stack, input.mode)
+		const shape = readStackShape(paths.stack)
 		if (!shape) {
 			runnerLog('warning', `No stack to start: ${paths.stack} is missing.`)
 			return
@@ -735,22 +688,16 @@ async function main(): Promise<void> {
 
 	try {
 		for (const spec of shared) if (spec.label !== 'backend') void startProgram(spec)
-		if (held) {
+		if (started) {
+			void startStack(started)
+		} else {
 			runnerLog('info', 'Backend, Cores and Apps wait for a fixture.')
 			if (applyDefault) applyDefaultFixture(paths, builds)
-		} else {
-			void startStack(saved ?? firstStackShape(input.mode))
 		}
 		await finished
 	} finally {
 		await stop(process.exitCode || 1)
 	}
-}
-
-/** What a mode that runs only part of a stack starts before any fixture was applied. */
-function firstStackShape(mode: DevMode): StackShape {
-	const parts = stackPartsForMode(mode)
-	return { apps: parts.apps ? [{ name: 'alice' }] : [], cores: parts.cores ? 1 : 0, id: 'first' }
 }
 
 /**
@@ -771,28 +718,19 @@ function applyDefaultFixture(
 }
 
 export function parseInput(args: ReadonlyArray<string>): RunnerInput {
-	const modeValue = args.find((arg) => !arg.startsWith('-')) ?? 'dev'
-	if (!DEV_MODES.includes(modeValue as DevMode)) {
-		throw new DevRunnerError(
-			`Unknown development mode ${modeValue}. Expected ${DEV_MODES.join(', ')}.`,
-		)
-	}
-
 	const unknown = args.find((arg) => arg.startsWith('--') && !RUNNER_FLAGS.includes(arg))
 	if (unknown) throw new DevRunnerError(`Unknown option ${unknown}.`)
-	const extra = args.find((arg) => arg !== modeValue && !arg.startsWith('--'))
+	const extra = args.find((arg) => !arg.startsWith('--'))
 	if (extra) {
 		throw new DevRunnerError(
-			`Unexpected ${extra}. A fixture names the Apps and Cores: node scripts/dev-runner.ts fixture <name>`,
+			`Unexpected ${extra}. A fixture names the Apps and Cores: vp run fixture <name>`,
 		)
 	}
 
 	return {
 		accountWeb: !args.includes('--no-account-web'),
-		dryRun: args.includes('--dry-run'),
 		held: args.includes('--held'),
 		hideWindows: args.includes('--hide-windows'),
-		mode: modeValue as DevMode,
 	}
 }
 
@@ -844,7 +782,7 @@ async function buildPrograms(paths: WorktreePaths): Promise<void> {
 		hideWindows: true,
 		paths,
 		ports,
-		shape: firstStackShape('dev'),
+		shape: { apps: [{ name: 'alice' }], cores: 1, id: 'build' },
 	})
 	for (const spec of specs) {
 		if (!spec.build) continue
@@ -965,15 +903,14 @@ async function runTests(
 	}
 }
 
-/** The programs a mode always runs: the ones that are not a Core or an App. */
+/** The programs every stack runs: the ones that are not a Core or an App. */
 export function createSharedSpecs(input: {
 	readonly accountWeb: boolean
 	readonly env: NodeJS.ProcessEnv
-	readonly mode: DevMode
 	readonly paths: WorktreePaths
 	readonly ports: DevPorts
 }): ReadonlyArray<ProcessSpec> {
-	const labels = processLabelsForMode(input.mode, input.accountWeb)
+	const labels = sharedLabels(input.accountWeb)
 	const backendUrl = `http://127.0.0.1:${input.ports.backend}`
 	const specs: Record<string, ProcessSpec> = {
 		backend: {
@@ -1864,14 +1801,9 @@ function canListen(port: number, host: string): Promise<boolean> {
 	})
 }
 
-function requiredPortNames(mode: DevMode, accountWeb = true): ReadonlyArray<PortName> {
-	const names = {
-		dev: ['app', 'backend', 'accountWeb', 'core'],
-		'dev:backend': ['backend', 'accountWeb'],
-		'dev:app': ['app'],
-		'dev:core': ['core'],
-	} as const
-	return names[mode].filter((name) => accountWeb || name !== 'accountWeb')
+function requiredPortNames(accountWeb = true): ReadonlyArray<PortName> {
+	const names = ['app', 'backend', 'accountWeb', 'core'] as const
+	return names.filter((name) => accountWeb || name !== 'accountWeb')
 }
 
 function stableHash(value: string): number {
@@ -2034,7 +1966,7 @@ function processIsDevRunner(pid: number): boolean {
 
 /** The ports the stack's programs listen on, by program label. */
 function programPorts(runtime: RuntimeFile): ReadonlyMap<string, number> {
-	const labels = processLabelsForMode(runtime.mode, runtime.accountWeb)
+	const labels = sharedLabels(runtime.accountWeb)
 	const shared = [
 		['backend', runtime.ports.backend],
 		['account-web', runtime.ports.accountWeb],
@@ -2141,7 +2073,7 @@ function portIsOpen(port: number): Promise<boolean> {
 async function printStatus(paths: WorktreePaths): Promise<boolean> {
 	const runtime = readLiveRuntime(paths)
 	if (!runtime) {
-		runnerLog('info', 'not running. Start it with: node scripts/dev-runner.ts up')
+		runnerLog('info', 'not running. Start it with: vp run up')
 		return false
 	}
 	let ready = false
@@ -2152,9 +2084,9 @@ async function printStatus(paths: WorktreePaths): Promise<boolean> {
 		if (!(error instanceof PageError)) throw error
 		pageError = error.message
 	}
-	const labels = processLabelsForMode(runtime.mode, runtime.accountWeb)
+	const labels = sharedLabels(runtime.accountWeb)
 	const state = pageError ? 'page does not compile' : ready ? 'ready' : 'starting'
-	runnerLog('info', `${runtime.mode} PID ${runtime.pid} · ${state}`)
+	runnerLog('info', `dev PID ${runtime.pid} · ${state}`)
 	if (pageError) runnerLog('error', pageError)
 	/** Says so when a program is not simply running. */
 	const note = (label: string) => {
@@ -2194,7 +2126,7 @@ function startRunner(paths: WorktreePaths, input: RunnerInput): number {
 	NodeFS.mkdirSync(paths.data, { recursive: true })
 	const args = [
 		NodeURL.fileURLToPath(import.meta.url),
-		input.mode,
+		'dev',
 		...(input.accountWeb ? [] : ['--no-account-web']),
 		...(input.hideWindows ? ['--hide-windows'] : []),
 		...(input.held ? ['--held'] : []),
@@ -2280,9 +2212,6 @@ async function applyFixture(paths: WorktreePaths, name: string, input: RunnerInp
 		return
 	}
 	const live = readLiveRuntime(paths)
-	if (live && live.mode !== 'dev') {
-		throw new DevRunnerError(`Already running ${live.mode}. Run vp run down first.`)
-	}
 	// An App decides whether to show its window when it starts, so asking a running one is too late.
 	if (live?.hideWindows && !input.hideWindows) {
 		throw new DevRunnerError('Already running with App windows hidden. Run vp run down first.')
@@ -2344,7 +2273,7 @@ async function sendProgramCommand(
 ): Promise<void> {
 	const [name] = args
 	const before = readLiveRuntime(paths)
-	if (!before) throw new DevRunnerError('not running. Start it with: node scripts/dev-runner.ts up')
+	if (!before) throw new DevRunnerError('not running. Start it with: vp run up')
 	const known = Object.keys(before.programs)
 	const app = before.apps.find((app) => String(app.index) === name || app.name === name)
 	const label = app ? `app:${app.index}` : name === 'core' ? 'core:1' : (name ?? '')
@@ -2381,11 +2310,6 @@ async function up(paths: WorktreePaths, input: RunnerInput): Promise<void> {
 		process.exitCode = 1
 		return
 	}
-	if (live && live.mode !== input.mode) {
-		runnerLog('error', `Already running ${live.mode}. Run vp run down first.`)
-		process.exitCode = 1
-		return
-	}
 	if (!live) started = startRunner(paths, input)
 
 	const waitStarted = performance.now()
@@ -2396,7 +2320,6 @@ async function up(paths: WorktreePaths, input: RunnerInput): Promise<void> {
 			worktree: paths.worktree,
 			result,
 			startedRunner: started !== undefined,
-			mode: input.mode,
 			ms: { total: Math.round(performance.now() - waitStarted) },
 		})
 	const deadline = Date.now() + UP_WAIT_MS
@@ -2445,7 +2368,7 @@ async function up(paths: WorktreePaths, input: RunnerInput): Promise<void> {
 	}
 	runnerLog(
 		'warning',
-		`Still starting. Run node scripts/dev-runner.ts up again to keep waiting. Log: ${devLogPath(paths)}`,
+		`Still starting. Run vp run up again to keep waiting. Log: ${devLogPath(paths)}`,
 	)
 	record('waiting')
 	// Not a failure: the runner is still working.
@@ -2492,7 +2415,6 @@ function devLogPath(paths: WorktreePaths): string {
 
 function printPlan(input: {
 	readonly branch: string
-	readonly mode: DevMode
 	readonly paths: WorktreePaths
 	readonly ports: DevPorts
 	/** Absent when the Apps and Cores wait for a fixture. */
@@ -2500,7 +2422,7 @@ function printPlan(input: {
 	readonly source: string
 	readonly specs: ReadonlyArray<ProcessSpec>
 }): void {
-	runnerLog('info', `${input.branch} · ${input.mode}`)
+	runnerLog('info', input.branch)
 	runnerLog('info', `data ${input.paths.data}`)
 	runnerLog('info', `ports from ${input.source}`)
 	const labels = input.specs.map((spec) => spec.label)

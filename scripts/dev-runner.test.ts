@@ -15,10 +15,10 @@ import {
 	parseInput,
 	portsForOffset,
 	prepareCheckoutCrates,
-	processLabelsForMode,
 	programKey,
 	readStackShape,
 	resolveStartOffset,
+	sharedLabels,
 } from './dev-runner.ts'
 
 describe('dev runner ports', () => {
@@ -86,7 +86,6 @@ describe('dev runner ports', () => {
 				checked.push(port)
 				return port !== 1420
 			},
-			mode: 'dev',
 			startOffset: 0,
 		})
 
@@ -98,20 +97,6 @@ describe('dev runner ports', () => {
 			accountWeb: 3101,
 			core: 16663,
 		})
-	})
-
-	it('checks only the ports started by a partial mode', async () => {
-		const checked: number[] = []
-		await findFirstAvailableOffset({
-			checkPort: async (port) => {
-				checked.push(port)
-				return true
-			},
-			mode: 'dev:core',
-			startOffset: 0,
-		})
-
-		expect(checked).toEqual([16662])
 	})
 
 	it('skips ports blocked by browsers', () => {
@@ -138,19 +123,10 @@ describe('dev runner environment', () => {
 	})
 })
 
-describe('dev runner modes', () => {
-	it('runs everything but the Cores and Apps of the stack in dev mode', () => {
-		expect(processLabelsForMode('dev')).toEqual(['backend', 'account-web', 'app-frontend'])
-	})
-
-	it('keeps partial modes focused', () => {
-		expect(processLabelsForMode('dev:app')).toEqual(['app-frontend'])
-		expect(processLabelsForMode('dev:backend')).toEqual(['backend', 'account-web'])
-		expect(processLabelsForMode('dev:core')).toEqual([])
-	})
-
-	it('leaves out the account sign-in website when asked', async () => {
-		expect(processLabelsForMode('dev', false)).toEqual(['backend', 'app-frontend'])
+describe('dev runner programs', () => {
+	it('runs the backend and the frontend beside the stack, and the sign-in website when asked', async () => {
+		expect(sharedLabels()).toEqual(['backend', 'account-web', 'app-frontend'])
+		expect(sharedLabels(false)).toEqual(['backend', 'app-frontend'])
 		const checked: number[] = []
 		await findFirstAvailableOffset({
 			accountWeb: false,
@@ -158,7 +134,6 @@ describe('dev runner modes', () => {
 				checked.push(port)
 				return true
 			},
-			mode: 'dev',
 			startOffset: 0,
 		})
 		expect(checked).toEqual([1420, 8787, 16662])
@@ -177,40 +152,29 @@ describe('dev runner stack', () => {
 	}
 
 	it('reads the options a background start passes', () => {
-		expect(parseInput(['dev'])).toEqual({
-			accountWeb: true,
-			dryRun: false,
-			held: false,
-			hideWindows: false,
-			mode: 'dev',
-		})
-		expect(parseInput(['dev', '--no-account-web', '--hide-windows', '--held'])).toEqual({
+		expect(parseInput([])).toEqual({ accountWeb: true, held: false, hideWindows: false })
+		expect(parseInput(['--no-account-web', '--hide-windows', '--held'])).toEqual({
 			accountWeb: false,
-			dryRun: false,
 			held: true,
 			hideWindows: true,
-			mode: 'dev',
 		})
-		expect(() => parseInput(['dev', '--nope'])).toThrow('Unknown option --nope')
+		expect(() => parseInput(['--nope'])).toThrow('Unknown option --nope')
 	})
 
 	it('leaves the Apps and Cores to a fixture', () => {
-		expect(() => parseInput(['dev', '2'])).toThrow('A fixture names the Apps and Cores')
+		expect(() => parseInput(['2'])).toThrow('A fixture names the Apps and Cores')
 	})
 
-	it('reads the stack a fixture wrote, and only the part a mode runs', () => {
+	it('reads the stack a fixture wrote', () => {
 		const scratch = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), 'dev-runner-'))
 		const file = NodePath.join(scratch, 'stack.json')
 		try {
-			expect(readStackShape(file, 'dev')).toBeUndefined()
+			expect(readStackShape(file)).toBeUndefined()
 			const shape = { apps: [{ name: 'alice' }, { name: 'bob' }], cores: 2, id: 'one' }
 			NodeFS.writeFileSync(file, JSON.stringify(shape))
-			expect(readStackShape(file, 'dev')).toEqual(shape)
-			expect(readStackShape(file, 'dev:core')).toEqual({ ...shape, apps: [] })
-			expect(readStackShape(file, 'dev:app')).toEqual({ ...shape, cores: 0 })
-			expect(readStackShape(file, 'dev:backend')).toEqual({ apps: [], cores: 0, id: 'one' })
+			expect(readStackShape(file)).toEqual(shape)
 			NodeFS.writeFileSync(file, JSON.stringify({ apps: ['alice'], cores: 1, id: 'two' }))
-			expect(() => readStackShape(file, 'dev')).toThrow('is not a stack file')
+			expect(() => readStackShape(file)).toThrow('is not a stack file')
 		} finally {
 			NodeFS.rmSync(scratch, { force: true, recursive: true })
 		}
@@ -277,7 +241,6 @@ describe('dev runner stack', () => {
 		const specs = createSharedSpecs({
 			accountWeb: false,
 			env: {},
-			mode: 'dev',
 			paths,
 			ports: portsForOffset(0),
 		})

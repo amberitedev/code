@@ -1,4 +1,4 @@
-// What `node scripts/dev-runner.ts fixture <name>` does with a fixture file: find it, check its
+// What `vp run fixture <name>` does with a fixture file: find it, check its
 // types, run it against the dev stack, and tidy up after it.
 
 import * as NodeChildProcess from 'node:child_process'

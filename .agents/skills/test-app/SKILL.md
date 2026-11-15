@@ -7,14 +7,12 @@ description: Check a change in the real Amberite App from a browser tab, on a fi
 
 ## Start it
 
-`node scripts/dev-runner.ts fixture <name>` starts the stack in the background, builds the
-fixture's state, and prints each App's `tab:` URL once it loads. Without a name it applies
-`default`: Apps for `alice` and `bob`, who are friends, a Core `alice` owns, and an instance she
-shares with `bob`. When the change needs another state, write that state as a fixture (see
-Fixtures in AGENTS.md) and apply the file. There is no `vp run fixture`: on Windows, vp kills the
-background stack when it returns. `vp run status` and `vp run down` are safe through vp, because
-they start nothing that outlives them. Reuse a healthy stack from earlier in the task:
-`vp run status` prints the URLs again. Stop only what you started, with `vp run down`.
+`vp run fixture <name>` starts the stack in the background, builds the fixture's state, and prints
+each App's `tab:` URL once it loads. Without a name it applies `default`: Apps for `alice` and
+`bob`, who are friends, a Core `alice` owns, and an instance she shares with `bob`. When the change
+needs another state, write that state as a fixture (see Fixtures in AGENTS.md) and apply the file.
+Reuse a healthy stack from earlier in the task: `vp run status` prints the URLs again. Stop only
+what you started, with `vp run down`.
 
 When Rust has to build, the first start takes several minutes. The command gives up waiting after
 9 minutes; run it again to keep waiting.
@@ -42,7 +40,6 @@ When Rust has to build, the first start takes several minutes. The command gives
 
 ## Hand it over
 
-When the developer wants to look themselves: `vp run down`, then
-`node scripts/dev-runner.ts up --show-windows`, which starts the same Apps on the same data with
-their windows, and say which window and screen to look at. Once the developer has a window, do not
-drive that App.
+When the developer wants to look themselves: `vp run down`, then `vp run up --show-windows`, which
+starts the same Apps on the same data with their windows, and say which window and screen to look
+at. Once the developer has a window, do not drive that App.

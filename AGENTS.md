@@ -78,37 +78,26 @@ another. Before calling work done, walk this list and say which entries applied:
 ## Dev servers
 
 - `vp i` installs. Worktrees get this from the t3.json setup script; if module resolution looks
-  broken, it probably did not run.
-- Setup runs in the background. While `.data/setup.json` says `running` and its `pid` is alive,
-  wait for it and do not run `vp i`. It ends with `done` or `failed` (with the error). A dead pid,
-  `failed`, or no file at all means run `vp run setup` yourself.
-- `node scripts/dev-runner.ts fixture <name>` is the whole setup. It starts the backend, the
-  frontend, and the Cores and Apps the [fixture](#fixtures) declares in the background, builds the
-  fixture's state, and returns once each App loads, printing its tab URL. Without a name it
-  applies `default`: Apps for `alice` and `bob`, and a Core. There is no `vp run fixture`: on
-  Windows, vp kills everything its command started when it returns, the background stack included.
-  `node scripts/dev-runner.ts up` starts the stack again on the data it has. `vp run status`
-  prints the URLs again; `vp run down` stops only this checkout's stack. The log is
-  `.data/dev.log`. `vp run dev` is the same stack in the foreground with App windows, for a person
-  at a terminal.
-- Rust builds once per distinct set of Rust inputs, shared by every checkout. With no Rust changes,
-  a start compiles nothing. Otherwise it compiles only the repo's crates that changed, one build at
-  a time across checkouts. `fixture` and `up` give up waiting after 9 minutes; run the command again
-  to keep waiting.
-- Nothing watches Rust. After a Rust edit, apply the fixture again, or restart one program with
-  `vp run rs <name>`. Either builds first and stops on a compiler error, which is in the log, so it
-  is also the check for Rust changes.
+  broken, it probably did not run. While `.data/setup.json` says `running`, wait for it. `failed`
+  or no file means run `vp run setup` yourself.
+- `vp run fixture <name>` is the whole setup. It starts the stack in the background with the
+  Cores and Apps the [fixture](#fixtures) declares, builds the fixture's state, and returns once
+  each App loads, printing its tab URL. Without a name it applies `default`: Apps for `alice` and
+  `bob`, and a Core. `backend` is the backend alone, which starts in seconds.
+- `vp run status` prints the addresses and tab URLs again, and any program that is stopped or has
+  failed. `vp run down` stops this checkout's stack and keeps its data; `vp run up` starts it
+  again on that data. The log is `.data/dev.log`. `vp run dev` is the same stack in the
+  foreground with App windows, for a person at a terminal.
 - `vp run stop <name>` takes one program down and keeps it down, for a Core that is offline or a
   backend that does not answer. `vp run rs <name>` brings it back. The names are in
   `vp run status`: `backend`, `core:1`, `app:2`.
-- Backend-only work needs no App: `node scripts/dev-runner.ts up dev:backend` starts in seconds.
-  `node scripts/dev-runner.ts up dev:core` starts only the Cores. For the backend and a Core
-  together, start the full stack.
-- Ports derive from the worktree path and are stable across restarts. Read the real ones and the
-  tab URLs from `vp run status`, since occupied ports shift.
+- Nothing watches Rust. After a Rust edit, apply the fixture again, or restart one program with
+  `vp run rs <name>`. Either builds first and stops on a compiler error, which is in the log, so
+  it is also the check for Rust changes. A build can outlast the command, which gives up after 9
+  minutes: run it again to keep waiting.
 - Never kill by process name, path, or worktree string. Several worktrees run stacks at once, and
   your own agent's command line holds this worktree's path. Stop what you started with
-  `vp run down`, or kill only a PID you captured at spawn.
+  `vp run down` or `vp run stop <name>`.
 
 Ports, builds, and timings: [scripts](docs/internals/scripts.md).
 
@@ -131,7 +120,7 @@ await instance(alice, {
 ```
 
 - Write the state your change needs as a fixture and apply it:
-  `node scripts/dev-runner.ts fixture path/to/file.ts`. Every apply wipes the stack's data and runs
+  `vp run fixture path/to/file.ts`. Every apply wipes the stack's data and runs
   the file from the top against the current code. The file can live anywhere; one that others will
   want goes in `packages/fixtures/fixtures`.
 - The first line is `stack`, which names the Apps (each signed in to the account of that name),

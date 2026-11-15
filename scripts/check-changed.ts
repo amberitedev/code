@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
 // CI's fast checks for this branch's changes, so they fail here instead of after a push:
-// lint, typos and TOML on the changed files, typecheck and tests of the affected packages,
-// `dev:check` when the dev scripts change, and for Rust, `cargo fmt`, a build through the dev
-// runner (the same compile check `up` does, sharing its build folder), and the tests of every
-// workspace crate with a changed file, also through the runner and in that folder.
+// lint, typos and TOML on the changed files, typecheck and tests of the affected packages, and
+// for Rust, `cargo fmt`, a build through the dev runner (the same compile check a start does,
+// sharing its build folder), and the tests of every workspace crate with a changed file, also
+// through the runner and in that folder.
 //
 //   vp run check:changed          compare against the merge base with origin/main
 //   vp run check:changed <ref>    compare against the merge base with <ref>
@@ -102,9 +102,6 @@ const unitTests = changed.flatMap((file) => {
 })
 if (unitTests.length > 0) {
 	steps.push({ name: 'unit tests', command: 'vp', args: ['test', 'run', ...new Set(unitTests)] })
-}
-if (under('scripts')) {
-	steps.push({ name: 'dev:check', command: 'vp', args: ['run', 'dev:check'] })
 }
 const rust = matching(/\.rs$/)
 if (rust.length > 0) {

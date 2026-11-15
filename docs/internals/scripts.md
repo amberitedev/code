@@ -36,50 +36,34 @@ folder that is usually nothing.
 
 ## Dev
 
-- `node scripts/dev-runner.ts fixture <name>`: The whole setup in one command. It type-checks the
-  [fixture](#fixtures), starts the stack in the background when none is running, replaces the
-  stack's data with what the fixture builds, waits until everything answers, and prints each App's
-  `tab:` URL. `<name>` is a file in `packages/fixtures/fixtures` or the path of any fixture file,
-  and `default` when left out.
-- `node scripts/dev-runner.ts up`: Starts the stack in the background on the data it already has,
-  with the Apps and Cores of the fixture applied last. A checkout that never had one applied gets
-  the default fixture. It waits until every service answers, every App answers on its local API,
-  and the frontend serves the App's page, then prints each App's `tab:` URL. There is no
-  `vp run up` and no `vp run fixture`: on Windows, `vp run` puts its command in a job that kills
-  every process in it when vp exits, the background stack included. The tab URL opens the App in
-  a plain browser tab on its own origin. In a new checkout the frontend spends a minute or two
-  preparing its dependencies; that happens inside the command. Both commands write to
-  `.data/dev.log` and return after 9 minutes if the stack is still compiling; run the command
-  again to keep waiting. They fail at once when a Rust build fails, or when the App's entry module
-  does not compile, printing the compiler error; the stack keeps running. `up` takes an optional
-  mode first: `node scripts/dev-runner.ts up dev:backend`. Unlike `vp run dev`, both leave out the
-  account sign-in website and keep App windows off the desktop, because agents use Apps from
-  browser tabs. `--show-windows` shows them; on a stack already running hidden it fails, so run
-  `down` first.
-- `vp run dev`: The same stack in the foreground, with the account sign-in website and App
-  windows, for a person at a terminal.
-- `vp run dev:backend`: Starts the Worker and account website without Apps or Cores.
-- `vp run dev:app`: Starts only the stack's Apps and their shared frontend. Start `dev:backend`
-  first. Cores and Minecraft servers are not needed for account/sharing work.
-- `vp run dev:core`: Starts only the stack's Cores. A Core pairs with the Worker and checks App
-  sign-in tickets against the Worker's public key, so start `dev:backend` too.
-- `vp run status`: Prints what is running, whether it is ready, each program that is stopped or
-  has failed, and each App's tab URL. Exits non-zero when the stack is not ready.
-- `vp run stop <name>` and `vp run rs <name>`: Stops one program, or starts it again. See
-  [Process ownership](#process-ownership).
-- `vp run down`: Stops this checkout's dev runner and everything it started.
-- `node scripts/dev-runner.ts build`: Compiles the App and Core for this checkout's Rust without
-  starting anything. `check:changed` runs it when Rust changed.
-- `node scripts/dev-runner.ts test <package>...`: Runs one `cargo test` of the given Cargo packages
-  (such as `copal` or `engine`) in the primary checkout's `target/dev-shared`, like `build`. `check:changed` runs it for
-  the crates with a changed file.
-- `vp run check:changed [ref]`: CI's fast checks for the files changed since the merge base with
-  `origin/main` (or `ref`): lint, typos, TOML, typecheck and tests of the affected packages,
-  `dev:check`, and for Rust `rustfmt`, a build, and the tests of every workspace crate with a
-  changed file (except the ones CI leaves out), both through the runner. typos and tombi are
-  skipped when not installed.
-- `vp run dev:check`: Prints the processes, state directory, URLs, and ports that a full run would
-  use without starting anything.
+| Command                                  | What it does                                                                                                                                                                                                                                                                                                                                               |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `vp run fixture <name>`                  | The whole setup: type-checks the [fixture](#fixtures), starts the stack in the background when none is running, replaces the stack's data with what the fixture builds, waits until everything answers, and prints each App's `tab:` URL. `<name>` is a file in `packages/fixtures/fixtures` or the path of any fixture file, and `default` when left out. |
+| `vp run up`                              | Starts the stack in the background on the data it already has, with the Apps and Cores of the fixture applied last. A checkout that never had one applied gets the default fixture.                                                                                                                                                                        |
+| `vp run dev`                             | The same stack in the foreground, with the account sign-in website and App windows, for a person at a terminal.                                                                                                                                                                                                                                            |
+| `vp run status`                          | Prints what is running, whether it is ready, each program that is stopped or has failed, and each App's tab URL. Exits non-zero when the stack is not ready.                                                                                                                                                                                               |
+| `vp run stop <name>`, `vp run rs <name>` | Stops one program, or starts it again. See [Process ownership](#process-ownership).                                                                                                                                                                                                                                                                        |
+| `vp run down`                            | Stops this checkout's dev runner and everything it started. The data stays.                                                                                                                                                                                                                                                                                |
+| `vp run check:changed [ref]`             | CI's fast checks for the files changed since the merge base with `origin/main` (or `ref`): lint, typos, TOML, typecheck and tests of the affected packages, and for Rust `rustfmt`, a build, and the tests of every workspace crate with a changed file (except the ones CI leaves out). typos and tombi are skipped when not installed.                   |
+
+`fixture` and `up` wait until every service answers, every App answers on its local API, and the
+frontend serves the App's page. In a new checkout the frontend spends a minute or two preparing its
+dependencies; that happens inside the command. They return after 9 minutes if the stack is still
+compiling; run the command again to keep waiting. They fail at once when a Rust build fails, or when
+the App's entry module does not compile, printing the compiler error; the stack keeps running.
+Unlike `vp run dev`, both leave out the account sign-in website and keep App windows off the
+desktop, because agents use Apps from browser tabs. `--show-windows` shows them; on a stack
+already running hidden it fails, so run `down` first.
+
+A background runner has to outlive the command that started it. On Windows `vp run` puts its
+command in a job that kills every process in it when vp exits, and a child process cannot leave
+that job. So there the command asks Windows itself to create the runner, which makes it nobody's
+child, and leaves its environment in `.data/runner-env.json` for the runner to take, since such a
+process starts with a fresh one. The runner writes `.data/dev.log` itself.
+
+`check:changed` builds and tests Rust through `node scripts/dev-runner.ts build` and
+`node scripts/dev-runner.ts test <package>...`, which compile in the primary checkout's
+`target/dev-shared` like every start does.
 
 ## Fixtures
 
