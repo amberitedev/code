@@ -486,6 +486,8 @@ async function main(): Promise<void> {
 				if (stopping || starts.get(spec.label) !== token) return
 			}
 		}
+		// A stop or a newer start can arrive during any wait above, the last port check included.
+		if (stopping || starts.get(spec.label) !== token) return
 		const running = spawnProcess(paths.worktree, spec, program)
 		processes.set(spec.label, running)
 		setState(spec.label, 'running')
@@ -624,20 +626,21 @@ async function main(): Promise<void> {
 		}
 		writeRuntimeFile(paths, runtime)
 		const backend = specsByLabel.get('backend')
-		if (backend) {
-			await startProgram(backend)
-			// An App signs in once as it starts and a Core asks for its pairing code as it starts, so
-			// the backend has to answer before either does.
-			while (!stopping && !(await portIsOpen(ports.backend))) {
-				if (runtime.programs.backend === 'failed') return
+		if (backend) await startProgram(backend)
+		// An App signs in once as it starts and a Core asks for its pairing code as it starts, so the
+		// backend has to answer before either does. Not waited for here: commands run one at a time,
+		// and `rs backend` is how a backend that will not start is brought back.
+		void (async () => {
+			const replaced = () => stopping || runtime.stackId !== shape.id
+			while (backend && !replaced() && !(await portIsOpen(ports.backend))) {
 				await new Promise((resolve) => setTimeout(resolve, 100))
 			}
-		}
-		if (runtime.stackId !== shape.id) return
-		// One stopped on purpose while the backend came up stays down.
-		for (const spec of stack) {
-			if (runtime.programs[spec.label] === 'starting') void startProgram(spec)
-		}
+			if (replaced()) return
+			// One stopped on purpose while the backend came up stays down.
+			for (const spec of stack) {
+				if (runtime.programs[spec.label] === 'starting') void startProgram(spec)
+			}
+		})()
 	}
 	/** Reads the stack file a fixture just wrote and starts it. */
 	const startSavedStack = async () => {
@@ -2249,7 +2252,10 @@ async function applyFixture(paths: WorktreePaths, name: string, input: RunnerInp
 			worktree: paths.worktree,
 		})
 		const deadline = Date.now() + UP_WAIT_MS
-		while (!(await runtimeIsReady(runtime()!))) {
+		for (;;) {
+			// The runner rewrites its file as it works, so one read can come back empty.
+			const current = runtime()
+			if (current && (await runtimeIsReady(current))) break
 			if (Date.now() > deadline) throw new DevRunnerError('The stack did not become ready.')
 			await new Promise((resolve) => setTimeout(resolve, 500))
 		}
