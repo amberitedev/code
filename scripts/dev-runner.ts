@@ -24,6 +24,8 @@ const MAX_PORT = 65_535
 const RESTART_FAILURE_LIMIT = 5
 const RESTART_FAILURE_WINDOW_MS = 60_000
 const RESTART_FIRST_WAIT_MS = 750
+/** How many finished `stop` and `rs` requests the runtime file remembers. */
+const ANSWERED_REQUESTS = 50
 /** The stack a checkout starts with before any fixture names one. */
 const DEFAULT_FIXTURE = 'default'
 const PORT_PROBE_HOSTS = ['127.0.0.1', '::1'] as const
@@ -159,8 +161,11 @@ export type RuntimeFile = {
 	readonly ports: DevPorts
 	/** Every program by label, such as `backend`, `core:1` and `app:2`. */
 	programs: Record<string, ProgramState>
-	/** How often each program was started, so whoever asked for a restart can tell it happened. */
-	starts: Record<string, number>
+	/**
+	 * The `stop` and `rs` requests that carried an id and have finished, with the state they left
+	 * the program in. The newest few are kept.
+	 */
+	requests: Record<string, ProgramState | 'unknown'>
 	/** The [`StackShape`] the Apps and Cores below were started from. */
 	stackId?: string
 	apps: Array<{
@@ -458,7 +463,7 @@ async function main(): Promise<void> {
 		hideWindows: input.hideWindows,
 		ports,
 		programs: {},
-		starts: {},
+		requests: {},
 		apps: [],
 		cores: [],
 		source,
@@ -529,7 +534,6 @@ async function main(): Promise<void> {
 		}
 		const running = spawnProcess(paths.worktree, spec, program)
 		processes.set(spec.label, running)
-		runtime.starts[spec.label] = (runtime.starts[spec.label] ?? 0) + 1
 		setState(spec.label, 'running')
 		void running.done.then(
 			(code) => handleProcessExit(spec, running, code),
@@ -564,6 +568,7 @@ async function main(): Promise<void> {
 		// Only now: whoever waits on this state is about to replace the program's files.
 		if (specsByLabel.has(label)) setState(label, 'stopped')
 	}
+	/** Resolves once the old process is gone, with `started` for when the new one is up or has failed. */
 	const restart = async (label: string) => {
 		const spec = specsByLabel.get(label)
 		if (!spec) {
@@ -571,13 +576,13 @@ async function main(): Promise<void> {
 				'warning',
 				`Nothing here is named ${label}. Running: ${[...specsByLabel.keys()].join(', ')}`,
 			)
-			return
+			return undefined
 		}
 		await stopProgram(label)
 		restartFailures.delete(label)
 		runnerLog('info', `Starting ${label}...`)
 		// Not waited for: a Rust program may build first, and the next command should not queue behind it.
-		void startProgram(spec)
+		return { started: startProgram(spec) }
 	}
 	const handleProcessExit = async (spec: ProcessSpec, running: RunningProcess, code: number) => {
 		// Stopped or replaced on purpose.
@@ -698,6 +703,12 @@ async function main(): Promise<void> {
 		return app ? `app:${app.index}` : name
 	}
 	const commands = createCommandInput({
+		answered: (request, name) => {
+			const kept = Object.entries(runtime.requests).slice(1 - ANSWERED_REQUESTS)
+			const state = runtime.programs[labelFor(name)] ?? 'unknown'
+			runtime.requests = Object.fromEntries([...kept, [request, state]])
+			writeRuntimeFile(paths, runtime)
+		},
 		commandFile: NodePath.join(paths.data, 'dev-commands'),
 		getCore: () => processes.get('core:1'),
 		halt,
@@ -1699,12 +1710,17 @@ function pipeOutput(
  * send it `rs core:1`, `stop backend`, or `quit`. The file is emptied when the runner starts.
  * `halt` and `stack` are how a fixture swaps the data: stop what holds it, then start the stack
  * file it wrote.
+ *
+ * A `stop` or `rs` may end in `#<id>`. `answered` is called with that id once that very request
+ * has finished, which is how its sender tells it from an earlier state or another restart.
  */
-function createCommandInput(input: {
+export function createCommandInput(input: {
+	readonly answered: (request: string, name: string) => void
 	readonly commandFile: string
 	readonly getCore: () => RunningProcess | undefined
 	readonly halt: () => Promise<void>
-	readonly restart: (name: string) => Promise<void>
+	/** Resolves once the old process is gone. `started` settles when the new one is up or failed. */
+	readonly restart: (name: string) => Promise<{ readonly started: Promise<void> } | undefined>
 	readonly startStack: () => Promise<void>
 	readonly stop: () => Promise<void>
 	readonly stopProgram: (name: string) => Promise<void>
@@ -1759,12 +1775,21 @@ function createCommandInput(input: {
 			inOrder(input.startStack)
 			return
 		}
-		const program = command.match(/^(rs|stop)\s+(\S+)$/i)
+		const program = command.match(/^(rs|stop)\s+(\S+)(?:\s+#(\S+))?$/i)
 		if (program) {
 			const name = program[2]!.toLowerCase()
-			inOrder(() =>
-				program[1]!.toLowerCase() === 'rs' ? input.restart(name) : input.stopProgram(name),
-			)
+			const request = program[3]
+			const answer = () => request && input.answered(request, name)
+			inOrder(async () => {
+				if (program[1]!.toLowerCase() === 'stop') {
+					await input.stopProgram(name)
+					answer()
+					return
+				}
+				const restart = await input.restart(name)
+				// The next command runs while a Rust program builds; the answer waits for the start.
+				void (restart?.started ?? Promise.resolve()).then(answer)
+			})
 			return
 		}
 		const coreCommand = command.match(/^core\s+(.+)$/i)
@@ -1958,7 +1983,7 @@ function stoppedRuntime(runtime: RuntimeFile): RuntimeFile {
 		...runtime,
 		pid: undefined,
 		programs: {},
-		starts: {},
+		requests: {},
 		apps: runtime.apps.map((app) => ({ ...app, tabUrl: undefined })),
 	}
 }
@@ -2263,20 +2288,19 @@ async function sendProgramCommand(
 	if (args.length !== 1 || !known.includes(label)) {
 		throw new DevRunnerError(`${command} takes one of: ${known.join(', ')}`)
 	}
-	sendRunnerCommand(paths, `${command} ${label}`)
+	// The id marks this request: the program's state alone could be left from before it, or come
+	// from a restart the runner made on its own.
+	const request = NodeCrypto.randomUUID()
+	sendRunnerCommand(paths, `${command} ${label} #${request}`)
 	const wanted = command === 'stop' ? 'stopped' : 'running'
-	const startsBefore = before.starts[label] ?? 0
 	const deadline = Date.now() + UP_WAIT_MS
 	while (Date.now() < deadline) {
-		const now = readLiveRuntime(paths)
-		const state = now?.programs[label]
-		// A program that was already running is only restarted once it has been started again.
-		const restarted = command === 'stop' || (now?.starts[label] ?? 0) > startsBefore
-		if (state === wanted && restarted) {
+		const state = readLiveRuntime(paths)?.requests[request]
+		if (state === wanted) {
 			runnerLog('info', `${label} ${wanted}`)
 			return
 		}
-		if (state === 'failed') throw new DevRunnerError(`${label} failed. See ${devLogPath(paths)}`)
+		if (state) throw new DevRunnerError(`${label} is ${state}. See ${devLogPath(paths)}`)
 		await new Promise((resolve) => setTimeout(resolve, 200))
 	}
 	throw new DevRunnerError(`${label} is still not ${wanted}. See ${devLogPath(paths)}`)

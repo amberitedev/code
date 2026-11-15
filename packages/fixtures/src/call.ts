@@ -1,5 +1,6 @@
 // One typed endpoint, sent to whichever program the first argument names.
 
+import * as NodeCrypto from 'node:crypto'
 import * as NodeFS from 'node:fs'
 import * as NodeHttp from 'node:http'
 import * as NodeHttps from 'node:https'
@@ -190,15 +191,15 @@ const restarts = new Map<string, Promise<void>>()
 
 /** Restarts one program through the dev runner and waits until it answers again. */
 export async function restart(label: string): Promise<void> {
-	const before = runtime().starts[label] ?? 0
-	current().send(`rs ${label}`)
+	// The id marks this request: the program's state alone could be left from before it, or come
+	// from a restart the runner made on its own.
+	const request = NodeCrypto.randomUUID()
+	current().send(`rs ${label} #${request}`)
 	const deadline = Date.now() + 9 * 60_000
 	for (;;) {
-		const now = runtime()
-		if (now.programs[label] === 'failed') throw new FixtureError(`${label} did not start again.`)
-		// Started again since the request, not still the process that was running before it.
-		const restarted = (now.starts[label] ?? 0) > before && now.programs[label] === 'running'
-		if (restarted && (await answers(label))) return
+		const state = runtime().requests[request]
+		if (state && state !== 'running') throw new FixtureError(`${label} did not start again.`)
+		if (state && (await answers(label))) return
 		if (Date.now() > deadline) throw new FixtureError(`${label} did not come back.`)
 		await sleep(100)
 	}

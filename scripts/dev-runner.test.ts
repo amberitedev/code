@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vite-plus/test'
 
 import {
 	appTabUrl,
+	createCommandInput,
 	createRuntimeEnvironment,
 	createSharedSpecs,
 	createStackSpecs,
@@ -392,5 +393,47 @@ describe('dev runner tab URL', () => {
 		expect(new URL(appTabUrl('big_bob', 1420, { port: 1, secret: 'a' })).hostname).toBe(
 			'big-bob.localhost',
 		)
+	})
+})
+
+describe('dev runner commands', () => {
+	it('answers a request once that very request has finished, in the order sent', async () => {
+		const scratch = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), 'dev-runner-'))
+		const file = NodePath.join(scratch, 'dev-commands')
+		const answered: string[] = []
+		const calls: string[] = []
+		let finishStop = () => {}
+		let finishStart = () => {}
+		const commands = createCommandInput({
+			answered: (request, name) => answered.push(`${request} ${name}`),
+			commandFile: file,
+			getCore: () => undefined,
+			halt: async () => {},
+			restart: async (name) => {
+				calls.push(`rs ${name}`)
+				return { started: new Promise<void>((resolve) => (finishStart = resolve)) }
+			},
+			startStack: async () => {},
+			stop: async () => {},
+			stopProgram: (name) => {
+				calls.push(`stop ${name}`)
+				return new Promise<void>((resolve) => (finishStop = resolve))
+			},
+		})
+		try {
+			NodeFS.appendFileSync(file, 'stop backend #one\nrs core:1 #two\n')
+			await expect.poll(() => calls, { timeout: 5_000 }).toEqual(['stop backend'])
+			// The restart waits its turn, and nothing is answered while the stop still works.
+			expect(answered).toEqual([])
+			finishStop()
+			await expect.poll(() => calls, { timeout: 5_000 }).toEqual(['stop backend', 'rs core:1'])
+			// The old process is gone, but a restart is only done once the new one is up.
+			expect(answered).toEqual(['one backend'])
+			finishStart()
+			await expect.poll(() => answered, { timeout: 5_000 }).toEqual(['one backend', 'two core:1'])
+		} finally {
+			commands.close()
+			NodeFS.rmSync(scratch, { force: true, recursive: true })
+		}
 	})
 })
