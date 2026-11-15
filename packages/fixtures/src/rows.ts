@@ -3,15 +3,16 @@
 import * as NodeFS from 'node:fs'
 import * as NodePath from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { dev } from '@amberite/contracts'
+import { dev, type SqlAnswer, type SqlStatement } from '@amberite/contracts'
 
-import { devHeaders, send } from './call.ts'
-import { type App, type Core, FixtureError, runtime, state } from './context.ts'
+import { devCall } from './call.ts'
+import { type App, type Core, FixtureError, state } from './context.ts'
 
 /** The backend's database, or the two an App or a Core keeps in its data folder. */
 export type Store = 'backend' | App | Core
-export type Value = string | number | null
-export type Row = Record<string, Value>
+/** A row and a value as the backend's `/_dev/sql` route defines them, for every store alike. */
+export type Row = SqlAnswer['rows'][number]
+export type Value = SqlStatement['params'][number]
 
 /**
  * Runs one statement and returns the rows it read. On an App or a Core it runs in whichever of
@@ -82,21 +83,9 @@ function noRow(where: string, table: string, match: Row): FixtureError {
 	return new FixtureError(`${table} on ${where} has no row with ${JSON.stringify(match)}.`)
 }
 
-async function backend(
-	statement: string,
-	values: ReadonlyArray<Value>,
-): Promise<{ readonly rows: Row[]; readonly changes: number }> {
-	// Through the backend itself: its database file belongs to the process serving it.
-	const answer = await send(`${runtime().urls.backend}${dev.Sql.path}`, {
-		method: dev.Sql.method,
-		headers: devHeaders(),
-		body: JSON.stringify({ sql: statement, params: values }),
-	})
-	const result = JSON.parse(answer.text) as { rows: Row[]; changes: number; description?: string }
-	if (answer.status >= 400) {
-		throw new FixtureError(`The backend's database refused \`${statement}\`: ${result.description}`)
-	}
-	return result
+/** Through the backend itself: its database file belongs to the process serving it. */
+function backend(statement: string, values: ReadonlyArray<Value>): Promise<SqlAnswer> {
+	return devCall(dev.Sql, { sql: statement, params: [...values] })
 }
 
 function label(store: App | Core): string {

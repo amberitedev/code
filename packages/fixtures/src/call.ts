@@ -132,24 +132,32 @@ export async function backendSession(
 ): Promise<{ readonly session: string; readonly userId: string }> {
 	const known = state.backendSessions.get(name)
 	if (known) return known
-	const answer = await send(`${runtime().urls.backend}${dev.Session.path}`, {
-		method: dev.Session.method,
-		headers: devHeaders(),
-		body: JSON.stringify({ username: name }),
-	})
-	if (answer.status >= 400) {
-		throw new FixtureError(`The backend would not sign in ${name}: ${describe(answer.text)}`)
-	}
-	const { session, user_id } = JSON.parse(answer.text) as { session: string; user_id: string }
+	const { session, user_id } = await devCall(dev.Session, { username: name })
 	const made = { session, userId: user_id }
 	state.backendSessions.set(name, made)
 	return made
 }
 
-/** The dev runner's secret, which the backend's `/_dev` routes ask for. */
-export function devHeaders(): Record<string, string> {
-	const file = NodePath.join(current().data, 'backend', 'dev-secret')
-	return { 'x-local-dev-secret': NodeFS.readFileSync(file, 'utf8').trim() }
+/**
+ * Calls one of the backend's `/_dev` routes, which ask for the dev runner's secret instead of an
+ * account.
+ */
+export async function devCall<B, R>(
+	endpoint: Endpoint<null, null, B, R>,
+	body: NoInfer<B>,
+): Promise<R> {
+	const secret = NodePath.join(current().data, 'backend', 'dev-secret')
+	const answer = await send(`${runtime().urls.backend}${endpoint.path}`, {
+		method: endpoint.method,
+		headers: { 'x-local-dev-secret': NodeFS.readFileSync(secret, 'utf8').trim() },
+		body: JSON.stringify(body),
+	})
+	if (answer.status >= 400) {
+		throw new FixtureError(
+			`${endpoint.method} ${endpoint.path} on the backend answered ${answer.status}: ${describe(answer.text)}`,
+		)
+	}
+	return JSON.parse(answer.text) as R
 }
 
 async function ticket(core: Core, account: Account): Promise<string> {
