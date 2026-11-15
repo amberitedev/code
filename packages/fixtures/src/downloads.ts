@@ -50,8 +50,14 @@ function linkMissing(from: string, to: string, top = true): number {
 			try {
 				NodeFS.linkSync(source, target)
 			} catch {
-				// Another drive, or a file system without hard links.
-				NodeFS.copyFileSync(source, target)
+				// Another drive, or a file system without hard links. Never over a file another
+				// checkout put there in the meantime.
+				try {
+					NodeFS.copyFileSync(source, target, NodeFS.constants.COPYFILE_EXCL)
+				} catch (error) {
+					if ((error as NodeJS.ErrnoException).code === 'EEXIST') continue
+					throw error
+				}
 			}
 			linked += 1
 		}

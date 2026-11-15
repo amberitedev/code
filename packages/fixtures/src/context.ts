@@ -3,6 +3,8 @@
 /** The part of the dev runner's `.data/runtime.json` a fixture reads. */
 export interface Runtime {
 	readonly programs: Readonly<Record<string, string>>
+	/** How often each program was started. */
+	readonly starts: Readonly<Record<string, number>>
 	readonly stackId?: string
 	readonly apps: ReadonlyArray<{
 		readonly dataDir: string

@@ -159,6 +159,8 @@ export type RuntimeFile = {
 	readonly ports: DevPorts
 	/** Every program by label, such as `backend`, `core:1` and `app:2`. */
 	programs: Record<string, ProgramState>
+	/** How often each program was started, so whoever asked for a restart can tell it happened. */
+	starts: Record<string, number>
 	/** The [`StackShape`] the Apps and Cores below were started from. */
 	stackId?: string
 	apps: Array<{
@@ -456,6 +458,7 @@ async function main(): Promise<void> {
 		hideWindows: input.hideWindows,
 		ports,
 		programs: {},
+		starts: {},
 		apps: [],
 		cores: [],
 		source,
@@ -526,6 +529,7 @@ async function main(): Promise<void> {
 		}
 		const running = spawnProcess(paths.worktree, spec, program)
 		processes.set(spec.label, running)
+		runtime.starts[spec.label] = (runtime.starts[spec.label] ?? 0) + 1
 		setState(spec.label, 'running')
 		void running.done.then(
 			(code) => handleProcessExit(spec, running, code),
@@ -641,7 +645,8 @@ async function main(): Promise<void> {
 		})
 		for (const spec of stack) {
 			specsByLabel.set(spec.label, spec)
-			runtime.programs[spec.label] = 'stopped'
+			// Not `stopped`: readiness leaves a stopped program out, and these are about to start.
+			runtime.programs[spec.label] = 'starting'
 		}
 		runtime.stackId = shape.id
 		runtime.apps = shape.apps.map(({ name }, index) => ({
@@ -670,7 +675,10 @@ async function main(): Promise<void> {
 			}
 		}
 		if (runtime.stackId !== shape.id) return
-		for (const spec of stack) void startProgram(spec)
+		// One stopped on purpose while the backend came up stays down.
+		for (const spec of stack) {
+			if (runtime.programs[spec.label] === 'starting') void startProgram(spec)
+		}
 	}
 	/** Reads the stack file a fixture just wrote and starts it. */
 	const startSavedStack = async () => {
@@ -1950,6 +1958,7 @@ function stoppedRuntime(runtime: RuntimeFile): RuntimeFile {
 		...runtime,
 		pid: undefined,
 		programs: {},
+		starts: {},
 		apps: runtime.apps.map((app) => ({ ...app, tabUrl: undefined })),
 	}
 }
@@ -2256,13 +2265,14 @@ async function sendProgramCommand(
 	}
 	sendRunnerCommand(paths, `${command} ${label}`)
 	const wanted = command === 'stop' ? 'stopped' : 'running'
-	// Longer than the runner takes to read its command file, so an `rs` of a running program is
-	// seen going down before it is seen back up.
-	await new Promise((resolve) => setTimeout(resolve, 1_000))
+	const startsBefore = before.starts[label] ?? 0
 	const deadline = Date.now() + UP_WAIT_MS
 	while (Date.now() < deadline) {
-		const state = readLiveRuntime(paths)?.programs[label]
-		if (state === wanted) {
+		const now = readLiveRuntime(paths)
+		const state = now?.programs[label]
+		// A program that was already running is only restarted once it has been started again.
+		const restarted = command === 'stop' || (now?.starts[label] ?? 0) > startsBefore
+		if (state === wanted && restarted) {
 			runnerLog('info', `${label} ${wanted}`)
 			return
 		}

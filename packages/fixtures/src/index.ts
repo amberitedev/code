@@ -3,6 +3,7 @@
 
 export { call, signedIn, type Who } from './call.ts'
 export { type Account, type App, type Core, type CoreUser, FixtureError, until } from './context.ts'
+export { ended } from './ops.ts'
 export { patch, sql, type Row, type Store, type Value } from './rows.ts'
 export { stack } from './stack.ts'
 export { friends } from '../kit/friends.ts'

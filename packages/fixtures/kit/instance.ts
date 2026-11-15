@@ -10,11 +10,11 @@ import {
 	localInstalls,
 	localSharing,
 	type ModLoader,
-	ops,
 } from '@amberite/contracts'
 
 import { call } from '../src/call.ts'
 import { type App, FixtureError, state, step, until } from '../src/context.ts'
+import { ended } from '../src/ops.ts'
 import { pinnedVersion } from './mods.ts'
 
 export interface Instance {
@@ -114,17 +114,16 @@ export async function instance(
 
 	const share = await call(owner, instanceSharing.EnsureSharedInstance, ref)
 	const preview = await call(owner, instanceSharing.GetSharedInstancePublishPreview, ref)
-	await call(owner, localSharing.publishSharedInstance, null, {
-		op: NodeCrypto.randomUUID(),
-		instance_id: made.id,
-		file_paths: (preview?.files ?? []).filter((file) => !file.blocked).map((file) => file.path),
-		removed_paths: [],
-		server_core_id: null,
-	})
+	const publish = NodeCrypto.randomUUID()
 	await step(`${owner.name} shares "${spec.name}"`, () =>
-		until(
-			`${owner.name}'s App has published "${spec.name}"`,
-			async () => (await call(owner, ops.listOps)).length === 0,
+		ended(owner, publish, () =>
+			call(owner, localSharing.publishSharedInstance, null, {
+				op: publish,
+				instance_id: made.id,
+				file_paths: (preview?.files ?? []).filter((file) => !file.blocked).map((file) => file.path),
+				removed_paths: [],
+				server_core_id: null,
+			}),
 		),
 	)
 

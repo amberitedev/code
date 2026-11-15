@@ -171,21 +171,34 @@ async function coreToken(core: Core, account: Account): Promise<string> {
  * Restarts a Core or App whose rows a fixture wrote while it ran, so it never answers from what it
  * read before. See `patch`.
  */
-export async function restartIfPatched(label: string): Promise<void> {
-	if (!state.dirty.delete(label)) return
-	await restart(label)
+export function restartIfPatched(label: string): Promise<void> {
+	// Calls made at the same time wait on the one restart rather than reaching the old process.
+	const pending = restarts.get(label)
+	if (pending) return pending
+	if (!state.dirty.delete(label)) return Promise.resolve()
+	const attempt = restart(label)
+		.catch((error: unknown) => {
+			state.dirty.add(label)
+			throw error
+		})
+		.finally(() => restarts.delete(label))
+	restarts.set(label, attempt)
+	return attempt
 }
+
+const restarts = new Map<string, Promise<void>>()
 
 /** Restarts one program through the dev runner and waits until it answers again. */
 export async function restart(label: string): Promise<void> {
+	const before = runtime().starts[label] ?? 0
 	current().send(`rs ${label}`)
-	// The runner reads its commands twice a second: wait to see the old process go first.
-	await sleep(1_000)
 	const deadline = Date.now() + 9 * 60_000
 	for (;;) {
-		const program = runtime().programs[label]
-		if (program === 'failed') throw new FixtureError(`${label} did not start again.`)
-		if (program === 'running' && (await answers(label))) return
+		const now = runtime()
+		if (now.programs[label] === 'failed') throw new FixtureError(`${label} did not start again.`)
+		// Started again since the request, not still the process that was running before it.
+		const restarted = (now.starts[label] ?? 0) > before && now.programs[label] === 'running'
+		if (restarted && (await answers(label))) return
 		if (Date.now() > deadline) throw new FixtureError(`${label} did not come back.`)
 		await sleep(100)
 	}

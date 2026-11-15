@@ -23,16 +23,12 @@ export async function sql(
 	values: ReadonlyArray<Value> = [],
 ): Promise<Row[]> {
 	if (store === 'backend') return (await backend(statement, values)).rows
-	const reads = /^\s*(select|pragma|explain)\b/i.test(statement)
-	return local(
-		store,
-		(db) => {
-			const prepared = db.prepare(statement)
-			if (reads) return prepared.all(...values).map(plain)
-			prepared.run(...values)
-			return []
-		},
-		!reads,
+	// `all` also runs a statement that returns no rows, so nothing here guesses which kind it is.
+	return local(store, (db) =>
+		db
+			.prepare(statement)
+			.all(...values)
+			.map(plain),
 	)
 }
 
@@ -63,30 +59,23 @@ export async function patch(store: Store, table: string, where: Row, values: Row
 		if (changes === 0) throw noRow('backend', table, where)
 		return
 	}
-	local(
-		store,
-		(db) => {
-			const columns = new Map(
-				db
-					.prepare(`PRAGMA table_info("${table}")`)
-					.all()
-					.map((column) => [String(column.name), String(column.type)]),
-			)
-			if (columns.size === 0) throw new Error(`no such table: ${table}`)
-			for (const name of [...set, ...match]) {
-				if (!columns.has(name)) throw new FixtureError(`${table} has no column ${name}.`)
-			}
-			// These columns hold SQLite's binary JSON, which reads back wrong when written as text.
-			const mark = (name: string) =>
-				columns.get(name)!.toUpperCase() === 'JSONB' ? 'jsonb(?)' : '?'
-			const statement = `UPDATE "${table}" SET ${set.map((name) => `"${name}" = ${mark(name)}`).join(', ')} WHERE ${matching}`
-			const { changes } = db
-				.prepare(statement)
-				.run(...Object.values(values), ...Object.values(where))
-			if (changes === 0) throw noRow(label(store), table, where)
-		},
-		true,
-	)
+	local(store, (db) => {
+		const columns = new Map(
+			db
+				.prepare(`PRAGMA table_info("${table}")`)
+				.all()
+				.map((column) => [String(column.name), String(column.type)]),
+		)
+		if (columns.size === 0) throw new Error(`no such table: ${table}`)
+		for (const name of [...set, ...match]) {
+			if (!columns.has(name)) throw new FixtureError(`${table} has no column ${name}.`)
+		}
+		// These columns hold SQLite's binary JSON, which reads back wrong when written as text.
+		const mark = (name: string) => (columns.get(name)!.toUpperCase() === 'JSONB' ? 'jsonb(?)' : '?')
+		const statement = `UPDATE "${table}" SET ${set.map((name) => `"${name}" = ${mark(name)}`).join(', ')} WHERE ${matching}`
+		const { changes } = db.prepare(statement).run(...Object.values(values), ...Object.values(where))
+		if (changes === 0) throw noRow(label(store), table, where)
+	})
 }
 
 function noRow(where: string, table: string, match: Row): FixtureError {
@@ -115,7 +104,7 @@ function label(store: App | Core): string {
 }
 
 /** Runs `work` in the first of the program's databases that knows the tables it names. */
-function local<T>(store: App | Core, work: (db: DatabaseSync) => T, writes: boolean): T {
+function local<T>(store: App | Core, work: (db: DatabaseSync) => T): T {
 	const files =
 		store.kind === 'app'
 			? ['app.db', 'engine.db']
@@ -124,12 +113,14 @@ function local<T>(store: App | Core, work: (db: DatabaseSync) => T, writes: bool
 	for (const file of files) {
 		const path = NodePath.join(store.dir, file)
 		if (!NodeFS.existsSync(path)) continue
-		const db = new DatabaseSync(path, { readOnly: !writes })
+		const db = new DatabaseSync(path)
 		try {
 			// The program has the file open too.
 			db.exec('PRAGMA busy_timeout = 5000')
 			const result = work(db)
-			if (writes) state.dirty.add(label(store))
+			// Whatever the statement looked like, this is whether it changed a row.
+			const { changed } = db.prepare('SELECT total_changes() AS changed').get()!
+			if (Number(changed) > 0) state.dirty.add(label(store))
 			return result
 		} catch (error) {
 			if (!(error instanceof Error) || !error.message.includes('no such table')) throw error
