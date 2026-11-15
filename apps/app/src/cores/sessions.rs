@@ -2,7 +2,7 @@
 //! proxy reads them; no command returns a token, so the WebView never sees one.
 //!
 //! Entries are per account as well as per Core because the App can switch accounts, and because
-//! dev scenarios share one OS keychain.
+//! the dev stack's Apps share one OS keychain.
 
 use std::{collections::HashMap, sync::Mutex};
 

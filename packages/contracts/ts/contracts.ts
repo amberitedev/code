@@ -1019,10 +1019,15 @@ export type EmailKind = "verify_email" | "reset_password";
 
 export type OutboxEmail = { id: string, recipient: string, kind: EmailKind, flow: string, created: string, };
 
+export type SqlStatement = { sql: string, params: Array<string | number | null>, };
+
+export type SqlAnswer = { rows: Array<Record<string, string | number | null>>, changes: number, };
+
 /** The local dev backend's routes. */
 export const dev = {
 	Session: { method: "POST", path: "/_dev/session", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, ScenarioLogin, AuthSession>,
 	Outbox: { method: "GET", path: "/_dev/outbox", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<OutboxEmail>>,
+	Sql: { method: "POST", path: "/_dev/sql", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, SqlStatement, SqlAnswer>,
 }
 
 /** The backend's routes outside accounts, cores, dev, sharing and social, which have their own consts. */

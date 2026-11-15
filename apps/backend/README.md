@@ -45,8 +45,9 @@ configured, so password authentication outside local development returns a confi
 
 Local scenario accounts have password hashes and can log in through the real password endpoint.
 The runner's `/_dev/session` shortcut can access only scenario accounts and requires the local
-secret. Scenario passwords are `Scenario-<username>-Local-only!`; this path is disabled without
-`LOCAL_DEV=true` and the correct secret on a loopback hostname.
+secret. Scenario passwords are `Scenario-<username>-Local-only!`. `/_dev/sql` runs one statement on
+the local database, which is how a dev fixture reads rows and changes one. Both paths are disabled
+without `LOCAL_DEV=true` and the correct secret on a loopback hostname.
 
 Public content stays on Modrinth. Replacement accounts do not own same-named Modrinth profiles.
 Local profile content lists are empty; public author requests must be routed to Modrinth by the

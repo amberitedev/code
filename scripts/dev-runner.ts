@@ -10,7 +10,6 @@ import * as NodeReadline from 'node:readline'
 import * as NodeURL from 'node:url'
 import * as NodeUtil from 'node:util'
 import { recordTiming } from './timings.ts'
-import { normalizeScenarioDatabase, runningAppCommands } from './scenario-state.ts'
 
 const BASE_PORTS = {
 	app: 1420,
@@ -20,8 +19,13 @@ const BASE_PORTS = {
 } as const
 const MAX_HASH_OFFSET = 3000
 const MAX_PORT = 65_535
-const RESTART_FAILURE_LIMIT = 3
-const RESTART_FAILURE_WINDOW_MS = 10_000
+// A program that exits on its own is started again, waiting twice as long each time. After this
+// many exits inside the window it stays down until someone runs `rs <name>`.
+const RESTART_FAILURE_LIMIT = 5
+const RESTART_FAILURE_WINDOW_MS = 60_000
+const RESTART_FIRST_WAIT_MS = 750
+/** The stack a checkout starts with before any fixture names one. */
+const DEFAULT_FIXTURE = 'default'
 const PORT_PROBE_HOSTS = ['127.0.0.1', '::1'] as const
 // Stays under the ten minute limit agent shells put on a foreground command.
 const UP_WAIT_MS = 9 * 60_000
@@ -42,33 +46,50 @@ const FETCH_BAD_PORTS = new Set([
 ])
 
 export const DEV_MODES = ['dev', 'dev:app', 'dev:backend', 'dev:core'] as const
-const RUNNER_FLAGS = ['--dry-run', '--no-account-web', '--hide-windows']
+const RUNNER_FLAGS = ['--dry-run', '--no-account-web', '--hide-windows', '--held']
 export type DevMode = (typeof DEV_MODES)[number]
 export type DevPorts = {
 	readonly app: number
 	readonly backend: number
 	readonly accountWeb: number
+	/** The first Core's port. Any further Core takes a free one when it starts. */
 	readonly core: number
 }
 
 type PortName = keyof DevPorts
 type PortAvailabilityCheck = (port: number, hosts: ReadonlyArray<string>) => Promise<boolean>
 export type WorktreePaths = {
-	readonly coreData: string
+	/** One folder per App, numbered by its place in the stack. */
+	readonly appsData: string
+	/** One folder per Core, numbered the same way. */
+	readonly coresData: string
 	readonly data: string
 	readonly primary: string
 	readonly runtime: string
-	readonly scenariosData: string
+	/** The Apps and Cores the last applied fixture declared. See [`StackShape`]. */
+	readonly stack: string
 	readonly worktree: string
+}
+/**
+ * `.data/stack.json`: which Apps and Cores run. A fixture writes it when it is applied, and a
+ * later start reads it, so the stack comes back the way the fixture left it.
+ */
+export type StackShape = {
+	/** Each App is signed in to the account of the same name. */
+	readonly apps: ReadonlyArray<{ readonly name: string }>
+	readonly cores: number
+	/** Changes with every apply, so whoever wrote the file can tell when the runner has read it. */
+	readonly id: string
 }
 type RunnerInput = {
 	/** The account sign-in website. Only a person signing in by hand needs it. */
 	readonly accountWeb: boolean
 	readonly dryRun: boolean
+	/** Start only what holds no data, and leave the backend, Cores and Apps to a fixture. */
+	readonly held: boolean
 	/** Apps run without a window on the desktop and are used from browser tabs. */
 	readonly hideWindows: boolean
 	readonly mode: DevMode
-	readonly scenarios: ReadonlyArray<number>
 }
 /**
  * A Rust program the runner builds itself. It is built once per distinct set of inputs, copied
@@ -117,8 +138,13 @@ type RunningProcess = {
 	readonly label: string
 }
 type LogLevel = 'error' | 'info' | 'warning'
+/**
+ * `stopped` was asked for and stays that way until `rs <name>`. `failed` kept exiting or did not
+ * build, and also waits for `rs <name>`.
+ */
+export type ProgramState = 'starting' | 'running' | 'stopped' | 'failed'
 /** .data/runtime.json: what the running (or last) dev runner started and where to reach it. */
-type RuntimeFile = {
+export type RuntimeFile = {
 	/** The dev runner process. Absent once it has stopped. */
 	pid?: number
 	readonly branch: string
@@ -131,15 +157,26 @@ type RuntimeFile = {
 	/** Whether the Apps were started without a window. `up --show-windows` cannot change it later. */
 	readonly hideWindows: boolean
 	readonly ports: DevPorts
-	readonly scenarios: Array<{
+	/** Every program by label, such as `backend`, `core:1` and `app:2`. */
+	programs: Record<string, ProgramState>
+	/** The [`StackShape`] the Apps and Cores below were started from. */
+	stackId?: string
+	apps: Array<{
 		readonly dataDir: string
-		readonly number: number
-		readonly username: string
-		/** Opens this scenario's App in a plain browser tab, on its own origin. */
+		readonly index: number
+		/** The account it signs in to, and its tab's host. */
+		readonly name: string
+		/** Opens this App in a plain browser tab, on its own origin. */
 		readonly tabUrl?: string
 	}>
+	cores: Array<{
+		readonly dataDir: string
+		readonly index: number
+		/** Where its API answers, over TLS with its own certificate. */
+		readonly url: string
+	}>
 	readonly source: string
-	readonly urls: Record<PortName, string>
+	readonly urls: Record<Exclude<PortName, 'core'>, string>
 }
 
 export class DevRunnerError extends Error {
@@ -147,10 +184,6 @@ export class DevRunnerError extends Error {
 		super(message)
 		this.name = 'DevRunnerError'
 	}
-}
-
-export function scenarioUsername(scenario: number): string {
-	return `scenario_${scenario}`
 }
 
 export function isBrowserAllowedPort(port: number): boolean {
@@ -237,13 +270,12 @@ export function createRuntimeEnvironment(input: {
 	return env
 }
 
-/** A free loopback port and a new secret for each scenario's App. */
-async function pickLocalAddresses(
-	scenarios: ReadonlyArray<number>,
-): Promise<ReadonlyMap<number, LocalAddress>> {
-	// Every listener stays open until all ports are read, so no two scenarios get the same one.
+/** That many free loopback ports. */
+async function pickFreePorts(count: number): Promise<ReadonlyArray<number>> {
+	// Every listener stays open until all ports are read, so no two picks get the same one.
 	const servers = await Promise.all(
-		scenarios.map(
+		Array.from(
+			{ length: count },
 			() =>
 				new Promise<{ readonly port: number; readonly server: NodeNet.Server }>(
 					(resolve, reject) => {
@@ -254,61 +286,117 @@ async function pickLocalAddresses(
 							server.unref()
 							const address = server.address()
 							if (typeof address === 'object' && address) resolve({ port: address.port, server })
-							else reject(new DevRunnerError('Could not pick a local port for an App.'))
+							else reject(new DevRunnerError('Could not pick a free local port.'))
 						})
 					},
 				),
 		),
 	)
 	for (const { server } of servers) server.close()
-	return new Map(
-		scenarios.map((scenario, index) => [
-			scenario,
-			{ port: servers[index]!.port, secret: NodeCrypto.randomBytes(32).toString('hex') },
-		]),
-	)
+	return servers.map(({ port }) => port)
 }
 
-/** The App's local API base goes in the `#local=` fragment, where the frontend reads it. */
-export function scenarioTabUrl(scenario: number, vitePort: number, address: LocalAddress): string {
-	const url = new URL(`http://scenario-${scenario}.localhost:${vitePort}`)
+/** A free loopback port and a new secret for each App. */
+async function pickLocalAddresses(count: number): Promise<ReadonlyArray<LocalAddress>> {
+	return (await pickFreePorts(count)).map((port) => ({
+		port,
+		secret: NodeCrypto.randomBytes(32).toString('hex'),
+	}))
+}
+
+/**
+ * An App's tab: its own origin, named after its account, with the App's local API base in the
+ * `#local=` fragment, where the frontend reads it.
+ */
+export function appTabUrl(name: string, vitePort: number, address: LocalAddress): string {
+	const url = new URL(`http://${name.replaceAll('_', '-')}.localhost:${vitePort}`)
 	url.hash = `local=${encodeURIComponent(`http://127.0.0.1:${address.port}/${address.secret}`)}`
 	return url.href
 }
 
+/** The programs a mode always runs. Cores and Apps come from the stack on top of these. */
 export function processLabelsForMode(mode: DevMode, accountWeb = true): ReadonlyArray<string> {
 	const labels = {
-		dev: ['backend', 'account-web', 'core', 'app-frontend'],
+		dev: ['backend', 'account-web', 'app-frontend'],
 		'dev:backend': ['backend', 'account-web'],
 		'dev:app': ['app-frontend'],
-		'dev:core': ['core'],
+		'dev:core': [],
 	}[mode]
 	return accountWeb ? labels : labels.filter((label) => label !== 'account-web')
 }
 
+/** Whether a mode runs the stack's Apps, and whether it runs its Cores. */
+function stackPartsForMode(mode: DevMode): { readonly apps: boolean; readonly cores: boolean } {
+	return {
+		apps: mode === 'dev' || mode === 'dev:app',
+		cores: mode === 'dev' || mode === 'dev:core',
+	}
+}
+
+/**
+ * The stack file, or `undefined` before any fixture was applied. A mode that runs only part of a
+ * stack takes that part.
+ */
+export function readStackShape(path: string, mode: DevMode): StackShape | undefined {
+	if (!NodeFS.existsSync(path)) return undefined
+	let value: unknown
+	try {
+		value = JSON.parse(NodeFS.readFileSync(path, 'utf8'))
+	} catch (error) {
+		throw new DevRunnerError(`Could not read ${path}: ${String(error)}`)
+	}
+	if (
+		!isRecord(value) ||
+		!Array.isArray(value.apps) ||
+		!value.apps.every((app) => isRecord(app) && typeof app.name === 'string') ||
+		typeof value.cores !== 'number' ||
+		typeof value.id !== 'string'
+	) {
+		throw new DevRunnerError(`${path} is not a stack file. Apply a fixture to write it again.`)
+	}
+	const parts = stackPartsForMode(mode)
+	return {
+		apps: parts.apps ? (value.apps as StackShape['apps']) : [],
+		cores: parts.cores ? value.cores : 0,
+		id: value.id,
+	}
+}
+
 async function main(): Promise<void> {
 	const paths = resolveWorktreePaths()
-	const defaultScenarios = readDefaultScenarios(NodePath.join(paths.worktree, 'dev.json'))
 	const [command, ...commandArgs] = process.argv.slice(2)
-	if (command === 'up') {
+	if (command === 'up' || command === 'fixture') {
 		const args = commandArgs.filter((arg) => arg !== '--show-windows')
-		// The mode is optional here: `up 1 2` means the full stack with those scenarios.
-		const hasMode = DEV_MODES.some((mode) => mode === args[0])
-		return up(paths, {
-			...parseInput(hasMode ? args : ['dev', ...args], defaultScenarios),
+		const background = {
 			// Apps sign themselves in and are used from browser tabs.
 			accountWeb: false,
 			hideWindows: !commandArgs.includes('--show-windows'),
-		})
+		}
+		if (command === 'fixture') {
+			if (args.length > 1) throw new DevRunnerError('fixture takes one name or file.')
+			return applyFixture(paths, args[0] ?? DEFAULT_FIXTURE, {
+				...parseInput(['dev']),
+				...background,
+			})
+		}
+		// The mode is optional here: `up` means the full stack.
+		const hasMode = DEV_MODES.some((mode) => mode === args[0])
+		const input = { ...parseInput(hasMode ? args : ['dev', ...args]), ...background }
+		// A checkout that never had a fixture applied has no data to start on.
+		if (input.mode === 'dev' && !NodeFS.existsSync(paths.stack) && !readLiveRuntime(paths)) {
+			return applyFixture(paths, DEFAULT_FIXTURE, input)
+		}
+		return up(paths, input)
 	}
 	if (command === 'down') return down(paths)
 	if (command === 'status') {
 		if (!(await printStatus(paths))) process.exitCode = 1
 		return
 	}
+	if (command === 'stop' || command === 'rs') return sendProgramCommand(paths, command, commandArgs)
 	if (command === 'build') return buildPrograms(paths)
 	if (command === 'test') return testCrates(paths, commandArgs)
-	const input = parseInput(process.argv.slice(2), defaultScenarios)
+	const input = parseInput(process.argv.slice(2))
 	const { offset: startOffset, source } = resolveStartOffset({
 		devInstance: process.env.DEV_INSTANCE,
 		explicitOffset: process.env.PORT_OFFSET,
@@ -321,42 +409,44 @@ async function main(): Promise<void> {
 		startOffset,
 	})
 	const ports = portsForOffset(selectedOffset)
-	const localAddresses = await pickLocalAddresses(input.scenarios)
 	const branch = currentBranch(paths.worktree)
 	const env = createRuntimeEnvironment({ baseEnv: readSharedEnv(paths), ports })
+	const saved = readStackShape(paths.stack, input.mode)
+	// A full stack with no data yet starts held, and the default fixture then fills it.
+	const applyDefault = input.mode === 'dev' && !input.held && !saved
+	const held = input.held || applyDefault
+	const labels = processLabelsForMode(input.mode, input.accountWeb)
 	if (!input.dryRun) {
 		const secretPath = NodePath.join(paths.data, 'backend', 'dev-secret')
 		NodeFS.mkdirSync(NodePath.dirname(secretPath), { recursive: true })
 		if (!NodeFS.existsSync(secretPath))
 			NodeFS.writeFileSync(secretPath, NodeCrypto.randomBytes(32).toString('hex'), { mode: 0o600 })
 		env.LOCAL_DEV_SECRET = NodeFS.readFileSync(secretPath, 'utf8').trim()
-		if (processLabelsForMode(input.mode).includes('backend')) {
+		if (labels.includes('backend')) {
 			prepareLocalBackend(paths, env)
+			// A fixture brings the backend's database with it.
+			if (!held) migrateLocalBackend(paths, env)
 		}
 	}
-	const specs = createProcessSpecs({
+	const shared = createSharedSpecs({
 		accountWeb: input.accountWeb,
-		branch,
 		env,
-		hideWindows: input.hideWindows,
-		localAddresses,
 		mode: input.mode,
 		paths,
 		ports,
-		scenarios: input.scenarios,
 	})
 	printPlan({
 		branch,
 		mode: input.mode,
 		paths,
 		ports,
-		scenarios: input.scenarios,
+		shape: held ? undefined : (saved ?? firstStackShape(input.mode)),
 		source,
-		specs,
+		specs: shared,
 	})
 	if (input.dryRun) return
 
-	ensureDataLayout(paths, input.scenarios)
+	NodeFS.mkdirSync(paths.data, { recursive: true })
 	const runtime: RuntimeFile = {
 		pid: process.pid,
 		branch,
@@ -365,18 +455,14 @@ async function main(): Promise<void> {
 		accountWeb: input.accountWeb,
 		hideWindows: input.hideWindows,
 		ports,
-		scenarios: input.scenarios.map((scenario) => ({
-			dataDir: scenarioDataPath(paths, scenario),
-			number: scenario,
-			username: scenarioUsername(scenario),
-			tabUrl: scenarioTabUrl(scenario, ports.app, localAddresses.get(scenario)!),
-		})),
+		programs: {},
+		apps: [],
+		cores: [],
 		source,
 		urls: {
 			backend: `http://127.0.0.1:${ports.backend}`,
 			accountWeb: `http://127.0.0.1:${ports.accountWeb}`,
 			app: `http://localhost:${ports.app}`,
-			core: `http://127.0.0.1:${ports.core}`,
 		},
 	}
 	writeRuntimeFile(paths, runtime)
@@ -385,7 +471,14 @@ async function main(): Promise<void> {
 		runtime.buildFailed = failed ? label : undefined
 		writeRuntimeFile(paths, runtime)
 	}
-	const specsByLabel = new Map(specs.map((spec) => [spec.label, spec]))
+	const setState = (label: string, state: ProgramState | undefined) => {
+		if (runtime.programs[label] === state) return
+		if (state) runtime.programs[label] = state
+		else delete runtime.programs[label]
+		writeRuntimeFile(paths, runtime)
+	}
+	const specsByLabel = new Map(shared.map((spec) => [spec.label, spec]))
+	for (const spec of shared) runtime.programs[spec.label] = 'stopped'
 	const processes = new Map<string, RunningProcess>()
 	/** The latest start of each process. A build that finishes after a newer start is dropped. */
 	const starts = new Map<string, symbol>()
@@ -411,6 +504,7 @@ async function main(): Promise<void> {
 	const start = async (spec: ProcessSpec) => {
 		const token = Symbol(spec.label)
 		starts.set(spec.label, token)
+		setState(spec.label, 'starting')
 		let program: string | undefined
 		if (spec.build) {
 			setBuildFailed(spec.label, false)
@@ -418,8 +512,8 @@ async function main(): Promise<void> {
 			if (stopping || starts.get(spec.label) !== token) return
 			if (!program) {
 				setBuildFailed(spec.label, true)
-				const command = spec.label === 'core' ? 'rs core' : `rs ${spec.label.slice(4)}`
-				runnerLog('error', `${spec.label} did not build. Use ${command} after fixing it.`)
+				setState(spec.label, 'failed')
+				runnerLog('error', `${spec.label} did not build. Use rs ${spec.label} after fixing it.`)
 				return
 			}
 		}
@@ -429,12 +523,10 @@ async function main(): Promise<void> {
 				await new Promise((resolve) => setTimeout(resolve, 250))
 				if (stopping || starts.get(spec.label) !== token) return
 			}
-			const dataDir = spec.env.THESEUS_CONFIG_DIR
-			if (!dataDir) throw new DevRunnerError('App scenario is missing its data directory.')
-			normalizeScenarioDatabase(paths.worktree, dataDir, runningAppCommands())
 		}
 		const running = spawnProcess(paths.worktree, spec, program)
 		processes.set(spec.label, running)
+		setState(spec.label, 'running')
 		void running.done.then(
 			(code) => handleProcessExit(spec, running, code),
 			(error: unknown) => {
@@ -446,83 +538,219 @@ async function main(): Promise<void> {
 			},
 		)
 	}
-	const startOrStop = (spec: ProcessSpec) =>
+	/** One program that cannot start never takes the others down. */
+	const startProgram = (spec: ProcessSpec) =>
 		start(spec).catch((error: unknown) => {
 			runnerLog(
 				'error',
 				`${spec.label} failed: ${error instanceof Error ? error.message : String(error)}`,
 			)
-			return stop(1)
+			setState(spec.label, 'failed')
 		})
+	/** Stops a program on purpose: it stays down until `rs`. Returns once it has exited. */
+	const stopProgram = async (label: string) => {
+		// Ends a start that is still building or waiting.
+		starts.set(label, Symbol(label))
+		const current = processes.get(label)
+		processes.delete(label)
+		if (current) {
+			stopChild(current.child)
+			await current.done.catch(() => undefined)
+		}
+		// Only now: whoever waits on this state is about to replace the program's files.
+		if (specsByLabel.has(label)) setState(label, 'stopped')
+	}
 	const restart = async (label: string) => {
 		const spec = specsByLabel.get(label)
-		if (!spec || (label !== 'core' && !label.startsWith('app:'))) {
-			runnerLog('warning', `Unknown restart target ${label}. Use rs <scenario> or rs core.`)
+		if (!spec) {
+			runnerLog(
+				'warning',
+				`Nothing here is named ${label}. Running: ${[...specsByLabel.keys()].join(', ')}`,
+			)
 			return
 		}
-		const current = processes.get(label)
-		if (current) {
-			processes.delete(label)
-			stopChild(current.child)
-		}
+		await stopProgram(label)
 		restartFailures.delete(label)
-		runnerLog('info', `Restarting ${label}...`)
-		await startOrStop(spec)
+		runnerLog('info', `Starting ${label}...`)
+		// Not waited for: a Rust program may build first, and the next command should not queue behind it.
+		void startProgram(spec)
 	}
 	const handleProcessExit = async (spec: ProcessSpec, running: RunningProcess, code: number) => {
+		// Stopped or replaced on purpose.
 		if (processes.get(spec.label) !== running) return
 		processes.delete(spec.label)
 		if (stopping) return
-
-		if (spec.label === 'core' || (spec.label.startsWith('app:') && code !== 0)) {
-			const now = Date.now()
-			const failures = [...(restartFailures.get(spec.label) ?? []), now].filter(
-				(timestamp) => now - timestamp < RESTART_FAILURE_WINDOW_MS,
+		// A person closing an App's window asked for it to stop.
+		if (spec.label.startsWith('app:') && code === 0) {
+			setState(spec.label, 'stopped')
+			runnerLog('info', `${spec.label} closed. Use rs ${spec.label} to start it again.`)
+			return
+		}
+		const now = Date.now()
+		const failures = [...(restartFailures.get(spec.label) ?? []), now].filter(
+			(timestamp) => now - timestamp < RESTART_FAILURE_WINDOW_MS,
+		)
+		restartFailures.set(spec.label, failures)
+		if (failures.length >= RESTART_FAILURE_LIMIT) {
+			setState(spec.label, 'failed')
+			runnerLog(
+				'error',
+				`${spec.label} exited ${RESTART_FAILURE_LIMIT} times in a minute and stays down. Use rs ${spec.label} after fixing it.`,
 			)
-			restartFailures.set(spec.label, failures)
-			if (failures.length >= RESTART_FAILURE_LIMIT) {
-				const command = spec.label === 'core' ? 'rs core' : `rs ${spec.label.slice(4)}`
-				runnerLog(
-					'error',
-					`${spec.label} failed ${RESTART_FAILURE_LIMIT} times in 10 seconds; automatic restarts paused. Use ${command} after fixing it.`,
-				)
-				return
-			}
-			runnerLog('warning', `${spec.label} exited with code ${code}; restarting...`)
-			await new Promise((resolve) => setTimeout(resolve, 750))
-			if (!stopping && !processes.has(spec.label)) await startOrStop(spec)
 			return
 		}
-		if (spec.label.startsWith('app:')) {
-			runnerLog('info', `${spec.label} closed. Use rs ${spec.label.slice(4)} to start it again.`)
-			return
-		}
+		const wait = RESTART_FIRST_WAIT_MS * 2 ** (failures.length - 1)
+		const token = Symbol(spec.label)
+		starts.set(spec.label, token)
+		setState(spec.label, 'starting')
+		runnerLog('warning', `${spec.label} exited with code ${code}; starting it again in ${wait} ms.`)
+		await new Promise((resolve) => setTimeout(resolve, wait))
+		// A stop or a restart asked for meanwhile wins.
+		if (!stopping && starts.get(spec.label) === token) await startProgram(spec)
+	}
 
-		runnerLog('error', `${spec.label} exited with code ${code}.`)
-		await stop(code || 1)
+	/** Whether the Apps and Cores change with the stack file, rather than being fixed by the mode. */
+	const isStackLabel = (label: string) => label.startsWith('app:') || label.startsWith('core:')
+	/** Stops everything that holds data, so a fixture can replace that data. */
+	const halt = async () => {
+		const labels = [...specsByLabel.keys()].filter(
+			(label) => label === 'backend' || isStackLabel(label),
+		)
+		await Promise.all(labels.map(stopProgram))
+		runnerLog('info', 'Backend, Cores and Apps stopped for a fixture.')
+	}
+	/** Starts the Apps and Cores `shape` names, replacing the ones that ran before. */
+	const startStack = async (shape: StackShape) => {
+		await halt()
+		for (const label of [...specsByLabel.keys()].filter(isStackLabel)) {
+			specsByLabel.delete(label)
+			setState(label, undefined)
+		}
+		const appAddresses = await pickLocalAddresses(shape.apps.length)
+		const corePorts =
+			shape.cores === 0 ? [] : [ports.core, ...(await pickFreePorts(shape.cores - 1))]
+		const stack = createStackSpecs({
+			appAddresses,
+			branch,
+			corePorts,
+			env,
+			hideWindows: input.hideWindows,
+			paths,
+			ports,
+			shape,
+		})
+		for (const spec of stack) {
+			specsByLabel.set(spec.label, spec)
+			runtime.programs[spec.label] = 'stopped'
+		}
+		runtime.stackId = shape.id
+		runtime.apps = shape.apps.map(({ name }, index) => ({
+			dataDir: appDataPath(paths, index + 1),
+			index: index + 1,
+			name,
+			tabUrl: appTabUrl(name, ports.app, appAddresses[index]!),
+		}))
+		runtime.cores = corePorts.map((port, index) => ({
+			dataDir: coreDataPath(paths, index + 1),
+			index: index + 1,
+			url: `https://127.0.0.1:${port}`,
+		}))
+		for (const { dataDir } of [...runtime.apps, ...runtime.cores]) {
+			NodeFS.mkdirSync(dataDir, { recursive: true })
+		}
+		writeRuntimeFile(paths, runtime)
+		const backend = specsByLabel.get('backend')
+		if (backend) {
+			await startProgram(backend)
+			// An App signs in once as it starts and a Core asks for its pairing code as it starts, so
+			// the backend has to answer before either does.
+			while (!stopping && !(await portIsOpen(ports.backend))) {
+				if (runtime.programs.backend === 'failed') return
+				await new Promise((resolve) => setTimeout(resolve, 100))
+			}
+		}
+		if (runtime.stackId !== shape.id) return
+		for (const spec of stack) void startProgram(spec)
+	}
+	/** Reads the stack file a fixture just wrote and starts it. */
+	const startSavedStack = async () => {
+		const shape = readStackShape(paths.stack, input.mode)
+		if (!shape) {
+			runnerLog('warning', `No stack to start: ${paths.stack} is missing.`)
+			return
+		}
+		await startStack(shape)
+	}
+	/** `backend`, `core:2`, `app:1`, plus `core` for the first Core, a bare number or name for an App. */
+	const labelFor = (name: string) => {
+		if (specsByLabel.has(name)) return name
+		if (name === 'core') return 'core:1'
+		if (name === 'frontend') return 'app-frontend'
+		const app = runtime.apps.find((app) => String(app.index) === name || app.name === name)
+		return app ? `app:${app.index}` : name
 	}
 	const commands = createCommandInput({
 		commandFile: NodePath.join(paths.data, 'dev-commands'),
-		getCore: () => processes.get('core'),
-		restart: (target) => restart(target === 'core' ? target : `app:${target}`),
+		getCore: () => processes.get('core:1'),
+		halt,
+		restart: (name) => restart(labelFor(name)),
+		startStack: startSavedStack,
 		stop: () => stop(0),
+		stopProgram: async (name) => {
+			const label = labelFor(name)
+			if (!specsByLabel.has(label)) {
+				runnerLog(
+					'warning',
+					`Nothing here is named ${name}. Running: ${[...specsByLabel.keys()].join(', ')}`,
+				)
+				return
+			}
+			await stopProgram(label)
+			runnerLog('info', `${label} stopped. Use rs ${label} to start it again.`)
+		},
 	})
 
 	process.once('SIGINT', () => void stop(130))
 	process.once('SIGTERM', () => void stop(143))
 
 	try {
-		for (const spec of specs) void startOrStop(spec)
+		for (const spec of shared) if (spec.label !== 'backend') void startProgram(spec)
+		if (held) {
+			runnerLog('info', 'Backend, Cores and Apps wait for a fixture.')
+			if (applyDefault) applyDefaultFixture(paths, builds)
+		} else {
+			void startStack(saved ?? firstStackShape(input.mode))
+		}
 		await finished
 	} finally {
 		await stop(process.exitCode || 1)
 	}
 }
 
-export function parseInput(
-	args: ReadonlyArray<string>,
-	defaultScenarios: ReadonlyArray<number> = [1],
-): RunnerInput {
+/** What a mode that runs only part of a stack starts before any fixture was applied. */
+function firstStackShape(mode: DevMode): StackShape {
+	const parts = stackPartsForMode(mode)
+	return { apps: parts.apps ? [{ name: 'alice' }] : [], cores: parts.cores ? 1 : 0, id: 'first' }
+}
+
+/**
+ * Fills a checkout that has no data yet. The runner in the foreground does this for itself; a
+ * background `up` applies the fixture from its own process instead.
+ */
+function applyDefaultFixture(
+	paths: WorktreePaths,
+	children: Set<NodeChildProcess.ChildProcess>,
+): void {
+	const child = NodeChildProcess.spawn(
+		process.execPath,
+		[NodeURL.fileURLToPath(import.meta.url), 'fixture', DEFAULT_FIXTURE],
+		{ cwd: paths.worktree, stdio: 'inherit', windowsHide: true },
+	)
+	children.add(child)
+	child.once('close', () => children.delete(child))
+}
+
+export function parseInput(args: ReadonlyArray<string>): RunnerInput {
 	const modeValue = args.find((arg) => !arg.startsWith('-')) ?? 'dev'
 	if (!DEV_MODES.includes(modeValue as DevMode)) {
 		throw new DevRunnerError(
@@ -532,48 +760,20 @@ export function parseInput(
 
 	const unknown = args.find((arg) => arg.startsWith('--') && !RUNNER_FLAGS.includes(arg))
 	if (unknown) throw new DevRunnerError(`Unknown option ${unknown}.`)
-	const scenarioArgs = args.filter((arg) => arg !== modeValue && !arg.startsWith('--'))
-	const startsApps = modeValue === 'dev' || modeValue === 'dev:app'
-	if (!startsApps && scenarioArgs.length > 0) {
-		throw new DevRunnerError(`${modeValue} does not start App scenarios.`)
+	const extra = args.find((arg) => arg !== modeValue && !arg.startsWith('--'))
+	if (extra) {
+		throw new DevRunnerError(
+			`Unexpected ${extra}. A fixture names the Apps and Cores: node scripts/dev-runner.ts fixture <name>`,
+		)
 	}
-	const scenarios = startsApps
-		? normalizeScenarios(scenarioArgs.length > 0 ? scenarioArgs : defaultScenarios)
-		: []
 
 	return {
 		accountWeb: !args.includes('--no-account-web'),
 		dryRun: args.includes('--dry-run'),
+		held: args.includes('--held'),
 		hideWindows: args.includes('--hide-windows'),
 		mode: modeValue as DevMode,
-		scenarios,
 	}
-}
-
-export function readDefaultScenarios(path: string): ReadonlyArray<number> {
-	if (!NodeFS.existsSync(path)) return [1]
-	let value: unknown
-	try {
-		value = JSON.parse(NodeFS.readFileSync(path, 'utf8'))
-	} catch (error) {
-		throw new DevRunnerError(`Could not read ${path}: ${String(error)}`)
-	}
-	if (!isRecord(value) || !Array.isArray(value.defaultScenarios)) {
-		throw new DevRunnerError(`${path} must contain a defaultScenarios array.`)
-	}
-	return normalizeScenarios(value.defaultScenarios)
-}
-
-function normalizeScenarios(values: ReadonlyArray<unknown>): ReadonlyArray<number> {
-	const scenarios = values.map((value) => {
-		const scenario = typeof value === 'number' ? value : Number(value)
-		if (!Number.isSafeInteger(scenario) || scenario < 1 || scenario > 999_999_999_999) {
-			throw new DevRunnerError(`Scenario ${String(value)} must be a positive whole number.`)
-		}
-		return scenario
-	})
-	if (scenarios.length === 0) throw new DevRunnerError('At least one App scenario is required.')
-	return [...new Set(scenarios)]
 }
 
 function resolveWorktreePaths(): WorktreePaths {
@@ -587,11 +787,12 @@ function resolveWorktreePaths(): WorktreePaths {
 	const data = NodePath.join(worktree, '.data')
 
 	return {
-		coreData: NodePath.join(data, 'core'),
+		appsData: NodePath.join(data, 'apps'),
+		coresData: NodePath.join(data, 'cores'),
 		data,
 		primary: NodePath.resolve(primary),
 		runtime: NodePath.join(data, 'runtime.json'),
-		scenariosData: NodePath.join(data, 'scenarios'),
+		stack: NodePath.join(data, 'stack.json'),
 		worktree: NodePath.resolve(worktree),
 	}
 }
@@ -614,17 +815,16 @@ function readSharedEnv(paths: WorktreePaths): NodeJS.ProcessEnv {
  */
 async function buildPrograms(paths: WorktreePaths): Promise<void> {
 	const ports = portsForOffset(0)
-	const specs = createProcessSpecs({
-		accountWeb: false,
+	const specs = createStackSpecs({
+		// Only the builds are used, so no App ever gets this address.
+		appAddresses: [{ port: 0, secret: '' }],
 		branch: currentBranch(paths.worktree),
+		corePorts: [ports.core],
 		env: createRuntimeEnvironment({ baseEnv: readSharedEnv(paths), ports }),
 		hideWindows: true,
-		// Only the builds are used, so no App ever gets this address.
-		localAddresses: new Map([[1, { port: 0, secret: '' }]]),
-		mode: 'dev',
 		paths,
 		ports,
-		scenarios: [1],
+		shape: firstStackShape('dev'),
 	})
 	for (const spec of specs) {
 		if (!spec.build) continue
@@ -745,35 +945,16 @@ async function runTests(
 	}
 }
 
-function ensureDataLayout(paths: WorktreePaths, scenarios: ReadonlyArray<number>): void {
-	NodeFS.mkdirSync(paths.data, { recursive: true })
-	NodeFS.mkdirSync(paths.coreData, { recursive: true })
-	for (const scenario of new Set([1, 2, 3, 4, ...scenarios])) {
-		NodeFS.mkdirSync(scenarioDataPath(paths, scenario), { recursive: true })
-	}
-}
-
-export function createProcessSpecs(input: {
+/** The programs a mode always runs: the ones that are not a Core or an App. */
+export function createSharedSpecs(input: {
 	readonly accountWeb: boolean
-	readonly branch: string
 	readonly env: NodeJS.ProcessEnv
-	readonly hideWindows: boolean
-	readonly localAddresses: ReadonlyMap<number, LocalAddress>
 	readonly mode: DevMode
 	readonly paths: WorktreePaths
 	readonly ports: DevPorts
-	readonly scenarios: ReadonlyArray<number>
 }): ReadonlyArray<ProcessSpec> {
 	const labels = processLabelsForMode(input.mode, input.accountWeb)
 	const backendUrl = `http://127.0.0.1:${input.ports.backend}`
-	const coreDir = NodePath.join(input.paths.worktree, 'apps', 'core')
-	const coreEnv = {
-		...input.env,
-		ALLOWED_ORIGIN: `http://localhost:${input.ports.app}`,
-		BIND_HOST: '127.0.0.1',
-		CORE_DATA_DIR: input.paths.coreData,
-		PORT: String(input.ports.core),
-	}
 	const specs: Record<string, ProcessSpec> = {
 		backend: {
 			args: [
@@ -822,78 +1003,75 @@ export function createProcessSpecs(input: {
 			env: input.env,
 			label: 'app-frontend',
 		},
-		core: {
-			args: ['run'],
-			build: {
-				cargoArgs: ['build', '--package', 'copal'],
-				cwd: coreDir,
-				...engineBuildSettings(input.paths, input.env),
-				inputs: programInputs(input.paths, 'copal'),
-				program: programFile('copal'),
-				...workspaceBuildDirs(input.paths),
-			},
-			cwd: coreDir,
-			env: coreEnv,
-			label: 'core',
-		},
 	}
-	const shared = labels.map((label) => specs[label]!)
-	if (input.mode !== 'dev' && input.mode !== 'dev:app') return shared
-	return [
-		...shared,
-		...input.scenarios.map((scenario) =>
-			createAppProcessSpec({
-				branch: input.branch,
-				backendUrl,
-				devUrl: `http://localhost:${input.ports.app}`,
-				env: input.env,
-				hideWindows: input.hideWindows,
-				localAddress: input.localAddresses.get(scenario)!,
-				paths: input.paths,
-				scenario,
-			}),
-		),
-	]
+	return labels.map((label) => specs[label]!)
 }
 
-function createAppProcessSpec(input: {
-	readonly backendUrl: string
+/** One program per Core and per App of `shape`, the Cores first. */
+export function createStackSpecs(input: {
+	/** One per App, in the stack's order. */
+	readonly appAddresses: ReadonlyArray<LocalAddress>
 	readonly branch: string
-	readonly devUrl: string
+	/** One per Core, in the stack's order. */
+	readonly corePorts: ReadonlyArray<number>
 	readonly env: NodeJS.ProcessEnv
 	readonly hideWindows: boolean
-	readonly localAddress: LocalAddress
 	readonly paths: WorktreePaths
-	readonly scenario: number
-}): ProcessSpec {
-	const dataDir = scenarioDataPath(input.paths, input.scenario)
-	const namespace = `${input.branch}:scenario:${input.scenario}`
-	// Everything that differs between runs reaches the App here, so one build serves them all.
-	const appDevConfig = {
-		backendUrl: input.backendUrl,
-		authMode: 'dev',
-		branch: input.branch,
-		credentialNamespace: namespace,
-		dataDir,
-		devUrl: input.devUrl,
-		hideWindow: input.hideWindows,
-		localPort: input.localAddress.port,
-		localSecret: input.localAddress.secret,
-		title: `Modrinth ${input.scenario} - ${input.branch}`,
-		username: scenarioUsername(input.scenario),
-	}
-	return {
-		args: ['--amberite-dev-config', JSON.stringify(appDevConfig)],
-		build: appProgramBuild(input.paths, input.env),
-		cwd: NodePath.join(input.paths.worktree, 'apps', 'app'),
+	readonly ports: DevPorts
+	readonly shape: StackShape
+}): ReadonlyArray<ProcessSpec> {
+	const coreDir = NodePath.join(input.paths.worktree, 'apps', 'core')
+	const cores = input.corePorts.slice(0, input.shape.cores).map((port, index) => ({
+		args: ['run'],
+		build: {
+			cargoArgs: ['build', '--package', 'copal'],
+			cwd: coreDir,
+			...engineBuildSettings(input.paths, input.env),
+			inputs: programInputs(input.paths, 'copal'),
+			program: programFile('copal'),
+			...workspaceBuildDirs(input.paths),
+		},
+		cwd: coreDir,
 		env: {
 			...input.env,
-			RUST_LOG: 'engine=warn,theseus_gui=warn,webview=off',
-			THESEUS_CONFIG_DIR: dataDir,
-			WEBVIEW2_USER_DATA_FOLDER: NodePath.join(dataDir, 'webview2'),
+			ALLOWED_ORIGIN: `http://localhost:${input.ports.app}`,
+			BIND_HOST: '127.0.0.1',
+			CORE_DATA_DIR: coreDataPath(input.paths, index + 1),
+			PORT: String(port),
 		},
-		label: `app:${input.scenario}`,
-	}
+		label: `core:${index + 1}`,
+	}))
+	const apps = input.shape.apps.map(({ name }, index) => {
+		const dataDir = appDataPath(input.paths, index + 1)
+		const address = input.appAddresses[index]!
+		// Everything that differs between runs reaches the App here, so one build serves them all.
+		const appDevConfig = {
+			backendUrl: `http://127.0.0.1:${input.ports.backend}`,
+			authMode: 'dev',
+			branch: input.branch,
+			credentialNamespace: `${input.branch}:app:${index + 1}`,
+			dataDir,
+			devUrl: `http://localhost:${input.ports.app}`,
+			hideWindow: input.hideWindows,
+			localPort: address.port,
+			localSecret: address.secret,
+			title: `Modrinth ${name} - ${input.branch}`,
+			username: name,
+		}
+		return {
+			args: ['--amberite-dev-config', JSON.stringify(appDevConfig)],
+			build: appProgramBuild(input.paths, input.env),
+			cwd: NodePath.join(input.paths.worktree, 'apps', 'app'),
+			env: {
+				...input.env,
+				RUST_LOG: 'engine=warn,theseus_gui=warn,webview=off',
+				THESEUS_CONFIG_DIR: dataDir,
+				WEBVIEW2_USER_DATA_FOLDER: NodePath.join(dataDir, 'webview2'),
+			},
+			label: `app:${index + 1}`,
+		}
+	})
+	return [...cores, ...apps]
 }
 
 function appProgramBuild(paths: WorktreePaths, env: NodeJS.ProcessEnv): ProgramBuild {
@@ -1416,8 +1594,13 @@ async function lockBuilds(
 	return () => NodeFS.rmSync(lock, { recursive: true, force: true })
 }
 
-function scenarioDataPath(paths: WorktreePaths, scenario: number): string {
-	return NodePath.join(paths.scenariosData, String(scenario))
+/** Numbered by place in the stack, so the same folder serves whatever a fixture names its App. */
+function appDataPath(paths: WorktreePaths, index: number): string {
+	return NodePath.join(paths.appsData, String(index))
+}
+
+function coreDataPath(paths: WorktreePaths, index: number): string {
+	return NodePath.join(paths.coresData, String(index))
 }
 
 function spawnProcess(
@@ -1505,13 +1688,18 @@ function pipeOutput(
 /**
  * Commands come from stdin and from `.data/dev-commands`: a runner started detached (by an agent,
  * or from another terminal) has no usable stdin, so appending a line to that file is the way to
- * send it `rs core`, `rs 1`, or `quit`. The file is emptied when the runner starts.
+ * send it `rs core:1`, `stop backend`, or `quit`. The file is emptied when the runner starts.
+ * `halt` and `stack` are how a fixture swaps the data: stop what holds it, then start the stack
+ * file it wrote.
  */
 function createCommandInput(input: {
 	readonly commandFile: string
 	readonly getCore: () => RunningProcess | undefined
-	readonly restart: (target: string) => Promise<void>
+	readonly halt: () => Promise<void>
+	readonly restart: (name: string) => Promise<void>
+	readonly startStack: () => Promise<void>
 	readonly stop: () => Promise<void>
+	readonly stopProgram: (name: string) => Promise<void>
 }): { close: () => void } {
 	const commands = NodeReadline.createInterface({ input: process.stdin })
 	commands.on('line', handle)
@@ -1539,6 +1727,15 @@ function createCommandInput(input: {
 	}, 500)
 	poll.unref()
 
+	// One at a time, in the order they were sent: a fixture's `stack` must not start what its
+	// `halt` is still stopping.
+	let last = Promise.resolve()
+	const inOrder = (work: () => Promise<void>) => {
+		last = last.then(work).catch((error: unknown) => {
+			runnerLog('error', error instanceof Error ? error.message : String(error))
+		})
+	}
+
 	function handle(line: string) {
 		const command = line.trim()
 		if (!command) return
@@ -1546,9 +1743,20 @@ function createCommandInput(input: {
 			void input.stop()
 			return
 		}
-		const restart = command.match(/^rs\s+(core|\d+)$/i)
-		if (restart) {
-			void input.restart(restart[1].toLowerCase())
+		if (command === 'halt') {
+			inOrder(input.halt)
+			return
+		}
+		if (command === 'stack') {
+			inOrder(input.startStack)
+			return
+		}
+		const program = command.match(/^(rs|stop)\s+(\S+)$/i)
+		if (program) {
+			const name = program[2]!.toLowerCase()
+			inOrder(() =>
+				program[1]!.toLowerCase() === 'rs' ? input.restart(name) : input.stopProgram(name),
+			)
 			return
 		}
 		const coreCommand = command.match(/^core\s+(.+)$/i)
@@ -1562,7 +1770,7 @@ function createCommandInput(input: {
 			return
 		}
 		if (command === 'help') {
-			runnerLog('info', 'Commands: rs <scenario>, rs core, core <command>, quit')
+			runnerLog('info', 'Commands: rs <name>, stop <name>, core <command>, quit')
 			return
 		}
 		runnerLog('warning', `Unknown command ${command}. Type help for available commands.`)
@@ -1677,6 +1885,10 @@ function prepareLocalBackend(paths: WorktreePaths, env: NodeJS.ProcessEnv): void
 	NodeFS.writeFileSync(NodePath.join(paths.data, 'backend', '.dev.vars'), variables, {
 		mode: 0o600,
 	})
+}
+
+/** Brings the backend's database up to the current schema, creating it when it is missing. */
+function migrateLocalBackend(paths: WorktreePaths, env: NodeJS.ProcessEnv): void {
 	const result = NodeChildProcess.spawnSync(
 		process.execPath,
 		[
@@ -1737,10 +1949,8 @@ function stoppedRuntime(runtime: RuntimeFile): RuntimeFile {
 	return {
 		...runtime,
 		pid: undefined,
-		scenarios: runtime.scenarios.map((scenario) => ({
-			...scenario,
-			tabUrl: undefined,
-		})),
+		programs: {},
+		apps: runtime.apps.map((app) => ({ ...app, tabUrl: undefined })),
 	}
 }
 
@@ -1783,21 +1993,33 @@ function processIsDevRunner(pid: number): boolean {
 	return result.status === 0 && result.stdout.includes('dev-runner')
 }
 
-async function runtimeIsReady(runtime: RuntimeFile): Promise<boolean> {
-	const open = await Promise.all(
-		requiredPortNames(runtime.mode, runtime.accountWeb).map((name) =>
-			portIsOpen(runtime.ports[name]),
-		),
-	)
-	if (!open.every(Boolean)) return false
-	const answering = await Promise.all(
-		runtime.scenarios.map((scenario) => appAnswers(scenario.tabUrl)),
-	)
-	if (!answering.every(Boolean)) return false
-	return runtime.scenarios.length === 0 || appPageLoads(runtime.urls.app)
+/** The ports the stack's programs listen on, by program label. */
+function programPorts(runtime: RuntimeFile): ReadonlyMap<string, number> {
+	const labels = processLabelsForMode(runtime.mode, runtime.accountWeb)
+	const shared = [
+		['backend', runtime.ports.backend],
+		['account-web', runtime.ports.accountWeb],
+		['app-frontend', runtime.ports.app],
+	] as const
+	return new Map([
+		...shared.filter(([label]) => labels.includes(label)),
+		...runtime.cores.map((core) => [`core:${core.index}`, Number(new URL(core.url).port)] as const),
+	])
 }
 
-/** Whether a scenario's App answers on the local API base its tab URL carries. */
+/** Whether everything that is meant to run answers. A program stopped on purpose is left out. */
+async function runtimeIsReady(runtime: RuntimeFile): Promise<boolean> {
+	const expected = (label: string) => runtime.programs[label] !== 'stopped'
+	const ports = [...programPorts(runtime)].filter(([label]) => expected(label))
+	const open = await Promise.all(ports.map(([, port]) => portIsOpen(port)))
+	if (!open.every(Boolean)) return false
+	const apps = runtime.apps.filter((app) => expected(`app:${app.index}`))
+	const answering = await Promise.all(apps.map((app) => appAnswers(app.tabUrl)))
+	if (!answering.every(Boolean)) return false
+	return apps.length === 0 || appPageLoads(runtime.urls.app)
+}
+
+/** Whether an App answers on the local API base its tab URL carries. */
 async function appAnswers(tabUrl: string | undefined): Promise<boolean> {
 	const base = tabUrl && new URLSearchParams(new URL(tabUrl).hash.slice(1)).get('local')
 	if (!base) return false
@@ -1895,17 +2117,159 @@ async function printStatus(paths: WorktreePaths): Promise<boolean> {
 	const state = pageError ? 'page does not compile' : ready ? 'ready' : 'starting'
 	runnerLog('info', `${runtime.mode} PID ${runtime.pid} · ${state}`)
 	if (pageError) runnerLog('error', pageError)
-	if (labels.includes('backend')) runnerLog('info', `Accounts and sharing ${runtime.urls.backend}`)
-	if (labels.includes('account-web')) {
-		runnerLog('info', `Account sign-in ${runtime.urls.accountWeb}`)
+	/** Says so when a program is not simply running. */
+	const note = (label: string) => {
+		const program = runtime.programs[label]
+		return program && program !== 'running' ? ` · ${program}` : ''
 	}
-	if (labels.includes('core')) runnerLog('info', `Core ${runtime.urls.core}`)
-	for (const scenario of runtime.scenarios) {
-		runnerLog('info', `App ${scenario.number} (${scenario.username})`)
-		if (scenario.tabUrl) runnerLog('info', `  tab: ${scenario.tabUrl}`)
+	if (labels.includes('backend')) {
+		runnerLog('info', `backend ${runtime.urls.backend}${note('backend')}`)
+	}
+	if (labels.includes('account-web')) {
+		runnerLog('info', `account-web ${runtime.urls.accountWeb}${note('account-web')}`)
+	}
+	for (const core of runtime.cores) {
+		runnerLog('info', `core:${core.index} ${core.url}${note(`core:${core.index}`)}`)
+	}
+	for (const app of runtime.apps) {
+		runnerLog('info', `app:${app.index} (${app.name})${note(`app:${app.index}`)}`)
+		if (app.tabUrl) runnerLog('info', `  tab: ${app.tabUrl}`)
 	}
 	runnerLog('info', `log ${devLogPath(paths)}`)
 	return ready
+}
+
+/** Starts a dev runner that outlives this command, writing to the dev log. */
+function startRunner(paths: WorktreePaths, input: RunnerInput): NodeChildProcess.ChildProcess {
+	NodeFS.mkdirSync(paths.data, { recursive: true })
+	const log = NodeFS.openSync(devLogPath(paths), 'w')
+	// On Windows `vp run` puts its command in a kill-on-close job without breakaway, so a runner
+	// started through it dies when vp returns. Node cannot spawn outside that job.
+	const started = NodeChildProcess.spawn(
+		process.execPath,
+		[
+			NodeURL.fileURLToPath(import.meta.url),
+			input.mode,
+			...(input.accountWeb ? [] : ['--no-account-web']),
+			...(input.hideWindows ? ['--hide-windows'] : []),
+			...(input.held ? ['--held'] : []),
+		],
+		{ cwd: paths.worktree, detached: true, stdio: ['ignore', log, log], windowsHide: true },
+	)
+	started.unref()
+	NodeFS.closeSync(log)
+	runnerLog('info', `started PID ${started.pid}`)
+	return started
+}
+
+/** Sends the running dev runner one line, the way `rs` and `stop` reach it. */
+function sendRunnerCommand(paths: WorktreePaths, command: string): void {
+	NodeFS.appendFileSync(NodePath.join(paths.data, 'dev-commands'), `${command}\n`)
+}
+
+/**
+ * `fixture <name>`: the whole setup in one command. Starts the dev stack when none is running,
+ * replaces its data with what the fixture builds, and prints where to reach it.
+ */
+async function applyFixture(paths: WorktreePaths, name: string, input: RunnerInput): Promise<void> {
+	const source = (file: string) =>
+		NodeURL.pathToFileURL(NodePath.join(paths.worktree, 'packages', 'fixtures', 'src', file)).href
+	// First, so the kit's own imports of the contracts resolve.
+	;(await import(source('packages.ts'))).resolvePackages()
+	const fixtures = await import(source('run.ts'))
+	const file: string = fixtures.resolveFixture(paths.worktree, name)
+	if (!(await fixtures.checkTypes(paths.worktree, file))) {
+		process.exitCode = 1
+		return
+	}
+	const live = readLiveRuntime(paths)
+	if (live && live.mode !== 'dev') {
+		throw new DevRunnerError(`Already running ${live.mode}. Run vp run down first.`)
+	}
+	// An App decides whether to show its window when it starts, so asking a running one is too late.
+	if (live?.hideWindows && !input.hideWindows) {
+		throw new DevRunnerError('Already running with App windows hidden. Run vp run down first.')
+	}
+	const started = live ? undefined : startRunner(paths, { ...input, held: true })
+	const waitStarted = performance.now()
+	const record = (result: 'ok' | 'failed') =>
+		recordTiming(paths.primary, {
+			kind: 'fixture',
+			worktree: paths.worktree,
+			result,
+			startedRunner: started !== undefined,
+			fixture: NodePath.basename(file),
+			ms: { total: Math.round(performance.now() - waitStarted) },
+		})
+	/** The runner this command talks to, or an error once it can no longer finish the job. */
+	const runtime = (): RuntimeFile | undefined => {
+		if (started && started.exitCode !== null) {
+			throw new DevRunnerError(`The dev runner stopped. See ${devLogPath(paths)}`)
+		}
+		const current = readLiveRuntime(paths)
+		if (current?.buildFailed) {
+			throw new DevRunnerError(`${current.buildFailed} did not build. See ${devLogPath(paths)}`)
+		}
+		return current && (!started || current.pid === started.pid) ? current : undefined
+	}
+	try {
+		while (!runtime()) await new Promise((resolve) => setTimeout(resolve, 200))
+		await fixtures.runFixture({
+			data: paths.data,
+			file,
+			primary: paths.primary,
+			runtime,
+			send: (command: string) => sendRunnerCommand(paths, command),
+			worktree: paths.worktree,
+		})
+		const deadline = Date.now() + UP_WAIT_MS
+		while (!(await runtimeIsReady(runtime()!))) {
+			if (Date.now() > deadline) throw new DevRunnerError('The stack did not become ready.')
+			await new Promise((resolve) => setTimeout(resolve, 500))
+		}
+	} catch (error) {
+		record('failed')
+		runnerLog('error', error instanceof Error ? error.message : String(error))
+		runnerLog('info', 'The stack stays up as far as the fixture got. Applying again starts over.')
+		process.exitCode = 1
+		return
+	}
+	record('ok')
+	await printStatus(paths)
+	if (live) runnerLog('info', 'Every App restarted, so reload any tab that was open.')
+}
+
+/** `stop <name>` and `rs <name>`: asks the runner, then waits until the program is there. */
+async function sendProgramCommand(
+	paths: WorktreePaths,
+	command: 'stop' | 'rs',
+	args: ReadonlyArray<string>,
+): Promise<void> {
+	const [name] = args
+	const before = readLiveRuntime(paths)
+	if (!before) throw new DevRunnerError('not running. Start it with: node scripts/dev-runner.ts up')
+	const known = Object.keys(before.programs)
+	const app = before.apps.find((app) => String(app.index) === name || app.name === name)
+	const label = app ? `app:${app.index}` : name === 'core' ? 'core:1' : (name ?? '')
+	if (args.length !== 1 || !known.includes(label)) {
+		throw new DevRunnerError(`${command} takes one of: ${known.join(', ')}`)
+	}
+	sendRunnerCommand(paths, `${command} ${label}`)
+	const wanted = command === 'stop' ? 'stopped' : 'running'
+	// Longer than the runner takes to read its command file, so an `rs` of a running program is
+	// seen going down before it is seen back up.
+	await new Promise((resolve) => setTimeout(resolve, 1_000))
+	const deadline = Date.now() + UP_WAIT_MS
+	while (Date.now() < deadline) {
+		const state = readLiveRuntime(paths)?.programs[label]
+		if (state === wanted) {
+			runnerLog('info', `${label} ${wanted}`)
+			return
+		}
+		if (state === 'failed') throw new DevRunnerError(`${label} failed. See ${devLogPath(paths)}`)
+		await new Promise((resolve) => setTimeout(resolve, 200))
+	}
+	throw new DevRunnerError(`${label} is still not ${wanted}. See ${devLogPath(paths)}`)
 }
 
 /**
@@ -1920,35 +2284,12 @@ async function up(paths: WorktreePaths, input: RunnerInput): Promise<void> {
 		process.exitCode = 1
 		return
 	}
-	const liveScenarios = live?.scenarios.map((scenario) => scenario.number).join(' ')
-	if (live && (live.mode !== input.mode || liveScenarios !== input.scenarios.join(' '))) {
-		runnerLog(
-			'error',
-			`Already running ${[live.mode, liveScenarios].filter(Boolean).join(' ')}. Run vp run down first.`,
-		)
+	if (live && live.mode !== input.mode) {
+		runnerLog('error', `Already running ${live.mode}. Run vp run down first.`)
 		process.exitCode = 1
 		return
 	}
-	if (!live) {
-		NodeFS.mkdirSync(paths.data, { recursive: true })
-		const log = NodeFS.openSync(devLogPath(paths), 'w')
-		// On Windows `vp run` puts its command in a kill-on-close job without breakaway, so a runner
-		// started through it dies when vp returns. Node cannot spawn outside that job.
-		started = NodeChildProcess.spawn(
-			process.execPath,
-			[
-				NodeURL.fileURLToPath(import.meta.url),
-				input.mode,
-				...input.scenarios.map(String),
-				...(input.accountWeb ? [] : ['--no-account-web']),
-				...(input.hideWindows ? ['--hide-windows'] : []),
-			],
-			{ cwd: paths.worktree, detached: true, stdio: ['ignore', log, log], windowsHide: true },
-		)
-		started.unref()
-		NodeFS.closeSync(log)
-		runnerLog('info', `started PID ${started.pid}`)
-	}
+	if (!live) started = startRunner(paths, input)
 
 	const waitStarted = performance.now()
 	// How long an agent waited for a usable stack. `waiting` means up gave up before it was ready.
@@ -1959,7 +2300,6 @@ async function up(paths: WorktreePaths, input: RunnerInput): Promise<void> {
 			result,
 			startedRunner: started !== undefined,
 			mode: input.mode,
-			scenarios: input.scenarios,
 			ms: { total: Math.round(performance.now() - waitStarted) },
 		})
 	const deadline = Date.now() + UP_WAIT_MS
@@ -1975,6 +2315,13 @@ async function up(paths: WorktreePaths, input: RunnerInput): Promise<void> {
 		const current = runtime && (!started || runtime.pid === started.pid) ? runtime : undefined
 		if (current?.buildFailed) {
 			runnerLog('error', `${current.buildFailed} did not build. See ${devLogPath(paths)}`)
+			process.exitCode = 1
+			record('failed')
+			return
+		}
+		const failed = Object.entries(current?.programs ?? {}).find(([, state]) => state === 'failed')
+		if (failed) {
+			runnerLog('error', `${failed[0]} keeps exiting. See ${devLogPath(paths)}`)
 			process.exitCode = 1
 			record('failed')
 			return
@@ -2033,9 +2380,7 @@ async function down(paths: WorktreePaths): Promise<void> {
 	}
 	// What the runner started takes a moment longer to go. A start right after this must not
 	// meet the old backend.
-	const ports = requiredPortNames(runtime.mode, runtime.accountWeb).map(
-		(name) => runtime.ports[name],
-	)
+	const ports = [...programPorts(runtime).values()]
 	for (let attempt = 0; attempt < 50; attempt += 1) {
 		if (!(await Promise.all(ports.map(portIsOpen))).some(Boolean)) break
 		await new Promise((resolve) => setTimeout(resolve, 200))
@@ -2053,7 +2398,8 @@ function printPlan(input: {
 	readonly mode: DevMode
 	readonly paths: WorktreePaths
 	readonly ports: DevPorts
-	readonly scenarios: ReadonlyArray<number>
+	/** Absent when the Apps and Cores wait for a fixture. */
+	readonly shape: StackShape | undefined
 	readonly source: string
 	readonly specs: ReadonlyArray<ProcessSpec>
 }): void {
@@ -2068,11 +2414,11 @@ function printPlan(input: {
 	if (labels.includes('account-web')) {
 		runnerLog('info', `Account sign-in http://127.0.0.1:${input.ports.accountWeb}`)
 	}
-	if (labels.includes('core')) runnerLog('info', `Core http://127.0.0.1:${input.ports.core}`)
-	if (input.scenarios.length > 0) {
-		runnerLog('info', `scenarios ${input.scenarios.join(', ')}`)
+	if (input.shape?.cores) runnerLog('info', `Cores ${input.shape.cores}`)
+	if (input.shape?.apps.length) {
+		runnerLog('info', `Apps ${input.shape.apps.map((app) => app.name).join(', ')}`)
 	}
-	runnerLog('info', `processes ${input.specs.map((spec) => spec.label).join(', ')}`)
+	runnerLog('info', `processes ${labels.join(', ')}`)
 }
 
 const isMain = process.argv[1] && samePath(process.argv[1], NodeURL.fileURLToPath(import.meta.url))

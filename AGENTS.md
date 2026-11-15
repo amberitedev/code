@@ -82,21 +82,28 @@ another. Before calling work done, walk this list and say which entries applied:
 - Setup runs in the background. While `.data/setup.json` says `running` and its `pid` is alive,
   wait for it and do not run `vp i`. It ends with `done` or `failed` (with the error). A dead pid,
   `failed`, or no file at all means run `vp run setup` yourself.
-- `node scripts/dev-runner.ts up 1 2` starts the backend, one Core, and the Apps for scenarios 1
-  and 2 in the background, and returns once each App loads, printing its tab URL. There is no
-  `vp run up`: on Windows, vp kills everything its command started when it returns, the background
-  stack included. `vp run status` prints the URLs again; `vp run down` stops only this checkout's
-  stack. The log is `.data/dev.log`. `vp run dev` is the same stack in the foreground with App
-  windows, for a person at a terminal.
+- `node scripts/dev-runner.ts fixture <name>` is the whole setup. It starts the backend, the
+  frontend, and the Cores and Apps the [fixture](#fixtures) declares in the background, builds the
+  fixture's state, and returns once each App loads, printing its tab URL. Without a name it
+  applies `default`: Apps for `alice` and `bob`, and a Core. There is no `vp run fixture`: on
+  Windows, vp kills everything its command started when it returns, the background stack included.
+  `node scripts/dev-runner.ts up` starts the stack again on the data it has. `vp run status`
+  prints the URLs again; `vp run down` stops only this checkout's stack. The log is
+  `.data/dev.log`. `vp run dev` is the same stack in the foreground with App windows, for a person
+  at a terminal.
 - Rust builds once per distinct set of Rust inputs, shared by every checkout. With no Rust changes,
-  `up` compiles nothing. Otherwise it compiles only the repo's crates that changed, one build at a
-  time across checkouts. `up` gives up waiting after 9 minutes; run it again to keep waiting.
-- Nothing watches Rust. After a Rust edit, `vp run down`, then the same `up` command again,
-  with its mode and scenario numbers. `up` stops and prints compiler errors, so it is also the
-  check for Rust changes.
+  a start compiles nothing. Otherwise it compiles only the repo's crates that changed, one build at
+  a time across checkouts. `fixture` and `up` give up waiting after 9 minutes; run the command again
+  to keep waiting.
+- Nothing watches Rust. After a Rust edit, apply the fixture again, or restart one program with
+  `vp run rs <name>`. Either builds first and stops on a compiler error, which is in the log, so it
+  is also the check for Rust changes.
+- `vp run stop <name>` takes one program down and keeps it down, for a Core that is offline or a
+  backend that does not answer. `vp run rs <name>` brings it back. The names are in
+  `vp run status`: `backend`, `core:1`, `app:2`.
 - Backend-only work needs no App: `node scripts/dev-runner.ts up dev:backend` starts in seconds.
-  `node scripts/dev-runner.ts up dev:core` starts only the Core. For the backend and Core together,
-  start the full stack.
+  `node scripts/dev-runner.ts up dev:core` starts only the Cores. For the backend and a Core
+  together, start the full stack.
 - Ports derive from the worktree path and are stable across restarts. Read the real ones and the
   tab URLs from `vp run status`, since occupied ports shift.
 - Never kill by process name, path, or worktree string. Several worktrees run stacks at once, and
@@ -105,21 +112,43 @@ another. Before calling work done, walk this list and say which entries applied:
 
 Ports, builds, and timings: [scripts](docs/internals/scripts.md).
 
-## Test data
+## Fixtures
 
-An empty database is a bad test. Each worktree gets a copy of the primary checkout's `.data/`
-instead of pointing at live state:
+An empty database is a bad test, and so is a state clicked together by hand that nobody can get
+back. A fixture is one TypeScript file that builds an exact state of the whole stack:
 
-- `.data/backend` and `.data/core` are shared by every App in the worktree.
-  `.data/scenarios/<number>` is one App installation. Scenarios 1 to 4 are the default set; a new
-  number makes another isolated App and account.
-- A scenario holds two databases: `engine.db` (instances, content, the cache) and `app.db` (accounts,
-  settings, synced options and the App's other tables). `.data/core` holds the Core's `db/core.db`
-  and its engine's `engine/engine.db`. Nothing joins across them, so copy each folder whole.
-- The backend, Core, and scenarios are one dataset. Copy them together.
-- Stop the affected process before copying SQLite files, and copy their `-wal` and `-shm` files with
-  them.
-- Copy in, never symlink. Data flows one way: into your sandbox, never back out.
+```ts
+import { friends, instance, stack } from '@amberite/fixtures'
+
+const { alice, bob } = await stack({ apps: ['alice', 'bob'], cores: [{ owner: 'alice' }] })
+await friends(alice, bob)
+await instance(alice, {
+	name: 'Survival',
+	loader: 'fabric',
+	gameVersion: '1.21.1',
+	sharedWith: [bob],
+})
+```
+
+- Write the state your change needs as a fixture and apply it:
+  `node scripts/dev-runner.ts fixture path/to/file.ts`. Every apply wipes the stack's data and runs
+  the file from the top against the current code. The file can live anywhere; one that others will
+  want goes in `packages/fixtures/fixtures`.
+- The first line is `stack`, which names the Apps (each signed in to the account of that name),
+  accounts with no App, and the Cores with their owners. The lines after it build state through the
+  real programs, so each program writes everything that belongs to that state.
+- For something with no helper, `call(who, endpoint, params, body)` sends any generated endpoint to
+  an App, to the backend as an account, or to a Core. When a second fixture needs the same calls,
+  they become a helper in `packages/fixtures/kit`.
+- `patch(store, table, where, values)` changes rows a program wrote, for a state it does not reach
+  on demand: an expired link, a quarantined share, a wrong role. Make the state for real first and
+  bend it with one line. Do not write whole states as rows.
+- A line that fails stops the fixture there with the program's own error and leaves the stack up.
+  Fix the line and apply again.
+- `.data/apps/<n>` is one App installation and `.data/cores/<n>` one Core, numbered by their place
+  in the stack. `.data` belongs to this checkout: never point a stack at another checkout's data.
+
+How it works and why: [scripts](docs/internals/scripts.md#fixtures).
 
 ## Verifying
 

@@ -5,8 +5,10 @@ import * as NodePath from 'node:path'
 import { describe, expect, it } from 'vite-plus/test'
 
 import {
-	createProcessSpecs,
+	appTabUrl,
 	createRuntimeEnvironment,
+	createSharedSpecs,
+	createStackSpecs,
 	findFirstAvailableOffset,
 	isBrowserAllowedPort,
 	parseInput,
@@ -14,9 +16,8 @@ import {
 	prepareCheckoutCrates,
 	processLabelsForMode,
 	programKey,
+	readStackShape,
 	resolveStartOffset,
-	scenarioTabUrl,
-	scenarioUsername,
 } from './dev-runner.ts'
 
 describe('dev runner ports', () => {
@@ -137,18 +138,18 @@ describe('dev runner environment', () => {
 })
 
 describe('dev runner modes', () => {
-	it('runs the complete product in dev mode', () => {
-		expect(processLabelsForMode('dev')).toEqual(['backend', 'account-web', 'core', 'app-frontend'])
+	it('runs everything but the Cores and Apps of the stack in dev mode', () => {
+		expect(processLabelsForMode('dev')).toEqual(['backend', 'account-web', 'app-frontend'])
 	})
 
 	it('keeps partial modes focused', () => {
 		expect(processLabelsForMode('dev:app')).toEqual(['app-frontend'])
 		expect(processLabelsForMode('dev:backend')).toEqual(['backend', 'account-web'])
-		expect(processLabelsForMode('dev:core')).toEqual(['core'])
+		expect(processLabelsForMode('dev:core')).toEqual([])
 	})
 
 	it('leaves out the account sign-in website when asked', async () => {
-		expect(processLabelsForMode('dev', false)).toEqual(['backend', 'core', 'app-frontend'])
+		expect(processLabelsForMode('dev', false)).toEqual(['backend', 'app-frontend'])
 		const checked: number[] = []
 		await findFirstAvailableOffset({
 			accountWeb: false,
@@ -163,82 +164,73 @@ describe('dev runner modes', () => {
 	})
 })
 
-describe('dev runner scenarios', () => {
-	it('uses dev.json defaults when no scenario is passed', () => {
-		expect(parseInput(['dev'], [2, 4])).toEqual({
-			accountWeb: true,
-			dryRun: false,
-			hideWindows: false,
-			mode: 'dev',
-			scenarios: [2, 4],
-		})
-	})
+describe('dev runner stack', () => {
+	const paths = {
+		appsData: `${process.cwd()}/.data/apps`,
+		coresData: `${process.cwd()}/.data/cores`,
+		data: `${process.cwd()}/.data`,
+		primary: process.cwd(),
+		runtime: `${process.cwd()}/.data/runtime.json`,
+		stack: `${process.cwd()}/.data/stack.json`,
+		worktree: process.cwd(),
+	}
 
 	it('reads the options a background start passes', () => {
-		expect(parseInput(['dev', '2', '--no-account-web', '--hide-windows'], [1])).toEqual({
+		expect(parseInput(['dev'])).toEqual({
+			accountWeb: true,
+			dryRun: false,
+			held: false,
+			hideWindows: false,
+			mode: 'dev',
+		})
+		expect(parseInput(['dev', '--no-account-web', '--hide-windows', '--held'])).toEqual({
 			accountWeb: false,
 			dryRun: false,
+			held: true,
 			hideWindows: true,
 			mode: 'dev',
-			scenarios: [2],
 		})
-		expect(() => parseInput(['dev', '--nope'], [1])).toThrow('Unknown option --nope')
+		expect(() => parseInput(['dev', '--nope'])).toThrow('Unknown option --nope')
 	})
 
-	it('accepts several scenarios and removes duplicates', () => {
-		expect(parseInput(['dev', '1', '2', '1'], [4]).scenarios).toEqual([1, 2])
-		expect(parseInput(['dev:app', '3'], [1]).scenarios).toEqual([3])
+	it('leaves the Apps and Cores to a fixture', () => {
+		expect(() => parseInput(['dev', '2'])).toThrow('A fixture names the Apps and Cores')
 	})
 
-	it('does not attach scenarios to backend-only modes', () => {
-		expect(parseInput(['dev:core'], [1])).toEqual({
-			accountWeb: true,
-			dryRun: false,
-			hideWindows: false,
-			mode: 'dev:core',
-			scenarios: [],
-		})
-		expect(() => parseInput(['dev:core', '2'], [1])).toThrow(
-			'dev:core does not start App scenarios',
-		)
-	})
-
-	it('derives the fake account from the scenario number', () => {
-		expect(scenarioUsername(12)).toBe('scenario_12')
-	})
-
-	it('gives each App isolated persistent state', () => {
-		const paths = {
-			coreData: `${process.cwd()}/.data/core`,
-			data: `${process.cwd()}/.data`,
-			primary: process.cwd(),
-			runtime: `${process.cwd()}/.data/runtime.json`,
-			scenariosData: `${process.cwd()}/.data/scenarios`,
-			worktree: process.cwd(),
+	it('reads the stack a fixture wrote, and only the part a mode runs', () => {
+		const scratch = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), 'dev-runner-'))
+		const file = NodePath.join(scratch, 'stack.json')
+		try {
+			expect(readStackShape(file, 'dev')).toBeUndefined()
+			const shape = { apps: [{ name: 'alice' }, { name: 'bob' }], cores: 2, id: 'one' }
+			NodeFS.writeFileSync(file, JSON.stringify(shape))
+			expect(readStackShape(file, 'dev')).toEqual(shape)
+			expect(readStackShape(file, 'dev:core')).toEqual({ ...shape, apps: [] })
+			expect(readStackShape(file, 'dev:app')).toEqual({ ...shape, cores: 0 })
+			expect(readStackShape(file, 'dev:backend')).toEqual({ apps: [], cores: 0, id: 'one' })
+			NodeFS.writeFileSync(file, JSON.stringify({ apps: ['alice'], cores: 1, id: 'two' }))
+			expect(() => readStackShape(file, 'dev')).toThrow('is not a stack file')
+		} finally {
+			NodeFS.rmSync(scratch, { force: true, recursive: true })
 		}
-		const specs = createProcessSpecs({
-			accountWeb: true,
+	})
+
+	it('gives each App and Core isolated persistent state', () => {
+		const specs = createStackSpecs({
+			appAddresses: [
+				{ port: 50001, secret: 'one' },
+				{ port: 50002, secret: 'two' },
+			],
 			branch: 'feature',
+			corePorts: [16662, 50010],
 			env: { MODRINTH_API_URL: 'https://api.example/v2/' },
 			hideWindows: true,
-			localAddresses: new Map([
-				[1, { port: 50001, secret: 'one' }],
-				[3, { port: 50003, secret: 'three' }],
-			]),
-			mode: 'dev',
 			paths,
 			ports: portsForOffset(0),
-			scenarios: [1, 3],
+			shape: { apps: [{ name: 'alice' }, { name: 'bob' }], cores: 2, id: 'one' },
 		})
 
-		expect(specs.map((spec) => spec.label)).toEqual([
-			'backend',
-			'account-web',
-			'core',
-			'app-frontend',
-			'app:1',
-			'app:3',
-		])
+		expect(specs.map((spec) => spec.label)).toEqual(['core:1', 'core:2', 'app:1', 'app:2'])
 		const apps = specs.filter((spec) => spec.label.startsWith('app:'))
 		for (const app of apps) {
 			// Ports reach the App when it starts, so one build serves every checkout.
@@ -253,27 +245,42 @@ describe('dev runner scenarios', () => {
 			)
 		}
 		expect(apps[0]!.build).toEqual(apps[1]!.build)
-		const core = specs.find((spec) => spec.label === 'core')?.build
+		const cores = specs.filter((spec) => spec.label.startsWith('core:'))
 		// Core compiles this crate from outside its own folder.
-		expect(core?.inputs).toEqual(
+		expect(cores[0]!.build?.inputs).toEqual(
 			expect.arrayContaining(['apps/core', 'Cargo.lock', 'packages/minecraft-meta-manifest']),
 		)
-		expect(core?.env).toEqual({ MODRINTH_API_URL: 'https://api.example/v2/' })
-		expect(core?.ignoredInputs).toEqual(apps[0]!.build?.ignoredInputs)
+		expect(cores[0]!.build?.env).toEqual({ MODRINTH_API_URL: 'https://api.example/v2/' })
+		expect(cores[0]!.build?.ignoredInputs).toEqual(apps[0]!.build?.ignoredInputs)
+		expect(cores[0]!.build).toEqual(cores[1]!.build)
 		const cwd = process.cwd().replaceAll('\\', '/')
+		// A folder is numbered by place in the stack, whatever the fixture calls its account.
 		expect(apps.map((spec) => spec.env.THESEUS_CONFIG_DIR?.replaceAll('\\', '/'))).toEqual([
-			`${cwd}/.data/scenarios/1`,
-			`${cwd}/.data/scenarios/3`,
+			`${cwd}/.data/apps/1`,
+			`${cwd}/.data/apps/2`,
 		])
-		expect(apps.map((spec) => JSON.parse(spec.args.at(-1)!).username)).toEqual([
-			'scenario_1',
-			'scenario_3',
+		expect(cores.map((spec) => spec.env.CORE_DATA_DIR?.replaceAll('\\', '/'))).toEqual([
+			`${cwd}/.data/cores/1`,
+			`${cwd}/.data/cores/2`,
 		])
+		expect(cores.map((spec) => spec.env.PORT)).toEqual(['16662', '50010'])
+		expect(apps.map((spec) => JSON.parse(spec.args.at(-1)!).username)).toEqual(['alice', 'bob'])
 		// `rs` restarts an App from this spec, so it keeps its local address.
 		expect(apps.map((spec) => JSON.parse(spec.args.at(-1)!))).toMatchObject([
 			{ localPort: 50001, localSecret: 'one' },
-			{ localPort: 50003, localSecret: 'three' },
+			{ localPort: 50002, localSecret: 'two' },
 		])
+	})
+
+	it('runs the programs a mode shares beside the stack', () => {
+		const specs = createSharedSpecs({
+			accountWeb: false,
+			env: {},
+			mode: 'dev',
+			paths,
+			ports: portsForOffset(0),
+		})
+		expect(specs.map((spec) => spec.label)).toEqual(['backend', 'app-frontend'])
 	})
 })
 
@@ -377,9 +384,13 @@ describe('dev runner program cache', () => {
 })
 
 describe('dev runner tab URL', () => {
-	it("carries the App's local API base on the tab URL", () => {
-		expect(scenarioTabUrl(2, 1420, { port: 50001, secret: 'ab12' })).toBe(
-			'http://scenario-2.localhost:1420/#local=http%3A%2F%2F127.0.0.1%3A50001%2Fab12',
+	it("names the tab after the App's account and carries its local API base", () => {
+		expect(appTabUrl('alice', 1420, { port: 50001, secret: 'ab12' })).toBe(
+			'http://alice.localhost:1420/#local=http%3A%2F%2F127.0.0.1%3A50001%2Fab12',
+		)
+		// A host name cannot hold an underscore.
+		expect(new URL(appTabUrl('big_bob', 1420, { port: 1, secret: 'a' })).hostname).toBe(
+			'big-bob.localhost',
 		)
 	})
 })

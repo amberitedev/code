@@ -25,11 +25,10 @@ You need:
 This repository is commonly worked on through [T3 Code](https://github.com/pingdotgg/t3code), a
 coding-agent app that gives each task an isolated Git worktree. When T3 Code creates a worktree, it
 runs `node scripts/setup-worktree.ts` from `t3.json`. The script installs dependencies (retrying once,
-because two worktrees set up at the same time can collide on the shared Git config), copies the
-`backend`, `core`, and `scenarios` development data from the primary checkout, and copies the
-engine's `.env`. The scenario copy leaves out Minecraft's game assets (`meta/assets`) and the App
-window's browser caches; they are most of the files and are fetched again when needed. It does not
-overwrite anything already in the worktree, so it is safe to run again. `.data/setup.json` records
+because two worktrees set up at the same time can collide on the shared Git config) and copies the
+engine's `.env`. It copies no data: the first dev start applies the default
+[fixture](#fixtures). It does not overwrite anything already in the worktree, so it is safe to run
+again. `.data/setup.json` records
 whether it is `running` (with its `pid`), `done`, or `failed` (with an `error`). Any exit,
 including Ctrl+C, writes the final state; a hard kill cannot, so a `running` file whose `pid` is
 gone means setup died. Rust is not built here: `up` builds what it needs, and with the shared build
@@ -37,30 +36,37 @@ folder that is usually nothing.
 
 ## Dev
 
-- `vp run dev`: Starts the local account/sharing Worker, the account sign-in website, Core, and the
-  App scenarios selected by `dev.json`.
-- `vp run dev 1 2 3`: Starts several isolated App installations against those same local services.
-- `vp run dev:backend`: Starts the Worker and account website without Apps.
-- `vp run dev:app 1 2`: Starts only those App scenarios and their shared frontend. Start
-  `dev:backend` first. Core and Minecraft servers are not needed for account/sharing work.
-- `vp run dev:core`: Starts only Core. It pairs with the Worker and checks App sign-in tickets
-  against the Worker's public key, so start `dev:backend` too.
-- `node scripts/dev-runner.ts up 1 2`: Starts the same stack in the background, waits until every
-  service answers, every App answers on its local API, and the frontend serves the App's page, then
-  prints each App's `tab:` URL. There is no `vp run up`: on Windows, `vp run` puts its command in a
-  job that kills every process in it when vp exits, the background stack included. The tab URL
-  opens the App in a plain browser tab on its own origin. In a new checkout the frontend spends a
-  minute or two preparing its dependencies; that happens inside `up`. It writes to
-  `.data/dev.log` and returns after 9 minutes if the stack
-  is still compiling; run it again to keep waiting. It fails at once when a Rust build fails, or
-  when the App's entry module does not compile, printing the compiler error; the stack keeps
-  running. An optional mode comes first: `node scripts/dev-runner.ts up dev:backend`. Unlike
-  `vp run dev`, it leaves out the account sign-in
-  website and keeps App windows off the desktop, because agents use Apps from browser tabs.
-  `--show-windows` shows them; on a stack already running hidden it fails, so run `down`
-  first.
-- `vp run status`: Prints what is running, whether it is ready, and each App's tab URL. Exits
-  non-zero when the stack is not ready.
+- `node scripts/dev-runner.ts fixture <name>`: The whole setup in one command. It type-checks the
+  [fixture](#fixtures), starts the stack in the background when none is running, replaces the
+  stack's data with what the fixture builds, waits until everything answers, and prints each App's
+  `tab:` URL. `<name>` is a file in `packages/fixtures/fixtures` or the path of any fixture file,
+  and `default` when left out.
+- `node scripts/dev-runner.ts up`: Starts the stack in the background on the data it already has,
+  with the Apps and Cores of the fixture applied last. A checkout that never had one applied gets
+  the default fixture. It waits until every service answers, every App answers on its local API,
+  and the frontend serves the App's page, then prints each App's `tab:` URL. There is no
+  `vp run up` and no `vp run fixture`: on Windows, `vp run` puts its command in a job that kills
+  every process in it when vp exits, the background stack included. The tab URL opens the App in
+  a plain browser tab on its own origin. In a new checkout the frontend spends a minute or two
+  preparing its dependencies; that happens inside the command. Both commands write to
+  `.data/dev.log` and return after 9 minutes if the stack is still compiling; run the command
+  again to keep waiting. They fail at once when a Rust build fails, or when the App's entry module
+  does not compile, printing the compiler error; the stack keeps running. `up` takes an optional
+  mode first: `node scripts/dev-runner.ts up dev:backend`. Unlike `vp run dev`, both leave out the
+  account sign-in website and keep App windows off the desktop, because agents use Apps from
+  browser tabs. `--show-windows` shows them; on a stack already running hidden it fails, so run
+  `down` first.
+- `vp run dev`: The same stack in the foreground, with the account sign-in website and App
+  windows, for a person at a terminal.
+- `vp run dev:backend`: Starts the Worker and account website without Apps or Cores.
+- `vp run dev:app`: Starts only the stack's Apps and their shared frontend. Start `dev:backend`
+  first. Cores and Minecraft servers are not needed for account/sharing work.
+- `vp run dev:core`: Starts only the stack's Cores. A Core pairs with the Worker and checks App
+  sign-in tickets against the Worker's public key, so start `dev:backend` too.
+- `vp run status`: Prints what is running, whether it is ready, each program that is stopped or
+  has failed, and each App's tab URL. Exits non-zero when the stack is not ready.
+- `vp run stop <name>` and `vp run rs <name>`: Stops one program, or starts it again. See
+  [Process ownership](#process-ownership).
 - `vp run down`: Stops this checkout's dev runner and everything it started.
 - `node scripts/dev-runner.ts build`: Compiles the App and Core for this checkout's Rust without
   starting anything. `check:changed` runs it when Rust changed.
@@ -75,7 +81,60 @@ folder that is usually nothing.
 - `vp run dev:check`: Prints the processes, state directory, URLs, and ports that a full run would
   use without starting anything.
 
-Scenario numbers passed after the task name override `defaultScenarios` in `dev.json` for that run.
+## Fixtures
+
+A fixture is a TypeScript file that puts the whole dev stack into one exact state. Its first line
+declares the stack; every line after it builds state in that stack, top to bottom.
+
+```ts
+import { friends, instance, stack } from '@amberite/fixtures'
+
+const { alice, bob } = await stack({ apps: ['alice', 'bob'], cores: [{ owner: 'alice' }] })
+await friends(alice, bob)
+await instance(alice, {
+	name: 'Survival',
+	loader: 'fabric',
+	gameVersion: '1.21.1',
+	sharedWith: [bob],
+})
+```
+
+The package is `packages/fixtures`: `src/` is the tool, `kit/` holds one helper per thing a fixture
+builds, and `fixtures/` holds the fixtures worth keeping. A fixture written for one bug can live
+anywhere, outside the repo too.
+
+- **Every apply wipes and runs from the top.** There is no saved state and no comparing with what
+  is there: the stack is stopped, its data deleted, and the fixture run against programs started
+  on empty data. One code path, and a fixture always shows what the current code produces. Reuse
+  is ordinary functions imported from another file.
+- **State is made by the program that owns it.** `stack` signs each App in the way a dev App
+  signs in, and pairs each Core by approving the code it shows, as its owner. A helper calls the
+  endpoints of whichever program owns the state, so that program writes everything that belongs to
+  it. `call(who, endpoint, params, body)` is the same thing without a helper: `who` is an App (its
+  local API), an account (the backend), or a Core.
+- **A row bends that state.** `patch` and `sql` write rows directly, for the states no program
+  reaches on demand, such as an expired link. The backend's rows go through its `/_dev/sql` route,
+  because its database file belongs to the process serving it. A Core or an App may hold what it
+  read in memory, so the tool restarts one after its rows change, before it is next called. State
+  a program keeps only in memory cannot be patched. Much of what the backend stores about a Core
+  is a copy the Core sends again when it starts, so patch the Core.
+- **A line that fails stops the fixture there**, with the program's own error, and leaves the
+  stack up in the state it reached. Applying again starts over.
+- **The fixture is type-checked before anything is stopped**, against the generated contracts, so
+  a call the programs would refuse fails in a few seconds with the stack untouched. CI and
+  `check:changed` type-check the package, which is how a changed endpoint reaches the helper that
+  calls it.
+- **A helper returns only once its work has finished.** It waits for the install job or the
+  publish it started, so no fixture waits or polls.
+
+An apply keeps two things in each program's folder: the App window's browser profile, and `meta`,
+the game files (Minecraft, Java, loaders, server jars). Each App and Core has its own `meta`,
+because installing Java deletes and unpacks a folder in place, which two programs cannot share. A
+new folder is filled with hard links from `target/dev-shared/game-files` in the primary checkout,
+and what a program downloads is linked back there after an apply, so a file is downloaded once per
+machine. On another drive the links become copies.
+
+Nothing about a real Minecraft account is covered: launching the game needs one.
 
 ## Rust programs
 
@@ -100,9 +159,9 @@ The six most recently used keys are kept.
 Nothing in the build depends on ports. The App is told where its frontend is, and whether to keep
 its window hidden, in `--amberite-dev-config` when it starts.
 
-Nothing watches Rust files. After a Rust edit, restart with `down` then `up`, or `rs <scenario>` and
-`rs core` in the foreground runner; the key has changed, so the runner builds first. If a build
-fails, the process stays stopped until the next restart.
+Nothing watches Rust files. After a Rust edit, apply a fixture again, restart with `down` then
+`up`, or restart one program with `vp run rs app:1` or `vp run rs core:1`; the key has changed, so
+the runner builds first. If a build fails, the process stays stopped until the next restart.
 
 Builds and test runs go one at a time across every checkout, at below-normal priority, so several
 agents restarting after Rust edits queue up instead of taking the whole machine. A test run holds
@@ -135,30 +194,29 @@ again as well (about 7 minutes).
 An older checkout that still runs its App from `target/dev-shared/debug` holds that file open; the runner
 renames it aside and builds again.
 
-A fresh dev Core belongs to nobody. Add it once from an App with the code in the `[core]` output;
-until then the Servers page asks for a Core. The App signs in to a Core with a ticket on its first
-request and keeps that session in the OS keychain; set `CORE_PROXY_LOG=1` before starting an App
-to log the head of every request its Core proxy sends, with the session token left out.
+A Core that a fixture declares with `owner: null` belongs to nobody and shows its pairing code in
+the `[core:<n>]` output, to be added from an App by hand. The App signs in to a Core with a ticket
+on its first request and keeps that session in the OS keychain; set `CORE_PROXY_LOG=1` before
+starting an App to log the head of every request its Core proxy sends, with the session token left
+out.
 
 The Worker runs through `wrangler dev --local`; D1, Durable Objects, and the R2 bucket that holds
-shared version manifests persist in `.data/backend`. Shared files themselves are in the dev Core's
-store, `.data/core/store`.
-The runner applies local migrations first. It generates a persistent secret in
+shared version manifests persist in `.data/backend`. Shared files themselves are in a Core's
+store, `.data/cores/<n>/store`.
+A fixture gives the Worker a database with every migration applied and no rows, made once per
+schema by `wrangler d1 migrations apply` and kept in the primary checkout's
+`target/dev-shared/fixtures`; a start on existing data applies the migrations to it instead. The
+runner generates a persistent secret in
 `.data/backend/dev-secret` and passes it through `.data/backend/.dev.vars`, never command-line
 arguments. It also makes a local ticket key in `.data/backend/ticket-key.json`, passes it as
 `TICKET_KEY`, and serves its public half from `.data/backend/assets/core/keys.json` in place of the
 production keys. No Cloudflare account, billing, remote D1, or remote R2 is used.
 
-Scenario `1` uses username `scenario_1`, email `scenario_1@scenario.invalid`, and password
-`Scenario-scenario_1-Local-only!`. Other numbers follow the same pattern. These are real local
-database accounts with hashed passwords. The native dev login can seed/sign in these accounts through
-a loopback endpoint requiring the runner secret; ordinary email/password login also works. This
-shortcut cannot access accounts created through normal signup. Each scenario retains separate App
-credentials and settings.
-Before starting a scenario, the runner checks that its App is stopped and normalizes copied SQLite
-launcher paths to that scenario's directory. Both current and previous launcher directories change
-together, so native startup cannot move files from the primary checkout. Copied icon, Java, queued
-install, and upload paths follow the new directory; stale copied process records are cleared.
+An account a fixture names, such as `alice`, has that username, the email
+`alice@scenario.invalid`, and the password `Scenario-alice-Local-only!`. These are real local
+database accounts with hashed passwords. A dev App signs in to its account, and a fixture acts as
+any of them, through a loopback endpoint requiring the runner secret; ordinary email/password
+login also works. This shortcut cannot access accounts created through normal signup.
 
 `node apps/backend/tests/accounts.mjs <backend-url>` runs the focused HTTP and native WebSocket
 contract proof against the already-running backend. Its private test credentials stay in
@@ -171,54 +229,31 @@ Each checkout owns a gitignored `.data/`:
 ```text
 .data/
 ├── backend/         persistent local D1, Durable Objects, manifests (R2), and dev secrets
-├── core/            shared Core state
-├── scenarios/
+├── cores/
+│   ├── 1/           one complete Core installation
+│   └── ...
+├── apps/
 │   ├── 1/           one complete App installation
 │   ├── 2/
 │   └── ...
+├── stack.json       the Apps and Cores the last applied fixture declared
 └── runtime.json     the last dev runner plan
 ```
 
-Every App scenario has its own local database, settings, Minecraft instances, credentials, WebView
-data, and session state. Scenarios in one checkout share that checkout's account backend.
-Keep backend, Core, and scenarios together when copying the dataset.
+Every App has its own local database, settings, Minecraft instances, credentials, WebView data,
+and session state, and every Core its own database, servers and store. They share that checkout's
+account backend. A folder is numbered by the program's place in the stack, not named after its
+account, so the game files in it serve whatever the next fixture calls that App.
 
-Worktree setup copies `backend`, `core`, and `scenarios` from the primary checkout's `.data/` without
-overwriting existing state.
-
-`runtime.json` holds the runner's PID, the ports, and each scenario's `tabUrl` while the stack is
-running. The PID and URLs are removed when it stops.
-
-### Regenerating the sharing dataset
-
-In the default dataset scenario 1 owns a shared instance that scenario 2 has joined: scenario 1's
-Share tab lists scenario 2 as a member, and scenario 2's copy shows no wrong-account warning (a
-member's instance has no Share tab). Rebuild it in a worktree, through the Apps, and hand it over
-by copying; test data never leaves a worktree on its own.
-
-1. `node scripts/dev-runner.ts up 1 2` and open both tab URLs.
-2. In App 1, delete every instance whose Share tab says "Wrong account" (Instance settings, General,
-   Delete instance). Such a record points at a shared instance the backend no longer has, and the
-   locked Share tab offers no other way out.
-3. In App 1, open the Share tab of the instance to share and click Invite friends. This creates the
-   shared instance on the backend and publishes the instance's current content. Type `scenario_2`
-   and click Add. The accounts are not friends yet, so this first Add only sends a friend request:
-   sharing invites need friendship by default.
-4. In App 2, accept the friend request (the "1 friend request" button in the sidebar).
-5. In App 1, Add `scenario_2` again. The member table shows the invite as Pending.
-6. In App 2, accept the invite toast and click Install. Wait until the install finishes (the
-   download indicator in the top bar), which leaves the instance in App 2's library as a member of
-   the shared instance.
-7. `vp run down`. With the primary checkout's stack stopped too, replace the
-   primary's `.data/backend`, `.data/core`, and `.data/scenarios` with the worktree's.
-
-Publishing uploads only files that are not on Modrinth: loose mods, selected configs, and the like.
-The default instance has none, so its push needs no uploads at all.
+`runtime.json` holds the runner's PID, the ports, the state of every program, and each App's
+`tabUrl` and each Core's address while the stack is running. The PID and URLs are removed when it
+stops.
 
 ## Ports and multiple instances
 
 Base ports are App `1420`, account website `3100`, Worker `8787`, and Core `16662`. Linked worktrees
-derive a stable preferred offset from their path and add it to every port.
+derive a stable preferred offset from their path and add it to every port. That Core port is the
+first Core's; each further Core takes a free port when the stack starts.
 
 Offset resolution, in order:
 
@@ -248,19 +283,18 @@ PID recorded in `.data/runtime.json` and nothing else. Never kill by a broad pro
 match, or worktree path: several worktrees may be running Node, Core, and Tauri at the same
 time, and a pattern can also match the agent doing the work.
 
-Core and crashed App scenarios restart automatically. Closing an App window normally leaves that
-scenario stopped. Enter `rs 1` to start or restart scenario 1, or `rs core` to restart Core; either
-rebuilds first when its Rust changed. Three fast failures pause
-automatic restarts so a broken launch cannot loop indefinitely; `rs 1` or `rs core` retries manually.
+Every program follows one rule. An exit nobody asked for is a crash: the runner starts the program
+again, waiting twice as long each time, and after five exits in a minute it leaves the program down
+and prints why. One program going down never stops the others, the backend included. A stop someone
+asked for is not a crash: `vp run stop <name>` keeps a program down until `vp run rs <name>`, which
+starts or restarts it and rebuilds first when its Rust changed. Closing an App's window counts as
+asking. `<name>` is a label from `vp run status`: `backend`, `core:1`, `app:2`, or an App's account
+name. This is how a fixture's state gets a Core that is offline or a backend that is down, without
+killing a process by PID.
 
-The same commands can be appended as lines to `.data/dev-commands` when the runner has no usable
-stdin, which is the case for a runner started detached in the background:
-
-```bash
-echo "rs core" >> .data/dev-commands
-```
-
-The runner empties that file when it starts and reads new lines every half second.
+The foreground runner takes the same commands on its terminal, as `stop <name>` and `rs <name>`.
+Both forms write a line to `.data/dev-commands`, which the runner empties when it starts and reads
+every half second.
 
 The combined terminal removes repetitive progress output. Vite+ forwards App console
 errors and warnings to the same terminal; error and warning notifications are logged there too.
@@ -281,9 +315,10 @@ The daily Modrinth merge, `upstream.json` and the porting rules are in [upstream
 
 ## Timings
 
-Setup, every Rust build and test run, and every `up` append one JSON line to the primary checkout's
-`.data/timings.jsonl`, shared by all checkouts. Each line has `kind` (`setup`, `build`, `test`,
-`up`), the worktree, the result, and milliseconds per step: `install` and `data` for setup,
-`lockWait` and `compile` plus the number of repo crates compiled again for a build, the same plus
-`test` and the tested crates for a test run, and the wait until ready for `up`. It is the record for checking
+Setup, every Rust build and test run, every `up`, and every applied fixture append one JSON line to
+the primary checkout's `.data/timings.jsonl`, shared by all checkouts. Each line has `kind`
+(`setup`, `build`, `test`, `up`, `fixture`), the worktree, the result, and milliseconds per step:
+`install` for setup, `lockWait` and `compile` plus the number of repo crates compiled again for a
+build, the same plus `test` and the tested crates for a test run, and the wait until ready for
+`up` and `fixture`. It is the record for checking
 whether a change to the dev setup made it faster.

@@ -83,17 +83,18 @@ test('admin permissions, locked accounts, and forced recovery preserve upstream 
 		await call(`${adminPath}/sessions`, 'DELETE')
 		await call('/user', 'GET', undefined, 'member', 401)
 
-		async function devSession(username, secret) {
-			const response = await backend.fetch('http://localhost/_dev/session', {
+		async function dev(path, body, secret) {
+			const response = await backend.fetch(`http://localhost/_dev/${path}`, {
 				method: 'POST',
 				headers: {
 					'content-type': 'application/json',
 					...(secret ? { 'x-local-dev-secret': secret } : {}),
 				},
-				body: JSON.stringify({ username }),
+				body: JSON.stringify(body),
 			})
 			return { status: response.status, body: await response.json() }
 		}
+		const devSession = (username, secret) => dev('session', { username }, secret)
 		assert.equal((await devSession('scenario', undefined)).status, 404)
 		assert.equal((await devSession('scenario', 'wrong')).status, 404)
 		assert.equal((await devSession('member', 'dev-secret')).status, 403)
@@ -103,6 +104,20 @@ test('admin permissions, locked accounts, and forced recovery preserve upstream 
 			headers: { authorization: `Bearer ${scenario.body.session}` },
 		})
 		assert.equal((await user.json()).username, 'scenario')
+
+		// A dev fixture's way to the database is as closed as the dev sign-in.
+		const rename = {
+			sql: 'UPDATE users SET bio = ? WHERE username = ?',
+			params: ['bent', 'scenario'],
+		}
+		assert.equal((await dev('sql', rename, undefined)).status, 404)
+		assert.equal((await dev('sql', rename, 'wrong')).status, 404)
+		assert.deepEqual((await dev('sql', rename, 'dev-secret')).body, { rows: [], changes: 1 })
+		const read = { sql: 'SELECT bio FROM users WHERE username = ?', params: ['scenario'] }
+		assert.deepEqual((await dev('sql', read, 'dev-secret')).body.rows, [{ bio: 'bent' }])
+		const wrong = await dev('sql', { sql: 'SELECT nope FROM users', params: [] }, 'dev-secret')
+		assert.equal(wrong.status, 400)
+		assert.match(wrong.body.description, /no such column: nope/)
 	} finally {
 		await backend.dispose()
 	}

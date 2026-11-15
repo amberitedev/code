@@ -33,6 +33,12 @@ const matching = (pattern: RegExp) => changed.filter((file) => pattern.test(file
 // The packages CI typechecks and tests (ci.yml, js job), and what reaches each.
 const PACKAGES = [
 	{ name: '@amberite/backend', test: true, reachedBy: ['apps/backend', 'packages/contracts'] },
+	// A fixture helper calls the generated endpoints, so a changed contract shows up here.
+	{
+		name: '@amberite/fixtures',
+		test: false,
+		reachedBy: ['packages/fixtures', 'packages/contracts'],
+	},
 	{
 		name: '@modrinth/app-frontend',
 		test: false,
@@ -88,16 +94,16 @@ for (const pack of PACKAGES) {
 		})
 	}
 }
-// The root test run (vite.config.ts) covers scripts/ and api-client's unit tests.
+// The root test run (vite.config.ts) covers scripts/ and the unit tests of api-client and fixtures.
 const unitTests = changed.flatMap((file) => {
-	if (!/^(?:scripts|packages\/api-client\/src)\/.+\.ts$/.test(file)) return []
+	if (!/^(?:scripts|packages\/(?:api-client|fixtures)\/src)\/.+\.ts$/.test(file)) return []
 	const test = file.replace(/(?<!\.test)\.ts$/, '.test.ts')
 	return NodeFS.existsSync(NodePath.join(root, test)) ? [test] : []
 })
 if (unitTests.length > 0) {
 	steps.push({ name: 'unit tests', command: 'vp', args: ['test', 'run', ...new Set(unitTests)] })
 }
-if (under('scripts') || touched.includes('dev.json')) {
+if (under('scripts')) {
 	steps.push({ name: 'dev:check', command: 'vp', args: ['run', 'dev:check'] })
 }
 const rust = matching(/\.rs$/)

@@ -8,6 +8,8 @@
 		"setup": "node scripts/setup-worktree.ts",
 		"status": "node scripts/dev-runner.ts status",
 		"down": "node scripts/dev-runner.ts down",
+		"stop": "node scripts/dev-runner.ts stop",
+		"rs": "node scripts/dev-runner.ts rs",
 		"dev": "node scripts/dev-runner.ts dev",
 		"dev:app": "node scripts/dev-runner.ts dev:app",
 		"dev:backend": "node scripts/dev-runner.ts dev:backend",
