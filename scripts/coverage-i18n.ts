@@ -644,10 +644,16 @@ function cachedModule(rootDir: string, scanDirs: ReadonlyArray<string>): string 
 	]
 	try {
 		const hash = createHash('sha256').update(git(['ls-files', '-s', '-z', '--', ...inputs]))
-		// Edited and new files count by their content, a deleted one by its absence.
-		for (const file of git(['ls-files', '-m', '-o', '--exclude-standard', '-z', '--', ...inputs])
-			.split('\0')
-			.filter(Boolean)) {
+		// Edited and new files count by their content, a deleted one by its absence. The scan also
+		// reads ignored Vue files, such as generated ones.
+		const listed = (...flags: ReadonlyArray<string>) =>
+			git(['ls-files', ...flags, '-z', '--', ...inputs])
+				.split('\0')
+				.filter(Boolean)
+		for (const file of [
+			...listed('-m', '-o', '--exclude-standard'),
+			...listed('-o', '-i', '--exclude-standard').filter((file) => file.endsWith('.vue')),
+		]) {
 			const absolute = path.join(rootDir, file)
 			hash.update(file).update(fs.existsSync(absolute) ? fs.readFileSync(absolute) : 'deleted')
 		}
