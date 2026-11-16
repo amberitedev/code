@@ -1,10 +1,10 @@
 use std::env;
 use std::ffi::OsString;
-#[cfg(target_os = "windows")]
 use std::fs;
-use std::path::PathBuf;
+use std::hash::{DefaultHasher, Hash, Hasher};
 #[cfg(target_os = "windows")]
-use std::path::{Component, Path, Prefix};
+use std::path::{Component, Prefix};
+use std::path::{Path, PathBuf};
 use std::process::{Command, exit};
 
 fn main() {
@@ -58,6 +58,16 @@ fn build_java_jars() {
         out_dir.join("java/libs").display()
     );
 
+    // Cargo reruns this script whenever the java files look newer, which the dev runner's shared
+    // build causes on every engine edit. Gradle takes 10-30 s even with nothing to do.
+    let stamp = out_dir.join("java/inputs.stamp");
+    let inputs = java_inputs_hash();
+    if out_dir.join("java/libs").is_dir()
+        && fs::read_to_string(&stamp).is_ok_and(|built| built == inputs)
+    {
+        return;
+    }
+
     #[cfg(target_os = "windows")]
     let java_dir = windows_java_dir(&out_dir);
     #[cfg(not(target_os = "windows"))]
@@ -84,6 +94,37 @@ fn build_java_jars() {
         println!("cargo::error=Gradle build failed with {exit_status}");
         exit(exit_status.code().unwrap_or(1));
     }
+    fs::write(stamp, inputs).unwrap();
+}
+
+/// The content of everything Gradle reads, as the rerun-if-changed lines above name it.
+fn java_inputs_hash() -> String {
+    fn visit(path: &Path, hasher: &mut DefaultHasher) {
+        if path.is_dir() {
+            let mut entries = fs::read_dir(path)
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+                .collect::<Vec<_>>();
+            entries.sort();
+            for entry in entries {
+                visit(&entry, hasher);
+            }
+        } else if let Ok(content) = fs::read(path) {
+            path.hash(hasher);
+            content.hash(hasher);
+        }
+    }
+    let mut hasher = DefaultHasher::new();
+    for input in [
+        "gradle",
+        "src",
+        "build.gradle.kts",
+        "settings.gradle.kts",
+        "gradle.properties",
+    ] {
+        visit(&Path::new("java").join(input), &mut hasher);
+    }
+    format!("{:016x}", hasher.finish())
 }
 
 #[cfg(target_os = "windows")]

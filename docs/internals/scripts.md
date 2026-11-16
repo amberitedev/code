@@ -36,15 +36,17 @@ folder that is usually nothing.
 
 ## Dev
 
-| Command                                  | What it does                                                                                                                                                                                                                                                                                                                                               |
-| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `vp run fixture <name>`                  | The whole setup: type-checks the [fixture](#fixtures), starts the stack in the background when none is running, replaces the stack's data with what the fixture builds, waits until everything answers, and prints each App's `tab:` URL. `<name>` is a file in `packages/fixtures/fixtures` or the path of any fixture file, and `default` when left out. |
-| `vp run up`                              | Starts the stack in the background on the data it already has, with the Apps and Cores of the fixture applied last. A checkout that never had one applied gets the default fixture.                                                                                                                                                                        |
-| `vp run dev`                             | The same stack in the foreground, with the account sign-in website and App windows, for a person at a terminal.                                                                                                                                                                                                                                            |
-| `vp run status`                          | Prints what is running, whether it is ready, each program that is stopped or has failed, and each App's tab URL. Exits non-zero when the stack is not ready.                                                                                                                                                                                               |
-| `vp run stop <name>`, `vp run rs <name>` | Stops one program, or starts it again. See [Process ownership](#process-ownership).                                                                                                                                                                                                                                                                        |
-| `vp run down`                            | Stops this checkout's dev runner and everything it started. The data stays.                                                                                                                                                                                                                                                                                |
-| `vp run check:changed [ref]`             | CI's fast checks for the files changed since the merge base with `origin/main` (or `ref`): lint, typos, TOML, typecheck and tests of the affected packages, and for Rust `rustfmt`, a build, and the tests of every workspace crate with a changed file (except the ones CI leaves out). typos and tombi are skipped when not installed.                   |
+| Command                                      | What it does                                                                                                                                                                                                                                                                                                                                                                                                      |
+| -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `vp run fixture <name>`                      | The whole setup: type-checks the [fixture](#fixtures), starts the stack in the background when none is running, replaces the stack's data with what the fixture builds, waits until everything answers, and prints each App's `tab:` URL. `<name>` is a file in `packages/fixtures/fixtures` or the path of any fixture file, and `default` when left out.                                                        |
+| `vp run up`                                  | Starts the stack in the background on the data it already has, with the Apps and Cores of the fixture applied last. A checkout that never had one applied gets the default fixture.                                                                                                                                                                                                                               |
+| `vp run dev`                                 | The same stack in the foreground, with the account sign-in website and App windows, for a person at a terminal.                                                                                                                                                                                                                                                                                                   |
+| `vp run status`                              | Prints what is running, whether it is ready, each program that is stopped or has failed, and each App's tab URL. Exits non-zero when the stack is not ready.                                                                                                                                                                                                                                                      |
+| `vp run stop <name>`, `vp run rs <name>`     | Stops one program, or starts it again. See [Process ownership](#process-ownership).                                                                                                                                                                                                                                                                                                                               |
+| `vp run down`                                | Stops this checkout's dev runner and everything it started. The data stays.                                                                                                                                                                                                                                                                                                                                       |
+| `vp run check:changed [ref]`                 | CI's fast checks for the files changed since the merge base with `origin/main` (or `ref`): lint, typos, TOML, typecheck and tests of the affected packages, and for Rust `rustfmt`, a build, and the tests of every workspace crate with a changed file (except the ones CI leaves out). The steps run at once, each one's output printed whole when it finishes. typos and tombi are skipped when not installed. |
+| `node scripts/dev-runner.ts build`           | Compiles the App and Core for this checkout's Rust without starting anything. `check:changed` runs it when Rust changed.                                                                                                                                                                                                                                                                                          |
+| `node scripts/dev-runner.ts test <crate>...` | One `cargo test` of the given crates in the shared build folder, with the programs' packages and features, so it compiles only the tested crates' own tests. Doc tests are left to CI. `check:changed` runs it for the crates with a changed file.                                                                                                                                                                |
 
 `fixture` and `up` wait until every service answers, every App answers on its local API, and the
 frontend serves the App's page. In a new checkout the frontend spends a minute or two preparing its
@@ -122,18 +124,21 @@ Nothing about a real Minecraft account is covered: launching the game needs one.
 
 ## Rust programs
 
-The runner builds the App and Core with `cargo build` and never runs them from the build output.
-Each program is copied to `<target>/dev-bin/<key>/` and run from there, where `<target>` is the
-primary checkout's `target/dev-shared`; every worktree shares those programs. Both are members of the root Cargo workspace.
+The runner builds the App and Core with one `cargo build` and never runs them from the build output.
+Both programs are copied to `<target>/dev-bin/<key>/` and run from there, where `<target>` is the
+primary checkout's `target/dev-shared`; every worktree shares those programs. Built apart, Cargo
+picks dependency features for each on its own and compiles about 250 crates twice, the engine
+among them. The build also passes `--examples`, which builds nothing here but turns on the features
+dev-dependencies add, exactly as a test run does, so tests reuse every crate the programs compiled.
 The key is a hash of everything that goes into the build:
 
-- Both: the root `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `.cargo`, the Cargo arguments,
-  and the folders of the program's crate and every local crate it builds with, as
-  `cargo metadata` reports them. Crates it does not use, such as `toasty`, can change without a
-  rebuild. Also `packages/engine/.env` and the variables named in that file and `.env.prod`,
-  which the engine's build compiles in.
-- App, also: `apps/app-frontend/package.json` (the App's version) and
-  `apps/app/tauri-local.conf.json`.
+- The root `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `.cargo`, the Cargo arguments,
+  and the folders of both programs' crates and every local crate they build with, as
+  `cargo metadata` reports them. Crates they do not use, such as `toasty`, can change without a
+  rebuild.
+- `packages/engine/.env` and the variables named in that file and `.env.prod`, which the engine's
+  build compiles in.
+- `apps/app-frontend/package.json` (the App's version) and `apps/app/tauri-local.conf.json`.
 
 Files are hashed by content as Git would store it, including edits and new files that are not
 committed, so the same Rust in two checkouts gives the same key. When the key already has a program,
@@ -157,23 +162,24 @@ runner compiles there, tests included; a plain `cargo` run, `cargo test` too, us
 cannot change what the runner trusts. `cargo clean` in the primary checkout
 deletes `target/dev-shared` too, so every checkout compiles from scratch next time.
 
+Cargo runs from `<primary>-checkout`, a link (a junction on Windows) that the runner points at the
+checkout it builds while it holds the build turn. Compiled crates then hold the same source paths
+whichever checkout built them, so the compiler's incremental state carries over between worktrees
+(an App edit in a new worktree compiles about as fast as in the last one), and build scripts that
+record absolute paths, such as tauri's, do not see a changed crate. Compiler messages name the
+real checkout. A crate that reads a file outside its own folder records it by that link too, but
+the runner does not date such a file, so keep embedded files inside the crate.
+
 Cargo decides what to recompile from file times alone, so in a shared folder a crate last compiled
-from another checkout can look finished here. `target/dev-shared/built-crates.json` records, for each crate in
-the repo, the content it was last compiled from and for which programs and test runs: a crate
-compiled for a test run is a different build from the same crate in a program, and each set of
-tested crates is its own test run. Before a build, a crate
-that matches gets its files dated 2000, so Cargo keeps its output; any other crate gets the current
-time, so Cargo compiles it again. Inputs outside every crate folder, such as the App's version in
-`apps/app-frontend/package.json`, count toward the program's own crate, in its tests too. A crate's
-own tests can
-hold its checkout's path (`env!("CARGO_MANIFEST_DIR")`), which Cargo does not compare, so they
-are trusted only in the checkout that compiled them last; another checkout compiles that crate
-again. A test run also compiles again every local crate it uses that it has not used at that
-content before. A crate compiled again, even from the same content, is newer than the compiled
-crates that use it, so the next program build that runs Cargo compiles those again as well (for
-`path-util`, the engine and the App). Switching between worktrees that differ only in `apps/app`
-compiles that one crate (about 2.5 minutes); when `packages/engine` differs too, the engine compiles
-again as well (about 7 minutes).
+from another checkout can look finished here. `target/dev-shared/built-crates.json` records, for
+each crate in the repo, the content it was last compiled from: as the programs compile it, which
+is also how a test run compiles every crate it does not test, and as each set of tested crates
+compiles its own tests. Before a build, a crate that matches gets its files and folders dated 2000,
+so Cargo keeps its output; any other crate gets the current time, so Cargo compiles it again.
+Inputs outside every crate folder, such as the App's version in `apps/app-frontend/package.json`,
+count toward the App's own crate, in its tests too. A crate compiled again, even from the same
+content, is newer than the compiled crates that use it, so the next build compiles those again as
+well.
 
 An older checkout that still runs its App from `target/dev-shared/debug` holds that file open; the runner
 renames it aside and builds again.
@@ -304,5 +310,14 @@ the primary checkout's `.data/timings.jsonl`, shared by all checkouts. Each line
 (`setup`, `build`, `test`, `up`, `fixture`), the worktree, the result, and milliseconds per step:
 `install` for setup, `lockWait` and `compile` plus the number of repo crates compiled again for a
 build, the same plus `test` and the tested crates for a test run, and the wait until ready for
-`up` and `fixture`. It is the record for checking
-whether a change to the dev setup made it faster.
+`up` and `fixture`. It records what happened, under whatever else the machine was doing.
+
+To check whether a change to the dev setup made it faster, run `node scripts/dev-bench.ts`. It
+times the agent loop (a new worktree's setup, `up` until the App is usable, `check:changed`) for a
+cold start, one-line UI, App, App and Core, and contracts edits, an edit-and-restart in a running
+worktree, and two worktrees at once. It benchmarks this checkout's files in a clone at
+`<primary>-bench` with its own build folder and empty data, so it never touches shared builds.
+Scenarios start from the snapshot already built, tested and typechecked, as agents keep `main`
+warm in practice. The default run is the quick scenarios (about 10 minutes); `--full` runs all
+(about 40 minutes, most of it the cold start). The score is 100 when every scenario meets its
+target and is the harmonic mean, so the slowest scenario dominates it.

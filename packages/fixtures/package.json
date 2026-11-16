@@ -9,7 +9,7 @@
 		".": "./src/index.ts"
 	},
 	"scripts": {
-		"typecheck": "tsc --noEmit"
+		"typecheck": "tsc --noEmit --incremental --tsBuildInfoFile node_modules/.cache/typecheck.tsbuildinfo"
 	},
 	"dependencies": {
 		"@amberite/contracts": "workspace:*"

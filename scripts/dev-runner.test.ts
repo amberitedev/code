@@ -204,20 +204,27 @@ describe('dev runner stack', () => {
 				devUrl: 'http://localhost:1420',
 				hideWindow: true,
 			})
-			expect(JSON.stringify(app.build)).not.toContain('1420')
-			expect(app.build?.inputs).toEqual(
-				expect.arrayContaining(['Cargo.lock', 'apps/app', 'packages/engine']),
-			)
+			expect(JSON.stringify(app.program)).not.toContain('1420')
 		}
-		expect(apps[0]!.build).toEqual(apps[1]!.build)
+		// One Cargo run builds both programs.
 		const cores = specs.filter((spec) => spec.label.startsWith('core:'))
+		for (const spec of [...apps, ...cores])
+			expect(spec.program?.build).toBe(cores[0]!.program?.build)
+		expect(apps[0]!.program?.file).toMatch(/^theseus_gui/)
+		expect(cores[0]!.program?.file).toMatch(/^copal/)
 		// Core compiles this crate from outside its own folder.
-		expect(cores[0]!.build?.inputs).toEqual(
-			expect.arrayContaining(['apps/core', 'Cargo.lock', 'packages/minecraft-meta-manifest']),
+		expect(cores[0]!.program?.build.inputs).toEqual(
+			expect.arrayContaining([
+				'apps/app',
+				'apps/core',
+				'Cargo.lock',
+				'packages/engine',
+				'packages/minecraft-meta-manifest',
+			]),
 		)
-		expect(cores[0]!.build?.env).toEqual({ MODRINTH_API_URL: 'https://api.example/v2/' })
-		expect(cores[0]!.build?.ignoredInputs).toEqual(apps[0]!.build?.ignoredInputs)
-		expect(cores[0]!.build).toEqual(cores[1]!.build)
+		expect(cores[0]!.program?.build.env).toMatchObject({
+			MODRINTH_API_URL: 'https://api.example/v2/',
+		})
 		const cwd = process.cwd().replaceAll('\\', '/')
 		// A folder is numbered by place in the stack, whatever the fixture calls its account.
 		expect(apps.map((spec) => spec.env.THESEUS_CONFIG_DIR?.replaceAll('\\', '/'))).toEqual([
@@ -255,7 +262,7 @@ describe('dev runner program cache', () => {
 		env: {},
 		ignoredInputs: [],
 		inputs: ['scripts/dev-runner.ts'],
-		program: 'program',
+		programs: ['program'],
 		targetDir: `${process.cwd()}/target`,
 	}
 
@@ -269,7 +276,7 @@ describe('dev runner program cache', () => {
 		expect(programKey(process.cwd(), { ...build, cargoArgs: ['build', '--release'] })).not.toBe(key)
 	})
 
-	it('trusts shared output per build, and a crate tests only where they were compiled', () => {
+	it('trusts shared output per build and content, from any checkout', () => {
 		const scratch = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), 'dev-runner-'))
 		const library = (checkout: string) => NodePath.join(checkout, 'packages', 'a', 'src', 'lib.rs')
 		const checkout = (name: string) => {
@@ -295,13 +302,20 @@ describe('dev runner program cache', () => {
 		const program = {
 			...shared,
 			inputs: ['Cargo.lock', 'packages/app', 'packages/a'],
-			program: 'app',
+			programs: ['app'],
 		}
 		const tests = {
 			...shared,
 			inputs: ['Cargo.lock', 'packages/a'],
 			programInputs: {},
+			shared: program.inputs,
 			tested: ['packages/a'],
+		}
+		const programTests = {
+			...tests,
+			inputs: program.inputs,
+			programInputs: { 'packages/app': program.inputs },
+			tested: ['packages/app'],
 		}
 		const both = {
 			...tests,
@@ -319,17 +333,17 @@ describe('dev runner program cache', () => {
 			const here = checkout('here')
 			const there = checkout('there')
 			expect(compiles(here, program)).toBe(2)
+			// A test run compiles the crates it does not test as the programs do.
+			expect(compiles(here, programTests)).toBe(1)
 			expect(compiles(here, tests)).toBe(1)
 			// The tests compiled the content the program was compiled from.
 			expect(compiles(here, program)).toBe(0)
 			expect(NodeFS.statSync(library(here)).mtime.getUTCFullYear()).toBe(2000)
 			expect(compiles(here, tests)).toBe(0)
-			// Same content elsewhere: the program serves it, but the tests hold this checkout's path.
+			// Cargo builds every checkout through one path, so the same content serves them all.
 			expect(compiles(there, program)).toBe(0)
-			expect(compiles(there, tests)).toBe(1)
-			expect(NodeFS.statSync(library(there)).mtime.getUTCFullYear()).not.toBe(2000)
-			expect(compiles(here, tests)).toBe(1)
-			expect(compiles(here, program)).toBe(0)
+			expect(compiles(there, tests)).toBe(0)
+			expect(NodeFS.statSync(library(there)).mtime.getUTCFullYear()).toBe(2000)
 			NodeFS.writeFileSync(library(there), 'pub fn b() {}')
 			expect(compiles(there, tests)).toBe(1)
 			expect(compiles(here, program)).toBe(1)
@@ -338,8 +352,8 @@ describe('dev runner program cache', () => {
 			expect(compiles(here, both)).toBe(2)
 			expect(compiles(here, tests)).toBe(0)
 			expect(compiles(here, program)).toBe(0)
-			// Compiling a crate's tests elsewhere ends every test run's trust in them here.
-			expect(compiles(there, both)).toBe(2)
+			// Compiling other content anywhere ends every build's trust in what it replaced.
+			expect(compiles(there, both)).toBe(1)
 			expect(compiles(here, tests)).toBe(1)
 		} finally {
 			NodeFS.rmSync(scratch, { force: true, recursive: true })
