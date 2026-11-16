@@ -6293,6 +6293,21 @@
   "servers.download.unavailable.title": {
     "defaultMessage": "Download unavailable"
   },
+  "servers.eula.accept": {
+    "defaultMessage": "Accept"
+  },
+  "servers.eula.body": {
+    "defaultMessage": "Servers on this Core start once you accept the Minecraft EULA. You only accept it once."
+  },
+  "servers.eula.owner-only": {
+    "defaultMessage": "This Core's owner has to accept the Minecraft EULA before its servers start."
+  },
+  "servers.eula.read": {
+    "defaultMessage": "Read the EULA"
+  },
+  "servers.eula.title": {
+    "defaultMessage": "Minecraft EULA"
+  },
   "servers.files.config-push.admonition-body": {
     "defaultMessage": "You edited {path}. Push an update so players get this change next time they play."
   },

@@ -331,6 +331,7 @@
 		:world-id="worldId"
 		:site-url="siteUrl ?? ''"
 	/>
+	<ServerEulaModal ref="serverEulaModal" />
 	<ConfirmLeaveModal
 		ref="confirmLeaveModal"
 		:header="formatMessage(leaveMessages.uploadInProgress)"
@@ -389,6 +390,7 @@ import MedalServerCountdown from '#ui/components/servers/marketing/MedalServerCo
 import { injectServerOnboardingFlow } from '#ui/components/servers/onboarding/context'
 import ServerPlayMigrationModal from '#ui/components/servers/play-migration/ServerPlayMigrationModal.vue'
 import { PanelServerActionButton } from '#ui/components/servers/server-header'
+import ServerEulaModal from '#ui/components/servers/ServerEulaModal.vue'
 import ServerSettingsModal from '#ui/components/servers/ServerSettingsModal.vue'
 import ServerInviteLinkModal from '#ui/components/sharing/server-invite-link/ServerInviteLinkModal.vue'
 import {
@@ -417,6 +419,7 @@ import type { ServerSettingsTabId } from '#ui/layouts/shared/server-settings'
 import {
 	injectModrinthClient,
 	injectNotificationManager,
+	provideServerEula,
 	provideServerSettingsModal,
 } from '#ui/providers'
 import type { ServerStats } from '#ui/providers/server-context'
@@ -528,6 +531,8 @@ function resolveViewerOnce() {
 	return viewerPromise
 }
 const confirmLeaveModal = ref<InstanceType<typeof ConfirmLeaveModal>>()
+const serverEulaModal = ref<InstanceType<typeof ServerEulaModal>>()
+provideServerEula({ ask: async (url) => (await serverEulaModal.value?.ask(url)) ?? false })
 const formatDateTime = useFormatDateTime({ dateStyle: 'long', timeStyle: 'short' })
 
 const suspensionMessages = defineMessages({

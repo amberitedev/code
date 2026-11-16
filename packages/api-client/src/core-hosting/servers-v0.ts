@@ -7,7 +7,6 @@ import {
 
 import { ApiCallError } from '../contracts/errors'
 import type { AbstractModrinthClient } from '../core/abstract-client'
-import { ModrinthApiError } from '../core/errors'
 import type { ArchonServersV0Module } from '../modules/archon/servers/v0'
 import type { Archon } from '../modules/archon/types'
 import { coreNodeUrl } from '../utils/node-url'
@@ -55,17 +54,6 @@ function isJdkName(name: string): name is JdkName {
 	return name in JDK_MAJORS
 }
 
-/** Shown on the server's page until the owner accepts the EULA; no server starts before that. */
-const EULA_NOTICE: Archon.Servers.v0.Notice = {
-	id: 0,
-	dismissable: false,
-	title: 'Minecraft EULA',
-	message:
-		'Servers on this Core start once its owner accepts the Minecraft EULA: run `copal eula` on the Core to read it, then `copal eula --accept`.',
-	level: 'warn',
-	announced: '',
-}
-
 function reachability(report: ReachabilityReport): Archon.Servers.v0.Reachability {
 	return { state: report.state, cause: report.state === 'reachable' ? null : report.title }
 }
@@ -90,7 +78,7 @@ export function archonServer(server: CoreServer, base: string): Archon.Servers.v
 		sftp_password: '',
 		sftp_host: '',
 		datacenter: '',
-		notices: server.eula_accepted ? [] : [EULA_NOTICE],
+		notices: [],
 		node: { token: '', instance: coreNodeUrl(base, server.id) },
 		flows: { intro: false },
 		is_medal: false,
@@ -158,7 +146,7 @@ export function serversV0(client: AbstractModrinthClient): Adapter<ArchonServers
 		},
 		async power(serverId, action) {
 			const change = { params: { id: serverId }, body: { action: POWER[action] } }
-			await (await coreOf(client, serverId)).call(core.ChangePower, change).catch(eulaFirst)
+			await (await coreOf(client, serverId)).call(core.ChangePower, change)
 		},
 		async reinstall(serverId, request, hardReset = false) {
 			if (hardReset || !('loader' in request) || !request.game_version)
@@ -202,14 +190,4 @@ export function serversV0(client: AbstractModrinthClient): Adapter<ArchonServers
 			})
 		},
 	}
-}
-
-/** The panel shows a power failure's message; a missing EULA is the owner's to accept. */
-function eulaFirst(error: unknown): never {
-	if (error instanceof ApiCallError && error.code === 'eula_not_accepted')
-		throw new ModrinthApiError(error.description, {
-			statusCode: 409,
-			responseData: { error: error.code, description: error.description },
-		})
-	throw error
 }

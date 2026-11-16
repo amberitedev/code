@@ -443,14 +443,6 @@ describe('a server on a Core', () => {
 		}
 	})
 
-	it('names the EULA on its page until the owner accepts it', async () => {
-		const api = new FakeClient()
-		api.answers = [{ ...SERVER_ON_CORE, eula_accepted: false }, SERVER_ON_CORE]
-		const [notice] = (await api.archon.servers_v0.get(SERVER)).notices
-		expect(notice.message).toContain('Minecraft EULA')
-		expect((await api.archon.servers_v0.get(SERVER)).notices).toEqual([])
-	})
-
 	it('is renamed on its Core', async () => {
 		const api = new FakeClient()
 		await api.archon.servers_v0.updateName(SERVER, 'Survival')

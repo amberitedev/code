@@ -1,7 +1,10 @@
+import { ApiCallError } from '@modrinth/api-client'
+import { isCancelledError } from '@tanstack/vue-query'
 import { computed, type Ref, ref } from 'vue'
 
 import { useVIntl } from '#ui/composables/i18n'
 import { useServerPermissions } from '#ui/composables/server-permissions'
+import { useServerPower } from '#ui/composables/use-server-power'
 import {
 	injectModrinthClient,
 	injectModrinthServerContext,
@@ -13,7 +16,8 @@ export type PowerAction = 'Start' | 'Stop' | 'Restart' | 'Kill'
 export function useServerPowerAction(options?: { disabled?: Ref<boolean> }) {
 	const { formatMessage } = useVIntl()
 	const client = injectModrinthClient()
-	const { serverId, powerState, busyReasons } = injectModrinthServerContext()
+	const { powerState, busyReasons } = injectModrinthServerContext()
+	const power = useServerPower()
 	const { addNotification } = injectNotificationManager()
 	const { canUsePowerActions, permissionDeniedMessage } = useServerPermissions()
 	const pendingAction = ref<PowerAction | null>(null)
@@ -75,13 +79,17 @@ export function useServerPowerAction(options?: { disabled?: Ref<boolean> }) {
 		if (pendingAction.value) return
 		pendingAction.value = action
 		try {
-			await client.archon.servers_v0.power(serverId, action)
+			await power(action)
 		} catch (error) {
+			if (isCancelledError(error)) return
 			console.error(`Error performing ${action} on server:`, error)
 			addNotification({
 				type: 'error',
 				title: `Failed to ${action.toLowerCase()} server`,
-				text: 'An error occurred while performing this action.',
+				text:
+					error instanceof ApiCallError
+						? error.description
+						: 'An error occurred while performing this action.',
 			})
 		} finally {
 			pendingAction.value = null

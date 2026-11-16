@@ -1,4 +1,10 @@
-import { type CoreSession, core as coreRoutes, cores, type ListedCore } from '@amberite/contracts'
+import {
+	type CoreSession,
+	core as coreRoutes,
+	cores,
+	type Eula,
+	type ListedCore,
+} from '@amberite/contracts'
 
 import { ApiCallError } from '../contracts/errors'
 import { AbstractModule } from '../core/abstract-module'
@@ -137,6 +143,16 @@ export class ArchonCoresV1Module extends AbstractModule {
 		// RemoveMember is dangerous for removing someone else; removing yourself is not.
 		const leaveServer = { ...coreRoutes.RemoveMember, dangerous: false }
 		await core.call(leaveServer, { params: { id: serverId, user_id: user.id } })
+	}
+
+	/** The Minecraft EULA on the Core that has `serverId`. Owner only: anyone else gets `forbidden`. */
+	public async eula(serverId: string): Promise<Eula> {
+		return this.client.core((await this.coreOf(serverId)).id).call(coreRoutes.GetEula)
+	}
+
+	/** Accept the Minecraft EULA on the Core that has `serverId`, for every server on it. Owner only. */
+	public async acceptEula(serverId: string): Promise<void> {
+		await this.client.core((await this.coreOf(serverId)).id).call(coreRoutes.AcceptEula)
 	}
 
 	/** A ticket for `coreId`, for its owner or someone invited to one of its servers. */

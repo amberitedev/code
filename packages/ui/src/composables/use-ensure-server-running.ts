@@ -1,6 +1,7 @@
-import { injectModrinthClient, injectModrinthServerContext } from '../providers'
+import { injectModrinthServerContext } from '../providers'
 import { defineMessages, useVIntl } from './i18n'
 import { useServerPermissions } from './server-permissions'
+import { useServerPower } from './use-server-power'
 
 const START_TIMEOUT_MS = 180_000
 const POLL_INTERVAL_MS = 500
@@ -24,8 +25,8 @@ const messages = defineMessages({
 
 /** Starts the current server when it is stopped and resolves once it reports running. */
 export function useEnsureServerRunning() {
-	const client = injectModrinthClient()
-	const { serverId, busyReasons, powerState, isConnected } = injectModrinthServerContext()
+	const power = useServerPower()
+	const { busyReasons, powerState, isConnected } = injectModrinthServerContext()
 	const { canUsePowerActions, permissionDeniedMessage } = useServerPermissions()
 	const { formatMessage } = useVIntl()
 
@@ -45,7 +46,7 @@ export function useEnsureServerRunning() {
 				if (!startRequested && (state === 'stopped' || state === 'crashed')) {
 					if (!canUsePowerActions.value) throw new Error(permissionDeniedMessage.value)
 					startRequested = true
-					await client.archon.servers_v0.power(serverId, 'Start')
+					await power('Start')
 				}
 			}
 			if (Date.now() >= deadline) throw new Error(formatMessage(messages.startTimeout))
