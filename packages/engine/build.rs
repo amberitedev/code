@@ -62,11 +62,13 @@ fn build_java_jars() {
     // build causes on every engine edit. Gradle takes 10-30 s even with nothing to do.
     let stamp = out_dir.join("java/inputs.stamp");
     let inputs = java_inputs_hash();
-    if out_dir.join("java/libs").is_dir()
+    if out_dir.join("java/libs/theseus.jar").is_file()
         && fs::read_to_string(&stamp).is_ok_and(|built| built == inputs)
     {
         return;
     }
+    // A failed run can still rewrite the JAR, so only a finished one leaves a stamp.
+    let _ = fs::remove_file(&stamp);
 
     #[cfg(target_os = "windows")]
     let java_dir = windows_java_dir(&out_dir);
@@ -94,7 +96,10 @@ fn build_java_jars() {
         println!("cargo::error=Gradle build failed with {exit_status}");
         exit(exit_status.code().unwrap_or(1));
     }
-    fs::write(stamp, inputs).unwrap();
+    // An input edited while Gradle ran may not be in the JAR.
+    if java_inputs_hash() == inputs {
+        fs::write(stamp, inputs).unwrap();
+    }
 }
 
 /// The content of everything Gradle reads, as the rerun-if-changed lines above name it.

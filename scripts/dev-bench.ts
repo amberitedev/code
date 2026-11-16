@@ -219,9 +219,14 @@ class Bench {
 	}
 
 	async parallel(): Promise<Steps> {
-		const [first, second] = await Promise.all(
+		// Both finish before either failure counts, so the next scenario never shares the machine.
+		const settled = await Promise.allSettled(
 			['parallel-1', 'parallel-2'].map((name) => this.worktree(name, ['app'], { check: false })),
 		)
+		const [first, second] = settled.map((result) => {
+			if (result.status === 'rejected') throw result.reason
+			return result.value
+		})
 		const total = (steps: Steps) => Object.values(steps).reduce((sum, value) => sum + value, 0)
 		return total(first!) >= total(second!) ? first! : second!
 	}
@@ -283,6 +288,14 @@ class Bench {
 
 	addWorktree(name: string): string {
 		let path = NodePath.join(this.worktrees, name)
+		// A run that was interrupted can leave its stack running there.
+		if (NodeFS.existsSync(NodePath.join(path, '.data', 'runtime.json'))) {
+			NodeChildProcess.spawnSync(process.execPath, ['scripts/dev-runner.ts', 'down'], {
+				cwd: path,
+				stdio: 'ignore',
+				windowsHide: true,
+			})
+		}
 		try {
 			wipe(path)
 		} catch {
@@ -352,7 +365,6 @@ async function main(): Promise<void> {
 		let ok = true
 		try {
 			steps = await SCENARIOS[scenario].run(bench)
-			if (scenario === 'cold') await bench.prime()
 		} catch (error) {
 			ok = false
 			console.error(`[bench] ${error instanceof Error ? error.message : String(error)}`)
@@ -371,6 +383,8 @@ async function main(): Promise<void> {
 		}
 		NodeFS.appendFileSync(resultsFile, `${JSON.stringify(result)}\n`)
 		console.log(`[bench]   ${formatResult(result)}`)
+		// The rest start warm. A failure here stops them, since they would measure the warmup.
+		if (scenario === 'cold' && scenario !== selected.at(-1)) await bench.prime()
 	}
 	printReport(resultsFile, snapshot)
 }

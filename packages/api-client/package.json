@@ -13,7 +13,7 @@
 		"directory": "packages/api-client"
 	},
 	"files": [
-		"dist",
+		"src",
 		"README.md",
 		"LICENSE"
 	],
