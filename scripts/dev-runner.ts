@@ -1799,11 +1799,9 @@ export function createCommandInput(input: {
 		} catch {
 			return
 		}
-		// Only whole lines: a read can land while a command is still being written.
-		const end = buffer.lastIndexOf('\n')
-		if (end === -1) return
-		offset += end + 1
-		for (const line of buffer.subarray(0, end).toString('utf8').split(/\r?\n/)) handle(line)
+		// A command is appended in one write, so a read never finds half of one.
+		offset += buffer.length
+		for (const line of buffer.toString('utf8').split(/\r?\n/)) handle(line)
 	}
 	// The watcher answers a command at once; the poll catches anything it misses.
 	const poll = setInterval(read, 500)
@@ -2350,19 +2348,17 @@ async function applyFixture(paths: WorktreePaths, name: string, input: RunnerInp
 	;(await import(source('packages.ts'))).resolvePackages()
 	const fixtures = await import(source('run.ts'))
 	const file: string = fixtures.resolveFixture(paths.worktree, name)
-	const waitStarted = performance.now()
-	const typed: Promise<boolean> = fixtures.checkTypes(paths.worktree, file)
+	if (!(await fixtures.checkTypes(paths.worktree, file))) {
+		process.exitCode = 1
+		return
+	}
 	const live = readLiveRuntime(paths)
 	// An App decides whether to show its window when it starts, so asking a running one is too late.
 	if (live?.hideWindows && !input.hideWindows) {
 		throw new DevRunnerError('Already running with App windows hidden. Run vp run down first.')
 	}
-	// A held runner stops and wipes nothing, so a new one starts while the types are checked.
 	const started = live ? undefined : startRunner(paths, { ...input, held: true })
-	if (!(await typed)) {
-		process.exitCode = 1
-		return
-	}
+	const waitStarted = performance.now()
 	const record = (result: 'ok' | 'failed') =>
 		recordTiming(paths.primary, {
 			kind: 'fixture',

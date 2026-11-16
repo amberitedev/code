@@ -31,7 +31,8 @@ export function resolveFixture(worktree: string, name: string): string {
  */
 export async function checkTypes(worktree: string, file: string): Promise<boolean> {
 	const local = (path: string) => NodeURL.fileURLToPath(path).replaceAll('\\', '/')
-	const config = NodePath.join(worktree, '.data', 'fixture-tsconfig.json')
+	// One per command: two applies in one checkout must not check each other's fixture.
+	const config = NodePath.join(worktree, '.data', `fixture-tsconfig.${process.pid}.json`)
 	NodeFS.mkdirSync(NodePath.dirname(config), { recursive: true })
 	NodeFS.writeFileSync(
 		config,
@@ -57,21 +58,15 @@ export async function checkTypes(worktree: string, file: string): Promise<boolea
 	)
 	// The compiler itself, not through `vp exec`, which takes longer to start than the check runs.
 	const compiler = createRequire(import.meta.url).resolve('typescript/lib/tsc.js')
-	// Not blocking, so the stack can start while the compiler runs.
-	const child = NodeChildProcess.spawn(process.execPath, [compiler, '-p', config], {
+	const result = NodeChildProcess.spawnSync(process.execPath, [compiler, '-p', config], {
 		cwd: worktree,
+		encoding: 'utf8',
 		windowsHide: true,
 	})
-	let output = ''
-	child.stdout.on('data', (chunk: Buffer) => (output += chunk.toString()))
-	child.stderr.on('data', (chunk: Buffer) => (output += chunk.toString()))
-	const status = await new Promise<number | null>((resolve) => {
-		child.once('error', () => resolve(null))
-		child.once('close', resolve)
-	})
-	if (status === 0) return true
+	NodeFS.rmSync(config, { force: true })
+	if (result.status === 0) return true
 	console.error(`[fixture] ${NodePath.basename(file)} does not type-check, so nothing was changed.`)
-	console.error(output.trim())
+	console.error((result.stdout + result.stderr).trim())
 	return false
 }
 

@@ -805,7 +805,7 @@ function main() {
 	}
 
 	// Every install writes the module, so a new worktree reuses one made from the same files.
-	const cached = writeOutput && quiet ? cachedModule(rootDir, scanDirs) : undefined
+	const cached = writeOutput && quiet && !jsonOutput ? cachedModule(rootDir, scanDirs) : undefined
 	if (cached && fs.existsSync(cached)) {
 		const resolvedOutput = path.resolve(rootDir, writeOutput!)
 		fs.mkdirSync(path.dirname(resolvedOutput), { recursive: true })
@@ -839,7 +839,8 @@ function main() {
 	const languageCoverage = generateLanguageCoverage(results, rootDir)
 	if (writeOutput) {
 		writeLanguageCoverageModule(rootDir, writeOutput, languageCoverage)
-		if (cached) {
+		// Kept only when no source changed during the scan, so the module matches its name.
+		if (cached && cachedModule(rootDir, scanDirs) === cached) {
 			try {
 				fs.mkdirSync(path.dirname(cached), { recursive: true })
 				const partial = `${cached}.${process.pid}.partial`
