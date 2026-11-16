@@ -1539,9 +1539,13 @@ async fn the_owner_changes_storage_and_the_store_is_forwarded_to() {
         .call(Method::GET, "/storage", Some(&editor), None, None)
         .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
-    let (status, storage) = core
-        .call(Method::GET, "/storage", Some(&owner), None, None)
-        .await;
+    // The store is not running here, and the settings answer anyway, without waiting for it.
+    let (status, storage) = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        core.call(Method::GET, "/storage", Some(&owner), None, None),
+    )
+    .await
+    .expect("GET /storage waited for a store that is not running");
     assert_eq!(status, StatusCode::OK);
     assert_eq!(storage["enabled"], true);
     assert_eq!(storage["egress_cap"], 50u64 << 30);

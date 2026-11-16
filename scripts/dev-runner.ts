@@ -467,7 +467,8 @@ async function main(): Promise<void> {
 		process.exitCode = exitCode
 		finish?.()
 	}
-	const start = async (spec: ProcessSpec) => {
+	/** `ready`, when given, is awaited after the build and before the program runs: false skips it. */
+	const start = async (spec: ProcessSpec, ready?: Promise<boolean>) => {
 		const token = Symbol(spec.label)
 		starts.set(spec.label, token)
 		setState(spec.label, 'starting')
@@ -490,6 +491,7 @@ async function main(): Promise<void> {
 				return
 			}
 		}
+		if (ready && !(await ready)) return
 		if (spec.label.startsWith('app:')) {
 			// The App loads its page once, so the frontend has to be serving before it starts.
 			while (!(await portIsOpen(ports.app))) {
@@ -514,8 +516,8 @@ async function main(): Promise<void> {
 		)
 	}
 	/** One program that cannot start never takes the others down. */
-	const startProgram = (spec: ProcessSpec) =>
-		start(spec).catch((error: unknown) => {
+	const startProgram = (spec: ProcessSpec, ready?: Promise<boolean>) =>
+		start(spec, ready).catch((error: unknown) => {
 			runnerLog(
 				'error',
 				`${spec.label} failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -639,19 +641,17 @@ async function main(): Promise<void> {
 		const backend = specsByLabel.get('backend')
 		if (backend) await startProgram(backend)
 		// An App signs in once as it starts and a Core asks for its pairing code as it starts, so the
-		// backend has to answer before either does. Not waited for here: commands run one at a time,
-		// and `rs backend` is how a backend that will not start is brought back.
-		void (async () => {
-			const replaced = () => stopping || runtime.stackId !== shape.id
+		// backend has to answer before either runs; their build goes on meanwhile. Not waited for
+		// here: commands run one at a time, and `rs backend` is how a backend that will not start
+		// is brought back. One stopped on purpose meanwhile stays down.
+		const replaced = () => stopping || runtime.stackId !== shape.id
+		const backendAnswers = (async () => {
 			while (backend && !replaced() && !(await portIsOpen(ports.backend))) {
 				await new Promise((resolve) => setTimeout(resolve, 100))
 			}
-			if (replaced()) return
-			// One stopped on purpose while the backend came up stays down.
-			for (const spec of stack) {
-				if (runtime.programs[spec.label] === 'starting') void startProgram(spec)
-			}
+			return !replaced()
 		})()
+		for (const spec of stack) void startProgram(spec, backendAnswers)
 	}
 	/** Reads the stack file a fixture just wrote and starts it. */
 	const startSavedStack = async () => {
@@ -1782,9 +1782,9 @@ export function createCommandInput(input: {
 	commands.on('line', handle)
 	NodeFS.writeFileSync(input.commandFile, '')
 	let offset = 0
-	const poll = setInterval(() => {
+	const read = () => {
 		let buffer: Buffer
-		// The file can vanish or be replaced at any point; skip this poll and read it on the next.
+		// The file can vanish or be replaced at any point; skip this read and take it on the next.
 		try {
 			const size = NodeFS.statSync(input.commandFile).size
 			if (size < offset) offset = 0
@@ -1796,13 +1796,24 @@ export function createCommandInput(input: {
 			} finally {
 				NodeFS.closeSync(fd)
 			}
-			offset = size
 		} catch {
 			return
 		}
+		// A command is appended in one write, so a read never finds half of one.
+		offset += buffer.length
 		for (const line of buffer.toString('utf8').split(/\r?\n/)) handle(line)
-	}, 500)
+	}
+	// The watcher answers a command at once; the poll catches anything it misses.
+	const poll = setInterval(read, 500)
 	poll.unref()
+	let watcher: NodeFS.FSWatcher | undefined
+	try {
+		watcher = NodeFS.watch(input.commandFile, read)
+		watcher.on('error', () => watcher?.close())
+		watcher.unref()
+	} catch {
+		// The poll alone still reads every command.
+	}
 
 	// One at a time, in the order they were sent: a fixture's `stack` must not start what its
 	// `halt` is still stopping.
@@ -1864,6 +1875,7 @@ export function createCommandInput(input: {
 	return {
 		close: () => {
 			clearInterval(poll)
+			watcher?.close()
 			commands.close()
 		},
 	}
@@ -2496,7 +2508,7 @@ async function up(paths: WorktreePaths, input: RunnerInput): Promise<void> {
 			record('ok')
 			return
 		}
-		await new Promise((resolve) => setTimeout(resolve, 2_000))
+		await new Promise((resolve) => setTimeout(resolve, 500))
 	}
 	runnerLog(
 		'warning',

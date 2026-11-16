@@ -320,11 +320,13 @@ impl Storage {
             .ok_or_else(|| "the store is not running".into())
     }
 
-    /// What the store holds, or `None` when it does not answer.
+    /// What the store holds, or `None` when it does not answer. Never waits for a store that is
+    /// not running, so the owner's storage settings answer while it is down.
     async fn store_status(&self) -> Option<Status> {
-        let status = match self.local().await {
-            Ok(local) => local.status().await,
-            Err(error) => Err(error),
+        let running = self.running.borrow().clone();
+        let status = match running {
+            Some(running) => running.local.status().await,
+            None => Err("the store is not running".into()),
         };
         status
             .inspect_err(|error| {

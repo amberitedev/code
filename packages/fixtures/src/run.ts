@@ -31,7 +31,8 @@ export function resolveFixture(worktree: string, name: string): string {
  */
 export async function checkTypes(worktree: string, file: string): Promise<boolean> {
 	const local = (path: string) => NodeURL.fileURLToPath(path).replaceAll('\\', '/')
-	const config = NodePath.join(worktree, '.data', 'fixture-tsconfig.json')
+	// One per command: two applies in one checkout must not check each other's fixture.
+	const config = NodePath.join(worktree, '.data', `fixture-tsconfig.${process.pid}.json`)
 	NodeFS.mkdirSync(NodePath.dirname(config), { recursive: true })
 	NodeFS.writeFileSync(
 		config,
@@ -62,6 +63,7 @@ export async function checkTypes(worktree: string, file: string): Promise<boolea
 		encoding: 'utf8',
 		windowsHide: true,
 	})
+	NodeFS.rmSync(config, { force: true })
 	if (result.status === 0) return true
 	console.error(`[fixture] ${NodePath.basename(file)} does not type-check, so nothing was changed.`)
 	console.error((result.stdout + result.stderr).trim())
