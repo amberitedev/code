@@ -70,8 +70,6 @@ jobs:
               - packages/sharing-client/**
               - packages/sharing-storage/**
               - packages/toasty/**
-              # Read from outside a crate: an icon the engine embeds.
-              - packages/assets/external/illustrations/minecraft_server_icon.png
               - .github/workflows/ci.yml
 
   js:

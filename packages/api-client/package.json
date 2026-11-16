@@ -2,40 +2,34 @@
 	"name": "@modrinth/api-client",
 	"version": "0.0.0",
 	"description": "An API client for Modrinth's API for use in nuxt, tauri and plain node/browser environments.",
-	"license": "LGPL-3.0-only",
-	"type": "module",
-	"main": "./dist/index.js",
-	"types": "./dist/index.d.ts",
-	"exports": {
-		".": {
-			"types": "./dist/index.d.ts",
-			"import": "./dist/index.js",
-			"default": "./dist/index.js"
-		},
-		"./package.json": "./package.json"
+	"homepage": "https://github.com/modrinth/code/tree/main/packages/api-client#readme",
+	"bugs": {
+		"url": "https://github.com/modrinth/code/issues"
 	},
-	"files": [
-		"dist",
-		"README.md",
-		"LICENSE"
-	],
-	"sideEffects": false,
+	"license": "LGPL-3.0-only",
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/modrinth/code.git",
 		"directory": "packages/api-client"
 	},
-	"bugs": {
-		"url": "https://github.com/modrinth/code/issues"
+	"files": [
+		"src",
+		"README.md",
+		"LICENSE"
+	],
+	"type": "module",
+	"sideEffects": false,
+	"types": "./src/index.ts",
+	"exports": {
+		".": "./src/index.ts",
+		"./package.json": "./package.json"
 	},
-	"homepage": "https://github.com/modrinth/code/tree/main/packages/api-client#readme",
 	"publishConfig": {
 		"access": "public"
 	},
 	"scripts": {
 		"clean": "node --eval \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
 		"build": "pnpm run clean && node esbuild.config.mjs",
-		"prepare": "pnpm run build",
 		"lint": "eslint . && prettier --check .",
 		"fix": "eslint . --fix && prettier --write ."
 	},

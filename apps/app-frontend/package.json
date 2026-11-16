@@ -6,7 +6,7 @@
 	"scripts": {
 		"dev": "vp dev",
 		"build": "vue-tsc --noEmit && vp build",
-		"typecheck": "vue-tsc -p tsconfig.app.json --noEmit",
+		"typecheck": "vue-tsc -p tsconfig.app.json --noEmit --incremental --tsBuildInfoFile node_modules/.cache/typecheck.tsbuildinfo",
 		"tsc:check": "vue-tsc --noEmit",
 		"lint": "eslint . && prettier --check .",
 		"fix": "eslint . --fix && prettier --write .",

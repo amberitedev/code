@@ -37,6 +37,8 @@ const BUILD_LOCK_STALE_MS = 60 * 60_000
 const BUILD_LOCK = 'building'
 // In the shared build output: each repo crate's content when last compiled, and for which programs.
 const BUILT_CRATES = 'built-crates.json'
+// In the shared build output's record: a crate's output as the programs compile it.
+const PROGRAMS = 'programs'
 // Given to an unchanged crate's files so Cargo trusts its compiled output.
 const TRUSTED_FILE_TIME = new Date('2000-01-01T00:00:00Z')
 const FETCH_BAD_PORTS = new Set([
@@ -90,15 +92,15 @@ type RunnerInput = {
 	readonly hideWindows: boolean
 }
 /**
- * A Rust program the runner builds itself. It is built once per distinct set of inputs, copied
- * into `<cacheDir>/<key>/`, and run from that copy. A checkout whose Rust matches something
- * already built starts without Cargo, and a running program never blocks a build.
+ * Rust programs the runner builds itself, in one Cargo run. They are built once per distinct set
+ * of inputs, copied into `<cacheDir>/<key>/`, and run from that copy. A checkout whose Rust matches
+ * something already built starts without Cargo, and a running program never blocks a build.
  */
 export type ProgramBuild = {
 	/** Programs built by every checkout, shared. Its lock lets one build run at a time. */
 	readonly cacheDir: string
 	readonly cargoArgs: ReadonlyArray<string>
-	/** Where Cargo runs. It takes the toolchain and `.cargo` settings from here. */
+	/** The checkout to build. Cargo runs from a link to it, taking its toolchain and settings. */
 	readonly cwd: string
 	/** Settings the build reads. They change the program, so they are part of its key. */
 	readonly env: Record<string, string>
@@ -106,12 +108,14 @@ export type ProgramBuild = {
 	readonly ignoredInputs: ReadonlyArray<string>
 	/** Files and folders, relative to the checkout, that the build reads. */
 	readonly inputs: ReadonlyArray<string>
-	/** The file Cargo writes in `<targetDir>/debug`. */
-	readonly program: string
+	/** The files Cargo writes in `<targetDir>/debug`. */
+	readonly programs: ReadonlyArray<string>
 	readonly targetDir: string
 }
 /** `cargo test` of some crates, compiled into the programs' build output the way they are. */
-export type TestBuild = Omit<ProgramBuild, 'program'> & {
+export type TestBuild = Omit<ProgramBuild, 'programs'> & {
+	/** What the programs build reads. A crate in it that is not tested is compiled as they compile it. */
+	readonly shared: ReadonlyArray<string>
 	/** The tested crates that are a program's own crate, by folder, with that program's inputs. */
 	readonly programInputs: Readonly<Record<string, ReadonlyArray<string>>>
 	/** The tested crates' folders, sorted, as `inputs` names them. */
@@ -119,8 +123,8 @@ export type TestBuild = Omit<ProgramBuild, 'program'> & {
 }
 export type ProcessSpec = {
 	readonly args: ReadonlyArray<string>
-	/** Set when the process is a Rust program. Otherwise the arguments go to `vp`. */
-	readonly build?: ProgramBuild
+	/** Set when the process is a Rust program: the build and its file. Otherwise the arguments go to `vp`. */
+	readonly program?: { readonly build: ProgramBuild; readonly file: string }
 	readonly cwd: string
 	readonly env: NodeJS.ProcessEnv
 	readonly label: string
@@ -468,10 +472,17 @@ async function main(): Promise<void> {
 		starts.set(spec.label, token)
 		setState(spec.label, 'starting')
 		let program: string | undefined
-		if (spec.build) {
+		if (spec.program) {
 			setBuildFailed(spec.label, false)
-			program = await ensureProgram(paths.worktree, spec, spec.build, builds, () => stopping)
+			const built = await ensureProgram(
+				paths.worktree,
+				spec,
+				spec.program.build,
+				builds,
+				() => stopping,
+			)
 			if (stopping || starts.get(spec.label) !== token) return
+			program = built && NodePath.join(built, spec.program.file)
 			if (!program) {
 				setBuildFailed(spec.label, true)
 				setState(spec.label, 'failed')
@@ -787,11 +798,9 @@ async function buildPrograms(paths: WorktreePaths): Promise<void> {
 		ports,
 		shape: { apps: [{ name: 'alice' }], cores: 1, id: 'build' },
 	})
-	for (const spec of specs) {
-		if (!spec.build) continue
-		if (!(await ensureProgram(paths.worktree, spec, spec.build, new Set(), () => false))) {
-			process.exitCode = 1
-		}
+	const spec = specs.find((candidate) => candidate.program)!
+	if (!(await ensureProgram(paths.worktree, spec, spec.program!.build, new Set(), () => false))) {
+		process.exitCode = 1
 	}
 }
 
@@ -812,29 +821,44 @@ async function testCrates(paths: WorktreePaths, crates: ReadonlyArray<string>): 
 	if (!(await runTests(paths, env, crates, build))) process.exitCode = 1
 }
 
-function testBuild(
+export function testBuild(
 	paths: WorktreePaths,
 	env: NodeJS.ProcessEnv,
 	crates: ReadonlyArray<string>,
 ): TestBuild {
 	const checkout = NodeFS.realpathSync.native(paths.worktree)
-	const tested = [...localCrates(paths.worktree).values()]
-		.filter((crate) => crates.includes(crate.name))
-		.map((crate) => ({
-			folder: NodePath.relative(checkout, crate.folder).replaceAll('\\', '/'),
-			name: crate.name,
-		}))
-	const programs = tested.flatMap(({ folder, name }) =>
-		name === 'copal' || name === 'theseus_gui'
-			? [[folder, programInputs(paths, name)] as const]
+	const tested = [...localCrates(paths.worktree).values()].filter((crate) =>
+		crates.includes(crate.name),
+	)
+	const folder = (crate: LocalCrate) =>
+		NodePath.relative(checkout, crate.folder).replaceAll('\\', '/')
+	const programs = tested.flatMap((crate) =>
+		crate.name === 'copal' || crate.name === 'theseus_gui'
+			? [[folder(crate), programInputs(paths, crate.name)] as const]
 			: [],
 	)
+	const { cargoArgs: _, programs: __, ...shared } = programsBuild(paths, env)
+	const targets = tested.flatMap((crate) => crate.testTargets)
 	return {
-		// One run, so the tested crates share one feature set, as they do in a single cargo test.
-		cargoArgs: ['test', '--locked', ...crates.flatMap((crate) => ['--package', crate])],
-		cwd: paths.worktree,
-		// The same compiled settings as the programs, so the crates they share stay compiled.
-		...engineBuildSettings(paths, env),
+		...shared,
+		// The programs' packages and features, so every crate the tests do not test is the one the
+		// programs compiled. Target flags then pick only the tested crates' tests. Their own default
+		// features come back on, except the App's, which the programs leave off.
+		cargoArgs: [
+			'test',
+			'--locked',
+			...PROGRAM_PACKAGES,
+			...crates.flatMap((crate) => (PROGRAM_PACKAGES.includes(crate) ? [] : ['--package', crate])),
+			'--no-default-features',
+			...tested.flatMap((crate) =>
+				crate.hasDefault && crate.name !== 'theseus_gui'
+					? ['--features', `${crate.name}/default`]
+					: [],
+			),
+			// Cargo takes `--lib` once, for every selected package.
+			...(targets.includes('--lib') ? ['--lib'] : []),
+			...targets.filter((target) => target !== '--lib'),
+		],
 		inputs: [
 			...new Set([
 				...crates.flatMap((crate) => workspaceInputs(paths, crate, { tests: true })),
@@ -842,8 +866,8 @@ function testBuild(
 			]),
 		],
 		programInputs: Object.fromEntries(programs),
-		tested: tested.map(({ folder }) => folder).sort(),
-		...workspaceBuildDirs(paths),
+		shared: shared.inputs,
+		tested: tested.map(folder).sort(),
 	}
 }
 
@@ -980,17 +1004,15 @@ export function createStackSpecs(input: {
 	readonly ports: DevPorts
 	readonly shape: StackShape
 }): ReadonlyArray<ProcessSpec> {
+	let programs: ProgramBuild | undefined
+	const program = (name: 'copal' | 'theseus_gui') => ({
+		build: (programs ??= programsBuild(input.paths, input.env)),
+		file: programFile(name),
+	})
 	const coreDir = NodePath.join(input.paths.worktree, 'apps', 'core')
 	const cores = input.corePorts.slice(0, input.shape.cores).map((port, index) => ({
 		args: ['run'],
-		build: {
-			cargoArgs: ['build', '--package', 'copal'],
-			cwd: coreDir,
-			...engineBuildSettings(input.paths, input.env),
-			inputs: programInputs(input.paths, 'copal'),
-			program: programFile('copal'),
-			...workspaceBuildDirs(input.paths),
-		},
+		program: program('copal'),
 		cwd: coreDir,
 		env: {
 			...input.env,
@@ -1020,7 +1042,7 @@ export function createStackSpecs(input: {
 		}
 		return {
 			args: ['--amberite-dev-config', JSON.stringify(appDevConfig)],
-			build: appProgramBuild(input.paths, input.env),
+			program: program('theseus_gui'),
 			cwd: NodePath.join(input.paths.worktree, 'apps', 'app'),
 			env: {
 				...input.env,
@@ -1034,13 +1056,22 @@ export function createStackSpecs(input: {
 	return [...cores, ...apps]
 }
 
-function appProgramBuild(paths: WorktreePaths, env: NodeJS.ProcessEnv): ProgramBuild {
+const PROGRAM_PACKAGES = ['--package', 'theseus_gui', '--package', 'copal']
+
+/**
+ * The App and Core, in one Cargo run. Built apart, Cargo picks dependency features for each on its
+ * own and compiles about 250 crates twice, the engine and contracts among them.
+ */
+function programsBuild(paths: WorktreePaths, env: NodeJS.ProcessEnv): ProgramBuild {
 	const appDir = NodePath.join(paths.worktree, 'apps', 'app')
 	const engine = engineBuildSettings(paths, env)
 	return {
 		// What `tauri dev` ran. Without `custom-protocol` the App loads its frontend from devUrl.
-		cargoArgs: ['build', '--package', 'theseus_gui', '--no-default-features'],
-		cwd: appDir,
+		// Core has no default features.
+		// `--examples` builds none, but turns on what dev-dependencies add to features, as a test
+		// run does, so tests compile no second copy of anything the programs use.
+		cargoArgs: ['build', ...PROGRAM_PACKAGES, '--no-default-features', '--bins', '--examples'],
+		cwd: paths.worktree,
 		env: {
 			...engine.env,
 			TAURI_CONFIG: JSON.stringify(
@@ -1048,8 +1079,11 @@ function appProgramBuild(paths: WorktreePaths, env: NodeJS.ProcessEnv): ProgramB
 			),
 		},
 		ignoredInputs: engine.ignoredInputs,
-		inputs: programInputs(paths, 'theseus_gui'),
-		program: programFile('theseus_gui'),
+		// The App's first: loose inputs count toward the first crate.
+		inputs: [
+			...new Set([...programInputs(paths, 'theseus_gui'), ...programInputs(paths, 'copal')]),
+		],
+		programs: [programFile('theseus_gui'), programFile('copal')],
 		...workspaceBuildDirs(paths),
 	}
 }
@@ -1125,7 +1159,11 @@ type LocalCrate = {
 	/** Folders of the local crates only its tests, examples and benchmarks build with. */
 	readonly devDependencies: ReadonlyArray<string>
 	readonly folder: string
+	/** Whether it declares a `default` feature. */
+	readonly hasDefault: boolean
 	readonly name: string
+	/** Cargo target flags that select its tests: its library, programs and integration tests. */
+	readonly testTargets: ReadonlyArray<string>
 }
 const localCratesResults = new Map<string, ReadonlyMap<string, LocalCrate>>()
 /** The workspace's crates by folder, as Cargo reports them. Empty when the manifests do not read. */
@@ -1142,8 +1180,10 @@ function localCrates(worktree: string): ReadonlyMap<string, LocalCrate> {
 		const { packages } = JSON.parse(metadata.stdout) as {
 			packages: ReadonlyArray<{
 				dependencies: ReadonlyArray<{ kind: string | null; path?: string }>
+				features: Readonly<Record<string, unknown>>
 				manifest_path: string
 				name: string
+				targets: ReadonlyArray<{ kind: ReadonlyArray<string>; name: string }>
 			}>
 		}
 		for (const crate of packages) {
@@ -1156,7 +1196,17 @@ function localCrates(worktree: string): ReadonlyMap<string, LocalCrate> {
 				dependencies: local(false),
 				devDependencies: local(true),
 				folder,
+				hasDefault: 'default' in crate.features,
 				name: crate.name,
+				testTargets: crate.targets.flatMap((target) =>
+					target.kind.includes('lib')
+						? ['--lib']
+						: target.kind.includes('bin')
+							? ['--bin', target.name]
+							: target.kind.includes('test')
+								? ['--test', target.name]
+								: [],
+				),
 			})
 		}
 	}
@@ -1233,18 +1283,44 @@ function inputContents(
 	return contents
 }
 
-/** The cached program for this build's current inputs, built first when there is none. */
-async function ensureProgram(
+/** Builds in progress in this runner by key, so the App and Core wait on one Cargo run. */
+const programBuilds = new Map<string, Promise<string | undefined>>()
+
+/**
+ * The folder holding this build's programs for its current inputs, built first when there is
+ * none. `undefined` when the build failed or the runner is stopping.
+ */
+function ensureProgram(
 	worktree: string,
-	spec: ProcessSpec,
+	spec: Pick<ProcessSpec, 'env' | 'label'>,
 	build: ProgramBuild,
 	builds: Set<NodeChildProcess.ChildProcess>,
 	stopped: () => boolean,
 ): Promise<string | undefined> {
+	const key = programKey(worktree, build)
+	const running = programBuilds.get(key)
+	if (running) return running
+	const built = buildProgram(worktree, spec, build, builds, stopped, key).finally(() =>
+		programBuilds.delete(key),
+	)
+	programBuilds.set(key, built)
+	return built
+}
+
+async function buildProgram(
+	worktree: string,
+	spec: Pick<ProcessSpec, 'env' | 'label'>,
+	build: ProgramBuild,
+	builds: Set<NodeChildProcess.ChildProcess>,
+	stopped: () => boolean,
+	initialKey: string,
+): Promise<string | undefined> {
 	const cache = build.cacheDir
-	const cached = (key: string) => NodePath.join(cache, key, build.program)
-	let key = programKey(worktree, build)
-	if (NodeFS.existsSync(cached(key))) {
+	const cached = (key: string) => NodePath.join(cache, key)
+	const complete = (key: string) =>
+		build.programs.every((program) => NodeFS.existsSync(NodePath.join(cached(key), program)))
+	let key = initialKey
+	if (complete(key)) {
 		runnerLog('info', `${spec.label} using ${cached(key)}`)
 	} else {
 		const started = performance.now()
@@ -1255,16 +1331,19 @@ async function ensureProgram(
 		let result: 'ok' | 'failed' = 'failed'
 		try {
 			// Another runner may have built it while this one waited.
-			while (!NodeFS.existsSync(cached(key))) {
-				runnerLog('info', `${spec.label} building ${build.program} (${key})`)
+			while (!complete(key)) {
+				runnerLog('info', `${spec.label} building ${build.programs.join(', ')} (${key})`)
 				const run = await compileShared(worktree, spec, build, builds, build.cargoArgs, key)
 				changedCrates += run.changed
 				if (!run.compiled) return undefined
 				if (run.key === key) {
-					NodeFS.mkdirSync(NodePath.dirname(cached(key)), { recursive: true })
-					const partial = `${cached(key)}.${process.pid}.partial`
-					NodeFS.copyFileSync(NodePath.join(build.targetDir, 'debug', build.program), partial)
-					NodeFS.renameSync(partial, cached(key))
+					NodeFS.mkdirSync(cached(key), { recursive: true })
+					for (const program of build.programs) {
+						const target = NodePath.join(cached(key), program)
+						const partial = `${target}.${process.pid}.partial`
+						NodeFS.copyFileSync(NodePath.join(build.targetDir, 'debug', program), partial)
+						NodeFS.renameSync(partial, target)
+					}
 				}
 				key = run.key
 			}
@@ -1276,7 +1355,7 @@ async function ensureProgram(
 			recordTiming(NodePath.resolve(build.targetDir, '..', '..'), {
 				kind: 'build',
 				worktree,
-				program: build.program,
+				program: build.programs.join(' '),
 				key,
 				result,
 				// Crates in the repo compiled again; third-party crates are not counted.
@@ -1290,7 +1369,7 @@ async function ensureProgram(
 		}
 	}
 	const used = new Date()
-	NodeFS.utimesSync(NodePath.dirname(cached(key)), used, used)
+	NodeFS.utimesSync(cached(key), used, used)
 	const keys = NodeFS.readdirSync(cache)
 		.filter((entry) => entry !== BUILD_LOCK)
 		.map((entry) => NodePath.join(cache, entry))
@@ -1331,26 +1410,21 @@ async function compileShared(
 type BuiltCrate = {
 	readonly hash: string
 	/**
-	 * The builds whose output of it is from this content: program files, and `test <folder>...`
-	 * for test runs. Named `programs` because checkouts on older branches share this record.
+	 * The builds whose output of it is from this content: `programs` for the crate as the programs
+	 * compile it, which every test run that does not test it compiles too, and `test <folder>...`
+	 * for its own tests. Named `programs` because checkouts on older branches share this record.
 	 */
 	readonly programs: ReadonlyArray<string>
-	/** The checkout every listed test run of this crate compiled its own tests in. */
-	readonly tested?: string
 }
 
 /**
  * Cargo decides whether a crate needs compiling from file times alone, and every checkout shares
  * one build output. So before a build, each crate in the repo is checked against the content it
- * was last compiled from for this build: a program, or one crate's tests. A crate that matches gets
- * old file times, so Cargo keeps its compiled output even though this checkout's files are newer.
- * A crate that differs, or was last compiled for other builds only, gets the current time, so Cargo
- * compiles it again from this checkout. Returns how many crates will compile, and what to record
- * once the build succeeds.
- *
- * A crate's own tests can hold their checkout's path (`env!("CARGO_MANIFEST_DIR")`), which Cargo
- * does not compare, so a test build trusts its tested crates only when they were compiled in this
- * checkout.
+ * was last compiled from as this build compiles it: as the programs do, or as one crate's tests. A
+ * crate that matches gets old file times, folders included, so Cargo keeps its compiled output even
+ * though this checkout's files are newer. A crate that differs, or was last compiled for other
+ * builds only, gets the current time, so Cargo compiles it again from this checkout. Returns how
+ * many crates will compile, and what to record once the build succeeds.
  */
 export function prepareCheckoutCrates(
 	worktree: string,
@@ -1363,16 +1437,18 @@ export function prepareCheckoutCrates(
 	} catch {
 		// First build into this folder: every crate compiles.
 	}
-	const tested = 'tested' in build ? build.tested : undefined
-	const buildName = 'tested' in build ? `test ${build.tested.join(' ')}` : build.program
+	// Test runs compile the crates they do not test exactly as the programs do.
+	const buildName = (folder: string) =>
+		'tested' in build && (build.tested.includes(folder) || !build.shared.includes(folder))
+			? `test ${build.tested.join(' ')}`
+			: PROGRAMS
 	const folders = build.inputs.filter((input) =>
 		NodeFS.existsSync(NodePath.join(worktree, input, 'Cargo.toml')),
 	)
 	const files = new Map<string, Array<[string, string]>>(folders.map((folder) => [folder, []]))
 	// Inputs outside every crate folder, such as the App's version in `package.json`, count toward
 	// the program's own crate (the first input folder), in its tests too, so the two keep trusting
-	// each other's output. Cargo judges them through build scripts that recorded another checkout's
-	// paths, so only their content can say they changed.
+	// each other's output.
 	const own = 'tested' in build ? build.programInputs : { [folders[0] ?? '']: build.inputs }
 	const loose: Array<[string, string]> = []
 	for (const [file, blob] of inputContents(worktree, build)) {
@@ -1400,23 +1476,27 @@ export function prepareCheckoutCrates(
 		const digest = hash.digest('hex')
 		hashes.set(folder, digest)
 		const built = record[folder]
-		const trusted =
-			built?.hash === digest &&
-			built.programs.includes(buildName) &&
-			(!tested?.includes(folder) || built.tested === worktree)
+		const trusted = built?.hash === digest && built.programs.includes(buildName(folder))
 		if (!trusted) {
 			changed += 1
 			// Compiling from other content may replace what other builds use, whether or not this
-			// build succeeds. From the same content, only this crate's own tests change checkout.
+			// build succeeds.
 			if (built?.hash !== digest) delete record[folder]
-			else if (tested?.includes(folder) && built.tested !== worktree) {
-				const testsOf = (name: string) =>
-					name.startsWith('test ') && name.split(' ').includes(folder)
-				record[folder] = { hash: digest, programs: built.programs.filter((name) => !testsOf(name)) }
-			}
 		}
 		const time = trusted ? TRUSTED_FILE_TIME : now
-		for (const [file] of entries) {
+		// Cargo also compares folder times for a build script's `rerun-if-changed` folders, and a new
+		// checkout's folders are new.
+		const dated = new Set(entries.map(([file]) => file))
+		if (trusted) {
+			for (const [file] of entries) {
+				for (let parent = NodePath.posix.dirname(file); parent.startsWith(folder);) {
+					if (dated.has(parent)) break
+					dated.add(parent)
+					parent = NodePath.posix.dirname(parent)
+				}
+			}
+		}
+		for (const file of dated) {
 			try {
 				NodeFS.utimesSync(NodePath.join(worktree, file), time, time)
 			} catch {
@@ -1430,8 +1510,7 @@ export function prepareCheckoutCrates(
 			const built = record[folder]?.hash === hash ? record[folder] : undefined
 			record[folder] = {
 				hash,
-				programs: [...new Set([...(built?.programs ?? []), buildName])],
-				tested: tested?.includes(folder) ? worktree : built?.tested,
+				programs: [...new Set([...(built?.programs ?? []), buildName(folder)])],
 			}
 		}
 		writeRecord(recordFile, record)
@@ -1466,11 +1545,18 @@ async function runCargo(
 			}
 		}
 	}
+	const checkout = linkCheckout(build.targetDir, build.cwd)
+	// Compiler messages name the checkout itself, never the link another build will move.
+	const toCheckout = (line: string) =>
+		line.replaceAll(checkout, build.cwd).replaceAll(checkout.replaceAll('\\', '/'), build.cwd)
 	for (let retried = false; ; retried = true) {
-		const child = NodeChildProcess.spawn('cargo', [...args], {
-			cwd: build.cwd,
+		// On Unix, Cargo finds the manifest from the physical working directory, not the link.
+		const [command, ...rest] = args
+		const manifest = ['--manifest-path', NodePath.join(checkout, 'Cargo.toml')]
+		const child = NodeChildProcess.spawn('cargo', [command!, ...manifest, ...rest], {
+			cwd: checkout,
 			detached: process.platform !== 'win32',
-			env: { ...spec.env, ...build.env, CARGO_TARGET_DIR: build.targetDir },
+			env: cargoEnv({ ...spec.env, ...build.env, CARGO_TARGET_DIR: build.targetDir }),
 			stdio: ['ignore', 'pipe', 'pipe'],
 			windowsHide: true,
 		})
@@ -1486,8 +1572,8 @@ async function runCargo(
 		const rememberFailure = (line: string) => {
 			if (/Access is denied|failed to remove file/.test(line)) failure.push(line)
 		}
-		pipeOutput(child.stdout, spec.label, process.stdout)
-		pipeOutput(child.stderr, spec.label, process.stderr, rememberFailure)
+		pipeOutput(child.stdout, spec.label, process.stdout, undefined, toCheckout)
+		pipeOutput(child.stderr, spec.label, process.stderr, rememberFailure, toCheckout)
 		const code = await new Promise<number>((resolve) => {
 			child.once('error', (error) => {
 				runnerLog('error', `Could not start cargo: ${error.message}`)
@@ -1509,6 +1595,30 @@ async function runCargo(
 		NodeFS.renameSync(locked, `${locked}.${Date.now()}.old`)
 		runnerLog('info', `${spec.label} moved a running ${NodePath.basename(locked)} aside`)
 	}
+}
+
+/**
+ * Every build runs Cargo from one path, a link to the checkout it builds, so what it compiles
+ * holds the same paths whichever checkout that was. Otherwise the compiler's incremental state,
+ * the paths build scripts record and `CARGO_MANIFEST_DIR` belong to one checkout, and the next
+ * checkout compiles those crates from scratch. Builds take turns, so one link serves them all. It
+ * sits beside the primary checkout, not in it, so Cargo reads no `.cargo` folder above it.
+ */
+function linkCheckout(targetDir: string, checkout: string): string {
+	const link = `${NodePath.resolve(targetDir, '..', '..')}-checkout`
+	NodeFS.rmSync(link, { force: true })
+	// A junction on Windows, which needs no elevation.
+	NodeFS.symlinkSync(checkout, link, 'junction')
+	return link
+}
+
+/**
+ * What Cargo runs with. `RUSTC_BOOTSTRAP` changes every crate's fingerprint, so one shell that sets
+ * it would compile everything again for every checkout, and the next shell without it again.
+ */
+function cargoEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+	const { RUSTC_BOOTSTRAP: _, ...rest } = env
+	return rest
 }
 
 /**
@@ -1621,12 +1731,14 @@ function pipeOutput(
 	label: string,
 	destination: NodeJS.WritableStream,
 	onLine?: (line: string) => void,
+	rewrite: (line: string) => string = (line) => line,
 ): void {
 	if (!stream) return
 	const lines = NodeReadline.createInterface({ input: stream })
 	let previousLine = ''
 	const seenRepeatedNoise = new Set<string>()
-	lines.on('line', (line) => {
+	lines.on('line', (raw) => {
+		const line = rewrite(raw)
 		const plainLine = stripAnsi(line).trimEnd()
 		onLine?.(plainLine)
 		const noise = REPEATED_NOISE.find((text) => plainLine.includes(text))
@@ -1858,6 +1970,19 @@ function prepareLocalBackend(paths: WorktreePaths, env: NodeJS.ProcessEnv): void
 
 /** Brings the backend's database up to the current schema, creating it when it is missing. */
 function migrateLocalBackend(paths: WorktreePaths, env: NodeJS.ProcessEnv): void {
+	// Asking wrangler takes about 4 seconds even with nothing to apply. The stamp sits in the
+	// storage folder, so it goes wherever that folder's data goes.
+	const migrations = NodePath.join(paths.worktree, 'apps', 'backend', 'migrations')
+	const stampPath = NodePath.join(paths.data, 'backend', 'v3', 'migrations.stamp')
+	const stamp = NodeCrypto.createHash('sha256')
+	for (const file of NodeFS.readdirSync(migrations).sort()) {
+		stamp
+			.update(file)
+			.update('\0')
+			.update(NodeFS.readFileSync(NodePath.join(migrations, file)))
+	}
+	const applied = stamp.digest('hex')
+	if (NodeFS.existsSync(stampPath) && NodeFS.readFileSync(stampPath, 'utf8') === applied) return
 	const result = NodeChildProcess.spawnSync(
 		process.execPath,
 		[
@@ -1884,6 +2009,7 @@ function migrateLocalBackend(paths: WorktreePaths, env: NodeJS.ProcessEnv): void
 			`Local account database migration failed.\n${result.stdout}${result.stderr}`,
 		)
 	}
+	NodeFS.writeFileSync(stampPath, applied)
 }
 
 /**

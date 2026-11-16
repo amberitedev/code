@@ -4,9 +4,13 @@ import { resolve } from 'path'
 import { defineConfig } from 'vite'
 import svgLoader from 'vite-svg-loader'
 
-import tauriConf from '../app/tauri.conf.json'
-
 const projectRootDir = resolve(__dirname)
+// Read, not imported: Vite restarts its server when an imported file changes, and a Rust build
+// re-dates this one while the server may still be preparing its dependencies, which it never
+// recovers from. A CSP change takes a restart of the frontend.
+const tauriConf: { app: { security: { csp: Record<string, string | string[]> } } } = JSON.parse(
+	readFileSync(resolve(projectRootDir, '../app/tauri.conf.json'), 'utf-8'),
+)
 const engineEnvDir = resolve(projectRootDir, '../../packages/engine')
 const apiClientSource = resolve(projectRootDir, '../../packages/api-client/src/index.ts')
 const portArgumentIndex = process.argv.indexOf('--port')

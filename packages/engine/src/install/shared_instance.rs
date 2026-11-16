@@ -37,10 +37,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use uuid::Uuid;
 
-/// Icon used for linked-server instances whose server has no icon of its own.
-const DEFAULT_SERVER_ICON: &[u8] = include_bytes!(
-    "../../../assets/external/illustrations/minecraft_server_icon.png"
-);
+/// Icon used for linked-server instances whose server has no icon of its own. A copy inside this
+/// crate: Cargo records a file outside it by the absolute path of the checkout that compiled it,
+/// and recompiles the engine everywhere once that checkout is gone.
+const DEFAULT_SERVER_ICON: &[u8] =
+    include_bytes!("../../assets/minecraft_server_icon.png");
 const MAX_SHARED_INSTANCE_INITIAL_BUFFER_SIZE: u64 = 8 * 1024 * 1024;
 const SHARED_INSTANCE_CONTENT_DOWNLOAD_CONCURRENCY: usize = 4;
 const SHARED_INSTANCE_FILE_DOWNLOAD_CONCURRENCY: usize = 64;
