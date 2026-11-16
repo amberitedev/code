@@ -11,6 +11,8 @@ import {
 } from '@vue/compiler-dom'
 import { parse as parseVue } from '@vue/compiler-sfc'
 import chalk from 'chalk'
+import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -55,10 +57,7 @@ interface LanguageCoverageStats {
 	unlocalizedStrings: number
 }
 
-type LanguageCoverageByProduct = Record<
-	LanguageProduct,
-	Record<string, LanguageCoverageStats>
->
+type LanguageCoverageByProduct = Record<LanguageProduct, Record<string, LanguageCoverageStats>>
 
 const PRODUCT_SCOPES: Record<
 	LanguageProduct,
@@ -523,8 +522,7 @@ function getLocaleCodes(rootDir: string): string[] {
 		.readdirSync(localesDirectory, { withFileTypes: true })
 		.filter(
 			(entry) =>
-				entry.isDirectory() &&
-				fs.existsSync(path.join(localesDirectory, entry.name, 'index.json')),
+				entry.isDirectory() && fs.existsSync(path.join(localesDirectory, entry.name, 'index.json')),
 		)
 		.map((entry) => entry.name)
 		.sort((left, right) => left.localeCompare(right))
@@ -560,16 +558,13 @@ function generateLanguageCoverage(
 		LanguageProduct,
 		(typeof PRODUCT_SCOPES)[LanguageProduct],
 	][]) {
-		const sourceRoots = definition.sourceDirectories.map((directory) =>
-			`${path.join(rootDir, directory)}${path.sep}`,
+		const sourceRoots = definition.sourceDirectories.map(
+			(directory) => `${path.join(rootDir, directory)}${path.sep}`,
 		)
 		const productResults = results.filter((result) =>
 			sourceRoots.some((sourceRoot) => result.path.startsWith(sourceRoot)),
 		)
-		const localizedUsages = productResults.reduce(
-			(total, result) => total + result.i18nUsages,
-			0,
-		)
+		const localizedUsages = productResults.reduce((total, result) => total + result.i18nUsages, 0)
 		const unlocalizedStrings = productResults.reduce(
 			(total, result) => total + result.plainStrings.length,
 			0,
@@ -593,9 +588,7 @@ function generateLanguageCoverage(
 					? Math.round((translatedMessages / sourceEntries.length) * 100)
 					: 100
 			const percentage =
-				locale === 'en-US'
-					? 100
-					: Math.round((interfaceCoverage * translationCoverage) / 100)
+				locale === 'en-US' ? 100 : Math.round((interfaceCoverage * translationCoverage) / 100)
 
 			coverage[product][locale] = {
 				percentage,
@@ -614,7 +607,8 @@ function generateLanguageCoverage(
 function renderLanguageCoverageModule(coverage: LanguageCoverageByProduct): string {
 	const products = (
 		Object.entries(coverage) as [LanguageProduct, Record<string, LanguageCoverageStats>][]
-	).map(([product, locales]) => {
+	)
+		.map(([product, locales]) => {
 			const localeEntries = Object.entries(locales)
 				.map(
 					([locale, stats]) =>
@@ -633,6 +627,41 @@ function renderLanguageCoverageModule(coverage: LanguageCoverageByProduct): stri
 		.join('\n')
 
 	return `import type { LanguageCoverageByProduct } from './language-settings-coverage'\n\nexport const languageCoverage = {\n${products}\n} satisfies LanguageCoverageByProduct\n`
+}
+
+/**
+ * Where the module made from these sources is kept for every checkout: the primary checkout's
+ * cache, named by the content of everything the scan reads. `undefined` outside a git checkout.
+ */
+function cachedModule(rootDir: string, scanDirs: ReadonlyArray<string>): string | undefined {
+	const git = (args: ReadonlyArray<string>) =>
+		execFileSync('git', args, { cwd: rootDir, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+	const inputs = [
+		...scanDirs,
+		'scripts/coverage-i18n.ts',
+		'scripts/i18n-icu-contract.ts',
+		'pnpm-lock.yaml',
+	]
+	try {
+		const hash = createHash('sha256').update(git(['ls-files', '-s', '-z', '--', ...inputs]))
+		// Edited and new files count by their content, a deleted one by its absence.
+		for (const file of git(['ls-files', '-m', '-o', '--exclude-standard', '-z', '--', ...inputs])
+			.split('\0')
+			.filter(Boolean)) {
+			const absolute = path.join(rootDir, file)
+			hash.update(file).update(fs.existsSync(absolute) ? fs.readFileSync(absolute) : 'deleted')
+		}
+		const common = path.resolve(rootDir, git(['rev-parse', '--git-common-dir']).trim())
+		return path.join(
+			path.dirname(common),
+			'node_modules',
+			'.cache',
+			'i18n-coverage',
+			`${hash.digest('hex').slice(0, 32)}.ts`,
+		)
+	} catch {
+		return undefined
+	}
 }
 
 function writeLanguageCoverageModule(
@@ -775,6 +804,15 @@ function main() {
 		process.stdout.write(theme.muted('  Scanning Vue files... '))
 	}
 
+	// Every install writes the module, so a new worktree reuses one made from the same files.
+	const cached = writeOutput && quiet ? cachedModule(rootDir, scanDirs) : undefined
+	if (cached && fs.existsSync(cached)) {
+		const resolvedOutput = path.resolve(rootDir, writeOutput!)
+		fs.mkdirSync(path.dirname(resolvedOutput), { recursive: true })
+		fs.copyFileSync(cached, resolvedOutput)
+		return
+	}
+
 	const allFiles: string[] = []
 
 	for (const dir of scanDirs) {
@@ -801,6 +839,16 @@ function main() {
 	const languageCoverage = generateLanguageCoverage(results, rootDir)
 	if (writeOutput) {
 		writeLanguageCoverageModule(rootDir, writeOutput, languageCoverage)
+		if (cached) {
+			try {
+				fs.mkdirSync(path.dirname(cached), { recursive: true })
+				const partial = `${cached}.${process.pid}.partial`
+				fs.copyFileSync(path.resolve(rootDir, writeOutput), partial)
+				fs.renameSync(partial, cached)
+			} catch {
+				// Another checkout is storing the same module.
+			}
+		}
 	}
 
 	if (jsonOutput) {
