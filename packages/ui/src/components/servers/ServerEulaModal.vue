@@ -42,10 +42,10 @@ const messages = defineMessages({
 	body: {
 		id: 'servers.eula.body',
 		defaultMessage:
-			'Servers on this Core start once you accept the Minecraft EULA. You only accept it once.',
+			"To create servers on this Core, you need to agree to the Minecraft EULA. Your agreement covers every server on this Core, including ones you create later, and can't be undone.",
 	},
 	read: { id: 'servers.eula.read', defaultMessage: 'Read the EULA' },
-	accept: { id: 'servers.eula.accept', defaultMessage: 'Accept' },
+	accept: { id: 'servers.eula.accept', defaultMessage: 'I agree to the EULA' },
 })
 
 const modal = ref<InstanceType<typeof NewModal>>()

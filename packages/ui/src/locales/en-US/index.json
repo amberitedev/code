@@ -6294,13 +6294,10 @@
     "defaultMessage": "Download unavailable"
   },
   "servers.eula.accept": {
-    "defaultMessage": "Accept"
+    "defaultMessage": "I agree to the EULA"
   },
   "servers.eula.body": {
-    "defaultMessage": "Servers on this Core start once you accept the Minecraft EULA. You only accept it once."
-  },
-  "servers.eula.owner-only": {
-    "defaultMessage": "This Core's owner has to accept the Minecraft EULA before its servers start."
+    "defaultMessage": "To create servers on this Core, you need to agree to the Minecraft EULA. Your agreement covers every server on this Core, including ones you create later, and can't be undone."
   },
   "servers.eula.read": {
     "defaultMessage": "Read the EULA"

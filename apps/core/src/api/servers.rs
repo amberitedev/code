@@ -233,6 +233,14 @@ pub async fn create(
     Req { body, .. }: Req<CreateServer>,
 ) -> Result<Json<ServerId>, ApiError> {
     require_owner(&caller)?;
+    // No server exists before the owner accepts, so nobody they invite is ever stuck on it.
+    if super::eula::accepted_at(&state.db)
+        .await
+        .map_err(internal)?
+        .is_none()
+    {
+        return Err(ServerError::Eula.into());
+    }
     let row = state.servers.create(server_name(&body.name)?).await?;
     activity::log(&state.db, &caller, Some(&row.id), Action::ServerCreated)
         .await;

@@ -39,9 +39,8 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { Button } from '#ui/components/base/buttons'
 import FloatingActionBar from '#ui/components/base/FloatingActionBar.vue'
 import { defineMessage, useVIntl } from '#ui/composables/i18n'
-import { useServerPower } from '#ui/composables/use-server-power'
 import { injectServerSettings } from '#ui/layouts/shared/server-settings/providers/server-settings'
-import { injectModrinthServerContext, injectNotificationManager } from '#ui/providers'
+import { injectModrinthClient, injectModrinthServerContext } from '#ui/providers'
 
 const props = defineProps<{
 	isUpdating: boolean
@@ -93,8 +92,7 @@ onBeforeUnmount(() => {
 	if (saveBanner) saveBanner.shown.value = false
 })
 
-const power = useServerPower()
-const { handleError } = injectNotificationManager()
+const client = injectModrinthClient()
 
 const { powerState } = injectModrinthServerContext()
 
@@ -116,6 +114,6 @@ const saveAndPower = async () => {
 	} catch {
 		return
 	}
-	await power(isStopped.value ? 'Start' : 'Restart').catch(handleError)
+	await client.archon.servers_v0.power(props.serverId, isStopped.value ? 'Start' : 'Restart')
 }
 </script>

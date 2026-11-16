@@ -13,7 +13,6 @@ import { useServerPermissions } from '#ui/composables/server-permissions'
 import { toShareableConfigPath } from '#ui/composables/server-sharing/config-files'
 import { useSharedInstanceInstalledOnce } from '#ui/composables/server-sharing/shared-instance'
 import { useServerShareReview } from '#ui/composables/server-sharing/use-server-share-review'
-import { useServerPower } from '#ui/composables/use-server-power'
 import {
 	injectAuth,
 	injectFileDownload,
@@ -33,7 +32,6 @@ const props = defineProps<{
 }>()
 
 const client = injectModrinthClient()
-const power = useServerPower()
 const auth = injectAuth()
 const fileDownload = injectFileDownload(null)
 const serverContext = injectModrinthServerContext()
@@ -545,7 +543,7 @@ onMounted(async () => {
 // Restart
 async function restartServer() {
 	if (!canUsePowerActions.value) return
-	await power('Restart')
+	await client.archon.servers_v0.power(serverId, 'Restart')
 }
 
 function getSessionUploadFilename(fileName: string) {

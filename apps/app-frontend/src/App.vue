@@ -43,7 +43,9 @@ import {
 	providePageContext,
 	providePopupNotificationManager,
 	provideServerOnboardingFlow,
+	provideServerEula,
 	provideServerPlay,
+	ServerEulaModal,
 	ServerOnboardingModal,
 	TeleportOverflowMenu,
 	TooltipDirective,
@@ -293,6 +295,8 @@ const serverPlay = {
 	},
 }
 provideServerPlay(serverPlay)
+const serverEulaModal = ref()
+provideServerEula({ ask: async (url) => (await serverEulaModal.value?.ask(url)) ?? false })
 // Both are known before the Servers page opens, so it never has to wait or flash.
 useCores()
 useCoreWatch()
@@ -2224,6 +2228,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 		@go-to-instance="handleContentInstallModpackDuplicateGoToInstance"
 	/>
 	<ServerPlayHandler ref="serverPlayHandler" />
+	<ServerEulaModal ref="serverEulaModal" />
 	<SharedInstanceInviteHandler ref="sharedInstanceInviteHandler" />
 	<InstallToPlayModal ref="installToPlayModal" :show-external-warnings="false" />
 	<UpdateToPlayModal ref="updateToPlayModal" :show-external-warnings="false" />

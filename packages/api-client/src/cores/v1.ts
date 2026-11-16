@@ -1,10 +1,4 @@
-import {
-	type CoreSession,
-	core as coreRoutes,
-	cores,
-	type Eula,
-	type ListedCore,
-} from '@amberite/contracts'
+import { type CoreSession, core as coreRoutes, cores, type ListedCore } from '@amberite/contracts'
 
 import { ApiCallError } from '../contracts/errors'
 import { AbstractModule } from '../core/abstract-module'
@@ -143,16 +137,6 @@ export class ArchonCoresV1Module extends AbstractModule {
 		// RemoveMember is dangerous for removing someone else; removing yourself is not.
 		const leaveServer = { ...coreRoutes.RemoveMember, dangerous: false }
 		await core.call(leaveServer, { params: { id: serverId, user_id: user.id } })
-	}
-
-	/** The Minecraft EULA on the Core that has `serverId`. Owner only: anyone else gets `forbidden`. */
-	public async eula(serverId: string): Promise<Eula> {
-		return this.client.core((await this.coreOf(serverId)).id).call(coreRoutes.GetEula)
-	}
-
-	/** Accept the Minecraft EULA on the Core that has `serverId`, for every server on it. Owner only. */
-	public async acceptEula(serverId: string): Promise<void> {
-		await this.client.core((await this.coreOf(serverId)).id).call(coreRoutes.AcceptEula)
 	}
 
 	/** A ticket for `coreId`, for its owner or someone invited to one of its servers. */
@@ -307,10 +291,24 @@ export class ArchonCoresV1Module extends AbstractModule {
 		return merged
 	}
 
-	/** Create an empty server on a Core. */
-	public async createServer(name: string, core: ListedCore): Promise<{ id: string }> {
-		const server = await this.client.core(core.id).call(coreRoutes.CreateServer, { body: { name } })
-		this.serverCores.set(server.id, core.id)
+	/**
+	 * Create an empty server on a Core. A Core makes no server until its owner accepts the Minecraft
+	 * EULA, so the first one shows it with `confirmEula`. Null when the owner declines.
+	 */
+	public async createServer(
+		name: string,
+		core: ListedCore,
+		confirmEula: (url: string) => Promise<boolean>,
+	): Promise<{ id: string } | null> {
+		const routes = this.client.core(core.id)
+		const create = () => routes.call(coreRoutes.CreateServer, { body: { name } })
+		const server = await create().catch(async (error: unknown) => {
+			if (!(error instanceof ApiCallError && error.code === 'eula_not_accepted')) throw error
+			if (!(await confirmEula((await routes.call(coreRoutes.GetEula)).url))) return null
+			await routes.call(coreRoutes.AcceptEula)
+			return create()
+		})
+		if (server) this.serverCores.set(server.id, core.id)
 		return server
 	}
 

@@ -124,6 +124,9 @@ pub async fn run(client: &Client, command: ServersCommand) -> Result<Output> {
             version,
             accept_eula,
         } => {
+            if accept_eula {
+                call::<AcceptEula>(client, &(), &(), ()).await?;
+            }
             let created =
                 call::<CreateServer>(client, &(), &(), NewServer { name })
                     .await?;
@@ -150,9 +153,6 @@ pub async fn run(client: &Client, command: ServersCommand) -> Result<Output> {
                     ),
                     &json,
                 ));
-            }
-            if accept_eula {
-                call::<AcceptEula>(client, &(), &(), ()).await?;
             }
             Ok(Output::new(
                 format!(

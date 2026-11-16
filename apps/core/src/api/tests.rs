@@ -244,6 +244,19 @@ async fn each_role_reaches_only_what_the_table_gives_it() {
         error["error"], "eula_not_accepted",
         "allowed, but the EULA is not accepted"
     );
+    let (_, error) = core
+        .call(
+            Method::POST,
+            "/servers",
+            Some(&owner),
+            None,
+            Some(json!({ "name": "B" })),
+        )
+        .await;
+    assert_eq!(
+        error["error"], "eula_not_accepted",
+        "no new server before it"
+    );
     core.call(Method::POST, "/eula", Some(&owner), None, None)
         .await;
     let (_, detail) = core

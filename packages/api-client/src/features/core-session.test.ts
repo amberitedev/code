@@ -429,6 +429,38 @@ const SERVER_ON_CORE: CoreServer = {
 	eula_accepted: true,
 }
 
+describe('creating a server on a Core', () => {
+	const EULA = 'https://aka.ms/MinecraftEULA'
+	const notAccepted = () =>
+		new ModrinthApiError('HTTP 409', {
+			statusCode: 409,
+			responseData: { error: 'eula_not_accepted', description: '' },
+		})
+	const toCore = (api: FakeClient) =>
+		api.toCore().map((request) => `${request.method} ${request.url.slice(PROXY.length)}`)
+
+	it('asks the owner for the EULA the Core needs first, then creates the server', async () => {
+		const api = new FakeClient()
+		api.answers = [notAccepted(), { url: EULA, accepted_at: null }, {}, { id: SERVER }]
+		const asked: string[] = []
+		const created = await api.archon.cores_v1.createServer('Survival', CORE, async (url) => {
+			asked.push(url)
+			return true
+		})
+		expect(created).toEqual({ id: SERVER })
+		expect(asked).toEqual([EULA])
+		expect(toCore(api)).toEqual(['POST /servers', 'GET /eula', 'POST /eula', 'POST /servers'])
+	})
+
+	it('creates nothing when the owner declines the EULA', async () => {
+		const api = new FakeClient()
+		api.answers = [notAccepted(), { url: EULA, accepted_at: null }]
+		const created = await api.archon.cores_v1.createServer('Survival', CORE, async () => false)
+		expect(created).toBeNull()
+		expect(toCore(api)).toEqual(['POST /servers', 'GET /eula'])
+	})
+})
+
 describe('a server on a Core', () => {
 	it('shows each role its own permissions', async () => {
 		const api = new FakeClient()
