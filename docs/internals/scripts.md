@@ -15,7 +15,7 @@ vp run dev
 
 You need:
 
-- Node 24.15 or newer.
+- Node 24.22 or newer.
 - Rust through [rustup](https://rustup.rs). `rust-toolchain.toml` pins the version and rustup installs
   it on the first build.
 - JDK 17 or newer. The engine's build runs Gradle 9, which uses `JAVA_HOME` when it is set and

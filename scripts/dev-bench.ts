@@ -137,12 +137,15 @@ type Result = {
 
 class Bench {
 	readonly logs: string
+	/** The Node `vp run` gives agents in this checkout, which every step runs on. */
+	readonly node: string
 	readonly primary: string
 	readonly snapshot: string
 	readonly worktrees: string
 	// Node runs this file without compiling it, so no constructor parameter properties.
 	constructor(root: string, primary: string, snapshot: string) {
 		this.logs = NodePath.join(root, 'logs')
+		this.node = agentNode(primary)
 		this.primary = primary
 		this.snapshot = snapshot
 		this.worktrees = NodePath.join(root, 'wt')
@@ -278,7 +281,7 @@ class Bench {
 		NodeFS.mkdirSync(this.logs, { recursive: true })
 		const log = NodePath.join(this.logs, `${name}.log`)
 		NodeFS.appendFileSync(log, `\n=== ${step}: node ${args.join(' ')}\n`)
-		const child = NodeChildProcess.spawn(process.execPath, [...args], {
+		const child = NodeChildProcess.spawn(this.node, [...args], {
 			cwd,
 			stdio: ['ignore', 'pipe', 'pipe'],
 			windowsHide: true,
@@ -307,7 +310,7 @@ class Bench {
 		// keeps its folder, and this run takes a new one.
 		const stopped =
 			!NodeFS.existsSync(NodePath.join(path, '.data', 'runtime.json')) ||
-			NodeChildProcess.spawnSync(process.execPath, ['scripts/dev-runner.ts', 'down'], {
+			NodeChildProcess.spawnSync(this.node, ['scripts/dev-runner.ts', 'down'], {
 				cwd: path,
 				stdio: 'ignore',
 				windowsHide: true,
@@ -369,7 +372,7 @@ async function main(): Promise<void> {
 			NodeFS.rmSync(NodePath.join(bench.logs, log))
 		}
 	}
-	console.log(`[bench] ${snapshot.slice(0, 9)} in ${root}`)
+	console.log(`[bench] ${snapshot.slice(0, 9)} in ${root} on ${bench.node}`)
 
 	if (!selected.includes('cold')) await bench.prime()
 
@@ -491,6 +494,20 @@ function append(file: string, text: string): (worktree: string) => void {
 /** A one-line change to a Rust crate, formatted as rustfmt wants it. */
 function rustFn(file: string, nonce: string): (worktree: string) => void {
 	return append(file, `\n#[allow(dead_code)]\nfn bench_edit_${nonce}() -> u32 {\n    ${nonce}\n}\n`)
+}
+
+/**
+ * The Node `vp run` uses in `checkout`, which can differ from the one running this script: Node
+ * 24.15.0, for one, crashes now and then on Windows with 0xC0000409 while it makes HTTP requests.
+ */
+function agentNode(checkout: string): string {
+	const result = NodeChildProcess.spawnSync('vp', ['env', 'which', 'node'], {
+		cwd: checkout,
+		encoding: 'utf8',
+		windowsHide: true,
+	})
+	const path = result.status === 0 ? result.stdout.split('\n')[0]!.trim() : ''
+	return path && NodeFS.existsSync(path) ? path : process.execPath
 }
 
 /** rustc processes running now, all of which belong to other checkouts when a scenario starts. */
