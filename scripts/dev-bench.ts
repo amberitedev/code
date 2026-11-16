@@ -501,9 +501,11 @@ function rustFn(file: string, nonce: string): (worktree: string) => void {
  * 24.15.0, for one, crashes now and then on Windows with 0xC0000409 while it makes HTTP requests.
  */
 function agentNode(checkout: string): string {
-	const result = NodeChildProcess.spawnSync('vp', ['env', 'which', 'node'], {
+	// Through the shell, which also finds vp.cmd, what an npm install of vp puts on PATH.
+	const result = NodeChildProcess.spawnSync('vp env which node', {
 		cwd: checkout,
 		encoding: 'utf8',
+		shell: true,
 		windowsHide: true,
 	})
 	const path = result.status === 0 ? result.stdout.split('\n')[0]!.trim() : ''
