@@ -10,12 +10,14 @@ const { alice, bob } = await stack({
 
 await friends(alice, bob)
 
-await instance(alice, {
-	name: 'Survival',
-	loader: 'fabric',
-	gameVersion: '1.21.1',
-	mods: ['ferrite-core'],
-	sharedWith: [bob],
-})
-
-await instance(bob, { name: 'Vanilla', gameVersion: '1.21.1' })
+// Every checkout's first start applies this, so lines that do not depend on each other run together.
+await Promise.all([
+	instance(alice, {
+		name: 'Survival',
+		loader: 'fabric',
+		gameVersion: '1.21.1',
+		mods: ['ferrite-core'],
+		sharedWith: [bob],
+	}),
+	instance(bob, { name: 'Vanilla', gameVersion: '1.21.1' }),
+])

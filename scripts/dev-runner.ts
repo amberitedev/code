@@ -1782,9 +1782,9 @@ export function createCommandInput(input: {
 	commands.on('line', handle)
 	NodeFS.writeFileSync(input.commandFile, '')
 	let offset = 0
-	const poll = setInterval(() => {
+	const read = () => {
 		let buffer: Buffer
-		// The file can vanish or be replaced at any point; skip this poll and read it on the next.
+		// The file can vanish or be replaced at any point; skip this read and take it on the next.
 		try {
 			const size = NodeFS.statSync(input.commandFile).size
 			if (size < offset) offset = 0
@@ -1796,13 +1796,26 @@ export function createCommandInput(input: {
 			} finally {
 				NodeFS.closeSync(fd)
 			}
-			offset = size
 		} catch {
 			return
 		}
-		for (const line of buffer.toString('utf8').split(/\r?\n/)) handle(line)
-	}, 500)
+		// Only whole lines: a read can land while a command is still being written.
+		const end = buffer.lastIndexOf('\n')
+		if (end === -1) return
+		offset += end + 1
+		for (const line of buffer.subarray(0, end).toString('utf8').split(/\r?\n/)) handle(line)
+	}
+	// The watcher answers a command at once; the poll catches anything it misses.
+	const poll = setInterval(read, 500)
 	poll.unref()
+	let watcher: NodeFS.FSWatcher | undefined
+	try {
+		watcher = NodeFS.watch(input.commandFile, read)
+		watcher.on('error', () => watcher?.close())
+		watcher.unref()
+	} catch {
+		// The poll alone still reads every command.
+	}
 
 	// One at a time, in the order they were sent: a fixture's `stack` must not start what its
 	// `halt` is still stopping.
@@ -1864,6 +1877,7 @@ export function createCommandInput(input: {
 	return {
 		close: () => {
 			clearInterval(poll)
+			watcher?.close()
 			commands.close()
 		},
 	}
@@ -2336,17 +2350,19 @@ async function applyFixture(paths: WorktreePaths, name: string, input: RunnerInp
 	;(await import(source('packages.ts'))).resolvePackages()
 	const fixtures = await import(source('run.ts'))
 	const file: string = fixtures.resolveFixture(paths.worktree, name)
-	if (!(await fixtures.checkTypes(paths.worktree, file))) {
-		process.exitCode = 1
-		return
-	}
+	const waitStarted = performance.now()
+	const typed: Promise<boolean> = fixtures.checkTypes(paths.worktree, file)
 	const live = readLiveRuntime(paths)
 	// An App decides whether to show its window when it starts, so asking a running one is too late.
 	if (live?.hideWindows && !input.hideWindows) {
 		throw new DevRunnerError('Already running with App windows hidden. Run vp run down first.')
 	}
+	// A held runner stops and wipes nothing, so a new one starts while the types are checked.
 	const started = live ? undefined : startRunner(paths, { ...input, held: true })
-	const waitStarted = performance.now()
+	if (!(await typed)) {
+		process.exitCode = 1
+		return
+	}
 	const record = (result: 'ok' | 'failed') =>
 		recordTiming(paths.primary, {
 			kind: 'fixture',
