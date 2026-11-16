@@ -18,6 +18,7 @@ import {
 	defineMessages,
 	injectModrinthClient,
 	injectNotificationManager,
+	injectServerEula,
 	notifyHomeAddressOnce,
 	serverKeys,
 	useVIntl,
@@ -40,6 +41,7 @@ const props = defineProps<{
 
 const { formatMessage } = useVIntl()
 const { addNotification } = injectNotificationManager()
+const { ask: confirmEula } = injectServerEula()
 const client = injectModrinthClient()
 const queryClient = useQueryClient()
 const flow = ref<InstanceType<typeof CreationFlowModal>>()
@@ -75,7 +77,9 @@ async function create(ctx: CreationFlowContextValue) {
 	const instance = { id: props.instance.id, name: props.instance.name }
 	try {
 		if (!core) throw new Error('No Core was chosen')
-		const { id } = await client.archon.cores_v1.createServer(instance.name, core)
+		const created = await client.archon.cores_v1.createServer(instance.name, core, confirmEula)
+		if (!created) return
+		const { id } = created
 		flow.value?.hide()
 		// Nobody else sees the server of an instance that is not shared.
 		if (props.instance.shared_instance) notifyHomeAddressOnce(addNotification, formatMessage)

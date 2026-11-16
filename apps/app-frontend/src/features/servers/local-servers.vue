@@ -11,6 +11,7 @@ import {
 	injectInstanceServerSource,
 	injectModrinthClient,
 	injectNotificationManager,
+	injectServerEula,
 	Input,
 	ServerListing,
 	useGhostReveal,
@@ -28,6 +29,7 @@ import { injectSettingsActions } from '@/features/settings/settings-actions'
 const client = injectModrinthClient()
 const auth = injectAuth()
 const { addNotification } = injectNotificationManager()
+const { ask: confirmEula } = injectServerEula()
 const instanceSource = injectInstanceServerSource(null)
 const { openCores: openCoreSettings } = injectSettingsActions()
 const router = useRouter()
@@ -153,7 +155,9 @@ async function createServer(config: CreationFlowContextValue) {
 	const instance = config.instanceSelection.value
 	try {
 		if (!core) throw new Error('No Core was chosen')
-		const { id } = await client.archon.cores_v1.createServer(serverName(config), core)
+		const created = await client.archon.cores_v1.createServer(serverName(config), core, confirmEula)
+		if (!created) return
+		const { id } = created
 		try {
 			await install(id, config)
 		} catch (cause) {
@@ -185,7 +189,9 @@ async function createServer(config: CreationFlowContextValue) {
 async function browseModpacks() {
 	try {
 		if (!core) throw new Error('No Core was chosen')
-		const { id } = await client.archon.cores_v1.createServer('New server', core)
+		const created = await client.archon.cores_v1.createServer('New server', core, confirmEula)
+		if (!created) return
+		const { id } = created
 		setupModal.value?.hide()
 		await queryClient.invalidateQueries({ queryKey: ['servers'] })
 		await router.push({ path: '/browse/modpack', query: { sid: id, wid: id, from: 'onboarding' } })

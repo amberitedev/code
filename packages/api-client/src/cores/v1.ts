@@ -291,10 +291,24 @@ export class ArchonCoresV1Module extends AbstractModule {
 		return merged
 	}
 
-	/** Create an empty server on a Core. */
-	public async createServer(name: string, core: ListedCore): Promise<{ id: string }> {
-		const server = await this.client.core(core.id).call(coreRoutes.CreateServer, { body: { name } })
-		this.serverCores.set(server.id, core.id)
+	/**
+	 * Create an empty server on a Core. A Core makes no server until its owner accepts the Minecraft
+	 * EULA, so the first one shows it with `confirmEula`. Null when the owner declines.
+	 */
+	public async createServer(
+		name: string,
+		core: ListedCore,
+		confirmEula: (url: string) => Promise<boolean>,
+	): Promise<{ id: string } | null> {
+		const routes = this.client.core(core.id)
+		const create = () => routes.call(coreRoutes.CreateServer, { body: { name } })
+		const server = await create().catch(async (error: unknown) => {
+			if (!(error instanceof ApiCallError && error.code === 'eula_not_accepted')) throw error
+			if (!(await confirmEula((await routes.call(coreRoutes.GetEula)).url))) return null
+			await routes.call(coreRoutes.AcceptEula)
+			return create()
+		})
+		if (server) this.serverCores.set(server.id, core.id)
 		return server
 	}
 
