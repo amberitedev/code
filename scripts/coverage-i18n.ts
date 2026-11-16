@@ -655,7 +655,10 @@ function cachedModule(rootDir: string, scanDirs: ReadonlyArray<string>): string 
 			...listed('-o', '-i', '--exclude-standard').filter((file) => file.endsWith('.vue')),
 		]) {
 			const absolute = path.join(rootDir, file)
-			hash.update(file).update(fs.existsSync(absolute) ? fs.readFileSync(absolute) : 'deleted')
+			const content = fs.existsSync(absolute) ? fs.readFileSync(absolute) : undefined
+			// Each file's path and length lead its bytes, so no two sets of files hash alike.
+			hash.update(`\0${file}\0${content?.length ?? 'deleted'}\0`)
+			if (content) hash.update(content)
 		}
 		const common = path.resolve(rootDir, git(['rev-parse', '--git-common-dir']).trim())
 		return path.join(
