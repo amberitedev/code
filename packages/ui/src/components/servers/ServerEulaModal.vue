@@ -5,28 +5,9 @@
 		max-width="520px"
 		:on-hide="() => settle(false)"
 	>
-		<div class="flex flex-col gap-5">
-			<div class="flex items-center gap-4">
-				<ScaleIcon class="size-10 shrink-0 text-brand" />
-				<p class="m-0 text-lg font-semibold text-contrast">{{ formatMessage(messages.lead) }}</p>
-			</div>
-			<ul class="m-0 flex list-none flex-col gap-3 p-0">
-				<li class="flex items-center gap-3">
-					<ServerStackIcon class="size-5 shrink-0 text-secondary" />
-					{{ formatMessage(messages.covers) }}
-				</li>
-				<li class="flex items-center gap-3">
-					<LockIcon class="size-5 shrink-0 text-secondary" />
-					{{ formatMessage(messages.final) }}
-				</li>
-			</ul>
-			<a
-				:href="url"
-				target="_blank"
-				rel="noopener"
-				class="flex w-fit items-center gap-2 font-semibold text-link"
-			>
-				<BookTextIcon class="size-5" />
+		<div class="flex flex-col gap-3">
+			<p class="m-0">{{ formatMessage(messages.lead) }}</p>
+			<a :href="url" target="_blank" rel="noopener" class="flex w-fit items-center gap-1 text-link">
 				{{ formatMessage(messages.read) }}
 				<ExternalIcon class="size-4" />
 			</a>
@@ -47,15 +28,7 @@
 </template>
 
 <script setup lang="ts">
-import {
-	BookTextIcon,
-	CheckIcon,
-	ExternalIcon,
-	LockIcon,
-	ScaleIcon,
-	ServerStackIcon,
-	XIcon,
-} from '@modrinth/assets'
+import { CheckIcon, ExternalIcon, XIcon } from '@modrinth/assets'
 import { ref } from 'vue'
 
 import { Button } from '#ui/components/base/buttons'
@@ -71,11 +44,6 @@ const messages = defineMessages({
 		id: 'servers.eula.lead',
 		defaultMessage: 'Agree to the EULA to create servers on this Core.',
 	},
-	covers: {
-		id: 'servers.eula.covers',
-		defaultMessage: 'Covers every server on this Core, including new ones',
-	},
-	final: { id: 'servers.eula.final', defaultMessage: "Can't be undone" },
 	read: { id: 'servers.eula.read', defaultMessage: 'Read the Minecraft EULA' },
 	accept: { id: 'servers.eula.accept', defaultMessage: 'I agree to the EULA' },
 })
