@@ -1,4 +1,10 @@
-import { dev, type OutboxEmail, type ScenarioLogin } from '@amberite/contracts'
+import {
+	dev,
+	type OutboxEmail,
+	type ScenarioLogin,
+	type SqlAnswer,
+	type SqlStatement,
+} from '@amberite/contracts'
 
 import { validateUsername } from './accounts'
 import { findUser, issueSession, requireLocal } from './common/auth'
@@ -10,6 +16,17 @@ function parseScenarioLogin(raw: unknown): ScenarioLogin {
 	const username = stringField(objectBody(raw), 'username', 39)
 	validateUsername(username)
 	return { username }
+}
+
+function parseSql(raw: unknown): SqlStatement {
+	const body = objectBody(raw)
+	const params = body.params
+	if (
+		!Array.isArray(params) ||
+		!params.every((value) => value === null || ['string', 'number'].includes(typeof value))
+	)
+		throw new ApiError(400, 'invalid_input', 'Invalid params')
+	return { sql: stringField(body, 'sql', 100_000), params }
 }
 
 /** The dev runner's routes. `requireLocal` answers 404 outside a local dev backend. */
@@ -44,5 +61,22 @@ export const devRoutes: Route[] = [
 				'SELECT * FROM email_outbox ORDER BY created DESC LIMIT 100',
 			).all<OutboxEmail>()
 		).results
+	}),
+	route(dev.Sql, parseSql, async ({ request, env, body }) => {
+		requireLocal(request, env)
+		const { sql, params } = await body()
+		try {
+			const result = await env.DB.prepare(sql)
+				.bind(...params)
+				.all<SqlAnswer['rows'][number]>()
+			return { rows: result.results, changes: result.meta.changes }
+		} catch (error) {
+			// The statement is the caller's own, so its mistake goes back to them in full.
+			throw new ApiError(
+				400,
+				'invalid_input',
+				error instanceof Error ? error.message : String(error),
+			)
+		}
 	}),
 ]

@@ -210,7 +210,9 @@ async fn sign_in_to_modrinth(
             .await
             .map_err(api_error)?;
 
-    if let Some(main_window) = app.get_window("main") {
+    if !crate::dev::window_hidden()
+        && let Some(main_window) = app.get_window("main")
+    {
         main_window.set_focus().ok();
     }
 

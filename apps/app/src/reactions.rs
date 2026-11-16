@@ -328,6 +328,9 @@ async fn files_changed(engine: &Engine, instance_id: &str, paths: &[String]) {
 }
 
 fn change_window(app: &AppHandle, change: WindowChange) {
+    if crate::dev::window_hidden() {
+        return;
+    }
     // The ads webview makes "main" a multi-webview window, which only get_window finds.
     let Some(window) = app.get_window("main") else {
         return;

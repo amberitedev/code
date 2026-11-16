@@ -96,7 +96,9 @@ pub async fn handle_command<R: Runtime>(
         let _ = app
             .state::<broadcast::Sender<AppEvent>>()
             .send(AppEvent::Command(Command::Amberite(command)));
-        if let Some(window) = app.get_window("main") {
+        if !crate::dev::window_hidden()
+            && let Some(window) = app.get_window("main")
+        {
             let _ = window.set_focus();
         }
         return Ok(());

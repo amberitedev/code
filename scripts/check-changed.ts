@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
 // CI's fast checks for this branch's changes, so they fail here instead of after a push:
-// lint, typos and TOML on the changed files, typecheck and tests of the affected packages,
-// `dev:check` when the dev scripts change, and for Rust, `cargo fmt`, a build through the dev
-// runner (the same compile check `up` does, sharing its build folder), and the tests of every
-// workspace crate with a changed file, also through the runner and in that folder.
+// lint, typos and TOML on the changed files, typecheck and tests of the affected packages, and
+// for Rust, `cargo fmt`, a build through the dev runner (the same compile check a start does,
+// sharing its build folder), and the tests of every workspace crate with a changed file, also
+// through the runner and in that folder.
 //
 //   vp run check:changed          compare against the merge base with origin/main
 //   vp run check:changed <ref>    compare against the merge base with <ref>
@@ -33,6 +33,12 @@ const matching = (pattern: RegExp) => changed.filter((file) => pattern.test(file
 // The packages CI typechecks and tests (ci.yml, js job), and what reaches each.
 const PACKAGES = [
 	{ name: '@amberite/backend', test: true, reachedBy: ['apps/backend', 'packages/contracts'] },
+	// A fixture helper calls the generated endpoints, so a changed contract shows up here.
+	{
+		name: '@amberite/fixtures',
+		test: false,
+		reachedBy: ['packages/fixtures', 'packages/contracts'],
+	},
 	{
 		name: '@modrinth/app-frontend',
 		test: false,
@@ -88,17 +94,14 @@ for (const pack of PACKAGES) {
 		})
 	}
 }
-// The root test run (vite.config.ts) covers scripts/ and api-client's unit tests.
+// The root test run (vite.config.ts) covers scripts/ and the unit tests of api-client and fixtures.
 const unitTests = changed.flatMap((file) => {
-	if (!/^(?:scripts|packages\/api-client\/src)\/.+\.ts$/.test(file)) return []
+	if (!/^(?:scripts|packages\/(?:api-client|fixtures)\/src)\/.+\.ts$/.test(file)) return []
 	const test = file.replace(/(?<!\.test)\.ts$/, '.test.ts')
 	return NodeFS.existsSync(NodePath.join(root, test)) ? [test] : []
 })
 if (unitTests.length > 0) {
 	steps.push({ name: 'unit tests', command: 'vp', args: ['test', 'run', ...new Set(unitTests)] })
-}
-if (under('scripts') || touched.includes('dev.json')) {
-	steps.push({ name: 'dev:check', command: 'vp', args: ['run', 'dev:check'] })
 }
 const rust = matching(/\.rs$/)
 if (rust.length > 0) {

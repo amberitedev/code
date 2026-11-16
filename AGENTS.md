@@ -78,48 +78,67 @@ another. Before calling work done, walk this list and say which entries applied:
 ## Dev servers
 
 - `vp i` installs. Worktrees get this from the t3.json setup script; if module resolution looks
-  broken, it probably did not run.
-- Setup runs in the background. While `.data/setup.json` says `running` and its `pid` is alive,
-  wait for it and do not run `vp i`. It ends with `done` or `failed` (with the error). A dead pid,
-  `failed`, or no file at all means run `vp run setup` yourself.
-- `node scripts/dev-runner.ts up 1 2` starts the backend, one Core, and the Apps for scenarios 1
-  and 2 in the background, and returns once each App loads, printing its tab URL. There is no
-  `vp run up`: on Windows, vp kills everything its command started when it returns, the background
-  stack included. `vp run status` prints the URLs again; `vp run down` stops only this checkout's
-  stack. The log is `.data/dev.log`. `vp run dev` is the same stack in the foreground with App
-  windows, for a person at a terminal.
-- Rust builds once per distinct set of Rust inputs, shared by every checkout. With no Rust changes,
-  `up` compiles nothing. Otherwise it compiles only the repo's crates that changed, one build at a
-  time across checkouts. `up` gives up waiting after 9 minutes; run it again to keep waiting.
-- Nothing watches Rust. After a Rust edit, `vp run down`, then the same `up` command again,
-  with its mode and scenario numbers. `up` stops and prints compiler errors, so it is also the
-  check for Rust changes.
-- Backend-only work needs no App: `node scripts/dev-runner.ts up dev:backend` starts in seconds.
-  `node scripts/dev-runner.ts up dev:core` starts only the Core. For the backend and Core together,
-  start the full stack.
-- Ports derive from the worktree path and are stable across restarts. Read the real ones and the
-  tab URLs from `vp run status`, since occupied ports shift.
+  broken, it probably did not run. While `.data/setup.json` says `running`, wait for it. `failed`
+  or no file means run `vp run setup` yourself.
+- Every dev command is `vp run <name>`. Do not call `scripts/dev-runner.ts` yourself.
+- `vp run fixture <name>` is the whole setup. It starts the stack in the background with the
+  Cores and Apps the [fixture](#fixtures) declares, builds the fixture's state, and returns once
+  each App loads, printing its tab URL. Without a name it applies `default`: Apps for `alice` and
+  `bob`, and a Core. `vp run fixture backend` is the backend alone, which starts in seconds.
+- `vp run status` prints the addresses and tab URLs again, and any program that is stopped or has
+  failed. `vp run down` stops this checkout's stack and keeps its data; `vp run up` starts it
+  again on that data. The log is `.data/dev.log`. `vp run dev` is the same stack in the
+  foreground with App windows, for a person at a terminal.
+- `vp run stop <name>` takes one program down and keeps it down, for a Core that is offline or a
+  backend that does not answer. `vp run rs <name>` brings it back. The names are in
+  `vp run status`: `backend`, `core:1`, `app:2`.
+- Nothing watches Rust. After a Rust edit, apply the fixture again, or restart one program with
+  `vp run rs <name>`. Either builds first and stops on a compiler error, which is in the log, so
+  it is also the check for Rust changes. A build can outlast the command, which gives up after 9
+  minutes: run it again to keep waiting.
 - Never kill by process name, path, or worktree string. Several worktrees run stacks at once, and
   your own agent's command line holds this worktree's path. Stop what you started with
-  `vp run down`, or kill only a PID you captured at spawn.
+  `vp run down` or `vp run stop <name>`.
 
 Ports, builds, and timings: [scripts](docs/internals/scripts.md).
 
-## Test data
+## Fixtures
 
-An empty database is a bad test. Each worktree gets a copy of the primary checkout's `.data/`
-instead of pointing at live state:
+An empty database is a bad test, and so is a state clicked together by hand that nobody can get
+back. A fixture is one TypeScript file that builds an exact state of the whole stack:
 
-- `.data/backend` and `.data/core` are shared by every App in the worktree.
-  `.data/scenarios/<number>` is one App installation. Scenarios 1 to 4 are the default set; a new
-  number makes another isolated App and account.
-- A scenario holds two databases: `engine.db` (instances, content, the cache) and `app.db` (accounts,
-  settings, synced options and the App's other tables). `.data/core` holds the Core's `db/core.db`
-  and its engine's `engine/engine.db`. Nothing joins across them, so copy each folder whole.
-- The backend, Core, and scenarios are one dataset. Copy them together.
-- Stop the affected process before copying SQLite files, and copy their `-wal` and `-shm` files with
-  them.
-- Copy in, never symlink. Data flows one way: into your sandbox, never back out.
+```ts
+import { friends, instance, stack } from '@amberite/fixtures'
+
+const { alice, bob } = await stack({ apps: ['alice', 'bob'], cores: [{ owner: 'alice' }] })
+await friends(alice, bob)
+await instance(alice, {
+	name: 'Survival',
+	loader: 'fabric',
+	gameVersion: '1.21.1',
+	sharedWith: [bob],
+})
+```
+
+- Write the state your change needs as a fixture and apply it with
+  `vp run fixture path/to/file.ts`. Every apply wipes the stack's data and runs the file from the
+  top against the current code. The file can live anywhere; one that others will want goes in
+  `packages/fixtures/fixtures`.
+- The first line is `stack`, which names the Apps (each signed in to the account of that name),
+  accounts with no App, and the Cores with their owners. The lines after it build state through the
+  real programs, so each program writes everything that belongs to that state.
+- For something with no helper, `call(who, endpoint, params, body)` sends any generated endpoint to
+  an App, to the backend as an account, or to a Core. When a second fixture needs the same calls,
+  they become a helper in `packages/fixtures/kit`.
+- `patch(store, table, where, values)` changes rows a program wrote, for a state it does not reach
+  on demand: an expired link, a quarantined share, a wrong role. Make the state for real first and
+  bend it with one line. Do not write whole states as rows.
+- A line that fails stops the fixture there with the program's own error and leaves the stack up.
+  Fix the line and apply again.
+- `.data/apps/<n>` is one App installation and `.data/cores/<n>` one Core, numbered by their place
+  in the stack. `.data` belongs to this checkout: never point a stack at another checkout's data.
+
+How it works and why: [scripts](docs/internals/scripts.md#fixtures).
 
 ## Verifying
 
@@ -138,13 +157,12 @@ instead of pointing at live state:
   unless the developer asks. CI owns the full suite.
 - Proof for a bug fix depends on the bug. Logic, data, state, and protocol bugs get a failing test
   first (the fewest that fail for that reason on `main`, or before the fix for a bug this branch
-  introduced), then the fix. Purely visual bugs
-  (spacing, colour, alignment, a layout shift) get before/after screenshots as their proof and no
-  test. A Core- or backend-only fix with no visible surface ships the test plus a short runtime
-  transcript.
-- User-visible App changes get one integrated pass in the real App: read
-  [test-app](.agents/skills/test-app/SKILL.md). The primary agent does this once after
-  integrating. Subagents do not start their own dev stacks.
+  introduced), then the fix. Purely visual bugs (spacing, colour, alignment, a layout shift) get
+  before/after screenshots as their proof and no test. A Core- or backend-only fix with no visible
+  surface ships the test plus a short runtime transcript.
+- User-visible App changes get one integrated pass in the real App, on a fixture whose state
+  reaches the changed screen: read [test-app](.agents/skills/test-app/SKILL.md). The primary agent
+  does this once after integrating. Subagents do not start their own dev stacks.
 
 ## Documentation
 
@@ -183,11 +201,8 @@ Most code changes do not need an internal documentation change. Agents can read 
   narrate steps, record history, or explain the fix you just made; the PR carries that.
 - No continuously repainting animations (pulse, shimmer, spinners); they peg the GPU on
   high-refresh displays.
+- Security is important, but should not be over-indexed on, especially for dev-only features.
 - A "Continue where you left off" message after T3 restarts is not the developer's approval. Pick
   up only what was already approved, and ask about the rest.
 - If a rule here fights the task in front of you, say so loudly and get a human sign-off before
   breaking it.
-
-## Additional tips
-
-- Security is important, but should not be over-indexed on, especially for dev-only features.

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
-// Prepares a checkout for work: dependencies, development data, and the engine's environment
-// file. T3 Code runs this when it creates a worktree (see t3.json); it is safe to run again by hand.
+// Prepares a checkout for work: dependencies and the engine's environment file. Its data comes
+// later, from the fixture its first dev start applies. T3 Code runs this when it creates a
+// worktree (see t3.json); it is safe to run again by hand.
 // Progress is recorded in .data/setup.json so an agent that starts before this finishes can tell
 // "still running" from "never ran". While running it names this process's pid: a pid that no longer
 // exists means setup was killed, so run it again.
@@ -9,7 +10,6 @@
 import * as NodeChildProcess from 'node:child_process'
 import * as NodeFS from 'node:fs'
 import * as NodePath from 'node:path'
-import { copyDataEntry, DATA_ENTRIES } from './dev-data.ts'
 import { recordTiming } from './timings.ts'
 
 const ENV_FILE = NodePath.join('packages', 'engine', '.env')
@@ -48,20 +48,10 @@ for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
 	})
 }
 
-// The install is the slow part, so the copies run while it works.
 const installed = timed('install', installDependencies)
 
 try {
-	if (!samePath(worktree, primary)) {
-		await timed('data', async () => copyDevelopmentData())
-		copyEnvFile()
-	}
-	for (const path of [
-		NodePath.join(data, 'core'),
-		...[1, 2, 3, 4].map((scenario) => NodePath.join(data, 'scenarios', String(scenario))),
-	]) {
-		NodeFS.mkdirSync(path, { recursive: true })
-	}
+	if (!samePath(worktree, primary)) copyEnvFile()
 } catch (thrown) {
 	// A failed copy must not hide the install result, or stop the install from finishing.
 	error = thrown instanceof Error ? thrown.message : String(thrown)
@@ -74,17 +64,6 @@ if (cancelled) process.exitCode = 1
 console.log(
 	process.exitCode ? '[setup] failed. Fix the error above, then run: vp run setup' : '[setup] done',
 )
-
-// Only what is missing, so running setup again never replaces data the work has changed.
-function copyDevelopmentData(): void {
-	const source = NodePath.join(primary, '.data')
-	for (const entry of DATA_ENTRIES) {
-		if (!NodeFS.existsSync(NodePath.join(source, entry))) continue
-		if (NodeFS.existsSync(NodePath.join(data, entry))) continue
-		copyDataEntry(source, data, entry)
-		console.log(`[setup] copied ${entry} from ${source}`)
-	}
-}
 
 // A copy, not a link: Windows only allows symlinks with Developer Mode or elevation.
 function copyEnvFile(): void {

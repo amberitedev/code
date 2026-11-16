@@ -88,10 +88,9 @@ jobs:
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
-      - run: pnpm --filter @amberite/backend --filter @modrinth/app-frontend typecheck
+      - run: pnpm --filter @amberite/backend --filter @amberite/fixtures --filter @modrinth/app-frontend typecheck
       - run: pnpm test:unit
       - run: pnpm --filter @amberite/backend test
-      - run: pnpm dev:check
 
   hygiene:
     name: Typos and TOML
