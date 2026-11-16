@@ -68,7 +68,11 @@ fn build_java_jars() {
         return;
     }
     // A failed run can still rewrite the JAR, so only a finished one leaves a stamp.
-    let _ = fs::remove_file(&stamp);
+    if let Err(error) = fs::remove_file(&stamp)
+        && error.kind() != std::io::ErrorKind::NotFound
+    {
+        panic!("Could not remove {}: {error}", stamp.display());
+    }
 
     #[cfg(target_os = "windows")]
     let java_dir = windows_java_dir(&out_dir);

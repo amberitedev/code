@@ -821,7 +821,7 @@ async function testCrates(paths: WorktreePaths, crates: ReadonlyArray<string>): 
 	if (!(await runTests(paths, env, crates, build))) process.exitCode = 1
 }
 
-function testBuild(
+export function testBuild(
 	paths: WorktreePaths,
 	env: NodeJS.ProcessEnv,
 	crates: ReadonlyArray<string>,
@@ -838,6 +838,7 @@ function testBuild(
 			: [],
 	)
 	const { cargoArgs: _, programs: __, ...shared } = programsBuild(paths, env)
+	const targets = tested.flatMap((crate) => crate.testTargets)
 	return {
 		...shared,
 		// The programs' packages and features, so every crate the tests do not test is the one the
@@ -854,7 +855,9 @@ function testBuild(
 					? ['--features', `${crate.name}/default`]
 					: [],
 			),
-			...tested.flatMap((crate) => crate.testTargets),
+			// Cargo takes `--lib` once, for every selected package.
+			...(targets.includes('--lib') ? ['--lib'] : []),
+			...targets.filter((target) => target !== '--lib'),
 		],
 		inputs: [
 			...new Set([
@@ -1547,7 +1550,10 @@ async function runCargo(
 	const toCheckout = (line: string) =>
 		line.replaceAll(checkout, build.cwd).replaceAll(checkout.replaceAll('\\', '/'), build.cwd)
 	for (let retried = false; ; retried = true) {
-		const child = NodeChildProcess.spawn('cargo', [...args], {
+		// On Unix, Cargo finds the manifest from the physical working directory, not the link.
+		const [command, ...rest] = args
+		const manifest = ['--manifest-path', NodePath.join(checkout, 'Cargo.toml')]
+		const child = NodeChildProcess.spawn('cargo', [command!, ...manifest, ...rest], {
 			cwd: checkout,
 			detached: process.platform !== 'win32',
 			env: cargoEnv({ ...spec.env, ...build.env, CARGO_TARGET_DIR: build.targetDir }),

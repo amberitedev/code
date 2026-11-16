@@ -19,6 +19,7 @@ import {
 	readStackShape,
 	resolveStartOffset,
 	sharedLabels,
+	testBuild,
 } from './dev-runner.ts'
 
 describe('dev runner ports', () => {
@@ -150,6 +151,14 @@ describe('dev runner stack', () => {
 		stack: `${process.cwd()}/.data/stack.json`,
 		worktree: process.cwd(),
 	}
+
+	it('tests several crates in one Cargo run', () => {
+		const { cargoArgs } = testBuild(paths, {}, ['engine', 'contracts'])
+		expect(cargoArgs.filter((arg) => arg === '--lib')).toHaveLength(1)
+		expect(cargoArgs).toEqual(
+			expect.arrayContaining(['--package', 'engine', '--package', 'contracts']),
+		)
+	})
 
 	it('reads the options a background start passes', () => {
 		expect(parseInput([])).toEqual({ accountWeb: true, held: false, hideWindows: false })

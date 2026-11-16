@@ -32,6 +32,14 @@ const EDITS = {
 	],
 	app: (nonce: string) => [rustFn('apps/app/src/main.rs', nonce)],
 	core: (nonce: string) => [rustFn('apps/core/src/main.rs', nonce)],
+	/** Only for warming the fixtures typecheck, which a contracts edit also runs. */
+	fixtures: (nonce: string) => [
+		append(
+			'packages/fixtures/src/index.ts',
+			`// bench ${nonce}
+`,
+		),
+	],
 	contracts: (nonce: string) => [
 		append(
 			'packages/contracts/src/lib.rs',
@@ -187,7 +195,7 @@ class Bench {
 			'theseus_gui',
 			'copal',
 		])
-		await this.worktree('prime', ['ui'])
+		await this.worktree('prime', ['ui', 'fixtures'])
 	}
 
 	/** The edit-and-restart loop inside a worktree whose stack is already running. */
@@ -236,7 +244,14 @@ class Bench {
 		let seconds = 0
 		for (;;) {
 			const started = performance.now()
-			const output = await this.exec(name, 'up', path, ['scripts/dev-runner.ts', 'up'])
+			let output: string
+			try {
+				output = await this.exec(name, 'up', path, ['scripts/dev-runner.ts', 'up'])
+			} catch (error) {
+				// The default fixture gives up on a build that outlasts its wait and asks for a rerun.
+				if (!/still being built|did not become ready/.test(String(error))) throw error
+				output = 'Still starting'
+			}
 			seconds += (performance.now() - started) / 1000
 			if (!output.includes('Still starting')) return seconds
 		}
@@ -288,15 +303,17 @@ class Bench {
 
 	addWorktree(name: string): string {
 		let path = NodePath.join(this.worktrees, name)
-		// A run that was interrupted can leave its stack running there.
-		if (NodeFS.existsSync(NodePath.join(path, '.data', 'runtime.json'))) {
+		// A run that was interrupted can leave its stack running there. One that will not stop
+		// keeps its folder, and this run takes a new one.
+		const stopped =
+			!NodeFS.existsSync(NodePath.join(path, '.data', 'runtime.json')) ||
 			NodeChildProcess.spawnSync(process.execPath, ['scripts/dev-runner.ts', 'down'], {
 				cwd: path,
 				stdio: 'ignore',
 				windowsHide: true,
-			})
-		}
+			}).status === 0
 		try {
+			if (!stopped) throw new Error('still running')
 			wipe(path)
 		} catch {
 			// Still held by a process from an earlier run.
