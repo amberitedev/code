@@ -504,7 +504,13 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 			new Promise((resolve, reject) => {
 				const timer = setTimeout(() => reject(new Error(`no live event for ${share}`)), 2000)
 				const check = () => {
-					if (events.some((event) => event.body?.shared_instance_id === share)) {
+					if (
+						events.some(
+							(event) =>
+								event.body?.type === 'shared_instance_users' &&
+								event.body.shared_instance_id === share,
+						)
+					) {
 						clearTimeout(timer)
 						resolve()
 					}
@@ -779,6 +785,24 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		events.length = 0
 		await ok(await call('/servers/core/srv1/players', 'DELETE', { user_ids: ['friend'] }))
 		await told(smp.id)
+		// A server's players are told when the share it follows is deleted.
+		const closing = await ok(await call('/instances', 'POST', { name: 'Closing' }))
+		await ok(await push(closing.id, []))
+		await ok(
+			await call('/servers/core/srv9/players', 'POST', {
+				instance_id: closing.id,
+				name: 'Closing server',
+				port: 25571,
+				user_ids: ['friend'],
+			}),
+		)
+		await ok(
+			await call(`/instances/${closing.id}/invites/pending`, 'POST', undefined, 'mra_friend'),
+		)
+		await new Promise((resolve) => setTimeout(resolve, 200))
+		events.length = 0
+		await ok(await call(`/instances/${closing.id}`, 'DELETE'))
+		await told(closing.id)
 		live.close()
 		assert.equal((await asFriend(`/instances/${smp.id}/versions`)).status, 401)
 		assert.equal((await asFriend(`/instances/${smp.id}`)).status, 401)

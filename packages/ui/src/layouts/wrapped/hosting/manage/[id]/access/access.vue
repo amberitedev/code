@@ -50,8 +50,7 @@
 			@remove-member="requestRemoveMember"
 		/>
 
-		<!-- A Core shows its activity log to its owner only. -->
-		<div v-if="!client.selfHostedHosting || canManageUsers" class="flex flex-col gap-4">
+		<div v-if="showActivityLog" class="flex flex-col gap-4">
 			<span class="m-0 text-2xl font-semibold text-contrast">
 				{{ formatMessage(messages.activityLogTitle) }}
 			</span>
@@ -183,6 +182,8 @@ const editorScopes = [
 const viewerScopes = ['BASE_READ', 'POWER_ACTIONS'] as const
 
 const { canManageUsers, permissionDeniedMessage } = useServerPermissions()
+// A Core shows its activity log to its owner only.
+const showActivityLog = computed(() => !client.selfHostedHosting || canManageUsers.value)
 const manageUsersActionTooltip = computed(() =>
 	canManageUsers.value ? undefined : permissionDeniedMessage.value,
 )
@@ -302,6 +303,7 @@ const {
 	serverId,
 	serverFull,
 	showAuditLogInstances,
+	visible: showActivityLog,
 	addNotification,
 })
 

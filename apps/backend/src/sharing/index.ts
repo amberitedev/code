@@ -1111,10 +1111,15 @@ async function owned(env: Env, id: string, userId: string) {
 }
 
 async function deleteShare(env: Env, id: string): Promise<void> {
-	const members = await joinedMembers(env, id)
+	const { results: players } = await env.DB.prepare(
+		`SELECT DISTINCT p.user_id FROM ${PLAYERS} WHERE s.instance_id = ? AND p.joined_at IS NOT NULL`,
+	)
+		.bind(id)
+		.all<{ user_id: string }>()
+	const told = new Set([...(await joinedMembers(env, id)), ...players.map((p) => p.user_id)])
 	await env.DB.prepare('DELETE FROM shared_instances WHERE id = ?').bind(id).run()
+	await notifyUsers(env, [...told], id, 'shared_instance_users')
 	await sweepFiles(env, id)
-	await notifyUsers(env, members, id, 'shared_instance_users')
 }
 
 async function renameShare(env: Env, id: string, update: SharedInstanceUpdate): Promise<void> {
