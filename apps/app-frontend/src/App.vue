@@ -1055,7 +1055,10 @@ async function fetchCredentials() {
 		}
 		creds.user = await traceStartupStep('Fetch signed-in user', () =>
 			get_user(creds.user_id, 'bypass'),
-		).catch(handleError)
+		).catch((error) => {
+			// Unreachable is not an error to show: the pages that need the backend say so.
+			if (error?.code !== 'network_error') handleError(error)
+		})
 		if (refreshId !== credentialsRefreshId) return
 	}
 	credentials.value = creds ?? null
@@ -1423,11 +1426,14 @@ async function replayUnreadNotifications() {
 	}
 }
 window.addEventListener('online', replayUnreadNotifications)
-// The backend sends the full friend status list each time the socket connects.
+// The backend sends the full friend status list each time the socket connects. A sign-in that
+// could not load the account while the backend was unreachable loads it now.
 useAppEvent(
 	'friend',
 	(event) => {
-		if (event.event === 'status_sync') void replayUnreadNotifications()
+		if (event.event !== 'status_sync') return
+		if (credentials.value?.session && !credentials.value.user) void fetchCredentials()
+		else void replayUnreadNotifications()
 	},
 	appEvents,
 )

@@ -107,6 +107,9 @@ function hostingAction(action: Action): Archon.Actions.v1.Action {
 			return { action: 'console_command_executed', metadata: { command: action.command } }
 		case 'backup_created':
 		case 'backup_restored':
+		case 'backup_deleted':
+		case 'backup_renamed':
+		case 'backup_downloaded':
 			return { action: action.type, metadata: { id: action.backup_id } }
 		default:
 			// Server actions share their names; the rest show as they are.

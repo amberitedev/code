@@ -124,6 +124,10 @@ const messages = defineMessages({
 		id: 'content.page-layout.empty.modpack-hint',
 		defaultMessage: 'Add additional content on top of this modpack',
 	},
+	emptySharedHint: {
+		id: 'content.page-layout.empty.shared-hint',
+		defaultMessage: 'Add your own content on top of the shared content',
+	},
 	emptyHint: {
 		id: 'content.page-layout.empty.hint',
 		defaultMessage: 'Browse or upload {contentType} to get started',
@@ -1229,7 +1233,11 @@ const confirmUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 					<template #description>
 						{{
 							ctx.managedContent.value
-								? formatMessage(messages.emptyModpackHint)
+								? formatMessage(
+										ctx.managedContent.value.card.kind === 'modpack'
+											? messages.emptyModpackHint
+											: messages.emptySharedHint,
+									)
 								: formatMessage(messages.emptyHint, {
 										contentType: formatContentTypeSentence(
 											formatMessage,

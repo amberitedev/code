@@ -388,7 +388,7 @@ const messages = defineMessages({
 	removeDescription: {
 		id: 'servers.play.remove-description',
 		defaultMessage:
-			'Remove {username} from this shared instance? This does not ban them from the Minecraft server.',
+			'Remove {username} from this server? They stop getting its content updates. This does not ban them from the Minecraft server.',
 	},
 	permission: {
 		id: 'servers.play.permission',

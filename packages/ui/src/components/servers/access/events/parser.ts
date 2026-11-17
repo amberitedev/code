@@ -38,6 +38,16 @@ const basicEvents = new Set([
 	'sftp_login',
 	'sftp_credentials_rolled',
 	'console_cleared',
+	// Core actions
+	'server_deleted',
+	'signed_in',
+	'session_revoked',
+	'settings_changed',
+	'content_changed',
+	'world_downloaded',
+	'eula_accepted',
+	'core_updated',
+	'core_removed',
 ])
 
 export function parseAuditEvent(
@@ -322,7 +332,8 @@ export function parseAuditEvent(
 			}
 			case 'backup_created':
 			case 'backup_restored':
-			case 'backup_deleted': {
+			case 'backup_deleted':
+			case 'backup_downloaded': {
 				const id = stringField(metadataRecord(metadata), 'id')
 				if (!id) return unknown(base, action)
 				const kind = action.replace('backup_', '')
@@ -338,7 +349,13 @@ export function parseAuditEvent(
 				const id = stringField(record, 'id')
 				const from = stringField(record, 'from')
 				const to = stringField(record, 'to')
-				if (!id || !from || !to) return unknown(base, action)
+				if (!id) return unknown(base, action)
+				// A Core records the rename without the names.
+				if (!from || !to)
+					return parsed(BackupEvent, base, { kind: 'renamed', backupId: id }, [
+						...actionSearchParts(action),
+						id,
+					])
 				const backup = backupEntity(id, lookups)
 				return parsed(
 					BackupEvent,

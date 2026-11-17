@@ -112,24 +112,31 @@ export async function instance(
 	if (members.length === 0)
 		return { kind: 'instance', id: made.id, name: spec.name, owner, dir, share: null }
 
-	const share = await call(owner, instanceSharing.EnsureSharedInstance, ref)
-	const preview = await call(owner, instanceSharing.GetSharedInstancePublishPreview, ref)
-	const publish = NodeCrypto.randomUUID()
-	await step(`${owner.name} shares "${spec.name}"`, () =>
-		ended(owner, publish, () =>
-			call(owner, localSharing.publishSharedInstance, null, {
-				op: publish,
-				instance_id: made.id,
-				file_paths: (preview?.files ?? []).filter((file) => !file.blocked).map((file) => file.path),
-				removed_paths: [],
-				server_core_id: null,
-			}),
-		),
+	// As in the App, the first invite creates the share and publishes its first version.
+	const invited = await step(`${owner.name} shares "${spec.name}"`, () =>
+		call(owner, instanceSharing.InviteSharedInstanceUsers, ref, {
+			user_ids: members.map((member) => member.account.id),
+		}),
 	)
-
-	const invited = await call(owner, instanceSharing.InviteSharedInstanceUsers, ref, {
-		user_ids: members.map((member) => member.account.id),
-	})
+	const share = await call(owner, instanceSharing.EnsureSharedInstance, ref)
+	// That first version leaves loose files out; they go up in a second one, before anyone joins.
+	if (files.length > 0) {
+		const preview = await call(owner, instanceSharing.GetSharedInstancePublishPreview, ref)
+		const publish = NodeCrypto.randomUUID()
+		await step(`${owner.name} shares the files of "${spec.name}"`, () =>
+			ended(owner, publish, () =>
+				call(owner, localSharing.publishSharedInstance, null, {
+					op: publish,
+					instance_id: made.id,
+					file_paths: (preview?.files ?? [])
+						.filter((file) => !file.blocked)
+						.map((file) => file.path),
+					removed_paths: [],
+					server_core_id: null,
+				}),
+			),
+		)
+	}
 	for (const member of members) {
 		if (!invited.users.some((user) => user.id === member.account.id)) {
 			throw new FixtureError(
@@ -146,7 +153,7 @@ export async function instance(
 					{ id: share.id },
 					{
 						name: spec.name,
-						manager_id: null,
+						manager_id: owner.account.id,
 						server_manager_name: null,
 						server_manager_icon_url: null,
 						instance_icon_url: null,
@@ -160,7 +167,7 @@ export async function instance(
 }
 
 /** Waits for an install job, and fails with the App's own reason when the job does. */
-async function finished(app: App, job: InstallJobSnapshot): Promise<InstallJobSnapshot> {
+export async function finished(app: App, job: InstallJobSnapshot): Promise<InstallJobSnapshot> {
 	return until(
 		`${app.name}'s App finishes installing`,
 		async () => {

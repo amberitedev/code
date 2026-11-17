@@ -216,7 +216,7 @@ const instanceBreadcrumbDefinition = {
 const serversBreadcrumbDefinition = {
 	slot: 'root',
 	id: 'servers',
-	label: 'Hosting',
+	label: 'Servers',
 	to: '/hosting/manage/',
 	visual: { type: 'icon', component: ServerStackIcon },
 } satisfies BreadcrumbDefinition

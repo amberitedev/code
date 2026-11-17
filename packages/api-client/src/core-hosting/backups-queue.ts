@@ -65,7 +65,8 @@ export function queue({ backups }: ServerBackups): Queue {
 			locked: false,
 			automated: backup.kind !== 'manual',
 			...(backup.rotates_at === null ? {} : { rotates_at: time(backup.rotates_at) }),
-			history: backup.operations.map((op) => ({
+			// A Core lists operations oldest first; the panel reads the newest from the top.
+			history: backup.operations.toReversed().map((op) => ({
 				operation_type: op.kind,
 				operation_id: op.id,
 				state: OPERATION_STATE[op.state],

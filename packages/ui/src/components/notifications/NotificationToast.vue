@@ -95,7 +95,7 @@
 						{{ formatMessage(messages.accept) }}
 					</Button>
 					<Button
-						v-if="type !== 'instance-invite'"
+						v-if="type !== 'instance-invite' || declinable"
 						type="outlined"
 						:disabled="actionLoading != null"
 						@click="$emit('decline')"
@@ -278,6 +278,8 @@ const props = withDefaults(
 		progressTotal?: number
 		actions?: PopupNotificationButton[]
 		dismissible?: boolean
+		/** An instance invite offers Decline only when the app can decline it. */
+		declinable?: boolean
 	}>(),
 	{
 		actionLoading: null,

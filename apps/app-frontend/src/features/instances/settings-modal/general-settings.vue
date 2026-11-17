@@ -280,7 +280,7 @@ const messages = defineMessages({
 	deleteInstanceDescription: {
 		id: 'instance.settings.tabs.general.delete.description',
 		defaultMessage:
-			'Permanently deletes an instance from your device, including your worlds, configs, and all installed content. Be careful, as once you delete a instance there is no way to recover it.',
+			'Permanently deletes an instance from your device, including your worlds, configs, and all installed content. Be careful, as once you delete an instance there is no way to recover it.',
 	},
 	deleteInstanceButton: {
 		id: 'instance.settings.tabs.general.delete.button',

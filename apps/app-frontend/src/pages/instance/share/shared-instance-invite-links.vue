@@ -44,11 +44,15 @@ const invitesQuery = useQuery({
 		try {
 			return await get_shared_instance_invites(queryKey[1])
 		} catch (error) {
-			void sharedInstance.reportActionError(error)
+			// Removing the last member turns sharing off, so a share gone by now was expected.
+			if (instancePage.instance.value?.shared_instance) void sharedInstance.reportActionError(error)
 			throw error
 		}
 	},
-	enabled: () => !instancePage.offline.value && !sharedInstance.shareActionsLocked.value,
+	enabled: () =>
+		!!instancePage.instance.value?.shared_instance &&
+		!instancePage.offline.value &&
+		!sharedInstance.shareActionsLocked.value,
 	retry: false,
 	staleTime: Infinity,
 	refetchOnMount: 'always',

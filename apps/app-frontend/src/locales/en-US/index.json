@@ -731,6 +731,9 @@
   "app.instance.confirm-delete.instances-label": {
     "message": "{count, plural, one {Instance} other {Instances ({count})}}"
   },
+  "app.instance.confirm-delete.stays-shared": {
+    "message": "{count, plural, one {Your shared instance stays shared, and your friends keep their copies. To stop sharing it, unpublish it from your library.} other {# of these stay shared, and your friends keep their copies. To stop sharing them, unpublish them from your library.}}"
+  },
   "app.instance.content.managed-content.modpack-header": {
     "message": "Modpack content"
   },
@@ -1419,7 +1422,7 @@
     "message": "Library"
   },
   "app.library.unpublish-and-leave-shared-instances.modal.admonition-body": {
-    "message": "{unpublishCount, plural, one {The # shared instance you own will be deleted from Modrinth's servers, and people using it} other {The # shared instances you own will be deleted from Modrinth's servers, and people using them}} will stop receiving updates. {leaveCount, plural, one {You'll lose access to the other shared instance and need a new invite to rejoin it.} other {You'll lose access to the other # shared instances and need a new invite to rejoin them.}} All of them will be removed from your library."
+    "message": "{unpublishCount, plural, one {The # shared instance you own will stop being shared, and people using it} other {The # shared instances you own will stop being shared, and people using them}} will stop receiving updates. {leaveCount, plural, one {You'll lose access to the other shared instance and need a new invite to rejoin it.} other {You'll lose access to the other # shared instances and need a new invite to rejoin them.}} All of them will be removed from your library."
   },
   "app.library.unpublish-and-leave-shared-instances.modal.admonition-header": {
     "message": "Unpublishing and leaving shared instances"
@@ -1428,7 +1431,7 @@
     "message": "Unpublish and leave {count} shared instances"
   },
   "app.library.unpublish-shared-instance.modal.admonition-body": {
-    "message": "{count, plural, one {This deletes the shared instance from Modrinth's servers. People using it in the Modrinth App will stop receiving updates, and it will be removed from your library.} other {This deletes these shared instances from Modrinth's servers. People using them in the Modrinth App will stop receiving updates, and they will be removed from your library.}}"
+    "message": "{count, plural, one {This stops sharing the instance. People using it will stop receiving updates, and it will be removed from your library.} other {This stops sharing these instances. People using them will stop receiving updates, and they will be removed from your library.}}"
   },
   "app.library.unpublish-shared-instance.modal.admonition-header": {
     "message": "{count, plural, one {Unpublishing shared instance} other {Unpublishing # shared instances}}"
@@ -3834,7 +3837,7 @@
     "message": "Unlink shared instance"
   },
   "installation-settings.unpublish-shared-instance.modal.admonition-body": {
-    "message": "This deletes the shared instance from Modrinth's servers. People using it in the Modrinth App will stop receiving updates, but your local instance and its content will stay on this device."
+    "message": "This stops sharing the instance. People using it will stop receiving updates, but your local instance and its content will stay on this device."
   },
   "instance.action.create-shortcut": {
     "message": "Create shortcut"
@@ -4041,7 +4044,7 @@
     "message": "Delete instance"
   },
   "instance.settings.tabs.general.delete.description": {
-    "message": "Permanently deletes an instance from your device, including your worlds, configs, and all installed content. Be careful, as once you delete a instance there is no way to recover it."
+    "message": "Permanently deletes an instance from your device, including your worlds, configs, and all installed content. Be careful, as once you delete an instance there is no way to recover it."
   },
   "instance.settings.tabs.general.deleting.button": {
     "message": "Deleting..."
@@ -4359,7 +4362,7 @@
     "message": "the instance manager"
   },
   "instance.shared-instance.unavailable.not-found-text": {
-    "message": "We couldn’t find this shared instance. Your installed content is still on this device."
+    "message": "This instance is no longer shared. Its content stays on this device, but it won't get updates."
   },
   "instance.shared-instance.unavailable.not-found-title": {
     "message": "Shared instance unavailable"

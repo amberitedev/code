@@ -99,7 +99,10 @@ pub(super) fn push_backend(sessions: &Sessions) -> crate::Result<OwnedRemote> {
 /// `SharedInstancesApiError`; refusals keep the backend's status.
 pub(super) fn backend_error(error: CallError) -> crate::Error {
     if let Some(reason) = Unavailable::of(&error) {
-        return anyhow::Error::new(reason).into();
+        return ErrorKind::SharedInstanceUnavailable(unavailable_reason(
+            reason,
+        ))
+        .into();
     }
     let server_side = match &error {
         CallError::Api { status, .. } => *status >= 500,

@@ -11,6 +11,7 @@ import Admonition from '#ui/components/base/Admonition.vue'
 import { Button } from '#ui/components/base/buttons'
 import type { MessageDescriptor } from '#ui/composables/i18n'
 import { defineMessages, useVIntl } from '#ui/composables/i18n'
+import { injectModrinthClient } from '#ui/providers'
 import { commonMessages } from '#ui/utils/common-messages'
 
 export type AdmonitionDisplayState = 'ongoing' | Archon.BackupsQueue.v1.BackupQueueState
@@ -44,6 +45,7 @@ defineEmits<{
 }>()
 
 const { formatMessage } = useVIntl()
+const client = injectModrinthClient()
 
 type UiPhase = 'queued' | 'in_progress' | 'failed' | 'timed_out' | 'cancelled' | 'completed'
 
@@ -185,6 +187,10 @@ const messages = defineMessages({
 		defaultMessage:
 			'Something went wrong while creating {backupName}. Please try again or contact support if the issue continues.',
 	},
+	backupFailedSelfHostedDescription: {
+		id: 'servers.backups.admonition.backup-failed.self-hosted-description',
+		defaultMessage: 'Something went wrong while creating {backupName}. Please try again.',
+	},
 	backupTimedOutTitle: {
 		id: 'servers.backups.admonition.backup-timed-out.title',
 		defaultMessage: 'Backup timed out',
@@ -193,6 +199,10 @@ const messages = defineMessages({
 		id: 'servers.backups.admonition.backup-timed-out.description',
 		defaultMessage:
 			'Creating {backupName} timed out. You can try again or contact support if the issue continues.',
+	},
+	backupTimedOutSelfHostedDescription: {
+		id: 'servers.backups.admonition.backup-timed-out.self-hosted-description',
+		defaultMessage: 'Creating {backupName} timed out. You can try again.',
 	},
 	backupCancelledTitle: {
 		id: 'servers.backups.admonition.backup-cancelled.title',
@@ -243,6 +253,10 @@ const messages = defineMessages({
 		defaultMessage:
 			'Something went wrong while restoring from {backupName}. Please try again or contact support if the issue continues.',
 	},
+	restoreFailedSelfHostedDescription: {
+		id: 'servers.backups.admonition.restore-failed.self-hosted-description',
+		defaultMessage: 'Something went wrong while restoring from {backupName}. Please try again.',
+	},
 	restoreTimedOutTitle: {
 		id: 'servers.backups.admonition.restore-timed-out.title',
 		defaultMessage: 'Restore timed out',
@@ -251,6 +265,10 @@ const messages = defineMessages({
 		id: 'servers.backups.admonition.restore-timed-out.description',
 		defaultMessage:
 			'Restoring from {backupName} timed out. You can try again or contact support if the issue continues.',
+	},
+	restoreTimedOutSelfHostedDescription: {
+		id: 'servers.backups.admonition.restore-timed-out.self-hosted-description',
+		defaultMessage: 'Restoring from {backupName} timed out. You can try again.',
 	},
 	restoreCancelledTitle: {
 		id: 'servers.backups.admonition.restore-cancelled.title',
@@ -298,6 +316,19 @@ const restoreDescriptions: Record<UiPhase, MessageDescriptor> = {
 	completed: messages.restoreSuccessfulDescription,
 }
 
+// A self-hosted Core has no support to contact.
+const selfHostedCreateDescriptions: Record<UiPhase, MessageDescriptor> = {
+	...createDescriptions,
+	failed: messages.backupFailedSelfHostedDescription,
+	timed_out: messages.backupTimedOutSelfHostedDescription,
+}
+
+const selfHostedRestoreDescriptions: Record<UiPhase, MessageDescriptor> = {
+	...restoreDescriptions,
+	failed: messages.restoreFailedSelfHostedDescription,
+	timed_out: messages.restoreTimedOutSelfHostedDescription,
+}
+
 function migrationMessages(
 	phase: UiPhase,
 	restoring: boolean,
@@ -336,7 +367,13 @@ function getDescription(item: BackupAdmonitionEntry): string {
 	if (item.migration) {
 		return formatMessage(migrationMessages(phase, item.migration.restoring)[1], { backupName })
 	}
-	const table = item.type === 'create' ? createDescriptions : restoreDescriptions
+	const table = client.selfHostedHosting
+		? item.type === 'create'
+			? selfHostedCreateDescriptions
+			: selfHostedRestoreDescriptions
+		: item.type === 'create'
+			? createDescriptions
+			: restoreDescriptions
 	return formatMessage(table[phase], { backupName })
 }
 </script>

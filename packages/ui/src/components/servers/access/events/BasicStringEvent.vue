@@ -65,6 +65,42 @@ const messages = defineMessages({
 		id: 'servers.audit-log.event.console-cleared',
 		defaultMessage: 'Cleared console',
 	},
+	serverDeleted: {
+		id: 'servers.audit-log.event.server-deleted',
+		defaultMessage: 'Deleted server',
+	},
+	signedIn: {
+		id: 'servers.audit-log.event.signed-in',
+		defaultMessage: 'Signed in',
+	},
+	sessionRevoked: {
+		id: 'servers.audit-log.event.session-revoked',
+		defaultMessage: 'Signed out a device',
+	},
+	settingsChanged: {
+		id: 'servers.audit-log.event.settings-changed',
+		defaultMessage: 'Changed server settings',
+	},
+	contentChanged: {
+		id: 'servers.audit-log.event.content-changed',
+		defaultMessage: 'Changed content',
+	},
+	worldDownloaded: {
+		id: 'servers.audit-log.event.world-downloaded',
+		defaultMessage: 'Downloaded world',
+	},
+	eulaAccepted: {
+		id: 'servers.audit-log.event.eula-accepted',
+		defaultMessage: 'Accepted the Minecraft EULA',
+	},
+	coreUpdated: {
+		id: 'servers.audit-log.event.core-updated',
+		defaultMessage: 'Updated Core',
+	},
+	coreRemoved: {
+		id: 'servers.audit-log.event.core-removed',
+		defaultMessage: 'Removed Core',
+	},
 	unknown: {
 		id: 'servers.audit-log.event.unknown-basic',
 		defaultMessage: 'Recorded server activity',
@@ -84,6 +120,15 @@ const actionMessages: Record<string, MessageDescriptor> = {
 	sftp_login: messages.sftpLogin,
 	sftp_credentials_rolled: messages.sftpCredentialsRolled,
 	console_cleared: messages.consoleCleared,
+	server_deleted: messages.serverDeleted,
+	signed_in: messages.signedIn,
+	session_revoked: messages.sessionRevoked,
+	settings_changed: messages.settingsChanged,
+	content_changed: messages.contentChanged,
+	world_downloaded: messages.worldDownloaded,
+	eula_accepted: messages.eulaAccepted,
+	core_updated: messages.coreUpdated,
+	core_removed: messages.coreRemoved,
 }
 
 const message = computed(() => actionMessages[props.action] ?? messages.unknown)

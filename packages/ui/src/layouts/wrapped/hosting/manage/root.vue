@@ -84,6 +84,16 @@
 		class="flex min-h-[calc(100vh-4rem)] items-center justify-center text-contrast"
 	>
 		<ErrorInformationCard
+			v-if="client.selfHostedHosting"
+			title="Can't reach your Core"
+			description="Check that your Core is running and that you're online, then try again."
+			:icon="TriangleAlertIcon"
+			icon-color="red"
+			:action="nodeUnavailableAction"
+			:error-details="nodeUnavailableDetails"
+		/>
+		<ErrorInformationCard
+			v-else
 			title="Server Node Unavailable"
 			:icon="TriangleAlertIcon"
 			icon-color="red"
@@ -572,6 +582,8 @@ const {
 } = useQuery({
 	queryKey: serverKeys.detail(props.serverId),
 	queryFn: () => client.archon.servers_v0.get(props.serverId)!,
+	// A Core that does not answer is offline: say so at once instead of retrying for half a minute.
+	retry: client.selfHostedHosting ? false : 3,
 	// The server list already holds this server, so the panel shows at once and the full answer
 	// replaces it when it lands.
 	placeholderData: () =>
@@ -1377,7 +1389,7 @@ const generalErrorAction = computed(() => ({
 }))
 
 const nodeUnavailableAction = computed(() => ({
-	label: 'Reload',
+	label: client.selfHostedHosting ? 'Try again' : 'Reload',
 	onClick: () => props.reloadPage(),
 	color: 'brand' as const,
 	disabled: false,

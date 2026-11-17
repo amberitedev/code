@@ -77,8 +77,8 @@ const problem = computed(() => {
 	if (!coreOffline.value) return null
 	return {
 		type: 'no-connection' as const,
-		heading: 'Your Core is offline',
-		description: 'Start your Core, or check its connection, then try again.',
+		heading: "Can't reach your Core",
+		description: "Check that your Core is running and that you're online, then try again.",
 		retrying: isFetching.value,
 		retry: () => refetch(),
 	}
@@ -220,7 +220,10 @@ async function browseModpacks() {
 			</div>
 		</div>
 
-		<div v-if="!auth.user.value" class="flex min-h-[60vh] grow items-center justify-center">
+		<div
+			v-if="!auth.session_token.value"
+			class="flex min-h-[60vh] grow items-center justify-center"
+		>
 			<AccountRequired description="Sign in to host servers on a Core you control" />
 		</div>
 		<div v-else-if="needsCore" class="flex min-h-[60vh] grow items-center justify-center">

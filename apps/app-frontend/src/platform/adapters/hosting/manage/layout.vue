@@ -123,6 +123,8 @@ const { data: serverData } = useQuery({
 	queryKey: computed(() => ['servers', 'detail', serverId.value]),
 	queryFn: () => client.archon.servers_v0.get(serverId.value),
 	enabled: computed(() => Boolean(serverId.value)),
+	// The panel's own query of this server says when its Core is offline; retrying only delays it.
+	retry: client.selfHostedHosting ? false : 3,
 	placeholderData: () =>
 		queryClient
 			.getQueryData<Archon.Servers.v0.ServerGetResponse>(['servers'])
@@ -156,7 +158,7 @@ const serverIcon = useCachedServerIcon(breadcrumbServerId)
 const hostingBreadcrumb = useRootBreadcrumb({
 	slot: 'root',
 	id: 'servers',
-	label: 'Hosting',
+	label: 'Servers',
 	to: '/hosting/manage/',
 	visual: { type: 'icon', component: ServerStackIcon },
 })

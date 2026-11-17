@@ -266,9 +266,10 @@ pub async fn list_instance_files(
         };
         let file_type = entry.file_type().await?;
         let resolved = resolve(state, instance_id, &relative, false).await;
+        // A link Files will not follow still has its own dates.
         let metadata = match &resolved {
             Ok(content) => fs::metadata(content.path()).await.ok(),
-            Err(_) => None,
+            Err(_) => entry.metadata().await.ok(),
         };
         let read_only =
             resolve(state, instance_id, &relative, true).await.is_err();
