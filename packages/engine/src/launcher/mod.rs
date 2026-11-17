@@ -655,6 +655,7 @@ async fn install_minecraft_inner(
     let server_jar = server::server_jar_path(&state.directories, &version.id);
     if let Some(processors) = &version_info.processors {
         let libraries_dir = state.directories.libraries_dir();
+        let metadata_dir = state.directories.metadata_dir();
 
         if let Some(ref mut data) = version_info.data {
             processor_rules! {
@@ -668,9 +669,10 @@ async fn install_minecraft_inner(
                 "MINECRAFT_VERSION":
                     client => content_set.game_version.clone(),
                     server => content_set.game_version.clone();
+                // A server's steps write only into `{ROOT}/libraries/`: the shared store.
                 "ROOT":
                     client => instance_path.to_string_lossy(),
-                    server => instance_path.to_string_lossy();
+                    server => metadata_dir.to_string_lossy();
                 "LIBRARY_DIR":
                     client => libraries_dir.to_string_lossy(),
                     server => libraries_dir.to_string_lossy();

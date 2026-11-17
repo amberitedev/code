@@ -1,5 +1,6 @@
-// A Core running a Forge 1.7.10 and a NeoForge 1.20.1 server: the oldest Forge era, and the
-// NeoForge builds published under Forge's name. Both install from their server profiles in meta/.
+// A Core running Forge 1.7.10, NeoForge 1.20.1 and NeoForge 1.21.10 servers: the oldest Forge
+// era, the NeoForge builds published under Forge's name, and NeoForge's one-step patching. Each
+// installs from its server profile in meta/.
 
 import { core } from '@amberite/contracts'
 import { call, stack, until } from '@amberite/fixtures'
@@ -37,7 +38,7 @@ async function server(name: string, loader: string, gameVersion: string, loaderV
 	)
 }
 
-await Promise.all([
-	server('Forge 1.7.10', 'forge', '1.7.10', '10.13.4.1614'),
-	server('NeoForge 1.20.1', 'neoforge', '1.20.1', '47.1.106'),
-])
+// One at a time: installs that run together can race on the libraries they share.
+await server('Forge 1.7.10', 'forge', '1.7.10', '10.13.4.1614')
+await server('NeoForge 1.20.1', 'neoforge', '1.20.1', '47.1.106')
+await server('NeoForge 1.21.10', 'neoforge', '1.21.10', '21.10.64')

@@ -46,7 +46,12 @@ impl Remote {
         loop {
             attempt += 1;
             match request(&self.client).send() {
-                Ok(response) if response.status() == StatusCode::NOT_FOUND => {
+                // Some mirrors answer a missing file with 403 or 405 rather than 404.
+                Ok(response)
+                    if response.status().is_client_error()
+                        && response.status()
+                            != StatusCode::TOO_MANY_REQUESTS =>
+                {
                     return Ok(None);
                 }
                 Ok(response) if response.status().is_success() => {
@@ -146,7 +151,11 @@ impl RemoteFile<'_> {
                     if response.status() != StatusCode::PARTIAL_CONTENT {
                         bail!("the host ignored the range");
                     }
-                    Ok(response.bytes()?.to_vec())
+                    let bytes = response.bytes()?.to_vec();
+                    if bytes.len() as u64 != end - start + 1 {
+                        bail!("the host sent a short range");
+                    }
+                    Ok(bytes)
                 })
                 .map_err(io::Error::other)?;
             self.chunks.insert(index, bytes);

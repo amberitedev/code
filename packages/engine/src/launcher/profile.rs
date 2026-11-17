@@ -85,8 +85,7 @@ pub fn merge_partial_version(
 }
 
 /// Layers a server profile over a resolved Forge or NeoForge version. The profile stands in for
-/// the installer, so the install steps that read the installer or write into the server folder
-/// are dropped.
+/// the installer, so the install steps that read the installer are dropped.
 pub fn merge_server_profile(
     server: ServerProfile,
     mut resolved: ResolvedVersion,
@@ -103,9 +102,7 @@ pub fn merge_server_profile(
     }
     if let Some(processors) = &mut resolved.processors {
         processors.retain(|processor| {
-            !processor.args.iter().any(|arg| {
-                arg.contains("{INSTALLER}") || arg.contains("{ROOT}")
-            })
+            !processor.args.iter().any(|arg| arg.contains("{INSTALLER}"))
         });
     }
     resolved.server_arguments = Some(server.arguments);
@@ -215,7 +212,7 @@ mod tests {
                 .iter()
                 .map(|processor| processor.jar.as_str())
                 .collect::<Vec<_>>(),
-            ["a:patch:1"]
+            ["a:bundler:1", "a:patch:1"]
         );
         assert_eq!(
             merged
