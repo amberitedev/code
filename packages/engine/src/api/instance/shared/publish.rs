@@ -196,16 +196,20 @@ pub async fn get_shared_instance_publish_preview(
     for file in &mut files {
         file.shared = shared.contains(file.path.as_str());
     }
-    set_shared_instance_publish_status(
+    // Only a change is news: a Core's panel refetches on this event, and that refetch reads this
+    // preview again, so emitting every time loops.
+    if set_shared_instance_publish_status(
         instance_id,
         &attachment,
         version.version,
         !diffs.is_empty(),
         state,
     )
-    .await?;
-    emit_instance(&state.events, instance_id, InstancePayloadType::Edited)
-        .await?;
+    .await?
+    {
+        emit_instance(&state.events, instance_id, InstancePayloadType::Edited)
+            .await?;
+    }
 
     Ok(Some(SharedInstancePublishPreview {
         shared_instance_id: attachment.id,
@@ -582,19 +586,26 @@ pub(super) fn shared_instance_name(name: String) -> String {
     }
 }
 
+/// Records whether the owner's copy is ahead of the latest version. False when that is already
+/// what is recorded, so nothing was written.
 pub(super) async fn set_shared_instance_publish_status(
     instance_id: &str,
     attachment: &SharedInstanceAttachment,
     latest_version: i32,
     has_changes: bool,
     state: &Engine,
-) -> crate::Result<()> {
+) -> crate::Result<bool> {
     let (status, applied_version) = if has_changes {
         (ContentSetSyncStatus::Stale, attachment.applied_version)
     } else {
         (ContentSetSyncStatus::UpToDate, Some(latest_version))
     };
-
+    if attachment.status == status
+        && attachment.applied_version == applied_version
+        && attachment.latest_version == Some(latest_version)
+    {
+        return Ok(false);
+    }
     crate::state::set_shared_instance_sync_status(
         instance_id,
         status,
@@ -602,7 +613,8 @@ pub(super) async fn set_shared_instance_publish_status(
         Some(latest_version),
         &state.pool,
     )
-    .await
+    .await?;
+    Ok(true)
 }
 
 pub(super) async fn publish_shared_instance_inner(

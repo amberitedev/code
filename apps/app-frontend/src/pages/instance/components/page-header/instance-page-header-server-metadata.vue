@@ -4,10 +4,11 @@
 			<ServerOnlinePlayers :online="playersOnline" :status-online="statusOnline" hide-label />
 		</PageHeaderMetadataItem>
 		<PageHeaderMetadataItem
-			v-if="minecraftServer?.region || loadingServerPing || hostingStatus !== undefined"
+			v-if="minecraftServer?.region || loadingServerPing || hostingStatus != null"
 		>
 			<ServerRegion v-if="minecraftServer?.region" :region="minecraftServer.region" flag-only />
-			<template v-if="hostingStatus !== undefined">
+			<!-- A Core server's status is null on the backend; the live ping below says it. -->
+			<template v-if="hostingStatus != null">
 				<TagItem
 					class="border !border-solid !font-medium w-max"
 					:class="{

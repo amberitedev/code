@@ -149,6 +149,16 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 			(await files.list({ prefix: `manifests/${id}/` })).objects.map((object) => object.key).sort()
 		const notifications = async () =>
 			(await db.prepare('SELECT COUNT(*) AS count FROM notifications').first()).count
+		/** The user's unread invites to the share, which the App shows again at every sign-in. */
+		const unread = async (user, id) =>
+			(
+				await db
+					.prepare(
+						"SELECT COUNT(*) AS count FROM notifications WHERE user_id = ? AND read = 0 AND json_extract(body,'$.shared_instance_id') = ?",
+					)
+					.bind(user, id)
+					.first()
+			).count
 
 		// Share an instance: create it, name it, give it an icon, invite a friend.
 		const { id } = await ok(await call('/instances', 'POST', { name: 'Proof' }))
@@ -257,7 +267,14 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 			{ home: 'core2', replica: null },
 			'no second Core offers storage, so there is no replica yet',
 		)
+		assert.equal(await unread('friend', id), 1)
+		assert.equal(
+			(await ok(await call(`/instances/${id}/versions`, 'GET', undefined, 'mra_friend'))).version,
+			1,
+			'the App previews what an invite installs before it is accepted',
+		)
 		await ok(await call(`/instances/${id}/invites/pending`, 'POST', undefined, 'mra_friend'))
+		assert.equal(await unread('friend', id), 0, 'joining answers the invitation')
 		// The Library lists a member's joined shares, and only an owner's own without `include_joined`.
 		assert.deepEqual(
 			await ok(await call('/instances?user=friend', 'GET', undefined, 'mra_friend')),
@@ -474,8 +491,31 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		)
 		assert.deepEqual(decode(both.download.ticket).claims.aud, ['core2', 'core'])
 
+		// The friends socket tells an App when its account loses a share, so an open page notices.
+		const connection = await backend.fetch(
+			'http://local.test/_internal/launcher_socket?code=mra_friend',
+			{ headers: { upgrade: 'websocket' } },
+		)
+		const live = connection.webSocket
+		live.accept()
+		const events = []
+		live.addEventListener('message', (event) => events.push(JSON.parse(event.data)))
+		const told = (share) =>
+			new Promise((resolve, reject) => {
+				const timer = setTimeout(() => reject(new Error(`no live event for ${share}`)), 2000)
+				const check = () => {
+					if (events.some((event) => event.body?.shared_instance_id === share)) {
+						clearTimeout(timer)
+						resolve()
+					}
+				}
+				live.addEventListener('message', check)
+				check()
+			})
+
 		// Leaving and removal revoke access to versions.
 		await ok(await call(`/instances/${id}/users`, 'DELETE', { user_ids: ['friend'] }))
+		await told(id)
 		assert.equal(
 			(await call(`/instances/${id}/versions`, 'GET', undefined, 'mra_friend')).status,
 			401,
@@ -493,6 +533,17 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		// Deleting a share removes its manifests.
 		await ok(await call(`/instances/${id}`, 'DELETE'))
 		assert.deepEqual(await manifests(id), [])
+
+		// Its members are told when a share they joined is deleted.
+		const gone = await ok(await call('/instances', 'POST', { name: 'Gone' }))
+		await ok(await push(gone.id, []))
+		await ok(await call(`/instances/${gone.id}/users`, 'POST', { user_ids: ['friend'] }))
+		await ok(await call(`/instances/${gone.id}/invites/pending`, 'POST', undefined, 'mra_friend'))
+		// The invite itself arrives live too; let it land before listening for the deletion.
+		await new Promise((resolve) => setTimeout(resolve, 200))
+		events.length = 0
+		await ok(await call(`/instances/${gone.id}`, 'DELETE'))
+		await told(gone.id)
 
 		// A 3 GB allowance on other people's Cores, across every share's kept versions.
 		// Each exactly 1 GiB once encrypted: 1,024 chunks of 16 tag bytes each.
@@ -612,6 +663,27 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		const aloneShare = (await usage()).shares.find((share) => share.id === alone.id)
 		assert.deepEqual([aloneShare.counted, aloneShare.used], [false, 0])
 
+		// Declining, or joining by link instead, answers the invitation too.
+		for (const answer of ['decline', 'link']) {
+			const invited = await ok(await call('/instances', 'POST', { name: answer }))
+			await ok(await push(invited.id, []))
+			await ok(await call(`/instances/${invited.id}/users`, 'POST', { user_ids: ['friend'] }))
+			assert.equal(await unread('friend', invited.id), 1)
+			const path =
+				answer === 'decline'
+					? 'pending'
+					: (await ok(await call(`/instances/${invited.id}/invites`, 'POST', {}))).id
+			await ok(
+				await call(
+					`/instances/${invited.id}/invites/${path}`,
+					answer === 'decline' ? 'DELETE' : 'POST',
+					undefined,
+					'mra_friend',
+				),
+			)
+			assert.equal(await unread('friend', invited.id), 0, answer)
+		}
+
 		// Players of a server read the share it follows without being members, until removed.
 		const smp = await ok(await call('/instances', 'POST', { name: 'SMP' }))
 		await ok(await push(smp.id, []))
@@ -623,8 +695,14 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 			{ failed: [] },
 		)
 		const asFriend = (path) => call(path, 'GET', undefined, 'mra_friend')
-		assert.equal((await asFriend(`/instances/${smp.id}/versions`)).status, 401, 'until accepted')
+		assert.equal(
+			(await ok(await asFriend(`/instances/${smp.id}/versions`))).version,
+			1,
+			'an invited player previews it before accepting',
+		)
+		assert.equal(await unread('friend', smp.id), 1)
 		await ok(await call(`/instances/${smp.id}/invites/pending`, 'POST', undefined, 'mra_friend'))
+		assert.equal(await unread('friend', smp.id), 0)
 		assert.equal((await ok(await asFriend(`/instances/${smp.id}/versions`))).version, 1)
 		// Players join at the Core's last reported address with the server's port.
 		const linkedDomain = async () =>
@@ -697,7 +775,11 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 				.status,
 			403,
 		)
+		await new Promise((resolve) => setTimeout(resolve, 200))
+		events.length = 0
 		await ok(await call('/servers/core/srv1/players', 'DELETE', { user_ids: ['friend'] }))
+		await told(smp.id)
+		live.close()
 		assert.equal((await asFriend(`/instances/${smp.id}/versions`)).status, 401)
 		assert.equal((await asFriend(`/instances/${smp.id}`)).status, 401)
 		// A member's server passes the share on to its players only while its owner is a member.

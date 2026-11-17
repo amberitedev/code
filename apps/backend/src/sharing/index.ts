@@ -25,7 +25,12 @@ import {
 import { requireUnlocked, requireUser, tokenFrom } from '../common/auth'
 import { randomId } from '../common/crypto'
 import { ApiError } from '../common/http'
-import { notificationResponse, notifyMembers } from '../common/notifications'
+import {
+	joinedMembers,
+	notificationResponse,
+	notifyMembers,
+	notifyUsers,
+} from '../common/notifications'
 import { JsonText, noBody, rawBody, route, serve, spliceJson } from '../common/router'
 import type { Env } from '../common/types'
 import { requireListedCore } from '../cores'
@@ -487,6 +492,12 @@ async function notifyReadyInvites(env: Env, id: string): Promise<void> {
 			await notifyUser(env, invite.user, notificationResponse(notification)).catch(() => undefined)
 	}
 }
+
+/** Marks read the user's invites to the share, which the App replays at sign-in while unread. */
+const readInvites = (env: Env, id: string, user: string) =>
+	env.DB.prepare(
+		"UPDATE notifications SET read = 1 WHERE user_id = ? AND read = 0 AND json_extract(body,'$.type') = 'shared_instance_invite' AND json_extract(body,'$.shared_instance_id') = ?",
+	).bind(user, id)
 
 /**
  * A version became ready: its home Core confirmed it holds the files. Invites waiting on
@@ -1100,8 +1111,10 @@ async function owned(env: Env, id: string, userId: string) {
 }
 
 async function deleteShare(env: Env, id: string): Promise<void> {
+	const members = await joinedMembers(env, id)
 	await env.DB.prepare('DELETE FROM shared_instances WHERE id = ?').bind(id).run()
 	await sweepFiles(env, id)
+	await notifyUsers(env, members, id, 'shared_instance_users')
 }
 
 async function renameShare(env: Env, id: string, update: SharedInstanceUpdate): Promise<void> {
@@ -1275,7 +1288,7 @@ const accountRoutes = [
 	}),
 	route(sharing.GetSharedInstance, noBody, async ({ request, env, params }) => {
 		const user = await sharer(request, env)
-		const item = await readable(env, params.id, user.id, true)
+		const item = await readable(env, params.id, user.id)
 		const server = await cameThrough(env, item, user.id)
 		return {
 			name: item.name,
@@ -1368,6 +1381,12 @@ const accountRoutes = [
 			...dropServers(env, item.id, ids),
 		])
 		await notifyMembers(env, item.id, 'shared_instance_users', user.id)
+		await notifyUsers(
+			env,
+			ids.filter((id) => id !== user.id),
+			item.id,
+			'shared_instance_users',
+		)
 	}),
 	// A server's links are listed with its players.
 	route(sharing.ListInvites, noBody, async ({ request, env, params }) => {
@@ -1402,6 +1421,7 @@ const accountRoutes = [
 			env.DB.prepare(
 				'UPDATE hosted_server_players SET joined_at = COALESCE(joined_at,?1) WHERE user_id = ?3 AND (core_id, server_id) IN (SELECT core_id, server_id FROM hosted_servers WHERE instance_id = ?2)',
 			).bind(now(), item.id, user.id),
+			readInvites(env, item.id, user.id),
 		])
 		if (!members?.meta.changes && !players?.meta.changes)
 			throw new ApiError(404, 'invite_not_found', 'Pending invite was not found')
@@ -1418,6 +1438,7 @@ const accountRoutes = [
 			env.DB.prepare(
 				'DELETE FROM hosted_server_players WHERE user_id = ?2 AND joined_at IS NULL AND (core_id, server_id) IN (SELECT core_id, server_id FROM hosted_servers WHERE instance_id = ?1)',
 			).bind(item.id, user.id),
+			readInvites(env, item.id, user.id),
 		])
 		if (members?.meta.changes || players?.meta.changes)
 			await notifyMembers(env, item.id, 'shared_instance_users', user.id)
@@ -1456,6 +1477,7 @@ const accountRoutes = [
 			env.DB.prepare(
 				'UPDATE shared_instance_invites SET uses = uses + 1 WHERE id = ? AND changes() > 0',
 			).bind(inviteId),
+			readInvites(env, item.id, user.id),
 		])
 		await member(env, item, user.id)
 		await installedOnce(env, item, user.id)
@@ -1470,7 +1492,8 @@ const accountRoutes = [
 	}),
 	route(sharing.GetLatestVersion, noBody, async ({ request, env, params }) => {
 		const user = await sharer(request, env)
-		const item = await readable(env, params.id, user.id)
+		// A pending invitee reads it too: the App previews what an invite installs before accepting.
+		const item = await readable(env, params.id, user.id, true)
 		return versionResponse(env, item, await memberVersion(env, item, user.id), user.id)
 	}),
 	route(sharing.GetVersion, noBody, async ({ request, env, params }) => {
@@ -1658,8 +1681,16 @@ const accountRoutes = [
 					).bind(core_id, server_id, id),
 				),
 			)
-		if (roles.server)
-			await notifyMembers(env, roles.server.instance_id, 'shared_instance_users', user.id)
+		if (roles.server) {
+			const share = roles.server.instance_id
+			await notifyMembers(env, share, 'shared_instance_users', user.id)
+			await notifyUsers(
+				env,
+				ids.filter((id) => id !== user.id),
+				share,
+				'shared_instance_users',
+			)
+		}
 	}),
 	route(sharing.ListPlayerLinks, noBody, async ({ request, env, params }) => {
 		const user = await sharer(request, env)

@@ -4,6 +4,7 @@ import { createContext, injectAuth } from '@modrinth/ui'
 import { queryOptions, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, type Ref, ref, watch } from 'vue'
 
+import { useSharedInstanceEvent } from '@/composables/use-shared-instance-event'
 import { useUserQuery } from '@/composables/users/use-user-query'
 import { injectInstanceLaunchState } from '@/features/instances/launch-state'
 import {
@@ -189,6 +190,16 @@ export function createSharedInstanceContext(
 		() => {
 			if (ownerProblem.value === 'wrong_account') ownerProblem.value = null
 		},
+	)
+
+	// A member removed from the share, or whose share was deleted, hears it live: check again.
+	useSharedInstanceEvent(
+		'shared_instance_users',
+		() =>
+			instance.value?.shared_instance?.role === 'owner'
+				? null
+				: instance.value?.shared_instance?.id,
+		() => void refreshAvailability(),
 	)
 
 	async function refreshAvailability() {

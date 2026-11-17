@@ -61,27 +61,46 @@ export async function addNotification(
 	return id
 }
 
+/** The accounts that joined a shared instance, other than `except`. */
+export async function joinedMembers(
+	env: Env,
+	instanceId: string,
+	except: string | null = null,
+): Promise<string[]> {
+	const { results } = await env.DB.prepare(
+		'SELECT user_id FROM shared_instance_users WHERE instance_id = ? AND joined_at IS NOT NULL AND user_id IS NOT ?',
+	)
+		.bind(instanceId, except)
+		.all<{ user_id: string }>()
+	return results.map(({ user_id }) => user_id)
+}
+
 /**
- * Tells the online Apps of a shared instance's members that its member list or hosted servers
- * changed, so an open page fetches it again instead of polling. `except` is the account whose own
- * action this was; its App already knows.
+ * Tells the online Apps of `users` that a shared instance's member list or hosted servers
+ * changed, so an open page fetches it again instead of polling. Members who were just removed,
+ * or whose share was deleted, are told too: their App finds out it lost access.
  */
+export async function notifyUsers(
+	env: Env,
+	users: readonly string[],
+	instanceId: string,
+	type: SharedInstanceList,
+): Promise<void> {
+	await Promise.all(
+		users.map((user) =>
+			notifyUser(env, user, { body: { type, shared_instance_id: instanceId } }).catch(
+				(error: unknown) => console.error('Live event failed', error),
+			),
+		),
+	)
+}
+
+/** {@link notifyUsers} for the share's members. `except` already knows: it was their action. */
 export async function notifyMembers(
 	env: Env,
 	instanceId: string,
 	type: SharedInstanceList,
 	except: string | null = null,
 ): Promise<void> {
-	const { results } = await env.DB.prepare(
-		'SELECT user_id FROM shared_instance_users WHERE instance_id = ? AND joined_at IS NOT NULL AND user_id IS NOT ?',
-	)
-		.bind(instanceId, except)
-		.all<{ user_id: string }>()
-	await Promise.all(
-		results.map(({ user_id }) =>
-			notifyUser(env, user_id, { body: { type, shared_instance_id: instanceId } }).catch(
-				(error: unknown) => console.error('Live event failed', error),
-			),
-		),
-	)
+	await notifyUsers(env, await joinedMembers(env, instanceId, except), instanceId, type)
 }

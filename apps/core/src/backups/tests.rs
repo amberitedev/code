@@ -188,6 +188,39 @@ async fn ran(setup: &Setup) {
 async fn a_schedule_backs_up_only_a_world_that_may_have_changed() {
     let setup = setup().await;
     let backups = &setup.backups;
+    let created: i64 =
+        sqlx::query_scalar("SELECT created_at FROM servers WHERE id = ?")
+            .bind(&setup.server)
+            .fetch_one(&setup.db)
+            .await
+            .unwrap();
+    // A new server is not backed up while its first world is still being written.
+    ran(&setup).await;
+    backups.queue_due().await.unwrap();
+    assert!(
+        records::backups(&setup.db, &setup.server)
+            .await
+            .unwrap()
+            .is_empty(),
+        "not due on the day it was made"
+    );
+    assert_eq!(
+        backups.next_scheduled(&setup.server).await.unwrap(),
+        Some(created + DAY),
+        "due an interval after it was made"
+    );
+
+    // The first time it comes due, a server that never ran is only checked.
+    sqlx::query("UPDATE servers SET created_at = ? WHERE id = ?")
+        .bind(created - 2 * DAY)
+        .bind(&setup.server)
+        .execute(&setup.db)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM runs")
+        .execute(&setup.db)
+        .await
+        .unwrap();
     backups.queue_due().await.unwrap();
     assert!(
         records::backups(&setup.db, &setup.server)

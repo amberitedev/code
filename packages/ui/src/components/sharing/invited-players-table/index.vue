@@ -205,7 +205,7 @@ const messages = defineMessages({
 	},
 	searchUsers: {
 		id: 'servers.play.players.search-users',
-		defaultMessage: 'Search {count} users...',
+		defaultMessage: 'Search {count} {count, plural, one {user} other {users}}...',
 	},
 	all: { id: 'servers.play.players.all', defaultMessage: 'All' },
 	username: { id: 'servers.play.players.username', defaultMessage: 'Username' },

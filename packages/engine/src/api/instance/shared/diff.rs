@@ -211,7 +211,9 @@ pub(super) async fn shared_instance_publish_diffs(
     snapshot: &CurrentPublishSnapshot,
     state: &Engine,
 ) -> crate::Result<Vec<SharedInstanceUpdateDiff>> {
-    let before = remote_shared_content(version, state).await?;
+    let mut before = remote_shared_content(version, state).await?;
+    // The owner's instance runs the loader as published, not the one players install it with.
+    before.configuration = published_configuration(version);
     let configuration = local_configuration(metadata);
     let instance_path = state
         .directories
@@ -286,6 +288,24 @@ fn local_configuration(
     }
 }
 
+/// What `version` was published with: its owner's own loader.
+fn published_configuration(
+    version: &InstanceVersion,
+) -> ContentSetConfiguration {
+    let content = &version.manifest.content;
+    ContentSetConfiguration {
+        modpack_version_id: sharing_client::versions::modpack_id(version)
+            .map(str::to_owned),
+        game_version: content.game_version.clone(),
+        loader: LoaderReference {
+            name: content.loader.clone(),
+            version: (!content.loader_version.is_empty())
+                .then(|| content.loader_version.clone()),
+        },
+    }
+}
+
+/// What a member installs `version` with: see [`instance_loader`].
 pub(super) fn remote_configuration(
     version: &InstanceVersion,
 ) -> ContentSetConfiguration {
@@ -313,4 +333,46 @@ pub(super) fn shared_external_file_key(
         )?,
         path: path.to_string(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use contracts::Hash;
+    use contracts::backend::sharing::{VersionContent, VersionManifest};
+
+    fn vanilla() -> InstanceVersion {
+        InstanceVersion {
+            manifest: VersionManifest {
+                content: VersionContent {
+                    modrinth_ids: Vec::new(),
+                    modpack_id: None,
+                    removed_files: Vec::new(),
+                    game_version: "1.21.1".into(),
+                    loader: "vanilla".into(),
+                    loader_version: String::new(),
+                },
+                version_hash: Hash([0; 32]),
+                external_files: Vec::new(),
+            },
+            version: 1,
+            ready: true,
+            download: None,
+            upload: None,
+            reports: None,
+        }
+    }
+
+    // Players install a vanilla share with Fabric, but its owner's push compares against what was
+    // published, or every vanilla share would always have a loader change to push.
+    #[test]
+    fn a_vanilla_share_is_vanilla_to_its_owner_and_fabric_to_players() {
+        let version = vanilla();
+        let published = published_configuration(&version).loader;
+        assert_eq!(
+            (published.name.as_str(), published.version),
+            ("vanilla", None)
+        );
+        assert_eq!(remote_configuration(&version).loader.name, "fabric");
+    }
 }

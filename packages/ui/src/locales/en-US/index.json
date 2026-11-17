@@ -839,6 +839,9 @@
   "content.page-layout.empty.no-extra-content-installed": {
     "defaultMessage": "No extra content installed"
   },
+  "content.page-layout.empty.shared-hint": {
+    "defaultMessage": "Add your own content on top of the shared content"
+  },
   "content.page-layout.failed-to-load": {
     "defaultMessage": "Failed to load content"
   },
@@ -1819,6 +1822,12 @@
   },
   "files.layout.extraction-started-title": {
     "defaultMessage": "Extraction started"
+  },
+  "files.layout.forbidden-message": {
+    "defaultMessage": "Ask the owner for access to them."
+  },
+  "files.layout.forbidden-title": {
+    "defaultMessage": "You can't view these files"
   },
   "files.layout.selected-count": {
     "defaultMessage": "{count} selected"
@@ -5705,6 +5714,12 @@
   "servers.audit-log.event.backup-deleted-fallback": {
     "defaultMessage": "Deleted backup"
   },
+  "servers.audit-log.event.backup-downloaded": {
+    "defaultMessage": "Downloaded backup <backup></backup>"
+  },
+  "servers.audit-log.event.backup-downloaded-fallback": {
+    "defaultMessage": "Downloaded backup"
+  },
   "servers.audit-log.event.backup-renamed": {
     "defaultMessage": "Renamed backup <from></from> to <renamed-backup></renamed-backup>"
   },
@@ -5726,8 +5741,20 @@
   "servers.audit-log.event.console-command-executed": {
     "defaultMessage": "Ran console command <command></command>"
   },
+  "servers.audit-log.event.content-changed": {
+    "defaultMessage": "Changed content"
+  },
+  "servers.audit-log.event.core-removed": {
+    "defaultMessage": "Removed Core"
+  },
+  "servers.audit-log.event.core-updated": {
+    "defaultMessage": "Updated Core"
+  },
   "servers.audit-log.event.entity-list.hidden-count": {
     "defaultMessage": "+{count, number}"
+  },
+  "servers.audit-log.event.eula-accepted": {
+    "defaultMessage": "Accepted the Minecraft EULA"
   },
   "servers.audit-log.event.file-changed": {
     "defaultMessage": "Changed file <file></file>"
@@ -5794,6 +5821,9 @@
   },
   "servers.audit-log.event.server-created": {
     "defaultMessage": "Created server"
+  },
+  "servers.audit-log.event.server-deleted": {
+    "defaultMessage": "Deleted server"
   },
   "servers.audit-log.event.server-killed": {
     "defaultMessage": "Killed server"
@@ -5870,11 +5900,20 @@
   "servers.audit-log.event.server-unsuspended": {
     "defaultMessage": "Server unsuspended"
   },
+  "servers.audit-log.event.session-revoked": {
+    "defaultMessage": "Signed out a device"
+  },
+  "servers.audit-log.event.settings-changed": {
+    "defaultMessage": "Changed server settings"
+  },
   "servers.audit-log.event.sftp-credentials-rolled": {
     "defaultMessage": "Rotated SFTP credentials"
   },
   "servers.audit-log.event.sftp-login": {
     "defaultMessage": "Logged in via SFTP"
+  },
+  "servers.audit-log.event.signed-in": {
+    "defaultMessage": "Signed in"
   },
   "servers.audit-log.event.startup-command-modified": {
     "defaultMessage": "Changed startup command to <command></command>"
@@ -5906,6 +5945,9 @@
   "servers.audit-log.event.world-data-reset": {
     "defaultMessage": "Reset world data"
   },
+  "servers.audit-log.event.world-downloaded": {
+    "defaultMessage": "Downloaded world"
+  },
   "servers.audit-log.scope.server": {
     "defaultMessage": "Server"
   },
@@ -5927,6 +5969,9 @@
   "servers.backups.admonition.backup-failed.description": {
     "defaultMessage": "Something went wrong while creating {backupName}. Please try again or contact support if the issue continues."
   },
+  "servers.backups.admonition.backup-failed.self-hosted-description": {
+    "defaultMessage": "Something went wrong while creating {backupName}. Please try again."
+  },
   "servers.backups.admonition.backup-failed.title": {
     "defaultMessage": "Backup failed"
   },
@@ -5938,6 +5983,9 @@
   },
   "servers.backups.admonition.backup-timed-out.description": {
     "defaultMessage": "Creating {backupName} timed out. You can try again or contact support if the issue continues."
+  },
+  "servers.backups.admonition.backup-timed-out.self-hosted-description": {
+    "defaultMessage": "Creating {backupName} timed out. You can try again."
   },
   "servers.backups.admonition.backup-timed-out.title": {
     "defaultMessage": "Backup timed out"
@@ -5999,6 +6047,9 @@
   "servers.backups.admonition.restore-failed.description": {
     "defaultMessage": "Something went wrong while restoring from {backupName}. Please try again or contact support if the issue continues."
   },
+  "servers.backups.admonition.restore-failed.self-hosted-description": {
+    "defaultMessage": "Something went wrong while restoring from {backupName}. Please try again."
+  },
   "servers.backups.admonition.restore-failed.title": {
     "defaultMessage": "Restore failed"
   },
@@ -6016,6 +6067,9 @@
   },
   "servers.backups.admonition.restore-timed-out.description": {
     "defaultMessage": "Restoring from {backupName} timed out. You can try again or contact support if the issue continues."
+  },
+  "servers.backups.admonition.restore-timed-out.self-hosted-description": {
+    "defaultMessage": "Restoring from {backupName} timed out. You can try again."
   },
   "servers.backups.admonition.restore-timed-out.title": {
     "defaultMessage": "Restore timed out"
@@ -6951,7 +7005,7 @@
     "defaultMessage": "Revoke access for {username}"
   },
   "servers.play.players.search-users": {
-    "defaultMessage": "Search {count} users..."
+    "defaultMessage": "Search {count} {count, plural, one {user} other {users}}..."
   },
   "servers.play.players.title": {
     "defaultMessage": "Invited players"
@@ -6972,7 +7026,7 @@
     "defaultMessage": "Refreshing changes…"
   },
   "servers.play.remove-description": {
-    "defaultMessage": "Remove {username} from this shared instance? This does not ban them from the Minecraft server."
+    "defaultMessage": "Remove {username} from this server? They stop getting its content updates. This does not ban them from the Minecraft server."
   },
   "servers.play.remove-player": {
     "defaultMessage": "Remove player"

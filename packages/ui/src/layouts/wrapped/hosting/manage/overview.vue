@@ -5,7 +5,9 @@
 		data-pyro-server-manager-root
 	>
 		<div class="flex flex-col gap-4" :class="fillConsole ? 'flex-1' : ''">
+			<!-- A Core sends no stats, so the cards would only show zeros. -->
 			<ServerManageStats
+				v-if="!client.selfHostedHosting"
 				class="shrink-0"
 				:data="!isWsAuthIncorrect ? stats : undefined"
 				:loading="isWsAuthIncorrect"

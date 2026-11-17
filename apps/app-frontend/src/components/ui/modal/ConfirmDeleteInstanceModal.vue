@@ -4,6 +4,9 @@
 			<Admonition type="critical" :header="formatMessage(messages.admonitionHeader)">
 				{{ admonitionBody }}
 			</Admonition>
+			<Admonition v-if="sharedCount > 0" type="info">
+				{{ formatMessage(messages.staysShared, { count: sharedCount }) }}
+			</Admonition>
 
 			<div v-if="instances.length > 0" class="flex min-w-0 flex-col gap-2">
 				<span class="font-semibold text-contrast">
@@ -130,6 +133,11 @@ const messages = defineMessages({
 		id: 'app.instance.confirm-delete.instances-label',
 		defaultMessage: '{count, plural, one {Instance} other {Instances ({count})}}',
 	},
+	staysShared: {
+		id: 'app.instance.confirm-delete.stays-shared',
+		defaultMessage:
+			'{count, plural, one {Your shared instance stays shared, and your friends keep their copies. To stop sharing it, unpublish it from your library.} other {# of these stay shared, and your friends keep their copies. To stop sharing them, unpublish them from your library.}}',
+	},
 	deleteButton: {
 		id: 'app.instance.confirm-delete.delete-button',
 		defaultMessage: 'Delete instance',
@@ -145,6 +153,9 @@ const props = withDefaults(defineProps<{ instances?: GameInstance[] }>(), {
 })
 const instances = computed(() => props.instances)
 const count = computed(() => instances.value.length || 1)
+const sharedCount = computed(
+	() => instances.value.filter((instance) => instance.shared_instance?.role === 'owner').length,
+)
 
 const emit = defineEmits<{
 	(e: 'delete'): void

@@ -753,7 +753,8 @@ impl Backups {
 
     /// When a server's schedule next comes due, and what it is due from: `None` when scheduled
     /// backups are off. The anchor is the later of the last scheduled backup and the last time
-    /// the schedule came due with nothing new; a failed scheduled backup comes due again sooner.
+    /// the schedule came due with nothing new; a failed scheduled backup comes due again sooner,
+    /// and a schedule that never acted comes due an interval after the server was made.
     async fn due(&self, server_id: &str) -> Result<Option<Due>, Error> {
         let schedule = records::schedule(&self.db, server_id).await?;
         if schedule.keep == 0 {
@@ -781,9 +782,17 @@ impl Backups {
                 }
             }
             (Some(either), None) | (None, Some(either)) => either,
+            // A new server's first comes an interval after it was made. Right after its first
+            // start the world it just generated is still being written, and holds nothing to keep.
             (None, None) => {
+                let created: i64 = sqlx::query_scalar(
+                    "SELECT created_at FROM servers WHERE id = ?",
+                )
+                .bind(server_id)
+                .fetch_one(&self.db)
+                .await?;
                 return Ok(Some(Due {
-                    at: now(),
+                    at: created + interval,
                     anchor: None,
                     last,
                 }));
@@ -811,7 +820,7 @@ struct Due {
     /// When it comes due.
     at: i64,
     /// What it is due from: the last scheduled backup or skipped check. `None` when the schedule
-    /// has never acted, so it is due now.
+    /// has never acted.
     anchor: Option<i64>,
     last: Option<records::LastScheduled>,
 }

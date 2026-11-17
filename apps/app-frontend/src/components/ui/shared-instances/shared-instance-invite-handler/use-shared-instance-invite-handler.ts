@@ -1,4 +1,4 @@
-import { ModrinthApiError, social } from '@modrinth/api-client'
+import { ModrinthApiError, sharing, social } from '@modrinth/api-client'
 import {
 	injectAuth,
 	injectModrinthClient,
@@ -259,6 +259,11 @@ export function useSharedInstanceInviteHandler(
 			entityIconUrl: getInstanceIconUrl(invite.instanceIconUrl) ?? undefined,
 			autoCloseMs: null,
 			onReview: () => reviewNotification(notification, invite),
+			// The backend answers the invite and marks it read, so it does not come back.
+			onDecline: () =>
+				client.backend
+					.call(sharing.DeclinePendingInvite, { params: { id: invite.sharedInstanceId } })
+					.catch((error) => handleError(toError(error))),
 			onOpenActor: () => {
 				if (invite.invitedByUsername) {
 					void router.push(`/user/${encodeURIComponent(invite.invitedByUsername)}`)

@@ -202,10 +202,12 @@
 						>
 					</div>
 					<Button
-						v-tooltip="advancedActionTooltip"
+						v-tooltip="
+							stopBeforeDeleting ? 'Stop the server before deleting it.' : advancedActionTooltip
+						"
 						type="colored"
 						color="red"
-						:disabled="!canUseAdvancedSettings || deleting"
+						:disabled="!canUseAdvancedSettings || deleting || stopBeforeDeleting"
 						@click="deleteModal?.show()"
 					>
 						<TrashIcon aria-hidden="true" />
@@ -260,7 +262,18 @@ import {
 
 const { addNotification } = injectNotificationManager()
 const client = injectModrinthClient()
-const { server: data, serverId, worldId, serverFull, busyReasons } = injectModrinthServerContext()
+const {
+	server: data,
+	serverId,
+	worldId,
+	serverFull,
+	busyReasons,
+	powerState,
+} = injectModrinthServerContext()
+// A Core only deletes a stopped server, so say so before the name is typed.
+const stopBeforeDeleting = computed(
+	() => powerState.value !== 'stopped' && powerState.value !== 'crashed',
+)
 const { isApp } = injectServerSettings()
 const { featureFlags } = injectPageContext()
 const queryClient = useQueryClient()
@@ -482,10 +495,10 @@ const preferences = computed(() => ({
 type PreferenceKeys = keyof typeof preferences.value
 const preferenceKeys = Object.keys(preferences.value) as PreferenceKeys[]
 
-// A Core server has no subdomain, so there is no label to hide.
+// A Core server has no subdomain label to hide, and reports no RAM usage to show.
 const shownPreferences = computed(() => {
 	if (!client.selfHostedHosting) return preferences.value
-	const { hideSubdomainLabel: _, ...rest } = preferences.value
+	const { hideSubdomainLabel: _, ramAsNumber: __, ...rest } = preferences.value
 	return rest
 })
 

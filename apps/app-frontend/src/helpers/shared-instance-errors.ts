@@ -74,7 +74,7 @@ export const sharedInstanceErrorMessages = defineMessages({
 	deletedText: {
 		id: 'instance.shared-instance.unavailable.not-found-text',
 		defaultMessage:
-			'We couldn’t find this shared instance. Your installed content is still on this device.',
+			"This instance is no longer shared. Its content stays on this device, but it won't get updates.",
 	},
 	accessRevokedText: {
 		id: 'instance.shared-instance.unavailable.access-revoked-text',

@@ -31,6 +31,7 @@
 					:progress-type="item.progressType"
 					:progress-current="item.progressCurrent"
 					:progress-total="item.progressTotal"
+					:declinable="!!item.onDecline"
 					@accept="handleToastAccept(item, item.onAccept)"
 					@review="handleToastReview(item)"
 					@decline="handleToastAction(item, item.onDecline)"

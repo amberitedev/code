@@ -49,6 +49,10 @@ const messages = defineMessages({
 		id: 'servers.audit-log.event.backup-deleted',
 		defaultMessage: 'Deleted backup <backup></backup>',
 	},
+	downloaded: {
+		id: 'servers.audit-log.event.backup-downloaded',
+		defaultMessage: 'Downloaded backup <backup></backup>',
+	},
 	changed: {
 		id: 'servers.audit-log.event.backup-changed',
 		defaultMessage: 'Changed backup <backup></backup>',
@@ -69,6 +73,10 @@ const messages = defineMessages({
 		id: 'servers.audit-log.event.backup-deleted-fallback',
 		defaultMessage: 'Deleted backup',
 	},
+	downloadedFallback: {
+		id: 'servers.audit-log.event.backup-downloaded-fallback',
+		defaultMessage: 'Downloaded backup',
+	},
 	changedFallback: {
 		id: 'servers.audit-log.event.backup-changed-fallback',
 		defaultMessage: 'Changed backup',
@@ -80,6 +88,7 @@ const kindMessages: Record<string, MessageDescriptor> = {
 	restored: messages.restored,
 	renamed: messages.renamed,
 	deleted: messages.deleted,
+	downloaded: messages.downloaded,
 }
 
 const fallbackMessages: Record<string, MessageDescriptor> = {
@@ -87,6 +96,7 @@ const fallbackMessages: Record<string, MessageDescriptor> = {
 	restored: messages.restoredFallback,
 	renamed: messages.renamedFallback,
 	deleted: messages.deletedFallback,
+	downloaded: messages.downloadedFallback,
 }
 
 const message = computed(() =>

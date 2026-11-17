@@ -50,7 +50,8 @@
 			@remove-member="requestRemoveMember"
 		/>
 
-		<div class="flex flex-col gap-4">
+		<!-- A Core shows its activity log to its owner only. -->
+		<div v-if="!client.selfHostedHosting || canManageUsers" class="flex flex-col gap-4">
 			<span class="m-0 text-2xl font-semibold text-contrast">
 				{{ formatMessage(messages.activityLogTitle) }}
 			</span>
