@@ -1,0 +1,90 @@
+{
+	"arguments": [
+		"-p",
+		"${library_directory}/cpw/mods/bootstraplauncher/1.1.0/bootstraplauncher-1.1.0.jar${classpath_separator}${library_directory}/cpw/mods/securejarhandler/2.0.3/securejarhandler-2.0.3.jar${classpath_separator}${library_directory}/org/ow2/asm/asm-commons/9.3/asm-commons-9.3.jar${classpath_separator}${library_directory}/org/ow2/asm/asm-util/9.3/asm-util-9.3.jar${classpath_separator}${library_directory}/org/ow2/asm/asm-analysis/9.3/asm-analysis-9.3.jar${classpath_separator}${library_directory}/org/ow2/asm/asm-tree/9.3/asm-tree-9.3.jar${classpath_separator}${library_directory}/org/ow2/asm/asm/9.3/asm-9.3.jar",
+		"--add-modules",
+		"ALL-MODULE-PATH",
+		"--add-opens",
+		"java.base/java.util.jar=cpw.mods.securejarhandler",
+		"--add-exports",
+		"java.base/sun.security.util=cpw.mods.securejarhandler",
+		"--add-exports",
+		"jdk.naming.dns/com.sun.jndi.dns=java.naming",
+		"-DignoreList=bootstraplauncher-1.1.0.jar,securejarhandler-2.0.3.jar,asm-commons-9.3.jar,asm-util-9.3.jar,asm-analysis-9.3.jar,asm-tree-9.3.jar,asm-9.3.jar",
+		"-DlibraryDirectory=${library_directory}",
+		"-DlegacyClassPath=${library_directory}/cpw/mods/securejarhandler/2.0.3/securejarhandler-2.0.3.jar${classpath_separator}${library_directory}/org/ow2/asm/asm/9.3/asm-9.3.jar${classpath_separator}${library_directory}/org/ow2/asm/asm-commons/9.3/asm-commons-9.3.jar${classpath_separator}${library_directory}/org/ow2/asm/asm-tree/9.3/asm-tree-9.3.jar${classpath_separator}${library_directory}/org/ow2/asm/asm-util/9.3/asm-util-9.3.jar${classpath_separator}${library_directory}/org/ow2/asm/asm-analysis/9.3/asm-analysis-9.3.jar${classpath_separator}${library_directory}/net/minecraftforge/accesstransformers/8.0.4/accesstransformers-8.0.4.jar${classpath_separator}${library_directory}/org/antlr/antlr4-runtime/4.9.1/antlr4-runtime-4.9.1.jar${classpath_separator}${library_directory}/net/minecraftforge/eventbus/6.0.0/eventbus-6.0.0.jar${classpath_separator}${library_directory}/net/minecraftforge/forgespi/6.0.0/forgespi-6.0.0.jar${classpath_separator}${library_directory}/net/minecraftforge/coremods/5.0.1/coremods-5.0.1.jar${classpath_separator}${library_directory}/cpw/mods/modlauncher/10.0.1/modlauncher-10.0.1.jar${classpath_separator}${library_directory}/net/minecraftforge/unsafe/0.2.0/unsafe-0.2.0.jar${classpath_separator}${library_directory}/com/electronwill/night-config/core/3.6.4/core-3.6.4.jar${classpath_separator}${library_directory}/com/electronwill/night-config/toml/3.6.4/toml-3.6.4.jar${classpath_separator}${library_directory}/org/apache/maven/maven-artifact/3.8.5/maven-artifact-3.8.5.jar${classpath_separator}${library_directory}/net/jodah/typetools/0.8.3/typetools-0.8.3.jar${classpath_separator}${library_directory}/net/minecrell/terminalconsoleappender/1.2.0/terminalconsoleappender-1.2.0.jar${classpath_separator}${library_directory}/org/jline/jline-reader/3.12.1/jline-reader-3.12.1.jar${classpath_separator}${library_directory}/org/jline/jline-terminal/3.12.1/jline-terminal-3.12.1.jar${classpath_separator}${library_directory}/org/spongepowered/mixin/0.8.5/mixin-0.8.5.jar${classpath_separator}${library_directory}/org/openjdk/nashorn/nashorn-core/15.3/nashorn-core-15.3.jar${classpath_separator}${library_directory}/net/minecraftforge/JarJar/0.2.24/JarJar-0.2.24.jar${classpath_separator}${library_directory}/net/minecraftforge/fmlloader/1.19-41.0.42/fmlloader-1.19-41.0.42.jar${classpath_separator}${library_directory}/net/minecraft/server/1.19-20220607.102129/server-1.19-20220607.102129-extra.jar${classpath_separator}${library_directory}/com/github/oshi/oshi-core/5.8.5/oshi-core-5.8.5.jar${classpath_separator}${library_directory}/com/google/code/gson/gson/2.8.9/gson-2.8.9.jar${classpath_separator}${library_directory}/com/google/guava/failureaccess/1.0.1/failureaccess-1.0.1.jar${classpath_separator}${library_directory}/com/google/guava/guava/31.0.1-jre/guava-31.0.1-jre.jar${classpath_separator}${library_directory}/com/mojang/authlib/3.5.41/authlib-3.5.41.jar${classpath_separator}${library_directory}/com/mojang/brigadier/1.0.18/brigadier-1.0.18.jar${classpath_separator}${library_directory}/com/mojang/datafixerupper/5.0.28/datafixerupper-5.0.28.jar${classpath_separator}${library_directory}/com/mojang/javabridge/1.2.24/javabridge-1.2.24.jar${classpath_separator}${library_directory}/com/mojang/logging/1.0.0/logging-1.0.0.jar${classpath_separator}${library_directory}/commons-io/commons-io/2.11.0/commons-io-2.11.0.jar${classpath_separator}${library_directory}/io/netty/netty-buffer/4.1.76.Final/netty-buffer-4.1.76.Final.jar${classpath_separator}${library_directory}/io/netty/netty-codec/4.1.76.Final/netty-codec-4.1.76.Final.jar${classpath_separator}${library_directory}/io/netty/netty-common/4.1.76.Final/netty-common-4.1.76.Final.jar${classpath_separator}${library_directory}/io/netty/netty-handler/4.1.76.Final/netty-handler-4.1.76.Final.jar${classpath_separator}${library_directory}/io/netty/netty-resolver/4.1.76.Final/netty-resolver-4.1.76.Final.jar${classpath_separator}${library_directory}/io/netty/netty-transport/4.1.76.Final/netty-transport-4.1.76.Final.jar${classpath_separator}${library_directory}/io/netty/netty-transport-classes-epoll/4.1.76.Final/netty-transport-classes-epoll-4.1.76.Final.jar${classpath_separator}${library_directory}/io/netty/netty-transport-native-epoll/4.1.76.Final/netty-transport-native-epoll-4.1.76.Final-linux-x86_64.jar${classpath_separator}${library_directory}/io/netty/netty-transport-native-epoll/4.1.76.Final/netty-transport-native-epoll-4.1.76.Final-linux-aarch_64.jar${classpath_separator}${library_directory}/io/netty/netty-transport-native-unix-common/4.1.76.Final/netty-transport-native-unix-common-4.1.76.Final.jar${classpath_separator}${library_directory}/it/unimi/dsi/fastutil/8.5.6/fastutil-8.5.6.jar${classpath_separator}${library_directory}/net/java/dev/jna/jna/5.10.0/jna-5.10.0.jar${classpath_separator}${library_directory}/net/java/dev/jna/jna-platform/5.10.0/jna-platform-5.10.0.jar${classpath_separator}${library_directory}/net/sf/jopt-simple/jopt-simple/5.0.4/jopt-simple-5.0.4.jar${classpath_separator}${library_directory}/org/apache/commons/commons-lang3/3.12.0/commons-lang3-3.12.0.jar${classpath_separator}${library_directory}/org/apache/logging/log4j/log4j-api/2.17.0/log4j-api-2.17.0.jar${classpath_separator}${library_directory}/org/apache/logging/log4j/log4j-core/2.17.0/log4j-core-2.17.0.jar${classpath_separator}${library_directory}/org/apache/logging/log4j/log4j-slf4j18-impl/2.17.0/log4j-slf4j18-impl-2.17.0.jar${classpath_separator}${library_directory}/org/slf4j/slf4j-api/1.8.0-beta4/slf4j-api-1.8.0-beta4.jar",
+		"cpw.mods.bootstraplauncher.BootstrapLauncher",
+		"--launchTarget",
+		"forgeserver",
+		"--fml.forgeVersion",
+		"41.0.42",
+		"--fml.mcVersion",
+		"1.19",
+		"--fml.forgeGroup",
+		"net.minecraftforge",
+		"--fml.mcpVersion",
+		"20220607.102129"
+	],
+	"libraries": [
+		{
+			"name": "io.netty:netty-buffer:4.1.76.Final",
+			"url": "https://libraries.minecraft.net/",
+			"include_in_classpath": false,
+			"downloadable": true
+		},
+		{
+			"name": "io.netty:netty-codec:4.1.76.Final",
+			"url": "https://libraries.minecraft.net/",
+			"include_in_classpath": false,
+			"downloadable": true
+		},
+		{
+			"name": "io.netty:netty-common:4.1.76.Final",
+			"url": "https://libraries.minecraft.net/",
+			"include_in_classpath": false,
+			"downloadable": true
+		},
+		{
+			"name": "io.netty:netty-handler:4.1.76.Final",
+			"url": "https://libraries.minecraft.net/",
+			"include_in_classpath": false,
+			"downloadable": true
+		},
+		{
+			"name": "io.netty:netty-resolver:4.1.76.Final",
+			"url": "https://libraries.minecraft.net/",
+			"include_in_classpath": false,
+			"downloadable": true
+		},
+		{
+			"name": "io.netty:netty-transport-classes-epoll:4.1.76.Final",
+			"url": "https://libraries.minecraft.net/",
+			"include_in_classpath": false,
+			"downloadable": true
+		},
+		{
+			"name": "io.netty:netty-transport-native-epoll:4.1.76.Final:linux-aarch_64",
+			"url": "https://libraries.minecraft.net/",
+			"include_in_classpath": false,
+			"downloadable": true
+		},
+		{
+			"name": "io.netty:netty-transport-native-epoll:4.1.76.Final:linux-x86_64",
+			"url": "https://libraries.minecraft.net/",
+			"include_in_classpath": false,
+			"downloadable": true
+		},
+		{
+			"name": "io.netty:netty-transport-native-unix-common:4.1.76.Final",
+			"url": "https://libraries.minecraft.net/",
+			"include_in_classpath": false,
+			"downloadable": true
+		},
+		{
+			"name": "io.netty:netty-transport:4.1.76.Final",
+			"url": "https://libraries.minecraft.net/",
+			"include_in_classpath": false,
+			"downloadable": true
+		}
+	]
+}

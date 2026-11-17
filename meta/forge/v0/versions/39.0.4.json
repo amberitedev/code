@@ -1,0 +1,27 @@
+{
+	"arguments": [
+		"-p",
+		"${library_directory}/cpw/mods/bootstraplauncher/0.1.17/bootstraplauncher-0.1.17.jar${classpath_separator}${library_directory}/cpw/mods/securejarhandler/0.9.54/securejarhandler-0.9.54.jar${classpath_separator}${library_directory}/org/ow2/asm/asm-commons/9.1/asm-commons-9.1.jar${classpath_separator}${library_directory}/org/ow2/asm/asm-util/9.1/asm-util-9.1.jar${classpath_separator}${library_directory}/org/ow2/asm/asm-analysis/9.1/asm-analysis-9.1.jar${classpath_separator}${library_directory}/org/ow2/asm/asm-tree/9.1/asm-tree-9.1.jar${classpath_separator}${library_directory}/org/ow2/asm/asm/9.1/asm-9.1.jar",
+		"--add-modules",
+		"ALL-MODULE-PATH",
+		"--add-opens",
+		"java.base/java.util.jar=cpw.mods.securejarhandler",
+		"--add-exports",
+		"java.base/sun.security.util=cpw.mods.securejarhandler",
+		"-DignoreList=bootstraplauncher-0.1.17.jar,securejarhandler-0.9.54.jar,asm-commons-9.1.jar,asm-util-9.1.jar,asm-analysis-9.1.jar,asm-tree-9.1.jar,asm-9.1.jar",
+		"-DlibraryDirectory=${library_directory}",
+		"-DlegacyClassPath=${library_directory}/cpw/mods/securejarhandler/0.9.54/securejarhandler-0.9.54.jar${classpath_separator}${library_directory}/org/ow2/asm/asm/9.1/asm-9.1.jar${classpath_separator}${library_directory}/org/ow2/asm/asm-commons/9.1/asm-commons-9.1.jar${classpath_separator}${library_directory}/org/ow2/asm/asm-tree/9.1/asm-tree-9.1.jar${classpath_separator}${library_directory}/org/ow2/asm/asm-util/9.1/asm-util-9.1.jar${classpath_separator}${library_directory}/org/ow2/asm/asm-analysis/9.1/asm-analysis-9.1.jar${classpath_separator}${library_directory}/net/minecraftforge/accesstransformers/8.0.4/accesstransformers-8.0.4.jar${classpath_separator}${library_directory}/org/antlr/antlr4-runtime/4.9.1/antlr4-runtime-4.9.1.jar${classpath_separator}${library_directory}/net/minecraftforge/eventbus/5.0.3/eventbus-5.0.3.jar${classpath_separator}${library_directory}/net/minecraftforge/forgespi/4.0.10/forgespi-4.0.10.jar${classpath_separator}${library_directory}/net/minecraftforge/coremods/5.0.1/coremods-5.0.1.jar${classpath_separator}${library_directory}/cpw/mods/modlauncher/9.0.7/modlauncher-9.0.7.jar${classpath_separator}${library_directory}/net/minecraftforge/unsafe/0.2.0/unsafe-0.2.0.jar${classpath_separator}${library_directory}/com/electronwill/night-config/core/3.6.4/core-3.6.4.jar${classpath_separator}${library_directory}/com/electronwill/night-config/toml/3.6.4/toml-3.6.4.jar${classpath_separator}${library_directory}/org/apache/maven/maven-artifact/3.6.3/maven-artifact-3.6.3.jar${classpath_separator}${library_directory}/org/apache/commons/commons-lang3/3.12.0/commons-lang3-3.12.0.jar${classpath_separator}${library_directory}/net/jodah/typetools/0.8.3/typetools-0.8.3.jar${classpath_separator}${library_directory}/org/apache/logging/log4j/log4j-api/2.15.0/log4j-api-2.15.0.jar${classpath_separator}${library_directory}/org/apache/logging/log4j/log4j-core/2.15.0/log4j-core-2.15.0.jar${classpath_separator}${library_directory}/org/apache/logging/log4j/log4j-slf4j18-impl/2.15.0/log4j-slf4j18-impl-2.15.0.jar${classpath_separator}${library_directory}/net/minecrell/terminalconsoleappender/1.2.0/terminalconsoleappender-1.2.0.jar${classpath_separator}${library_directory}/org/jline/jline-reader/3.12.1/jline-reader-3.12.1.jar${classpath_separator}${library_directory}/org/jline/jline-terminal/3.12.1/jline-terminal-3.12.1.jar${classpath_separator}${library_directory}/net/sf/jopt-simple/jopt-simple/5.0.4/jopt-simple-5.0.4.jar${classpath_separator}${library_directory}/org/spongepowered/mixin/0.8.5/mixin-0.8.5.jar${classpath_separator}${library_directory}/org/openjdk/nashorn/nashorn-core/15.3/nashorn-core-15.3.jar${classpath_separator}${library_directory}/com/google/guava/guava/31.0.1-jre/guava-31.0.1-jre.jar${classpath_separator}${library_directory}/com/google/code/gson/gson/2.8.8/gson-2.8.8.jar${classpath_separator}${library_directory}/net/minecraftforge/fmlloader/1.18.1-39.0.4/fmlloader-1.18.1-39.0.4.jar${classpath_separator}${library_directory}/net/minecraft/server/1.18.1-20211210.034407/server-1.18.1-20211210.034407-extra.jar${classpath_separator}${library_directory}/com/github/oshi/oshi-core/5.8.2/oshi-core-5.8.2.jar${classpath_separator}${library_directory}/com/google/guava/failureaccess/1.0.1/failureaccess-1.0.1.jar${classpath_separator}${library_directory}/com/mojang/authlib/3.2.38/authlib-3.2.38.jar${classpath_separator}${library_directory}/com/mojang/brigadier/1.0.18/brigadier-1.0.18.jar${classpath_separator}${library_directory}/com/mojang/datafixerupper/4.0.26/datafixerupper-4.0.26.jar${classpath_separator}${library_directory}/com/mojang/javabridge/1.2.24/javabridge-1.2.24.jar${classpath_separator}${library_directory}/commons-io/commons-io/2.11.0/commons-io-2.11.0.jar${classpath_separator}${library_directory}/io/netty/netty-all/4.1.68.Final/netty-all-4.1.68.Final.jar${classpath_separator}${library_directory}/it/unimi/dsi/fastutil/8.5.6/fastutil-8.5.6.jar${classpath_separator}${library_directory}/net/java/dev/jna/jna/5.9.0/jna-5.9.0.jar${classpath_separator}${library_directory}/net/java/dev/jna/jna-platform/5.9.0/jna-platform-5.9.0.jar${classpath_separator}${library_directory}/org/slf4j/slf4j-api/1.8.0-beta4/slf4j-api-1.8.0-beta4.jar",
+		"cpw.mods.bootstraplauncher.BootstrapLauncher",
+		"--launchTarget",
+		"forgeserver",
+		"--fml.forgeVersion",
+		"39.0.4",
+		"--fml.mcVersion",
+		"1.18.1",
+		"--fml.forgeGroup",
+		"net.minecraftforge",
+		"--fml.mcpVersion",
+		"20211210.034407"
+	],
+	"libraries": []
+}

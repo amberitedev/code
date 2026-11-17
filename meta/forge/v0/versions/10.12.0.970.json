@@ -1,0 +1,8 @@
+{
+	"arguments": [
+		"-cp",
+		"${library_directory}/net/minecraftforge/forge/1.7.2-10.12.0.970/forge-1.7.2-10.12.0.970.jar${classpath_separator}${library_directory}/net/minecraft/launchwrapper/1.9/launchwrapper-1.9.jar${classpath_separator}${library_directory}/org/ow2/asm/asm-all/4.1/asm-all-4.1.jar${classpath_separator}${library_directory}/org/scala-lang/scala-library/2.10.2/scala-library-2.10.2.jar${classpath_separator}${library_directory}/org/scala-lang/scala-compiler/2.10.2/scala-compiler-2.10.2.jar${classpath_separator}minecraft_server.1.7.2",
+		"cpw.mods.fml.relauncher.ServerLaunchWrapper"
+	],
+	"libraries": []
+}
