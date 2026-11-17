@@ -32,6 +32,8 @@ const WORKERS: usize = 16;
 const BLACKLIST: &[&str] = &[
     // The `data` field is `[]` though its type is a map.
     "1.12.2-14.23.5.2851",
+    // Its Forge jar names no main class.
+    "1.12.2-14.23.5.2852",
     // Listed upstream, but the installer returns 404.
     "1.20.1-47.1.7",
     "47.1.82",

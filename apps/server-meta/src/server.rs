@@ -68,17 +68,17 @@ pub fn server_profile(remote: &Remote, build: &Build) -> Result<ServerProfile> {
         .archive(&installer_url)?
         .with_context(|| format!("{installer_url} does not exist"))?;
     let unix = entry(&mut installer, "data/unix_args.txt")?;
+    let shim = format!("{artifact}-{name}-shim.jar");
     let args = match unix {
         // From Forge 1.17, the installer ships the arguments the server starts with.
         Some(unix) => {
             let unix = String::from_utf8(unix)?;
-            let windows = entry(&mut installer, "data/win_args.txt")?
-                .context("the installer has no Windows arguments")?;
+            let windows = String::from_utf8(
+                entry(&mut installer, "data/win_args.txt")?
+                    .context("the installer has no Windows arguments")?,
+            )?;
             ensure!(
-                String::from_utf8(windows)?
-                    .replace(';', ":")
-                    .split_whitespace()
-                    .eq(unix.split_whitespace()),
+                same_but_separator(&unix, &windows),
                 "the Windows arguments differ by more than the separator"
             );
             let tokens: Vec<String> =
@@ -88,19 +88,19 @@ pub fn server_profile(remote: &Remote, build: &Build) -> Result<ServerProfile> {
                 Some(index) => {
                     let jar =
                         tokens.get(index + 1).context("-jar names no jar")?;
-                    let bytes = entry(
-                        &mut installer,
-                        &format!("maven/{group}/{name}/{jar}"),
-                    )?
-                    .with_context(|| format!("the installer has no {jar}"))?;
-                    let mut shim =
-                        zip::ZipArchive::new(std::io::Cursor::new(bytes))?;
                     let mut args = tokens[..index].to_vec();
-                    args.extend(shim_args(&mut shim)?);
+                    args.extend(shim_args(&mut installer, &group, name, jar)?);
                     args
                 }
                 None => tokens,
             }
+        }
+        // Early Forge 1.20.3 and 1.20.4 ship only the shim.
+        None if installer
+            .index_for_name(&format!("maven/{group}/{name}/{shim}"))
+            .is_some() =>
+        {
+            shim_args(&mut installer, &group, name, &shim)?
         }
         // Before 1.17, the server starts from the Forge jar, which names its main class and
         // classpath in its manifest. launcher-meta mirrors that jar.
@@ -132,11 +132,23 @@ pub fn server_profile(remote: &Remote, build: &Build) -> Result<ServerProfile> {
         }
     };
     let (arguments, referenced) = placeholders(&args);
-    let libraries = missing_libraries(remote, build, &referenced)?;
+    let libraries =
+        missing_libraries(remote, build, &mut installer, &referenced)?;
     Ok(ServerProfile {
         arguments,
         libraries,
     })
+}
+
+/// Whether the Windows arguments are the Unix ones with `;` for `:`, token by token. Some lists
+/// use `;` in both.
+fn same_but_separator(unix: &str, windows: &str) -> bool {
+    let unix: Vec<_> = unix.split_whitespace().collect();
+    let windows: Vec<_> = windows.split_whitespace().collect();
+    unix.len() == windows.len()
+        && unix.iter().zip(&windows).all(|(unix, windows)| {
+            unix.replace(':', ";") == windows.replace(':', ";")
+        })
 }
 
 fn entry<R: Read + Seek>(
@@ -188,8 +200,14 @@ fn manifest_attributes(text: &str) -> HashMap<String, String> {
 /// What `java -jar` on a Forge shim jar runs: the shim's classpath and listed libraries, then the
 /// main class and arguments it names.
 fn shim_args<R: Read + Seek>(
-    shim: &mut zip::ZipArchive<R>,
+    installer: &mut zip::ZipArchive<R>,
+    group: &str,
+    name: &str,
+    jar: &str,
 ) -> Result<Vec<String>> {
+    let bytes = entry(installer, &format!("maven/{group}/{name}/{jar}"))?
+        .with_context(|| format!("the installer has no {jar}"))?;
+    let shim = &mut zip::ZipArchive::new(std::io::Cursor::new(bytes))?;
     let manifest = manifest(shim)?;
     let list = String::from_utf8(
         entry(shim, "bootstrap-shim.list")?
@@ -276,10 +294,12 @@ fn placeholders(args: &[String]) -> (Vec<String>, BTreeSet<String>) {
 }
 
 /// Libraries the arguments reference that neither the profiles nor the install steps provide,
-/// each with the repository that hosts it.
-fn missing_libraries(
+/// each with the repository that hosts it. A reference the installer would also leave dangling
+/// stays dangling: some vendor arguments name files no step makes.
+fn missing_libraries<R: Read + Seek>(
     remote: &Remote,
     build: &Build,
+    installer: &mut zip::ZipArchive<R>,
     referenced: &BTreeSet<String>,
 ) -> Result<Vec<Library>> {
     let mut known: HashSet<String> = build
@@ -289,32 +309,72 @@ fn missing_libraries(
         .chain(&build.vanilla.libraries)
         .filter_map(|library| get_path_from_artifact(&library.name).ok())
         .collect();
-    // Install steps write their outputs, named in `data` as `[coordinate]`.
-    known.extend(build.profile.data.iter().flatten().filter_map(
-        |(_, entry)| {
-            let coordinate =
-                entry.server.strip_prefix('[')?.strip_suffix(']')?;
-            get_path_from_artifact(coordinate).ok()
-        },
+    known.extend(outputs(
+        build
+            .profile
+            .data
+            .iter()
+            .flatten()
+            .map(|(_, entry)| &entry.server),
     ));
+    let mut vendor = None;
     let mut libraries = Vec::new();
     for path in referenced.iter().filter(|path| !known.contains(*path)) {
-        let host = remote
-            .library_host(path)?
-            .with_context(|| format!("no repository has {path}"))?;
-        libraries.push(Library {
-            downloads: None,
-            extract: None,
-            name: coordinate(path)?,
-            url: Some(host.to_owned()),
-            natives: None,
-            rules: None,
-            checksums: None,
-            include_in_classpath: false,
-            downloadable: true,
-        });
+        if let Some(host) = remote.library_host(path)? {
+            libraries.push(Library {
+                downloads: None,
+                extract: None,
+                name: coordinate(path)?,
+                url: Some(host.to_owned()),
+                natives: None,
+                rules: None,
+                checksums: None,
+                include_in_classpath: false,
+                downloadable: true,
+            });
+            continue;
+        }
+        let made = match &vendor {
+            Some(made) => made,
+            None => vendor.insert(vendor_outputs(installer)?),
+        };
+        if made.contains(path)
+            || installer.index_for_name(&format!("maven/{path}")).is_some()
+        {
+            bail!("only the installer has {path}");
+        }
     }
     Ok(libraries)
+}
+
+/// The repository paths of the `[coordinate]` values among install-step data.
+fn outputs<'a>(
+    values: impl Iterator<Item = &'a String>,
+) -> impl Iterator<Item = String> {
+    values.filter_map(|value| {
+        let coordinate = value.strip_prefix('[')?.strip_suffix(']')?;
+        get_path_from_artifact(coordinate).ok()
+    })
+}
+
+/// What the installer's own install steps make on a server.
+fn vendor_outputs<R: Read + Seek>(
+    installer: &mut zip::ZipArchive<R>,
+) -> Result<HashSet<String>> {
+    let Some(bytes) = entry(installer, "install_profile.json")? else {
+        return Ok(HashSet::new());
+    };
+    let profile: serde_json::Value = serde_json::from_slice(&bytes)?;
+    let servers: Vec<String> = profile
+        .get("data")
+        .and_then(serde_json::Value::as_object)
+        .into_iter()
+        .flatten()
+        .filter_map(|(_, entry)| {
+            entry.get("server")?.as_str().map(str::to_owned)
+        })
+        .collect();
+    Ok(outputs(servers.iter()).collect())
 }
 
 /// The maven coordinate of a repository-relative jar path.
@@ -385,6 +445,19 @@ mod tests {
             referenced.into_iter().collect::<Vec<_>>(),
             ["cpw/a.jar", "net/c.jar", "net/forge.jar", "org/b.jar"]
         );
+    }
+
+    #[test]
+    fn windows_arguments_differ_only_by_the_separator() {
+        for (unix, windows, same) in [
+            ("-p a.jar:b.jar Main", "-p a.jar;b.jar Main", true),
+            // Early NeoForge 1.20.1 writes this list with `;` in both files.
+            ("-Dlist=a.jar;b.jar Main", "-Dlist=a.jar;b.jar Main", true),
+            ("-p a.jar:b.jar Main", "-p a.jar;c.jar Main", false),
+            ("-p a.jar Main", "-p a.jar Main --extra", false),
+        ] {
+            assert_eq!(same_but_separator(unix, windows), same, "{unix}");
+        }
     }
 
     #[test]

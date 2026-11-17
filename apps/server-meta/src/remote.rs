@@ -139,25 +139,37 @@ impl RemoteFile<'_> {
         if !self.chunks.contains_key(&index) {
             let start = index * CHUNK;
             let end = (start + CHUNK).min(self.len) - 1;
-            let bytes = self
-                .remote
-                .send(&self.url, |client| {
-                    client
-                        .get(&self.url)
-                        .header(RANGE, format!("bytes={start}-{end}"))
-                })
-                .and_then(|response| {
-                    let response = response.context("the file disappeared")?;
-                    if response.status() != StatusCode::PARTIAL_CONTENT {
-                        bail!("the host ignored the range");
+            // A dropped connection mid-body is retried like a failed request.
+            let mut attempt = 0;
+            let bytes = loop {
+                attempt += 1;
+                let read = self
+                    .remote
+                    .send(&self.url, |client| {
+                        client
+                            .get(&self.url)
+                            .header(RANGE, format!("bytes={start}-{end}"))
+                    })
+                    .and_then(|response| {
+                        let response =
+                            response.context("the file disappeared")?;
+                        if response.status() != StatusCode::PARTIAL_CONTENT {
+                            bail!("the host ignored the range");
+                        }
+                        let bytes = response.bytes()?.to_vec();
+                        if bytes.len() as u64 != end - start + 1 {
+                            bail!("the host sent a short range");
+                        }
+                        Ok(bytes)
+                    });
+                match read {
+                    Ok(bytes) => break bytes,
+                    Err(error) if attempt >= 4 => {
+                        return Err(io::Error::other(error));
                     }
-                    let bytes = response.bytes()?.to_vec();
-                    if bytes.len() as u64 != end - start + 1 {
-                        bail!("the host sent a short range");
-                    }
-                    Ok(bytes)
-                })
-                .map_err(io::Error::other)?;
+                    Err(_) => std::thread::sleep(Duration::from_secs(attempt)),
+                }
+            };
             self.chunks.insert(index, bytes);
         }
         Ok(&self.chunks[&index])
