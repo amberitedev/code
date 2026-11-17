@@ -1,6 +1,7 @@
 //! Downloader for Minecraft data
 use crate::launcher::profile::{
     ResolvedVersion as GameVersionInfo, merge_partial_version,
+    merge_server_profile,
 };
 
 use crate::install::{
@@ -20,6 +21,7 @@ use crate::{
     util::{fetch::*, io},
 };
 use anyhow::{Context, bail};
+use contracts::Side;
 use futures::prelude::*;
 use minecraft_meta_manifest::minecraft::{LoggingConfiguration, LoggingSide};
 use minecraft_meta_manifest::{
@@ -630,6 +632,43 @@ async fn download_server_jar(
     Ok(())
 }
 
+/// Amberite's metadata, which adds what a server needs to launcher-meta's, at the same paths.
+/// Served from the repository until it has a CDN. `AMBERITE_SERVER_META_URL` points a Core
+/// elsewhere, such as a local folder in development.
+const SERVER_META_URL: &str =
+    "https://raw.githubusercontent.com/amberitedev/code/main/meta/";
+
+/// Where the server profile of the loader version at `loader_url` is: `None` for loaders other
+/// than Forge and NeoForge.
+fn server_profile_url(loader_url: &str) -> Option<String> {
+    let path = loader_url.strip_prefix(env!("MODRINTH_LAUNCHER_META_URL"))?;
+    (path.starts_with("forge/") || path.starts_with("neo/")).then(|| {
+        let base = std::env::var("AMBERITE_SERVER_META_URL")
+            .unwrap_or_else(|_| SERVER_META_URL.to_owned());
+        format!("{base}{path}")
+    })
+}
+
+async fn fetch_server_profile(
+    st: &Engine,
+    url: &str,
+) -> crate::Result<d::profile::ServerProfile> {
+    if url.starts_with("https://") || url.starts_with("http://") {
+        fetch_json(
+            Method::GET,
+            url,
+            None,
+            None,
+            None,
+            &st.api_semaphore,
+            &st.sessions,
+        )
+        .await
+    } else {
+        Ok(serde_json::from_slice(&io::read(url).await?)?)
+    }
+}
+
 #[tracing::instrument(skip_all, fields(version = version.id.as_str(), loader = ?loader))]
 
 pub async fn download_version_info(
@@ -725,6 +764,16 @@ pub async fn download_version_info(
             .await
             .context(format!("fetching loader {} version info", loader.id))?;
             info = merge_partial_version(partial, info);
+            if st.side == Side::Server
+                && let Some(url) = server_profile_url(loader.url.as_str())
+            {
+                let server =
+                    fetch_server_profile(st, &url).await.context(format!(
+                        "Amberite has no server profile for loader version {}",
+                        loader.id
+                    ))?;
+                info = merge_server_profile(server, info);
+            }
         }
 
         info.id.0.clone_from(&version_id);

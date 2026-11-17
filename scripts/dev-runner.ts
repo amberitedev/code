@@ -777,6 +777,8 @@ function readSharedEnv(paths: WorktreePaths): NodeJS.ProcessEnv {
 		...readEnv(NodePath.join(paths.primary, '.env.local')),
 		...readEnv(NodePath.join(paths.primary, 'apps', 'core', '.env.local')),
 		...readEnv(NodePath.join(paths.worktree, '.env.local')),
+		// Cores read server profiles from this checkout, so a change to them needs no push.
+		AMBERITE_SERVER_META_URL: NodePath.join(paths.worktree, 'meta') + NodePath.sep,
 		...process.env,
 	}
 }
