@@ -3,7 +3,7 @@ import * as NodeOS from 'node:os'
 import * as NodePath from 'node:path'
 import { describe, expect, it } from 'vite-plus/test'
 
-import { fillGameFiles, keepGameFiles } from './downloads.ts'
+import { fillGameFiles, forgetMergedProfiles, keepGameFiles } from './downloads.ts'
 
 describe('game files', () => {
 	it('shares downloads between programs without sharing their folders', () => {
@@ -25,6 +25,8 @@ describe('game files', () => {
 			write(first!, 'install_job_backups/job/instance.json', 'backup')
 			write(first!, 'versions/1.21.1/.tmpAb12', 'partial')
 			write(first!, 'launcher.json', 'state')
+			// The version profile the engine merged, which its code decides.
+			write(first!, 'versions/1.21.1-21.1.77/1.21.1-21.1.77.json', 'merged')
 			expect(keepGameFiles(scratch, 'app', first!)).toBe(2)
 
 			write(second!, 'versions/1.21.1/client.jar', 'its own')
@@ -35,6 +37,11 @@ describe('game files', () => {
 			expect(read(second!, 'install_job_backups/job/instance.json')).toBeUndefined()
 			expect(read(second!, 'versions/1.21.1/.tmpAb12')).toBeUndefined()
 			expect(read(second!, 'launcher.json')).toBeUndefined()
+			expect(read(second!, 'versions/1.21.1-21.1.77/1.21.1-21.1.77.json')).toBeUndefined()
+			// A program's own merged profile goes on the next apply; its downloads stay.
+			forgetMergedProfiles(first!)
+			expect(read(first!, 'versions/1.21.1-21.1.77/1.21.1-21.1.77.json')).toBeUndefined()
+			expect(read(first!, 'versions/1.21.1/client.jar')).toBe('jar')
 
 			// Installing Java deletes its folder and unpacks again: the other program keeps its copy.
 			NodeFS.rmSync(NodePath.join(second!, 'meta', 'java_versions'), { recursive: true })

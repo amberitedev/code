@@ -21,7 +21,7 @@ import {
 	step,
 	until,
 } from './context.ts'
-import { fillGameFiles } from './downloads.ts'
+import { fillGameFiles, forgetMergedProfiles } from './downloads.ts'
 import { useKeptJava } from './java.ts'
 
 /** A first Rust build of the App and the Core fits in this. */
@@ -170,6 +170,7 @@ function clearData(data: string): void {
 			for (const entry of NodeFS.readdirSync(NodePath.join(root, program))) {
 				if (!KEPT.has(entry)) remove(NodePath.join(root, program, entry))
 			}
+			forgetMergedProfiles(NodePath.join(root, program))
 		}
 	}
 }
