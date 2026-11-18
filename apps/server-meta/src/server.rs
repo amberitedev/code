@@ -7,7 +7,7 @@ use std::io::{Read, Seek};
 use anyhow::{Context, Result, bail, ensure};
 use minecraft_meta_manifest::minecraft::{Library, VersionManifest};
 use minecraft_meta_manifest::profile::{
-    ProfileMetadata, SERVER_CLASSPATH_SEPARATOR, SERVER_JAR,
+    Processor, ProfileMetadata, SERVER_CLASSPATH_SEPARATOR, SERVER_JAR,
     SERVER_LIBRARY_DIRECTORY, ServerProfile,
 };
 use minecraft_meta_manifest::util::get_path_from_artifact;
@@ -137,7 +137,36 @@ pub fn server_profile(remote: &Remote, build: &Build) -> Result<ServerProfile> {
     Ok(ServerProfile {
         arguments,
         libraries,
+        processors: server_steps(build.profile)?,
     })
+}
+
+/// The profile's install steps a server runs, with the installer gone: the steps that read it are
+/// dropped, and what they extract into the server folder's `libraries/` goes to the shared one.
+pub fn server_steps(profile: &ProfileMetadata) -> Result<Vec<Processor>> {
+    profile
+        .processors
+        .iter()
+        .flatten()
+        .filter(|step| {
+            step.sides
+                .as_ref()
+                .is_none_or(|sides| sides.iter().any(|side| side == "server"))
+        })
+        .filter(|step| !step.args.iter().any(|arg| arg.contains("{INSTALLER}")))
+        .map(|step| {
+            let mut step = step.clone();
+            for arg in &mut step.args {
+                *arg = arg.replace("{ROOT}/libraries/", "{LIBRARY_DIR}/");
+            }
+            ensure!(
+                !step.args.iter().any(|arg| arg.contains("{ROOT}")),
+                "a server step of {} writes into the server folder",
+                step.jar
+            );
+            Ok(step)
+        })
+        .collect()
 }
 
 /// Whether the Windows arguments are the Unix ones with `;` for `:`, token by token. Some lists
@@ -458,6 +487,46 @@ mod tests {
         ] {
             assert_eq!(same_but_separator(unix, windows), same, "{unix}");
         }
+    }
+
+    #[test]
+    fn server_steps_need_no_installer_and_write_to_the_shared_store() {
+        let profile = |steps: serde_json::Value| -> ProfileMetadata {
+            serde_json::from_value(serde_json::json!({
+                "id": "1.21.10-21.10.64",
+                "inheritsFrom": "1.21.10",
+                "releaseTime": "2025-10-07T00:00:00Z",
+                "time": "2025-10-07T00:00:00Z",
+                "type": "release",
+                "libraries": [],
+                "processors": steps
+            }))
+            .unwrap()
+        };
+        // Shapes from NeoForge 21.10's profile.
+        let steps = server_steps(&profile(serde_json::json!([
+            {"jar": "a:extract:1", "classpath": [], "sides": ["server"], "args": ["--archive", "{INSTALLER}", "--to", "{ROOT}/run.sh"]},
+            {"jar": "a:split:1", "classpath": [], "sides": ["client"], "args": ["--input", "{MINECRAFT_JAR}"]},
+            {"jar": "a:patch:1", "classpath": [], "args": ["--output", "{PATCHED}", "--extract-libraries-to", "{ROOT}/libraries/"]}
+        ])))
+        .unwrap();
+        assert_eq!(
+            steps
+                .iter()
+                .map(|step| (step.jar.as_str(), step.args.join(" ")))
+                .collect::<Vec<_>>(),
+            [(
+                "a:patch:1",
+                "--output {PATCHED} --extract-libraries-to {LIBRARY_DIR}/"
+                    .to_owned()
+            )]
+        );
+        assert!(
+            server_steps(&profile(serde_json::json!([
+                {"jar": "a:write:1", "classpath": [], "args": ["--to", "{ROOT}/server.properties"]}
+            ])))
+            .is_err()
+        );
     }
 
     #[test]

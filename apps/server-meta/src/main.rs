@@ -15,7 +15,7 @@ use std::sync::Mutex;
 
 use anyhow::{Context, Result};
 use minecraft_meta_manifest::forgelike;
-use minecraft_meta_manifest::minecraft::{self, VersionManifest};
+use minecraft_meta_manifest::minecraft::{self, Library, VersionManifest};
 use minecraft_meta_manifest::profile::{ProfileMetadata, ServerProfile};
 use serde::Deserialize;
 
@@ -79,7 +79,7 @@ fn main() -> Result<()> {
     let jobs: Vec<Job> = jobs
         .into_iter()
         .filter(|job| only.is_empty() || only.contains(&job.id))
-        .filter(|job| force || !profile_path(&out, job).exists())
+        .filter(|job| force || !current(&profile_path(&out, job)))
         .collect();
     println!("{} builds to generate", jobs.len());
 
@@ -106,7 +106,8 @@ fn main() -> Result<()> {
                     let Some(job) = queue.lock().unwrap().next() else {
                         break;
                     };
-                    if let Err(error) = generate(&remote, &vanilla, &out, &job)
+                    if let Err(error) =
+                        generate(&remote, &vanilla, &out, &job, force)
                     {
                         failures.lock().unwrap().push(format!(
                             "{} {} ({}): {error:#}",
@@ -241,24 +242,49 @@ fn generate(
     vanilla: &Vanilla,
     out: &Path,
     job: &Job,
+    force: bool,
 ) -> Result<()> {
     let profile: ProfileMetadata = remote.json(&job.url)?;
-    let vanilla = vanilla.get(remote, &job.game_version)?;
-    let server: ServerProfile = server::server_profile(
-        remote,
-        &Build {
-            repository: job.repository,
-            name: &job.name,
-            profile: &profile,
-            vanilla: &vanilla,
-        },
-    )?;
     let path = profile_path(out, job);
+    // A build's installer never changes, so what an earlier run read from it is kept.
+    let server = match std::fs::read(&path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<FromInstaller>(&bytes).ok())
+    {
+        Some(earlier) if !force => ServerProfile {
+            arguments: earlier.arguments,
+            libraries: earlier.libraries,
+            processors: server::server_steps(&profile)?,
+        },
+        _ => server::server_profile(
+            remote,
+            &Build {
+                repository: job.repository,
+                name: &job.name,
+                profile: &profile,
+                vanilla: &*vanilla.get(remote, &job.game_version)?,
+            },
+        )?,
+    };
     std::fs::create_dir_all(path.parent().context("no parent")?)?;
-    let mut json = serde_json::to_string_pretty(&server)?;
+    let mut json = serde_json::to_string(&server)?;
     json.push('\n');
     std::fs::write(&path, json)?;
     Ok(())
+}
+
+/// What a profile holds from its installer.
+#[derive(Deserialize)]
+struct FromInstaller {
+    arguments: Vec<String>,
+    libraries: Vec<Library>,
+}
+
+/// Whether the profile at `path` is in the current format.
+fn current(path: &Path) -> bool {
+    std::fs::read(path).is_ok_and(|bytes| {
+        serde_json::from_slice::<ServerProfile>(&bytes).is_ok()
+    })
 }
 
 #[cfg(test)]

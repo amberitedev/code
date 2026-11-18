@@ -61,8 +61,6 @@ pub const DUMMY_REPLACE_STRING: &str = "${modrinth.gameVersion}";
 
 /// What a Forge or NeoForge server needs beyond its launcher-meta profile, which only describes a
 /// client. Amberite's `server-meta` generator publishes one beside each loader version, at the same path.
-/// It stands in for the installer, so a server skips the profile's install steps that read the
-/// installer.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ServerProfile {
@@ -71,6 +69,9 @@ pub struct ServerProfile {
     pub arguments: Vec<String>,
     /// Libraries the server starts with that the profile does not list.
     pub libraries: Vec<Library>,
+    /// The server's install steps, in place of the profile's. None reads the installer, and what
+    /// the installer's steps extract into the server folder's `libraries/` goes to `{LIBRARY_DIR}`.
+    pub processors: Vec<Processor>,
 }
 
 /// In [`ServerProfile::arguments`]: the shared libraries folder.

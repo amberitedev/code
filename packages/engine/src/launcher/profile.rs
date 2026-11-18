@@ -84,8 +84,7 @@ pub fn merge_partial_version(
     resolved
 }
 
-/// Layers a server profile over a resolved Forge or NeoForge version. The profile stands in for
-/// the installer, so the install steps that read the installer are dropped.
+/// Layers a server profile over a resolved Forge or NeoForge version.
 pub fn merge_server_profile(
     server: ServerProfile,
     mut resolved: ResolvedVersion,
@@ -100,11 +99,7 @@ pub fn merge_server_profile(
             resolved.minecraft.libraries.push(library);
         }
     }
-    if let Some(processors) = &mut resolved.processors {
-        processors.retain(|processor| {
-            !processor.args.iter().any(|arg| arg.contains("{INSTALLER}"))
-        });
-    }
+    resolved.processors = Some(server.processors);
     resolved.server_arguments = Some(server.arguments);
     resolved
 }
@@ -191,7 +186,6 @@ mod tests {
             "type": "release",
             "processors": [
                 {"jar": "a:extract:1", "classpath": [], "args": ["--archive", "{INSTALLER}"], "sides": ["server"]},
-                {"jar": "a:bundler:1", "classpath": [], "args": ["--output", "{ROOT}/libraries/"], "sides": ["server"]},
                 {"jar": "a:patch:1", "classpath": [], "args": ["--output", "{PATCHED}"]}
             ]
         }))
@@ -201,6 +195,9 @@ mod tests {
             "libraries": [
                 {"name": "org.ow2.asm:asm:9.5", "url": "https://libraries.minecraft.net/"},
                 {"name": "net.minecraft:server:1.20.1", "url": "https://libraries.minecraft.net/"}
+            ],
+            "processors": [
+                {"jar": "a:patch:1", "classpath": [], "args": ["--output", "{PATCHED}"]}
             ]
         }))
         .unwrap();
@@ -212,7 +209,7 @@ mod tests {
                 .iter()
                 .map(|processor| processor.jar.as_str())
                 .collect::<Vec<_>>(),
-            ["a:bundler:1", "a:patch:1"]
+            ["a:patch:1"]
         );
         assert_eq!(
             merged
