@@ -26,6 +26,8 @@ export async function server(
 		readonly gameVersion: string
 		/** As the Core names it, such as `vanilla`, `fabric` or `paper`. */
 		readonly loader?: string
+		/** The newest when left out. */
+		readonly loaderVersion?: string
 		readonly members?: ReadonlyArray<{ readonly who: App | Account; readonly role: CoreRole }>
 		readonly players?: ReadonlyArray<App>
 		readonly running?: boolean
@@ -37,12 +39,21 @@ export async function server(
 			core,
 			coreApi.InstallLoader,
 			{ id: made.id },
-			{ loader: spec.loader ?? 'vanilla', loader_version: null, game_version: spec.gameVersion },
+			{
+				loader: spec.loader ?? 'vanilla',
+				loader_version: spec.loaderVersion ?? null,
+				game_version: spec.gameVersion,
+			},
 		)
-		await until(`"${spec.name}" installs`, async () => {
-			const now = await call(core, coreApi.GetServer, { id: made.id })
-			return !now.installing && now.loader !== null
-		})
+		await until(
+			`"${spec.name}" installs`,
+			async () => {
+				const now = await call(core, coreApi.GetServer, { id: made.id })
+				return !now.installing && now.loader !== null
+			},
+			// A first install downloads Minecraft, the loader and Java.
+			{ timeoutMs: 15 * 60_000, everyMs: 500 },
+		)
 		return made
 	})
 	for (const { who, role } of spec.members ?? []) {

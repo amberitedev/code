@@ -6,6 +6,8 @@
 **/locales/en-US/index.json -linguist-generated
 packages/contracts/ts/*.ts linguist-generated=true
 packages/contracts/ts/index.ts -linguist-generated
+# Server profiles that apps/server-meta writes.
+meta/** linguist-generated=true -diff
 
 # Keep this fork's agent instructions during upstream merges.
 AGENTS.md merge=keepLocal

@@ -653,23 +653,7 @@ async fn install_minecraft_inner(
         .version_dir(&version_jar)
         .join(format!("{version_jar}.jar"));
     let server_jar = server::server_jar_path(&state.directories, &version.id);
-    let forge_server = match (state.side, &loader_version) {
-        (Side::Server, Some(loader_version)) => {
-            server::forge::prepare(
-                state,
-                content_set.loader,
-                &version.id,
-                &loader_version.id,
-                &java_version.path,
-                &instance_path,
-            )
-            .await?
-        }
-        _ => None,
-    };
-    if let Some(processors) = &version_info.processors
-        && !matches!(forge_server, Some(server::forge::ForgeServer::Installed))
-    {
+    if let Some(processors) = &version_info.processors {
         let libraries_dir = state.directories.libraries_dir();
 
         if let Some(ref mut data) = version_info.data {
@@ -690,16 +674,6 @@ async fn install_minecraft_inner(
                 "LIBRARY_DIR":
                     client => libraries_dir.to_string_lossy(),
                     server => libraries_dir.to_string_lossy();
-            }
-            if let Some(server::forge::ForgeServer::Steps { installer, .. }) =
-                &forge_server
-            {
-                processor_rules! {
-                    data;
-                    "INSTALLER":
-                        client => "",
-                        server => installer.to_string_lossy();
-                }
             }
 
             if let Some(loading_bar) = &loading_bar {
@@ -812,16 +786,6 @@ async fn install_minecraft_inner(
                 }
             }
         }
-    }
-
-    if let Some(server::forge::ForgeServer::Steps { args, .. }) = &forge_server {
-        server::forge::record_launch_args(
-            state,
-            &version_jar,
-            args,
-            &java_version.architecture,
-        )
-        .await?;
     }
 
     let protocol_version = read_protocol_version_from_jar(match state.side {

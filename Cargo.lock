@@ -7973,6 +7973,7 @@ dependencies = [
  "base64 0.23.1",
  "bytes",
  "encoding_rs",
+ "futures-channel",
  "futures-core",
  "futures-util",
  "h2",
@@ -8723,6 +8724,19 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "server-meta"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "minecraft-meta-manifest",
+ "reqwest 0.13.5",
+ "rustls",
+ "serde",
+ "serde_json",
+ "zip 9.0.5",
 ]
 
 [[package]]

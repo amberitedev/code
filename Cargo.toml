@@ -3,6 +3,7 @@ resolver = "2"
 members = [
   "apps/app",
   "apps/core",
+  "apps/server-meta",
   "packages/ariadne",
   "packages/contracts",
   "packages/engine",

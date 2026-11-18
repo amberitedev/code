@@ -58,3 +58,25 @@ pub const CURRENT_NEOFORGE_FORMAT_VERSION: usize = 0;
 
 /// The dummy replace string library names, inheritsFrom, and version names should be replaced with
 pub const DUMMY_REPLACE_STRING: &str = "${modrinth.gameVersion}";
+
+/// What a Forge or NeoForge server needs beyond its launcher-meta profile, which only describes a
+/// client. Amberite's `server-meta` generator publishes one beside each loader version, at the same path.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerProfile {
+    /// The Java arguments that start the server, after the host's own JVM flags. Holds the
+    /// `SERVER_*` placeholders below.
+    pub arguments: Vec<String>,
+    /// Libraries the server starts with that the profile does not list.
+    pub libraries: Vec<Library>,
+    /// The server's install steps, in place of the profile's. None reads the installer, and what
+    /// the installer's steps extract into the server folder's `libraries/` goes to `{LIBRARY_DIR}`.
+    pub processors: Vec<Processor>,
+}
+
+/// In [`ServerProfile::arguments`]: the shared libraries folder.
+pub const SERVER_LIBRARY_DIRECTORY: &str = "${library_directory}";
+/// In [`ServerProfile::arguments`]: the platform's classpath separator.
+pub const SERVER_CLASSPATH_SEPARATOR: &str = "${classpath_separator}";
+/// In [`ServerProfile::arguments`]: the vanilla server jar.
+pub const SERVER_JAR: &str = "${server_jar}";

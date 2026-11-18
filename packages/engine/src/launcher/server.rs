@@ -1,7 +1,6 @@
 //! A server-side engine's installs: the server jar, each loader's server install, and the Java
 //! command a host runs. The engine only builds the command; the host starts the process.
 
-pub(super) mod forge;
 pub mod paper;
 
 use std::future::Future;
@@ -10,12 +9,15 @@ use std::pin::Pin;
 
 use anyhow::bail;
 use contracts::Side;
-use minecraft_meta_manifest::profile::Processor;
+use minecraft_meta_manifest::profile::{
+    Processor, SERVER_CLASSPATH_SEPARATOR, SERVER_JAR, SERVER_LIBRARY_DIRECTORY,
+};
 
 use super::args::get_class_paths;
 use super::profile::ResolvedVersion;
 use crate::data::ModLoader;
 use crate::state::{DirectoryInfo, InstanceInstallStage};
+use crate::util::platform::classpath_separator;
 use crate::{Engine, ErrorKind};
 
 const FABRIC_SERVER_MAIN: &str =
@@ -84,7 +86,13 @@ pub async fn server_command(
     .await?;
     let args = match (content_set.loader, &loader_version) {
         (ModLoader::Vanilla, _)
-        | (ModLoader::Fabric | ModLoader::Quilt, Some(_)) => {
+        | (
+            ModLoader::Fabric
+            | ModLoader::Quilt
+            | ModLoader::Forge
+            | ModLoader::NeoForge,
+            Some(_),
+        ) => {
             let info = super::download::download_version_info(
                 engine,
                 version,
@@ -100,15 +108,6 @@ pub async fn server_command(
                 &info,
                 content_set.loader,
                 &java.architecture,
-            )?
-        }
-        (ModLoader::Forge | ModLoader::NeoForge, Some(loader_version)) => {
-            forge::launch_args(
-                &engine.directories,
-                &cwd,
-                content_set.loader,
-                &version.id,
-                &loader_version.id,
             )?
         }
         (ModLoader::Paper, _) => unreachable!("Paper returned above"),
@@ -183,8 +182,9 @@ pub(super) fn runs_on(processor: &Processor, side: Side) -> bool {
         .is_none_or(|sides| sides.iter().any(|side| side == name))
 }
 
-/// The arguments a Vanilla, Fabric or Quilt server starts with. Fabric and Quilt start their
-/// `KnotServer` with the loader libraries and the vanilla server jar on the classpath.
+/// The arguments a Vanilla, Fabric, Quilt, Forge or NeoForge server starts with. Fabric and Quilt
+/// start their `KnotServer` with the loader libraries and the vanilla server jar on the
+/// classpath; Forge and NeoForge start as their server profile says.
 fn launch_args(
     libraries_dir: &Path,
     server_jar: &Path,
@@ -202,10 +202,34 @@ fn launch_args(
         }
         ModLoader::Fabric => FABRIC_SERVER_MAIN,
         ModLoader::Quilt => QUILT_SERVER_MAIN,
-        ModLoader::Forge | ModLoader::NeoForge | ModLoader::Paper => {
-            bail!(ErrorKind::LauncherError(format!(
-                "{loader:?} starts from its install's arguments"
-            )))
+        ModLoader::Forge | ModLoader::NeoForge => {
+            let arguments =
+                info.server_arguments.as_ref().ok_or_else(|| {
+                    ErrorKind::LauncherError(format!(
+                        "{loader:?} {} was installed without a server profile",
+                        info.id
+                    ))
+                })?;
+            let libraries = canonical(libraries_dir)?;
+            let server_jar = canonical(server_jar)?;
+            return Ok(arguments
+                .iter()
+                .map(|argument| {
+                    argument
+                        .replace(SERVER_LIBRARY_DIRECTORY, &libraries)
+                        .replace(
+                            SERVER_CLASSPATH_SEPARATOR,
+                            classpath_separator(java_arch),
+                        )
+                        .replace(SERVER_JAR, &server_jar)
+                })
+                .chain(["--nogui".to_string()])
+                .collect());
+        }
+        ModLoader::Paper => {
+            bail!(ErrorKind::LauncherError(
+                "Paper starts from its own jar".to_string()
+            ))
         }
     };
     Ok(vec![
@@ -386,6 +410,47 @@ mod tests {
                 "-cp",
                 &classpath,
                 "net.fabricmc.loader.impl.launch.knot.KnotServer",
+                "--nogui"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_forge_server_starts_from_its_profile_in_the_shared_store() {
+        let data = tempfile::tempdir().unwrap();
+        let (mut info, files) = fabric_store(data.path());
+        info.server_arguments = Some(
+            [
+                "-cp",
+                "${library_directory}/org/ow2/asm/asm/9.8/asm-9.8.jar${classpath_separator}${server_jar}",
+                "-DlibraryDirectory=${library_directory}",
+                "cpw.mods.fml.relauncher.ServerLaunchWrapper",
+            ]
+            .map(str::to_owned)
+            .to_vec(),
+        );
+        let libraries = dunce::canonicalize(data.path().join("libraries"))
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let separator = if cfg!(windows) { ";" } else { ":" };
+        assert_eq!(
+            launch_args(
+                &data.path().join("libraries"),
+                &data.path().join("versions/1.21.1/server.jar"),
+                &info,
+                ModLoader::Forge,
+                std::env::consts::ARCH
+            )
+            .unwrap(),
+            [
+                "-cp",
+                &format!(
+                    "{libraries}/org/ow2/asm/asm/9.8/asm-9.8.jar{separator}{}",
+                    files[0].to_string_lossy()
+                ),
+                &format!("-DlibraryDirectory={libraries}"),
+                "cpw.mods.fml.relauncher.ServerLaunchWrapper",
                 "--nogui"
             ]
         );

@@ -14,20 +14,28 @@ function cache(primary: string, kind: Kind): string {
 	return NodePath.join(primary, 'target', 'dev-shared', 'game-files', kind)
 }
 
-/** Whether a name in `meta` is shared: not a download still being written, not per-install state. */
-function shared(name: string, top: boolean): boolean {
+/**
+ * Whether a path in `meta`, with `/` separators, is shared: not a download still being written,
+ * not per-install state, and not a version profile the engine merged, which depends on its code.
+ */
+function shared(path: string): boolean {
+	const parts = path.split('/')
+	const name = parts.at(-1) ?? ''
 	// The engine writes a download under a temporary dot name and renames it when it is whole.
-	return !name.startsWith('.') && !(top && NOT_SHARED.has(name))
+	if (name.startsWith('.')) return false
+	if (parts.length === 1 && NOT_SHARED.has(name)) return false
+	return !(parts.length === 3 && parts[0] === 'versions' && name === `${parts[1]}.json`)
 }
 
 /** How many shared files a folder holds. Listing is far cheaper than asking about each file. */
-function count(folder: string, top = true): number {
+function count(folder: string, path = ''): number {
 	if (!NodeFS.existsSync(folder)) return 0
 	let files = 0
 	for (const entry of NodeFS.readdirSync(folder, { withFileTypes: true })) {
-		if (!shared(entry.name, top)) continue
-		if (entry.isDirectory()) files += count(NodePath.join(folder, entry.name), false)
-		else if (!top) files += 1
+		const inner = path ? `${path}/${entry.name}` : entry.name
+		if (!shared(inner)) continue
+		if (entry.isDirectory()) files += count(NodePath.join(folder, entry.name), inner)
+		else if (path) files += 1
 	}
 	return files
 }
@@ -36,16 +44,17 @@ function count(folder: string, top = true): number {
  * Gives every file under `from` that `to` lacks a second name there. Returns how many it linked.
  * A file is never overwritten, so a program's own copy always wins.
  */
-function linkMissing(from: string, to: string, top = true): number {
+function linkMissing(from: string, to: string, path = ''): number {
 	if (!NodeFS.existsSync(from)) return 0
 	let linked = 0
 	for (const entry of NodeFS.readdirSync(from, { withFileTypes: true })) {
-		if (!shared(entry.name, top)) continue
+		const inner = path ? `${path}/${entry.name}` : entry.name
+		if (!shared(inner)) continue
 		const source = NodePath.join(from, entry.name)
 		const target = NodePath.join(to, entry.name)
 		if (entry.isDirectory()) {
-			linked += linkMissing(source, target, false)
-		} else if (entry.isFile() && !top && !NodeFS.existsSync(target)) {
+			linked += linkMissing(source, target, inner)
+		} else if (entry.isFile() && path && !NodeFS.existsSync(target)) {
 			NodeFS.mkdirSync(to, { recursive: true })
 			try {
 				NodeFS.linkSync(source, target)
@@ -78,6 +87,15 @@ function sync(from: string, to: string, record: string): number {
 	NodeFS.mkdirSync(NodePath.dirname(record), { recursive: true })
 	NodeFS.writeFileSync(record, String(files))
 	return linked
+}
+
+/** Removes the version profiles a program's engine merged, so the current code merges them again. */
+export function forgetMergedProfiles(programDir: string): void {
+	const versions = NodePath.join(programDir, 'meta', 'versions')
+	if (!NodeFS.existsSync(versions)) return
+	for (const id of NodeFS.readdirSync(versions)) {
+		NodeFS.rmSync(NodePath.join(versions, id, `${id}.json`), { force: true })
+	}
 }
 
 /** Fills a program's game files from what any checkout downloaded before. */
