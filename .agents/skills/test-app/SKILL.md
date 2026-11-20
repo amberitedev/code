@@ -1,45 +1,40 @@
 ---
 name: test-app
-description: Check a change in the real Amberite App from a browser tab, on a fixture's test accounts, and hand a window to the developer. Use for any App change a person can see.
+description: Test the Amberite App through T3's built-in Browser panel against this checkout's dev stack. Use for App verification, browser recovery, and test fixtures.
 ---
 
 # Test the App
 
-## Start it
+Use T3's built-in Browser panel for verification. Follow the recovery steps below before declaring
+it unavailable. Do not install or switch to another automation system.
 
-`vp run fixture <name>` starts the stack in the background, builds the fixture's state, and prints
-each App's `tab:` URL once it loads. Without a name it applies `default`: Apps for `alice` and
-`bob`, who are friends, a Core `alice` owns, and an instance she shares with `bob`. When the change
-needs another state, write that state as a fixture (see Fixtures in AGENTS.md) and apply the file.
-Reuse a healthy stack from earlier in the task: `vp run status` prints the URLs again. Stop only
-what you started, with `vp run down`.
+## Start the app
 
-When Rust has to build, the first start takes several minutes. The command gives up waiting after
-9 minutes; run it again to keep waiting.
+Reuse this task's healthy stack: `vp run status` prints each App's `tab:` URL. Otherwise run
+`vp run fixture` from the repository root, which starts the stack in the background on this
+checkout's ignored `.data` and prints them. Read the actual URLs from that output. The bare
+frontend URL reaches no App.
 
-## Drive it
+Test with meaningful state. Describe the state that lets you test the scenario you want as a
+[fixture](../../../docs/internals/fixtures.md) and apply it, rather than clicking state together.
 
-- Open each App's `tab:` URL in the preview. Each tab is its own origin and talks to its own App,
-  so two tabs are two accounts side by side. Do not open the bare frontend URL: it reaches no App,
-  and the sign-in website hangs the preview tools.
-- The page removes the `#local=` fragment from the address bar after it loads and keeps the App's
-  address for the tab's session, so a reload still works. A new tab needs the full `tab:` URL.
-- Applying a fixture restarts every App. A tab that was open is on an old session: open its
-  `tab:` URL again.
-- The preview tab is hidden, so `requestAnimationFrame` never runs and page transitions stall.
-  After each load, replace it in the page:
-  `window.requestAnimationFrame = (f) => setTimeout(() => f(performance.now()), 16); window.cancelAnimationFrame = clearTimeout`.
-- Each App signs itself in as the account the fixture names, so screens behind an account work at
-  once.
-- Use a fixture whose state reaches the changed screen.
-- A full-screen "Something broke" (`[data-crash-screen]`) means a page threw while rendering. Its
-  Details and the console's `[crash]` line hold the route and stack.
-- Only the native window shows window chrome, system dialogs, and drag and drop from the desktop.
-  A dialog started from a tab opens on the desktop. Those need a person, or computer use with the
-  developer's go-ahead.
+## Use the Browser panel
 
-## Hand it over
+Call `preview_status`. If no tab can be automated, call `preview_open`, including when status
+reports `available: false` or `tabId: null`. Status can report unavailable simply because no tab
+exists yet; opening a tab needs no user action. Stop verification and explain the blocker only if
+the tools are absent or `preview_open` reports unavailable or fails.
 
-When the developer wants to look themselves: `vp run down`, then `vp run up --show-windows`, which
-starts the same Apps on the same data with their windows, and say which window and screen to look
-at. Once the developer has a window, do not drive that App.
+Open each App's `tab:` URL in its own tab, then use `preview_snapshot` and T3's interaction tools.
+Each tab is one account, signed in. After a fixture is applied, open the new URLs.
+
+Snapshots and clicks need the T3 Code window on screen. If they time out, ask for the window and
+continue through `preview_evaluate`.
+
+## Verify and stop
+
+Exercise the affected flow in every account it reaches and capture the state that proves it works.
+
+Stop the stack with `vp run down` when you are done: this machine runs several agents. Then run
+`vp run fixture --show-windows`, which starts a clean stack with App windows for the developer to
+try the change, and leave those Apps to them.

@@ -27,7 +27,7 @@ coding-agent app that gives each task an isolated Git worktree. When T3 Code cre
 runs `node scripts/setup-worktree.ts` from `t3.json`. The script installs dependencies (retrying once,
 because two worktrees set up at the same time can collide on the shared Git config) and copies the
 engine's `.env`. It copies no data: the first dev start applies the default
-[fixture](#fixtures). It does not overwrite anything already in the worktree, so it is safe to run
+[fixture](fixtures.md). It does not overwrite anything already in the worktree, so it is safe to run
 again. `.data/setup.json` records
 whether it is `running` (with its `pid`), `done`, or `failed` (with an `error`). Any exit,
 including Ctrl+C, writes the final state; a hard kill cannot, so a `running` file whose `pid` is
@@ -38,7 +38,7 @@ folder that is usually nothing.
 
 | Command                                      | What it does                                                                                                                                                                                                                                                                                                                                                                                                      |
 | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `vp run fixture <name>`                      | The whole setup: type-checks the [fixture](#fixtures), starts the stack in the background when none is running, replaces the stack's data with what the fixture builds, waits until everything answers, and prints each App's `tab:` URL. `<name>` is a file in `packages/fixtures/fixtures` or the path of any fixture file, and `default` when left out.                                                        |
+| `vp run fixture <name>`                      | The whole setup: type-checks the [fixture](fixtures.md), starts the stack in the background when none is running, replaces the stack's data with what the fixture builds, waits until everything answers, and prints each App's `tab:` URL. `<name>` is a file in `packages/fixtures/fixtures` or the path of any fixture file, and `default` when left out.                                                      |
 | `vp run up`                                  | Starts the stack in the background on the data it already has, with the Apps and Cores of the fixture applied last. A checkout that never had one applied gets the default fixture.                                                                                                                                                                                                                               |
 | `vp run dev`                                 | The same stack in the foreground, with the account sign-in website and App windows, for a person at a terminal.                                                                                                                                                                                                                                                                                                   |
 | `vp run status`                              | Prints what is running, whether it is ready, each program that is stopped or has failed, and each App's tab URL. Exits non-zero when the stack is not ready.                                                                                                                                                                                                                                                      |
@@ -69,58 +69,7 @@ process starts with a fresh one. The runner writes `.data/dev.log` itself.
 
 ## Fixtures
 
-A fixture is a TypeScript file that puts the whole dev stack into one exact state. Its first line
-declares the stack; every line after it builds state in that stack, top to bottom.
-
-```ts
-import { friends, instance, stack } from '@amberite/fixtures'
-
-const { alice, bob } = await stack({ apps: ['alice', 'bob'], cores: [{ owner: 'alice' }] })
-await friends(alice, bob)
-await instance(alice, {
-	name: 'Survival',
-	loader: 'fabric',
-	gameVersion: '1.21.1',
-	sharedWith: [bob],
-})
-```
-
-The package is `packages/fixtures`: `src/` is the tool, `kit/` holds one helper per thing a fixture
-builds, and `fixtures/` holds the fixtures worth keeping. A fixture written for one bug can live
-anywhere, outside the repo too.
-
-- **Every apply wipes and runs from the top.** There is no saved state and no comparing with what
-  is there: the stack is stopped, its data deleted, and the fixture run against programs started
-  on empty data. One code path, and a fixture always shows what the current code produces. Reuse
-  is ordinary functions imported from another file.
-- **State is made by the program that owns it.** `stack` signs each App in the way a dev App
-  signs in, and pairs each Core by approving the code it shows, as its owner. A helper calls the
-  endpoints of whichever program owns the state, so that program writes everything that belongs to
-  it. `call(who, endpoint, params, body)` is the same thing without a helper: `who` is an App (its
-  local API), an account (the backend), or a Core.
-- **A row bends that state.** `patch` and `sql` write rows directly, for the states no program
-  reaches on demand, such as an expired link. The backend's rows go through its `/_dev/sql` route,
-  because its database file belongs to the process serving it. A Core or an App may hold what it
-  read in memory, so the tool restarts one after its rows change, before it is next called. State
-  a program keeps only in memory cannot be patched. Much of what the backend stores about a Core
-  is a copy the Core sends again when it starts, so patch the Core.
-- **A line that fails stops the fixture there**, with the program's own error, and leaves the
-  stack up in the state it reached. Applying again starts over.
-- **The fixture is type-checked before anything is stopped**, against the generated contracts, so
-  a call the programs would refuse fails in a few seconds with the stack untouched. CI and
-  `check:changed` type-check the package, which is how a changed endpoint reaches the helper that
-  calls it.
-- **A helper returns only once its work has finished.** It waits for the install job or the
-  publish it started, so no fixture waits or polls.
-
-An apply keeps two things in each program's folder: the App window's browser profile, and `meta`,
-the game files (Minecraft, Java, loaders, server jars). Each App and Core has its own `meta`,
-because installing Java deletes and unpacks a folder in place, which two programs cannot share. A
-new folder is filled with hard links from `target/dev-shared/game-files` in the primary checkout,
-and what a program downloads is linked back there after an apply, so a file is downloaded once per
-machine. On another drive the links become copies.
-
-Nothing about a real Minecraft account is covered: launching the game needs one.
+What a fixture is and how to write one: [fixtures](fixtures.md).
 
 ## Rust programs
 
@@ -184,8 +133,7 @@ well.
 An older checkout that still runs its App from `target/dev-shared/debug` holds that file open; the runner
 renames it aside and builds again.
 
-A Core that a fixture declares with `owner: null` belongs to nobody and shows its pairing code in
-the `[core:<n>]` output, to be added from an App by hand. The App signs in to a Core with a ticket
+The App signs in to a Core with a ticket
 on its first request and keeps that session in the OS keychain; set `CORE_PROXY_LOG=1` before
 starting an App to log the head of every request its Core proxy sends, with the session token left
 out.
@@ -201,12 +149,6 @@ runner generates a persistent secret in
 arguments. It also makes a local ticket key in `.data/backend/ticket-key.json`, passes it as
 `TICKET_KEY`, and serves its public half from `.data/backend/assets/core/keys.json` in place of the
 production keys. No Cloudflare account, billing, remote D1, or remote R2 is used.
-
-An account a fixture names, such as `alice`, has that username, the email
-`alice@scenario.invalid`, and the password `Scenario-alice-Local-only!`. These are real local
-database accounts with hashed passwords. A dev App signs in to its account, and a fixture acts as
-any of them, through a loopback endpoint requiring the runner secret; ordinary email/password
-login also works. This shortcut cannot access accounts created through normal signup.
 
 `node apps/backend/tests/accounts.mjs <backend-url>` runs the focused HTTP and native WebSocket
 contract proof against the already-running backend. Its private test credentials stay in

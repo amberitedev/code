@@ -1,0 +1,4 @@
+interface:
+  display_name: 'Amberite App Testing'
+  short_description: "Test the App in T3's Browser panel"
+  default_prompt: "Use $test-app to verify the affected App flow through T3's Browser panel."
