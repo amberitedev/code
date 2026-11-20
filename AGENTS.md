@@ -71,7 +71,7 @@ Every command, the log, and ports: [scripts](docs/internals/scripts.md).
 ## Verifying
 
 - Before you push, run `vp run check:changed`. It runs CI's fast checks for changed files: lint, typos, TOML, typecheck and tests of the affected packages, and for Rust `rustfmt`, a build, and the tests of changed crates. CI still runs the full suites.
-- While you iterate, run only the test files you touched.
+- While you iterate, run only the tests that cover what you changed.
 - **Do not run repo-wide checks.** No `vp check`, no `vp run -r test`, no `vp run -r typecheck` unless the developer asks. CI owns the full suite.
 - Core and backend behavior changes ship with focused tests for that behavior.
 - Test behavior that can break, such as sharing and sync logic, Core and backend permission checks, persistence and migrations, external-format parsing (modpacks, Modrinth's API), race fixes, and the logic a bug fix changed. Leave out tests for what types already guarantee, trivial logic, copy text, smoke runs, mock-call mirrors, and props rendered to static markup.
