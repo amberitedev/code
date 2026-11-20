@@ -1,48 +1,26 @@
 # Amberite
 
-Amberite is a Minecraft launcher for modding and sharing, with self-hosted servers. Run the Rust
-server (Core) on any machine and manage it from the desktop App.
+Amberite is a Minecraft launcher for modding and sharing, with self-hosted servers. The desktop App manages the Core, a Rust server manager you run on any machine.
 
-New code, folders, types and docs say Core. Copal names only the shipped program: its binary,
-crate, service, installer and release.
+You can think of Amberite as a self-hosted alternative to Modrinth Hosting, like Lodestone or Pterodactyl. The main difference is full parity with Modrinth.
 
-Theseus is Modrinth's codename for the App. It survives in upstream names we keep: the App crate
-`theseus_gui`, the Java package `com.modrinth.theseus` and `theseus.jar`, the `modrinth/theseus`
-user agent, `THESEUS_CONFIG_DIR` and the `theseus-*.yml` workflows.
-
-You can think of Amberite as Modrinth Hosting, but free and better. Sharing is not tied to a Core
-and works for everyone.
-
-This project is very new and has not been deployed or tested anywhere, so never migrate anything.
-But there are some things we never compromise on.
+Nothing is released, so there's nothing to migrate. But there are some things we never compromise on.
 
 ### 1. Easy to use
 
-Amberite is built so anyone can use it, without being any less capable. A non-technical user can do
-everything they need without setup or jargon. Advanced options exist, but the basics never require
-them.
+Amberite is built so anyone can use it, without being any less capable. Unlike a lot of self-hosting platforms, it does not assume you know how things work. We want all users to find Amberite easy, and those who know what they're doing to enjoy it even further.
 
 ### 2. Performance without compromise
 
-Lots of apps have gotten bogged down with bad tech decisions and "slop". We have not, and we're
-proud of Amberite's performance. We regularly audit for performance regressions. Make sure every
-change considers its performance impact.
+Lots of apps have gotten bogged down with bad tech decisions and "slop". We have not, and we're proud of Amberite's performance. We regularly audit for performance regressions. Make sure every change considers its performance impact.
 
 ### 3. Free to run
 
-Amberite is free. We never run or host servers: they are self-hosted, and we use those self-hosted
-servers to further reduce the cost of our backend. Keep every change cheap, with plenty of headroom.
+Although Amberite's products are self-hosted, accounts, friends and share details run on a backend we pay for, and we want to run it for free for as long as possible. We optimize the backend to be cheap, and our decisions show that. Make sure your changes are considerate of the cost impact, push back on expensive changes, and suggest functionally equivalent alternatives (assume fully optimized).
 
 ### 4. Built on Modrinth
 
-Modrinth handles public content, and we use that ecosystem rather than replacing it. We keep the
-full Modrinth experience, so users can keep it as their main launcher with Amberite's features added
-on top.
-
-Amberite ports Modrinth's social backend from `apps/labrinth` (friends, profiles, sharing, etc.) to
-`apps/backend` (Cloudflare Workers and D1) while keeping the same schemas and contracts. We do not
-keep `apps/labrinth`; read it at `modrinth/main`. Amberite runs this backend itself, with relevant
-upstream changes carried over.
+Amberite is a fork of Modrinth, not a replacement. We use their content, launcher data and UI, and a Modrinth user should feel at home with our features on top. We aren't scared to change their code, especially when it improves our architecture, performance or cost. We merge their code daily, so leaving out changes can make merges cheaper. For example, we kept their backend's routes so their friends and profile pages work on ours unchanged. Aim for that kind of fit.
 
 ## A note from ilai
 
@@ -52,157 +30,84 @@ Channel both "measure twice, cut once" and "yagni". Fight scope creep. Try to ho
 
 The rest of this document is meant to help you navigate the codebase and make changes effectively. Think of these instructions less as "hard rules", more as "good defaults". The developer's preferences should be able to override anything here.
 
-Of note: most Amberite work is done by agents in T3 Code worktrees, several at once. Be careful
-with dev stacks, data, and processes that belong to another worktree or to the developer.
+Of note: most Amberite work is done by agents in T3 Code worktrees, several at once. Be careful with dev stacks, data, and processes that belong to another worktree or to the developer.
 
-Rust imports go one way: `contracts` <- `sharing-client` <- `engine` <- `apps/app`, `apps/core`.
-The design, and the rules a review checks it against, are in
-[architecture](docs/internals/architecture.md).
+## A small glossary
+
+We need to be on the same page with terminology. When communicating, use this language:
+
+- **you** means the agent reading this file and changing Amberite.
+- **we** and **maintainers** mean ilai and the people building Amberite. This is who you are talking to now.
+- **user** means a person using Amberite.
+- **instance** means a configuration of Minecraft (mods, loader, Minecraft version) in an App or on a Core.
+- **server** means a Minecraft server on a Core. Think of it as a hosted world.
+- **shared instance** means an instance published through our backend and shared with your friends.
+- **share** means one version of a shared instance.
+- **upstream** means Modrinth's repo. It is the `modrinth` remote in this repo, so their code is at `modrinth/main`.
+- **stack** means one checkout's dev programs: the backend, its Cores, and its Apps.
 
 ## Hit every surface
 
-The most common defect in this repo is a change that works on the side you tested and is missing on
-another. Before calling work done, walk this list and say which entries applied:
+The most common defect in this repo is a change that works on the path you tested and is missing everywhere else. Before calling work done, walk this list and say which entries applied:
 
-- **Way in, way out.** If you added a way in, add the way out and the way to see it. Share needs
-  unshare, invite needs revoke. A one-way door is an unfinished feature.
-- **One contract.** Every call between the App and a backend (Core, `apps/backend`) is an
-  `Endpoint` whose TS is generated into `@amberite/contracts` and called through
-  `packages/api-client`. Values Rust owns, such as limits and share rules, are generated the same
-  way, never typed twice.
-- **Shared UI.** Changes to inherited Modrinth UI or `packages/ui` can affect screens outside the
-  one you changed. Check its consumers before treating it as local.
-- **Docs.** Check whether the change makes existing guidance inaccurate. Apply the
-  [documentation rules](#documentation) before adding anything.
+- **Way in, way out.** If you added a way in, add the way out and the way to see it. Share needs unshare, invite needs revoke. A one-way door is an unfinished feature.
+- **Contracts.** Anything crossing the wire is an `Endpoint` declared in Rust, and its TypeScript is generated. Change the Rust type and the App, the Cores and the backend all follow.
+- **App and Core.** An instance lives on this computer or on a Core. Most instance screens are one shared layout with a provider per side, so an action added on one side is missing on the other.
+- **Roles and states.** The owner and someone invited see different things, and a server or a shared instance behaves differently while stopped, running, installing or removed. Check the ones the change touches.
+- **Docs.** Check whether the change makes existing guidance inaccurate. Apply the [documentation rules](#documentation) before adding anything.
 
 ## Dev servers
 
-- `vp i` installs. Worktrees get this from the t3.json setup script; if module resolution looks
-  broken, it probably did not run. While `.data/setup.json` says `running`, wait for it. `failed`
-  or no file means run `vp run setup` yourself.
-- Every dev command is `vp run <name>`. Do not call `scripts/dev-runner.ts` yourself.
-- `vp run fixture <name>` is the whole setup. It starts the stack in the background with the
-  Cores and Apps the [fixture](#fixtures) declares, builds the fixture's state, and returns once
-  each App loads, printing its tab URL. Without a name it applies `default`: Apps for `alice` and
-  `bob`, and a Core. `vp run fixture backend` is the backend alone, which starts in seconds.
-- `vp run status` prints the addresses and tab URLs again, and any program that is stopped or has
-  failed. `vp run down` stops this checkout's stack and keeps its data; `vp run up` starts it
-  again on that data. The log is `.data/dev.log`. `vp run dev` is the same stack in the
-  foreground with App windows, for a person at a terminal.
-- `vp run stop <name>` takes one program down and keeps it down, for a Core that is offline or a
-  backend that does not answer. `vp run rs <name>` brings it back. The names are in
-  `vp run status`: `backend`, `core:1`, `app:2`.
-- Nothing watches Rust. After a Rust edit, apply the fixture again, or restart one program with
-  `vp run rs <name>`. Either builds first and stops on a compiler error, which is in the log, so
-  it is also the check for Rust changes. A build can outlast the command, which gives up after 9
-  minutes: run it again to keep waiting.
-- Never kill by process name, path, or worktree string. Several worktrees run stacks at once, and
-  your own agent's command line holds this worktree's path. Stop what you started with
-  `vp run down` or `vp run stop <name>`.
+- `vp i` installs. Worktrees get this from the t3.json setup script; if module resolution looks broken, it probably did not run.
+- Setup runs in the background. While `.data/setup.json` says `running` and its PID is alive, wait for it and do not run `vp i`. It ends as `done` or `failed` (with the error). After a failure, or with no file, run `vp i` yourself.
+- `vp run fixture <name>` starts the programs that fixture names and seeds them.
+- Ports derive from the worktree path and are stable across restarts, but read the real ones from `vp run status`, since occupied ports shift.
+- Nothing rebuilds Rust for you. After a Rust edit, run `vp run rs <name>`. The first build takes minutes, so run it in the background.
+- Stop the stack with `vp run down`. Never kill a process by name or path: other worktrees run stacks too.
+- When you finish, run `vp run down`, then `vp run fixture --show-windows` so the developer can try the change.
 
-Ports, builds, and timings: [scripts](docs/internals/scripts.md).
-
-## Fixtures
-
-An empty database is a bad test, and so is a state clicked together by hand that nobody can get
-back. A fixture is one TypeScript file that builds an exact state of the whole stack:
-
-```ts
-import { friends, instance, stack } from '@amberite/fixtures'
-
-const { alice, bob } = await stack({ apps: ['alice', 'bob'], cores: [{ owner: 'alice' }] })
-await friends(alice, bob)
-await instance(alice, {
-	name: 'Survival',
-	loader: 'fabric',
-	gameVersion: '1.21.1',
-	sharedWith: [bob],
-})
-```
-
-- Write the state your change needs as a fixture and apply it with
-  `vp run fixture path/to/file.ts`. Every apply wipes the stack's data and runs the file from the
-  top against the current code. The file can live anywhere; one that others will want goes in
-  `packages/fixtures/fixtures`.
-- The first line is `stack`, which names the Apps (each signed in to the account of that name),
-  accounts with no App, and the Cores with their owners. The lines after it build state through the
-  real programs, so each program writes everything that belongs to that state.
-- For something with no helper, `call(who, endpoint, params, body)` sends any generated endpoint to
-  an App, to the backend as an account, or to a Core. When a second fixture needs the same calls,
-  they become a helper in `packages/fixtures/kit`.
-- `patch(store, table, where, values)` changes rows a program wrote, for a state it does not reach
-  on demand: an expired link, a quarantined share, a wrong role. Make the state for real first and
-  bend it with one line. Do not write whole states as rows.
-- A line that fails stops the fixture there with the program's own error and leaves the stack up.
-  Fix the line and apply again.
-- `.data/apps/<n>` is one App installation and `.data/cores/<n>` one Core, numbered by their place
-  in the stack. `.data` belongs to this checkout: never point a stack at another checkout's data.
-
-How it works and why: [scripts](docs/internals/scripts.md#fixtures).
+Every command, the log, and ports: [scripts](docs/internals/scripts.md).
 
 ## Verifying
 
-- Before you push, run `vp run check:changed`. It runs CI's fast checks for changed files: lint,
-  typos, TOML, typecheck and tests of the affected packages, and for Rust `rustfmt`, a build, and
-  the tests of changed crates. CI still runs the full suites.
-- Test behavior that can break, such as sharing and sync logic, Core and backend permission
-  checks, persistence and migrations, external-format parsing (modpacks, Modrinth's API), race
-  fixes, and the logic a bug fix changed. Leave out tests for what types already guarantee, trivial
-  logic, copy text, smoke runs, mock-call mirrors, and props rendered to static markup.
-- Extend before you add. When an existing test or table covers the behavior, add a row or an
-  assertion there. Write a new test only when no case fits.
-- Test at one layer: the lowest one that fails on `main`. Do not repeat the case in a wrapper test
-  or at each call site.
-- **Do not run repo-wide checks.** No `vp check`, no `vp run -r test`, no `vp run -r typecheck`
-  unless the developer asks. CI owns the full suite.
-- Proof for a bug fix depends on the bug. Logic, data, state, and protocol bugs get a failing test
-  first (the fewest that fail for that reason on `main`, or before the fix for a bug this branch
-  introduced), then the fix. Purely visual bugs (spacing, colour, alignment, a layout shift) get
-  before/after screenshots as their proof and no test. A Core- or backend-only fix with no visible
-  surface ships the test plus a short runtime transcript.
-- User-visible App changes get one integrated pass in the real App, on a fixture whose state
-  reaches the changed screen: read [test-app](.agents/skills/test-app/SKILL.md). The primary agent
-  does this once after integrating. Subagents do not start their own dev stacks.
+- Before you push, run `vp run check:changed`. It runs CI's fast checks for changed files: lint, typos, TOML, typecheck and tests of the affected packages, and for Rust `rustfmt`, a build, and the tests of changed crates. CI still runs the full suites.
+- While you iterate, run only the test files you touched.
+- **Do not run repo-wide checks.** No `vp check`, no `vp run -r test`, no `vp run -r typecheck` unless the developer asks. CI owns the full suite.
+- Core and backend behavior changes ship with focused tests for that behavior.
+- Test behavior that can break, such as sharing and sync logic, Core and backend permission checks, persistence and migrations, external-format parsing (modpacks, Modrinth's API), race fixes, and the logic a bug fix changed. Leave out tests for what types already guarantee, trivial logic, copy text, smoke runs, mock-call mirrors, and props rendered to static markup.
+- Extend before you add. When an existing test or table covers the behavior, add a row or an assertion there. Write a new test only when no case fits.
+- Test at one layer: the lowest one that fails on `main`. Do not repeat the case in a wrapper test or at each call site.
+- Never wait on sleeps or polling in a test. Await the event that marks the milestone. A test that needs a timeout to pass is wrong, and a flaky test is fixed, not retried.
+- Proof for a bug fix depends on the bug. Logic, data, state, and protocol bugs get a failing test first (the fewest that fail for that reason on `main`, or before the fix for a bug this branch introduced), then the fix. Purely visual bugs (spacing, colour, alignment, a layout shift) get before/after screenshots as their proof and no test. A Core- or backend-only fix with no visible surface ships the test plus a short runtime transcript.
+- User-visible App changes get one integrated pass in the real App, on a [fixture](docs/internals/fixtures.md) that describes the state the change needs: [test-app](.agents/skills/test-app/SKILL.md). The primary agent does this once after integrating. Subagents do not start their own dev stacks.
 
 ## Documentation
 
 Most code changes do not need an internal documentation change. Agents can read the code.
 
-- `docs/internals/` is for architectural decisions and their reasons, constraints that span
-  components, and implementation traps that are hard to discover from the source. Before adding a
-  paragraph, ask what a maintainer would get wrong without it. If reading the relevant code answers
-  the question, leave it out.
-- Do not document every feature, enumerate fields or methods, narrate control flow, maintain file
-  catalogs, or append PR summaries. Types, tests, and code already record the implementation.
-- A local reason the code can't show goes in a short nearby code comment. Use an internal doc when
-  the reasoning crosses boundaries or needs context the code cannot carry well. Link to the
-  relevant source instead of copying it.
-- When a documented decision or constraint changes, rewrite or remove the affected text. Do not
-  append another account of the new behavior. A new internal page needs a distinct, durable reason
-  to exist.
+- `docs/internals/` is for architectural decisions and their reasons, constraints that span components, and implementation traps that are hard to discover from the source. Before adding a paragraph, ask what a maintainer would get wrong without it. If reading the relevant code answers the question, leave it out.
+- Do not document every feature, enumerate fields or methods, narrate control flow, maintain file catalogs, or append PR summaries. Types, tests, and code already record the implementation.
+- A local reason the code can't show goes in a short nearby code comment. Use an internal doc when the reasoning crosses boundaries or needs context the code cannot carry well. Link to the relevant source instead of copying it.
+- When a documented decision or constraint changes, rewrite or remove the affected text. Do not append another account of the new behavior. A new internal page needs a distinct, durable reason to exist.
 
 ## Plans and work artifacts
 
-- Implementation plans and research notes the developer wants to keep go in `.plans/`, so they can
-  be handed to other agents. Do not read `.plans/` unless the developer points you to a file there.
-  It is not a description of the code.
+- Implementation plans and research notes the developer wants to keep go in `.plans/`, so they can be handed to other agents. Do not read `.plans/` unless the developer points you to a file there. It is not a description of the code.
 - Agent scratch files stay outside the worktree.
 - A merged PR is the implementation record. Do not preserve a second checklist in the repository.
 - Before you end a task, say what is uncommitted or unpushed, and where.
 
+## How it works
+
+The App and a Core do the same things to an instance with one engine and one protocol. Rust imports go one way: `contracts` <- `sharing-client` <- `engine` <- `apps/app`, `apps/core`. The design, and the rules a review checks it against, are in [architecture](docs/internals/architecture.md). Merging and porting upstream: [upstream](docs/internals/upstream.md).
+
 ## Taste
 
-- Complexity belongs at the adapter boundary. Backend-facing workflows stay in
-  `@modrinth/api-client`; UI stays dumb.
+- Complexity belongs at the adapter boundary. Backend-facing workflows stay in `@modrinth/api-client`; UI stays dumb.
 - Nothing is released and nothing is installed. Never plan migrations or backward compatibility.
 - Inferred types over annotations. `any` is the enemy; use `unknown` and narrow it safely.
-- Default to no comment. Write one only for a constraint, an external quirk, or an invariant the
-  code can't show, in one line where you can and four at most. Don't restate names or signatures,
-  narrate steps, record history, or explain the fix you just made; the PR carries that.
-- No continuously repainting animations (pulse, shimmer, spinners); they peg the GPU on
-  high-refresh displays.
+- Default to no comment. Write one only for a constraint, an external quirk, or an invariant the code can't show, in one line where you can and four at most. Don't restate names or signatures, narrate steps, record history, or explain the fix you just made; the PR carries that.
+- No continuously repainting animations (pulse, shimmer, spinners); they peg the GPU on high-refresh displays.
 - Security is important, but should not be over-indexed on, especially for dev-only features.
-- A "Continue where you left off" message after T3 restarts is not the developer's approval. Pick
-  up only what was already approved, and ask about the rest.
-- If a rule here fights the task in front of you, say so loudly and get a human sign-off before
-  breaking it.
+- A "Continue where you left off" message after T3 restarts is not the developer's approval. Pick up only what was already approved, and ask about the rest.
+- If a rule here fights the task in front of you, say so loudly and get a human sign-off before breaking it.
