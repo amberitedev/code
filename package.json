@@ -14,6 +14,7 @@
 		"rs": "node scripts/dev-runner.ts rs",
 		"dev": "node scripts/dev-runner.ts dev",
 		"check:changed": "node scripts/check-changed.ts",
+		"sync:repos": "node scripts/sync-repos.ts",
 		"app:build": "vp run --filter @modrinth/app build",
 		"build": "node ./node_modules/turbo/bin/turbo run build --continue",
 		"check": "vp check",

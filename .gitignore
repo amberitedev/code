@@ -8,6 +8,9 @@ tmp
 # dependencies
 node_modules
 
+# reference repos, fetched by `vp run sync:repos`
+/.repos/
+
 # IDEs and editors
 .project
 .classpath
