@@ -358,6 +358,7 @@ import {
 	CopyIcon,
 	DatabaseBackupIcon,
 	FolderOpenIcon,
+	HistoryIcon,
 	IssuesIcon,
 	LayoutTemplateIcon,
 	LinkIcon,
@@ -371,7 +372,6 @@ import {
 	TimerIcon,
 	TransferIcon,
 	TriangleAlertIcon,
-	UsersIcon,
 } from '@modrinth/assets'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import DOMPurify from 'dompurify'
@@ -900,13 +900,6 @@ function prefetchFiles() {
 	})
 }
 
-function prefetchAccess() {
-	void queryClient.prefetchQuery({
-		queryKey: ['servers', 'users', 'v1', props.serverId],
-		queryFn: () => client.archon.server_users_v1.list(props.serverId),
-		staleTime: PANEL_STALE_MS,
-	})
-}
 watch(
 	() => serverData.value?.status,
 	(status, previousStatus) => {
@@ -950,11 +943,10 @@ const navLinks = computed<Tab[]>(() => [
 		subpages: [],
 	},
 	{
-		label: 'Access',
+		label: 'Activity',
 		href: `/hosting/manage/${props.serverId}/access`,
-		icon: UsersIcon,
+		icon: HistoryIcon,
 		subpages: [],
-		onHover: prefetchAccess,
 	},
 	...props.additionalTabs,
 ])

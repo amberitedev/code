@@ -1,5 +1,5 @@
-//! Routes as the App calls them: per-server roles, dangerous actions, and sessions, against a
-//! real router and an in-memory database.
+//! Routes as the App calls them: dangerous actions, sessions, servers, and their files, against
+//! a real router and an in-memory database.
 
 use std::sync::Arc;
 
@@ -35,7 +35,7 @@ struct Core {
     server: String,
 }
 
-/// A Core owned by `owner`, with one server where `editor` and `viewer` have those roles.
+/// A Core owned by `owner`, with one server.
 async fn core() -> Core {
     core_with_backend(None).await
 }
@@ -70,15 +70,6 @@ async fn core_with_backend(backend: Option<&str>) -> Core {
     .await
     .unwrap();
     let server = servers.create("A").await.unwrap().id;
-    for (user, role) in [("editor", "editor"), ("viewer", "viewer")] {
-        sqlx::query("INSERT INTO access (server_id, user_id, role, added_at) VALUES (?, ?, ?, 0)")
-            .bind(&server)
-            .bind(user)
-            .bind(role)
-            .execute(&db)
-            .await
-            .unwrap();
-    }
     let signer = Signer::new("k1");
     let keys = access::keys::load(
         db.clone(),
@@ -204,54 +195,29 @@ impl Core {
 }
 
 #[tokio::test]
-async fn each_role_reaches_only_what_the_table_gives_it() {
+async fn servers_wait_for_the_eula_and_every_route_for_a_session() {
     let core = core().await;
     let server = core.server.clone();
     let owner = core.sign_in("owner").await;
-    let editor = core.sign_in("editor").await;
-    let viewer = core.sign_in("viewer").await;
-    sqlx::query("INSERT INTO access (server_id, user_id, role, added_at) SELECT id, 'stranger', 'viewer', 0 FROM servers")
-        .execute(&core.state.db)
-        .await
-        .unwrap();
-    let stranger = core.sign_in("stranger").await;
-    sqlx::query("DELETE FROM access WHERE user_id = 'stranger'")
-        .execute(&core.state.db)
-        .await
-        .unwrap();
 
     let get = format!("/servers/{server}");
-    let (status, detail) = core
-        .call(Method::GET, &get, Some(&viewer), None, None)
-        .await;
+    let (status, detail) =
+        core.call(Method::GET, &get, Some(&owner), None, None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(detail["eula_accepted"], false);
-    let (status, _) = core
-        .call(Method::GET, &get, Some(&stranger), None, None)
-        .await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "no role reads as no server");
-
-    let power = format!("/servers/{server}/power");
-    let start = Some(json!({ "action": "start" }));
-    let (status, _) = core
-        .call(Method::POST, &power, Some(&viewer), None, start.clone())
-        .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    let (_, error) = core
-        .call(Method::POST, &power, Some(&editor), None, start)
-        .await;
-    assert_eq!(
-        error["error"], "eula_not_accepted",
-        "allowed, but the EULA is not accepted"
-    );
     let (_, error) = core
         .call(
             Method::POST,
-            "/servers",
+            &format!("/servers/{server}/power"),
             Some(&owner),
             None,
-            Some(json!({ "name": "B" })),
+            Some(json!({ "action": "start" })),
         )
+        .await;
+    assert_eq!(error["error"], "eula_not_accepted");
+    let create = Some(json!({ "name": "B" }));
+    let (_, error) = core
+        .call(Method::POST, "/servers", Some(&owner), None, create.clone())
         .await;
     assert_eq!(
         error["error"], "eula_not_accepted",
@@ -259,55 +225,23 @@ async fn each_role_reaches_only_what_the_table_gives_it() {
     );
     core.call(Method::POST, "/eula", Some(&owner), None, None)
         .await;
-    let (_, detail) = core
-        .call(Method::GET, &get, Some(&viewer), None, None)
-        .await;
+    let (_, detail) =
+        core.call(Method::GET, &get, Some(&owner), None, None).await;
     assert_eq!(detail["eula_accepted"], true);
 
-    let create = Some(json!({ "name": "B" }));
-    let (status, _) = core
-        .call(
-            Method::POST,
-            "/servers",
-            Some(&editor),
-            None,
-            create.clone(),
-        )
-        .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
     let (status, _) = core
         .call(Method::POST, "/servers", Some(&owner), None, create)
         .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(
-        core.call(Method::GET, "/activity", Some(&editor), None, None)
-            .await
-            .0,
-        StatusCode::FORBIDDEN
-    );
     let (status, page) = core
         .call(Method::GET, "/activity", Some(&owner), None, None)
         .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(page["entries"][0]["action"]["type"], "server_created");
-
-    let (_, list) = core
-        .call(Method::GET, "/servers", Some(&editor), None, None)
-        .await;
-    assert_eq!(
-        list.as_array().unwrap().len(),
-        1,
-        "friends see only their servers"
-    );
     let (_, list) = core
         .call(Method::GET, "/servers", Some(&owner), None, None)
         .await;
     assert_eq!(list.as_array().unwrap().len(), 2);
-    let (_, me) = core
-        .call(Method::GET, "/access/me", Some(&editor), None, None)
-        .await;
-    assert_eq!(me["servers"][0]["role"], "editor");
-    assert_eq!(me["owner"], false);
 
     assert_eq!(
         core.call(Method::GET, "/activity", None, None, None)
@@ -324,232 +258,79 @@ async fn each_role_reaches_only_what_the_table_gives_it() {
 }
 
 #[tokio::test]
-async fn crash_console_lines_are_kept_from_viewers() {
-    let core = core().await;
-    sqlx::query(
-        "INSERT INTO runs (id, server_id, started_at, ended_at, outcome, exit_code, last_lines) \
-         VALUES ('run', ?, 1, 2, 'crashed', 1, '<Steve> my address is 10.0.0.5')",
-    )
-    .bind(&core.server)
-    .execute(&core.state.db)
-    .await
-    .unwrap();
-    let insight = format!("/servers/{}/insight", core.server);
-    let viewer = core.sign_in("viewer").await;
-    let (status, seen) = core
-        .call(Method::GET, &insight, Some(&viewer), None, None)
-        .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(seen["last_crash"]["exit_code"], 1);
-    assert_eq!(seen["last_crash"]["last_lines"], Value::Null);
-    let editor = core.sign_in("editor").await;
-    let (_, seen) = core
-        .call(Method::GET, &insight, Some(&editor), None, None)
-        .await;
-    assert_eq!(
-        seen["last_crash"]["last_lines"],
-        "<Steve> my address is 10.0.0.5"
-    );
-}
-
-#[tokio::test]
 async fn dangerous_actions_need_a_fresh_ticket_of_the_owner() {
     let core = core().await;
     let owner = core.sign_in("owner").await;
-    let editor = core.sign_in("editor").await;
-    let invite = format!("/servers/{}/access", core.server);
-    let body = || {
-        Some(
-            json!({ "user": { "id": "friend", "name": "Friend", "avatar_url": null }, "role": "editor" }),
-        )
-    };
+    let delete = format!("/servers/{}", core.server);
 
     let (status, error) = core
-        .call(Method::POST, &invite, Some(&owner), None, body())
+        .call(Method::DELETE, &delete, Some(&owner), None, None)
         .await;
     assert_eq!(
         (status, error["error"].as_str()),
         (StatusCode::UNAUTHORIZED, Some("ticket_required"))
     );
-    let theirs = core.ticket("editor");
     let (_, error) = core
-        .call(Method::POST, &invite, Some(&owner), Some(&theirs), body())
+        .call(
+            Method::DELETE,
+            &delete,
+            Some(&owner),
+            Some(&core.ticket("stranger")),
+            None,
+        )
         .await;
     assert_eq!(
         error["error"], "ticket_invalid",
         "a ticket for someone else"
     );
-    let (status, _) = core
-        .call(Method::POST, &invite, Some(&editor), Some(&theirs), body())
-        .await;
-    assert_eq!(status, StatusCode::FORBIDDEN, "only the owner invites");
 
     let ticket = core.ticket("owner");
-    let (status, member) = core
-        .call(Method::POST, &invite, Some(&owner), Some(&ticket), body())
+    let (status, _) = core
+        .call(Method::DELETE, &delete, Some(&owner), Some(&ticket), None)
         .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(member["user"]["name"], "Friend");
-    assert_eq!(
-        core.count(
-            "SELECT COUNT(*) FROM backend_owed WHERE call LIKE '%\"grant\"%'"
-        )
-        .await,
-        1
-    );
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert!(!core.state.servers.paths().server(&core.server).exists());
     let (_, error) = core
-        .call(Method::POST, &invite, Some(&owner), Some(&ticket), body())
+        .call(Method::DELETE, &delete, Some(&owner), Some(&ticket), None)
         .await;
     assert_eq!(error["error"], "ticket_reused");
-
-    // Removing the editor ends their sessions and owes the backend the change.
-    let remove = format!("/servers/{}/access/editor", core.server);
-    assert_eq!(
-        core.call(Method::DELETE, &remove, Some(&owner), None, None)
-            .await
-            .0,
-        StatusCode::UNAUTHORIZED
-    );
-    let mut changes = core.state.access.changed.subscribe();
-    let (status, _) = core
-        .call(
-            Method::DELETE,
-            &remove,
-            Some(&owner),
-            Some(&core.ticket("owner")),
-            None,
-        )
-        .await;
-    assert_eq!(status, StatusCode::NO_CONTENT);
-    assert_eq!(
-        changes.recv().await.unwrap(),
-        access::Changed::User("editor".into())
-    );
-    assert_eq!(
-        core.call(Method::GET, "/access/me", Some(&editor), None, None)
-            .await
-            .0,
-        StatusCode::UNAUTHORIZED
-    );
-    assert_eq!(
-        core.count("SELECT COUNT(*) FROM backend_owed WHERE call LIKE '%\"remove\"%' AND call LIKE '%\"keep_core\":false%'").await,
-        1
-    );
-
-    // The CLI on the Core's machine is the owner and needs no ticket.
-    let mut request = Request::builder()
-        .method(Method::PATCH)
-        .uri(format!("/servers/{}/access/viewer", core.server))
-        .header("content-type", "application/json")
-        .body(Body::from(json!({ "role": "editor" }).to_string()))
-        .unwrap();
-    request.extensions_mut().insert(Local);
-    let (status, member) = core.send(request).await;
-    assert_eq!(
-        (status, member["role"].as_str()),
-        (StatusCode::OK, Some("editor"))
-    );
-
-    // Deleting a server takes a ticket too, and drops everyone's role on it.
-    let delete = format!("/servers/{}", core.server);
-    assert_eq!(
-        core.call(Method::DELETE, &delete, Some(&owner), None, None)
-            .await
-            .0,
-        StatusCode::UNAUTHORIZED
-    );
-    let (status, _) = core
-        .call(
-            Method::DELETE,
-            &delete,
-            Some(&owner),
-            Some(&core.ticket("owner")),
-            None,
-        )
-        .await;
-    assert_eq!(status, StatusCode::NO_CONTENT);
-    assert_eq!(core.count("SELECT COUNT(*) FROM access").await, 0);
-    assert!(!core.state.servers.paths().server(&core.server).exists());
-}
-
-#[tokio::test]
-async fn invites_stop_at_the_directory_cap() {
-    let core = core().await;
-    let owner = core.sign_in("owner").await;
-    // Two people already have a role; fill the rest of the directory.
-    for n in 2..super::access::MAX_DIRECTORY {
-        sqlx::query("INSERT INTO access (server_id, user_id, role, added_at) VALUES (?, ?, 'viewer', 0)")
-            .bind(&core.server)
-            .bind(format!("user{n}"))
-            .execute(&core.state.db)
-            .await
-            .unwrap();
-    }
-    let invite = format!("/servers/{}/access", core.server);
-    let body = |id: &str| {
-        Some(
-            json!({ "user": { "id": id, "name": id, "avatar_url": null }, "role": "editor" }),
-        )
-    };
-    let (status, error) = core
-        .call(
-            Method::POST,
-            &invite,
-            Some(&owner),
-            Some(&core.ticket("owner")),
-            body("newcomer"),
-        )
-        .await;
-    assert_eq!(
-        (status, error["error"].as_str()),
-        (StatusCode::CONFLICT, Some("conflict"))
-    );
-    // Someone already in the directory still gets a new role.
-    let (status, _) = core
-        .call(
-            Method::POST,
-            &invite,
-            Some(&owner),
-            Some(&core.ticket("owner")),
-            body("viewer"),
-        )
-        .await;
-    assert_eq!(status, StatusCode::OK);
 }
 
 #[tokio::test]
 async fn sessions_are_revoked_and_signed_out() {
+    use sha2::{Digest, Sha256};
+
     let core = core().await;
     let owner = core.sign_in("owner").await;
-    let laptop = core.sign_in("editor").await;
-    let phone = core.sign_in("editor").await;
-    let viewer = core.sign_in("viewer").await;
+    // Sign-in refuses anyone but the owner, so their session is made here.
+    sqlx::query(
+        "INSERT INTO sessions (id, token_hash, user_id, device_name, created_at, \
+         last_used_at, expires_at) VALUES ('theirs', ?1, 'stranger', 'Phone', ?2, ?2, ?2 + 3600)",
+    )
+    .bind(Sha256::digest(b"stranger").to_vec())
+    .bind(now())
+    .execute(&core.state.db)
+    .await
+    .unwrap();
 
-    let (_, mine) = core
-        .call(Method::GET, "/sessions", Some(&laptop), None, None)
+    let (status, _) = core
+        .call(
+            Method::GET,
+            &format!("/servers/{}", core.server),
+            Some("stranger"),
+            None,
+            None,
+        )
         .await;
-    let mine = mine.as_array().unwrap().clone();
-    assert_eq!(mine.len(), 2, "a friend sees only their own sessions");
-    let phone_id = mine
-        .iter()
-        .find(|session| session["current"] == false)
-        .unwrap()["id"]
-        .clone();
+    assert_eq!(status, StatusCode::NOT_FOUND, "no owner reads as no server");
     let (_, all) = core
         .call(Method::GET, "/sessions", Some(&owner), None, None)
         .await;
-    assert_eq!(all.as_array().unwrap().len(), 4);
+    assert_eq!(all.as_array().unwrap().len(), 2);
 
-    // Someone else's session: hidden from a friend, a dangerous action for the owner.
-    let revoke_phone = format!("/sessions/{}", phone_id.as_str().unwrap());
+    // Someone else's session is a dangerous action for the owner.
     assert_eq!(
-        core.call(Method::DELETE, &revoke_phone, Some(&viewer), None, None)
-            .await
-            .0,
-        StatusCode::NOT_FOUND
-    );
-    assert_eq!(
-        core.call(Method::DELETE, &revoke_phone, Some(&owner), None, None)
+        core.call(Method::DELETE, "/sessions/theirs", Some(&owner), None, None)
             .await
             .0,
         StatusCode::UNAUTHORIZED
@@ -557,7 +338,7 @@ async fn sessions_are_revoked_and_signed_out() {
     let (status, _) = core
         .call(
             Method::DELETE,
-            &revoke_phone,
+            "/sessions/theirs",
             Some(&owner),
             Some(&core.ticket("owner")),
             None,
@@ -565,7 +346,7 @@ async fn sessions_are_revoked_and_signed_out() {
         .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
     assert_eq!(
-        core.call(Method::GET, "/sessions", Some(&phone), None, None)
+        core.call(Method::GET, "/sessions", Some("stranger"), None, None)
             .await
             .0,
         StatusCode::UNAUTHORIZED
@@ -576,7 +357,7 @@ async fn sessions_are_revoked_and_signed_out() {
         core.call(
             Method::DELETE,
             "/sessions/current",
-            Some(&laptop),
+            Some(&owner),
             None,
             None
         )
@@ -585,7 +366,7 @@ async fn sessions_are_revoked_and_signed_out() {
         StatusCode::NO_CONTENT
     );
     assert_eq!(
-        core.call(Method::GET, "/sessions", Some(&laptop), None, None)
+        core.call(Method::GET, "/sessions", Some(&owner), None, None)
             .await
             .0,
         StatusCode::UNAUTHORIZED
@@ -603,16 +384,16 @@ async fn sessions_are_revoked_and_signed_out() {
 async fn sign_in_answers_with_a_session() {
     let core = core().await;
     let body =
-        json!({ "ticket": core.ticket("viewer"), "device_name": "Phone" });
+        json!({ "ticket": core.ticket("owner"), "device_name": "Phone" });
     let (status, signed) = core
         .call(Method::POST, "/sessions", None, None, Some(body))
         .await;
     assert_eq!(status, StatusCode::OK);
     let token = signed["token"].as_str().unwrap();
-    let (_, me) = core
-        .call(Method::GET, "/access/me", Some(token), None, None)
+    let (_, sessions) = core
+        .call(Method::GET, "/sessions", Some(token), None, None)
         .await;
-    assert_eq!(me["user"]["name"], "viewer name");
+    assert_eq!(sessions[0]["user"]["name"], "owner name");
     let stranger =
         json!({ "ticket": core.ticket("stranger"), "device_name": "Phone" });
     let (status, error) = core
@@ -620,7 +401,7 @@ async fn sign_in_answers_with_a_session() {
         .await;
     assert_eq!(
         (status, error["error"].as_str()),
-        (StatusCode::FORBIDDEN, Some("not_invited"))
+        (StatusCode::FORBIDDEN, Some("forbidden"))
     );
 }
 
@@ -662,59 +443,13 @@ async fn raw(
 }
 
 #[tokio::test]
-async fn content_and_files_follow_the_role_table() {
+async fn content_and_files_stay_inside_the_server() {
     let core = core().await;
     let server = core.server.clone();
-    let editor = core.sign_in("editor").await;
-    let viewer = core.sign_in("viewer").await;
-    sqlx::query("INSERT INTO access (server_id, user_id, role, added_at) VALUES (?, 'stranger', 'viewer', 0)")
-        .bind(&server)
-        .execute(&core.state.db)
-        .await
-        .unwrap();
-    let stranger = core.sign_in("stranger").await;
-    sqlx::query("DELETE FROM access WHERE user_id = 'stranger'")
-        .execute(&core.state.db)
-        .await
-        .unwrap();
+    let owner = core.sign_in("owner").await;
     let instance = format!("/instances/{server}");
     let files = format!("{instance}/files");
 
-    // Viewers see the content list and what the owner edited, nothing else.
-    for uri in [
-        format!("{instance}/content"),
-        format!("{instance}/content/edited"),
-    ] {
-        let (status, list) = core
-            .call(Method::GET, &uri, Some(&viewer), None, None)
-            .await;
-        assert_eq!((status, list), (StatusCode::OK, json!([])), "{uri}");
-        let (status, _) = core
-            .call(Method::GET, &uri, Some(&stranger), None, None)
-            .await;
-        assert_eq!(status, StatusCode::NOT_FOUND, "no role reads as no server");
-    }
-    let (status, _) = core
-        .call(
-            Method::GET,
-            &format!("{files}?path="),
-            Some(&stranger),
-            None,
-            None,
-        )
-        .await;
-    assert_eq!(status, StatusCode::NOT_FOUND);
-    for (method, uri) in [
-        (Method::GET, format!("{files}?path=")),
-        (Method::GET, format!("/servers/{server}/properties")),
-        (Method::POST, format!("{instance}/content/repair")),
-        (Method::POST, format!("{instance}/modpack/unlink")),
-        (Method::GET, format!("{instance}/shared/publish-preview")),
-    ] {
-        let (status, _) =
-            core.call(method, &uri, Some(&viewer), None, None).await;
-        assert_eq!(status, StatusCode::FORBIDDEN, "{uri}");
-    }
     // Engine routes a Core does not serve: their bodies or answers carry host paths, or they
     // reach past the server.
     for (method, uri) in [
@@ -723,7 +458,7 @@ async fn content_and_files_follow_the_role_table() {
         (Method::POST, format!("{instance}/install")),
     ] {
         let (status, _) =
-            core.call(method, &uri, Some(&editor), None, None).await;
+            core.call(method, &uri, Some(&owner), None, None).await;
         assert!(
             matches!(
                 status,
@@ -733,32 +468,29 @@ async fn content_and_files_follow_the_role_table() {
         );
     }
 
-    // Editors and the owner use the files, inside the server folder only.
+    // The files are used inside the server folder only.
     let content = format!("{files}/content");
     let write = format!("{content}?path=config/a.toml&create_only=true");
     assert_eq!(
-        raw(&core, Method::PUT, &write, &editor, "x = 1").await.0,
+        raw(&core, Method::PUT, &write, &owner, "x = 1").await.0,
         StatusCode::NO_CONTENT
     );
-    let owner = core.sign_in("owner").await;
-    for token in [&editor, &owner] {
-        let (status, list) = core
-            .call(
-                Method::GET,
-                &format!("{files}?path=config"),
-                Some(token),
-                None,
-                None,
-            )
-            .await;
-        assert_eq!(status, StatusCode::OK);
-        assert_eq!(list[0]["path"], "config/a.toml");
-    }
+    let (status, list) = core
+        .call(
+            Method::GET,
+            &format!("{files}?path=config"),
+            Some(&owner),
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(list[0]["path"], "config/a.toml");
     let (status, body) = raw(
         &core,
         Method::GET,
         &format!("{content}?path=config/a.toml"),
-        &editor,
+        &owner,
         "",
     )
     .await;
@@ -768,7 +500,7 @@ async fn content_and_files_follow_the_role_table() {
             &core,
             Method::GET,
             &format!("{content}?path={path}"),
-            &editor,
+            &owner,
             "",
         )
         .await;
@@ -783,21 +515,21 @@ async fn content_and_files_follow_the_role_table() {
     let properties = format!("{content}?path=server.properties");
     let new_file = format!("{properties}&create_only=true");
     assert_eq!(
-        raw(&core, Method::PUT, &new_file, &editor, "motd=Mine\n")
+        raw(&core, Method::PUT, &new_file, &owner, "motd=Mine\n")
             .await
             .0,
         StatusCode::NO_CONTENT,
         "nothing to replace yet"
     );
     assert_eq!(
-        raw(&core, Method::PUT, &new_file, &editor, "motd=Theirs\n")
+        raw(&core, Method::PUT, &new_file, &owner, "motd=Theirs\n")
             .await
             .0,
         StatusCode::CONFLICT
     );
     let edit = format!("{properties}&create_only=false");
     assert_eq!(
-        raw(&core, Method::PUT, &edit, &editor, "motd=Edited\n")
+        raw(&core, Method::PUT, &edit, &owner, "motd=Edited\n")
             .await
             .0,
         StatusCode::NO_CONTENT
@@ -814,7 +546,7 @@ async fn content_and_files_follow_the_role_table() {
         .call(
             Method::GET,
             &format!("/servers/{server}/properties"),
-            Some(&editor),
+            Some(&owner),
             None,
             None,
         )
@@ -828,8 +560,7 @@ async fn content_changes_wait_for_a_stopped_server_and_a_pack_update_backs_up_fi
  {
     let core = core().await;
     let server = core.server.clone();
-    let editor = core.sign_in("editor").await;
-    let viewer = core.sign_in("viewer").await;
+    let owner = core.sign_in("owner").await;
     let instance = format!("/instances/{server}");
     let unlink = format!("{instance}/modpack/unlink");
 
@@ -838,16 +569,11 @@ async fn content_changes_wait_for_a_stopped_server_and_a_pack_update_backs_up_fi
         crate::servers::shim::try_lock(core.state.servers.paths(), &server)
             .unwrap()
             .unwrap();
-    let (status, _) = core
-        .call(Method::POST, &unlink, Some(&viewer), None, None)
-        .await;
-    assert_eq!(status, StatusCode::FORBIDDEN, "the role is checked first");
     let (_, error) = core
-        .call(Method::POST, &unlink, Some(&editor), None, None)
+        .call(Method::POST, &unlink, Some(&owner), None, None)
         .await;
     assert_eq!(error["error"], "already_running");
     // Share changes touch no files of the server.
-    let owner = core.sign_in("owner").await;
     let (status, error) = core
         .call(
             Method::DELETE,
@@ -871,7 +597,7 @@ async fn content_changes_wait_for_a_stopped_server_and_a_pack_update_backs_up_fi
     drop(shim);
 
     let (status, _) = core
-        .call(Method::POST, &unlink, Some(&editor), None, None)
+        .call(Method::POST, &unlink, Some(&owner), None, None)
         .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
     assert_eq!(
@@ -893,7 +619,7 @@ async fn content_changes_wait_for_a_stopped_server_and_a_pack_update_backs_up_fi
         .call(
             Method::POST,
             &format!("{instance}/modpack/update"),
-            Some(&editor),
+            Some(&owner),
             None,
             Some(json!({ "version_id": "v" })),
         )
@@ -921,17 +647,11 @@ async fn restores_need_the_owners_fresh_ticket_and_downloads_a_link_or_a_session
     let core = core().await;
     let server = core.server.clone();
     let owner = core.sign_in("owner").await;
-    let editor = core.sign_in("editor").await;
-    let viewer = core.sign_in("viewer").await;
     let queue = format!("/servers/{server}/backups");
 
     let name = Some(json!({ "name": "First" }));
-    let (status, _) = core
-        .call(Method::POST, &queue, Some(&viewer), None, name.clone())
-        .await;
-    assert_eq!(status, StatusCode::FORBIDDEN, "viewers only see backups");
     let (status, created) = core
-        .call(Method::POST, &queue, Some(&editor), None, name.clone())
+        .call(Method::POST, &queue, Some(&owner), None, name)
         .await;
     assert_eq!(status, StatusCode::OK);
     let backup = created["id"].as_str().unwrap().to_owned();
@@ -942,22 +662,12 @@ async fn restores_need_the_owners_fresh_ticket_and_downloads_a_link_or_a_session
             .id;
     core.state.backups.wait(operation).await.unwrap();
     let (_, list) = core
-        .call(Method::GET, &queue, Some(&viewer), None, None)
+        .call(Method::GET, &queue, Some(&owner), None, None)
         .await;
     assert_eq!(list["backups"][0]["state"], "done");
     assert_eq!(list["backups"][0]["operations"][0]["state"], "done");
 
     let restore = format!("{queue}/{backup}/restore");
-    let (status, _) = core
-        .call(
-            Method::POST,
-            &restore,
-            Some(&editor),
-            Some(&core.ticket("editor")),
-            None,
-        )
-        .await;
-    assert_eq!(status, StatusCode::FORBIDDEN, "only the owner restores");
     let (status, error) = core
         .call(Method::POST, &restore, Some(&owner), None, None)
         .await;
@@ -976,13 +686,11 @@ async fn restores_need_the_owners_fresh_ticket_and_downloads_a_link_or_a_session
         .await;
     assert_eq!(status, StatusCode::ACCEPTED);
 
-    // A link works once, for the exact path it was made for, while its maker may still make it.
+    // A link works once, for the exact path it was made for.
     let download = format!(
         "/servers/{server}/v1/worlds/{server}/backups/{backup}/download"
     );
-    let (status, _) = core.link(&viewer, &download).await;
-    assert_eq!(status, StatusCode::FORBIDDEN, "a viewer cannot download");
-    let (status, link) = core.link(&editor, &download).await;
+    let (status, link) = core.link(&owner, &download).await;
     assert_eq!(status, StatusCode::OK);
     let get =
         |uri: &str| Request::builder().uri(uri).body(Body::empty()).unwrap();
@@ -992,7 +700,7 @@ async fn restores_need_the_owners_fresh_ticket_and_downloads_a_link_or_a_session
     assert!(bytes.starts_with(b"PK"), "a zip");
     let (status, _) = core.send(get(&link)).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "a second use");
-    let (_, link) = core.link(&editor, &download).await;
+    let (_, link) = core.link(&owner, &download).await;
     let token = link.rsplit_once("link=").unwrap().1;
     let world =
         format!("/servers/{server}/v1/worlds/{server}/files/download-full-zip");
@@ -1000,24 +708,6 @@ async fn restores_need_the_owners_fresh_ticket_and_downloads_a_link_or_a_session
     assert_eq!(status, StatusCode::UNAUTHORIZED, "another path");
     let (status, _) = core.send(get(&link)).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "spent on the other path");
-    let (_, link) = core.link(&editor, &download).await;
-    let demote = |role: &'static str| {
-        sqlx::query("UPDATE access SET role = ? WHERE user_id = 'editor'")
-            .bind(role)
-            .execute(&core.state.db)
-    };
-    demote("viewer").await.unwrap();
-    let (status, _) = core.send(get(&link)).await;
-    assert_eq!(status, StatusCode::FORBIDDEN, "no longer an editor");
-    demote("editor").await.unwrap();
-    let (status, _) = core
-        .call(Method::GET, &download, Some(&viewer), None, None)
-        .await;
-    assert_eq!(
-        status,
-        StatusCode::FORBIDDEN,
-        "a viewer's session does not download"
-    );
 
     // One file of the server, named in the query.
     std::fs::write(
@@ -1031,7 +721,7 @@ async fn restores_need_the_owners_fresh_ticket_and_downloads_a_link_or_a_session
     .unwrap();
     let (status, link) = core
         .link(
-            &editor,
+            &owner,
             &format!(
                 "/instances/{server}/files/content?path=server.properties"
             ),
@@ -1045,7 +735,7 @@ async fn restores_need_the_owners_fresh_ticket_and_downloads_a_link_or_a_session
     let (status, _) = core.send(get(&link)).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "a file downloads once");
 
-    // Deleting a backup is the owner's too.
+    // Deleting a backup takes a ticket too.
     let delete = format!("{queue}/{backup}");
     core.state
         .backups
@@ -1062,9 +752,9 @@ async fn restores_need_the_owners_fresh_ticket_and_downloads_a_link_or_a_session
         .await
         .unwrap();
     let (status, _) = core
-        .call(Method::DELETE, &delete, Some(&editor), None, None)
+        .call(Method::DELETE, &delete, Some(&owner), None, None)
         .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
     let (status, _) = core
         .call(
             Method::DELETE,
@@ -1081,11 +771,6 @@ async fn restores_need_the_owners_fresh_ticket_and_downloads_a_link_or_a_session
 async fn updating_core_is_the_owners_dangerous_action() {
     let core = core().await;
     let owner = core.sign_in("owner").await;
-    let editor = core.sign_in("editor").await;
-    let (status, _) = core
-        .call(Method::GET, "/update", Some(&editor), None, None)
-        .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
 
     // Turning auto-update off is plain; a new channel or turning it on takes a ticket.
     let patch = |body| {
@@ -1157,15 +842,9 @@ async fn updating_core_is_the_owners_dangerous_action() {
 async fn removing_the_core_from_its_account_ends_every_session() {
     let core = core().await;
     let owner = core.sign_in("owner").await;
-    let editor = core.sign_in("editor").await;
     let remove = |token, ticket| {
         core.call(Method::DELETE, "/pairing", Some(token), ticket, None)
     };
-    let theirs = core.ticket("editor");
-    assert_eq!(
-        remove(&editor, Some(&theirs)).await.0,
-        StatusCode::FORBIDDEN
-    );
     assert_eq!(remove(&owner, None).await.0, StatusCode::UNAUTHORIZED);
 
     let mut changes = core.state.access.changed.subscribe();
@@ -1181,7 +860,6 @@ async fn removing_the_core_from_its_account_ends_every_session() {
             "SELECT COUNT(*) FROM core WHERE owner_user_id IS NOT NULL",
         ),
         ("sessions", "SELECT COUNT(*) FROM sessions"),
-        ("roles", "SELECT COUNT(*) FROM access"),
     ] {
         assert_eq!(core.count(sql).await, 0, "{what} left");
     }
@@ -1193,77 +871,9 @@ async fn removing_the_core_from_its_account_ends_every_session() {
         1
     );
     let (status, _) = core
-        .call(Method::GET, "/access/me", Some(&owner), None, None)
+        .call(Method::GET, "/sessions", Some(&owner), None, None)
         .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
-async fn a_member_leaves_a_server_without_a_ticket() {
-    let core = core().await;
-    let editor = core.sign_in("editor").await;
-    let viewer = core.sign_in("viewer").await;
-    let path = |user: &str| format!("/servers/{}/access/{user}", core.server);
-
-    let (status, _) = core
-        .call(Method::DELETE, &path("viewer"), Some(&editor), None, None)
-        .await;
-    assert_eq!(
-        status,
-        StatusCode::FORBIDDEN,
-        "only the owner removes others"
-    );
-
-    let mut changes = core.state.access.changed.subscribe();
-    let (status, _) = core
-        .call(Method::DELETE, &path("viewer"), Some(&viewer), None, None)
-        .await;
-    assert_eq!(status, StatusCode::NO_CONTENT);
-    assert_eq!(
-        changes.recv().await.unwrap(),
-        access::Changed::User("viewer".into())
-    );
-    assert_eq!(
-        core.count("SELECT COUNT(*) FROM access WHERE user_id = 'viewer'")
-            .await,
-        0
-    );
-    assert_eq!(
-        core.count("SELECT COUNT(*) FROM sessions WHERE user_id = 'viewer'")
-            .await,
-        0
-    );
-    assert_eq!(
-        core.count(
-            "SELECT COUNT(*) FROM backend_owed WHERE call LIKE '%\"remove\"%'"
-        )
-        .await,
-        1
-    );
-    let (status, _) = core
-        .call(Method::DELETE, &path("viewer"), Some(&viewer), None, None)
-        .await;
-    assert_eq!(
-        status,
-        StatusCode::UNAUTHORIZED,
-        "the session ended with it"
-    );
-}
-
-#[tokio::test]
-async fn each_role_is_shown_its_own_role() {
-    let core = core().await;
-    let uri = format!("/servers/{}", core.server);
-    for (user, expected) in [
-        ("owner", Value::Null),
-        ("editor", json!("editor")),
-        ("viewer", json!("viewer")),
-    ] {
-        let token = core.sign_in(user).await;
-        let (_, server) =
-            core.call(Method::GET, &uri, Some(&token), None, None).await;
-        assert_eq!(server["role"], expected, "{user}");
-    }
 }
 
 #[tokio::test]
@@ -1274,11 +884,9 @@ async fn slot_options_rotate_scheduled_backups_as_the_owners_dangerous_action()
     let core = core().await;
     let server = core.server.clone();
     let owner = core.sign_in("owner").await;
-    let editor = core.sign_in("editor").await;
-    let viewer = core.sign_in("viewer").await;
     let backups = format!("/servers/{server}/backups");
     let schedule = format!("{backups}/schedule");
-    let get = || core.call(Method::GET, &backups, Some(&viewer), None, None);
+    let get = || core.call(Method::GET, &backups, Some(&owner), None, None);
     let patch = |token, ticket: Option<String>, body| {
         let core = &core;
         let schedule = &schedule;
@@ -1327,33 +935,29 @@ async fn slot_options_rotate_scheduled_backups_as_the_owners_dangerous_action()
             .all(|backup| !backup["rotates_at"].is_null())
     );
 
-    // Editors change the interval and give scheduled backups more slots.
+    // A new interval and more slots for scheduled backups need no ticket.
     let (status, body) = patch(
-        &editor,
+        &owner,
         None,
         json!({ "keep": 10, "interval_hours": 12, "delete_excess": false }),
     )
     .await;
     assert_eq!((status, &body["applied"]), (StatusCode::OK, &json!(true)));
     let (status, _) = patch(
-        &editor,
+        &owner,
         None,
         json!({ "keep": 16, "interval_hours": null, "delete_excess": false }),
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "there are 15 slots");
 
-    // Fewer scheduled slots than backups: named first, then deleted, which is the owner's
-    // with a ticket.
+    // Fewer scheduled slots than backups: named first, then deleted with a ticket.
     let fewer = |delete_excess| json!({ "keep": 1, "interval_hours": null, "delete_excess": delete_excess });
-    let (status, body) = patch(&editor, None, fewer(false)).await;
+    let (status, body) = patch(&owner, None, fewer(false)).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["applied"], false);
     assert_eq!(body["excess"].as_array().unwrap().len(), 1);
     let oldest = body["excess"][0].clone();
-    let (status, _) =
-        patch(&editor, Some(core.ticket("editor")), fewer(true)).await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
     let (status, error) = patch(&owner, None, fewer(true)).await;
     assert_eq!(
         (status, error["error"].as_str()),
@@ -1383,9 +987,9 @@ async fn slot_options_rotate_scheduled_backups_as_the_owners_dangerous_action()
     assert_eq!(body["schedule"]["keep"], 0);
     assert!(body["backups"].as_array().unwrap().is_empty());
 
-    // A manual backup takes a manual slot; renaming is the editor's.
+    // A manual backup takes a manual slot, and is renamed.
     let (status, _) = patch(
-        &editor,
+        &owner,
         None,
         json!({ "keep": 14, "interval_hours": null, "delete_excess": false }),
     )
@@ -1395,7 +999,7 @@ async fn slot_options_rotate_scheduled_backups_as_the_owners_dangerous_action()
         .call(
             Method::POST,
             &backups,
-            Some(&editor),
+            Some(&owner),
             None,
             Some(json!({ "name": "One" })),
         )
@@ -1405,7 +1009,7 @@ async fn slot_options_rotate_scheduled_backups_as_the_owners_dangerous_action()
         .call(
             Method::POST,
             &backups,
-            Some(&editor),
+            Some(&owner),
             None,
             Some(json!({ "name": "Two" })),
         )
@@ -1414,11 +1018,7 @@ async fn slot_options_rotate_scheduled_backups_as_the_owners_dangerous_action()
     let rename = format!("{backups}/{}", created["id"].as_str().unwrap());
     let renamed = Some(json!({ "name": "Renamed" }));
     let (status, _) = core
-        .call(Method::PATCH, &rename, Some(&viewer), None, renamed.clone())
-        .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    let (status, _) = core
-        .call(Method::PATCH, &rename, Some(&editor), None, renamed)
+        .call(Method::PATCH, &rename, Some(&owner), None, renamed)
         .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
     let (_, body) = get().await;
@@ -1426,22 +1026,12 @@ async fn slot_options_rotate_scheduled_backups_as_the_owners_dangerous_action()
 }
 
 #[tokio::test]
-async fn only_the_owner_reads_and_changes_a_servers_share_history() {
+async fn a_server_not_shared_has_no_share_history() {
     let core = core().await;
     let server = core.server.clone();
     let owner = core.sign_in("owner").await;
-    let editor = core.sign_in("editor").await;
     let history = format!("/instances/{server}/shared/history");
 
-    for (method, uri) in [
-        (Method::GET, history.clone()),
-        (Method::POST, format!("{history}/1/restore")),
-        (Method::DELETE, format!("{history}/1")),
-    ] {
-        let (status, _) =
-            core.call(method, &uri, Some(&editor), None, None).await;
-        assert_eq!(status, StatusCode::FORBIDDEN, "{uri}");
-    }
     let (status, versions) = core
         .call(Method::GET, &history, Some(&owner), None, None)
         .await;
@@ -1547,11 +1137,6 @@ async fn a_server_with_nothing_installed_is_not_shared() {
 async fn the_owner_changes_storage_and_the_store_is_forwarded_to() {
     let core = core().await;
     let owner = core.sign_in("owner").await;
-    let editor = core.sign_in("editor").await;
-    let (status, _) = core
-        .call(Method::GET, "/storage", Some(&editor), None, None)
-        .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
     // The store is not running here, and the settings answer anyway, without waiting for it.
     let (status, storage) = tokio::time::timeout(
         std::time::Duration::from_secs(5),
@@ -1592,46 +1177,41 @@ async fn the_owner_changes_storage_and_the_store_is_forwarded_to() {
 }
 
 #[tokio::test]
-async fn editors_set_the_servers_name_and_update_channel() {
+async fn the_owner_sets_the_servers_name_and_update_channel() {
     let core = core().await;
     let server = core.server.clone();
-    let editor = core.sign_in("editor").await;
-    let viewer = core.sign_in("viewer").await;
+    let owner = core.sign_in("owner").await;
     let detail = format!("/servers/{server}");
     let channel = |detail: &Value| detail["update_channel"].clone();
 
     let (_, before) = core
-        .call(Method::GET, &detail, Some(&viewer), None, None)
+        .call(Method::GET, &detail, Some(&owner), None, None)
         .await;
     assert_eq!(channel(&before), "release");
 
     let beta = Some(json!({ "update_channel": "beta" }));
     let (status, _) = core
-        .call(Method::PATCH, &detail, Some(&viewer), None, beta.clone())
-        .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    let (status, _) = core
-        .call(Method::PATCH, &detail, Some(&editor), None, beta)
+        .call(Method::PATCH, &detail, Some(&owner), None, beta)
         .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
 
     let (_, after) = core
-        .call(Method::GET, &detail, Some(&viewer), None, None)
+        .call(Method::GET, &detail, Some(&owner), None, None)
         .await;
     assert_eq!(channel(&after), "beta");
 
     let blank = Some(json!({ "name": "  " }));
     let (_, error) = core
-        .call(Method::PATCH, &detail, Some(&editor), None, blank)
+        .call(Method::PATCH, &detail, Some(&owner), None, blank)
         .await;
     assert_eq!(error["error"], "invalid_input");
     let renamed = Some(json!({ "name": " Survival " }));
     let (status, _) = core
-        .call(Method::PATCH, &detail, Some(&editor), None, renamed)
+        .call(Method::PATCH, &detail, Some(&owner), None, renamed)
         .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
     let (_, after) = core
-        .call(Method::GET, &detail, Some(&viewer), None, None)
+        .call(Method::GET, &detail, Some(&owner), None, None)
         .await;
     assert_eq!(after["name"], "Survival");
     assert_eq!(channel(&after), "beta", "a rename keeps the channel");
@@ -1640,8 +1220,7 @@ async fn editors_set_the_servers_name_and_update_channel() {
 #[tokio::test]
 async fn an_icon_is_saved_for_minecraft_and_the_app_then_reset() {
     let core = core().await;
-    let editor = core.sign_in("editor").await;
-    let viewer = core.sign_in("viewer").await;
+    let owner = core.sign_in("owner").await;
     let uri = format!("/instances/{}/icon", core.server);
     let put = |token: &str, body: Vec<u8>| {
         Request::put(&uri)
@@ -1657,9 +1236,8 @@ async fn an_icon_is_saved_for_minecraft_and_the_app_then_reset() {
         .server(&core.server)
         .join("server-icon.png");
 
-    let (status, _) = core
-        .call(Method::GET, &uri, Some(&viewer), None, None)
-        .await;
+    let (status, _) =
+        core.call(Method::GET, &uri, Some(&owner), None, None).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
     let mut wide = Vec::new();
     image::RgbaImage::new(1024, 512)
@@ -1668,23 +1246,15 @@ async fn an_icon_is_saved_for_minecraft_and_the_app_then_reset() {
             image::ImageFormat::Png,
         )
         .unwrap();
-    assert_eq!(
-        core.send(put(&viewer, wide.clone())).await.0,
-        StatusCode::FORBIDDEN
-    );
-    assert_eq!(
-        core.send(put(&editor, wide)).await.0,
-        StatusCode::NO_CONTENT
-    );
-    let (status, _) = core
-        .call(Method::GET, &uri, Some(&viewer), None, None)
-        .await;
+    assert_eq!(core.send(put(&owner, wide)).await.0, StatusCode::NO_CONTENT);
+    let (status, _) =
+        core.call(Method::GET, &uri, Some(&owner), None, None).await;
     assert_eq!(status, StatusCode::OK);
     let game = image::open(&game_icon).unwrap();
     assert_eq!((game.width(), game.height()), (64, 64));
 
     let (status, _) = core
-        .call(Method::DELETE, &uri, Some(&editor), None, None)
+        .call(Method::DELETE, &uri, Some(&owner), None, None)
         .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
     assert!(!game_icon.exists());
@@ -1696,8 +1266,7 @@ async fn a_server_exports_as_a_pack_once_per_link() {
 
     let core = core().await;
     let server = core.server.clone();
-    let editor = core.sign_in("editor").await;
-    let viewer = core.sign_in("viewer").await;
+    let owner = core.sign_in("owner").await;
     crate::servers::platform::set(
         &core.state.engine,
         &server,
@@ -1715,9 +1284,7 @@ async fn a_server_exports_as_a_pack_once_per_link() {
     let path =
         format!("/servers/{server}/v1/worlds/{server}/content/export-mrpack");
 
-    let (status, _) = core.link(&viewer, &path).await;
-    assert_eq!(status, StatusCode::FORBIDDEN, "a viewer may not export");
-    let (status, link) = core.link(&editor, &path).await;
+    let (status, link) = core.link(&owner, &path).await;
     assert_eq!(status, StatusCode::OK);
     let export = || Request::builder().uri(&link).body(Body::empty()).unwrap();
     let response = core.router.clone().oneshot(export()).await.unwrap();
@@ -1756,7 +1323,7 @@ async fn engine_wide_access_is_the_owners() {
     for (caller, allowed) in [
         (access::Caller::Local, true),
         (session("owner", true), true),
-        (session("editor", false), false),
+        (session("stranger", false), false),
     ] {
         let granted = engine_access
             .require(&caller, None, access::Permission::View)
@@ -1828,36 +1395,10 @@ async fn next(socket: &mut EventSocket) -> Option<Value> {
 }
 
 #[tokio::test]
-async fn revoking_a_role_ends_the_console_and_keeps_the_socket() {
-    let core = core().await;
-    let server = core.server.clone();
-    let editor = core.sign_in("editor").await;
-    let mut socket = core.events(&editor).await;
-    subscribe(&mut socket, json!({ "type": "server", "id": server })).await;
-    assert_eq!(next(&mut socket).await.unwrap()["type"], "power");
-    let console = json!({ "type": "console", "id": server });
-    subscribe(&mut socket, console.clone()).await;
-
-    sqlx::query("UPDATE access SET role = 'viewer' WHERE user_id = 'editor'")
-        .execute(&core.state.db)
-        .await
-        .unwrap();
-    core.state.access.changed("editor");
-    let ended = next(&mut socket).await.unwrap();
-    assert_eq!(ended["type"], "ended");
-    assert_eq!(ended["payload"]["topic"], console);
-    assert_eq!(ended["payload"]["error"]["error"], "forbidden");
-
-    subscribe(&mut socket, console).await;
-    let refused = next(&mut socket).await.expect("the socket stays open");
-    assert_eq!(refused["payload"]["error"]["error"], "forbidden");
-}
-
-#[tokio::test]
 async fn ending_the_session_closes_the_socket() {
     let core = core().await;
-    let editor = core.sign_in("editor").await;
-    let mut socket = core.events(&editor).await;
+    let owner = core.sign_in("owner").await;
+    let mut socket = core.events(&owner).await;
     subscribe(&mut socket, json!({ "type": "server", "id": core.server }))
         .await;
     next(&mut socket).await.unwrap();
@@ -1866,7 +1407,7 @@ async fn ending_the_session_closes_the_socket() {
         .call(
             Method::DELETE,
             "/sessions/current",
-            Some(&editor),
+            Some(&owner),
             None,
             None,
         )
@@ -1896,8 +1437,8 @@ async fn an_installs_subscription_starts_with_the_unfinished_jobs() {
     )
     .await
     .unwrap();
-    let editor = core.sign_in("editor").await;
-    let mut socket = core.events(&editor).await;
+    let owner = core.sign_in("owner").await;
+    let mut socket = core.events(&owner).await;
     subscribe(&mut socket, json!({ "type": "installs" })).await;
     subscribe(&mut socket, json!({ "type": "server", "id": core.server }))
         .await;
@@ -1929,12 +1470,12 @@ async fn a_loader_install_is_refused_while_the_engine_installs_the_server() {
     )
     .await
     .unwrap();
-    let editor = core.sign_in("editor").await;
+    let owner = core.sign_in("owner").await;
     let (_, error) = core
         .call(
             Method::POST,
             &format!("/servers/{}/reinstall", core.server),
-            Some(&editor),
+            Some(&owner),
             None,
             Some(json!({ "loader": "fabric", "loader_version": null, "game_version": "1.21.4" })),
         )
@@ -1972,8 +1513,8 @@ async fn the_content_is_announced_once_an_install_lets_the_server_go() {
 #[tokio::test]
 async fn a_lagged_subscriber_gets_resync_and_the_servers_state_again() {
     let core = core().await;
-    let editor = core.sign_in("editor").await;
-    let mut socket = core.events(&editor).await;
+    let owner = core.sign_in("owner").await;
+    let mut socket = core.events(&owner).await;
     subscribe(&mut socket, json!({ "type": "server", "id": core.server }))
         .await;
     next(&mut socket).await.unwrap();
@@ -2051,14 +1592,14 @@ fn follow_instance(ticket: &str) -> Value {
 async fn a_stopped_server_follows_an_instance_at_once() {
     let version = Arc::new(std::sync::atomic::AtomicI32::new(2));
     let core = core_with_backend(Some(&share_versions(version).await)).await;
-    let editor = core.sign_in("editor").await;
+    let owner = core.sign_in("owner").await;
     let follow = format!("/servers/{}/follow", core.server);
 
     let (status, _) = core
         .call(
             Method::POST,
             &follow,
-            Some(&editor),
+            Some(&owner),
             None,
             Some(follow_instance("another")),
         )
@@ -2068,7 +1609,7 @@ async fn a_stopped_server_follows_an_instance_at_once() {
         .call(
             Method::POST,
             &follow,
-            Some(&editor),
+            Some(&owner),
             None,
             Some(follow_instance("ticket")),
         )
@@ -2088,7 +1629,7 @@ async fn a_stopped_server_follows_an_instance_at_once() {
         .call(
             Method::GET,
             &format!("/servers/{}", core.server),
-            Some(&editor),
+            Some(&owner),
             None,
             None,
         )
@@ -2105,7 +1646,7 @@ async fn a_running_server_takes_the_newest_pushed_version_once_it_stops() {
     let core =
         core_with_backend(Some(&share_versions(Arc::clone(&version)).await))
             .await;
-    let editor = core.sign_in("editor").await;
+    let owner = core.sign_in("owner").await;
     let follow = format!("/servers/{}/follow", core.server);
     let pending = || {
         core.count(
@@ -2124,7 +1665,7 @@ async fn a_running_server_takes_the_newest_pushed_version_once_it_stops() {
         .call(
             Method::POST,
             &follow,
-            Some(&editor),
+            Some(&owner),
             None,
             Some(follow_instance("ticket")),
         )
@@ -2135,7 +1676,7 @@ async fn a_running_server_takes_the_newest_pushed_version_once_it_stops() {
         .call(
             Method::GET,
             &format!("/servers/{}", core.server),
-            Some(&editor),
+            Some(&owner),
             None,
             None,
         )
@@ -2148,7 +1689,7 @@ async fn a_running_server_takes_the_newest_pushed_version_once_it_stops() {
     core.call(
         Method::POST,
         &follow,
-        Some(&editor),
+        Some(&owner),
         None,
         Some(follow_instance("ticket")),
     )

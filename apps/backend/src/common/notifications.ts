@@ -15,24 +15,15 @@ export interface NotificationRow {
 export function notificationResponse(row: NotificationRow): Notification {
 	// Every notification is stored with a `type`.
 	const body: Notification['body'] = JSON.parse(row.body)
-	const serverInvite = body.type === 'server_invite'
-	const invite = body.type === 'shared_instance_invite' || serverInvite
+	const invite = body.type === 'shared_instance_invite'
 	return {
 		id: row.id,
 		user_id: row.user_id,
 		body,
 		created: row.created,
 		read: Boolean(row.read),
-		name: serverInvite
-			? 'You have been invited to manage a server!'
-			: invite
-				? 'You have been invited to a shared instance!'
-				: '',
-		text: serverInvite
-			? `An invite has been sent for you to manage ${body.server_name}`
-			: invite
-				? `An invite has been sent for you to join ${body.shared_instance_name}`
-				: '',
+		name: invite ? 'You have been invited to a shared instance!' : '',
+		text: invite ? `An invite has been sent for you to join ${body.shared_instance_name}` : '',
 		link: invite ? '#' : '',
 		actions: invite
 			? [

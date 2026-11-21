@@ -1821,7 +1821,6 @@ export namespace Labrinth {
 			export type SocialPreferences = {
 				friend_privacy: FriendPrivacy
 				shared_instances_privacy: InvitePrivacy
-				hosting_access_privacy: InvitePrivacy
 			}
 
 			export type UserPreferences = {

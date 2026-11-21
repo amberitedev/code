@@ -21,7 +21,7 @@ test('friend refusals keep labrinth codes and text, avatars round-trip as raw by
 		const refusal = async (path, user) =>
 			JSON.parse(await call(path, { method: 'POST', user, expected: 400 }))
 
-		// Upstream's access page (packages/ui) matches these descriptions.
+		// Labrinth's descriptions, which upstream's pages expect.
 		assert.deepEqual(await refusal('/v3/friend/alice', 'alice'), {
 			error: 'cannot_friend_self',
 			description: 'You cannot add yourself as a friend!',

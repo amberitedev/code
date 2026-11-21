@@ -52,7 +52,6 @@ export function fields(all: Record<string, string>): Archon.Content.v1.Propertie
 	return { known, custom }
 }
 
-/** Editors and the owner only: the file can hold secrets, such as a resource pack URL. */
 export function properties(client: AbstractModrinthClient): Adapter<ArchonPropertiesV1Module> {
 	return {
 		async getProperties(serverId) {

@@ -34,7 +34,6 @@ import {
 import { JsonText, noBody, rawBody, route, serve, spliceJson } from '../common/router'
 import type { Env } from '../common/types'
 import { requireListedCore } from '../cores'
-import { listHostedServers } from '../cores/servers'
 import { readTicket, readTicketUser } from '../cores/tickets'
 import { canInviteToSharedInstance } from '../social/preferences'
 import { notifyUser } from '../social/socket'
@@ -1560,9 +1559,7 @@ const accountRoutes = [
 		owner(item, user.id)
 		await setIcon(env, item, null, null)
 	}),
-	listHostedServers,
-	// A ticket for one Core to read this share for the user, so a server they manage can follow
-	// it. The Core sends it with its reads, and the backend checks the user can still read then.
+	// A ticket for one Core to read this share for the user, so a server they own can follow it. The Core sends it with its reads, and the backend checks the user can still read then.
 	route(
 		sharing.IssueReadTicket,
 		(raw) => ({ core_id: string(object(raw).core_id, 'core_id', 64) }),
@@ -1614,17 +1611,11 @@ const accountRoutes = [
 			.bind(params.id)
 			.run()
 	}),
-	// The people who manage servers on the Core see who plays there, as its owner does.
 	route(sharing.ListPlayers, noBody, async ({ request, env, params }) => {
 		const user = await sharer(request, env)
 		const { core_id, server_id } = params
 		const roles = await serverRoles(env, user.id, core_id, server_id)
-		const manager = await env.DB.prepare(
-			'SELECT 1 FROM core_access WHERE core_id = ? AND user_id = ?',
-		)
-			.bind(core_id, user.id)
-			.first()
-		if (!roles.coreOwner && !roles.shareOwner && !manager) throw notServerOwner()
+		if (!roles.coreOwner && !roles.shareOwner) throw notServerOwner()
 		const users = (
 			await env.DB.prepare(
 				'SELECT user_id AS id, joined_at, join_type, NULL AS last_played FROM hosted_server_players WHERE core_id = ? AND server_id = ? ORDER BY joined_at IS NULL, joined_at',

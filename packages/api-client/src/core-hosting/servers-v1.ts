@@ -1,6 +1,5 @@
 import { core, type Performance, type Restarts } from '@amberite/contracts'
 
-import { ApiCallError } from '../contracts/errors'
 import type { AbstractModrinthClient } from '../core/abstract-client'
 import type { ArchonServersV1Module } from '../modules/archon/servers/v1'
 import type { Archon } from '../modules/archon/types'
@@ -11,11 +10,6 @@ declare module '../modules/archon/servers/v1' {
 	interface ArchonServersV1Module {
 		/** Core only. Deletes a stopped server, with its world, files and backups. */
 		deleteLocal(serverId: string): Promise<void>
-		/** Core only. Answers `unsupported`: a Core decides who sees a linked server. */
-		setLinkedInstance(
-			serverId: string,
-			settings: { visible_to_friends?: boolean; shared_instance?: { id: string | null } },
-		): Promise<void>
 		/** Core only. A server's memory, JVM flags and restart settings. */
 		getPerformance(serverId: string): Promise<Performance>
 		/** Core only. When a server restarts on its own. */
@@ -104,9 +98,6 @@ export function serversV1(client: AbstractModrinthClient): Adapter<ArchonServers
 		},
 		// A Core server never shows the intro (`flows.intro` is false), so there is none to end.
 		async endIntro() {},
-		async setLinkedInstance() {
-			throw new ApiCallError(501, 'unsupported', 'A Core decides who sees a linked server.')
-		},
 		async getPerformance(serverId) {
 			return (await coreOf(client, serverId)).call(core.GetPerformance, {
 				params: { id: serverId },

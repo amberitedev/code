@@ -1,15 +1,15 @@
 import { defineMessage, type MessageDescriptor } from '../composables/i18n'
 
-const SHOWN_KEY = 'visible-to-friends-home-address-notice'
+const SHOWN_KEY = 'home-address-notice'
 
 const homeAddressNotice = defineMessage({
-	id: 'servers.visible-to-friends.home-address-notice',
+	id: 'servers.home-address-notice',
 	defaultMessage: 'People who join this server can see your home address.',
 })
 
 /**
- * Says once per installation what showing a server to friends gives away. Call when a server
- * becomes visible to friends: when it is created that way, or when the setting is turned on.
+ * Says once per installation what a server's players can see. Call when a server is created for a
+ * shared instance, whose players can join it.
  */
 export function notifyHomeAddressOnce(
 	addNotification: (notification: { type: 'info'; title: string }) => unknown,

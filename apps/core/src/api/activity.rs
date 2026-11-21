@@ -1,5 +1,4 @@
-//! The activity log: access changes, sessions, sensitive reads, and server actions, with who did
-//! them. Owner only.
+//! The activity log: sessions, sensitive reads, and server actions, with who did them.
 
 use std::sync::Arc;
 

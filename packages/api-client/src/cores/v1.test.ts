@@ -10,7 +10,6 @@ const LOCAL = 'https://192.168.1.2:16662'
 const CORE: ListedCore = {
 	id: 'core',
 	name: 'Core',
-	owned: true,
 	version: null,
 	address: LOCAL,
 	public_address: 'https://203.0.113.5:16662',

@@ -22,15 +22,10 @@ const LOADERS: Record<string, Archon.Servers.v0.Loader> = {
 }
 
 /**
- * The Modrinth scope bits a role reads as (`serverPermissionBits` in `@modrinth/ui`): the owner is
- * `SERVER_ADMIN`; editors read, power, console, files, setup, backups and advanced settings;
- * viewers read. Each survives as a JavaScript number.
+ * The Modrinth scope bits of `SERVER_ADMIN` (`serverPermissionBits` in `@modrinth/ui`), which
+ * survive as a JavaScript number. Core answers only its owner.
  */
-export const PERMISSIONS = {
-	owner: 2 ** 64 - 2 ** 15,
-	editor: 2 ** 64 - 2 ** 57,
-	viewer: 2 ** 63,
-}
+const OWNER_PERMISSIONS = 2 ** 64 - 2 ** 15
 
 const POWER = {
 	Start: 'start',
@@ -82,13 +77,10 @@ export function archonServer(server: CoreServer, base: string): Archon.Servers.v
 		node: { token: '', instance: coreNodeUrl(base, server.id) },
 		flows: { intro: false },
 		is_medal: false,
-		current_user_permissions: PERMISSIONS[server.role ?? 'owner'],
+		current_user_permissions: OWNER_PERMISSIONS,
 		locked_since: null,
 		icon: null,
-		linked_instance: server.linked_instance && {
-			...server.linked_instance,
-			visible_to_friends: false,
-		},
+		linked_instance: server.linked_instance,
 		power_state: server.power,
 		reachability: server.reachability && reachability(server.reachability),
 		players: server.players,

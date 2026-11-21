@@ -148,7 +148,7 @@ pub struct ServerInsight {
     pub answered_at: Option<i64>,
     /// The Core stopped starting the server again after it crashed 3 times in 10 minutes.
     pub crash_restart_stopped: bool,
-    /// The last crash, with the console lines before it for editors and up.
+    /// The last crash, with the console lines before it.
     pub last_crash: Option<Crash>,
     /// Whether players can join from the internet. Null while the server does not run or has
     /// not been checked yet.
@@ -161,9 +161,8 @@ pub struct Crash {
     /// Unix seconds.
     pub at: i64,
     pub exit_code: Option<i32>,
-    /// The console lines before the crash. Null for viewers: they can hold chat, addresses,
-    /// and anything a mod printed, which the console route keeps to editors.
-    pub last_lines: Option<String>,
+    /// The console lines before the crash.
+    pub last_lines: String,
 }
 
 #[cfg(test)]

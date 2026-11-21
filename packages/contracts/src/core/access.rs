@@ -1,25 +1,7 @@
-//! Who may use a Core: sessions, per-server roles, the activity log and pairing.
+//! Who may use a Core: the owner's sessions, the activity log and pairing.
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-
-/// A role on one server. The owner has every role on every server and is never a member.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
-#[cfg_attr(
-    feature = "sqlx",
-    derive(sqlx::Type),
-    sqlx(type_name = "TEXT", rename_all = "snake_case")
-)]
-#[serde(rename_all = "snake_case")]
-pub enum CoreRole {
-    /// Sees status, players, content, and backups. No console: it carries chat and player IPs.
-    Viewer,
-    /// Everything a viewer can, plus running, console, files, settings, and backups. Runs code on
-    /// the host machine.
-    Editor,
-}
 
 /// A user as their last ticket named them.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -28,54 +10,6 @@ pub struct CoreUser {
     pub id: String,
     pub name: String,
     pub avatar_url: Option<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct Member {
-    pub user: CoreUser,
-    pub role: CoreRole,
-    /// Unix seconds.
-    pub added_at: i64,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct ServerAccess {
-    /// Null until the Core is paired.
-    pub owner: Option<CoreUser>,
-    pub members: Vec<Member>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct NewMember {
-    /// Shown until the invited user signs in and their own ticket names them.
-    pub user: CoreUser,
-    pub role: CoreRole,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct MemberUpdate {
-    pub role: CoreRole,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct MyAccess {
-    pub user: CoreUser,
-    /// The owner of this Core, with every role on every server.
-    pub owner: bool,
-    /// Empty for the owner.
-    pub servers: Vec<ServerRole>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct ServerRole {
-    pub server_id: Uuid,
-    pub role: CoreRole,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -156,17 +90,6 @@ pub struct ActivityEntry {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Action {
-    Invited {
-        user_id: String,
-        role: CoreRole,
-    },
-    RoleChanged {
-        user_id: String,
-        role: CoreRole,
-    },
-    Removed {
-        user_id: String,
-    },
     SignedIn {
         session_id: String,
         device_name: String,
@@ -242,14 +165,7 @@ pub(super) fn ts_types() -> Vec<String> {
 
     let cfg = crate::ts::config();
     vec![
-        CoreRole::decl(&cfg),
         CoreUser::decl(&cfg),
-        Member::decl(&cfg),
-        ServerAccess::decl(&cfg),
-        NewMember::decl(&cfg),
-        MemberUpdate::decl(&cfg),
-        MyAccess::decl(&cfg),
-        ServerRole::decl(&cfg),
         NewSession::decl(&cfg),
         SignedIn::decl(&cfg),
         CoreSession::decl(&cfg),

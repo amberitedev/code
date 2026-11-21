@@ -24,14 +24,14 @@ declare module '../modules/archon/content/v1' {
 			configPaths?: string[],
 			options?: { timeout?: number; restart?: boolean; removedConfigPaths?: string[] },
 		): Promise<Archon.Content.v1.ShareWorldContentResponse>
-		/** Core only. Owner only. The versions of the server's own share, newest first. */
+		/** Core only. The versions of the server's own share, newest first. */
 		getShareHistory(
 			serverId: string,
 			worldId: string,
 		): Promise<Archon.Content.v1.SharedInstanceHistoryEntry[]>
-		/** Core only. Owner only. Puts the server back to a version of its share, left to push. */
+		/** Core only. Puts the server back to a version of its share, left to push. */
 		restoreShareVersion(serverId: string, worldId: string, version: number): Promise<void>
-		/** Core only. Owner only. The latest version stays. */
+		/** Core only. The latest version stays. */
 		deleteShareVersion(serverId: string, worldId: string, version: number): Promise<void>
 		/** Core only. Installs a `.mrpack` over the server. */
 		uploadModpackFile(

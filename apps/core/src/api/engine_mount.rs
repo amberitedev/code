@@ -282,8 +282,8 @@ async fn export_mrpack(
     Ok(zip_response(file, &server.name, "mrpack", Some(path)))
 }
 
-/// What a push would change, for editors: the engine's route is for the share's owner, and on a
-/// Core the owner is the Core.
+/// What a push would change. The engine's route is for the share's owner, and on a Core the owner
+/// is the Core.
 async fn publish_preview(
     State(engine): State<Arc<Engine>>,
     instance: InstanceAccess<Edit>,

@@ -857,8 +857,6 @@ export namespace Archon {
 				name: string
 				state: Content.v1.LinkedPackState
 				error: string | null
-				/** "Visible to friends": the people the instance is shared with see and join it. */
-				visible_to_friends: boolean
 				/** The instance's share, whose versions the server applies. */
 				shared_instance_id: string | null
 				/** The version of the share the server runs. */

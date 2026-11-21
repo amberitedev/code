@@ -8,7 +8,7 @@ CREATE TABLE core (
     -- The audience of every ticket the backend signs for this Core.
     core_id TEXT NOT NULL,
     created_at INTEGER NOT NULL,
-    -- Set at pairing. The owner has every role on every server and is never in `access`.
+    -- Set at pairing. The only user this Core answers.
     owner_user_id TEXT,
     -- Core's own key for its calls to the backend (`amc_...`), issued at pairing.
     backend_key TEXT,
@@ -89,7 +89,7 @@ CREATE TABLE runs (
 );
 CREATE INDEX runs_server ON runs (server_id, started_at);
 
--- Names and avatars as the last ticket for each user carried them, for access lists and the
+-- Names and avatars as the last ticket for each user carried them, for sessions and the
 -- activity log.
 CREATE TABLE users (
     id TEXT PRIMARY KEY,
@@ -97,16 +97,6 @@ CREATE TABLE users (
     avatar_url TEXT,
     updated_at INTEGER NOT NULL
 );
-
--- Who may do what on each server. The only list that decides anything. Invite means granted.
-CREATE TABLE access (
-    server_id TEXT NOT NULL REFERENCES servers (id) ON DELETE CASCADE,
-    user_id TEXT NOT NULL,
-    role TEXT NOT NULL CHECK (role IN ('viewer', 'editor')),
-    added_at INTEGER NOT NULL,
-    PRIMARY KEY (server_id, user_id)
-);
-CREATE INDEX access_user ON access (user_id);
 
 -- One per device per Core. Only a hash of the token is stored.
 CREATE TABLE sessions (

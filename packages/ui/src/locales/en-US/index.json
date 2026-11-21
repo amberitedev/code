@@ -6437,6 +6437,9 @@
   "servers.grant-access-modal.target.searching": {
     "defaultMessage": "Searching..."
   },
+  "servers.home-address-notice": {
+    "defaultMessage": "People who join this server can see your home address."
+  },
   "servers.installing-banner.description.applying": {
     "defaultMessage": "Applying your installation changes..."
   },
@@ -7381,9 +7384,6 @@
   },
   "servers.setup.uploading-modpack.header": {
     "defaultMessage": "Uploading modpack"
-  },
-  "servers.visible-to-friends.home-address-notice": {
-    "defaultMessage": "People who join this server can see your home address."
   },
   "settings.account.title": {
     "defaultMessage": "Account and security"

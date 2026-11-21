@@ -10,7 +10,6 @@ import { kyrosContent } from './kyros-content'
 import { kyrosLogs } from './logs'
 import { options } from './options'
 import { properties } from './properties'
-import { serverUsers } from './server-users'
 import { serversV0 } from './servers-v0'
 import { serversV1 } from './servers-v1'
 import { uploadSessions } from './upload-sessions'
@@ -28,7 +27,6 @@ export function withCoreHosting(client: AbstractModrinthClient): void {
 	Object.assign(archon.backups_v1, backups(client))
 	Object.assign(archon.options_v1, options(client))
 	Object.assign(archon.properties_v1, properties(client))
-	Object.assign(archon.server_users_v1, serverUsers(client))
 	Object.assign(archon.actions_v1, actions(client))
 	Object.assign(archon.content_v1, content(client))
 	Object.assign(archon.icons_v1, icons(client))

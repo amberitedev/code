@@ -15,7 +15,7 @@ export type ApiError = { error: ErrorCode,
  */
 description: string, };
 
-export type ErrorCode = "invalid_input" | "invalid_credentials" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "conflict" | "rate_limited" | "internal_error" | "unsupported" | "account_locked" | "already_signed_in" | "code_expired" | "configuration_error" | "core_removed" | "duplicate_email" | "invalid_address" | "mail_error" | "no_storage" | "rate_limit" | "tickets_unavailable" | "too_many_attempts" | "too_many_invites" | "too_many_requests" | "unsupported_operation" | "username_taken" | "weak_password" | "wrong_code" | "blacklisted" | "core_not_found" | "current_version" | "endpoint_not_found" | "icon_not_found" | "instance_not_found" | "invite_invalid" | "invite_not_found" | "members_only" | "not_member" | "not_moderator" | "not_own_list" | "not_owner" | "push_in_flight" | "quarantined" | "share_too_large" | "storage_quota" | "too_many_files" | "version_not_found" | "already_friends" | "cannot_friend_self" | "own_friend_request" | "ticket_required" | "ticket_invalid" | "ticket_wrong_core" | "ticket_wrong_kind" | "ticket_expired" | "ticket_reused" | "clock_wrong" | "not_invited" | "disk_full" | "egress_spent" | "eula_not_accepted" | "not_managed" | "already_running" | "installing" | "no_ports" | "shared_instance_deleted" | "shared_instance_access_revoked" | "shared_instance_quarantined" | "shared_instances_api_error" | "shared_instance_file_not_allowed" | "shared_instance_owner_behind" | "shared_instance_limit_reached" | "pool_no_storage" | "pool_push_in_flight" | "pool_too_large" | "pool_disk_full" | "pool_egress_spent" | "pool_push_unconfirmed" | "pool_files_broken" | "pool_files_unavailable" | "hash_error" | "login_canceled" | "not_logged_in" | "no_loader_version" | "launcher_error" | "java_error" | "metadata_error" | "network_error" | "archive_error" | "path_error" | "filesystem_error" | "parse_error" | "database_error" | "directory_move_no_space" | "directory_move_permission_denied" | "directory_move_failed" | "permission_denied" | "api_error" | "minecraft_auth_no_profile" | "minecraft_auth_token_expired" | "minecraft_auth_clock_out_of_sync" | "minecraft_auth_rate_limited" | "minecraft_auth_service_unavailable" | "minecraft_auth_connection_refused" | "minecraft_auth_network" | "minecraft_auth_age_verification" | "minecraft_auth_banned" | "minecraft_auth_restricted" | "minecraft_auth_no_xbox_profile" | "minecraft_auth_terms_not_accepted" | "minecraft_auth_region_unavailable" | "minecraft_auth_adult_verification" | "minecraft_auth_underage" | "minecraft_auth_xsts_rejected" | "minecraft_auth_error" | "engine_unavailable" | "external_save_failed" | "sign_in_cancelled" | "cancelled" | "unknown";
+export type ErrorCode = "invalid_input" | "invalid_credentials" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "conflict" | "rate_limited" | "internal_error" | "unsupported" | "account_locked" | "already_signed_in" | "code_expired" | "configuration_error" | "core_removed" | "duplicate_email" | "invalid_address" | "mail_error" | "no_storage" | "rate_limit" | "tickets_unavailable" | "too_many_attempts" | "too_many_invites" | "too_many_requests" | "unsupported_operation" | "username_taken" | "weak_password" | "wrong_code" | "blacklisted" | "core_not_found" | "current_version" | "endpoint_not_found" | "icon_not_found" | "instance_not_found" | "invite_invalid" | "invite_not_found" | "members_only" | "not_member" | "not_moderator" | "not_own_list" | "not_owner" | "push_in_flight" | "quarantined" | "share_too_large" | "storage_quota" | "too_many_files" | "version_not_found" | "already_friends" | "cannot_friend_self" | "own_friend_request" | "ticket_required" | "ticket_invalid" | "ticket_wrong_core" | "ticket_wrong_kind" | "ticket_expired" | "ticket_reused" | "clock_wrong" | "disk_full" | "egress_spent" | "eula_not_accepted" | "not_managed" | "already_running" | "installing" | "no_ports" | "shared_instance_deleted" | "shared_instance_access_revoked" | "shared_instance_quarantined" | "shared_instances_api_error" | "shared_instance_file_not_allowed" | "shared_instance_owner_behind" | "shared_instance_limit_reached" | "pool_no_storage" | "pool_push_in_flight" | "pool_too_large" | "pool_disk_full" | "pool_egress_spent" | "pool_push_unconfirmed" | "pool_files_broken" | "pool_files_unavailable" | "hash_error" | "login_canceled" | "not_logged_in" | "no_loader_version" | "launcher_error" | "java_error" | "metadata_error" | "network_error" | "archive_error" | "path_error" | "filesystem_error" | "parse_error" | "database_error" | "directory_move_no_space" | "directory_move_permission_denied" | "directory_move_failed" | "permission_denied" | "api_error" | "minecraft_auth_no_profile" | "minecraft_auth_token_expired" | "minecraft_auth_clock_out_of_sync" | "minecraft_auth_rate_limited" | "minecraft_auth_service_unavailable" | "minecraft_auth_connection_refused" | "minecraft_auth_network" | "minecraft_auth_age_verification" | "minecraft_auth_banned" | "minecraft_auth_restricted" | "minecraft_auth_no_xbox_profile" | "minecraft_auth_terms_not_accepted" | "minecraft_auth_region_unavailable" | "minecraft_auth_adult_verification" | "minecraft_auth_underage" | "minecraft_auth_xsts_rejected" | "minecraft_auth_error" | "engine_unavailable" | "external_save_failed" | "sign_in_cancelled" | "cancelled" | "unknown";
 
 export type Hash = string;
 
@@ -220,17 +220,7 @@ public_address: string | null,
 /**
  * SHA-256 of the TLS certificate, lowercase hex. The App pins it.
  */
-cert_fingerprint: string, 
-/**
- * The servers shown to the people their instance is shared with.
- */
-servers: Array<VisibleServer>, };
-
-export type VisibleServer = { id: string, name: string, 
-/**
- * The Minecraft address, `host:port`.
- */
-address: string, shared_instance_id: string, };
+cert_fingerprint: string, };
 
 export type StorageReport = { 
 /**
@@ -280,22 +270,6 @@ export type PullOrder = { root: string,
  */
 ticket: string, };
 
-export type AccessDirectory = { user_ids: Array<string>, };
-
-export type AccessGrant = { 
-/**
- * A user id or username.
- */
-user: string, server_id: string, server_name: string, 
-/**
- * Shown in the invite.
- */
-role: CoreRole, };
-
-export type GrantedUser = { id: string, username: string, avatar_url: string | null, };
-
-export type AccessRevocation = { user_id: string, server_id: string, keep_core: boolean, };
-
 export type ForgottenServer = { server_id: string, share_id: string | null, };
 
 export type EnteredCode = { code: string, };
@@ -309,10 +283,6 @@ name: string, };
 export type ApprovedCore = { id: string, name: string, };
 
 export type ListedCore = { id: string, name: string, 
-/**
- * False for a Core the account was only invited to. Its owner manages it.
- */
-owned: boolean, 
 /**
  * The Core's own version. Null until it has started once since it learned to report it.
  */
@@ -342,9 +312,6 @@ export const cores = {
 	WaitForSignIn: { method: "GET", path: "/core/auth/wait", auth: "core_key", dangerous: false, body: "empty", response: "upgrade" } as Endpoint<null, null, void, { receive: string, send: null }>,
 	ReportState: { method: "POST", path: "/core/state", auth: "core_key", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, StateReport, void>,
 	ReportStorage: { method: "POST", path: "/core/storage", auth: "core_key", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, StorageReport, StorageAnswer>,
-	ReplaceAccess: { method: "PUT", path: "/core/access", auth: "core_key", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, AccessDirectory, void>,
-	GrantAccess: { method: "POST", path: "/core/access", auth: "core_key", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, AccessGrant, GrantedUser>,
-	RevokeAccess: { method: "DELETE", path: "/core/access", auth: "core_key", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, AccessRevocation, void>,
 	ForgetPlayers: { method: "DELETE", path: "/core/players", auth: "core_key", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, ForgottenServer, void>,
 	LookUpSignInCode: { method: "POST", path: "/cores/approve/lookup", auth: "account", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, EnteredCode, PendingCore>,
 	ApproveSignInCode: { method: "POST", path: "/cores/approve", auth: "account", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, EnteredCode, ApprovedCore>,
@@ -650,14 +617,6 @@ export type VersionFault = { core_id: string, kind: FaultKind, };
 
 export type FaultKind = "object" | "content";
 
-export type HostedServer = { core_id: string, server_id: string, name: string, 
-/**
- * The Minecraft address to ping and join. Not shown to the member.
- */
-address: string, host: ServerHost, };
-
-export type ServerHost = { id: string, username: string, avatar_url: string | null, };
-
 export type NewReadTicket = { core_id: string, };
 
 export type SignedReadTicket = { ticket: string, 
@@ -775,7 +734,6 @@ export const sharing = {
 	SetGeneratedIcon: { method: "PUT", path: "/v1/instances/{id}/icon/generated", auth: "account", dangerous: false, body: "json", response: "empty" } as Endpoint<SharedInstanceId, null, SharedIconConfig, void>,
 	RemoveIcon: { method: "DELETE", path: "/v1/instances/{id}/icon", auth: "account", dangerous: false, body: "empty", response: "empty" } as Endpoint<SharedInstanceId, null, void, void>,
 	GetIcon: { method: "GET", path: "/v1/icons/{id}/{upload}", auth: "none", dangerous: false, body: "empty", response: "raw" } as Endpoint<IconUpload, null, void, Blob>,
-	ListHostedServers: { method: "GET", path: "/v1/instances/{id}/servers", auth: "account", dangerous: false, body: "empty", response: "json" } as Endpoint<SharedInstanceId, null, void, Array<HostedServer>>,
 	IssueReadTicket: { method: "POST", path: "/v1/instances/{id}/server-ticket", auth: "account", dangerous: false, body: "json", response: "json" } as Endpoint<SharedInstanceId, null, NewReadTicket, SignedReadTicket>,
 	GetShareStorage: { method: "GET", path: "/v1/storage", auth: "account", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, ShareStorage>,
 	GetBlacklistStatus: { method: "GET", path: "/v1/blacklist/{user_id}", auth: "account", dangerous: false, body: "empty", response: "json" } as Endpoint<BlacklistedUser, null, void, BlacklistStatus>,
@@ -834,7 +792,7 @@ export type LayoutPreferences = { mods: LayoutOption, plugins: LayoutOption, dat
 
 export type SidebarPreferences = { right_aligned_search: boolean, left_aligned_content: boolean, };
 
-export type SocialPreferences = { friend_privacy: FriendPrivacy, shared_instances_privacy: InvitePrivacy, hosting_access_privacy: InvitePrivacy, };
+export type SocialPreferences = { friend_privacy: FriendPrivacy, shared_instances_privacy: InvitePrivacy, };
 
 export type UserPreferences = { appearance: AppearancePreferences, behavior: BehaviorPreferences, localization: LocalizationPreferences, layouts: LayoutPreferences, sidebars: SidebarPreferences, social: SocialPreferences, };
 
@@ -848,7 +806,7 @@ action_route: [string, string], };
 
 export type Notification = { id: string, user_id: string, read: boolean, created: string, body: { type: string, [key: string]: unknown }, name: string, text: string, link: string, actions: Array<NotificationAction>, };
 
-export type SharedInstanceList = "shared_instance_users" | "shared_instance_servers";
+export type SharedInstanceList = "shared_instance_users";
 
 export type SharedInstanceChangeBody = { type: SharedInstanceList, shared_instance_id: string, };
 
@@ -1046,49 +1004,9 @@ protocol?: number, version: string, core_id: string, };
 
 export type ServerId = { id: string, };
 
-export type MemberId = { 
-/**
- * The server.
- */
-id: string, user_id: string, };
-
 export type SessionId = { id: string, };
 
-export type CoreRole = "viewer" | "editor";
-
 export type CoreUser = { id: string, name: string, avatar_url: string | null, };
-
-export type Member = { user: CoreUser, role: CoreRole, 
-/**
- * Unix seconds.
- */
-added_at: number, };
-
-export type ServerAccess = { 
-/**
- * Null until the Core is paired.
- */
-owner: CoreUser | null, members: Array<Member>, };
-
-export type NewMember = { 
-/**
- * Shown until the invited user signs in and their own ticket names them.
- */
-user: CoreUser, role: CoreRole, };
-
-export type MemberUpdate = { role: CoreRole, };
-
-export type MyAccess = { user: CoreUser, 
-/**
- * The owner of this Core, with every role on every server.
- */
-owner: boolean, 
-/**
- * Empty for the owner.
- */
-servers: Array<ServerRole>, };
-
-export type ServerRole = { server_id: string, role: CoreRole, };
 
 export type NewSession = { 
 /**
@@ -1164,7 +1082,7 @@ user: CoreUser | null,
  */
 server_id: string | null, action: Action, };
 
-export type Action = { "type": "invited", user_id: string, role: CoreRole, } | { "type": "role_changed", user_id: string, role: CoreRole, } | { "type": "removed", user_id: string, } | { "type": "signed_in", session_id: string, device_name: string, } | { "type": "session_revoked", session_id: string, } | { "type": "server_created" } | { "type": "server_deleted" } | { "type": "server_started" } | { "type": "server_stopped" } | { "type": "server_restarted" } | { "type": "server_killed" } | { "type": "console_command", command: string, } | { "type": "settings_changed" } | { "type": "content_changed" } | { "type": "backup_created", backup_id: string, } | { "type": "backup_restored", backup_id: string, } | { "type": "backup_deleted", backup_id: string, } | { "type": "backup_renamed", backup_id: string, } | { "type": "backup_downloaded", backup_id: string, } | { "type": "world_downloaded" } | { "type": "eula_accepted" } | { "type": "core_updated", version: string, } | { "type": "core_removed" };
+export type Action = { "type": "signed_in", session_id: string, device_name: string, } | { "type": "session_revoked", session_id: string, } | { "type": "server_created" } | { "type": "server_deleted" } | { "type": "server_started" } | { "type": "server_stopped" } | { "type": "server_restarted" } | { "type": "server_killed" } | { "type": "console_command", command: string, } | { "type": "settings_changed" } | { "type": "content_changed" } | { "type": "backup_created", backup_id: string, } | { "type": "backup_restored", backup_id: string, } | { "type": "backup_deleted", backup_id: string, } | { "type": "backup_renamed", backup_id: string, } | { "type": "backup_downloaded", backup_id: string, } | { "type": "world_downloaded" } | { "type": "eula_accepted" } | { "type": "core_updated", version: string, } | { "type": "core_removed" };
 
 export type PairingStatus = { paired: boolean, 
 /**
@@ -1203,10 +1121,6 @@ export type CoreServer = { id: string, name: string,
  * Null until the Core is paired.
  */
 owner_id: string | null, 
-/**
- * The caller's role. Null for the owner, who has every role.
- */
-role: CoreRole | null, 
 /**
  * Its loader or pack is installing now.
  */
@@ -1699,7 +1613,7 @@ answered_at: number | null,
  */
 crash_restart_stopped: boolean, 
 /**
- * The last crash, with the console lines before it for editors and up.
+ * The last crash, with the console lines before it.
  */
 last_crash: Crash | null, 
 /**
@@ -1714,10 +1628,9 @@ export type Crash = {
  */
 at: number, exit_code: number | null, 
 /**
- * The console lines before the crash. Null for viewers: they can hold chat, addresses,
- * and anything a mod printed, which the console route keeps to editors.
+ * The console lines before the crash.
  */
-last_lines: string | null, };
+last_lines: string, };
 
 /** A Core's own routes. */
 export const core = {
@@ -1726,11 +1639,6 @@ export const core = {
 	ListSessions: { method: "GET", path: "/sessions", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<CoreSession>>,
 	SignOut: { method: "DELETE", path: "/sessions/current", auth: "session", dangerous: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
 	RevokeSession: { method: "DELETE", path: "/sessions/{id}", auth: "session", dangerous: true, body: "empty", response: "empty" } as Endpoint<SessionId, null, void, void>,
-	GetMyAccess: { method: "GET", path: "/access/me", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, MyAccess>,
-	ListMembers: { method: "GET", path: "/servers/{id}/access", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<ServerId, null, void, ServerAccess>,
-	InviteMember: { method: "POST", path: "/servers/{id}/access", auth: "session", dangerous: true, body: "json", response: "json" } as Endpoint<ServerId, null, NewMember, Member>,
-	ChangeRole: { method: "PATCH", path: "/servers/{id}/access/{user_id}", auth: "session", dangerous: true, body: "json", response: "json" } as Endpoint<MemberId, null, MemberUpdate, Member>,
-	RemoveMember: { method: "DELETE", path: "/servers/{id}/access/{user_id}", auth: "session", dangerous: true, body: "empty", response: "empty" } as Endpoint<MemberId, null, void, void>,
 	CreateDownloadLink: { method: "POST", path: "/links", auth: "session", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, NewDownloadLink, DownloadLink>,
 	ListActivity: { method: "GET", path: "/activity", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, ActivityQuery, void, ActivityPage>,
 	GetPairing: { method: "GET", path: "/pairing", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, PairingStatus>,

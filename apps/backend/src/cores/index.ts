@@ -1,27 +1,20 @@
 import {
-	type AccessDirectory,
-	type AccessGrant,
-	type AccessRevocation,
 	type EnteredCode,
 	type ForgottenServer,
 	type ListedCore,
 	type NewSignInCode,
 	type SignInStatus,
 	type StateReport,
-	type VisibleServer,
 	cores,
 } from '@amberite/contracts'
 
-import { findUser, requireUser, tokenFrom } from '../common/auth'
+import { requireUser, tokenFrom } from '../common/auth'
 import { isPrivateHost } from '../common/address'
 import { digest, randomId } from '../common/crypto'
 import { ApiError, invalid, objectBody, stringField, unauthorized } from '../common/http'
-import { addNotification } from '../common/notifications'
 import { type Route, noBody, route } from '../common/router'
 import type { Env } from '../common/types'
-import { blockedEitherWay } from '../social/preferences'
 import { forgetServer, sweepFiles } from '../sharing'
-import { MAX_SERVER_NAME, writeServers } from './servers'
 import { waitForApproval } from './sign-in'
 import { MAX_REPORT_BODY, parseStorageReport, reportStorage } from './storage'
 import { issueTicket } from './tickets'
@@ -33,12 +26,7 @@ import { issueTicket } from './tickets'
 // during sign-in and the account session never leaves the App. After that the backend only
 // keeps the account's list of Cores and their addresses. A Core reports its state on start and on
 // change, never on a timer, and a report that changes nothing writes nothing: D1 writes are the
-// free tier's scarcest resource.
-//
-// A Core's owner can invite other accounts to manage its servers. The Core keeps who has which
-// role on which server and is the only authority on it; the backend keeps a copy of which accounts
-// may reach the Core, so their App is told its address too and can get tickets for it, and
-// delivers the invite. Only the owner invites.
+// free tier's scarcest resource. Only a Core's owner is told where it is or gets tickets for it.
 
 const CODE_TTL_MS = 15 * 60_000
 const POLL_INTERVAL_S = 5
@@ -54,13 +42,6 @@ const REQUEST_WINDOW_MS = 10 * 60_000
 // The code's alphabet: no i, o, 0 or 1, so it reads the same in any font.
 const CODE_ALPHABET = 'abcdefghjklmnpqrstuvwxyz23456789'
 const FINGERPRINT_PATTERN = /^[0-9a-f]{64}$/
-// Invites one Core may send within `INVITE_WINDOW_MS`.
-const MAX_INVITES = 30
-const INVITE_WINDOW_MS = 10 * 60_000
-// Accounts one Core's access directory may hold. Core refuses an invite past it, with
-// `MAX_DIRECTORY` in `apps/core/src/api/access.rs`; the two must stay equal.
-const MAX_DIRECTORY = 1000
-const MAX_SERVERS = 100
 
 interface PendingRow {
 	code: string
@@ -113,8 +94,7 @@ function certFingerprint(body: Record<string, unknown>): string | null {
 	return value
 }
 
-/** A Core as `userId` sees it. `owned` is false for a Core they were only invited to. */
-function publicCore(row: CoreRow, userId: string): ListedCore {
+function publicCore(row: CoreRow): ListedCore {
 	return {
 		id: row.id,
 		name: row.name,
@@ -122,7 +102,6 @@ function publicCore(row: CoreRow, userId: string): ListedCore {
 		cert_fingerprint: row.cert_fingerprint,
 		public_address: row.public_address,
 		version: row.version,
-		owned: row.owner_id === userId,
 		created: row.created,
 		last_seen: row.last_seen,
 	}
@@ -370,39 +349,18 @@ function parseStateReport(raw: unknown): StateReport {
 		public_address: body.public_address == null ? null : httpsAddress(body, 'public_address'),
 		cert_fingerprint: fingerprint,
 		version: stringField(body, 'version', 32),
-		servers: parseServers(body.servers),
 	}
-}
-
-function parseServers(servers: unknown): VisibleServer[] {
-	if (!Array.isArray(servers) || servers.length > MAX_SERVERS) invalid('Invalid servers')
-	return servers.map((server: unknown) => {
-		const body = objectBody(server)
-		return {
-			id: stringField(body, 'id', 64),
-			name: stringField(body, 'name', MAX_SERVER_NAME),
-			address: stringField(body, 'address', 261),
-			shared_instance_id: stringField(body, 'shared_instance_id', 64),
-		}
-	})
 }
 
 /**
  * Core, signed in: its whole state, sent once on start and again when any of it changes: where the
- * App reaches it, the certificate the App pins, its version, and the servers it shows to friends.
+ * App reaches it, the certificate the App pins, and its version.
  * A report that changes nothing writes nothing. A Core removed from its account gets 410
  * `core_removed` and un-pairs.
  */
 async function reportState(request: Request, env: Env, body: () => Promise<StateReport>) {
 	const core = await requireListedCore(request, env)
-	const report = await body()
-	await writeState(env, core, {
-		address: report.address,
-		public_address: report.public_address,
-		cert_fingerprint: report.cert_fingerprint,
-		version: report.version,
-	})
-	await writeServers(env, core, report.servers)
+	await writeState(env, core, await body())
 }
 
 /** The Core a request's key belongs to, or null for a key no Core has. */
@@ -429,124 +387,6 @@ export async function requireListedCore(request: Request, env: Env): Promise<Cor
 	return core
 }
 
-/** One account's invite to one server of one Core. Binds: account, Core, server. */
-const INVITE_FILTER =
-	"user_id = ? AND json_extract(body,'$.type') = 'server_invite' AND json_extract(body,'$.core_id') = ? AND json_extract(body,'$.server_id') = ?"
-
-function parseAccessGrant(raw: unknown): AccessGrant {
-	const body = objectBody(raw)
-	return {
-		user: stringField(body, 'user', 64),
-		server_id: stringField(body, 'server_id', 64),
-		server_name: stringField(body, 'server_name', MAX_SERVER_NAME),
-		role: body.role === 'viewer' || body.role === 'editor' ? body.role : invalid('Invalid role'),
-	}
-}
-
-/**
- * Core, signed in: its owner invited an account to one of its servers. The account may reach this
- * Core from now on, and gets the invite as a notification. `user` is an id or a username; the
- * answer says who it is, so the Core can show their name. Only the owner invites, so the invite
- * is always from the owner.
- */
-async function grantAccess(request: Request, env: Env, body: () => Promise<AccessGrant>) {
-	const core = await requireListedCore(request, env)
-	const { server_id: serverId, server_name: serverName, role, user: username } = await body()
-
-	// Counted before the account is looked up, so a Core cannot use this to test names either.
-	const now = Date.now()
-	await env.DB.prepare('DELETE FROM auth_attempts WHERE expires < ?').bind(now).run()
-	const sent = await env.DB.prepare(
-		'INSERT INTO auth_attempts (key,count,expires) VALUES (?1,1,?2) ON CONFLICT(key) DO UPDATE SET count = CASE WHEN expires < ?3 THEN 1 ELSE count + 1 END, expires = CASE WHEN expires < ?3 THEN excluded.expires ELSE expires END RETURNING count',
-	)
-		.bind(`core-access:${core.id}`, now + INVITE_WINDOW_MS, now)
-		.first<{ count: number }>()
-	if (sent && sent.count > MAX_INVITES)
-		throw new ApiError(429, 'too_many_invites', 'Too many invites. Try again later.')
-
-	// Answers like a friend request does, for an unknown name and for a block.
-	const user = await findUser(env, username)
-	if (!user) throw new ApiError(404, 'not_found', 'Not found')
-	if (user.id === core.owner_id) invalid('The owner already has full access')
-	if (await blockedEitherWay(env, user.id, core.owner_id))
-		invalid("You've blocked the other user or have been blocked by them!")
-	await env.DB.batch([
-		env.DB.prepare(
-			'INSERT OR IGNORE INTO core_access (core_id,user_id,created) VALUES (?,?,?)',
-		).bind(core.id, user.id, new Date().toISOString()),
-		// Access may already exist for another server. Every invite still gets a fresh notification.
-		env.DB.prepare(`DELETE FROM notifications WHERE ${INVITE_FILTER}`).bind(
-			user.id,
-			core.id,
-			serverId,
-		),
-	])
-	await addNotification(env, user.id, {
-		type: 'server_invite',
-		core_id: core.id,
-		server_id: serverId,
-		server_name: serverName,
-		role,
-		invited_by: core.owner_id,
-	})
-	return { id: user.id, username: user.username, avatar_url: user.avatar_url }
-}
-
-function parseAccessDirectory(raw: unknown): AccessDirectory {
-	const userIds = objectBody(raw).user_ids
-	if (!Array.isArray(userIds) || userIds.length > MAX_DIRECTORY) invalid('Invalid user_ids')
-	return {
-		user_ids: userIds.map((id: unknown) =>
-			typeof id === 'string' && id.length > 0 && id.length <= 64 ? id : invalid('Invalid user_ids'),
-		),
-	}
-}
-
-/**
- * Core, signed in: the whole access directory, everyone with a role on any of its servers. Sent on
- * every start and reconnect, it replaces the backend's copy, so a missed grant or removal cannot
- * leave the two apart. Only rows that change are written. Unknown accounts and the owner are
- * skipped.
- */
-async function replaceAccess(request: Request, env: Env, body: () => Promise<AccessDirectory>) {
-	const core = await requireListedCore(request, env)
-	const ids = JSON.stringify((await body()).user_ids)
-	await env.DB.batch([
-		env.DB.prepare(
-			'DELETE FROM core_access WHERE core_id = ?1 AND user_id NOT IN (SELECT value FROM json_each(?2))',
-		).bind(core.id, ids),
-		env.DB.prepare(
-			'INSERT OR IGNORE INTO core_access (core_id,user_id,created) SELECT ?1, id, ?3 FROM users WHERE id IN (SELECT value FROM json_each(?2)) AND id != ?4',
-		).bind(core.id, ids, new Date().toISOString(), core.owner_id),
-	])
-}
-
-/**
- * Core, signed in: an account lost its access or its invite to one server. Its invite is withdrawn,
- * and unless `keep_core` says it still has another server there, so is its way to this Core.
- */
-async function revokeAccess(request: Request, env: Env, body: () => Promise<AccessRevocation>) {
-	const core = await requireListedCore(request, env)
-	const revocation = await body()
-	const userId = revocation.user_id
-	await env.DB.prepare(`DELETE FROM notifications WHERE ${INVITE_FILTER}`)
-		.bind(userId, core.id, revocation.server_id)
-		.run()
-	if (!revocation.keep_core)
-		await env.DB.prepare('DELETE FROM core_access WHERE core_id = ? AND user_id = ?')
-			.bind(core.id, userId)
-			.run()
-}
-
-function parseAccessRevocation(raw: unknown): AccessRevocation {
-	const body = objectBody(raw)
-	return {
-		user_id: stringField(body, 'user_id', 64),
-		server_id: stringField(body, 'server_id', 64),
-		keep_core: body.keep_core === true,
-	}
-}
-
 function parseForgottenServer(raw: unknown): ForgottenServer {
 	const body = objectBody(raw)
 	return {
@@ -555,18 +395,13 @@ function parseForgottenServer(raw: unknown): ForgottenServer {
 	}
 }
 
-/**
- * App: the account's own Cores, then the ones it was invited to. Nobody else is told where a Core
- * is.
- */
+/** App: the account's Cores. Nobody else is told where a Core is. */
 async function listCores(request: Request, env: Env): Promise<ListedCore[]> {
 	const user = await requireUser(request, env)
-	const rows = await env.DB.prepare(
-		'SELECT * FROM cores WHERE owner_id = ?1 OR id IN (SELECT core_id FROM core_access WHERE user_id = ?1) ORDER BY owner_id = ?1 DESC, created',
-	)
+	const rows = await env.DB.prepare('SELECT * FROM cores WHERE owner_id = ? ORDER BY created')
 		.bind(user.id)
 		.all<CoreRow>()
-	return rows.results.map((row) => publicCore(row, user.id))
+	return rows.results.map(publicCore)
 }
 
 /**
@@ -607,15 +442,6 @@ export const coreRoutes: Route[] = [
 			return reportStorage(env, core, await body())
 		},
 		MAX_REPORT_BODY,
-	),
-	route(cores.ReplaceAccess, parseAccessDirectory, ({ request, env, body }) =>
-		replaceAccess(request, env, body),
-	),
-	route(cores.GrantAccess, parseAccessGrant, ({ request, env, body }) =>
-		grantAccess(request, env, body),
-	),
-	route(cores.RevokeAccess, parseAccessRevocation, ({ request, env, body }) =>
-		revokeAccess(request, env, body),
 	),
 	// A server was deleted or stopped following an instance: its players and links go. With
 	// `share_id`, only while it still follows that share.

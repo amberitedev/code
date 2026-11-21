@@ -188,16 +188,18 @@ to the fingerprint learned at pairing. The fingerprint check exists once, in
 The engine asks its host who the caller is and what they may do through `Access`
 ([`access.rs`](../../packages/engine/src/access.rs)). Each engine handler declares its level with
 the `InstanceAccess<View | Edit | Owner>` extractor. The App's `AppAccess` allows its one local
-user everything. A Core's `CoreAccess` ([`access/mod.rs`](../../apps/core/src/access/mod.rs))
-maps the session to an account and checks owner, Editor or Viewer: no role is 404, a role too low
-is 403. Nothing in a request can change which `Access` runs. Sessions, tickets and revalidation
-are Core concepts and stay on `CoreAccess`.
+user everything. A Core answers its owner only: `CoreAccess`
+([`access/mod.rs`](../../apps/core/src/access/mod.rs)) maps the session to an account, and
+anyone but the owner gets 404. The levels stay on the handlers so per-server access can come back
+without touching the engine. Nothing in a request can change which `Access` runs. Sessions,
+tickets and revalidation are Core concepts and stay on `CoreAccess`.
 
 A Core does not mount `engine::routes()`. It mounts the routes
 [`engine_mount.rs`](../../apps/core/src/api/engine_mount.rs) lists: one whose body or answer is a
 host path, or that reaches the whole engine or runs code on the host (the edit-instance route's
-launch hooks and Java path), would hand a server's members the Core's machine. Each change it
-mounts holds the server first, so content never changes under a running server or an install.
+launch hooks and Java path), would hand the Core's machine to anyone who can reach a server's
+routes. Each change it mounts holds the server first, so content never changes under a running
+server or an install.
 
 ## Events, and resync when one is lost
 
@@ -210,8 +212,7 @@ Each host serves one `/events` socket that carries the engine's events and its o
 - The Core's socket ([`api/events.rs`](../../apps/core/src/api/events.rs)) takes subscriptions to
   topics. It checks `CoreAccess` at subscribe time, and again when the caller's access changes,
   when the socket falls behind, and on a timer. It ends a topic the caller lost and closes the
-  socket when the session ends. A Viewer never gets a console, because the console carries chat and
-  player IPs.
+  socket when the session ends.
 - A socket that falls behind sends `Resync` and carries on. The UI refetches its queries, so a lost
   install completion or process exit is never silent.
 - `Event::FilesChanged` stays in-process. The socket loops drop it.

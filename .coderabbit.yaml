@@ -82,9 +82,9 @@ reviews:
         binary, crate, service, installer and release.
         - No desktop code paths or desktop tables: no Discord, friends, skins or Modrinth sign-in.
         - Every route is a contracts::Endpoint impl: Core-native ones from contracts::core, routes
-          over engine types declared in apps/core. Access is checked through the host's Access on
-          every route and every event subscription, and rechecked when a role changes or a session
-          ends. A Viewer never gets a console.
+          over engine types declared in apps/core. A Core answers its owner only. Access is
+          checked through the host's Access on every route and every event subscription, and
+          rechecked when a session ends.
         - Mods, packs, archives and paths are untrusted. Paths stay inside the server's folder.
         - Host concepts keep the name "server" (routes /servers/{id}, the servers table).
     - path: 'apps/backend/**'

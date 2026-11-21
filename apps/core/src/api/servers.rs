@@ -10,7 +10,7 @@ use axum::extract::State;
 use contracts::{
     ApiError, Empty, ErrorCode, Json,
     core::{
-        Action, ChangePower, ChangeServer, CoreRole, CoreServer, CreateServer,
+        Action, ChangePower, ChangeServer, CoreServer, CreateServer,
         DeleteServer, GetServer, GetSetup, InstallLoader, InstallModpackFile,
         JoinAddress, ListServers, PowerAction, ServerId, ServerNet,
         ServerPower, ServerSetup, ShareServer, SharedServer, UpdateChannel,
@@ -72,7 +72,7 @@ fn release_channel(channel: UpdateChannel) -> ReleaseChannel {
     }
 }
 
-// Every route below checks the caller's role on the server, or that they own the Core.
+// Every route below checks that its caller owns the Core.
 
 /// Where players join a server from the internet: the router's grant when it gave a different
 /// outside port than the game port, otherwise the Core's join IP and the game port.
@@ -127,11 +127,9 @@ pub(super) async fn power_state(
     })
 }
 
-/// A server row as a caller with `level` on it sees it.
 async fn server(
     state: &CoreState,
     row: server_rows::ServerRow,
-    level: Permission,
 ) -> Result<CoreServer, ApiError> {
     let phase = state.servers.phase(&row.id);
     let power = power_state(state, &row.id, phase).await.map_err(internal)?;
@@ -174,11 +172,6 @@ async fn server(
             .servers
             .insight(&row.id)
             .map(|insight| insight.players.into_iter().collect()),
-        role: match level {
-            Permission::Owner => None,
-            Permission::Edit => Some(CoreRole::Editor),
-            Permission::View => Some(CoreRole::Viewer),
-        },
         installing: phase == Some(Phase::Installing),
         memory_mb: u32::try_from(row.memory_mb).unwrap_or_default(),
         update_channel: update_channel(instance.instance.update_channel),
@@ -199,16 +192,10 @@ pub async fn list(
     State(state): State<Arc<CoreState>>,
     _: Req<ListServers>,
 ) -> Result<Json<Vec<CoreServer>>, ApiError> {
+    require_owner(&caller)?;
     let mut servers = Vec::new();
     for row in server_rows::list(&state.db).await.map_err(internal)? {
-        if let Some(level) = state
-            .access
-            .level(&caller, &row.id)
-            .await
-            .map_err(internal)?
-        {
-            servers.push(server(&state, row, level).await?);
-        }
+        servers.push(server(&state, row).await?);
     }
     Ok(Json(servers))
 }
@@ -219,12 +206,12 @@ pub async fn get(
     Req { params, .. }: Req<GetServer>,
 ) -> Result<Json<CoreServer>, ApiError> {
     let id = params.id;
-    let level = state.access.require(&caller, &id, Permission::View).await?;
+    state.access.require(&caller, &id, Permission::View).await?;
     let row = server_rows::get(&state.db, &id)
         .await
         .map_err(internal)?
         .ok_or(ServerError::NotFound(id))?;
-    Ok(Json(server(&state, row, level).await?))
+    Ok(Json(server(&state, row).await?))
 }
 
 pub async fn create(
@@ -233,7 +220,6 @@ pub async fn create(
     Req { body, .. }: Req<CreateServer>,
 ) -> Result<Json<ServerId>, ApiError> {
     require_owner(&caller)?;
-    // No server exists before the owner accepts, so nobody they invite is ever stuck on it.
     if super::eula::accepted_at(&state.db)
         .await
         .map_err(internal)?
@@ -540,18 +526,11 @@ pub async fn delete(
             "Stop the server before deleting it.",
         ));
     }
-    let removed = remove_server(&state, &caller, &id).await;
-    let members = match removed {
-        Ok(members) => members,
-        Err(error) => {
-            state.servers.release(&id);
-            return Err(error);
-        }
-    };
-    state.access.owed.notify_one();
-    for user in &members {
-        state.access.changed(user);
+    if let Err(error) = remove_server(&state, &caller, &id).await {
+        state.servers.release(&id);
+        return Err(error);
     }
+    state.access.owed.notify_one();
     if let Err(error) = state.servers.delete_folders(&id).await {
         tracing::warn!(server = %id, %error, "could not remove a deleted server's files");
         return Err(ApiError::new(
@@ -562,14 +541,13 @@ pub async fn delete(
     Ok(Empty)
 }
 
-/// Delete a held server's row, and with it every role on it and its own share's history, owing
-/// the backend each removal and the share's deletion and dropping its players. Returns who had a
-/// role.
+/// Delete a held server's row and its own share's history, owing the backend the share's deletion
+/// and dropping its players.
 async fn remove_server(
     state: &CoreState,
     caller: &Caller,
     id: &str,
-) -> Result<Vec<String>, ApiError> {
+) -> Result<(), ApiError> {
     let own_share = engine::instance::get(&state.engine, id)
         .await
         .map_err(api_error)?
@@ -587,12 +565,6 @@ async fn remove_server(
         .await
         .map_err(internal)?;
     }
-    let members: Vec<String> =
-        sqlx::query_scalar("SELECT user_id FROM access WHERE server_id = ?")
-            .bind(id)
-            .fetch_all(&mut *tx)
-            .await
-            .map_err(internal)?;
     sqlx::query("DELETE FROM servers WHERE id = ?")
         .bind(id)
         .execute(&mut *tx)
@@ -610,11 +582,6 @@ async fn remove_server(
     )
     .await
     .map_err(internal)?;
-    for user in &members {
-        super::access::owe_removal(&mut tx, user, id)
-            .await
-            .map_err(internal)?;
-    }
     activity::record(
         &mut tx,
         caller.user_id(),
@@ -631,7 +598,7 @@ async fn remove_server(
     {
         tracing::warn!(server = %id, %error, "could not forget the share's history");
     }
-    Ok(members)
+    Ok(())
 }
 
 pub async fn setup(

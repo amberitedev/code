@@ -105,7 +105,6 @@ pub async fn page(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use contracts::core::CoreRole;
 
     use crate::db;
 
@@ -146,14 +145,13 @@ mod tests {
         let db = db::memory().await;
         let server = uuid::Uuid::new_v4();
         let mut conn = db.acquire().await.unwrap();
-        for user in ["a", "b", "c"] {
+        for command in ["a", "b", "c"] {
             record(
                 &mut conn,
                 None,
                 Some(&server.to_string()),
-                &Action::Invited {
-                    user_id: user.into(),
-                    role: CoreRole::Editor,
+                &Action::ConsoleCommand {
+                    command: command.into(),
                 },
             )
             .await
@@ -177,7 +175,7 @@ mod tests {
         assert_eq!(first.entries.len(), 2);
         assert!(matches!(
             &first.entries[0].action,
-            Action::Invited { user_id, role: CoreRole::Editor } if user_id == "c"
+            Action::ConsoleCommand { command } if command == "c"
         ));
         let rest = page(
             &db,

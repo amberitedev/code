@@ -6,8 +6,7 @@ use uuid::Uuid;
 
 use crate::ApiError;
 
-/// A stream of events a socket can subscribe to. Viewers and up may subscribe to every topic but
-/// `Console`, which needs Editor: it carries chat and player IPs.
+/// A stream of events a socket can subscribe to.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(tag = "type", rename_all = "snake_case")]

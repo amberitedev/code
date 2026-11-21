@@ -421,26 +421,6 @@ pub enum FaultKind {
     Content,
 }
 
-/// A server someone else hosts for a shared instance and shows to its members.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct HostedServer {
-    pub core_id: String,
-    pub server_id: String,
-    pub name: String,
-    /// The Minecraft address to ping and join. Not shown to the member.
-    pub address: String,
-    pub host: ServerHost,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct ServerHost {
-    pub id: String,
-    pub username: String,
-    pub avatar_url: Option<String>,
-}
-
 /// Body of [`IssueReadTicket`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
@@ -591,10 +571,8 @@ pub struct SetGeneratedIcon;
 pub struct RemoveIcon;
 /// An uploaded icon. Every upload gets a new URL, so it never changes.
 pub struct GetIcon;
-/// Members: the servers other people host for the share. The caller's own Cores are left out.
-pub struct ListHostedServers;
 /// Owner or member: a ticket for one Core to read the share for the caller, so a server they
-/// manage can follow it.
+/// own can follow it.
 pub struct IssueReadTicket;
 /// The caller's shared storage.
 pub struct GetShareStorage;
@@ -606,7 +584,7 @@ pub struct UnblacklistUsers;
 /// Moderators. Files are opaque to the backend, so the share is quarantined instead.
 pub struct DeleteModeratedFile;
 /// The players of a Core's server: the people it is shared with, who read the share it follows
-/// without being its members. For the Core's owner, its managers and the share's owner.
+/// without being its members. For the Core's owner and the share's owner.
 pub struct ListPlayers;
 /// The Core's owner invites players, saying which share the server follows.
 pub struct InvitePlayers;
@@ -661,7 +639,6 @@ endpoints! {
     SetGeneratedIcon: Put "/v1/instances/{id}/icon/generated", Account, SharedInstanceId, (), Json<IconConfig> => Empty;
     RemoveIcon: Delete "/v1/instances/{id}/icon", Account, SharedInstanceId, (), Empty => Empty;
     GetIcon: Get "/v1/icons/{id}/{upload}", None, IconUpload, (), Empty => Raw;
-    ListHostedServers: Get "/v1/instances/{id}/servers", Account, SharedInstanceId, (), Empty => Json<Vec<HostedServer>>;
     IssueReadTicket: Post "/v1/instances/{id}/server-ticket", Account, SharedInstanceId, (), Json<NewReadTicket> => Json<SignedReadTicket>;
     GetShareStorage: Get "/v1/storage", Account, (), (), Empty => Json<ShareStorage>;
     GetBlacklistStatus: Get "/v1/blacklist/{user_id}", Account, BlacklistedUser, (), Empty => Json<BlacklistStatus>;
@@ -723,8 +700,6 @@ pub(crate) fn ts() -> String {
         NewInstanceVersion::decl(&cfg),
         VersionFault::decl(&cfg),
         FaultKind::decl(&cfg),
-        HostedServer::decl(&cfg),
-        ServerHost::decl(&cfg),
         NewReadTicket::decl(&cfg),
         SignedReadTicket::decl(&cfg),
         ShareStorage::decl(&cfg),

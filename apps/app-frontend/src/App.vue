@@ -91,12 +91,7 @@ import { useQuickInstanceLimit } from '@/composables/use-quick-instance-limit.ts
 import { isDarkTheme, useTheme } from '@/composables/use-theme.ts'
 import { config } from '@/config'
 import AddCoreModal from '@/features/cores/add-core-modal.vue'
-import {
-	coresQueryKey,
-	createCoreActions,
-	provideCoreActions,
-	useCores,
-} from '@/features/cores/use-cores'
+import { createCoreActions, provideCoreActions, useCores } from '@/features/cores/use-cores'
 import { pageGeneration } from '@/features/crash'
 import ServerPlayHandler from '@/features/hosting/play-handler.vue'
 import { prefetchHostingData } from '@/features/hosting/prefetch'
@@ -391,8 +386,6 @@ function onCreationIconSaved(iconPath, config) {
 	context.instanceIconPath.value = iconPath
 }
 
-const displayedServerInviteNotifications = new Set()
-const serverInvitePopupNotificationIds = new Set()
 let liveNotificationGeneration = 0
 let liveNotificationsEnabled = true
 
@@ -1300,109 +1293,14 @@ provideMinecraftAccounts(computed(() => sidebar.value?.minecraftAccounts ?? null
 useAppEvent('command', handleCommand, appEvents)
 useAppEvent('notification', handleLiveNotification, appEvents)
 
-async function markLiveNotificationRead(notification) {
-	try {
-		await tauriApiClient.backend.call(social.ReadNotification, {
-			params: { id: String(notification.id) },
-		})
-	} catch (error) {
-		if (error instanceof ModrinthApiError && error.statusCode === 404) {
-			console.warn(`notification ${notification.id} could not be marked as read`, error)
-			return
-		}
-		throw error
-	}
-}
-
-async function respondToServerInvite(notification, action) {
-	const serverId = notification.body?.server_id
-	if (typeof serverId !== 'string') {
-		throw new Error('Missing server ID for invite notification.')
-	}
-
-	const coreId = notification.body?.core_id
-	if (typeof coreId === 'string') {
-		// The server is on someone else's Core, which the invite made reachable.
-		try {
-			await tauriApiClient.archon.cores_v1.respondToInvite(coreId, serverId, action)
-		} catch (error) {
-			// The invite, its server, or its Core is gone, so it should not be offered again.
-			if (error instanceof ModrinthApiError && error.statusCode === 404)
-				await markLiveNotificationRead(notification)
-			throw error
-		}
-		await queryClient.invalidateQueries({ queryKey: coresQueryKey })
-	} else {
-		await tauriApiClient.request(`/servers/${serverId}/invites/${action}`, {
-			api: 'archon',
-			version: 1,
-			method: 'POST',
-		})
-	}
-	await markLiveNotificationRead(notification)
-
-	return serverId
-}
-
-async function acceptServerInviteNotification(notification) {
-	try {
-		const serverId = await respondToServerInvite(notification, 'accept')
-		await router.push(`/hosting/manage/${encodeURIComponent(serverId)}`)
-		queryClient.invalidateQueries({ queryKey: ['servers'] })
-	} catch (error) {
-		handleError(error)
-	}
-}
-
-async function declineServerInviteNotification(notification) {
-	try {
-		await respondToServerInvite(notification, 'decline')
-	} catch (error) {
-		handleError(error)
-	}
-}
-
-function openServerInviteInviterProfile(inviterName) {
-	if (!inviterName) return
-	void router.push(`/user/${encodeURIComponent(inviterName)}`)
-}
-
 async function handleLiveNotification(notification) {
 	if (!liveNotificationsEnabled || !notification?.body || notification.read) return
-	if (await sharedInstanceInviteHandler.value?.handleNotification(notification)) return
-
-	if (notification.body.type === 'server_invite') {
-		if (displayedServerInviteNotifications.has(notification.id)) return
-
-		const generation = liveNotificationGeneration
-		displayedServerInviteNotifications.add(notification.id)
-
-		const serverName =
-			typeof notification.body.server_name === 'string' ? notification.body.server_name : 'a server'
-		const inviterId = notification.body.invited_by
-		const invitedBy =
-			typeof inviterId === 'string' ? await get_user(inviterId, 'bypass').catch(() => null) : null
-		if (generation !== liveNotificationGeneration) return
-
-		const popupNotification = addPopupNotification({
-			contentType: 'toast',
-			title: serverName,
-			type: 'server-invite',
-			actorName: invitedBy?.username ?? null,
-			actorAvatarUrl: invitedBy?.avatar_url ?? null,
-			entityName: serverName,
-			autoCloseMs: null,
-			onAccept: () => acceptServerInviteNotification(notification),
-			onDecline: () => declineServerInviteNotification(notification),
-			onOpenActor: () => openServerInviteInviterProfile(invitedBy?.username ?? null),
-		})
-		serverInvitePopupNotificationIds.add(popupNotification.id)
-	}
+	await sharedInstanceInviteHandler.value?.handleNotification(notification)
 }
 
 // The friends socket only delivers notifications while the App is open, so unread ones are
 // replayed through the live path at sign-in, when the network returns, and when the socket
-// (re)connects. Both invite handlers dedupe by notification ID, so one that also arrives live is
+// (re)connects. The invite handler dedupes by notification ID, so one that also arrives live is
 // shown once.
 async function replayUnreadNotifications() {
 	const userId = credentials.value?.user_id
@@ -1441,11 +1339,6 @@ useAppEvent(
 function clearLiveNotifications() {
 	liveNotificationGeneration++
 	liveNotificationsEnabled = false
-	for (const id of serverInvitePopupNotificationIds) {
-		popupNotificationManager.removeNotification(id)
-	}
-	displayedServerInviteNotifications.clear()
-	serverInvitePopupNotificationIds.clear()
 	sharedInstanceInviteHandler.value?.clearNotifications()
 }
 

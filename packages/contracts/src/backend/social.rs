@@ -208,7 +208,6 @@ pub struct SidebarPreferences {
 pub struct SocialPreferences {
     pub friend_privacy: FriendPrivacy,
     pub shared_instances_privacy: InvitePrivacy,
-    pub hosting_access_privacy: InvitePrivacy,
 }
 
 /// An account's settings, kept with the account so they follow it to every installation.
@@ -268,7 +267,6 @@ pub struct Notification {
 #[serde(rename_all = "snake_case")]
 pub enum SharedInstanceList {
     SharedInstanceUsers,
-    SharedInstanceServers,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -279,8 +277,7 @@ pub struct SharedInstanceChangeBody {
     pub shared_instance_id: String,
 }
 
-/// A shared instance's member list or the servers its members host for it changed, so an open
-/// page fetches it again. Shaped like a notification so the App passes it on, but not stored.
+/// A shared instance's member list changed, so an open page fetches it again. Shaped like a notification so the App passes it on, but not stored.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct SharedInstanceChange {

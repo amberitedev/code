@@ -122,11 +122,6 @@ const props = withDefaults(
 		copyAddress?: string
 		// Why a running server cannot be joined from the internet. Turns the signal icon orange.
 		outsideWarning?: string
-		// The name of whoever hosts this server for the shared instance. The row then never shows
-		// or copies the address, and it can only be joined while the server answers.
-		hostedBy?: string
-		// A hosted server this account may also manage. Clicking the row opens its page.
-		hostedServerId?: string
 		// Worlds tab: the row can be pinned to the top, and whether it is. A pinned row has a
 		// `.world-drag-handle` to reorder it by.
 		pinnable?: boolean
@@ -157,8 +152,6 @@ const props = withDefaults(
 		managed: false,
 		linkedServerId: undefined,
 		linkedNote: undefined,
-		hostedBy: undefined,
-		hostedServerId: undefined,
 		pinnable: false,
 		pinned: false,
 		showPlayButton: true,
@@ -187,9 +180,8 @@ const serverIncompatible = computed(
 const locked = computed(() => props.world.type === 'singleplayer' && props.world.locked)
 const managed = computed(() => props.managed)
 const shortcutInstanceId = computed(() => props.shortcutInstanceId ?? props.instanceId)
-const manageServerId = computed(() => props.linkedServerId ?? props.hostedServerId)
 // An entry of the instance's own list, which the user may edit and remove.
-const ownEntry = computed(() => !props.instanceId && !props.linkedServerId && !props.hostedBy)
+const ownEntry = computed(() => !props.instanceId && !props.linkedServerId)
 
 async function createShortcut() {
 	if (!shortcutInstanceId.value || props.quarantined) return
@@ -311,10 +303,6 @@ const messages = defineMessages({
 		id: 'instance.worlds.manage_server',
 		defaultMessage: 'Manage server',
 	},
-	hostedBy: {
-		id: 'instance.worlds.hosted_by',
-		defaultMessage: 'Hosted by {name}',
-	},
 	pin: {
 		id: 'instance.worlds.pin',
 		defaultMessage: 'Pin to top',
@@ -370,7 +358,6 @@ const playDisabled = computed(
 		props.quarantined ||
 		playingOtherWorld.value ||
 		props.startingInstance ||
-		(!!props.hostedBy && !props.serverStatus) ||
 		(props.world.type === 'server' && !props.supportsServerQuickPlay) ||
 		(props.world.type === 'singleplayer' && !props.supportsWorldQuickPlay),
 )
@@ -393,8 +380,8 @@ const overflowOptions = computed((): ButtonMenuOption[] => [
 		id: 'manage-server',
 		label: formatMessage(messages.manageServer),
 		icon: SettingsIcon,
-		shown: !!manageServerId.value,
-		action: () => void router.push(`/hosting/manage/${manageServerId.value}`),
+		shown: !!props.linkedServerId,
+		action: () => void router.push(`/hosting/manage/${props.linkedServerId}`),
 	},
 	{
 		id: 'toggle-pin',
@@ -432,7 +419,7 @@ const overflowOptions = computed((): ButtonMenuOption[] => [
 		id: 'copy-address',
 		label: formatMessage(messages.copyAddress),
 		icon: ClipboardCopyIcon,
-		shown: props.world.type === 'server' && !props.hostedBy,
+		shown: props.world.type === 'server',
 		action: () => copyToClipboard(props.copyAddress ?? (props.world as ServerWorld).address),
 	},
 	{
@@ -491,8 +478,7 @@ const overflowOptions = computed((): ButtonMenuOption[] => [
 		id: 'create-shortcut',
 		label: formatMessage(messages.createShortcut),
 		icon: ExternalIcon,
-		// A shortcut carries the address, so a hosted server gets none.
-		shown: !!shortcutInstanceId.value && !props.quarantined && !props.hostedBy,
+		shown: !!shortcutInstanceId.value && !props.quarantined,
 		action: () => createShortcut(),
 	},
 	{
@@ -548,8 +534,8 @@ function openContextMenu(event: MouseEvent) {
 <template>
 	<div @contextmenu.prevent.stop="openContextMenu">
 		<SmartClickable class="[--active-scale:0.985]">
-			<template v-if="manageServerId" #clickable>
-				<router-link class="no-click-animation" :to="`/hosting/manage/${manageServerId}`" />
+			<template v-if="linkedServerId" #clickable>
+				<router-link class="no-click-animation" :to="`/hosting/manage/${linkedServerId}`" />
 			</template>
 			<template v-else-if="instanceId" #clickable>
 				<router-link
@@ -694,12 +680,6 @@ function openContextMenu(event: MouseEvent) {
 								/>
 								<span class="truncate">{{ instanceName }}</span>
 							</router-link>
-							<BulletDivider class="shrink-0" />
-						</template>
-						<template v-if="hostedBy">
-							<span class="truncate">{{
-								formatMessage(messages.hostedBy, { name: hostedBy })
-							}}</span>
 							<BulletDivider class="shrink-0" />
 						</template>
 						<div

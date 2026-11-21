@@ -64,20 +64,17 @@ test sends every request the App's sharing client and a Core's storage report se
 
 A Core pairs with a code its owner approves in the App (`POST /core/auth/code`, then
 `POST /core/auth/poll`), then calls the backend with its own `amc_` key. It reports its state,
-including the servers it shows to friends, with `POST /core/state` on start and when something
-changes, never on a timer, and a report that changes nothing writes nothing. `PUT /core/access`
-replaces the Core's access directory, the accounts that may be told where it is, and
-`POST /core/access` and `DELETE /core/access` add or drop one account as the owner invites or
-removes it. The Core is the only authority on roles; the backend never sees them. A Core removed
-from its account gets `410 core_removed` from every one of these calls and un-pairs.
+with `POST /core/state` on start and when something changes, never on a timer, and a report that
+changes nothing writes nothing. Only the owner is told where a Core is. A Core removed from its
+account gets `410 core_removed` from every one of its calls and un-pairs.
 
 The App removes a Core by telling the Core first, with a ticket, and then calling
 `DELETE /cores/:id`. A Core that was off learns from the 410 at its next start.
 
-`POST /cores/:id/ticket` gives the App a ticket for one Core, to its owner or an account in that
-Core's directory: an Ed25519 JWT whose claims are a `SessionTicket` (`contracts::tickets`), good
-for five minutes. It writes nothing. The Core verifies it against `public/core/keys.json`, served
-as a static asset at `/core/keys.json` so it costs no requests. The pool's `store`, `fetch`, and
+`POST /cores/:id/ticket` gives the App a ticket for one Core, to its owner only: an Ed25519 JWT
+whose claims are a `SessionTicket` (`contracts::tickets`), good for five minutes. It writes
+nothing. The Core verifies it against `public/core/keys.json`, served as a static asset at
+`/core/keys.json` so it costs no requests. The pool's `store`, `fetch`, and
 `pull` tickets are signed the same way.
 
 `POST /core/storage` is a Core's storage report: what its store holds and how much room it has.

@@ -58,5 +58,8 @@ leaves it unreachable or in the wrong place.
   upstream's own pages. Our screens use our API.
 - A hosting method upstream's pages call on a Core is answered by an adapter in
   `packages/api-client/src/core-hosting/`, one file per upstream module, over the Core's Endpoints.
+- Server roles are cut: a Core answers its owner only. Drop upstream changes to server users,
+  member invites and roles; their files are under `ignore`, and the access page keeps only the
+  activity log.
 - A `port` commit is carried into the file `ported` names, keeping labrinth's schemas and contracts
   for `apps/backend`.

@@ -83,7 +83,6 @@ pub enum ErrorCode {
     TicketExpired,
     TicketReused,
     ClockWrong,
-    NotInvited,
     DiskFull,
     EgressSpent,
     EulaNotAccepted,
@@ -188,7 +187,6 @@ impl ErrorCode {
             | Self::NotOwnList
             | Self::NotOwner
             | Self::Quarantined
-            | Self::NotInvited
             | Self::EulaNotAccepted
             | Self::SharedInstanceAccessRevoked
             | Self::SharedInstanceQuarantined

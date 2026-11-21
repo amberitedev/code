@@ -1,7 +1,7 @@
-import { core as coreApi, type CoreRole, installs, sharing } from '@amberite/contracts'
+import { core as coreApi, installs, sharing } from '@amberite/contracts'
 
 import { call } from '../src/call.ts'
-import { type Account, type App, type Core, FixtureError, step, until } from '../src/context.ts'
+import { type App, type Core, FixtureError, step, until } from '../src/context.ts'
 import { finished } from './instance.ts'
 
 export interface Server {
@@ -14,10 +14,9 @@ export interface Server {
 }
 
 /**
- * A server on `core`, made and installed by the Core as its owner, with `members` given access
- * the way the owner's Access tab gives it. Each member's App shows the invite. `players` are
- * invited from the Play tab and have joined: each has the server's instance installed. With
- * `running`, it is started and has finished starting.
+ * A server on `core`, made and installed by the Core as its owner. `players` are invited from
+ * the Play tab and have joined: each has the server's instance installed. With `running`, it is
+ * started and has finished starting.
  */
 export async function server(
 	core: Core,
@@ -28,7 +27,6 @@ export async function server(
 		readonly loader?: string
 		/** The newest when left out. */
 		readonly loaderVersion?: string
-		readonly members?: ReadonlyArray<{ readonly who: App | Account; readonly role: CoreRole }>
 		readonly players?: ReadonlyArray<App>
 		readonly running?: boolean
 	},
@@ -56,15 +54,6 @@ export async function server(
 		)
 		return made
 	})
-	for (const { who, role } of spec.members ?? []) {
-		const account = who.kind === 'app' ? who.account : who
-		await call(
-			core,
-			coreApi.InviteMember,
-			{ id },
-			{ user: { id: account.id, name: account.name, avatar_url: null }, role },
-		)
-	}
 	if (spec.running) {
 		await step(`"${spec.name}" starts`, async () => {
 			await call(core, coreApi.ChangePower, { id }, { action: 'start' })

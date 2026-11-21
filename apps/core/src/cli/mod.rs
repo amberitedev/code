@@ -96,7 +96,7 @@ pub enum Command {
     /// List, make, and restore backups.
     #[command(subcommand)]
     Backups(backups::BackupsCommand),
-    /// Who may use each server, and their sessions.
+    /// The devices signed in to this Core.
     #[command(subcommand)]
     Access(access::AccessCommand),
     /// Show this Core's storage for shared files, or change what it offers others.

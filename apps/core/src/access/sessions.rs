@@ -33,8 +33,8 @@ fn unauthorized() -> ApiError {
     )
 }
 
-/// Make a session from a ticket. Not on this Core's access list: no session, and nothing is
-/// stored, not even the ticket's use.
+/// Make a session from a ticket. Not the owner: no session, and nothing is stored, not even the
+/// ticket's use.
 pub async fn sign_in(
     db: &SqlitePool,
     keys: &Keys,
@@ -53,17 +53,17 @@ pub async fn sign_in(
     let claims = tickets::verify(keys, ticket, &core_id, now).await?;
 
     let mut tx = db.begin().await.map_err(internal)?;
-    let allowed: bool = sqlx::query_scalar(
-        "SELECT EXISTS (SELECT 1 FROM core WHERE id = 1 AND owner_user_id = ?1) \
-         OR EXISTS (SELECT 1 FROM access WHERE user_id = ?1)",
+    let owner: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM core WHERE id = 1 AND owner_user_id = ?)",
     )
     .bind(&claims.sub)
     .fetch_one(&mut *tx)
-    .await.map_err(internal)?;
-    if !allowed {
+    .await
+    .map_err(internal)?;
+    if !owner {
         return Err(ApiError::new(
-            ErrorCode::NotInvited,
-            "You have not been invited to any server on this Core.",
+            ErrorCode::Forbidden,
+            "Only this Core's owner can sign in to it.",
         ));
     }
     tickets::spend(&mut tx, &claims, now).await?;
@@ -212,18 +212,16 @@ pub async fn get(
     Ok(row.map(|row| session(row, current)))
 }
 
-/// Every live session, or only `user`'s.
+/// Every live session.
 pub async fn list(
     db: &SqlitePool,
-    user: Option<&str>,
     current: Option<&str>,
     now: i64,
 ) -> sqlx::Result<Vec<CoreSession>> {
     let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-        "{SESSION} WHERE (?1 IS NULL OR s.user_id = ?1) AND s.expires_at > ?2 \
-         AND s.last_used_at > ?2 - ?3 ORDER BY s.user_id, s.created_at"
+        "{SESSION} WHERE s.expires_at > ?1 \
+         AND s.last_used_at > ?1 - ?2 ORDER BY s.created_at"
     )))
-    .bind(user)
     .bind(now)
     .bind(IDLE_S)
     .fetch_all(db)
@@ -286,13 +284,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn someone_not_invited_gets_nothing_stored() {
+    async fn someone_else_gets_nothing_stored() {
         let (db, keys, signer, core) = core().await;
         let ticket = signer.sign(&claims("stranger", &core, NOW));
         let error = sign_in(&db, &keys, &ticket, "Laptop", NOW)
             .await
             .unwrap_err();
-        assert_eq!(error.error, ErrorCode::NotInvited);
+        assert_eq!(error.error, ErrorCode::Forbidden);
         for table in ["sessions", "used_tickets", "users", "activity"] {
             let count: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
                 "SELECT COUNT(*) FROM {table}"
