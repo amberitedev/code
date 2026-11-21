@@ -97,6 +97,8 @@ Most code changes do not need an internal documentation change. Agents can read 
 
 The App and a Core do the same things to an instance with one engine and one protocol. Rust imports go one way: `contracts` <- `sharing-client` <- `engine` <- `apps/app`, `apps/core`. The design, and the rules a review checks it against, are in [architecture](docs/internals/architecture.md). Merging and porting upstream: [upstream](docs/internals/upstream.md).
 
+`.repos/modrinth` holds the latest Modrinth `main`, read-only and gitignored. Read upstream there, not in `modrinth/main`, whose local history is shallow. `SYNCED.json` names its commit. Never edit or import from `.repos/`. If it is missing or stale, run `vp run sync:repos`.
+
 ## Taste
 
 - Complexity belongs at the adapter boundary. Backend-facing workflows stay in `@modrinth/api-client`; UI stays dumb.
