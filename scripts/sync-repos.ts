@@ -22,9 +22,13 @@ if (selected.length === 0)
 	throw new Error(`Unknown repo "${only}". Expected one of: ${REPOS.map((r) => r.id).join(', ')}`)
 
 NodeFS.mkdirSync(repos, { recursive: true })
-// An interrupted run leaves its temp folder, a second full copy for every grep to find.
-for (const leftover of NodeFS.readdirSync(repos).filter((name) => name.startsWith('.sync-')))
-	NodeFS.rmSync(NodePath.join(repos, leftover), { recursive: true, force: true })
+// An interrupted run leaves its temp folder, a second full copy for every grep to find. A recent one
+// may belong to a sync still running in this checkout, so only old ones go.
+for (const name of NodeFS.readdirSync(repos)) {
+	const leftover = NodePath.join(repos, name)
+	if (name.startsWith('.sync-') && Date.now() - NodeFS.statSync(leftover).mtimeMs > 3_600_000)
+		remove(leftover)
+}
 
 for (const repo of selected) {
 	const target = NodePath.join(repos, repo.id)
@@ -49,7 +53,7 @@ for (const repo of selected) {
 			root,
 		)
 		const commit = git(['rev-parse', 'HEAD'], checkout)
-		NodeFS.rmSync(NodePath.join(checkout, '.git'), { recursive: true, force: true })
+		remove(NodePath.join(checkout, '.git'))
 		const synced = { repository: repo.repository, ref: repo.ref, commit }
 		NodeFS.writeFileSync(
 			NodePath.join(checkout, 'SYNCED.json'),
@@ -65,8 +69,13 @@ for (const repo of selected) {
 		}
 		console.log(`.repos/${repo.id} is at ${repo.ref} (${commit.slice(0, 12)}).`)
 	} finally {
-		NodeFS.rmSync(temp, { recursive: true, force: true })
+		remove(temp)
 	}
+}
+
+// Retries ride out the brief locks antivirus and indexers take on Windows.
+function remove(path: string) {
+	NodeFS.rmSync(path, { recursive: true, force: true, maxRetries: 5 })
 }
 
 function git(args: string[], cwd: string): string {

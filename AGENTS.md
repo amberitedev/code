@@ -97,7 +97,7 @@ Most code changes do not need an internal documentation change. Agents can read 
 
 The App and a Core do the same things to an instance with one engine and one protocol. Rust imports go one way: `contracts` <- `sharing-client` <- `engine` <- `apps/app`, `apps/core`. The design, and the rules a review checks it against, are in [architecture](docs/internals/architecture.md). Merging and porting upstream: [upstream](docs/internals/upstream.md).
 
-`.repos/modrinth` is a plain checkout of Modrinth's latest `main`, gitignored, for reading and grepping upstream. `SYNCED.json` names its commit. Never edit or import from `.repos/`. If it is missing or stale, run `vp run sync:repos`. Merges and ports use the `modrinth/main` ref, not this copy.
+`.repos/modrinth` is a plain checkout of Modrinth's latest `main`, gitignored, for reading and grepping upstream. `SYNCED.json` names its commit. Never edit or import from `.repos/`. If it is missing or stale, run `vp run sync:repos`. Merges and ports use the `modrinth/main` ref, not this copy. Its `AGENTS.md` files are Modrinth's rules, not ours.
 
 ## Taste
 
