@@ -36,6 +36,7 @@ for (const repo of selected) {
 	// Deleting the old copy in place could stop halfway on a locked file and leave a copy that looks
 	// complete.
 	const temp = NodeFS.mkdtempSync(NodePath.join(repos, `.sync-${repo.id}-`))
+	let keepTemp = false
 	try {
 		const checkout = NodePath.join(temp, 'checkout')
 		console.log(`Syncing ${repo.id} from ${repo.ref} (shallow clone, no history).`)
@@ -64,12 +65,15 @@ for (const repo of selected) {
 		try {
 			NodeFS.renameSync(checkout, target)
 		} catch (error) {
-			if (NodeFS.existsSync(old)) NodeFS.renameSync(old, target)
+			// If the old copy cannot go back either, it stays in the temp folder rather than being lost.
+			keepTemp = NodeFS.existsSync(old)
+			if (keepTemp) NodeFS.renameSync(old, target)
+			keepTemp = false
 			throw error
 		}
 		console.log(`.repos/${repo.id} is at ${repo.ref} (${commit.slice(0, 12)}).`)
 	} finally {
-		remove(temp)
+		if (!keepTemp) remove(temp)
 	}
 }
 
