@@ -11,7 +11,6 @@ import {
 	type Account,
 	type App,
 	type Core,
-	type CoreUser,
 	current,
 	FixtureError,
 	runtime,
@@ -19,18 +18,13 @@ import {
 	state,
 } from './context.ts'
 
-/** Who a call goes to: an App's own API, the backend as an account, or a Core as one of its users. */
-export type Who = App | Account | Core | CoreUser
-
-/** A Core as `account`, which needs access to it. A plain Core handle acts as its owner. */
-export function signedIn(core: Core, account: Account | App): CoreUser {
-	return { kind: 'core-user', core, account: account.kind === 'app' ? account.account : account }
-}
+/** Who a call goes to: an App's own API, the backend as an account, or a Core as its owner. */
+export type Who = App | Account | Core
 
 /**
  * Calls `endpoint` and returns what it answers. An App is reached on its local API, the way its
  * own frontend reaches it; an account goes straight to the backend; a Core is called as its
- * owner, or as the user `signedIn` names. An error answer throws with the program's own message.
+ * owner. An error answer throws with the program's own message.
  */
 export async function call<P, Q, B, R>(
 	who: Who,
@@ -93,22 +87,17 @@ async function reach(who: Who, endpoint: Endpoint): Promise<Target> {
 			name: `the backend as ${who.name}`,
 		}
 	}
-	const core = who.kind === 'core' ? who : who.core
-	const account = who.kind === 'core' ? who.owner : who.account
-	await restartIfPatched(`core:${core.index}`)
-	const base = coreUrl(core.index)
-	const name = `Core ${core.index}${account ? ` as ${account.name}` : ''}`
+	const account = who.owner
+	await restartIfPatched(`core:${who.index}`)
+	const base = coreUrl(who.index)
+	const name = `Core ${who.index}${account ? ` as ${account.name}` : ''}`
 	if (endpoint.auth === 'none') return { base, headers: {}, name }
-	if (!account) {
-		throw new FixtureError(
-			`Core ${core.index} has no owner. Name who calls it with signedIn(core, user).`,
-		)
-	}
+	if (!account) throw new FixtureError(`Core ${who.index} has no owner, so it answers nobody.`)
 	const headers: Record<string, string> = {
-		authorization: `Bearer ${await coreToken(core, account)}`,
+		authorization: `Bearer ${await coreToken(who, account)}`,
 	}
 	// A dangerous action proves the account again with a ticket made for this one call.
-	if (endpoint.dangerous) headers['x-amberite-ticket'] = await ticket(core, account)
+	if (endpoint.dangerous) headers['x-amberite-ticket'] = await ticket(who, account)
 	return { base, headers, name }
 }
 

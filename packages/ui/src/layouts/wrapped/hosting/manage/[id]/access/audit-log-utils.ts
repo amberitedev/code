@@ -7,7 +7,6 @@ import {
 	PowerIcon,
 	ServerIcon,
 	SettingsIcon,
-	UsersIcon,
 } from '@modrinth/assets'
 
 import type { DropdownFilterBarOption } from '#ui/components/base/DropdownFilterBar.vue'
@@ -31,10 +30,6 @@ export const actionLogActionNames = [
 	'server_unsuspended',
 	'server_suspension_lifted',
 	'server_resuspended',
-	'user_invited',
-	'user_invite_revoked',
-	'user_permission_modified',
-	'user_removed',
 	'addon_added',
 	'addon_uploaded',
 	'addon_disabled',
@@ -116,15 +111,6 @@ export const actionLogActionGroups = [
 			'console_command_executed',
 			'console_cleared',
 		],
-	},
-	{
-		key: 'users',
-		label: defineMessage({
-			id: 'servers.access-page.activity-log-filter.action-group.users',
-			defaultMessage: 'Users and invites',
-		}),
-		icon: UsersIcon,
-		actions: ['user_invited', 'user_invite_revoked', 'user_permission_modified', 'user_removed'],
 	},
 	{
 		key: 'content',

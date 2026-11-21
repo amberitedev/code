@@ -37,7 +37,6 @@ type UseAccessAuditLogOptions = {
 	serverId: string
 	serverFull: ComputedRef<Archon.Servers.v1.ServerFull | null>
 	showAuditLogInstances: ComputedRef<boolean>
-	visible: ComputedRef<boolean>
 	addNotification: AbstractWebNotificationManager['addNotification']
 }
 
@@ -49,7 +48,6 @@ export function useAccessAuditLog({
 	serverId,
 	serverFull,
 	showAuditLogInstances,
-	visible,
 	addNotification,
 }: UseAccessAuditLogOptions) {
 	const { formatMessage } = useVIntl()
@@ -146,7 +144,6 @@ export function useAccessAuditLog({
 		initialPageParam: 0,
 		placeholderData: (previousData) => previousData,
 		staleTime: 30_000,
-		enabled: visible,
 	})
 	const actionLogFilterSignature = computed(() =>
 		JSON.stringify([

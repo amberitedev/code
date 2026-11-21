@@ -1,5 +1,5 @@
 //! Who may call an engine route. The engine asks its host through [`Access`]; the App allows its
-//! one local user everything, a Core checks the caller's session and role.
+//! one local user everything, a Core lets in its owner only.
 
 use std::{marker::PhantomData, sync::Arc};
 

@@ -1,14 +1,14 @@
 //! Argument parsing, and one round trip per command group through a real local socket.
 
-use contracts::core::{Channel, CoreRole, Schedule, Weekday};
+use contracts::core::{Channel, Schedule, Weekday};
 use std::sync::Arc;
 
 use clap::{CommandFactory, Parser};
 use contracts::{ApiError, ErrorCode};
 
 use super::{
-    Cli, Client, Command, access::AccessCommand, backups::BackupsCommand,
-    machine::UpdateCommand, servers::ServersCommand,
+    Cli, Client, Command, backups::BackupsCommand, machine::UpdateCommand,
+    servers::ServersCommand,
 };
 use crate::{
     access::CoreAccess,
@@ -111,7 +111,6 @@ fn bad_arguments_are_refused() {
         "servers restarts survival --on sunday",
         "servers restarts survival --at 25:00",
         "servers restarts survival --at 04:00 --no-schedule",
-        "access role survival friend admin",
         "update channel nightly",
         "backups schedule survival --every 6 --off",
         "servers console send survival",
@@ -307,57 +306,6 @@ async fn server_commands_round_trip() {
     .err()
     .unwrap();
     assert!(error.to_string().contains("not running"), "{error}");
-}
-
-#[tokio::test]
-async fn access_commands_round_trip() {
-    let (_dir, state, client) = core().await;
-    let server = state.servers.create("Survival").await.unwrap();
-    sqlx::query(
-        "INSERT INTO users (id, name, updated_at) VALUES ('u1', 'Friend', 0)",
-    )
-    .execute(&state.db)
-    .await
-    .unwrap();
-    sqlx::query("INSERT INTO access (server_id, user_id, role, added_at) VALUES (?, 'u1', 'viewer', 0)")
-        .bind(&server.id)
-        .execute(&state.db)
-        .await
-        .unwrap();
-    let changed = super::access::run(
-        &client,
-        AccessCommand::Role {
-            server: "survival".into(),
-            user: "friend".into(),
-            role: CoreRole::Editor,
-        },
-    )
-    .await
-    .unwrap();
-    assert_eq!(changed.json["role"], "editor");
-    let list = super::access::run(
-        &client,
-        AccessCommand::List {
-            server: "survival".into(),
-        },
-    )
-    .await
-    .unwrap();
-    assert!(list.text.contains("editor Friend"), "{}", list.text);
-    super::access::run(
-        &client,
-        AccessCommand::Remove {
-            server: "survival".into(),
-            user: "u1".into(),
-        },
-    )
-    .await
-    .unwrap();
-    let sessions =
-        super::access::run(&client, AccessCommand::Sessions { user: None })
-            .await
-            .unwrap();
-    assert_eq!(sessions.text, "No sessions");
 }
 
 #[tokio::test]

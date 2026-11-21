@@ -81,7 +81,7 @@ async function create(ctx: CreationFlowContextValue) {
 		if (!created) return
 		const { id } = created
 		flow.value?.hide()
-		// Nobody else sees the server of an instance that is not shared.
+		// The members of a shared instance are the people likely to be invited to its server.
 		if (props.instance.shared_instance) notifyHomeAddressOnce(addNotification, formatMessage)
 		await queryClient.invalidateQueries({ queryKey: serverKeys.list() })
 		try {

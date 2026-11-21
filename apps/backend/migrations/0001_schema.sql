@@ -101,16 +101,6 @@ CREATE TABLE core_auth_limits (
   window_start TEXT NOT NULL
 );
 
--- Accounts that may reach a Core they do not own, so the App can be told where it is. The Core
--- adds an account when it invites them and removes it when they have no server left there.
-CREATE TABLE core_access (
-  core_id TEXT NOT NULL REFERENCES cores(id) ON DELETE CASCADE,
-  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  created TEXT NOT NULL,
-  PRIMARY KEY (core_id, user_id)
-);
-CREATE INDEX core_access_user ON core_access(user_id);
-
 -- Each Core's storage as it last reported it. `service` is whether it runs as a system service.
 CREATE TABLE core_storage (
   core_id TEXT PRIMARY KEY REFERENCES cores(id) ON DELETE CASCADE,
@@ -211,19 +201,6 @@ CREATE TABLE shared_instance_reports (
 CREATE TABLE sharing_blacklist (
   user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE
 );
-
--- Servers a Core shows to the people an instance is shared with, written with that Core's key.
--- Online state and player counts are not stored: the App pings `address`, the server's Minecraft
--- address, itself.
-CREATE TABLE visible_servers (
-  core_id TEXT NOT NULL REFERENCES cores(id) ON DELETE CASCADE,
-  server_id TEXT NOT NULL,
-  name TEXT NOT NULL,
-  address TEXT NOT NULL,
-  instance_id TEXT NOT NULL REFERENCES shared_instances(id) ON DELETE CASCADE,
-  PRIMARY KEY(core_id, server_id)
-);
-CREATE INDEX visible_servers_instance ON visible_servers(instance_id);
 
 -- A Core server that has players, and the share it follows: its instance's share or its own
 -- server-first share. Players join `port` at the Core's last reported address, or first at

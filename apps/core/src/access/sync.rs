@@ -1,12 +1,12 @@
-//! Backend sync. The backend is a phone book and a notifier: Core tells it where this Core is and
-//! who may reach it, on start and on change, never on a timer. Storage reports (see `storage`) are
-//! the exception: they also go hourly, so a replica learns of new versions within the hour.
+//! Backend sync. The backend is a phone book and a notifier: Core tells it where this Core is, on
+//! start and on change, never on a timer. Storage reports (see `storage`) are the exception: they
+//! also go hourly, so a replica learns of new versions within the hour.
 //!
 //! A call that must reach the backend is owed: [`owe`] stores it in `backend_owed` in the same
 //! transaction as the change, and [`run`] sends it, retrying with backoff until the backend
-//! answers. On every start and reconnect Core also replaces the backend's whole directory and
-//! reports its state, so a lost call cannot leave the two apart. When the backend says this Core
-//! was removed from its account, Core un-pairs and shows a new pairing code.
+//! answers. On every start and reconnect Core also reports its state, so a lost report cannot
+//! leave the two apart. When the backend says this Core was removed from its account, Core
+//! un-pairs and shows a new pairing code.
 
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
@@ -17,10 +17,7 @@ use std::{
 use contracts::{
     Endpoint, Json,
     backend::{
-        cores::{
-            AccessDirectory, ForgetPlayers, GrantAccess, ReplaceAccess,
-            ReportState, ReportStorage, RevokeAccess, StateReport,
-        },
+        cores::{ForgetPlayers, ReportState, ReportStorage, StateReport},
         sharing::DeleteSharedInstance,
     },
     client::{Body, CallError, Remote, Reply, call},
@@ -79,14 +76,13 @@ pub async fn owe(
 }
 
 /// Forget the owner and everything that came from them, in the caller's transaction: their key,
-/// owed calls, every session, and every role they gave. Send [`Changed::Everyone`] once it
+/// owed calls and every session. Send [`Changed::Everyone`] once it
 /// commits. Used when the backend says this Core was removed, and by `DELETE /pairing`.
 pub async fn unpair(conn: &mut SqliteConnection) -> sqlx::Result<()> {
     for statement in [
         "UPDATE core SET owner_user_id = NULL, backend_key = NULL WHERE id = 1",
         "DELETE FROM backend_owed",
         "DELETE FROM sessions",
-        "DELETE FROM access",
     ] {
         sqlx::query(statement).execute(&mut *conn).await?;
     }
@@ -282,22 +278,13 @@ impl Sync {
         }
     }
 
-    /// Replace the backend's directory and report this Core's state, as on every start and
-    /// reconnect.
+    /// Report this Core's state, as on every start and reconnect.
     async fn connect(
         &self,
         key: &str,
         addresses: &watch::Receiver<Addresses>,
     ) -> Result<(), Lost> {
-        let user_ids: Vec<String> = sqlx::query_scalar(
-            "SELECT DISTINCT user_id FROM access ORDER BY user_id",
-        )
-        .fetch_all(&self.db)
-        .await
-        .map_err(|error| Lost::Unreachable(error.to_string()))?;
         let result = async {
-            self.call::<ReplaceAccess>(key, Json(AccessDirectory { user_ids }))
-                .await?;
             // This report covers any already owed.
             sqlx::query("DELETE FROM backend_owed WHERE call = ?")
                 .bind(
@@ -326,7 +313,6 @@ impl Sync {
             address: addresses.local.clone(),
             public_address: addresses.public.clone(),
             cert_fingerprint: self.cert_fingerprint.clone(),
-            servers: Vec::new(),
         }
     }
 
@@ -362,8 +348,7 @@ impl Sync {
             |error: sqlx::Error| Lost::Unreachable(error.to_string());
         loop {
             let now = now();
-            // Strictly in order: a later call never overtakes one waiting to retry, so an old
-            // grant cannot undo a newer removal.
+            // Strictly in order: a later call never overtakes one waiting to retry.
             let next: Option<(i64, String, i64, i64)> = sqlx::query_as(
                 "SELECT id, call, attempts, next_attempt_at FROM backend_owed \
                  ORDER BY id LIMIT 1",
@@ -420,28 +405,6 @@ impl Sync {
         addresses: &Addresses,
     ) -> Result<(), Failure> {
         match call {
-            OwedCall::Grant(grant) => {
-                // Removed again since: the removal that follows says all there is to say.
-                let current: bool = sqlx::query_scalar(
-                    "SELECT EXISTS (SELECT 1 FROM access WHERE server_id = ? AND user_id = ?)",
-                )
-                .bind(&grant.server_id)
-                .bind(&grant.user)
-                .fetch_one(&self.db)
-                .await
-                .map_err(|error| {
-                    Failure::Lost(Lost::Unreachable(error.to_string()))
-                })?;
-                if !current {
-                    return Ok(());
-                }
-                self.call::<GrantAccess>(key, Json(grant.clone()))
-                    .await
-                    .map(drop)
-            }
-            OwedCall::Remove(remove) => {
-                self.call::<RevokeAccess>(key, Json(remove.clone())).await
-            }
             OwedCall::DeleteShare { share_id } => {
                 // A share already gone counts as deleted.
                 sharing_client::shares::delete_share(
@@ -499,8 +462,8 @@ impl Sync {
         }
     }
 
-    /// Forget the owner and everything that came from them: their key, owed calls, every session,
-    /// and every role they gave. Servers and files stay. A new owner pairs the Core again.
+    /// Forget the owner and everything that came from them: their key, owed calls and every
+    /// session. Servers and files stay. A new owner pairs the Core again.
     async fn unpair(&self) {
         let cleared = async {
             let mut tx = self.db.begin().await?;
@@ -535,10 +498,7 @@ mod tests {
         routing::any,
     };
 
-    use contracts::{
-        backend::cores::{AccessGrant, AccessRevocation},
-        core::CoreRole,
-    };
+    use contracts::backend::cores::ForgottenServer;
 
     use super::*;
     use crate::db;
@@ -643,16 +603,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn connecting_replaces_the_directory_and_reports_state() {
+    async fn connecting_reports_state() {
         let (backend, url) = backend(Vec::new()).await;
         let sync = sync(url).await;
-        sqlx::query(
-            "INSERT INTO servers (id, name, created_at, port, memory_mb) VALUES ('s1', 'A', 0, 25565, 1024), ('s2', 'B', 0, 25566, 1024); \
-             INSERT INTO access (server_id, user_id, role, added_at) VALUES ('s1', 'b', 'viewer', 0), ('s2', 'b', 'editor', 0), ('s1', 'a', 'editor', 0)",
-        )
-        .execute(&sync.db)
-        .await
-        .unwrap();
         let mut conn = sync.db.acquire().await.unwrap();
         owe(&mut conn, &OwedCall::ReportState).await.unwrap();
         owe(&mut conn, &OwedCall::ReportState).await.unwrap();
@@ -665,12 +618,10 @@ mod tests {
 
         sync.connect("amc_key", &addresses()).await.unwrap();
         let calls = backend.calls.lock().unwrap().clone();
-        assert_eq!(calls[0].0, "PUT");
-        assert_eq!(calls[0].1, "/core/access");
-        assert_eq!(calls[0].2, serde_json::json!({ "user_ids": ["a", "b"] }));
-        assert_eq!(calls[1].1, "/core/state");
-        assert_eq!(calls[1].2["address"], "https://127.0.0.1:16662");
-        assert_eq!(calls[1].2["cert_fingerprint"], "f".repeat(64));
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].1, "/core/state");
+        assert_eq!(calls[0].2["address"], "https://127.0.0.1:16662");
+        assert_eq!(calls[0].2["cert_fingerprint"], "f".repeat(64));
         assert!(
             owed(&sync).await.is_empty(),
             "the report covered the owed one"
@@ -681,27 +632,15 @@ mod tests {
     async fn owed_calls_retry_with_backoff_until_the_backend_answers() {
         let (backend, url) = backend(vec![503]).await;
         let sync = sync(url).await;
-        sqlx::query(
-            "INSERT INTO servers (id, name, created_at, port, memory_mb) VALUES ('s1', 'A', 0, 25565, 1024); \
-             INSERT INTO access (server_id, user_id, role, added_at) VALUES ('s1', 'friend', 'editor', 0)",
-        )
-        .execute(&sync.db)
-        .await
-        .unwrap();
-        let grant = OwedCall::Grant(AccessGrant {
-            user: "friend".into(),
-            server_id: "s1".into(),
-            server_name: "A".into(),
-            role: CoreRole::Editor,
-        });
-        let remove = OwedCall::Remove(AccessRevocation {
-            user_id: "other".into(),
-            server_id: "s1".into(),
-            keep_core: false,
-        });
+        let forget = |server_id: &str| {
+            OwedCall::ForgetPlayers(ForgottenServer {
+                server_id: server_id.into(),
+                share_id: None,
+            })
+        };
         let mut conn = sync.db.acquire().await.unwrap();
-        owe(&mut conn, &grant).await.unwrap();
-        owe(&mut conn, &remove).await.unwrap();
+        owe(&mut conn, &forget("s1")).await.unwrap();
+        owe(&mut conn, &forget("s2")).await.unwrap();
         owe(
             &mut conn,
             &OwedCall::DeleteShare {
@@ -733,31 +672,21 @@ mod tests {
         assert!(owed(&sync).await.is_empty());
         let calls = backend.calls.lock().unwrap().clone();
         assert_eq!(calls.len(), 4);
+        let sent: Vec<_> = calls
+            .iter()
+            .map(|(method, path, body)| {
+                (method.as_str(), path.as_str(), body["server_id"].as_str())
+            })
+            .collect();
         assert_eq!(
-            (calls[1].0.as_str(), calls[1].2["user"].as_str()),
-            ("POST", Some("friend"))
+            sent,
+            [
+                ("DELETE", "/core/players", Some("s1")),
+                ("DELETE", "/core/players", Some("s1")),
+                ("DELETE", "/core/players", Some("s2")),
+                ("DELETE", "/v1/instances/share-1", None),
+            ]
         );
-        assert_eq!(
-            (calls[2].0.as_str(), calls[2].2["user_id"].as_str()),
-            ("DELETE", Some("other"))
-        );
-        assert_eq!(
-            (calls[3].0.as_str(), calls[3].1.as_str()),
-            ("DELETE", "/v1/instances/share-1")
-        );
-        assert_eq!(calls[1].2["role"], "editor");
-
-        // A grant for someone removed since is not sent.
-        sqlx::query("DELETE FROM access")
-            .execute(&sync.db)
-            .await
-            .unwrap();
-        let mut conn = sync.db.acquire().await.unwrap();
-        owe(&mut conn, &grant).await.unwrap();
-        drop(conn);
-        sync.send_due("amc_key", &addresses()).await.unwrap();
-        assert!(owed(&sync).await.is_empty());
-        assert_eq!(backend.calls.lock().unwrap().len(), 4);
     }
 
     #[tokio::test]
@@ -766,7 +695,6 @@ mod tests {
         let sync = sync(url).await;
         sqlx::query(
             "INSERT INTO servers (id, name, created_at, port, memory_mb) VALUES ('s1', 'A', 0, 25565, 1024); \
-             INSERT INTO access (server_id, user_id, role, added_at) VALUES ('s1', 'friend', 'editor', 0); \
              INSERT INTO sessions VALUES ('x', x'00', 'owner', 'Laptop', 0, 0, 9999999999)",
         )
         .execute(&sync.db)
@@ -787,15 +715,11 @@ mod tests {
         assert_eq!(changed.recv().await.unwrap(), Changed::Everyone);
         assert!(sync.sessions.backend().is_none(), "the engine kept the key");
         assert_eq!(sync.key().await, None);
-        for table in ["access", "sessions"] {
-            let count: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-                "SELECT COUNT(*) FROM {table}"
-            )))
+        let sessions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sessions")
             .fetch_one(&sync.db)
             .await
             .unwrap();
-            assert_eq!(count, 0, "{table}");
-        }
+        assert_eq!(sessions, 0);
         let servers: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM servers")
             .fetch_one(&sync.db)
             .await

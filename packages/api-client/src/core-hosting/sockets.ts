@@ -50,9 +50,8 @@ export class CoreSyncClient extends AbstractSyncClient {
 
 /**
  * The hosting panel's per-server socket on a Core: a Core's `/events` socket subscribed to one
- * server's topics, each event passed on as the hosting API's event the panel listens for. A
- * Viewer's console subscription ends at once, so they get no console. Commands go to
- * `POST /servers/{id}/console`.
+ * server's topics, each event passed on as the hosting API's event the panel listens for. Commands
+ * go to `POST /servers/{id}/console`.
  *
  * The panel opens once it has the server's install progress. `installs` is subscribed first, so
  * the unfinished jobs it starts with have arrived when the power state authenticates the socket.

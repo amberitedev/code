@@ -14,11 +14,11 @@ const TICKET_KEY = JSON.stringify({ ...privateKey.export({ format: 'jwk' }), kid
  */
 const SIGNED_TICKET = new URL('../../core/src/access/session-ticket.json', import.meta.url)
 
-/** A backend with accounts `owner`, `friend`, `other` and `stranger`, and Core `core` owned by `owner`. */
+/** A backend with accounts `owner` and `friend`, and Core `core` owned by `owner`. */
 async function withCore(name, run) {
 	const backend = await startBackend(name, { TICKET_KEY })
 	try {
-		for (const user of ['owner', 'friend', 'other', 'stranger']) await backend.account(user)
+		for (const user of ['owner', 'friend']) await backend.account(user)
 		await backend.db
 			.prepare(
 				'INSERT INTO cores (id,owner_id,name,address,key_hash,created,last_seen) VALUES (?,?,?,?,?,?,?)',
@@ -36,13 +36,7 @@ async function withCore(name, run) {
 		// Every row written to the tables a Core's reports touch, so a test can tell "nothing changed"
 		// from "rewrote the same values".
 		await backend.db.prepare('CREATE TABLE writes (tbl TEXT NOT NULL)').run()
-		for (const [table, event] of [
-			['cores', 'UPDATE'],
-			['visible_servers', 'INSERT'],
-			['visible_servers', 'DELETE'],
-			['core_access', 'INSERT'],
-			['core_access', 'DELETE'],
-		])
+		for (const [table, event] of [['cores', 'UPDATE']])
 			await backend.db
 				.prepare(
 					`CREATE TRIGGER count_${table}_${event} AFTER ${event} ON ${table} BEGIN INSERT INTO writes VALUES ('${table}'); END`,
@@ -109,11 +103,8 @@ test('a signed-out Core waits on a socket that approval closes', { timeout: 30_0
 	})
 })
 
-test('tickets carry the user and the Core, for the owner and the access directory only', async () => {
-	await withCore('core-tickets', async ({ backend, call, writes }) => {
-		await backend.db
-			.prepare("INSERT INTO core_access (core_id,user_id,created) VALUES ('core','friend','x')")
-			.run()
+test('tickets carry the user and the Core, for the owner only', async () => {
+	await withCore('core-tickets', async ({ call, writes }) => {
 		const before = await writes()
 
 		const response = await call('POST', '/cores/core/ticket', undefined, 'mra_owner')
@@ -148,87 +139,30 @@ test('tickets carry the user and the Core, for the owner and the access director
 			'Core verifies session-ticket.json: sign a new one with WRITE_TICKET=1',
 		)
 
-		const friend = await call('POST', '/cores/core/ticket', undefined, 'mra_friend')
-		assert.equal(friend.status, 200)
-		const friendClaims = decode((await friend.json()).ticket).claims
-		assert.equal(friendClaims.sub, 'friend')
-		assert.notEqual(friendClaims.jti, claims.jti)
+		const again = await call('POST', '/cores/core/ticket', undefined, 'mra_owner')
+		assert.notEqual(decode((await again.json()).ticket).claims.jti, claims.jti)
 
-		assert.equal((await call('POST', '/cores/core/ticket', undefined, 'mra_stranger')).status, 404)
+		assert.equal((await call('POST', '/cores/core/ticket', undefined, 'mra_friend')).status, 404)
 		assert.equal((await call('POST', '/cores/nope/ticket', undefined, 'mra_owner')).status, 404)
 		assert.equal((await call('POST', '/cores/core/ticket', undefined, 'amc_test')).status, 401)
 		assert.equal(await writes(), before)
 	})
 })
 
-test('PUT /core/access replaces the directory, writing only what changed', async () => {
-	await withCore('core-access-replace', async ({ backend, call, writes }) => {
-		await backend.db
-			.prepare(
-				"INSERT INTO core_access (core_id,user_id,created) VALUES ('core','friend','x'), ('core','other','kept')",
-			)
-			.run()
-		const before = await writes()
-		const directory = { user_ids: ['other', 'stranger', 'owner', 'nobody'] }
-		assert.equal((await call('PUT', '/core/access', directory)).status, 204)
-		const rows = (
-			await backend.db
-				.prepare("SELECT user_id, created FROM core_access WHERE core_id = 'core' ORDER BY user_id")
-				.all()
-		).results
-		assert.deepEqual(
-			rows.map((row) => row.user_id),
-			['other', 'stranger'],
-		)
-		assert.equal(rows[0].created, 'kept', 'an unchanged row is not rewritten')
-		assert.equal(await writes(), before + 2, 'one removal and one addition')
-
-		assert.equal((await call('PUT', '/core/access', directory)).status, 204)
-		assert.equal(await writes(), before + 2, 'the same directory again writes nothing')
-		assert.equal((await call('POST', '/cores/core/ticket', undefined, 'mra_friend')).status, 404)
-
-		assert.equal((await call('PUT', '/core/access', { user_ids: [7] })).status, 400)
-		const removed = await call('PUT', '/core/access', directory, 'amc_unknown')
-		assert.equal(removed.status, 410)
-		assert.equal((await removed.json()).error, 'core_removed')
-	})
-})
-
 test('state reports write only what changed', async () => {
 	await withCore('core-state', async ({ backend, call, writes }) => {
-		await backend.db
-			.prepare(
-				"INSERT INTO shared_instances (id,owner_id,name,created) VALUES ('pack','owner','Pack','x')",
-			)
-			.run()
-		await backend.db
-			.prepare(
-				"INSERT INTO shared_instance_users (instance_id,user_id,joined_at,join_type) VALUES ('pack','owner','x','owner')",
-			)
-			.run()
-		const server = {
-			id: 's1',
-			name: 'SMP',
-			address: '203.0.113.5:25565',
-			shared_instance_id: 'pack',
-		}
 		const state = {
 			version: '0.1.0',
 			address: 'https://192.168.1.2:16662',
 			public_address: null,
 			cert_fingerprint: 'a'.repeat(64),
-			servers: [server],
 		}
 		const core = () => backend.db.prepare("SELECT * FROM cores WHERE id = 'core'").first()
-		const visible = async () =>
-			(await backend.db.prepare("SELECT * FROM visible_servers WHERE core_id = 'core'").all())
-				.results
 
 		const before = await writes()
 		assert.equal((await call('POST', '/core/state', state)).status, 204)
 		assert.equal((await core()).cert_fingerprint, 'a'.repeat(64))
 		assert.equal((await core()).version, '0.1.0')
-		assert.equal((await visible()).length, 1)
 		const first = await writes()
 		assert.ok(first > before)
 
@@ -239,9 +173,6 @@ test('state reports write only what changed', async () => {
 		assert.equal((await call('POST', '/core/state', moved)).status, 204)
 		assert.equal((await core()).public_address, 'https://203.0.113.5:16662')
 		assert.equal(await writes(), first + 1, 'one changed field is one write')
-
-		assert.equal((await call('POST', '/core/state', { ...moved, servers: [] })).status, 204)
-		assert.equal((await visible()).length, 0)
 
 		const plain = { ...state, address: 'http://192.168.1.2:16662' }
 		assert.equal((await call('POST', '/core/state', plain)).status, 400)
@@ -254,32 +185,6 @@ test('state reports write only what changed', async () => {
 		const removed = await call('POST', '/core/state', state)
 		assert.equal(removed.status, 410)
 		assert.equal((await removed.json()).error, 'core_removed')
-	})
-})
-
-test('every invite is from the owner', async () => {
-	await withCore('core-invites', async ({ backend, call }) => {
-		await backend.db
-			.prepare("INSERT INTO core_access (core_id,user_id,created) VALUES ('core','friend','x')")
-			.run()
-		const invite = { server_id: 'server', server_name: 'Server', role: 'editor', user: 'other' }
-		// A Core cannot name anyone else as the inviter.
-		assert.equal(
-			(await call('POST', '/core/access', { ...invite, invited_by: 'friend' })).status,
-			200,
-		)
-		const notification = await backend.db
-			.prepare("SELECT body FROM notifications WHERE user_id = 'other'")
-			.first()
-		assert.equal(JSON.parse(notification.body).invited_by, 'owner')
-		// Core allows 64 characters; outside the BMP that is 128 UTF-16 units.
-		const wide = { ...invite, server_name: '\u{1F7E7}'.repeat(64) }
-		assert.equal((await call('POST', '/core/access', wide)).status, 200)
-		assert.ok(
-			await backend.db
-				.prepare("SELECT 1 FROM core_access WHERE core_id = 'core' AND user_id = 'other'")
-				.first(),
-		)
 	})
 })
 
@@ -298,9 +203,6 @@ test('the old Core routes are gone, and a removed Core is told so on every route
 		for (const [method, path] of [
 			['POST', '/core/state'],
 			['POST', '/core/storage'],
-			['PUT', '/core/access'],
-			['POST', '/core/access'],
-			['DELETE', '/core/access'],
 			['DELETE', '/core/players'],
 		])
 			assert.equal((await call(method, path, {})).status, 410, `${method} ${path}`)

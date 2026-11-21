@@ -48,7 +48,7 @@ The most common defect in this repo is a change that works on the path you teste
 - **Way in, way out.** If you added a way in, add the way out and the way to see it. Share needs unshare, invite needs revoke. A one-way door is an unfinished feature.
 - **Contracts.** Anything crossing the wire is an `Endpoint` declared in Rust, and its TypeScript is generated. Change the Rust type and the App, the Cores and the backend all follow.
 - **App and Core.** An instance lives on this computer or on a Core. Most instance screens are one shared layout with a provider per side, so an action added on one side is missing on the other.
-- **Roles and states.** The owner and someone invited see different things, and a server or a shared instance behaves differently while stopped, running, installing or removed. Check the ones the change touches.
+- **People and states.** A shared instance's owner, its members and a server's players see different things, and a server or a shared instance behaves differently while stopped, running, installing or removed. Check the ones the change touches.
 - **Docs.** Check whether the change makes existing guidance inaccurate. Apply the [documentation rules](#documentation) before adding anything.
 - **Cost.** If the change touches the backend, say what it does to cost.
 

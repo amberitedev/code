@@ -380,10 +380,7 @@ fn describe(server: &Server, insight: &ServerInsight) -> String {
             super::local_time(crash.at)
         ));
         // A crash's lines are the server's console, escaped as `console attach` does.
-        let last: Vec<&str> = crash
-            .last_lines
-            .as_deref()
-            .map_or_else(Vec::new, |text| text.lines().collect());
+        let last: Vec<&str> = crash.last_lines.lines().collect();
         let start = last.len().saturating_sub(5);
         lines.extend(
             last[start..]
@@ -593,7 +590,7 @@ mod tests {
 
     fn server(id: &str, name: &str) -> Server {
         serde_json::from_value(serde_json::json!({
-            "id": id, "name": name, "owner_id": null, "role": null, "installing": false,
+            "id": id, "name": name, "owner_id": null, "installing": false,
             "loader": null, "loader_version": null, "game_version": null,
             "net": {"ip": null, "port": 25565, "outside": null, "game_port": 25565},
             "power": "offline", "linked_instance": null, "reachability": null, "players": null,

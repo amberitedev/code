@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use axum::{Extension, extract::State, http::HeaderMap};
+use axum::{Extension, extract::State};
 use contracts::{
     ApiError, Empty, ErrorCode, Json,
     core::{
@@ -14,7 +14,9 @@ use contracts::{
 };
 
 use super::{CoreState, internal};
-use crate::access::{Caller, Peer, activity, fresh_ticket, now, sessions};
+use crate::access::{
+    Caller, Dangerous, Peer, activity, now, require_owner, sessions,
+};
 
 pub async fn sign_in(
     State(state): State<Arc<CoreState>>,
@@ -45,41 +47,30 @@ pub async fn list(
     State(state): State<Arc<CoreState>>,
     _: Req<ListSessions>,
 ) -> Result<Json<Vec<CoreSession>>, ApiError> {
-    let only = if caller.is_owner() {
-        None
-    } else {
-        caller.user_id()
-    };
+    require_owner(&caller)?;
     let current = match &caller {
         Caller::Session { id, .. } => Some(id.as_str()),
         Caller::Local => None,
     };
     Ok(Json(
-        sessions::list(&state.db, only, current, now())
+        sessions::list(&state.db, current, now())
             .await
             .map_err(internal)?,
     ))
 }
 
 pub async fn revoke(
-    caller: Caller,
+    Dangerous(caller): Dangerous,
     State(state): State<Arc<CoreState>>,
-    headers: HeaderMap,
     request: Req<RevokeSession>,
 ) -> Result<Empty, ApiError> {
     let id = request.params.id;
-    let not_found =
-        || ApiError::new(ErrorCode::NotFound, "There is no such session.");
-    let session = sessions::get(&state.db, &id, None)
+    sessions::get(&state.db, &id, None)
         .await
         .map_err(internal)?
-        .ok_or_else(not_found)?;
-    if caller.user_id() != Some(session.user.id.as_str()) {
-        if !caller.is_owner() {
-            return Err(not_found());
-        }
-        fresh_ticket(&state, &caller, &headers).await?;
-    }
+        .ok_or_else(|| {
+            ApiError::new(ErrorCode::NotFound, "There is no such session.")
+        })?;
     end(&state, &caller, &id).await
 }
 
@@ -88,6 +79,7 @@ pub async fn sign_out(
     State(state): State<Arc<CoreState>>,
     _: Req<SignOut>,
 ) -> Result<Empty, ApiError> {
+    require_owner(&caller)?;
     match &caller {
         Caller::Session { id, .. } => end(&state, &caller, id).await,
         Caller::Local => Err(ApiError::new(

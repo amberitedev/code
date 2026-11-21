@@ -1,6 +1,5 @@
 //! The Java a server runs: a managed major other than the one the Minecraft version needs, or, as
 //! an advanced override, a custom Java path. Both run as `copal-servers` like every server.
-//! Editors and the owner only, since choosing what runs is running code.
 
 use std::sync::Arc;
 

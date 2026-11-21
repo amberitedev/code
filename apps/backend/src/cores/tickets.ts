@@ -170,14 +170,12 @@ export async function pullTicket(env: Env, coreId: string, root: string, source:
 }
 
 /**
- * App: a session ticket for one Core, for its owner or anyone in its access directory. Anyone
- * else gets the same 404 as for a Core that does not exist.
+ * App: a session ticket for one Core, for its owner. Anyone else gets the same 404 as for a Core
+ * that does not exist.
  */
 export async function issueTicket(request: Request, env: Env, coreId: string): Promise<CoreTicket> {
 	const user = await requireUser(request, env)
-	const allowed = await env.DB.prepare(
-		'SELECT 1 FROM cores c WHERE c.id = ?1 AND (c.owner_id = ?2 OR EXISTS (SELECT 1 FROM core_access a WHERE a.core_id = c.id AND a.user_id = ?2))',
-	)
+	const allowed = await env.DB.prepare('SELECT 1 FROM cores WHERE id = ? AND owner_id = ?')
 		.bind(coreId, user.id)
 		.first()
 	if (!allowed) throw new ApiError(404, 'not_found', 'Core not found')

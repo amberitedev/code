@@ -4,9 +4,9 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::{CoreRole, CoreUser, ReachabilityReport};
+use super::{CoreUser, ReachabilityReport};
 
-/// A server, as someone with a role on it sees it.
+/// A server on a Core.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct CoreServer {
@@ -14,8 +14,6 @@ pub struct CoreServer {
     pub name: String,
     /// Null until the Core is paired.
     pub owner_id: Option<String>,
-    /// The caller's role. Null for the owner, who has every role.
-    pub role: Option<CoreRole>,
     /// Its loader or pack is installing now.
     pub installing: bool,
     /// `vanilla`, `fabric`, `quilt`, `forge`, `neoforge` or `paper`. Null until installed.

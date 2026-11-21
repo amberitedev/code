@@ -42,9 +42,8 @@ const auth = injectAuth()
 const queryClient = useQueryClient()
 const { addNotification } = injectNotificationManager()
 const formatBytes = useFormatBytes()
-// Kept fresh from the App root, so this page has its answer the moment it opens. Only the
-// account's own Cores are managed here, not ones it was invited to.
-const { ownCores: cores, data, isFetching, error, refetch } = useCores()
+// Kept fresh from the App root, so this page has its answer the moment it opens.
+const { cores, data, isFetching, error, refetch } = useCores()
 const { openAddCore } = injectCoreActions()
 const { data: servers } = useServers()
 const { data: shared } = useSharedStorage()
@@ -242,7 +241,7 @@ async function remove() {
 
 		<Admonition v-if="mismatch" type="warning">
 			{{ mismatch.message }}
-			<template v-if="mismatch.side === 'core' && mismatch.owner" #actions>
+			<template v-if="mismatch.side === 'core'" #actions>
 				<Button
 					:disabled="update.isPending.value || updatedId === core.id"
 					@click="update.mutate(core.id)"

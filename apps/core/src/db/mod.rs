@@ -71,7 +71,6 @@ mod tests {
         assert_eq!(
             tables,
             [
-                "access",
                 "activity",
                 "backend_owed",
                 "backup_operations",

@@ -22,10 +22,9 @@ type CoreLocation = Pick<ListedCore, 'id' | 'address' | 'cert_fingerprint'> &
 type Route = { base: string; address: string }
 
 /**
- * The Cores the account may reach: the ones signed in to it, and the ones it was invited to manage
- * a server on. The backend keeps the list and each Core's address; hosting calls go to a Core
- * directly, with this device's session there (see `signIn`). Several Cores are treated as one:
- * their servers form one list, and a request for a server is sent to the Core that has it.
+ * The account's own Cores. The backend keeps the list and each Core's address; hosting calls go to
+ * a Core directly, with this device's session there (see `signIn`). Several Cores are treated as
+ * one: their servers form one list, and a request for a server is sent to the Core that has it.
  *
  * The App never contacts a Core before it is listed. Fetch the list again with `list` after it
  * changes, such as when a Core is approved. It is `client.archon.cores_v1` because `packages/ui`
@@ -49,8 +48,8 @@ export class ArchonCoresV1Module extends AbstractModule {
 	}
 
 	/**
-	 * Fetch the Cores the account may reach from the backend, its own first. A Core whose route
-	 * cannot be worked out keeps its plain address, so it does not take the other Cores down with it.
+	 * Fetch the account's Cores from the backend. A Core whose route cannot be worked out keeps its
+	 * plain address, so it does not take the other Cores down with it.
 	 */
 	public list(): Promise<ListedCore[]> {
 		const listing = this.client.backend.call(cores.ListCores).then(async (list) => {
@@ -103,43 +102,7 @@ export class ArchonCoresV1Module extends AbstractModule {
 		this.cores = null
 	}
 
-	/**
-	 * Accept or decline an invite to a server on someone else's Core. An invite is already access,
-	 * so accepting is signing in and declining is leaving the server. The invite is what made that
-	 * Core reachable, so the list is fetched again to find it.
-	 */
-	public async respondToInvite(
-		coreId: string,
-		serverId: string,
-		action: 'accept' | 'decline',
-	): Promise<void> {
-		const core = (await this.list()).find((candidate) => candidate.id === coreId)
-		if (!core) throw new ModrinthApiError('This invite is no longer available', { statusCode: 404 })
-		if (action === 'accept') {
-			await this.ensureSession(core)
-			this.serverCores.set(serverId, core.id)
-			return
-		}
-		await this.leave(core.id, serverId)
-		// Declining the only server on that Core takes the Core out of the list.
-		this.serverCores.delete(serverId)
-		this.cores = null
-	}
-
-	/**
-	 * Give up your own role on a server. No ticket, so leaving works without the backend: it only
-	 * takes away what this device's session could do. Every session you have on the Core ends; the
-	 * App signs in again for what is left.
-	 */
-	public async leave(coreId: string, serverId: string): Promise<void> {
-		const core = this.client.core(coreId)
-		const { user } = await core.call(coreRoutes.GetMyAccess)
-		// RemoveMember is dangerous for removing someone else; removing yourself is not.
-		const leaveServer = { ...coreRoutes.RemoveMember, dangerous: false }
-		await core.call(leaveServer, { params: { id: serverId, user_id: user.id } })
-	}
-
-	/** A ticket for `coreId`, for its owner or someone invited to one of its servers. */
+	/** A ticket for `coreId`, which only its owner gets. */
 	public async ticket(coreId: string): Promise<string> {
 		const { ticket } = await this.client.backend.call(cores.IssueTicket, { params: { id: coreId } })
 		return ticket
@@ -155,7 +118,7 @@ export class ArchonCoresV1Module extends AbstractModule {
 	 * Sign this device in to `core` with a fresh ticket, replacing any session it held. The
 	 * platform trades the ticket with the Core for a session of its own and adds it to every
 	 * request to the Core; the page never sees it. Throws a `ModrinthApiError` with Core's error,
-	 * such as `not_invited` or `clock_wrong`.
+	 * such as `clock_wrong`.
 	 */
 	public signIn(core: ListedCore): Promise<CoreSession> {
 		const pending = this.signingIn.get(core.id)

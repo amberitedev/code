@@ -19,7 +19,6 @@
 		@confirm="proceedRemoveWorld"
 	/>
 	<DesyncServerModal ref="desyncServerModal" @confirm="confirmDesyncServer" />
-	<UpdateBeforeJoinModal ref="updateBeforeJoinModal" />
 	<CreateServerFromInstanceModal
 		v-if="canCreateServer"
 		ref="createServerModal"
@@ -122,10 +121,6 @@
 						:linked-note="row.linked && linkedNote(row.linked)"
 						:copy-address="row.linked && getHostingServerAddress(row.linked.net)"
 						:outside-warning="row.linked && unreachableCause(row.linked)"
-						:hosted-by="row.hosted?.host.username"
-						:hosted-server-id="
-							row.hosted && canManageHostedServer(row.hosted) ? row.hosted.server_id : undefined
-						"
 						pinnable
 						:pinned="pins.pinned.value.includes(row.key)"
 						:highlighted="highlightedWorld === getWorldIdentifier(row.world)"
@@ -229,7 +224,6 @@ import ConfirmRemoveWorldModal from '@/components/ui/world/modal/ConfirmRemoveWo
 import DesyncServerModal from '@/components/ui/world/modal/DesyncServerModal.vue'
 import EditServerModal from '@/components/ui/world/modal/EditServerModal.vue'
 import EditWorldModal from '@/components/ui/world/modal/EditSingleplayerWorldModal.vue'
-import UpdateBeforeJoinModal from '@/components/ui/world/modal/UpdateBeforeJoinModal.vue'
 import WorldItem from '@/components/ui/world/WorldItem.vue'
 import { useAppEvent } from '@/composables/use-app-event'
 import { handleSevereError } from '@/composables/use-error.js'
@@ -237,12 +231,9 @@ import { useWorldPins, worldPinKey } from '@/features/instances/worlds/world-pin
 import CreateServerFromInstanceModal from '@/features/servers/create-server-from-instance-modal.vue'
 import {
 	coreOffline,
-	type HostedServer,
 	type LinkedServer,
 	linkedServerState,
 	unreachableCause,
-	useCanManageHostedServer,
-	useHostedServers,
 	useLinkedServers,
 } from '@/features/servers/linked-servers'
 import { trackEvent } from '@/helpers/analytics'
@@ -283,7 +274,6 @@ import { injectServerInstall } from '@/providers/server-install'
 
 import { injectInstancePage } from '../instance-context'
 import { instanceKeys, instanceWorldsQueryOptions } from '../query-options'
-import { injectSharedInstance } from '../shared-instance-context'
 
 const messages = defineMessages({
 	searchWorldsPlaceholder: {
@@ -357,7 +347,6 @@ const { handleError } = injectNotificationManager()
 const { playServerProject } = injectServerInstall()
 const route = useRoute()
 const instancePage = injectInstancePage()
-const sharedInstance = injectSharedInstance()
 
 const addServerModal = ref<InstanceType<typeof AddServerModal>>()
 const editServerModal = ref<InstanceType<typeof EditServerModal>>()
@@ -365,7 +354,6 @@ const editWorldModal = ref<InstanceType<typeof EditWorldModal>>()
 const removeWorldModal = ref<InstanceType<typeof ConfirmRemoveWorldModal>>()
 const desyncServerModal = ref<InstanceType<typeof DesyncServerModal>>()
 const createServerModal = ref<InstanceType<typeof CreateServerFromInstanceModal>>()
-const updateBeforeJoinModal = ref<InstanceType<typeof UpdateBeforeJoinModal>>()
 
 const worldToRemove = ref<World | null>(null)
 
@@ -386,23 +374,14 @@ const { servers: linkedServers } = useLinkedServers(() => instance.value.id)
 const canCreateServer = computed(
 	() => !instance.value.quarantined && instance.value.install_stage === 'installed',
 )
-// Servers other people host for this shared instance. A signed-out or wrong account gets none,
-// and neither does an instance that was deleted or that this account lost access to.
-const { servers: hostedServers, query: hostedServersQuery } = useHostedServers(() =>
-	sharedInstance.shareActionsLocked.value || sharedInstance.signedOut.value
-		? undefined
-		: instance.value.shared_instance?.id,
-)
-// The ones among them this account may manage, which makes those rows open the server page.
-const canManageHostedServer = useCanManageHostedServer()
 
 const pins = useWorldPins(() => instance.value.id)
 
 /**
- * One row of the list. A server on the user's Core (`linked`) and a server someone else hosts
- * (`hosted`) are listed as ordinary server rows, so they look and join like the others.
+ * One row of the list. A server on the user's Core (`linked`) is listed as an ordinary server row,
+ * so it looks and joins like the others.
  */
-type WorldRow = { key: string; world: World; linked?: LinkedServer; hosted?: HostedServer }
+type WorldRow = { key: string; world: World; linked?: LinkedServer }
 
 /** Where this App joins a linked server, which its row shows, pings and joins. See `joinNet`. */
 function joinAddress(server: LinkedServer) {
@@ -433,10 +412,6 @@ const rows = computed<WorldRow[]>(() => {
 				world: serverRow(key, linked.name, joinAddress(linked)),
 			}
 		}),
-		...hostedServers.value.map((hosted) => {
-			const key = `hosted:${hosted.core_id}:${hosted.server_id}`
-			return { key, hosted, world: serverRow(key, hosted.name, hosted.address) }
-		}),
 		...dedupedWorlds.value.map((world) => ({ key: worldPinKey(world), world })),
 	]
 	const order = pins.pinned.value
@@ -451,7 +426,7 @@ const rows = computed<WorldRow[]>(() => {
 
 /** A row from the instance's own list, which the user may edit and remove. */
 function ownRow(row: WorldRow) {
-	return !row.linked && !row.hosted
+	return !row.linked
 }
 
 function editRow(row: WorldRow) {
@@ -473,29 +448,9 @@ function reorderPinned(reordered: WorldRow[]) {
 	pins.pinned.value = reordered.filter((row) => pinned.has(row.key)).map((row) => row.key)
 }
 
-/**
- * Joins a row's world. A member whose shared instance is behind is first asked whether to update
- * when the server is someone else's, since that server follows the instance.
- */
+/** Joins a row's world. */
 async function joinRow(row: WorldRow) {
-	if (row.linked || row.hosted) pins.markJoined(row.key)
-	const hosted = row.hosted
-	if (hosted && instance.value.shared_instance?.role === 'member') {
-		// Busy from the first click, so a second one does not check and join again.
-		if (startingInstance.value) return
-		startingInstance.value = true
-		const preview = await sharedInstance
-			.refreshUpdatePreview()
-			.catch(() => sharedInstance.updatePreview.value)
-			.finally(() => (startingInstance.value = false))
-		if (preview?.updateAvailable && updateBeforeJoinModal.value) {
-			updateBeforeJoinModal.value.show(instance.value.id, hosted.host.username, async () => {
-				await instancePage.refreshInstance()
-				await joinWorld(row.world)
-			})
-			return
-		}
-	}
+	if (row.linked) pins.markJoined(row.key)
 	await joinWorld(row.world)
 }
 
@@ -759,21 +714,6 @@ watch(
 	{ immediate: true },
 )
 
-// A hosted server's state is only known by pinging it, so each is pinged again whenever the list
-// is fetched. The row keeps its last answer meanwhile instead of showing as loading.
-watch(
-	[hostedServersQuery.dataUpdatedAt, protocolVersionReady],
-	async () => {
-		if (!protocolVersionReady.value) return
-		for (const { address } of hostedServers.value) {
-			const answer: ServerData = { refreshing: true }
-			void refreshServerData(answer, protocolVersion.value, address).then(() => {
-				serverData.value[address] = answer
-			})
-		}
-	},
-	{ immediate: true },
-)
 async function refreshAllWorlds() {
 	if (refreshingAll.value) {
 		console.log(`Already refreshing, cancelling refresh.`)

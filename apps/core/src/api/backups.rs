@@ -6,9 +6,8 @@
 //! Core has [`SLOTS`] backup slots per server, split between scheduled and manual backups; the
 //! schedule's `keep` is the scheduled share.
 //!
-//! Viewers see the list and the schedule. Editors create, rename, and download backups and the
-//! world, and set the schedule. Restoring and deleting are the owner's, with a fresh ticket, and
-//! so is keeping fewer scheduled backups than there are, which deletes the oldest.
+//! Restoring and deleting need a fresh ticket, and so does keeping fewer scheduled backups than
+//! there are, which deletes the oldest.
 
 use std::{collections::HashMap, sync::Arc};
 

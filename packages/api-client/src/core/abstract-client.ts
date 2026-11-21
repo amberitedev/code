@@ -95,9 +95,7 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 		const transport =
 			this.config.coreTransport?.(coreId) ??
 			coreSessionTransport(this, coreId, (input, init) => this.platformFetch(input, init))
-		const client = new ContractClient(
-			protocolChecked(transport, async () => (await this.archon.cores_v1.core(coreId)).owned),
-		)
+		const client = new ContractClient(protocolChecked(transport))
 		this._cores.set(coreId, client)
 		return client
 	}

@@ -128,10 +128,8 @@
 						<FileManagerError
 							v-else-if="ctx.error.value"
 							class="rounded-b-[20px]"
-							:title="formatMessage(forbidden ? messages.forbiddenTitle : messages.errorTitle)"
-							:message="
-								formatMessage(forbidden ? messages.forbiddenMessage : messages.errorMessage)
-							"
+							:title="formatMessage(messages.errorTitle)"
+							:message="formatMessage(messages.errorMessage)"
 							@refetch="ctx.refresh"
 							@home="navigateToSegment(-1)"
 						/>
@@ -205,7 +203,6 @@
 </template>
 
 <script setup lang="ts">
-import { ModrinthApiError } from '@modrinth/api-client'
 import {
 	FolderArchiveIcon,
 	FolderOpenIcon,
@@ -266,14 +263,6 @@ const messages = defineMessages({
 		id: 'files.layout.error-message',
 		defaultMessage: 'The folder may not exist.',
 	},
-	forbiddenTitle: {
-		id: 'files.layout.forbidden-title',
-		defaultMessage: "You can't view these files",
-	},
-	forbiddenMessage: {
-		id: 'files.layout.forbidden-message',
-		defaultMessage: 'Ask the owner for access to them.',
-	},
 	selectedCount: {
 		id: 'files.layout.selected-count',
 		defaultMessage: '{count} selected',
@@ -307,10 +296,6 @@ defineProps<{
 
 const { addNotification } = injectNotificationManager()
 const ctx = injectFileManager()
-// A viewer of a Core server may not read its files.
-const forbidden = computed(
-	() => ctx.error.value instanceof ModrinthApiError && ctx.error.value.statusCode === 403,
-)
 const filePicker = injectFilePicker(null)
 
 const editorComponent = shallowRef<Component | null>(null)

@@ -7,8 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Auth, Empty, Endpoint, Json, Method, Upgrade, core::CoreRole,
-    tickets::PublicKeys,
+    Auth, Empty, Endpoint, Json, Method, Upgrade, tickets::PublicKeys,
 };
 
 /// Body of [`RequestSignInCode`].
@@ -63,18 +62,6 @@ pub struct StateReport {
     pub public_address: Option<String>,
     /// SHA-256 of the TLS certificate, lowercase hex. The App pins it.
     pub cert_fingerprint: String,
-    /// The servers shown to the people their instance is shared with.
-    pub servers: Vec<VisibleServer>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct VisibleServer {
-    pub id: String,
-    pub name: String,
-    /// The Minecraft address, `host:port`.
-    pub address: String,
-    pub shared_instance_id: String,
 }
 
 /// Body of [`ReportStorage`]. Bytes throughout.
@@ -125,46 +112,6 @@ pub struct PullOrder {
     pub ticket: String,
 }
 
-/// Body of [`ReplaceAccess`]: everyone with a role on any server of the Core, so who may be told
-/// its address. Nothing about roles; the owner is never listed.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct AccessDirectory {
-    pub user_ids: Vec<String>,
-}
-
-/// Body of [`GrantAccess`]: the owner invited `user` to a server.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct AccessGrant {
-    /// A user id or username.
-    pub user: String,
-    pub server_id: String,
-    pub server_name: String,
-    /// Shown in the invite.
-    pub role: CoreRole,
-}
-
-/// Who an invite went to.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct GrantedUser {
-    pub id: String,
-    pub username: String,
-    pub avatar_url: Option<String>,
-}
-
-/// Body of [`RevokeAccess`]: `user_id` lost `server_id`. `keep_core` when they still have another
-/// server on the Core, so they stay in its directory.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct AccessRevocation {
-    pub user_id: String,
-    pub server_id: String,
-    #[serde(default)]
-    pub keep_core: bool,
-}
-
 /// Body of [`ForgetPlayers`]: `server_id` was deleted or stopped following an instance. With
 /// `share_id`, only while it still follows that share, so a late call never drops the players of
 /// a share it follows since.
@@ -197,15 +144,12 @@ pub struct ApprovedCore {
     pub name: String,
 }
 
-/// A Core the signed-in account may reach: one signed in to the account, or one whose owner
-/// invited it to manage a server.
+/// A Core signed in to the account.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct ListedCore {
     pub id: String,
     pub name: String,
-    /// False for a Core the account was only invited to. Its owner manages it.
-    pub owned: bool,
     /// The Core's own version. Null until it has started once since it learned to report it.
     pub version: Option<String>,
     /// Where this Core is on its own network, reported by the Core itself.
@@ -251,17 +195,6 @@ pub struct ReportState;
 /// Core: what its store holds, answered with what to drop and what to pull.
 pub struct ReportStorage;
 
-/// Core: its whole access directory, on every start and reconnect.
-pub struct ReplaceAccess;
-
-/// Core: the owner invited someone to a server. They may reach the Core and get the invite as a
-/// notification.
-pub struct GrantAccess;
-
-/// Core: someone lost a server. Their invite is withdrawn, and their way to the Core unless
-/// `keep_core`.
-pub struct RevokeAccess;
-
 /// Core: a server was deleted or stopped following an instance, so its players and links go.
 pub struct ForgetPlayers;
 
@@ -272,10 +205,10 @@ pub struct LookUpSignInCode;
 /// working.
 pub struct ApproveSignInCode;
 
-/// App: the account's own Cores, then the ones it was invited to.
+/// App: the account's Cores.
 pub struct ListCores;
 
-/// App: a session ticket for one Core, for its owner or anyone in its access directory.
+/// App: a session ticket for one of the account's Cores.
 pub struct IssueTicket;
 
 /// App: the owner takes a Core off the account. Its key stops working at once.
@@ -333,36 +266,6 @@ impl Endpoint for ReportStorage {
     type Query = ();
     type Body = Json<StorageReport>;
     type Response = Json<StorageAnswer>;
-}
-
-impl Endpoint for ReplaceAccess {
-    const METHOD: Method = Method::Put;
-    const PATH: &'static str = "/core/access";
-    const AUTH: Auth = Auth::CoreKey;
-    type Params = ();
-    type Query = ();
-    type Body = Json<AccessDirectory>;
-    type Response = Empty;
-}
-
-impl Endpoint for GrantAccess {
-    const METHOD: Method = Method::Post;
-    const PATH: &'static str = "/core/access";
-    const AUTH: Auth = Auth::CoreKey;
-    type Params = ();
-    type Query = ();
-    type Body = Json<AccessGrant>;
-    type Response = Json<GrantedUser>;
-}
-
-impl Endpoint for RevokeAccess {
-    const METHOD: Method = Method::Delete;
-    const PATH: &'static str = "/core/access";
-    const AUTH: Auth = Auth::CoreKey;
-    type Params = ();
-    type Query = ();
-    type Body = Json<AccessRevocation>;
-    type Response = Empty;
 }
 
 impl Endpoint for ForgetPlayers {
@@ -448,15 +351,10 @@ pub(crate) fn ts() -> String {
         SignInStatus::decl(&cfg),
         CoreOwner::decl(&cfg),
         StateReport::decl(&cfg),
-        VisibleServer::decl(&cfg),
         StorageReport::decl(&cfg),
         HeldVersion::decl(&cfg),
         StorageAnswer::decl(&cfg),
         PullOrder::decl(&cfg),
-        AccessDirectory::decl(&cfg),
-        AccessGrant::decl(&cfg),
-        GrantedUser::decl(&cfg),
-        AccessRevocation::decl(&cfg),
         ForgottenServer::decl(&cfg),
         EnteredCode::decl(&cfg),
         PendingCore::decl(&cfg),
@@ -473,9 +371,6 @@ pub(crate) fn ts() -> String {
         ("WaitForSignIn", endpoint::<WaitForSignIn>()),
         ("ReportState", endpoint::<ReportState>()),
         ("ReportStorage", endpoint::<ReportStorage>()),
-        ("ReplaceAccess", endpoint::<ReplaceAccess>()),
-        ("GrantAccess", endpoint::<GrantAccess>()),
-        ("RevokeAccess", endpoint::<RevokeAccess>()),
         ("ForgetPlayers", endpoint::<ForgetPlayers>()),
         ("LookUpSignInCode", endpoint::<LookUpSignInCode>()),
         ("ApproveSignInCode", endpoint::<ApproveSignInCode>()),

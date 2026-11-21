@@ -688,9 +688,6 @@ const everyActionEntries = toAuditEntries(
 	auditLogEntryExamplesServerFullResponse,
 )
 const sampleEntries = toAuditEntries(actionLogResponse)
-const permissionBadgeEntries = sampleEntries.filter((entry) =>
-	['user_invited', 'user_permission_modified'].includes(entry.event.key),
-)
 const loaderVersionEntries = toAuditEntries({
 	...actionLogResponse,
 	data: [
@@ -793,10 +790,6 @@ function renderStory(entries: ServerAuditLogEntry[], initialQuery = '') {
 
 export const AllEvents: Story = {
 	render: renderStory(everyActionEntries),
-}
-
-export const PermissionBadges: Story = {
-	render: renderStory(permissionBadgeEntries),
 }
 
 export const LoaderVersionEvents: Story = {

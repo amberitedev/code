@@ -1,8 +1,8 @@
 //! `GET /events`: one socket per client, on which it subscribes to topics
 //! (`contracts::core::Topic`) and gets the Core's [`CoreEvent`]s and the engine's events for them.
-//! Every topic is checked against the caller's role when subscribed, and again when their access
-//! changes, when the socket falls behind, and every [`RECHECK_EVERY`]: a topic they lost ends with
-//! [`CoreEvent::Ended`], and a session that ended closes the socket.
+//! Every topic is checked against the caller's access when subscribed, and again when their
+//! session changes, when the socket falls behind, and every [`RECHECK_EVERY`]: a topic they lost
+//! ends with [`CoreEvent::Ended`], and a session that ended closes the socket.
 
 use std::{
     collections::{HashMap, VecDeque},
@@ -32,7 +32,7 @@ use tokio::sync::{
 
 use super::{CoreState, servers::power_state};
 use crate::{
-    access::{Caller, Changed, Permission, StreamGuard, now},
+    access::{Caller, Changed, Permission, StreamGuard, now, require_owner},
     servers::{Phase, console, restarts::run_started_at},
 };
 
@@ -53,7 +53,10 @@ pub async fn socket(
     State(state): State<Arc<CoreState>>,
     upgrade: WebSocketUpgrade,
 ) -> Response {
-    // Before any role check, so a change from here on is never missed.
+    if let Err(error) = require_owner(&caller) {
+        return error.into_response();
+    }
+    // Before any access check, so a change from here on is never missed.
     let changes = state.access.changed.subscribe();
     let Some(guard) = state.access.open_stream(&caller) else {
         return ApiError::new(

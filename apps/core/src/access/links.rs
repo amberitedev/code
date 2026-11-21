@@ -72,7 +72,7 @@ fn expired() -> ApiError {
 }
 
 /// What a link may be made for, and is checked against again when used: a path of a server the
-/// caller is an editor of, as every download is.
+/// caller may edit, as every download is.
 async fn allowed(
     access: &CoreAccess,
     caller: &Caller,

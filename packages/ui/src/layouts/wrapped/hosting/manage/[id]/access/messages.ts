@@ -1,14 +1,6 @@
 import { defineMessages } from '#ui/composables/i18n'
 
 export const accessMessages = defineMessages({
-	searchUsersPlaceholder: {
-		id: 'servers.access-page.search-users-placeholder',
-		defaultMessage: 'Search {count} {count, plural, one {user} other {users}}...',
-	},
-	inviteFriends: {
-		id: 'servers.access-page.invite-friends',
-		defaultMessage: 'Add user',
-	},
 	activityLogTitle: {
 		id: 'servers.access-page.activity-log-title',
 		defaultMessage: 'Activity log',
@@ -53,98 +45,13 @@ export const accessMessages = defineMessages({
 		id: 'servers.access-page.activity-log-filter.action-types-search',
 		defaultMessage: 'Search actions...',
 	},
-	allRoles: {
-		id: 'servers.access-page.role-filter.all',
-		defaultMessage: 'All',
-	},
-	selectedRoleFilter: {
-		id: 'servers.access-page.role-filter.selected',
-		defaultMessage: 'Role: {role}',
-	},
-	ownerRole: {
-		id: 'servers.access-page.role.owner',
-		defaultMessage: 'Owner',
-	},
-	ownerDescription: {
-		id: 'servers.access-page.role.owner-description',
-		defaultMessage: 'Full access including billing, members, and destructive actions.',
-	},
-	// A self-hosted Core has no billing.
-	ownerDescriptionSelfHosted: {
-		id: 'servers.access-page.role.owner-description-self-hosted',
-		defaultMessage: 'Full access including members and destructive actions.',
-	},
-	editorRole: {
-		id: 'servers.access-page.role.editor',
-		defaultMessage: 'Editor',
-	},
-	editorDescription: {
-		id: 'servers.access-page.role.editor-description',
-		defaultMessage: 'Manage instance content, files, backups, and other settings.',
-	},
-	viewerRole: {
-		id: 'servers.access-page.role.viewer',
-		defaultMessage: 'Limited',
-	},
-	viewerDescription: {
-		id: 'servers.access-page.role.viewer-description',
-		defaultMessage: 'Start, stop, and view the server without making changes.',
-	},
-	inviteSentTitle: {
-		id: 'servers.access-page.notification.invite-sent.title',
-		defaultMessage: 'Invite sent',
-	},
-	inviteSentText: {
-		id: 'servers.access-page.notification.invite-sent.text',
-		defaultMessage: 'Invited {target} as {role}.',
-	},
-	inviteResentTitle: {
-		id: 'servers.access-page.notification.invite-resent.title',
-		defaultMessage: 'Invite resent',
-	},
-	inviteResentText: {
-		id: 'servers.access-page.notification.invite-resent.text',
-		defaultMessage: 'Sent another invite to {target}.',
-	},
-	inviteCancelledTitle: {
-		id: 'servers.access-page.notification.invite-cancelled.title',
-		defaultMessage: 'Invite revoked',
-	},
-	inviteCancelledText: {
-		id: 'servers.access-page.notification.invite-cancelled.text',
-		defaultMessage: 'Revoked the invite for {target}.',
-	},
-	memberRemovedTitle: {
-		id: 'servers.access-page.notification.member-removed.title',
-		defaultMessage: 'Access revoked',
-	},
-	memberRemovedText: {
-		id: 'servers.access-page.notification.member-removed.text',
-		defaultMessage: 'Revoked access for {target}.',
-	},
 	loadFailedTitle: {
-		id: 'servers.access-page.notification.load-failed.title',
-		defaultMessage: 'Access could not be loaded',
+		id: 'servers.access-page.notification.activity-load-failed.title',
+		defaultMessage: 'Activity could not be loaded',
 	},
 	loadFailedText: {
 		id: 'servers.access-page.notification.load-failed.text',
 		defaultMessage: 'Refresh the page to try again.',
-	},
-	inviteFailedTitle: {
-		id: 'servers.access-page.notification.invite-failed.title',
-		defaultMessage: 'Invite could not be sent',
-	},
-	friendRequestFailedTitle: {
-		id: 'servers.access-page.notification.friend-request-failed.title',
-		defaultMessage: 'Friend request could not be sent',
-	},
-	removeFailedTitle: {
-		id: 'servers.access-page.notification.remove-failed.title',
-		defaultMessage: 'Access could not be removed',
-	},
-	roleUpdateFailedTitle: {
-		id: 'servers.access-page.notification.role-update-failed.title',
-		defaultMessage: 'Role could not be updated',
 	},
 })
 
@@ -184,22 +91,6 @@ export const actionLogActionMessages = defineMessages({
 	server_resuspended: {
 		id: 'servers.access-page.activity-log-filter.action.server-resuspended',
 		defaultMessage: 'Server suspended again',
-	},
-	user_invited: {
-		id: 'servers.access-page.activity-log-filter.action.user-invited',
-		defaultMessage: 'Invited user',
-	},
-	user_invite_revoked: {
-		id: 'servers.access-page.activity-log-filter.action.user-invite-revoked',
-		defaultMessage: 'Revoked user invite',
-	},
-	user_permission_modified: {
-		id: 'servers.access-page.activity-log-filter.action.user-permission-modified',
-		defaultMessage: 'Changed user permissions',
-	},
-	user_removed: {
-		id: 'servers.access-page.activity-log-filter.action.user-removed',
-		defaultMessage: 'Revoked access',
 	},
 	addon_added: {
 		id: 'servers.access-page.activity-log-filter.action.addon-added',

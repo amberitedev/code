@@ -23,7 +23,6 @@ import type {
 	ParsedAuditEvent,
 } from './types'
 import UnknownEvent from './UnknownEvent.vue'
-import UserAccessEvent from './UserAccessEvent.vue'
 
 const basicEvents = new Set([
 	'server_created',
@@ -120,31 +119,6 @@ export function parseAuditEvent(
 					{ kind: 'resuspended', expired: metadataRecord(metadata)?.expired === true },
 					actionSearchParts(action),
 				)
-			case 'user_invited':
-			case 'user_permission_modified': {
-				const actionMetadata = userPermissionsActionMetadata(metadataRecord(metadata))
-				if (!actionMetadata) return unknown(base, action)
-				const kind = action === 'user_invited' ? 'invited' : 'permission_modified'
-				const targetUser = userEntity(actionMetadata.user_id, lookups.users)
-				return parsed(
-					UserAccessEvent,
-					base,
-					{ kind, targetUser, permissions: actionMetadata.permissions },
-					[...actionSearchParts(action), targetUser.label, actionMetadata.permissions],
-				)
-			}
-			case 'user_invite_revoked':
-			case 'user_removed': {
-				const record = metadataRecord(metadata)
-				const userId = stringField(record, 'user_id')
-				if (!userId) return unknown(base, action)
-				const kind = action === 'user_invite_revoked' ? 'invite_revoked' : 'removed'
-				const targetUser = userEntity(userId, lookups.users)
-				return parsed(UserAccessEvent, base, { kind, targetUser }, [
-					...actionSearchParts(action),
-					targetUser.label,
-				])
-			}
 			case 'addon_added':
 			case 'addon_disabled':
 			case 'addon_enabled':
@@ -431,52 +405,12 @@ function actorFromEntry(
 	}
 }
 
-function userPermissionsActionMetadata(
-	record: Record<string, unknown> | null,
-): Archon.Actions.v1.UserPermissionsActionMetadata | null {
-	const userId = stringField(record, 'user_id')
-	if (!userId) return null
-
-	return {
-		user_id: userId,
-		permissions: permissionField(record?.permissions),
-	}
-}
-
-function permissionField(value: unknown): Archon.ServerUsers.v1.UserScope | null {
-	if (typeof value === 'number' && Number.isFinite(value)) return value
-	if (typeof value === 'string') return value.trim() || null
-	if (Array.isArray(value)) {
-		const permissions = value
-			.filter((permission): permission is string => typeof permission === 'string')
-			.map((permission) => permission.trim())
-			.filter(Boolean)
-		return permissions.length > 0 ? permissions.join(' | ') : null
-	}
-	return null
-}
-
 function worldFromId(
 	worldId: string | null,
 	worldById: Map<string, AuditWorld>,
 ): AuditWorld | null {
 	if (!worldId) return null
 	return worldById.get(worldId) ?? { id: worldId, name: worldId }
-}
-
-function userEntity(
-	userId: string,
-	users: Record<string, Archon.Actions.v1.UserResp>,
-): EventEntity {
-	const user = users[userId]
-	const label = user?.username ?? userId
-	return {
-		id: userId,
-		label,
-		iconUrl: user?.avatar_url || undefined,
-		iconShape: 'circle',
-		to: user?.username ? `/user/${encodeURIComponent(user.username)}` : undefined,
-	}
 }
 
 function addonList(

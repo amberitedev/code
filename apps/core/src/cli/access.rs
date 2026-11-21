@@ -1,105 +1,23 @@
-//! `copal access ...`: who may use each server, and the sessions they signed in with. Inviting
-//! someone needs their Amberite account, so invites come from the App. A user is named by their
-//! id or their name.
+//! `copal access ...`: the devices signed in to this Core.
 
 use clap::Subcommand;
 use color_eyre::eyre::{Result, bail};
-use contracts::core::{
-    ChangeRole, CoreRole, CoreSession, ListMembers, ListSessions, Member,
-    MemberId, MemberUpdate, RemoveMember, RevokeSession, ServerId, SessionId,
-};
+use contracts::core::{CoreSession, ListSessions, RevokeSession, SessionId};
 
-use super::{Client, Output, call::call, local_time, servers};
+use super::{Client, Output, call::call, local_time};
 
 #[derive(Debug, Subcommand)]
 pub enum AccessCommand {
-    /// Who may use a server, and with which role.
-    List { server: String },
-    /// Change someone's role on a server.
-    Role {
-        server: String,
-        user: String,
-        role: CoreRole,
-    },
-    /// Take someone off a server. Their sessions on this Core end at once.
-    Remove { server: String, user: String },
-    /// Every signed-in device, or one user's.
-    Sessions {
-        #[arg(long)]
-        user: Option<String>,
-    },
+    /// Every signed-in device.
+    Sessions,
     /// End a session. The device has to sign in again.
     Revoke { session: String },
 }
 
 pub async fn run(client: &Client, command: AccessCommand) -> Result<Output> {
     match command {
-        AccessCommand::List { server } => {
-            let server = servers::find(client, &server).await?;
-            let id = ServerId {
-                id: server.id.clone(),
-            };
-            let access = call::<ListMembers>(client, &id, &(), ()).await?;
-            let mut lines = vec![match &access.owner {
-                Some(owner) => format!("{}  owner  {}", owner.id, owner.name),
-                None => "This Core is not paired with an owner yet".into(),
-            }];
-            lines.extend(access.members.iter().map(|member| {
-                format!(
-                    "{}  {:<6} {}",
-                    member.user.id,
-                    role_name(member.role),
-                    member.user.name
-                )
-            }));
-            Ok(Output::new(lines.join("\n"), &access))
-        }
-        AccessCommand::Role { server, user, role } => {
-            let server = servers::find(client, &server).await?;
-            let member = member(client, &server.id, &user).await?;
-            let id = MemberId {
-                id: server.id.clone(),
-                user_id: member.user.id,
-            };
-            let member =
-                call::<ChangeRole>(client, &id, &(), MemberUpdate { role })
-                    .await?;
-            Ok(Output::new(
-                format!(
-                    "{} is now {} on {}",
-                    member.user.name,
-                    role_name(member.role),
-                    server.name
-                ),
-                &member,
-            ))
-        }
-        AccessCommand::Remove { server, user } => {
-            let server = servers::find(client, &server).await?;
-            let member = member(client, &server.id, &user).await?;
-            let id = MemberId {
-                id: server.id.clone(),
-                user_id: member.user.id.clone(),
-            };
-            call::<RemoveMember>(client, &id, &(), ()).await?;
-            Ok(Output::new(
-                format!(
-                    "{} was removed from {}",
-                    member.user.name, server.name
-                ),
-                &member,
-            ))
-        }
-        AccessCommand::Sessions { user } => {
-            let mut sessions =
-                call::<ListSessions>(client, &(), &(), ()).await?;
-            if let Some(user) = user {
-                let name = user.to_lowercase();
-                sessions.retain(|session| {
-                    session.user.id == user
-                        || session.user.name.to_lowercase() == name
-                });
-            }
+        AccessCommand::Sessions => {
+            let sessions = call::<ListSessions>(client, &(), &(), ()).await?;
             let text = if sessions.is_empty() {
                 "No sessions".to_owned()
             } else {
@@ -143,37 +61,5 @@ pub async fn run(client: &Client, command: AccessCommand) -> Result<Output> {
                 session,
             ))
         }
-    }
-}
-
-/// The member of a server `query` names: their id or their name.
-async fn member(
-    client: &Client,
-    server_id: &str,
-    query: &str,
-) -> Result<Member> {
-    let id = ServerId {
-        id: server_id.to_owned(),
-    };
-    let access = call::<ListMembers>(client, &id, &(), ()).await?;
-    let lower = query.to_lowercase();
-    let mut matches: Vec<Member> = access
-        .members
-        .into_iter()
-        .filter(|member| {
-            member.user.id == query || member.user.name.to_lowercase() == lower
-        })
-        .collect();
-    match matches.len() {
-        1 => Ok(matches.remove(0)),
-        0 => bail!("{query} has no role on this server. See copal access list"),
-        _ => bail!("several people are called {query}; use their id"),
-    }
-}
-
-fn role_name(role: CoreRole) -> &'static str {
-    match role {
-        CoreRole::Viewer => "viewer",
-        CoreRole::Editor => "editor",
     }
 }

@@ -52,11 +52,9 @@ impl From<Report> for ReachabilityReport {
     }
 }
 
-/// What `level` may see of a server.
 async fn insight(
     state: &CoreState,
     id: &str,
-    level: Permission,
 ) -> Result<ServerInsight, ApiError> {
     let last_crash: Option<(i64, Option<i32>, Option<String>)> = sqlx::query_as(
         "SELECT ended_at, exit_code, last_lines FROM runs \
@@ -75,8 +73,7 @@ async fn insight(
         last_crash: last_crash.map(|(at, exit_code, last_lines)| Crash {
             at,
             exit_code,
-            last_lines: (level >= Permission::Edit)
-                .then(|| last_lines.unwrap_or_default()),
+            last_lines: last_lines.unwrap_or_default(),
         }),
         reachability: state.network.report(id).map(Into::into),
     })
@@ -88,8 +85,8 @@ pub async fn get(
     request: Req<GetInsight>,
 ) -> Result<Json<ServerInsight>, ApiError> {
     let id = request.params.id;
-    let level = state.access.require(&caller, &id, Permission::View).await?;
-    Ok(Json(insight(&state, &id, level).await?))
+    state.access.require(&caller, &id, Permission::View).await?;
+    Ok(Json(insight(&state, &id).await?))
 }
 
 pub async fn check(
@@ -98,14 +95,14 @@ pub async fn check(
     request: Req<CheckReachability>,
 ) -> Result<Json<ServerInsight>, ApiError> {
     let id = request.params.id;
-    let level = state.access.require(&caller, &id, Permission::Edit).await?;
+    state.access.require(&caller, &id, Permission::Edit).await?;
     if state.servers.phase(&id).is_none() {
         return Err(ServerError::NotRunning.into());
     }
     Arc::clone(&state.network)
         .check(Arc::clone(&state.servers), id.clone())
         .await;
-    Ok(Json(insight(&state, &id, level).await?))
+    Ok(Json(insight(&state, &id).await?))
 }
 
 pub async fn machine(

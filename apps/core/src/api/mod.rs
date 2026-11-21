@@ -5,7 +5,6 @@
 //! icon are the engine's routes (`engine_mount`). The download routes match the `Kyros.*` shapes in
 //! `packages/api-client/src/modules`.
 
-pub mod access;
 pub mod activity;
 pub mod backups;
 pub mod console;
@@ -136,11 +135,6 @@ pub fn router(state: Arc<CoreState>) -> Router {
         .endpoint::<ListSessions, _, _>(sessions::list)
         .endpoint::<SignOut, _, _>(sessions::sign_out)
         .endpoint::<RevokeSession, _, _>(sessions::revoke)
-        .endpoint::<GetMyAccess, _, _>(access::me)
-        .endpoint::<ListMembers, _, _>(access::list)
-        .endpoint::<InviteMember, _, _>(access::invite)
-        .endpoint::<ChangeRole, _, _>(access::change_role)
-        .endpoint::<RemoveMember, _, _>(access::remove)
         .endpoint::<CreateDownloadLink, _, _>(crate::access::links::create)
         .endpoint::<ListActivity, _, _>(activity::list)
         .endpoint::<GetPairing, _, _>(pairing::get)

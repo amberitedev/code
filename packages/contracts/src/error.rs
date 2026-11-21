@@ -47,7 +47,6 @@ pub enum ErrorCode {
     RateLimit,
     TicketsUnavailable,
     TooManyAttempts,
-    TooManyInvites,
     TooManyRequests,
     UnsupportedOperation,
     UsernameTaken,
@@ -83,7 +82,6 @@ pub enum ErrorCode {
     TicketExpired,
     TicketReused,
     ClockWrong,
-    NotInvited,
     DiskFull,
     EgressSpent,
     EulaNotAccepted,
@@ -188,7 +186,6 @@ impl ErrorCode {
             | Self::NotOwnList
             | Self::NotOwner
             | Self::Quarantined
-            | Self::NotInvited
             | Self::EulaNotAccepted
             | Self::SharedInstanceAccessRevoked
             | Self::SharedInstanceQuarantined
@@ -239,7 +236,6 @@ impl ErrorCode {
             Self::RateLimited
             | Self::RateLimit
             | Self::TooManyAttempts
-            | Self::TooManyInvites
             | Self::TooManyRequests
             | Self::EgressSpent
             | Self::PoolEgressSpent

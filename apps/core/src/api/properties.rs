@@ -1,5 +1,4 @@
-//! A server's `server.properties`. Editors and the owner only: the file can hold secrets, such as
-//! a resource pack URL.
+//! A server's `server.properties`.
 
 use std::sync::Arc;
 

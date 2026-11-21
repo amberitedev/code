@@ -1,9 +1,8 @@
-import { type Archon, type HostedServer, ModrinthApiError, sharing } from '@modrinth/api-client'
+import { type Archon, ModrinthApiError, sharing } from '@modrinth/api-client'
 import { serverListQueryOptions } from '@modrinth/ui'
-import { useQuery, useQueryClient } from '@tanstack/vue-query'
+import { useQuery } from '@tanstack/vue-query'
 import { computed, type MaybeRefOrGetter, ref, toValue, watch } from 'vue'
 
-import { useSharedInstanceEvent } from '@/composables/use-shared-instance-event'
 import { ensure_shared_instance } from '@/helpers/instance'
 import { apiClient } from '@/platform/modrinth-client'
 
@@ -81,47 +80,6 @@ export function useLinkedServers(instanceId: MaybeRefOrGetter<string | undefined
 		)
 	})
 	return { servers, query }
-}
-
-export type { HostedServer }
-
-/**
- * The servers other people host for a shared instance and show to its members. Empty when the
- * instance is not shared. Fetched again when the backend says the list changed, so a server that
- * was hidden, renamed, or moved shows up without a restart.
- */
-export function useHostedServers(sharedInstanceId: MaybeRefOrGetter<string | undefined>) {
-	const queryClient = useQueryClient()
-	const queryKey = computed(() => ['shared-instance-servers', toValue(sharedInstanceId)] as const)
-	const query = useQuery({
-		queryKey,
-		queryFn: () =>
-			apiClient.backend.call(sharing.ListHostedServers, {
-				params: { id: toValue(sharedInstanceId)! },
-			}),
-		enabled: () => !!toValue(sharedInstanceId),
-		retry: false,
-	})
-	useSharedInstanceEvent(
-		'shared_instance_servers',
-		sharedInstanceId,
-		() => void queryClient.invalidateQueries({ queryKey: queryKey.value }),
-	)
-	const servers = computed(() => (toValue(sharedInstanceId) ? (query.data.value ?? []) : []))
-	return { servers, query }
-}
-
-/**
- * Whether this account may manage a server someone else hosts, which makes its Worlds row open
- * the server page. Access is given per server, not per Core, so the answer is whether the server
- * is in the account's own server list, which holds every server it can reach.
- */
-export function useCanManageHostedServer() {
-	const query = useServers()
-	const reachable = computed(
-		() => new Set((query.data.value?.servers ?? []).map((server) => server.server_id)),
-	)
-	return (server: HostedServer) => reachable.value.has(server.server_id)
 }
 
 /** Whether the server's process is up, including while it starts or stops. */

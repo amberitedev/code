@@ -158,7 +158,7 @@ async function publishToFriends(paths: string[], removed: string[]) {
 			props.instance.id,
 			paths,
 			removed,
-			await ownServerCore(),
+			await serverCore(),
 			task.update,
 		)
 		await loadSupportDetails(task)
@@ -173,14 +173,13 @@ async function publishToFriends(paths: string[], removed: string[]) {
 }
 
 /**
- * The first of the account's own Cores that runs one of this instance's servers. The share's home
- * copy is kept there. A server on someone else's Core, or one whose Core can't be found, is skipped.
+ * The first Core that runs one of this instance's servers. The share's home copy is kept there. A
+ * server whose Core can't be found is skipped.
  */
-async function ownServerCore() {
+async function serverCore() {
 	for (const server of props.servers ?? []) {
 		try {
-			const core = await client.archon.cores_v1.coreOf(server.server_id)
-			if (core.owned) return core.id
+			return (await client.archon.cores_v1.coreOf(server.server_id)).id
 		} catch (error) {
 			console.error(`Could not find the Core of server ${server.server_id}`, error)
 		}

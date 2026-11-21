@@ -1,8 +1,8 @@
-//! Who can do what: tickets, sessions, download links, per-server roles, the local socket, the
-//! activity log, and backend sync. The request and response shapes are in `api::access`, `api::sessions`,
-//! `api::activity`, and, for the backend, `contracts::backend::cores`.
+//! Who can do what: tickets, sessions, download links, the local socket, the activity log, and
+//! backend sync. A Core answers its owner only. The request and response shapes are in
+//! `api::sessions`, `api::activity`, and, for the backend, `contracts::backend::cores`.
 //!
-//! Every route takes a [`Caller`] and checks it: [`CoreAccess::require`] for a role on one server,
+//! Every route takes a [`Caller`] and checks it: [`CoreAccess::require`] for one server,
 //! [`require_owner`] for the Core itself, and [`Dangerous`] for the owner's actions that need a
 //! fresh ticket.
 
@@ -27,10 +27,7 @@ use axum::{
     extract::FromRequestParts,
     http::{HeaderMap, header::AUTHORIZATION, request::Parts},
 };
-use contracts::{
-    ApiError, ErrorCode,
-    core::{CoreRole, TICKET_HEADER},
-};
+use contracts::{ApiError, ErrorCode, core::TICKET_HEADER};
 use engine::access::{Access, BoxFuture};
 pub use engine::access::{Caller, Permission};
 use sqlx::SqlitePool;
@@ -54,8 +51,8 @@ pub fn now() -> i64 {
 pub struct CoreAccess {
     db: SqlitePool,
     pub keys: keys::Keys,
-    /// Users whose sessions or roles changed. `/events` sockets listen, and end what their
-    /// session or role no longer allows.
+    /// Users whose sessions changed. `/events` sockets listen, and close once their session
+    /// ended.
     pub changed: broadcast::Sender<Changed>,
     /// Wakes backend sync when a call is owed.
     pub owed: Arc<Notify>,
@@ -170,55 +167,21 @@ pub fn require_owner(caller: &Caller) -> Result<(), ApiError> {
 }
 
 impl CoreAccess {
-    /// The caller's level on `server_id`, `None` without a role there.
-    pub async fn level(
-        &self,
-        caller: &Caller,
-        server_id: &str,
-    ) -> sqlx::Result<Option<Permission>> {
-        let Caller::Session { user_id, owner, .. } = caller else {
-            return Ok(Some(Permission::Owner));
-        };
-        if *owner {
-            return Ok(Some(Permission::Owner));
-        }
-        let role: Option<CoreRole> = sqlx::query_scalar(
-            "SELECT role FROM access WHERE server_id = ? AND user_id = ?",
-        )
-        .bind(server_id)
-        .bind(user_id)
-        .fetch_optional(&self.db)
-        .await?;
-        Ok(role.map(|role| match role {
-            CoreRole::Viewer => Permission::View,
-            CoreRole::Editor => Permission::Edit,
-        }))
-    }
-
-    /// Require at least `permission` on `server_id`, and return the caller's level. A caller with
-    /// no role there gets the same 404 as for a server that does not exist: friends never learn
-    /// about the other servers.
+    /// Everything for the owner. Anyone else gets the same 404 as for a server that does not
+    /// exist. Routes still name the level they need, so per-server access can come back.
     pub async fn require(
         &self,
         caller: &Caller,
         server_id: &str,
-        permission: Permission,
+        _: Permission,
     ) -> Result<Permission, ApiError> {
-        match self.level(caller, server_id).await.map_err(internal)? {
-            None => Err(ApiError::new(
+        if caller.is_owner() {
+            Ok(Permission::Owner)
+        } else {
+            Err(ApiError::new(
                 ErrorCode::NotFound,
                 format!("There is no server {server_id}."),
-            )),
-            Some(has) if has < permission => Err(ApiError::new(
-                ErrorCode::Forbidden,
-                match permission {
-                    Permission::Edit => {
-                        "Viewers cannot do that on this server."
-                    }
-                    _ => "Only this Core's owner can do that.",
-                },
-            )),
-            Some(has) => Ok(has),
+            ))
         }
     }
 }
@@ -268,10 +231,10 @@ impl Access for CoreAccess {
     }
 }
 
-/// The owner doing something dangerous: inviting, removing, or changing a role; deleting a
-/// server; revoking someone else's session; updating or rolling back Core; removing Core from
-/// its account; restoring or deleting a backup, or keeping fewer scheduled ones. Over HTTPS this
-/// needs a fresh ticket (see [`fresh_ticket`]); the local CLI needs none.
+/// The owner doing something dangerous: deleting a server; ending another device's session;
+/// updating or rolling back Core; removing Core from its account; restoring or deleting a backup,
+/// or keeping fewer scheduled ones. Over HTTPS this needs a fresh ticket (see [`fresh_ticket`]);
+/// the local CLI needs none.
 pub struct Dangerous(pub Caller);
 
 impl FromRequestParts<Shared> for Dangerous {

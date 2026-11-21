@@ -276,11 +276,7 @@
 			v-else-if="propsError"
 			class="flex h-full w-full items-center justify-center text-secondary"
 		>
-			{{
-				forbidden
-					? "You can't view this server's properties."
-					: "Couldn't load this server's properties. Try again later."
-			}}
+			Couldn't load this server's properties. Try again later.
 		</div>
 		<div v-else class="flex h-full w-full items-center justify-center">
 			<SpinnerIcon class="animate-spin" />
@@ -302,7 +298,7 @@
 </template>
 
 <script setup lang="ts">
-import { type Archon, ModrinthApiError } from '@modrinth/api-client'
+import type { Archon } from '@modrinth/api-client'
 import { SearchIcon, SpinnerIcon } from '@modrinth/assets'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import Fuse from 'fuse.js'
@@ -404,14 +400,7 @@ const { data: propsData, error: propsError } = useQuery({
 	queryKey,
 	queryFn: () => client.archon.properties_v1.getProperties(serverId, worldId.value!),
 	enabled: computed(() => worldId.value !== null),
-	// A viewer may not read them, and asking again will not change that.
-	retry: (count, error) => !isForbidden(error) && count < 3,
 })
-const forbidden = computed(() => isForbidden(propsError.value))
-
-function isForbidden(error: unknown) {
-	return error instanceof ModrinthApiError && error.statusCode === 403
-}
 
 function flattenProperties(data: Archon.Content.v1.PropertiesFields): Record<string, string> {
 	const result: Record<string, string> = {}

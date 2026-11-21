@@ -1038,12 +1038,8 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 				.run()
 		await join(strangers.id, 'owner')
 		await code(await readFor(strangers.id), 404, 'version_not_found')
-		// A Core that wrote a user into its access list still cannot read as them without their
-		// ticket: it reads as its owner, who is not a member of the friend's share.
-		await db
-			.prepare("INSERT INTO core_access (core_id,user_id,created) VALUES ('core','friend',?)")
-			.bind(new Date().toISOString())
-			.run()
+		// A Core cannot read as a user without their ticket: it reads as its owner, who is not a
+		// member of the friend's share.
 		const friends = await ok(await call('/instances', 'POST', { name: 'Mine' }, 'mra_friend'))
 		await code(await readFor(friends.id), 401, 'not_member')
 		// A forged ticket, or one signed by another key, is refused.

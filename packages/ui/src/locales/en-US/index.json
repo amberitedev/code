@@ -1823,12 +1823,6 @@
   "files.layout.extraction-started-title": {
     "defaultMessage": "Extraction started"
   },
-  "files.layout.forbidden-message": {
-    "defaultMessage": "Ask the owner for access to them."
-  },
-  "files.layout.forbidden-title": {
-    "defaultMessage": "You can't view these files"
-  },
   "files.layout.selected-count": {
     "defaultMessage": "{count} selected"
   },
@@ -2261,9 +2255,6 @@
   "hosting.loader.failed-to-save-settings": {
     "defaultMessage": "Failed to save installation settings"
   },
-  "hosting.loader.failed-to-save-visibility": {
-    "defaultMessage": "Failed to change who can see this server"
-  },
   "hosting.loader.failed-to-unlink": {
     "defaultMessage": "Failed to unlink modpack"
   },
@@ -2617,15 +2608,6 @@
   },
   "installation-settings.verifying": {
     "defaultMessage": "Verifying..."
-  },
-  "installation-settings.visible-to-friends.description": {
-    "defaultMessage": "People this instance is shared with can see this server in Worlds and join it."
-  },
-  "installation-settings.visible-to-friends.not-shared": {
-    "defaultMessage": "Share the instance to let friends see this server."
-  },
-  "installation-settings.visible-to-friends.title": {
-    "defaultMessage": "Visible to friends"
   },
   "instance.confirm-reinstall.admonition-body": {
     "defaultMessage": "Reinstalling will reset all installed or modified content to what is provided by the modpack, removing any mods or content you have added on top of the original installation."
@@ -5300,9 +5282,6 @@
   "servers.access-page.activity-log-filter.action-group.settings": {
     "defaultMessage": "Settings and runtime"
   },
-  "servers.access-page.activity-log-filter.action-group.users": {
-    "defaultMessage": "Users and invites"
-  },
   "servers.access-page.activity-log-filter.action-types": {
     "defaultMessage": "Actions"
   },
@@ -5450,18 +5429,6 @@
   "servers.access-page.activity-log-filter.action.startup-command-modified": {
     "defaultMessage": "Changed startup command"
   },
-  "servers.access-page.activity-log-filter.action.user-invite-revoked": {
-    "defaultMessage": "Revoked user invite"
-  },
-  "servers.access-page.activity-log-filter.action.user-invited": {
-    "defaultMessage": "Invited user"
-  },
-  "servers.access-page.activity-log-filter.action.user-permission-modified": {
-    "defaultMessage": "Changed user permissions"
-  },
-  "servers.access-page.activity-log-filter.action.user-removed": {
-    "defaultMessage": "Revoked access"
-  },
   "servers.access-page.activity-log-filter.action.world-data-reset": {
     "defaultMessage": "Reset world data"
   },
@@ -5492,128 +5459,11 @@
   "servers.access-page.activity-log-title": {
     "defaultMessage": "Activity log"
   },
-  "servers.access-page.invite-friends": {
-    "defaultMessage": "Add user"
-  },
-  "servers.access-page.notification.friend-request-failed.title": {
-    "defaultMessage": "Friend request could not be sent"
-  },
-  "servers.access-page.notification.invite-cancelled.text": {
-    "defaultMessage": "Revoked the invite for {target}."
-  },
-  "servers.access-page.notification.invite-cancelled.title": {
-    "defaultMessage": "Invite revoked"
-  },
-  "servers.access-page.notification.invite-failed.title": {
-    "defaultMessage": "Invite could not be sent"
-  },
-  "servers.access-page.notification.invite-resent.text": {
-    "defaultMessage": "Sent another invite to {target}."
-  },
-  "servers.access-page.notification.invite-resent.title": {
-    "defaultMessage": "Invite resent"
-  },
-  "servers.access-page.notification.invite-sent.text": {
-    "defaultMessage": "Invited {target} as {role}."
-  },
-  "servers.access-page.notification.invite-sent.title": {
-    "defaultMessage": "Invite sent"
+  "servers.access-page.notification.activity-load-failed.title": {
+    "defaultMessage": "Activity could not be loaded"
   },
   "servers.access-page.notification.load-failed.text": {
     "defaultMessage": "Refresh the page to try again."
-  },
-  "servers.access-page.notification.load-failed.title": {
-    "defaultMessage": "Access could not be loaded"
-  },
-  "servers.access-page.notification.member-removed.text": {
-    "defaultMessage": "Revoked access for {target}."
-  },
-  "servers.access-page.notification.member-removed.title": {
-    "defaultMessage": "Access revoked"
-  },
-  "servers.access-page.notification.remove-failed.title": {
-    "defaultMessage": "Access could not be removed"
-  },
-  "servers.access-page.notification.role-update-failed.title": {
-    "defaultMessage": "Role could not be updated"
-  },
-  "servers.access-page.role-filter.all": {
-    "defaultMessage": "All"
-  },
-  "servers.access-page.role-filter.selected": {
-    "defaultMessage": "Role: {role}"
-  },
-  "servers.access-page.role.editor": {
-    "defaultMessage": "Editor"
-  },
-  "servers.access-page.role.editor-description": {
-    "defaultMessage": "Manage instance content, files, backups, and other settings."
-  },
-  "servers.access-page.role.owner": {
-    "defaultMessage": "Owner"
-  },
-  "servers.access-page.role.owner-description": {
-    "defaultMessage": "Full access including billing, members, and destructive actions."
-  },
-  "servers.access-page.role.owner-description-self-hosted": {
-    "defaultMessage": "Full access including members and destructive actions."
-  },
-  "servers.access-page.role.viewer": {
-    "defaultMessage": "Limited"
-  },
-  "servers.access-page.role.viewer-description": {
-    "defaultMessage": "Start, stop, and view the server without making changes."
-  },
-  "servers.access-page.search-users-placeholder": {
-    "defaultMessage": "Search {count} {count, plural, one {user} other {users}}..."
-  },
-  "servers.access-role.editor": {
-    "defaultMessage": "Editor"
-  },
-  "servers.access-role.owner": {
-    "defaultMessage": "Owner"
-  },
-  "servers.access-role.viewer": {
-    "defaultMessage": "Limited"
-  },
-  "servers.access-table.action.cancel-invite": {
-    "defaultMessage": "Revoke invite"
-  },
-  "servers.access-table.action.remove-user": {
-    "defaultMessage": "Revoke access"
-  },
-  "servers.access-table.action.resend-invite": {
-    "defaultMessage": "Resend invite"
-  },
-  "servers.access-table.action.resend-invite-cooldown": {
-    "defaultMessage": "Resend in {seconds}s"
-  },
-  "servers.access-table.column.actions": {
-    "defaultMessage": "Actions"
-  },
-  "servers.access-table.column.joined": {
-    "defaultMessage": "Joined"
-  },
-  "servers.access-table.column.role": {
-    "defaultMessage": "Role"
-  },
-  "servers.access-table.column.user": {
-    "defaultMessage": "User"
-  },
-  "servers.access-table.empty": {
-    "defaultMessage": "No users match your filters."
-  },
-  "servers.access-table.member-actions-label": {
-    "defaultMessage": "Actions for {username}"
-  },
-  "servers.access-table.pending": {
-    "defaultMessage": "Pending"
-  },
-  "servers.access-table.unknown-joined-date": {
-    "defaultMessage": "—"
-  },
-  "servers.access-table.user-avatar-alt": {
-    "defaultMessage": "{username}'s avatar"
   },
   "servers.admonitions.background-task-running": {
     "defaultMessage": "Background task running"
@@ -5923,24 +5773,6 @@
   },
   "servers.audit-log.event.unknown-basic": {
     "defaultMessage": "Recorded server activity"
-  },
-  "servers.audit-log.event.user-invite-revoked": {
-    "defaultMessage": "Revoked invite for <target-user></target-user>"
-  },
-  "servers.audit-log.event.user-invited": {
-    "defaultMessage": "Invited <target-user></target-user>"
-  },
-  "servers.audit-log.event.user-invited-with-permissions": {
-    "defaultMessage": "Invited <target-user></target-user> with <permission-label>{permissions}</permission-label>"
-  },
-  "servers.audit-log.event.user-permission-modified": {
-    "defaultMessage": "Changed permissions for <target-user></target-user>"
-  },
-  "servers.audit-log.event.user-permission-modified-with-permissions": {
-    "defaultMessage": "Changed permissions for <target-user></target-user> to <permission-label>{permissions}</permission-label>"
-  },
-  "servers.audit-log.event.user-removed": {
-    "defaultMessage": "Revoked access for <target-user></target-user>"
   },
   "servers.audit-log.event.world-data-reset": {
     "defaultMessage": "Reset world data"
@@ -6386,56 +6218,8 @@
   "servers.files.zip-created-description": {
     "defaultMessage": "Created {destination}"
   },
-  "servers.grant-access-modal.add-as-friend": {
-    "defaultMessage": "Also send a friend request"
-  },
-  "servers.grant-access-modal.already-member-tooltip": {
-    "defaultMessage": "This user has already been invited"
-  },
-  "servers.grant-access-modal.cancel": {
-    "defaultMessage": "Cancel"
-  },
-  "servers.grant-access-modal.header": {
-    "defaultMessage": "Add user"
-  },
-  "servers.grant-access-modal.invite": {
-    "defaultMessage": "Invite"
-  },
-  "servers.grant-access-modal.permissions-help": {
-    "defaultMessage": "View the full list of permissions for each role <link>here</link>."
-  },
-  "servers.grant-access-modal.role.editor": {
-    "defaultMessage": "Editor"
-  },
-  "servers.grant-access-modal.role.editor-description": {
-    "defaultMessage": "Manage instance content, files, backups, and other settings."
-  },
-  "servers.grant-access-modal.role.label": {
-    "defaultMessage": "Select role"
-  },
-  "servers.grant-access-modal.role.viewer": {
-    "defaultMessage": "Limited"
-  },
-  "servers.grant-access-modal.role.viewer-description": {
-    "defaultMessage": "Start, stop, and view the server without making changes."
-  },
-  "servers.grant-access-modal.suggestion-avatar-alt": {
-    "defaultMessage": "{username}'s avatar"
-  },
-  "servers.grant-access-modal.target.help": {
-    "defaultMessage": "Do not use their Minecraft username."
-  },
-  "servers.grant-access-modal.target.label": {
-    "defaultMessage": "Modrinth username"
-  },
-  "servers.grant-access-modal.target.no-suggestions": {
-    "defaultMessage": "No matching users found."
-  },
-  "servers.grant-access-modal.target.placeholder": {
-    "defaultMessage": "Enter Modrinth username"
-  },
-  "servers.grant-access-modal.target.searching": {
-    "defaultMessage": "Searching..."
+  "servers.home-address-notice": {
+    "defaultMessage": "People who join this server can see your home address."
   },
   "servers.installing-banner.description.applying": {
     "defaultMessage": "Applying your installation changes..."
@@ -7169,54 +6953,6 @@
   "servers.region.western-europe": {
     "defaultMessage": "United Kingdom (Coventry)"
   },
-  "servers.remove-access-modal.added-label": {
-    "defaultMessage": "Added {time}"
-  },
-  "servers.remove-access-modal.cancel-button": {
-    "defaultMessage": "Revoke invite"
-  },
-  "servers.remove-access-modal.cancel-effect-access": {
-    "defaultMessage": "They will not be added to this server"
-  },
-  "servers.remove-access-modal.cancel-effect-invite": {
-    "defaultMessage": "You can send them another invite later"
-  },
-  "servers.remove-access-modal.cancel-header": {
-    "defaultMessage": "Revoke invite"
-  },
-  "servers.remove-access-modal.cancel-warning-body": {
-    "defaultMessage": "If you revoke this invite, {username} will need a new invitation before they can join this server."
-  },
-  "servers.remove-access-modal.header": {
-    "defaultMessage": "Revoke access"
-  },
-  "servers.remove-access-modal.invited-label": {
-    "defaultMessage": "Invited {time}"
-  },
-  "servers.remove-access-modal.pending-invite-label": {
-    "defaultMessage": "Pending invite"
-  },
-  "servers.remove-access-modal.remove-button": {
-    "defaultMessage": "Revoke access"
-  },
-  "servers.remove-access-modal.remove-effect-access": {
-    "defaultMessage": "They will immediately lose access to the server panel and will no longer be able to edit content"
-  },
-  "servers.remove-access-modal.remove-effect-join": {
-    "defaultMessage": "They will still be able to join and play on the server unless you make separate changes"
-  },
-  "servers.remove-access-modal.unknown-added-label": {
-    "defaultMessage": "Added date unknown"
-  },
-  "servers.remove-access-modal.user-avatar-alt": {
-    "defaultMessage": "{username}'s avatar"
-  },
-  "servers.remove-access-modal.warning-body": {
-    "defaultMessage": "If you revoke a user's access to your server, you'll need to re-invite them to restore access."
-  },
-  "servers.remove-access-modal.what-happens-label": {
-    "defaultMessage": "What happens?"
-  },
   "servers.settings.advanced.sftp.roll-credentials": {
     "defaultMessage": "Rotate credentials"
   },
@@ -7381,9 +7117,6 @@
   },
   "servers.setup.uploading-modpack.header": {
     "defaultMessage": "Uploading modpack"
-  },
-  "servers.visible-to-friends.home-address-notice": {
-    "defaultMessage": "People who join this server can see your home address."
   },
   "settings.account.title": {
     "defaultMessage": "Account and security"
@@ -7604,9 +7337,6 @@
   "settings.social.blocked-users.restriction.friend-requests": {
     "defaultMessage": "Send you friend requests"
   },
-  "settings.social.blocked-users.restriction.hosting": {
-    "defaultMessage": "Invite you to manage a Modrinth Hosting server."
-  },
   "settings.social.blocked-users.restriction.shared-instances": {
     "defaultMessage": "Invite you to shared instances"
   },
@@ -7633,12 +7363,6 @@
   },
   "settings.social.friend-requests.title": {
     "defaultMessage": "Friend requests"
-  },
-  "settings.social.hosting-access.description": {
-    "defaultMessage": "Control who can invite you to manage a Modrinth Hosting server."
-  },
-  "settings.social.hosting-access.title": {
-    "defaultMessage": "Hosting access invites"
   },
   "settings.social.interaction-source.everyone": {
     "defaultMessage": "Everyone"

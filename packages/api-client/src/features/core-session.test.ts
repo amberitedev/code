@@ -1,10 +1,4 @@
-import {
-	core,
-	type CoreServer,
-	type ErrorCode,
-	type ListedCore,
-	PROTOCOL_VERSION,
-} from '@amberite/contracts'
+import { core, type ErrorCode, type ListedCore, PROTOCOL_VERSION } from '@amberite/contracts'
 import { describe, expect, it } from 'vite-plus/test'
 
 import { ModrinthApiError } from '../core/errors'
@@ -23,7 +17,6 @@ const SERVER = '00000000-0000-4000-8000-000000000001'
 const CORE: ListedCore = {
 	id: 'core',
 	name: 'Core',
-	owned: true,
 	version: null,
 	address: 'https://192.168.1.2:16662',
 	public_address: null,
@@ -153,21 +146,21 @@ describe('Core sessions', () => {
 		await api.archon.cores_v1.servers()
 		expect(api.signIns).toHaveLength(1)
 
-		api.answers = [coreError('invalid_credentials'), { owner: true }]
-		expect(await api.core(CORE.id).call(core.GetMyAccess)).toEqual({ owner: true })
+		api.answers = [coreError('invalid_credentials'), []]
+		expect(await api.core(CORE.id).call(core.ListSessions)).toEqual([])
 		expect(api.signIns).toHaveLength(2)
 		expect(api.toCore().map((request) => request.url)).toEqual([
 			`${PROXY}/servers`,
 			`${PROXY}/servers`,
-			`${PROXY}/access/me`,
-			`${PROXY}/access/me`,
+			`${PROXY}/sessions`,
+			`${PROXY}/sessions`,
 		])
 	})
 
 	it('gives up after one sign-in, and never signs in for a refused ticket', async () => {
 		const api = new FakeClient()
 		api.answers = [coreError('invalid_credentials'), coreError('invalid_credentials')]
-		await expect(api.core(CORE.id).call(core.GetMyAccess)).rejects.toMatchObject({
+		await expect(api.core(CORE.id).call(core.ListSessions)).rejects.toMatchObject({
 			statusCode: 401,
 		})
 		expect(api.signIns).toHaveLength(1)
@@ -182,17 +175,14 @@ describe('Core sessions', () => {
 	it('sends every dangerous action with a ticket of its own', async () => {
 		const api = new FakeClient()
 		await api.archon.servers_v1.deleteLocal(SERVER)
-		await api.core(CORE.id).call(core.InviteMember, {
-			params: { id: SERVER },
-			body: { user: { id: 'friend', name: 'Friend', avatar_url: null }, role: 'editor' },
-		})
-		await api.core(CORE.id).call(core.GetMyAccess)
+		await api.core(CORE.id).call(core.RevokeSession, { params: { id: 'other' } })
+		await api.core(CORE.id).call(core.ListSessions)
 
-		const [deleted, invited, me] = api.toCore()
+		const [deleted, revoked, listed] = api.toCore()
 		expect(deleted.url).toBe(`${PROXY}/servers/${SERVER}`)
 		expect(header(deleted.headers, 'X-Amberite-Ticket')).toBe('ticket-1')
-		expect(header(invited.headers, 'X-Amberite-Ticket')).toBe('ticket-2')
-		expect(header(me.headers, 'X-Amberite-Ticket')).toBeUndefined()
+		expect(header(revoked.headers, 'X-Amberite-Ticket')).toBe('ticket-2')
+		expect(header(listed.headers, 'X-Amberite-Ticket')).toBeUndefined()
 	})
 
 	it('tells the Core before the backend when a Core is removed', async () => {
@@ -217,7 +207,7 @@ describe('Core sessions', () => {
 	it('never sends the account token to a Core', async () => {
 		const api = new FakeClient()
 		await api.archon.servers_v1.deleteLocal(SERVER)
-		await api.core(CORE.id).call(core.GetMyAccess)
+		await api.core(CORE.id).call(core.ListSessions)
 		api.answers = [[]]
 		await api.archon.cores_v1.servers()
 		expect(api.toCore()).toHaveLength(3)
@@ -230,18 +220,15 @@ describe('Core sessions', () => {
 
 describe('a Core on another protocol version', () => {
 	it('counts a Core that reports none as version 1', () => {
-		expect(protocolMismatch({}, true, 1)).toBeNull()
-		expect(protocolMismatch({}, true, 2)?.side).toBe('core')
+		expect(protocolMismatch({}, 1)).toBeNull()
+		expect(protocolMismatch({}, 2)?.side).toBe('core')
 	})
 
-	it('says who can fix it', () => {
-		expect(protocolMismatch({ protocol: 1 }, true, 2)?.message).toBe(
+	it('says which side to update', () => {
+		expect(protocolMismatch({ protocol: 1 }, 2)?.message).toBe(
 			'This Core is out of date. Update this Core.',
 		)
-		expect(protocolMismatch({ protocol: 1 }, false, 2)?.message).toBe(
-			'This Core is out of date. Ask the owner to update it.',
-		)
-		expect(protocolMismatch({ protocol: 3 }, true, 2)?.message).toBe(
+		expect(protocolMismatch({ protocol: 3 }, 2)?.message).toBe(
 			'This Core is newer than this App. Update Amberite.',
 		)
 	})
@@ -264,107 +251,7 @@ describe('a Core on another protocol version', () => {
 	})
 })
 
-const EDITOR_SCOPES =
-	'BASE_READ | POWER_ACTIONS | EXEC_COMMANDS | FILES_WRITE | SETUP | BACKUPS | ADVANCED'
-const ACCESS = {
-	owner: { id: 'owner', name: 'Owner', avatar_url: null },
-	members: [
-		{
-			user: { id: 'friend', name: 'Friend', avatar_url: null },
-			role: 'editor',
-			added_at: 1_700_000_000,
-		},
-	],
-}
-
-function forbidden() {
-	return new ModrinthApiError('HTTP 403', {
-		statusCode: 403,
-		responseData: { error: 'forbidden', description: '' },
-	})
-}
-
-describe('the server access page on a Core', () => {
-	it('lists the owner and members in the hosting shapes, none of them pending', async () => {
-		const api = new FakeClient()
-		api.answers = [ACCESS]
-		expect(await api.archon.server_users_v1.list(SERVER)).toEqual([
-			{
-				user: { id: 'owner', username: 'Owner', avatar_url: null },
-				added_on: null,
-				permissions: 'SERVER_ADMIN',
-			},
-			{
-				user: { id: 'friend', username: 'Friend', avatar_url: null },
-				added_on: new Date(1_700_000_000_000).toISOString(),
-				permissions: EDITOR_SCOPES,
-			},
-		])
-		expect(api.toCore().map((request) => request.url)).toEqual([
-			`${PROXY}/servers/${SERVER}/access`,
-		])
-	})
-
-	it('shows a member only themselves', async () => {
-		const api = new FakeClient()
-		api.answers = [
-			forbidden(),
-			{
-				user: ACCESS.members[0].user,
-				owner: false,
-				servers: [{ server_id: SERVER, role: 'viewer' }],
-			},
-		]
-		expect(await api.archon.server_users_v1.list(SERVER)).toEqual([
-			{
-				user: { id: 'friend', username: 'Friend', avatar_url: null },
-				added_on: null,
-				permissions: 'BASE_READ',
-			},
-		])
-	})
-
-	it('invites, changes roles and removes with a ticket each, and leaves without one', async () => {
-		const api = new FakeClient()
-		api.answers = [{ id: 'other', username: 'Other', avatar_url: null }]
-		const users = api.archon.server_users_v1
-		await users.add(SERVER, { user_id: 'other', role: 'Editor' })
-		await users.update(SERVER, 'other', 'Viewer')
-		await users.delete(SERVER, 'other')
-		api.answers = [{ user: ACCESS.members[0].user, owner: false, servers: [] }]
-		await users.leave(SERVER)
-
-		const calls = api.toCore().map((request) => ({
-			call: `${request.method} ${request.url.slice(PROXY.length)}`,
-			ticket: header(request.headers, 'X-Amberite-Ticket'),
-			body: request.body,
-		}))
-		expect(calls).toEqual([
-			{
-				call: `POST /servers/${SERVER}/access`,
-				ticket: 'ticket-1',
-				body: { user: { id: 'other', name: 'Other', avatar_url: null }, role: 'editor' },
-			},
-			{
-				call: `PATCH /servers/${SERVER}/access/other`,
-				ticket: 'ticket-2',
-				body: { role: 'viewer' },
-			},
-			{ call: `DELETE /servers/${SERVER}/access/other`, ticket: 'ticket-3', body: undefined },
-			{ call: 'GET /access/me', ticket: undefined, body: undefined },
-			{ call: `DELETE /servers/${SERVER}/access/friend`, ticket: undefined, body: undefined },
-		])
-		expect(api.sent.filter((request) => request.url.endsWith('/ticket'))).toHaveLength(3)
-	})
-
-	it('declining an invite leaves the server', async () => {
-		const api = new FakeClient()
-		api.answers = [{ user: ACCESS.members[0].user, owner: false, servers: [] }]
-		await api.archon.cores_v1.respondToInvite(CORE.id, SERVER, 'decline')
-		expect(api.toCore().at(-1)?.method).toBe('DELETE')
-		expect(api.toCore().at(-1)?.url).toBe(`${PROXY}/servers/${SERVER}/access/friend`)
-	})
-
+describe('the activity log of a server on a Core', () => {
 	it("reads a server's activity as its action log", async () => {
 		const api = new FakeClient()
 		const at = 1_700_000_000
@@ -373,26 +260,25 @@ describe('the server access page on a Core', () => {
 				{
 					id: 5,
 					at,
-					user: ACCESS.owner,
+					user: { id: 'owner', name: 'Owner', avatar_url: null },
 					server_id: SERVER,
-					action: { type: 'invited', user_id: 'friend', role: 'editor' },
+					action: { type: 'console_command', command: 'say hi' },
 				},
 				{ id: 4, at, user: null, server_id: SERVER, action: { type: 'server_started' } },
 			],
 			next_before: 4,
 		}
-		api.routes[`${PROXY}/servers/${SERVER}/access`] = ACCESS
 		const log = await api.archon.actions_v1.list(SERVER, { limit: 2 })
 
 		expect(log.next_offset).toBe(4)
 		expect(log.data.map((entry) => [entry.actor, entry.action])).toEqual([
 			[
 				{ type: 'user', user_id: 'owner' },
-				{ action: 'user_invited', metadata: { user_id: 'friend', permissions: EDITOR_SCOPES } },
+				{ action: 'console_command_executed', metadata: { command: 'say hi' } },
 			],
 			[{ type: 'user', user_id: 'core-cli' }, { action: 'server_started' }],
 		])
-		expect(log.users.friend.username).toBe('Friend')
+		expect(log.users.owner.username).toBe('Owner')
 		const activity = () =>
 			api.sent.findLast((request) => request.url.startsWith(`${PROXY}/activity`))?.url
 		expect(activity()).toBe(`${PROXY}/activity?server_id=${SERVER}&limit=2`)
@@ -400,34 +286,7 @@ describe('the server access page on a Core', () => {
 		await api.archon.actions_v1.list(SERVER, { limit: 2, offset: 4 })
 		expect(activity()).toBe(`${PROXY}/activity?server_id=${SERVER}&limit=2&before=4`)
 	})
-
-	it('gives a member an empty action log', async () => {
-		const api = new FakeClient()
-		api.routes[`${PROXY}/activity`] = forbidden()
-		api.routes[`${PROXY}/servers/${SERVER}/access`] = forbidden()
-		expect((await api.archon.actions_v1.list(SERVER)).data).toEqual([])
-	})
 })
-
-const SERVER_ON_CORE: CoreServer = {
-	id: SERVER,
-	name: 'A',
-	owner_id: 'owner',
-	role: null,
-	installing: false,
-	loader: null,
-	loader_version: null,
-	game_version: null,
-	net: { ip: null, port: 25565, outside: null, game_port: 25565 },
-	power: 'offline',
-	linked_instance: null,
-	reachability: null,
-	players: null,
-	memory_mb: 2048,
-	created_at: 0,
-	update_channel: 'release',
-	eula_accepted: true,
-}
 
 describe('creating a server on a Core', () => {
 	const EULA = 'https://aka.ms/MinecraftEULA'
@@ -462,19 +321,6 @@ describe('creating a server on a Core', () => {
 })
 
 describe('a server on a Core', () => {
-	it('shows each role its own permissions', async () => {
-		const api = new FakeClient()
-		for (const [role, permissions] of [
-			[null, 0xffff_ffff_ffff_8000],
-			['editor', 0xfe00_0000_0000_0000],
-			['viewer', 2 ** 63],
-		] as const) {
-			api.answers = [{ ...SERVER_ON_CORE, role }]
-			const shown = await api.archon.servers_v0.get(SERVER)
-			expect(shown.current_user_permissions).toBe(permissions)
-		}
-	})
-
 	it('is renamed on its Core', async () => {
 		const api = new FakeClient()
 		await api.archon.servers_v0.updateName(SERVER, 'Survival')

@@ -38,7 +38,6 @@ export const defaultPreferences: UserPreferences = {
 	social: {
 		friend_privacy: 'everyone',
 		shared_instances_privacy: 'friends',
-		hosting_access_privacy: 'friends',
 	},
 }
 

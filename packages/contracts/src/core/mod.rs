@@ -1,7 +1,7 @@
-//! A Core's own routes, besides the engine's. A device signs in with a ticket from the backend
-//! ([`SignIn`]) and sends the session it gets as its bearer; the local `copal` CLI is the owner
-//! and sends neither. A dangerous route also needs a fresh ticket in the `X-Amberite-Ticket`
-//! header.
+//! A Core's own routes, besides the engine's. The owner's device signs in with a ticket from the
+//! backend ([`SignIn`]) and sends the session it gets as its bearer; the local `copal` CLI is the
+//! owner and sends neither. Every route but [`CheckHealth`] and [`SignIn`] answers the owner only.
+//! A dangerous route also needs a fresh ticket in the `X-Amberite-Ticket` header.
 
 mod access;
 mod events;
@@ -42,14 +42,6 @@ fn first_protocol() -> u32 {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct ServerId {
     pub id: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct MemberId {
-    /// The server.
-    pub id: String,
-    pub user_id: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -97,46 +89,32 @@ endpoints! {
 
     /// Trade a ticket for a session on this device. 10 a minute per address.
     SignIn: Post "/sessions", None, (), (), Json<NewSession>, Json<SignedIn>;
-    /// Every session for the owner, your own for anyone else.
+    /// Every signed-in device.
     ListSessions: Get "/sessions", Session, (), (), Empty, Json<Vec<CoreSession>>;
     /// End this device's session.
     SignOut: Delete "/sessions/current", Session, (), (), Empty, Empty;
-    /// End a session. Someone else's is the owner's to end, and needs the ticket.
+    /// End another device's session.
     RevokeSession: Delete "/sessions/{id}", Session, SessionId, (), Empty, Empty, dangerous;
 
-    /// The caller's own access.
-    GetMyAccess: Get "/access/me", Session, (), (), Empty, Json<MyAccess>;
-    /// A server's owner and members. Owner only.
-    ListMembers: Get "/servers/{id}/access", Session, ServerId, (), Empty, Json<ServerAccess>;
-    /// Give someone a role on a server, at once; the backend notifies them. Inviting someone who
-    /// has a role sets the new one. Owner only.
-    InviteMember: Post "/servers/{id}/access", Session, ServerId, (), Json<NewMember>, Json<Member>, dangerous;
-    /// Owner only.
-    ChangeRole: Patch "/servers/{id}/access/{user_id}", Session, MemberId, (), Json<MemberUpdate>, Json<Member>, dangerous;
-    /// Take someone's role on a server, ending every session they have on the Core. Owner only,
-    /// except that a member may remove themselves to leave, which needs no ticket.
-    RemoveMember: Delete "/servers/{id}/access/{user_id}", Session, MemberId, (), Empty, Empty, dangerous;
-
-    /// A link for a download that cannot send the session, such as a native save. Editors and up
-    /// of the server in the path.
+    /// A link for a download that cannot send the session, such as a native save.
     CreateDownloadLink: Post "/links", Session, (), (), Json<NewDownloadLink>, Json<DownloadLink>;
 
-    /// The activity log, newest first. Owner only.
+    /// The activity log, newest first.
     ListActivity: Get "/activity", Session, (), ActivityQuery, Empty, Json<ActivityPage>;
 
-    /// Whether this Core is paired, and the code it shows while it is not. Owner only.
+    /// Whether this Core is paired, and the code it shows while it is not.
     GetPairing: Get "/pairing", Session, (), (), Empty, Json<PairingStatus>;
-    /// Drop the code shown and get another, within 20 seconds, while unpaired. Owner only.
+    /// Drop the code shown and get another, within 20 seconds, while unpaired.
     RequestPairingCode: Post "/pairing/code", Session, (), (), Empty, Json<PairingStatus>;
     /// The owner is removing this Core from their account: every session ends and the Core shows
     /// a new pairing code.
     Unpair: Delete "/pairing", Session, (), (), Empty, Empty, dangerous;
 
-    /// Owner only.
+    /// The running version, the newest release and the update settings.
     GetUpdate: Get "/update", Session, (), (), Empty, Json<UpdateStatus>;
-    /// Owner only. Turning auto-update on or changing the channel needs the ticket.
+    /// Turning auto-update on or changing the channel needs the ticket.
     ChangeUpdateSettings: Patch "/update", Session, (), (), Json<UpdateSettings>, Json<UpdateStatus>, dangerous;
-    /// Look up the newest release now. Owner only.
+    /// Look up the newest release now.
     CheckForUpdate: Post "/update/check", Session, (), (), Empty, Json<UpdateStatus>;
     /// The Core restarts into the new version right after answering. Its shape never changes, so
     /// an App can update a Core that speaks an older protocol.
@@ -144,89 +122,88 @@ endpoints! {
     /// Back to the previous version, with the database from before the update.
     RollBack: Post "/update/rollback", Session, (), (), Empty, Json<Restarting>, dangerous;
 
-    /// Owner only.
+    /// What this Core gives to other people's shares, and what it holds.
     GetStorage: Get "/storage", Session, (), (), Empty, Json<StorageStatus>;
-    /// Change what is given; the rest stays. Owner only.
+    /// Change what is given; the rest stays.
     ChangeStorage: Patch "/storage", Session, (), (), Json<StorageSettings>, Json<StorageStatus>;
 
-    /// Owner only.
+    /// Whether the owner accepted the Minecraft EULA.
     GetEula: Get "/eula", Session, (), (), Empty, Json<Eula>;
-    /// Accept the Minecraft EULA for every server on this Core. Owner only.
+    /// Accept the Minecraft EULA for every server on this Core.
     AcceptEula: Post "/eula", Session, (), (), Empty, Json<Eula>;
 
-    /// The end of the Core's own log. Owner only.
+    /// The end of the Core's own log.
     GetLogs: Get "/logs", Session, (), LogsQuery, Empty, Json<CoreLogs>;
-    /// Owner only.
+    /// The machine the Core runs on.
     GetMachine: Get "/machine", Session, (), (), Empty, Json<Machine>;
 
-    /// Every server the caller has a role on.
+    /// Every server on this Core.
     ListServers: Get "/servers", Session, (), (), Empty, Json<Vec<CoreServer>>;
-    /// An empty server, to install a loader or pack on. Owner only.
+    /// An empty server, to install a loader or pack on.
     CreateServer: Post "/servers", Session, (), (), Json<NewServer>, Json<ServerId>;
-    /// Viewers and up.
+    /// One server.
     GetServer: Get "/servers/{id}", Session, ServerId, (), Empty, Json<CoreServer>;
-    /// Editors and up.
+    /// Rename a server or change its update channel.
     ChangeServer: Patch "/servers/{id}", Session, ServerId, (), Json<ServerUpdate>, Empty;
-    /// A stopped server, with its world, files and backups, and every role on it. Owner only.
+    /// A stopped server, with its world, files and backups.
     DeleteServer: Delete "/servers/{id}", Session, ServerId, (), Empty, Empty, dangerous;
     /// Start answers once Java runs, stop and kill once the server has the request, restart at
-    /// once. Editors and up.
+    /// once.
     ChangePower: Post "/servers/{id}/power", Session, ServerId, (), Json<PowerChange>, Empty;
-    /// Install a loader on a stopped server, answering once it is done. Editors and up.
+    /// Install a loader on a stopped server, answering once it is done.
     InstallLoader: Post "/servers/{id}/reinstall", Session, ServerId, (), Json<LoaderInstall>, Empty;
     /// Install an `.mrpack`, the body, over a stopped server. It goes on in the background.
-    /// Editors and up.
     InstallModpackFile: Post "/servers/{id}/modpack-file", Session, ServerId, (), Stream, Empty;
-    /// Push a version of the server's own share, which the first push creates. Editors and up.
+    /// Push a version of the server's own share, which the first push creates.
     ShareServer: Post "/servers/{id}/share", Session, ServerId, (), Json<SharePush>, Json<SharedServer>;
     /// Apply the latest version of an App instance's share, which the server follows from then
     /// on and its own share goes. A stopped server installs it now; a running one when it next
-    /// stops. Editors and up.
+    /// stops.
     FollowInstance: Post "/servers/{id}/follow", Session, ServerId, (), Json<InstanceFollow>, Empty;
-    /// Viewers and up.
+    /// How the server runs: its command, Java and shared instance.
     GetSetup: Get "/servers/{id}/setup", Session, ServerId, (), Empty, Json<ServerSetup>;
-    /// The managed Java the server runs, from its next start. Editors and up.
+    /// The managed Java the server runs, from its next start.
     SetJavaVersion: Put "/servers/{id}/java-version", Session, ServerId, (), Json<JavaMajor>, Empty;
-    /// Editors and up: the file can hold secrets, such as a resource pack URL.
+    /// The server's `server.properties`.
     GetProperties: Get "/servers/{id}/properties", Session, ServerId, (), Empty, Json<ServerProperties>;
-    /// Editors and up. Answers with the file as it is now.
+    /// Answers with the file as it is now.
     ChangeProperties: Patch "/servers/{id}/properties", Session, ServerId, (), Json<PropertiesUpdate>, Json<ServerProperties>;
-    /// Viewers and up.
+    /// The server's backups, their schedule, and the operations queued on them.
     ListBackups: Get "/servers/{id}/backups", Session, ServerId, (), Empty, Json<ServerBackups>;
-    /// Back up the server as it is, hot when it runs, into a free manual slot. Editors and up.
+    /// Back up the server as it is, hot when it runs, into a free manual slot.
     CreateBackup: Post "/servers/{id}/backups", Session, ServerId, (), Json<NewBackup>, Json<CreatedBackup>;
-    /// Editors and up. Deleting the excess scheduled backups is the owner's, with the ticket.
+    /// Deleting the excess scheduled backups needs the ticket.
     ChangeBackupSchedule: Patch "/servers/{id}/backups/schedule", Session, ServerId, (), Json<ScheduleUpdate>, Json<ScheduleChange>;
-    /// Owner only: backups are what undoes damage.
+    /// Delete several backups.
     DeleteBackups: Post "/servers/{id}/backups/delete", Session, ServerId, (), Json<BackupIds>, Empty, dangerous;
-    /// Editors and up.
+    /// Rename a backup.
     RenameBackup: Patch "/servers/{id}/backups/{backup_id}", Session, BackupRef, (), Json<BackupUpdate>, Empty;
-    /// Owner only.
+    /// Delete one backup.
     DeleteBackup: Delete "/servers/{id}/backups/{backup_id}", Session, BackupRef, (), Empty, Empty, dangerous;
-    /// Queue a restore over the stopped server's world, after a backup of it. Owner only.
+    /// Queue a restore over the stopped server's world, after a backup of it.
     RestoreBackup: Post "/servers/{id}/backups/{backup_id}/restore", Session, BackupRef, (), Empty, Empty, dangerous;
-    /// Queue a failed backup again. Editors and up.
+    /// Queue a failed backup again.
     RetryBackup: Post "/servers/{id}/backups/{backup_id}/retry", Session, BackupRef, (), Empty, Empty;
-    /// Stop showing an operation that ended. Editors and up.
+    /// Stop showing an operation that ended.
     AckOperation: Post "/servers/{id}/backups/operations/{operation_id}/ack", Session, OperationRef, (), Empty, Empty;
-    /// Drop a queued operation; a cancelled backup goes with it. Editors and up.
+    /// Drop a queued operation; a cancelled backup goes with it.
     CancelOperation: Post "/servers/{id}/backups/operations/{operation_id}/cancel", Session, OperationRef, (), Empty, Empty;
 
-    /// Viewers and up.
+    /// The server's memory, JVM flags and restart settings.
     GetPerformance: Get "/servers/{id}/performance", Session, ServerId, (), Empty, Json<Performance>;
-    /// Used from the server's next start. Editors and up.
+    /// Used from the server's next start.
     SetMemory: Put "/servers/{id}/memory", Session, ServerId, (), Json<Memory>, Json<Performance>;
-    /// Used from the server's next start. Editors and up.
+    /// Used from the server's next start.
     SetFlags: Put "/servers/{id}/flags", Session, ServerId, (), Json<JvmFlags>, Json<Performance>;
-    /// Editors and up.
+    /// When the server restarts on its own.
     SetRestarts: Put "/servers/{id}/restarts", Session, ServerId, (), Json<Restarts>, Json<Performance>;
-    /// Send one command to the server's console, and learn why one was refused. Editors and up.
+    /// Send one command to the server's console, and learn why one was refused.
     SendCommand: Post "/servers/{id}/console", Session, ServerId, (), Json<ConsoleCommand>, Empty;
-    /// A custom Java for the server, or the Core's own. Editors and up.
+    /// A custom Java for the server, or the Core's own.
     SetJava: Put "/servers/{id}/java", Session, ServerId, (), Json<JavaPath>, Empty;
-    /// Viewers and up; a crash's console lines are for editors and up.
+    /// What the server is doing and why it last stopped.
     GetInsight: Get "/servers/{id}/insight", Session, ServerId, (), Empty, Json<ServerInsight>;
-    /// Check a running server's port again, answering once checked. Editors and up.
+    /// Check a running server's port again, answering once checked.
     CheckReachability: Post "/servers/{id}/reachability", Session, ServerId, (), Empty, Json<ServerInsight>;
 }
 
@@ -238,7 +215,6 @@ pub(crate) fn ts() -> String {
     let declarations = [
         Health::decl(&cfg),
         ServerId::decl(&cfg),
-        MemberId::decl(&cfg),
         SessionId::decl(&cfg),
     ]
     .into_iter()
