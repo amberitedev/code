@@ -2,25 +2,21 @@
 
 Amberite is a Minecraft launcher for modding and sharing, with self-hosted servers. The desktop App manages the Core, a Rust server manager you run on any machine.
 
-You can think of Amberite as a self-hosted alternative to Modrinth Hosting, like Lodestone or Pterodactyl. The main difference is full parity with Modrinth.
+You can think of Amberite as a self-hosted alternative to Modrinth Hosting, BisectHosting and other hosting platforms. The main difference is that Amberite integrates directly into your launcher, like Modrinth Hosting.
 
 Nothing is released, so there's nothing to migrate. But there are some things we never compromise on.
 
 ### 1. Easy to use
 
-Amberite is built so anyone can use it, without being any less capable. Unlike a lot of self-hosting platforms, it does not assume you know how things work. We want all users to find Amberite easy, and those who know what they're doing to enjoy it even further.
+Amberite is built so anyone can use it, without being any less capable. Unlike a lot of self-hosting platforms, it does not assume you know how things work. We want all users to find Amberite easy, and for the power users to enjoy it even further.
 
-### 2. Performance without compromise
+### 2. Free to run
 
-Lots of apps have gotten bogged down with bad tech decisions and "slop". We have not, and we're proud of Amberite's performance. We regularly audit for performance regressions. Make sure every change considers its performance impact.
+Amberite is open source, but accounts, friends, sharing and more run on a backend we pay for. As Amberite grows, so does the cost of running it. Right now we keep that cost at $0, and we want the backend to stay cheap as our users grow. Weigh the cost impact of every change, and push back on expensive changes that scale poorly.
 
-### 3. Free to run
+### 3. Built on Modrinth
 
-Although Amberite's products are self-hosted, accounts, friends and share details run on a backend we pay for, and we want to run it for free for as long as possible. We optimize the backend to be cheap, and our decisions show that. Make sure your changes are considerate of the cost impact, push back on expensive changes, and suggest functionally equivalent alternatives (assume fully optimized).
-
-### 4. Built on Modrinth
-
-Amberite is a fork of Modrinth, not a replacement. We use their content, launcher data and UI, and a Modrinth user should feel at home with our features on top. We aren't scared to change their code, especially when it improves our architecture, performance or cost. We merge their code daily, so leaving out changes can make merges cheaper. For example, we kept their backend's routes so their friends and profile pages work on ours unchanged. Aim for that kind of fit.
+Amberite is a fork of the Modrinth monorepo, tracked as `modrinth/main`. We build on Modrinth's content, launcher data and UI. The only part we replace is their launcher. A Modrinth user should be able to switch to Amberite without losing any Modrinth features, and we merge upstream changes regularly. We've rewritten a lot of their code to fit our architecture, but that doesn't mean everything needs rewriting. New changes should fit in with what's already there.
 
 ## A note from ilai
 
@@ -43,7 +39,6 @@ We need to be on the same page with terminology. When communicating, use this la
 - **server** means a Minecraft server on a Core. Think of it as a hosted world.
 - **shared instance** means an instance published through our backend and shared with your friends.
 - **share** means one version of a shared instance.
-- **upstream** means Modrinth's repo. It is the `modrinth` remote in this repo, so their code is at `modrinth/main`.
 - **stack** means one checkout's dev programs: the backend, its Cores, and its Apps.
 
 ## Hit every surface
@@ -55,6 +50,7 @@ The most common defect in this repo is a change that works on the path you teste
 - **App and Core.** An instance lives on this computer or on a Core. Most instance screens are one shared layout with a provider per side, so an action added on one side is missing on the other.
 - **Roles and states.** The owner and someone invited see different things, and a server or a shared instance behaves differently while stopped, running, installing or removed. Check the ones the change touches.
 - **Docs.** Check whether the change makes existing guidance inaccurate. Apply the [documentation rules](#documentation) before adding anything.
+- **Cost.** If the change touches the backend, say what it does to cost.
 
 ## Dev servers
 
