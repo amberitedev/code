@@ -55,8 +55,14 @@ for (const repo of selected) {
 			NodePath.join(checkout, 'SYNCED.json'),
 			`${JSON.stringify(synced, null, '\t')}\n`,
 		)
-		if (NodeFS.existsSync(target)) NodeFS.renameSync(target, NodePath.join(temp, 'old'))
-		NodeFS.renameSync(checkout, target)
+		const old = NodePath.join(temp, 'old')
+		if (NodeFS.existsSync(target)) NodeFS.renameSync(target, old)
+		try {
+			NodeFS.renameSync(checkout, target)
+		} catch (error) {
+			if (NodeFS.existsSync(old)) NodeFS.renameSync(old, target)
+			throw error
+		}
 		console.log(`.repos/${repo.id} is at ${repo.ref} (${commit.slice(0, 12)}).`)
 	} finally {
 		NodeFS.rmSync(temp, { recursive: true, force: true })
