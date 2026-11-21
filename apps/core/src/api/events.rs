@@ -32,7 +32,7 @@ use tokio::sync::{
 
 use super::{CoreState, servers::power_state};
 use crate::{
-    access::{Caller, Changed, Permission, StreamGuard, now},
+    access::{Caller, Changed, Permission, StreamGuard, now, require_owner},
     servers::{Phase, console, restarts::run_started_at},
 };
 
@@ -53,6 +53,9 @@ pub async fn socket(
     State(state): State<Arc<CoreState>>,
     upgrade: WebSocketUpgrade,
 ) -> Response {
+    if let Err(error) = require_owner(&caller) {
+        return error.into_response();
+    }
     // Before any access check, so a change from here on is never missed.
     let changes = state.access.changed.subscribe();
     let Some(guard) = state.access.open_stream(&caller) else {

@@ -189,10 +189,11 @@ The engine asks its host who the caller is and what they may do through `Access`
 ([`access.rs`](../../packages/engine/src/access.rs)). Each engine handler declares its level with
 the `InstanceAccess<View | Edit | Owner>` extractor. The App's `AppAccess` allows its one local
 user everything. A Core answers its owner only: `CoreAccess`
-([`access/mod.rs`](../../apps/core/src/access/mod.rs)) maps the session to an account, and
-anyone but the owner gets 404. The levels stay on the handlers so per-server access can come back
-without touching the engine. Nothing in a request can change which `Access` runs. Sessions,
-tickets and revalidation are Core concepts and stay on `CoreAccess`.
+([`access/mod.rs`](../../apps/core/src/access/mod.rs)) maps the session to an account, and only
+the owner can sign in. Anyone else gets 404 on a server and 403 on the Core's own routes. The
+levels stay on the handlers so per-server access can come back without touching the engine.
+Nothing in a request can change which `Access` runs. Sessions, tickets and revalidation are Core
+concepts and stay on `CoreAccess`.
 
 A Core does not mount `engine::routes()`. It mounts the routes
 [`engine_mount.rs`](../../apps/core/src/api/engine_mount.rs) lists: one whose body or answer is a

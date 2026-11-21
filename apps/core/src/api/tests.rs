@@ -328,9 +328,30 @@ async fn sessions_are_revoked_and_signed_out() {
         .await;
     assert_eq!(all.as_array().unwrap().len(), 2);
 
-    // Ending another device's session needs a fresh ticket.
     assert_eq!(
-        core.call(Method::DELETE, "/sessions/theirs", Some(&owner), None, None)
+        core.call(Method::GET, "/sessions", Some("stranger"), None, None)
+            .await
+            .0,
+        StatusCode::FORBIDDEN
+    );
+
+    // Ending another device's session needs a fresh ticket, even one of the owner's own.
+    let phone = core.sign_in("owner").await;
+    let (_, seen) = core
+        .call(Method::GET, "/sessions", Some(&phone), None, None)
+        .await;
+    let phone_id = seen
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|session| session["current"] == true)
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let revoke_phone = format!("/sessions/{phone_id}");
+    assert_eq!(
+        core.call(Method::DELETE, &revoke_phone, Some(&owner), None, None)
             .await
             .0,
         StatusCode::UNAUTHORIZED
@@ -338,7 +359,7 @@ async fn sessions_are_revoked_and_signed_out() {
     let (status, _) = core
         .call(
             Method::DELETE,
-            "/sessions/theirs",
+            &revoke_phone,
             Some(&owner),
             Some(&core.ticket("owner")),
             None,
@@ -346,7 +367,7 @@ async fn sessions_are_revoked_and_signed_out() {
         .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
     assert_eq!(
-        core.call(Method::GET, "/sessions", Some("stranger"), None, None)
+        core.call(Method::GET, "/sessions", Some(&phone), None, None)
             .await
             .0,
         StatusCode::UNAUTHORIZED

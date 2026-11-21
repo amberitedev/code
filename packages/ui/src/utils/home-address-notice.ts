@@ -8,8 +8,8 @@ const homeAddressNotice = defineMessage({
 })
 
 /**
- * Says once per installation what a server's players can see. Call when a server is created for a
- * shared instance, whose players can join it.
+ * Says once per installation that a server's players see its address. Call when a server is
+ * created for a shared instance, whose members are the people likely to be invited to play.
  */
 export function notifyHomeAddressOnce(
 	addNotification: (notification: { type: 'info'; title: string }) => unknown,

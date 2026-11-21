@@ -277,7 +277,8 @@ pub struct SharedInstanceChangeBody {
     pub shared_instance_id: String,
 }
 
-/// A shared instance's member list changed, so an open page fetches it again. Shaped like a notification so the App passes it on, but not stored.
+/// A shared instance's member list changed, so an open page fetches it again. Shaped like a
+/// notification so the App passes it on, but not stored.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct SharedInstanceChange {
