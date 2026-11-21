@@ -1,8 +1,8 @@
 //! `GET /events`: one socket per client, on which it subscribes to topics
 //! (`contracts::core::Topic`) and gets the Core's [`CoreEvent`]s and the engine's events for them.
 //! Every topic is checked against the caller's access when subscribed, and again when their
-//! session changes, when the socket falls behind, and every [`RECHECK_EVERY`]: a topic they lost ends with
-//! [`CoreEvent::Ended`], and a session that ended closes the socket.
+//! session changes, when the socket falls behind, and every [`RECHECK_EVERY`]: a topic they lost
+//! ends with [`CoreEvent::Ended`], and a session that ended closes the socket.
 
 use std::{
     collections::{HashMap, VecDeque},

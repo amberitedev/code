@@ -46,8 +46,8 @@ export const accessMessages = defineMessages({
 		defaultMessage: 'Search actions...',
 	},
 	loadFailedTitle: {
-		id: 'servers.access-page.notification.load-failed.title',
-		defaultMessage: 'Access could not be loaded',
+		id: 'servers.access-page.notification.activity-load-failed.title',
+		defaultMessage: 'Activity could not be loaded',
 	},
 	loadFailedText: {
 		id: 'servers.access-page.notification.load-failed.text',
@@ -91,22 +91,6 @@ export const actionLogActionMessages = defineMessages({
 	server_resuspended: {
 		id: 'servers.access-page.activity-log-filter.action.server-resuspended',
 		defaultMessage: 'Server suspended again',
-	},
-	user_invited: {
-		id: 'servers.access-page.activity-log-filter.action.user-invited',
-		defaultMessage: 'Invited user',
-	},
-	user_invite_revoked: {
-		id: 'servers.access-page.activity-log-filter.action.user-invite-revoked',
-		defaultMessage: 'Revoked user invite',
-	},
-	user_permission_modified: {
-		id: 'servers.access-page.activity-log-filter.action.user-permission-modified',
-		defaultMessage: 'Changed user permissions',
-	},
-	user_removed: {
-		id: 'servers.access-page.activity-log-filter.action.user-removed',
-		defaultMessage: 'Revoked access',
 	},
 	addon_added: {
 		id: 'servers.access-page.activity-log-filter.action.addon-added',

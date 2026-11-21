@@ -231,9 +231,10 @@ impl Access for CoreAccess {
     }
 }
 
-/// The owner doing something dangerous: deleting a server; revoking someone else's session; updating or rolling back Core; removing Core from
-/// its account; restoring or deleting a backup, or keeping fewer scheduled ones. Over HTTPS this
-/// needs a fresh ticket (see [`fresh_ticket`]); the local CLI needs none.
+/// The owner doing something dangerous: deleting a server; ending another device's session;
+/// updating or rolling back Core; removing Core from its account; restoring or deleting a backup,
+/// or keeping fewer scheduled ones. Over HTTPS this needs a fresh ticket (see [`fresh_ticket`]);
+/// the local CLI needs none.
 pub struct Dangerous(pub Caller);
 
 impl FromRequestParts<Shared> for Dangerous {

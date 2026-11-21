@@ -58,13 +58,6 @@ export interface Core {
 	readonly owner: Account | null
 }
 
-/** A Core as one of its users, for calls its owner would not make. See `signedIn`. */
-export interface CoreUser {
-	readonly kind: 'core-user'
-	readonly core: Core
-	readonly account: Account
-}
-
 export class FixtureError extends Error {
 	constructor(message: string) {
 		super(message)

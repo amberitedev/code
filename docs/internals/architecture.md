@@ -177,9 +177,9 @@ to the fingerprint learned at pairing. The fingerprint check exists once, in
   too.
 - Core session tokens never enter the WebView. The proxy drops the WebView's `Authorization` and
   adds the session on the way out.
-- It listens on a port of its own, one for all Cores, behind the same secret and guard. Content
-  from other people's Cores then never shares an origin with the local server's file routes, and
-  the local server refuses the proxy's origin.
+- It listens on a port of its own, one for all Cores, behind the same secret and guard. A Core's
+  content then never shares an origin with the local server's file routes, and the local server
+  refuses the proxy's origin.
 - Every answer carries `Content-Security-Policy: sandbox`, so a Core's file opened as a document
   runs no script and cannot call another Core through the proxy.
 

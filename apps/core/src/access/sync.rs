@@ -1,12 +1,12 @@
 //! Backend sync. The backend is a phone book and a notifier: Core tells it where this Core is, on
-//! start and on change, never on a timer. Storage reports (see `storage`) are
-//! the exception: they also go hourly, so a replica learns of new versions within the hour.
+//! start and on change, never on a timer. Storage reports (see `storage`) are the exception: they
+//! also go hourly, so a replica learns of new versions within the hour.
 //!
 //! A call that must reach the backend is owed: [`owe`] stores it in `backend_owed` in the same
 //! transaction as the change, and [`run`] sends it, retrying with backoff until the backend
 //! answers. On every start and reconnect Core also reports its state, so a lost report cannot
-//! leave the two apart. When the backend says this Core
-//! was removed from its account, Core un-pairs and shows a new pairing code.
+//! leave the two apart. When the backend says this Core was removed from its account, Core
+//! un-pairs and shows a new pairing code.
 
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},

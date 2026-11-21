@@ -328,7 +328,7 @@ async fn sessions_are_revoked_and_signed_out() {
         .await;
     assert_eq!(all.as_array().unwrap().len(), 2);
 
-    // Someone else's session is a dangerous action for the owner.
+    // Ending another device's session needs a fresh ticket.
     assert_eq!(
         core.call(Method::DELETE, "/sessions/theirs", Some(&owner), None, None)
             .await

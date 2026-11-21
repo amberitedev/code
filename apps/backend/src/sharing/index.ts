@@ -1559,7 +1559,8 @@ const accountRoutes = [
 		owner(item, user.id)
 		await setIcon(env, item, null, null)
 	}),
-	// A ticket for one Core to read this share for the user, so a server they own can follow it. The Core sends it with its reads, and the backend checks the user can still read then.
+	// A ticket for one Core to read this share for the user, so a server on it can follow the share.
+	// The Core sends it with its reads, and the backend checks the user can still read then.
 	route(
 		sharing.IssueReadTicket,
 		(raw) => ({ core_id: string(object(raw).core_id, 'core_id', 64) }),

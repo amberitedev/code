@@ -24,8 +24,8 @@ export function useCores() {
  * resolves true once a Core is added, false if the modal is closed.
  *
  * `ensureCore` is called before anything that creates a server. It resolves true right away when
- * the account has a Core; otherwise it opens "Add Core" and resolves true only once one is added. It throws when the account's Cores
- * cannot be loaded, so a failed lookup never asks for a Core.
+ * the account has a Core; otherwise it opens "Add Core" and resolves true only once one is added.
+ * It throws when the account's Cores cannot be loaded, so a failed lookup never asks for a Core.
  */
 export interface CoreActions {
 	openAddCore: (code?: string) => Promise<boolean>

@@ -67,8 +67,8 @@ export async function joinedMembers(
 }
 
 /**
- * Tells the online Apps of `users` that a shared instance's member list or hosted servers
- * changed, so an open page fetches it again instead of polling. Members who were just removed,
+ * Tells the online Apps of `users` that a shared instance's member list changed, so an open page
+ * fetches it again instead of polling. Members who were just removed,
  * or whose share was deleted, are told too: their App finds out it lost access.
  */
 export async function notifyUsers(

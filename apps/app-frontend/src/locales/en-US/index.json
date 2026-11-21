@@ -4421,9 +4421,6 @@
   "instance.worlds.hardcore": {
     "message": "Hardcore mode"
   },
-  "instance.worlds.hosted_by": {
-    "message": "Hosted by {name}"
-  },
   "instance.worlds.incompatible_server": {
     "message": "Server is incompatible"
   },
@@ -4471,21 +4468,6 @@
   },
   "instance.worlds.unpin": {
     "message": "Unpin"
-  },
-  "instance.worlds.update-before-join.description": {
-    "message": "{host}'s server may already be on the new version. Update to be sure you can join."
-  },
-  "instance.worlds.update-before-join.start-without-updating": {
-    "message": "Start without updating"
-  },
-  "instance.worlds.update-before-join.title": {
-    "message": "This instance has an update"
-  },
-  "instance.worlds.update-before-join.update-and-start": {
-    "message": "Update and start"
-  },
-  "instance.worlds.update-before-join.updating": {
-    "message": "Updating..."
   },
   "instance.worlds.view_instance": {
     "message": "View instance"

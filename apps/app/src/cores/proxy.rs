@@ -11,12 +11,12 @@
 //! that fails any of these is answered here and nothing is signed. This matters because a Core
 //! often runs on the same PC, where a mod runs as another OS user.
 //!
-//! It listens on a port of its own so that content from other people's Cores never shares an
-//! origin with the local server, whose routes read this computer's files, and the local server
-//! refuses its origin. Every answer carries `Content-Security-Policy: sandbox`, `nosniff` and
-//! `Referrer-Policy: no-referrer`, so a Core's file opened as a document runs no script, gets an
-//! opaque origin and never sends its URL, which holds the secret. Its `<img>` and links can still
-//! reach another tunnel by a relative URL, signed, but it can read no answer.
+//! It listens on a port of its own so that a Core's content never shares an origin with the local
+//! server, whose routes read this computer's files, and the local server refuses its origin. Every
+//! answer carries `Content-Security-Policy: sandbox`, `nosniff` and `Referrer-Policy: no-referrer`,
+//! so a Core's file opened as a document runs no script, gets an opaque origin and never sends its
+//! URL, which holds the secret. Its `<img>` and links can still reach another tunnel by a relative
+//! URL, signed, but it can read no answer.
 
 use std::{
     collections::HashMap, convert::Infallible, sync::Arc, sync::LazyLock,

@@ -47,7 +47,6 @@ pub enum ErrorCode {
     RateLimit,
     TicketsUnavailable,
     TooManyAttempts,
-    TooManyInvites,
     TooManyRequests,
     UnsupportedOperation,
     UsernameTaken,
@@ -237,7 +236,6 @@ impl ErrorCode {
             Self::RateLimited
             | Self::RateLimit
             | Self::TooManyAttempts
-            | Self::TooManyInvites
             | Self::TooManyRequests
             | Self::EgressSpent
             | Self::PoolEgressSpent
