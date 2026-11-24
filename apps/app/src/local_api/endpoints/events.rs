@@ -1,16 +1,10 @@
-use contracts::{Auth, Empty, Endpoint, Method, Upgrade};
+use contracts::{Empty, Upgrade};
 
 use crate::local_api::events::LocalEvent;
 
-/// Sends every engine and App event; reads nothing.
-pub struct EventSocket;
+contracts::endpoints! {
+    group events;
 
-impl Endpoint for EventSocket {
-    const METHOD: Method = Method::Get;
-    const PATH: &'static str = "/events";
-    const AUTH: Auth = Auth::None;
-    type Params = ();
-    type Query = ();
-    type Body = Empty;
-    type Response = Upgrade<LocalEvent, ()>;
+    /// Sends every engine and App event; reads nothing.
+    EventSocket: Get "/events", None, (), (), Empty => Upgrade<LocalEvent, ()>;
 }

@@ -8,7 +8,7 @@ use crate::ApiError;
 
 /// A stream of events a socket can subscribe to.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Topic {
     /// The engine's instance and process events for one instance.
@@ -25,7 +25,7 @@ pub enum Topic {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientMessage {
     Subscribe { topic: Topic },
@@ -34,7 +34,7 @@ pub enum ClientMessage {
 
 /// What the Core sends on `/events`, beside the engine's events.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(tag = "type", content = "payload", rename_all = "snake_case")]
 pub enum CoreEvent {
     /// A console line, without Core's health checks.
@@ -62,7 +62,7 @@ pub enum CoreEvent {
 
 /// Mirrors Archon.Websocket.v0.PowerState.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
 pub enum PowerState {
     Running,
@@ -74,7 +74,7 @@ pub enum PowerState {
 
 /// Mirrors Archon.Websocket.v0.BackupTask.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
 pub enum BackupTask {
     Create,
@@ -83,7 +83,7 @@ pub enum BackupTask {
 
 /// Mirrors Archon.Websocket.v0.BackupState.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
 pub enum BackupTaskState {
     Ongoing,

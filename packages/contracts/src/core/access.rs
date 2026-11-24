@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 /// A user as their last ticket named them.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct CoreUser {
     pub id: String,
     pub name: String,
@@ -13,7 +13,7 @@ pub struct CoreUser {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct NewSession {
     /// A ticket the backend signed for this Core, under five minutes old and never used.
     pub ticket: String,
@@ -22,7 +22,7 @@ pub struct NewSession {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct SignedIn {
     /// 256 random bits, sent as the bearer. The Core stores only its hash, and the App keeps it in
     /// the OS keychain, out of the WebView.
@@ -32,7 +32,7 @@ pub struct SignedIn {
 
 /// One device signed in to a Core.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct CoreSession {
     /// Public id for listing and revoking. Not the token.
     pub id: String,
@@ -50,21 +50,21 @@ pub struct CoreSession {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ActivityQuery {
     /// Only this server's entries.
-    #[cfg_attr(feature = "ts", ts(optional))]
+    #[cfg_attr(feature = "export-ts", ts(optional))]
     pub server_id: Option<Uuid>,
     /// Entries with an id below this, for the next page.
-    #[cfg_attr(feature = "ts", ts(optional))]
+    #[cfg_attr(feature = "export-ts", ts(optional))]
     pub before: Option<i64>,
     /// At most 100. 50 when left out.
-    #[cfg_attr(feature = "ts", ts(optional))]
+    #[cfg_attr(feature = "export-ts", ts(optional))]
     pub limit: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ActivityPage {
     pub entries: Vec<ActivityEntry>,
     /// Pass as `before` for the next page. Null on the last page.
@@ -72,7 +72,7 @@ pub struct ActivityPage {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ActivityEntry {
     pub id: i64,
     /// Unix seconds.
@@ -87,7 +87,7 @@ pub struct ActivityEntry {
 /// What was done. The Core stores the tag and the fields apart, so a renamed variant or field
 /// hides the entries already stored.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Action {
     SignedIn {
@@ -133,7 +133,7 @@ pub enum Action {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct PairingStatus {
     pub paired: bool,
     /// The code to enter in the App, like `MZUX-D576`. Null once paired, and while the Core is
@@ -144,7 +144,7 @@ pub struct PairingStatus {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct NewDownloadLink {
     /// The exact path and query the link will GET, such as
     /// `/instances/{id}/files/content?path=server.properties`.
@@ -154,7 +154,7 @@ pub struct NewDownloadLink {
 /// Sent as `?link=` on a GET of the path it was made for: once, within five minutes, and only
 /// while its maker may still make it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct DownloadLink {
     pub token: String,
 }

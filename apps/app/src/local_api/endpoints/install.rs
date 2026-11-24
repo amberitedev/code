@@ -13,21 +13,19 @@ use serde::{Deserialize, Serialize};
 
 use super::IdParams;
 
-endpoints! {
+contracts::endpoints! {
+    group localInstalls;
+
     /// What installing the modpack would make, without installing it.
-    PreviewModpack: Post "/app/install/modpack-preview", (), (),
-        Json<CreatePackLocation> => Json<InstallModpackPreview>;
-    CreateInstance: Post "/app/install/instances", (), (),
-        Json<InstallCreateInstanceRequest> => Json<InstallJobSnapshot>;
-    CreateModpackInstance: Post "/app/install/modpack-instances", (), (),
-        Json<PackInstall> => Json<InstallJobSnapshot>;
+    PreviewModpack: Post "/app/install/modpack-preview", None, (), (), Json<CreatePackLocation> => Json<InstallModpackPreview>;
+    CreateInstance: Post "/app/install/instances", None, (), (), Json<InstallCreateInstanceRequest> => Json<InstallJobSnapshot>;
+    CreateModpackInstance: Post "/app/install/modpack-instances", None, (), (), Json<PackInstall> => Json<InstallJobSnapshot>;
     /// Replaces the instance's loader and content with the modpack's.
-    InstallPackToInstance: Post "/app/install/instances/{id}/pack", IdParams,
-        (), Json<PackInstall> => Json<InstallJobSnapshot>;
+    InstallPackToInstance: Post "/app/install/instances/{id}/pack", None, IdParams, (), Json<PackInstall> => Json<InstallJobSnapshot>;
 }
 
 #[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct InstallModpackPreview {
     pub name: String,
@@ -59,7 +57,7 @@ impl From<CreatePackInstance> for InstallModpackPreview {
 }
 
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct InstallCreateInstanceRequest {
     pub name: String,
@@ -67,27 +65,27 @@ pub struct InstallCreateInstanceRequest {
     pub loader: ModLoader,
     pub loader_version: Option<String>,
     pub icon_path: Option<String>,
-    #[cfg_attr(test, ts(optional = nullable))]
+    #[cfg_attr(feature = "export-ts", ts(optional = nullable))]
     pub icon_config: Option<IconConfig>,
-    #[cfg_attr(test, ts(optional = nullable))]
+    #[cfg_attr(feature = "export-ts", ts(optional = nullable))]
     pub link: Option<InstanceLink>,
 }
 
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct PackInstall {
     pub location: CreatePackLocation,
-    #[cfg_attr(test, ts(optional = nullable))]
+    #[cfg_attr(feature = "export-ts", ts(optional = nullable))]
     pub post_install_edit: Option<InstallPostInstallEdit>,
 }
 
 /// Applied to the instance once the modpack is installed.
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct InstallPostInstallEdit {
-    #[cfg_attr(test, ts(optional = nullable))]
+    #[cfg_attr(feature = "export-ts", ts(optional = nullable))]
     pub name: Option<String>,
     /// Absent keeps the pack's icon; `null` removes it.
     #[serde(
@@ -95,9 +93,12 @@ pub struct InstallPostInstallEdit {
         skip_serializing_if = "Option::is_none",
         with = "serde_with::rust::double_option"
     )]
-    #[cfg_attr(test, ts(as = "Option<Option<String>>", optional))]
+    #[cfg_attr(
+        feature = "export-ts",
+        ts(as = "Option<Option<String>>", optional)
+    )]
     pub icon_path: Option<Option<String>>,
-    #[cfg_attr(test, ts(optional = nullable))]
+    #[cfg_attr(feature = "export-ts", ts(optional = nullable))]
     pub link: Option<InstanceLink>,
 }
 

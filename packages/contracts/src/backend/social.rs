@@ -11,15 +11,15 @@ use ariadne::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{Auth, Empty, Endpoint, Json, Method, Raw, Upgrade};
+use crate::{Empty, Json, Raw, Upgrade};
 
 /// Something this backend never has, such as an account's projects: an empty list, or null.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub enum Never {}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum Role {
     Developer,
@@ -28,14 +28,14 @@ pub enum Role {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct UserCampaigns {
     pub pride_26: Option<Never>,
 }
 
 /// Shown to admins and moderators only.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct UserLock {
     pub locked_by: String,
     pub reason: String,
@@ -45,7 +45,7 @@ pub struct UserLock {
 /// An account. The private fields are null unless it is the caller's own or the caller is an
 /// admin.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct User {
     pub id: String,
     pub username: String,
@@ -71,7 +71,7 @@ pub struct User {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct SearchUser {
     pub id: String,
     pub username: String,
@@ -81,7 +81,7 @@ pub struct SearchUser {
 /// A friendship or a pending request. As in labrinth, `id` is the recipient and `friend_id` the
 /// sender.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct UserFriend {
     pub id: String,
     pub friend_id: String,
@@ -91,29 +91,29 @@ pub struct UserFriend {
 
 /// Body of [`EditUser`]. A null `bio` clears it.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct UserUpdate {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "ts", ts(optional))]
+    #[cfg_attr(feature = "export-ts", ts(optional))]
     pub username: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "ts", ts(optional))]
+    #[cfg_attr(feature = "export-ts", ts(optional))]
     pub bio: Option<Option<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "ts", ts(optional))]
+    #[cfg_attr(feature = "export-ts", ts(optional))]
     pub allow_friend_requests: Option<bool>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct AllProjects {
     pub projects: Vec<Never>,
-    #[cfg_attr(feature = "ts", ts(type = "Record<string, never>"))]
+    #[cfg_attr(feature = "export-ts", ts(type = "Record<string, never>"))]
     pub organizations: HashMap<String, Never>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum Theme {
     Light,
@@ -123,7 +123,7 @@ pub enum Theme {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum LayoutOption {
     Grid,
@@ -131,7 +131,7 @@ pub enum LayoutOption {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum FriendPrivacy {
     None,
@@ -140,7 +140,7 @@ pub enum FriendPrivacy {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum InvitePrivacy {
     None,
@@ -149,14 +149,14 @@ pub enum InvitePrivacy {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct AppearancePreferences {
     pub auto: bool,
     pub theme: Theme,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct BehaviorPreferences {
     pub minimize_app: bool,
     pub refocus_on_game_close: bool,
@@ -177,14 +177,14 @@ pub struct BehaviorPreferences {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct LocalizationPreferences {
     /// Letters, digits and dashes, at most 35.
     pub locale: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct LayoutPreferences {
     pub mods: LayoutOption,
     pub plugins: LayoutOption,
@@ -197,14 +197,14 @@ pub struct LayoutPreferences {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct SidebarPreferences {
     pub right_aligned_search: bool,
     pub left_aligned_content: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct SocialPreferences {
     pub friend_privacy: FriendPrivacy,
     pub shared_instances_privacy: InvitePrivacy,
@@ -212,7 +212,7 @@ pub struct SocialPreferences {
 
 /// An account's settings, kept with the account so they follow it to every installation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct UserPreferences {
     pub appearance: AppearancePreferences,
     pub behavior: BehaviorPreferences,
@@ -225,7 +225,7 @@ pub struct UserPreferences {
 /// Body of [`EditPreferences`]: the settings to change, by section. The rest keep their value.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(
-    feature = "ts",
+    feature = "export-ts",
     derive(ts_rs::TS),
     ts(
         type = "{ [S in keyof UserPreferences]?: Partial<UserPreferences[S]> }"
@@ -237,7 +237,7 @@ pub struct PreferencesUpdate(
 );
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct NotificationAction {
     pub name: String,
     /// The method and the route to call.
@@ -245,14 +245,14 @@ pub struct NotificationAction {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct Notification {
     pub id: String,
     pub user_id: String,
     pub read: bool,
     pub created: String,
     #[cfg_attr(
-        feature = "ts",
+        feature = "export-ts",
         ts(type = "{ type: string, [key: string]: unknown }")
     )]
     pub body: Value,
@@ -263,14 +263,14 @@ pub struct Notification {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum SharedInstanceList {
     SharedInstanceUsers,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct SharedInstanceChangeBody {
     #[serde(rename = "type")]
     pub list: SharedInstanceList,
@@ -280,7 +280,7 @@ pub struct SharedInstanceChangeBody {
 /// A shared instance's member list changed, so an open page fetches it again. Shaped like a
 /// notification so the App passes it on, but not stored.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct SharedInstanceChange {
     pub body: SharedInstanceChangeBody,
 }
@@ -288,7 +288,7 @@ pub struct SharedInstanceChange {
 /// What the backend sends on [`FriendsSocket`]: ariadne's messages, and the notifications and
 /// changes the App tells apart by not reading them as ariadne's.
 #[derive(Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(untagged)]
 pub enum FriendsSocketMessage {
     Friends(ServerToClientMessage),
@@ -298,19 +298,19 @@ pub enum FriendsSocketMessage {
 
 /// A user id or username.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct UserRef {
     pub id: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct NotificationRef {
     pub id: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct AvatarRevision {
     pub user_id: String,
     pub revision: String,
@@ -318,19 +318,19 @@ pub struct AvatarRevision {
 
 /// Ids as labrinth takes them: a JSON array of at most 100, in the query string.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct IdList {
     pub ids: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct UserSearch {
     pub query: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct IconFormat {
     /// `png`, `jpg`, `jpeg`, `gif` or `webp`.
     pub ext: String,
@@ -338,140 +338,64 @@ pub struct IconFormat {
 
 /// The account session, sent in the query since a browser socket cannot send headers.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct SocketCode {
     pub code: String,
 }
 
-/// Up to 20 accounts whose username starts with the query.
-pub struct SearchUsers;
+crate::endpoints! {
+    /// The backend's social routes, in labrinth's shapes.
+    group social;
 
-/// Accounts by id or username. Signed out works too.
-pub struct GetUsers;
-
-/// The account's friends and pending requests, both ways.
-pub struct ListFriends;
-
-/// The presence of each online friend.
-pub struct ListFriendStatuses;
-
-/// Sends a request, or accepts the one the other account sent.
-pub struct AddFriend;
-
-/// Ends a friendship or withdraws or declines a request.
-pub struct RemoveFriend;
-
-/// The ids the account blocked.
-pub struct ListBlocks;
-
-/// Blocks an account and ends any friendship with it.
-pub struct BlockUser;
-
-pub struct UnblockUser;
-
-/// An avatar. Each upload gets a new revision, so it is cached for a day.
-pub struct GetAvatar;
-
-/// One account. Signed out works too.
-pub struct GetUser;
-
-pub struct ListUserProjects;
-
-pub struct ListUserOrganizations;
-
-pub struct ListUserCollections;
-
-/// The owner only.
-pub struct ListFollowedProjects;
-
-/// The owner only.
-pub struct ListAllProjects;
-
-/// The owner only.
-pub struct EditUser;
-
-/// The owner deletes the account, its shared instances and its Cores.
-pub struct DeleteUser;
-
-pub struct GetPreferences;
-
-/// Answers with every setting after the change.
-pub struct EditPreferences;
-
-/// A PNG, JPEG, GIF or WebP of at most 512 KiB.
-pub struct ChangeAvatar;
-
-pub struct RemoveAvatar;
-
-/// The owner's notifications, newest first.
-pub struct ListUserNotifications;
-
-pub struct GetNotification;
-
-pub struct ReadNotification;
-
-pub struct DeleteNotification;
-
-/// The caller's notifications among `ids`. Others' are left out.
-pub struct GetNotifications;
-
-pub struct ReadNotifications;
-
-pub struct DeleteNotifications;
-
-/// The App's live link: friend presence, friend requests, notifications and shared instance
-/// changes. Upstream calls it `/_internal/launcher_socket`.
-pub struct FriendsSocket;
-
-macro_rules! endpoints {
-    ($($name:ident: $method:ident $path:literal, $auth:ident, $params:ty, $query:ty, $body:ty => $response:ty;)+) => {
-        $(impl Endpoint for $name {
-            const METHOD: Method = Method::$method;
-            const PATH: &'static str = $path;
-            const AUTH: Auth = Auth::$auth;
-            type Params = $params;
-            type Query = $query;
-            type Body = $body;
-            type Response = $response;
-        })+
-
-        #[cfg(test)]
-        fn endpoint_entries() -> String {
-            [$(format!("\t{}: {},\n", stringify!($name), crate::ts::endpoint::<$name>())),+].concat()
-        }
-    };
-}
-
-endpoints! {
+    /// Up to 20 accounts whose username starts with the query.
     SearchUsers: Get "/users/search", None, (), UserSearch, Empty => Json<Vec<SearchUser>>;
+    /// Accounts by id or username. Signed out works too.
     GetUsers: Get "/users", Account, (), IdList, Empty => Json<Vec<User>>;
+    /// The account's friends and pending requests, both ways.
     ListFriends: Get "/friends", Account, (), (), Empty => Json<Vec<UserFriend>>;
+    /// The presence of each online friend.
     ListFriendStatuses: Get "/friends/status", Account, (), (), Empty => Json<Vec<UserStatus>>;
+    /// Sends a request, or accepts the one the other account sent.
     AddFriend: Post "/friend/{id}", Account, UserRef, (), Empty => Empty;
+    /// Ends a friendship or withdraws or declines a request.
     RemoveFriend: Delete "/friend/{id}", Account, UserRef, (), Empty => Empty;
+    /// The ids the account blocked.
     ListBlocks: Get "/blocks", Account, (), (), Empty => Json<Vec<String>>;
+    /// Blocks an account and ends any friendship with it.
     BlockUser: Post "/block/{id}", Account, UserRef, (), Empty => Empty;
     UnblockUser: Delete "/block/{id}", Account, UserRef, (), Empty => Empty;
+    /// An avatar. Each upload gets a new revision, so it is cached for a day.
     GetAvatar: Get "/avatars/{user_id}/{revision}", None, AvatarRevision, (), Empty => Raw;
+    /// One account. Signed out works too.
     GetUser: Get "/user/{id}", Account, UserRef, (), Empty => Json<User>;
     ListUserProjects: Get "/user/{id}/projects", None, UserRef, (), Empty => Json<Vec<Never>>;
     ListUserOrganizations: Get "/user/{id}/organizations", None, UserRef, (), Empty => Json<Vec<Never>>;
     ListUserCollections: Get "/user/{id}/collections", None, UserRef, (), Empty => Json<Vec<Never>>;
+    /// The owner only.
     ListFollowedProjects: Get "/user/{id}/follows", Account, UserRef, (), Empty => Json<Vec<Never>>;
+    /// The owner only.
     ListAllProjects: Get "/user/{id}/all-projects", Account, UserRef, (), Empty => Json<AllProjects>;
+    /// The owner only.
     EditUser: Patch "/user/{id}", Account, UserRef, (), Json<UserUpdate> => Empty;
+    /// The owner deletes the account, its shared instances and its Cores.
     DeleteUser: Delete "/user/{id}", Account, UserRef, (), Empty => Empty;
     GetPreferences: Get "/user/{id}/preferences", Account, UserRef, (), Empty => Json<UserPreferences>;
+    /// Answers with every setting after the change.
     EditPreferences: Patch "/user/{id}/preferences", Account, UserRef, (), Json<PreferencesUpdate> => Json<UserPreferences>;
+    /// A PNG, JPEG, GIF or WebP of at most 512 KiB.
     ChangeAvatar: Patch "/user/{id}/icon", Account, UserRef, IconFormat, Raw => Empty;
     RemoveAvatar: Delete "/user/{id}/icon", Account, UserRef, (), Empty => Empty;
+    /// The owner's notifications, newest first.
     ListUserNotifications: Get "/user/{id}/notifications", Account, UserRef, (), Empty => Json<Vec<Notification>>;
     GetNotification: Get "/notification/{id}", Account, NotificationRef, (), Empty => Json<Notification>;
     ReadNotification: Patch "/notification/{id}", Account, NotificationRef, (), Empty => Empty;
     DeleteNotification: Delete "/notification/{id}", Account, NotificationRef, (), Empty => Empty;
+    /// The caller's notifications among `ids`. Others' are left out.
     GetNotifications: Get "/notifications", Account, (), IdList, Empty => Json<Vec<Notification>>;
     ReadNotifications: Patch "/notifications", Account, (), IdList, Empty => Empty;
     DeleteNotifications: Delete "/notifications", Account, (), IdList, Empty => Empty;
+    /// The App's live link: friend presence, friend requests, notifications and shared instance
+    /// changes. Upstream calls it `/_internal/launcher_socket`.
     FriendsSocket: Get "/launcher_socket", Account, (), SocketCode, Empty => Upgrade<FriendsSocketMessage, ClientToServerMessage>;
 }
 
@@ -521,8 +445,5 @@ pub(crate) fn ts() -> String {
     ]
     .map(|declaration| format!("\nexport {declaration}\n"))
     .concat();
-    format!(
-        "{declarations}\n/** The backend's social routes, in labrinth's shapes. */\nexport const social = {{\n{}}}\n",
-        endpoint_entries()
-    )
+    declarations + &ts_module().ts(false)
 }

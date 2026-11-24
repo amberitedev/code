@@ -9,7 +9,7 @@ use crate::ReleaseChannel;
 
 /// A server on a Core.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct CoreServer {
     pub id: String,
     pub name: String,
@@ -39,7 +39,7 @@ pub struct CoreServer {
 
 /// Where players join a server.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ServerNet {
     /// With `port`, where players join from the internet: the router's address when it forwarded
     /// another port than the game port, otherwise the Core's.
@@ -52,7 +52,7 @@ pub struct ServerNet {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct JoinAddress {
     pub ip: String,
     pub port: u16,
@@ -61,7 +61,7 @@ pub struct JoinAddress {
 /// Where a server is in its run, or how its last run ended: `offline` (stopped or never run),
 /// `crashed` or `killed`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum ServerPower {
     Offline,
@@ -74,7 +74,7 @@ pub enum ServerPower {
 
 /// The App instance a server follows.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct LinkedInstance {
     /// The App's id for the instance.
     pub id: String,
@@ -88,7 +88,7 @@ pub struct LinkedInstance {
 
 /// Where a linked server is with the newest version pushed to it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum LinkedPackState {
     UpToDate,
@@ -100,14 +100,14 @@ pub enum LinkedPackState {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct NewServer {
     /// 1 to 64 characters.
     pub name: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ServerUpdate {
     /// 1 to 64 characters, trimmed.
     pub name: Option<String>,
@@ -115,7 +115,7 @@ pub struct ServerUpdate {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum PowerAction {
     Start,
@@ -125,14 +125,14 @@ pub enum PowerAction {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct PowerChange {
     pub action: PowerAction,
 }
 
 /// A loader to install on a stopped server. Packs install through the content routes.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct LoaderInstall {
     /// As [`CoreServer::loader`] names it.
     pub loader: String,
@@ -143,7 +143,7 @@ pub struct LoaderInstall {
 
 /// Body of `ShareServer`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct SharePush {
     /// Files to send with this version. Files sent earlier stay shared while the server has
     /// them, unless they are in `removed_paths`.
@@ -154,7 +154,7 @@ pub struct SharePush {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct SharedServer {
     pub shared_instance_id: String,
     pub version: Option<i32>,
@@ -163,7 +163,7 @@ pub struct SharedServer {
 
 /// Body of `FollowInstance`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct InstanceFollow {
     pub instance: FollowedInstance,
     /// The instance's share, whose latest version the server applies.
@@ -177,7 +177,7 @@ pub struct InstanceFollow {
 
 /// The App instance a server follows, as the App names it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct FollowedInstance {
     pub id: String,
     pub name: String,
@@ -185,7 +185,7 @@ pub struct FollowedInstance {
 
 /// How a server starts, and what it shares.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ServerSetup {
     /// The Java major it runs. Null until installed.
     pub java_version: Option<u32>,
@@ -201,7 +201,7 @@ pub struct ServerSetup {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct JavaMajor {
     /// A Java major the Core installs (8, 11, 17, 21 or 25), or null for the one the Minecraft
     /// version needs.
@@ -210,21 +210,21 @@ pub struct JavaMajor {
 
 /// Every key of a server's `server.properties`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ServerProperties {
     pub properties: BTreeMap<String, String>,
 }
 
 /// Used from the server's next start.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct PropertiesUpdate {
     /// Null removes the key.
     pub properties: BTreeMap<String, Option<String>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ServerBackups {
     pub backups: Vec<ServerBackup>,
     pub schedule: BackupSchedule,
@@ -234,7 +234,7 @@ pub struct ServerBackups {
 
 /// A server has `slots` backup slots: `keep` for scheduled backups, the rest for manual ones.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct BackupSchedule {
     pub interval_hours: u32,
     pub keep: u32,
@@ -242,7 +242,7 @@ pub struct BackupSchedule {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ServerBackup {
     pub id: String,
     pub name: String,
@@ -257,7 +257,7 @@ pub struct ServerBackup {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum BackupState {
     Queued,
@@ -267,7 +267,7 @@ pub enum BackupState {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum BackupKind {
     Manual,
@@ -278,7 +278,7 @@ pub enum BackupKind {
 
 /// Making a backup or restoring it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct BackupOperation {
     pub id: i64,
     pub kind: OperationKind,
@@ -295,7 +295,7 @@ pub struct BackupOperation {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum OperationKind {
     Create,
@@ -303,7 +303,7 @@ pub enum OperationKind {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum OperationState {
     Queued,
@@ -314,33 +314,33 @@ pub enum OperationState {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct NewBackup {
     /// 1 to 64 characters.
     pub name: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct CreatedBackup {
     pub id: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct BackupUpdate {
     pub name: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct BackupIds {
     pub ids: Vec<String>,
 }
 
 /// What is given changes; the rest stays.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ScheduleUpdate {
     /// Hourly at most, every 744 hours at least.
     pub interval_hours: Option<u32>,
@@ -352,7 +352,7 @@ pub struct ScheduleUpdate {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ScheduleChange {
     pub applied: bool,
     /// The scheduled backups the change deletes, or deleted once applied.
@@ -360,7 +360,7 @@ pub struct ScheduleChange {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct BackupRef {
     /// The server.
     pub id: String,
@@ -368,7 +368,7 @@ pub struct BackupRef {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct OperationRef {
     /// The server.
     pub id: String,

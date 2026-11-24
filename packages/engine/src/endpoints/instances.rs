@@ -2,7 +2,6 @@ use anyhow::Context;
 use contracts::{Empty, Json};
 use serde::{Deserialize, Serialize};
 
-use super::endpoints;
 use crate::{
     ErrorKind,
     state::{
@@ -17,20 +16,22 @@ use crate::{
     },
 };
 
-endpoints! {
+contracts::endpoints! {
+    group instances;
+
     /// Every instance the caller may view.
-    ListInstances: Get "/instances", (), (), Empty => Json<Vec<Instance>>;
+    ListInstances: Get "/instances", Session, (), (), Empty => Json<Vec<Instance>>;
     /// The instances among `ids` that exist and the caller may view.
-    GetInstances: Get "/instances/many", (), InstanceIds, Empty => Json<Vec<Instance>>;
+    GetInstances: Get "/instances/many", Session, (), InstanceIds, Empty => Json<Vec<Instance>>;
     /// `null` when there is no such instance.
-    GetInstance: Get "/instances/{id}", InstanceRef, (), Empty => Json<Option<Instance>>;
+    GetInstance: Get "/instances/{id}", Session, InstanceRef, (), Empty => Json<Option<Instance>>;
     /// Deletes the instance and its folder.
-    RemoveInstance: Delete "/instances/{id}", InstanceRef, (), Empty => Empty;
-    EditInstance: Patch "/instances/{id}", InstanceRef, (), Json<InstanceUpdate> => Empty;
+    RemoveInstance: Delete "/instances/{id}", Session, InstanceRef, (), Empty => Empty;
+    EditInstance: Patch "/instances/{id}", Session, InstanceRef, (), Json<InstanceUpdate> => Empty;
     /// Stops the instance's running game.
-    KillInstance: Post "/instances/{id}/kill", InstanceRef, (), Empty => Empty;
+    KillInstance: Post "/instances/{id}/kill", Session, InstanceRef, (), Empty => Empty;
     /// The installed Java that suits the instance's game version, if any.
-    GetOptimalJava: Get "/instances/{id}/java", InstanceRef, (), Empty => Json<Option<JavaVersion>>;
+    GetOptimalJava: Get "/instances/{id}/java", Session, InstanceRef, (), Empty => Json<Option<JavaVersion>>;
 }
 
 #[derive(Serialize, Deserialize)]

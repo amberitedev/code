@@ -2,8 +2,11 @@ use crate::synced_options::state::{CanonicalValue, GameOptionKind};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "GameOptionsSourceDisabledReason"))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "export-ts",
+    ts(rename = "GameOptionsSourceDisabledReason")
+)]
 #[serde(rename_all = "snake_case")]
 pub enum GameOptionsSourceIssue {
     InstallingOrUpdating,
@@ -14,7 +17,7 @@ pub enum GameOptionsSourceIssue {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct GameOptionsSourceCandidate {
     pub source_id: String,
     pub instance_id: String,
@@ -28,19 +31,19 @@ pub struct GameOptionsSourceCandidate {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct GameSettingCategory {
     pub id: String,
     pub is_custom: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "GameOptionEditor"))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", ts(rename = "GameOptionEditor"))]
 pub struct GameOptionEditorDefinition {
     #[serde(rename = "type")]
     #[cfg_attr(
-        test,
+        feature = "export-ts",
         ts(
             type = "\"bool\" | \"integer\" | \"decimal\" | \"enum\" | \"text\" | \"string_list\" | \"key_binding\" | \"external_raw\""
         )
@@ -54,13 +57,13 @@ pub struct GameOptionEditorDefinition {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct GameOptionEditorChoice {
     pub value: String,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum GameOptionCompatibilityStatus {
     Ready,
@@ -76,7 +79,7 @@ pub enum GameOptionCompatibilityStatus {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum GameOptionMappingKind {
     Direct,
@@ -87,7 +90,7 @@ pub enum GameOptionMappingKind {
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum GameOptionCompatibilityReason {
     LauncherControlled,
@@ -101,7 +104,7 @@ pub enum GameOptionCompatibilityReason {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct GameOptionCompatibilityBucket {
     pub instance_count: u32,
     pub write_keys: Vec<String>,
@@ -113,8 +116,11 @@ pub struct GameOptionCompatibilityBucket {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "GameOptionCompatibilitySummary"))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "export-ts",
+    ts(rename = "GameOptionCompatibilitySummary")
+)]
 pub struct GameOptionCompatibility {
     pub total_participating: u32,
     pub will_receive: u32,
@@ -124,7 +130,7 @@ pub struct GameOptionCompatibility {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum GameOptionValueState {
     Canonical,
@@ -135,8 +141,8 @@ pub enum GameOptionValueState {
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "GameOptionValidationError"))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", ts(rename = "GameOptionValidationError"))]
 #[serde(rename_all = "snake_case")]
 pub enum GameOptionValidationIssue {
     MissingValue,
@@ -146,7 +152,7 @@ pub enum GameOptionValidationIssue {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct EditableGameSetting {
     pub option_id: String,
     pub category_id: String,
@@ -163,7 +169,7 @@ pub struct EditableGameSetting {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct GameSettingsEditorState {
     pub summary_revision: String,
     pub canonical_revision: u64,
@@ -174,7 +180,7 @@ pub struct GameSettingsEditorState {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct UpdateGameSettingsRequest {
     pub expected_summary_revision: String,
     pub expected_canonical_revision: u64,
@@ -183,13 +189,16 @@ pub struct UpdateGameSettingsRequest {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct GameSettingChange {
     pub option_id: String,
     pub base_option_revision: u64,
-    #[cfg_attr(test, ts(optional))]
+    #[cfg_attr(feature = "export-ts", ts(optional))]
     pub sync_enabled: Option<bool>,
-    #[cfg_attr(test, ts(as = "Option<Option<CanonicalValue>>", optional))]
+    #[cfg_attr(
+        feature = "export-ts",
+        ts(as = "Option<Option<CanonicalValue>>", optional)
+    )]
     #[serde(
         default,
         with = "serde_with::rust::double_option",
@@ -199,7 +208,7 @@ pub struct GameSettingChange {
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct SaveGameSettingsResult {
     pub state: Option<GameSettingsEditorState>,
     pub applied: u32,

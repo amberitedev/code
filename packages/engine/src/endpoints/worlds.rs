@@ -1,7 +1,7 @@
 use contracts::{Empty, Json};
 use serde::{Deserialize, Serialize};
 
-use super::{endpoints, instances::InstanceRef};
+use super::instances::InstanceRef;
 use crate::{
     server_list::DesyncServerMode,
     worlds::{
@@ -10,28 +10,30 @@ use crate::{
     },
 };
 
-endpoints! {
+contracts::endpoints! {
+    group worlds;
+
     /// The most recently played worlds across every instance, newest first.
-    ListRecentWorlds: Get "/worlds/recent", (), RecentWorldsQuery, Empty => Json<Vec<WorldWithInstance>>;
+    ListRecentWorlds: Get "/worlds/recent", Session, (), RecentWorldsQuery, Empty => Json<Vec<WorldWithInstance>>;
     /// Pings a Minecraft server.
-    GetServerStatus: Get "/server-status", (), ServerStatusQuery, Empty => Json<ServerStatus>;
+    GetServerStatus: Get "/server-status", Session, (), ServerStatusQuery, Empty => Json<ServerStatus>;
     /// The instance's singleplayer worlds and servers.
-    ListInstanceWorlds: Get "/instances/{id}/worlds", InstanceRef, (), Empty => Json<Vec<World>>;
-    SetWorldDisplayStatus: Put "/instances/{id}/worlds/display-status", InstanceRef, (), Json<WorldDisplayStatusUpdate> => Empty;
+    ListInstanceWorlds: Get "/instances/{id}/worlds", Session, InstanceRef, (), Empty => Json<Vec<World>>;
+    SetWorldDisplayStatus: Put "/instances/{id}/worlds/display-status", Session, InstanceRef, (), Json<WorldDisplayStatusUpdate> => Empty;
     /// `null` until the instance is installed.
-    GetInstanceProtocolVersion: Get "/instances/{id}/protocol-version", InstanceRef, (), Empty => Json<Option<ProtocolVersion>>;
-    GetSingleplayerWorld: Get "/instances/{id}/saves/{world}", WorldSaveRef, (), Empty => Json<World>;
-    DeleteWorld: Delete "/instances/{id}/saves/{world}", WorldSaveRef, (), Empty => Empty;
-    RenameWorld: Put "/instances/{id}/saves/{world}/name", WorldSaveRef, (), Json<WorldRename> => Empty;
-    ResetWorldIcon: Delete "/instances/{id}/saves/{world}/icon", WorldSaveRef, (), Empty => Empty;
+    GetInstanceProtocolVersion: Get "/instances/{id}/protocol-version", Session, InstanceRef, (), Empty => Json<Option<ProtocolVersion>>;
+    GetSingleplayerWorld: Get "/instances/{id}/saves/{world}", Session, WorldSaveRef, (), Empty => Json<World>;
+    DeleteWorld: Delete "/instances/{id}/saves/{world}", Session, WorldSaveRef, (), Empty => Empty;
+    RenameWorld: Put "/instances/{id}/saves/{world}/name", Session, WorldSaveRef, (), Json<WorldRename> => Empty;
+    ResetWorldIcon: Delete "/instances/{id}/saves/{world}/icon", Session, WorldSaveRef, (), Empty => Empty;
     /// Zips the world into the instance's `backups` folder and returns the archive's size.
-    BackupWorld: Post "/instances/{id}/saves/{world}/backups", WorldSaveRef, (), Empty => Json<u64>;
+    BackupWorld: Post "/instances/{id}/saves/{world}/backups", Session, WorldSaveRef, (), Empty => Json<u64>;
     /// Returns the new server's index.
-    AddInstanceServer: Post "/instances/{id}/servers", InstanceRef, (), Json<NewInstanceServer> => Json<usize>;
-    EnsureManagedInstanceServer: Put "/instances/{id}/servers/managed", InstanceRef, (), Json<ManagedInstanceServer> => Empty;
-    DesyncInstanceServer: Post "/instances/{id}/servers/desync", InstanceRef, (), Json<InstanceServerDesync> => Empty;
-    EditInstanceServer: Put "/instances/{id}/servers/{index}", InstanceServerRef, (), Json<InstanceServerUpdate> => Empty;
-    RemoveInstanceServer: Delete "/instances/{id}/servers/{index}", InstanceServerRef, (), Empty => Empty;
+    AddInstanceServer: Post "/instances/{id}/servers", Session, InstanceRef, (), Json<NewInstanceServer> => Json<usize>;
+    EnsureManagedInstanceServer: Put "/instances/{id}/servers/managed", Session, InstanceRef, (), Json<ManagedInstanceServer> => Empty;
+    DesyncInstanceServer: Post "/instances/{id}/servers/desync", Session, InstanceRef, (), Json<InstanceServerDesync> => Empty;
+    EditInstanceServer: Put "/instances/{id}/servers/{index}", Session, InstanceServerRef, (), Json<InstanceServerUpdate> => Empty;
+    RemoveInstanceServer: Delete "/instances/{id}/servers/{index}", Session, InstanceServerRef, (), Empty => Empty;
 }
 
 #[derive(Serialize, Deserialize)]

@@ -119,7 +119,7 @@ zbus = { workspace = true }
 zip = { workspace = true }
 
 [dev-dependencies]
-contracts = { workspace = true, features = ["ts"] }
+contracts = { workspace = true, features = ["export-ts"] }
 # Turns `export-ts` on for the engine's own tests, which write its TypeScript.
 engine = { path = ".", features = ["export-ts"] }
 http-body-util = "0.1.3"
@@ -142,7 +142,7 @@ winreg = { workspace = true }
 
 [features]
 export-ts = [
-  "contracts/ts",
+  "contracts/export-ts",
   "dep:ts-rs",
   "minecraft-meta-manifest/ts",
   "modrinth-content-management/ts",

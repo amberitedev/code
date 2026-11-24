@@ -1,13 +1,7 @@
-use contracts::{Auth, Empty, Endpoint, Method};
+use contracts::Empty;
 
-pub struct CheckHealth;
+contracts::endpoints! {
+    group health;
 
-impl Endpoint for CheckHealth {
-    const METHOD: Method = Method::Get;
-    const PATH: &'static str = "/health";
-    const AUTH: Auth = Auth::None;
-    type Params = ();
-    type Query = ();
-    type Body = Empty;
-    type Response = Empty;
+    CheckHealth: Get "/health", None, (), (), Empty => Empty;
 }

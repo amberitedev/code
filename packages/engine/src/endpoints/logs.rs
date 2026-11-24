@@ -1,17 +1,19 @@
 use contracts::{Empty, Json};
 use serde::{Deserialize, Serialize};
 
-use super::{endpoints, instances::InstanceRef};
+use super::instances::InstanceRef;
 use crate::logs::{CensoredString, LogType, Logs};
 
-endpoints! {
+contracts::endpoints! {
+    group logs;
+
     /// The instance's log files and crash reports, newest first.
-    ListInstanceLogs: Get "/instances/{id}/logs", InstanceRef, LogListing, Empty => Json<Vec<Logs>>;
-    GetInstanceLogOutput: Get "/instances/{id}/logs/{log_type}/{filename}", LogFileRef, (), Empty => Json<CensoredString>;
-    DeleteInstanceLog: Delete "/instances/{id}/logs/{log_type}/{filename}", LogFileRef, (), Empty => Empty;
+    ListInstanceLogs: Get "/instances/{id}/logs", Session, InstanceRef, LogListing, Empty => Json<Vec<Logs>>;
+    GetInstanceLogOutput: Get "/instances/{id}/logs/{log_type}/{filename}", Session, LogFileRef, (), Empty => Json<CensoredString>;
+    DeleteInstanceLog: Delete "/instances/{id}/logs/{log_type}/{filename}", Session, LogFileRef, (), Empty => Empty;
     /// The running game's buffered output. Later lines arrive as `Log` events.
-    GetLiveLog: Get "/instances/{id}/live-log", InstanceRef, (), Empty => Json<CensoredString>;
-    ClearLiveLog: Delete "/instances/{id}/live-log", InstanceRef, (), Empty => Empty;
+    GetLiveLog: Get "/instances/{id}/live-log", Session, InstanceRef, (), Empty => Json<CensoredString>;
+    ClearLiveLog: Delete "/instances/{id}/live-log", Session, InstanceRef, (), Empty => Empty;
 }
 
 #[derive(Serialize, Deserialize)]

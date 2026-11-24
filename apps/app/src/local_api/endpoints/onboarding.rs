@@ -1,34 +1,18 @@
-use contracts::{Auth, Empty, Endpoint, Json, Method};
+use contracts::{Empty, Json};
 use engine::data::OnboardingChecklist;
 use serde::Serialize;
 
-pub struct GetOnboardingChecklist;
+contracts::endpoints! {
+    group onboarding;
 
-impl Endpoint for GetOnboardingChecklist {
-    const METHOD: Method = Method::Get;
-    const PATH: &'static str = "/app/onboarding/checklist";
-    const AUTH: Auth = Auth::None;
-    type Params = ();
-    type Query = ();
-    type Body = Empty;
-    type Response = Json<OnboardingProgress>;
-}
-
-/// Checks off creating an instance without creating one.
-pub struct SkipCreateInstanceOnboarding;
-
-impl Endpoint for SkipCreateInstanceOnboarding {
-    const METHOD: Method = Method::Post;
-    const PATH: &'static str = "/app/onboarding/checklist/skip-create-instance";
-    const AUTH: Auth = Auth::None;
-    type Params = ();
-    type Query = ();
-    type Body = Empty;
-    type Response = Empty;
+    GetOnboardingChecklist: Get "/app/onboarding/checklist", None, (), (), Empty => Json<OnboardingProgress>;
+    /// Checks off creating an instance without creating one.
+    SkipCreateInstanceOnboarding: Post "/app/onboarding/checklist/skip-create-instance", None, (), (), Empty => Empty;
 }
 
 #[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct OnboardingProgress(
-    #[cfg_attr(test, ts(type = "OnboardingChecklist"))] pub OnboardingChecklist,
+    #[cfg_attr(feature = "export-ts", ts(type = "OnboardingChecklist"))]
+    pub  OnboardingChecklist,
 );

@@ -1,6 +1,6 @@
 //! The protocol between the App, Cores, their stores and the backend. A shape is written once here
-//! and generated to TypeScript in `ts/contracts.ts`, which `cargo test -p contracts` keeps fresh.
-//! Regenerate it with `WRITE_TS=1 node scripts/dev-runner.ts test contracts`.
+//! and generated to TypeScript in `ts/protocol.ts`, `ts/backend.ts` and `ts/core.ts`, which
+//! `cargo test -p contracts` keeps fresh. Regenerate them with `WRITE_TS=1 node scripts/dev-runner.ts test contracts`.
 
 use std::marker::PhantomData;
 
@@ -21,7 +21,7 @@ pub mod server;
 mod side;
 pub mod store;
 pub mod tickets;
-#[cfg(feature = "ts")]
+#[cfg(feature = "export-ts")]
 pub mod ts;
 
 pub use error::{ApiError, ErrorCode};
@@ -33,7 +33,7 @@ pub use side::Side;
 pub const PROTOCOL_VERSION: u32 = 1;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "UPPERCASE")]
 pub enum Method {
     Get,
@@ -44,7 +44,7 @@ pub enum Method {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum Auth {
     None,
@@ -73,7 +73,7 @@ pub trait Endpoint {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum BodyKind {
     Json,
@@ -145,6 +145,80 @@ impl ResponseBody for Stream {
 
 impl<S, R> ResponseBody for Upgrade<S, R> {
     const KIND: BodyKind = BodyKind::Upgrade;
+}
+
+/// Declares routes: per line a unit struct and its [`Endpoint`], and with `export-ts` a
+/// `ts_module()` that gives them as the TypeScript object `group`. Every crate that declares
+/// routes uses this one form.
+///
+/// ```ignore
+/// contracts::endpoints! {
+///     /// The TypeScript object's doc.
+///     group core;
+///
+///     /// A route's doc.
+///     GetServer: Get "/servers/{id}", Session, ServerId, (), Empty => Json<CoreServer>;
+///     DeleteServer: Delete "/servers/{id}", Session, ServerId, (), Empty => Empty, dangerous;
+/// }
+/// ```
+///
+/// A line is `Name: Method "path", Auth, Params, Query, Body => Response`, then `dangerous` when
+/// the route needs a fresh ticket ([`Endpoint::DANGEROUS`]).
+#[macro_export]
+macro_rules! endpoints {
+    (@dangerous) => { false };
+    (@dangerous dangerous) => { true };
+    (
+        $(#[doc = $group_doc:literal])*
+        group $group:ident;
+        $(
+            $(#[doc = $doc:literal])*
+            $name:ident: $method:ident $path:literal, $auth:ident, $params:ty, $query:ty, $body:ty => $response:ty $(, $flag:ident)?;
+        )+
+    ) => {
+        $(
+            $(#[doc = $doc])*
+            pub struct $name;
+
+            impl $crate::Endpoint for $name {
+                const METHOD: $crate::Method = $crate::Method::$method;
+                const PATH: &'static str = $path;
+                const AUTH: $crate::Auth = $crate::Auth::$auth;
+                const DANGEROUS: bool = $crate::endpoints!(@dangerous $($flag)?);
+                type Params = $params;
+                type Query = $query;
+                type Body = $body;
+                type Response = $response;
+            }
+        )+
+
+        /// These routes' TypeScript object.
+        #[cfg(feature = "export-ts")]
+        pub fn ts_module() -> $crate::ts::Module {
+            $crate::ts::Module {
+                name: stringify!($group),
+                docs: &[$($group_doc),*],
+                endpoints: vec![$((stringify!($name), $crate::ts::endpoint::<$name>())),+],
+            }
+        }
+
+        /// Each route's name, method and path, and whether it needs a fresh ticket.
+        pub const ROUTES: &[$crate::Route] = &[$($crate::Route {
+            name: stringify!($name),
+            method: $crate::Method::$method,
+            path: $path,
+            dangerous: $crate::endpoints!(@dangerous $($flag)?),
+        }),+];
+    };
+}
+
+/// One route of an [`endpoints!`] group, for tests that walk every route.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Route {
+    pub name: &'static str,
+    pub method: Method,
+    pub path: &'static str,
+    pub dangerous: bool,
 }
 
 /// Declares documented `pub const`s and, for the tests, their TypeScript.

@@ -2,7 +2,6 @@ use contracts::{Empty, Json, backend::sharing::UserIds};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    endpoints,
     install::{SharedInstanceInviteRef, SharedInstanceRef},
     instances::{InstanceRef, SharedInstanceAttachment},
 };
@@ -11,28 +10,30 @@ use crate::instance::{
     SharedInstancePublishPreview, SharedInstanceUsers,
 };
 
-endpoints! {
+contracts::endpoints! {
+    group instanceSharing;
+
     /// Empty when the instance has no share.
-    GetSharedInstanceUsers: Get "/instances/{id}/shared/users", InstanceRef, (), Empty => Json<SharedInstanceUsers>;
-    InviteSharedInstanceUsers: Post "/instances/{id}/shared/users", InstanceRef, (), Json<UserIds> => Json<SharedInstanceUsers>;
-    RemoveSharedInstanceUsers: Post "/instances/{id}/shared/users/remove", InstanceRef, (), Json<SharedUsersRemoval> => Json<SharedInstanceUsers>;
-    ListSharedInstanceInvites: Get "/instances/{id}/shared/invites", InstanceRef, (), Empty => Json<Vec<SharedInstanceInvite>>;
-    CreateSharedInstanceInviteLink: Post "/instances/{id}/shared/invites", InstanceRef, (), Json<NewSharedInviteLink> => Json<SharedInstanceInviteLink>;
-    RevokeSharedInstanceInvite: Delete "/instances/{id}/shared/invites/{invite_id}", SharedInstanceInviteRef, (), Empty => Empty;
+    GetSharedInstanceUsers: Get "/instances/{id}/shared/users", Session, InstanceRef, (), Empty => Json<SharedInstanceUsers>;
+    InviteSharedInstanceUsers: Post "/instances/{id}/shared/users", Session, InstanceRef, (), Json<UserIds> => Json<SharedInstanceUsers>;
+    RemoveSharedInstanceUsers: Post "/instances/{id}/shared/users/remove", Session, InstanceRef, (), Json<SharedUsersRemoval> => Json<SharedInstanceUsers>;
+    ListSharedInstanceInvites: Get "/instances/{id}/shared/invites", Session, InstanceRef, (), Empty => Json<Vec<SharedInstanceInvite>>;
+    CreateSharedInstanceInviteLink: Post "/instances/{id}/shared/invites", Session, InstanceRef, (), Json<NewSharedInviteLink> => Json<SharedInstanceInviteLink>;
+    RevokeSharedInstanceInvite: Delete "/instances/{id}/shared/invites/{invite_id}", Session, SharedInstanceInviteRef, (), Empty => Empty;
     /// `null` when the instance has no share.
-    GetSharedInstancePublishPreview: Get "/instances/{id}/shared/publish-preview", InstanceRef, (), Empty => Json<Option<SharedInstancePublishPreview>>;
+    GetSharedInstancePublishPreview: Get "/instances/{id}/shared/publish-preview", Session, InstanceRef, (), Empty => Json<Option<SharedInstancePublishPreview>>;
     /// A plain-text report of the instance's last publish, for a support request.
-    GetSharedInstancePublishSupportDetails: Get "/instances/{id}/shared/publish-support-details", InstanceRef, (), Empty => Json<Option<String>>;
+    GetSharedInstancePublishSupportDetails: Get "/instances/{id}/shared/publish-support-details", Session, InstanceRef, (), Empty => Json<Option<String>>;
     /// The instance's share, created with its first version when it has none.
-    EnsureSharedInstance: Put "/instances/{id}/shared", InstanceRef, (), Empty => Json<SharedInstanceAttachment>;
+    EnsureSharedInstance: Put "/instances/{id}/shared", Session, InstanceRef, (), Empty => Json<SharedInstanceAttachment>;
     /// Deletes the share for everyone.
-    UnpublishSharedInstance: Delete "/instances/{id}/shared", InstanceRef, (), Empty => Empty;
+    UnpublishSharedInstance: Delete "/instances/{id}/shared", Session, InstanceRef, (), Empty => Empty;
     /// Detaches the instance from its share and keeps its files.
-    UnlinkSharedInstance: Post "/instances/{id}/shared/unlink", InstanceRef, (), Empty => Empty;
-    DismissSharedInstanceRestoredNotice: Delete "/instances/{id}/shared/restored-notice", InstanceRef, (), Empty => Empty;
+    UnlinkSharedInstance: Post "/instances/{id}/shared/unlink", Session, InstanceRef, (), Empty => Empty;
+    DismissSharedInstanceRestoredNotice: Delete "/instances/{id}/shared/restored-notice", Session, InstanceRef, (), Empty => Empty;
     /// Deletes a share the caller owns but has no instance of.
-    UnpublishRemoteSharedInstance: Delete "/shared-instances/{id}", SharedInstanceRef, (), Empty => Empty;
-    LeaveRemoteSharedInstance: Post "/shared-instances/{id}/leave", SharedInstanceRef, (), Empty => Empty;
+    UnpublishRemoteSharedInstance: Delete "/shared-instances/{id}", Session, SharedInstanceRef, (), Empty => Empty;
+    LeaveRemoteSharedInstance: Post "/shared-instances/{id}/leave", Session, SharedInstanceRef, (), Empty => Empty;
 }
 
 #[derive(Serialize, Deserialize)]
