@@ -1,14 +1,11 @@
 import { type CoreSession, core as coreRoutes, cores, type ListedCore } from '@amberite/contracts'
 
 import { ApiCallError } from '../contracts/errors'
-import { AbstractModule } from '../core/abstract-module'
-import { ModrinthApiError } from '../core/errors'
+import type { AbstractModrinthClient } from '../core/abstract-client'
 import { archonServer } from '../core-hosting/servers-v0'
 import type { Archon } from '../modules/archon/types'
 import type { CoreCallError, CoreSessions } from '../types/client'
-import type { RequestOptions } from '../types/request'
 
-const SERVER_ID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
 /** How long a Core's local address may take to answer before its internet address is used. */
 const LOCAL_ANSWER_MS = 2500
 /** How long the Core list is kept after an unreachable Core last caused it to be fetched again. */
@@ -27,10 +24,9 @@ type Route = { base: string; address: string }
  * one: their servers form one list, and a request for a server is sent to the Core that has it.
  *
  * The App never contacts a Core before it is listed. Fetch the list again with `list` after it
- * changes, such as when a Core is approved. It is `client.archon.cores_v1` because `packages/ui`
- * and the archon modules reach Cores through it.
+ * changes, such as when a Core is approved.
  */
-export class ArchonCoresV1Module extends AbstractModule {
+export class Cores {
 	private cores: Promise<ListedCore[]> | null = null
 	/** When the list was last dropped because a Core did not answer. See `servers`. */
 	private droppedAfterFailureAt = 0
@@ -43,9 +39,7 @@ export class ArchonCoresV1Module extends AbstractModule {
 	/** Sign-ins in flight, by Core id, so requests that fail together sign in once. */
 	private signingIn = new Map<string, Promise<CoreSession>>()
 
-	public getModuleID(): string {
-		return 'archon_cores_v1'
-	}
+	constructor(private readonly client: AbstractModrinthClient) {}
 
 	/**
 	 * Fetch the account's Cores from the backend. A Core whose route cannot be worked out keeps its
@@ -117,7 +111,7 @@ export class ArchonCoresV1Module extends AbstractModule {
 	/**
 	 * Sign this device in to `core` with a fresh ticket, replacing any session it held. The
 	 * platform trades the ticket with the Core for a session of its own and adds it to every
-	 * request to the Core; the page never sees it. Throws a `ModrinthApiError` with Core's error,
+	 * request to the Core; the page never sees it. Throws an `ApiCallError` with Core's error,
 	 * such as `clock_wrong`.
 	 */
 	public signIn(core: ListedCore): Promise<CoreSession> {
@@ -126,7 +120,7 @@ export class ArchonCoresV1Module extends AbstractModule {
 		const signing = (async () => {
 			const fingerprint = core.cert_fingerprint
 			if (!fingerprint)
-				throw new ModrinthApiError('This Core does not serve HTTPS yet', { statusCode: 400 })
+				throw new ApiCallError(400, 'unsupported', 'This Core does not serve HTTPS yet')
 			const ticket = await this.ticket(core.id)
 			return this.sessions()
 				.signIn(core.id, this.address(core), fingerprint, ticket)
@@ -154,17 +148,16 @@ export class ArchonCoresV1Module extends AbstractModule {
 	/** The listed Core with this id. */
 	public async core(coreId: string): Promise<ListedCore> {
 		const core = (await this.known()).find((candidate) => candidate.id === coreId)
-		if (!core) throw new ModrinthApiError('This Core is not listed', { statusCode: 404 })
+		if (!core) throw new ApiCallError(404, 'not_found', 'This Core is not listed')
 		return core
 	}
 
-	/** The listed Core that has `serverId`. */
+	/** The listed Core that has `serverId`. Throws `not_found` when no Core that answers has it. */
 	public async coreOf(serverId: string): Promise<ListedCore> {
-		const cores = await this.known()
-		if (cores.length > 1 && !this.serverCores.has(serverId)) await this.servers()
-		const coreId = this.serverCores.get(serverId) ?? cores[0]?.id
-		const core = cores.find((candidate) => candidate.id === coreId)
-		if (!core) throw new ModrinthApiError('No Core is signed in', { statusCode: 404 })
+		if (!this.serverCores.has(serverId)) await this.servers()
+		const coreId = this.serverCores.get(serverId)
+		const core = (await this.known()).find((candidate) => candidate.id === coreId)
+		if (!core) throw new ApiCallError(404, 'not_found', 'No listed Core has this server')
 		return core
 	}
 
@@ -189,31 +182,16 @@ export class ArchonCoresV1Module extends AbstractModule {
 	public joinNet(server: Pick<Archon.Servers.v0.Server, 'server_id' | 'net'>) {
 		const { net } = server
 		if (net.game_port === undefined) return net
-		const coreId = this.serverCores.get(server.server_id) ?? this.listed[0]?.id
+		const coreId = this.serverCores.get(server.server_id)
 		const core = this.listed.find((candidate) => candidate.id === coreId)
 		if (!core || this.address(core) !== core.address) return net
 		const ip = new URL(core.address).hostname.replace(/^\[|\]$/g, '')
 		return { ...net, ip, port: net.game_port }
 	}
 
-	/** The hosting API base URL for a request: the Core that has the server the request names. */
-	public async hostingUrl(
-		path: string,
-		params?: RequestOptions['params'],
-		version?: RequestOptions['version'],
-	): Promise<string> {
-		const cores = await this.known()
-		if (!cores.length) throw new ModrinthApiError('No Core is signed in', { statusCode: 404 })
-		// Uploads carry the server id in the version segment (`servers/<id>/v1`), not the path.
-		const serverId =
-			cores.length > 1 &&
-			`${version ?? ''} ${path} ${JSON.stringify(params ?? {})}`.match(SERVER_ID)
-		if (serverId) {
-			if (!this.serverCores.has(serverId[0])) await this.servers()
-			const core = cores.find((candidate) => candidate.id === this.serverCores.get(serverId[0]))
-			if (core) return this.base(core)
-		}
-		return this.base(cores[0])
+	/** The base URL requests to the Core that has `serverId` go to. */
+	public async serverUrl(serverId: string): Promise<string> {
+		return this.base(await this.coreOf(serverId))
 	}
 
 	/**
@@ -326,15 +304,11 @@ export class ArchonCoresV1Module extends AbstractModule {
 	}
 }
 
-/** A platform sign-in failure as the error a Core request would have thrown. */
-function coreError(error: unknown): ModrinthApiError {
-	if (error instanceof ModrinthApiError) return error
-	if (isCoreCallError(error))
-		return new ModrinthApiError(error.description, {
-			statusCode: error.status ?? undefined,
-			responseData: { error: error.error, description: error.description },
-		})
-	return ModrinthApiError.fromUnknown(error)
+/** A platform sign-in failure as the error a Core call would have thrown. */
+function coreError(error: unknown): unknown {
+	return isCoreCallError(error)
+		? new ApiCallError(error.status ?? 0, error.error, error.description)
+		: error
 }
 
 function isCoreCallError(error: unknown): error is CoreCallError {

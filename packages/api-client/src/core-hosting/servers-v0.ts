@@ -110,8 +110,8 @@ export function sameCommand(command: string | null | undefined, current: string)
 }
 
 export function serversV0(client: AbstractModrinthClient): Adapter<ArchonServersV0Module> {
-	const cores = client.archon.cores_v1
-	const base = (serverId: string) => cores.hostingUrl(`/servers/${serverId}`)
+	const cores = client.cores
+	const base = (serverId: string) => cores.serverUrl(serverId)
 	return {
 		async get(serverId) {
 			const routes = await coreOf(client, serverId)

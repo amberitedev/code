@@ -4,7 +4,10 @@ import { localBase, localTransport } from '@/platform/local'
 
 let boot: Boot | undefined
 
-/** `main.js` awaits this before anything else loads, so the readers below can stay synchronous. */
+/**
+ * `main.js` awaits this before anything else loads, so the readers below can stay synchronous.
+ * It cannot use `apiClient.local`: the client is built from the config the boot completes.
+ */
 export async function loadBoot(): Promise<Boot> {
 	if (!localBase) {
 		throw new Error(

@@ -1,8 +1,8 @@
-import { ContractClient, events as eventRoutes, type LocalEvent } from '@modrinth/api-client'
+import { events as eventRoutes, type LocalEvent } from '@modrinth/api-client'
 import { useQueryClient } from '@tanstack/vue-query'
 import { onScopeDispose } from 'vue'
 
-import { localTransport } from '@/platform/local'
+import { apiClient } from '@/platform/modrinth-client'
 import { dispatchOpEvent } from '@/platform/ops'
 import {
 	type AppEventHandler,
@@ -62,9 +62,7 @@ export function setupAppEventsProvider() {
 		}
 	}
 
-	const url = new ContractClient(localTransport)
-		.url(eventRoutes.eventSocket, null)
-		.replace(/^http/, 'ws')
+	const url = apiClient.local.url(eventRoutes.eventSocket).replace(/^http/, 'ws')
 	let socket: WebSocket | undefined
 	let disposed = false
 

@@ -29,10 +29,9 @@ function parseResponseBody(body: string): unknown {
  */
 export abstract class XHRUploadClient extends AbstractModrinthClient {
 	upload<T = void>(path: string, options: UploadRequestOptions): UploadHandle<T> {
-		// Resolved inside the upload, because a self-hosted Core's address is only known
-		// asynchronously: an upload must reach the same Core as every other hosting request.
+		// Resolved inside the upload, so an `api` with no base URL rejects its promise.
 		const resolveUrl = async () =>
-			this.buildUrl(path, await this.resolveApiBaseUrl(path, options), options.version)
+			this.buildUrl(path, await this.resolveApiBaseUrl(options), options.version)
 
 		const progressCallbacks: Array<(p: UploadProgress) => void> = []
 		if (options.onProgress) {

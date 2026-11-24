@@ -1,5 +1,5 @@
 import {
-	ContractClient,
+	type CallOptions,
 	type ExternalSave,
 	type ExtractDryRunResult,
 	type InstanceFileItem,
@@ -9,10 +9,8 @@ import {
 	ops,
 } from '@modrinth/api-client'
 
-import { localTransport } from '@/platform/local'
+import { apiClient } from '@/platform/modrinth-client'
 import { type OpEnd, runOp } from '@/platform/ops'
-
-const local = new ContractClient(localTransport)
 
 export interface ExternalFileProgress {
 	stage: 'waiting' | 'downloading' | 'saving'
@@ -31,7 +29,7 @@ export function saveExternal(
 ): Promise<OpEnd> {
 	return runOp(
 		save.op,
-		() => local.call(ops.saveExternalFile, { body: save }),
+		() => apiClient.local.call(ops.saveExternalFile, { body: save }),
 		({ stage, done, total }) =>
 			onProgress({
 				stage: stage === 'downloading' || stage === 'saving' ? stage : 'waiting',
@@ -47,22 +45,22 @@ export function uploadLocal(
 ): Promise<OpEnd> {
 	return runOp(
 		upload.op,
-		() => local.call(ops.uploadLocalFile, { body: upload }),
+		() => apiClient.local.call(ops.uploadLocalFile, { body: upload }),
 		({ done, total }) => onProgress({ loaded: done, total: total ?? done }),
 	)
 }
 
 export function saveInstanceFileAs(save: InstanceFileSave): Promise<OpEnd> {
-	return runOp(save.op, () => local.call(ops.saveInstanceFileAs, { body: save }))
+	return runOp(save.op, () => apiClient.local.call(ops.saveInstanceFileAs, { body: save }))
 }
 
 /** Paths are inside the instance's folder; `""` lists the folder itself. */
 export function listInstanceFiles(id: string, path: string): Promise<InstanceFileItem[]> {
-	return local.call(instanceFiles.ListInstanceFiles, { params: { id }, query: { path } })
+	return apiClient.local.call(instanceFiles.ListInstanceFiles, { params: { id }, query: { path } })
 }
 
 export function readInstanceFile(id: string, path: string): Promise<Blob> {
-	return local.call(instanceFiles.ReadInstanceFile, { params: { id }, query: { path } })
+	return apiClient.local.call(instanceFiles.ReadInstanceFile, { params: { id }, query: { path } })
 }
 
 export function writeInstanceFile(
@@ -70,27 +68,31 @@ export function writeInstanceFile(
 	path: string,
 	contents: Blob,
 	createOnly = false,
+	options?: CallOptions,
 ): Promise<void> {
-	return local.call(instanceFiles.WriteInstanceFile, {
-		params: { id },
-		query: { path, create_only: createOnly },
-		body: contents,
-	})
+	return apiClient.local.call(
+		instanceFiles.WriteInstanceFile,
+		{ params: { id }, query: { path, create_only: createOnly }, body: contents },
+		options,
+	)
 }
 
 export function createInstanceDirectory(id: string, path: string): Promise<void> {
-	return local.call(instanceFiles.CreateInstanceDirectory, { params: { id }, query: { path } })
+	return apiClient.local.call(instanceFiles.CreateInstanceDirectory, {
+		params: { id },
+		query: { path },
+	})
 }
 
 export function moveInstanceFile(id: string, source: string, destination: string): Promise<void> {
-	return local.call(instanceFiles.MoveInstanceFile, {
+	return apiClient.local.call(instanceFiles.MoveInstanceFile, {
 		params: { id },
 		body: { source, destination },
 	})
 }
 
 export function deleteInstanceFile(id: string, path: string, recursive: boolean): Promise<void> {
-	return local.call(instanceFiles.DeleteInstanceFile, {
+	return apiClient.local.call(instanceFiles.DeleteInstanceFile, {
 		params: { id },
 		query: { path, recursive },
 	})
@@ -103,7 +105,7 @@ export async function extractInstanceZip(
 	overrideConflicts: boolean,
 	dryRun: boolean,
 ): Promise<ExtractDryRunResult | undefined> {
-	const result = await local.call(instanceFiles.ExtractInstanceZip, {
+	const result = await apiClient.local.call(instanceFiles.ExtractInstanceZip, {
 		params: { id },
 		body: { path, override_conflicts: overrideConflicts, dry_run: dryRun },
 	})

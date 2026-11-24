@@ -1,4 +1,6 @@
 import { ContractClient } from '../contracts/client'
+import { ApiCallError } from '../contracts/errors'
+import { Cores } from '../cores/cores'
 import type { InferredClientModules } from '../modules'
 import { buildModuleStructure } from '../modules'
 import { withCoreHosting } from '../core-hosting'
@@ -39,7 +41,8 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 	private _moduleNamespaces: Map<string, Record<string, AbstractModule>> = new Map()
 
 	private _local?: ContractClient
-	private _cores: Map<string, ContractClient> = new Map()
+	private _coreClients: Map<string, ContractClient> = new Map()
+	private _cores?: Cores
 
 	public readonly labrinth!: InferredClientModules['labrinth']
 	public readonly archon!: ArchonClientModules & {
@@ -71,6 +74,11 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 		})
 	}
 
+	/** The account's Cores, and the servers on them. */
+	public get cores(): Cores {
+		return (this._cores ??= new Cores(this))
+	}
+
 	/** The App's local server: engine and App routes. */
 	public get local(): ContractClient {
 		if (this._local) return this._local
@@ -84,13 +92,13 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 	 * speaks another protocol version.
 	 */
 	public core(coreId: string): ContractClient {
-		const known = this._cores.get(coreId)
+		const known = this._coreClients.get(coreId)
 		if (known) return known
 		const transport =
 			this.config.coreTransport?.(coreId) ??
 			coreSessionTransport(this, coreId, (input, init) => this.platformFetch(input, init))
 		const client = new ContractClient(protocolChecked(transport))
-		this._cores.set(coreId, client)
+		this._coreClients.set(coreId, client)
 		return client
 	}
 
@@ -177,7 +185,7 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 	 * @throws {ModrinthApiError} When the request fails or features throw errors
 	 */
 	async request<T>(path: string, options: RequestOptions): Promise<T> {
-		const url = this.buildUrl(path, await this.resolveApiBaseUrl(path, options), options.version)
+		const url = this.buildUrl(path, await this.resolveApiBaseUrl(options), options.version)
 
 		const defaultHeaders = await this.defaultHeadersFor(options)
 
@@ -215,7 +223,7 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 	}
 
 	async download(path: string, options: RequestOptions, sink: DownloadSink): Promise<void> {
-		const baseUrl = await this.resolveApiBaseUrl(path, options)
+		const baseUrl = await this.resolveApiBaseUrl(options)
 		const mergedOptions: RequestOptions = {
 			method: 'GET',
 			retry: false,
@@ -245,7 +253,7 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 	}
 
 	async stream(path: string, options: RequestOptions): Promise<ReadableStream<Uint8Array>> {
-		const url = this.buildUrl(path, await this.resolveApiBaseUrl(path, options), options.version)
+		const url = this.buildUrl(path, await this.resolveApiBaseUrl(options), options.version)
 		const defaultHeaders = await this.defaultHeadersFor(options)
 		const mergedOptions: RequestOptions = {
 			method: 'GET',
@@ -367,17 +375,13 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 	}
 
 	/**
-	 * Where a request's `api` lives. Hosting has no single base URL: each request goes to the Core it
-	 * is about. Shared instances are our account backend's.
+	 * Where a request's `api` lives. There is no Modrinth Hosting: a Core's routes are called with
+	 * `core(id)`. Shared instances are our account backend's.
 	 */
-	protected async resolveApiBaseUrl(
-		path: string,
-		options: Pick<RequestOptions, 'api' | 'params' | 'version'>,
-	): Promise<string> {
+	protected async resolveApiBaseUrl(options: Pick<RequestOptions, 'api'>): Promise<string> {
 		if (options.api === 'labrinth') return this.resolveBaseUrl(this.config.labrinthBaseUrl!)
-		if (options.api === 'archon') {
-			return this.archon.cores_v1.hostingUrl(path, options.params, options.version)
-		}
+		if (options.api === 'archon')
+			throw new ApiCallError(404, 'not_found', 'There is no Modrinth Hosting')
 		if (options.api === 'sharedinstances') return this.selfHosted().baseUrl
 		return options.api
 	}

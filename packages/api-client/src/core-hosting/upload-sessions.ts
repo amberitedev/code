@@ -56,8 +56,8 @@ function uploadEach(
 	let current: UploadHandle<InstanceUpload> | undefined
 	let cancelled = false
 	const promise = (async () => {
-		const cores = client.archon.cores_v1
-		const base = await cores.url((await cores.coreOf(serverId)).id)
+		const cores = client.cores
+		const base = await cores.serverUrl(serverId)
 		// `upload` puts a version segment between the base and the path: the route's first segment.
 		const [, version, ...path] = instanceFiles.AddInstanceUploadFile.path
 			.replace('{id}', encodeURIComponent(serverId))

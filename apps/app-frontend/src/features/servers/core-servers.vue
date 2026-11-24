@@ -155,7 +155,7 @@ async function createServer(config: CreationFlowContextValue) {
 	const instance = config.instanceSelection.value
 	try {
 		if (!core) throw new Error('No Core was chosen')
-		const created = await client.archon.cores_v1.createServer(serverName(config), core, confirmEula)
+		const created = await client.cores.createServer(serverName(config), core, confirmEula)
 		if (!created) return
 		const { id } = created
 		try {
@@ -189,7 +189,7 @@ async function createServer(config: CreationFlowContextValue) {
 async function browseModpacks() {
 	try {
 		if (!core) throw new Error('No Core was chosen')
-		const created = await client.archon.cores_v1.createServer('New server', core, confirmEula)
+		const created = await client.cores.createServer('New server', core, confirmEula)
 		if (!created) return
 		const { id } = created
 		setupModal.value?.hide()

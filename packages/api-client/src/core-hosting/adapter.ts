@@ -6,5 +6,5 @@ export type Adapter<M extends AbstractModule> = Partial<Omit<M, 'getModuleID'>>
 
 /** The routes of the Core that has `serverId`. */
 export async function coreOf(client: AbstractModrinthClient, serverId: string) {
-	return client.core((await client.archon.cores_v1.coreOf(serverId)).id)
+	return client.core((await client.cores.coreOf(serverId)).id)
 }

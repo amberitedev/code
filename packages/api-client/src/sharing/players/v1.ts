@@ -67,7 +67,7 @@ export class SharedInstancesPlayersV1Module extends AbstractModule {
 	}
 
 	private async ids(serverId: string) {
-		const core = await this.client.archon.cores_v1.coreOf(serverId)
+		const core = await this.client.cores.coreOf(serverId)
 		return { core_id: core.id, server_id: serverId }
 	}
 

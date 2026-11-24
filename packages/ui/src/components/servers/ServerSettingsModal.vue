@@ -59,7 +59,7 @@ const { serverId: currentServerId, worldId, server, serverFull } = injectModrint
 // The Core the server runs on, named in the title.
 const { data: core } = useQuery({
 	queryKey: ['cores', 'of', currentServerId],
-	queryFn: () => client.archon.cores_v1.coreOf(currentServerId),
+	queryFn: () => client.cores.coreOf(currentServerId),
 })
 
 const isApp = ref(true)

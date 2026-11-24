@@ -188,7 +188,7 @@ export class CoreWebSocketClient extends AbstractWebSocketClient {
 
 	send(serverId: string, message: Archon.Websocket.v0.WSOutgoingMessage): void {
 		if (message.event !== 'command') return
-		void this.modrinth.archon.cores_v1
+		void this.modrinth.cores
 			.coreOf(serverId)
 			.then(({ id }) =>
 				this.modrinth

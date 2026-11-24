@@ -1,8 +1,8 @@
 import { accounts, social } from '@amberite/contracts'
 
 import type { ContractTransport } from '../contracts/client'
+import { ApiCallError } from '../contracts/errors'
 import { AbstractFeature, type FeatureConfig } from '../core/abstract-feature'
-import { SharedInstancesApiError } from '../sharing/errors'
 import type { RequestContext } from '../types/request'
 
 export interface SelfHostedConfig extends FeatureConfig {
@@ -13,7 +13,7 @@ export interface SelfHostedConfig extends FeatureConfig {
 /**
  * Routes private accounts and sharing without sending their sessions to public content services.
  * Every other request, including those to a Core, goes without an account token: a Core gets
- * this device's own session for it from the platform instead (see `archon.cores_v1.signIn`).
+ * this device's own session for it from the platform instead (see `cores.signIn`).
  */
 export class SelfHostedFeature extends AbstractFeature {
 	declare protected config: SelfHostedConfig
@@ -27,19 +27,19 @@ export class SelfHostedFeature extends AbstractFeature {
 		return this.config.baseUrl
 	}
 
-	/** A refused sharing request throws `SharedInstancesApiError`, with its status and code. */
+	/** A refused sharing request throws `ApiCallError`, with its status and code. */
 	async execute<T>(next: () => Promise<T>, context: RequestContext): Promise<T> {
 		await routeSelfHostedRequest(context, this.config)
 		if (context.options.api !== 'sharedinstances') return next()
 		try {
 			return await next()
 		} catch (error) {
-			throw SharedInstancesApiError.from(error)
+			throw ApiCallError.from(error)
 		}
 	}
 
 	/** `client.backend`'s way to the backend: the same URL and account session. */
-	transport(fetch: typeof globalThis.fetch): ContractTransport {
+	transport(fetch: ContractTransport['fetch']): ContractTransport {
 		return {
 			base: this.config.baseUrl,
 			headers: async (endpoint) => {
