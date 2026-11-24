@@ -287,7 +287,6 @@ pub(crate) async fn sync_instance_content_files(
             sha1: hash.hash.clone(),
             size: scanned.size,
             missing: false,
-            pending: None,
             added_at: previous
                 .map(|file| file.added_at)
                 .unwrap_or_else(Utc::now),
@@ -648,11 +647,12 @@ async fn sync_server_content_files(
     let existing =
         sqlite::content_rows::get_instance_files(&instance.id, &state.pool)
             .await?;
-    let tracked = sqlite::server_rows::tracked_files(&state.pool, &instance.id)
-        .await?
-        .into_iter()
-        .map(|(row, _)| row.relative_path)
-        .collect::<HashSet<_>>();
+    let tracked =
+        sqlite::content_rows::tracked_files(&state.pool, &instance.id)
+            .await?
+            .into_iter()
+            .map(|(row, _)| row.relative_path)
+            .collect::<HashSet<_>>();
     let known = existing
         .iter()
         .map(|file| file.relative_path.clone())
@@ -706,7 +706,6 @@ async fn sync_server_content_files(
                     sha1: sha1.clone(),
                     size: addon.size,
                     missing: false,
-                    pending: None,
                     added_at: now,
                     modified_at: now,
                 }
@@ -719,8 +718,10 @@ async fn sync_server_content_files(
         if !file.missing
             && !on_disk.contains(file.relative_path.as_str())
             && !tracked.contains(&file.relative_path)
-            && crate::api::pack::server::project_type_of(&file.relative_path)
-                .is_some()
+            && crate::state::instances::adapters::filesystem::server_addon_type(
+                &file.relative_path,
+            )
+            .is_some()
         {
             sqlite::content_rows::remove_instance_file_by_relative_path(
                 &instance.id,

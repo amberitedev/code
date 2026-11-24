@@ -18,15 +18,17 @@ mod lifecycle;
 mod paths;
 mod projects;
 mod run;
-mod server_content;
 mod shared;
 
 pub use self::content::{
-    get_content_items, get_dependencies_as_content_items,
-    get_install_candidates, get_installed_project_ids,
-    get_linked_modpack_content, get_linked_modpack_info, get_projects,
-    list_content_sets, refresh_content_updates, sync_content_files,
+    ContentSide, complete_side_review, get_content_items,
+    get_dependencies_as_content_items, get_install_candidates,
+    get_installed_project_ids, get_linked_modpack_content,
+    get_linked_modpack_info, get_projects, list_content_sets,
+    refresh_content_updates, repair_content, set_content_side,
+    set_content_sides_unlocked, sync_content_files,
 };
+pub(crate) use self::export_mrpack::get_mrpack_environment;
 pub use self::export_mrpack::{
     PackExportCandidate, PackExportCandidateType, create_mrpack_json,
     export_mrpack, get_pack_export_candidates,
@@ -59,11 +61,6 @@ pub use self::projects::{
 pub use self::run::{
     LaunchCredentials, LaunchDefaults, LaunchRequest, QuickPlayType, kill,
     launch, try_update_playtime_by_instance_id,
-};
-pub use self::server_content::{
-    ContentSide, EditedFile, complete_side_review, decide_edited, edited_files,
-    place_client_only, repair_content, set_content_side,
-    set_content_sides_unlocked,
 };
 pub(crate) use self::shared::{
     CONFIG_DIRECTORY, CONFIG_FILE_EXTENSIONS, CONFIG_FILE_TYPE,

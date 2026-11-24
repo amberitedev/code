@@ -10,8 +10,7 @@ use crate::{
     DownloadReason,
     install::InstallJobSnapshot,
     instance::{
-        ContentSide, EditedFile, InstallProjectWithDependenciesRequest,
-        PackExportCandidate,
+        ContentSide, InstallProjectWithDependenciesRequest, PackExportCandidate,
     },
     state::{
         CacheBehaviour, ContentFile, ContentItem, Dependency,
@@ -63,13 +62,8 @@ contracts::endpoints! {
     SetSide: Post "/instances/{id}/content/side", Session, InstanceRef, (), Json<SideChange> => Empty;
     SetSidesUnlocked: Post "/instances/{id}/content/sides-unlocked", Session, InstanceRef, (), Json<SidesUnlocked> => Empty;
     CompleteSideReview: Post "/instances/{id}/content/side-review", Session, InstanceRef, (), Empty => Empty;
-    /// Places every file of the followed pack that is missing.
+    /// Installs the followed pack again, placing every file of it that is missing or changed.
     RepairContent: Post "/instances/{id}/content/repair", Session, InstanceRef, (), Empty => Empty;
-    /// The pack files the owner edited or deleted, and what the last pack update wants for each.
-    EditedFiles: Get "/instances/{id}/content/edited", Session, InstanceRef, (), Empty => Json<Vec<EditedFile>>;
-    DecideEdited: Post "/instances/{id}/content/edited", Session, InstanceRef, (), Json<EditedDecision> => Empty;
-    /// Places a client-only file of the pack on the server.
-    PlaceClientOnly: Post "/instances/{id}/content/client-only", Session, InstanceRef, (), Json<ProjectPath> => Empty;
 }
 
 #[derive(Serialize, Deserialize)]
@@ -167,12 +161,4 @@ pub struct SideChange {
 pub struct SidesUnlocked {
     pub project_path: String,
     pub unlocked: bool,
-}
-
-/// Keep the owner's version of an edited file, or `replace` it with the pack's.
-#[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
-pub struct EditedDecision {
-    pub path: String,
-    pub replace: bool,
 }

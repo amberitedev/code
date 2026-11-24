@@ -53,8 +53,7 @@ use crate::{
             ToggleProject, UnlinkModpack, UpdateModpackVersion, UpdateProject,
         },
         content::{
-            CompleteSideReview, DecideEdited, EditedFiles, PlaceClientOnly,
-            RepairContent, SetSide, SetSidesUnlocked,
+            CompleteSideReview, RepairContent, SetSide, SetSidesUnlocked,
         },
         files::{
             AddInstanceUploadFile, CancelInstanceUpload,
@@ -161,9 +160,6 @@ where
         .endpoint::<SetSidesUnlocked, _, _>(set_sides_unlocked)
         .endpoint::<CompleteSideReview, _, _>(complete_side_review)
         .endpoint::<RepairContent, _, _>(repair_content)
-        .endpoint::<EditedFiles, _, _>(edited_files)
-        .endpoint::<DecideEdited, _, _>(decide_edited)
-        .endpoint::<PlaceClientOnly, _, _>(place_client_only)
         .endpoint::<ListPackExportCandidates, _, _>(list_pack_export_candidates)
         .endpoint::<ListInstanceGroups, _, _>(list_instance_groups)
         .endpoint::<CreateInstanceGroup, _, _>(create_instance_group)

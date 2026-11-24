@@ -181,7 +181,9 @@ impl<'a> InstanceContent<'a> {
         let relative_path = canonical_content_path(request.requested_path);
         // A server's plugins and world datapacks are addons too.
         let server_addon = self.state.side == contracts::Side::Server
-            && crate::api::pack::server::project_type_of(relative_path)
+            && crate::state::instances::adapters::filesystem::server_addon_type(
+                relative_path,
+            )
                 .is_some();
         if !crate::state::content_store::is_managed_content_path(relative_path)
             && !server_addon

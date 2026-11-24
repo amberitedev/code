@@ -89,6 +89,25 @@ pub(crate) fn project_type_from_relative_path(
     ProjectType::get_from_parent_folder(PathBuf::from(relative_path))
 }
 
+/// The project type of the file at `relative_path` on a server, from its folder: directly inside
+/// `mods/`, `plugins/`, `resourcepacks/`, `shaderpacks/` or `<level>/datapacks/`. `None` for
+/// anything else, such as a config.
+pub(crate) fn server_addon_type(relative_path: &str) -> Option<ProjectType> {
+    let (folder, name) = relative_path.rsplit_once('/')?;
+    if name.is_empty() {
+        return None;
+    }
+    if folder.matches('/').count() == 1 {
+        return folder
+            .ends_with("/datapacks")
+            .then_some(ProjectType::DataPack);
+    }
+    match ProjectType::from_name(folder)? {
+        ProjectType::DataPack => None,
+        project_type => Some(project_type),
+    }
+}
+
 fn is_scannable_project_file(
     project_type: ProjectType,
     file_name: &str,
@@ -110,5 +129,22 @@ fn is_scannable_project_file(
             extension.eq_ignore_ascii_case("zip")
                 || extension.eq_ignore_ascii_case("jar")
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_server_addon_s_type_is_its_content_folder_s() {
+        let of = server_addon_type;
+        assert_eq!(of("mods/a.jar"), Some(ProjectType::Mod));
+        assert_eq!(of("plugins/a.jar"), Some(ProjectType::Plugin));
+        assert_eq!(of("world/datapacks/a.zip"), Some(ProjectType::DataPack));
+        assert_eq!(of("datapacks/a.zip"), None);
+        assert_eq!(of("config/a.toml"), None);
+        assert_eq!(of("mods/sub/a.jar"), None);
+        assert_eq!(of("a/b/datapacks/a.zip"), None);
     }
 }

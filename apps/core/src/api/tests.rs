@@ -1326,6 +1326,8 @@ async fn an_icon_is_saved_for_minecraft_and_the_app_then_reset() {
 async fn a_server_exports_as_a_pack_once_per_link() {
     use std::io::Read;
 
+    use engine::pack::install_from::{PackDependency, PackFormat};
+
     let core = core().await;
     let server = core.server.clone();
     let owner = core.sign_in("owner").await;
@@ -1357,10 +1359,12 @@ async fn a_server_exports_as_a_pack_once_per_link() {
     );
     let bytes = response.into_body().collect().await.unwrap().to_bytes();
     let mut pack = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
-    let index = engine::pack::server::read_index(&mut pack).unwrap();
+    let index: PackFormat =
+        serde_json::from_reader(pack.by_name("modrinth.index.json").unwrap())
+            .unwrap();
     assert_eq!(index.name, "A");
-    assert_eq!(index.dependencies["minecraft"], "1.21.1");
-    assert_eq!(index.dependencies["fabric-loader"], "0.16.0");
+    assert_eq!(index.dependencies[&PackDependency::Minecraft], "1.21.1");
+    assert_eq!(index.dependencies[&PackDependency::FabricLoader], "0.16.0");
     let mut text = String::new();
     pack.by_name("overrides/config/sub/a.toml")
         .unwrap()

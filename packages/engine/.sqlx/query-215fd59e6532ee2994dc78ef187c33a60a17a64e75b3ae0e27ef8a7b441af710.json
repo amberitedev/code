@@ -92,19 +92,8 @@
         }
       },
       {
-        "name": "pending",
-        "ordinal": 8,
-        "type_info": "Text",
-        "origin": {
-          "Table": {
-            "table": "instance_files",
-            "name": "pending"
-          }
-        }
-      },
-      {
         "name": "added_at",
-        "ordinal": 9,
+        "ordinal": 8,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -115,7 +104,7 @@
       },
       {
         "name": "modified_at",
-        "ordinal": 10,
+        "ordinal": 9,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -137,7 +126,6 @@
       false,
       false,
       false,
-      true,
       false,
       false
     ]
