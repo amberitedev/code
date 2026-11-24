@@ -18,10 +18,12 @@ ariadne = { workspace = true }
 axum = { version = "0.8.4", default-features = false, features = ["json", "query"], optional = true }
 bytes = { workspace = true }
 clap = { workspace = true, features = ["derive"], optional = true }
+http = { version = "1.5.0", optional = true }
 modrinth-content-management = { workspace = true }
 reqwest = { workspace = true, features = ["json"], optional = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+serde_urlencoded = { version = "0.7.1", optional = true }
 sqlx = { workspace = true, features = ["derive"], optional = true }
 thiserror = { workspace = true, optional = true }
 ts-rs = { workspace = true, features = ["no-serde-warnings", "uuid-impl"], optional = true }
@@ -36,7 +38,7 @@ tower = { version = "0.5.2", features = ["util"] }
 
 [features]
 clap = ["dep:clap"]
-client = ["dep:reqwest", "dep:thiserror"]
+client = ["dep:http", "dep:reqwest", "dep:serde_urlencoded", "dep:thiserror"]
 export-ts = ["ariadne/ts", "dep:ts-rs", "modrinth-content-management/ts"]
 server = ["dep:axum"]
 sqlx = ["dep:sqlx"]

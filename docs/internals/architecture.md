@@ -32,8 +32,11 @@ Rust imports go `contracts` <- `sharing-client` <- `engine` <- `apps/app`, `apps
 
 - `packages/contracts` is the protocol: the `Endpoint` machinery, `ApiError`, `PROTOCOL_VERSION`,
   limits, share rules, and every type we own outright (backend, Core, store). It holds no logic.
-  Its `client` feature is the Rust caller `call::<E>()`, and its `server` feature is the axum glue
-  (`route::<E>()`, `Req<E>`, `IntoResponse for ApiError`).
+  Its `client` feature is the Rust caller: `request::<E>()` and `response::<E>()` build and read a
+  call for any transport (the Copal CLI's local socket, the App's pinned tunnel), and `call::<E>()`
+  sends one with reqwest. Its `server` feature is the axum glue: `Mount::endpoint::<E>()`, the one
+  way an owned route is mounted, `Req<E>` and `IntoResponse for ApiError`. Only reverse-proxy
+  pass-throughs (Copal's `/store/{*rest}`, the App's Core proxy) are raw routes.
 - `packages/engine` is upstream's `packages/app-lib`, renamed. It owns the instances on one
   machine and serves them as an axum router. It knows nothing about desktops or servers.
 - `packages/sharing-client` is the sharing logic: versions, the install plan, the diff, crypto,

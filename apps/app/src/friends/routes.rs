@@ -7,7 +7,7 @@ use axum::{Router, extract::State};
 use contracts::{
     ApiError, Empty, Json,
     backend::social::UserFriend,
-    server::{Req, route},
+    server::{Mount, Req},
 };
 use engine::{Engine, routes::api_error};
 
@@ -24,16 +24,11 @@ use crate::local_api::{
 type Answer<T> = Result<T, ApiError>;
 
 pub fn routes() -> Router<AppState> {
-    [
-        route::<ListFriends, _, _, _>(list_friends),
-        route::<ListFriendStatuses, _, _, _>(list_friend_statuses),
-        route::<AddFriend, _, _, _>(add_friend),
-        route::<RemoveFriend, _, _, _>(remove_friend),
-    ]
-    .into_iter()
-    .fold(Router::new(), |router, (path, method)| {
-        router.route(path, method)
-    })
+    Router::new()
+        .endpoint::<ListFriends, _, _>(list_friends)
+        .endpoint::<ListFriendStatuses, _, _>(list_friend_statuses)
+        .endpoint::<AddFriend, _, _>(add_friend)
+        .endpoint::<RemoveFriend, _, _>(remove_friend)
 }
 
 async fn list_friends(

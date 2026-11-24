@@ -5,7 +5,7 @@ use std::sync::Arc;
 use axum::{Router, extract::State};
 use contracts::{
     ApiError, Json,
-    server::{Req, route},
+    server::{Mount, Req},
 };
 use engine::{
     Engine, data::InstanceLink, install::InstallJobSnapshot, routes::api_error,
@@ -20,16 +20,11 @@ use crate::local_api::{
 };
 
 pub fn routes() -> Router<AppState> {
-    [
-        route::<PreviewModpack, _, _, _>(preview_modpack),
-        route::<CreateInstance, _, _, _>(create_instance),
-        route::<CreateModpackInstance, _, _, _>(create_modpack_instance),
-        route::<InstallPackToInstance, _, _, _>(install_pack_to_instance),
-    ]
-    .into_iter()
-    .fold(Router::new(), |router, (path, method)| {
-        router.route(path, method)
-    })
+    Router::new()
+        .endpoint::<PreviewModpack, _, _>(preview_modpack)
+        .endpoint::<CreateInstance, _, _>(create_instance)
+        .endpoint::<CreateModpackInstance, _, _>(create_modpack_instance)
+        .endpoint::<InstallPackToInstance, _, _>(install_pack_to_instance)
 }
 
 async fn preview_modpack(

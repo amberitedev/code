@@ -9,7 +9,7 @@ use std::{
 use axum::{Router, extract::State, http::StatusCode};
 use contracts::{
     ApiError, ErrorCode,
-    server::{Req, route},
+    server::{Mount, Req},
 };
 use engine::{Engine, routes::api_error};
 use tauri_plugin_http::reqwest;
@@ -24,13 +24,9 @@ use crate::local_api::{
 };
 
 pub fn routes() -> Router<AppState> {
-    let (external_path, external) =
-        route::<SaveExternalFile, _, _, _>(save_external_file);
-    let (instance_path, instance) =
-        route::<SaveInstanceFileAs, _, _, _>(save_instance_file_as);
     Router::new()
-        .route(external_path, external)
-        .route(instance_path, instance)
+        .endpoint::<SaveExternalFile, _, _>(save_external_file)
+        .endpoint::<SaveInstanceFileAs, _, _>(save_instance_file_as)
 }
 
 async fn save_external_file(

@@ -9,7 +9,7 @@ use std::sync::{
 use axum::{Router, extract::State, http::StatusCode};
 use contracts::{
     ApiError, Empty, ErrorCode, Json,
-    server::{Req, route},
+    server::{Mount, Req},
 };
 use engine::{
     EventSink, LoadingBarType, emit_loading, init_loading, routes::api_error,
@@ -66,21 +66,13 @@ impl Updater {
 }
 
 pub fn routes() -> Router<AppState> {
-    let (check_path, check) = route::<CheckForUpdate, _, _, _>(check);
-    let (size_path, size) = route::<GetUpdateSize, _, _, _>(size);
-    let (download_path, download) = route::<DownloadUpdate, _, _, _>(download);
-    let (discard_path, discard) =
-        route::<DiscardDownloadedUpdate, _, _, _>(discard);
-    let (restart_after_path, restart_after) =
-        route::<SetRestartAfterUpdate, _, _, _>(set_restart_after);
-    let (restart_path, restart) = route::<RestartApp, _, _, _>(restart);
     Router::new()
-        .route(check_path, check)
-        .route(size_path, size)
-        .route(download_path, download)
-        .route(discard_path, discard)
-        .route(restart_after_path, restart_after)
-        .route(restart_path, restart)
+        .endpoint::<CheckForUpdate, _, _>(check)
+        .endpoint::<GetUpdateSize, _, _>(size)
+        .endpoint::<DownloadUpdate, _, _>(download)
+        .endpoint::<DiscardDownloadedUpdate, _, _>(discard)
+        .endpoint::<SetRestartAfterUpdate, _, _>(set_restart_after)
+        .endpoint::<RestartApp, _, _>(restart)
 }
 
 async fn check(

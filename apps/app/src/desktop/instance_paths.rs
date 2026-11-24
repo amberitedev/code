@@ -3,7 +3,7 @@ use std::{path::PathBuf, sync::Arc};
 use axum::{Router, extract::State};
 use contracts::{
     ApiError, Empty, Json,
-    server::{Req, route},
+    server::{Mount, Req},
 };
 use engine::{Engine, routes::api_error};
 
@@ -16,18 +16,13 @@ use crate::local_api::{
 };
 
 pub fn routes() -> Router<AppState> {
-    [
-        route::<GetInstancePath, _, _, _>(get_instance_path),
-        route::<GetInstanceContentPath, _, _, _>(get_instance_content_path),
-        route::<AddProjectFromPath, _, _, _>(add_project_from_path),
-        route::<CheckFileOnModrinth, _, _, _>(check_file_on_modrinth),
-        route::<ExportMrpack, _, _, _>(export_mrpack),
-        route::<SetInstanceIconFromPath, _, _, _>(set_instance_icon_from_path),
-    ]
-    .into_iter()
-    .fold(Router::new(), |router, (path, method)| {
-        router.route(path, method)
-    })
+    Router::new()
+        .endpoint::<GetInstancePath, _, _>(get_instance_path)
+        .endpoint::<GetInstanceContentPath, _, _>(get_instance_content_path)
+        .endpoint::<AddProjectFromPath, _, _>(add_project_from_path)
+        .endpoint::<CheckFileOnModrinth, _, _>(check_file_on_modrinth)
+        .endpoint::<ExportMrpack, _, _>(export_mrpack)
+        .endpoint::<SetInstanceIconFromPath, _, _>(set_instance_icon_from_path)
 }
 
 async fn get_instance_path(

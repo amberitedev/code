@@ -5,7 +5,7 @@ use std::sync::Arc;
 use axum::{Router, extract::State, http::StatusCode};
 use contracts::{
     ApiError,
-    server::{Req, route},
+    server::{Mount, Req},
 };
 use engine::{
     Engine,
@@ -20,8 +20,7 @@ use crate::local_api::{
 };
 
 pub fn routes() -> Router<AppState> {
-    let (path, export) = route::<ExportDebugInfo, _, _, _>(export);
-    Router::new().route(path, export)
+    Router::new().endpoint::<ExportDebugInfo, _, _>(export)
 }
 
 async fn export(

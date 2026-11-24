@@ -6,7 +6,7 @@ use axum::{
 };
 use contracts::{
     ApiError, Empty, Json,
-    server::{Req, route},
+    server::{Mount, Req},
 };
 use engine::Engine;
 
@@ -20,20 +20,15 @@ use crate::local_api::{
 };
 
 pub fn routes() -> Router<AppState> {
-    [
-        route::<ListRecentIconConfigs, _, _, _>(list_recent_icon_configs),
-        route::<ListHiddenInstances, _, _, _>(list_hidden_instances),
-        route::<SetInstanceHidden, _, _, _>(set_instance_hidden),
-        route::<CacheIcon, _, _, _>(cache_icon),
-        route::<CacheGeneratedIcon, _, _, _>(cache_generated_icon),
-        route::<SetGeneratedInstanceIcon, _, _, _>(set_generated_instance_icon),
-    ]
-    .into_iter()
-    .fold(Router::new(), |router, (path, method)| {
-        router.route(path, method)
-    })
-    // The engine caps icons and symbols at 4 MiB, past axum's default body limit.
-    .layer(DefaultBodyLimit::disable())
+    Router::new()
+        .endpoint::<ListRecentIconConfigs, _, _>(list_recent_icon_configs)
+        .endpoint::<ListHiddenInstances, _, _>(list_hidden_instances)
+        .endpoint::<SetInstanceHidden, _, _>(set_instance_hidden)
+        .endpoint::<CacheIcon, _, _>(cache_icon)
+        .endpoint::<CacheGeneratedIcon, _, _>(cache_generated_icon)
+        .endpoint::<SetGeneratedInstanceIcon, _, _>(set_generated_instance_icon)
+        // The engine caps icons and symbols at 4 MiB, past axum's default body limit.
+        .layer(DefaultBodyLimit::disable())
 }
 
 async fn list_recent_icon_configs(

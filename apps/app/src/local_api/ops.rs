@@ -7,7 +7,7 @@ use std::{future::Future, sync::Arc};
 use axum::{Router, extract::State, http::StatusCode};
 use contracts::{
     ApiError, Empty, ErrorCode, Json,
-    server::{Req, route},
+    server::{Mount, Req},
 };
 use dashmap::{DashMap, mapref::entry::Entry};
 use tokio::sync::broadcast;
@@ -138,11 +138,9 @@ pub fn cancelled() -> ApiError {
 }
 
 pub fn routes() -> Router<AppState> {
-    let (list_path, list) = route::<ListOps, _, _, _>(list_ops);
-    let (cancel_path, cancel) = route::<CancelOp, _, _, _>(cancel_op);
     Router::new()
-        .route(list_path, list)
-        .route(cancel_path, cancel)
+        .endpoint::<ListOps, _, _>(list_ops)
+        .endpoint::<CancelOp, _, _>(cancel_op)
 }
 
 async fn list_ops(

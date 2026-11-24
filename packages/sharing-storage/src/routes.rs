@@ -22,7 +22,7 @@ use axum::{
 };
 use contracts::{
     ApiError, ErrorCode, Hash, Json,
-    server::{Req, route},
+    server::{Mount, Req},
     store::{
         GetObject, ListVersion, MissingObjects, ObjectHashes, PullVersion,
         PulledVersion, UploadStatus, UploadVersion, UploadedVersion,
@@ -41,18 +41,13 @@ use crate::{
 };
 
 pub(crate) fn router(store: Arc<Store>) -> Router {
-    [
-        route::<ListVersion, _, _, _>(list),
-        route::<UploadVersion, _, _, _>(upload),
-        route::<MissingObjects, _, _, _>(have),
-        route::<GetObject, _, _, _>(object),
-        route::<PullVersion, _, _, _>(pull_version),
-    ]
-    .into_iter()
-    .fold(Router::new(), |router, (path, method)| {
-        router.route(path, method)
-    })
-    .with_state(store)
+    Router::new()
+        .endpoint::<ListVersion, _, _>(list)
+        .endpoint::<UploadVersion, _, _>(upload)
+        .endpoint::<MissingObjects, _, _>(have)
+        .endpoint::<GetObject, _, _>(object)
+        .endpoint::<PullVersion, _, _>(pull_version)
+        .with_state(store)
 }
 
 fn invalid(description: impl Into<String>) -> ApiError {

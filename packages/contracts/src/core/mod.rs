@@ -17,7 +17,7 @@ pub use servers::*;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Empty, Json, Stream};
+use crate::{Empty, Json, Stream, Upgrade};
 
 /// The header a dangerous route's fresh ticket travels in.
 pub const TICKET_HEADER: &str = "x-amberite-ticket";
@@ -44,12 +44,31 @@ pub struct SessionId {
     pub id: String,
 }
 
+/// A server and its world, in upstream's hosting paths. A server has the one world `wid` names.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+pub struct WorldRef {
+    pub id: String,
+    pub wid: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+pub struct WorldBackupRef {
+    pub id: String,
+    pub wid: String,
+    pub bid: String,
+}
+
 crate::endpoints! {
     /// A Core's own routes.
     group core;
 
     /// Whether the Core is up, which Core it is, and the protocol it speaks.
     CheckHealth: Get "/health", None, (), (), Empty => Json<Health>;
+    /// The events socket: the caller subscribes to topics with [`ClientMessage`] and gets the
+    /// Core's events and the engine's for them.
+    EventSocket: Get "/events", Session, (), (), Empty => Upgrade<CoreEvent, ClientMessage>;
     /// Trade a ticket for a session on this device. 10 a minute per address.
     SignIn: Post "/sessions", None, (), (), Json<NewSession> => Json<SignedIn>;
     /// Every signed-in device.
@@ -159,6 +178,13 @@ crate::endpoints! {
     GetInsight: Get "/servers/{id}/insight", Session, ServerId, (), Empty => Json<ServerInsight>;
     /// Check a running server's port again, answering once checked.
     CheckReachability: Post "/servers/{id}/reachability", Session, ServerId, (), Empty => Json<ServerInsight>;
+
+    /// A backup as a zip, streamed. A native save asks for a link first ([`CreateDownloadLink`]).
+    DownloadBackup: Get "/servers/{id}/v1/worlds/{wid}/backups/{bid}/download", Session, WorldBackupRef, (), Empty => Stream;
+    /// The server's files as a zip, streamed.
+    DownloadWorld: Get "/servers/{id}/v1/worlds/{wid}/files/download-full-zip", Session, WorldRef, (), Empty => Stream;
+    /// The server's content as an `.mrpack`: its content folders and `config/`.
+    ExportModpack: Get "/servers/{id}/v1/worlds/{wid}/content/export-mrpack", Session, WorldRef, (), Empty => Stream;
 }
 
 #[cfg(test)]
@@ -170,6 +196,8 @@ pub(crate) fn ts() -> String {
         Health::decl(&cfg),
         ServerId::decl(&cfg),
         SessionId::decl(&cfg),
+        WorldRef::decl(&cfg),
+        WorldBackupRef::decl(&cfg),
     ]
     .into_iter()
     .chain(access::ts_types())

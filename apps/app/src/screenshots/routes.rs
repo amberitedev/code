@@ -2,10 +2,14 @@
 
 use std::sync::Arc;
 
-use axum::{Router, extract::DefaultBodyLimit, extract::State};
+use axum::{
+    Router,
+    extract::{DefaultBodyLimit, State},
+    handler::Handler,
+};
 use contracts::{
     ApiError, Empty, Json,
-    server::{Req, route},
+    server::{Mount, Req},
 };
 use engine::{Engine, routes::api_error};
 
@@ -25,30 +29,25 @@ use crate::local_api::{
 type Answer<T> = Result<T, ApiError>;
 
 pub fn routes() -> Router<AppState> {
-    let (edits_path, edits) =
-        route::<SaveEditedScreenshot, _, _, _>(save_edited_screenshot);
-    [
-        route::<ListInstanceScreenshots, _, _, _>(list_instance_screenshots),
-        route::<ListScreenshots, _, _, _>(list_screenshots),
-        route::<ListSyncedScreenshots, _, _, _>(list_synced_screenshots),
-        route::<DeleteScreenshots, _, _, _>(delete_screenshots),
-        route::<ExportScreenshots, _, _, _>(export_screenshots),
-        route::<MoveScreenshots, _, _, _>(move_screenshots),
-        route::<ListScreenshotGroups, _, _, _>(list_screenshot_groups),
-        route::<CreateScreenshotGroup, _, _, _>(create_screenshot_group),
-        route::<RenameScreenshotGroup, _, _, _>(rename_screenshot_group),
-        route::<DeleteScreenshotGroup, _, _, _>(delete_screenshot_group),
-        route::<SetScreenshotGroupMemberships, _, _, _>(
+    Router::new()
+        .endpoint::<ListInstanceScreenshots, _, _>(list_instance_screenshots)
+        .endpoint::<ListScreenshots, _, _>(list_screenshots)
+        .endpoint::<ListSyncedScreenshots, _, _>(list_synced_screenshots)
+        .endpoint::<DeleteScreenshots, _, _>(delete_screenshots)
+        .endpoint::<ExportScreenshots, _, _>(export_screenshots)
+        .endpoint::<MoveScreenshots, _, _>(move_screenshots)
+        .endpoint::<ListScreenshotGroups, _, _>(list_screenshot_groups)
+        .endpoint::<CreateScreenshotGroup, _, _>(create_screenshot_group)
+        .endpoint::<RenameScreenshotGroup, _, _>(rename_screenshot_group)
+        .endpoint::<DeleteScreenshotGroup, _, _>(delete_screenshot_group)
+        .endpoint::<SetScreenshotGroupMemberships, _, _>(
             set_screenshot_group_memberships,
-        ),
-        route::<ImportScreenshotGroups, _, _, _>(import_screenshot_groups),
+        )
+        .endpoint::<ImportScreenshotGroups, _, _>(import_screenshot_groups)
         // A full-size PNG is far past axum's 2 MB default.
-        (edits_path, edits.layer(DefaultBodyLimit::disable())),
-    ]
-    .into_iter()
-    .fold(Router::new(), |router, (path, method)| {
-        router.route(path, method)
-    })
+        .endpoint::<SaveEditedScreenshot, _, _>(
+            save_edited_screenshot.layer(DefaultBodyLimit::disable()),
+        )
 }
 
 fn files(

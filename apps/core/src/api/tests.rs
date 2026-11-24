@@ -261,6 +261,47 @@ async fn servers_wait_for_the_eula_and_every_route_for_a_session() {
 async fn dangerous_actions_need_a_fresh_ticket_of_the_owner() {
     let core = core().await;
     let owner = core.sign_in("owner").await;
+
+    let dangerous = || {
+        contracts::core::ROUTES
+            .iter()
+            .filter(|route| route.dangerous)
+    };
+    assert_eq!(
+        dangerous().map(|route| route.name).collect::<Vec<_>>(),
+        [
+            "RevokeSession",
+            "Unpair",
+            "ChangeUpdateSettings",
+            "InstallUpdate",
+            "RollBack",
+            "DeleteServer",
+            "DeleteBackups",
+            "DeleteBackup",
+            "RestoreBackup",
+        ],
+    );
+    for route in dangerous() {
+        let path = route
+            .path
+            .replace("{id}", &core.server)
+            .replace("{backup_id}", "backup");
+        let method = serde_json::to_value(route.method).unwrap();
+        let method =
+            Method::from_bytes(method.as_str().unwrap().as_bytes()).unwrap();
+        // Turning auto-update on is the dangerous change of the update settings.
+        let body = (route.name == "ChangeUpdateSettings")
+            .then(|| json!({ "auto_update": true }));
+        let (status, error) =
+            core.call(method, &path, Some(&owner), None, body).await;
+        assert_eq!(
+            (status, error["error"].as_str()),
+            (StatusCode::UNAUTHORIZED, Some("ticket_required")),
+            "{}",
+            route.name
+        );
+    }
+
     let delete = format!("/servers/{}", core.server);
 
     let (status, error) = core

@@ -59,7 +59,7 @@ pub fn status(error: &CallError) -> Option<u16> {
         | CallError::Decode { status, .. }
         | CallError::RangeIgnored { status } => Some(*status),
         CallError::Http(error) => error.status().map(|status| status.as_u16()),
-        CallError::Params { .. } => None,
+        CallError::Params { .. } | CallError::Transport(_) => None,
     }
 }
 

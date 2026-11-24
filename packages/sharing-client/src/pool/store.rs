@@ -68,7 +68,7 @@ impl From<CallError> for StoreError {
             | CallError::RangeIgnored { status }) => {
                 Self::Other(status, error.to_string())
             }
-            error @ CallError::Params { .. } => {
+            error @ (CallError::Params { .. } | CallError::Transport(_)) => {
                 Self::Other(0, error.to_string())
             }
         }

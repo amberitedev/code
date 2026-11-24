@@ -5,7 +5,7 @@ use std::{net::SocketAddr, sync::Arc, time::Duration};
 use axum::{Router, extract::State};
 use contracts::{
     ApiError, Empty, ErrorCode, Json,
-    server::{Req, route},
+    server::{Mount, Req},
 };
 use engine::Engine;
 use tauri::{Manager, UserAttentionType, WebviewUrl, WebviewWindowBuilder};
@@ -48,29 +48,24 @@ const MICROSOFT_REDIRECT: &str = "https://login.live.com/oauth20_desktop.srf";
 const MICROSOFT_SIGN_IN_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
 pub fn routes() -> Router<AppState> {
-    [
-        route::<CheckMinecraftReachable, _, _, _>(check_minecraft_reachable),
-        route::<SignInToMinecraft, _, _, _>(sign_in_to_minecraft),
-        route::<ListMinecraftAccounts, _, _, _>(list_minecraft_accounts),
-        route::<GetDefaultMinecraftAccount, _, _, _>(
+    Router::new()
+        .endpoint::<CheckMinecraftReachable, _, _>(check_minecraft_reachable)
+        .endpoint::<SignInToMinecraft, _, _>(sign_in_to_minecraft)
+        .endpoint::<ListMinecraftAccounts, _, _>(list_minecraft_accounts)
+        .endpoint::<GetDefaultMinecraftAccount, _, _>(
             get_default_minecraft_account,
-        ),
-        route::<SetDefaultMinecraftAccount, _, _, _>(
+        )
+        .endpoint::<SetDefaultMinecraftAccount, _, _>(
             set_default_minecraft_account,
-        ),
-        route::<RemoveMinecraftAccount, _, _, _>(remove_minecraft_account),
-        route::<SignInToModrinth, _, _, _>(sign_in_to_modrinth),
-        route::<CancelModrinthSignIn, _, _, _>(cancel_modrinth_sign_in),
-        route::<SignOutOfModrinth, _, _, _>(sign_out_of_modrinth),
-        route::<GetActiveModrinthAccount, _, _, _>(get_active_modrinth_account),
-        route::<ListModrinthAccounts, _, _, _>(list_modrinth_accounts),
-        route::<SetActiveModrinthAccount, _, _, _>(set_active_modrinth_account),
-        route::<RemoveModrinthAccount, _, _, _>(remove_modrinth_account),
-    ]
-    .into_iter()
-    .fold(Router::new(), |router, (path, method)| {
-        router.route(path, method)
-    })
+        )
+        .endpoint::<RemoveMinecraftAccount, _, _>(remove_minecraft_account)
+        .endpoint::<SignInToModrinth, _, _>(sign_in_to_modrinth)
+        .endpoint::<CancelModrinthSignIn, _, _>(cancel_modrinth_sign_in)
+        .endpoint::<SignOutOfModrinth, _, _>(sign_out_of_modrinth)
+        .endpoint::<GetActiveModrinthAccount, _, _>(get_active_modrinth_account)
+        .endpoint::<ListModrinthAccounts, _, _>(list_modrinth_accounts)
+        .endpoint::<SetActiveModrinthAccount, _, _>(set_active_modrinth_account)
+        .endpoint::<RemoveModrinthAccount, _, _>(remove_modrinth_account)
 }
 
 async fn check_minecraft_reachable(

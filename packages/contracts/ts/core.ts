@@ -16,6 +16,10 @@ export type ServerId = { id: string, };
 
 export type SessionId = { id: string, };
 
+export type WorldRef = { id: string, wid: string, };
+
+export type WorldBackupRef = { id: string, wid: string, bid: string, };
+
 export type CoreUser = { id: string, name: string, avatar_url: string | null, };
 
 export type NewSession = { 
@@ -643,6 +647,7 @@ last_lines: string, };
 /** A Core's own routes. */
 export const core = {
 	CheckHealth: { method: "GET", path: "/health", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Health>,
+	EventSocket: { method: "GET", path: "/events", auth: "session", dangerous: false, body: "empty", response: "upgrade" } as Endpoint<null, null, void, { receive: CoreEvent, send: ClientMessage }>,
 	SignIn: { method: "POST", path: "/sessions", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, NewSession, SignedIn>,
 	ListSessions: { method: "GET", path: "/sessions", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<CoreSession>>,
 	SignOut: { method: "DELETE", path: "/sessions/current", auth: "session", dangerous: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
@@ -695,4 +700,7 @@ export const core = {
 	SetJava: { method: "PUT", path: "/servers/{id}/java", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<ServerId, null, JavaPath, void>,
 	GetInsight: { method: "GET", path: "/servers/{id}/insight", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<ServerId, null, void, ServerInsight>,
 	CheckReachability: { method: "POST", path: "/servers/{id}/reachability", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<ServerId, null, void, ServerInsight>,
+	DownloadBackup: { method: "GET", path: "/servers/{id}/v1/worlds/{wid}/backups/{bid}/download", auth: "session", dangerous: false, body: "empty", response: "stream" } as Endpoint<WorldBackupRef, null, void, Response>,
+	DownloadWorld: { method: "GET", path: "/servers/{id}/v1/worlds/{wid}/files/download-full-zip", auth: "session", dangerous: false, body: "empty", response: "stream" } as Endpoint<WorldRef, null, void, Response>,
+	ExportModpack: { method: "GET", path: "/servers/{id}/v1/worlds/{wid}/content/export-mrpack", auth: "session", dangerous: false, body: "empty", response: "stream" } as Endpoint<WorldRef, null, void, Response>,
 }

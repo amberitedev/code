@@ -106,7 +106,9 @@ pub(super) fn backend_error(error: CallError) -> crate::Error {
     }
     let server_side = match &error {
         CallError::Api { status, .. } => *status >= 500,
-        CallError::Http(_) | CallError::Decode { .. } => true,
+        CallError::Http(_)
+        | CallError::Decode { .. }
+        | CallError::Transport(_) => true,
         CallError::RangeIgnored { .. } | CallError::Params { .. } => false,
     };
     let error = anyhow::Error::new(error);

@@ -1,15 +1,14 @@
 use axum::Router;
 use contracts::{
     ApiError, Json,
-    server::{Req, route},
+    server::{Mount, Req},
 };
 
 use super::internal;
 use crate::local_api::endpoints::desktop::CheckNetworkMetered;
 
 pub fn routes() -> Router {
-    let (path, handler) = route::<CheckNetworkMetered, _, _, _>(is_metered);
-    Router::new().route(path, handler)
+    Router::new().endpoint::<CheckNetworkMetered, _, _>(is_metered)
 }
 
 async fn is_metered(

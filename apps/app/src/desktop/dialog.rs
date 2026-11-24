@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use axum::{Router, extract::State};
 use contracts::{
     ApiError, Json,
-    server::{Req, route},
+    server::{Mount, Req},
 };
 use tauri::AppHandle;
 #[cfg(any(windows, target_os = "macos"))]
@@ -19,11 +19,9 @@ use crate::local_api::endpoints::desktop::{
 };
 
 pub fn routes(app: AppSlot) -> Router {
-    let (open_path, open) = route::<PickFiles, _, _, _>(pick_files);
-    let (save_path, save) = route::<PickSavePath, _, _, _>(pick_save_path);
     Router::new()
-        .route(open_path, open)
-        .route(save_path, save)
+        .endpoint::<PickFiles, _, _>(pick_files)
+        .endpoint::<PickSavePath, _, _>(pick_save_path)
         .with_state(app)
 }
 
