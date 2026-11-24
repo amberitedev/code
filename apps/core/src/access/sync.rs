@@ -694,7 +694,7 @@ mod tests {
         let (_backend, url) = backend(vec![404, 410]).await;
         let sync = sync(url).await;
         sqlx::query(
-            "INSERT INTO servers (id, name, created_at, port, memory_mb) VALUES ('s1', 'A', 0, 25565, 1024); \
+            "INSERT INTO servers (id, port) VALUES ('s1', 25565); \
              INSERT INTO sessions VALUES ('x', x'00', 'owner', 'Laptop', 0, 0, 9999999999)",
         )
         .execute(&sync.db)

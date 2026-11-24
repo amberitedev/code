@@ -42,16 +42,11 @@ CREATE TABLE pairing (
     poll_interval INTEGER NOT NULL
 );
 
--- A server's content, loader and Minecraft version are its engine instance's, which has the
--- server's id.
+-- A server's name, creation time, memory, JVM flags, Java path, content, loader and Minecraft
+-- version are its engine instance's, which has the server's id.
 CREATE TABLE servers (
     id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    created_at INTEGER NOT NULL,
     port INTEGER NOT NULL UNIQUE,
-    memory_mb INTEGER NOT NULL,
-    -- Advanced override; null means the Java Core manages for this version.
-    java_path TEXT,
     -- The managed Java major the owner chose; null means the one the Minecraft version needs.
     java_version INTEGER
 );
@@ -195,13 +190,6 @@ CREATE TABLE restarts (
     schedule TEXT,
     -- Restart once nobody is online and the server has run this many hours. Null: off.
     smart_after_hours INTEGER
-);
-
--- A server's own JVM flags, instead of the tuned ones. No row: the tuned flags.
-CREATE TABLE jvm_flags (
-    server_id TEXT PRIMARY KEY REFERENCES servers (id) ON DELETE CASCADE,
-    -- JSON array of strings.
-    flags TEXT NOT NULL
 );
 
 -- Port mappings Core asked the router for, so a Core that restarts renews them instead of asking

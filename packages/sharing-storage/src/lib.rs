@@ -11,7 +11,7 @@
 //! answers status, drop, and config calls. Only Copal holds the pipes, so the calls need no
 //! token. Closing stdin stops the store. stderr is its log, which Copal copies into its own.
 
-pub mod keys;
+mod keys;
 mod limits;
 pub mod local;
 mod objects;
@@ -41,7 +41,7 @@ use contracts::{
 };
 use tracing::{info, warn};
 
-use keys::{JsonFile, Keys};
+use keys::Keys;
 use limits::Limits;
 use local::{Caps, Status};
 use objects::{Index, Layout, ListExt, ListState};
@@ -88,7 +88,7 @@ fn now() -> i64 {
 pub struct Store {
     layout: Layout,
     core_id: String,
-    keys: Keys<JsonFile>,
+    keys: Keys,
     allow_private_sources: bool,
     /// Pulls from other Cores. One for the life of the store.
     client: sharing_client::pool::StoreClient,
@@ -102,7 +102,7 @@ impl Store {
     fn open(
         layout: Layout,
         core_id: String,
-        keys: Keys<JsonFile>,
+        keys: Keys,
         allow_private_sources: bool,
         caps: Caps,
     ) -> std::io::Result<Self> {
@@ -325,7 +325,7 @@ pub async fn main(args: Args) -> Result<()> {
         .connect_timeout(Duration::from_secs(15))
         .build()?;
     let layout = Layout::new(&args.data_dir);
-    let keys = Keys::load_file(layout.keys(), http, backend_url.as_deref());
+    let keys = keys::load_file(layout.keys(), http, backend_url.as_deref());
     let store = Arc::new(
         Store::open(
             layout,

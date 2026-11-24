@@ -23,14 +23,13 @@ pub enum NotReady {
     NotInstalled,
 }
 
-/// Everything the shim needs to start `server`, with `flags` (`memory::flags`) as its JVM flags.
-/// Writes `eula.txt` and the address first. `local_only` is `Config::local_only`.
+/// Everything the shim needs to start `server`. Writes `eula.txt` and the address first.
+/// `local_only` is `Config::local_only`.
 pub async fn prepare(
     paths: &Paths,
     engine: &Engine,
     server: &ServerRow,
     platform: Option<&Platform>,
-    flags: Option<Vec<String>>,
     run_id: &str,
     local_only: Option<IpAddr>,
 ) -> Result<Launch> {
@@ -50,7 +49,7 @@ pub async fn prepare(
         .await
         .map_err(|error| eyre!("{error:#}"))?;
     let java = java_for(engine, server, &command).await?;
-    Ok(launch(paths, server, java, command, flags, run_id))
+    Ok(launch(paths, server, java, command, run_id))
 }
 
 /// What the shim runs: `java`, Core's flags, then the engine's arguments, in the engine's folder.
@@ -59,31 +58,29 @@ fn launch(
     server: &ServerRow,
     java: PathBuf,
     command: ServerCommand,
-    flags: Option<Vec<String>>,
     run_id: &str,
 ) -> Launch {
     Launch {
         v: PROTOCOL,
         run_id: run_id.to_owned(),
         java,
-        args: args(paths, server, flags, command.args),
+        args: args(paths, server, command.args),
         dir: command.cwd,
         memory_limit_mb: memory_limit(server.memory_mb),
     }
 }
 
-/// The arguments after `java`: the heap, the JVM flags (`flags`, or the tuned ones), the
+/// The arguments after `java`: the heap, the server's JVM flags (or the tuned ones), the
 /// temporary folder and home, then `server_args`, which the loader starts from.
 pub fn args(
     paths: &Paths,
     server: &ServerRow,
-    flags: Option<Vec<String>>,
     server_args: Vec<String>,
 ) -> Vec<String> {
     let dir = paths.server(&server.id);
     let mut args = super::memory::jvm(server.memory_mb);
-    if let Some(flags) = flags {
-        super::memory::use_flags(&mut args, flags);
+    if let Some(flags) = &server.jvm_flags {
+        super::memory::use_flags(&mut args, flags.clone());
     }
     args.extend([
         format!("-Djava.io.tmpdir={}", dir.join("tmp").display()),
@@ -326,8 +323,10 @@ mod tests {
         let server = ServerRow {
             id: "a".into(),
             name: "A".into(),
+            created_at: 0,
             port: 25565,
             memory_mb: 2048,
+            jvm_flags: None,
             java_path: None,
             java_version: None,
         };
@@ -358,12 +357,15 @@ mod tests {
                 args: server_args.iter().map(|arg| (*arg).to_owned()).collect(),
                 cwd: "/data/servers/a".into(),
             };
+            let server = ServerRow {
+                jvm_flags: flags.clone(),
+                ..server.clone()
+            };
             let launch = launch(
                 &paths,
                 &server,
                 command.java.clone(),
                 command.clone(),
-                flags.clone(),
                 "run",
             );
             let mut expected = match flags {

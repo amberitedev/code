@@ -542,11 +542,12 @@ mod tests {
     #[tokio::test]
     async fn settings_default_until_set() {
         let db = db::memory().await;
-        let server = server_rows::create(&db, "a", "A", |_| true)
+        server_rows::create(&db, "a", |_| true)
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(get(&db, &server.id).await.unwrap(), Restarts::default());
+        let server = "a";
+        assert_eq!(get(&db, server).await.unwrap(), Restarts::default());
         let changed = Restarts {
             crash: false,
             schedule: Some(Schedule::Daily {
@@ -554,7 +555,7 @@ mod tests {
             }),
             smart_after_hours: Some(12),
         };
-        set(&db, &server.id, &changed).await.unwrap();
-        assert_eq!(get(&db, &server.id).await.unwrap(), changed);
+        set(&db, server, &changed).await.unwrap();
+        assert_eq!(get(&db, server).await.unwrap(), changed);
     }
 }

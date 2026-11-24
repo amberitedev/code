@@ -40,7 +40,8 @@ Rust imports go `contracts` <- `sharing-client` <- `engine` <- `apps/app`, `apps
 - `packages/engine` is upstream's `packages/app-lib`, renamed. It owns the instances on one
   machine and serves them as an axum router. It knows nothing about desktops or servers.
 - `packages/sharing-client` is the sharing logic: versions, the install plan, the diff, crypto,
-  the pool and the TLS pin. It is its own crate because the store needs it without the engine.
+  the pool, the TLS pin and the backend's ticket keys. It is its own crate because the store
+  needs it without the engine, and Core's sign-in checks tickets with the same keys code.
 - `packages/sharing-storage` is the store, a separate process from the Core on purpose: small, with
   no identity, keys or database of its own.
 - `packages/modrinth-content-management` is upstream's content decisions (`resolve_content`, the
@@ -85,7 +86,9 @@ drops the last `Arc`, so tests run two engines side by side.
 Every machine also has `engine.db`, which holds only engine tables. Each database has its own
 schema, so a desktop table never exists on a Core. Nothing joins across databases: a host row
 refers to an instance by id, and the host deletes its rows when the engine reports the instance
-removed. The one shared table is the share history, whose `SCHEMA` sharing-client owns and the
+removed. A host row holds only what the engine instance has no field for: a Core keeps a server's
+name, memory, JVM flags and Java path on its instance, and only its port and chosen Java major in
+`core.db`. The one shared table is the share history, whose `SCHEMA` sharing-client owns and the
 engine applies to `engine.db` at open, so the table has one definition.
 
 Nothing is migrated. The schemas are fresh, a data folder from before them stops opening, and dev

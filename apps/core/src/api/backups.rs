@@ -568,7 +568,7 @@ pub async fn download_world(
 ) -> Result<Response, ApiError> {
     world(&id, &wid)?;
     state.access.require(&caller, &id).await?;
-    let server = server_rows::get(&state.db, &id)
+    let server = server_rows::get(&state.db, &state.engine, &id)
         .await
         .map_err(internal)?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;

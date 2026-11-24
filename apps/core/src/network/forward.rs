@@ -241,7 +241,8 @@ impl Network {
         let Some(run) = servers.run_of(&server_id) else {
             return;
         };
-        let Ok(Some(server)) = server_rows::get(&self.db, &server_id).await
+        let Ok(Some(server)) =
+            server_rows::get(&self.db, servers.engine(), &server_id).await
         else {
             return;
         };

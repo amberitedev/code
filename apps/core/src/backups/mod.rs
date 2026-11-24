@@ -785,12 +785,15 @@ impl Backups {
             // A new server's first comes an interval after it was made. Right after its first
             // start the world it just generated is still being written, and holds nothing to keep.
             (None, None) => {
-                let created: i64 = sqlx::query_scalar(
-                    "SELECT created_at FROM servers WHERE id = ?",
+                let created = crate::servers::server_rows::get(
+                    &self.db,
+                    self.servers.engine(),
+                    server_id,
                 )
-                .bind(server_id)
-                .fetch_one(&self.db)
-                .await?;
+                .await
+                .map_err(ServerError::Other)?
+                .ok_or_else(|| Error::NotFound(server_id.to_owned()))?
+                .created_at;
                 return Ok(Some(Due {
                     at: created + interval,
                     anchor: None,
