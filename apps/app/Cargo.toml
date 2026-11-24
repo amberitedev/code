@@ -73,6 +73,7 @@ tokio-util = { workspace = true, features = ["compat", "io", "rt"] }
 tracing = { workspace = true }
 tracing-error = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["chrono", "env-filter"] }
+ts-rs = { workspace = true, optional = true }
 url = { workspace = true }
 urlencoding = { workspace = true }
 uuid = { workspace = true, features = ["serde", "v4"] }
@@ -84,14 +85,10 @@ workspace = true
 features = ["devtools", "macos-private-api", "unstable"]
 
 [dev-dependencies]
-contracts = { workspace = true, features = ["server", "ts"] }
-# App routes over engine types write those types' TypeScript too.
-engine = { workspace = true, features = ["export-ts"] }
 rcgen = "0.14.7"
 rustls = { workspace = true, features = ["std"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tower = { version = "0.5.2", features = ["util"] }
-ts-rs = { workspace = true }
 
 [build-dependencies]
 dotenvy = { workspace = true }
@@ -118,6 +115,9 @@ default = ["custom-protocol"]
 # this feature is used for production builds where `devPath` points to the filesystem
 # DO NOT remove this
 custom-protocol = ["tauri/custom-protocol"]
+# The TypeScript of the App's routes, written by its tests: `cargo test --features export-ts`.
+# App routes over engine types write those types' TypeScript too.
+export-ts = ["contracts/export-ts", "dep:ts-rs", "engine/export-ts"]
 updater = []
 
 [lints]

@@ -1,46 +1,20 @@
-use contracts::{Auth, Empty, Endpoint, Json, Method};
+use contracts::{Empty, Json};
 use engine::data::Settings;
 use serde::{Deserialize, Serialize};
 
-pub struct GetSettings;
+contracts::endpoints! {
+    group settings;
 
-impl Endpoint for GetSettings {
-    const METHOD: Method = Method::Get;
-    const PATH: &'static str = "/app/settings";
-    const AUTH: Auth = Auth::None;
-    type Params = ();
-    type Query = ();
-    type Body = Empty;
-    type Response = Json<AppSettings>;
-}
-
-/// Replaces every setting.
-pub struct SetSettings;
-
-impl Endpoint for SetSettings {
-    const METHOD: Method = Method::Put;
-    const PATH: &'static str = "/app/settings";
-    const AUTH: Auth = Auth::None;
-    type Params = ();
-    type Query = ();
-    type Body = Json<AppSettings>;
-    type Response = Empty;
-}
-
-/// Keeps the previous data folder after a move failed. It answers while the engine cannot start.
-pub struct CancelDirectoryChange;
-
-impl Endpoint for CancelDirectoryChange {
-    const METHOD: Method = Method::Delete;
-    const PATH: &'static str = "/app/settings/directory-change";
-    const AUTH: Auth = Auth::None;
-    type Params = ();
-    type Query = ();
-    type Body = Empty;
-    type Response = Empty;
+    GetSettings: Get "/app/settings", None, (), (), Empty => Json<AppSettings>;
+    /// Replaces every setting.
+    SetSettings: Put "/app/settings", None, (), (), Json<AppSettings> => Empty;
+    /// Keeps the previous data folder after a move failed. It answers while the engine cannot start.
+    CancelDirectoryChange: Delete "/app/settings/directory-change", None, (), (), Empty => Empty;
 }
 
 /// Named the engine's `Settings` in TS, so the frontend has one settings type.
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "Settings"))]
-pub struct AppSettings(#[cfg_attr(test, ts(type = "Settings"))] pub Settings);
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS), ts(rename = "Settings"))]
+pub struct AppSettings(
+    #[cfg_attr(feature = "export-ts", ts(type = "Settings"))] pub Settings,
+);

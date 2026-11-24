@@ -10,51 +10,49 @@
 use modrinth_content_management::icons::IconConfig;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    Auth, Empty, Endpoint, Hash, Json, Method, Raw, tickets::StoreHost,
-};
+use crate::{Empty, Hash, Json, Raw, tickets::StoreHost};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct SharedInstanceId {
     pub id: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct InstanceInviteId {
     pub id: String,
     pub invite_id: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct InstanceVersionId {
     pub id: String,
     pub version: i32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct InviteId {
     pub id: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct IconUpload {
     pub id: String,
     pub upload: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct BlacklistedUser {
     pub user_id: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ModeratedFile {
     pub id: String,
     pub version: i32,
@@ -63,14 +61,14 @@ pub struct ModeratedFile {
 
 /// A server of a Core, by both ids.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct CoreServerId {
     pub core_id: String,
     pub server_id: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ServerInviteId {
     pub core_id: String,
     pub server_id: String,
@@ -79,45 +77,45 @@ pub struct ServerInviteId {
 
 /// Query of [`ListSharedInstances`].
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct SharedInstanceFilter {
     /// Only the caller's own id is allowed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "ts", ts(optional))]
+    #[cfg_attr(feature = "export-ts", ts(optional))]
     pub user: Option<String>,
     /// Also the shares the caller joined or plays through a server.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "ts", ts(optional))]
+    #[cfg_attr(feature = "export-ts", ts(optional))]
     pub include_joined: Option<bool>,
 }
 
 /// Body of [`CreateSharedInstance`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct NewSharedInstance {
     pub name: String,
     /// A Core key only: the server whose share this is. Its existing share is answered when it
     /// has one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "ts", ts(optional))]
+    #[cfg_attr(feature = "export-ts", ts(optional))]
     pub server_id: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct CreatedId {
     pub id: String,
 }
 
 /// Body of [`UpdateSharedInstance`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct SharedInstanceUpdate {
     pub name: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct SharedInstance {
     pub name: String,
     /// The URL of an uploaded image. Null for an icon editor icon, which `icon_config` holds.
@@ -131,7 +129,7 @@ pub struct SharedInstance {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct LinkedServer {
     /// The Minecraft address, `host:port`.
     pub domain: String,
@@ -140,7 +138,7 @@ pub struct LinkedServer {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
 pub enum OnlineStatus {
     Unknown,
@@ -150,7 +148,7 @@ pub enum OnlineStatus {
 
 /// The people a share is shared with, or the players of a server.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct InstanceUsers {
     pub users: Vec<InstanceUser>,
     /// Invite links that still work.
@@ -158,7 +156,7 @@ pub struct InstanceUsers {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct InstanceUser {
     pub id: String,
     /// RFC 3339. Null while the invite is pending.
@@ -169,7 +167,7 @@ pub struct InstanceUser {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
 pub enum JoinType {
     Owner,
@@ -178,20 +176,20 @@ pub enum JoinType {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct UserIds {
     pub user_ids: Vec<String>,
 }
 
 /// The invited accounts whose privacy settings refuse sharing invitations.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct FailedInvites {
     pub failed: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct InviteLink {
     pub id: String,
     /// RFC 3339.
@@ -203,21 +201,21 @@ pub struct InviteLink {
 
 /// Body of [`CreateInvite`].
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct NewInviteLink {
     /// Seconds, a week when absent. 0 is a year.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "ts", ts(optional))]
+    #[cfg_attr(feature = "export-ts", ts(optional))]
     pub max_age: Option<u32>,
     /// 0, the default, for no limit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "ts", ts(optional))]
+    #[cfg_attr(feature = "export-ts", ts(optional))]
     pub max_uses: Option<u32>,
 }
 
 /// What an invite link shares, shown to anyone before they accept it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct Invite {
     pub instance_id: String,
     pub instance_name: String,
@@ -232,12 +230,12 @@ pub struct Invite {
     pub instance_users: Vec<InviteUser>,
     /// With `?version=true`: the latest ready version, without file keys or download.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "ts", ts(optional))]
+    #[cfg_attr(feature = "export-ts", ts(optional))]
     pub version: Option<InstanceVersion>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct Inviter {
     pub id: String,
     pub name: String,
@@ -245,7 +243,7 @@ pub struct Inviter {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum InviteManager {
     User {
@@ -260,7 +258,7 @@ pub enum InviteManager {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct InviteUser {
     pub id: String,
     pub name: String,
@@ -269,18 +267,18 @@ pub struct InviteUser {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct InvitePreviewQuery {
     /// Adds the latest ready version.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "ts", ts(optional))]
+    #[cfg_attr(feature = "export-ts", ts(optional))]
     pub version: Option<bool>,
 }
 
 /// A file of a modpack that members do not get: by its Modrinth version, or, for a file Modrinth
 /// does not know, by its folder and file name.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RemovedFile {
     Version { version_id: String },
@@ -289,7 +287,7 @@ pub enum RemovedFile {
 
 /// A version's upstream fields, which a push sends beside the files.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct VersionContent {
     /// The Modrinth versions of its content.
     pub modrinth_ids: Vec<String>,
@@ -306,10 +304,10 @@ pub struct VersionContent {
 
 /// A version as the backend stores it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct VersionManifest {
     #[serde(flatten)]
-    #[cfg_attr(feature = "ts", ts(flatten))]
+    #[cfg_attr(feature = "export-ts", ts(flatten))]
     pub content: VersionContent,
     /// The hash of its sorted distinct object hashes, which names it on the stores.
     pub version_hash: Hash,
@@ -319,7 +317,7 @@ pub struct VersionManifest {
 /// A file of a version that lives on the stores. Content files (mods and the like) are named by
 /// their file name, every other file by its path in the instance or server folder.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ExternalFile {
     pub file_name: String,
     pub file_type: String,
@@ -337,37 +335,37 @@ pub struct ExternalFile {
     /// The file's own key. Absent for content files, whose key derives from `sha256`, and in an
     /// invite's preview, which carries no keys.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "ts", ts(optional))]
+    #[cfg_attr(feature = "export-ts", ts(optional))]
     pub key: Option<Hash>,
 }
 
 /// One version of a share.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct InstanceVersion {
     #[serde(flatten)]
-    #[cfg_attr(feature = "ts", ts(flatten))]
+    #[cfg_attr(feature = "export-ts", ts(flatten))]
     pub manifest: VersionManifest,
     pub version: i32,
     /// Its files are on the stores, so members can install it.
     pub ready: bool,
     /// For a member, once it is ready and has files.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "ts", ts(optional))]
+    #[cfg_attr(feature = "export-ts", ts(optional))]
     pub download: Option<VersionDownload>,
     /// For its owner, while it is not ready.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "ts", ts(optional))]
+    #[cfg_attr(feature = "export-ts", ts(optional))]
     pub upload: Option<VersionUpload>,
     /// For its owner.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "ts", ts(optional))]
+    #[cfg_attr(feature = "export-ts", ts(optional))]
     pub reports: Option<VersionReports>,
 }
 
 /// Where a ready version's files are, and the fetch ticket for them.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct VersionDownload {
     pub holders: Vec<StoreHost>,
     pub ticket: String,
@@ -375,7 +373,7 @@ pub struct VersionDownload {
 
 /// The Core the owner uploads a version's files to, and the store ticket for it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct VersionUpload {
     pub core: StoreHost,
     pub ticket: String,
@@ -384,7 +382,7 @@ pub struct VersionUpload {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct VersionReports {
     /// Members whose files decrypted to the wrong bytes.
     pub content: u32,
@@ -392,27 +390,27 @@ pub struct VersionReports {
 
 /// Body of [`CreateVersion`]. A push with the same files as a version still uploading resumes it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct NewInstanceVersion {
     #[serde(flatten)]
-    #[cfg_attr(feature = "ts", ts(flatten))]
+    #[cfg_attr(feature = "export-ts", ts(flatten))]
     pub manifest: VersionManifest,
     /// The owner's Core that runs a server of this share, which then holds its files.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "ts", ts(optional))]
+    #[cfg_attr(feature = "export-ts", ts(optional))]
     pub server_core: Option<String>,
 }
 
 /// Body of [`ReportVersion`]: a member got bad bytes of a version from `core_id`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct VersionFault {
     pub core_id: String,
     pub kind: FaultKind,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
 pub enum FaultKind {
     /// The bytes did not hash to their object: the Core's fault.
@@ -423,13 +421,13 @@ pub enum FaultKind {
 
 /// Body of [`IssueReadTicket`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct NewReadTicket {
     pub core_id: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct SignedReadTicket {
     pub ticket: String,
     /// RFC 3339.
@@ -439,7 +437,7 @@ pub struct SignedReadTicket {
 /// The account's shared storage: how much of its allowance on other people's Cores its shares
 /// use, and the versions they keep. Bytes throughout.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ShareStorage {
     pub used: u64,
     pub allowance: u64,
@@ -448,7 +446,7 @@ pub struct ShareStorage {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct StoredShare {
     pub id: String,
     pub name: String,
@@ -465,7 +463,7 @@ pub struct StoredShare {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct StoredVersion {
     pub version: i32,
     /// RFC 3339.
@@ -477,7 +475,7 @@ pub struct StoredVersion {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct BlacklistStatus {
     pub blacklisted: bool,
 }
@@ -485,7 +483,7 @@ pub struct BlacklistStatus {
 /// What a write to a server's players tells the backend about the server: the share it follows,
 /// the name its players see, and where they join it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct FollowedShare {
     pub instance_id: String,
     pub name: String,
@@ -497,7 +495,7 @@ pub struct FollowedShare {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct OutsideAddress {
     pub ip: String,
     pub port: u16,
@@ -505,149 +503,96 @@ pub struct OutsideAddress {
 
 /// Body of [`InvitePlayers`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct NewPlayers {
     #[serde(flatten)]
-    #[cfg_attr(feature = "ts", ts(flatten))]
+    #[cfg_attr(feature = "export-ts", ts(flatten))]
     pub server: FollowedShare,
     pub user_ids: Vec<String>,
 }
 
 /// Body of [`CreatePlayerLink`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct NewPlayerLink {
     #[serde(flatten)]
-    #[cfg_attr(feature = "ts", ts(flatten))]
+    #[cfg_attr(feature = "export-ts", ts(flatten))]
     pub server: FollowedShare,
     #[serde(flatten)]
-    #[cfg_attr(feature = "ts", ts(flatten))]
+    #[cfg_attr(feature = "export-ts", ts(flatten))]
     pub link: NewInviteLink,
 }
 
-/// The caller's own shares, and with `include_joined` every share they can play too.
-pub struct ListSharedInstances;
-/// A new share owned by the caller, or by a Core key the share of its server `server_id`.
-pub struct CreateSharedInstance;
-/// Pending invitees may read it too, to preview the invite.
-pub struct GetSharedInstance;
-/// The owner, or the Core whose server's share it is.
-pub struct UpdateSharedInstance;
-/// The owner, or the Core whose server's share it is. Its files go once no version names them.
-pub struct DeleteSharedInstance;
-/// Joined members only; players get the content, not who it is shared with.
-pub struct ListInstanceUsers;
-/// The owner invites accounts.
-pub struct InviteInstanceUsers;
-/// The owner removes anyone; a member may remove only themselves, which also leaves the servers
-/// they played it through. Their servers stop passing it on.
-pub struct RemoveInstanceUsers;
-/// The owner's live links.
-pub struct ListInvites;
-pub struct CreateInvite;
-pub struct DeleteInvite;
-/// Join through a link. Joining a share one already has is done.
-pub struct AcceptInvite;
-/// Accept every pending invite to the share, as a member and as a player. 404 when there is none.
-pub struct AcceptPendingInvite;
-pub struct DeclinePendingInvite;
-/// Anyone, signed in or not.
-pub struct GetInvite;
-/// The newest ready version, or the one uploading while none is ready.
-pub struct GetLatestVersion;
-/// Members see a version once it is ready.
-pub struct GetVersion;
-/// The owner pushes: every file is already encrypted and named, and the answer names the Core to
-/// upload them to. The version is ready once that Core confirms it holds them.
-pub struct CreateVersion;
-/// The owner deletes an older version. The current one and one still uploading stay.
-pub struct DeleteVersion;
-/// A member got bad bytes. The report is shown to the owner; nothing is marked broken.
-pub struct ReportVersion;
-/// The owner uploads an image.
-pub struct SetIcon;
-/// The owner sets an icon editor icon: only its settings, which clients draw themselves.
-pub struct SetGeneratedIcon;
-pub struct RemoveIcon;
-/// An uploaded icon. Every upload gets a new URL, so it never changes.
-pub struct GetIcon;
-/// Owner or member: a ticket for one Core to read the share for the caller, so a server they
-/// own can follow it.
-pub struct IssueReadTicket;
-/// The caller's shared storage.
-pub struct GetShareStorage;
-pub struct GetBlacklistStatus;
-/// Moderators.
-pub struct BlacklistUsers;
-/// Moderators.
-pub struct UnblacklistUsers;
-/// Moderators. Files are opaque to the backend, so the share is quarantined instead.
-pub struct DeleteModeratedFile;
-/// The players of a Core's server: the people it is shared with, who read the share it follows
-/// without being its members. For the Core's owner and the share's owner.
-pub struct ListPlayers;
-/// The Core's owner invites players, saying which share the server follows.
-pub struct InvitePlayers;
-/// A player may leave; the Core's owner and the share's owner remove anyone.
-pub struct RemovePlayers;
-/// The Core's owner: links that make whoever opens them a player.
-pub struct ListPlayerLinks;
-pub struct CreatePlayerLink;
-pub struct DeletePlayerLink;
+crate::endpoints! {
+    /// The backend's shared instance routes, on upstream's `sharedinstances` v1 paths.
+    group sharing;
 
-macro_rules! endpoints {
-    ($($name:ident: $method:ident $path:literal, $auth:ident, $params:ty, $query:ty, $body:ty => $response:ty;)+) => {
-        $(impl Endpoint for $name {
-            const METHOD: Method = Method::$method;
-            const PATH: &'static str = $path;
-            const AUTH: Auth = Auth::$auth;
-            type Params = $params;
-            type Query = $query;
-            type Body = $body;
-            type Response = $response;
-        })+
-
-        #[cfg(test)]
-        fn endpoint_entries() -> String {
-            [$(format!("\t{}: {},\n", stringify!($name), crate::ts::endpoint::<$name>())),+].concat()
-        }
-    };
-}
-
-endpoints! {
+    /// The caller's own shares, and with `include_joined` every share they can play too.
     ListSharedInstances: Get "/v1/instances", Account, (), SharedInstanceFilter, Empty => Json<Vec<String>>;
+    /// A new share owned by the caller, or by a Core key the share of its server `server_id`.
     CreateSharedInstance: Post "/v1/instances", Account, (), (), Json<NewSharedInstance> => Json<CreatedId>;
+    /// Pending invitees may read it too, to preview the invite.
     GetSharedInstance: Get "/v1/instances/{id}", Account, SharedInstanceId, (), Empty => Json<SharedInstance>;
+    /// The owner, or the Core whose server's share it is.
     UpdateSharedInstance: Patch "/v1/instances/{id}", Account, SharedInstanceId, (), Json<SharedInstanceUpdate> => Empty;
+    /// The owner, or the Core whose server's share it is. Its files go once no version names them.
     DeleteSharedInstance: Delete "/v1/instances/{id}", Account, SharedInstanceId, (), Empty => Empty;
+    /// Joined members only; players get the content, not who it is shared with.
     ListInstanceUsers: Get "/v1/instances/{id}/users", Account, SharedInstanceId, (), Empty => Json<InstanceUsers>;
+    /// The owner invites accounts.
     InviteInstanceUsers: Post "/v1/instances/{id}/users", Account, SharedInstanceId, (), Json<UserIds> => Json<FailedInvites>;
+    /// The owner removes anyone; a member may remove only themselves, which also leaves the servers
+    /// they played it through. Their servers stop passing it on.
     RemoveInstanceUsers: Delete "/v1/instances/{id}/users", Account, SharedInstanceId, (), Json<UserIds> => Empty;
+    /// The owner's live links.
     ListInvites: Get "/v1/instances/{id}/invites", Account, SharedInstanceId, (), Empty => Json<Vec<InviteLink>>;
     CreateInvite: Post "/v1/instances/{id}/invites", Account, SharedInstanceId, (), Json<NewInviteLink> => Json<CreatedId>;
+    /// Accept every pending invite to the share, as a member and as a player. 404 when there is none.
     AcceptPendingInvite: Post "/v1/instances/{id}/invites/pending", Account, SharedInstanceId, (), Empty => Empty;
     DeclinePendingInvite: Delete "/v1/instances/{id}/invites/pending", Account, SharedInstanceId, (), Empty => Empty;
+    /// Join through a link. Joining a share one already has is done.
     AcceptInvite: Post "/v1/instances/{id}/invites/{invite_id}", Account, InstanceInviteId, (), Empty => Empty;
     DeleteInvite: Delete "/v1/instances/{id}/invites/{invite_id}", Account, InstanceInviteId, (), Empty => Empty;
+    /// Anyone, signed in or not.
     GetInvite: Get "/v1/invites/{id}", None, InviteId, InvitePreviewQuery, Empty => Json<Invite>;
+    /// The newest ready version, or the one uploading while none is ready.
     GetLatestVersion: Get "/v1/instances/{id}/versions", Account, SharedInstanceId, (), Empty => Json<InstanceVersion>;
+    /// The owner pushes: every file is already encrypted and named, and the answer names the Core to
+    /// upload them to. The version is ready once that Core confirms it holds them.
     CreateVersion: Post "/v1/instances/{id}/versions", Account, SharedInstanceId, (), Json<NewInstanceVersion> => Json<InstanceVersion>;
+    /// Members see a version once it is ready.
     GetVersion: Get "/v1/instances/{id}/versions/{version}", Account, InstanceVersionId, (), Empty => Json<InstanceVersion>;
+    /// The owner deletes an older version. The current one and one still uploading stay.
     DeleteVersion: Delete "/v1/instances/{id}/versions/{version}", Account, InstanceVersionId, (), Empty => Empty;
+    /// A member got bad bytes. The report is shown to the owner; nothing is marked broken.
     ReportVersion: Post "/v1/instances/{id}/versions/{version}/reports", Account, InstanceVersionId, (), Json<VersionFault> => Empty;
+    /// The owner uploads an image.
     SetIcon: Put "/v1/instances/{id}/icon", Account, SharedInstanceId, (), Raw => Empty;
+    /// The owner sets an icon editor icon: only its settings, which clients draw themselves.
     SetGeneratedIcon: Put "/v1/instances/{id}/icon/generated", Account, SharedInstanceId, (), Json<IconConfig> => Empty;
     RemoveIcon: Delete "/v1/instances/{id}/icon", Account, SharedInstanceId, (), Empty => Empty;
+    /// An uploaded icon. Every upload gets a new URL, so it never changes.
     GetIcon: Get "/v1/icons/{id}/{upload}", None, IconUpload, (), Empty => Raw;
+    /// Owner or member: a ticket for one Core to read the share for the caller, so a server they
+    /// own can follow it.
     IssueReadTicket: Post "/v1/instances/{id}/server-ticket", Account, SharedInstanceId, (), Json<NewReadTicket> => Json<SignedReadTicket>;
+    /// The caller's shared storage.
     GetShareStorage: Get "/v1/storage", Account, (), (), Empty => Json<ShareStorage>;
     GetBlacklistStatus: Get "/v1/blacklist/{user_id}", Account, BlacklistedUser, (), Empty => Json<BlacklistStatus>;
+    /// Moderators.
     BlacklistUsers: Post "/v1/moderation/blacklist", Account, (), (), Json<UserIds> => Empty;
+    /// Moderators.
     UnblacklistUsers: Delete "/v1/moderation/blacklist", Account, (), (), Json<UserIds> => Empty;
+    /// Moderators. Files are opaque to the backend, so the share is quarantined instead.
     DeleteModeratedFile: Delete "/v1/moderation/instances/{id}/versions/{version}/files/{file}", Account, ModeratedFile, (), Empty => Empty;
+    /// The players of a Core's server: the people it is shared with, who read the share it follows
+    /// without being its members. For the Core's owner and the share's owner.
     ListPlayers: Get "/v1/servers/{core_id}/{server_id}/players", Account, CoreServerId, (), Empty => Json<InstanceUsers>;
+    /// The Core's owner invites players, saying which share the server follows.
     InvitePlayers: Post "/v1/servers/{core_id}/{server_id}/players", Account, CoreServerId, (), Json<NewPlayers> => Json<FailedInvites>;
+    /// A player may leave; the Core's owner and the share's owner remove anyone.
     RemovePlayers: Delete "/v1/servers/{core_id}/{server_id}/players", Account, CoreServerId, (), Json<UserIds> => Empty;
+    /// The Core's owner: links that make whoever opens them a player.
     ListPlayerLinks: Get "/v1/servers/{core_id}/{server_id}/invites", Account, CoreServerId, (), Empty => Json<Vec<InviteLink>>;
     CreatePlayerLink: Post "/v1/servers/{core_id}/{server_id}/invites", Account, CoreServerId, (), Json<NewPlayerLink> => Json<CreatedId>;
     DeletePlayerLink: Delete "/v1/servers/{core_id}/{server_id}/invites/{invite_id}", Account, ServerInviteId, (), Empty => Empty;
@@ -713,10 +658,7 @@ pub(crate) fn ts() -> String {
     ]
     .map(|declaration| format!("\nexport {declaration}\n"))
     .concat();
-    format!(
-        "{declarations}\n/** The backend's shared instance routes, on upstream's `sharedinstances` v1 paths. */\nexport const sharing = {{\n{}}}\n",
-        endpoint_entries()
-    )
+    declarations + &ts_module().ts(false)
 }
 
 #[cfg(test)]

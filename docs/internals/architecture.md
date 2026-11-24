@@ -92,16 +92,19 @@ data is reset rather than converted. The sqlx regeneration commands are in the c
 ## One protocol
 
 An `Endpoint` ([`contracts/src/lib.rs`](../../packages/contracts/src/lib.rs)) is a unit struct per
-method and path with its `Params`, `Query`, `Body` and `Response`. ts-rs writes the TypeScript, which
-is committed and kept fresh by each crate's tests; `WRITE_TS=1 node scripts/dev-runner.ts test <crate>`
-rewrites it. All generated files are re-exported by
-`@amberite/contracts` (`packages/contracts/ts/index.ts`), so an exported name must be unique across
-them.
+method and path with its `Params`, `Query`, `Body` and `Response`. Every crate declares its routes
+with the one `contracts::endpoints!` macro, a group per module, and never implements `Endpoint` by
+hand outside tests. Under the `export-ts` feature ts-rs writes the TypeScript, which is committed
+and kept fresh by each crate's tests; `WRITE_TS=1 node scripts/dev-runner.ts test <crate>` rewrites
+it. Each generated file is a namespace of its own (`protocol`, `backend`, `core`, `engine`,
+`app`) that imports the types it names from the files before it. `@amberite/contracts`
+(`packages/contracts/ts/index.ts`) still re-exports them all flat, so an exported name must be
+unique across them, until `core-hosting/*` goes and the index exports each file as its namespace.
 
 Endpoints are declared where their types are:
 
-- Backend, Core-native and store Endpoints are in `packages/contracts`, generated to
-  `ts/contracts.ts`.
+- Backend and Core-native Endpoints are in `packages/contracts`, generated to `ts/backend.ts` and
+  `ts/core.ts` over the shared primitives in `ts/protocol.ts`. The store's Endpoints are Rust-only.
 - Engine Endpoints are in [`packages/engine/src/endpoints`](../../packages/engine/src/endpoints/mod.rs),
   generated to `ts/engine.ts`. The engine's wire types are upstream's (`Instance`,
   `InstallJobSnapshot`), and contracts sits below the engine, so contracts cannot name them. Moving

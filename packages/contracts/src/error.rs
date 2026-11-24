@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 /// The error body of every route we own.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ApiError {
     pub error: ErrorCode,
     /// Ready to show.
@@ -21,7 +21,7 @@ impl ApiError {
 /// Every error code of the backend, Cores, stores, the engine and the App. The engine's keep the
 /// exact strings `engine::error::error_code` returns, which the App's helpers switch on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
     InvalidInput,

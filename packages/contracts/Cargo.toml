@@ -9,7 +9,7 @@ repository.workspace = true
 ignored = ["contracts"]
 
 # The protocol: the Endpoint machinery, the one error body, the protocol version, and the limits and
-# share rules. `client` and `server` add the transport glue, `ts` the TypeScript generator, and
+# share rules. `client` and `server` add the transport glue, `export-ts` the TypeScript generator, and
 # `sqlx` and `clap` the derives the Core stores and parses a few enums with. It imports none of our
 # crates, only upstream's ariadne for the friends socket's messages and modrinth-content-management
 # for a shared instance's icon.
@@ -28,7 +28,7 @@ ts-rs = { workspace = true, features = ["no-serde-warnings", "uuid-impl"], optio
 uuid = { workspace = true, features = ["serde"] }
 
 [dev-dependencies]
-contracts = { path = ".", features = ["client", "server", "ts"] }
+contracts = { path = ".", features = ["client", "export-ts", "server"] }
 http-body-util = "0.1.3"
 rustls = { workspace = true, features = ["ring"] }
 tokio = { workspace = true, features = ["io-util", "macros", "net", "rt"] }
@@ -37,9 +37,9 @@ tower = { version = "0.5.2", features = ["util"] }
 [features]
 clap = ["dep:clap"]
 client = ["dep:reqwest", "dep:thiserror"]
+export-ts = ["ariadne/ts", "dep:ts-rs", "modrinth-content-management/ts"]
 server = ["dep:axum"]
 sqlx = ["dep:sqlx"]
-ts = ["ariadne/ts", "dep:ts-rs", "modrinth-content-management/ts"]
 
 [lints]
 workspace = true

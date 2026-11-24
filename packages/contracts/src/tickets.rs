@@ -13,7 +13,7 @@ crate::consts! {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum TicketKind {
     Session,
@@ -31,7 +31,7 @@ pub trait Ticket: DeserializeOwned {
 /// The App signs in to one Core as one user, or authorizes one dangerous action there. Five
 /// minutes, one use.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct SessionTicket {
     pub iss: String,
     pub kind: TicketKind,
@@ -51,7 +51,7 @@ pub struct SessionTicket {
 
 /// The owner's App uploads one version of at most `bytes` to the Core in `aud`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct StoreTicket {
     pub iss: String,
     pub kind: TicketKind,
@@ -66,7 +66,7 @@ pub struct StoreTicket {
 
 /// A member's App reads one version from any of the Cores in `aud`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct FetchTicket {
     pub iss: String,
     pub kind: TicketKind,
@@ -80,7 +80,7 @@ pub struct FetchTicket {
 
 /// The Core in `aud` copies one version from `source`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct PullTicket {
     pub iss: String,
     pub kind: TicketKind,
@@ -96,7 +96,7 @@ pub struct PullTicket {
 /// The App lets one Core read one share for its user, so a server can follow it. The backend
 /// checks this kind itself.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ReadTicket {
     pub iss: String,
     pub kind: TicketKind,
@@ -113,7 +113,7 @@ pub struct ReadTicket {
 
 /// The Core a ticket is for, or the Cores it may be used at.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(untagged)]
 pub enum Audience {
     One(String),
@@ -122,7 +122,7 @@ pub enum Audience {
 
 /// Where a pull copies from, and a fetch ticket for it there.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct PullSource {
     pub core: StoreHost,
     pub ticket: String,
@@ -130,7 +130,7 @@ pub struct PullSource {
 
 /// A Core whose store holds versions, as the App and other Cores reach it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct StoreHost {
     pub id: String,
     /// `https://ip:port` on its own network.
@@ -163,14 +163,14 @@ impl Ticket for ReadTicket {
 
 /// The backend's ticket keys as a JWK set. A key stays listed for a day after it is replaced.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct PublicKeys {
     pub keys: Vec<PublicKey>,
 }
 
 /// One Ed25519 public key as a JWK.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct PublicKey {
     /// Always `OKP`.
     pub kty: String,

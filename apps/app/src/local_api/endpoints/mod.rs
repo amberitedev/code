@@ -2,44 +2,6 @@
 //! `cargo test -p amberite-app` keeps fresh. Regenerate it with
 //! `WRITE_TS=1 node scripts/dev-runner.ts test amberite-app`.
 
-/// Declares each route as a unit struct and, for the tests, the entries of its TypeScript module
-/// object, keyed by the name with a lowercase first letter.
-macro_rules! endpoints {
-    ($(
-        $(#[doc = $doc:literal])*
-        $name:ident: $method:ident $path:literal, $params:ty, $query:ty, $body:ty => $response:ty;
-    )+) => {
-        $(
-            $(#[doc = $doc])*
-            pub struct $name;
-
-            impl contracts::Endpoint for $name {
-                const METHOD: contracts::Method = contracts::Method::$method;
-                const PATH: &'static str = $path;
-                const AUTH: contracts::Auth = contracts::Auth::None;
-                type Params = $params;
-                type Query = $query;
-                type Body = $body;
-                type Response = $response;
-            }
-        )+
-
-        #[cfg(test)]
-        pub(super) fn ts_entries() -> String {
-            [$({
-                let name = stringify!($name);
-                format!(
-                    "\t{}{}: {},\n",
-                    name[..1].to_lowercase(),
-                    &name[1..],
-                    contracts::ts::endpoint::<$name>(),
-                )
-            }),+]
-            .concat()
-        }
-    };
-}
-
 pub mod accounts;
 pub mod boot;
 pub mod cores;
@@ -66,44 +28,34 @@ pub mod updates;
 
 /// The `{id}` of a route's path.
 #[derive(serde::Serialize, serde::Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct IdParams {
     pub id: String,
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "export-ts"))]
 mod tests {
-    use contracts::ts::{config, endpoint};
+    use contracts::ts::config;
     use ts_rs::TS;
 
     use super::{
         IdParams,
         accounts::{self, MinecraftAccountParams, ModrinthSignIn},
-        boot::{Boot, GetBoot, Platform},
-        cores::{
-            CheckCoreSession, ConnectCore, CoreSessionKey, CoreTarget,
-            NewCoreSession, SignInToCore, SignOutOfCore,
-        },
+        boot::{self, Boot, Platform},
+        cores::{self, CoreSessionKey, CoreTarget, NewCoreSession},
         desktop::{
-            AppFolder, CheckNetworkMetered, CreateShortcut, DialogFilter,
-            ExternalLink, GetJavaAt, GetOpeningCommand, JavaAtPath, JavaTest,
-            LocalPath, LogFromWebview, NewShortcut, OpenDialog, OpenFolder,
-            OpenPath, OpenUrl, PickFiles, PickSavePath, RevealPath, SaveDialog,
-            TestJavaAt, WebviewLog, WebviewLogLevel,
+            self, AppFolder, DialogFilter, ExternalLink, JavaAtPath, JavaTest,
+            LocalPath, NewShortcut, OpenDialog, SaveDialog, WebviewLog,
+            WebviewLogLevel,
         },
-        events::EventSocket,
-        files::{
-            CacheRemoteIcon, FileStat, GetLocalFile, GetThumbnail,
-            LocalFileQuery, ReadLocalFile, RemoteIcon, StatLocalFile,
-            ThumbnailQuery,
-        },
+        events,
+        files::{self, FileStat, LocalFileQuery, RemoteIcon, ThumbnailQuery},
         friends,
         game_options::{self, GameSettingLabelsRequest},
-        health::CheckHealth,
+        health,
         import::{
-            CheckImportableInstance, GetDefaultLauncherPath, ImportInstance,
-            ImportJob, ImportableInstance, InstanceToImport, Launcher,
-            LauncherFolder, ListImportableInstances,
+            self, ImportJob, ImportableInstance, InstanceToImport, Launcher,
+            LauncherFolder,
         },
         install::{
             self, InstallCreateInstanceRequest, InstallModpackPreview,
@@ -113,20 +65,12 @@ mod tests {
             self, ContentPathQuery, LocalContentFile, LocalIcon, LocalProject,
             MrpackExport,
         },
-        launch::{
-            InstancePlay, JoinServer, JoinSingleplayerWorld, PlayInstance,
-            ServerJoin, SingleplayerJoin,
-        },
+        launch::{self, InstancePlay, ServerJoin, SingleplayerJoin},
         library::{
-            CacheGeneratedIcon, CacheIcon, GeneratedIcon,
-            GeneratedInstanceIcon, InstanceVisibility, ListHiddenInstances,
-            ListRecentIconConfigs, RecentIconConfigs, SetGeneratedInstanceIcon,
-            SetInstanceHidden,
+            self, GeneratedIcon, GeneratedInstanceIcon, InstanceVisibility,
+            RecentIconConfigs,
         },
-        onboarding::{
-            GetOnboardingChecklist, OnboardingProgress,
-            SkipCreateInstanceOnboarding,
-        },
+        onboarding::{self, OnboardingProgress},
         ops::{
             self, DebugExport, ExternalSave, InstanceFileSave, LocalUpload,
             OpResponse,
@@ -135,7 +79,7 @@ mod tests {
             self, NewScreenshotGroup, ScreenshotEdit, ScreenshotExport,
             ScreenshotFile, ScreenshotGroupUpdate, ScreenshotMove,
         },
-        settings::{CancelDirectoryChange, GetSettings, SetSettings},
+        settings,
         sharing::{self, SharePublish},
         skins::{self, CustomSkinSave, NewCustomSkin, SkinFlushQuery},
         synced_options::{
@@ -185,10 +129,8 @@ mod tests {
     use engine::pack::install_from::CreatePackLocation;
     use engine::prelude::InstanceSyncedOption;
 
-    const PATH: &str = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../packages/contracts/ts/app.ts"
-    );
+    const DIR: &str =
+        concat!(env!("CARGO_MANIFEST_DIR"), "/../../packages/contracts/ts");
 
     fn file() -> String {
         let cfg = config();
@@ -328,147 +270,49 @@ mod tests {
         ]
         .map(|declaration| format!("\nexport {declaration}\n"))
         .concat();
-        format!(
-            "// Generated from apps/app by ts-rs. Do not edit.\n\
-             // Regenerate: WRITE_TS=1 node scripts/dev-runner.ts test amberite-app\n\n\
-             import type {{ ApiError, CoreSession, Endpoint, ModLoader, SharedIconConfig, UserFriend, UserStatus }} from './contracts'\n\
-             import type {{ CachedSharedInstanceSummary, CommandPayload, DesyncServerMode, EngineEvent, FriendPayload, ImportLauncherType, InstallJobSnapshot, InstanceGroupsChangedPayload, InstanceLink, InstanceSyncedOptions, JavaVersion, OnboardingChecklist, ProcessMetadata, ProjectType, Settings }} from './engine'\n\
-             {declarations}\n\
-             export const health = {{\n\
-             \tcheckHealth: {},\n\
-             }}\n\n\
-             export const boot = {{\n\
-             \tgetBoot: {},\n\
-             }}\n\n\
-             export const pairedCores = {{\n\
-             \tconnectCore: {},\n\
-             \tsignInToCore: {},\n\
-             \tsignOutOfCore: {},\n\
-             \tcheckCoreSession: {},\n\
-             }}\n\n\
-             export const events = {{\n\
-             \teventSocket: {},\n\
-             }}\n\n\
-             export const localFiles = {{\n\
-             \tgetLocalFile: {},\n\
-             \tgetThumbnail: {},\n\
-             \tcacheRemoteIcon: {},\n\
-             \treadLocalFile: {},\n\
-             \tstatLocalFile: {},\n\
-             }}\n\n\
-             export const desktop = {{\n\
-             \tpickFiles: {},\n\
-             \tpickSavePath: {},\n\
-             \topenUrl: {},\n\
-             \topenPath: {},\n\
-             \trevealPath: {},\n\
-             \topenFolder: {},\n\
-             \tcreateShortcut: {},\n\
-             \tcheckNetworkMetered: {},\n\
-             \tlogFromWebview: {},\n\
-             \tgetOpeningCommand: {},\n\
-             \tgetJavaAt: {},\n\
-             \ttestJavaAt: {},\n\
-             }}\n\n\
-             export const library = {{\n\
-             \tlistRecentIconConfigs: {},\n\
-             \tlistHiddenInstances: {},\n\
-             \tsetInstanceHidden: {},\n\
-             \tcacheIcon: {},\n\
-             \tcacheGeneratedIcon: {},\n\
-             \tsetGeneratedInstanceIcon: {},\n\
-             }}\n\n\
-             export const gameOptions = {{\n{}}}\n\n\
-             export const syncedOptions = {{\n{}}}\n\n\
-             export const syncedPacks = {{\n{}}}\n\n\
-             export const screenshots = {{\n{}}}\n\n\
-             export const friends = {{\n{}}}\n\n\
-             export const skins = {{\n{}}}\n\n\
-             export const ops = {{\n{}}}\n\n\
-             export const updates = {{\n{}}}\n\n\
-             export const localAccounts = {{\n{}}}\n\n\
-             export const launch = {{\n\
-             \tplayInstance: {},\n\
-             \tjoinServer: {},\n\
-             \tjoinSingleplayerWorld: {},\n\
-             }}\n\n\
-             export const settings = {{\n\
-             \tgetSettings: {},\n\
-             \tsetSettings: {},\n\
-             \tcancelDirectoryChange: {},\n\
-             }}\n\n\
-             export const onboarding = {{\n\
-             \tgetOnboardingChecklist: {},\n\
-             \tskipCreateInstanceOnboarding: {},\n\
-             }}\n\n\
-             export const launcherImport = {{\n\
-             \tlistImportableInstances: {},\n\
-             \tcheckImportableInstance: {},\n\
-             \tgetDefaultLauncherPath: {},\n\
-             \timportInstance: {},\n\
-             }}\n\n\
-             export const localInstalls = {{\n{}}}\n\n\
-             export const instancePaths = {{\n{}}}\n\n\
-             export const localSharing = {{\n{}}}\n",
-            endpoint::<CheckHealth>(),
-            endpoint::<GetBoot>(),
-            endpoint::<ConnectCore>(),
-            endpoint::<SignInToCore>(),
-            endpoint::<SignOutOfCore>(),
-            endpoint::<CheckCoreSession>(),
-            endpoint::<EventSocket>(),
-            endpoint::<GetLocalFile>(),
-            endpoint::<GetThumbnail>(),
-            endpoint::<CacheRemoteIcon>(),
-            endpoint::<ReadLocalFile>(),
-            endpoint::<StatLocalFile>(),
-            endpoint::<PickFiles>(),
-            endpoint::<PickSavePath>(),
-            endpoint::<OpenUrl>(),
-            endpoint::<OpenPath>(),
-            endpoint::<RevealPath>(),
-            endpoint::<OpenFolder>(),
-            endpoint::<CreateShortcut>(),
-            endpoint::<CheckNetworkMetered>(),
-            endpoint::<LogFromWebview>(),
-            endpoint::<GetOpeningCommand>(),
-            endpoint::<GetJavaAt>(),
-            endpoint::<TestJavaAt>(),
-            endpoint::<ListRecentIconConfigs>(),
-            endpoint::<ListHiddenInstances>(),
-            endpoint::<SetInstanceHidden>(),
-            endpoint::<CacheIcon>(),
-            endpoint::<CacheGeneratedIcon>(),
-            endpoint::<SetGeneratedInstanceIcon>(),
-            game_options::ts_entries(),
-            synced_options::ts_entries(),
-            synced_packs::ts_entries(),
-            screenshots::ts_entries(),
-            friends::ts_entries(),
-            skins::ts_entries(),
-            ops::ts_entries(),
-            updates::ts_entries(),
-            accounts::ts_entries(),
-            endpoint::<PlayInstance>(),
-            endpoint::<JoinServer>(),
-            endpoint::<JoinSingleplayerWorld>(),
-            endpoint::<GetSettings>(),
-            endpoint::<SetSettings>(),
-            endpoint::<CancelDirectoryChange>(),
-            endpoint::<GetOnboardingChecklist>(),
-            endpoint::<SkipCreateInstanceOnboarding>(),
-            endpoint::<ListImportableInstances>(),
-            endpoint::<CheckImportableInstance>(),
-            endpoint::<GetDefaultLauncherPath>(),
-            endpoint::<ImportInstance>(),
-            install::ts_entries(),
-            instance_paths::ts_entries(),
-            sharing::ts_entries(),
+        let modules: String = [
+            health::ts_module(),
+            boot::ts_module(),
+            cores::ts_module(),
+            events::ts_module(),
+            files::ts_module(),
+            desktop::ts_module(),
+            library::ts_module(),
+            game_options::ts_module(),
+            synced_options::ts_module(),
+            synced_packs::ts_module(),
+            screenshots::ts_module(),
+            friends::ts_module(),
+            skins::ts_module(),
+            ops::ts_module(),
+            updates::ts_module(),
+            accounts::ts_module(),
+            launch::ts_module(),
+            settings::ts_module(),
+            onboarding::ts_module(),
+            import::ts_module(),
+            install::ts_module(),
+            instance_paths::ts_module(),
+            sharing::ts_module(),
+        ]
+        .map(|module| module.ts(true))
+        .concat();
+        let earlier = ["protocol", "backend", "core", "engine"].map(|name| {
+            let path = format!("{DIR}/{name}.ts");
+            (name, std::fs::read_to_string(path).unwrap_or_default())
+        });
+        let earlier = earlier
+            .each_ref()
+            .map(|(name, contents)| (*name, contents.as_str()));
+        contracts::ts::file(
+            "amberite-app",
+            &format!("{declarations}{modules}"),
+            &earlier,
         )
     }
 
     #[test]
     fn ts_is_up_to_date() {
-        contracts::ts::check(PATH, &file());
+        contracts::ts::check(&format!("{DIR}/app.ts"), &file());
     }
 }

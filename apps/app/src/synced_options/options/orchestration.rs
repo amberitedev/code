@@ -33,7 +33,7 @@ use super::pending::{self, PendingAction, PendingChange};
 use super::{COMMAND_HISTORY_FILE, HOTBAR_FILE};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum SyncedOptionJoinAction {
     SeedShared,
@@ -43,13 +43,13 @@ pub enum SyncedOptionJoinAction {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct SyncedOptionJoinPreview {
     pub action: SyncedOptionJoinAction,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum SyncedOptionJoinResolution {
     UseSynced,
@@ -57,7 +57,7 @@ pub enum SyncedOptionJoinResolution {
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct GlobalSyncedOptions {
     pub game_options: bool,
     pub command_history: bool,
@@ -103,7 +103,7 @@ impl GlobalSyncedOptions {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct SyncedOptionCapability {
     pub option: SyncedOption,
     pub supported: bool,
@@ -111,7 +111,7 @@ pub struct SyncedOptionCapability {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct SyncedOptionsOverview {
     pub global_options: GlobalSyncedOptions,
     pub capabilities: Vec<SyncedOptionCapability>,

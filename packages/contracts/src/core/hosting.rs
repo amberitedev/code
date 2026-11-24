@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct Performance {
     /// The most memory Java may use. Java starts with less and grows to it.
     pub memory_mb: u32,
@@ -15,13 +15,13 @@ pub struct Performance {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct Memory {
     pub memory_mb: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct JvmFlags {
     /// The server's own flags, each starting with `-`. Null goes back to the tuned ones.
     pub flags: Option<Vec<String>>,
@@ -29,7 +29,7 @@ pub struct JvmFlags {
 
 /// A server's restart settings.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct Restarts {
     /// Start the server again after a crash. On by default.
     pub crash: bool,
@@ -52,16 +52,16 @@ impl Default for Restarts {
 
 /// A scheduled restart, in the Core machine's local time.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(tag = "every", rename_all = "snake_case")]
 pub enum Schedule {
     Daily {
-        #[cfg_attr(feature = "ts", ts(type = "string"))]
+        #[cfg_attr(feature = "export-ts", ts(type = "string"))]
         at: TimeOfDay,
     },
     Weekly {
         on: Weekday,
-        #[cfg_attr(feature = "ts", ts(type = "string"))]
+        #[cfg_attr(feature = "export-ts", ts(type = "string"))]
         at: TimeOfDay,
     },
 }
@@ -104,7 +104,7 @@ impl From<TimeOfDay> for String {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 #[serde(rename_all = "snake_case")]
 pub enum Weekday {
@@ -118,7 +118,7 @@ pub enum Weekday {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ConsoleCommand {
     /// One line, as typed into the server console, such as `say hello`.
     pub command: String,
@@ -127,13 +127,13 @@ pub struct ConsoleCommand {
 /// A custom Java binary on the Core's machine, or null for the Java the Core manages. An advanced
 /// override; it runs as `copal-servers`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct JavaPath {
     pub path: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ServerInsight {
     /// Who is online, from the Core's health check and join and leave lines. Empty while the
     /// server does not run.
@@ -156,7 +156,7 @@ pub struct ServerInsight {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct Crash {
     /// Unix seconds.
     pub at: i64,

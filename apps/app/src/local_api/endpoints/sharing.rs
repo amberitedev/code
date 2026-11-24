@@ -2,19 +2,21 @@ use contracts::{Empty, Json};
 use engine::data::CachedSharedInstanceSummary;
 use serde::{Deserialize, Serialize};
 
-endpoints! {
+contracts::endpoints! {
+    group localSharing;
+
     /// Whether the signed-in account can share instances.
-    CanUseSharedInstances: Get "/app/sharing/available", (), (), Empty => Json<bool>;
+    CanUseSharedInstances: Get "/app/sharing/available", None, (), (), Empty => Json<bool>;
     /// The signed-in account's shares as last seen, empty when signed out.
-    GetCachedSharedLibrary: Get "/app/sharing/library", (), (), Empty => Json<Vec<CachedSharedInstanceSummary>>;
-    SetCachedSharedLibrary: Put "/app/sharing/library", (), (), Json<Vec<CachedSharedInstanceSummary>> => Empty;
+    GetCachedSharedLibrary: Get "/app/sharing/library", None, (), (), Empty => Json<Vec<CachedSharedInstanceSummary>>;
+    SetCachedSharedLibrary: Put "/app/sharing/library", None, (), (), Json<Vec<CachedSharedInstanceSummary>> => Empty;
     /// Publishes the instance's current content as its share's next version. Progress is bytes
     /// uploaded.
-    PublishSharedInstance: Post "/app/ops/shared-instance-publish", (), (), Json<SharePublish> => Empty;
+    PublishSharedInstance: Post "/app/ops/shared-instance-publish", None, (), (), Json<SharePublish> => Empty;
 }
 
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct SharePublish {
     pub op: String,
     pub instance_id: String,

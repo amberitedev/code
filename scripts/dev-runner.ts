@@ -857,6 +857,8 @@ export function testBuild(
 					? ['--features', `${crate.name}/default`]
 					: [],
 			),
+			// The App's tests check its generated TypeScript, as in CI.
+			...(crates.includes('amberite-app') ? ['--features', 'amberite-app/export-ts'] : []),
 			// Cargo takes `--lib` once, for every selected package.
 			...(targets.includes('--lib') ? ['--lib'] : []),
 			...targets.filter((target) => target !== '--lib'),

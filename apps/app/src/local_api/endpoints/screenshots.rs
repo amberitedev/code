@@ -11,41 +11,30 @@ use serde::{Deserialize, Serialize};
 
 use super::IdParams;
 
-endpoints! {
-    ListInstanceScreenshots: Get "/app/instances/{id}/screenshots", IdParams,
-        (), Empty => Json<Vec<ScreenshotFile>>;
-    ListScreenshots: Get "/app/screenshots", (), (), Empty
-        => Json<Vec<ScreenshotFile>>;
+contracts::endpoints! {
+    group screenshots;
+
+    ListInstanceScreenshots: Get "/app/instances/{id}/screenshots", None, IdParams, (), Empty => Json<Vec<ScreenshotFile>>;
+    ListScreenshots: Get "/app/screenshots", None, (), (), Empty => Json<Vec<ScreenshotFile>>;
     /// The screenshots in the shared screenshots folder.
-    ListSyncedScreenshots: Get "/app/screenshots/synced", (), (), Empty
-        => Json<Vec<ScreenshotFile>>;
+    ListSyncedScreenshots: Get "/app/screenshots/synced", None, (), (), Empty => Json<Vec<ScreenshotFile>>;
     /// Saves an edit of a screenshot; the body is the edited PNG.
-    SaveEditedScreenshot: Post "/app/screenshots/edits", (), ScreenshotEdit,
-        Raw => Json<ScreenshotFile>;
-    DeleteScreenshots: Delete "/app/screenshots", (), (),
-        Json<Vec<ScreenshotKey>> => Empty;
+    SaveEditedScreenshot: Post "/app/screenshots/edits", None, (), ScreenshotEdit, Raw => Json<ScreenshotFile>;
+    DeleteScreenshots: Delete "/app/screenshots", None, (), (), Json<Vec<ScreenshotKey>> => Empty;
     /// Copies the screenshots into a folder.
-    ExportScreenshots: Post "/app/screenshots/export", (), (),
-        Json<ScreenshotExport> => Empty;
+    ExportScreenshots: Post "/app/screenshots/export", None, (), (), Json<ScreenshotExport> => Empty;
     /// Moves the screenshots to another instance and returns their new keys.
-    MoveScreenshots: Post "/app/screenshots/move", (), (), Json<ScreenshotMove>
-        => Json<Vec<ScreenshotKey>>;
-    ListScreenshotGroups: Get "/app/screenshot-groups", (), (), Empty
-        => Json<Vec<ScreenshotGroup>>;
-    CreateScreenshotGroup: Post "/app/screenshot-groups", (), (),
-        Json<NewScreenshotGroup> => Json<ScreenshotGroup>;
-    RenameScreenshotGroup: Patch "/app/screenshot-groups/{id}", IdParams, (),
-        Json<ScreenshotGroupUpdate> => Json<ScreenshotGroup>;
-    DeleteScreenshotGroup: Delete "/app/screenshot-groups/{id}", IdParams, (),
-        Empty => Empty;
-    SetScreenshotGroupMemberships: Put "/app/screenshot-groups/memberships",
-        (), (), Json<Vec<ScreenshotGroupMembershipUpdate>> => Empty;
-    ImportScreenshotGroups: Post "/app/screenshot-groups/import", (), (),
-        Json<Vec<ScreenshotGroupImport>> => Empty;
+    MoveScreenshots: Post "/app/screenshots/move", None, (), (), Json<ScreenshotMove> => Json<Vec<ScreenshotKey>>;
+    ListScreenshotGroups: Get "/app/screenshot-groups", None, (), (), Empty => Json<Vec<ScreenshotGroup>>;
+    CreateScreenshotGroup: Post "/app/screenshot-groups", None, (), (), Json<NewScreenshotGroup> => Json<ScreenshotGroup>;
+    RenameScreenshotGroup: Patch "/app/screenshot-groups/{id}", None, IdParams, (), Json<ScreenshotGroupUpdate> => Json<ScreenshotGroup>;
+    DeleteScreenshotGroup: Delete "/app/screenshot-groups/{id}", None, IdParams, (), Empty => Empty;
+    SetScreenshotGroupMemberships: Put "/app/screenshot-groups/memberships", None, (), (), Json<Vec<ScreenshotGroupMembershipUpdate>> => Empty;
+    ImportScreenshotGroups: Post "/app/screenshot-groups/import", None, (), (), Json<Vec<ScreenshotGroupImport>> => Empty;
 }
 
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ScreenshotFile {
     pub id: String,
     pub instance_id: String,
@@ -74,7 +63,7 @@ impl From<crate::screenshots::InstanceScreenshot> for ScreenshotFile {
 
 /// The screenshot that was edited, and whether the edit replaces it or is saved beside it.
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ScreenshotEdit {
     pub instance_id: String,
     pub file_name: String,
@@ -82,28 +71,28 @@ pub struct ScreenshotEdit {
 }
 
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ScreenshotExport {
     pub keys: Vec<ScreenshotKey>,
     pub export_path: PathBuf,
 }
 
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ScreenshotMove {
     pub keys: Vec<ScreenshotKey>,
     pub target_instance_id: String,
 }
 
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct NewScreenshotGroup {
     pub name: String,
     pub screenshot_ids: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ScreenshotGroupUpdate {
     pub name: String,
 }

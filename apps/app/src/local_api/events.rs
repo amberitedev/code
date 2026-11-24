@@ -21,20 +21,30 @@ const APP_EVENT_CAPACITY: usize = 256;
 
 /// What the App reports, beside the engine's events.
 #[derive(Clone, Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(tag = "type", content = "payload", rename_all = "snake_case")]
 #[cfg_attr(
-    test,
+    feature = "export-ts",
     ts(tag = "type", content = "payload", rename_all = "snake_case")
 )]
 pub enum AppEvent {
-    Friend(#[cfg_attr(test, ts(type = "FriendPayload"))] FriendPayload),
-    Notification(#[cfg_attr(test, ts(type = "unknown"))] serde_json::Value),
+    Friend(
+        #[cfg_attr(feature = "export-ts", ts(type = "FriendPayload"))]
+        FriendPayload,
+    ),
+    Notification(
+        #[cfg_attr(feature = "export-ts", ts(type = "unknown"))]
+        serde_json::Value,
+    ),
     OnboardingChecklist(
-        #[cfg_attr(test, ts(type = "OnboardingChecklist"))] OnboardingChecklist,
+        #[cfg_attr(feature = "export-ts", ts(type = "OnboardingChecklist"))]
+        OnboardingChecklist,
     ),
     InstanceGroupsChanged(
-        #[cfg_attr(test, ts(type = "InstanceGroupsChangedPayload"))]
+        #[cfg_attr(
+            feature = "export-ts",
+            ts(type = "InstanceGroupsChangedPayload")
+        )]
         InstanceGroupsChangedPayload,
     ),
     Command(Command),
@@ -64,15 +74,18 @@ pub enum AppEvent {
 /// A link or file the App was asked to open: a Modrinth one, which the engine parses, or an
 /// Amberite one. The frontend tells them apart by `event`.
 #[derive(Clone, Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(untagged)]
 pub enum Command {
-    Modrinth(#[cfg_attr(test, ts(type = "CommandPayload"))] CommandPayload),
+    Modrinth(
+        #[cfg_attr(feature = "export-ts", ts(type = "CommandPayload"))]
+        CommandPayload,
+    ),
     Amberite(AmberiteCommand),
 }
 
 #[derive(Debug, Clone, Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(tag = "event")]
 pub enum AmberiteCommand {
     /// `amberite://approve/<code>`: open "Add Core" with the code a Core is showing filled in.
@@ -81,10 +94,10 @@ pub enum AmberiteCommand {
 
 /// Everything `/events` sends.
 #[derive(Clone, Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(untagged)]
 pub enum LocalEvent {
-    Engine(#[cfg_attr(test, ts(type = "EngineEvent"))] Event),
+    Engine(#[cfg_attr(feature = "export-ts", ts(type = "EngineEvent"))] Event),
     App(AppEvent),
 }
 

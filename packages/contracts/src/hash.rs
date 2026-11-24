@@ -5,8 +5,10 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 /// A SHA-256, written as 64 lowercase hex characters and read back only in that spelling, so the
 /// text is safe in a path. Sorting the text sorts the bytes.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct Hash(#[cfg_attr(feature = "ts", ts(type = "string"))] pub [u8; 32]);
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+pub struct Hash(
+    #[cfg_attr(feature = "export-ts", ts(type = "string"))] pub [u8; 32],
+);
 
 impl Hash {
     pub fn parse(text: &str) -> Option<Self> {

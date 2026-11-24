@@ -135,7 +135,7 @@ jobs:
       - run: mkdir -p apps/app-frontend/dist
       - run: cargo fmt --all --check
       - run: cargo shear
-      - run: cargo test --workspace --exclude toasty --locked --no-fail-fast
+      - run: cargo test --workspace --exclude toasty --locked --no-fail-fast --features amberite-app/export-ts
       - run: sh -n apps/core/scripts/install.sh
       # A cargo error fails the step, and amberite-app proves the pattern matches tauri.
       - name: Copal does not depend on Tauri, and the engine on no desktop crate

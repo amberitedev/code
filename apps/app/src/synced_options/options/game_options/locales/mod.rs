@@ -46,13 +46,13 @@ struct Origin {
 }
 
 #[derive(Default, Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct GameSettingLocaleLabels {
     pub settings: BTreeMap<String, GameSettingLocaleLabel>,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct GameSettingLocaleLabel {
     pub label: String,
     pub choices: BTreeMap<String, String>,
@@ -60,7 +60,7 @@ pub struct GameSettingLocaleLabel {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct GameSettingSource {
     pub instance_id: String,
     pub file_name: String,
@@ -69,7 +69,7 @@ pub struct GameSettingSource {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct GameSettingSourceProject {
     pub id: String,
     pub title: String,

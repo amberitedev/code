@@ -105,8 +105,7 @@ use crate::{
 
 use crate::state::CachedSharedInstanceSummary;
 
-const PATH: &str =
-    concat!(env!("CARGO_MANIFEST_DIR"), "/../contracts/ts/engine.ts");
+const DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../contracts/ts");
 
 fn file() -> String {
     let cfg = config();
@@ -325,33 +324,36 @@ fn file() -> String {
     ]
     .map(|declaration| format!("\nexport {declaration}\n"))
     .concat();
-    let modules = [
-        ("instances", instances::ts_entries()),
-        ("instanceGroups", groups::ts_entries()),
-        ("loadingBars", loading::ts_entries()),
-        ("worlds", worlds::ts_entries()),
-        ("contentStore", store::ts_entries()),
-        ("tags", tags::ts_entries()),
-        ("metadata", metadata::ts_entries()),
-        ("cache", cache::ts_entries()),
-        ("logs", logs::ts_entries()),
-        ("processes", process::ts_entries()),
-        ("java", jre::ts_entries()),
-        ("instanceFiles", files::ts_entries()),
-        ("installs", installs::ts_entries()),
-        ("instanceContent", content::ts_entries()),
-        ("instanceSharing", sharing::ts_entries()),
+    let modules: String = [
+        instances::ts_module(),
+        groups::ts_module(),
+        loading::ts_module(),
+        worlds::ts_module(),
+        store::ts_module(),
+        tags::ts_module(),
+        metadata::ts_module(),
+        cache::ts_module(),
+        logs::ts_module(),
+        process::ts_module(),
+        jre::ts_module(),
+        files::ts_module(),
+        installs::ts_module(),
+        content::ts_module(),
+        sharing::ts_module(),
     ]
-    .map(|(name, entries)| format!("\nexport const {name} = {{\n{entries}}}\n"))
+    .map(|module| module.ts(false))
     .concat();
-    format!(
-        "// Generated from packages/engine by ts-rs. Do not edit.\n\
-         // Regenerate: WRITE_TS=1 node scripts/dev-runner.ts test engine\n\n\
-         import type {{ Endpoint, ModLoader, ReleaseChannel, RemovedFile, SharedIconConfig, UserIds }} from './contracts'\n{declarations}{modules}"
-    )
+    let earlier = ["protocol", "backend", "core"].map(|name| {
+        let path = format!("{DIR}/{name}.ts");
+        (name, std::fs::read_to_string(path).unwrap_or_default())
+    });
+    let earlier = earlier
+        .each_ref()
+        .map(|(name, contents)| (*name, contents.as_str()));
+    contracts::ts::file("engine", &format!("{declarations}{modules}"), &earlier)
 }
 
 #[test]
 fn ts_is_up_to_date() {
-    contracts::ts::check(PATH, &file());
+    contracts::ts::check(&format!("{DIR}/engine.ts"), &file());
 }

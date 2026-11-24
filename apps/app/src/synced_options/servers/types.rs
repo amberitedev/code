@@ -3,12 +3,12 @@ use quartz_nbt::NbtCompound;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct SyncedServer {
     pub id: String,
     pub name: String,
     pub address: String,
-    #[cfg_attr(test, ts(optional = nullable))]
+    #[cfg_attr(feature = "export-ts", ts(optional = nullable))]
     pub accept_textures: Option<bool>,
 }
 
