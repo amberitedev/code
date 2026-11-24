@@ -1,4 +1,4 @@
-//! Serves `ExportDebugInfo` of `crate::server::endpoints::ops`.
+//! Serves `ExportDebugInfo` of `crate::local_api::endpoints::ops`.
 
 use std::sync::Arc;
 
@@ -13,7 +13,7 @@ use engine::{
     routes::api_error,
 };
 
-use crate::server::{
+use crate::local_api::{
     AppState,
     endpoints::ops::ExportDebugInfo,
     ops::{Ops, cancelled},

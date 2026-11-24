@@ -1,4 +1,4 @@
-//! Serves `UploadLocalFile` of `crate::server::endpoints::ops`: large files go from disk to the
+//! Serves `UploadLocalFile` of `crate::local_api::endpoints::ops`: large files go from disk to the
 //! server without passing through the page.
 
 use std::{
@@ -16,7 +16,7 @@ use engine::{
     upload::{LocalFileUpload, upload_local_file},
 };
 
-use crate::server::{
+use crate::local_api::{
     AppState,
     endpoints::ops::{OpResponse, UploadLocalFile},
     ops::Ops,

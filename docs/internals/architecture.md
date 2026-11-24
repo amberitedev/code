@@ -105,7 +105,7 @@ Endpoints are declared where their types are:
   generated to `ts/engine.ts`. The engine's wire types are upstream's (`Instance`, `ModLoader`,
   `InstallJobSnapshot`), and contracts sits below the engine, so contracts cannot name them. Moving
   them would rewrite upstream files on every sync.
-- App Endpoints are in [`apps/app/src/server/endpoints`](../../apps/app/src/server/endpoints/mod.rs),
+- App Endpoints are in [`apps/app/src/local_api/endpoints`](../../apps/app/src/local_api/endpoints/mod.rs),
   generated to `ts/app.ts`.
 
 A route whose body or answer carries a host filesystem path is an App route, never an engine route.
@@ -148,13 +148,13 @@ upstream's pages reach our backend through `SelfHostedFeature` unchanged. Our sc
 
 ## The App serves everything on 127.0.0.1
 
-The App's local server ([`server/mod.rs`](../../apps/app/src/server/mod.rs)) binds before Tauri
+The App's local server ([`local_api/mod.rs`](../../apps/app/src/local_api/mod.rs)) binds before Tauri
 builds, so the native window and tabs know its address before the frontend loads. `/health` and
 `/app/boot` answer from bind. The engine routes wait until the engine is up. `/events` opens at
 once, so the page sees startup's loading events, and then sends how the start ended.
 
 Any program on the machine can reach 127.0.0.1, and so can any website through the user's browser.
-The guard ([`guard.rs`](../../apps/app/src/server/guard.rs)) therefore puts every route under a
+The guard ([`guard.rs`](../../apps/app/src/local_api/guard.rs)) therefore puts every route under a
 secret first path segment. A request without the secret gets 404, a `Host` other than loopback
 gets 421, a same-origin request gets 403, and an `Origin` other than the App's own gets 403. No
 legitimate caller is same-origin, so the same-origin refusal stops a document served from the
@@ -163,7 +163,7 @@ App's origin from reading the file routes. The secret is the security boundary f
 
 Long operations start and return: the route takes a caller-made op id and answers 202, progress
 arrives as `AppEvent::Progress`, and the end as `AppEvent::OpEnded`
-([`ops.rs`](../../apps/app/src/server/ops.rs)). No request stays open for an operation's length,
+([`ops.rs`](../../apps/app/src/local_api/ops.rs)). No request stays open for an operation's length,
 so no operation holds one of the six HTTP/1.1 connections the UI shares.
 
 ### The Core proxy has its own listener
@@ -208,7 +208,7 @@ Each source owns its event enum, all with the same JSON shape: the engine's `Eve
 `AppEvent` and the Core's `CoreEvent`. One enum in contracts could not name the engine's payloads.
 Each host serves one `/events` socket that carries the engine's events and its own.
 
-- The App's socket ([`server/events.rs`](../../apps/app/src/server/events.rs)) forwards every event
+- The App's socket ([`local_api/events.rs`](../../apps/app/src/local_api/events.rs)) forwards every event
   to every client. One local user sees everything, so there is no subscribe protocol.
 - The Core's socket ([`api/events.rs`](../../apps/core/src/api/events.rs)) takes subscriptions to
   topics. It checks `CoreAccess` at subscribe time, and again when the caller's access changes,

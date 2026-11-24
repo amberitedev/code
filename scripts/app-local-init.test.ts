@@ -5,13 +5,13 @@ import { describe, expect, it } from 'vite-plus/test'
 
 // Every webview the App creates runs this script, the `signin` window on Microsoft's page too.
 const script = NodeFS.readFileSync(
-	new URL('../apps/app/src/server/local-init.js', import.meta.url),
+	new URL('../apps/app/src/local_api/local-init.js', import.meta.url),
 	'utf8',
 )
 const BASE = 'http://127.0.0.1:4100/secret'
 const ORIGINS = ['tauri://localhost', 'http://localhost:1420']
 
-/** The global a webview ends up with, rendered the way `init_script` in server/mod.rs does. */
+/** The global a webview ends up with, rendered the way `init_script` in local_api/mod.rs does. */
 function localGlobal(label: string, origin: string, topFrame = true): unknown {
 	const window: Record<string, unknown> = {
 		__TAURI_INTERNALS__: { metadata: { currentWebview: { label } } },

@@ -33,7 +33,7 @@ use self::{
     sessions::{Key, Sessions},
     tls::Target,
 };
-use crate::server::endpoints::cores::{
+use crate::local_api::endpoints::cores::{
     CheckCoreSession, ConnectCore, SignInToCore, SignOutOfCore,
 };
 

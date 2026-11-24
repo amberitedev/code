@@ -1,4 +1,4 @@
-//! Serves `crate::server::endpoints::desktop::CreateShortcut`.
+//! Serves `crate::local_api::endpoints::desktop::CreateShortcut`.
 
 use std::path::PathBuf;
 
@@ -11,7 +11,7 @@ use contracts::{
 use super::internal;
 use crate::{
     api::shortcuts::create_instance_shortcut,
-    server::endpoints::desktop::CreateShortcut,
+    local_api::endpoints::desktop::CreateShortcut,
 };
 
 pub fn routes() -> Router {

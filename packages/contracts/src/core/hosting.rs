@@ -1,387 +1,193 @@
-//! A Core's servers: listing and creating them, power, setup, `server.properties` and backups.
-
-use std::collections::BTreeMap;
+//! What a Core adds to its servers: memory, JVM flags, restarts, Java, the console, and insight.
 
 use serde::{Deserialize, Serialize};
 
-use super::{CoreUser, ReachabilityReport};
-
-/// A server on a Core.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct CoreServer {
-    pub id: String,
-    pub name: String,
-    /// Null until the Core is paired.
-    pub owner_id: Option<String>,
-    /// Its loader or pack is installing now.
-    pub installing: bool,
-    /// `vanilla`, `fabric`, `quilt`, `forge`, `neoforge` or `paper`. Null until installed.
-    pub loader: Option<String>,
-    pub loader_version: Option<String>,
-    pub game_version: Option<String>,
-    pub net: ServerNet,
-    pub power: ServerPower,
-    /// The App instance it follows.
-    pub linked_instance: Option<LinkedInstance>,
-    /// Whether players can join from the internet. Null while it does not run.
-    pub reachability: Option<ReachabilityReport>,
-    /// Who is online. Null while it does not run.
-    pub players: Option<Vec<String>>,
+pub struct Performance {
+    /// The most memory Java may use. Java starts with less and grows to it.
     pub memory_mb: u32,
+    /// The JVM flags the server starts with.
+    pub flags: Vec<String>,
+    /// `flags` are the server's own rather than the Core's tuned ones.
+    pub custom_flags: bool,
+    pub restarts: Restarts,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct Memory {
+    pub memory_mb: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct JvmFlags {
+    /// The server's own flags, each starting with `-`. Null goes back to the tuned ones.
+    pub flags: Option<Vec<String>>,
+}
+
+/// A server's restart settings.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct Restarts {
+    /// Start the server again after a crash. On by default.
+    pub crash: bool,
+    /// A restart at a set time, with an in-game countdown.
+    pub schedule: Option<Schedule>,
+    /// Experimental: restart once nobody is online and the server has run this many hours,
+    /// after a minute's warning in the game.
+    pub smart_after_hours: Option<u32>,
+}
+
+impl Default for Restarts {
+    fn default() -> Self {
+        Self {
+            crash: true,
+            schedule: None,
+            smart_after_hours: None,
+        }
+    }
+}
+
+/// A scheduled restart, in the Core machine's local time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(tag = "every", rename_all = "snake_case")]
+pub enum Schedule {
+    Daily {
+        #[cfg_attr(feature = "ts", ts(type = "string"))]
+        at: TimeOfDay,
+    },
+    Weekly {
+        on: Weekday,
+        #[cfg_attr(feature = "ts", ts(type = "string"))]
+        at: TimeOfDay,
+    },
+}
+
+/// `HH:MM`, 24-hour.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct TimeOfDay {
+    pub hour: u8,
+    pub minute: u8,
+}
+
+impl TryFrom<String> for TimeOfDay {
+    type Error = String;
+
+    fn try_from(text: String) -> Result<Self, String> {
+        text.parse()
+    }
+}
+
+impl std::str::FromStr for TimeOfDay {
+    type Err = String;
+
+    fn from_str(text: &str) -> Result<Self, String> {
+        let invalid = || format!("{text} is not a time like 04:30");
+        let (hour, minute) = text.split_once(':').ok_or_else(invalid)?;
+        let hour: u8 = hour.parse().map_err(|_| invalid())?;
+        let minute: u8 = minute.parse().map_err(|_| invalid())?;
+        if hour > 23 || minute > 59 {
+            return Err(invalid());
+        }
+        Ok(Self { hour, minute })
+    }
+}
+
+impl From<TimeOfDay> for String {
+    fn from(time: TimeOfDay) -> Self {
+        format!("{:02}:{:02}", time.hour, time.minute)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
+#[serde(rename_all = "snake_case")]
+pub enum Weekday {
+    Monday,
+    Tuesday,
+    Wednesday,
+    Thursday,
+    Friday,
+    Saturday,
+    Sunday,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct ConsoleCommand {
+    /// One line, as typed into the server console, such as `say hello`.
+    pub command: String,
+}
+
+/// A custom Java binary on the Core's machine, or null for the Java the Core manages. An advanced
+/// override; it runs as `copal-servers`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct JavaPath {
+    pub path: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct ServerInsight {
+    /// Who is online, from the Core's health check and join and leave lines. Empty while the
+    /// server does not run.
+    pub players: Vec<String>,
+    /// The health check answered this run, so `players` is checked, not only what join and
+    /// leave lines said.
+    pub players_checked: bool,
+    /// The server stopped answering the Core's health check, so it is probably frozen. Offer a
+    /// restart.
+    pub frozen: bool,
+    /// Unix seconds of the server's last answer to the health check.
+    pub answered_at: Option<i64>,
+    /// The Core stopped starting the server again after it crashed 3 times in 10 minutes.
+    pub crash_restart_stopped: bool,
+    /// The last crash, with the console lines before it.
+    pub last_crash: Option<Crash>,
+    /// Whether players can join from the internet. Null while the server does not run or has
+    /// not been checked yet.
+    pub reachability: Option<super::ReachabilityReport>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct Crash {
     /// Unix seconds.
-    pub created_at: i64,
-    pub update_channel: UpdateChannel,
-    /// The owner accepted the Minecraft EULA for every server on this Core. None starts before.
-    pub eula_accepted: bool,
+    pub at: i64,
+    pub exit_code: Option<i32>,
+    /// The console lines before the crash.
+    pub last_lines: String,
 }
 
-/// Where players join a server.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct ServerNet {
-    /// With `port`, where players join from the internet: the router's address when it forwarded
-    /// another port than the game port, otherwise the Core's.
-    pub ip: Option<String>,
-    pub port: u16,
-    /// Where the server is on the internet, while it runs and is forwarded or public.
-    pub outside: Option<JoinAddress>,
-    /// The port the server listens on.
-    pub game_port: u16,
-}
+#[cfg(test)]
+mod tests {
+    use super::{Schedule, TimeOfDay, Weekday};
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct JoinAddress {
-    pub ip: String,
-    pub port: u16,
-}
-
-/// Where a server is in its run, or how its last run ended: `offline` (stopped or never run),
-/// `crashed` or `killed`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-#[serde(rename_all = "snake_case")]
-pub enum ServerPower {
-    Offline,
-    Starting,
-    Running,
-    Stopping,
-    Crashed,
-    Killed,
-}
-
-/// The App instance a server follows.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct LinkedInstance {
-    /// The App's id for the instance.
-    pub id: String,
-    pub name: String,
-    pub state: LinkedPackState,
-    pub error: Option<String>,
-    pub shared_instance_id: Option<String>,
-    /// The version of the instance's share the server runs.
-    pub version: Option<i64>,
-}
-
-/// Where a linked server is with the newest version pushed to it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-#[serde(rename_all = "snake_case")]
-pub enum LinkedPackState {
-    UpToDate,
-    Downloading,
-    /// Applies when the server next stops.
-    Pending,
-    Applying,
-    Failed,
-}
-
-/// Which Modrinth versions a server's content updates to.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-#[serde(rename_all = "snake_case")]
-pub enum UpdateChannel {
-    Release,
-    Beta,
-    Alpha,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct NewServer {
-    /// 1 to 64 characters.
-    pub name: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct ServerUpdate {
-    /// 1 to 64 characters, trimmed.
-    pub name: Option<String>,
-    pub update_channel: Option<UpdateChannel>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-#[serde(rename_all = "snake_case")]
-pub enum PowerAction {
-    Start,
-    Stop,
-    Restart,
-    Kill,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct PowerChange {
-    pub action: PowerAction,
-}
-
-/// A loader to install on a stopped server. Packs install through the content routes.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct LoaderInstall {
-    /// As [`CoreServer::loader`] names it.
-    pub loader: String,
-    /// Null for the newest.
-    pub loader_version: Option<String>,
-    pub game_version: String,
-}
-
-/// Body of `ShareServer`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct SharePush {
-    /// Files to send with this version. Files sent earlier stay shared while the server has
-    /// them, unless they are in `removed_paths`.
-    pub file_paths: Vec<String>,
-    pub removed_paths: Vec<String>,
-    /// Restart a running server once the version is out.
-    pub restart: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct SharedServer {
-    pub shared_instance_id: String,
-    pub version: Option<i32>,
-    pub restarted: bool,
-}
-
-/// Body of `FollowInstance`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct InstanceFollow {
-    pub instance: FollowedInstance,
-    /// The instance's share, whose latest version the server applies.
-    pub shared_instance_id: String,
-    /// From the backend's `sharing.IssueReadTicket` for this Core: the Core reads the share for
-    /// the user who asked, and only while they can.
-    pub ticket: String,
-    /// Stop a running server to apply the version now, and start it again after.
-    pub restart: bool,
-}
-
-/// The App instance a server follows, as the App names it.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct FollowedInstance {
-    pub id: String,
-    pub name: String,
-}
-
-/// How a server starts, and what it shares.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct ServerSetup {
-    /// The Java major it runs. Null until installed.
-    pub java_version: Option<u32>,
-    /// The command line it runs, as people read it. Null until installed.
-    pub invocation: Option<String>,
-    /// The share it reads: its instance's when it follows one, else its own once it is shared.
-    pub shared_instance_id: Option<String>,
-    /// It has changes its own share's latest version does not. Always false while it follows an
-    /// instance.
-    pub shared_instance_needs_update: bool,
-    /// The Core machine's CPU threads.
-    pub cpus: u32,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct JavaMajor {
-    /// A Java major the Core installs (8, 11, 17, 21 or 25), or null for the one the Minecraft
-    /// version needs.
-    pub major: Option<u32>,
-}
-
-/// Every key of a server's `server.properties`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct ServerProperties {
-    pub properties: BTreeMap<String, String>,
-}
-
-/// Used from the server's next start.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct PropertiesUpdate {
-    /// Null removes the key.
-    pub properties: BTreeMap<String, Option<String>>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct ServerBackups {
-    pub backups: Vec<ServerBackup>,
-    pub schedule: BackupSchedule,
-    /// Unix seconds. Null while scheduled backups are off.
-    pub next_scheduled_at: Option<i64>,
-}
-
-/// A server has `slots` backup slots: `keep` for scheduled backups, the rest for manual ones.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct BackupSchedule {
-    pub interval_hours: u32,
-    pub keep: u32,
-    pub slots: u32,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct ServerBackup {
-    pub id: String,
-    pub name: String,
-    /// Unix seconds.
-    pub created_at: i64,
-    pub state: BackupState,
-    pub kind: BackupKind,
-    /// Unix seconds. Set on scheduled backups that hold a slot: when later scheduled backups push
-    /// it out.
-    pub rotates_at: Option<i64>,
-    pub operations: Vec<BackupOperation>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-#[serde(rename_all = "snake_case")]
-pub enum BackupState {
-    Queued,
-    Running,
-    Done,
-    Failed,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-#[serde(rename_all = "snake_case")]
-pub enum BackupKind {
-    Manual,
-    Scheduled,
-    /// Made before a pack update or a restore.
-    PreUpdate,
-}
-
-/// Making a backup or restoring it.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct BackupOperation {
-    pub id: i64,
-    pub kind: OperationKind,
-    pub state: OperationState,
-    /// Unix seconds, as are the other times.
-    pub queued_at: i64,
-    pub started_at: Option<i64>,
-    pub ended_at: Option<i64>,
-    pub error: Option<String>,
-    /// Someone dismissed it once it ended.
-    pub acked: bool,
-    /// Who started it. Null for the schedule.
-    pub user: Option<CoreUser>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-#[serde(rename_all = "snake_case")]
-pub enum OperationKind {
-    Create,
-    Restore,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-#[serde(rename_all = "snake_case")]
-pub enum OperationState {
-    Queued,
-    Running,
-    Done,
-    Failed,
-    Cancelled,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct NewBackup {
-    /// 1 to 64 characters.
-    pub name: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct CreatedBackup {
-    pub id: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct BackupUpdate {
-    pub name: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct BackupIds {
-    pub ids: Vec<String>,
-}
-
-/// What is given changes; the rest stays.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct ScheduleUpdate {
-    /// Hourly at most, every 744 hours at least.
-    pub interval_hours: Option<u32>,
-    /// 0 turns scheduled backups off.
-    pub keep: Option<u32>,
-    /// Keeping fewer than there are deletes the oldest scheduled backups. Without this the change
-    /// is only described; with it, it is the owner's dangerous action.
-    pub delete_excess: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct ScheduleChange {
-    pub applied: bool,
-    /// The scheduled backups the change deletes, or deleted once applied.
-    pub excess: Vec<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct BackupRef {
-    /// The server.
-    pub id: String,
-    pub backup_id: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct OperationRef {
-    /// The server.
-    pub id: String,
-    pub operation_id: i64,
+    #[test]
+    fn times_of_day_are_checked() {
+        let time: TimeOfDay = "04:30".parse().unwrap();
+        assert_eq!(String::from(time), "04:30");
+        for bad in ["4", "24:00", "12:60", "ab:cd", ""] {
+            assert!(bad.parse::<TimeOfDay>().is_err(), "{bad}");
+        }
+        let schedule: Schedule = serde_json::from_str(
+            r#"{"every":"weekly","on":"sunday","at":"05:00"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            schedule,
+            Schedule::Weekly {
+                on: Weekday::Sunday,
+                at: TimeOfDay { hour: 5, minute: 0 }
+            }
+        );
+    }
 }
 
 #[cfg(test)]
@@ -390,41 +196,15 @@ pub(super) fn ts_types() -> Vec<String> {
 
     let cfg = crate::ts::config();
     vec![
-        CoreServer::decl(&cfg),
-        ServerNet::decl(&cfg),
-        JoinAddress::decl(&cfg),
-        ServerPower::decl(&cfg),
-        LinkedInstance::decl(&cfg),
-        LinkedPackState::decl(&cfg),
-        UpdateChannel::decl(&cfg),
-        NewServer::decl(&cfg),
-        ServerUpdate::decl(&cfg),
-        PowerAction::decl(&cfg),
-        PowerChange::decl(&cfg),
-        LoaderInstall::decl(&cfg),
-        SharePush::decl(&cfg),
-        SharedServer::decl(&cfg),
-        InstanceFollow::decl(&cfg),
-        FollowedInstance::decl(&cfg),
-        ServerSetup::decl(&cfg),
-        JavaMajor::decl(&cfg),
-        ServerProperties::decl(&cfg),
-        PropertiesUpdate::decl(&cfg),
-        ServerBackups::decl(&cfg),
-        BackupSchedule::decl(&cfg),
-        ServerBackup::decl(&cfg),
-        BackupState::decl(&cfg),
-        BackupKind::decl(&cfg),
-        BackupOperation::decl(&cfg),
-        OperationKind::decl(&cfg),
-        OperationState::decl(&cfg),
-        NewBackup::decl(&cfg),
-        CreatedBackup::decl(&cfg),
-        BackupUpdate::decl(&cfg),
-        BackupIds::decl(&cfg),
-        ScheduleUpdate::decl(&cfg),
-        ScheduleChange::decl(&cfg),
-        BackupRef::decl(&cfg),
-        OperationRef::decl(&cfg),
+        Performance::decl(&cfg),
+        Memory::decl(&cfg),
+        JvmFlags::decl(&cfg),
+        Restarts::decl(&cfg),
+        Schedule::decl(&cfg),
+        Weekday::decl(&cfg),
+        ConsoleCommand::decl(&cfg),
+        JavaPath::decl(&cfg),
+        ServerInsight::decl(&cfg),
+        Crash::decl(&cfg),
     ]
 }

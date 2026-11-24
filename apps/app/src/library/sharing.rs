@@ -10,7 +10,7 @@ use contracts::{
 };
 use engine::{Engine, data::CachedSharedInstanceSummary, routes::api_error};
 
-use crate::server::{
+use crate::local_api::{
     AppState,
     endpoints::sharing::{
         CanUseSharedInstances, GetCachedSharedLibrary, PublishSharedInstance,

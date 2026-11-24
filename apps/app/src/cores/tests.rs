@@ -28,7 +28,7 @@ use tokio::{
 use tokio_rustls::TlsAcceptor;
 
 use super::*;
-use crate::server::guard::Guard;
+use crate::local_api::guard::Guard;
 
 const APP: &str = "tauri://localhost";
 const ACCOUNT_TOKEN: &str = "Bearer mra_the_account_session";

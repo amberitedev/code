@@ -39,7 +39,7 @@ pub enum AppEvent {
     ),
     Command(Command),
     GameOptionLocalesUpdated,
-    /// How far a long operation (`crate::server::ops`) has got.
+    /// How far a long operation (`crate::local_api::ops`) has got.
     Progress {
         op: String,
         stage: Option<String>,

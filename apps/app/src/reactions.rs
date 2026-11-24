@@ -15,8 +15,8 @@ use engine::{
 use tauri::{AppHandle, Manager};
 use tokio::sync::broadcast::{self, Receiver, error::RecvError};
 
+use crate::local_api::events::AppEvent;
 use crate::presence::{Presence, show_presence, start_presence};
-use crate::server::events::AppEvent;
 
 #[derive(Debug, PartialEq)]
 struct Reaction {

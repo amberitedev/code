@@ -23,12 +23,12 @@ mod hooks;
 mod import;
 mod launch;
 mod library;
+mod local_api;
 mod logger;
 mod onboarding;
 mod presence;
 mod reactions;
 mod screenshots;
-mod server;
 mod settings;
 mod skins;
 mod synced_options;
@@ -145,14 +145,14 @@ fn main() {
 
     tracing::info!("Initialized tracing subscriber. Loading Modrinth App!");
 
-    let local = server::LocalServer::bind(
+    let local = local_api::LocalServer::bind(
         dev::config().and_then(|config| config.local_port),
         dev::config().and_then(|config| config.local_secret.clone()),
         tauri_context.config().build.dev_url.clone(),
     )
     .expect("failed to bind the App's local server");
     let local_init = local.init_plugin();
-    let events = server::events::Events::default();
+    let events = local_api::events::Events::default();
     let engine = engine_handle::EngineHandle::default();
     let presence = Arc::new(
         presence::Presence::init()
@@ -161,7 +161,7 @@ fn main() {
     let desktop = desktop::AppSlot::default();
     let updater = Arc::new(desktop::updater::Updater::new(desktop.clone()));
     let router = local.router(
-        server::endpoints::boot::Boot::current(
+        local_api::endpoints::boot::Boot::current(
             tauri_context.package_info().version.to_string(),
         ),
         events.clone(),

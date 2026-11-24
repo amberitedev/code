@@ -5,7 +5,7 @@ use contracts::{
 };
 use engine::{jre, routes::api_error};
 
-use crate::server::endpoints::desktop::{GetJavaAt, JavaAtPath, TestJavaAt};
+use crate::local_api::endpoints::desktop::{GetJavaAt, JavaAtPath, TestJavaAt};
 
 pub fn routes() -> Router {
     let (get_path, get) = route::<GetJavaAt, _, _, _>(get_java_at);

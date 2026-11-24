@@ -1,6 +1,6 @@
 use contracts::{Auth, Empty, Endpoint, Method, Upgrade};
 
-use crate::server::events::LocalEvent;
+use crate::local_api::events::LocalEvent;
 
 /// Sends every engine and App event; reads nothing.
 pub struct EventSocket;

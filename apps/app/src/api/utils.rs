@@ -6,7 +6,7 @@ use crate::accounts::oauth_utils::auth_code_reply::{
     normalize_deep_link_command, parse_auth_deeplink, submit_deeplink,
 };
 use crate::api::Result;
-use crate::server::events::{AmberiteCommand, AppEvent, Command};
+use crate::local_api::events::{AmberiteCommand, AppEvent, Command};
 
 /// The Amberite command behind a deep link, or `None` for anything else.
 fn amberite_command(command: &str) -> Option<AmberiteCommand> {

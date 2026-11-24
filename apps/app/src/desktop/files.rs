@@ -1,4 +1,4 @@
-//! Serves `crate::server::endpoints::files`.
+//! Serves `crate::local_api::endpoints::files`.
 
 use std::{
     ffi::OsStr,
@@ -27,7 +27,7 @@ use tokio_util::io::ReaderStream;
 use super::thumbnails;
 use crate::{
     engine_handle::EngineHandle,
-    server::endpoints::files::{
+    local_api::endpoints::files::{
         CacheRemoteIcon, FileStat, GetLocalFile, GetThumbnail, ReadLocalFile,
         StatLocalFile,
     },
@@ -260,7 +260,7 @@ mod tests {
     use http_body_util::BodyExt;
 
     use super::{is_cached_icon, read_file, serve, stat_file};
-    use crate::server::endpoints::files::LocalFileQuery;
+    use crate::local_api::endpoints::files::LocalFileQuery;
 
     #[tokio::test]
     async fn a_matching_etag_is_not_modified_until_the_file_changes() {

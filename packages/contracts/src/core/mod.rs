@@ -220,9 +220,9 @@ pub(crate) fn ts() -> String {
     .into_iter()
     .chain(access::ts_types())
     .chain(events::ts_types())
-    .chain(hosting::ts_types())
-    .chain(machine::ts_types())
     .chain(servers::ts_types())
+    .chain(machine::ts_types())
+    .chain(hosting::ts_types())
     .map(|declaration| format!("\nexport {declaration}\n"))
     .collect::<String>();
     format!(

@@ -1,4 +1,4 @@
-//! Serves the link, path and folder routes of `crate::server::endpoints::desktop`.
+//! Serves the link, path and folder routes of `crate::local_api::endpoints::desktop`.
 
 use std::path::PathBuf;
 
@@ -13,10 +13,10 @@ use url::Url;
 use super::internal;
 use crate::{
     engine_handle::EngineHandle,
-    screenshots::ScreenshotKey,
-    server::endpoints::desktop::{
+    local_api::endpoints::desktop::{
         AppFolder, OpenFolder, OpenPath, OpenUrl, RevealPath,
     },
+    screenshots::ScreenshotKey,
 };
 
 pub fn routes(engine: EngineHandle) -> Router {

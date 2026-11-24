@@ -6,7 +6,7 @@ import { useQuery } from '@tanstack/vue-query'
 import { computed } from 'vue'
 
 import { config } from '@/config'
-import LocalServers from '@/features/servers/local-servers.vue'
+import CoreServers from '@/features/servers/core-servers.vue'
 import { useRootBreadcrumb } from '@/shared/breadcrumbs'
 
 const stripePublishableKey = (config.stripePublishableKey as string) || ''
@@ -31,7 +31,7 @@ const resolvedProducts = computed<Labrinth.Billing.Internal.Product[]>(() => pro
 </script>
 
 <template>
-	<LocalServers v-if="client.selfHostedHosting" />
+	<CoreServers v-if="client.selfHostedHosting" />
 	<ServersManagePageIndex
 		v-else
 		:stripe-publishable-key="stripePublishableKey"

@@ -11,7 +11,7 @@ use engine::{
     Engine, data::InstanceLink, install::InstallJobSnapshot, routes::api_error,
 };
 
-use crate::server::{
+use crate::local_api::{
     AppState,
     endpoints::install::{
         CreateInstance, CreateModpackInstance, InstallModpackPreview,

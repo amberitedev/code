@@ -7,7 +7,7 @@ use contracts::{
 };
 use engine::{Engine, pack::import, routes::api_error};
 
-use crate::server::{
+use crate::local_api::{
     AppState,
     endpoints::import::{
         CheckImportableInstance, GetDefaultLauncherPath, ImportInstance,

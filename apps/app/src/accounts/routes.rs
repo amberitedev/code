@@ -1,4 +1,4 @@
-//! Serves `crate::server::endpoints::accounts` over the App's sign-in code.
+//! Serves `crate::local_api::endpoints::accounts` over the App's sign-in code.
 
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
@@ -26,8 +26,7 @@ use crate::{
         state::ModrinthCredentials,
     },
     desktop::{AppSlot, internal},
-    presence::Presence,
-    server::{
+    local_api::{
         AppState,
         endpoints::accounts::{
             CancelModrinthSignIn, CheckMinecraftReachable,
@@ -38,6 +37,7 @@ use crate::{
             SignInToMinecraft, SignInToModrinth, SignOutOfModrinth,
         },
     },
+    presence::Presence,
 };
 
 type Answer<T> = Result<T, ApiError>;
