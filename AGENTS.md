@@ -96,6 +96,17 @@ The App and a Core do the same things to an instance with one engine and one pro
 
 `.repos/modrinth` is a plain checkout of Modrinth's latest `main`, gitignored, for reading and grepping upstream. `SYNCED.json` names its commit. Never edit or import from `.repos/`. If it is missing or stale, run `vp run sync:repos`. Merges and ports use the `modrinth/main` ref, not this copy. Its `AGENTS.md` files are Modrinth's rules, not ours.
 
+## Where code lives
+
+- `packages/engine` - Rust. What the App and a Core both do to an instance. Never imports a host.
+- `apps/app` - Rust and Tauri. Desktop-only features, in `apps/app/src/<domain>`.
+- `apps/core` - Rust. The Core, shipped as Copal.
+- `apps/backend` - TypeScript on Cloudflare Workers. Accounts, friends and share details.
+- `packages/contracts` - Wire types and `Endpoint` declarations. No logic.
+- `apps/app-frontend` - Vue. The App's UI.
+- `packages/ui` - Modrinth's shared Vue components. Reuse before adding.
+- `packages/api-client` - The one TypeScript client.
+
 ## Taste
 
 - Complexity belongs at the adapter boundary. Backend-facing workflows stay in `@modrinth/api-client`; UI stays dumb.
