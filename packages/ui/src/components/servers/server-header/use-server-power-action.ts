@@ -48,9 +48,7 @@ export function useServerPowerAction(options?: { disabled?: Ref<boolean> }) {
 		() => !isTransitioning.value && !isBlockedByPropsBusyOrPermission.value,
 	)
 	const canStop = computed(
-		() =>
-			canTakeAction.value ||
-			(client.selfHostedHosting && isStarting.value && !isBlockedByPropsBusyOrPermission.value),
+		() => canTakeAction.value || (isStarting.value && !isBlockedByPropsBusyOrPermission.value),
 	)
 
 	const canKill = computed(

@@ -5,14 +5,6 @@
 		data-pyro-server-manager-root
 	>
 		<div class="flex flex-col gap-4" :class="fillConsole ? 'flex-1' : ''">
-			<!-- A Core sends no stats, so the cards would only show zeros. -->
-			<ServerManageStats
-				v-if="!client.selfHostedHosting"
-				class="shrink-0"
-				:data="!isWsAuthIncorrect ? stats : undefined"
-				:loading="isWsAuthIncorrect"
-			/>
-
 			<div class="flex flex-col gap-2" :class="fillConsole ? 'flex-1' : 'min-h-[700px]'">
 				<span class="shrink-0 text-2xl font-semibold text-contrast">Console</span>
 
@@ -46,7 +38,6 @@ import type { Mclogs } from '@modrinth/api-client'
 import { useStorage } from '@vueuse/core'
 import { computed, ref, watch } from 'vue'
 
-import ServerManageStats from '#ui/components/servers/ServerManageStats.vue'
 import { useModrinthServersConsole } from '#ui/composables'
 import { useServerPermissions } from '#ui/composables/server-permissions'
 import { ConsolePageLayout, provideConsoleManager } from '#ui/layouts/shared/console'
@@ -69,7 +60,6 @@ const {
 	serverId,
 	isConnected,
 	isWsAuthIncorrect,
-	stats,
 	powerState: serverPowerState,
 	powerStateDetails: _powerStateDetails,
 } = injectModrinthServerContext()

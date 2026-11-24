@@ -87,7 +87,7 @@ export default {
 			response.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS')
 			response.headers.set(
 				'Access-Control-Allow-Headers',
-				'Authorization, Content-Type, Range, X-Local-Dev-Secret, X-Requested-With, X-Panel-Version',
+				'Authorization, Content-Type, Range, X-Local-Dev-Secret, X-Requested-With',
 			)
 			response.headers.set('Access-Control-Expose-Headers', 'Content-Range, Accept-Ranges, ETag')
 		}

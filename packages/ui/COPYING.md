@@ -11,10 +11,3 @@ The use of Modrinth branding elements, including but not limited to the wrench-i
 This includes, but may not be limited to, the following files:
 
 - src/components/brand/\*
-- src/components/servers/ModrinthServersIcon.vue
-
-## External logos
-
-The following files are owned by their respective copyright holders and must be used within each of their Brand Guidelines:
-
-- src/components/servers/MedalBackgroundImage.vue

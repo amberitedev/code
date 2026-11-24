@@ -7,7 +7,6 @@ import { createApp } from 'vue'
 import { applyDevAppConfig, config } from '@/config'
 import { overlayScrollbarsDirective } from '@/directives/overlayScrollbars'
 import { installCrashScreen } from '@/features/crash'
-import { setupErrorReporting } from '@/helpers/error-reporting'
 import { debugStartup, traceStartupStep } from '@/helpers/startup-debug'
 import { isNativeWindow } from '@/platform/local'
 import { loadBoot } from '@/platform/os'
@@ -18,6 +17,9 @@ import i18nDebugPlugin from '@/plugins/i18n-debug'
 async function bootstrap() {
 	const boot = await loadBoot()
 	applyDevAppConfig({ backendUrl: boot.backend_url ?? undefined })
+	if (!config.accountApiUrl) {
+		throw new Error('No Amberite backend is configured. Build with VITE_ACCOUNT_API_URL set.')
+	}
 	const [{ default: App }, { default: router }] = await Promise.all([
 		import('@/App.vue'),
 		import('@/routes'),
@@ -25,7 +27,6 @@ async function bootstrap() {
 	debugStartup('Frontend entry module evaluated')
 	const app = createApp(App)
 	installCrashScreen(app, router)
-	if (!config.accountApiUrl) setupErrorReporting(app, router)
 
 	// A tab keeps vue-query's own focus listener.
 	if (isNativeWindow) {

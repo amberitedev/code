@@ -524,18 +524,6 @@
   "app.home.jump-back-in.view-instance": {
     "message": "View instance"
   },
-  "app.hosting.update-required.description": {
-    "message": "You need to update to use Modrinth Hosting through the Modrinth App"
-  },
-  "app.hosting.update-required.download": {
-    "message": "Download to update"
-  },
-  "app.hosting.update-required.rinthbot-alt": {
-    "message": "Excited Modrinth Bot"
-  },
-  "app.hosting.update-required.title": {
-    "message": "Modrinth App update required"
-  },
   "app.install.phase.downloading_content": {
     "message": "Downloading content"
   },
@@ -3517,21 +3505,6 @@
   },
   "app.skins.toggle-ears-features-on": {
     "message": "Toggle on"
-  },
-  "app.survey.body": {
-    "message": "Would you mind answering a few questions about your experience with Modrinth App?"
-  },
-  "app.survey.footer": {
-    "message": "This feedback will go directly to the Modrinth team and help guide future updates!"
-  },
-  "app.survey.no-thanks": {
-    "message": "No thanks"
-  },
-  "app.survey.take-survey": {
-    "message": "Take survey"
-  },
-  "app.survey.title": {
-    "message": "Hey there Modrinth user!"
   },
   "app.sync-instances-update.choose-source.data-packs": {
     "message": "Choose which instance to copy your data packs from. These packs are only used for the initial sync, and you can edit them from any instance afterward."

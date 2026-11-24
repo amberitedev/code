@@ -21,14 +21,14 @@ export function useServerHistory(serverId: Ref<string>) {
 	const server = useQuery({
 		queryKey: computed(() => serverKeys.detail(serverId.value)),
 		queryFn: () => client.archon.servers_v0.get(serverId.value),
-		enabled: computed(() => client.selfHostedHosting && !!serverId.value),
+		enabled: computed(() => !!serverId.value),
 		// A Core that does not answer is offline; the panel says so instead of waiting on retries.
 		retry: false,
 	})
 	const serverFull = useQuery({
 		queryKey: computed(() => serverKeys.detailV1(serverId.value)),
 		queryFn: () => client.archon.servers_v1.get(serverId.value),
-		enabled: computed(() => client.selfHostedHosting && !!serverId.value),
+		enabled: computed(() => !!serverId.value),
 		retry: false,
 	})
 	const linkedId = computed(() => server.data.value?.linked_instance?.id ?? null)

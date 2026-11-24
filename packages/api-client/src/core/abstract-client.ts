@@ -46,10 +46,6 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 		sockets: AbstractWebSocketClient
 		sync: AbstractSyncClient
 	}
-	public get selfHostedHosting(): boolean {
-		return this.config.selfHostedHosting === true
-	}
-
 	/** See `ClientConfig.connectCore`. */
 	public get connectCore(): ClientConfig['connectCore'] {
 		return this.config.connectCore
@@ -62,9 +58,7 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 
 	/** Our account backend's routes, at the URL and with the session the client's `SelfHostedFeature` uses. */
 	public get backend(): ContractClient {
-		const selfHosted = this.features.find((feature) => feature instanceof SelfHostedFeature)
-		if (!selfHosted) throw new Error('This client has no account backend')
-		const transport = selfHosted.transport((input, init) => this.platformFetch(input, init))
+		const transport = this.selfHosted().transport((input, init) => this.platformFetch(input, init))
 		return new ContractClient({
 			...transport,
 			headers: async (endpoint) => {
@@ -113,14 +107,12 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 		this.config = {
 			timeout: 10000,
 			labrinthBaseUrl: 'https://api.modrinth.com',
-			archonBaseUrl: 'https://archon.modrinth.com',
-			sharedInstancesBaseUrl: 'https://shared-instances.modrinth.com',
 			...config,
 		}
 		this.features = config.features ?? []
 		if (config.coreSessions) this.features.unshift(new CoreSessionFeature(this))
 		this.initializeModules()
-		if (this.selfHostedHosting) withCoreHosting(this)
+		withCoreHosting(this)
 	}
 
 	/**
@@ -185,18 +177,7 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 	 * @throws {ModrinthApiError} When the request fails or features throw errors
 	 */
 	async request<T>(path: string, options: RequestOptions): Promise<T> {
-		let baseUrl: string
-		if (options.api === 'labrinth') {
-			baseUrl = this.resolveBaseUrl(this.config.labrinthBaseUrl!)
-		} else if (options.api === 'archon') {
-			baseUrl = await this.resolveArchonBaseUrl(path, options)
-		} else if (options.api === 'sharedinstances') {
-			baseUrl = this.resolveBaseUrl(this.config.sharedInstancesBaseUrl!)
-		} else {
-			baseUrl = options.api
-		}
-
-		const url = this.buildUrl(path, baseUrl, options.version)
+		const url = this.buildUrl(path, await this.resolveApiBaseUrl(path, options), options.version)
 
 		const defaultHeaders = await this.defaultHeadersFor(options)
 
@@ -210,7 +191,6 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 				...options.headers,
 			},
 		}
-		this.attachArchonSentryCaptureHeader(mergedOptions)
 
 		const headers = mergedOptions.headers
 		if (headers && 'Content-Type' in headers && headers['Content-Type'] === '') {
@@ -235,17 +215,7 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 	}
 
 	async download(path: string, options: RequestOptions, sink: DownloadSink): Promise<void> {
-		let baseUrl: string
-		if (options.api === 'labrinth') {
-			baseUrl = this.resolveBaseUrl(this.config.labrinthBaseUrl!)
-		} else if (options.api === 'archon') {
-			baseUrl = this.resolveBaseUrl(this.config.archonBaseUrl!)
-		} else if (options.api === 'sharedinstances') {
-			baseUrl = this.resolveBaseUrl(this.config.sharedInstancesBaseUrl!)
-		} else {
-			baseUrl = options.api
-		}
-
+		const baseUrl = await this.resolveApiBaseUrl(path, options)
 		const mergedOptions: RequestOptions = {
 			method: 'GET',
 			retry: false,
@@ -256,7 +226,6 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 				...options.headers,
 			},
 		}
-		this.attachArchonSentryCaptureHeader(mergedOptions)
 		const context = this.buildContext(
 			this.buildUrl(path, baseUrl, options.version),
 			path,
@@ -276,18 +245,7 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 	}
 
 	async stream(path: string, options: RequestOptions): Promise<ReadableStream<Uint8Array>> {
-		let baseUrl: string
-		if (options.api === 'labrinth') {
-			baseUrl = this.resolveBaseUrl(this.config.labrinthBaseUrl!)
-		} else if (options.api === 'archon') {
-			baseUrl = await this.resolveArchonBaseUrl(path, options)
-		} else if (options.api === 'sharedinstances') {
-			baseUrl = this.resolveBaseUrl(this.config.sharedInstancesBaseUrl!)
-		} else {
-			baseUrl = options.api
-		}
-
-		const url = this.buildUrl(path, baseUrl, options.version)
+		const url = this.buildUrl(path, await this.resolveApiBaseUrl(path, options), options.version)
 		const defaultHeaders = await this.defaultHeadersFor(options)
 		const mergedOptions: RequestOptions = {
 			method: 'GET',
@@ -300,7 +258,6 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 				...options.headers,
 			},
 		}
-		this.attachArchonSentryCaptureHeader(mergedOptions)
 
 		const context = this.buildContext(url, path, mergedOptions)
 
@@ -409,12 +366,26 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 		return typeof baseUrl === 'function' ? baseUrl() : baseUrl
 	}
 
-	/** Self-hosted hosting has no single base URL: each request goes to the Core it is about. */
-	protected async resolveArchonBaseUrl(path: string, options: RequestOptions): Promise<string> {
-		if (this.selfHostedHosting) {
+	/**
+	 * Where a request's `api` lives. Hosting has no single base URL: each request goes to the Core it
+	 * is about. Shared instances are our account backend's.
+	 */
+	protected async resolveApiBaseUrl(
+		path: string,
+		options: Pick<RequestOptions, 'api' | 'params' | 'version'>,
+	): Promise<string> {
+		if (options.api === 'labrinth') return this.resolveBaseUrl(this.config.labrinthBaseUrl!)
+		if (options.api === 'archon') {
 			return this.archon.cores_v1.hostingUrl(path, options.params, options.version)
 		}
-		return this.resolveBaseUrl(this.config.archonBaseUrl!)
+		if (options.api === 'sharedinstances') return this.selfHosted().baseUrl
+		return options.api
+	}
+
+	private selfHosted(): SelfHostedFeature {
+		const selfHosted = this.features.find((feature) => feature instanceof SelfHostedFeature)
+		if (!selfHosted) throw new Error('This client has no account backend')
+		return selfHosted
 	}
 
 	/**
@@ -494,7 +465,6 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 	 * Build default headers for all requests
 	 *
 	 * Subclasses can override this to add platform-specific headers
-	 * (e.g., Nuxt rate limit key)
 	 */
 	protected async buildDefaultHeaders(): Promise<Record<string, string>> {
 		const headers: Record<string, string> = {
@@ -513,21 +483,6 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 	private async resolveUserAgent(): Promise<string | undefined> {
 		const userAgent = this.config.userAgent
 		return typeof userAgent === 'function' ? await userAgent() : userAgent
-	}
-
-	protected attachArchonSentryCaptureHeader(options: RequestOptions): void {
-		if (options.api !== 'archon' || !options.headers || !this.shouldCaptureArchonRequests()) {
-			return
-		}
-
-		options.headers['modrinth-sentry-capture'] = '1'
-	}
-
-	private shouldCaptureArchonRequests(): boolean {
-		const archonSentryCapture = this.config.archonSentryCapture
-		return typeof archonSentryCapture === 'function'
-			? archonSentryCapture()
-			: archonSentryCapture === true
 	}
 
 	/** The fetch `client.backend` calls with. A platform whose requests skip the page's fetch overrides it. */

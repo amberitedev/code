@@ -100,7 +100,6 @@ import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
-import { config } from '@/config'
 import { injectSettingsActions } from '@/features/settings/settings-actions'
 import { get_project, get_version_many } from '@/helpers/cache.js'
 import {
@@ -121,9 +120,7 @@ import { injectContentInstall } from '@/providers/content-install'
 import { useBreadcrumb } from '@/shared/breadcrumbs'
 
 const route = useRoute()
-const isPublicProfile = computed(
-	() => Boolean(config.accountApiUrl) && route.query.source === 'modrinth',
-)
+const isPublicProfile = computed(() => route.query.source === 'modrinth')
 const inheritedAuth = injectAuth()
 provideAuth({
 	...inheritedAuth,

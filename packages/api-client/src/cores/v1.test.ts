@@ -27,7 +27,6 @@ class FakeClient extends GenericModrinthClient {
 	constructor(private readonly home: boolean) {
 		super({
 			labrinthBaseUrl: ACCOUNTS,
-			selfHostedHosting: true,
 			connectCore: async (_coreId, address) =>
 				`http://127.0.0.1:5000/${encodeURIComponent(address)}`,
 			features: [new SelfHostedFeature({ baseUrl: ACCOUNTS, token: async () => undefined })],

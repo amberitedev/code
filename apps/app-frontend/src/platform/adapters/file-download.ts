@@ -57,9 +57,7 @@ export function createFileDownload(
 
 			// A Core download goes through the App's local proxy, which serves only the App:
 			// the native download names the App's origin, as the WebView's own requests do.
-			const originHeaders: Record<string, string> = client.selfHostedHosting
-				? { Origin: window.location.origin }
-				: {}
+			const originHeaders = { Origin: window.location.origin }
 			const saveUrl = async (url: string) => {
 				if (cancelled) throw new Error('Download cancelled')
 				const { error, response } = await saveExternal(

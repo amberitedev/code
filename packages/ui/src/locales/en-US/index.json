@@ -44,72 +44,6 @@
   "badge.release": {
     "defaultMessage": "Release"
   },
-  "billing.resubscribe-modal.add-payment-method": {
-    "defaultMessage": "Add payment method"
-  },
-  "billing.resubscribe-modal.cancel": {
-    "defaultMessage": "Cancel"
-  },
-  "billing.resubscribe-modal.change-payment-method": {
-    "defaultMessage": "Change"
-  },
-  "billing.resubscribe-modal.charged-now": {
-    "defaultMessage": "You'll be charged {total} today, and then every {period} until you cancel. You can cancel anytime from your settings page."
-  },
-  "billing.resubscribe-modal.charged-on-date": {
-    "defaultMessage": "You'll be charged {total} on <charge-date>{date}</charge-date>, and then every {period} until you cancel. You can cancel anytime from your settings page."
-  },
-  "billing.resubscribe-modal.description": {
-    "defaultMessage": "You are about to resubscribe to <server-name>{serverName}</server-name>. Your subscription will be reactivated and your server will continue running without interruption."
-  },
-  "billing.resubscribe-modal.error.payment-method": {
-    "defaultMessage": "Failed to change your payment method."
-  },
-  "billing.resubscribe-modal.error.text": {
-    "defaultMessage": "Cannot resubscribe, failed to load subscription details."
-  },
-  "billing.resubscribe-modal.error.title": {
-    "defaultMessage": "Error"
-  },
-  "billing.resubscribe-modal.failed-load": {
-    "defaultMessage": "Failed to load subscription details."
-  },
-  "billing.resubscribe-modal.no-payment-method": {
-    "defaultMessage": "No payment method selected"
-  },
-  "billing.resubscribe-modal.period": {
-    "defaultMessage": "{interval, select, fiveDays {5 days} monthly {month} quarterly {3 months} yearly {year} other {{interval}}}"
-  },
-  "billing.resubscribe-modal.plan-item": {
-    "defaultMessage": "Modrinth Hosting ({plan})"
-  },
-  "billing.resubscribe-modal.plan.custom": {
-    "defaultMessage": "Custom"
-  },
-  "billing.resubscribe-modal.plan.large": {
-    "defaultMessage": "Large"
-  },
-  "billing.resubscribe-modal.plan.medium": {
-    "defaultMessage": "Medium"
-  },
-  "billing.resubscribe-modal.plan.small": {
-    "defaultMessage": "Small"
-  },
-  "billing.resubscribe-modal.preview-error": {
-    "defaultMessage": "We couldn't calculate the cost of resubscribing. Make sure your payment method has a billing address, then try again."
-  },
-  "billing.resubscribe-modal.recurring-notice": {
-    "defaultMessage": "By clicking \"Resubscribe\", you are resuming a recurring subscription."
-  },
-  "billing.resubscribe-modal.resubscribe": {
-    "defaultMessage": "Resubscribe"
-  },
-  "billing.resubscribe-modal.tax-item": {
-    "defaultMessage": "Tax"
-  },
-  "billing.resubscribe-modal.title": {
-    "defaultMessage": "Resubscribe to Modrinth Hosting"
-  },
   "browse.advanced-filters.apply-saved-preferences": {
     "defaultMessage": "Apply saved preferences"
   },
@@ -2249,9 +2183,6 @@
   "hosting.loader.failed-to-repair": {
     "defaultMessage": "Failed to repair server"
   },
-  "hosting.loader.failed-to-reset-to-onboarding": {
-    "defaultMessage": "Failed to reset server to onboarding"
-  },
   "hosting.loader.failed-to-save-settings": {
     "defaultMessage": "Failed to save installation settings"
   },
@@ -2272,21 +2203,6 @@
   },
   "hosting.loader.reset-server-description": {
     "defaultMessage": "Removes all data on your server, including your worlds, mods, and configuration files. Backups will remain and can be restored. Invited players will keep their access."
-  },
-  "hosting.loader.reset-to-onboarding-button": {
-    "defaultMessage": "Reset to onboarding"
-  },
-  "hosting.loader.reset-to-onboarding-modal-description": {
-    "defaultMessage": "This will send the server back into onboarding so setup can be completed again. Are you sure you want to continue?"
-  },
-  "hosting.loader.reset-to-onboarding-modal-title": {
-    "defaultMessage": "Reset to onboarding"
-  },
-  "hosting.loader.reset-to-onboarding-success-description": {
-    "defaultMessage": "The server has been returned to the onboarding flow."
-  },
-  "hosting.loader.reset-to-onboarding-success-title": {
-    "defaultMessage": "Server reset to onboarding"
   },
   "hosting.save-banner.saved": {
     "defaultMessage": "Saved"
@@ -2320,21 +2236,6 @@
   },
   "hosting.settings.warn-environment-changes.title": {
     "defaultMessage": "Warn about incompatible or required content"
-  },
-  "hosting.specs.burst": {
-    "defaultMessage": "Bursts up to {cpus} CPUs"
-  },
-  "hosting.specs.burst.tooltip": {
-    "defaultMessage": "CPU bursting allows your server to temporarily use additional threads to help mitigate TPS spikes. Click for more info."
-  },
-  "hosting.specs.gb-ram": {
-    "defaultMessage": "{ram} GB RAM"
-  },
-  "hosting.specs.gb-storage": {
-    "defaultMessage": "{storage} GB Storage"
-  },
-  "hosting.specs.shared-cpus": {
-    "defaultMessage": "{cpus} Shared CPUs"
   },
   "icon-select.edit": {
     "defaultMessage": "Edit icon"
@@ -3610,12 +3511,6 @@
   },
   "markdown-editor.video-modal.url-field.title": {
     "defaultMessage": "YouTube video URL"
-  },
-  "modal.add-payment-method.action": {
-    "defaultMessage": "Add payment method"
-  },
-  "modal.add-payment-method.title": {
-    "defaultMessage": "Adding a payment method"
   },
   "modal.open-in-app.benefit.install": {
     "defaultMessage": "Automatically install required content"
@@ -5798,9 +5693,6 @@
   "servers.backups.admonition.backup-completed.title": {
     "defaultMessage": "Backup finished"
   },
-  "servers.backups.admonition.backup-failed.description": {
-    "defaultMessage": "Something went wrong while creating {backupName}. Please try again or contact support if the issue continues."
-  },
   "servers.backups.admonition.backup-failed.self-hosted-description": {
     "defaultMessage": "Something went wrong while creating {backupName}. Please try again."
   },
@@ -5812,9 +5704,6 @@
   },
   "servers.backups.admonition.backup-queued.title": {
     "defaultMessage": "Backup queued"
-  },
-  "servers.backups.admonition.backup-timed-out.description": {
-    "defaultMessage": "Creating {backupName} timed out. You can try again or contact support if the issue continues."
   },
   "servers.backups.admonition.backup-timed-out.self-hosted-description": {
     "defaultMessage": "Creating {backupName} timed out. You can try again."
@@ -5876,9 +5765,6 @@
   "servers.backups.admonition.restore-cancelled.title": {
     "defaultMessage": "Restore cancelled"
   },
-  "servers.backups.admonition.restore-failed.description": {
-    "defaultMessage": "Something went wrong while restoring from {backupName}. Please try again or contact support if the issue continues."
-  },
   "servers.backups.admonition.restore-failed.self-hosted-description": {
     "defaultMessage": "Something went wrong while restoring from {backupName}. Please try again."
   },
@@ -5896,9 +5782,6 @@
   },
   "servers.backups.admonition.restore-successful.title": {
     "defaultMessage": "Restore finished"
-  },
-  "servers.backups.admonition.restore-timed-out.description": {
-    "defaultMessage": "Restoring from {backupName} timed out. You can try again or contact support if the issue continues."
   },
   "servers.backups.admonition.restore-timed-out.self-hosted-description": {
     "defaultMessage": "Restoring from {backupName} timed out. You can try again."
@@ -5938,84 +5821,6 @@
   },
   "servers.backups.delete.error": {
     "defaultMessage": "Failed to delete {count, plural, one {backup} other {# backups}}"
-  },
-  "servers.backups.deleted.auto-badge": {
-    "defaultMessage": "Auto"
-  },
-  "servers.backups.deleted.bulk-bar.none-recoverable": {
-    "defaultMessage": "None of the selected backups can be undeleted"
-  },
-  "servers.backups.deleted.bulk-bar.selected-count": {
-    "defaultMessage": "{count, plural, one {# backup selected} other {# backups selected}}"
-  },
-  "servers.backups.deleted.bulk-bar.some-unrecoverable": {
-    "defaultMessage": "Only {recoverable} of {count, plural, one {# selected backup} other {# selected backups}} can be undeleted"
-  },
-  "servers.backups.deleted.column.created": {
-    "defaultMessage": "Created"
-  },
-  "servers.backups.deleted.column.name": {
-    "defaultMessage": "Name"
-  },
-  "servers.backups.deleted.column.reason": {
-    "defaultMessage": "Reason"
-  },
-  "servers.backups.deleted.column.recoverable-until": {
-    "defaultMessage": "Recoverable until"
-  },
-  "servers.backups.deleted.filter.add": {
-    "defaultMessage": "Add filter"
-  },
-  "servers.backups.deleted.filter.clear": {
-    "defaultMessage": "Clear filters"
-  },
-  "servers.backups.deleted.filter.reason": {
-    "defaultMessage": "Reason"
-  },
-  "servers.backups.deleted.filter.recoverable": {
-    "defaultMessage": "Recoverability"
-  },
-  "servers.backups.deleted.filter.recoverable.yes": {
-    "defaultMessage": "Recoverable"
-  },
-  "servers.backups.deleted.filter.type": {
-    "defaultMessage": "Type"
-  },
-  "servers.backups.deleted.filter.type.auto": {
-    "defaultMessage": "Auto"
-  },
-  "servers.backups.deleted.filter.type.manual": {
-    "defaultMessage": "Manual"
-  },
-  "servers.backups.deleted.no-results": {
-    "defaultMessage": "No deleted backups match your search."
-  },
-  "servers.backups.deleted.reason.deleted": {
-    "defaultMessage": "Manually deleted"
-  },
-  "servers.backups.deleted.reason.suspension": {
-    "defaultMessage": "Suspension"
-  },
-  "servers.backups.deleted.search-label": {
-    "defaultMessage": "Search deleted backups"
-  },
-  "servers.backups.deleted.search-placeholder": {
-    "defaultMessage": "Search {count, plural, one {# deleted backup} other {# deleted backups}}..."
-  },
-  "servers.backups.deleted.title": {
-    "defaultMessage": "Deleted backups"
-  },
-  "servers.backups.deleted.undelete": {
-    "defaultMessage": "Undelete"
-  },
-  "servers.backups.deleted.undelete.error": {
-    "defaultMessage": "Failed to undelete {count, plural, one {backup} other {# backups}}"
-  },
-  "servers.backups.deleted.undelete.success": {
-    "defaultMessage": "{count, plural, one {Backup undeleted} other {# backups undeleted}}"
-  },
-  "servers.backups.deleted.unrecoverable": {
-    "defaultMessage": "Unrecoverable"
   },
   "servers.backups.empty.description": {
     "defaultMessage": "Create your first backup"
@@ -6272,152 +6077,11 @@
   "servers.installing-banner.preparing.header": {
     "defaultMessage": "Preparing your server"
   },
-  "servers.lift-suspension.duration": {
-    "defaultMessage": "Duration"
-  },
-  "servers.lift-suspension.duration.custom": {
-    "defaultMessage": "Custom"
-  },
-  "servers.lift-suspension.duration.days": {
-    "defaultMessage": "{count, plural, one {# day} other {# days}}"
-  },
-  "servers.lift-suspension.duration.hours": {
-    "defaultMessage": "{count, plural, one {# hour} other {# hours}}"
-  },
-  "servers.lift-suspension.duration.minutes": {
-    "defaultMessage": "{count, plural, one {# minute} other {# minutes}}"
-  },
-  "servers.lift-suspension.ends-at": {
-    "defaultMessage": "The server will be suspended again around {date}."
-  },
-  "servers.lift-suspension.error.title": {
-    "defaultMessage": "Failed to lift suspension"
-  },
-  "servers.lift-suspension.header": {
-    "defaultMessage": "Lift suspension of {name}"
-  },
-  "servers.lift-suspension.lift-button": {
-    "defaultMessage": "Lift suspension"
-  },
-  "servers.lift-suspension.minutes": {
-    "defaultMessage": "Minutes"
-  },
-  "servers.lift-suspension.minutes.invalid": {
-    "defaultMessage": "Enter a whole number of minutes between 1 and {max} (3 days)."
-  },
-  "servers.lift-suspension.minutes.placeholder": {
-    "defaultMessage": "Enter a number of minutes"
-  },
-  "servers.lift-suspension.restrict-power.description": {
-    "defaultMessage": "The server can't be started, so its panel and files can be used without the server being played."
-  },
-  "servers.lift-suspension.restrict-power.label": {
-    "defaultMessage": "Block power actions while the suspension is lifted"
-  },
-  "servers.lift-suspension.success.text": {
-    "defaultMessage": "{name} is unsuspended until {date}."
-  },
-  "servers.lift-suspension.success.text-restricted": {
-    "defaultMessage": "{name} is unsuspended until {date}, with power actions blocked."
-  },
-  "servers.lift-suspension.success.title": {
-    "defaultMessage": "Suspension lifted"
-  },
-  "servers.lift-suspension.temporary.body": {
-    "defaultMessage": "The server will be suspended again automatically once the lift ends. Its subdomain stays unassigned while the suspension is lifted."
-  },
-  "servers.lift-suspension.temporary.header": {
-    "defaultMessage": "This lift is temporary"
-  },
-  "servers.list-empty.already-have-server-label": {
-    "defaultMessage": "Already have a server?"
-  },
-  "servers.list-empty.learn-more-link": {
-    "defaultMessage": "Learn more"
-  },
-  "servers.list-empty.modrinth-hosting-label": {
-    "defaultMessage": "Modrinth Hosting"
-  },
-  "servers.list-empty.new-server-button": {
-    "defaultMessage": "New server"
-  },
-  "servers.list-empty.no-servers-description": {
-    "defaultMessage": "Install mods, invite friends, and play together all from the Modrinth App."
-  },
-  "servers.list-empty.one-click-mod-installs-description": {
-    "defaultMessage": "Pick your favorite mods and we handle the rest."
-  },
-  "servers.list-empty.one-click-mod-installs-title": {
-    "defaultMessage": "One-click mod installs"
-  },
-  "servers.list-empty.play-with-friends-description": {
-    "defaultMessage": "Invite friends to play your server with one-click play from the Modrinth App."
-  },
-  "servers.list-empty.play-with-friends-title": {
-    "defaultMessage": "Play with friends"
-  },
-  "servers.list-empty.sign-in-button": {
-    "defaultMessage": "Sign in to Modrinth"
-  },
-  "servers.list-empty.simple-setup-description": {
-    "defaultMessage": "Set up your server just like a single player world."
-  },
-  "servers.list-empty.simple-setup-title": {
-    "defaultMessage": "Simple setup"
-  },
-  "servers.listing.copied-label": {
-    "defaultMessage": "Copied"
-  },
-  "servers.listing.copy-code-tooltip": {
-    "defaultMessage": "Copy code to clipboard"
-  },
-  "servers.listing.copy-id-label": {
-    "defaultMessage": "Copy ID"
-  },
-  "servers.listing.manage-billing-label": {
-    "defaultMessage": "Manage billing"
-  },
   "servers.listing.new-label": {
     "defaultMessage": "New"
   },
-  "servers.listing.notice.files-kept-for-download": {
-    "defaultMessage": "Your files will be kept for <days-remaining>{daysRemaining} more {daysRemaining, plural, one {day} other {days}}</days-remaining>. Contact support to download the files before they are deleted."
-  },
-  "servers.listing.notice.files-preserved-after-cancellation": {
-    "defaultMessage": "Your files will be preserved for 30 days after cancellation."
-  },
-  "servers.listing.notice.moderated": {
-    "defaultMessage": "Your server has been suspended by moderation action."
-  },
-  "servers.listing.notice.pending-change": {
-    "defaultMessage": "Your server will {verb, select, downgrade {downgrade} other {upgrade}} to the {planSize} Plan on <date>{formattedDate}</date>."
-  },
   "servers.listing.notice.provisioning": {
     "defaultMessage": "Please wait while we set up your server. This can take up to 10 minutes."
-  },
-  "servers.listing.notice.subscription-cancelled": {
-    "defaultMessage": "Your subscription was cancelled."
-  },
-  "servers.listing.notice.subscription-cancelled-on-date": {
-    "defaultMessage": "Your subscription was cancelled on <date>{formattedDate}</date>."
-  },
-  "servers.listing.notice.subscription-cancelled-payment-failed": {
-    "defaultMessage": "Your subscription was cancelled due to payment failure."
-  },
-  "servers.listing.notice.subscription-cancelled-payment-failed-on-date": {
-    "defaultMessage": "Your subscription was cancelled on <date>{formattedDate}</date> due to payment failure. "
-  },
-  "servers.listing.notice.subscription-set-to-cancel": {
-    "defaultMessage": "Your subscription is set to cancel."
-  },
-  "servers.listing.notice.subscription-set-to-cancel-on-date": {
-    "defaultMessage": "Your subscription is set to cancel on <date>{formattedDate}</date>. "
-  },
-  "servers.listing.notice.suspended": {
-    "defaultMessage": "Your server has been suspended. Please contact Modrinth Support for more information."
-  },
-  "servers.listing.notice.upgrading": {
-    "defaultMessage": "Your server's hardware is currently being upgraded and will be back online shortly."
   },
   "servers.listing.owner-avatar-alt": {
     "defaultMessage": "{username}'s avatar"
@@ -6425,50 +6089,11 @@
   "servers.listing.owner-tooltip": {
     "defaultMessage": "Owned by {username}"
   },
-  "servers.listing.resubscribe-label": {
-    "defaultMessage": "Resubscribe"
-  },
   "servers.listing.server-icon-alt": {
     "defaultMessage": "Server icon"
   },
-  "servers.listing.support-label": {
-    "defaultMessage": "Support"
-  },
   "servers.listing.using-project-label": {
     "defaultMessage": "Using {projectTitle}"
-  },
-  "servers.lock.modal.error-text": {
-    "defaultMessage": "An error occurred while locking this server. Please try again."
-  },
-  "servers.lock.modal.error-title": {
-    "defaultMessage": "Failed to lock server"
-  },
-  "servers.lock.modal.header": {
-    "defaultMessage": "Lock {name}"
-  },
-  "servers.lock.modal.lock-button": {
-    "defaultMessage": "Lock server"
-  },
-  "servers.lock.modal.reason-label": {
-    "defaultMessage": "Reason"
-  },
-  "servers.lock.modal.reason-placeholder": {
-    "defaultMessage": "Visible to other admins"
-  },
-  "servers.lock.modal.success-text": {
-    "defaultMessage": "{name} has been locked."
-  },
-  "servers.lock.modal.success-title": {
-    "defaultMessage": "Server locked"
-  },
-  "servers.lock.modal.warning-body": {
-    "defaultMessage": "{name} will be read-only for its owner and members until it is unlocked by an admin."
-  },
-  "servers.lock.modal.warning-header": {
-    "defaultMessage": "This server will become read-only"
-  },
-  "servers.manage.checking-for-new-servers": {
-    "defaultMessage": "Checking for new servers..."
   },
   "servers.manage.confirm-leave.body": {
     "defaultMessage": "A file upload is in progress. Leaving this page will cancel the upload."
@@ -6476,182 +6101,8 @@
   "servers.manage.confirm-leave.upload-in-progress": {
     "defaultMessage": "Upload in progress"
   },
-  "servers.manage.contact-support-button": {
-    "defaultMessage": "Contact Modrinth Support"
-  },
-  "servers.manage.error.alert-notice": {
-    "defaultMessage": "Our systems automatically alert our team when there's an issue. We are already working on getting them back online."
-  },
-  "servers.manage.error.description": {
-    "defaultMessage": "We may have temporary issues with our servers."
-  },
-  "servers.manage.error.details": {
-    "defaultMessage": "Error details:"
-  },
-  "servers.manage.error.queue-notice": {
-    "defaultMessage": "If you recently purchased your Modrinth Hosting server, it is currently in a queue and will appear here as soon as it's ready. <warning>Do not attempt to purchase a new server.</warning>"
-  },
-  "servers.manage.error.support-notice": {
-    "defaultMessage": "If you require personalized support regarding the status of your server, please contact Modrinth Support."
-  },
-  "servers.manage.error.title": {
-    "defaultMessage": "Servers could not be loaded"
-  },
-  "servers.manage.error.unknown": {
-    "defaultMessage": "Unknown error"
-  },
-  "servers.manage.handle-error.title": {
-    "defaultMessage": "An error occurred"
-  },
-  "servers.manage.lock-server": {
-    "defaultMessage": "Lock server"
-  },
-  "servers.manage.locked.badge": {
-    "defaultMessage": "Locked"
-  },
-  "servers.manage.locked.badge-tooltip": {
-    "defaultMessage": "Locked since {date}"
-  },
-  "servers.manage.locked.body": {
-    "defaultMessage": "Support has temporarily locked this server, so you cannot make any changes. <support-link>Contact support</support-link> if you believe this is a mistake."
-  },
-  "servers.manage.locked.header": {
-    "defaultMessage": "Server locked by support"
-  },
-  "servers.manage.new-server-button": {
-    "defaultMessage": "New server"
-  },
-  "servers.manage.no-owned-servers-found": {
-    "defaultMessage": "No servers you own match your search."
-  },
-  "servers.manage.no-servers-found": {
-    "defaultMessage": "No servers found."
-  },
-  "servers.manage.no-shared-servers-found": {
-    "defaultMessage": "No shared servers match your search."
-  },
-  "servers.manage.purchase-unavailable.text": {
-    "defaultMessage": "Payment information is still loading. Opening checkout as soon as it is ready."
-  },
-  "servers.manage.purchase-unavailable.title": {
-    "defaultMessage": "Purchase unavailable"
-  },
-  "servers.manage.reload-button": {
-    "defaultMessage": "Reload"
-  },
-  "servers.manage.resubscribe-error.text": {
-    "defaultMessage": "An error occurred while resubscribing to your Modrinth server."
-  },
-  "servers.manage.resubscribe-error.title": {
-    "defaultMessage": "Error resubscribing"
-  },
-  "servers.manage.resubscribe-submitted.text": {
-    "defaultMessage": "If the server is currently cancelled, it may take up to 10 minutes for another charge attempt to be made."
-  },
-  "servers.manage.resubscribe-submitted.title": {
-    "defaultMessage": "Resubscription request submitted"
-  },
-  "servers.manage.resubscribe-success.text": {
-    "defaultMessage": "Server subscription resubscribed successfully"
-  },
-  "servers.manage.resubscribe-success.title": {
-    "defaultMessage": "Success"
-  },
-  "servers.manage.search-placeholder": {
-    "defaultMessage": "Search {count} {count, plural, one {server} other {servers}}..."
-  },
-  "servers.manage.servers-title": {
-    "defaultMessage": "Modrinth Hosting"
-  },
-  "servers.manage.shared-servers-title": {
-    "defaultMessage": "Shared servers"
-  },
-  "servers.manage.suspended.go-to-admin-billing": {
-    "defaultMessage": "Go to admin billing"
-  },
-  "servers.manage.suspended.lift-suspension": {
-    "defaultMessage": "Lift suspension"
-  },
-  "servers.manage.unlock-server": {
-    "defaultMessage": "Unlock server"
-  },
-  "servers.manage.unlock.error-text": {
-    "defaultMessage": "An error occurred while unlocking this server. Please try again."
-  },
-  "servers.manage.unlock.error-title": {
-    "defaultMessage": "Failed to unlock server"
-  },
-  "servers.manage.unlock.success-text": {
-    "defaultMessage": "{name} has been unlocked."
-  },
-  "servers.manage.unlock.success-title": {
-    "defaultMessage": "Server unlocked"
-  },
-  "servers.manage.your-servers-title": {
-    "defaultMessage": "Your servers"
-  },
-  "servers.medal-listing.countdown.remaining": {
-    "defaultMessage": "<days-count>{days}</days-count> {days, plural, one {day} other {days}} <hours-count>{hours}</hours-count> {hours, plural, one {hour} other {hours}} <minutes-count>{minutes}</minutes-count> {minutes, plural, one {minute} other {minutes}} <seconds-count>{seconds}</seconds-count> {seconds, plural, one {second} other {seconds}} remaining..."
-  },
-  "servers.medal-listing.new-server-label": {
-    "defaultMessage": "New server"
-  },
-  "servers.medal-listing.notice.medal-trial-ended": {
-    "defaultMessage": "Your Medal server trial has ended and your server has been suspended. Please upgrade to continue using your server."
-  },
-  "servers.medal-listing.notice.suspended": {
-    "defaultMessage": "Your server has been suspended. Please update your billing information or contact Modrinth Support for more information."
-  },
-  "servers.medal-listing.notice.suspended-with-reason": {
-    "defaultMessage": "Your server has been suspended: {reason}. Please update your billing information or contact Modrinth Support for more information."
-  },
-  "servers.medal-listing.notice.upgrading": {
-    "defaultMessage": "Your server's hardware is currently being upgraded and will be back online shortly."
-  },
-  "servers.medal-listing.owner-avatar-alt": {
-    "defaultMessage": "{username}'s avatar"
-  },
-  "servers.medal-listing.owner-tooltip": {
-    "defaultMessage": "Owned by {username}"
-  },
-  "servers.medal-listing.server-icon-alt": {
-    "defaultMessage": "Server icon"
-  },
-  "servers.medal-listing.upgrade-button": {
-    "defaultMessage": "Upgrade"
-  },
-  "servers.medal-listing.using-project-label": {
-    "defaultMessage": "Using {projectTitle}"
-  },
   "servers.modpack-upload.file-label": {
     "defaultMessage": ".mrpack file"
-  },
-  "servers.notice.dismiss": {
-    "defaultMessage": "Dismiss"
-  },
-  "servers.notice.dismissable": {
-    "defaultMessage": "Dismissable"
-  },
-  "servers.notice.heading.attention": {
-    "defaultMessage": "Attention"
-  },
-  "servers.notice.heading.info": {
-    "defaultMessage": "Info"
-  },
-  "servers.notice.level.critical.name": {
-    "defaultMessage": "Critical"
-  },
-  "servers.notice.level.info.name": {
-    "defaultMessage": "Info"
-  },
-  "servers.notice.level.survey.name": {
-    "defaultMessage": "Survey"
-  },
-  "servers.notice.level.warn.name": {
-    "defaultMessage": "Warning"
-  },
-  "servers.notice.undismissable": {
-    "defaultMessage": "Undismissable"
   },
   "servers.play-migration.acknowledge": {
     "defaultMessage": "I understand my server will be reinstalled and restarted."
@@ -6842,83 +6293,11 @@
   "servers.power.share-changes-start-body": {
     "defaultMessage": "Starting the server will push these changes to all invited players. They will be asked to update their instance the next time they play."
   },
-  "servers.purchase.notification.success.text": {
-    "defaultMessage": "Your Modrinth Hosting purchase was completed successfully."
-  },
-  "servers.purchase.notification.success.title": {
-    "defaultMessage": "Purchase success"
-  },
-  "servers.purchase.step.payment.description": {
-    "defaultMessage": "You won't be charged yet."
-  },
-  "servers.purchase.step.payment.prompt": {
-    "defaultMessage": "Select a payment method"
-  },
-  "servers.purchase.step.payment.title": {
-    "defaultMessage": "Payment method"
-  },
-  "servers.purchase.step.plan.billed": {
-    "defaultMessage": "billed {interval, select, monthly {monthly} quarterly {quarterly} yearly {yearly} other {{interval}}}"
-  },
-  "servers.purchase.step.plan.custom.desc": {
-    "defaultMessage": "Pick a customized plan with just the specs you need."
-  },
-  "servers.purchase.step.plan.custom.heading": {
-    "defaultMessage": "Know exactly what you need?"
-  },
-  "servers.purchase.step.plan.get-started": {
-    "defaultMessage": "Get started"
-  },
-  "servers.purchase.step.plan.hardware-subtitle": {
-    "defaultMessage": "Powered by AMD Ryzen 7950X, 9950X, or equivalent, with DDR5 memory."
-  },
-  "servers.purchase.step.plan.large": {
-    "defaultMessage": "Large"
-  },
-  "servers.purchase.step.plan.large.desc": {
-    "defaultMessage": "Ideal for 15–25 players, modpacks, or heavy modding."
-  },
-  "servers.purchase.step.plan.medium": {
-    "defaultMessage": "Medium"
-  },
-  "servers.purchase.step.plan.medium.desc": {
-    "defaultMessage": "Great for 6–15 players and multiple mods."
-  },
-  "servers.purchase.step.plan.most-popular": {
-    "defaultMessage": "Most Popular"
-  },
-  "servers.purchase.step.plan.select": {
-    "defaultMessage": "Select Plan"
-  },
-  "servers.purchase.step.plan.small": {
-    "defaultMessage": "Small"
-  },
-  "servers.purchase.step.plan.small.desc": {
-    "defaultMessage": "Perfect for 1–5 friends with a few light mods."
-  },
-  "servers.purchase.step.plan.title": {
-    "defaultMessage": "Plan"
-  },
-  "servers.purchase.step.plan.your-current-plan": {
-    "defaultMessage": "Your current plan"
-  },
-  "servers.purchase.step.region.title": {
-    "defaultMessage": "Region"
-  },
-  "servers.purchase.step.review.title": {
-    "defaultMessage": "Review"
-  },
   "servers.region.australia": {
     "defaultMessage": "Australia (Sydney)"
   },
   "servers.region.central-europe": {
     "defaultMessage": "Germany (Limburg)"
-  },
-  "servers.region.custom.prompt": {
-    "defaultMessage": "How much RAM do you want your server to have?"
-  },
-  "servers.region.custom.prompt-ram-only": {
-    "defaultMessage": "RAM"
   },
   "servers.region.north-america-central": {
     "defaultMessage": "United States (Dallas)"
@@ -6929,50 +6308,11 @@
   "servers.region.north-america-west": {
     "defaultMessage": "United States (San Jose)"
   },
-  "servers.region.out-of-stock": {
-    "defaultMessage": "(Out of stock)"
-  },
-  "servers.region.ping.failed": {
-    "defaultMessage": "Failed to ping"
-  },
-  "servers.region.ping.latency": {
-    "defaultMessage": "{ping}ms"
-  },
-  "servers.region.ping.testing": {
-    "defaultMessage": "Testing connection..."
-  },
-  "servers.region.prompt": {
-    "defaultMessage": "Where would you like your server to be located?"
-  },
-  "servers.region.region-unsupported": {
-    "defaultMessage": "Region not listed? <link>Let us know where you'd like to see Modrinth Hosting next!</link>"
-  },
   "servers.region.southeast-asia": {
     "defaultMessage": "Singapore"
   },
   "servers.region.western-europe": {
     "defaultMessage": "United Kingdom (Coventry)"
-  },
-  "servers.settings.advanced.sftp.roll-credentials": {
-    "defaultMessage": "Rotate credentials"
-  },
-  "servers.settings.advanced.sftp.roll-credentials-error-text": {
-    "defaultMessage": "Please try again later."
-  },
-  "servers.settings.advanced.sftp.roll-credentials-error-title": {
-    "defaultMessage": "Failed to rotate SFTP credentials"
-  },
-  "servers.settings.advanced.sftp.roll-credentials-modal-description": {
-    "defaultMessage": "The previous username and password will stop working."
-  },
-  "servers.settings.advanced.sftp.roll-credentials-modal-title": {
-    "defaultMessage": "Rotate credentials"
-  },
-  "servers.settings.advanced.sftp.roll-credentials-success-text": {
-    "defaultMessage": "Your SFTP username and password have been regenerated."
-  },
-  "servers.settings.advanced.sftp.roll-credentials-success-title": {
-    "defaultMessage": "SFTP credentials rotated"
   },
   "servers.settings.backups.auto.description": {
     "defaultMessage": "Back up your server on a schedule."
@@ -6991,57 +6331,6 @@
   },
   "servers.settings.backups.save.error-title": {
     "defaultMessage": "Failed to update backup settings"
-  },
-  "servers.settings.support.action-log-title": {
-    "defaultMessage": "Action log"
-  },
-  "servers.settings.support.clear-action-log-button": {
-    "defaultMessage": "Clear action log"
-  },
-  "servers.settings.support.clear-action-log-confirmation": {
-    "defaultMessage": "This permanently deletes all action log entries for this server. Continue?"
-  },
-  "servers.settings.support.clear-action-log-description": {
-    "defaultMessage": "Delete all action log entries for this server."
-  },
-  "servers.settings.support.clear-action-log-error": {
-    "defaultMessage": "Failed to clear action log"
-  },
-  "servers.settings.support.clear-action-log-success": {
-    "defaultMessage": "Action log cleared"
-  },
-  "servers.settings.support.clear-action-log-title": {
-    "defaultMessage": "Clear action log?"
-  },
-  "servers.settings.support.resuspend.button": {
-    "defaultMessage": "Unlift now"
-  },
-  "servers.settings.support.resuspend.description": {
-    "defaultMessage": "This ends the temporary lift of {name}'s suspension early. The server will be suspended again right away."
-  },
-  "servers.settings.support.resuspend.error-title": {
-    "defaultMessage": "Failed to unlift the suspension"
-  },
-  "servers.settings.support.resuspend.success-text": {
-    "defaultMessage": "{name} has been suspended again."
-  },
-  "servers.settings.support.resuspend.success-title": {
-    "defaultMessage": "Server suspended"
-  },
-  "servers.settings.support.resuspend.title": {
-    "defaultMessage": "Unlift suspension now?"
-  },
-  "servers.settings.support.suspension-lifted.power-allowed": {
-    "defaultMessage": "Power actions are allowed while the suspension is lifted."
-  },
-  "servers.settings.support.suspension-lifted.power-blocked": {
-    "defaultMessage": "Power actions are blocked while the suspension is lifted."
-  },
-  "servers.settings.support.suspension-lifted.suspended-again": {
-    "defaultMessage": "Suspended again {time}"
-  },
-  "servers.settings.support.suspension-lifted.title": {
-    "defaultMessage": "Suspension lifted"
   },
   "servers.setup.onboarding.invite.copied": {
     "defaultMessage": "Link copied"
@@ -7415,9 +6704,6 @@
   "sharing.invite-players-modal.avatar-alt": {
     "defaultMessage": "{username}'s avatar"
   },
-  "sharing.invite-players-modal.cancel": {
-    "defaultMessage": "Cancel"
-  },
   "sharing.invite-players-modal.custom-expiry": {
     "defaultMessage": "Custom..."
   },
@@ -7453,9 +6739,6 @@
   },
   "sharing.invite-players-modal.friends-heading": {
     "defaultMessage": "Your friends - {count}"
-  },
-  "sharing.invite-players-modal.heading": {
-    "defaultMessage": "Invite players"
   },
   "sharing.invite-players-modal.invite": {
     "defaultMessage": "Invite"
@@ -7501,18 +6784,6 @@
   },
   "sharing.invite-players-modal.update-invite-link-failed-title": {
     "defaultMessage": "Failed to update invite link"
-  },
-  "sharing.invite-players-toast.accept": {
-    "defaultMessage": "Accept"
-  },
-  "sharing.invite-players-toast.decline": {
-    "defaultMessage": "Decline"
-  },
-  "sharing.invite-players-toast.invited-you-to": {
-    "defaultMessage": "invited you to"
-  },
-  "sharing.invite-players-toast.server-suffix": {
-    "defaultMessage": "server."
   },
   "skins.select": {
     "defaultMessage": "Select skin"

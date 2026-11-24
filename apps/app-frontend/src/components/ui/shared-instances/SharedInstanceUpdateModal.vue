@@ -31,7 +31,6 @@ import {
 } from '@modrinth/ui'
 import { computed, ref } from 'vue'
 
-import { config } from '@/config'
 import {
 	getSharedInstanceUnavailableReason,
 	install_update_shared_instance,
@@ -67,14 +66,7 @@ const description = computed(() => {
 		? formatMessage(messages.ownerUpdateDescription)
 		: formatMessage(messages.description, { name: instance.value.name })
 })
-const diffs = computed(() =>
-	sharedDiffItems(
-		preview.value?.diffs.filter(
-			(diff) =>
-				config.accountApiUrl || !(diff.type === 'updated' && !diff.projectId && diff.fileName),
-		) ?? [],
-	),
-)
+const diffs = computed(() => sharedDiffItems(preview.value?.diffs ?? []))
 
 async function update() {
 	let successful = false

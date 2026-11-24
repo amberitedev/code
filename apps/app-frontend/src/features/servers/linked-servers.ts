@@ -17,7 +17,6 @@ export type LinkedServer = Archon.Servers.v0.Server & {
  */
 const serversQueryOptions = {
 	...serverListQueryOptions(apiClient),
-	enabled: () => apiClient.selfHostedHosting,
 	staleTime: 5_000,
 	refetchInterval: 5_000,
 	retry: false,
