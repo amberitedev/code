@@ -1,6 +1,5 @@
 import type { AbstractModrinthClient } from '../core/abstract-client'
 import type { AbstractModule } from '../core/abstract-module'
-import { ArchonCoresV1Module } from '../cores/v1'
 import { SharedInstancesPlayersV1Module } from '../sharing/players/v1'
 import { ArchonActionsV1Module } from './archon/actions/v1'
 import { ArchonBackupsV1Module } from './archon/backups/v1'
@@ -77,7 +76,6 @@ export const MODULE_REGISTRY = {
 	archon_backups_queue_v1: ArchonBackupsQueueV1Module,
 	archon_backups_v1: ArchonBackupsV1Module,
 	archon_content_v1: ArchonContentV1Module,
-	archon_cores_v1: ArchonCoresV1Module,
 	archon_icons_v1: ArchonIconsV1Module,
 	archon_options_v1: ArchonOptionsV1Module,
 	archon_properties_v1: ArchonPropertiesV1Module,

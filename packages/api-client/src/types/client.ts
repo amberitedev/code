@@ -59,7 +59,7 @@ export interface ClientConfig {
 
 	/**
 	 * This device's sessions on Cores, held by the platform outside the page: the page never sees
-	 * a session token, and `connectCore` adds it to each request. See `archon.cores_v1.signIn`.
+	 * a session token, and `connectCore` adds it to each request. See `cores.signIn`.
 	 */
 	coreSessions?: CoreSessions
 

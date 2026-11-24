@@ -1,4 +1,4 @@
-import { SharedInstancesApiError } from '@modrinth/api-client'
+import { ApiCallError } from '@modrinth/api-client'
 import { MinecraftServerIcon } from '@modrinth/assets'
 import { createContext, injectAuth } from '@modrinth/ui'
 import { queryOptions, useQuery, useQueryClient } from '@tanstack/vue-query'
@@ -254,7 +254,7 @@ export function createSharedInstanceContext(
 			const owner = users.find((user) => user.join_type === 'owner')
 			if (owner && owner.id !== userId) problem = 'wrong_account'
 		} catch (error) {
-			if (!(error instanceof SharedInstancesApiError)) return ownerProblem.value
+			if (!(error instanceof ApiCallError)) return ownerProblem.value
 			if (error.status === 404) problem = 'missing'
 			else if (otherAccount) return ownerProblem.value
 			// A session the backend no longer accepts is a sign-in problem, not the wrong account.

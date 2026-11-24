@@ -35,7 +35,7 @@ function fake(own: ContentItem[], pack: ContentItem[]) {
 		[instanceContent.ListLinkedModpackContent, pack],
 	])
 	const client = {
-		archon: { cores_v1: { coreOf: async () => ({ id: 'core' }) } },
+		cores: { coreOf: async () => ({ id: 'core' }) },
 		core: () => ({
 			call: async (endpoint: Endpoint, input: unknown) => {
 				calls.push({ endpoint, input })

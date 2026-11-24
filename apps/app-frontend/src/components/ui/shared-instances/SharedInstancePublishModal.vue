@@ -179,7 +179,7 @@ async function publishToFriends(paths: string[], removed: string[]) {
 async function serverCore() {
 	for (const server of props.servers ?? []) {
 		try {
-			return (await client.archon.cores_v1.coreOf(server.server_id)).id
+			return (await client.cores.coreOf(server.server_id)).id
 		} catch (error) {
 			console.error(`Could not find the Core of server ${server.server_id}`, error)
 		}

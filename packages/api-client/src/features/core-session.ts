@@ -6,7 +6,8 @@ import {
 	TICKET_HEADER,
 } from '@amberite/contracts'
 
-import { ContractClient, type ContractTransport } from '../contracts/client'
+import { ContractClient, type ContractTransport, fetchWithProgress } from '../contracts/client'
+import { ApiCallError } from '../contracts/errors'
 import type { AbstractModrinthClient } from '../core/abstract-client'
 import { AbstractFeature } from '../core/abstract-feature'
 import { ModrinthApiError } from '../core/errors'
@@ -23,14 +24,11 @@ export class CoreSessionFeature extends AbstractFeature {
 	}
 
 	shouldApply(context: RequestContext): boolean {
-		return (
-			super.shouldApply(context) &&
-			this.client.archon.cores_v1.coreForUrl(context.url) !== undefined
-		)
+		return super.shouldApply(context) && this.client.cores.coreForUrl(context.url) !== undefined
 	}
 
 	async execute<T>(next: () => Promise<T>, context: RequestContext): Promise<T> {
-		const cores = this.client.archon.cores_v1
+		const cores = this.client.cores
 		const core = cores.coreForUrl(context.url)
 		if (!core) return next()
 		try {
@@ -55,7 +53,7 @@ function signedOut(error: unknown): boolean {
 }
 
 /**
- * How `client.core(id)` reaches a listed Core by default: at the base `archon.cores_v1` routes it
+ * How `client.core(id)` reaches a listed Core by default: at the base `cores` routes it
  * to, where the platform adds this device's session. A dangerous call carries a fresh ticket, and
  * a call the Core answers with 401 `invalid_credentials` signs in once and is sent again; the
  * Core checks the session before the ticket, so the ticket is still unused.
@@ -65,7 +63,7 @@ export function coreSessionTransport(
 	coreId: string,
 	fetch: typeof globalThis.fetch,
 ): ContractTransport {
-	const cores = client.archon.cores_v1
+	const cores = client.cores
 	return {
 		base: () => cores.url(coreId),
 		headers: async (endpoint) => {
@@ -74,10 +72,13 @@ export function coreSessionTransport(
 			return headers
 		},
 		fetch: async (input, init) => {
-			const response = await fetch(input, init)
+			// Only the page's own XMLHttpRequest reports an upload's progress.
+			const send = () =>
+				init.onUploadProgress ? fetchWithProgress(input, init) : fetch(input, init)
+			const response = await send()
 			if (!(await answeredSignedOut(response))) return response
 			await cores.signIn(await cores.core(coreId))
-			return fetch(input, init)
+			return send()
 		},
 	}
 }
@@ -123,13 +124,15 @@ export function protocolChecked(transport: ContractTransport): ContractTransport
 	}
 }
 
-/** A Core speaks another protocol version than this App. `message` says which to update. */
-export class ProtocolMismatch extends Error {
+/** A Core speaks another protocol version than this App. `description` says which to update. */
+export class ProtocolMismatch extends ApiCallError {
 	constructor(
 		/** The side that is too old. */
 		readonly side: 'core' | 'app',
 	) {
 		super(
+			0,
+			'unsupported',
 			side === 'app'
 				? 'This Core is newer than this App. Update Amberite.'
 				: 'This Core is out of date. Update this Core.',

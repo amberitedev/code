@@ -1,12 +1,10 @@
-import { ContractClient, desktop, updates } from '@modrinth/api-client'
+import { desktop, updates } from '@modrinth/api-client'
 
 import { get_full_path, get_mod_full_path } from '@/helpers/instance'
 import { save } from '@/platform/dialog'
-import { localTransport } from '@/platform/local'
+import { apiClient } from '@/platform/modrinth-client'
 import { runOp } from '@/platform/ops'
 import { getBoot } from '@/platform/os'
-
-const local = new ContractClient(localTransport)
 
 export async function isDev() {
 	return getBoot().dev
@@ -17,26 +15,30 @@ export async function areUpdatesEnabled() {
 }
 
 export async function checkForUpdate() {
-	return await local.call(updates.checkForUpdate)
+	return await apiClient.local.call(updates.checkForUpdate)
 }
 
 // The App keeps the update its last check found, so the rid is unused.
 export async function getUpdateSize(_updateRid) {
-	return await local.call(updates.getUpdateSize)
+	return await apiClient.local.call(updates.getUpdateSize)
 }
 
 export async function enqueueUpdateForInstallation(_updateRid) {
 	const op = crypto.randomUUID()
-	const { error } = await runOp(op, () => local.call(updates.downloadUpdate, { body: { op } }))
+	const { error } = await runOp(op, () =>
+		apiClient.local.call(updates.downloadUpdate, { body: { op } }),
+	)
 	if (error) throw new Error(error.description)
 }
 
 export async function removeEnqueuedUpdate() {
-	return await local.call(updates.discardDownloadedUpdate)
+	return await apiClient.local.call(updates.discardDownloadedUpdate)
 }
 
 export async function setRestartAfterPendingUpdate(should_restart) {
-	return await local.call(updates.setRestartAfterUpdate, { body: { restart: should_restart } })
+	return await apiClient.local.call(updates.setRestartAfterUpdate, {
+		body: { restart: should_restart },
+	})
 }
 
 // One of 'Windows', 'Linux', 'MacOS'
@@ -45,19 +47,19 @@ export async function getOS() {
 }
 
 export async function isNetworkMetered() {
-	return await local.call(desktop.checkNetworkMetered)
+	return await apiClient.local.call(desktop.checkNetworkMetered)
 }
 
 export async function openPath(path) {
-	return await local.call(desktop.openPath, { body: { path } })
+	return await apiClient.local.call(desktop.openPath, { body: { path } })
 }
 
 export async function highlightInFolder(path) {
-	return await local.call(desktop.revealPath, { body: { path } })
+	return await apiClient.local.call(desktop.revealPath, { body: { path } })
 }
 
 export async function showLauncherLogsFolder() {
-	return await local.call(desktop.openFolder, { body: { folder: 'launcher_logs' } })
+	return await apiClient.local.call(desktop.openFolder, { body: { folder: 'launcher_logs' } })
 }
 
 export async function createInstanceShortcut(instanceName, instanceId, options = {}) {
@@ -67,7 +69,7 @@ export async function createInstanceShortcut(instanceName, instanceId, options =
 
 	if (!outputPath) return null
 
-	return await local.call(desktop.createShortcut, {
+	return await apiClient.local.call(desktop.createShortcut, {
 		body: {
 			instance_name: instanceName,
 			instance_id: instanceId,
@@ -79,7 +81,7 @@ export async function createInstanceShortcut(instanceName, instanceId, options =
 }
 
 export async function showAppDbBackupsFolder() {
-	return await local.call(desktop.openFolder, { body: { folder: 'app_db_backups' } })
+	return await apiClient.local.call(desktop.openFolder, { body: { folder: 'app_db_backups' } })
 }
 
 // Opens an instance's folder in the OS file explorer
@@ -94,7 +96,7 @@ export async function highlightModInInstance(instanceId, projectPath) {
 }
 
 export async function restartApp() {
-	return await local.call(updates.restartApp)
+	return await apiClient.local.call(updates.restartApp)
 }
 
 export const releaseColor = (releaseType) => {

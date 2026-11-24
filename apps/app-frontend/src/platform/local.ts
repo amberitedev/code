@@ -1,4 +1,4 @@
-import { type ContractTransport, localFiles } from '@modrinth/api-client'
+import { type ContractTransport, fetchWithProgress, localFiles } from '@modrinth/api-client'
 
 declare global {
 	interface Window {
@@ -42,7 +42,7 @@ export const isNativeWindow = window.__AMBERITE_LOCAL__ !== undefined
 export const localTransport: ContractTransport = {
 	base: localBase,
 	headers: async () => ({}),
-	fetch: (input, init) => fetch(input, init),
+	fetch: fetchWithProgress,
 }
 
 /**

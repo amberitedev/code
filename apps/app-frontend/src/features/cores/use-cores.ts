@@ -10,7 +10,7 @@ export const coresQueryKey = ['cores']
 export function useCores() {
 	const query = useQuery({
 		queryKey: coresQueryKey,
-		queryFn: () => apiClient.archon.cores_v1.list(),
+		queryFn: () => apiClient.cores.list(),
 		staleTime: 30_000,
 	})
 	const cores = computed(() => query.data.value ?? [])
@@ -41,7 +41,7 @@ export function createCoreActions(openAddCore: CoreActions['openAddCore']): Core
 	return {
 		openAddCore,
 		ensureCore: async () => {
-			const cores = await apiClient.archon.cores_v1.list()
+			const cores = await apiClient.cores.list()
 			return cores.length > 0 || openAddCore()
 		},
 	}

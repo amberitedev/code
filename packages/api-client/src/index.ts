@@ -40,7 +40,6 @@ export {
 } from './features/self-hosted'
 export { type VerboseLoggingConfig, VerboseLoggingFeature } from './features/verbose-logging'
 export type { InferredClientModules } from './modules'
-export { SharedInstancesApiError } from './sharing/errors'
 export * from './modules/types'
 export { GenericModrinthClient } from './platform/generic'
 export type { TauriClientConfig } from './platform/tauri'

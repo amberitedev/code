@@ -25,7 +25,7 @@ export function serversV1(client: AbstractModrinthClient): Adapter<ArchonServers
 		const [server, setup, base] = await Promise.all([
 			routes.call(core.GetServer, params),
 			routes.call(core.GetSetup, params),
-			client.archon.cores_v1.hostingUrl(`/servers/${serverId}`),
+			client.cores.serverUrl(serverId),
 		])
 		const host = new URL(base).host
 		return {
@@ -79,7 +79,7 @@ export function serversV1(client: AbstractModrinthClient): Adapter<ArchonServers
 	return {
 		get,
 		async list() {
-			const { servers } = await client.archon.cores_v1.servers()
+			const { servers } = await client.cores.servers()
 			return Promise.all(servers.map((server) => get(server.server_id)))
 		},
 		async patchWorld(serverId, _worldId, body) {

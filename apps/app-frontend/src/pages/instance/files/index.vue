@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ApiCallError } from '@modrinth/api-client'
 import type { EditingFile, FileItem, UploadState } from '@modrinth/ui'
 import {
 	commonMessages,
@@ -250,8 +251,12 @@ const uploadState = ref<UploadState>({
 	totalFiles: 0,
 })
 
+/** Aborts the upload running now, if any. */
+let uploading: AbortController | undefined
+
 async function handleUploadFiles(files: File[]) {
 	if (files.length === 0) return
+	const abort = (uploading = new AbortController())
 
 	uploadState.value = {
 		isUploading: true,
@@ -264,20 +269,30 @@ async function handleUploadFiles(files: File[]) {
 	}
 	try {
 		for (const file of files) {
+			const sent = uploadState.value.uploadedBytes
 			uploadState.value.currentFileName = file.name
+			uploadState.value.currentFileProgress = 0
 			const targetPath = currentPath.value ? `${currentPath.value}/${file.name}` : file.name
-			await writeInstanceFile(instanceId.value, targetPath, file)
+			await writeInstanceFile(instanceId.value, targetPath, file, false, {
+				signal: abort.signal,
+				onUploadProgress: ({ loaded, progress }) => {
+					uploadState.value.currentFileProgress = progress
+					uploadState.value.uploadedBytes = sent + loaded
+				},
+			})
 			uploadState.value.completedFiles++
-			uploadState.value.uploadedBytes += file.size
+			uploadState.value.uploadedBytes = sent + file.size
 			uploadState.value.currentFileProgress = 1
 		}
 	} catch (e) {
+		if (e instanceof ApiCallError && e.code === 'cancelled') return
 		addNotification({
 			title: formatMessage(commonMessages.uploadFailedLabel),
 			text: e instanceof Error ? e.message : '',
 			type: 'error',
 		})
 	} finally {
+		if (uploading === abort) uploading = undefined
 		uploadState.value.isUploading = false
 		await refresh()
 	}
@@ -329,6 +344,7 @@ provideFileManager({
 	writeFile: handleWriteFile,
 	downloadFile: handleDownloadFile,
 	uploadFiles: handleUploadFiles,
+	cancelUpload: () => uploading?.abort(),
 	uploadState,
 	extractFile: handleExtractFile,
 	refresh,

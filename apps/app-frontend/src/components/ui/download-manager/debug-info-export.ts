@@ -1,9 +1,9 @@
-import { ContractClient, ops } from '@modrinth/api-client'
+import { ops } from '@modrinth/api-client'
 import { computed, reactive, ref } from 'vue'
 
 import { toError } from '@/helpers/errors'
 import { save } from '@/platform/dialog'
-import { localTransport } from '@/platform/local'
+import { apiClient } from '@/platform/modrinth-client'
 import { cancelOp, runOp } from '@/platform/ops'
 
 export interface DebugInfoExportProgress {
@@ -23,8 +23,6 @@ export interface DebugInfoExportTask extends DebugInfoExportProgress {
 	error?: string
 	cancel: () => Promise<void>
 }
-
-const local = new ContractClient(localTransport)
 
 export const debugInfoExports = ref(new Map<string, DebugInfoExportTask>())
 const selectingDestination = ref(false)
@@ -80,7 +78,7 @@ export async function exportDebugInfo(title: string) {
 	try {
 		const { error } = await runOp(
 			task.id,
-			() => local.call(ops.exportDebugInfo, { body: { op: task.id, path } }),
+			() => apiClient.local.call(ops.exportDebugInfo, { body: { op: task.id, path } }),
 			({ stage, done, total }) => {
 				if (task.status !== 'running') return
 				task.started = true

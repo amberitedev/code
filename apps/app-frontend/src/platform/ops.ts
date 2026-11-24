@@ -1,11 +1,10 @@
-import { ContractClient, type LocalEvent, ops } from '@modrinth/api-client'
+import { type LocalEvent, ops } from '@modrinth/api-client'
 
-import { localTransport } from '@/platform/local'
+import { apiClient } from '@/platform/modrinth-client'
 
 export type OpProgress = Extract<LocalEvent, { type: 'progress' }>['payload']
 export type OpEnd = Extract<LocalEvent, { type: 'op_ended' }>['payload']
 
-const local = new ContractClient(localTransport)
 const running = new Map<
 	string,
 	{
@@ -26,7 +25,7 @@ export function dispatchOpEvent(event: LocalEvent) {
 async function endLostOps() {
 	const started = [...running].filter(([, op]) => op.started)
 	if (started.length === 0) return
-	const listed = await local.call(ops.listOps).catch(() => null)
+	const listed = await apiClient.local.call(ops.listOps).catch(() => null)
 	if (!listed) return
 	for (const [op, { end }] of started) {
 		if (listed.includes(op)) continue
@@ -60,5 +59,5 @@ export async function runOp(
 
 /** The op ends with `cancelled`. */
 export async function cancelOp(op: string) {
-	await local.call(ops.cancelOp, { params: { id: op } })
+	await apiClient.local.call(ops.cancelOp, { params: { id: op } })
 }

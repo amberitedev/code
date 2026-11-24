@@ -77,7 +77,7 @@ async function create(ctx: CreationFlowContextValue) {
 	const instance = { id: props.instance.id, name: props.instance.name }
 	try {
 		if (!core) throw new Error('No Core was chosen')
-		const created = await client.archon.cores_v1.createServer(instance.name, core, confirmEula)
+		const created = await client.cores.createServer(instance.name, core, confirmEula)
 		if (!created) return
 		const { id } = created
 		flow.value?.hide()

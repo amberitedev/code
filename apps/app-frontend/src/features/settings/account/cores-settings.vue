@@ -178,7 +178,7 @@ async function remove() {
 	if (!removed || removing.value) return
 	removing.value = true
 	try {
-		await client.archon.cores_v1.revoke(removed)
+		await client.cores.revoke(removed)
 		selectedId.value = undefined
 	} catch (cause) {
 		console.error('Failed to remove Core', cause)

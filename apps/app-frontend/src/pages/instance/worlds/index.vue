@@ -385,7 +385,7 @@ type WorldRow = { key: string; world: World; linked?: LinkedServer }
 
 /** Where this App joins a linked server, which its row shows, pings and joins. See `joinNet`. */
 function joinAddress(server: LinkedServer) {
-	return getHostingServerAddress(apiClient.archon.cores_v1.joinNet(server))
+	return getHostingServerAddress(apiClient.cores.joinNet(server))
 }
 
 function serverRow(key: string, name: string, address: string): ServerWorld {

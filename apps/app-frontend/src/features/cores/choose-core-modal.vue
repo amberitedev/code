@@ -22,7 +22,7 @@ let settle: ((core: ListedCore | null) => void) | null = null
 async function pick(): Promise<ListedCore | null> {
 	try {
 		if (!(await ensureCore())) return null
-		cores.value = await client.archon.cores_v1.list()
+		cores.value = await client.cores.list()
 	} catch (cause) {
 		console.error('Failed to load Cores', cause)
 		addNotification({

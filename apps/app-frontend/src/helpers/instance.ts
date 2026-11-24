@@ -6,7 +6,6 @@
 import {
 	ApiCallError,
 	type ContentItem as ContentItemResponse,
-	ContractClient,
 	desktop,
 	type GameInstance as InstanceResponse,
 	type GlobalSyncedOptions,
@@ -40,7 +39,7 @@ import {
 } from '@modrinth/api-client'
 import { type ContentItem, type ContentOwner, getIconSymbolAsset } from '@modrinth/ui'
 
-import { localFileUrl, localTransport } from '@/platform/local'
+import { localFileUrl } from '@/platform/local'
 import { apiClient } from '@/platform/modrinth-client'
 import { runOp } from '@/platform/ops'
 
@@ -361,7 +360,7 @@ export async function move_screenshots(
 }
 
 export async function open_screenshot(key: ScreenshotKey): Promise<void> {
-	return await new ContractClient(localTransport).call(desktop.openFolder, {
+	return await apiClient.local.call(desktop.openFolder, {
 		body: { folder: 'screenshot', ...key },
 	})
 }
@@ -430,7 +429,7 @@ export async function set_command_history(contents: string): Promise<string> {
 }
 
 export async function open_synced_options_folder(): Promise<void> {
-	return await new ContractClient(localTransport).call(desktop.openFolder, {
+	return await apiClient.local.call(desktop.openFolder, {
 		body: { folder: 'synced_options' },
 	})
 }
