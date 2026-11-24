@@ -177,7 +177,6 @@
 		<ServerSettingsModal
 			ref="serverSettingsModal"
 			:site-url="siteUrl"
-			:resolve-viewer="resolveViewerOnce"
 			:browse-modpacks="handleBrowseModpacks"
 		/>
 	</Suspense>
@@ -248,7 +247,6 @@ import ServerInviteLinkModal from '#ui/components/sharing/server-invite-link/Ser
 import {
 	hasServerPermission,
 	useDebugLogger,
-	useFormatDateTime,
 	useGeneratedIconSrc,
 	useLoadingBarToken,
 	useModrinthServersConsole,
@@ -291,7 +289,6 @@ const props = withDefaults(
 	defineProps<{
 		serverId: string
 		reloadPage: () => void
-		resolveViewer: () => Promise<{ userId: string | null; userRole: string | null }>
 		showAdvancedDebugInfo?: boolean
 		showUptime?: boolean
 		additionalTabs?: Tab[]
@@ -356,17 +353,7 @@ const isMounted = ref(true)
 const serverPreferences = useServerPreferences(props.serverId)
 
 const serverSettingsModal = ref<InstanceType<typeof ServerSettingsModal> | null>(null)
-let viewerPromise: ReturnType<typeof props.resolveViewer> | null = null
-
-function resolveViewerOnce() {
-	viewerPromise ??= props.resolveViewer().catch((error) => {
-		viewerPromise = null
-		throw error
-	})
-	return viewerPromise
-}
 const confirmLeaveModal = ref<InstanceType<typeof ConfirmLeaveModal>>()
-const formatDateTime = useFormatDateTime({ dateStyle: 'long', timeStyle: 'short' })
 
 // Matches the tab pages and the hover prefetches, so opening a server or switching tabs reuses
 // what was just fetched. Changes arrive over the websocket and invalidate these queries.

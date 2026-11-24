@@ -4,7 +4,6 @@
 			:server-id="serverId"
 			:layout-mode="isOverviewRoute ? 'fill' : 'page'"
 			:reload-page="() => router.go(0)"
-			:resolve-viewer="resolveViewer"
 			:additional-tabs="historyTabs"
 			:site-url="config.accountSiteUrl"
 			:navigate-to-servers="() => router.push('/hosting/manage')"
@@ -39,7 +38,7 @@
 </template>
 
 <script setup lang="ts">
-import type { Archon, Labrinth } from '@modrinth/api-client'
+import type { Archon } from '@modrinth/api-client'
 import { HistoryIcon, ServerStackIcon } from '@modrinth/assets'
 import {
 	commonMessages,
@@ -54,8 +53,6 @@ import { useRoute, useRouter } from 'vue-router'
 
 import { config } from '@/config'
 import { useServerHistory } from '@/features/share-history/use-server-history'
-import { get_user } from '@/helpers/cache'
-import { get as getCreds } from '@/helpers/mr_auth'
 import { provideBreadcrumbParent, useBreadcrumb, useRootBreadcrumb } from '@/shared/breadcrumbs'
 import { useCachedServerIcon } from '@/shared/composables/use-cached-server-icon'
 
@@ -171,18 +168,4 @@ watch(
 		void router.replace('/hosting/manage')
 	},
 )
-
-async function resolveViewer(): Promise<{ userId: string | null; userRole: string | null }> {
-	const credentials = await getCreds().catch(() => null)
-	if (!credentials?.user_id) {
-		return { userId: null, userRole: null }
-	}
-
-	const user = await get_user(credentials.user_id, 'bypass').catch(() => null)
-	const typedUser = user as Labrinth.Users.v2.User | null
-	return {
-		userId: credentials.user_id,
-		userRole: typedUser?.role ?? null,
-	}
-}
 </script>

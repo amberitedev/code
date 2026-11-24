@@ -50,12 +50,4 @@ export { clearNodeAuthState, nodeAuthState, setNodeAuthState } from './state/nod
 export * from './types'
 export { withJWTRetry } from './utils/jwt-retry'
 export { getNodeBaseUrl, getNodeWebSocketUrl } from './utils/node-url'
-export { WebSocketPinger, type WebSocketPingOptions } from './utils/pingtest'
-export {
-	type ParsedSseEvent,
-	type ParsedSseItem,
-	type ParsedSseRetry,
-	parseSyncEventData,
-	SseParser,
-} from './utils/sse'
 export type { Override, RawDecimal } from './utils/types'

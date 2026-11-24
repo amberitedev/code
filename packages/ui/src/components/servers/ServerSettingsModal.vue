@@ -33,7 +33,6 @@ type ShowOptions = {
 
 const props = defineProps<{
 	siteUrl?: string
-	resolveViewer: () => Promise<{ userId: string | null; userRole: string | null }>
 	browseModpacks?: (args: {
 		serverId: string
 		worldId: string | null
@@ -63,9 +62,6 @@ const { data: core } = useQuery({
 	queryFn: () => client.archon.cores_v1.coreOf(currentServerId),
 })
 
-const currentUserId = ref<string | null>(null)
-const currentUserRole = ref<string | null>(null)
-
 const isApp = ref(true)
 
 // Preload
@@ -94,8 +90,6 @@ const saveBannerShown = ref(false)
 provideServerSettings({
 	siteUrl: computed(() => (props.siteUrl ?? 'https://modrinth.com').replace(/\/$/, '')),
 	isApp,
-	currentUserId,
-	currentUserRole,
 	browseModpacks: props.browseModpacks ?? (() => {}),
 	closeModal: () => hide(),
 	saveBanner: { target: saveBannerTarget, shown: saveBannerShown },
@@ -134,15 +128,6 @@ watch(tabs, (currentTabs, previousTabs) => {
 	modal.value.setTab(Math.max(selectedIndex, 0))
 })
 
-async function fetchViewer() {
-	currentUserId.value = null
-	currentUserRole.value = null
-
-	const result = await props.resolveViewer()
-	currentUserId.value = result.userId
-	currentUserRole.value = result.userRole
-}
-
 function resolveVisibleTabIndex(tabIndex?: number, tabId?: ServerSettingsTabId) {
 	const visibleTabs = tabs.value.filter((tab) => tab.shown !== false)
 	let requestedTab = tabIndex ?? 0
@@ -177,7 +162,7 @@ async function show({ serverId, tabIndex, tabId }: ShowOptions) {
 
 		modal.value?.setTab(resolveVisibleTabIndex(tabIndex, tabId))
 		modal.value?.show()
-		const fetchPromises: Promise<unknown>[] = [fetchViewer()]
+		const fetchPromises: Promise<unknown>[] = []
 
 		if (!cachedServer) {
 			fetchPromises.push(

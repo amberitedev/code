@@ -27,7 +27,6 @@
 					</div>
 
 					<EditServerIcon
-						v-if="!data.is_medal"
 						:can-edit="canSetup"
 						:permission-denied-message="permissionDeniedMessage"
 					/>

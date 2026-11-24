@@ -60,7 +60,6 @@ const {
 	serverId,
 	isConnected,
 	isWsAuthIncorrect,
-	stats,
 	powerState: serverPowerState,
 	powerStateDetails: _powerStateDetails,
 } = injectModrinthServerContext()
