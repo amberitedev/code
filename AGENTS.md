@@ -65,9 +65,10 @@ Every command, the log, and ports: [scripts](docs/internals/scripts.md).
 
 - Before you push, run `vp run check:changed`. It runs CI's fast checks for changed files: lint, typos, TOML, typecheck and tests of the affected packages, and for Rust `rustfmt`, a build, and the tests of changed crates. CI still runs the full suites.
 - While you iterate, run only the tests that cover what you changed.
+- Rust tests run through `node scripts/dev-runner.ts test <crate>`. A plain `cargo test` rebuilds everything in a separate folder.
 - **Do not run repo-wide checks.** No `vp check`, no `vp run -r test`, no `vp run -r typecheck` unless the developer asks. CI owns the full suite.
 - Core and backend behavior changes ship with focused tests for that behavior.
-- Test behavior that can break, such as sharing and sync logic, Core and backend permission checks, persistence and migrations, external-format parsing (modpacks, Modrinth's API), race fixes, and the logic a bug fix changed. Leave out tests for what types already guarantee, trivial logic, copy text, smoke runs, mock-call mirrors, and props rendered to static markup.
+- Test behavior that can break, such as two things happening at once, an operation that fails halfway, sharing and sync between the App, a Core and the backend, files and archives from other people, external formats (modpacks, Modrinth's API), and the logic a bug fix changed. Leave out tests for what types already guarantee, trivial logic, copy text, smoke runs, mock-call mirrors, and props rendered to static markup.
 - Extend before you add. When an existing test or table covers the behavior, add a row or an assertion there. Write a new test only when no case fits.
 - Test at one layer: the lowest one that fails on `main`. Do not repeat the case in a wrapper test or at each call site.
 - Never wait on sleeps or polling in a test. Await the event that marks the milestone. A test that needs a timeout to pass is wrong, and a flaky test is fixed, not retried.
@@ -109,7 +110,8 @@ The App and a Core do the same things to an instance with one engine and one pro
 
 ## Taste
 
-- Complexity belongs at the adapter boundary. Backend-facing workflows stay in `@modrinth/api-client`; UI stays dumb.
+- Reuse what Modrinth built unless there is a real reason to diverge. Never translate our data into another API's shape.
+- Code enforces boundaries. The crate graph, types and tests beat a written rule.
 - Nothing is released and nothing is installed. Never plan migrations or backward compatibility.
 - Inferred types over annotations. `any` is the enemy; use `unknown` and narrow it safely.
 - Default to no comment. Write one only for a constraint, an external quirk, or an invariant the code can't show, in one line where you can and four at most. Don't restate names or signatures, narrate steps, record history, or explain the fix you just made; the PR carries that.
