@@ -11,16 +11,27 @@ import type { Env } from '../common/types'
 /** What each socket keeps through hibernation. */
 type Connection = { userId: string; sessionId: string; expires: string; presence: UserStatus }
 
+/** Storage key of the friends this account knows are online, kept while it is online itself. */
+const ONLINE_FRIENDS = 'online-friends'
+
 /**
  * One object per account keeps all its installations online through Worker hibernation.
  *
  * A socket is trusted until its session's expiry, checked in memory. Revoking a session early
  * (signing out, a lock, an admin reset, deleting the account) calls `revalidateSessions`, so no
  * message or presence lookup has to ask D1 whether the session still exists.
+ *
+ * Coming online asks every friend's object, which answers with its presence. From then on the
+ * object remembers which friends are online, from those answers and the presence messages it is
+ * sent, so a status change or going offline wakes only the objects of friends who are online.
  */
 export class FriendsHub extends DurableObject<Env> {
+	/** The friends known to be online, as stored under `ONLINE_FRIENDS`; loaded on first use. */
+	private known?: Set<string> | null
+
 	async fetch(request: Request): Promise<Response> {
 		const session = await requireSession(request, this.env)
+		const wasOnline = this.online().length > 0
 		const pair = new WebSocketPair()
 		const connection: Connection = {
 			userId: session.user_id,
@@ -36,14 +47,16 @@ export class FriendsHub extends DurableObject<Env> {
 		this.ctx.acceptWebSocket(pair[1])
 		await this.scheduleExpiry()
 		// The same call that tells each friend this account is online answers with their presence.
-		const statuses = await this.broadcast(session.user_id, {
-			type: 'status_update',
-			status: connection.presence,
-		})
-		const sync: ServerToClientMessage = {
-			type: 'friend_statuses',
-			statuses: statuses.filter((status) => status !== null),
-		}
+		// Another installation of an account already online asks only the friends known online.
+		const statuses = (
+			await this.broadcast(
+				session.user_id,
+				{ type: 'status_update', status: connection.presence },
+				!wasOnline,
+			)
+		).filter((status) => status !== null)
+		await this.remember(new Set(statuses.map((status) => status.user_id)))
+		const sync: ServerToClientMessage = { type: 'friend_statuses', statuses }
 		pair[1].send(JSON.stringify(sync))
 		return new Response(null, { status: 101, webSocket: pair[0] })
 	}
@@ -54,15 +67,33 @@ export class FriendsHub extends DurableObject<Env> {
 		return socket ? attachment(socket).presence : null
 	}
 
-	/** Sends each message to every online installation of this account. */
-	notify(...messages: FriendsSocketMessage[]): void {
+	/**
+	 * Sends each message to every online installation of this account, and keeps the friends
+	 * known online up to date from the presence messages among them.
+	 */
+	async notify(...messages: FriendsSocketMessage[]): Promise<void> {
+		const sockets = this.online()
+		if (!sockets.length) return
 		const texts = messages.map((message) => JSON.stringify(message))
-		for (const socket of this.online()) for (const text of texts) socket.send(text)
+		for (const socket of sockets) for (const text of texts) socket.send(text)
+		const changes = messages.flatMap((message): [string, boolean][] => {
+			if (!('type' in message)) return []
+			if (message.type === 'status_update') return [[message.status.user_id, true]]
+			if (message.type === 'user_offline') return [[message.id, false]]
+			if (message.type === 'friend_request_rejected') return [[message.from, false]]
+			return []
+		})
+		if (!changes.length) return
+		const known = new Set(await this.knownOnline())
+		for (const [id, online] of changes)
+			if (online) known.add(id)
+			else known.delete(id)
+		await this.remember(known)
 	}
 
 	/** A friend's presence changed: passes it on and answers with this account's own. */
-	friendPresence(message: ServerToClientMessage): UserStatus | null {
-		this.notify(message)
+	async friendPresence(message: ServerToClientMessage): Promise<UserStatus | null> {
+		await this.notify(message)
 		return this.status()
 	}
 
@@ -152,18 +183,43 @@ export class FriendsHub extends DurableObject<Env> {
 
 	private async wentOffline(userId: string): Promise<void> {
 		await this.broadcast(userId, { type: 'user_offline', id: userId })
+		// Offline, it hears of no friend coming online, so what it knew goes stale.
+		this.known = null
+		await this.ctx.storage.delete(ONLINE_FRIENDS)
 	}
 
-	/** Sends a presence message to every friend, and returns each friend's own presence. */
+	/**
+	 * Sends a presence message to the friends known online, or with `everyone` (or nothing known)
+	 * to every friend, and returns each one's own presence. Friendship is read from D1 each time,
+	 * so a stale entry never reaches someone who is no longer a friend.
+	 */
 	private async broadcast(
 		userId: string,
 		message: ServerToClientMessage,
+		everyone = false,
 	): Promise<(UserStatus | null)[]> {
+		const friends = await friendIds(this.env, userId)
+		const known = everyone ? null : await this.knownOnline()
 		return Promise.all(
-			(await friendIds(this.env, userId)).map((id) =>
+			(known ? friends.filter((id) => known.has(id)) : friends).map((id) =>
 				this.env.FRIENDS.getByName(id).friendPresence(message),
 			),
 		)
+	}
+
+	private async knownOnline(): Promise<Set<string> | null> {
+		if (this.known === undefined) {
+			const stored = await this.ctx.storage.get<string[]>(ONLINE_FRIENDS)
+			this.known = stored ? new Set(stored) : null
+		}
+		return this.known
+	}
+
+	private async remember(known: Set<string>): Promise<void> {
+		const before = await this.knownOnline()
+		if (before && before.size === known.size && [...known].every((id) => before.has(id))) return
+		this.known = known
+		await this.ctx.storage.put(ONLINE_FRIENDS, [...known])
 	}
 
 	private async scheduleExpiry(): Promise<void> {

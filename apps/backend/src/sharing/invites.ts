@@ -210,7 +210,11 @@ async function previewInvite(env: Env, id: string, withVersion: boolean): Promis
 	}
 }
 
-/** A new invite link to the share `instanceId`, or with `server`, to be a player of that server. */
+/**
+ * A new invite link to the share `instanceId`, or with `server`, to be a player of that server.
+ * The share's expired links go in the same write: nothing reads them, and making a link is the
+ * only way to add more.
+ */
 export async function createLink(
 	env: Env,
 	link: NewInviteLink,
@@ -220,18 +224,21 @@ export async function createLink(
 	const id = inviteCode()
 	const maxAge = link.max_age ?? 604800
 	const expiration = new Date(Date.now() + (maxAge === 0 ? 31536000 : maxAge) * 1000).toISOString()
-	await env.DB.prepare(
-		'INSERT INTO shared_instance_invites (id,instance_id,expiration,max_uses,core_id,server_id) VALUES (?,?,?,?,?,?)',
-	)
-		.bind(
+	await env.DB.batch([
+		env.DB.prepare(
+			'DELETE FROM shared_instance_invites WHERE instance_id = ? AND expiration <= ?',
+		).bind(instanceId, now()),
+		env.DB.prepare(
+			'INSERT INTO shared_instance_invites (id,instance_id,expiration,max_uses,core_id,server_id) VALUES (?,?,?,?,?,?)',
+		).bind(
 			id,
 			instanceId,
 			expiration,
 			link.max_uses ?? 0,
 			server?.core_id ?? null,
 			server?.server_id ?? null,
-		)
-		.run()
+		),
+	])
 	return { id }
 }
 
