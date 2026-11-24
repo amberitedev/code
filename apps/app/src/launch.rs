@@ -12,7 +12,7 @@ use engine::instance::{
 };
 use engine::server_address::ServerAddress;
 
-use crate::server::{
+use crate::local_api::{
     AppState,
     endpoints::launch::{JoinServer, JoinSingleplayerWorld, PlayInstance},
 };

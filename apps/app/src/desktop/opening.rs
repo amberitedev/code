@@ -1,4 +1,4 @@
-//! Serves `crate::server::endpoints::desktop::GetOpeningCommand`.
+//! Serves `crate::local_api::endpoints::desktop::GetOpeningCommand`.
 
 use axum::{Router, extract::State};
 use contracts::{
@@ -7,7 +7,9 @@ use contracts::{
 };
 
 use super::AppSlot;
-use crate::server::{endpoints::desktop::GetOpeningCommand, events::Command};
+use crate::local_api::{
+    endpoints::desktop::GetOpeningCommand, events::Command,
+};
 
 pub fn routes(app: AppSlot) -> Router {
     let (path, method) =

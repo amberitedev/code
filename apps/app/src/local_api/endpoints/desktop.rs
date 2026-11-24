@@ -7,7 +7,7 @@ use contracts::{Auth, Empty, Endpoint, Json, Method};
 use engine::data::JavaVersion;
 use serde::{Deserialize, Serialize};
 
-use crate::server::events::Command;
+use crate::local_api::events::Command;
 
 /// Asks the person to pick files or folders. `None` when they cancel.
 pub struct PickFiles;

@@ -5,7 +5,7 @@ use contracts::{
 };
 
 use super::internal;
-use crate::server::endpoints::desktop::CheckNetworkMetered;
+use crate::local_api::endpoints::desktop::CheckNetworkMetered;
 
 pub fn routes() -> Router {
     let (path, handler) = route::<CheckNetworkMetered, _, _, _>(is_metered);

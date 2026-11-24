@@ -1,4 +1,4 @@
-//! Serves `crate::server::endpoints::skins` over `crate::skins::minecraft_skins`.
+//! Serves `crate::local_api::endpoints::skins` over `crate::skins::minecraft_skins`.
 
 use std::sync::Arc;
 
@@ -10,7 +10,7 @@ use contracts::{
 use engine::Engine;
 
 use crate::accounts::api_error;
-use crate::server::{
+use crate::local_api::{
     AppState,
     endpoints::skins::{
         AddAndEquipCustomSkin, EquipSkin, FlushPendingSkinChange, ListCapes,

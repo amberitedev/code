@@ -6,7 +6,7 @@ use contracts::{
     server::{Req, route},
 };
 
-use crate::server::endpoints::desktop::{LogFromWebview, WebviewLogLevel};
+use crate::local_api::endpoints::desktop::{LogFromWebview, WebviewLogLevel};
 
 /// The page's console prints local URLs, and the log is shared, so the secret is masked.
 pub fn routes(secret: &str) -> Router {

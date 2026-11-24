@@ -1,4 +1,4 @@
-//! Serves `crate::server::endpoints::updates`. Only a build with the `updater` feature registers
+//! Serves `crate::local_api::endpoints::updates`. Only a build with the `updater` feature registers
 //! Tauri's updater plugin, so only it can find an update; the App installs a downloaded one on exit.
 
 use std::sync::{
@@ -21,7 +21,7 @@ use tauri_plugin_updater::{Update, UpdaterExt};
 use tokio::time::Instant;
 
 use super::{AppSlot, internal};
-use crate::server::{
+use crate::local_api::{
     AppState,
     endpoints::updates::{
         AvailableUpdate, CheckForUpdate, DiscardDownloadedUpdate,

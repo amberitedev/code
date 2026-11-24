@@ -1,4 +1,4 @@
-//! Serves `crate::server::endpoints::friends` over `crate::friends::api`.
+//! Serves `crate::local_api::endpoints::friends` over `crate::friends::api`.
 
 use std::sync::Arc;
 
@@ -14,7 +14,7 @@ use engine::{Engine, routes::api_error};
 use super::api;
 use crate::presence::Presence;
 
-use crate::server::{
+use crate::local_api::{
     AppState,
     endpoints::friends::{
         AddFriend, ListFriendStatuses, ListFriends, RemoveFriend,

@@ -157,12 +157,12 @@ mod tests {
             ModrinthCredentials,
         },
     };
+    use crate::local_api::events::{
+        AmberiteCommand, AppEvent, Command, LocalEvent,
+    };
     use crate::screenshots::{
         ScreenshotEditSaveMode, ScreenshotGroup, ScreenshotGroupImport,
         ScreenshotGroupMembershipUpdate, ScreenshotKey,
-    };
-    use crate::server::events::{
-        AmberiteCommand, AppEvent, Command, LocalEvent,
     };
     use crate::skins::minecraft_skins::{
         Cape, MinecraftSkinVariant, Skin, SkinSource, UrlOrBlob,

@@ -1,4 +1,4 @@
-//! Serves the dialog routes of `crate::server::endpoints::desktop`.
+//! Serves the dialog routes of `crate::local_api::endpoints::desktop`.
 
 use std::path::PathBuf;
 
@@ -14,7 +14,7 @@ use tauri_plugin_dialog::{DialogExt, FileDialogBuilder, FilePath};
 use tokio::sync::oneshot;
 
 use super::{AppSlot, internal};
-use crate::server::endpoints::desktop::{
+use crate::local_api::endpoints::desktop::{
     DialogFilter, PickFiles, PickSavePath,
 };
 

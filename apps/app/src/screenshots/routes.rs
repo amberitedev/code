@@ -1,4 +1,4 @@
-//! Serves `crate::server::endpoints::screenshots` over the engine crate's screenshot code.
+//! Serves `crate::local_api::endpoints::screenshots` over the engine crate's screenshot code.
 
 use std::sync::Arc;
 
@@ -11,7 +11,7 @@ use engine::{Engine, routes::api_error};
 
 use super::{ScreenshotGroup, ScreenshotKey};
 
-use crate::server::{
+use crate::local_api::{
     AppState,
     endpoints::screenshots::{
         CreateScreenshotGroup, DeleteScreenshotGroup, DeleteScreenshots,

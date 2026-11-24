@@ -1,4 +1,4 @@
-//! Serves `SaveExternalFile` and `SaveInstanceFileAs` of `crate::server::endpoints::ops`: saves
+//! Serves `SaveExternalFile` and `SaveInstanceFileAs` of `crate::local_api::endpoints::ops`: saves
 //! to a path the person picked outside the App.
 
 use std::{
@@ -15,7 +15,7 @@ use engine::{Engine, routes::api_error};
 use tauri_plugin_http::reqwest;
 use tokio::io::AsyncWriteExt;
 
-use crate::server::{
+use crate::local_api::{
     AppState,
     endpoints::ops::{
         ExternalSave, OpResponse, SaveExternalFile, SaveInstanceFileAs,
@@ -134,7 +134,7 @@ mod tests {
     use tokio::sync::broadcast;
 
     use super::*;
-    use crate::server::events::AppEvent;
+    use crate::local_api::events::AppEvent;
 
     async fn save(url: String, path: std::path::PathBuf) -> AppEvent {
         let events = broadcast::Sender::new(16);

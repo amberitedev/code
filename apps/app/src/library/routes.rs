@@ -10,7 +10,7 @@ use contracts::{
 };
 use engine::Engine;
 
-use crate::server::{
+use crate::local_api::{
     AppState,
     endpoints::library::{
         CacheGeneratedIcon, CacheIcon, ListHiddenInstances,

@@ -1,4 +1,4 @@
-//! Serves `crate::server::endpoints::{game_options, synced_options, synced_packs}` over the
+//! Serves `crate::local_api::endpoints::{game_options, synced_options, synced_packs}` over the
 //! engine crate's synced-options code.
 
 use std::collections::HashMap;
@@ -18,7 +18,7 @@ use super::{
     SyncedServer,
 };
 
-use crate::server::{
+use crate::local_api::{
     AppState,
     endpoints::{
         game_options::{
