@@ -89,7 +89,10 @@ export class FriendsHub extends DurableObject<Env> {
 			return []
 		})
 		if (!changes.length) return
-		const known = new Set(await this.knownOnline())
+		const current = await this.knownOnline()
+		// Unknown stays unknown, so the next broadcast asks every friend instead of a partial set.
+		if (!current) return
+		const known = new Set(current)
 		for (const [id, online] of changes)
 			if (online) known.add(id)
 			else known.delete(id)
@@ -188,6 +191,8 @@ export class FriendsHub extends DurableObject<Env> {
 
 	private async wentOffline(userId: string): Promise<void> {
 		await this.broadcast(userId, { type: 'user_offline', id: userId })
+		// A reconnect during the broadcast already rebuilt the set.
+		if (this.online().length) return
 		// Offline, it hears of no friend coming online, so what it knew goes stale.
 		this.known = null
 		await this.ctx.storage.delete(ONLINE_FRIENDS)
