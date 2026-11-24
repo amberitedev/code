@@ -1,6 +1,6 @@
 //! The App's own Endpoints, generated to `packages/contracts/ts/app.ts`, which
-//! `cargo test -p theseus_gui` keeps fresh. Regenerate it with
-//! `cargo test -p theseus_gui -- --ignored write_ts`.
+//! `cargo test -p amberite-app` keeps fresh. Regenerate it with
+//! `cargo test -p amberite-app -- --ignored write_ts`.
 
 /// Declares each route as a unit struct and, for the tests, the entries of its TypeScript module
 /// object, keyed by the name with a lowercase first letter.
@@ -330,7 +330,7 @@ mod tests {
         .concat();
         format!(
             "// Generated from apps/app by ts-rs. Do not edit.\n\
-             // Regenerate: cargo test -p theseus_gui -- --ignored write_ts\n\n\
+             // Regenerate: cargo test -p amberite-app -- --ignored write_ts\n\n\
              import type {{ ApiError, CoreSession, Endpoint, SharedIconConfig, UserFriend, UserStatus }} from './contracts'\n\
              import type {{ CachedSharedInstanceSummary, CommandPayload, DesyncServerMode, EngineEvent, FriendPayload, ImportLauncherType, InstallJobSnapshot, InstanceGroupsChangedPayload, InstanceLink, InstanceSyncedOptions, JavaVersion, ModLoader, OnboardingChecklist, ProcessMetadata, ProjectType, Settings }} from './engine'\n\
              {declarations}\n\
@@ -472,7 +472,7 @@ mod tests {
         let written = std::fs::read_to_string(PATH).unwrap_or_default();
         assert!(
             written.replace("\r\n", "\n") == file(),
-            "{PATH} is out of date. Run: cargo test -p theseus_gui -- --ignored write_ts"
+            "{PATH} is out of date. Run: cargo test -p amberite-app -- --ignored write_ts"
         );
     }
 

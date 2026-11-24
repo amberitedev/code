@@ -35,6 +35,9 @@ use config::Config;
 use install::InstallRecord;
 use paths::Paths;
 
+/// Every request the Core makes, to the backend and to Modrinth, names it with this.
+const USER_AGENT: &str = concat!("copal/", env!("CARGO_PKG_VERSION"));
+
 /// `copal run`: the launcher (see `update::launcher`), which runs Core as its child. `service`
 /// is set by the Windows service manager, which starts Copal that way.
 pub fn run(service: bool) -> Result<()> {
@@ -124,7 +127,7 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
     let core_id = db::core_id(&db).await?;
     let identity = Identity::load_or_create(&paths)?;
     let http = crate::network::http()
-        .user_agent(concat!("copal/", env!("CARGO_PKG_VERSION")))
+        .user_agent(USER_AGENT)
         .connect_timeout(std::time::Duration::from_secs(15))
         .build()?;
     let keys = access::keys::load(
@@ -275,6 +278,7 @@ pub async fn start_engine(
         events: engine::EventSink::new(),
         accounts,
         hooks: None,
+        user_agent: USER_AGENT.to_owned(),
     })
     .await
     .map_err(|error| eyre!("the engine did not start: {error:#}"))

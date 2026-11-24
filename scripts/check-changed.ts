@@ -129,7 +129,7 @@ else {
 	// The crates CI leaves out of the workspace tests (ci.yml, rust job).
 	const untested = new Set(['toasty'])
 	const tested = crates.filter((crate) => !untested.has(crate.name) && under(crate.folder))
-	if (tested.some((crate) => crate.name === 'theseus_gui')) {
+	if (tested.some((crate) => crate.name === 'amberite-app')) {
 		// Tauri only checks that the frontend build folder exists, as in CI.
 		NodeFS.mkdirSync(NodePath.join(root, 'apps', 'app-frontend', 'dist'), { recursive: true })
 	}

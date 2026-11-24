@@ -7,12 +7,12 @@ pub mod instance_paths;
 mod jre;
 mod network;
 mod opener;
-mod opening;
+pub mod opening;
 mod shortcuts;
 mod thumbnails;
 pub mod updater;
 mod upload;
-mod webview_log;
+pub mod webview_log;
 
 use std::{fmt::Display, sync::Arc};
 

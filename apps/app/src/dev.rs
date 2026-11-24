@@ -157,7 +157,7 @@ fn parse_config() -> Option<DevAppConfig> {
             "dev data directory cannot be empty"
         );
         unsafe {
-            env::set_var("THESEUS_CONFIG_DIR", &config.data_dir);
+            env::set_var("AMBERITE_CONFIG_DIR", &config.data_dir);
             env::set_var(
                 "WEBVIEW2_USER_DATA_FOLDER",
                 format!("{}/webview2", config.data_dir),

@@ -219,7 +219,7 @@ describe('dev runner stack', () => {
 		const cores = specs.filter((spec) => spec.label.startsWith('core:'))
 		for (const spec of [...apps, ...cores])
 			expect(spec.program?.build).toBe(cores[0]!.program?.build)
-		expect(apps[0]!.program?.file).toMatch(/^theseus_gui/)
+		expect(apps[0]!.program?.file).toMatch(/^amberite-app/)
 		expect(cores[0]!.program?.file).toMatch(/^copal/)
 		// Core compiles this crate from outside its own folder.
 		expect(cores[0]!.program?.build.inputs).toEqual(
@@ -236,7 +236,7 @@ describe('dev runner stack', () => {
 		})
 		const cwd = process.cwd().replaceAll('\\', '/')
 		// A folder is numbered by place in the stack, whatever the fixture calls its account.
-		expect(apps.map((spec) => spec.env.THESEUS_CONFIG_DIR?.replaceAll('\\', '/'))).toEqual([
+		expect(apps.map((spec) => spec.env.AMBERITE_CONFIG_DIR?.replaceAll('\\', '/'))).toEqual([
 			`${cwd}/.data/apps/1`,
 			`${cwd}/.data/apps/2`,
 		])

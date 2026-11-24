@@ -61,13 +61,12 @@ pub fn install_crypto_provider() {
     let _ = rustls::crypto::ring::default_provider().install_default();
 }
 
-pub fn launcher_user_agent() -> String {
-    const LAUNCHER_BASE_USER_AGENT: &str =
-        concat!("modrinth/theseus/", env!("CARGO_PKG_VERSION"),);
+static USER_AGENT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
-    format!(
-        "{} ({}; support@modrinth.com)",
-        LAUNCHER_BASE_USER_AGENT,
-        std::env::consts::OS
-    )
+/// The user agent of this process's requests: the first engine's `EngineConfig.user_agent`. The
+/// reqwest clients are process-wide, so a process has one. Only engine-less tests see the default.
+pub fn launcher_user_agent() -> String {
+    USER_AGENT.get().cloned().unwrap_or_else(|| {
+        concat!("engine/", env!("CARGO_PKG_VERSION")).to_owned()
+    })
 }

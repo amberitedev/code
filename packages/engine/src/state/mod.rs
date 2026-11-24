@@ -64,6 +64,8 @@ pub struct EngineConfig {
     pub events: EventSink,
     pub accounts: Option<AccountEndpoints>,
     pub hooks: Option<Arc<dyn InstanceHooks>>,
+    /// What every request from this process sends as its user agent; the first engine sets it.
+    pub user_agent: String,
 }
 
 /// Host work the engine's own instance changes wait on, the host's view of an instance's server
@@ -407,7 +409,9 @@ impl Engine {
             events,
             accounts,
             hooks,
+            user_agent,
         } = config;
+        let _ = crate::USER_AGENT.set(user_agent);
         let directories = DirectoryInfo::init(
             data_dir,
             instances_dir,
@@ -624,6 +628,7 @@ pub(crate) mod tests {
             events: EventSink::new(),
             accounts: None,
             hooks: None,
+            user_agent: "engine-test".to_owned(),
         }
     }
 

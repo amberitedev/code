@@ -42,7 +42,6 @@
 </template>
 
 <script setup lang="ts">
-import type { VersionEntry } from '@modrinth/blog/changelog'
 import { renderHighlightedString } from '@modrinth/utils'
 import dayjs from 'dayjs'
 import { computed, ref } from 'vue'
@@ -50,6 +49,14 @@ import { computed, ref } from 'vue'
 import { useFormatDateTime, useRelativeTime } from '../../composables'
 import { defineMessages, useVIntl } from '../../composables/i18n'
 import AutoLink from '../base/AutoLink.vue'
+
+// Was `@modrinth/blog`'s, which Amberite does not ship.
+type VersionEntry = {
+	date: dayjs.Dayjs
+	product: 'web' | 'hosting' | 'app'
+	version?: string
+	body: string
+}
 
 const { formatMessage } = useVIntl()
 const formatRelativeTime = useRelativeTime()

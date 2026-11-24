@@ -137,10 +137,10 @@ jobs:
       - run: cargo shear
       - run: cargo test --workspace --exclude toasty --locked --no-fail-fast
       - run: sh -n apps/core/scripts/install.sh
-      # A cargo error fails the step, and theseus_gui proves the pattern matches tauri.
+      # A cargo error fails the step, and amberite-app proves the pattern matches tauri.
       - name: Copal does not depend on Tauri, and the engine on no desktop crate
         run: |
-          gui=$(cargo tree --locked -e normal -p theseus_gui --prefix none -f '{p}')
+          gui=$(cargo tree --locked -e normal -p amberite-app --prefix none -f '{p}')
           copal=$(cargo tree --locked -e normal -p copal --prefix none -f '{p}')
           engine=$(cargo tree --locked -e normal -p engine --prefix none -f '{p}')
           grep -q '^tauri v' <<< "$gui"

@@ -30,7 +30,7 @@ async function account(): Promise<string> {
  */
 const ModrinthClient = isNativeWindow ? TauriModrinthClient : GenericModrinthClient
 export const apiClient: AbstractModrinthClient = new ModrinthClient({
-	userAgent: async () => `modrinth/theseus/${await getVersion()}`,
+	userAgent: async () => `amberite/${await getVersion()}`,
 	labrinthBaseUrl: config.labrinthBaseUrl,
 	// A Core's own certificate is checked in Rust; the WebView talks to the App's Core proxy
 	// instead, which adds this device's session for the account signed in. The WebView never
