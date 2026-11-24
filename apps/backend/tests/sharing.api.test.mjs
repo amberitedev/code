@@ -1120,6 +1120,63 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 			(await ok(await call(`/instances/${pack.id}/versions`))).removed_files,
 			removed,
 		)
+
+		// One invite names many users in one write: the inviter is skipped, someone who blocked
+		// them or keeps invites to friends fails, and each invitee is told once, when it is ready.
+		for (const user of ['open', 'blocker']) {
+			await backend.account(user)
+			await db
+				.prepare('UPDATE users SET preferences = ? WHERE id = ?')
+				.bind(JSON.stringify({ social: { shared_instances_privacy: 'everyone' } }), user)
+				.run()
+		}
+		await db.prepare("INSERT INTO blocks (user_id,blocked_id) VALUES ('blocker','owner')").run()
+		const batch = await ok(await call('/instances', 'POST', { name: 'Batch' }))
+		assert.deepEqual(
+			await ok(
+				await call(`/instances/${batch.id}/users`, 'POST', {
+					user_ids: ['owner', 'friend', 'open', 'stranger', 'blocker'],
+				}),
+			),
+			{ failed: ['stranger', 'blocker'] },
+		)
+		await ok(await push(batch.id, []))
+		await ok(await call(`/instances/${batch.id}/users`, 'POST', { user_ids: ['open'] }))
+		assert.deepEqual(
+			await Promise.all(['friend', 'open', 'stranger'].map((user) => unread(user, batch.id))),
+			[1, 1, 0],
+		)
+
+		// Making a link drops the share's expired ones.
+		const stale = await ok(await call(`/instances/${batch.id}/invites`, 'POST', {}))
+		await db
+			.prepare("UPDATE shared_instance_invites SET expiration = '2020-01-01' WHERE id = ?")
+			.bind(stale.id)
+			.run()
+		const fresh = await ok(await call(`/instances/${batch.id}/invites`, 'POST', {}))
+		assert.deepEqual(
+			(
+				await db
+					.prepare('SELECT id FROM shared_instance_invites WHERE instance_id = ?')
+					.bind(batch.id)
+					.all()
+			).results.map((row) => row.id),
+			[fresh.id],
+		)
+
+		// A moderator bars accounts from sharing in one write; a barred account's session is
+		// refused on every sharing route, and lifting the ban lets it back in.
+		await db.prepare("UPDATE users SET role = 'moderator' WHERE id = 'stranger'").run()
+		const barred = { user_ids: ['friend', 'open'] }
+		await ok(await call('/moderation/blacklist', 'POST', barred, 'mra_stranger'))
+		for (const user of ['mra_friend', 'mra_open'])
+			await code(await call(`/instances/${batch.id}`, 'GET', undefined, user), 403, 'blacklisted')
+		await ok(await call('/moderation/blacklist', 'DELETE', barred, 'mra_stranger'))
+		await ok(await call(`/instances/${batch.id}/invites/pending`, 'POST', undefined, 'mra_open'))
+		assert.equal(
+			(await ok(await call(`/instances/${batch.id}`, 'GET', undefined, 'mra_open'))).name,
+			'Batch',
+		)
 	} finally {
 		await backend.dispose()
 	}

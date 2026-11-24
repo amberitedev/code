@@ -1,8 +1,8 @@
 # Local accounts and sharing backend
 
 One Cloudflare Worker owns account, social, and sharing metadata in D1. Shared files live on Cores;
-the Worker keeps each version's manifest in an R2 bucket, which
-wrangler emulates locally, and never carries a file byte. There are no
+the Worker keeps each version's manifest, share icons and avatars in an R2 bucket, which
+wrangler emulates locally, and never carries a shared file's byte. There are no
 remote bindings or deployment scripts. The root development runner supplies local secrets and keeps
 persistent state under the worktree's `.data/`.
 
