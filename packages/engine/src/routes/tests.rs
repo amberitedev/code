@@ -1021,3 +1021,224 @@ async fn a_servers_file_routes_follow_no_link() {
         "secret"
     );
 }
+
+/// Make `link` a link to the folder `target`: a symlink on Unix, a junction on Windows, which
+/// needs no privilege.
+fn link_dir(target: &std::path::Path, link: &std::path::Path) {
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(target, link).unwrap();
+    #[cfg(windows)]
+    assert!(
+        std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(link)
+            .arg(target)
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_apps_files_tab_leaves_managed_content_to_the_content_tab() {
+    crate::install_crypto_provider();
+    let dir = tempfile::tempdir().unwrap();
+    let engine = engine(dir.path().to_path_buf()).await;
+    add_instance(&engine, "local:a", "Survival").await;
+    let root = engine.directories.instances_dir().join("Survival");
+    std::fs::create_dir_all(root.join("mods")).unwrap();
+    let pack = dir.path().join("pack.zip");
+    std::fs::write(&pack, "pack").unwrap();
+    crate::instance::add_project_from_path(
+        &engine,
+        "local:a",
+        &pack,
+        Some(crate::state::ProjectType::ResourcePack),
+    )
+    .await
+    .unwrap();
+    let router = super::routes().with_state(Host {
+        engine,
+        access: Arc::new(FakeAccess { allow: true }),
+    });
+    let files = "/instances/local%3Aa/files";
+    let write =
+        |path: &str| format!("{files}/content?path={path}&create_only=false");
+    let (status, _) =
+        send_raw(&router, "PUT", &write("config%2Fa.txt"), b"a".to_vec()).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let read_only = |listed: &Value, path: &str| {
+        listed
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["path"] == path)
+            .unwrap_or_else(|| panic!("{path} is listed"))["readOnly"]
+            .clone()
+    };
+    let (_, listed) =
+        send(&router, "GET", &format!("{files}?path="), None).await;
+    assert_eq!(read_only(&listed, "mods"), true);
+    assert_eq!(read_only(&listed, "resourcepacks"), true);
+    assert_eq!(read_only(&listed, "config"), false);
+    let (_, listed) =
+        send(&router, "GET", &format!("{files}?path=resourcepacks"), None)
+            .await;
+    assert_eq!(read_only(&listed, "resourcepacks/pack.zip"), true);
+
+    for path in ["resourcepacks%2Fpack.zip", "mods%2Fa.jar"] {
+        let (status, _) =
+            send_raw(&router, "PUT", &write(path), b"x".to_vec()).await;
+        assert!(!status.is_success(), "{path} was written");
+    }
+    for (method, uri, body) in [
+        (
+            "DELETE",
+            format!("{files}?path=resourcepacks%2Fpack.zip"),
+            None,
+        ),
+        ("DELETE", format!("{files}?path=mods&recursive=true"), None),
+        ("POST", format!("{files}/directories?path=mods%2Fsub"), None),
+        (
+            "POST",
+            format!("{files}/move"),
+            Some(
+                json!({ "source": "resourcepacks/pack.zip", "destination": "config/pack.zip" }),
+            ),
+        ),
+        (
+            "POST",
+            format!("{files}/move"),
+            Some(
+                json!({ "source": "config/a.txt", "destination": "mods/a.jar" }),
+            ),
+        ),
+    ] {
+        let (status, _) = send(&router, method, &uri, body).await;
+        assert!(!status.is_success(), "{method} {uri}");
+    }
+
+    let mut archive = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    archive
+        .start_file("mods/b.jar", zip::write::SimpleFileOptions::default())
+        .unwrap();
+    std::io::Write::write_all(&mut archive, b"jar").unwrap();
+    let archive = archive.finish().unwrap().into_inner();
+    send_raw(&router, "PUT", &write("drop.zip"), archive).await;
+    let (status, _) = send(
+        &router,
+        "POST",
+        &format!("{files}/extract"),
+        Some(json!({ "path": "drop.zip", "target": "", "override_conflicts": true, "dry_run": false })),
+    )
+    .await;
+    assert!(!status.is_success());
+
+    assert_eq!(
+        std::fs::read_to_string(root.join("resourcepacks/pack.zip")).unwrap(),
+        "pack"
+    );
+    assert!(root.join("mods").is_dir());
+    assert!(
+        !root.join("mods/a.jar").exists() && !root.join("mods/b.jar").exists()
+    );
+    assert!(root.join("config/a.txt").exists());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_apps_files_follow_a_linked_data_folder_but_no_link_in_an_instance()
+{
+    crate::install_crypto_provider();
+    let dir = tempfile::tempdir().unwrap();
+    // The App's instances live on another drive, reached through a link.
+    let external = tempfile::tempdir().unwrap();
+    let instances = dir.path().join("profiles");
+    link_dir(external.path(), &instances);
+    let engine = Engine::new(crate::state::EngineConfig {
+        instances_dir: instances.clone(),
+        ..crate::state::tests::config(dir.path().to_path_buf())
+    })
+    .await
+    .unwrap();
+    add_instance(&engine, "local:a", "Survival").await;
+    let root = external.path().join("Survival");
+    std::fs::create_dir_all(&root).unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::write(outside.path().join("secret.txt"), "secret").unwrap();
+    link_dir(outside.path(), &root.join("linked"));
+    let router = super::routes().with_state(Host {
+        engine,
+        access: Arc::new(FakeAccess { allow: true }),
+    });
+    let files = "/instances/local%3Aa/files";
+
+    let (status, _) = send_raw(
+        &router,
+        "PUT",
+        &format!("{files}/content?path=config%2Fa.txt&create_only=false"),
+        b"a".to_vec(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(
+        std::fs::read_to_string(root.join("config/a.txt")).unwrap(),
+        "a"
+    );
+    let (status, read) = send_raw(
+        &router,
+        "GET",
+        &format!("{files}/content?path=config%2Fa.txt"),
+        Vec::new(),
+    )
+    .await;
+    assert_eq!((status, &read[..]), (StatusCode::OK, &b"a"[..]));
+    let (status, listed) =
+        send(&router, "GET", &format!("{files}?path="), None).await;
+    assert_eq!(status, StatusCode::OK);
+    let linked = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["path"] == "linked")
+        .expect("the link is listed");
+    assert_eq!(linked["type"], "symlink");
+
+    // A link inside the instance is neither followed nor changed.
+    for (method, uri) in [
+        ("GET", format!("{files}?path=linked")),
+        ("GET", format!("{files}/content?path=linked%2Fsecret.txt")),
+        (
+            "PUT",
+            format!(
+                "{files}/content?path=linked%2Fsecret.txt&create_only=false"
+            ),
+        ),
+        (
+            "PUT",
+            format!("{files}/content?path=linked&create_only=false"),
+        ),
+        ("DELETE", format!("{files}?path=linked%2Fsecret.txt")),
+        ("DELETE", format!("{files}?path=linked&recursive=true")),
+        ("POST", format!("{files}/directories?path=linked%2Fsub")),
+    ] {
+        let (status, _) =
+            send_raw(&router, method, &uri, b"overwritten".to_vec()).await;
+        assert!(!status.is_success(), "{method} {uri}");
+    }
+    let (status, _) = send(
+        &router,
+        "POST",
+        &format!("{files}/move"),
+        Some(json!({ "source": "linked", "destination": "moved" })),
+    )
+    .await;
+    assert!(!status.is_success());
+    assert_eq!(
+        std::fs::read_to_string(outside.path().join("secret.txt")).unwrap(),
+        "secret"
+    );
+    assert!(!outside.path().join("sub").exists());
+    assert!(std::fs::symlink_metadata(root.join("linked")).is_ok());
+}
