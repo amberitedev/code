@@ -1099,12 +1099,12 @@ async fn add_server_sides(
     items: &mut [ContentItem],
     state: &Engine,
 ) -> crate::Result<()> {
-    let sides = sqlite::server_rows::tracked_files(&state.pool, instance_id)
+    let sides = sqlite::content_rows::tracked_files(&state.pool, instance_id)
         .await?
         .into_iter()
         .map(|(row, sides)| (row.relative_path, sides))
         .collect::<HashMap<_, _>>();
-    let skipped = sqlite::server_rows::skipped_files(&state.pool, instance_id)
+    let skipped = sqlite::content_rows::skipped_files(&state.pool, instance_id)
         .await?
         .into_iter()
         .map(|file| file.relative_path)

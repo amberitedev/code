@@ -40,7 +40,6 @@ pub use launcher::{
 };
 pub use self_hosted::accounts::AccountEndpoints;
 pub use state::INSTANCES_FOLDER_NAME;
-pub use state::instances::commands::server_jar;
 pub use state::{
     BackendSession, BackendSessionKind, Engine, EngineConfig,
     GameOptionsPackSource, InstanceHooks, ModrinthSession, PackOverrides,

@@ -140,9 +140,6 @@ CREATE TABLE instance_files (
 	size INTEGER NOT NULL,
 	-- On a server: a client-only file of the pack, never on its disk.
 	missing INTEGER NOT NULL DEFAULT 0,
-	-- On a server: a pack update found the file edited and left it, because the new pack
-	-- changed or removed it. Cleared when the owner keeps or replaces it.
-	pending TEXT NULL CHECK (pending IN ('changed', 'removed')),
 
 	added_at INTEGER NOT NULL,
 	modified_at INTEGER NOT NULL,

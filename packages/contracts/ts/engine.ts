@@ -469,27 +469,9 @@ installed: boolean, };
 
 export type ContentSide = "server" | "player";
 
-export type EditedFile = { 
-/**
- * Relative to the server folder, with forward slashes.
- */
-path: string, 
-/**
- * The owner deleted it (or disabled it) rather than changed it.
- */
-deleted: boolean, 
-/**
- * What the last pack update wants for it; null when nothing waits on a decision.
- */
-pending: PendingChange | null, };
-
-export type PendingChange = "changed" | "removed";
-
 export type SideChange = { project_path: string, side: ContentSide, enabled: boolean, };
 
 export type SidesUnlocked = { project_path: string, unlocked: boolean, };
-
-export type EditedDecision = { path: string, replace: boolean, };
 
 export type SharedInstanceUsers = { user_ids: Array<string>, users: Array<SharedInstanceUser>, tokens: number, };
 
@@ -703,9 +685,6 @@ export const instanceContent = {
 	SetSidesUnlocked: { method: "POST", path: "/instances/{id}/content/sides-unlocked", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<InstanceRef, null, SidesUnlocked, void>,
 	CompleteSideReview: { method: "POST", path: "/instances/{id}/content/side-review", auth: "session", dangerous: false, body: "empty", response: "empty" } as Endpoint<InstanceRef, null, void, void>,
 	RepairContent: { method: "POST", path: "/instances/{id}/content/repair", auth: "session", dangerous: false, body: "empty", response: "empty" } as Endpoint<InstanceRef, null, void, void>,
-	EditedFiles: { method: "GET", path: "/instances/{id}/content/edited", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceRef, null, void, Array<EditedFile>>,
-	DecideEdited: { method: "POST", path: "/instances/{id}/content/edited", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<InstanceRef, null, EditedDecision, void>,
-	PlaceClientOnly: { method: "POST", path: "/instances/{id}/content/client-only", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<InstanceRef, null, ProjectPath, void>,
 }
 
 export const instanceSharing = {

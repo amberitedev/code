@@ -19,11 +19,10 @@ use crate::{
         UpdateModpackVersion, UpdateProject,
     },
     endpoints::content::{
-        CompleteSideReview, DecideEdited, EditedFiles, PlaceClientOnly,
-        RepairContent, SetSide, SetSidesUnlocked,
+        CompleteSideReview, RepairContent, SetSide, SetSidesUnlocked,
     },
     install::InstallJobSnapshot,
-    instance::{self, EditedFile, PackExportCandidate},
+    instance::{self, PackExportCandidate},
     state::{
         ContentFile, ContentItem, InstanceInstallCandidate, LinkedModpackInfo,
     },
@@ -427,47 +426,4 @@ pub async fn repair_content(
         .await
         .map(|()| Empty)
         .map_err(api_error)
-}
-
-pub async fn edited_files(
-    State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess,
-    _: Req<EditedFiles>,
-) -> Answer<Vec<EditedFile>> {
-    instance::edited_files(&engine, &instance.id)
-        .await
-        .map(Json)
-        .map_err(api_error)
-}
-
-pub async fn decide_edited(
-    State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess,
-    request: Req<DecideEdited>,
-) -> Result<Empty, ApiError> {
-    let decision = request.body;
-    instance::decide_edited(
-        &engine,
-        &instance.id,
-        &decision.path,
-        decision.replace,
-    )
-    .await
-    .map(|()| Empty)
-    .map_err(api_error)
-}
-
-pub async fn place_client_only(
-    State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess,
-    request: Req<PlaceClientOnly>,
-) -> Result<Empty, ApiError> {
-    instance::place_client_only(
-        &engine,
-        &instance.id,
-        &request.body.project_path,
-    )
-    .await
-    .map(|()| Empty)
-    .map_err(api_error)
 }

@@ -1815,7 +1815,7 @@ async fn remove_existing_pack_content(
     state: &Engine,
     instance_id: &str,
 ) -> crate::Result<HashSet<String>> {
-    // A server's pack install plans the update over the files it tracks, edits included.
+    // A server's pack install plans the update over the files it tracks.
     if state.side == contracts::Side::Server {
         return Ok(HashSet::new());
     }

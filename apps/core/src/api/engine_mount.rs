@@ -140,7 +140,6 @@ pub fn long_routes() -> Router<Shared> {
     use engine_routes::*;
     Router::new()
         .endpoint::<GetLinkedModpack, _, _>(get_linked_modpack)
-        .endpoint::<EditedFiles, _, _>(edited_files)
         .endpoint::<AddProjectFromVersion, _, _>(change(
             EDIT,
             add_project_from_version,
@@ -154,8 +153,6 @@ pub fn long_routes() -> Router<Shared> {
             EDIT,
             switch_project_version,
         ))
-        .endpoint::<DecideEdited, _, _>(change(EDIT, decide_edited))
-        .endpoint::<PlaceClientOnly, _, _>(change(EDIT, place_client_only))
         .endpoint::<RepairContent, _, _>(change(EDIT, repair_content))
         .endpoint::<UpdateInstanceContent, _, _>(change(
             JOB,
