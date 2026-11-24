@@ -1265,3 +1265,58 @@ async fn the_apps_files_follow_a_linked_data_folder_but_no_link_in_an_instance()
     assert!(!outside.path().join("sub").exists());
     assert!(std::fs::symlink_metadata(root.join("linked")).is_ok());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_servers_logs_are_read_and_deleted_through_no_link() {
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::write(outside.path().join("crash.txt"), "secret").unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let (router, root) = server_host(&dir).await;
+    std::fs::create_dir_all(root.join("logs")).unwrap();
+    std::fs::write(root.join("logs/latest.log"), "[main] ready").unwrap();
+    link_dir(outside.path(), &root.join("crash-reports"));
+    // A FIFO a mod made would hang a reader that opened it.
+    #[cfg(unix)]
+    nix::unistd::mkfifo(
+        &root.join("logs/fifo.log"),
+        nix::sys::stat::Mode::S_IRWXU,
+    )
+    .unwrap();
+    let logs = "/instances/local%3Aa/logs";
+
+    let (status, listed) = send(&router, "GET", logs, None).await;
+    assert_eq!(status, StatusCode::OK);
+    let names: Vec<_> = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|log| log["filename"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["latest.log"]);
+    let (status, output) =
+        send(&router, "GET", &format!("{logs}/InfoLog/latest.log"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(output.as_str().unwrap().contains("ready"));
+
+    let behind_link = format!("{logs}/CrashReport/crash.txt");
+    for method in ["GET", "DELETE"] {
+        let (status, _) = send(&router, method, &behind_link, None).await;
+        assert!(!status.is_success(), "{method}");
+    }
+    #[cfg(unix)]
+    {
+        let fifo = format!("{logs}/InfoLog/fifo.log");
+        let (status, _) = send(&router, "GET", &fifo, None).await;
+        assert!(!status.is_success());
+    }
+    assert!(outside.path().join("crash.txt").exists());
+    let (status, _) = send(
+        &router,
+        "DELETE",
+        &format!("{logs}/InfoLog/latest.log"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert!(!root.join("logs/latest.log").exists());
+}
