@@ -1,11 +1,14 @@
-//! The App's side of the backend's share routes (`contracts::backend::sharing`), the routes Core
-//! calls too: the signed-in session as the token, the API semaphore, the App's errors, and the
-//! shapes its commands return.
+//! The engine's side of the backend's share routes (`contracts::backend::sharing`): the host's
+//! backend credential as the token, the API semaphore, the App's errors, and the shapes its
+//! commands return. A Core's key calls the twins it has (`contracts::backend::cores`).
 
 use super::install::*;
 use super::*;
 use crate::ErrorKind;
-use crate::state::Sessions;
+use crate::state::{BackendSessionKind, Sessions};
+use contracts::backend::cores::{
+    CreateServerShare, GetLatestShareVersion, NewServerShare, RenameServerShare,
+};
 use contracts::backend::sharing::{
     AcceptInvite, AcceptPendingInvite, CreateInvite, CreateSharedInstance,
     DeclinePendingInvite, DeleteInvite, GetInvite, GetLatestVersion,
@@ -18,7 +21,9 @@ use contracts::backend::sharing::{
 pub(super) use contracts::backend::sharing::{ExternalFile, InstanceVersion};
 use contracts::client::{Body, CallError, Reply};
 use contracts::{Empty, Endpoint, Json, Raw};
-use sharing_client::shares::{OwnedRemote, Unavailable, delete_share};
+use sharing_client::shares::{
+    Caller, OwnedRemote, Unavailable, call_as, delete_share,
+};
 
 #[derive(Debug)]
 pub(super) enum SharedInstanceRemoteResponse<T> {
@@ -70,8 +75,8 @@ fn client(base_url: &url::Url, long: bool) -> reqwest::Client {
     (*http).clone()
 }
 
-/// The share routes as the signed-in account. Uploads and pushes take `long` to have no
-/// overall timeout.
+/// The share routes as the host's backend credential: the signed-in account, or a Core's key.
+/// Uploads and pushes take `long` to have no overall timeout.
 fn backend_with(sessions: &Sessions, long: bool) -> crate::Result<OwnedRemote> {
     if sessions.accounts.is_none() {
         bail!("Amberite shared clients service is not configured");
@@ -82,15 +87,19 @@ fn backend_with(sessions: &Sessions, long: bool) -> crate::Result<OwnedRemote> {
         base: session.base_url.as_str().to_owned(),
         bearer: Some(session.bearer),
         timeout: None,
+        caller: match session.kind {
+            BackendSessionKind::User { .. } => Caller::Account,
+            BackendSessionKind::CoreKey => Caller::Core,
+        },
     })
 }
 
-/// The share routes as the signed-in account.
+/// The share routes as the host's backend credential.
 pub(crate) fn share_backend(sessions: &Sessions) -> crate::Result<OwnedRemote> {
     backend_with(sessions, false)
 }
 
-/// The share routes as the signed-in account, without an overall timeout, for a push.
+/// The share routes as the host's backend credential, without an overall timeout, for a push.
 pub(super) fn push_backend(sessions: &Sessions) -> crate::Result<OwnedRemote> {
     backend_with(sessions, true)
 }
@@ -195,22 +204,28 @@ fn share(id: &str) -> SharedInstanceId {
     SharedInstanceId { id: id.to_owned() }
 }
 
-/// A server engine calls with its host's Core key, which owns the share of server
-/// `instance_id`.
+/// A new share of instance `instance_id`: the account's, or with a Core's key its owner's share
+/// of server `instance_id`.
 pub(super) async fn create_remote_instance(
     name: String,
     instance_id: &str,
     state: &Engine,
 ) -> crate::Result<String> {
     let backend = share_backend(&state.sessions)?;
-    let body = Json(NewSharedInstance {
-        name,
-        server_id: (state.side == contracts::Side::Server)
-            .then(|| instance_id.to_owned()),
-    });
-    let created = send::<CreateSharedInstance>(state, &backend, &(), &(), body)
-        .await?
-        .map_err(backend_error)?;
+    let created = match backend.caller {
+        Caller::Account => {
+            let body = Json(NewSharedInstance { name });
+            send::<CreateSharedInstance>(state, &backend, &(), &(), body).await
+        }
+        Caller::Core => {
+            let body = Json(NewServerShare {
+                name,
+                server_id: instance_id.to_owned(),
+            });
+            send::<CreateServerShare>(state, &backend, &(), &(), body).await
+        }
+    }?
+    .map_err(backend_error)?;
     Ok(created.id)
 }
 
@@ -220,7 +235,7 @@ pub(super) async fn delete_remote_instance(
 ) -> crate::Result<()> {
     let backend = share_backend(&state.sessions)?;
     let _permit = state.api_semaphore.0.acquire().await?;
-    delete_share(&backend.remote(), shared_instance_id)
+    delete_share(backend.caller, &backend.remote(), shared_instance_id)
         .await
         .map_err(backend_error)
 }
@@ -230,8 +245,17 @@ pub(super) async fn update_remote_instance(
     name: String,
     state: &Engine,
 ) -> crate::Result<()> {
-    let body = Json(SharedInstanceUpdate { name });
-    call::<UpdateSharedInstance>(state, shared_instance_id, body).await
+    let backend = share_backend(&state.sessions)?;
+    let _permit = state.api_semaphore.0.acquire().await?;
+    call_as::<UpdateSharedInstance, RenameServerShare>(
+        backend.caller,
+        &backend.remote(),
+        &share(shared_instance_id),
+        &(),
+        Json(SharedInstanceUpdate { name }),
+    )
+    .await
+    .map_err(backend_error)
 }
 
 pub(super) async fn get_remote_instance_access(
@@ -350,39 +374,18 @@ pub(super) async fn get_latest_remote_version_optional_unavailable(
     state: &Engine,
 ) -> crate::Result<SharedInstanceRemoteResponse<InstanceVersion>> {
     let backend = share_backend(&state.sessions)?;
-    let id = share(shared_instance_id);
-    let result = send::<GetLatestVersion>(
-        state,
-        &backend,
-        &id,
-        &Default::default(),
-        Empty,
-    )
-    .await?;
-    call_share(state, result).await
-}
-
-/// The latest version of a share a server follows, which a Core reads for the user who sent
-/// `read_ticket`.
-pub(super) async fn get_latest_remote_version_with_ticket(
-    shared_instance_id: &str,
-    read_ticket: &str,
-    state: &Engine,
-) -> crate::Result<InstanceVersion> {
-    let backend = share_backend(&state.sessions)?;
-    let remote = contracts::client::Remote {
-        read_ticket: Some(read_ticket),
-        ..backend.remote()
+    let result = {
+        let _permit = state.api_semaphore.0.acquire().await?;
+        call_as::<GetLatestVersion, GetLatestShareVersion>(
+            backend.caller,
+            &backend.remote(),
+            &share(shared_instance_id),
+            &(),
+            Empty,
+        )
+        .await
     };
-    let _permit = state.api_semaphore.0.acquire().await?;
-    contracts::client::call::<GetLatestVersion>(
-        &remote,
-        &share(shared_instance_id),
-        &Default::default(),
-        Empty,
-    )
-    .await
-    .map_err(backend_error)
+    call_share(state, result).await
 }
 
 pub(super) async fn add_remote_users(
@@ -508,6 +511,7 @@ pub(super) async fn get_shared_instance_invite_info(
         base: base_url.as_str().to_owned(),
         bearer: None,
         timeout: None,
+        caller: Caller::Account,
     };
     let id = contracts::backend::sharing::InviteId {
         id: invite_id.to_owned(),

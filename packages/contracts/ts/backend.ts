@@ -128,6 +128,12 @@ export type CoreTicket = { ticket: string, };
 
 export type CoreId = { id: string, };
 
+export type NewServerShare = { name: string, 
+/**
+ * The server whose share this is.
+ */
+server_id: string, };
+
 /** The backend's Core routes. */
 export const cores = {
 	RequestSignInCode: { method: "POST", path: "/core/auth/code", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, NewSignInCode, SignInCode>,
@@ -136,6 +142,12 @@ export const cores = {
 	ReportState: { method: "POST", path: "/core/state", auth: "core_key", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, StateReport, void>,
 	ReportStorage: { method: "POST", path: "/core/storage", auth: "core_key", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, StorageReport, StorageAnswer>,
 	ForgetPlayers: { method: "DELETE", path: "/core/players", auth: "core_key", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, ForgottenServer, void>,
+	CreateServerShare: { method: "POST", path: "/core/shares", auth: "core_key", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, NewServerShare, CreatedId>,
+	RenameServerShare: { method: "PATCH", path: "/core/shares/{id}", auth: "core_key", dangerous: false, body: "json", response: "empty" } as Endpoint<SharedInstanceId, null, SharedInstanceUpdate, void>,
+	DeleteServerShare: { method: "DELETE", path: "/core/shares/{id}", auth: "core_key", dangerous: false, body: "empty", response: "empty" } as Endpoint<SharedInstanceId, null, void, void>,
+	CreateServerShareVersion: { method: "POST", path: "/core/shares/{id}/versions", auth: "core_key", dangerous: false, body: "json", response: "json" } as Endpoint<SharedInstanceId, null, NewInstanceVersion, InstanceVersion>,
+	GetLatestShareVersion: { method: "GET", path: "/core/shares/{id}/versions", auth: "core_key", dangerous: false, body: "empty", response: "json" } as Endpoint<SharedInstanceId, null, void, InstanceVersion>,
+	GetShareVersion: { method: "GET", path: "/core/shares/{id}/versions/{version}", auth: "core_key", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceVersionId, null, void, InstanceVersion>,
 	LookUpSignInCode: { method: "POST", path: "/cores/approve/lookup", auth: "account", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, EnteredCode, PendingCore>,
 	ApproveSignInCode: { method: "POST", path: "/cores/approve", auth: "account", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, EnteredCode, ApprovedCore>,
 	ListCores: { method: "GET", path: "/cores", auth: "account", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<ListedCore>>,
@@ -176,12 +188,7 @@ user?: string,
  */
 include_joined?: boolean, };
 
-export type NewSharedInstance = { name: string, 
-/**
- * A Core key only: the server whose share this is. Its existing share is answered when it
- * has one.
- */
-server_id?: string, };
+export type NewSharedInstance = { name: string, };
 
 export type CreatedId = { id: string, };
 
@@ -440,14 +447,6 @@ export type VersionFault = { core_id: string, kind: FaultKind, };
 
 export type FaultKind = "object" | "content";
 
-export type NewReadTicket = { core_id: string, };
-
-export type SignedReadTicket = { ticket: string, 
-/**
- * RFC 3339.
- */
-expires: string, };
-
 export type ShareStorage = { used: number, allowance: number, 
 /**
  * Only the shares the account owns.
@@ -557,7 +556,6 @@ export const sharing = {
 	SetGeneratedIcon: { method: "PUT", path: "/v1/instances/{id}/icon/generated", auth: "account", dangerous: false, body: "json", response: "empty" } as Endpoint<SharedInstanceId, null, SharedIconConfig, void>,
 	RemoveIcon: { method: "DELETE", path: "/v1/instances/{id}/icon", auth: "account", dangerous: false, body: "empty", response: "empty" } as Endpoint<SharedInstanceId, null, void, void>,
 	GetIcon: { method: "GET", path: "/v1/icons/{id}/{upload}", auth: "none", dangerous: false, body: "empty", response: "raw" } as Endpoint<IconUpload, null, void, Blob>,
-	IssueReadTicket: { method: "POST", path: "/v1/instances/{id}/server-ticket", auth: "account", dangerous: false, body: "json", response: "json" } as Endpoint<SharedInstanceId, null, NewReadTicket, SignedReadTicket>,
 	GetShareStorage: { method: "GET", path: "/v1/storage", auth: "account", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, ShareStorage>,
 	GetBlacklistStatus: { method: "GET", path: "/v1/blacklist/{user_id}", auth: "account", dangerous: false, body: "empty", response: "json" } as Endpoint<BlacklistedUser, null, void, BlacklistStatus>,
 	BlacklistUsers: { method: "POST", path: "/v1/moderation/blacklist", auth: "account", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, UserIds, void>,

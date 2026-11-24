@@ -16,14 +16,15 @@ use std::{
 
 use contracts::{
     Endpoint, Json,
-    backend::{
-        cores::{ForgetPlayers, ReportState, ReportStorage, StateReport},
-        sharing::DeleteSharedInstance,
+    backend::cores::{
+        DeleteServerShare, ForgetPlayers, ReportState, ReportStorage,
+        StateReport,
     },
     client::{Body, CallError, Remote, Reply, call},
 };
 use engine::{BackendSession, BackendSessionKind, Sessions};
 use reqwest::StatusCode;
+use sharing_client::shares::Caller;
 use sqlx::{SqliteConnection, SqlitePool};
 use tokio::sync::watch;
 use tracing::{info, warn};
@@ -408,13 +409,12 @@ impl Sync {
             OwedCall::DeleteShare { share_id } => {
                 // A share already gone counts as deleted.
                 sharing_client::shares::delete_share(
+                    Caller::Core,
                     &self.remote(key),
                     share_id,
                 )
                 .await
-                .map_err(|error| {
-                    call_failure(DeleteSharedInstance::PATH, error)
-                })
+                .map_err(|error| call_failure(DeleteServerShare::PATH, error))
             }
             OwedCall::ForgetPlayers(forget) => {
                 self.call::<ForgetPlayers>(key, Json(forget.clone())).await
@@ -457,7 +457,7 @@ impl Sync {
             http: &self.http,
             base: &self.backend_url,
             bearer: Some(key),
-            read_ticket: None,
+            ticket: None,
             timeout: Some(CALL_TIMEOUT),
         }
     }
@@ -684,7 +684,7 @@ mod tests {
                 ("DELETE", "/core/players", Some("s1")),
                 ("DELETE", "/core/players", Some("s1")),
                 ("DELETE", "/core/players", Some("s2")),
-                ("DELETE", "/v1/instances/share-1", None),
+                ("DELETE", "/core/shares/share-1", None),
             ]
         );
     }

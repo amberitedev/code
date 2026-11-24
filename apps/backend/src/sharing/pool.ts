@@ -15,8 +15,7 @@ import { fetchTicket, storeTicket } from '../cores/tickets'
 // tickets that let Apps talk to stores. The backend never
 // carries a file byte: it keeps manifests in R2, one row per version in D1, and signs tickets.
 
-export const MAX_VERSION_FILES = 4096
-/** The manifest request body; 4,096 entries with keys are about 1 MB. */
+/** The manifest request body; `MAX_VERSION_FILES` entries with keys are about 1 MB. */
 export const MAX_MANIFEST_BODY = 4 * 1024 * 1024
 /** Ready versions a share keeps, files included. */
 export const KEPT_VERSIONS = 5

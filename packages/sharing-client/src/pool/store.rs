@@ -520,7 +520,7 @@ fn remote<'a>(
         http,
         base: address,
         bearer: None,
-        read_ticket: Some(ticket),
+        ticket: Some(ticket),
         timeout: None,
     }
 }

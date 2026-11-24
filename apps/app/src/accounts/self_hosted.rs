@@ -16,7 +16,7 @@ pub(crate) fn remote<'a>(base: &'a Url, bearer: &'a str) -> Remote<'a> {
         http: &INSECURE_REQWEST_CLIENT,
         base: base.as_str(),
         bearer: Some(bearer),
-        read_ticket: None,
+        ticket: None,
         timeout: None,
     }
 }

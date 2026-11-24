@@ -3,9 +3,17 @@
 //! storage after uploads, pulls and hourly. A key the backend no longer knows gets 410
 //! `core_removed`, and the Core un-pairs. The App lists the account's Cores, approves codes and
 //! gets the tickets it signs in to a Core with.
+//!
+//! A Core reaches shares with its key on `/core/shares`, acting for its owner: it writes the share
+//! of a server that follows no instance, and reads any share its owner reads, so a server can
+//! follow one.
 
 use serde::{Deserialize, Serialize};
 
+use super::sharing::{
+    CreatedId, InstanceVersion, InstanceVersionId, NewInstanceVersion,
+    SharedInstanceId, SharedInstanceUpdate,
+};
 use crate::{Empty, Json, Upgrade, tickets::PublicKeys};
 
 /// Body of [`RequestSignInCode`].
@@ -174,6 +182,15 @@ pub struct CoreId {
     pub id: String,
 }
 
+/// Body of [`CreateServerShare`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+pub struct NewServerShare {
+    pub name: String,
+    /// The server whose share this is.
+    pub server_id: String,
+}
+
 crate::endpoints! {
     /// The backend's Core routes.
     group cores;
@@ -194,6 +211,19 @@ crate::endpoints! {
     ReportStorage: Post "/core/storage", CoreKey, (), (), Json<StorageReport> => Json<StorageAnswer>;
     /// Core: a server was deleted or stopped following an instance, so its players and links go.
     ForgetPlayers: Delete "/core/players", CoreKey, (), (), Json<ForgottenServer> => Empty;
+    /// Core: the share of its server `server_id`, owned by its owner. The server's existing share is
+    /// answered when it has one.
+    CreateServerShare: Post "/core/shares", CoreKey, (), (), Json<NewServerShare> => Json<CreatedId>;
+    /// Core: rename one of its servers' shares.
+    RenameServerShare: Patch "/core/shares/{id}", CoreKey, SharedInstanceId, (), Json<SharedInstanceUpdate> => Empty;
+    /// Core: delete one of its servers' shares, even while its owner may not share.
+    DeleteServerShare: Delete "/core/shares/{id}", CoreKey, SharedInstanceId, (), Empty => Empty;
+    /// Core: push a version of one of its servers' shares.
+    CreateServerShareVersion: Post "/core/shares/{id}/versions", CoreKey, SharedInstanceId, (), Json<NewInstanceVersion> => Json<InstanceVersion>;
+    /// Core: the latest version of a share its owner reads, without the owner's extras.
+    GetLatestShareVersion: Get "/core/shares/{id}/versions", CoreKey, SharedInstanceId, (), Empty => Json<InstanceVersion>;
+    /// Core: one version of a share its owner reads, without the owner's extras.
+    GetShareVersion: Get "/core/shares/{id}/versions/{version}", CoreKey, InstanceVersionId, (), Empty => Json<InstanceVersion>;
     /// App: which machine shows this code, so the user can check before approving.
     LookUpSignInCode: Post "/cores/approve/lookup", Account, (), (), Json<EnteredCode> => Json<PendingCore>;
     /// App: approve the Core showing this code. It joins the account's Cores and its key starts
@@ -232,6 +262,7 @@ pub(crate) fn ts() -> String {
         ListedCore::decl(&cfg),
         CoreTicket::decl(&cfg),
         CoreId::decl(&cfg),
+        NewServerShare::decl(&cfg),
     ]
     .map(|declaration| format!("\nexport {declaration}\n"))
     .concat();

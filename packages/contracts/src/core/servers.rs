@@ -168,9 +168,10 @@ pub struct InstanceFollow {
     pub instance: FollowedInstance,
     /// The instance's share, whose latest version the server applies.
     pub shared_instance_id: String,
-    /// From the backend's `sharing.IssueReadTicket` for this Core: the Core reads the share for
-    /// the user who asked, and only while they can.
-    pub ticket: String,
+    /// Ignored: the Core reads the share as its owner. Goes with `core-hosting/content.ts`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "export-ts", ts(optional))]
+    pub ticket: Option<String>,
     /// Stop a running server to apply the version now, and start it again after.
     pub restart: bool,
 }

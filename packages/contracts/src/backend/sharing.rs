@@ -2,10 +2,8 @@
 //! `sharedinstances` v1 API wherever upstream calls them. A share's metadata lives here; its files
 //! live encrypted on Cores' stores (`crate::store`), which a version names by its hash.
 //!
-//! An account calls with its session. A Core calls a few of them with its key, as the owner of its
-//! own server's share: create (with `server_id`), rename, delete and its versions. It also reads
-//! the versions of a share one of its servers follows, for the user whose read ticket it sends.
-//! A share that is gone answers 404, one the caller can no longer read 401.
+//! An account calls them with its session. A Core reaches shares with its key on routes of its own
+//! (`super::cores`). A share that is gone answers 404, one the caller can no longer read 401.
 
 use modrinth_content_management::icons::IconConfig;
 use serde::{Deserialize, Serialize};
@@ -94,11 +92,6 @@ pub struct SharedInstanceFilter {
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct NewSharedInstance {
     pub name: String,
-    /// A Core key only: the server whose share this is. Its existing share is answered when it
-    /// has one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "export-ts", ts(optional))]
-    pub server_id: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -419,21 +412,6 @@ pub enum FaultKind {
     Content,
 }
 
-/// Body of [`IssueReadTicket`].
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
-pub struct NewReadTicket {
-    pub core_id: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
-pub struct SignedReadTicket {
-    pub ticket: String,
-    /// RFC 3339.
-    pub expires: String,
-}
-
 /// The account's shared storage: how much of its allowance on other people's Cores its shares
 /// use, and the versions they keep. Bytes throughout.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -529,13 +507,13 @@ crate::endpoints! {
 
     /// The caller's own shares, and with `include_joined` every share they can play too.
     ListSharedInstances: Get "/v1/instances", Account, (), SharedInstanceFilter, Empty => Json<Vec<String>>;
-    /// A new share owned by the caller, or by a Core key the share of its server `server_id`.
+    /// A new share owned by the caller.
     CreateSharedInstance: Post "/v1/instances", Account, (), (), Json<NewSharedInstance> => Json<CreatedId>;
     /// Pending invitees may read it too, to preview the invite.
     GetSharedInstance: Get "/v1/instances/{id}", Account, SharedInstanceId, (), Empty => Json<SharedInstance>;
-    /// The owner, or the Core whose server's share it is.
+    /// The owner.
     UpdateSharedInstance: Patch "/v1/instances/{id}", Account, SharedInstanceId, (), Json<SharedInstanceUpdate> => Empty;
-    /// The owner, or the Core whose server's share it is. Its files go once no version names them.
+    /// The owner. Its files go once no version names them.
     DeleteSharedInstance: Delete "/v1/instances/{id}", Account, SharedInstanceId, (), Empty => Empty;
     /// Joined members only; players get the content, not who it is shared with.
     ListInstanceUsers: Get "/v1/instances/{id}/users", Account, SharedInstanceId, (), Empty => Json<InstanceUsers>;
@@ -573,9 +551,6 @@ crate::endpoints! {
     RemoveIcon: Delete "/v1/instances/{id}/icon", Account, SharedInstanceId, (), Empty => Empty;
     /// An uploaded icon. Every upload gets a new URL, so it never changes.
     GetIcon: Get "/v1/icons/{id}/{upload}", None, IconUpload, (), Empty => Raw;
-    /// Owner or member: a ticket for one Core to read the share for the caller, so a server they
-    /// own can follow it.
-    IssueReadTicket: Post "/v1/instances/{id}/server-ticket", Account, SharedInstanceId, (), Json<NewReadTicket> => Json<SignedReadTicket>;
     /// The caller's shared storage.
     GetShareStorage: Get "/v1/storage", Account, (), (), Empty => Json<ShareStorage>;
     GetBlacklistStatus: Get "/v1/blacklist/{user_id}", Account, BlacklistedUser, (), Empty => Json<BlacklistStatus>;
@@ -645,8 +620,6 @@ pub(crate) fn ts() -> String {
         NewInstanceVersion::decl(&cfg),
         VersionFault::decl(&cfg),
         FaultKind::decl(&cfg),
-        NewReadTicket::decl(&cfg),
-        SignedReadTicket::decl(&cfg),
         ShareStorage::decl(&cfg),
         StoredShare::decl(&cfg),
         StoredVersion::decl(&cfg),

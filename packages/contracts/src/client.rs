@@ -9,10 +9,7 @@ use reqwest::{RequestBuilder, Response, StatusCode, header};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 
-use crate::{
-    ApiError, Auth, Empty, Endpoint, Json, Method, Raw, Stream,
-    tickets::READ_TICKET_HEADER,
-};
+use crate::{ApiError, Auth, Empty, Endpoint, Json, Method, Raw, Stream};
 
 /// The server a call goes to and the credentials it may need.
 #[derive(Clone, Copy)]
@@ -21,9 +18,8 @@ pub struct Remote<'a> {
     /// Everything before the Endpoint's path, such as `https://example.com`.
     pub base: &'a str,
     pub bearer: Option<&'a str>,
-    /// Sent in place of `bearer` to [`Auth::Ticket`] routes, and beside it to [`Auth::Account`]
-    /// ones in [`READ_TICKET_HEADER`].
-    pub read_ticket: Option<&'a str>,
+    /// Sent in place of `bearer` to [`Auth::Ticket`] routes.
+    pub ticket: Option<&'a str>,
     pub timeout: Option<Duration>,
 }
 
@@ -31,7 +27,7 @@ pub struct Remote<'a> {
 pub enum CallError {
     #[error("{} (HTTP {status})", error.description)]
     Api { status: u16, error: ApiError },
-    /// Without its URL, which can carry a read ticket in the query.
+    /// Without its URL, which can carry a ticket in the query.
     #[error(transparent)]
     Http(reqwest::Error),
     #[error("the response (HTTP {status}) could not be read: {source}")]
@@ -239,16 +235,11 @@ fn reqwest_request<E: Endpoint>(
         .request(method::<E>(), target::<E>(remote.base, params, query)?);
     let token = match E::AUTH {
         Auth::None => None,
-        Auth::Ticket => remote.read_ticket,
+        Auth::Ticket => remote.ticket,
         _ => remote.bearer,
     };
     if let Some(token) = token {
         request = request.bearer_auth(token);
-    }
-    if E::AUTH == Auth::Account
-        && let Some(ticket) = remote.read_ticket
-    {
-        request = request.header(READ_TICKET_HEADER, ticket);
     }
     if let Some(timeout) = remote.timeout {
         request = request.timeout(timeout);
@@ -528,7 +519,7 @@ mod tests {
                 http: &self.http,
                 base: &self.base,
                 bearer: None,
-                read_ticket: None,
+                ticket: None,
                 timeout: None,
             }
         }
@@ -550,7 +541,7 @@ mod tests {
 
     #[derive(Serialize, Deserialize)]
     struct Ticket {
-        read_ticket: String,
+        ticket: String,
     }
 
     struct ReadWithTicket;
@@ -563,55 +554,6 @@ mod tests {
         type Query = Ticket;
         type Body = Empty;
         type Response = Json<String>;
-    }
-
-    struct ReadAsAccount;
-
-    impl Endpoint for ReadAsAccount {
-        const METHOD: Method = Method::Get;
-        const PATH: &'static str = "/v1/read";
-        const AUTH: Auth = Auth::Account;
-        type Params = ();
-        type Query = ();
-        type Body = Empty;
-        type Response = Json<String>;
-    }
-
-    #[tokio::test]
-    async fn a_read_ticket_goes_to_an_account_route_in_its_header() {
-        let _ = rustls::crypto::ring::default_provider().install_default();
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let base = format!("http://{}", listener.local_addr().unwrap());
-        let received = tokio::spawn(async move {
-            let (mut socket, _) = listener.accept().await.unwrap();
-            let mut head = [0; 4096];
-            let read = socket.read(&mut head).await.unwrap();
-            let _ = socket
-                .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\n\"\"")
-                .await;
-            String::from_utf8_lossy(&head[..read]).to_lowercase()
-        });
-        let http = Client::new();
-        let remote = Remote {
-            http: &http,
-            base: &base,
-            bearer: Some("amc_key"),
-            read_ticket: Some("secret"),
-            timeout: None,
-        };
-        call::<ReadAsAccount>(&remote, &(), &(), Empty)
-            .await
-            .unwrap();
-        let request = received.await.unwrap();
-        assert!(request.starts_with("get /v1/read http/1.1"), "{request}");
-        assert!(
-            request.contains("authorization: bearer amc_key"),
-            "{request}"
-        );
-        assert!(
-            request.contains("x-amberite-read-ticket: secret"),
-            "{request}"
-        );
     }
 
     #[test]
@@ -632,7 +574,7 @@ mod tests {
         assert_eq!(request.headers()["authorization"], "Bearer token");
 
         let query = Ticket {
-            read_ticket: "a&b".into(),
+            ticket: "a&b".into(),
         };
         let request = super::request::<ReadWithTicket>(
             "",
@@ -642,7 +584,7 @@ mod tests {
             Some("token"),
         )
         .unwrap();
-        assert_eq!(request.uri(), "/v1/read?read_ticket=a%26b");
+        assert_eq!(request.uri(), "/v1/read?ticket=a%26b");
         assert!(request.headers().get("authorization").is_none());
 
         let answer = super::response::<ReadFile>(200, None, "\"text\"".into());
@@ -669,11 +611,11 @@ mod tests {
             http: &http,
             base: &base,
             bearer: None,
-            read_ticket: None,
+            ticket: None,
             timeout: None,
         };
         let query = Ticket {
-            read_ticket: "secret".into(),
+            ticket: "secret".into(),
         };
         let error = call::<ReadWithTicket>(&remote, &(), &query, Empty)
             .await

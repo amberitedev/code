@@ -1,18 +1,22 @@
-import type {
-	FollowedShare,
-	NewInstanceVersion,
-	NewInviteLink,
-	NewSharedInstance,
-	OutsideAddress,
-	RemovedFile,
-	SharedIconConfig,
-	SharedInstanceUpdate,
-	UserIds,
-	VersionFault,
+import {
+	type FollowedShare,
+	MAX_VERSION_FILES,
+	type NewInstanceVersion,
+	type NewInviteLink,
+	type NewServerShare,
+	type NewSharedInstance,
+	type OutsideAddress,
+	REMOVED_FILE_FOLDERS,
+	REMOVED_FILE_SUFFIXES,
+	type RemovedFile,
+	type SharedIconConfig,
+	type SharedInstanceUpdate,
+	type UserIds,
+	type VersionFault,
 } from '@amberite/contracts'
 
 import { ApiError } from '../common/http'
-import { MAX_VERSION_FILES, externalFile } from './pool'
+import { externalFile } from './pool'
 
 // The sharing routes' bodies, checked into their contract types. A body that does not fit throws
 // `invalid_input`.
@@ -43,9 +47,6 @@ function fileType(value: unknown): string {
 	return type
 }
 
-const REMOVED_PARENTS = ['mods', 'plugins', 'datapacks', 'shaderpacks', 'resourcepacks']
-/** The App drops a version whose removed path names any other kind of file. */
-const REMOVED_SUFFIXES = ['.jar', '.zip', '.jar.disabled', '.zip.disabled']
 /** Windows device names, as `is_reserved_windows_device_name` in `packages/path-util`. */
 const RESERVED_DEVICE_NAMES = [
 	...['CON', 'PRN', 'AUX', 'NUL', 'CONIN$', 'CONOUT$'],
@@ -81,10 +82,10 @@ function removedFiles(value: unknown, modpackId: string | null): RemovedFile[] {
 		if (
 			entry.type !== 'path' ||
 			typeof entry.parent !== 'string' ||
-			!REMOVED_PARENTS.includes(entry.parent) ||
+			!REMOVED_FILE_FOLDERS.includes(entry.parent) ||
 			/[\u0000-\u001f]/.test(filename) ||
 			!safeFileName(filename) ||
-			!REMOVED_SUFFIXES.some((suffix) => filename.endsWith(suffix))
+			!REMOVED_FILE_SUFFIXES.some((suffix) => filename.endsWith(suffix))
 		)
 			throw new ApiError(400, 'invalid_input', 'Invalid removed modpack file')
 		return { type: 'path', parent: entry.parent, filename }
@@ -203,12 +204,13 @@ export const parseUpdate = (raw: unknown): SharedInstanceUpdate => ({
 	name: string(object(raw).name, 'name'),
 })
 
-export const parseNewShare = (raw: unknown): NewSharedInstance => {
+export const parseNewShare = (raw: unknown): NewSharedInstance => ({
+	name: string(object(raw).name, 'name'),
+})
+
+export const parseNewServerShare = (raw: unknown): NewServerShare => {
 	const body = object(raw)
-	return {
-		name: string(body.name, 'name'),
-		server_id: body.server_id === undefined ? undefined : string(body.server_id, 'server_id', 64),
-	}
+	return { name: string(body.name, 'name'), server_id: string(body.server_id, 'server_id', 64) }
 }
 
 const ICON_COLOR = /^#[0-9a-fA-F]{6}$/
