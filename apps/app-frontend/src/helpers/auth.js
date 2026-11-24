@@ -35,7 +35,7 @@ export async function login() {
 	try {
 		return await apiClient.local.call(localAccounts.signInToMinecraft)
 	} catch (error) {
-		if (error instanceof ApiCallError && error.code === 'sign_in_cancelled') return null
+		if (error instanceof ApiCallError && error.code === 'login_canceled') return null
 		throw error
 	}
 }

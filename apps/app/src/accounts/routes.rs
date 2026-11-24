@@ -333,7 +333,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cancelling_a_modrinth_sign_in_answers_sign_in_cancelled() {
+    async fn cancelling_a_modrinth_sign_in_answers_login_canceled() {
         let seal = AuthSeal::generate();
         let mut reply = AuthReplySession::start(seal.nonce().to_string());
         reply.socket_addr().await.unwrap();
