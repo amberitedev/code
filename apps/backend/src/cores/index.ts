@@ -181,7 +181,7 @@ async function requestCode(request: Request, env: Env, body: NewSignInCode) {
 	if (byCore.count > MAX_CORE_REQUESTS || byAddress.count > MAX_ADDRESS_REQUESTS)
 		throw new ApiError(
 			429,
-			'too_many_requests',
+			'rate_limited',
 			'Too many sign-in codes were asked for. Try again later.',
 		)
 

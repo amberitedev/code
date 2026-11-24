@@ -138,12 +138,12 @@ export class ProtocolMismatch extends Error {
 	}
 }
 
-/** How a Core's `health` differs from `ours`, if it does. A Core that reports none speaks 1. */
+/** How a Core's `health` differs from `ours`, if it does. */
 export function protocolMismatch(
 	health: Pick<Health, 'protocol'>,
 	ours: number = PROTOCOL_VERSION,
 ): ProtocolMismatch | null {
-	const theirs = health.protocol ?? 1
+	const theirs = health.protocol
 	if (theirs === ours) return null
 	return new ProtocolMismatch(theirs < ours ? 'core' : 'app')
 }

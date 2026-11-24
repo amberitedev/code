@@ -8,7 +8,7 @@ use contracts::{ApiError, Empty, Json, server::Req};
 use super::api_error;
 use crate::{
     Engine,
-    access::{Edit, EngineAccess, InstanceAccess, Owner, View},
+    access::{EngineAccess, InstanceAccess},
     endpoints::{
         instances::SharedInstanceAttachment,
         sharing::{
@@ -30,7 +30,7 @@ use crate::{
 
 pub async fn get_shared_instance_users(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<View>,
+    instance: InstanceAccess,
     _: Req<GetSharedInstanceUsers>,
 ) -> Result<Json<SharedInstanceUsers>, ApiError> {
     instance::get_shared_instance_users(&engine, &instance.id)
@@ -41,7 +41,7 @@ pub async fn get_shared_instance_users(
 
 pub async fn invite_shared_instance_users(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Owner>,
+    instance: InstanceAccess,
     request: Req<InviteSharedInstanceUsers>,
 ) -> Result<Json<SharedInstanceUsers>, ApiError> {
     instance::invite_shared_instance_users(
@@ -56,7 +56,7 @@ pub async fn invite_shared_instance_users(
 
 pub async fn remove_shared_instance_users(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Owner>,
+    instance: InstanceAccess,
     request: Req<RemoveSharedInstanceUsers>,
 ) -> Result<Json<SharedInstanceUsers>, ApiError> {
     instance::remove_shared_instance_users(
@@ -72,7 +72,7 @@ pub async fn remove_shared_instance_users(
 
 pub async fn list_shared_instance_invites(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Owner>,
+    instance: InstanceAccess,
     _: Req<ListSharedInstanceInvites>,
 ) -> Result<Json<Vec<SharedInstanceInvite>>, ApiError> {
     instance::get_shared_instance_invites(&engine, &instance.id)
@@ -83,7 +83,7 @@ pub async fn list_shared_instance_invites(
 
 pub async fn create_shared_instance_invite_link(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Owner>,
+    instance: InstanceAccess,
     request: Req<CreateSharedInstanceInviteLink>,
 ) -> Result<Json<SharedInstanceInviteLink>, ApiError> {
     let link = request.body;
@@ -101,7 +101,7 @@ pub async fn create_shared_instance_invite_link(
 
 pub async fn revoke_shared_instance_invite(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Owner>,
+    instance: InstanceAccess,
     request: Req<RevokeSharedInstanceInvite>,
 ) -> Result<Empty, ApiError> {
     instance::revoke_shared_instance_invite(
@@ -116,7 +116,7 @@ pub async fn revoke_shared_instance_invite(
 
 pub async fn get_shared_instance_publish_preview(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Owner>,
+    instance: InstanceAccess,
     _: Req<GetSharedInstancePublishPreview>,
 ) -> Result<Json<Option<SharedInstancePublishPreview>>, ApiError> {
     instance::get_shared_instance_publish_preview(&engine, &instance.id)
@@ -127,7 +127,7 @@ pub async fn get_shared_instance_publish_preview(
 
 pub async fn get_shared_instance_publish_support_details(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Owner>,
+    instance: InstanceAccess,
     _: Req<GetSharedInstancePublishSupportDetails>,
 ) -> Result<Json<Option<String>>, ApiError> {
     instance::get_shared_instance_publish_support_details(&engine, &instance.id)
@@ -138,7 +138,7 @@ pub async fn get_shared_instance_publish_support_details(
 
 pub async fn ensure_shared_instance(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Owner>,
+    instance: InstanceAccess,
     _: Req<EnsureSharedInstance>,
 ) -> Result<Json<SharedInstanceAttachment>, ApiError> {
     instance::ensure_shared_instance(&engine, &instance.id)
@@ -149,7 +149,7 @@ pub async fn ensure_shared_instance(
 
 pub async fn unpublish_shared_instance(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Owner>,
+    instance: InstanceAccess,
     _: Req<UnpublishSharedInstance>,
 ) -> Result<Empty, ApiError> {
     instance::unpublish_shared_instance(&engine, &instance.id)
@@ -160,7 +160,7 @@ pub async fn unpublish_shared_instance(
 
 pub async fn unlink_shared_instance(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Owner>,
+    instance: InstanceAccess,
     _: Req<UnlinkSharedInstance>,
 ) -> Result<Empty, ApiError> {
     instance::unlink_shared_instance(&engine, &instance.id)
@@ -171,7 +171,7 @@ pub async fn unlink_shared_instance(
 
 pub async fn dismiss_shared_instance_restored_notice(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     _: Req<DismissSharedInstanceRestoredNotice>,
 ) -> Result<Empty, ApiError> {
     instance::dismiss_shared_instance_restored_notice(&engine, &instance.id)
@@ -182,7 +182,7 @@ pub async fn dismiss_shared_instance_restored_notice(
 
 pub async fn unpublish_remote_shared_instance(
     State(engine): State<Arc<Engine>>,
-    _: EngineAccess<Owner>,
+    _: EngineAccess,
     request: Req<UnpublishRemoteSharedInstance>,
 ) -> Result<Empty, ApiError> {
     instance::unpublish_remote_shared_instance(&engine, &request.params.id)
@@ -193,7 +193,7 @@ pub async fn unpublish_remote_shared_instance(
 
 pub async fn leave_remote_shared_instance(
     State(engine): State<Arc<Engine>>,
-    _: EngineAccess<Owner>,
+    _: EngineAccess,
     request: Req<LeaveRemoteSharedInstance>,
 ) -> Result<Empty, ApiError> {
     instance::leave_remote_shared_instance(&engine, &request.params.id)

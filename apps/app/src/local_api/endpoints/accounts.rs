@@ -14,7 +14,7 @@ endpoints! {
     /// Fails when Mojang's session server cannot be reached.
     CheckMinecraftReachable: Get "/app/accounts/minecraft/reachable", (), (),
         Empty => Empty;
-    /// Opens Microsoft's sign-in window on the desktop; closing it answers `sign_in_cancelled`.
+    /// Opens Microsoft's sign-in window on the desktop; closing it answers `login_canceled`.
     SignInToMinecraft: Post "/app/accounts/minecraft/login", (), (), Empty
         => Json<MinecraftAccountSummary>;
     ListMinecraftAccounts: Get "/app/accounts/minecraft", (), (), Empty
@@ -26,7 +26,7 @@ endpoints! {
     RemoveMinecraftAccount: Delete "/app/accounts/minecraft/{id}",
         MinecraftAccountParams, (), Empty => Empty;
     /// Opens Modrinth's sign-in page in the browser and waits for it to hand back a session;
-    /// cancelling answers `sign_in_cancelled`.
+    /// cancelling answers `login_canceled`.
     SignInToModrinth: Post "/app/accounts/modrinth/login", (), (),
         Json<ModrinthSignIn> => Json<ModrinthCredentials>;
     CancelModrinthSignIn: Delete "/app/accounts/modrinth/login", (), (), Empty

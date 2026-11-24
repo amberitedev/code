@@ -44,18 +44,14 @@ pub enum ErrorCode {
     InvalidAddress,
     MailError,
     NoStorage,
-    RateLimit,
     TicketsUnavailable,
     TooManyAttempts,
-    TooManyRequests,
-    UnsupportedOperation,
     UsernameTaken,
     WeakPassword,
     WrongCode,
     Blacklisted,
     CoreNotFound,
     CurrentVersion,
-    EndpointNotFound,
     IconNotFound,
     InstanceNotFound,
     InviteInvalid,
@@ -145,7 +141,6 @@ pub enum ErrorCode {
 
     EngineUnavailable,
     ExternalSaveFailed,
-    SignInCancelled,
     Cancelled,
 
     #[serde(other)]
@@ -205,7 +200,6 @@ impl ErrorCode {
             Self::NotFound
             | Self::WrongCode
             | Self::CoreNotFound
-            | Self::EndpointNotFound
             | Self::IconNotFound
             | Self::InstanceNotFound
             | Self::InviteInvalid
@@ -223,7 +217,6 @@ impl ErrorCode {
             | Self::PoolPushInFlight
             | Self::SharedInstanceOwnerBehind
             | Self::LoginCanceled
-            | Self::SignInCancelled
             | Self::Cancelled => 409,
             Self::CodeExpired
             | Self::CoreRemoved
@@ -234,13 +227,11 @@ impl ErrorCode {
             | Self::PoolTooLarge
             | Self::SharedInstanceLimitReached => 413,
             Self::RateLimited
-            | Self::RateLimit
             | Self::TooManyAttempts
-            | Self::TooManyRequests
             | Self::EgressSpent
             | Self::PoolEgressSpent
             | Self::MinecraftAuthRateLimited => 429,
-            Self::Unsupported | Self::UnsupportedOperation => 501,
+            Self::Unsupported => 501,
             Self::NetworkError
             | Self::ModrinthApi
             | Self::SharedInstancesApiError

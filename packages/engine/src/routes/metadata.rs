@@ -6,14 +6,14 @@ use contracts::{ApiError, Json, server::Req};
 use super::api_error;
 use crate::{
     Engine,
-    access::{EngineAccess, Owner},
+    access::EngineAccess,
     endpoints::metadata::GetLoaderManifest,
     metadata::{self, Manifest},
 };
 
 pub async fn get_loader_manifest(
     State(engine): State<Arc<Engine>>,
-    _: EngineAccess<Owner>,
+    _: EngineAccess,
     request: Req<GetLoaderManifest>,
 ) -> Result<Json<Manifest>, ApiError> {
     metadata::get_loader_versions(&engine, &request.params.loader)

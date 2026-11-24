@@ -1,6 +1,6 @@
 //! The engine's wire types, generated to `packages/contracts/ts/engine.ts`, which
 //! `cargo test -p engine` keeps fresh. Regenerate it with
-//! `cargo test -p engine -- --ignored write_ts`.
+//! `WRITE_TS=1 node scripts/dev-runner.ts test engine`.
 
 use contracts::ts::config;
 use minecraft_meta_manifest::fabriclike::{
@@ -89,13 +89,12 @@ use crate::{
         FileMetadata, FileType, GalleryItem, GameVersion, Hooks,
         InstanceInstallCandidate, InstanceInstallStage, InstanceInstallTarget,
         InstanceSyncedOptions, InstanceTabVisibility, JavaVersion, License,
-        LinkedModpackInfo, Loader, Log4jEvent, MemorySettings, ModLoader,
-        Organization, OwnerType, PendingChange, ProcessMetadata, Project,
-        ProjectType, ProjectV3, ReleaseChannel, SearchEntry, SearchResult,
-        SearchResultV3, SearchResults, SearchResultsV3, ServerSides, Settings,
-        SharedInstanceRole, SideType, SyncedPackInfo, TeamMember, Theme, User,
-        Version, VersionEnvironment, VersionFile, WindowSize,
-        content_store::StoreUsage,
+        LinkedModpackInfo, Loader, Log4jEvent, MemorySettings, Organization,
+        OwnerType, PendingChange, ProcessMetadata, Project, ProjectType,
+        ProjectV3, SearchEntry, SearchResult, SearchResultV3, SearchResults,
+        SearchResultsV3, ServerSides, Settings, SharedInstanceRole, SideType,
+        SyncedPackInfo, TeamMember, Theme, User, Version, VersionEnvironment,
+        VersionFile, WindowSize, content_store::StoreUsage,
     },
     worlds::{
         DisplayStatus, ProtocolVersion, ServerGameProfile, ServerPackStatus,
@@ -133,7 +132,6 @@ fn file() -> String {
         InstallApiErrorDetails::decl(&cfg),
         InstallErrorContext::decl(&cfg),
         ImportLauncherType::decl(&cfg),
-        ModLoader::decl(&cfg),
         WarningPayload::decl(&cfg),
         LogPayload::decl(&cfg),
         LogEvent::decl(&cfg),
@@ -147,7 +145,6 @@ fn file() -> String {
         ContentSetSyncStatus::decl(&cfg),
         InstanceSyncedOptions::decl(&cfg),
         InstanceTabVisibility::decl(&cfg),
-        ReleaseChannel::decl(&cfg),
         MemorySettings::decl(&cfg),
         WindowSize::decl(&cfg),
         Hooks::decl(&cfg),
@@ -349,22 +346,12 @@ fn file() -> String {
     .concat();
     format!(
         "// Generated from packages/engine by ts-rs. Do not edit.\n\
-         // Regenerate: cargo test -p engine -- --ignored write_ts\n\n\
-         import type {{ Endpoint, RemovedFile, SharedIconConfig, UserIds }} from './contracts'\n{declarations}{modules}"
+         // Regenerate: WRITE_TS=1 node scripts/dev-runner.ts test engine\n\n\
+         import type {{ Endpoint, ModLoader, ReleaseChannel, RemovedFile, SharedIconConfig, UserIds }} from './contracts'\n{declarations}{modules}"
     )
 }
 
 #[test]
 fn ts_is_up_to_date() {
-    let written = std::fs::read_to_string(PATH).unwrap_or_default();
-    assert!(
-        written.replace("\r\n", "\n") == file(),
-        "{PATH} is out of date. Run: cargo test -p engine -- --ignored write_ts"
-    );
-}
-
-#[test]
-#[ignore = "writes the generated file; run on purpose"]
-fn write_ts() {
-    std::fs::write(PATH, file()).unwrap();
+    contracts::ts::check(PATH, &file());
 }

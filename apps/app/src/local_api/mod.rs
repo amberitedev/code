@@ -29,7 +29,7 @@ use contracts::{
 };
 use engine::{
     Engine, EventSink,
-    access::{Access, BoxFuture, Caller, Permission},
+    access::{Access, BoxFuture, Caller},
 };
 use tauri::{Runtime, plugin::TauriPlugin};
 use url::Url;
@@ -297,9 +297,8 @@ impl Access for AppAccess {
         &'a self,
         _: &'a Caller,
         _: Option<&'a str>,
-        _: Permission,
-    ) -> BoxFuture<'a, Result<Permission, ApiError>> {
-        Box::pin(async { Ok(Permission::Owner) })
+    ) -> BoxFuture<'a, Result<(), ApiError>> {
+        Box::pin(async { Ok(()) })
     }
 }
 

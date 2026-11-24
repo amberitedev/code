@@ -11,7 +11,7 @@ use contracts::{
 
 use super::{CoreState, internal};
 use crate::{
-    access::{Caller, Permission, activity},
+    access::{Caller, activity},
     servers::properties,
 };
 
@@ -20,10 +20,7 @@ pub async fn get(
     State(state): State<Arc<CoreState>>,
     Req { params, .. }: Req<GetProperties>,
 ) -> Result<Json<ServerProperties>, ApiError> {
-    state
-        .access
-        .require(&caller, &params.id, Permission::Edit)
-        .await?;
+    state.access.require(&caller, &params.id).await?;
     let dir = state.servers.paths().server(&params.id);
     Ok(Json(ServerProperties {
         properties: properties::read(&dir).map_err(internal)?,
@@ -37,7 +34,7 @@ pub async fn change(
     Req { params, body, .. }: Req<ChangeProperties>,
 ) -> Result<Json<ServerProperties>, ApiError> {
     let id = params.id;
-    state.access.require(&caller, &id, Permission::Edit).await?;
+    state.access.require(&caller, &id).await?;
     let dir = state.servers.paths().server(&id);
     properties::patch(&dir, &body.properties).map_err(internal)?;
     activity::log(&state.db, &caller, Some(&id), Action::SettingsChanged).await;

@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use super::{CoreUser, ReachabilityReport};
+use crate::ReleaseChannel;
 
 /// A server on a Core.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -31,7 +32,7 @@ pub struct CoreServer {
     pub memory_mb: u32,
     /// Unix seconds.
     pub created_at: i64,
-    pub update_channel: UpdateChannel,
+    pub update_channel: ReleaseChannel,
     /// The owner accepted the Minecraft EULA for every server on this Core. None starts before.
     pub eula_accepted: bool,
 }
@@ -98,16 +99,6 @@ pub enum LinkedPackState {
     Failed,
 }
 
-/// Which Modrinth versions a server's content updates to.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-#[serde(rename_all = "snake_case")]
-pub enum UpdateChannel {
-    Release,
-    Beta,
-    Alpha,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct NewServer {
@@ -120,7 +111,7 @@ pub struct NewServer {
 pub struct ServerUpdate {
     /// 1 to 64 characters, trimmed.
     pub name: Option<String>,
-    pub update_channel: Option<UpdateChannel>,
+    pub update_channel: Option<ReleaseChannel>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -396,7 +387,6 @@ pub(super) fn ts_types() -> Vec<String> {
         ServerPower::decl(&cfg),
         LinkedInstance::decl(&cfg),
         LinkedPackState::decl(&cfg),
-        UpdateChannel::decl(&cfg),
         NewServer::decl(&cfg),
         ServerUpdate::decl(&cfg),
         PowerAction::decl(&cfg),

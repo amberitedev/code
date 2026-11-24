@@ -1,8 +1,8 @@
 //! `GET /events`: one socket per client, on which it subscribes to topics
 //! (`contracts::core::Topic`) and gets the Core's [`CoreEvent`]s and the engine's events for them.
-//! Every topic is checked against the caller's access when subscribed, and again when their
-//! session changes, when the socket falls behind, and every [`RECHECK_EVERY`]: a topic they lost
-//! ends with [`CoreEvent::Ended`], and a session that ended closes the socket.
+//! Only the owner opens one, and the owner sees every topic. The session is checked again when it
+//! changes, when the socket falls behind, and every [`RECHECK_EVERY`]; one that ended closes the
+//! socket.
 
 use std::{
     collections::{HashMap, VecDeque},
@@ -32,7 +32,7 @@ use tokio::sync::{
 
 use super::{CoreState, servers::power_state};
 use crate::{
-    access::{Caller, Changed, Permission, StreamGuard, now, require_owner},
+    access::{Caller, Changed, StreamGuard, now, require_owner},
     servers::{Phase, console, restarts::run_started_at},
 };
 
@@ -74,7 +74,6 @@ pub async fn socket(
             caller,
             _guard: guard,
             topics: HashMap::new(),
-            visible: HashMap::new(),
             console,
         }
         .run(socket, changes, core, engine, consoles)
@@ -99,8 +98,6 @@ struct Loop {
     _guard: StreamGuard,
     /// Each subscribed topic, with a console subscription's forwarding task.
     topics: HashMap<Topic, Option<Forward>>,
-    /// Whether the caller may see each instance an install job names, until the next re-check.
-    visible: HashMap<String, bool>,
     /// Where console subscriptions forward their lines, or `Resync` when they fell behind.
     console: mpsc::Sender<CoreEvent>,
 }
@@ -152,7 +149,7 @@ impl Loop {
                 },
                 event = engine.recv() => match event {
                     Ok(event) => {
-                        if self.wants_engine(&event).await {
+                        if self.wants_engine(&event) {
                             send(socket, &event).await?;
                         }
                         false
@@ -176,12 +173,12 @@ impl Loop {
                         Ok(Changed::Everyone) | Err(_) => true,
                     };
                     if concerns_me {
-                        self.recheck(socket).await?;
+                        self.recheck().await?;
                     }
                     false
                 }
                 _ = recheck.tick() => {
-                    self.recheck(socket).await?;
+                    self.recheck().await?;
                     false
                 }
                 message = socket.recv() => match message {
@@ -196,7 +193,7 @@ impl Loop {
                 },
             };
             if lagged {
-                self.recheck(socket).await?;
+                self.recheck().await?;
                 send(socket, &CoreEvent::Resync).await?;
                 let servers: Vec<String> = self
                     .topics
@@ -231,9 +228,6 @@ impl Loop {
         if self.topics.contains_key(&topic) {
             return Ok(());
         }
-        if let Err(error) = self.allowed(&topic).await {
-            return send(socket, &CoreEvent::Ended { topic, error }).await;
-        }
         let forward = match &topic {
             Topic::Console { id } => {
                 let path = self.state.servers.paths().console_log(id);
@@ -258,36 +252,12 @@ impl Loop {
         }
     }
 
-    /// Whether the caller may subscribe to `topic`. Install jobs are filtered one by one.
-    async fn allowed(&self, topic: &Topic) -> Result<(), ApiError> {
-        let (id, permission) = match topic {
-            Topic::Installs => return Ok(()),
-            Topic::Console { id } => (id, Permission::Edit),
-            Topic::Instance { id }
-            | Topic::Server { id }
-            | Topic::Backups { id } => (id, Permission::View),
-        };
-        self.state
-            .access
-            .require(&self.caller, id, permission)
-            .await
-            .map(drop)
-    }
-
-    /// Close on an ended session; end each topic the caller lost.
-    async fn recheck(&mut self, socket: &mut WebSocket) -> Result<(), Closed> {
-        if !self.state.access.revalidate(&self.caller).await {
-            return Err(Closed);
+    /// Close once the session ended.
+    async fn recheck(&self) -> Result<(), Closed> {
+        match self.state.access.revalidate(&self.caller).await {
+            true => Ok(()),
+            false => Err(Closed),
         }
-        self.visible.clear();
-        let topics: Vec<Topic> = self.topics.keys().cloned().collect();
-        for topic in topics {
-            if let Err(error) = self.allowed(&topic).await {
-                self.topics.remove(&topic);
-                send(socket, &CoreEvent::Ended { topic, error }).await?;
-            }
-        }
-        Ok(())
     }
 
     /// The server's power, as a `Server` subscription starts with.
@@ -303,9 +273,9 @@ impl Loop {
         send(socket, &power_event(&self.state, server, power).await).await
     }
 
-    /// The unfinished install jobs the caller may see, as an `Installs` subscription starts with.
+    /// The unfinished install jobs, as an `Installs` subscription starts with.
     async fn unfinished_jobs(
-        &mut self,
+        &self,
         socket: &mut WebSocket,
     ) -> Result<(), Closed> {
         let jobs = engine::install::list_jobs(false, &self.state.engine)
@@ -315,9 +285,7 @@ impl Loop {
                 Vec::new()
             });
         for job in jobs {
-            if !job.status.is_finished()
-                && self.sees(job.instance_id.as_deref()).await
-            {
+            if !job.status.is_finished() {
                 send(socket, &Event::InstallJob(Arc::new(job))).await?;
             }
         }
@@ -340,37 +308,18 @@ impl Loop {
         self.topics.contains_key(&topic)
     }
 
-    async fn wants_engine(&mut self, event: &Event) -> bool {
+    fn wants_engine(&self, event: &Event) -> bool {
         let instance = match event {
             Event::Instance(payload) => &payload.instance_id,
             Event::Process(payload) => &payload.instance_id,
-            Event::InstallJob(job) => {
-                return self.topics.contains_key(&Topic::Installs)
-                    && self.sees(job.instance_id.as_deref()).await;
+            Event::InstallJob(_) => {
+                return self.topics.contains_key(&Topic::Installs);
             }
             _ => return false,
         };
         self.topics.contains_key(&Topic::Instance {
             id: instance.clone(),
         })
-    }
-
-    /// Whether the caller may see an install job on `instance`; one on no instance is the Owner's.
-    async fn sees(&mut self, instance: Option<&str>) -> bool {
-        let Some(instance) = instance else {
-            return self.caller.is_owner();
-        };
-        if let Some(&visible) = self.visible.get(instance) {
-            return visible;
-        }
-        let visible = self
-            .state
-            .access
-            .require(&self.caller, instance, Permission::View)
-            .await
-            .is_ok();
-        self.visible.insert(instance.to_owned(), visible);
-        visible
     }
 }
 

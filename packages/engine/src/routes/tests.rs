@@ -13,7 +13,7 @@ use tower::ServiceExt;
 
 use crate::{
     Engine,
-    access::{Access, BoxFuture, Caller, Permission},
+    access::{Access, BoxFuture, Caller},
     install::{InstallJobStatus, InstallRequest, model::InstallJobState},
     state::{
         CacheValue, CachedEntry,
@@ -21,9 +21,9 @@ use crate::{
     },
 };
 
-/// Grants up to `granted` on everything, and denies the rest with 403.
+/// Allows everything, or denies everything with 403.
 struct FakeAccess {
-    granted: Option<Permission>,
+    allow: bool,
 }
 
 impl Access for FakeAccess {
@@ -38,12 +38,11 @@ impl Access for FakeAccess {
         &'a self,
         _: &'a Caller,
         _: Option<&'a str>,
-        permission: Permission,
-    ) -> BoxFuture<'a, Result<Permission, ApiError>> {
+    ) -> BoxFuture<'a, Result<(), ApiError>> {
         Box::pin(async move {
-            match self.granted {
-                Some(granted) if permission <= granted => Ok(permission),
-                _ => Err(ApiError::new(ErrorCode::Forbidden, "denied")),
+            match self.allow {
+                true => Ok(()),
+                false => Err(ApiError::new(ErrorCode::Forbidden, "denied")),
             }
         })
     }
@@ -91,19 +90,12 @@ async fn send(
 }
 
 async fn host(dir: &tempfile::TempDir, allow: bool) -> Router {
-    host_granting(dir, allow.then_some(Permission::Owner)).await
-}
-
-async fn host_granting(
-    dir: &tempfile::TempDir,
-    granted: Option<Permission>,
-) -> Router {
     crate::install_crypto_provider();
     let engine = engine(dir.path().to_path_buf()).await;
     add_instance(&engine, "local:a", "Survival").await;
     super::routes().with_state(Host {
         engine,
-        access: Arc::new(FakeAccess { granted }),
+        access: Arc::new(FakeAccess { allow }),
     })
 }
 
@@ -356,24 +348,6 @@ async fn world_routes_refuse_a_folder_outside_saves() {
     assert!(outside.join("keep.txt").exists());
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn desyncing_a_server_needs_owner_over_the_engine() {
-    let dir = tempfile::tempdir().unwrap();
-    let router = host_granting(&dir, Some(Permission::Edit)).await;
-
-    let (status, _) = send(
-        &router,
-        "POST",
-        "/instances/local%3Aa/servers/desync",
-        Some(json!({
-            "server_id": "synced",
-            "mode": "remove_from_other_instances",
-        })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-}
-
 fn world_with_instance(world: &Value) -> Value {
     let mut world = world.clone();
     world["instance_id"] = json!("local:a");
@@ -402,9 +376,7 @@ async fn cache_reads_take_the_helpers_query_names() {
     .unwrap();
     let router = super::routes().with_state(Host {
         engine,
-        access: Arc::new(FakeAccess {
-            granted: Some(Permission::Owner),
-        }),
+        access: Arc::new(FakeAccess { allow: true }),
     });
 
     let (status, user) = send(
@@ -441,9 +413,7 @@ async fn logs_are_read_and_deleted_by_file_name_only() {
     std::fs::write(&secret, "secret").unwrap();
     let router = super::routes().with_state(Host {
         engine,
-        access: Arc::new(FakeAccess {
-            granted: Some(Permission::Owner),
-        }),
+        access: Arc::new(FakeAccess { allow: true }),
     });
 
     let (status, logs) = send(
@@ -672,9 +642,9 @@ async fn file_and_content_routes_refuse_paths_that_leave_the_instance() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn an_editor_edits_an_instance_and_only_an_owner_removes_it() {
+async fn an_instance_is_edited_then_removed() {
     let dir = tempfile::tempdir().unwrap();
-    let router = host_granting(&dir, Some(Permission::Edit)).await;
+    let router = host(&dir, true).await;
     let instance = "/instances/local%3Aa";
 
     let (status, _) = send(
@@ -687,11 +657,6 @@ async fn an_editor_edits_an_instance_and_only_an_owner_removes_it() {
     assert_eq!(status, StatusCode::NO_CONTENT);
     let (_, edited) = send(&router, "GET", instance, None).await;
     assert_eq!(edited["name"], "Creative");
-    let (status, _) = send(&router, "DELETE", instance, None).await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-
-    let dir = tempfile::tempdir().unwrap();
-    let router = host(&dir, true).await;
     let (status, _) = send(&router, "DELETE", instance, None).await;
     assert_eq!(status, StatusCode::NO_CONTENT);
     let (_, removed) = send(&router, "GET", instance, None).await;
@@ -721,9 +686,7 @@ async fn install_jobs_are_read_and_controlled_through_their_instance() {
     let router = |allow: bool| {
         super::routes().with_state(Host {
             engine: Arc::clone(&engine),
-            access: Arc::new(FakeAccess {
-                granted: allow.then_some(Permission::Owner),
-            }),
+            access: Arc::new(FakeAccess { allow }),
         })
     };
     let job = format!("/install-jobs/{id}");
@@ -767,39 +730,8 @@ async fn install_jobs_are_read_and_controlled_through_their_instance() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn only_an_owner_manages_a_share_and_an_unshared_instance_reads_empty() {
-    let dir = tempfile::tempdir().unwrap();
-    let editor = host_granting(&dir, Some(Permission::Edit)).await;
+async fn an_unshared_instance_reads_empty() {
     let shared = "/instances/local%3Aa/shared";
-    for (method, uri, body) in [
-        (
-            "POST",
-            format!("{shared}/users"),
-            Some(json!({ "user_ids": ["u"] })),
-        ),
-        ("GET", format!("{shared}/invites"), None),
-        ("DELETE", format!("{shared}/invites/i"), None),
-        ("PUT", shared.to_owned(), None),
-        ("DELETE", shared.to_owned(), None),
-        ("POST", format!("{shared}/unlink"), None),
-        ("DELETE", "/shared-instances/s".to_owned(), None),
-        ("POST", "/shared-instances/s/leave".to_owned(), None),
-    ] {
-        let (status, _) = send(&editor, method, &uri, body).await;
-        assert_eq!(status, StatusCode::FORBIDDEN, "{method} {uri}");
-    }
-    assert_eq!(
-        send(
-            &editor,
-            "DELETE",
-            &format!("{shared}/restored-notice"),
-            None
-        )
-        .await
-        .0,
-        StatusCode::NO_CONTENT
-    );
-
     let dir = tempfile::tempdir().unwrap();
     let owner = host(&dir, true).await;
     assert_eq!(
@@ -835,70 +767,9 @@ async fn server_host(dir: &tempfile::TempDir) -> (Router, std::path::PathBuf) {
     std::fs::create_dir_all(&root).unwrap();
     let router = super::routes().with_state(Host {
         engine,
-        access: Arc::new(FakeAccess {
-            granted: Some(Permission::Owner),
-        }),
+        access: Arc::new(FakeAccess { allow: true }),
     });
     (router, root)
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn files_need_an_editor_and_a_viewer_reads_only_the_icon() {
-    let dir = tempfile::tempdir().unwrap();
-    let viewer = host_granting(&dir, Some(Permission::View)).await;
-    let files = "/instances/local%3Aa/files";
-    let uploads = "/instances/local%3Aa/uploads";
-    for (method, uri, body) in [
-        ("GET", format!("{files}?path="), None),
-        ("GET", format!("{files}/content?path=a.txt"), None),
-        (
-            "PUT",
-            format!("{files}/content?path=a.txt&create_only=false"),
-            None,
-        ),
-        ("POST", format!("{files}/directories?path=notes"), None),
-        (
-            "POST",
-            format!("{files}/move"),
-            Some(json!({ "source": "a", "destination": "b" })),
-        ),
-        ("DELETE", format!("{files}?path=a&recursive=true"), None),
-        (
-            "POST",
-            format!("{files}/extract"),
-            Some(
-                json!({ "path": "a.zip", "override_conflicts": false, "dry_run": true }),
-            ),
-        ),
-        ("GET", format!("{files}/stat?path=a"), None),
-        (
-            "POST",
-            format!("{files}/zip"),
-            Some(json!({ "target_type": "Directory", "path": "config" })),
-        ),
-        (
-            "POST",
-            uploads.to_owned(),
-            Some(json!({ "scope": "files" })),
-        ),
-        ("GET", format!("{uploads}?scope=files"), None),
-        ("POST", format!("{uploads}/u/files?path=a.txt"), None),
-        ("POST", format!("{uploads}/u/finalize"), None),
-        ("DELETE", format!("{uploads}/u"), None),
-        ("PUT", "/instances/local%3Aa/icon".to_owned(), None),
-        (
-            "PUT",
-            "/instances/local%3Aa/icon/edited".to_owned(),
-            Some(json!({ "config": null, "image": [] })),
-        ),
-        ("DELETE", "/instances/local%3Aa/icon".to_owned(), None),
-    ] {
-        let (status, _) = send(&viewer, method, &uri, body).await;
-        assert_eq!(status, StatusCode::FORBIDDEN, "{method} {uri}");
-    }
-    let (status, _) =
-        send(&viewer, "GET", "/instances/local%3Aa/icon", None).await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "allowed, but there is none");
 }
 
 #[tokio::test(flavor = "multi_thread")]

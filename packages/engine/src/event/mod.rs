@@ -73,7 +73,6 @@ pub enum Event {
     InstallJob(std::sync::Arc<InstallJobSnapshot>),
     Warning(WarningPayload),
     Log(LogPayload),
-    AdsConsentRequired(bool),
     /// Raised by desktop code that still lives in the engine; the App sends it as its own event.
     /// It does not serialize, so every socket loop maps or drops it. It goes once the desktop code
     /// raising it lives in apps/app.

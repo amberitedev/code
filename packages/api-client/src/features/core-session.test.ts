@@ -36,13 +36,13 @@ type Sent = {
 /**
  * The real request pipeline against a fake backend and Core. The backend lists `CORE` and numbers
  * its tickets; the Core answers a path in `routes` with its entry, and any other request with the
- * next entry of `answers`, or `{}`. Its health reports no protocol, which is version 1.
+ * next entry of `answers`, or `{}`. Its health reports this App's protocol.
  */
 class FakeClient extends GenericModrinthClient {
 	public sent: Sent[] = []
 	public answers: unknown[] = []
 	public routes: Record<string, unknown> = {
-		[`${PROXY}/health`]: { version: '0.0.0', core_id: CORE.id },
+		[`${PROXY}/health`]: { protocol: PROTOCOL_VERSION, version: '0.0.0', core_id: CORE.id },
 	}
 	public signIns: string[][] = []
 	public hasSession = false
@@ -218,11 +218,6 @@ describe('Core sessions', () => {
 })
 
 describe('a Core on another protocol version', () => {
-	it('counts a Core that reports none as version 1', () => {
-		expect(protocolMismatch({}, 1)).toBeNull()
-		expect(protocolMismatch({}, 2)?.side).toBe('core')
-	})
-
 	it('says which side to update', () => {
 		expect(protocolMismatch({ protocol: 1 }, 2)?.message).toBe(
 			'This Core is out of date. Update this Core.',

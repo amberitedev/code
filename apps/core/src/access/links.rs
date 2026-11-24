@@ -15,7 +15,7 @@ use contracts::{
     server::Req,
 };
 
-use super::{Caller, CoreAccess, Permission};
+use super::{Caller, CoreAccess};
 use crate::api::CoreState;
 
 const LIFETIME: Duration = Duration::from_secs(300);
@@ -90,7 +90,7 @@ async fn allowed(
                 "A link is for a path under /servers/{id}/ or /instances/{id}/.",
             )
         })?;
-    access.require(caller, server, Permission::Edit).await?;
+    access.require(caller, server).await?;
     Ok(())
 }
 

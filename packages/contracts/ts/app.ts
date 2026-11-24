@@ -1,8 +1,8 @@
 // Generated from apps/app by ts-rs. Do not edit.
-// Regenerate: cargo test -p amberite-app -- --ignored write_ts
+// Regenerate: WRITE_TS=1 node scripts/dev-runner.ts test amberite-app
 
-import type { ApiError, CoreSession, Endpoint, SharedIconConfig, UserFriend, UserStatus } from './contracts'
-import type { CachedSharedInstanceSummary, CommandPayload, DesyncServerMode, EngineEvent, FriendPayload, ImportLauncherType, InstallJobSnapshot, InstanceGroupsChangedPayload, InstanceLink, InstanceSyncedOptions, JavaVersion, ModLoader, OnboardingChecklist, ProcessMetadata, ProjectType, Settings } from './engine'
+import type { ApiError, CoreSession, Endpoint, ModLoader, SharedIconConfig, UserFriend, UserStatus } from './contracts'
+import type { CachedSharedInstanceSummary, CommandPayload, DesyncServerMode, EngineEvent, FriendPayload, ImportLauncherType, InstallJobSnapshot, InstanceGroupsChangedPayload, InstanceLink, InstanceSyncedOptions, JavaVersion, OnboardingChecklist, ProcessMetadata, ProjectType, Settings } from './engine'
 
 export type Boot = { version: string, platform: Platform, os_version: string, 
 /**

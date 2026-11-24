@@ -9,7 +9,7 @@ use contracts::{ApiError, Empty, ErrorCode, Json, server::Req};
 use super::api_error;
 use crate::{
     Engine,
-    access::{Edit, InstanceAccess},
+    access::InstanceAccess,
     endpoints::logs::{
         ClearLiveLog, DeleteInstanceLog, GetInstanceLogOutput, GetLiveLog,
         ListInstanceLogs,
@@ -19,7 +19,7 @@ use crate::{
 
 pub async fn list_instance_logs(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<ListInstanceLogs>,
 ) -> Result<Json<Vec<Logs>>, ApiError> {
     logs::get_logs(&engine, &instance.id, request.query.clear_contents)
@@ -30,7 +30,7 @@ pub async fn list_instance_logs(
 
 pub async fn get_instance_log_output(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<GetInstanceLogOutput>,
 ) -> Result<Json<CensoredString>, ApiError> {
     let filename = log_file_name(&request.params.filename)?;
@@ -47,7 +47,7 @@ pub async fn get_instance_log_output(
 
 pub async fn delete_instance_log(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<DeleteInstanceLog>,
 ) -> Result<Empty, ApiError> {
     let filename = log_file_name(&request.params.filename)?;
@@ -64,7 +64,7 @@ pub async fn delete_instance_log(
 
 pub async fn get_live_log(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     _: Req<GetLiveLog>,
 ) -> Result<Json<CensoredString>, ApiError> {
     logs::get_live_log_buffer(&engine, &instance.id)
@@ -75,7 +75,7 @@ pub async fn get_live_log(
 
 pub async fn clear_live_log(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     _: Req<ClearLiveLog>,
 ) -> Result<Empty, ApiError> {
     logs::clear_live_log_buffer(&engine, &instance.id)

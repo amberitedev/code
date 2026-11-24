@@ -1,7 +1,7 @@
 //! The backend's account routes: sign-up, sign-in, sessions, passwords, two-factor, email and the
 //! admin's account controls. They keep labrinth's paths and shapes, so upstream's pages call them as
 //! they call Modrinth; upstream calls them under `/v2`, `/v3` and `/_internal`, which the backend
-//! strips. Every other `/auth/` path answers 501 `unsupported_operation`.
+//! strips. Every other `/auth/` path answers 501 `unsupported`.
 
 use std::collections::HashMap;
 

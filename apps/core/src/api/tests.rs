@@ -1347,11 +1347,11 @@ async fn engine_wide_access_is_the_owners() {
         (session("stranger", false), false),
     ] {
         let granted = engine_access
-            .require(&caller, None, access::Permission::View)
+            .require(&caller, None)
             .await
             .map_err(|error| error.error);
         let expected = if allowed {
-            Ok(access::Permission::Owner)
+            Ok(())
         } else {
             Err(contracts::ErrorCode::Forbidden)
         };

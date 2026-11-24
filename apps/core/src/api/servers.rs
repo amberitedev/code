@@ -13,20 +13,17 @@ use contracts::{
         Action, ChangePower, ChangeServer, CoreServer, CreateServer,
         DeleteServer, GetServer, GetSetup, InstallLoader, InstallModpackFile,
         JoinAddress, ListServers, PowerAction, ServerId, ServerNet,
-        ServerPower, ServerSetup, ShareServer, SharedServer, UpdateChannel,
+        ServerPower, ServerSetup, ShareServer, SharedServer,
     },
     server::Req,
 };
-use engine::{
-    routes::api_error,
-    state::{ReleaseChannel, SharedInstanceRole},
-};
+use engine::{routes::api_error, state::SharedInstanceRole};
 use futures::TryStreamExt;
 use tokio::io::AsyncWriteExt;
 
 use super::{CoreState, engine_mount, internal};
 use crate::{
-    access::{Caller, Dangerous, Permission, activity, require_owner},
+    access::{Caller, Dangerous, activity, require_owner},
     servers::{
         Phase, ServerError, launch,
         platform::{self, Platform},
@@ -53,22 +50,6 @@ impl From<ServerError> for ApiError {
             }
         };
         Self::new(code, format!("{error:#}"))
-    }
-}
-
-fn update_channel(channel: ReleaseChannel) -> UpdateChannel {
-    match channel {
-        ReleaseChannel::Release => UpdateChannel::Release,
-        ReleaseChannel::Beta => UpdateChannel::Beta,
-        ReleaseChannel::Alpha => UpdateChannel::Alpha,
-    }
-}
-
-fn release_channel(channel: UpdateChannel) -> ReleaseChannel {
-    match channel {
-        UpdateChannel::Release => ReleaseChannel::Release,
-        UpdateChannel::Beta => ReleaseChannel::Beta,
-        UpdateChannel::Alpha => ReleaseChannel::Alpha,
     }
 }
 
@@ -174,7 +155,7 @@ async fn server(
             .map(|insight| insight.players.into_iter().collect()),
         installing: phase == Some(Phase::Installing),
         memory_mb: u32::try_from(row.memory_mb).unwrap_or_default(),
-        update_channel: update_channel(instance.instance.update_channel),
+        update_channel: instance.instance.update_channel,
         id: row.id,
         name: row.name,
         owner_id,
@@ -206,7 +187,7 @@ pub async fn get(
     Req { params, .. }: Req<GetServer>,
 ) -> Result<Json<CoreServer>, ApiError> {
     let id = params.id;
-    state.access.require(&caller, &id, Permission::View).await?;
+    state.access.require(&caller, &id).await?;
     let row = server_rows::get(&state.db, &id)
         .await
         .map_err(internal)?
@@ -250,7 +231,7 @@ pub async fn change(
     Req { params, body, .. }: Req<ChangeServer>,
 ) -> Result<Empty, ApiError> {
     let id = params.id;
-    state.access.require(&caller, &id, Permission::Edit).await?;
+    state.access.require(&caller, &id).await?;
     server_rows::get(&state.db, &id)
         .await
         .map_err(internal)?
@@ -267,7 +248,7 @@ pub async fn change(
             &state.engine,
             &id,
             engine::state::EditInstance {
-                update_channel: Some(release_channel(channel)),
+                update_channel: Some(channel),
                 ..Default::default()
             },
         )
@@ -285,7 +266,7 @@ pub async fn power(
     Req { params, body, .. }: Req<ChangePower>,
 ) -> Result<Empty, ApiError> {
     let id = params.id;
-    state.access.require(&caller, &id, Permission::Edit).await?;
+    state.access.require(&caller, &id).await?;
     let action = match body.action {
         PowerAction::Start => Action::ServerStarted,
         PowerAction::Stop => Action::ServerStopped,
@@ -320,7 +301,7 @@ pub async fn install(
     Req { params, body, .. }: Req<InstallLoader>,
 ) -> Result<Empty, ApiError> {
     let id = params.id;
-    state.access.require(&caller, &id, Permission::Edit).await?;
+    state.access.require(&caller, &id).await?;
     let Some(loader) = platform::parse_loader(&body.loader) else {
         return Err(ApiError::new(
             ErrorCode::InvalidInput,
@@ -369,7 +350,7 @@ pub async fn install_modpack_file(
     Req { params, body, .. }: Req<InstallModpackFile>,
 ) -> Result<Empty, ApiError> {
     let id = params.id;
-    state.access.require(&caller, &id, Permission::Edit).await?;
+    state.access.require(&caller, &id).await?;
     let hold = state.servers.hold(&id)?;
     let dir = state.servers.paths().run(&id);
     tokio::fs::create_dir_all(&dir).await.map_err(internal)?;
@@ -418,7 +399,7 @@ pub async fn share(
     Req { params, body, .. }: Req<ShareServer>,
 ) -> Result<Json<SharedServer>, ApiError> {
     let id = params.id;
-    state.access.require(&caller, &id, Permission::Edit).await?;
+    state.access.require(&caller, &id).await?;
     let instance = engine::instance::get(&state.engine, &id)
         .await
         .map_err(api_error)?
@@ -607,7 +588,7 @@ pub async fn setup(
     Req { params, .. }: Req<GetSetup>,
 ) -> Result<Json<ServerSetup>, ApiError> {
     let id = params.id;
-    state.access.require(&caller, &id, Permission::View).await?;
+    state.access.require(&caller, &id).await?;
     let row = server_rows::get(&state.db, &id)
         .await
         .map_err(internal)?

@@ -6,7 +6,7 @@ use contracts::{ApiError, Empty, Json, server::Req};
 use super::api_error;
 use crate::{
     Engine,
-    access::{EngineAccess, Owner},
+    access::EngineAccess,
     endpoints::groups::{
         CreateInstanceGroup, DeleteInstanceGroup, ListInstanceGroups,
         RenameInstanceGroup, SetInstanceGroupMemberships,
@@ -17,7 +17,7 @@ use crate::{
 
 pub async fn list_instance_groups(
     State(engine): State<Arc<Engine>>,
-    _: EngineAccess<Owner>,
+    _: EngineAccess,
     _: Req<ListInstanceGroups>,
 ) -> Result<Json<Vec<InstanceGroup>>, ApiError> {
     instance::list_groups(&engine)
@@ -28,7 +28,7 @@ pub async fn list_instance_groups(
 
 pub async fn create_instance_group(
     State(engine): State<Arc<Engine>>,
-    _: EngineAccess<Owner>,
+    _: EngineAccess,
     request: Req<CreateInstanceGroup>,
 ) -> Result<Json<InstanceGroup>, ApiError> {
     instance::create_group(&engine, request.body.name)
@@ -39,7 +39,7 @@ pub async fn create_instance_group(
 
 pub async fn rename_instance_group(
     State(engine): State<Arc<Engine>>,
-    _: EngineAccess<Owner>,
+    _: EngineAccess,
     request: Req<RenameInstanceGroup>,
 ) -> Result<Json<InstanceGroup>, ApiError> {
     instance::rename_group(&engine, request.params.id, request.body.name)
@@ -50,7 +50,7 @@ pub async fn rename_instance_group(
 
 pub async fn delete_instance_group(
     State(engine): State<Arc<Engine>>,
-    _: EngineAccess<Owner>,
+    _: EngineAccess,
     request: Req<DeleteInstanceGroup>,
 ) -> Result<Empty, ApiError> {
     instance::delete_group(&engine, request.params.id)
@@ -61,7 +61,7 @@ pub async fn delete_instance_group(
 
 pub async fn set_instance_group_order(
     State(engine): State<Arc<Engine>>,
-    _: EngineAccess<Owner>,
+    _: EngineAccess,
     request: Req<SetInstanceGroupOrder>,
 ) -> Result<Empty, ApiError> {
     instance::set_group_order(&engine, request.body)
@@ -72,7 +72,7 @@ pub async fn set_instance_group_order(
 
 pub async fn set_instance_group_memberships(
     State(engine): State<Arc<Engine>>,
-    _: EngineAccess<Owner>,
+    _: EngineAccess,
     request: Req<SetInstanceGroupMemberships>,
 ) -> Result<Empty, ApiError> {
     instance::set_group_memberships(&engine, request.body)

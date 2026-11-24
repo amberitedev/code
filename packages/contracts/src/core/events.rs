@@ -28,13 +28,8 @@ pub enum Topic {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientMessage {
-    /// A topic the caller may not see is answered with `Ended`.
-    Subscribe {
-        topic: Topic,
-    },
-    Unsubscribe {
-        topic: Topic,
-    },
+    Subscribe { topic: Topic },
+    Unsubscribe { topic: Topic },
 }
 
 /// What the Core sends on `/events`, beside the engine's events.
@@ -59,7 +54,7 @@ pub enum CoreEvent {
         start_time: Option<i64>,
         finish_time: Option<i64>,
     },
-    /// The caller may not, or no longer, see `topic`.
+    /// Never sent: only the owner opens a socket, and the owner sees every topic.
     Ended { topic: Topic, error: ApiError },
     /// This socket fell behind and lost events: refetch what is shown.
     Resync,

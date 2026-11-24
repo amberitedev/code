@@ -1,6 +1,6 @@
 //! The App's own Endpoints, generated to `packages/contracts/ts/app.ts`, which
 //! `cargo test -p amberite-app` keeps fresh. Regenerate it with
-//! `cargo test -p amberite-app -- --ignored write_ts`.
+//! `WRITE_TS=1 node scripts/dev-runner.ts test amberite-app`.
 
 /// Declares each route as a unit struct and, for the tests, the entries of its TypeScript module
 /// object, keyed by the name with a lowercase first letter.
@@ -330,9 +330,9 @@ mod tests {
         .concat();
         format!(
             "// Generated from apps/app by ts-rs. Do not edit.\n\
-             // Regenerate: cargo test -p amberite-app -- --ignored write_ts\n\n\
-             import type {{ ApiError, CoreSession, Endpoint, SharedIconConfig, UserFriend, UserStatus }} from './contracts'\n\
-             import type {{ CachedSharedInstanceSummary, CommandPayload, DesyncServerMode, EngineEvent, FriendPayload, ImportLauncherType, InstallJobSnapshot, InstanceGroupsChangedPayload, InstanceLink, InstanceSyncedOptions, JavaVersion, ModLoader, OnboardingChecklist, ProcessMetadata, ProjectType, Settings }} from './engine'\n\
+             // Regenerate: WRITE_TS=1 node scripts/dev-runner.ts test amberite-app\n\n\
+             import type {{ ApiError, CoreSession, Endpoint, ModLoader, SharedIconConfig, UserFriend, UserStatus }} from './contracts'\n\
+             import type {{ CachedSharedInstanceSummary, CommandPayload, DesyncServerMode, EngineEvent, FriendPayload, ImportLauncherType, InstallJobSnapshot, InstanceGroupsChangedPayload, InstanceLink, InstanceSyncedOptions, JavaVersion, OnboardingChecklist, ProcessMetadata, ProjectType, Settings }} from './engine'\n\
              {declarations}\n\
              export const health = {{\n\
              \tcheckHealth: {},\n\
@@ -469,16 +469,6 @@ mod tests {
 
     #[test]
     fn ts_is_up_to_date() {
-        let written = std::fs::read_to_string(PATH).unwrap_or_default();
-        assert!(
-            written.replace("\r\n", "\n") == file(),
-            "{PATH} is out of date. Run: cargo test -p amberite-app -- --ignored write_ts"
-        );
-    }
-
-    #[test]
-    #[ignore = "writes the generated file; run on purpose"]
-    fn write_ts() {
-        std::fs::write(PATH, file()).unwrap();
+        contracts::ts::check(PATH, &file());
     }
 }

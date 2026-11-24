@@ -22,7 +22,7 @@ use contracts::{
 };
 use engine::{
     Engine,
-    access::{Edit, InstanceAccess},
+    access::InstanceAccess,
     data::ResolveContentPlan,
     endpoints::{content::*, files::*, install::*, sharing::*},
     instance::SharedInstancePublishPreview,
@@ -33,13 +33,12 @@ use uuid::Uuid;
 
 use super::{CoreState, Shared, backups::zip_response, internal, world};
 use crate::{
-    access::{Caller, Permission, activity, owed::OwedCall},
+    access::{Caller, activity, owed::OwedCall},
     servers::{Hold, ServerError, server_rows},
 };
 
 #[derive(Clone, Copy)]
 struct Hook {
-    level: Permission,
     /// Refused while the server runs or installs (`Servers::hold`).
     hold: bool,
     /// Back the world up before the change.
@@ -54,20 +53,15 @@ struct Hook {
 }
 
 const EDIT: Hook = Hook {
-    level: Permission::Edit,
     hold: true,
     backup: false,
     forget_players: false,
     job: false,
     icon: false,
 };
-const OWNER: Hook = Hook {
-    level: Permission::Owner,
-    ..EDIT
-};
 const SHARE: Hook = Hook {
     hold: false,
-    ..OWNER
+    ..EDIT
 };
 const JOB: Hook = Hook { job: true, ..EDIT };
 const BACKUP_JOB: Hook = Hook {
@@ -110,7 +104,7 @@ pub fn routes() -> Router<Shared> {
         route::<UnlinkSharedInstance, _, _, _>(change(
             Hook {
                 forget_players: true,
-                ..OWNER
+                ..EDIT
             },
             unlink_shared_instance,
         )),
@@ -179,10 +173,7 @@ pub fn long_routes() -> Router<Shared> {
             update_modpack_version,
         )),
         route::<RestoreSharedInstanceVersion, _, _, _>(change(
-            Hook {
-                level: Permission::Owner,
-                ..BACKUP_JOB
-            },
+            BACKUP_JOB,
             restore_shared_instance_version,
         )),
         route::<ReadInstanceFile, _, _, _>(read_instance_file),
@@ -220,7 +211,7 @@ pub fn upload_routes() -> Router<Shared> {
 async fn extract_zip(
     State(state): State<Arc<CoreState>>,
     engine: State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<ExtractInstanceZip>,
 ) -> Result<Json<Option<ExtractDryRunResult>>, ApiError> {
     let (caller, id) = (instance.caller.clone(), instance.id.clone());
@@ -244,7 +235,7 @@ async fn export_mrpack(
     Path((id, wid)): Path<(String, String)>,
 ) -> Result<Response, ApiError> {
     world(&id, &wid)?;
-    state.access.require(&caller, &id, Permission::Edit).await?;
+    state.access.require(&caller, &id).await?;
     let server = server_rows::get(&state.db, &id)
         .await
         .map_err(internal)?
@@ -286,7 +277,7 @@ async fn export_mrpack(
 /// is the Core.
 async fn publish_preview(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     _: Req<GetSharedInstancePublishPreview>,
 ) -> Result<Json<Option<SharedInstancePublishPreview>>, ApiError> {
     engine::instance::get_shared_instance_publish_preview(&engine, &instance.id)
@@ -299,7 +290,7 @@ async fn publish_preview(
 /// server stays held until it is and a failed download reaches the caller.
 async fn install_with_dependencies(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<InstallProjectWithDependencies>,
 ) -> Result<Json<ResolveContentPlan>, ApiError> {
     let plan = engine::instance::resolve_project_with_dependencies(
@@ -358,7 +349,7 @@ where
         .find_map(|(name, value)| (name == "id").then(|| value.to_owned()))
         .expect("an instance route has an {id} segment");
     let state = Arc::clone(&shared.0);
-    state.access.require(&caller, &id, hook.level).await?;
+    state.access.require(&caller, &id).await?;
     let hold = hook.hold.then(|| state.servers.hold(&id)).transpose()?;
     if hook.backup {
         state.backups.pre_update(&id).await?;

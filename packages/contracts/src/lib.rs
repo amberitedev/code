@@ -1,6 +1,6 @@
 //! The protocol between the App, Cores, their stores and the backend. A shape is written once here
 //! and generated to TypeScript in `ts/contracts.ts`, which `cargo test -p contracts` keeps fresh.
-//! Regenerate it with `cargo test -p contracts -- --ignored write_ts`.
+//! Regenerate it with `WRITE_TS=1 node scripts/dev-runner.ts test contracts`.
 
 use std::marker::PhantomData;
 
@@ -13,6 +13,7 @@ pub mod client;
 pub mod core;
 pub mod error;
 mod hash;
+mod instance;
 pub mod limits;
 pub mod rules;
 #[cfg(feature = "server")]
@@ -25,6 +26,7 @@ pub mod ts;
 
 pub use error::{ApiError, ErrorCode};
 pub use hash::Hash;
+pub use instance::{ModLoader, ReleaseChannel};
 pub use side::Side;
 
 /// Bumped only when old and new sides can no longer talk to each other. Releases do not touch it.

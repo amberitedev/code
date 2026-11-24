@@ -1,9 +1,9 @@
 // Generated from packages/engine by ts-rs. Do not edit.
-// Regenerate: cargo test -p engine -- --ignored write_ts
+// Regenerate: WRITE_TS=1 node scripts/dev-runner.ts test engine
 
-import type { Endpoint, RemovedFile, SharedIconConfig, UserIds } from './contracts'
+import type { Endpoint, ModLoader, ReleaseChannel, RemovedFile, SharedIconConfig, UserIds } from './contracts'
 
-export type EngineEvent = { "type": "loading", "payload": LoadingPayload } | { "type": "process", "payload": ProcessPayload } | { "type": "instance", "payload": InstancePayload } | { "type": "install_job", "payload": InstallJobSnapshot } | { "type": "warning", "payload": WarningPayload } | { "type": "log", "payload": LogPayload } | { "type": "ads_consent_required", "payload": boolean };
+export type EngineEvent = { "type": "loading", "payload": LoadingPayload } | { "type": "process", "payload": ProcessPayload } | { "type": "instance", "payload": InstancePayload } | { "type": "install_job", "payload": InstallJobSnapshot } | { "type": "warning", "payload": WarningPayload } | { "type": "log", "payload": LogPayload };
 
 export type LoadingPayload = { event: LoadingBarType, loader_uuid: string, fraction: number | null, message: string, };
 
@@ -45,8 +45,6 @@ export type InstallErrorContext = { operation: string, source_path?: string, tar
 
 export type ImportLauncherType = "MultiMC" | "PrismLauncher" | "ATLauncher" | "GDLauncher" | "Curseforge" | "Unknown";
 
-export type ModLoader = "vanilla" | "forge" | "fabric" | "quilt" | "neoforge" | "paper";
-
 export type WarningPayload = { message: string, };
 
 export type LogPayload = { instance_id: string, } & ({ "type": "log4j" } & Log4jEvent | { "type": "legacy", message: string, });
@@ -72,8 +70,6 @@ export type ContentSetSyncStatus = "unknown" | "up_to_date" | "update_available"
 export type InstanceSyncedOptions = { game_options: boolean, command_history: boolean, multiplayer_servers: boolean, creative_hotbars: boolean, screenshots: boolean, resource_packs: boolean, data_packs: boolean, };
 
 export type InstanceTabVisibility = { files: boolean, worlds: boolean, screenshots: boolean, };
-
-export type ReleaseChannel = "release" | "beta" | "alpha";
 
 export type MemorySettings = { maximum: number, };
 

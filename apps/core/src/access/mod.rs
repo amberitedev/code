@@ -28,8 +28,8 @@ use axum::{
     http::{HeaderMap, header::AUTHORIZATION, request::Parts},
 };
 use contracts::{ApiError, ErrorCode, core::TICKET_HEADER};
+pub use engine::access::Caller;
 use engine::access::{Access, BoxFuture};
-pub use engine::access::{Caller, Permission};
 use sqlx::SqlitePool;
 use tokio::sync::{Notify, broadcast};
 
@@ -168,15 +168,14 @@ pub fn require_owner(caller: &Caller) -> Result<(), ApiError> {
 
 impl CoreAccess {
     /// Everything for the owner. Anyone else gets the same 404 as for a server that does not
-    /// exist. Routes still name the level they need, so per-server access can come back.
+    /// exist.
     pub async fn require(
         &self,
         caller: &Caller,
         server_id: &str,
-        _: Permission,
-    ) -> Result<Permission, ApiError> {
+    ) -> Result<(), ApiError> {
         if caller.is_owner() {
-            Ok(Permission::Owner)
+            Ok(())
         } else {
             Err(ApiError::new(
                 ErrorCode::NotFound,
@@ -218,14 +217,11 @@ impl Access for CoreAccess {
         &'a self,
         caller: &'a Caller,
         instance: Option<&'a str>,
-        permission: Permission,
-    ) -> BoxFuture<'a, Result<Permission, ApiError>> {
+    ) -> BoxFuture<'a, Result<(), ApiError>> {
         Box::pin(async move {
             match instance {
-                Some(server_id) => {
-                    Self::require(self, caller, server_id, permission).await
-                }
-                None => require_owner(caller).map(|()| Permission::Owner),
+                Some(server_id) => Self::require(self, caller, server_id).await,
+                None => require_owner(caller),
             }
         })
     }

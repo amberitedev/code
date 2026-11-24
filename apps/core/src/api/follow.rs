@@ -19,7 +19,7 @@ use engine::{
 
 use super::{CoreState, engine_mount, internal};
 use crate::{
-    access::{Caller, Permission, activity},
+    access::{Caller, activity},
     servers::{Hold, Lifecycle, ServerError},
 };
 
@@ -29,7 +29,7 @@ pub async fn follow(
     Req { params, body, .. }: Req<FollowInstance>,
 ) -> Result<Empty, ApiError> {
     let id = params.id;
-    state.access.require(&caller, &id, Permission::Edit).await?;
+    state.access.require(&caller, &id).await?;
     // Read now, so a version that cannot go fails the request.
     let data = engine::instance::followed_shared_instance_version(
         &state.engine,
