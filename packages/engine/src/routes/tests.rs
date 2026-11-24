@@ -1091,7 +1091,7 @@ async fn the_apps_files_tab_leaves_managed_content_to_the_content_tab() {
     for path in ["resourcepacks%2Fpack.zip", "mods%2Fa.jar"] {
         let (status, _) =
             send_raw(&router, "PUT", &write(path), b"x".to_vec()).await;
-        assert!(!status.is_success(), "{path} was written");
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{path} was written");
     }
     for (method, uri, body) in [
         (
@@ -1117,7 +1117,7 @@ async fn the_apps_files_tab_leaves_managed_content_to_the_content_tab() {
         ),
     ] {
         let (status, _) = send(&router, method, &uri, body).await;
-        assert!(!status.is_success(), "{method} {uri}");
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{method} {uri}");
     }
 
     let mut archive = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
@@ -1134,7 +1134,28 @@ async fn the_apps_files_tab_leaves_managed_content_to_the_content_tab() {
         Some(json!({ "path": "drop.zip", "target": "", "override_conflicts": true, "dry_run": false })),
     )
     .await;
-    assert!(!status.is_success());
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // An upload's files are placed as a write would be.
+    let uploads = "/instances/local%3Aa/uploads";
+    let (_, upload) =
+        send(&router, "POST", uploads, Some(json!({ "scope": "files" }))).await;
+    let upload = upload["upload_id"].as_str().unwrap().to_owned();
+    send_raw(
+        &router,
+        "POST",
+        &format!("{uploads}/{upload}/files?path=mods%2Fc.jar"),
+        b"jar".to_vec(),
+    )
+    .await;
+    let (status, _) = send(
+        &router,
+        "POST",
+        &format!("{uploads}/{upload}/finalize"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 
     assert_eq!(
         std::fs::read_to_string(root.join("resourcepacks/pack.zip")).unwrap(),
@@ -1142,7 +1163,9 @@ async fn the_apps_files_tab_leaves_managed_content_to_the_content_tab() {
     );
     assert!(root.join("mods").is_dir());
     assert!(
-        !root.join("mods/a.jar").exists() && !root.join("mods/b.jar").exists()
+        ["a.jar", "b.jar", "c.jar"]
+            .iter()
+            .all(|jar| !root.join("mods").join(jar).exists())
     );
     assert!(root.join("config/a.txt").exists());
 }

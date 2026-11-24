@@ -12,9 +12,7 @@ use contracts::{ApiError, ErrorCode};
 use futures::StreamExt;
 use tokio::io::AsyncWriteExt;
 
-use super::sandboxed::{
-    changing, inner_path, internal, locked, place, refuse_owned, staging,
-};
+use super::sandboxed::{inner_path, internal, place, staging};
 use crate::{
     Engine,
     access::Caller,
@@ -259,7 +257,7 @@ pub(super) async fn add_file(
             })?;
     // Checked now, so a bad name fails before it is stored.
     let file_name = match scope {
-        UploadScope::Files => inner_path(name)?,
+        UploadScope::Files => inner_path(engine.side, name)?,
         UploadScope::Content => sandbox::clean(name).map_err(|error| {
             ApiError::new(ErrorCode::InvalidInput, error.to_string())
         })?,
@@ -297,8 +295,8 @@ pub(super) async fn add_file(
     committed
 }
 
-/// Put every staged file in place. Files go where their names say, never over a server-owned
-/// file; content goes through the instance's content.
+/// Put every staged file in place. Files go where their names say, unless their side refuses one
+/// ([`place`]); content goes through the instance's content.
 pub(super) async fn finalize(
     engine: &Engine,
     caller: &Caller,
@@ -317,23 +315,13 @@ pub(super) async fn finalize(
     let result = async {
         match scope {
             UploadScope::Files => {
-                let files = files
+                let placed = files
                     .iter()
                     .map(|(name, staged)| {
-                        Ok((inner_path(name)?, staged.clone()))
+                        Ok((inner_path(engine.side, name)?, staged.clone()))
                     })
                     .collect::<Result<Vec<_>, ApiError>>()?;
-                let (folder, lock) = changing(engine, instance_id).await?;
-                locked(lock, move || {
-                    for (path, _) in &files {
-                        refuse_owned(&folder, path)?;
-                    }
-                    for (path, staged) in &files {
-                        place(&folder, path, staged)?;
-                    }
-                    Ok(())
-                })
-                .await
+                place(engine, instance_id, placed).await
             }
             UploadScope::Content => {
                 for (_, staged) in &files {
