@@ -23,7 +23,7 @@ export type ModLoader = "vanilla" | "forge" | "fabric" | "quilt" | "neoforge" | 
 
 export type ReleaseChannel = "release" | "beta" | "alpha";
 
-export type TicketKind = "session" | "store" | "fetch" | "pull" | "read";
+export type TicketKind = "session" | "store" | "fetch" | "pull";
 
 export type SessionTicket = { iss: string, kind: TicketKind, 
 /**
@@ -64,20 +64,6 @@ export type PullTicket = { iss: string, kind: TicketKind, aud: Audience,
  * The version's hash.
  */
 root: string, source: PullSource, iat: number, exp: number, jti: string, };
-
-export type ReadTicket = { iss: string, kind: TicketKind, 
-/**
- * The user id.
- */
-sub: string, 
-/**
- * The Core it is for.
- */
-aud: string, 
-/**
- * The share id.
- */
-share: string, iat: number, exp: number, jti: string, };
 
 export type Audience = string | Array<string>;
 
@@ -158,8 +144,13 @@ export const MAX_COMPRESSION_RATIO = 100
 export const DISK_MARGIN_BYTES = 268435456
 
 /**
- * The most a version's object list in a store may weigh: 4,096 objects take well under a
- * megabyte.
+ * The most files one share version may hold. The backend enforces it.
+ */
+export const MAX_VERSION_FILES = 4096
+
+/**
+ * The most a version's object list in a store may weigh: [`MAX_VERSION_FILES`] objects take
+ * well under a megabyte.
  */
 export const MAX_VERSION_LIST_BYTES = 4194304
 
@@ -174,12 +165,17 @@ export const SERVER_SHARE_FOLDER = "config"
 export const SHAREABLE_CONFIG_EXTENSIONS: readonly string[] = ["json","json5","jsonc","yml","yaml","css","toml","txt","ini","cfg","conf","properties","xml","nbt"]
 
 /**
+ * The folders a modpack file members do not get may be named in, by path.
+ */
+export const REMOVED_FILE_FOLDERS: readonly string[] = ["mods","plugins","datapacks","shaderpacks","resourcepacks"]
+
+/**
+ * The endings of a modpack file members do not get, named by path: an addon archive, on or
+ * turned off.
+ */
+export const REMOVED_FILE_SUFFIXES: readonly string[] = [".jar",".zip",".jar.disabled",".zip.disabled"]
+
+/**
  * The `iss` of every ticket the backend signs.
  */
 export const TICKET_ISSUER = "amberite"
-
-/**
- * The header a Core reading a share's versions for a user sends the read ticket that user's
- * App got for it in. Never the query, which request logs keep.
- */
-export const READ_TICKET_HEADER = "x-amberite-read-ticket"

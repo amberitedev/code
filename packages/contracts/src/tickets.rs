@@ -7,9 +7,6 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 crate::consts! {
     /// The `iss` of every ticket the backend signs.
     TICKET_ISSUER: &str = "amberite";
-    /// The header a Core reading a share's versions for a user sends the read ticket that user's
-    /// App got for it in. Never the query, which request logs keep.
-    READ_TICKET_HEADER: &str = "x-amberite-read-ticket";
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -20,7 +17,6 @@ pub enum TicketKind {
     Store,
     Fetch,
     Pull,
-    Read,
 }
 
 /// The claims of one kind of ticket, so a verifier can require the kind before it reads the rest.
@@ -93,24 +89,6 @@ pub struct PullTicket {
     pub jti: String,
 }
 
-/// The App lets one Core read one share for its user, so a server can follow it. The backend
-/// checks this kind itself.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
-pub struct ReadTicket {
-    pub iss: String,
-    pub kind: TicketKind,
-    /// The user id.
-    pub sub: String,
-    /// The Core it is for.
-    pub aud: String,
-    /// The share id.
-    pub share: String,
-    pub iat: i64,
-    pub exp: i64,
-    pub jti: String,
-}
-
 /// The Core a ticket is for, or the Cores it may be used at.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
@@ -157,10 +135,6 @@ impl Ticket for PullTicket {
     const KIND: TicketKind = TicketKind::Pull;
 }
 
-impl Ticket for ReadTicket {
-    const KIND: TicketKind = TicketKind::Read;
-}
-
 /// The backend's ticket keys as a JWK set. A key stays listed for a day after it is replaced.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
@@ -193,7 +167,6 @@ pub(crate) fn ts_types() -> Vec<String> {
         StoreTicket::decl(&cfg),
         FetchTicket::decl(&cfg),
         PullTicket::decl(&cfg),
-        ReadTicket::decl(&cfg),
         Audience::decl(&cfg),
         PullSource::decl(&cfg),
         StoreHost::decl(&cfg),

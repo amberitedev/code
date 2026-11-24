@@ -384,7 +384,7 @@ fn remote<'a>(state: &Pairing<'a>, key: Option<&'a str>) -> Remote<'a> {
         http: state.http,
         base: state.backend_url,
         bearer: key,
-        read_ticket: None,
+        ticket: None,
         timeout: None,
     }
 }

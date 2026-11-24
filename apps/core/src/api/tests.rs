@@ -1596,23 +1596,32 @@ async fn a_lagged_subscriber_gets_resync_and_the_servers_state_again() {
     assert_eq!(next(&mut socket).await.unwrap()["type"], "power");
 }
 
-/// A backend that answers the latest version of a share, `version`, to the read ticket `ticket`.
+/// A backend whose Core's owner reads share `share` alone: its latest version is `version`, read
+/// with the Core's key on the Core's own route.
 async fn share_versions(version: Arc<std::sync::atomic::AtomicI32>) -> String {
-    use axum::{extract::State, http::HeaderMap, routing::get};
+    use axum::{
+        extract::{Path, State},
+        http::HeaderMap,
+        routing::get,
+    };
     use contracts::backend::sharing::{
         InstanceVersion, VersionContent, VersionManifest,
     };
 
     let app = Router::new()
         .route(
-            "/v1/instances/{id}/versions",
+            "/core/shares/{id}/versions",
             get(
                 |State(version): State<Arc<std::sync::atomic::AtomicI32>>,
+                 Path(id): Path<String>,
                  headers: HeaderMap| async move {
                     if headers
-                        .get(contracts::tickets::READ_TICKET_HEADER)
-                        .is_none_or(|ticket| ticket != "ticket")
+                        .get("authorization")
+                        .is_none_or(|bearer| bearer != "Bearer amc_key")
                     {
+                        return Err(StatusCode::UNAUTHORIZED);
+                    }
+                    if id != "share" {
                         return Err(StatusCode::FORBIDDEN);
                     }
                     Ok(axum::Json(InstanceVersion {
@@ -1645,11 +1654,12 @@ async fn share_versions(version: Arc<std::sync::atomic::AtomicI32>) -> String {
     url
 }
 
-fn follow_instance(ticket: &str) -> Value {
+/// The App's body, which still sends a ticket the Core ignores.
+fn follow_instance(share: &str) -> Value {
     json!({
         "instance": { "id": "app-instance", "name": "Our pack" },
-        "shared_instance_id": "share",
-        "ticket": ticket,
+        "shared_instance_id": share,
+        "ticket": "ignored",
         "restart": false,
     })
 }
@@ -1670,14 +1680,14 @@ async fn a_stopped_server_follows_an_instance_at_once() {
             Some(follow_instance("another")),
         )
         .await;
-    assert!(!status.is_success(), "the share is read for who asked only");
+    assert!(!status.is_success(), "only a share the owner reads");
     let (status, error) = core
         .call(
             Method::POST,
             &follow,
             Some(&owner),
             None,
-            Some(follow_instance("ticket")),
+            Some(follow_instance("share")),
         )
         .await;
     assert!(status.is_success(), "{error}");
@@ -1733,7 +1743,7 @@ async fn a_running_server_takes_the_newest_pushed_version_once_it_stops() {
             &follow,
             Some(&owner),
             None,
-            Some(follow_instance("ticket")),
+            Some(follow_instance("share")),
         )
         .await;
     assert!(status.is_success(), "{error}");
@@ -1757,7 +1767,7 @@ async fn a_running_server_takes_the_newest_pushed_version_once_it_stops() {
         &follow,
         Some(&owner),
         None,
-        Some(follow_instance("ticket")),
+        Some(follow_instance("share")),
     )
     .await;
     assert_eq!(pending().await, 3);

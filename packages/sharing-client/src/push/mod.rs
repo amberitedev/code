@@ -26,12 +26,15 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use contracts::backend::cores::{
+    CreateServerShareVersion, GetLatestShareVersion, GetShareVersion,
+};
 use contracts::backend::sharing::{
     CreateVersion, ExternalFile, GetLatestVersion, GetVersion, InstanceVersion,
     InstanceVersionId, NewInstanceVersion, SharedInstanceId, VersionContent,
     VersionManifest,
 };
-use contracts::client::{CallError, Remote, call};
+use contracts::client::{CallError, Remote};
 use contracts::limits::MAX_SHARE_BYTES;
 use contracts::{Empty, ErrorCode, Hash, Json};
 use futures::future::BoxFuture;
@@ -40,7 +43,7 @@ use futures::{StreamExt, TryStreamExt};
 use crate::crypto;
 use crate::pool::{StoreClient, StoreError};
 use crate::rules::ShareScope;
-use crate::shares::Unavailable;
+use crate::shares::{Caller, Unavailable, call_as};
 use crate::versions::configs;
 
 /// Files hashed or encrypted at once.
@@ -151,12 +154,14 @@ struct Object {
 }
 
 /// Pushes a new version of the share `share_id` holding `files`, plus the configs of the latest
-/// version that `kept` keeps, and returns it once members can install it.
+/// version that `kept` keeps, and returns it once members can install it. `caller` is who
+/// `backend`'s token is.
 /// `server_core` is a Core of the owner running a server of this share, which the backend makes
 /// its home. Encrypted files wait in a folder of their own under `scratch` until the Core has
 /// them.
 #[allow(clippy::too_many_arguments)]
 pub async fn push(
+    caller: Caller,
     backend: &Remote<'_>,
     store: &StoreClient,
     share_id: &str,
@@ -167,7 +172,7 @@ pub async fn push(
     scratch: &Path,
     on_event: &mut (dyn FnMut(PushEvent<'_>) + Send),
 ) -> Result<Pushed, PushError> {
-    let previous = previous_versions(backend, share_id).await?;
+    let previous = previous_versions(caller, backend, share_id).await?;
     let files = with_kept_configs(&previous, files, kept, on_event).await?;
     let hashed = hash::hash_files(&files).await?;
     on_event(PushEvent::Hashed(&hashed));
@@ -183,6 +188,7 @@ pub async fn push(
 
     let folder = scratch.join(hex::encode(rand::random::<[u8; 16]>()));
     let result = push_hashed(
+        caller,
         backend,
         store,
         share_id,
@@ -217,6 +223,7 @@ pub async fn push(
 
 #[allow(clippy::too_many_arguments)]
 async fn push_hashed(
+    caller: Caller,
     backend: &Remote<'_>,
     store: &StoreClient,
     share_id: &str,
@@ -273,7 +280,8 @@ async fn push_hashed(
     let share = SharedInstanceId {
         id: share_id.to_owned(),
     };
-    let created = call::<CreateVersion>(
+    let created = call_as::<CreateVersion, CreateServerShareVersion>(
+        caller,
         backend,
         &share,
         &(),
@@ -315,7 +323,7 @@ async fn push_hashed(
 
     for _ in 0..CONFIRM_ATTEMPTS {
         tokio::time::sleep(CONFIRM_INTERVAL).await;
-        match version(backend, share_id, created.version).await {
+        match version(caller, backend, share_id, created.version).await {
             Ok(version) if version.ready => {
                 on_event(PushEvent::Confirmed);
                 return Ok((created.version, external_files));
@@ -351,6 +359,7 @@ fn refusal(error: CallError) -> PushError {
 
 /// Version `number` of the share.
 async fn version(
+    caller: Caller,
     backend: &Remote<'_>,
     share_id: &str,
     number: i32,
@@ -359,13 +368,15 @@ async fn version(
         id: share_id.to_owned(),
         version: number,
     };
-    call::<GetVersion>(backend, &id, &Default::default(), Empty).await
+    call_as::<GetVersion, GetShareVersion>(caller, backend, &id, &(), Empty)
+        .await
 }
 
 /// The versions a push builds on: the latest one, then the version a crashed push left
 /// unconfirmed one past it, if there is one. A share without a version (404) is a new share; a
 /// token that no longer reaches it (401) fails the push.
 async fn previous_versions(
+    caller: Caller,
     backend: &Remote<'_>,
     share_id: &str,
 ) -> Result<Vec<InstanceVersion>, PushError> {
@@ -382,14 +393,21 @@ async fn previous_versions(
     let share = SharedInstanceId {
         id: share_id.to_owned(),
     };
-    let latest =
-        call::<GetLatestVersion>(backend, &share, &Default::default(), Empty)
-            .await;
+    let latest = call_as::<GetLatestVersion, GetLatestShareVersion>(
+        caller,
+        backend,
+        &share,
+        &(),
+        Empty,
+    )
+    .await;
     let Some(latest) = unless_missing(latest)? else {
         return Ok(Vec::new());
     };
     let pending = if latest.ready {
-        unless_missing(version(backend, share_id, latest.version + 1).await)?
+        unless_missing(
+            version(caller, backend, share_id, latest.version + 1).await,
+        )?
     } else {
         None
     };

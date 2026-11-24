@@ -201,7 +201,7 @@ impl<P: Persist> Keys<P> {
             http: &self.http,
             base,
             bearer: None,
-            read_ticket: None,
+            ticket: None,
             timeout: Some(Duration::from_secs(20)),
         };
         let keys = call::<cores::Keys>(&remote, &(), &(), Empty)

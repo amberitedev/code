@@ -113,7 +113,7 @@ async fn open_session(
         http: &http,
         base: backend_url,
         bearer: None,
-        read_ticket: None,
+        ticket: None,
         // Startup waits on this, so a backend that is reloading must not hold the App on its splash.
         timeout: Some(std::time::Duration::from_secs(10)),
     };

@@ -849,8 +849,10 @@ pub(super) async fn publish_current_content(
             .instances_dir()
             .join(&metadata.instance.path),
     );
+    let backend = push_backend(&state.sessions)?;
     let result = push::push(
-        &push_backend(&state.sessions)?.remote(),
+        backend.caller,
+        &backend.remote(),
         &pool::STORE,
         shared_instance_id,
         &content,

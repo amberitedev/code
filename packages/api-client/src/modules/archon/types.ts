@@ -613,8 +613,8 @@ export namespace Archon {
 						content_variant: 'instance'
 						instance: { id: string; name: string }
 						shared_instance_id: string
-						/** From the backend's `sharing.IssueReadTicket` for this server's Core. */
-						ticket: string
+						/** Ignored: the Core reads the share as its owner. */
+						ticket?: string
 						properties?: PropertiesFields | null
 						restart?: boolean
 				  }

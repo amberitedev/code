@@ -240,10 +240,9 @@ export type InstanceFollow = { instance: FollowedInstance,
  */
 shared_instance_id: string, 
 /**
- * From the backend's `sharing.IssueReadTicket` for this Core: the Core reads the share for
- * the user who asked, and only while they can.
+ * Ignored: the Core reads the share as its owner. Goes with `core-hosting/content.ts`.
  */
-ticket: string, 
+ticket?: string, 
 /**
  * Stop a running server to apply the version now, and start it again after.
  */

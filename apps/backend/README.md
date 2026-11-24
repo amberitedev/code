@@ -68,6 +68,10 @@ with `POST /core/state` on start and when something changes, never on a timer, a
 changes nothing writes nothing. Only the owner is told where a Core is. A Core removed from its
 account gets `410 core_removed` from every one of its calls and un-pairs.
 
+A Core reaches shares on its own routes, `/core/shares`, acting for its owner: it writes the shares
+of its servers that follow no instance, and reads any share its owner can read, so a server can
+follow one. The owner's access is checked on every read.
+
 The App removes a Core by telling the Core first, with a ticket, and then calling
 `DELETE /cores/:id`. A Core that was off learns from the 410 at its next start.
 

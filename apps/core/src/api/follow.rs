@@ -1,5 +1,5 @@
 //! A server following an App instance through the instance's share, as one more member: the
-//! engine reads the share's latest version for the user who asked, with their read ticket, and
+//! engine reads the share's latest version as the Core's owner, who must read the share, and
 //! applies it as a member's update. A running server keeps running; the version waits for it to
 //! stop, or with `restart` the server is stopped for it and started again after.
 
@@ -35,7 +35,6 @@ pub async fn follow(
         &state.engine,
         &id,
         &body.shared_instance_id,
-        &body.ticket,
     )
     .await
     .map_err(api_error)?;

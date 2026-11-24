@@ -1,7 +1,6 @@
-import { tokenFrom } from '../common/auth'
 import { serve } from '../common/router'
 import type { Env } from '../common/types'
-import { coreKeyRoutes, readTicketRoutes } from './core'
+import { coreKeyRoutes } from './core'
 import { memberRoutes, publicInviteRoutes } from './invites'
 import { moderationRoutes } from './moderation'
 import { playerRoutes } from './servers'
@@ -21,22 +20,11 @@ const accountRoutes = [
 	...shareRoutes,
 	...memberRoutes,
 	...versionRoutes,
-	...readTicketRoutes,
 	...moderationRoutes,
 	...playerRoutes,
 ]
 
-/**
- * The shared instance routes. A Core key reaches only its own (`coreKeyRoutes`), dispatched before
- * any account check.
- */
+/** The shared instance routes, and a Core key's own (`coreKeyRoutes`) under `/core/shares`. */
 export async function handleSharing(request: Request, env: Env): Promise<Response | null> {
-	return (
-		(await serve(publicRoutes, request, env)) ??
-		(await serve(
-			tokenFrom(request).startsWith('amc_') ? coreKeyRoutes : accountRoutes,
-			request,
-			env,
-		))
-	)
+	return serve([...publicRoutes, ...accountRoutes, ...coreKeyRoutes], request, env)
 }
