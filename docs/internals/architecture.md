@@ -93,7 +93,8 @@ data is reset rather than converted. The sqlx regeneration commands are in the c
 
 An `Endpoint` ([`contracts/src/lib.rs`](../../packages/contracts/src/lib.rs)) is a unit struct per
 method and path with its `Params`, `Query`, `Body` and `Response`. ts-rs writes the TypeScript, which
-is committed and kept fresh by each crate's tests. All generated files are re-exported by
+is committed and kept fresh by each crate's tests; `WRITE_TS=1 node scripts/dev-runner.ts test <crate>`
+rewrites it. All generated files are re-exported by
 `@amberite/contracts` (`packages/contracts/ts/index.ts`), so an exported name must be unique across
 them.
 
@@ -102,9 +103,11 @@ Endpoints are declared where their types are:
 - Backend, Core-native and store Endpoints are in `packages/contracts`, generated to
   `ts/contracts.ts`.
 - Engine Endpoints are in [`packages/engine/src/endpoints`](../../packages/engine/src/endpoints/mod.rs),
-  generated to `ts/engine.ts`. The engine's wire types are upstream's (`Instance`, `ModLoader`,
+  generated to `ts/engine.ts`. The engine's wire types are upstream's (`Instance`,
   `InstallJobSnapshot`), and contracts sits below the engine, so contracts cannot name them. Moving
-  them would rewrite upstream files on every sync.
+  them would rewrite upstream files on every sync. The exception is an enum a Core's own types name
+  too: `ModLoader` and `ReleaseChannel` live in contracts, and the engine re-exports them where
+  upstream declares them.
 - App Endpoints are in [`apps/app/src/local_api/endpoints`](../../apps/app/src/local_api/endpoints/mod.rs),
   generated to `ts/app.ts`.
 
@@ -121,8 +124,8 @@ message. The engine's codes keep the exact strings its helpers already switch on
 `PROTOCOL_VERSION` is one integer, bumped only when old and new sides can no longer talk. Releases
 do not touch it. Cores run on other people's machines and can be older or newer than the App, so
 a Core reports it in `/health` and `client.core(id)` compares it before the first call
-([`core-session.ts`](../../packages/api-client/src/features/core-session.ts)). A Core that reports
-none speaks version 1. The backend always runs the latest, so it needs no check.
+([`core-session.ts`](../../packages/api-client/src/features/core-session.ts)). The backend always
+runs the latest, so it needs no check.
 
 ### Who calls whom
 
@@ -185,14 +188,15 @@ to the fingerprint learned at pairing. The fingerprint check exists once, in
 
 ## Access is the host's decision
 
-The engine asks its host who the caller is and what they may do through `Access`
-([`access.rs`](../../packages/engine/src/access.rs)). Each engine handler declares its level with
-the `InstanceAccess<View | Edit | Owner>` extractor. The App's `AppAccess` allows its one local
-user everything. A Core answers its owner only: `CoreAccess`
+The engine asks its host who the caller is and whether they may use an instance, or the whole
+engine, through `Access` ([`access.rs`](../../packages/engine/src/access.rs)); a handler takes the
+`InstanceAccess` or `EngineAccess` extractor. There are no access levels: the App's `AppAccess`
+allows its one local user everything, and a Core answers its owner only. `CoreAccess`
 ([`access/mod.rs`](../../apps/core/src/access/mod.rs)) maps the session to an account, and only
-the owner can sign in. Anyone else gets 404 on a server and 403 on the Core's own routes. The
-levels stay on the handlers so per-server access can come back without touching the engine.
-Nothing in a request can change which `Access` runs. Sessions, tickets and revalidation are Core
+the owner can sign in. Anyone else gets 404 on a server and 403 on the Core's own routes. Per-server
+roles would bring levels back; until then they are code nobody can reach. The owner's dangerous
+actions still need a fresh ticket (`Dangerous`). Nothing in a request can change which `Access`
+runs. Sessions, tickets and revalidation are Core
 concepts and stay on `CoreAccess`.
 
 A Core does not mount `engine::routes()`. It mounts the routes
@@ -211,9 +215,8 @@ Each host serves one `/events` socket that carries the engine's events and its o
 - The App's socket ([`local_api/events.rs`](../../apps/app/src/local_api/events.rs)) forwards every event
   to every client. One local user sees everything, so there is no subscribe protocol.
 - The Core's socket ([`api/events.rs`](../../apps/core/src/api/events.rs)) takes subscriptions to
-  topics. It checks `CoreAccess` at subscribe time, and again when the caller's access changes,
-  when the socket falls behind, and on a timer. It ends a topic the caller lost and closes the
-  socket when the session ends.
+  topics. Only the owner opens one, and the owner sees every topic. It checks the session again when
+  it changes, when the socket falls behind, and on a timer, and closes the socket once it ended.
 - A socket that falls behind sends `Resync` and carries on. The UI refetches its queries, so a lost
   install completion or process exit is never silent.
 - `Event::FilesChanged` stays in-process. The socket loops drop it.

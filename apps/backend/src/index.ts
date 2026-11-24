@@ -31,7 +31,7 @@ async function serveLabrinth(request: Request, env: Env): Promise<Response | nul
 	if (response || !path.startsWith('/auth/')) return response
 	throw new ApiError(
 		501,
-		'unsupported_operation',
+		'unsupported',
 		'This authentication method has not been configured on this backend',
 	)
 }

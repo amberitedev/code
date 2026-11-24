@@ -32,7 +32,7 @@ use uuid::Uuid;
 
 use super::{CoreState, internal, world};
 use crate::{
-    access::{Caller, Dangerous, Permission, activity},
+    access::{Caller, Dangerous, activity},
     backups::{
         self, SLOTS,
         records::{self, Kind, OpKind, OpState, State as BackupRowState},
@@ -129,7 +129,7 @@ pub async fn list(
     Req { params, .. }: Req<ListBackups>,
 ) -> Result<Json<ServerBackups>, ApiError> {
     let id = params.id;
-    state.access.require(&caller, &id, Permission::View).await?;
+    state.access.require(&caller, &id).await?;
     let schedule = records::schedule(&state.db, &id).await.map_err(internal)?;
     let next = state.backups.next_scheduled(&id).await?;
     let operations = records::operations(&state.db, &id)
@@ -215,7 +215,7 @@ pub async fn change_schedule(
     Req { params, body, .. }: Req<ChangeBackupSchedule>,
 ) -> Result<Json<ScheduleChange>, ApiError> {
     let id = params.id;
-    state.access.require(&caller, &id, Permission::Edit).await?;
+    state.access.require(&caller, &id).await?;
     let current = records::schedule(&state.db, &id).await.map_err(internal)?;
     let interval_hours = body.interval_hours.unwrap_or(current.interval_hours);
     if !(1..=24 * 31).contains(&interval_hours) {
@@ -281,7 +281,7 @@ pub async fn create(
     Req { params, body, .. }: Req<CreateBackup>,
 ) -> Result<Json<CreatedBackup>, ApiError> {
     let id = params.id;
-    state.access.require(&caller, &id, Permission::Edit).await?;
+    state.access.require(&caller, &id).await?;
     let name = backup_name(&body.name)?;
     let (backup, _) = state
         .backups
@@ -305,7 +305,7 @@ pub async fn rename(
     Req { params, body, .. }: Req<RenameBackup>,
 ) -> Result<Empty, ApiError> {
     let (id, backup) = (params.id, params.backup_id);
-    state.access.require(&caller, &id, Permission::Edit).await?;
+    state.access.require(&caller, &id).await?;
     let name = backup_name(&body.name)?;
     if !records::rename(&state.db, &id, &backup, name)
         .await
@@ -397,7 +397,7 @@ pub async fn retry(
     Req { params, .. }: Req<RetryBackup>,
 ) -> Result<StatusCode, ApiError> {
     let (id, backup) = (params.id, params.backup_id);
-    state.access.require(&caller, &id, Permission::Edit).await?;
+    state.access.require(&caller, &id).await?;
     state.backups.retry(&id, &backup, caller.user_id()).await?;
     Ok(StatusCode::ACCEPTED)
 }
@@ -427,7 +427,7 @@ async fn operation(
     operation: i64,
     cancel: bool,
 ) -> Result<Empty, ApiError> {
-    state.access.require(caller, id, Permission::Edit).await?;
+    state.access.require(caller, id).await?;
     let found = records::operation(&state.db, operation)
         .await
         .map_err(internal)?
@@ -534,7 +534,7 @@ pub async fn download_backup(
     Path((id, wid, backup)): Path<(String, String, String)>,
 ) -> Result<Response, ApiError> {
     world(&id, &wid)?;
-    state.access.require(&caller, &id, Permission::Edit).await?;
+    state.access.require(&caller, &id).await?;
     let found = records::backup(&state.db, &id, &backup)
         .await
         .map_err(internal)?
@@ -567,7 +567,7 @@ pub async fn download_world(
     Path((id, wid)): Path<(String, String)>,
 ) -> Result<Response, ApiError> {
     world(&id, &wid)?;
-    state.access.require(&caller, &id, Permission::Edit).await?;
+    state.access.require(&caller, &id).await?;
     let server = server_rows::get(&state.db, &id)
         .await
         .map_err(internal)?

@@ -7,7 +7,7 @@ use modrinth_content_management::ResolveContentPlan;
 use super::{api_error, files::inside_instance};
 use crate::{
     Engine,
-    access::{Edit, EngineAccess, InstanceAccess, Owner, View},
+    access::{EngineAccess, InstanceAccess},
     endpoints::content::{
         AddProjectFromVersion, CheckProjectInstalled, GetLinkedModpack,
         InstallModpack, InstallProjectWithDependencies, ListContentItems,
@@ -33,7 +33,7 @@ type Answer<T> = Result<Json<T>, ApiError>;
 
 pub async fn list_instance_projects(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<View>,
+    instance: InstanceAccess,
     request: Req<ListInstanceProjects>,
 ) -> Answer<HashMap<String, ContentFile>> {
     instance::get_projects(&engine, &instance.id, request.query.cache_behaviour)
@@ -44,7 +44,7 @@ pub async fn list_instance_projects(
 
 pub async fn list_installed_project_ids(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<View>,
+    instance: InstanceAccess,
     _: Req<ListInstalledProjectIds>,
 ) -> Answer<Vec<String>> {
     instance::get_installed_project_ids(&engine, &instance.id)
@@ -56,7 +56,7 @@ pub async fn list_installed_project_ids(
 /// `false` when the instance's content cannot be read.
 pub async fn check_project_installed(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<View>,
+    instance: InstanceAccess,
     request: Req<CheckProjectInstalled>,
 ) -> Answer<bool> {
     let project_id = &request.query.project_id;
@@ -75,7 +75,7 @@ pub async fn check_project_installed(
 
 pub async fn list_install_candidates(
     State(engine): State<Arc<Engine>>,
-    _: EngineAccess<Owner>,
+    _: EngineAccess,
     request: Req<ListInstallCandidates>,
 ) -> Answer<Vec<InstanceInstallCandidate>> {
     let query = request.body;
@@ -92,7 +92,7 @@ pub async fn list_install_candidates(
 
 pub async fn list_content_items(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<View>,
+    instance: InstanceAccess,
     request: Req<ListContentItems>,
 ) -> Answer<Vec<ContentItem>> {
     instance::get_content_items(
@@ -123,7 +123,7 @@ fn without_host_paths(
 
 pub async fn refresh_content_updates(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     _: Req<RefreshContentUpdates>,
 ) -> Result<Empty, ApiError> {
     instance::refresh_content_updates(&engine, &instance.id)
@@ -134,7 +134,7 @@ pub async fn refresh_content_updates(
 
 pub async fn sync_content_files(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     _: Req<SyncContentFiles>,
 ) -> Result<Empty, ApiError> {
     instance::sync_content_files(&engine, &instance.id)
@@ -145,7 +145,7 @@ pub async fn sync_content_files(
 
 pub async fn list_dependency_content_items(
     State(engine): State<Arc<Engine>>,
-    _: EngineAccess<Owner>,
+    _: EngineAccess,
     request: Req<ListDependencyContentItems>,
 ) -> Answer<Vec<ContentItem>> {
     let query = request.body;
@@ -161,7 +161,7 @@ pub async fn list_dependency_content_items(
 
 pub async fn get_linked_modpack(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<View>,
+    instance: InstanceAccess,
     request: Req<GetLinkedModpack>,
 ) -> Answer<Option<LinkedModpackInfo>> {
     instance::get_linked_modpack_info(
@@ -176,7 +176,7 @@ pub async fn get_linked_modpack(
 
 pub async fn list_linked_modpack_content(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<View>,
+    instance: InstanceAccess,
     request: Req<ListLinkedModpackContent>,
 ) -> Answer<Vec<ContentItem>> {
     instance::get_linked_modpack_content(
@@ -191,7 +191,7 @@ pub async fn list_linked_modpack_content(
 
 pub async fn add_project_from_version(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<AddProjectFromVersion>,
 ) -> Answer<String> {
     let project = request.body;
@@ -209,7 +209,7 @@ pub async fn add_project_from_version(
 
 pub async fn install_project_with_dependencies(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<InstallProjectWithDependencies>,
 ) -> Answer<ResolveContentPlan> {
     instance::install_project_with_dependencies(
@@ -224,7 +224,7 @@ pub async fn install_project_with_dependencies(
 
 pub async fn update_project(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<UpdateProject>,
 ) -> Answer<String> {
     let path = inside_instance(&request.body.project_path)?;
@@ -236,7 +236,7 @@ pub async fn update_project(
 
 pub async fn switch_project_version(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<SwitchProjectVersion>,
 ) -> Answer<String> {
     let switch = request.body;
@@ -253,7 +253,7 @@ pub async fn switch_project_version(
 
 pub async fn toggle_project(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<ToggleProject>,
 ) -> Answer<String> {
     let toggle = request.body;
@@ -270,7 +270,7 @@ pub async fn toggle_project(
 
 pub async fn set_project_locked(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<SetProjectLocked>,
 ) -> Result<Empty, ApiError> {
     let lock = request.body;
@@ -287,7 +287,7 @@ pub async fn set_project_locked(
 
 pub async fn remove_project(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<RemoveProject>,
 ) -> Result<Empty, ApiError> {
     let path = inside_instance(&request.body.project_path)?;
@@ -299,7 +299,7 @@ pub async fn remove_project(
 
 pub async fn install_modpack(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<InstallModpack>,
 ) -> Answer<InstallJobSnapshot> {
     instance::install_modrinth_modpack(
@@ -315,7 +315,7 @@ pub async fn install_modpack(
 
 pub async fn update_modpack_version(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<UpdateModpackVersion>,
 ) -> Answer<InstallJobSnapshot> {
     instance::update_managed_modrinth_version(
@@ -330,7 +330,7 @@ pub async fn update_modpack_version(
 
 pub async fn unlink_modpack(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     _: Req<UnlinkModpack>,
 ) -> Result<Empty, ApiError> {
     instance::edit(
@@ -348,7 +348,7 @@ pub async fn unlink_modpack(
 
 pub async fn repair_modpack(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     _: Req<RepairModpack>,
 ) -> Answer<InstallJobSnapshot> {
     instance::repair_managed_modrinth(&engine, &instance.id)
@@ -359,7 +359,7 @@ pub async fn repair_modpack(
 
 pub async fn list_pack_export_candidates(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<ListPackExportCandidates>,
 ) -> Answer<Vec<PackExportCandidate>> {
     instance::get_pack_export_candidates_for_parent(
@@ -374,7 +374,7 @@ pub async fn list_pack_export_candidates(
 
 pub async fn set_side(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<SetSide>,
 ) -> Result<Empty, ApiError> {
     let change = request.body;
@@ -392,7 +392,7 @@ pub async fn set_side(
 
 pub async fn set_sides_unlocked(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<SetSidesUnlocked>,
 ) -> Result<Empty, ApiError> {
     let change = request.body;
@@ -409,7 +409,7 @@ pub async fn set_sides_unlocked(
 
 pub async fn complete_side_review(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     _: Req<CompleteSideReview>,
 ) -> Result<Empty, ApiError> {
     instance::complete_side_review(&engine, &instance.id)
@@ -420,7 +420,7 @@ pub async fn complete_side_review(
 
 pub async fn repair_content(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     _: Req<RepairContent>,
 ) -> Result<Empty, ApiError> {
     instance::repair_content(&engine, &instance.id)
@@ -431,7 +431,7 @@ pub async fn repair_content(
 
 pub async fn edited_files(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<View>,
+    instance: InstanceAccess,
     _: Req<EditedFiles>,
 ) -> Answer<Vec<EditedFile>> {
     instance::edited_files(&engine, &instance.id)
@@ -442,7 +442,7 @@ pub async fn edited_files(
 
 pub async fn decide_edited(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<DecideEdited>,
 ) -> Result<Empty, ApiError> {
     let decision = request.body;
@@ -459,7 +459,7 @@ pub async fn decide_edited(
 
 pub async fn place_client_only(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<PlaceClientOnly>,
 ) -> Result<Empty, ApiError> {
     instance::place_client_only(

@@ -26,16 +26,10 @@ pub const TICKET_HEADER: &str = "x-amberite-ticket";
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct Health {
-    /// The `PROTOCOL_VERSION` the Core speaks. One that reports none speaks version 1.
-    #[serde(default = "first_protocol")]
-    #[cfg_attr(feature = "ts", ts(as = "Option<u32>", optional))]
+    /// The `PROTOCOL_VERSION` the Core speaks.
     pub protocol: u32,
     pub version: String,
     pub core_id: String,
-}
-
-fn first_protocol() -> u32 {
-    1
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

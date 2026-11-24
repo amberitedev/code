@@ -14,7 +14,7 @@ use contracts::{
 
 use super::{CoreState, internal};
 use crate::{
-    access::{Caller, Permission, require_owner},
+    access::{Caller, require_owner},
     network::{
         diagnosis::{Case, Mark},
         forward::{self, Report},
@@ -85,7 +85,7 @@ pub async fn get(
     request: Req<GetInsight>,
 ) -> Result<Json<ServerInsight>, ApiError> {
     let id = request.params.id;
-    state.access.require(&caller, &id, Permission::View).await?;
+    state.access.require(&caller, &id).await?;
     Ok(Json(insight(&state, &id).await?))
 }
 
@@ -95,7 +95,7 @@ pub async fn check(
     request: Req<CheckReachability>,
 ) -> Result<Json<ServerInsight>, ApiError> {
     let id = request.params.id;
-    state.access.require(&caller, &id, Permission::Edit).await?;
+    state.access.require(&caller, &id).await?;
     if state.servers.phase(&id).is_none() {
         return Err(ServerError::NotRunning.into());
     }

@@ -333,69 +333,7 @@ pub struct CachedFileUpdate {
     pub update_version_id: String,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
-pub enum ReleaseChannel {
-    Release,
-    Beta,
-    Alpha,
-}
-
-impl ReleaseChannel {
-    pub fn key(self) -> &'static str {
-        match self {
-            Self::Release => "release",
-            Self::Beta => "beta",
-            Self::Alpha => "alpha",
-        }
-    }
-
-    pub fn from_key(key: &str) -> Self {
-        match key {
-            "alpha" => Self::Alpha,
-            "all" => Self::Alpha,
-            "beta" => Self::Beta,
-            _ => Self::Release,
-        }
-    }
-
-    pub fn from_version_type(version_type: &str) -> Self {
-        match version_type {
-            "alpha" => Self::Alpha,
-            "beta" => Self::Beta,
-            _ => Self::Release,
-        }
-    }
-
-    pub fn least_stable(self, other: Self) -> Self {
-        if self.instability_rank() >= other.instability_rank() {
-            self
-        } else {
-            other
-        }
-    }
-
-    fn instability_rank(self) -> u8 {
-        match self {
-            Self::Release => 0,
-            Self::Beta => 1,
-            Self::Alpha => 2,
-        }
-    }
-
-    pub fn version_type_fallbacks(self) -> Vec<Vec<&'static str>> {
-        match self {
-            Self::Release => {
-                vec![vec!["release"], vec!["beta"], vec!["alpha"]]
-            }
-            Self::Beta => {
-                vec![vec!["release", "beta"], vec!["alpha"]]
-            }
-            Self::Alpha => vec![vec!["release", "beta", "alpha"]],
-        }
-    }
-}
+pub use contracts::ReleaseChannel;
 
 fn default_file_update_channel_policy() -> String {
     ReleaseChannel::Alpha.key().to_string()

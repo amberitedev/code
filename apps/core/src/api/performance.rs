@@ -13,7 +13,7 @@ use contracts::{
 
 use super::{CoreState, internal};
 use crate::{
-    access::{Caller, Permission, activity},
+    access::{Caller, activity},
     servers::{ServerError, memory, restarts, server_rows},
 };
 
@@ -47,7 +47,7 @@ pub async fn get(
     request: Req<GetPerformance>,
 ) -> Result<Json<Performance>, ApiError> {
     let id = request.params.id;
-    state.access.require(&caller, &id, Permission::View).await?;
+    state.access.require(&caller, &id).await?;
     Ok(Json(performance(&state, &id).await?))
 }
 
@@ -61,7 +61,7 @@ pub async fn set_memory(
     }: Req<SetMemory>,
 ) -> Result<Json<Performance>, ApiError> {
     let id = params.id;
-    state.access.require(&caller, &id, Permission::Edit).await?;
+    state.access.require(&caller, &id).await?;
     // The owner passes `require` for any id, so a missing server is found here, before a write.
     performance(&state, &id).await?;
     if request.memory_mb < MIN_MEMORY_MB {
@@ -90,7 +90,7 @@ pub async fn set_flags(
     }: Req<SetFlags>,
 ) -> Result<Json<Performance>, ApiError> {
     let id = params.id;
-    state.access.require(&caller, &id, Permission::Edit).await?;
+    state.access.require(&caller, &id).await?;
     if let Some(flags) = &request.flags
         && (flags.len() > MAX_FLAGS
             || flags
@@ -122,7 +122,7 @@ pub async fn set_restarts(
     }: Req<SetRestarts>,
 ) -> Result<Json<Performance>, ApiError> {
     let id = params.id;
-    state.access.require(&caller, &id, Permission::Edit).await?;
+    state.access.require(&caller, &id).await?;
     performance(&state, &id).await?;
     if request.smart_after_hours == Some(0) {
         return Err(ApiError::new(

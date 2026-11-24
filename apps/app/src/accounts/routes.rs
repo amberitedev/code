@@ -135,7 +135,7 @@ async fn microsoft_code(address: impl Fn() -> Option<Url>) -> Answer<String> {
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    Err(sign_in_cancelled())
+    Err(login_canceled())
 }
 
 async fn list_minecraft_accounts(
@@ -219,13 +219,13 @@ async fn sign_in_to_modrinth(
     Ok(Json(credentials))
 }
 
-/// Waits for the sealed session; the cancel route ends the wait with `sign_in_cancelled`.
+/// Waits for the sealed session; the cancel route ends the wait with `login_canceled`.
 async fn modrinth_session(
     mut reply: AuthReplySession,
     seal: &AuthSeal,
 ) -> Answer<String> {
     let Some(sealed) = reply.wait().await.map_err(api_error)? else {
-        return Err(sign_in_cancelled());
+        return Err(login_canceled());
     };
     seal.open(&sealed).map_err(api_error)
 }
@@ -286,8 +286,8 @@ async fn remove_modrinth_account(
         .map_err(api_error)
 }
 
-fn sign_in_cancelled() -> ApiError {
-    ApiError::new(ErrorCode::SignInCancelled, "Sign-in was cancelled")
+fn login_canceled() -> ApiError {
+    ApiError::new(ErrorCode::LoginCanceled, "Sign-in was canceled")
 }
 
 fn auth_request_url(
@@ -322,7 +322,7 @@ mod tests {
     async fn closing_the_microsoft_window_cancels_and_its_redirect_gives_the_code()
      {
         let closed = microsoft_code(|| None).await.unwrap_err();
-        assert_eq!(closed.error, ErrorCode::SignInCancelled);
+        assert_eq!(closed.error, ErrorCode::LoginCanceled);
 
         let redirect = Url::parse(
             "https://login.live.com/oauth20_desktop.srf?code=M.code&lc=1033",
@@ -333,7 +333,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cancelling_a_modrinth_sign_in_answers_sign_in_cancelled() {
+    async fn cancelling_a_modrinth_sign_in_answers_login_canceled() {
         let seal = AuthSeal::generate();
         let mut reply = AuthReplySession::start(seal.nonce().to_string());
         reply.socket_addr().await.unwrap();
@@ -343,6 +343,6 @@ mod tests {
         cancel_pending_auth();
 
         let cancelled = waiting.await.unwrap().unwrap_err();
-        assert_eq!(cancelled.error, ErrorCode::SignInCancelled);
+        assert_eq!(cancelled.error, ErrorCode::LoginCanceled);
     }
 }

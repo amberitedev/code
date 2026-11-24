@@ -12,7 +12,7 @@ use contracts::{
 
 use super::{CoreState, internal};
 use crate::{
-    access::{Caller, Permission, activity},
+    access::{Caller, activity},
     servers::{ServerError, platform, server_rows},
 };
 
@@ -69,10 +69,7 @@ pub async fn set_java_version(
     State(state): State<Arc<CoreState>>,
     Req { params, body, .. }: Req<SetJavaVersion>,
 ) -> Result<Empty, ApiError> {
-    state
-        .access
-        .require(&caller, &params.id, Permission::Edit)
-        .await?;
+    state.access.require(&caller, &params.id).await?;
     set_major(&state, &caller, &params.id, body.major).await?;
     Ok(Empty)
 }
@@ -84,7 +81,7 @@ pub async fn set_java_path(
     Req { params, body, .. }: Req<SetJava>,
 ) -> Result<Empty, ApiError> {
     let id = params.id;
-    state.access.require(&caller, &id, Permission::Edit).await?;
+    state.access.require(&caller, &id).await?;
     let server = server_rows::get(&state.db, &id)
         .await
         .map_err(internal)?

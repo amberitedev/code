@@ -83,6 +83,21 @@ where
     )
 }
 
+/// Asserts that the generated TypeScript at `path` is `generated`, or writes it when `WRITE_TS`
+/// is set.
+pub fn check(path: &str, generated: &str) {
+    if std::env::var_os("WRITE_TS").is_some() {
+        std::fs::write(path, generated)
+            .expect("the generated file is writable");
+        return;
+    }
+    let written = std::fs::read_to_string(path).unwrap_or_default();
+    assert!(
+        written.replace("\r\n", "\n") == generated,
+        "{path} is out of date. Regenerate it with WRITE_TS=1 node scripts/dev-runner.ts test <crate>"
+    );
+}
+
 fn json(value: &impl Serialize) -> String {
     serde_json::to_string(value).expect("plain values serialize")
 }
@@ -140,7 +155,8 @@ mod tests {
 
     use crate::{
         ApiError, Auth, BodyKind, Empty, Endpoint, ErrorCode, Hash, Json,
-        Method, PROTOCOL_VERSION, backend, core, limits, rules, store, tickets,
+        Method, ModLoader, PROTOCOL_VERSION, ReleaseChannel, backend, core,
+        limits, rules, store, tickets,
     };
 
     const PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/ts/contracts.ts");
@@ -167,6 +183,8 @@ export interface Endpoint<P = unknown, Q = unknown, B = unknown, R = unknown> {
             ApiError::decl(&cfg),
             ErrorCode::decl(&cfg),
             Hash::decl(&cfg),
+            ModLoader::decl(&cfg),
+            ReleaseChannel::decl(&cfg),
         ]
         .into_iter()
         .chain(tickets::ts_types())
@@ -174,7 +192,7 @@ export interface Endpoint<P = unknown, Q = unknown, B = unknown, R = unknown> {
         .collect::<String>();
         format!(
             "// Generated from packages/contracts by ts-rs. Do not edit.\n\
-             // Regenerate: cargo test -p contracts -- --ignored write_ts\n\n\
+             // Regenerate: WRITE_TS=1 node scripts/dev-runner.ts test contracts\n\n\
              export const PROTOCOL_VERSION = {PROTOCOL_VERSION}\n{declarations}{ENDPOINT}{}{}{}{}{}{}{}{}{}{}{}",
             limits::ts(),
             rules::ts(),
@@ -192,17 +210,7 @@ export interface Endpoint<P = unknown, Q = unknown, B = unknown, R = unknown> {
 
     #[test]
     fn ts_is_up_to_date() {
-        let written = std::fs::read_to_string(PATH).unwrap_or_default();
-        assert!(
-            written.replace("\r\n", "\n") == file(),
-            "{PATH} is out of date. Run: cargo test -p contracts -- --ignored write_ts"
-        );
-    }
-
-    #[test]
-    #[ignore = "writes the generated file; run on purpose"]
-    fn write_ts() {
-        std::fs::write(PATH, file()).unwrap();
+        super::check(PATH, &file());
     }
 
     struct ClearCache;

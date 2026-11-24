@@ -6,7 +6,7 @@ use contracts::{ApiError, ErrorCode, Json, server::Req};
 use super::api_error;
 use crate::{
     Engine,
-    access::{Access, Caller, InstanceAccess, Permission, View},
+    access::{Access, Caller, InstanceAccess},
     endpoints::instances::{
         GetInstance, GetInstances, Instance, ListInstances,
     },
@@ -42,7 +42,7 @@ pub async fn get_instances(
 
 pub async fn get_instance(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<View>,
+    instance: InstanceAccess,
     _: Req<GetInstance>,
 ) -> Result<Json<Option<Instance>>, ApiError> {
     let found = crate::instance::get(&engine, &instance.id)
@@ -59,7 +59,7 @@ async fn visible(
     let mut visible = Vec::with_capacity(instances.len());
     for instance in instances {
         if access
-            .require(caller, Some(&instance.instance.id), Permission::View)
+            .require(caller, Some(&instance.instance.id))
             .await
             .is_ok()
         {

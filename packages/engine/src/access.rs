@@ -1,7 +1,7 @@
 //! Who may call an engine route. The engine asks its host through [`Access`]; the App allows its
 //! one local user everything, a Core lets in its owner only.
 
-use std::{marker::PhantomData, sync::Arc};
+use std::sync::Arc;
 
 use axum::{
     extract::{FromRef, FromRequestParts, RawPathParams},
@@ -36,59 +36,27 @@ impl Caller {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Permission {
-    View,
-    Edit,
-    Owner,
-}
-
 pub trait Access: Send + Sync + 'static {
     fn caller<'a>(
         &'a self,
         request: &'a Parts,
     ) -> BoxFuture<'a, Result<Caller, ApiError>>;
 
-    /// Returns the level granted, at least `permission`, so a route can show more to a caller
-    /// with more. `instance` is `None` for a route over the whole engine.
+    /// Whether `caller` may use `instance`, or the whole engine when it is `None`.
     fn require<'a>(
         &'a self,
         caller: &'a Caller,
         instance: Option<&'a str>,
-        permission: Permission,
-    ) -> BoxFuture<'a, Result<Permission, ApiError>>;
+    ) -> BoxFuture<'a, Result<(), ApiError>>;
 }
 
-/// The level a route needs, as a type: [`View`], [`Edit`] or [`Owner`].
-pub trait Level: Send + Sync {
-    const PERMISSION: Permission;
-}
-
-pub struct View;
-pub struct Edit;
-pub struct Owner;
-
-impl Level for View {
-    const PERMISSION: Permission = Permission::View;
-}
-
-impl Level for Edit {
-    const PERMISSION: Permission = Permission::Edit;
-}
-
-impl Level for Owner {
-    const PERMISSION: Permission = Permission::Owner;
-}
-
-/// A caller allowed `P` on the instance in the route's `{id}`.
-pub struct InstanceAccess<P> {
+/// A caller allowed on the instance in the route's `{id}`.
+pub struct InstanceAccess {
     pub id: String,
     pub caller: Caller,
-    pub granted: Permission,
-    _level: PhantomData<P>,
 }
 
-impl<P: Level, S: Send + Sync> FromRequestParts<S> for InstanceAccess<P>
+impl<S: Send + Sync> FromRequestParts<S> for InstanceAccess
 where
     Arc<dyn Access>: FromRef<S>,
 {
@@ -109,23 +77,17 @@ where
             .expect("an instance route has an {id} segment");
         let access = Arc::<dyn Access>::from_ref(state);
         let caller = access.caller(parts).await?;
-        let granted = access.require(&caller, Some(&id), P::PERMISSION).await?;
-        Ok(Self {
-            id,
-            caller,
-            granted,
-            _level: PhantomData,
-        })
+        access.require(&caller, Some(&id)).await?;
+        Ok(Self { id, caller })
     }
 }
 
-/// A caller allowed `P` over the whole engine, such as its groups or its loading bars.
-pub struct EngineAccess<P> {
+/// A caller allowed over the whole engine, such as its groups or its loading bars.
+pub struct EngineAccess {
     pub caller: Caller,
-    _level: PhantomData<P>,
 }
 
-impl<P: Level, S: Send + Sync> FromRequestParts<S> for EngineAccess<P>
+impl<S: Send + Sync> FromRequestParts<S> for EngineAccess
 where
     Arc<dyn Access>: FromRef<S>,
 {
@@ -137,11 +99,8 @@ where
     ) -> Result<Self, ApiError> {
         let access = Arc::<dyn Access>::from_ref(state);
         let caller = access.caller(parts).await?;
-        access.require(&caller, None, P::PERMISSION).await?;
-        Ok(Self {
-            caller,
-            _level: PhantomData,
-        })
+        access.require(&caller, None).await?;
+        Ok(Self { caller })
     }
 }
 

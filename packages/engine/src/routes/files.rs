@@ -14,7 +14,7 @@ pub use self::uploads::Uploads;
 use super::api_error;
 use crate::{
     Engine, ErrorKind,
-    access::{Edit, InstanceAccess, View},
+    access::InstanceAccess,
     endpoints::files::{
         AddInstanceUploadFile, CancelInstanceUpload, CreateInstanceDirectory,
         DeleteInstanceFile, ExtractDryRunResult, ExtractInstanceZip,
@@ -44,7 +44,7 @@ pub(super) fn inside_instance(path: &str) -> Result<&str, ApiError> {
 
 pub async fn list_instance_files(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<ListInstanceFiles>,
 ) -> Result<Json<Vec<InstanceFileItem>>, ApiError> {
     let path = inside_instance(&request.query.path)?;
@@ -59,7 +59,7 @@ pub async fn list_instance_files(
 
 pub async fn read_instance_file(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<ReadInstanceFile>,
 ) -> Result<Raw, ApiError> {
     let path = inside_instance(&request.query.path)?;
@@ -78,7 +78,7 @@ pub async fn read_instance_file(
 
 pub async fn write_instance_file(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<WriteInstanceFile>,
 ) -> Result<Empty, ApiError> {
     if engine.side == Side::Server {
@@ -106,7 +106,7 @@ pub async fn write_instance_file(
 
 pub async fn create_instance_directory(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<CreateInstanceDirectory>,
 ) -> Result<Empty, ApiError> {
     let path = inside_instance(&request.query.path)?;
@@ -123,7 +123,7 @@ pub async fn create_instance_directory(
 
 pub async fn move_instance_file(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<MoveInstanceFile>,
 ) -> Result<Empty, ApiError> {
     if engine.side == Side::Server {
@@ -149,7 +149,7 @@ pub async fn move_instance_file(
 
 pub async fn delete_instance_file(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<DeleteInstanceFile>,
 ) -> Result<Empty, ApiError> {
     if engine.side == Side::Server {
@@ -175,7 +175,7 @@ pub async fn delete_instance_file(
 
 pub async fn extract_instance_zip(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<ExtractInstanceZip>,
 ) -> Result<Json<Option<ExtractDryRunResult>>, ApiError> {
     let body = request.body;
@@ -316,7 +316,7 @@ async fn extract_zip(
 
 pub async fn stat_instance_file(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<StatInstanceFile>,
 ) -> Result<Json<InstanceFileStat>, ApiError> {
     let path = inside_instance(&request.query.path)?;
@@ -325,7 +325,7 @@ pub async fn stat_instance_file(
 
 pub async fn zip_instance_files(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<ZipInstanceFiles>,
 ) -> Result<Empty, ApiError> {
     sandboxed::zip(&engine, &instance.id, request.body)
@@ -335,7 +335,7 @@ pub async fn zip_instance_files(
 
 pub async fn open_instance_upload(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<OpenInstanceUpload>,
 ) -> Json<InstanceUpload> {
     Json(
@@ -351,7 +351,7 @@ pub async fn open_instance_upload(
 
 pub async fn get_instance_upload(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<GetInstanceUpload>,
 ) -> Json<Option<InstanceUpload>> {
     Json(uploads::get(
@@ -364,7 +364,7 @@ pub async fn get_instance_upload(
 
 pub async fn add_instance_upload_file(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<AddInstanceUploadFile>,
 ) -> Result<Json<InstanceUpload>, ApiError> {
     uploads::add_file(
@@ -381,7 +381,7 @@ pub async fn add_instance_upload_file(
 
 pub async fn finalize_instance_upload(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<FinalizeInstanceUpload>,
 ) -> Result<Json<InstanceUpload>, ApiError> {
     uploads::finalize(
@@ -396,7 +396,7 @@ pub async fn finalize_instance_upload(
 
 pub async fn cancel_instance_upload(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<CancelInstanceUpload>,
 ) -> Result<Json<InstanceUpload>, ApiError> {
     uploads::cancel(
@@ -415,7 +415,7 @@ fn no_icon() -> ApiError {
 
 pub async fn get_instance_icon(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<View>,
+    instance: InstanceAccess,
     _: Req<GetInstanceIcon>,
 ) -> Result<Raw, ApiError> {
     let bytes = instance::read_icon(&engine, &instance.id)
@@ -430,7 +430,7 @@ pub async fn get_instance_icon(
 
 pub async fn set_instance_icon(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<SetInstanceIcon>,
 ) -> Result<Empty, ApiError> {
     instance::edit_icon_image(
@@ -446,7 +446,7 @@ pub async fn set_instance_icon(
 
 pub async fn set_edited_instance_icon(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<SetEditedInstanceIcon>,
 ) -> Result<Empty, ApiError> {
     let body = request.body;
@@ -463,7 +463,7 @@ pub async fn set_edited_instance_icon(
 
 pub async fn remove_instance_icon(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     _: Req<RemoveInstanceIcon>,
 ) -> Result<Empty, ApiError> {
     if instance::remove_icon(&engine, &instance.id)

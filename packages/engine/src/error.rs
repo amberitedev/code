@@ -439,3 +439,83 @@ pub fn error_code(error: &Error) -> &'static str {
 }
 
 pub type Result<T> = core::result::Result<T, Error>;
+
+#[cfg(test)]
+mod tests {
+    use contracts::ErrorCode;
+
+    use super::*;
+
+    /// The UI reads these as `contracts::ErrorCode`, where a string it does not know is `Unknown`.
+    #[test]
+    fn every_error_kind_has_a_real_error_code() {
+        let kinds = [
+            ErrorKind::SharedInstanceUnavailable(
+                SharedInstanceUnavailableReason::Deleted,
+            ),
+            ErrorKind::SharedInstanceUnavailable(
+                SharedInstanceUnavailableReason::AccessRevoked,
+            ),
+            ErrorKind::SharedInstanceUnavailable(
+                SharedInstanceUnavailableReason::Quarantined,
+            ),
+            ErrorKind::SharedInstancesApiError,
+            ErrorKind::SharedInstanceFileNotAllowed(String::new()),
+            ErrorKind::PoolNoStorage,
+            ErrorKind::PoolPushInFlight,
+            ErrorKind::PoolTooLarge(String::new()),
+            ErrorKind::PoolDiskFull,
+            ErrorKind::PoolEgressSpent,
+            ErrorKind::PoolPushUnconfirmed,
+            ErrorKind::PoolFilesBroken,
+            ErrorKind::PoolFilesUnavailable,
+            ErrorKind::SharedInstanceOwnerBehind,
+            ErrorKind::SharedInstanceLimitReached,
+            ErrorKind::HashError(String::new(), String::new()),
+            ErrorKind::LoginCanceled,
+            ErrorKind::NotLoggedIn,
+            ErrorKind::NoLoaderVersion {
+                loader: ModLoader::Fabric,
+            },
+            ErrorKind::NoMinecraftProfile,
+            ErrorKind::LauncherError(String::new()),
+            ErrorKind::JREError(JREError::NoExecutable(Default::default())),
+            ErrorKind::NoValueFor(String::new()),
+            ErrorKind::ApiIsDownError(1),
+            ErrorKind::ZipError(ZipError::FileNotFound),
+            ErrorKind::DeserializationError(serde::de::Error::custom("")),
+            ErrorKind::FSError(String::new()),
+            ErrorKind::JSONError(
+                serde_json::from_str::<u8>("").expect_err("not a number"),
+            ),
+            ErrorKind::Sqlx(sqlx::Error::RowNotFound),
+            // Every other kind.
+            ErrorKind::PackSyncChanged,
+        ];
+        let denied =
+            || std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+        let errors = kinds.into_iter().map(Error::new).chain([
+            Error::new(ErrorKind::NotEnoughSpace { required: 1 })
+                .context(ErrorKind::DirectoryMoveFailed),
+            Error::new(denied()).context(ErrorKind::DirectoryMoveFailed),
+            Error::new(ErrorKind::DirectoryMoveFailed),
+            Error::new(denied()),
+            Error::new(LabrinthError {
+                error: String::new(),
+                description: String::new(),
+                details: None,
+                status: None,
+                method: None,
+                url: None,
+                route: None,
+            }),
+            Error::msg("anything else"),
+        ]);
+        for error in errors {
+            let code = error_code(&error);
+            let parsed: ErrorCode =
+                serde_json::from_value(code.into()).expect("a string");
+            assert_ne!(parsed, ErrorCode::Unknown, "{code} ({error:#})");
+        }
+    }
+}
