@@ -19,7 +19,7 @@ use crate::{
         diagnosis::{Case, Mark},
         forward::{self, Report},
     },
-    servers::{ServerError, memory},
+    servers::{ServerError, memory, server_rows},
 };
 
 impl From<Report> for ReachabilityReport {
@@ -111,8 +111,13 @@ pub async fn machine(
     _: Req<GetMachine>,
 ) -> Result<Json<Machine>, ApiError> {
     require_owner(&caller)?;
-    let memory_mb = memory::machine_mb();
-    let assigned_mb = memory::assigned_mb(&state.db).await.map_err(internal)?;
+    let memory_mb = memory::machine_mb().await;
+    let assigned_mb = server_rows::list(&state.db, &state.engine)
+        .await
+        .map_err(internal)?
+        .iter()
+        .map(|server| server.memory_mb)
+        .sum::<i64>();
     let warning = memory_mb
         .filter(|&machine| assigned_mb > machine as i64)
         .map(|machine| {

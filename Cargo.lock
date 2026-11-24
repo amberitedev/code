@@ -8904,6 +8904,7 @@ dependencies = [
 name = "sharing-client"
 version = "0.0.0"
 dependencies = [
+ "base64 0.23.1",
  "bytes",
  "chacha20poly1305",
  "contracts",
@@ -8916,6 +8917,7 @@ dependencies = [
  "path-util",
  "rand 0.10.3",
  "reqwest 0.13.5",
+ "ring",
  "rustls",
  "serde",
  "serde_json",
@@ -8937,7 +8939,6 @@ name = "sharing-storage"
 version = "0.1.0"
 dependencies = [
  "axum",
- "base64 0.23.1",
  "chrono",
  "clap 4.6.7",
  "color-eyre",
@@ -8948,7 +8949,6 @@ dependencies = [
  "hyper-util",
  "rcgen",
  "reqwest 0.13.5",
- "ring",
  "rustls",
  "serde",
  "serde_json",

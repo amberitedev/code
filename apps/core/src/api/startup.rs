@@ -10,6 +10,8 @@ use contracts::{
     server::Req,
 };
 
+use engine::state::InstanceLaunchOverridesPatch;
+
 use super::{CoreState, internal};
 use crate::{
     access::{Caller, activity},
@@ -34,7 +36,7 @@ async fn set_major(
             format!("Core installs Java {MAJORS:?}, not {major}."),
         ));
     }
-    let server = server_rows::get(&state.db, id)
+    server_rows::get(&state.db, &state.engine, id)
         .await
         .map_err(internal)?
         .ok_or_else(|| ServerError::NotFound(id.into()))?;
@@ -52,14 +54,9 @@ async fn set_major(
         None => None,
     };
     let chosen = major.filter(|major| Some(*major) != needed);
-    server_rows::set_java(
-        &state.db,
-        id,
-        server.java_path.as_deref(),
-        chosen.map(i64::from),
-    )
-    .await
-    .map_err(internal)?;
+    server_rows::set_java_version(&state.db, id, chosen.map(i64::from))
+        .await
+        .map_err(internal)?;
     activity::log(&state.db, caller, Some(id), Action::SettingsChanged).await;
     Ok(())
 }
@@ -82,7 +79,7 @@ pub async fn set_java_path(
 ) -> Result<Empty, ApiError> {
     let id = params.id;
     state.access.require(&caller, &id).await?;
-    let server = server_rows::get(&state.db, &id)
+    server_rows::get(&state.db, &state.engine, &id)
         .await
         .map_err(internal)?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
@@ -95,14 +92,15 @@ pub async fn set_java_path(
             ));
         }
     }
-    server_rows::set_java(
-        &state.db,
+    super::performance::edit_launch(
+        &state,
         &id,
-        body.path.as_deref(),
-        server.java_version,
+        InstanceLaunchOverridesPatch {
+            java_path: Some(body.path),
+            ..Default::default()
+        },
     )
-    .await
-    .map_err(internal)?;
+    .await?;
     activity::log(&state.db, &caller, Some(&id), Action::SettingsChanged).await;
     Ok(Empty)
 }

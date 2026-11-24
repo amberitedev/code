@@ -120,12 +120,6 @@ async fn server(
             .await
             .map_err(internal)?
             .flatten();
-    let created_at: i64 =
-        sqlx::query_scalar("SELECT created_at FROM servers WHERE id = ?")
-            .bind(&row.id)
-            .fetch_one(&state.db)
-            .await
-            .map_err(internal)?;
     let eula_accepted = super::eula::accepted_at(&state.db)
         .await
         .map_err(internal)?
@@ -163,7 +157,7 @@ async fn server(
         loader_version: set.loader_version.filter(|_| installed),
         game_version: installed.then_some(set.game_version),
         power,
-        created_at,
+        created_at: row.created_at,
         eula_accepted,
     })
 }
@@ -175,7 +169,10 @@ pub async fn list(
 ) -> Result<Json<Vec<CoreServer>>, ApiError> {
     require_owner(&caller)?;
     let mut servers = Vec::new();
-    for row in server_rows::list(&state.db).await.map_err(internal)? {
+    for row in server_rows::list(&state.db, &state.engine)
+        .await
+        .map_err(internal)?
+    {
         servers.push(server(&state, row).await?);
     }
     Ok(Json(servers))
@@ -188,7 +185,7 @@ pub async fn get(
 ) -> Result<Json<CoreServer>, ApiError> {
     let id = params.id;
     state.access.require(&caller, &id).await?;
-    let row = server_rows::get(&state.db, &id)
+    let row = server_rows::get(&state.db, &state.engine, &id)
         .await
         .map_err(internal)?
         .ok_or(ServerError::NotFound(id))?;
@@ -232,14 +229,21 @@ pub async fn change(
 ) -> Result<Empty, ApiError> {
     let id = params.id;
     state.access.require(&caller, &id).await?;
-    server_rows::get(&state.db, &id)
+    server_rows::get(&state.db, &state.engine, &id)
         .await
         .map_err(internal)?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
     if let Some(name) = &body.name {
-        server_rows::set_name(&state.db, &id, server_name(name)?)
-            .await
-            .map_err(internal)?;
+        engine::instance::edit(
+            &state.engine,
+            &id,
+            engine::state::EditInstance {
+                name: Some(server_name(name)?.to_owned()),
+                ..Default::default()
+            },
+        )
+        .await
+        .map_err(api_error)?;
         activity::log(&state.db, &caller, Some(&id), Action::SettingsChanged)
             .await;
     }
@@ -312,7 +316,7 @@ pub async fn install(
         return Err(ServerError::Installing.into());
     }
     let hold = state.servers.hold(&id)?;
-    server_rows::get(&state.db, &id)
+    server_rows::get(&state.db, &state.engine, &id)
         .await
         .map_err(internal)?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
@@ -468,9 +472,10 @@ pub async fn share(
 
 /// Publish the first version of a share made while the server installed, once it is let go.
 async fn publish_after_install(state: Arc<CoreState>, id: String) {
-    while state.servers.phase(&id) == Some(Phase::Installing) {
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-    }
+    state
+        .servers
+        .until(|servers| servers.phase(&id) != Some(Phase::Installing))
+        .await;
     let published = async {
         let core_id = crate::db::core_id(&state.db).await.map_err(internal)?;
         engine::instance::publish_shared_instance(
@@ -497,7 +502,7 @@ pub async fn delete(
     Req { params, .. }: Req<DeleteServer>,
 ) -> Result<Empty, ApiError> {
     let id = params.id;
-    server_rows::get(&state.db, &id)
+    server_rows::get(&state.db, &state.engine, &id)
         .await
         .map_err(internal)?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
@@ -589,7 +594,7 @@ pub async fn setup(
 ) -> Result<Json<ServerSetup>, ApiError> {
     let id = params.id;
     state.access.require(&caller, &id).await?;
-    let row = server_rows::get(&state.db, &id)
+    let row = server_rows::get(&state.db, &state.engine, &id)
         .await
         .map_err(internal)?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
@@ -606,10 +611,14 @@ pub async fn setup(
                     .await
                     .ok()
                     .map(|command| {
+                        // Shown with the tuned flags, whatever the server's own.
+                        let tuned = server_rows::ServerRow {
+                            jvm_flags: None,
+                            ..row.clone()
+                        };
                         launch::invocation(&launch::args(
                             state.servers.paths(),
-                            &row,
-                            None,
+                            &tuned,
                             command.args,
                         ))
                     }),

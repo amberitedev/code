@@ -40,9 +40,8 @@ use crate::{
 const BACKLOG: usize = 200;
 /// How often an open socket checks that its session has not expired.
 const RECHECK_EVERY: Duration = Duration::from_secs(600);
-/// How often the Core looks for power changes. A server's phase changes in many places, so one
-/// task reads them all instead of each of them announcing it.
-const POWER_EVERY: Duration = Duration::from_millis(500);
+/// How long a power announcement that could not read a server's last run waits to try again.
+const POWER_RETRY: Duration = Duration::from_secs(1);
 /// Console lines a subscriber may fall behind by before it lags.
 const CONSOLE_CAPACITY: usize = 256;
 /// How often a console follower checks whether anyone still reads it.
@@ -440,34 +439,45 @@ impl Consoles {
     }
 }
 
-/// Send a `Power` event whenever a server's phase changes, for every socket subscribed to it.
+/// Send a `Power` event whenever a server's phase changes, for every socket subscribed to it. A
+/// server's phase changes in many places, so this one task follows them all
+/// ([`Servers::changes`](crate::servers::Servers::changes)) instead of each announcing it.
 pub async fn watch_power(state: Arc<CoreState>) {
+    let mut changes = state.servers.changes();
     let mut seen: HashMap<String, Phase> = HashMap::new();
-    let mut tick = tokio::time::interval(POWER_EVERY);
-    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
-        tick.tick().await;
         let phases = state.servers.phases();
+        let mut unread = false;
         if state.backups.events.receiver_count() == 0 {
             seen = phases;
-            continue;
-        }
-        let ended: Vec<String> = seen
-            .keys()
-            .filter(|id| !phases.contains_key(*id))
-            .cloned()
-            .collect();
-        for (id, phase) in phases {
-            if seen.get(&id) != Some(&phase)
-                && announce(&state, &id, Some(phase)).await
-            {
-                seen.insert(id, phase);
+        } else {
+            let ended: Vec<String> = seen
+                .keys()
+                .filter(|id| !phases.contains_key(*id))
+                .cloned()
+                .collect();
+            for (id, phase) in phases {
+                if seen.get(&id) == Some(&phase) {
+                    continue;
+                }
+                if announce(&state, &id, Some(phase)).await {
+                    seen.insert(id, phase);
+                } else {
+                    unread = true;
+                }
+            }
+            for id in ended {
+                if announce(&state, &id, None).await {
+                    seen.remove(&id);
+                } else {
+                    unread = true;
+                }
             }
         }
-        for id in ended {
-            if announce(&state, &id, None).await {
-                seen.remove(&id);
-            }
+        if unread {
+            tokio::time::sleep(POWER_RETRY).await;
+        } else if changes.changed().await.is_err() {
+            return;
         }
     }
 }

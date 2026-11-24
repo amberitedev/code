@@ -1239,7 +1239,8 @@ async fn the_owner_changes_storage_and_the_store_is_forwarded_to() {
 }
 
 #[tokio::test]
-async fn the_owner_sets_the_servers_name_and_update_channel() {
+async fn the_owner_sets_the_servers_name_channel_and_launch_settings_on_its_instance()
+ {
     let core = core().await;
     let server = core.server.clone();
     let owner = core.sign_in("owner").await;
@@ -1277,6 +1278,30 @@ async fn the_owner_sets_the_servers_name_and_update_channel() {
         .await;
     assert_eq!(after["name"], "Survival");
     assert_eq!(channel(&after), "beta", "a rename keeps the channel");
+
+    for (path, body) in [
+        ("memory", json!({ "memory_mb": 3072 })),
+        ("flags", json!({ "flags": ["-XX:+UseZGC"] })),
+    ] {
+        let (status, _) = core
+            .call(
+                Method::PUT,
+                &format!("{detail}/{path}"),
+                Some(&owner),
+                None,
+                Some(body),
+            )
+            .await;
+        assert!(status.is_success(), "{path}");
+    }
+    let instance = engine::instance::get(&core.state.engine, &server)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(instance.instance.name, "Survival");
+    let launch = instance.launch_overrides;
+    assert_eq!(launch.memory.map(|memory| memory.maximum), Some(3072));
+    assert_eq!(launch.extra_launch_args.unwrap(), ["-XX:+UseZGC"]);
 }
 
 #[tokio::test]

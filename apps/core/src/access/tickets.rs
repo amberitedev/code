@@ -9,7 +9,7 @@ use contracts::{
 use serde::Deserialize;
 use sqlx::SqliteConnection;
 
-use sharing_storage::keys::LEEWAY_S;
+use sharing_client::keys::LEEWAY_S;
 
 use super::keys::Keys;
 use crate::api::internal;
@@ -94,7 +94,7 @@ pub async fn spend(
 /// Signing sign-in tickets the way the backend does, for tests.
 #[cfg(test)]
 pub mod test_support {
-    pub use sharing_storage::keys::test_support::Signer;
+    pub use sharing_client::keys::test_support::Signer;
 
     use super::*;
 

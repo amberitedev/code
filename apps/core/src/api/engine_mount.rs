@@ -6,7 +6,7 @@
 //! holds the server, so it is refused while the server runs or installs. Its [`Hook`] says what
 //! else it does.
 
-use std::{io::Cursor, sync::Arc, time::Duration};
+use std::{io::Cursor, sync::Arc};
 
 use axum::{
     extract::{FromRequestParts, Path, RawPathParams, Request, State},
@@ -217,7 +217,7 @@ pub(super) async fn export_mrpack(
 ) -> Result<Response, ApiError> {
     world(&id, &wid)?;
     state.access.require(&caller, &id).await?;
-    let server = server_rows::get(&state.db, &id)
+    let server = server_rows::get(&state.db, &state.engine, &id)
         .await
         .map_err(internal)?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
@@ -451,7 +451,16 @@ async fn wait_for_jobs(state: &CoreState, id: &str) {
         .await
         {
             Ok(jobs) if jobs.is_empty() => break,
-            Ok(_) => tokio::time::sleep(Duration::from_secs(1)).await,
+            Ok(jobs) => {
+                for job in jobs {
+                    // Returns once the job ended, however it ended.
+                    let _ = engine::install::runner::wait_for_job(
+                        job.id,
+                        &state.engine,
+                    )
+                    .await;
+                }
+            }
             Err(error) => {
                 tracing::warn!(server = %id, %error, "could not follow the install");
                 return;

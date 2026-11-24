@@ -1,21 +1,58 @@
 //! Server rows and their run history in the database.
 
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::{
+    collections::HashMap,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+};
 
+use color_eyre::eyre::{Result, eyre};
+use engine::{Engine, state::InstanceMetadata};
 use sqlx::SqlitePool;
 
 use crate::network::firewall::SERVER_PORTS;
 use crate::servers::shim::{EndedBy, ExitStatus};
 
-/// A row of `servers`. What it runs is its engine instance's (see `servers::platform`).
-#[derive(Debug, Clone, sqlx::FromRow)]
+/// A server: its row of `servers`, with the name, creation time and launch settings its engine
+/// instance keeps. What it runs is its engine instance's too (see `servers::platform`).
+#[derive(Debug, Clone)]
 pub struct ServerRow {
     pub id: String,
     pub name: String,
+    /// Unix seconds.
+    pub created_at: i64,
     pub port: i64,
     pub memory_mb: i64,
+    /// The server's own JVM flags, `None` for the tuned ones (`memory::TUNED_FLAGS`).
+    pub jvm_flags: Option<Vec<String>>,
+    /// Advanced override; `None` means the Java Core manages for this version.
     pub java_path: Option<String>,
+    /// The managed Java major the owner chose; `None` means the one the Minecraft version needs.
     pub java_version: Option<i64>,
+}
+
+#[derive(sqlx::FromRow)]
+struct Row {
+    id: String,
+    port: i64,
+    java_version: Option<i64>,
+}
+
+impl ServerRow {
+    fn new(row: Row, instance: InstanceMetadata) -> Self {
+        let launch = instance.launch_overrides;
+        Self {
+            id: row.id,
+            name: instance.instance.name,
+            created_at: instance.instance.created.timestamp(),
+            port: row.port,
+            memory_mb: launch
+                .memory
+                .map_or(DEFAULT_MEMORY_MB, |memory| i64::from(memory.maximum)),
+            jvm_flags: launch.extra_launch_args,
+            java_path: launch.java_path,
+            java_version: row.java_version,
+        }
+    }
 }
 
 /// How a run ended, as `runs.outcome` stores it.
@@ -37,10 +74,10 @@ pub struct Ended {
     pub last_lines: Option<String>,
 }
 
-/// Memory for a new server until the owner picks (step 8).
+/// Memory for a server whose owner has not picked any.
 const DEFAULT_MEMORY_MB: i64 = 2048;
 
-const COLUMNS: &str = "id, name, port, memory_mb, java_path, java_version";
+const COLUMNS: &str = "id, port, java_version";
 
 /// Whether no other program on this machine holds `port`. Minecraft listens on the addresses
 /// [`probed_ips`] gives, TCP for the game and UDP for query and voice mods, so Core tries to bind
@@ -89,31 +126,70 @@ fn probed_ips(local_only: Option<IpAddr>) -> Vec<IpAddr> {
     }
 }
 
-pub async fn list(db: &SqlitePool) -> sqlx::Result<Vec<ServerRow>> {
-    sqlx::query_as(sqlx::AssertSqlSafe(format!(
-        "SELECT {COLUMNS} FROM servers ORDER BY created_at, id"
-    )))
-    .fetch_all(db)
-    .await
+fn engine_error(error: engine::Error) -> color_eyre::Report {
+    eyre!("{error:#}")
 }
 
-pub async fn get(db: &SqlitePool, id: &str) -> sqlx::Result<Option<ServerRow>> {
-    sqlx::query_as(sqlx::AssertSqlSafe(format!(
+/// Every server, oldest first.
+pub async fn list(db: &SqlitePool, engine: &Engine) -> Result<Vec<ServerRow>> {
+    let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "SELECT {COLUMNS} FROM servers"
+    )))
+    .fetch_all(db)
+    .await?;
+    let mut instances: HashMap<String, InstanceMetadata> =
+        engine::instance::list(engine)
+            .await
+            .map_err(engine_error)?
+            .into_iter()
+            .map(|instance| (instance.instance.id.clone(), instance))
+            .collect();
+    let mut servers: Vec<ServerRow> = rows
+        .into_iter()
+        .filter_map(|row| {
+            let instance = instances.remove(&row.id)?;
+            Some(ServerRow::new(row, instance))
+        })
+        .collect();
+    servers.sort_by(|a, b| (a.created_at, &a.id).cmp(&(b.created_at, &b.id)));
+    Ok(servers)
+}
+
+/// The ids of every row, with or without an engine instance.
+pub async fn ids(db: &SqlitePool) -> sqlx::Result<Vec<String>> {
+    sqlx::query_scalar("SELECT id FROM servers")
+        .fetch_all(db)
+        .await
+}
+
+pub async fn get(
+    db: &SqlitePool,
+    engine: &Engine,
+    id: &str,
+) -> Result<Option<ServerRow>> {
+    let row: Option<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {COLUMNS} FROM servers WHERE id = ?"
     )))
     .bind(id)
     .fetch_optional(db)
-    .await
+    .await?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let instance = engine::instance::get(engine, id)
+        .await
+        .map_err(engine_error)?;
+    Ok(instance.map(|instance| ServerRow::new(row, instance)))
 }
 
-/// Create an unconfigured server on the lowest port of the server range that no server has and
-/// `free` accepts ([`port_free`] outside tests). `None` when every port is taken.
+/// Give the server `id`, whose engine instance exists, a row on the lowest port of the server
+/// range that no server has and `free` accepts ([`port_free`] outside tests). Its port, or
+/// `None` when every port is taken.
 pub async fn create(
     db: &SqlitePool,
     id: &str,
-    name: &str,
     free: impl Fn(u16) -> bool,
-) -> sqlx::Result<Option<ServerRow>> {
+) -> sqlx::Result<Option<i64>> {
     // Two creates at once can pick the same port; `port` is UNIQUE, so the later one picks again.
     loop {
         let used: Vec<i64> = sqlx::query_scalar("SELECT port FROM servers")
@@ -126,53 +202,31 @@ pub async fn create(
         else {
             return Ok(None);
         };
-        let inserted = sqlx::query(
-            "INSERT INTO servers (id, name, created_at, port, memory_mb) \
-             VALUES (?, ?, unixepoch(), ?, ?)",
-        )
-        .bind(id)
-        .bind(name)
-        .bind(port)
-        .bind(DEFAULT_MEMORY_MB)
-        .execute(db)
-        .await;
+        let inserted =
+            sqlx::query("INSERT INTO servers (id, port) VALUES (?, ?)")
+                .bind(id)
+                .bind(port)
+                .execute(db)
+                .await;
         match inserted {
             Err(sqlx::Error::Database(error))
                 if error.is_unique_violation() => {}
             inserted => {
                 inserted?;
-                return get(db, id).await;
+                return Ok(Some(port));
             }
         }
     }
 }
 
-/// Set the Java a server runs with: a custom path, or a managed major other than the one its
-/// Minecraft version needs. `None` for both is Core's choice.
-pub async fn set_java(
+/// Choose the managed Java major a server runs, `None` for the one its Minecraft version needs.
+pub async fn set_java_version(
     db: &SqlitePool,
     id: &str,
-    java_path: Option<&str>,
     java_version: Option<i64>,
 ) -> sqlx::Result<()> {
-    sqlx::query(
-        "UPDATE servers SET java_path = ?, java_version = ? WHERE id = ?",
-    )
-    .bind(java_path)
-    .bind(java_version)
-    .bind(id)
-    .execute(db)
-    .await?;
-    Ok(())
-}
-
-pub async fn set_name(
-    db: &SqlitePool,
-    id: &str,
-    name: &str,
-) -> sqlx::Result<()> {
-    sqlx::query("UPDATE servers SET name = ? WHERE id = ?")
-        .bind(name)
+    sqlx::query("UPDATE servers SET java_version = ? WHERE id = ?")
+        .bind(java_version)
         .bind(id)
         .execute(db)
         .await?;
@@ -345,17 +399,11 @@ mod tests {
     #[tokio::test]
     async fn a_run_is_recorded_once_with_its_crash_lines() {
         let db = db::memory().await;
-        let server = create(&db, "a", "A", |_| true).await.unwrap().unwrap();
-        assert_eq!(server.port, i64::from(*SERVER_PORTS.start()));
-        start_run(&db, &server.id, "run", 1).await.unwrap();
-        assert_eq!(
-            open_runs(&db, &server.id, i64::MAX).await.unwrap(),
-            ["run"]
-        );
-        assert_eq!(
-            servers_with_open_runs(&db).await.unwrap(),
-            [server.id.as_str()]
-        );
+        let port = create(&db, "a", |_| true).await.unwrap().unwrap();
+        assert_eq!(port, i64::from(*SERVER_PORTS.start()));
+        start_run(&db, "a", "run", 1).await.unwrap();
+        assert_eq!(open_runs(&db, "a", i64::MAX).await.unwrap(), ["run"]);
+        assert_eq!(servers_with_open_runs(&db).await.unwrap(), ["a"]);
 
         let crashed = Ended {
             at: 2,
@@ -385,14 +433,9 @@ mod tests {
                 Some("Exception in server tick loop".into())
             )
         );
-        assert!(
-            open_runs(&db, &server.id, i64::MAX)
-                .await
-                .unwrap()
-                .is_empty()
-        );
+        assert!(open_runs(&db, "a", i64::MAX).await.unwrap().is_empty());
         assert_eq!(
-            last_outcome(&db, &server.id).await.unwrap(),
+            last_outcome(&db, "a").await.unwrap(),
             Some(Outcome::Crashed)
         );
     }
@@ -400,9 +443,9 @@ mod tests {
     #[tokio::test]
     async fn new_servers_take_the_next_free_port() {
         let db = db::memory().await;
-        let first = create(&db, "a", "A", |_| true).await.unwrap().unwrap();
-        let second = create(&db, "b", "B", |_| true).await.unwrap().unwrap();
-        assert_eq!(second.port, first.port + 1);
+        let first = create(&db, "a", |_| true).await.unwrap().unwrap();
+        let second = create(&db, "b", |_| true).await.unwrap().unwrap();
+        assert_eq!(second, first + 1);
     }
 
     #[tokio::test]
@@ -410,12 +453,12 @@ mod tests {
         let db = db::memory().await;
         let start = *SERVER_PORTS.start();
         let taken = [start, start + 1];
-        let server = create(&db, "a", "A", |port| !taken.contains(&port))
+        let port = create(&db, "a", |port| !taken.contains(&port))
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(server.port, i64::from(start + 2));
-        assert!(create(&db, "b", "B", |_| false).await.unwrap().is_none());
+        assert_eq!(port, i64::from(start + 2));
+        assert!(create(&db, "b", |_| false).await.unwrap().is_none());
     }
 
     #[test]

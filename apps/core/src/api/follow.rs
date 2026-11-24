@@ -3,7 +3,7 @@
 //! applies it as a member's update. A running server keeps running; the version waits for it to
 //! stop, or with `restart` the server is stopped for it and started again after.
 
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
 use axum::extract::State;
 use contracts::{
@@ -20,7 +20,7 @@ use engine::{
 use super::{CoreState, engine_mount, internal};
 use crate::{
     access::{Caller, activity},
-    servers::{Hold, Lifecycle, ServerError},
+    servers::{Hold, Lifecycle, Phase, ServerError},
 };
 
 pub async fn follow(
@@ -126,7 +126,12 @@ async fn apply_pending(state: Arc<CoreState>, id: String) {
         match state.servers.hold(&id) {
             Ok(hold) => break hold,
             Err(ServerError::Installing) => {
-                tokio::time::sleep(Duration::from_secs(1)).await;
+                state
+                    .servers
+                    .until(|servers| {
+                        servers.phase(&id) != Some(Phase::Installing)
+                    })
+                    .await;
             }
             Err(_) => return,
         }
@@ -219,20 +224,15 @@ async fn job_error(state: &CoreState, job_id: &str) -> Option<String> {
         Ok(job_id) => job_id,
         Err(error) => return Some(format!("{error}")),
     };
-    loop {
-        match engine::install::get_job(job_id, &state.engine).await {
-            Ok(job) if job.status == InstallJobStatus::Succeeded => {
-                return None;
-            }
-            Ok(job) if job.status.is_finished() => {
-                return Some(job.error.map_or_else(
-                    || job.status.as_str().to_owned(),
-                    |error| error.message,
-                ));
-            }
-            Ok(_) => tokio::time::sleep(Duration::from_secs(1)).await,
-            Err(error) => return Some(format!("{error:#}")),
-        }
+    // Returns once the job ended, however it ended; the job says how.
+    let _ = engine::install::runner::wait_for_job(job_id, &state.engine).await;
+    match engine::install::get_job(job_id, &state.engine).await {
+        Ok(job) if job.status == InstallJobStatus::Succeeded => None,
+        Ok(job) => Some(job.error.map_or_else(
+            || job.status.as_str().to_owned(),
+            |error| error.message,
+        )),
+        Err(error) => Some(format!("{error:#}")),
     }
 }
 

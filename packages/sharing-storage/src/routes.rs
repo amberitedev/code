@@ -328,8 +328,10 @@ pub mod tests {
     use tower::ServiceExt;
 
     use super::*;
+    use sharing_client::keys::test_support::Signer;
+
     use crate::{
-        keys::{Keys, test_support::Signer},
+        keys,
         local::Caps,
         objects::{GRACE_S, Layout, list_of},
         tar::test_support::tar,
@@ -348,7 +350,7 @@ pub mod tests {
     pub async fn fixture(core: &str, cap: u64, egress_cap: u64) -> Fixture {
         let dir = tempfile::tempdir().unwrap();
         let signer = Signer::new("k1");
-        let keys = Keys::load_file(
+        let keys = keys::load_file(
             dir.path().join("keys.json"),
             crate::http().build().unwrap(),
             None,

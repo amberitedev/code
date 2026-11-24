@@ -138,11 +138,14 @@ jobs:
       - run: cargo test --workspace --exclude toasty --locked --no-fail-fast --features amberite-app/export-ts
       - run: sh -n apps/core/scripts/install.sh
       # A cargo error fails the step, and amberite-app proves the pattern matches tauri.
-      - name: Copal does not depend on Tauri, and the engine on no desktop crate
+      - name: Copal does not depend on Tauri, the engine on no desktop crate, and the store on neither the engine nor Copal
         run: |
           gui=$(cargo tree --locked -e normal -p amberite-app --prefix none -f '{p}')
           copal=$(cargo tree --locked -e normal -p copal --prefix none -f '{p}')
           engine=$(cargo tree --locked -e normal -p engine --prefix none -f '{p}')
+          store=$(cargo tree --locked -e normal -p sharing-storage --prefix none -f '{p}')
           grep -q '^tauri v' <<< "$gui"
+          grep -q '^sharing-client v' <<< "$store"
           if grep '^tauri v' <<< "$copal"; then echo '::error::copal depends on tauri'; exit 1; fi
           if grep -E '^(tauri|discord-rich-presence|async-tungstenite|p256) v' <<< "$engine"; then echo '::error::engine depends on a desktop crate'; exit 1; fi
+          if grep -E '^(engine|copal) v' <<< "$store"; then echo '::error::sharing-storage depends on the engine or copal'; exit 1; fi
