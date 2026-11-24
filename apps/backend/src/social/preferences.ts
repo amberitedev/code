@@ -1,6 +1,5 @@
 import type { PreferencesUpdate, UserPreferences } from '@amberite/contracts'
 
-import { areFriends } from '../common/auth'
 import { invalid, objectBody } from '../common/http'
 import type { Env, UserRow } from '../common/types'
 
@@ -124,19 +123,29 @@ export async function blockedEitherWay(env: Env, first: string, second: string) 
 	)
 }
 
-export async function canInviteToSharedInstance(
+/**
+ * Which of `recipientIds` `senderId` may invite to a shared instance: neither blocks the other,
+ * and each recipient's `shared_instances_privacy` lets the sender in. One read for the whole list.
+ */
+export async function invitableUsers(
 	env: Env,
 	senderId: string,
-	recipientId: string,
-): Promise<boolean> {
-	if (senderId === recipientId || (await blockedEitherWay(env, senderId, recipientId))) return false
-	const user = await env.DB.prepare('SELECT * FROM users WHERE id = ?')
-		.bind(recipientId)
-		.first<UserRow>()
-	if (!user) return false
-	const privacy = preferences(user).social.shared_instances_privacy
-	return (
-		privacy === 'everyone' ||
-		(privacy === 'friends' && (await areFriends(env, senderId, recipientId)))
+	recipientIds: string[],
+): Promise<Set<string>> {
+	if (!recipientIds.length) return new Set()
+	const { results } = await env.DB.prepare(
+		`SELECT u.*, EXISTS (SELECT 1 FROM friends f WHERE f.accepted = 1 AND ((f.user_id = ?1 AND f.friend_id = u.id) OR (f.user_id = u.id AND f.friend_id = ?1))) AS friend
+		FROM users u WHERE u.id IN (SELECT value FROM json_each(?2)) AND u.id != ?1
+		AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.user_id = ?1 AND b.blocked_id = u.id) OR (b.user_id = u.id AND b.blocked_id = ?1))`,
+	)
+		.bind(senderId, JSON.stringify(recipientIds))
+		.all<UserRow & { friend: number }>()
+	return new Set(
+		results
+			.filter((user) => {
+				const privacy = preferences(user).social.shared_instances_privacy
+				return privacy === 'everyone' || (privacy === 'friends' && user.friend === 1)
+			})
+			.map((user) => user.id),
 	)
 }
