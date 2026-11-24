@@ -61,83 +61,10 @@ export const ConfiguringNewServer: Story = {
 	},
 }
 
-export const SuspendedUpgrading: Story = {
-	args: {
-		...baseServer,
-		name: 'Creative Build Team',
-		status: 'suspended',
-		suspension_reason: 'upgrading',
-	},
-}
-
 export const Provisioning: Story = {
 	args: {
 		...baseServer,
 		name: 'My New Server',
 		isProvisioning: true,
-	},
-}
-
-export const SetToCancel: Story = {
-	args: {
-		...baseServer,
-		name: 'Survival SMP',
-		cancellationDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-		onResubscribe: () => alert('Resubscribe clicked'),
-		onDownloadWorld: () => alert('Download world clicked'),
-	},
-}
-
-export const SuspendedCancelled: Story = {
-	args: {
-		...baseServer,
-		name: 'Old Event Server',
-		status: 'suspended',
-		suspension_reason: 'cancelled',
-		cancellationDate: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
-		onResubscribe: () => alert('Resubscribe clicked'),
-		onDownloadWorld: () => alert('Download world clicked'),
-	},
-}
-
-export const SuspendedCancelledAfterResubscribeWindow: Story = {
-	args: {
-		...baseServer,
-		onDownloadWorld: () => alert('Download world clicked'),
-		name: 'Old Event Server',
-		status: 'suspended',
-		suspension_reason: 'cancelled',
-		cancellationDate: new Date(2025, 1, 17).toISOString(),
-		onResubscribe: null,
-	},
-}
-
-export const SuspendedPaymentFailed: Story = {
-	args: {
-		...baseServer,
-		name: 'Minigames Network',
-		status: 'suspended',
-		suspension_reason: 'paymentfailed',
-		cancellationDate: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
-		onDownloadWorld: () => alert('Download world clicked'),
-	},
-}
-
-export const SuspendedModerated: Story = {
-	args: {
-		...baseServer,
-		name: 'Banned Server',
-		status: 'suspended',
-		suspension_reason: 'moderated',
-		onDownloadWorld: () => alert('Download world clicked'),
-	},
-}
-
-export const SuspendedGeneric: Story = {
-	args: {
-		...baseServer,
-		name: 'Server with other suspension reason',
-		status: 'suspended',
-		onDownloadWorld: () => alert('Download world clicked'),
 	},
 }
