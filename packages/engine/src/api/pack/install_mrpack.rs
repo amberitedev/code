@@ -1645,3 +1645,271 @@ mod zip_reader_tests {
         assert_eq!(std::fs::read(&destination).unwrap(), b"previous contents");
     }
 }
+
+/// What a pack install does to a server's folder. Installs and updates both read the pack the
+/// server keeps and run through `repair_content`, which needs no network for these packs: their
+/// downloads are client only or already on disk.
+#[cfg(test)]
+mod server_pack_tests {
+    use std::io::Write;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    use contracts::Side;
+
+    use crate::Engine;
+    use crate::api::instance::{ContentSide, repair_content, set_content_side};
+    use crate::state::instances::adapters::sqlite::content_rows;
+    use crate::state::tests::{add_instance, config};
+
+    const ID: &str = "s";
+
+    struct Server {
+        _tmp: tempfile::TempDir,
+        state: Arc<Engine>,
+        dir: PathBuf,
+    }
+
+    async fn server() -> Server {
+        crate::install_crypto_provider();
+        let tmp = tempfile::tempdir().unwrap();
+        let state = Engine::new(crate::state::EngineConfig {
+            side: Side::Server,
+            ..config(tmp.path().to_path_buf())
+        })
+        .await
+        .unwrap();
+        add_instance(&state, ID, "srv").await;
+        let dir = state.directories.instances_dir().join("srv");
+        std::fs::create_dir_all(&dir).unwrap();
+        Server {
+            _tmp: tmp,
+            state,
+            dir,
+        }
+    }
+
+    /// A jar whose only metadata is `fabric.mod.json` with `environment`.
+    fn fabric_jar(environment: &str) -> Vec<u8> {
+        let mut jar = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        jar.start_file(
+            "fabric.mod.json",
+            zip::write::SimpleFileOptions::default(),
+        )
+        .unwrap();
+        write!(
+            jar,
+            r#"{{"id":"m","version":"1","environment":"{environment}"}}"#
+        )
+        .unwrap();
+        jar.finish().unwrap().into_inner()
+    }
+
+    impl Server {
+        /// Make the pack with index `files` and archive `entries` the one the server follows,
+        /// and install it.
+        async fn install(&self, files: &str, entries: &[(&str, &[u8])]) {
+            let mut writer =
+                zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+            let options = zip::write::SimpleFileOptions::default();
+            writer.start_file("modrinth.index.json", options).unwrap();
+            write!(
+                writer,
+                r#"{{"formatVersion":1,"game":"minecraft","versionId":"1","name":"p","dependencies":{{"minecraft":"1.21.1","fabric-loader":"0.16.0"}},"files":[{files}]}}"#
+            )
+            .unwrap();
+            for (name, bytes) in entries {
+                writer.start_file(*name, options).unwrap();
+                writer.write_all(bytes).unwrap();
+            }
+            let kept = self
+                .state
+                .directories
+                .config_dir
+                .join("packs")
+                .join(format!("{ID}.mrpack"));
+            std::fs::create_dir_all(kept.parent().unwrap()).unwrap();
+            std::fs::write(kept, writer.finish().unwrap().into_inner())
+                .unwrap();
+            repair_content(&self.state, ID).await.unwrap();
+        }
+
+        fn read(&self, path: &str) -> Option<String> {
+            std::fs::read_to_string(self.dir.join(path)).ok()
+        }
+
+        fn write(&self, path: &str, text: &str) {
+            let path = self.dir.join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        }
+
+        /// The paths the engine records, and whether each is a client-only file of the pack.
+        async fn rows(&self) -> Vec<(String, bool)> {
+            let mut rows: Vec<_> =
+                content_rows::get_instance_files(ID, &self.state.pool)
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .map(|file| (file.relative_path, file.missing))
+                    .collect();
+            rows.sort();
+            rows
+        }
+    }
+
+    fn rows(rows: &[(&str, bool)]) -> Vec<(String, bool)> {
+        rows.iter()
+            .map(|(path, missing)| ((*path).to_owned(), *missing))
+            .collect()
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_server_takes_overrides_and_its_own_and_leaves_client_files_out()
+    {
+        let server = server().await;
+        server
+            .install(
+                r#"{"path":"mods/sodium.jar","hashes":{"sha1":"c1"},"env":{"client":"required","server":"unsupported"},"downloads":["https://cdn.modrinth.com/data/P/versions/V/sodium.jar"],"fileSize":1}"#,
+                &[
+                    ("overrides/config/a.toml", b"a"),
+                    ("overrides/config/b.toml", b"everyone"),
+                    ("server-overrides/config/b.toml", b"server"),
+                    ("client-overrides/config/c.toml", b"client"),
+                    ("overrides/mods/both.jar", &fabric_jar("*")),
+                    ("overrides/mods/menu.jar", &fabric_jar("client")),
+                ],
+            )
+            .await;
+
+        assert_eq!(server.read("config/a.toml").as_deref(), Some("a"));
+        assert_eq!(server.read("config/b.toml").as_deref(), Some("server"));
+        assert_eq!(server.read("config/c.toml"), None);
+        assert!(server.dir.join("mods/both.jar").exists());
+        assert!(!server.dir.join("mods/menu.jar").exists());
+        assert!(!server.dir.join("mods/sodium.jar").exists());
+        assert_eq!(
+            server.rows().await,
+            rows(&[
+                ("config/a.toml", false),
+                ("config/b.toml", false),
+                ("mods/both.jar", false),
+                ("mods/menu.jar", true),
+                ("mods/sodium.jar", true),
+            ])
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_pack_never_replaces_what_the_server_owns() {
+        let server = server().await;
+        server.write("server.properties", "motd=mine");
+        server.write("world/level.dat", "mine");
+        server
+            .install(
+                "",
+                &[
+                    ("overrides/server.properties", b"motd=pack"),
+                    ("overrides/world/level.dat", b"pack"),
+                    ("overrides/ops.json", b"[]"),
+                ],
+            )
+            .await;
+
+        assert_eq!(
+            server.read("server.properties").as_deref(),
+            Some("motd=mine")
+        );
+        assert_eq!(server.read("world/level.dat").as_deref(), Some("mine"));
+        assert_eq!(server.read("ops.json").as_deref(), Some("[]"));
+        assert_eq!(server.rows().await, rows(&[]), "they are the server's");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_index_file_already_on_disk_is_recorded_without_a_download() {
+        let server = server().await;
+        server.write("config/big.toml", "already");
+        let sha1 = sha1_smol::Sha1::from(b"already").hexdigest();
+        server
+            .install(
+                &format!(
+                    r#"{{"path":"config/big.toml","hashes":{{"sha1":"{sha1}"}},"downloads":["https://cdn.modrinth.com/data/P/versions/V/big.toml"],"fileSize":7}}"#
+                ),
+                &[],
+            )
+            .await;
+
+        assert_eq!(server.read("config/big.toml").as_deref(), Some("already"));
+        assert_eq!(server.rows().await, rows(&[("config/big.toml", false)]));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_update_replaces_the_packs_files_and_leaves_the_owners() {
+        let server = server().await;
+        server
+            .install(
+                "",
+                &[
+                    ("overrides/config/changed.toml", b"one"),
+                    ("overrides/config/same.toml", b"same"),
+                    ("overrides/config/dropped.toml", b"old"),
+                ],
+            )
+            .await;
+        server.write("config/mine.toml", "mine");
+
+        server
+            .install(
+                "",
+                &[
+                    ("overrides/config/changed.toml", b"two"),
+                    ("overrides/config/same.toml", b"same"),
+                    ("overrides/config/new.toml", b"new"),
+                ],
+            )
+            .await;
+
+        assert_eq!(server.read("config/changed.toml").as_deref(), Some("two"));
+        assert_eq!(server.read("config/same.toml").as_deref(), Some("same"));
+        assert_eq!(server.read("config/new.toml").as_deref(), Some("new"));
+        assert_eq!(server.read("config/dropped.toml"), None);
+        assert_eq!(server.read("config/mine.toml").as_deref(), Some("mine"));
+        assert_eq!(
+            server.rows().await,
+            rows(&[
+                ("config/changed.toml", false),
+                ("config/new.toml", false),
+                ("config/same.toml", false),
+            ])
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_client_only_file_turned_on_for_the_server_stays_on_through_updates()
+     {
+        let server = server().await;
+        let menu = fabric_jar("client");
+        let pack: [(&str, &[u8]); 1] = [("overrides/mods/menu.jar", &menu)];
+        server.install("", &pack).await;
+        assert!(!server.dir.join("mods/menu.jar").exists());
+
+        let set_server_side = |enabled| {
+            set_content_side(
+                &server.state,
+                ID,
+                "mods/menu.jar",
+                ContentSide::Server,
+                enabled,
+            )
+        };
+        set_server_side(true).await.unwrap();
+        assert!(server.dir.join("mods/menu.jar").exists());
+        server.install("", &pack).await;
+        assert!(server.dir.join("mods/menu.jar").exists());
+        assert_eq!(server.rows().await, rows(&[("mods/menu.jar", false)]));
+
+        set_server_side(false).await.unwrap();
+        assert!(!server.dir.join("mods/menu.jar").exists());
+        assert_eq!(server.rows().await, rows(&[("mods/menu.jar", true)]));
+    }
+}
