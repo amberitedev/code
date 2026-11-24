@@ -1480,7 +1480,7 @@ provideContentManager({
 	// A Core keeps side toggles only for a server that follows no instance: the instance's owner
 	// decides them for its servers.
 	get setEnabledFor() {
-		return client.selfHostedHosting && linkedInstanceId.value ? undefined : handleSetEnabledFor
+		return linkedInstanceId.value ? undefined : handleSetEnabledFor
 	},
 	deleteItem: handleDeleteItem,
 	bulkDeleteItems: handleBulkDelete,

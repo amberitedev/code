@@ -5,20 +5,8 @@
 			:layout-mode="isOverviewRoute ? 'fill' : 'page'"
 			:reload-page="() => router.go(0)"
 			:resolve-viewer="resolveViewer"
-			:show-copy-id-action="appSettings.devMode"
 			:additional-tabs="historyTabs"
 			:site-url="config.accountSiteUrl"
-			:auth-user="authUser"
-			:navigate-to-billing="
-				client.selfHostedHosting
-					? undefined
-					: () => openUrl('https://modrinth.com/settings/billing')
-			"
-			:navigate-to-admin-billing="
-				client.selfHostedHosting
-					? undefined
-					: (ownerId: string) => openUrl(`https://modrinth.com/admin/billing/${ownerId}`)
-			"
 			:navigate-to-servers="() => router.push('/hosting/manage')"
 			:browse-modpacks="
 				({ serverId: sid, worldId: wid, from }) => {
@@ -64,12 +52,10 @@ import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
-import { useAppSettings } from '@/composables/use-app-settings.ts'
 import { config } from '@/config'
 import { useServerHistory } from '@/features/share-history/use-server-history'
 import { get_user } from '@/helpers/cache'
 import { get as getCreds } from '@/helpers/mr_auth'
-import { openUrl } from '@/platform/opener'
 import { provideBreadcrumbParent, useBreadcrumb, useRootBreadcrumb } from '@/shared/breadcrumbs'
 import { useCachedServerIcon } from '@/shared/composables/use-cached-server-icon'
 
@@ -78,7 +64,6 @@ const router = useRouter()
 const auth = injectAuth()
 const client = injectModrinthClient()
 const queryClient = useQueryClient()
-const appSettings = useAppSettings()
 const { formatMessage } = useVIntl()
 
 const serverRoute = shallowRef(router.currentRoute.value)
@@ -124,7 +109,7 @@ const { data: serverData } = useQuery({
 	queryFn: () => client.archon.servers_v0.get(serverId.value),
 	enabled: computed(() => Boolean(serverId.value)),
 	// The panel's own query of this server says when its Core is offline; retrying only delays it.
-	retry: client.selfHostedHosting ? false : 3,
+	retry: false,
 	placeholderData: () =>
 		queryClient
 			.getQueryData<Archon.Servers.v0.ServerGetResponse>(['servers'])
@@ -186,17 +171,6 @@ watch(
 		void router.replace('/hosting/manage')
 	},
 )
-
-const authUser = computed(() => {
-	const user = auth.user.value
-	if (!user?.id) return undefined
-	return {
-		id: user.id,
-		username: user.username,
-		email: user.email ?? '',
-		created: user.created,
-	}
-})
 
 async function resolveViewer(): Promise<{ userId: string | null; userRole: string | null }> {
 	const credentials = await getCreds().catch(() => null)

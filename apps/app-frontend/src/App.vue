@@ -51,7 +51,6 @@ import {
 	TooltipDirective,
 	useDebugLogger,
 	useFormatBytes,
-	useHostingIntercom,
 	UserRoleIcon,
 	useVIntl,
 } from '@modrinth/ui'
@@ -67,7 +66,6 @@ import AppSidebar from '@/app/shell/sidebar/index.vue'
 import AppTitleBar from '@/app/shell/title-bar/index.vue'
 import { trackExternalFileDownload } from '@/components/ui/download-manager/external-file-downloads'
 import ErrorModal from '@/components/ui/ErrorModal.vue'
-import HostingUpdateRequired from '@/components/ui/HostingUpdateRequired.vue'
 import AddServerToInstanceModal from '@/components/ui/install_flow/AddServerToInstanceModal.vue'
 import UnknownPackWarningModal from '@/components/ui/install_flow/UnknownPackWarningModal.vue'
 import IconEditorModal from '@/components/ui/instance_settings/InstanceIconEditorModal.vue'
@@ -81,7 +79,6 @@ import NavButton from '@/components/ui/NavButton.vue'
 import QuickInstanceSwitcher from '@/components/ui/QuickInstanceSwitcher.vue'
 import SharedInstanceInviteHandler from '@/components/ui/shared-instances/shared-instance-invite-handler/index.vue'
 import SplashScreen from '@/components/ui/SplashScreen.vue'
-import SurveyPopup from '@/components/ui/SurveyPopup.vue'
 import { useCheckDisableMouseover } from '@/composables/macCssFix.js'
 import { useAppEvent } from '@/composables/use-app-event'
 import { useAppSettings } from '@/composables/use-app-settings.ts'
@@ -208,7 +205,6 @@ const breadcrumbManager = createBreadcrumbManager()
 provideBreadcrumbManager(breadcrumbManager)
 const APP_LEFT_NAV_WIDTH = '4rem'
 const APP_SIDEBAR_WIDTH = 300
-const INTERCOM_BUBBLE_DEFAULT_PADDING = 20
 const credentials = ref()
 const storedModrinthAccounts = ref([])
 let credentialsRefreshId = 0
@@ -226,37 +222,6 @@ const forceSidebar = computed(
 		route.path.startsWith('/user'),
 )
 const sidebarVisible = computed(() => sidebarToggled.value || forceSidebar.value)
-const hostingRouteActive = computed(() => route.path.startsWith('/hosting'))
-const hostingUpdateRequired = computed(
-	() =>
-		hostingRouteActive.value &&
-		!!appUpdateState.availableUpdate.value &&
-		appUpdateState.updatesEnabled.value,
-)
-const hostingIntercomIdentityKey = computed(() => {
-	const rawServerId = route.params.id
-	const serverId = Array.isArray(rawServerId) ? rawServerId[0] : rawServerId
-	const userId = credentials.value?.user_id ?? credentials.value?.user?.id ?? 'anonymous'
-	return `${userId}:${serverId ?? 'hosting'}`
-})
-const hostingIntercom = useHostingIntercom({
-	enabled: computed(
-		() =>
-			!config.accountApiUrl &&
-			hostingRouteActive.value &&
-			!hostingUpdateRequired.value &&
-			!!credentials.value?.session,
-	),
-	appId: 'ykeritl9',
-	fetchToken: fetchIntercomToken,
-	identityKey: hostingIntercomIdentityKey,
-	horizontalPadding: computed(() =>
-		sidebarVisible.value
-			? APP_SIDEBAR_WIDTH + INTERCOM_BUBBLE_DEFAULT_PADDING
-			: INTERCOM_BUBBLE_DEFAULT_PADDING,
-	),
-})
-
 const notificationManager = new AppNotificationManager()
 provideNotificationManager(notificationManager)
 const { handleError, addNotification } = notificationManager
@@ -312,7 +277,6 @@ providePageContext({
 		left: ref(APP_LEFT_NAV_WIDTH),
 		right: computed(() => (sidebarVisible.value ? `${APP_SIDEBAR_WIDTH}px` : '0px')),
 	},
-	intercomBubble: hostingIntercom.intercomBubble,
 	featureFlags: {
 		serverRamAsBytesAlwaysOn: computed(() =>
 			appSettings.getFeatureFlag('server_ram_as_bytes_always_on'),
@@ -1010,7 +974,7 @@ watch(
 
 async function validateSession(sessionToken) {
 	try {
-		const response = await tauriFetch(`${config.accountApiUrl || config.labrinthBaseUrl}/v2/user`, {
+		const response = await tauriFetch(`${config.accountApiUrl}/v2/user`, {
 			method: 'GET',
 			headers: { Authorization: sessionToken },
 		})
@@ -1242,34 +1206,6 @@ const modrinthAccountMenuOptions = computed(() => [
 		action: () => logOut(),
 	},
 ])
-
-async function fetchIntercomToken() {
-	if (config.accountApiUrl)
-		throw new Error('Hosting support is unavailable for this account service')
-	const creds = await getCreds()
-	if (!creds?.session) {
-		throw new Error('Not authenticated')
-	}
-
-	const params = new URLSearchParams()
-	const rawServerId = route.params.id
-	const serverId = Array.isArray(rawServerId) ? rawServerId[0] : rawServerId
-	if (route.path.startsWith('/hosting/manage/') && typeof serverId === 'string') {
-		params.set('server_id', serverId)
-	}
-	const query = params.size > 0 ? `?${params.toString()}` : ''
-
-	const response = await tauriFetch(`${config.siteUrl}/api/intercom/messenger-jwt${query}`, {
-		method: 'GET',
-		headers: {
-			Authorization: `Bearer ${creds.session}`,
-		},
-	})
-	if (!response.ok) {
-		throw new Error(`Failed to fetch Intercom token: ${response.status}`)
-	}
-	return await response.json()
-}
 
 onMounted(() => {
 	if (isNativeWindow) showWindow()
@@ -2014,7 +1950,6 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 		}"
 	>
 		<div class="app-viewport flex-grow router-view">
-			<SurveyPopup />
 			<div
 				class="loading-indicator-container h-8 fixed z-50 pointer-events-none"
 				:style="{
@@ -2057,8 +1992,7 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 			>
 				{{ formatMessage(messages.authUnreachableBody) }}
 			</Admonition>
-			<HostingUpdateRequired v-if="hostingUpdateRequired" />
-			<RouterView v-else v-slot="{ Component }">
+			<RouterView v-slot="{ Component }">
 				<template v-if="Component">
 					<Suspense @pending="onSuspensePending" @resolve="onSuspenseResolve">
 						<component :is="Component" :key="pageGeneration"></component>

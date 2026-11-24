@@ -58,8 +58,12 @@ leaves it unreachable or in the wrong place.
   upstream's own pages. Our screens use our API.
 - A hosting method upstream's pages call on a Core is answered by an adapter in
   `packages/api-client/src/core-hosting/`, one file per upstream module, over the Core's Endpoints.
+- There is no Modrinth Hosting. Its business code (billing and purchase, Stripe, Intercom, surveys,
+  suspension, staff support tools and their api-client modules) goes under `ignore`, and nothing
+  falls back to Modrinth's hosting or shared-instances hosts.
 - Server roles are cut: a Core answers its owner only. Drop upstream changes to server users,
-  member invites and roles; their files are under `ignore`, and the access page keeps only the
-  activity log.
+  member invites and roles; their files are under `ignore`, the access page keeps only the
+  activity log, and `packages/ui`'s `server-permissions.ts` keeps upstream's exports but grants
+  everything.
 - A `port` commit is carried into the file `ported` names, keeping labrinth's schemas and contracts
   for `apps/backend`.

@@ -237,30 +237,6 @@
 				</Button>
 			</div>
 		</div>
-
-		<div v-if="pendingChange && status !== 'suspended'" class="server-listing-notice">
-			<div>
-				<IntlFormatted
-					:message-id="messages.pendingChangeNotice"
-					:values="{
-						verb: pendingChange.verb.toLowerCase(),
-						planSize: pendingChange.planSize,
-						formattedDate: formatDate(pendingChange.date),
-					}"
-				>
-					<template #date="{ children }">
-						<span class="font-medium text-contrast"><component :is="() => children" /></span>
-					</template>
-				</IntlFormatted>
-			</div>
-			<ServersSpecs
-				class="!font-normal !text-primary"
-				:ram="Math.round((pendingChange.ramGb ?? 0) * 1024)"
-				:storage="Math.round((pendingChange.storageGb ?? 0) * 1024)"
-				:cpus="pendingChange.cpuBurst"
-				bursting-link="https://docs.modrinth.com/servers/bursting"
-			/>
-		</div>
 	</div>
 </template>
 
@@ -292,7 +268,6 @@ import { useServerIcon } from '../../composables/use-server-icon'
 import { injectModrinthClient } from '../../providers/api-client'
 import Avatar from '../base/Avatar.vue'
 import IntlFormatted from '../base/IntlFormatted.vue'
-import ServersSpecs from '../billing/ServersSpecs.vue'
 import type { ServerListingOwner } from './access/types'
 import ServerIcon from './icons/ServerIcon.vue'
 import ServerInfoLabels from './labels/ServerInfoLabels.vue'
@@ -397,24 +372,7 @@ const messages = defineMessages({
 		id: 'servers.listing.resubscribe-label',
 		defaultMessage: 'Resubscribe',
 	},
-	pendingChangeNotice: {
-		id: 'servers.listing.notice.pending-change',
-		defaultMessage:
-			'Your server will {verb, select, downgrade {downgrade} other {upgrade}} to the {planSize} Plan on <date>{formattedDate}</date>.',
-	},
 })
-
-export type PendingChange = {
-	planSize: string
-	cpu: number
-	cpuBurst: number
-	ramGb: number
-	swapGb?: number
-	storageGb?: number
-	date: string | number | Date
-	intervalChange?: string | null
-	verb: string
-}
 
 type ServerListingProps = {
 	server_id: string
@@ -429,7 +387,6 @@ type ServerListingProps = {
 	upstream?: Archon.Servers.v0.Upstream | null
 	icon?: Archon.Icons.v1.ServerIcon | null
 	flows?: Archon.Servers.v0.Flows
-	pendingChange?: PendingChange
 	online?: boolean
 	playerCount?: {
 		current?: number
@@ -534,7 +491,7 @@ const noticeButtons = computed<NoticeButtons | null>(() => {
 	}
 })
 
-const hasNotice = computed(() => !!noticeType.value || !!props.pendingChange)
+const hasNotice = computed(() => !!noticeType.value)
 
 const showGameLabel = computed(() => !!props.game && !isConfiguring.value)
 const showLoaderLabel = computed(() => !!props.loader && !isConfiguring.value)

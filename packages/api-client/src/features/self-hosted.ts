@@ -22,6 +22,11 @@ export class SelfHostedFeature extends AbstractFeature {
 		super(config)
 	}
 
+	/** The backend's URL, where upstream's account and shared-instances requests go. */
+	get baseUrl(): string {
+		return this.config.baseUrl
+	}
+
 	/** A refused sharing request throws `SharedInstancesApiError`, with its status and code. */
 	async execute<T>(next: () => Promise<T>, context: RequestContext): Promise<T> {
 		await routeSelfHostedRequest(context, this.config)

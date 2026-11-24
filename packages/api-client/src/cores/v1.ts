@@ -188,7 +188,7 @@ export class ArchonCoresV1Module extends AbstractModule {
 	 */
 	public joinNet(server: Pick<Archon.Servers.v0.Server, 'server_id' | 'net'>) {
 		const { net } = server
-		if (!this.client.selfHostedHosting || net.game_port === undefined) return net
+		if (net.game_port === undefined) return net
 		const coreId = this.serverCores.get(server.server_id) ?? this.listed[0]?.id
 		const core = this.listed.find((candidate) => candidate.id === coreId)
 		if (!core || this.address(core) !== core.address) return net

@@ -32,7 +32,6 @@ export {
 } from './features/circuit-breaker'
 export { protocolMismatch, ProtocolMismatch } from './features/core-session'
 export { type NodeAuth, type NodeAuthConfig, NodeAuthFeature } from './features/node-auth'
-export { PANEL_VERSION, PanelVersionFeature } from './features/panel-version'
 export { type BackoffStrategy, type RetryConfig, RetryFeature } from './features/retry'
 export {
 	routeSelfHostedRequest,
@@ -44,9 +43,6 @@ export type { InferredClientModules } from './modules'
 export { SharedInstancesApiError } from './sharing/errors'
 export * from './modules/types'
 export { GenericModrinthClient } from './platform/generic'
-export type { NuxtClientConfig } from './platform/nuxt'
-export { NuxtCircuitBreakerStorage, NuxtModrinthClient } from './platform/nuxt'
-export { GenericSyncClient } from './platform/sync-generic'
 export type { TauriClientConfig } from './platform/tauri'
 export { TauriModrinthClient } from './platform/tauri'
 export { XHRUploadClient } from './platform/xhr-upload-client'

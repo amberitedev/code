@@ -20,9 +20,7 @@ export function usePlayInstanceServer(instance: Ref<GameInstance | undefined>) {
 		const shared = instance.value?.shared_instance
 		return shared?.role === 'member' && shared.server_manager_name ? shared.id : null
 	})
-	const enabled = computed(
-		() => client.selfHostedHosting && !!shareId.value && !!auth.user.value?.id,
-	)
+	const enabled = computed(() => !!shareId.value && !!auth.user.value?.id)
 	const servers = useQuery({
 		queryKey: ['servers', 'v1'],
 		queryFn: () => client.archon.servers_v1.list(),

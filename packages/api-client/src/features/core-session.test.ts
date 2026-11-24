@@ -51,7 +51,6 @@ class FakeClient extends GenericModrinthClient {
 	constructor() {
 		super({
 			labrinthBaseUrl: ACCOUNTS,
-			selfHostedHosting: true,
 			headers: { Authorization: `Bearer ${ACCOUNT}` },
 			connectCore: async (coreId) => (coreId === CORE.id ? PROXY : 'unknown'),
 			coreSessions: {

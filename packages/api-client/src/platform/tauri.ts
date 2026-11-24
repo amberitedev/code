@@ -3,8 +3,6 @@ import { CoreSyncClient, CoreWebSocketClient } from '../core-hosting/sockets'
 import type { ClientConfig } from '../types/client'
 import type { RequestOptions } from '../types/request'
 import { appendRequestParams, parseResponseErrorData, toFetchBody } from '../utils/fetch'
-import { GenericSyncClient } from './sync-generic'
-import { GenericWebSocketClient } from './websocket-generic'
 import { XHRUploadClient } from './xhr-upload-client'
 
 /**
@@ -47,15 +45,13 @@ export class TauriModrinthClient extends XHRUploadClient {
 		super(config)
 
 		Object.defineProperty(this.archon, 'sockets', {
-			value: this.selfHostedHosting
-				? new CoreWebSocketClient(this)
-				: new GenericWebSocketClient(this),
+			value: new CoreWebSocketClient(this),
 			writable: false,
 			enumerable: true,
 			configurable: false,
 		})
 		Object.defineProperty(this.archon, 'sync', {
-			value: this.selfHostedHosting ? new CoreSyncClient(this) : new GenericSyncClient(this),
+			value: new CoreSyncClient(this),
 			writable: false,
 			enumerable: true,
 			configurable: false,

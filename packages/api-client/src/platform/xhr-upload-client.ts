@@ -31,19 +31,8 @@ export abstract class XHRUploadClient extends AbstractModrinthClient {
 	upload<T = void>(path: string, options: UploadRequestOptions): UploadHandle<T> {
 		// Resolved inside the upload, because a self-hosted Core's address is only known
 		// asynchronously: an upload must reach the same Core as every other hosting request.
-		const resolveUrl = async () => {
-			let baseUrl: string
-			if (options.api === 'labrinth') {
-				baseUrl = this.resolveBaseUrl(this.config.labrinthBaseUrl!)
-			} else if (options.api === 'archon') {
-				baseUrl = await this.resolveArchonBaseUrl(path, options)
-			} else if (options.api === 'sharedinstances') {
-				baseUrl = this.resolveBaseUrl(this.config.sharedInstancesBaseUrl!)
-			} else {
-				baseUrl = options.api
-			}
-			return this.buildUrl(path, baseUrl, options.version)
-		}
+		const resolveUrl = async () =>
+			this.buildUrl(path, await this.resolveApiBaseUrl(path, options), options.version)
 
 		const progressCallbacks: Array<(p: UploadProgress) => void> = []
 		if (options.onProgress) {
@@ -77,7 +66,6 @@ export abstract class XHRUploadClient extends AbstractModrinthClient {
 						...options.headers,
 					},
 				}
-				this.attachArchonSentryCaptureHeader(mergedOptions)
 
 				const uploadContext = this.buildUploadContext(url, path, mergedOptions)
 				context = uploadContext

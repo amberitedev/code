@@ -50,12 +50,6 @@ export interface CoreSessions {
  */
 export interface ClientConfig {
 	/**
-	 * Hosting is served by the account's own Cores instead of Modrinth Hosting. Hosting requests
-	 * go to those Cores (see `archon.cores_v1`), and there are no purchase or subscription flows.
-	 */
-	selfHostedHosting?: boolean
-
-	/**
 	 * Opens a connection to the Core `coreId` at `address`, which serves HTTPS with its own
 	 * certificate, trusting only the certificate with this SHA-256 fingerprint. Returns the base URL
 	 * requests to that Core go to; requests there carry this device's session for it (see
@@ -89,20 +83,6 @@ export interface ClientConfig {
 	labrinthBaseUrl?: BaseUrlConfig
 
 	/**
-	 * Base URL for Archon API (Modrinth Hosting API)
-	 * Can be a callback so apps can drive this from runtime feature flags.
-	 *
-	 * @default 'https://archon.modrinth.com'
-	 */
-	archonBaseUrl?: BaseUrlConfig
-
-	/**
-	 * Base URL for the Shared Instances API
-	 * @default 'https://shared-instances.modrinth.com'
-	 */
-	sharedInstancesBaseUrl?: BaseUrlConfig
-
-	/**
 	 * Default request timeout in milliseconds
 	 * @default 10000
 	 */
@@ -112,14 +92,6 @@ export interface ClientConfig {
 	 * Additional default headers to include in all requests
 	 */
 	headers?: Record<string, string>
-
-	/**
-	 * Whether to attach `modrinth-sentry-capture: 1` to Archon requests.
-	 * Can be a callback so apps can drive this from runtime feature flags.
-	 *
-	 * @default false
-	 */
-	archonSentryCapture?: boolean | (() => boolean)
 
 	/**
 	 * Sends uploads of `LocalFile`s, which the platform reads straight from disk.

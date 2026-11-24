@@ -17,16 +17,6 @@ const baseServer = {
 	},
 } as const
 
-const pendingChange = {
-	planSize: 'Performance 8 GB',
-	cpu: 4,
-	cpuBurst: 6,
-	ramGb: 8,
-	storageGb: 80,
-	date: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(),
-	verb: 'Upgrade',
-} as const
-
 const meta = {
 	title: 'Servers/ServerListing',
 	component: ServerListing,
@@ -68,21 +58,6 @@ export const ConfiguringNewServer: Story = {
 		flows: { intro: true },
 		loader: 'Vanilla',
 		loader_version: null,
-	},
-}
-
-export const WithPendingDowngrade: Story = {
-	args: {
-		...baseServer,
-		name: 'Competitive UHC',
-		pendingChange: {
-			...pendingChange,
-			planSize: 'Small',
-			ramGb: 4,
-			storageGb: 40,
-			cpuBurst: 4,
-			verb: 'Downgrade',
-		},
 	},
 }
 

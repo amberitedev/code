@@ -12,10 +12,8 @@ import {
 	ServerSettingsBackupsPage,
 	ServerSettingsGeneralPage,
 	ServerSettingsInstallationPage,
-	ServerSettingsNetworkPage,
 	ServerSettingsPropertiesPage,
 	ServerSettingsSharingPage,
-	ServerSettingsSupportPage,
 	serverSettingsTabDefinitions,
 	type ServerSettingsTabId,
 } from '#ui/layouts/shared/server-settings'
@@ -59,11 +57,10 @@ const modal = ref<InstanceType<typeof TabbedModal> | null>(null)
 
 const { serverId: currentServerId, worldId, server, serverFull } = injectModrinthServerContext()
 
-// The Core a self-hosted server runs on, named in the title.
+// The Core the server runs on, named in the title.
 const { data: core } = useQuery({
 	queryKey: ['cores', 'of', currentServerId],
 	queryFn: () => client.archon.cores_v1.coreOf(currentServerId),
-	enabled: client.selfHostedHosting,
 })
 
 const currentUserId = ref<string | null>(null)
@@ -86,11 +83,9 @@ const serverSettingsTabComponentMap = {
 	general: ServerSettingsGeneralPage,
 	installation: ServerSettingsInstallationPage,
 	sharing: ServerSettingsSharingPage,
-	network: ServerSettingsNetworkPage,
 	backups: ServerSettingsBackupsPage,
 	properties: ServerSettingsPropertiesPage,
 	advanced: ServerSettingsAdvancedPage,
-	support: ServerSettingsSupportPage,
 } as const
 
 const saveBannerTarget = ref<HTMLElement | null>(null)
@@ -106,60 +101,28 @@ provideServerSettings({
 	saveBanner: { target: saveBannerTarget, shown: saveBannerShown },
 })
 
-const ownerId = computed(() => server.value?.owner_id ?? 'Ghost')
-const isOwner = computed(() => currentUserId.value != null && currentUserId.value === ownerId.value)
-const isAdmin = computed(() => currentUserRole.value === 'admin')
-
-// Modrinth hosting tabs a Core has no routes behind: billing, staff support, and allocations.
-const selfHostedHiddenTabs: ServerSettingsTabId[] = [
-	'billing',
-	'admin-billing',
-	'support',
-	'network',
-]
-
 const tabs = computed<TabbedModalTab[]>(() =>
-	serverSettingsTabDefinitions
-		.filter((tab) => !client.selfHostedHosting || !selfHostedHiddenTabs.includes(tab.id))
-		.map((tab) => {
-			const ctx = {
-				serverId: currentServerId,
-				ownerId: ownerId.value,
-				serverStatus: server.value?.status,
-				isOwner: isOwner.value,
-				isAdmin: isAdmin.value,
-				// On a Core only a server that follows no instance has a share of its own; one that
-				// follows an instance reports that instance's share, which it does not manage.
-				isShared:
-					!server.value?.linked_instance &&
-					!!serverFull.value?.worlds.find((world) => world.id === worldId.value)?.content
-						?.shared_instance_id,
-			}
-			const name = defineMessage({
-				id: `server.settings.tabs.${tab.id}`,
-				defaultMessage: tab.label,
-			})
-			const shown = tab.shown ? tab.shown(ctx) : true
-
-			if (tab.external) {
-				return {
-					name,
-					icon: tab.icon,
-					color: tab.color,
-					href: tab.href ? `https://modrinth.com${tab.href(ctx)}` : undefined,
-					shown,
-				}
-			}
-
-			return {
-				name,
-				icon: tab.icon,
-				color: tab.color,
-				content:
-					serverSettingsTabComponentMap[tab.id as keyof typeof serverSettingsTabComponentMap],
-				shown,
-			}
-		}),
+	serverSettingsTabDefinitions.map((tab) => {
+		const ctx = {
+			serverStatus: server.value?.status,
+			// On a Core only a server that follows no instance has a share of its own; one that
+			// follows an instance reports that instance's share, which it does not manage.
+			isShared:
+				!server.value?.linked_instance &&
+				!!serverFull.value?.worlds.find((world) => world.id === worldId.value)?.content
+					?.shared_instance_id,
+		}
+		const name = defineMessage({
+			id: `server.settings.tabs.${tab.id}`,
+			defaultMessage: tab.label,
+		})
+		return {
+			name,
+			icon: tab.icon,
+			content: serverSettingsTabComponentMap[tab.id],
+			shown: tab.shown ? tab.shown(ctx) : true,
+		}
+	}),
 )
 
 watch(tabs, (currentTabs, previousTabs) => {
