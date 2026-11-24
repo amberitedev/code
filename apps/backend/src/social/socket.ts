@@ -60,7 +60,7 @@ export class FriendsHub extends DurableObject<Env> {
 		).filter((status) => status !== null)
 		const known = new Set(await this.knownOnline())
 		for (const status of statuses) known.add(status.user_id)
-		await this.remember(known)
+		await this.remember(known, !wasOnline)
 		const sync: ServerToClientMessage = { type: 'friend_statuses', statuses }
 		pair[1].send(JSON.stringify(sync))
 		return new Response(null, { status: 101, webSocket: pair[0] })
@@ -208,8 +208,9 @@ export class FriendsHub extends DurableObject<Env> {
 		message: ServerToClientMessage,
 		everyone = false,
 	): Promise<(UserStatus | null)[]> {
-		const friends = await friendIds(this.env, userId)
 		const known = everyone ? null : await this.knownOnline()
+		if (known && !known.size) return []
+		const friends = await friendIds(this.env, userId)
 		return Promise.all(
 			(known ? friends.filter((id) => known.has(id)) : friends).map((id) =>
 				this.env.FRIENDS.getByName(id).friendPresence(message),
@@ -225,9 +226,11 @@ export class FriendsHub extends DurableObject<Env> {
 		return this.known
 	}
 
-	private async remember(known: Set<string>): Promise<void> {
+	/** `force` writes even an unchanged set, for one so far held only in memory. */
+	private async remember(known: Set<string>, force = false): Promise<void> {
 		const before = await this.knownOnline()
-		if (before && before.size === known.size && [...known].every((id) => before.has(id))) return
+		if (!force && before && before.size === known.size && [...known].every((id) => before.has(id)))
+			return
 		this.known = known
 		await this.ctx.storage.put(ONLINE_FRIENDS, [...known])
 	}
