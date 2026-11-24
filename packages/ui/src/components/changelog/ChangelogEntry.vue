@@ -50,7 +50,6 @@ import { useFormatDateTime, useRelativeTime } from '../../composables'
 import { defineMessages, useVIntl } from '../../composables/i18n'
 import AutoLink from '../base/AutoLink.vue'
 
-// Was `@modrinth/blog`'s, which Amberite does not ship.
 type VersionEntry = {
 	date: dayjs.Dayjs
 	product: 'web' | 'hosting' | 'app'

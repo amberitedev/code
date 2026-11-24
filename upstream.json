@@ -1,5 +1,6 @@
 {
 	"ignore": [
+		".agents/skills/review-changelog",
 		".github/instructions/i18n-convert.instructions.md",
 		".github/scripts/notify-app-build.mjs",
 		".github/templates",

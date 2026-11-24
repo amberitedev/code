@@ -1371,11 +1371,6 @@ const updatePopupMessages = defineMessages({
 		id: 'app.update-popup.body.download-complete',
 		defaultMessage: `Modrinth App v{version} has finished downloading. Reload to update now, or automatically when you close Modrinth App.`,
 	},
-	linuxBody: {
-		id: 'app.update-popup.body.linux',
-		defaultMessage:
-			'Modrinth App v{version} is available. Use your package manager to update for the latest features and fixes!',
-	},
 	reload: {
 		id: 'app.update-popup.reload',
 		defaultMessage: 'Reload to update',
@@ -1496,11 +1491,6 @@ async function checkUpdates() {
 	if (!(await areUpdatesEnabled())) {
 		console.log('Skipping update check as updates are disabled in this build or environment')
 		updatesEnabled.value = false
-
-		if (os.value === 'Linux' && !isDevEnvironment.value) {
-			checkLinuxUpdates()
-			setInterval(checkLinuxUpdates, 5 * 60 * 1000)
-		}
 		return
 	}
 
@@ -1547,34 +1537,6 @@ async function checkUpdates() {
 		},
 		5 /* min */ * 60 /* sec */ * 1000 /* ms */,
 	)
-}
-
-async function checkLinuxUpdates() {
-	try {
-		const [response, currentVersion] = await Promise.all([
-			fetch('https://launcher-files.modrinth.com/updates.json'),
-			getVersion(),
-		])
-		const updates = await response.json()
-		const latestVersion = updates?.version
-
-		if (latestVersion && latestVersion !== currentVersion) {
-			markAppUpdateActionable(latestVersion)
-			const nextPopupTime = getNextAppUpdatePopupTime(latestVersion)
-			if (nextPopupTime !== null && Date.now() >= nextPopupTime) {
-				addPopupNotification({
-					contentType: 'standard',
-					title: formatMessage(updatePopupMessages.updateAvailable),
-					text: formatMessage(updatePopupMessages.linuxBody, { version: latestVersion }),
-					type: 'info',
-					autoCloseMs: null,
-				})
-				markAppUpdatePopupShown(latestVersion)
-			}
-		}
-	} catch (e) {
-		console.error('Failed to check for updates:', e)
-	}
 }
 
 async function downloadAvailableUpdate() {
