@@ -2,8 +2,14 @@
 //! files into `packages/contracts/ts/` and checks they are fresh in its own tests, under the
 //! `export-ts` feature.
 
+use std::{
+    any::TypeId,
+    collections::HashSet,
+    path::{Path, PathBuf},
+};
+
 use serde::Serialize;
-use ts_rs::{Config, TS};
+use ts_rs::{Config, TS, TypeVisitor};
 
 use crate::{
     Empty, Endpoint, Json, Raw, RequestBody, ResponseBody, Stream, Upgrade,
@@ -22,11 +28,18 @@ pub trait TsBody {
     fn request_ts(cfg: &Config) -> String {
         Self::ts(cfg)
     }
+
+    /// Visit the types it carries.
+    fn visit(_: &mut impl TypeVisitor) {}
 }
 
-impl<T: TS> TsBody for Json<T> {
+impl<T: TS + 'static> TsBody for Json<T> {
     fn ts(cfg: &Config) -> String {
         T::name(cfg)
+    }
+
+    fn visit(v: &mut impl TypeVisitor) {
+        v.visit::<T>();
     }
 }
 
@@ -52,10 +65,48 @@ impl TsBody for Stream {
     }
 }
 
-impl<S: TS, R: TS> TsBody for Upgrade<S, R> {
+impl<S: TS + 'static, R: TS + 'static> TsBody for Upgrade<S, R> {
     fn ts(cfg: &Config) -> String {
         format!("{{ receive: {}, send: {} }}", S::name(cfg), R::name(cfg))
     }
+
+    fn visit(v: &mut impl TypeVisitor) {
+        v.visit::<S>();
+        v.visit::<R>();
+    }
+}
+
+/// Whether `E`'s params, query, body or response holds a [`Path`] or [`PathBuf`] anywhere inside.
+pub fn names_host_path<E>() -> bool
+where
+    E: Endpoint,
+    E::Params: TS + 'static,
+    E::Query: TS + 'static,
+    E::Body: TsBody,
+    E::Response: TsBody,
+{
+    #[derive(Default)]
+    struct HostPaths {
+        seen: HashSet<TypeId>,
+        found: bool,
+    }
+    impl TypeVisitor for HostPaths {
+        fn visit<T: TS + 'static + ?Sized>(&mut self) {
+            let id = TypeId::of::<T>();
+            self.found |=
+                id == TypeId::of::<PathBuf>() || id == TypeId::of::<Path>();
+            if self.seen.insert(id) {
+                T::visit_dependencies(self);
+                T::visit_generics(self);
+            }
+        }
+    }
+    let mut visitor = HostPaths::default();
+    visitor.visit::<E::Params>();
+    visitor.visit::<E::Query>();
+    E::Body::visit(&mut visitor);
+    E::Response::visit(&mut visitor);
+    visitor.found
 }
 
 /// `E` as a TypeScript `Endpoint` value, to place in its module's object.

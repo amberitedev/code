@@ -163,11 +163,18 @@ impl<S, R> ResponseBody for Upgrade<S, R> {
 /// ```
 ///
 /// A line is `Name: Method "path", Auth, Params, Query, Body => Response`, then `dangerous` when
-/// the route needs a fresh ticket ([`Endpoint::DANGEROUS`]).
+/// the route needs a fresh ticket ([`Endpoint::DANGEROUS`]), or for an engine route its
+/// [`Reach`]: `shared` or `client_only`.
 #[macro_export]
 macro_rules! endpoints {
     (@dangerous) => { false };
     (@dangerous dangerous) => { true };
+    (@dangerous shared) => { false };
+    (@dangerous client_only) => { false };
+    (@reach) => { None };
+    (@reach dangerous) => { None };
+    (@reach shared) => { Some($crate::Reach::Shared) };
+    (@reach client_only) => { Some($crate::Reach::ClientOnly) };
     (
         $(#[doc = $group_doc:literal])*
         group $group:ident;
@@ -202,12 +209,23 @@ macro_rules! endpoints {
             }
         }
 
-        /// Each route's name, method and path, and whether it needs a fresh ticket.
+        /// The routes whose params, query, body or response names a host path.
+        #[cfg(feature = "export-ts")]
+        pub fn host_paths() -> Vec<&'static str> {
+            [$((stringify!($name), $crate::ts::names_host_path::<$name>())),+]
+                .into_iter()
+                .filter_map(|(name, host)| host.then_some(name))
+                .collect()
+        }
+
+        /// Each route's name, method and path, whether it needs a fresh ticket, and where an
+        /// engine route is served.
         pub const ROUTES: &[$crate::Route] = &[$($crate::Route {
             name: stringify!($name),
             method: $crate::Method::$method,
             path: $path,
             dangerous: $crate::endpoints!(@dangerous $($flag)?),
+            reach: $crate::endpoints!(@reach $($flag)?),
         }),+];
     };
 }
@@ -219,6 +237,19 @@ pub struct Route {
     pub method: Method,
     pub path: &'static str,
     pub dangerous: bool,
+    /// `None` for a route that is not the engine's.
+    pub reach: Option<Reach>,
+}
+
+/// Which hosts serve an engine route. A Core serves its servers' engine routes to remote users,
+/// so a route that takes or answers a host path, reaches the whole engine, or runs code on the
+/// host is the App's alone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Reach {
+    /// The App and every Core.
+    Shared,
+    /// Only the App.
+    ClientOnly,
 }
 
 /// Declares documented `pub const`s and, for the tests, their TypeScript.

@@ -7,7 +7,7 @@ contracts::endpoints! {
     group metadata;
 
     /// The versions of a mod loader for each game version.
-    GetLoaderManifest: Get "/metadata/loaders/{loader}", Session, LoaderRef, (), Empty => Json<Manifest>;
+    GetLoaderManifest: Get "/metadata/loaders/{loader}", Session, LoaderRef, (), Empty => Json<Manifest>, client_only;
 }
 
 #[derive(Serialize, Deserialize)]

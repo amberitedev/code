@@ -1,15 +1,14 @@
-//! The engine's content, share, file, upload and icon routes on a Core, behind `CoreAccess`. Only
-//! the routes listed here are mounted: none whose body or answer carries a host path, none of the
-//! engine-wide routes for settings, the store, caches, Java or processes, and not the engine's
-//! edit-instance route, which writes launch hooks, Java and environment variables (`api::servers`
-//! changes a server's name and update channel itself). A change is logged; a content change also
+//! The engine's content, share, file, upload, icon and log routes on a Core, behind `CoreAccess`:
+//! every engine route declared `shared`, and no `client_only` one (the tests check both). None
+//! carries a host path, reaches the engine's settings, store, caches, Java or processes, or edits
+//! the instance, which writes launch hooks, Java and environment variables (`api::servers` changes
+//! a server's name and update channel itself). A server's live console is Core's own. A change is logged; a content change also
 //! holds the server, so it is refused while the server runs or installs. Its [`Hook`] says what
 //! else it does.
 
 use std::{io::Cursor, sync::Arc, time::Duration};
 
 use axum::{
-    Router,
     extract::{FromRequestParts, Path, RawPathParams, Request, State},
     handler::Handler,
     response::{IntoResponse, Response},
@@ -24,7 +23,7 @@ use engine::{
     Engine,
     access::InstanceAccess,
     data::ResolveContentPlan,
-    endpoints::{content::*, files::*, install::*, sharing::*},
+    endpoints::{content::*, files::*, install::*, logs::*, sharing::*},
     instance::SharedInstancePublishPreview,
     routes::{self as engine_routes, api_error},
 };
@@ -75,10 +74,11 @@ const FILE: Hook = Hook {
 };
 const ICON: Hook = Hook { icon: true, ..FILE };
 
-/// Routes that answer within the request timeout.
-pub fn routes() -> Router<Shared> {
+/// Routes that answer within the request timeout. Each of these takes `Router::new()`; the tests
+/// list what they mount.
+pub fn routes<M: Mount<Shared>>(mount: M) -> M {
     use engine_routes::*;
-    Router::new()
+    mount
         .endpoint::<ListContentItems, _, _>(list_content_items)
         .endpoint::<ListLinkedModpackContent, _, _>(list_linked_modpack_content)
         .endpoint::<RefreshContentUpdates, _, _>(refresh_content_updates)
@@ -132,13 +132,14 @@ pub fn routes() -> Router<Shared> {
             ICON,
             remove_instance_icon,
         ))
+        .endpoint::<DeleteInstanceLog, _, _>(change(FILE, delete_instance_log))
 }
 
 /// Routes that download, or back the world up, first, or go through whole files and folders, which
 /// can take longer than the request timeout, and reads at the same paths.
-pub fn long_routes() -> Router<Shared> {
+pub fn long_routes<M: Mount<Shared>>(mount: M) -> M {
     use engine_routes::*;
-    Router::new()
+    mount
         .endpoint::<GetLinkedModpack, _, _>(get_linked_modpack)
         .endpoint::<AddProjectFromVersion, _, _>(change(
             EDIT,
@@ -175,12 +176,14 @@ pub fn long_routes() -> Router<Shared> {
             FILE,
             finalize_instance_upload,
         ))
+        .endpoint::<ListInstanceLogs, _, _>(list_instance_logs)
+        .endpoint::<GetInstanceLogOutput, _, _>(get_instance_log_output)
 }
 
 /// Routes whose body is a file of any size.
-pub fn upload_routes() -> Router<Shared> {
+pub fn upload_routes<M: Mount<Shared>>(mount: M) -> M {
     use engine_routes::*;
-    Router::new()
+    mount
         .endpoint::<WriteInstanceFile, _, _>(change(FILE, write_instance_file))
         .endpoint::<AddInstanceUploadFile, _, _>(add_instance_upload_file)
 }
@@ -454,5 +457,53 @@ async fn wait_for_jobs(state: &CoreState, id: &str) {
                 return;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use axum::handler::Handler;
+    use contracts::{Endpoint, Method, Reach, server::Mount};
+
+    use super::Shared;
+
+    /// What a mount function mounts.
+    #[derive(Default)]
+    struct Mounted(Vec<(Method, &'static str)>);
+
+    impl Mount<Shared> for Mounted {
+        fn endpoint<E: Endpoint, H: Handler<T, Shared>, T: 'static>(
+            mut self,
+            _: H,
+        ) -> Self {
+            self.0.push((E::METHOD, E::PATH));
+            self
+        }
+    }
+
+    #[test]
+    fn a_core_mounts_every_shared_engine_route_and_no_other() {
+        let engine_routes =
+            || engine::endpoints::ROUTES.iter().copied().flatten();
+        let mounted: BTreeSet<_> = [
+            super::routes::<Mounted>,
+            super::long_routes::<Mounted>,
+            super::upload_routes::<Mounted>,
+        ]
+        .into_iter()
+        .flat_map(|mount| mount(Mounted::default()).0)
+        .map(|(method, path)| {
+            engine_routes()
+                .find(|route| route.method == method && route.path == path)
+                .map_or(path, |route| route.name)
+        })
+        .collect();
+        let shared: BTreeSet<_> = engine_routes()
+            .filter(|route| route.reach == Some(Reach::Shared))
+            .map(|route| route.name)
+            .collect();
+        assert_eq!(mounted, shared);
     }
 }

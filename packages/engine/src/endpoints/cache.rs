@@ -11,23 +11,23 @@ contracts::endpoints! {
     group cache;
 
     /// `null` when Modrinth has no such project. The id may be a slug.
-    GetCachedProject: Get "/cache/projects/{id}", Session, CacheKey, CacheRead, Empty => Json<Option<Project>>;
-    GetCachedProjects: Post "/cache/projects", Session, (), (), Json<CacheKeys> => Json<Vec<Project>>;
+    GetCachedProject: Get "/cache/projects/{id}", Session, CacheKey, CacheRead, Empty => Json<Option<Project>>, client_only;
+    GetCachedProjects: Post "/cache/projects", Session, (), (), Json<CacheKeys> => Json<Vec<Project>>, client_only;
     /// The project's versions, without changelogs.
-    GetCachedProjectVersions: Get "/cache/projects/{id}/versions", Session, CacheKey, CacheRead, Empty => Json<Option<Vec<Version>>>;
-    GetCachedProjectV3: Get "/cache/v3/projects/{id}", Session, CacheKey, CacheRead, Empty => Json<Option<ProjectV3>>;
-    GetCachedProjectsV3: Post "/cache/v3/projects", Session, (), (), Json<CacheKeys> => Json<Vec<ProjectV3>>;
-    GetCachedVersion: Get "/cache/versions/{id}", Session, CacheKey, CacheRead, Empty => Json<Option<Version>>;
-    GetCachedVersions: Post "/cache/versions", Session, (), (), Json<CacheKeys> => Json<Vec<Version>>;
-    GetCachedUser: Get "/cache/users/{id}", Session, CacheKey, CacheRead, Empty => Json<Option<User>>;
-    GetCachedUsers: Post "/cache/users", Session, (), (), Json<CacheKeys> => Json<Vec<User>>;
-    GetCachedTeam: Get "/cache/teams/{id}", Session, CacheKey, CacheRead, Empty => Json<Option<Vec<TeamMember>>>;
-    GetCachedOrganization: Get "/cache/organizations/{id}", Session, CacheKey, CacheRead, Empty => Json<Option<Organization>>;
+    GetCachedProjectVersions: Get "/cache/projects/{id}/versions", Session, CacheKey, CacheRead, Empty => Json<Option<Vec<Version>>>, client_only;
+    GetCachedProjectV3: Get "/cache/v3/projects/{id}", Session, CacheKey, CacheRead, Empty => Json<Option<ProjectV3>>, client_only;
+    GetCachedProjectsV3: Post "/cache/v3/projects", Session, (), (), Json<CacheKeys> => Json<Vec<ProjectV3>>, client_only;
+    GetCachedVersion: Get "/cache/versions/{id}", Session, CacheKey, CacheRead, Empty => Json<Option<Version>>, client_only;
+    GetCachedVersions: Post "/cache/versions", Session, (), (), Json<CacheKeys> => Json<Vec<Version>>, client_only;
+    GetCachedUser: Get "/cache/users/{id}", Session, CacheKey, CacheRead, Empty => Json<Option<User>>, client_only;
+    GetCachedUsers: Post "/cache/users", Session, (), (), Json<CacheKeys> => Json<Vec<User>>, client_only;
+    GetCachedTeam: Get "/cache/teams/{id}", Session, CacheKey, CacheRead, Empty => Json<Option<Vec<TeamMember>>>, client_only;
+    GetCachedOrganization: Get "/cache/organizations/{id}", Session, CacheKey, CacheRead, Empty => Json<Option<Organization>>, client_only;
     /// `id` is the search's query string.
-    GetCachedSearchResults: Get "/cache/search", Session, (), CacheSearch, Empty => Json<Option<SearchResults>>;
-    GetCachedSearchResultsV3: Get "/cache/v3/search", Session, (), CacheSearch, Empty => Json<Option<SearchResultsV3>>;
+    GetCachedSearchResults: Get "/cache/search", Session, (), CacheSearch, Empty => Json<Option<SearchResults>>, client_only;
+    GetCachedSearchResultsV3: Get "/cache/v3/search", Session, (), CacheSearch, Empty => Json<Option<SearchResultsV3>>, client_only;
     /// Drops every cached entry of these types.
-    PurgeCache: Post "/cache/purge", Session, (), (), Json<Vec<CacheValueType>> => Empty;
+    PurgeCache: Post "/cache/purge", Session, (), (), Json<Vec<CacheValueType>> => Empty, client_only;
 }
 
 #[derive(Serialize, Deserialize)]

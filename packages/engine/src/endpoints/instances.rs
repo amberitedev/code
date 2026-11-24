@@ -20,18 +20,18 @@ contracts::endpoints! {
     group instances;
 
     /// Every instance the caller may view.
-    ListInstances: Get "/instances", Session, (), (), Empty => Json<Vec<Instance>>;
+    ListInstances: Get "/instances", Session, (), (), Empty => Json<Vec<Instance>>, client_only;
     /// The instances among `ids` that exist and the caller may view.
-    GetInstances: Get "/instances/many", Session, (), InstanceIds, Empty => Json<Vec<Instance>>;
+    GetInstances: Get "/instances/many", Session, (), InstanceIds, Empty => Json<Vec<Instance>>, client_only;
     /// `null` when there is no such instance.
-    GetInstance: Get "/instances/{id}", Session, InstanceRef, (), Empty => Json<Option<Instance>>;
+    GetInstance: Get "/instances/{id}", Session, InstanceRef, (), Empty => Json<Option<Instance>>, client_only;
     /// Deletes the instance and its folder.
-    RemoveInstance: Delete "/instances/{id}", Session, InstanceRef, (), Empty => Empty;
-    EditInstance: Patch "/instances/{id}", Session, InstanceRef, (), Json<InstanceUpdate> => Empty;
+    RemoveInstance: Delete "/instances/{id}", Session, InstanceRef, (), Empty => Empty, client_only;
+    EditInstance: Patch "/instances/{id}", Session, InstanceRef, (), Json<InstanceUpdate> => Empty, client_only;
     /// Stops the instance's running game.
-    KillInstance: Post "/instances/{id}/kill", Session, InstanceRef, (), Empty => Empty;
+    KillInstance: Post "/instances/{id}/kill", Session, InstanceRef, (), Empty => Empty, client_only;
     /// The installed Java that suits the instance's game version, if any.
-    GetOptimalJava: Get "/instances/{id}/java", Session, InstanceRef, (), Empty => Json<Option<JavaVersion>>;
+    GetOptimalJava: Get "/instances/{id}/java", Session, InstanceRef, (), Empty => Json<Option<JavaVersion>>, client_only;
 }
 
 #[derive(Serialize, Deserialize)]
