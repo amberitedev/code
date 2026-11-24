@@ -8,10 +8,10 @@ use crate::settings::rows::SettingsRow;
 
 const LOGS_FOLDER: &str = "launcher_logs";
 
-/// The folder holding app.db and the launcher logs: `THESEUS_CONFIG_DIR`, else the OS data folder.
+/// The folder holding app.db and the launcher logs: `AMBERITE_CONFIG_DIR`, else the OS data folder.
 /// Instances and engine.db live here too unless settings name another data directory.
 pub fn resolve(identifier: &str) -> anyhow::Result<PathBuf> {
-    std::env::var_os("THESEUS_CONFIG_DIR")
+    std::env::var_os("AMBERITE_CONFIG_DIR")
         .map(PathBuf::from)
         .or_else(|| Some(dirs::data_dir()?.join(identifier)))
         .context("could not find the application directory")
@@ -55,6 +55,7 @@ pub async fn engine_config(
         events,
         accounts,
         hooks: Some(Arc::new(crate::hooks::DesktopHooks::new(db))),
+        user_agent: crate::user_agent(),
     })
 }
 

@@ -1,6 +1,6 @@
 [package]
-name = "theseus_gui"
-# The actual version is set by the theseus-build workflow on tagging
+name = "amberite-app"
+# The actual version is set by the amberite-app-build workflow on tagging
 version = "1.0.0-local"
 edition.workspace = true
 description = "The Modrinth App is a desktop application for managing your Minecraft mods"

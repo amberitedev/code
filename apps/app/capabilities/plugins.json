@@ -19,9 +19,6 @@
 					"url": "https://*.modrinth.com/*"
 				},
 				{
-					"url": "https://*.nodes.modrinth.com/*"
-				},
-				{
 					"url": "http://127.0.0.1:*/*"
 				},
 				{

@@ -55,15 +55,15 @@ engine on the folders the host names. Its background tasks hold a `Weak` and end
 drops the last `Arc`, so tests run two engines side by side.
 
 - The host resolves every path. The engine reads no environment variables for paths;
-  `THESEUS_CONFIG_DIR` is read only by the App ([`data_dir.rs`](../../apps/app/src/data_dir.rs)),
+  `AMBERITE_CONFIG_DIR` is read only by the App ([`data_dir.rs`](../../apps/app/src/data_dir.rs)),
   which also finishes a data-directory move and backs up its databases before the engine starts.
 - Side is a property of the engine (`EngineConfig.side`). An App engine holds client instances and
   a Core engine holds server instances. One engine never holds both.
 - The host sets the Modrinth session and one backend credential: the user's session on the App,
   the Core key on a Core. A Core calls Modrinth anonymously.
-- Process resources stay process-wide: the Modrinth rate limit, its reqwest clients and user agent,
-  and the icon and DNS semaphores. One process has one network identity. Anything keyed by an
-  instance or a job lives on the engine.
+- Process resources stay process-wide: the Modrinth rate limit, its reqwest clients, the user agent
+  (`EngineConfig.user_agent`, which the first engine sets), and the icon and DNS semaphores. One
+  process has one network identity. Anything keyed by an instance or a job lives on the engine.
 - A launch takes its credentials, launch defaults and game options from the App
   ([`launch.rs`](../../apps/app/src/launch.rs)). A Core does not launch through the engine: the
   engine installs by side and returns the server's Java command, and the Core's supervisor runs it.

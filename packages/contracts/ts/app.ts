@@ -1,5 +1,5 @@
 // Generated from apps/app by ts-rs. Do not edit.
-// Regenerate: cargo test -p theseus_gui -- --ignored write_ts
+// Regenerate: cargo test -p amberite-app -- --ignored write_ts
 
 import type { ApiError, CoreSession, Endpoint, SharedIconConfig, UserFriend, UserStatus } from './contracts'
 import type { CachedSharedInstanceSummary, CommandPayload, DesyncServerMode, EngineEvent, FriendPayload, ImportLauncherType, InstallJobSnapshot, InstanceGroupsChangedPayload, InstanceLink, InstanceSyncedOptions, JavaVersion, ModLoader, OnboardingChecklist, ProcessMetadata, ProjectType, Settings } from './engine'

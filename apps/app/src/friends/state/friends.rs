@@ -99,7 +99,7 @@ impl FriendsSocket {
 
             request.headers_mut().insert(
                 "User-Agent",
-                HeaderValue::from_str(&engine::launcher_user_agent()).unwrap(),
+                HeaderValue::from_str(&crate::user_agent()).unwrap(),
             );
 
             let res = connect_async(request).await;

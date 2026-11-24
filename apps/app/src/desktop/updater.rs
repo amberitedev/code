@@ -12,8 +12,7 @@ use contracts::{
     server::{Req, route},
 };
 use engine::{
-    EventSink, LoadingBarType, emit_loading, init_loading, launcher_user_agent,
-    routes::api_error,
+    EventSink, LoadingBarType, emit_loading, init_loading, routes::api_error,
 };
 use tauri::http::{HeaderValue, header::ACCEPT};
 use tauri_plugin_http::reqwest::{self, ClientBuilder};
@@ -124,7 +123,7 @@ async fn size(
             HeaderValue::from_static("application/octet-stream"),
         );
     }
-    let mut request = ClientBuilder::new().user_agent(launcher_user_agent());
+    let mut request = ClientBuilder::new().user_agent(crate::user_agent());
     if let Some(timeout) = update.timeout {
         request = request.timeout(timeout);
     }

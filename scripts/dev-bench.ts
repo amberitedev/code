@@ -195,7 +195,7 @@ class Bench {
 		await this.exec('prime', 'test', this.primary, [
 			'scripts/dev-runner.ts',
 			'test',
-			'theseus_gui',
+			'amberite-app',
 			'copal',
 		])
 		await this.worktree('prime', ['ui', 'fixtures'])

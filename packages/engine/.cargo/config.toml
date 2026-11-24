@@ -9,7 +9,7 @@
 #   touch packages/engine/src/lib.rs apps/app/src/main.rs
 #   SQLX_OFFLINE=false DATABASE_URL=sqlite:$(pwd -W)/target/sqlx/engine.db \
 #     SQLX_OFFLINE_DIR=$(pwd -W)/packages/engine/.sqlx cargo check -p engine --all-targets --features export-ts
-#   SQLX_OFFLINE=true cargo check -p theseus_gui --all-targets   # builds the engine offline; the App's own queries fail here
+#   SQLX_OFFLINE=true cargo check -p amberite-app --all-targets   # builds the engine offline; the App's own queries fail here
 #   SQLX_OFFLINE=false DATABASE_URL=sqlite:$(pwd -W)/target/sqlx/app.db \
-#     SQLX_OFFLINE_DIR=$(pwd -W)/apps/app/.sqlx cargo check -p theseus_gui --all-targets
+#     SQLX_OFFLINE_DIR=$(pwd -W)/apps/app/.sqlx cargo check -p amberite-app --all-targets
 SQLX_OFFLINE = "true"

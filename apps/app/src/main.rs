@@ -10,7 +10,6 @@ use std::sync::Arc;
 use tauri::{Listener, Manager};
 
 mod accounts;
-mod api;
 mod cores;
 mod data_dir;
 mod db;
@@ -35,6 +34,15 @@ mod synced_options;
 
 #[cfg(target_os = "macos")]
 mod macos;
+
+/// Every request the App makes names it with this, the engine's to Modrinth too.
+fn user_agent() -> String {
+    format!(
+        "amberite/{} ({})",
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::OS
+    )
+}
 
 /// Starts the engine and signs a dev App in before its routes open. Setup runs it, and opening the
 /// event socket runs it again after a failure.
@@ -184,13 +192,12 @@ fn main() {
 
     #[cfg(feature = "updater")]
     {
-        use engine::launcher_user_agent;
         use tauri_plugin_http::reqwest::header::{HeaderValue, USER_AGENT};
         builder = builder.plugin(
             tauri_plugin_updater::Builder::new()
                 .header(
                     USER_AGENT,
-                    HeaderValue::from_str(&launcher_user_agent()).unwrap(),
+                    HeaderValue::from_str(&user_agent()).unwrap(),
                 )
                 .unwrap()
                 .build(),
@@ -203,10 +210,9 @@ fn main() {
                 if let Some(payload) = args.get(1) {
                     tracing::info!("Handling command-line deep link");
                     let payload = payload.clone();
-                    tauri::async_runtime::spawn(api::utils::handle_command(
-                        app.clone(),
-                        payload,
-                    ));
+                    tauri::async_runtime::spawn(
+                        desktop::opening::handle_command(app.clone(), payload),
+                    );
                 }
 
                 if let Some(win) = app.get_window("main") {
@@ -334,9 +340,11 @@ fn main() {
                             *payload = Some(actual_request.clone());
                         }
 
-                        let _ =
-                            api::utils::handle_command(handle, actual_request)
-                                .await;
+                        let _ = desktop::opening::handle_command(
+                            handle,
+                            actual_request,
+                        )
+                        .await;
                     });
                 });
             };
@@ -347,10 +355,12 @@ fn main() {
                 app.listen("deep-link://new-url", move |url| {
                     let payload = url.payload().to_owned();
                     tracing::info!("Handling deep link");
-                    tauri::async_runtime::spawn(api::utils::handle_command(
-                        handle.clone(),
-                        payload,
-                    ));
+                    tauri::async_runtime::spawn(
+                        desktop::opening::handle_command(
+                            handle.clone(),
+                            payload,
+                        ),
+                    );
                 });
             }
 
@@ -372,7 +382,7 @@ fn main() {
         });
 
     builder = builder
-        .plugin(api::logs::init())
+        .plugin(desktop::webview_log::plugin())
         .manage(updater)
         .manage(engine)
         .invoke_handler(tauri::generate_handler![show_window]);
@@ -492,7 +502,7 @@ fn main() {
                             }
 
                             let _ =
-                                api::utils::handle_command(handle, request)
+                                desktop::opening::handle_command(handle, request)
                                     .await;
                         });
                     }

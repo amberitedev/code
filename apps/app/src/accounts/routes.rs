@@ -179,7 +179,7 @@ async fn remove_minecraft_account(
 }
 
 /// The browser hands the session back to a loopback listener or through a `modrinth://auth`
-/// deep link; `crate::api::utils` delivers the deep link.
+/// deep link; `crate::desktop::opening` delivers the deep link.
 async fn sign_in_to_modrinth(
     State(engine): State<Arc<Engine>>,
     State(presence): State<Arc<Presence>>,
