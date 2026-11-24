@@ -3,7 +3,7 @@
 use axum::{Router, extract::State};
 use contracts::{
     ApiError, Json,
-    server::{Req, route},
+    server::{Mount, Req},
 };
 use engine::emit_warning;
 use tauri::{Manager, Runtime};
@@ -19,8 +19,9 @@ use crate::local_api::{
 };
 
 pub fn routes(app: AppSlot) -> Router {
-    let (path, method) = route::<GetOpeningCommand, _, _, _>(opening_route);
-    Router::new().route(path, method).with_state(app)
+    Router::new()
+        .endpoint::<GetOpeningCommand, _, _>(opening_route)
+        .with_state(app)
 }
 
 async fn opening_route(

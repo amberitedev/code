@@ -20,7 +20,7 @@ use axum::{
 };
 use contracts::{
     ApiError, ErrorCode, Json,
-    server::{Req, route},
+    server::{Mount, Req},
 };
 use tokio_util::io::ReaderStream;
 
@@ -34,18 +34,12 @@ use crate::{
 };
 
 pub fn routes(engine: EngineHandle) -> Router {
-    let (file_path, file) = route::<GetLocalFile, _, _, _>(local_file);
-    let (thumbnail_path, thumbnail) = route::<GetThumbnail, _, _, _>(thumbnail);
-    let (remote_icon_path, remote_icon) =
-        route::<CacheRemoteIcon, _, _, _>(cache_remote_icon);
-    let (read_path, read) = route::<ReadLocalFile, _, _, _>(read_file);
-    let (stat_path, stat) = route::<StatLocalFile, _, _, _>(stat_file);
     Router::new()
-        .route(file_path, file)
-        .route(thumbnail_path, thumbnail)
-        .route(remote_icon_path, remote_icon)
-        .route(read_path, read)
-        .route(stat_path, stat)
+        .endpoint::<GetLocalFile, _, _>(local_file)
+        .endpoint::<GetThumbnail, _, _>(thumbnail)
+        .endpoint::<CacheRemoteIcon, _, _>(cache_remote_icon)
+        .endpoint::<ReadLocalFile, _, _>(read_file)
+        .endpoint::<StatLocalFile, _, _>(stat_file)
         .with_state(engine)
 }
 

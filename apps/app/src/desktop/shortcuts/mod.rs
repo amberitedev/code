@@ -4,7 +4,7 @@ use anyhow::Result;
 use axum::Router;
 use contracts::{
     ApiError, Json,
-    server::{Req, route},
+    server::{Mount, Req},
 };
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -28,9 +28,7 @@ use macos::{SHORTCUT_EXTENSION, create_shortcut};
 use windows::{SHORTCUT_EXTENSION, create_shortcut};
 
 pub fn routes() -> Router {
-    let (path, handler) =
-        route::<CreateShortcut, _, _, _>(create_shortcut_route);
-    Router::new().route(path, handler)
+    Router::new().endpoint::<CreateShortcut, _, _>(create_shortcut_route)
 }
 
 async fn create_shortcut_route(

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use axum::{Router, extract::State};
 use contracts::{
     ApiError, Empty, Json,
-    server::{Req, route},
+    server::{Mount, Req},
 };
 use engine::Engine;
 use engine::data::ProcessMetadata;
@@ -18,15 +18,10 @@ use crate::local_api::{
 };
 
 pub fn routes() -> Router<AppState> {
-    [
-        route::<PlayInstance, _, _, _>(play_instance),
-        route::<JoinServer, _, _, _>(join_server),
-        route::<JoinSingleplayerWorld, _, _, _>(join_singleplayer_world),
-    ]
-    .into_iter()
-    .fold(Router::new(), |router, (path, method)| {
-        router.route(path, method)
-    })
+    Router::new()
+        .endpoint::<PlayInstance, _, _>(play_instance)
+        .endpoint::<JoinServer, _, _>(join_server)
+        .endpoint::<JoinSingleplayerWorld, _, _>(join_singleplayer_world)
 }
 
 async fn play_instance(

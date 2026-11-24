@@ -6,7 +6,7 @@ use std::{
 use axum::{Router, extract::State, http::StatusCode};
 use contracts::{
     ApiError, Empty, Json,
-    server::{Req, route},
+    server::{Mount, Req},
 };
 use engine::{Engine, data::CachedSharedInstanceSummary, routes::api_error};
 
@@ -20,16 +20,11 @@ use crate::local_api::{
 };
 
 pub fn routes() -> Router<AppState> {
-    [
-        route::<CanUseSharedInstances, _, _, _>(can_use_shared_instances),
-        route::<GetCachedSharedLibrary, _, _, _>(get_cached_shared_library),
-        route::<SetCachedSharedLibrary, _, _, _>(set_cached_shared_library),
-        route::<PublishSharedInstance, _, _, _>(publish_shared_instance),
-    ]
-    .into_iter()
-    .fold(Router::new(), |router, (path, method)| {
-        router.route(path, method)
-    })
+    Router::new()
+        .endpoint::<CanUseSharedInstances, _, _>(can_use_shared_instances)
+        .endpoint::<GetCachedSharedLibrary, _, _>(get_cached_shared_library)
+        .endpoint::<SetCachedSharedLibrary, _, _>(set_cached_shared_library)
+        .endpoint::<PublishSharedInstance, _, _>(publish_shared_instance)
 }
 
 async fn can_use_shared_instances(

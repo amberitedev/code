@@ -3,7 +3,7 @@ use std::sync::Arc;
 use axum::{Router, extract::State};
 use contracts::{
     Empty,
-    server::{Req, route},
+    server::{Mount, Req},
 };
 
 use crate::local_api::endpoints::desktop::{LogFromWebview, WebviewLogLevel};
@@ -17,9 +17,8 @@ pub fn plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
 
 /// The page's console prints local URLs, and the log is shared, so the secret is masked.
 pub fn routes(secret: &str) -> Router {
-    let (path, handler) = route::<LogFromWebview, _, _, _>(log);
     Router::new()
-        .route(path, handler)
+        .endpoint::<LogFromWebview, _, _>(log)
         .with_state(Arc::<str>::from(secret))
 }
 

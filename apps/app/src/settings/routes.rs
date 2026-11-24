@@ -3,7 +3,7 @@ use std::sync::Arc;
 use axum::{Router, extract::State};
 use contracts::{
     ApiError, Empty, Json,
-    server::{Req, route},
+    server::{Mount, Req},
 };
 use engine::{Engine, routes::api_error};
 
@@ -15,17 +15,15 @@ use crate::local_api::{
 };
 
 pub fn routes() -> Router<AppState> {
-    let (get_path, get) = route::<GetSettings, _, _, _>(get_settings);
-    let (set_path, set) = route::<SetSettings, _, _, _>(set_settings);
-    Router::new().route(get_path, get).route(set_path, set)
+    Router::new()
+        .endpoint::<GetSettings, _, _>(get_settings)
+        .endpoint::<SetSettings, _, _>(set_settings)
 }
 
 /// Routes that answer while the engine cannot start, so they wait on nothing.
 pub fn startup_routes(identifier: String) -> Router {
-    let (path, method) =
-        route::<CancelDirectoryChange, _, _, _>(cancel_directory_change);
     Router::new()
-        .route(path, method)
+        .endpoint::<CancelDirectoryChange, _, _>(cancel_directory_change)
         .with_state(Arc::from(identifier))
 }
 

@@ -31,12 +31,11 @@ use std::{sync::Arc, time::Duration};
 use axum::{
     Router,
     extract::{DefaultBodyLimit, FromRef},
-    handler::Handler,
     http::StatusCode,
-    routing::{any, get},
+    routing::any,
 };
 use color_eyre::eyre::{Result, eyre};
-use contracts::{ApiError, Endpoint, ErrorCode, core::*, server::route};
+use contracts::{ApiError, ErrorCode, core::*, server::Mount};
 use engine::{Engine, access::Access};
 use hyper_util::{
     rt::{TokioExecutor, TokioIo, TokioTimer},
@@ -107,30 +106,12 @@ impl FromRef<Shared> for Arc<dyn Access> {
     }
 }
 
-/// Mounting an Endpoint's handler at its method and path.
-trait Endpoints {
-    fn endpoint<E: Endpoint, H: Handler<T, Shared>, T: 'static>(
-        self,
-        handler: H,
-    ) -> Self;
-}
-
-impl Endpoints for Router<Shared> {
-    fn endpoint<E: Endpoint, H: Handler<T, Shared>, T: 'static>(
-        self,
-        handler: H,
-    ) -> Self {
-        let (path, method) = route::<E, _, _, _>(handler);
-        self.route(path, method)
-    }
-}
-
 /// Every route. Each one checks its caller itself (see `access`); the network listener adds its
 /// own checks on top (see `network::tls`).
 pub fn router(state: Arc<CoreState>) -> Router {
     Router::new()
         .endpoint::<CheckHealth, _, _>(health::get)
-        .route("/events", get(events::socket))
+        .endpoint::<EventSocket, _, _>(events::socket)
         .endpoint::<SignIn, _, _>(sessions::sign_in)
         .endpoint::<ListSessions, _, _>(sessions::list)
         .endpoint::<SignOut, _, _>(sessions::sign_out)
@@ -196,19 +177,15 @@ pub fn router(state: Arc<CoreState>) -> Router {
         // unpacking, zipping, uploading and exporting files go through them whole.
         .merge(engine_mount::long_routes())
         // Downloads stream for as long as they take.
-        .route(
-            "/servers/{id}/v1/worlds/{wid}/backups/{bid}/download",
-            get(backups::download_backup),
-        )
-        .route(
-            "/servers/{id}/v1/worlds/{wid}/files/download-full-zip",
-            get(backups::download_world),
-        )
+        .endpoint::<DownloadBackup, _, _>(backups::download_backup)
+        .endpoint::<DownloadWorld, _, _>(backups::download_world)
+        .endpoint::<ExportModpack, _, _>(engine_mount::export_mrpack)
         .layer(DefaultBodyLimit::max(MAX_BODY))
         // Uploads stream to disk with their own cap: the disk's free space (`archive::room`).
         .endpoint::<InstallModpackFile, _, _>(servers::install_modpack_file)
         .merge(engine_mount::upload_routes())
-        // The pool's store streams uploads and downloads of any size, with its own caps.
+        // The pool's store streams uploads and downloads of any size, with its own caps. It is a
+        // pass-through to the `copal store` process, which mounts its own Endpoints.
         .route("/store/{*rest}", any(storage::forward))
         .layer(DefaultBodyLimit::disable())
         .with_state(Shared(state))

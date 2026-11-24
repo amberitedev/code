@@ -2,10 +2,10 @@
 //! everything, so there is no subscribe protocol.
 
 use axum::{
+    Router,
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
-    routing::MethodRouter,
 };
-use contracts::ApiError;
+use contracts::{ApiError, server::Mount};
 use engine::{
     DesktopEvent, Event, EventSink, FriendPayload,
     InstanceGroupsChangedPayload, data::OnboardingChecklist,
@@ -143,11 +143,8 @@ impl Default for Events {
 /// Subscribes before answering the upgrade, so the socket misses nothing raised after it opens.
 /// It opens without waiting for the engine, so the page sees its startup. Opening it retries a
 /// failed start, as a reload did when the start was a command.
-pub fn route(
-    events: Events,
-    startup: EngineHandle,
-) -> (&'static str, MethodRouter) {
-    contracts::server::route::<EventSocket, _, _, _>(
+pub fn routes(events: Events, startup: EngineHandle) -> Router {
+    Router::new().endpoint::<EventSocket, _, _>(
         move |upgrade: WebSocketUpgrade| {
             let engine = events.engine.subscribe();
             let app = events.app.subscribe();

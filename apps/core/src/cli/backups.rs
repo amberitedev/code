@@ -2,10 +2,13 @@
 
 use clap::Subcommand;
 use color_eyre::eyre::{Result, bail};
-use contracts::core::{
-    BackupKind, BackupRef, BackupState, ChangeBackupSchedule, CreateBackup,
-    ListBackups, NewBackup, OperationKind, OperationState, RestoreBackup,
-    ScheduleUpdate, ServerBackup as Backup, ServerBackups, ServerId,
+use contracts::{
+    Empty, Json,
+    core::{
+        BackupKind, BackupRef, BackupState, ChangeBackupSchedule, CreateBackup,
+        ListBackups, NewBackup, OperationKind, OperationState, RestoreBackup,
+        ScheduleUpdate, ServerBackup as Backup, ServerBackups, ServerId,
+    },
 };
 
 use super::{Client, Output, call::call, servers};
@@ -112,7 +115,7 @@ pub async fn run(client: &Client, command: BackupsCommand) -> Result<Output> {
                 client,
                 &id(&server.id),
                 &(),
-                NewBackup { name },
+                Json(NewBackup { name }),
             )
             .await?;
             Ok(Output::new(
@@ -128,7 +131,7 @@ pub async fn run(client: &Client, command: BackupsCommand) -> Result<Output> {
                 id: server.id.clone(),
                 backup_id: backup.id.clone(),
             };
-            call::<RestoreBackup>(client, &target, &(), ()).await?;
+            call::<RestoreBackup>(client, &target, &(), Empty).await?;
             Ok(Output::new(
                 format!("Restoring {} on {}", backup.name, server.name),
                 backup,
@@ -156,11 +159,11 @@ pub async fn run(client: &Client, command: BackupsCommand) -> Result<Output> {
                     client,
                     &id(&server.id),
                     &(),
-                    ScheduleUpdate {
+                    Json(ScheduleUpdate {
                         interval_hours: every,
                         keep,
                         delete_excess: true,
-                    },
+                    }),
                 )
                 .await?;
                 deleted = changed.excess.len();
@@ -198,7 +201,7 @@ fn id(server_id: &str) -> ServerId {
 }
 
 async fn list(client: &Client, server_id: &str) -> Result<ServerBackups> {
-    call::<ListBackups>(client, &id(server_id), &(), ()).await
+    call::<ListBackups>(client, &id(server_id), &(), Empty).await
 }
 
 /// The backup `query` names: its id, the unique start of its id, or its name.

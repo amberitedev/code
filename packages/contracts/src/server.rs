@@ -3,6 +3,7 @@
 use std::future::Future;
 
 use axum::{
+    Router,
     body::{Body, Bytes},
     extract::{FromRequest, FromRequestParts, Path, Query, Request},
     handler::Handler,
@@ -25,8 +26,27 @@ impl IntoResponse for ApiError {
     }
 }
 
-/// The Endpoint's path, and `handler` as its method's route.
-pub fn route<E, H, T, S>(handler: H) -> (&'static str, MethodRouter<S>)
+/// Mounting routes on a router. Every route we own goes through [`Mount::endpoint`], so its method
+/// and path are always the Endpoint's.
+pub trait Mount<S> {
+    /// `handler` at `E`'s method and path.
+    fn endpoint<E: Endpoint, H: Handler<T, S>, T: 'static>(
+        self,
+        handler: H,
+    ) -> Self;
+}
+
+impl<S: Clone + Send + Sync + 'static> Mount<S> for Router<S> {
+    fn endpoint<E: Endpoint, H: Handler<T, S>, T: 'static>(
+        self,
+        handler: H,
+    ) -> Self {
+        let (path, method) = route::<E, H, T, S>(handler);
+        self.route(path, method)
+    }
+}
+
+fn route<E, H, T, S>(handler: H) -> (&'static str, MethodRouter<S>)
 where
     E: Endpoint,
     H: Handler<T, S>,
@@ -198,7 +218,7 @@ mod tests {
     use serde::{Deserialize, Serialize};
     use tower::ServiceExt;
 
-    use super::{Req, route};
+    use super::{Mount, Req};
     use crate::{ApiError, Auth, Empty, Endpoint, ErrorCode, Json, Method};
 
     #[derive(Serialize, Deserialize)]
@@ -237,7 +257,6 @@ mod tests {
     }
 
     async fn send(body: &'static str) -> (StatusCode, Vec<u8>) {
-        let (path, handler) = route::<RenameFile, _, _, ()>(rename);
         let file = File {
             id: "a b/c".into(),
             path: "config/x y.json".into(),
@@ -248,7 +267,7 @@ mod tests {
             .body(Body::from(body))
             .unwrap();
         let response = Router::new()
-            .route(path, handler)
+            .endpoint::<RenameFile, _, _>(rename)
             .oneshot(request)
             .await
             .unwrap();
@@ -287,9 +306,8 @@ mod tests {
 
     #[tokio::test]
     async fn a_route_without_a_query_ignores_one() {
-        let (path, handler) = route::<Ping, _, _, ()>(ping);
         let response = Router::new()
-            .route(path, handler)
+            .endpoint::<Ping, _, _>(ping)
             .oneshot(Request::get("/v1/ping?v=2").body(Body::empty()).unwrap())
             .await
             .unwrap();

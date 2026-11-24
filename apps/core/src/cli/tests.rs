@@ -180,7 +180,7 @@ async fn core() -> (tempfile::TempDir, Arc<CoreState>, Client) {
     });
     let client = Client::at(paths);
     for _ in 0..50 {
-        if client.get::<serde_json::Value>("/health").await.is_ok() {
+        if client.is_up().await {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;

@@ -7,7 +7,7 @@ use std::sync::Arc;
 use axum::{Router, extract::State};
 use contracts::{
     ApiError, Empty, Json,
-    server::{Req, route},
+    server::{Mount, Req},
 };
 use engine::{Engine, data::InstanceSyncedOptions, routes::api_error};
 
@@ -45,46 +45,41 @@ use crate::local_api::{
 type Answer<T> = Result<T, ApiError>;
 
 pub fn routes() -> Router<AppState> {
-    [
-        route::<ListGameOptionsSources, _, _, _>(list_game_options_sources),
-        route::<GetSyncedGameOptions, _, _, _>(get_synced_game_options),
-        route::<PreviewSyncedGameOptions, _, _, _>(preview_synced_game_options),
-        route::<SaveSyncedGameOptions, _, _, _>(save_synced_game_options),
-        route::<GetInstanceGameOptions, _, _, _>(get_instance_game_options),
-        route::<PreviewInstanceGameOptions, _, _, _>(
+    Router::new()
+        .endpoint::<ListGameOptionsSources, _, _>(list_game_options_sources)
+        .endpoint::<GetSyncedGameOptions, _, _>(get_synced_game_options)
+        .endpoint::<PreviewSyncedGameOptions, _, _>(preview_synced_game_options)
+        .endpoint::<SaveSyncedGameOptions, _, _>(save_synced_game_options)
+        .endpoint::<GetInstanceGameOptions, _, _>(get_instance_game_options)
+        .endpoint::<PreviewInstanceGameOptions, _, _>(
             preview_instance_game_options,
-        ),
-        route::<SaveInstanceGameOptions, _, _, _>(save_instance_game_options),
-        route::<GetGameSettingLabels, _, _, _>(get_game_setting_labels),
-        route::<SetInstanceSyncedOption, _, _, _>(set_instance_synced_option),
-        route::<PreviewSyncedOptionJoin, _, _, _>(preview_synced_option_join),
-        route::<GetInstanceSyncedOptions, _, _, _>(get_instance_synced_options),
-        route::<ListInstancesSyncedOptions, _, _, _>(
+        )
+        .endpoint::<SaveInstanceGameOptions, _, _>(save_instance_game_options)
+        .endpoint::<GetGameSettingLabels, _, _>(get_game_setting_labels)
+        .endpoint::<SetInstanceSyncedOption, _, _>(set_instance_synced_option)
+        .endpoint::<PreviewSyncedOptionJoin, _, _>(preview_synced_option_join)
+        .endpoint::<GetInstanceSyncedOptions, _, _>(get_instance_synced_options)
+        .endpoint::<ListInstancesSyncedOptions, _, _>(
             list_instances_synced_options,
-        ),
-        route::<GetGlobalSyncedOptions, _, _, _>(get_global_synced_options),
-        route::<GetInitializedSyncedOptions, _, _, _>(
+        )
+        .endpoint::<GetGlobalSyncedOptions, _, _>(get_global_synced_options)
+        .endpoint::<GetInitializedSyncedOptions, _, _>(
             get_initialized_synced_options,
-        ),
-        route::<SetGlobalSyncedOption, _, _, _>(set_global_synced_option),
-        route::<RebuildSyncedOptions, _, _, _>(rebuild_synced_options),
-        route::<GetCommandHistory, _, _, _>(get_command_history),
-        route::<SetCommandHistory, _, _, _>(set_command_history),
-        route::<ListSyncedServers, _, _, _>(list_synced_servers),
-        route::<UpdateSyncedServer, _, _, _>(update_synced_server),
-        route::<RemoveSyncedServer, _, _, _>(remove_synced_server),
-        route::<ListSyncedPacks, _, _, _>(list_synced_packs),
-        route::<UploadSyncedPack, _, _, _>(upload_synced_pack),
-        route::<SetSyncedPackEnabled, _, _, _>(set_synced_pack_enabled),
-        route::<RemoveSyncedPack, _, _, _>(remove_synced_pack),
-        route::<PreviewPackSync, _, _, _>(preview_pack_sync),
-        route::<SyncPack, _, _, _>(sync_pack),
-        route::<DesyncPack, _, _, _>(desync_pack),
-    ]
-    .into_iter()
-    .fold(Router::new(), |router, (path, method)| {
-        router.route(path, method)
-    })
+        )
+        .endpoint::<SetGlobalSyncedOption, _, _>(set_global_synced_option)
+        .endpoint::<RebuildSyncedOptions, _, _>(rebuild_synced_options)
+        .endpoint::<GetCommandHistory, _, _>(get_command_history)
+        .endpoint::<SetCommandHistory, _, _>(set_command_history)
+        .endpoint::<ListSyncedServers, _, _>(list_synced_servers)
+        .endpoint::<UpdateSyncedServer, _, _>(update_synced_server)
+        .endpoint::<RemoveSyncedServer, _, _>(remove_synced_server)
+        .endpoint::<ListSyncedPacks, _, _>(list_synced_packs)
+        .endpoint::<UploadSyncedPack, _, _>(upload_synced_pack)
+        .endpoint::<SetSyncedPackEnabled, _, _>(set_synced_pack_enabled)
+        .endpoint::<RemoveSyncedPack, _, _>(remove_synced_pack)
+        .endpoint::<PreviewPackSync, _, _>(preview_pack_sync)
+        .endpoint::<SyncPack, _, _>(sync_pack)
+        .endpoint::<DesyncPack, _, _>(desync_pack)
 }
 
 async fn list_game_options_sources(

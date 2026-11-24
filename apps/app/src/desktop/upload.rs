@@ -9,7 +9,7 @@ use std::{
 use axum::{Router, extract::State, http::StatusCode};
 use contracts::{
     ApiError, ErrorCode,
-    server::{Req, route},
+    server::{Mount, Req},
 };
 use engine::{
     routes::api_error,
@@ -23,8 +23,7 @@ use crate::local_api::{
 };
 
 pub fn routes() -> Router<AppState> {
-    let (path, upload) = route::<UploadLocalFile, _, _, _>(upload);
-    Router::new().route(path, upload)
+    Router::new().endpoint::<UploadLocalFile, _, _>(upload)
 }
 
 async fn upload(

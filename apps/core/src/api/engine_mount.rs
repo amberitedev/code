@@ -18,7 +18,7 @@ use contracts::{
     ApiError, ErrorCode, Json,
     backend::cores::ForgottenServer,
     core::Action,
-    server::{Req, route},
+    server::{Mount, Req},
 };
 use engine::{
     Engine,
@@ -78,133 +78,114 @@ const ICON: Hook = Hook { icon: true, ..FILE };
 /// Routes that answer within the request timeout.
 pub fn routes() -> Router<Shared> {
     use engine_routes::*;
-    [
-        route::<ListContentItems, _, _, _>(list_content_items),
-        route::<ListLinkedModpackContent, _, _, _>(list_linked_modpack_content),
-        route::<RefreshContentUpdates, _, _, _>(refresh_content_updates),
-        route::<GetSharedInstanceHistory, _, _, _>(get_shared_instance_history),
-        route::<GetSharedInstancePublishPreview, _, _, _>(publish_preview),
-        route::<ToggleProject, _, _, _>(change(EDIT, toggle_project)),
-        route::<RemoveProject, _, _, _>(change(EDIT, remove_project)),
-        route::<SetSide, _, _, _>(change(EDIT, set_side)),
-        route::<SetSidesUnlocked, _, _, _>(change(EDIT, set_sides_unlocked)),
-        route::<CompleteSideReview, _, _, _>(change(
+    Router::new()
+        .endpoint::<ListContentItems, _, _>(list_content_items)
+        .endpoint::<ListLinkedModpackContent, _, _>(list_linked_modpack_content)
+        .endpoint::<RefreshContentUpdates, _, _>(refresh_content_updates)
+        .endpoint::<GetSharedInstanceHistory, _, _>(get_shared_instance_history)
+        .endpoint::<GetSharedInstancePublishPreview, _, _>(publish_preview)
+        .endpoint::<ToggleProject, _, _>(change(EDIT, toggle_project))
+        .endpoint::<RemoveProject, _, _>(change(EDIT, remove_project))
+        .endpoint::<SetSide, _, _>(change(EDIT, set_side))
+        .endpoint::<SetSidesUnlocked, _, _>(change(EDIT, set_sides_unlocked))
+        .endpoint::<CompleteSideReview, _, _>(change(
             EDIT,
             complete_side_review,
-        )),
-        route::<UnlinkModpack, _, _, _>(change(EDIT, unlink_modpack)),
-        route::<DeleteSharedInstanceVersion, _, _, _>(change(
+        ))
+        .endpoint::<UnlinkModpack, _, _>(change(EDIT, unlink_modpack))
+        .endpoint::<DeleteSharedInstanceVersion, _, _>(change(
             SHARE,
             delete_shared_instance_version,
-        )),
-        route::<UnpublishSharedInstance, _, _, _>(change(
+        ))
+        .endpoint::<UnpublishSharedInstance, _, _>(change(
             SHARE,
             unpublish_shared_instance,
-        )),
-        route::<UnlinkSharedInstance, _, _, _>(change(
+        ))
+        .endpoint::<UnlinkSharedInstance, _, _>(change(
             Hook {
                 forget_players: true,
                 ..EDIT
             },
             unlink_shared_instance,
-        )),
-        route::<ListInstanceFiles, _, _, _>(list_instance_files),
-        route::<StatInstanceFile, _, _, _>(stat_instance_file),
-        route::<CreateInstanceDirectory, _, _, _>(change(
+        ))
+        .endpoint::<ListInstanceFiles, _, _>(list_instance_files)
+        .endpoint::<StatInstanceFile, _, _>(stat_instance_file)
+        .endpoint::<CreateInstanceDirectory, _, _>(change(
             FILE,
             create_instance_directory,
-        )),
-        route::<MoveInstanceFile, _, _, _>(change(FILE, move_instance_file)),
-        route::<DeleteInstanceFile, _, _, _>(change(
+        ))
+        .endpoint::<MoveInstanceFile, _, _>(change(FILE, move_instance_file))
+        .endpoint::<DeleteInstanceFile, _, _>(change(
             FILE,
             delete_instance_file,
-        )),
-        route::<OpenInstanceUpload, _, _, _>(open_instance_upload),
-        route::<GetInstanceUpload, _, _, _>(get_instance_upload),
-        route::<CancelInstanceUpload, _, _, _>(cancel_instance_upload),
-        route::<GetInstanceIcon, _, _, _>(get_instance_icon),
-        route::<SetInstanceIcon, _, _, _>(change(ICON, set_instance_icon)),
-        route::<SetEditedInstanceIcon, _, _, _>(change(
+        ))
+        .endpoint::<OpenInstanceUpload, _, _>(open_instance_upload)
+        .endpoint::<GetInstanceUpload, _, _>(get_instance_upload)
+        .endpoint::<CancelInstanceUpload, _, _>(cancel_instance_upload)
+        .endpoint::<GetInstanceIcon, _, _>(get_instance_icon)
+        .endpoint::<SetInstanceIcon, _, _>(change(ICON, set_instance_icon))
+        .endpoint::<SetEditedInstanceIcon, _, _>(change(
             ICON,
             set_edited_instance_icon,
-        )),
-        route::<RemoveInstanceIcon, _, _, _>(change(
+        ))
+        .endpoint::<RemoveInstanceIcon, _, _>(change(
             ICON,
             remove_instance_icon,
-        )),
-    ]
-    .into_iter()
-    .fold(Router::new(), |router, (path, method)| {
-        router.route(path, method)
-    })
+        ))
 }
 
 /// Routes that download, or back the world up, first, or go through whole files and folders, which
 /// can take longer than the request timeout, and reads at the same paths.
 pub fn long_routes() -> Router<Shared> {
     use engine_routes::*;
-    [
-        route::<GetLinkedModpack, _, _, _>(get_linked_modpack),
-        route::<EditedFiles, _, _, _>(edited_files),
-        route::<AddProjectFromVersion, _, _, _>(change(
+    Router::new()
+        .endpoint::<GetLinkedModpack, _, _>(get_linked_modpack)
+        .endpoint::<EditedFiles, _, _>(edited_files)
+        .endpoint::<AddProjectFromVersion, _, _>(change(
             EDIT,
             add_project_from_version,
-        )),
-        route::<InstallProjectWithDependencies, _, _, _>(change(
+        ))
+        .endpoint::<InstallProjectWithDependencies, _, _>(change(
             EDIT,
             install_with_dependencies,
-        )),
-        route::<UpdateProject, _, _, _>(change(EDIT, update_project)),
-        route::<SwitchProjectVersion, _, _, _>(change(
+        ))
+        .endpoint::<UpdateProject, _, _>(change(EDIT, update_project))
+        .endpoint::<SwitchProjectVersion, _, _>(change(
             EDIT,
             switch_project_version,
-        )),
-        route::<DecideEdited, _, _, _>(change(EDIT, decide_edited)),
-        route::<PlaceClientOnly, _, _, _>(change(EDIT, place_client_only)),
-        route::<RepairContent, _, _, _>(change(EDIT, repair_content)),
-        route::<UpdateInstanceContent, _, _, _>(change(
+        ))
+        .endpoint::<DecideEdited, _, _>(change(EDIT, decide_edited))
+        .endpoint::<PlaceClientOnly, _, _>(change(EDIT, place_client_only))
+        .endpoint::<RepairContent, _, _>(change(EDIT, repair_content))
+        .endpoint::<UpdateInstanceContent, _, _>(change(
             JOB,
             update_instance_content,
-        )),
-        route::<RepairModpack, _, _, _>(change(JOB, repair_modpack)),
-        route::<InstallModpack, _, _, _>(change(BACKUP_JOB, install_modpack)),
-        route::<UpdateModpackVersion, _, _, _>(change(
+        ))
+        .endpoint::<RepairModpack, _, _>(change(JOB, repair_modpack))
+        .endpoint::<InstallModpack, _, _>(change(BACKUP_JOB, install_modpack))
+        .endpoint::<UpdateModpackVersion, _, _>(change(
             BACKUP_JOB,
             update_modpack_version,
-        )),
-        route::<RestoreSharedInstanceVersion, _, _, _>(change(
+        ))
+        .endpoint::<RestoreSharedInstanceVersion, _, _>(change(
             BACKUP_JOB,
             restore_shared_instance_version,
-        )),
-        route::<ReadInstanceFile, _, _, _>(read_instance_file),
-        route::<ExtractInstanceZip, _, _, _>(extract_zip),
-        route::<ZipInstanceFiles, _, _, _>(change(FILE, zip_instance_files)),
-        route::<FinalizeInstanceUpload, _, _, _>(change(
+        ))
+        .endpoint::<ReadInstanceFile, _, _>(read_instance_file)
+        .endpoint::<ExtractInstanceZip, _, _>(extract_zip)
+        .endpoint::<ZipInstanceFiles, _, _>(change(FILE, zip_instance_files))
+        .endpoint::<FinalizeInstanceUpload, _, _>(change(
             FILE,
             finalize_instance_upload,
-        )),
-    ]
-    .into_iter()
-    .fold(Router::new(), |router, (path, method)| {
-        router.route(path, method)
-    })
-    .route(
-        "/servers/{id}/v1/worlds/{wid}/content/export-mrpack",
-        axum::routing::get(export_mrpack),
-    )
+        ))
 }
 
 /// Routes whose body is a file of any size.
 pub fn upload_routes() -> Router<Shared> {
     use engine_routes::*;
-    [
-        route::<WriteInstanceFile, _, _, _>(change(FILE, write_instance_file)),
-        route::<AddInstanceUploadFile, _, _, _>(add_instance_upload_file),
-    ]
-    .into_iter()
-    .fold(Router::new(), |router, (path, method)| {
-        router.route(path, method)
-    })
+    Router::new()
+        .endpoint::<WriteInstanceFile, _, _>(change(FILE, write_instance_file))
+        .endpoint::<AddInstanceUploadFile, _, _>(add_instance_upload_file)
 }
 
 /// A dry run changes nothing, so only a real one is logged.
@@ -225,11 +206,11 @@ async fn extract_zip(
     Ok(extracted)
 }
 
-/// `GET /servers/{id}/v1/worlds/{wid}/content/export-mrpack`: the server's content as an
-/// `.mrpack`, written to its staging folder, streamed, then removed. The App saves it natively, so
-/// it asks for a link first (`access::links`). A server exports what upstream's export selects by
-/// default: its content folders and `config/`.
-async fn export_mrpack(
+/// [`ExportModpack`](contracts::core::ExportModpack): the server's content as an `.mrpack`, written
+/// to its staging folder, streamed, then removed. The App saves it natively, so it asks for a link
+/// first (`access::links`). A server exports what upstream's export selects by default: its
+/// content folders and `config/`.
+pub(super) async fn export_mrpack(
     caller: Caller,
     State(state): State<Arc<CoreState>>,
     Path((id, wid)): Path<(String, String)>,

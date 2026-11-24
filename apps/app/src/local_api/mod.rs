@@ -25,7 +25,7 @@ use axum::{
 };
 use contracts::{
     ApiError, Empty, Json,
-    server::{Req, route},
+    server::{Mount, Req},
 };
 use engine::{
     Engine, EventSink,
@@ -115,15 +115,6 @@ impl LocalServer {
             self.port(),
             self.dev_url.as_ref(),
         ));
-        let (health_path, health) =
-            route::<CheckHealth, _, _, _>(|_: Req<CheckHealth>| async {
-                Empty
-            });
-        let (boot_path, boot) =
-            route::<GetBoot, _, _, _>(move |_: Req<GetBoot>| {
-                let boot = boot.clone();
-                async move { Json(boot) }
-            });
         let ops = Arc::new(ops::Ops::new(events.app.clone()));
         let state = AppState {
             engine: engine.clone(),
@@ -134,7 +125,7 @@ impl LocalServer {
             app: app.clone(),
             events: events.engine.clone(),
         };
-        let (events_path, events) = events::route(events, engine.clone());
+        let events = events::routes(events, engine.clone());
         // Updates come without the engine, so a release that cannot start it can still be fixed.
         let updates = ops::routes()
             .merge(desktop::updater::routes())
@@ -167,9 +158,14 @@ impl LocalServer {
                 wait_for_engine,
             ));
         let routes = Router::new()
-            .route(health_path, health)
-            .route(boot_path, boot)
-            .route(events_path, events)
+            .endpoint::<CheckHealth, _, _>(|_: Req<CheckHealth>| async {
+                Empty
+            })
+            .endpoint::<GetBoot, _, _>(move |_: Req<GetBoot>| {
+                let boot = boot.clone();
+                async move { Json(boot) }
+            })
+            .merge(events)
             .merge(waiting)
             .merge(updates)
             .merge(cores::routes(Arc::clone(&self.cores)))

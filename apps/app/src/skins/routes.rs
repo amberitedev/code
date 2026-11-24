@@ -5,7 +5,7 @@ use std::sync::Arc;
 use axum::{Router, extract::State};
 use contracts::{
     ApiError, Empty, Json, Raw,
-    server::{Req, route},
+    server::{Mount, Req},
 };
 use engine::Engine;
 
@@ -23,22 +23,17 @@ use crate::skins::minecraft_skins::{self, Cape, Skin};
 type Answer<T> = Result<T, ApiError>;
 
 pub fn routes() -> Router<AppState> {
-    [
-        route::<ListCapes, _, _, _>(list_capes),
-        route::<ListSkins, _, _, _>(list_skins),
-        route::<SaveCustomSkin, _, _, _>(save_custom_skin),
-        route::<RemoveCustomSkin, _, _, _>(remove_custom_skin),
-        route::<SetCustomSkinOrder, _, _, _>(set_custom_skin_order),
-        route::<AddAndEquipCustomSkin, _, _, _>(add_and_equip_custom_skin),
-        route::<EquipSkin, _, _, _>(equip_skin),
-        route::<UnequipSkin, _, _, _>(unequip_skin),
-        route::<FlushPendingSkinChange, _, _, _>(flush_pending_skin_change),
-        route::<NormalizeSkinTexture, _, _, _>(normalize_skin_texture),
-    ]
-    .into_iter()
-    .fold(Router::new(), |router, (path, method)| {
-        router.route(path, method)
-    })
+    Router::new()
+        .endpoint::<ListCapes, _, _>(list_capes)
+        .endpoint::<ListSkins, _, _>(list_skins)
+        .endpoint::<SaveCustomSkin, _, _>(save_custom_skin)
+        .endpoint::<RemoveCustomSkin, _, _>(remove_custom_skin)
+        .endpoint::<SetCustomSkinOrder, _, _>(set_custom_skin_order)
+        .endpoint::<AddAndEquipCustomSkin, _, _>(add_and_equip_custom_skin)
+        .endpoint::<EquipSkin, _, _>(equip_skin)
+        .endpoint::<UnequipSkin, _, _>(unequip_skin)
+        .endpoint::<FlushPendingSkinChange, _, _>(flush_pending_skin_change)
+        .endpoint::<NormalizeSkinTexture, _, _>(normalize_skin_texture)
 }
 
 async fn list_capes(

@@ -1,16 +1,15 @@
 //! HTTP and the `/events` socket over Core's local socket, which only `copal` and the owner may
 //! open. A request that arrives this way is the owner's, with no token or ticket.
 
-use axum::http::{Method, Request, header};
+use axum::http::{HeaderValue, Request, header};
 use bytes::Bytes;
 use color_eyre::eyre::{Result, WrapErr, bail};
 use contracts::{
-    ApiError,
-    core::{ClientMessage, Topic},
+    ApiError, Empty,
+    core::{CheckHealth, ClientMessage, Topic},
 };
 use http_body_util::{BodyExt, Full};
 use hyper_util::rt::TokioIo;
-use serde::{Serialize, de::DeserializeOwned};
 use tokio_tungstenite::WebSocketStream;
 
 use crate::{
@@ -66,35 +65,18 @@ impl Client {
         Self { paths }
     }
 
-    pub async fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
-        self.call(Method::GET, path, None::<&()>).await
+    /// Whether Core answers on its local socket.
+    pub async fn is_up(&self) -> bool {
+        super::call::call::<CheckHealth>(self, &(), &(), Empty)
+            .await
+            .is_ok()
     }
 
-    /// Send a request and read the answer as `T`. An empty answer reads as `null`, so `()`
-    /// takes it.
-    pub async fn call<T: DeserializeOwned>(
-        &self,
-        method: Method,
-        path: &str,
-        body: Option<&impl Serialize>,
-    ) -> Result<T> {
-        let body = match body {
-            Some(body) => Bytes::from(serde_json::to_vec(body)?),
-            None => Bytes::new(),
-        };
-        let body = self.send(method, path, body).await?;
-        let body: &[u8] = if body.is_empty() { b"null" } else { &body };
-        serde_json::from_slice(body)
-            .wrap_err("Core answered something this CLI cannot read")
-    }
-
-    /// Send a JSON request and return the body of a successful answer.
+    /// Send `request` and return the status, content type and body of a successful answer.
     pub(super) async fn send(
         &self,
-        method: Method,
-        path: &str,
-        body: Bytes,
-    ) -> Result<Bytes> {
+        request: Request<Bytes>,
+    ) -> Result<(u16, Option<String>, Bytes)> {
         let mut sender = hyper::client::conn::http1::handshake(TokioIo::new(
             self.connect().await?,
         ))
@@ -103,19 +85,23 @@ impl Client {
             tokio::spawn(connection);
             sender
         })?;
-        let request = Request::builder()
-            .method(method)
-            .uri(path)
-            .header(header::HOST, "copal")
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(Full::new(body))?;
+        let path = request.uri().path().to_owned();
+        let (mut parts, body) = request.into_parts();
+        parts
+            .headers
+            .insert(header::HOST, HeaderValue::from_static("copal"));
         // Core drops a connection from an account other than `copal` and the owner without a
         // word, which reads here as a broken pipe or a closed connection.
         let response = sender
-            .send_request(request)
+            .send_request(Request::from_parts(parts, Full::new(body)))
             .await
             .wrap_err_with(refused_message)?;
         let status = response.status();
+        let content_type = response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
         let body = response.into_body().collect().await?.to_bytes();
         if status == axum::http::StatusCode::NOT_FOUND && body.is_empty() {
             bail!(
@@ -131,11 +117,11 @@ impl Client {
                 ),
             }
         }
-        Ok(body)
+        Ok((status.as_u16(), content_type, body))
     }
 
     /// The `/events` socket, subscribed to a server's console. It sends `console` events as JSON
-    /// text, or `ended` when Core refused the subscription.
+    /// text.
     pub async fn console(
         &self,
         server_id: &str,

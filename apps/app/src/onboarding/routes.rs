@@ -3,7 +3,7 @@ use std::sync::Arc;
 use axum::{Router, extract::State};
 use contracts::{
     ApiError, Empty, Json,
-    server::{Req, route},
+    server::{Mount, Req},
 };
 use engine::{Engine, routes::api_error};
 
@@ -16,12 +16,11 @@ use crate::local_api::{
 };
 
 pub fn routes() -> Router<AppState> {
-    let (get_path, get) =
-        route::<GetOnboardingChecklist, _, _, _>(get_onboarding_checklist);
-    let (skip_path, skip) = route::<SkipCreateInstanceOnboarding, _, _, _>(
-        skip_create_instance_onboarding,
-    );
-    Router::new().route(get_path, get).route(skip_path, skip)
+    Router::new()
+        .endpoint::<GetOnboardingChecklist, _, _>(get_onboarding_checklist)
+        .endpoint::<SkipCreateInstanceOnboarding, _, _>(
+            skip_create_instance_onboarding,
+        )
 }
 
 async fn get_onboarding_checklist(
