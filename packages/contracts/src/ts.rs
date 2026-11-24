@@ -93,11 +93,7 @@ pub fn check(path: &str, generated: &str) {
     }
     let written = std::fs::read_to_string(path).unwrap_or_default();
     assert!(
-        written.replace(
-            "
-", "
-"
-        ) == generated,
+        written.replace("\r\n", "\n") == generated,
         "{path} is out of date. Regenerate it with WRITE_TS=1 node scripts/dev-runner.ts test <crate>"
     );
 }
