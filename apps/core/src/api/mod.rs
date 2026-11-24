@@ -1,8 +1,8 @@
 //! The HTTP API: Axum routes, one file per resource. The same router serves HTTPS and the local
 //! socket (see `access::local`).
 //!
-//! Routes only a Core has are `contracts::core` Endpoints. A server's content, share, files and
-//! icon are the engine's routes (`engine_mount`). The download routes match the `Kyros.*` shapes in
+//! Routes only a Core has are `contracts::core` Endpoints. A server's content, share, files, icon
+//! and logs are the engine's routes (`engine_mount`). The download routes match the `Kyros.*` shapes in
 //! `packages/api-client/src/modules`.
 
 pub mod activity;
@@ -157,7 +157,7 @@ pub fn router(state: Arc<CoreState>) -> Router {
         .endpoint::<AckOperation, _, _>(backups::ack)
         .endpoint::<CancelOperation, _, _>(backups::cancel)
         .endpoint::<SetJava, _, _>(startup::set_java_path)
-        .merge(engine_mount::routes())
+        .merge(engine_mount::routes(Router::new()))
         // Applies to the routes above only.
         .layer(TimeoutLayer::with_status_code(
             StatusCode::REQUEST_TIMEOUT,
@@ -175,7 +175,7 @@ pub fn router(state: Arc<CoreState>) -> Router {
         // Adding and updating addons download them first, as does taking the pack's version of
         // an edited file, and a pack's install or update backs the world up first. Reading,
         // unpacking, zipping, uploading and exporting files go through them whole.
-        .merge(engine_mount::long_routes())
+        .merge(engine_mount::long_routes(Router::new()))
         // Downloads stream for as long as they take.
         .endpoint::<DownloadBackup, _, _>(backups::download_backup)
         .endpoint::<DownloadWorld, _, _>(backups::download_world)
@@ -183,7 +183,7 @@ pub fn router(state: Arc<CoreState>) -> Router {
         .layer(DefaultBodyLimit::max(MAX_BODY))
         // Uploads stream to disk with their own cap: the disk's free space (`archive::room`).
         .endpoint::<InstallModpackFile, _, _>(servers::install_modpack_file)
-        .merge(engine_mount::upload_routes())
+        .merge(engine_mount::upload_routes(Router::new()))
         // The pool's store streams uploads and downloads of any size, with its own caps. It is a
         // pass-through to the `copal store` process, which mounts its own Endpoints.
         .route("/store/{*rest}", any(storage::forward))

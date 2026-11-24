@@ -9,38 +9,38 @@ contracts::endpoints! {
     group instanceFiles;
 
     /// A folder's entries; `path` is `""` for the instance's own folder.
-    ListInstanceFiles: Get "/instances/{id}/files", Session, InstanceRef, InstanceFilePath, Empty => Json<Vec<InstanceFileItem>>;
-    ReadInstanceFile: Get "/instances/{id}/files/content", Session, InstanceRef, InstanceFilePath, Empty => Raw;
-    WriteInstanceFile: Put "/instances/{id}/files/content", Session, InstanceRef, InstanceFileWrite, Raw => Empty;
-    CreateInstanceDirectory: Post "/instances/{id}/files/directories", Session, InstanceRef, InstanceFilePath, Empty => Empty;
+    ListInstanceFiles: Get "/instances/{id}/files", Session, InstanceRef, InstanceFilePath, Empty => Json<Vec<InstanceFileItem>>, shared;
+    ReadInstanceFile: Get "/instances/{id}/files/content", Session, InstanceRef, InstanceFilePath, Empty => Raw, shared;
+    WriteInstanceFile: Put "/instances/{id}/files/content", Session, InstanceRef, InstanceFileWrite, Raw => Empty, shared;
+    CreateInstanceDirectory: Post "/instances/{id}/files/directories", Session, InstanceRef, InstanceFilePath, Empty => Empty, shared;
     /// Renames or moves; refused when something is already at `destination`.
-    MoveInstanceFile: Post "/instances/{id}/files/move", Session, InstanceRef, (), Json<InstanceFileMove> => Empty;
-    DeleteInstanceFile: Delete "/instances/{id}/files", Session, InstanceRef, InstanceFileDelete, Empty => Empty;
+    MoveInstanceFile: Post "/instances/{id}/files/move", Session, InstanceRef, (), Json<InstanceFileMove> => Empty, shared;
+    DeleteInstanceFile: Delete "/instances/{id}/files", Session, InstanceRef, InstanceFileDelete, Empty => Empty, shared;
     /// Extracts a zip into `target`, by default its own folder. A dry run extracts nothing and
     /// answers which files it would replace; a real run answers `null`.
-    ExtractInstanceZip: Post "/instances/{id}/files/extract", Session, InstanceRef, (), Json<InstanceZipExtract> => Json<Option<ExtractDryRunResult>>;
+    ExtractInstanceZip: Post "/instances/{id}/files/extract", Session, InstanceRef, (), Json<InstanceZipExtract> => Json<Option<ExtractDryRunResult>>, shared;
     /// What is at `path`, without following a link there.
-    StatInstanceFile: Get "/instances/{id}/files/stat", Session, InstanceRef, InstanceFilePath, Empty => Json<InstanceFileStat>;
+    StatInstanceFile: Get "/instances/{id}/files/stat", Session, InstanceRef, InstanceFilePath, Empty => Json<InstanceFileStat>, shared;
     /// Writes a zip of a folder, or of some paths in one folder, skipping links.
-    ZipInstanceFiles: Post "/instances/{id}/files/zip", Session, InstanceRef, (), Json<InstanceZipRequest> => Empty;
+    ZipInstanceFiles: Post "/instances/{id}/files/zip", Session, InstanceRef, (), Json<InstanceZipRequest> => Empty, shared;
     /// Opens an upload for the caller, ending any open one they had in its scope. Files wait
     /// outside the instance until it is finalized.
-    OpenInstanceUpload: Post "/instances/{id}/uploads", Session, InstanceRef, (), Json<InstanceUploadScope> => Json<InstanceUpload>;
+    OpenInstanceUpload: Post "/instances/{id}/uploads", Session, InstanceRef, (), Json<InstanceUploadScope> => Json<InstanceUpload>, shared;
     /// The caller's open upload in a scope, if any.
-    GetInstanceUpload: Get "/instances/{id}/uploads", Session, InstanceRef, InstanceUploadScope, Empty => Json<Option<InstanceUpload>>;
+    GetInstanceUpload: Get "/instances/{id}/uploads", Session, InstanceRef, InstanceUploadScope, Empty => Json<Option<InstanceUpload>>, shared;
     /// Adds the body as a file: `path` is where it goes for `files`, its file name for `content`.
-    AddInstanceUploadFile: Post "/instances/{id}/uploads/{upload}/files", Session, InstanceUploadRef, InstanceFilePath, Stream => Json<InstanceUpload>;
+    AddInstanceUploadFile: Post "/instances/{id}/uploads/{upload}/files", Session, InstanceUploadRef, InstanceFilePath, Stream => Json<InstanceUpload>, shared;
     /// Puts every file in place, never over a server-owned file; content goes through the
     /// instance's content.
-    FinalizeInstanceUpload: Post "/instances/{id}/uploads/{upload}/finalize", Session, InstanceUploadRef, (), Empty => Json<InstanceUpload>;
-    CancelInstanceUpload: Delete "/instances/{id}/uploads/{upload}", Session, InstanceUploadRef, (), Empty => Json<InstanceUpload>;
+    FinalizeInstanceUpload: Post "/instances/{id}/uploads/{upload}/finalize", Session, InstanceUploadRef, (), Empty => Json<InstanceUpload>, shared;
+    CancelInstanceUpload: Delete "/instances/{id}/uploads/{upload}", Session, InstanceUploadRef, (), Empty => Json<InstanceUpload>, shared;
     /// The instance's icon as a PNG, up to 512x512.
-    GetInstanceIcon: Get "/instances/{id}/icon", Session, InstanceRef, (), Empty => Raw;
+    GetInstanceIcon: Get "/instances/{id}/icon", Session, InstanceRef, (), Empty => Raw, shared;
     /// The body is a PNG, JPEG, GIF or WebP image. Clears the icon editor's settings.
-    SetInstanceIcon: Put "/instances/{id}/icon", Session, InstanceRef, (), Raw => Empty;
+    SetInstanceIcon: Put "/instances/{id}/icon", Session, InstanceRef, (), Raw => Empty, shared;
     /// An icon made in the icon editor, kept with the settings it was made from.
-    SetEditedInstanceIcon: Put "/instances/{id}/icon/edited", Session, InstanceRef, (), Json<EditedInstanceIcon> => Empty;
-    RemoveInstanceIcon: Delete "/instances/{id}/icon", Session, InstanceRef, (), Empty => Empty;
+    SetEditedInstanceIcon: Put "/instances/{id}/icon/edited", Session, InstanceRef, (), Json<EditedInstanceIcon> => Empty, shared;
+    RemoveInstanceIcon: Delete "/instances/{id}/icon", Session, InstanceRef, (), Empty => Empty, shared;
 }
 
 /// A path inside the instance's folder, `/`-separated.

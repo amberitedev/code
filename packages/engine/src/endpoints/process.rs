@@ -10,10 +10,10 @@ contracts::endpoints! {
 
     /// The running games of every instance the caller may view. `Process` events report starts and
     /// exits.
-    ListProcesses: Get "/processes", Session, (), (), Empty => Json<Vec<ProcessMetadata>>;
-    ListInstanceProcesses: Get "/instances/{id}/processes", Session, InstanceRef, (), Empty => Json<Vec<ProcessMetadata>>;
+    ListProcesses: Get "/processes", Session, (), (), Empty => Json<Vec<ProcessMetadata>>, client_only;
+    ListInstanceProcesses: Get "/instances/{id}/processes", Session, InstanceRef, (), Empty => Json<Vec<ProcessMetadata>>, client_only;
     /// Needs Edit on the game's instance. A game that already exited is not an error.
-    KillProcess: Post "/processes/{uuid}/kill", Session, ProcessRef, (), Empty => Empty;
+    KillProcess: Post "/processes/{uuid}/kill", Session, ProcessRef, (), Empty => Empty, client_only;
 }
 
 #[derive(Serialize, Deserialize)]

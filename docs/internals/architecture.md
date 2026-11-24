@@ -205,12 +205,18 @@ actions still need a fresh ticket (`Dangerous`). Nothing in a request can change
 runs. Sessions, tickets and revalidation are Core
 concepts and stay on `CoreAccess`.
 
-A Core does not mount `engine::routes()`. It mounts the routes
-[`engine_mount.rs`](../../apps/core/src/api/engine_mount.rs) lists: one whose body or answer is a
-host path, or that reaches the whole engine or runs code on the host (the edit-instance route's
-launch hooks and Java path), would hand the Core's machine to anyone who can reach a server's
-routes. Each change it mounts holds the server first, so content never changes under a running
-server or an install.
+A Core does not mount `engine::routes()`. Each engine Endpoint is declared `shared` or
+`client_only`, and [`engine_mount.rs`](../../apps/core/src/api/engine_mount.rs) mounts exactly the
+`shared` ones, which tests check along with that no `shared` route's types hold a `PathBuf`. A
+route whose body or answer is a host path, or that reaches the whole engine or runs code on the
+host (the edit-instance route's launch hooks and Java path), is `client_only`: it would hand the
+Core's machine to anyone who can reach a server's routes. Each change it mounts holds the server
+first, so content never changes under a running server or an install.
+
+The file and log routes walk a server's folder from a handle
+([`sandbox`](../../packages/engine/src/util/sandbox.rs)), so a link or FIFO a mod planted is never
+followed or read. The App's file routes walk the same way and keep `mods/` and managed content
+read-only (`ManagedPaths`), because they are hard links into the content store.
 
 ## Events, and resync when one is lost
 
