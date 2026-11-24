@@ -288,8 +288,9 @@ async function deleteUser(env: Env, target: UserRow) {
 	).results
 	await env.DB.prepare('DELETE FROM users WHERE id = ?').bind(target.id).run()
 	await env.FRIENDS.getByName(target.id).revalidateSessions()
-	const avatar = storedAvatar(target)
-	if (avatar) await env.FILES.delete(avatar)
+	// Listed rather than read from the row: overlapping uploads can each leave an image behind.
+	const avatars = await env.FILES.list({ prefix: `avatars/${target.id}/` })
+	if (avatars.objects.length) await env.FILES.delete(avatars.objects.map((object) => object.key))
 	for (const instance of instances) await sweepFiles(env, instance.id)
 }
 

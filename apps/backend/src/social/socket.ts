@@ -48,6 +48,9 @@ export class FriendsHub extends DurableObject<Env> {
 		await this.scheduleExpiry()
 		// The same call that tells each friend this account is online answers with their presence.
 		// Another installation of an account already online asks only the friends known online.
+		// Answers are merged, not assigned: a friend who connects while this call waits on D1 or
+		// another object is added by `notify` and has no socket yet to answer with.
+		if (!wasOnline) this.known = new Set()
 		const statuses = (
 			await this.broadcast(
 				session.user_id,
@@ -55,7 +58,9 @@ export class FriendsHub extends DurableObject<Env> {
 				!wasOnline,
 			)
 		).filter((status) => status !== null)
-		await this.remember(new Set(statuses.map((status) => status.user_id)))
+		const known = new Set(await this.knownOnline())
+		for (const status of statuses) known.add(status.user_id)
+		await this.remember(known)
 		const sync: ServerToClientMessage = { type: 'friend_statuses', statuses }
 		pair[1].send(JSON.stringify(sync))
 		return new Response(null, { status: 101, webSocket: pair[0] })
