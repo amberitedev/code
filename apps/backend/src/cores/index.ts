@@ -363,20 +363,28 @@ async function reportState(request: Request, env: Env, body: () => Promise<State
 	await writeState(env, core, await body())
 }
 
+/**
+ * A Core as its own calls see it, with whether its owner's account is locked or may not use
+ * sharing, so sharing needs no second read.
+ */
+type CallingCore = CoreRow & { owner_locked: number; owner_blacklisted: number }
+
 /** The Core a request's key belongs to, or null for a key no Core has. */
-async function findCore(request: Request, env: Env): Promise<CoreRow | null> {
+async function findCore(request: Request, env: Env): Promise<CallingCore | null> {
 	const key = tokenFrom(request)
 	if (!key.startsWith('amc_')) unauthorized()
-	return env.DB.prepare('SELECT * FROM cores WHERE key_hash = ?')
+	return env.DB.prepare(
+		'SELECT c.*, EXISTS(SELECT 1 FROM user_locks l WHERE l.user_id = c.owner_id) AS owner_locked, EXISTS(SELECT 1 FROM sharing_blacklist b WHERE b.user_id = c.owner_id) AS owner_blacklisted FROM cores c WHERE c.key_hash = ?',
+	)
 		.bind(await digest(key))
-		.first<CoreRow>()
+		.first<CallingCore>()
 }
 
 /**
  * The Core a request's key belongs to. A key that belonged to a Core that was since removed from
  * its account gets 410, so the Core un-pairs on that answer and on no other.
  */
-export async function requireListedCore(request: Request, env: Env): Promise<CoreRow> {
+export async function requireListedCore(request: Request, env: Env): Promise<CallingCore> {
 	const core = await findCore(request, env)
 	if (!core)
 		throw new ApiError(

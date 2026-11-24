@@ -52,7 +52,7 @@ async function authenticate<Row extends { expires: string; refresh_expires: stri
 	return row
 }
 
-function accountLocked(): never {
+export function accountLocked(): never {
 	throw new ApiError(403, 'account_locked', 'Your account is locked and cannot perform this action')
 }
 
@@ -66,11 +66,24 @@ export async function requireUnlocked(env: Env, userId: string) {
 	if (await accountLock(env, userId)) accountLocked()
 }
 
+/** The session's account, with `extra` columns over `u`, the user. */
+const userQuery = (extra = '') =>
+	`SELECT u.*, s.expires, s.refresh_expires, EXISTS(SELECT 1 FROM user_locks l WHERE l.user_id = u.id) AS locked${extra} FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?`
+
 export async function requireUser(request: Request, env: Env): Promise<UserRow> {
 	return authenticate<UserRow & { expires: string; refresh_expires: string }>(
 		request,
 		env,
-		'SELECT u.*, s.expires, s.refresh_expires, EXISTS(SELECT 1 FROM user_locks l WHERE l.user_id = u.id) AS locked FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?',
+		userQuery(),
+	)
+}
+
+/** {@link requireUser}, with whether sharing is closed to the account read in the same statement. */
+export async function requireUserWithSharing(request: Request, env: Env) {
+	return authenticate<UserRow & { expires: string; refresh_expires: string; blacklisted: number }>(
+		request,
+		env,
+		userQuery(', EXISTS(SELECT 1 FROM sharing_blacklist b WHERE b.user_id = u.id) AS blacklisted'),
 	)
 }
 
@@ -189,16 +202,6 @@ export async function findUser(env: Env, id: string) {
 	return env.DB.prepare('SELECT * FROM users WHERE id = ? OR username = ? COLLATE NOCASE')
 		.bind(id, id)
 		.first<UserRow>()
-}
-
-export async function areFriends(env: Env, first: string, second: string): Promise<boolean> {
-	return Boolean(
-		await env.DB.prepare(
-			'SELECT 1 FROM friends WHERE accepted = 1 AND ((user_id = ? AND friend_id = ?) OR (user_id = ? AND friend_id = ?))',
-		)
-			.bind(first, second, second, first)
-			.first(),
-	)
 }
 
 export function requireLocal(request: Request, env: Env) {
