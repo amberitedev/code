@@ -4,7 +4,7 @@
 import type { ApiError, ModLoader, Endpoint } from './protocol'
 import type { SharedIconConfig, UserFriend, UserStatus } from './backend'
 import type { CoreSession } from './core'
-import type { EngineEvent, InstallJobSnapshot, ImportLauncherType, InstanceLink, InstanceSyncedOptions, DesyncServerMode, Settings, ProcessMetadata, JavaVersion, ProjectType, CachedSharedInstanceSummary, FriendPayload, OnboardingChecklist, InstanceGroupsChangedPayload, CommandPayload } from './engine'
+import type { EngineEvent, InstallJobSnapshot, ImportLauncherType, InstanceLink, InstanceSyncedOptions, MemorySettings, WindowSize, Hooks, World, WorldWithInstance, DesyncServerMode, ProcessMetadata, JavaVersion, ProjectType, CachedSharedInstanceSummary } from './engine'
 
 export type Boot = { version: string, platform: Platform, os_version: string, 
 /**
@@ -392,7 +392,39 @@ world: string, };
 
 export type InstanceVisibility = { instance_id: string, hidden: boolean, };
 
-export type OnboardingProgress = OnboardingChecklist;
+export type RecentWorldsQuery = { limit: number, 
+/**
+ * A JSON array of statuses; every status when absent.
+ */
+display_statuses: string | null, };
+
+export type InstanceGroupDefinition = { id: string, name: string, };
+
+export type InstanceGroupMembershipUpdate = { instance_id: string, group_ids: Array<string>, };
+
+export type InstanceGroupRef = { id: string, };
+
+export type NewInstanceGroup = { name: string, };
+
+export type InstanceGroupUpdate = { name: string, };
+
+export type InstanceGroupsChangedPayload = { instance_ids: Array<string>, };
+
+export type OnboardingChecklist = { has_created_instance: boolean, has_logged_into_minecraft: boolean, has_logged_into_modrinth: boolean, show_checklist: boolean, };
+
+export type FriendPayload = { "event": "friend_request", from: string, } | { "event": "user_offline", id: string, } | { "event": "status_update", user_status: FriendStatusPayload, } | { "event": "status_sync" } | { "event": "friend_request_rejected", from: string, };
+
+export type FriendStatusPayload = { user_id: string, profile_name: string | null, last_update: string, };
+
+export type CommandPayload = { "event": "InstallMod", id: string, } | { "event": "InstallVersion", id: string, } | { "event": "InstallModpack", id: string, } | { "event": "InstallServer", id: string, } | { "event": "LaunchInstance", id: string, server: string | null, singleplayer_world: string | null, } | { "event": "InstallSharedInstanceInvite", invite_id: string, } | { "event": "RunMRPack", path: string, } | { "event": "PlayHostingServer", server_id: string, world_id: string, };
+
+export type Settings = { max_concurrent_downloads: number, max_concurrent_writes: number, theme: AppTheme, locale: string, default_page: DefaultPage, collapsed_navigation: boolean, hide_nametag_skins_page: boolean, advanced_rendering: boolean, native_decorations: boolean, toggle_sidebar: boolean, sync_theme_across_devices: boolean, sync_behavior_across_devices: boolean, sync_features_across_devices: boolean, show_files_tab_in_instances: boolean, show_worlds_tab_in_instances: boolean, show_screenshots_tab_in_instances: boolean, show_skin_selector_in_sidebar: boolean, show_jump_in: boolean, always_show_copy_details: boolean, hide_installed_modpacks: boolean, advanced_filters_collapsed: boolean, dismissed_photosensitivity_filter_warning: boolean, friends_active_collapsed: boolean, friends_online_collapsed: boolean, friends_offline_collapsed: boolean, friends_pending_collapsed: boolean, telemetry: boolean, discord_rpc: boolean, personalized_ads: boolean, extra_launch_args: Array<string>, custom_env_vars: Array<[string, string]>, memory: MemorySettings, force_fullscreen: boolean, game_resolution: WindowSize, hide_on_process_start: boolean, refocus_on_game_close: boolean, compact_instance_cards: boolean, show_play_time: boolean, warn_on_unknown_modpacks: boolean, skip_non_essential_warnings: boolean, hooks: Hooks, custom_dir: string | null, prev_custom_dir: string | null, developer_mode: boolean, feature_flags: { [key in FeatureFlag]?: boolean }, skipped_update: string | null, pending_update_toast_for_version: string | null, auto_download_updates: boolean | null, version: number, };
+
+export type AppTheme = "dark" | "light" | "oled" | "retro" | "system";
+
+export type DefaultPage = "Home" | "Library";
+
+export type FeatureFlag = "page_path" | "project_background" | "server_ram_as_bytes_always_on" | "always_show_app_controls" | "show_sync_instances_update_modal" | "pride_fundraiser" | "servers_in_app" | "server_project_qa" | "i18n_debug" | "localhost_sign_in" | "show_version_environment_column";
 
 export type JavaTest = { path: string, major_version: number, };
 
@@ -518,6 +550,18 @@ export const library = {
 	cacheIcon: { method: "POST", path: "/app/library/icons", auth: "none", dangerous: false, body: "raw", response: "json" } as Endpoint<null, null, Blob, string>,
 	cacheGeneratedIcon: { method: "POST", path: "/app/library/icons/generated", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, GeneratedIcon, string>,
 	setGeneratedInstanceIcon: { method: "PUT", path: "/app/instances/{id}/icon/generated", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<IdParams, null, GeneratedInstanceIcon, string | null>,
+	listRecentWorlds: { method: "GET", path: "/app/worlds/recent", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, RecentWorldsQuery, void, Array<WorldWithInstance>>,
+	listInstanceWorlds: { method: "GET", path: "/app/instances/{id}/worlds", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<IdParams, null, void, Array<World>>,
+}
+
+export const instanceGroups = {
+	listInstanceGroups: { method: "GET", path: "/app/instance-groups", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<InstanceGroupDefinition>>,
+	listInstanceGroupMemberships: { method: "GET", path: "/app/instance-groups/memberships", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, { [key in string]: Array<string> }>,
+	createInstanceGroup: { method: "POST", path: "/app/instance-groups", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, NewInstanceGroup, InstanceGroupDefinition>,
+	renameInstanceGroup: { method: "PATCH", path: "/app/instance-groups/{id}", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<InstanceGroupRef, null, InstanceGroupUpdate, InstanceGroupDefinition>,
+	deleteInstanceGroup: { method: "DELETE", path: "/app/instance-groups/{id}", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<InstanceGroupRef, null, void, void>,
+	setInstanceGroupOrder: { method: "PUT", path: "/app/instance-groups/order", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, Array<string>, void>,
+	setInstanceGroupMemberships: { method: "PUT", path: "/app/instance-groups/memberships", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, Array<InstanceGroupMembershipUpdate>, void>,
 }
 
 export const gameOptions = {
@@ -640,7 +684,7 @@ export const settings = {
 }
 
 export const onboarding = {
-	getOnboardingChecklist: { method: "GET", path: "/app/onboarding/checklist", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, OnboardingProgress>,
+	getOnboardingChecklist: { method: "GET", path: "/app/onboarding/checklist", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, OnboardingChecklist>,
 	skipCreateInstanceOnboarding: { method: "POST", path: "/app/onboarding/checklist/skip-create-instance", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
 }
 

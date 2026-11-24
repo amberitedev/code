@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n\t\tINSERT INTO instance_groups (id, name, display_order)\n\t\tVALUES (?, ?, 0)\n\t\t",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "a0edb45433cf7972a2b40b2eae128079bdd497ef7c293fd1493a324e535df33f"
+}

@@ -4,7 +4,6 @@
 mod cache;
 mod content;
 mod files;
-mod groups;
 mod install;
 mod instances;
 mod jre;
@@ -27,9 +26,9 @@ use contracts::{ApiError, ErrorCode, server::Mount};
 use serde::Deserialize;
 
 pub use self::{
-    cache::*, content::*, files::*, groups::*, install::*, instances::*,
-    jre::*, lifecycle::*, loading::*, logs::*, metadata::*, process::*,
-    sharing::*, store::*, tags::*, worlds::*,
+    cache::*, content::*, files::*, install::*, instances::*, jre::*,
+    lifecycle::*, loading::*, logs::*, metadata::*, process::*, sharing::*,
+    store::*, tags::*, worlds::*,
 };
 use crate::{
     Engine,
@@ -63,11 +62,6 @@ use crate::{
             ReadInstanceFile, RemoveInstanceIcon, SetEditedInstanceIcon,
             SetInstanceIcon, StatInstanceFile, WriteInstanceFile,
             ZipInstanceFiles,
-        },
-        groups::{
-            CreateInstanceGroup, DeleteInstanceGroup, ListInstanceGroups,
-            RenameInstanceGroup, SetInstanceGroupMemberships,
-            SetInstanceGroupOrder,
         },
         install::{
             AcceptPendingSharedInstanceInvite, AcceptSharedInstanceInvite,
@@ -111,8 +105,8 @@ use crate::{
             AddInstanceServer, BackupWorld, DeleteWorld, DesyncInstanceServer,
             EditInstanceServer, EnsureManagedInstanceServer,
             GetInstanceProtocolVersion, GetServerStatus, GetSingleplayerWorld,
-            ListInstanceWorlds, ListRecentWorlds, RemoveInstanceServer,
-            RenameWorld, ResetWorldIcon, SetWorldDisplayStatus,
+            RemoveInstanceServer, RenameWorld, ResetWorldIcon,
+            SetWorldDisplayStatus,
         },
     },
 };
@@ -161,18 +155,8 @@ where
         .endpoint::<CompleteSideReview, _, _>(complete_side_review)
         .endpoint::<RepairContent, _, _>(repair_content)
         .endpoint::<ListPackExportCandidates, _, _>(list_pack_export_candidates)
-        .endpoint::<ListInstanceGroups, _, _>(list_instance_groups)
-        .endpoint::<CreateInstanceGroup, _, _>(create_instance_group)
-        .endpoint::<RenameInstanceGroup, _, _>(rename_instance_group)
-        .endpoint::<DeleteInstanceGroup, _, _>(delete_instance_group)
-        .endpoint::<SetInstanceGroupOrder, _, _>(set_instance_group_order)
-        .endpoint::<SetInstanceGroupMemberships, _, _>(
-            set_instance_group_memberships,
-        )
         .endpoint::<ListLoadingBars, _, _>(list_loading_bars)
-        .endpoint::<ListRecentWorlds, _, _>(list_recent_worlds)
         .endpoint::<GetServerStatus, _, _>(get_server_status)
-        .endpoint::<ListInstanceWorlds, _, _>(list_instance_worlds)
         .endpoint::<SetWorldDisplayStatus, _, _>(set_world_display_status)
         .endpoint::<GetInstanceProtocolVersion, _, _>(
             get_instance_protocol_version,

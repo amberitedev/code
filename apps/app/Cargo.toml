@@ -27,6 +27,7 @@ discord-rich-presence = { workspace = true }
 either = { workspace = true }
 encoding_rs = { workspace = true }
 engine = { workspace = true }
+enumset = { workspace = true }
 futures = { workspace = true, features = ["alloc", "async-await"] }
 heck = { workspace = true }
 hkdf = { workspace = true }
@@ -96,10 +97,15 @@ tauri-build = { workspace = true, features = ["codegen"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 tauri-plugin-updater = { workspace = true, optional = true }
+zbus = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+cidre = { workspace = true, features = ["blocks", "nw"] }
 
 [target."cfg(windows)".dependencies.windows]
 workspace = true
 features = [
+  "Networking_Connectivity",
   "Win32_Foundation",
   "Win32_Graphics_Dwm",
   "Win32_Graphics_Gdi",

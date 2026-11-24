@@ -11,7 +11,6 @@ pub use files::{
 };
 pub(crate) use files::{InstanceFileWriter, ManagedPaths};
 mod get;
-mod groups;
 mod icon;
 mod install;
 mod lifecycle;
@@ -35,11 +34,6 @@ pub use self::export_mrpack::{
     get_pack_export_candidates_for_parent,
 };
 pub use self::get::{get, get_many, list};
-pub use self::groups::{
-    FAVORITES_GROUP_ID, InstanceGroup, InstanceGroupMembershipUpdate,
-    create_group, delete_group, list_groups, rename_group,
-    set_group_memberships, set_group_order,
-};
 pub use self::icon::{
     cache_generated_icon, cache_icon_bytes, cache_remote_icon,
     edit_generated_icon, edit_generated_icon_if_empty, edit_icon,

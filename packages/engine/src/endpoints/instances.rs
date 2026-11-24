@@ -60,8 +60,6 @@ pub struct InstanceUpdate {
         ts(as = "Option<Option<String>>", optional)
     )]
     pub loader_version: Option<Option<String>>,
-    #[cfg_attr(feature = "export-ts", ts(optional = nullable))]
-    pub group_ids: Option<Vec<String>>,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -149,7 +147,6 @@ impl InstanceUpdate {
             icon_path: None,
             icon_config: None,
             update_channel: self.update_channel,
-            group_ids: self.group_ids,
             link: self
                 .link
                 .map(|link| match link {
@@ -204,7 +201,6 @@ pub struct Instance {
     pub protocol_version: Option<u32>,
     pub loader: ModLoader,
     pub loader_version: Option<String>,
-    pub group_ids: Vec<String>,
     pub link: Option<InstanceLink>,
     pub shared_instance: Option<SharedInstanceAttachment>,
     pub quarantined: bool,
@@ -310,7 +306,6 @@ impl From<InstanceMetadata> for Instance {
             protocol_version: metadata.applied_content_set.protocol_version,
             loader: metadata.applied_content_set.loader,
             loader_version: metadata.applied_content_set.loader_version,
-            group_ids: metadata.group_ids,
             link: InstanceLink::from_core(metadata.link),
             shared_instance: metadata.shared_instance.map(Into::into),
             quarantined: metadata.quarantined,

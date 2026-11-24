@@ -6,11 +6,12 @@ use super::write_shared_settings::{
     apply_shared_settings_to_instance, capture_instance_options,
     sync_is_active_for_instance,
 };
+use crate::state::Desktop;
 use crate::synced_options::state::SyncedInstance;
 use anyhow::bail;
 use encoding_rs::{UTF_8, UTF_16BE, UTF_16LE};
 use engine::GameOptionsPackSource;
-use engine::state::{Engine, InstanceLink, InstanceMetadata, SyncedOption};
+use engine::state::{InstanceLink, InstanceMetadata, SyncedOption};
 use engine::util::io;
 use std::io::ErrorKind;
 use std::path::Path;
@@ -122,7 +123,7 @@ fn merge_default_keybindings(
 
 async fn read_pack_options_template(
     metadata: &InstanceMetadata,
-    state: &Engine,
+    state: &Desktop,
     relative_path: &str,
 ) -> engine::Result<Option<(Vec<u8>, String, String)>> {
     let directory = super::super::instance_dir(metadata, state);
@@ -167,7 +168,7 @@ async fn read_pack_options_template(
 
 pub(super) async fn materialize_pack_options_if_missing(
     metadata: &InstanceMetadata,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<()> {
     let path = options_path(metadata, state);
     if options_target_exists(&path).await? {
@@ -186,7 +187,7 @@ pub(super) async fn materialize_pack_options_if_missing(
 
 pub(in crate::synced_options) async fn detach_instance(
     metadata: &InstanceMetadata,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<()> {
     let feature = SyncedOption::GameOptions.as_str();
     sqlx::query!(
@@ -197,7 +198,7 @@ pub(in crate::synced_options) async fn detach_instance(
         metadata.instance.id,
         feature,
     )
-    .execute(crate::db::pool(state))
+    .execute(state.db())
     .await?;
     Ok(())
 }
@@ -206,13 +207,13 @@ pub(in crate::synced_options) async fn detach_instance(
 /// player changed in Minecraft.
 pub(in crate::synced_options) async fn prepare_instance_update_with_state(
     metadata: &SyncedInstance,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<()> {
     sqlx::query!(
         "DELETE FROM instance_game_option_update_state WHERE instance_id = ?",
         metadata.instance.id,
     )
-    .execute(crate::db::pool(state))
+    .execute(state.db())
     .await?;
     if sync_is_active_for_instance(metadata, state).await? {
         let _ = capture_instance_options(metadata, state, true).await?;
@@ -253,7 +254,7 @@ pub(in crate::synced_options) async fn prepare_instance_update_with_state(
         sha1,
         bytes,
     )
-    .execute(crate::db::pool(state))
+    .execute(state.db())
     .await?;
     Ok(())
 }
@@ -261,11 +262,11 @@ pub(in crate::synced_options) async fn prepare_instance_update_with_state(
 /// Keeps the new modpack's `options.txt` as its default, then reapplies the user's
 /// shared settings.
 pub async fn capture_pack_base(
-    state: &Engine,
+    state: &Desktop,
     instance_id: &str,
     source: Option<GameOptionsPackSource>,
 ) -> engine::Result<()> {
-    let _guard = crate::hooks::synced_options(state).lock().await;
+    let _guard = state.synced_options().lock().await;
     let metadata =
         crate::synced_options::state::get_instance(state, instance_id)
             .await?
@@ -282,7 +283,7 @@ pub async fn capture_pack_base(
         instance_id,
         feature,
     )
-    .execute(crate::db::pool(state))
+    .execute(state.db())
     .await?;
 
     if source.is_none() {
@@ -294,7 +295,7 @@ pub async fn capture_pack_base(
 			"#,
             instance_id,
         )
-        .fetch_optional(crate::db::pool(state))
+        .fetch_optional(state.db())
         .await?;
         if let Some(pending) = pending {
             if pending.had_file {
@@ -356,13 +357,13 @@ pub async fn capture_pack_base(
         encoding,
         document_bytes,
     )
-    .execute(crate::db::pool(state))
+    .execute(state.db())
     .await?;
     sqlx::query!(
         "DELETE FROM instance_game_option_update_state WHERE instance_id = ?",
         instance_id,
     )
-    .execute(crate::db::pool(state))
+    .execute(state.db())
     .await?;
 
     if sync_is_active_for_instance(&metadata, state).await?

@@ -1,8 +1,9 @@
 use super::super::options_file::sha1_bytes;
 use super::archive::{self, ArchiveIndex};
+use crate::state::Desktop;
 use anyhow::bail;
 use engine::ErrorKind;
-use engine::state::{CachedEntry, Engine, InstanceMetadata, Project};
+use engine::state::{CachedEntry, InstanceMetadata, Project};
 use engine::util::{fetch, io};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
@@ -22,7 +23,7 @@ pub(super) struct Snapshot {
 }
 
 pub(super) async fn mod_projects(
-    state: &Engine,
+    state: &Desktop,
     hashes: &[&str],
 ) -> engine::Result<HashMap<String, Project>> {
     let files = CachedEntry::get_file_many(
@@ -58,7 +59,7 @@ pub(super) async fn mod_projects(
         .collect())
 }
 
-pub(super) fn root(state: &Engine) -> PathBuf {
+pub(super) fn root(state: &Desktop) -> PathBuf {
     state
         .directories
         .caches_dir()
@@ -80,7 +81,7 @@ pub(super) async fn write_json<T: Serialize>(
 
 pub(super) async fn snapshot_instance(
     metadata: &InstanceMetadata,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<String> {
     let version = &metadata.applied_content_set.game_version;
     let instance_dir = state
@@ -136,7 +137,7 @@ pub(super) async fn snapshot_instance(
 
 #[tracing::instrument(skip_all, fields(snapshot_id = id), err)]
 pub(super) async fn load_snapshot(
-    state: &Engine,
+    state: &Desktop,
     id: &str,
 ) -> engine::Result<Snapshot> {
     if !archive::valid_hash(id) {
@@ -155,7 +156,7 @@ pub(super) async fn load_snapshot(
 }
 
 pub(super) async fn archive_index(
-    state: &Engine,
+    state: &Desktop,
     source: &ArchiveSource,
 ) -> engine::Result<ArchiveIndex> {
     if !archive::valid_hash(&source.hash) {

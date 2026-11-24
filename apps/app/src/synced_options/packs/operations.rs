@@ -10,13 +10,14 @@ use super::{
     PackLibrary, PackPlacement, PackSyncPreview, PackSyncTarget, SyncedPack,
     pack_option, version_compatible,
 };
+use crate::state::Desktop;
 use crate::synced_options::state::SyncedInstance;
 use anyhow::{Context, bail};
 use bytes::Bytes;
 use engine::server_list::DesyncServerMode;
 use engine::state::instances::commands;
 use engine::state::{
-    CacheBehaviour, CachedEntry, ContentItem, ContentSourceKind, Engine,
+    CacheBehaviour, CachedEntry, ContentItem, ContentSourceKind,
     InstanceMetadata, ProjectType, SyncedOption, SyncedPackInfo,
 };
 use engine::util::io;
@@ -29,7 +30,7 @@ use uuid::Uuid;
 async fn source(
     instance_id: &str,
     project_path: &str,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<(SyncedInstance, ContentItem)> {
     let metadata =
         crate::synced_options::state::get_instance(state, instance_id)
@@ -68,7 +69,7 @@ async fn source(
 pub(super) async fn pack_from_item(
     mut item: ContentItem,
     metadata: &InstanceMetadata,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<SyncedPack> {
     pack_option(item.project_type)?;
     if !path_util::is_safe_file_name(&item.file_name)
@@ -196,7 +197,7 @@ fn existing_pack<'a>(
 }
 
 pub async fn get_pack_sync_preview(
-    state: &Engine,
+    state: &Desktop,
     instance_id: &str,
     project_path: &str,
 ) -> engine::Result<PackSyncPreview> {
@@ -260,7 +261,7 @@ pub async fn get_pack_sync_preview(
 }
 
 pub async fn sync_pack(
-    state: &engine::Engine,
+    state: &Desktop,
     instance_id: &str,
     project_path: &str,
 ) -> engine::Result<()> {
@@ -270,7 +271,7 @@ pub async fn sync_pack(
 pub(in crate::synced_options) async fn seed_from_instance(
     metadata: &InstanceMetadata,
     option: SyncedOption,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<()> {
     engine::instance::ensure_metadata_content_unlocked(metadata)?;
     let instance_id = &metadata.instance.id;
@@ -355,7 +356,7 @@ pub(in crate::synced_options) async fn seed_from_instance(
 }
 
 pub(crate) async fn sync_new_pack(
-    state: &engine::Engine,
+    state: &Desktop,
     instance_id: &str,
     project_path: &str,
 ) {
@@ -374,7 +375,7 @@ pub(crate) async fn sync_new_pack(
 }
 
 async fn sync_pack_inner(
-    state: &engine::Engine,
+    state: &Desktop,
     instance_id: &str,
     project_path: &str,
     automatic: bool,
@@ -396,7 +397,7 @@ async fn sync_pack_inner(
 }
 
 async fn sync_pack_once(
-    state: &Engine,
+    state: &Desktop,
     instance_id: &str,
     project_path: &str,
     automatic: bool,
@@ -508,7 +509,7 @@ async fn sync_pack_once(
 }
 
 pub async fn list_synced_packs(
-    state: &Engine,
+    state: &Desktop,
     project_type: ProjectType,
 ) -> engine::Result<Vec<ContentItem>> {
     pack_option(project_type)?;
@@ -544,7 +545,7 @@ pub async fn list_synced_packs(
 }
 
 pub async fn upload_synced_pack(
-    state: &Engine,
+    state: &Desktop,
     path: &Path,
     project_type: ProjectType,
     game_versions: Vec<String>,
@@ -575,7 +576,7 @@ pub async fn upload_synced_pack(
     let size = bytes.len() as u64;
     let sha1 = engine::util::fetch::sha1_async(bytes.clone()).await?;
     let sha512 = cache_bytes(bytes, state).await?;
-    let _guard = crate::hooks::synced_options(state).lock().await;
+    let _guard = state.synced_options().lock().await;
     if !get_global_options(state).await?.get(option) {
         bail!(ErrorKind::InputError(
             "pack syncing was disabled while preparing the upload".to_owned(),
@@ -624,11 +625,11 @@ pub async fn upload_synced_pack(
 }
 
 pub async fn set_synced_pack_enabled(
-    state: &Engine,
+    state: &Desktop,
     pack_id: &str,
     enabled: bool,
 ) -> engine::Result<()> {
-    let _guard = crate::hooks::synced_options(state).lock().await;
+    let _guard = state.synced_options().lock().await;
     let mut library = read_library(state).await?;
     let pack = library
         .packs
@@ -640,10 +641,10 @@ pub async fn set_synced_pack_enabled(
 }
 
 pub async fn remove_synced_pack(
-    state: &Engine,
+    state: &Desktop,
     pack_id: &str,
 ) -> engine::Result<()> {
-    let _guard = crate::hooks::synced_options(state).lock().await;
+    let _guard = state.synced_options().lock().await;
     let mut library = read_library(state).await?;
     let pack = library
         .packs
@@ -655,12 +656,12 @@ pub async fn remove_synced_pack(
 }
 
 pub async fn desync_pack(
-    state: &Engine,
+    state: &Desktop,
     instance_id: &str,
     pack_id: &str,
     mode: DesyncServerMode,
 ) -> engine::Result<()> {
-    let _guard = crate::hooks::synced_options(state).lock().await;
+    let _guard = state.synced_options().lock().await;
     let metadata =
         crate::synced_options::state::get_instance(state, instance_id)
             .await?

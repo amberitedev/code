@@ -1,4 +1,5 @@
-use engine::state::{Engine, InstanceMetadata};
+use crate::state::Desktop;
+use engine::state::InstanceMetadata;
 use parking_lot::Mutex;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -129,7 +130,7 @@ async fn read_zip_json_uncached(
 
 pub(super) async fn game_format(
     metadata: &InstanceMetadata,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<Option<PackFormat>> {
     let content_set = &metadata.applied_content_set;
     let version = &content_set.game_version;
@@ -268,7 +269,7 @@ pub(super) async fn compatible(path: &Path, game: Option<PackFormat>) -> bool {
 pub(super) async fn warm(
     metadata: &InstanceMetadata,
     items: &[engine::state::ContentItem],
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<()> {
     if game_format(metadata, state).await.ok().flatten().is_some() {
         let directory = super::super::options::instance_dir(metadata, state);

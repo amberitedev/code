@@ -73,11 +73,6 @@ pub enum Event {
     InstallJob(std::sync::Arc<InstallJobSnapshot>),
     Warning(WarningPayload),
     Log(LogPayload),
-    /// Raised by desktop code that still lives in the engine; the App sends it as its own event.
-    /// It does not serialize, so every socket loop maps or drops it. It goes once the desktop code
-    /// raising it lives in apps/app.
-    #[serde(skip)]
-    Desktop(DesktopEvent),
     /// Files in an instance changed, as paths relative to its folder: content files once the
     /// engine has indexed them, anything else as the top-level entry holding it. In-process only:
     /// socket loops drop it.
@@ -86,24 +81,6 @@ pub enum Event {
         instance_id: String,
         paths: Vec<String>,
     },
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
-pub struct OnboardingChecklist {
-    pub has_created_instance: bool,
-    pub has_logged_into_minecraft: bool,
-    pub has_logged_into_modrinth: bool,
-    pub show_checklist: bool,
-}
-
-#[derive(Clone)]
-pub enum DesktopEvent {
-    Friend(FriendPayload),
-    Notification(serde_json::Value),
-    OnboardingChecklist(OnboardingChecklist),
-    InstanceGroupsChanged(InstanceGroupsChangedPayload),
-    Command(CommandPayload),
 }
 
 #[derive(Serialize, Debug, Clone)]
@@ -212,41 +189,6 @@ pub struct WarningPayload {
     pub message: String,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
-#[serde(tag = "event")]
-#[cfg_attr(feature = "export-ts", ts(tag = "event"))]
-pub enum CommandPayload {
-    InstallMod {
-        id: String,
-    },
-    InstallVersion {
-        id: String,
-    },
-    InstallModpack {
-        id: String,
-    },
-    InstallServer {
-        id: String,
-    },
-    LaunchInstance {
-        id: String,
-        server: Option<String>,
-        singleplayer_world: Option<String>,
-    },
-    InstallSharedInstanceInvite {
-        invite_id: String,
-    },
-    RunMRPack {
-        // run or install .mrpack
-        path: String,
-    },
-    PlayHostingServer {
-        server_id: String,
-        world_id: String,
-    },
-}
-
 #[derive(Serialize, Deserialize, Clone)]
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ProcessPayload {
@@ -275,12 +217,6 @@ pub struct InstancePayload {
 
 #[derive(Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
-pub struct InstanceGroupsChangedPayload {
-    pub instance_ids: Vec<String>,
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(tag = "event", rename_all = "snake_case")]
 #[cfg_attr(feature = "export-ts", ts(tag = "event", rename_all = "snake_case"))]
 pub enum InstancePayloadType {
@@ -305,27 +241,6 @@ pub enum InstancePayloadType {
         message: String,
     },
     Removed,
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
-#[serde(rename_all = "snake_case")]
-#[serde(tag = "event")]
-#[cfg_attr(feature = "export-ts", ts(tag = "event", rename_all = "snake_case"))]
-pub enum FriendPayload {
-    FriendRequest { from: String },
-    UserOffline { id: String },
-    StatusUpdate { user_status: FriendStatusPayload },
-    StatusSync,
-    FriendRequestRejected { from: String },
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
-pub struct FriendStatusPayload {
-    pub user_id: String,
-    pub profile_name: Option<String>,
-    pub last_update: String,
 }
 
 pub use self::log_types::*;

@@ -5,7 +5,6 @@ use std::{
 
 use axum::extract::State;
 use contracts::{ApiError, Empty, ErrorCode, Json, server::Req};
-use enumset::EnumSet;
 
 use super::api_error;
 use crate::{
@@ -15,35 +14,12 @@ use crate::{
         AddInstanceServer, BackupWorld, DeleteWorld, DesyncInstanceServer,
         EditInstanceServer, EnsureManagedInstanceServer,
         GetInstanceProtocolVersion, GetServerStatus, GetSingleplayerWorld,
-        ListInstanceWorlds, ListRecentWorlds, RemoveInstanceServer,
-        RenameWorld, ResetWorldIcon, SetWorldDisplayStatus,
+        RemoveInstanceServer, RenameWorld, ResetWorldIcon,
+        SetWorldDisplayStatus,
     },
     instance::get_full_path,
-    worlds::{
-        self, DisplayStatus, ProtocolVersion, ServerStatus, World,
-        WorldWithInstance,
-    },
+    worlds::{self, ProtocolVersion, ServerStatus, World},
 };
-
-pub async fn list_recent_worlds(
-    State(engine): State<Arc<Engine>>,
-    _: EngineAccess,
-    request: Req<ListRecentWorlds>,
-) -> Result<Json<Vec<WorldWithInstance>>, ApiError> {
-    let display_statuses = match request.query.display_statuses {
-        Some(statuses) => serde_json::from_str::<Vec<DisplayStatus>>(&statuses)
-            .map_err(|error| {
-                ApiError::new(ErrorCode::InvalidInput, error.to_string())
-            })?
-            .into_iter()
-            .collect(),
-        None => EnumSet::all(),
-    };
-    worlds::get_recent_worlds(&engine, request.query.limit, display_statuses)
-        .await
-        .map(Json)
-        .map_err(api_error)
-}
 
 pub async fn get_server_status(
     _: EngineAccess,
@@ -58,17 +34,6 @@ pub async fn get_server_status(
                 legacy: request.query.legacy,
             });
     worlds::get_server_status(&request.query.address, protocol_version)
-        .await
-        .map(Json)
-        .map_err(api_error)
-}
-
-pub async fn list_instance_worlds(
-    State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess,
-    _: Req<ListInstanceWorlds>,
-) -> Result<Json<Vec<World>>, ApiError> {
-    worlds::get_instance_worlds(&engine, &instance.id)
         .await
         .map(Json)
         .map_err(api_error)

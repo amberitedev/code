@@ -18,8 +18,8 @@ macro_rules! groups {
 }
 
 groups!(
-    cache, content, files, groups, install, instances, jre, loading, logs,
-    metadata, process, sharing, store, tags, worlds,
+    cache, content, files, install, instances, jre, loading, logs, metadata,
+    process, sharing, store, tags, worlds,
 );
 
 #[cfg(test)]

@@ -1,11 +1,8 @@
 //! The App's side of the engine's instance changes. Synced options, packs and servers keep up
-//! through modpack updates, removals, content changes and server-list edits, and the state they
-//! share for one engine lives here.
+//! through modpack updates, removals, content changes and server-list edits.
 
-use std::any::Any;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock, Weak};
 
-use dashmap::DashMap;
 use engine::{
     Engine, InstanceHooks, PackOverrides, PackServers, SavedSecrets,
     access::BoxFuture,
@@ -13,86 +10,76 @@ use engine::{
     server_list::{DesyncServerMode, ServerRecord},
 };
 use quartz_nbt::NbtCompound;
-use sqlx::SqlitePool;
-use tokio::sync::{Mutex, OwnedMutexGuard};
 
-use crate::synced_options::{self as synced, state::SyncedOptions};
+use crate::state::{Desktop, DesktopState};
+use crate::synced_options as synced;
 
 pub struct DesktopHooks {
-    pub(crate) db: SqlitePool,
-    synced_options: SyncedOptions,
-    screenshots: DashMap<String, Arc<Mutex<()>>>,
+    engine: OnceLock<Weak<Engine>>,
+    state: Arc<DesktopState>,
 }
 
 impl DesktopHooks {
-    pub fn new(db: SqlitePool) -> Self {
+    pub fn new(state: Arc<DesktopState>) -> Self {
         Self {
-            db,
-            synced_options: SyncedOptions::default(),
-            screenshots: DashMap::default(),
+            engine: OnceLock::new(),
+            state,
         }
+    }
+
+    /// The engine these hooks serve, which is alive while it calls them.
+    fn desktop(&self) -> Desktop {
+        let engine = self
+            .engine
+            .get()
+            .and_then(Weak::upgrade)
+            .expect("the engine binds its hooks and outlives their calls");
+        Desktop::new(engine, Arc::clone(&self.state))
     }
 }
 
-pub(crate) fn desktop(engine: &Engine) -> &DesktopHooks {
-    (engine.hooks() as &dyn Any)
-        .downcast_ref()
-        .expect("the App's engine carries DesktopHooks")
-}
-
-pub fn synced_options(engine: &Engine) -> &SyncedOptions {
-    &desktop(engine).synced_options
-}
-
-/// Serializes screenshot changes in one instance.
-pub async fn lock_screenshots(
-    engine: &Engine,
-    instance_id: &str,
-) -> OwnedMutexGuard<()> {
-    let lock = desktop(engine)
-        .screenshots
-        .entry(instance_id.to_string())
-        .or_default()
-        .clone();
-    lock.lock_owned().await
-}
-
-pub fn forget_instance(engine: &Engine, instance_id: &str) {
-    desktop(engine).screenshots.remove(instance_id);
-}
-
 impl InstanceHooks for DesktopHooks {
+    fn bind(&self, engine: Weak<Engine>) {
+        let _ = self.engine.set(engine);
+    }
+
     fn secrets<'a>(
         &'a self,
         engine: &'a Engine,
     ) -> BoxFuture<'a, engine::Result<SavedSecrets>> {
-        Box::pin(crate::accounts::saved_secrets(&self.db, &engine.sessions))
+        Box::pin(crate::accounts::saved_secrets(
+            &self.state.db,
+            &engine.sessions,
+        ))
     }
 
     fn before_pack_update<'a>(
         &'a self,
-        engine: &'a Engine,
+        _: &'a Engine,
         instance_id: &'a str,
     ) -> BoxFuture<'a, engine::Result<()>> {
-        Box::pin(synced::prepare_instance_update(engine, instance_id))
+        Box::pin(async move {
+            synced::prepare_instance_update(&self.desktop(), instance_id).await
+        })
     }
 
     fn after_pack_update<'a>(
         &'a self,
-        engine: &'a Engine,
+        _: &'a Engine,
         instance_id: &'a str,
         overrides: PackOverrides<'a>,
     ) -> BoxFuture<'a, engine::Result<()>> {
         Box::pin(async move {
+            let desktop = self.desktop();
             match overrides.servers {
                 PackServers::Untouched => {}
                 PackServers::Ignored => {
-                    synced::discard_modpack_servers(instance_id, engine)
+                    synced::discard_modpack_servers(instance_id, &desktop)
                         .await?;
                 }
                 PackServers::Pack(path) => {
                     synced::capture_modpack_server_override(
-                        engine,
+                        &desktop,
                         instance_id,
                         path,
                     )
@@ -100,7 +87,7 @@ impl InstanceHooks for DesktopHooks {
                 }
             }
             if let Err(error) = synced::capture_game_options_pack_base(
-                engine,
+                &desktop,
                 instance_id,
                 overrides.game_options,
             )
@@ -110,48 +97,52 @@ impl InstanceHooks for DesktopHooks {
                     "The pack was applied, but its options.txt could not be captured for game-settings sync: {error}"
                 );
             }
-            synced::reconcile_instance_after_pack_update(engine, instance_id)
+            synced::reconcile_instance_after_pack_update(&desktop, instance_id)
                 .await
         })
     }
 
     fn removing<'a>(
         &'a self,
-        _engine: &'a Engine,
+        _: &'a Engine,
     ) -> BoxFuture<'a, Box<dyn Send + 'a>> {
         Box::pin(async {
-            Box::new(self.synced_options.lock().await) as Box<dyn Send>
+            Box::new(self.state.synced_options.lock().await) as Box<dyn Send>
         })
     }
 
     fn decorate_content<'a>(
         &'a self,
-        engine: &'a Engine,
+        _: &'a Engine,
         instance_id: &'a str,
         items: &'a mut [ContentItem],
     ) -> BoxFuture<'a, engine::Result<()>> {
-        Box::pin(synced::decorate_content(instance_id, items, engine))
+        Box::pin(async move {
+            synced::decorate_content(instance_id, items, &self.desktop()).await
+        })
     }
 
     fn content_installed<'a>(
         &'a self,
-        engine: &'a Engine,
+        _: &'a Engine,
         instance_id: &'a str,
         path: &'a str,
     ) -> BoxFuture<'a, ()> {
-        Box::pin(synced::sync_new_pack(engine, instance_id, path))
+        Box::pin(async move {
+            synced::sync_new_pack(&self.desktop(), instance_id, path).await
+        })
     }
 
     fn content_changed<'a>(
         &'a self,
-        engine: &'a Engine,
+        _: &'a Engine,
         instance_id: &'a str,
         paths: &'a [&'a str],
     ) -> BoxFuture<'a, ()> {
         Box::pin(async move {
             if paths.iter().any(|path| synced::is_pack_path(path)) {
                 synced::reconcile_synced_packs_after_content_change(
-                    engine,
+                    &self.desktop(),
                     instance_id,
                 )
                 .await;
@@ -161,45 +152,48 @@ impl InstanceHooks for DesktopHooks {
 
     fn list_servers<'a>(
         &'a self,
-        engine: &'a Engine,
+        _: &'a Engine,
         metadata: &'a InstanceMetadata,
     ) -> BoxFuture<'a, engine::Result<Vec<ServerRecord>>> {
         Box::pin(async move {
+            let desktop = self.desktop();
             let metadata =
-                synced::state::with_synced_options(engine, metadata).await?;
-            synced::list_server_records(&metadata, engine).await
+                synced::state::with_synced_options(&desktop, metadata).await?;
+            synced::list_server_records(&metadata, &desktop).await
         })
     }
 
     fn add_server<'a>(
         &'a self,
-        engine: &'a Engine,
+        _: &'a Engine,
         metadata: &'a InstanceMetadata,
         data: NbtCompound,
     ) -> BoxFuture<'a, engine::Result<String>> {
         Box::pin(async move {
+            let desktop = self.desktop();
             let metadata =
-                synced::state::with_synced_options(engine, metadata).await?;
-            synced::add_user_server(&metadata, data, engine).await
+                synced::state::with_synced_options(&desktop, metadata).await?;
+            synced::add_user_server(&metadata, data, &desktop).await
         })
     }
 
     fn ensure_managed_server<'a>(
         &'a self,
-        engine: &'a Engine,
+        _: &'a Engine,
         metadata: &'a InstanceMetadata,
         data: NbtCompound,
     ) -> BoxFuture<'a, engine::Result<()>> {
         Box::pin(async move {
+            let desktop = self.desktop();
             let metadata =
-                synced::state::with_synced_options(engine, metadata).await?;
-            synced::ensure_managed_server(&metadata, data, engine).await
+                synced::state::with_synced_options(&desktop, metadata).await?;
+            synced::ensure_managed_server(&metadata, data, &desktop).await
         })
     }
 
     fn update_server<'a>(
         &'a self,
-        engine: &'a Engine,
+        _: &'a Engine,
         metadata: &'a InstanceMetadata,
         index: usize,
         name: String,
@@ -207,15 +201,16 @@ impl InstanceHooks for DesktopHooks {
         accept_textures: Option<bool>,
     ) -> BoxFuture<'a, engine::Result<()>> {
         Box::pin(async move {
+            let desktop = self.desktop();
             let metadata =
-                synced::state::with_synced_options(engine, metadata).await?;
+                synced::state::with_synced_options(&desktop, metadata).await?;
             synced::update_server_by_index(
                 &metadata,
                 index,
                 name,
                 address,
                 accept_textures,
-                engine,
+                &desktop,
             )
             .await
         })
@@ -223,41 +218,49 @@ impl InstanceHooks for DesktopHooks {
 
     fn remove_server<'a>(
         &'a self,
-        engine: &'a Engine,
+        _: &'a Engine,
         metadata: &'a InstanceMetadata,
         index: usize,
     ) -> BoxFuture<'a, engine::Result<()>> {
         Box::pin(async move {
+            let desktop = self.desktop();
             let metadata =
-                synced::state::with_synced_options(engine, metadata).await?;
-            synced::remove_server_by_index(&metadata, index, engine).await
+                synced::state::with_synced_options(&desktop, metadata).await?;
+            synced::remove_server_by_index(&metadata, index, &desktop).await
         })
     }
 
     fn remove_managed_servers<'a>(
         &'a self,
-        engine: &'a Engine,
+        _: &'a Engine,
         instance_id: &'a str,
     ) -> BoxFuture<'a, engine::Result<()>> {
-        Box::pin(synced::remove_managed_servers(instance_id, engine))
+        Box::pin(async move {
+            synced::remove_managed_servers(instance_id, &self.desktop()).await
+        })
     }
 
     fn discard_modpack_servers<'a>(
         &'a self,
-        engine: &'a Engine,
+        _: &'a Engine,
         instance_id: &'a str,
     ) -> BoxFuture<'a, engine::Result<()>> {
-        Box::pin(synced::discard_modpack_servers(instance_id, engine))
+        Box::pin(async move {
+            synced::discard_modpack_servers(instance_id, &self.desktop()).await
+        })
     }
 
     fn desync_server<'a>(
         &'a self,
-        engine: &'a Engine,
+        _: &'a Engine,
         instance_id: &'a str,
         server_id: &'a str,
         mode: DesyncServerMode,
     ) -> BoxFuture<'a, engine::Result<()>> {
-        Box::pin(synced::desync_server(engine, instance_id, server_id, mode))
+        Box::pin(async move {
+            synced::desync_server(&self.desktop(), instance_id, server_id, mode)
+                .await
+        })
     }
 }
 
@@ -266,20 +269,12 @@ pub(crate) mod tests {
     use super::*;
     use engine::data::{InstanceLink, InstanceSyncedOption, ModLoader};
     use engine::instance;
-    use std::{path::Path, sync::Arc};
+    use std::path::Path;
 
     /// The App's engine, with the synced options that need Mojang's version manifest turned off
     /// so nothing reaches the network.
-    pub(crate) async fn offline_engine(dir: &Path) -> Arc<Engine> {
-        engine::install_crypto_provider();
-        let config = crate::data_dir::engine_config(
-            dir.to_path_buf(),
-            engine::EventSink::new(),
-            None,
-        )
-        .await
-        .unwrap();
-        let engine = Engine::new(config).await.unwrap();
+    pub(crate) async fn offline_engine(dir: &Path) -> Desktop {
+        let engine = crate::data_dir::tests::open(dir, None).await.unwrap();
         for option in [
             InstanceSyncedOption::GameOptions,
             InstanceSyncedOption::CommandHistory,
@@ -293,7 +288,7 @@ pub(crate) mod tests {
         engine
     }
 
-    pub(crate) async fn create(engine: &Engine) -> InstanceMetadata {
+    pub(crate) async fn create(engine: &Desktop) -> InstanceMetadata {
         instance::create(
             engine,
             "Followed".to_string(),
@@ -348,9 +343,9 @@ pub(crate) mod tests {
         let folder = instance::get_full_path(&engine, &id).await.unwrap();
         std::fs::create_dir_all(&folder).unwrap();
 
-        let pass = synced_options(&engine).lock().await;
+        let pass = engine.synced_options().lock().await;
         let removal = tokio::spawn({
-            let engine = Arc::clone(&engine);
+            let engine = engine.clone();
             async move { instance::remove(&engine, &id).await }
         });
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;

@@ -365,16 +365,19 @@ async fn the_event_socket_opens_before_the_engine_and_reports_its_start() {
     engine::emit_warning(&events.engine, "low disk")
         .await
         .unwrap();
-    crate::desktop::deep_links::parse_and_emit_command(
+    assert_eq!(
+        next_event(&mut socket).await,
+        json!({ "type": "warning", "payload": { "message": "low disk" } })
+    );
+    let command = crate::desktop::deep_links::parse_command(
         &events.engine,
         "modrinth://mod/sodium",
     )
     .await
     .unwrap();
-    assert_eq!(
-        next_event(&mut socket).await,
-        json!({ "type": "warning", "payload": { "message": "low disk" } })
-    );
+    let _ = events.app.send(super::events::AppEvent::Command(
+        super::events::Command::Modrinth(command),
+    ));
     assert_eq!(
         next_event(&mut socket).await,
         json!({ "type": "command", "payload": { "event": "InstallMod", "id": "sodium" } })
@@ -463,14 +466,7 @@ async fn opening_the_socket_retries_a_failed_start() {
             let dir = Arc::clone(&dir);
             async move {
                 anyhow::ensure!(attempt > 0, "the data folder is in use");
-                engine::install_crypto_provider();
-                let config = crate::data_dir::engine_config(
-                    dir.path().to_path_buf(),
-                    engine::EventSink::new(),
-                    None,
-                )
-                .await?;
-                Ok(engine::Engine::new(config).await?)
+                crate::data_dir::tests::open(dir.path(), None).await
             }
         }
     });
@@ -495,14 +491,9 @@ async fn a_screenshot_edit_past_axums_default_body_limit_reaches_the_engine() {
     engine::install_crypto_provider();
     let dir = tempfile::tempdir().unwrap();
     let handle = EngineHandle::default();
-    let config = crate::data_dir::engine_config(
-        dir.path().to_path_buf(),
-        engine::EventSink::new(),
-        None,
-    )
-    .await
-    .unwrap();
-    handle.set(Ok(engine::Engine::new(config).await.unwrap()));
+    handle.set(Ok(crate::data_dir::tests::open(dir.path(), None)
+        .await
+        .unwrap()));
     let local = local_with(handle);
     let request = Request::post(format!(
         "/{}/app/screenshots/edits?instance_id=missing&file_name=a.png&mode=create_copy",
@@ -525,14 +516,9 @@ async fn a_screenshot_edit_past_axums_default_body_limit_reaches_the_engine() {
 async fn an_external_save_into_the_apps_instances_is_refused() {
     engine::install_crypto_provider();
     let dir = tempfile::tempdir().unwrap();
-    let config = crate::data_dir::engine_config(
-        dir.path().to_path_buf(),
-        engine::EventSink::new(),
-        None,
-    )
-    .await
-    .unwrap();
-    let engine = engine::Engine::new(config).await.unwrap();
+    let engine = crate::data_dir::tests::open(dir.path(), None)
+        .await
+        .unwrap();
     let path = engine.directories.instances_dir().join("world.zip");
     let handle = EngineHandle::default();
     handle.set(Ok(engine));
@@ -611,20 +597,12 @@ async fn with_nobody_signed_in_the_account_reads_are_empty() {
     engine::install_crypto_provider();
     let dir = tempfile::tempdir().unwrap();
     let handle = EngineHandle::default();
-    let config = crate::data_dir::engine_config(
-        dir.path().to_path_buf(),
-        engine::EventSink::new(),
-        None,
-    )
-    .await
-    .unwrap();
-    let engine = engine::Engine::new(config).await.unwrap();
-    crate::accounts::self_hosted::bind_origin(
-        crate::db::pool(&engine),
-        &engine.sessions,
-    )
-    .await
-    .unwrap();
+    let engine = crate::data_dir::tests::open(dir.path(), None)
+        .await
+        .unwrap();
+    crate::accounts::self_hosted::bind_origin(engine.db(), &engine.sessions)
+        .await
+        .unwrap();
     handle.set(Ok(engine));
     let local = local_with(handle);
 
@@ -649,14 +627,9 @@ async fn playing_without_a_minecraft_account_is_refused() {
     engine::install_crypto_provider();
     let dir = tempfile::tempdir().unwrap();
     let handle = EngineHandle::default();
-    let config = crate::data_dir::engine_config(
-        dir.path().to_path_buf(),
-        engine::EventSink::new(),
-        None,
-    )
-    .await
-    .unwrap();
-    handle.set(Ok(engine::Engine::new(config).await.unwrap()));
+    handle.set(Ok(crate::data_dir::tests::open(dir.path(), None)
+        .await
+        .unwrap()));
     let local = local_with(handle);
     let request =
         Request::post(format!("/{}/app/launch/instance", local.secret))
@@ -671,4 +644,80 @@ async fn playing_without_a_minecraft_account_is_refused() {
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let body: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(body["error"], "not_logged_in");
+}
+
+/// The Library's groups live in app.db; the frontend composes an instance's groups from the
+/// memberships route.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_library_groups_instances_in_the_helpers_shapes() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = crate::hooks::tests::offline_engine(dir.path()).await;
+    let id = crate::hooks::tests::create(&engine).await.instance.id;
+    let handle = EngineHandle::default();
+    handle.set(Ok(engine));
+    let local = local_with(handle);
+    let send = async |method: &str, path: &str, body: Value| {
+        let request = Request::builder()
+            .method(method)
+            .uri(format!("/{}/app/{path}", local.secret))
+            .header(HOST, &local.host)
+            .header(ORIGIN, "tauri://localhost")
+            .header(CONTENT_TYPE, "application/json")
+            .body(match body {
+                Value::Null => Body::empty(),
+                body => Body::from(body.to_string()),
+            })
+            .unwrap();
+        let response = local.send(request).await;
+        let status = response.status();
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        (status, serde_json::from_slice(&body).unwrap_or(Value::Null))
+    };
+
+    let (status, group) =
+        send("POST", "instance-groups", json!({ "name": "Modded" })).await;
+    assert_eq!(status, StatusCode::OK);
+    let group_id = group["id"].as_str().unwrap();
+    let (status, _) = send(
+        "PATCH",
+        &format!("instance-groups/{group_id}"),
+        json!({ "name": "Heavy" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = send(
+        "PUT",
+        "instance-groups/memberships",
+        json!([{ "instance_id": id, "group_ids": [group_id] }]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let (_, groups) = send("GET", "instance-groups", Value::Null).await;
+    assert_eq!(
+        groups,
+        json!([
+            { "id": "group:favorites", "name": "Favorites" },
+            { "id": group_id, "name": "Heavy" },
+        ])
+    );
+    let (_, memberships) =
+        send("GET", "instance-groups/memberships", Value::Null).await;
+    let expected: serde_json::Map<_, _> =
+        [(id.clone(), json!([group_id]))].into_iter().collect();
+    assert_eq!(memberships, Value::Object(expected));
+
+    let (status, _) = send(
+        "PUT",
+        "instance-groups/memberships",
+        json!([
+            { "instance_id": id, "group_ids": [] },
+            { "instance_id": "local:missing", "group_ids": [group_id] },
+        ]),
+    )
+    .await;
+    assert!(!status.is_success());
+    let (_, unchanged) =
+        send("GET", "instance-groups/memberships", Value::Null).await;
+    assert_eq!(unchanged, memberships);
 }

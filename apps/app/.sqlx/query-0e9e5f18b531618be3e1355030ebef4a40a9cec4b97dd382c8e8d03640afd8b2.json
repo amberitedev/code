@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n\t\tSELECT memberships.instance_id, memberships.group_id\n\t\tFROM instance_group_memberships memberships\n\t\tINNER JOIN instance_groups groups\n\t\t\tON groups.id = memberships.group_id\n\t\tORDER BY groups.name\n\t\t",
+  "describe": {
+    "columns": [
+      {
+        "name": "instance_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "instance_group_memberships",
+            "name": "instance_id"
+          }
+        }
+      },
+      {
+        "name": "group_id",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "instance_group_memberships",
+            "name": "group_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "0e9e5f18b531618be3e1355030ebef4a40a9cec4b97dd382c8e8d03640afd8b2"
+}

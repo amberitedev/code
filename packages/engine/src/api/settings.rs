@@ -6,7 +6,7 @@ pub use crate::state::content_store::StoreUsage;
 use crate::state::{DirectoryInfo, db};
 pub use crate::{
     Engine,
-    state::{Hooks, MemorySettings, Settings, WindowSize},
+    state::{Hooks, MemorySettings, WindowSize},
 };
 use std::path::{Path, PathBuf};
 

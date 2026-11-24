@@ -6,16 +6,16 @@ use axum::{
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
 };
 use contracts::{ApiError, server::Mount};
-use engine::{
-    DesktopEvent, Event, EventSink, FriendPayload,
-    InstanceGroupsChangedPayload, data::OnboardingChecklist,
-    prelude::CommandPayload,
-};
+use engine::{Event, EventSink};
 use serde::Serialize;
 use tokio::sync::broadcast::{self, Receiver, error::RecvError};
 
 use super::endpoints::{events::EventSocket, ops::OpResponse};
+use crate::desktop::deep_links::CommandPayload;
 use crate::engine_handle::EngineHandle;
+use crate::friends::FriendPayload;
+use crate::library::groups::InstanceGroupsChangedPayload;
+use crate::onboarding::state::OnboardingChecklist;
 
 const APP_EVENT_CAPACITY: usize = 256;
 
@@ -28,25 +28,13 @@ const APP_EVENT_CAPACITY: usize = 256;
     ts(tag = "type", content = "payload", rename_all = "snake_case")
 )]
 pub enum AppEvent {
-    Friend(
-        #[cfg_attr(feature = "export-ts", ts(type = "FriendPayload"))]
-        FriendPayload,
-    ),
+    Friend(FriendPayload),
     Notification(
         #[cfg_attr(feature = "export-ts", ts(type = "unknown"))]
         serde_json::Value,
     ),
-    OnboardingChecklist(
-        #[cfg_attr(feature = "export-ts", ts(type = "OnboardingChecklist"))]
-        OnboardingChecklist,
-    ),
-    InstanceGroupsChanged(
-        #[cfg_attr(
-            feature = "export-ts",
-            ts(type = "InstanceGroupsChangedPayload")
-        )]
-        InstanceGroupsChangedPayload,
-    ),
+    OnboardingChecklist(OnboardingChecklist),
+    InstanceGroupsChanged(InstanceGroupsChangedPayload),
     Command(Command),
     GameOptionLocalesUpdated,
     /// How far a long operation (`crate::local_api::ops`) has got.
@@ -71,16 +59,13 @@ pub enum AppEvent {
     },
 }
 
-/// A link or file the App was asked to open: a Modrinth one, which the engine parses, or an
-/// Amberite one. The frontend tells them apart by `event`.
+/// A link or file the App was asked to open: a Modrinth one or an Amberite one. The frontend tells
+/// them apart by `event`.
 #[derive(Clone, Serialize)]
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(untagged)]
 pub enum Command {
-    Modrinth(
-        #[cfg_attr(feature = "export-ts", ts(type = "CommandPayload"))]
-        CommandPayload,
-    ),
+    Modrinth(CommandPayload),
     Amberite(AmberiteCommand),
 }
 
@@ -99,29 +84,6 @@ pub enum AmberiteCommand {
 pub enum LocalEvent {
     Engine(#[cfg_attr(feature = "export-ts", ts(type = "EngineEvent"))] Event),
     App(AppEvent),
-}
-
-impl From<Event> for LocalEvent {
-    fn from(event: Event) -> Self {
-        let Event::Desktop(event) = event else {
-            return Self::Engine(event);
-        };
-        Self::App(match event {
-            DesktopEvent::Friend(payload) => AppEvent::Friend(payload),
-            DesktopEvent::Notification(payload) => {
-                AppEvent::Notification(payload)
-            }
-            DesktopEvent::OnboardingChecklist(checklist) => {
-                AppEvent::OnboardingChecklist(checklist)
-            }
-            DesktopEvent::InstanceGroupsChanged(payload) => {
-                AppEvent::InstanceGroupsChanged(payload)
-            }
-            DesktopEvent::Command(command) => {
-                AppEvent::Command(Command::Modrinth(command))
-            }
-        })
-    }
 }
 
 /// Where the socket's events come from: the engine's sink and the App's own sender.
@@ -204,7 +166,7 @@ async fn next(
     app: &mut Receiver<AppEvent>,
 ) -> Option<LocalEvent> {
     let received = tokio::select! {
-        event = engine.recv() => event.map(LocalEvent::from),
+        event = engine.recv() => event.map(LocalEvent::Engine),
         event = app.recv() => event.map(LocalEvent::App),
     };
     match received {

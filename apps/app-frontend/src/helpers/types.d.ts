@@ -7,10 +7,11 @@ import type { ModrinthId } from '@modrinth/utils'
 
 export type { ContentFile, SharedInstanceAttachment } from '@modrinth/api-client'
 
-/** The engine's instance with the options it shares, which the App keeps. */
+/** The engine's instance with the options it shares and its groups, which the App keeps. */
 export type GameInstance = Omit<InstanceResponse, 'link'> & {
 	link: InstanceLink | null
 	synced_options: InstanceSyncedOptions
+	group_ids: string[]
 }
 
 /** Every variant's ids, readable without narrowing. */

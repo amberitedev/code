@@ -1,15 +1,15 @@
 //! Serves `crate::local_api::endpoints::{game_options, synced_options, synced_packs}` over the
 //! engine crate's synced-options code.
 
+use crate::state::Desktop;
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use axum::{Router, extract::State};
 use contracts::{
     ApiError, Empty, Json,
     server::{Mount, Req},
 };
-use engine::{Engine, data::InstanceSyncedOptions, routes::api_error};
+use engine::{data::InstanceSyncedOptions, routes::api_error};
 
 use super::{
     GameOptionsSourceCandidate, GameSettingLocaleLabels,
@@ -83,7 +83,7 @@ pub fn routes() -> Router<AppState> {
 }
 
 async fn list_game_options_sources(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     _: Req<ListGameOptionsSources>,
 ) -> Answer<Json<Vec<GameOptionsSourceCandidate>>> {
     crate::synced_options::list_game_options_sync_sources(&engine)
@@ -93,7 +93,7 @@ async fn list_game_options_sources(
 }
 
 async fn get_synced_game_options(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     _: Req<GetSyncedGameOptions>,
 ) -> Answer<Json<GameSettingsEditorState>> {
     crate::synced_options::get_synced_game_options_config(&engine)
@@ -103,7 +103,7 @@ async fn get_synced_game_options(
 }
 
 async fn preview_synced_game_options(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { body, .. }: Req<PreviewSyncedGameOptions>,
 ) -> Answer<Json<GameSettingsEditorState>> {
     crate::synced_options::preview_synced_game_option_changes(&engine, body)
@@ -113,7 +113,7 @@ async fn preview_synced_game_options(
 }
 
 async fn save_synced_game_options(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { body, .. }: Req<SaveSyncedGameOptions>,
 ) -> Answer<Json<SaveGameSettingsResult>> {
     crate::synced_options::save_synced_game_option_changes(&engine, body)
@@ -123,7 +123,7 @@ async fn save_synced_game_options(
 }
 
 async fn get_instance_game_options(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { params, .. }: Req<GetInstanceGameOptions>,
 ) -> Answer<Json<GameSettingsEditorState>> {
     crate::synced_options::get_local_game_options_config(&engine, &params.id)
@@ -133,7 +133,7 @@ async fn get_instance_game_options(
 }
 
 async fn preview_instance_game_options(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { params, body, .. }: Req<PreviewInstanceGameOptions>,
 ) -> Answer<Json<GameSettingsEditorState>> {
     crate::synced_options::preview_local_game_option_changes(
@@ -145,7 +145,7 @@ async fn preview_instance_game_options(
 }
 
 async fn save_instance_game_options(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { params, body, .. }: Req<SaveInstanceGameOptions>,
 ) -> Answer<Json<SaveGameSettingsResult>> {
     crate::synced_options::save_local_game_option_changes(
@@ -157,7 +157,7 @@ async fn save_instance_game_options(
 }
 
 async fn get_game_setting_labels(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { body, .. }: Req<GetGameSettingLabels>,
 ) -> Answer<Json<GameSettingLocaleLabels>> {
     crate::synced_options::get_game_setting_locale_labels(
@@ -173,7 +173,7 @@ async fn get_game_setting_labels(
 }
 
 async fn set_instance_synced_option(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { params, body, .. }: Req<SetInstanceSyncedOption>,
 ) -> Answer<Empty> {
     crate::synced_options::set_synced_option(
@@ -189,7 +189,7 @@ async fn set_instance_synced_option(
 }
 
 async fn preview_synced_option_join(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { params, query, .. }: Req<PreviewSyncedOptionJoin>,
 ) -> Answer<Json<SyncedOptionJoinPreview>> {
     crate::synced_options::get_synced_option_join_preview(
@@ -203,7 +203,7 @@ async fn preview_synced_option_join(
 }
 
 async fn get_instance_synced_options(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { params, .. }: Req<GetInstanceSyncedOptions>,
 ) -> Answer<Json<SyncedOptionsOverview>> {
     crate::synced_options::get_synced_options_overview(&engine, &params.id)
@@ -213,19 +213,17 @@ async fn get_instance_synced_options(
 }
 
 async fn list_instances_synced_options(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     _: Req<ListInstancesSyncedOptions>,
 ) -> Answer<Json<HashMap<String, InstanceSyncedOptions>>> {
-    crate::synced_options::state::all_instance_synced_options(crate::db::pool(
-        &engine,
-    ))
-    .await
-    .map(Json)
-    .map_err(api_error)
+    crate::synced_options::state::all_instance_synced_options(engine.db())
+        .await
+        .map(Json)
+        .map_err(api_error)
 }
 
 async fn get_global_synced_options(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     _: Req<GetGlobalSyncedOptions>,
 ) -> Answer<Json<GlobalSyncedOptions>> {
     crate::synced_options::get_global_synced_options(&engine)
@@ -235,7 +233,7 @@ async fn get_global_synced_options(
 }
 
 async fn get_initialized_synced_options(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     _: Req<GetInitializedSyncedOptions>,
 ) -> Answer<Json<GlobalSyncedOptions>> {
     crate::synced_options::get_initialized_synced_options(&engine)
@@ -245,7 +243,7 @@ async fn get_initialized_synced_options(
 }
 
 async fn set_global_synced_option(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { body, .. }: Req<SetGlobalSyncedOption>,
 ) -> Answer<Json<GlobalSyncedOptions>> {
     crate::synced_options::set_global_synced_option(
@@ -260,7 +258,7 @@ async fn set_global_synced_option(
 }
 
 async fn rebuild_synced_options(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { body, .. }: Req<RebuildSyncedOptions>,
 ) -> Answer<Empty> {
     match body.instance_id {
@@ -280,7 +278,7 @@ async fn rebuild_synced_options(
 }
 
 async fn get_command_history(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     _: Req<GetCommandHistory>,
 ) -> Answer<Json<String>> {
     crate::synced_options::get_command_history(&engine)
@@ -290,7 +288,7 @@ async fn get_command_history(
 }
 
 async fn set_command_history(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { body, .. }: Req<SetCommandHistory>,
 ) -> Answer<Json<String>> {
     crate::synced_options::set_command_history(&engine, &body.contents)
@@ -300,7 +298,7 @@ async fn set_command_history(
 }
 
 async fn list_synced_servers(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     _: Req<ListSyncedServers>,
 ) -> Answer<Json<Vec<SyncedServer>>> {
     crate::synced_options::list_synced_servers(&engine)
@@ -310,7 +308,7 @@ async fn list_synced_servers(
 }
 
 async fn update_synced_server(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { body, .. }: Req<UpdateSyncedServer>,
 ) -> Answer<Empty> {
     crate::synced_options::update_synced_server(&engine, body)
@@ -320,7 +318,7 @@ async fn update_synced_server(
 }
 
 async fn remove_synced_server(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { params, .. }: Req<RemoveSyncedServer>,
 ) -> Answer<Empty> {
     crate::synced_options::remove_synced_server(&engine, &params.id)
@@ -330,7 +328,7 @@ async fn remove_synced_server(
 }
 
 async fn list_synced_packs(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { query, .. }: Req<ListSyncedPacks>,
 ) -> Answer<Json<SyncedPacks>> {
     crate::synced_options::list_synced_packs(&engine, query.project_type.into())
@@ -340,7 +338,7 @@ async fn list_synced_packs(
 }
 
 async fn upload_synced_pack(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { body, .. }: Req<UploadSyncedPack>,
 ) -> Answer<Empty> {
     crate::synced_options::upload_synced_pack(
@@ -355,7 +353,7 @@ async fn upload_synced_pack(
 }
 
 async fn set_synced_pack_enabled(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { params, body, .. }: Req<SetSyncedPackEnabled>,
 ) -> Answer<Empty> {
     crate::synced_options::set_synced_pack_enabled(
@@ -369,7 +367,7 @@ async fn set_synced_pack_enabled(
 }
 
 async fn remove_synced_pack(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { params, .. }: Req<RemoveSyncedPack>,
 ) -> Answer<Empty> {
     crate::synced_options::remove_synced_pack(&engine, &params.id)
@@ -379,7 +377,7 @@ async fn remove_synced_pack(
 }
 
 async fn preview_pack_sync(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { params, query, .. }: Req<PreviewPackSync>,
 ) -> Answer<Json<PackSyncPreview>> {
     crate::synced_options::get_pack_sync_preview(
@@ -393,7 +391,7 @@ async fn preview_pack_sync(
 }
 
 async fn sync_pack(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { params, body, .. }: Req<SyncPack>,
 ) -> Answer<Empty> {
     crate::synced_options::sync_pack(&engine, &params.id, &body.project_path)
@@ -403,7 +401,7 @@ async fn sync_pack(
 }
 
 async fn desync_pack(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { params, query, .. }: Req<DesyncPack>,
 ) -> Answer<Empty> {
     crate::synced_options::desync_pack(

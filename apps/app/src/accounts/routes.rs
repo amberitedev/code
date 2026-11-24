@@ -1,5 +1,6 @@
 //! Serves `crate::local_api::endpoints::accounts` over the App's sign-in code.
 
+use crate::state::Desktop;
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use axum::{Router, extract::State};
@@ -7,7 +8,6 @@ use contracts::{
     ApiError, Empty, ErrorCode, Json,
     server::{Mount, Req},
 };
-use engine::Engine;
 use tauri::{Manager, UserAttentionType, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_opener::OpenerExt;
 use tokio::time::Instant;
@@ -78,7 +78,7 @@ async fn check_minecraft_reachable(
 }
 
 async fn sign_in_to_minecraft(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     State(app): State<AppSlot>,
     _: Req<SignInToMinecraft>,
 ) -> Answer<Json<MinecraftAccountSummary>> {
@@ -134,7 +134,7 @@ async fn microsoft_code(address: impl Fn() -> Option<Url>) -> Answer<String> {
 }
 
 async fn list_minecraft_accounts(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     _: Req<ListMinecraftAccounts>,
 ) -> Answer<Json<Vec<MinecraftAccountSummary>>> {
     minecraft_auth::users(&engine)
@@ -144,7 +144,7 @@ async fn list_minecraft_accounts(
 }
 
 async fn get_default_minecraft_account(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     _: Req<GetDefaultMinecraftAccount>,
 ) -> Answer<Json<Option<Uuid>>> {
     minecraft_auth::get_default_user(&engine)
@@ -154,7 +154,7 @@ async fn get_default_minecraft_account(
 }
 
 async fn set_default_minecraft_account(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { body, .. }: Req<SetDefaultMinecraftAccount>,
 ) -> Answer<Empty> {
     minecraft_auth::set_default_user(&engine, body)
@@ -164,7 +164,7 @@ async fn set_default_minecraft_account(
 }
 
 async fn remove_minecraft_account(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { params, .. }: Req<RemoveMinecraftAccount>,
 ) -> Answer<Empty> {
     minecraft_auth::remove_user(&engine, params.id)
@@ -176,7 +176,7 @@ async fn remove_minecraft_account(
 /// The browser hands the session back to a loopback listener or through a `modrinth://auth`
 /// deep link; `crate::desktop::opening` delivers the deep link.
 async fn sign_in_to_modrinth(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     State(presence): State<Arc<Presence>>,
     State(app): State<AppSlot>,
     Req { body, .. }: Req<SignInToModrinth>,
@@ -231,7 +231,7 @@ async fn cancel_modrinth_sign_in(_: Req<CancelModrinthSignIn>) -> Empty {
 }
 
 async fn sign_out_of_modrinth(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     State(presence): State<Arc<Presence>>,
     _: Req<SignOutOfModrinth>,
 ) -> Answer<Empty> {
@@ -242,7 +242,7 @@ async fn sign_out_of_modrinth(
 }
 
 async fn get_active_modrinth_account(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     State(presence): State<Arc<Presence>>,
     _: Req<GetActiveModrinthAccount>,
 ) -> Answer<Json<Option<ModrinthCredentials>>> {
@@ -253,14 +253,14 @@ async fn get_active_modrinth_account(
 }
 
 async fn list_modrinth_accounts(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     _: Req<ListModrinthAccounts>,
 ) -> Answer<Json<Vec<ModrinthCredentials>>> {
     mr_auth::get_all(&engine).await.map(Json).map_err(api_error)
 }
 
 async fn set_active_modrinth_account(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     State(presence): State<Arc<Presence>>,
     Req { body, .. }: Req<SetActiveModrinthAccount>,
 ) -> Answer<Empty> {
@@ -271,7 +271,7 @@ async fn set_active_modrinth_account(
 }
 
 async fn remove_modrinth_account(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     State(presence): State<Arc<Presence>>,
     Req { params, .. }: Req<RemoveModrinthAccount>,
 ) -> Answer<Empty> {

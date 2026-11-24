@@ -1,5 +1,6 @@
 //! Serves `ExportDebugInfo` of `crate::local_api::endpoints::ops`.
 
+use crate::state::Desktop;
 use std::sync::Arc;
 
 use axum::{Router, extract::State, http::StatusCode};
@@ -8,7 +9,6 @@ use contracts::{
     server::{Mount, Req},
 };
 use engine::{
-    Engine,
     debug_info::{DebugInfoExportStage, export_debug_info},
     routes::api_error,
 };
@@ -24,7 +24,7 @@ pub fn routes() -> Router<AppState> {
 }
 
 async fn export(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     State(ops): State<Arc<Ops>>,
     Req { body, .. }: Req<ExportDebugInfo>,
 ) -> Result<StatusCode, ApiError> {

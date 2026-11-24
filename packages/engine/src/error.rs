@@ -243,13 +243,6 @@ pub enum ErrorKind {
     )]
     InvalidSkinTexture,
 
-    #[cfg(windows)]
-    #[error("Windows error: {0}")]
-    WindowsError(#[from] windows_core::Error),
-
-    #[error("zbus error: {0}")]
-    ZbusError(#[from] zbus::Error),
-
     #[error("deserialization error: {0}")]
     DeserializationError(#[from] serde::de::value::Error),
 

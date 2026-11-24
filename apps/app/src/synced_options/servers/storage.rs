@@ -6,18 +6,19 @@ use super::types::{
     CanonicalServer, LocalServer, ProjectionEntry, ProjectionOwner,
     ServerRecord, ServerSource,
 };
-use engine::{Engine, ErrorKind};
+use crate::state::Desktop;
+use engine::ErrorKind;
 use sqlx::{Executor, Sqlite, Transaction};
 use std::collections::HashSet;
 use std::path::PathBuf;
 
 pub(in crate::synced_options) async fn canonical_exists(
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<bool> {
     canonical_initialized(state).await
 }
 
-async fn canonical_initialized(state: &Engine) -> engine::Result<bool> {
+async fn canonical_initialized(state: &Desktop) -> engine::Result<bool> {
     Ok(sqlx::query_scalar!(
         r#"
 		SELECT EXISTS(
@@ -25,14 +26,14 @@ async fn canonical_initialized(state: &Engine) -> engine::Result<bool> {
 		) AS "initialized!: bool"
 		"#,
     )
-    .fetch_one(crate::db::pool(state))
+    .fetch_one(state.db())
     .await?)
 }
 
 pub(super) async fn read_canonical(
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<Vec<CanonicalServer>> {
-    read_canonical_with(crate::db::pool(state)).await
+    read_canonical_with(state.db()).await
 }
 
 async fn read_canonical_with<'e>(
@@ -60,9 +61,9 @@ async fn read_canonical_with<'e>(
 /// Reads canonical servers and instance overrides from the same committed revision.
 pub(super) async fn read_server_snapshot(
     instance_id: &str,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<(Vec<CanonicalServer>, Vec<LocalServer>)> {
-    let mut tx = crate::db::pool(state).begin().await?;
+    let mut tx = state.db().begin().await?;
     let canonical = read_canonical_with(&mut *tx).await?;
     let local = load_local_with(instance_id, &mut *tx).await?;
     tx.commit().await?;
@@ -72,9 +73,9 @@ pub(super) async fn read_server_snapshot(
 pub(super) async fn commit_server_state(
     canonical: Option<&[CanonicalServer]>,
     local: Option<(&str, &[LocalServer])>,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<bool> {
-    let mut tx = crate::db::pool(state).begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = state.db().begin_with("BEGIN IMMEDIATE").await?;
     let mut canonical_changed = false;
     if let Some(canonical) = canonical {
         canonical_changed = write_canonical_rows(&mut tx, canonical).await?;
@@ -180,7 +181,7 @@ async fn write_canonical_rows(
     Ok(true)
 }
 
-pub(super) async fn server_revision(state: &Engine) -> engine::Result<i64> {
+pub(super) async fn server_revision(state: &Desktop) -> engine::Result<i64> {
     Ok(sqlx::query_scalar!(
         r#"
 		SELECT revision AS "revision!: i64"
@@ -188,16 +189,16 @@ pub(super) async fn server_revision(state: &Engine) -> engine::Result<i64> {
 		WHERE singleton = 1
 		"#,
     )
-    .fetch_optional(crate::db::pool(state))
+    .fetch_optional(state.db())
     .await?
     .unwrap_or(0))
 }
 
 pub(super) async fn load_local(
     instance_id: &str,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<Vec<LocalServer>> {
-    load_local_with(instance_id, crate::db::pool(state)).await
+    load_local_with(instance_id, state.db()).await
 }
 
 async fn load_local_with<'e>(
@@ -236,7 +237,7 @@ async fn load_local_with<'e>(
 pub(super) async fn write_local(
     instance_id: &str,
     servers: &[LocalServer],
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<()> {
     commit_server_state(None, Some((instance_id, servers)), state).await?;
     Ok(())
@@ -279,7 +280,7 @@ pub(super) async fn write_local_rows(
 
 pub(super) async fn load_projection_entries(
     instance_id: &str,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<Vec<ProjectionEntry>> {
     let rows = sqlx::query!(
         "
@@ -290,7 +291,7 @@ pub(super) async fn load_projection_entries(
 		",
         instance_id,
     )
-    .fetch_all(crate::db::pool(state))
+    .fetch_all(state.db())
     .await?;
     rows.into_iter()
         .map(|row| {
@@ -314,9 +315,9 @@ pub(super) async fn begin_server_checkpoint(
     servers: &[ServerRecord],
     expected_sha1: &str,
     source_revision: i64,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<()> {
-    let mut tx = crate::db::pool(state).begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = state.db().begin_with("BEGIN IMMEDIATE").await?;
     sqlx::query!(
         "DELETE FROM instance_server_projection_entries WHERE instance_id = ?",
         instance_id,
@@ -371,7 +372,7 @@ pub(super) async fn begin_server_checkpoint(
     Ok(())
 }
 
-pub(super) fn generated_path(state: &Engine, instance_id: &str) -> PathBuf {
+pub(super) fn generated_path(state: &Desktop, instance_id: &str) -> PathBuf {
     synced_options_path(state)
         .join("servers/generated")
         .join(safe_instance_id(instance_id))

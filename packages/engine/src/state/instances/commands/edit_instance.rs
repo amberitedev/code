@@ -30,7 +30,6 @@ pub struct EditInstance {
     )]
     pub icon_config: Option<Option<IconConfig>>,
     pub update_channel: Option<ReleaseChannel>,
-    pub group_ids: Option<Vec<String>>,
     pub link: Option<InstanceLink>,
     pub launch_overrides: Option<InstanceLaunchOverridesPatch>,
     pub content_set_patch: Option<AppliedContentSetPatch>,
@@ -184,15 +183,6 @@ pub(crate) async fn edit_instance(
     if let Some(link) = &patch.link {
         instance_rows::upsert_instance_link(&instance.id, link, &mut tx)
             .await?;
-    }
-
-    if let Some(group_ids) = &patch.group_ids {
-        instance_rows::replace_instance_groups(
-            &instance.id,
-            group_ids,
-            &mut tx,
-        )
-        .await?;
     }
 
     if let Some(overrides) = launch_overrides.as_mut() {

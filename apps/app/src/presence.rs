@@ -1,6 +1,5 @@
+use crate::state::Desktop;
 use std::sync::Arc;
-
-use engine::Engine;
 
 use crate::accounts::state::ModrinthCredentials;
 use crate::discord::DiscordGuard;
@@ -23,15 +22,15 @@ impl Presence {
 
 /// Refreshes Modrinth sign-ins, connects Discord and the friends socket, then keeps the socket
 /// connected. The friends socket waits for the refresh, which may replace its session.
-pub async fn start_presence(engine: Arc<Engine>, presence: Arc<Presence>) {
+pub async fn start_presence(engine: Desktop, presence: Arc<Presence>) {
     let res = tokio::try_join!(
         presence.discord_rpc.clear_to_default(
             true,
-            crate::db::pool(&engine),
+            engine.db(),
             &engine.process_manager,
         ),
         ModrinthCredentials::refresh_all(
-            crate::db::pool(&engine),
+            engine.db(),
             engine.pool(),
             &engine.fetch_semaphore,
             &engine.sessions,
@@ -45,25 +44,21 @@ pub async fn start_presence(engine: Arc<Engine>, presence: Arc<Presence>) {
     let _ = presence
         .friends_socket
         .connect(
-            crate::db::pool(&engine),
+            engine.db(),
             &engine.api_semaphore,
             &engine.sessions,
             &engine.process_manager,
-            &engine.events,
+            engine.app_events(),
         )
         .await;
     let _ = FriendsSocket::socket_loop(engine, presence).await;
 }
 
 /// Shows the first running instance, or none, on Discord and to friends.
-pub async fn show_presence(engine: &Engine, presence: &Presence) {
+pub async fn show_presence(engine: &Desktop, presence: &Presence) {
     let _ = presence
         .discord_rpc
-        .clear_to_default(
-            true,
-            crate::db::pool(engine),
-            &engine.process_manager,
-        )
+        .clear_to_default(true, engine.db(), &engine.process_manager)
         .await;
     let playing = engine
         .process_manager

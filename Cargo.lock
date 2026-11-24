@@ -180,6 +180,7 @@ dependencies = [
  "bytes",
  "chardetng",
  "chrono",
+ "cidre",
  "contracts",
  "dashmap",
  "data-url",
@@ -189,6 +190,7 @@ dependencies = [
  "either",
  "encoding_rs",
  "engine",
+ "enumset",
  "futures",
  "heck 0.5.0",
  "hkdf",
@@ -245,6 +247,7 @@ dependencies = [
  "uuid 1.28.0",
  "whoami",
  "windows 0.61.3",
+ "zbus 6.0.0",
  "zip 9.0.5",
 ]
 
@@ -3266,7 +3269,6 @@ dependencies = [
  "cap-std",
  "chardetng",
  "chrono",
- "cidre",
  "contracts",
  "dashmap",
  "data-url",
@@ -3333,9 +3335,7 @@ dependencies = [
  "uuid 1.28.0",
  "whoami",
  "windows 0.61.3",
- "windows-core 0.61.2",
  "winreg",
- "zbus 6.0.0",
  "zip 9.0.5",
 ]
 

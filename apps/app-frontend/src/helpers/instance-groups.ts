@@ -12,32 +12,37 @@ export const FAVORITES_GROUP_ID = 'group:favorites'
 export const MAX_INSTANCE_GROUP_NAME_LENGTH = 256
 
 export async function list_groups(): Promise<InstanceGroupDefinition[]> {
-	return await apiClient.local.call(instanceGroups.ListInstanceGroups)
+	return await apiClient.local.call(instanceGroups.listInstanceGroups)
 }
 
 export async function create_group(name: string): Promise<InstanceGroupDefinition> {
-	return await apiClient.local.call(instanceGroups.CreateInstanceGroup, { body: { name } })
+	return await apiClient.local.call(instanceGroups.createInstanceGroup, { body: { name } })
 }
 
 export async function rename_group(id: string, newName: string): Promise<InstanceGroupDefinition> {
-	return await apiClient.local.call(instanceGroups.RenameInstanceGroup, {
+	return await apiClient.local.call(instanceGroups.renameInstanceGroup, {
 		params: { id },
 		body: { name: newName },
 	})
 }
 
 export async function delete_group(id: string): Promise<void> {
-	return await apiClient.local.call(instanceGroups.DeleteInstanceGroup, { params: { id } })
+	return await apiClient.local.call(instanceGroups.deleteInstanceGroup, { params: { id } })
 }
 
 export async function set_group_order(groupIds: string[]): Promise<void> {
-	return await apiClient.local.call(instanceGroups.SetInstanceGroupOrder, { body: groupIds })
+	return await apiClient.local.call(instanceGroups.setInstanceGroupOrder, { body: groupIds })
+}
+
+/** Each instance's group ids, by instance id. */
+export async function list_group_memberships(): Promise<Record<string, string[]>> {
+	return await apiClient.local.call(instanceGroups.listInstanceGroupMemberships)
 }
 
 export async function set_group_memberships(
 	updates: InstanceGroupMembershipUpdate[],
 ): Promise<void> {
-	return await apiClient.local.call(instanceGroups.SetInstanceGroupMemberships, {
+	return await apiClient.local.call(instanceGroups.setInstanceGroupMemberships, {
 		body: updates,
 	})
 }

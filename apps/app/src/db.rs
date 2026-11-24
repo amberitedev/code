@@ -1,8 +1,8 @@
 //! app.db: the App's own tables, in its settings folder. Rows about an instance keep its id
 //! without a foreign key, since instances live in the engine's database.
 
-use crate::settings::rows::SettingsRow;
-use engine::{Engine, data::Settings};
+use crate::settings::Settings;
+use crate::state::Desktop;
 use sqlx::SqlitePool;
 use sqlx::sqlite::{
     SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions,
@@ -13,15 +13,11 @@ use std::time::Duration;
 
 const DB_FILE: &str = "app.db";
 
-/// The App's database of the engine it started.
-pub fn pool(engine: &Engine) -> &SqlitePool {
-    &crate::hooks::desktop(engine).db
-}
-
 /// Opens and migrates `settings_dir`'s app.db, backing it up first when this is a new version.
 pub async fn open(settings_dir: &Path) -> engine::Result<SqlitePool> {
     let path = settings_dir.join(DB_FILE);
-    if let Err(err) = engine::prelude::maybe_backup_existing_app_db(&path).await
+    if let Err(err) =
+        crate::db_backup::maybe_backup_existing_app_db(&path).await
     {
         tracing::warn!(
             "Continuing without a pre-migration app database backup: {err}"
@@ -105,13 +101,15 @@ async fn remove_orphaned_skins(pool: &SqlitePool) -> engine::Result<()> {
 /// Catches app.db up with the engine for Created and Removed events the App missed: forgets the
 /// rows of instances the engine no longer has and gives the rest the default sync preferences
 /// they lack.
-pub async fn reconcile_instances(engine: &Engine) -> engine::Result<()> {
-    let pool = pool(engine);
+pub async fn reconcile_instances(engine: &Desktop) -> engine::Result<()> {
+    let pool = engine.db();
     // Read before the engine's instances, so an instance created in between is not forgotten.
     // The tables are those forget_instance deletes from.
     let known: Vec<String> = sqlx::query_scalar(
         "
 		SELECT instance_id FROM hidden_instances
+		UNION SELECT instance_id FROM instance_group_memberships
+		UNION SELECT instance_id FROM join_log
 		UNION SELECT instance_id FROM instance_game_option_pack_bases
 		UNION SELECT instance_id FROM instance_game_option_update_state
 		UNION SELECT instance_id FROM instance_server_pack_state
@@ -206,6 +204,15 @@ pub async fn forget_instance(
     sqlx::query!("DELETE FROM screenshots WHERE instance_id = ?", instance_id)
         .execute(&mut *tx)
         .await?;
+    sqlx::query!(
+        "DELETE FROM instance_group_memberships WHERE instance_id = ?",
+        instance_id
+    )
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query!("DELETE FROM join_log WHERE instance_id = ?", instance_id)
+        .execute(&mut *tx)
+        .await?;
     tx.commit().await?;
     Ok(())
 }
@@ -220,7 +227,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let engine = crate::hooks::tests::offline_engine(dir.path()).await;
         let id = crate::hooks::tests::create(&engine).await.instance.id;
-        let pool = pool(&engine);
+        let pool = engine.db();
         crate::library::hidden_instances::set_instance_hidden(
             "user", "removed", true, pool,
         )

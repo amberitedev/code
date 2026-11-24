@@ -10,6 +10,7 @@ pub mod events;
 pub mod files;
 pub mod friends;
 pub mod game_options;
+pub mod groups;
 pub mod health;
 pub mod import;
 pub mod install;
@@ -52,6 +53,9 @@ mod tests {
         files::{self, FileStat, LocalFileQuery, RemoteIcon, ThumbnailQuery},
         friends,
         game_options::{self, GameSettingLabelsRequest},
+        groups::{
+            self, InstanceGroupRef, InstanceGroupUpdate, NewInstanceGroup,
+        },
         health,
         import::{
             self, ImportJob, ImportableInstance, InstanceToImport, Launcher,
@@ -68,9 +72,9 @@ mod tests {
         launch::{self, InstancePlay, ServerJoin, SingleplayerJoin},
         library::{
             self, GeneratedIcon, GeneratedInstanceIcon, InstanceVisibility,
-            RecentIconConfigs,
+            RecentIconConfigs, RecentWorldsQuery,
         },
-        onboarding::{self, OnboardingProgress},
+        onboarding,
         ops::{
             self, DebugExport, ExternalSave, InstanceFileSave, LocalUpload,
             OpResponse,
@@ -101,13 +105,21 @@ mod tests {
             ModrinthCredentials,
         },
     };
+    use crate::desktop::deep_links::CommandPayload;
+    use crate::friends::{FriendPayload, FriendStatusPayload};
+    use crate::library::groups::{
+        InstanceGroup, InstanceGroupMembershipUpdate,
+        InstanceGroupsChangedPayload,
+    };
     use crate::local_api::events::{
         AmberiteCommand, AppEvent, Command, LocalEvent,
     };
+    use crate::onboarding::state::OnboardingChecklist;
     use crate::screenshots::{
         ScreenshotEditSaveMode, ScreenshotGroup, ScreenshotGroupImport,
         ScreenshotGroupMembershipUpdate, ScreenshotKey,
     };
+    use crate::settings::{DefaultPage, FeatureFlag, Settings, Theme};
     use crate::skins::minecraft_skins::{
         Cape, MinecraftSkinVariant, Skin, SkinSource, UrlOrBlob,
     };
@@ -245,7 +257,21 @@ mod tests {
             ServerJoin::decl(&cfg),
             SingleplayerJoin::decl(&cfg),
             InstanceVisibility::decl(&cfg),
-            OnboardingProgress::decl(&cfg),
+            RecentWorldsQuery::decl(&cfg),
+            InstanceGroup::decl(&cfg),
+            InstanceGroupMembershipUpdate::decl(&cfg),
+            InstanceGroupRef::decl(&cfg),
+            NewInstanceGroup::decl(&cfg),
+            InstanceGroupUpdate::decl(&cfg),
+            InstanceGroupsChangedPayload::decl(&cfg),
+            OnboardingChecklist::decl(&cfg),
+            FriendPayload::decl(&cfg),
+            FriendStatusPayload::decl(&cfg),
+            CommandPayload::decl(&cfg),
+            Settings::decl(&cfg),
+            Theme::decl(&cfg),
+            DefaultPage::decl(&cfg),
+            FeatureFlag::decl(&cfg),
             JavaTest::decl(&cfg),
             JavaAtPath::decl(&cfg),
             Launcher::decl(&cfg),
@@ -278,6 +304,7 @@ mod tests {
             files::ts_module(),
             desktop::ts_module(),
             library::ts_module(),
+            groups::ts_module(),
             game_options::ts_module(),
             synced_options::ts_module(),
             synced_packs::ts_module(),

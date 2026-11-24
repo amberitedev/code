@@ -1,27 +1,15 @@
 //! The settings row of app.db.
 
 use anyhow::bail;
-use engine::state::{
-    DefaultPage, Hooks, MemorySettings, Settings, Theme, WindowSize,
-};
+use engine::state::{Hooks, MemorySettings, WindowSize};
+
+use super::{DefaultPage, Settings, Theme};
 use sqlx::{Pool, Sqlite};
 
 const CURRENT_VERSION: usize = 3;
 
-pub trait SettingsRow: Sized {
-    async fn get(
-        exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
-    ) -> engine::Result<Self>;
-    async fn update(
-        &self,
-        exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
-    ) -> engine::Result<()>;
-    async fn migrate(exec: &Pool<Sqlite>) -> engine::Result<()>;
-    fn perform_migration(&mut self) -> engine::Result<()>;
-}
-
-impl SettingsRow for Settings {
-    async fn get(
+impl Settings {
+    pub async fn get(
         exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
     ) -> engine::Result<Self> {
         let res = sqlx::query!(
@@ -135,7 +123,7 @@ impl SettingsRow for Settings {
         })
     }
 
-    async fn update(
+    pub async fn update(
         &self,
         exec: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
     ) -> engine::Result<()> {
@@ -273,7 +261,7 @@ impl SettingsRow for Settings {
         Ok(())
     }
 
-    async fn migrate(exec: &Pool<Sqlite>) -> engine::Result<()> {
+    pub async fn migrate(exec: &Pool<Sqlite>) -> engine::Result<()> {
         let mut settings = Self::get(exec).await?;
 
         if settings.version < CURRENT_VERSION {

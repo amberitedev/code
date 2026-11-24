@@ -6,19 +6,15 @@ use crate::{
     server_list::DesyncServerMode,
     worlds::{
         DisplayStatus, ProtocolVersion, ServerPackStatus, ServerStatus, World,
-        WorldType, WorldWithInstance,
+        WorldType,
     },
 };
 
 contracts::endpoints! {
     group worlds;
 
-    /// The most recently played worlds across every instance, newest first.
-    ListRecentWorlds: Get "/worlds/recent", Session, (), RecentWorldsQuery, Empty => Json<Vec<WorldWithInstance>>, client_only;
     /// Pings a Minecraft server.
     GetServerStatus: Get "/server-status", Session, (), ServerStatusQuery, Empty => Json<ServerStatus>, client_only;
-    /// The instance's singleplayer worlds and servers.
-    ListInstanceWorlds: Get "/instances/{id}/worlds", Session, InstanceRef, (), Empty => Json<Vec<World>>, client_only;
     SetWorldDisplayStatus: Put "/instances/{id}/worlds/display-status", Session, InstanceRef, (), Json<WorldDisplayStatusUpdate> => Empty, client_only;
     /// `null` until the instance is installed.
     GetInstanceProtocolVersion: Get "/instances/{id}/protocol-version", Session, InstanceRef, (), Empty => Json<Option<ProtocolVersion>>, client_only;
@@ -34,14 +30,6 @@ contracts::endpoints! {
     DesyncInstanceServer: Post "/instances/{id}/servers/desync", Session, InstanceRef, (), Json<InstanceServerDesync> => Empty, client_only;
     EditInstanceServer: Put "/instances/{id}/servers/{index}", Session, InstanceServerRef, (), Json<InstanceServerUpdate> => Empty, client_only;
     RemoveInstanceServer: Delete "/instances/{id}/servers/{index}", Session, InstanceServerRef, (), Empty => Empty, client_only;
-}
-
-#[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
-pub struct RecentWorldsQuery {
-    pub limit: usize,
-    /// A JSON array of statuses; every status when absent.
-    pub display_statuses: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]

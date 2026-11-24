@@ -12,6 +12,7 @@ import {
 	type GlobalSyncedOptions,
 	type IconConfig,
 	instanceContent,
+	instanceGroups,
 	instancePaths,
 	instances,
 	instanceSharing,
@@ -74,19 +75,22 @@ const NOT_SYNCED: InstanceSyncedOptions = {
 	data_packs: false,
 }
 
-async function withSyncedOptions(read: Promise<InstanceResponse[]>): Promise<GameInstance[]> {
-	const [found, synced] = await Promise.all([
+/** The engine's instances with what the App keeps about each: synced options and groups. */
+async function withDesktopFields(read: Promise<InstanceResponse[]>): Promise<GameInstance[]> {
+	const [found, synced, groups] = await Promise.all([
 		read,
 		apiClient.local.call(syncedOptions.listInstancesSyncedOptions),
+		apiClient.local.call(instanceGroups.listInstanceGroupMemberships),
 	])
 	return found.map((instance) => ({
 		...instance,
 		synced_options: synced[instance.id] ?? NOT_SYNCED,
+		group_ids: groups[instance.id] ?? [],
 	}))
 }
 
 export async function get(instanceId: string): Promise<GameInstance | null> {
-	const [instance] = await withSyncedOptions(
+	const [instance] = await withDesktopFields(
 		apiClient.local
 			.call(instances.GetInstance, { params: { id: instanceId } })
 			.then((instance) => (instance ? [instance] : [])),
@@ -95,7 +99,7 @@ export async function get(instanceId: string): Promise<GameInstance | null> {
 }
 
 export async function get_many(instanceIds: string[]): Promise<GameInstance[]> {
-	return await withSyncedOptions(
+	return await withDesktopFields(
 		apiClient.local.call(instances.GetInstances, {
 			query: { ids: JSON.stringify(instanceIds) },
 		}),
@@ -465,7 +469,7 @@ export async function get_optimal_jre_key(instanceId: string): Promise<JavaVersi
 }
 
 export async function list(): Promise<GameInstance[]> {
-	return await withSyncedOptions(apiClient.local.call(instances.ListInstances))
+	return await withDesktopFields(apiClient.local.call(instances.ListInstances))
 }
 
 export async function check_installed(instanceId: string, projectId: string): Promise<boolean> {

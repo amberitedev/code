@@ -1,5 +1,6 @@
 //! Serves `crate::local_api::endpoints::friends` over `crate::friends::api`.
 
+use crate::state::Desktop;
 use std::sync::Arc;
 
 use ariadne::users::UserStatus;
@@ -9,7 +10,7 @@ use contracts::{
     backend::social::UserFriend,
     server::{Mount, Req},
 };
-use engine::{Engine, routes::api_error};
+use engine::routes::api_error;
 
 use super::api;
 use crate::presence::Presence;
@@ -32,7 +33,7 @@ pub fn routes() -> Router<AppState> {
 }
 
 async fn list_friends(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     _: Req<ListFriends>,
 ) -> Answer<Json<Vec<UserFriend>>> {
     api::friends(&engine).await.map(Json).map_err(api_error)
@@ -49,7 +50,7 @@ async fn list_friend_statuses(
 }
 
 async fn add_friend(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { params, .. }: Req<AddFriend>,
 ) -> Answer<Empty> {
     api::add_friend(&engine, &params.id)
@@ -59,7 +60,7 @@ async fn add_friend(
 }
 
 async fn remove_friend(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { params, .. }: Req<RemoveFriend>,
 ) -> Answer<Empty> {
     api::remove_friend(&engine, &params.id)

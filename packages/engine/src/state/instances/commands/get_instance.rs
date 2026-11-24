@@ -15,7 +15,6 @@ pub struct InstanceMetadata {
     pub shared_instance: Option<SharedInstanceAttachment>,
     #[serde(default)]
     pub quarantined: bool,
-    pub group_ids: Vec<String>,
     pub launch_overrides: InstanceLaunchOverrides,
 }
 
@@ -86,7 +85,6 @@ fn instance_metadata(
         link: record.link,
         shared_instance: record.shared_instance,
         quarantined,
-        group_ids: record.group_ids,
         launch_overrides: record.launch_overrides,
     }
 }

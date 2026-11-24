@@ -5,14 +5,14 @@ use contracts::{
     ApiError, Empty, Json,
     server::{Mount, Req},
 };
-use engine::{Engine, routes::api_error};
+use engine::routes::api_error;
 
+use super::Settings;
 use crate::local_api::{
     AppState,
-    endpoints::settings::{
-        AppSettings, CancelDirectoryChange, GetSettings, SetSettings,
-    },
+    endpoints::settings::{CancelDirectoryChange, GetSettings, SetSettings},
 };
+use crate::state::Desktop;
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -28,20 +28,17 @@ pub fn startup_routes(identifier: String) -> Router {
 }
 
 async fn get_settings(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     _: Req<GetSettings>,
-) -> Result<Json<AppSettings>, ApiError> {
-    super::get(&engine)
-        .await
-        .map(|settings| Json(AppSettings(settings)))
-        .map_err(api_error)
+) -> Result<Json<Settings>, ApiError> {
+    super::get(&engine).await.map(Json).map_err(api_error)
 }
 
 async fn set_settings(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { body, .. }: Req<SetSettings>,
 ) -> Result<Empty, ApiError> {
-    super::set(&engine, body.0)
+    super::set(&engine, body)
         .await
         .map(|()| Empty)
         .map_err(api_error)

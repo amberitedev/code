@@ -2,9 +2,10 @@
 
 use super::super::{instance_is_running, sync_files_are_protected};
 use super::options_file::{options_path, read_document};
+use crate::state::Desktop;
 use anyhow::Context;
 use engine::ErrorKind;
-use engine::state::{Engine, InstanceMetadata};
+use engine::state::InstanceMetadata;
 use engine::util::io;
 use std::collections::BTreeSet;
 
@@ -50,7 +51,7 @@ pub(in crate::synced_options) fn merge_resource_pack_order(
 
 pub(in crate::synced_options) async fn read_resource_pack_entries(
     metadata: &InstanceMetadata,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<Option<ResourcePackOptions>> {
     let path = options_path(metadata, state);
     if !path.exists() {
@@ -74,7 +75,7 @@ pub(in crate::synced_options) async fn merge_resource_pack_entries(
     metadata: &InstanceMetadata,
     managed: &BTreeSet<String>,
     selected: &[String],
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<ResourcePackOptionsUpdate> {
     if sync_files_are_protected(metadata) {
         return Ok(ResourcePackOptionsUpdate::Deferred);
