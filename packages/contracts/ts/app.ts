@@ -502,218 +502,218 @@ removed_paths: Array<string>,
 server_core_id: string | null, };
 
 export const health = {
-	checkHealth: { method: "GET", path: "/health", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
+	checkHealth: { method: "GET", path: "/health", auth: "none", dangerous: false, untimed: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
 }
 
 export const boot = {
-	getBoot: { method: "GET", path: "/app/boot", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Boot>,
+	getBoot: { method: "GET", path: "/app/boot", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, null, void, Boot>,
 }
 
 export const pairedCores = {
-	connectCore: { method: "POST", path: "/app/cores/connect", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, CoreTarget, string>,
-	signInToCore: { method: "POST", path: "/app/cores/sessions", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, NewCoreSession, CoreSession>,
-	signOutOfCore: { method: "DELETE", path: "/app/cores/sessions", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<null, CoreSessionKey, void, void>,
-	checkCoreSession: { method: "GET", path: "/app/cores/sessions", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, CoreSessionKey, void, boolean>,
+	connectCore: { method: "POST", path: "/app/cores/connect", auth: "none", dangerous: false, untimed: false, body: "json", response: "json" } as Endpoint<null, null, CoreTarget, string>,
+	signInToCore: { method: "POST", path: "/app/cores/sessions", auth: "none", dangerous: false, untimed: false, body: "json", response: "json" } as Endpoint<null, null, NewCoreSession, CoreSession>,
+	signOutOfCore: { method: "DELETE", path: "/app/cores/sessions", auth: "none", dangerous: false, untimed: false, body: "empty", response: "empty" } as Endpoint<null, CoreSessionKey, void, void>,
+	checkCoreSession: { method: "GET", path: "/app/cores/sessions", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, CoreSessionKey, void, boolean>,
 }
 
 export const events = {
-	eventSocket: { method: "GET", path: "/events", auth: "none", dangerous: false, body: "empty", response: "upgrade" } as Endpoint<null, null, void, { receive: LocalEvent, send: null }>,
+	eventSocket: { method: "GET", path: "/events", auth: "none", dangerous: false, untimed: false, body: "empty", response: "upgrade" } as Endpoint<null, null, void, { receive: LocalEvent, send: null }>,
 }
 
 export const localFiles = {
-	getLocalFile: { method: "GET", path: "/app/file", auth: "none", dangerous: false, body: "empty", response: "stream" } as Endpoint<null, LocalFileQuery, void, Response>,
-	getThumbnail: { method: "GET", path: "/app/thumbnail", auth: "none", dangerous: false, body: "empty", response: "stream" } as Endpoint<null, ThumbnailQuery, void, Response>,
-	cacheRemoteIcon: { method: "POST", path: "/app/icons/remote", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, RemoteIcon, string>,
-	readLocalFile: { method: "GET", path: "/app/fs/read", auth: "none", dangerous: false, body: "empty", response: "stream" } as Endpoint<null, LocalFileQuery, void, Response>,
-	statLocalFile: { method: "GET", path: "/app/fs/stat", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, LocalFileQuery, void, FileStat>,
+	getLocalFile: { method: "GET", path: "/app/file", auth: "none", dangerous: false, untimed: false, body: "empty", response: "stream" } as Endpoint<null, LocalFileQuery, void, Response>,
+	getThumbnail: { method: "GET", path: "/app/thumbnail", auth: "none", dangerous: false, untimed: false, body: "empty", response: "stream" } as Endpoint<null, ThumbnailQuery, void, Response>,
+	cacheRemoteIcon: { method: "POST", path: "/app/icons/remote", auth: "none", dangerous: false, untimed: false, body: "json", response: "json" } as Endpoint<null, null, RemoteIcon, string>,
+	readLocalFile: { method: "GET", path: "/app/fs/read", auth: "none", dangerous: false, untimed: false, body: "empty", response: "stream" } as Endpoint<null, LocalFileQuery, void, Response>,
+	statLocalFile: { method: "GET", path: "/app/fs/stat", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, LocalFileQuery, void, FileStat>,
 }
 
 export const desktop = {
-	pickFiles: { method: "POST", path: "/app/dialog/open", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, OpenDialog, Array<string> | null>,
-	pickSavePath: { method: "POST", path: "/app/dialog/save", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, SaveDialog, string | null>,
-	openUrl: { method: "POST", path: "/app/opener/url", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, ExternalLink, void>,
-	openPath: { method: "POST", path: "/app/opener/path", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, LocalPath, void>,
-	revealPath: { method: "POST", path: "/app/opener/reveal", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, LocalPath, void>,
-	openFolder: { method: "POST", path: "/app/folders/open", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, AppFolder, void>,
-	createShortcut: { method: "POST", path: "/app/shortcuts", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, NewShortcut, string>,
-	checkNetworkMetered: { method: "GET", path: "/app/network/metered", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, boolean>,
-	logFromWebview: { method: "POST", path: "/app/webview-log", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, Array<WebviewLog>, void>,
-	getOpeningCommand: { method: "GET", path: "/app/opening-command", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Command | null>,
-	getJavaAt: { method: "GET", path: "/app/java", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, LocalPath, void, JavaAtPath>,
-	testJavaAt: { method: "GET", path: "/app/java/test", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, JavaTest, void, boolean>,
+	pickFiles: { method: "POST", path: "/app/dialog/open", auth: "none", dangerous: false, untimed: false, body: "json", response: "json" } as Endpoint<null, null, OpenDialog, Array<string> | null>,
+	pickSavePath: { method: "POST", path: "/app/dialog/save", auth: "none", dangerous: false, untimed: false, body: "json", response: "json" } as Endpoint<null, null, SaveDialog, string | null>,
+	openUrl: { method: "POST", path: "/app/opener/url", auth: "none", dangerous: false, untimed: false, body: "json", response: "empty" } as Endpoint<null, null, ExternalLink, void>,
+	openPath: { method: "POST", path: "/app/opener/path", auth: "none", dangerous: false, untimed: false, body: "json", response: "empty" } as Endpoint<null, null, LocalPath, void>,
+	revealPath: { method: "POST", path: "/app/opener/reveal", auth: "none", dangerous: false, untimed: false, body: "json", response: "empty" } as Endpoint<null, null, LocalPath, void>,
+	openFolder: { method: "POST", path: "/app/folders/open", auth: "none", dangerous: false, untimed: false, body: "json", response: "empty" } as Endpoint<null, null, AppFolder, void>,
+	createShortcut: { method: "POST", path: "/app/shortcuts", auth: "none", dangerous: false, untimed: false, body: "json", response: "json" } as Endpoint<null, null, NewShortcut, string>,
+	checkNetworkMetered: { method: "GET", path: "/app/network/metered", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, null, void, boolean>,
+	logFromWebview: { method: "POST", path: "/app/webview-log", auth: "none", dangerous: false, untimed: false, body: "json", response: "empty" } as Endpoint<null, null, Array<WebviewLog>, void>,
+	getOpeningCommand: { method: "GET", path: "/app/opening-command", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, null, void, Command | null>,
+	getJavaAt: { method: "GET", path: "/app/java", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, LocalPath, void, JavaAtPath>,
+	testJavaAt: { method: "GET", path: "/app/java/test", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, JavaTest, void, boolean>,
 }
 
 export const library = {
-	listRecentIconConfigs: { method: "GET", path: "/app/library/recent-icon-configs", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, RecentIconConfigs>,
-	listHiddenInstances: { method: "GET", path: "/app/library/hidden-instances", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<string>>,
-	setInstanceHidden: { method: "PUT", path: "/app/library/hidden-instances", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, InstanceVisibility, void>,
-	cacheIcon: { method: "POST", path: "/app/library/icons", auth: "none", dangerous: false, body: "raw", response: "json" } as Endpoint<null, null, Blob, string>,
-	cacheGeneratedIcon: { method: "POST", path: "/app/library/icons/generated", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, GeneratedIcon, string>,
-	setGeneratedInstanceIcon: { method: "PUT", path: "/app/instances/{id}/icon/generated", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<IdParams, null, GeneratedInstanceIcon, string | null>,
-	listRecentWorlds: { method: "GET", path: "/app/worlds/recent", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, RecentWorldsQuery, void, Array<WorldWithInstance>>,
-	listInstanceWorlds: { method: "GET", path: "/app/instances/{id}/worlds", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<IdParams, null, void, Array<World>>,
+	listRecentIconConfigs: { method: "GET", path: "/app/library/recent-icon-configs", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, null, void, RecentIconConfigs>,
+	listHiddenInstances: { method: "GET", path: "/app/library/hidden-instances", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<string>>,
+	setInstanceHidden: { method: "PUT", path: "/app/library/hidden-instances", auth: "none", dangerous: false, untimed: false, body: "json", response: "empty" } as Endpoint<null, null, InstanceVisibility, void>,
+	cacheIcon: { method: "POST", path: "/app/library/icons", auth: "none", dangerous: false, untimed: false, body: "raw", response: "json" } as Endpoint<null, null, Blob, string>,
+	cacheGeneratedIcon: { method: "POST", path: "/app/library/icons/generated", auth: "none", dangerous: false, untimed: false, body: "json", response: "json" } as Endpoint<null, null, GeneratedIcon, string>,
+	setGeneratedInstanceIcon: { method: "PUT", path: "/app/instances/{id}/icon/generated", auth: "none", dangerous: false, untimed: false, body: "json", response: "json" } as Endpoint<IdParams, null, GeneratedInstanceIcon, string | null>,
+	listRecentWorlds: { method: "GET", path: "/app/worlds/recent", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, RecentWorldsQuery, void, Array<WorldWithInstance>>,
+	listInstanceWorlds: { method: "GET", path: "/app/instances/{id}/worlds", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<IdParams, null, void, Array<World>>,
 }
 
 export const instanceGroups = {
-	listInstanceGroups: { method: "GET", path: "/app/instance-groups", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<InstanceGroupDefinition>>,
-	listInstanceGroupMemberships: { method: "GET", path: "/app/instance-groups/memberships", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, { [key in string]: Array<string> }>,
-	createInstanceGroup: { method: "POST", path: "/app/instance-groups", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, NewInstanceGroup, InstanceGroupDefinition>,
-	renameInstanceGroup: { method: "PATCH", path: "/app/instance-groups/{id}", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<InstanceGroupRef, null, InstanceGroupUpdate, InstanceGroupDefinition>,
-	deleteInstanceGroup: { method: "DELETE", path: "/app/instance-groups/{id}", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<InstanceGroupRef, null, void, void>,
-	setInstanceGroupOrder: { method: "PUT", path: "/app/instance-groups/order", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, Array<string>, void>,
-	setInstanceGroupMemberships: { method: "PUT", path: "/app/instance-groups/memberships", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, Array<InstanceGroupMembershipUpdate>, void>,
+	listInstanceGroups: { method: "GET", path: "/app/instance-groups", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<InstanceGroupDefinition>>,
+	listInstanceGroupMemberships: { method: "GET", path: "/app/instance-groups/memberships", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, null, void, { [key in string]: Array<string> }>,
+	createInstanceGroup: { method: "POST", path: "/app/instance-groups", auth: "none", dangerous: false, untimed: false, body: "json", response: "json" } as Endpoint<null, null, NewInstanceGroup, InstanceGroupDefinition>,
+	renameInstanceGroup: { method: "PATCH", path: "/app/instance-groups/{id}", auth: "none", dangerous: false, untimed: false, body: "json", response: "json" } as Endpoint<InstanceGroupRef, null, InstanceGroupUpdate, InstanceGroupDefinition>,
+	deleteInstanceGroup: { method: "DELETE", path: "/app/instance-groups/{id}", auth: "none", dangerous: false, untimed: false, body: "empty", response: "empty" } as Endpoint<InstanceGroupRef, null, void, void>,
+	setInstanceGroupOrder: { method: "PUT", path: "/app/instance-groups/order", auth: "none", dangerous: false, untimed: false, body: "json", response: "empty" } as Endpoint<null, null, Array<string>, void>,
+	setInstanceGroupMemberships: { method: "PUT", path: "/app/instance-groups/memberships", auth: "none", dangerous: false, untimed: false, body: "json", response: "empty" } as Endpoint<null, null, Array<InstanceGroupMembershipUpdate>, void>,
 }
 
 export const gameOptions = {
-	listGameOptionsSources: { method: "GET", path: "/app/game-options/sources", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<GameOptionsSourceCandidate>>,
-	getSyncedGameOptions: { method: "GET", path: "/app/game-options", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, GameSettingsEditorState>,
-	previewSyncedGameOptions: { method: "POST", path: "/app/game-options/preview", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, UpdateGameSettingsRequest, GameSettingsEditorState>,
-	saveSyncedGameOptions: { method: "PATCH", path: "/app/game-options", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, UpdateGameSettingsRequest, SaveGameSettingsResult>,
-	getInstanceGameOptions: { method: "GET", path: "/app/instances/{id}/game-options", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<IdParams, null, void, GameSettingsEditorState>,
-	previewInstanceGameOptions: { method: "POST", path: "/app/instances/{id}/game-options/preview", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<IdParams, null, UpdateGameSettingsRequest, GameSettingsEditorState>,
-	saveInstanceGameOptions: { method: "PATCH", path: "/app/instances/{id}/game-options", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<IdParams, null, UpdateGameSettingsRequest, SaveGameSettingsResult>,
-	getGameSettingLabels: { method: "POST", path: "/app/game-options/labels", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, GameSettingLabelsRequest, GameSettingLocaleLabels>,
+	listGameOptionsSources: { method: "GET", path: "/app/game-options/sources", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<GameOptionsSourceCandidate>>,
+	getSyncedGameOptions: { method: "GET", path: "/app/game-options", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, null, void, GameSettingsEditorState>,
+	previewSyncedGameOptions: { method: "POST", path: "/app/game-options/preview", auth: "none", dangerous: false, untimed: false, body: "json", response: "json" } as Endpoint<null, null, UpdateGameSettingsRequest, GameSettingsEditorState>,
+	saveSyncedGameOptions: { method: "PATCH", path: "/app/game-options", auth: "none", dangerous: false, untimed: false, body: "json", response: "json" } as Endpoint<null, null, UpdateGameSettingsRequest, SaveGameSettingsResult>,
+	getInstanceGameOptions: { method: "GET", path: "/app/instances/{id}/game-options", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<IdParams, null, void, GameSettingsEditorState>,
+	previewInstanceGameOptions: { method: "POST", path: "/app/instances/{id}/game-options/preview", auth: "none", dangerous: false, untimed: false, body: "json", response: "json" } as Endpoint<IdParams, null, UpdateGameSettingsRequest, GameSettingsEditorState>,
+	saveInstanceGameOptions: { method: "PATCH", path: "/app/instances/{id}/game-options", auth: "none", dangerous: false, untimed: false, body: "json", response: "json" } as Endpoint<IdParams, null, UpdateGameSettingsRequest, SaveGameSettingsResult>,
+	getGameSettingLabels: { method: "POST", path: "/app/game-options/labels", auth: "none", dangerous: false, untimed: false, body: "json", response: "json" } as Endpoint<null, null, GameSettingLabelsRequest, GameSettingLocaleLabels>,
 }
 
 export const syncedOptions = {
-	setInstanceSyncedOption: { method: "PUT", path: "/app/instances/{id}/synced-options", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<IdParams, null, InstanceSyncedOptionUpdate, void>,
-	previewSyncedOptionJoin: { method: "GET", path: "/app/instances/{id}/synced-options/join-preview", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<IdParams, SyncedOptionQuery, void, SyncedOptionJoinPreview>,
-	getInstanceSyncedOptions: { method: "GET", path: "/app/instances/{id}/synced-options", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<IdParams, null, void, SyncedOptionsOverview>,
-	listInstancesSyncedOptions: { method: "GET", path: "/app/synced-options/instances", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, { [key in string]: InstanceSyncedOptions }>,
-	getGlobalSyncedOptions: { method: "GET", path: "/app/synced-options", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, GlobalSyncedOptions>,
-	getInitializedSyncedOptions: { method: "GET", path: "/app/synced-options/initialized", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, GlobalSyncedOptions>,
-	setGlobalSyncedOption: { method: "PUT", path: "/app/synced-options", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, GlobalSyncedOptionUpdate, GlobalSyncedOptions>,
-	rebuildSyncedOptions: { method: "POST", path: "/app/synced-options/rebuild", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, SyncedOptionsRebuild, void>,
-	getCommandHistory: { method: "GET", path: "/app/synced-options/command-history", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, string>,
-	setCommandHistory: { method: "PUT", path: "/app/synced-options/command-history", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, CommandHistory, string>,
-	listSyncedServers: { method: "GET", path: "/app/synced-servers", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<SyncedServer>>,
-	updateSyncedServer: { method: "PUT", path: "/app/synced-servers", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, SyncedServer, void>,
-	removeSyncedServer: { method: "DELETE", path: "/app/synced-servers/{id}", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<IdParams, null, void, void>,
+	setInstanceSyncedOption: { method: "PUT", path: "/app/instances/{id}/synced-options", auth: "none", dangerous: false, untimed: false, body: "json", response: "empty" } as Endpoint<IdParams, null, InstanceSyncedOptionUpdate, void>,
+	previewSyncedOptionJoin: { method: "GET", path: "/app/instances/{id}/synced-options/join-preview", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<IdParams, SyncedOptionQuery, void, SyncedOptionJoinPreview>,
+	getInstanceSyncedOptions: { method: "GET", path: "/app/instances/{id}/synced-options", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<IdParams, null, void, SyncedOptionsOverview>,
+	listInstancesSyncedOptions: { method: "GET", path: "/app/synced-options/instances", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, null, void, { [key in string]: InstanceSyncedOptions }>,
+	getGlobalSyncedOptions: { method: "GET", path: "/app/synced-options", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, null, void, GlobalSyncedOptions>,
+	getInitializedSyncedOptions: { method: "GET", path: "/app/synced-options/initialized", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, null, void, GlobalSyncedOptions>,
+	setGlobalSyncedOption: { method: "PUT", path: "/app/synced-options", auth: "none", dangerous: false, untimed: false, body: "json", response: "json" } as Endpoint<null, null, GlobalSyncedOptionUpdate, GlobalSyncedOptions>,
+	rebuildSyncedOptions: { method: "POST", path: "/app/synced-options/rebuild", auth: "none", dangerous: false, untimed: false, body: "json", response: "empty" } as Endpoint<null, null, SyncedOptionsRebuild, void>,
+	getCommandHistory: { method: "GET", path: "/app/synced-options/command-history", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, null, void, string>,
+	setCommandHistory: { method: "PUT", path: "/app/synced-options/command-history", auth: "none", dangerous: false, untimed: false, body: "json", response: "json" } as Endpoint<null, null, CommandHistory, string>,
+	listSyncedServers: { method: "GET", path: "/app/synced-servers", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<SyncedServer>>,
+	updateSyncedServer: { method: "PUT", path: "/app/synced-servers", auth: "none", dangerous: false, untimed: false, body: "json", response: "empty" } as Endpoint<null, null, SyncedServer, void>,
+	removeSyncedServer: { method: "DELETE", path: "/app/synced-servers/{id}", auth: "none", dangerous: false, untimed: false, body: "empty", response: "empty" } as Endpoint<IdParams, null, void, void>,
 }
 
 export const syncedPacks = {
-	listSyncedPacks: { method: "GET", path: "/app/synced-packs", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, SyncedPackQuery, void, SyncedPacks>,
-	uploadSyncedPack: { method: "POST", path: "/app/synced-packs", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, NewSyncedPack, void>,
-	setSyncedPackEnabled: { method: "PATCH", path: "/app/synced-packs/{id}", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<IdParams, null, SyncedPackUpdate, void>,
-	removeSyncedPack: { method: "DELETE", path: "/app/synced-packs/{id}", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<IdParams, null, void, void>,
-	previewPackSync: { method: "GET", path: "/app/instances/{id}/synced-packs/preview", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<IdParams, InstancePack, void, PackSyncPreview>,
-	syncPack: { method: "POST", path: "/app/instances/{id}/synced-packs", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<IdParams, null, InstancePack, void>,
-	desyncPack: { method: "DELETE", path: "/app/instances/{id}/synced-packs/{pack_id}", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<InstancePackParams, DesyncQuery, void, void>,
+	listSyncedPacks: { method: "GET", path: "/app/synced-packs", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, SyncedPackQuery, void, SyncedPacks>,
+	uploadSyncedPack: { method: "POST", path: "/app/synced-packs", auth: "none", dangerous: false, untimed: false, body: "json", response: "empty" } as Endpoint<null, null, NewSyncedPack, void>,
+	setSyncedPackEnabled: { method: "PATCH", path: "/app/synced-packs/{id}", auth: "none", dangerous: false, untimed: false, body: "json", response: "empty" } as Endpoint<IdParams, null, SyncedPackUpdate, void>,
+	removeSyncedPack: { method: "DELETE", path: "/app/synced-packs/{id}", auth: "none", dangerous: false, untimed: false, body: "empty", response: "empty" } as Endpoint<IdParams, null, void, void>,
+	previewPackSync: { method: "GET", path: "/app/instances/{id}/synced-packs/preview", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<IdParams, InstancePack, void, PackSyncPreview>,
+	syncPack: { method: "POST", path: "/app/instances/{id}/synced-packs", auth: "none", dangerous: false, untimed: false, body: "json", response: "empty" } as Endpoint<IdParams, null, InstancePack, void>,
+	desyncPack: { method: "DELETE", path: "/app/instances/{id}/synced-packs/{pack_id}", auth: "none", dangerous: false, untimed: false, body: "empty", response: "empty" } as Endpoint<InstancePackParams, DesyncQuery, void, void>,
 }
 
 export const screenshots = {
-	listInstanceScreenshots: { method: "GET", path: "/app/instances/{id}/screenshots", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<IdParams, null, void, Array<ScreenshotFile>>,
-	listScreenshots: { method: "GET", path: "/app/screenshots", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<ScreenshotFile>>,
-	listSyncedScreenshots: { method: "GET", path: "/app/screenshots/synced", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<ScreenshotFile>>,
-	saveEditedScreenshot: { method: "POST", path: "/app/screenshots/edits", auth: "none", dangerous: false, body: "raw", response: "json" } as Endpoint<null, ScreenshotEdit, Blob, ScreenshotFile>,
-	deleteScreenshots: { method: "DELETE", path: "/app/screenshots", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, Array<ScreenshotKey>, void>,
-	exportScreenshots: { method: "POST", path: "/app/screenshots/export", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, ScreenshotExport, void>,
-	moveScreenshots: { method: "POST", path: "/app/screenshots/move", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, ScreenshotMove, Array<ScreenshotKey>>,
-	listScreenshotGroups: { method: "GET", path: "/app/screenshot-groups", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<ScreenshotGroup>>,
-	createScreenshotGroup: { method: "POST", path: "/app/screenshot-groups", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, NewScreenshotGroup, ScreenshotGroup>,
-	renameScreenshotGroup: { method: "PATCH", path: "/app/screenshot-groups/{id}", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<IdParams, null, ScreenshotGroupUpdate, ScreenshotGroup>,
-	deleteScreenshotGroup: { method: "DELETE", path: "/app/screenshot-groups/{id}", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<IdParams, null, void, void>,
-	setScreenshotGroupMemberships: { method: "PUT", path: "/app/screenshot-groups/memberships", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, Array<ScreenshotGroupMembershipUpdate>, void>,
-	importScreenshotGroups: { method: "POST", path: "/app/screenshot-groups/import", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, Array<ScreenshotGroupImport>, void>,
+	listInstanceScreenshots: { method: "GET", path: "/app/instances/{id}/screenshots", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<IdParams, null, void, Array<ScreenshotFile>>,
+	listScreenshots: { method: "GET", path: "/app/screenshots", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<ScreenshotFile>>,
+	listSyncedScreenshots: { method: "GET", path: "/app/screenshots/synced", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<ScreenshotFile>>,
+	saveEditedScreenshot: { method: "POST", path: "/app/screenshots/edits", auth: "none", dangerous: false, untimed: false, body: "raw", response: "json" } as Endpoint<null, ScreenshotEdit, Blob, ScreenshotFile>,
+	deleteScreenshots: { method: "DELETE", path: "/app/screenshots", auth: "none", dangerous: false, untimed: false, body: "json", response: "empty" } as Endpoint<null, null, Array<ScreenshotKey>, void>,
+	exportScreenshots: { method: "POST", path: "/app/screenshots/export", auth: "none", dangerous: false, untimed: false, body: "json", response: "empty" } as Endpoint<null, null, ScreenshotExport, void>,
+	moveScreenshots: { method: "POST", path: "/app/screenshots/move", auth: "none", dangerous: false, untimed: false, body: "json", response: "json" } as Endpoint<null, null, ScreenshotMove, Array<ScreenshotKey>>,
+	listScreenshotGroups: { method: "GET", path: "/app/screenshot-groups", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<ScreenshotGroup>>,
+	createScreenshotGroup: { method: "POST", path: "/app/screenshot-groups", auth: "none", dangerous: false, untimed: false, body: "json", response: "json" } as Endpoint<null, null, NewScreenshotGroup, ScreenshotGroup>,
+	renameScreenshotGroup: { method: "PATCH", path: "/app/screenshot-groups/{id}", auth: "none", dangerous: false, untimed: false, body: "json", response: "json" } as Endpoint<IdParams, null, ScreenshotGroupUpdate, ScreenshotGroup>,
+	deleteScreenshotGroup: { method: "DELETE", path: "/app/screenshot-groups/{id}", auth: "none", dangerous: false, untimed: false, body: "empty", response: "empty" } as Endpoint<IdParams, null, void, void>,
+	setScreenshotGroupMemberships: { method: "PUT", path: "/app/screenshot-groups/memberships", auth: "none", dangerous: false, untimed: false, body: "json", response: "empty" } as Endpoint<null, null, Array<ScreenshotGroupMembershipUpdate>, void>,
+	importScreenshotGroups: { method: "POST", path: "/app/screenshot-groups/import", auth: "none", dangerous: false, untimed: false, body: "json", response: "empty" } as Endpoint<null, null, Array<ScreenshotGroupImport>, void>,
 }
 
 export const friends = {
-	listFriends: { method: "GET", path: "/app/friends", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<UserFriend>>,
-	listFriendStatuses: { method: "GET", path: "/app/friend-statuses", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<UserStatus>>,
-	addFriend: { method: "POST", path: "/app/friends/{id}", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<IdParams, null, void, void>,
-	removeFriend: { method: "DELETE", path: "/app/friends/{id}", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<IdParams, null, void, void>,
+	listFriends: { method: "GET", path: "/app/friends", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<UserFriend>>,
+	listFriendStatuses: { method: "GET", path: "/app/friend-statuses", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<UserStatus>>,
+	addFriend: { method: "POST", path: "/app/friends/{id}", auth: "none", dangerous: false, untimed: false, body: "empty", response: "empty" } as Endpoint<IdParams, null, void, void>,
+	removeFriend: { method: "DELETE", path: "/app/friends/{id}", auth: "none", dangerous: false, untimed: false, body: "empty", response: "empty" } as Endpoint<IdParams, null, void, void>,
 }
 
 export const skins = {
-	listCapes: { method: "GET", path: "/app/skins/capes", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<Cape>>,
-	listSkins: { method: "GET", path: "/app/skins", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<Skin>>,
-	saveCustomSkin: { method: "POST", path: "/app/skins", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, CustomSkinSave, Skin>,
-	removeCustomSkin: { method: "DELETE", path: "/app/skins", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, Skin, void>,
-	setCustomSkinOrder: { method: "PUT", path: "/app/skins/order", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, Array<string>, void>,
-	addAndEquipCustomSkin: { method: "POST", path: "/app/skins/equipped", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, NewCustomSkin, Skin>,
-	equipSkin: { method: "PUT", path: "/app/skins/equipped", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, Skin, void>,
-	unequipSkin: { method: "DELETE", path: "/app/skins/equipped", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
-	flushPendingSkinChange: { method: "POST", path: "/app/skins/flush", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<null, SkinFlushQuery, void, void>,
-	normalizeSkinTexture: { method: "POST", path: "/app/skins/normalize", auth: "none", dangerous: false, body: "json", response: "raw" } as Endpoint<null, null, UrlOrBlob, Blob>,
+	listCapes: { method: "GET", path: "/app/skins/capes", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<Cape>>,
+	listSkins: { method: "GET", path: "/app/skins", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<Skin>>,
+	saveCustomSkin: { method: "POST", path: "/app/skins", auth: "none", dangerous: false, untimed: false, body: "json", response: "json" } as Endpoint<null, null, CustomSkinSave, Skin>,
+	removeCustomSkin: { method: "DELETE", path: "/app/skins", auth: "none", dangerous: false, untimed: false, body: "json", response: "empty" } as Endpoint<null, null, Skin, void>,
+	setCustomSkinOrder: { method: "PUT", path: "/app/skins/order", auth: "none", dangerous: false, untimed: false, body: "json", response: "empty" } as Endpoint<null, null, Array<string>, void>,
+	addAndEquipCustomSkin: { method: "POST", path: "/app/skins/equipped", auth: "none", dangerous: false, untimed: false, body: "json", response: "json" } as Endpoint<null, null, NewCustomSkin, Skin>,
+	equipSkin: { method: "PUT", path: "/app/skins/equipped", auth: "none", dangerous: false, untimed: false, body: "json", response: "empty" } as Endpoint<null, null, Skin, void>,
+	unequipSkin: { method: "DELETE", path: "/app/skins/equipped", auth: "none", dangerous: false, untimed: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
+	flushPendingSkinChange: { method: "POST", path: "/app/skins/flush", auth: "none", dangerous: false, untimed: false, body: "empty", response: "empty" } as Endpoint<null, SkinFlushQuery, void, void>,
+	normalizeSkinTexture: { method: "POST", path: "/app/skins/normalize", auth: "none", dangerous: false, untimed: false, body: "json", response: "raw" } as Endpoint<null, null, UrlOrBlob, Blob>,
 }
 
 export const ops = {
-	listOps: { method: "GET", path: "/app/ops", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<string>>,
-	cancelOp: { method: "DELETE", path: "/app/ops/{id}", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<IdParams, null, void, void>,
-	exportDebugInfo: { method: "POST", path: "/app/ops/debug-export", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, DebugExport, void>,
-	saveExternalFile: { method: "POST", path: "/app/ops/external-save", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, ExternalSave, void>,
-	uploadLocalFile: { method: "POST", path: "/app/ops/upload", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, LocalUpload, void>,
-	saveInstanceFileAs: { method: "POST", path: "/app/ops/instance-file-save", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, InstanceFileSave, void>,
+	listOps: { method: "GET", path: "/app/ops", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<string>>,
+	cancelOp: { method: "DELETE", path: "/app/ops/{id}", auth: "none", dangerous: false, untimed: false, body: "empty", response: "empty" } as Endpoint<IdParams, null, void, void>,
+	exportDebugInfo: { method: "POST", path: "/app/ops/debug-export", auth: "none", dangerous: false, untimed: false, body: "json", response: "empty" } as Endpoint<null, null, DebugExport, void>,
+	saveExternalFile: { method: "POST", path: "/app/ops/external-save", auth: "none", dangerous: false, untimed: false, body: "json", response: "empty" } as Endpoint<null, null, ExternalSave, void>,
+	uploadLocalFile: { method: "POST", path: "/app/ops/upload", auth: "none", dangerous: false, untimed: false, body: "json", response: "empty" } as Endpoint<null, null, LocalUpload, void>,
+	saveInstanceFileAs: { method: "POST", path: "/app/ops/instance-file-save", auth: "none", dangerous: false, untimed: false, body: "json", response: "empty" } as Endpoint<null, null, InstanceFileSave, void>,
 }
 
 export const updates = {
-	checkForUpdate: { method: "POST", path: "/app/updates/check", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, AvailableUpdate | null>,
-	getUpdateSize: { method: "GET", path: "/app/updates/size", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, number | null>,
-	downloadUpdate: { method: "POST", path: "/app/ops/update-download", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, UpdateDownload, void>,
-	discardDownloadedUpdate: { method: "DELETE", path: "/app/updates/downloaded", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
-	setRestartAfterUpdate: { method: "PUT", path: "/app/updates/restart-after", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, RestartAfterUpdate, void>,
-	restartApp: { method: "POST", path: "/app/restart", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
+	checkForUpdate: { method: "POST", path: "/app/updates/check", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, null, void, AvailableUpdate | null>,
+	getUpdateSize: { method: "GET", path: "/app/updates/size", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, null, void, number | null>,
+	downloadUpdate: { method: "POST", path: "/app/ops/update-download", auth: "none", dangerous: false, untimed: false, body: "json", response: "empty" } as Endpoint<null, null, UpdateDownload, void>,
+	discardDownloadedUpdate: { method: "DELETE", path: "/app/updates/downloaded", auth: "none", dangerous: false, untimed: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
+	setRestartAfterUpdate: { method: "PUT", path: "/app/updates/restart-after", auth: "none", dangerous: false, untimed: false, body: "json", response: "empty" } as Endpoint<null, null, RestartAfterUpdate, void>,
+	restartApp: { method: "POST", path: "/app/restart", auth: "none", dangerous: false, untimed: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
 }
 
 export const localAccounts = {
-	checkMinecraftReachable: { method: "GET", path: "/app/accounts/minecraft/reachable", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
-	signInToMinecraft: { method: "POST", path: "/app/accounts/minecraft/login", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, MinecraftAccountSummary>,
-	listMinecraftAccounts: { method: "GET", path: "/app/accounts/minecraft", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<MinecraftAccountSummary>>,
-	getDefaultMinecraftAccount: { method: "GET", path: "/app/accounts/minecraft/default", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, string | null>,
-	setDefaultMinecraftAccount: { method: "PUT", path: "/app/accounts/minecraft/default", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, string, void>,
-	removeMinecraftAccount: { method: "DELETE", path: "/app/accounts/minecraft/{id}", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<MinecraftAccountParams, null, void, void>,
-	signInToModrinth: { method: "POST", path: "/app/accounts/modrinth/login", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, ModrinthSignIn, ModrinthCredentials>,
-	cancelModrinthSignIn: { method: "DELETE", path: "/app/accounts/modrinth/login", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
-	signOutOfModrinth: { method: "POST", path: "/app/accounts/modrinth/logout", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
-	getActiveModrinthAccount: { method: "GET", path: "/app/accounts/modrinth/active", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, ModrinthCredentials | null>,
-	listModrinthAccounts: { method: "GET", path: "/app/accounts/modrinth", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<ModrinthCredentials>>,
-	setActiveModrinthAccount: { method: "PUT", path: "/app/accounts/modrinth/active", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, string, void>,
-	removeModrinthAccount: { method: "DELETE", path: "/app/accounts/modrinth/{id}", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<IdParams, null, void, void>,
+	checkMinecraftReachable: { method: "GET", path: "/app/accounts/minecraft/reachable", auth: "none", dangerous: false, untimed: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
+	signInToMinecraft: { method: "POST", path: "/app/accounts/minecraft/login", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, null, void, MinecraftAccountSummary>,
+	listMinecraftAccounts: { method: "GET", path: "/app/accounts/minecraft", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<MinecraftAccountSummary>>,
+	getDefaultMinecraftAccount: { method: "GET", path: "/app/accounts/minecraft/default", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, null, void, string | null>,
+	setDefaultMinecraftAccount: { method: "PUT", path: "/app/accounts/minecraft/default", auth: "none", dangerous: false, untimed: false, body: "json", response: "empty" } as Endpoint<null, null, string, void>,
+	removeMinecraftAccount: { method: "DELETE", path: "/app/accounts/minecraft/{id}", auth: "none", dangerous: false, untimed: false, body: "empty", response: "empty" } as Endpoint<MinecraftAccountParams, null, void, void>,
+	signInToModrinth: { method: "POST", path: "/app/accounts/modrinth/login", auth: "none", dangerous: false, untimed: false, body: "json", response: "json" } as Endpoint<null, null, ModrinthSignIn, ModrinthCredentials>,
+	cancelModrinthSignIn: { method: "DELETE", path: "/app/accounts/modrinth/login", auth: "none", dangerous: false, untimed: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
+	signOutOfModrinth: { method: "POST", path: "/app/accounts/modrinth/logout", auth: "none", dangerous: false, untimed: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
+	getActiveModrinthAccount: { method: "GET", path: "/app/accounts/modrinth/active", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, null, void, ModrinthCredentials | null>,
+	listModrinthAccounts: { method: "GET", path: "/app/accounts/modrinth", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<ModrinthCredentials>>,
+	setActiveModrinthAccount: { method: "PUT", path: "/app/accounts/modrinth/active", auth: "none", dangerous: false, untimed: false, body: "json", response: "empty" } as Endpoint<null, null, string, void>,
+	removeModrinthAccount: { method: "DELETE", path: "/app/accounts/modrinth/{id}", auth: "none", dangerous: false, untimed: false, body: "empty", response: "empty" } as Endpoint<IdParams, null, void, void>,
 }
 
 export const launch = {
-	playInstance: { method: "POST", path: "/app/launch/instance", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, InstancePlay, ProcessMetadata>,
-	joinServer: { method: "POST", path: "/app/launch/server", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, ServerJoin, void>,
-	joinSingleplayerWorld: { method: "POST", path: "/app/launch/singleplayer", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, SingleplayerJoin, void>,
+	playInstance: { method: "POST", path: "/app/launch/instance", auth: "none", dangerous: false, untimed: false, body: "json", response: "json" } as Endpoint<null, null, InstancePlay, ProcessMetadata>,
+	joinServer: { method: "POST", path: "/app/launch/server", auth: "none", dangerous: false, untimed: false, body: "json", response: "empty" } as Endpoint<null, null, ServerJoin, void>,
+	joinSingleplayerWorld: { method: "POST", path: "/app/launch/singleplayer", auth: "none", dangerous: false, untimed: false, body: "json", response: "empty" } as Endpoint<null, null, SingleplayerJoin, void>,
 }
 
 export const settings = {
-	getSettings: { method: "GET", path: "/app/settings", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Settings>,
-	setSettings: { method: "PUT", path: "/app/settings", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, Settings, void>,
-	cancelDirectoryChange: { method: "DELETE", path: "/app/settings/directory-change", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
+	getSettings: { method: "GET", path: "/app/settings", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, null, void, Settings>,
+	setSettings: { method: "PUT", path: "/app/settings", auth: "none", dangerous: false, untimed: false, body: "json", response: "empty" } as Endpoint<null, null, Settings, void>,
+	cancelDirectoryChange: { method: "DELETE", path: "/app/settings/directory-change", auth: "none", dangerous: false, untimed: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
 }
 
 export const onboarding = {
-	getOnboardingChecklist: { method: "GET", path: "/app/onboarding/checklist", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, OnboardingChecklist>,
-	skipCreateInstanceOnboarding: { method: "POST", path: "/app/onboarding/checklist/skip-create-instance", auth: "none", dangerous: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
+	getOnboardingChecklist: { method: "GET", path: "/app/onboarding/checklist", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, null, void, OnboardingChecklist>,
+	skipCreateInstanceOnboarding: { method: "POST", path: "/app/onboarding/checklist/skip-create-instance", auth: "none", dangerous: false, untimed: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
 }
 
 export const launcherImport = {
-	listImportableInstances: { method: "GET", path: "/app/import/instances", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, LauncherFolder, void, Array<string>>,
-	checkImportableInstance: { method: "GET", path: "/app/import/instance", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, ImportableInstance, void, boolean>,
-	getDefaultLauncherPath: { method: "GET", path: "/app/import/default-path", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, Launcher, void, string | null>,
-	importInstance: { method: "POST", path: "/app/import", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, InstanceToImport, ImportJob>,
+	listImportableInstances: { method: "GET", path: "/app/import/instances", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, LauncherFolder, void, Array<string>>,
+	checkImportableInstance: { method: "GET", path: "/app/import/instance", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, ImportableInstance, void, boolean>,
+	getDefaultLauncherPath: { method: "GET", path: "/app/import/default-path", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, Launcher, void, string | null>,
+	importInstance: { method: "POST", path: "/app/import", auth: "none", dangerous: false, untimed: false, body: "json", response: "json" } as Endpoint<null, null, InstanceToImport, ImportJob>,
 }
 
 export const localInstalls = {
-	previewModpack: { method: "POST", path: "/app/install/modpack-preview", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, CreatePackLocation, InstallModpackPreview>,
-	createInstance: { method: "POST", path: "/app/install/instances", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, InstallCreateInstanceRequest, InstallJobSnapshot>,
-	createModpackInstance: { method: "POST", path: "/app/install/modpack-instances", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, PackInstall, InstallJobSnapshot>,
-	installPackToInstance: { method: "POST", path: "/app/install/instances/{id}/pack", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<IdParams, null, PackInstall, InstallJobSnapshot>,
+	previewModpack: { method: "POST", path: "/app/install/modpack-preview", auth: "none", dangerous: false, untimed: false, body: "json", response: "json" } as Endpoint<null, null, CreatePackLocation, InstallModpackPreview>,
+	createInstance: { method: "POST", path: "/app/install/instances", auth: "none", dangerous: false, untimed: false, body: "json", response: "json" } as Endpoint<null, null, InstallCreateInstanceRequest, InstallJobSnapshot>,
+	createModpackInstance: { method: "POST", path: "/app/install/modpack-instances", auth: "none", dangerous: false, untimed: false, body: "json", response: "json" } as Endpoint<null, null, PackInstall, InstallJobSnapshot>,
+	installPackToInstance: { method: "POST", path: "/app/install/instances/{id}/pack", auth: "none", dangerous: false, untimed: false, body: "json", response: "json" } as Endpoint<IdParams, null, PackInstall, InstallJobSnapshot>,
 }
 
 export const instancePaths = {
-	getInstancePath: { method: "GET", path: "/app/instances/{id}/path", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<IdParams, null, void, string>,
-	getInstanceContentPath: { method: "GET", path: "/app/instances/{id}/content-path", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<IdParams, ContentPathQuery, void, string>,
-	addProjectFromPath: { method: "POST", path: "/app/instances/{id}/projects/from-path", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<IdParams, null, LocalProject, string>,
-	checkFileOnModrinth: { method: "POST", path: "/app/content/on-modrinth", auth: "none", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, LocalContentFile, boolean>,
-	exportMrpack: { method: "POST", path: "/app/instances/{id}/export-mrpack", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<IdParams, null, MrpackExport, void>,
-	setInstanceIconFromPath: { method: "PUT", path: "/app/instances/{id}/icon", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<IdParams, null, LocalIcon, void>,
+	getInstancePath: { method: "GET", path: "/app/instances/{id}/path", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<IdParams, null, void, string>,
+	getInstanceContentPath: { method: "GET", path: "/app/instances/{id}/content-path", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<IdParams, ContentPathQuery, void, string>,
+	addProjectFromPath: { method: "POST", path: "/app/instances/{id}/projects/from-path", auth: "none", dangerous: false, untimed: false, body: "json", response: "json" } as Endpoint<IdParams, null, LocalProject, string>,
+	checkFileOnModrinth: { method: "POST", path: "/app/content/on-modrinth", auth: "none", dangerous: false, untimed: false, body: "json", response: "json" } as Endpoint<null, null, LocalContentFile, boolean>,
+	exportMrpack: { method: "POST", path: "/app/instances/{id}/export-mrpack", auth: "none", dangerous: false, untimed: false, body: "json", response: "empty" } as Endpoint<IdParams, null, MrpackExport, void>,
+	setInstanceIconFromPath: { method: "PUT", path: "/app/instances/{id}/icon", auth: "none", dangerous: false, untimed: false, body: "json", response: "empty" } as Endpoint<IdParams, null, LocalIcon, void>,
 }
 
 export const localSharing = {
-	canUseSharedInstances: { method: "GET", path: "/app/sharing/available", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, boolean>,
-	getCachedSharedLibrary: { method: "GET", path: "/app/sharing/library", auth: "none", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<CachedSharedInstanceSummary>>,
-	setCachedSharedLibrary: { method: "PUT", path: "/app/sharing/library", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, Array<CachedSharedInstanceSummary>, void>,
-	publishSharedInstance: { method: "POST", path: "/app/ops/shared-instance-publish", auth: "none", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, SharePublish, void>,
+	canUseSharedInstances: { method: "GET", path: "/app/sharing/available", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, null, void, boolean>,
+	getCachedSharedLibrary: { method: "GET", path: "/app/sharing/library", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<CachedSharedInstanceSummary>>,
+	setCachedSharedLibrary: { method: "PUT", path: "/app/sharing/library", auth: "none", dangerous: false, untimed: false, body: "json", response: "empty" } as Endpoint<null, null, Array<CachedSharedInstanceSummary>, void>,
+	publishSharedInstance: { method: "POST", path: "/app/ops/shared-instance-publish", auth: "none", dangerous: false, untimed: false, body: "json", response: "empty" } as Endpoint<null, null, SharePublish, void>,
 }

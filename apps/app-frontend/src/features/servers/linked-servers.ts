@@ -14,6 +14,7 @@ import { ensure_shared_instance } from '@/helpers/instance'
 import { apiClient } from '@/platform/modrinth-client'
 
 export type LinkedServer = Server & { linked_instance: LinkedInstance }
+type ServerList = Awaited<ReturnType<typeof apiClient.cores.servers>>
 
 /**
  * The one query for the Cores' server list, under the same key and fetch as the Servers page so
@@ -74,6 +75,19 @@ export function useCoreWatch() {
 		const stops = [
 			events.subscribe({ type: 'servers' }),
 			events.on('server_changed', refetch),
+			// A change of power alone comes as this event, with no `server_changed`.
+			events.on('power_state', ({ server, state }) =>
+				queryClient.setQueryData<ServerList>(serversQueryOptions.queryKey, (list) =>
+					list
+						? {
+								...list,
+								servers: list.servers.map((listed) =>
+									listed.server_id === server ? { ...listed, power_state: state } : listed,
+								),
+							}
+						: list,
+				),
+			),
 			// The socket lost events: nothing shown from this Core can be trusted.
 			events.on('resync', () => void queryClient.invalidateQueries()),
 			events.onStatus((open) => {
@@ -141,7 +155,7 @@ export function useLinkedServers(instanceId: MaybeRefOrGetter<string | undefined
 }
 
 /** Whether the server's process is up, including while it starts or stops. */
-export function isServerRunning(server: Server) {
+export function isServerUp(server: Server) {
 	return (
 		server.power_state === 'running' ||
 		server.power_state === 'starting' ||
@@ -158,8 +172,8 @@ export function linkedServerState(server: LinkedServer): LinkedServerState {
 	if (update === 'downloading' || update === 'applying' || server.status === 'installing') {
 		return 'updating'
 	}
-	if (update === 'pending' && isServerRunning(server)) return 'pending'
-	return isServerRunning(server) ? 'running' : 'offline'
+	if (update === 'pending' && isServerUp(server)) return 'pending'
+	return isServerUp(server) ? 'running' : 'offline'
 }
 
 /** Why a running server cannot be joined from the internet, or undefined when it can. */

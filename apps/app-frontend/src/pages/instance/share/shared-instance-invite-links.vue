@@ -8,12 +8,12 @@ import {
 	type TableColumn,
 	useFormatDateTime,
 	useRelativeTime,
+	useSharedInstanceEvent,
 	useVIntl,
 } from '@modrinth/ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, ref } from 'vue'
 
-import { useSharedInstanceEvent } from '@/composables/use-shared-instance-event'
 import {
 	get_shared_instance_invites,
 	revoke_shared_instance_invite,

@@ -32,6 +32,22 @@ export function instancePath(path: string): string {
 	return path.replace(/^\/+/, '')
 }
 
+/** One folder's listing, as the Files tab reads it, for a host that warms it before the tab opens. */
+export function directoryQueryOptions(
+	options: Pick<InstanceFilesOptions, 'client' | 'instanceId' | 'queryKey'>,
+	path: string,
+) {
+	return {
+		queryKey: options.queryKey(path),
+		queryFn: () =>
+			toValue(options.client).call(instanceFiles.ListInstanceFiles, {
+				params: { id: toValue(options.instanceId) },
+				query: { path },
+			}),
+		staleTime: 30_000,
+	}
+}
+
 function join(parent: string, name: string) {
 	return parent ? `${parent}/${name}` : name
 }
@@ -46,20 +62,11 @@ export function useInstanceFiles(options: InstanceFilesOptions) {
 	const client = () => toValue(options.client)
 	const params = () => ({ id: toValue(options.instanceId) })
 
-	function directoryQueryOptions(path: string) {
-		return {
-			queryKey: options.queryKey(path),
-			queryFn: () =>
-				client().call(instanceFiles.ListInstanceFiles, { params: params(), query: { path } }),
-			staleTime: 30_000,
-		}
-	}
-
 	// A cached listing shows at once. Opening the tab always reads it again in the background,
 	// because files change outside the tab.
 	const directory = useQuery(
 		computed(() => ({
-			...directoryQueryOptions(options.currentPath.value),
+			...directoryQueryOptions(options, options.currentPath.value),
 			enabled: !!toValue(options.instanceId),
 			refetchOnMount: 'always' as const,
 		})),
@@ -180,7 +187,7 @@ export function useInstanceFiles(options: InstanceFilesOptions) {
 			options.currentPath.value = instancePath(path)
 		},
 		prefetchDirectory: (path: string) =>
-			void queryClient.prefetchQuery(directoryQueryOptions(instancePath(path))),
+			void queryClient.prefetchQuery(directoryQueryOptions(options, instancePath(path))),
 		editingFile,
 		startEditing: (file: EditingFile) => {
 			editingFile.value = file

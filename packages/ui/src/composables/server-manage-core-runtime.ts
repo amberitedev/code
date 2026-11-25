@@ -1,8 +1,8 @@
-import type { CoreEvent, PowerState, Server, ServerPower } from '@amberite/contracts/core'
+import type { CoreEvent, PowerState, Server } from '@amberite/contracts/core'
 import type { UploadState } from '@modrinth/api-client'
 import { useQueryClient } from '@tanstack/vue-query'
 import type { ComputedRef, Ref } from 'vue'
-import { computed, onScopeDispose, ref, watch } from 'vue'
+import { computed, onScopeDispose, ref } from 'vue'
 
 import type { FileOperation } from '../layouts/shared/files-tab/types'
 import { injectModrinthClient, provideModrinthServerContext } from '../providers'
@@ -41,16 +41,8 @@ export function useServerManageCoreRuntime(options: UseServerManageCoreRuntimeOp
 	const events = client.coreEvents(coreId)
 
 	const isConnected = ref(events.open)
+	// A server subscription starts with the server's power, as Modrinth Hosting's socket does.
 	const powerState = ref<PowerState>('stopped')
-	// The server's power until the socket says otherwise.
-	let heardPower = false
-	watch(
-		() => options.server.value?.power_state,
-		(power) => {
-			if (power && !heardPower) powerState.value = fromServerPower(power)
-		},
-		{ immediate: true },
-	)
 	const isServerRunning = computed(() => powerState.value === 'running')
 	const uptimeSeconds = ref(0)
 	let uptimeTicker: ReturnType<typeof setInterval> | undefined
@@ -110,7 +102,6 @@ export function useServerManageCoreRuntime(options: UseServerManageCoreRuntimeOp
 		events.on('resync', () => void jobs.refresh()),
 		events.on('power_state', (power) => {
 			if (power.server !== serverId) return
-			heardPower = true
 			powerState.value = power.state
 			if (power.state !== 'running') {
 				clearInterval(uptimeTicker)
@@ -122,8 +113,7 @@ export function useServerManageCoreRuntime(options: UseServerManageCoreRuntimeOp
 		}),
 		events.on('log', (log) => {
 			if (log.instance_id !== serverId) return
-			if (log.type === 'legacy') serverConsole.addLegacyLog(log.message)
-			else serverConsole.addLog4jEvent(log)
+			serverConsole.addLogEvent(log)
 		}),
 		events.on('backup_progress', (progress) => {
 			if (progress.server === serverId) options.onBackupProgress?.(progress)
@@ -200,8 +190,4 @@ export function useServerManageCoreRuntime(options: UseServerManageCoreRuntimeOp
 		uptimeSeconds,
 		uploadState,
 	}
-}
-
-function fromServerPower(power: ServerPower): PowerState {
-	return power === 'offline' || power === 'killed' ? 'stopped' : power
 }

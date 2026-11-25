@@ -122,7 +122,7 @@ const files = useInstanceFiles({
 	client: core,
 	instanceId: serverId,
 	currentPath,
-	queryKey: (path) => [...serverKeys.files(serverId), path],
+	queryKey: (path) => serverKeys.directory(serverId, path),
 	queryKeyPrefix: serverKeys.files(serverId),
 	uploadState: serverContext.uploadState,
 	onFailure: (failure, error) =>

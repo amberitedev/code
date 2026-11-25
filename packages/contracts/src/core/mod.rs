@@ -89,7 +89,7 @@ crate::endpoints! {
     CheckForUpdate: Post "/update/check", Session, (), (), Empty => Json<UpdateStatus>;
     /// The Core restarts into the new version right after answering. Its shape never changes, so
     /// an App can update a Core that speaks an older protocol.
-    InstallUpdate: Post "/update/apply", Session, (), (), Json<ApplyUpdate> => Json<Restarting>, dangerous;
+    InstallUpdate: Post "/update/apply", Session, (), (), Json<ApplyUpdate> => Json<Restarting>, dangerous, untimed;
     /// Back to the previous version, with the database from before the update.
     RollBack: Post "/update/rollback", Session, (), (), Empty => Json<Restarting>, dangerous;
     /// What this Core gives to other people's shares, and what it holds.
@@ -121,11 +121,11 @@ crate::endpoints! {
     /// Install an `.mrpack`, the body, over a stopped server. It goes on in the background.
     InstallModpackFile: Post "/servers/{id}/modpack-file", Session, ServerId, (), Stream => Empty;
     /// Push a version of the server's own share, which the first push creates.
-    ShareServer: Post "/servers/{id}/share", Session, ServerId, (), Json<SharePush> => Json<SharedServer>;
+    ShareServer: Post "/servers/{id}/share", Session, ServerId, (), Json<SharePush> => Json<SharedServer>, untimed;
     /// Apply the latest version of an App instance's share, which the server follows from then
     /// on and its own share goes. A stopped server installs it now; a running one when it next
     /// stops.
-    FollowInstance: Post "/servers/{id}/follow", Session, ServerId, (), Json<InstanceFollow> => Empty;
+    FollowInstance: Post "/servers/{id}/follow", Session, ServerId, (), Json<InstanceFollow> => Empty, untimed;
     /// How the server starts: its Java and its command.
     GetStartup: Get "/servers/{id}/startup", Session, ServerId, (), Empty => Json<RuntimeOptions>;
     /// The managed Java the server runs, from its next start.

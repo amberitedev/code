@@ -116,14 +116,14 @@
 </template>
 
 <script setup lang="ts">
-import { core, type Server } from '@amberite/contracts/core'
+import type { Server } from '@amberite/contracts/core'
 import { SparklesIcon, SpinnerIcon } from '@modrinth/assets'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { defineMessages, useVIntl } from '../../composables/i18n'
-import { serverKeys } from '../../composables/server-queries'
+import { serverDetailQueryOptions } from '../../composables/server-queries'
 import { useServerIcon } from '../../composables/use-server-icon'
 import { injectModrinthClient } from '../../providers/api-client'
 import Avatar from '../base/Avatar.vue'
@@ -184,14 +184,7 @@ const queryClient = useQueryClient()
 /** Warms the request the server panel opens with while the pointer is over the row. */
 function prefetchServer() {
 	if (isDisabled.value) return
-	void queryClient.prefetchQuery({
-		queryKey: serverKeys.detail(props.server_id),
-		queryFn: async () =>
-			(await client.cores.serverRoutes(props.server_id)).call(core.GetServer, {
-				params: { id: props.server_id },
-			}),
-		staleTime: 30_000,
-	})
+	void queryClient.prefetchQuery(serverDetailQueryOptions(client, props.server_id))
 }
 
 const isConfiguring = computed(() => props.flows?.intro)

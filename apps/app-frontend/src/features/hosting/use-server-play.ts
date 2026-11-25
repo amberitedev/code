@@ -7,8 +7,8 @@ import {
 	injectModrinthClient,
 	injectNotificationManager,
 	injectPopupNotificationManager,
+	serverDetailQueryOptions,
 	serverIconImageQueryOptions,
-	serverIconMetadataQueryOptions,
 	type ServerPlayTarget,
 	sharedDiffItems,
 	useVIntl,
@@ -103,7 +103,7 @@ export function useServerPlay(modals: Ref<ServerPlayModals | undefined>) {
 	const activeInstall = ref<{ serverId: string; instanceId: string }>()
 
 	async function cacheServerIcon(serverId: string) {
-		const metadata = await queryClient.fetchQuery(serverIconMetadataQueryOptions(serverId, client))
+		const metadata = (await queryClient.fetchQuery(serverDetailQueryOptions(client, serverId))).icon
 		if (!metadata) return null
 		const icon = await queryClient.fetchQuery(
 			serverIconImageQueryOptions(serverId, metadata.hash, client),

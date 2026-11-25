@@ -1,5 +1,4 @@
-import { core, type Server } from '@amberite/contracts/core'
-import { instanceContent } from '@amberite/contracts/engine'
+import type { Server } from '@amberite/contracts/core'
 import type { Labrinth } from '@modrinth/api-client'
 import {
 	addServerVersions,
@@ -15,10 +14,13 @@ import {
 	injectModrinthClient,
 	injectNotificationManager,
 	injectServerOnboardingFlow,
+	instanceContentQueries,
 	readStoredServerInstallQueue,
 	resolveServerAddonInstallPlans,
 	resolveServerPlatform,
 	type ServerPlatform,
+	serverContentQueryKeys,
+	serverDetailQueryOptions,
 	serverKeys,
 	setUpServer,
 	type UpdateChannelPolicy,
@@ -147,14 +149,7 @@ export function useServerInstallContent(opts: {
 	}
 
 	async function ensureServer(serverId: string): Promise<Server> {
-		return queryClient.ensureQueryData({
-			queryKey: serverKeys.detail(serverId),
-			queryFn: async () =>
-				(await client.cores.serverRoutes(serverId)).call(core.GetServer, {
-					params: { id: serverId },
-				}),
-			staleTime: 30_000,
-		})
+		return queryClient.ensureQueryData(serverDetailQueryOptions(client, serverId))
 	}
 
 	const initialServerId = serverIdQuery.value
@@ -210,9 +205,13 @@ export function useServerInstallContent(opts: {
 
 	async function refreshServerInstalledContent(serverId: string) {
 		try {
-			const items = await (
-				await client.cores.serverRoutes(serverId)
-			).call(instanceContent.ListContentItems, { params: { id: serverId }, query: {} })
+			const { items } = await queryClient.fetchQuery(
+				instanceContentQueries({
+					client: await client.cores.serverRoutes(serverId),
+					instanceId: serverId,
+					queryKeys: serverContentQueryKeys,
+				}).content(),
+			)
 			if (serverIdQuery.value !== serverId) return
 			serverContentProjectIds.value = new Set(
 				items.flatMap((item) => (item.project ? [item.project.id] : [])),

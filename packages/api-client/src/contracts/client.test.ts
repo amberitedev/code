@@ -12,6 +12,7 @@ const renameFile = {
 	path: '/v1/instances/{id}/files/{*path}',
 	auth: 'session',
 	dangerous: false,
+	untimed: false,
 	body: 'json',
 	response: 'json',
 } as Endpoint<{ id: string; path: string }, { force: boolean | null }, { name: string }, string[]>
@@ -21,6 +22,7 @@ const deleteCache = {
 	path: '/v1/cache',
 	auth: 'session',
 	dangerous: false,
+	untimed: false,
 	body: 'empty',
 	response: 'empty',
 } as Endpoint<null, null, void, void>
@@ -30,6 +32,7 @@ const writeFile = {
 	path: '/v1/instances/{id}/file',
 	auth: 'session',
 	dangerous: false,
+	untimed: false,
 	body: 'raw',
 	response: 'json',
 } as Endpoint<{ id: string }, null, Blob, string[]>
@@ -39,6 +42,7 @@ const download = {
 	path: '/v1/download',
 	auth: 'none',
 	dangerous: false,
+	untimed: false,
 	body: 'empty',
 	response: 'stream',
 } as Endpoint<null, null, void, Response>

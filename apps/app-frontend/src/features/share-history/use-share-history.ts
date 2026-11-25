@@ -1,6 +1,6 @@
 import { installs } from '@amberite/contracts/engine'
 import type { ContractClient } from '@modrinth/api-client'
-import { shareHistoryKey } from '@modrinth/ui'
+import { serverCoreQueryOptions, shareHistoryKey } from '@modrinth/ui'
 import { useMutation, useQuery } from '@tanstack/vue-query'
 import { computed, type MaybeRefOrGetter, toValue } from 'vue'
 
@@ -14,12 +14,10 @@ export type ShareHistorySource = { client: ContractClient; instanceId: string }
 
 /** The source of a server's history on its Core, once the Core is known. */
 export function useServerShareHistorySource(serverId: MaybeRefOrGetter<string | null | undefined>) {
-	const core = useQuery({
-		queryKey: computed(() => ['servers', 'core', toValue(serverId)]),
-		queryFn: async () => (await apiClient.cores.coreOf(toValue(serverId)!)).id,
-		enabled: computed(() => !!toValue(serverId)),
-		staleTime: Infinity,
-	})
+	const core = useQuery(() => ({
+		...serverCoreQueryOptions(apiClient, toValue(serverId) ?? ''),
+		enabled: !!toValue(serverId),
+	}))
 	return computed<ShareHistorySource | null>(() => {
 		const id = toValue(serverId)
 		return id && core.data.value

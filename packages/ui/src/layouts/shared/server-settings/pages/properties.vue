@@ -298,8 +298,12 @@
 </template>
 
 <script setup lang="ts">
-import { core as coreRoutes } from '@amberite/contracts/core'
-import type { Archon } from '@modrinth/api-client'
+import {
+	core as coreRoutes,
+	type KnownPropertiesFields,
+	type PatchPropertiesFields,
+	type PropertiesFields,
+} from '@amberite/contracts/core'
 import { SearchIcon, SpinnerIcon } from '@modrinth/assets'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import Fuse from 'fuse.js'
@@ -308,6 +312,7 @@ import { computed, ref, watch } from 'vue'
 import { Accordion, Admonition, AutoLink, Chips, Input, Toggle } from '#ui/components'
 import SaveBanner from '#ui/components/servers/SaveBanner.vue'
 import { useServerPermissions } from '#ui/composables/server-permissions'
+import { serverKeys } from '#ui/composables/server-queries'
 import { injectServerSettings } from '#ui/layouts/shared/server-settings'
 import { injectModrinthServerContext, injectNotificationManager } from '#ui/providers'
 
@@ -390,14 +395,14 @@ function capitalize(str: string): string {
 	return str.charAt(0).toUpperCase() + str.slice(1)
 }
 
-const queryKey = computed(() => ['servers', 'properties', serverId])
+const queryKey = computed(() => serverKeys.properties(serverId))
 
 const { data: propsData, error: propsError } = useQuery({
 	queryKey,
 	queryFn: () => core.call(coreRoutes.GetProperties, { params: { id: serverId } }),
 })
 
-function flattenProperties(data: Archon.Content.v1.PropertiesFields): Record<string, string> {
+function flattenProperties(data: PropertiesFields): Record<string, string> {
 	const result: Record<string, string> = {}
 	if (data.known) {
 		for (const [key, value] of Object.entries(data.known)) {
@@ -497,7 +502,7 @@ const spawnProtectionEnabled = computed({
 	},
 })
 
-function buildPatch(): Archon.Content.v1.PatchPropertiesFields {
+function buildPatch(): PatchPropertiesFields {
 	const known: Record<string, string> = {}
 	const custom: Record<string, string> = {}
 
@@ -510,9 +515,9 @@ function buildPatch(): Archon.Content.v1.PatchPropertiesFields {
 		}
 	}
 
-	const patch: Archon.Content.v1.PatchPropertiesFields = {}
+	const patch: PatchPropertiesFields = {}
 	if (Object.keys(known).length > 0) {
-		patch.known = known as Archon.Content.v1.KnownPropertiesFields
+		patch.known = known as KnownPropertiesFields
 	}
 	if (Object.keys(custom).length > 0) {
 		patch.custom = custom

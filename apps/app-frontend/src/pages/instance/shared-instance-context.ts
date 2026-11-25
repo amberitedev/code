@@ -1,10 +1,9 @@
 import { ApiCallError } from '@modrinth/api-client'
 import { MinecraftServerIcon } from '@modrinth/assets'
-import { createContext, injectAuth } from '@modrinth/ui'
+import { createContext, injectAuth, useSharedInstanceEvent } from '@modrinth/ui'
 import { queryOptions, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, type Ref, ref, watch } from 'vue'
 
-import { useSharedInstanceEvent } from '@/composables/use-shared-instance-event'
 import { useUserQuery } from '@/composables/users/use-user-query'
 import { injectInstanceLaunchState } from '@/features/instances/launch-state'
 import {

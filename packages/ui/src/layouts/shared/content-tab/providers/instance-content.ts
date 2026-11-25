@@ -1,7 +1,9 @@
 import {
 	type CacheBehaviour,
 	type ContentItem as EngineContentItem,
+	type ContentUpdateSelection,
 	instanceContent,
+	installs,
 	type LinkedModpackInfo,
 } from '@amberite/contracts/engine'
 import type { ContractClient } from '@modrinth/api-client'
@@ -131,6 +133,9 @@ export function useInstanceContent(options: InstanceContentOptions) {
 				params: params(),
 				body: { project_path: path, version_id: versionId },
 			}),
+		/** Updates files to other versions of their projects, as one install job. */
+		updateAll: (updates: ContentUpdateSelection[]) =>
+			client().call(installs.UpdateInstanceContent, { params: params(), body: updates }),
 		setLocked: (path: string, locked: boolean) =>
 			client().call(instanceContent.SetProjectLocked, {
 				params: params(),

@@ -17,14 +17,14 @@ contracts::endpoints! {
 
     InstallInstance: Post "/instances/{id}/install", Session, InstanceRef, (), Json<InstanceInstall> => Json<InstallJobSnapshot>, client_only;
     DuplicateInstance: Post "/instances/{id}/duplicate", Session, InstanceRef, (), Empty => Json<InstallJobSnapshot>, client_only;
-    UpdateInstanceContent: Post "/instances/{id}/content-updates", Session, InstanceRef, (), Json<Vec<ContentUpdateSelection>> => Json<InstallJobSnapshot>, shared;
+    UpdateInstanceContent: Post "/instances/{id}/content-updates", Session, InstanceRef, (), Json<Vec<ContentUpdateSelection>> => Json<InstallJobSnapshot>, shared, untimed;
     GetSharedInstanceUpdatePreview: Get "/instances/{id}/shared/update-preview", Session, InstanceRef, (), Empty => Json<Option<SharedInstanceUpdatePreview>>, client_only;
     UpdateSharedInstance: Post "/instances/{id}/shared/update", Session, InstanceRef, (), Empty => Json<InstallJobSnapshot>, client_only;
     /// The share's pushed versions, newest first. Empty when the instance joined the share as a
     /// member rather than owning it.
     GetSharedInstanceHistory: Get "/instances/{id}/shared/history", Session, InstanceRef, (), Empty => Json<Vec<SharedInstanceHistoryEntry>>, shared;
     /// Puts the instance back to a version from its history, leaving it to push.
-    RestoreSharedInstanceVersion: Post "/instances/{id}/shared/history/{version}/restore", Session, SharedVersionRef, (), Empty => Json<InstallJobSnapshot>, shared;
+    RestoreSharedInstanceVersion: Post "/instances/{id}/shared/history/{version}/restore", Session, SharedVersionRef, (), Empty => Json<InstallJobSnapshot>, shared, untimed;
     /// The latest version stays.
     DeleteSharedInstanceVersion: Delete "/instances/{id}/shared/history/{version}", Session, SharedVersionRef, (), Empty => Empty, shared;
     GetSharedInstanceInstallPreview: Get "/shared-instances/{id}/install-preview", Session, SharedInstanceRef, SharedInstanceName, Empty => Json<SharedInstanceInstallPreview>, client_only;

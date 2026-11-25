@@ -102,11 +102,11 @@ pub(super) async fn power_state(
         Some(Phase::Starting) => ServerPower::Starting,
         Some(Phase::Running | Phase::Unmanaged(_)) => ServerPower::Running,
         Some(Phase::Stopping) => ServerPower::Stopping,
-        Some(Phase::Installing) => ServerPower::Offline,
+        Some(Phase::Installing) => ServerPower::Stopped,
         None => match server_rows::last_outcome(&state.db, id).await? {
             Some(server_rows::Outcome::Crashed) => ServerPower::Crashed,
             Some(server_rows::Outcome::Killed) => ServerPower::Killed,
-            Some(server_rows::Outcome::Stopped) | None => ServerPower::Offline,
+            Some(server_rows::Outcome::Stopped) | None => ServerPower::Stopped,
         },
     })
 }

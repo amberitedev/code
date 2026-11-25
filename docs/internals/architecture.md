@@ -192,7 +192,7 @@ so no operation holds one of the six HTTP/1.1 connections the UI shares. A Core'
 operations (power, loader installs, reachability checks) work the same way and end with
 `CoreEvent::OpEnded` ([`api/ops.rs`](../../apps/core/src/api/ops.rs)), so a Core call can have a
 timeout. The engine's long routes still answer once done on a Core, which holds the server
-meanwhile; the Core transport leaves only those untimed.
+meanwhile; they are declared `untimed`, and the Core transport sets no timeout on those.
 
 ### The Core proxy has its own listener
 

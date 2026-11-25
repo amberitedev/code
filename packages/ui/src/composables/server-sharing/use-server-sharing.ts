@@ -13,6 +13,7 @@ import {
 	injectNotificationManager,
 } from '#ui/providers'
 
+import { useSharedInstanceEvent } from '../use-shared-instance-event'
 import { clearServerSharedInstance } from './cache'
 import { sharedInstanceInvitesQueryOptions } from './query-options'
 
@@ -40,9 +41,11 @@ export function useServerSharingSettings() {
 			),
 			enabled: !!targetKey.value,
 			refetchOnMount: 'always' as const,
-			refetchInterval: 30_000,
 		})),
 	)
+	useSharedInstanceEvent('shared_instance_users', sharedInstanceId, () => {
+		if (invites.isEnabled.value) void invites.refetch()
+	})
 	const shareActions = useIsMutating({ mutationKey: ['servers', 'share-action', serverId] })
 
 	type ShareTarget = { instanceId: string }

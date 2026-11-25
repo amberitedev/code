@@ -13,8 +13,8 @@ function renderInstallation(state: ServerInstallationState) {
 			const installation = ref<ServerInstallationState | null>(state)
 			provideModrinthServerContext(
 				storyServerContext({
-					server: { status: 'installing', power_state: 'offline' },
-					powerState: ref('offline'),
+					server: { status: 'installing', power_state: 'stopped' },
+					powerState: ref('stopped'),
 					isServerRunning: computed(() => false),
 					installation: computed(() => installation.value),
 					dismissInstallation: () => {

@@ -5,6 +5,7 @@ import type { InvitedPlayerRow } from '#ui/components/sharing/invited-players-ta
 import { sharedInstanceKeys } from '#ui/composables/server-queries'
 import { injectAuth, injectModrinthClient } from '#ui/providers'
 
+import { useSharedInstanceEvent } from '../use-shared-instance-event'
 import { remainingPlayerSlots } from './invite-link'
 
 export type ServerPlayerMembers = { rows: InvitedPlayerRow[]; remaining: number }
@@ -13,7 +14,7 @@ export function useServerPlayerMembers(serverId: string, instanceId: Ref<string 
 	const client = injectModrinthClient()
 	const auth = injectAuth()
 	const userId = computed(() => auth.user.value?.id)
-	return useQuery({
+	const players = useQuery({
 		queryKey: computed(() =>
 			sharedInstanceKeys.players(instanceId.value ?? '', serverId, userId.value),
 		),
@@ -39,8 +40,11 @@ export function useServerPlayerMembers(serverId: string, instanceId: Ref<string 
 				})
 			return { rows, remaining: remainingPlayerSlots(response.users.length) }
 		},
-		refetchInterval: 30_000,
 	})
+	useSharedInstanceEvent('shared_instance_users', instanceId, () => {
+		if (players.isEnabled.value) void players.refetch()
+	})
+	return players
 }
 
 export function useSharedInstanceInstalledOnce(instanceId: Ref<string | null>) {
@@ -51,7 +55,10 @@ export function useSharedInstanceInstalledOnce(instanceId: Ref<string | null>) {
 		queryKey: computed(() => sharedInstanceKeys.instance(instanceId.value ?? '', userId.value)),
 		enabled: computed(() => !!instanceId.value && !!userId.value),
 		queryFn: () => client.sharedinstances.instances_v1.get(instanceId.value!),
-		refetchInterval: 30_000,
+	})
+	// The backend marks it installed when a player first joins, and tells the members then.
+	useSharedInstanceEvent('shared_instance_users', instanceId, () => {
+		if (instance.isEnabled.value) void instance.refetch()
 	})
 	return computed(() => instance.data.value?.installed_once ?? false)
 }

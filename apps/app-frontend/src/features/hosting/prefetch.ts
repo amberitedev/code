@@ -4,8 +4,6 @@ import {
 	type IconCacheContext,
 	serverIconEditorConfig,
 	serverIconImageQueryOptions,
-	serverIconKeys,
-	serverIconMetadataQueryOptions,
 	serverListQueryOptions,
 } from '@modrinth/ui'
 import type { QueryClient } from '@tanstack/vue-query'
@@ -27,12 +25,7 @@ export async function prefetchHostingData(
 		response.servers
 			.filter((server) => server.status === 'available')
 			.map(async (server) => {
-				if (server.icon !== undefined) {
-					queryClient.setQueryData(serverIconKeys.metadata(server.server_id), server.icon)
-				}
-				const metadata = await queryClient.fetchQuery(
-					serverIconMetadataQueryOptions(server.server_id, client),
-				)
+				const metadata = server.icon
 				if (!metadata) return
 				const config = serverIconEditorConfig(metadata)
 				if (config) {

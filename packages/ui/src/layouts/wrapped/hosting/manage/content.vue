@@ -15,7 +15,7 @@ import { useContentUpload } from '#ui/composables/content-upload'
 import { defineMessages, useVIntl } from '#ui/composables/i18n'
 import { useServerPermissions } from '#ui/composables/server-permissions'
 import { useServerPreferences } from '#ui/composables/server-preferences'
-import { serverKeys } from '#ui/composables/server-queries'
+import { serverContentQueryKeys } from '#ui/composables/server-queries'
 import { addServerVersions } from '#ui/composables/server-setup'
 import {
 	injectModrinthClient,
@@ -178,15 +178,10 @@ const follow = computed(() => server.value?.linked_instance)
 const linkedInstanceId = computed(() => follow.value?.id ?? null)
 const applyingInstanceUpdate = ref(false)
 
-// Under the server's content key, which its Core's socket invalidates when the server changes.
-const contentKey = serverKeys.content(serverId)
 const content = useInstanceContent({
 	client: core,
 	instanceId: serverId,
-	queryKeys: {
-		content: () => [...contentKey, 'own'],
-		packContent: () => [...contentKey, 'pack-content'],
-	},
+	queryKeys: serverContentQueryKeys,
 	mapping: { formatMessage },
 	packContentEnabled: (modpack) => !!modpack || !!follow.value,
 })
@@ -770,15 +765,13 @@ async function handleBulkUpdate(selections: UpdateAllSelection[]) {
 			item.project?.id !== selection.projectId
 		)
 			return []
-		return [{ path: item.id, versionId: selection.version.id }]
+		return [{ project_path: item.id, version_id: selection.version.id }]
 	})
 	if (updates.length === 0) return
 	let failed: unknown
 	await changeFiles(
-		updates.map(({ path }) => path),
-		async () => {
-			for (const { path, versionId } of updates) await content.switchVersion(path, versionId)
-		},
+		updates.map(({ project_path }) => project_path),
+		() => content.updateAll(updates),
 		(error) => {
 			failed = error
 			addNotification({

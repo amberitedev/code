@@ -561,17 +561,19 @@ pub async fn watch_power(state: Arc<CoreState>) {
                 .cloned()
                 .collect();
             for (id, phase) in phases {
-                if seen.get(&id) == Some(&phase) {
+                let was = seen.get(&id).copied();
+                if was == Some(phase) {
                     continue;
                 }
-                if announce(&state, &id, Some(phase)).await {
+                if announce(&state, &id, was, Some(phase)).await {
                     seen.insert(id, phase);
                 } else {
                     unread = true;
                 }
             }
             for id in ended {
-                if announce(&state, &id, None).await {
+                let was = seen.get(&id).copied();
+                if announce(&state, &id, was, None).await {
                     seen.remove(&id);
                 } else {
                     unread = true;
@@ -586,19 +588,33 @@ pub async fn watch_power(state: Arc<CoreState>) {
     }
 }
 
-/// Send `id`'s power at `phase`. False when it could not be read, to try again.
-async fn announce(state: &CoreState, id: &str, phase: Option<Phase>) -> bool {
+/// Send `id`'s power at `phase`, after `was`. False when it could not be read, to try again.
+async fn announce(
+    state: &CoreState,
+    id: &str,
+    was: Option<Phase>,
+    phase: Option<Phase>,
+) -> bool {
     let Some(power) = power_of(state, id, phase).await else {
         return false;
     };
     for event in power_events(state, id, power).await {
         let _ = state.events.send(event);
     }
-    // A change of phase also changes `status`, such as the end of an install.
-    let _ = state.events.send(CoreEvent::ServerChanged {
-        server: id.to_owned(),
-    });
+    if changes_more_than_power(was, phase) {
+        let _ = state.events.send(CoreEvent::ServerChanged {
+            server: id.to_owned(),
+        });
+    }
     true
+}
+
+/// Whether a server's `Server` shows more than its power differently after its phase went from
+/// `was` to `phase`: its `status` follows an install, and its players leave with the end of a run.
+fn changes_more_than_power(was: Option<Phase>, phase: Option<Phase>) -> bool {
+    was == Some(Phase::Installing)
+        || phase == Some(Phase::Installing)
+        || (was.is_some() && phase.is_none())
 }
 
 /// `id`'s power state at `phase`, as the hosting API's socket names it, or `None` when its last
@@ -620,7 +636,7 @@ async fn power_of(
         ServerPower::Running => PowerState::Running,
         ServerPower::Stopping => PowerState::Stopping,
         ServerPower::Crashed => PowerState::Crashed,
-        ServerPower::Offline | ServerPower::Killed => PowerState::Stopped,
+        ServerPower::Stopped | ServerPower::Killed => PowerState::Stopped,
     })
 }
 
@@ -644,4 +660,29 @@ async fn power_events(
     }];
     events.extend(uptime.map(|uptime| CoreEvent::Uptime { server, uptime }));
     events
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Phase, changes_more_than_power};
+
+    #[test]
+    fn only_an_install_or_the_end_of_a_run_changes_more_than_power() {
+        use Phase::*;
+        let cases = [
+            (None, Some(Starting), false),
+            (Some(Starting), Some(Running), false),
+            (Some(Running), Some(Stopping), false),
+            (Some(Stopping), None, true),
+            (None, Some(Installing), true),
+            (Some(Installing), None, true),
+        ];
+        for (was, phase, more) in cases {
+            assert_eq!(
+                changes_more_than_power(was, phase),
+                more,
+                "{was:?} -> {phase:?}"
+            );
+        }
+    }
 }

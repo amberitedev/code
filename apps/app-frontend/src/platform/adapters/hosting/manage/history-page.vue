@@ -20,7 +20,7 @@ const { addNotification } = injectNotificationManager()
 const { core, server } = injectModrinthServerContext()
 
 const serverId = computed(() => String(route.params.id ?? ''))
-const source = useServerHistory(serverId)
+const source = useServerHistory(server)
 const { history, restore, remove } = useShareHistory(() => {
 	const from = source.value
 	if (!from) return null
