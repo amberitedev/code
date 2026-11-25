@@ -60,7 +60,7 @@ export default defineConfig({
 			'**/node_modules/**',
 			'**/target/**',
 		],
-		plugins: ['eslint', 'oxc', 'typescript', 'unicorn'],
+		plugins: ['eslint', 'import', 'oxc', 'typescript', 'unicorn'],
 		categories: {
 			correctness: 'warn',
 			perf: 'warn',
@@ -75,6 +75,9 @@ export default defineConfig({
 			'eslint/no-unsafe-finally': 'off',
 			'eslint/no-useless-constructor': 'off',
 			'eslint/preserve-caught-error': 'off',
+			'import/no-named-as-default': 'off',
+			'import/no-named-as-default-member': 'off',
+			'import/no-unassigned-import': 'off',
 			'oxc/no-accumulating-spread': 'off',
 			'oxc/no-map-spread': 'off',
 			'typescript/consistent-return': 'off',
@@ -133,6 +136,15 @@ export default defineConfig({
 							],
 						},
 					],
+				},
+			},
+			{
+				// Typecheck has no checkJs, so this is what catches a removed export these upstream .js files import.
+				files: ['apps/app-frontend/src/**/*.js'],
+				// Oxlint misses the implicit default export of a <script setup> SFC.
+				excludeFiles: ['apps/app-frontend/src/pages/project/index.js'],
+				rules: {
+					'import/named': 'error',
 				},
 			},
 		],
