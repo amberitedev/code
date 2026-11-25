@@ -56,6 +56,8 @@ leaves it unreachable or in the wrong place.
 - Upstream's Archon and Kyros calls in our screens become calls of the Core's or the engine's
   Endpoints with `client.core(coreId)`, on their generated types. Where an upstream shape names a
   world, a Core server's one world has the server's id.
+- Upstream's shared tab providers are implemented once over `{ client, instanceId }`, where
+  `client` is `client.local` or `client.core(id)`; each host page only wires them.
 - Upstream's `archon` and `kyros` modules in api-client are under `ignore`: there is no Modrinth
   Hosting to call, so `client.archon` and `client.kyros` do not exist. Their `types.ts` stay as
   upstream has them, for the upstream screens that still name them, with no fields of ours.

@@ -6,6 +6,7 @@ import type {
 import type { ModrinthId } from '@modrinth/utils'
 
 export type { Settings as AppSettings } from '@amberite/contracts/app'
+export type { ModLoader as InstanceLoader } from '@amberite/contracts/protocol'
 export type {
 	CacheBehaviour,
 	ContentFile,
@@ -35,8 +36,6 @@ type InstanceLinkIdentity = {
 export type InstanceLink = InstanceLinkIdentity & InstanceLinkResponse
 
 export type Instance = GameInstance
-
-export type InstanceLoader = 'vanilla' | 'forge' | 'fabric' | 'quilt' | 'neoforge' | 'paper'
 
 export type ContentFileProjectType = 'mod' | 'datapack' | 'resourcepack' | 'shaderpack'
 

@@ -136,6 +136,18 @@ describe('an event stream', () => {
 		expect(resyncs).toEqual([])
 	})
 
+	it('opens at once for a caller that waits on it, not after the reopen backoff', async () => {
+		const events = stream()
+		events.subscribe('server-a')
+		await settle()
+		FakeSocket.opened[0]!.drop()
+
+		const ready = events.ready()
+		await settle()
+		FakeSocket.opened[1]!.open()
+		await expect(ready).resolves.toBeUndefined()
+	})
+
 	it('is not ready when its socket fails to open, or does not open in time', async () => {
 		const events = stream()
 		const failed = events.ready()

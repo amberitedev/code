@@ -86,7 +86,6 @@
 		<ServerSharePushModal
 			ref="diffModal"
 			:server-id="serverId"
-			:world-id="serverId"
 			:diffs="previewQuery.data.value?.items ?? []"
 			:changes-description="
 				formatMessage(previewAction === 'Restart' ? messages.restartBody : messages.startBody)

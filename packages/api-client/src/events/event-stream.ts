@@ -89,7 +89,8 @@ export class EventStream<Event extends Typed, Topic = never> {
 
 	/**
 	 * Resolves once the socket is open, so an event raised from then on is not missed. Rejects with
-	 * `network_error` when it fails to open, or is not open within `timeout` ms.
+	 * `network_error` when it fails to open, or is not open within `timeout` ms. A socket waiting to
+	 * reopen tries again at once: someone is waiting on it.
 	 */
 	ready(timeout = READY_MS): Promise<void> {
 		if (this.isOpen) return Promise.resolve()
@@ -102,6 +103,10 @@ export class EventStream<Event extends Typed, Topic = never> {
 			}
 			const timer = setTimeout(() => settle(false), timeout)
 			const stop = this.onStatus(settle)
+			if (this.reopenTimer) {
+				clearTimeout(this.reopenTimer)
+				void this.reopen()
+			}
 		})
 	}
 
@@ -199,12 +204,15 @@ export class EventStream<Event extends Typed, Topic = never> {
 		if (this.closed || !this.wanted()) return
 		const wait = this.reopenAfter
 		this.reopenAfter = Math.min(this.reopenAfter * 2, MAX_REOPEN_MS)
-		this.reopenTimer = setTimeout(async () => {
-			this.connecting = true
-			await this.source.beforeReopen?.().catch(() => undefined)
-			this.connecting = false
-			if (!this.closed && this.wanted()) void this.connect()
-		}, wait)
+		this.reopenTimer = setTimeout(() => void this.reopen(), wait)
+	}
+
+	private async reopen(): Promise<void> {
+		this.reopenTimer = undefined
+		this.connecting = true
+		await this.source.beforeReopen?.().catch(() => undefined)
+		this.connecting = false
+		if (!this.closed && this.wanted()) void this.connect()
 	}
 
 	private wanted(): boolean {

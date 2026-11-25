@@ -49,7 +49,6 @@
 		<ServerSharePushModal
 			ref="diffModal"
 			:server-id="serverId"
-			:world-id="serverId"
 			:diffs="previewQuery.data.value?.items ?? []"
 			:changes-description="
 				previewAction === 'play' ? formatMessage(messages.shareChangesPlayBody) : undefined
