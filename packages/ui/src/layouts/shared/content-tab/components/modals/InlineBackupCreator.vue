@@ -1,5 +1,5 @@
 <template>
-	<div class="flex flex-col gap-3">
+	<div v-if="backup.available || !props.hideShiftClickHint" class="flex flex-col gap-3">
 		<span v-if="backup.available" class="text-primary">
 			{{
 				formatMessage(messages.warningBody, {

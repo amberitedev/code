@@ -7,6 +7,7 @@
 			body: formatMessage(commonMessages.shareRequiresUnlinkBody),
 		}"
 		:backup-tip="backupTip"
+		hide-shift-click-hint
 		:action-disabled="!!blocked"
 		:action-disabled-tooltip="blocked ?? undefined"
 	/>

@@ -15,6 +15,7 @@
 			<InlineBackupCreator
 				ref="backupCreator"
 				:backup-name="props.backupTip ? `Before unlink (${props.backupTip})` : 'Before unlink'"
+				:hide-shift-click-hint="props.hideShiftClickHint"
 				@update:buttons-disabled="buttonsDisabled = $event"
 			/>
 		</div>
@@ -42,7 +43,7 @@
 
 <script setup lang="ts">
 import { UnlinkIcon, XIcon } from '@modrinth/assets'
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 
 import Admonition from '#ui/components/base/Admonition.vue'
 import { Button } from '#ui/components/base/buttons'
@@ -60,6 +61,8 @@ const props = defineProps<{
 	/** The server follows an App instance, not a modpack, so the wording says so. */
 	instance?: boolean
 	backupTip?: string
+	/** Nothing opened the modal with a click that Shift could skip. */
+	hideShiftClickHint?: boolean
 	actionDisabled?: boolean
 	actionDisabledTooltip?: string
 }>()
@@ -145,9 +148,13 @@ function onHide() {
 	settle = null
 }
 
+// A pending `ask` would otherwise never answer, and its caller would wait for good.
+onBeforeUnmount(() => settle?.(false))
+
 /** Shows the modal; resolves true once the owner confirms, false when they close it. */
 function ask(): Promise<boolean> {
 	settle?.(false)
+	if (!modal.value) return Promise.resolve(false)
 	return new Promise((resolve) => {
 		settle = resolve
 		modal.value?.show()

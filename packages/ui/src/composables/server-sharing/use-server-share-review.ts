@@ -47,6 +47,7 @@ export function useServerShareReview<Action extends string = 'push'>(options?: {
 	const previewOpen = ref(false)
 	const sharedInstanceId = computed(() => server.value?.shared_instance_id)
 	const shareUnlink = injectShareUnlinkPrompt(null)
+	const unlinking = ref(false)
 	let disposed = false
 	onScopeDispose(() => {
 		disposed = true
@@ -86,6 +87,7 @@ export function useServerShareReview<Action extends string = 'push'>(options?: {
 			shareActions.value > 0 ||
 			sharePreviews.value > 0 ||
 			busyReasons.value.length > 0 ||
+			unlinking.value ||
 			!!options?.disabled?.value,
 	)
 
@@ -110,8 +112,14 @@ export function useServerShareReview<Action extends string = 'push'>(options?: {
 	}
 
 	async function unlinkUploadedPack() {
-		if (server.value && (await unlinkBeforeShare(core, server.value, shareUnlink)))
-			await queryClient.invalidateQueries({ queryKey: serverKeys.detail(serverId) })
+		if (!server.value?.uploaded_modpack) return
+		unlinking.value = true
+		try {
+			if (await unlinkBeforeShare(core, server.value, shareUnlink))
+				await queryClient.invalidateQueries({ queryKey: serverKeys.detail(serverId) })
+		} finally {
+			unlinking.value = false
+		}
 	}
 
 	/**
