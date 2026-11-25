@@ -1,5 +1,6 @@
 use crate::install::control::InstallControl;
 use crate::install::store::LiveJob;
+use contracts::Side;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex as SyncMutex, Weak};
 use tokio::sync::{Mutex, Notify, Semaphore};
@@ -10,6 +11,8 @@ const MAX_CONCURRENT_INSTALL_JOBS: usize = 3;
 /// Limits install job concurrency and holds the in-memory state of this engine's jobs.
 #[derive(Debug)]
 pub(crate) struct Installs {
+    /// A server engine's jobs are read by remote callers, so they name no host path.
+    pub(crate) side: Side,
     /// Admission covers setup and deletion. A target reservation stays with its worker
     /// until cleanup finishes, so backups and rollback cannot overlap another install.
     pub(crate) admission: Mutex<()>,
@@ -22,8 +25,9 @@ pub(crate) struct Installs {
 }
 
 impl Installs {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(side: Side) -> Self {
         Self {
+            side,
             admission: Mutex::new(()),
             job_semaphore: Semaphore::new(MAX_CONCURRENT_INSTALL_JOBS),
             db_semaphore: Semaphore::new(1),

@@ -141,6 +141,7 @@ export-ts = [
   "dep:ts-rs",
   "minecraft-meta-manifest/ts",
   "modrinth-content-management/ts",
+  "sharing-client/export-ts",
 ]
 
 [lints]

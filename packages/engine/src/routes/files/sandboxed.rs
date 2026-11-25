@@ -3,10 +3,7 @@
 //! such as the App's data folder moved to another drive, is followed. Each side then guards what
 //! it owns ([`Guard`]).
 
-use std::{
-    io::Read,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
@@ -281,27 +278,25 @@ pub(super) async fn list(
     .await
 }
 
-pub(super) async fn read(
+/// The file at `path`, opened to be read as it is sent.
+pub(super) async fn open_file(
     engine: &Engine,
     id: &str,
     path: &str,
-) -> Result<Vec<u8>, ApiError> {
+) -> Result<std::fs::File, ApiError> {
     let path = inner_path(engine.side, path)?;
     let files = open(engine, id).await?;
     blocking(move || {
         // A link or something other than a file reads as missing; any other error, such as a
         // file the engine may not read, says what it is.
-        let mut file = match files.folder.open_file(&path) {
-            Ok(Some(file)) => file,
-            Ok(None) => return Err(not_found(&path)),
+        match files.folder.open_file(&path) {
+            Ok(Some(file)) => Ok(file.into_std()),
+            Ok(None) => Err(not_found(&path)),
             Err(error) if error.kind() == std::io::ErrorKind::InvalidInput => {
-                return Err(not_found(&path));
+                Err(not_found(&path))
             }
-            Err(error) => return Err(internal(error)),
-        };
-        let mut bytes = Vec::new();
-        file.read_to_end(&mut bytes).map_err(internal)?;
-        Ok(bytes)
+            Err(error) => Err(internal(error)),
+        }
     })
     .await
 }

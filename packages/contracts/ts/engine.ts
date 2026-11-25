@@ -572,7 +572,7 @@ export const java = {
 
 export const instanceFiles = {
 	ListInstanceFiles: { method: "GET", path: "/instances/{id}/files", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceRef, InstanceFilePath, void, Array<InstanceFileItem>>,
-	ReadInstanceFile: { method: "GET", path: "/instances/{id}/files/content", auth: "session", dangerous: false, body: "empty", response: "raw" } as Endpoint<InstanceRef, InstanceFilePath, void, Blob>,
+	ReadInstanceFile: { method: "GET", path: "/instances/{id}/files/content", auth: "session", dangerous: false, body: "empty", response: "stream" } as Endpoint<InstanceRef, InstanceFilePath, void, Response>,
 	WriteInstanceFile: { method: "PUT", path: "/instances/{id}/files/content", auth: "session", dangerous: false, body: "raw", response: "empty" } as Endpoint<InstanceRef, InstanceFileWrite, Blob, void>,
 	CreateInstanceDirectory: { method: "POST", path: "/instances/{id}/files/directories", auth: "session", dangerous: false, body: "empty", response: "empty" } as Endpoint<InstanceRef, InstanceFilePath, void, void>,
 	MoveInstanceFile: { method: "POST", path: "/instances/{id}/files/move", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<InstanceRef, null, InstanceFileMove, void>,

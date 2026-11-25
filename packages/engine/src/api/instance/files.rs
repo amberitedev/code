@@ -246,6 +246,7 @@ impl InstanceFileWriter {
     }
 }
 
+// The Files tab uses `routes/files/sandboxed.rs`; these stay as upstream has them.
 pub async fn list_instance_files(
     state: &Engine,
     instance_id: &str,

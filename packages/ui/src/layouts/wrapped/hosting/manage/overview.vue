@@ -92,11 +92,11 @@ const inspectError = async () => {
 	if (isDismissed()) return
 
 	try {
-		const blob = await core.call(instanceFiles.ReadInstanceFile, {
+		const response = await core.call(instanceFiles.ReadInstanceFile, {
 			params: { id: serverId },
 			query: { path: 'logs/latest.log' },
 		})
-		const log = await blob.text()
+		const log = await response.text()
 		if (!log) return
 
 		const data = await client.mclogs.insights_v1.analyse(log)

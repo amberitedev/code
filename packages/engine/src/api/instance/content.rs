@@ -4,7 +4,7 @@ use contracts::Side;
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 
-use crate::api::pack::install_mrpack::{
+use crate::api::pack::sandboxed_install::{
     instance_dir, instance_metadata, open_folder, pack_kind, place_turned_on,
     repair_server_pack,
 };

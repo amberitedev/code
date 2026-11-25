@@ -10,7 +10,7 @@ contracts::endpoints! {
 
     /// A folder's entries; `path` is `""` for the instance's own folder.
     ListInstanceFiles: Get "/instances/{id}/files", Session, InstanceRef, InstanceFilePath, Empty => Json<Vec<InstanceFileItem>>, shared;
-    ReadInstanceFile: Get "/instances/{id}/files/content", Session, InstanceRef, InstanceFilePath, Empty => Raw, shared;
+    ReadInstanceFile: Get "/instances/{id}/files/content", Session, InstanceRef, InstanceFilePath, Empty => Stream, shared;
     WriteInstanceFile: Put "/instances/{id}/files/content", Session, InstanceRef, InstanceFileWrite, Raw => Empty, shared;
     CreateInstanceDirectory: Post "/instances/{id}/files/directories", Session, InstanceRef, InstanceFilePath, Empty => Empty, shared;
     /// Renames or moves; refused when something is already at `destination`.

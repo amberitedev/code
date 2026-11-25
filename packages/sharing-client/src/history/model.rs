@@ -2,7 +2,6 @@
 //! History page shows it.
 
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
 use crate::diff::{SharedInstanceUpdateDiff, SharedInstanceUpdateDiffType};
 use crate::rules::CONFIG_FILE_TYPE;
@@ -40,7 +39,8 @@ impl HistoryEntry {
 /// One version of a share's history as the History page shows it: what it runs on, how much it
 /// holds, and what it changed over the version before it. The App returns it for an instance's
 /// share and Core for a server's, so both pages read one shape.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct SharedInstanceHistoryEntry {
     pub version: i32,

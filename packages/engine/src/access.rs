@@ -82,7 +82,7 @@ where
     }
 }
 
-/// A caller allowed over the whole engine, such as its groups or its loading bars.
+/// A caller allowed over the whole engine, such as its loading bars.
 pub struct EngineAccess {
     pub caller: Caller,
 }

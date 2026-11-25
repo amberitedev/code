@@ -34,8 +34,8 @@ thiserror = { workspace = true }
 tokio = { workspace = true, features = ["fs", "io-util", "macros", "sync", "time"] }
 tokio-util = { workspace = true, features = ["io"] }
 tracing = { workspace = true }
-# The types the App's UI also sees, generated into `packages/api-client` by Core.
-ts-rs = { workspace = true }
+# The share diff and history types the engine's routes answer with, in the engine's TypeScript.
+ts-rs = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
@@ -48,6 +48,7 @@ nix = { version = "0.30.1", features = ["fs"] }
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
 
 [features]
+export-ts = ["dep:ts-rs"]
 # `keys::test_support`, for the store's and Core's tests.
 testing = []
 

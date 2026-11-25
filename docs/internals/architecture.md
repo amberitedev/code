@@ -230,7 +230,9 @@ A Core does not mount `engine::routes()`. Each engine Endpoint is declared `shar
 route whose body or answer is a host path, or that reaches the whole engine or runs code on the
 host (the edit-instance route's launch hooks and Java path), is `client_only`: it would hand the
 Core's machine to anyone who can reach a server's routes. Each change it mounts holds the server
-first, so content never changes under a running server or an install.
+first, so content never changes under a running server or an install. The test cannot see a host
+path kept in a `String`, such as an embedded icon's cached copy or an install job's icon and failed
+paths: a server engine drops each before it leaves the engine, in answers and events alike.
 
 The file and log routes walk a server's folder from a handle
 ([`sandbox`](../../packages/engine/src/util/sandbox.rs)), so a link or FIFO a mod planted is never
