@@ -439,7 +439,6 @@ function onInstallationDismiss() {
 	<ServerSharePushModal
 		ref="diffModal"
 		:server-id="ctx.serverId"
-		:world-id="ctx.serverId"
 		:diffs="previewQuery.data.value?.items ?? []"
 		:requires-restart="previewQuery.data.value?.diff.requires_restart"
 		:loading="previewQuery.isFetching.value"

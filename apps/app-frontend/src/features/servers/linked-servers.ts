@@ -5,7 +5,7 @@ import {
 	type Server,
 } from '@amberite/contracts/core'
 import { ModrinthApiError } from '@modrinth/api-client'
-import { serverListQueryOptions } from '@modrinth/ui'
+import { serverKeys, serverListQueryOptions } from '@modrinth/ui'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, type MaybeRefOrGetter, onScopeDispose, ref, toValue, watch } from 'vue'
 
@@ -55,12 +55,17 @@ export function useCoreWatch() {
 	useQuery(serversQueryOptions)
 	const { cores } = useCores()
 	let settle: ReturnType<typeof setTimeout> | undefined
-	const refetch = () => {
+	const changedServers = new Set<string>()
+	/** The list, and each changed server, are read again once for a burst of changes. */
+	const refetch = (server?: string) => {
+		if (server) changedServers.add(server)
 		clearTimeout(settle)
-		settle = setTimeout(
-			() => void queryClient.invalidateQueries({ queryKey: serversQueryOptions.queryKey }),
-			CHANGES_SETTLE_MS,
-		)
+		settle = setTimeout(() => {
+			void queryClient.invalidateQueries({ queryKey: serversQueryOptions.queryKey, exact: true })
+			for (const id of changedServers)
+				void queryClient.invalidateQueries({ queryKey: serverKeys.detail(id) })
+			changedServers.clear()
+		}, CHANGES_SETTLE_MS)
 	}
 	const setClosed = (coreId: string, closed: boolean) => {
 		const next = new Set(closedCores.value)
@@ -72,9 +77,10 @@ export function useCoreWatch() {
 	function watchCore(coreId: string) {
 		const events = apiClient.coreEvents(coreId)
 		setClosed(coreId, !events.open)
+		let wasDown = false
 		const stops = [
 			events.subscribe({ type: 'servers' }),
-			events.on('server_changed', refetch),
+			events.on('server_changed', (change) => refetch(change.server)),
 			// A change of power alone comes as this event, with no `server_changed`.
 			events.on('power_state', ({ server, state }) =>
 				queryClient.setQueryData<ServerList>(serversQueryOptions.queryKey, (list) =>
@@ -90,9 +96,11 @@ export function useCoreWatch() {
 			),
 			// The socket lost events: nothing shown from this Core can be trusted.
 			events.on('resync', () => void queryClient.invalidateQueries()),
+			// The list fetched at boot is current when the socket first opens; after a drop it is not.
 			events.onStatus((open) => {
 				setClosed(coreId, !open)
-				if (open) refetch()
+				if (open && wasDown) refetch()
+				wasDown = !open
 			}),
 		]
 		return () => {

@@ -162,7 +162,6 @@
 	<ServerInviteLinkModal
 		ref="serverInviteLinkModal"
 		:server-id="serverId"
-		:world-id="serverId"
 		:site-url="siteUrl ?? ''"
 	/>
 	<ConfirmLeaveModal

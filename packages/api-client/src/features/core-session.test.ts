@@ -28,7 +28,7 @@ const LISTED: Server = {
 	flows: { intro: true },
 	icon: null,
 	net: { ip: null, port: 25565, outside: null, game_port: 25565 },
-	power_state: 'offline',
+	power_state: 'stopped',
 	linked_instance: null,
 	shared_instance_id: null,
 	reachability: null,

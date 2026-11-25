@@ -38,6 +38,12 @@ const PACKAGES = [
 		test: true,
 		reachedBy: ['apps/backend', 'packages/contracts'],
 	},
+	{
+		name: '@modrinth/api-client',
+		folder: 'packages/api-client',
+		test: false,
+		reachedBy: ['packages/api-client', 'packages/contracts'],
+	},
 	// A fixture helper calls the generated endpoints, so a changed contract shows up here.
 	{
 		name: '@amberite/fixtures',
