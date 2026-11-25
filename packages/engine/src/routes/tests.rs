@@ -710,6 +710,18 @@ async fn install_jobs_are_read_and_controlled_through_their_instance() {
             .await,
         (StatusCode::OK, json!([]))
     );
+
+    // `local:a` follows no pack.
+    for (uri, body) in [
+        ("content-updates", Some(json!([]))),
+        ("modpack/repair", None),
+        ("modpack/update", Some(json!({ "version_id": "v" }))),
+    ] {
+        let uri = format!("/instances/local%3Aa/{uri}");
+        let (status, error) = send(&allowed, "POST", &uri, body).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{uri}: {error}");
+        assert_eq!(error["error"], "invalid_input", "{uri}");
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]

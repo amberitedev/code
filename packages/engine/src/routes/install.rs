@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use axum::extract::State;
-use contracts::{ApiError, Empty, Json, server::Req};
+use contracts::{ApiError, Empty, ErrorCode, Json, server::Req};
 use uuid::Uuid;
 
 use super::api_error;
@@ -60,6 +60,12 @@ pub async fn update_instance_content(
     instance: InstanceAccess,
     request: Req<UpdateInstanceContent>,
 ) -> JobResponse {
+    if request.body.is_empty() {
+        return Err(ApiError::new(
+            ErrorCode::InvalidInput,
+            "Choose the content to update.",
+        ));
+    }
     install::bulk_update_content(instance.id, request.body, &engine)
         .await
         .map(Json)

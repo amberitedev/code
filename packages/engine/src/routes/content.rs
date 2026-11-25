@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use axum::extract::State;
-use contracts::{ApiError, Empty, Json, server::Req};
+use contracts::{ApiError, Empty, ErrorCode, Json, server::Req};
 use modrinth_content_management::ResolveContentPlan;
 
 use super::{api_error, files::inside_instance};
@@ -22,7 +22,8 @@ use crate::{
     install::InstallJobSnapshot,
     instance::{self, PackExportCandidate},
     state::{
-        ContentFile, ContentItem, InstanceInstallCandidate, LinkedModpackInfo,
+        ContentFile, ContentItem, InstanceInstallCandidate, InstanceLink,
+        LinkedModpackInfo,
     },
 };
 
@@ -310,11 +311,33 @@ pub async fn install_modpack(
     .map_err(api_error)
 }
 
+/// The engine refuses an instance that follows no Modrinth pack too, but as an internal error.
+async fn follows_modrinth_pack(
+    engine: &Engine,
+    id: &str,
+) -> Result<(), ApiError> {
+    if let Some(metadata) =
+        instance::get(engine, id).await.map_err(api_error)?
+        && !matches!(
+            metadata.link,
+            InstanceLink::ModrinthModpack { .. }
+                | InstanceLink::ServerProjectModpack { .. }
+        )
+    {
+        return Err(ApiError::new(
+            ErrorCode::InvalidInput,
+            "This instance does not follow a Modrinth pack.",
+        ));
+    }
+    Ok(())
+}
+
 pub async fn update_modpack_version(
     State(engine): State<Arc<Engine>>,
     instance: InstanceAccess,
     request: Req<UpdateModpackVersion>,
 ) -> Answer<InstallJobSnapshot> {
+    follows_modrinth_pack(&engine, &instance.id).await?;
     instance::update_managed_modrinth_version(
         &engine,
         &instance.id,
@@ -348,6 +371,7 @@ pub async fn repair_modpack(
     instance: InstanceAccess,
     _: Req<RepairModpack>,
 ) -> Answer<InstallJobSnapshot> {
+    follows_modrinth_pack(&engine, &instance.id).await?;
     instance::repair_managed_modrinth(&engine, &instance.id)
         .await
         .map(Json)

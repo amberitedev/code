@@ -45,7 +45,7 @@ struct SharedInstanceUpdateRollback {
 
 /// With `scoped_paths`, only those instance-relative files and folders are backed
 /// up. A path that does not exist yet is removed again on rollback.
-pub(super) async fn prepare_instance_update_backup(
+pub(crate) async fn prepare_instance_update_backup(
     job_id: Uuid,
     metadata: &InstanceMetadata,
     scoped_paths: Option<Vec<String>>,
