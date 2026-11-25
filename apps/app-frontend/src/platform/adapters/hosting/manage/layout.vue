@@ -1,10 +1,21 @@
 <template>
 	<div class="w-full pt-6" :class="isOverviewRoute ? 'flex min-h-full flex-col' : 'h-full'">
+		<div
+			v-if="coreError"
+			class="flex min-h-[calc(100vh-4rem)] items-center justify-center text-contrast"
+		>
+			<ErrorInformationCard
+				v-bind="coreErrorCopy"
+				:icon="TriangleAlertIcon"
+				icon-color="red"
+				:action="{ label: 'Try again', onClick: () => void refetchCore(), color: 'brand' }"
+			/>
+		</div>
 		<ServersManageRootLayout
-			v-if="!coreLoading"
+			v-else-if="coreId"
 			:key="serverId"
 			:server-id="serverId"
-			:core-id="coreId ?? ''"
+			:core-id="coreId"
 			:layout-mode="isOverviewRoute ? 'fill' : 'page'"
 			:reload-page="() => router.go(0)"
 			:additional-tabs="historyTabs"
@@ -36,9 +47,11 @@
 
 <script setup lang="ts">
 import { core, type Server } from '@amberite/contracts/core'
-import { HistoryIcon, ServerStackIcon } from '@modrinth/assets'
+import { ApiCallError } from '@modrinth/api-client'
+import { HistoryIcon, ServerStackIcon, TriangleAlertIcon } from '@modrinth/assets'
 import {
 	commonMessages,
+	ErrorInformationCard,
 	injectAuth,
 	injectModrinthClient,
 	serverKeys,
@@ -99,14 +112,27 @@ function getCachedServerName(id: string): string | undefined {
 		?.servers.find((server) => server.server_id === id)?.name
 }
 
-// The panel talks to the server's Core, so it opens once the Core is known. A server no Core has
-// opens with no Core, whose calls answer `not_found`, which the panel shows.
-const { data: coreId, isLoading: coreLoading } = useQuery({
+// The panel talks to the server's Core, so it opens once the Core is known.
+const {
+	data: coreId,
+	error: coreError,
+	refetch: refetchCore,
+} = useQuery({
 	queryKey: computed(() => ['servers', 'core', serverId.value]),
 	queryFn: async () => (await client.cores.coreOf(serverId.value)).id,
 	enabled: computed(() => Boolean(serverId.value)),
+	// No Core answered, or none has the server: say so at once.
+	retry: false,
 	staleTime: Infinity,
 })
+const coreErrorCopy = computed(() =>
+	coreError.value instanceof ApiCallError && coreError.value.code === 'not_found'
+		? { title: 'Server not found', description: 'None of your Cores has this server.' }
+		: {
+				title: "Can't reach your Core",
+				description: "Check that your Core is running and that you're online, then try again.",
+			},
+)
 
 const { data: serverData } = useQuery({
 	queryKey: computed(() => serverKeys.detail(serverId.value)),

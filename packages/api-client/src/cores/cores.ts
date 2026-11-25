@@ -96,6 +96,7 @@ export class Cores {
 		this.routes.delete(core.id)
 		this.listed = this.listed.filter((listed) => listed.id !== core.id)
 		this.cores = null
+		this.client.forgetCore(core.id)
 	}
 
 	/**
@@ -206,14 +207,6 @@ export class Cores {
 		return this.sessions().signOut(coreId)
 	}
 
-	/** The listed Core a request URL goes to, if any. */
-	public coreForUrl(url: string): ListedCore | undefined {
-		return this.listed.find((core) => {
-			const base = this.routes.get(core.id)?.base
-			return base !== undefined && (url === base || url.startsWith(`${base}/`))
-		})
-	}
-
 	/** The listed Core with this id. */
 	public async core(coreId: string): Promise<ListedCore> {
 		const core = (await this.known()).find((candidate) => candidate.id === coreId)
@@ -260,11 +253,6 @@ export class Cores {
 		if (!core || this.address(core) !== core.address) return net
 		const ip = new URL(core.address).hostname.replace(/^\[|\]$/g, '')
 		return { ...net, ip, port: net.game_port }
-	}
-
-	/** The base URL requests to the Core that has `serverId` go to. */
-	public async serverUrl(serverId: string): Promise<string> {
-		return this.base(await this.coreOf(serverId))
 	}
 
 	/**
