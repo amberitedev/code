@@ -16,7 +16,10 @@ export type FilesFailure = 'create' | 'rename' | 'move' | 'delete' | 'upload' | 
 export interface InstanceFilesOptions {
 	/** `client.local` for an instance on this computer, `client.core(id)` for a server. */
 	client: MaybeRefOrGetter<ContractClient>
-	/** The events of the same host, whose `files_changed` reads the shown folder again. */
+	/**
+	 * The events of the same host, whose `files_changed` reads the shown folder again. A Core sends
+	 * it on the instance's topic, which the host keeps subscribed.
+	 */
 	events: {
 		on(type: 'files_changed', handler: (payload: FilesChanged) => void): () => void
 	}
@@ -194,7 +197,8 @@ export function useInstanceFiles(options: InstanceFilesOptions) {
 
 	return {
 		items,
-		loading: directory.isFetching,
+		// Only the first read: a refetch of an empty folder would hide the whole tab.
+		loading: directory.isLoading,
 		error: computed(() => directory.error.value ?? null),
 		firstPaintPending,
 		currentPath: options.currentPath,

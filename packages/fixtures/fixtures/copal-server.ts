@@ -1,4 +1,4 @@
-// A Core with one Fabric server that is not running, for its Files tab.
+// A Core with one Fabric server that is not running.
 
 import { core } from '@amberite/contracts/core'
 import { call, server, stack } from '@amberite/fixtures'

@@ -1604,9 +1604,15 @@ async fn files_changed_on_disk_reach_the_instance_topic_without_paths() {
         .await;
     next_of(&mut socket, "power_state").await;
 
-    let folder = core.state.servers.paths().server(&core.server);
-    std::fs::write(folder.join("server.properties"), "motd=hi").unwrap();
-    std::fs::create_dir_all(folder.join("config")).unwrap();
+    // `config` sends no `synced`, so only `files_changed` tells the Files tab.
+    let config = core
+        .state
+        .servers
+        .paths()
+        .server(&core.server)
+        .join("config");
+    std::fs::create_dir_all(&config).unwrap();
+    std::fs::write(config.join("plugin.json"), "{}").unwrap();
     assert_eq!(
         next_of(&mut socket, "files_changed").await,
         json!({
