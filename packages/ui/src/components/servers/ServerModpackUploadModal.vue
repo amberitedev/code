@@ -33,14 +33,13 @@
 </template>
 
 <script setup lang="ts">
-import type { UploadProgress } from '@modrinth/api-client'
+import type { LocalFile, UploadProgress } from '@modrinth/api-client'
 import { XIcon } from '@modrinth/assets'
 import { type Component, computed, ref } from 'vue'
 
 import { Button } from '#ui/components/base/buttons'
 import ArchiveInput from '#ui/components/flows/creation-flow-modal/components/curseforge-stage/archive-input.vue'
 import ModpackUploadProgress from '#ui/components/flows/creation-flow-modal/components/ModpackUploadProgress.vue'
-import type { CurseForgePackFile } from '#ui/components/flows/creation-flow-modal/creation-flow-context'
 import NewModal from '#ui/components/modal/NewModal.vue'
 import { defineMessages, useVIntl } from '#ui/composables/i18n'
 import { commonMessages } from '#ui/utils/common-messages'
@@ -58,7 +57,7 @@ const emit = defineEmits<{
 
 const { formatMessage } = useVIntl()
 const modal = ref<InstanceType<typeof NewModal>>()
-const file = ref<CurseForgePackFile | null>(null)
+const file = ref<File | LocalFile | null>(null)
 const processing = ref(false)
 const mrpack = computed(() => (file.value instanceof File ? file.value : null))
 

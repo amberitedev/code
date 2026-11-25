@@ -14,8 +14,6 @@ export async function installServerCreationConfig(
 		await config.installServerContent(coreId, serverId)
 		return
 	}
-	if (config.setupType.value === 'curseforge')
-		throw new Error('A Core does not install CurseForge modpacks.')
 	const properties = config.buildProperties()
 	const file = config.modpackFile.value
 	if (config.setupType.value === 'modpack' && file) {

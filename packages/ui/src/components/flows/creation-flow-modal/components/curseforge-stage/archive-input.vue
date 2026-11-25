@@ -34,14 +34,12 @@
 </template>
 
 <script setup lang="ts">
+import type { LocalFile } from '@modrinth/api-client'
 import { FileIcon, XIcon } from '@modrinth/assets'
 
 import { IconButton } from '#ui/components/base/buttons'
 import DropzoneFileInput from '#ui/components/base/DropzoneFileInput.vue'
-import { useVIntl } from '#ui/composables/i18n'
-
-import type { CurseForgePackFile } from '../../creation-flow-context'
-import { curseforgeMessages as messages } from '../../curseforge'
+import { defineMessages, useVIntl } from '#ui/composables/i18n'
 
 const {
 	accept = '.zip',
@@ -53,7 +51,23 @@ const {
 	disabled?: boolean
 }>()
 
-const file = defineModel<CurseForgePackFile | null>({ required: true })
+/** A file picked in the browser, or dropped from disk in the App. */
+const file = defineModel<File | LocalFile | null>({ required: true })
 const processing = defineModel<boolean>('processing', { default: false })
 const { formatMessage } = useVIntl()
+
+const messages = defineMessages({
+	uploadPrompt: {
+		id: 'creation-flow.curseforge.upload-prompt',
+		defaultMessage: 'Drag and drop file or click to browse',
+	},
+	processingFile: {
+		id: 'creation-flow.curseforge.processing-file',
+		defaultMessage: 'Processing...',
+	},
+	removeFile: {
+		id: 'creation-flow.curseforge.remove-file',
+		defaultMessage: 'Remove {filename}',
+	},
+})
 </script>

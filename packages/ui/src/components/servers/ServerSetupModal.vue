@@ -111,8 +111,6 @@ async function onFlowComplete(ctx: CreationFlowContextValue) {
 		if (ctx.projectInstall.value) {
 			await ctx.installServerContent(coreId, serverId)
 			emitReinstall()
-		} else if (ctx.setupType.value === 'curseforge') {
-			throw new Error('A Core does not install CurseForge modpacks.')
 		} else if (ctx.setupType.value === 'modpack' && ctx.modpackFile.value) {
 			debug('onFlowComplete: mrpack upload path')
 			const file = ctx.modpackFile.value

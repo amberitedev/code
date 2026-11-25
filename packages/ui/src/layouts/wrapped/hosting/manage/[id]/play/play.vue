@@ -304,7 +304,7 @@ watch(
 		if (inviteHandoffStarted || actionsLocked.value) return
 		inviteHandoffStarted = true
 		if (canSetup.value) await perform('invite')
-		if (!inviteHandoff.binding.value && !inviteHandoff.migration.value) inviteHandoff.cancel()
+		if (!inviteHandoff.binding.value) inviteHandoff.cancel()
 	},
 	{ immediate: true },
 )
