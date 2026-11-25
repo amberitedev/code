@@ -1,4 +1,4 @@
-import { ModrinthApiError } from '@modrinth/api-client'
+import { ApiCallError, ModrinthApiError } from '@modrinth/api-client'
 import type { FileDownloadProvider } from '@modrinth/ui'
 
 import { save } from '@/platform/dialog'
@@ -61,12 +61,15 @@ export function createFileDownload(trackDownload: TrackFileDownload): FileDownlo
 					{ op: saveId, path, url, headers: originHeaders },
 					onProgress,
 				)
-				if (error) throw new ModrinthApiError(error.description)
+				if (error) throw new ApiCallError(0, error.error, error.description)
 				if (response) {
-					throw new ModrinthApiError(`Download failed with status ${response.status}`, {
-						statusCode: response.status,
-						responseData: parseBody(response.body),
-					})
+					// Typed on the answer's error code when it is one of ours.
+					throw ApiCallError.from(
+						new ModrinthApiError(`Download failed with status ${response.status}`, {
+							statusCode: response.status,
+							responseData: parseBody(response.body),
+						}),
+					)
 				}
 			}
 

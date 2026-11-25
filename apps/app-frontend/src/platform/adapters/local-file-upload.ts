@@ -1,4 +1,4 @@
-import { type LocalFileUploader, ModrinthApiError } from '@modrinth/api-client'
+import { ApiCallError, type LocalFileUploader } from '@modrinth/api-client'
 
 import { uploadLocal } from '@/platform/ops'
 import { cancelOp } from '@/platform/ops'
@@ -22,7 +22,8 @@ export function createLocalFileUploader(): LocalFileUploader {
 				({ loaded, total }) =>
 					onProgress({ loaded, total, progress: total > 0 ? loaded / total : 1 }),
 			)
-			if (error || !response) throw new ModrinthApiError(error?.description ?? 'Upload failed')
+			if (error) throw new ApiCallError(0, error.error, error.description)
+			if (!response) throw new ApiCallError(0, 'unknown', 'Upload failed')
 			return response
 		} finally {
 			signal.removeEventListener('abort', cancel)
