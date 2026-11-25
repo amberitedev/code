@@ -1,3 +1,4 @@
+import type { LogEvent } from '@amberite/contracts/engine'
 import { type Ref, ref, shallowRef, triggerRef } from 'vue'
 
 import { detectLogLevel } from '../layouts/shared/console/composables/log-level'
@@ -326,6 +327,12 @@ export function createConsoleState() {
 		addLines(formatLog4jLines(event))
 	}
 
+	/** A live log line as either host's `log` event carries it. */
+	const addLogEvent = (event: LogEvent): void => {
+		if (event.type === 'legacy') addLegacyLog(event.message)
+		else addLog4jEvent(event)
+	}
+
 	const recordWsEvent = (event: unknown): void => {
 		if (!wsEventCaptureEnabled) return
 		wsEventHistory.push(event)
@@ -406,6 +413,7 @@ export function createConsoleState() {
 		addLines,
 		addLog4jEvent,
 		addLegacyLog,
+		addLogEvent,
 		recordWsEvent,
 		getWsEventHistory,
 		setWsEventCaptureEnabled,

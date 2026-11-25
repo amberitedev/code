@@ -174,8 +174,7 @@
 </template>
 
 <script setup lang="ts">
-import { core as coreRoutes } from '@amberite/contracts/core'
-import { instanceContent, instanceFiles } from '@amberite/contracts/engine'
+import { instanceContent } from '@amberite/contracts/engine'
 import { ModrinthApiError } from '@modrinth/api-client'
 import {
 	BoxesIcon,
@@ -223,7 +222,8 @@ import {
 import { defineMessages, useVIntl } from '#ui/composables/i18n'
 import { useServerBackupsQueue } from '#ui/composables/server-backups-queue'
 import { useServerManageCoreRuntime } from '#ui/composables/server-manage-core-runtime'
-import { serverKeys } from '#ui/composables/server-queries'
+import { serverDetailQueryOptions, serverKeys } from '#ui/composables/server-queries'
+import { directoryQueryOptions } from '#ui/layouts/shared/files-tab/providers/instance-files'
 import type { ServerSettingsTabId } from '#ui/layouts/shared/server-settings'
 import {
 	injectModrinthClient,
@@ -303,21 +303,11 @@ const onboardingFlow = injectServerOnboardingFlow(null)
 const serverSettingsModal = ref<InstanceType<typeof ServerSettingsModal> | null>(null)
 const confirmLeaveModal = ref<InstanceType<typeof ConfirmLeaveModal>>()
 
-// Matches the tab pages and the hover prefetches, so opening a server or switching tabs reuses
-// what was just fetched. Changes arrive over the Core's event socket and invalidate these queries.
-const PANEL_STALE_MS = 30_000
-
 const {
 	data: serverData,
 	error: serverQueryError,
 	isLoading: serverLoading,
-} = useQuery({
-	queryKey: serverKeys.detail(props.serverId),
-	queryFn: () => core.call(coreRoutes.GetServer, { params: { id: props.serverId } }),
-	// A Core that does not answer is offline: say so at once instead of retrying for half a minute.
-	retry: false,
-	staleTime: PANEL_STALE_MS,
-})
+} = useQuery(serverDetailQueryOptions(client, props.serverId))
 
 useLoadingBarToken(useReadyState({ isLoading: serverLoading, data: serverData }))
 
@@ -448,15 +438,16 @@ if (typeof window !== 'undefined') {
 // Content and backups are already loaded by this layout; these two tabs fetch on their own, so
 // hovering their link warms the first request.
 function prefetchFiles() {
-	void queryClient.prefetchQuery({
-		queryKey: [...serverKeys.files(props.serverId), ''],
-		queryFn: () =>
-			core.call(instanceFiles.ListInstanceFiles, {
-				params: { id: props.serverId },
-				query: { path: '' },
-			}),
-		staleTime: PANEL_STALE_MS,
-	})
+	void queryClient.prefetchQuery(
+		directoryQueryOptions(
+			{
+				client: core,
+				instanceId: props.serverId,
+				queryKey: (path) => serverKeys.directory(props.serverId, path),
+			},
+			'',
+		),
+	)
 }
 
 const navLinks = computed<Tab[]>(() => [

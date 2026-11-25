@@ -135,7 +135,7 @@ async function show({ serverId, tabIndex, tabId }: ShowOptions) {
 		modal.value?.show()
 		const params = { params: { id: targetServerId } }
 		void queryClient.prefetchQuery({
-			queryKey: ['servers', 'properties', targetServerId],
+			queryKey: serverKeys.properties(targetServerId),
 			queryFn: () => core.call(coreRoutes.GetProperties, params),
 		})
 		void queryClient.prefetchQuery({

@@ -120,11 +120,12 @@ where
 {
     let cfg = &config();
     format!(
-        "{{ method: {}, path: {}, auth: {}, dangerous: {}, body: {}, response: {} }} as Endpoint<{}, {}, {}, {}>",
+        "{{ method: {}, path: {}, auth: {}, dangerous: {}, untimed: {}, body: {}, response: {} }} as Endpoint<{}, {}, {}, {}>",
         json(&E::METHOD),
         json(&E::PATH),
         json(&E::AUTH),
         E::DANGEROUS,
+        E::UNTIMED,
         json(&<E::Body as RequestBody>::KIND),
         json(&<E::Response as ResponseBody>::KIND),
         E::Params::name(cfg),
@@ -321,6 +322,7 @@ export interface Endpoint<P = unknown, Q = unknown, B = unknown, R = unknown> {
 \tpath: string
 \tauth: Auth
 \tdangerous: boolean
+\tuntimed: boolean
 \tbody: BodyKind
 \tresponse: BodyKind
 \treadonly _types?: { params: P; query: Q; body: B; response: R }
@@ -399,7 +401,7 @@ export interface Endpoint<P = unknown, Q = unknown, B = unknown, R = unknown> {
     fn an_endpoint_is_the_object_contract_client_reads() {
         assert_eq!(
             super::endpoint::<ClearCache>(),
-            r#"{ method: "DELETE", path: "/v1/cache", auth: "session", dangerous: true, body: "empty", response: "json" } as Endpoint<null, null, void, number>"#
+            r#"{ method: "DELETE", path: "/v1/cache", auth: "session", dangerous: true, untimed: false, body: "empty", response: "json" } as Endpoint<null, null, void, number>"#
         );
     }
 }

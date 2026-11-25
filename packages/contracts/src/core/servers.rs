@@ -145,13 +145,14 @@ pub struct ServerIcon {
     pub config: Option<IconConfig>,
 }
 
-/// Where a server is in its run, or how its last run ended: `offline` (stopped or never run),
-/// `crashed` or `killed`.
+/// Where a server is in its run, or how its last run ended: `stopped` (or never run), `crashed`
+/// or `killed`. The socket's [`PowerState`](super::PowerState) names the same states, and sends
+/// `killed` as `stopped`, as Modrinth Hosting's has no such state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum ServerPower {
-    Offline,
+    Stopped,
     Starting,
     Running,
     Stopping,

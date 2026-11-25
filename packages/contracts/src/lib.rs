@@ -65,6 +65,9 @@ pub trait Endpoint {
     const AUTH: Auth;
     /// The TypeScript client attaches a fresh ticket, which Core's `Dangerous` extractor requires.
     const DANGEROUS: bool = false;
+    /// A Core answers only once the work is done, which can take any time, so the TypeScript
+    /// client sets no timeout. A Core serves it outside its request timeout.
+    const UNTIMED: bool = false;
     /// Fills the path's `{name}` segments; `()` when it has none.
     type Params: Serialize + DeserializeOwned + Send;
     type Query: Serialize + DeserializeOwned + Send;
@@ -162,25 +165,28 @@ impl<S, R> ResponseBody for Upgrade<S, R> {
 /// }
 /// ```
 ///
-/// A line is `Name: Method "path", Auth, Params, Query, Body => Response`, then `dangerous` when
-/// the route needs a fresh ticket ([`Endpoint::DANGEROUS`]), or for an engine route its
-/// [`Reach`]: `shared` or `client_only`.
+/// A line is `Name: Method "path", Auth, Params, Query, Body => Response`, then its flags:
+/// `dangerous` when the route needs a fresh ticket ([`Endpoint::DANGEROUS`]), `untimed` when a
+/// Core answers it only once done ([`Endpoint::UNTIMED`]), and for an engine route its [`Reach`]:
+/// `shared` or `client_only`.
 #[macro_export]
 macro_rules! endpoints {
     (@dangerous) => { false };
-    (@dangerous dangerous) => { true };
-    (@dangerous shared) => { false };
-    (@dangerous client_only) => { false };
+    (@dangerous dangerous $($rest:ident)*) => { true };
+    (@dangerous $other:ident $($rest:ident)*) => { $crate::endpoints!(@dangerous $($rest)*) };
+    (@untimed) => { false };
+    (@untimed untimed $($rest:ident)*) => { true };
+    (@untimed $other:ident $($rest:ident)*) => { $crate::endpoints!(@untimed $($rest)*) };
     (@reach) => { None };
-    (@reach dangerous) => { None };
-    (@reach shared) => { Some($crate::Reach::Shared) };
-    (@reach client_only) => { Some($crate::Reach::ClientOnly) };
+    (@reach shared $($rest:ident)*) => { Some($crate::Reach::Shared) };
+    (@reach client_only $($rest:ident)*) => { Some($crate::Reach::ClientOnly) };
+    (@reach $other:ident $($rest:ident)*) => { $crate::endpoints!(@reach $($rest)*) };
     (
         $(#[doc = $group_doc:literal])*
         group $group:ident;
         $(
             $(#[doc = $doc:literal])*
-            $name:ident: $method:ident $path:literal, $auth:ident, $params:ty, $query:ty, $body:ty => $response:ty $(, $flag:ident)?;
+            $name:ident: $method:ident $path:literal, $auth:ident, $params:ty, $query:ty, $body:ty => $response:ty $(, $flag:ident)*;
         )+
     ) => {
         $(
@@ -191,7 +197,8 @@ macro_rules! endpoints {
                 const METHOD: $crate::Method = $crate::Method::$method;
                 const PATH: &'static str = $path;
                 const AUTH: $crate::Auth = $crate::Auth::$auth;
-                const DANGEROUS: bool = $crate::endpoints!(@dangerous $($flag)?);
+                const DANGEROUS: bool = $crate::endpoints!(@dangerous $($flag)*);
+                const UNTIMED: bool = $crate::endpoints!(@untimed $($flag)*);
                 type Params = $params;
                 type Query = $query;
                 type Body = $body;
@@ -218,14 +225,15 @@ macro_rules! endpoints {
                 .collect()
         }
 
-        /// Each route's name, method and path, whether it needs a fresh ticket, and where an
-        /// engine route is served.
+        /// Each route's name, method and path, whether it needs a fresh ticket or a Core answers
+        /// it only once done, and where an engine route is served.
         pub const ROUTES: &[$crate::Route] = &[$($crate::Route {
             name: stringify!($name),
             method: $crate::Method::$method,
             path: $path,
-            dangerous: $crate::endpoints!(@dangerous $($flag)?),
-            reach: $crate::endpoints!(@reach $($flag)?),
+            dangerous: $crate::endpoints!(@dangerous $($flag)*),
+            untimed: $crate::endpoints!(@untimed $($flag)*),
+            reach: $crate::endpoints!(@reach $($flag)*),
         }),+];
     };
 }
@@ -237,6 +245,7 @@ pub struct Route {
     pub method: Method,
     pub path: &'static str,
     pub dangerous: bool,
+    pub untimed: bool,
     /// `None` for a route that is not the engine's.
     pub reach: Option<Reach>,
 }

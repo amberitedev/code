@@ -109,6 +109,7 @@ export interface Endpoint<P = unknown, Q = unknown, B = unknown, R = unknown> {
 	path: string
 	auth: Auth
 	dangerous: boolean
+	untimed: boolean
 	body: BodyKind
 	response: BodyKind
 	readonly _types?: { params: P; query: Q; body: B; response: R }

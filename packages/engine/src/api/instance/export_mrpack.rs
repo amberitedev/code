@@ -30,7 +30,7 @@ use std::time::UNIX_EPOCH;
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
-const DEFAULT_SELECTED_EXPORT_PATH_PREFIXES: &[&str] = &[
+pub const DEFAULT_SELECTED_EXPORT_PATH_PREFIXES: &[&str] = &[
     "mods",
     "datapacks",
     "resourcepacks",

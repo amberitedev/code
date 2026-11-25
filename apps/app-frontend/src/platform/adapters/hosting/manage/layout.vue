@@ -46,7 +46,7 @@
 </template>
 
 <script setup lang="ts">
-import { core, type Server } from '@amberite/contracts/core'
+import type { Server } from '@amberite/contracts/core'
 import { ApiCallError } from '@modrinth/api-client'
 import { HistoryIcon, ServerStackIcon, TriangleAlertIcon } from '@modrinth/assets'
 import {
@@ -54,6 +54,8 @@ import {
 	ErrorInformationCard,
 	injectAuth,
 	injectModrinthClient,
+	serverCoreQueryOptions,
+	serverDetailQueryOptions,
 	serverKeys,
 	ServersManageRootLayout,
 	useVIntl,
@@ -92,20 +94,6 @@ const serverId = computed(() => {
 	return Array.isArray(rawId) ? (rawId[0] ?? '') : (rawId ?? '')
 })
 
-// History lives with the share's source, and only its owner sees it (`useServerHistory`).
-const historySource = useServerHistory(serverId)
-const historyTabs = computed(() =>
-	historySource.value
-		? [
-				{
-					label: 'History',
-					href: `/hosting/manage/${serverId.value}/history`,
-					icon: HistoryIcon,
-				},
-			]
-		: [],
-)
-
 function getCachedServerName(id: string): string | undefined {
 	return queryClient
 		.getQueryData<{ servers: Server[] }>(serverKeys.list())
@@ -117,14 +105,10 @@ const {
 	data: coreId,
 	error: coreError,
 	refetch: refetchCore,
-} = useQuery({
-	queryKey: computed(() => ['servers', 'core', serverId.value]),
-	queryFn: async () => (await client.cores.coreOf(serverId.value)).id,
-	enabled: computed(() => Boolean(serverId.value)),
-	// No Core answered, or none has the server: say so at once.
-	retry: false,
-	staleTime: Infinity,
-})
+} = useQuery(() => ({
+	...serverCoreQueryOptions(client, serverId.value),
+	enabled: Boolean(serverId.value),
+}))
 const coreErrorCopy = computed(() =>
 	coreError.value instanceof ApiCallError && coreError.value.code === 'not_found'
 		? { title: 'Server not found', description: 'None of your Cores has this server.' }
@@ -134,21 +118,28 @@ const coreErrorCopy = computed(() =>
 			},
 )
 
-const { data: serverData } = useQuery({
-	queryKey: computed(() => serverKeys.detail(serverId.value)),
-	queryFn: async () =>
-		(await client.cores.serverRoutes(serverId.value)).call(core.GetServer, {
-			params: { id: serverId.value },
-		}),
-	enabled: computed(() => Boolean(serverId.value)),
-	// The panel's own query of this server says when its Core is offline; retrying only delays it.
-	retry: false,
+const { data: serverData } = useQuery(() => ({
+	...serverDetailQueryOptions(client, serverId.value),
+	enabled: Boolean(serverId.value),
 	placeholderData: () =>
 		queryClient
 			.getQueryData<{ servers: Server[] }>(serverKeys.list())
 			?.servers.find((server) => server.server_id === serverId.value),
-	staleTime: 30_000,
-})
+}))
+
+// History lives with the share's source, and only its owner sees it (`useServerHistory`).
+const historySource = useServerHistory(serverData)
+const historyTabs = computed(() =>
+	historySource.value
+		? [
+				{
+					label: 'History',
+					href: `/hosting/manage/${serverId.value}/history`,
+					icon: HistoryIcon,
+				},
+			]
+		: [],
+)
 
 const breadcrumbServerId = ref(serverId.value)
 const breadcrumbLabel = ref(

@@ -8,8 +8,8 @@ contracts::endpoints! {
     group logs;
 
     /// The instance's log files and crash reports, newest first.
-    ListInstanceLogs: Get "/instances/{id}/logs", Session, InstanceRef, LogListing, Empty => Json<Vec<Logs>>, shared;
-    GetInstanceLogOutput: Get "/instances/{id}/logs/{log_type}/{filename}", Session, LogFileRef, (), Empty => Json<CensoredString>, shared;
+    ListInstanceLogs: Get "/instances/{id}/logs", Session, InstanceRef, LogListing, Empty => Json<Vec<Logs>>, shared, untimed;
+    GetInstanceLogOutput: Get "/instances/{id}/logs/{log_type}/{filename}", Session, LogFileRef, (), Empty => Json<CensoredString>, shared, untimed;
     DeleteInstanceLog: Delete "/instances/{id}/logs/{log_type}/{filename}", Session, LogFileRef, (), Empty => Empty, shared;
     /// The running game's buffered output. Later lines arrive as `Log` events.
     GetLiveLog: Get "/instances/{id}/live-log", Session, InstanceRef, (), Empty => Json<CensoredString>, client_only;

@@ -1,6 +1,5 @@
 import { type Endpoint, PROTOCOL_VERSION } from '@amberite/contracts/protocol'
 import { core as coreRoutes, type Health, TICKET_HEADER } from '@amberite/contracts/core'
-import { installs, instanceContent, instanceFiles, logs } from '@amberite/contracts/engine'
 
 import { ContractClient, type ContractTransport, fetchWithProgress } from '../contracts/client'
 import { ApiCallError } from '../contracts/errors'
@@ -8,34 +7,6 @@ import type { AbstractModrinthClient } from '../core/abstract-client'
 
 /** How long a Core call waits for its answer: a Core answers its own routes within 30 seconds. */
 const CORE_TIMEOUT_MS = 35_000
-
-/**
- * Routes a Core answers only once their work is done, which can take any time: the engine's
- * long routes (`long_routes` in `apps/core/src/api/engine_mount.rs`), a push, following an
- * instance, and installing an update. Long ops of a Core's own answer 202 at once instead.
- */
-const UNTIMED = new Set<Endpoint>([
-	instanceContent.GetLinkedModpack,
-	instanceContent.AddProjectFromVersion,
-	instanceContent.InstallProjectWithDependencies,
-	instanceContent.UpdateProject,
-	instanceContent.SwitchProjectVersion,
-	instanceContent.RepairContent,
-	instanceContent.RepairModpack,
-	instanceContent.InstallModpack,
-	instanceContent.UpdateModpackVersion,
-	installs.UpdateInstanceContent,
-	installs.RestoreSharedInstanceVersion,
-	instanceFiles.ReadInstanceFile,
-	instanceFiles.ExtractInstanceZip,
-	instanceFiles.ZipInstanceFiles,
-	instanceFiles.FinalizeInstanceUpload,
-	logs.ListInstanceLogs,
-	logs.GetInstanceLogOutput,
-	coreRoutes.ShareServer,
-	coreRoutes.FollowInstance,
-	coreRoutes.InstallUpdate,
-])
 
 /**
  * How `client.core(id)` reaches a listed Core by default: at the base `cores` routes it
@@ -51,7 +22,8 @@ export function coreSessionTransport(
 	const cores = client.cores
 	return {
 		base: () => cores.url(coreId),
-		timeout: (endpoint) => (UNTIMED.has(endpoint) ? undefined : CORE_TIMEOUT_MS),
+		// A Core answers an untimed route only once its work is done, which can take any time.
+		timeout: (endpoint) => (endpoint.untimed ? undefined : CORE_TIMEOUT_MS),
 		headers: async (endpoint) => {
 			const headers: Record<string, string> = {}
 			if (endpoint.dangerous) headers[TICKET_HEADER] = await cores.ticket(coreId)

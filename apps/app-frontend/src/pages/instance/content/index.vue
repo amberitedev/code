@@ -134,7 +134,6 @@ import { useAppEvent } from '@/composables/use-app-event'
 import { useAppSettings } from '@/composables/use-app-settings.ts'
 import { trackEvent } from '@/helpers/analytics'
 import { get_project_versions, get_version, get_version_many } from '@/helpers/cache.js'
-import { install_bulk_update_content } from '@/helpers/install'
 import {
 	add_project_from_path,
 	get_shared_instance_publish_preview,
@@ -1031,19 +1030,12 @@ async function getDeleteDependencyWarning(items: ContentItem[]) {
 }
 
 const bulkUpdateMutation = useMutation({
-	mutationFn: ({
-		instanceId,
-		updates,
-	}: {
-		instanceId: string
-		updates: Parameters<typeof install_bulk_update_content>[1]
-	}) => install_bulk_update_content(instanceId, updates),
+	mutationFn: content.updateAll,
 	onError: (error) => handleError(error),
 })
 
 async function bulkUpdateSelections(selections: UpdateAllSelection[]) {
 	if (isInstanceBusy.value || bulkUpdateMutation.isPending.value) return
-	const instanceId = instance.value.id
 	const updates = selections.flatMap((selection) => {
 		const item =
 			projects.value.find((project) => getContentItemId(project) === selection.id) ??
@@ -1058,7 +1050,7 @@ async function bulkUpdateSelections(selections: UpdateAllSelection[]) {
 		return [{ project_path: item.file_path, version_id: selection.version.id }]
 	})
 	if (!updates.length) return
-	await bulkUpdateMutation.mutateAsync({ instanceId, updates })
+	await bulkUpdateMutation.mutateAsync(updates)
 }
 
 async function updateProject(mod: ContentItem) {

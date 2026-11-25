@@ -81,8 +81,9 @@ import { computed, ref, useTemplateRef, watch } from 'vue'
 import { Button } from '#ui/components/base/buttons'
 import ServerModpackUploadModal from '#ui/components/servers/ServerModpackUploadModal.vue'
 import type { ServerPlatform } from '#ui/composables/server-installation-tracker'
-import { serverKeys } from '#ui/composables/server-queries'
+import { serverContentQueryKeys, serverKeys } from '#ui/composables/server-queries'
 import { serverLoader, setUpServer } from '#ui/composables/server-setup'
+import { instanceContentQueries } from '#ui/layouts/shared/content-tab/providers/instance-content'
 import { isDisabledFor } from '#ui/layouts/shared/content-tab/utils/addon-environment'
 
 const debug = useDebugLogger('LoaderPage')
@@ -200,17 +201,17 @@ async function invalidateServerState() {
 	debug('invalidateServerState: complete')
 }
 
-const packQuery = useQuery({
-	queryKey: [...contentQueryKey, 'pack'],
-	queryFn: () =>
-		core.call(instanceContent.GetLinkedModpack, { params: { id: serverId }, query: {} }),
-	staleTime: 30_000,
+const contentQueries = instanceContentQueries({
+	client: core,
+	instanceId: serverId,
+	queryKeys: serverContentQueryKeys,
 })
+const contentQuery = useQuery(contentQueries.content())
 
 const requiresInstallation = computed(() => installation.value?.status === 'failed')
 
 /** The Modrinth modpack the server runs. */
-const modpack = computed(() => packQuery.data.value ?? null)
+const modpack = computed(() => contentQuery.data.value?.modpack ?? null)
 /** The App instance the server follows, whose owner pushes its versions. */
 const follow = computed(() => server.value?.linked_instance)
 
@@ -433,10 +434,7 @@ async function uploadLocalModpackWithSoftOverride(file: File) {
 
 /** The server's own files that run on the server or players' games. */
 async function activeContent() {
-	const items = await core.call(instanceContent.ListContentItems, {
-		params: { id: serverId },
-		query: {},
-	})
+	const { items } = await queryClient.fetchQuery(contentQueries.content())
 	return items.filter((item) => !isDisabledFor(item, 'server') || !isDisabledFor(item, 'player'))
 }
 
@@ -456,7 +454,7 @@ provideInstallationSettings({
 		serverSettings.closeModal?.()
 	},
 	onGameVersionHover: handleGameVersionHover,
-	loading: computed(() => packQuery.isLoading.value),
+	loading: computed(() => contentQuery.isLoading.value),
 	installationInfo: computed(() => {
 		const rawLoader = server.value?.loader
 		const loader = rawLoader ? formatLoaderLabel(rawLoader) : null

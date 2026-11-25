@@ -1,8 +1,7 @@
-import type { InvitePlayersUser } from '@modrinth/ui'
+import { type InvitePlayersUser, useSharedInstanceEvent } from '@modrinth/ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, type Ref, ref } from 'vue'
 
-import { useSharedInstanceEvent } from '@/composables/use-shared-instance-event'
 import { get_user_many } from '@/helpers/cache.js'
 import {
 	get_shared_instance_users,

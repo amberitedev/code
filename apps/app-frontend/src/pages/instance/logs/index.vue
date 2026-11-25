@@ -91,12 +91,7 @@ void liveConsoleHydration.then(() => {
 
 useAppEvent('log', (payload) => {
 	if (payload.instance_id !== instanceId.value || !liveConsoleHydrated) return
-
-	if (payload.type === 'log4j') {
-		liveConsole.addLog4jEvent(payload)
-	} else if (payload.type === 'legacy') {
-		liveConsole.addLegacyLog(payload.message)
-	}
+	liveConsole.addLogEvent(payload)
 })
 
 // The buffer holds this run's whole live log, so it replaces lines a resync lost.

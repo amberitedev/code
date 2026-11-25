@@ -24,7 +24,6 @@ use engine::{
     access::InstanceAccess,
     data::ResolveContentPlan,
     endpoints::{content::*, files::*, install::*, logs::*, sharing::*},
-    instance::SharedInstancePublishPreview,
     routes::{self as engine_routes, api_error},
 };
 use futures::future::BoxFuture;
@@ -83,7 +82,9 @@ pub fn routes<M: Mount<Shared>>(mount: M) -> M {
         .endpoint::<ListLinkedModpackContent, _, _>(list_linked_modpack_content)
         .endpoint::<RefreshContentUpdates, _, _>(refresh_content_updates)
         .endpoint::<GetSharedInstanceHistory, _, _>(get_shared_instance_history)
-        .endpoint::<GetSharedInstancePublishPreview, _, _>(publish_preview)
+        .endpoint::<GetSharedInstancePublishPreview, _, _>(
+            get_shared_instance_publish_preview,
+        )
         .endpoint::<ToggleProject, _, _>(change(EDIT, toggle_project))
         .endpoint::<RemoveProject, _, _>(change(EDIT, remove_project))
         .endpoint::<SetSide, _, _>(change(EDIT, set_side))
@@ -131,8 +132,8 @@ pub fn routes<M: Mount<Shared>>(mount: M) -> M {
         .endpoint::<DeleteInstanceLog, _, _>(change(FILE, delete_instance_log))
 }
 
-/// Routes that download, or back the world up, first, or go through whole files and folders, which
-/// can take longer than the request timeout, and reads at the same paths.
+/// The `untimed` routes: they download, or back the world up, first, or go through whole files and
+/// folders, which can take longer than the request timeout, and reads at the same paths.
 pub fn long_routes<M: Mount<Shared>>(mount: M) -> M {
     use engine_routes::*;
     mount
@@ -204,7 +205,7 @@ async fn extract_zip(
 
 /// [`ExportModpack`](contracts::core::ExportModpack): the server's content as an `.mrpack`, written
 /// to its staging folder, streamed, then removed. A server exports what upstream's export selects
-/// by default: its content folders and `config/`.
+/// by default, with its plugins and its world's datapacks.
 pub(super) async fn export_mrpack(
     caller: Caller,
     State(state): State<Arc<CoreState>>,
@@ -225,9 +226,10 @@ pub(super) async fn export_mrpack(
         engine::sandbox::Folder::open(&state.servers.paths().server(&id))
             .map_err(internal)?
             .level_name();
-    let included = ["mods", "plugins", "config"]
-        .map(str::to_owned)
-        .into_iter()
+    let included = engine::instance::DEFAULT_SELECTED_EXPORT_PATH_PREFIXES
+        .iter()
+        .chain(&["plugins"])
+        .map(|path| (*path).to_owned())
         .chain([format!("{level}/datapacks")])
         .collect();
     let exported = engine::instance::export_mrpack(
@@ -247,19 +249,6 @@ pub(super) async fn export_mrpack(
     }
     let file = std::fs::File::open(&path).map_err(internal)?;
     Ok(zip_response(file, &server.name, "mrpack", Some(path)))
-}
-
-/// What a push would change. The engine's route is for the share's owner, and on a Core the owner
-/// is the Core.
-async fn publish_preview(
-    State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess,
-    _: Req<GetSharedInstancePublishPreview>,
-) -> Result<Json<Option<SharedInstancePublishPreview>>, ApiError> {
-    engine::instance::get_shared_instance_publish_preview(&engine, &instance.id)
-        .await
-        .map(Json)
-        .map_err(api_error)
 }
 
 /// The engine's route answers before the content is written. Here the answer waits for it, so the
@@ -475,14 +464,14 @@ mod tests {
 
     /// What a mount function mounts.
     #[derive(Default)]
-    struct Mounted(Vec<(Method, &'static str)>);
+    struct Mounted(Vec<(Method, &'static str, bool)>);
 
     impl Mount<Shared> for Mounted {
         fn endpoint<E: Endpoint, H: Handler<T, Shared>, T: 'static>(
             mut self,
             _: H,
         ) -> Self {
-            self.0.push((E::METHOD, E::PATH));
+            self.0.push((E::METHOD, E::PATH, E::UNTIMED));
             self
         }
     }
@@ -498,7 +487,7 @@ mod tests {
         ]
         .into_iter()
         .flat_map(|mount| mount(Mounted::default()).0)
-        .map(|(method, path)| {
+        .map(|(method, path, _)| {
             engine_routes()
                 .find(|route| route.method == method && route.path == path)
                 .map_or(path, |route| route.name)
@@ -509,5 +498,18 @@ mod tests {
             .map(|route| route.name)
             .collect();
         assert_eq!(mounted, shared);
+    }
+
+    /// The TypeScript client times every call but the `untimed` ones out.
+    #[test]
+    fn the_routes_outside_the_request_timeout_are_the_untimed_ones() {
+        let untimed = |mount: fn(Mounted) -> Mounted| {
+            mount(Mounted::default())
+                .0
+                .into_iter()
+                .map(|(_, _, untimed)| untimed)
+        };
+        assert!(untimed(super::routes::<Mounted>).all(|untimed| !untimed));
+        assert!(untimed(super::long_routes::<Mounted>).all(|untimed| untimed));
     }
 }

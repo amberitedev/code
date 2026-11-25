@@ -77,7 +77,7 @@ import TeleportOverflowMenu from '#ui/components/base/buttons/TeleportOverflowMe
 import { type IconConfig, renderIcon } from '#ui/components/base/icon-editor-modal'
 import IconEditorModal from '#ui/components/base/icon-editor-modal/index.vue'
 import ServerIcon from '#ui/components/servers/icons/ServerIcon.vue'
-import { serverIconKeys, serverKeys, useServerIcon } from '#ui/composables'
+import { serverKeys, useServerIcon } from '#ui/composables'
 import { useVIntl } from '#ui/composables/i18n'
 import { injectModrinthServerContext, injectNotificationManager } from '#ui/providers'
 import { commonMessages } from '#ui/utils/common-messages'
@@ -137,12 +137,9 @@ async function saveRecentConfig(config: IconConfig) {
 	}
 }
 
-/** The server's icon changed: read it, and the server that names it, again. */
+/** The server's icon changed: read the server that names it again. */
 async function iconChanged() {
-	await Promise.all([
-		queryClient.invalidateQueries({ queryKey: serverIconKeys.metadata(serverId) }),
-		queryClient.invalidateQueries({ queryKey: serverKeys.detail(serverId) }),
-	])
+	await queryClient.invalidateQueries({ queryKey: serverKeys.detail(serverId) })
 }
 
 function openIconEditor() {

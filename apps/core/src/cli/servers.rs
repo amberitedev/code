@@ -479,7 +479,7 @@ fn pick(servers: Vec<Server>, query: &str) -> Result<Server> {
 
 fn state_name(state: ServerPower) -> &'static str {
     match state {
-        ServerPower::Offline => "stopped",
+        ServerPower::Stopped => "stopped",
         ServerPower::Starting => "starting",
         ServerPower::Running => "running",
         ServerPower::Stopping => "stopping",
@@ -620,7 +620,7 @@ mod tests {
             "loader": null, "loader_version": null, "mc_version": null, "upstream": null,
             "flows": {"intro": true}, "icon": null,
             "net": {"ip": null, "port": 25565, "outside": null, "game_port": 25565},
-            "power_state": "offline", "linked_instance": null, "shared_instance_id": null,
+            "power_state": "stopped", "linked_instance": null, "shared_instance_id": null,
             "reachability": null, "players": null, "memory_mb": 2048,
             "created_at": "1970-01-01T00:00:00Z", "update_channel": "release",
             "eula_accepted": false
