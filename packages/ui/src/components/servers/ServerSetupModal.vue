@@ -116,6 +116,8 @@ async function onFlowComplete(ctx: CreationFlowContextValue) {
 		} else if (ctx.setupType.value === 'modpack' && ctx.modpackFile.value) {
 			debug('onFlowComplete: mrpack upload path')
 			const file = ctx.modpackFile.value
+			// Before the upload: the Core's install job starts before it answers, and may end before.
+			serverContext.beginInstallation({ type: 'local_modpack', filename: file.name })
 			await ctx.trackUpload((onUploadProgress) =>
 				setUpServer(
 					client,
@@ -125,7 +127,6 @@ async function onFlowComplete(ctx: CreationFlowContextValue) {
 					{ properties: ctx.buildProperties(), onUploadProgress },
 				),
 			)
-			serverContext.beginInstallation({ type: 'local_modpack', filename: file.name })
 			emitReinstall()
 		} else if (ctx.setupType.value === 'modpack' && ctx.modpackSelection.value) {
 			const { projectId, versionId } = ctx.modpackSelection.value

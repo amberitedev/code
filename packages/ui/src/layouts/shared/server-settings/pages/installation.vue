@@ -399,6 +399,8 @@ function rollbackOptimisticInstallation(snapshot: InstallationCacheSnapshot) {
 
 async function uploadLocalModpackWithSoftOverride(file: File) {
 	modpackUploadProgress.value = { loaded: 0, total: 0, progress: 0 }
+	// Before the upload: the Core's install job starts before it answers, and may end before.
+	beginInstallation({ type: 'local_modpack', filename: file.name })
 	try {
 		await setUpServer(
 			client,
@@ -408,6 +410,7 @@ async function uploadLocalModpackWithSoftOverride(file: File) {
 			{ onUploadProgress: (progress) => (modpackUploadProgress.value = progress) },
 		)
 	} catch (err) {
+		cancelOptimisticInstallation()
 		emit('reinstall-failed')
 		addNotification({
 			type: 'error',
@@ -425,10 +428,6 @@ async function uploadLocalModpackWithSoftOverride(file: File) {
 		modpackUploadProgress.value = null
 	}
 	modpackUploadModal.value?.hide()
-	beginInstallation({
-		type: 'local_modpack',
-		filename: file.name,
-	})
 	emit('reinstall')
 }
 
@@ -626,11 +625,13 @@ provideInstallationSettings({
 			})
 		} catch (err) {
 			debug('repair: failed', err)
-			cancelOptimisticInstallation()
 			addNotification({
 				type: 'error',
 				text: err instanceof Error ? err.message : formatMessage(messages.failedToRepair),
 			})
+		} finally {
+			// A repair answers once done and runs no install job to end what began here.
+			cancelOptimisticInstallation()
 		}
 	},
 
