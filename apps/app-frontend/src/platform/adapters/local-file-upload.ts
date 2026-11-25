@@ -1,6 +1,6 @@
 import { type LocalFileUploader, ModrinthApiError } from '@modrinth/api-client'
 
-import { uploadLocal } from '@/platform/app-lib/files/commands'
+import { uploadLocal } from '@/platform/ops'
 import { cancelOp } from '@/platform/ops'
 
 /** Uploads local files from the Rust side, streaming them from disk. */

@@ -1,80 +1,68 @@
 <script setup lang="ts">
-import { injectModrinthClient, injectNotificationManager, serverKeys } from '@modrinth/ui'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
+import { injectModrinthServerContext, injectNotificationManager, serverKeys } from '@modrinth/ui'
+import { useQueryClient } from '@tanstack/vue-query'
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 
 import ShareHistory from '@/features/share-history/share-history.vue'
 import { useServerHistory } from '@/features/share-history/use-server-history'
-import { getErrorMessage, install_get_shared_instance_history } from '@/helpers/install'
+import { useShareHistory } from '@/features/share-history/use-share-history'
+import { getErrorMessage } from '@/helpers/install'
+import { apiClient } from '@/platform/modrinth-client'
 
 // A server's History tab. A server-first server's history is on its Core, which restores and
 // deletes. A linked server shows its instance's history from this App, read-only; restoring and
 // pushing happen on the instance.
 
 const route = useRoute()
-const client = injectModrinthClient()
 const queryClient = useQueryClient()
 const { addNotification } = injectNotificationManager()
+const { core, server } = injectModrinthServerContext()
 
 const serverId = computed(() => String(route.params.id ?? ''))
 const source = useServerHistory(serverId)
-const historyKey = computed(() => serverKeys.shareHistory(serverId.value))
-
-const history = useQuery({
-	queryKey: computed(() => [...historyKey.value, source.value?.source] as const),
-	queryFn: async () => {
-		const from = source.value!
-		if (from.source === 'server')
-			return client.archon.content_v1.getShareHistory(from.serverId, from.worldId)
-		// Not on this computer, or not shared from it: nothing to show.
-		return install_get_shared_instance_history(from.instanceId).catch(() => [])
-	},
-	enabled: () => !!source.value,
-	staleTime: 0,
+const { history, restore, remove } = useShareHistory(() => {
+	const from = source.value
+	if (!from) return null
+	return from.source === 'server'
+		? { client: core, instanceId: from.serverId }
+		: { client: apiClient.local, instanceId: from.instanceId }
 })
 
-/** Runs `change` on the server's Core, then reloads what it changed. */
-function useServerChange(
-	change: (serverId: string, worldId: string, version: number) => Promise<void>,
-	title: string,
-) {
-	return useMutation({
-		mutationFn: (version: number) => {
-			const from = source.value
-			if (from?.source !== 'server') throw new Error('This server does not manage its history.')
-			return change(from.serverId, from.worldId, version)
-		},
-		onError: (cause) => {
-			console.error(title, cause)
-			addNotification({ type: 'error', title, text: getErrorMessage(cause) })
-		},
-		onSettled: () =>
-			Promise.all([
-				queryClient.invalidateQueries({ queryKey: historyKey.value }),
-				queryClient.invalidateQueries({ queryKey: serverKeys.content(serverId.value) }),
-				queryClient.invalidateQueries({ queryKey: serverKeys.detailV1(serverId.value) }),
-				queryClient.invalidateQueries({ queryKey: serverKeys.shareDiff(serverId.value) }),
-			]),
+function reportError(title: string) {
+	return (cause: unknown) => {
+		console.error(title, cause)
+		addNotification({ type: 'error', title, text: getErrorMessage(cause) })
+	}
+}
+
+/** What a change of the server's history changes besides it. */
+function reloadServer() {
+	return Promise.all([
+		queryClient.invalidateQueries({ queryKey: serverKeys.content(serverId.value) }),
+		queryClient.invalidateQueries({ queryKey: serverKeys.detailV1(serverId.value) }),
+		queryClient.invalidateQueries({ queryKey: serverKeys.shareDiff(serverId.value) }),
+	])
+}
+
+function restoreVersion(version: number) {
+	restore.mutate(version, {
+		onError: reportError('Could not restore the version'),
+		onSettled: reloadServer,
 	})
 }
-const restore = useServerChange(
-	(id, world, version) => client.archon.content_v1.restoreShareVersion(id, world, version),
-	'Could not restore the version',
-)
-const remove = useServerChange(
-	(id, world, version) => client.archon.content_v1.deleteShareVersion(id, world, version),
-	'Could not delete the version',
-)
+
+function deleteVersion(version: number) {
+	remove.mutate(version, {
+		onError: reportError('Could not delete the version'),
+		onSettled: reloadServer,
+	})
+}
+
 // A restore onto another loader or pack goes on in the background, holding the server, which
 // reports itself installing meanwhile.
-const server = useQuery({
-	queryKey: computed(() => serverKeys.detail(serverId.value)),
-	queryFn: () => client.archon.servers_v0.get(serverId.value),
-})
 const busy = computed(
-	() =>
-		restore.isPending.value || remove.isPending.value || server.data.value?.status === 'installing',
+	() => restore.isPending.value || remove.isPending.value || server.value?.status === 'installing',
 )
 </script>
 
@@ -86,7 +74,7 @@ const busy = computed(
 		:editable="source.source === 'server'"
 		:busy="busy"
 		subject="server"
-		@restore="restore.mutate"
-		@delete="remove.mutate"
+		@restore="restoreVersion"
+		@delete="deleteVersion"
 	/>
 </template>

@@ -27,6 +27,7 @@ type ConnectSocketOptions = {
 
 type UseServerManageCoreRuntimeOptions = {
 	serverId: ReadableRef<string>
+	coreId: string
 	worldId: ReadableRef<string | null>
 	server: ReadableRef<Archon.Servers.v0.Server | null | undefined>
 	serverFull?: ReadableRef<Archon.Servers.v1.ServerFull | null | undefined>
@@ -441,6 +442,8 @@ export function useServerManageCoreRuntime(options: UseServerManageCoreRuntimeOp
 		get serverId() {
 			return options.serverId.value
 		},
+		coreId: options.coreId,
+		core: client.core(options.coreId),
 		worldId: options.worldId as Ref<string | null>,
 		server: options.server as Ref<Archon.Servers.v0.Server>,
 		serverFull,

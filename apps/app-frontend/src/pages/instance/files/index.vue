@@ -1,44 +1,33 @@
 <script setup lang="ts">
-import { ApiCallError } from '@modrinth/api-client'
-import type { EditingFile, FileItem, UploadState } from '@modrinth/ui'
 import {
 	commonMessages,
 	defineMessages,
 	FilePageLayout,
+	type FilesFailure,
 	injectNotificationManager,
 	provideFileManager,
 	ReadyTransition,
-	useDebugLogger,
+	useInstanceFiles,
 	useVIntl,
 } from '@modrinth/ui'
-import { useQuery, useQueryClient } from '@tanstack/vue-query'
+import { useQuery } from '@tanstack/vue-query'
 import { computed, ref, watch } from 'vue'
 
 import { useAppEvent } from '@/composables/use-app-event'
 import { get_full_path } from '@/helpers/instance'
 import { highlightInFolder } from '@/helpers/utils'
-import {
-	createInstanceDirectory,
-	deleteInstanceFile,
-	extractInstanceZip,
-	listInstanceFiles,
-	moveInstanceFile,
-	readInstanceFile,
-	saveInstanceFileAs,
-	writeInstanceFile,
-} from '@/platform/app-lib/files/commands'
 import { save } from '@/platform/dialog'
+import { apiClient } from '@/platform/modrinth-client'
+import { saveInstanceFileAs } from '@/platform/ops'
 
 import { injectInstancePage } from '../instance-context'
 import { instanceKeys } from '../query-options'
 
 const instancePage = injectInstancePage()
 const instanceId = instancePage.instanceId
-const queryClient = useQueryClient()
 
 const { formatMessage } = useVIntl()
 const { addNotification } = injectNotificationManager()
-const debug = useDebugLogger('Files')
 
 const messages = defineMessages({
 	readOnly: {
@@ -55,181 +44,54 @@ const messages = defineMessages({
 	},
 })
 
+const failureTitles = {
+	create: commonMessages.createFailedLabel,
+	rename: commonMessages.renameFailedLabel,
+	move: commonMessages.moveFailedLabel,
+	delete: commonMessages.deleteFailedLabel,
+	upload: commonMessages.uploadFailedLabel,
+	extract: commonMessages.extractFailedLabel,
+	write: commonMessages.uploadFailedLabel,
+	zip: commonMessages.createFailedLabel,
+} satisfies Record<FilesFailure, unknown>
+
 // Only joins paths for display and Open in folder, so the listing never waits on it.
 const instanceRootQuery = useQuery(
 	computed(() => ({
-		queryKey: instanceKeys.rootPath(instancePage.instanceId.value),
+		queryKey: instanceKeys.rootPath(instanceId.value),
 		networkMode: 'always' as const,
-		queryFn: () => get_full_path(instancePage.instanceId.value),
-		enabled: !!instancePage.instanceId.value,
+		queryFn: () => get_full_path(instanceId.value),
+		enabled: !!instanceId.value,
 		staleTime: Infinity,
 	})),
 )
 const instanceRoot = computed(() => instanceRootQuery.data.value ?? '')
-const items = ref<FileItem[]>([])
-const loading = ref(true)
-const error = ref<Error | null>(null)
+
 const currentPath = ref('')
-const editingFile = ref<EditingFile | null>(null)
+const files = useInstanceFiles({
+	client: apiClient.local,
+	instanceId,
+	currentPath,
+	queryKey: (path) => instanceKeys.files(instanceId.value, path),
+	queryKeyPrefix: () => [...instanceKeys.detail(instanceId.value), 'files'],
+	onFailure: (failure, error) =>
+		addNotification({
+			title: formatMessage(failureTitles[failure]),
+			text: error instanceof Error ? error.message : '',
+			type: 'error',
+		}),
+})
 
-debug('setup: start, instance.id =', instanceId.value)
-
-async function listDirectory(dirPath: string): Promise<FileItem[]> {
-	return listInstanceFiles(instanceId.value, dirPath)
-}
-
+// `mods/` and the content the engine manages are hard links into the content store.
 function isReadOnly(path: string): boolean {
 	const normalized = path.startsWith('/') ? path.slice(1) : path
 	return (
 		normalized.split('/')[0].toLowerCase() === 'mods' ||
-		items.value.some((item) => item.path === normalized && item.readOnly === true)
+		files.items.value.some((item) => item.path === normalized && item.readOnly === true)
 	)
 }
 
-function directoryQueryOptions(dirPath: string) {
-	return {
-		queryKey: instanceKeys.files(instancePage.instanceId.value, dirPath),
-		networkMode: 'always' as const,
-		queryFn: () => listDirectory(dirPath),
-		staleTime: 30_000,
-	}
-}
-
-// A cached listing shows at once. Opening the tab always re-reads it in the background, because
-// files change outside this tab (content installs, the game itself).
-const directoryQuery = useQuery(
-	computed(() => ({
-		...directoryQueryOptions(currentPath.value),
-		enabled: !!instanceId.value,
-		refetchOnMount: 'always' as const,
-	})),
-)
-/** True until the first directory listing for this instance is available (initial load only). */
-const firstPaintPending = ref(directoryQuery.data.value === undefined)
-
-watch(
-	directoryQuery.data,
-	(data) => {
-		if (!data) return
-		items.value = data
-		firstPaintPending.value = false
-	},
-	{ immediate: true },
-)
-watch(directoryQuery.isFetching, (fetching) => {
-	loading.value = fetching
-})
-watch(directoryQuery.error, (queryError) => {
-	error.value = queryError
-	if (queryError) {
-		items.value = []
-		firstPaintPending.value = false
-	}
-})
-
-// Marks every cached folder of this instance stale and re-reads the open one, so a folder changed
-// by a move or an extract is read again when it is opened.
-async function refresh() {
-	debug('refresh: called, currentPath =', currentPath.value, 'instanceRoot =', instanceRoot.value)
-	await queryClient.invalidateQueries({
-		queryKey: [...instanceKeys.detail(instanceId.value), 'files'],
-	})
-}
-
-function toDirectoryPath(path: string) {
-	return path.startsWith('/') ? path.slice(1) : path
-}
-
-// Changing the path switches the query key, which loads the folder unless a fresh copy is cached.
-function navigateTo(path: string) {
-	debug('navigateTo:', path)
-	currentPath.value = toDirectoryPath(path)
-}
-
-function prefetchDirectory(path: string) {
-	void queryClient.prefetchQuery(directoryQueryOptions(toDirectoryPath(path)))
-}
-
-function startEditing(file: EditingFile) {
-	editingFile.value = file
-}
-
-function stopEditing() {
-	editingFile.value = null
-}
-
-async function handleCreateItem(name: string, type: 'file' | 'directory') {
-	const targetPath = currentPath.value ? `${currentPath.value}/${name}` : name
-	try {
-		if (type === 'directory') {
-			await createInstanceDirectory(instanceId.value, targetPath)
-		} else {
-			await writeInstanceFile(instanceId.value, targetPath, new Blob(), true)
-		}
-		await refresh()
-	} catch (e) {
-		addNotification({
-			title: formatMessage(commonMessages.createFailedLabel),
-			text: e instanceof Error ? e.message : '',
-			type: 'error',
-		})
-	}
-}
-
-async function handleRenameItem(path: string, newName: string) {
-	const parentDir = path.includes('/') ? path.substring(0, path.lastIndexOf('/')) : ''
-	const newPath = parentDir ? `${parentDir}/${newName}` : newName
-	try {
-		await moveInstanceFile(instanceId.value, path, newPath)
-		await refresh()
-	} catch (e) {
-		addNotification({
-			title: formatMessage(commonMessages.renameFailedLabel),
-			text: e instanceof Error ? e.message : '',
-			type: 'error',
-		})
-	}
-}
-
-async function handleMoveItem(source: string, destination: string) {
-	try {
-		await moveInstanceFile(instanceId.value, source, destination)
-		await refresh()
-	} catch (e) {
-		addNotification({
-			title: formatMessage(commonMessages.moveFailedLabel),
-			text: e instanceof Error ? e.message : '',
-			type: 'error',
-		})
-	}
-}
-
-async function handleDeleteItem(path: string, recursive: boolean) {
-	try {
-		await deleteInstanceFile(instanceId.value, path, recursive)
-		await refresh()
-	} catch (e) {
-		addNotification({
-			title: formatMessage(commonMessages.deleteFailedLabel),
-			text: e instanceof Error ? e.message : '',
-			type: 'error',
-		})
-	}
-}
-
-async function handleReadFile(path: string): Promise<string> {
-	return (await readInstanceFile(instanceId.value, path)).text()
-}
-
-async function handleReadFileAsBlob(path: string): Promise<Blob> {
-	return readInstanceFile(instanceId.value, path)
-}
-
-async function handleWriteFile(path: string, content: string) {
-	await writeInstanceFile(instanceId.value, path, new Blob([content]))
-}
-
-async function handleDownloadFile(path: string, fileName: string) {
+async function downloadFile(path: string, fileName: string) {
 	const destination = await save({ defaultPath: fileName })
 	if (!destination) return
 	const { error } = await saveInstanceFileAs({
@@ -241,113 +103,39 @@ async function handleDownloadFile(path: string, fileName: string) {
 	if (error) throw new Error(error.description)
 }
 
-const uploadState = ref<UploadState>({
-	isUploading: false,
-	currentFileName: null,
-	currentFileProgress: 0,
-	uploadedBytes: 0,
-	totalBytes: 0,
-	completedFiles: 0,
-	totalFiles: 0,
-})
-
-/** Aborts the upload running now, if any. */
-let uploading: AbortController | undefined
-
-async function handleUploadFiles(files: File[]) {
-	if (files.length === 0) return
-	const abort = (uploading = new AbortController())
-
-	uploadState.value = {
-		isUploading: true,
-		currentFileName: '',
-		currentFileProgress: 0,
-		uploadedBytes: 0,
-		totalBytes: files.reduce((sum, f) => sum + f.size, 0),
-		completedFiles: 0,
-		totalFiles: files.length,
-	}
-	try {
-		for (const file of files) {
-			const sent = uploadState.value.uploadedBytes
-			uploadState.value.currentFileName = file.name
-			uploadState.value.currentFileProgress = 0
-			const targetPath = currentPath.value ? `${currentPath.value}/${file.name}` : file.name
-			await writeInstanceFile(instanceId.value, targetPath, file, false, {
-				signal: abort.signal,
-				onUploadProgress: ({ loaded, progress }) => {
-					uploadState.value.currentFileProgress = progress
-					uploadState.value.uploadedBytes = sent + loaded
-				},
-			})
-			uploadState.value.completedFiles++
-			uploadState.value.uploadedBytes = sent + file.size
-			uploadState.value.currentFileProgress = 1
-		}
-	} catch (e) {
-		if (e instanceof ApiCallError && e.code === 'cancelled') return
-		addNotification({
-			title: formatMessage(commonMessages.uploadFailedLabel),
-			text: e instanceof Error ? e.message : '',
-			type: 'error',
-		})
-	} finally {
-		if (uploading === abort) uploading = undefined
-		uploadState.value.isUploading = false
-		await refresh()
-	}
-}
-
-async function handleExtractFile(path: string, override: boolean, dry: boolean) {
-	try {
-		return await extractInstanceZip(instanceId.value, path, override, dry)
-	} catch (e) {
-		addNotification({
-			title: formatMessage(commonMessages.extractFailedLabel),
-			text: e instanceof Error ? e.message : '',
-			type: 'error',
-		})
-	}
-}
-
 useAppEvent('instance', async (event) => {
-	debug('app event: instance =', event.event, 'path =', event.instance_id)
-	if (event.instance_id === instanceId.value && event.event === 'synced') {
-		debug('app event: synced instance matched, calling refresh')
-		await refresh()
-	}
+	if (event.instance_id === instanceId.value && event.event === 'synced') await files.refresh()
 })
 
 watch(instanceId, () => {
-	debug('watch instance.id: changed to', instanceId.value)
 	currentPath.value = ''
 })
 
 provideFileManager({
 	isReadOnly,
 	readOnlyReason: computed(() => formatMessage(messages.readOnly)),
-	items,
-	loading,
-	error,
+	items: files.items,
+	loading: files.loading,
+	error: files.error,
 	currentPath,
-	navigateTo,
-	prefetchDirectory,
-	editingFile,
-	startEditing,
-	stopEditing,
-	createItem: handleCreateItem,
-	renameItem: handleRenameItem,
-	moveItem: handleMoveItem,
-	deleteItem: handleDeleteItem,
-	readFile: handleReadFile,
-	readFileAsBlob: handleReadFileAsBlob,
-	writeFile: handleWriteFile,
-	downloadFile: handleDownloadFile,
-	uploadFiles: handleUploadFiles,
-	cancelUpload: () => uploading?.abort(),
-	uploadState,
-	extractFile: handleExtractFile,
-	refresh,
+	navigateTo: files.navigateTo,
+	prefetchDirectory: files.prefetchDirectory,
+	editingFile: files.editingFile,
+	startEditing: files.startEditing,
+	stopEditing: files.stopEditing,
+	createItem: files.createItem,
+	renameItem: files.renameItem,
+	moveItem: files.moveItem,
+	deleteItem: files.deleteItem,
+	readFile: files.readFile,
+	readFileAsBlob: files.readFileAsBlob,
+	writeFile: files.writeFile,
+	downloadFile,
+	uploadFiles: files.uploadFiles,
+	cancelUpload: files.cancelUpload,
+	uploadState: files.uploadState,
+	extractFile: files.extractFile,
+	refresh: files.refresh,
 	basePath: instanceRoot,
 	openInFolder: (path: string) => highlightInFolder(path),
 	downloadButtonLabel: formatMessage(messages.saveAs),
@@ -357,7 +145,7 @@ provideFileManager({
 </script>
 
 <template>
-	<ReadyTransition :pending="firstPaintPending">
+	<ReadyTransition :pending="files.firstPaintPending.value">
 		<div>
 			<FilePageLayout :show-refresh-button="true" />
 		</div>

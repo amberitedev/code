@@ -1054,7 +1054,6 @@ useAppEvent('process', (event) => {
 	if (event.instance_id !== instanceId.value) return
 	if (event.event === 'finished') {
 		queryClient.setQueryData(instanceKeys.processes(event.instance_id), [])
-		useInstanceConsole(event.instance_id).invalidate()
 		void queryClient.invalidateQueries({ queryKey: instanceKeys.logs(event.instance_id) })
 	} else if (event.event === 'launched') {
 		queryClient.setQueryData(instanceKeys.processes(event.instance_id), [true])

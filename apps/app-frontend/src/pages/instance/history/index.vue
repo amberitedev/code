@@ -1,11 +1,6 @@
 <script setup lang="ts">
-import {
-	injectModrinthClient,
-	injectNotificationManager,
-	SegmentedBar,
-	useFormatBytes,
-} from '@modrinth/ui'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
+import { injectNotificationManager, SegmentedBar, useFormatBytes } from '@modrinth/ui'
+import { useQueryClient } from '@tanstack/vue-query'
 import { computed, watch } from 'vue'
 
 import {
@@ -19,11 +14,11 @@ import {
 import ShareHistory from '@/features/share-history/share-history.vue'
 import { usePlayInstanceServer } from '@/features/share-history/use-play-instance-server'
 import {
-	getErrorMessage,
-	install_get_shared_instance_history,
-	install_restore_shared_instance_version,
-	wait_for_install_job,
-} from '@/helpers/install'
+	useServerShareHistorySource,
+	useShareHistory,
+} from '@/features/share-history/use-share-history'
+import { getErrorMessage, wait_for_install_job } from '@/helpers/install'
+import { apiClient } from '@/platform/modrinth-client'
 import { injectAppEvents } from '@/providers/app-events'
 
 import { injectInstancePage } from '../instance-context'
@@ -36,7 +31,6 @@ import { injectInstancePage } from '../instance-context'
 
 const instancePage = injectInstancePage()
 const appEvents = injectAppEvents()
-const client = injectModrinthClient()
 const { addNotification } = injectNotificationManager()
 const formatBytes = useFormatBytes()
 
@@ -45,20 +39,10 @@ const shareId = computed(() => instance.value.shared_instance?.id)
 const owner = computed(() => instance.value.shared_instance?.role === 'owner')
 const playServer = usePlayInstanceServer(instancePage.instance)
 
-const history = useQuery({
-	queryKey: computed(() =>
-		owner.value
-			? versionHistoryKey(instance.value.id)
-			: (['server-share-history', playServer.value?.serverId] as const),
-	),
-	queryFn: () => {
-		const server = playServer.value
-		return owner.value || !server
-			? install_get_shared_instance_history(instance.value.id)
-			: client.archon.content_v1.getShareHistory(server.serverId, server.worldId)
-	},
-	enabled: () => owner.value || !!playServer.value,
-})
+const serverSource = useServerShareHistorySource(() => playServer.value?.serverId)
+const { history, restore: restoreVersion } = useShareHistory(() =>
+	owner.value ? { client: apiClient.local, instanceId: instance.value.id } : serverSource.value,
+)
 const versions = computed(() => history.data.value ?? [])
 
 // A push adds a version and changes the share's usage.
@@ -66,6 +50,7 @@ const queryClient = useQueryClient()
 watch(
 	() => instance.value.shared_instance?.latest_version,
 	() => {
+		void history.refetch()
 		queryClient.invalidateQueries({ queryKey: versionHistoryKey(instance.value.id) })
 		queryClient.invalidateQueries({ queryKey: sharedHistorySettingsKey })
 		queryClient.invalidateQueries({ queryKey: sharedStorageKey })
@@ -89,24 +74,26 @@ const segments = computed(() => {
 })
 
 const deleteVersion = useDeleteVersion()
-const restore = useMutation({
-	mutationFn: async (version: number) => {
-		const job = await install_restore_shared_instance_version(instance.value.id, version)
-		await wait_for_install_job(appEvents, job.job_id)
-	},
-	onSuccess: () => instancePage.refreshInstance(),
-	onError: (cause) => {
-		console.error('Failed to restore version', cause)
-		addNotification({
-			type: 'error',
-			title: 'Could not restore the version',
-			text: getErrorMessage(cause),
-		})
-	},
-})
+/** Restores a version into this instance, once its install job ends. */
+function restore(version: number) {
+	restoreVersion.mutate(version, {
+		onSuccess: async (job) => {
+			await wait_for_install_job(appEvents, job.job_id)
+			await instancePage.refreshInstance()
+		},
+		onError: (cause) => {
+			console.error('Failed to restore version', cause)
+			addNotification({
+				type: 'error',
+				title: 'Could not restore the version',
+				text: getErrorMessage(cause),
+			})
+		},
+	})
+}
 const busy = computed(
 	() =>
-		restore.isPending.value ||
+		restoreVersion.isPending.value ||
 		deleteVersion.isPending.value ||
 		instance.value.install_stage !== 'installed',
 )
@@ -120,7 +107,7 @@ const busy = computed(
 		:editable="owner"
 		:busy="busy"
 		subject="instance"
-		@restore="restore.mutate"
+		@restore="restore"
 		@delete="(version) => deleteVersion.mutate({ instanceId: instance.id, version })"
 	>
 		<div v-if="owner && storage && share?.counted" class="flex items-center gap-4">

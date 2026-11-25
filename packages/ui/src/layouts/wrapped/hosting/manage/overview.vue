@@ -34,14 +34,22 @@
 </template>
 
 <script setup lang="ts">
-import type { Mclogs } from '@modrinth/api-client'
+import { core as coreRoutes, instanceFiles, type Mclogs } from '@modrinth/api-client'
 import { useStorage } from '@vueuse/core'
 import { computed, ref, watch } from 'vue'
 
 import { useModrinthServersConsole } from '#ui/composables'
 import { useServerPermissions } from '#ui/composables/server-permissions'
-import { ConsolePageLayout, provideConsoleManager } from '#ui/layouts/shared/console'
-import { injectModrinthClient, injectModrinthServerContext } from '#ui/providers'
+import {
+	ConsolePageLayout,
+	provideConsoleManager,
+	useInstanceLogs,
+} from '#ui/layouts/shared/console'
+import {
+	injectModrinthClient,
+	injectModrinthServerContext,
+	injectNotificationManager,
+} from '#ui/providers'
 
 const props = withDefaults(
 	defineProps<{
@@ -56,14 +64,23 @@ const props = withDefaults(
 
 const client = injectModrinthClient()
 const {
-	server: _serverData,
 	serverId,
+	core,
 	isConnected,
 	isWsAuthIncorrect,
+	isServerRunning,
 	powerState: serverPowerState,
-	powerStateDetails: _powerStateDetails,
 } = injectModrinthServerContext()
 const modrinthServersConsole = useModrinthServersConsole()
+const { handleError } = injectNotificationManager()
+const logs = useInstanceLogs({
+	client: core,
+	instanceId: serverId,
+	live: modrinthServersConsole,
+	running: isServerRunning,
+	queryKey: ['servers', 'logs', serverId],
+	onError: handleError,
+})
 // Running commands and clearing the console need more than the right to start the server.
 const { canExecuteCommands, permissionDeniedMessage } = useServerPermissions()
 
@@ -85,7 +102,10 @@ const inspectError = async () => {
 	if (isDismissed()) return
 
 	try {
-		const blob = await client.kyros.files_v0.downloadFile('/logs/latest.log')
+		const blob = await core.call(instanceFiles.ReadInstanceFile, {
+			params: { id: serverId },
+			query: { path: 'logs/latest.log' },
+		})
 		const log = await blob.text()
 		if (!log) return
 
@@ -107,16 +127,18 @@ const dismissCrash = () => {
 }
 
 provideConsoleManager({
-	logLines: modrinthServersConsole.output,
-	sendCommand: (cmd: string) => {
+	logLines: logs.logLines,
+	logSources: logs.logSources,
+	activeLogSourceIndex: logs.activeLogSourceIndex,
+	onDelete: logs.onDelete,
+	deleteDisabled: logs.deleteDisabled,
+	sendCommand: (command: string) => {
 		if (!canExecuteCommands.value) return
-		try {
-			client.archon.sockets.send(serverId, { event: 'command', cmd })
-		} catch (error) {
-			console.error('Error sending command:', error)
-		}
+		core
+			.call(coreRoutes.SendCommand, { params: { id: serverId }, body: { command } })
+			.catch(handleError)
 	},
-	showCommandInput: true,
+	showCommandInput: logs.isLive,
 	disableCommandInput: computed(
 		() => !canExecuteCommands.value || serverPowerState.value !== 'running',
 	),
@@ -129,14 +151,9 @@ provideConsoleManager({
 			modrinthServersConsole.isInitialLogHydrating.value ||
 			isWsAuthIncorrect.value,
 	),
-	onClear: async () => {
-		if (!canExecuteCommands.value) return
-		modrinthServersConsole.clear()
-		try {
-			await client.kyros.logs_v1.clear()
-		} catch (error) {
-			console.error('Failed to clear server logs:', error)
-		}
+	// A Core keeps no buffer of its own: the console reads the server's log, which stays.
+	onClear: () => {
+		if (canExecuteCommands.value && logs.isLive.value) modrinthServersConsole.clear()
 	},
 	clearDisabled: computed(() => !canExecuteCommands.value),
 	clearDisabledTooltip: computed(() =>
@@ -151,6 +168,8 @@ provideConsoleManager({
 watch(
 	() => serverPowerState.value,
 	(newVal) => {
+		// A run that ended wrote a log of its own.
+		if (newVal === 'stopped' || newVal === 'crashed') void logs.refresh()
 		if (newVal === 'crashed') {
 			void inspectError()
 		} else {

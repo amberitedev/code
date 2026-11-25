@@ -1,4 +1,4 @@
-import type { Archon, UploadState } from '@modrinth/api-client'
+import type { Archon, ContractClient, UploadState } from '@modrinth/api-client'
 import type { ComputedRef, Ref } from 'vue'
 
 import type { MessageDescriptor } from '#ui/composables/i18n'
@@ -40,6 +40,9 @@ export interface ServerStats {
 
 export interface ModrinthServerContext {
 	readonly serverId: string
+	/** The Core that has the server, and its routes. */
+	readonly coreId: string
+	readonly core: ContractClient
 	readonly worldId: Ref<string | null>
 	readonly server: Ref<Archon.Servers.v0.Server>
 	readonly serverFull: ComputedRef<Archon.Servers.v1.ServerFull | null>

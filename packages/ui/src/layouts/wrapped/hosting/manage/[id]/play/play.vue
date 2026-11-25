@@ -81,6 +81,7 @@
 </template>
 
 <script setup lang="ts">
+import { core as coreRoutes } from '@modrinth/api-client'
 import { useIntersectionObserver } from '@vueuse/core'
 import { computed, nextTick, onScopeDispose, ref, watch } from 'vue'
 
@@ -116,7 +117,7 @@ import {
 	injectNotificationManager,
 	type ServerPlayTarget,
 } from '#ui/providers'
-import { injectFileDownload } from '#ui/providers/file-download'
+import { useServerDownload } from '#ui/composables/server-download'
 import { injectPageContext } from '#ui/providers/page-context'
 import { getHostingServerAddress } from '#ui/utils/servers'
 
@@ -240,24 +241,19 @@ async function performAction(action: Action, target: ServerShareActionTarget) {
 		else invitePlayersModal.value?.show()
 	}
 }
-const fileDownload = injectFileDownload(null)
+const serverDownload = useServerDownload()
 const exporting = ref(false)
 /** Saves the server's content as a `.mrpack` its Core exports, for players on other launchers. */
 async function exportModpack() {
-	const nodeUrlHost = server.value.node?.instance
-	if (!fileDownload || !nodeUrlHost || !worldId.value || exporting.value) return
+	if (exporting.value) return
 	exporting.value = true
 	try {
-		await fileDownload.download({
-			type: 'server-mrpack',
-			serverId,
-			serverName: server.value.name,
-			nodeUrlHost,
-			worldId: worldId.value,
-			filename: mrpackFilename(server.value.name),
-		})
-	} catch (error) {
-		handleError(error as Error)
+		await serverDownload.download(
+			'server-mrpack',
+			mrpackFilename(server.value.name),
+			coreRoutes.ExportModpack,
+			{ params: { id: serverId } },
+		)
 	} finally {
 		exporting.value = false
 	}

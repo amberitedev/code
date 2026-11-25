@@ -178,20 +178,6 @@ export async function install_update_shared_instance(instanceId: string) {
 	return await apiClient.local.call(installs.UpdateSharedInstance, { params: { id: instanceId } })
 }
 
-/** The share's history, newest first. Empty when the instance joined the share as a member. */
-export async function install_get_shared_instance_history(instanceId: string) {
-	return await apiClient.local.call(installs.GetSharedInstanceHistory, {
-		params: { id: instanceId },
-	})
-}
-
-/** Owner only. Puts the instance back to a version from its history, leaving it to push. */
-export async function install_restore_shared_instance_version(instanceId: string, version: number) {
-	return await apiClient.local.call(installs.RestoreSharedInstanceVersion, {
-		params: { id: instanceId, version },
-	})
-}
-
 /** Owner only. Deletes a version from the share's history. The latest one stays. */
 export async function install_delete_shared_instance_version(instanceId: string, version: number) {
 	return await apiClient.local.call(installs.DeleteSharedInstanceVersion, {

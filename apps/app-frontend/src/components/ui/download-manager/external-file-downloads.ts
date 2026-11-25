@@ -1,6 +1,6 @@
 import { reactive, ref } from 'vue'
 
-import type { ExternalFileProgress } from '@/platform/app-lib/files/commands'
+import type { ExternalFileProgress } from '@/platform/ops'
 
 export interface ExternalFileDownloadTask {
 	id: string

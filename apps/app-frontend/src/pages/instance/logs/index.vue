@@ -4,19 +4,20 @@
 	</div>
 </template>
 
-<script setup>
+<script setup lang="ts">
+import type { Mclogs } from '@modrinth/api-client'
 import {
 	ConsolePageLayout,
 	injectModrinthClient,
 	injectNotificationManager,
 	provideConsoleManager,
+	useInstanceLogs,
 } from '@modrinth/ui'
-import { useQuery } from '@tanstack/vue-query'
-import { computed, ref, shallowRef, triggerRef, watch, watchEffect } from 'vue'
+import { ref } from 'vue'
 
 import { useAppEvent } from '@/composables/use-app-event'
 import { useInstanceConsole } from '@/composables/useInstanceConsole'
-import { delete_logs_by_filename, get_output_by_filename } from '@/helpers/logs.js'
+import { apiClient } from '@/platform/modrinth-client'
 
 import { injectInstancePage } from '../instance-context'
 import { instanceKeys } from '../query-options'
@@ -25,15 +26,7 @@ const client = injectModrinthClient()
 const { handleError } = injectNotificationManager()
 const instancePage = injectInstancePage()
 const instanceId = instancePage.instanceId
-const {
-	liveConsole,
-	historicalConsole,
-	hydrate,
-	getHistoricalLogs,
-	getHistoricalContent,
-	invalidate,
-	clearLive,
-} = useInstanceConsole(instanceId.value)
+const { liveConsole, hydrate, clearLive } = useInstanceConsole(instanceId.value)
 
 // Not awaited, so the tab opens at once: the live console is a per-instance store, and the
 // terminal fills in when the buffered output arrives. Live `log` events are ignored until then
@@ -45,69 +38,16 @@ const liveConsoleHydration = hydrate()
 		liveConsoleHydrated = true
 	})
 
-function buildLogList(rawLogs) {
-	return [
-		{ name: 'Live Log', live: true },
-		...rawLogs
-			.filter(
-				(log) =>
-					log.filename !== 'latest_stdout.log' &&
-					log.filename !== 'latest_stdout' &&
-					log.filename !== 'launcher_log.txt' &&
-					(log.output == null || log.output !== '') &&
-					(log.filename.includes('.log') || log.filename.endsWith('.txt')),
-			)
-			.map((log) => ({
-				...log,
-				name: log.filename || 'Unknown',
-			})),
-	]
-}
-
-const logs = ref(buildLogList([]))
-const historicalLogsQuery = useQuery({
-	queryKey: computed(() => instanceKeys.logs(instanceId.value)),
-	networkMode: 'always',
-	queryFn: getHistoricalLogs,
-	staleTime: 0,
-})
-watch(
-	historicalLogsQuery.data,
-	(allLogs) => {
-		if (allLogs) logs.value = buildLogList(allLogs)
-	},
-	{ immediate: true },
-)
-watch(historicalLogsQuery.error, (error) => {
-	if (error) handleError(error)
+const logs = useInstanceLogs({
+	client: apiClient.local,
+	instanceId,
+	live: liveConsole,
+	running: instancePage.playing,
+	queryKey: () => instanceKeys.logs(instanceId.value),
+	onError: handleError,
 })
 
-const selectedLogIndex = ref(0)
-const isLive = computed(() => selectedLogIndex.value === 0)
-
-const filteredLogs = computed(() =>
-	instancePage.playing.value
-		? logs.value.filter((l) => l.live || l.name !== 'latest.log')
-		: logs.value,
-)
-
-const logSources = computed(() =>
-	filteredLogs.value.map((l, i) => ({
-		id: String(i),
-		name: l?.name ?? `Log ${i}`,
-		live: l?.live ?? false,
-	})),
-)
-
-const activeConsole = computed(() => (isLive.value ? liveConsole : historicalConsole))
-
-const logLines = shallowRef(activeConsole.value.output.value)
-watchEffect(() => {
-	logLines.value = activeConsole.value.output.value
-	triggerRef(logLines)
-})
-
-const crashAnalysis = ref(null)
+const crashAnalysis = ref<Mclogs.Insights.v1.InsightsResponse | null>(null)
 
 async function analyseForCrash() {
 	const lines = liveConsole.output.value
@@ -124,36 +64,18 @@ async function analyseForCrash() {
 	}
 }
 
-const selectedLog = computed(() => filteredLogs.value[selectedLogIndex.value])
-
-const deleteDisabled = computed(() => {
-	const log = selectedLog.value
-	if (!log || log.live) return true
-	return log.filename === 'latest.log' && instancePage.playing.value
-})
-
-async function deleteSelectedLog() {
-	const log = selectedLog.value
-	if (!log || log.live) return
-	await delete_logs_by_filename(instanceId.value, log.log_type, log.filename)
-	invalidate()
-	const { data } = await historicalLogsQuery.refetch()
-	if (data) logs.value = buildLogList(data)
-	selectedLogIndex.value = 0
-}
-
 provideConsoleManager({
-	logLines,
-	logSources,
-	activeLogSourceIndex: selectedLogIndex,
+	logLines: logs.logLines,
+	logSources: logs.logSources,
+	activeLogSourceIndex: logs.activeLogSourceIndex,
 	showCommandInput: false,
 	loading: ref(false),
 	onClear: () => {
-		if (!isLive.value) return
+		if (!logs.isLive.value) return
 		void clearLive()
 	},
-	onDelete: deleteSelectedLog,
-	deleteDisabled,
+	onDelete: logs.onDelete,
+	deleteDisabled: logs.deleteDisabled,
 	deleteDisabledTooltip: 'Cannot delete latest.log while the instance is running',
 	shareDisabled: instancePage.offline,
 	emptyStateType: 'instance',
@@ -162,29 +84,6 @@ provideConsoleManager({
 		crashAnalysis.value = null
 	},
 })
-
-watch(selectedLogIndex, async (newIndex) => {
-	if (newIndex === 0) return
-	const log = filteredLogs.value[newIndex]
-	if (!log) return
-
-	const cached = getHistoricalContent(log.filename)
-	if (cached) {
-		historicalConsole.clear()
-		historicalConsole.addLegacyLog(cached)
-		return
-	}
-
-	const output = await get_output_by_filename(instanceId.value, log.log_type, log.filename).catch(
-		handleError,
-	)
-	if (output) {
-		historicalConsole.clear()
-		historicalConsole.addLegacyLog(output)
-	}
-})
-
-selectedLogIndex.value = 0
 
 void liveConsoleHydration.then(() => {
 	if (!instancePage.playing.value) void analyseForCrash()
@@ -203,8 +102,7 @@ useAppEvent('log', (payload) => {
 // The buffer holds this run's whole live log, so it replaces lines a resync lost.
 useAppEvent('resync', async () => {
 	await liveConsoleHydration
-	invalidate()
-	void historicalLogsQuery.refetch()
+	void logs.refresh()
 	liveConsoleHydrated = false
 	liveConsole.clear()
 	await hydrate().catch(handleError)
@@ -215,14 +113,11 @@ useAppEvent('process', async (e) => {
 	if (e.instance_id !== instanceId.value) return
 	if (e.event === 'launched') {
 		liveConsole.clear()
-		invalidate()
-		void historicalLogsQuery.refetch()
-		selectedLogIndex.value = 0
+		logs.activeLogSourceIndex.value = 0
+		void logs.refresh()
 	}
 	if (e.event === 'finished') {
-		invalidate()
-		const { data } = await historicalLogsQuery.refetch()
-		if (data) logs.value = buildLogList(data)
+		await logs.refresh()
 		void analyseForCrash()
 	}
 })
