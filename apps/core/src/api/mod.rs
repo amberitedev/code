@@ -101,7 +101,36 @@ impl FromRef<Shared> for Arc<dyn Access> {
 /// Every route. Each one checks its caller itself (see `access`); the network listener adds its
 /// own checks on top (see `network::tls`).
 pub fn router(state: Arc<CoreState>) -> Router {
-    Router::new()
+    timed_routes(Router::new())
+        // Applies to the routes above only.
+        .layer(TimeoutLayer::with_status_code(
+            StatusCode::REQUEST_TIMEOUT,
+            REQUEST_TIMEOUT,
+        ))
+        .merge(untimed_routes(Router::new()))
+        .layer(DefaultBodyLimit::max(MAX_BODY))
+        // Uploads stream to disk with their own cap: the disk's free space (`archive::room`).
+        .endpoint::<InstallModpackFile, _, _>(servers::install_modpack_file)
+        .merge(engine_mount::upload_routes(Router::new()))
+        // The pool's store streams uploads and downloads of any size, with its own caps. It is a
+        // pass-through to the `copal store` process, which mounts its own Endpoints.
+        .route("/store/{*rest}", any(storage::forward))
+        .layer(DefaultBodyLimit::disable())
+        .with_state(Shared(state))
+        .layer(TraceLayer::new_for_http().make_span_with(
+            |request: &axum::extract::Request| {
+                tracing::debug_span!(
+                    "request",
+                    method = %request.method(),
+                    path = %request.uri().path(),
+                )
+            },
+        ))
+}
+
+/// The routes that answer within the request timeout.
+fn timed_routes<M: Mount<Shared>>(mount: M) -> M {
+    let mount = mount
         .endpoint::<CheckHealth, _, _>(health::get)
         .endpoint::<EventSocket, _, _>(events::socket)
         .endpoint::<SignIn, _, _>(sessions::sign_in)
@@ -152,45 +181,27 @@ pub fn router(state: Arc<CoreState>) -> Router {
         .endpoint::<ListOps, _, _>(ops::list)
         .endpoint::<ChangePower, _, _>(servers::power)
         .endpoint::<CheckReachability, _, _>(insight::check)
-        .endpoint::<InstallLoader, _, _>(servers::install)
-        .merge(engine_mount::routes(Router::new()))
-        // Applies to the routes above only.
-        .layer(TimeoutLayer::with_status_code(
-            StatusCode::REQUEST_TIMEOUT,
-            REQUEST_TIMEOUT,
-        ))
+        .endpoint::<InstallLoader, _, _>(servers::install);
+    engine_mount::routes(mount)
+}
+
+/// The `untimed` routes but uploads: each answers once its work is done.
+fn untimed_routes<M: Mount<Shared>>(mount: M) -> M {
+    let mount = mount
         // An update answers once it is installed, just before the Core restarts into it.
         .endpoint::<InstallUpdate, _, _>(update::apply)
         // A push uploads the server's files and waits for the store to confirm them.
         .endpoint::<ShareServer, _, _>(servers::share)
         // Following an instance reads its share's version first.
-        .endpoint::<FollowInstance, _, _>(follow::follow)
-        // Adding and updating addons download them first, as does taking the pack's version of
-        // an edited file, and a pack's install or update backs the world up first. Reading,
-        // unpacking, zipping, uploading and exporting files go through them whole.
-        .merge(engine_mount::long_routes(Router::new()))
+        .endpoint::<FollowInstance, _, _>(follow::follow);
+    // Adding and updating addons download them first, as does taking the pack's version of an
+    // edited file, and a pack's install or update backs the world up first. Reading, unpacking,
+    // zipping, uploading and exporting files go through them whole.
+    engine_mount::long_routes(mount)
         // Downloads stream for as long as they take.
         .endpoint::<DownloadBackup, _, _>(backups::download_backup)
         .endpoint::<DownloadWorld, _, _>(backups::download_world)
         .endpoint::<ExportModpack, _, _>(engine_mount::export_mrpack)
-        .layer(DefaultBodyLimit::max(MAX_BODY))
-        // Uploads stream to disk with their own cap: the disk's free space (`archive::room`).
-        .endpoint::<InstallModpackFile, _, _>(servers::install_modpack_file)
-        .merge(engine_mount::upload_routes(Router::new()))
-        // The pool's store streams uploads and downloads of any size, with its own caps. It is a
-        // pass-through to the `copal store` process, which mounts its own Endpoints.
-        .route("/store/{*rest}", any(storage::forward))
-        .layer(DefaultBodyLimit::disable())
-        .with_state(Shared(state))
-        .layer(TraceLayer::new_for_http().make_span_with(
-            |request: &axum::extract::Request| {
-                tracing::debug_span!(
-                    "request",
-                    method = %request.method(),
-                    path = %request.uri().path(),
-                )
-            },
-        ))
 }
 
 /// Serve HTTP/1 or HTTP/2, with upgrades for the `/events` socket, on one connection. A connection

@@ -1708,7 +1708,7 @@ async fn an_installs_subscription_starts_with_the_unfinished_jobs() {
 }
 
 #[tokio::test]
-async fn a_loader_install_is_refused_while_the_engine_installs_the_server() {
+async fn a_change_is_refused_while_the_engine_installs_the_server() {
     use engine::install::{
         InstallJobStatus, InstallRequest, model::InstallJobState,
     };
@@ -1729,16 +1729,22 @@ async fn a_loader_install_is_refused_while_the_engine_installs_the_server() {
     .await
     .unwrap();
     let owner = core.sign_in("owner").await;
-    let (_, error) = core
-        .call(
-            Method::POST,
-            &format!("/servers/{}/reinstall", core.server),
-            Some(&owner),
-            None,
-            Some(json!({ "loader": "Fabric", "loader_version": null, "game_version": "1.21.4", "op": "install" })),
-        )
-        .await;
-    assert_eq!(error["error"], "installing", "{error}");
+    let server = &core.server;
+    for (uri, body) in [
+        (
+            format!("/servers/{server}/reinstall"),
+            Some(
+                json!({ "loader": "Fabric", "loader_version": null, "game_version": "1.21.4", "op": "install" }),
+            ),
+        ),
+        (format!("/servers/{server}/modpack-file"), None),
+        (format!("/instances/{server}/modpack/unlink"), None),
+    ] {
+        let (_, error) = core
+            .call(Method::POST, &uri, Some(&owner), None, body)
+            .await;
+        assert_eq!(error["error"], "installing", "{uri}: {error}");
+    }
     let instance = engine::instance::get(&core.state.engine, &core.server)
         .await
         .unwrap()

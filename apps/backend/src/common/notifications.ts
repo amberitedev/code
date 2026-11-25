@@ -52,14 +52,17 @@ export async function addNotification(
 	return id
 }
 
-/** The accounts that joined a shared instance, other than `except`. */
+/**
+ * The accounts that joined a shared instance, and its owner, other than `except`. A server's share
+ * has no member row for its owner, so the owner comes from the share.
+ */
 export async function joinedMembers(
 	env: Env,
 	instanceId: string,
 	except: string | null = null,
 ): Promise<string[]> {
 	const { results } = await env.DB.prepare(
-		'SELECT user_id FROM shared_instance_users WHERE instance_id = ? AND joined_at IS NOT NULL AND user_id IS NOT ?',
+		'SELECT user_id FROM shared_instance_users WHERE instance_id = ?1 AND joined_at IS NOT NULL AND user_id IS NOT ?2 UNION SELECT owner_id FROM shared_instances WHERE id = ?1 AND owner_id IS NOT ?2',
 	)
 		.bind(instanceId, except)
 		.all<{ user_id: string }>()

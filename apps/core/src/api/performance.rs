@@ -67,8 +67,6 @@ pub async fn set_memory(
 ) -> Result<Json<Performance>, ApiError> {
     let id = params.id;
     state.access.require(&caller, &id).await?;
-    // The owner passes `require` for any id, so a missing server is found here, before a write.
-    performance(&state, &id).await?;
     if request.memory_mb < MIN_MEMORY_MB {
         return Err(ApiError::new(
             ErrorCode::InvalidInput,
@@ -115,7 +113,6 @@ pub async fn set_flags(
             ),
         ));
     }
-    performance(&state, &id).await?;
     edit_launch(
         &state,
         &id,
@@ -160,7 +157,6 @@ pub async fn set_restarts(
 ) -> Result<Json<Performance>, ApiError> {
     let id = params.id;
     state.access.require(&caller, &id).await?;
-    performance(&state, &id).await?;
     if request.smart_after_hours == Some(0) {
         return Err(ApiError::new(
             ErrorCode::InvalidInput,
