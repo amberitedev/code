@@ -174,11 +174,11 @@ crate::endpoints! {
     ListOps: Get "/ops", Session, (), (), Empty => Json<Vec<String>>;
 
     /// A backup as a zip, streamed.
-    DownloadBackup: Get "/servers/{id}/backups/{backup_id}/download", Session, BackupRef, (), Empty => Stream;
+    DownloadBackup: Get "/servers/{id}/backups/{backup_id}/download", Session, BackupRef, (), Empty => Stream, untimed;
     /// The server's files as a zip, streamed.
-    DownloadWorld: Get "/servers/{id}/download", Session, ServerId, (), Empty => Stream;
+    DownloadWorld: Get "/servers/{id}/download", Session, ServerId, (), Empty => Stream, untimed;
     /// The server's content as an `.mrpack`: its content folders and `config/`.
-    ExportModpack: Get "/servers/{id}/export.mrpack", Session, ServerId, (), Empty => Stream;
+    ExportModpack: Get "/servers/{id}/export.mrpack", Session, ServerId, (), Empty => Stream, untimed;
 }
 
 #[cfg(test)]

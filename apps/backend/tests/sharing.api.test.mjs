@@ -59,6 +59,9 @@ function root(files) {
 	return sha256(Buffer.concat(objects.map((object) => Buffer.from(object, 'hex'))))
 }
 
+/** A PNG as far as its bytes tell. */
+const png = () => Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), randomBytes(56)])
+
 const bytes = (files) => {
 	const seen = new Map(files.map((entry) => [entry.object, entry.object_size]))
 	return [...seen.values()].reduce((sum, size) => sum + size, 0)
@@ -118,6 +121,36 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 			assert.equal(response.status, status)
 			assert.equal((await response.json()).error, code)
 		}
+		/** `user`'s friends socket, and a wait for it to be told a share's members changed. */
+		const listen = async (user) => {
+			const connection = await backend.fetch(
+				`http://local.test/_internal/launcher_socket?code=mra_${user}`,
+				{ headers: { upgrade: 'websocket' } },
+			)
+			const live = connection.webSocket
+			live.accept()
+			const events = []
+			live.addEventListener('message', (event) => events.push(JSON.parse(event.data)))
+			const told = (share) =>
+				new Promise((resolve, reject) => {
+					const timer = setTimeout(() => reject(new Error(`no live event for ${share}`)), 2000)
+					const check = () => {
+						if (
+							events.some(
+								(event) =>
+									event.body?.type === 'shared_instance_users' &&
+									event.body.shared_instance_id === share,
+							)
+						) {
+							clearTimeout(timer)
+							resolve()
+						}
+					}
+					live.addEventListener('message', check)
+					check()
+				})
+			return { live, events, told }
+		}
 		/** `create_remote_version`: the manifest with its files already encrypted and named. */
 		const push = (id, external, user = 'mra_owner') =>
 			call(
@@ -163,15 +196,20 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		// Share an instance: create it, name it, give it an icon, invite a friend.
 		const { id } = await ok(await call('/instances', 'POST', { name: 'Proof' }))
 		await ok(await call(`/instances/${id}`, 'PATCH', { name: 'Proof pack' }))
-		const icon = randomBytes(64)
-		await ok(
-			await send(`http://local.test/v1/instances/${id}/icon`, 'PUT', 'mra_owner', icon, {
-				'content-type': 'application/octet-stream',
-			}),
-		)
+		// An icon is served as the image its bytes are, whatever type the upload claimed.
+		const putIcon = (body) =>
+			send(`http://local.test/v1/instances/${id}/icon`, 'PUT', 'mra_owner', body, {
+				'content-type': 'text/html',
+			})
+		await code(await putIcon('<script>alert(1)</script>'), 400, 'invalid_input')
+		const icon = png()
+		await ok(await putIcon(icon))
 		const info = await ok(await call(`/instances/${id}`))
 		assert.equal(info.name, 'Proof pack')
-		assert.deepEqual(Buffer.from(await (await send(info.icon, 'GET')).arrayBuffer()), icon)
+		const image = await send(info.icon, 'GET')
+		assert.equal(image.headers.get('content-type'), 'image/png')
+		assert.equal(image.headers.get('x-content-type-options'), 'nosniff')
+		assert.deepEqual(Buffer.from(await image.arrayBuffer()), icon)
 		assert.equal(info.installed_once, false)
 		assert.equal(info.linked_server, null)
 		assert.equal(info.icon_config, null, 'an uploaded image has no icon editor settings')
@@ -492,32 +530,7 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		assert.deepEqual(decode(both.download.ticket).claims.aud, ['core2', 'core'])
 
 		// The friends socket tells an App when its account loses a share, so an open page notices.
-		const connection = await backend.fetch(
-			'http://local.test/_internal/launcher_socket?code=mra_friend',
-			{ headers: { upgrade: 'websocket' } },
-		)
-		const live = connection.webSocket
-		live.accept()
-		const events = []
-		live.addEventListener('message', (event) => events.push(JSON.parse(event.data)))
-		const told = (share) =>
-			new Promise((resolve, reject) => {
-				const timer = setTimeout(() => reject(new Error(`no live event for ${share}`)), 2000)
-				const check = () => {
-					if (
-						events.some(
-							(event) =>
-								event.body?.type === 'shared_instance_users' &&
-								event.body.shared_instance_id === share,
-						)
-					) {
-						clearTimeout(timer)
-						resolve()
-					}
-				}
-				live.addEventListener('message', check)
-				check()
-			})
+		const { live, events, told } = await listen('friend')
 
 		// Leaving and removal revoke access to versions.
 		await ok(await call(`/instances/${id}/users`, 'DELETE', { user_ids: ['friend'] }))
@@ -945,8 +958,26 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 			await ok(await asCore('', 'POST', { name: 'Server', server_id: 'server' })),
 			serverShare,
 		)
+		// Its owner hears of its members as they would of a share they made.
+		const owner = await listen('owner')
+		await db
+			.prepare(
+				"INSERT INTO shared_instance_users (instance_id,user_id,join_type,joined_at) VALUES (?,?,'invite',?)",
+			)
+			.bind(serverShare.id, 'friend', new Date().toISOString())
+			.run()
+		await ok(
+			await call(
+				`/instances/${serverShare.id}/users`,
+				'DELETE',
+				{ user_ids: ['friend'] },
+				'mra_friend',
+			),
+		)
+		await owner.told(serverShare.id)
+		owner.live.close()
 		// The Core sets its server's share icon with its key, as the owner would with their session.
-		const serverIcon = randomBytes(64)
+		const serverIcon = png()
 		await ok(
 			await send(
 				`http://local.test/core/shares/${serverShare.id}/icon`,

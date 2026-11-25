@@ -11,6 +11,7 @@ import {
 import { accountLock, findUser, publicUser, requireUser } from '../common/auth'
 import { randomId } from '../common/crypto'
 import { ApiError, invalid, objectBody } from '../common/http'
+import { IMAGE_HEADERS, imageType } from '../common/images'
 import { notificationResponse, type NotificationRow } from '../common/notifications'
 import { type Route, noBody, rawBody, route } from '../common/router'
 import type { Env, UserRow } from '../common/types'
@@ -192,8 +193,7 @@ async function avatar(env: Env, userId: string, revision: string) {
 	return new Response(object.body, {
 		headers: {
 			'Content-Type': object.httpMetadata?.contentType ?? 'application/octet-stream',
-			'Cache-Control': 'public, max-age=31536000, immutable',
-			'X-Content-Type-Options': 'nosniff',
+			...IMAGE_HEADERS,
 		},
 	})
 }
@@ -212,16 +212,7 @@ async function changeAvatar(request: Request, env: Env, target: UserRow, image: 
 	const url = new URL(request.url)
 	const ext = url.searchParams.get('ext')?.toLowerCase()
 	if (!ext || !ICON_TYPES[ext]) invalid('Unsupported image format')
-	const valid =
-		ext === 'png'
-			? bytes[0] === 137 && bytes[1] === 80 && bytes[2] === 78 && bytes[3] === 71
-			: ext === 'jpg' || ext === 'jpeg'
-				? bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255
-				: ext === 'gif'
-					? String.fromCharCode(...bytes.slice(0, 6)).match(/^GIF8[79]a$/)
-					: String.fromCharCode(...bytes.slice(0, 4)) === 'RIFF' &&
-						String.fromCharCode(...bytes.slice(8, 12)) === 'WEBP'
-	if (!valid) invalid('Invalid image')
+	if (imageType(bytes) !== ICON_TYPES[ext]) invalid('Invalid image')
 	const revision = randomId()
 	await env.FILES.put(avatarKey(target.id, revision), bytes, {
 		httpMetadata: { contentType: ICON_TYPES[ext] },

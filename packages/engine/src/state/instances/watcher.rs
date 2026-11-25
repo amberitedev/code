@@ -17,6 +17,7 @@ use notify_debouncer_mini::{
     DebounceEventResult, DebouncedEvent, Debouncer, new_debouncer_opt,
 };
 use sqlx::SqlitePool;
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::Weak;
 use std::{
@@ -34,7 +35,6 @@ use super::adapters::sqlite::instance_rows;
 pub struct FileWatcher {
     side: Side,
     watcher: RwLock<Watching>,
-    instance_ids: RwLock<HashMap<String, String>>,
     content_syncs: DashMap<String, bool>,
 }
 
@@ -43,14 +43,33 @@ pub struct FileWatcher {
 /// folder's own watch sees them appear.
 struct Watching {
     debouncer: Debouncer<WriteOnlyWatcher>,
-    /// Each instance's folder as watched, by that spelling and its canonical one: a platform can
-    /// name events by the real path (FSEvents gives `/private/var` for `/var`, or a linked data
+    /// Each instance's folder, by its watched spelling and its canonical one: a platform can name
+    /// events by the real path (FSEvents gives `/private/var` for `/var`, or a linked data
     /// folder's target).
-    roots: HashMap<PathBuf, PathBuf>,
+    roots: HashMap<PathBuf, Root>,
     folders: HashSet<PathBuf>,
 }
 
+struct Root {
+    /// The folder as watched.
+    path: PathBuf,
+    instance_id: String,
+}
+
 impl Watching {
+    /// The instance whose folder holds `path`, and the name of the entry in that folder it is or
+    /// is under: `None` for the folder itself.
+    fn locate<'a>(&self, path: &'a Path) -> Option<(&str, Option<&'a OsStr>)> {
+        path.ancestors().find_map(|folder| {
+            let root = self.roots.get(folder)?;
+            let mut inside = path.strip_prefix(folder).ok()?.components();
+            Some((
+                root.instance_id.as_str(),
+                inside.next().map(|c| c.as_os_str()),
+            ))
+        })
+    }
+
     /// Watch `folder` and everything in it, if it is a folder now and not watched yet.
     fn attach(&mut self, folder: &Path) {
         if self.folders.contains(folder) || !folder.is_dir() {
@@ -229,7 +248,6 @@ pub(crate) fn init_watcher(
                 roots: HashMap::new(),
                 folders: HashSet::new(),
             }),
-            instance_ids: RwLock::new(HashMap::new()),
             content_syncs: DashMap::new(),
         },
         rx,
@@ -253,44 +271,17 @@ pub(crate) fn watch_instance_events(
             match res {
                 Ok(events) => {
                     attach_or_drop(&state.file_watcher, &events).await;
-                    let instance_ids =
-                        state.file_watcher.instance_ids.read().await;
+                    let watching = state.file_watcher.watcher.read().await;
                     let mut visited_instances = Vec::new();
                     let mut visited_screenshot_instances = Vec::new();
                     let mut changed_files =
                         HashMap::<String, BTreeSet<String>>::new();
 
                     for e in &events {
-                        let mut instance_path = None;
-
-                        let mut found = false;
-                        for component in e.path.components() {
-                            if found {
-                                instance_path = Some(component.as_os_str());
-                                break;
-                            }
-
-                            if component.as_os_str()
-                                == crate::state::dirs::INSTANCES_FOLDER_NAME
-                            {
-                                found = true;
-                            }
-                        }
-
-                        if let Some(instance_path) = instance_path {
-                            let instance_path_str =
-                                instance_path.to_string_lossy().to_string();
-                            let Some(instance_id) =
-                                instance_ids.get(&instance_path_str).cloned()
-                            else {
-                                continue;
-                            };
-                            let first_file_name = e
-                                .path
-                                .components()
-                                .skip_while(|x| x.as_os_str() != instance_path)
-                                .nth(1)
-                                .map(|x| x.as_os_str());
+                        if let Some((instance_id, first_file_name)) =
+                            watching.locate(&e.path)
+                        {
+                            let instance_id = instance_id.to_owned();
                             let sync_content =
                                 first_file_name.as_ref().is_some_and(|name| {
                                     content_folders(state.side)
@@ -472,22 +463,17 @@ pub(crate) async fn watch_instance_folder(
             "Failed to watch root instance directory for watcher {full_instance_path:?}: {e}"
         );
     }
+    let root = || Root {
+        path: full_instance_path.clone(),
+        instance_id: instance_id.to_owned(),
+    };
     if let Ok(canonical) = full_instance_path.canonicalize() {
-        watching.roots.insert(canonical, full_instance_path.clone());
+        watching.roots.insert(canonical, root());
     }
-    watching
-        .roots
-        .insert(full_instance_path.clone(), full_instance_path.clone());
+    watching.roots.insert(full_instance_path.clone(), root());
     for sub_path in watched_subpaths(watcher.side) {
         watching.attach(&full_instance_path.join(sub_path));
     }
-    drop(watching);
-
-    watcher
-        .instance_ids
-        .write()
-        .await
-        .insert(instance_path.to_string(), instance_id.to_string());
 }
 
 /// An allowlisted folder that appeared is watched; one that went is no longer.
@@ -500,7 +486,7 @@ async fn attach_or_drop(watcher: &FileWatcher, events: &[DebouncedEvent]) {
             let name = event.path.file_name()?;
             watched_subpaths(watcher.side)
                 .any(|sub| name == sub)
-                .then(|| root.join(name))
+                .then(|| root.path.join(name))
         })
         .collect();
     for folder in folders {
@@ -544,19 +530,18 @@ pub(crate) async fn unwatch_instance_folder(
     watcher: &FileWatcher,
     dirs: &DirectoryInfo,
 ) {
-    let mut instance_ids = watcher.instance_ids.write().await;
-    if instance_ids
-        .get(instance_path)
-        .is_none_or(|id| id != instance_id)
+    let full_instance_path = dirs.instances_dir().join(instance_path);
+    let mut watching = watcher.watcher.write().await;
+    if watching
+        .roots
+        .get(&full_instance_path)
+        .is_none_or(|root| root.instance_id != instance_id)
     {
         return;
     }
-    instance_ids.remove(instance_path);
-    drop(instance_ids);
-
-    let full_instance_path = dirs.instances_dir().join(instance_path);
-    let mut watching = watcher.watcher.write().await;
-    watching.roots.retain(|_, root| *root != full_instance_path);
+    watching
+        .roots
+        .retain(|_, root| root.path != full_instance_path);
     for sub_path in watched_subpaths(watcher.side) {
         watching.unwatch(&full_instance_path.join(sub_path));
     }
@@ -651,7 +636,8 @@ mod tests {
     }
 
     /// A platform can name an event by the real path of a folder watched through a link, as
-    /// FSEvents does for a linked data folder.
+    /// FSEvents does for a linked data folder. An event is the instance's by its folder, not by
+    /// where that folder is.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_content_folder_named_by_its_real_path_is_watched() {
         let tmp = tempfile::tempdir().unwrap();
@@ -680,6 +666,36 @@ mod tests {
         attach_or_drop(&watcher, &[appeared]).await;
         let watched = instances.join("Survival").join("mods");
         assert!(watcher.watcher.read().await.folders.contains(&watched));
+
+        // A Core's instances are its servers, in `servers/<id>`.
+        let servers = tmp.path().join("servers");
+        std::fs::create_dir_all(servers.join("srv")).unwrap();
+        let core_dirs = DirectoryInfo::init(
+            tmp.path().join("core"),
+            servers.clone(),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        watch_instance_folder("b", "srv", &watcher, &core_dirs).await;
+        for (path, instance, first) in [
+            (mods.canonicalize().unwrap().join("a.jar"), "a", "mods"),
+            (watched.join("a.jar"), "a", "mods"),
+            (
+                servers.join("srv").join("plugins").join("b.jar"),
+                "b",
+                "plugins",
+            ),
+        ] {
+            let watching = watcher.watcher.read().await;
+            assert_eq!(
+                watching.locate(&path),
+                Some((instance, Some(OsStr::new(first)))),
+                "{path:?}"
+            );
+        }
+        unwatch_instance_folder("b", "srv", &watcher, &core_dirs).await;
 
         unwatch_instance_folder("a", "Survival", &watcher, &dirs).await;
         let watching = watcher.watcher.read().await;

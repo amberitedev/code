@@ -729,7 +729,7 @@ export const core = {
 	GetInsight: { method: "GET", path: "/servers/{id}/insight", auth: "session", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<ServerId, null, void, ServerInsight>,
 	CheckReachability: { method: "POST", path: "/servers/{id}/reachability", auth: "session", dangerous: false, untimed: false, body: "json", response: "empty" } as Endpoint<ServerId, null, OpStart, void>,
 	ListOps: { method: "GET", path: "/ops", auth: "session", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<string>>,
-	DownloadBackup: { method: "GET", path: "/servers/{id}/backups/{backup_id}/download", auth: "session", dangerous: false, untimed: false, body: "empty", response: "stream" } as Endpoint<BackupRef, null, void, Response>,
-	DownloadWorld: { method: "GET", path: "/servers/{id}/download", auth: "session", dangerous: false, untimed: false, body: "empty", response: "stream" } as Endpoint<ServerId, null, void, Response>,
-	ExportModpack: { method: "GET", path: "/servers/{id}/export.mrpack", auth: "session", dangerous: false, untimed: false, body: "empty", response: "stream" } as Endpoint<ServerId, null, void, Response>,
+	DownloadBackup: { method: "GET", path: "/servers/{id}/backups/{backup_id}/download", auth: "session", dangerous: false, untimed: true, body: "empty", response: "stream" } as Endpoint<BackupRef, null, void, Response>,
+	DownloadWorld: { method: "GET", path: "/servers/{id}/download", auth: "session", dangerous: false, untimed: true, body: "empty", response: "stream" } as Endpoint<ServerId, null, void, Response>,
+	ExportModpack: { method: "GET", path: "/servers/{id}/export.mrpack", auth: "session", dangerous: false, untimed: true, body: "empty", response: "stream" } as Endpoint<ServerId, null, void, Response>,
 }

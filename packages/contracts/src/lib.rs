@@ -168,9 +168,16 @@ impl<S, R> ResponseBody for Upgrade<S, R> {
 /// A line is `Name: Method "path", Auth, Params, Query, Body => Response`, then its flags:
 /// `dangerous` when the route needs a fresh ticket ([`Endpoint::DANGEROUS`]), `untimed` when a
 /// Core answers it only once done ([`Endpoint::UNTIMED`]), and for an engine route its [`Reach`]:
-/// `shared` or `client_only`.
+/// `shared` or `client_only`. Any other flag does not compile.
 #[macro_export]
 macro_rules! endpoints {
+    (@flag dangerous) => {};
+    (@flag untimed) => {};
+    (@flag shared) => {};
+    (@flag client_only) => {};
+    (@flag $other:ident) => {
+        compile_error!(concat!("unknown endpoint flag `", stringify!($other), "`"));
+    };
     (@dangerous) => { false };
     (@dangerous dangerous $($rest:ident)*) => { true };
     (@dangerous $other:ident $($rest:ident)*) => { $crate::endpoints!(@dangerous $($rest)*) };
@@ -190,6 +197,8 @@ macro_rules! endpoints {
         )+
     ) => {
         $(
+            $($crate::endpoints!(@flag $flag);)*
+
             $(#[doc = $doc])*
             pub struct $name;
 

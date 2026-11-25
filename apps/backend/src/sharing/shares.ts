@@ -2,7 +2,8 @@ import { ALLOWANCE_BYTES } from '@amberite/contracts/protocol'
 import { type SharedInstanceUpdate, sharing } from '@amberite/contracts/backend'
 
 import { requireUser } from '../common/auth'
-import { ApiError } from '../common/http'
+import { ApiError, invalid } from '../common/http'
+import { IMAGE_HEADERS, imageType } from '../common/images'
 import { joinedMembers, notifyUsers } from '../common/notifications'
 import { noBody, rawBody, route } from '../common/router'
 import type { Env } from '../common/types'
@@ -90,12 +91,12 @@ export async function setIcon(
 	if (upload) await env.FILES.delete(iconKey(item.id, upload))
 }
 
-/** Replaces the share's icon with `image`, served from this backend as it was sent. */
+/** Replaces the share's icon with `image`, served from this backend as the image its bytes are. */
 export async function uploadIcon(request: Request, env: Env, item: InstanceRow, image: Blob) {
+	const bytes = new Uint8Array(await image.arrayBuffer())
+	const contentType = imageType(bytes) ?? invalid('Icons must be PNG, JPEG, GIF or WebP images')
 	const upload = crypto.randomUUID()
-	await env.FILES.put(iconKey(item.id, upload), await image.arrayBuffer(), {
-		httpMetadata: { contentType: image.type || 'image/png' },
-	})
+	await env.FILES.put(iconKey(item.id, upload), bytes, { httpMetadata: { contentType } })
 	await setIcon(env, item, `${new URL(request.url).origin}/v1/icons/${item.id}/${upload}`, null)
 }
 
@@ -107,8 +108,7 @@ export const publicShareRoutes = [
 		return new Response(object.body, {
 			headers: {
 				'Content-Type': object.httpMetadata?.contentType ?? 'image/png',
-				// Every upload gets a new URL, so a fetched icon never changes.
-				'Cache-Control': 'public, max-age=31536000, immutable',
+				...IMAGE_HEADERS,
 			},
 		})
 	}),

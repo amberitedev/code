@@ -393,6 +393,9 @@ pub async fn install_modpack_file(
 ) -> Result<Empty, ApiError> {
     let id = params.id;
     state.access.require(&caller, &id).await?;
+    if state.servers.engine_installing(&id).await? {
+        return Err(ServerError::Installing.into());
+    }
     let hold = state.servers.hold(&id)?;
     let dir = state.servers.paths().run(&id);
     tokio::fs::create_dir_all(&dir).await.map_err(internal)?;

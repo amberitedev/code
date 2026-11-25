@@ -315,6 +315,9 @@ where
         .expect("an instance route has an {id} segment");
     let state = Arc::clone(&shared.0);
     state.access.require(&caller, &id).await?;
+    if hook.hold && state.servers.engine_installing(&id).await? {
+        return Err(ServerError::Installing.into());
+    }
     let hold = hook.hold.then(|| state.servers.hold(&id)).transpose()?;
     if hook.backup {
         state.backups.pre_update(&id).await?;
@@ -500,16 +503,31 @@ mod tests {
         assert_eq!(mounted, shared);
     }
 
-    /// The TypeScript client times every call but the `untimed` ones out.
+    /// The TypeScript client times every call but the `untimed` ones out, so those are exactly the
+    /// routes a Core mounts outside its request timeout.
     #[test]
     fn the_routes_outside_the_request_timeout_are_the_untimed_ones() {
-        let untimed = |mount: fn(Mounted) -> Mounted| {
-            mount(Mounted::default())
-                .0
-                .into_iter()
-                .map(|(_, _, untimed)| untimed)
-        };
-        assert!(untimed(super::routes::<Mounted>).all(|untimed| !untimed));
-        assert!(untimed(super::long_routes::<Mounted>).all(|untimed| untimed));
+        let mounted =
+            |mount: fn(Mounted) -> Mounted| mount(Mounted::default()).0;
+        let timed = mounted(crate::api::timed_routes::<Mounted>);
+        let outside = mounted(crate::api::untimed_routes::<Mounted>);
+        assert!(timed.iter().all(|&(.., untimed)| !untimed));
+        assert!(outside.iter().all(|&(.., untimed)| untimed));
+        let shared = engine::endpoints::ROUTES
+            .iter()
+            .copied()
+            .flatten()
+            .filter(|route| route.reach == Some(Reach::Shared));
+        for route in contracts::core::ROUTES.iter().chain(shared) {
+            if route.untimed {
+                assert!(
+                    outside.iter().any(|&(method, path, _)| {
+                        method == route.method && path == route.path
+                    }),
+                    "{} is untimed but mounted inside the timeout",
+                    route.name
+                );
+            }
+        }
     }
 }

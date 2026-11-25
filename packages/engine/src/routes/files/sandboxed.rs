@@ -556,7 +556,7 @@ fn zip_tree(
                 .map_err(internal)?;
             zip_tree(
                 zip,
-                &sandbox::open_child(dir, &name, &path).map_err(internal)?,
+                &sandbox::open_child(dir, &name, &path).map_err(io_error)?,
                 &format!("{path}/"),
             )?;
         } else if kind.is_file() {
@@ -633,7 +633,7 @@ pub(super) async fn zip(
                     .map_err(internal)?;
                     zip_tree(
                         &mut zip,
-                        &folder.open_dir(Some(&path)).map_err(internal)?,
+                        &folder.open_dir(Some(&path)).map_err(io_error)?,
                         &format!("{name}/"),
                     )?;
                 } else if meta.is_file() {
@@ -645,7 +645,7 @@ pub(super) async fn zip(
                     .map_err(internal)?;
                     let mut file = folder
                         .open_file(&path)
-                        .map_err(internal)?
+                        .map_err(io_error)?
                         .ok_or_else(|| not_found(name))?;
                     std::io::copy(&mut file, &mut zip).map_err(internal)?;
                 }
@@ -656,7 +656,7 @@ pub(super) async fn zip(
                     &target,
                     &mut std::fs::File::open(&staged).map_err(internal)?,
                 )
-                .map_err(internal)?;
+                .map_err(io_error)?;
             Ok(())
         }
     })
@@ -693,6 +693,6 @@ fn write_staged(
 ) -> Result<(), ApiError> {
     folder
         .write(path, &mut std::fs::File::open(staged).map_err(internal)?)
-        .map_err(internal)?;
+        .map_err(io_error)?;
     Ok(())
 }
