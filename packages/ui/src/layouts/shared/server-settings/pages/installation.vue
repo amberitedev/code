@@ -53,7 +53,7 @@
 </template>
 
 <script setup lang="ts">
-import type { Archon, Labrinth, UploadProgress } from '@modrinth/api-client'
+import type { Archon, Labrinth, Loader, Server, UploadProgress } from '@modrinth/api-client'
 import { ArrowLeftRightIcon, RotateCounterClockwiseIcon } from '@modrinth/assets'
 import {
 	commonMessages,
@@ -79,6 +79,7 @@ import { computed, ref, useTemplateRef, watch } from 'vue'
 
 import { Button } from '#ui/components/base/buttons'
 import ServerModpackUploadModal from '#ui/components/servers/ServerModpackUploadModal.vue'
+import type { ServerPlatform } from '#ui/composables/server-installation-tracker'
 
 const debug = useDebugLogger('LoaderPage')
 const client = injectModrinthClient()
@@ -89,8 +90,9 @@ const {
 	installation,
 	server,
 	serverId,
-	worldId,
 } = injectModrinthServerContext()
+// A Core names a server's one world by the server's id.
+const worldId = computed<string | null>(() => serverId)
 const { addNotification } = injectNotificationManager()
 const queryClient = useQueryClient()
 const serverDetailQueryKey = ['servers', 'detail', serverId] as const
@@ -362,7 +364,7 @@ function toApiLoader(loader: string): Archon.Content.v1.Modloader {
 }
 
 type InstallationCacheSnapshot = {
-	server: Archon.Servers.v0.Server | undefined
+	server: Server | undefined
 	addons: Archon.Content.v1.Addons | undefined
 }
 
@@ -377,26 +379,23 @@ async function applyOptimisticInstallation(
 	])
 
 	const snapshot = {
-		server: queryClient.getQueryData<Archon.Servers.v0.Server>(serverDetailQueryKey),
+		server: queryClient.getQueryData<Server>(serverDetailQueryKey),
 		addons: queryClient.getQueryData<Archon.Content.v1.Addons>(addonsQueryKey),
 	}
 	const resolvedLoaderVersion = platform === 'vanilla' ? null : loaderVersion
 	beginInstallation({
 		type: 'platform',
-		platform: platform as Extract<
-			Archon.Websocket.v0.InstallProgressKey,
-			{ type: 'platform' }
-		>['platform'],
+		platform: platform as ServerPlatform,
 		platform_version: resolvedLoaderVersion ?? '',
 		game_version: gameVersion,
 	})
 
-	queryClient.setQueryData<Archon.Servers.v0.Server>(serverDetailQueryKey, (current) =>
+	queryClient.setQueryData<Server>(serverDetailQueryKey, (current) =>
 		current
 			? {
 					...current,
 					status: 'installing',
-					loader: formatLoaderLabel(platform) as Archon.Servers.v0.Loader,
+					loader: formatLoaderLabel(platform) as Loader,
 					loader_version: resolvedLoaderVersion,
 					mc_version: gameVersion,
 				}
@@ -1016,10 +1015,7 @@ function onReinstall(event?: unknown) {
 		if (args?.loader && args.mVersion) {
 			beginInstallation({
 				type: 'platform',
-				platform: args.loader as Extract<
-					Archon.Websocket.v0.InstallProgressKey,
-					{ type: 'platform' }
-				>['platform'],
+				platform: args.loader as ServerPlatform,
 				platform_version: args.lVersion ?? '',
 				game_version: args.mVersion,
 			})
@@ -1036,7 +1032,6 @@ function onBrowseModpacks() {
 	debug('onBrowseModpacks: navigating to modpack discovery')
 	serverSettings.browseModpacks({
 		serverId,
-		worldId: worldId.value,
 		from: 'reset-server',
 	})
 }

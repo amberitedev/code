@@ -20,14 +20,12 @@ export function useServerSharingSettings() {
 	const auth = injectAuth()
 	const queryClient = useQueryClient()
 	const { handleError } = injectNotificationManager()
-	const { serverId, worldId, serverFull, busyReasons } = injectModrinthServerContext()
+	const { serverId, server, busyReasons } = injectModrinthServerContext()
+	// A Core names a server's one world by the server's id.
+	const worldId = computed<string | null>(() => serverId)
 	const { canSetup, permissionDeniedMessage } = useServerPermissions()
 	const userId = computed(() => auth.user.value?.id)
-	const sharedInstanceId = computed(
-		() =>
-			serverFull.value?.worlds.find((world) => world.id === worldId.value)?.content
-				?.shared_instance_id,
-	)
+	const sharedInstanceId = computed(() => server.value.shared_instance_id)
 	const targetKey = computed(() =>
 		canSetup.value && worldId.value && sharedInstanceId.value && userId.value
 			? JSON.stringify([serverId, worldId.value, sharedInstanceId.value, userId.value])

@@ -2,7 +2,7 @@
 	<div class="relative flex flex-col gap-6">
 		<ServerPlayCard
 			:address="serverAddress"
-			:disabled="actionsLocked || migrating || !worldId || (!canSetup && !sharedInstanceId)"
+			:disabled="actionsLocked || migrating || (!canSetup && !sharedInstanceId)"
 			:pending-action="exporting ? 'download' : pendingAction"
 			@play="perform('play')"
 			@download="exportModpack"
@@ -24,9 +24,9 @@
 				:can-manage="canSetup"
 				:disabled="players.membershipMutation.isPending.value || actionsLocked || migrating"
 				:show-push-update="!!sharedInstanceId && !followsInstance"
-				:push-update-disabled="actionsLocked || migrating || !worldId"
+				:push-update-disabled="actionsLocked || migrating"
 				:push-update-pending="previewQuery.isFetching.value || pendingAction === 'push'"
-				:invite-disabled="actionsLocked || migrating || !worldId"
+				:invite-disabled="actionsLocked || migrating"
 				:invite-pending="pendingAction === 'invite'"
 				@push-update="showPreview()"
 				@push-update-hover="shareReview.prefetchFiles()"
@@ -49,7 +49,7 @@
 		<ServerSharePushModal
 			ref="diffModal"
 			:server-id="serverId"
-			:world-id="worldId ?? undefined"
+			:world-id="serverId"
 			:diffs="previewQuery.data.value?.items ?? []"
 			:changes-description="
 				previewAction === 'play' ? formatMessage(messages.shareChangesPlayBody) : undefined
@@ -105,6 +105,7 @@ import {
 import { defineMessages, useVIntl } from '#ui/composables/i18n'
 import { useServerPermissions } from '#ui/composables/server-permissions'
 import { inviteLinkUrl } from '#ui/composables/server-sharing/invite-link'
+import { useServerOwnShare } from '#ui/composables/server-sharing/own-share'
 import { mrpackFilename } from '#ui/composables/server-sharing/shared-instance'
 import {
 	type ServerShareActionTarget,
@@ -148,12 +149,12 @@ onScopeDispose(() => {
 })
 const { handleError } = injectNotificationManager()
 const auth = injectAuth()
-const { serverId, worldId, server, serverFull } = injectModrinthServerContext()
+const { serverId, server } = injectModrinthServerContext()
 const { canSetup } = useServerPermissions()
 const ensureServerRunning = useEnsureServerRunning()
-const world = computed(() => serverFull.value?.worlds.find((world) => world.id === worldId.value))
-const sharedInstanceId = computed(() => world.value?.content?.shared_instance_id ?? null)
-const needsUpdate = computed(() => world.value?.content?.shared_instance_needs_update ?? false)
+// The server's own share, or the one of the instance it follows.
+const sharedInstanceId = computed(() => server.value.shared_instance_id)
+const { needsUpdate } = useServerOwnShare()
 const followsInstance = computed(() => !!server.value?.linked_instance)
 const players = useServerPlayers(serverId, sharedInstanceId, canSetup)
 const invitePlayersModal = ref<InstanceType<typeof InvitePlayersModal>>()
@@ -204,13 +205,10 @@ const inviteBinding = computed<ServerInviteBinding>(() => ({
 	onInvite: invitePlayer,
 	onCancel: (user) => changeMember(user.id, true),
 }))
-const serverAddress = computed(() =>
-	getHostingServerAddress(server.value?.net, serverFull.value?.subdomain),
-)
+const serverAddress = computed(() => getHostingServerAddress(server.value.net))
 async function performAction(action: Action, target: ServerShareActionTarget) {
 	const { worldId: targetWorldId, configPaths, isCurrent: sameContext } = target
-	let id = serverFull.value?.worlds.find((world) => world.id === targetWorldId)?.content
-		?.shared_instance_id
+	let id = server.value.shared_instance_id
 	// A server that follows an instance reads that instance's share, which only the instance
 	// owner's App pushes: here it only manages players and plays.
 	const shouldShare =
@@ -268,7 +266,7 @@ async function perform(
 	restart?: boolean,
 	removedConfigPaths: string[] = [],
 ) {
-	if (!worldId.value || actionsLocked.value || migrating.value) return
+	if (actionsLocked.value || migrating.value) return
 	if (
 		requireMigration(action, () =>
 			perform(action, reviewed, configPaths, restart, removedConfigPaths),
@@ -294,7 +292,7 @@ function requireMigration(action: Action, resume: () => Promise<void>) {
 			kind: migration.kind.value ?? 'custom',
 			modpackName: migration.modpackName.value,
 			hasUploadedMrpack: migration.hasUploadedMrpack.value,
-			worldId: worldId.value!,
+			worldId: serverId,
 			uploadProgress: migration.uploadProgress,
 			start: (source, onRequested) => migration.start(source, next, onRequested),
 		})
@@ -336,13 +334,13 @@ async function updateInviteLink(settings: InviteLinkSettings) {
 	})
 }
 watch(
-	[worldId, canSetup, () => inviteHandoff?.requested.value, migrating, actionsLocked],
+	[canSetup, () => inviteHandoff?.requested.value, migrating, actionsLocked],
 	async () => {
 		if (!inviteHandoff?.requested.value) {
 			inviteHandoffStarted = false
 			return
 		}
-		if (!worldId.value || inviteHandoffStarted || migrating.value || actionsLocked.value) return
+		if (inviteHandoffStarted || migrating.value || actionsLocked.value) return
 		inviteHandoffStarted = true
 		if (canSetup.value) await perform('invite')
 		if (!inviteHandoff.binding.value && !inviteHandoff.migration.value) inviteHandoff.cancel()
@@ -352,7 +350,7 @@ watch(
 onScopeDispose(() => {
 	if (inviteHandoff?.binding.value === inviteBinding) inviteHandoff.cancel()
 })
-watch([worldId, sharedInstanceId, () => auth.user.value?.id], () => {
+watch([sharedInstanceId, () => auth.user.value?.id], () => {
 	invitePlayersModal.value?.hide()
 	removeModal.value?.hide()
 	playerToRemove.value = undefined

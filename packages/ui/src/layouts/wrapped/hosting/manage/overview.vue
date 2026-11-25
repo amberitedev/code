@@ -12,17 +12,6 @@
 			</div>
 		</div>
 
-		<div
-			v-if="isWsAuthIncorrect"
-			class="absolute inset-0 flex flex-col items-center justify-center bg-bg"
-		>
-			<h2>Could not connect to the server.</h2>
-			<p>
-				An error occurred while attempting to connect to your server. Please try refreshing the
-				page. (WebSocket Authentication Failed)
-			</p>
-		</div>
-
 		<button
 			v-if="showAdvancedDebugInfo"
 			class="self-start rounded-lg bg-surface-3 px-3 py-1 text-sm text-contrast hover:brightness-125"
@@ -67,7 +56,6 @@ const {
 	serverId,
 	core,
 	isConnected,
-	isWsAuthIncorrect,
 	isServerRunning,
 	powerState: serverPowerState,
 } = injectModrinthServerContext()
@@ -145,12 +133,7 @@ provideConsoleManager({
 	disableCommandInputTooltip: computed(() =>
 		canExecuteCommands.value ? undefined : permissionDeniedMessage.value,
 	),
-	loading: computed(
-		() =>
-			!isConnected.value ||
-			modrinthServersConsole.isInitialLogHydrating.value ||
-			isWsAuthIncorrect.value,
-	),
+	loading: computed(() => !isConnected.value || modrinthServersConsole.isInitialLogHydrating.value),
 	// A Core keeps no buffer of its own: the console reads the server's log, which stays.
 	onClear: () => {
 		if (canExecuteCommands.value && logs.isLive.value) modrinthServersConsole.clear()

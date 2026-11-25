@@ -298,7 +298,7 @@
 </template>
 
 <script setup lang="ts">
-import type { Archon } from '@modrinth/api-client'
+import { type Archon, core as coreRoutes } from '@modrinth/api-client'
 import { SearchIcon, SpinnerIcon } from '@modrinth/assets'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import Fuse from 'fuse.js'
@@ -308,15 +308,10 @@ import { Accordion, Admonition, AutoLink, Chips, Input, Toggle } from '#ui/compo
 import SaveBanner from '#ui/components/servers/SaveBanner.vue'
 import { useServerPermissions } from '#ui/composables/server-permissions'
 import { injectServerSettings } from '#ui/layouts/shared/server-settings'
-import {
-	injectModrinthClient,
-	injectModrinthServerContext,
-	injectNotificationManager,
-} from '#ui/providers'
+import { injectModrinthServerContext, injectNotificationManager } from '#ui/providers'
 
 const { addNotification } = injectNotificationManager()
-const client = injectModrinthClient()
-const { serverId, worldId, powerState, busyReasons } = injectModrinthServerContext()
+const { serverId, core, powerState, busyReasons } = injectModrinthServerContext()
 const queryClient = useQueryClient()
 const { canUseAdvancedSettings, canUsePowerActions, permissionDeniedMessage } =
 	useServerPermissions()
@@ -394,12 +389,11 @@ function capitalize(str: string): string {
 	return str.charAt(0).toUpperCase() + str.slice(1)
 }
 
-const queryKey = computed(() => ['servers', 'properties', 'v1', serverId, worldId.value])
+const queryKey = computed(() => ['servers', 'properties', serverId])
 
 const { data: propsData, error: propsError } = useQuery({
 	queryKey,
-	queryFn: () => client.archon.properties_v1.getProperties(serverId, worldId.value!),
-	enabled: computed(() => worldId.value !== null),
+	queryFn: () => core.call(coreRoutes.GetProperties, { params: { id: serverId } }),
 })
 
 function flattenProperties(data: Archon.Content.v1.PropertiesFields): Record<string, string> {
@@ -527,7 +521,7 @@ function buildPatch(): Archon.Content.v1.PatchPropertiesFields {
 
 const { mutateAsync: savePropertiesMutation, isPending: isUpdating } = useMutation({
 	mutationFn: () =>
-		client.archon.properties_v1.patchProperties(serverId, worldId.value!, buildPatch()),
+		core.call(coreRoutes.ChangeProperties, { params: { id: serverId }, body: buildPatch() }),
 	onSuccess: async () => {
 		await queryClient.invalidateQueries({ queryKey: queryKey.value })
 		syncFormFromData()

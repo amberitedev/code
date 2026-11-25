@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Archon } from '@modrinth/api-client'
+import type { OperationState } from '@modrinth/api-client'
 import {
 	CheckCircleIcon,
 	InfoIcon,
@@ -13,7 +13,7 @@ import type { MessageDescriptor } from '#ui/composables/i18n'
 import { defineMessages, useVIntl } from '#ui/composables/i18n'
 import { commonMessages } from '#ui/utils/common-messages'
 
-export type AdmonitionDisplayState = 'ongoing' | Archon.BackupsQueue.v1.BackupQueueState
+export type AdmonitionDisplayState = 'ongoing' | OperationState
 
 export type BackupAdmonitionEntry = {
 	key: string
@@ -22,7 +22,6 @@ export type BackupAdmonitionEntry = {
 	state: AdmonitionDisplayState
 	progress: number
 	operationId: number | null
-	syntheticLegacy: boolean
 	name?: string
 	timestamp?: string
 	error?: string | null
@@ -54,7 +53,6 @@ function resolveUiPhase(item: BackupAdmonitionEntry): UiPhase | null {
 		case 'ongoing':
 			return 'in_progress'
 		case 'failed':
-		case 'timed_out':
 		case 'cancelled':
 		case 'completed':
 			return item.state
@@ -64,13 +62,13 @@ function resolveUiPhase(item: BackupAdmonitionEntry): UiPhase | null {
 }
 
 function getAdmonitionType(state: AdmonitionDisplayState): 'info' | 'critical' | 'success' {
-	if (state === 'failed' || state === 'timed_out') return 'critical'
+	if (state === 'failed') return 'critical'
 	if (state === 'completed') return 'success'
 	return 'info'
 }
 
 function getIcon(state: AdmonitionDisplayState) {
-	if (state === 'failed' || state === 'timed_out') return TriangleAlertIcon
+	if (state === 'failed') return TriangleAlertIcon
 	if (state === 'completed') return CheckCircleIcon
 	return InfoIcon
 }
@@ -88,7 +86,7 @@ function isTerminal(item: BackupAdmonitionEntry) {
 }
 
 function canRetry(item: BackupAdmonitionEntry) {
-	return !item.migration && (item.state === 'failed' || item.state === 'timed_out')
+	return !item.migration && item.state === 'failed'
 }
 
 function canCancel(item: BackupAdmonitionEntry) {
@@ -96,7 +94,7 @@ function canCancel(item: BackupAdmonitionEntry) {
 }
 
 function hasErrorDetail(item: BackupAdmonitionEntry) {
-	return !!item.error && (item.state === 'failed' || item.state === 'timed_out')
+	return !!item.error && item.state === 'failed'
 }
 
 const messages = defineMessages({

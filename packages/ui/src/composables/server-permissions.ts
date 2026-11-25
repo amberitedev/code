@@ -2,7 +2,6 @@ import type { Archon } from '@modrinth/api-client'
 import { computed } from 'vue'
 
 import { useVIntl } from '#ui/composables/i18n'
-import { injectModrinthServerContext } from '#ui/providers'
 import { commonMessages } from '#ui/utils/common-messages'
 
 // A Core answers its owner only, so whoever sees a server may do everything on it. Upstream's
@@ -40,7 +39,8 @@ export function hasServerPermission(
 
 export function useServerPermissions() {
 	const { formatMessage } = useVIntl()
-	const { currentUserPermissions } = injectModrinthServerContext()
+	// Upstream's scope bits; nothing reads them, since everything is granted.
+	const currentUserPermissions = computed(() => 0)
 
 	const permissionDeniedMessage = computed(() => formatMessage(commonMessages.noPermissionAction))
 	const allowed = computed(() => true)

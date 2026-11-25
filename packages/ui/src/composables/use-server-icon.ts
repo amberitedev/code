@@ -1,4 +1,10 @@
-import { type AbstractModrinthClient, type Archon, ModrinthApiError } from '@modrinth/api-client'
+import {
+	type AbstractModrinthClient,
+	ApiCallError,
+	core as coreRoutes,
+	instanceFiles,
+	type ServerIcon,
+} from '@modrinth/api-client'
 import { useQuery } from '@tanstack/vue-query'
 import { computed, type MaybeRefOrGetter, toValue } from 'vue'
 
@@ -17,11 +23,12 @@ export const serverIconKeys = {
 export function serverIconMetadataQueryOptions(serverId: string, client: AbstractModrinthClient) {
 	return {
 		queryKey: serverIconKeys.metadata(serverId),
-		queryFn: async (): Promise<Archon.Icons.v1.ServerIcon | null> => {
+		queryFn: async (): Promise<ServerIcon | null> => {
 			try {
-				return await client.archon.icons_v1.getMetadata(serverId)
+				const routes = await client.cores.serverRoutes(serverId)
+				return (await routes.call(coreRoutes.GetServer, { params: { id: serverId } })).icon
 			} catch (error) {
-				if (error instanceof ModrinthApiError && error.statusCode === 404) return null
+				if (error instanceof ApiCallError && error.code === 'not_found') return null
 				throw error
 			}
 		},
@@ -37,22 +44,23 @@ export function serverIconImageQueryOptions(
 ) {
 	return {
 		queryKey: serverIconKeys.image(serverId, hash),
-		queryFn: () => client.archon.icons_v1.get(serverId, true),
+		queryFn: async () =>
+			(await client.cores.serverRoutes(serverId)).call(instanceFiles.GetInstanceIcon, {
+				params: { id: serverId },
+			}),
 		staleTime: Infinity,
 	}
 }
 
 /** Returns the config of an icon created with the icon editor, if its symbol is known. */
-export function serverIconEditorConfig(
-	icon: Archon.Icons.v1.ServerIcon | null | undefined,
-): IconConfig | null {
+export function serverIconEditorConfig(icon: ServerIcon | null | undefined): IconConfig | null {
 	const value = icon?.config
 	return value && getIconSymbolAsset(value.symbol) ? value : null
 }
 
 type UseServerIconOptions = {
 	/** Icon metadata already loaded with the server. Skips fetching the metadata separately. */
-	icon?: MaybeRefOrGetter<Archon.Icons.v1.ServerIcon | null | undefined>
+	icon?: MaybeRefOrGetter<ServerIcon | null | undefined>
 	enabled?: MaybeRefOrGetter<boolean>
 }
 

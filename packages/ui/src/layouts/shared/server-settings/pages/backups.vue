@@ -81,7 +81,7 @@
 </template>
 
 <script setup lang="ts">
-import type { Archon } from '@modrinth/api-client'
+import { type PatchBackupOptions, core as coreRoutes } from '@modrinth/api-client'
 import { SpinnerIcon } from '@modrinth/assets'
 import { useMutation } from '@tanstack/vue-query'
 import { computed, ref, watch } from 'vue'
@@ -98,11 +98,7 @@ import {
 import { defineMessages, useVIntl } from '#ui/composables/i18n'
 import { useServerBackupsQueue } from '#ui/composables/server-backups-queue'
 import { useServerPermissions } from '#ui/composables/server-permissions'
-import {
-	injectModrinthClient,
-	injectModrinthServerContext,
-	injectNotificationManager,
-} from '#ui/providers'
+import { injectModrinthServerContext, injectNotificationManager } from '#ui/providers'
 
 const DEFAULT_AUTO_SLOTS = 5
 const MAX_BACKUP_SLOTS = 15
@@ -137,14 +133,10 @@ const messages = defineMessages({
 
 const { formatMessage } = useVIntl()
 const { formatInterval } = useBackupIntervalFormat()
-const client = injectModrinthClient()
 const { addNotification } = injectNotificationManager()
-const { serverId, worldId } = injectModrinthServerContext()
+const { serverId, core } = injectModrinthServerContext()
 const { canManageBackups, permissionDeniedMessage } = useServerPermissions()
-const { backups, options, invalidate } = useServerBackupsQueue(
-	computed(() => serverId),
-	worldId,
-)
+const { backups, options, invalidate } = useServerBackupsQueue(serverId, core)
 
 const manageTooltip = computed(() =>
 	canManageBackups.value ? undefined : permissionDeniedMessage.value,
@@ -162,7 +154,7 @@ const intervalOptions = computed(() => {
 
 const slotLimit = computed(() => Math.min(options.value?.limit ?? 0, MAX_BACKUP_SLOTS))
 
-const pendingPatch = computed<Archon.BackupsQueue.v1.PatchWorldBackupOptions | null>(() => {
+const pendingPatch = computed<PatchBackupOptions | null>(() => {
 	if (!options.value) return null
 	const limit = slotLimit.value
 	return autoEnabled.value
@@ -207,11 +199,14 @@ const isSaving = ref(false)
 
 const { mutateAsync: patchOptions } = useMutation({
 	mutationFn: ({ acknowledgeRotation }: { acknowledgeRotation: boolean }) =>
-		client.archon.backups_queue_v1.patchOptions(
-			serverId,
-			worldId.value!,
-			pendingPatch.value!,
-			acknowledgeRotation,
+		// Deleting the scheduled backups past the new slots is a dangerous action: a fresh ticket.
+		core.call(
+			{ ...coreRoutes.ChangeBackupOptions, dangerous: acknowledgeRotation },
+			{
+				params: { id: serverId },
+				query: { ar: acknowledgeRotation || undefined },
+				body: pendingPatch.value!,
+			},
 		),
 })
 
@@ -222,7 +217,7 @@ async function saveOptions(acknowledgeRotation: boolean) {
 	try {
 		const result = await patchOptions({ acknowledgeRotation })
 		if (!result.applied) {
-			const rotatedIds = result.backup_ids ?? []
+			const rotatedIds = result.backup_ids
 			rotationModal.value?.show(
 				backups.value.filter((backup) => rotatedIds.includes(backup.id)),
 				rotatedIds.length,

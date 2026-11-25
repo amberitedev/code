@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Archon } from '@modrinth/api-client'
+import { core as coreRoutes } from '@modrinth/api-client'
 import { ChevronRightIcon } from '@modrinth/assets'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, ref, watch } from 'vue'
@@ -7,6 +7,7 @@ import { computed, ref, watch } from 'vue'
 import type { TabbedModalTab } from '#ui/components'
 import { TabbedModal } from '#ui/components'
 import { defineMessage, defineMessages, useVIntl } from '#ui/composables/i18n'
+import { serverKeys } from '#ui/composables/server-queries'
 import {
 	ServerSettingsAdvancedPage,
 	ServerSettingsBackupsPage,
@@ -33,11 +34,7 @@ type ShowOptions = {
 
 const props = defineProps<{
 	siteUrl?: string
-	browseModpacks?: (args: {
-		serverId: string
-		worldId: string | null
-		from: 'reset-server'
-	}) => void | Promise<void>
+	browseModpacks?: (args: { serverId: string; from: 'reset-server' }) => void | Promise<void>
 }>()
 
 const { formatMessage } = useVIntl()
@@ -54,26 +51,15 @@ const messages = defineMessages({
 
 const modal = ref<InstanceType<typeof TabbedModal> | null>(null)
 
-const { serverId: currentServerId, worldId, server, serverFull } = injectModrinthServerContext()
+const { serverId: currentServerId, core, server } = injectModrinthServerContext()
 
 // The Core the server runs on, named in the title.
-const { data: core } = useQuery({
+const { data: coreInfo } = useQuery({
 	queryKey: ['cores', 'of', currentServerId],
 	queryFn: () => client.cores.coreOf(currentServerId),
 })
 
 const isApp = ref(true)
-
-// Preload
-useQuery({
-	queryKey: computed(() => ['content', 'list', 'v1', currentServerId]),
-	queryFn: () =>
-		client.archon.content_v1.getAddons(currentServerId, worldId.value!, {
-			from_modpack: false,
-		}),
-	enabled: computed(() => !!worldId.value),
-	staleTime: 30_000,
-})
 
 const serverSettingsTabComponentMap = {
 	general: ServerSettingsGeneralPage,
@@ -101,10 +87,7 @@ const tabs = computed<TabbedModalTab[]>(() =>
 			serverStatus: server.value?.status,
 			// On a Core only a server that follows no instance has a share of its own; one that
 			// follows an instance reports that instance's share, which it does not manage.
-			isShared:
-				!server.value?.linked_instance &&
-				!!serverFull.value?.worlds.find((world) => world.id === worldId.value)?.content
-					?.shared_instance_id,
+			isShared: !server.value.linked_instance && !!server.value.shared_instance_id,
 		}
 		const name = defineMessage({
 			id: `server.settings.tabs.${tab.id}`,
@@ -148,53 +131,17 @@ async function show({ serverId, tabIndex, tabId }: ShowOptions) {
 			)
 		}
 
-		const cachedServer = queryClient.getQueryData<Archon.Servers.v0.Server>([
-			'servers',
-			'detail',
-			targetServerId,
-		])
-		const cachedFull = queryClient.getQueryData<Archon.Servers.v1.ServerFull>([
-			'servers',
-			'v1',
-			'detail',
-			targetServerId,
-		])
-
 		modal.value?.setTab(resolveVisibleTabIndex(tabIndex, tabId))
 		modal.value?.show()
-		const fetchPromises: Promise<unknown>[] = []
-
-		if (!cachedServer) {
-			fetchPromises.push(
-				queryClient.fetchQuery({
-					queryKey: ['servers', 'detail', targetServerId],
-					queryFn: () => client.archon.servers_v0.get(targetServerId),
-				}),
-			)
-		}
-
-		if (!cachedFull) {
-			fetchPromises.push(
-				queryClient.fetchQuery({
-					queryKey: ['servers', 'v1', 'detail', targetServerId],
-					queryFn: () => client.archon.servers_v1.get(targetServerId),
-				}),
-			)
-		}
-
-		await Promise.all(fetchPromises)
-		modal.value?.setTab(resolveVisibleTabIndex(tabIndex, tabId))
-
-		if (worldId.value) {
-			queryClient.prefetchQuery({
-				queryKey: ['servers', 'properties', 'v1', targetServerId, worldId.value],
-				queryFn: () => client.archon.properties_v1.getProperties(targetServerId, worldId.value!),
-			})
-			queryClient.prefetchQuery({
-				queryKey: ['servers', 'startup', 'v1', targetServerId, worldId.value],
-				queryFn: () => client.archon.options_v1.getStartup(targetServerId, worldId.value!),
-			})
-		}
+		const params = { params: { id: targetServerId } }
+		void queryClient.prefetchQuery({
+			queryKey: ['servers', 'properties', targetServerId],
+			queryFn: () => core.call(coreRoutes.GetProperties, params),
+		})
+		void queryClient.prefetchQuery({
+			queryKey: serverKeys.startup(targetServerId),
+			queryFn: () => core.call(coreRoutes.GetStartup, params),
+		})
 	} catch (error) {
 		console.error(error)
 		addNotification({
@@ -224,7 +171,7 @@ defineExpose({ show, hide })
 		</template>
 		<template #title>
 			<span class="flex items-center gap-2 text-lg font-semibold text-primary">
-				<template v-if="core">{{ core.name }} <ChevronRightIcon /></template>
+				<template v-if="coreInfo">{{ coreInfo.name }} <ChevronRightIcon /></template>
 				{{ server.name || 'Server' }} <ChevronRightIcon />
 				<span class="font-extrabold text-contrast">{{
 					formatMessage(commonMessages.settingsLabel)

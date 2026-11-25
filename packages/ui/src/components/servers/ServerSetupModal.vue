@@ -24,6 +24,7 @@ import type { Archon, ModrinthApiError } from '@modrinth/api-client'
 import { computed, useTemplateRef } from 'vue'
 
 import { useDebugLogger } from '#ui/composables/debug-logger'
+import type { ServerInstallationKey } from '#ui/composables/server-installation-tracker'
 import { useServerPermissions } from '#ui/composables/server-permissions'
 
 import { defineMessages, useVIntl } from '../../composables/i18n'
@@ -69,7 +70,7 @@ async function getProjectVersions(projectId: string) {
 }
 
 async function getCurseForgeTarget() {
-	return { worldId: serverContext.worldId.value! }
+	return { worldId: serverContext.serverId }
 }
 
 function toApiLoader(loader: string): Archon.Content.v1.Modloader {
@@ -113,12 +114,12 @@ async function onFlowComplete(ctx: CreationFlowContextValue) {
 		selectedLoader: ctx.selectedLoader.value,
 		selectedGameVersion: ctx.selectedGameVersion.value,
 		selectedLoaderVersion: ctx.selectedLoaderVersion.value,
-		worldId: serverContext.worldId.value,
+		worldId: serverContext.serverId,
 	})
 
 	try {
 		if (ctx.projectInstall.value) {
-			await ctx.installServerContent(serverContext.serverId, serverContext.worldId.value!)
+			await ctx.installServerContent(serverContext.serverId, serverContext.serverId)
 			emitReinstall()
 		} else if (ctx.setupType.value === 'modpack' && ctx.modpackFile.value) {
 			debug('onFlowComplete: mrpack upload path')
@@ -135,7 +136,7 @@ async function onFlowComplete(ctx: CreationFlowContextValue) {
 			})
 			await client.archon.content_v1.installContent(
 				serverContext.serverId,
-				serverContext.worldId.value!,
+				serverContext.serverId,
 				{
 					content_variant: 'modpack',
 					spec: {
@@ -164,7 +165,7 @@ async function onFlowComplete(ctx: CreationFlowContextValue) {
 			serverContext.beginInstallation({
 				type: 'platform',
 				platform: (loader ?? 'vanilla') as Extract<
-					Archon.Websocket.v0.InstallProgressKey,
+					ServerInstallationKey,
 					{ type: 'platform' }
 				>['platform'],
 				platform_version: loaderVersion,
@@ -172,7 +173,7 @@ async function onFlowComplete(ctx: CreationFlowContextValue) {
 			})
 			await client.archon.content_v1.installContent(
 				serverContext.serverId,
-				serverContext.worldId.value!,
+				serverContext.serverId,
 				{
 					content_variant: 'bare',
 					loader: toApiLoader(loader ?? 'vanilla'),
@@ -217,7 +218,7 @@ async function handleMrpackUpload(ctx: CreationFlowContextValue, file: File) {
 	await ctx.trackUpload(
 		(onProgress) =>
 			client.kyros.content_v1.uploadModpackFile(
-				serverContext.worldId.value!,
+				serverContext.serverId,
 				file,
 				ctx.buildProperties(),
 				{ softOverride: false, onProgress },
@@ -231,18 +232,17 @@ async function handleMrpackUpload(ctx: CreationFlowContextValue, file: File) {
 }
 
 async function handleCurseForgeInstall(ctx: CreationFlowContextValue) {
-	const worldId = serverContext.worldId.value!
-	let installationKey
+	const worldId = serverContext.serverId
 	if (ctx.curseforgeModpackFile.value || ctx.curseforgeServerPackFile.value) {
-		installationKey = await ctx.trackUpload((onUploadProgress) =>
+		await ctx.trackUpload((onUploadProgress) =>
 			installCurseForgeModpack(client, worldId, ctx, { softOverride: false, onUploadProgress }),
 		)
 	} else {
-		installationKey = await installCurseForgeModpack(client, worldId, ctx, {
+		await installCurseForgeModpack(client, worldId, ctx, {
 			softOverride: false,
 		})
 	}
-	serverContext.beginInstallation(installationKey)
+	serverContext.beginInstallation({ type: 'unknown' })
 	emitReinstall()
 }
 

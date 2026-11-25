@@ -1,4 +1,4 @@
-import type { Archon } from '@modrinth/api-client'
+import type { ActionEntry, ActionUser, Archon, UserResp } from '@modrinth/api-client'
 import { PackageIcon } from '@modrinth/assets'
 import type { Component } from 'vue'
 
@@ -17,7 +17,6 @@ import type {
 	AuditAddonEventItem,
 	AuditBackupEventItem,
 	AuditEventLookups,
-	AuditWorld,
 	BaseEventProps,
 	EventEntity,
 	ParsedAuditEvent,
@@ -49,12 +48,10 @@ const basicEvents = new Set([
 	'core_removed',
 ])
 
-export function parseAuditEvent(
-	entry: Archon.Actions.v1.ActionEntry,
-	lookups: AuditEventLookups,
-): ParsedAuditEvent {
-	const action = entry.action?.action || 'unknown'
-	const metadata = entry.action?.metadata
+export function parseAuditEvent(entry: ActionEntry, lookups: AuditEventLookups): ParsedAuditEvent {
+	// Named as Modrinth Hosting names them, so upstream's parsing reads them; it knows more.
+	const action: string = entry.action.action
+	const metadata: unknown = 'metadata' in entry.action ? entry.action.metadata : undefined
 	const base = baseProps(entry, lookups, action)
 
 	try {
@@ -346,16 +343,12 @@ export function parseAuditEvent(
 	}
 }
 
-function baseProps(
-	entry: Archon.Actions.v1.ActionEntry,
-	lookups: AuditEventLookups,
-	action: string,
-): BaseEventProps {
+function baseProps(entry: ActionEntry, lookups: AuditEventLookups, action: string): BaseEventProps {
 	return {
 		action,
 		timestamp: entry.timestamp,
 		actor: actorFromEntry(entry.actor, lookups.users),
-		world: worldFromId(entry.world_id ?? null, lookups.worldById),
+		world: null,
 	}
 }
 
@@ -384,17 +377,9 @@ function actionSearchParts(action: string, ...extra: unknown[]): unknown[] {
 	return [action, action.replaceAll('_', ' '), ...extra]
 }
 
-function actorFromEntry(
-	actor: Archon.Actions.v1.ActionUser,
-	users: Record<string, Archon.Actions.v1.UserResp>,
-): AuditActor {
-	if (actor.type === 'support') {
-		const user = actor.user_id ? users[actor.user_id] : undefined
-		return {
-			id: 'support',
-			username: user?.username ? `Support (${user.username})` : 'support',
-		}
-	}
+function actorFromEntry(actor: ActionUser, users: Record<string, UserResp>): AuditActor {
+	// The Core's own CLI, which only its owner runs on the Core's machine.
+	if (actor.type === 'cli') return { id: 'cli', username: 'Core CLI' }
 
 	const user = users[actor.user_id]
 	return {
@@ -403,14 +388,6 @@ function actorFromEntry(
 		avatarUrl: user?.avatar_url || undefined,
 		profilePath: user?.username ? `/user/${encodeURIComponent(user.username)}` : undefined,
 	}
-}
-
-function worldFromId(
-	worldId: string | null,
-	worldById: Map<string, AuditWorld>,
-): AuditWorld | null {
-	if (!worldId) return null
-	return worldById.get(worldId) ?? { id: worldId, name: worldId }
 }
 
 function addonList(
