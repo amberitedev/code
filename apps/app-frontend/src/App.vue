@@ -1316,7 +1316,7 @@ async function handleCommand(e) {
 	} else if (e.event === 'ApproveCore') {
 		await coreActions.openAddCore(e.code)
 	} else if (e.event === 'PlayHostingServer') {
-		await serverPlay.play({ serverId: e.server_id, worldId: e.world_id }).catch(handleError)
+		await serverPlay.play({ serverId: e.server_id }).catch(handleError)
 	} else if (e.event === 'InstallSharedInstanceInvite') {
 		await sharedInstanceInviteHandler.value?.installFromInviteId(e.invite_id)
 	} else if (e.event === 'InstallServer') {

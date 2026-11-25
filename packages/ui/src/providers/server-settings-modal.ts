@@ -4,7 +4,6 @@ import { createContext } from './create-context'
 
 export interface BrowseServerContentArgs {
 	serverId: string
-	worldId: string | null
 	type: 'mod' | 'plugin' | 'datapack'
 }
 

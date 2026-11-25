@@ -4,8 +4,7 @@ import { injectModrinthClient } from '#ui/providers'
 
 import { createServerInviteLink } from './invite-link'
 
-// `worldId` is upstream's; a Core server's one world has the server's id.
-export type ServerInviteLinkTarget = { serverId: string; worldId: string; siteUrl: string }
+export type ServerInviteLinkTarget = { serverId: string; siteUrl: string }
 
 export type ServerInviteLink = ReturnType<typeof useServerInviteLink>
 

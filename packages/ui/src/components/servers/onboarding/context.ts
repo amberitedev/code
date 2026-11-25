@@ -4,7 +4,6 @@ import { createContext } from '#ui/providers/create-context'
 
 export interface ServerOnboardingRequest {
 	serverId: string
-	worldId: string
 	siteUrl: string
 	project?: {
 		projectId: string

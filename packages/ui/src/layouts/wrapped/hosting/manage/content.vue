@@ -635,7 +635,7 @@ function handleBrowseContent() {
 	if (contentActionDisabled.value) return
 	const contentType = type.value
 	if (browseServerContent) {
-		browseServerContent({ serverId, worldId: serverId, type: contentType })
+		browseServerContent({ serverId, type: contentType })
 		return
 	}
 

@@ -113,7 +113,6 @@ async function install(coreId: string, serverId: string, config: CreationFlowCon
 	if (instance && instanceSource) {
 		await instanceSource.pushInstance({
 			serverId,
-			worldId: serverId,
 			instanceId: instance.id,
 			properties: config.buildProperties(),
 		})
@@ -170,7 +169,7 @@ async function browseModpacks() {
 		const { id } = created
 		setupModal.value?.hide()
 		await queryClient.invalidateQueries({ queryKey: ['servers'] })
-		await router.push({ path: '/browse/modpack', query: { sid: id, wid: id, from: 'onboarding' } })
+		await router.push({ path: '/browse/modpack', query: { sid: id, from: 'onboarding' } })
 	} catch (cause) {
 		console.error('Failed to create server', cause)
 		addNotification({

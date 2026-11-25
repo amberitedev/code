@@ -22,7 +22,6 @@ export interface InstanceServerSourceProvider {
 	 */
 	pushInstance: (args: {
 		serverId: string
-		worldId: string
 		instanceId: string
 		properties?: PatchPropertiesFields
 		restart?: boolean

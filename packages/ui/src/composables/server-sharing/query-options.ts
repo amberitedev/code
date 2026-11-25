@@ -17,7 +17,7 @@ export function serverShareDiffQueryOptions(
 	userId: string | undefined,
 ) {
 	return {
-		queryKey: serverKeys.shareDiff(serverId, serverId, userId),
+		queryKey: serverKeys.shareDiff(serverId, userId),
 		queryFn: async () => {
 			const preview = await core.call(instanceSharing.GetSharedInstancePublishPreview, {
 				params: { id: serverId },
@@ -45,7 +45,7 @@ export function serverShareableFilesQueryOptions(
 	userId: string | undefined,
 ) {
 	return {
-		queryKey: serverKeys.shareFiles(serverId, serverId, userId),
+		queryKey: serverKeys.shareFiles(serverId, userId),
 		queryFn: async () => {
 			const preview = await core.call(instanceSharing.GetSharedInstancePublishPreview, {
 				params: { id: serverId },

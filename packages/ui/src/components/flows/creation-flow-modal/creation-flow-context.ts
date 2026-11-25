@@ -268,12 +268,7 @@ export interface CreationFlowContextValue {
 	trackUpload: <T>(
 		run: (onProgress: (progress: UploadProgress) => void) => Promise<T>,
 	) => Promise<T>
-	showInvite: (
-		serverId: string,
-		worldId: string,
-		siteUrl: string,
-		onDone: () => void | Promise<void>,
-	) => void
+	showInvite: (serverId: string, siteUrl: string, onDone: () => void | Promise<void>) => void
 	completeInvite: () => Promise<void>
 	buildProperties: () => PatchPropertiesFields
 	fetchLoaderMetadata: (loader?: string | null) => Promise<void>
@@ -710,18 +705,13 @@ export function createCreationFlowContext(
 		}
 	}
 
-	function showInvite(
-		serverId: string,
-		worldId: string,
-		siteUrl: string,
-		onDone: () => void | Promise<void>,
-	) {
+	function showInvite(serverId: string, siteUrl: string, onDone: () => void | Promise<void>) {
 		if (flowType !== 'server-onboarding') return
 		inviteOnDone = onDone
 		inviteSubmitted.value = true
 		modal.value?.setStage('invite-friends')
 		loading.value = false
-		invite.start({ serverId, worldId, siteUrl })
+		invite.start({ serverId, siteUrl })
 	}
 
 	async function completeInvite() {

@@ -197,7 +197,7 @@ const inviteBinding = computed<ServerInviteBinding>(() => ({
 }))
 const serverAddress = computed(() => getHostingServerAddress(server.value?.net))
 async function performAction(action: Action, target: ServerShareActionTarget) {
-	const { worldId: targetWorldId, configPaths, isCurrent: sameContext } = target
+	const { configPaths, isCurrent: sameContext } = target
 	let id = server.value?.shared_instance_id
 	// A server that follows an instance reads that instance's share, which only the instance
 	// owner's App pushes: here it only manages players and plays.
@@ -218,7 +218,7 @@ async function performAction(action: Action, target: ServerShareActionTarget) {
 	if (action === 'play') {
 		await ensureServerRunning(sameContext)
 		if (!sameContext()) return
-		await props.onPlayServer({ serverId, worldId: targetWorldId })
+		await props.onPlayServer({ serverId })
 	} else if (action === 'invite') {
 		await nextTick()
 		const members = await players.members.refetch({ throwOnError: true })

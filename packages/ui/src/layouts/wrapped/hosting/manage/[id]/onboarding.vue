@@ -129,7 +129,7 @@ const messages = defineMessages({
 async function openModal(project?: ServerOnboardingRequest['project']) {
 	if (!canSetup.value) return
 	try {
-		await flow.open({ serverId, worldId: serverId, siteUrl: props.siteUrl, project })
+		await flow.open({ serverId, siteUrl: props.siteUrl, project })
 	} catch (error) {
 		handleError(error as Error)
 	}

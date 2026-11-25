@@ -33,7 +33,6 @@ import { injectAuth, injectModrinthServerContext } from '#ui/providers'
 
 const props = defineProps<{
 	serverId: string
-	worldId?: string
 	diffs: ContentDiffItem[]
 	changesDescription?: string
 	confirmLabel?: string
