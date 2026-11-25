@@ -194,7 +194,11 @@ async function uploadIcon(file: File, config: IconConfig | null): Promise<boolea
 		addNotification({
 			type: 'error',
 			title: 'Upload failed',
-			text: error instanceof ApiCallError ? error.description : 'Failed to upload server icon.',
+			// Only the reason for a bad file is meant for the person uploading.
+			text:
+				error instanceof ApiCallError && error.code === 'invalid_input'
+					? error.description
+					: 'Failed to upload server icon.',
 		})
 		return false
 	} finally {
