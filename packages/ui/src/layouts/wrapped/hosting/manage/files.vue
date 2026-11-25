@@ -8,9 +8,10 @@ import ConfigPushPromptModal from '#ui/components/servers/ConfigPushPromptModal.
 import { defineMessages, useVIntl } from '#ui/composables/i18n'
 import { useServerDownload } from '#ui/composables/server-download'
 import { useServerPermissions } from '#ui/composables/server-permissions'
+import { changeServerPower } from '#ui/composables/server-power'
 import { serverKeys } from '#ui/composables/server-queries'
 import { toShareableConfigPath } from '#ui/composables/server-sharing/config-files'
-import { useSharedInstanceInstalledOnce } from '#ui/composables/server-sharing/shared-instance'
+import { useServerOwnShare } from '#ui/composables/server-sharing/own-share'
 import { useServerShareReview } from '#ui/composables/server-sharing/use-server-share-review'
 import {
 	injectModrinthClient,
@@ -34,7 +35,7 @@ const props = defineProps<{
 
 const client = injectModrinthClient()
 const serverContext = injectModrinthServerContext()
-const { serverId, core, worldId, busyReasons } = serverContext
+const { serverId, coreId, core, busyReasons } = serverContext
 const { addNotification } = injectNotificationManager()
 const { formatMessage } = useVIntl()
 const { canWriteFiles, canUsePowerActions, canSetup, permissionDeniedMessage } =
@@ -84,16 +85,12 @@ const busyWarning = computed(() =>
 		: null,
 )
 
-const shareWorld = computed(() =>
-	serverContext.serverFull.value?.worlds.find((world) => world.id === worldId.value),
-)
 // Config pushes go to the server's own share; a server that follows an instance has none.
-const sharedInstanceId = computed(() =>
-	serverContext.server.value?.linked_instance
-		? null
-		: (shareWorld.value?.content?.shared_instance_id ?? null),
-)
-const sharedInstanceInstalledOnce = useSharedInstanceInstalledOnce(sharedInstanceId)
+const {
+	sharedInstanceId,
+	installedOnce: sharedInstanceInstalledOnce,
+	needsUpdate: shareNeedsUpdate,
+} = useServerOwnShare()
 const configPushModal = ref<InstanceType<typeof ConfigPushPromptModal>>()
 const configPushDeferredPaths = new Set<string>()
 
@@ -222,7 +219,7 @@ provideFileManager({
 	prefetchDirectory: files.prefetchDirectory,
 	canRestart: canUsePowerActions.value,
 	restartServer: async () => {
-		if (canUsePowerActions.value) await client.archon.servers_v0.power(serverId, 'Restart')
+		if (canUsePowerActions.value) await changeServerPower(client, coreId, serverId, 'Restart')
 	},
 	canShareToMclogs: true,
 })
@@ -238,7 +235,7 @@ provideFileManager({
 	<ConfigPushPromptModal
 		ref="configPushModal"
 		:action-disabled="!canSetup || sharePending"
-		:includes-other-changes="shareWorld?.content?.shared_instance_needs_update ?? false"
+		:includes-other-changes="shareNeedsUpdate"
 		:server-running="serverContext.isServerRunning.value"
 	/>
 </template>

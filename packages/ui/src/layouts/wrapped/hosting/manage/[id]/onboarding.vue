@@ -48,7 +48,7 @@
 				color="brand"
 				size="xl"
 				class="ml-auto"
-				:disabled="!canSetup || !worldId"
+				:disabled="!canSetup"
 				@click="openModal()"
 			>
 				{{ formatMessage(messages.setupServerButton) }} <RightArrowIcon />
@@ -74,7 +74,7 @@ import { injectModrinthServerContext, injectNotificationManager } from '#ui/prov
 const { formatMessage } = useVIntl()
 const { handleError } = injectNotificationManager()
 const { canSetup, permissionDeniedMessage } = useServerPermissions()
-const { serverId, worldId } = injectModrinthServerContext()
+const { serverId } = injectModrinthServerContext()
 const flow = injectServerOnboardingFlow()
 const route = useRoute()
 const router = useRouter()
@@ -127,9 +127,9 @@ const messages = defineMessages({
 })
 
 async function openModal(project?: ServerOnboardingRequest['project']) {
-	if (!canSetup.value || !worldId.value) return
+	if (!canSetup.value) return
 	try {
-		await flow.open({ serverId, worldId: worldId.value, siteUrl: props.siteUrl, project })
+		await flow.open({ serverId, worldId: serverId, siteUrl: props.siteUrl, project })
 	} catch (error) {
 		handleError(error as Error)
 	}

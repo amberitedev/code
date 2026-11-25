@@ -1,81 +1,27 @@
-import type { Archon, UploadState } from '@modrinth/api-client'
 import type { Meta, StoryObj } from '@storybook/vue3-vite'
 import { computed, ref } from 'vue'
 
 import InstallingBanner from '../../components/servers/InstallingBanner.vue'
 import type { ServerInstallationState } from '../../composables/server-installation-tracker'
 import { provideModrinthServerContext } from '../../providers'
-import type {
-	CancelUploadHandler,
-	ModrinthServerContext,
-	ServerStats,
-} from '../../providers/server-context'
+import { storyServerContext } from './story-server-context'
 
 function renderInstallation(state: ServerInstallationState) {
 	return () => ({
 		components: { InstallingBanner },
 		setup() {
 			const installation = ref<ServerInstallationState | null>(state)
-			const serverContext: ModrinthServerContext = {
-				get serverId() {
-					return 'story-server'
-				},
-				worldId: ref<string | null>('story-world'),
-				server: ref({
-					server_id: 'story-server',
-					status: 'installing',
-				} as Archon.Servers.v0.Server),
-				serverFull: computed(() => null),
-				currentUserPermissions: computed(() => 0),
-				isConnected: ref(true),
-				isWsAuthIncorrect: ref(false),
-				powerState: ref('stopped'),
-				powerStateDetails: ref(undefined),
-				isServerRunning: computed(() => false),
-				stats: ref<ServerStats>({
-					current: {
-						cpu_percent: 0,
-						ram_usage_bytes: 0,
-						ram_total_bytes: 1,
-						storage_usage_bytes: 0,
-						storage_total_bytes: 0,
+			provideModrinthServerContext(
+				storyServerContext({
+					server: { status: 'installing', power_state: 'offline' },
+					powerState: ref('offline'),
+					isServerRunning: computed(() => false),
+					installation: computed(() => installation.value),
+					dismissInstallation: () => {
+						installation.value = null
 					},
-					past: {
-						cpu_percent: 0,
-						ram_usage_bytes: 0,
-						ram_total_bytes: 1,
-						storage_usage_bytes: 0,
-						storage_total_bytes: 0,
-					},
-					graph: { cpu: [], ram: [] },
 				}),
-				uptimeSeconds: ref(0),
-				installProgressItems: ref<Archon.Websocket.v0.InstallProgressItem[]>([]),
-				installation: computed(() => installation.value),
-				beginInstallation: () => {},
-				cancelOptimisticInstallation: () => {},
-				dismissInstallation: () => {
-					installation.value = null
-				},
-				busyReasons: computed(() => []),
-				fsAuth: ref(null),
-				fsOps: ref<Archon.Websocket.v0.FilesystemOperation[]>([]),
-				fsQueuedOps: ref<Archon.Websocket.v0.QueuedFilesystemOp[]>([]),
-				refreshFsAuth: async () => {},
-				uploadState: ref<UploadState>({
-					isUploading: false,
-					currentFileName: null,
-					currentFileProgress: 0,
-					uploadedBytes: 0,
-					totalBytes: 0,
-					completedFiles: 0,
-					totalFiles: 0,
-				}),
-				cancelUpload: ref<CancelUploadHandler | null>(null),
-				activeOperations: computed(() => []),
-				dismissOperation: async () => {},
-			}
-			provideModrinthServerContext(serverContext)
+			)
 		},
 		template: '<InstallingBanner />',
 	})

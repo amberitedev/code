@@ -4,7 +4,6 @@ import { createContext } from '#ui/providers/create-context'
 
 export interface ServerSettingsBrowseModpacksArgs {
 	serverId: string
-	worldId: string | null
 	from: 'reset-server'
 }
 

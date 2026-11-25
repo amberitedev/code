@@ -39,18 +39,16 @@ export function useServerShareReview<Action extends string = 'push'>(options?: {
 }) {
 	const client = injectModrinthClient()
 	const auth = injectAuth()
-	const { serverId, worldId, serverFull, busyReasons } = injectModrinthServerContext()
+	const { serverId, server, busyReasons } = injectModrinthServerContext()
+	// A Core names a server's one world by the server's id.
+	const worldId = computed<string | null>(() => serverId)
 	const { canSetup } = useServerPermissions()
 	const { handleError } = injectNotificationManager()
 	const { formatMessage } = useVIntl()
 	const queryClient = useQueryClient()
 	const diffModal = ref<InstanceType<typeof ServerSharePushModal>>()
 	const previewOpen = ref(false)
-	const sharedInstanceId = computed(
-		() =>
-			serverFull.value?.worlds.find((world) => world.id === worldId.value)?.content
-				?.shared_instance_id,
-	)
+	const sharedInstanceId = computed(() => server.value.shared_instance_id)
 	let disposed = false
 	onScopeDispose(() => {
 		disposed = true

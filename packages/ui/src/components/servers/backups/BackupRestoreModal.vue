@@ -38,7 +38,7 @@
 </template>
 
 <script setup lang="ts">
-import type { Archon } from '@modrinth/api-client'
+import { core as coreRoutes, type Backup } from '@modrinth/api-client'
 import { RotateCounterClockwiseIcon, SpinnerIcon, XIcon } from '@modrinth/assets'
 import { useMutation, useQueryClient } from '@tanstack/vue-query'
 import { computed, ref } from 'vue'
@@ -46,11 +46,7 @@ import { computed, ref } from 'vue'
 import { Button } from '#ui/components/base/buttons'
 
 import { useVIntl } from '../../../composables/i18n'
-import {
-	injectModrinthClient,
-	injectModrinthServerContext,
-	injectNotificationManager,
-} from '../../../providers'
+import { injectModrinthServerContext, injectNotificationManager } from '../../../providers'
 import { commonMessages } from '../../../utils'
 import Admonition from '../../base/Admonition.vue'
 import NewModal from '../../modal/NewModal.vue'
@@ -58,7 +54,6 @@ import BackupItem from './BackupItem.vue'
 
 const { addNotification } = injectNotificationManager()
 const { formatMessage } = useVIntl()
-const client = injectModrinthClient()
 const queryClient = useQueryClient()
 const ctx = injectModrinthServerContext()
 
@@ -81,13 +76,13 @@ function safetyBackupName(backupName: string) {
 }
 
 const restoreMutation = useMutation({
-	mutationFn: ({ backupId, name }: { backupId: string; name: string }) =>
-		client.archon.backups_queue_v1.restore(ctx.serverId, ctx.worldId.value!, backupId, { name }),
+	mutationFn: ({ backupId }: { backupId: string; name: string }) =>
+		ctx.core.call(coreRoutes.RestoreBackup, { params: { id: ctx.serverId, backup_id: backupId } }),
 	onSuccess: () => queryClient.invalidateQueries({ queryKey: backupsQueryKey }),
 })
 
 const modal = ref<InstanceType<typeof NewModal>>()
-const currentBackup = ref<Archon.BackupsQueue.v1.BackupQueueBackup | null>(null)
+const currentBackup = ref<Backup | null>(null)
 const isRestoring = ref(false)
 const restoreDisabled = computed(
 	() => isRestoring.value || ctx.isServerRunning.value || !props.canRestore,
@@ -98,7 +93,7 @@ const restoreDisabledTooltip = computed(() =>
 		: (props.permissionDeniedMessage ?? formatMessage(commonMessages.noPermissionAction)),
 )
 
-function show(backup: Archon.BackupsQueue.v1.BackupQueueBackup) {
+function show(backup: Backup) {
 	currentBackup.value = backup
 	modal.value?.show()
 }

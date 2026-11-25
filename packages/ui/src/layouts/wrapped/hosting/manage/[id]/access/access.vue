@@ -43,11 +43,7 @@ import { computed } from 'vue'
 import DropdownFilterBar from '#ui/components/base/DropdownFilterBar.vue'
 import { AuditLogTable } from '#ui/components/servers/access'
 import { useVIntl } from '#ui/composables/i18n'
-import {
-	injectModrinthClient,
-	injectModrinthServerContext,
-	injectNotificationManager,
-} from '#ui/providers'
+import { injectModrinthServerContext, injectNotificationManager } from '#ui/providers'
 
 import { useAccessAuditLog } from './audit-log'
 import { accessMessages } from './messages'
@@ -63,8 +59,7 @@ const props = withDefaults(
 const showAuditLogInstances = computed(() => props.showAuditLogInstances)
 
 const { formatMessage } = useVIntl()
-const client = injectModrinthClient()
-const { serverId, serverFull } = injectModrinthServerContext()
+const { serverId, core } = injectModrinthServerContext()
 const { addNotification } = injectNotificationManager()
 
 const messages = accessMessages
@@ -87,9 +82,8 @@ const {
 	isLoadingMoreActionLogEntries,
 	loadMoreActionLogEntries,
 } = useAccessAuditLog({
-	client,
+	core,
 	serverId,
-	serverFull,
 	showAuditLogInstances,
 	addNotification,
 })

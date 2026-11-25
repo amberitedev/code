@@ -11,19 +11,13 @@
 			:site-url="config.accountSiteUrl"
 			:navigate-to-servers="() => router.push('/hosting/manage')"
 			:browse-modpacks="
-				({ serverId: sid, worldId: wid, from }) => {
-					router.push({
-						path: '/browse/modpack',
-						query: { sid, wid: wid ?? undefined, from },
-					})
+				({ serverId: sid, from }) => {
+					router.push({ path: '/browse/modpack', query: { sid, from } })
 				}
 			"
 			:browse-content="
-				({ serverId: sid, worldId: wid, type }) => {
-					router.push({
-						path: `/browse/${type}`,
-						query: { sid, wid: wid ?? undefined },
-					})
+				({ serverId: sid, type }) => {
+					router.push({ path: `/browse/${type}`, query: { sid } })
 				}
 			"
 		>

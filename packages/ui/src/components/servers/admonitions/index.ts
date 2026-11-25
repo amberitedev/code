@@ -1,6 +1,5 @@
 export type { BackupAdmonitionEntry } from './BackupAdmonition.vue'
 export { default as BackupAdmonition } from './BackupAdmonition.vue'
-export { default as CurseForgeFilesAdmonition } from './CurseForgeFilesAdmonition.vue'
 export { default as FileOperationAdmonition } from './FileOperationAdmonition.vue'
 export { default as ServerPanelAdmonitions } from './ServerPanelAdmonitions.vue'
 export { default as UploadAdmonition } from './UploadAdmonition.vue'

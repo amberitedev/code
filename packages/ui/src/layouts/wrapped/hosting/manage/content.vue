@@ -185,18 +185,11 @@ const messages = defineMessages({
 })
 
 const client = injectModrinthClient()
-const {
-	server,
-	serverFull,
-	worldId,
-	busyReasons,
-	beginInstallation,
-	installProgressItems,
-	uploadState,
-	cancelUpload,
-	powerState,
-} = injectModrinthServerContext()
+const { server, busyReasons, beginInstallation, uploadState, cancelUpload, powerState } =
+	injectModrinthServerContext()
 const serverPlayMigration = injectServerPlayMigration(null)
+// A Core names a server's one world by the server's id.
+const worldId = computed<string | null>(() => server.value.server_id)
 const contentUploadSession = useUploadSessionUpload({
 	client,
 	scope: 'content',
@@ -323,8 +316,9 @@ const setupActionBusyMessage = computed(() => {
 	return filteredReasons.length > 0 ? formatMessage(filteredReasons[0].reason) : null
 })
 
-const currentWorldInstallProgressItems = computed(() =>
-	installProgressItems.value.filter((item) => item.world_id === worldId.value),
+// A Core reports no install progress per file.
+const currentWorldInstallProgressItems = computed(
+	(): Archon.Websocket.v0.InstallProgressItem[] => [],
 )
 const contentActionDisabled = computed(() => !canSetup.value || busyReasons.value.length > 0)
 const contentActionBusyMessage = computed(() => {
@@ -685,8 +679,7 @@ async function resolveStoredServerAddonPlans(plans: BrowseInstallPlan[]) {
 				selected: toResolvePreferences(plan.preferences),
 				target: toResolvePreferences(target),
 				existing_project_ids: existingProjectIds,
-				update_channel: serverFull.value?.worlds.find((world) => world.id === worldId.value)
-					?.update_channel,
+				update_channel: server.value.update_channel,
 			})
 
 			return [resolved.primary, ...resolved.dependencies].map((item) => ({
@@ -1415,9 +1408,8 @@ async function performUpdate(selectedVersion: Labrinth.Versions.v2.Version) {
 		if (updatingModpack.value && curseforgeLink) {
 			const file = curseforgeFilesById.value.get(selectedVersion.id)
 			if (!file) return
-			beginInstallation(
-				await switchCurseForgeModpackFile(client, worldId.value!, curseforgeLink, file),
-			)
+			await switchCurseForgeModpackFile(client, worldId.value!, curseforgeLink, file)
+			beginInstallation({ type: 'unknown' })
 		} else if (updatingModpack.value) {
 			const mp = contentQuery.data.value?.modpack
 			if (!mp || mp.spec.platform !== 'modrinth') return

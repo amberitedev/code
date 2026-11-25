@@ -56,6 +56,7 @@
 </template>
 
 <script setup lang="ts">
+import { core as coreRoutes } from '@modrinth/api-client'
 import { EyeIcon, EyeOffIcon, SpinnerIcon } from '@modrinth/assets'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, ref, watch } from 'vue'
@@ -63,15 +64,11 @@ import { computed, ref, watch } from 'vue'
 import { Combobox } from '#ui/components'
 import SaveBanner from '#ui/components/servers/SaveBanner.vue'
 import { useServerPermissions } from '#ui/composables/server-permissions'
-import {
-	injectModrinthClient,
-	injectModrinthServerContext,
-	injectNotificationManager,
-} from '#ui/providers'
+import { serverKeys } from '#ui/composables/server-queries'
+import { injectModrinthServerContext, injectNotificationManager } from '#ui/providers'
 
 const { addNotification } = injectNotificationManager()
-const { server, serverId, worldId } = injectModrinthServerContext()
-const client = injectModrinthClient()
+const { server, serverId, core } = injectModrinthServerContext()
 const queryClient = useQueryClient()
 const { canUseAdvancedSettings, permissionDeniedMessage } = useServerPermissions()
 
@@ -80,7 +77,7 @@ const advancedActionTooltip = computed(() =>
 )
 
 // Startup state
-const startupQueryKey = computed(() => ['servers', 'startup', 'v1', serverId, worldId.value])
+const startupQueryKey = computed(() => serverKeys.startup(serverId))
 
 const {
 	data: startupData,
@@ -88,8 +85,7 @@ const {
 	error: startupError,
 } = useQuery({
 	queryKey: startupQueryKey,
-	queryFn: () => client.archon.options_v1.getStartup(serverId, worldId.value!),
-	enabled: computed(() => worldId.value !== null),
+	queryFn: () => core.call(coreRoutes.GetStartup, { params: { id: serverId } }),
 	// A Core's refusal (a server with nothing installed yet) does not change on retry, and
 	// retrying kept every field spinning for seconds.
 	retry: false,
@@ -177,10 +173,9 @@ const hasUnsavedChanges = computed(() => javaVersion.value !== savedJavaVersion.
 
 const { mutate: saveStartupMutation, isPending } = useMutation({
 	mutationFn: () =>
-		client.archon.options_v1.patchStartup(serverId, worldId.value!, {
-			startup_command: startupData.value?.startup_command || null,
-			java_version: javaVersion.value ?? null,
-			jre_vendor: null,
+		core.call(coreRoutes.ChangeStartup, {
+			params: { id: serverId },
+			body: { java_version: javaVersion.value ?? null },
 		}),
 	onSuccess: async () => {
 		await queryClient.invalidateQueries({ queryKey: startupQueryKey.value })

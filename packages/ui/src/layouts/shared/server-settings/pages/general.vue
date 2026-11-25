@@ -137,7 +137,7 @@
 </template>
 
 <script setup lang="ts">
-import type { Archon } from '@modrinth/api-client'
+import { core as coreRoutes, type ReleaseChannel } from '@modrinth/api-client'
 import { TrashIcon } from '@modrinth/assets'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, ref, watch } from 'vue'
@@ -152,22 +152,13 @@ import { defineMessages, useVIntl } from '#ui/composables/i18n'
 import { useServerPermissions } from '#ui/composables/server-permissions'
 import { useServerPreferences } from '#ui/composables/server-preferences'
 import {
-	injectModrinthClient,
 	injectModrinthServerContext,
 	injectNotificationManager,
 	injectPageContext,
 } from '#ui/providers'
 
 const { addNotification } = injectNotificationManager()
-const client = injectModrinthClient()
-const {
-	server: data,
-	serverId,
-	worldId,
-	serverFull,
-	busyReasons,
-	powerState,
-} = injectModrinthServerContext()
+const { server: data, serverId, core, busyReasons, powerState } = injectModrinthServerContext()
 // A Core only deletes a stopped server, so say so before the name is typed.
 const stopBeforeDeleting = computed(
 	() => powerState.value !== 'stopped' && powerState.value !== 'crashed',
@@ -187,7 +178,7 @@ async function deleteServer() {
 	if (deleting.value) return
 	deleting.value = true
 	try {
-		await client.archon.servers_v1.deleteLocal(serverId)
+		await core.call(coreRoutes.DeleteServer, { params: { id: serverId } })
 		queryClient.removeQueries({ queryKey: ['servers', 'detail', serverId] })
 		await queryClient.invalidateQueries({ queryKey: ['servers'] })
 		await router.push('/hosting/manage')
@@ -206,21 +197,16 @@ const serverName = ref(data.value?.name)
 watch(data, (newData) => {
 	if (newData) serverName.value = newData.name
 })
-type UpdateChannel = Archon.Servers.v1.ReleaseChannel
-const updateChannelOptions: UpdateChannel[] = ['release', 'beta', 'alpha']
+const updateChannelOptions: ReleaseChannel[] = ['release', 'beta', 'alpha']
 
-const worldUpdateChannel = computed<UpdateChannel>(
-	() =>
-		serverFull.value?.worlds.find((world) => world.id === worldId.value)?.update_channel ??
-		'release',
-)
-const updateChannel = ref<UpdateChannel>(worldUpdateChannel.value)
+const worldUpdateChannel = computed(() => data.value.update_channel)
+const updateChannel = ref<ReleaseChannel>(worldUpdateChannel.value)
 
 watch(worldUpdateChannel, (channel) => {
 	updateChannel.value = channel
 })
 
-function formatUpdateChannelLabel(channel: UpdateChannel) {
+function formatUpdateChannelLabel(channel: ReleaseChannel) {
 	switch (channel) {
 		case 'release':
 			return formatMessage(messages.updateChannelRelease)
@@ -231,7 +217,7 @@ function formatUpdateChannelLabel(channel: UpdateChannel) {
 	}
 }
 
-function formatUpdateChannelDescription(channel: UpdateChannel) {
+function formatUpdateChannelDescription(channel: ReleaseChannel) {
 	switch (channel) {
 		case 'release':
 			return formatMessage(messages.updateChannelReleaseDescription)
@@ -349,7 +335,7 @@ const setPreferenceValue = (key: string, value: boolean) => {
 
 const { data: performance } = useQuery({
 	queryKey: ['servers', 'performance', serverId],
-	queryFn: () => client.archon.servers_v1.getPerformance(serverId),
+	queryFn: () => core.call(coreRoutes.GetPerformance, { params: { id: serverId } }),
 })
 const restartOnCrash = ref(true)
 watch(
@@ -383,26 +369,22 @@ const saveGeneral = async () => {
 
 	try {
 		isUpdating.value = true
-		if (serverName.value !== data.value?.name) {
-			await client.archon.servers_v0.updateName(serverId, serverName.value ?? '')
+		if (serverName.value !== data.value?.name || hasUpdateChannelChanges.value) {
+			await core.call(coreRoutes.ChangeServer, {
+				params: { id: serverId },
+				body: {
+					name: serverName.value !== data.value?.name ? (serverName.value ?? '') : null,
+					update_channel: hasUpdateChannelChanges.value ? updateChannel.value : null,
+				},
+			})
 		}
 		if (hasRestartChanges.value && performance.value) {
-			const saved = await client.archon.servers_v1.setRestarts(serverId, {
-				...performance.value.restarts,
-				crash: restartOnCrash.value,
+			const saved = await core.call(coreRoutes.SetRestarts, {
+				params: { id: serverId },
+				body: { ...performance.value.restarts, crash: restartOnCrash.value },
 			})
 			queryClient.setQueryData(['servers', 'performance', serverId], saved)
 		}
-		if (hasUpdateChannelChanges.value && worldId.value) {
-			await client.archon.servers_v1.patchWorld(serverId, worldId.value, {
-				update_channel: updateChannel.value,
-			})
-			await Promise.all([
-				queryClient.invalidateQueries({ queryKey: ['servers', 'v1', 'detail', serverId] }),
-				queryClient.invalidateQueries({ queryKey: ['content', 'list', 'v1', serverId] }),
-			])
-		}
-
 		// Save preferences to localStorage
 		for (const key of preferenceKeys) userPreferences.value[key] = newUserPreferences.value[key]
 

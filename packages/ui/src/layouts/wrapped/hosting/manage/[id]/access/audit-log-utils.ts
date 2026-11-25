@@ -1,4 +1,4 @@
-import type { Archon } from '@modrinth/api-client'
+import type { ActionEntry, Archon } from '@modrinth/api-client'
 import type { IconComponent } from '@modrinth/assets'
 import {
 	DatabaseBackupIcon,
@@ -236,15 +236,14 @@ export function getAuditLogTimeframeRange(
 	return getPresetAuditLogTimeframeRange(selection.preset, now)
 }
 
-export function getActionLogEntryId(entry: Archon.Actions.v1.ActionEntry) {
+export function getActionLogEntryId(entry: ActionEntry) {
 	return JSON.stringify([
 		entry.timestamp,
 		entry.actor.type,
-		entry.actor.type === 'user' ? entry.actor.user_id : (entry.actor.user_id ?? 'support'),
+		entry.actor.type === 'user' ? entry.actor.user_id : 'cli',
 		entry.server_id,
-		entry.world_id ?? null,
 		entry.action.action,
-		stableStringify(entry.action.metadata),
+		stableStringify('metadata' in entry.action ? entry.action.metadata : null),
 	])
 }
 

@@ -7,7 +7,7 @@ import {
 	type ListedCore,
 } from '@amberite/contracts'
 
-import type { LocationOf } from '../contracts/client'
+import type { ContractClient, LocationOf } from '../contracts/client'
 import { ApiCallError } from '../contracts/errors'
 import type { AbstractModrinthClient } from '../core/abstract-client'
 import { archonServer } from '../core-hosting/servers-v0'
@@ -221,6 +221,11 @@ export class Cores {
 		const core = (await this.known()).find((candidate) => candidate.id === coreId)
 		if (!core) throw new ApiCallError(404, 'not_found', 'No listed Core has this server')
 		return core
+	}
+
+	/** The routes of the Core that has `serverId`. Throws `not_found` when no listed Core has it. */
+	public async serverRoutes(serverId: string): Promise<ContractClient> {
+		return this.client.core((await this.coreOf(serverId)).id)
 	}
 
 	/** The base URL requests to a listed Core go to. */

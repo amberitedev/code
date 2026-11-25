@@ -101,7 +101,7 @@
 					:highlighted-id="highlightedBackupId"
 					:show-copy-id-action="showCopyIdAction"
 					:show-debug-info="showDebugInfo"
-					:can-download="!!server.node && !!worldId"
+					:can-download="true"
 					@download="downloadBackup"
 					@restore="(backup) => restoreModal?.show(backup)"
 					@rename="(backup) => renameModal?.show(backup)"
@@ -164,7 +164,7 @@
 </template>
 
 <script setup lang="ts">
-import { type Archon, core as coreRoutes } from '@modrinth/api-client'
+import { type Backup, core as coreRoutes } from '@modrinth/api-client'
 import {
 	CalendarClockIcon,
 	DownloadIcon,
@@ -193,19 +193,13 @@ import { defineMessages, useVIntl } from '#ui/composables/i18n'
 import { useServerBackupsQueue } from '#ui/composables/server-backups-queue'
 import { useServerDownload } from '#ui/composables/server-download'
 import { useServerPermissions } from '#ui/composables/server-permissions'
-import {
-	injectModrinthClient,
-	injectModrinthServerContext,
-	injectNotificationManager,
-} from '#ui/providers'
+import { injectModrinthServerContext, injectNotificationManager } from '#ui/providers'
 import { injectServerSettingsModal } from '#ui/providers/server-settings-modal'
 import { commonMessages } from '#ui/utils/common-messages'
 
 import HistoryTable from './history-table.vue'
 import SlotCard from './slot-card.vue'
 import { useFocusedBackup } from './use-focused-backup'
-
-type Backup = Archon.BackupsQueue.v1.BackupQueueBackup
 
 const props = defineProps<{
 	isServerRunning: boolean
@@ -323,10 +317,9 @@ const messages = defineMessages({
 
 const { formatMessage } = useVIntl()
 const now = useNow({ interval: 30_000 })
-const client = injectModrinthClient()
 const queryClient = useQueryClient()
 const { addNotification } = injectNotificationManager()
-const { server, serverId, worldId, busyReasons } = injectModrinthServerContext()
+const { serverId, core, busyReasons } = injectModrinthServerContext()
 const settingsModal = injectServerSettingsModal(null)
 const { canManageBackups, permissionDeniedMessage } = useServerPermissions()
 
@@ -339,15 +332,10 @@ const {
 	hasActiveCreate,
 	hasActiveRestore,
 	invalidate,
-} = useServerBackupsQueue(
-	computed(() => serverId),
-	worldId,
-)
+} = useServerBackupsQueue(serverId, core)
 
 const error = computed(() => query.error.value)
-const readyPending = computed(
-	() => !worldId.value || (query.data.value === undefined && !query.error.value),
-)
+const readyPending = computed(() => query.data.value === undefined && !query.error.value)
 
 const completedBackups = computed(() => backups.value.filter((b) => b.status === 'done'))
 const search = ref('')
@@ -448,8 +436,11 @@ const deleteModal = ref<InstanceType<typeof BackupDeleteModal>>()
 const deleteMutation = useMutation({
 	mutationFn: (backupIds: string[]) =>
 		backupIds.length === 1
-			? client.archon.backups_queue_v1.delete(serverId, worldId.value!, backupIds[0])
-			: client.archon.backups_queue_v1.deleteMany(serverId, worldId.value!, backupIds),
+			? core.call(coreRoutes.DeleteBackup, { params: { id: serverId, backup_id: backupIds[0] } })
+			: core.call(coreRoutes.DeleteBackups, {
+					params: { id: serverId },
+					body: { backup_ids: backupIds },
+				}),
 	onSuccess: async () => {
 		await invalidate()
 		await queryClient.invalidateQueries({ queryKey: ['servers', 'detail', serverId] })

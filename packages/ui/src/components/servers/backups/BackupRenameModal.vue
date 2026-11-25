@@ -48,7 +48,7 @@
 </template>
 
 <script setup lang="ts">
-import type { Archon } from '@modrinth/api-client'
+import { core as coreRoutes, type Backup } from '@modrinth/api-client'
 import { IssuesIcon, SaveIcon, SpinnerIcon, XIcon } from '@modrinth/assets'
 import { useMutation, useQueryClient } from '@tanstack/vue-query'
 import { computed, nextTick, ref } from 'vue'
@@ -56,24 +56,19 @@ import { computed, nextTick, ref } from 'vue'
 import { Button } from '#ui/components/base/buttons'
 
 import { useVIntl } from '../../../composables/i18n'
-import {
-	injectModrinthClient,
-	injectModrinthServerContext,
-	injectNotificationManager,
-} from '../../../providers'
+import { injectModrinthServerContext, injectNotificationManager } from '../../../providers'
 import { commonMessages } from '../../../utils'
 import Input from '../../base/inputs/Input.vue'
 import NewModal from '../../modal/NewModal.vue'
 
 const { addNotification } = injectNotificationManager()
 const { formatMessage } = useVIntl()
-const client = injectModrinthClient()
 const queryClient = useQueryClient()
 const ctx = injectModrinthServerContext()
 
 const props = withDefaults(
 	defineProps<{
-		backups?: Archon.BackupsQueue.v1.BackupQueueBackup[]
+		backups?: Backup[]
 		canRename?: boolean
 		permissionDeniedMessage?: string
 	}>(),
@@ -88,7 +83,10 @@ const backupsQueryKey = ['backups', 'queue', ctx.serverId]
 
 const renameMutation = useMutation({
 	mutationFn: ({ backupId, name }: { backupId: string; name: string }) =>
-		client.archon.backups_v1.rename(ctx.serverId, ctx.worldId.value!, backupId, { name }),
+		ctx.core.call(coreRoutes.RenameBackup, {
+			params: { id: ctx.serverId, backup_id: backupId },
+			body: { name },
+		}),
 	onSuccess: () => queryClient.invalidateQueries({ queryKey: backupsQueryKey }),
 })
 
@@ -97,7 +95,7 @@ const input = ref<HTMLInputElement>()
 const backupName = ref('')
 const originalName = ref('')
 
-const currentBackup = ref<Archon.BackupsQueue.v1.BackupQueueBackup | null>(null)
+const currentBackup = ref<Backup | null>(null)
 
 const trimmedName = computed(() => backupName.value.trim())
 
@@ -135,7 +133,7 @@ const focusInput = () => {
 	})
 }
 
-function show(backup: Archon.BackupsQueue.v1.BackupQueueBackup) {
+function show(backup: Backup) {
 	currentBackup.value = backup
 	backupName.value = backup.name
 	originalName.value = backup.name

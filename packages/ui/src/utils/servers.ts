@@ -1,7 +1,5 @@
-import type { Archon } from '@modrinth/api-client'
-
 export function getHostingServerAddress(
-	net: Archon.Servers.v0.Net | null | undefined,
+	net: { ip: string | null; port: number; domain?: string | null } | null | undefined,
 	subdomain?: string,
 ) {
 	const domain = net?.domain || subdomain
