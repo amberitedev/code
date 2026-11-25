@@ -29,14 +29,6 @@ export const accessMessages = defineMessages({
 		id: 'servers.access-page.activity-log-filter.support-actor',
 		defaultMessage: 'Support',
 	},
-	instanceFilter: {
-		id: 'servers.access-page.activity-log-filter.instances',
-		defaultMessage: 'Instances',
-	},
-	serverScopedInstance: {
-		id: 'servers.access-page.activity-log-filter.server-scoped-instance',
-		defaultMessage: 'Server',
-	},
 	actionTypeFilter: {
 		id: 'servers.access-page.activity-log-filter.action-types',
 		defaultMessage: 'Actions',
@@ -60,94 +52,6 @@ export const actionLogActionMessages = defineMessages({
 		id: 'servers.access-page.activity-log-filter.action.server-created',
 		defaultMessage: 'Created server',
 	},
-	changed_server_name: {
-		id: 'servers.access-page.activity-log-filter.action.changed-server-name',
-		defaultMessage: 'Changed server name',
-	},
-	changed_server_subdomain: {
-		id: 'servers.access-page.activity-log-filter.action.changed-server-subdomain',
-		defaultMessage: 'Changed server subdomain',
-	},
-	server_reallocated: {
-		id: 'servers.access-page.activity-log-filter.action.server-reallocated',
-		defaultMessage: 'Reallocated server',
-	},
-	server_plan_changed: {
-		id: 'servers.access-page.activity-log-filter.action.server-plan-changed',
-		defaultMessage: 'Changed plan',
-	},
-	server_suspended: {
-		id: 'servers.access-page.activity-log-filter.action.server-suspended',
-		defaultMessage: 'Server suspended',
-	},
-	server_unsuspended: {
-		id: 'servers.access-page.activity-log-filter.action.server-unsuspended',
-		defaultMessage: 'Server unsuspended',
-	},
-	server_suspension_lifted: {
-		id: 'servers.access-page.activity-log-filter.action.server-suspension-lifted',
-		defaultMessage: 'Suspension temporarily lifted',
-	},
-	server_resuspended: {
-		id: 'servers.access-page.activity-log-filter.action.server-resuspended',
-		defaultMessage: 'Server suspended again',
-	},
-	addon_added: {
-		id: 'servers.access-page.activity-log-filter.action.addon-added',
-		defaultMessage: 'Added content',
-	},
-	addon_uploaded: {
-		id: 'servers.access-page.activity-log-filter.action.addon-uploaded',
-		defaultMessage: 'Uploaded content',
-	},
-	addon_disabled: {
-		id: 'servers.access-page.activity-log-filter.action.addon-disabled',
-		defaultMessage: 'Disabled content',
-	},
-	addon_enabled: {
-		id: 'servers.access-page.activity-log-filter.action.addon-enabled',
-		defaultMessage: 'Enabled content',
-	},
-	addon_deleted: {
-		id: 'servers.access-page.activity-log-filter.action.addon-deleted',
-		defaultMessage: 'Deleted content',
-	},
-	addon_server_enabled: {
-		id: 'servers.access-page.activity-log-filter.action.addon-server-enabled',
-		defaultMessage: 'Changed server content enablement',
-	},
-	addon_player_enabled: {
-		id: 'servers.access-page.activity-log-filter.action.addon-player-enabled',
-		defaultMessage: 'Changed player content enablement',
-	},
-	addon_side_toggle_locked: {
-		id: 'servers.access-page.activity-log-filter.action.addon-side-toggle-locked',
-		defaultMessage: 'Changed content side toggle lock',
-	},
-	world_data_reset: {
-		id: 'servers.access-page.activity-log-filter.action.world-data-reset',
-		defaultMessage: 'Reset world data',
-	},
-	addon_updated: {
-		id: 'servers.access-page.activity-log-filter.action.addon-updated',
-		defaultMessage: 'Updated content',
-	},
-	modpack_changed: {
-		id: 'servers.access-page.activity-log-filter.action.modpack-changed',
-		defaultMessage: 'Changed modpack',
-	},
-	modpack_unlinked: {
-		id: 'servers.access-page.activity-log-filter.action.modpack-unlinked',
-		defaultMessage: 'Unlinked modpack',
-	},
-	server_repaired: {
-		id: 'servers.access-page.activity-log-filter.action.server-repaired',
-		defaultMessage: 'Repaired server',
-	},
-	server_reset: {
-		id: 'servers.access-page.activity-log-filter.action.server-reset',
-		defaultMessage: 'Reset server',
-	},
 	server_started: {
 		id: 'servers.access-page.activity-log-filter.action.server-started',
 		defaultMessage: 'Started server',
@@ -164,57 +68,17 @@ export const actionLogActionMessages = defineMessages({
 		id: 'servers.access-page.activity-log-filter.action.server-killed',
 		defaultMessage: 'Killed server',
 	},
-	port_allocation_added: {
-		id: 'servers.access-page.activity-log-filter.action.port-allocation-added',
-		defaultMessage: 'Added port allocation',
-	},
-	port_allocation_removed: {
-		id: 'servers.access-page.activity-log-filter.action.port-allocation-removed',
-		defaultMessage: 'Removed port allocation',
-	},
-	loader_version_edited: {
-		id: 'servers.access-page.activity-log-filter.action.loader-version-edited',
-		defaultMessage: 'Changed loader version',
-	},
-	game_version_edited: {
-		id: 'servers.access-page.activity-log-filter.action.game-version-edited',
-		defaultMessage: 'Changed Minecraft version',
-	},
-	server_properties_modified: {
-		id: 'servers.access-page.activity-log-filter.action.server-properties-modified',
-		defaultMessage: 'Modified server properties',
-	},
-	file_uploaded: {
-		id: 'servers.access-page.activity-log-filter.action.file-uploaded',
-		defaultMessage: 'Uploaded file',
-	},
-	file_deleted: {
-		id: 'servers.access-page.activity-log-filter.action.file-deleted',
-		defaultMessage: 'Deleted file',
-	},
-	file_renamed: {
-		id: 'servers.access-page.activity-log-filter.action.file-renamed',
-		defaultMessage: 'Renamed file',
-	},
-	file_edited: {
-		id: 'servers.access-page.activity-log-filter.action.file-edited',
-		defaultMessage: 'Edited file',
-	},
-	sftp_login: {
-		id: 'servers.access-page.activity-log-filter.action.sftp-login',
-		defaultMessage: 'Logged in via SFTP',
-	},
-	sftp_credentials_rolled: {
-		id: 'servers.access-page.activity-log-filter.action.sftp-credentials-rolled',
-		defaultMessage: 'Rotated SFTP credentials',
-	},
 	console_command_executed: {
 		id: 'servers.access-page.activity-log-filter.action.console-command-executed',
 		defaultMessage: 'Ran console command',
 	},
-	console_cleared: {
-		id: 'servers.access-page.activity-log-filter.action.console-cleared',
-		defaultMessage: 'Cleared console',
+	content_changed: {
+		id: 'servers.access-page.activity-log-filter.action.content-changed',
+		defaultMessage: 'Changed content',
+	},
+	settings_changed: {
+		id: 'servers.access-page.activity-log-filter.action.settings-changed',
+		defaultMessage: 'Changed settings',
 	},
 	backup_created: {
 		id: 'servers.access-page.activity-log-filter.action.backup-created',
@@ -232,16 +96,12 @@ export const actionLogActionMessages = defineMessages({
 		id: 'servers.access-page.activity-log-filter.action.backup-deleted',
 		defaultMessage: 'Deleted backup',
 	},
-	startup_command_modified: {
-		id: 'servers.access-page.activity-log-filter.action.startup-command-modified',
-		defaultMessage: 'Changed startup command',
+	backup_downloaded: {
+		id: 'servers.access-page.activity-log-filter.action.backup-downloaded',
+		defaultMessage: 'Downloaded backup',
 	},
-	java_runtime_modified: {
-		id: 'servers.access-page.activity-log-filter.action.java-runtime-modified',
-		defaultMessage: 'Changed Java runtime',
-	},
-	java_version_modified: {
-		id: 'servers.access-page.activity-log-filter.action.java-version-modified',
-		defaultMessage: 'Changed Java version',
+	world_downloaded: {
+		id: 'servers.access-page.activity-log-filter.action.world-downloaded',
+		defaultMessage: 'Downloaded world',
 	},
 })

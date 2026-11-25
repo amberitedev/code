@@ -128,6 +128,7 @@ export function useServerBackupsQueue(serverId: string, core: ContractClient) {
 		activeOperations,
 		activeOperationByBackupId,
 		backups,
+		backupById,
 		hasActiveCreate,
 		hasActiveRestore,
 		hasRunningCreate,

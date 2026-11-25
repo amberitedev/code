@@ -65,6 +65,5 @@ export interface AuditEventLookups {
 	users: Record<string, UserResp>
 	addons: Record<string, Archon.Actions.v1.AddonResp>
 	versions: Record<string, Archon.Actions.v1.VersionResp>
-	worldById: Map<string, AuditWorld>
 	backupById: Map<string, Backup>
 }
