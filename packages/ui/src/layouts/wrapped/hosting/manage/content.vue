@@ -183,11 +183,15 @@ const content = useInstanceContent({
 	instanceId: serverId,
 	queryKeys: serverContentQueryKeys,
 	mapping: { formatMessage },
-	packContentEnabled: (modpack) => !!modpack || !!follow.value,
+	packContentEnabled: (modpack) => !!modpack || !!follow.value || !!server.value?.uploaded_modpack,
 })
 const contentQuery = content.content
 const packContentQuery = content.packContent
 const linkedModpack = computed(() => contentQuery.data.value?.modpack ?? null)
+/** The `.mrpack` the server was set up from by upload, when Modrinth does not know it. */
+const uploadedModpack = computed(() =>
+	linkedModpack.value ? null : (server.value?.uploaded_modpack ?? null),
+)
 
 const isModpackContentModalOpen = ref(false)
 
@@ -264,7 +268,8 @@ const currentModpackVersionId = computed(() => linkedModpack.value?.version?.id 
 const managedContent = computed<ManagedContentData | null>(() => {
 	const pack = linkedModpack.value
 	const followed = follow.value
-	if (!pack && !followed) return null
+	const uploaded = uploadedModpack.value
+	if (!pack && !followed && !uploaded) return null
 	const summary = packContentQuery.data.value
 		? summarizeManagedContent(packContentItems.value)
 		: packContentQuery.isLoading.value
@@ -299,6 +304,20 @@ const managedContent = computed<ManagedContentData | null>(() => {
 					link: `/instance/${encodeURIComponent(followed.id)}`,
 				},
 				summary,
+				canSwitchVersion: false,
+			},
+			disabled,
+			disabledText,
+		}
+	}
+	if (uploaded) {
+		return {
+			card: {
+				kind: 'modpack',
+				installing: isInstallingContent.value,
+				manager: { name: uploaded.name ?? server.value?.name ?? '' },
+				summary,
+				versionNumber: uploaded.version_number ?? undefined,
 				canSwitchVersion: false,
 			},
 			disabled,

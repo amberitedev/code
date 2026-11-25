@@ -15,6 +15,7 @@
 		@after-hide="onAfterHide"
 		@after-show="flow.markShown"
 	/>
+	<ServerShareUnlinkModal ref="shareUnlinkModal" />
 </template>
 
 <script setup lang="ts">
@@ -30,9 +31,11 @@ import type {
 } from '#ui/components/flows/creation-flow-modal/creation-flow-context'
 import CreationFlowModal from '#ui/components/flows/creation-flow-modal/index.vue'
 import { installServerCreationConfig } from '#ui/components/flows/creation-flow-modal/server-install'
+import ServerShareUnlinkModal from '#ui/components/servers/sharing/ServerShareUnlinkModal.vue'
 import { useVIntl } from '#ui/composables/i18n'
 import { hasServerPermission } from '#ui/composables/server-permissions'
 import { serverKeys } from '#ui/composables/server-queries'
+import { provideShareUnlinkPrompt } from '#ui/composables/server-sharing'
 import { injectModrinthClient, injectNotificationManager } from '#ui/providers'
 import { injectInstanceServerSource } from '#ui/providers/instance-server-source'
 import { commonMessages } from '#ui/utils/common-messages'
@@ -55,6 +58,11 @@ const { formatMessage } = useVIntl()
 const dismissServerIntro = useDismissServerIntro()
 const instanceSource = injectInstanceServerSource(null)
 const modalRef = useTemplateRef<InstanceType<typeof CreationFlowModal>>('modalRef')
+const shareUnlinkModal =
+	useTemplateRef<InstanceType<typeof ServerShareUnlinkModal>>('shareUnlinkModal')
+provideShareUnlinkPrompt({
+	ask: async (server) => (await shareUnlinkModal.value?.ask(server)) ?? false,
+})
 const canSetup = computed(() => hasServerPermission(0, 'SETUP'))
 let opening = false
 let introCompletion: Promise<void> | null = null

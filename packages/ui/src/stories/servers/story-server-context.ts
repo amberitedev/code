@@ -33,6 +33,7 @@ export function storyServerContext(
 			icon: null,
 			power_state: 'running',
 			linked_instance: null,
+			uploaded_modpack: null,
 			shared_instance_id: null,
 			reachability: null,
 			players: null,

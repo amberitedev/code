@@ -158,6 +158,11 @@ flows: Flows, icon: ServerIcon | null, power_state: ServerPower,
  */
 linked_instance: LinkedInstance | null, 
 /**
+ * The `.mrpack` it was set up from by upload, whose files it keeps apart as a Modrinth pack's.
+ * A share cannot carry one, so the server is unlinked from it before it is shared.
+ */
+uploaded_modpack: UploadedModpack | null, 
+/**
  * The share it reads: its instance's when it follows one, else its own once it is shared.
  */
 shared_instance_id: string | null, 
@@ -212,6 +217,8 @@ hash: string,
 config: SharedIconConfig | null, };
 
 export type ServerPower = "stopped" | "starting" | "running" | "stopping" | "crashed" | "killed";
+
+export type UploadedModpack = { name: string | null, version_number: string | null, };
 
 export type LinkedInstance = { 
 /**

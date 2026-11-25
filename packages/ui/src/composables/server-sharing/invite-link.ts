@@ -1,5 +1,7 @@
-import { core as coreRoutes } from '@amberite/contracts/core'
-import type { AbstractModrinthClient, SharedInstances } from '@modrinth/api-client'
+import { core as coreRoutes, type Server } from '@amberite/contracts/core'
+import type { AbstractModrinthClient, ContractClient, SharedInstances } from '@modrinth/api-client'
+
+import { type ShareUnlinkPrompt, unlinkBeforeShare } from './unlink-before-share'
 
 // The invite rules for instance and server shares alike; the App's share pages import them too.
 // The age and default uses mirror SHARED_INSTANCE_INVITE_MAX_AGE_SECONDS and
@@ -69,30 +71,71 @@ export async function ensureServerInviteLink(
 }
 
 /**
- * Shares the server when it has no shared instance yet, then returns a share URL for an
- * invite link that still has uses left. Returns `null` once `isCurrent` reports the caller moved on.
+ * Shares the server when it has no shared instance yet, unlinking an uploaded modpack first through
+ * `shareUnlink`, then returns a share URL for an invite link that still has uses left. Returns
+ * `null` once `isCurrent` reports the caller moved on. With `afterInstall`, it first waits for the
+ * server's install to end: an uploaded pack is linked as it installs, and unlinked only after.
  */
 export async function createServerInviteLink(
 	client: AbstractModrinthClient,
 	serverId: string,
 	siteUrl: string,
-	isCurrent: () => boolean,
+	options: {
+		isCurrent: () => boolean
+		shareUnlink: ShareUnlinkPrompt | null
+		afterInstall?: boolean
+	},
 ): Promise<string | null> {
+	const { isCurrent } = options
 	const core = await client.cores.serverRoutes(serverId)
 	const params = { id: serverId }
-	const server = await core.call(coreRoutes.GetServer, { params })
+	const server = options.afterInstall
+		? await installedServer(client, core, serverId)
+		: await core.call(coreRoutes.GetServer, { params })
 	if (!isCurrent()) return null
-	const instanceId =
-		server.shared_instance_id ??
-		(
+	let instanceId = server.shared_instance_id
+	if (!instanceId) {
+		await unlinkBeforeShare(core, server, options.shareUnlink)
+		if (!isCurrent()) return null
+		instanceId = (
 			await core.call(coreRoutes.ShareServer, {
 				params,
 				body: { file_paths: [], removed_paths: [], restart: false },
 			})
 		).shared_instance_id
+	}
 	if (!isCurrent()) return null
 	const inviteId = await ensureServerInviteLink(client, serverId, instanceId, undefined, {
 		maximizeUses: true,
 	})
 	return inviteLinkUrl(siteUrl, inviteId)
+}
+
+/** The server once it no longer installs, read again on each change its Core announces. */
+async function installedServer(
+	client: AbstractModrinthClient,
+	core: ContractClient,
+	serverId: string,
+): Promise<Server> {
+	const events = client.coreEvents((await client.cores.coreOf(serverId)).id)
+	let changed = () => {}
+	const stops = [
+		events.subscribe({ type: 'server', id: serverId }),
+		events.on('server_changed', (change) => {
+			if (change.server === serverId) changed()
+		}),
+		events.on('resync', () => changed()),
+	]
+	try {
+		// Subscribed before the first read, so a change after it cannot pass unseen.
+		await events.ready()
+		for (;;) {
+			const next = new Promise<void>((resolve) => (changed = resolve))
+			const server = await core.call(coreRoutes.GetServer, { params: { id: serverId } })
+			if (server.status !== 'installing') return server
+			await next
+		}
+	} finally {
+		for (const stop of stops) stop()
+	}
 }

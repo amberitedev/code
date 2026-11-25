@@ -6,7 +6,7 @@
 		"
 		fade="warning"
 		max-width="500px"
-		:on-hide="() => backupCreator?.cancelBackup()"
+		:on-hide="onHide"
 	>
 		<div class="flex flex-col gap-6">
 			<Admonition type="warning" :header="admonitionHeader">
@@ -137,6 +137,23 @@ function show() {
 	})
 }
 
+let settle: ((unlinked: boolean) => void) | null = null
+
+function onHide() {
+	backupCreator.value?.cancelBackup()
+	settle?.(false)
+	settle = null
+}
+
+/** Shows the modal; resolves true once the owner confirms, false when they close it. */
+function ask(): Promise<boolean> {
+	settle?.(false)
+	return new Promise((resolve) => {
+		settle = resolve
+		modal.value?.show()
+	})
+}
+
 function confirm() {
 	debug('confirm: called', {
 		hasModalRef: !!modal.value,
@@ -147,6 +164,8 @@ function confirm() {
 		debug('confirm: ignored actionDisabled')
 		return
 	}
+	settle?.(true)
+	settle = null
 	modal.value?.hide()
 	emit('unlink')
 	debug('confirm: emitted unlink')
@@ -154,5 +173,6 @@ function confirm() {
 
 defineExpose({
 	show,
+	ask,
 })
 </script>

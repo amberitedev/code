@@ -6086,6 +6086,9 @@
   "servers.setup.uploading-modpack.header": {
     "defaultMessage": "Uploading modpack"
   },
+  "servers.share.unlink.stop-first": {
+    "defaultMessage": "Stop the server to unlink its modpack"
+  },
   "settings.account.title": {
     "defaultMessage": "Account and security"
   },
@@ -6463,6 +6466,12 @@
   },
   "sharing.invite-players-modal.update-invite-link-failed-title": {
     "defaultMessage": "Failed to update invite link"
+  },
+  "sharing.unlink.body": {
+    "defaultMessage": "You must unlink this modpack to share your instance"
+  },
+  "sharing.unlink.header": {
+    "defaultMessage": "Sharing requires unlinking"
   },
   "skins.select": {
     "defaultMessage": "Select skin"

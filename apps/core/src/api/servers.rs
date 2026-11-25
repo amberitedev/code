@@ -13,7 +13,8 @@ use contracts::{
         Action, ChangePower, ChangeServer, CreateServer, DeleteServer, Flows,
         GetServer, InstallLoader, InstallModpackFile, JoinAddress, ListServers,
         Net, PowerAction, Server, ServerIcon, ServerId, ServerPower,
-        ShareServer, SharedServer, Status, Upstream, UpstreamKind,
+        ShareServer, SharedServer, Status, UploadedModpack, Upstream,
+        UpstreamKind,
     },
     server::Req,
 };
@@ -139,6 +140,17 @@ async fn server(
     .await?;
     let set = instance.applied_content_set;
     let installed = !set.game_version.is_empty();
+    let uploaded_modpack = match &instance.link {
+        InstanceLink::ImportedModpack {
+            name,
+            version_number,
+            ..
+        } => Some(UploadedModpack {
+            name: name.clone(),
+            version_number: version_number.clone(),
+        }),
+        _ => None,
+    };
     let upstream = match instance.link {
         InstanceLink::ModrinthModpack {
             project_id,
@@ -167,6 +179,7 @@ async fn server(
         },
         flows: Flows { intro: !installed },
         linked_instance,
+        uploaded_modpack,
         shared_instance_id: instance.shared_instance.map(|share| share.id),
         reachability: state
             .network

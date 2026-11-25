@@ -164,6 +164,7 @@
 		:server-id="serverId"
 		:site-url="siteUrl ?? ''"
 	/>
+	<ServerShareUnlinkModal ref="shareUnlinkModal" />
 	<ConfirmLeaveModal
 		ref="confirmLeaveModal"
 		:header="formatMessage(leaveMessages.uploadInProgress)"
@@ -208,6 +209,7 @@ import ServerIcon from '#ui/components/servers/icons/ServerIcon.vue'
 import { injectServerOnboardingFlow } from '#ui/components/servers/onboarding/context'
 import { PanelServerActionButton } from '#ui/components/servers/server-header'
 import ServerSettingsModal from '#ui/components/servers/ServerSettingsModal.vue'
+import ServerShareUnlinkModal from '#ui/components/servers/sharing/ServerShareUnlinkModal.vue'
 import ServerInviteLinkModal from '#ui/components/sharing/server-invite-link/ServerInviteLinkModal.vue'
 import { injectServerInviteHandoff } from '#ui/components/sharing/server-sharing-update/handoff'
 import {
@@ -222,6 +224,7 @@ import { defineMessages, useVIntl } from '#ui/composables/i18n'
 import { useServerBackupsQueue } from '#ui/composables/server-backups-queue'
 import { useServerManageCoreRuntime } from '#ui/composables/server-manage-core-runtime'
 import { serverDetailQueryOptions, serverKeys } from '#ui/composables/server-queries'
+import { provideShareUnlinkPrompt } from '#ui/composables/server-sharing'
 import { directoryQueryOptions } from '#ui/layouts/shared/files-tab/providers/instance-files'
 import type { ServerSettingsTabId } from '#ui/layouts/shared/server-settings'
 import {
@@ -350,6 +353,10 @@ const {
 })
 
 const serverInviteLinkModal = ref<InstanceType<typeof ServerInviteLinkModal>>()
+const shareUnlinkModal = ref<InstanceType<typeof ServerShareUnlinkModal>>()
+provideShareUnlinkPrompt({
+	ask: async (server) => (await shareUnlinkModal.value?.ask(server)) ?? false,
+})
 const canSetup = computed(() => hasServerPermission(0, 'SETUP'))
 
 // A server made to invite players to opens the invite link once it loads.
