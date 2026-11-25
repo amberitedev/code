@@ -6,7 +6,11 @@ import type { ContentSide } from '../types'
 /** A server's content file, as the engine lists it. */
 type Addon = EngineContentItem
 
-export function friendlyAddonName(addon: Addon): string {
+export function friendlyAddonName(addon: {
+	file_name: string
+	project?: { title: string } | null
+	embedded_metadata?: { name?: string | null } | null
+}): string {
 	if (addon.project?.title) return addon.project.title
 	if (addon.embedded_metadata?.name) return addon.embedded_metadata.name
 	const lastDotIndex = addon.file_name.lastIndexOf('.')

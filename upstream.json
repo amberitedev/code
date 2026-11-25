@@ -160,6 +160,7 @@
 	},
 	"ported": {
 		".github/workflows/theseus-build.yml": ".github/workflows/amberite-app-build.yml",
+		"apps/app-frontend/src/helpers/instance-content.ts": "packages/ui/src/layouts/shared/content-tab/providers/instance-content.ts",
 		"apps/app-frontend/src/platform/app-lib/files/commands.ts": "packages/ui/src/layouts/shared/files-tab/providers/instance-files.ts",
 		"apps/app-frontend/src/platform/app-lib/hidden-instances/commands.ts": "apps/app-frontend/src/features/library/hidden-instances/queries.ts",
 		"apps/app-frontend/src/platform/app-lib/icons/commands.ts": "apps/app-frontend/src/platform/adapters/icon-cache.ts",

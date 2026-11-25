@@ -115,9 +115,10 @@ export interface BulkOperationStatus {
 /** Content item returned from the app backend API - maps to ContentCardTableItem for display */
 export interface ContentItem extends Omit<
 	ContentCardTableItem,
-	'id' | 'projectLink' | 'disabled' | 'overflowOptions'
+	'id' | 'project' | 'projectLink' | 'disabled' | 'overflowOptions'
 > {
 	id: string
+	project?: ContentCardProject
 	synced_pack?: {
 		id: string
 		instance_ids: string[]

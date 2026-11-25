@@ -16,8 +16,9 @@ function unfinished(job: InstallJobSnapshot) {
 
 /**
  * An instance's install jobs on its host, from the engine's job list and its `install_job`
- * events, which an App and a Core both send: the Install Progress provider for either. `active`
- * is the job running or waiting now, `failed` the last one that failed.
+ * events. The server panel shows a server's install progress from it; the App shows every
+ * instance's jobs at once in its download manager instead. `active` is the job running or waiting
+ * now, `failed` the last one that failed.
  */
 export function useInstallJobs(options: InstallJobsOptions) {
 	const jobs = ref(new Map<string, InstallJobSnapshot>())
