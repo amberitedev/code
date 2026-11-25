@@ -122,6 +122,7 @@ import {
 	ContextMenu,
 	defineMessages,
 	injectNotificationManager,
+	instanceContentQueries,
 	NavTabs,
 	useLoadingBarToken,
 	useVIntl,
@@ -179,12 +180,12 @@ import InstanceAdmonitions from './components/admonitions/index.vue'
 import InstancePageHeader from './components/page-header/index.vue'
 import { provideInstancePage } from './instance-context'
 import {
-	instanceContentQueryOptions,
 	instanceDetailQueryOptions,
 	instanceKeys,
 	instanceLinkedProjectQueryOptions,
 	instanceListQueryOptions,
 	instanceProcessesQueryOptions,
+	localInstanceContent,
 } from './query-options'
 import { createSharedInstanceContext, provideSharedInstance } from './shared-instance-context'
 
@@ -263,12 +264,10 @@ const instanceQuery = useQuery(
 	),
 )
 useQuery(
-	computed(() =>
-		queryOptions({
-			...instanceContentQueryOptions(instanceId.value, (error) => handleError(toError(error))),
-			enabled: !!instanceId.value,
-		}),
-	),
+	computed(() => ({
+		...instanceContentQueries(localInstanceContent(instanceId.value)).content(),
+		enabled: !!instanceId.value,
+	})),
 )
 const instance = computed(() => instanceQuery.data.value)
 

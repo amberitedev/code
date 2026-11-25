@@ -1,10 +1,11 @@
 import { type PackSyncTarget, type SyncedPackType, syncedPacks } from '@amberite/contracts/app'
-import type { ContentItem } from '@modrinth/ui'
+import type { ContentItem as EngineContentItem } from '@amberite/contracts/engine'
+import { type ContentItem, toContentItem } from '@modrinth/ui'
 import { queryOptions } from '@tanstack/vue-query'
 
 import { apiClient } from '@/platform/modrinth-client'
 
-import { adaptContentItems, isSyncedOptionAvailable } from './instance'
+import { isSyncedOptionAvailable, localContentMapping } from './instance'
 import type { DesyncServerMode } from './worlds'
 
 export type { SyncedPackType }
@@ -37,10 +38,11 @@ export function syncedPackQueryOptions(type: SyncedPackType) {
 }
 
 export async function list_synced_packs(projectType: SyncedPackType): Promise<ContentItem[]> {
+	// The App's synced pack routes declare their items as JSON values: they are the engine's.
 	const items = (await apiClient.local.call(syncedPacks.listSyncedPacks, {
 		query: { project_type: projectType },
-	})) as ContentItem[]
-	return adaptContentItems(items).map((item) => ({ ...item, external: !item.project }))
+	})) as EngineContentItem[]
+	return items.map((item) => toContentItem(item, localContentMapping))
 }
 
 export async function get_pack_sync_preview(
@@ -51,7 +53,7 @@ export async function get_pack_sync_preview(
 		params: { id: instanceId },
 		query: { project_path: projectPath },
 	})
-	return { ...preview, pack: preview.pack as ContentItem }
+	return { ...preview, pack: toContentItem(preview.pack as EngineContentItem, localContentMapping) }
 }
 
 export function sync_pack(instanceId: string, projectPath: string): Promise<void> {

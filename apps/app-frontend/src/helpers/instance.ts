@@ -4,7 +4,6 @@
  *  and deserialized into a usable JS object.
  */
 import {
-	type ContentItem as ContentItemResponse,
 	type GameInstance as InstanceResponse,
 	instanceContent,
 	instances,
@@ -38,7 +37,7 @@ import {
 	type SyncedServer,
 } from '@amberite/contracts/app'
 import { ApiCallError, type IconConfig, type Labrinth } from '@modrinth/api-client'
-import { type ContentItem, type ContentOwner, getIconSymbolAsset } from '@modrinth/ui'
+import { type ContentItemMapping, type ContentOwner, getIconSymbolAsset } from '@modrinth/ui'
 
 import { localFileUrl } from '@/platform/local'
 import { apiClient } from '@/platform/modrinth-client'
@@ -146,20 +145,6 @@ export async function get_install_candidates(
 	})
 }
 
-// Get content items with rich metadata for an instance
-// Returns content items filtered to exclude modpack files (if linked),
-// sorted alphabetically by project name
-export async function get_content_items(
-	instanceId: string,
-	cacheBehaviour?: CacheBehaviour,
-): Promise<ContentItem[]> {
-	const items = await apiClient.local.call(instanceContent.ListContentItems, {
-		params: { id: instanceId },
-		query: { cacheBehaviour },
-	})
-	return adaptContentItems(items)
-}
-
 export async function refresh_content_updates(instanceId: string): Promise<void> {
 	return await apiClient.local.call(instanceContent.RefreshContentUpdates, {
 		params: { id: instanceId },
@@ -195,54 +180,8 @@ export async function get_linked_modpack_info(
 	})) as LinkedModpackInfo | null
 }
 
-// Get content items that are part of the linked modpack
-// Returns the modpack's dependencies as ContentItem list
-// Returns empty array if the instance is not linked to a modpack
-export async function get_linked_modpack_content(
-	instanceId: string,
-	cacheBehaviour?: CacheBehaviour,
-): Promise<ContentItem[]> {
-	const items = await apiClient.local.call(instanceContent.ListLinkedModpackContent, {
-		params: { id: instanceId },
-		query: { cacheBehaviour },
-	})
-	return adaptContentItems(items)
-}
-
-// Convert a list of dependencies into ContentItems with rich metadata
-export async function get_dependencies_as_content_items(
-	dependencies: Labrinth.Versions.v3.Dependency[],
-	cacheBehaviour?: CacheBehaviour,
-): Promise<ContentItem[]> {
-	const items = await apiClient.local.call(instanceContent.ListDependencyContentItems, {
-		body: {
-			dependencies: dependencies.map((dependency) => ({
-				project_id: null,
-				version_id: null,
-				file_name: null,
-				...dependency,
-			})),
-			cacheBehaviour,
-		},
-	})
-	return adaptContentItems(items)
-}
-
-/** The engine sends `null` for a field the UI's `ContentItem` leaves out. */
-export function adaptContentItems(items: ContentItem[] | ContentItemResponse[]): ContentItem[] {
-	return (items as ContentItem[]).map((item) => {
-		const embeddedMetadata = item.embedded_metadata
-		if (!embeddedMetadata?.icon_path) return item
-
-		return {
-			...item,
-			embedded_metadata: {
-				...embeddedMetadata,
-				icon_url: localFileUrl(embeddedMetadata.icon_path),
-			},
-		}
-	})
-}
+/** How the content tab shows this computer's content files: embedded icons load from disk. */
+export const localContentMapping: ContentItemMapping = { iconUrl: (path) => localFileUrl(path) }
 
 export async function get_full_path(instanceId: string): Promise<string> {
 	return await apiClient.local.call(instancePaths.getInstancePath, { params: { id: instanceId } })
@@ -541,17 +480,6 @@ export async function install_project_with_dependencies(
 	})
 }
 
-export async function switch_project_version_with_dependencies(
-	instanceId: string,
-	projectPath: string,
-	versionId: string,
-): Promise<string> {
-	return await apiClient.local.call(instanceContent.SwitchProjectVersion, {
-		params: { id: instanceId },
-		body: { project_path: projectPath, version_id: versionId },
-	})
-}
-
 // Add a project to an instance from a path + project_type
 // Returns a path to the new project file
 export async function add_project_from_path(
@@ -568,29 +496,6 @@ export async function add_project_from_path(
 export async function is_file_on_modrinth(projectPath: string): Promise<boolean> {
 	return await apiClient.local.call(instancePaths.checkFileOnModrinth, {
 		body: { path: projectPath },
-	})
-}
-
-// Toggle disabling a project
-export async function toggle_disable_project(
-	instanceId: string,
-	projectPath: string,
-	desiredEnabled?: boolean,
-): Promise<string> {
-	return await apiClient.local.call(instanceContent.ToggleProject, {
-		params: { id: instanceId },
-		body: { project_path: projectPath, desired_enabled: desiredEnabled },
-	})
-}
-
-export async function set_project_locked(
-	instanceId: string,
-	projectPath: string,
-	locked: boolean,
-): Promise<void> {
-	return await apiClient.local.call(instanceContent.SetProjectLocked, {
-		params: { id: instanceId },
-		body: { project_path: projectPath, locked },
 	})
 }
 

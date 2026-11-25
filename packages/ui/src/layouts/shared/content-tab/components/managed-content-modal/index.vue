@@ -294,9 +294,9 @@ const tableItems = computed<ContentCardTableItem[]>(() =>
 		projectType: item.project_type,
 		project: item.project ?? {
 			id: item.id,
-			slug: null,
+			slug: item.id,
 			title: item.embedded_metadata?.name ?? item.file_name,
-			icon_url: item.embedded_metadata?.icon_url ?? null,
+			icon_url: item.embedded_metadata?.icon_url ?? undefined,
 		},
 		projectLink:
 			!isExternalItem(item) && item.project?.id ? `/project/${item.project.id}` : undefined,

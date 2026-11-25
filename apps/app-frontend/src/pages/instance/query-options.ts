@@ -1,17 +1,20 @@
+import type { InstanceContentOptions } from '@modrinth/ui'
 import { queryOptions } from '@tanstack/vue-query'
+import type { MaybeRefOrGetter } from 'vue'
 
 import { get_project_v3 } from '@/helpers/cache.js'
 import { install_get_shared_instance_update_preview } from '@/helpers/install'
 import {
 	get as getInstance,
 	list as listInstances,
+	localContentMapping,
 	list_instance_screenshots,
 	list_screenshot_groups,
 	list_synced_screenshots,
 } from '@/helpers/instance'
-import { loadInstanceContentData } from '@/helpers/instance-content'
 import { get_by_instance_id } from '@/helpers/process'
 import { refreshWorlds } from '@/helpers/worlds'
+import { apiClient } from '@/platform/modrinth-client'
 
 export const instanceKeys = {
 	all: ['instances'] as const,
@@ -131,16 +134,14 @@ export function instanceLinkedProjectQueryOptions(projectId: string) {
 	})
 }
 
-export function instanceContentQueryOptions(
-	instanceId: string,
-	onError?: (error: Error) => unknown,
-) {
-	return queryOptions({
-		queryKey: instanceKeys.content(instanceId),
-		networkMode: 'always',
-		queryFn: () => loadInstanceContentData(instanceId, undefined, onError),
-		staleTime: 30_000,
-	})
+/** The shared content provider's options for an instance on this computer. */
+export function localInstanceContent(instanceId: MaybeRefOrGetter<string>) {
+	return {
+		client: apiClient.local,
+		instanceId,
+		queryKeys: { content: instanceKeys.content, packContent: instanceKeys.linkedContent },
+		mapping: localContentMapping,
+	} satisfies InstanceContentOptions
 }
 
 export function instanceWorldsQueryOptions(instanceId: string) {

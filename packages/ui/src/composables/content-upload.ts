@@ -5,8 +5,9 @@ import type { Ref } from 'vue'
 import type { CancelUploadHandler } from '#ui/providers/server-context'
 
 /**
- * Uploads files into an instance's content, mods or plugins by their names, on the App or a Core.
- * Progress goes to `uploadState`; `cancelUpload` aborts it while it runs.
+ * Uploads a browser's files into a server's content, mods or plugins by their names, through the
+ * engine's upload sessions. Progress goes to `uploadState`; `cancelUpload` aborts it while it
+ * runs. The App adds files by their path on this computer instead, so nothing is uploaded.
  */
 export function useContentUpload(options: {
 	client: ContractClient

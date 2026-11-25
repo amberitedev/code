@@ -12,6 +12,7 @@ export default defineConfig({
 			'scripts/**/*.test.ts',
 			'packages/api-client/src/**/*.test.ts',
 			'packages/fixtures/src/**/*.test.ts',
+			'packages/ui/src/**/*.test.ts',
 		],
 		exclude: ['**/.data/**', '**/.repos/**', '**/dist/**', '**/node_modules/**', '**/target/**'],
 		hookTimeout: 60_000,
