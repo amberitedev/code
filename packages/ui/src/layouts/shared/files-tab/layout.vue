@@ -433,7 +433,7 @@ async function handleEditorClose() {
 // CRUD handlers
 async function handleCreateNewItem(name: string) {
 	if (isBusy.value) return
-	await ctx.createItem(name, newItemType.value)
+	await succeeded(ctx.createItem(name, newItemType.value))
 }
 
 async function handleRenameItem(newName: string) {
@@ -442,7 +442,8 @@ async function handleRenameItem(newName: string) {
 	if (!item) return
 
 	const path = `${ctx.currentPath.value}/${item.name}`.replace('//', '/')
-	await ctx.renameItem(path, newName)
+	// A failed rename was already shown, and cannot be undone.
+	if (!(await succeeded(ctx.renameItem(path, newName)))) return
 	recordOperation({
 		type: 'rename',
 		itemType: item.type,
@@ -462,7 +463,7 @@ async function handleMoveItem(destination: string) {
 	const source = `${sourcePath}/${item.name}`.replace('//', '/')
 	const dest = `${destination}/${item.name}`.replace('//', '/')
 
-	await ctx.moveItem(source, dest)
+	if (!(await succeeded(ctx.moveItem(source, dest)))) return
 	recordOperation({
 		type: 'move',
 		sourcePath,
@@ -478,7 +479,7 @@ function handleDeleteItem() {
 	if (!item) return
 
 	const path = `${ctx.currentPath.value}/${item.name}`.replace('//', '/')
-	ctx.deleteItem(path, item.type === 'directory')
+	void succeeded(ctx.deleteItem(path, item.type === 'directory'))
 }
 
 function handleDirectMove(moveData: {
@@ -491,7 +492,8 @@ function handleDirectMove(moveData: {
 	const dest = `${moveData.destination}/${moveData.name}`.replace('//', '/')
 	const sourcePath = moveData.path.substring(0, moveData.path.lastIndexOf('/'))
 
-	ctx.moveItem(moveData.path, dest).then(() => {
+	void succeeded(ctx.moveItem(moveData.path, dest)).then((moved) => {
+		if (!moved) return
 		recordOperation({
 			type: 'move',
 			sourcePath,
@@ -500,6 +502,14 @@ function handleDirectMove(moveData: {
 			itemType: moveData.type,
 		})
 	})
+}
+
+/** Whether `change` went through. A provider tells the user itself when it did not. */
+function succeeded(change: Promise<unknown>): Promise<boolean> {
+	return change.then(
+		() => true,
+		() => false,
+	)
 }
 
 // Download
@@ -511,7 +521,7 @@ async function handleDownload(item: FileItem) {
 
 async function handleZip(item: FileItem) {
 	if (isBusy.value || item.type !== 'directory' || !ctx.zipFolder) return
-	await ctx.zipFolder(item.path)
+	await succeeded(ctx.zipFolder(item.path))
 }
 
 async function handleZipSelection(target: string) {
@@ -520,7 +530,7 @@ async function handleZipSelection(target: string) {
 		.filter((item) => selectedItems.value.has(item.path))
 		.map((item) => item.name)
 	deselectAll()
-	await ctx.zipPaths(ctx.currentPath.value, include, target)
+	await succeeded(ctx.zipPaths(ctx.currentPath.value, include, target))
 }
 
 // Extract
@@ -598,7 +608,7 @@ function showBulkDeleteModal() {
 	for (const path of itemsToDelete) {
 		const item = items.value.find((i) => i.path === path)
 		if (item) {
-			ctx.deleteItem(path, item.type === 'directory')
+			void succeeded(ctx.deleteItem(path, item.type === 'directory'))
 		}
 	}
 	deselectAll()

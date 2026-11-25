@@ -59,7 +59,6 @@ const failureTitles = {
 	move: commonMessages.moveFailedLabel,
 	delete: commonMessages.deleteFailedLabel,
 	upload: commonMessages.uploadFailedLabel,
-	extract: commonMessages.extractFailedLabel,
 	write: commonMessages.uploadFailedLabel,
 	zip: commonMessages.createFailedLabel,
 } satisfies Record<FilesFailure, unknown>
