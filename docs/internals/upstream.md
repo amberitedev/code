@@ -44,8 +44,8 @@ leaves it unreachable or in the wrong place.
 
 - An `api/` function or `#[tauri::command]` with a frontend helper that calls `invoke` becomes an
   Endpoint declared next to its types in the engine and a handler that takes the `Engine`. When its
-  body or answer carries a host filesystem path, it becomes an App Endpoint instead
-  ([architecture](architecture.md#one-protocol)). Only the helper's body changes, to call
+  body or answer carries a host filesystem path, it becomes an App Endpoint instead (a Core serves
+  the engine's `shared` routes to remote users). Only the helper's body changes, to call
   `client.local`; its name and signature stay upstream's.
 - A new engine event becomes a variant of the engine's `Event`, and a new desktop event a variant
   of the App's `AppEvent`. Both reach the UI on the `/events` socket.

@@ -43,14 +43,11 @@ We need to be on the same page with terminology. When communicating, use this la
 
 ## Hit every surface
 
-The most common defect in this repo is a change that works on the path you tested and is missing everywhere else. Before calling work done, walk this list and say which entries applied:
+The most common defect in this repo is a change that works on the path you tested and is missing everywhere else. Before calling frontend work done, walk this list and say which entries applied:
 
 - **Way in, way out.** If you added a way in, add the way out and the way to see it. Share needs unshare, invite needs revoke. A one-way door is an unfinished feature.
-- **Contracts.** Anything crossing the wire is an `Endpoint` declared in Rust, and its TypeScript is generated. Change the Rust type and the App, the Cores and the backend all follow.
-- **App and Core.** An instance lives on this computer or on a Core. Most instance screens are one shared layout with a provider per side, so an action added on one side is missing on the other.
-- **People and states.** A shared instance's owner, its members and a server's players see different things, and a server or a shared instance behaves differently while stopped, running, installing or removed. Check the ones the change touches.
+- **Contracts.** Anything crossing the wire goes through `packages/contracts`. Change the Rust type and the App, the Cores and the backend all follow.
 - **Docs.** Check whether the change makes existing guidance inaccurate. Apply the [documentation rules](#documentation) before adding anything.
-- **Cost.** If the change touches the backend, say what it does to cost.
 
 ## Dev servers
 
@@ -68,9 +65,10 @@ Every command, the log, and ports: [scripts](docs/internals/scripts.md).
 
 - Before you push, run `vp run check:changed`. It runs CI's fast checks for changed files: lint, typos, TOML, typecheck and tests of the affected packages, and for Rust `rustfmt`, a build, and the tests of changed crates. CI still runs the full suites.
 - While you iterate, run only the tests that cover what you changed.
+- Rust tests run through `node scripts/dev-runner.ts test <crate>`. A plain `cargo test` rebuilds everything in a separate folder.
 - **Do not run repo-wide checks.** No `vp check`, no `vp run -r test`, no `vp run -r typecheck` unless the developer asks. CI owns the full suite.
 - Core and backend behavior changes ship with focused tests for that behavior.
-- Test behavior that can break, such as sharing and sync logic, Core and backend permission checks, persistence and migrations, external-format parsing (modpacks, Modrinth's API), race fixes, and the logic a bug fix changed. Leave out tests for what types already guarantee, trivial logic, copy text, smoke runs, mock-call mirrors, and props rendered to static markup.
+- Test behavior that can break, such as two things happening at once, an operation that fails halfway, sharing and sync between the App, a Core and the backend, files and archives from other people, external formats (modpacks, Modrinth's API), and the logic a bug fix changed. Leave out tests for what types already guarantee, trivial logic, copy text, smoke runs, mock-call mirrors, and props rendered to static markup.
 - Extend before you add. When an existing test or table covers the behavior, add a row or an assertion there. Write a new test only when no case fits.
 - Test at one layer: the lowest one that fails on `main`. Do not repeat the case in a wrapper test or at each call site.
 - Never wait on sleeps or polling in a test. Await the event that marks the milestone. A test that needs a timeout to pass is wrong, and a flaky test is fixed, not retried.
@@ -95,13 +93,25 @@ Most code changes do not need an internal documentation change. Agents can read 
 
 ## How it works
 
-The App and a Core do the same things to an instance with one engine and one protocol. Rust imports go one way: `contracts` <- `sharing-client` <- `engine` <- `apps/app`, `apps/core`. The design, and the rules a review checks it against, are in [architecture](docs/internals/architecture.md). Merging and porting upstream: [upstream](docs/internals/upstream.md).
+The App and a Core do the same things to an instance with one engine and one protocol. Rust imports go one way: `contracts` <- `sharing-client` <- `engine` <- `apps/app`, `apps/core`. Merging and porting upstream: [upstream](docs/internals/upstream.md).
 
 `.repos/modrinth` is a plain checkout of Modrinth's latest `main`, gitignored, for reading and grepping upstream. `SYNCED.json` names its commit. Never edit or import from `.repos/`. If it is missing or stale, run `vp run sync:repos`. Merges and ports use the `modrinth/main` ref, not this copy. Its `AGENTS.md` files are Modrinth's rules, not ours.
 
+## Where code lives
+
+- `packages/engine` - Rust. What the App and a Core both do to an instance. Never imports a host.
+- `apps/app` - Rust and Tauri. Desktop-only features, in `apps/app/src/<domain>`.
+- `apps/core` - Rust. The Core, shipped as Copal.
+- `apps/backend` - TypeScript on Cloudflare Workers. Accounts, friends and share details.
+- `packages/contracts` - Wire types and `Endpoint` declarations. No logic.
+- `apps/app-frontend` - Vue. The App's UI.
+- `packages/ui` - Modrinth's shared Vue components. Reuse before adding.
+- `packages/api-client` - The one TypeScript client.
+
 ## Taste
 
-- Complexity belongs at the adapter boundary. Backend-facing workflows stay in `@modrinth/api-client`; UI stays dumb.
+- Reuse what Modrinth built unless there is a real reason to diverge. Never translate our data into another API's shape.
+- Code enforces boundaries. The crate graph, types and tests beat a written rule.
 - Nothing is released and nothing is installed. Never plan migrations or backward compatibility.
 - Inferred types over annotations. `any` is the enemy; use `unknown` and narrow it safely.
 - Default to no comment. Write one only for a constraint, an external quirk, or an invariant the code can't show, in one line where you can and four at most. Don't restate names or signatures, narrate steps, record history, or explain the fix you just made; the PR carries that.

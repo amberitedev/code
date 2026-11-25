@@ -1,6 +1,11 @@
 {
 	"ignore": [
+		".agents/skills/api-module",
+		".agents/skills/cross-platform-pages",
+		".agents/skills/figma-mcp",
+		".agents/skills/i18n-pass",
 		".agents/skills/review-changelog",
+		".agents/skills/tanstack-query",
 		".github/instructions/i18n-convert.instructions.md",
 		".github/scripts/notify-app-build.mjs",
 		".github/templates",
@@ -161,7 +166,8 @@
 		"scripts/collect-changelog.ts",
 		"scripts/import-projects.py",
 		"scripts/reset-db.sh",
-		"scripts/seed-db.sh"
+		"scripts/seed-db.sh",
+		"standards"
 	],
 	"renamed": {
 		"packages/app-lib": "packages/engine"
