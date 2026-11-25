@@ -4,7 +4,7 @@
 import type { ModLoader, ReleaseChannel, Endpoint } from './protocol'
 import type { SharedIconConfig, UserIds, RemovedFile } from './backend'
 
-export type EngineEvent = { "type": "loading", "payload": LoadingPayload } | { "type": "process", "payload": ProcessPayload } | { "type": "instance", "payload": InstancePayload } | { "type": "install_job", "payload": InstallJobSnapshot } | { "type": "warning", "payload": WarningPayload } | { "type": "log", "payload": LogPayload };
+export type EngineEvent = { "type": "loading", "payload": LoadingPayload } | { "type": "process", "payload": ProcessPayload } | { "type": "instance", "payload": InstancePayload } | { "type": "install_job", "payload": InstallJobSnapshot } | { "type": "warning", "payload": WarningPayload } | { "type": "log", "payload": LogPayload } | { "type": "files_changed", "payload": { instance_id: string, } };
 
 export type LoadingPayload = { event: LoadingBarType, loader_uuid: string, fraction: number | null, message: string, };
 

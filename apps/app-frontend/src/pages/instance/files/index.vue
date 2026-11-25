@@ -13,7 +13,7 @@ import {
 import { useQuery } from '@tanstack/vue-query'
 import { computed, ref, watch } from 'vue'
 
-import { useAppEvent } from '@/composables/use-app-event'
+import { injectAppEvents } from '@/providers/app-events'
 import { get_full_path } from '@/helpers/instance'
 import { highlightInFolder } from '@/helpers/utils'
 import { save } from '@/platform/dialog'
@@ -69,6 +69,7 @@ const instanceRoot = computed(() => instanceRootQuery.data.value ?? '')
 const currentPath = ref('')
 const files = useInstanceFiles({
 	client: apiClient.local,
+	events: injectAppEvents(),
 	instanceId,
 	currentPath,
 	queryKey: (path) => instanceKeys.files(instanceId.value, path),
@@ -101,10 +102,6 @@ async function downloadFile(path: string, fileName: string) {
 	})
 	if (error) throw new Error(error.description)
 }
-
-useAppEvent('instance', async (event) => {
-	if (event.instance_id === instanceId.value && event.event === 'synced') await files.refresh()
-})
 
 watch(instanceId, () => {
 	currentPath.value = ''

@@ -404,6 +404,7 @@ impl Loop {
         let instance = match event {
             Event::Instance(payload) => &payload.instance_id,
             Event::Process(payload) => &payload.instance_id,
+            Event::FilesChanged { instance_id } => instance_id,
             Event::InstallJob(_) => {
                 return self.topics.contains_key(&Topic::Installs);
             }

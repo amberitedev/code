@@ -143,7 +143,7 @@ async fn forward(
             },
         };
         let Some(event) = event else { return };
-        if matches!(event, LocalEvent::Engine(Event::FilesChanged { .. })) {
+        if matches!(event, LocalEvent::Engine(Event::PathsChanged { .. })) {
             continue;
         }
         let text = match serde_json::to_string(&event) {

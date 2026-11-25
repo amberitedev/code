@@ -1589,6 +1589,33 @@ async fn console_lines_are_log_events_and_a_missing_server_is_not_found() {
     assert_eq!(power["payload"]["server"], core.server.as_str());
 }
 
+#[tokio::test]
+async fn files_changed_on_disk_reach_the_instance_topic_without_paths() {
+    let core = core().await;
+    let owner = core.sign_in("owner").await;
+    let mut socket = core.events(&owner).await;
+    subscribe(
+        &mut socket,
+        json!({ "type": "instance", "id": core.server }),
+    )
+    .await;
+    // Topics apply in order, so the server's power means the instance topic is in place.
+    subscribe(&mut socket, json!({ "type": "server", "id": core.server }))
+        .await;
+    next_of(&mut socket, "power_state").await;
+
+    let folder = core.state.servers.paths().server(&core.server);
+    std::fs::write(folder.join("server.properties"), "motd=hi").unwrap();
+    std::fs::create_dir_all(folder.join("config")).unwrap();
+    assert_eq!(
+        next_of(&mut socket, "files_changed").await,
+        json!({
+            "type": "files_changed",
+            "payload": { "instance_id": core.server },
+        })
+    );
+}
+
 /// The next event of `kind`, skipping others.
 async fn next_of(socket: &mut EventSocket, kind: &str) -> Value {
     loop {

@@ -165,7 +165,7 @@ impl<'a> InstanceContent<'a> {
             {
                 tracing::warn!(instance_id = %self.instance.id, %error, "Content installed, but metadata caching failed");
             }
-            self.state.events.send(crate::event::Event::FilesChanged {
+            self.state.events.send(crate::event::Event::PathsChanged {
                 instance_id: self.instance.id.clone(),
                 paths: vec![file.relative_path.clone()],
             });

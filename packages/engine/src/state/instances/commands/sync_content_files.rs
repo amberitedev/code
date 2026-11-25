@@ -366,7 +366,7 @@ pub(crate) async fn sync_instance_content_files(
     tx.commit().await?;
     if changed {
         super::mark_shared_instance_stale(&instance.id, &state.pool).await?;
-        state.events.send(crate::event::Event::FilesChanged {
+        state.events.send(crate::event::Event::PathsChanged {
             instance_id: instance.id.clone(),
             paths: changed_paths,
         });
@@ -735,7 +735,7 @@ async fn sync_server_content_files(
     tx.commit().await?;
     drop(content);
     if !changed_paths.is_empty() {
-        state.events.send(crate::event::Event::FilesChanged {
+        state.events.send(crate::event::Event::PathsChanged {
             instance_id: instance.id.clone(),
             paths: changed_paths,
         });

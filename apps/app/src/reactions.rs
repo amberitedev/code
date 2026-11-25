@@ -248,7 +248,7 @@ async fn follow(engine: Desktop, event: Event) {
             }
             return;
         }
-        Event::FilesChanged { instance_id, paths } => {
+        Event::PathsChanged { instance_id, paths } => {
             files_changed(&engine, &instance_id, &paths).await;
             return;
         }

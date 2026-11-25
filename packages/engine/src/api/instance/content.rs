@@ -222,7 +222,7 @@ fn server_first(metadata: &InstanceMetadata) -> crate::Result<()> {
 }
 
 fn changed(state: &Engine, instance_id: &str, path: &str) {
-    state.events.send(crate::event::Event::FilesChanged {
+    state.events.send(crate::event::Event::PathsChanged {
         instance_id: instance_id.to_owned(),
         paths: vec![path.to_owned()],
     });

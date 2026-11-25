@@ -73,11 +73,16 @@ pub enum Event {
     InstallJob(std::sync::Arc<InstallJobSnapshot>),
     Warning(WarningPayload),
     Log(LogPayload),
+    /// Something in an instance's watched files changed on disk, once per batch of the watcher:
+    /// whoever lists its files reads them again. No paths, so it stays one small event.
+    FilesChanged {
+        instance_id: String,
+    },
     /// Files in an instance changed, as paths relative to its folder: content files once the
     /// engine has indexed them, anything else as the top-level entry holding it. In-process only:
     /// socket loops drop it.
     #[serde(skip)]
-    FilesChanged {
+    PathsChanged {
         instance_id: String,
         paths: Vec<String>,
     },

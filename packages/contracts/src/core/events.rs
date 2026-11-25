@@ -11,7 +11,7 @@ use crate::ApiError;
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Topic {
-    /// The engine's instance and process events for one instance.
+    /// The engine's instance, process and `files_changed` events for one instance.
     Instance { id: String },
     /// The engine's install jobs, for every instance the caller may see, starting with the
     /// unfinished ones.

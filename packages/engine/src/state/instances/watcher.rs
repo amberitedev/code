@@ -276,12 +276,14 @@ pub(crate) fn watch_instance_events(
                     let mut visited_screenshot_instances = Vec::new();
                     let mut changed_files =
                         HashMap::<String, BTreeSet<String>>::new();
+                    let mut touched = BTreeSet::new();
 
                     for e in &events {
                         if let Some((instance_id, first_file_name)) =
                             watching.locate(&e.path)
                         {
                             let instance_id = instance_id.to_owned();
+                            touched.insert(instance_id.clone());
                             let sync_content =
                                 first_file_name.as_ref().is_some_and(|name| {
                                     content_folders(state.side)
@@ -409,9 +411,14 @@ pub(crate) fn watch_instance_events(
                     }
 
                     for (instance_id, names) in changed_files {
-                        state.events.send(crate::event::Event::FilesChanged {
+                        state.events.send(crate::event::Event::PathsChanged {
                             instance_id,
                             paths: names.into_iter().collect(),
+                        });
+                    }
+                    for instance_id in touched {
+                        state.events.send(crate::event::Event::FilesChanged {
+                            instance_id,
                         });
                     }
                 }
