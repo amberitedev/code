@@ -73,7 +73,7 @@ export async function ensureServerInviteLink(
 /**
  * Shares the server when it has no shared instance yet, unlinking an uploaded modpack first through
  * `shareUnlink`, then returns a share URL for an invite link that still has uses left. Returns
- * `null` once `isCurrent` reports the caller moved on. With `afterInstall`, it first waits for the
+ * `null` once `signal` aborts. With `afterInstall`, it first waits for the
  * server's install to end: an uploaded pack is linked as it installs, and unlinked only after.
  */
 export async function createServerInviteLink(
@@ -81,16 +81,17 @@ export async function createServerInviteLink(
 	serverId: string,
 	siteUrl: string,
 	options: {
-		isCurrent: () => boolean
+		signal: AbortSignal
 		shareUnlink: ShareUnlinkPrompt | null
 		afterInstall?: boolean
 	},
 ): Promise<string | null> {
-	const { isCurrent } = options
+	const { signal } = options
+	const isCurrent = () => !signal.aborted
 	const core = await client.cores.serverRoutes(serverId)
 	const params = { id: serverId }
 	const server = options.afterInstall
-		? await installedServer(client, core, serverId, isCurrent)
+		? await installedServer(client, core, serverId, signal)
 		: await core.call(coreRoutes.GetServer, { params })
 	if (!server || !isCurrent()) return null
 	let instanceId = server.shared_instance_id
@@ -113,13 +114,13 @@ export async function createServerInviteLink(
 
 /**
  * The server once it no longer installs, read again on each change its Core announces. `null` once
- * `isCurrent` reports the caller moved on.
+ * `signal` aborts.
  */
 async function installedServer(
 	client: AbstractModrinthClient,
 	core: ContractClient,
 	serverId: string,
-	isCurrent: () => boolean,
+	signal: AbortSignal,
 ): Promise<Server | null> {
 	const events = client.coreEvents((await client.cores.coreOf(serverId)).id)
 	let changed = () => {}
@@ -130,15 +131,18 @@ async function installedServer(
 		}),
 		events.on('resync', () => changed()),
 	]
+	const wake = () => changed()
+	signal.addEventListener('abort', wake)
+	stops.push(() => signal.removeEventListener('abort', wake))
 	try {
 		// Subscribed before the first read, so a change after it cannot pass unseen.
 		await events.ready()
 		for (;;) {
+			if (signal.aborted) return null
 			const next = new Promise<void>((resolve) => (changed = resolve))
 			const server = await core.call(coreRoutes.GetServer, { params: { id: serverId } })
 			if (server.status !== 'installing') return server
 			await next
-			if (!isCurrent()) return null
 		}
 	} finally {
 		for (const stop of stops) stop()

@@ -9,10 +9,13 @@ const uploadedPack = { name: 'Drop Check', version_number: '1.0.0' }
 
 /**
  * A server set up from an uploaded pack, behind a Core that records the routes it is sent. With
- * `installing`, the first read finds the pack still installing and not yet linked, and the install
- * then ends, as the Core announces.
+ * `installing`, the first read finds the pack still installing and not yet linked; with `'ends'`
+ * the install then ends, as the Core announces. `onRead` runs after each read of the server.
  */
-function uploadedPackServer({ installing = false } = {}) {
+function uploadedPackServer({
+	installing,
+	onRead,
+}: { installing?: 'ends' | 'stays'; onRead?: () => void } = {}) {
 	const calls: string[] = []
 	const server = {
 		server_id: 'server',
@@ -28,7 +31,8 @@ function uploadedPackServer({ installing = false } = {}) {
 			if (endpoint.path.endsWith('/share')) return { shared_instance_id: 'share' }
 			if (endpoint.path !== '/servers/{id}') return null
 			const read = { ...server }
-			if (server.status === 'installing') {
+			onRead?.()
+			if (installing === 'ends' && server.status === 'installing') {
 				Object.assign(server, { status: 'available', uploaded_modpack: uploadedPack })
 				queueMicrotask(() => listeners.get('server_changed')?.({ server: 'server' }))
 			}
@@ -59,7 +63,7 @@ function uploadedPackServer({ installing = false } = {}) {
 test('an uploaded pack is unlinked once the owner confirms, before the server is shared', async () => {
 	const { calls, client } = uploadedPackServer()
 	const link = await createServerInviteLink(client, 'server', 'https://site', {
-		isCurrent: () => true,
+		signal: new AbortController().signal,
 		shareUnlink: { ask: async () => true },
 	})
 
@@ -71,7 +75,7 @@ test('a declined unlink shares nothing', async () => {
 	const { calls, client } = uploadedPackServer()
 	await expect(
 		createServerInviteLink(client, 'server', 'https://site', {
-			isCurrent: () => true,
+			signal: new AbortController().signal,
 			shareUnlink: { ask: async () => false },
 		}),
 	).rejects.toBeInstanceOf(ShareUnlinkDeclined)
@@ -80,9 +84,9 @@ test('a declined unlink shares nothing', async () => {
 })
 
 test('after a pack upload, the invite waits for the install to end before it unlinks', async () => {
-	const { calls, client } = uploadedPackServer({ installing: true })
+	const { calls, client } = uploadedPackServer({ installing: 'ends' })
 	const link = await createServerInviteLink(client, 'server', 'https://site', {
-		isCurrent: () => true,
+		signal: new AbortController().signal,
 		shareUnlink: { ask: async () => true },
 		afterInstall: true,
 	})
@@ -94,4 +98,20 @@ test('after a pack upload, the invite waits for the install to end before it unl
 		'/instances/{id}/modpack/unlink',
 		'/servers/{id}/share',
 	])
+})
+
+test('setup moving on during the install wait ends it at once, sharing nothing', async () => {
+	const setup = new AbortController()
+	const { calls, client } = uploadedPackServer({
+		installing: 'stays',
+		onRead: () => setup.abort(),
+	})
+	const link = await createServerInviteLink(client, 'server', 'https://site', {
+		signal: setup.signal,
+		shareUnlink: { ask: async () => true },
+		afterInstall: true,
+	})
+
+	expect(link).toBeNull()
+	expect(calls).toEqual(['/servers/{id}'])
 })

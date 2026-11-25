@@ -25,7 +25,7 @@ export function useServerInviteLink() {
 	const loading = ref(false)
 	const error = ref<string | null>(null)
 	const copied = ref(false)
-	let run = 0
+	let controller: AbortController | null = null
 	let target: ServerInviteLinkTarget | null = null
 
 	watch(link, () => {
@@ -34,19 +34,20 @@ export function useServerInviteLink() {
 
 	async function retry() {
 		if (!target || loading.value) return
-		const current = ++run
+		controller?.abort()
+		const { signal } = (controller = new AbortController())
 		const { serverId, siteUrl, afterInstall } = target
 		loading.value = true
 		error.value = null
 		try {
 			const next = await createServerInviteLink(client, serverId, siteUrl, {
-				isCurrent: () => current === run,
+				signal,
 				shareUnlink,
 				afterInstall,
 			})
-			if (current === run) link.value = next
+			if (!signal.aborted) link.value = next
 		} catch (err) {
-			if (current !== run) return
+			if (signal.aborted) return
 			error.value =
 				err instanceof ShareUnlinkDeclined
 					? formatMessage(commonMessages.shareRequiresUnlinkBody)
@@ -54,12 +55,12 @@ export function useServerInviteLink() {
 						? err.message
 						: String(err)
 		} finally {
-			if (current === run) loading.value = false
+			if (!signal.aborted) loading.value = false
 		}
 	}
 
 	function start(next: ServerInviteLinkTarget) {
-		run++
+		controller?.abort()
 		target = next
 		link.value = null
 		loading.value = false
@@ -70,7 +71,7 @@ export function useServerInviteLink() {
 
 	/** Stops an in-flight load and keeps whatever link is already shown. */
 	function cancel() {
-		run++
+		controller?.abort()
 		loading.value = false
 	}
 

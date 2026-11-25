@@ -72,6 +72,18 @@ export async function server(
 				async () => (await call(core, coreApi.GetServer, { id })).status !== 'installing',
 				{ timeoutMs: 15 * 60_000, everyMs: 500 },
 			)
+			// The server is let go however the install ended; its job says whether it worked.
+			const [job] = (
+				await call(core, installs.ListInstallJobs, null, undefined, { include_finished: true })
+			)
+				.filter(
+					(each) => each.instance_id === id && each.kind === 'install_pack_to_existing_instance',
+				)
+				.sort((a, b) => b.created.localeCompare(a.created))
+			if (job?.status !== 'succeeded')
+				throw new FixtureError(
+					`The pack did not install on "${spec.name}": ${JSON.stringify(job?.error ?? job?.status ?? 'no install job')}`,
+				)
 		})
 	}
 	if (spec.running) {
