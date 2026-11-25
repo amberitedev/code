@@ -825,6 +825,11 @@ mod tests {
         .unwrap();
         tests::add_instance(&engine, "s", "srv").await;
         let missing = engine.directories.metadata_dir().join("versions/1.json");
+        let placed = engine
+            .content_store
+            .instance_path("srv", "config/a.toml")
+            .await
+            .unwrap();
         let request = InstallRequest::InstallExistingInstance {
             instance_id: "s".to_owned(),
             force: false,
@@ -845,7 +850,7 @@ mod tests {
             ..InstallErrorView::from_message(
                 "path_error",
                 InstallPhaseId::ExtractingOverrides,
-                format!("not found, path: {}", missing.display()),
+                format!("{}, then {}", missing.display(), placed.display()),
             )
         };
         state.error = Some(failed.clone());
@@ -864,12 +869,19 @@ mod tests {
         let json = serde_json::to_string(&jobs).unwrap();
         assert!(!json.contains("/srv/copal"), "{json}");
         assert!(json.contains("overrides/config/a.toml"), "{json}");
-        let root = dir.path().display().to_string();
+        let instances = engine.directories.instances_dir();
+        let instances = Path::new(instances.file_name().unwrap());
+        let named = format!(
+            "{}, then {}",
+            Path::new("meta").join("versions/1.json").display(),
+            instances
+                .join("srv")
+                .join("config")
+                .join("a.toml")
+                .display(),
+        );
         for error in [&jobs[0].error, &jobs[0].rollback_error] {
-            let message = &error.as_ref().unwrap().message;
-            assert!(!message.contains(&root), "{message}");
-            let named = Path::new("meta").join("versions/1.json");
-            assert!(message.ends_with(&*named.to_string_lossy()), "{message}");
+            assert_eq!(error.as_ref().unwrap().message, named);
         }
     }
 }

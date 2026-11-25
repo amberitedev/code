@@ -296,6 +296,12 @@ async fn worlds_and_servers_are_read_and_edited_through_their_routes() {
         send(&router, "DELETE", "/instances/local%3Aa/servers/0", None).await;
     assert_eq!(status, StatusCode::NO_CONTENT);
     assert_eq!(list().await, json!([world]));
+
+    let uri = "/server-status?address=play.example.com%3Aabc&legacy=false";
+    let (status, error) = send(&router, "GET", uri, None).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
+    assert_eq!(error["error"], "invalid_input");
+    assert!(error["description"].as_str().unwrap().contains("abc"));
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -837,15 +843,9 @@ async fn an_icon_is_set_from_an_image_or_the_editor_then_removed() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_server_address_or_content_the_engine_cannot_read_is_invalid_input() {
+async fn content_the_engine_cannot_read_is_invalid_input() {
     let dir = tempfile::tempdir().unwrap();
     let router = host(&dir, true).await;
-    let uri = "/server-status?address=play.example.com%3Aabc&legacy=false";
-    let (status, error) = send(&router, "GET", uri, None).await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
-    assert_eq!(error["error"], "invalid_input");
-    assert!(error["description"].as_str().unwrap().contains("abc"));
-
     let uploads = "/instances/local%3Aa/uploads";
     let (_, upload) = send(
         &router,

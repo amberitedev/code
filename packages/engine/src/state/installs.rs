@@ -30,11 +30,18 @@ pub(crate) struct Installs {
 impl Installs {
     pub(crate) fn new(side: Side, directories: &DirectoryInfo) -> Self {
         let server_folders = (side == Side::Server).then(|| {
-            let mut folders = vec![
+            let mut folders: Vec<_> = [
                 directories.config_dir.clone(),
                 directories.instances_dir(),
                 directories.metadata_dir(),
-            ];
+            ]
+            .into_iter()
+            // The content store names a folder as it resolves: `\\?\C:\…` on Windows.
+            .flat_map(|folder| {
+                [std::fs::canonicalize(&folder).ok(), Some(folder)]
+            })
+            .flatten()
+            .collect();
             // A folder inside another one goes first, so it keeps its own name.
             folders.sort_by_key(|folder| {
                 std::cmp::Reverse(folder.as_os_str().len())
