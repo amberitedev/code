@@ -25,7 +25,9 @@ pub(crate) use self::list_content::{
 };
 
 mod embedded_content_metadata;
-pub(crate) use self::embedded_content_metadata::names_client_only;
+pub(crate) use self::embedded_content_metadata::{
+    infer_project_type_path, names_client_only,
+};
 
 mod remove_instance;
 pub(crate) use self::remove_instance::*;

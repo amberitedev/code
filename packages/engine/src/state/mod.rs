@@ -450,6 +450,7 @@ impl Engine {
         };
 
         let hooks = hooks.unwrap_or_else(|| Arc::new(NoHooks));
+        let installs = Arc::new(Installs::new(side, &directories));
         let state = Arc::new_cyclic(|engine| {
             hooks.bind(engine.clone());
             Self {
@@ -459,7 +460,7 @@ impl Engine {
                 fetch_semaphore,
                 io_semaphore,
                 api_semaphore,
-                installs: Arc::new(Installs::new(side)),
+                installs,
                 instance_locks: InstanceLocks::default(),
                 publish_reports: Default::default(),
                 uploads: Default::default(),

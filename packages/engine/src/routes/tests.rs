@@ -780,9 +780,26 @@ async fn an_icon_is_set_from_an_image_or_the_editor_then_removed() {
         )
         .unwrap();
 
-    let (status, _) =
+    let (status, error) =
         send_raw(&router, "PUT", icon, b"not an image".to_vec()).await;
-    assert!(!status.is_success());
+    let error: Value = serde_json::from_slice(&error).unwrap();
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
+    assert_eq!(error["error"], "invalid_input");
+    let reason = error["description"].as_str().unwrap();
+    assert!(
+        reason.starts_with("Could not decode instance icon"),
+        "{reason}"
+    );
+    let config = json!({ "background": { "type": "color", "value": "#c78aff" }, "symbol": "dusk_block" });
+    let (status, error) = send(
+        &router,
+        "PUT",
+        &format!("{icon}/edited"),
+        Some(json!({ "config": config, "image": b"not an image" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
+    assert_eq!(error["error"], "invalid_input");
     let (status, _) = send_raw(&router, "PUT", icon, wide.clone()).await;
     assert_eq!(status, StatusCode::NO_CONTENT);
     let (status, read) = send_raw(&router, "GET", icon, Vec::new()).await;
@@ -793,7 +810,6 @@ async fn an_icon_is_set_from_an_image_or_the_editor_then_removed() {
         send(&router, "GET", "/instances/local%3Aa", None).await;
     assert_eq!(instance["icon_config"], Value::Null);
 
-    let config = json!({ "background": { "type": "color", "value": "#c78aff" }, "symbol": "dusk_block" });
     let (status, _) = send(
         &router,
         "PUT",
@@ -818,6 +834,39 @@ async fn an_icon_is_set_from_an_image_or_the_editor_then_removed() {
         send(&router, "DELETE", icon, None).await.0,
         StatusCode::NOT_FOUND
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_server_address_or_content_the_engine_cannot_read_is_invalid_input() {
+    let dir = tempfile::tempdir().unwrap();
+    let router = host(&dir, true).await;
+    let uri = "/server-status?address=play.example.com%3Aabc&legacy=false";
+    let (status, error) = send(&router, "GET", uri, None).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
+    assert_eq!(error["error"], "invalid_input");
+    assert!(error["description"].as_str().unwrap().contains("abc"));
+
+    let uploads = "/instances/local%3Aa/uploads";
+    let (_, upload) = send(
+        &router,
+        "POST",
+        uploads,
+        Some(json!({ "scope": "content" })),
+    )
+    .await;
+    let upload = upload["upload_id"].as_str().unwrap().to_owned();
+    let (status, _) = send_raw(
+        &router,
+        "POST",
+        &format!("{uploads}/{upload}/files?path=notes.jar"),
+        b"not an archive".to_vec(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let uri = format!("{uploads}/{upload}/finalize");
+    let (status, error) = send(&router, "POST", &uri, None).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
+    assert_eq!(error["error"], "invalid_input");
 }
 
 #[tokio::test(flavor = "multi_thread")]

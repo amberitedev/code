@@ -18,7 +18,7 @@ use crate::{
     access::Caller,
     archive::{self, NoRoom},
     endpoints::files::{InstanceUpload, InstanceUploadStatus, UploadScope},
-    routes::api_error,
+    routes::{api_error, input_error},
     sandbox,
 };
 
@@ -325,11 +325,15 @@ pub(super) async fn finalize(
             }
             UploadScope::Content => {
                 for (_, staged) in &files {
+                    // Read here: a file the engine cannot read as content is the caller's.
+                    let kind = crate::state::instances::commands::infer_project_type_path(staged)
+                        .await
+                        .map_err(input_error)?;
                     crate::instance::add_project_from_path(
                         engine,
                         instance_id,
                         staged,
-                        None,
+                        Some(kind),
                     )
                     .await
                     .map_err(api_error)?;

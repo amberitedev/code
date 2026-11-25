@@ -6,7 +6,7 @@ use contracts::{
     ApiError, Empty, Json,
     server::{Mount, Req},
 };
-use engine::routes::api_error;
+use engine::routes::{api_error, input_error};
 
 use crate::local_api::{
     AppState,
@@ -107,5 +107,5 @@ async fn set_instance_icon_from_path(
     )
     .await
     .map(|()| Empty)
-    .map_err(api_error)
+    .map_err(input_error)
 }

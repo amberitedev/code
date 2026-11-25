@@ -6,7 +6,7 @@ use std::{
 use axum::extract::State;
 use contracts::{ApiError, Empty, ErrorCode, Json, server::Req};
 
-use super::api_error;
+use super::{api_error, input_error};
 use crate::{
     Engine,
     access::{EngineAccess, InstanceAccess},
@@ -36,7 +36,7 @@ pub async fn get_server_status(
     worlds::get_server_status(&request.query.address, protocol_version)
         .await
         .map(Json)
-        .map_err(api_error)
+        .map_err(input_error)
 }
 
 pub async fn set_world_display_status(

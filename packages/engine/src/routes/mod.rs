@@ -310,3 +310,21 @@ pub fn api_error(error: crate::Error) -> ApiError {
     .unwrap_or(ErrorCode::Unknown);
     ApiError::new(code, format!("{error:#}"))
 }
+
+/// `api_error` for a route whose every `InputError` is about what the caller sent. Upstream also
+/// raises `InputError` for its own failures, so `error_code` cannot call it `invalid_input`.
+pub fn input_error(error: crate::Error) -> ApiError {
+    if crate::error_kinds(&error)
+        .any(|kind| matches!(kind, crate::ErrorKind::InputError(_)))
+    {
+        // Upstream's "invalid input: " tells the person reading the reason nothing.
+        let reason = format!("{error:#}").replace("invalid input: ", "");
+        let mut chars = reason.chars();
+        let reason = chars
+            .next()
+            .map(|first| first.to_uppercase().chain(chars).collect())
+            .unwrap_or(reason);
+        return ApiError::new(ErrorCode::InvalidInput, reason);
+    }
+    api_error(error)
+}
