@@ -1,11 +1,13 @@
 import {
 	type ApiError,
 	type CoreSession,
+	type Endpoint,
 	core as coreRoutes,
 	cores,
 	type ListedCore,
 } from '@amberite/contracts'
 
+import type { LocationOf } from '../contracts/client'
 import { ApiCallError } from '../contracts/errors'
 import type { AbstractModrinthClient } from '../core/abstract-client'
 import { archonServer } from '../core-hosting/servers-v0'
@@ -139,6 +141,21 @@ export class Cores {
 		} finally {
 			for (const stop of stops) stop()
 		}
+	}
+
+	/**
+	 * The URL of a route of a Core to download from, such as a backup, for a save that cannot send
+	 * the session itself: the App's Core proxy adds it. A call first signs in again when the
+	 * session ended.
+	 */
+	public async downloadUrl<E extends Endpoint>(
+		coreId: string,
+		endpoint: E,
+		location: LocationOf<E>,
+	): Promise<string> {
+		const core = this.client.core(coreId)
+		await core.call(coreRoutes.ListOps)
+		return (core.url as (endpoint: E, location: LocationOf<E>) => string)(endpoint, location)
 	}
 
 	/** A ticket for `coreId`, which only its owner gets. */

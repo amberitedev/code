@@ -39,6 +39,8 @@ export interface FileManagerContext {
 	uploadFiles: (files: File[]) => void
 	cancelUpload?: () => void
 	uploadState?: Ref<UploadState> | ComputedRef<UploadState>
+	/** False when the host shows an upload's progress itself, outside the tab. */
+	showUploadProgress?: boolean
 
 	refresh: () => void
 
@@ -59,7 +61,6 @@ export interface FileManagerContext {
 	prefetchDirectory?: (path: string) => void
 	prefetchFile?: (path: string) => void
 
-	showInstallFromUrl?: boolean
 	basePath?: Ref<string> | ComputedRef<string>
 	openInFolder?: (path: string) => void
 

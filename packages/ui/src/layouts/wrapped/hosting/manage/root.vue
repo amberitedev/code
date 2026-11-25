@@ -206,7 +206,7 @@
 
 <script setup lang="ts">
 import type { Archon } from '@modrinth/api-client'
-import { ModrinthApiError } from '@modrinth/api-client'
+import { instanceFiles, ModrinthApiError } from '@modrinth/api-client'
 import {
 	BoxesIcon,
 	DatabaseBackupIcon,
@@ -288,6 +288,8 @@ interface Tab {
 const props = withDefaults(
 	defineProps<{
 		serverId: string
+		/** The Core that has the server. */
+		coreId: string
 		reloadPage: () => void
 		showAdvancedDebugInfo?: boolean
 		showUptime?: boolean
@@ -460,6 +462,7 @@ const {
 	uploadState,
 } = useServerManageCoreRuntime({
 	serverId: computed(() => props.serverId),
+	coreId: props.coreId,
 	worldId,
 	server: serverData,
 	serverFull,
@@ -653,8 +656,14 @@ watch(serverData, (data) => {
 // hovering their link warms the first request.
 function prefetchFiles() {
 	void queryClient.prefetchQuery({
-		queryKey: ['files', props.serverId, '/'],
-		queryFn: () => client.kyros.files_v0.listDirectory('/', 1, 2000),
+		queryKey: [...serverKeys.files(props.serverId), ''],
+		queryFn: () =>
+			client
+				.core(props.coreId)
+				.call(instanceFiles.ListInstanceFiles, {
+					params: { id: props.serverId },
+					query: { path: '' },
+				}),
 		staleTime: PANEL_STALE_MS,
 	})
 }

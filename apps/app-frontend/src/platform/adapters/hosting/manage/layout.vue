@@ -1,7 +1,10 @@
 <template>
 	<div class="w-full pt-6" :class="isOverviewRoute ? 'flex min-h-full flex-col' : 'h-full'">
 		<ServersManageRootLayout
+			v-if="!coreLoading"
+			:key="serverId"
 			:server-id="serverId"
+			:core-id="coreId ?? ''"
 			:layout-mode="isOverviewRoute ? 'fill' : 'page'"
 			:reload-page="() => router.go(0)"
 			:additional-tabs="historyTabs"
@@ -100,6 +103,15 @@ function getCachedServerName(id: string): string | undefined {
 		.getQueryData<Archon.Servers.v0.ServerGetResponse>(['servers'])
 		?.servers.find((server) => server.server_id === id)?.name
 }
+
+// The panel talks to the server's Core, so it opens once the Core is known. A server no Core has
+// opens with no Core, whose calls answer `not_found`, which the panel shows.
+const { data: coreId, isLoading: coreLoading } = useQuery({
+	queryKey: computed(() => ['servers', 'core', serverId.value]),
+	queryFn: async () => (await client.cores.coreOf(serverId.value)).id,
+	enabled: computed(() => Boolean(serverId.value)),
+	staleTime: Infinity,
+})
 
 const { data: serverData } = useQuery({
 	queryKey: computed(() => ['servers', 'detail', serverId.value]),

@@ -9,12 +9,6 @@
 		@create="handleZipSelection"
 	/>
 	<FileUploadConflictModal ref="uploadConflictModal" @proceed="handleExtractConfirm" />
-	<FileUploadZipUrlModal
-		v-if="ctx.showInstallFromUrl"
-		ref="uploadZipUrlModal"
-		:disabled="isBusy"
-		:disabled-tooltip="busyTooltip"
-	/>
 	<FileRenameItemModal ref="renameItemModal" :item="selectedItem" @rename="handleRenameItem" />
 	<FileMoveItemModal
 		ref="moveItemModal"
@@ -27,6 +21,12 @@
 	<div v-if="!(ctx.loading.value && items.length === 0)" class="contents">
 		<div class="relative flex w-full flex-col">
 			<div class="relative isolate flex w-full flex-col gap-4">
+				<UploadAdmonition
+					v-if="ctx.showUploadProgress !== false && ctx.uploadState?.value.isUploading"
+					:state="ctx.uploadState.value"
+					:cancelable="!!ctx.cancelUpload"
+					@cancel="ctx.cancelUpload?.()"
+				/>
 				<FileNavbar
 					:breadcrumbs="breadcrumbSegments"
 					:is-editing="isEditing"
@@ -36,7 +36,6 @@
 					:is-editor-find-open="fileEditorRef?.isFindOpen"
 					:search-query="searchQuery"
 					:show-refresh-button="showRefreshButton"
-					:show-install-from-url="ctx.showInstallFromUrl"
 					:base-id="baseId"
 					:disabled="isBusy"
 					:disabled-tooltip="busyTooltip"
@@ -47,7 +46,6 @@
 					@create="showCreateModal"
 					@upload="initiateFileUpload"
 					@upload-zip="() => {}"
-					@unzip-from-url="showUnzipFromUrlModal"
 					@refresh="ctx.refresh"
 					@share="() => fileEditorRef?.shareToMclogs()"
 					@find="() => fileEditorRef?.toggleFind()"
@@ -215,6 +213,7 @@ import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 
 import { Button, ContextMenu } from '#ui/components/base/buttons'
 import FloatingActionBar from '#ui/components/base/FloatingActionBar.vue'
+import UploadAdmonition from '#ui/components/servers/admonitions/UploadAdmonition.vue'
 import { defineMessages, useVIntl } from '#ui/composables/i18n'
 import { useStickyObserver } from '#ui/composables/sticky-observer'
 import { useVirtualScroll } from '#ui/composables/virtual-scroll'
@@ -235,7 +234,6 @@ import FileMoveItemModal from './components/modals/FileMoveItemModal.vue'
 import FileRenameItemModal from './components/modals/FileRenameItemModal.vue'
 import FileUnsavedChangesModal from './components/modals/FileUnsavedChangesModal.vue'
 import FileUploadConflictModal from './components/modals/FileUploadConflictModal.vue'
-import FileUploadZipUrlModal from './components/modals/FileUploadZipUrlModal.vue'
 import FileUploadDragAndDrop from './components/upload/FileUploadDragAndDrop.vue'
 import { useFileSearch } from './composables/file-search'
 import { useFileSelection } from './composables/file-selection'
@@ -378,7 +376,6 @@ const renameItemModal = ref<InstanceType<typeof FileRenameItemModal>>()
 const moveItemModal = ref<InstanceType<typeof FileMoveItemModal>>()
 const deleteItemModal = ref<InstanceType<typeof FileDeleteItemModal>>()
 const uploadConflictModal = ref<InstanceType<typeof FileUploadConflictModal>>()
-const uploadZipUrlModal = ref<InstanceType<typeof FileUploadZipUrlModal>>()
 const contextMenuRef = ref<InstanceType<typeof ContextMenu>>()
 
 const newItemType = ref<'file' | 'directory'>('file')
@@ -573,11 +570,6 @@ function showCreateModal(type: 'file' | 'directory') {
 	if (isBusy.value) return
 	newItemType.value = type
 	createItemModal.value?.show()
-}
-
-function showUnzipFromUrlModal() {
-	if (isBusy.value) return
-	uploadZipUrlModal.value?.show()
 }
 
 function showRenameModal(item: FileItem) {

@@ -555,6 +555,7 @@ function onInstallationDismiss() {
 			/>
 			<UploadAdmonition
 				v-else-if="item.kind === 'upload'"
+				:state="ctx.uploadState.value"
 				:cancelable="!!ctx.cancelUpload.value"
 				:cancelling="uploadCancelling"
 				@cancel="onUploadCancel"

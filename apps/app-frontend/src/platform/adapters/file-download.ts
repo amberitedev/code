@@ -1,9 +1,8 @@
-import { type AbstractModrinthClient, ModrinthApiError } from '@modrinth/api-client'
+import { ModrinthApiError } from '@modrinth/api-client'
 import type { FileDownloadProvider } from '@modrinth/ui'
 
-import { type ExternalFileProgress, saveExternal } from '@/platform/app-lib/files/commands'
 import { save } from '@/platform/dialog'
-import { cancelOp } from '@/platform/ops'
+import { cancelOp, type ExternalFileProgress, saveExternal } from '@/platform/ops'
 
 export interface FileDownloadTask {
 	update: (progress: ExternalFileProgress) => void
@@ -20,10 +19,8 @@ export type TrackFileDownload = (
 	server: { serverId?: string; serverName?: string },
 ) => FileDownloadTask
 
-export function createFileDownload(
-	client: AbstractModrinthClient,
-	trackDownload: TrackFileDownload,
-): FileDownloadProvider {
+/** Saves a Core's download (see `FileDownload`) to a file the user picks, with its progress. */
+export function createFileDownload(trackDownload: TrackFileDownload): FileDownloadProvider {
 	return {
 		async download(file) {
 			const path = await save({
@@ -74,55 +71,7 @@ export function createFileDownload(
 			}
 
 			try {
-				switch (file.type) {
-					case 'server-file': {
-						const { token } = await client.kyros.files_v1.authorizeFileDownload(
-							file.nodeUrlHost,
-							file.worldId,
-							file.path,
-						)
-						await saveUrl(
-							client.kyros.files_v1.getFileDownloadUrl(file.nodeUrlHost, file.worldId, token),
-						)
-						break
-					}
-					case 'server-mrpack': {
-						const { token } = await client.kyros.content_v1.authorizeMrpackExport(
-							file.nodeUrlHost,
-							file.worldId,
-						)
-						await saveUrl(
-							client.kyros.content_v1.getMrpackExportUrl(file.nodeUrlHost, file.worldId, token),
-						)
-						break
-					}
-					case 'server-world': {
-						const { token } = await client.kyros.files_v1.authorizeFullWorldDownload(
-							file.nodeUrlHost,
-							file.worldId,
-						)
-						await saveUrl(
-							client.kyros.files_v1.getFullWorldDownloadUrl(file.nodeUrlHost, file.worldId, token),
-						)
-						break
-					}
-					case 'server-backup': {
-						const { token } = await client.kyros.backups_v1.authorizeDownload(
-							file.nodeUrlHost,
-							file.worldId,
-							file.backupId,
-						)
-						await saveUrl(
-							client.kyros.backups_v1.getDownloadUrl(
-								file.nodeUrlHost,
-								file.worldId,
-								file.backupId,
-								token,
-							),
-						)
-						break
-					}
-				}
+				await saveUrl(file.url)
 				task.succeed(savedFilename)
 				return true
 			} catch (error) {

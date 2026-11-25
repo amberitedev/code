@@ -189,8 +189,8 @@ function formatTimestamp(millis?: number): string {
 }
 
 function formatLog4jLines(event: Log4jEvent): LogLine[] {
-	const level = mapLog4jLevel(event.level)
-	const time = formatTimestamp(event.timestamp_millis)
+	const level = mapLog4jLevel(event.level ?? undefined)
+	const time = formatTimestamp(event.timestamp_millis ?? undefined)
 	const thread = event.thread_name ?? ''
 	const levelStr = event.level ?? ''
 	const message = event.message?.trim() ?? ''

@@ -36,10 +36,11 @@ import { computed } from 'vue'
 import Admonition from '#ui/components/base/Admonition.vue'
 import { Button } from '#ui/components/base/buttons'
 import { useFormatBytes } from '#ui/composables'
-import { injectModrinthServerContext } from '#ui/providers'
+import type { UploadState } from '#ui/layouts/shared/files-tab/types'
 
-withDefaults(
+const props = withDefaults(
 	defineProps<{
+		state: UploadState
 		cancelable?: boolean
 		cancelling?: boolean
 	}>(),
@@ -55,9 +56,7 @@ defineEmits<{
 
 const formatBytes = useFormatBytes()
 
-const ctx = injectModrinthServerContext()
-
-const state = computed(() => ctx.uploadState.value)
+const state = computed(() => props.state)
 
 const overallProgress = computed(() => {
 	const s = state.value

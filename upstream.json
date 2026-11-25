@@ -94,6 +94,8 @@
 		"packages/ui/src/composables/hosting-intercom.ts",
 		"packages/ui/src/composables/region-pings.ts",
 		"packages/ui/src/composables/stripe.ts",
+		"packages/ui/src/layouts/shared/files-tab/components/modals/FileUploadZipUrlModal.vue",
+		"packages/ui/src/layouts/shared/files-tab/components/upload/FileUploadDropdown.vue",
 		"packages/ui/src/layouts/shared/server-settings/components/backup-repository-reparation.vue",
 		"packages/ui/src/layouts/shared/server-settings/pages/network.vue",
 		"packages/ui/src/layouts/shared/server-settings/pages/support.vue",
@@ -127,6 +129,7 @@
 	},
 	"ported": {
 		".github/workflows/theseus-build.yml": ".github/workflows/amberite-app-build.yml",
+		"apps/app-frontend/src/platform/app-lib/files/commands.ts": "packages/ui/src/layouts/shared/files-tab/providers/instance-files.ts",
 		"apps/app/src/api/auth.rs": "apps/app/src/accounts/routes.rs",
 		"apps/app/src/api/cache.rs": "packages/engine/src/routes/cache.rs",
 		"apps/app/src/api/files.rs": "packages/engine/src/routes/files.rs",

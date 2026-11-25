@@ -11,6 +11,8 @@ export const serverKeys = {
 	shareDiff: (serverId: string, ...scope: [worldId?: string, userId?: string]) =>
 		['servers', 'share-diff', serverId, ...scope] as const,
 	shareHistory: (serverId: string) => ['servers', 'share-history', serverId] as const,
+	/** The listings of the server's files, by folder. */
+	files: (serverId: string) => ['servers', 'files', serverId] as const,
 	shareFiles: (serverId: string, worldId: string, userId: string | undefined) =>
 		['servers', 'share-files', serverId, worldId, userId] as const,
 	sharingUpdateTarget: (userId: string, serverId: string | undefined) =>

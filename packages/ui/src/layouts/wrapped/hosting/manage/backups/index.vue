@@ -164,7 +164,7 @@
 </template>
 
 <script setup lang="ts">
-import type { Archon } from '@modrinth/api-client'
+import { type Archon, core as coreRoutes } from '@modrinth/api-client'
 import {
 	CalendarClockIcon,
 	DownloadIcon,
@@ -191,10 +191,9 @@ import BackupRenameModal from '#ui/components/servers/backups/BackupRenameModal.
 import BackupRestoreModal from '#ui/components/servers/backups/BackupRestoreModal.vue'
 import { defineMessages, useVIntl } from '#ui/composables/i18n'
 import { useServerBackupsQueue } from '#ui/composables/server-backups-queue'
-import { useServerWorldDownload } from '#ui/composables/server-download'
+import { useServerDownload } from '#ui/composables/server-download'
 import { useServerPermissions } from '#ui/composables/server-permissions'
 import {
-	injectFileDownload,
 	injectModrinthClient,
 	injectModrinthServerContext,
 	injectNotificationManager,
@@ -329,7 +328,6 @@ const queryClient = useQueryClient()
 const { addNotification } = injectNotificationManager()
 const { server, serverId, worldId, busyReasons } = injectModrinthServerContext()
 const settingsModal = injectServerSettingsModal(null)
-const fileDownload = injectFileDownload(null)
 const { canManageBackups, permissionDeniedMessage } = useServerPermissions()
 
 const {
@@ -404,17 +402,14 @@ const createDisabledReason = computed(() => {
 	return undefined
 })
 
-const { downloadWorldFiles } = useServerWorldDownload()
+const serverDownload = useServerDownload()
 const isDownloadingFiles = ref(false)
 
 async function downloadFiles() {
-	const node = server.value.node
-	const currentWorldId = worldId.value
-	if (!node || !currentWorldId || isDownloadingFiles.value) return
-
+	if (isDownloadingFiles.value) return
 	isDownloadingFiles.value = true
 	try {
-		await downloadWorldFiles(node.instance, currentWorldId)
+		await serverDownload.downloadWorld()
 	} finally {
 		isDownloadingFiles.value = false
 	}
@@ -424,7 +419,7 @@ const createMenuOptions = computed<ButtonMenuOption[]>(() => [
 	{
 		id: 'download-files',
 		label: formatMessage(commonMessages.downloadFilesButton),
-		disabled: !server.value.node || !worldId.value || isDownloadingFiles.value,
+		disabled: isDownloadingFiles.value,
 		action: downloadFiles,
 	},
 ])
@@ -439,47 +434,10 @@ const restoreDisabledReason = computed(() => {
 	return undefined
 })
 
-async function downloadBackup(backup: Backup) {
-	const node = server.value.node
-	const currentWorldId = worldId.value
-	if (!node || !currentWorldId) return
-
-	try {
-		if (fileDownload) {
-			await fileDownload.download({
-				type: 'server-backup',
-				filename: `${backup.name}.zip`,
-				serverId,
-				serverName: server.value.name,
-				nodeUrlHost: node.instance,
-				worldId: currentWorldId,
-				backupId: backup.id,
-			})
-			return
-		}
-
-		const { token } = await client.kyros.backups_v1.authorizeDownload(
-			node.instance,
-			currentWorldId,
-			backup.id,
-		)
-		const link = document.createElement('a')
-		link.href = client.kyros.backups_v1.getDownloadUrl(
-			node.instance,
-			currentWorldId,
-			backup.id,
-			token,
-		)
-		link.download = ''
-		link.rel = 'noopener'
-		link.click()
-	} catch (error) {
-		addNotification({
-			type: 'error',
-			title: formatMessage(commonMessages.downloadFailedLabel),
-			text: error instanceof Error ? error.message : String(error),
-		})
-	}
+function downloadBackup(backup: Backup) {
+	return serverDownload.download('server-backup', `${backup.name}.zip`, coreRoutes.DownloadBackup, {
+		params: { id: serverId, backup_id: backup.id },
+	})
 }
 
 const createModal = ref<InstanceType<typeof BackupCreateModal>>()

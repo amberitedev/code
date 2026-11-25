@@ -243,7 +243,7 @@ const { addPopupNotification } = popupNotificationManager
 
 provideModrinthClient(tauriApiClient)
 provideServerOnboardingFlow(createServerOnboardingFlow())
-provideFileDownload(createFileDownload(tauriApiClient, trackExternalFileDownload))
+provideFileDownload(createFileDownload(trackExternalFileDownload))
 const iconCache = createIconCache()
 provideIconCache(iconCache)
 provideInstanceLaunchState(createInstanceLaunchState())

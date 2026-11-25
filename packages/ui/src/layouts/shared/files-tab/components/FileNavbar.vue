@@ -147,18 +147,11 @@
 							label: formatMessage(messages.uploadFile),
 							action: () => $emit('upload'),
 						},
-						{ type: 'divider', shown: showInstallFromUrl ?? false },
 						{
 							id: 'upload-zip',
 							label: formatMessage(messages.uploadFromZip),
 							shown: false,
 							action: () => $emit('uploadZip'),
-						},
-						{
-							id: 'install-from-url',
-							label: formatMessage(messages.uploadFromZipUrl),
-							shown: showInstallFromUrl ?? false,
-							action: () => $emit('unzipFromUrl'),
 						},
 					]"
 				>
@@ -175,9 +168,6 @@
 					</template>
 					<template #upload-zip>
 						<FileArchiveIcon aria-hidden="true" /> {{ formatMessage(messages.uploadFromZip) }}
-					</template>
-					<template #install-from-url>
-						<LinkIcon aria-hidden="true" /> {{ formatMessage(messages.uploadFromZipUrl) }}
 					</template>
 				</TeleportOverflowMenu>
 			</div>
@@ -215,7 +205,6 @@ import {
 	FileArchiveIcon,
 	FolderOpenIcon,
 	HomeIcon,
-	LinkIcon,
 	PlusIcon,
 	RefreshCwIcon,
 	SearchIcon,
@@ -272,10 +261,6 @@ const messages = defineMessages({
 		id: 'files.navbar.upload-from-zip',
 		defaultMessage: 'Upload from .zip file',
 	},
-	uploadFromZipUrl: {
-		id: 'files.navbar.upload-from-zip-url',
-		defaultMessage: 'Upload from .zip URL',
-	},
 	shareToMclogs: {
 		id: 'files.navbar.share-to-mclogs',
 		defaultMessage: 'Share to mclo.gs',
@@ -295,7 +280,6 @@ const props = defineProps<{
 	isEditorFindOpen?: boolean
 	searchQuery: string
 	showRefreshButton?: boolean
-	showInstallFromUrl?: boolean
 	baseId: string
 	disabled?: boolean
 	disabledTooltip?: string
@@ -309,7 +293,6 @@ const emit = defineEmits<{
 	create: [type: 'file' | 'directory']
 	upload: []
 	uploadZip: []
-	unzipFromUrl: []
 	refresh: []
 	share: []
 	find: []

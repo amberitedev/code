@@ -1,4 +1,10 @@
-import { type LocalEvent, ops } from '@modrinth/api-client'
+import {
+	type ExternalSave,
+	type InstanceFileSave,
+	type LocalEvent,
+	type LocalUpload,
+	ops,
+} from '@modrinth/api-client'
 
 import { apiClient } from '@/platform/modrinth-client'
 
@@ -60,4 +66,49 @@ export async function runOp(
 /** The op ends with `cancelled`. */
 export async function cancelOp(op: string) {
 	await apiClient.local.call(ops.cancelOp, { params: { id: op } })
+}
+
+export interface ExternalFileProgress {
+	stage: 'waiting' | 'downloading' | 'saving'
+	downloadedBytes: number
+	totalBytes: number | null
+}
+
+export interface LocalUploadProgress {
+	loaded: number
+	total: number
+}
+
+/** Downloads `save.url` to a file on this computer. */
+export function saveExternal(
+	save: ExternalSave,
+	onProgress: (progress: ExternalFileProgress) => void,
+): Promise<OpEnd> {
+	return runOp(
+		save.op,
+		() => apiClient.local.call(ops.saveExternalFile, { body: save }),
+		({ stage, done, total }) =>
+			onProgress({
+				stage: stage === 'downloading' || stage === 'saving' ? stage : 'waiting',
+				downloadedBytes: done,
+				totalBytes: total,
+			}),
+	)
+}
+
+/** Uploads a file on this computer straight from disk. */
+export function uploadLocal(
+	upload: LocalUpload,
+	onProgress: (progress: LocalUploadProgress) => void,
+): Promise<OpEnd> {
+	return runOp(
+		upload.op,
+		() => apiClient.local.call(ops.uploadLocalFile, { body: upload }),
+		({ done, total }) => onProgress({ loaded: done, total: total ?? done }),
+	)
+}
+
+/** Copies a file of an instance to a path on this computer. */
+export function saveInstanceFileAs(save: InstanceFileSave): Promise<OpEnd> {
+	return runOp(save.op, () => apiClient.local.call(ops.saveInstanceFileAs, { body: save }))
 }
