@@ -7,10 +7,11 @@ mod storage;
 
 use super::catalog::{is_never_sync_key, setting_by_file_key};
 use super::options_file::{GameOptionsDocument, options_path, read_document};
+use crate::state::Desktop;
 use anyhow::bail;
 use archive::{ArchiveIndex, Translations};
 use engine::ErrorKind;
-use engine::state::{Engine, InstanceMetadata};
+use engine::state::InstanceMetadata;
 use serde::{Deserialize, Serialize};
 use sources::{ArchiveSource, Snapshot};
 use std::collections::{BTreeMap, HashMap};
@@ -46,13 +47,13 @@ struct Origin {
 }
 
 #[derive(Default, Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct GameSettingLocaleLabels {
     pub settings: BTreeMap<String, GameSettingLocaleLabel>,
 }
 
 #[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct GameSettingLocaleLabel {
     pub label: String,
     pub choices: BTreeMap<String, String>,
@@ -60,7 +61,7 @@ pub struct GameSettingLocaleLabel {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct GameSettingSource {
     pub instance_id: String,
     pub file_name: String,
@@ -69,7 +70,7 @@ pub struct GameSettingSource {
 }
 
 #[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct GameSettingSourceProject {
     pub id: String,
     pub title: String,
@@ -89,32 +90,26 @@ impl GameLocaleIndexer {
 }
 
 /// Reindexes mod setting labels soon, once for any number of calls before it runs.
-pub fn queue_game_locale_index(state: &Engine) {
-    crate::hooks::synced_options(state).locales.queue();
+pub fn queue_game_locale_index(state: &Desktop) {
+    state.synced_options().locales.queue();
 }
 
 pub(crate) fn start_game_locale_indexer(
-    state: Arc<Engine>,
+    state: Desktop,
     on_indexed: impl Fn() + Send + 'static,
 ) {
-    if crate::hooks::synced_options(&state)
+    if state
+        .synced_options()
         .locales
         .started
         .swap(true, Ordering::AcqRel)
     {
         return;
     }
-    crate::hooks::synced_options(&state)
-        .locales
-        .notify
-        .notify_one();
+    state.synced_options().locales.notify.notify_one();
     tokio::spawn(async move {
         loop {
-            crate::hooks::synced_options(&state)
-                .locales
-                .notify
-                .notified()
-                .await;
+            state.synced_options().locales.notify.notified().await;
             tokio::time::sleep(std::time::Duration::from_millis(300)).await;
             if let Err(error) = index_installed_sources(&state).await {
                 tracing::warn!(%error, "Game setting locales: indexing failed");
@@ -152,7 +147,7 @@ pub(super) fn has_localizable_mod_settings(
 /// Records mod JAR hashes before saving new options.
 pub(super) async fn capture_observation(
     metadata: &InstanceMetadata,
-    state: &Engine,
+    state: &Desktop,
 ) -> Option<String> {
     match sources::snapshot_instance(metadata, state).await {
         Ok(id) => Some(id),
@@ -194,7 +189,7 @@ pub(super) async fn record_observations(
 }
 
 async fn cached_archive(
-    state: &Engine,
+    state: &Desktop,
     source: &ArchiveSource,
     cache: &mut HashMap<String, Arc<ArchiveIndex>>,
 ) -> engine::Result<Arc<ArchiveIndex>> {
@@ -210,7 +205,7 @@ async fn cached_archive(
 }
 
 #[tracing::instrument(skip_all, err)]
-async fn index_installed_sources(state: &Engine) -> engine::Result<()> {
+async fn index_installed_sources(state: &Desktop) -> engine::Result<()> {
     let mut instances =
         crate::synced_options::state::list_instances(state).await?;
     instances.sort_by(|a, b| a.instance.id.cmp(&b.instance.id));
@@ -248,8 +243,7 @@ async fn index_installed_sources(state: &Engine) -> engine::Result<()> {
         resolver
             .index_snapshot(state, &snapshot_id, snapshot.clone())
             .await?;
-        let mut tx =
-            crate::db::pool(state).begin_with("BEGIN IMMEDIATE").await?;
+        let mut tx = state.db().begin_with("BEGIN IMMEDIATE").await?;
         for (id, key) in &keys {
             let observation = Observation {
                 snapshot: snapshot_id.clone(),
@@ -272,7 +266,7 @@ async fn index_installed_sources(state: &Engine) -> engine::Result<()> {
             keys,
         });
     }
-    let rows = storage::load(crate::db::pool(state), None).await?;
+    let rows = storage::load(state.db(), None).await?;
     for row in rows {
         if row.origin.is_some() {
             continue;
@@ -314,7 +308,7 @@ async fn index_installed_sources(state: &Engine) -> engine::Result<()> {
         for observation in observations {
             match resolver.resolve(state, &observation).await {
                 Ok(Some(origin)) => {
-                    storage::pin(crate::db::pool(state), &row, &origin).await?;
+                    storage::pin(state.db(), &row, &origin).await?;
                     break;
                 }
                 Ok(None) => {}
@@ -350,7 +344,7 @@ fn minecraft_locale(locale: &str) -> String {
 /// Loads translations for the settings shown in the modal.
 #[tracing::instrument(skip_all, fields(instance_id, locale, requested = option_ids.len(), refresh_sources), err)]
 pub async fn get_game_setting_locale_labels(
-    state: &Engine,
+    state: &Desktop,
     instance_id: Option<&str>,
     locale: &str,
     option_ids: Vec<String>,
@@ -379,15 +373,15 @@ pub async fn get_game_setting_locale_labels(
         ));
     }
     if refresh_sources {
-        crate::hooks::synced_options(state).locales.queue();
+        state.synced_options().locales.queue();
     }
     let scope = instance_id.unwrap_or("");
-    let mut rows = storage::load(crate::db::pool(state), Some(scope)).await?;
+    let mut rows = storage::load(state.db(), Some(scope)).await?;
     if scope.is_empty() {
         let mut sourced: std::collections::HashSet<_> =
             rows.iter().map(|row| row.option_id.clone()).collect();
         // Unsaved global options have no provenance row; use an indexed local label until saved.
-        for row in storage::load(crate::db::pool(state), None).await? {
+        for row in storage::load(state.db(), None).await? {
             if !row.scope.is_empty()
                 && requested.contains(&row.option_id)
                 && row.origin.is_some()

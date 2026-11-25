@@ -1,3 +1,4 @@
+use crate::state::Desktop;
 use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
@@ -6,11 +7,11 @@ use std::{
 use axum::{Router, extract::State, http::StatusCode};
 use contracts::{
     ApiError, Empty, Json,
-    server::{Req, route},
+    server::{Mount, Req},
 };
-use engine::{Engine, data::CachedSharedInstanceSummary, routes::api_error};
+use engine::{data::CachedSharedInstanceSummary, routes::api_error};
 
-use crate::server::{
+use crate::local_api::{
     AppState,
     endpoints::sharing::{
         CanUseSharedInstances, GetCachedSharedLibrary, PublishSharedInstance,
@@ -20,20 +21,15 @@ use crate::server::{
 };
 
 pub fn routes() -> Router<AppState> {
-    [
-        route::<CanUseSharedInstances, _, _, _>(can_use_shared_instances),
-        route::<GetCachedSharedLibrary, _, _, _>(get_cached_shared_library),
-        route::<SetCachedSharedLibrary, _, _, _>(set_cached_shared_library),
-        route::<PublishSharedInstance, _, _, _>(publish_shared_instance),
-    ]
-    .into_iter()
-    .fold(Router::new(), |router, (path, method)| {
-        router.route(path, method)
-    })
+    Router::new()
+        .endpoint::<CanUseSharedInstances, _, _>(can_use_shared_instances)
+        .endpoint::<GetCachedSharedLibrary, _, _>(get_cached_shared_library)
+        .endpoint::<SetCachedSharedLibrary, _, _>(set_cached_shared_library)
+        .endpoint::<PublishSharedInstance, _, _>(publish_shared_instance)
 }
 
 async fn can_use_shared_instances(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     _: Req<CanUseSharedInstances>,
 ) -> Result<Json<bool>, ApiError> {
     engine::instance::can_active_user_use_shared_instances(&engine)
@@ -43,13 +39,12 @@ async fn can_use_shared_instances(
 }
 
 async fn get_cached_shared_library(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     _: Req<GetCachedSharedLibrary>,
 ) -> Result<Json<Vec<CachedSharedInstanceSummary>>, ApiError> {
-    let Some(user_id) =
-        crate::accounts::active_modrinth_user_id(crate::db::pool(&engine))
-            .await
-            .map_err(api_error)?
+    let Some(user_id) = crate::accounts::active_modrinth_user_id(engine.db())
+        .await
+        .map_err(api_error)?
     else {
         return Ok(Json(Vec::new()));
     };
@@ -60,13 +55,12 @@ async fn get_cached_shared_library(
 }
 
 async fn set_cached_shared_library(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { body, .. }: Req<SetCachedSharedLibrary>,
 ) -> Result<Empty, ApiError> {
-    let Some(user_id) =
-        crate::accounts::active_modrinth_user_id(crate::db::pool(&engine))
-            .await
-            .map_err(api_error)?
+    let Some(user_id) = crate::accounts::active_modrinth_user_id(engine.db())
+        .await
+        .map_err(api_error)?
     else {
         return Ok(Empty);
     };
@@ -78,7 +72,7 @@ async fn set_cached_shared_library(
 
 /// Runs to its end even when cancelled: stopping midway would leave the share applying.
 async fn publish_shared_instance(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     State(ops): State<Arc<Ops>>,
     Req { body, .. }: Req<PublishSharedInstance>,
 ) -> Result<StatusCode, ApiError> {

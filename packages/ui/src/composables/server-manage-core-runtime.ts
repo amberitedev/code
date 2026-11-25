@@ -1,382 +1,136 @@
-import {
-	type Archon,
-	clearNodeAuthState,
-	setNodeAuthState,
-	type UploadState,
-} from '@modrinth/api-client'
+import type { CoreEvent, PowerState, Server } from '@amberite/contracts/core'
+import type { UploadState } from '@modrinth/api-client'
+import { useQueryClient } from '@tanstack/vue-query'
 import type { ComputedRef, Ref } from 'vue'
-import { computed, ref, watch } from 'vue'
+import { computed, onScopeDispose, ref } from 'vue'
 
 import type { FileOperation } from '../layouts/shared/files-tab/types'
 import { injectModrinthClient, provideModrinthServerContext } from '../providers'
-import type { BusyReason, CancelUploadHandler, ServerStats } from '../providers/server-context'
+import type { BusyReason, CancelUploadHandler } from '../providers/server-context'
 import { defineMessage } from './i18n'
-import { useModrinthServersConsole } from './server-console'
-import {
-	retainServerContextRuntime,
-	type ServerContextRuntimeLease,
-} from './server-context-runtime'
+import { useInstallJobs } from './install-jobs'
+import { createConsoleState } from './server-console'
 import { useServerInstallationTracker } from './server-installation-tracker'
+import { serverKeys } from './server-queries'
 
-type ReadableRef<T> = Ref<T> | ComputedRef<T>
-type SocketUnsubscriber = () => void
+/** How long a burst of changes waits before the server is read again, so it is read once. */
+const CHANGES_SETTLE_MS = 500
 
-type ConnectSocketOptions = {
-	extraSubscriptions?: (targetServerId: string) => SocketUnsubscriber[]
-}
+type BackupProgress = Extract<CoreEvent, { type: 'backup_progress' }>['payload']
 
 type UseServerManageCoreRuntimeOptions = {
-	serverId: ReadableRef<string>
-	worldId: ReadableRef<string | null>
-	server: ReadableRef<Archon.Servers.v0.Server | null | undefined>
-	serverFull?: ReadableRef<Archon.Servers.v1.ServerFull | null | undefined>
-	content?: ReadableRef<Archon.Content.v1.Addons | null | undefined>
-	isSiteAdmin?: ReadableRef<boolean>
+	serverId: string
+	coreId: string
+	server: Ref<Server | undefined>
 	extraBusyReasons?: ComputedRef<BusyReason[]>
-	setDisconnectedOnAuthIncorrect?: boolean
-	syncUptimeFromState?: boolean
-	incrementUptimeLocally?: boolean
-	eventGuard?: () => boolean
-	onStateEvent?: (data: Archon.Websocket.v0.WSStateEvent) => void
+	onBackupProgress?: (progress: BackupProgress) => void
 }
 
-const createInitialStats = (): ServerStats => ({
-	current: {
-		cpu_percent: 0,
-		ram_usage_bytes: 0,
-		ram_total_bytes: 1,
-		storage_usage_bytes: 0,
-		storage_total_bytes: 0,
-	},
-	past: {
-		cpu_percent: 0,
-		ram_usage_bytes: 0,
-		ram_total_bytes: 1,
-		storage_usage_bytes: 0,
-		storage_total_bytes: 0,
-	},
-	graph: {
-		cpu: [],
-		ram: [],
-	},
-})
-
-const appendGraphData = (dataArray: number[], newValue: number): number[] => {
-	const updated = [...dataArray, newValue]
-	if (updated.length > 10) updated.shift()
-	return updated
-}
-
-const STALE_STATS_THRESHOLD_MS = 5000
-const STALE_STATS_PUSH_INTERVAL_MS = 1000
-
-const mapPowerStateFromStateEvent = (
-	data: Archon.Websocket.v0.WSStateEvent,
-): Archon.Websocket.v0.PowerState => {
-	const powerMap: Record<Archon.Websocket.v0.FlattenedPowerState, Archon.Websocket.v0.PowerState> =
-		{
-			not_ready: 'stopped',
-			starting: 'starting',
-			running: 'running',
-			stopping: 'stopping',
-			idle:
-				data.was_oom || (data.exit_code != null && data.exit_code !== 0) ? 'crashed' : 'stopped',
-		}
-	return powerMap[data.power_variant]
-}
-
+/**
+ * The open server's live state, from its Core's one event socket: power, uptime, its console,
+ * its install jobs and backups. Provides the server context every tab of the panel reads.
+ */
 export function useServerManageCoreRuntime(options: UseServerManageCoreRuntimeOptions) {
 	const client = injectModrinthClient()
-	const modrinthServersConsole = useModrinthServersConsole()
+	const queryClient = useQueryClient()
+	// Each panel has its own console: a Core sends the backlog on subscribe, and the next panel
+	// may mount before this one unmounts.
+	const serverConsole = createConsoleState()
+	const { serverId, coreId } = options
+	const core = client.core(coreId)
+	const events = client.coreEvents(coreId)
 
-	const shouldProcessEvent = () => (options.eventGuard ? options.eventGuard() : true)
-
-	const isConnected = ref(false)
-	const isWsAuthIncorrect = ref(false)
-	const serverPowerState = ref<Archon.Websocket.v0.PowerState>('stopped')
-	const powerStateDetails = ref<{ oom_killed?: boolean; exit_code?: number }>()
-	const isServerRunning = computed(() => serverPowerState.value === 'running')
-	const stats = ref<ServerStats>(createInitialStats())
+	const isConnected = ref(events.open)
+	// A server subscription starts with the server's power, as Modrinth Hosting's socket does.
+	const powerState = ref<PowerState>('stopped')
+	const isServerRunning = computed(() => powerState.value === 'running')
 	const uptimeSeconds = ref(0)
-	const fsAuth = ref<{ url: string; token: string } | null>(null)
-	const fsOps = ref<Archon.Websocket.v0.FilesystemOperation[]>([])
-	const fsQueuedOps = ref<Archon.Websocket.v0.QueuedFilesystemOp[]>([])
-	const {
-		begin: beginInstallation,
-		cancelOptimistic: cancelOptimisticInstallation,
-		dismiss: dismissInstallation,
-		handleProgress: handleInstallProgress,
-		installation,
-		installProgressItems,
-		isBlocking: isInstallationBlocking,
-		reset: resetInstallation,
-	} = useServerInstallationTracker({
-		worldId: options.worldId,
-		server: options.server,
-		content: options.content,
+	let uptimeTicker: ReturnType<typeof setInterval> | undefined
+
+	const jobs = useInstallJobs({
+		client: core,
+		instanceId: serverId,
+		onJob: (handler) => events.on('install_job', handler),
 	})
-	const connectedSocketServerId = ref<string | null>(null)
-	const socketUnsubscribers = ref<SocketUnsubscriber[]>([])
-	const cpuData = ref<number[]>([])
-	const ramData = ref<number[]>([])
-	let serverContextRuntimeLease: ServerContextRuntimeLease | null = null
+	const tracker = useServerInstallationTracker(jobs)
 
-	let uptimeIntervalId: ReturnType<typeof setInterval> | null = null
-	let staleStatsTimeoutId: ReturnType<typeof setTimeout> | null = null
-	let staleStatsIntervalId: ReturnType<typeof setInterval> | null = null
+	const busyReasons = computed<BusyReason[]>(() => [
+		...(tracker.isBlocking.value || options.server.value?.status === 'installing'
+			? [
+					{
+						reason: defineMessage({
+							id: 'servers.busy.installing',
+							defaultMessage: 'Server is installing',
+						}),
+					},
+				]
+			: []),
+		...(options.extraBusyReasons?.value ?? []),
+	])
 
-	const busyReasons = computed<BusyReason[]>(() => {
-		const reasons: BusyReason[] = []
-		if (isInstallationBlocking.value) {
-			reasons.push({
-				reason: defineMessage({
-					id: 'servers.busy.installing',
-					defaultMessage: 'Server is installing',
-				}),
-			})
-		}
-		if (options.extraBusyReasons) reasons.push(...options.extraBusyReasons.value)
-		return reasons
+	function setUptime(seconds: number) {
+		clearInterval(uptimeTicker)
+		uptimeSeconds.value = seconds
+		uptimeTicker = setInterval(() => uptimeSeconds.value++, 1000)
+	}
+
+	let settle: ReturnType<typeof setTimeout> | undefined
+	/** What the server shows may have changed: read it again, once for a burst of changes. */
+	function changed() {
+		settle ??= setTimeout(() => {
+			settle = undefined
+			void queryClient.invalidateQueries({ queryKey: serverKeys.detail(serverId) })
+			void queryClient.invalidateQueries({ queryKey: serverKeys.content(serverId) })
+		}, CHANGES_SETTLE_MS)
+	}
+
+	let wasClosed = false
+	const stops = [
+		...[
+			{ type: 'installs' as const },
+			{ type: 'server' as const, id: serverId },
+			{ type: 'backups' as const, id: serverId },
+			{ type: 'console' as const, id: serverId },
+			{ type: 'instance' as const, id: serverId },
+		].map((topic) => events.subscribe(topic)),
+		events.onStatus((open) => {
+			isConnected.value = open
+			// A reopened socket starts the console again from its backlog.
+			if (open && wasClosed) serverConsole.clear()
+			wasClosed = !open
+		}),
+		events.on('resync', () => void jobs.refresh()),
+		events.on('power_state', (power) => {
+			if (power.server !== serverId) return
+			powerState.value = power.state
+			if (power.state !== 'running') {
+				clearInterval(uptimeTicker)
+				uptimeSeconds.value = 0
+			}
+		}),
+		events.on('uptime', (uptime) => {
+			if (uptime.server === serverId) setUptime(uptime.uptime)
+		}),
+		events.on('log', (log) => {
+			if (log.instance_id !== serverId) return
+			serverConsole.addLogEvent(log)
+		}),
+		events.on('backup_progress', (progress) => {
+			if (progress.server === serverId) options.onBackupProgress?.(progress)
+		}),
+		events.on('server_changed', (change) => {
+			if (change.server === serverId) changed()
+		}),
+		events.on('instance', (instance) => {
+			if (instance.instance_id === serverId) changed()
+		}),
+	]
+	onScopeDispose(() => {
+		for (const stop of stops) stop()
+		jobs.stop()
+		clearInterval(uptimeTicker)
+		clearTimeout(settle)
 	})
-
-	const stopUptimeTicker = () => {
-		if (uptimeIntervalId) {
-			clearInterval(uptimeIntervalId)
-			uptimeIntervalId = null
-		}
-	}
-
-	const startUptimeTicker = () => {
-		if (!options.incrementUptimeLocally || uptimeIntervalId) return
-		uptimeIntervalId = setInterval(() => {
-			uptimeSeconds.value += 1
-		}, 1000)
-	}
-
-	const updateStats = (currentStats: ServerStats['current']) => {
-		if (!shouldProcessEvent()) return
-		if (!isConnected.value) isConnected.value = true
-		cpuData.value = appendGraphData(cpuData.value, currentStats.cpu_percent)
-		ramData.value = appendGraphData(
-			ramData.value,
-			Math.floor((currentStats.ram_usage_bytes / currentStats.ram_total_bytes) * 100),
-		)
-		stats.value = {
-			current: currentStats,
-			past: { ...stats.value.current },
-			graph: {
-				cpu: cpuData.value,
-				ram: ramData.value,
-			},
-		}
-	}
-
-	const clearStaleStatsTimers = () => {
-		if (staleStatsTimeoutId) {
-			clearTimeout(staleStatsTimeoutId)
-			staleStatsTimeoutId = null
-		}
-		if (staleStatsIntervalId) {
-			clearInterval(staleStatsIntervalId)
-			staleStatsIntervalId = null
-		}
-	}
-
-	const pushZeroStats = () => {
-		if (!shouldProcessEvent()) return
-		cpuData.value = appendGraphData(cpuData.value, 0)
-		ramData.value = appendGraphData(ramData.value, 0)
-		stats.value = {
-			current: {
-				...stats.value.current,
-				cpu_percent: 0,
-				ram_usage_bytes: 0,
-			},
-			past: { ...stats.value.current },
-			graph: {
-				cpu: cpuData.value,
-				ram: ramData.value,
-			},
-		}
-	}
-
-	const armStaleStatsWatchdog = () => {
-		clearStaleStatsTimers()
-		staleStatsTimeoutId = setTimeout(() => {
-			pushZeroStats()
-			staleStatsIntervalId = setInterval(pushZeroStats, STALE_STATS_PUSH_INTERVAL_MS)
-		}, STALE_STATS_THRESHOLD_MS)
-	}
-
-	const updatePowerState = (
-		state: Archon.Websocket.v0.PowerState,
-		details?: { oom_killed?: boolean; exit_code?: number },
-	) => {
-		if (!shouldProcessEvent()) return
-		serverPowerState.value = state
-		powerStateDetails.value = state === 'crashed' ? details : undefined
-		if (state === 'stopped' || state === 'crashed') {
-			stopUptimeTicker()
-			uptimeSeconds.value = 0
-		}
-	}
-
-	const handleLog = (data: Archon.Websocket.v0.WSLogEvent) => {
-		if (!shouldProcessEvent()) return
-		modrinthServersConsole.recordWsEvent({ event: 'log', ...(data as Omit<typeof data, 'event'>) })
-		modrinthServersConsole.addLegacyLog(data.message)
-	}
-
-	const handleLog4j = (data: Archon.Websocket.v0.WSLog4jEvent) => {
-		if (!shouldProcessEvent()) return
-		modrinthServersConsole.recordWsEvent({
-			event: 'log4j',
-			...(data as Omit<typeof data, 'event'>),
-		})
-		modrinthServersConsole.addLog4jEvent(data)
-	}
-
-	const handleStats = (data: Archon.Websocket.v0.WSStatsEvent) => {
-		armStaleStatsWatchdog()
-		updateStats({
-			cpu_percent: data.cpu_percent,
-			ram_usage_bytes: data.ram_usage_bytes,
-			ram_total_bytes: data.ram_total_bytes,
-			storage_usage_bytes: data.storage_usage_bytes,
-			storage_total_bytes: data.storage_total_bytes,
-		})
-	}
-
-	const handlePowerState = (data: Archon.Websocket.v0.WSPowerStateEvent) => {
-		if (data.state === 'crashed') {
-			updatePowerState(data.state, {
-				oom_killed: data.oom_killed,
-				exit_code: data.exit_code,
-			})
-		} else {
-			updatePowerState(data.state)
-		}
-	}
-
-	const handleState = (data: Archon.Websocket.v0.WSStateEvent) => {
-		if (!shouldProcessEvent()) return
-		options.onStateEvent?.(data)
-		updatePowerState(mapPowerStateFromStateEvent(data), {
-			exit_code: data.exit_code ?? undefined,
-			oom_killed: data.was_oom,
-		})
-
-		if (options.syncUptimeFromState && data.uptime > 0) {
-			stopUptimeTicker()
-			uptimeSeconds.value = data.uptime
-			startUptimeTicker()
-		}
-	}
-
-	const handleUptime = (data: Archon.Websocket.v0.WSUptimeEvent) => {
-		if (!shouldProcessEvent()) return
-		stopUptimeTicker()
-		uptimeSeconds.value = data.uptime
-		startUptimeTicker()
-	}
-
-	const clearSocketListeners = () => {
-		for (const unsub of socketUnsubscribers.value) unsub()
-		socketUnsubscribers.value = []
-	}
-
-	const disconnectSocket = (targetServerId?: string) => {
-		if (!targetServerId && !connectedSocketServerId.value) return
-
-		clearSocketListeners()
-		serverContextRuntimeLease?.release()
-		serverContextRuntimeLease = null
-
-		stopUptimeTicker()
-		clearStaleStatsTimers()
-		connectedSocketServerId.value = null
-		isConnected.value = false
-		isWsAuthIncorrect.value = false
-		serverPowerState.value = 'stopped'
-		powerStateDetails.value = undefined
-		uptimeSeconds.value = 0
-		resetInstallation()
-	}
-
-	const connectSocket = async (
-		targetServerId: string,
-		connectOptions: ConnectSocketOptions = {},
-	): Promise<boolean> => {
-		if (
-			connectedSocketServerId.value === targetServerId &&
-			(isConnected.value || isWsAuthIncorrect.value)
-		) {
-			return true
-		}
-
-		disconnectSocket(connectedSocketServerId.value ?? undefined)
-
-		try {
-			const runtimeLease = retainServerContextRuntime(client, targetServerId, {
-				connect: false,
-			})
-			serverContextRuntimeLease = runtimeLease
-			connectedSocketServerId.value = targetServerId
-
-			const baseSubscriptions: SocketUnsubscriber[] = [
-				client.archon.sockets.on(targetServerId, 'log', handleLog),
-				client.archon.sockets.on(targetServerId, 'log4j', handleLog4j),
-				client.archon.sockets.on(targetServerId, 'stats', handleStats),
-				client.archon.sockets.on(targetServerId, 'state', handleState),
-				client.archon.sockets.on(targetServerId, 'power-state', handlePowerState),
-				client.archon.sockets.on(targetServerId, 'uptime', handleUptime),
-				watch(
-					runtimeLease.installProgressItems,
-					(items) => {
-						if (shouldProcessEvent()) handleInstallProgress(items)
-					},
-					{ immediate: true },
-				),
-				watch(
-					runtimeLease.isSocketAuthenticated,
-					(authenticated) => {
-						if (!shouldProcessEvent()) return
-						if (authenticated || options.setDisconnectedOnAuthIncorrect) {
-							isConnected.value = authenticated
-						}
-					},
-					{ immediate: true },
-				),
-				watch(runtimeLease.socketGeneration, () => {
-					if (!shouldProcessEvent()) return
-					modrinthServersConsole.clear()
-					modrinthServersConsole.beginInitialLogHydration()
-				}),
-				watch(
-					runtimeLease.isSocketAuthIncorrect,
-					(authIncorrect) => {
-						if (shouldProcessEvent()) isWsAuthIncorrect.value = authIncorrect
-					},
-					{ immediate: true },
-				),
-			]
-			const extraSubscriptions = connectOptions.extraSubscriptions?.(targetServerId) ?? []
-			socketUnsubscribers.value = [...baseSubscriptions, ...extraSubscriptions]
-
-			modrinthServersConsole.clear()
-			modrinthServersConsole.beginInitialLogHydration()
-
-			await runtimeLease.waitUntilReady()
-			isConnected.value = true
-			isWsAuthIncorrect.value = false
-
-			return true
-		} catch (error) {
-			console.error('[hosting/manage] Failed to connect server socket:', error)
-			disconnectSocket(targetServerId)
-			return false
-		}
-	}
 
 	const uploadState = ref<UploadState>({
 		isUploading: false,
@@ -389,82 +143,33 @@ export function useServerManageCoreRuntime(options: UseServerManageCoreRuntimeOp
 	})
 	const cancelUpload = ref<CancelUploadHandler | null>(null)
 
-	type QueuedOpWithState = Archon.Websocket.v0.QueuedFilesystemOp & { state: 'queued' }
-	const dismissedOpIds = ref<Set<string>>(new Set())
 	const localFileOperations = ref<FileOperation[]>([])
-
-	const activeOperations = computed<FileOperation[]>(() => [
-		...localFileOperations.value,
-		...fsQueuedOps.value.map((x) => ({ ...x, state: 'queued' }) satisfies QueuedOpWithState),
-		...(fsOps.value.filter((op) => !op.id || !dismissedOpIds.value.has(op.id)) as FileOperation[]),
-	])
-
-	async function dismissOperation(opId: string, action: 'dismiss' | 'cancel') {
-		if (localFileOperations.value.some((operation) => operation.id === opId)) {
-			localFileOperations.value = localFileOperations.value.filter(
-				(operation) => operation.id !== opId,
-			)
-			return
-		}
-		if (action === 'dismiss') {
-			dismissedOpIds.value = new Set([...dismissedOpIds.value, opId])
-		}
-		try {
-			await client.kyros.files_v0.modifyOperation(opId, action)
-		} catch (error) {
-			if (action === 'dismiss') return
-			console.error(`Failed to ${action} operation:`, error)
-		}
-	}
-
-	function upsertLocalFileOperation(operation: FileOperation) {
-		const index = localFileOperations.value.findIndex((item) => item.id === operation.id)
-		if (index === -1) {
-			localFileOperations.value = [...localFileOperations.value, operation]
-			return
-		}
-		localFileOperations.value = localFileOperations.value.map((item, itemIndex) =>
-			itemIndex === index ? operation : item,
+	const activeOperations = computed(() => localFileOperations.value)
+	async function dismissOperation(opId: string) {
+		localFileOperations.value = localFileOperations.value.filter(
+			(operation) => operation.id !== opId,
 		)
 	}
-
-	const refreshFsAuth = async () => {
-		if (!options.serverId.value) {
-			fsAuth.value = null
-			return
-		}
-		fsAuth.value = await client.archon.servers_v0.getFilesystemAuth(options.serverId.value)
+	function upsertLocalFileOperation(operation: FileOperation) {
+		const others = localFileOperations.value.filter((item) => item.id !== operation.id)
+		localFileOperations.value = [...others, operation]
 	}
-	const currentUserPermissions = computed(() => options.server.value?.current_user_permissions ?? 0)
-	const serverFull = computed(() => options.serverFull?.value ?? null)
-	const isSiteAdmin = computed(() => options.isSiteAdmin?.value ?? false)
 
 	provideModrinthServerContext({
-		get serverId() {
-			return options.serverId.value
-		},
-		worldId: options.worldId as Ref<string | null>,
-		server: options.server as Ref<Archon.Servers.v0.Server>,
-		serverFull,
-		currentUserPermissions,
-		isSiteAdmin,
+		serverId,
+		coreId,
+		core,
+		server: options.server,
+		console: serverConsole,
 		isConnected,
-		isWsAuthIncorrect,
-		powerState: serverPowerState,
-		powerStateDetails,
+		powerState,
 		isServerRunning,
-		stats,
 		uptimeSeconds,
-		installProgressItems,
-		installation,
-		beginInstallation,
-		cancelOptimisticInstallation,
-		dismissInstallation,
+		installation: tracker.installation,
+		beginInstallation: tracker.begin,
+		cancelOptimisticInstallation: tracker.cancelOptimistic,
+		dismissInstallation: tracker.dismiss,
 		busyReasons,
-		fsAuth,
-		fsOps,
-		fsQueuedOps,
-		refreshFsAuth,
 		uploadState,
 		cancelUpload,
 		activeOperations,
@@ -472,39 +177,16 @@ export function useServerManageCoreRuntime(options: UseServerManageCoreRuntimeOp
 		upsertLocalFileOperation,
 	})
 
-	setNodeAuthState(() => fsAuth.value, refreshFsAuth)
-
-	const cleanupCoreRuntime = (targetServerId?: string) => {
-		disconnectSocket(targetServerId ?? connectedSocketServerId.value ?? undefined)
-		clearNodeAuthState()
-	}
-
 	return {
-		activeOperations,
-		beginInstallation,
 		busyReasons,
 		cancelUpload,
-		cancelOptimisticInstallation,
-		cleanupCoreRuntime,
-		connectSocket,
-		connectedSocketServerId,
-		cpuData,
-		disconnectSocket,
-		dismissInstallation,
-		dismissOperation,
-		fsAuth,
-		fsOps,
-		fsQueuedOps,
-		installation,
+		installation: tracker.installation,
+		beginInstallation: tracker.begin,
+		cancelOptimisticInstallation: tracker.cancelOptimistic,
+		dismissInstallation: tracker.dismiss,
 		isConnected,
 		isServerRunning,
-		isWsAuthIncorrect,
-		installProgressItems,
-		powerStateDetails,
-		ramData,
-		refreshFsAuth,
-		serverPowerState,
-		stats,
+		powerState,
 		uptimeSeconds,
 		uploadState,
 	}

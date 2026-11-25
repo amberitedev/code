@@ -1,12 +1,46 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, bail};
-use engine::{
-    ErrorKind, EventSink, emit_command, emit_warning, prelude::CommandPayload,
-    util::io,
-};
+use engine::{ErrorKind, EventSink, emit_warning, util::io};
+use serde::{Deserialize, Serialize};
 use url::form_urlencoded;
 use urlencoding::decode;
+
+/// A Modrinth link or file the App was asked to open, which the frontend acts on.
+#[derive(Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[serde(tag = "event")]
+#[cfg_attr(feature = "export-ts", ts(tag = "event"))]
+pub enum CommandPayload {
+    InstallMod {
+        id: String,
+    },
+    InstallVersion {
+        id: String,
+    },
+    InstallModpack {
+        id: String,
+    },
+    InstallServer {
+        id: String,
+    },
+    LaunchInstance {
+        id: String,
+        server: Option<String>,
+        singleplayer_world: Option<String>,
+    },
+    InstallSharedInstanceInvite {
+        invite_id: String,
+    },
+    RunMRPack {
+        // run or install .mrpack
+        path: String,
+    },
+    PlayHostingServer {
+        server_id: String,
+        world_id: String,
+    },
+}
 
 /// Handles external functions (such as through URL deep linkage)
 /// Link is extracted value (link) in somewhat URL format, such as
@@ -163,13 +197,4 @@ pub async fn parse_command(
             path.display()
         )))
     }
-}
-
-pub async fn parse_and_emit_command(
-    events: &EventSink,
-    command_string: &str,
-) -> engine::Result<()> {
-    let command = parse_command(events, command_string).await?;
-    emit_command(events, command).await?;
-    Ok(())
 }

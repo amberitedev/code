@@ -1,5 +1,7 @@
-import type { Archon, Labrinth } from '@modrinth/api-client'
+import type { Server } from '@amberite/contracts/core'
+import type { Labrinth } from '@modrinth/api-client'
 import {
+	addServerVersions,
 	type BrowseInstallPlan,
 	type BrowseInstallProject,
 	type BrowseSelectedProject,
@@ -12,14 +14,16 @@ import {
 	injectModrinthClient,
 	injectNotificationManager,
 	injectServerOnboardingFlow,
+	instanceContentQueries,
 	readStoredServerInstallQueue,
 	resolveServerAddonInstallPlans,
 	resolveServerPlatform,
 	type ServerPlatform,
+	serverContentQueryKeys,
+	serverDetailQueryOptions,
+	serverKeys,
+	setUpServer,
 	type UpdateChannelPolicy,
-	useServerContextRuntime,
-	useServerPanelSync,
-	waitForServerContextRuntimeReady,
 	writeStoredServerInstallQueue,
 } from '@modrinth/ui'
 import { useQueryClient } from '@tanstack/vue-query'
@@ -54,14 +58,12 @@ interface ServerSetupModalHandle {
 
 export interface ServerInstallContentContext {
 	serverIdQuery: ComputedRef<string | null>
-	worldIdQuery: ComputedRef<string | null>
 	browseFrom: ComputedRef<string | null>
 	serverFlowFrom: ComputedRef<ServerFlowFrom | null>
 	isFromWorlds: ComputedRef<boolean>
 	isServerContext: ComputedRef<boolean>
 	isSetupServerContext: ComputedRef<boolean>
-	effectiveServerWorldId: ComputedRef<string | null>
-	serverContextServerData: Ref<Archon.Servers.v0.Server | null>
+	serverContextServerData: Ref<Server | null>
 	serverContextPlatform: ComputedRef<ServerPlatform>
 	serverContentProjectIds: Ref<Set<string>>
 	queuedServerInstallRootProjectIds: ComputedRef<Set<string>>
@@ -126,7 +128,6 @@ export function useServerInstallContent(opts: {
 	const serverIdQuery = computed(
 		() => readQueryString(route.query.sid) ?? breadcrumbServerId?.value ?? null,
 	)
-	const worldIdQuery = computed(() => readQueryString(route.query.wid))
 	const browseFrom = computed(() => readQueryString(route.query.from))
 	const serverFlowFrom = computed<ServerFlowFrom | null>(() =>
 		browseFrom.value === 'onboarding' || browseFrom.value === 'reset-server'
@@ -137,35 +138,26 @@ export function useServerInstallContent(opts: {
 	const isFromWorlds = computed(() => browseFrom.value === 'worlds')
 	const isServerContext = computed(() => !!serverIdQuery.value)
 	const isSetupServerContext = computed(() => !!serverIdQuery.value && !!serverFlowFrom.value)
-	useServerContextRuntime(serverIdQuery)
-
-	const serverContextWorldId = ref<string | null>(worldIdQuery.value)
-
-	function getCachedServer(serverId: string): Archon.Servers.v0.Server | null {
+	function getCachedServer(serverId: string): Server | null {
 		return (
-			queryClient.getQueryData<Archon.Servers.v0.Server>(['servers', 'detail', serverId]) ??
+			queryClient.getQueryData<Server>(serverKeys.detail(serverId)) ??
 			queryClient
-				.getQueryData<Archon.Servers.v0.ServerGetResponse>(['servers'])
+				.getQueryData<{ servers: Server[] }>(serverKeys.list())
 				?.servers.find((server) => server.server_id === serverId) ??
 			null
 		)
 	}
 
-	async function ensureServer(serverId: string): Promise<Archon.Servers.v0.Server> {
-		return queryClient.ensureQueryData({
-			queryKey: ['servers', 'detail', serverId],
-			queryFn: () => client.archon.servers_v0.get(serverId),
-			staleTime: 30_000,
-		})
+	async function ensureServer(serverId: string): Promise<Server> {
+		return queryClient.ensureQueryData(serverDetailQueryOptions(client, serverId))
 	}
 
 	const initialServerId = serverIdQuery.value
-	const serverContextServerData = ref<Archon.Servers.v0.Server | null>(
+	const serverContextServerData = ref<Server | null>(
 		initialServerId ? getCachedServer(initialServerId) : null,
 	)
-	const serverContextContent = ref<Archon.Content.v1.Addons | null>(null)
 	const serverContextPlatform = computed(() =>
-		resolveServerPlatform(serverContextServerData.value, serverContextContent.value),
+		resolveServerPlatform(serverContextServerData.value, null),
 	)
 	const serverContentProjectIds = ref<Set<string>>(new Set())
 	const queuedServerInstalls = ref<Map<string, BrowseInstallPlan<InstallableSearchResult>>>(
@@ -188,11 +180,6 @@ export function useServerInstallContent(opts: {
 	const isInstallingQueuedServerInstalls = ref(false)
 	const activeServerModpackInstallProjectId = ref<string | null>(null)
 	const queuedInstallProgress = ref({ completed: 0, total: 0 })
-	const effectiveServerWorldId = computed(() => worldIdQuery.value ?? serverContextWorldId.value)
-	useServerPanelSync({
-		serverId: serverIdQuery,
-		worldId: effectiveServerWorldId,
-	})
 	const serverBackUrl = computed(() => {
 		const sid = serverIdQuery.value
 		if (!sid) return '/hosting/manage'
@@ -216,38 +203,19 @@ export function useServerInstallContent(opts: {
 		return 'Installing content'
 	})
 
-	async function ensureServerFull(serverId: string) {
-		return queryClient.fetchQuery({
-			queryKey: ['servers', 'v1', 'detail', serverId],
-			queryFn: () => client.archon.servers_v1.get(serverId),
-			staleTime: 30_000,
-		})
-	}
-
-	async function resolveServerContextWorldId(serverId: string) {
+	async function refreshServerInstalledContent(serverId: string) {
 		try {
-			const server = await ensureServerFull(serverId)
-			const activeWorld = server.worlds.find((world) => world.is_active)
-			return activeWorld?.id ?? server.worlds[0]?.id ?? null
-		} catch (err) {
-			handleError(err as Error)
-			return null
-		}
-	}
-
-	async function refreshServerInstalledContent(serverId: string, worldId: string) {
-		try {
-			const content = await client.archon.content_v1.getAddons(serverId, worldId)
-			if (serverIdQuery.value !== serverId || effectiveServerWorldId.value !== worldId) {
-				return
-			}
-			serverContextContent.value = content
-			const ids = new Set(
-				(content.addons ?? [])
-					.map((addon) => addon.project_id)
-					.filter((projectId): projectId is string => !!projectId),
+			const { items } = await queryClient.fetchQuery(
+				instanceContentQueries({
+					client: await client.cores.serverRoutes(serverId),
+					instanceId: serverId,
+					queryKeys: serverContentQueryKeys,
+				}).content(),
 			)
-			serverContentProjectIds.value = ids
+			if (serverIdQuery.value !== serverId) return
+			serverContentProjectIds.value = new Set(
+				items.flatMap((item) => (item.project ? [item.project.id] : [])),
+			)
 		} catch (err) {
 			handleError(err as Error)
 		}
@@ -268,54 +236,32 @@ export function useServerInstallContent(opts: {
 
 		if (serverIdQuery.value !== sid) return
 
-		let resolvedWorldId = effectiveServerWorldId.value
-		if (!resolvedWorldId) {
-			resolvedWorldId = await resolveServerContextWorldId(sid)
-			if (serverIdQuery.value !== sid) return
-			if (resolvedWorldId) {
-				serverContextWorldId.value = resolvedWorldId
-			}
-		}
-
-		if (resolvedWorldId) {
-			queuedServerInstalls.value = readStoredServerInstallQueue(sid, resolvedWorldId)
-			await refreshServerInstalledContent(sid, resolvedWorldId)
-		}
+		queuedServerInstalls.value = readStoredServerInstallQueue(sid, sid)
+		await refreshServerInstalledContent(sid)
 	}
 
 	function watchServerContextChanges() {
-		watch([serverIdQuery, effectiveServerWorldId], async ([sid, wid], [prevSid, prevWid]) => {
+		watch(serverIdQuery, async (sid, prevSid) => {
 			if (!sid) {
-				serverContextWorldId.value = null
 				serverContextServerData.value = null
-				serverContextContent.value = null
 				serverContentProjectIds.value = new Set()
 				setQueuedServerInstallPlans(new Map())
 				return
 			}
 
-			if (sid !== prevSid) {
-				serverContextContent.value = null
-				serverContentProjectIds.value = new Set()
-				queuedServerInstalls.value = readStoredServerInstallQueue(sid, wid)
-				serverContextServerData.value = getCachedServer(sid)
-				try {
-					const server = await ensureServer(sid)
-					if (serverIdQuery.value === sid) {
-						serverContextServerData.value = server
-					}
-				} catch (err) {
-					handleError(err as Error)
+			if (sid === prevSid) return
+			serverContentProjectIds.value = new Set()
+			queuedServerInstalls.value = readStoredServerInstallQueue(sid, sid)
+			serverContextServerData.value = getCachedServer(sid)
+			try {
+				const server = await ensureServer(sid)
+				if (serverIdQuery.value === sid) {
+					serverContextServerData.value = server
 				}
+			} catch (err) {
+				handleError(err as Error)
 			}
-
-			if (wid !== prevWid) {
-				queuedServerInstalls.value = readStoredServerInstallQueue(sid, wid)
-			}
-
-			if (wid && (sid !== prevSid || wid !== prevWid)) {
-				await refreshServerInstalledContent(sid, wid)
-			}
+			await refreshServerInstalledContent(sid)
 		})
 	}
 
@@ -342,28 +288,18 @@ export function useServerInstallContent(opts: {
 	 */
 	async function getServerUpdateChannel(): Promise<UpdateChannelPolicy | undefined> {
 		const sid = serverIdQuery.value
-		const wid = effectiveServerWorldId.value
 		if (!sid) return undefined
-
-		const server = await ensureServerFull(sid)
-		const world =
-			server.worlds.find((world) => world.id === wid) ??
-			server.worlds.find((world) => world.is_active) ??
-			server.worlds[0]
-		return world?.update_channel
+		return (await ensureServer(sid)).update_channel
 	}
 
 	async function openServerModpackInstallFlow(request: ServerModpackSelectionRequest) {
-		if (!serverIdQuery.value || !effectiveServerWorldId.value) {
-			throw new Error('Missing server context')
-		}
+		if (!serverIdQuery.value) throw new Error('Missing server context')
 
 		activeServerModpackInstallProjectId.value = request.projectId
 		try {
 			if (serverFlowFrom.value === 'onboarding') {
 				await onboardingFlow.open({
 					serverId: serverIdQuery.value,
-					worldId: effectiveServerWorldId.value,
 					siteUrl: appConfig.accountSiteUrl,
 					project: request,
 					backToBrowse: true,
@@ -416,13 +352,10 @@ export function useServerInstallContent(opts: {
 
 	function setStoredServerInstallPlans(
 		serverId: string,
-		worldId: string,
 		plans: Map<string, BrowseInstallPlan<InstallableSearchResult>>,
 	) {
-		if (serverId === serverIdQuery.value && worldId === effectiveServerWorldId.value) {
-			queuedServerInstalls.value = plans
-		}
-		writeStoredServerInstallQueue(serverId, worldId, plans)
+		if (serverId === serverIdQuery.value) queuedServerInstalls.value = plans
+		writeStoredServerInstallQueue(serverId, serverId, plans)
 	}
 
 	function toResolvePreferences(
@@ -479,26 +412,20 @@ export function useServerInstallContent(opts: {
 		})
 	}
 
-	async function flushQueuedServerInstalls(
-		serverId: string | null = serverIdQuery.value,
-		worldId: string | null = effectiveServerWorldId.value,
-	) {
+	async function flushQueuedServerInstalls(serverId: string | null = serverIdQuery.value) {
 		if (isInstallingQueuedServerInstalls.value) return false
 
-		if (!serverId || !worldId) {
-			handleError(new Error('No server world is available for install.'))
+		if (!serverId) {
+			handleError(new Error('No server is available for install.'))
 			return false
 		}
 
-		const queuedPlans = getStoredServerAddonInstallQueue<InstallableSearchResult>(serverId, worldId)
+		// Upstream keys the queue by server and world; a Core server's one world is the server.
+		const queuedPlans = getStoredServerAddonInstallQueue<InstallableSearchResult>(
+			serverId,
+			serverId,
+		)
 		if (queuedPlans.size === 0) return true
-
-		try {
-			await waitForServerContextRuntimeReady(client, serverId)
-		} catch (error) {
-			handleError(error as Error)
-			return false
-		}
 
 		isInstallingQueuedServerInstalls.value = true
 		queuedInstallProgress.value = {
@@ -509,14 +436,18 @@ export function useServerInstallContent(opts: {
 		try {
 			const result = await flushStoredServerAddonInstallQueue<InstallableSearchResult>({
 				serverId,
-				worldId,
+				worldId: serverId,
 				install: async (plans) => {
 					const addons = await resolveQueuedAddonPlans(plans)
-					if (addons.length > 0) {
-						await client.archon.content_v1.addAddons(serverId, worldId, addons)
-					}
+					const { id: coreId } = await client.cores.coreOf(serverId)
+					await addServerVersions(
+						client,
+						coreId,
+						serverId,
+						addons.map((addon) => addon.version_id),
+					)
 				},
-				onQueueChange: (plans) => setStoredServerInstallPlans(serverId, worldId, plans),
+				onQueueChange: (plans) => setStoredServerInstallPlans(serverId, plans),
 			})
 
 			if (!result.ok) {
@@ -533,7 +464,7 @@ export function useServerInstallContent(opts: {
 				...result.flushedPlans.map((plan) => plan.projectId),
 			])
 			if (result.flushedPlans.length > 0) {
-				await queryClient.invalidateQueries({ queryKey: ['content', 'list', 'v1', serverId] })
+				await queryClient.invalidateQueries({ queryKey: serverKeys.content(serverId) })
 			}
 
 			return true
@@ -550,14 +481,11 @@ export function useServerInstallContent(opts: {
 
 	async function installQueuedServerInstallsAndBack() {
 		const sid = serverIdQuery.value
-		const wid = effectiveServerWorldId.value
 		const backUrl = serverBackUrl.value
 		const plans = new Map(queuedServerInstalls.value)
 
-		if (sid && wid) {
-			writeStoredServerInstallQueue(sid, wid, plans)
-		}
-		const installed = await flushQueuedServerInstalls(sid, wid)
+		if (sid) writeStoredServerInstallQueue(sid, sid, plans)
+		const installed = await flushQueuedServerInstalls(sid)
 		if (!installed) return false
 		await router.push(backUrl)
 
@@ -572,7 +500,7 @@ export function useServerInstallContent(opts: {
 		plans: Map<string, BrowseInstallPlan<InstallableSearchResult>>,
 	) {
 		queuedServerInstalls.value = plans
-		writeStoredServerInstallQueue(serverIdQuery.value, effectiveServerWorldId.value, plans)
+		writeStoredServerInstallQueue(serverIdQuery.value, serverIdQuery.value, plans)
 	}
 
 	function onServerFlowBack() {
@@ -581,26 +509,24 @@ export function useServerInstallContent(opts: {
 
 	async function handleServerModpackFlowCreate(config: CreationFlowContextValue) {
 		const sid = serverIdQuery.value
-		const wid = effectiveServerWorldId.value
-		if (!sid || !wid || (!config.modpackSelection.value && !config.projectInstall.value)) {
+		const selection = config.modpackSelection.value
+		if (!sid || (!selection && !config.projectInstall.value)) {
 			config.loading.value = false
 			return
 		}
 
 		try {
+			const { id: coreId } = await client.cores.coreOf(sid)
 			if (config.projectInstall.value) {
-				await config.installServerContent(sid, wid)
-			} else {
-				await client.archon.content_v1.installContent(sid, wid, {
-					content_variant: 'modpack',
-					spec: {
-						platform: 'modrinth',
-						project_id: config.modpackSelection.value!.projectId,
-						version_id: config.modpackSelection.value!.versionId,
-					},
-					soft_override: false,
-					properties: config.buildProperties(),
-				} satisfies Archon.Content.v1.InstallWorldContent)
+				await config.installServerContent(coreId, sid)
+			} else if (selection) {
+				await setUpServer(
+					client,
+					coreId,
+					sid,
+					{ type: 'modpack', projectId: selection.projectId, versionId: selection.versionId },
+					{ properties: config.buildProperties() },
+				)
 			}
 
 			serverSetupModalRef.value?.hide()
@@ -617,13 +543,11 @@ export function useServerInstallContent(opts: {
 
 	return {
 		serverIdQuery,
-		worldIdQuery,
 		browseFrom,
 		serverFlowFrom,
 		isFromWorlds,
 		isServerContext,
 		isSetupServerContext,
-		effectiveServerWorldId,
 		serverContextServerData,
 		serverContextPlatform,
 		serverContentProjectIds,

@@ -7,19 +7,19 @@ pub mod instance_paths;
 mod jre;
 mod network;
 mod opener;
-mod opening;
+pub mod opening;
 mod shortcuts;
 mod thumbnails;
 pub mod updater;
 mod upload;
-mod webview_log;
+pub mod webview_log;
 
 use std::{fmt::Display, sync::Arc};
 
 use axum::Router;
 use contracts::{ApiError, ErrorCode};
 
-use crate::{engine_handle::EngineHandle, server::AppState};
+use crate::{engine_handle::EngineHandle, local_api::AppState};
 
 /// The Tauri app, which builds after the local server binds. Setup sets it; a route that needs it
 /// waits until then.
@@ -36,7 +36,7 @@ pub fn routes(engine: EngineHandle, app: AppSlot, secret: &str) -> Router {
         .merge(webview_log::routes(secret))
 }
 
-/// The long operations, which `crate::server::ops` runs.
+/// The long operations, which `crate::local_api::ops` runs.
 pub fn op_routes() -> Router<AppState> {
     debug_export::routes()
         .merge(external_save::routes())

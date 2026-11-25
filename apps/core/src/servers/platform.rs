@@ -15,20 +15,6 @@ pub struct Platform {
     pub loader_version: Option<String>,
 }
 
-/// A loader name in any case.
-pub fn parse_loader(name: &str) -> Option<ModLoader> {
-    [
-        ModLoader::Vanilla,
-        ModLoader::Paper,
-        ModLoader::Fabric,
-        ModLoader::Forge,
-        ModLoader::NeoForge,
-        ModLoader::Quilt,
-    ]
-    .into_iter()
-    .find(|loader| loader.as_str().eq_ignore_ascii_case(name))
-}
-
 /// `None` until something is installed: a new server's instance has no Minecraft version.
 pub async fn platform(
     engine: &Engine,

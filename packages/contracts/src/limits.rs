@@ -15,7 +15,9 @@ crate::consts! {
     /// The free disk space a Core keeps after anything it writes: what it writes must fit in the
     /// free space less this.
     DISK_MARGIN_BYTES: u64 = 256 * 1024 * 1024;
-    /// The most a version's object list in a store may weigh: 4,096 objects take well under a
-    /// megabyte.
+    /// The most files one share version may hold. The backend enforces it.
+    MAX_VERSION_FILES: usize = 4096;
+    /// The most a version's object list in a store may weigh: [`MAX_VERSION_FILES`] objects take
+    /// well under a megabyte.
     MAX_VERSION_LIST_BYTES: u64 = 4 * 1024 * 1024;
 }

@@ -1,29 +1,27 @@
 use super::hidden_instances;
 use crate::accounts;
+use crate::state::Desktop;
 use engine::ErrorKind;
-use engine::state::Engine;
 
 #[tracing::instrument(skip(state))]
 pub async fn get_hidden_instance_ids(
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<Vec<String>> {
-    let Some(user_id) =
-        accounts::active_modrinth_user_id(crate::db::pool(state)).await?
+    let Some(user_id) = accounts::active_modrinth_user_id(state.db()).await?
     else {
         return Ok(Vec::new());
     };
 
-    hidden_instances::get_hidden_instance_ids(&user_id, crate::db::pool(state))
-        .await
+    hidden_instances::get_hidden_instance_ids(&user_id, state.db()).await
 }
 
 #[tracing::instrument(skip(state))]
 pub async fn set_instance_hidden(
-    state: &Engine,
+    state: &Desktop,
     instance_id: &str,
     hidden: bool,
 ) -> engine::Result<()> {
-    let user_id = accounts::active_modrinth_user_id(crate::db::pool(state))
+    let user_id = accounts::active_modrinth_user_id(state.db())
         .await?
         .ok_or(ErrorKind::NotLoggedIn)?;
 
@@ -31,7 +29,7 @@ pub async fn set_instance_hidden(
         &user_id,
         instance_id,
         hidden,
-        crate::db::pool(state),
+        state.db(),
     )
     .await
 }

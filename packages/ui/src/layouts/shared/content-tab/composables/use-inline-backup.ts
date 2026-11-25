@@ -1,10 +1,10 @@
+import { core as coreRoutes } from '@amberite/contracts/core'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
 
 import { useServerBackupsQueue } from '#ui/composables/server-backups-queue'
 import {
 	injectAppBackup,
-	injectModrinthClient,
 	injectModrinthServerContext,
 	injectNotificationManager,
 } from '#ui/providers'
@@ -59,13 +59,12 @@ export function useInlineBackup(backupName: string | (() => string)) {
 		}
 	}
 
-	const client = injectModrinthClient()
 	const { addNotification } = injectNotificationManager()
-	const { serverId, worldId } = serverCtx
+	const { serverId, core } = serverCtx
 
 	const { activeOperationByBackupId, backups, hasActiveCreate, invalidate } = useServerBackupsQueue(
-		computed(() => serverId),
-		worldId,
+		serverId,
+		core,
 	)
 
 	const createdBackupId = ref<string | null>(null)
@@ -98,7 +97,7 @@ export function useInlineBackup(backupName: string | (() => string)) {
 		(b) => {
 			if (!createdBackupId.value || !b) return
 			if (b.status === 'done') backupComplete.value = true
-			else if (b.status === 'error' || b.status === 'timed_out') backupFailed.value = true
+			else if (b.status === 'error') backupFailed.value = true
 		},
 		{ immediate: true },
 	)
@@ -114,8 +113,6 @@ export function useInlineBackup(backupName: string | (() => string)) {
 	)
 
 	async function startBackup() {
-		if (!worldId.value) return
-
 		const name = typeof backupName === 'function' ? backupName() : backupName
 
 		backupFailed.value = false
@@ -127,7 +124,10 @@ export function useInlineBackup(backupName: string | (() => string)) {
 		pendingCreate.value = true
 
 		try {
-			const { id } = await client.archon.backups_queue_v1.create(serverId, worldId.value, { name })
+			const { id } = await core.call(coreRoutes.CreateBackup, {
+				params: { id: serverId },
+				body: { name },
+			})
 			createdBackupId.value = id
 			await invalidate()
 		} catch (error) {
@@ -145,13 +145,13 @@ export function useInlineBackup(backupName: string | (() => string)) {
 	}
 
 	async function cancelBackup() {
-		if (!worldId.value || !createdBackupId.value || !isBackingUp.value) return
+		if (!createdBackupId.value || !isBackingUp.value) return
 
 		isCancelling.value = true
 		try {
 			let operationId = createdOperationId.value ?? myActiveOp.value?.operation_id ?? null
 			if (operationId == null) {
-				const queue = await client.archon.backups_queue_v1.list(serverId, worldId.value)
+				const queue = await core.call(coreRoutes.ListBackups, { params: { id: serverId } })
 				const operation = queue.active_operations.find(
 					(op) => op.backup_id === createdBackupId.value && op.operation_type === 'create',
 				)
@@ -160,7 +160,9 @@ export function useInlineBackup(backupName: string | (() => string)) {
 			if (operationId == null) {
 				throw new Error('Could not find the backup creation operation to cancel.')
 			}
-			await client.archon.backups_queue_v1.cancelCreate(serverId, worldId.value, operationId)
+			await core.call(coreRoutes.CancelOperation, {
+				params: { id: serverId, operation_id: operationId },
+			})
 			backupCancelled.value = true
 			isCancelling.value = false
 			await invalidate()

@@ -1,6 +1,7 @@
-//! Serves `SaveExternalFile` and `SaveInstanceFileAs` of `crate::server::endpoints::ops`: saves
+//! Serves `SaveExternalFile` and `SaveInstanceFileAs` of `crate::local_api::endpoints::ops`: saves
 //! to a path the person picked outside the App.
 
+use crate::state::Desktop;
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -9,13 +10,13 @@ use std::{
 use axum::{Router, extract::State, http::StatusCode};
 use contracts::{
     ApiError, ErrorCode,
-    server::{Req, route},
+    server::{Mount, Req},
 };
-use engine::{Engine, routes::api_error};
+use engine::routes::api_error;
 use tauri_plugin_http::reqwest;
 use tokio::io::AsyncWriteExt;
 
-use crate::server::{
+use crate::local_api::{
     AppState,
     endpoints::ops::{
         ExternalSave, OpResponse, SaveExternalFile, SaveInstanceFileAs,
@@ -24,17 +25,13 @@ use crate::server::{
 };
 
 pub fn routes() -> Router<AppState> {
-    let (external_path, external) =
-        route::<SaveExternalFile, _, _, _>(save_external_file);
-    let (instance_path, instance) =
-        route::<SaveInstanceFileAs, _, _, _>(save_instance_file_as);
     Router::new()
-        .route(external_path, external)
-        .route(instance_path, instance)
+        .endpoint::<SaveExternalFile, _, _>(save_external_file)
+        .endpoint::<SaveInstanceFileAs, _, _>(save_instance_file_as)
 }
 
 async fn save_external_file(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     State(ops): State<Arc<Ops>>,
     Req { body, .. }: Req<SaveExternalFile>,
 ) -> Result<StatusCode, ApiError> {
@@ -109,7 +106,7 @@ fn save_failed(error: impl std::fmt::Display) -> ApiError {
 }
 
 async fn save_instance_file_as(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     State(ops): State<Arc<Ops>>,
     Req { body, .. }: Req<SaveInstanceFileAs>,
 ) -> Result<StatusCode, ApiError> {
@@ -134,7 +131,7 @@ mod tests {
     use tokio::sync::broadcast;
 
     use super::*;
-    use crate::server::events::AppEvent;
+    use crate::local_api::events::AppEvent;
 
     async fn save(url: String, path: std::path::PathBuf) -> AppEvent {
         let events = broadcast::Sender::new(16);

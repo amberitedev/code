@@ -7,12 +7,13 @@ use super::write_shared_settings::{
     apply_shared_settings_to_instance, remember_processed_sha,
     sync_is_active_for_instance,
 };
+use crate::state::Desktop;
 use crate::synced_options::state::SyncedInstance;
 use crate::synced_options::state::{
     game_options_sync_is_enabled, load_game_option_preferences,
 };
 use engine::ErrorKind;
-use engine::state::{Engine, InstanceMetadata};
+use engine::state::InstanceMetadata;
 use engine::util::io;
 use std::collections::HashSet;
 
@@ -28,10 +29,10 @@ pub(super) fn currently_launcher_owned_keys(
 
 /// Writes canonical settings to `options.txt` before launch.
 pub async fn sync_before_launch(
-    state: &Engine,
+    state: &Desktop,
     instance_id: &str,
 ) -> engine::Result<()> {
-    let _guard = crate::hooks::synced_options(state).lock().await;
+    let _guard = state.synced_options().lock().await;
     let metadata =
         crate::synced_options::state::get_instance(state, instance_id)
             .await?
@@ -48,11 +49,11 @@ pub async fn sync_before_launch(
 ///
 /// Stores the written file's hash so the watcher ignores the app's write.
 pub async fn apply_launcher_overrides(
-    state: &Engine,
+    state: &Desktop,
     instance_id: &str,
     force_fullscreen: bool,
 ) -> engine::Result<()> {
-    let _guard = crate::hooks::synced_options(state).lock().await;
+    let _guard = state.synced_options().lock().await;
     let metadata =
         crate::synced_options::state::get_instance(state, instance_id)
             .await?
@@ -89,11 +90,11 @@ pub async fn apply_launcher_overrides(
 
 async fn fullscreen_is_synced(
     metadata: &SyncedInstance,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<bool> {
     Ok(metadata.synced.game_options
-        && game_options_sync_is_enabled(crate::db::pool(state)).await?
-        && load_game_option_preferences(crate::db::pool(state))
+        && game_options_sync_is_enabled(state.db()).await?
+        && load_game_option_preferences(state.db())
             .await?
             .get("fullscreen")
             .is_some_and(|preference| preference.enabled))

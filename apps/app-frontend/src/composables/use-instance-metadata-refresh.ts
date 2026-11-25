@@ -1,4 +1,4 @@
-import type { InstancePayload } from '@modrinth/api-client'
+import type { InstancePayload } from '@amberite/contracts/engine'
 import { useQueryClient } from '@tanstack/vue-query'
 
 import { installJobInstanceId, isInstallJobFinished } from '@/helpers/install'

@@ -1,5 +1,5 @@
-import { sharing, type ShareStorage } from '@modrinth/api-client'
-import { injectModrinthClient, injectNotificationManager } from '@modrinth/ui'
+import { sharing, type ShareStorage } from '@amberite/contracts/backend'
+import { injectModrinthClient, injectNotificationManager, shareHistoryKey } from '@modrinth/ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 
 import {
@@ -9,9 +9,6 @@ import {
 } from '@/helpers/install'
 
 export const sharedStorageKey = ['shared-storage'] as const
-/** The owner's history of one instance's share, kept on this computer. */
-export const versionHistoryKey = (instanceId: string) =>
-	['shared-version-history', instanceId] as const
 export const sharedHistorySettingsKey = ['shared-history-settings'] as const
 
 /** The account's shared storage: its allowance and the shares it owns. */
@@ -49,7 +46,7 @@ export function useDeleteVersion() {
 		onSettled: (_data, _error, { instanceId }) =>
 			Promise.all([
 				queryClient.invalidateQueries({ queryKey: sharedHistorySettingsKey }),
-				queryClient.invalidateQueries({ queryKey: versionHistoryKey(instanceId) }),
+				queryClient.invalidateQueries({ queryKey: shareHistoryKey(instanceId) }),
 			]),
 	})
 }

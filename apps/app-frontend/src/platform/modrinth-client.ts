@@ -1,11 +1,8 @@
+import { pairedCores } from '@amberite/contracts/app'
 import {
 	type AbstractModrinthClient,
 	AuthFeature,
 	GenericModrinthClient,
-	NodeAuthFeature,
-	nodeAuthState,
-	pairedCores,
-	PanelVersionFeature,
 	SelfHostedFeature,
 	TauriModrinthClient,
 	VerboseLoggingFeature,
@@ -31,10 +28,8 @@ async function account(): Promise<string> {
  */
 const ModrinthClient = isNativeWindow ? TauriModrinthClient : GenericModrinthClient
 export const apiClient: AbstractModrinthClient = new ModrinthClient({
-	userAgent: async () => `modrinth/theseus/${await getVersion()}`,
+	userAgent: async () => `amberite/${await getVersion()}`,
 	labrinthBaseUrl: config.labrinthBaseUrl,
-	// With our own account backend, hosting is the account's own Cores, found through it.
-	selfHostedHosting: Boolean(config.accountApiUrl),
 	// A Core's own certificate is checked in Rust; the WebView talks to the App's Core proxy
 	// instead, which adds this device's session for the account signed in. The WebView never
 	// holds it.
@@ -57,27 +52,16 @@ export const apiClient: AbstractModrinthClient = new ModrinthClient({
 				query: { core_id: coreId, account: await account() },
 			}),
 	},
-	archonBaseUrl: config.archonBaseUrl,
-	sharedInstancesBaseUrl: config.sharedInstancesBaseUrl,
 	localFileUploader: createLocalFileUploader(),
 	localTransport,
 	features: [
-		...(config.accountApiUrl
-			? [
-					new SelfHostedFeature({
-						baseUrl: config.accountApiUrl,
-						token: async () => (await getModrinthCredentials())?.session,
-					}),
-				]
-			: []),
-		new NodeAuthFeature({
-			getAuth: () => nodeAuthState.getAuth?.() ?? null,
-			refreshAuth: async () => await nodeAuthState.refreshAuth?.(),
+		new SelfHostedFeature({
+			baseUrl: config.accountApiUrl,
+			token: async () => (await getModrinthCredentials())?.session,
 		}),
 		new AuthFeature({
 			token: async () => (await getModrinthCredentials())?.session,
 		}),
-		new PanelVersionFeature(),
 		new VerboseLoggingFeature(),
 	],
 })

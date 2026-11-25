@@ -1,73 +1,6 @@
 <template>
 	<div
-		v-if="filteredNotices.length > 0"
-		class="relative mx-auto mb-4 flex w-full min-w-0 flex-col gap-3 px-6"
-		:class="{
-			'max-w-[1280px]': constrainWidth,
-		}"
-	>
-		<ServerNotice
-			v-for="notice in filteredNotices"
-			:key="`notice-${notice.id}`"
-			:level="notice.level"
-			:message="notice.message"
-			:dismissable="notice.dismissable"
-			:title="notice.title"
-			class="w-full"
-			@dismiss="() => dismissNotice(notice.id)"
-		/>
-	</div>
-	<div
-		v-if="serverData && serverData.node === null && serverData.status !== 'suspended'"
-		class="flex min-h-[calc(100vh-4rem)] items-center justify-center text-contrast"
-	>
-		<ErrorInformationCard
-			title="We're getting your server ready"
-			description="Your server's hardware is being prepared and will be available shortly!"
-			:icon="TransferIcon"
-			icon-color="blue"
-			:action="generalErrorAction"
-		/>
-	</div>
-	<div
-		v-else-if="serverData?.status === 'suspended' && serverData.suspension_reason === 'upgrading'"
-		class="flex min-h-[calc(100vh-4rem)] items-center justify-center text-contrast"
-	>
-		<ErrorInformationCard
-			title="Server upgrading"
-			description="Your server's hardware is currently being upgraded and will be back online shortly!"
-			:icon="TransferIcon"
-			icon-color="blue"
-			:action="generalErrorAction"
-		/>
-	</div>
-	<div
-		v-else-if="serverData?.status === 'suspended'"
-		class="flex min-h-[calc(100vh-4rem)] items-center justify-center text-contrast"
-	>
-		<ErrorInformationCard
-			title="Server suspended"
-			:description="suspendedDescription"
-			:icon="LockIcon"
-			icon-color="orange"
-			:action="suspendedAction"
-		>
-			<template v-if="isSiteAdmin" #actions>
-				<Button size="xl" class="flex-1" @click="liftSuspensionModal?.show()">
-					<LockOpenIcon class="size-4" />
-					{{ formatMessage(suspensionMessages.liftSuspension) }}
-				</Button>
-			</template>
-		</ErrorInformationCard>
-		<LiftSuspensionModal
-			v-if="isSiteAdmin"
-			ref="liftSuspensionModal"
-			:server-id="serverId"
-			:server-name="serverData.name"
-		/>
-	</div>
-	<div
-		v-else-if="serverError?.statusCode === 403 || serverError?.statusCode === 404"
+		v-if="serverError?.statusCode === 403 || serverError?.statusCode === 404"
 		class="flex min-h-[calc(100vh-4rem)] items-center justify-center text-contrast"
 	>
 		<ErrorInformationCard
@@ -80,11 +13,10 @@
 		/>
 	</div>
 	<div
-		v-else-if="serverError || !nodeAccessible"
+		v-else-if="serverError"
 		class="flex min-h-[calc(100vh-4rem)] items-center justify-center text-contrast"
 	>
 		<ErrorInformationCard
-			v-if="client.selfHostedHosting"
 			title="Can't reach your Core"
 			description="Check that your Core is running and that you're online, then try again."
 			:icon="TriangleAlertIcon"
@@ -92,31 +24,6 @@
 			:action="nodeUnavailableAction"
 			:error-details="nodeUnavailableDetails"
 		/>
-		<ErrorInformationCard
-			v-else
-			title="Server Node Unavailable"
-			:icon="TriangleAlertIcon"
-			icon-color="red"
-			:action="nodeUnavailableAction"
-			:error-details="nodeUnavailableDetails"
-		>
-			<template #description>
-				<div class="text-md space-y-4">
-					<p class="leading-[170%] text-secondary">
-						Your server's node, where your Modrinth Server is physically hosted, is not accessible
-						at the moment. We are working to resolve the issue as quickly as possible.
-					</p>
-					<p class="leading-[170%] text-secondary">
-						Your data is safe and will not be lost, and your server will be back online as soon as
-						the issue is resolved.
-					</p>
-					<p class="leading-[170%] text-secondary">
-						If reloading does not work initially, please contact Modrinth Support via the chat
-						bubble in the bottom right corner and we'll be happy to help.
-					</p>
-				</div>
-			</template>
-		</ErrorInformationCard>
 	</div>
 	<!-- SERVER START -->
 	<div
@@ -129,7 +36,6 @@
 				: `linear-gradient(180deg, rgba(153,153,153,1) 0%, rgba(87,87,87,1) 100%)`,
 		}"
 		:class="[
-			'server-panel-' + revealState,
 			fillLayout
 				? 'flex-1 pb-6'
 				: constrainWidth
@@ -137,175 +43,104 @@
 					: 'min-h-[calc(100svh-100px)] pb-6',
 		]"
 	>
-		<template v-if="revealState !== 'pending' || isOnboarding || globalInviteForServer">
-			<div
-				v-if="!isOnboarding"
-				class="w-full flex flex-col gap-4"
-				:class="['server-stagger-item', fillLayout ? 'shrink-0' : '', { 'mt-4': isNuxt }]"
-				:style="{ '--si': 0 }"
-			>
-				<PageHeader :title="serverData?.name || 'Server'">
-					<template #leading>
-						<ServerIcon
-							:image="serverHeaderImage"
-							:config="serverData.is_medal ? null : serverIconConfig"
-							:class="isNuxt ? 'size-20 !rounded-2xl' : 'size-16 !rounded-xl'"
-						/>
-					</template>
+		<div
+			v-if="!isOnboarding"
+			class="w-full flex flex-col gap-4"
+			:class="['server-stagger-item', fillLayout ? 'shrink-0' : '']"
+			:style="{ '--si': 0 }"
+		>
+			<PageHeader :title="serverData?.name || 'Server'">
+				<template #leading>
+					<ServerIcon
+						:image="serverIconImage"
+						:config="serverIconConfig"
+						class="size-16 !rounded-xl"
+					/>
+				</template>
 
-					<template v-if="serverData.locked_since" #badges>
-						<PageHeaderBadgeItem
-							:icon="LockIcon"
-							:tooltip="
-								formatMessage(lockMessages.lockedBadgeTooltip, {
-									date: formatDateTime(serverData.locked_since),
-								})
-							"
-							class="border-brand-red bg-highlight-red !text-red"
+				<template #metadata>
+					<PageHeaderMetadata>
+						<PageHeaderMetadataItem
+							v-if="serverData.flows.intro"
+							:icon="SettingsIcon"
+							class="font-semibold"
 						>
-							{{ formatMessage(lockMessages.lockedBadge) }}
-						</PageHeaderBadgeItem>
-					</template>
+							Configuring server...
+						</PageHeaderMetadataItem>
 
-					<template #metadata>
-						<PageHeaderMetadata>
+						<template v-else>
 							<PageHeaderMetadataItem
-								v-if="serverData.flows?.intro"
-								:icon="SettingsIcon"
-								class="font-semibold"
+								v-if="headerPlatform.loader"
+								:icon="TagIcon"
+								:icon-props="{ tag: headerPlatform.loader, enforceType: 'loader' }"
 							>
-								Configuring server...
+								{{ formatLoaderLabel(headerPlatform.loader) }} {{ headerPlatform.gameVersion }}
 							</PageHeaderMetadataItem>
-
-							<template v-else>
-								<PageHeaderMetadataItem
-									v-if="headerPlatform.loader"
-									:icon="TagIcon"
-									:icon-props="{ tag: headerPlatform.loader, enforceType: 'loader' }"
-								>
-									{{ formatLoaderLabel(headerPlatform.loader) }} {{ headerPlatform.gameVersion }}
-								</PageHeaderMetadataItem>
-								<PageHeaderMetadataItem
-									v-if="serverData.net?.domain && !serverPreferences.hideSubdomainLabel"
-									:icon="LinkIcon"
-									tooltip="Copy server address"
-									:action="copyServerAddress"
-								>
-									{{ serverData.net.domain }}.modrinth.gg
-								</PageHeaderMetadataItem>
-								<PageHeaderMetadataItem v-if="showServerUptime" :icon="TimerIcon">
-									{{ formattedUptime }}
-								</PageHeaderMetadataItem>
-								<PageHeaderMetadataItem
-									v-if="serverProject"
-									:to="serverProjectLink"
-									class="!text-primary"
-								>
-									Linked to
-									<Avatar :src="serverProject.icon_url" :alt="serverProject.title" size="24px" />
-									{{ serverProject.title }}
-								</PageHeaderMetadataItem>
-							</template>
-						</PageHeaderMetadata>
-					</template>
-
-					<template #actions>
-						<PageHeaderActions>
-							<PanelServerActionButton />
-							<IconButton
-								v-tooltip="'Server settings'"
-								size="xl"
-								label="Server settings"
-								native-type="button"
-								@click="openServerSettingsModal()"
+							<PageHeaderMetadataItem v-if="showServerUptime" :icon="TimerIcon">
+								{{ formattedUptime }}
+							</PageHeaderMetadataItem>
+							<PageHeaderMetadataItem
+								v-if="serverProject"
+								:to="serverProjectLink"
+								class="!text-primary"
 							>
-								<SettingsIcon />
-							</IconButton>
-							<TeleportOverflowMenu
-								v-if="isNuxt"
-								type="quiet"
-								size="xl"
-								label="More server options"
-								:options="serverMenuOptions"
-							>
-								<MoreVerticalIcon aria-hidden="true" />
-							</TeleportOverflowMenu>
-						</PageHeaderActions>
-					</template>
-				</PageHeader>
+								Linked to
+								<Avatar :src="serverProject.icon_url" :alt="serverProject.title" size="24px" />
+								{{ serverProject.title }}
+							</PageHeaderMetadataItem>
+						</template>
+					</PageHeaderMetadata>
+				</template>
+
+				<template #actions>
+					<PageHeaderActions>
+						<PanelServerActionButton />
+						<IconButton
+							v-tooltip="'Server settings'"
+							size="xl"
+							label="Server settings"
+							native-type="button"
+							@click="openServerSettingsModal()"
+						>
+							<SettingsIcon />
+						</IconButton>
+					</PageHeaderActions>
+				</template>
+			</PageHeader>
+		</div>
+
+		<ServerOnboardingPanelPage
+			v-if="isOnboarding"
+			:class="fillLayout ? 'my-auto' : 'mt-16'"
+			:site-url="siteUrl ?? 'https://modrinth.com'"
+		/>
+
+		<template v-if="!isOnboarding">
+			<div class="server-stagger-item -mb-3" :class="fillLayout ? 'shrink-0' : ''">
+				<NavTabs :links="navLinks" replace page-nav data-pyro-navigation :style="{ '--si': 1 }" />
 			</div>
 
-			<ServerOnboardingPanelPage
-				v-if="isOnboarding"
-				:class="fillLayout ? 'my-auto' : 'mt-16'"
-				:site-url="siteUrl ?? 'https://modrinth.com'"
-			/>
-
-			<template v-if="!isOnboarding">
-				<div class="server-stagger-item -mb-3" :class="fillLayout ? 'shrink-0' : ''">
-					<NavTabs :links="navLinks" replace page-nav data-pyro-navigation :style="{ '--si': 1 }" />
-				</div>
-
+			<div
+				data-pyro-mount
+				class="server-stagger-item w-full flex-1"
+				:class="fillLayout ? 'flex flex-col' : 'h-full'"
+				:style="{ '--si': 2 }"
+			>
 				<div
-					data-pyro-mount
-					class="server-stagger-item w-full flex-1"
-					:class="fillLayout ? 'flex flex-col' : 'h-full'"
-					:style="{ '--si': 2 }"
+					v-if="isReconnecting"
+					data-pyro-server-ws-reconnecting
+					class="mb-4 flex w-full flex-row items-center gap-4 rounded-2xl bg-bg-orange p-4 text-sm text-contrast"
 				>
-					<div v-if="serverData.is_medal" class="mb-4">
-						<MedalServerCountdown
-							:server-id="serverId"
-							:stripe-publishable-key="stripePublishableKey"
-							:site-url="siteUrl"
-							:products="products"
-						/>
-					</div>
-
-					<div
-						v-if="!isConnected && !isReconnecting && !isLoading"
-						data-pyro-server-ws-error
-						class="mb-4 flex w-full flex-row items-center gap-4 rounded-2xl bg-bg-red p-4 text-contrast"
-					>
-						<IssuesIcon class="size-5 text-red" />
-						Something went wrong...
-					</div>
-
-					<div
-						v-if="isReconnecting"
-						data-pyro-server-ws-reconnecting
-						class="mb-4 flex w-full flex-row items-center gap-4 rounded-2xl bg-bg-orange p-4 text-sm text-contrast"
-					>
-						<LoaderCircleIcon class="h-5 w-5 animate-spin" />
-						Hang on, we're reconnecting to your server.
-					</div>
-
-					<Admonition
-						v-if="serverData.locked_since"
-						type="critical"
-						:header="formatMessage(lockMessages.lockedHeader)"
-						class="mb-4 shrink-0"
-					>
-						<IntlFormatted :message-id="lockMessages.lockedBody">
-							<template #support-link="{ children }">
-								<button
-									type="button"
-									class="m-0 cursor-pointer border-none bg-transparent p-0 font-semibold text-link hover:underline"
-									@click="showIntercom"
-								>
-									<component :is="() => children" />
-								</button>
-							</template>
-						</IntlFormatted>
-					</Admonition>
-
-					<ServerPanelAdmonitions
-						class="mb-4 shrink-0"
-						:curseforge-file-warning-count="serverContent?.files_need_side_type_review ?? 0"
-						@installation-retry="handleInstallationRetry"
-					/>
-					<slot :on-reinstall="onReinstall" :on-reinstall-failed="onReinstallFailed" />
+					<LoaderCircleIcon class="h-5 w-5 animate-spin" />
+					Hang on, we're reconnecting to your server.
 				</div>
-			</template>
+
+				<ServerPanelAdmonitions
+					class="mb-4 shrink-0"
+					@installation-retry="handleInstallationRetry"
+				/>
+				<slot />
+			</div>
 		</template>
 	</div>
 	<div
@@ -321,24 +156,12 @@
 		<ServerSettingsModal
 			ref="serverSettingsModal"
 			:site-url="siteUrl"
-			:resolve-viewer="resolveViewerOnce"
 			:browse-modpacks="handleBrowseModpacks"
 		/>
 	</Suspense>
-	<ServerPlayMigrationModal
-		ref="serverPlayMigrationModal"
-		:kind="serverPlayMigration.kind.value"
-		:modpack-name="serverPlayMigration.modpackName.value"
-		:has-uploaded-mrpack="serverPlayMigration.hasUploadedMrpack.value"
-		:world-id="worldId"
-		:disabled="!canSetup || serverPlayMigration.active.value"
-		:upload-progress="serverPlayMigration.uploadProgress.value"
-		@confirm="confirmServerPlayMigration"
-	/>
 	<ServerInviteLinkModal
 		ref="serverInviteLinkModal"
 		:server-id="serverId"
-		:world-id="worldId"
 		:site-url="siteUrl ?? ''"
 	/>
 	<ConfirmLeaveModal
@@ -350,24 +173,16 @@
 </template>
 
 <script setup lang="ts">
-import { show as showIntercom } from '@intercom/messenger-js-sdk'
-import type { Archon, Labrinth } from '@modrinth/api-client'
-import { ModrinthApiError, NuxtModrinthClient } from '@modrinth/api-client'
+import { instanceContent } from '@amberite/contracts/engine'
+import { ModrinthApiError } from '@modrinth/api-client'
 import {
 	BoxesIcon,
-	CopyIcon,
 	DatabaseBackupIcon,
 	FolderOpenIcon,
 	HistoryIcon,
-	IssuesIcon,
 	LayoutTemplateIcon,
-	LinkIcon,
 	LoaderCircleIcon,
-	LockIcon,
-	LockOpenIcon,
-	MoreVerticalIcon,
 	PlayIcon,
-	ServerIcon as ServerAssetIcon,
 	SettingsIcon,
 	TimerIcon,
 	TransferIcon,
@@ -378,63 +193,46 @@ import DOMPurify from 'dompurify'
 import { computed, nextTick, onBeforeUnmount, onMounted, onUnmounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 
-import Admonition from '#ui/components/base/Admonition.vue'
 import Avatar from '#ui/components/base/Avatar.vue'
-import { Button, IconButton, TeleportOverflowMenu } from '#ui/components/base/buttons'
+import { IconButton } from '#ui/components/base/buttons'
 import ErrorInformationCard from '#ui/components/base/ErrorInformationCard.vue'
-import IntlFormatted from '#ui/components/base/IntlFormatted.vue'
 import NavTabs from '#ui/components/base/NavTabs.vue'
 import PageHeader from '#ui/components/base/page-header/index.vue'
 import PageHeaderMetadata from '#ui/components/base/page-header/metadata/index.vue'
 import PageHeaderMetadataItem from '#ui/components/base/page-header/metadata/page-header-metadata-item.vue'
 import PageHeaderActions from '#ui/components/base/page-header/page-header-actions.vue'
-import PageHeaderBadgeItem from '#ui/components/base/page-header/page-header-badge-item.vue'
-import ServerNotice from '#ui/components/base/ServerNotice.vue'
 import TagIcon from '#ui/components/base/TagIcon.vue'
 import ConfirmLeaveModal from '#ui/components/modal/ConfirmLeaveModal.vue'
 import ServerPanelAdmonitions from '#ui/components/servers/admonitions/ServerPanelAdmonitions.vue'
 import ServerIcon from '#ui/components/servers/icons/ServerIcon.vue'
-import LiftSuspensionModal from '#ui/components/servers/LiftSuspensionModal.vue'
-import MedalServerCountdown from '#ui/components/servers/marketing/MedalServerCountdown.vue'
 import { injectServerOnboardingFlow } from '#ui/components/servers/onboarding/context'
-import ServerPlayMigrationModal from '#ui/components/servers/play-migration/ServerPlayMigrationModal.vue'
 import { PanelServerActionButton } from '#ui/components/servers/server-header'
 import ServerSettingsModal from '#ui/components/servers/ServerSettingsModal.vue'
 import ServerInviteLinkModal from '#ui/components/sharing/server-invite-link/ServerInviteLinkModal.vue'
+import { injectServerInviteHandoff } from '#ui/components/sharing/server-sharing-update/handoff'
 import {
 	hasServerPermission,
-	useDebugLogger,
-	useFormatDateTime,
 	useGeneratedIconSrc,
 	useLoadingBarToken,
-	useModrinthServersConsole,
 	useReadyState,
 	useServerIcon,
 	useServerProject,
 } from '#ui/composables'
 import { defineMessages, useVIntl } from '#ui/composables/i18n'
 import { useServerBackupsQueue } from '#ui/composables/server-backups-queue'
-import type {
-	ServerInstallationKey,
-	ServerInstallationState,
-} from '#ui/composables/server-installation-tracker'
 import { useServerManageCoreRuntime } from '#ui/composables/server-manage-core-runtime'
-import { useServerPanelSync } from '#ui/composables/server-panel-sync'
-import { useServerPreferences } from '#ui/composables/server-preferences'
-import { serverKeys } from '#ui/composables/server-queries'
-import type { LogLine } from '#ui/layouts/shared/console'
+import { serverDetailQueryOptions, serverKeys } from '#ui/composables/server-queries'
+import { directoryQueryOptions } from '#ui/layouts/shared/files-tab/providers/instance-files'
 import type { ServerSettingsTabId } from '#ui/layouts/shared/server-settings'
 import {
 	injectModrinthClient,
 	injectNotificationManager,
 	provideServerSettingsModal,
 } from '#ui/providers'
-import type { ServerStats } from '#ui/providers/server-context'
 import { commonMessages } from '#ui/utils/common-messages'
-import { formatLoaderLabel, resolveServerPlatform } from '#ui/utils/loaders'
+import { formatLoaderLabel } from '#ui/utils/loaders'
 
 import ServerOnboardingPanelPage from './[id]/onboarding.vue'
-import { useServerPlayMigrationFlow } from './composables/use-server-play-migration-flow'
 
 interface Tab {
 	label: string
@@ -446,43 +244,30 @@ interface Tab {
 const props = withDefaults(
 	defineProps<{
 		serverId: string
+		/** The Core that has the server. */
+		coreId: string
 		reloadPage: () => void
-		resolveViewer: () => Promise<{ userId: string | null; userRole: string | null }>
-		showCopyIdAction?: boolean
 		showAdvancedDebugInfo?: boolean
 		showUptime?: boolean
 		additionalTabs?: Tab[]
-		stripePublishableKey?: string
 		siteUrl?: string
-		products?: Labrinth.Billing.Internal.Product[]
-		authUser?: { id: string; username: string; email: string; created: string }
-		navigateToBilling?: () => void
-		navigateToAdminBilling?: (ownerId: string) => void
 		navigateToServers?: () => void
 		browseModpacks?: (args: {
 			serverId: string
-			worldId: string | null
 			from: 'reset-server' | 'onboarding'
 		}) => void | Promise<void>
 		browseContent?: (args: {
 			serverId: string
-			worldId: string | null
 			type: 'mod' | 'plugin' | 'datapack'
 		}) => void | Promise<void>
 		constrainWidth?: boolean
 		layoutMode?: 'page' | 'fill'
 	}>(),
 	{
-		showCopyIdAction: false,
 		showAdvancedDebugInfo: false,
 		showUptime: true,
 		additionalTabs: () => [],
-		stripePublishableKey: undefined,
 		siteUrl: undefined,
-		products: () => [],
-		authUser: undefined,
-		navigateToBilling: undefined,
-		navigateToAdminBilling: undefined,
 		navigateToServers: undefined,
 		browseModpacks: undefined,
 		browseContent: undefined,
@@ -504,104 +289,26 @@ const leaveMessages = defineMessages({
 	},
 })
 
-// disabled, keeping the animation logic cos it's really nice and we might want to re-enable in future
-const DISABLE_LOADING_ANIM = true
-
 const { addNotification } = injectNotificationManager()
 const client = injectModrinthClient()
+const core = client.core(props.coreId)
 const constrainWidth = computed(() => props.constrainWidth)
 const fillLayout = computed(() => props.layoutMode === 'fill')
-const isNuxt = computed(() => client instanceof NuxtModrinthClient)
 const queryClient = useQueryClient()
 const route = useRoute()
 const router = useRouter()
 const onboardingFlow = injectServerOnboardingFlow(null)
-const debug = useDebugLogger('ServerManage')
-
-const isReconnecting = ref(false)
-const isLoading = ref(true)
-const isMounted = ref(true)
-
-const serverPreferences = useServerPreferences(props.serverId)
 
 const serverSettingsModal = ref<InstanceType<typeof ServerSettingsModal> | null>(null)
-const liftSuspensionModal = ref<InstanceType<typeof LiftSuspensionModal> | null>(null)
-const viewerRole = ref<string | null>(null)
-const isSiteAdmin = computed(() => viewerRole.value === 'admin')
-let viewerPromise: ReturnType<typeof props.resolveViewer> | null = null
-
-function resolveViewerOnce() {
-	viewerPromise ??= props.resolveViewer().catch((error) => {
-		viewerPromise = null
-		throw error
-	})
-	return viewerPromise
-}
 const confirmLeaveModal = ref<InstanceType<typeof ConfirmLeaveModal>>()
-const formatDateTime = useFormatDateTime({ dateStyle: 'long', timeStyle: 'short' })
-
-const suspensionMessages = defineMessages({
-	liftSuspension: {
-		id: 'servers.manage.suspended.lift-suspension',
-		defaultMessage: 'Lift suspension',
-	},
-	goToAdminBilling: {
-		id: 'servers.manage.suspended.go-to-admin-billing',
-		defaultMessage: 'Go to admin billing',
-	},
-})
-
-const lockMessages = defineMessages({
-	lockedBadge: {
-		id: 'servers.manage.locked.badge',
-		defaultMessage: 'Locked',
-	},
-	lockedBadgeTooltip: {
-		id: 'servers.manage.locked.badge-tooltip',
-		defaultMessage: 'Locked since {date}',
-	},
-	lockedHeader: {
-		id: 'servers.manage.locked.header',
-		defaultMessage: 'Server locked by support',
-	},
-	lockedBody: {
-		id: 'servers.manage.locked.body',
-		defaultMessage:
-			'Support has temporarily locked this server, so you cannot make any changes. <support-link>Contact support</support-link> if you believe this is a mistake.',
-	},
-})
-
-// Matches the tab pages and the hover prefetches, so opening a server or switching tabs reuses
-// what was just fetched. Changes arrive over the websocket and invalidate these queries.
-const PANEL_STALE_MS = 30_000
 
 const {
 	data: serverData,
 	error: serverQueryError,
 	isLoading: serverLoading,
-} = useQuery({
-	queryKey: serverKeys.detail(props.serverId),
-	queryFn: () => client.archon.servers_v0.get(props.serverId)!,
-	// A Core that does not answer is offline: say so at once instead of retrying for half a minute.
-	retry: client.selfHostedHosting ? false : 3,
-	// The server list already holds this server, so the panel shows at once and the full answer
-	// replaces it when it lands.
-	placeholderData: () =>
-		queryClient
-			.getQueryData<Archon.Servers.v0.ServerGetResponse>(['servers'])
-			?.servers.find((server) => server.server_id === props.serverId),
-	staleTime: PANEL_STALE_MS,
-})
+} = useQuery(serverDetailQueryOptions(client, props.serverId))
 
 useLoadingBarToken(useReadyState({ isLoading: serverLoading, data: serverData }))
-
-function updateServerData(patch: Partial<Archon.Servers.v0.Server>) {
-	if (!serverData.value) return
-	queryClient.setQueryData(serverKeys.detail(props.serverId), {
-		...serverData.value,
-		...patch,
-	})
-}
 
 const serverError = computed(() => {
 	const err = serverQueryError.value
@@ -609,38 +316,13 @@ const serverError = computed(() => {
 	return err ? ModrinthApiError.fromUnknown(err) : null
 })
 
-const { data: serverFull } = useQuery({
-	queryKey: serverKeys.detailV1(props.serverId),
-	queryFn: () => client.archon.servers_v1.get(props.serverId),
-	staleTime: PANEL_STALE_MS,
-})
+const headerPlatform = computed(() => ({
+	loader: serverData.value?.loader?.toLowerCase() ?? null,
+	gameVersion: serverData.value?.mc_version ?? null,
+}))
 
-const worldId = computed(() => {
-	if (!serverFull.value) return null
-	const activeWorld = serverFull.value.worlds.find((w) => w.is_active)
-	return activeWorld?.id ?? serverFull.value.worlds[0]?.id ?? null
-})
-
-const { data: serverContent } = useQuery({
-	queryKey: serverKeys.content(props.serverId),
-	queryFn: () =>
-		client.archon.content_v1.getAddons(props.serverId, worldId.value!, { from_modpack: false }),
-	enabled: computed(() => worldId.value !== null),
-	staleTime: PANEL_STALE_MS,
-})
-
-const headerPlatform = computed(() => resolveServerPlatform(serverData.value, serverContent.value))
-
-const backupsQueue = useServerBackupsQueue(
-	computed(() => props.serverId),
-	worldId,
-)
-const { handleWsBackupProgress, busyReasons: backupsBusy } = backupsQueue
-
-const { disconnect: disconnectPanelSync } = useServerPanelSync({
-	serverId: computed(() => props.serverId),
-	worldId,
-})
+const backupsQueue = useServerBackupsQueue(props.serverId, core)
+const { handleBackupProgress, busyReasons: backupsBusy } = backupsQueue
 
 const { config: serverIconConfig, image: serverIconImage } = useServerIcon(() => props.serverId, {
 	icon: () => serverData.value?.icon,
@@ -649,77 +331,56 @@ const serverIconGeneratedSrc = useGeneratedIconSrc(serverIconConfig)
 const serverImage = computed(() => serverIconGeneratedSrc.value ?? serverIconImage.value)
 const { data: serverProject } = useServerProject(computed(() => serverData.value?.upstream ?? null))
 
-const onStateEvent = (data: Archon.Websocket.v0.WSStateEvent) => {
-	debug('[root.vue] handleState received:', {
-		power_variant: data.power_variant,
-		serverStatus: serverData.value?.status,
-	})
-	hasReceivedWsData.value = true
-}
-
 const {
-	beginInstallation,
 	cancelUpload,
-	cancelOptimisticInstallation,
-	cleanupCoreRuntime,
-	connectSocket,
-	cpuData,
-	dismissInstallation,
-	fsOps,
-	fsQueuedOps,
 	installation,
+	beginInstallation,
+	cancelOptimisticInstallation,
+	dismissInstallation,
 	isConnected,
-	ramData,
-	serverPowerState,
-	stats,
+	powerState,
 	uptimeSeconds,
 	uploadState,
 } = useServerManageCoreRuntime({
-	serverId: computed(() => props.serverId),
-	worldId,
+	serverId: props.serverId,
+	coreId: props.coreId,
 	server: serverData,
-	serverFull,
-	content: serverContent,
-	isSiteAdmin,
 	extraBusyReasons: backupsBusy,
-	setDisconnectedOnAuthIncorrect: false,
-	syncUptimeFromState: true,
-	incrementUptimeLocally: true,
-	eventGuard: () => isMounted.value,
-	onStateEvent,
+	onBackupProgress: handleBackupProgress,
 })
 
-const serverPlayMigrationModal = ref<InstanceType<typeof ServerPlayMigrationModal>>()
 const serverInviteLinkModal = ref<InstanceType<typeof ServerInviteLinkModal>>()
-const canSetup = computed(() =>
-	hasServerPermission(serverData.value?.current_user_permissions ?? 0, 'SETUP'),
+const canSetup = computed(() => hasServerPermission(0, 'SETUP'))
+
+// A server made to invite players to opens the invite link once it loads.
+const inviteHandoff = injectServerInviteHandoff(null)
+watch(
+	() => !!inviteHandoff?.awaitingServer.value && !!serverData.value,
+	(ready) => {
+		if (!ready || !inviteHandoff) return
+		inviteHandoff.awaitingServer.value = false
+		void nextTick(() => serverInviteLinkModal.value?.show())
+	},
+	{ immediate: true },
 )
-const { migration: serverPlayMigration, confirmMigration: confirmServerPlayMigration } =
-	useServerPlayMigrationFlow({
-		serverId: props.serverId,
-		worldId,
-		serverFull,
-		content: serverContent,
-		backupsQueue,
-		canSetup,
-		serverLoaded: computed(() => !!serverData.value),
-		migrationModal: serverPlayMigrationModal,
-		inviteLinkModal: serverInviteLinkModal,
-	})
 
 const globalInviteForServer = computed(
 	() =>
 		onboardingFlow?.inviteActive.value && onboardingFlow.request.value?.serverId === props.serverId,
 )
+// A server with nothing installed is not set up yet: the panel opens on setting it up.
 const isOnboarding = computed(
-	() => !globalInviteForServer.value && !!serverData.value?.flows?.intro && !installation.value,
+	() => !globalInviteForServer.value && !!serverData.value?.flows.intro && !installation.value,
 )
 
-const serverHeaderImage = computed(() =>
-	serverData.value?.is_medal ? 'https://cdn.modrinth.com/medal_icon.webp' : serverIconImage.value,
-)
+/** The socket was open and dropped; it reopens by itself. */
+const everConnected = ref(isConnected.value)
+watch(isConnected, (connected) => {
+	if (connected) everConnected.value = true
+})
+const isReconnecting = computed(() => everConnected.value && !isConnected.value)
 
-const showServerUptime = computed(() => props.showUptime && serverPowerState.value === 'running')
+const showServerUptime = computed(() => props.showUptime && powerState.value === 'running')
 
 const formattedUptime = computed(() => formatUptime(uptimeSeconds.value))
 
@@ -727,22 +388,6 @@ const serverProjectLink = computed(() => {
 	if (!serverProject.value) return ''
 	return `/project/${serverProject.value.slug ?? serverProject.value.id}`
 })
-
-const serverMenuOptions = computed(() => [
-	{
-		id: 'all-servers',
-		label: 'All servers',
-		icon: ServerAssetIcon,
-		action: () => void router.push('/hosting/manage'),
-	},
-	{
-		id: 'copy-id',
-		label: 'Copy ID',
-		icon: CopyIcon,
-		action: copyServerId,
-		shown: props.showCopyIdAction,
-	},
-])
 
 function formatUptime(uptime: number) {
 	const days = Math.floor(uptime / (24 * 3600))
@@ -757,24 +402,7 @@ function formatUptime(uptime: number) {
 	return formatted.trim()
 }
 
-function copyServerAddress() {
-	const domain = serverData.value?.net?.domain
-	if (!domain) return
-
-	void navigator.clipboard.writeText(`${domain}.modrinth.gg`)
-	addNotification({
-		title: 'Server address copied',
-		text: "Your server's address has been copied to your clipboard.",
-		type: 'success',
-	})
-}
-
-function copyServerId() {
-	void navigator.clipboard.writeText(props.serverId)
-}
-
 const isUploading = computed(() => uploadState.value.isUploading)
-const permissionDeniedMessage = computed(() => formatMessage(commonMessages.noPermissionAction))
 
 function handleBeforeUnload(e: BeforeUnloadEvent) {
 	if (isUploading.value) {
@@ -806,109 +434,20 @@ if (typeof window !== 'undefined') {
 	})
 }
 
-type CachedWsState = {
-	stats: ServerStats
-	cpuData: number[]
-	ramData: number[]
-	powerState: Archon.Websocket.v0.PowerState
-	uptimeSeconds: number
-	consoleLines: LogLine[]
-}
-
-const modrinthServersConsole = useModrinthServersConsole()
-const wsStateCacheKey = ['servers', 'ws-state', props.serverId] as const
-const cachedWsState = queryClient.getQueryData<CachedWsState>(wsStateCacheKey)
-if (cachedWsState) {
-	stats.value = cachedWsState.stats
-	cpuData.value = cachedWsState.cpuData
-	ramData.value = cachedWsState.ramData
-	serverPowerState.value = cachedWsState.powerState
-	uptimeSeconds.value = cachedWsState.uptimeSeconds
-}
-
-const log = useDebugLogger('server-panel-reveal')
-
-const hasReceivedWsData = ref(!!cachedWsState)
-log('init', {
-	hasCachedWsState: !!cachedWsState,
-	hasReceivedWsData: hasReceivedWsData.value,
-	isConnected: isConnected.value,
-	serverData: !!serverData.value,
-})
-
-const saveWsStateToCache = () => {
-	if (!hasReceivedWsData.value) return
-	queryClient.setQueryData(wsStateCacheKey, {
-		stats: stats.value,
-		cpuData: cpuData.value,
-		ramData: ramData.value,
-		powerState: serverPowerState.value,
-		uptimeSeconds: uptimeSeconds.value,
-		consoleLines: modrinthServersConsole.output.value,
-	} satisfies CachedWsState)
-}
-
-watch([stats, serverPowerState], () => {
-	if (!isConnected.value) return
-	hasReceivedWsData.value = true
-})
-
-const canReveal = computed(() => serverData.value && hasReceivedWsData.value)
-log('canReveal initial', {
-	canReveal: canReveal.value,
-	serverData: !!serverData.value,
-	hasReceivedWsData: hasReceivedWsData.value,
-})
-
-const revealState = ref<'pending' | 'revealing' | 'visible'>(
-	DISABLE_LOADING_ANIM || canReveal.value ? 'visible' : 'pending',
-)
-log('revealState initial', revealState.value)
-
-const REVEAL_TOTAL_MS = 2 * 80 + 400
-
-watch(canReveal, (ready) => {
-	log('canReveal changed', { ready, revealState: revealState.value })
-	if (ready && revealState.value === 'pending') {
-		if (DISABLE_LOADING_ANIM) {
-			revealState.value = 'visible'
-		} else {
-			revealState.value = 'revealing'
-			setTimeout(() => {
-				revealState.value = 'visible'
-				log('revealState -> visible')
-			}, REVEAL_TOTAL_MS)
-		}
-	}
-})
-
-watch(isConnected, (connected) => {
-	log('isConnected changed', connected)
-})
-
-watch(serverData, (data) => {
-	log('serverData changed', !!data)
-})
-
 // Content and backups are already loaded by this layout; these two tabs fetch on their own, so
 // hovering their link warms the first request.
 function prefetchFiles() {
-	void queryClient.prefetchQuery({
-		queryKey: ['files', props.serverId, '/'],
-		queryFn: () => client.kyros.files_v0.listDirectory('/', 1, 2000),
-		staleTime: PANEL_STALE_MS,
-	})
+	void queryClient.prefetchQuery(
+		directoryQueryOptions(
+			{
+				client: core,
+				instanceId: props.serverId,
+				queryKey: (path) => serverKeys.directory(props.serverId, path),
+			},
+			'',
+		),
+	)
 }
-
-watch(
-	() => serverData.value?.status,
-	(status, previousStatus) => {
-		if (!status || !previousStatus) return
-		if ((status === 'suspended') === (previousStatus === 'suspended')) return
-		isLoading.value = true
-		props.reloadPage()
-	},
-)
 
 const navLinks = computed<Tab[]>(() => [
 	{
@@ -951,428 +490,58 @@ const navLinks = computed<Tab[]>(() => [
 	...props.additionalTabs,
 ])
 
-const filteredNotices = computed(
-	() => serverData.value?.notices?.filter((n) => n.level !== 'survey') ?? [],
-)
-const surveyNotice = computed(() => serverData.value?.notices?.find((n) => n.level === 'survey'))
-
-async function dismissNotice(noticeId: number) {
-	await client.archon.servers_v0.dismissNotice(props.serverId, noticeId).catch((err) => {
-		addNotification({
-			title: 'Error dismissing notice',
-			text: err,
-			type: 'error',
-		})
-	})
-	await queryClient.invalidateQueries({ queryKey: serverKeys.detail(props.serverId) })
-}
-
-async function dismissSurvey() {
-	const noticeId = surveyNotice.value?.id
-	if (noticeId === undefined) return
-	await dismissNotice(noticeId)
-}
-
-type TallyPopupOptions = {
-	key?: string
-	layout?: 'default' | 'modal'
-	width?: number
-	alignLeft?: boolean
-	hideTitle?: boolean
-	overlay?: boolean
-	emoji?: {
-		text: string
-		animation:
-			| 'none'
-			| 'wave'
-			| 'tada'
-			| 'heart-beat'
-			| 'spin'
-			| 'flash'
-			| 'bounce'
-			| 'rubber-band'
-			| 'head-shake'
-	}
-	autoClose?: number
-	showOnce?: boolean
-	doNotShowAfterSubmit?: boolean
-	customFormUrl?: string
-	hiddenFields?: { [key: string]: unknown }
-	onOpen?: () => void
-	onClose?: () => void
-	onPageView?: (page: number) => void
-	onSubmit?: (payload: unknown) => void
-}
-
-const popupOptions = computed(
-	() =>
-		({
-			layout: 'default',
-			width: 400,
-			autoClose: 2000,
-			hideTitle: true,
-			hiddenFields: {
-				username: props.authUser?.username,
-				user_id: props.authUser?.id,
-				user_email: props.authUser?.email,
-				server_id: serverData.value?.server_id,
-				loader: serverData.value?.loader,
-				game_version: serverData.value?.mc_version,
-				modpack_id: serverProject.value?.id,
-				modpack_name: serverProject.value?.title,
-			},
-			onOpen: () => debug(`Opened survey notice: ${surveyNotice.value?.id}`),
-			onClose: async () => await dismissSurvey(),
-			onSubmit: (payload: unknown) => {
-				debug('Form submitted:', payload)
-			},
-		}) satisfies TallyPopupOptions,
-)
-
-function getTally(): { openPopup?: (id: string, opts: TallyPopupOptions) => void } | undefined {
-	return (
-		window as Window & { Tally?: { openPopup?: (id: string, opts: TallyPopupOptions) => void } }
-	).Tally
-}
-
-function showSurvey() {
-	if (!surveyNotice.value) return
-
-	try {
-		const tally = getTally()
-		if (tally?.openPopup) {
-			tally.openPopup(surveyNotice.value.message, popupOptions.value)
-		}
-	} catch (e) {
-		console.error('Error opening Tally popup:', e)
-	}
-}
-
-function loadTallyScript() {
-	if (document.querySelector('script[src*="tally.so"]')) return
-	const script = document.createElement('script')
-	script.src = 'https://tally.so/widgets/embed.js'
-	script.defer = true
-	document.head.appendChild(script)
-}
-
+/** Installs what the server follows again, after a failed install. */
 async function handleInstallationRetry() {
-	if (!worldId.value) return
 	if (!canSetup.value) {
-		addNotification({
-			type: 'error',
-			text: permissionDeniedMessage.value,
-		})
+		addNotification({ type: 'error', text: formatMessage(commonMessages.noPermissionAction) })
 		return
 	}
-	const failedInstallationId =
-		installation.value?.status === 'failed' ? installation.value.id : null
-	if (failedInstallationId) dismissInstallation(failedInstallationId)
+	const failed = installation.value?.status === 'failed' ? installation.value.id : null
+	if (failed) dismissInstallation(failed)
 	beginInstallation({ type: 'unknown' })
-	updateServerData({ status: 'installing' })
 	try {
-		await client.archon.content_v1.repair(props.serverId, worldId.value)
+		await core.call(instanceContent.RepairContent, { params: { id: props.serverId } })
 	} catch (err) {
-		cancelOptimisticInstallation()
-		updateServerData({ status: 'available' })
 		addNotification({
 			type: 'error',
 			text: err instanceof Error ? err.message : 'Failed to retry installation',
 		})
+	} finally {
+		// A repair answers once done and runs no install job to end what began here.
+		cancelOptimisticInstallation()
 	}
 }
 
-const handleBackupProgress = (data: Archon.Websocket.v0.WSBackupProgressEvent) => {
-	handleWsBackupProgress(data)
-}
-
-const handleFilesystemOps = (data: Archon.Websocket.v0.WSFilesystemOpsEvent) => {
-	const allOps = data.all
-
-	if (JSON.stringify(fsOps.value) !== JSON.stringify(allOps)) {
-		fsOps.value = allOps
-	}
-
-	fsQueuedOps.value = fsQueuedOps.value.filter(
-		(queuedOp) => !allOps.some((x) => x.src === queuedOp.src),
-	)
-
-	const cancelled = allOps.filter((x) => x.state === 'cancelled')
-	Promise.all(
-		cancelled.map((x) =>
-			client.kyros.files_v0.modifyOperation(x.id, 'dismiss').catch((error) => {
-				console.error('Failed to dismiss cancelled operation:', error)
-			}),
-		),
-	)
-}
-
-type InstallationServerSnapshot = Pick<
-	Archon.Servers.v0.Server,
-	'loader' | 'loader_version' | 'mc_version'
->
-
-let installationServerSnapshot: InstallationServerSnapshot | null = null
-
-function applyInstallationTarget(current: ServerInstallationState) {
-	if (!serverData.value) return
-
-	if (!installationServerSnapshot) {
-		installationServerSnapshot = {
-			loader: serverData.value.loader,
-			loader_version: serverData.value.loader_version,
-			mc_version: serverData.value.mc_version,
-		}
-	}
-
-	const patch: Partial<Archon.Servers.v0.Server> = { status: 'installing' }
-	if (current.key.type === 'platform') {
-		patch.loader = formatLoaderLabel(current.key.platform) as Archon.Servers.v0.Loader
-		patch.loader_version = current.key.platform === 'vanilla' ? null : current.key.platform_version
-		patch.mc_version = current.key.game_version
-	}
-
-	if (
-		serverData.value.status === patch.status &&
-		(current.key.type !== 'platform' ||
-			(serverData.value.loader === patch.loader &&
-				serverData.value.loader_version === patch.loader_version &&
-				serverData.value.mc_version === patch.mc_version))
-	) {
-		return
-	}
-
-	void queryClient.cancelQueries({
-		queryKey: serverKeys.detail(props.serverId),
-		exact: true,
-	})
-	updateServerData(patch)
-}
-
-function restoreInstallationServerSnapshot() {
-	const snapshot = installationServerSnapshot
-	updateServerData({
-		...(snapshot ?? {}),
-		status: 'available',
-	})
-	installationServerSnapshot = null
-}
-
-const onReinstall = async (
-	potentialArgs: { loader?: string; lVersion?: string; mVersion?: string } | undefined,
-) => {
-	debug('[root.vue] onReinstall called with:', potentialArgs)
-
-	if (serverData.value?.flows?.intro) {
-		await client.archon.servers_v1.endIntro(props.serverId)
-		queryClient.invalidateQueries({ queryKey: serverKeys.detail(props.serverId) })
-	}
-
-	if (!serverData.value) return
-
-	if (
-		!installation.value ||
-		installation.value.status === 'complete' ||
-		installation.value.status === 'failed'
-	) {
-		if (potentialArgs?.loader && potentialArgs.mVersion) {
-			beginInstallation({
-				type: 'platform',
-				platform: potentialArgs.loader as Extract<
-					Archon.Websocket.v0.InstallProgressKey,
-					{ type: 'platform' }
-				>['platform'],
-				platform_version: potentialArgs.lVersion ?? '',
-				game_version: potentialArgs.mVersion,
-			})
-		} else {
-			beginInstallation({ type: 'unknown' })
-		}
-	}
-
-	modrinthServersConsole.clear()
-}
-
-const onReinstallFailed = () => {
-	debug('[root.vue] onReinstallFailed: reverting status to available')
-	cancelOptimisticInstallation()
-	restoreInstallationServerSnapshot()
-}
-
-function applyInstallationCompletion(key: ServerInstallationKey) {
-	const platformKey = key?.type === 'platform' ? key : null
-	const patch: Partial<Archon.Servers.v0.Server> = { status: 'available' }
-	if (platformKey) {
-		patch.loader = formatLoaderLabel(platformKey.platform) as Archon.Servers.v0.Loader
-		patch.loader_version = platformKey.platform === 'vanilla' ? null : platformKey.platform_version
-		patch.mc_version = platformKey.game_version
-	} else if (serverContent.value?.modloader && serverContent.value.game_version) {
-		patch.loader = formatLoaderLabel(serverContent.value.modloader) as Archon.Servers.v0.Loader
-		patch.mc_version = serverContent.value.game_version
-	}
-
-	debug('[root.vue] applyInstallationCompletion: patch:', patch)
-	updateServerData(patch)
-
-	const addonsQueries = queryClient.getQueriesData<Archon.Content.v1.Addons>({
-		queryKey: serverKeys.content(props.serverId),
-	})
-	for (const [key, data] of addonsQueries) {
-		if (!data || !platformKey) continue
-		queryClient.setQueryData(key, {
-			...data,
-			modloader: platformKey.platform === 'neoforge' ? 'neo_forge' : platformKey.platform,
-			modloader_version: platformKey.platform === 'vanilla' ? null : platformKey.platform_version,
-			game_version: platformKey.game_version,
-		})
-	}
-}
-
-async function invalidateAfterInstall() {
-	debug('[root.vue] invalidateAfterInstall: scheduling 2s delayed invalidation')
-	setTimeout(async () => {
-		try {
-			await Promise.all([
-				queryClient.invalidateQueries({ queryKey: serverKeys.detail(props.serverId) }),
-				queryClient.invalidateQueries({
-					queryKey: serverKeys.startup(props.serverId),
-				}),
-			])
-		} catch (err: unknown) {
-			console.error('Error refreshing data after installation:', err)
-		}
-	}, 2000)
-}
-
-let handledFailedInstallationId: string | null = null
+// An install that ends changes what the server runs.
 watch(
-	installation,
-	(current, previous) => {
-		if (!current) {
-			if (
-				isMounted.value &&
-				previous?.source === 'optimistic' &&
-				previous.status === 'pending' &&
-				serverData.value?.status === 'installing'
-			) {
-				restoreInstallationServerSnapshot()
-			}
-			return
+	() => installation.value?.status,
+	(status, before) => {
+		if (before && status !== before && (status === undefined || status === 'failed')) {
+			void queryClient.invalidateQueries({ queryKey: serverKeys.detail(props.serverId) })
+			void queryClient.invalidateQueries({ queryKey: serverKeys.startup(props.serverId) })
 		}
-		if (current.status === 'pending' || current.status === 'installing') {
-			handledFailedInstallationId = null
-			applyInstallationTarget(current)
-			return
-		}
-
-		if (current.status === 'failed') {
-			if (handledFailedInstallationId === current.id) return
-			handledFailedInstallationId = current.id
-			if (current.source === 'server') return
-			onReinstallFailed()
-			void invalidateAfterInstall()
-			return
-		}
-
-		dismissInstallation(current.id)
-		installationServerSnapshot = null
-		applyInstallationCompletion(current.key)
-		void invalidateAfterInstall()
 	},
-	{ flush: 'sync' },
 )
 
-const nodeAccessible = ref(true)
+const generalErrorDetails = computed(() => [
+	{ label: 'Server ID', value: props.serverId, type: 'inline' as const },
+	{ label: 'Timestamp', value: String(new Date().toISOString()), type: 'inline' as const },
+	{ label: 'Error Name', value: serverError.value?.name, type: 'inline' as const },
+	{ label: 'Error Message', value: serverError.value?.message, type: 'block' as const },
+	...(serverError.value?.stack
+		? [{ label: 'Stack Trace', value: serverError.value.stack, type: 'hidden' as const }]
+		: []),
+])
 
 const nodeUnavailableDetails = computed(() => [
-	{
-		label: 'Server ID',
-		value: props.serverId,
-		type: 'inline' as const,
-	},
-	{
-		label: 'Node',
-		value:
-			(serverError.value?.responseData as { hostname?: string } | undefined)?.hostname ??
-			serverData.value?.datacenter ??
-			'Unknown',
-		type: 'inline' as const,
-	},
+	{ label: 'Server ID', value: props.serverId, type: 'inline' as const },
+	{ label: 'Core', value: props.coreId, type: 'inline' as const },
 	{
 		label: 'Error message',
-		value: nodeAccessible.value
-			? (serverError.value?.message ?? 'Unknown')
-			: 'Unable to establish the node WebSocket connection.',
+		value: serverError.value?.message ?? 'Unknown',
 		type: 'block' as const,
 	},
 ])
-
-const suspendedDescription = computed(() => {
-	if (serverData.value?.suspension_reason === 'cancelled') {
-		return 'Your subscription has been cancelled.\nContact Modrinth Support if you believe this is an error.'
-	}
-	if (serverData.value?.suspension_reason) {
-		return `Your server has been suspended: ${serverData.value.suspension_reason}\nContact Modrinth Support if you believe this is an error.`
-	}
-	return 'Your server has been suspended.\nContact Modrinth Support if you believe this is an error.'
-})
-
-const generalErrorDetails = computed(() => [
-	{
-		label: 'Server ID',
-		value: props.serverId,
-		type: 'inline' as const,
-	},
-	{
-		label: 'Timestamp',
-		value: String(new Date().toISOString()),
-		type: 'inline' as const,
-	},
-	{
-		label: 'Error Name',
-		value: serverError.value?.name,
-		type: 'inline' as const,
-	},
-	{
-		label: 'Error Message',
-		value: serverError.value?.message,
-		type: 'block' as const,
-	},
-	...(serverError.value?.originalError
-		? [
-				{
-					label: 'Original Error',
-					value: String(serverError.value.originalError),
-					type: 'hidden' as const,
-				},
-			]
-		: []),
-	...(serverError.value?.stack
-		? [
-				{
-					label: 'Stack Trace',
-					value: serverError.value.stack,
-					type: 'hidden' as const,
-				},
-			]
-		: []),
-])
-
-const suspendedAction = computed(() => {
-	const ownerId = serverData.value?.owner_id
-	if (isSiteAdmin.value && ownerId) {
-		return {
-			label: formatMessage(suspensionMessages.goToAdminBilling),
-			onClick: () => props.navigateToAdminBilling?.(ownerId),
-			color: 'brand' as const,
-		}
-	}
-	return {
-		label: 'Go to billing settings',
-		onClick: () => props.navigateToBilling?.(),
-		color: 'brand' as const,
-	}
-})
 
 const generalErrorAction = computed(() => ({
 	label: 'Go back to all servers',
@@ -1381,7 +550,7 @@ const generalErrorAction = computed(() => ({
 }))
 
 const nodeUnavailableAction = computed(() => ({
-	label: client.selfHostedHosting ? 'Try again' : 'Reload',
+	label: 'Try again',
 	onClick: () => props.reloadPage(),
 	color: 'brand' as const,
 	disabled: false,
@@ -1392,122 +561,20 @@ function openServerSettingsModal(tabId?: ServerSettingsTabId) {
 	serverSettingsModal.value?.show({ serverId: props.serverId, tabId })
 }
 
-function handleBrowseModpacks(args: {
-	serverId: string
-	worldId: string | null
-	from: 'reset-server' | 'onboarding'
-}) {
+function handleBrowseModpacks(args: { serverId: string; from: 'reset-server' | 'onboarding' }) {
 	props.browseModpacks?.(args)
-}
-
-function handleBrowseContent(args: {
-	serverId: string
-	worldId: string | null
-	type: 'mod' | 'plugin' | 'datapack'
-}) {
-	props.browseContent?.(args)
 }
 
 provideServerSettingsModal({
 	openServerSettings: (options) => openServerSettingsModal(options?.tabId),
-	browseServerContent: (args) => handleBrowseContent(args),
+	browseServerContent: (args) => props.browseContent?.(args),
 })
 
-function safeStringify(obj: unknown, indent = ' '): string {
-	const seen = new WeakSet()
-	return JSON.stringify(
-		obj,
-		(_key, value) => {
-			if (typeof value === 'object' && value !== null) {
-				if (seen.has(value)) {
-					return '[Circular]'
-				}
-				seen.add(value)
-			}
-			return value
-		},
-		indent,
-	)
-}
-
-function initializeServer() {
-	if (serverData.value?.status === 'suspended') {
-		isLoading.value = false
-		return
-	}
-
-	if (serverData.value?.node === null) {
-		isLoading.value = false
-		return
-	}
-
-	if (serverError.value) {
-		isLoading.value = false
-	} else {
-		void connectSocket(props.serverId, {
-			extraSubscriptions: (targetServerId) => [
-				client.archon.sockets.on(targetServerId, 'backup-progress', handleBackupProgress),
-				client.archon.sockets.on(targetServerId, 'filesystem-ops', handleFilesystemOps),
-				// A Core install that fails before reporting any progress is only visible as the
-				// content's `error`, so the content is fetched again to show it.
-				client.archon.sockets.on(targetServerId, 'installation-result', () =>
-					queryClient.invalidateQueries({ queryKey: serverKeys.content(props.serverId) }),
-				),
-			],
-		})
-			.then((connected) => {
-				nodeAccessible.value = connected
-				if (connected && cachedWsState?.consoleLines?.length) {
-					modrinthServersConsole.clear()
-					modrinthServersConsole.addLines(cachedWsState.consoleLines)
-				}
-			})
-			.finally(() => {
-				isLoading.value = false
-			})
-	}
-
-	if (serverData.value?.flows?.intro && serverProject.value) {
-		client.archon.servers_v1.endIntro(props.serverId).then(() => {
-			queryClient.invalidateQueries({ queryKey: serverKeys.detail(props.serverId) })
-		})
-	}
-}
-
-const cleanup = () => {
-	isMounted.value = false
-
-	saveWsStateToCache()
-
-	cleanupCoreRuntime(props.serverId)
-	disconnectPanelSync()
-
-	isReconnecting.value = false
-	isLoading.value = true
-
-	DOMPurify.removeHook('afterSanitizeAttributes')
+function safeStringify(obj: unknown): string {
+	return JSON.stringify(obj, null, ' ')
 }
 
 onMounted(() => {
-	isMounted.value = true
-
-	void resolveViewerOnce()
-		.then(({ userRole }) => {
-			viewerRole.value = userRole
-		})
-		.catch((error) => console.error('Failed to resolve viewer:', error))
-
-	if (serverData.value) {
-		initializeServer()
-	} else {
-		const stopWatch = watch(serverData, (data) => {
-			if (data) {
-				stopWatch()
-				initializeServer()
-			}
-		})
-	}
-
 	DOMPurify.addHook(
 		'afterSanitizeAttributes',
 		(node: {
@@ -1521,11 +588,6 @@ onMounted(() => {
 		},
 	)
 
-	loadTallyScript()
-	if (surveyNotice.value) {
-		showSurvey()
-	}
-
 	if (route.query.openSettings) {
 		const tabId = route.query.openSettings as ServerSettingsTabId
 		router.replace({ query: { ...route.query, openSettings: undefined } })
@@ -1537,7 +599,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-	cleanup()
+	DOMPurify.removeHook('afterSanitizeAttributes')
 })
 </script>
 
@@ -1556,25 +618,5 @@ onUnmounted(() => {
 
 .server-action-buttons-anim {
 	animation: server-action-buttons-anim 0.2s ease-out;
-}
-
-.server-panel-pending .server-stagger-item {
-	opacity: 0;
-}
-
-.server-panel-revealing .server-stagger-item {
-	animation: serverReveal 0.4s ease-out both;
-	animation-delay: calc(var(--si) * 80ms);
-}
-
-@keyframes serverReveal {
-	from {
-		opacity: 0;
-		transform: translateY(12px);
-	}
-	to {
-		opacity: 1;
-		transform: translateY(0);
-	}
 }
 </style>

@@ -1,4 +1,4 @@
-import { backend } from '@amberite/contracts'
+import { backend } from '@amberite/contracts/backend'
 
 import { accountRoutes } from './accounts'
 import { ApiError, errorResponse, routePath } from './common/http'
@@ -31,7 +31,7 @@ async function serveLabrinth(request: Request, env: Env): Promise<Response | nul
 	if (response || !path.startsWith('/auth/')) return response
 	throw new ApiError(
 		501,
-		'unsupported_operation',
+		'unsupported',
 		'This authentication method has not been configured on this backend',
 	)
 }
@@ -87,7 +87,7 @@ export default {
 			response.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS')
 			response.headers.set(
 				'Access-Control-Allow-Headers',
-				'Authorization, Content-Type, Range, X-Local-Dev-Secret, X-Requested-With, X-Panel-Version',
+				'Authorization, Content-Type, Range, X-Local-Dev-Secret, X-Requested-With',
 			)
 			response.headers.set('Access-Control-Expose-Headers', 'Content-Range, Accept-Ranges, ETag')
 		}

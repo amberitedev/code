@@ -14,12 +14,12 @@ use contracts::{
 
 use super::{CoreState, internal};
 use crate::{
-    access::{Caller, Permission, require_owner},
+    access::{Caller, require_owner},
     network::{
         diagnosis::{Case, Mark},
         forward::{self, Report},
     },
-    servers::{ServerError, memory},
+    servers::{ServerError, memory, server_rows},
 };
 
 impl From<Report> for ReachabilityReport {
@@ -47,7 +47,7 @@ impl From<Report> for ReachabilityReport {
                 .collect(),
             found: diagnosis.found,
             fix: diagnosis.fix,
-            checked_at: report.at,
+            checked_at: crate::access::at(report.at),
         }
     }
 }
@@ -68,10 +68,10 @@ async fn insight(
         players: live.players.into_iter().collect(),
         players_checked: live.players_checked,
         frozen: live.frozen,
-        answered_at: live.answered_at,
+        answered_at: live.answered_at.map(crate::access::at),
         crash_restart_stopped: state.servers.gave_up(id),
         last_crash: last_crash.map(|(at, exit_code, last_lines)| Crash {
-            at,
+            at: crate::access::at(at),
             exit_code,
             last_lines: last_lines.unwrap_or_default(),
         }),
@@ -85,24 +85,27 @@ pub async fn get(
     request: Req<GetInsight>,
 ) -> Result<Json<ServerInsight>, ApiError> {
     let id = request.params.id;
-    state.access.require(&caller, &id, Permission::View).await?;
+    state.access.require(&caller, &id).await?;
     Ok(Json(insight(&state, &id).await?))
 }
 
+/// A long op; `GetInsight` has what it found.
 pub async fn check(
     caller: Caller,
     State(state): State<Arc<CoreState>>,
-    request: Req<CheckReachability>,
-) -> Result<Json<ServerInsight>, ApiError> {
-    let id = request.params.id;
-    state.access.require(&caller, &id, Permission::Edit).await?;
+    Req { params, body, .. }: Req<CheckReachability>,
+) -> Result<axum::http::StatusCode, ApiError> {
+    let id = params.id;
+    state.access.require(&caller, &id).await?;
     if state.servers.phase(&id).is_none() {
         return Err(ServerError::NotRunning.into());
     }
-    Arc::clone(&state.network)
-        .check(Arc::clone(&state.servers), id.clone())
-        .await;
-    Ok(Json(insight(&state, &id).await?))
+    let (network, servers) =
+        (Arc::clone(&state.network), Arc::clone(&state.servers));
+    super::ops::start(&state, body.op, async move {
+        network.check(servers, id).await;
+        Ok(())
+    })
 }
 
 pub async fn machine(
@@ -111,8 +114,13 @@ pub async fn machine(
     _: Req<GetMachine>,
 ) -> Result<Json<Machine>, ApiError> {
     require_owner(&caller)?;
-    let memory_mb = memory::machine_mb();
-    let assigned_mb = memory::assigned_mb(&state.db).await.map_err(internal)?;
+    let memory_mb = memory::machine_mb().await;
+    let assigned_mb = server_rows::list(&state.db, &state.engine)
+        .await
+        .map_err(internal)?
+        .iter()
+        .map(|server| server.memory_mb)
+        .sum::<i64>();
     let warning = memory_mb
         .filter(|&machine| assigned_mb > machine as i64)
         .map(|machine| {
@@ -122,6 +130,8 @@ pub async fn machine(
         });
     Ok(Json(Machine {
         memory_mb,
+        cpus: std::thread::available_parallelism()
+            .map_or(1, |cpus| u32::try_from(cpus.get()).unwrap_or(u32::MAX)),
         assigned_mb,
         warning,
         api_reachability: state.network.report(forward::CORE).map(Into::into),

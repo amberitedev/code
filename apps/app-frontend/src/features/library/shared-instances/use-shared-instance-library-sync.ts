@@ -1,9 +1,10 @@
+import { localSharing } from '@amberite/contracts/app'
 import { injectAuth } from '@modrinth/ui'
 import { useQueryClient } from '@tanstack/vue-query'
 import { computed, type Ref, watch } from 'vue'
 
 import { useHiddenInstances } from '@/features/library/hidden-instances/use-hidden-instances'
-import { cacheSharedInstanceLibrary } from '@/platform/app-lib/shared-instances/commands'
+import { apiClient } from '@/platform/modrinth-client'
 
 import {
 	getUninstalledSharedInstanceId,
@@ -42,9 +43,9 @@ export function useSharedInstanceLibrarySync({
 				sharedInstanceLibraryKeys.cached(currentUserId),
 				sharedInstances.value,
 			)
-			void cacheSharedInstanceLibrary(summaries).catch((error) =>
-				console.warn('Failed to cache shared instance library:', error),
-			)
+			void apiClient.local
+				.call(localSharing.setCachedSharedLibrary, { body: summaries })
+				.catch((error) => console.warn('Failed to cache shared instance library:', error))
 		},
 	)
 

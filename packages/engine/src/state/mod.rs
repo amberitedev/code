@@ -47,10 +47,9 @@ mod sessions;
 pub use self::sessions::*;
 
 pub mod db;
-pub(crate) mod db_backup;
+pub mod db_backup;
 
 pub mod attached_world_data;
-pub mod server_join_log;
 
 pub struct EngineConfig {
     pub data_dir: PathBuf,
@@ -64,12 +63,17 @@ pub struct EngineConfig {
     pub events: EventSink,
     pub accounts: Option<AccountEndpoints>,
     pub hooks: Option<Arc<dyn InstanceHooks>>,
+    /// What every request from this process sends as its user agent; the first engine sets it.
+    pub user_agent: String,
 }
 
 /// Host work the engine's own instance changes wait on, the host's view of an instance's server
 /// list, and the saved secrets logs hide. The App keeps synced options, packs and servers here;
 /// the defaults are an engine with nothing synced or saved, which edits `servers.dat` directly.
-pub trait InstanceHooks: std::any::Any + Send + Sync {
+pub trait InstanceHooks: Send + Sync {
+    /// Called once as the engine is built, before any other hook, with the engine they serve.
+    fn bind(&self, _engine: std::sync::Weak<Engine>) {}
+
     fn secrets<'a>(
         &'a self,
         _engine: &'a Engine,
@@ -407,7 +411,9 @@ impl Engine {
             events,
             accounts,
             hooks,
+            user_agent,
         } = config;
+        let _ = crate::USER_AGENT.set(user_agent);
         let directories = DirectoryInfo::init(
             data_dir,
             instances_dir,
@@ -443,24 +449,28 @@ impl Engine {
             Side::Client => None,
         };
 
-        let state = Arc::new(Self {
-            side,
-            directories,
-            content_store,
-            fetch_semaphore,
-            io_semaphore,
-            api_semaphore,
-            installs: Arc::new(Installs::new()),
-            instance_locks: InstanceLocks::default(),
-            publish_reports: Default::default(),
-            uploads: Default::default(),
-            process_manager: ProcessManager::new(),
-            pool,
-            file_watcher,
-            events,
-            sessions: Sessions::new(accounts),
-            pack_client,
-            hooks: hooks.unwrap_or_else(|| Arc::new(NoHooks)),
+        let hooks = hooks.unwrap_or_else(|| Arc::new(NoHooks));
+        let state = Arc::new_cyclic(|engine| {
+            hooks.bind(engine.clone());
+            Self {
+                side,
+                directories,
+                content_store,
+                fetch_semaphore,
+                io_semaphore,
+                api_semaphore,
+                installs: Arc::new(Installs::new(side)),
+                instance_locks: InstanceLocks::default(),
+                publish_reports: Default::default(),
+                uploads: Default::default(),
+                process_manager: ProcessManager::new(),
+                pool,
+                file_watcher,
+                events,
+                sessions: Sessions::new(accounts),
+                pack_client,
+                hooks,
+            }
         });
 
         state.content_store.recover(None).await?;
@@ -624,11 +634,30 @@ pub(crate) mod tests {
             events: EventSink::new(),
             accounts: None,
             hooks: None,
+            user_agent: "engine-test".to_owned(),
         }
     }
 
     pub(crate) async fn engine(dir: PathBuf) -> Arc<Engine> {
         Engine::new(config(dir)).await.unwrap()
+    }
+
+    /// Make `link` a link to the folder `target`: a symlink on Unix, a junction on Windows, which
+    /// needs no privilege.
+    pub(crate) fn link_dir(target: &Path, link: &Path) {
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(target, link).unwrap();
+        #[cfg(windows)]
+        assert!(
+            std::process::Command::new("cmd")
+                .args(["/C", "mklink", "/J"])
+                .arg(link)
+                .arg(target)
+                .output()
+                .unwrap()
+                .status
+                .success()
+        );
     }
 
     pub(super) fn write(path: &Path) {

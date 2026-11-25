@@ -5,48 +5,24 @@ use std::{
 
 use axum::extract::State;
 use contracts::{ApiError, Empty, ErrorCode, Json, server::Req};
-use enumset::EnumSet;
 
 use super::api_error;
 use crate::{
     Engine,
-    access::{Edit, EngineAccess, InstanceAccess, Owner, View},
+    access::{EngineAccess, InstanceAccess},
     endpoints::worlds::{
         AddInstanceServer, BackupWorld, DeleteWorld, DesyncInstanceServer,
         EditInstanceServer, EnsureManagedInstanceServer,
         GetInstanceProtocolVersion, GetServerStatus, GetSingleplayerWorld,
-        ListInstanceWorlds, ListRecentWorlds, RemoveInstanceServer,
-        RenameWorld, ResetWorldIcon, SetWorldDisplayStatus,
+        RemoveInstanceServer, RenameWorld, ResetWorldIcon,
+        SetWorldDisplayStatus,
     },
     instance::get_full_path,
-    worlds::{
-        self, DisplayStatus, ProtocolVersion, ServerStatus, World,
-        WorldWithInstance,
-    },
+    worlds::{self, ProtocolVersion, ServerStatus, World},
 };
 
-pub async fn list_recent_worlds(
-    State(engine): State<Arc<Engine>>,
-    _: EngineAccess<Owner>,
-    request: Req<ListRecentWorlds>,
-) -> Result<Json<Vec<WorldWithInstance>>, ApiError> {
-    let display_statuses = match request.query.display_statuses {
-        Some(statuses) => serde_json::from_str::<Vec<DisplayStatus>>(&statuses)
-            .map_err(|error| {
-                ApiError::new(ErrorCode::InvalidInput, error.to_string())
-            })?
-            .into_iter()
-            .collect(),
-        None => EnumSet::all(),
-    };
-    worlds::get_recent_worlds(&engine, request.query.limit, display_statuses)
-        .await
-        .map(Json)
-        .map_err(api_error)
-}
-
 pub async fn get_server_status(
-    _: EngineAccess<Owner>,
+    _: EngineAccess,
     request: Req<GetServerStatus>,
 ) -> Result<Json<ServerStatus>, ApiError> {
     let protocol_version =
@@ -63,20 +39,9 @@ pub async fn get_server_status(
         .map_err(api_error)
 }
 
-pub async fn list_instance_worlds(
-    State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<View>,
-    _: Req<ListInstanceWorlds>,
-) -> Result<Json<Vec<World>>, ApiError> {
-    worlds::get_instance_worlds(&engine, &instance.id)
-        .await
-        .map(Json)
-        .map_err(api_error)
-}
-
 pub async fn set_world_display_status(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<SetWorldDisplayStatus>,
 ) -> Result<Empty, ApiError> {
     worlds::set_world_display_status(
@@ -93,7 +58,7 @@ pub async fn set_world_display_status(
 
 pub async fn get_instance_protocol_version(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<View>,
+    instance: InstanceAccess,
     _: Req<GetInstanceProtocolVersion>,
 ) -> Result<Json<Option<ProtocolVersion>>, ApiError> {
     worlds::get_instance_protocol_version(&engine, &instance.id)
@@ -104,7 +69,7 @@ pub async fn get_instance_protocol_version(
 
 pub async fn get_singleplayer_world(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<View>,
+    instance: InstanceAccess,
     request: Req<GetSingleplayerWorld>,
 ) -> Result<Json<World>, ApiError> {
     let world = world_folder(&request.params.world)?;
@@ -116,7 +81,7 @@ pub async fn get_singleplayer_world(
 
 pub async fn delete_world(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<DeleteWorld>,
 ) -> Result<Empty, ApiError> {
     let path = get_full_path(&engine, &instance.id)
@@ -130,7 +95,7 @@ pub async fn delete_world(
 
 pub async fn rename_world(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<RenameWorld>,
 ) -> Result<Empty, ApiError> {
     let path = get_full_path(&engine, &instance.id)
@@ -145,7 +110,7 @@ pub async fn rename_world(
 
 pub async fn reset_world_icon(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<ResetWorldIcon>,
 ) -> Result<Empty, ApiError> {
     let path = get_full_path(&engine, &instance.id)
@@ -159,7 +124,7 @@ pub async fn reset_world_icon(
 
 pub async fn backup_world(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<BackupWorld>,
 ) -> Result<Json<u64>, ApiError> {
     let path = get_full_path(&engine, &instance.id)
@@ -173,7 +138,7 @@ pub async fn backup_world(
 
 pub async fn add_instance_server(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<AddInstanceServer>,
 ) -> Result<Json<usize>, ApiError> {
     let server = request.body;
@@ -193,7 +158,7 @@ pub async fn add_instance_server(
 
 pub async fn ensure_managed_instance_server(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<EnsureManagedInstanceServer>,
 ) -> Result<Empty, ApiError> {
     worlds::ensure_managed_server_in_instance(
@@ -210,8 +175,8 @@ pub async fn ensure_managed_instance_server(
 /// Needs Owner over the engine: desyncing can drop the server from every participating instance.
 pub async fn desync_instance_server(
     State(engine): State<Arc<Engine>>,
-    _: EngineAccess<Owner>,
-    instance: InstanceAccess<Edit>,
+    _: EngineAccess,
+    instance: InstanceAccess,
     request: Req<DesyncInstanceServer>,
 ) -> Result<Empty, ApiError> {
     engine
@@ -229,7 +194,7 @@ pub async fn desync_instance_server(
 
 pub async fn edit_instance_server(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<EditInstanceServer>,
 ) -> Result<Empty, ApiError> {
     let server = request.body;
@@ -248,7 +213,7 @@ pub async fn edit_instance_server(
 
 pub async fn remove_instance_server(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<RemoveInstanceServer>,
 ) -> Result<Empty, ApiError> {
     worlds::remove_server_from_instance(

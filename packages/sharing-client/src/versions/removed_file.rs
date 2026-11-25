@@ -1,19 +1,10 @@
 use contracts::backend::sharing::RemovedFile;
+use contracts::rules::{REMOVED_FILE_FOLDERS, REMOVED_FILE_SUFFIXES};
 
 /// A removed file the App and the backend would refuse.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("invalid removed modpack file")]
 pub struct InvalidRemovedFile;
-
-/// The folders a removed path may name.
-const PARENTS: [&str; 5] = [
-    "mods",
-    "plugins",
-    "datapacks",
-    "shaderpacks",
-    "resourcepacks",
-];
-const SUFFIXES: [&str; 4] = [".jar", ".zip", ".jar.disabled", ".zip.disabled"];
 
 /// `parent/filename` as a removed path, or `None` when it is not one: one plain file name of an
 /// addon archive in an addon folder.
@@ -55,10 +46,12 @@ impl RemovedFileRules for RemovedFile {
         let Self::Path { parent, filename } = self else {
             return Ok(());
         };
-        let valid = PARENTS.contains(&parent.as_str())
+        let valid = REMOVED_FILE_FOLDERS.contains(&parent.as_str())
             && path_util::is_safe_file_name(filename)
             && !filename.contains(char::is_control)
-            && SUFFIXES.iter().any(|suffix| filename.ends_with(suffix));
+            && REMOVED_FILE_SUFFIXES
+                .iter()
+                .any(|suffix| filename.ends_with(suffix));
         valid.then_some(()).ok_or(InvalidRemovedFile)
     }
 }

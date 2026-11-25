@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Archon } from '@modrinth/api-client'
+import type { OperationState } from '@amberite/contracts/core'
 import {
 	CheckCircleIcon,
 	InfoIcon,
@@ -11,10 +11,9 @@ import Admonition from '#ui/components/base/Admonition.vue'
 import { Button } from '#ui/components/base/buttons'
 import type { MessageDescriptor } from '#ui/composables/i18n'
 import { defineMessages, useVIntl } from '#ui/composables/i18n'
-import { injectModrinthClient } from '#ui/providers'
 import { commonMessages } from '#ui/utils/common-messages'
 
-export type AdmonitionDisplayState = 'ongoing' | Archon.BackupsQueue.v1.BackupQueueState
+export type AdmonitionDisplayState = 'ongoing' | OperationState
 
 export type BackupAdmonitionEntry = {
 	key: string
@@ -23,7 +22,6 @@ export type BackupAdmonitionEntry = {
 	state: AdmonitionDisplayState
 	progress: number
 	operationId: number | null
-	syntheticLegacy: boolean
 	name?: string
 	timestamp?: string
 	error?: string | null
@@ -45,7 +43,6 @@ defineEmits<{
 }>()
 
 const { formatMessage } = useVIntl()
-const client = injectModrinthClient()
 
 type UiPhase = 'queued' | 'in_progress' | 'failed' | 'timed_out' | 'cancelled' | 'completed'
 
@@ -56,7 +53,6 @@ function resolveUiPhase(item: BackupAdmonitionEntry): UiPhase | null {
 		case 'ongoing':
 			return 'in_progress'
 		case 'failed':
-		case 'timed_out':
 		case 'cancelled':
 		case 'completed':
 			return item.state
@@ -66,13 +62,13 @@ function resolveUiPhase(item: BackupAdmonitionEntry): UiPhase | null {
 }
 
 function getAdmonitionType(state: AdmonitionDisplayState): 'info' | 'critical' | 'success' {
-	if (state === 'failed' || state === 'timed_out') return 'critical'
+	if (state === 'failed') return 'critical'
 	if (state === 'completed') return 'success'
 	return 'info'
 }
 
 function getIcon(state: AdmonitionDisplayState) {
-	if (state === 'failed' || state === 'timed_out') return TriangleAlertIcon
+	if (state === 'failed') return TriangleAlertIcon
 	if (state === 'completed') return CheckCircleIcon
 	return InfoIcon
 }
@@ -90,7 +86,7 @@ function isTerminal(item: BackupAdmonitionEntry) {
 }
 
 function canRetry(item: BackupAdmonitionEntry) {
-	return !item.migration && (item.state === 'failed' || item.state === 'timed_out')
+	return !item.migration && item.state === 'failed'
 }
 
 function canCancel(item: BackupAdmonitionEntry) {
@@ -98,7 +94,7 @@ function canCancel(item: BackupAdmonitionEntry) {
 }
 
 function hasErrorDetail(item: BackupAdmonitionEntry) {
-	return !!item.error && (item.state === 'failed' || item.state === 'timed_out')
+	return !!item.error && item.state === 'failed'
 }
 
 const messages = defineMessages({
@@ -182,11 +178,6 @@ const messages = defineMessages({
 		id: 'servers.backups.admonition.backup-failed.title',
 		defaultMessage: 'Backup failed',
 	},
-	backupFailedDescription: {
-		id: 'servers.backups.admonition.backup-failed.description',
-		defaultMessage:
-			'Something went wrong while creating {backupName}. Please try again or contact support if the issue continues.',
-	},
 	backupFailedSelfHostedDescription: {
 		id: 'servers.backups.admonition.backup-failed.self-hosted-description',
 		defaultMessage: 'Something went wrong while creating {backupName}. Please try again.',
@@ -194,11 +185,6 @@ const messages = defineMessages({
 	backupTimedOutTitle: {
 		id: 'servers.backups.admonition.backup-timed-out.title',
 		defaultMessage: 'Backup timed out',
-	},
-	backupTimedOutDescription: {
-		id: 'servers.backups.admonition.backup-timed-out.description',
-		defaultMessage:
-			'Creating {backupName} timed out. You can try again or contact support if the issue continues.',
 	},
 	backupTimedOutSelfHostedDescription: {
 		id: 'servers.backups.admonition.backup-timed-out.self-hosted-description',
@@ -248,11 +234,6 @@ const messages = defineMessages({
 		id: 'servers.backups.admonition.restore-failed.title',
 		defaultMessage: 'Restore failed',
 	},
-	restoreFailedDescription: {
-		id: 'servers.backups.admonition.restore-failed.description',
-		defaultMessage:
-			'Something went wrong while restoring from {backupName}. Please try again or contact support if the issue continues.',
-	},
 	restoreFailedSelfHostedDescription: {
 		id: 'servers.backups.admonition.restore-failed.self-hosted-description',
 		defaultMessage: 'Something went wrong while restoring from {backupName}. Please try again.',
@@ -260,11 +241,6 @@ const messages = defineMessages({
 	restoreTimedOutTitle: {
 		id: 'servers.backups.admonition.restore-timed-out.title',
 		defaultMessage: 'Restore timed out',
-	},
-	restoreTimedOutDescription: {
-		id: 'servers.backups.admonition.restore-timed-out.description',
-		defaultMessage:
-			'Restoring from {backupName} timed out. You can try again or contact support if the issue continues.',
 	},
 	restoreTimedOutSelfHostedDescription: {
 		id: 'servers.backups.admonition.restore-timed-out.self-hosted-description',
@@ -301,8 +277,8 @@ const restoreTitles: Record<UiPhase, MessageDescriptor> = {
 const createDescriptions: Record<UiPhase, MessageDescriptor> = {
 	queued: messages.backupQueuedDescription,
 	in_progress: messages.creatingBackupDescription,
-	failed: messages.backupFailedDescription,
-	timed_out: messages.backupTimedOutDescription,
+	failed: messages.backupFailedSelfHostedDescription,
+	timed_out: messages.backupTimedOutSelfHostedDescription,
 	cancelled: messages.backupCancelledDescription,
 	completed: messages.backupCompletedDescription,
 }
@@ -310,23 +286,10 @@ const createDescriptions: Record<UiPhase, MessageDescriptor> = {
 const restoreDescriptions: Record<UiPhase, MessageDescriptor> = {
 	queued: messages.restoreQueuedDescription,
 	in_progress: messages.restoringBackupDescription,
-	failed: messages.restoreFailedDescription,
-	timed_out: messages.restoreTimedOutDescription,
-	cancelled: messages.restoreCancelledDescription,
-	completed: messages.restoreSuccessfulDescription,
-}
-
-// A self-hosted Core has no support to contact.
-const selfHostedCreateDescriptions: Record<UiPhase, MessageDescriptor> = {
-	...createDescriptions,
-	failed: messages.backupFailedSelfHostedDescription,
-	timed_out: messages.backupTimedOutSelfHostedDescription,
-}
-
-const selfHostedRestoreDescriptions: Record<UiPhase, MessageDescriptor> = {
-	...restoreDescriptions,
 	failed: messages.restoreFailedSelfHostedDescription,
 	timed_out: messages.restoreTimedOutSelfHostedDescription,
+	cancelled: messages.restoreCancelledDescription,
+	completed: messages.restoreSuccessfulDescription,
 }
 
 function migrationMessages(
@@ -367,13 +330,7 @@ function getDescription(item: BackupAdmonitionEntry): string {
 	if (item.migration) {
 		return formatMessage(migrationMessages(phase, item.migration.restoring)[1], { backupName })
 	}
-	const table = client.selfHostedHosting
-		? item.type === 'create'
-			? selfHostedCreateDescriptions
-			: selfHostedRestoreDescriptions
-		: item.type === 'create'
-			? createDescriptions
-			: restoreDescriptions
+	const table = item.type === 'create' ? createDescriptions : restoreDescriptions
 	return formatMessage(table[phase], { backupName })
 }
 </script>

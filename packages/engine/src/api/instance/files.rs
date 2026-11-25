@@ -95,13 +95,16 @@ async fn local_destination(
 
 /// Lowercased paths of an instance's managed content, and every directory
 /// containing it, which the Files tab must not write.
-struct ManagedPaths {
+pub(crate) struct ManagedPaths {
     files: HashSet<String>,
     directories: HashSet<String>,
 }
 
 impl ManagedPaths {
-    async fn load(state: &Engine, instance_id: &str) -> crate::Result<Self> {
+    pub(crate) async fn load(
+        state: &Engine,
+        instance_id: &str,
+    ) -> crate::Result<Self> {
         let bindings =
             content_store::instance_storage(&state.pool, instance_id).await?;
         let bound = bindings
@@ -132,7 +135,7 @@ impl ManagedPaths {
         Ok(managed)
     }
 
-    fn ensure_writable(&self, path: &str) -> crate::Result<()> {
+    pub(crate) fn ensure_writable(&self, path: &str) -> crate::Result<()> {
         if path
             .split('/')
             .next()
@@ -243,6 +246,7 @@ impl InstanceFileWriter {
     }
 }
 
+// The Files tab uses `routes/files/sandboxed.rs`; these stay as upstream has them.
 pub async fn list_instance_files(
     state: &Engine,
     instance_id: &str,

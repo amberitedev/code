@@ -90,6 +90,7 @@
 </template>
 
 <script setup lang="ts">
+import type { ContentItem as EngineContentItem } from '@amberite/contracts/engine'
 import type { Labrinth } from '@modrinth/api-client'
 import { ClipboardCopyIcon, FolderOpenIcon, LockIcon, LockOpenIcon } from '@modrinth/assets'
 import {
@@ -104,6 +105,7 @@ import {
 	dedupeManagedContentItems,
 	defineMessages,
 	injectNotificationManager,
+	type InstanceContent,
 	type ManagedContentData,
 	ManagedContentModal,
 	type ManagedContentModalState,
@@ -115,10 +117,11 @@ import {
 	UnknownFileWarningModal,
 	type UpdateAllSelection,
 	useDebugLogger,
+	useInstanceContent,
 	useVIntl,
 	versionChangesGameVersion,
 } from '@modrinth/ui'
-import { queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
+import { useMutation, useQueryClient } from '@tanstack/vue-query'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -131,21 +134,12 @@ import { useAppEvent } from '@/composables/use-app-event'
 import { useAppSettings } from '@/composables/use-app-settings.ts'
 import { trackEvent } from '@/helpers/analytics'
 import { get_project_versions, get_version, get_version_many } from '@/helpers/cache.js'
-import { install_bulk_update_content } from '@/helpers/install'
 import {
 	add_project_from_path,
-	edit,
-	get_linked_modpack_content,
 	get_shared_instance_publish_preview,
 	getInstanceIconUrl,
 	is_file_on_modrinth,
-	remove_project,
-	set_project_locked,
-	switch_project_version_with_dependencies,
-	toggle_disable_project,
-	update_managed_modrinth_version,
 } from '@/helpers/instance'
-import { type InstanceContentData, loadInstanceContentData } from '@/helpers/instance-content'
 import { listenNativeDragDrop } from '@/helpers/native-drag-drop'
 import { get as getSettings, set as setSettings } from '@/helpers/settings'
 import { set_synced_pack_enabled, syncedPackKeys } from '@/helpers/synced-packs'
@@ -156,7 +150,7 @@ import { openUrl } from '@/platform/opener'
 import { injectContentInstall } from '@/providers/content-install'
 
 import { injectInstancePage } from '../instance-context'
-import { instanceContentQueryOptions, instanceKeys } from '../query-options'
+import { instanceKeys, localInstanceContent } from '../query-options'
 import { injectSharedInstance } from '../shared-instance-context'
 
 const messages = defineMessages({
@@ -239,14 +233,12 @@ const {
 	canUpdateContent: canUpdateProject,
 } = managedContentPolicy
 
-const contentQuery = useQuery(
-	computed(() =>
-		queryOptions({
-			...instanceContentQueryOptions(instancePage.instanceId.value),
-			enabled: !!instancePage.instanceId.value,
-		}),
-	),
-)
+const content = useInstanceContent({
+	...localInstanceContent(instancePage.instanceId),
+	packContentEnabled: () =>
+		!!instance.value?.id && !!instance.value?.link && instance.value.install_stage === 'installed',
+})
+const contentQuery = content.content
 const loading = ref(contentQuery.data.value === undefined)
 const projects = ref<ContentItem[]>([])
 
@@ -363,17 +355,7 @@ const unknownFileName = ref('')
 let resolveUnknownFileConfirmation: ((confirmed: boolean) => void) | null = null
 
 const modpackContentQueryKey = computed(() => instanceKeys.linkedContent(instance.value.id))
-const modpackContentQuery = useQuery({
-	queryKey: modpackContentQueryKey,
-	networkMode: 'always',
-	queryFn: () => get_linked_modpack_content(instance.value.id),
-	enabled: computed(
-		() =>
-			!!instance.value?.id &&
-			!!instance.value?.link &&
-			instance.value.install_stage === 'installed',
-	),
-})
+const modpackContentQuery = content.packContent
 
 const hasSharedManagedContent = computed(() => {
 	if (instance.value.shared_instance?.role === 'owner') return false
@@ -387,7 +369,7 @@ const hasSharedManagedContent = computed(() => {
 })
 
 const managedContentItems = computed(() => {
-	const linkedContent = instance.value.link ? (modpackContentQuery.data.value ?? []) : []
+	const linkedContent = instance.value.link ? (content.packItems.value ?? []) : []
 	const sourcedContent = hasSharedManagedContent.value
 		? projects.value.filter((item) =>
 				['server_project', 'shared_instance'].includes(item.source_kind ?? ''),
@@ -541,8 +523,16 @@ function fileNameFromPath(path: string) {
 	return path.split('/').pop() ?? path
 }
 
+/** The fields a toggle or a freeze changes, on the page's items and in the cached engine lists. */
+type ContentItemUpdates = Partial<
+	Pick<EngineContentItem, 'enabled' | 'file_path' | 'file_name' | 'locked'>
+>
+
 function matchesContentItem(
-	item: ContentItem,
+	item: Pick<EngineContentItem, 'file_name' | 'file_path'> & {
+		project?: { id: string } | null
+		version?: { id: string } | null
+	},
 	target: ContentItem,
 	originalFileName: string,
 	originalFilePath?: string,
@@ -560,9 +550,9 @@ function updateLinkedModpackContentCache(
 	target: ContentItem,
 	originalFileName: string,
 	originalFilePath: string | undefined,
-	updates: Partial<ContentItem>,
+	updates: ContentItemUpdates,
 ) {
-	queryClient.setQueryData<ContentItem[]>(modpackContentQueryKey.value, (items) => {
+	queryClient.setQueryData<EngineContentItem[]>(modpackContentQueryKey.value, (items) => {
 		if (!items) return items
 
 		return items.map((item) =>
@@ -836,27 +826,26 @@ type ContentToggleVariables = {
 
 function updateToggledContent(
 	{ mod, instanceId, originalFileName, originalFilePath }: ContentToggleVariables,
-	updates: Partial<ContentItem>,
+	updates: ContentItemUpdates,
 ) {
 	Object.assign(mod, updates)
 	managedContentModal.value?.updateItem(originalFileName, updates)
-	queryClient.setQueryData<ContentItem[]>(instanceKeys.linkedContent(instanceId), (items) =>
+	queryClient.setQueryData<EngineContentItem[]>(instanceKeys.linkedContent(instanceId), (items) =>
 		items?.map((item) =>
 			matchesContentItem(item, mod, originalFileName, originalFilePath)
 				? { ...item, ...updates }
 				: item,
 		),
 	)
-	queryClient.setQueryData<InstanceContentData>(instanceKeys.content(instanceId), (data) => {
+	queryClient.setQueryData<InstanceContent>(instanceKeys.content(instanceId), (data) => {
 		if (!data) return data
 		return {
 			...data,
-			contentItems:
-				data.contentItems?.map((item) =>
-					matchesContentItem(item, mod, originalFileName, originalFilePath)
-						? { ...item, ...updates }
-						: item,
-				) ?? null,
+			items: data.items.map((item) =>
+				matchesContentItem(item, mod, originalFileName, originalFilePath)
+					? { ...item, ...updates }
+					: item,
+			),
 		}
 	})
 }
@@ -873,13 +862,13 @@ const toggleContentMutation = useMutation({
 		return { previousEnabled: variables.previousEnabled }
 	},
 	mutationFn: async (variables: ContentToggleVariables) => {
-		const { mod, instanceId, originalFilePath, enabled } = variables
+		const { mod, originalFilePath, enabled } = variables
 		const packSyncOption = mod.project_type === 'resourcepack' ? 'resource_packs' : 'data_packs'
 		if (mod.synced_pack && instance.value.synced_options[packSyncOption]) {
 			await set_synced_pack_enabled(mod.synced_pack.id, enabled)
 			return null
 		}
-		return toggle_disable_project(instanceId, originalFilePath, enabled)
+		return content.toggle(originalFilePath, enabled)
 	},
 	onSuccess: async (newPath, variables) => {
 		const { mod, enabled, reconcileSharedState } = variables
@@ -892,7 +881,7 @@ const toggleContentMutation = useMutation({
 			trackEvent('InstanceProjectDisable', {
 				loader: instance.value.loader,
 				game_version: instance.value.game_version,
-				id: mod.project?.id,
+				id: mod.project?.id ?? mod.file_name,
 				name: mod.project?.title ?? mod.file_name,
 				project_type: mod.project_type,
 				disabled: !enabled,
@@ -960,7 +949,7 @@ async function removeMod(mod: ContentItem) {
 	try {
 		const removedPath = mod.file_path
 		if (!(await packActions.deleteSyncedItem(mod))) {
-			await remove_project(instance.value.id, removedPath)
+			await content.remove(removedPath)
 		}
 		if (mod.synced_pack) {
 			await refreshContentState('must_revalidate')
@@ -972,7 +961,7 @@ async function removeMod(mod: ContentItem) {
 		trackEvent('InstanceProjectRemove', {
 			loader: instance.value.loader,
 			game_version: instance.value.game_version,
-			id: mod.project?.id,
+			id: mod.project?.id ?? mod.file_name,
 			name: mod.project?.title ?? mod.file_name,
 			project_type: mod.project_type,
 		})
@@ -1041,19 +1030,12 @@ async function getDeleteDependencyWarning(items: ContentItem[]) {
 }
 
 const bulkUpdateMutation = useMutation({
-	mutationFn: ({
-		instanceId,
-		updates,
-	}: {
-		instanceId: string
-		updates: Parameters<typeof install_bulk_update_content>[1]
-	}) => install_bulk_update_content(instanceId, updates),
+	mutationFn: content.updateAll,
 	onError: (error) => handleError(error),
 })
 
 async function bulkUpdateSelections(selections: UpdateAllSelection[]) {
 	if (isInstanceBusy.value || bulkUpdateMutation.isPending.value) return
-	const instanceId = instance.value.id
 	const updates = selections.flatMap((selection) => {
 		const item =
 			projects.value.find((project) => getContentItemId(project) === selection.id) ??
@@ -1068,7 +1050,7 @@ async function bulkUpdateSelections(selections: UpdateAllSelection[]) {
 		return [{ project_path: item.file_path, version_id: selection.version.id }]
 	})
 	if (!updates.length) return
-	await bulkUpdateMutation.mutateAsync({ instanceId, updates })
+	await bulkUpdateMutation.mutateAsync(updates)
 }
 
 async function updateProject(mod: ContentItem) {
@@ -1078,16 +1060,12 @@ async function updateProject(mod: ContentItem) {
 
 	try {
 		const updateVersionId = mod.update_version_id!
-		await switch_project_version_with_dependencies(
-			instance.value.id,
-			mod.file_path!,
-			updateVersionId,
-		)
+		await content.switchVersion(mod.file_path!, updateVersionId)
 
 		trackEvent('InstanceProjectUpdate', {
 			loader: instance.value.loader,
 			game_version: instance.value.game_version,
-			id: mod.project?.id,
+			id: mod.project?.id ?? mod.file_name,
 			name: mod.project?.title ?? mod.file_name,
 			project_type: mod.project_type,
 		})
@@ -1109,12 +1087,12 @@ async function switchProjectVersion(mod: ContentItem, version: Labrinth.Versions
 	const oldPath = mod.file_path
 
 	try {
-		await switch_project_version_with_dependencies(instance.value.id, oldPath, version.id)
+		await content.switchVersion(oldPath, version.id)
 
 		trackEvent('InstanceProjectUpdate', {
 			loader: instance.value.loader,
 			game_version: instance.value.game_version,
-			id: mod.project?.id,
+			id: mod.project?.id ?? mod.file_name,
 			name: mod.project?.title ?? mod.file_name,
 			project_type: mod.project_type,
 		})
@@ -1320,13 +1298,7 @@ async function handleManagedContent() {
 async function refreshManagedContentItems(cacheBehaviour?: CacheBehaviour) {
 	if (!instance.value?.id) return
 
-	const contentItems = await queryClient
-		.fetchQuery({
-			queryKey: modpackContentQueryKey.value,
-			networkMode: 'always',
-			queryFn: () => get_linked_modpack_content(instance.value.id, cacheBehaviour),
-		})
-		.catch(handleError)
+	const contentItems = await content.fetchPackContent(cacheBehaviour).catch(handleError)
 
 	if (contentItems) {
 		managedContentModal.value?.setItems(managedContentItems.value)
@@ -1493,7 +1465,7 @@ async function handleModpackUpdateConfirm() {
 	contentUpdaterModal.value?.hide()
 	isModpackUpdating.value = true
 	try {
-		await update_managed_modrinth_version(instance.value.id, version.id)
+		await content.updateModpack(version.id)
 		await initProjects()
 	} finally {
 		isModpackUpdating.value = false
@@ -1537,9 +1509,7 @@ async function handleModalUpdate(
 }
 
 async function unpairInstance() {
-	await edit(instance.value.id, {
-		link: null as unknown as undefined,
-	})
+	await content.unlinkModpack()
 	linkedModpackProject.value = null
 	linkedModpackVersion.value = null
 	linkedModpackUpdateVersionId.value = null
@@ -1631,7 +1601,7 @@ async function handleContentFreeze(item: ContentItem, frozen: boolean) {
 	const originalFilePath = item.file_path
 
 	try {
-		await set_project_locked(instance.value.id, item.file_path, frozen)
+		await content.setLocked(item.file_path, frozen)
 		item.locked = frozen
 		managedContentModal.value?.updateItem(operation.originalFileName, { locked: frozen })
 		updateLinkedModpackContentCache(item, operation.originalFileName, originalFilePath, {
@@ -1647,41 +1617,32 @@ async function handleContentFreeze(item: ContentItem, frozen: boolean) {
 async function initProjects(cacheBehaviour?: CacheBehaviour, staleTime = 0) {
 	if (!instance.value) return
 
-	const contentData = await queryClient.fetchQuery({
-		...instanceContentQueryOptions(instance.value.id),
-		queryFn: () => loadInstanceContentData(instance.value.id, cacheBehaviour, handleError),
-		staleTime,
-	})
-	applyContentData(contentData)
+	const instanceId = instance.value.id
+	// A failed read shows through the query's error.
+	const contentData = await content.fetch(cacheBehaviour, staleTime).catch(() => null)
+	if (contentData) applyContentData(instanceId, contentData)
+	else loading.value = false
 }
 
-function applyContentData(contentData: InstanceContentData) {
-	if (contentData.path !== instance.value.id) {
-		return false
-	}
+function applyContentData(instanceId: string, { items, modpack }: InstanceContent) {
+	if (instanceId !== instance.value.id) return
 
-	if (!contentData.contentItems) {
-		loading.value = false
-		return true
-	}
+	projects.value = items.map((item) => {
+		const mapped = content.toContentItem(item)
+		return { ...mapped, has_update: canUpdateProject(mapped) }
+	})
 
-	projects.value = contentData.contentItems.map((item) => ({
-		...item,
-		has_update: canUpdateProject(item),
-	}))
-
-	if (contentData.modpack) {
-		linkedModpackProject.value = contentData.modpack.project
-		linkedModpackVersion.value = contentData.modpack.version
-		linkedModpackUpdateVersionId.value = contentData.modpack.updateVersionId
-	} else {
-		linkedModpackProject.value = null
-		linkedModpackVersion.value = null
-		linkedModpackUpdateVersionId.value = null
-	}
+	linkedModpackProject.value = modpack
+		? {
+				...modpack.project,
+				slug: modpack.project.slug ?? modpack.project.id,
+				icon_url: modpack.project.icon_url ?? undefined,
+			}
+		: null
+	linkedModpackVersion.value = modpack?.version ?? null
+	linkedModpackUpdateVersionId.value = modpack?.update_version_id ?? null
 
 	loading.value = false
-	return true
 }
 
 function contentVersionLabel(item: ContentItem): string {
@@ -1754,9 +1715,9 @@ provideContentManager({
 		id: getContentItemId(item),
 		project: item.project ?? {
 			id: item.file_name,
-			slug: null,
+			slug: item.file_name,
 			title: item.embedded_metadata?.name ?? item.file_name.replace('.disabled', ''),
-			icon_url: item.embedded_metadata?.icon_url ?? null,
+			icon_url: item.embedded_metadata?.icon_url ?? undefined,
 		},
 		projectLink: item.project?.id
 			? { path: `/project/${item.project.id}`, query: { i: instancePage.instanceId.value } }
@@ -1816,7 +1777,7 @@ function loadInitialContent() {
 watch(
 	contentQuery.data,
 	(data) => {
-		if (data) applyContentData(data)
+		if (data) applyContentData(instancePage.instanceId.value, data)
 	},
 	{ immediate: true },
 )

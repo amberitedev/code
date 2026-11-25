@@ -1,34 +1,30 @@
-//! Serves the link, path and folder routes of `crate::server::endpoints::desktop`.
+//! Serves the link, path and folder routes of `crate::local_api::endpoints::desktop`.
 
 use std::path::PathBuf;
 
+use crate::db_backup::app_db_backup_dir;
 use axum::{Router, extract::State};
 use contracts::{
     ApiError, Empty, ErrorCode,
-    server::{Req, route},
+    server::{Mount, Req},
 };
-use engine::prelude::app_db_backup_dir;
 use url::Url;
 
 use super::internal;
 use crate::{
     engine_handle::EngineHandle,
-    screenshots::ScreenshotKey,
-    server::endpoints::desktop::{
+    local_api::endpoints::desktop::{
         AppFolder, OpenFolder, OpenPath, OpenUrl, RevealPath,
     },
+    screenshots::ScreenshotKey,
 };
 
 pub fn routes(engine: EngineHandle) -> Router {
-    let (url_at, url_route) = route::<OpenUrl, _, _, _>(open_url);
-    let (path_at, path_route) = route::<OpenPath, _, _, _>(open_path);
-    let (reveal_at, reveal_route) = route::<RevealPath, _, _, _>(reveal_path);
-    let (folder_at, folder_route) = route::<OpenFolder, _, _, _>(open_folder);
     Router::new()
-        .route(url_at, url_route)
-        .route(path_at, path_route)
-        .route(reveal_at, reveal_route)
-        .route(folder_at, folder_route)
+        .endpoint::<OpenUrl, _, _>(open_url)
+        .endpoint::<OpenPath, _, _>(open_path)
+        .endpoint::<RevealPath, _, _>(reveal_path)
+        .endpoint::<OpenFolder, _, _>(open_folder)
         .with_state(engine)
 }
 

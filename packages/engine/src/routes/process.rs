@@ -6,7 +6,7 @@ use contracts::{ApiError, Empty, Json, server::Req};
 use super::api_error;
 use crate::{
     Engine,
-    access::{Access, Caller, InstanceAccess, Permission, View},
+    access::{Access, Caller, InstanceAccess},
     endpoints::process::{KillProcess, ListInstanceProcesses, ListProcesses},
     process,
     state::ProcessMetadata,
@@ -21,7 +21,7 @@ pub async fn list_processes(
     let mut visible = Vec::new();
     for metadata in process::get_all(&engine).await.map_err(api_error)? {
         if access
-            .require(&caller, Some(&metadata.instance_id), Permission::View)
+            .require(&caller, Some(&metadata.instance_id))
             .await
             .is_ok()
         {
@@ -33,7 +33,7 @@ pub async fn list_processes(
 
 pub async fn list_instance_processes(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<View>,
+    instance: InstanceAccess,
     _: Req<ListInstanceProcesses>,
 ) -> Result<Json<Vec<ProcessMetadata>>, ApiError> {
     process::get_by_instance_id(&engine, &instance.id)
@@ -53,9 +53,7 @@ pub async fn kill_process(
     let Some(metadata) = running.into_iter().find(|it| it.uuid == uuid) else {
         return Ok(Empty);
     };
-    access
-        .require(&caller, Some(&metadata.instance_id), Permission::Edit)
-        .await?;
+    access.require(&caller, Some(&metadata.instance_id)).await?;
     process::kill(&engine, uuid)
         .await
         .map(|()| Empty)

@@ -1,4 +1,4 @@
-import type { Archon } from '@modrinth/api-client'
+import type { Backup } from '@amberite/contracts/core'
 import type { Meta, StoryObj } from '@storybook/vue3-vite'
 
 import BackupItem from '../../components/servers/backups/BackupItem.vue'
@@ -11,16 +11,13 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-function makeBackup(
-	overrides: Partial<Archon.BackupsQueue.v1.BackupQueueBackup> = {},
-): Archon.BackupsQueue.v1.BackupQueueBackup {
+function makeBackup(overrides: Partial<Backup> = {}): Backup {
 	return {
 		id: 'backup-001',
 		name: 'Backup #5',
 		created_at: new Date(Date.now() - 1000 * 60 * 10).toISOString(),
 		automated: false,
 		status: 'done',
-		locked: false,
 		history: [],
 		...overrides,
 	}

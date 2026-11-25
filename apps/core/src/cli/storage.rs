@@ -2,8 +2,9 @@
 //! people's shares or runs privately.
 
 use color_eyre::eyre::Result;
-use contracts::core::{
-    ChangeStorage, GetStorage, StorageSettings, StorageStatus,
+use contracts::{
+    Empty, Json,
+    core::{ChangeStorage, GetStorage, StorageSettings, StorageStatus},
 };
 
 use super::{Client, Output, call::call};
@@ -39,9 +40,9 @@ pub async fn run(client: &Client, args: StorageArgs) -> Result<Output> {
         && change.cap.is_none()
         && change.egress_cap.is_none()
     {
-        call::<GetStorage>(client, &(), &(), ()).await?
+        call::<GetStorage>(client, &(), &(), Empty).await?
     } else {
-        call::<ChangeStorage>(client, &(), &(), change).await?
+        call::<ChangeStorage>(client, &(), &(), Json(change)).await?
     };
     Ok(Output::new(describe(&status), &status))
 }

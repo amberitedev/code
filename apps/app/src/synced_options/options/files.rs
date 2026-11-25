@@ -1,10 +1,11 @@
+use crate::state::Desktop;
 use crate::synced_options::state::SyncedInstance;
+use engine::ErrorKind;
 pub(crate) use engine::server_list::{
     nbt_from_bytes, nbt_to_bytes, read_nbt_file,
 };
 use engine::state::{InstanceInstallStage, InstanceMetadata, SyncedOption};
 use engine::util::io;
-use engine::{Engine, ErrorKind};
 use sha1_smol::Sha1;
 use std::path::{Path, PathBuf};
 
@@ -58,7 +59,7 @@ pub(in crate::synced_options) fn safe_instance_id(instance_id: &str) -> String {
 
 pub(in crate::synced_options) fn instance_dir(
     metadata: &InstanceMetadata,
-    state: &Engine,
+    state: &Desktop,
 ) -> PathBuf {
     state
         .directories
@@ -78,7 +79,7 @@ pub(in crate::synced_options) fn sync_files_are_protected(
 
 pub(in crate::synced_options) async fn instance_is_running(
     metadata: &InstanceMetadata,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<bool> {
     engine::state::instance_has_running_process(&metadata.instance.id, state)
         .await
@@ -176,7 +177,7 @@ pub(in crate::synced_options) async fn begin_checkpoint(
     expected_sha1: &str,
     merge_base: Option<&[u8]>,
     source_revision: i64,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<()> {
     let option_name = option.as_str();
     sqlx::query!(
@@ -199,7 +200,7 @@ pub(in crate::synced_options) async fn begin_checkpoint(
         merge_base,
         source_revision,
     )
-    .execute(crate::db::pool(state))
+    .execute(state.db())
     .await?;
     Ok(())
 }
@@ -209,7 +210,7 @@ pub(in crate::synced_options) async fn finish_checkpoint(
     option: SyncedOption,
     variant: &str,
     mode: LinkMode,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<()> {
     let option_name = option.as_str();
     let link_mode = mode.as_str();
@@ -224,7 +225,7 @@ pub(in crate::synced_options) async fn finish_checkpoint(
         option_name,
         variant,
     )
-    .execute(crate::db::pool(state))
+    .execute(state.db())
     .await?;
     Ok(())
 }
@@ -233,7 +234,7 @@ pub(in crate::synced_options) async fn finish_plain_checkpoint(
     instance_id: &str,
     option: SyncedOption,
     variant: &str,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<()> {
     let option_name = option.as_str();
     sqlx::query!(
@@ -246,7 +247,7 @@ pub(in crate::synced_options) async fn finish_plain_checkpoint(
         option_name,
         variant,
     )
-    .execute(crate::db::pool(state))
+    .execute(state.db())
     .await?;
     Ok(())
 }
@@ -255,7 +256,7 @@ pub(in crate::synced_options) async fn checkpoint(
     instance_id: &str,
     option: SyncedOption,
     variant: &str,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<Option<SyncCheckpoint>> {
     let option_name = option.as_str();
     let row = sqlx::query!(
@@ -269,7 +270,7 @@ pub(in crate::synced_options) async fn checkpoint(
         option_name,
         variant,
     )
-    .fetch_optional(crate::db::pool(state))
+    .fetch_optional(state.db())
     .await?;
     row.map(|row| {
         Ok(SyncCheckpoint {

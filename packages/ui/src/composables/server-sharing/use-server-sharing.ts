@@ -1,3 +1,4 @@
+import { instanceSharing } from '@amberite/contracts/engine'
 import type { SharedInstances } from '@modrinth/api-client'
 import { useIsMutating, useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed } from 'vue'
@@ -12,6 +13,7 @@ import {
 	injectNotificationManager,
 } from '#ui/providers'
 
+import { useSharedInstanceEvent } from '../use-shared-instance-event'
 import { clearServerSharedInstance } from './cache'
 import { sharedInstanceInvitesQueryOptions } from './query-options'
 
@@ -20,17 +22,13 @@ export function useServerSharingSettings() {
 	const auth = injectAuth()
 	const queryClient = useQueryClient()
 	const { handleError } = injectNotificationManager()
-	const { serverId, worldId, serverFull, busyReasons } = injectModrinthServerContext()
+	const { serverId, core, server, busyReasons } = injectModrinthServerContext()
 	const { canSetup, permissionDeniedMessage } = useServerPermissions()
 	const userId = computed(() => auth.user.value?.id)
-	const sharedInstanceId = computed(
-		() =>
-			serverFull.value?.worlds.find((world) => world.id === worldId.value)?.content
-				?.shared_instance_id,
-	)
+	const sharedInstanceId = computed(() => server.value?.shared_instance_id)
 	const targetKey = computed(() =>
-		canSetup.value && worldId.value && sharedInstanceId.value && userId.value
-			? JSON.stringify([serverId, worldId.value, sharedInstanceId.value, userId.value])
+		canSetup.value && sharedInstanceId.value && userId.value
+			? JSON.stringify([serverId, sharedInstanceId.value, userId.value])
 			: null,
 	)
 	const invites = useQuery(
@@ -43,12 +41,14 @@ export function useServerSharingSettings() {
 			),
 			enabled: !!targetKey.value,
 			refetchOnMount: 'always' as const,
-			refetchInterval: 30_000,
 		})),
 	)
+	useSharedInstanceEvent('shared_instance_users', sharedInstanceId, () => {
+		if (invites.isEnabled.value) void invites.refetch()
+	})
 	const shareActions = useIsMutating({ mutationKey: ['servers', 'share-action', serverId] })
 
-	type ShareTarget = { worldId: string; instanceId: string }
+	type ShareTarget = { instanceId: string }
 	const revokeMutation = useMutation({
 		mutationFn: (target: ShareTarget & { inviteId: string }) =>
 			client.sharedinstances.players_v1.deleteLink(serverId, target.instanceId, target.inviteId),
@@ -65,10 +65,11 @@ export function useServerSharingSettings() {
 	})
 	const unpublishMutation = useMutation({
 		mutationKey: ['servers', 'share-action', serverId],
-		mutationFn: (target: ShareTarget) => client.archon.content_v1.unshare(serverId, target.worldId),
+		mutationFn: (_target: ShareTarget) =>
+			core.call(instanceSharing.UnpublishSharedInstance, { params: { id: serverId } }),
 		onSuccess: (_data, target) =>
-			clearServerSharedInstance(queryClient, serverId, target.worldId, target.instanceId),
-		onSettled: () => queryClient.invalidateQueries({ queryKey: serverKeys.detailV1(serverId) }),
+			clearServerSharedInstance(queryClient, serverId, target.instanceId),
+		onSettled: () => queryClient.invalidateQueries({ queryKey: serverKeys.detail(serverId) }),
 	})
 	const busy = computed(
 		() =>
@@ -80,15 +81,8 @@ export function useServerSharingSettings() {
 	)
 
 	function currentTarget(expectedKey: string): ShareTarget | undefined {
-		if (
-			busy.value ||
-			expectedKey !== targetKey.value ||
-			!worldId.value ||
-			!sharedInstanceId.value
-		) {
-			return
-		}
-		return { worldId: worldId.value, instanceId: sharedInstanceId.value }
+		if (busy.value || expectedKey !== targetKey.value || !sharedInstanceId.value) return
+		return { instanceId: sharedInstanceId.value }
 	}
 
 	const settings: SharingSettingsContext = {

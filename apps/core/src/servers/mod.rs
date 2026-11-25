@@ -4,7 +4,9 @@
 //! shim (see `shim`), which runs Java and outlives Core. [`Servers`] keeps track of which servers
 //! have a shim, adopts the shims it finds when Core starts, and records how every run ended.
 //! While a server runs, Core reads its console for players and freezes (see `watch`), restarts
-//! it after a crash, and tells [`Servers::events`] subscribers, such as port forwarding.
+//! it after a crash, and tells [`Servers::events`] subscribers, such as port forwarding. Every
+//! change to where servers are in their runs wakes [`Servers::changes`] receivers, so power is
+//! announced and waited on without polling.
 
 pub mod console;
 pub mod insight;
@@ -21,15 +23,16 @@ mod watch;
 use std::{
     collections::{HashMap, HashSet},
     net::IpAddr,
+    ops::{Deref, DerefMut},
     process::Child,
-    sync::{Arc, Mutex, Weak},
+    sync::{Arc, Mutex, MutexGuard, Weak},
     time::{Duration, Instant},
 };
 
 use color_eyre::eyre::Result;
 use engine::Engine;
 use sqlx::SqlitePool;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, watch as notify};
 use tracing::{info, warn};
 
 use self::server_rows::{Ended, Outcome};
@@ -113,6 +116,37 @@ struct Live {
     child: Option<Child>,
 }
 
+/// A lock on one of [`Servers`]' maps that wakes [`Servers::changes`] receivers once it drops,
+/// when it was written through.
+struct Tracked<'a, T> {
+    guard: MutexGuard<'a, T>,
+    changed: &'a notify::Sender<()>,
+    written: bool,
+}
+
+impl<T> Deref for Tracked<'_, T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        &self.guard
+    }
+}
+
+impl<T> DerefMut for Tracked<'_, T> {
+    fn deref_mut(&mut self) -> &mut T {
+        self.written = true;
+        &mut self.guard
+    }
+}
+
+impl<T> Drop for Tracked<'_, T> {
+    fn drop(&mut self) {
+        if self.written {
+            self.changed.send_replace(());
+        }
+    }
+}
+
 /// Every server's lifecycle. One per Core.
 pub struct Servers {
     paths: Paths,
@@ -141,6 +175,8 @@ pub struct Servers {
     retries: Mutex<HashMap<String, (String, u64)>>,
     /// How many owner actions each server has seen. Only taken while `live` is held.
     owner_actions: Mutex<HashMap<String, u64>>,
+    /// Sent on every change to `live`, `retries` and `copying`. See [`Servers::changes`].
+    changed: notify::Sender<()>,
 }
 
 /// A change in which servers run.
@@ -166,6 +202,7 @@ impl Drop for Copying {
             .lock()
             .expect("not poisoned")
             .remove(&self.id);
+        self.servers.changed.send_replace(());
     }
 }
 
@@ -199,6 +236,7 @@ impl Servers {
             gave_up: Mutex::default(),
             retries: Mutex::default(),
             owner_actions: Mutex::default(),
+            changed: notify::channel(()).0,
         });
         servers.remove_orphans().await?;
         servers.scan().await?;
@@ -210,11 +248,8 @@ impl Servers {
     /// left when a file could not go, or when Core stopped between the two databases. A new
     /// server's instance is made before its row, so a create cut short leaves the same.
     async fn remove_orphans(&self) -> Result<()> {
-        let rows: HashSet<String> = server_rows::list(&self.db)
-            .await?
-            .into_iter()
-            .map(|row| row.id)
-            .collect();
+        let rows: HashSet<String> =
+            server_rows::ids(&self.db).await?.into_iter().collect();
         let mut ids: HashSet<String> = engine::instance::list(&self.engine)
             .await
             .map_err(|error| color_eyre::eyre::eyre!("{error:#}"))?
@@ -244,8 +279,27 @@ impl Servers {
         Ok(())
     }
 
-    fn live(&self) -> std::sync::MutexGuard<'_, HashMap<String, Live>> {
-        self.live.lock().expect("not poisoned")
+    fn live(&self) -> Tracked<'_, HashMap<String, Live>> {
+        Tracked {
+            guard: self.live.lock().expect("not poisoned"),
+            changed: &self.changed,
+            written: false,
+        }
+    }
+
+    /// A receiver woken whenever a server gets or loses a shim, moves on in its run, or a crash
+    /// restart or a hot backup's copy starts or ends.
+    pub fn changes(&self) -> notify::Receiver<()> {
+        self.changed.subscribe()
+    }
+
+    /// Wait until `done` holds, looking again on every change [`Servers::changes`] reports.
+    pub async fn until(&self, done: impl Fn(&Self) -> bool) {
+        let mut changes = self.changes();
+        while !done(self) {
+            // The sender lives as long as `self`.
+            let _ = changes.changed().await;
+        }
     }
 
     pub fn paths(&self) -> &Paths {
@@ -460,10 +514,8 @@ impl Servers {
     ) -> Result<(), ServerError> {
         // A server that exited during a hot backup, such as a crash restart, starts once the
         // copy is done. A copy ends within the shim's ten-minute hold.
-        while self.is_copying(id) {
-            tokio::time::sleep(Duration::from_secs(1)).await;
-        }
-        let server = server_rows::get(&self.db, id)
+        self.until(|servers| !servers.is_copying(id)).await;
+        let server = server_rows::get(&self.db, &self.engine, id)
             .await?
             .ok_or_else(|| ServerError::NotFound(id.into()))?;
         if self.engine_installing(id).await? {
@@ -593,7 +645,6 @@ impl Servers {
             &self.engine,
             server,
             platform.as_ref(),
-            memory::flags(&self.db, id).await?,
             run_id,
             self.local_only,
         )
@@ -816,10 +867,11 @@ impl Servers {
     /// again after a crash. The updater waits so a restart of Core never lands in the middle of
     /// one.
     pub async fn settle(&self, timeout: Duration) {
-        let deadline = Instant::now() + timeout;
-        while Instant::now() < deadline && self.unsettled() {
-            tokio::time::sleep(Duration::from_secs(1)).await;
-        }
+        let _ = tokio::time::timeout(
+            timeout,
+            self.until(|servers| !servers.unsettled()),
+        )
+        .await;
     }
 
     fn unsettled(&self) -> bool {
@@ -870,9 +922,7 @@ impl Servers {
 
     /// Wait for a stopping server's shim to exit, then start it, unless it was killed.
     async fn start_once_stopped(&self, id: &str) -> Result<(), ServerError> {
-        while self.phase(id).is_some() {
-            tokio::time::sleep(Duration::from_millis(250)).await;
-        }
+        self.until(|servers| servers.phase(id).is_none()).await;
         if self.killed.lock().expect("not poisoned").remove(id) {
             return Ok(());
         }
@@ -895,11 +945,14 @@ impl Servers {
             crate::daemon::folders::create_server_folder(
                 &self.paths.server(&id),
             )?;
-            server_rows::create(&self.db, &id, name, |port| {
+            server_rows::create(&self.db, &id, |port| {
                 server_rows::port_free(port, self.local_only)
             })
             .await?
-            .ok_or(ServerError::NoPorts)
+            .ok_or(ServerError::NoPorts)?;
+            server_rows::get(&self.db, &self.engine, &id)
+                .await?
+                .ok_or_else(|| ServerError::NotFound(id.clone()))
         }
         .await;
         if created.is_err()
@@ -1029,6 +1082,31 @@ mod tests {
         (dir, servers)
     }
 
+    #[tokio::test]
+    async fn a_change_of_phase_wakes_its_waiters_and_a_read_does_not() {
+        let (_dir, servers) = servers().await;
+        let id = servers.create("A").await.unwrap().id;
+        let mut changes = servers.changes();
+        let hold = servers.hold(&id).unwrap();
+        assert!(changes.has_changed().unwrap());
+        changes.mark_unchanged();
+        servers.phases();
+        assert_eq!(servers.phase(&id), Some(Phase::Installing));
+        assert!(!changes.has_changed().unwrap());
+
+        let waiter = tokio::spawn({
+            let (servers, id) = (Arc::clone(&servers), id.clone());
+            async move {
+                servers.until(|servers| servers.phase(&id).is_none()).await
+            }
+        });
+        drop(hold);
+        tokio::time::timeout(Duration::from_secs(10), waiter)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn a_link_planted_in_a_server_folder_is_not_followed() {
@@ -1126,43 +1204,45 @@ mod tests {
         let paths = Paths::new(dir.path());
         crate::daemon::folders::create(&paths, None).unwrap();
         let db = db::memory().await;
-        let server = server_rows::create(&db, "a", "A", |_| true)
+        server_rows::create(&db, "a", |_| true)
             .await
             .unwrap()
             .unwrap();
+        let server = "a";
         // The dead Core recorded the run and wrote the launch; its shim has not started yet.
         let now = chrono::Utc::now().timestamp();
-        server_rows::start_run(&db, &server.id, "late", now)
+        server_rows::start_run(&db, server, "late", now)
             .await
             .unwrap();
-        std::fs::create_dir_all(paths.run(&server.id)).unwrap();
+        std::fs::create_dir_all(paths.run(server)).unwrap();
         shim::write_json(
-            &paths.launch_spec(&server.id),
+            &paths.launch_spec(server),
             &shim::Launch {
                 v: shim::PROTOCOL,
                 run_id: "late".into(),
                 java: "java".into(),
                 args: Vec::new(),
-                dir: paths.server(&server.id),
+                dir: paths.server(server),
                 memory_limit_mb: 1024,
             },
         )
         .unwrap();
 
         let servers = Servers::open_for_test(paths.clone(), db.clone()).await;
-        assert_eq!(servers.phase(&server.id), None);
+        platform::create(&servers.engine, server, "A")
+            .await
+            .unwrap();
+        assert_eq!(servers.phase(server), None);
         assert_eq!(
-            server_rows::open_runs(&db, &server.id, i64::MAX)
-                .await
-                .unwrap(),
+            server_rows::open_runs(&db, server, i64::MAX).await.unwrap(),
             ["late"]
         );
 
         // The shim takes its lock and records itself, as this test process.
-        let _lock = shim::try_lock(&paths, &server.id).unwrap().unwrap();
+        let _lock = shim::try_lock(&paths, server).unwrap().unwrap();
         let pid = std::process::id();
         shim::write_json(
-            &paths.run_record(&server.id),
+            &paths.run_record(server),
             &RunRecord {
                 v: shim::PROTOCOL,
                 run_id: "late".into(),
@@ -1174,21 +1254,16 @@ mod tests {
         )
         .unwrap();
         let deadline = Instant::now() + Duration::from_secs(10);
-        while servers.phase(&server.id).is_none() && Instant::now() < deadline {
+        while servers.phase(server).is_none() && Instant::now() < deadline {
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
-        assert!(
-            servers.phase(&server.id).is_some(),
-            "the late shim was ignored"
-        );
+        assert!(servers.phase(server).is_some(), "the late shim was ignored");
         assert!(matches!(
-            servers.start(&server.id).await,
+            servers.start(server).await,
             Err(ServerError::AlreadyRunning)
         ));
         assert_eq!(
-            server_rows::open_runs(&db, &server.id, i64::MAX)
-                .await
-                .unwrap(),
+            server_rows::open_runs(&db, server, i64::MAX).await.unwrap(),
             ["late"]
         );
     }
@@ -1236,25 +1311,29 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let paths = Paths::new(dir.path());
         let db = db::memory().await;
-        let server = server_rows::create(&db, "a", "A", |_| true)
+        server_rows::create(&db, "a", |_| true)
             .await
             .unwrap()
             .unwrap();
-        let _shim = shim::try_lock(&paths, &server.id).unwrap().unwrap();
+        let server = "a";
+        let _shim = shim::try_lock(&paths, server).unwrap().unwrap();
         std::fs::write(
-            paths.run_record(&server.id),
+            paths.run_record(server),
             r#"{"v":1,"run_id":"older","pid":1}"#,
         )
         .unwrap();
 
         let servers = Servers::open_for_test(paths, db).await;
-        assert_eq!(servers.phase(&server.id), Some(Phase::Unmanaged(Some(1))));
+        platform::create(&servers.engine, server, "A")
+            .await
+            .unwrap();
+        assert_eq!(servers.phase(server), Some(Phase::Unmanaged(Some(1))));
         assert!(matches!(
-            servers.stop(&server.id).await,
+            servers.stop(server).await,
             Err(ServerError::Shim(ShimError::Incompatible(1)))
         ));
         assert!(matches!(
-            servers.start(&server.id).await,
+            servers.start(server).await,
             Err(ServerError::AlreadyRunning)
         ));
     }
@@ -1264,21 +1343,21 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let paths = Paths::new(dir.path());
         let db = db::memory().await;
-        let server = server_rows::create(&db, "a", "A", |_| true)
+        server_rows::create(&db, "a", |_| true)
             .await
             .unwrap()
             .unwrap();
-        server_rows::start_run(&db, &server.id, "killed", 1)
+        let server = "a";
+        server_rows::start_run(&db, server, "killed", 1)
             .await
             .unwrap();
-        server_rows::start_run(&db, &server.id, "vanished", 2)
+        server_rows::start_run(&db, server, "vanished", 2)
             .await
             .unwrap();
-        std::fs::create_dir_all(paths.run(&server.id)).unwrap();
-        std::fs::write(paths.console_log(&server.id), "booting\nboom\n")
-            .unwrap();
+        std::fs::create_dir_all(paths.run(server)).unwrap();
+        std::fs::write(paths.console_log(server), "booting\nboom\n").unwrap();
         shim::write_json(
-            &paths.run_status(&server.id),
+            &paths.run_status(server),
             &ExitStatus {
                 v: shim::PROTOCOL,
                 run_id: "killed".into(),
@@ -1291,7 +1370,7 @@ mod tests {
         .unwrap();
 
         let servers = Servers::open_for_test(paths, db.clone()).await;
-        assert_eq!(servers.phase(&server.id), None);
+        assert_eq!(servers.phase(server), None);
         let runs: Vec<(String, Outcome, Option<String>)> = sqlx::query_as(
             "SELECT id, outcome, last_lines FROM runs ORDER BY started_at",
         )

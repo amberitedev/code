@@ -1,4 +1,4 @@
-import { createGlobalState } from '@vueuse/core'
+import type { LogEvent } from '@amberite/contracts/engine'
 import { type Ref, ref, shallowRef, triggerRef } from 'vue'
 
 import { detectLogLevel } from '../layouts/shared/console/composables/log-level'
@@ -189,8 +189,8 @@ function formatTimestamp(millis?: number): string {
 }
 
 function formatLog4jLines(event: Log4jEvent): LogLine[] {
-	const level = mapLog4jLevel(event.level)
-	const time = formatTimestamp(event.timestamp_millis)
+	const level = mapLog4jLevel(event.level ?? undefined)
+	const time = formatTimestamp(event.timestamp_millis ?? undefined)
 	const thread = event.thread_name ?? ''
 	const levelStr = event.level ?? ''
 	const message = event.message?.trim() ?? ''
@@ -327,6 +327,12 @@ export function createConsoleState() {
 		addLines(formatLog4jLines(event))
 	}
 
+	/** A live log line as either host's `log` event carries it. */
+	const addLogEvent = (event: LogEvent): void => {
+		if (event.type === 'legacy') addLegacyLog(event.message)
+		else addLog4jEvent(event)
+	}
+
 	const recordWsEvent = (event: unknown): void => {
 		if (!wsEventCaptureEnabled) return
 		wsEventHistory.push(event)
@@ -407,6 +413,7 @@ export function createConsoleState() {
 		addLines,
 		addLog4jEvent,
 		addLegacyLog,
+		addLogEvent,
 		recordWsEvent,
 		getWsEventHistory,
 		setWsEventCaptureEnabled,
@@ -415,4 +422,4 @@ export function createConsoleState() {
 	}
 }
 
-export const useModrinthServersConsole = createGlobalState(createConsoleState)
+export type ConsoleState = ReturnType<typeof createConsoleState>

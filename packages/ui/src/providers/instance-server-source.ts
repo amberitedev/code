@@ -1,4 +1,4 @@
-import type { Archon } from '@modrinth/api-client'
+import type { PatchPropertiesFields } from '@amberite/contracts/core'
 
 import { createContext } from '.'
 
@@ -22,9 +22,8 @@ export interface InstanceServerSourceProvider {
 	 */
 	pushInstance: (args: {
 		serverId: string
-		worldId: string
 		instanceId: string
-		properties?: Archon.Content.v1.PropertiesFields
+		properties?: PatchPropertiesFields
 		restart?: boolean
 	}) => Promise<void>
 }

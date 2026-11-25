@@ -35,6 +35,9 @@ use config::Config;
 use install::InstallRecord;
 use paths::Paths;
 
+/// Every request the Core makes, to the backend and to Modrinth, names it with this.
+const USER_AGENT: &str = concat!("copal/", env!("CARGO_PKG_VERSION"));
+
 /// `copal run`: the launcher (see `update::launcher`), which runs Core as its child. `service`
 /// is set by the Windows service manager, which starts Copal that way.
 pub fn run(service: bool) -> Result<()> {
@@ -124,7 +127,7 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
     let core_id = db::core_id(&db).await?;
     let identity = Identity::load_or_create(&paths)?;
     let http = crate::network::http()
-        .user_agent(concat!("copal/", env!("CARGO_PKG_VERSION")))
+        .user_agent(USER_AGENT)
         .connect_timeout(std::time::Duration::from_secs(15))
         .build()?;
     let keys = access::keys::load(
@@ -151,10 +154,12 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
         config.local_only(),
     )
     .await?;
+    let events = api::events::sender();
     let backups = crate::backups::Backups::open(
         paths.clone(),
         db.clone(),
         Arc::clone(&servers),
+        events.clone(),
     )
     .await?;
     let update = Arc::new(Updater::new(
@@ -178,10 +183,12 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
         servers,
         access: Arc::clone(&access),
         backups,
+        events,
         update: Arc::clone(&update),
         network: Arc::clone(&network),
         storage: Arc::clone(&storage),
         consoles: Arc::default(),
+        ops: Default::default(),
     });
     tokio::spawn(api::events::watch_power(Arc::clone(&state)));
     tokio::spawn(api::follow::apply_on_stop(Arc::clone(&state)));
@@ -275,6 +282,7 @@ pub async fn start_engine(
         events: engine::EventSink::new(),
         accounts,
         hooks: None,
+        user_agent: USER_AGENT.to_owned(),
     })
     .await
     .map_err(|error| eyre!("the engine did not start: {error:#}"))
@@ -306,7 +314,7 @@ fn listen(address: SocketAddr) -> std::io::Result<tokio::net::TcpListener> {
 async fn answer_once(paths: Paths) {
     let client = crate::cli::Client::at(paths);
     for _ in 0..20 {
-        if client.get::<serde_json::Value>("/health").await.is_ok() {
+        if client.is_up().await {
             return;
         }
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;

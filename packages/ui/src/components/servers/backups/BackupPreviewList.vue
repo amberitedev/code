@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import type { Archon } from '@modrinth/api-client'
+import type { Backup } from '@amberite/contracts/core'
 import { onMounted, ref } from 'vue'
 
 import { useScrollIndicator } from '../../../composables/scroll-indicator'
 import BackupItem from './BackupItem.vue'
 
 defineProps<{
-	backups: Archon.BackupsQueue.v1.BackupQueueBackup[]
+	backups: Backup[]
 	label: string
 }>()
 

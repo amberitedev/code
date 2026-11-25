@@ -1,7 +1,5 @@
-//! A server's backups: the list and its schedule, creating, renaming, restoring and deleting
-//! them, and their operations. Also the downloads, which a native save follows with a link
-//! (`access::links`): `GET /servers/{id}/v1/worlds/{wid}/backups/{bid}/download` and
-//! `.../files/download-full-zip`.
+//! A server's backups: the list and its options, creating, renaming, restoring and deleting
+//! them, and their operations. Also the downloads of a backup and of the whole server.
 //!
 //! Core has [`SLOTS`] backup slots per server, split between scheduled and manual backups; the
 //! schedule's `keep` is the scheduled share.
@@ -13,26 +11,27 @@ use std::{collections::HashMap, sync::Arc};
 
 use axum::{
     body::Body,
-    extract::{Path, State},
+    extract::State,
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
 };
 use contracts::{
     ApiError, Empty, ErrorCode, Json,
     core::{
-        AckOperation, Action, BackupKind, BackupOperation, BackupSchedule,
-        BackupState, CancelOperation, ChangeBackupSchedule, CoreUser,
-        CreateBackup, CreatedBackup, DeleteBackup, DeleteBackups, ListBackups,
-        OperationKind, OperationState, RenameBackup, RestoreBackup,
-        RetryBackup, ScheduleChange, ServerBackup, ServerBackups,
+        AckOperation, Action, ActiveOperation, Backup, BackupOperation,
+        BackupOptions, BackupStatus, BackupsQueue, CancelOperation,
+        ChangeBackupOptions, CreateBackup, DeleteBackup, DeleteBackups,
+        DownloadBackup, DownloadWorld, ListBackups, OperationState,
+        OperationType, PatchBackupOptionsResponse, PostBackupResponse,
+        RenameBackup, RestoreBackup, RetryBackup, UserInfo,
     },
     server::Req,
 };
 use uuid::Uuid;
 
-use super::{CoreState, internal, world};
+use super::{CoreState, internal};
 use crate::{
-    access::{Caller, Dangerous, Permission, activity},
+    access::{Caller, Dangerous, activity, at},
     backups::{
         self, SLOTS,
         records::{self, Kind, OpKind, OpState, State as BackupRowState},
@@ -78,7 +77,7 @@ fn backup_name(name: &str) -> Result<&str, ApiError> {
 async fn users(
     state: &CoreState,
     operations: &[records::Operation],
-) -> Result<HashMap<String, CoreUser>, ApiError> {
+) -> Result<HashMap<String, UserInfo>, ApiError> {
     let mut users = HashMap::new();
     for user_id in operations.iter().filter_map(|op| op.user_id.as_ref()) {
         if users.contains_key(user_id) {
@@ -90,12 +89,13 @@ async fn users(
                 .fetch_optional(&state.db)
                 .await
                 .map_err(internal)?;
-        let (name, avatar_url) = row.unwrap_or_else(|| (user_id.clone(), None));
+        let (username, avatar_url) =
+            row.unwrap_or_else(|| (user_id.clone(), None));
         users.insert(
             user_id.clone(),
-            CoreUser {
+            UserInfo {
                 id: user_id.clone(),
-                name,
+                username,
                 avatar_url,
             },
         );
@@ -103,141 +103,182 @@ async fn users(
     Ok(users)
 }
 
-fn operation_kind(kind: OpKind) -> OperationKind {
+fn operation_type(kind: OpKind) -> OperationType {
     match kind {
-        OpKind::Create => OperationKind::Create,
-        OpKind::Restore => OperationKind::Restore,
+        OpKind::Create => OperationType::Create,
+        OpKind::Restore => OperationType::Restore,
     }
 }
 
 fn operation_state(state: OpState) -> OperationState {
     match state {
-        OpState::Queued => OperationState::Queued,
-        OpState::Running => OperationState::Running,
-        OpState::Done => OperationState::Done,
+        OpState::Queued => OperationState::Pending,
+        OpState::Running => OperationState::Ongoing,
+        OpState::Done => OperationState::Completed,
         OpState::Failed => OperationState::Failed,
         OpState::Cancelled => OperationState::Cancelled,
     }
 }
 
-/// Every backup with its operations, and the schedule. Scheduled backups that hold a slot say
-/// when they rotate out: the newest after `keep` more scheduled backups, the oldest at the next
-/// one.
+fn active(op: &records::Operation) -> bool {
+    matches!(op.state, OpState::Queued | OpState::Running)
+}
+
 pub async fn list(
     caller: Caller,
     State(state): State<Arc<CoreState>>,
     Req { params, .. }: Req<ListBackups>,
-) -> Result<Json<ServerBackups>, ApiError> {
+) -> Result<Json<BackupsQueue>, ApiError> {
     let id = params.id;
-    state.access.require(&caller, &id, Permission::View).await?;
+    state.access.require(&caller, &id).await?;
     let schedule = records::schedule(&state.db, &id).await.map_err(internal)?;
     let next = state.backups.next_scheduled(&id).await?;
     let operations = records::operations(&state.db, &id)
         .await
         .map_err(internal)?;
     let users = users(&state, &operations).await?;
+    let user_info = |op: &records::Operation| {
+        op.user_id
+            .as_ref()
+            .and_then(|user| users.get(user))
+            .cloned()
+    };
     let interval = i64::from(schedule.interval_hours) * 3600;
     let mut slotted = 0u32;
-    let backups = records::backups(&state.db, &id)
-        .await
-        .map_err(internal)?
+    let rows = records::backups(&state.db, &id).await.map_err(internal)?;
+    let live =
+        |backup: &records::Backup| backup.state != BackupRowState::Failed;
+    let manual_count = rows
+        .iter()
+        .filter(|backup| backup.kind == Kind::Manual && live(backup))
+        .count();
+    let backups: Vec<Backup> = rows
         .into_iter()
         .map(|backup| {
-            let live = backup.state != BackupRowState::Failed;
             let rotates_at = match next {
-                Some(next) if backup.kind == Kind::Scheduled && live => {
+                Some(next)
+                    if backup.kind == Kind::Scheduled && live(&backup) =>
+                {
                     let after = i64::from(
                         schedule.keep.saturating_sub(1).saturating_sub(slotted),
                     );
                     slotted += 1;
-                    Some(next + after * interval)
+                    Some(at(next + after * interval))
                 }
                 _ => None,
             };
-            let operations = operations
+            // Listed oldest first; a backup's history reads newest first.
+            let history = operations
                 .iter()
+                .rev()
                 .filter(|op| op.backup_id == backup.id)
                 .map(|op| BackupOperation {
-                    id: op.id,
-                    kind: operation_kind(op.kind),
+                    operation_type: operation_type(op.kind),
+                    operation_id: op.id,
                     state: operation_state(op.state),
-                    queued_at: op.queued_at,
-                    started_at: op.started_at,
-                    ended_at: op.ended_at,
+                    scheduled_for: at(op.queued_at),
+                    started_at: op.started_at.map(at),
+                    completed_at: op.ended_at.map(at),
                     error: op.error.clone(),
-                    acked: op.acked,
-                    user: op
-                        .user_id
-                        .as_ref()
-                        .and_then(|user| users.get(user))
-                        .cloned(),
+                    should_prompt: !active(op) && !op.acked,
+                    user_info: user_info(op),
                 })
                 .collect();
-            ServerBackup {
+            Backup {
                 id: backup.id,
                 name: backup.name,
-                created_at: backup.created_at,
-                state: match backup.state {
-                    BackupRowState::Queued => BackupState::Queued,
-                    BackupRowState::Running => BackupState::Running,
-                    BackupRowState::Done => BackupState::Done,
-                    BackupRowState::Failed => BackupState::Failed,
+                created_at: at(backup.created_at),
+                status: match backup.state {
+                    BackupRowState::Queued => BackupStatus::Pending,
+                    BackupRowState::Running => BackupStatus::InProgress,
+                    BackupRowState::Done => BackupStatus::Done,
+                    BackupRowState::Failed => BackupStatus::Error,
                 },
-                kind: match backup.kind {
-                    Kind::Manual => BackupKind::Manual,
-                    Kind::Scheduled => BackupKind::Scheduled,
-                    Kind::PreUpdate => BackupKind::PreUpdate,
-                },
+                automated: backup.kind != Kind::Manual,
                 rotates_at,
-                operations,
+                history,
             }
         })
         .collect();
-    Ok(Json(ServerBackups {
-        backups,
-        schedule: BackupSchedule {
-            interval_hours: schedule.interval_hours,
-            keep: schedule.keep,
-            slots: SLOTS,
+    let active_operations = operations
+        .iter()
+        .filter(|op| active(op))
+        .map(|op| ActiveOperation {
+            backup_id: op.backup_id.clone(),
+            operation_type: operation_type(op.kind),
+            operation_id: op.id,
+            scheduled_for: at(op.queued_at),
+            started_at: op.started_at.map(at),
+            user_info: user_info(op),
+        })
+        .collect();
+    Ok(Json(BackupsQueue {
+        active_operations,
+        options: BackupOptions {
+            split_automatic: schedule.keep,
+            split_manual: SLOTS - schedule.keep,
+            limit: SLOTS,
+            interval: schedule.interval_hours,
         },
-        next_scheduled_at: next,
+        next_auto_backup_at: next.map(at),
+        manual_count: u32::try_from(manual_count).unwrap_or(u32::MAX),
+        auto_count: slotted,
+        backups,
     }))
 }
 
 /// Set the interval (hourly at most, monthly at least) and how many slots scheduled backups keep
-/// (none turns them off). Keeping fewer than there are deletes the oldest: without
-/// `delete_excess` the answer only names them; with it, this is the owner's, with a fresh ticket,
-/// as deleting them by hand would be.
-pub async fn change_schedule(
+/// (none turns them off); the two splits add up to the slots. Keeping fewer than there are deletes
+/// the oldest: without `ar` the answer only names them; with it, this is the owner's, with a
+/// fresh ticket, as deleting them by hand would be.
+pub async fn change_options(
     caller: Caller,
     State(state): State<Arc<CoreState>>,
     headers: HeaderMap,
-    Req { params, body, .. }: Req<ChangeBackupSchedule>,
-) -> Result<Json<ScheduleChange>, ApiError> {
+    Req {
+        params,
+        query,
+        body,
+        ..
+    }: Req<ChangeBackupOptions>,
+) -> Result<Json<PatchBackupOptionsResponse>, ApiError> {
     let id = params.id;
-    state.access.require(&caller, &id, Permission::Edit).await?;
+    state.access.require(&caller, &id).await?;
     let current = records::schedule(&state.db, &id).await.map_err(internal)?;
-    let interval_hours = body.interval_hours.unwrap_or(current.interval_hours);
+    let interval_hours = body.interval.unwrap_or(current.interval_hours);
     if !(1..=24 * 31).contains(&interval_hours) {
         return Err(ApiError::new(
             ErrorCode::InvalidInput,
             "Back up at most every hour and at least every 744 hours.",
         ));
     }
-    let keep = body.keep.unwrap_or(current.keep);
-    if keep > SLOTS {
-        return Err(ApiError::new(
+    let slots = || {
+        ApiError::new(
             ErrorCode::InvalidInput,
             format!("There are {SLOTS} slots."),
-        ));
+        )
+    };
+    let keep = match (body.split_automatic, body.split_manual) {
+        (Some(automatic), Some(manual)) if automatic + manual != SLOTS => {
+            return Err(ApiError::new(
+                ErrorCode::InvalidInput,
+                format!("Scheduled and manual slots add up to {SLOTS}."),
+            ));
+        }
+        (Some(automatic), _) => automatic,
+        (None, Some(manual)) => SLOTS.checked_sub(manual).ok_or_else(slots)?,
+        (None, None) => current.keep,
+    };
+    if keep > SLOTS {
+        return Err(slots());
     }
     let excess = records::excess(&state.db, &id, Kind::Scheduled, keep)
         .await
         .map_err(internal)?;
-    if !excess.is_empty() && !body.delete_excess {
-        return Ok(Json(ScheduleChange {
+    if !excess.is_empty() && query.ar != Some(true) {
+        return Ok(Json(PatchBackupOptionsResponse {
             applied: false,
-            excess,
+            backup_ids: excess,
         }));
     }
     let caller = if excess.is_empty() {
@@ -262,16 +303,14 @@ pub async fn change_schedule(
             &state.db,
             &caller,
             Some(&id),
-            Action::BackupDeleted {
-                backup_id: uuid(old),
-            },
+            Action::BackupDeleted { id: uuid(old) },
         )
         .await;
     }
     activity::log(&state.db, &caller, Some(&id), Action::SettingsChanged).await;
-    Ok(Json(ScheduleChange {
+    Ok(Json(PatchBackupOptionsResponse {
         applied: true,
-        excess,
+        backup_ids: excess,
     }))
 }
 
@@ -279,9 +318,9 @@ pub async fn create(
     caller: Caller,
     State(state): State<Arc<CoreState>>,
     Req { params, body, .. }: Req<CreateBackup>,
-) -> Result<Json<CreatedBackup>, ApiError> {
+) -> Result<Json<PostBackupResponse>, ApiError> {
     let id = params.id;
-    state.access.require(&caller, &id, Permission::Edit).await?;
+    state.access.require(&caller, &id).await?;
     let name = backup_name(&body.name)?;
     let (backup, _) = state
         .backups
@@ -291,12 +330,10 @@ pub async fn create(
         &state.db,
         &caller,
         Some(&id),
-        Action::BackupCreated {
-            backup_id: uuid(&backup),
-        },
+        Action::BackupCreated { id: uuid(&backup) },
     )
     .await;
-    Ok(Json(CreatedBackup { id: backup }))
+    Ok(Json(PostBackupResponse { id: backup }))
 }
 
 pub async fn rename(
@@ -305,7 +342,7 @@ pub async fn rename(
     Req { params, body, .. }: Req<RenameBackup>,
 ) -> Result<Empty, ApiError> {
     let (id, backup) = (params.id, params.backup_id);
-    state.access.require(&caller, &id, Permission::Edit).await?;
+    state.access.require(&caller, &id).await?;
     let name = backup_name(&body.name)?;
     if !records::rename(&state.db, &id, &backup, name)
         .await
@@ -320,9 +357,7 @@ pub async fn rename(
         &state.db,
         &caller,
         Some(&id),
-        Action::BackupRenamed {
-            backup_id: uuid(&backup),
-        },
+        Action::BackupRenamed { id: uuid(&backup) },
     )
     .await;
     Ok(Empty)
@@ -339,9 +374,7 @@ pub async fn delete(
         &state.db,
         &caller,
         Some(&id),
-        Action::BackupDeleted {
-            backup_id: uuid(&backup),
-        },
+        Action::BackupDeleted { id: uuid(&backup) },
     )
     .await;
     Ok(Empty)
@@ -353,15 +386,13 @@ pub async fn delete_many(
     Req { params, body, .. }: Req<DeleteBackups>,
 ) -> Result<Empty, ApiError> {
     let id = params.id;
-    for backup in &body.ids {
+    for backup in &body.backup_ids {
         state.backups.delete(&id, backup).await?;
         activity::log(
             &state.db,
             &caller,
             Some(&id),
-            Action::BackupDeleted {
-                backup_id: uuid(backup),
-            },
+            Action::BackupDeleted { id: uuid(backup) },
         )
         .await;
     }
@@ -383,9 +414,7 @@ pub async fn restore(
         &state.db,
         &caller,
         Some(&id),
-        Action::BackupRestored {
-            backup_id: uuid(&backup),
-        },
+        Action::BackupRestored { id: uuid(&backup) },
     )
     .await;
     Ok(StatusCode::ACCEPTED)
@@ -397,7 +426,7 @@ pub async fn retry(
     Req { params, .. }: Req<RetryBackup>,
 ) -> Result<StatusCode, ApiError> {
     let (id, backup) = (params.id, params.backup_id);
-    state.access.require(&caller, &id, Permission::Edit).await?;
+    state.access.require(&caller, &id).await?;
     state.backups.retry(&id, &backup, caller.user_id()).await?;
     Ok(StatusCode::ACCEPTED)
 }
@@ -427,7 +456,7 @@ async fn operation(
     operation: i64,
     cancel: bool,
 ) -> Result<Empty, ApiError> {
-    state.access.require(caller, id, Permission::Edit).await?;
+    state.access.require(caller, id).await?;
     let found = records::operation(&state.db, operation)
         .await
         .map_err(internal)?
@@ -527,14 +556,14 @@ impl Drop for Temporary {
     }
 }
 
-/// `GET /servers/{id}/v1/worlds/{wid}/backups/{bid}/download`: a backup's zip, streamed.
+/// A backup's zip, streamed.
 pub async fn download_backup(
     caller: Caller,
     State(state): State<Arc<CoreState>>,
-    Path((id, wid, backup)): Path<(String, String, String)>,
+    Req { params, .. }: Req<DownloadBackup>,
 ) -> Result<Response, ApiError> {
-    world(&id, &wid)?;
-    state.access.require(&caller, &id, Permission::Edit).await?;
+    let (id, backup) = (params.id, params.backup_id);
+    state.access.require(&caller, &id).await?;
     let found = records::backup(&state.db, &id, &backup)
         .await
         .map_err(internal)?
@@ -551,24 +580,22 @@ pub async fn download_backup(
         &state.db,
         &caller,
         Some(&id),
-        Action::BackupDownloaded {
-            backup_id: uuid(&backup),
-        },
+        Action::BackupDownloaded { id: uuid(&backup) },
     )
     .await;
     Ok(zip_response(file, &found.name, "zip", None))
 }
 
-/// `GET /servers/{id}/v1/worlds/{wid}/files/download-full-zip`: the world and settings as they
-/// are now, copied as a backup is (hot when the server runs) and streamed, then removed.
+/// The world and settings as they are now, copied as a backup is (hot when the server runs) and
+/// streamed, then removed.
 pub async fn download_world(
     caller: Caller,
     State(state): State<Arc<CoreState>>,
-    Path((id, wid)): Path<(String, String)>,
+    Req { params, .. }: Req<DownloadWorld>,
 ) -> Result<Response, ApiError> {
-    world(&id, &wid)?;
-    state.access.require(&caller, &id, Permission::Edit).await?;
-    let server = server_rows::get(&state.db, &id)
+    let id = params.id;
+    state.access.require(&caller, &id).await?;
+    let server = server_rows::get(&state.db, &state.engine, &id)
         .await
         .map_err(internal)?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;

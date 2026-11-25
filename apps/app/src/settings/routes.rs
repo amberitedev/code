@@ -3,47 +3,42 @@ use std::sync::Arc;
 use axum::{Router, extract::State};
 use contracts::{
     ApiError, Empty, Json,
-    server::{Req, route},
+    server::{Mount, Req},
 };
-use engine::{Engine, routes::api_error};
+use engine::routes::api_error;
 
-use crate::server::{
+use super::Settings;
+use crate::local_api::{
     AppState,
-    endpoints::settings::{
-        AppSettings, CancelDirectoryChange, GetSettings, SetSettings,
-    },
+    endpoints::settings::{CancelDirectoryChange, GetSettings, SetSettings},
 };
+use crate::state::Desktop;
 
 pub fn routes() -> Router<AppState> {
-    let (get_path, get) = route::<GetSettings, _, _, _>(get_settings);
-    let (set_path, set) = route::<SetSettings, _, _, _>(set_settings);
-    Router::new().route(get_path, get).route(set_path, set)
+    Router::new()
+        .endpoint::<GetSettings, _, _>(get_settings)
+        .endpoint::<SetSettings, _, _>(set_settings)
 }
 
 /// Routes that answer while the engine cannot start, so they wait on nothing.
 pub fn startup_routes(identifier: String) -> Router {
-    let (path, method) =
-        route::<CancelDirectoryChange, _, _, _>(cancel_directory_change);
     Router::new()
-        .route(path, method)
+        .endpoint::<CancelDirectoryChange, _, _>(cancel_directory_change)
         .with_state(Arc::from(identifier))
 }
 
 async fn get_settings(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     _: Req<GetSettings>,
-) -> Result<Json<AppSettings>, ApiError> {
-    super::get(&engine)
-        .await
-        .map(|settings| Json(AppSettings(settings)))
-        .map_err(api_error)
+) -> Result<Json<Settings>, ApiError> {
+    super::get(&engine).await.map(Json).map_err(api_error)
 }
 
 async fn set_settings(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { body, .. }: Req<SetSettings>,
 ) -> Result<Empty, ApiError> {
-    super::set(&engine, body.0)
+    super::set(&engine, body)
         .await
         .map(|()| Empty)
         .map_err(api_error)

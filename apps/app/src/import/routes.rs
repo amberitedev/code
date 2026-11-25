@@ -1,13 +1,14 @@
-use std::{path::PathBuf, sync::Arc};
+use crate::state::Desktop;
+use std::path::PathBuf;
 
 use axum::{Router, extract::State};
 use contracts::{
     ApiError, Json,
-    server::{Req, route},
+    server::{Mount, Req},
 };
-use engine::{Engine, pack::import, routes::api_error};
+use engine::{pack::import, routes::api_error};
 
-use crate::server::{
+use crate::local_api::{
     AppState,
     endpoints::import::{
         CheckImportableInstance, GetDefaultLauncherPath, ImportInstance,
@@ -16,16 +17,11 @@ use crate::server::{
 };
 
 pub fn routes() -> Router<AppState> {
-    [
-        route::<ListImportableInstances, _, _, _>(list_importable_instances),
-        route::<CheckImportableInstance, _, _, _>(check_importable_instance),
-        route::<GetDefaultLauncherPath, _, _, _>(get_default_launcher_path),
-        route::<ImportInstance, _, _, _>(import_instance),
-    ]
-    .into_iter()
-    .fold(Router::new(), |router, (path, method)| {
-        router.route(path, method)
-    })
+    Router::new()
+        .endpoint::<ListImportableInstances, _, _>(list_importable_instances)
+        .endpoint::<CheckImportableInstance, _, _>(check_importable_instance)
+        .endpoint::<GetDefaultLauncherPath, _, _>(get_default_launcher_path)
+        .endpoint::<ImportInstance, _, _>(import_instance)
 }
 
 async fn list_importable_instances(
@@ -56,14 +52,14 @@ async fn get_default_launcher_path(
 }
 
 async fn import_instance(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { body, .. }: Req<ImportInstance>,
 ) -> Result<Json<ImportJob>, ApiError> {
     engine::install::import_instance(
         body.launcher_type,
         body.base_path,
         body.instance_folder,
-        &engine,
+        engine.engine(),
     )
     .await
     .map(|job| Json(ImportJob(job)))

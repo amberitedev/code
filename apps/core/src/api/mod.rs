@@ -1,9 +1,8 @@
 //! The HTTP API: Axum routes, one file per resource. The same router serves HTTPS and the local
 //! socket (see `access::local`).
 //!
-//! Routes only a Core has are `contracts::core` Endpoints. A server's content, share, files and
-//! icon are the engine's routes (`engine_mount`). The download routes match the `Kyros.*` shapes in
-//! `packages/api-client/src/modules`.
+//! Routes only a Core has are `contracts::core` Endpoints, in Modrinth Hosting's shapes. A server's
+//! content, share, files, icon and logs are the engine's routes (`engine_mount`).
 
 pub mod activity;
 pub mod backups;
@@ -15,6 +14,7 @@ pub mod follow;
 pub mod health;
 pub mod insight;
 pub mod logs;
+pub mod ops;
 pub mod pairing;
 pub mod performance;
 pub mod properties;
@@ -31,12 +31,11 @@ use std::{sync::Arc, time::Duration};
 use axum::{
     Router,
     extract::{DefaultBodyLimit, FromRef},
-    handler::Handler,
     http::StatusCode,
-    routing::{any, get},
+    routing::any,
 };
 use color_eyre::eyre::{Result, eyre};
-use contracts::{ApiError, Endpoint, ErrorCode, core::*, server::route};
+use contracts::{ApiError, ErrorCode, core::*, server::Mount};
 use engine::{Engine, access::Access};
 use hyper_util::{
     rt::{TokioExecutor, TokioIo, TokioTimer},
@@ -50,18 +49,6 @@ use tower_http::{timeout::TimeoutLayer, trace::TraceLayer};
 /// A failure on the Core's side, such as a database or disk error, described by its cause.
 pub fn internal(error: impl std::fmt::Display) -> ApiError {
     ApiError::new(ErrorCode::InternalError, format!("{error:#}"))
-}
-
-/// The one world of a server has the server's id.
-pub fn world(id: &str, wid: &str) -> Result<(), ApiError> {
-    if id.eq_ignore_ascii_case(wid) {
-        Ok(())
-    } else {
-        Err(ApiError::new(
-            ErrorCode::NotFound,
-            format!("There is no world {wid}."),
-        ))
-    }
 }
 
 /// The longest a request may take, except the routes that wait on a server.
@@ -78,10 +65,14 @@ pub struct CoreState {
     pub servers: Arc<crate::servers::Servers>,
     pub access: Arc<crate::access::CoreAccess>,
     pub backups: Arc<crate::backups::Backups>,
+    /// The Core's events for `/events` sockets: power, server changes, ended ops and backup
+    /// progress.
+    pub events: tokio::sync::broadcast::Sender<events::CoreEvent>,
     pub update: Arc<crate::update::Updater>,
     pub network: Arc<crate::network::forward::Network>,
     pub storage: Arc<crate::storage::Storage>,
     pub consoles: Arc<events::Consoles>,
+    pub ops: ops::Ops,
 }
 
 /// The router's state. Routes take `State<Arc<CoreState>>`; the engine's extractors find
@@ -107,35 +98,45 @@ impl FromRef<Shared> for Arc<dyn Access> {
     }
 }
 
-/// Mounting an Endpoint's handler at its method and path.
-trait Endpoints {
-    fn endpoint<E: Endpoint, H: Handler<T, Shared>, T: 'static>(
-        self,
-        handler: H,
-    ) -> Self;
-}
-
-impl Endpoints for Router<Shared> {
-    fn endpoint<E: Endpoint, H: Handler<T, Shared>, T: 'static>(
-        self,
-        handler: H,
-    ) -> Self {
-        let (path, method) = route::<E, _, _, _>(handler);
-        self.route(path, method)
-    }
-}
-
 /// Every route. Each one checks its caller itself (see `access`); the network listener adds its
 /// own checks on top (see `network::tls`).
 pub fn router(state: Arc<CoreState>) -> Router {
-    Router::new()
+    timed_routes(Router::new())
+        // Applies to the routes above only.
+        .layer(TimeoutLayer::with_status_code(
+            StatusCode::REQUEST_TIMEOUT,
+            REQUEST_TIMEOUT,
+        ))
+        .merge(untimed_routes(Router::new()))
+        .layer(DefaultBodyLimit::max(MAX_BODY))
+        // Uploads stream to disk with their own cap: the disk's free space (`archive::room`).
+        .endpoint::<InstallModpackFile, _, _>(servers::install_modpack_file)
+        .merge(engine_mount::upload_routes(Router::new()))
+        // The pool's store streams uploads and downloads of any size, with its own caps. It is a
+        // pass-through to the `copal store` process, which mounts its own Endpoints.
+        .route("/store/{*rest}", any(storage::forward))
+        .layer(DefaultBodyLimit::disable())
+        .with_state(Shared(state))
+        .layer(TraceLayer::new_for_http().make_span_with(
+            |request: &axum::extract::Request| {
+                tracing::debug_span!(
+                    "request",
+                    method = %request.method(),
+                    path = %request.uri().path(),
+                )
+            },
+        ))
+}
+
+/// The routes that answer within the request timeout.
+fn timed_routes<M: Mount<Shared>>(mount: M) -> M {
+    let mount = mount
         .endpoint::<CheckHealth, _, _>(health::get)
-        .route("/events", get(events::socket))
+        .endpoint::<EventSocket, _, _>(events::socket)
         .endpoint::<SignIn, _, _>(sessions::sign_in)
         .endpoint::<ListSessions, _, _>(sessions::list)
         .endpoint::<SignOut, _, _>(sessions::sign_out)
         .endpoint::<RevokeSession, _, _>(sessions::revoke)
-        .endpoint::<CreateDownloadLink, _, _>(crate::access::links::create)
         .endpoint::<ListActivity, _, _>(activity::list)
         .endpoint::<GetPairing, _, _>(pairing::get)
         .endpoint::<RequestPairingCode, _, _>(pairing::new_code)
@@ -161,13 +162,13 @@ pub fn router(state: Arc<CoreState>) -> Router {
         .endpoint::<GetServer, _, _>(servers::get)
         .endpoint::<ChangeServer, _, _>(servers::change)
         .endpoint::<DeleteServer, _, _>(servers::delete)
-        .endpoint::<GetSetup, _, _>(servers::setup)
-        .endpoint::<SetJavaVersion, _, _>(startup::set_java_version)
+        .endpoint::<GetStartup, _, _>(startup::get)
+        .endpoint::<ChangeStartup, _, _>(startup::change)
         .endpoint::<GetProperties, _, _>(properties::get)
         .endpoint::<ChangeProperties, _, _>(properties::change)
         .endpoint::<ListBackups, _, _>(backups::list)
         .endpoint::<CreateBackup, _, _>(backups::create)
-        .endpoint::<ChangeBackupSchedule, _, _>(backups::change_schedule)
+        .endpoint::<ChangeBackupOptions, _, _>(backups::change_options)
         .endpoint::<DeleteBackups, _, _>(backups::delete_many)
         .endpoint::<RenameBackup, _, _>(backups::rename)
         .endpoint::<DeleteBackup, _, _>(backups::delete)
@@ -176,52 +177,31 @@ pub fn router(state: Arc<CoreState>) -> Router {
         .endpoint::<AckOperation, _, _>(backups::ack)
         .endpoint::<CancelOperation, _, _>(backups::cancel)
         .endpoint::<SetJava, _, _>(startup::set_java_path)
-        .merge(engine_mount::routes())
-        // Applies to the routes above only.
-        .layer(TimeoutLayer::with_status_code(
-            StatusCode::REQUEST_TIMEOUT,
-            REQUEST_TIMEOUT,
-        ))
-        // Starting a server answers once Java runs, and an install or update once it is done.
+        // Long ops answer 202 at once and end on the socket (`ops`).
+        .endpoint::<ListOps, _, _>(ops::list)
         .endpoint::<ChangePower, _, _>(servers::power)
-        .endpoint::<InstallUpdate, _, _>(update::apply)
         .endpoint::<CheckReachability, _, _>(insight::check)
-        .endpoint::<InstallLoader, _, _>(servers::install)
+        .endpoint::<InstallLoader, _, _>(servers::install);
+    engine_mount::routes(mount)
+}
+
+/// The `untimed` routes but uploads: each answers once its work is done.
+fn untimed_routes<M: Mount<Shared>>(mount: M) -> M {
+    let mount = mount
+        // An update answers once it is installed, just before the Core restarts into it.
+        .endpoint::<InstallUpdate, _, _>(update::apply)
         // A push uploads the server's files and waits for the store to confirm them.
         .endpoint::<ShareServer, _, _>(servers::share)
         // Following an instance reads its share's version first.
-        .endpoint::<FollowInstance, _, _>(follow::follow)
-        // Adding and updating addons download them first, as does taking the pack's version of
-        // an edited file, and a pack's install or update backs the world up first. Reading,
-        // unpacking, zipping, uploading and exporting files go through them whole.
-        .merge(engine_mount::long_routes())
+        .endpoint::<FollowInstance, _, _>(follow::follow);
+    // Adding and updating addons download them first, as does taking the pack's version of an
+    // edited file, and a pack's install or update backs the world up first. Reading, unpacking,
+    // zipping, uploading and exporting files go through them whole.
+    engine_mount::long_routes(mount)
         // Downloads stream for as long as they take.
-        .route(
-            "/servers/{id}/v1/worlds/{wid}/backups/{bid}/download",
-            get(backups::download_backup),
-        )
-        .route(
-            "/servers/{id}/v1/worlds/{wid}/files/download-full-zip",
-            get(backups::download_world),
-        )
-        .layer(DefaultBodyLimit::max(MAX_BODY))
-        // Uploads stream to disk with their own cap: the disk's free space (`archive::room`).
-        .endpoint::<InstallModpackFile, _, _>(servers::install_modpack_file)
-        .merge(engine_mount::upload_routes())
-        // The pool's store streams uploads and downloads of any size, with its own caps.
-        .route("/store/{*rest}", any(storage::forward))
-        .layer(DefaultBodyLimit::disable())
-        .with_state(Shared(state))
-        // Without the query, which can hold a download link (`access::links`).
-        .layer(TraceLayer::new_for_http().make_span_with(
-            |request: &axum::extract::Request| {
-                tracing::debug_span!(
-                    "request",
-                    method = %request.method(),
-                    path = %request.uri().path(),
-                )
-            },
-        ))
+        .endpoint::<DownloadBackup, _, _>(backups::download_backup)
+        .endpoint::<DownloadWorld, _, _>(backups::download_world)
+        .endpoint::<ExportModpack, _, _>(engine_mount::export_mrpack)
 }
 
 /// Serve HTTP/1 or HTTP/2, with upgrades for the `/events` socket, on one connection. A connection

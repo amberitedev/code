@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vite-plus/test'
-import { accounts, social } from '../packages/contracts/ts'
+import { accounts, social } from '../packages/contracts/ts/backend'
 import { AuthFeature } from '../packages/api-client/src/features/auth'
 import { SelfHostedFeature } from '../packages/api-client/src/features/self-hosted'
 import { GenericModrinthClient } from '../packages/api-client/src/platform/generic'
@@ -38,6 +38,12 @@ describe('self-hosted account routing through the complete client chain', () => 
 		expect(sharing.url).toBe('http://127.0.0.1:8787/v1/instances')
 		const globals = await prepared('/globals', { version: 'internal', skipAuth: true })
 		expect(globals.url).toBe('http://127.0.0.1:8787/_internal/globals')
+	})
+	it('fails shared instances loudly without an account backend', async () => {
+		const client = new GenericModrinthClient({})
+		await expect(
+			client.request('/instances', { api: 'sharedinstances', version: 1 }),
+		).rejects.toThrow('This client has no account backend')
 	})
 	it('routes every account and social path the backend serves, and any sign-in, to it', async () => {
 		const paths = [...Object.values(accounts), ...Object.values(social)].map(({ path }) =>

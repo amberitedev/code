@@ -2,10 +2,9 @@
 	<CreationFlowModal
 		ref="modalRef"
 		type="server-onboarding"
-		:available-loaders="['vanilla', 'fabric', 'neoforge', 'forge', 'quilt', 'paper', 'purpur']"
+		:available-loaders="['vanilla', 'fabric', 'neoforge', 'forge', 'quilt', 'paper']"
 		show-snapshot-toggle
 		:get-loader-manifest="getLoaderManifest"
-		:get-curse-forge-target="getCurseForgeTarget"
 		:finish-disabled="!canSetup"
 		:finish-disabled-tooltip="
 			!canSetup ? formatMessage(commonMessages.noPermissionAction) : undefined
@@ -19,8 +18,8 @@
 </template>
 
 <script setup lang="ts">
-import type { Archon } from '@modrinth/api-client'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
+import type { Server } from '@amberite/contracts/core'
+import { useMutation, useQueryClient } from '@tanstack/vue-query'
 import { until } from '@vueuse/core'
 import { computed, nextTick, useTemplateRef, watch } from 'vue'
 import { isNavigationFailure, NavigationFailureType, type RouteLocationRaw } from 'vue-router'
@@ -56,16 +55,7 @@ const { formatMessage } = useVIntl()
 const dismissServerIntro = useDismissServerIntro()
 const instanceSource = injectInstanceServerSource(null)
 const modalRef = useTemplateRef<InstanceType<typeof CreationFlowModal>>('modalRef')
-const serverId = computed(() => flow.request.value?.serverId ?? '')
-const { data: server } = useQuery({
-	queryKey: computed(() => serverKeys.detail(serverId.value)),
-	queryFn: ({ queryKey }) => client.archon.servers_v0.get(queryKey[2]),
-	enabled: computed(() => !!serverId.value),
-	staleTime: 30_000,
-})
-const canSetup = computed(() =>
-	hasServerPermission(server.value?.current_user_permissions ?? 0, 'SETUP'),
-)
+const canSetup = computed(() => hasServerPermission(0, 'SETUP'))
 let opening = false
 let introCompletion: Promise<void> | null = null
 
@@ -87,15 +77,8 @@ async function browseModpacks() {
 	if (!request) return
 	await navigateAndWaitForPage({
 		path: props.browsePath,
-		query: { sid: request.serverId, wid: request.worldId, from: 'onboarding' },
+		query: { sid: request.serverId, from: 'onboarding' },
 	})
-}
-
-async function getCurseForgeTarget() {
-	const request = flow.request.value
-	if (!request) throw new Error('No server is being set up')
-	const auth = await client.archon.servers_v0.getFilesystemAuth(request.serverId)
-	return { worldId: request.worldId, auth }
 }
 
 function onBack() {
@@ -112,7 +95,7 @@ async function onAfterHide() {
 }
 
 const install = useMutation({
-	mutationFn: ({
+	mutationFn: async ({
 		config,
 		request,
 	}: {
@@ -124,17 +107,16 @@ const install = useMutation({
 		if (instance && instanceSource) {
 			return instanceSource.pushInstance({
 				serverId: request.serverId,
-				worldId: request.worldId,
 				instanceId: instance.id,
 				properties: config.buildProperties(),
 			})
 		}
-		return installServerCreationConfig(client, config, request.serverId, request.worldId)
+		const { id: coreId } = await client.cores.coreOf(request.serverId)
+		return installServerCreationConfig(client, config, coreId, request.serverId)
 	},
 	onSuccess: (_result, { request }) => {
-		queryClient.setQueryData<Archon.Servers.v0.Server>(
-			serverKeys.detail(request.serverId),
-			(server) => (server ? { ...server, status: 'installing' } : server),
+		queryClient.setQueryData<Server>(serverKeys.detail(request.serverId), (server) =>
+			server ? { ...server, status: 'installing' } : server,
 		)
 	},
 })
@@ -171,7 +153,7 @@ async function onCreate(config: CreationFlowContextValue) {
 	flow.inviteActive.value = true
 	const navigateToOverview = () => navigateAndWaitForPage(`/hosting/manage/${request.serverId}`)
 	config.navigating.value = true
-	config.showInvite(request.serverId, request.worldId, request.siteUrl, () => {
+	config.showInvite(request.serverId, request.siteUrl, () => {
 		introCompletion = dismissServerIntro.mutateAsync(request.serverId).then(() => {})
 		return introCompletion
 	})

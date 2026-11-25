@@ -1,4 +1,6 @@
-import { core as coreApi, installs, sharing } from '@amberite/contracts'
+import { sharing } from '@amberite/contracts/backend'
+import { core as coreApi, type Loader } from '@amberite/contracts/core'
+import { installs } from '@amberite/contracts/engine'
 
 import { call } from '../src/call.ts'
 import { type App, type Core, FixtureError, step, until } from '../src/context.ts'
@@ -23,8 +25,8 @@ export async function server(
 	spec: {
 		readonly name: string
 		readonly gameVersion: string
-		/** As the Core names it, such as `vanilla`, `fabric` or `paper`. */
-		readonly loader?: string
+		/** As the Core names it, such as `Vanilla`, `Fabric` or `Paper`. */
+		readonly loader?: Loader
 		/** The newest when left out. */
 		readonly loaderVersion?: string
 		readonly players?: ReadonlyArray<App>
@@ -38,16 +40,18 @@ export async function server(
 			coreApi.InstallLoader,
 			{ id: made.id },
 			{
-				loader: spec.loader ?? 'vanilla',
+				loader: spec.loader ?? 'Vanilla',
 				loader_version: spec.loaderVersion ?? null,
 				game_version: spec.gameVersion,
+				// A long op: the Core answers at once, and the wait below sees it end.
+				op: crypto.randomUUID(),
 			},
 		)
 		await until(
 			`"${spec.name}" installs`,
 			async () => {
 				const now = await call(core, coreApi.GetServer, { id: made.id })
-				return !now.installing && now.loader !== null
+				return now.status !== 'installing' && now.loader !== null
 			},
 			// A first install downloads Minecraft, the loader and Java.
 			{ timeoutMs: 15 * 60_000, everyMs: 500 },
@@ -56,10 +60,10 @@ export async function server(
 	})
 	if (spec.running) {
 		await step(`"${spec.name}" starts`, async () => {
-			await call(core, coreApi.ChangePower, { id }, { action: 'start' })
+			await call(core, coreApi.ChangePower, { id }, { action: 'Start', op: crypto.randomUUID() })
 			await until(`"${spec.name}" is running`, async () => {
-				const { power } = await call(core, coreApi.GetServer, { id })
-				return power === 'running'
+				const { power_state } = await call(core, coreApi.GetServer, { id })
+				return power_state === 'running'
 			})
 		})
 	}

@@ -14,7 +14,6 @@ use anyhow::{Context, bail};
 use chrono::{DateTime, TimeZone, Utc};
 use serde::de::DeserializeOwned;
 use sqlx::{Executor, Sqlite, SqlitePool, Transaction};
-use std::collections::HashSet;
 use uuid::Uuid;
 
 #[derive(Debug, sqlx::FromRow)]
@@ -168,7 +167,6 @@ pub(crate) struct InstanceMetadataRecord {
     pub applied_content_set: ContentSet,
     pub link: InstanceLink,
     pub shared_instance: Option<SharedInstanceAttachment>,
-    pub group_ids: Vec<String>,
     pub launch_overrides: InstanceLaunchOverrides,
 }
 
@@ -236,7 +234,6 @@ struct InstanceMetadataRow {
     imported_name: Option<String>,
     imported_version_number: Option<String>,
     imported_filename: Option<String>,
-    group_ids: String,
     launch_overrides: Option<String>,
 }
 
@@ -347,7 +344,6 @@ impl InstanceMetadataRow {
             self.shared_sync_applied_backtrack_version,
             self.shared_sync_latest_available_update_id,
         )?;
-        let group_ids = parse_group_ids(self.group_ids)?;
         let launch_overrides =
             launch_overrides_from_json(instance_id, self.launch_overrides)?;
         let icon_config =
@@ -370,7 +366,6 @@ impl InstanceMetadataRow {
             applied_content_set,
             link,
             shared_instance,
-            group_ids,
             launch_overrides,
         })
     }
@@ -641,17 +636,6 @@ macro_rules! query_instance_metadata {
                     link.imported_name AS "imported_name?: String",
                     link.imported_version_number AS "imported_version_number?: String",
                     link.imported_filename AS "imported_filename?: String",
-                    COALESCE((
-                        SELECT json_group_array(id)
-                        FROM (
-                            SELECT groups.id
-                            FROM instance_group_memberships memberships
-                            INNER JOIN instance_groups groups
-                                ON groups.id = memberships.group_id
-                            WHERE memberships.instance_id = i.id
-                            ORDER BY groups.name
-                        )
-                    ), '[]') AS "group_ids!: String",
                     json(overrides.overrides) AS "launch_overrides?: String"
                 "#
                 + $from
@@ -884,144 +868,6 @@ where
         Some(row) => row.try_into(),
         None => Ok(InstanceLink::Unmanaged),
     }
-}
-
-pub(crate) async fn get_instance_groups<'e, E>(
-    instance_id: &str,
-    exec: E,
-) -> crate::Result<Vec<String>>
-where
-    E: Executor<'e, Database = Sqlite>,
-{
-    let rows = sqlx::query_scalar!(
-        "
-		SELECT groups.id
-		FROM instance_group_memberships memberships
-		INNER JOIN instance_groups groups
-			ON groups.id = memberships.group_id
-		WHERE memberships.instance_id = ?
-		ORDER BY groups.name
-		",
-        instance_id,
-    )
-    .fetch_all(exec)
-    .await?;
-
-    Ok(rows)
-}
-
-pub(crate) async fn list_instance_groups(
-    pool: &SqlitePool,
-) -> crate::Result<Vec<(String, String)>> {
-    let groups = sqlx::query_as::<_, (String, String)>(
-        "
-		SELECT id, name
-		FROM instance_groups
-		ORDER BY display_order, name, id
-		",
-    )
-    .fetch_all(pool)
-    .await?;
-
-    Ok(groups)
-}
-
-pub(crate) async fn create_instance_group(
-    id: &str,
-    name: &str,
-    pool: &SqlitePool,
-) -> crate::Result<()> {
-    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
-
-    sqlx::query(
-        "
-		UPDATE instance_groups
-		SET display_order = display_order + 1
-		WHERE id != ?
-		",
-    )
-    .bind(crate::api::instance::FAVORITES_GROUP_ID)
-    .execute(&mut *tx)
-    .await?;
-
-    sqlx::query(
-        "
-		INSERT INTO instance_groups (id, name, display_order)
-		VALUES (?, ?, 0)
-		",
-    )
-    .bind(id)
-    .bind(name)
-    .execute(&mut *tx)
-    .await?;
-
-    tx.commit().await?;
-
-    Ok(())
-}
-
-pub(crate) async fn set_instance_group_order(
-    group_ids: &[String],
-    pool: &SqlitePool,
-) -> crate::Result<()> {
-    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
-    let existing_group_ids = sqlx::query_scalar::<_, String>(
-        "
-		SELECT id
-		FROM instance_groups
-		WHERE id != ?
-		ORDER BY display_order, name, id
-		",
-    )
-    .bind(crate::api::instance::FAVORITES_GROUP_ID)
-    .fetch_all(&mut *tx)
-    .await?;
-    let existing_group_id_set = existing_group_ids
-        .iter()
-        .map(String::as_str)
-        .collect::<HashSet<_>>();
-    let mut seen_group_ids = HashSet::new();
-    let mut ordered_group_ids = Vec::with_capacity(existing_group_ids.len());
-
-    for group_id in group_ids {
-        if !seen_group_ids.insert(group_id.as_str()) {
-            bail!(ErrorKind::InputError(format!(
-                "duplicate instance group {group_id} in group order"
-            )));
-        }
-
-        if !existing_group_id_set.contains(group_id.as_str()) {
-            bail!(ErrorKind::InputError(format!(
-                "unknown instance group {group_id}"
-            )));
-        }
-
-        ordered_group_ids.push(group_id.as_str());
-    }
-
-    for group_id in &existing_group_ids {
-        if seen_group_ids.insert(group_id.as_str()) {
-            ordered_group_ids.push(group_id.as_str());
-        }
-    }
-
-    for (display_order, group_id) in ordered_group_ids.into_iter().enumerate() {
-        sqlx::query(
-            "
-			UPDATE instance_groups
-			SET display_order = ?
-			WHERE id = ?
-			",
-        )
-        .bind(display_order as i64)
-        .bind(group_id)
-        .execute(&mut *tx)
-        .await?;
-    }
-
-    tx.commit().await?;
-
-    Ok(())
 }
 
 pub(crate) async fn get_instance_launch_overrides<'e, E>(
@@ -1320,40 +1166,6 @@ pub(crate) async fn set_shared_instance_restored_from_remote(
     Ok(())
 }
 
-pub(crate) async fn replace_instance_groups(
-    instance_id: &str,
-    group_ids: &[String],
-    tx: &mut Transaction<'_, Sqlite>,
-) -> crate::Result<()> {
-    sqlx::query!(
-        "
-		DELETE FROM instance_group_memberships
-		WHERE instance_id = ?
-		",
-        instance_id,
-    )
-    .execute(&mut **tx)
-    .await?;
-
-    for group_id in group_ids {
-        sqlx::query(
-            "
-			INSERT OR IGNORE INTO instance_group_memberships (
-				instance_id,
-				group_id
-			)
-			VALUES (?, ?)
-			",
-        )
-        .bind(instance_id)
-        .bind(group_id)
-        .execute(&mut **tx)
-        .await?;
-    }
-
-    Ok(())
-}
-
 pub(crate) async fn upsert_instance_launch_overrides(
     overrides: &InstanceLaunchOverrides,
     tx: &mut Transaction<'_, Sqlite>,
@@ -1555,12 +1367,6 @@ fn required_i64(value: Option<i64>, column: &str) -> crate::Result<i64> {
         ))
         .into(),
     )
-}
-
-fn parse_group_ids(value: String) -> crate::Result<Vec<String>> {
-    serde_json::from_str(&value).context(ErrorKind::InputError(
-        "invalid instance groups JSON".to_string(),
-    ))
 }
 
 fn launch_overrides_from_json(

@@ -13,17 +13,17 @@ use tower::ServiceExt;
 
 use crate::{
     Engine,
-    access::{Access, BoxFuture, Caller, Permission},
+    access::{Access, BoxFuture, Caller},
     install::{InstallJobStatus, InstallRequest, model::InstallJobState},
     state::{
         CacheValue, CachedEntry,
-        tests::{add_instance, engine},
+        tests::{add_instance, engine, link_dir},
     },
 };
 
-/// Grants up to `granted` on everything, and denies the rest with 403.
+/// Allows everything, or denies everything with 403.
 struct FakeAccess {
-    granted: Option<Permission>,
+    allow: bool,
 }
 
 impl Access for FakeAccess {
@@ -38,12 +38,11 @@ impl Access for FakeAccess {
         &'a self,
         _: &'a Caller,
         _: Option<&'a str>,
-        permission: Permission,
-    ) -> BoxFuture<'a, Result<Permission, ApiError>> {
+    ) -> BoxFuture<'a, Result<(), ApiError>> {
         Box::pin(async move {
-            match self.granted {
-                Some(granted) if permission <= granted => Ok(permission),
-                _ => Err(ApiError::new(ErrorCode::Forbidden, "denied")),
+            match self.allow {
+                true => Ok(()),
+                false => Err(ApiError::new(ErrorCode::Forbidden, "denied")),
             }
         })
     }
@@ -91,66 +90,23 @@ async fn send(
 }
 
 async fn host(dir: &tempfile::TempDir, allow: bool) -> Router {
-    host_granting(dir, allow.then_some(Permission::Owner)).await
-}
-
-async fn host_granting(
-    dir: &tempfile::TempDir,
-    granted: Option<Permission>,
-) -> Router {
     crate::install_crypto_provider();
     let engine = engine(dir.path().to_path_buf()).await;
     add_instance(&engine, "local:a", "Survival").await;
     super::routes().with_state(Host {
         engine,
-        access: Arc::new(FakeAccess { granted }),
+        access: Arc::new(FakeAccess { allow }),
     })
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn the_library_reads_and_groups_instances_in_the_helpers_shapes() {
+async fn the_library_reads_instances_in_the_helpers_shapes() {
     let dir = tempfile::tempdir().unwrap();
     let router = host(&dir, true).await;
 
-    let (status, group) = send(
-        &router,
-        "POST",
-        "/instance-groups",
-        Some(json!({ "name": "Modded" })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(group["name"], "Modded");
-    let group_id = group["id"].as_str().unwrap();
-
-    let (status, _) = send(
-        &router,
-        "PATCH",
-        &format!("/instance-groups/{group_id}"),
-        Some(json!({ "name": "Heavy" })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    let (status, _) = send(
-        &router,
-        "PUT",
-        "/instance-groups/memberships",
-        Some(json!([{ "instance_id": "local:a", "group_ids": [group_id] }])),
-    )
-    .await;
-    assert_eq!(status, StatusCode::NO_CONTENT);
-
-    let (_, groups) = send(&router, "GET", "/instance-groups", None).await;
-    assert!(
-        groups
-            .as_array()
-            .unwrap()
-            .contains(&json!({ "id": group_id, "name": "Heavy" }))
-    );
     let (_, instance) =
         send(&router, "GET", "/instances/local%3Aa", None).await;
     assert_eq!(instance["path"], "Survival");
-    assert_eq!(instance["group_ids"], json!([group_id]));
     let (_, listed) = send(&router, "GET", "/instances", None).await;
     assert_eq!(listed[0]["id"], "local:a");
     let (_, many) = send(
@@ -166,7 +122,7 @@ async fn the_library_reads_and_groups_instances_in_the_helpers_shapes() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_denied_caller_sees_no_instances_and_touches_no_groups_or_store() {
+async fn a_denied_caller_sees_no_instances_and_touches_no_store() {
     let dir = tempfile::tempdir().unwrap();
     let router = host(&dir, false).await;
 
@@ -181,14 +137,6 @@ async fn a_denied_caller_sees_no_instances_and_touches_no_groups_or_store() {
             "{list}"
         );
     }
-    let (status, _) = send(
-        &router,
-        "POST",
-        "/instance-groups",
-        Some(json!({ "name": "Modded" })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
     for (method, uri, body) in [
         ("GET", "/content-store/usage", None),
         ("POST", "/content-store/cleanup", None),
@@ -221,8 +169,28 @@ async fn a_denied_caller_sees_no_instances_and_touches_no_groups_or_store() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn worlds_and_servers_are_read_and_edited_through_their_routes() {
+    crate::install_crypto_provider();
     let dir = tempfile::tempdir().unwrap();
-    let router = host(&dir, true).await;
+    let engine = engine(dir.path().to_path_buf()).await;
+    add_instance(&engine, "local:a", "Survival").await;
+    let router = super::routes().with_state(Host {
+        engine: Arc::clone(&engine),
+        access: Arc::new(FakeAccess { allow: true }),
+    });
+    // The host keeps join times and lists worlds with them.
+    let joined: chrono::DateTime<chrono::Utc> =
+        "2026-01-02T03:04:05Z".parse().unwrap();
+    let joins = crate::worlds::ServerJoins::from([(
+        ("hub.example.com".to_string(), 25565),
+        joined,
+    )]);
+    let list = async || {
+        let worlds =
+            crate::worlds::get_instance_worlds(&engine, "local:a", &joins)
+                .await
+                .unwrap();
+        serde_json::to_value(worlds).unwrap()
+    };
     let save = dir
         .path()
         .join(crate::INSTANCES_FOLDER_NAME)
@@ -292,8 +260,7 @@ async fn worlds_and_servers_are_read_and_edited_through_their_routes() {
     let (_, world) =
         send(&router, "GET", "/instances/local%3Aa/saves/World1", None).await;
     assert_eq!(world["name"], "New");
-    let (_, worlds) =
-        send(&router, "GET", "/instances/local%3Aa/worlds", None).await;
+    let worlds = list().await;
     let server = worlds
         .as_array()
         .unwrap()
@@ -303,24 +270,32 @@ async fn worlds_and_servers_are_read_and_edited_through_their_routes() {
     assert_eq!(server["name"], "Lobby");
     assert_eq!(server["pack_status"], "enabled");
     assert_eq!(server["display_status"], "hidden");
+    assert_eq!(server["last_played"], json!(joined));
 
-    let (_, shown) = send(
-        &router,
-        "GET",
-        "/worlds/recent?limit=10&display_statuses=%5B%22normal%22%2C%22favorite%22%5D",
-        None,
+    let all_joins = std::collections::HashMap::from([(
+        "local:a".to_string(),
+        joins.clone(),
+    )]);
+    let recent = async |statuses| {
+        let worlds =
+            crate::worlds::get_recent_worlds(&engine, 10, statuses, &all_joins)
+                .await
+                .unwrap();
+        serde_json::to_value(worlds).unwrap()
+    };
+    let shown = recent(
+        crate::worlds::DisplayStatus::Normal
+            | crate::worlds::DisplayStatus::Favorite,
     )
     .await;
     assert_eq!(shown, json!([world_with_instance(&world)]));
-    let (_, all) = send(&router, "GET", "/worlds/recent?limit=10", None).await;
+    let all = recent(enumset::EnumSet::all()).await;
     assert_eq!(all.as_array().unwrap().len(), 2);
 
     let (status, _) =
         send(&router, "DELETE", "/instances/local%3Aa/servers/0", None).await;
     assert_eq!(status, StatusCode::NO_CONTENT);
-    let (_, worlds) =
-        send(&router, "GET", "/instances/local%3Aa/worlds", None).await;
-    assert_eq!(worlds, json!([world]));
+    assert_eq!(list().await, json!([world]));
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -356,24 +331,6 @@ async fn world_routes_refuse_a_folder_outside_saves() {
     assert!(outside.join("keep.txt").exists());
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn desyncing_a_server_needs_owner_over_the_engine() {
-    let dir = tempfile::tempdir().unwrap();
-    let router = host_granting(&dir, Some(Permission::Edit)).await;
-
-    let (status, _) = send(
-        &router,
-        "POST",
-        "/instances/local%3Aa/servers/desync",
-        Some(json!({
-            "server_id": "synced",
-            "mode": "remove_from_other_instances",
-        })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-}
-
 fn world_with_instance(world: &Value) -> Value {
     let mut world = world.clone();
     world["instance_id"] = json!("local:a");
@@ -402,9 +359,7 @@ async fn cache_reads_take_the_helpers_query_names() {
     .unwrap();
     let router = super::routes().with_state(Host {
         engine,
-        access: Arc::new(FakeAccess {
-            granted: Some(Permission::Owner),
-        }),
+        access: Arc::new(FakeAccess { allow: true }),
     });
 
     let (status, user) = send(
@@ -441,9 +396,7 @@ async fn logs_are_read_and_deleted_by_file_name_only() {
     std::fs::write(&secret, "secret").unwrap();
     let router = super::routes().with_state(Host {
         engine,
-        access: Arc::new(FakeAccess {
-            granted: Some(Permission::Owner),
-        }),
+        access: Arc::new(FakeAccess { allow: true }),
     });
 
     let (status, logs) = send(
@@ -672,9 +625,9 @@ async fn file_and_content_routes_refuse_paths_that_leave_the_instance() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn an_editor_edits_an_instance_and_only_an_owner_removes_it() {
+async fn an_instance_is_edited_then_removed() {
     let dir = tempfile::tempdir().unwrap();
-    let router = host_granting(&dir, Some(Permission::Edit)).await;
+    let router = host(&dir, true).await;
     let instance = "/instances/local%3Aa";
 
     let (status, _) = send(
@@ -687,11 +640,6 @@ async fn an_editor_edits_an_instance_and_only_an_owner_removes_it() {
     assert_eq!(status, StatusCode::NO_CONTENT);
     let (_, edited) = send(&router, "GET", instance, None).await;
     assert_eq!(edited["name"], "Creative");
-    let (status, _) = send(&router, "DELETE", instance, None).await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-
-    let dir = tempfile::tempdir().unwrap();
-    let router = host(&dir, true).await;
     let (status, _) = send(&router, "DELETE", instance, None).await;
     assert_eq!(status, StatusCode::NO_CONTENT);
     let (_, removed) = send(&router, "GET", instance, None).await;
@@ -721,9 +669,7 @@ async fn install_jobs_are_read_and_controlled_through_their_instance() {
     let router = |allow: bool| {
         super::routes().with_state(Host {
             engine: Arc::clone(&engine),
-            access: Arc::new(FakeAccess {
-                granted: allow.then_some(Permission::Owner),
-            }),
+            access: Arc::new(FakeAccess { allow }),
         })
     };
     let job = format!("/install-jobs/{id}");
@@ -764,42 +710,23 @@ async fn install_jobs_are_read_and_controlled_through_their_instance() {
             .await,
         (StatusCode::OK, json!([]))
     );
+
+    // `local:a` follows no pack.
+    for (uri, body) in [
+        ("content-updates", Some(json!([]))),
+        ("modpack/repair", None),
+        ("modpack/update", Some(json!({ "version_id": "v" }))),
+    ] {
+        let uri = format!("/instances/local%3Aa/{uri}");
+        let (status, error) = send(&allowed, "POST", &uri, body).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{uri}: {error}");
+        assert_eq!(error["error"], "invalid_input", "{uri}");
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn only_an_owner_manages_a_share_and_an_unshared_instance_reads_empty() {
-    let dir = tempfile::tempdir().unwrap();
-    let editor = host_granting(&dir, Some(Permission::Edit)).await;
+async fn an_unshared_instance_reads_empty() {
     let shared = "/instances/local%3Aa/shared";
-    for (method, uri, body) in [
-        (
-            "POST",
-            format!("{shared}/users"),
-            Some(json!({ "user_ids": ["u"] })),
-        ),
-        ("GET", format!("{shared}/invites"), None),
-        ("DELETE", format!("{shared}/invites/i"), None),
-        ("PUT", shared.to_owned(), None),
-        ("DELETE", shared.to_owned(), None),
-        ("POST", format!("{shared}/unlink"), None),
-        ("DELETE", "/shared-instances/s".to_owned(), None),
-        ("POST", "/shared-instances/s/leave".to_owned(), None),
-    ] {
-        let (status, _) = send(&editor, method, &uri, body).await;
-        assert_eq!(status, StatusCode::FORBIDDEN, "{method} {uri}");
-    }
-    assert_eq!(
-        send(
-            &editor,
-            "DELETE",
-            &format!("{shared}/restored-notice"),
-            None
-        )
-        .await
-        .0,
-        StatusCode::NO_CONTENT
-    );
-
     let dir = tempfile::tempdir().unwrap();
     let owner = host(&dir, true).await;
     assert_eq!(
@@ -835,70 +762,9 @@ async fn server_host(dir: &tempfile::TempDir) -> (Router, std::path::PathBuf) {
     std::fs::create_dir_all(&root).unwrap();
     let router = super::routes().with_state(Host {
         engine,
-        access: Arc::new(FakeAccess {
-            granted: Some(Permission::Owner),
-        }),
+        access: Arc::new(FakeAccess { allow: true }),
     });
     (router, root)
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn files_need_an_editor_and_a_viewer_reads_only_the_icon() {
-    let dir = tempfile::tempdir().unwrap();
-    let viewer = host_granting(&dir, Some(Permission::View)).await;
-    let files = "/instances/local%3Aa/files";
-    let uploads = "/instances/local%3Aa/uploads";
-    for (method, uri, body) in [
-        ("GET", format!("{files}?path="), None),
-        ("GET", format!("{files}/content?path=a.txt"), None),
-        (
-            "PUT",
-            format!("{files}/content?path=a.txt&create_only=false"),
-            None,
-        ),
-        ("POST", format!("{files}/directories?path=notes"), None),
-        (
-            "POST",
-            format!("{files}/move"),
-            Some(json!({ "source": "a", "destination": "b" })),
-        ),
-        ("DELETE", format!("{files}?path=a&recursive=true"), None),
-        (
-            "POST",
-            format!("{files}/extract"),
-            Some(
-                json!({ "path": "a.zip", "override_conflicts": false, "dry_run": true }),
-            ),
-        ),
-        ("GET", format!("{files}/stat?path=a"), None),
-        (
-            "POST",
-            format!("{files}/zip"),
-            Some(json!({ "target_type": "Directory", "path": "config" })),
-        ),
-        (
-            "POST",
-            uploads.to_owned(),
-            Some(json!({ "scope": "files" })),
-        ),
-        ("GET", format!("{uploads}?scope=files"), None),
-        ("POST", format!("{uploads}/u/files?path=a.txt"), None),
-        ("POST", format!("{uploads}/u/finalize"), None),
-        ("DELETE", format!("{uploads}/u"), None),
-        ("PUT", "/instances/local%3Aa/icon".to_owned(), None),
-        (
-            "PUT",
-            "/instances/local%3Aa/icon/edited".to_owned(),
-            Some(json!({ "config": null, "image": [] })),
-        ),
-        ("DELETE", "/instances/local%3Aa/icon".to_owned(), None),
-    ] {
-        let (status, _) = send(&viewer, method, &uri, body).await;
-        assert_eq!(status, StatusCode::FORBIDDEN, "{method} {uri}");
-    }
-    let (status, _) =
-        send(&viewer, "GET", "/instances/local%3Aa/icon", None).await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "allowed, but there is none");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -992,6 +858,7 @@ async fn a_servers_files_stay_in_its_folder_and_never_replace_what_it_owns() {
         send(&router, "GET", &format!("{files}/stat?path=config"), None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(stat["type"], "directory");
+    assert_eq!(stat["full_path"], "/config", "Kyros's stat shape");
     for path in [
         "..%2Fescape.txt",
         "a%2F..%2F..%2Fescape.txt",
@@ -1149,4 +1016,285 @@ async fn a_servers_file_routes_follow_no_link() {
         std::fs::read_to_string(outside.path().join("secret.txt")).unwrap(),
         "secret"
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_apps_files_tab_leaves_managed_content_to_the_content_tab() {
+    crate::install_crypto_provider();
+    let dir = tempfile::tempdir().unwrap();
+    let engine = engine(dir.path().to_path_buf()).await;
+    add_instance(&engine, "local:a", "Survival").await;
+    let root = engine.directories.instances_dir().join("Survival");
+    std::fs::create_dir_all(root.join("mods")).unwrap();
+    let pack = dir.path().join("pack.zip");
+    std::fs::write(&pack, "pack").unwrap();
+    crate::instance::add_project_from_path(
+        &engine,
+        "local:a",
+        &pack,
+        Some(crate::state::ProjectType::ResourcePack),
+    )
+    .await
+    .unwrap();
+    let router = super::routes().with_state(Host {
+        engine,
+        access: Arc::new(FakeAccess { allow: true }),
+    });
+    let files = "/instances/local%3Aa/files";
+    let write =
+        |path: &str| format!("{files}/content?path={path}&create_only=false");
+    let (status, _) =
+        send_raw(&router, "PUT", &write("config%2Fa.txt"), b"a".to_vec()).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let read_only = |listed: &Value, path: &str| {
+        listed
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["path"] == path)
+            .unwrap_or_else(|| panic!("{path} is listed"))["readOnly"]
+            .clone()
+    };
+    let (_, listed) =
+        send(&router, "GET", &format!("{files}?path="), None).await;
+    assert_eq!(read_only(&listed, "mods"), true);
+    assert_eq!(read_only(&listed, "resourcepacks"), true);
+    assert_eq!(read_only(&listed, "config"), false);
+    let (_, listed) =
+        send(&router, "GET", &format!("{files}?path=resourcepacks"), None)
+            .await;
+    assert_eq!(read_only(&listed, "resourcepacks/pack.zip"), true);
+
+    for path in ["resourcepacks%2Fpack.zip", "mods%2Fa.jar"] {
+        let (status, _) =
+            send_raw(&router, "PUT", &write(path), b"x".to_vec()).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{path} was written");
+    }
+    for (method, uri, body) in [
+        (
+            "DELETE",
+            format!("{files}?path=resourcepacks%2Fpack.zip"),
+            None,
+        ),
+        ("DELETE", format!("{files}?path=mods&recursive=true"), None),
+        ("POST", format!("{files}/directories?path=mods%2Fsub"), None),
+        (
+            "POST",
+            format!("{files}/move"),
+            Some(
+                json!({ "source": "resourcepacks/pack.zip", "destination": "config/pack.zip" }),
+            ),
+        ),
+        (
+            "POST",
+            format!("{files}/move"),
+            Some(
+                json!({ "source": "config/a.txt", "destination": "mods/a.jar" }),
+            ),
+        ),
+    ] {
+        let (status, _) = send(&router, method, &uri, body).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{method} {uri}");
+    }
+
+    let mut archive = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    archive
+        .start_file("mods/b.jar", zip::write::SimpleFileOptions::default())
+        .unwrap();
+    std::io::Write::write_all(&mut archive, b"jar").unwrap();
+    let archive = archive.finish().unwrap().into_inner();
+    send_raw(&router, "PUT", &write("drop.zip"), archive).await;
+    let (status, _) = send(
+        &router,
+        "POST",
+        &format!("{files}/extract"),
+        Some(json!({ "path": "drop.zip", "target": "", "override_conflicts": true, "dry_run": false })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // An upload's files are placed as a write would be.
+    let uploads = "/instances/local%3Aa/uploads";
+    let (_, upload) =
+        send(&router, "POST", uploads, Some(json!({ "scope": "files" }))).await;
+    let upload = upload["upload_id"].as_str().unwrap().to_owned();
+    send_raw(
+        &router,
+        "POST",
+        &format!("{uploads}/{upload}/files?path=mods%2Fc.jar"),
+        b"jar".to_vec(),
+    )
+    .await;
+    let (status, _) = send(
+        &router,
+        "POST",
+        &format!("{uploads}/{upload}/finalize"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    assert_eq!(
+        std::fs::read_to_string(root.join("resourcepacks/pack.zip")).unwrap(),
+        "pack"
+    );
+    assert!(root.join("mods").is_dir());
+    assert!(
+        ["a.jar", "b.jar", "c.jar"]
+            .iter()
+            .all(|jar| !root.join("mods").join(jar).exists())
+    );
+    assert!(root.join("config/a.txt").exists());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_apps_files_follow_a_linked_data_folder_but_no_link_in_an_instance()
+{
+    crate::install_crypto_provider();
+    let dir = tempfile::tempdir().unwrap();
+    // The App's instances live on another drive, reached through a link.
+    let external = tempfile::tempdir().unwrap();
+    let instances = dir.path().join("profiles");
+    link_dir(external.path(), &instances);
+    let engine = Engine::new(crate::state::EngineConfig {
+        instances_dir: instances.clone(),
+        ..crate::state::tests::config(dir.path().to_path_buf())
+    })
+    .await
+    .unwrap();
+    add_instance(&engine, "local:a", "Survival").await;
+    let root = external.path().join("Survival");
+    std::fs::create_dir_all(&root).unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::write(outside.path().join("secret.txt"), "secret").unwrap();
+    link_dir(outside.path(), &root.join("linked"));
+    let router = super::routes().with_state(Host {
+        engine,
+        access: Arc::new(FakeAccess { allow: true }),
+    });
+    let files = "/instances/local%3Aa/files";
+
+    let (status, _) = send_raw(
+        &router,
+        "PUT",
+        &format!("{files}/content?path=config%2Fa.txt&create_only=false"),
+        b"a".to_vec(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(
+        std::fs::read_to_string(root.join("config/a.txt")).unwrap(),
+        "a"
+    );
+    let (status, read) = send_raw(
+        &router,
+        "GET",
+        &format!("{files}/content?path=config%2Fa.txt"),
+        Vec::new(),
+    )
+    .await;
+    assert_eq!((status, &read[..]), (StatusCode::OK, &b"a"[..]));
+    let (status, listed) =
+        send(&router, "GET", &format!("{files}?path="), None).await;
+    assert_eq!(status, StatusCode::OK);
+    let linked = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["path"] == "linked")
+        .expect("the link is listed");
+    assert_eq!(linked["type"], "symlink");
+
+    // A link inside the instance is neither followed nor changed.
+    for (method, uri) in [
+        ("GET", format!("{files}?path=linked")),
+        ("GET", format!("{files}/content?path=linked%2Fsecret.txt")),
+        (
+            "PUT",
+            format!(
+                "{files}/content?path=linked%2Fsecret.txt&create_only=false"
+            ),
+        ),
+        (
+            "PUT",
+            format!("{files}/content?path=linked&create_only=false"),
+        ),
+        ("DELETE", format!("{files}?path=linked%2Fsecret.txt")),
+        ("DELETE", format!("{files}?path=linked&recursive=true")),
+        ("POST", format!("{files}/directories?path=linked%2Fsub")),
+    ] {
+        let (status, _) =
+            send_raw(&router, method, &uri, b"overwritten".to_vec()).await;
+        assert!(status.is_client_error(), "{method} {uri}: {status}");
+    }
+    let (status, _) = send(
+        &router,
+        "POST",
+        &format!("{files}/move"),
+        Some(json!({ "source": "linked", "destination": "moved" })),
+    )
+    .await;
+    assert!(status.is_client_error(), "{status}");
+    assert_eq!(
+        std::fs::read_to_string(outside.path().join("secret.txt")).unwrap(),
+        "secret"
+    );
+    assert!(!outside.path().join("sub").exists());
+    assert!(std::fs::symlink_metadata(root.join("linked")).is_ok());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_servers_logs_are_read_and_deleted_through_no_link() {
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::write(outside.path().join("crash.txt"), "secret").unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let (router, root) = server_host(&dir).await;
+    std::fs::create_dir_all(root.join("logs")).unwrap();
+    std::fs::write(root.join("logs/latest.log"), "[main] ready").unwrap();
+    link_dir(outside.path(), &root.join("crash-reports"));
+    // A FIFO a mod made would hang a reader that opened it.
+    #[cfg(unix)]
+    nix::unistd::mkfifo(
+        &root.join("logs/fifo.log"),
+        nix::sys::stat::Mode::S_IRWXU,
+    )
+    .unwrap();
+    let logs = "/instances/local%3Aa/logs";
+
+    let (status, listed) = send(&router, "GET", logs, None).await;
+    assert_eq!(status, StatusCode::OK);
+    let names: Vec<_> = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|log| log["filename"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["latest.log"]);
+    let (status, output) =
+        send(&router, "GET", &format!("{logs}/InfoLog/latest.log"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(output.as_str().unwrap().contains("ready"));
+
+    let behind_link = format!("{logs}/CrashReport/crash.txt");
+    for method in ["GET", "DELETE"] {
+        let (status, _) = send(&router, method, &behind_link, None).await;
+        assert!(!status.is_success(), "{method}");
+    }
+    #[cfg(unix)]
+    {
+        let fifo = format!("{logs}/InfoLog/fifo.log");
+        let (status, _) = send(&router, "GET", &fifo, None).await;
+        assert!(!status.is_success());
+    }
+    assert!(outside.path().join("crash.txt").exists());
+    let (status, _) = send(
+        &router,
+        "DELETE",
+        &format!("{logs}/InfoLog/latest.log"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert!(!root.join("logs/latest.log").exists());
 }

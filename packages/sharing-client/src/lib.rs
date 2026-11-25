@@ -10,6 +10,7 @@
 //! - `diff`: what one share content changes over another, for updates, pushes and history.
 //! - `history`: the versions an owner pushed, kept locally by the side that pushed them.
 //! - `crypto`: the pool's encryption.
+//! - `keys`: the backend's ticket keys, which Copal's sign-in and the store's tickets verify with.
 //! - `net`: reaching a Core.
 //! - `disk`: free disk space, checked before the store and Core write.
 
@@ -18,6 +19,7 @@ pub mod diff;
 pub mod disk;
 pub mod history;
 pub mod install;
+pub mod keys;
 pub mod net;
 pub mod pool;
 pub mod push;

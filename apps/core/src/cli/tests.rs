@@ -142,10 +142,12 @@ async fn core() -> (tempfile::TempDir, Arc<CoreState>, Client) {
     )
     .await
     .unwrap();
+    let events = crate::api::events::sender();
     let backups = crate::backups::Backups::open(
         paths.clone(),
         db.clone(),
         Arc::clone(&servers),
+        events.clone(),
     )
     .await
     .unwrap();
@@ -154,6 +156,7 @@ async fn core() -> (tempfile::TempDir, Arc<CoreState>, Client) {
         engine,
         access: Arc::new(CoreAccess::new(db.clone(), keys)),
         backups,
+        events,
         update: Arc::new(Updater::new(
             paths.clone(),
             db.clone(),
@@ -170,6 +173,7 @@ async fn core() -> (tempfile::TempDir, Arc<CoreState>, Client) {
             Arc::new(tokio::sync::Notify::new()),
         )),
         consoles: Arc::default(),
+        ops: Default::default(),
         db,
     });
     let router = api::router(Arc::clone(&state));
@@ -180,7 +184,7 @@ async fn core() -> (tempfile::TempDir, Arc<CoreState>, Client) {
     });
     let client = Client::at(paths);
     for _ in 0..50 {
-        if client.get::<serde_json::Value>("/health").await.is_ok() {
+        if client.is_up().await {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
@@ -194,7 +198,7 @@ async fn core_commands_round_trip() {
     let eula = super::machine::eula(&client, false).await.unwrap();
     assert!(eula.json["accepted_at"].is_null());
     let eula = super::machine::eula(&client, true).await.unwrap();
-    assert!(eula.json["accepted_at"].is_i64());
+    assert!(eula.json["accepted_at"].is_string());
     let status = super::machine::update(
         &client,
         UpdateCommand::Channel {

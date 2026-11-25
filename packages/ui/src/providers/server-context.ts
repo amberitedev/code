@@ -1,7 +1,9 @@
-import type { Archon, UploadState } from '@modrinth/api-client'
+import type { PowerState, Server } from '@amberite/contracts/core'
+import type { ContractClient, UploadState } from '@modrinth/api-client'
 import type { ComputedRef, Ref } from 'vue'
 
 import type { MessageDescriptor } from '#ui/composables/i18n'
+import type { ConsoleState } from '#ui/composables/server-console'
 import type {
 	ServerInstallationKey,
 	ServerInstallationState,
@@ -14,48 +16,24 @@ export interface BusyReason {
 	reason: MessageDescriptor
 }
 
-export interface FilesystemAuth {
-	url: string
-	token: string
-}
-
 export type CancelUploadHandler = () => void | Promise<void>
 
-export interface ServerStatsSample {
-	cpu_percent: number
-	ram_usage_bytes: number
-	ram_total_bytes: number
-	storage_usage_bytes: number
-	storage_total_bytes: number
-}
-
-export interface ServerStats {
-	current: ServerStatsSample
-	past: ServerStatsSample
-	graph: {
-		cpu: number[]
-		ram: number[]
-	}
-}
-
+/** The server a panel shows, on its Core. */
 export interface ModrinthServerContext {
 	readonly serverId: string
-	readonly worldId: Ref<string | null>
-	readonly server: Ref<Archon.Servers.v0.Server>
-	readonly serverFull: ComputedRef<Archon.Servers.v1.ServerFull | null>
-	readonly currentUserPermissions: ComputedRef<Archon.Servers.v0.UserScope>
-	/** Whether the viewer is a Modrinth admin, same as the server settings support tab. */
-	readonly isSiteAdmin: ComputedRef<boolean>
+	/** The Core that has the server, and its routes. */
+	readonly coreId: string
+	readonly core: ContractClient
+	/** Undefined until the server first loads. */
+	readonly server: Ref<Server | undefined>
+	/** The server's live console, from when this panel opened. */
+	readonly console: ConsoleState
 
-	// Websocket state
+	/** The Core's event socket is open. */
 	readonly isConnected: Ref<boolean>
-	readonly isWsAuthIncorrect: Ref<boolean>
-	readonly powerState: Ref<Archon.Websocket.v0.PowerState>
-	readonly powerStateDetails: Ref<{ oom_killed?: boolean; exit_code?: number } | undefined>
+	readonly powerState: Ref<PowerState>
 	readonly isServerRunning: ComputedRef<boolean>
-	readonly stats: Ref<ServerStats>
 	readonly uptimeSeconds: Ref<number>
-	readonly installProgressItems: Ref<Archon.Websocket.v0.InstallProgressItem[]>
 	readonly installation: ComputedRef<ServerInstallationState | null>
 	beginInstallation: (key: ServerInstallationKey) => void
 	cancelOptimisticInstallation: () => void
@@ -64,17 +42,11 @@ export interface ModrinthServerContext {
 	// Busy state — when non-empty, all write operations should be disabled
 	readonly busyReasons: ComputedRef<BusyReason[]>
 
-	// Filesystem state
-	readonly fsAuth: Ref<FilesystemAuth | null>
-	readonly fsOps: Ref<Archon.Websocket.v0.FilesystemOperation[]>
-	readonly fsQueuedOps: Ref<Archon.Websocket.v0.QueuedFilesystemOp[]>
-	refreshFsAuth: () => Promise<void>
-
 	// File upload state
 	readonly uploadState: Ref<UploadState>
 	readonly cancelUpload: Ref<CancelUploadHandler | null>
 
-	// File operations (extract, move, etc.)
+	// File operations this page runs, such as zipping
 	readonly activeOperations: ComputedRef<FileOperation[]>
 	dismissOperation: (opId: string, action: 'dismiss' | 'cancel') => Promise<void>
 	upsertLocalFileOperation?: (operation: FileOperation) => void

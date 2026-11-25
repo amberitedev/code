@@ -29,11 +29,10 @@ import SharedFilesPublishModal from '#ui/components/sharing/SharedFilesPublishMo
 import { useServerPermissions } from '#ui/composables/server-permissions'
 import { serverShareableFilesQueryOptions } from '#ui/composables/server-sharing/query-options'
 import type { ContentDiffItem } from '#ui/layouts/shared/installation-settings/types'
-import { injectAuth, injectModrinthClient } from '#ui/providers'
+import { injectAuth, injectModrinthServerContext } from '#ui/providers'
 
 const props = defineProps<{
 	serverId: string
-	worldId?: string
 	diffs: ContentDiffItem[]
 	changesDescription?: string
 	confirmLabel?: string
@@ -50,20 +49,15 @@ const emit = defineEmits<{
 	retry: []
 }>()
 
-const client = injectModrinthClient()
+const { core } = injectModrinthServerContext()
 const auth = injectAuth()
 const { canUsePowerActions } = useServerPermissions()
 const modal = ref<InstanceType<typeof SharedFilesPublishModal>>()
 const open = ref(false)
 const filesQuery = useQuery(
 	computed(() => ({
-		...serverShareableFilesQueryOptions(
-			client,
-			props.serverId,
-			props.worldId ?? '',
-			auth.user.value?.id,
-		),
-		enabled: open.value && !!props.worldId,
+		...serverShareableFilesQueryOptions(core, props.serverId, auth.user.value?.id),
+		enabled: open.value,
 	})),
 )
 

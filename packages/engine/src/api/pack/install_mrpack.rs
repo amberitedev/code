@@ -707,23 +707,14 @@ async fn install_zipped_mrpack_files_with_reporter_inner(
             "unknown instance {instance_id}"
         )))?;
     if state.side == contracts::Side::Server {
-        super::server_install::install_pack_files(
+        return super::sandboxed_install::install_pack(
             state,
-            &instance_id,
+            instance_id,
             &file,
             &reporter,
             modpack_details,
         )
-        .await?;
-        crate::launcher::install_minecraft_for_instance_id_with_reporter(
-            &instance_id,
-            false,
-            Some(reporter.clone()),
-            state,
-        )
-        .await?;
-        reporter.clear_context().await?;
-        return Ok(instance_id);
+        .await;
     }
     let instance_path = metadata.instance.path.clone();
     let download_meta = DownloadMeta {

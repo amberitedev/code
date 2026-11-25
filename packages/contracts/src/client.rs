@@ -1,15 +1,15 @@
-//! The Rust caller of any [`Endpoint`].
+//! The Rust caller of any [`Endpoint`]. [`request`] and [`response`] build and read a call for any
+//! HTTP transport, such as a hyper connection on a local socket or a pinned TLS tunnel; [`call`]
+//! and the functions beside it send one with reqwest.
 
-use std::{fmt::Write, future::Future, time::Duration};
+use std::{fmt::Write, time::Duration};
 
+use bytes::Bytes;
 use reqwest::{RequestBuilder, Response, StatusCode, header};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 
-use crate::{
-    ApiError, Auth, Empty, Endpoint, Json, Method, Raw, Stream,
-    tickets::READ_TICKET_HEADER,
-};
+use crate::{ApiError, Auth, Empty, Endpoint, Json, Method, Raw, Stream};
 
 /// The server a call goes to and the credentials it may need.
 #[derive(Clone, Copy)]
@@ -18,9 +18,8 @@ pub struct Remote<'a> {
     /// Everything before the Endpoint's path, such as `https://example.com`.
     pub base: &'a str,
     pub bearer: Option<&'a str>,
-    /// Sent in place of `bearer` to [`Auth::Ticket`] routes, and beside it to [`Auth::Account`]
-    /// ones in [`READ_TICKET_HEADER`].
-    pub read_ticket: Option<&'a str>,
+    /// Sent in place of `bearer` to [`Auth::Ticket`] routes.
+    pub ticket: Option<&'a str>,
     pub timeout: Option<Duration>,
 }
 
@@ -28,7 +27,7 @@ pub struct Remote<'a> {
 pub enum CallError {
     #[error("{} (HTTP {status})", error.description)]
     Api { status: u16, error: ApiError },
-    /// Without its URL, which can carry a read ticket in the query.
+    /// Without its URL, which can carry a ticket in the query.
     #[error(transparent)]
     Http(reqwest::Error),
     #[error("the response (HTTP {status}) could not be read: {source}")]
@@ -46,6 +45,9 @@ pub enum CallError {
         name: String,
         value: String,
     },
+    /// A transport other than reqwest could not deliver the call or read its answer.
+    #[error("{0}")]
+    Transport(String),
 }
 
 impl From<reqwest::Error> for CallError {
@@ -57,18 +59,82 @@ impl From<reqwest::Error> for CallError {
 /// An [`ApiError`] is a code and a short description; a longer error body is refused unread.
 const MAX_ERROR_BYTES: usize = 64 * 1024;
 
-/// A request body the caller sends: the marker itself, or the body a [`Stream`] sends.
+/// A request body sent whole, which any transport can carry.
+pub trait Encode {
+    type Input;
+    /// Its content type, when it has a body, and its bytes.
+    fn encode(input: Self::Input) -> (Option<String>, Bytes);
+}
+
+/// A request body [`call`] sends: one sent whole, or the stream a [`Stream`] sends.
 pub trait Body {
     type Input;
     fn attach(input: Self::Input, request: RequestBuilder) -> RequestBuilder;
 }
 
-/// A response body the caller reads whole.
+/// A response body read whole.
 pub trait Reply {
     type Output;
-    fn read(
-        response: Response,
-    ) -> impl Future<Output = Result<Self::Output, CallError>> + Send;
+    fn decode(
+        status: u16,
+        content_type: Option<&str>,
+        bytes: Bytes,
+    ) -> Result<Self::Output, CallError>;
+}
+
+/// A call to `E` for any HTTP transport: its method, `base` and the path and query, the bearer
+/// when `E` sends one, and the body. The transport adds what it needs, such as `Host`.
+pub fn request<E: Endpoint>(
+    base: &str,
+    params: &E::Params,
+    query: &E::Query,
+    body: <E::Body as Encode>::Input,
+    bearer: Option<&str>,
+) -> Result<http::Request<Bytes>, CallError>
+where
+    E::Body: Encode,
+{
+    let mut request = http::Request::builder()
+        .method(method::<E>())
+        .uri(target::<E>(base, params, query)?);
+    if let Some(bearer) = bearer.filter(|_| E::AUTH != Auth::None) {
+        request = request
+            .header(http::header::AUTHORIZATION, format!("Bearer {bearer}"));
+    }
+    let (content_type, bytes) = E::Body::encode(body);
+    if let Some(content_type) = content_type {
+        request = request.header(http::header::CONTENT_TYPE, content_type);
+    }
+    Ok(request.body(bytes).expect("an Endpoint's request is valid"))
+}
+
+/// `E`'s answer, read from a response's status, content type and body.
+pub fn response<E: Endpoint>(
+    status: u16,
+    content_type: Option<&str>,
+    bytes: Bytes,
+) -> Result<<E::Response as Reply>::Output, CallError>
+where
+    E::Response: Reply,
+{
+    if !(200..300).contains(&status) {
+        return Err(failure(status, &bytes));
+    }
+    E::Response::decode(status, content_type, bytes)
+}
+
+/// An answer that is not a success, as its [`ApiError`].
+fn failure(status: u16, bytes: &[u8]) -> CallError {
+    if bytes.len() > MAX_ERROR_BYTES {
+        return CallError::Decode {
+            status,
+            source: serde::de::Error::custom("the body is too long"),
+        };
+    }
+    match serde_json::from_slice(bytes) {
+        Ok(error) => CallError::Api { status, error },
+        Err(source) => CallError::Decode { status, source },
+    }
 }
 
 pub async fn call<E: Endpoint>(
@@ -81,8 +147,13 @@ where
     E::Body: Body,
     E::Response: Reply,
 {
-    let request = E::Body::attach(body, request::<E>(remote, params, query)?);
-    E::Response::read(check(request.send().await?).await?).await
+    let request =
+        E::Body::attach(body, reqwest_request::<E>(remote, params, query)?);
+    let response = check(request.send().await?).await?;
+    let status = response.status().as_u16();
+    let content_type = content_type(&response).map(str::to_owned);
+    let bytes = response.bytes().await?;
+    E::Response::decode(status, content_type.as_deref(), bytes)
 }
 
 /// [`call`] for a server trusted no further than its answer's first `max` bytes: a longer JSON
@@ -99,7 +170,8 @@ where
     E::Body: Body,
     T: DeserializeOwned,
 {
-    let request = E::Body::attach(body, request::<E>(remote, params, query)?);
+    let request =
+        E::Body::attach(body, reqwest_request::<E>(remote, params, query)?);
     let response = check(request.send().await?).await?;
     let status = response.status().as_u16();
     let bytes = read_up_to(response, max).await?;
@@ -114,7 +186,7 @@ pub async fn call_stream<E: Endpoint<Body = Empty, Response = Stream>>(
     query: &E::Query,
     from: u64,
 ) -> Result<Response, CallError> {
-    let mut request = request::<E>(remote, params, query)?;
+    let mut request = reqwest_request::<E>(remote, params, query)?;
     if from > 0 {
         request = request.header(header::RANGE, format!("bytes={from}-"));
     }
@@ -128,34 +200,46 @@ pub async fn call_stream<E: Endpoint<Body = Empty, Response = Stream>>(
     Ok(response)
 }
 
-fn request<E: Endpoint>(
+fn method<E: Endpoint>() -> http::Method {
+    match E::METHOD {
+        Method::Get => http::Method::GET,
+        Method::Post => http::Method::POST,
+        Method::Put => http::Method::PUT,
+        Method::Patch => http::Method::PATCH,
+        Method::Delete => http::Method::DELETE,
+    }
+}
+
+/// [`url`] with the query, leaving out its absent fields.
+fn target<E: Endpoint>(
+    base: &str,
+    params: &E::Params,
+    query: &E::Query,
+) -> Result<String, CallError> {
+    let url = url::<E>(base, params)?;
+    let query = serde_urlencoded::to_string(query)
+        .expect("an Endpoint's query is flat");
+    Ok(match query.is_empty() {
+        true => url,
+        false => format!("{url}?{query}"),
+    })
+}
+
+fn reqwest_request<E: Endpoint>(
     remote: &Remote<'_>,
     params: &E::Params,
     query: &E::Query,
 ) -> Result<RequestBuilder, CallError> {
-    let method = match E::METHOD {
-        Method::Get => reqwest::Method::GET,
-        Method::Post => reqwest::Method::POST,
-        Method::Put => reqwest::Method::PUT,
-        Method::Patch => reqwest::Method::PATCH,
-        Method::Delete => reqwest::Method::DELETE,
-    };
     let mut request = remote
         .http
-        .request(method, url::<E>(remote.base, params)?)
-        .query(query);
+        .request(method::<E>(), target::<E>(remote.base, params, query)?);
     let token = match E::AUTH {
         Auth::None => None,
-        Auth::Ticket => remote.read_ticket,
+        Auth::Ticket => remote.ticket,
         _ => remote.bearer,
     };
     if let Some(token) = token {
         request = request.bearer_auth(token);
-    }
-    if E::AUTH == Auth::Account
-        && let Some(ticket) = remote.read_ticket
-    {
-        request = request.header(READ_TICKET_HEADER, ticket);
     }
     if let Some(timeout) = remote.timeout {
         request = request.timeout(timeout);
@@ -223,10 +307,14 @@ async fn check(response: Response) -> Result<Response, CallError> {
     }
     let status = response.status().as_u16();
     let bytes = read_up_to(response, MAX_ERROR_BYTES).await?;
-    match serde_json::from_slice(&bytes) {
-        Ok(error) => Err(CallError::Api { status, error }),
-        Err(source) => Err(CallError::Decode { status, source }),
-    }
+    Err(failure(status, &bytes))
+}
+
+fn content_type(response: &Response) -> Option<&str> {
+    response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
 }
 
 async fn read_up_to(
@@ -247,29 +335,44 @@ async fn read_up_to(
     Ok(bytes)
 }
 
-impl<T: Serialize> Body for Json<T> {
+impl<T: Serialize> Encode for Json<T> {
     type Input = Self;
 
-    fn attach(input: Self, request: RequestBuilder) -> RequestBuilder {
-        request.json(&input.0)
+    fn encode(input: Self) -> (Option<String>, Bytes) {
+        let bytes = serde_json::to_vec(&input.0)
+            .expect("an Endpoint's body serializes to JSON");
+        (Some("application/json".into()), bytes.into())
     }
 }
 
-impl Body for Empty {
+impl Encode for Empty {
     type Input = Self;
 
-    fn attach(_: Self, request: RequestBuilder) -> RequestBuilder {
-        request
+    fn encode(_: Self) -> (Option<String>, Bytes) {
+        (None, Bytes::new())
     }
 }
 
-impl Body for Raw {
+impl Encode for Raw {
     type Input = Self;
 
-    fn attach(input: Self, request: RequestBuilder) -> RequestBuilder {
-        request
-            .header(header::CONTENT_TYPE, input.content_type)
-            .body(input.bytes)
+    fn encode(input: Self) -> (Option<String>, Bytes) {
+        (Some(input.content_type), input.bytes)
+    }
+}
+
+impl<B: Encode> Body for B {
+    type Input = B::Input;
+
+    fn attach(input: B::Input, request: RequestBuilder) -> RequestBuilder {
+        let (content_type, bytes) = B::encode(input);
+        let request = match content_type {
+            Some(content_type) => {
+                request.header(header::CONTENT_TYPE, content_type)
+            }
+            None => request,
+        };
+        request.body(bytes)
     }
 }
 
@@ -284,9 +387,11 @@ impl Body for Stream {
 impl<T: DeserializeOwned> Reply for Json<T> {
     type Output = T;
 
-    async fn read(response: Response) -> Result<T, CallError> {
-        let status = response.status().as_u16();
-        let bytes = response.bytes().await?;
+    fn decode(
+        status: u16,
+        _: Option<&str>,
+        bytes: Bytes,
+    ) -> Result<T, CallError> {
         serde_json::from_slice(&bytes)
             .map_err(|source| CallError::Decode { status, source })
     }
@@ -295,7 +400,7 @@ impl<T: DeserializeOwned> Reply for Json<T> {
 impl Reply for Empty {
     type Output = ();
 
-    async fn read(_: Response) -> Result<(), CallError> {
+    fn decode(_: u16, _: Option<&str>, _: Bytes) -> Result<(), CallError> {
         Ok(())
     }
 }
@@ -303,16 +408,16 @@ impl Reply for Empty {
 impl Reply for Raw {
     type Output = Raw;
 
-    async fn read(response: Response) -> Result<Raw, CallError> {
-        let content_type = response
-            .headers()
-            .get(header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok())
-            .unwrap_or("application/octet-stream")
-            .to_owned();
+    fn decode(
+        _: u16,
+        content_type: Option<&str>,
+        bytes: Bytes,
+    ) -> Result<Raw, CallError> {
         Ok(Raw {
-            content_type,
-            bytes: response.bytes().await?,
+            content_type: content_type
+                .unwrap_or("application/octet-stream")
+                .to_owned(),
+            bytes,
         })
     }
 }
@@ -414,7 +519,7 @@ mod tests {
                 http: &self.http,
                 base: &self.base,
                 bearer: None,
-                read_ticket: None,
+                ticket: None,
                 timeout: None,
             }
         }
@@ -436,7 +541,7 @@ mod tests {
 
     #[derive(Serialize, Deserialize)]
     struct Ticket {
-        read_ticket: String,
+        ticket: String,
     }
 
     struct ReadWithTicket;
@@ -451,53 +556,48 @@ mod tests {
         type Response = Json<String>;
     }
 
-    struct ReadAsAccount;
+    #[test]
+    fn a_call_is_built_and_read_without_a_transport() {
+        let request = super::request::<ReadFile>(
+            "https://core",
+            &file("a b", "x.json"),
+            &(),
+            Empty,
+            Some("token"),
+        )
+        .unwrap();
+        assert_eq!(request.method(), http::Method::GET);
+        assert_eq!(
+            request.uri(),
+            "https://core/v1/instances/a%20b/files/x.json"
+        );
+        assert_eq!(request.headers()["authorization"], "Bearer token");
 
-    impl Endpoint for ReadAsAccount {
-        const METHOD: Method = Method::Get;
-        const PATH: &'static str = "/v1/read";
-        const AUTH: Auth = Auth::Account;
-        type Params = ();
-        type Query = ();
-        type Body = Empty;
-        type Response = Json<String>;
-    }
-
-    #[tokio::test]
-    async fn a_read_ticket_goes_to_an_account_route_in_its_header() {
-        let _ = rustls::crypto::ring::default_provider().install_default();
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let base = format!("http://{}", listener.local_addr().unwrap());
-        let received = tokio::spawn(async move {
-            let (mut socket, _) = listener.accept().await.unwrap();
-            let mut head = [0; 4096];
-            let read = socket.read(&mut head).await.unwrap();
-            let _ = socket
-                .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\n\"\"")
-                .await;
-            String::from_utf8_lossy(&head[..read]).to_lowercase()
-        });
-        let http = Client::new();
-        let remote = Remote {
-            http: &http,
-            base: &base,
-            bearer: Some("amc_key"),
-            read_ticket: Some("secret"),
-            timeout: None,
+        let query = Ticket {
+            ticket: "a&b".into(),
         };
-        call::<ReadAsAccount>(&remote, &(), &(), Empty)
-            .await
-            .unwrap();
-        let request = received.await.unwrap();
-        assert!(request.starts_with("get /v1/read http/1.1"), "{request}");
-        assert!(
-            request.contains("authorization: bearer amc_key"),
-            "{request}"
+        let request = super::request::<ReadWithTicket>(
+            "",
+            &(),
+            &query,
+            Empty,
+            Some("token"),
+        )
+        .unwrap();
+        assert_eq!(request.uri(), "/v1/read?ticket=a%26b");
+        assert!(request.headers().get("authorization").is_none());
+
+        let answer = super::response::<ReadFile>(200, None, "\"text\"".into());
+        assert_eq!(answer.unwrap(), "text");
+        let refused = super::response::<ReadFile>(
+            404,
+            None,
+            r#"{"error":"not_found","description":"Gone."}"#.into(),
         );
-        assert!(
-            request.contains("x-amberite-read-ticket: secret"),
-            "{request}"
-        );
+        assert!(matches!(
+            refused,
+            Err(CallError::Api { status: 404, error }) if error.error == ErrorCode::NotFound
+        ));
     }
 
     #[tokio::test]
@@ -511,11 +611,11 @@ mod tests {
             http: &http,
             base: &base,
             bearer: None,
-            read_ticket: None,
+            ticket: None,
             timeout: None,
         };
         let query = Ticket {
-            read_ticket: "secret".into(),
+            ticket: "secret".into(),
         };
         let error = call::<ReadWithTicket>(&remote, &(), &query, Empty)
             .await

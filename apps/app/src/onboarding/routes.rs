@@ -1,41 +1,36 @@
-use std::sync::Arc;
-
 use axum::{Router, extract::State};
 use contracts::{
     ApiError, Empty, Json,
-    server::{Req, route},
+    server::{Mount, Req},
 };
-use engine::{Engine, routes::api_error};
+use engine::routes::api_error;
 
-use crate::server::{
+use super::state::OnboardingChecklist;
+use crate::local_api::{
     AppState,
     endpoints::onboarding::{
-        GetOnboardingChecklist, OnboardingProgress,
-        SkipCreateInstanceOnboarding,
+        GetOnboardingChecklist, SkipCreateInstanceOnboarding,
     },
 };
+use crate::state::Desktop;
 
 pub fn routes() -> Router<AppState> {
-    let (get_path, get) =
-        route::<GetOnboardingChecklist, _, _, _>(get_onboarding_checklist);
-    let (skip_path, skip) = route::<SkipCreateInstanceOnboarding, _, _, _>(
-        skip_create_instance_onboarding,
-    );
-    Router::new().route(get_path, get).route(skip_path, skip)
+    Router::new()
+        .endpoint::<GetOnboardingChecklist, _, _>(get_onboarding_checklist)
+        .endpoint::<SkipCreateInstanceOnboarding, _, _>(
+            skip_create_instance_onboarding,
+        )
 }
 
 async fn get_onboarding_checklist(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     _: Req<GetOnboardingChecklist>,
-) -> Result<Json<OnboardingProgress>, ApiError> {
-    super::get(&engine)
-        .await
-        .map(|checklist| Json(OnboardingProgress(checklist)))
-        .map_err(api_error)
+) -> Result<Json<OnboardingChecklist>, ApiError> {
+    super::get(&engine).await.map(Json).map_err(api_error)
 }
 
 async fn skip_create_instance_onboarding(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     _: Req<SkipCreateInstanceOnboarding>,
 ) -> Result<Empty, ApiError> {
     super::mark_created_instance(&engine)

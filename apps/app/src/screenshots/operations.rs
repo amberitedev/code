@@ -1,3 +1,4 @@
+use crate::state::Desktop;
 use chrono::{DateTime, Utc};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use serde::{Deserialize, Serialize};
@@ -14,6 +15,7 @@ use super::reconciliation::{
 };
 use super::rows as screenshot_rows;
 use anyhow::{Context, bail};
+use engine::ErrorKind;
 use engine::InstancePayloadType;
 use engine::emit_instance;
 use engine::state::DirectoryInfo;
@@ -22,13 +24,12 @@ use engine::state::instances::adapters::sqlite::instance_rows::{
 };
 use engine::util::fetch::sha1_file_async;
 use engine::util::io::{self, IOError};
-use engine::{Engine, ErrorKind};
 
 const SCREENSHOTS_DIRECTORY: &str = "screenshots";
 const SCREENSHOT_SCAN_CONCURRENCY: usize = 8;
 
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ScreenshotKey {
     pub instance_id: String,
     pub file_name: String,
@@ -48,7 +49,7 @@ pub struct InstanceScreenshot {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum ScreenshotEditSaveMode {
     CreateCopy,
@@ -56,7 +57,7 @@ pub enum ScreenshotEditSaveMode {
 }
 
 pub async fn list_screenshots(
-    state: &Engine,
+    state: &Desktop,
     instance_id: &str,
 ) -> engine::Result<Vec<InstanceScreenshot>> {
     let source = instance_rows::get_instance_screenshot_source(
@@ -70,7 +71,7 @@ pub async fn list_screenshots(
 }
 
 pub async fn list_synced_screenshots(
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<Vec<InstanceScreenshot>> {
     if !crate::synced_options::get_global_synced_options(state)
         .await?
@@ -83,14 +84,14 @@ pub async fn list_synced_screenshots(
 }
 
 pub async fn list_all_screenshots(
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<Vec<InstanceScreenshot>> {
     let sources = instance_rows::list_screenshot_sources(state.pool()).await?;
     list_source_screenshot_sets(state, sources).await
 }
 
 async fn list_source_screenshot_sets(
-    state: &Engine,
+    state: &Desktop,
     sources: Vec<InstanceScreenshotSource>,
 ) -> engine::Result<Vec<InstanceScreenshot>> {
     let mut screenshots =
@@ -109,18 +110,18 @@ async fn list_source_screenshot_sets(
 }
 
 async fn lock_instance_screenshots<'a>(
-    state: &Engine,
+    state: &Desktop,
     instance_ids: impl IntoIterator<Item = &'a str>,
 ) -> Vec<OwnedMutexGuard<()>> {
     let mut locks = Vec::new();
     for instance_id in instance_ids {
-        locks.push(crate::hooks::lock_screenshots(state, instance_id).await);
+        locks.push(state.lock_screenshots(instance_id).await);
     }
     locks
 }
 
 pub async fn delete_screenshots(
-    state: &Engine,
+    state: &Desktop,
     keys: &[ScreenshotKey],
 ) -> engine::Result<()> {
     ensure_unique_keys(keys)?;
@@ -137,7 +138,7 @@ pub async fn delete_screenshots(
         screenshot_rows::delete_screenshot_by_key(
             &key.instance_id,
             &key.file_name,
-            crate::db::pool(state),
+            state.db(),
         )
         .await?;
     }
@@ -146,7 +147,7 @@ pub async fn delete_screenshots(
 }
 
 pub async fn export_screenshots(
-    state: &Engine,
+    state: &Desktop,
     keys: &[ScreenshotKey],
     export_path: PathBuf,
 ) -> engine::Result<()> {
@@ -217,7 +218,7 @@ pub async fn export_screenshots(
 }
 
 pub async fn move_screenshots(
-    state: &Engine,
+    state: &Desktop,
     keys: &[ScreenshotKey],
     target_instance_id: &str,
 ) -> engine::Result<Vec<ScreenshotKey>> {
@@ -271,7 +272,7 @@ pub async fn move_screenshots(
             &key.file_name,
             target_instance_id,
             &file_name,
-            crate::db::pool(state),
+            state.db(),
         )
         .await?;
         moved_keys.push(ScreenshotKey {
@@ -284,7 +285,7 @@ pub async fn move_screenshots(
 }
 
 pub async fn get_screenshot_path(
-    state: &Engine,
+    state: &Desktop,
     key: &ScreenshotKey,
 ) -> engine::Result<PathBuf> {
     validate_file_name(&key.file_name)?;
@@ -325,7 +326,7 @@ pub async fn get_screenshot_path(
 }
 
 pub async fn save_edited_screenshot(
-    state: &Engine,
+    state: &Desktop,
     key: ScreenshotKey,
     png_bytes: Vec<u8>,
     mode: ScreenshotEditSaveMode,
@@ -338,7 +339,7 @@ pub async fn save_edited_screenshot(
     )
     .await?
     .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
-    let _lock = crate::hooks::lock_screenshots(state, &source.id).await;
+    let _lock = state.lock_screenshots(&source.id).await;
 
     let scanned = scan_source_screenshots(&state.directories, &source).await?;
     let current = reconcile_source_screenshots(state, &source, scanned).await?;
@@ -349,7 +350,7 @@ pub async fn save_edited_screenshot(
     let source_row = screenshot_rows::get_screenshot_by_key(
         &key.instance_id,
         &key.file_name,
-        crate::db::pool(state),
+        state.db(),
     )
     .await?
     .ok_or(ErrorKind::InputError("unknown screenshot".to_string()))?;
@@ -414,8 +415,7 @@ pub async fn save_edited_screenshot(
         let mut source_row = source_row.clone();
         source_row.content_hash = content_hash;
         source_row.file_size = file_size;
-        let mut tx =
-            crate::db::pool(state).begin_with("BEGIN IMMEDIATE").await?;
+        let mut tx = state.db().begin_with("BEGIN IMMEDIATE").await?;
         screenshot_rows::update_screenshot(&source_row, &mut tx).await?;
         tx.commit().await?;
     }
@@ -431,8 +431,7 @@ pub async fn save_edited_screenshot(
 
     if copy_group {
         let result: engine::Result<()> = async {
-            let mut tx =
-                crate::db::pool(state).begin_with("BEGIN IMMEDIATE").await?;
+            let mut tx = state.db().begin_with("BEGIN IMMEDIATE").await?;
             screenshot_rows::copy_group_membership(
                 &source_row.id,
                 &saved.id,
@@ -448,7 +447,7 @@ pub async fn save_edited_screenshot(
             let _ = screenshot_rows::delete_screenshot_by_key(
                 &source.id,
                 &target_file_name,
-                crate::db::pool(state),
+                state.db(),
             )
             .await;
             return Err(error);
@@ -458,15 +457,14 @@ pub async fn save_edited_screenshot(
     let mut saved_row = screenshot_rows::get_screenshot_by_key(
         &saved.instance_id,
         &saved.file_name,
-        crate::db::pool(state),
+        state.db(),
     )
     .await?
     .ok_or(ErrorKind::InputError(
         "could not load edited screenshot".to_string(),
     ))?;
     if !copy_group {
-        let mut tx =
-            crate::db::pool(state).begin_with("BEGIN IMMEDIATE").await?;
+        let mut tx = state.db().begin_with("BEGIN IMMEDIATE").await?;
         if saved_row.created_at != source_row.created_at {
             saved_row.created_at = source_row.created_at;
             screenshot_rows::update_screenshot(&saved_row, &mut tx).await?;

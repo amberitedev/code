@@ -1,10 +1,14 @@
-import { boot as bootRoutes, type Boot, ContractClient } from '@modrinth/api-client'
+import { boot as bootRoutes, type Boot } from '@amberite/contracts/app'
+import { ContractClient } from '@modrinth/api-client'
 
 import { localBase, localTransport } from '@/platform/local'
 
 let boot: Boot | undefined
 
-/** `main.js` awaits this before anything else loads, so the readers below can stay synchronous. */
+/**
+ * `main.js` awaits this before anything else loads, so the readers below can stay synchronous.
+ * It cannot use `apiClient.local`: the client is built from the config the boot completes.
+ */
 export async function loadBoot(): Promise<Boot> {
 	if (!localBase) {
 		throw new Error(

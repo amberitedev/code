@@ -1,38 +1,25 @@
-import type { Archon } from '@modrinth/api-client'
+import type { Server } from '@amberite/contracts/core'
 import type { QueryClient } from '@tanstack/vue-query'
 
 import { serverKeys } from '#ui/composables/server-queries'
+
+/** Forgets the server's own share once it is unpublished. */
 export async function clearServerSharedInstance(
 	queryClient: QueryClient,
 	serverId: string,
-	worldId: string,
 	sharedInstanceId: string,
 ) {
-	const detailKey = serverKeys.detailV1(serverId)
+	const detailKey = serverKeys.detail(serverId)
 	const instanceKey = ['shared-instances', sharedInstanceId] as const
-	const diffKey = serverKeys.shareDiff(serverId, worldId)
+	const diffKey = serverKeys.shareDiff(serverId)
 	await Promise.all([
 		queryClient.cancelQueries({ queryKey: detailKey }),
 		queryClient.cancelQueries({ queryKey: instanceKey }),
 		queryClient.cancelQueries({ queryKey: diffKey }),
 	])
-	queryClient.setQueryData<Archon.Servers.v1.ServerFull>(detailKey, (server) =>
-		server
-			? {
-					...server,
-					worlds: server.worlds.map((world) =>
-						world.id === worldId && world.content?.shared_instance_id === sharedInstanceId
-							? {
-									...world,
-									content: {
-										...world.content,
-										shared_instance_id: null,
-										shared_instance_needs_update: false,
-									},
-								}
-							: world,
-					),
-				}
+	queryClient.setQueryData<Server>(detailKey, (server) =>
+		server?.shared_instance_id === sharedInstanceId
+			? { ...server, shared_instance_id: null }
 			: server,
 	)
 	queryClient.removeQueries({ queryKey: instanceKey })

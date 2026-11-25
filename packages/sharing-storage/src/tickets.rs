@@ -8,7 +8,9 @@ use contracts::{
 };
 use serde::Deserialize;
 
-use crate::keys::{JsonFile, Keys, LEEWAY_S};
+use sharing_client::keys::LEEWAY_S;
+
+use crate::keys::Keys;
 
 /// What every pool ticket is checked for before its kind's own claims are read.
 #[derive(Deserialize)]
@@ -28,7 +30,7 @@ fn invalid(description: &str) -> ApiError {
 
 /// The claims of `ticket`, required to be a `T`, for this Core, for `root`, and current at `now`.
 pub async fn verify<T: Ticket>(
-    keys: &Keys<JsonFile>,
+    keys: &Keys,
     ticket: &str,
     core_id: &str,
     root: &Hash,
@@ -83,7 +85,7 @@ pub mod test_support {
     use contracts::tickets::TICKET_ISSUER;
     use serde_json::{Value, json};
 
-    use crate::keys::test_support::Signer;
+    use sharing_client::keys::test_support::Signer;
 
     /// A ticket of `kind` for `root` on `aud`, issued at `iat` and good for an hour, with
     /// `extra` claims.
@@ -119,13 +121,13 @@ mod tests {
     use serde_json::json;
 
     use super::{test_support::ticket, *};
-    use crate::keys::test_support::Signer;
+    use sharing_client::keys::test_support::Signer;
 
     const NOW: i64 = 1_800_000_000;
 
-    async fn keys(signer: &Signer) -> (tempfile::TempDir, Keys<JsonFile>) {
+    async fn keys(signer: &Signer) -> (tempfile::TempDir, Keys) {
         let dir = tempfile::tempdir().unwrap();
-        let keys = Keys::load_file(
+        let keys = crate::keys::load_file(
             dir.path().join("keys.json"),
             crate::http().build().unwrap(),
             None,
@@ -139,7 +141,7 @@ mod tests {
     }
 
     async fn code<T: Ticket + std::fmt::Debug>(
-        keys: &Keys<JsonFile>,
+        keys: &Keys,
         ticket: &str,
         now: i64,
     ) -> ErrorCode {

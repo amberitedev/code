@@ -1,4 +1,4 @@
-//! Who can do what: tickets, sessions, download links, the local socket, the activity log, and
+//! Who can do what: tickets, sessions, the local socket, the activity log, and
 //! backend sync. A Core answers its owner only. The request and response shapes are in
 //! `api::sessions`, `api::activity`, and, for the backend, `contracts::backend::cores`.
 //!
@@ -8,7 +8,6 @@
 
 pub mod activity;
 pub mod keys;
-pub mod links;
 pub mod local;
 pub mod owed;
 pub mod pairing;
@@ -28,8 +27,8 @@ use axum::{
     http::{HeaderMap, header::AUTHORIZATION, request::Parts},
 };
 use contracts::{ApiError, ErrorCode, core::TICKET_HEADER};
+pub use engine::access::Caller;
 use engine::access::{Access, BoxFuture};
-pub use engine::access::{Caller, Permission};
 use sqlx::SqlitePool;
 use tokio::sync::{Notify, broadcast};
 
@@ -47,6 +46,11 @@ pub fn now() -> i64 {
     chrono::Utc::now().timestamp()
 }
 
+/// Unix `seconds` as the wire's time.
+pub fn at(seconds: i64) -> chrono::DateTime<chrono::Utc> {
+    chrono::DateTime::from_timestamp(seconds, 0).unwrap_or_default()
+}
+
 /// Access state shared by every route, and the engine's [`Access`] on this Core.
 pub struct CoreAccess {
     db: SqlitePool,
@@ -58,7 +62,6 @@ pub struct CoreAccess {
     pub owed: Arc<Notify>,
     /// Asks the pairing loop for a fresh code (`copal pair`).
     pub new_code: Notify,
-    links: links::Links,
     streams: Mutex<HashMap<String, usize>>,
     sign_ins: Mutex<HashMap<IpAddr, (Instant, u32)>>,
 }
@@ -78,7 +81,6 @@ impl CoreAccess {
             changed: broadcast::channel(64).0,
             owed: Arc::new(Notify::new()),
             new_code: Notify::new(),
-            links: links::Links::default(),
             streams: Mutex::default(),
             sign_ins: Mutex::default(),
         }
@@ -167,16 +169,23 @@ pub fn require_owner(caller: &Caller) -> Result<(), ApiError> {
 }
 
 impl CoreAccess {
-    /// Everything for the owner. Anyone else gets the same 404 as for a server that does not
-    /// exist. Routes still name the level they need, so per-server access can come back.
+    /// Every server for the owner. Anyone else gets the same 404 as for a server that does not
+    /// exist. Every server-scoped route and topic goes through it, so `server_id` names a server
+    /// in `core.db` before it reaches a path.
     pub async fn require(
         &self,
         caller: &Caller,
         server_id: &str,
-        _: Permission,
-    ) -> Result<Permission, ApiError> {
-        if caller.is_owner() {
-            Ok(Permission::Owner)
+    ) -> Result<(), ApiError> {
+        let exists = caller.is_owner()
+            && sqlx::query("SELECT 1 FROM servers WHERE id = ?1")
+                .bind(server_id)
+                .fetch_optional(&self.db)
+                .await
+                .map_err(internal)?
+                .is_some();
+        if exists {
+            Ok(())
         } else {
             Err(ApiError::new(
                 ErrorCode::NotFound,
@@ -194,9 +203,6 @@ impl Access for CoreAccess {
         Box::pin(async move {
             if request.extensions.get::<local::Local>().is_some() {
                 return Ok(Caller::Local);
-            }
-            if let Some((token, path)) = links::split(&request.uri) {
-                return self.redeem(token, &path).await;
             }
             let token = request
                 .headers
@@ -218,14 +224,11 @@ impl Access for CoreAccess {
         &'a self,
         caller: &'a Caller,
         instance: Option<&'a str>,
-        permission: Permission,
-    ) -> BoxFuture<'a, Result<Permission, ApiError>> {
+    ) -> BoxFuture<'a, Result<(), ApiError>> {
         Box::pin(async move {
             match instance {
-                Some(server_id) => {
-                    Self::require(self, caller, server_id, permission).await
-                }
-                None => require_owner(caller).map(|()| Permission::Owner),
+                Some(server_id) => Self::require(self, caller, server_id).await,
+                None => require_owner(caller),
             }
         })
     }

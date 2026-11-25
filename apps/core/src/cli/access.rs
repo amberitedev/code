@@ -2,7 +2,10 @@
 
 use clap::Subcommand;
 use color_eyre::eyre::{Result, bail};
-use contracts::core::{CoreSession, ListSessions, RevokeSession, SessionId};
+use contracts::{
+    Empty,
+    core::{CoreSession, ListSessions, RevokeSession, SessionId},
+};
 
 use super::{Client, Output, call::call, local_time};
 
@@ -17,7 +20,8 @@ pub enum AccessCommand {
 pub async fn run(client: &Client, command: AccessCommand) -> Result<Output> {
     match command {
         AccessCommand::Sessions => {
-            let sessions = call::<ListSessions>(client, &(), &(), ()).await?;
+            let sessions =
+                call::<ListSessions>(client, &(), &(), Empty).await?;
             let text = if sessions.is_empty() {
                 "No sessions".to_owned()
             } else {
@@ -38,7 +42,8 @@ pub async fn run(client: &Client, command: AccessCommand) -> Result<Output> {
             Ok(Output::new(text, &sessions))
         }
         AccessCommand::Revoke { session } => {
-            let sessions = call::<ListSessions>(client, &(), &(), ()).await?;
+            let sessions =
+                call::<ListSessions>(client, &(), &(), Empty).await?;
             let matches: Vec<&CoreSession> = sessions
                 .iter()
                 .filter(|candidate| candidate.id.starts_with(&session))
@@ -52,7 +57,7 @@ pub async fn run(client: &Client, command: AccessCommand) -> Result<Output> {
             let id = SessionId {
                 id: session.id.clone(),
             };
-            call::<RevokeSession>(client, &id, &(), ()).await?;
+            call::<RevokeSession>(client, &id, &(), Empty).await?;
             Ok(Output::new(
                 format!(
                     "Ended the session of {} on {}",

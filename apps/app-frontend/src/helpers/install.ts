@@ -1,20 +1,13 @@
 import {
-	type CreatePackLocation,
-	type IconConfig,
 	type ImportLauncherType,
-	type InstallCreateInstanceRequest,
 	type InstallErrorView,
 	type InstallJavaStep,
 	type InstallJobSnapshot,
 	type InstallJobStatus,
-	type InstallModpackPreview,
 	type InstallPhaseId,
-	type InstallPostInstallEdit,
 	type InstallProgress,
 	type InstallProgressSecondary,
 	installs,
-	launcherImport,
-	localInstalls,
 	type SharedHistorySettings,
 	type SharedInstanceExternalFilePreview,
 	type SharedInstanceHistoryEntry,
@@ -22,7 +15,16 @@ import {
 	type SharedInstanceInviteInstallPreview,
 	type SharedInstanceUpdateDiff,
 	type SharedInstanceUpdatePreview,
-} from '@modrinth/api-client'
+} from '@amberite/contracts/engine'
+import {
+	type CreatePackLocation,
+	type InstallCreateInstanceRequest,
+	type InstallModpackPreview,
+	type InstallPostInstallEdit,
+	launcherImport,
+	localInstalls,
+} from '@amberite/contracts/app'
+import type { IconConfig } from '@modrinth/api-client'
 
 import { apiClient } from '@/platform/modrinth-client'
 import type { AppEvents } from '@/providers/app-events'
@@ -176,20 +178,6 @@ export async function install_shared_instance(
 
 export async function install_update_shared_instance(instanceId: string) {
 	return await apiClient.local.call(installs.UpdateSharedInstance, { params: { id: instanceId } })
-}
-
-/** The share's history, newest first. Empty when the instance joined the share as a member. */
-export async function install_get_shared_instance_history(instanceId: string) {
-	return await apiClient.local.call(installs.GetSharedInstanceHistory, {
-		params: { id: instanceId },
-	})
-}
-
-/** Owner only. Puts the instance back to a version from its history, leaving it to push. */
-export async function install_restore_shared_instance_version(instanceId: string, version: number) {
-	return await apiClient.local.call(installs.RestoreSharedInstanceVersion, {
-		params: { id: instanceId, version },
-	})
 }
 
 /** Owner only. Deletes a version from the share's history. The latest one stays. */

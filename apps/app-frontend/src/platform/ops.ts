@@ -1,11 +1,16 @@
-import { ContractClient, type LocalEvent, ops } from '@modrinth/api-client'
+import {
+	type ExternalSave,
+	type InstanceFileSave,
+	type LocalEvent,
+	type LocalUpload,
+	ops,
+} from '@amberite/contracts/app'
 
-import { localTransport } from '@/platform/local'
+import { apiClient } from '@/platform/modrinth-client'
 
 export type OpProgress = Extract<LocalEvent, { type: 'progress' }>['payload']
 export type OpEnd = Extract<LocalEvent, { type: 'op_ended' }>['payload']
 
-const local = new ContractClient(localTransport)
 const running = new Map<
 	string,
 	{
@@ -26,7 +31,7 @@ export function dispatchOpEvent(event: LocalEvent) {
 async function endLostOps() {
 	const started = [...running].filter(([, op]) => op.started)
 	if (started.length === 0) return
-	const listed = await local.call(ops.listOps).catch(() => null)
+	const listed = await apiClient.local.call(ops.listOps).catch(() => null)
 	if (!listed) return
 	for (const [op, { end }] of started) {
 		if (listed.includes(op)) continue
@@ -60,5 +65,50 @@ export async function runOp(
 
 /** The op ends with `cancelled`. */
 export async function cancelOp(op: string) {
-	await local.call(ops.cancelOp, { params: { id: op } })
+	await apiClient.local.call(ops.cancelOp, { params: { id: op } })
+}
+
+export interface ExternalFileProgress {
+	stage: 'waiting' | 'downloading' | 'saving'
+	downloadedBytes: number
+	totalBytes: number | null
+}
+
+export interface LocalUploadProgress {
+	loaded: number
+	total: number
+}
+
+/** Downloads `save.url` to a file on this computer. */
+export function saveExternal(
+	save: ExternalSave,
+	onProgress: (progress: ExternalFileProgress) => void,
+): Promise<OpEnd> {
+	return runOp(
+		save.op,
+		() => apiClient.local.call(ops.saveExternalFile, { body: save }),
+		({ stage, done, total }) =>
+			onProgress({
+				stage: stage === 'downloading' || stage === 'saving' ? stage : 'waiting',
+				downloadedBytes: done,
+				totalBytes: total,
+			}),
+	)
+}
+
+/** Uploads a file on this computer straight from disk. */
+export function uploadLocal(
+	upload: LocalUpload,
+	onProgress: (progress: LocalUploadProgress) => void,
+): Promise<OpEnd> {
+	return runOp(
+		upload.op,
+		() => apiClient.local.call(ops.uploadLocalFile, { body: upload }),
+		({ done, total }) => onProgress({ loaded: done, total: total ?? done }),
+	)
+}
+
+/** Copies a file of an instance to a path on this computer. */
+export function saveInstanceFileAs(save: InstanceFileSave): Promise<OpEnd> {
+	return runOp(save.op, () => apiClient.local.call(ops.saveInstanceFileAs, { body: save }))
 }

@@ -1,23 +1,18 @@
-//! The file routes through [`sandbox`]: every path is walked from a handle on the instance's
-//! folder, so nothing reaches outside it, links included. A server's file routes all come here;
-//! the App's keep the engine's own, which follow the links desktop users make on purpose.
-//! Uploads, unpacking and zips never replace server-owned files ([`sandbox::is_server_owned`]);
-//! a write is an explicit edit and may change them.
+//! The file routes of both sides. Every path is walked from a handle on the instance's folder
+//! ([`sandbox`]), so nothing reaches outside it through a link in it; a link above the folder,
+//! such as the App's data folder moved to another drive, is followed. Each side then guards what
+//! it owns ([`Guard`]).
 
-use std::{
-    io::Read,
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::path::{Path, PathBuf};
 
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
-use contracts::{ApiError, ErrorCode};
-use tokio::sync::OwnedMutexGuard;
+use contracts::{ApiError, ErrorCode, Side};
+use tokio::sync::{MutexGuard, OwnedMutexGuard};
 
 use crate::{
     Engine,
-    api::pack::install_from::PackFormat,
+    api::{instance::ManagedPaths, pack::install_from::PackFormat},
     archive::{self, ArchiveError},
     endpoints::files::{
         ExtractDryRunResult, InstanceFileKind, InstanceFileStat,
@@ -26,11 +21,25 @@ use crate::{
     instance::InstanceFileItem,
     routes::api_error,
     sandbox::{self, Folder},
-    state::instances::adapters::sqlite::instance_rows,
+    state::{
+        content_store::validate_relative,
+        instances::adapters::sqlite::instance_rows,
+    },
 };
 
 pub(super) fn internal(error: impl std::fmt::Display) -> ApiError {
     ApiError::new(ErrorCode::InternalError, error.to_string())
+}
+
+/// A folder's refusal of the path, such as one through a link, is the caller's; any other
+/// failure is ours.
+fn io_error(error: std::io::Error) -> ApiError {
+    match error.kind() {
+        std::io::ErrorKind::InvalidInput => {
+            ApiError::new(ErrorCode::InvalidInput, error.to_string())
+        }
+        _ => internal(error),
+    }
 }
 
 pub(super) fn not_found(path: &str) -> ApiError {
@@ -48,18 +57,101 @@ fn archive_error(error: ArchiveError) -> ApiError {
     }
 }
 
-/// A path the caller sent, checked. `None` is the folder itself.
-pub(super) fn api_path(path: &str) -> Result<Option<String>, ApiError> {
-    sandbox::from_api(path).map_err(|error| {
-        ApiError::new(ErrorCode::InvalidInput, error.to_string())
-    })
+/// A path the caller sent, checked. `None` is the folder itself. A server's paths name the same
+/// file on every OS ([`sandbox::clean`]); the App's take any name its own OS does.
+pub(super) fn api_path(
+    side: Side,
+    path: &str,
+) -> Result<Option<String>, ApiError> {
+    let invalid =
+        |reason: String| ApiError::new(ErrorCode::InvalidInput, reason);
+    let trimmed = path.trim_start_matches('/').trim_end_matches('/');
+    match side {
+        Side::Server => {
+            sandbox::from_api(path).map_err(|error| invalid(error.to_string()))
+        }
+        Side::Client if trimmed.is_empty() => Ok(None),
+        Side::Client => validate_relative(trimmed)
+            .map(|()| Some(trimmed.to_owned()))
+            .map_err(|_| {
+                invalid(format!(
+                    "{path:?} is not a path inside the instance's folder"
+                ))
+            }),
+    }
 }
 
 /// A path that must name something inside the folder, not the folder itself.
-pub(super) fn inner_path(path: &str) -> Result<String, ApiError> {
-    api_path(path)?.ok_or_else(|| {
+pub(super) fn inner_path(side: Side, path: &str) -> Result<String, ApiError> {
+    api_path(side, path)?.ok_or_else(|| {
         ApiError::new(ErrorCode::InvalidInput, "Name a file or folder.")
     })
+}
+
+/// What one side keeps the Files tab from changing.
+enum Guard {
+    /// A server's own files ([`sandbox::is_server_owned`]) are never replaced by an upload,
+    /// unpacking or a zip; an explicit edit may change them.
+    Server { level: String },
+    /// On the App, `mods/` and managed content belong to the Content tab, since its files are
+    /// links into the content store, and a link in the instance is refused, not replaced.
+    Client(ManagedPaths),
+}
+
+impl Guard {
+    /// Refuse an explicit change at `path`.
+    fn edit(&self, folder: &Folder, path: &str) -> Result<(), ApiError> {
+        let Self::Client(managed) = self else {
+            return Ok(());
+        };
+        managed.ensure_writable(path).map_err(|error| {
+            ApiError::new(ErrorCode::InvalidInput, format!("{error:#}"))
+        })?;
+        if folder
+            .metadata(path)
+            .is_ok_and(|meta| meta.file_type().is_symlink())
+        {
+            return Err(ApiError::new(
+                ErrorCode::InvalidInput,
+                "Files cannot access a symbolic link or its target",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Whether a file placed in bulk leaves `path` as it is: a server-owned file that exists.
+    fn keeps(&self, folder: &Folder, path: &str) -> bool {
+        matches!(self, Self::Server { level }
+            if sandbox::is_server_owned(path, level) && folder.exists(path))
+    }
+
+    /// Refuse placing a file in bulk at `path`, from an upload or a zip.
+    fn place(&self, folder: &Folder, path: &str) -> Result<(), ApiError> {
+        self.edit(folder, path)?;
+        if self.keeps(folder, path) {
+            return Err(ApiError::new(
+                ErrorCode::Conflict,
+                format!(
+                    "{path} belongs to the server; uploads never replace it. Edit it instead."
+                ),
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// An instance's folder, opened for one request, and what its side guards there.
+pub(super) struct Files {
+    folder: Folder,
+    guard: Guard,
+}
+
+/// The locks a change holds: the instance's, which installs hold, so an edit never lands between
+/// an install's plan and its writes, and on the App also the content store's, which launches and
+/// content changes hold.
+pub(super) struct Held<'a> {
+    instance: OwnedMutexGuard<()>,
+    store: Option<MutexGuard<'a, ()>>,
 }
 
 pub(super) async fn root(
@@ -79,23 +171,41 @@ pub(super) async fn root(
         .map_err(api_error)
 }
 
-pub(super) async fn folder(
-    engine: &Engine,
-    id: &str,
-) -> Result<Arc<Folder>, ApiError> {
-    Ok(Arc::new(
-        Folder::open(&root(engine, id).await?).map_err(internal)?,
-    ))
+pub(super) async fn open(engine: &Engine, id: &str) -> Result<Files, ApiError> {
+    open_at(engine, id, &root(engine, id).await?).await
 }
 
-/// The folder, taken for a change: the lock installs hold, so an edit never lands between an
-/// install's plan and its writes. Do the change through [`locked`].
-pub(super) async fn changing(
+async fn open_at(
     engine: &Engine,
     id: &str,
-) -> Result<(Arc<Folder>, OwnedMutexGuard<()>), ApiError> {
-    let lock = engine.instance_locks.lock_content(id).await;
-    Ok((folder(engine, id).await?, lock))
+    root: &Path,
+) -> Result<Files, ApiError> {
+    let folder = Folder::open(root).map_err(internal)?;
+    let guard = match engine.side {
+        Side::Server => Guard::Server {
+            level: folder.level_name(),
+        },
+        Side::Client => Guard::Client(
+            ManagedPaths::load(engine, id).await.map_err(api_error)?,
+        ),
+    };
+    Ok(Files { folder, guard })
+}
+
+/// The folder, taken for a change, and made if the instance has none yet. Do the change through
+/// [`locked`].
+pub(super) async fn changing<'a>(
+    engine: &'a Engine,
+    id: &str,
+) -> Result<(Files, Held<'a>), ApiError> {
+    let instance = engine.instance_locks.lock_content(id).await;
+    let store = match engine.side {
+        Side::Client => Some(engine.content_store.files_lock.lock().await),
+        Side::Server => None,
+    };
+    let root = root(engine, id).await?;
+    tokio::fs::create_dir_all(&root).await.map_err(internal)?;
+    Ok((open_at(engine, id, &root).await?, Held { instance, store }))
 }
 
 pub(super) async fn blocking<T: Send + 'static>(
@@ -104,35 +214,20 @@ pub(super) async fn blocking<T: Send + 'static>(
     tokio::task::spawn_blocking(work).await.map_err(internal)?
 }
 
-/// As [`blocking`], keeping the lock until `work` itself ends: a request that is dropped stops
-/// waiting, but the work it started holds the lock to the end.
+/// As [`blocking`], keeping the instance's lock until `work` itself ends: a request that is
+/// dropped stops waiting, but the work it started holds the lock to the end.
 pub(super) async fn locked<T: Send + 'static>(
-    lock: OwnedMutexGuard<()>,
+    held: Held<'_>,
     work: impl FnOnce() -> Result<T, ApiError> + Send + 'static,
 ) -> Result<T, ApiError> {
-    blocking(move || {
-        let _lock = lock;
+    let Held { instance, store } = held;
+    let result = blocking(move || {
+        let _instance = instance;
         work()
     })
-    .await
-}
-
-/// Refuse to replace a server-owned file that exists.
-pub(super) fn refuse_owned(
-    folder: &Folder,
-    path: &str,
-) -> Result<(), ApiError> {
-    if sandbox::is_server_owned(path, &folder.level_name())
-        && folder.exists(path)
-    {
-        return Err(ApiError::new(
-            ErrorCode::Conflict,
-            format!(
-                "{path} belongs to the server; uploads never replace it. Edit it instead."
-            ),
-        ));
-    }
-    Ok(())
+    .await;
+    drop(store);
+    result
 }
 
 fn since_epoch(time: std::io::Result<cap_std::time::SystemTime>) -> u64 {
@@ -147,10 +242,11 @@ pub(super) async fn list(
     id: &str,
     path: &str,
 ) -> Result<Vec<InstanceFileItem>, ApiError> {
-    let path = api_path(path)?;
-    let folder = folder(engine, id).await?;
+    let path = api_path(engine.side, path)?;
+    let files = open(engine, id).await?;
     blocking(move || {
-        let dir = folder
+        let dir = files
+            .folder
             .open_dir(path.as_deref())
             .map_err(|_| not_found(path.as_deref().unwrap_or("folder")))?;
         let mut items = Vec::new();
@@ -158,6 +254,9 @@ pub(super) async fn list(
             let Ok(name) = entry.file_name().into_string() else {
                 continue;
             };
+            if name == ".DS_Store" {
+                continue;
+            }
             let Ok(meta) = entry.metadata() else { continue };
             let kind = if meta.file_type().is_symlink() {
                 "symlink"
@@ -171,17 +270,18 @@ pub(super) async fn list(
                     entry.open_dir().ok()?.entries().ok().map(Iterator::count)
                 })
                 .flatten();
+            let path = path
+                .as_ref()
+                .map_or(name.clone(), |path| format!("{path}/{name}"));
             items.push(InstanceFileItem {
-                path: path
-                    .as_ref()
-                    .map_or(name.clone(), |path| format!("{path}/{name}")),
+                read_only: files.guard.edit(&files.folder, &path).is_err(),
+                path,
                 name,
                 kind: kind.to_owned(),
                 modified: since_epoch(meta.modified()),
                 created: since_epoch(meta.created()),
                 size: (kind == "file").then(|| meta.len()),
                 count,
-                read_only: false,
             });
         }
         Ok(items)
@@ -189,27 +289,25 @@ pub(super) async fn list(
     .await
 }
 
-pub(super) async fn read(
+/// The file at `path`, opened to be read as it is sent.
+pub(super) async fn open_file(
     engine: &Engine,
     id: &str,
     path: &str,
-) -> Result<Vec<u8>, ApiError> {
-    let path = inner_path(path)?;
-    let folder = folder(engine, id).await?;
+) -> Result<std::fs::File, ApiError> {
+    let path = inner_path(engine.side, path)?;
+    let files = open(engine, id).await?;
     blocking(move || {
         // A link or something other than a file reads as missing; any other error, such as a
         // file the engine may not read, says what it is.
-        let mut file = match folder.open_file(&path) {
-            Ok(Some(file)) => file,
-            Ok(None) => return Err(not_found(&path)),
+        match files.folder.open_file(&path) {
+            Ok(Some(file)) => Ok(file.into_std()),
+            Ok(None) => Err(not_found(&path)),
             Err(error) if error.kind() == std::io::ErrorKind::InvalidInput => {
-                return Err(not_found(&path));
+                Err(not_found(&path))
             }
-            Err(error) => return Err(internal(error)),
-        };
-        let mut bytes = Vec::new();
-        file.read_to_end(&mut bytes).map_err(internal)?;
-        Ok(bytes)
+            Err(error) => Err(internal(error)),
+        }
     })
     .await
 }
@@ -221,16 +319,20 @@ pub(super) async fn write(
     bytes: Bytes,
     create_only: bool,
 ) -> Result<(), ApiError> {
-    let path = inner_path(path)?;
-    let (folder, lock) = changing(engine, id).await?;
-    locked(lock, move || {
-        if create_only && folder.exists(&path) {
+    let path = inner_path(engine.side, path)?;
+    let (files, held) = changing(engine, id).await?;
+    locked(held, move || {
+        files.guard.edit(&files.folder, &path)?;
+        if create_only && files.folder.exists(&path) {
             return Err(ApiError::new(
                 ErrorCode::Conflict,
                 format!("{path} already exists."),
             ));
         }
-        folder.write(&path, &mut bytes.as_ref()).map_err(internal)?;
+        files
+            .folder
+            .write(&path, &mut bytes.as_ref())
+            .map_err(io_error)?;
         Ok(())
     })
     .await
@@ -241,10 +343,11 @@ pub(super) async fn create_directory(
     id: &str,
     path: &str,
 ) -> Result<(), ApiError> {
-    let path = inner_path(path)?;
-    let (folder, lock) = changing(engine, id).await?;
-    locked(lock, move || {
-        folder.create_dir_all(&path).map_err(internal)?;
+    let path = inner_path(engine.side, path)?;
+    let (files, held) = changing(engine, id).await?;
+    locked(held, move || {
+        files.guard.edit(&files.folder, &path)?;
+        files.folder.create_dir_all(&path).map_err(io_error)?;
         Ok(())
     })
     .await
@@ -257,10 +360,13 @@ pub(super) async fn rename(
     from: &str,
     to: &str,
 ) -> Result<(), ApiError> {
-    let from = inner_path(from)?;
-    let to = inner_path(to)?;
-    let (folder, lock) = changing(engine, id).await?;
-    locked(lock, move || {
+    let from = inner_path(engine.side, from)?;
+    let to = inner_path(engine.side, to)?;
+    let (files, held) = changing(engine, id).await?;
+    locked(held, move || {
+        let Files { folder, guard } = &files;
+        guard.edit(folder, &from)?;
+        guard.edit(folder, &to)?;
         if !folder.exists(&from) {
             return Err(not_found(&from));
         }
@@ -270,7 +376,7 @@ pub(super) async fn rename(
                 format!("{to} already exists."),
             ));
         }
-        folder.rename(&from, &to).map_err(internal)
+        folder.rename(&from, &to).map_err(io_error)
     })
     .await
 }
@@ -282,9 +388,11 @@ pub(super) async fn delete(
     path: &str,
     recursive: bool,
 ) -> Result<(), ApiError> {
-    let path = inner_path(path)?;
-    let (folder, lock) = changing(engine, id).await?;
-    locked(lock, move || {
+    let path = inner_path(engine.side, path)?;
+    let (files, held) = changing(engine, id).await?;
+    locked(held, move || {
+        let Files { folder, guard } = &files;
+        guard.edit(folder, &path)?;
         let meta = folder.metadata(&path).map_err(|_| not_found(&path))?;
         if meta.is_dir() && !recursive {
             folder.remove_empty_dir(&path).map_err(|_| {
@@ -294,7 +402,7 @@ pub(super) async fn delete(
                 )
             })?;
         } else {
-            folder.remove(&path).map_err(internal)?;
+            folder.remove(&path).map_err(io_error)?;
         }
         Ok(())
     })
@@ -303,8 +411,8 @@ pub(super) async fn delete(
 
 /// Unpack the zip at `source` into `target`, by default the zip's own folder. A dry run only
 /// lists the files that exist already; otherwise they are replaced when `overwrite` says so,
-/// except server-owned ones, which are never replaced. A pack's name is reported so the caller
-/// can offer to install it as one.
+/// except what the side keeps ([`Guard`]). A pack's name is reported so the caller can offer to
+/// install it as one.
 pub(super) async fn extract(
     engine: &Engine,
     id: &str,
@@ -313,14 +421,15 @@ pub(super) async fn extract(
     overwrite: bool,
     dry: bool,
 ) -> Result<Option<ExtractDryRunResult>, ApiError> {
-    let source = inner_path(source)?;
+    let source = inner_path(engine.side, source)?;
     let target = match target {
-        Some(target) => api_path(target)?,
+        Some(target) => api_path(engine.side, target)?,
         None => source.rsplit_once('/').map(|(parent, _)| parent.to_owned()),
     };
     let room = archive::room(&root(engine, id).await?).map_err(internal)?;
-    let (folder, lock) = changing(engine, id).await?;
-    locked(lock, move || {
+    let (files, held) = changing(engine, id).await?;
+    locked(held, move || {
+        let Files { folder, guard } = &files;
         let file = folder
             .open_file(&source)
             .ok()
@@ -334,6 +443,9 @@ pub(super) async fn extract(
             None => entry.to_owned(),
         };
         let entries = archive::entries(&mut zip).map_err(archive_error)?;
+        for (entry, _) in &entries {
+            guard.edit(folder, &destination(entry))?;
+        }
         if dry {
             let modpack_name = zip
                 .by_name("modrinth.index.json")
@@ -353,18 +465,17 @@ pub(super) async fn extract(
                 conflicting_files,
             }));
         }
-        let level = folder.level_name();
         // Paths nothing was at before, so a partway failure can take them away again. Files it
         // replaced stay replaced: what they held is already gone.
         let mut created = Vec::new();
-        let extracted = archive::extract(&folder, &mut zip, room, |entry| {
+        let extracted = archive::extract(folder, &mut zip, room, |entry| {
             let path = destination(entry);
             let exists = folder.exists(&path);
-            let owned = sandbox::is_server_owned(&path, &level);
             if !exists {
                 created.push(path.clone());
             }
-            (!exists || (overwrite && !owned)).then_some(path)
+            (!exists || (overwrite && !guard.keeps(folder, &path)))
+                .then_some(path)
         });
         if let Err(error) = extracted {
             for path in created.iter().rev() {
@@ -382,9 +493,10 @@ pub(super) async fn stat(
     id: &str,
     path: &str,
 ) -> Result<InstanceFileStat, ApiError> {
-    let path = api_path(path)?;
-    let folder = folder(engine, id).await?;
+    let path = api_path(engine.side, path)?;
+    let files = open(engine, id).await?;
     blocking(move || {
+        let folder = &files.folder;
         let meta = match &path {
             Some(path) => folder.metadata(path),
             None => folder.open_dir(None).and_then(|dir| dir.dir_metadata()),
@@ -401,8 +513,8 @@ pub(super) async fn stat(
             .to_owned();
         Ok(InstanceFileStat {
             name,
-            path: path.unwrap_or_default(),
-            size: meta.len(),
+            full_path: format!("/{}", path.unwrap_or_default()),
+            size_bytes: meta.len(),
             kind: if meta.file_type().is_symlink() {
                 InstanceFileKind::Symlink
             } else if meta.is_dir() {
@@ -412,8 +524,8 @@ pub(super) async fn stat(
             } else {
                 InstanceFileKind::Other
             },
-            modified: time(meta.modified()),
-            created: time(meta.created()),
+            mtime: time(meta.modified()),
+            ctime: time(meta.created()),
         })
     })
     .await
@@ -444,7 +556,7 @@ fn zip_tree(
                 .map_err(internal)?;
             zip_tree(
                 zip,
-                &sandbox::open_child(dir, &name, &path).map_err(internal)?,
+                &sandbox::open_child(dir, &name, &path).map_err(io_error)?,
                 &format!("{path}/"),
             )?;
         } else if kind.is_file() {
@@ -466,9 +578,10 @@ pub(super) async fn zip(
     id: &str,
     request: InstanceZipRequest,
 ) -> Result<(), ApiError> {
+    let side = engine.side;
     let (parent, include, target) = match request {
         InstanceZipRequest::Directory { path } => {
-            let path = inner_path(&path)?;
+            let path = inner_path(side, &path)?;
             let (parent, name) = path
                 .rsplit_once('/')
                 .map_or((None, path.clone()), |(parent, name)| {
@@ -483,23 +596,25 @@ pub(super) async fn zip(
         } => {
             let include = include
                 .iter()
-                .map(|name| sandbox::clean(name.trim_matches('/')))
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|error| {
-                    ApiError::new(ErrorCode::InvalidInput, error.to_string())
-                })?;
-            (api_path(&parent)?, include, inner_path(&target)?)
+                .map(|name| inner_path(side, name))
+                .collect::<Result<Vec<_>, _>>()?;
+            (
+                api_path(side, &parent)?,
+                include,
+                inner_path(side, &target)?,
+            )
         }
     };
     let staged = staging(engine).join(format!("zip-{}", uuid::Uuid::new_v4()));
     tokio::fs::create_dir_all(staging(engine))
         .await
         .map_err(internal)?;
-    let (folder, lock) = changing(engine, id).await?;
-    refuse_owned(&folder, &target)?;
-    let result = locked(lock, {
+    let (files, held) = changing(engine, id).await?;
+    let result = locked(held, {
         let staged = staged.clone();
         move || {
+            let Files { folder, guard } = &files;
+            guard.place(folder, &target)?;
             let mut zip = zip::ZipWriter::new(
                 std::fs::File::create(&staged).map_err(internal)?,
             );
@@ -518,7 +633,7 @@ pub(super) async fn zip(
                     .map_err(internal)?;
                     zip_tree(
                         &mut zip,
-                        &folder.open_dir(Some(&path)).map_err(internal)?,
+                        &folder.open_dir(Some(&path)).map_err(io_error)?,
                         &format!("{name}/"),
                     )?;
                 } else if meta.is_file() {
@@ -530,7 +645,7 @@ pub(super) async fn zip(
                     .map_err(internal)?;
                     let mut file = folder
                         .open_file(&path)
-                        .map_err(internal)?
+                        .map_err(io_error)?
                         .ok_or_else(|| not_found(name))?;
                     std::io::copy(&mut file, &mut zip).map_err(internal)?;
                 }
@@ -541,7 +656,7 @@ pub(super) async fn zip(
                     &target,
                     &mut std::fs::File::open(&staged).map_err(internal)?,
                 )
-                .map_err(internal)?;
+                .map_err(io_error)?;
             Ok(())
         }
     })
@@ -550,14 +665,34 @@ pub(super) async fn zip(
     result
 }
 
-/// Write a staged file into `folder`.
-pub(super) fn place(
+/// Put staged files in place, all or none: each `(path, staged)` goes to `path` unless its side
+/// refuses one ([`Guard::place`]).
+pub(super) async fn place(
+    engine: &Engine,
+    id: &str,
+    placed: Vec<(String, PathBuf)>,
+) -> Result<(), ApiError> {
+    let (files, held) = changing(engine, id).await?;
+    locked(held, move || {
+        let Files { folder, guard } = &files;
+        for (path, _) in &placed {
+            guard.place(folder, path)?;
+        }
+        for (path, staged) in &placed {
+            write_staged(folder, path, staged)?;
+        }
+        Ok(())
+    })
+    .await
+}
+
+fn write_staged(
     folder: &Folder,
     path: &str,
     staged: &Path,
 ) -> Result<(), ApiError> {
     folder
         .write(path, &mut std::fs::File::open(staged).map_err(internal)?)
-        .map_err(internal)?;
+        .map_err(io_error)?;
     Ok(())
 }

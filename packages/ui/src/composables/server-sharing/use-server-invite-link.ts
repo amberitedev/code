@@ -4,7 +4,7 @@ import { injectModrinthClient } from '#ui/providers'
 
 import { createServerInviteLink } from './invite-link'
 
-export type ServerInviteLinkTarget = { serverId: string; worldId: string; siteUrl: string }
+export type ServerInviteLinkTarget = { serverId: string; siteUrl: string }
 
 export type ServerInviteLink = ReturnType<typeof useServerInviteLink>
 
@@ -25,17 +25,11 @@ export function useServerInviteLink() {
 	async function retry() {
 		if (!target || loading.value) return
 		const current = ++run
-		const { serverId, worldId, siteUrl } = target
+		const { serverId, siteUrl } = target
 		loading.value = true
 		error.value = null
 		try {
-			const next = await createServerInviteLink(
-				client,
-				serverId,
-				worldId,
-				siteUrl,
-				() => current === run,
-			)
+			const next = await createServerInviteLink(client, serverId, siteUrl, () => current === run)
 			if (current === run) link.value = next
 		} catch (err) {
 			if (current === run) error.value = err instanceof Error ? err.message : String(err)

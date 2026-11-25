@@ -1,3 +1,4 @@
+import { core } from '@amberite/contracts/core'
 import {
 	type ContentDiffItem,
 	defineMessages,
@@ -6,8 +7,8 @@ import {
 	injectModrinthClient,
 	injectNotificationManager,
 	injectPopupNotificationManager,
+	serverDetailQueryOptions,
 	serverIconImageQueryOptions,
-	serverIconMetadataQueryOptions,
 	type ServerPlayTarget,
 	sharedDiffItems,
 	useVIntl,
@@ -39,7 +40,7 @@ import {
 	instanceKeys,
 	sharedInstanceUpdatePreviewQueryOptions,
 } from '@/pages/instance/query-options'
-import { cacheIconBytes } from '@/platform/app-lib/icons/commands'
+import { cacheIconBytes } from '@/platform/adapters/icon-cache'
 import { injectAppEvents } from '@/providers/app-events'
 
 type LaunchTarget = ServerPlayTarget & {
@@ -87,6 +88,8 @@ const messages = defineMessages({
 export function useServerPlay(modals: Ref<ServerPlayModals | undefined>) {
 	const auth = injectAuth()
 	const client = injectModrinthClient()
+	const getServer = async (serverId: string) =>
+		(await client.cores.serverRoutes(serverId)).call(core.GetServer, { params: { id: serverId } })
 	const appEvents = injectAppEvents()
 	const queryClient = useQueryClient()
 	const router = useRouter()
@@ -97,10 +100,10 @@ export function useServerPlay(modals: Ref<ServerPlayModals | undefined>) {
 	const { formatMessage } = useVIntl()
 	const updateDiffs = ref<ContentDiffItem[]>([])
 	const pendingUpdate = ref<{ target: LaunchTarget; instanceId: string }>()
-	const activeInstall = ref<{ serverId: string; worldId: string; instanceId: string }>()
+	const activeInstall = ref<{ serverId: string; instanceId: string }>()
 
 	async function cacheServerIcon(serverId: string) {
-		const metadata = await queryClient.fetchQuery(serverIconMetadataQueryOptions(serverId, client))
+		const metadata = (await queryClient.fetchQuery(serverDetailQueryOptions(client, serverId))).icon
 		if (!metadata) return null
 		const icon = await queryClient.fetchQuery(
 			serverIconImageQueryOptions(serverId, metadata.hash, client),
@@ -137,32 +140,18 @@ export function useServerPlay(modals: Ref<ServerPlayModals | undefined>) {
 
 	async function join(target: LaunchTarget, instanceId: string) {
 		await assertAccount(target)
-		const [server, legacy] = await Promise.all([
-			client.archon.servers_v1.get(target.serverId),
-			client.archon.servers_v0.get(target.serverId),
-		])
-		if (
-			!server.worlds.some(
-				(world) =>
-					world.id === target.worldId &&
-					world.is_active &&
-					world.content?.shared_instance_id === target.sharedInstanceId,
-			)
-		) {
+		const server = await getServer(target.serverId)
+		if (server.shared_instance_id !== target.sharedInstanceId)
 			throw new Error(formatMessage(messages.worldChanged))
-		}
 		await assertAccount(target)
 		const instance = await get(instanceId)
 		if (!instance || instance.quarantined || instance.install_stage !== 'installed')
 			throw new Error(formatMessage(messages.notReady))
-		const address = getHostingServerAddress(
-			client.archon.cores_v1.joinNet(legacy),
-			server.subdomain,
-		)
+		const address = getHostingServerAddress(client.cores.joinNet(server))
 		if (!address) throw new Error(formatMessage(messages.noAddress))
 		await assertAccount(target)
 		await ensureManagedServerWorldExists(instanceId, target.name, address)
-		linkedServers.value[instanceId] = linkedServerMetadata(server, target.sharedInstanceId, address)
+		linkedServers.value[instanceId] = linkedServerMetadata(target.sharedInstanceId, address)
 		await assertAccount(target)
 		try {
 			await start_join_server(instanceId, address)
@@ -292,7 +281,6 @@ export function useServerPlay(modals: Ref<ServerPlayModals | undefined>) {
 				if (!installedId) throw new Error(formatMessage(messages.notReady))
 				activeInstall.value = {
 					serverId: target.serverId,
-					worldId: target.worldId,
 					instanceId: installedId,
 				}
 				notifyWhenInstalled(target, job.job_id, installedId)
@@ -334,14 +322,13 @@ export function useServerPlay(modals: Ref<ServerPlayModals | undefined>) {
 	}
 
 	const prepareMutation = useMutation({
-		mutationFn: async ({ serverId, worldId }: ServerPlayTarget) => {
+		mutationFn: async ({ serverId }: ServerPlayTarget) => {
 			await waitForAuth()
 			if (!auth.session_token.value && !(await modals.value?.showAccountRequired())) return
 			const credentials = await getCredentials()
 			if (!credentials) return
-			const server = await client.archon.servers_v1.get(serverId)
-			const world = server.worlds.find((world) => world.id === worldId && world.is_active)
-			const sharedInstanceId = world?.content?.shared_instance_id
+			const server = await getServer(serverId)
+			const sharedInstanceId = server.shared_instance_id
 			if (!sharedInstanceId) throw new Error(formatMessage(messages.worldChanged))
 			const iconPath = await cacheServerIcon(serverId).catch((error) => {
 				console.warn('Could not cache the hosting server icon', error)
@@ -349,7 +336,6 @@ export function useServerPlay(modals: Ref<ServerPlayModals | undefined>) {
 			})
 			const target: LaunchTarget = {
 				serverId,
-				worldId,
 				sharedInstanceId,
 				name: server.name,
 				userId: credentials.user_id,
@@ -362,12 +348,9 @@ export function useServerPlay(modals: Ref<ServerPlayModals | undefined>) {
 				await playExisting(target, existing, false)
 				return
 			}
-			const [remote, legacyServer] = await Promise.all([
-				client.sharedinstances.instances_v1.get(sharedInstanceId),
-				client.archon.servers_v0.get(serverId),
-			])
+			const remote = await client.sharedinstances.instances_v1.get(sharedInstanceId)
 			target.name = remote.name
-			if (legacyServer.owner_id === credentials.user_id) {
+			if (server.owner_id === credentials.user_id) {
 				await launchMutation.mutateAsync({ target }).catch(() => {})
 				return
 			}
@@ -384,7 +367,7 @@ export function useServerPlay(modals: Ref<ServerPlayModals | undefined>) {
 
 	async function play(target: ServerPlayTarget) {
 		const installing = activeInstall.value
-		if (installing?.serverId === target.serverId && installing.worldId === target.worldId) {
+		if (installing?.serverId === target.serverId) {
 			await router.push(`/instance/${encodeURIComponent(installing.instanceId)}`)
 			return
 		}

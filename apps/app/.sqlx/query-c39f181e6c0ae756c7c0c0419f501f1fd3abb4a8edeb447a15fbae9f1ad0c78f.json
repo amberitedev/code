@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM join_log WHERE instance_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "c39f181e6c0ae756c7c0c0419f501f1fd3abb4a8edeb447a15fbae9f1ad0c78f"
+}

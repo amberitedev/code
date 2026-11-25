@@ -1,9 +1,10 @@
 //! The Core itself: updates, storage for the pool, the EULA, its log, and the machine it runs on.
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct UpdateStatus {
     /// The running version.
     pub version: String,
@@ -17,8 +18,7 @@ pub struct UpdateStatus {
     pub latest: Option<String>,
     /// `latest` is newer than the running version.
     pub update_available: bool,
-    /// Unix seconds.
-    pub checked_at: Option<i64>,
+    pub checked_at: Option<DateTime<Utc>>,
     /// Why the last check failed.
     pub check_error: Option<String>,
     /// The version a rollback goes back to.
@@ -35,7 +35,7 @@ pub struct UpdateStatus {
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
 )]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 #[cfg_attr(
     feature = "sqlx",
@@ -51,7 +51,7 @@ pub enum Channel {
 
 /// How a version on trial failed, as the launcher saw it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum FailedTrial {
     /// The OS would not run its binary.
@@ -63,29 +63,29 @@ pub enum FailedTrial {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct UpdateSettings {
-    #[cfg_attr(feature = "ts", ts(optional))]
+    #[cfg_attr(feature = "export-ts", ts(optional))]
     pub channel: Option<Channel>,
-    #[cfg_attr(feature = "ts", ts(optional))]
+    #[cfg_attr(feature = "export-ts", ts(optional))]
     pub auto_update: Option<bool>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ApplyUpdate {
     /// Install the channel's release even when it is older. Only the copal CLI may.
     #[serde(default)]
-    #[cfg_attr(feature = "ts", ts(as = "Option<bool>", optional))]
+    #[cfg_attr(feature = "export-ts", ts(as = "Option<bool>", optional))]
     pub allow_downgrade: bool,
     /// Install the channel's release even when it already failed its trial on this Core.
     #[serde(default)]
-    #[cfg_attr(feature = "ts", ts(as = "Option<bool>", optional))]
+    #[cfg_attr(feature = "export-ts", ts(as = "Option<bool>", optional))]
     pub retry: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct Restarting {
     /// The version the Core restarts into.
     pub version: String,
@@ -93,23 +93,23 @@ pub struct Restarting {
 
 /// The settings to change. Absent ones stay. Bytes throughout.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct StorageSettings {
     /// Offer storage to other people's shares. Off, the Core runs privately.
-    #[cfg_attr(feature = "ts", ts(optional))]
+    #[cfg_attr(feature = "export-ts", ts(optional))]
     pub enabled: Option<bool>,
     /// The most the store may hold.
-    #[cfg_attr(feature = "ts", ts(optional))]
+    #[cfg_attr(feature = "export-ts", ts(optional))]
     pub cap: Option<i64>,
     /// The most it may serve a day.
-    #[cfg_attr(feature = "ts", ts(optional))]
+    #[cfg_attr(feature = "export-ts", ts(optional))]
     pub egress_cap: Option<i64>,
 }
 
 /// Bytes throughout. What the store holds is shown whether or not storage is offered: a Core
 /// that does not offer it still holds its owner's shares.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct StorageStatus {
     /// Offers storage to other people's shares. Off, the Core runs privately.
     pub enabled: bool,
@@ -130,34 +130,36 @@ pub struct StorageStatus {
 /// The Minecraft EULA, accepted once by the owner for every server on the Core. No server starts
 /// before that.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct Eula {
     /// The EULA's address.
     pub url: String,
-    /// Unix seconds. Null until the owner accepts it.
-    pub accepted_at: Option<i64>,
+    /// Null until the owner accepts it.
+    pub accepted_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct LogsQuery {
     /// At most 1000. 100 when left out.
-    #[cfg_attr(feature = "ts", ts(optional))]
+    #[cfg_attr(feature = "export-ts", ts(optional))]
     pub lines: Option<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct CoreLogs {
     /// Oldest first.
     pub lines: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct Machine {
     /// This machine's memory. Null when the OS does not say.
     pub memory_mb: Option<u64>,
+    /// This machine's CPU threads.
+    pub cpus: u32,
     /// The memory every server together may use.
     pub assigned_mb: i64,
     /// Set when the servers together may use more than the machine has.
@@ -167,7 +169,7 @@ pub struct Machine {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ReachabilityReport {
     pub state: Reach,
     /// The cause in one line.
@@ -179,12 +181,11 @@ pub struct ReachabilityReport {
     pub found: Vec<String>,
     /// Every step of the fix, `next_step` first.
     pub fix: Vec<String>,
-    /// Unix seconds.
-    pub checked_at: i64,
+    pub checked_at: DateTime<Utc>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum Reach {
     Reachable,
@@ -194,7 +195,7 @@ pub enum Reach {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ReachabilityCheck {
     /// Null when the test was not run or could not tell.
     pub passed: Option<bool>,

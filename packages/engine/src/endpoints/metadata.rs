@@ -1,12 +1,13 @@
 use contracts::{Empty, Json};
 use serde::{Deserialize, Serialize};
 
-use super::endpoints;
 use crate::metadata::Manifest;
 
-endpoints! {
+contracts::endpoints! {
+    group metadata;
+
     /// The versions of a mod loader for each game version.
-    GetLoaderManifest: Get "/metadata/loaders/{loader}", LoaderRef, (), Empty => Json<Manifest>;
+    GetLoaderManifest: Get "/metadata/loaders/{loader}", Session, LoaderRef, (), Empty => Json<Manifest>, client_only;
 }
 
 #[derive(Serialize, Deserialize)]

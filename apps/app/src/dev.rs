@@ -1,4 +1,5 @@
 #[cfg(debug_assertions)]
+use crate::state::Desktop;
 use contracts::{
     Json,
     backend::dev::{ScenarioLogin, Session},
@@ -67,10 +68,7 @@ pub fn window_hidden() -> bool {
 /// without going through the website. Does nothing when an account is already active. The backend
 /// opens the session only for the runner's secret, which arrives in the environment.
 #[cfg(debug_assertions)]
-pub async fn sign_in(
-    state: &engine::Engine,
-    presence: &crate::presence::Presence,
-) {
+pub async fn sign_in(state: &Desktop, presence: &crate::presence::Presence) {
     let Some(config) = config().filter(|config| config.auth_mode == "dev")
     else {
         return;
@@ -91,7 +89,7 @@ pub async fn sign_in(
 
 #[cfg(debug_assertions)]
 async fn open_session(
-    state: &engine::Engine,
+    state: &Desktop,
     presence: &crate::presence::Presence,
     username: &str,
     backend_url: &str,
@@ -113,7 +111,7 @@ async fn open_session(
         http: &http,
         base: backend_url,
         bearer: None,
-        read_ticket: None,
+        ticket: None,
         // Startup waits on this, so a backend that is reloading must not hold the App on its splash.
         timeout: Some(std::time::Duration::from_secs(10)),
     };
@@ -157,7 +155,7 @@ fn parse_config() -> Option<DevAppConfig> {
             "dev data directory cannot be empty"
         );
         unsafe {
-            env::set_var("THESEUS_CONFIG_DIR", &config.data_dir);
+            env::set_var("AMBERITE_CONFIG_DIR", &config.data_dir);
             env::set_var(
                 "WEBVIEW2_USER_DATA_FOLDER",
                 format!("{}/webview2", config.data_dir),

@@ -1,10 +1,8 @@
-import { ContractClient, desktop } from '@modrinth/api-client'
+import { desktop } from '@amberite/contracts/app'
 
-import { localTransport } from '@/platform/local'
-
-const local = new ContractClient(localTransport)
+import { apiClient } from '@/platform/modrinth-client'
 
 /** Keeps `@tauri-apps/plugin-opener`'s name. The link opens on the App's desktop. */
 export async function openUrl(url: string | URL): Promise<void> {
-	await local.call(desktop.openUrl, { body: { url: String(url) } })
+	await apiClient.local.call(desktop.openUrl, { body: { url: String(url) } })
 }

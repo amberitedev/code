@@ -1,17 +1,17 @@
 //! New instances and modpack installs from a file on this desktop.
 
-use std::sync::Arc;
+use crate::state::Desktop;
 
 use axum::{Router, extract::State};
 use contracts::{
     ApiError, Json,
-    server::{Req, route},
+    server::{Mount, Req},
 };
 use engine::{
-    Engine, data::InstanceLink, install::InstallJobSnapshot, routes::api_error,
+    data::InstanceLink, install::InstallJobSnapshot, routes::api_error,
 };
 
-use crate::server::{
+use crate::local_api::{
     AppState,
     endpoints::install::{
         CreateInstance, CreateModpackInstance, InstallModpackPreview,
@@ -20,20 +20,15 @@ use crate::server::{
 };
 
 pub fn routes() -> Router<AppState> {
-    [
-        route::<PreviewModpack, _, _, _>(preview_modpack),
-        route::<CreateInstance, _, _, _>(create_instance),
-        route::<CreateModpackInstance, _, _, _>(create_modpack_instance),
-        route::<InstallPackToInstance, _, _, _>(install_pack_to_instance),
-    ]
-    .into_iter()
-    .fold(Router::new(), |router, (path, method)| {
-        router.route(path, method)
-    })
+    Router::new()
+        .endpoint::<PreviewModpack, _, _>(preview_modpack)
+        .endpoint::<CreateInstance, _, _>(create_instance)
+        .endpoint::<CreateModpackInstance, _, _>(create_modpack_instance)
+        .endpoint::<InstallPackToInstance, _, _>(install_pack_to_instance)
 }
 
 async fn preview_modpack(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     request: Req<PreviewModpack>,
 ) -> Result<Json<InstallModpackPreview>, ApiError> {
     engine::pack::install_from::get_instance_from_pack(&engine, request.body)
@@ -43,7 +38,7 @@ async fn preview_modpack(
 }
 
 async fn create_instance(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     request: Req<CreateInstance>,
 ) -> Result<Json<InstallJobSnapshot>, ApiError> {
     let request = request.body;
@@ -61,7 +56,7 @@ async fn create_instance(
         link,
         None,
         None,
-        &engine,
+        engine.engine(),
     )
     .await
     .map(Json)
@@ -69,7 +64,7 @@ async fn create_instance(
 }
 
 async fn create_modpack_instance(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     request: Req<CreateModpackInstance>,
 ) -> Result<Json<InstallJobSnapshot>, ApiError> {
     let install = request.body;
@@ -78,14 +73,18 @@ async fn create_modpack_instance(
         .map(|edit| edit.into_core())
         .transpose()
         .map_err(api_error)?;
-    engine::install::create_modpack_instance(install.location, edit, &engine)
-        .await
-        .map(Json)
-        .map_err(api_error)
+    engine::install::create_modpack_instance(
+        install.location,
+        edit,
+        engine.engine(),
+    )
+    .await
+    .map(Json)
+    .map_err(api_error)
 }
 
 async fn install_pack_to_instance(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     request: Req<InstallPackToInstance>,
 ) -> Result<Json<InstallJobSnapshot>, ApiError> {
     let install = request.body;
@@ -98,7 +97,7 @@ async fn install_pack_to_instance(
         request.params.id,
         install.location,
         edit,
-        &engine,
+        engine.engine(),
     )
     .await
     .map(Json)

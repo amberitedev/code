@@ -1,162 +1,10 @@
 <template>
 	<div class="relative h-full w-full">
-		<ConfirmModal
-			ref="rollSftpModal"
-			:title="formatMessage(messages.rollCredentialsModalTitle)"
-			:description="formatMessage(messages.rollCredentialsModalDescription)"
-			:proceed-label="formatMessage(messages.rollCredentials)"
-			:proceed-icon="RefreshCwIcon"
-			:markdown="false"
-			@proceed="confirmRollSftp"
-		/>
-
 		<div class="flex h-full w-full flex-col gap-4">
 			<div class="flex flex-col gap-6">
-				<!-- SFTP section -->
-				<div v-if="!client.selfHostedHosting" class="flex flex-col gap-2">
-					<div class="flex flex-col items-center justify-between gap-2 sm:flex-row">
-						<span class="text-lg font-semibold text-contrast">SFTP</span>
-						<div class="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
-							<Button
-								v-tooltip="sftpRollTooltip"
-								class="!w-full sm:!w-auto"
-								:disabled="!canWriteFiles || isRollingSftp"
-								:loading="isRollingSftp"
-								@click="showRollSftpModal"
-							>
-								<RefreshCwIcon class="h-5 w-5" />
-								{{ formatMessage(messages.rollCredentials) }}
-							</Button>
-							<ButtonLink
-								v-tooltip="sftpActionTooltip"
-								class="!w-full sm:!w-auto"
-								:class="{ 'opacity-60': !canWriteFiles }"
-								:href="canWriteFiles ? sftpUrl : undefined"
-								:aria-disabled="!canWriteFiles"
-								target="_blank"
-								@click="handleSftpLaunchClick"
-							>
-								<ExternalIcon class="h-5 w-5" />
-								Launch SFTP
-							</ButtonLink>
-						</div>
-					</div>
-
-					<div
-						class="flex flex-col gap-2.5 rounded-2xl border border-solid border-surface-5 p-4"
-						:class="isApp ? 'bg-surface-3' : 'bg-surface-2'"
-					>
-						<span class="text-lg font-semibold text-contrast">Server Address</span>
-						<Button
-							v-tooltip="sftpCopyTooltip('Copy SFTP server address')"
-							native-type="button"
-							size="lg"
-							class="w-full !justify-between text-left"
-							:disabled="!canWriteFiles"
-							@click="copyToClipboard('Server address', server?.sftp_host)"
-						>
-							<span class="min-w-0 truncate text-base font-semibold text-primary">
-								{{ server?.sftp_host }}
-							</span>
-							<ClipboardCopyIcon class="size-5 shrink-0 text-secondary" aria-hidden="true" />
-						</Button>
-						<div class="flex flex-col gap-2 sm:mt-0 sm:flex-row">
-							<div class="flex w-full flex-col justify-center gap-2">
-								<span class="text-lg font-semibold text-contrast">Username</span>
-								<Button
-									v-tooltip="sftpCopyTooltip('Copy SFTP username')"
-									native-type="button"
-									size="lg"
-									class="w-full !justify-between text-left"
-									:disabled="!canWriteFiles"
-									@click="copyToClipboard('Username', server?.sftp_username)"
-								>
-									<span class="min-w-0 truncate text-base font-semibold text-primary">
-										{{ server?.sftp_username }}
-									</span>
-									<ClipboardCopyIcon class="size-5 shrink-0 text-secondary" aria-hidden="true" />
-								</Button>
-							</div>
-							<div class="flex w-full flex-col justify-center gap-2">
-								<span class="text-lg font-semibold text-contrast">Password</span>
-								<div class="flex items-center gap-1.5">
-									<Button
-										v-tooltip="sftpCopyTooltip('Copy SFTP password')"
-										native-type="button"
-										size="lg"
-										class="min-w-0 grow !justify-between text-left"
-										:disabled="!canWriteFiles"
-										@click="copyToClipboard('Password', server?.sftp_password)"
-									>
-										<span class="min-w-0 truncate text-base font-semibold text-primary">
-											{{
-												showPassword
-													? server?.sftp_password
-													: '*'.repeat(server?.sftp_password?.length ?? 0)
-											}}
-										</span>
-										<ClipboardCopyIcon class="size-5 shrink-0 text-secondary" aria-hidden="true" />
-									</Button>
-									<IconButton
-										v-tooltip="passwordVisibilityTooltip"
-										:label="passwordVisibilityTooltip"
-										size="lg"
-										:disabled="!canWriteFiles"
-										@click="togglePasswordVisibility"
-									>
-										<EyeIcon v-if="showPassword" />
-										<EyeOffIcon v-else />
-									</IconButton>
-								</div>
-							</div>
-						</div>
-					</div>
-				</div>
-
 				<p v-if="startupError" class="m-0 text-red">
 					Couldn't load startup settings: {{ startupError.message }}
 				</p>
-
-				<!-- Startup command section (a Core builds its own and accepts no other) -->
-				<div v-if="!client.selfHostedHosting" class="flex flex-col gap-2.5">
-					<div class="flex h-10 flex-col items-end justify-between gap-4 sm:flex-row">
-						<label for="startup-command-field" class="mb-0.5 flex flex-col gap-2">
-							<span class="text-lg font-semibold text-contrast">Startup command</span>
-						</label>
-						<Button
-							v-if="startupCommand !== defaultStartupCommand"
-							v-tooltip="advancedActionTooltip"
-							type="quiet"
-							:disabled="
-								isStartupLoading ||
-								startupCommand === defaultStartupCommand ||
-								!canUseAdvancedSettings
-							"
-							class="relative !w-full sm:!w-auto"
-							@click="resetToDefault"
-						>
-							<UpdatedIcon class="h-5 w-5" />
-							Default
-						</Button>
-					</div>
-					<div class="relative">
-						<Textarea
-							id="startup-command-field"
-							v-model="startupCommand"
-							v-tooltip="advancedActionTooltip"
-							resize="vertical"
-							input-class="font-mono field-sizing-content"
-							:disabled="isStartupLoading || !canUseAdvancedSettings"
-						/>
-						<div
-							v-if="isStartupLoading"
-							class="bg-bg/50 absolute inset-0 flex items-center justify-center rounded-xl"
-						>
-							<SpinnerIcon class="h-6 w-6 animate-spin text-secondary" />
-						</div>
-					</div>
-					<span> The command that runs when your server is started. </span>
-				</div>
 
 				<!-- Java version section -->
 				<div class="flex flex-col gap-2.5">
@@ -195,32 +43,6 @@
 					</div>
 					<span> The Java version your server runs on. </span>
 				</div>
-
-				<!-- Java runtime section (a Core runs one runtime) -->
-				<div v-if="!client.selfHostedHosting" class="flex flex-col gap-2.5">
-					<div class="flex flex-col gap-2">
-						<span class="text-lg font-semibold text-contrast">Java runtime</span>
-					</div>
-					<div class="relative max-w-xs">
-						<Combobox
-							:id="'runtime-field'"
-							v-model="jreVendor"
-							v-tooltip="advancedActionTooltip"
-							name="runtime"
-							:options="JRE_VENDORS"
-							:display-value="jreVendorLabel ?? 'Runtime'"
-							:disabled="isStartupLoading || !canUseAdvancedSettings"
-							trigger-type="base"
-						/>
-						<div
-							v-if="isStartupLoading"
-							class="bg-bg/50 absolute inset-0 flex items-center justify-center rounded-xl"
-						>
-							<SpinnerIcon class="h-5 w-5 animate-spin text-secondary" />
-						</div>
-					</div>
-					<span> The Java runtime your server will use. </span>
-				</div>
 			</div>
 		</div>
 		<SaveBanner
@@ -234,155 +56,28 @@
 </template>
 
 <script setup lang="ts">
-import type { Archon } from '@modrinth/api-client'
-import {
-	ClipboardCopyIcon,
-	ExternalIcon,
-	EyeIcon,
-	EyeOffIcon,
-	RefreshCwIcon,
-	SpinnerIcon,
-	UpdatedIcon,
-} from '@modrinth/assets'
+import { core as coreRoutes } from '@amberite/contracts/core'
+import { EyeIcon, EyeOffIcon, SpinnerIcon } from '@modrinth/assets'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, ref, watch } from 'vue'
 
-import { Combobox, ConfirmModal, Textarea } from '#ui/components'
-import { Button, ButtonLink, IconButton } from '#ui/components/base/buttons'
+import { Combobox } from '#ui/components'
 import SaveBanner from '#ui/components/servers/SaveBanner.vue'
-import { defineMessages, useVIntl } from '#ui/composables/i18n'
 import { useServerPermissions } from '#ui/composables/server-permissions'
-import { injectServerSettings } from '#ui/layouts/shared/server-settings/providers/server-settings'
-import {
-	injectModrinthClient,
-	injectModrinthServerContext,
-	injectNotificationManager,
-} from '#ui/providers'
+import { serverKeys } from '#ui/composables/server-queries'
+import { injectModrinthServerContext, injectNotificationManager } from '#ui/providers'
 
 const { addNotification } = injectNotificationManager()
-const { server, serverId, worldId } = injectModrinthServerContext()
-const { isApp } = injectServerSettings()
-const client = injectModrinthClient()
+const { server, serverId, core } = injectModrinthServerContext()
 const queryClient = useQueryClient()
-const { formatMessage } = useVIntl()
-const { canUseAdvancedSettings, canWriteFiles, permissionDeniedMessage } = useServerPermissions()
+const { canUseAdvancedSettings, permissionDeniedMessage } = useServerPermissions()
 
-const messages = defineMessages({
-	rollCredentials: {
-		id: 'servers.settings.advanced.sftp.roll-credentials',
-		defaultMessage: 'Rotate credentials',
-	},
-	rollCredentialsModalTitle: {
-		id: 'servers.settings.advanced.sftp.roll-credentials-modal-title',
-		defaultMessage: 'Rotate credentials',
-	},
-	rollCredentialsModalDescription: {
-		id: 'servers.settings.advanced.sftp.roll-credentials-modal-description',
-		defaultMessage: 'The previous username and password will stop working.',
-	},
-	rollCredentialsSuccessTitle: {
-		id: 'servers.settings.advanced.sftp.roll-credentials-success-title',
-		defaultMessage: 'SFTP credentials rotated',
-	},
-	rollCredentialsSuccessText: {
-		id: 'servers.settings.advanced.sftp.roll-credentials-success-text',
-		defaultMessage: 'Your SFTP username and password have been regenerated.',
-	},
-	rollCredentialsErrorTitle: {
-		id: 'servers.settings.advanced.sftp.roll-credentials-error-title',
-		defaultMessage: 'Failed to rotate SFTP credentials',
-	},
-	rollCredentialsErrorText: {
-		id: 'servers.settings.advanced.sftp.roll-credentials-error-text',
-		defaultMessage: 'Please try again later.',
-	},
-})
-
-const showPassword = ref(false)
-const rollSftpModal = ref<InstanceType<typeof ConfirmModal>>()
-const sftpUrl = computed(() => `sftp://${server.value?.sftp_username}@${server.value?.sftp_host}`)
 const advancedActionTooltip = computed(() =>
 	canUseAdvancedSettings.value ? undefined : permissionDeniedMessage.value,
 )
-const sftpActionTooltip = computed(() =>
-	canWriteFiles.value
-		? 'This button only works with compatible SFTP clients (e.g. WinSCP)'
-		: permissionDeniedMessage.value,
-)
-const sftpRollTooltip = computed(() =>
-	canWriteFiles.value ? undefined : permissionDeniedMessage.value,
-)
-const sftpCopyTooltip = (label: string) =>
-	canWriteFiles.value ? label : permissionDeniedMessage.value
-const passwordVisibilityTooltip = computed(() =>
-	canWriteFiles.value
-		? showPassword.value
-			? 'Hide password'
-			: 'Show password'
-		: permissionDeniedMessage.value,
-)
-
-function handleSftpLaunchClick(event: MouseEvent) {
-	if (canWriteFiles.value) return
-	event.preventDefault()
-}
-
-function applySftpCredentials(credentials: Archon.Servers.v1.SftpCredentials) {
-	queryClient.setQueryData<Archon.Servers.v0.Server>(['servers', 'detail', serverId], (current) =>
-		current ? { ...current, ...credentials } : current,
-	)
-	queryClient.setQueryData<Archon.Servers.v1.ServerFull>(
-		['servers', 'v1', 'detail', serverId],
-		(current) => (current ? { ...current, ...credentials } : current),
-	)
-}
-
-const { mutate: rollSftpMutation, isPending: isRollingSftp } = useMutation({
-	mutationFn: () => client.archon.servers_v1.rollSftp(serverId),
-	onSuccess: (credentials) => {
-		applySftpCredentials(credentials)
-		addNotification({
-			type: 'success',
-			title: formatMessage(messages.rollCredentialsSuccessTitle),
-			text: formatMessage(messages.rollCredentialsSuccessText),
-		})
-	},
-	onError: (error) => {
-		console.error(error)
-		addNotification({
-			type: 'error',
-			title: formatMessage(messages.rollCredentialsErrorTitle),
-			text: formatMessage(messages.rollCredentialsErrorText),
-		})
-	},
-})
-
-function showRollSftpModal() {
-	if (!canWriteFiles.value || isRollingSftp.value) return
-	rollSftpModal.value?.show()
-}
-
-function confirmRollSftp() {
-	if (!canWriteFiles.value) return
-	rollSftpMutation()
-}
-
-const copyToClipboard = (name: string, textToCopy?: string) => {
-	if (!canWriteFiles.value) return
-	navigator.clipboard.writeText(textToCopy || '')
-	addNotification({
-		type: 'success',
-		title: `${name} copied to clipboard!`,
-	})
-}
-
-function togglePasswordVisibility() {
-	if (!canWriteFiles.value) return
-	showPassword.value = !showPassword.value
-}
 
 // Startup state
-const startupQueryKey = computed(() => ['servers', 'startup', 'v1', serverId, worldId.value])
+const startupQueryKey = computed(() => serverKeys.startup(serverId))
 
 const {
 	data: startupData,
@@ -390,11 +85,10 @@ const {
 	error: startupError,
 } = useQuery({
 	queryKey: startupQueryKey,
-	queryFn: () => client.archon.options_v1.getStartup(serverId, worldId.value!),
-	enabled: computed(() => worldId.value !== null),
+	queryFn: () => core.call(coreRoutes.GetStartup, { params: { id: serverId } }),
 	// A Core's refusal (a server with nothing installed yet) does not change on retry, and
 	// retrying kept every field spinning for seconds.
-	retry: client.selfHostedHosting ? false : 3,
+	retry: false,
 })
 
 const JAVA_VERSIONS = [
@@ -453,32 +147,16 @@ const displayedJavaVersions = computed(() => {
 	return filterJavaVersions([8])
 })
 
-const JRE_VENDORS: { value: Archon.Content.v1.JreVendor; label: string }[] = [
-	{ value: 'corretto', label: 'Corretto' },
-	{ value: 'temurin', label: 'Temurin' },
-	{ value: 'graal', label: 'GraalVM' },
-]
-
-const savedStartupCommand = computed(() => startupData.value?.startup_command ?? '')
 const savedJavaVersion = computed(() => startupData.value?.java_version ?? undefined)
-const savedJreVendor = computed(() => startupData.value?.jre_vendor ?? undefined)
-const defaultStartupCommand = computed(
-	() => startupData.value?.original_invocation ?? savedStartupCommand.value,
-)
 
-const startupCommand = ref('')
 const javaVersion = ref<number>()
-const jreVendor = ref<Archon.Content.v1.JreVendor>()
 
 const javaVersionLabel = computed(
 	() => JAVA_VERSIONS.find((v) => v.value === javaVersion.value)?.label,
 )
-const jreVendorLabel = computed(() => JRE_VENDORS.find((v) => v.value === jreVendor.value)?.label)
 
 function syncFormFromData() {
-	startupCommand.value = savedStartupCommand.value
 	javaVersion.value = savedJavaVersion.value
-	jreVendor.value = savedJreVendor.value
 }
 
 watch(
@@ -491,19 +169,13 @@ watch(
 	{ immediate: true },
 )
 
-const hasUnsavedChanges = computed(
-	() =>
-		startupCommand.value !== savedStartupCommand.value ||
-		javaVersion.value !== savedJavaVersion.value ||
-		jreVendor.value !== savedJreVendor.value,
-)
+const hasUnsavedChanges = computed(() => javaVersion.value !== savedJavaVersion.value)
 
 const { mutate: saveStartupMutation, isPending } = useMutation({
 	mutationFn: () =>
-		client.archon.options_v1.patchStartup(serverId, worldId.value!, {
-			startup_command: startupCommand.value || null,
-			java_version: javaVersion.value ?? null,
-			jre_vendor: jreVendor.value ?? null,
+		core.call(coreRoutes.ChangeStartup, {
+			params: { id: serverId },
+			body: { java_version: javaVersion.value ?? null },
 		}),
 	onSuccess: async () => {
 		await queryClient.invalidateQueries({ queryKey: startupQueryKey.value })
@@ -531,10 +203,5 @@ function saveStartup() {
 
 function resetStartup() {
 	syncFormFromData()
-}
-
-function resetToDefault() {
-	if (!canUseAdvancedSettings.value) return
-	startupCommand.value = defaultStartupCommand.value
 }
 </script>

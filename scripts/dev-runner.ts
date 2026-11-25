@@ -835,7 +835,7 @@ export function testBuild(
 	const folder = (crate: LocalCrate) =>
 		NodePath.relative(checkout, crate.folder).replaceAll('\\', '/')
 	const programs = tested.flatMap((crate) =>
-		crate.name === 'copal' || crate.name === 'theseus_gui'
+		crate.name === 'copal' || crate.name === 'amberite-app'
 			? [[folder(crate), programInputs(paths, crate.name)] as const]
 			: [],
 	)
@@ -853,10 +853,12 @@ export function testBuild(
 			...crates.flatMap((crate) => (PROGRAM_PACKAGES.includes(crate) ? [] : ['--package', crate])),
 			'--no-default-features',
 			...tested.flatMap((crate) =>
-				crate.hasDefault && crate.name !== 'theseus_gui'
+				crate.hasDefault && crate.name !== 'amberite-app'
 					? ['--features', `${crate.name}/default`]
 					: [],
 			),
+			// The App's tests check its generated TypeScript, as in CI.
+			...(crates.includes('amberite-app') ? ['--features', 'amberite-app/export-ts'] : []),
 			// Cargo takes `--lib` once, for every selected package.
 			...(targets.includes('--lib') ? ['--lib'] : []),
 			...targets.filter((target) => target !== '--lib'),
@@ -1007,7 +1009,7 @@ export function createStackSpecs(input: {
 	readonly shape: StackShape
 }): ReadonlyArray<ProcessSpec> {
 	let programs: ProgramBuild | undefined
-	const program = (name: 'copal' | 'theseus_gui') => ({
+	const program = (name: 'copal' | 'amberite-app') => ({
 		build: (programs ??= programsBuild(input.paths, input.env)),
 		file: programFile(name),
 	})
@@ -1044,12 +1046,12 @@ export function createStackSpecs(input: {
 		}
 		return {
 			args: ['--amberite-dev-config', JSON.stringify(appDevConfig)],
-			program: program('theseus_gui'),
+			program: program('amberite-app'),
 			cwd: NodePath.join(input.paths.worktree, 'apps', 'app'),
 			env: {
 				...input.env,
-				RUST_LOG: 'engine=warn,theseus_gui=warn,webview=off',
-				THESEUS_CONFIG_DIR: dataDir,
+				RUST_LOG: 'engine=warn,amberite_app=warn,webview=off',
+				AMBERITE_CONFIG_DIR: dataDir,
 				WEBVIEW2_USER_DATA_FOLDER: NodePath.join(dataDir, 'webview2'),
 			},
 			label: `app:${index + 1}`,
@@ -1058,7 +1060,7 @@ export function createStackSpecs(input: {
 	return [...cores, ...apps]
 }
 
-const PROGRAM_PACKAGES = ['--package', 'theseus_gui', '--package', 'copal']
+const PROGRAM_PACKAGES = ['--package', 'amberite-app', '--package', 'copal']
 
 /**
  * The App and Core, in one Cargo run. Built apart, Cargo picks dependency features for each on its
@@ -1083,9 +1085,9 @@ function programsBuild(paths: WorktreePaths, env: NodeJS.ProcessEnv): ProgramBui
 		ignoredInputs: engine.ignoredInputs,
 		// The App's first: loose inputs count toward the first crate.
 		inputs: [
-			...new Set([...programInputs(paths, 'theseus_gui'), ...programInputs(paths, 'copal')]),
+			...new Set([...programInputs(paths, 'amberite-app'), ...programInputs(paths, 'copal')]),
 		],
-		programs: [programFile('theseus_gui'), programFile('copal')],
+		programs: [programFile('amberite-app'), programFile('copal')],
 		...workspaceBuildDirs(paths),
 	}
 }
@@ -1117,11 +1119,11 @@ function engineBuildSettings(
 /** What the App's or Core's build reads. Its tests count the same files toward its own crate. */
 function programInputs(
 	paths: WorktreePaths,
-	packageName: 'copal' | 'theseus_gui',
+	packageName: 'copal' | 'amberite-app',
 ): ReadonlyArray<string> {
 	const inputs = workspaceInputs(paths, packageName)
 	// The App's version comes from the frontend.
-	return packageName === 'theseus_gui' ? [...inputs, 'apps/app-frontend/package.json'] : inputs
+	return packageName === 'amberite-app' ? [...inputs, 'apps/app-frontend/package.json'] : inputs
 }
 
 /**

@@ -1,36 +1,30 @@
-use std::sync::Arc;
+use crate::state::Desktop;
 
 use axum::{Router, extract::State};
 use contracts::{
     ApiError, Empty, Json,
-    server::{Req, route},
+    server::{Mount, Req},
 };
-use engine::Engine;
 use engine::data::ProcessMetadata;
 use engine::instance::{
     LaunchCredentials, LaunchDefaults, LaunchRequest, QuickPlayType,
 };
 use engine::server_address::ServerAddress;
 
-use crate::server::{
+use crate::local_api::{
     AppState,
     endpoints::launch::{JoinServer, JoinSingleplayerWorld, PlayInstance},
 };
 
 pub fn routes() -> Router<AppState> {
-    [
-        route::<PlayInstance, _, _, _>(play_instance),
-        route::<JoinServer, _, _, _>(join_server),
-        route::<JoinSingleplayerWorld, _, _, _>(join_singleplayer_world),
-    ]
-    .into_iter()
-    .fold(Router::new(), |router, (path, method)| {
-        router.route(path, method)
-    })
+    Router::new()
+        .endpoint::<PlayInstance, _, _>(play_instance)
+        .endpoint::<JoinServer, _, _>(join_server)
+        .endpoint::<JoinSingleplayerWorld, _, _>(join_singleplayer_world)
 }
 
 async fn play_instance(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     request: Req<PlayInstance>,
 ) -> Result<Json<ProcessMetadata>, ApiError> {
     let play = request.body;
@@ -47,7 +41,7 @@ async fn play_instance(
 }
 
 async fn join_server(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     request: Req<JoinServer>,
 ) -> Result<Empty, ApiError> {
     let join = request.body;
@@ -59,7 +53,7 @@ async fn join_server(
 }
 
 async fn join_singleplayer_world(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     request: Req<JoinSingleplayerWorld>,
 ) -> Result<Empty, ApiError> {
     let join = request.body;
@@ -73,7 +67,7 @@ async fn join_singleplayer_world(
 /// Launches an instance as the active Minecraft account, after applying this desktop's pending
 /// skin, synced packs, game options and launch settings.
 pub async fn launch(
-    engine: &Arc<Engine>,
+    engine: &Desktop,
     instance_id: &str,
     quick_play: QuickPlayType,
 ) -> engine::Result<ProcessMetadata> {
@@ -99,7 +93,7 @@ pub async fn launch(
         },
         quick_play,
     };
-    engine::instance::launch(engine, instance_id, request, async || {
+    engine::instance::launch(engine.engine(), instance_id, request, async || {
         crate::skins::minecraft_skins::flush_pending_skin_change(engine).await?;
         if let Err(error) =
             crate::synced_options::reconcile_synced_packs(engine, instance_id).await

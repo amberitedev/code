@@ -16,14 +16,14 @@
 		<div
 			class="flex flex-row items-center overflow-x-hidden rounded-2xl border-[1px] border-solid border-surface-4 bg-bg-raised p-4 transition-all duration-150"
 			:class="{
-				'!rounded-b-none border-b-0': hasNotice,
+				'!rounded-b-none border-b-0': isProvisioning,
 				'bg-surface-2': isDisabled,
 			}"
 			data-pyro-server-listing
 			:data-pyro-server-listing-id="server_id"
 		>
 			<div
-				v-if="hasIconOverlay"
+				v-if="isProvisioning"
 				class="flex size-16 items-center justify-center rounded-xl border-[1px] border-solid border-button-border bg-button-bg shadow-sm"
 			>
 				<ServerIcon
@@ -33,11 +33,9 @@
 					class="!rounded-xl"
 				/>
 				<SpinnerIcon
-					v-if="isProvisioning || isUpgrading"
 					class="size-8 animate-spin absolute text-contrast"
 					:class="{ 'opacity-50': isDisabled }"
 				/>
-				<LockIcon v-else class="size-8 absolute" :class="{ 'opacity-50': isDisabled }" />
 			</div>
 			<ServerIcon v-else :image="image" :config="iconConfig" :disabled="isDisabled" />
 			<div class="ml-4 flex flex-col gap-1.5">
@@ -62,7 +60,7 @@
 						<span class="max-w-32 truncate">{{ owner.username }}</span>
 					</div>
 					<div
-						v-if="isConfiguring && noticeType !== 'cancelled' && noticeType !== 'setToCancel'"
+						v-if="isConfiguring"
 						class="flex min-w-0 items-center gap-2 truncate text-sm font-medium text-brand rounded-full bg-brand-highlight border border-solid border-brand px-2.5 h-[28px]"
 					>
 						<SparklesIcon class="size-5 shrink-0 font-semibold" />
@@ -111,193 +109,28 @@
 			</div>
 		</div>
 
-		<div v-if="noticeType" class="server-listing-notice">
-			<div v-if="noticeType === 'provisioning'" class="flex gap-2">
-				{{ formatMessage(messages.provisioningNotice) }}
-			</div>
-			<div v-else-if="noticeType === 'upgrading'" class="flex gap-2">
-				{{ formatMessage(messages.upgradingNotice) }}
-			</div>
-			<div v-else-if="noticeType === 'cancelled' || noticeType === 'paymentfailed'">
-				<IntlFormatted
-					v-if="noticeType === 'paymentfailed' && cancellationDate"
-					:message-id="messages.subscriptionCancelledPaymentFailedOnDate"
-					:values="{ formattedDate: formatDate(cancellationDate) }"
-				>
-					<template #date="{ children }">
-						<span class="font-medium text-contrast"><component :is="() => children" /></span>
-					</template>
-				</IntlFormatted>
-
-				<span v-else-if="noticeType === 'paymentfailed'">
-					{{ formatMessage(messages.subscriptionCancelledPaymentFailed) }}
-				</span>
-
-				<IntlFormatted
-					v-else-if="cancellationDate"
-					:message-id="messages.subscriptionCancelledOnDate"
-					:values="{ formattedDate: formatDate(cancellationDate) }"
-				>
-					<template #date="{ children }">
-						<span class="font-medium text-contrast"><component :is="() => children" /></span>
-					</template>
-				</IntlFormatted>
-
-				<span v-else>
-					{{ formatMessage(messages.subscriptionCancelled) }}
-				</span>
-
-				{{ ' ' }}
-				<IntlFormatted
-					v-if="!isFilesExpired"
-					:message-id="messages.filesKeptForDownload"
-					:values="{ daysRemaining: filesRemainingDays }"
-				>
-					<template #days-remaining="{ children }">
-						<span class="font-medium text-red">
-							<component :is="() => children" />
-						</span>
-					</template>
-				</IntlFormatted>
-			</div>
-
-			<div v-else-if="noticeType === 'setToCancel'">
-				<IntlFormatted
-					v-if="cancellationDate"
-					:message-id="messages.subscriptionSetToCancelOnDate"
-					:values="{ formattedDate: formatDate(cancellationDate) }"
-				>
-					<template #date="{ children }">
-						<span class="font-medium text-contrast">
-							<component :is="() => children" />
-						</span>
-					</template>
-				</IntlFormatted>
-
-				<span v-else>{{ formatMessage(messages.subscriptionSetToCancel) }}</span>
-
-				<template v-if="!isFilesExpired">
-					{{ ' ' }}
-					{{ formatMessage(messages.filesPreservedAfterCancellation) }}
-				</template>
-			</div>
-			<div v-else-if="noticeType === 'moderated'">
-				{{ formatMessage(messages.moderatedNotice) }}
-			</div>
-			<div v-else>
-				{{ formatMessage(messages.suspendedNotice) }}
-			</div>
-
-			<div v-if="noticeButtons" class="flex flex-wrap gap-2">
-				<Button
-					v-if="noticeButtons.downloadWorld && onDownloadWorld"
-					type="outlined"
-					data-server-listing-button
-					@click="onDownloadWorld"
-				>
-					<DownloadIcon />
-					{{ formatMessage(commonMessages.downloadFilesButton) }}
-				</Button>
-				<Button
-					v-if="noticeButtons.copyId"
-					v-tooltip="formatMessage(messages.copyCodeToClipboardTooltip)"
-					type="outlined"
-					data-server-listing-button
-					@click="copyToClipboard(server_id)"
-				>
-					<template v-if="copied">
-						{{ formatMessage(messages.copiedLabel) }} <CheckIcon class="text-green" />
-					</template>
-					<template v-else> {{ formatMessage(messages.copyIdLabel) }} <CopyIcon /> </template>
-				</Button>
-				<ButtonLink
-					v-if="noticeButtons.support"
-					href="https://support.modrinth.com/en/"
-					target="_blank"
-					data-server-listing-button
-					><MessagesSquareIcon /> {{ formatMessage(messages.supportLabel) }}
-				</ButtonLink>
-				<ButtonLink
-					v-if="noticeButtons.manageBilling"
-					type="colored"
-					color="brand"
-					:to="`/settings/billing#server-${server_id}`"
-					data-server-listing-button
-				>
-					<CardIcon /> {{ formatMessage(messages.manageBillingLabel) }}
-				</ButtonLink>
-				<Button
-					v-if="noticeButtons.resubscribe && onResubscribe"
-					type="colored"
-					color="brand"
-					data-server-listing-button
-					@click="onResubscribe"
-				>
-					<RotateCounterClockwiseIcon /> {{ formatMessage(messages.resubscribeLabel) }}
-				</Button>
-			</div>
-		</div>
-
-		<div v-if="pendingChange && status !== 'suspended'" class="server-listing-notice">
-			<div>
-				<IntlFormatted
-					:message-id="messages.pendingChangeNotice"
-					:values="{
-						verb: pendingChange.verb.toLowerCase(),
-						planSize: pendingChange.planSize,
-						formattedDate: formatDate(pendingChange.date),
-					}"
-				>
-					<template #date="{ children }">
-						<span class="font-medium text-contrast"><component :is="() => children" /></span>
-					</template>
-				</IntlFormatted>
-			</div>
-			<ServersSpecs
-				class="!font-normal !text-primary"
-				:ram="Math.round((pendingChange.ramGb ?? 0) * 1024)"
-				:storage="Math.round((pendingChange.storageGb ?? 0) * 1024)"
-				:cpus="pendingChange.cpuBurst"
-				bursting-link="https://docs.modrinth.com/servers/bursting"
-			/>
+		<div v-if="isProvisioning" class="server-listing-notice">
+			{{ formatMessage(messages.provisioningNotice) }}
 		</div>
 	</div>
 </template>
 
 <script setup lang="ts">
-import type { Archon } from '@modrinth/api-client'
-import {
-	DownloadIcon,
-	LockIcon,
-	MessagesSquareIcon,
-	SparklesIcon,
-	SpinnerIcon,
-} from '@modrinth/assets'
+import type { Server } from '@amberite/contracts/core'
+import { SparklesIcon, SpinnerIcon } from '@modrinth/assets'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 
-import { Button, ButtonLink } from '#ui/components/base/buttons'
-import { commonMessages } from '#ui/utils/common-messages'
-
-import {
-	CardIcon,
-	CheckIcon,
-	CopyIcon,
-	RotateCounterClockwiseIcon,
-} from '../../../../assets/generated-icons'
-import { useFormatDateTime } from '../../composables'
 import { defineMessages, useVIntl } from '../../composables/i18n'
+import { serverDetailQueryOptions } from '../../composables/server-queries'
 import { useServerIcon } from '../../composables/use-server-icon'
 import { injectModrinthClient } from '../../providers/api-client'
 import Avatar from '../base/Avatar.vue'
-import IntlFormatted from '../base/IntlFormatted.vue'
-import ServersSpecs from '../billing/ServersSpecs.vue'
 import type { ServerListingOwner } from './access/types'
 import ServerIcon from './icons/ServerIcon.vue'
 import ServerInfoLabels from './labels/ServerInfoLabels.vue'
 
-const formatDate = useFormatDateTime({ dateStyle: 'long' })
 const { formatMessage } = useVIntl()
 
 const messages = defineMessages({
@@ -325,216 +158,37 @@ const messages = defineMessages({
 		id: 'servers.listing.notice.provisioning',
 		defaultMessage: 'Please wait while we set up your server. This can take up to 10 minutes.',
 	},
-	upgradingNotice: {
-		id: 'servers.listing.notice.upgrading',
-		defaultMessage:
-			"Your server's hardware is currently being upgraded and will be back online shortly.",
-	},
-	subscriptionCancelled: {
-		id: 'servers.listing.notice.subscription-cancelled',
-		defaultMessage: 'Your subscription was cancelled.',
-	},
-	subscriptionCancelledOnDate: {
-		id: 'servers.listing.notice.subscription-cancelled-on-date',
-		defaultMessage: 'Your subscription was cancelled on <date>{formattedDate}</date>.',
-	},
-	subscriptionCancelledPaymentFailed: {
-		id: 'servers.listing.notice.subscription-cancelled-payment-failed',
-		defaultMessage: 'Your subscription was cancelled due to payment failure.',
-	},
-	subscriptionCancelledPaymentFailedOnDate: {
-		id: 'servers.listing.notice.subscription-cancelled-payment-failed-on-date',
-		defaultMessage:
-			'Your subscription was cancelled on <date>{formattedDate}</date> due to payment failure. ',
-	},
-	filesKeptForDownload: {
-		id: 'servers.listing.notice.files-kept-for-download',
-		defaultMessage:
-			'Your files will be kept for <days-remaining>{daysRemaining} more {daysRemaining, plural, one {day} other {days}}</days-remaining>. Contact support to download the files before they are deleted.',
-	},
-	subscriptionSetToCancel: {
-		id: 'servers.listing.notice.subscription-set-to-cancel',
-		defaultMessage: 'Your subscription is set to cancel.',
-	},
-	subscriptionSetToCancelOnDate: {
-		id: 'servers.listing.notice.subscription-set-to-cancel-on-date',
-		defaultMessage: 'Your subscription is set to cancel on <date>{formattedDate}</date>. ',
-	},
-	filesPreservedAfterCancellation: {
-		id: 'servers.listing.notice.files-preserved-after-cancellation',
-		defaultMessage: 'Your files will be preserved for 30 days after cancellation.',
-	},
-	moderatedNotice: {
-		id: 'servers.listing.notice.moderated',
-		defaultMessage: 'Your server has been suspended by moderation action.',
-	},
-	suspendedNotice: {
-		id: 'servers.listing.notice.suspended',
-		defaultMessage:
-			'Your server has been suspended. Please contact Modrinth Support for more information.',
-	},
-	copyCodeToClipboardTooltip: {
-		id: 'servers.listing.copy-code-tooltip',
-		defaultMessage: 'Copy code to clipboard',
-	},
-	copiedLabel: {
-		id: 'servers.listing.copied-label',
-		defaultMessage: 'Copied',
-	},
-	copyIdLabel: {
-		id: 'servers.listing.copy-id-label',
-		defaultMessage: 'Copy ID',
-	},
-	supportLabel: {
-		id: 'servers.listing.support-label',
-		defaultMessage: 'Support',
-	},
-	manageBillingLabel: {
-		id: 'servers.listing.manage-billing-label',
-		defaultMessage: 'Manage billing',
-	},
-	resubscribeLabel: {
-		id: 'servers.listing.resubscribe-label',
-		defaultMessage: 'Resubscribe',
-	},
-	pendingChangeNotice: {
-		id: 'servers.listing.notice.pending-change',
-		defaultMessage:
-			'Your server will {verb, select, downgrade {downgrade} other {upgrade}} to the {planSize} Plan on <date>{formattedDate}</date>.',
-	},
 })
 
-export type PendingChange = {
-	planSize: string
-	cpu: number
-	cpuBurst: number
-	ramGb: number
-	swapGb?: number
-	storageGb?: number
-	date: string | number | Date
-	intervalChange?: string | null
-	verb: string
-}
-
-type ServerListingProps = {
-	server_id: string
-	name: string
-	status: Archon.Servers.v0.Status
-	suspension_reason?: Archon.Servers.v0.SuspensionReason | null
-	game?: Archon.Servers.v0.Game
-	mc_version?: string | null
-	loader?: Archon.Servers.v0.Loader | null
-	loader_version?: string | null
-	net?: Archon.Servers.v0.Net
-	upstream?: Archon.Servers.v0.Upstream | null
-	icon?: Archon.Icons.v1.ServerIcon | null
-	flows?: Archon.Servers.v0.Flows
-	pendingChange?: PendingChange
-	online?: boolean
-	playerCount?: {
-		current?: number
-		max?: number
+type ServerListingProps = Pick<Server, 'server_id' | 'name' | 'status'> &
+	Partial<
+		Pick<Server, 'mc_version' | 'loader' | 'loader_version' | 'net' | 'upstream' | 'icon' | 'flows'>
+	> & {
+		game?: string
+		online?: boolean
+		playerCount?: {
+			current?: number
+			max?: number
+		}
+		isProvisioning?: boolean
+		owner?: ServerListingOwner
 	}
-	isProvisioning?: boolean
-	cancellationDate?: string | Date | null
-	onResubscribe?: (() => void) | null
-	onDownloadWorld?: (() => void) | null
-	owner?: ServerListingOwner
-}
 
 const props = defineProps<ServerListingProps>()
 const router = useRouter()
 
-const { archon, labrinth } = injectModrinthClient()
+const client = injectModrinthClient()
+const { labrinth } = client
 const queryClient = useQueryClient()
 
-/** Warms the two requests the server panel opens with while the pointer is over the row. */
+/** Warms the request the server panel opens with while the pointer is over the row. */
 function prefetchServer() {
 	if (isDisabled.value) return
-	void queryClient.prefetchQuery({
-		queryKey: ['servers', 'detail', props.server_id],
-		queryFn: () => archon.servers_v0.get(props.server_id),
-		staleTime: 30_000,
-	})
-	void queryClient.prefetchQuery({
-		queryKey: ['servers', 'v1', 'detail', props.server_id],
-		queryFn: () => archon.servers_v1.get(props.server_id),
-		staleTime: 30_000,
-	})
+	void queryClient.prefetchQuery(serverDetailQueryOptions(client, props.server_id))
 }
 
 const isConfiguring = computed(() => props.flows?.intro)
-const isUpgrading = computed(
-	() => props.status === 'suspended' && props.suspension_reason === 'upgrading',
-)
-const isDisabled = computed(() => props.status === 'suspended' || props.isProvisioning)
-const isSetToCancel = computed(() => !!props.cancellationDate && props.status !== 'suspended')
-const filesRemainingDays = computed(() => {
-	if (!props.cancellationDate) return 0
-	const cancellation = new Date(props.cancellationDate)
-	const expiresAt = new Date(cancellation.getTime() + 30 * 24 * 60 * 60 * 1000) // expires 30 days after cancellation
-	const remaining = Math.ceil((expiresAt.getTime() - Date.now()) / (24 * 60 * 60 * 1000))
-	return Math.max(0, remaining)
-})
-const isFilesExpired = computed(() => filesRemainingDays.value <= 0)
-
-const hasIconOverlay = computed(
-	() => props.isProvisioning || isUpgrading.value || props.status === 'suspended',
-)
-
-type NoticeType =
-	| 'provisioning'
-	| 'upgrading'
-	| 'cancelled'
-	| 'paymentfailed'
-	| 'moderated'
-	| 'suspended'
-	| 'setToCancel'
-
-const noticeType = computed<NoticeType | null>(() => {
-	if (props.isProvisioning) return 'provisioning'
-	if (props.status === 'suspended') {
-		switch (props.suspension_reason) {
-			case 'upgrading':
-				return 'upgrading'
-			case 'cancelled':
-				return 'cancelled'
-			case 'paymentfailed':
-				return 'paymentfailed'
-			case 'moderated':
-				return 'moderated'
-			default:
-				return 'suspended'
-		}
-	}
-	if (isSetToCancel.value) return 'setToCancel'
-	return null
-})
-
-type NoticeButtons = {
-	downloadWorld?: boolean
-	copyId?: boolean
-	support?: boolean
-	manageBilling?: boolean
-	resubscribe?: boolean
-}
-
-const noticeButtons = computed<NoticeButtons | null>(() => {
-	switch (noticeType.value) {
-		case 'cancelled':
-		case 'setToCancel':
-			return { downloadWorld: true, copyId: true, support: true, resubscribe: true }
-		case 'paymentfailed':
-			return { downloadWorld: true, copyId: true, support: true, manageBilling: true }
-		case 'moderated':
-		case 'suspended':
-			return { downloadWorld: true, copyId: true, support: true }
-		default:
-			return null
-	}
-})
-
-const hasNotice = computed(() => !!noticeType.value || !!props.pendingChange)
+const isDisabled = computed(() => !!props.isProvisioning)
 
 const showGameLabel = computed(() => !!props.game && !isConfiguring.value)
 const showLoaderLabel = computed(() => !!props.loader && !isConfiguring.value)
@@ -556,8 +210,6 @@ const { config: iconConfig, image } = useServerIcon(() => props.server_id, {
 	enabled: computed(() => props.status === 'available'),
 })
 
-const copied = ref(false)
-
 function navigateToServer(event: MouseEvent | KeyboardEvent) {
 	if (isDisabled.value) return
 
@@ -570,14 +222,6 @@ function navigateToServer(event: MouseEvent | KeyboardEvent) {
 	}
 
 	router.push(`/hosting/manage/${props.server_id}`)
-}
-
-async function copyToClipboard(text: string) {
-	await navigator.clipboard.writeText(text)
-	copied.value = true
-	setTimeout(() => {
-		copied.value = false
-	}, 3000)
 }
 </script>
 

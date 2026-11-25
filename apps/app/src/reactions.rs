@@ -1,22 +1,23 @@
-//! The desktop follows engine events: Discord and friends status show the running instance, the
-//! main window hides on launch and returns on exit, and it comes forward for an opened link.
-//! Synced options, packs, screenshots, setting labels, onboarding and recent icons catch up with
-//! each instance as it is created, edited, changed on disk, removed, installed or closed.
+//! The desktop follows engine events: Discord and friends status show the running instance, and
+//! the main window hides on launch and returns on exit. Synced options, packs, screenshots,
+//! setting labels, onboarding, recent icons and server joins catch up with each instance as it is
+//! created, edited, changed on disk, removed, installed, played or closed.
 
 use std::collections::BTreeSet;
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
 
 use engine::data::ProjectType;
 use engine::install::{InstallJobKind, InstallJobStatus};
 use engine::{
-    DesktopEvent, Engine, Event, InstancePayload, InstancePayloadType,
-    ProcessPayload, ProcessPayloadType,
+    Event, InstancePayload, InstancePayloadType, ProcessPayload,
+    ProcessPayloadType,
 };
 use tauri::{AppHandle, Manager};
-use tokio::sync::broadcast::{self, Receiver, error::RecvError};
+use tokio::sync::broadcast::{Receiver, error::RecvError};
 
+use crate::local_api::events::AppEvent;
 use crate::presence::{Presence, show_presence, start_presence};
-use crate::server::events::AppEvent;
+use crate::state::{Desktop, WeakDesktop};
 
 #[derive(Debug, PartialEq)]
 struct Reaction {
@@ -28,31 +29,30 @@ struct Reaction {
 enum WindowChange {
     Minimize,
     Restore,
-    Focus,
 }
 
 /// Connects presence, starts synced options and reacts to `events`, which must be subscribed
 /// before the engine starts so no event is missed.
 pub fn start(
-    engine: &Arc<Engine>,
+    engine: &Desktop,
     presence: Arc<Presence>,
     app: AppHandle,
     events: Receiver<Event>,
 ) {
     tauri::async_runtime::spawn(start_presence(
-        Arc::clone(engine),
+        engine.clone(),
         Arc::clone(&presence),
     ));
-    let app_events = app.state::<broadcast::Sender<AppEvent>>().inner().clone();
+    let app_events = engine.app_events().clone();
     crate::synced_options::start_synced_options(engine, move || {
         let _ = app_events.send(AppEvent::GameOptionLocalesUpdated);
     });
-    let reconciling = Arc::clone(engine);
+    let reconciling = engine.clone();
     tauri::async_runtime::spawn(async move {
         reconcile_instances(&reconciling).await;
     });
     tauri::async_runtime::spawn(react(
-        Arc::downgrade(engine),
+        engine.downgrade(),
         presence,
         app,
         events,
@@ -60,7 +60,7 @@ pub fn start(
 }
 
 async fn react(
-    engine: Weak<Engine>,
+    engine: WeakDesktop,
     presence: Arc<Presence>,
     app: AppHandle,
     mut events: Receiver<Event>,
@@ -73,7 +73,7 @@ async fn react(
                 };
                 if !matches!(event, Event::Log(_) | Event::Loading(_)) {
                     tauri::async_runtime::spawn(follow(
-                        Arc::clone(&engine),
+                        engine.clone(),
                         event.clone(),
                     ));
                 }
@@ -114,7 +114,7 @@ async fn react(
     }
 }
 
-async fn reconcile_instances(engine: &Engine) {
+async fn reconcile_instances(engine: &Desktop) {
     if let Err(error) = crate::db::reconcile_instances(engine).await {
         tracing::warn!(
             "Failed to catch up with the engine's instances: {error}"
@@ -122,7 +122,7 @@ async fn reconcile_instances(engine: &Engine) {
     }
 }
 
-async fn reaction(engine: &Engine, event: &Event) -> Option<Reaction> {
+async fn reaction(engine: &Desktop, event: &Event) -> Option<Reaction> {
     match event {
         Event::Process(process) => {
             let window = match crate::settings::get(engine).await {
@@ -144,15 +144,11 @@ async fn reaction(engine: &Engine, event: &Event) -> Option<Reaction> {
                 window,
             })
         }
-        Event::Desktop(DesktopEvent::Command(_)) => Some(Reaction {
-            presence: false,
-            window: Some(WindowChange::Focus),
-        }),
         _ => None,
     }
 }
 
-async fn follow(engine: Arc<Engine>, event: Event) {
+async fn follow(engine: Desktop, event: Event) {
     let (instance_id, result) = match event {
         Event::Instance(InstancePayload { instance_id, event }) => {
             let result = match event {
@@ -160,7 +156,7 @@ async fn follow(engine: Arc<Engine>, event: Event) {
                     if let Err(error) =
                         crate::synced_options::state::insert_default_instance_sync_preferences(
                             &instance_id,
-                            crate::db::pool(&engine),
+                            engine.db(),
                         )
                         .await
                     {
@@ -188,6 +184,15 @@ async fn follow(engine: Arc<Engine>, event: Event) {
                     )
                     .await
                 }
+                InstancePayloadType::ServerJoined {
+                    host,
+                    port,
+                    timestamp,
+                } => {
+                    record_join(&engine, &instance_id, &host, port, &timestamp)
+                        .await;
+                    return;
+                }
                 InstancePayloadType::Edited => {
                     crate::synced_options::reconcile_instance_synced_options(
                         &engine,
@@ -196,12 +201,10 @@ async fn follow(engine: Arc<Engine>, event: Event) {
                     .await
                 }
                 InstancePayloadType::Removed => {
-                    crate::hooks::forget_instance(&engine, &instance_id);
-                    if let Err(error) = crate::db::forget_instance(
-                        crate::db::pool(&engine),
-                        &instance_id,
-                    )
-                    .await
+                    engine.forget_instance(&instance_id);
+                    if let Err(error) =
+                        crate::db::forget_instance(engine.db(), &instance_id)
+                            .await
                     {
                         tracing::warn!(
                             "Failed to forget instance {instance_id}: {error}"
@@ -258,9 +261,34 @@ async fn follow(engine: Arc<Engine>, event: Event) {
     }
 }
 
+async fn record_join(
+    engine: &Desktop,
+    instance_id: &str,
+    host: &str,
+    port: u16,
+    timestamp: &str,
+) {
+    let recorded = match chrono::DateTime::parse_from_rfc3339(timestamp) {
+        Ok(time) => {
+            crate::library::join_log::record(
+                engine.db(),
+                instance_id,
+                host,
+                port,
+                time.to_utc(),
+            )
+            .await
+        }
+        Err(error) => Err(anyhow::Error::new(error).into()),
+    };
+    if let Err(error) = recorded {
+        tracing::warn!("Failed to record joining {host}:{port}: {error}");
+    }
+}
+
 /// Puts a new instance's created icon among the icon editor's recents.
 async fn remember_icon(
-    engine: &Engine,
+    engine: &Desktop,
     instance_id: &str,
 ) -> engine::Result<()> {
     let Some(config) = engine::instance::get(engine, instance_id)
@@ -269,10 +297,10 @@ async fn remember_icon(
     else {
         return Ok(());
     };
-    crate::library::recent_icons::record(&config, crate::db::pool(engine)).await
+    crate::library::recent_icons::record(&config, engine.db()).await
 }
 
-async fn files_changed(engine: &Engine, instance_id: &str, paths: &[String]) {
+async fn files_changed(engine: &Desktop, instance_id: &str, paths: &[String]) {
     let mut option_files = BTreeSet::new();
     let (mut packs, mut locales, mut screenshots) = (false, false, false);
     for path in paths {
@@ -340,7 +368,6 @@ fn change_window(app: &AppHandle, change: WindowChange) {
         WindowChange::Restore => {
             window.unminimize().and_then(|()| window.set_focus())
         }
-        WindowChange::Focus => window.set_focus(),
     };
     if let Err(error) = changed {
         tracing::warn!("Failed to change the main window: {error}");
@@ -351,7 +378,7 @@ fn change_window(app: &AppHandle, change: WindowChange) {
 mod tests {
     use super::*;
     use engine::data::{IconBackground, IconConfig, InstanceLink, ModLoader};
-    use engine::{ProcessPayload, instance, prelude::CommandPayload};
+    use engine::{ProcessPayload, instance};
 
     fn process(event: ProcessPayloadType) -> Event {
         Event::Process(ProcessPayload {
@@ -366,14 +393,9 @@ mod tests {
     async fn process_events_update_presence_and_follow_the_window_settings() {
         engine::install_crypto_provider();
         let dir = tempfile::tempdir().unwrap();
-        let config = crate::data_dir::engine_config(
-            dir.path().to_path_buf(),
-            engine::EventSink::new(),
-            None,
-        )
-        .await
-        .unwrap();
-        let engine = Engine::new(config).await.unwrap();
+        let engine = crate::data_dir::tests::open(dir.path(), None)
+            .await
+            .unwrap();
 
         for (hide, refocus, on_launch, on_exit) in [
             (true, false, Some(WindowChange::Minimize), None),
@@ -397,18 +419,6 @@ mod tests {
                 );
             }
         }
-
-        let opened =
-            Event::Desktop(DesktopEvent::Command(CommandPayload::RunMRPack {
-                path: "pack.mrpack".to_string(),
-            }));
-        assert_eq!(
-            reaction(&engine, &opened).await,
-            Some(Reaction {
-                presence: false,
-                window: Some(WindowChange::Focus),
-            })
-        );
     }
 
     async fn next_instance_event(
@@ -464,19 +474,52 @@ mod tests {
         };
         let synced = async || {
             crate::synced_options::state::all_instance_synced_options(
-                crate::db::pool(&engine),
+                engine.db(),
             )
             .await
             .unwrap()
             .contains_key(&id)
         };
         assert!(!onboarding().await);
-        follow(Arc::clone(&engine), event).await;
+        follow(engine.clone(), event).await;
         assert!(onboarding().await);
         assert!(synced().await);
-        let recents =
-            crate::library::recent_icons::list(crate::db::pool(&engine));
+        let recents = crate::library::recent_icons::list(engine.db());
         assert_eq!(recents.await.unwrap(), [icon]);
+        let joined = Event::Instance(InstancePayload {
+            instance_id: id.clone(),
+            event: InstancePayloadType::ServerJoined {
+                host: "play.example".to_string(),
+                port: 25565,
+                timestamp: "2026-01-02T03:04:05+00:00".to_string(),
+            },
+        });
+        follow(engine.clone(), joined).await;
+        let joins = async || {
+            crate::library::join_log::joins(engine.db(), &id)
+                .await
+                .unwrap()
+        };
+        assert_eq!(
+            joins().await[&("play.example".to_string(), 25565)].to_rfc3339(),
+            "2026-01-02T03:04:05+00:00"
+        );
+        let favorites = crate::library::groups::FAVORITES_GROUP_ID.to_string();
+        crate::library::groups::set_group_memberships(
+            &engine,
+            vec![crate::library::groups::InstanceGroupMembershipUpdate {
+                instance_id: id.clone(),
+                group_ids: vec![favorites.clone()],
+            }],
+        )
+        .await
+        .unwrap();
+        let groups = async || {
+            crate::library::groups::list_memberships(engine.db())
+                .await
+                .unwrap()
+        };
+        assert_eq!(groups().await[&id], [favorites]);
 
         let generated =
             crate::synced_options::get_synced_options_folder(&engine)
@@ -489,7 +532,7 @@ mod tests {
             "user",
             &id,
             true,
-            crate::db::pool(&engine),
+            engine.db(),
         );
         hidden.await.unwrap();
         let folder = instance::get_full_path(&engine, &id).await.unwrap();
@@ -498,21 +541,23 @@ mod tests {
             matches!(event, InstancePayloadType::Removed)
         })
         .await;
-        follow(Arc::clone(&engine), removed).await;
+        follow(engine.clone(), removed).await;
         assert!(!generated.exists());
         let hidden = crate::library::hidden_instances::get_hidden_instance_ids(
             "user",
-            crate::db::pool(&engine),
+            engine.db(),
         );
         assert!(hidden.await.unwrap().is_empty());
         assert!(!synced().await);
+        assert!(joins().await.is_empty());
+        assert!(groups().await.is_empty());
 
         // An edit can still be in flight for an instance removed under it.
         let edited = Event::Instance(InstancePayload {
             instance_id: id.clone(),
             event: InstancePayloadType::Edited,
         });
-        follow(Arc::clone(&engine), edited).await;
+        follow(engine.clone(), edited).await;
         assert!(!folder.exists());
         crate::synced_options::reconcile_instance_synced_options(&engine, &id)
             .await
@@ -539,7 +584,7 @@ mod tests {
         let mut events = engine.events.subscribe();
 
         follow(
-            Arc::clone(&engine),
+            engine.clone(),
             Event::Instance(InstancePayload {
                 instance_id: id.clone(),
                 event: InstancePayloadType::Synced,
@@ -564,7 +609,7 @@ mod tests {
                 synced += 1;
                 assert!(synced < 5, "following Synced keeps re-running packs");
             }
-            follow(Arc::clone(&engine), event).await;
+            follow(engine.clone(), event).await;
         }
     }
 }

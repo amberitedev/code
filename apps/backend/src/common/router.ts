@@ -1,4 +1,4 @@
-import type { Endpoint } from '@amberite/contracts'
+import type { Endpoint } from '@amberite/contracts/protocol'
 
 import { invalid, json, readBytes, readJsonBody } from './http'
 import type { Env } from './types'

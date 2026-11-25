@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { instanceSharing } from '@amberite/contracts/engine'
 import { useQueryClient } from '@tanstack/vue-query'
 import { ref } from 'vue'
 
@@ -6,10 +7,7 @@ import SharedInstanceInstallModal from '@/components/ui/shared-instances/shared-
 import { install_shared_instance, wait_for_install_job } from '@/helpers/install'
 import { getInstanceIconUrl } from '@/helpers/instance'
 import { useSharedInstanceErrors } from '@/helpers/shared-instance-errors'
-import {
-	leaveRemoteSharedInstance,
-	unpublishRemoteSharedInstance,
-} from '@/platform/app-lib/shared-instances/commands'
+import { apiClient } from '@/platform/modrinth-client'
 import { injectAppEvents } from '@/providers/app-events'
 
 import type { SharedInstanceInstallOptions } from './actions-context'
@@ -95,8 +93,12 @@ async function remove(sharedInstances: UninstalledSharedInstance[]) {
 	const results = await Promise.allSettled(
 		sharedInstances.map((instance) =>
 			instance.role === 'owner'
-				? unpublishRemoteSharedInstance(instance.shared_instance_id)
-				: leaveRemoteSharedInstance(instance.shared_instance_id),
+				? apiClient.local.call(instanceSharing.UnpublishRemoteSharedInstance, {
+						params: { id: instance.shared_instance_id },
+					})
+				: apiClient.local.call(instanceSharing.LeaveRemoteSharedInstance, {
+						params: { id: instance.shared_instance_id },
+					}),
 		),
 	)
 	removing.value = false

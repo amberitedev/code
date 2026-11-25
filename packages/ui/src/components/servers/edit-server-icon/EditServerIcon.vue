@@ -68,7 +68,7 @@
 </template>
 
 <script setup lang="ts">
-import { type Archon, ModrinthApiError } from '@modrinth/api-client'
+import { instanceFiles } from '@amberite/contracts/engine'
 import { EditIcon, PaletteIcon, SpinnerIcon, TransferIcon, UploadIcon } from '@modrinth/assets'
 import { useQueryClient } from '@tanstack/vue-query'
 import { computed, ref } from 'vue'
@@ -77,13 +77,9 @@ import TeleportOverflowMenu from '#ui/components/base/buttons/TeleportOverflowMe
 import { type IconConfig, renderIcon } from '#ui/components/base/icon-editor-modal'
 import IconEditorModal from '#ui/components/base/icon-editor-modal/index.vue'
 import ServerIcon from '#ui/components/servers/icons/ServerIcon.vue'
-import { serverIconKeys, useServerIcon } from '#ui/composables'
+import { serverKeys, useServerIcon } from '#ui/composables'
 import { useVIntl } from '#ui/composables/i18n'
-import {
-	injectModrinthClient,
-	injectModrinthServerContext,
-	injectNotificationManager,
-} from '#ui/providers'
+import { injectModrinthServerContext, injectNotificationManager } from '#ui/providers'
 import { commonMessages } from '#ui/utils/common-messages'
 
 const props = withDefaults(
@@ -99,8 +95,7 @@ const props = withDefaults(
 
 const { addNotification } = injectNotificationManager()
 const { formatMessage } = useVIntl()
-const client = injectModrinthClient()
-const { serverId } = injectModrinthServerContext()
+const { serverId, core } = injectModrinthServerContext()
 const queryClient = useQueryClient()
 const iconEditorModal = ref<InstanceType<typeof IconEditorModal> | null>(null)
 const isUploadingIcon = ref(false)
@@ -142,9 +137,9 @@ async function saveRecentConfig(config: IconConfig) {
 	}
 }
 
-async function setServerIcon(icon: Archon.Icons.v1.ServerIcon | null) {
-	await queryClient.cancelQueries({ queryKey: serverIconKeys.metadata(serverId), exact: true })
-	queryClient.setQueryData(serverIconKeys.metadata(serverId), icon)
+/** The server's icon changed: read the server that names it again. */
+async function iconChanged() {
+	await queryClient.invalidateQueries({ queryKey: serverKeys.detail(serverId) })
 }
 
 function openIconEditor() {
@@ -179,10 +174,14 @@ async function uploadIcon(file: File, config: IconConfig | null): Promise<boolea
 	isUploadingIcon.value = true
 
 	try {
-		const icon = config
-			? await client.archon.icons_v1.setGenerated(serverId, file, config)
-			: await client.archon.icons_v1.set(serverId, file)
-		await setServerIcon(icon)
+		const params = { id: serverId }
+		if (config) {
+			const image = Array.from(new Uint8Array(await file.arrayBuffer()))
+			await core.call(instanceFiles.SetEditedInstanceIcon, { params, body: { config, image } })
+		} else {
+			await core.call(instanceFiles.SetInstanceIcon, { params, body: file })
+		}
+		await iconChanged()
 
 		addNotification({
 			type: 'success',
@@ -207,12 +206,8 @@ const resetIcon = async () => {
 	isSyncingIcon.value = true
 
 	try {
-		try {
-			await client.archon.icons_v1.delete(serverId)
-		} catch (error) {
-			if (!(error instanceof ModrinthApiError && error.statusCode === 404)) throw error
-		}
-		await setServerIcon(null)
+		await core.call(instanceFiles.RemoveInstanceIcon, { params: { id: serverId } })
+		await iconChanged()
 
 		addNotification({
 			type: 'success',

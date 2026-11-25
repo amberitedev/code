@@ -1,4 +1,5 @@
-import { ModrinthApiError, sharing, social } from '@modrinth/api-client'
+import { sharing, social } from '@amberite/contracts/backend'
+import { ModrinthApiError } from '@modrinth/api-client'
 import {
 	injectAuth,
 	injectModrinthClient,

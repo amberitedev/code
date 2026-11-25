@@ -1,3 +1,4 @@
+import { library } from '@amberite/contracts/app'
 import { EyeIcon, EyeOffIcon } from '@modrinth/assets'
 import {
 	type ButtonMenuLeafOption,
@@ -10,7 +11,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed } from 'vue'
 
 import { libraryInstanceMessages } from '@/features/library/messages'
-import { setInstanceHidden } from '@/platform/app-lib/hidden-instances/commands'
+import { apiClient } from '@/platform/modrinth-client'
 
 import { hiddenInstanceIdsQueryOptions, hiddenInstanceKeys } from './queries'
 
@@ -43,7 +44,9 @@ export function useHiddenInstances() {
 	const setHiddenMutation = useMutation({
 		networkMode: 'always' as const,
 		mutationFn: ({ instanceId, hidden }: { instanceId: string; hidden: boolean }) =>
-			setInstanceHidden(instanceId, hidden),
+			apiClient.local.call(library.setInstanceHidden, {
+				body: { instance_id: instanceId, hidden },
+			}),
 		onMutate: async ({ instanceId, hidden }) => {
 			const key = hiddenInstanceKeys.ids(userId.value)
 			await queryClient.cancelQueries({ queryKey: key })

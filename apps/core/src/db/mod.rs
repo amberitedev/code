@@ -78,7 +78,6 @@ mod tests {
                 "backups",
                 "core",
                 "follows",
-                "jvm_flags",
                 "pairing",
                 "port_mappings",
                 "restarts",

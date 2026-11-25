@@ -2,14 +2,15 @@
 
 use std::convert::Infallible;
 
+use bytes::Bytes;
 use http_body_util::{BodyExt, Empty};
 use hyper::{
-    HeaderMap, Response, StatusCode,
+    HeaderMap, Method, Request, Response, StatusCode,
     body::Incoming,
     header::{
-        ACCESS_CONTROL_ALLOW_ORIGIN, ACCESS_CONTROL_REQUEST_METHOD, CONNECTION,
-        CONTENT_SECURITY_POLICY, COOKIE, ORIGIN, REFERER, REFERRER_POLICY,
-        UPGRADE, X_CONTENT_TYPE_OPTIONS,
+        ACCESS_CONTROL_ALLOW_ORIGIN, ACCESS_CONTROL_REQUEST_METHOD,
+        AUTHORIZATION, CONNECTION, CONTENT_SECURITY_POLICY, COOKIE, ORIGIN,
+        REFERER, REFERRER_POLICY, UPGRADE, X_CONTENT_TYPE_OPTIONS,
     },
     service::service_fn,
 };
@@ -28,7 +29,7 @@ use tokio::{
 use tokio_rustls::TlsAcceptor;
 
 use super::*;
-use crate::server::guard::Guard;
+use crate::local_api::guard::Guard;
 
 const APP: &str = "tauri://localhost";
 const ACCOUNT_TOKEN: &str = "Bearer mra_the_account_session";

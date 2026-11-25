@@ -79,9 +79,7 @@ const emit = defineEmits<{
 
 const { formatMessage } = useVIntl()
 const serverCtx = injectModrinthServerContext(null)
-const canManageBackups = computed(
-	() => !serverCtx || hasServerPermission(serverCtx.currentUserPermissions.value, 'BACKUPS'),
-)
+const canManageBackups = computed(() => !serverCtx || hasServerPermission(0, 'BACKUPS'))
 const permissionDeniedMessage = computed(() => formatMessage(commonMessages.noPermissionAction))
 
 const backup = useInlineBackup(() => props.backupName)

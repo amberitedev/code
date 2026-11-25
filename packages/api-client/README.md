@@ -8,7 +8,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-c78aff?style=for-the-badge)](https://www.typescriptlang.org/)
 [![License: LGPL-3.0](https://img.shields.io/badge/License-LGPL%203.0-c78aff?style=for-the-badge)](LICENSE)
 
-Platform-agnostic TypeScript client for Modrinth's API across Node.js, browsers, Nuxt, and Tauri.
+Platform-agnostic TypeScript client for Modrinth's API across Node.js, browsers, and Tauri.
 
 **⚠️ We use this internally to power modrinth.com, Modrinth App, and Modrinth Hosting frontends. It may break without any notice, but you are welcome to use it.**
 
@@ -49,34 +49,6 @@ const project = await client.request<Labrinth.Projects.v2.Project>('/project/sod
 })
 ```
 
-### Nuxt
-
-```ts
-import {
-	AuthFeature,
-	CircuitBreakerFeature,
-	NuxtCircuitBreakerStorage,
-	NuxtModrinthClient,
-} from '@modrinth/api-client'
-
-export const useModrinthClient = async () => {
-	const config = useRuntimeConfig()
-
-	return new NuxtModrinthClient({
-		userAgent: 'my-nuxt-app/1.0.0',
-		rateLimitKey: import.meta.server ? config.rateLimitKey : undefined,
-		features: [
-			new AuthFeature({
-				token: process.env.MODRINTH_TOKEN,
-			}),
-			new CircuitBreakerFeature({
-				storage: new NuxtCircuitBreakerStorage(),
-			}),
-		],
-	})
-}
-```
-
 ### Tauri
 
 ```ts
@@ -109,9 +81,9 @@ import type { Labrinth } from '@modrinth/api-client'
 const project: Labrinth.Projects.v3.Project = await client.labrinth.projects_v3.get('sodium')
 ```
 
-## Modrinth Hosting API Modules
+## Hosting API Modules
 
-- These modules are internal to Modrinth and are only supported inside the Modrinth Hosting panel in Modrinth App and on modrinth.com. They should not be expected to work in third-party clients today. We are discussing how to safely expose access to your own server through these APIs in the future.
+- There is no Modrinth Hosting, so there are no `archon` or `kyros` modules; only their types stay, for upstream's UI. A Core's routes are called with `client.core(coreId)`, and its servers are listed with `client.cores.servers()`.
 
 ## Base URLs
 
@@ -154,14 +126,14 @@ const client = new GenericModrinthClient({
 })
 ```
 
-Built-in features include authentication, node auth, retries, circuit breaking, panel version headers, and verbose logging.
+Built-in features include authentication, retries, circuit breaking, and verbose logging.
 
 ## Uploads
 
 Upload endpoints return an `UploadHandle<T>` with progress and cancellation support:
 
 ```ts
-const upload = client.kyros.files_v0.uploadFile(path, file)
+const upload = client.upload(path, { api: 'labrinth', version: 3, file })
 
 upload.onProgress(({ progress }) => {
 	console.log(Math.round(progress * 100))
@@ -170,7 +142,7 @@ upload.onProgress(({ progress }) => {
 await upload.promise
 ```
 
-Uploads use `XMLHttpRequest` for progress tracking and are only available in browser-capable contexts. `NuxtModrinthClient.upload()` throws during SSR.
+Uploads use `XMLHttpRequest` for progress tracking and are only available in browser-capable contexts.
 
 ## Third-Party API Typings
 

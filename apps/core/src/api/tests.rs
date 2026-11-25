@@ -79,10 +79,12 @@ async fn core_with_backend(backend: Option<&str>) -> Core {
     .await
     .unwrap();
     keys.set(&signer.public_keys()).await;
+    let events = super::events::sender();
     let backups = crate::backups::Backups::open(
         servers.paths().clone(),
         db.clone(),
         Arc::clone(&servers),
+        events.clone(),
     )
     .await
     .unwrap();
@@ -107,9 +109,11 @@ async fn core_with_backend(backend: Option<&str>) -> Core {
         network: Arc::new(crate::network::forward::Network::off(db.clone())),
         db,
         backups,
+        events,
         update,
         storage,
         consoles: Arc::default(),
+        ops: Default::default(),
     });
     Core {
         _dir: dir,
@@ -165,15 +169,22 @@ impl Core {
         self.send(request.unwrap()).await
     }
 
-    /// A download link to `path` made with `token`'s session, and the URI that uses it.
-    async fn link(&self, token: &str, path: &str) -> (StatusCode, String) {
-        let body = Some(json!({ "path": path }));
-        let (status, link) = self
-            .call(Method::POST, "/links", Some(token), None, body)
-            .await;
-        let separator = if path.contains('?') { '&' } else { '?' };
-        let token = link["token"].as_str().unwrap_or_default();
-        (status, format!("{path}{separator}link={token}"))
+    /// A download of `uri` with a session token, unread.
+    async fn download(
+        &self,
+        uri: &str,
+        token: Option<&str>,
+    ) -> axum::response::Response {
+        let mut request = Request::builder().uri(uri);
+        if let Some(token) = token {
+            request =
+                request.header("authorization", format!("Bearer {token}"));
+        }
+        self.router
+            .clone()
+            .oneshot(request.body(Body::empty()).unwrap())
+            .await
+            .unwrap()
     }
 
     async fn send(&self, request: Request<Body>) -> (StatusCode, Value) {
@@ -211,7 +222,7 @@ async fn servers_wait_for_the_eula_and_every_route_for_a_session() {
             &format!("/servers/{server}/power"),
             Some(&owner),
             None,
-            Some(json!({ "action": "start" })),
+            Some(json!({ "action": "Start", "op": "start" })),
         )
         .await;
     assert_eq!(error["error"], "eula_not_accepted");
@@ -237,7 +248,7 @@ async fn servers_wait_for_the_eula_and_every_route_for_a_session() {
         .call(Method::GET, "/activity", Some(&owner), None, None)
         .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(page["entries"][0]["action"]["type"], "server_created");
+    assert_eq!(page["data"][0]["action"]["action"], "server_created");
     let (_, list) = core
         .call(Method::GET, "/servers", Some(&owner), None, None)
         .await;
@@ -261,6 +272,47 @@ async fn servers_wait_for_the_eula_and_every_route_for_a_session() {
 async fn dangerous_actions_need_a_fresh_ticket_of_the_owner() {
     let core = core().await;
     let owner = core.sign_in("owner").await;
+
+    let dangerous = || {
+        contracts::core::ROUTES
+            .iter()
+            .filter(|route| route.dangerous)
+    };
+    assert_eq!(
+        dangerous().map(|route| route.name).collect::<Vec<_>>(),
+        [
+            "RevokeSession",
+            "Unpair",
+            "ChangeUpdateSettings",
+            "InstallUpdate",
+            "RollBack",
+            "DeleteServer",
+            "DeleteBackups",
+            "DeleteBackup",
+            "RestoreBackup",
+        ],
+    );
+    for route in dangerous() {
+        let path = route
+            .path
+            .replace("{id}", &core.server)
+            .replace("{backup_id}", "backup");
+        let method = serde_json::to_value(route.method).unwrap();
+        let method =
+            Method::from_bytes(method.as_str().unwrap().as_bytes()).unwrap();
+        // Turning auto-update on is the dangerous change of the update settings.
+        let body = (route.name == "ChangeUpdateSettings")
+            .then(|| json!({ "auto_update": true }));
+        let (status, error) =
+            core.call(method, &path, Some(&owner), None, body).await;
+        assert_eq!(
+            (status, error["error"].as_str()),
+            (StatusCode::UNAUTHORIZED, Some("ticket_required")),
+            "{}",
+            route.name
+        );
+    }
+
     let delete = format!("/servers/{}", core.server);
 
     let (status, error) = core
@@ -573,7 +625,69 @@ async fn content_and_files_stay_inside_the_server() {
         )
         .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(read["properties"]["motd"], "Edited");
+    assert_eq!(read["known"]["motd"], "Edited");
+}
+
+/// Server ids that name a folder outside the Core's, as a percent-encoded path segment: one that
+/// climbs out, and an absolute one. Each would land in `outside` under the test's folder.
+fn escaping_ids(core: &Core) -> Vec<String> {
+    let absolute = core._dir.path().join("outside").display().to_string();
+    let encode = |id: &str| {
+        id.replace('%', "%25")
+            .replace('/', "%2F")
+            .replace('\\', "%5C")
+            .replace(':', "%3A")
+    };
+    vec![encode("../outside"), encode(&absolute)]
+}
+
+#[tokio::test]
+async fn a_server_id_that_names_no_server_is_not_found() {
+    let core = core().await;
+    let owner = core.sign_in("owner").await;
+    for id in escaping_ids(&core) {
+        let (status, error) = core
+            .call(
+                Method::PATCH,
+                &format!("/servers/{id}/properties"),
+                Some(&owner),
+                None,
+                Some(json!({ "known": { "motd": "Hi" } })),
+            )
+            .await;
+        assert_eq!(
+            (status, &error["error"]),
+            (StatusCode::NOT_FOUND, &json!("not_found")),
+            "{id}"
+        );
+        let (status, error) = core
+            .call(
+                Method::GET,
+                &format!("/servers/{id}/properties"),
+                Some(&owner),
+                None,
+                None,
+            )
+            .await;
+        assert_eq!(
+            (status, &error["error"]),
+            (StatusCode::NOT_FOUND, &json!("not_found")),
+            "{id}"
+        );
+        let (status, _) = raw(
+            &core,
+            Method::POST,
+            &format!("/servers/{id}/modpack-file"),
+            &owner,
+            "not a pack",
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{id}");
+    }
+    assert!(
+        !core._dir.path().join("outside").exists(),
+        "nothing was written outside the Core's folders"
+    );
 }
 
 #[tokio::test]
@@ -663,8 +777,7 @@ async fn content_changes_wait_for_a_stopped_server_and_a_pack_update_backs_up_fi
 }
 
 #[tokio::test]
-async fn restores_need_the_owners_fresh_ticket_and_downloads_a_link_or_a_session()
- {
+async fn restores_need_the_owners_fresh_ticket_and_downloads_the_session() {
     let core = core().await;
     let server = core.server.clone();
     let owner = core.sign_in("owner").await;
@@ -685,8 +798,14 @@ async fn restores_need_the_owners_fresh_ticket_and_downloads_a_link_or_a_session
     let (_, list) = core
         .call(Method::GET, &queue, Some(&owner), None, None)
         .await;
-    assert_eq!(list["backups"][0]["state"], "done");
-    assert_eq!(list["backups"][0]["operations"][0]["state"], "done");
+    assert_eq!(list["backups"][0]["status"], "done");
+    assert_eq!(list["backups"][0]["history"][0]["state"], "completed");
+
+    // The whole server downloads as it is, copied as a backup is.
+    let world = core
+        .download(&format!("/servers/{server}/download"), Some(&owner))
+        .await;
+    assert_eq!(world.status(), StatusCode::OK);
 
     let restore = format!("{queue}/{backup}/restore");
     let (status, error) = core
@@ -707,54 +826,16 @@ async fn restores_need_the_owners_fresh_ticket_and_downloads_a_link_or_a_session
         .await;
     assert_eq!(status, StatusCode::ACCEPTED);
 
-    // A link works once, for the exact path it was made for.
-    let download = format!(
-        "/servers/{server}/v1/worlds/{server}/backups/{backup}/download"
+    // Downloads take the session, as every route does.
+    let download = format!("/servers/{server}/backups/{backup}/download");
+    assert_eq!(
+        core.download(&download, None).await.status(),
+        StatusCode::UNAUTHORIZED
     );
-    let (status, link) = core.link(&owner, &download).await;
-    assert_eq!(status, StatusCode::OK);
-    let get =
-        |uri: &str| Request::builder().uri(uri).body(Body::empty()).unwrap();
-    let response = core.router.clone().oneshot(get(&link)).await.unwrap();
+    let response = core.download(&download, Some(&owner)).await;
     assert_eq!(response.status(), StatusCode::OK);
     let bytes = response.into_body().collect().await.unwrap().to_bytes();
     assert!(bytes.starts_with(b"PK"), "a zip");
-    let (status, _) = core.send(get(&link)).await;
-    assert_eq!(status, StatusCode::UNAUTHORIZED, "a second use");
-    let (_, link) = core.link(&owner, &download).await;
-    let token = link.rsplit_once("link=").unwrap().1;
-    let world =
-        format!("/servers/{server}/v1/worlds/{server}/files/download-full-zip");
-    let (status, _) = core.send(get(&format!("{world}?link={token}"))).await;
-    assert_eq!(status, StatusCode::UNAUTHORIZED, "another path");
-    let (status, _) = core.send(get(&link)).await;
-    assert_eq!(status, StatusCode::UNAUTHORIZED, "spent on the other path");
-
-    // One file of the server, named in the query.
-    std::fs::write(
-        core.state
-            .servers
-            .paths()
-            .server(&server)
-            .join("server.properties"),
-        "motd=Hi\n",
-    )
-    .unwrap();
-    let (status, link) = core
-        .link(
-            &owner,
-            &format!(
-                "/instances/{server}/files/content?path=server.properties"
-            ),
-        )
-        .await;
-    assert_eq!(status, StatusCode::OK);
-    let response = core.router.clone().oneshot(get(&link)).await.unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let bytes = response.into_body().collect().await.unwrap().to_bytes();
-    assert_eq!(&bytes[..], b"motd=Hi\n");
-    let (status, _) = core.send(get(&link)).await;
-    assert_eq!(status, StatusCode::UNAUTHORIZED, "a file downloads once");
 
     // Deleting a backup takes a ticket too.
     let delete = format!("{queue}/{backup}");
@@ -772,6 +853,18 @@ async fn restores_need_the_owners_fresh_ticket_and_downloads_a_link_or_a_session
         )
         .await
         .unwrap();
+    // A backup's history reads newest first, so the restore shows over its creation.
+    let (_, list) = core
+        .call(Method::GET, &queue, Some(&owner), None, None)
+        .await;
+    let restored = list["backups"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|listed| listed["id"] == backup.as_str())
+        .unwrap();
+    assert_eq!(restored["history"][0]["operation_type"], "restore");
+    assert_eq!(restored["history"][1]["operation_type"], "create");
     let (status, _) = core
         .call(Method::DELETE, &delete, Some(&owner), None, None)
         .await;
@@ -906,15 +999,19 @@ async fn slot_options_rotate_scheduled_backups_as_the_owners_dangerous_action()
     let server = core.server.clone();
     let owner = core.sign_in("owner").await;
     let backups = format!("/servers/{server}/backups");
-    let schedule = format!("{backups}/schedule");
+    let options = format!("{backups}/options");
     let get = || core.call(Method::GET, &backups, Some(&owner), None, None);
-    let patch = |token, ticket: Option<String>, body| {
+    let patch = |token, ticket: Option<String>, body, rotate: bool| {
         let core = &core;
-        let schedule = &schedule;
+        let uri = if rotate {
+            format!("{options}?ar=true")
+        } else {
+            options.clone()
+        };
         async move {
             core.call(
                 Method::PATCH,
-                schedule,
+                &uri,
                 Some(token),
                 ticket.as_deref(),
                 Some(body),
@@ -927,10 +1024,10 @@ async fn slot_options_rotate_scheduled_backups_as_the_owners_dangerous_action()
     let (status, body) = get().await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
-        body["schedule"],
-        json!({ "interval_hours": 24, "keep": 7, "slots": 15 })
+        body["options"],
+        json!({ "split_automatic": 7, "split_manual": 8, "limit": 15, "interval": 24 })
     );
-    assert!(!body["next_scheduled_at"].is_null());
+    assert!(!body["next_auto_backup_at"].is_null());
 
     // Two scheduled backups, as the schedule makes them, each holding a slot.
     for _ in 0..2 {
@@ -947,9 +1044,10 @@ async fn slot_options_rotate_scheduled_backups_as_the_owners_dangerous_action()
         .as_array()
         .unwrap()
         .iter()
-        .filter(|backup| backup["kind"] == "scheduled")
+        .filter(|backup| backup["automated"] == true)
         .collect();
     assert_eq!(scheduled.len(), 2);
+    assert_eq!(body["auto_count"], 2);
     assert!(
         scheduled
             .iter()
@@ -960,37 +1058,45 @@ async fn slot_options_rotate_scheduled_backups_as_the_owners_dangerous_action()
     let (status, body) = patch(
         &owner,
         None,
-        json!({ "keep": 10, "interval_hours": 12, "delete_excess": false }),
+        json!({ "split_automatic": 10, "interval": 12 }),
+        false,
     )
     .await;
     assert_eq!((status, &body["applied"]), (StatusCode::OK, &json!(true)));
+    let (status, _) =
+        patch(&owner, None, json!({ "split_automatic": 16 }), false).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "there are 15 slots");
     let (status, _) = patch(
         &owner,
         None,
-        json!({ "keep": 16, "interval_hours": null, "delete_excess": false }),
+        json!({ "split_automatic": 10, "split_manual": 4 }),
+        false,
     )
     .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "there are 15 slots");
+    assert_eq!(status, StatusCode::BAD_REQUEST, "the splits add up to 15");
 
     // Fewer scheduled slots than backups: named first, then deleted with a ticket.
-    let fewer = |delete_excess| json!({ "keep": 1, "interval_hours": null, "delete_excess": delete_excess });
-    let (status, body) = patch(&owner, None, fewer(false)).await;
+    let fewer = || json!({ "split_manual": 14 });
+    let (status, body) = patch(&owner, None, fewer(), false).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["applied"], false);
-    assert_eq!(body["excess"].as_array().unwrap().len(), 1);
-    let oldest = body["excess"][0].clone();
-    let (status, error) = patch(&owner, None, fewer(true)).await;
+    assert_eq!(body["backup_ids"].as_array().unwrap().len(), 1);
+    let oldest = body["backup_ids"][0].clone();
+    let (status, error) = patch(&owner, None, fewer(), true).await;
     assert_eq!(
         (status, error["error"].as_str()),
         (StatusCode::UNAUTHORIZED, Some("ticket_required"))
     );
     let (_, body) = get().await;
-    assert_eq!(body["schedule"]["keep"], 10, "unchanged until then");
+    assert_eq!(
+        body["options"]["split_automatic"], 10,
+        "unchanged until then"
+    );
     let (status, body) =
-        patch(&owner, Some(core.ticket("owner")), fewer(true)).await;
+        patch(&owner, Some(core.ticket("owner")), fewer(), true).await;
     assert_eq!((status, &body["applied"]), (StatusCode::OK, &json!(true)));
     let (_, body) = get().await;
-    assert_eq!(body["schedule"]["keep"], 1);
+    assert_eq!(body["options"]["split_automatic"], 1);
     let listed = body["backups"].as_array().unwrap();
     assert_eq!(listed.len(), 1);
     assert_ne!(listed[0]["id"], oldest, "the oldest went");
@@ -999,22 +1105,19 @@ async fn slot_options_rotate_scheduled_backups_as_the_owners_dangerous_action()
     let (status, body) = patch(
         &owner,
         Some(core.ticket("owner")),
-        json!({ "keep": 0, "interval_hours": null, "delete_excess": true }),
+        json!({ "split_automatic": 0 }),
+        true,
     )
     .await;
     assert_eq!((status, &body["applied"]), (StatusCode::OK, &json!(true)));
     let (_, body) = get().await;
-    assert!(body["next_scheduled_at"].is_null());
-    assert_eq!(body["schedule"]["keep"], 0);
+    assert!(body["next_auto_backup_at"].is_null());
+    assert_eq!(body["options"]["split_automatic"], 0);
     assert!(body["backups"].as_array().unwrap().is_empty());
 
     // A manual backup takes a manual slot, and is renamed.
-    let (status, _) = patch(
-        &owner,
-        None,
-        json!({ "keep": 14, "interval_hours": null, "delete_excess": false }),
-    )
-    .await;
+    let (status, _) =
+        patch(&owner, None, json!({ "split_automatic": 14 }), false).await;
     assert_eq!(status, StatusCode::OK);
     let (status, created) = core
         .call(
@@ -1198,7 +1301,8 @@ async fn the_owner_changes_storage_and_the_store_is_forwarded_to() {
 }
 
 #[tokio::test]
-async fn the_owner_sets_the_servers_name_and_update_channel() {
+async fn the_owner_sets_the_servers_name_channel_and_launch_settings_on_its_instance()
+ {
     let core = core().await;
     let server = core.server.clone();
     let owner = core.sign_in("owner").await;
@@ -1236,6 +1340,30 @@ async fn the_owner_sets_the_servers_name_and_update_channel() {
         .await;
     assert_eq!(after["name"], "Survival");
     assert_eq!(channel(&after), "beta", "a rename keeps the channel");
+
+    for (path, body) in [
+        ("memory", json!({ "memory_mb": 3072 })),
+        ("flags", json!({ "flags": ["-XX:+UseZGC"] })),
+    ] {
+        let (status, _) = core
+            .call(
+                Method::PUT,
+                &format!("{detail}/{path}"),
+                Some(&owner),
+                None,
+                Some(body),
+            )
+            .await;
+        assert!(status.is_success(), "{path}");
+    }
+    let instance = engine::instance::get(&core.state.engine, &server)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(instance.instance.name, "Survival");
+    let launch = instance.launch_overrides;
+    assert_eq!(launch.memory.map(|memory| memory.maximum), Some(3072));
+    assert_eq!(launch.extra_launch_args.unwrap(), ["-XX:+UseZGC"]);
 }
 
 #[tokio::test]
@@ -1282,8 +1410,10 @@ async fn an_icon_is_saved_for_minecraft_and_the_app_then_reset() {
 }
 
 #[tokio::test]
-async fn a_server_exports_as_a_pack_once_per_link() {
+async fn a_server_exports_as_a_pack() {
     use std::io::Read;
+
+    use engine::pack::install_from::{PackDependency, PackFormat};
 
     let core = core().await;
     let server = core.server.clone();
@@ -1302,13 +1432,9 @@ async fn a_server_exports_as_a_pack_once_per_link() {
     let config = core.state.servers.paths().server(&server).join("config");
     std::fs::create_dir_all(config.join("sub")).unwrap();
     std::fs::write(config.join("sub/a.toml"), "a = 1").unwrap();
-    let path =
-        format!("/servers/{server}/v1/worlds/{server}/content/export-mrpack");
+    let path = format!("/servers/{server}/export.mrpack");
 
-    let (status, link) = core.link(&owner, &path).await;
-    assert_eq!(status, StatusCode::OK);
-    let export = || Request::builder().uri(&link).body(Body::empty()).unwrap();
-    let response = core.router.clone().oneshot(export()).await.unwrap();
+    let response = core.download(&path, Some(&owner)).await;
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         response.headers()["content-disposition"],
@@ -1316,19 +1442,18 @@ async fn a_server_exports_as_a_pack_once_per_link() {
     );
     let bytes = response.into_body().collect().await.unwrap().to_bytes();
     let mut pack = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
-    let index = engine::pack::server::read_index(&mut pack).unwrap();
+    let index: PackFormat =
+        serde_json::from_reader(pack.by_name("modrinth.index.json").unwrap())
+            .unwrap();
     assert_eq!(index.name, "A");
-    assert_eq!(index.dependencies["minecraft"], "1.21.1");
-    assert_eq!(index.dependencies["fabric-loader"], "0.16.0");
+    assert_eq!(index.dependencies[&PackDependency::Minecraft], "1.21.1");
+    assert_eq!(index.dependencies[&PackDependency::FabricLoader], "0.16.0");
     let mut text = String::new();
     pack.by_name("overrides/config/sub/a.toml")
         .unwrap()
         .read_to_string(&mut text)
         .unwrap();
     assert_eq!(text, "a = 1");
-
-    let (status, _) = core.send(export()).await;
-    assert_eq!(status, StatusCode::UNAUTHORIZED, "a link exports once");
 }
 
 #[tokio::test]
@@ -1347,11 +1472,11 @@ async fn engine_wide_access_is_the_owners() {
         (session("stranger", false), false),
     ] {
         let granted = engine_access
-            .require(&caller, None, access::Permission::View)
+            .require(&caller, None)
             .await
             .map_err(|error| error.error);
         let expected = if allowed {
-            Ok(access::Permission::Owner)
+            Ok(())
         } else {
             Err(contracts::ErrorCode::Forbidden)
         };
@@ -1416,6 +1541,118 @@ async fn next(socket: &mut EventSocket) -> Option<Value> {
 }
 
 #[tokio::test]
+async fn console_lines_are_log_events_and_a_missing_server_is_not_found() {
+    let core = core().await;
+    let owner = core.sign_in("owner").await;
+    let log = core.state.servers.paths().console_log(&core.server);
+    std::fs::create_dir_all(log.parent().unwrap()).unwrap();
+    std::fs::write(
+        &log,
+        "[Server thread/INFO]: Done
+",
+    )
+    .unwrap();
+    let mut socket = core.events(&owner).await;
+    subscribe(&mut socket, json!({ "type": "console", "id": core.server }))
+        .await;
+    assert_eq!(
+        next(&mut socket).await.unwrap(),
+        json!({
+            "type": "log",
+            "payload": {
+                "instance_id": core.server,
+                "type": "legacy",
+                "message": "[Server thread/INFO]: Done",
+            },
+        })
+    );
+
+    let escaping = [
+        "../outside".to_owned(),
+        core._dir.path().join("outside").display().to_string(),
+    ];
+    for id in ["missing", &escaping[0], &escaping[1]] {
+        for kind in ["server", "console", "backups", "instance"] {
+            let topic = json!({ "type": kind, "id": id });
+            subscribe(&mut socket, topic.clone()).await;
+            let refused = next(&mut socket).await.unwrap();
+            assert_eq!(refused["type"], "subscribe_failed", "{topic}");
+            assert_eq!(refused["payload"]["topic"], topic);
+            assert_eq!(refused["payload"]["error"]["error"], "not_found");
+        }
+    }
+    assert!(!core._dir.path().join("outside").exists());
+    subscribe(&mut socket, json!({ "type": "server", "id": core.server }))
+        .await;
+    let power = next(&mut socket).await.unwrap();
+    assert_eq!(power["type"], "power_state");
+    assert_eq!(power["payload"]["server"], core.server.as_str());
+}
+
+/// The next event of `kind`, skipping others.
+async fn next_of(socket: &mut EventSocket, kind: &str) -> Value {
+    loop {
+        let event = next(socket).await.unwrap();
+        if event["type"] == kind {
+            return event;
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_long_op_answers_at_once_and_ends_on_the_socket() {
+    let core = core().await;
+    let owner = core.sign_in("owner").await;
+    core.call(Method::POST, "/eula", Some(&owner), None, None)
+        .await;
+    let mut socket = core.events(&owner).await;
+
+    // Nothing is installed, so the start fails after it was accepted.
+    let start = json!({ "action": "Start", "op": "first" });
+    let (status, _) = core
+        .call(
+            Method::POST,
+            &format!("/servers/{}/power", core.server),
+            Some(&owner),
+            None,
+            Some(start),
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let ended = next_of(&mut socket, "op_ended").await;
+    assert_eq!(ended["payload"]["op"], "first");
+    assert!(ended["payload"]["error"]["error"].is_string(), "{ended}");
+    let (_, running) = core
+        .call(Method::GET, "/ops", Some(&owner), None, None)
+        .await;
+    assert_eq!(running, json!([]));
+}
+
+#[tokio::test]
+async fn the_servers_topic_has_every_servers_power_and_changes() {
+    let core = core().await;
+    let owner = core.sign_in("owner").await;
+    let mut socket = core.events(&owner).await;
+    subscribe(&mut socket, json!({ "type": "servers" })).await;
+    let power = next_of(&mut socket, "power_state").await;
+    assert_eq!(power["payload"]["server"], core.server.as_str());
+
+    let rename = Some(json!({ "name": "Renamed", "update_channel": null }));
+    let (status, _) = core
+        .call(
+            Method::PATCH,
+            &format!("/servers/{}", core.server),
+            Some(&owner),
+            None,
+            rename,
+        )
+        .await;
+    assert!(status.is_success());
+    let changed = next_of(&mut socket, "server_changed").await;
+    assert_eq!(changed["payload"]["server"], core.server.as_str());
+}
+
+#[tokio::test]
 async fn ending_the_session_closes_the_socket() {
     let core = core().await;
     let owner = core.sign_in("owner").await;
@@ -1438,7 +1675,7 @@ async fn ending_the_session_closes_the_socket() {
 }
 
 #[tokio::test]
-async fn an_installs_subscription_starts_with_the_unfinished_jobs() {
+async fn the_unfinished_jobs_are_listed_and_start_an_installs_subscription() {
     use engine::install::{
         InstallJobStatus, InstallRequest, model::InstallJobState,
     };
@@ -1459,6 +1696,18 @@ async fn an_installs_subscription_starts_with_the_unfinished_jobs() {
     .await
     .unwrap();
     let owner = core.sign_in("owner").await;
+    let (status, listed) = core
+        .call(
+            Method::GET,
+            "/install-jobs?include_finished=false",
+            Some(&owner),
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{listed}");
+    assert_eq!(listed[0]["job_id"], job.to_string(), "{listed}");
+
     let mut socket = core.events(&owner).await;
     subscribe(&mut socket, json!({ "type": "installs" })).await;
     subscribe(&mut socket, json!({ "type": "server", "id": core.server }))
@@ -1467,11 +1716,11 @@ async fn an_installs_subscription_starts_with_the_unfinished_jobs() {
     let running = next(&mut socket).await.unwrap();
     assert_eq!(running["type"], "install_job");
     assert_eq!(running["payload"]["job_id"], job.to_string());
-    assert_eq!(next(&mut socket).await.unwrap()["type"], "power");
+    assert_eq!(next(&mut socket).await.unwrap()["type"], "power_state");
 }
 
 #[tokio::test]
-async fn a_loader_install_is_refused_while_the_engine_installs_the_server() {
+async fn a_change_is_refused_while_the_engine_installs_the_server() {
     use engine::install::{
         InstallJobStatus, InstallRequest, model::InstallJobState,
     };
@@ -1492,16 +1741,22 @@ async fn a_loader_install_is_refused_while_the_engine_installs_the_server() {
     .await
     .unwrap();
     let owner = core.sign_in("owner").await;
-    let (_, error) = core
-        .call(
-            Method::POST,
-            &format!("/servers/{}/reinstall", core.server),
-            Some(&owner),
-            None,
-            Some(json!({ "loader": "fabric", "loader_version": null, "game_version": "1.21.4" })),
-        )
-        .await;
-    assert_eq!(error["error"], "installing", "{error}");
+    let server = &core.server;
+    for (uri, body) in [
+        (
+            format!("/servers/{server}/reinstall"),
+            Some(
+                json!({ "loader": "Fabric", "loader_version": null, "game_version": "1.21.4", "op": "install" }),
+            ),
+        ),
+        (format!("/servers/{server}/modpack-file"), None),
+        (format!("/instances/{server}/modpack/unlink"), None),
+    ] {
+        let (_, error) = core
+            .call(Method::POST, &uri, Some(&owner), None, body)
+            .await;
+        assert_eq!(error["error"], "installing", "{uri}: {error}");
+    }
     let instance = engine::instance::get(&core.state.engine, &core.server)
         .await
         .unwrap()
@@ -1541,33 +1796,38 @@ async fn a_lagged_subscriber_gets_resync_and_the_servers_state_again() {
     next(&mut socket).await.unwrap();
 
     for _ in 0..300 {
-        let _ = core
-            .state
-            .backups
-            .events
-            .send(super::events::CoreEvent::Resync);
+        let _ = core.state.events.send(super::events::CoreEvent::Resync);
     }
     assert_eq!(next(&mut socket).await.unwrap()["type"], "resync");
-    assert_eq!(next(&mut socket).await.unwrap()["type"], "power");
+    assert_eq!(next(&mut socket).await.unwrap()["type"], "power_state");
 }
 
-/// A backend that answers the latest version of a share, `version`, to the read ticket `ticket`.
+/// A backend whose Core's owner reads share `share` alone: its latest version is `version`, read
+/// with the Core's key on the Core's own route.
 async fn share_versions(version: Arc<std::sync::atomic::AtomicI32>) -> String {
-    use axum::{extract::State, http::HeaderMap, routing::get};
+    use axum::{
+        extract::{Path, State},
+        http::HeaderMap,
+        routing::get,
+    };
     use contracts::backend::sharing::{
         InstanceVersion, VersionContent, VersionManifest,
     };
 
     let app = Router::new()
         .route(
-            "/v1/instances/{id}/versions",
+            "/core/shares/{id}/versions",
             get(
                 |State(version): State<Arc<std::sync::atomic::AtomicI32>>,
+                 Path(id): Path<String>,
                  headers: HeaderMap| async move {
                     if headers
-                        .get(contracts::tickets::READ_TICKET_HEADER)
-                        .is_none_or(|ticket| ticket != "ticket")
+                        .get("authorization")
+                        .is_none_or(|bearer| bearer != "Bearer amc_key")
                     {
+                        return Err(StatusCode::UNAUTHORIZED);
+                    }
+                    if id != "share" {
                         return Err(StatusCode::FORBIDDEN);
                     }
                     Ok(axum::Json(InstanceVersion {
@@ -1600,11 +1860,11 @@ async fn share_versions(version: Arc<std::sync::atomic::AtomicI32>) -> String {
     url
 }
 
-fn follow_instance(ticket: &str) -> Value {
+/// The App's body.
+fn follow_instance(share: &str) -> Value {
     json!({
         "instance": { "id": "app-instance", "name": "Our pack" },
-        "shared_instance_id": "share",
-        "ticket": ticket,
+        "shared_instance_id": share,
         "restart": false,
     })
 }
@@ -1625,14 +1885,14 @@ async fn a_stopped_server_follows_an_instance_at_once() {
             Some(follow_instance("another")),
         )
         .await;
-    assert!(!status.is_success(), "the share is read for who asked only");
+    assert!(!status.is_success(), "only a share the owner reads");
     let (status, error) = core
         .call(
             Method::POST,
             &follow,
             Some(&owner),
             None,
-            Some(follow_instance("ticket")),
+            Some(follow_instance("share")),
         )
         .await;
     assert!(status.is_success(), "{error}");
@@ -1688,7 +1948,7 @@ async fn a_running_server_takes_the_newest_pushed_version_once_it_stops() {
             &follow,
             Some(&owner),
             None,
-            Some(follow_instance("ticket")),
+            Some(follow_instance("share")),
         )
         .await;
     assert!(status.is_success(), "{error}");
@@ -1712,7 +1972,7 @@ async fn a_running_server_takes_the_newest_pushed_version_once_it_stops() {
         &follow,
         Some(&owner),
         None,
-        Some(follow_instance("ticket")),
+        Some(follow_instance("share")),
     )
     .await;
     assert_eq!(pending().await, 3);

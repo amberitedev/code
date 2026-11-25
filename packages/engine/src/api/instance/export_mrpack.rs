@@ -2,7 +2,6 @@ use super::content::get_projects;
 use super::get::get;
 use super::paths::get_full_path;
 use crate::ErrorKind;
-use crate::api::pack::server::{EntrySides, project_type_of};
 use crate::event::LoadingBarType;
 use crate::event::emit::{emit_loading, init_loading};
 use crate::pack::install_from::{
@@ -11,7 +10,10 @@ use crate::pack::install_from::{
 use crate::state::content_store::{
     FileContent, ReadableContent, content_file_path, is_managed_content_path,
 };
-use crate::state::instances::adapters::sqlite::{content_rows, server_rows};
+use crate::state::instances::adapters::filesystem::server_addon_type;
+use crate::state::instances::adapters::sqlite::content_rows::{
+    self, EntrySides,
+};
 use crate::state::{
     CacheBehaviour, CachedEntry, ContentRequirement, Engine, InstanceMetadata,
     ModLoader, ProjectType, SideType, VersionEnvironment,
@@ -28,7 +30,7 @@ use std::time::UNIX_EPOCH;
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
-const DEFAULT_SELECTED_EXPORT_PATH_PREFIXES: &[&str] = &[
+pub const DEFAULT_SELECTED_EXPORT_PATH_PREFIXES: &[&str] = &[
     "mods",
     "datapacks",
     "resourcepacks",
@@ -640,7 +642,7 @@ impl ExportSides {
             && recorded
                 .is_some_and(|sides| unsupported(sides.server_requirement));
         let server_only = matches!(
-            project_type_of(path),
+            server_addon_type(path),
             Some(ProjectType::Plugin | ProjectType::DataPack)
         );
         Self {
@@ -695,7 +697,7 @@ async fn server_export_sides(
         .map(|file| (file.relative_path, file.enabled))
         .collect::<HashMap<_, _>>();
     Ok(Some(
-        server_rows::tracked_files(&state.pool, instance_id)
+        content_rows::tracked_files(&state.pool, instance_id)
             .await?
             .into_iter()
             .map(|(row, sides)| {
@@ -709,7 +711,7 @@ async fn server_export_sides(
     ))
 }
 
-fn get_mrpack_environment(
+pub(crate) fn get_mrpack_environment(
     environment: Option<VersionEnvironment>,
 ) -> HashMap<EnvType, SideType> {
     let (client, server) =

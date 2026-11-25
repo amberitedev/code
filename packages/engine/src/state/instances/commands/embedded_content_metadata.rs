@@ -634,4 +634,115 @@ fn metadata_cache_key(hash: &str, loader: ModLoader) -> String {
     format!("{hash}-{}", loader.as_str())
 }
 
-pub mod server;
+/// Whether a jar names itself client only, in the first metadata a server with `loader` reads (a
+/// jar can carry several): a Fabric or Quilt `environment` of `client`. Forge metadata names no
+/// sides, and a Paper server reads a plugin's first.
+pub(crate) fn names_client_only<R: Read + Seek>(
+    archive: &mut ZipArchive<R>,
+    loader: ModLoader,
+) -> bool {
+    if loader == ModLoader::Paper
+        && (has_entry(archive, "paper-plugin.yml")
+            || has_entry(archive, "plugin.yml"))
+    {
+        return false;
+    }
+    let manifest = read_manifest(archive);
+    metadata_order(Some(loader))
+        .into_iter()
+        .find_map(|kind| match kind {
+            ModMetadataKind::Fabric => {
+                read_json_entry(archive, "fabric.mod.json")
+                    .map(|root| root.get("environment").cloned())
+            }
+            ModMetadataKind::Quilt => {
+                read_text_entry(archive, "quilt.mod.json")
+                    .and_then(|text| json5::from_str::<JsonValue>(&text).ok())
+                    .map(|root| {
+                        root.get("minecraft")
+                            .and_then(|minecraft| minecraft.get("environment"))
+                            .cloned()
+                    })
+            }
+            ModMetadataKind::NeoForge => parse_toml_metadata(
+                archive,
+                "META-INF/neoforge.mods.toml",
+                &manifest,
+            )
+            .map(|_| None),
+            ModMetadataKind::Forge => {
+                parse_toml_metadata(archive, "META-INF/mods.toml", &manifest)
+                    .map(|_| None)
+            }
+            ModMetadataKind::LegacyForge => {
+                parse_legacy_forge_metadata(archive).map(|_| None)
+            }
+        })
+        .flatten()
+        .is_some_and(|environment| environment.as_str() == Some("client"))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+
+    use super::*;
+
+    fn jar(files: &[(&str, &str)]) -> ZipArchive<Cursor<Vec<u8>>> {
+        let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        for (name, text) in files {
+            writer
+                .start_file(*name, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            writer.write_all(text.as_bytes()).unwrap();
+        }
+        ZipArchive::new(writer.finish().unwrap()).unwrap()
+    }
+
+    #[test]
+    fn a_jar_is_client_only_by_the_first_metadata_the_server_reads() {
+        let fabric_client =
+            ("fabric.mod.json", r#"{"id":"m","environment":"client"}"#);
+        let forge = (
+            "META-INF/mods.toml",
+            "modLoader=\"javafml\"\n[[mods]]\nmodId=\"m\"\n",
+        );
+        let plugin = ("plugin.yml", "name: M\n");
+        let quilt = |environment| {
+            format!(
+                "{{quilt_loader: {{id: 'm'}}, minecraft: {{environment: '{environment}'}}}}"
+            )
+        };
+        for (files, loader, client_only) in [
+            (vec![fabric_client], ModLoader::Fabric, true),
+            (
+                vec![("fabric.mod.json", r#"{"id":"m","environment":"*"}"#)],
+                ModLoader::Fabric,
+                false,
+            ),
+            // A jar for both loaders: a Forge server reads its Forge metadata, which names no sides.
+            (vec![fabric_client, forge], ModLoader::Forge, false),
+            (vec![fabric_client, forge], ModLoader::Fabric, true),
+            (vec![fabric_client, plugin], ModLoader::Paper, false),
+            (vec![("not metadata", "")], ModLoader::Fabric, false),
+        ] {
+            assert_eq!(
+                names_client_only(&mut jar(&files), loader),
+                client_only,
+                "{files:?} on {loader:?}"
+            );
+        }
+        for (environment, client_only) in
+            [("client", true), ("dedicated_server", false)]
+        {
+            let text = quilt(environment);
+            assert_eq!(
+                names_client_only(
+                    &mut jar(&[("quilt.mod.json", text.as_str())]),
+                    ModLoader::Quilt
+                ),
+                client_only
+            );
+        }
+    }
+}

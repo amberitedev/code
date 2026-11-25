@@ -1,10 +1,11 @@
-import { core, type ErrorCode, type ListedCore, PROTOCOL_VERSION } from '@amberite/contracts'
+import { type ErrorCode, PROTOCOL_VERSION } from '@amberite/contracts/protocol'
+import type { ListedCore } from '@amberite/contracts/backend'
+import { core, type Server } from '@amberite/contracts/core'
 import { describe, expect, it } from 'vite-plus/test'
 
 import { ModrinthApiError } from '../core/errors'
 import { GenericModrinthClient } from '../platform/generic'
 import type { RequestOptions } from '../types/request'
-import { clearNodeAuthState, setNodeAuthState } from '../state/node-auth'
 import { AuthFeature } from './auth'
 import { ProtocolMismatch, protocolMismatch } from './core-session'
 import { SelfHostedFeature } from './self-hosted'
@@ -14,6 +15,29 @@ const ACCOUNT = 'mra_account'
 /** The local proxy `connectCore` opens for the Core, with its capability path. */
 const PROXY = 'http://127.0.0.1:5000/c0ffee'
 const SERVER = '00000000-0000-4000-8000-000000000001'
+/** `SERVER` as the Core lists it. */
+const LISTED: Server = {
+	server_id: SERVER,
+	name: 'Survival',
+	owner_id: 'owner',
+	status: 'available',
+	loader: null,
+	loader_version: null,
+	mc_version: null,
+	upstream: null,
+	flows: { intro: true },
+	icon: null,
+	net: { ip: null, port: 25565, outside: null, game_port: 25565 },
+	power_state: 'stopped',
+	linked_instance: null,
+	shared_instance_id: null,
+	reachability: null,
+	players: null,
+	memory_mb: 2048,
+	created_at: '1970-01-01T00:00:00Z',
+	update_channel: 'release',
+	eula_accepted: true,
+}
 const CORE: ListedCore = {
 	id: 'core',
 	name: 'Core',
@@ -35,14 +59,16 @@ type Sent = {
 
 /**
  * The real request pipeline against a fake backend and Core. The backend lists `CORE` and numbers
- * its tickets; the Core answers a path in `routes` with its entry, and any other request with the
- * next entry of `answers`, or `{}`. Its health reports no protocol, which is version 1.
+ * its tickets; the Core answers a GET of a path in `routes` with its entry, and any other request
+ * with the next entry of `answers`, or `{}`. Its health reports this App's protocol, and it has
+ * `SERVER`.
  */
 class FakeClient extends GenericModrinthClient {
 	public sent: Sent[] = []
 	public answers: unknown[] = []
 	public routes: Record<string, unknown> = {
-		[`${PROXY}/health`]: { version: '0.0.0', core_id: CORE.id },
+		[`${PROXY}/health`]: { protocol: PROTOCOL_VERSION, version: '0.0.0', core_id: CORE.id },
+		[`${PROXY}/servers`]: [LISTED],
 	}
 	public signIns: string[][] = []
 	public hasSession = false
@@ -51,7 +77,6 @@ class FakeClient extends GenericModrinthClient {
 	constructor() {
 		super({
 			labrinthBaseUrl: ACCOUNTS,
-			selfHostedHosting: true,
 			headers: { Authorization: `Bearer ${ACCOUNT}` },
 			connectCore: async (coreId) => (coreId === CORE.id ? PROXY : 'unknown'),
 			coreSessions: {
@@ -84,7 +109,7 @@ class FakeClient extends GenericModrinthClient {
 		if (url === `${ACCOUNTS}/cores`) return Response.json([CORE])
 		if (url.endsWith('/ticket')) return Response.json({ ticket: `ticket-${++this.tickets}` })
 		if (!url.startsWith(PROXY)) return new Response(null, { status: 204 })
-		const answer = this.answer(url)
+		const answer = this.answer(this.sent.at(-1)!)
 		if (answer instanceof ModrinthApiError)
 			return Response.json(answer.responseData, { status: answer.statusCode })
 		if (answer instanceof Error) throw answer
@@ -99,21 +124,22 @@ class FakeClient extends GenericModrinthClient {
 			body: options.body,
 			params: options.params,
 		})
-		const answer = this.answer(url)
+		const answer = this.answer(this.sent.at(-1)!)
 		if (answer instanceof Error) throw answer
 		return (answer ?? {}) as T
 	}
 
-	private answer(url: string): unknown {
-		const path = url.split('?')[0]
-		return path in this.routes ? this.routes[path] : this.answers.shift()
+	private answer(request: Sent): unknown {
+		return this.routed(request) ? this.routes[request.url.split('?')[0]] : this.answers.shift()
 	}
 
-	/** What reached the Core, past the protocol check. */
+	private routed({ url, method }: Sent): boolean {
+		return method === 'GET' && url.split('?')[0] in this.routes
+	}
+
+	/** What reached the Core, past what `routes` answers: the protocol check and its servers. */
 	toCore(): Sent[] {
-		return this.sent.filter(
-			(request) => request.url.startsWith(PROXY) && request.url !== `${PROXY}/health`,
-		)
+		return this.sent.filter((request) => request.url.startsWith(PROXY) && !this.routed(request))
 	}
 }
 
@@ -132,18 +158,19 @@ function coreError(error: ErrorCode) {
 describe('Core sessions', () => {
 	it('signs in with a fresh ticket when this device has no session', async () => {
 		const api = new FakeClient()
-		await api.archon.cores_v1.ensureSession(CORE)
+		await api.cores.ensureSession(CORE)
 		expect(api.signIns).toEqual([[CORE.id, CORE.address, CORE.cert_fingerprint, 'ticket-1']])
 
-		await api.archon.cores_v1.ensureSession(CORE)
+		await api.cores.ensureSession(CORE)
 		expect(api.signIns).toHaveLength(1)
 		expect(api.sent.filter((request) => request.url.endsWith('/ticket'))).toHaveLength(1)
 	})
 
 	it('signs in once and retries a Core request its session no longer works for', async () => {
 		const api = new FakeClient()
+		delete api.routes[`${PROXY}/servers`]
 		api.answers = [coreError('invalid_credentials'), []]
-		await api.archon.cores_v1.servers()
+		await api.cores.servers()
 		expect(api.signIns).toHaveLength(1)
 
 		api.answers = [coreError('invalid_credentials'), []]
@@ -166,7 +193,9 @@ describe('Core sessions', () => {
 		expect(api.signIns).toHaveLength(1)
 
 		api.answers = [coreError('ticket_reused')]
-		await expect(api.archon.servers_v1.deleteLocal(SERVER)).rejects.toMatchObject({
+		await expect(
+			api.core(CORE.id).call(core.DeleteServer, { params: { id: SERVER } }),
+		).rejects.toMatchObject({
 			statusCode: 401,
 		})
 		expect(api.signIns).toHaveLength(1)
@@ -174,7 +203,7 @@ describe('Core sessions', () => {
 
 	it('sends every dangerous action with a ticket of its own', async () => {
 		const api = new FakeClient()
-		await api.archon.servers_v1.deleteLocal(SERVER)
+		await api.core(CORE.id).call(core.DeleteServer, { params: { id: SERVER } })
 		await api.core(CORE.id).call(core.RevokeSession, { params: { id: 'other' } })
 		await api.core(CORE.id).call(core.ListSessions)
 
@@ -188,29 +217,30 @@ describe('Core sessions', () => {
 	it('tells the Core before the backend when a Core is removed', async () => {
 		const api = new FakeClient()
 		api.hasSession = true
-		await api.archon.cores_v1.list()
-		await api.archon.cores_v1.revoke(CORE)
+		await api.cores.list()
+		const events = api.coreEvents(CORE.id)
+		await api.cores.revoke(CORE)
 		const calls = api.sent
 			.filter((request) => !request.url.endsWith('/ticket'))
 			.map((request) => `${request.method} ${request.url}`)
 		expect(calls.slice(-2)).toEqual([`DELETE ${PROXY}/pairing`, `DELETE ${ACCOUNTS}/cores/core`])
 		expect(api.hasSession).toBe(false)
+		// Its socket and routes are dropped with it.
+		expect(api.coreEvents(CORE.id)).not.toBe(events)
 	})
 
 	it('removes a Core it cannot reach from the backend alone', async () => {
 		const api = new FakeClient()
 		api.answers = [new ModrinthApiError('Network error')]
-		await api.archon.cores_v1.revoke(CORE)
+		await api.cores.revoke(CORE)
 		expect(api.sent.at(-1)?.url).toBe(`${ACCOUNTS}/cores/core`)
 	})
 
 	it('never sends the account token to a Core', async () => {
 		const api = new FakeClient()
-		await api.archon.servers_v1.deleteLocal(SERVER)
+		await api.core(CORE.id).call(core.DeleteServer, { params: { id: SERVER } })
 		await api.core(CORE.id).call(core.ListSessions)
-		api.answers = [[]]
-		await api.archon.cores_v1.servers()
-		expect(api.toCore()).toHaveLength(3)
+		expect(api.toCore()).toHaveLength(2)
 		for (const { headers } of api.sent.filter((request) => request.url.startsWith(PROXY)))
 			expect(Object.values(headers).some((value) => value.includes(ACCOUNT))).toBe(false)
 		const ticket = api.sent.find((request) => request.url.endsWith('/ticket'))
@@ -219,11 +249,6 @@ describe('Core sessions', () => {
 })
 
 describe('a Core on another protocol version', () => {
-	it('counts a Core that reports none as version 1', () => {
-		expect(protocolMismatch({}, 1)).toBeNull()
-		expect(protocolMismatch({}, 2)?.side).toBe('core')
-	})
-
 	it('says which side to update', () => {
 		expect(protocolMismatch({ protocol: 1 }, 2)?.message).toBe(
 			'This Core is out of date. Update this Core.',
@@ -251,43 +276,6 @@ describe('a Core on another protocol version', () => {
 	})
 })
 
-describe('the activity log of a server on a Core', () => {
-	it("reads a server's activity as its action log", async () => {
-		const api = new FakeClient()
-		const at = 1_700_000_000
-		api.routes[`${PROXY}/activity`] = {
-			entries: [
-				{
-					id: 5,
-					at,
-					user: { id: 'owner', name: 'Owner', avatar_url: null },
-					server_id: SERVER,
-					action: { type: 'console_command', command: 'say hi' },
-				},
-				{ id: 4, at, user: null, server_id: SERVER, action: { type: 'server_started' } },
-			],
-			next_before: 4,
-		}
-		const log = await api.archon.actions_v1.list(SERVER, { limit: 2 })
-
-		expect(log.next_offset).toBe(4)
-		expect(log.data.map((entry) => [entry.actor, entry.action])).toEqual([
-			[
-				{ type: 'user', user_id: 'owner' },
-				{ action: 'console_command_executed', metadata: { command: 'say hi' } },
-			],
-			[{ type: 'user', user_id: 'core-cli' }, { action: 'server_started' }],
-		])
-		expect(log.users.owner.username).toBe('Owner')
-		const activity = () =>
-			api.sent.findLast((request) => request.url.startsWith(`${PROXY}/activity`))?.url
-		expect(activity()).toBe(`${PROXY}/activity?server_id=${SERVER}&limit=2`)
-
-		await api.archon.actions_v1.list(SERVER, { limit: 2, offset: 4 })
-		expect(activity()).toBe(`${PROXY}/activity?server_id=${SERVER}&limit=2&before=4`)
-	})
-})
-
 describe('creating a server on a Core', () => {
 	const EULA = 'https://aka.ms/MinecraftEULA'
 	const notAccepted = () =>
@@ -302,7 +290,7 @@ describe('creating a server on a Core', () => {
 		const api = new FakeClient()
 		api.answers = [notAccepted(), { url: EULA, accepted_at: null }, {}, { id: SERVER }]
 		const asked: string[] = []
-		const created = await api.archon.cores_v1.createServer('Survival', CORE, async (url) => {
+		const created = await api.cores.createServer('Survival', CORE, async (url) => {
 			asked.push(url)
 			return true
 		})
@@ -314,51 +302,8 @@ describe('creating a server on a Core', () => {
 	it('creates nothing when the owner declines the EULA', async () => {
 		const api = new FakeClient()
 		api.answers = [notAccepted(), { url: EULA, accepted_at: null }]
-		const created = await api.archon.cores_v1.createServer('Survival', CORE, async () => false)
+		const created = await api.cores.createServer('Survival', CORE, async () => false)
 		expect(created).toBeNull()
 		expect(toCore(api)).toEqual(['POST /servers', 'GET /eula'])
-	})
-})
-
-describe('a server on a Core', () => {
-	it('is renamed on its Core', async () => {
-		const api = new FakeClient()
-		await api.archon.servers_v0.updateName(SERVER, 'Survival')
-		const [renamed] = api.toCore()
-		expect(renamed).toMatchObject({
-			url: `${PROXY}/servers/${SERVER}`,
-			method: 'PATCH',
-			body: { name: 'Survival', update_channel: null },
-		})
-	})
-
-	it('opens no sync stream, since its changes come over the event socket', async () => {
-		const api = new FakeClient()
-		await api.archon.sync.safeConnectServer(SERVER)
-		expect(api.archon.sync.getStatus(SERVER)).toBeNull()
-	})
-})
-
-describe('URLs a Core names', () => {
-	it('keep the proxy base, with its capability, for the event socket and the files', async () => {
-		const api = new FakeClient()
-		const socket = await api.archon.servers_v0.getWebSocketAuth(SERVER)
-		expect(socket.url).toBe('ws://127.0.0.1:5000/c0ffee/events')
-
-		const files = await api.archon.servers_v0.getFilesystemAuth(SERVER)
-		expect(files.url).toBe(`${PROXY}/servers/${SERVER}`)
-		// The open panel's server, which upstream's file methods do not name.
-		setNodeAuthState(
-			() => files,
-			async () => {},
-		)
-		try {
-			await api.kyros.files_v0.downloadFile('/logs/latest.log')
-		} finally {
-			clearNodeAuthState()
-		}
-		expect(api.sent.at(-1)?.url).toBe(
-			`${PROXY}/instances/${SERVER}/files/content?path=%2Flogs%2Flatest.log`,
-		)
 	})
 })

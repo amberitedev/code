@@ -1,14 +1,16 @@
 //! A server following an App instance through the instance's share, as one more member: the
-//! engine reads the share's latest version for the user who asked, with their read ticket, and
+//! engine reads the share's latest version as the Core's owner, who must read the share, and
 //! applies it as a member's update. A running server keeps running; the version waits for it to
 //! stop, or with `restart` the server is stopped for it and started again after.
 
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
 use axum::extract::State;
 use contracts::{
     ApiError, Empty,
-    core::{Action, FollowInstance, LinkedInstance, LinkedPackState},
+    core::{
+        Action, CoreEvent, FollowInstance, LinkedInstance, LinkedPackState,
+    },
     server::Req,
 };
 use engine::{
@@ -19,8 +21,8 @@ use engine::{
 
 use super::{CoreState, engine_mount, internal};
 use crate::{
-    access::{Caller, Permission, activity},
-    servers::{Hold, Lifecycle, ServerError},
+    access::{Caller, activity},
+    servers::{Hold, Lifecycle, Phase, ServerError},
 };
 
 pub async fn follow(
@@ -29,13 +31,12 @@ pub async fn follow(
     Req { params, body, .. }: Req<FollowInstance>,
 ) -> Result<Empty, ApiError> {
     let id = params.id;
-    state.access.require(&caller, &id, Permission::Edit).await?;
+    state.access.require(&caller, &id).await?;
     // Read now, so a version that cannot go fails the request.
     let data = engine::instance::followed_shared_instance_version(
         &state.engine,
         &id,
         &body.shared_instance_id,
-        &body.ticket,
     )
     .await
     .map_err(api_error)?;
@@ -67,6 +68,7 @@ pub async fn follow(
     .execute(&state.db)
     .await
     .map_err(internal)?;
+    changed(&state, &id);
     activity::log(&state.db, &caller, Some(&id), Action::ContentChanged).await;
     match hold {
         Some(hold) => {
@@ -127,7 +129,12 @@ async fn apply_pending(state: Arc<CoreState>, id: String) {
         match state.servers.hold(&id) {
             Ok(hold) => break hold,
             Err(ServerError::Installing) => {
-                tokio::time::sleep(Duration::from_secs(1)).await;
+                state
+                    .servers
+                    .until(|servers| {
+                        servers.phase(&id) != Some(Phase::Installing)
+                    })
+                    .await;
             }
             Err(_) => return,
         }
@@ -149,6 +156,7 @@ async fn apply_pending(state: Arc<CoreState>, id: String) {
     let Some((pending, start_after)) = taken else {
         return;
     };
+    changed(&state, &id);
     let applied = match serde_json::from_str(&pending) {
         Ok(data) => apply(&state, hold, data, start_after).await,
         Err(error) => Err(internal(error)),
@@ -203,6 +211,7 @@ async fn apply(
                 .bind(&id)
                 .execute(&state.db)
                 .await;
+                changed(&state, &id);
             }
             Some(error) => failed(&state, &id, &error).await,
         }
@@ -220,20 +229,15 @@ async fn job_error(state: &CoreState, job_id: &str) -> Option<String> {
         Ok(job_id) => job_id,
         Err(error) => return Some(format!("{error}")),
     };
-    loop {
-        match engine::install::get_job(job_id, &state.engine).await {
-            Ok(job) if job.status == InstallJobStatus::Succeeded => {
-                return None;
-            }
-            Ok(job) if job.status.is_finished() => {
-                return Some(job.error.map_or_else(
-                    || job.status.as_str().to_owned(),
-                    |error| error.message,
-                ));
-            }
-            Ok(_) => tokio::time::sleep(Duration::from_secs(1)).await,
-            Err(error) => return Some(format!("{error:#}")),
-        }
+    // Returns once the job ended, however it ended; the job says how.
+    let _ = engine::install::runner::wait_for_job(job_id, &state.engine).await;
+    match engine::install::get_job(job_id, &state.engine).await {
+        Ok(job) if job.status == InstallJobStatus::Succeeded => None,
+        Ok(job) => Some(job.error.map_or_else(
+            || job.status.as_str().to_owned(),
+            |error| error.message,
+        )),
+        Err(error) => Some(format!("{error:#}")),
     }
 }
 
@@ -246,6 +250,14 @@ async fn failed(state: &CoreState, id: &str, error: &str) {
     .bind(id)
     .execute(&state.db)
     .await;
+    changed(state, id);
+}
+
+/// The server's `linked_instance` reads differently now.
+fn changed(state: &CoreState, id: &str) {
+    let _ = state.events.send(CoreEvent::ServerChanged {
+        server: id.to_owned(),
+    });
 }
 
 /// Stop following: a server unlinked from its instance's share.
@@ -253,8 +265,9 @@ pub(super) async fn forget(state: &CoreState, id: &str) -> sqlx::Result<()> {
     sqlx::query("DELETE FROM follows WHERE server_id = ?")
         .bind(id)
         .execute(&state.db)
-        .await
-        .map(drop)
+        .await?;
+    changed(state, id);
+    Ok(())
 }
 
 /// The App instance server `id` follows, with `attachment`, its instance's share: shown while it

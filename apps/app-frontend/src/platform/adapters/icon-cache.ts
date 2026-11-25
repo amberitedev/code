@@ -1,11 +1,10 @@
-import { ContractClient, localFiles } from '@modrinth/api-client'
+import { library, localFiles } from '@amberite/contracts/app'
 import type { IconCacheContext } from '@modrinth/ui'
 
-import { cacheIconBytes } from '@/platform/app-lib/icons/commands'
-import { localFileUrl, localTransport } from '@/platform/local'
+import { localFileUrl } from '@/platform/local'
+import { apiClient } from '@/platform/modrinth-client'
 
 export function createIconCache(): IconCacheContext {
-	const local = new ContractClient(localTransport)
 	const pending = new Map<string, Promise<string>>()
 	const blobs = new WeakMap<Blob, Promise<string>>()
 	const resolvedUrls = new Map<string, string>()
@@ -33,7 +32,7 @@ export function createIconCache(): IconCacheContext {
 			if (!source.startsWith('https://')) return Promise.resolve(source)
 			const existing = pending.get(source)
 			if (existing) return existing
-			const request = local
+			const request = apiClient.local
 				.call(localFiles.cacheRemoteIcon, { body: { source } })
 				.then(localFileUrl)
 				.then((url) => {
@@ -50,4 +49,9 @@ export function createIconCache(): IconCacheContext {
 			return typeof source === 'string' ? resolvedUrls.get(source) : resolvedBlobs.get(source)
 		},
 	}
+}
+
+/** Writes icon bytes to the App's icon cache and returns the cached file's path. */
+export function cacheIconBytes(iconBytes: number[]): Promise<string> {
+	return apiClient.local.call(library.cacheIcon, { body: new Blob([new Uint8Array(iconBytes)]) })
 }

@@ -4,16 +4,16 @@
 )]
 #![recursion_limit = "256"]
 
-use engine::prelude::*;
+use crate::state::Desktop;
 use native_dialog::{DialogBuilder, MessageLevel};
 use std::sync::Arc;
 use tauri::{Listener, Manager};
 
 mod accounts;
-mod api;
 mod cores;
 mod data_dir;
 mod db;
+mod db_backup;
 mod desktop;
 mod dev;
 mod discord;
@@ -23,41 +23,47 @@ mod hooks;
 mod import;
 mod launch;
 mod library;
+mod local_api;
 mod logger;
 mod onboarding;
 mod presence;
 mod reactions;
 mod screenshots;
-mod server;
 mod settings;
 mod skins;
+mod state;
 mod synced_options;
 
 #[cfg(target_os = "macos")]
 mod macos;
 
+/// Every request the App makes names it with this, the engine's to Modrinth too.
+fn user_agent() -> String {
+    format!(
+        "amberite/{} ({})",
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::OS
+    )
+}
+
 /// Starts the engine and signs a dev App in before its routes open. Setup runs it, and opening the
 /// event socket runs it again after a failure.
 async fn start_engine(
     app: tauri::AppHandle,
-    events: engine::EventSink,
+    events: local_api::events::Events,
     presence: Arc<presence::Presence>,
-) -> anyhow::Result<Arc<Engine>> {
+) -> anyhow::Result<Desktop> {
     tracing::info!("Initializing app state...");
     let started = async {
-        let reacting = events.subscribe();
-        let config = data_dir::engine_config(
+        let reacting = events.engine.subscribe();
+        let state = data_dir::open(
             data_dir::resolve(&app.config().identifier)?,
-            events,
+            events.engine,
+            events.app,
             dev::accounts()?,
         )
         .await?;
-        let state = Engine::new(config).await?;
-        accounts::self_hosted::bind_origin(
-            crate::db::pool(&state),
-            &state.sessions,
-        )
-        .await?;
+        accounts::self_hosted::bind_origin(state.db(), &state.sessions).await?;
         reactions::start(&state, Arc::clone(&presence), app.clone(), reacting);
         #[cfg(debug_assertions)]
         dev::sign_in(&state, &presence).await;
@@ -145,14 +151,14 @@ fn main() {
 
     tracing::info!("Initialized tracing subscriber. Loading Modrinth App!");
 
-    let local = server::LocalServer::bind(
+    let local = local_api::LocalServer::bind(
         dev::config().and_then(|config| config.local_port),
         dev::config().and_then(|config| config.local_secret.clone()),
         tauri_context.config().build.dev_url.clone(),
     )
     .expect("failed to bind the App's local server");
     let local_init = local.init_plugin();
-    let events = server::events::Events::default();
+    let events = local_api::events::Events::default();
     let engine = engine_handle::EngineHandle::default();
     let presence = Arc::new(
         presence::Presence::init()
@@ -161,7 +167,7 @@ fn main() {
     let desktop = desktop::AppSlot::default();
     let updater = Arc::new(desktop::updater::Updater::new(desktop.clone()));
     let router = local.router(
-        server::endpoints::boot::Boot::current(
+        local_api::endpoints::boot::Boot::current(
             tauri_context.package_info().version.to_string(),
         ),
         events.clone(),
@@ -184,13 +190,12 @@ fn main() {
 
     #[cfg(feature = "updater")]
     {
-        use engine::launcher_user_agent;
         use tauri_plugin_http::reqwest::header::{HeaderValue, USER_AGENT};
         builder = builder.plugin(
             tauri_plugin_updater::Builder::new()
                 .header(
                     USER_AGENT,
-                    HeaderValue::from_str(&launcher_user_agent()).unwrap(),
+                    HeaderValue::from_str(&user_agent()).unwrap(),
                 )
                 .unwrap()
                 .build(),
@@ -203,10 +208,9 @@ fn main() {
                 if let Some(payload) = args.get(1) {
                     tracing::info!("Handling command-line deep link");
                     let payload = payload.clone();
-                    tauri::async_runtime::spawn(api::utils::handle_command(
-                        app.clone(),
-                        payload,
-                    ));
+                    tauri::async_runtime::spawn(
+                        desktop::opening::handle_command(app.clone(), payload),
+                    );
                 }
 
                 if let Some(win) = app.get_window("main") {
@@ -297,14 +301,13 @@ fn main() {
         )
         .setup(move |app| {
             let _ = desktop.set(app.handle().clone());
-            let sink = events.engine;
-            app.manage(sink.clone());
-            app.manage(events.app);
+            app.manage(events.engine.clone());
+            app.manage(events.app.clone());
             let handle = app.handle().clone();
             app.state::<engine_handle::EngineHandle>().start(move || {
                 start_engine(
                     handle.clone(),
-                    sink.clone(),
+                    events.clone(),
                     Arc::clone(&presence),
                 )
             });
@@ -334,9 +337,11 @@ fn main() {
                             *payload = Some(actual_request.clone());
                         }
 
-                        let _ =
-                            api::utils::handle_command(handle, actual_request)
-                                .await;
+                        let _ = desktop::opening::handle_command(
+                            handle,
+                            actual_request,
+                        )
+                        .await;
                     });
                 });
             };
@@ -347,10 +352,12 @@ fn main() {
                 app.listen("deep-link://new-url", move |url| {
                     let payload = url.payload().to_owned();
                     tracing::info!("Handling deep link");
-                    tauri::async_runtime::spawn(api::utils::handle_command(
-                        handle.clone(),
-                        payload,
-                    ));
+                    tauri::async_runtime::spawn(
+                        desktop::opening::handle_command(
+                            handle.clone(),
+                            payload,
+                        ),
+                    );
                 });
             }
 
@@ -372,7 +379,7 @@ fn main() {
         });
 
     builder = builder
-        .plugin(api::logs::init())
+        .plugin(desktop::webview_log::plugin())
         .manage(updater)
         .manage(engine)
         .invoke_handler(tauri::generate_handler![show_window]);
@@ -407,7 +414,7 @@ fn main() {
                     let should_restart = updater.restarts_after();
                     if let Some((update, data)) = &updater.take_downloaded() {
                         let state = app.state::<engine_handle::EngineHandle>().try_get();
-                        fn set_changelog_toast(state: Option<&Engine>, version: Option<String>) {
+                        fn set_changelog_toast(state: Option<&Desktop>, version: Option<String>) {
                             let Some(state) = state else {
                                 return;
                             };
@@ -492,7 +499,7 @@ fn main() {
                             }
 
                             let _ =
-                                api::utils::handle_command(handle, request)
+                                desktop::opening::handle_command(handle, request)
                                     .await;
                         });
                     }

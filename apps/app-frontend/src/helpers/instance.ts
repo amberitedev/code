@@ -4,43 +4,42 @@
  *  and deserialized into a usable JS object.
  */
 import {
-	ApiCallError,
-	type ContentItem as ContentItemResponse,
-	ContractClient,
-	desktop,
 	type GameInstance as InstanceResponse,
-	type GlobalSyncedOptions,
-	type IconConfig,
 	instanceContent,
-	instancePaths,
 	instances,
 	instanceSharing,
 	type InstanceSyncedOptions,
-	type Labrinth,
+	type ProjectType,
+	type SharedInstanceInvite,
+	type SharedInstanceInviteLink,
+	type SharedInstancePublishPreview,
+	type SharedInstanceUsers,
+} from '@amberite/contracts/engine'
+import {
+	desktop,
+	type GlobalSyncedOptions,
+	instanceGroups,
+	instancePaths,
 	launch,
 	library,
 	localSharing,
-	type ProjectType,
 	type ScreenshotFile,
 	type ScreenshotGroup,
 	type ScreenshotGroupImport,
 	type ScreenshotGroupMembershipUpdate,
 	type ScreenshotKey,
 	screenshots,
-	type SharedInstanceInvite,
-	type SharedInstanceInviteLink,
-	type SharedInstancePublishPreview,
-	type SharedInstanceUsers,
 	type SyncedOption,
 	type SyncedOptionJoinPreview,
 	type SyncedOptionJoinResolution,
 	type SyncedOptionsOverview,
 	syncedOptions,
 	type SyncedServer,
-} from '@modrinth/api-client'
-import { type ContentItem, type ContentOwner, getIconSymbolAsset } from '@modrinth/ui'
+} from '@amberite/contracts/app'
+import { ApiCallError, type IconConfig, type Labrinth } from '@modrinth/api-client'
+import { type ContentItemMapping, type ContentOwner, getIconSymbolAsset } from '@modrinth/ui'
 
-import { localFileUrl, localTransport } from '@/platform/local'
+import { localFileUrl } from '@/platform/local'
 import { apiClient } from '@/platform/modrinth-client'
 import { runOp } from '@/platform/ops'
 
@@ -74,19 +73,22 @@ const NOT_SYNCED: InstanceSyncedOptions = {
 	data_packs: false,
 }
 
-async function withSyncedOptions(read: Promise<InstanceResponse[]>): Promise<GameInstance[]> {
-	const [found, synced] = await Promise.all([
+/** The engine's instances with what the App keeps about each: synced options and groups. */
+async function withDesktopFields(read: Promise<InstanceResponse[]>): Promise<GameInstance[]> {
+	const [found, synced, groups] = await Promise.all([
 		read,
 		apiClient.local.call(syncedOptions.listInstancesSyncedOptions),
+		apiClient.local.call(instanceGroups.listInstanceGroupMemberships),
 	])
 	return found.map((instance) => ({
 		...instance,
 		synced_options: synced[instance.id] ?? NOT_SYNCED,
+		group_ids: groups[instance.id] ?? [],
 	}))
 }
 
 export async function get(instanceId: string): Promise<GameInstance | null> {
-	const [instance] = await withSyncedOptions(
+	const [instance] = await withDesktopFields(
 		apiClient.local
 			.call(instances.GetInstance, { params: { id: instanceId } })
 			.then((instance) => (instance ? [instance] : [])),
@@ -95,7 +97,7 @@ export async function get(instanceId: string): Promise<GameInstance | null> {
 }
 
 export async function get_many(instanceIds: string[]): Promise<GameInstance[]> {
-	return await withSyncedOptions(
+	return await withDesktopFields(
 		apiClient.local.call(instances.GetInstances, {
 			query: { ids: JSON.stringify(instanceIds) },
 		}),
@@ -143,20 +145,6 @@ export async function get_install_candidates(
 	})
 }
 
-// Get content items with rich metadata for an instance
-// Returns content items filtered to exclude modpack files (if linked),
-// sorted alphabetically by project name
-export async function get_content_items(
-	instanceId: string,
-	cacheBehaviour?: CacheBehaviour,
-): Promise<ContentItem[]> {
-	const items = await apiClient.local.call(instanceContent.ListContentItems, {
-		params: { id: instanceId },
-		query: { cacheBehaviour },
-	})
-	return adaptContentItems(items)
-}
-
 export async function refresh_content_updates(instanceId: string): Promise<void> {
 	return await apiClient.local.call(instanceContent.RefreshContentUpdates, {
 		params: { id: instanceId },
@@ -192,54 +180,8 @@ export async function get_linked_modpack_info(
 	})) as LinkedModpackInfo | null
 }
 
-// Get content items that are part of the linked modpack
-// Returns the modpack's dependencies as ContentItem list
-// Returns empty array if the instance is not linked to a modpack
-export async function get_linked_modpack_content(
-	instanceId: string,
-	cacheBehaviour?: CacheBehaviour,
-): Promise<ContentItem[]> {
-	const items = await apiClient.local.call(instanceContent.ListLinkedModpackContent, {
-		params: { id: instanceId },
-		query: { cacheBehaviour },
-	})
-	return adaptContentItems(items)
-}
-
-// Convert a list of dependencies into ContentItems with rich metadata
-export async function get_dependencies_as_content_items(
-	dependencies: Labrinth.Versions.v3.Dependency[],
-	cacheBehaviour?: CacheBehaviour,
-): Promise<ContentItem[]> {
-	const items = await apiClient.local.call(instanceContent.ListDependencyContentItems, {
-		body: {
-			dependencies: dependencies.map((dependency) => ({
-				project_id: null,
-				version_id: null,
-				file_name: null,
-				...dependency,
-			})),
-			cacheBehaviour,
-		},
-	})
-	return adaptContentItems(items)
-}
-
-/** The engine sends `null` for a field the UI's `ContentItem` leaves out. */
-export function adaptContentItems(items: ContentItem[] | ContentItemResponse[]): ContentItem[] {
-	return (items as ContentItem[]).map((item) => {
-		const embeddedMetadata = item.embedded_metadata
-		if (!embeddedMetadata?.icon_path) return item
-
-		return {
-			...item,
-			embedded_metadata: {
-				...embeddedMetadata,
-				icon_url: localFileUrl(embeddedMetadata.icon_path),
-			},
-		}
-	})
-}
+/** How the content tab shows this computer's content files: embedded icons load from disk. */
+export const localContentMapping: ContentItemMapping = { iconUrl: (path) => localFileUrl(path) }
 
 export async function get_full_path(instanceId: string): Promise<string> {
 	return await apiClient.local.call(instancePaths.getInstancePath, { params: { id: instanceId } })
@@ -265,7 +207,7 @@ export type {
 	SyncedOptionJoinResolution,
 	SyncedOptionsOverview,
 	SyncedServer,
-} from '@modrinth/api-client'
+} from '@amberite/contracts/app'
 
 export type InstanceScreenshot = ScreenshotFile & {
 	url: string
@@ -361,7 +303,7 @@ export async function move_screenshots(
 }
 
 export async function open_screenshot(key: ScreenshotKey): Promise<void> {
-	return await new ContractClient(localTransport).call(desktop.openFolder, {
+	return await apiClient.local.call(desktop.openFolder, {
 		body: { folder: 'screenshot', ...key },
 	})
 }
@@ -430,7 +372,7 @@ export async function set_command_history(contents: string): Promise<string> {
 }
 
 export async function open_synced_options_folder(): Promise<void> {
-	return await new ContractClient(localTransport).call(desktop.openFolder, {
+	return await apiClient.local.call(desktop.openFolder, {
 		body: { folder: 'synced_options' },
 	})
 }
@@ -465,7 +407,7 @@ export async function get_optimal_jre_key(instanceId: string): Promise<JavaVersi
 }
 
 export async function list(): Promise<GameInstance[]> {
-	return await withSyncedOptions(apiClient.local.call(instances.ListInstances))
+	return await withDesktopFields(apiClient.local.call(instances.ListInstances))
 }
 
 export async function check_installed(instanceId: string, projectId: string): Promise<boolean> {
@@ -538,17 +480,6 @@ export async function install_project_with_dependencies(
 	})
 }
 
-export async function switch_project_version_with_dependencies(
-	instanceId: string,
-	projectPath: string,
-	versionId: string,
-): Promise<string> {
-	return await apiClient.local.call(instanceContent.SwitchProjectVersion, {
-		params: { id: instanceId },
-		body: { project_path: projectPath, version_id: versionId },
-	})
-}
-
 // Add a project to an instance from a path + project_type
 // Returns a path to the new project file
 export async function add_project_from_path(
@@ -565,29 +496,6 @@ export async function add_project_from_path(
 export async function is_file_on_modrinth(projectPath: string): Promise<boolean> {
 	return await apiClient.local.call(instancePaths.checkFileOnModrinth, {
 		body: { path: projectPath },
-	})
-}
-
-// Toggle disabling a project
-export async function toggle_disable_project(
-	instanceId: string,
-	projectPath: string,
-	desiredEnabled?: boolean,
-): Promise<string> {
-	return await apiClient.local.call(instanceContent.ToggleProject, {
-		params: { id: instanceId },
-		body: { project_path: projectPath, desired_enabled: desiredEnabled },
-	})
-}
-
-export async function set_project_locked(
-	instanceId: string,
-	projectPath: string,
-	locked: boolean,
-): Promise<void> {
-	return await apiClient.local.call(instanceContent.SetProjectLocked, {
-		params: { id: instanceId },
-		body: { project_path: projectPath, locked },
 	})
 }
 
@@ -764,7 +672,7 @@ export type {
 	SharedInstancePublishPreview,
 	SharedInstanceUser,
 	SharedInstanceUsers,
-} from '@modrinth/api-client'
+} from '@amberite/contracts/engine'
 
 export async function can_current_user_use_shared_instances(): Promise<boolean> {
 	return await apiClient.local.call(localSharing.canUseSharedInstances)

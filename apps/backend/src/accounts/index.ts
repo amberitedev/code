@@ -12,7 +12,7 @@ import {
 	type TwoFactorCode,
 	type TwoFactorLogin,
 	type TwoFactorSetup,
-} from '@amberite/contracts'
+} from '@amberite/contracts/backend'
 import zxcvbn from 'zxcvbn'
 
 import {
@@ -121,7 +121,7 @@ async function throttle(request: Request, env: Env) {
 	if (result && result.count > 30)
 		throw new ApiError(
 			429,
-			'rate_limit',
+			'rate_limited',
 			'Too many authentication attempts. Try again in a minute.',
 		)
 }

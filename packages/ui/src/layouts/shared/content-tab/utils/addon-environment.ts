@@ -1,38 +1,47 @@
-import type { Archon, Labrinth } from '@modrinth/api-client'
+import type { ContentItem as EngineContentItem } from '@amberite/contracts/engine'
+import type { Labrinth } from '@modrinth/api-client'
 
 import type { ContentSide } from '../types'
 
-export function friendlyAddonName(addon: Archon.Content.v1.Addon): string {
-	if (addon.name) return addon.name
-	if (addon.manifest?.name) return addon.manifest.name
-	let cleanName = addon.filename
-	const lastDotIndex = cleanName.lastIndexOf('.')
-	if (lastDotIndex !== -1) cleanName = cleanName.substring(0, lastDotIndex)
-	return cleanName
+/** A server's content file, as the engine lists it. */
+type Addon = EngineContentItem
+
+export function friendlyAddonName(addon: {
+	file_name: string
+	project?: { title: string } | null
+	embedded_metadata?: { name?: string | null } | null
+}): string {
+	if (addon.project?.title) return addon.project.title
+	if (addon.embedded_metadata?.name) return addon.embedded_metadata.name
+	const lastDotIndex = addon.file_name.lastIndexOf('.')
+	return lastDotIndex === -1 ? addon.file_name : addon.file_name.substring(0, lastDotIndex)
 }
 
-export function getAddonEnvironment(
-	addon: Archon.Content.v1.Addon,
-): Labrinth.Projects.v3.Environment | undefined {
-	const versionEnvironment = addon.version?.environment
-	if (versionEnvironment && versionEnvironment !== 'unknown') return versionEnvironment
-	return addon.manifest?.environment ?? versionEnvironment ?? undefined
+export function getAddonEnvironment(addon: Addon): Labrinth.Projects.v3.Environment | undefined {
+	return addon.environment ?? undefined
 }
 
-export function hasDetectedEnvironment(addon: Archon.Content.v1.Addon) {
+export function hasDetectedEnvironment(addon: Addon) {
 	const environment = getAddonEnvironment(addon)
 	return environment !== undefined && environment !== 'unknown'
 }
 
-export function isPlayerOnlyContent(addon: Archon.Content.v1.Addon) {
-	return addon.kind === 'resourcepack' || addon.kind === 'shader'
+export function isPlayerOnlyContent(addon: Addon) {
+	return addon.project_type === 'resourcepack' || addon.project_type === 'shaderpack'
 }
 
-export function isEnabledForAnySide(addon: Archon.Content.v1.Addon) {
-	return (!isPlayerOnlyContent(addon) && !addon.disabled_server) || !addon.disabled_player
+export function isDisabledFor(addon: Addon, side: ContentSide) {
+	return side === 'server' ? !!addon.server?.disabled_server : !!addon.server?.disabled_player
 }
 
-export function isIncompatibleEnvironment(addon: Archon.Content.v1.Addon, side: ContentSide) {
+export function isEnabledForAnySide(addon: Addon) {
+	return (
+		(!isPlayerOnlyContent(addon) && !isDisabledFor(addon, 'server')) ||
+		!isDisabledFor(addon, 'player')
+	)
+}
+
+export function isIncompatibleEnvironment(addon: Addon, side: ContentSide) {
 	const environment = getAddonEnvironment(addon)
 	return side === 'server'
 		? environment === 'client_only' || environment === 'singleplayer_only'
@@ -41,7 +50,7 @@ export function isIncompatibleEnvironment(addon: Archon.Content.v1.Addon, side: 
 
 /** Falls back to the project's side requirements when the addon has no detected environment. */
 export function isRequiredEnvironment(
-	addon: Archon.Content.v1.Addon,
+	addon: Addon,
 	side: ContentSide,
 	project?: Pick<Labrinth.Projects.v2.Project, 'server_side' | 'client_side'>,
 ) {

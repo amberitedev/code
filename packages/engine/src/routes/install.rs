@@ -5,16 +5,13 @@
 use std::sync::Arc;
 
 use axum::extract::State;
-use contracts::{ApiError, Empty, Json, server::Req};
+use contracts::{ApiError, Empty, ErrorCode, Json, server::Req};
 use uuid::Uuid;
 
 use super::api_error;
 use crate::{
     Engine,
-    access::{
-        Access, Caller, Edit, EngineAccess, InstanceAccess, Owner, Permission,
-        View,
-    },
+    access::{Access, Caller, EngineAccess, InstanceAccess},
     endpoints::install::{
         AcceptPendingSharedInstanceInvite, AcceptSharedInstanceInvite,
         CancelInstallJob, DeleteSharedInstanceVersion, DismissInstallJob,
@@ -38,7 +35,7 @@ type JobResponse = Result<Json<InstallJobSnapshot>, ApiError>;
 
 pub async fn install_instance(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<InstallInstance>,
 ) -> JobResponse {
     install::install_existing_instance(instance.id, request.body.force, &engine)
@@ -49,7 +46,7 @@ pub async fn install_instance(
 
 pub async fn duplicate_instance(
     State(engine): State<Arc<Engine>>,
-    _: EngineAccess<Owner>,
+    _: EngineAccess,
     request: Req<DuplicateInstance>,
 ) -> JobResponse {
     install::duplicate_instance(request.params.id, &engine)
@@ -60,9 +57,15 @@ pub async fn duplicate_instance(
 
 pub async fn update_instance_content(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<UpdateInstanceContent>,
 ) -> JobResponse {
+    if request.body.is_empty() {
+        return Err(ApiError::new(
+            ErrorCode::InvalidInput,
+            "Choose the content to update.",
+        ));
+    }
     install::bulk_update_content(instance.id, request.body, &engine)
         .await
         .map(Json)
@@ -71,7 +74,7 @@ pub async fn update_instance_content(
 
 pub async fn get_shared_instance_update_preview(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<View>,
+    instance: InstanceAccess,
     _: Req<GetSharedInstanceUpdatePreview>,
 ) -> Result<Json<Option<SharedInstanceUpdatePreview>>, ApiError> {
     instance::get_shared_instance_update_preview(&engine, &instance.id)
@@ -82,7 +85,7 @@ pub async fn get_shared_instance_update_preview(
 
 pub async fn update_shared_instance(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     _: Req<UpdateSharedInstance>,
 ) -> JobResponse {
     instance::update_shared_instance(&engine, &instance.id)
@@ -93,7 +96,7 @@ pub async fn update_shared_instance(
 
 pub async fn get_shared_instance_history(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Owner>,
+    instance: InstanceAccess,
     _: Req<GetSharedInstanceHistory>,
 ) -> Result<Json<Vec<SharedInstanceHistoryEntry>>, ApiError> {
     instance::get_shared_instance_history(&engine, &instance.id)
@@ -104,7 +107,7 @@ pub async fn get_shared_instance_history(
 
 pub async fn restore_shared_instance_version(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Owner>,
+    instance: InstanceAccess,
     request: Req<RestoreSharedInstanceVersion>,
 ) -> JobResponse {
     instance::restore_shared_instance_version(
@@ -119,7 +122,7 @@ pub async fn restore_shared_instance_version(
 
 pub async fn delete_shared_instance_version(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Owner>,
+    instance: InstanceAccess,
     request: Req<DeleteSharedInstanceVersion>,
 ) -> Result<Empty, ApiError> {
     instance::delete_shared_instance_version(
@@ -134,7 +137,7 @@ pub async fn delete_shared_instance_version(
 
 pub async fn get_shared_instance_install_preview(
     State(engine): State<Arc<Engine>>,
-    _: EngineAccess<Owner>,
+    _: EngineAccess,
     request: Req<GetSharedInstanceInstallPreview>,
 ) -> Result<Json<SharedInstanceInstallPreview>, ApiError> {
     instance::get_shared_instance_install_preview(
@@ -149,7 +152,7 @@ pub async fn get_shared_instance_install_preview(
 
 pub async fn install_shared_instance(
     State(engine): State<Arc<Engine>>,
-    _: EngineAccess<Owner>,
+    _: EngineAccess,
     request: Req<InstallSharedInstance>,
 ) -> JobResponse {
     let install = request.body;
@@ -170,7 +173,7 @@ pub async fn install_shared_instance(
 
 pub async fn accept_shared_instance_invite(
     State(engine): State<Arc<Engine>>,
-    _: EngineAccess<Owner>,
+    _: EngineAccess,
     request: Req<AcceptSharedInstanceInvite>,
 ) -> Result<Empty, ApiError> {
     instance::accept_shared_instance_invite_for_install(
@@ -185,7 +188,7 @@ pub async fn accept_shared_instance_invite(
 
 pub async fn accept_pending_shared_instance_invite(
     State(engine): State<Arc<Engine>>,
-    _: EngineAccess<Owner>,
+    _: EngineAccess,
     request: Req<AcceptPendingSharedInstanceInvite>,
 ) -> Result<Empty, ApiError> {
     instance::accept_pending_shared_instance_invite(&engine, &request.params.id)
@@ -196,7 +199,7 @@ pub async fn accept_pending_shared_instance_invite(
 
 pub async fn get_shared_instance_invite_preview(
     State(engine): State<Arc<Engine>>,
-    _: EngineAccess<Owner>,
+    _: EngineAccess,
     request: Req<GetSharedInstanceInvitePreview>,
 ) -> Result<Json<SharedInstanceInviteInstallPreview>, ApiError> {
     instance::get_shared_instance_invite_install_preview(
@@ -210,7 +213,7 @@ pub async fn get_shared_instance_invite_preview(
 
 pub async fn get_shared_history_settings(
     State(engine): State<Arc<Engine>>,
-    _: EngineAccess<Owner>,
+    _: EngineAccess,
     _: Req<GetSharedHistorySettings>,
 ) -> Result<Json<SharedHistorySettings>, ApiError> {
     instance::get_shared_history_settings(&engine)
@@ -221,7 +224,7 @@ pub async fn get_shared_history_settings(
 
 pub async fn set_shared_history_kept(
     State(engine): State<Arc<Engine>>,
-    _: EngineAccess<Owner>,
+    _: EngineAccess,
     request: Req<SetSharedHistoryKept>,
 ) -> Result<Json<SharedHistorySettings>, ApiError> {
     instance::set_shared_history_kept(&engine, request.body.kept)
@@ -241,10 +244,7 @@ pub async fn list_install_jobs(
         .map_err(api_error)?;
     let mut visible = Vec::with_capacity(jobs.len());
     for job in jobs {
-        if require_job(&*access, &caller, &job, Permission::View)
-            .await
-            .is_ok()
-        {
+        if require_job(&*access, &caller, &job).await.is_ok() {
             visible.push(job);
         }
     }
@@ -257,15 +257,9 @@ pub async fn get_install_job(
     caller: Caller,
     request: Req<GetInstallJob>,
 ) -> JobResponse {
-    job(
-        &engine,
-        &*access,
-        &caller,
-        request.params.id,
-        Permission::View,
-    )
-    .await
-    .map(Json)
+    job(&engine, &*access, &caller, request.params.id)
+        .await
+        .map(Json)
 }
 
 pub async fn retry_install_job(
@@ -275,7 +269,7 @@ pub async fn retry_install_job(
     request: Req<RetryInstallJob>,
 ) -> JobResponse {
     let id = request.params.id;
-    job(&engine, &*access, &caller, id, Permission::Edit).await?;
+    job(&engine, &*access, &caller, id).await?;
     install::retry_job(id, &engine)
         .await
         .map(Json)
@@ -289,7 +283,7 @@ pub async fn pause_install_job(
     request: Req<PauseInstallJob>,
 ) -> JobResponse {
     let id = request.params.id;
-    job(&engine, &*access, &caller, id, Permission::Edit).await?;
+    job(&engine, &*access, &caller, id).await?;
     install::pause_job(id, &engine)
         .await
         .map(Json)
@@ -303,7 +297,7 @@ pub async fn resume_install_job(
     request: Req<ResumeInstallJob>,
 ) -> JobResponse {
     let id = request.params.id;
-    job(&engine, &*access, &caller, id, Permission::Edit).await?;
+    job(&engine, &*access, &caller, id).await?;
     install::resume_job(id, &engine)
         .await
         .map(Json)
@@ -317,7 +311,7 @@ pub async fn cancel_install_job(
     request: Req<CancelInstallJob>,
 ) -> JobResponse {
     let id = request.params.id;
-    job(&engine, &*access, &caller, id, Permission::Edit).await?;
+    job(&engine, &*access, &caller, id).await?;
     install::cancel_job(id, &engine)
         .await
         .map(Json)
@@ -331,7 +325,7 @@ pub async fn dismiss_install_job(
     request: Req<DismissInstallJob>,
 ) -> Result<Empty, ApiError> {
     let id = request.params.id;
-    job(&engine, &*access, &caller, id, Permission::Edit).await?;
+    job(&engine, &*access, &caller, id).await?;
     install::dismiss_job(id, &engine)
         .await
         .map(|()| Empty)
@@ -345,7 +339,7 @@ pub async fn get_install_job_support_details(
     request: Req<GetInstallJobSupportDetails>,
 ) -> Result<Json<String>, ApiError> {
     let id = request.params.id;
-    job(&engine, &*access, &caller, id, Permission::View).await?;
+    job(&engine, &*access, &caller, id).await?;
     install::job_support_details(id, &engine)
         .await
         .map(Json)
@@ -357,10 +351,9 @@ async fn job(
     access: &dyn Access,
     caller: &Caller,
     id: Uuid,
-    permission: Permission,
 ) -> Result<InstallJobSnapshot, ApiError> {
     let job = install::get_job(id, engine).await.map_err(api_error)?;
-    require_job(access, caller, &job, permission).await?;
+    require_job(access, caller, &job).await?;
     Ok(job)
 }
 
@@ -369,19 +362,10 @@ async fn require_job(
     access: &dyn Access,
     caller: &Caller,
     job: &InstallJobSnapshot,
-    permission: Permission,
 ) -> Result<(), ApiError> {
     let instance = job.instance_id.as_deref().or(match &job.target {
         InstallTarget::ExistingInstance { instance_id } => Some(instance_id),
         InstallTarget::NewInstance { instance_id } => instance_id.as_deref(),
     });
-    let permission = if instance.is_some() {
-        permission
-    } else {
-        Permission::Owner
-    };
-    access
-        .require(caller, instance, permission)
-        .await
-        .map(|_| ())
+    access.require(caller, instance).await
 }

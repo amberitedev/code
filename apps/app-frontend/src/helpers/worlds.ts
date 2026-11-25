@@ -2,7 +2,6 @@ import {
 	type DesyncServerMode,
 	type DisplayStatus,
 	type InstancePayload,
-	launch,
 	type ProtocolVersion,
 	type ServerPackStatus,
 	type ServerSource,
@@ -10,7 +9,8 @@ import {
 	type SingleplayerGameMode,
 	worlds as worldRoutes,
 	type WorldType,
-} from '@modrinth/api-client'
+} from '@amberite/contracts/engine'
+import { launch, library } from '@amberite/contracts/app'
 import type { GameVersion } from '@modrinth/ui'
 import { autoToHTML } from '@sfirew/minecraft-motd-parser'
 import dayjs from 'dayjs'
@@ -95,14 +95,14 @@ export async function get_recent_worlds(
 	limit: number,
 	displayStatuses?: DisplayStatus[],
 ): Promise<WorldWithInstance[]> {
-	const worlds = await apiClient.local.call(worldRoutes.ListRecentWorlds, {
+	const worlds = await apiClient.local.call(library.listRecentWorlds, {
 		query: { limit, display_statuses: displayStatuses ? JSON.stringify(displayStatuses) : null },
 	})
 	return worlds.map(withIconUrl)
 }
 
 export async function get_instance_worlds(instanceId: string): Promise<World[]> {
-	const worlds = await apiClient.local.call(worldRoutes.ListInstanceWorlds, {
+	const worlds = await apiClient.local.call(library.listInstanceWorlds, {
 		params: { id: instanceId },
 	})
 	return worlds.map(withIconUrl)

@@ -101,20 +101,13 @@
 					:highlighted-id="highlightedBackupId"
 					:show-copy-id-action="showCopyIdAction"
 					:show-debug-info="showDebugInfo"
-					:can-download="!!server.node && !!worldId"
+					:can-download="true"
 					@download="downloadBackup"
 					@restore="(backup) => restoreModal?.show(backup)"
 					@rename="(backup) => renameModal?.show(backup)"
 					@delete="(backup) => deleteModal?.show(backup)"
 				/>
 			</section>
-
-			<DeletedBackups
-				v-if="isSiteAdmin && deletedBackups.length > 0"
-				v-model:selected-ids="selectedDeletedIds"
-				:backups="deletedBackups"
-				:show-debug-info="showDebugInfo"
-			/>
 		</div>
 
 		<FloatingActionBar
@@ -171,7 +164,7 @@
 </template>
 
 <script setup lang="ts">
-import type { Archon } from '@modrinth/api-client'
+import { type Backup, core as coreRoutes } from '@amberite/contracts/core'
 import {
 	CalendarClockIcon,
 	DownloadIcon,
@@ -184,7 +177,7 @@ import {
 } from '@modrinth/assets'
 import { useMutation, useQueryClient } from '@tanstack/vue-query'
 import { useNow } from '@vueuse/core'
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 
 import { Button, type ButtonMenuOption, SplitButton } from '#ui/components/base/buttons'
 import EmptyState from '#ui/components/base/EmptyState.vue'
@@ -198,23 +191,15 @@ import BackupRenameModal from '#ui/components/servers/backups/BackupRenameModal.
 import BackupRestoreModal from '#ui/components/servers/backups/BackupRestoreModal.vue'
 import { defineMessages, useVIntl } from '#ui/composables/i18n'
 import { useServerBackupsQueue } from '#ui/composables/server-backups-queue'
-import { useServerWorldDownload } from '#ui/composables/server-download'
+import { useServerDownload } from '#ui/composables/server-download'
 import { useServerPermissions } from '#ui/composables/server-permissions'
-import {
-	injectFileDownload,
-	injectModrinthClient,
-	injectModrinthServerContext,
-	injectNotificationManager,
-} from '#ui/providers'
+import { injectModrinthServerContext, injectNotificationManager } from '#ui/providers'
 import { injectServerSettingsModal } from '#ui/providers/server-settings-modal'
 import { commonMessages } from '#ui/utils/common-messages'
 
-import DeletedBackups from './deleted-backups.vue'
 import HistoryTable from './history-table.vue'
 import SlotCard from './slot-card.vue'
 import { useFocusedBackup } from './use-focused-backup'
-
-type Backup = Archon.BackupsQueue.v1.BackupQueueBackup
 
 const props = defineProps<{
 	isServerRunning: boolean
@@ -332,33 +317,25 @@ const messages = defineMessages({
 
 const { formatMessage } = useVIntl()
 const now = useNow({ interval: 30_000 })
-const client = injectModrinthClient()
 const queryClient = useQueryClient()
 const { addNotification } = injectNotificationManager()
-const { server, serverId, worldId, busyReasons, isSiteAdmin } = injectModrinthServerContext()
+const { serverId, core, busyReasons } = injectModrinthServerContext()
 const settingsModal = injectServerSettingsModal(null)
-const fileDownload = injectFileDownload(null)
 const { canManageBackups, permissionDeniedMessage } = useServerPermissions()
 
 const {
 	query,
 	data,
 	backups,
-	deletedBackups,
 	options,
 	nextAutoBackupAt,
 	hasActiveCreate,
 	hasActiveRestore,
 	invalidate,
-} = useServerBackupsQueue(
-	computed(() => serverId),
-	worldId,
-)
+} = useServerBackupsQueue(serverId, core)
 
 const error = computed(() => query.error.value)
-const readyPending = computed(
-	() => !worldId.value || (query.data.value === undefined && !query.error.value),
-)
+const readyPending = computed(() => query.data.value === undefined && !query.error.value)
 
 const completedBackups = computed(() => backups.value.filter((b) => b.status === 'done'))
 const search = ref('')
@@ -369,14 +346,6 @@ const filteredBackups = computed(() => {
 })
 
 const selectedIds = ref<string[]>([])
-const selectedDeletedIds = ref<string[]>([])
-
-watch(selectedIds, (ids) => {
-	if (ids.length > 0) selectedDeletedIds.value = []
-})
-watch(selectedDeletedIds, (ids) => {
-	if (ids.length > 0) selectedIds.value = []
-})
 const selectedBackups = computed(() =>
 	completedBackups.value.filter((backup) => selectedIds.value.includes(backup.id)),
 )
@@ -421,17 +390,14 @@ const createDisabledReason = computed(() => {
 	return undefined
 })
 
-const { downloadWorldFiles } = useServerWorldDownload()
+const serverDownload = useServerDownload()
 const isDownloadingFiles = ref(false)
 
 async function downloadFiles() {
-	const node = server.value.node
-	const currentWorldId = worldId.value
-	if (!node || !currentWorldId || isDownloadingFiles.value) return
-
+	if (isDownloadingFiles.value) return
 	isDownloadingFiles.value = true
 	try {
-		await downloadWorldFiles(node.instance, currentWorldId)
+		await serverDownload.downloadWorld()
 	} finally {
 		isDownloadingFiles.value = false
 	}
@@ -441,7 +407,7 @@ const createMenuOptions = computed<ButtonMenuOption[]>(() => [
 	{
 		id: 'download-files',
 		label: formatMessage(commonMessages.downloadFilesButton),
-		disabled: !server.value.node || !worldId.value || isDownloadingFiles.value,
+		disabled: isDownloadingFiles.value,
 		action: downloadFiles,
 	},
 ])
@@ -456,47 +422,10 @@ const restoreDisabledReason = computed(() => {
 	return undefined
 })
 
-async function downloadBackup(backup: Backup) {
-	const node = server.value.node
-	const currentWorldId = worldId.value
-	if (!node || !currentWorldId) return
-
-	try {
-		if (fileDownload) {
-			await fileDownload.download({
-				type: 'server-backup',
-				filename: `${backup.name}.zip`,
-				serverId,
-				serverName: server.value.name,
-				nodeUrlHost: node.instance,
-				worldId: currentWorldId,
-				backupId: backup.id,
-			})
-			return
-		}
-
-		const { token } = await client.kyros.backups_v1.authorizeDownload(
-			node.instance,
-			currentWorldId,
-			backup.id,
-		)
-		const link = document.createElement('a')
-		link.href = client.kyros.backups_v1.getDownloadUrl(
-			node.instance,
-			currentWorldId,
-			backup.id,
-			token,
-		)
-		link.download = ''
-		link.rel = 'noopener'
-		link.click()
-	} catch (error) {
-		addNotification({
-			type: 'error',
-			title: formatMessage(commonMessages.downloadFailedLabel),
-			text: error instanceof Error ? error.message : String(error),
-		})
-	}
+function downloadBackup(backup: Backup) {
+	return serverDownload.download('server-backup', `${backup.name}.zip`, coreRoutes.DownloadBackup, {
+		params: { id: serverId, backup_id: backup.id },
+	})
 }
 
 const createModal = ref<InstanceType<typeof BackupCreateModal>>()
@@ -507,8 +436,11 @@ const deleteModal = ref<InstanceType<typeof BackupDeleteModal>>()
 const deleteMutation = useMutation({
 	mutationFn: (backupIds: string[]) =>
 		backupIds.length === 1
-			? client.archon.backups_queue_v1.delete(serverId, worldId.value!, backupIds[0])
-			: client.archon.backups_queue_v1.deleteMany(serverId, worldId.value!, backupIds),
+			? core.call(coreRoutes.DeleteBackup, { params: { id: serverId, backup_id: backupIds[0] } })
+			: core.call(coreRoutes.DeleteBackups, {
+					params: { id: serverId },
+					body: { backup_ids: backupIds },
+				}),
 	onSuccess: async () => {
 		await invalidate()
 		await queryClient.invalidateQueries({ queryKey: ['servers', 'detail', serverId] })

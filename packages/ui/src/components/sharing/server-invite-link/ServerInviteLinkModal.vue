@@ -42,7 +42,6 @@ import ServerInviteLinkContent from './ServerInviteLinkContent.vue'
 
 const props = defineProps<{
 	serverId: string
-	worldId: string | null
 	siteUrl: string
 }>()
 
@@ -62,9 +61,8 @@ const messages = defineMessages({
 })
 
 function show() {
-	const worldId = props.worldId
 	modal.value?.show()
-	if (worldId) invite.start({ serverId: props.serverId, worldId, siteUrl: props.siteUrl })
+	invite.start({ serverId: props.serverId, siteUrl: props.siteUrl })
 }
 
 function hide() {

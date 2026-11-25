@@ -1,4 +1,4 @@
-import type { Archon, UploadState } from '@modrinth/api-client'
+import type { UploadState } from '@modrinth/api-client'
 import type { Meta, StoryObj } from '@storybook/vue3-vite'
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
@@ -7,11 +7,8 @@ import ServerPanelAdmonitions from '../../components/servers/admonitions/ServerP
 import { defineMessage } from '../../composables/i18n'
 import type { FileOperation } from '../../layouts/shared/files-tab/types'
 import { provideModrinthServerContext } from '../../providers'
-import type {
-	CancelUploadHandler,
-	ModrinthServerContext,
-	ServerStats,
-} from '../../providers/server-context'
+import type { CancelUploadHandler } from '../../providers/server-context'
+import { storyServerContext } from './story-server-context'
 
 const meta = {
 	title: 'Servers/ServerPanelAdmonitions',
@@ -26,30 +23,6 @@ const meta = {
 				const router = useRouter()
 				onMounted(() => {
 					router.replace('/hosting/manage/demo-server/content')
-				})
-
-				const server = ref({
-					server_id: 'demo-server',
-					status: 'running',
-					upstream: null,
-				} as Archon.Servers.v0.Server)
-
-				const stats = ref<ServerStats>({
-					current: {
-						cpu_percent: 0,
-						ram_usage_bytes: 0,
-						ram_total_bytes: 1,
-						storage_usage_bytes: 0,
-						storage_total_bytes: 0,
-					},
-					past: {
-						cpu_percent: 0,
-						ram_usage_bytes: 0,
-						ram_total_bytes: 1,
-						storage_usage_bytes: 0,
-						storage_total_bytes: 0,
-					},
-					graph: { cpu: [], ram: [] },
 				})
 
 				const uploadState = ref<UploadState>({
@@ -82,46 +55,22 @@ const meta = {
 					},
 				])
 
-				const serverContext: ModrinthServerContext = {
-					get serverId() {
-						return 'demo-server'
-					},
-					worldId: ref(null),
-					server,
-					serverFull: computed(() => null),
-					currentUserPermissions: computed(() => 0),
-					isSiteAdmin: computed(() => false),
-					isConnected: ref(true),
-					isWsAuthIncorrect: ref(false),
-					powerState: ref('running'),
-					powerStateDetails: ref(undefined),
-					isServerRunning: computed(() => true),
-					stats,
-					uptimeSeconds: ref(0),
-					installProgressItems: ref<Archon.Websocket.v0.InstallProgressItem[]>([]),
-					installation: computed(() => null),
-					beginInstallation: () => {},
-					cancelOptimisticInstallation: () => {},
-					dismissInstallation: () => {},
-					busyReasons: computed(() => [
-						{ reason: defineMessage({ id: 's.bg', defaultMessage: 'Background task running' }) },
-					]),
-					fsAuth: ref(null),
-					fsOps: ref<Archon.Websocket.v0.FilesystemOperation[]>([]),
-					fsQueuedOps: ref<Archon.Websocket.v0.QueuedFilesystemOp[]>([]),
-					refreshFsAuth: async () => {},
-					uploadState,
-					cancelUpload: ref<CancelUploadHandler | null>(async () => {
-						await new Promise((resolve) => setTimeout(resolve, 1200))
-						uploadState.value = { ...uploadState.value, isUploading: false }
+				provideModrinthServerContext(
+					storyServerContext({
+						busyReasons: computed(() => [
+							{ reason: defineMessage({ id: 's.bg', defaultMessage: 'Background task running' }) },
+						]),
+						uploadState,
+						cancelUpload: ref<CancelUploadHandler | null>(async () => {
+							await new Promise((resolve) => setTimeout(resolve, 1200))
+							uploadState.value = { ...uploadState.value, isUploading: false }
+						}),
+						activeOperations: computed(() => fileOp.value),
+						dismissOperation: async (id) => {
+							fileOp.value = fileOp.value.filter((o) => o.id !== id)
+						},
 					}),
-					activeOperations: computed(() => fileOp.value),
-					dismissOperation: async (id) => {
-						fileOp.value = fileOp.value.filter((o) => o.id !== id)
-					},
-				}
-
-				provideModrinthServerContext(serverContext)
+				)
 				return {}
 			},
 			template: '<div style="max-width: 720px"><story /></div>',

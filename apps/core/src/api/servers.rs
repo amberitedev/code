@@ -6,29 +6,29 @@ use std::{
     sync::Arc,
 };
 
-use axum::extract::State;
+use axum::{extract::State, http::StatusCode};
 use contracts::{
     ApiError, Empty, ErrorCode, Json,
     core::{
-        Action, ChangePower, ChangeServer, CoreServer, CreateServer,
-        DeleteServer, GetServer, GetSetup, InstallLoader, InstallModpackFile,
-        JoinAddress, ListServers, PowerAction, ServerId, ServerNet,
-        ServerPower, ServerSetup, ShareServer, SharedServer, UpdateChannel,
+        Action, ChangePower, ChangeServer, CreateServer, DeleteServer, Flows,
+        GetServer, InstallLoader, InstallModpackFile, JoinAddress, ListServers,
+        Net, PowerAction, Server, ServerIcon, ServerId, ServerPower,
+        ShareServer, SharedServer, Status, Upstream, UpstreamKind,
     },
     server::Req,
 };
 use engine::{
     routes::api_error,
-    state::{ReleaseChannel, SharedInstanceRole},
+    state::{InstanceLink, SharedInstanceRole},
 };
 use futures::TryStreamExt;
 use tokio::io::AsyncWriteExt;
 
-use super::{CoreState, engine_mount, internal};
+use super::{CoreState, engine_mount, internal, ops};
 use crate::{
-    access::{Caller, Dangerous, Permission, activity, require_owner},
+    access::{Caller, Dangerous, activity, require_owner},
     servers::{
-        Phase, ServerError, launch,
+        Phase, ServerError,
         platform::{self, Platform},
         server_rows,
     },
@@ -56,22 +56,6 @@ impl From<ServerError> for ApiError {
     }
 }
 
-fn update_channel(channel: ReleaseChannel) -> UpdateChannel {
-    match channel {
-        ReleaseChannel::Release => UpdateChannel::Release,
-        ReleaseChannel::Beta => UpdateChannel::Beta,
-        ReleaseChannel::Alpha => UpdateChannel::Alpha,
-    }
-}
-
-fn release_channel(channel: UpdateChannel) -> ReleaseChannel {
-    match channel {
-        UpdateChannel::Release => ReleaseChannel::Release,
-        UpdateChannel::Beta => ReleaseChannel::Beta,
-        UpdateChannel::Alpha => ReleaseChannel::Alpha,
-    }
-}
-
 // Every route below checks that its caller owns the Core.
 
 /// Where players join a server from the internet: the router's grant when it gave a different
@@ -89,7 +73,7 @@ fn join_address(
     }
 }
 
-fn net(state: &CoreState, row: &server_rows::ServerRow) -> ServerNet {
+fn net(state: &CoreState, row: &server_rows::ServerRow) -> Net {
     let game_port = u16::try_from(row.port).unwrap_or_default();
     // Known while the server runs and its port is forwarded, or open on a public address.
     let outside = state
@@ -97,7 +81,7 @@ fn net(state: &CoreState, row: &server_rows::ServerRow) -> ServerNet {
         .report(&row.id)
         .and_then(|report| report.outside);
     let (ip, port) = join_address(state.network.join_ip(), game_port, outside);
-    ServerNet {
+    Net {
         ip: ip.map(|ip| ip.to_string()),
         port,
         outside: outside.map(|address| JoinAddress {
@@ -118,11 +102,11 @@ pub(super) async fn power_state(
         Some(Phase::Starting) => ServerPower::Starting,
         Some(Phase::Running | Phase::Unmanaged(_)) => ServerPower::Running,
         Some(Phase::Stopping) => ServerPower::Stopping,
-        Some(Phase::Installing) => ServerPower::Offline,
+        Some(Phase::Installing) => ServerPower::Stopped,
         None => match server_rows::last_outcome(&state.db, id).await? {
             Some(server_rows::Outcome::Crashed) => ServerPower::Crashed,
             Some(server_rows::Outcome::Killed) => ServerPower::Killed,
-            Some(server_rows::Outcome::Stopped) | None => ServerPower::Offline,
+            Some(server_rows::Outcome::Stopped) | None => ServerPower::Stopped,
         },
     })
 }
@@ -130,7 +114,7 @@ pub(super) async fn power_state(
 async fn server(
     state: &CoreState,
     row: server_rows::ServerRow,
-) -> Result<CoreServer, ApiError> {
+) -> Result<Server, ApiError> {
     let phase = state.servers.phase(&row.id);
     let power = power_state(state, &row.id, phase).await.map_err(internal)?;
     let owner_id: Option<String> =
@@ -139,12 +123,6 @@ async fn server(
             .await
             .map_err(internal)?
             .flatten();
-    let created_at: i64 =
-        sqlx::query_scalar("SELECT created_at FROM servers WHERE id = ?")
-            .bind(&row.id)
-            .fetch_one(&state.db)
-            .await
-            .map_err(internal)?;
     let eula_accepted = super::eula::accepted_at(&state.db)
         .await
         .map_err(internal)?
@@ -161,9 +139,35 @@ async fn server(
     .await?;
     let set = instance.applied_content_set;
     let installed = !set.game_version.is_empty();
-    Ok(CoreServer {
+    let upstream = match instance.link {
+        InstanceLink::ModrinthModpack {
+            project_id,
+            version_id,
+        } => Some(Upstream {
+            kind: UpstreamKind::Modpack,
+            project_id,
+            version_id,
+        }),
+        _ => None,
+    };
+    // The cached icon is named by its content's hash.
+    let icon = instance.instance.icon_path.as_deref().and_then(|path| {
+        let hash = std::path::Path::new(path).file_stem()?.to_str()?;
+        Some(ServerIcon {
+            hash: hash.to_owned(),
+            config: instance.icon_config.clone(),
+        })
+    });
+    Ok(Server {
         net: net(state, &row),
+        status: if phase == Some(Phase::Installing) {
+            Status::Installing
+        } else {
+            Status::Available
+        },
+        flows: Flows { intro: !installed },
         linked_instance,
+        shared_instance_id: instance.shared_instance.map(|share| share.id),
         reachability: state
             .network
             .report(&row.id)
@@ -172,17 +176,18 @@ async fn server(
             .servers
             .insight(&row.id)
             .map(|insight| insight.players.into_iter().collect()),
-        installing: phase == Some(Phase::Installing),
         memory_mb: u32::try_from(row.memory_mb).unwrap_or_default(),
-        update_channel: update_channel(instance.instance.update_channel),
-        id: row.id,
+        update_channel: instance.instance.update_channel,
+        server_id: row.id,
         name: row.name,
         owner_id,
-        loader: installed.then(|| set.loader.as_str().to_owned()),
+        loader: installed.then(|| set.loader.into()),
         loader_version: set.loader_version.filter(|_| installed),
-        game_version: installed.then_some(set.game_version),
-        power,
-        created_at,
+        mc_version: installed.then_some(set.game_version),
+        upstream,
+        icon,
+        power_state: power,
+        created_at: crate::access::at(row.created_at),
         eula_accepted,
     })
 }
@@ -191,10 +196,13 @@ pub async fn list(
     caller: Caller,
     State(state): State<Arc<CoreState>>,
     _: Req<ListServers>,
-) -> Result<Json<Vec<CoreServer>>, ApiError> {
+) -> Result<Json<Vec<Server>>, ApiError> {
     require_owner(&caller)?;
     let mut servers = Vec::new();
-    for row in server_rows::list(&state.db).await.map_err(internal)? {
+    for row in server_rows::list(&state.db, &state.engine)
+        .await
+        .map_err(internal)?
+    {
         servers.push(server(&state, row).await?);
     }
     Ok(Json(servers))
@@ -204,10 +212,10 @@ pub async fn get(
     caller: Caller,
     State(state): State<Arc<CoreState>>,
     Req { params, .. }: Req<GetServer>,
-) -> Result<Json<CoreServer>, ApiError> {
+) -> Result<Json<Server>, ApiError> {
     let id = params.id;
-    state.access.require(&caller, &id, Permission::View).await?;
-    let row = server_rows::get(&state.db, &id)
+    state.access.require(&caller, &id).await?;
+    let row = server_rows::get(&state.db, &state.engine, &id)
         .await
         .map_err(internal)?
         .ok_or(ServerError::NotFound(id))?;
@@ -250,15 +258,22 @@ pub async fn change(
     Req { params, body, .. }: Req<ChangeServer>,
 ) -> Result<Empty, ApiError> {
     let id = params.id;
-    state.access.require(&caller, &id, Permission::Edit).await?;
-    server_rows::get(&state.db, &id)
+    state.access.require(&caller, &id).await?;
+    server_rows::get(&state.db, &state.engine, &id)
         .await
         .map_err(internal)?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
     if let Some(name) = &body.name {
-        server_rows::set_name(&state.db, &id, server_name(name)?)
-            .await
-            .map_err(internal)?;
+        engine::instance::edit(
+            &state.engine,
+            &id,
+            engine::state::EditInstance {
+                name: Some(server_name(name)?.to_owned()),
+                ..Default::default()
+            },
+        )
+        .await
+        .map_err(api_error)?;
         activity::log(&state.db, &caller, Some(&id), Action::SettingsChanged)
             .await;
     }
@@ -267,7 +282,7 @@ pub async fn change(
             &state.engine,
             &id,
             engine::state::EditInstance {
-                update_channel: Some(release_channel(channel)),
+                update_channel: Some(channel),
                 ..Default::default()
             },
         )
@@ -279,13 +294,19 @@ pub async fn change(
     Ok(Empty)
 }
 
+/// A long op. What it cannot do at all, such as starting before the EULA is accepted or
+/// restarting a stopped server, is refused before it starts.
 pub async fn power(
     caller: Caller,
     State(state): State<Arc<CoreState>>,
     Req { params, body, .. }: Req<ChangePower>,
-) -> Result<Empty, ApiError> {
+) -> Result<StatusCode, ApiError> {
     let id = params.id;
-    state.access.require(&caller, &id, Permission::Edit).await?;
+    state.access.require(&caller, &id).await?;
+    server_rows::get(&state.db, &state.engine, &id)
+        .await
+        .map_err(internal)?
+        .ok_or_else(|| ServerError::NotFound(id.clone()))?;
     let action = match body.action {
         PowerAction::Start => Action::ServerStarted,
         PowerAction::Stop => Action::ServerStopped,
@@ -293,72 +314,74 @@ pub async fn power(
         PowerAction::Restart => Action::ServerRestarted,
     };
     match body.action {
-        PowerAction::Start => state.servers.start(&id).await?,
-        PowerAction::Stop => state.servers.stop(&id).await?,
-        PowerAction::Kill => state.servers.kill(&id).await?,
-        PowerAction::Restart => {
-            if state.servers.phase(&id).is_none() {
-                return Err(ServerError::NotRunning.into());
-            }
-            let (state, id) = (Arc::clone(&state), id.clone());
-            tokio::spawn(async move {
-                if let Err(error) = state.servers.restart(&id).await {
-                    tracing::warn!(server = %id, %error, "restart failed");
-                }
-            });
+        PowerAction::Start
+            if super::eula::accepted_at(&state.db)
+                .await
+                .map_err(internal)?
+                .is_none() =>
+        {
+            return Err(ServerError::Eula.into());
         }
+        PowerAction::Restart if state.servers.phase(&id).is_none() => {
+            return Err(ServerError::NotRunning.into());
+        }
+        _ => {}
     }
-    activity::log(&state.db, &caller, Some(&id), action).await;
-    Ok(Empty)
+    let work_state = Arc::clone(&state);
+    ops::start(&state, body.op, async move {
+        let state = work_state;
+        match body.action {
+            PowerAction::Start => state.servers.start(&id).await?,
+            PowerAction::Stop => state.servers.stop(&id).await?,
+            PowerAction::Kill => state.servers.kill(&id).await?,
+            PowerAction::Restart => state.servers.restart(&id).await?,
+        }
+        activity::log(&state.db, &caller, Some(&id), action).await;
+        Ok(())
+    })
 }
 
-/// Install a loader on a stopped server through the engine's install job for it, answering once
-/// the job is done. Its progress reaches the event socket as the job's events.
+/// A long op: install a loader on a stopped server through the engine's install job for it, held
+/// until the job is done. Its progress reaches the event socket as the job's events.
 pub async fn install(
     caller: Caller,
     State(state): State<Arc<CoreState>>,
     Req { params, body, .. }: Req<InstallLoader>,
-) -> Result<Empty, ApiError> {
+) -> Result<StatusCode, ApiError> {
     let id = params.id;
-    state.access.require(&caller, &id, Permission::Edit).await?;
-    let Some(loader) = platform::parse_loader(&body.loader) else {
-        return Err(ApiError::new(
-            ErrorCode::InvalidInput,
-            "Core installs Vanilla, Fabric, Quilt, Forge, NeoForge, and Paper.",
-        ));
-    };
+    state.access.require(&caller, &id).await?;
+    let loader = body.loader.into();
     if state.servers.engine_installing(&id).await? {
         return Err(ServerError::Installing.into());
     }
     let hold = state.servers.hold(&id)?;
-    server_rows::get(&state.db, &id)
+    server_rows::get(&state.db, &state.engine, &id)
         .await
         .map_err(internal)?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
-    if platform::platform(&state.engine, &id)
-        .await
-        .map_err(api_error)?
-        .is_some()
-    {
-        state.backups.pre_update(&id).await?;
-    }
     let platform = Platform {
         loader,
         game_version: body.game_version,
         loader_version: body.loader_version,
     };
-    // Not cancelled with the request: the job goes on, so the hold and the restore must too.
-    let engine = Arc::clone(&state.engine);
-    tokio::spawn(async move {
-        let installed = platform::install(&engine, hold.id(), &platform).await;
+    let work_state = Arc::clone(&state);
+    ops::start(&state, body.op, async move {
+        let state = work_state;
+        if platform::platform(&state.engine, &id)
+            .await
+            .map_err(api_error)?
+            .is_some()
+        {
+            state.backups.pre_update(&id).await?;
+        }
+        let installed =
+            platform::install(&state.engine, hold.id(), &platform).await;
         drop(hold);
-        installed
+        installed.map_err(api_error)?;
+        activity::log(&state.db, &caller, Some(&id), Action::ContentChanged)
+            .await;
+        Ok(())
     })
-    .await
-    .map_err(internal)?
-    .map_err(api_error)?;
-    activity::log(&state.db, &caller, Some(&id), Action::ContentChanged).await;
-    Ok(Empty)
 }
 
 /// Install the `.mrpack` in the body over the stopped server, in the background. It is staged in
@@ -369,7 +392,10 @@ pub async fn install_modpack_file(
     Req { params, body, .. }: Req<InstallModpackFile>,
 ) -> Result<Empty, ApiError> {
     let id = params.id;
-    state.access.require(&caller, &id, Permission::Edit).await?;
+    state.access.require(&caller, &id).await?;
+    if state.servers.engine_installing(&id).await? {
+        return Err(ServerError::Installing.into());
+    }
     let hold = state.servers.hold(&id)?;
     let dir = state.servers.paths().run(&id);
     tokio::fs::create_dir_all(&dir).await.map_err(internal)?;
@@ -418,7 +444,7 @@ pub async fn share(
     Req { params, body, .. }: Req<ShareServer>,
 ) -> Result<Json<SharedServer>, ApiError> {
     let id = params.id;
-    state.access.require(&caller, &id, Permission::Edit).await?;
+    state.access.require(&caller, &id).await?;
     let instance = engine::instance::get(&state.engine, &id)
         .await
         .map_err(api_error)?
@@ -487,9 +513,10 @@ pub async fn share(
 
 /// Publish the first version of a share made while the server installed, once it is let go.
 async fn publish_after_install(state: Arc<CoreState>, id: String) {
-    while state.servers.phase(&id) == Some(Phase::Installing) {
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-    }
+    state
+        .servers
+        .until(|servers| servers.phase(&id) != Some(Phase::Installing))
+        .await;
     let published = async {
         let core_id = crate::db::core_id(&state.db).await.map_err(internal)?;
         engine::instance::publish_shared_instance(
@@ -516,7 +543,7 @@ pub async fn delete(
     Req { params, .. }: Req<DeleteServer>,
 ) -> Result<Empty, ApiError> {
     let id = params.id;
-    server_rows::get(&state.db, &id)
+    server_rows::get(&state.db, &state.engine, &id)
         .await
         .map_err(internal)?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
@@ -599,67 +626,6 @@ async fn remove_server(
         tracing::warn!(server = %id, %error, "could not forget the share's history");
     }
     Ok(())
-}
-
-pub async fn setup(
-    caller: Caller,
-    State(state): State<Arc<CoreState>>,
-    Req { params, .. }: Req<GetSetup>,
-) -> Result<Json<ServerSetup>, ApiError> {
-    let id = params.id;
-    state.access.require(&caller, &id, Permission::View).await?;
-    let row = server_rows::get(&state.db, &id)
-        .await
-        .map_err(internal)?
-        .ok_or_else(|| ServerError::NotFound(id.clone()))?;
-    let (java_version, invocation) =
-        match platform::platform(&state.engine, &id)
-            .await
-            .map_err(api_error)?
-        {
-            Some(platform) => (
-                launch::java_major(&state.engine, &row, &platform.game_version)
-                    .await
-                    .ok(),
-                engine::server::server_command(&state.engine, &id)
-                    .await
-                    .ok()
-                    .map(|command| {
-                        launch::invocation(&launch::args(
-                            state.servers.paths(),
-                            &row,
-                            None,
-                            command.args,
-                        ))
-                    }),
-            ),
-            None => (None, None),
-        };
-    let shared_instance_id = engine::instance::get(&state.engine, &id)
-        .await
-        .map_err(api_error)?
-        .and_then(|instance| instance.shared_instance)
-        .map(|share| share.id);
-    // Best effort: what a push would change, as the share's latest version reads.
-    let shared_instance_needs_update = match &shared_instance_id {
-        Some(_) => engine::instance::get_shared_instance_publish_preview(
-            &state.engine,
-            &id,
-        )
-        .await
-        .ok()
-        .flatten()
-        .is_some_and(|preview| !preview.diffs.is_empty()),
-        None => false,
-    };
-    Ok(Json(ServerSetup {
-        java_version,
-        invocation,
-        shared_instance_id,
-        shared_instance_needs_update,
-        cpus: std::thread::available_parallelism()
-            .map_or(1, |cpus| cpus.get() as u32),
-    }))
 }
 
 #[cfg(test)]

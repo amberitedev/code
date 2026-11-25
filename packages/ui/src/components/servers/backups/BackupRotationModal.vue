@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Archon } from '@modrinth/api-client'
+import type { Backup } from '@amberite/contracts/core'
 import { TrashIcon, XIcon } from '@modrinth/assets'
 import { ref } from 'vue'
 
@@ -42,10 +42,10 @@ const messages = defineMessages({
 })
 
 const modal = ref<InstanceType<typeof NewModal>>()
-const backups = ref<Archon.BackupsQueue.v1.BackupQueueBackup[]>([])
+const backups = ref<Backup[]>([])
 const count = ref(0)
 
-function show(rotatedBackups: Archon.BackupsQueue.v1.BackupQueueBackup[], rotatedCount: number) {
+function show(rotatedBackups: Backup[], rotatedCount: number) {
 	backups.value = rotatedBackups
 	count.value = rotatedCount
 	modal.value?.show()

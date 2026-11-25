@@ -3,16 +3,24 @@
 //! storage after uploads, pulls and hourly. A key the backend no longer knows gets 410
 //! `core_removed`, and the Core un-pairs. The App lists the account's Cores, approves codes and
 //! gets the tickets it signs in to a Core with.
+//!
+//! A Core reaches shares with its key on `/core/shares`, acting for its owner: it writes the share
+//! of a server that follows no instance, and reads any share its owner reads, so a server can
+//! follow one.
 
+use chrono::{DateTime, Utc};
+use modrinth_content_management::icons::IconConfig;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    Auth, Empty, Endpoint, Json, Method, Upgrade, tickets::PublicKeys,
+use super::sharing::{
+    CreatedId, InstanceVersion, InstanceVersionId, NewInstanceVersion,
+    SharedInstanceId, SharedInstanceUpdate,
 };
+use crate::{Empty, Json, Raw, Upgrade, tickets::PublicKeys};
 
 /// Body of [`RequestSignInCode`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct NewSignInCode {
     pub core_id: String,
     /// The machine's name, shown to the owner before they approve.
@@ -25,7 +33,7 @@ pub struct NewSignInCode {
 
 /// A code for the owner to approve, and the key the Core uses once they do.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct SignInCode {
     pub code: String,
     pub key: String,
@@ -36,7 +44,7 @@ pub struct SignInCode {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum SignInStatus {
     Pending,
@@ -45,7 +53,7 @@ pub enum SignInStatus {
 
 /// The account that approved a Core's code.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct CoreOwner {
     pub id: String,
     pub username: String,
@@ -53,7 +61,7 @@ pub struct CoreOwner {
 
 /// Body of [`ReportState`]: everything the backend keeps about a Core.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct StateReport {
     pub version: String,
     /// Where the App reaches this Core on its own network, `https://ip:port`.
@@ -66,7 +74,7 @@ pub struct StateReport {
 
 /// Body of [`ReportStorage`]. Bytes throughout.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct StorageReport {
     /// This Core offers storage to other people's shares. Off, it holds only its owner's.
     pub enabled: bool,
@@ -84,7 +92,7 @@ pub struct StorageReport {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct HeldVersion {
     /// The version's hash.
     pub root: String,
@@ -94,7 +102,7 @@ pub struct HeldVersion {
 
 /// What the backend answers a [`StorageReport`] with.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct StorageAnswer {
     /// Versions to stop holding.
     #[serde(default)]
@@ -105,7 +113,7 @@ pub struct StorageAnswer {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct PullOrder {
     pub root: String,
     /// A pull ticket naming the source Core.
@@ -116,7 +124,7 @@ pub struct PullOrder {
 /// `share_id`, only while it still follows that share, so a late call never drops the players of
 /// a share it follows since.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ForgottenServer {
     pub server_id: String,
     pub share_id: Option<String>,
@@ -124,21 +132,21 @@ pub struct ForgottenServer {
 
 /// A sign-in code as the user typed it. The dash and case do not matter.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct EnteredCode {
     pub code: String,
 }
 
 /// A Core waiting for the account to approve its code.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct PendingCore {
     /// The machine's name, shown so the user can tell it is their Core.
     pub name: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ApprovedCore {
     pub id: String,
     pub name: String,
@@ -146,7 +154,7 @@ pub struct ApprovedCore {
 
 /// A Core signed in to the account.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ListedCore {
     pub id: String,
     pub name: String,
@@ -159,190 +167,90 @@ pub struct ListedCore {
     /// SHA-256 of the certificate this Core serves HTTPS with. The App trusts only this
     /// certificate for this Core. Null for a Core that does not serve HTTPS yet.
     pub cert_fingerprint: Option<String>,
-    pub created: String,
-    pub last_seen: String,
+    pub created: DateTime<Utc>,
+    pub last_seen: DateTime<Utc>,
 }
 
 /// A signed session ticket.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct CoreTicket {
     pub ticket: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct CoreId {
     pub id: String,
 }
 
-/// Core, signed out: a code to show its owner and the key it will use once they approve. Asking
-/// again replaces the code.
-pub struct RequestSignInCode;
-
-/// Core, signed out, with the key from [`RequestSignInCode`]: has the owner approved yet? 410
-/// `code_expired` once the code is gone.
-pub struct PollSignIn;
-
-/// Core, signed out: a WebSocket the backend sends `approved` on and closes once the code is
-/// approved. Then the Core asks [`PollSignIn`].
-pub struct WaitForSignIn;
-
-/// Core: its whole state, on start and whenever it changes. A report that changes nothing writes
-/// nothing.
-pub struct ReportState;
-
-/// Core: what its store holds, answered with what to drop and what to pull.
-pub struct ReportStorage;
-
-/// Core: a server was deleted or stopped following an instance, so its players and links go.
-pub struct ForgetPlayers;
-
-/// App: which machine shows this code, so the user can check before approving.
-pub struct LookUpSignInCode;
-
-/// App: approve the Core showing this code. It joins the account's Cores and its key starts
-/// working.
-pub struct ApproveSignInCode;
-
-/// App: the account's Cores.
-pub struct ListCores;
-
-/// App: a session ticket for one of the account's Cores.
-pub struct IssueTicket;
-
-/// App: the owner takes a Core off the account. Its key stops working at once.
-pub struct RemoveCore;
-
-/// The backend's ticket keys. A static file, refetched daily and when a ticket names an unknown
-/// key.
-pub struct Keys;
-
-impl Endpoint for RequestSignInCode {
-    const METHOD: Method = Method::Post;
-    const PATH: &'static str = "/core/auth/code";
-    const AUTH: Auth = Auth::None;
-    type Params = ();
-    type Query = ();
-    type Body = Json<NewSignInCode>;
-    type Response = Json<SignInCode>;
+/// Body of [`CreateServerShare`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+pub struct NewServerShare {
+    pub name: String,
+    /// The server whose share this is.
+    pub server_id: String,
 }
 
-impl Endpoint for PollSignIn {
-    const METHOD: Method = Method::Post;
-    const PATH: &'static str = "/core/auth/poll";
-    const AUTH: Auth = Auth::CoreKey;
-    type Params = ();
-    type Query = ();
-    type Body = Empty;
-    type Response = Json<SignInStatus>;
-}
+crate::endpoints! {
+    /// The backend's Core routes.
+    group cores;
 
-impl Endpoint for WaitForSignIn {
-    const METHOD: Method = Method::Get;
-    const PATH: &'static str = "/core/auth/wait";
-    const AUTH: Auth = Auth::CoreKey;
-    type Params = ();
-    type Query = ();
-    type Body = Empty;
-    type Response = Upgrade<String, ()>;
-}
-
-impl Endpoint for ReportState {
-    const METHOD: Method = Method::Post;
-    const PATH: &'static str = "/core/state";
-    const AUTH: Auth = Auth::CoreKey;
-    type Params = ();
-    type Query = ();
-    type Body = Json<StateReport>;
-    type Response = Empty;
-}
-
-impl Endpoint for ReportStorage {
-    const METHOD: Method = Method::Post;
-    const PATH: &'static str = "/core/storage";
-    const AUTH: Auth = Auth::CoreKey;
-    type Params = ();
-    type Query = ();
-    type Body = Json<StorageReport>;
-    type Response = Json<StorageAnswer>;
-}
-
-impl Endpoint for ForgetPlayers {
-    const METHOD: Method = Method::Delete;
-    const PATH: &'static str = "/core/players";
-    const AUTH: Auth = Auth::CoreKey;
-    type Params = ();
-    type Query = ();
-    type Body = Json<ForgottenServer>;
-    type Response = Empty;
-}
-
-impl Endpoint for LookUpSignInCode {
-    const METHOD: Method = Method::Post;
-    const PATH: &'static str = "/cores/approve/lookup";
-    const AUTH: Auth = Auth::Account;
-    type Params = ();
-    type Query = ();
-    type Body = Json<EnteredCode>;
-    type Response = Json<PendingCore>;
-}
-
-impl Endpoint for ApproveSignInCode {
-    const METHOD: Method = Method::Post;
-    const PATH: &'static str = "/cores/approve";
-    const AUTH: Auth = Auth::Account;
-    type Params = ();
-    type Query = ();
-    type Body = Json<EnteredCode>;
-    type Response = Json<ApprovedCore>;
-}
-
-impl Endpoint for ListCores {
-    const METHOD: Method = Method::Get;
-    const PATH: &'static str = "/cores";
-    const AUTH: Auth = Auth::Account;
-    type Params = ();
-    type Query = ();
-    type Body = Empty;
-    type Response = Json<Vec<ListedCore>>;
-}
-
-impl Endpoint for IssueTicket {
-    const METHOD: Method = Method::Post;
-    const PATH: &'static str = "/cores/{id}/ticket";
-    const AUTH: Auth = Auth::Account;
-    type Params = CoreId;
-    type Query = ();
-    type Body = Empty;
-    type Response = Json<CoreTicket>;
-}
-
-impl Endpoint for RemoveCore {
-    const METHOD: Method = Method::Delete;
-    const PATH: &'static str = "/cores/{id}";
-    const AUTH: Auth = Auth::Account;
-    type Params = CoreId;
-    type Query = ();
-    type Body = Empty;
-    type Response = Empty;
-}
-
-impl Endpoint for Keys {
-    const METHOD: Method = Method::Get;
-    const PATH: &'static str = "/core/keys.json";
-    const AUTH: Auth = Auth::None;
-    type Params = ();
-    type Query = ();
-    type Body = Empty;
-    type Response = Json<PublicKeys>;
+    /// Core, signed out: a code to show its owner and the key it will use once they approve. Asking
+    /// again replaces the code.
+    RequestSignInCode: Post "/core/auth/code", None, (), (), Json<NewSignInCode> => Json<SignInCode>;
+    /// Core, signed out, with the key from [`RequestSignInCode`]: has the owner approved yet? 410
+    /// `code_expired` once the code is gone.
+    PollSignIn: Post "/core/auth/poll", CoreKey, (), (), Empty => Json<SignInStatus>;
+    /// Core, signed out: a WebSocket the backend sends `approved` on and closes once the code is
+    /// approved. Then the Core asks [`PollSignIn`].
+    WaitForSignIn: Get "/core/auth/wait", CoreKey, (), (), Empty => Upgrade<String, ()>;
+    /// Core: its whole state, on start and whenever it changes. A report that changes nothing writes
+    /// nothing.
+    ReportState: Post "/core/state", CoreKey, (), (), Json<StateReport> => Empty;
+    /// Core: what its store holds, answered with what to drop and what to pull.
+    ReportStorage: Post "/core/storage", CoreKey, (), (), Json<StorageReport> => Json<StorageAnswer>;
+    /// Core: a server was deleted or stopped following an instance, so its players and links go.
+    ForgetPlayers: Delete "/core/players", CoreKey, (), (), Json<ForgottenServer> => Empty;
+    /// Core: the share of its server `server_id`, owned by its owner. The server's existing share is
+    /// answered when it has one.
+    CreateServerShare: Post "/core/shares", CoreKey, (), (), Json<NewServerShare> => Json<CreatedId>;
+    /// Core: rename one of its servers' shares.
+    RenameServerShare: Patch "/core/shares/{id}", CoreKey, SharedInstanceId, (), Json<SharedInstanceUpdate> => Empty;
+    /// Core: delete one of its servers' shares, even while its owner may not share.
+    DeleteServerShare: Delete "/core/shares/{id}", CoreKey, SharedInstanceId, (), Empty => Empty;
+    /// Core: upload an image as one of its servers' shares' icon.
+    SetServerShareIcon: Put "/core/shares/{id}/icon", CoreKey, SharedInstanceId, (), Raw => Empty;
+    /// Core: set an icon editor icon on one of its servers' shares.
+    SetServerShareGeneratedIcon: Put "/core/shares/{id}/icon/generated", CoreKey, SharedInstanceId, (), Json<IconConfig> => Empty;
+    /// Core: remove the icon of one of its servers' shares.
+    RemoveServerShareIcon: Delete "/core/shares/{id}/icon", CoreKey, SharedInstanceId, (), Empty => Empty;
+    /// Core: push a version of one of its servers' shares.
+    CreateServerShareVersion: Post "/core/shares/{id}/versions", CoreKey, SharedInstanceId, (), Json<NewInstanceVersion> => Json<InstanceVersion>;
+    /// Core: the latest version of a share its owner reads, without the owner's extras.
+    GetLatestShareVersion: Get "/core/shares/{id}/versions", CoreKey, SharedInstanceId, (), Empty => Json<InstanceVersion>;
+    /// Core: one version of a share its owner reads, without the owner's extras.
+    GetShareVersion: Get "/core/shares/{id}/versions/{version}", CoreKey, InstanceVersionId, (), Empty => Json<InstanceVersion>;
+    /// App: which machine shows this code, so the user can check before approving.
+    LookUpSignInCode: Post "/cores/approve/lookup", Account, (), (), Json<EnteredCode> => Json<PendingCore>;
+    /// App: approve the Core showing this code. It joins the account's Cores and its key starts
+    /// working.
+    ApproveSignInCode: Post "/cores/approve", Account, (), (), Json<EnteredCode> => Json<ApprovedCore>;
+    /// App: the account's Cores.
+    ListCores: Get "/cores", Account, (), (), Empty => Json<Vec<ListedCore>>;
+    /// App: a session ticket for one of the account's Cores.
+    IssueTicket: Post "/cores/{id}/ticket", Account, CoreId, (), Empty => Json<CoreTicket>;
+    /// App: the owner takes a Core off the account. Its key stops working at once.
+    RemoveCore: Delete "/cores/{id}", Account, CoreId, (), Empty => Empty;
+    /// The backend's ticket keys. A static file, refetched daily and when a ticket names an unknown
+    /// key.
+    Keys: Get "/core/keys.json", None, (), (), Empty => Json<PublicKeys>;
 }
 
 #[cfg(test)]
 pub(crate) fn ts() -> String {
     use ts_rs::TS;
-
-    use crate::ts::endpoint;
 
     let cfg = crate::ts::config();
     let declarations = [
@@ -362,26 +270,9 @@ pub(crate) fn ts() -> String {
         ListedCore::decl(&cfg),
         CoreTicket::decl(&cfg),
         CoreId::decl(&cfg),
+        NewServerShare::decl(&cfg),
     ]
     .map(|declaration| format!("\nexport {declaration}\n"))
     .concat();
-    let endpoints = [
-        ("RequestSignInCode", endpoint::<RequestSignInCode>()),
-        ("PollSignIn", endpoint::<PollSignIn>()),
-        ("WaitForSignIn", endpoint::<WaitForSignIn>()),
-        ("ReportState", endpoint::<ReportState>()),
-        ("ReportStorage", endpoint::<ReportStorage>()),
-        ("ForgetPlayers", endpoint::<ForgetPlayers>()),
-        ("LookUpSignInCode", endpoint::<LookUpSignInCode>()),
-        ("ApproveSignInCode", endpoint::<ApproveSignInCode>()),
-        ("ListCores", endpoint::<ListCores>()),
-        ("IssueTicket", endpoint::<IssueTicket>()),
-        ("RemoveCore", endpoint::<RemoveCore>()),
-        ("Keys", endpoint::<Keys>()),
-    ]
-    .map(|(name, endpoint)| format!("\t{name}: {endpoint},\n"))
-    .concat();
-    format!(
-        "{declarations}\n/** The backend's Core routes. */\nexport const cores = {{\n{endpoints}}}\n"
-    )
+    declarations + &ts_module().ts(false)
 }

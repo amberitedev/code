@@ -1,10 +1,10 @@
+import type { StoreHost } from '@amberite/contracts/protocol'
 import type {
 	ExternalFile,
-	StoreHost,
 	StoredShare,
 	VersionDownload,
 	VersionUpload,
-} from '@amberite/contracts'
+} from '@amberite/contracts/backend'
 
 import { isPrivateHost } from '../common/address'
 import { ApiError } from '../common/http'
@@ -15,8 +15,7 @@ import { fetchTicket, storeTicket } from '../cores/tickets'
 // tickets that let Apps talk to stores. The backend never
 // carries a file byte: it keeps manifests in R2, one row per version in D1, and signs tickets.
 
-export const MAX_VERSION_FILES = 4096
-/** The manifest request body; 4,096 entries with keys are about 1 MB. */
+/** The manifest request body; `MAX_VERSION_FILES` entries with keys are about 1 MB. */
 export const MAX_MANIFEST_BODY = 4 * 1024 * 1024
 /** Ready versions a share keeps, files included. */
 export const KEPT_VERSIONS = 5
@@ -177,20 +176,16 @@ export async function place(
 			)
 		: new Set<string>()
 	const kept = held.filter((id) => offering.has(id))
-	const eligible = await eligibleCores(env)
-	const others = eligible.filter((core) => core.owner_id !== ownerId)
+	// Read only when a copy needs a new Core, so a push whose copies stay put reads no other Core.
+	let eligible: Promise<Candidate[]> | undefined
+	const candidates = async (mine: boolean) =>
+		(await (eligible ??= eligibleCores(env))).filter((core) => (core.owner_id === ownerId) === mine)
 	// With no one else's Core to take it, the owner's own Core that offers storage does, as the
 	// pool's first Core must for its owner; a later push moves it once another Core can.
 	const home =
-		server ??
-		kept[0] ??
-		draw(others, []) ??
-		draw(
-			eligible.filter((core) => core.owner_id === ownerId),
-			[],
-		)
+		server ?? kept[0] ?? draw(await candidates(false), []) ?? draw(await candidates(true), [])
 	if (!home || !members) return { home, replica: null }
-	return { home, replica: kept.find((id) => id !== home) ?? draw(others, [home]) }
+	return { home, replica: kept.find((id) => id !== home) ?? draw(await candidates(false), [home]) }
 }
 
 /** A Core as `cores` holds it: one that does not serve HTTPS yet has no fingerprint. */

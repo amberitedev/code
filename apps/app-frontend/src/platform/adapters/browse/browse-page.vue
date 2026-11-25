@@ -128,7 +128,6 @@ const {
 	isFromWorlds,
 	isServerContext,
 	isSetupServerContext,
-	effectiveServerWorldId,
 	serverContextServerData,
 	serverContextPlatform,
 	serverContentProjectIds,
@@ -411,7 +410,6 @@ async function initInstanceContext() {
 		queryI: route.query.i,
 		queryAi: route.query.ai,
 		querySid: route.query.sid,
-		queryWid: route.query.wid,
 		queryFrom: route.query.from,
 	})
 	await Promise.all([
@@ -778,7 +776,6 @@ const projectTypeTabSuffix = computed(() => {
 	if (route.query.ai) params.ai = route.query.ai
 	if (route.query.from) params.from = route.query.from
 	if (route.query.sid) params.sid = route.query.sid
-	if (effectiveServerWorldId.value) params.wid = effectiveServerWorldId.value
 	if (showServerEnvironment.value && serverEnvironment.value) params.env = serverEnvironment.value
 
 	const queryString = new URLSearchParams(params as Record<string, string>).toString()
@@ -892,7 +889,7 @@ const installContext = computed(() => {
 			serverId: serverIdQuery.value,
 			upstream: serverContextServerData.value.upstream,
 			iconSrc: null as string | null,
-			isMedal: serverContextServerData.value.is_medal,
+			isMedal: false,
 			backUrl: serverBackUrl.value,
 			backLabel: serverBackLabel.value,
 			heading: serverBrowseHeading.value,
@@ -1339,10 +1336,9 @@ const searchState = useBrowseSearch({
 	environmentOverride: serverEnvironmentOverride,
 	search,
 	peekSearch,
-	persistentQueryParams: ['i', 'ai', 'shi', 'env', 'sid', 'wid', 'from'],
+	persistentQueryParams: ['i', 'ai', 'shi', 'env', 'sid', 'from'],
 	getExtraQueryParams: () => ({
 		sid: serverIdQuery.value || undefined,
-		wid: effectiveServerWorldId.value || undefined,
 		ai: instanceHideInstalled.value ? 'true' : undefined,
 		shi: serverHideInstalled.value ? 'true' : undefined,
 		env: (showServerEnvironment.value && serverEnvironment.value) || undefined,

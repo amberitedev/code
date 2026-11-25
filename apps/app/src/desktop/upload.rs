@@ -1,4 +1,4 @@
-//! Serves `UploadLocalFile` of `crate::server::endpoints::ops`: large files go from disk to the
+//! Serves `UploadLocalFile` of `crate::local_api::endpoints::ops`: large files go from disk to the
 //! server without passing through the page.
 
 use std::{
@@ -9,22 +9,21 @@ use std::{
 use axum::{Router, extract::State, http::StatusCode};
 use contracts::{
     ApiError, ErrorCode,
-    server::{Req, route},
+    server::{Mount, Req},
 };
 use engine::{
     routes::api_error,
     upload::{LocalFileUpload, upload_local_file},
 };
 
-use crate::server::{
+use crate::local_api::{
     AppState,
     endpoints::ops::{OpResponse, UploadLocalFile},
     ops::Ops,
 };
 
 pub fn routes() -> Router<AppState> {
-    let (path, upload) = route::<UploadLocalFile, _, _, _>(upload);
-    Router::new().route(path, upload)
+    Router::new().endpoint::<UploadLocalFile, _, _>(upload)
 }
 
 async fn upload(

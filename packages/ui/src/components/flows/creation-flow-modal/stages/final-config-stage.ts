@@ -34,11 +34,7 @@ export const stageConfig: StageConfigInput<CreationFlowContextValue> = {
 		icon: LeftArrowIcon,
 		disabled: ctx.loading.value,
 		onClick: () => {
-			if (ctx.setupType.value === 'curseforge') {
-				ctx.modal.value?.setStage('curseforge')
-			} else if (!ctx.onBack || ctx.onBack() === false) {
-				ctx.modal.value?.prevStage()
-			}
+			if (!ctx.onBack || ctx.onBack() === false) ctx.modal.value?.prevStage()
 		},
 	}),
 	rightButtonConfig: (ctx) => {

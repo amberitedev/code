@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 /// The error body of every route we own.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ApiError {
     pub error: ErrorCode,
     /// Ready to show.
@@ -21,7 +21,7 @@ impl ApiError {
 /// Every error code of the backend, Cores, stores, the engine and the App. The engine's keep the
 /// exact strings `engine::error::error_code` returns, which the App's helpers switch on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
     InvalidInput,
@@ -44,18 +44,14 @@ pub enum ErrorCode {
     InvalidAddress,
     MailError,
     NoStorage,
-    RateLimit,
     TicketsUnavailable,
     TooManyAttempts,
-    TooManyRequests,
-    UnsupportedOperation,
     UsernameTaken,
     WeakPassword,
     WrongCode,
     Blacklisted,
     CoreNotFound,
     CurrentVersion,
-    EndpointNotFound,
     IconNotFound,
     InstanceNotFound,
     InviteInvalid,
@@ -145,7 +141,6 @@ pub enum ErrorCode {
 
     EngineUnavailable,
     ExternalSaveFailed,
-    SignInCancelled,
     Cancelled,
 
     #[serde(other)]
@@ -205,7 +200,6 @@ impl ErrorCode {
             Self::NotFound
             | Self::WrongCode
             | Self::CoreNotFound
-            | Self::EndpointNotFound
             | Self::IconNotFound
             | Self::InstanceNotFound
             | Self::InviteInvalid
@@ -223,7 +217,6 @@ impl ErrorCode {
             | Self::PoolPushInFlight
             | Self::SharedInstanceOwnerBehind
             | Self::LoginCanceled
-            | Self::SignInCancelled
             | Self::Cancelled => 409,
             Self::CodeExpired
             | Self::CoreRemoved
@@ -234,13 +227,11 @@ impl ErrorCode {
             | Self::PoolTooLarge
             | Self::SharedInstanceLimitReached => 413,
             Self::RateLimited
-            | Self::RateLimit
             | Self::TooManyAttempts
-            | Self::TooManyRequests
             | Self::EgressSpent
             | Self::PoolEgressSpent
             | Self::MinecraftAuthRateLimited => 429,
-            Self::Unsupported | Self::UnsupportedOperation => 501,
+            Self::Unsupported => 501,
             Self::NetworkError
             | Self::ModrinthApi
             | Self::SharedInstancesApiError

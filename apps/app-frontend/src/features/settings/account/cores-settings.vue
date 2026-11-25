@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import {
 	core as coreRoutes,
-	ProtocolMismatch,
 	type StorageSettings,
 	type StorageStatus,
-} from '@modrinth/api-client'
+} from '@amberite/contracts/core'
+import { ProtocolMismatch } from '@modrinth/api-client'
 import { InfoIcon, PlusIcon, UnlinkIcon, UpdatedIcon } from '@modrinth/assets'
 import {
 	Admonition,
@@ -27,7 +27,7 @@ import { computed, ref, watch } from 'vue'
 
 import AccountRequired from '@/features/cores/account-required.vue'
 import { coresQueryKey, injectCoreActions, useCores } from '@/features/cores/use-cores'
-import { coreOffline, useServers } from '@/features/servers/linked-servers'
+import { isCoreOffline } from '@/features/servers/linked-servers'
 import { useSharedStorage } from '@/features/settings/sharing/use-shared-storage'
 
 // One of the account's Cores, picked at the top: the storage it lends the pool and its daily
@@ -45,7 +45,6 @@ const formatBytes = useFormatBytes()
 // Kept fresh from the App root, so this page has its answer the moment it opens.
 const { cores, data, isFetching, error, refetch } = useCores()
 const { openAddCore } = injectCoreActions()
-const { data: servers } = useServers()
 const { data: shared } = useSharedStorage()
 
 const ADD = 'add'
@@ -61,14 +60,10 @@ function pick(id: string | undefined) {
 	if (id && id !== ADD) selectedId.value = id
 }
 
-/** Whether the Core answered the last server check. Undefined before the first check finishes. */
-const online = computed(() => {
-	if (!core.value) return undefined
-	if (coreOffline.value) return false
-	return servers.value ? !servers.value.offline_cores?.includes(core.value.id) : undefined
-})
+/** Whether the Core's event socket is open. Undefined before there is a Core. */
+const online = computed(() => (core.value ? !isCoreOffline(core.value.id) : undefined))
 
-/** The Core an update was installed on. Its storage is asked for again until it answers. */
+/** The Core an update was installed on, whose update button stays off. */
 const updatedId = ref<string>()
 const storageKey = computed(() => ['core-storage', core.value?.id])
 const { data: storage, error: storageError } = useQuery({
@@ -77,8 +72,10 @@ const { data: storage, error: storageError } = useQuery({
 	enabled: computed(() => !!core.value && online.value === true),
 	staleTime: 30_000,
 	retry: false,
-	refetchInterval: (query) =>
-		updatedId.value === core.value?.id && query.state.error ? 5_000 : false,
+})
+// A Core back online, such as after an update, may answer differently.
+watch(online, (now, before) => {
+	if (now && before === false) void queryClient.invalidateQueries({ queryKey: storageKey.value })
 })
 const mismatch = computed(() =>
 	storageError.value instanceof ProtocolMismatch ? storageError.value : undefined,
@@ -178,7 +175,7 @@ async function remove() {
 	if (!removed || removing.value) return
 	removing.value = true
 	try {
-		await client.archon.cores_v1.revoke(removed)
+		await client.cores.revoke(removed)
 		selectedId.value = undefined
 	} catch (cause) {
 		console.error('Failed to remove Core', cause)

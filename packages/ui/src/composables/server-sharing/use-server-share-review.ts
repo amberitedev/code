@@ -1,3 +1,4 @@
+import { core as coreRoutes } from '@amberite/contracts/core'
 import { ModrinthApiError } from '@modrinth/api-client'
 import {
 	useIsFetching,
@@ -11,18 +12,12 @@ import { computed, onScopeDispose, type Ref, ref, watch } from 'vue'
 import type ServerSharePushModal from '#ui/components/servers/sharing/ServerSharePushModal.vue'
 import { defineMessages, useVIntl } from '#ui/composables/i18n'
 import { useServerPermissions } from '#ui/composables/server-permissions'
-import { serverKeys } from '#ui/composables/server-queries'
-import {
-	injectAuth,
-	injectModrinthClient,
-	injectModrinthServerContext,
-	injectNotificationManager,
-} from '#ui/providers'
+import { serverKeys, shareHistoryKey } from '#ui/composables/server-queries'
+import { injectAuth, injectModrinthServerContext, injectNotificationManager } from '#ui/providers'
 
 import { serverShareableFilesQueryOptions, serverShareDiffQueryOptions } from './query-options'
 
 export type ServerShareActionTarget = {
-	worldId: string
 	userId: string | undefined
 	configPaths: string[]
 	/** Configs the share carries that this push stops sharing. */
@@ -37,27 +32,22 @@ export function useServerShareReview<Action extends string = 'push'>(options?: {
 	execute: (action: Action, target: ServerShareActionTarget) => Promise<void>
 	disabled?: Ref<boolean>
 }) {
-	const client = injectModrinthClient()
 	const auth = injectAuth()
-	const { serverId, worldId, serverFull, busyReasons } = injectModrinthServerContext()
+	const { serverId, core, server, busyReasons, isServerRunning } = injectModrinthServerContext()
 	const { canSetup } = useServerPermissions()
 	const { handleError } = injectNotificationManager()
 	const { formatMessage } = useVIntl()
 	const queryClient = useQueryClient()
 	const diffModal = ref<InstanceType<typeof ServerSharePushModal>>()
 	const previewOpen = ref(false)
-	const sharedInstanceId = computed(
-		() =>
-			serverFull.value?.worlds.find((world) => world.id === worldId.value)?.content
-				?.shared_instance_id,
-	)
+	const sharedInstanceId = computed(() => server.value?.shared_instance_id)
 	let disposed = false
 	onScopeDispose(() => {
 		disposed = true
 	})
 	const previewQuery = useQuery(
 		computed(() => ({
-			...serverShareDiffQueryOptions(client, serverId, worldId.value ?? '', auth.user.value?.id),
+			...serverShareDiffQueryOptions(core, serverId, isServerRunning.value, auth.user.value?.id),
 			enabled: false,
 		})),
 	)
@@ -94,24 +84,21 @@ export function useServerShareReview<Action extends string = 'push'>(options?: {
 	)
 
 	function currentTarget(): ServerShareActionTarget | undefined {
-		const targetWorldId = worldId.value
 		const userId = auth.user.value?.id
-		if (!targetWorldId || disposed) return
+		if (disposed) return
 		return {
-			worldId: targetWorldId,
 			userId,
 			configPaths: [],
 			removedConfigPaths: [],
-			isCurrent: () =>
-				!disposed && worldId.value === targetWorldId && auth.user.value?.id === userId,
+			isCurrent: () => !disposed && auth.user.value?.id === userId,
 		}
 	}
 
 	/** Warms the shareable files cache so the review's file tree is ready when it opens. */
 	function prefetchFiles() {
-		if (!canSetup.value || !worldId.value) return
+		if (!canSetup.value) return
 		void queryClient.prefetchQuery({
-			...serverShareableFilesQueryOptions(client, serverId, worldId.value, auth.user.value?.id),
+			...serverShareableFilesQueryOptions(core, serverId, auth.user.value?.id),
 			staleTime: 30_000,
 		})
 	}
@@ -139,17 +126,19 @@ export function useServerShareReview<Action extends string = 'push'>(options?: {
 
 	async function publish(target: ServerShareActionTarget) {
 		if (!canSetup.value) throw new Error(formatMessage(messages.permission))
-		const shared = await client.archon.content_v1.share(
-			serverId,
-			target.worldId,
-			target.configPaths,
-			{ restart: target.restart, removedConfigPaths: target.removedConfigPaths },
-		)
+		const shared = await core.call(coreRoutes.ShareServer, {
+			params: { id: serverId },
+			body: {
+				file_paths: target.configPaths,
+				removed_paths: target.removedConfigPaths,
+				restart: target.restart ?? false,
+			},
+		})
 		target.pushed = true
 		await Promise.all([
-			queryClient.invalidateQueries({ queryKey: serverKeys.detailV1(serverId) }),
-			queryClient.invalidateQueries({ queryKey: serverKeys.shareDiff(serverId, target.worldId) }),
-			queryClient.invalidateQueries({ queryKey: serverKeys.shareHistory(serverId) }),
+			queryClient.invalidateQueries({ queryKey: serverKeys.detail(serverId) }),
+			queryClient.invalidateQueries({ queryKey: serverKeys.shareDiff(serverId) }),
+			queryClient.invalidateQueries({ queryKey: shareHistoryKey(serverId) }),
 		])
 		return shared
 	}
@@ -195,7 +184,7 @@ export function useServerShareReview<Action extends string = 'push'>(options?: {
 		}
 	}
 
-	watch([worldId, sharedInstanceId, () => auth.user.value?.id], () => {
+	watch([sharedInstanceId, () => auth.user.value?.id], () => {
 		previewOpen.value = false
 		diffModal.value?.hide()
 	})

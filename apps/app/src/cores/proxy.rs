@@ -6,7 +6,7 @@
 //! and the session token is added here, so the WebView never holds it. Console sockets are
 //! upgraded through the proxy too: a browser `WebSocket` cannot set headers at all.
 //!
-//! It is guarded like the local server (`server::guard`): the App's secret path segment, a loopback
+//! It is guarded like the local server (`local_api::guard`): the App's secret path segment, a loopback
 //! `Host`, no same-origin callers, only the App's origins, and an origin on every socket. A request
 //! that fails any of these is answered here and nothing is signed. This matters because a Core
 //! often runs on the same PC, where a mod runs as another OS user.
@@ -43,7 +43,7 @@ use hyper_util::rt::TokioIo;
 use tokio::{io::copy_bidirectional, net::TcpListener, sync::Mutex};
 
 use super::{Cores, Tunnel};
-use crate::server::guard::{self, Guard};
+use crate::local_api::guard::{self, Guard};
 
 /// Set to print the head of every request the proxy sends to a Core, with the session token left
 /// out, and whether the WebView had sent an `Authorization` of its own.

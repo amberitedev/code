@@ -1,7 +1,8 @@
 use super::rows as screenshot_rows;
+use crate::state::Desktop;
 use anyhow::bail;
+use engine::ErrorKind;
 use engine::emit_instance;
-use engine::{Engine, ErrorKind};
 use engine::{EventSink, InstancePayloadType};
 use serde::{Deserialize, Serialize};
 use sqlx::{Sqlite, Transaction};
@@ -11,22 +12,22 @@ use uuid::Uuid;
 const MAX_GROUP_NAME_LENGTH: usize = 256;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ScreenshotGroup {
     pub id: String,
     pub name: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ScreenshotGroupMembershipUpdate {
     pub screenshot_id: String,
-    #[cfg_attr(test, ts(optional = nullable))]
+    #[cfg_attr(feature = "export-ts", ts(optional = nullable))]
     pub group_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct ScreenshotGroupImport {
     pub id: String,
     pub name: String,
@@ -49,9 +50,9 @@ fn validate_group_name(name: &str) -> engine::Result<&str> {
 }
 
 pub async fn list_screenshot_groups(
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<Vec<ScreenshotGroup>> {
-    Ok(screenshot_rows::list_groups(crate::db::pool(state))
+    Ok(screenshot_rows::list_groups(state.db())
         .await?
         .into_iter()
         .map(|group| ScreenshotGroup {
@@ -62,13 +63,13 @@ pub async fn list_screenshot_groups(
 }
 
 pub async fn create_screenshot_group(
-    state: &Engine,
+    state: &Desktop,
     name: String,
     screenshot_ids: Vec<String>,
 ) -> engine::Result<ScreenshotGroup> {
     let name = validate_group_name(&name)?;
     let id = Uuid::new_v4().to_string();
-    let mut tx = crate::db::pool(state).begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = state.db().begin_with("BEGIN IMMEDIATE").await?;
 
     sqlx::query!(
         "UPDATE screenshot_groups SET display_order = display_order + 1",
@@ -99,7 +100,7 @@ pub async fn create_screenshot_group(
 }
 
 pub async fn rename_screenshot_group(
-    state: &Engine,
+    state: &Desktop,
     id: String,
     new_name: String,
 ) -> engine::Result<ScreenshotGroup> {
@@ -109,7 +110,7 @@ pub async fn rename_screenshot_group(
         new_name,
         id,
     )
-    .execute(crate::db::pool(state))
+    .execute(state.db())
     .await?;
     if result.rows_affected() == 0 {
         bail!(ErrorKind::InputError(format!(
@@ -124,7 +125,7 @@ pub async fn rename_screenshot_group(
 }
 
 pub async fn delete_screenshot_group(
-    state: &Engine,
+    state: &Desktop,
     id: String,
 ) -> engine::Result<()> {
     let instance_ids = sqlx::query_scalar!(
@@ -136,11 +137,11 @@ pub async fn delete_screenshot_group(
 		",
         id,
     )
-    .fetch_all(crate::db::pool(state))
+    .fetch_all(state.db())
     .await?;
     let result =
         sqlx::query!("DELETE FROM screenshot_groups WHERE id = ?", id,)
-            .execute(crate::db::pool(state))
+            .execute(state.db())
             .await?;
     if result.rows_affected() == 0 {
         bail!(ErrorKind::InputError(format!(
@@ -152,7 +153,7 @@ pub async fn delete_screenshot_group(
 }
 
 pub async fn set_screenshot_group_memberships(
-    state: &Engine,
+    state: &Desktop,
     updates: Vec<ScreenshotGroupMembershipUpdate>,
 ) -> engine::Result<()> {
     let updates = normalize_membership_updates(updates)?;
@@ -160,7 +161,7 @@ pub async fn set_screenshot_group_memberships(
         return Ok(());
     }
 
-    let mut tx = crate::db::pool(state).begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = state.db().begin_with("BEGIN IMMEDIATE").await?;
     let group_ids = updates
         .iter()
         .filter_map(|update| update.group_id.as_deref())
@@ -196,14 +197,14 @@ pub async fn set_screenshot_group_memberships(
 }
 
 pub async fn import_screenshot_groups(
-    state: &Engine,
+    state: &Desktop,
     groups: Vec<ScreenshotGroupImport>,
 ) -> engine::Result<()> {
     if groups.is_empty() {
         return Ok(());
     }
 
-    let mut tx = crate::db::pool(state).begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = state.db().begin_with("BEGIN IMMEDIATE").await?;
     let base_order = sqlx::query_scalar!(
         "SELECT COALESCE(MAX(display_order) + 1, 0) AS 'display_order!: i64' FROM screenshot_groups",
     )

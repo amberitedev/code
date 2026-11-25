@@ -1,7 +1,18 @@
+import {
+	type ClientMessage,
+	core as coreRoutes,
+	type CoreEvent,
+	type Topic,
+} from '@amberite/contracts/core'
+import type { EngineEvent } from '@amberite/contracts/engine'
+import { events as localRoutes, type LocalEvent } from '@amberite/contracts/app'
+
 import { ContractClient } from '../contracts/client'
+import { ApiCallError } from '../contracts/errors'
+import { Cores } from '../cores/cores'
+import { EventStream } from '../events/event-stream'
 import type { InferredClientModules } from '../modules'
 import { buildModuleStructure } from '../modules'
-import { withCoreHosting } from '../core-hosting'
 import type { BaseUrlConfig, ClientConfig } from '../types/client'
 import type { DownloadSink } from '../types/download'
 import type { RequestContext, RequestOptions } from '../types/request'
@@ -9,17 +20,13 @@ import type { UploadMetadata, UploadProgress, UploadRequestOptions } from '../ty
 import { appendRequestParams } from '../utils/fetch'
 import type { AbstractFeature } from './abstract-feature'
 import type { AbstractModule } from './abstract-module'
-import type { AbstractSyncClient } from './abstract-sync'
-import { CoreSessionFeature, coreSessionTransport, protocolChecked } from '../features/core-session'
+import { coreSessionTransport, protocolChecked } from '../features/core-session'
 import { SelfHostedFeature } from '../features/self-hosted'
 import { AbstractUploadClient } from './abstract-upload-client'
-import type { AbstractWebSocketClient } from './abstract-websocket'
 import { ModrinthApiError, ModrinthServerError } from './errors'
 
-type ArchonClientModules = Omit<InferredClientModules['archon'], 'backups_v1'> & {
-	/** @deprecated Use `backups_queue_v1` for the Backups Queue API. */
-	backups_v1: InferredClientModules['archon']['backups_v1']
-}
+/** What a Core's event socket sends: its own events and its engine's. */
+export type CoreStreamEvent = CoreEvent | EngineEvent
 
 /**
  * Abstract base client for Modrinth APIs
@@ -39,17 +46,12 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 	private _moduleNamespaces: Map<string, Record<string, AbstractModule>> = new Map()
 
 	private _local?: ContractClient
-	private _cores: Map<string, ContractClient> = new Map()
+	private _localEvents?: EventStream<LocalEvent>
+	private _coreClients: Map<string, ContractClient> = new Map()
+	private _coreEvents: Map<string, EventStream<CoreStreamEvent, Topic>> = new Map()
+	private _cores?: Cores
 
 	public readonly labrinth!: InferredClientModules['labrinth']
-	public readonly archon!: ArchonClientModules & {
-		sockets: AbstractWebSocketClient
-		sync: AbstractSyncClient
-	}
-	public get selfHostedHosting(): boolean {
-		return this.config.selfHostedHosting === true
-	}
-
 	/** See `ClientConfig.connectCore`. */
 	public get connectCore(): ClientConfig['connectCore'] {
 		return this.config.connectCore
@@ -62,9 +64,7 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 
 	/** Our account backend's routes, at the URL and with the session the client's `SelfHostedFeature` uses. */
 	public get backend(): ContractClient {
-		const selfHosted = this.features.find((feature) => feature instanceof SelfHostedFeature)
-		if (!selfHosted) throw new Error('This client has no account backend')
-		const transport = selfHosted.transport((input, init) => this.platformFetch(input, init))
+		const transport = this.selfHosted().transport((input, init) => this.platformFetch(input, init))
 		return new ContractClient({
 			...transport,
 			headers: async (endpoint) => {
@@ -75,6 +75,11 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 				}
 			},
 		})
+	}
+
+	/** The account's Cores, and the servers on them. */
+	public get cores(): Cores {
+		return (this._cores ??= new Cores(this))
 	}
 
 	/** The App's local server: engine and App routes. */
@@ -90,17 +95,52 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 	 * speaks another protocol version.
 	 */
 	public core(coreId: string): ContractClient {
-		const known = this._cores.get(coreId)
+		const known = this._coreClients.get(coreId)
 		if (known) return known
 		const transport =
 			this.config.coreTransport?.(coreId) ??
 			coreSessionTransport(this, coreId, (input, init) => this.platformFetch(input, init))
 		const client = new ContractClient(protocolChecked(transport))
-		this._cores.set(coreId, client)
+		this._coreClients.set(coreId, client)
 		return client
 	}
 
-	public readonly kyros!: InferredClientModules['kyros']
+	/** The App's events: its own and its engine's, everything on one socket. */
+	public get localEvents(): EventStream<LocalEvent> {
+		return (this._localEvents ??= new EventStream({
+			url: async () => this.local.url(localRoutes.eventSocket).replace(/^http/, 'ws'),
+		}))
+	}
+
+	/**
+	 * A listed Core's events on its one socket, for the topics subscribed to: every server's, which
+	 * the Core's owner may all see.
+	 */
+	public coreEvents(coreId: string): EventStream<CoreStreamEvent, Topic> {
+		const known = this._coreEvents.get(coreId)
+		if (known) return known
+		if (!coreId) throw new ApiCallError(404, 'not_found', 'There is no Core to listen to')
+		const stream = new EventStream<CoreStreamEvent, Topic>({
+			url: async () =>
+				`${(await this.cores.url(coreId)).replace(/^http/, 'ws').replace(/\/$/, '')}${coreRoutes.EventSocket.path}`,
+			message: (topic, subscribe): ClientMessage => ({
+				type: subscribe ? 'subscribe' : 'unsubscribe',
+				topic,
+			}),
+			// The socket cannot sign in again itself: a call does, once its session ended.
+			beforeReopen: () => this.core(coreId).call(coreRoutes.GetPairing),
+		})
+		this._coreEvents.set(coreId, stream)
+		return stream
+	}
+
+	/** Close a Core's socket and drop its routes, such as once it is removed. */
+	public forgetCore(coreId: string): void {
+		this._coreEvents.get(coreId)?.close()
+		this._coreEvents.delete(coreId)
+		this._coreClients.delete(coreId)
+	}
+
 	public readonly iso3166!: InferredClientModules['iso3166']
 	public readonly mclogs!: InferredClientModules['mclogs']
 	public readonly launchermeta!: InferredClientModules['launchermeta']
@@ -113,14 +153,10 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 		this.config = {
 			timeout: 10000,
 			labrinthBaseUrl: 'https://api.modrinth.com',
-			archonBaseUrl: 'https://archon.modrinth.com',
-			sharedInstancesBaseUrl: 'https://shared-instances.modrinth.com',
 			...config,
 		}
 		this.features = config.features ?? []
-		if (config.coreSessions) this.features.unshift(new CoreSessionFeature(this))
 		this.initializeModules()
-		if (this.selfHostedHosting) withCoreHosting(this)
 	}
 
 	/**
@@ -185,20 +221,9 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 	 * @throws {ModrinthApiError} When the request fails or features throw errors
 	 */
 	async request<T>(path: string, options: RequestOptions): Promise<T> {
-		let baseUrl: string
-		if (options.api === 'labrinth') {
-			baseUrl = this.resolveBaseUrl(this.config.labrinthBaseUrl!)
-		} else if (options.api === 'archon') {
-			baseUrl = await this.resolveArchonBaseUrl(path, options)
-		} else if (options.api === 'sharedinstances') {
-			baseUrl = this.resolveBaseUrl(this.config.sharedInstancesBaseUrl!)
-		} else {
-			baseUrl = options.api
-		}
+		const url = this.buildUrl(path, await this.resolveApiBaseUrl(options), options.version)
 
-		const url = this.buildUrl(path, baseUrl, options.version)
-
-		const defaultHeaders = await this.defaultHeadersFor(options)
+		const defaultHeaders = await this.buildDefaultHeaders()
 
 		// Merge options with defaults
 		const mergedOptions: RequestOptions = {
@@ -210,7 +235,6 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 				...options.headers,
 			},
 		}
-		this.attachArchonSentryCaptureHeader(mergedOptions)
 
 		const headers = mergedOptions.headers
 		if (headers && 'Content-Type' in headers && headers['Content-Type'] === '') {
@@ -235,17 +259,7 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 	}
 
 	async download(path: string, options: RequestOptions, sink: DownloadSink): Promise<void> {
-		let baseUrl: string
-		if (options.api === 'labrinth') {
-			baseUrl = this.resolveBaseUrl(this.config.labrinthBaseUrl!)
-		} else if (options.api === 'archon') {
-			baseUrl = this.resolveBaseUrl(this.config.archonBaseUrl!)
-		} else if (options.api === 'sharedinstances') {
-			baseUrl = this.resolveBaseUrl(this.config.sharedInstancesBaseUrl!)
-		} else {
-			baseUrl = options.api
-		}
-
+		const baseUrl = await this.resolveApiBaseUrl(options)
 		const mergedOptions: RequestOptions = {
 			method: 'GET',
 			retry: false,
@@ -256,7 +270,6 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 				...options.headers,
 			},
 		}
-		this.attachArchonSentryCaptureHeader(mergedOptions)
 		const context = this.buildContext(
 			this.buildUrl(path, baseUrl, options.version),
 			path,
@@ -276,19 +289,8 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 	}
 
 	async stream(path: string, options: RequestOptions): Promise<ReadableStream<Uint8Array>> {
-		let baseUrl: string
-		if (options.api === 'labrinth') {
-			baseUrl = this.resolveBaseUrl(this.config.labrinthBaseUrl!)
-		} else if (options.api === 'archon') {
-			baseUrl = await this.resolveArchonBaseUrl(path, options)
-		} else if (options.api === 'sharedinstances') {
-			baseUrl = this.resolveBaseUrl(this.config.sharedInstancesBaseUrl!)
-		} else {
-			baseUrl = options.api
-		}
-
-		const url = this.buildUrl(path, baseUrl, options.version)
-		const defaultHeaders = await this.defaultHeadersFor(options)
+		const url = this.buildUrl(path, await this.resolveApiBaseUrl(options), options.version)
+		const defaultHeaders = await this.buildDefaultHeaders()
 		const mergedOptions: RequestOptions = {
 			method: 'GET',
 			retry: false,
@@ -300,7 +302,6 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 				...options.headers,
 			},
 		}
-		this.attachArchonSentryCaptureHeader(mergedOptions)
 
 		const context = this.buildContext(url, path, mergedOptions)
 
@@ -409,12 +410,20 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 		return typeof baseUrl === 'function' ? baseUrl() : baseUrl
 	}
 
-	/** Self-hosted hosting has no single base URL: each request goes to the Core it is about. */
-	protected async resolveArchonBaseUrl(path: string, options: RequestOptions): Promise<string> {
-		if (this.selfHostedHosting) {
-			return this.archon.cores_v1.hostingUrl(path, options.params, options.version)
-		}
-		return this.resolveBaseUrl(this.config.archonBaseUrl!)
+	/**
+	 * Where a request's `api` lives. There is no Modrinth Hosting: a Core's routes are called with
+	 * `core(id)`. Shared instances are our account backend's.
+	 */
+	protected async resolveApiBaseUrl(options: Pick<RequestOptions, 'api'>): Promise<string> {
+		if (options.api === 'labrinth') return this.resolveBaseUrl(this.config.labrinthBaseUrl!)
+		if (options.api === 'sharedinstances') return this.selfHosted().baseUrl
+		return options.api
+	}
+
+	private selfHosted(): SelfHostedFeature {
+		const selfHosted = this.features.find((feature) => feature instanceof SelfHostedFeature)
+		if (!selfHosted) throw new Error('This client has no account backend')
+		return selfHosted
 	}
 
 	/**
@@ -477,24 +486,10 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 		}
 	}
 
-	/** The default headers for one request, without an inherited `Authorization` when it asks. */
-	protected async defaultHeadersFor(
-		options: Pick<RequestOptions, 'ownAuthorization'>,
-	): Promise<Record<string, string>> {
-		const headers = await this.buildDefaultHeaders()
-		if (options.ownAuthorization) {
-			for (const name of Object.keys(headers)) {
-				if (name.toLowerCase() === 'authorization') delete headers[name]
-			}
-		}
-		return headers
-	}
-
 	/**
 	 * Build default headers for all requests
 	 *
 	 * Subclasses can override this to add platform-specific headers
-	 * (e.g., Nuxt rate limit key)
 	 */
 	protected async buildDefaultHeaders(): Promise<Record<string, string>> {
 		const headers: Record<string, string> = {
@@ -513,21 +508,6 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 	private async resolveUserAgent(): Promise<string | undefined> {
 		const userAgent = this.config.userAgent
 		return typeof userAgent === 'function' ? await userAgent() : userAgent
-	}
-
-	protected attachArchonSentryCaptureHeader(options: RequestOptions): void {
-		if (options.api !== 'archon' || !options.headers || !this.shouldCaptureArchonRequests()) {
-			return
-		}
-
-		options.headers['modrinth-sentry-capture'] = '1'
-	}
-
-	private shouldCaptureArchonRequests(): boolean {
-		const archonSentryCapture = this.config.archonSentryCapture
-		return typeof archonSentryCapture === 'function'
-			? archonSentryCapture()
-			: archonSentryCapture === true
 	}
 
 	/** The fetch `client.backend` calls with. A platform whose requests skip the page's fetch overrides it. */

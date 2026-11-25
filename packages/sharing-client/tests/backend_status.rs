@@ -1,16 +1,19 @@
 //! How the backend's statuses reach callers: a revoked token is not a new share, and deleting a
-//! share that is already gone succeeds. Each test answers requests from a local socket.
+//! share that is already gone succeeds. A Core's key calls its own routes. Each test answers
+//! requests from a local socket.
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
 
-use contracts::ErrorCode;
 use contracts::backend::sharing::VersionContent;
 use contracts::client::{CallError, Remote};
+use contracts::{ErrorCode, Raw};
 use sharing_client::pool::StoreClient;
 use sharing_client::push::{self, KeptConfigs, LocateConfig, PushError};
 use sharing_client::rules::ShareScope;
-use sharing_client::shares::{Unavailable, delete_share};
+use sharing_client::shares::{
+    Caller, Icon, Unavailable, delete_share, set_icon,
+};
 
 /// Answers each request with the next (status, body) and records each request line.
 fn serve(answers: Vec<(u16, String)>) -> (String, Arc<Mutex<Vec<String>>>) {
@@ -43,7 +46,7 @@ fn remote<'a>(http: &'a reqwest::Client, base: &'a str) -> Remote<'a> {
         http,
         base,
         bearer: Some("token"),
-        read_ticket: None,
+        ticket: None,
         timeout: None,
     }
 }
@@ -58,6 +61,7 @@ fn http() -> reqwest::Client {
 }
 
 async fn push_against(
+    caller: Caller,
     answers: Vec<(u16, String)>,
 ) -> (Result<i32, PushError>, Vec<String>) {
     let (url, seen) = serve(answers);
@@ -78,6 +82,7 @@ async fn push_against(
         loader_version: String::new(),
     };
     let result = push::push(
+        caller,
         &remote(&http, &url),
         &StoreClient::new("token"),
         "share",
@@ -95,10 +100,10 @@ async fn push_against(
 
 #[tokio::test]
 async fn revoked_token_fails_the_push() {
-    let (result, seen) = push_against(vec![(
-        401,
-        r#"{"error":"not_member","description":"x"}"#.into(),
-    )])
+    let (result, seen) = push_against(
+        Caller::Account,
+        vec![(401, r#"{"error":"not_member","description":"x"}"#.into())],
+    )
     .await;
     assert!(
         matches!(
@@ -117,21 +122,38 @@ async fn share_without_versions_gets_its_first() {
     let created = format!(
         r#"{{"modrinth_ids":[],"modpack_id":null,"removed_files":[],"game_version":"1.21.1","loader":"fabric","loader_version":"","version_hash":"{root}","external_files":[],"version":1,"ready":true}}"#
     );
-    let (result, seen) = push_against(vec![
-        (404, r#"{"error":"not_found","description":"x"}"#.into()),
-        (200, created),
-    ])
-    .await;
-    assert_eq!(result.unwrap(), 1);
-    assert!(seen[1].starts_with("POST /v1/instances/share/versions"));
+    for (caller, path) in [
+        (Caller::Account, "/v1/instances/share/versions"),
+        (Caller::Core, "/core/shares/share/versions"),
+    ] {
+        let (result, seen) = push_against(
+            caller,
+            vec![
+                (404, r#"{"error":"not_found","description":"x"}"#.into()),
+                (200, created.clone()),
+            ],
+        )
+        .await;
+        assert_eq!(result.unwrap(), 1);
+        assert_eq!(
+            seen,
+            [
+                format!("GET {path} HTTP/1.1"),
+                format!("POST {path} HTTP/1.1")
+            ]
+        );
+    }
 }
 
 #[tokio::test]
 async fn the_pool_refuses_a_version_by_its_code() {
-    let (result, _) = push_against(vec![
-        (404, r#"{"error":"not_found","description":"x"}"#.into()),
-        (503, r#"{"error":"no_storage","description":"x"}"#.into()),
-    ])
+    let (result, _) = push_against(
+        Caller::Account,
+        vec![
+            (404, r#"{"error":"not_found","description":"x"}"#.into()),
+            (503, r#"{"error":"no_storage","description":"x"}"#.into()),
+        ],
+    )
     .await;
     assert!(matches!(result, Err(PushError::NoStorage)), "{result:?}");
 }
@@ -139,16 +161,20 @@ async fn the_pool_refuses_a_version_by_its_code() {
 #[tokio::test]
 async fn deleting_a_gone_share_succeeds() {
     let http = http();
-    for status in [404, 410] {
-        let (url, _) = serve(vec![(status, "{}".into())]);
-        let result = delete_share(&remote(&http, &url), "share").await;
+    for (caller, status, path) in [
+        (Caller::Account, 404, "/v1/instances/share"),
+        (Caller::Core, 410, "/core/shares/share"),
+    ] {
+        let (url, seen) = serve(vec![(status, "{}".into())]);
+        let result = delete_share(caller, &remote(&http, &url), "share").await;
         assert!(result.is_ok(), "{status}");
+        assert_eq!(*seen.lock().unwrap(), [format!("DELETE {path} HTTP/1.1")]);
     }
     let (url, _) = serve(vec![(
         403,
         r#"{"error":"not_owner","description":"n"}"#.into(),
     )]);
-    let error = delete_share(&remote(&http, &url), "share")
+    let error = delete_share(Caller::Account, &remote(&http, &url), "share")
         .await
         .unwrap_err();
     assert!(
@@ -158,4 +184,39 @@ async fn deleting_a_gone_share_succeeds() {
         ),
         "{error:?}"
     );
+}
+
+#[tokio::test]
+async fn a_cores_key_sets_the_icon_on_its_own_routes() {
+    let http = http();
+    let config: modrinth_content_management::icons::IconConfig = serde_json::from_str(
+        r##"{"background":{"type":"color","value":"#c78aff"},"symbol":"dusk_block"}"##,
+    )
+    .unwrap();
+    for (caller, path) in [
+        (Caller::Account, "/v1/instances/share/icon"),
+        (Caller::Core, "/core/shares/share/icon"),
+    ] {
+        let (url, seen) = serve(vec![(204, String::new()); 3]);
+        for icon in [
+            Icon::Image(Raw {
+                content_type: "image/png".into(),
+                bytes: bytes::Bytes::from_static(b"png"),
+            }),
+            Icon::Generated(config.clone()),
+            Icon::None,
+        ] {
+            set_icon(caller, &remote(&http, &url), "share", icon)
+                .await
+                .unwrap();
+        }
+        assert_eq!(
+            *seen.lock().unwrap(),
+            [
+                format!("PUT {path} HTTP/1.1"),
+                format!("PUT {path}/generated HTTP/1.1"),
+                format!("DELETE {path} HTTP/1.1"),
+            ]
+        );
+    }
 }

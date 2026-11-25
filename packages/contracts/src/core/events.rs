@@ -8,7 +8,7 @@ use crate::ApiError;
 
 /// A stream of events a socket can subscribe to.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Topic {
     /// The engine's instance and process events for one instance.
@@ -16,41 +16,43 @@ pub enum Topic {
     /// The engine's install jobs, for every instance the caller may see, starting with the
     /// unfinished ones.
     Installs,
-    /// A server's console lines, starting with its last 200.
+    /// A server's console lines, as the engine's `log` events, starting with its last 200.
     Console { id: String },
-    /// A server's power state, starting with the current one.
+    /// A server's power state, starting with the current one, and its changes.
     Server { id: String },
+    /// Every server's power state, starting with each current one, and their changes: what a list
+    /// of servers shows.
+    Servers,
     /// A server's backup progress.
     Backups { id: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientMessage {
-    /// A topic the caller may not see is answered with `Ended`.
-    Subscribe {
-        topic: Topic,
-    },
-    Unsubscribe {
-        topic: Topic,
-    },
+    Subscribe { topic: Topic },
+    Unsubscribe { topic: Topic },
 }
 
-/// What the Core sends on `/events`, beside the engine's events.
+/// What the Core sends on `/events`, beside the engine's events. A console line is the engine's
+/// `log` event, the same as an App instance's. The payloads are Modrinth Hosting's server socket
+/// events (`Archon.Websocket.v0`), with the server they are about.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(tag = "type", content = "payload", rename_all = "snake_case")]
 pub enum CoreEvent {
-    /// A console line, without Core's health checks.
-    Console { server: String, line: String },
-    /// `uptime` is how many seconds a running server has been up.
-    Power {
+    PowerState {
         server: String,
         state: PowerState,
-        uptime: Option<u64>,
     },
-    Backup {
+    /// How many seconds a running server has been up.
+    Uptime {
+        server: String,
+        uptime: u64,
+    },
+    /// Times are Unix seconds: numbers, as Kyros sends them.
+    BackupProgress {
         server: String,
         id: Uuid,
         task: BackupTask,
@@ -59,15 +61,29 @@ pub enum CoreEvent {
         start_time: Option<i64>,
         finish_time: Option<i64>,
     },
-    /// The caller may not, or no longer, see `topic`.
-    Ended { topic: Topic, error: ApiError },
+    /// Something a server's `Server` shows changed, or the server was made or removed: fetch it
+    /// again.
+    ServerChanged {
+        server: String,
+    },
+    /// A long op ended, sent to every socket. `error` is null when it succeeded.
+    OpEnded {
+        op: String,
+        error: Option<ApiError>,
+    },
     /// This socket fell behind and lost events: refetch what is shown.
     Resync,
+    /// A subscription was refused, as the topic's routes would be: `not_found` for a server that
+    /// does not exist. The topic gets no events.
+    SubscribeFailed {
+        topic: Topic,
+        error: ApiError,
+    },
 }
 
 /// Mirrors Archon.Websocket.v0.PowerState.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
 pub enum PowerState {
     Running,
@@ -79,7 +95,7 @@ pub enum PowerState {
 
 /// Mirrors Archon.Websocket.v0.BackupTask.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
 pub enum BackupTask {
     Create,
@@ -88,7 +104,7 @@ pub enum BackupTask {
 
 /// Mirrors Archon.Websocket.v0.BackupState.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
 pub enum BackupTaskState {
     Ongoing,

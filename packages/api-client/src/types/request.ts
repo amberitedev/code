@@ -10,11 +10,10 @@ export type RequestOptions = {
 	/**
 	 * API to use for this request
 	 * - 'labrinth': Main Modrinth API (resolves to labrinthBaseUrl)
-	 * - 'archon': Modrinth Hosting API (resolves to archonBaseUrl)
-	 * - 'sharedinstances': Shared Instances API (resolves to sharedInstancesBaseUrl)
+	 * - 'sharedinstances': Shared Instances API (resolves to the account backend)
 	 * - string: Custom base URL (e.g., 'https://custom-api.com')
 	 */
-	api: 'labrinth' | 'archon' | string
+	api: 'labrinth' | 'sharedinstances' | string
 
 	/**
 	 * API version to use
@@ -78,23 +77,8 @@ export type RequestOptions = {
 	 */
 	skipAuth?: boolean
 
-	/**
-	 * Send only the `Authorization` header this request sets itself. An `Authorization` default
-	 * from `ClientConfig.headers`, in any letter case, is left off. Core requests set it, with
-	 * `skipAuth`, so the account token never reaches a Core.
-	 * @default false
-	 */
-	ownAuthorization?: boolean
-
 	/** Explicit source for public creator profiles when accounts are self-hosted. */
 	accountSource?: 'modrinth' | 'self-hosted'
-
-	/**
-	 * Use node authentication for this request.
-	 * When true, NodeAuthFeature will handle auth injection and URL building.
-	 * @default false
-	 */
-	useNodeAuth?: boolean
 }
 
 /**

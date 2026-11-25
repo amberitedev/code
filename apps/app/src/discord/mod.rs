@@ -1,4 +1,3 @@
-use crate::settings::rows::SettingsRow;
 use std::sync::{Arc, atomic::AtomicBool};
 
 use discord_rich_presence::{
@@ -52,7 +51,7 @@ impl DiscordGuard {
         pool: &SqlitePool,
     ) -> engine::Result<()> {
         // Check if discord is disabled, and if so, clear the activity instead
-        let settings = engine::data::Settings::get(pool).await?;
+        let settings = crate::settings::Settings::get(pool).await?;
         if !settings.discord_rpc {
             Ok(self.clear_activity(true).await?)
         } else {
@@ -129,7 +128,7 @@ impl DiscordGuard {
         pool: &SqlitePool,
         process_manager: &ProcessManager,
     ) -> engine::Result<()> {
-        let settings = engine::data::Settings::get(pool).await?;
+        let settings = crate::settings::Settings::get(pool).await?;
         if !settings.discord_rpc {
             println!("Discord is disabled, clearing activity");
             return self.clear_activity(true).await;

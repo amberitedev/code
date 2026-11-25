@@ -22,7 +22,7 @@ use axum::{
 };
 use contracts::{
     ApiError, ErrorCode, Hash, Json,
-    server::{Req, route},
+    server::{Mount, Req},
     store::{
         GetObject, ListVersion, MissingObjects, ObjectHashes, PullVersion,
         PulledVersion, UploadStatus, UploadVersion, UploadedVersion,
@@ -41,18 +41,13 @@ use crate::{
 };
 
 pub(crate) fn router(store: Arc<Store>) -> Router {
-    [
-        route::<ListVersion, _, _, _>(list),
-        route::<UploadVersion, _, _, _>(upload),
-        route::<MissingObjects, _, _, _>(have),
-        route::<GetObject, _, _, _>(object),
-        route::<PullVersion, _, _, _>(pull_version),
-    ]
-    .into_iter()
-    .fold(Router::new(), |router, (path, method)| {
-        router.route(path, method)
-    })
-    .with_state(store)
+    Router::new()
+        .endpoint::<ListVersion, _, _>(list)
+        .endpoint::<UploadVersion, _, _>(upload)
+        .endpoint::<MissingObjects, _, _>(have)
+        .endpoint::<GetObject, _, _>(object)
+        .endpoint::<PullVersion, _, _>(pull_version)
+        .with_state(store)
 }
 
 fn invalid(description: impl Into<String>) -> ApiError {
@@ -333,8 +328,10 @@ pub mod tests {
     use tower::ServiceExt;
 
     use super::*;
+    use sharing_client::keys::test_support::Signer;
+
     use crate::{
-        keys::{Keys, test_support::Signer},
+        keys,
         local::Caps,
         objects::{GRACE_S, Layout, list_of},
         tar::test_support::tar,
@@ -353,7 +350,7 @@ pub mod tests {
     pub async fn fixture(core: &str, cap: u64, egress_cap: u64) -> Fixture {
         let dir = tempfile::tempdir().unwrap();
         let signer = Signer::new("k1");
-        let keys = Keys::load_file(
+        let keys = keys::load_file(
             dir.path().join("keys.json"),
             crate::http().build().unwrap(),
             None,

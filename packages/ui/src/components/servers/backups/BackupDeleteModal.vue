@@ -39,7 +39,7 @@
 </template>
 
 <script setup lang="ts">
-import type { Archon } from '@modrinth/api-client'
+import type { Backup } from '@amberite/contracts/core'
 import { TrashIcon, XIcon } from '@modrinth/assets'
 import { computed, ref } from 'vue'
 
@@ -65,8 +65,8 @@ const props = withDefaults(
 )
 
 const emit = defineEmits<{
-	(e: 'delete', backup: Archon.BackupsQueue.v1.BackupQueueBackup | undefined): void
-	(e: 'bulk-delete', backups: Archon.BackupsQueue.v1.BackupQueueBackup[]): void
+	(e: 'delete', backup: Backup | undefined): void
+	(e: 'bulk-delete', backups: Backup[]): void
 }>()
 
 const messages = defineMessages({
@@ -94,8 +94,8 @@ const messages = defineMessages({
 })
 
 const modal = ref<InstanceType<typeof NewModal>>()
-const singleBackup = ref<Archon.BackupsQueue.v1.BackupQueueBackup>()
-const bulkBackups = ref<Archon.BackupsQueue.v1.BackupQueueBackup[]>([])
+const singleBackup = ref<Backup>()
+const bulkBackups = ref<Backup[]>([])
 
 const isBulk = computed(() => bulkBackups.value.length > 0)
 const count = computed(() => (isBulk.value ? bulkBackups.value.length : 1))
@@ -108,13 +108,13 @@ const deleteDisabledTooltip = computed(() =>
 		: (props.permissionDeniedMessage ?? formatMessage(commonMessages.noPermissionAction)),
 )
 
-function show(backup: Archon.BackupsQueue.v1.BackupQueueBackup) {
+function show(backup: Backup) {
 	singleBackup.value = backup
 	bulkBackups.value = []
 	modal.value?.show()
 }
 
-function showBulk(backups: Archon.BackupsQueue.v1.BackupQueueBackup[]) {
+function showBulk(backups: Backup[]) {
 	singleBackup.value = undefined
 	bulkBackups.value = [...backups]
 	modal.value?.show()

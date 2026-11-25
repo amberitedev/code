@@ -226,13 +226,8 @@ fn on_off(on: bool) -> &'static str {
 }
 
 /// A unix time as the machine's local date and time.
-fn local_time(unix: i64) -> String {
-    chrono::DateTime::from_timestamp(unix, 0).map_or_else(
-        || unix.to_string(),
-        |time| {
-            time.with_timezone(&chrono::Local)
-                .format("%Y-%m-%d %H:%M")
-                .to_string()
-        },
-    )
+fn local_time(time: chrono::DateTime<chrono::Utc>) -> String {
+    time.with_timezone(&chrono::Local)
+        .format("%Y-%m-%d %H:%M")
+        .to_string()
 }

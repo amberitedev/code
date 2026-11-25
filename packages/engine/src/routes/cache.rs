@@ -6,7 +6,7 @@ use contracts::{ApiError, Empty, Json, server::Req};
 use super::api_error;
 use crate::{
     Engine,
-    access::{EngineAccess, Owner},
+    access::EngineAccess,
     cache,
     endpoints::cache::{
         GetCachedOrganization, GetCachedProject, GetCachedProjectV3,
@@ -27,7 +27,7 @@ fn as_strs(ids: &[String]) -> Vec<&str> {
 
 pub async fn get_cached_project(
     State(engine): State<Arc<Engine>>,
-    _: EngineAccess<Owner>,
+    _: EngineAccess,
     request: Req<GetCachedProject>,
 ) -> Result<Json<Option<Project>>, ApiError> {
     cache::get_project(
@@ -42,7 +42,7 @@ pub async fn get_cached_project(
 
 pub async fn get_cached_projects(
     State(engine): State<Arc<Engine>>,
-    _: EngineAccess<Owner>,
+    _: EngineAccess,
     request: Req<GetCachedProjects>,
 ) -> Result<Json<Vec<Project>>, ApiError> {
     cache::get_project_many(
@@ -57,7 +57,7 @@ pub async fn get_cached_projects(
 
 pub async fn get_cached_project_versions(
     State(engine): State<Arc<Engine>>,
-    _: EngineAccess<Owner>,
+    _: EngineAccess,
     request: Req<GetCachedProjectVersions>,
 ) -> Result<Json<Option<Vec<Version>>>, ApiError> {
     cache::get_project_versions(
@@ -72,7 +72,7 @@ pub async fn get_cached_project_versions(
 
 pub async fn get_cached_project_v3(
     State(engine): State<Arc<Engine>>,
-    _: EngineAccess<Owner>,
+    _: EngineAccess,
     request: Req<GetCachedProjectV3>,
 ) -> Result<Json<Option<ProjectV3>>, ApiError> {
     cache::get_project_v3(
@@ -87,7 +87,7 @@ pub async fn get_cached_project_v3(
 
 pub async fn get_cached_projects_v3(
     State(engine): State<Arc<Engine>>,
-    _: EngineAccess<Owner>,
+    _: EngineAccess,
     request: Req<GetCachedProjectsV3>,
 ) -> Result<Json<Vec<ProjectV3>>, ApiError> {
     cache::get_project_v3_many(
@@ -102,7 +102,7 @@ pub async fn get_cached_projects_v3(
 
 pub async fn get_cached_version(
     State(engine): State<Arc<Engine>>,
-    _: EngineAccess<Owner>,
+    _: EngineAccess,
     request: Req<GetCachedVersion>,
 ) -> Result<Json<Option<Version>>, ApiError> {
     cache::get_version(
@@ -117,7 +117,7 @@ pub async fn get_cached_version(
 
 pub async fn get_cached_versions(
     State(engine): State<Arc<Engine>>,
-    _: EngineAccess<Owner>,
+    _: EngineAccess,
     request: Req<GetCachedVersions>,
 ) -> Result<Json<Vec<Version>>, ApiError> {
     cache::get_version_many(
@@ -132,7 +132,7 @@ pub async fn get_cached_versions(
 
 pub async fn get_cached_user(
     State(engine): State<Arc<Engine>>,
-    _: EngineAccess<Owner>,
+    _: EngineAccess,
     request: Req<GetCachedUser>,
 ) -> Result<Json<Option<User>>, ApiError> {
     cache::get_user(&engine, &request.params.id, request.query.cache_behaviour)
@@ -143,7 +143,7 @@ pub async fn get_cached_user(
 
 pub async fn get_cached_users(
     State(engine): State<Arc<Engine>>,
-    _: EngineAccess<Owner>,
+    _: EngineAccess,
     request: Req<GetCachedUsers>,
 ) -> Result<Json<Vec<User>>, ApiError> {
     cache::get_user_many(
@@ -158,7 +158,7 @@ pub async fn get_cached_users(
 
 pub async fn get_cached_team(
     State(engine): State<Arc<Engine>>,
-    _: EngineAccess<Owner>,
+    _: EngineAccess,
     request: Req<GetCachedTeam>,
 ) -> Result<Json<Option<Vec<TeamMember>>>, ApiError> {
     cache::get_team(&engine, &request.params.id, request.query.cache_behaviour)
@@ -169,7 +169,7 @@ pub async fn get_cached_team(
 
 pub async fn get_cached_organization(
     State(engine): State<Arc<Engine>>,
-    _: EngineAccess<Owner>,
+    _: EngineAccess,
     request: Req<GetCachedOrganization>,
 ) -> Result<Json<Option<Organization>>, ApiError> {
     cache::get_organization(
@@ -184,7 +184,7 @@ pub async fn get_cached_organization(
 
 pub async fn get_cached_search_results(
     State(engine): State<Arc<Engine>>,
-    _: EngineAccess<Owner>,
+    _: EngineAccess,
     request: Req<GetCachedSearchResults>,
 ) -> Result<Json<Option<SearchResults>>, ApiError> {
     cache::get_search_results(
@@ -199,7 +199,7 @@ pub async fn get_cached_search_results(
 
 pub async fn get_cached_search_results_v3(
     State(engine): State<Arc<Engine>>,
-    _: EngineAccess<Owner>,
+    _: EngineAccess,
     request: Req<GetCachedSearchResultsV3>,
 ) -> Result<Json<Option<SearchResultsV3>>, ApiError> {
     cache::get_search_results_v3(
@@ -214,7 +214,7 @@ pub async fn get_cached_search_results_v3(
 
 pub async fn purge_cache(
     State(engine): State<Arc<Engine>>,
-    _: EngineAccess<Owner>,
+    _: EngineAccess,
     request: Req<PurgeCache>,
 ) -> Result<Empty, ApiError> {
     cache::purge_cache_types(&engine, &request.body)

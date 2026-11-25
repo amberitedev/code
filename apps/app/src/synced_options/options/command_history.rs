@@ -6,16 +6,16 @@ use super::files::{
 use super::orchestration::{
     create_synced_directories, option_effective, synced_options_path,
 };
+use crate::state::Desktop;
 use crate::synced_options::state::SyncedInstance;
-use engine::Engine;
 use engine::state::{InstanceMetadata, SyncedOption};
 use engine::util::io;
 use std::path::PathBuf;
 
 const COMMAND_HISTORY_LIMIT: usize = 50;
 
-pub async fn get_command_history(state: &Engine) -> engine::Result<String> {
-    let _guard = crate::hooks::synced_options(state).lock().await;
+pub async fn get_command_history(state: &Desktop) -> engine::Result<String> {
+    let _guard = state.synced_options().lock().await;
     let path = command_history_path(state);
     if !path.exists() {
         return Ok(String::new());
@@ -24,10 +24,10 @@ pub async fn get_command_history(state: &Engine) -> engine::Result<String> {
 }
 
 pub async fn set_command_history(
-    state: &Engine,
+    state: &Desktop,
     contents: &str,
 ) -> engine::Result<String> {
-    let _guard = crate::hooks::synced_options(state).lock().await;
+    let _guard = state.synced_options().lock().await;
     create_synced_directories(state).await?;
     let normalized = normalize_command_history(contents);
     io::write(command_history_path(state), normalized.as_bytes()).await?;
@@ -37,7 +37,7 @@ pub async fn set_command_history(
 
 pub(super) async fn ensure_command_history(
     metadata: &InstanceMetadata,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<()> {
     create_synced_directories(state).await?;
     let canonical = command_history_path(state);
@@ -76,7 +76,7 @@ pub(super) async fn ensure_command_history(
 
 pub(super) async fn reconcile_command_history(
     metadata: &SyncedInstance,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<()> {
     if !option_effective(metadata, SyncedOption::CommandHistory, state).await? {
         return Ok(());
@@ -119,7 +119,7 @@ pub(super) async fn reconcile_command_history(
     Ok(())
 }
 
-async fn refresh_command_history_links(state: &Engine) -> engine::Result<()> {
+async fn refresh_command_history_links(state: &Desktop) -> engine::Result<()> {
     let instances = crate::synced_options::state::list_instances(state).await?;
     for metadata in instances {
         if option_effective(&metadata, SyncedOption::CommandHistory, state)
@@ -143,7 +143,7 @@ pub(super) fn normalize_command_history(contents: &str) -> String {
 
 pub(super) async fn merge_command_history_from_instance(
     metadata: &InstanceMetadata,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<()> {
     let canonical_path = command_history_path(state);
     let canonical = if canonical_path.exists() {
@@ -182,6 +182,6 @@ pub(super) async fn merge_command_history_from_instance(
     Ok(())
 }
 
-pub(super) fn command_history_path(state: &Engine) -> PathBuf {
+pub(super) fn command_history_path(state: &Desktop) -> PathBuf {
     synced_options_path(state).join(COMMAND_HISTORY_FILE)
 }

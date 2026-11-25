@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Archon } from '@modrinth/api-client'
+import type { Backup } from '@amberite/contracts/core'
 import { CalendarClockIcon, SaveIcon } from '@modrinth/assets'
 import { ref } from 'vue'
 
@@ -8,7 +8,7 @@ import { defineMessages, useVIntl } from '../../../composables/i18n'
 import { truncatedTooltip } from '../../../utils'
 
 defineProps<{
-	backup: Archon.BackupsQueue.v1.BackupQueueBackup
+	backup: Backup
 }>()
 
 const { formatMessage } = useVIntl()

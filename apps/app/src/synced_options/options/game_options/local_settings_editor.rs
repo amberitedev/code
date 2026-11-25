@@ -10,12 +10,12 @@ use super::options_file::{
     validate_raw_key_value,
 };
 use super::read_instance_changes::custom_setting_id;
-use crate::settings::rows::SettingsRow;
+use crate::state::Desktop;
 use crate::synced_options::state::SyncedInstance;
 use crate::synced_options::state::{CanonicalValue, GameOptionKind};
 use anyhow::bail;
 use engine::ErrorKind;
-use engine::state::{Engine, InstanceMetadata};
+use engine::state::InstanceMetadata;
 use engine::util::io;
 use std::collections::HashSet;
 
@@ -81,7 +81,7 @@ fn editor_revision(metadata: &InstanceMetadata, input_bytes: &[u8]) -> String {
 
 async fn load_instance_document(
     instance_id: &str,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<(
     SyncedInstance,
     GameOptionsDocument,
@@ -92,10 +92,8 @@ async fn load_instance_document(
         crate::synced_options::state::get_instance(state, instance_id)
             .await?
             .ok_or(ErrorKind::InputError("unknown instance".to_string()))?;
-    if crate::synced_options::state::game_options_sync_is_enabled(
-        crate::db::pool(state),
-    )
-    .await?
+    if crate::synced_options::state::game_options_sync_is_enabled(state.db())
+        .await?
         && metadata.synced.game_options
     {
         bail!(ErrorKind::InputError(
@@ -118,7 +116,7 @@ async fn load_instance_document(
     let (document, input_bytes) = read_document(&path).await?;
     let mut controlled_keys = currently_launcher_owned_keys(&metadata);
     if metadata.launch_overrides.force_fullscreen.is_none()
-        && engine::state::Settings::get(crate::db::pool(state))
+        && crate::settings::Settings::get(state.db())
             .await?
             .force_fullscreen
     {
@@ -257,7 +255,7 @@ fn encode_setting_value(
 
 async fn load_editor(
     instance_id: &str,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<GameSettingsEditorState> {
     let (metadata, document, input_bytes, controlled_keys) =
         load_instance_document(instance_id, state).await?;
@@ -270,19 +268,19 @@ async fn load_editor(
 }
 
 pub async fn get_config(
-    state: &Engine,
+    state: &Desktop,
     instance_id: &str,
 ) -> engine::Result<GameSettingsEditorState> {
-    let _guard = crate::hooks::synced_options(state).lock().await;
+    let _guard = state.synced_options().lock().await;
     load_editor(instance_id, state).await
 }
 
 pub async fn preview_changes(
-    state: &Engine,
+    state: &Desktop,
     instance_id: &str,
     request: UpdateGameSettingsRequest,
 ) -> engine::Result<GameSettingsEditorState> {
-    let _guard = crate::hooks::synced_options(state).lock().await;
+    let _guard = state.synced_options().lock().await;
     let (metadata, document, input_bytes, controlled_keys) =
         load_instance_document(instance_id, state).await?;
     let mut editor = build_editor_state(
@@ -338,11 +336,11 @@ pub async fn preview_changes(
 }
 
 pub async fn save_changes(
-    state: &Engine,
+    state: &Desktop,
     instance_id: &str,
     request: UpdateGameSettingsRequest,
 ) -> engine::Result<SaveGameSettingsResult> {
-    let _guard = crate::hooks::synced_options(state).lock().await;
+    let _guard = state.synced_options().lock().await;
     let (metadata, mut document, input_bytes, controlled_keys) =
         load_instance_document(instance_id, state).await?;
     let current_editor = build_editor_state(

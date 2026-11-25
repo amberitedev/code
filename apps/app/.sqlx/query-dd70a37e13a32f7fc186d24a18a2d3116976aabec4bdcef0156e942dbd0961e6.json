@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT instance_id FROM instance_group_memberships WHERE group_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "instance_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "instance_group_memberships",
+            "name": "instance_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "dd70a37e13a32f7fc186d24a18a2d3116976aabec4bdcef0156e942dbd0961e6"
+}

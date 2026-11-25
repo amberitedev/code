@@ -1,22 +1,23 @@
 use super::{PackLibrary, SyncedPack};
+use crate::state::Desktop;
 use anyhow::bail;
 use bytes::Bytes;
 use engine::ErrorKind;
+use engine::state::CachedEntry;
 use engine::state::content_store::{
     StoredFileHandle, content_file_path, hash_file, validate_instance_path,
     validate_relative,
 };
 use engine::state::instances::adapters::sqlite::{content_rows, instance_rows};
-use engine::state::{CachedEntry, Engine};
 use engine::util::io;
 use std::path::PathBuf;
 
-fn directory(state: &Engine) -> PathBuf {
+fn directory(state: &Desktop) -> PathBuf {
     state.directories.synced_options_dir().join("packs")
 }
 
 pub(super) async fn read_library(
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<PackLibrary> {
     match io::read(directory(state).join("packs.json")).await {
         Ok(bytes) => {
@@ -57,7 +58,7 @@ pub(super) async fn read_library(
 
 pub(super) async fn write_library(
     library: &PackLibrary,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<()> {
     let _lease = state.content_store.lease().await;
     let previous = read_library(state).await?;
@@ -99,7 +100,7 @@ pub(super) async fn write_library(
 				.await?;
 			tokio::fs::rename(&temporary, &destination).await?;
 			renamed = true;
-			crate::hooks::synced_options(state).packs.revision
+			state.synced_options().packs.revision
 				.fetch_add(1, std::sync::atomic::Ordering::Release);
 		}
 		engine::state::content_store::sync_directory(&directory(state)).await?;
@@ -147,7 +148,7 @@ pub(super) async fn write_library(
 
 pub(super) async fn cache_bytes(
     bytes: Bytes,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<String> {
     let stored_file = state.content_store.store_bytes(&bytes).await?;
     state
@@ -163,7 +164,7 @@ pub(super) async fn cache_bytes(
 
 pub(super) async fn read_stored_file(
     pack: &SyncedPack,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<StoredFileHandle> {
     if let Some(stored_file) = state
         .content_store
@@ -226,8 +227,8 @@ pub(super) async fn read_stored_file(
         .stored_file)
 }
 
-pub(crate) async fn reconcile_retention(state: &Engine) -> engine::Result<()> {
-    let _guard = crate::hooks::synced_options(state).lock().await;
+pub(crate) async fn reconcile_retention(state: &Desktop) -> engine::Result<()> {
+    let _guard = state.synced_options().lock().await;
     if tokio::fs::try_exists(directory(state)).await? {
         engine::state::content_store::sync_directory(&directory(state)).await?;
     }
@@ -266,7 +267,7 @@ async fn recover_pack_from_instances(
     id: Option<&str>,
     pack: &SyncedPack,
     library: &PackLibrary,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<StoredFileHandle> {
     for instance in instance_rows::list_instances(state.pool()).await? {
         validate_instance_path(&instance.path)?;
@@ -314,7 +315,7 @@ async fn recover_pack_from_instances(
 async fn import_matching_pack(
     source: &std::path::Path,
     pack: &SyncedPack,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<Option<StoredFileHandle>> {
     let Ok(engine::state::content_store::FileHashes { sha512, .. }) =
         hash_file(source).await

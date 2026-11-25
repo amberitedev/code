@@ -9,12 +9,6 @@
 		@create="handleZipSelection"
 	/>
 	<FileUploadConflictModal ref="uploadConflictModal" @proceed="handleExtractConfirm" />
-	<FileUploadZipUrlModal
-		v-if="ctx.showInstallFromUrl"
-		ref="uploadZipUrlModal"
-		:disabled="isBusy"
-		:disabled-tooltip="busyTooltip"
-	/>
 	<FileRenameItemModal ref="renameItemModal" :item="selectedItem" @rename="handleRenameItem" />
 	<FileMoveItemModal
 		ref="moveItemModal"
@@ -27,6 +21,12 @@
 	<div v-if="!(ctx.loading.value && items.length === 0)" class="contents">
 		<div class="relative flex w-full flex-col">
 			<div class="relative isolate flex w-full flex-col gap-4">
+				<UploadAdmonition
+					v-if="ctx.showUploadProgress !== false && ctx.uploadState?.value.isUploading"
+					:state="ctx.uploadState.value"
+					:cancelable="!!ctx.cancelUpload"
+					@cancel="ctx.cancelUpload?.()"
+				/>
 				<FileNavbar
 					:breadcrumbs="breadcrumbSegments"
 					:is-editing="isEditing"
@@ -36,7 +36,6 @@
 					:is-editor-find-open="fileEditorRef?.isFindOpen"
 					:search-query="searchQuery"
 					:show-refresh-button="showRefreshButton"
-					:show-install-from-url="ctx.showInstallFromUrl"
 					:base-id="baseId"
 					:disabled="isBusy"
 					:disabled-tooltip="busyTooltip"
@@ -47,7 +46,6 @@
 					@create="showCreateModal"
 					@upload="initiateFileUpload"
 					@upload-zip="() => {}"
-					@unzip-from-url="showUnzipFromUrlModal"
 					@refresh="ctx.refresh"
 					@share="() => fileEditorRef?.shareToMclogs()"
 					@find="() => fileEditorRef?.toggleFind()"
@@ -215,6 +213,7 @@ import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 
 import { Button, ContextMenu } from '#ui/components/base/buttons'
 import FloatingActionBar from '#ui/components/base/FloatingActionBar.vue'
+import UploadAdmonition from '#ui/components/servers/admonitions/UploadAdmonition.vue'
 import { defineMessages, useVIntl } from '#ui/composables/i18n'
 import { useStickyObserver } from '#ui/composables/sticky-observer'
 import { useVirtualScroll } from '#ui/composables/virtual-scroll'
@@ -235,7 +234,6 @@ import FileMoveItemModal from './components/modals/FileMoveItemModal.vue'
 import FileRenameItemModal from './components/modals/FileRenameItemModal.vue'
 import FileUnsavedChangesModal from './components/modals/FileUnsavedChangesModal.vue'
 import FileUploadConflictModal from './components/modals/FileUploadConflictModal.vue'
-import FileUploadZipUrlModal from './components/modals/FileUploadZipUrlModal.vue'
 import FileUploadDragAndDrop from './components/upload/FileUploadDragAndDrop.vue'
 import { useFileSearch } from './composables/file-search'
 import { useFileSelection } from './composables/file-selection'
@@ -378,7 +376,6 @@ const renameItemModal = ref<InstanceType<typeof FileRenameItemModal>>()
 const moveItemModal = ref<InstanceType<typeof FileMoveItemModal>>()
 const deleteItemModal = ref<InstanceType<typeof FileDeleteItemModal>>()
 const uploadConflictModal = ref<InstanceType<typeof FileUploadConflictModal>>()
-const uploadZipUrlModal = ref<InstanceType<typeof FileUploadZipUrlModal>>()
 const contextMenuRef = ref<InstanceType<typeof ContextMenu>>()
 
 const newItemType = ref<'file' | 'directory'>('file')
@@ -436,7 +433,7 @@ async function handleEditorClose() {
 // CRUD handlers
 async function handleCreateNewItem(name: string) {
 	if (isBusy.value) return
-	await ctx.createItem(name, newItemType.value)
+	await succeeded(ctx.createItem(name, newItemType.value))
 }
 
 async function handleRenameItem(newName: string) {
@@ -445,7 +442,8 @@ async function handleRenameItem(newName: string) {
 	if (!item) return
 
 	const path = `${ctx.currentPath.value}/${item.name}`.replace('//', '/')
-	await ctx.renameItem(path, newName)
+	// A failed rename was already shown, and cannot be undone.
+	if (!(await succeeded(ctx.renameItem(path, newName)))) return
 	recordOperation({
 		type: 'rename',
 		itemType: item.type,
@@ -465,7 +463,7 @@ async function handleMoveItem(destination: string) {
 	const source = `${sourcePath}/${item.name}`.replace('//', '/')
 	const dest = `${destination}/${item.name}`.replace('//', '/')
 
-	await ctx.moveItem(source, dest)
+	if (!(await succeeded(ctx.moveItem(source, dest)))) return
 	recordOperation({
 		type: 'move',
 		sourcePath,
@@ -481,7 +479,7 @@ function handleDeleteItem() {
 	if (!item) return
 
 	const path = `${ctx.currentPath.value}/${item.name}`.replace('//', '/')
-	ctx.deleteItem(path, item.type === 'directory')
+	void succeeded(ctx.deleteItem(path, item.type === 'directory'))
 }
 
 function handleDirectMove(moveData: {
@@ -494,7 +492,8 @@ function handleDirectMove(moveData: {
 	const dest = `${moveData.destination}/${moveData.name}`.replace('//', '/')
 	const sourcePath = moveData.path.substring(0, moveData.path.lastIndexOf('/'))
 
-	ctx.moveItem(moveData.path, dest).then(() => {
+	void succeeded(ctx.moveItem(moveData.path, dest)).then((moved) => {
+		if (!moved) return
 		recordOperation({
 			type: 'move',
 			sourcePath,
@@ -503,6 +502,14 @@ function handleDirectMove(moveData: {
 			itemType: moveData.type,
 		})
 	})
+}
+
+/** Whether `change` went through. A provider tells the user itself when it did not. */
+function succeeded(change: Promise<unknown>): Promise<boolean> {
+	return change.then(
+		() => true,
+		() => false,
+	)
 }
 
 // Download
@@ -514,7 +521,7 @@ async function handleDownload(item: FileItem) {
 
 async function handleZip(item: FileItem) {
 	if (isBusy.value || item.type !== 'directory' || !ctx.zipFolder) return
-	await ctx.zipFolder(item.path)
+	await succeeded(ctx.zipFolder(item.path))
 }
 
 async function handleZipSelection(target: string) {
@@ -523,7 +530,7 @@ async function handleZipSelection(target: string) {
 		.filter((item) => selectedItems.value.has(item.path))
 		.map((item) => item.name)
 	deselectAll()
-	await ctx.zipPaths(ctx.currentPath.value, include, target)
+	await succeeded(ctx.zipPaths(ctx.currentPath.value, include, target))
 }
 
 // Extract
@@ -575,11 +582,6 @@ function showCreateModal(type: 'file' | 'directory') {
 	createItemModal.value?.show()
 }
 
-function showUnzipFromUrlModal() {
-	if (isBusy.value) return
-	uploadZipUrlModal.value?.show()
-}
-
 function showRenameModal(item: FileItem) {
 	if (isBusy.value || ctx.isReadOnly?.(item.path)) return
 	selectedItem.value = item
@@ -606,7 +608,7 @@ function showBulkDeleteModal() {
 	for (const path of itemsToDelete) {
 		const item = items.value.find((i) => i.path === path)
 		if (item) {
-			ctx.deleteItem(path, item.type === 'directory')
+			void succeeded(ctx.deleteItem(path, item.type === 'directory'))
 		}
 	}
 	deselectAll()

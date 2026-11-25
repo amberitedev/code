@@ -8,6 +8,7 @@ edition.workspace = true
 # and Core both push and read shares with them, and the store pulls from other Cores with the store
 # client.
 [dependencies]
+base64 = { workspace = true }
 bytes = { workspace = true }
 chacha20poly1305 = { workspace = true }
 contracts = { workspace = true, features = ["client"] }
@@ -19,6 +20,7 @@ modrinth-content-management = { workspace = true }
 path-util = { workspace = true }
 rand = { workspace = true }
 reqwest = { workspace = true, features = ["json", "rustls-no-provider", "stream"] }
+ring = "0.17.14"
 # The ring backend avoids aws-lc-sys's CMake build on Windows.
 rustls = { workspace = true, features = ["ring", "std", "tls12"] }
 serde = { workspace = true, features = ["derive", "rc"] }
@@ -29,11 +31,11 @@ sha2 = { workspace = true }
 sqlx = { workspace = true, features = ["json", "runtime-tokio", "sqlite"] }
 tar = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["fs", "io-util", "macros", "time"] }
+tokio = { workspace = true, features = ["fs", "io-util", "macros", "sync", "time"] }
 tokio-util = { workspace = true, features = ["io"] }
 tracing = { workspace = true }
-# The types the App's UI also sees, generated into `packages/api-client` by Core.
-ts-rs = { workspace = true }
+# The share diff and history types the engine's routes answer with, in the engine's TypeScript.
+ts-rs = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
@@ -44,6 +46,11 @@ nix = { version = "0.30.1", features = ["fs"] }
 
 [target."cfg(windows)".dependencies]
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+
+[features]
+export-ts = ["dep:ts-rs"]
+# `keys::test_support`, for the store's and Core's tests.
+testing = []
 
 [lints]
 workspace = true

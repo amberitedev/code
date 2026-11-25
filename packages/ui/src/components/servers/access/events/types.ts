@@ -1,3 +1,4 @@
+import type { Backup, UserResp } from '@amberite/contracts/core'
 import type { Archon } from '@modrinth/api-client'
 import type { Component } from 'vue'
 
@@ -61,9 +62,8 @@ export interface ParsedAuditEvent {
 
 export interface AuditEventLookups {
 	serverId: string
-	users: Record<string, Archon.Actions.v1.UserResp>
+	users: Record<string, UserResp>
 	addons: Record<string, Archon.Actions.v1.AddonResp>
 	versions: Record<string, Archon.Actions.v1.VersionResp>
-	worldById: Map<string, AuditWorld>
-	backupById: Map<string, Archon.Backups.v1.Backup>
+	backupById: Map<string, Backup>
 }

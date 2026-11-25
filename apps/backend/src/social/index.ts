@@ -6,11 +6,12 @@ import {
 	type UserFriend,
 	type UserUpdate,
 	social,
-} from '@amberite/contracts'
+} from '@amberite/contracts/backend'
 
 import { accountLock, findUser, publicUser, requireUser } from '../common/auth'
 import { randomId } from '../common/crypto'
 import { ApiError, invalid, objectBody } from '../common/http'
+import { IMAGE_HEADERS, imageType } from '../common/images'
 import { notificationResponse, type NotificationRow } from '../common/notifications'
 import { type Route, noBody, rawBody, route } from '../common/router'
 import type { Env, UserRow } from '../common/types'
@@ -23,7 +24,7 @@ import {
 } from './preferences'
 import { friendsSocket, friendsStatuses, notifyUser } from './socket'
 
-/** The largest avatar a user may upload. Avatars are kept in D1, so this stays well under a row. */
+/** The largest avatar a user may upload. */
 export const USER_ICON_BYTES = 512 * 1024
 
 type FriendRow = { user_id: string; friend_id: string; accepted: number; created: string }
@@ -177,19 +178,22 @@ async function blockTarget(request: Request, env: Env, id: string) {
 	return { user, target }
 }
 
+/** Where an avatar is kept in R2. Each upload gets a new revision, so its URL never changes. */
+const avatarKey = (userId: string, revision: string) => `avatars/${userId}/${revision}`
+
+/** The R2 key of the avatar `avatar_url` points to, or null when the account has none. */
+const storedAvatar = (user: UserRow) => {
+	const revision = user.avatar_url?.split('/').pop()
+	return revision ? avatarKey(user.id, revision) : null
+}
+
 async function avatar(env: Env, userId: string, revision: string) {
-	const avatar = await env.DB.prepare(
-		'SELECT content_type,data FROM avatars WHERE user_id = ? AND revision = ?',
-	)
-		.bind(userId, revision)
-		.first<{ content_type: string; data: string }>()
-	if (!avatar) throw notFound()
-	const bytes = Uint8Array.from(atob(avatar.data), (char) => char.charCodeAt(0))
-	return new Response(bytes, {
+	const object = await env.FILES.get(avatarKey(userId, revision))
+	if (!object) throw notFound()
+	return new Response(object.body, {
 		headers: {
-			'Content-Type': avatar.content_type,
-			'Cache-Control': 'public, max-age=86400',
-			'X-Content-Type-Options': 'nosniff',
+			'Content-Type': object.httpMetadata?.contentType ?? 'application/octet-stream',
+			...IMAGE_HEADERS,
 		},
 	})
 }
@@ -208,27 +212,21 @@ async function changeAvatar(request: Request, env: Env, target: UserRow, image: 
 	const url = new URL(request.url)
 	const ext = url.searchParams.get('ext')?.toLowerCase()
 	if (!ext || !ICON_TYPES[ext]) invalid('Unsupported image format')
-	const valid =
-		ext === 'png'
-			? bytes[0] === 137 && bytes[1] === 80 && bytes[2] === 78 && bytes[3] === 71
-			: ext === 'jpg' || ext === 'jpeg'
-				? bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255
-				: ext === 'gif'
-					? String.fromCharCode(...bytes.slice(0, 6)).match(/^GIF8[79]a$/)
-					: String.fromCharCode(...bytes.slice(0, 4)) === 'RIFF' &&
-						String.fromCharCode(...bytes.slice(8, 12)) === 'WEBP'
-	if (!valid) invalid('Invalid image')
-	let binary = ''
-	for (let i = 0; i < bytes.length; i += 8192)
-		binary += String.fromCharCode(...bytes.subarray(i, i + 8192))
-	const revision = randomId(),
-		avatarUrl = `${url.origin}/avatars/${target.id}/${revision}`
-	await env.DB.batch([
-		env.DB.prepare(
-			'INSERT INTO avatars (user_id,content_type,data,revision) VALUES (?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET content_type=excluded.content_type,data=excluded.data,revision=excluded.revision',
-		).bind(target.id, ICON_TYPES[ext], btoa(binary), revision),
-		env.DB.prepare('UPDATE users SET avatar_url = ? WHERE id = ?').bind(avatarUrl, target.id),
-	])
+	if (imageType(bytes) !== ICON_TYPES[ext]) invalid('Invalid image')
+	const revision = randomId()
+	await env.FILES.put(avatarKey(target.id, revision), bytes, {
+		httpMetadata: { contentType: ICON_TYPES[ext] },
+	})
+	await setAvatar(env, target, `${url.origin}/avatars/${target.id}/${revision}`)
+}
+
+/** Points the account at `avatarUrl` and drops the image it had. */
+async function setAvatar(env: Env, target: UserRow, avatarUrl: string | null) {
+	await env.DB.prepare('UPDATE users SET avatar_url = ? WHERE id = ?')
+		.bind(avatarUrl, target.id)
+		.run()
+	const previous = storedAvatar(target)
+	if (previous) await env.FILES.delete(previous)
 }
 
 /** `raw` as the body of `EditUser`. Role and badges are not the account's to change. */
@@ -270,8 +268,8 @@ async function editUser(env: Env, target: UserRow, update: UserUpdate) {
 }
 
 /**
- * The owner deletes the account. It cascades to its shared instances, Cores and their rows, but
- * not to the files those instances hold in R2.
+ * The owner deletes the account. D1 cascades to its shared instances, Cores and their rows; their
+ * manifests and icons, and the avatar, are R2 objects deleted here.
  */
 async function deleteUser(env: Env, target: UserRow) {
 	const instances = (
@@ -281,6 +279,9 @@ async function deleteUser(env: Env, target: UserRow) {
 	).results
 	await env.DB.prepare('DELETE FROM users WHERE id = ?').bind(target.id).run()
 	await env.FRIENDS.getByName(target.id).revalidateSessions()
+	// Listed rather than read from the row: overlapping uploads can each leave an image behind.
+	const avatars = await env.FILES.list({ prefix: `avatars/${target.id}/` })
+	if (avatars.objects.length) await env.FILES.delete(avatars.objects.map((object) => object.key))
 	for (const instance of instances) await sweepFiles(env, instance.id)
 }
 
@@ -437,11 +438,7 @@ export const socialRoutes: Route[] = [
 		USER_ICON_BYTES,
 	),
 	route(social.RemoveAvatar, noBody, async ({ request, env, params }) => {
-		const target = await ownTarget(request, env, params.id)
-		await env.DB.batch([
-			env.DB.prepare('DELETE FROM avatars WHERE user_id = ?').bind(target.id),
-			env.DB.prepare('UPDATE users SET avatar_url = NULL WHERE id = ?').bind(target.id),
-		])
+		await setAvatar(env, await ownTarget(request, env, params.id), null)
 	}),
 	route(social.ListUserNotifications, noBody, async ({ request, env, params }) => {
 		const target = await ownTarget(request, env, params.id)

@@ -140,9 +140,6 @@ CREATE TABLE instance_files (
 	size INTEGER NOT NULL,
 	-- On a server: a client-only file of the pack, never on its disk.
 	missing INTEGER NOT NULL DEFAULT 0,
-	-- On a server: a pack update found the file edited and left it, because the new pack
-	-- changed or removed it. Cleared when the owner keeps or replaces it.
-	pending TEXT NULL CHECK (pending IN ('changed', 'removed')),
 
 	added_at INTEGER NOT NULL,
 	modified_at INTEGER NOT NULL,
@@ -210,16 +207,6 @@ CREATE TABLE processes (
 	FOREIGN KEY (instance_id) REFERENCES instances(id) ON DELETE CASCADE
 );
 
-CREATE TABLE join_log (
-	instance_id TEXT NOT NULL,
-	host TEXT NOT NULL,
-	port INTEGER NOT NULL,
-	join_time INTEGER NOT NULL,
-
-	PRIMARY KEY (instance_id, host, port),
-	FOREIGN KEY (instance_id) REFERENCES instances(id) ON DELETE CASCADE
-);
-
 CREATE TABLE attached_world_data (
 	instance_id TEXT NOT NULL,
 	world_type TEXT CHECK ( world_type in ('singleplayer', 'server') ) NOT NULL,
@@ -259,23 +246,6 @@ CREATE TABLE install_jobs (
 CREATE TABLE instance_quarantines (
 	instance_id TEXT PRIMARY KEY NOT NULL,
 	FOREIGN KEY (instance_id) REFERENCES instances(id) ON DELETE CASCADE
-);
-
-CREATE TABLE instance_groups (
-	id TEXT NOT NULL,
-	name TEXT NOT NULL,
-	display_order INTEGER NOT NULL DEFAULT 0,
-
-	PRIMARY KEY (id)
-);
-
-CREATE TABLE instance_group_memberships (
-	instance_id TEXT NOT NULL,
-	group_id TEXT NOT NULL,
-
-	PRIMARY KEY (instance_id, group_id),
-	FOREIGN KEY (instance_id) REFERENCES instances(id) ON DELETE CASCADE,
-	FOREIGN KEY (group_id) REFERENCES instance_groups(id) ON DELETE CASCADE
 );
 
 CREATE TABLE instance_icon_configs (
@@ -402,8 +372,6 @@ CREATE INDEX instance_content_update_checks_update_version_id
 
 CREATE INDEX processes_instance_id ON processes(instance_id);
 
-CREATE INDEX join_log_instance_id ON join_log(instance_id);
-
 CREATE INDEX attached_world_data_instance_id
 	ON attached_world_data(instance_id);
 
@@ -423,13 +391,6 @@ CREATE UNIQUE INDEX instance_content_entries_content_set_project_version_unique
 		AND project_id IS NOT NULL
 		AND version_id IS NOT NULL;
 
-CREATE INDEX instance_groups_name ON instance_groups(name);
-
-CREATE INDEX instance_groups_display_order ON instance_groups(display_order);
-
-CREATE INDEX instance_group_memberships_group_id
-	ON instance_group_memberships(group_id);
-
 CREATE INDEX store_instance_files_blob ON store_instance_files(blob_sha512);
 
 CREATE INDEX store_operations_instance ON store_operations(instance_id);
@@ -438,6 +399,3 @@ CREATE INDEX cache_expires ON cache (expires);
 
 INSERT INTO app_metadata (key, value, updated_at)
 VALUES ('store_cache_limit_bytes', '5368709120', unixepoch());
-
-INSERT INTO instance_groups (id, name, display_order)
-VALUES ('group:favorites', 'Favorites', -1);

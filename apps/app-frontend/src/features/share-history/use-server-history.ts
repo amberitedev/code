@@ -1,4 +1,5 @@
-import { injectAuth, injectModrinthClient, serverKeys } from '@modrinth/ui'
+import type { Server } from '@amberite/contracts/core'
+import { injectAuth } from '@modrinth/ui'
 import { useQuery } from '@tanstack/vue-query'
 import { computed, type Ref } from 'vue'
 
@@ -15,40 +16,22 @@ import { get } from '@/helpers/instance'
  *   computers, and then the list is empty. Someone the instance is shared with may host it, and
  *   then it is not theirs to see.
  */
-export function useServerHistory(serverId: Ref<string>) {
-	const client = injectModrinthClient()
+export function useServerHistory(server: Ref<Server | undefined>) {
 	const auth = injectAuth()
-	const server = useQuery({
-		queryKey: computed(() => serverKeys.detail(serverId.value)),
-		queryFn: () => client.archon.servers_v0.get(serverId.value),
-		enabled: computed(() => client.selfHostedHosting && !!serverId.value),
-		// A Core that does not answer is offline; the panel says so instead of waiting on retries.
-		retry: false,
-	})
-	const serverFull = useQuery({
-		queryKey: computed(() => serverKeys.detailV1(serverId.value)),
-		queryFn: () => client.archon.servers_v1.get(serverId.value),
-		enabled: computed(() => client.selfHostedHosting && !!serverId.value),
-		retry: false,
-	})
-	const linkedId = computed(() => server.data.value?.linked_instance?.id ?? null)
+	const linkedId = computed(() => server.value?.linked_instance?.id ?? null)
 	const linked = useQuery({
 		queryKey: computed(() => ['instances', linkedId.value, 'share-role'] as const),
 		queryFn: async () => (await get(linkedId.value!).catch(() => null)) ?? null,
 		enabled: computed(() => !!linkedId.value),
 	})
 	return computed(() => {
-		const data = server.data.value
+		const data = server.value
 		if (!data || !auth.user.value?.id || data.owner_id !== auth.user.value.id) return null
-		const world =
-			serverFull.data.value?.worlds.find((each) => each.is_active) ??
-			serverFull.data.value?.worlds[0]
-		if (!world) return null
 		if (data.linked_instance) {
 			if (linked.data.value?.shared_instance?.role === 'member') return null
 			return { source: 'instance', instanceId: data.linked_instance.id } as const
 		}
-		if (!world.content?.shared_instance_id) return null
-		return { source: 'server', serverId: serverId.value, worldId: world.id } as const
+		if (!data.shared_instance_id) return null
+		return { source: 'server', serverId: data.server_id } as const
 	})
 }

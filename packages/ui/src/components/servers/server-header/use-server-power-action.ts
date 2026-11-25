@@ -1,6 +1,7 @@
 import { computed, type Ref, ref } from 'vue'
 
 import { useVIntl } from '#ui/composables/i18n'
+import { changeServerPower } from '#ui/composables/server-power'
 import { useServerPermissions } from '#ui/composables/server-permissions'
 import {
 	injectModrinthClient,
@@ -13,7 +14,7 @@ export type PowerAction = 'Start' | 'Stop' | 'Restart' | 'Kill'
 export function useServerPowerAction(options?: { disabled?: Ref<boolean> }) {
 	const { formatMessage } = useVIntl()
 	const client = injectModrinthClient()
-	const { serverId, powerState, busyReasons } = injectModrinthServerContext()
+	const { serverId, coreId, powerState, busyReasons } = injectModrinthServerContext()
 	const { addNotification } = injectNotificationManager()
 	const { canUsePowerActions, permissionDeniedMessage } = useServerPermissions()
 	const pendingAction = ref<PowerAction | null>(null)
@@ -48,9 +49,7 @@ export function useServerPowerAction(options?: { disabled?: Ref<boolean> }) {
 		() => !isTransitioning.value && !isBlockedByPropsBusyOrPermission.value,
 	)
 	const canStop = computed(
-		() =>
-			canTakeAction.value ||
-			(client.selfHostedHosting && isStarting.value && !isBlockedByPropsBusyOrPermission.value),
+		() => canTakeAction.value || (isStarting.value && !isBlockedByPropsBusyOrPermission.value),
 	)
 
 	const canKill = computed(
@@ -75,7 +74,7 @@ export function useServerPowerAction(options?: { disabled?: Ref<boolean> }) {
 		if (pendingAction.value) return
 		pendingAction.value = action
 		try {
-			await client.archon.servers_v0.power(serverId, action)
+			await changeServerPower(client, coreId, serverId, action)
 		} catch (error) {
 			console.error(`Error performing ${action} on server:`, error)
 			addNotification({

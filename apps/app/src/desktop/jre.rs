@@ -1,16 +1,16 @@
 use axum::Router;
 use contracts::{
     ApiError, Json,
-    server::{Req, route},
+    server::{Mount, Req},
 };
 use engine::{jre, routes::api_error};
 
-use crate::server::endpoints::desktop::{GetJavaAt, JavaAtPath, TestJavaAt};
+use crate::local_api::endpoints::desktop::{GetJavaAt, JavaAtPath, TestJavaAt};
 
 pub fn routes() -> Router {
-    let (get_path, get) = route::<GetJavaAt, _, _, _>(get_java_at);
-    let (test_path, test) = route::<TestJavaAt, _, _, _>(test_java_at);
-    Router::new().route(get_path, get).route(test_path, test)
+    Router::new()
+        .endpoint::<GetJavaAt, _, _>(get_java_at)
+        .endpoint::<TestJavaAt, _, _>(test_java_at)
 }
 
 async fn get_java_at(

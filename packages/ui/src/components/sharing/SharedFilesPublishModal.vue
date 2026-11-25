@@ -109,7 +109,7 @@
 </template>
 
 <script setup lang="ts">
-import { MAX_SHARE_BYTES } from '@modrinth/api-client'
+import { MAX_SHARE_BYTES } from '@amberite/contracts/protocol'
 import {
 	CircleAlertIcon,
 	RotateCounterClockwiseIcon,

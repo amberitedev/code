@@ -1,20 +1,14 @@
-import type { Archon } from '@modrinth/api-client'
+import type { Endpoint } from '@amberite/contracts/protocol'
+import { core as coreRoutes } from '@amberite/contracts/core'
+import type { LocationOf } from '@modrinth/api-client'
 
 import { injectModrinthClient } from '../providers/api-client'
-import { injectFileDownload } from '../providers/file-download'
+import { type FileDownload, injectFileDownload } from '../providers/file-download'
 import { injectModrinthServerContext } from '../providers/server-context'
 import { injectNotificationManager } from '../providers/web-notifications'
 import { defineMessages, useVIntl } from './i18n'
 
 const messages = defineMessages({
-	downloadUnavailableTitle: {
-		id: 'servers.download.unavailable.title',
-		defaultMessage: 'Download unavailable',
-	},
-	downloadUnavailableDescription: {
-		id: 'servers.download.unavailable.description',
-		defaultMessage: "This world's files cannot currently be downloaded.",
-	},
 	downloadFailedTitle: {
 		id: 'servers.download.failed.title',
 		defaultMessage: 'Download failed',
@@ -25,96 +19,58 @@ const messages = defineMessages({
 	},
 })
 
-export function hasAvailableWorldDownload(
-	serverId: string,
-	serverFullList: Archon.Servers.v1.ServerFull[] | null | undefined,
-): boolean {
-	const world = serverFullList?.find((server) => server.id === serverId)?.worlds[0]
-	return world?.download_method.method_type === 'direct_node_download'
-}
-
-export function useServerWorldDownload() {
+/**
+ * Saves files of the open server from its Core: a route of the Core, saved through the App's
+ * Core proxy, which adds this device's session. Without a host that saves files, the browser
+ * downloads it.
+ */
+export function useServerDownload() {
 	const client = injectModrinthClient()
 	const fileDownload = injectFileDownload(null)
-	const serverContext = injectModrinthServerContext(null)
+	const { serverId, coreId, server } = injectModrinthServerContext()
 	const { addNotification } = injectNotificationManager()
 	const { formatMessage } = useVIntl()
 
-	function showUnavailableNotification() {
-		addNotification({
-			title: formatMessage(messages.downloadUnavailableTitle),
-			text: formatMessage(messages.downloadUnavailableDescription),
-			type: 'error',
-		})
-	}
-
-	function showDownloadFailedNotification() {
-		addNotification({
-			title: formatMessage(messages.downloadFailedTitle),
-			text: formatMessage(messages.downloadFailedDescription),
-			type: 'error',
-		})
-	}
-
-	async function downloadWorldFiles(nodeUrlHost: string, worldId: string) {
+	async function download<E extends Endpoint>(
+		type: FileDownload['type'],
+		filename: string,
+		endpoint: E,
+		location: LocationOf<E>,
+	) {
 		try {
+			const url = await client.cores.downloadUrl(coreId, endpoint, location)
 			if (fileDownload) {
 				await fileDownload.download({
-					type: 'server-world',
-					serverId: serverContext?.serverId,
-					serverName: serverContext?.server.value.name,
-					nodeUrlHost,
-					worldId,
-					filename: `${worldId}.zip`,
-				})
-			} else {
-				const { token } = await client.kyros.files_v1.authorizeFullWorldDownload(
-					nodeUrlHost,
-					worldId,
-				)
-				const downloadUrl = client.kyros.files_v1.getFullWorldDownloadUrl(
-					nodeUrlHost,
-					worldId,
-					token,
-				)
-				window.location.assign(downloadUrl)
-			}
-		} catch {
-			showDownloadFailedNotification()
-		}
-	}
-
-	function getWorldDownload(
-		serverId: string,
-		serverFullList: Archon.Servers.v1.ServerFull[] | null | undefined,
-	): (() => Promise<void>) | null {
-		const serverFull = serverFullList?.find((candidate) => candidate.id === serverId)
-		const world = serverFull?.worlds[0]
-		if (!serverFull || !world || world.download_method.method_type !== 'direct_node_download')
-			return null
-
-		return async () => {
-			try {
-				const downloadMethod = await client.archon.servers_v1.selectWorldDownload(
+					type,
+					url,
+					filename,
 					serverId,
-					world.id,
-				)
-
-				if (
-					downloadMethod.method_type !== 'direct_node_download' ||
-					serverFull.location.status !== 'assigned'
-				) {
-					showUnavailableNotification()
-					return
-				}
-
-				const nodeUrlHost = serverFull.location.location_metadata.url_host
-				await downloadWorldFiles(nodeUrlHost, world.id)
-			} catch {
-				showDownloadFailedNotification()
+					serverName: server.value?.name,
+				})
+				return
 			}
+			const link = document.createElement('a')
+			link.href = url
+			link.download = filename
+			link.click()
+		} catch (error) {
+			addNotification({
+				title: formatMessage(messages.downloadFailedTitle),
+				text:
+					error instanceof Error
+						? error.message
+						: formatMessage(messages.downloadFailedDescription),
+				type: 'error',
+			})
 		}
 	}
 
-	return { getWorldDownload, downloadWorldFiles }
+	return {
+		download,
+		/** The world and settings as they are now, zipped. */
+		downloadWorld: () =>
+			download('server-world', `${server.value?.name ?? serverId}.zip`, coreRoutes.DownloadWorld, {
+				params: { id: serverId },
+			}),
+	}
 }

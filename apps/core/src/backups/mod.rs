@@ -107,8 +107,8 @@ pub struct Backups {
     paths: Paths,
     db: SqlitePool,
     servers: Arc<Servers>,
-    /// Events for `/events` sockets: backup progress, content installs and power changes.
-    pub events: broadcast::Sender<CoreEvent>,
+    /// `CoreState::events`, for backup progress.
+    events: broadcast::Sender<CoreEvent>,
     wake: Notify,
     /// The ids of operations as they finish.
     finished: broadcast::Sender<i64>,
@@ -125,12 +125,13 @@ impl Backups {
         paths: Paths,
         db: SqlitePool,
         servers: Arc<Servers>,
+        events: broadcast::Sender<CoreEvent>,
     ) -> Result<Arc<Self>, Error> {
         let backups = Arc::new(Self {
             paths,
             db,
             servers,
-            events: broadcast::channel(256).0,
+            events,
             wake: Notify::new(),
             finished: broadcast::channel(64).0,
             copying: tokio::sync::Mutex::new(()),
@@ -421,7 +422,7 @@ impl Backups {
             OpKind::Create => BackupTask::Create,
             OpKind::Restore => BackupTask::Restore,
         };
-        let started = chrono::Utc::now().timestamp_millis();
+        let started = chrono::Utc::now().timestamp();
         send_progress(
             &self.events,
             &operation,
@@ -463,7 +464,7 @@ impl Backups {
         } else {
             BackupState::Failed
         };
-        let ended = Some(chrono::Utc::now().timestamp_millis());
+        let ended = Some(chrono::Utc::now().timestamp());
         send_progress(
             &self.events,
             &operation,
@@ -785,12 +786,15 @@ impl Backups {
             // A new server's first comes an interval after it was made. Right after its first
             // start the world it just generated is still being written, and holds nothing to keep.
             (None, None) => {
-                let created: i64 = sqlx::query_scalar(
-                    "SELECT created_at FROM servers WHERE id = ?",
+                let created = crate::servers::server_rows::get(
+                    &self.db,
+                    self.servers.engine(),
+                    server_id,
                 )
-                .bind(server_id)
-                .fetch_one(&self.db)
-                .await?;
+                .await
+                .map_err(ServerError::Other)?
+                .ok_or_else(|| Error::NotFound(server_id.to_owned()))?
+                .created_at;
                 return Ok(Some(Due {
                     at: created + interval,
                     anchor: None,
@@ -853,7 +857,7 @@ fn send_progress(
     started: i64,
     finished: Option<i64>,
 ) {
-    let _ = events.send(CoreEvent::Backup {
+    let _ = events.send(CoreEvent::BackupProgress {
         server: operation.server_id.clone(),
         id: Uuid::parse_str(&operation.backup_id).unwrap_or_default(),
         task,

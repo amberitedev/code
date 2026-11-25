@@ -1,6 +1,12 @@
-import type { AbstractModrinthClient, Archon } from '@modrinth/api-client'
+import {
+	type ActionLogFilter,
+	type ActionLogResponse,
+	type ActionEntry,
+	type SortOrder,
+	core as coreRoutes,
+} from '@amberite/contracts/core'
+import type { ContractClient } from '@modrinth/api-client'
 import { useInfiniteQuery, useQueryClient } from '@tanstack/vue-query'
-import type { ComputedRef } from 'vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
 import type {
@@ -16,6 +22,7 @@ import type {
 import type { ServerAuditLogEntry } from '#ui/components/servers/access'
 import { parseAuditEvent } from '#ui/components/servers/access/events'
 import { useVIntl } from '#ui/composables/i18n'
+import { useServerBackupsQueue } from '#ui/composables/server-backups-queue'
 import type { AbstractWebNotificationManager } from '#ui/providers/web-notifications'
 
 import {
@@ -25,36 +32,25 @@ import {
 	getActionLogEntryId,
 	getAuditLogTimeframeRange,
 	isActionLogActionName,
-	SERVER_SCOPED_ACTION_LOG_WORLD_FILTER,
-	SUPPORT_ACTION_LOG_USER_FILTER,
 } from './audit-log-utils'
 import { accessMessages, actionLogActionMessages } from './messages'
 
-type AuditLogFilterKey = 'users' | 'worlds' | 'actions'
+type AuditLogFilterKey = 'users' | 'actions'
 
 type UseAccessAuditLogOptions = {
-	client: AbstractModrinthClient
+	core: ContractClient
 	serverId: string
-	serverFull: ComputedRef<Archon.Servers.v1.ServerFull | null>
-	showAuditLogInstances: ComputedRef<boolean>
 	addNotification: AbstractWebNotificationManager['addNotification']
 }
 
 const ACTION_LOG_PAGE_SIZE = 200
 const ACTION_LOG_FILTER_OVERLAY_MS = 750
 
-export function useAccessAuditLog({
-	client,
-	serverId,
-	serverFull,
-	showAuditLogInstances,
-	addNotification,
-}: UseAccessAuditLogOptions) {
+export function useAccessAuditLog({ core, serverId, addNotification }: UseAccessAuditLogOptions) {
 	const { formatMessage } = useVIntl()
 	const queryClient = useQueryClient()
 	const auditLogFilters = ref<Record<string, string[]>>({
 		users: [],
-		worlds: [],
 		actions: [],
 	})
 	const auditLogTimeframeMode = ref<TimeFrameMode>('preset')
@@ -63,28 +59,10 @@ export function useAccessAuditLog({
 	const auditLogTimeframeLastUnit = ref<TimeFrameLastUnit>('days')
 	const auditLogTimeframeCustomStartDate = ref('')
 	const auditLogTimeframeCustomEndDate = ref('')
-	const auditLogSortDirection = ref<Archon.Actions.v1.SortOrder>('desc')
+	const auditLogSortDirection = ref<SortOrder>('desc')
 
-	const worldOptions = computed(
-		() => serverFull.value?.worlds.map((world) => ({ id: world.id, name: world.name })) ?? [],
-	)
-	const isAuditLogWorldFilterVisible = computed(
-		() => showAuditLogInstances.value && worldOptions.value.length > 0,
-	)
-
-	const worldById = computed(
-		() => new Map(worldOptions.value.map((world) => [world.id, world] as const)),
-	)
-
-	const backupById = computed(() => {
-		const backups = new Map<string, Archon.Backups.v1.Backup>()
-		for (const world of serverFull.value?.worlds ?? []) {
-			for (const backup of world.backups ?? []) {
-				backups.set(backup.id, backup)
-			}
-		}
-		return backups
-	})
+	// Names the backups the log mentions.
+	const { backupById } = useServerBackupsQueue(serverId, core)
 
 	const actionLogDateFilter = computed(() => {
 		const range = getAuditLogTimeframeRange({
@@ -102,14 +80,13 @@ export function useAccessAuditLog({
 		}
 	})
 
-	const actionLogEndpointFilter = computed<Archon.Actions.v1.ActionLogFilter | undefined>(() => {
+	// The Core filters, so a page holds only what matches.
+	const actionLogEndpointFilter = computed<ActionLogFilter | undefined>(() => {
 		const users = selectedAuditLogFilterValues('users')
-		const worlds = isAuditLogWorldFilterVisible.value ? selectedAuditLogWorldFilterValues() : []
 		const actions = selectedAuditLogFilterValues('actions').filter(isActionLogActionName)
-		const filter: Archon.Actions.v1.ActionLogFilter = {}
+		const filter: ActionLogFilter = {}
 
 		if (users.length > 0) filter.users = users
-		if (worlds.length > 0) filter.worlds = worlds
 		if (actions.length > 0) filter.actions = actions
 
 		return Object.keys(filter).length > 0 ? filter : undefined
@@ -131,12 +108,16 @@ export function useAccessAuditLog({
 		queryKey: actionLogQueryKey,
 		queryFn: ({ pageParam = 0 }) => {
 			const offset = typeof pageParam === 'number' ? pageParam : 0
-			return client.archon.actions_v1.list(serverId, {
-				limit: ACTION_LOG_PAGE_SIZE,
-				offset,
-				order: auditLogSortDirection.value,
-				filter: actionLogEndpointFilter.value,
-				...actionLogDateFilter.value,
+			const filter = actionLogEndpointFilter.value
+			return core.call(coreRoutes.ListActivity, {
+				query: {
+					server_id: serverId,
+					limit: ACTION_LOG_PAGE_SIZE,
+					offset,
+					order: auditLogSortDirection.value,
+					filter: filter && JSON.stringify(filter),
+					...actionLogDateFilter.value,
+				},
 			})
 		},
 		getNextPageParam: (lastPage) =>
@@ -237,22 +218,6 @@ export function useAccessAuditLog({
 		return extractAuditLogUserFilterOptions(actionLogQuery.data.value?.pages ?? [])
 	})
 
-	const auditLogWorldFilterOptions = computed<DropdownFilterBarOption[]>(() => [
-		{
-			value: SERVER_SCOPED_ACTION_LOG_WORLD_FILTER,
-			label: formatMessage(accessMessages.serverScopedInstance),
-			searchTerms: [
-				SERVER_SCOPED_ACTION_LOG_WORLD_FILTER,
-				formatMessage(accessMessages.serverScopedInstance),
-			],
-		},
-		...worldOptions.value.map((world) => ({
-			value: world.id,
-			label: world.name,
-			searchTerms: [world.id, world.name],
-		})),
-	])
-
 	const auditLogActionFilterOptions = computed<DropdownFilterBarItem[]>(() =>
 		actionLogActionGroups.flatMap((group) => [
 			{
@@ -279,14 +244,6 @@ export function useAccessAuditLog({
 			},
 		]
 
-		if (isAuditLogWorldFilterVisible.value) {
-			categories.push({
-				key: 'worlds',
-				label: formatMessage(accessMessages.instanceFilter),
-				options: auditLogWorldFilterOptions.value,
-			})
-		}
-
 		categories.push({
 			key: 'actions',
 			label: formatMessage(accessMessages.actionTypeFilter),
@@ -307,10 +264,9 @@ export function useAccessAuditLog({
 	const hasActiveAuditLogFilters = computed(
 		() =>
 			hasActiveAuditLogDateFilter.value ||
-			(isAuditLogWorldFilterVisible.value
-				? (['users', 'worlds', 'actions'] satisfies AuditLogFilterKey[])
-				: (['users', 'actions'] satisfies AuditLogFilterKey[])
-			).some((key) => selectedAuditLogFilterValues(key).length > 0),
+			(['users', 'actions'] satisfies AuditLogFilterKey[]).some(
+				(key) => selectedAuditLogFilterValues(key).length > 0,
+			),
 	)
 
 	watch(
@@ -332,36 +288,13 @@ export function useAccessAuditLog({
 		return values ? [...values] : []
 	}
 
-	function selectedAuditLogWorldFilterValues(): Array<string | null> {
-		return selectedAuditLogFilterValues('worlds').map((world) =>
-			world === SERVER_SCOPED_ACTION_LOG_WORLD_FILTER ? null : world,
-		)
-	}
-
-	function extractAuditLogUserFilterOptions(
-		pages: Archon.Actions.v1.ActionLogResponse[],
-	): DropdownFilterBarOption[] {
+	function extractAuditLogUserFilterOptions(pages: ActionLogResponse[]): DropdownFilterBarOption[] {
 		const options = new Map<string, DropdownFilterBarOption>()
 
 		for (const page of pages) {
 			for (const entry of page.data) {
-				if (entry.actor.type === 'support') {
-					const userId = entry.actor.user_id ?? null
-					const user = userId ? page.users[userId] : undefined
-					if (!options.has(SUPPORT_ACTION_LOG_USER_FILTER)) {
-						options.set(SUPPORT_ACTION_LOG_USER_FILTER, {
-							value: SUPPORT_ACTION_LOG_USER_FILTER,
-							label: formatMessage(accessMessages.supportActor),
-							searchTerms: [
-								SUPPORT_ACTION_LOG_USER_FILTER,
-								formatMessage(accessMessages.supportActor),
-								userId,
-								user?.username,
-							].filter(Boolean) as string[],
-						})
-					}
-					continue
-				}
+				// The CLI is no user to filter by.
+				if (entry.actor.type === 'cli') continue
 
 				const id = entry.actor.user_id
 				const user = page.users[id]
@@ -445,17 +378,16 @@ export function useAccessAuditLog({
 	}
 
 	function apiActionLogEntryToAuditEntry(
-		entry: Archon.Actions.v1.ActionEntry,
-		actionLog: Archon.Actions.v1.ActionLogResponse,
+		entry: ActionEntry,
+		actionLog: ActionLogResponse,
 		id: string,
 	): ServerAuditLogEntry {
 		const event = parseAuditEvent(entry, {
 			serverId,
 			users: actionLog.users,
-			addons: actionLog.addons,
-			worldById: worldById.value,
+			addons: {},
 			backupById: backupById.value,
-			versions: actionLog.versions ?? {},
+			versions: {},
 		})
 
 		return {

@@ -39,6 +39,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { Button } from '#ui/components/base/buttons'
 import FloatingActionBar from '#ui/components/base/FloatingActionBar.vue'
 import { defineMessage, useVIntl } from '#ui/composables/i18n'
+import { changeServerPower } from '#ui/composables/server-power'
 import { injectServerSettings } from '#ui/layouts/shared/server-settings/providers/server-settings'
 import { injectModrinthClient, injectModrinthServerContext } from '#ui/providers'
 
@@ -94,7 +95,7 @@ onBeforeUnmount(() => {
 
 const client = injectModrinthClient()
 
-const { powerState } = injectModrinthServerContext()
+const { powerState, coreId } = injectModrinthServerContext()
 
 const isStopped = computed(() => powerState.value === 'stopped' || powerState.value === 'crashed')
 
@@ -114,6 +115,6 @@ const saveAndPower = async () => {
 	} catch {
 		return
 	}
-	await client.archon.servers_v0.power(props.serverId, isStopped.value ? 'Start' : 'Restart')
+	await changeServerPower(client, coreId, props.serverId, isStopped.value ? 'Start' : 'Restart')
 }
 </script>

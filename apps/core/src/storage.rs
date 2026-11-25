@@ -471,7 +471,7 @@ impl Storage {
                 http: &self.http,
                 base: &format!("http://127.0.0.1:{port}"),
                 bearer: None,
-                read_ticket: Some(&order.ticket),
+                ticket: Some(&order.ticket),
                 timeout: None,
             };
             call::<PullVersion>(&remote, &VersionHash { root }, &(), Empty)

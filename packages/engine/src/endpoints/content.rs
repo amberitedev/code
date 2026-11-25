@@ -5,13 +5,12 @@ use modrinth_content_management::ResolveContentPlan;
 use path_util::SafeRelativeUtf8UnixPathBuf;
 use serde::{Deserialize, Serialize};
 
-use super::{cache::CacheRead, endpoints, instances::InstanceRef};
+use super::{cache::CacheRead, instances::InstanceRef};
 use crate::{
     DownloadReason,
     install::InstallJobSnapshot,
     instance::{
-        ContentSide, EditedFile, InstallProjectWithDependenciesRequest,
-        PackExportCandidate,
+        ContentSide, InstallProjectWithDependenciesRequest, PackExportCandidate,
     },
     state::{
         CacheBehaviour, ContentFile, ContentItem, Dependency,
@@ -20,54 +19,50 @@ use crate::{
     },
 };
 
-endpoints! {
+contracts::endpoints! {
+    group instanceContent;
+
     /// The instance's content files, keyed by their path in the instance.
-    ListInstanceProjects: Get "/instances/{id}/projects", InstanceRef, CacheRead, Empty => Json<HashMap<String, ContentFile>>;
-    ListInstalledProjectIds: Get "/instances/{id}/projects/ids", InstanceRef, (), Empty => Json<Vec<String>>;
-    CheckProjectInstalled: Get "/instances/{id}/projects/installed", InstanceRef, ProjectIdQuery, Empty => Json<bool>;
+    ListInstanceProjects: Get "/instances/{id}/projects", Session, InstanceRef, CacheRead, Empty => Json<HashMap<String, ContentFile>>, client_only;
+    ListInstalledProjectIds: Get "/instances/{id}/projects/ids", Session, InstanceRef, (), Empty => Json<Vec<String>>, client_only;
+    CheckProjectInstalled: Get "/instances/{id}/projects/installed", Session, InstanceRef, ProjectIdQuery, Empty => Json<bool>, client_only;
     /// Which instances could take the project, among the targets.
-    ListInstallCandidates: Post "/install-candidates", (), (), Json<InstallCandidatesQuery> => Json<Vec<InstanceInstallCandidate>>;
+    ListInstallCandidates: Post "/install-candidates", Session, (), (), Json<InstallCandidatesQuery> => Json<Vec<InstanceInstallCandidate>>, client_only;
     /// The content outside the linked modpack, sorted by name.
-    ListContentItems: Get "/instances/{id}/content", InstanceRef, CacheRead, Empty => Json<Vec<ContentItem>>;
-    RefreshContentUpdates: Post "/instances/{id}/content/refresh-updates", InstanceRef, (), Empty => Empty;
+    ListContentItems: Get "/instances/{id}/content", Session, InstanceRef, CacheRead, Empty => Json<Vec<ContentItem>>, shared;
+    RefreshContentUpdates: Post "/instances/{id}/content/refresh-updates", Session, InstanceRef, (), Empty => Empty, shared;
     /// Indexes content files added or removed on disk.
-    SyncContentFiles: Post "/instances/{id}/content/sync", InstanceRef, (), Empty => Empty;
-    ListDependencyContentItems: Post "/content-items/dependencies", (), (), Json<DependencyContentQuery> => Json<Vec<ContentItem>>;
+    SyncContentFiles: Post "/instances/{id}/content/sync", Session, InstanceRef, (), Empty => Empty, client_only;
+    ListDependencyContentItems: Post "/content-items/dependencies", Session, (), (), Json<DependencyContentQuery> => Json<Vec<ContentItem>>, client_only;
     /// `null` when the instance follows no modpack.
-    GetLinkedModpack: Get "/instances/{id}/modpack", InstanceRef, CacheRead, Empty => Json<Option<LinkedModpackInfo>>;
-    ListLinkedModpackContent: Get "/instances/{id}/modpack/content", InstanceRef, CacheRead, Empty => Json<Vec<ContentItem>>;
+    GetLinkedModpack: Get "/instances/{id}/modpack", Session, InstanceRef, CacheRead, Empty => Json<Option<LinkedModpackInfo>>, shared, untimed;
+    ListLinkedModpackContent: Get "/instances/{id}/modpack/content", Session, InstanceRef, CacheRead, Empty => Json<Vec<ContentItem>>, shared;
     /// Answers the new file's path.
-    AddProjectFromVersion: Post "/instances/{id}/projects", InstanceRef, (), Json<NewProject> => Json<String>;
-    InstallProjectWithDependencies: Post "/instances/{id}/projects/with-dependencies", InstanceRef, (), Json<InstallProjectWithDependenciesRequest> => Json<ResolveContentPlan>;
+    AddProjectFromVersion: Post "/instances/{id}/projects", Session, InstanceRef, (), Json<NewProject> => Json<String>, shared, untimed;
+    InstallProjectWithDependencies: Post "/instances/{id}/projects/with-dependencies", Session, InstanceRef, (), Json<InstallProjectWithDependenciesRequest> => Json<ResolveContentPlan>, shared, untimed;
     /// Answers the new file's path.
-    UpdateProject: Post "/instances/{id}/projects/update", InstanceRef, (), Json<ProjectPath> => Json<String>;
+    UpdateProject: Post "/instances/{id}/projects/update", Session, InstanceRef, (), Json<ProjectPath> => Json<String>, shared, untimed;
     /// Answers the new file's path.
-    SwitchProjectVersion: Post "/instances/{id}/projects/switch-version", InstanceRef, (), Json<ProjectVersionSwitch> => Json<String>;
+    SwitchProjectVersion: Post "/instances/{id}/projects/switch-version", Session, InstanceRef, (), Json<ProjectVersionSwitch> => Json<String>, shared, untimed;
     /// Answers the file's path, which disabling renames.
-    ToggleProject: Post "/instances/{id}/projects/toggle", InstanceRef, (), Json<ProjectToggle> => Json<String>;
-    SetProjectLocked: Put "/instances/{id}/projects/locked", InstanceRef, (), Json<ProjectLock> => Empty;
-    RemoveProject: Post "/instances/{id}/projects/remove", InstanceRef, (), Json<ProjectPath> => Empty;
+    ToggleProject: Post "/instances/{id}/projects/toggle", Session, InstanceRef, (), Json<ProjectToggle> => Json<String>, shared;
+    SetProjectLocked: Put "/instances/{id}/projects/locked", Session, InstanceRef, (), Json<ProjectLock> => Empty, client_only;
+    RemoveProject: Post "/instances/{id}/projects/remove", Session, InstanceRef, (), Json<ProjectPath> => Empty, shared;
     /// Installs a Modrinth modpack version over the instance, which then follows it.
-    InstallModpack: Post "/instances/{id}/modpack", InstanceRef, (), Json<ModpackProject> => Json<InstallJobSnapshot>;
-    UpdateModpackVersion: Post "/instances/{id}/modpack/update", InstanceRef, (), Json<ModpackVersion> => Json<InstallJobSnapshot>;
+    InstallModpack: Post "/instances/{id}/modpack", Session, InstanceRef, (), Json<ModpackProject> => Json<InstallJobSnapshot>, shared, untimed;
+    UpdateModpackVersion: Post "/instances/{id}/modpack/update", Session, InstanceRef, (), Json<ModpackVersion> => Json<InstallJobSnapshot>, shared, untimed;
     /// Stops following the modpack. Its files stay.
-    UnlinkModpack: Post "/instances/{id}/modpack/unlink", InstanceRef, (), Empty => Empty;
-    RepairModpack: Post "/instances/{id}/modpack/repair", InstanceRef, (), Empty => Json<InstallJobSnapshot>;
+    UnlinkModpack: Post "/instances/{id}/modpack/unlink", Session, InstanceRef, (), Empty => Empty, shared;
+    RepairModpack: Post "/instances/{id}/modpack/repair", Session, InstanceRef, (), Empty => Json<InstallJobSnapshot>, shared, untimed;
     /// The direct children of `parent` (the instance's folder when absent) an mrpack export can
     /// include.
-    ListPackExportCandidates: Get "/instances/{id}/export-candidates", InstanceRef, ExportCandidatesQuery, Empty => Json<Vec<PackExportCandidate>>;
+    ListPackExportCandidates: Get "/instances/{id}/export-candidates", Session, InstanceRef, ExportCandidatesQuery, Empty => Json<Vec<PackExportCandidate>>, client_only;
     /// Turns an addon on or off for the server or for players. Server engines only, as are the
     /// routes below.
-    SetSide: Post "/instances/{id}/content/side", InstanceRef, (), Json<SideChange> => Empty;
-    SetSidesUnlocked: Post "/instances/{id}/content/sides-unlocked", InstanceRef, (), Json<SidesUnlocked> => Empty;
-    CompleteSideReview: Post "/instances/{id}/content/side-review", InstanceRef, (), Empty => Empty;
-    /// Places every file of the followed pack that is missing.
-    RepairContent: Post "/instances/{id}/content/repair", InstanceRef, (), Empty => Empty;
-    /// The pack files the owner edited or deleted, and what the last pack update wants for each.
-    EditedFiles: Get "/instances/{id}/content/edited", InstanceRef, (), Empty => Json<Vec<EditedFile>>;
-    DecideEdited: Post "/instances/{id}/content/edited", InstanceRef, (), Json<EditedDecision> => Empty;
-    /// Places a client-only file of the pack on the server.
-    PlaceClientOnly: Post "/instances/{id}/content/client-only", InstanceRef, (), Json<ProjectPath> => Empty;
+    SetSide: Post "/instances/{id}/content/side", Session, InstanceRef, (), Json<SideChange> => Empty, shared;
+    SetSidesUnlocked: Post "/instances/{id}/content/sides-unlocked", Session, InstanceRef, (), Json<SidesUnlocked> => Empty, shared;
+    /// Installs the followed pack again, placing every file of it that is missing or changed.
+    RepairContent: Post "/instances/{id}/content/repair", Session, InstanceRef, (), Empty => Empty, shared, untimed;
 }
 
 #[derive(Serialize, Deserialize)]
@@ -165,12 +160,4 @@ pub struct SideChange {
 pub struct SidesUnlocked {
     pub project_path: String,
     pub unlocked: bool,
-}
-
-/// Keep the owner's version of an edited file, or `replace` it with the pack's.
-#[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
-pub struct EditedDecision {
-    pub path: String,
-    pub replace: bool,
 }

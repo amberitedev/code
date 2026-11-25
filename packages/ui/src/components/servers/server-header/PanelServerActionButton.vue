@@ -86,7 +86,6 @@
 		<ServerSharePushModal
 			ref="diffModal"
 			:server-id="serverId"
-			:world-id="worldId ?? undefined"
 			:diffs="previewQuery.data.value?.items ?? []"
 			:changes-description="
 				formatMessage(previewAction === 'Restart' ? messages.restartBody : messages.startBody)
@@ -121,7 +120,7 @@ import { Button, SplitButton } from '#ui/components/base/buttons'
 import ServerSharePushModal from '#ui/components/servers/sharing/ServerSharePushModal.vue'
 import { defineMessages, useVIntl } from '#ui/composables/i18n'
 import { useServerPermissions } from '#ui/composables/server-permissions'
-import { useSharedInstanceInstalledOnce } from '#ui/composables/server-sharing/shared-instance'
+import { useServerOwnShare } from '#ui/composables/server-sharing/own-share'
 import { useServerShareReview } from '#ui/composables/server-sharing/use-server-share-review'
 import { injectModrinthServerContext } from '#ui/providers'
 
@@ -137,17 +136,11 @@ const props = withDefaults(
 )
 
 const { formatMessage } = useVIntl()
-const { serverId, worldId, serverFull } = injectModrinthServerContext()
+const { serverId } = injectModrinthServerContext()
 const { canSetup } = useServerPermissions()
-const world = computed(() => serverFull.value?.worlds.find((world) => world.id === worldId.value))
-const installedOnce = useSharedInstanceInstalledOnce(
-	computed(() => world.value?.content?.shared_instance_id ?? null),
-)
+const ownShare = useServerOwnShare()
 const needsShareReview = computed(
-	() =>
-		canSetup.value &&
-		(world.value?.content?.shared_instance_needs_update ?? false) &&
-		installedOnce.value,
+	() => canSetup.value && ownShare.needsUpdate.value && ownShare.installedOnce.value,
 )
 const previewAction = ref<'Start' | 'Restart'>('Start')
 const shareReview = useServerShareReview<'Start' | 'Restart'>({

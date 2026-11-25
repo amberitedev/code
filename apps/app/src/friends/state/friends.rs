@@ -3,6 +3,7 @@ use super::tunnel::InternalTunnelSocket;
 use crate::accounts::self_hosted::{backend, remote};
 use crate::accounts::state::ModrinthCredentials;
 use crate::presence::Presence;
+use crate::state::Desktop;
 use anyhow::bail;
 use ariadne::ids::UserId;
 use ariadne::networking::message::{
@@ -24,10 +25,12 @@ use dashmap::DashMap;
 use either::Either;
 use engine::LabrinthError;
 use engine::{
-    EventSink, FetchSemaphore, FriendPayload, FriendStatusPayload,
-    ProcessManager, Sessions, emit_friend, emit_notification, fetch_advanced,
-    fetch_json,
+    FetchSemaphore, ProcessManager, Sessions, fetch_advanced, fetch_json,
 };
+use tokio::sync::broadcast;
+
+use crate::friends::{FriendPayload, FriendStatusPayload};
+use crate::local_api::events::AppEvent;
 use futures::{SinkExt, StreamExt};
 use reqwest::Method;
 use reqwest::header::HeaderValue;
@@ -78,7 +81,7 @@ impl FriendsSocket {
         semaphore: &FetchSemaphore,
         sessions: &Sessions,
         process_manager: &ProcessManager,
-        events: &EventSink,
+        events: &broadcast::Sender<AppEvent>,
     ) -> engine::Result<()> {
         let _connection_guard = self.connection_lock.lock().await;
         if self.is_connected().await {
@@ -99,7 +102,7 @@ impl FriendsSocket {
 
             request.headers_mut().insert(
                 "User-Agent",
-                HeaderValue::from_str(&engine::launcher_user_agent()).unwrap(),
+                HeaderValue::from_str(&crate::user_agent()).unwrap(),
             );
 
             let res = connect_async(request).await;
@@ -197,25 +200,25 @@ impl FriendsSocket {
                                         match server_message {
                                             ServerToClientMessage::StatusUpdate { status } => {
                                                 statuses.insert(status.user_id, status.clone());
-                                                let _ = emit_friend(&events, FriendPayload::StatusUpdate { user_status: FriendStatusPayload { user_id: status.user_id.to_string(), profile_name: status.profile_name, last_update: status.last_update.to_rfc3339() } }).await;
+                                                let _ = events.send(AppEvent::Friend(FriendPayload::StatusUpdate { user_status: FriendStatusPayload { user_id: status.user_id.to_string(), profile_name: status.profile_name, last_update: status.last_update.to_rfc3339() } }));
                                             },
                                             ServerToClientMessage::UserOffline { id } => {
                                                 statuses.remove(&id);
-                                                let _ = emit_friend(&events, FriendPayload::UserOffline { id: id.to_string() }).await;
+                                                let _ = events.send(AppEvent::Friend(FriendPayload::UserOffline { id: id.to_string() }));
                                             }
                                             ServerToClientMessage::FriendStatuses { statuses: new_statuses } => {
                                                 statuses.clear();
                                                 new_statuses.into_iter().for_each(|status| {
                                                     statuses.insert(status.user_id, status);
                                                 });
-                                                let _ = emit_friend(&events, FriendPayload::StatusSync).await;
+                                                let _ = events.send(AppEvent::Friend(FriendPayload::StatusSync));
                                             }
                                             ServerToClientMessage::FriendRequest { from } => {
-                                                let _ = emit_friend(&events, FriendPayload::FriendRequest { from: from.to_string() }).await;
+                                                let _ = events.send(AppEvent::Friend(FriendPayload::FriendRequest { from: from.to_string() }));
                                             }
                                             ServerToClientMessage::FriendRequestRejected { from } => {
                                                 statuses.remove(&from);
-                                                let _ = emit_friend(&events, FriendPayload::FriendRequestRejected { from: from.to_string() }).await;
+                                                let _ = events.send(AppEvent::Friend(FriendPayload::FriendRequestRejected { from: from.to_string() }));
                                             },
 
                                             ServerToClientMessage::FriendSocketListening { .. } => {}, // TODO
@@ -280,7 +283,7 @@ impl FriendsSocket {
     }
 
     async fn handle_notification(
-        events: &EventSink,
+        events: &broadcast::Sender<AppEvent>,
         notification: Value,
     ) -> engine::Result<()> {
         tracing::info!(
@@ -294,7 +297,7 @@ impl FriendsSocket {
             .and_then(Value::as_str)
             .is_some()
         {
-            emit_notification(events, notification).await?;
+            let _ = events.send(AppEvent::Notification(notification));
         }
 
         Ok(())
@@ -302,7 +305,7 @@ impl FriendsSocket {
 
     #[tracing::instrument(skip_all)]
     pub async fn socket_loop(
-        state: Arc<engine::Engine>,
+        state: Desktop,
         presence: Arc<Presence>,
     ) -> engine::Result<()> {
         tokio::task::spawn(async move {
@@ -321,11 +324,11 @@ impl FriendsSocket {
                     let _ = presence
                         .friends_socket
                         .connect(
-                            crate::db::pool(&state),
+                            state.db(),
                             &state.api_semaphore,
                             &state.sessions,
                             &state.process_manager,
-                            &state.events,
+                            state.app_events(),
                         )
                         .await;
                 } else if connected

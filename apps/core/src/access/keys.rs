@@ -1,10 +1,10 @@
-//! The backend's public ticket keys ([`sharing_storage::keys`]), kept in Core's database.
+//! The backend's public ticket keys ([`sharing_client::keys`]), kept in Core's database.
 
 use contracts::tickets::PublicKeys;
-use sharing_storage::keys::Persist;
+use sharing_client::keys::Persist;
 use sqlx::SqlitePool;
 
-pub type Keys = sharing_storage::keys::Keys<Db>;
+pub type Keys = sharing_client::keys::Keys<Db>;
 
 /// The `core` table's `ticket_keys` and `ticket_keys_at`.
 pub struct Db(SqlitePool);
@@ -53,7 +53,7 @@ pub async fn load(
 
 #[cfg(test)]
 mod tests {
-    use sharing_storage::keys::test_support::Signer;
+    use sharing_client::keys::test_support::Signer;
 
     use super::*;
     use crate::db;

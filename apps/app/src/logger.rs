@@ -24,7 +24,7 @@ pub fn start_logger(_logs_dir: &std::path::Path) -> Option<()> {
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| {
             tracing_subscriber::EnvFilter::new(
-                "engine=info,theseus_gui=info,webview=trace",
+                "engine=info,amberite_app=info,webview=trace",
             )
         });
     tracing_subscriber::registry()

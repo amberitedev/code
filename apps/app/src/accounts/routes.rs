@@ -1,13 +1,13 @@
-//! Serves `crate::server::endpoints::accounts` over the App's sign-in code.
+//! Serves `crate::local_api::endpoints::accounts` over the App's sign-in code.
 
+use crate::state::Desktop;
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use axum::{Router, extract::State};
 use contracts::{
     ApiError, Empty, ErrorCode, Json,
-    server::{Req, route},
+    server::{Mount, Req},
 };
-use engine::Engine;
 use tauri::{Manager, UserAttentionType, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_opener::OpenerExt;
 use tokio::time::Instant;
@@ -26,8 +26,7 @@ use crate::{
         state::ModrinthCredentials,
     },
     desktop::{AppSlot, internal},
-    presence::Presence,
-    server::{
+    local_api::{
         AppState,
         endpoints::accounts::{
             CancelModrinthSignIn, CheckMinecraftReachable,
@@ -38,6 +37,7 @@ use crate::{
             SignInToMinecraft, SignInToModrinth, SignOutOfModrinth,
         },
     },
+    presence::Presence,
 };
 
 type Answer<T> = Result<T, ApiError>;
@@ -48,29 +48,24 @@ const MICROSOFT_REDIRECT: &str = "https://login.live.com/oauth20_desktop.srf";
 const MICROSOFT_SIGN_IN_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
 pub fn routes() -> Router<AppState> {
-    [
-        route::<CheckMinecraftReachable, _, _, _>(check_minecraft_reachable),
-        route::<SignInToMinecraft, _, _, _>(sign_in_to_minecraft),
-        route::<ListMinecraftAccounts, _, _, _>(list_minecraft_accounts),
-        route::<GetDefaultMinecraftAccount, _, _, _>(
+    Router::new()
+        .endpoint::<CheckMinecraftReachable, _, _>(check_minecraft_reachable)
+        .endpoint::<SignInToMinecraft, _, _>(sign_in_to_minecraft)
+        .endpoint::<ListMinecraftAccounts, _, _>(list_minecraft_accounts)
+        .endpoint::<GetDefaultMinecraftAccount, _, _>(
             get_default_minecraft_account,
-        ),
-        route::<SetDefaultMinecraftAccount, _, _, _>(
+        )
+        .endpoint::<SetDefaultMinecraftAccount, _, _>(
             set_default_minecraft_account,
-        ),
-        route::<RemoveMinecraftAccount, _, _, _>(remove_minecraft_account),
-        route::<SignInToModrinth, _, _, _>(sign_in_to_modrinth),
-        route::<CancelModrinthSignIn, _, _, _>(cancel_modrinth_sign_in),
-        route::<SignOutOfModrinth, _, _, _>(sign_out_of_modrinth),
-        route::<GetActiveModrinthAccount, _, _, _>(get_active_modrinth_account),
-        route::<ListModrinthAccounts, _, _, _>(list_modrinth_accounts),
-        route::<SetActiveModrinthAccount, _, _, _>(set_active_modrinth_account),
-        route::<RemoveModrinthAccount, _, _, _>(remove_modrinth_account),
-    ]
-    .into_iter()
-    .fold(Router::new(), |router, (path, method)| {
-        router.route(path, method)
-    })
+        )
+        .endpoint::<RemoveMinecraftAccount, _, _>(remove_minecraft_account)
+        .endpoint::<SignInToModrinth, _, _>(sign_in_to_modrinth)
+        .endpoint::<CancelModrinthSignIn, _, _>(cancel_modrinth_sign_in)
+        .endpoint::<SignOutOfModrinth, _, _>(sign_out_of_modrinth)
+        .endpoint::<GetActiveModrinthAccount, _, _>(get_active_modrinth_account)
+        .endpoint::<ListModrinthAccounts, _, _>(list_modrinth_accounts)
+        .endpoint::<SetActiveModrinthAccount, _, _>(set_active_modrinth_account)
+        .endpoint::<RemoveModrinthAccount, _, _>(remove_modrinth_account)
 }
 
 async fn check_minecraft_reachable(
@@ -83,7 +78,7 @@ async fn check_minecraft_reachable(
 }
 
 async fn sign_in_to_minecraft(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     State(app): State<AppSlot>,
     _: Req<SignInToMinecraft>,
 ) -> Answer<Json<MinecraftAccountSummary>> {
@@ -135,11 +130,11 @@ async fn microsoft_code(address: impl Fn() -> Option<Url>) -> Answer<String> {
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    Err(sign_in_cancelled())
+    Err(login_canceled())
 }
 
 async fn list_minecraft_accounts(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     _: Req<ListMinecraftAccounts>,
 ) -> Answer<Json<Vec<MinecraftAccountSummary>>> {
     minecraft_auth::users(&engine)
@@ -149,7 +144,7 @@ async fn list_minecraft_accounts(
 }
 
 async fn get_default_minecraft_account(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     _: Req<GetDefaultMinecraftAccount>,
 ) -> Answer<Json<Option<Uuid>>> {
     minecraft_auth::get_default_user(&engine)
@@ -159,7 +154,7 @@ async fn get_default_minecraft_account(
 }
 
 async fn set_default_minecraft_account(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { body, .. }: Req<SetDefaultMinecraftAccount>,
 ) -> Answer<Empty> {
     minecraft_auth::set_default_user(&engine, body)
@@ -169,7 +164,7 @@ async fn set_default_minecraft_account(
 }
 
 async fn remove_minecraft_account(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { params, .. }: Req<RemoveMinecraftAccount>,
 ) -> Answer<Empty> {
     minecraft_auth::remove_user(&engine, params.id)
@@ -179,9 +174,9 @@ async fn remove_minecraft_account(
 }
 
 /// The browser hands the session back to a loopback listener or through a `modrinth://auth`
-/// deep link; `crate::api::utils` delivers the deep link.
+/// deep link; `crate::desktop::opening` delivers the deep link.
 async fn sign_in_to_modrinth(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     State(presence): State<Arc<Presence>>,
     State(app): State<AppSlot>,
     Req { body, .. }: Req<SignInToModrinth>,
@@ -219,13 +214,13 @@ async fn sign_in_to_modrinth(
     Ok(Json(credentials))
 }
 
-/// Waits for the sealed session; the cancel route ends the wait with `sign_in_cancelled`.
+/// Waits for the sealed session; the cancel route ends the wait with `login_canceled`.
 async fn modrinth_session(
     mut reply: AuthReplySession,
     seal: &AuthSeal,
 ) -> Answer<String> {
     let Some(sealed) = reply.wait().await.map_err(api_error)? else {
-        return Err(sign_in_cancelled());
+        return Err(login_canceled());
     };
     seal.open(&sealed).map_err(api_error)
 }
@@ -236,7 +231,7 @@ async fn cancel_modrinth_sign_in(_: Req<CancelModrinthSignIn>) -> Empty {
 }
 
 async fn sign_out_of_modrinth(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     State(presence): State<Arc<Presence>>,
     _: Req<SignOutOfModrinth>,
 ) -> Answer<Empty> {
@@ -247,7 +242,7 @@ async fn sign_out_of_modrinth(
 }
 
 async fn get_active_modrinth_account(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     State(presence): State<Arc<Presence>>,
     _: Req<GetActiveModrinthAccount>,
 ) -> Answer<Json<Option<ModrinthCredentials>>> {
@@ -258,14 +253,14 @@ async fn get_active_modrinth_account(
 }
 
 async fn list_modrinth_accounts(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     _: Req<ListModrinthAccounts>,
 ) -> Answer<Json<Vec<ModrinthCredentials>>> {
     mr_auth::get_all(&engine).await.map(Json).map_err(api_error)
 }
 
 async fn set_active_modrinth_account(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     State(presence): State<Arc<Presence>>,
     Req { body, .. }: Req<SetActiveModrinthAccount>,
 ) -> Answer<Empty> {
@@ -276,7 +271,7 @@ async fn set_active_modrinth_account(
 }
 
 async fn remove_modrinth_account(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     State(presence): State<Arc<Presence>>,
     Req { params, .. }: Req<RemoveModrinthAccount>,
 ) -> Answer<Empty> {
@@ -286,8 +281,8 @@ async fn remove_modrinth_account(
         .map_err(api_error)
 }
 
-fn sign_in_cancelled() -> ApiError {
-    ApiError::new(ErrorCode::SignInCancelled, "Sign-in was cancelled")
+fn login_canceled() -> ApiError {
+    ApiError::new(ErrorCode::LoginCanceled, "Sign-in was canceled")
 }
 
 fn auth_request_url(
@@ -322,7 +317,7 @@ mod tests {
     async fn closing_the_microsoft_window_cancels_and_its_redirect_gives_the_code()
      {
         let closed = microsoft_code(|| None).await.unwrap_err();
-        assert_eq!(closed.error, ErrorCode::SignInCancelled);
+        assert_eq!(closed.error, ErrorCode::LoginCanceled);
 
         let redirect = Url::parse(
             "https://login.live.com/oauth20_desktop.srf?code=M.code&lc=1033",
@@ -333,7 +328,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cancelling_a_modrinth_sign_in_answers_sign_in_cancelled() {
+    async fn cancelling_a_modrinth_sign_in_answers_login_canceled() {
         let seal = AuthSeal::generate();
         let mut reply = AuthReplySession::start(seal.nonce().to_string());
         reply.socket_addr().await.unwrap();
@@ -343,6 +338,6 @@ mod tests {
         cancel_pending_auth();
 
         let cancelled = waiting.await.unwrap().unwrap_err();
-        assert_eq!(cancelled.error, ErrorCode::SignInCancelled);
+        assert_eq!(cancelled.error, ErrorCode::LoginCanceled);
     }
 }

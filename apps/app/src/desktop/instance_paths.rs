@@ -1,13 +1,14 @@
-use std::{path::PathBuf, sync::Arc};
+use crate::state::Desktop;
+use std::path::PathBuf;
 
 use axum::{Router, extract::State};
 use contracts::{
     ApiError, Empty, Json,
-    server::{Req, route},
+    server::{Mount, Req},
 };
-use engine::{Engine, routes::api_error};
+use engine::routes::api_error;
 
-use crate::server::{
+use crate::local_api::{
     AppState,
     endpoints::instance_paths::{
         AddProjectFromPath, CheckFileOnModrinth, ExportMrpack,
@@ -16,22 +17,17 @@ use crate::server::{
 };
 
 pub fn routes() -> Router<AppState> {
-    [
-        route::<GetInstancePath, _, _, _>(get_instance_path),
-        route::<GetInstanceContentPath, _, _, _>(get_instance_content_path),
-        route::<AddProjectFromPath, _, _, _>(add_project_from_path),
-        route::<CheckFileOnModrinth, _, _, _>(check_file_on_modrinth),
-        route::<ExportMrpack, _, _, _>(export_mrpack),
-        route::<SetInstanceIconFromPath, _, _, _>(set_instance_icon_from_path),
-    ]
-    .into_iter()
-    .fold(Router::new(), |router, (path, method)| {
-        router.route(path, method)
-    })
+    Router::new()
+        .endpoint::<GetInstancePath, _, _>(get_instance_path)
+        .endpoint::<GetInstanceContentPath, _, _>(get_instance_content_path)
+        .endpoint::<AddProjectFromPath, _, _>(add_project_from_path)
+        .endpoint::<CheckFileOnModrinth, _, _>(check_file_on_modrinth)
+        .endpoint::<ExportMrpack, _, _>(export_mrpack)
+        .endpoint::<SetInstanceIconFromPath, _, _>(set_instance_icon_from_path)
 }
 
 async fn get_instance_path(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     request: Req<GetInstancePath>,
 ) -> Result<Json<PathBuf>, ApiError> {
     engine::instance::get_full_path(&engine, &request.params.id)
@@ -41,7 +37,7 @@ async fn get_instance_path(
 }
 
 async fn get_instance_content_path(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     request: Req<GetInstanceContentPath>,
 ) -> Result<Json<PathBuf>, ApiError> {
     engine::instance::get_mod_full_path(
@@ -55,7 +51,7 @@ async fn get_instance_content_path(
 }
 
 async fn add_project_from_path(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     request: Req<AddProjectFromPath>,
 ) -> Result<Json<String>, ApiError> {
     let project = request.body;
@@ -71,7 +67,7 @@ async fn add_project_from_path(
 }
 
 async fn check_file_on_modrinth(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     request: Req<CheckFileOnModrinth>,
 ) -> Result<Json<bool>, ApiError> {
     engine::instance::is_file_on_modrinth(&engine, &request.body.path)
@@ -81,7 +77,7 @@ async fn check_file_on_modrinth(
 }
 
 async fn export_mrpack(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     request: Req<ExportMrpack>,
 ) -> Result<Empty, ApiError> {
     let export = request.body;
@@ -101,7 +97,7 @@ async fn export_mrpack(
 }
 
 async fn set_instance_icon_from_path(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     request: Req<SetInstanceIconFromPath>,
 ) -> Result<Empty, ApiError> {
     engine::instance::edit_icon(

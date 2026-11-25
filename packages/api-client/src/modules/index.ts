@@ -1,36 +1,11 @@
 import type { AbstractModrinthClient } from '../core/abstract-client'
 import type { AbstractModule } from '../core/abstract-module'
-import { ArchonCoresV1Module } from '../cores/v1'
 import { SharedInstancesPlayersV1Module } from '../sharing/players/v1'
-import { ArchonActionsV1Module } from './archon/actions/v1'
-import { ArchonBackupRepositoriesInternalModule } from './archon/backup-repositories/internal'
-import { ArchonBackupsV1Module } from './archon/backups/v1'
-import { ArchonBackupsQueueV1Module } from './archon/backups-queue/v1'
-import { ArchonContentV1Module } from './archon/content/v1'
-import { ArchonIconsV1Module } from './archon/icons/v1'
-import { ArchonNodesInternalModule } from './archon/nodes/internal'
-import { ArchonNoticesV0Module } from './archon/notices/v0'
-import { ArchonOptionsV1Module } from './archon/options/v1'
-import { ArchonPropertiesV1Module } from './archon/properties/v1'
-import { ArchonServersInternalModule } from './archon/servers/internal'
-import { ArchonServersV0Module } from './archon/servers/v0'
-import { ArchonServersV1Module } from './archon/servers/v1'
-import { ArchonTransfersInternalModule } from './archon/transfers/internal'
 import { ISO3166Module } from './iso3166'
-import { KyrosBackupsV1Module } from './kyros/backups/v1'
-import { KyrosContentV1Module } from './kyros/content/v1'
-import { KyrosFilesV0Module } from './kyros/files/v0'
-import { KyrosFilesV1Module } from './kyros/files/v1'
-import { KyrosFlameAnvilV1Module } from './kyros/flameanvil/v1'
-import { KyrosLogsV1Module } from './kyros/logs/v1'
-import { KyrosUploadSessionsV1Module } from './kyros/upload-sessions/v1'
 import { LabrinthVersionsV2Module, LabrinthVersionsV3Module } from './labrinth'
-import { LabrinthAnalyticsInternalModule } from './labrinth/analytics/internal'
-import { LabrinthAnalyticsV3Module } from './labrinth/analytics/v3'
 import { LabrinthAttributionInternalModule } from './labrinth/attribution/internal'
 import { LabrinthAuthInternalModule } from './labrinth/auth/internal'
 import { LabrinthAuthV2Module } from './labrinth/auth/v2'
-import { LabrinthBillingInternalModule } from './labrinth/billing/internal'
 import { LabrinthBlockedUsersInternalModule } from './labrinth/blocked-users/internal'
 import { LabrinthBlockedUsersV3Module } from './labrinth/blocked-users/v3'
 import { LabrinthCampaignInternalModule } from './labrinth/campaign/internal'
@@ -47,8 +22,6 @@ import { LabrinthNotificationsV2Module } from './labrinth/notifications/v2'
 import { LabrinthOAuthInternalModule } from './labrinth/oauth/internal'
 import { LabrinthOrganizationsV3Module } from './labrinth/organizations/v3'
 import { LabrinthPatsV2Module } from './labrinth/pats/v2'
-import { LabrinthPayoutV3Module } from './labrinth/payout/v3'
-import { LabrinthPayoutsV3Module } from './labrinth/payouts/v3'
 import { LabrinthProjectsV2Module } from './labrinth/projects/v2'
 import { LabrinthProjectsV3Module } from './labrinth/projects/v3'
 import { LabrinthReportsV3Module } from './labrinth/reports/v3'
@@ -58,7 +31,6 @@ import { LabrinthStateModule } from './labrinth/state'
 import { LabrinthTagsV2Module } from './labrinth/tags/v2'
 import { LabrinthTeamsV2Module } from './labrinth/teams/v2'
 import { LabrinthTeamsV3Module } from './labrinth/teams/v3'
-import { LabrinthTechReviewInternalModule } from './labrinth/tech-review/internal'
 import { LabrinthThreadsV3Module } from './labrinth/threads/v3'
 import { LabrinthUsersV2Module } from './labrinth/users/v2'
 import { LabrinthUsersV3Module } from './labrinth/users/v3'
@@ -84,38 +56,13 @@ type ModuleConstructor = new (client: AbstractModrinthClient) => AbstractModule
  * TODO: Better way? Probably not
  */
 export const MODULE_REGISTRY = {
-	archon_actions_v1: ArchonActionsV1Module,
-	archon_backup_repositories_internal: ArchonBackupRepositoriesInternalModule,
-	archon_backups_queue_v1: ArchonBackupsQueueV1Module,
-	archon_backups_v1: ArchonBackupsV1Module,
-	archon_content_v1: ArchonContentV1Module,
-	archon_cores_v1: ArchonCoresV1Module,
-	archon_icons_v1: ArchonIconsV1Module,
-	archon_nodes_internal: ArchonNodesInternalModule,
-	archon_notices_v0: ArchonNoticesV0Module,
-	archon_options_v1: ArchonOptionsV1Module,
-	archon_properties_v1: ArchonPropertiesV1Module,
-	archon_servers_internal: ArchonServersInternalModule,
-	archon_servers_v0: ArchonServersV0Module,
-	archon_servers_v1: ArchonServersV1Module,
-	archon_transfers_internal: ArchonTransfersInternalModule,
 	iso3166_data: ISO3166Module,
 	mclogs_insights_v1: MclogsInsightsV1Module,
 	mclogs_logs_v1: MclogsLogsV1Module,
 	launchermeta_manifest_v0: LauncherMetaManifestV0Module,
-	kyros_backups_v1: KyrosBackupsV1Module,
-	kyros_content_v1: KyrosContentV1Module,
-	kyros_files_v0: KyrosFilesV0Module,
-	kyros_files_v1: KyrosFilesV1Module,
-	kyros_flameanvil_v1: KyrosFlameAnvilV1Module,
-	kyros_logs_v1: KyrosLogsV1Module,
-	kyros_upload_sessions_v1: KyrosUploadSessionsV1Module,
-	labrinth_analytics_internal: LabrinthAnalyticsInternalModule,
-	labrinth_analytics_v3: LabrinthAnalyticsV3Module,
 	labrinth_auth_internal: LabrinthAuthInternalModule,
 	labrinth_auth_v2: LabrinthAuthV2Module,
 	labrinth_attribution_internal: LabrinthAttributionInternalModule,
-	labrinth_billing_internal: LabrinthBillingInternalModule,
 	labrinth_blocked_users_internal: LabrinthBlockedUsersInternalModule,
 	labrinth_blocked_users_v3: LabrinthBlockedUsersV3Module,
 	labrinth_campaign_internal: LabrinthCampaignInternalModule,
@@ -132,8 +79,6 @@ export const MODULE_REGISTRY = {
 	labrinth_organizations_v3: LabrinthOrganizationsV3Module,
 	labrinth_pats_v2: LabrinthPatsV2Module,
 	labrinth_limits_v3: LabrinthLimitsV3Module,
-	labrinth_payout_v3: LabrinthPayoutV3Module,
-	labrinth_payouts_v3: LabrinthPayoutsV3Module,
 	labrinth_projects_v2: LabrinthProjectsV2Module,
 	labrinth_projects_v3: LabrinthProjectsV3Module,
 	labrinth_reports_v3: LabrinthReportsV3Module,
@@ -143,7 +88,6 @@ export const MODULE_REGISTRY = {
 	labrinth_tags_v2: LabrinthTagsV2Module,
 	labrinth_teams_v2: LabrinthTeamsV2Module,
 	labrinth_teams_v3: LabrinthTeamsV3Module,
-	labrinth_tech_review_internal: LabrinthTechReviewInternalModule,
 	labrinth_threads_v3: LabrinthThreadsV3Module,
 	labrinth_users_v2: LabrinthUsersV2Module,
 	labrinth_users_v3: LabrinthUsersV3Module,

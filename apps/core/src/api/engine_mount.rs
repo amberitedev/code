@@ -1,45 +1,42 @@
-//! The engine's content, share, file, upload and icon routes on a Core, behind `CoreAccess`. Only
-//! the routes listed here are mounted: none whose body or answer carries a host path, none of the
-//! engine-wide routes for settings, the store, caches, Java or processes, and not the engine's
-//! edit-instance route, which writes launch hooks, Java and environment variables (`api::servers`
-//! changes a server's name and update channel itself). A change is logged; a content change also
-//! holds the server, so it is refused while the server runs or installs. Its [`Hook`] says what
-//! else it does.
+//! The engine's content, share, install job list, file, upload, icon and log routes on a Core,
+//! behind `CoreAccess`: every engine route declared `shared`, and no `client_only` one (the tests
+//! check both). None carries a host path, reaches the engine's settings, store, caches, Java or
+//! processes, or edits the instance, which writes launch hooks, Java and environment variables
+//! (`api::servers` changes a server's name and update channel itself). A server's live console is
+//! Core's own. A change is logged; a content change also holds the server, so it is refused while
+//! the server runs or installs. Its [`Hook`] says what else it does.
 
-use std::{io::Cursor, sync::Arc, time::Duration};
+use std::{io::Cursor, sync::Arc};
 
 use axum::{
-    Router,
-    extract::{FromRequestParts, Path, RawPathParams, Request, State},
+    extract::{FromRequestParts, RawPathParams, Request, State},
     handler::Handler,
     response::{IntoResponse, Response},
 };
 use contracts::{
     ApiError, ErrorCode, Json,
     backend::cores::ForgottenServer,
-    core::Action,
-    server::{Req, route},
+    core::{Action, ExportModpack},
+    server::{Mount, Req},
 };
 use engine::{
     Engine,
-    access::{Edit, InstanceAccess},
+    access::InstanceAccess,
     data::ResolveContentPlan,
-    endpoints::{content::*, files::*, install::*, sharing::*},
-    instance::SharedInstancePublishPreview,
+    endpoints::{content::*, files::*, install::*, logs::*, sharing::*},
     routes::{self as engine_routes, api_error},
 };
 use futures::future::BoxFuture;
 use uuid::Uuid;
 
-use super::{CoreState, Shared, backups::zip_response, internal, world};
+use super::{CoreState, Shared, backups::zip_response, internal};
 use crate::{
-    access::{Caller, Permission, activity, owed::OwedCall},
+    access::{Caller, activity, owed::OwedCall},
     servers::{Hold, ServerError, server_rows},
 };
 
 #[derive(Clone, Copy)]
 struct Hook {
-    level: Permission,
     /// Refused while the server runs or installs (`Servers::hold`).
     hold: bool,
     /// Back the world up before the change.
@@ -54,20 +51,15 @@ struct Hook {
 }
 
 const EDIT: Hook = Hook {
-    level: Permission::Edit,
     hold: true,
     backup: false,
     forget_players: false,
     job: false,
     icon: false,
 };
-const OWNER: Hook = Hook {
-    level: Permission::Owner,
-    ..EDIT
-};
 const SHARE: Hook = Hook {
     hold: false,
-    ..OWNER
+    ..EDIT
 };
 const JOB: Hook = Hook { job: true, ..EDIT };
 const BACKUP_JOB: Hook = Hook {
@@ -81,146 +73,124 @@ const FILE: Hook = Hook {
 };
 const ICON: Hook = Hook { icon: true, ..FILE };
 
-/// Routes that answer within the request timeout.
-pub fn routes() -> Router<Shared> {
+/// Routes that answer within the request timeout. Each of these takes `Router::new()`; the tests
+/// list what they mount.
+pub fn routes<M: Mount<Shared>>(mount: M) -> M {
     use engine_routes::*;
-    [
-        route::<ListContentItems, _, _, _>(list_content_items),
-        route::<ListLinkedModpackContent, _, _, _>(list_linked_modpack_content),
-        route::<RefreshContentUpdates, _, _, _>(refresh_content_updates),
-        route::<GetSharedInstanceHistory, _, _, _>(get_shared_instance_history),
-        route::<GetSharedInstancePublishPreview, _, _, _>(publish_preview),
-        route::<ToggleProject, _, _, _>(change(EDIT, toggle_project)),
-        route::<RemoveProject, _, _, _>(change(EDIT, remove_project)),
-        route::<SetSide, _, _, _>(change(EDIT, set_side)),
-        route::<SetSidesUnlocked, _, _, _>(change(EDIT, set_sides_unlocked)),
-        route::<CompleteSideReview, _, _, _>(change(
-            EDIT,
-            complete_side_review,
-        )),
-        route::<UnlinkModpack, _, _, _>(change(EDIT, unlink_modpack)),
-        route::<DeleteSharedInstanceVersion, _, _, _>(change(
+    mount
+        .endpoint::<ListContentItems, _, _>(list_content_items)
+        .endpoint::<ListLinkedModpackContent, _, _>(list_linked_modpack_content)
+        .endpoint::<RefreshContentUpdates, _, _>(refresh_content_updates)
+        .endpoint::<GetSharedInstanceHistory, _, _>(get_shared_instance_history)
+        .endpoint::<GetSharedInstancePublishPreview, _, _>(
+            get_shared_instance_publish_preview,
+        )
+        .endpoint::<ToggleProject, _, _>(change(EDIT, toggle_project))
+        .endpoint::<RemoveProject, _, _>(change(EDIT, remove_project))
+        .endpoint::<SetSide, _, _>(change(EDIT, set_side))
+        .endpoint::<SetSidesUnlocked, _, _>(change(EDIT, set_sides_unlocked))
+        .endpoint::<UnlinkModpack, _, _>(change(EDIT, unlink_modpack))
+        .endpoint::<DeleteSharedInstanceVersion, _, _>(change(
             SHARE,
             delete_shared_instance_version,
-        )),
-        route::<UnpublishSharedInstance, _, _, _>(change(
+        ))
+        .endpoint::<UnpublishSharedInstance, _, _>(change(
             SHARE,
             unpublish_shared_instance,
-        )),
-        route::<UnlinkSharedInstance, _, _, _>(change(
+        ))
+        .endpoint::<UnlinkSharedInstance, _, _>(change(
             Hook {
                 forget_players: true,
-                ..OWNER
+                ..EDIT
             },
             unlink_shared_instance,
-        )),
-        route::<ListInstanceFiles, _, _, _>(list_instance_files),
-        route::<StatInstanceFile, _, _, _>(stat_instance_file),
-        route::<CreateInstanceDirectory, _, _, _>(change(
+        ))
+        .endpoint::<ListInstanceFiles, _, _>(list_instance_files)
+        .endpoint::<StatInstanceFile, _, _>(stat_instance_file)
+        .endpoint::<CreateInstanceDirectory, _, _>(change(
             FILE,
             create_instance_directory,
-        )),
-        route::<MoveInstanceFile, _, _, _>(change(FILE, move_instance_file)),
-        route::<DeleteInstanceFile, _, _, _>(change(
+        ))
+        .endpoint::<MoveInstanceFile, _, _>(change(FILE, move_instance_file))
+        .endpoint::<DeleteInstanceFile, _, _>(change(
             FILE,
             delete_instance_file,
-        )),
-        route::<OpenInstanceUpload, _, _, _>(open_instance_upload),
-        route::<GetInstanceUpload, _, _, _>(get_instance_upload),
-        route::<CancelInstanceUpload, _, _, _>(cancel_instance_upload),
-        route::<GetInstanceIcon, _, _, _>(get_instance_icon),
-        route::<SetInstanceIcon, _, _, _>(change(ICON, set_instance_icon)),
-        route::<SetEditedInstanceIcon, _, _, _>(change(
+        ))
+        .endpoint::<OpenInstanceUpload, _, _>(open_instance_upload)
+        .endpoint::<GetInstanceUpload, _, _>(get_instance_upload)
+        .endpoint::<CancelInstanceUpload, _, _>(cancel_instance_upload)
+        .endpoint::<GetInstanceIcon, _, _>(get_instance_icon)
+        .endpoint::<SetInstanceIcon, _, _>(change(ICON, set_instance_icon))
+        .endpoint::<SetEditedInstanceIcon, _, _>(change(
             ICON,
             set_edited_instance_icon,
-        )),
-        route::<RemoveInstanceIcon, _, _, _>(change(
+        ))
+        .endpoint::<RemoveInstanceIcon, _, _>(change(
             ICON,
             remove_instance_icon,
-        )),
-    ]
-    .into_iter()
-    .fold(Router::new(), |router, (path, method)| {
-        router.route(path, method)
-    })
+        ))
+        .endpoint::<DeleteInstanceLog, _, _>(change(FILE, delete_instance_log))
+        .endpoint::<ListInstallJobs, _, _>(list_install_jobs)
 }
 
-/// Routes that download, or back the world up, first, or go through whole files and folders, which
-/// can take longer than the request timeout, and reads at the same paths.
-pub fn long_routes() -> Router<Shared> {
+/// The `untimed` routes: they download, or back the world up, first, or go through whole files and
+/// folders, which can take longer than the request timeout, and reads at the same paths.
+pub fn long_routes<M: Mount<Shared>>(mount: M) -> M {
     use engine_routes::*;
-    [
-        route::<GetLinkedModpack, _, _, _>(get_linked_modpack),
-        route::<EditedFiles, _, _, _>(edited_files),
-        route::<AddProjectFromVersion, _, _, _>(change(
+    mount
+        .endpoint::<GetLinkedModpack, _, _>(get_linked_modpack)
+        .endpoint::<AddProjectFromVersion, _, _>(change(
             EDIT,
             add_project_from_version,
-        )),
-        route::<InstallProjectWithDependencies, _, _, _>(change(
+        ))
+        .endpoint::<InstallProjectWithDependencies, _, _>(change(
             EDIT,
             install_with_dependencies,
-        )),
-        route::<UpdateProject, _, _, _>(change(EDIT, update_project)),
-        route::<SwitchProjectVersion, _, _, _>(change(
+        ))
+        .endpoint::<UpdateProject, _, _>(change(EDIT, update_project))
+        .endpoint::<SwitchProjectVersion, _, _>(change(
             EDIT,
             switch_project_version,
-        )),
-        route::<DecideEdited, _, _, _>(change(EDIT, decide_edited)),
-        route::<PlaceClientOnly, _, _, _>(change(EDIT, place_client_only)),
-        route::<RepairContent, _, _, _>(change(EDIT, repair_content)),
-        route::<UpdateInstanceContent, _, _, _>(change(
+        ))
+        .endpoint::<RepairContent, _, _>(change(EDIT, repair_content))
+        .endpoint::<UpdateInstanceContent, _, _>(change(
             JOB,
             update_instance_content,
-        )),
-        route::<RepairModpack, _, _, _>(change(JOB, repair_modpack)),
-        route::<InstallModpack, _, _, _>(change(BACKUP_JOB, install_modpack)),
-        route::<UpdateModpackVersion, _, _, _>(change(
+        ))
+        .endpoint::<RepairModpack, _, _>(change(JOB, repair_modpack))
+        .endpoint::<InstallModpack, _, _>(change(BACKUP_JOB, install_modpack))
+        .endpoint::<UpdateModpackVersion, _, _>(change(
             BACKUP_JOB,
             update_modpack_version,
-        )),
-        route::<RestoreSharedInstanceVersion, _, _, _>(change(
-            Hook {
-                level: Permission::Owner,
-                ..BACKUP_JOB
-            },
+        ))
+        .endpoint::<RestoreSharedInstanceVersion, _, _>(change(
+            BACKUP_JOB,
             restore_shared_instance_version,
-        )),
-        route::<ReadInstanceFile, _, _, _>(read_instance_file),
-        route::<ExtractInstanceZip, _, _, _>(extract_zip),
-        route::<ZipInstanceFiles, _, _, _>(change(FILE, zip_instance_files)),
-        route::<FinalizeInstanceUpload, _, _, _>(change(
+        ))
+        .endpoint::<ReadInstanceFile, _, _>(read_instance_file)
+        .endpoint::<ExtractInstanceZip, _, _>(extract_zip)
+        .endpoint::<ZipInstanceFiles, _, _>(change(FILE, zip_instance_files))
+        .endpoint::<FinalizeInstanceUpload, _, _>(change(
             FILE,
             finalize_instance_upload,
-        )),
-    ]
-    .into_iter()
-    .fold(Router::new(), |router, (path, method)| {
-        router.route(path, method)
-    })
-    .route(
-        "/servers/{id}/v1/worlds/{wid}/content/export-mrpack",
-        axum::routing::get(export_mrpack),
-    )
+        ))
+        .endpoint::<ListInstanceLogs, _, _>(list_instance_logs)
+        .endpoint::<GetInstanceLogOutput, _, _>(get_instance_log_output)
 }
 
 /// Routes whose body is a file of any size.
-pub fn upload_routes() -> Router<Shared> {
+pub fn upload_routes<M: Mount<Shared>>(mount: M) -> M {
     use engine_routes::*;
-    [
-        route::<WriteInstanceFile, _, _, _>(change(FILE, write_instance_file)),
-        route::<AddInstanceUploadFile, _, _, _>(add_instance_upload_file),
-    ]
-    .into_iter()
-    .fold(Router::new(), |router, (path, method)| {
-        router.route(path, method)
-    })
+    mount
+        .endpoint::<WriteInstanceFile, _, _>(change(FILE, write_instance_file))
+        .endpoint::<AddInstanceUploadFile, _, _>(add_instance_upload_file)
 }
 
 /// A dry run changes nothing, so only a real one is logged.
 async fn extract_zip(
     State(state): State<Arc<CoreState>>,
     engine: State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<ExtractInstanceZip>,
 ) -> Result<Json<Option<ExtractDryRunResult>>, ApiError> {
     let (caller, id) = (instance.caller.clone(), instance.id.clone());
@@ -234,18 +204,17 @@ async fn extract_zip(
     Ok(extracted)
 }
 
-/// `GET /servers/{id}/v1/worlds/{wid}/content/export-mrpack`: the server's content as an
-/// `.mrpack`, written to its staging folder, streamed, then removed. The App saves it natively, so
-/// it asks for a link first (`access::links`). A server exports what upstream's export selects by
-/// default: its content folders and `config/`.
-async fn export_mrpack(
+/// [`ExportModpack`](contracts::core::ExportModpack): the server's content as an `.mrpack`, written
+/// to its staging folder, streamed, then removed. A server exports what upstream's export selects
+/// by default, with its plugins and its world's datapacks.
+pub(super) async fn export_mrpack(
     caller: Caller,
     State(state): State<Arc<CoreState>>,
-    Path((id, wid)): Path<(String, String)>,
+    Req { params, .. }: Req<ExportModpack>,
 ) -> Result<Response, ApiError> {
-    world(&id, &wid)?;
-    state.access.require(&caller, &id, Permission::Edit).await?;
-    let server = server_rows::get(&state.db, &id)
+    let id = params.id;
+    state.access.require(&caller, &id).await?;
+    let server = server_rows::get(&state.db, &state.engine, &id)
         .await
         .map_err(internal)?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
@@ -258,9 +227,10 @@ async fn export_mrpack(
         engine::sandbox::Folder::open(&state.servers.paths().server(&id))
             .map_err(internal)?
             .level_name();
-    let included = ["mods", "plugins", "config"]
-        .map(str::to_owned)
-        .into_iter()
+    let included = engine::instance::DEFAULT_SELECTED_EXPORT_PATH_PREFIXES
+        .iter()
+        .chain(&["plugins"])
+        .map(|path| (*path).to_owned())
         .chain([format!("{level}/datapacks")])
         .collect();
     let exported = engine::instance::export_mrpack(
@@ -282,24 +252,11 @@ async fn export_mrpack(
     Ok(zip_response(file, &server.name, "mrpack", Some(path)))
 }
 
-/// What a push would change. The engine's route is for the share's owner, and on a Core the owner
-/// is the Core.
-async fn publish_preview(
-    State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
-    _: Req<GetSharedInstancePublishPreview>,
-) -> Result<Json<Option<SharedInstancePublishPreview>>, ApiError> {
-    engine::instance::get_shared_instance_publish_preview(&engine, &instance.id)
-        .await
-        .map(Json)
-        .map_err(api_error)
-}
-
 /// The engine's route answers before the content is written. Here the answer waits for it, so the
 /// server stays held until it is and a failed download reaches the caller.
 async fn install_with_dependencies(
     State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess<Edit>,
+    instance: InstanceAccess,
     request: Req<InstallProjectWithDependencies>,
 ) -> Result<Json<ResolveContentPlan>, ApiError> {
     let plan = engine::instance::resolve_project_with_dependencies(
@@ -358,7 +315,10 @@ where
         .find_map(|(name, value)| (name == "id").then(|| value.to_owned()))
         .expect("an instance route has an {id} segment");
     let state = Arc::clone(&shared.0);
-    state.access.require(&caller, &id, hook.level).await?;
+    state.access.require(&caller, &id).await?;
+    if hook.hold && state.servers.engine_installing(&id).await? {
+        return Err(ServerError::Installing.into());
+    }
     let hold = hook.hold.then(|| state.servers.hold(&id)).transpose()?;
     if hook.backup {
         state.backups.pre_update(&id).await?;
@@ -479,10 +439,95 @@ async fn wait_for_jobs(state: &CoreState, id: &str) {
         .await
         {
             Ok(jobs) if jobs.is_empty() => break,
-            Ok(_) => tokio::time::sleep(Duration::from_secs(1)).await,
+            Ok(jobs) => {
+                for job in jobs {
+                    // Returns once the job ended, however it ended.
+                    let _ = engine::install::runner::wait_for_job(
+                        job.id,
+                        &state.engine,
+                    )
+                    .await;
+                }
+            }
             Err(error) => {
                 tracing::warn!(server = %id, %error, "could not follow the install");
                 return;
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use axum::handler::Handler;
+    use contracts::{Endpoint, Method, Reach, server::Mount};
+
+    use super::Shared;
+
+    /// What a mount function mounts.
+    #[derive(Default)]
+    struct Mounted(Vec<(Method, &'static str, bool)>);
+
+    impl Mount<Shared> for Mounted {
+        fn endpoint<E: Endpoint, H: Handler<T, Shared>, T: 'static>(
+            mut self,
+            _: H,
+        ) -> Self {
+            self.0.push((E::METHOD, E::PATH, E::UNTIMED));
+            self
+        }
+    }
+
+    #[test]
+    fn a_core_mounts_every_shared_engine_route_and_no_other() {
+        let engine_routes =
+            || engine::endpoints::ROUTES.iter().copied().flatten();
+        let mounted: BTreeSet<_> = [
+            super::routes::<Mounted>,
+            super::long_routes::<Mounted>,
+            super::upload_routes::<Mounted>,
+        ]
+        .into_iter()
+        .flat_map(|mount| mount(Mounted::default()).0)
+        .map(|(method, path, _)| {
+            engine_routes()
+                .find(|route| route.method == method && route.path == path)
+                .map_or(path, |route| route.name)
+        })
+        .collect();
+        let shared: BTreeSet<_> = engine_routes()
+            .filter(|route| route.reach == Some(Reach::Shared))
+            .map(|route| route.name)
+            .collect();
+        assert_eq!(mounted, shared);
+    }
+
+    /// The TypeScript client times every call but the `untimed` ones out, so those are exactly the
+    /// routes a Core mounts outside its request timeout.
+    #[test]
+    fn the_routes_outside_the_request_timeout_are_the_untimed_ones() {
+        let mounted =
+            |mount: fn(Mounted) -> Mounted| mount(Mounted::default()).0;
+        let timed = mounted(crate::api::timed_routes::<Mounted>);
+        let outside = mounted(crate::api::untimed_routes::<Mounted>);
+        assert!(timed.iter().all(|&(.., untimed)| !untimed));
+        assert!(outside.iter().all(|&(.., untimed)| untimed));
+        let shared = engine::endpoints::ROUTES
+            .iter()
+            .copied()
+            .flatten()
+            .filter(|route| route.reach == Some(Reach::Shared));
+        for route in contracts::core::ROUTES.iter().chain(shared) {
+            if route.untimed {
+                assert!(
+                    outside.iter().any(|&(method, path, _)| {
+                        method == route.method && path == route.path
+                    }),
+                    "{} is untimed but mounted inside the timeout",
+                    route.name
+                );
             }
         }
     }

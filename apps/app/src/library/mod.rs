@@ -1,6 +1,8 @@
+pub mod groups;
 mod hidden;
 pub mod hidden_instances;
 pub mod install;
+pub mod join_log;
 pub(crate) mod recent_icons;
 pub mod routes;
 pub mod sharing;

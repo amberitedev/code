@@ -1,3 +1,4 @@
+import type { CachedSharedInstanceSummary } from '@amberite/contracts/engine'
 import type { AbstractModrinthClient, Labrinth } from '@modrinth/api-client'
 import type { QueryClient } from '@tanstack/vue-query'
 
@@ -6,7 +7,6 @@ import { get_user, get_user_many } from '@/helpers/cache.js'
 import { install_get_shared_instance_preview } from '@/helpers/install'
 import { shared_icon_path } from '@/helpers/instance'
 import type { InstanceLoader } from '@/helpers/types'
-import type { CachedSharedInstanceSummary } from '@/platform/app-lib/shared-instances/commands'
 
 import type { UninstalledSharedInstance } from './types'
 

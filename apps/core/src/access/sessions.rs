@@ -191,9 +191,9 @@ fn session(row: Row, current: Option<&str>) -> CoreSession {
             avatar_url,
         },
         device_name,
-        created_at,
-        last_used_at,
-        expires_at: expires_at.min(last_used_at + IDLE_S),
+        created_at: super::at(created_at),
+        last_used_at: super::at(last_used_at),
+        expires_at: super::at(expires_at.min(last_used_at + IDLE_S)),
     }
 }
 

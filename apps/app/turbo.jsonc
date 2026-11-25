@@ -2,7 +2,7 @@
 	"$schema": "../../node_modules/turbo/schema.json",
 	"extends": ["//"],
 	"tasks": {
-		// Turborepo derives Cargo inputs for the `theseus_gui` crate, but not for the
+		// Turborepo derives Cargo inputs for the `amberite-app` crate, but not for the
 		// `@modrinth/app` pnpm package in this directory, whose scripts also compile it.
 		// The Cargo workspace files and sibling crates are hashed explicitly for those.
 		// The engine entries mirror the rerun-if-changed list in its build.rs

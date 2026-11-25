@@ -16,24 +16,20 @@ mod tls;
 use std::sync::{Arc, Mutex};
 
 use axum::{Router, extract::State};
-use bytes::Bytes;
 use contracts::{
-    ApiError, Empty, ErrorCode, Json,
-    core::CoreSession,
-    server::{Req, route},
+    ApiError, Empty, Endpoint, ErrorCode, Json,
+    client::{CallError, Encode, Reply, request, response},
+    core::{CoreSession, NewSession, SignIn, SignOut},
+    server::{Mount, Req},
 };
 use http_body_util::Full;
-use hyper::{
-    Method, Request,
-    header::{AUTHORIZATION, CONTENT_TYPE, HOST},
-};
-use serde_json::{Value, json};
+use hyper::header::HOST;
 
 use self::{
     sessions::{Key, Sessions},
     tls::Target,
 };
-use crate::server::endpoints::cores::{
+use crate::local_api::endpoints::cores::{
     CheckCoreSession, ConnectCore, SignInToCore, SignOutOfCore,
 };
 
@@ -103,16 +99,11 @@ impl Cores {
 
 /// The `/app/cores` routes on the local server.
 pub fn routes(cores: Arc<Cores>) -> Router {
-    let (connect_path, connect) = route::<ConnectCore, _, _, _>(connect);
-    let (sign_in_path, sign_in) = route::<SignInToCore, _, _, _>(sign_in);
-    let (sign_out_path, sign_out) = route::<SignOutOfCore, _, _, _>(sign_out);
-    let (exists_path, exists) =
-        route::<CheckCoreSession, _, _, _>(session_exists);
     Router::new()
-        .route(connect_path, connect)
-        .route(sign_in_path, sign_in)
-        .route(sign_out_path, sign_out)
-        .route(exists_path, exists)
+        .endpoint::<ConnectCore, _, _>(connect)
+        .endpoint::<SignInToCore, _, _>(sign_in)
+        .endpoint::<SignOutOfCore, _, _>(sign_out)
+        .endpoint::<CheckCoreSession, _, _>(session_exists)
         .with_state(cores)
 }
 
@@ -133,31 +124,20 @@ async fn sign_in(
 ) -> Result<Json<CoreSession>, ApiError> {
     let target = Target::new(&body.address, &body.fingerprint)
         .map_err(|problem| ApiError::new(ErrorCode::InvalidInput, problem))?;
-    let request_body =
-        json!({ "ticket": body.ticket, "device_name": device_name() });
-    let request = Request::builder()
-        .method(Method::POST)
-        .uri("/sessions")
-        .header(HOST, target.authority())
-        .header(CONTENT_TYPE, "application/json")
-        .body(Full::from(request_body.to_string()))
-        .expect("a valid request");
-    let (status, answer) = target.call(request).await.map_err(unreachable)?;
-    if !status.is_success() {
-        return Err(serde_json::from_slice(&answer).unwrap_or_else(|_| {
-            ApiError::new(ErrorCode::InternalError, "The Core refused.")
-        }));
-    }
-    let mut signed: Value =
-        serde_json::from_slice(&answer).map_err(unreachable)?;
-    let Some(Value::String(token)) = signed.get_mut("token").map(Value::take)
-    else {
-        return Err(unreachable("no session token in the answer"));
+    let new_session = NewSession {
+        ticket: body.ticket,
+        device_name: device_name(),
     };
+    let signed = call::<SignIn>(&target, Json(new_session), None)
+        .await
+        .map_err(|error| match error {
+            CallError::Api { error, .. } => error,
+            other => unreachable(other),
+        })?;
     // The ticket was fetched for whoever was signed in then. A session for anyone but `account`,
     // as after an account switch mid sign-in, is ended and never kept.
-    if signed["session"]["user"]["id"].as_str() != Some(body.account.as_str()) {
-        end_session(&target, &token).await;
+    if signed.session.user.id != body.account {
+        end_session(&target, &signed.token).await;
         return Err(ApiError::new(
             ErrorCode::InvalidInput,
             "The account changed while signing in. Try again.",
@@ -167,10 +147,8 @@ async fn sign_in(
         account: body.account,
         core_id: body.core_id,
     };
-    cores.sessions.store(&key, token).await;
-    serde_json::from_value(signed["session"].take())
-        .map(Json)
-        .map_err(unreachable)
+    cores.sessions.store(&key, signed.token).await;
+    Ok(Json(signed.session))
 }
 
 /// Ends the session there through the first of the account's tunnels to the Core that answers.
@@ -221,20 +199,36 @@ fn unreachable(problem: impl std::fmt::Display) -> ApiError {
 
 /// End the session `token` on the Core. False when the Core did not answer.
 async fn end_session(target: &Target, token: &str) -> bool {
-    let request = Request::builder()
-        .method(Method::DELETE)
-        .uri("/sessions/current")
-        .header(HOST, target.authority())
-        .header(AUTHORIZATION, format!("Bearer {token}"))
-        .body(Full::<Bytes>::default())
-        .expect("a valid request");
-    match target.call(request).await {
-        Ok(_) => true,
-        Err(problem) => {
+    match call::<SignOut>(target, Empty, Some(token)).await {
+        Err(CallError::Transport(problem)) => {
             tracing::debug!(%problem, "could not end a Core session there");
             false
         }
+        _ => true,
     }
+}
+
+/// One call to a Core's own route over the tunnel pinned to it.
+async fn call<E: Endpoint<Params = (), Query = ()>>(
+    target: &Target,
+    body: <E::Body as Encode>::Input,
+    bearer: Option<&str>,
+) -> Result<<E::Response as Reply>::Output, CallError>
+where
+    E::Body: Encode,
+    E::Response: Reply,
+{
+    let mut request = request::<E>("", &(), &(), body, bearer)?;
+    let authority = target
+        .authority()
+        .parse()
+        .expect("an authority is a header value");
+    request.headers_mut().insert(HOST, authority);
+    let (status, answer) = target
+        .call(request.map(Full::new))
+        .await
+        .map_err(|problem| CallError::Transport(problem))?;
+    response::<E>(status.as_u16(), None, answer)
 }
 
 /// This computer's name, as Core lists the session.

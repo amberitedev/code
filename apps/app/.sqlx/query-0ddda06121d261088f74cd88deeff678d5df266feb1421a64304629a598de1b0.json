@@ -1,0 +1,62 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT instance_id, host, port, join_time FROM join_log",
+  "describe": {
+    "columns": [
+      {
+        "name": "instance_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "join_log",
+            "name": "instance_id"
+          }
+        }
+      },
+      {
+        "name": "host",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "join_log",
+            "name": "host"
+          }
+        }
+      },
+      {
+        "name": "port",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "join_log",
+            "name": "port"
+          }
+        }
+      },
+      {
+        "name": "join_time",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "join_log",
+            "name": "join_time"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "0ddda06121d261088f74cd88deeff678d5df266feb1421a64304629a598de1b0"
+}

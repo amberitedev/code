@@ -1,4 +1,4 @@
-//! Serves `crate::server::endpoints::files`.
+//! Serves `crate::local_api::endpoints::files`.
 
 use std::{
     ffi::OsStr,
@@ -20,32 +20,26 @@ use axum::{
 };
 use contracts::{
     ApiError, ErrorCode, Json,
-    server::{Req, route},
+    server::{Mount, Req},
 };
 use tokio_util::io::ReaderStream;
 
 use super::thumbnails;
 use crate::{
     engine_handle::EngineHandle,
-    server::endpoints::files::{
+    local_api::endpoints::files::{
         CacheRemoteIcon, FileStat, GetLocalFile, GetThumbnail, ReadLocalFile,
         StatLocalFile,
     },
 };
 
 pub fn routes(engine: EngineHandle) -> Router {
-    let (file_path, file) = route::<GetLocalFile, _, _, _>(local_file);
-    let (thumbnail_path, thumbnail) = route::<GetThumbnail, _, _, _>(thumbnail);
-    let (remote_icon_path, remote_icon) =
-        route::<CacheRemoteIcon, _, _, _>(cache_remote_icon);
-    let (read_path, read) = route::<ReadLocalFile, _, _, _>(read_file);
-    let (stat_path, stat) = route::<StatLocalFile, _, _, _>(stat_file);
     Router::new()
-        .route(file_path, file)
-        .route(thumbnail_path, thumbnail)
-        .route(remote_icon_path, remote_icon)
-        .route(read_path, read)
-        .route(stat_path, stat)
+        .endpoint::<GetLocalFile, _, _>(local_file)
+        .endpoint::<GetThumbnail, _, _>(thumbnail)
+        .endpoint::<CacheRemoteIcon, _, _>(cache_remote_icon)
+        .endpoint::<ReadLocalFile, _, _>(read_file)
+        .endpoint::<StatLocalFile, _, _>(stat_file)
         .with_state(engine)
 }
 
@@ -146,7 +140,7 @@ async fn cache_remote_icon(
     Req { body, .. }: Req<CacheRemoteIcon>,
 ) -> Result<Json<PathBuf>, ApiError> {
     let state = engine.get().await;
-    engine::instance::cache_remote_icon(&state, &body.source)
+    engine::instance::cache_remote_icon(state.engine(), &body.source)
         .await
         .map(Json)
         .map_err(|error| {
@@ -260,7 +254,7 @@ mod tests {
     use http_body_util::BodyExt;
 
     use super::{is_cached_icon, read_file, serve, stat_file};
-    use crate::server::endpoints::files::LocalFileQuery;
+    use crate::local_api::endpoints::files::LocalFileQuery;
 
     #[tokio::test]
     async fn a_matching_etag_is_not_modified_until_the_file_changes() {

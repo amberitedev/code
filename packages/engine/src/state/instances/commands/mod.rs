@@ -25,7 +25,7 @@ pub(crate) use self::list_content::{
 };
 
 mod embedded_content_metadata;
-pub use self::embedded_content_metadata::server as server_jar;
+pub(crate) use self::embedded_content_metadata::names_client_only;
 
 mod remove_instance;
 pub(crate) use self::remove_instance::*;

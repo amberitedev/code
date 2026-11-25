@@ -15,6 +15,7 @@ CREATE TABLE sessions (
   refresh_expires TEXT NOT NULL, user_agent TEXT NOT NULL, ip TEXT NOT NULL
 );
 CREATE INDEX sessions_user ON sessions(user_id);
+CREATE INDEX sessions_refresh_expires ON sessions(refresh_expires);
 CREATE TABLE auth_flows (
   id TEXT PRIMARY KEY, kind TEXT NOT NULL,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -51,10 +52,6 @@ CREATE TABLE email_outbox (
   flow TEXT NOT NULL, created TEXT NOT NULL
 );
 CREATE TABLE auth_attempts (key TEXT PRIMARY KEY, count INTEGER NOT NULL, expires INTEGER NOT NULL);
-CREATE TABLE avatars (
-  user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-  content_type TEXT NOT NULL, data TEXT NOT NULL, revision TEXT NOT NULL
-);
 -- Lock details are visible only to staff.
 CREATE TABLE user_locks (
   user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
@@ -113,6 +110,8 @@ CREATE TABLE core_storage (
   egress_today INTEGER NOT NULL,
   reported TEXT NOT NULL
 );
+-- Placement reads only the Cores offering storage that reported lately.
+CREATE INDEX core_storage_offering ON core_storage(enabled, reported);
 
 -- What each Core's store reported it holds, one row per version hash.
 CREATE TABLE core_holdings (
@@ -147,6 +146,10 @@ CREATE TABLE shared_instances (
 );
 CREATE UNIQUE INDEX shared_instances_server ON shared_instances(core_id, server_id)
   WHERE core_id IS NOT NULL;
+CREATE INDEX shared_instances_owner ON shared_instances(owner_id);
+-- A Core's storage report finds the shares it holds by `home = ? OR replica = ?`.
+CREATE INDEX shared_instances_home ON shared_instances(home);
+CREATE INDEX shared_instances_replica ON shared_instances(replica);
 CREATE TABLE shared_instance_users (
   instance_id TEXT NOT NULL REFERENCES shared_instances(id) ON DELETE CASCADE,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -185,6 +188,9 @@ CREATE TABLE shared_instance_invites (
   core_id TEXT,
   server_id TEXT
 );
+CREATE INDEX shared_instance_invites_instance ON shared_instance_invites(instance_id);
+CREATE INDEX shared_instance_invites_server ON shared_instance_invites(core_id, server_id)
+  WHERE core_id IS NOT NULL;
 
 -- A member's report that a version's bytes were wrong: `object` when a Core served bytes that did
 -- not hash to their name, `content` when they decrypted to the wrong file. Shown to the owner.

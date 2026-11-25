@@ -170,7 +170,7 @@
 </template>
 
 <script setup lang="ts">
-import type { Archon } from '@modrinth/api-client'
+import type { Backup } from '@amberite/contracts/core'
 import {
 	ClipboardCopyIcon,
 	DownloadIcon,
@@ -193,8 +193,6 @@ import { useFormatDateTime } from '#ui/composables/format-date-time'
 import { useRelativeTime } from '#ui/composables/how-ago'
 import { defineMessages, useVIntl } from '#ui/composables/i18n'
 import { commonMessages } from '#ui/utils/common-messages'
-
-type Backup = Archon.BackupsQueue.v1.BackupQueueBackup
 
 const props = defineProps<{
 	backups: Backup[]

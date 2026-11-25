@@ -14,13 +14,14 @@ use notify::{
     Watcher, WatcherKind,
 };
 use notify_debouncer_mini::{
-    DebounceEventResult, Debouncer, new_debouncer_opt,
+    DebounceEventResult, DebouncedEvent, Debouncer, new_debouncer_opt,
 };
 use sqlx::SqlitePool;
-use std::path::Path;
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
 use std::sync::Weak;
 use std::{
-    collections::{BTreeSet, HashMap},
+    collections::{BTreeSet, HashMap, HashSet},
     sync::Arc,
     time::Duration,
 };
@@ -33,9 +34,76 @@ use super::adapters::sqlite::instance_rows;
 
 pub struct FileWatcher {
     side: Side,
-    watcher: RwLock<Debouncer<WriteOnlyWatcher>>,
-    instance_ids: RwLock<HashMap<String, String>>,
+    watcher: RwLock<Watching>,
     content_syncs: DashMap<String, bool>,
+}
+
+/// Each instance's folder is watched alone, never what is in it, so a server's world is not.
+/// The folders of [`watched_subpaths`] are watched whole once they exist; until then the
+/// folder's own watch sees them appear.
+struct Watching {
+    debouncer: Debouncer<WriteOnlyWatcher>,
+    /// Each instance's folder, by its watched spelling and its canonical one: a platform can name
+    /// events by the real path (FSEvents gives `/private/var` for `/var`, or a linked data
+    /// folder's target).
+    roots: HashMap<PathBuf, Root>,
+    folders: HashSet<PathBuf>,
+}
+
+struct Root {
+    /// The folder as watched.
+    path: PathBuf,
+    instance_id: String,
+}
+
+impl Watching {
+    /// The instance whose folder holds `path`, and the name of the entry in that folder it is or
+    /// is under: `None` for the folder itself.
+    fn locate<'a>(&self, path: &'a Path) -> Option<(&str, Option<&'a OsStr>)> {
+        path.ancestors().find_map(|folder| {
+            let root = self.roots.get(folder)?;
+            let mut inside = path.strip_prefix(folder).ok()?.components();
+            Some((
+                root.instance_id.as_str(),
+                inside.next().map(|c| c.as_os_str()),
+            ))
+        })
+    }
+
+    /// Watch `folder` and everything in it, if it is a folder now and not watched yet.
+    fn attach(&mut self, folder: &Path) {
+        if self.folders.contains(folder) || !folder.is_dir() {
+            return;
+        }
+        match self
+            .debouncer
+            .watcher()
+            .watch(folder, RecursiveMode::Recursive)
+        {
+            Ok(()) => {
+                self.folders.insert(folder.to_owned());
+            }
+            Err(e) => tracing::error!(
+                "Failed to watch directory for watcher {folder:?}: {e}"
+            ),
+        }
+    }
+
+    fn unwatch(&mut self, path: &Path) {
+        self.folders.remove(path);
+        if let Err(error) = self.debouncer.watcher().unwatch(path)
+            && !matches!(
+                error.kind,
+                notify::ErrorKind::WatchNotFound
+                    | notify::ErrorKind::PathNotFound
+            )
+        {
+            tracing::warn!(
+                "Failed to unwatch instance path {}: {error}",
+                path.display()
+            );
+        }
+    }
 }
 
 /// Wraps the platform watcher and drops read-only access events before they
@@ -175,8 +243,11 @@ pub(crate) fn init_watcher(
     Ok((
         FileWatcher {
             side,
-            watcher: RwLock::new(file_watcher),
-            instance_ids: RwLock::new(HashMap::new()),
+            watcher: RwLock::new(Watching {
+                debouncer: file_watcher,
+                roots: HashMap::new(),
+                folders: HashSet::new(),
+            }),
             content_syncs: DashMap::new(),
         },
         rx,
@@ -199,44 +270,18 @@ pub(crate) fn watch_instance_events(
 
             match res {
                 Ok(events) => {
-                    let instance_ids =
-                        state.file_watcher.instance_ids.read().await;
+                    attach_or_drop(&state.file_watcher, &events).await;
+                    let watching = state.file_watcher.watcher.read().await;
                     let mut visited_instances = Vec::new();
                     let mut visited_screenshot_instances = Vec::new();
                     let mut changed_files =
                         HashMap::<String, BTreeSet<String>>::new();
 
                     for e in &events {
-                        let mut instance_path = None;
-
-                        let mut found = false;
-                        for component in e.path.components() {
-                            if found {
-                                instance_path = Some(component.as_os_str());
-                                break;
-                            }
-
-                            if component.as_os_str()
-                                == crate::state::dirs::INSTANCES_FOLDER_NAME
-                            {
-                                found = true;
-                            }
-                        }
-
-                        if let Some(instance_path) = instance_path {
-                            let instance_path_str =
-                                instance_path.to_string_lossy().to_string();
-                            let Some(instance_id) =
-                                instance_ids.get(&instance_path_str).cloned()
-                            else {
-                                continue;
-                            };
-                            let first_file_name = e
-                                .path
-                                .components()
-                                .skip_while(|x| x.as_os_str() != instance_path)
-                                .nth(1)
-                                .map(|x| x.as_os_str());
+                        if let Some((instance_id, first_file_name)) =
+                            watching.locate(&e.path)
+                        {
+                            let instance_id = instance_id.to_owned();
                             let sync_content =
                                 first_file_name.as_ref().is_some_and(|name| {
                                     content_folders(state.side)
@@ -407,46 +452,10 @@ pub(crate) async fn watch_instance_folder(
         return;
     }
 
-    let mut to_watch = Vec::new();
-    for sub_path in watched_subpaths(watcher.side) {
-        let full_path = full_instance_path.join(sub_path);
-
-        let meta = tokio::fs::symlink_metadata(&full_path).await;
-        let exists = meta.is_ok();
-        let is_symlink = meta.ok().is_some_and(|m| m.file_type().is_symlink());
-
-        // A server makes the folders it uses itself.
-        if !exists && watcher.side == Side::Server {
-            continue;
-        }
-        if !exists
-            && !is_symlink
-            && !sub_path.contains(".")
-            && let Err(e) = crate::util::io::create_dir_all(&full_path).await
-        {
-            tracing::error!(
-                "Failed to create directory for watcher {full_path:?}: {e}"
-            );
-            return;
-        }
-
-        to_watch.push(full_path);
-    }
-
-    let mut debouncer = watcher.watcher.write().await;
-    for full_path in &to_watch {
-        if let Err(e) = debouncer
-            .watcher()
-            .watch(full_path, RecursiveMode::Recursive)
-        {
-            tracing::error!(
-                "Failed to watch directory for watcher {full_path:?}: {e}"
-            );
-            return;
-        }
-    }
-
-    if let Err(e) = debouncer
+    let mut watching = watcher.watcher.write().await;
+    // First, so a folder made while the others are attached is seen.
+    if let Err(e) = watching
+        .debouncer
         .watcher()
         .watch(&full_instance_path, RecursiveMode::NonRecursive)
     {
@@ -454,12 +463,39 @@ pub(crate) async fn watch_instance_folder(
             "Failed to watch root instance directory for watcher {full_instance_path:?}: {e}"
         );
     }
+    let root = || Root {
+        path: full_instance_path.clone(),
+        instance_id: instance_id.to_owned(),
+    };
+    if let Ok(canonical) = full_instance_path.canonicalize() {
+        watching.roots.insert(canonical, root());
+    }
+    watching.roots.insert(full_instance_path.clone(), root());
+    for sub_path in watched_subpaths(watcher.side) {
+        watching.attach(&full_instance_path.join(sub_path));
+    }
+}
 
-    watcher
-        .instance_ids
-        .write()
-        .await
-        .insert(instance_path.to_string(), instance_id.to_string());
+/// An allowlisted folder that appeared is watched; one that went is no longer.
+async fn attach_or_drop(watcher: &FileWatcher, events: &[DebouncedEvent]) {
+    let mut watching = watcher.watcher.write().await;
+    let folders: Vec<_> = events
+        .iter()
+        .filter_map(|event| {
+            let root = watching.roots.get(event.path.parent()?)?;
+            let name = event.path.file_name()?;
+            watched_subpaths(watcher.side)
+                .any(|sub| name == sub)
+                .then(|| root.path.join(name))
+        })
+        .collect();
+    for folder in folders {
+        if folder.is_dir() {
+            watching.attach(&folder);
+        } else if watching.folders.contains(&folder) {
+            watching.unwatch(&folder);
+        }
+    }
 }
 
 /// The folders whose files are content. A server's datapacks are inside its world, which is not
@@ -494,37 +530,22 @@ pub(crate) async fn unwatch_instance_folder(
     watcher: &FileWatcher,
     dirs: &DirectoryInfo,
 ) {
-    let mut instance_ids = watcher.instance_ids.write().await;
-    if instance_ids
-        .get(instance_path)
-        .is_none_or(|id| id != instance_id)
+    let full_instance_path = dirs.instances_dir().join(instance_path);
+    let mut watching = watcher.watcher.write().await;
+    if watching
+        .roots
+        .get(&full_instance_path)
+        .is_none_or(|root| root.instance_id != instance_id)
     {
         return;
     }
-    instance_ids.remove(instance_path);
-    drop(instance_ids);
-
-    let full_instance_path = dirs.instances_dir().join(instance_path);
-    let mut watched_paths = watched_subpaths(watcher.side)
-        .map(|sub_path| full_instance_path.join(sub_path))
-        .collect::<Vec<_>>();
-    watched_paths.push(full_instance_path);
-
-    let mut debouncer = watcher.watcher.write().await;
-    for path in watched_paths {
-        if let Err(error) = debouncer.watcher().unwatch(&path)
-            && !matches!(
-                error.kind,
-                notify::ErrorKind::WatchNotFound
-                    | notify::ErrorKind::PathNotFound
-            )
-        {
-            tracing::warn!(
-                "Failed to unwatch instance path {}: {error}",
-                path.display()
-            );
-        }
+    watching
+        .roots
+        .retain(|_, root| root.path != full_instance_path);
+    for sub_path in watched_subpaths(watcher.side) {
+        watching.unwatch(&full_instance_path.join(sub_path));
     }
+    watching.unwatch(&full_instance_path);
 }
 
 fn crash_task(instance_id: String, pool: SqlitePool, events: EventSink) {
@@ -562,7 +583,124 @@ mod tests {
     use super::*;
     use crate::state::instances::adapters::sqlite::content_rows;
     use crate::state::instances::commands::set_instance_install_stage;
-    use crate::state::tests::{add_instance, engine, write};
+    use crate::state::tests::{add_instance, engine, link_dir, write};
+    use notify_debouncer_mini::DebouncedEventKind;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_content_folder_is_watched_once_it_appears_and_never_made() {
+        crate::install_crypto_provider();
+        let tmp = tempfile::tempdir().unwrap();
+        let engine = engine(tmp.path().to_path_buf()).await;
+        add_instance(&engine, "a", "Survival").await;
+        let root = engine.directories.instances_dir().join("Survival");
+        std::fs::create_dir_all(&root).unwrap();
+        let mut events = engine.events.subscribe();
+        watch_instance_folder(
+            "a",
+            "Survival",
+            &engine.file_watcher,
+            &engine.directories,
+        )
+        .await;
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 0);
+
+        tokio::time::timeout(Duration::from_secs(60), async {
+            // The folder's own watch sees `mods` appear; a file added to it afterwards is seen
+            // only through the watch then attached to it.
+            for jar in ["a.jar", "b.jar"] {
+                write(&root.join("mods").join(jar));
+                let path = format!("mods/{jar}");
+                while !content_rows::get_instance_files("a", &engine.pool)
+                    .await
+                    .unwrap()
+                    .iter()
+                    .any(|file| file.relative_path == path)
+                {
+                    loop {
+                        if let Ok(crate::event::Event::Instance(payload)) =
+                            events.recv().await
+                            && payload.instance_id == "a"
+                            && matches!(
+                                payload.event,
+                                InstancePayloadType::Synced
+                            )
+                        {
+                            break;
+                        }
+                    }
+                }
+            }
+        })
+        .await
+        .expect("mods/b.jar was never seen");
+    }
+
+    /// A platform can name an event by the real path of a folder watched through a link, as
+    /// FSEvents does for a linked data folder. An event is the instance's by its folder, not by
+    /// where that folder is.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_content_folder_named_by_its_real_path_is_watched() {
+        let tmp = tempfile::tempdir().unwrap();
+        let real = tmp.path().join("real");
+        std::fs::create_dir_all(real.join("Survival")).unwrap();
+        let instances = tmp.path().join("profiles");
+        link_dir(&real, &instances);
+        let dirs = DirectoryInfo::init(
+            tmp.path().join("config"),
+            instances.clone(),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        // Its events go nowhere, so only the event below attaches anything.
+        let (watcher, _) = init_watcher(Side::Client).unwrap();
+        watch_instance_folder("a", "Survival", &watcher, &dirs).await;
+
+        let mods = real.join("Survival").join("mods");
+        std::fs::create_dir(&mods).unwrap();
+        let appeared = DebouncedEvent {
+            path: mods.canonicalize().unwrap(),
+            kind: DebouncedEventKind::Any,
+        };
+        attach_or_drop(&watcher, &[appeared]).await;
+        let watched = instances.join("Survival").join("mods");
+        assert!(watcher.watcher.read().await.folders.contains(&watched));
+
+        // A Core's instances are its servers, in `servers/<id>`.
+        let servers = tmp.path().join("servers");
+        std::fs::create_dir_all(servers.join("srv")).unwrap();
+        let core_dirs = DirectoryInfo::init(
+            tmp.path().join("core"),
+            servers.clone(),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        watch_instance_folder("b", "srv", &watcher, &core_dirs).await;
+        for (path, instance, first) in [
+            (mods.canonicalize().unwrap().join("a.jar"), "a", "mods"),
+            (watched.join("a.jar"), "a", "mods"),
+            (
+                servers.join("srv").join("plugins").join("b.jar"),
+                "b",
+                "plugins",
+            ),
+        ] {
+            let watching = watcher.watcher.read().await;
+            assert_eq!(
+                watching.locate(&path),
+                Some((instance, Some(OsStr::new(first)))),
+                "{path:?}"
+            );
+        }
+        unwatch_instance_folder("b", "srv", &watcher, &core_dirs).await;
+
+        unwatch_instance_folder("a", "Survival", &watcher, &dirs).await;
+        let watching = watcher.watcher.read().await;
+        assert!(watching.roots.is_empty() && watching.folders.is_empty());
+    }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn two_engines_queue_the_same_instance_id_separately() {

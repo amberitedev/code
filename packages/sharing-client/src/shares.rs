@@ -1,11 +1,53 @@
 //! What the App and Core read the same way from the backend's shared instance routes
-//! (`contracts::backend::sharing`), which they call with `contracts::client::call`.
+//! (`contracts::backend::sharing`), which they call with `contracts::client::call`, and their
+//! twins a Core calls with its key (`contracts::backend::cores`).
 
 use std::time::Duration;
 
-use contracts::Empty;
-use contracts::backend::sharing::{DeleteSharedInstance, SharedInstanceId};
-use contracts::client::{CallError, Remote, call};
+use contracts::backend::cores::{
+    DeleteServerShare, RemoveServerShareIcon, SetServerShareGeneratedIcon,
+    SetServerShareIcon,
+};
+use contracts::backend::sharing::{
+    DeleteSharedInstance, RemoveIcon, SetGeneratedIcon, SetIcon,
+    SharedInstanceId,
+};
+use contracts::client::{Body, CallError, Remote, Reply, call};
+use contracts::{Empty, Endpoint, Json, Raw};
+use modrinth_content_management::icons::IconConfig;
+
+/// Who calls the share routes: an account with its session, or a Core with its key, which acts
+/// for its owner on routes of its own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Caller {
+    Account,
+    Core,
+}
+
+/// `A` as an account calls it, or `C`, the same call on a Core's own route.
+pub async fn call_as<A, C>(
+    caller: Caller,
+    remote: &Remote<'_>,
+    params: &A::Params,
+    query: &A::Query,
+    body: <A::Body as Body>::Input,
+) -> Result<<A::Response as Reply>::Output, CallError>
+where
+    A: Endpoint,
+    A::Body: Body,
+    A::Response: Reply,
+    C: Endpoint<
+            Params = A::Params,
+            Query = A::Query,
+            Body = A::Body,
+            Response = A::Response,
+        >,
+{
+    match caller {
+        Caller::Account => call::<A>(remote, params, query, body).await,
+        Caller::Core => call::<C>(remote, params, query, body).await,
+    }
+}
 
 /// A [`Remote`] that owns its client and token, for calls made after the code that set it up
 /// returns, such as an install job's.
@@ -15,6 +57,8 @@ pub struct OwnedRemote {
     pub base: String,
     pub bearer: Option<String>,
     pub timeout: Option<Duration>,
+    /// Who `bearer` is, which picks the share routes it calls.
+    pub caller: Caller,
 }
 
 impl OwnedRemote {
@@ -23,7 +67,7 @@ impl OwnedRemote {
             http: &self.http,
             base: &self.base,
             bearer: self.bearer.as_deref(),
-            read_ticket: None,
+            ticket: None,
             timeout: self.timeout,
         }
     }
@@ -59,21 +103,83 @@ pub fn status(error: &CallError) -> Option<u16> {
         | CallError::Decode { status, .. }
         | CallError::RangeIgnored { status } => Some(*status),
         CallError::Http(error) => error.status().map(|status| status.as_u16()),
-        CallError::Params { .. } => None,
+        CallError::Params { .. } | CallError::Transport(_) => None,
     }
 }
 
 /// Deletes the share. One already gone counts as deleted: 404 (no such share) and 410
 /// `core_removed` (the Core was removed from its account, and its shares with it).
 pub async fn delete_share(
+    caller: Caller,
     remote: &Remote<'_>,
     share_id: &str,
 ) -> Result<(), CallError> {
     let id = SharedInstanceId {
         id: share_id.to_owned(),
     };
-    match call::<DeleteSharedInstance>(remote, &id, &(), Empty).await {
+    let deleted = call_as::<DeleteSharedInstance, DeleteServerShare>(
+        caller,
+        remote,
+        &id,
+        &(),
+        Empty,
+    );
+    match deleted.await {
         Err(error) if matches!(status(&error), Some(404 | 410)) => Ok(()),
         result => result,
+    }
+}
+
+/// What a share's icon becomes.
+#[derive(Clone, Debug)]
+pub enum Icon {
+    /// An uploaded image, which the backend serves with its content type.
+    Image(Raw),
+    /// An icon editor icon: only its settings, which members draw themselves.
+    Generated(IconConfig),
+    None,
+}
+
+/// Sets the share's icon. Only its owner may.
+pub async fn set_icon(
+    caller: Caller,
+    remote: &Remote<'_>,
+    share_id: &str,
+    icon: Icon,
+) -> Result<(), CallError> {
+    let id = SharedInstanceId {
+        id: share_id.to_owned(),
+    };
+    match icon {
+        Icon::Image(image) => {
+            call_as::<SetIcon, SetServerShareIcon>(
+                caller,
+                remote,
+                &id,
+                &(),
+                image,
+            )
+            .await
+        }
+        Icon::Generated(config) => {
+            call_as::<SetGeneratedIcon, SetServerShareGeneratedIcon>(
+                caller,
+                remote,
+                &id,
+                &(),
+                Json(config),
+            )
+            .await
+        }
+        Icon::None => {
+            call_as::<RemoveIcon, RemoveServerShareIcon>(
+                caller,
+                remote,
+                &id,
+                &(),
+                Empty,
+            )
+            .await
+        }
     }
 }

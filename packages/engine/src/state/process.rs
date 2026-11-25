@@ -1,7 +1,7 @@
 use crate::Engine;
 use crate::ErrorKind;
-use crate::event::emit::{emit_instance, emit_process};
-use crate::event::{EventSink, InstancePayloadType, ProcessPayloadType};
+use crate::event::emit::{emit_process, emit_server_joined};
+use crate::event::{EventSink, ProcessPayloadType};
 use crate::event::{LogEvent, LogPayload};
 use crate::util::io::IOError;
 use crate::util::rpc::RpcServer;
@@ -321,7 +321,6 @@ impl ProcessManager {
 
             let instance_id = metadata.instance_id.clone();
             let instance_path = metadata.instance_path.clone();
-            let pool = state.pool.clone();
             let log_buffers = Arc::clone(&self.log_buffers);
             let events = state.events.clone();
             tokio::spawn(async move {
@@ -331,7 +330,6 @@ impl ProcessManager {
                     stdout,
                     log_path_clone,
                     xml_logging,
-                    &pool,
                     &log_buffers,
                     &events,
                 )
@@ -344,7 +342,6 @@ impl ProcessManager {
 
             let instance_id = metadata.instance_id.clone();
             let instance_path = metadata.instance_path.clone();
-            let pool = state.pool.clone();
             let log_buffers = Arc::clone(&self.log_buffers);
             let events = state.events.clone();
             tokio::spawn(async move {
@@ -354,7 +351,6 @@ impl ProcessManager {
                     stderr,
                     log_path_clone,
                     xml_logging,
-                    &pool,
                     &log_buffers,
                     &events,
                 )
@@ -468,7 +464,6 @@ impl Process {
         reader: R,
         log_path: impl AsRef<Path>,
         xml_logging: bool,
-        pool: &SqlitePool,
         log_buffers: &LogBuffers,
         events: &EventSink,
     ) where
@@ -628,9 +623,8 @@ impl Process {
 											instance_id,
 											&timestamp,
 											message,
-											pool,
 											events,
-                                        ).await {
+                                        ) {
                                             tracing::error!("Failed to handle server join logging: {e}");
                                         }
                                     }
@@ -702,11 +696,8 @@ impl Process {
                     if let Err(e) = Self::maybe_handle_old_server_join_logging(
                         instance_id,
                         line.trim_ascii_end(),
-                        pool,
                         events,
-                    )
-                    .await
-                    {
+                    ) {
                         tracing::error!(
                             "Failed to handle old server join logging: {e}"
                         );
@@ -811,11 +802,10 @@ impl Process {
         Ok(())
     }
 
-    async fn maybe_handle_server_join_logging(
+    fn maybe_handle_server_join_logging(
         instance_id: &str,
         timestamp: &str,
         message: &str,
-        pool: &SqlitePool,
         events: &EventSink,
     ) -> crate::Result<()> {
         let timestamp = timestamp
@@ -827,20 +817,18 @@ impl Process {
                     .single()
                     .context("failed to convert timestamp to DateTime")
             })?;
-        Self::parse_and_insert_server_join(
+        Self::parse_and_emit_server_join(
             instance_id,
             message,
             timestamp,
-            pool,
             events,
-        )
-        .await
+        );
+        Ok(())
     }
 
-    async fn maybe_handle_old_server_join_logging(
+    fn maybe_handle_old_server_join_logging(
         instance_id: &str,
         line: &str,
-        pool: &SqlitePool,
         events: &EventSink,
     ) -> crate::Result<()> {
         if let Some((timestamp, message)) = line.split_once(" [CLIENT] [INFO] ")
@@ -851,72 +839,42 @@ impl Process {
                     .map(|x| x.to_utc())
                     .single()
                     .unwrap_or_else(Utc::now);
-            Self::parse_and_insert_server_join(
+            Self::parse_and_emit_server_join(
                 instance_id,
                 message,
                 timestamp,
-                pool,
                 events,
-            )
-            .await
+            );
         } else {
-            Self::parse_and_insert_server_join(
+            Self::parse_and_emit_server_join(
                 instance_id,
                 line,
                 Utc::now(),
-                pool,
                 events,
-            )
-            .await
+            );
         }
+        Ok(())
     }
 
-    async fn parse_and_insert_server_join(
+    /// Reports a "Connecting to host, port" line as a join, which the host records.
+    fn parse_and_emit_server_join(
         instance_id: &str,
         message: &str,
         timestamp: DateTime<Utc>,
-        pool: &SqlitePool,
         events: &EventSink,
-    ) -> crate::Result<()> {
+    ) {
         let Some(host_port_string) = message.strip_prefix("Connecting to ")
         else {
-            return Ok(());
+            return;
         };
         let Some((host, port_string)) = host_port_string.rsplit_once(", ")
         else {
-            return Ok(());
+            return;
         };
         let Some(port) = port_string.parse::<u16>().ok() else {
-            return Ok(());
+            return;
         };
-
-        crate::state::server_join_log::JoinLogEntry {
-            instance_id: instance_id.to_owned(),
-            host: host.to_string(),
-            port,
-            join_time: timestamp,
-        }
-        .upsert(pool)
-        .await?;
-        {
-            let instance_id = instance_id.to_owned();
-            let host = host.to_owned();
-            let events = events.clone();
-            tokio::spawn(async move {
-                let _ = emit_instance(
-                    &events,
-                    &instance_id,
-                    InstancePayloadType::ServerJoined {
-                        host,
-                        port,
-                        timestamp: timestamp.to_rfc3339(),
-                    },
-                )
-                .await;
-            });
-        }
-
-        Ok(())
+        emit_server_joined(events, instance_id, host, port, timestamp);
     }
 
     // Spawns a new child process and inserts it into the hashmap
@@ -1067,6 +1025,29 @@ impl Process {
 #[cfg(test)]
 mod tests {
     use super::running_process_start_times;
+    use crate::event::{
+        Event, EventSink, InstancePayload, InstancePayloadType,
+    };
+
+    /// The engine reports a join for the host to record, and records none itself.
+    #[test]
+    fn a_connecting_line_reports_the_join() {
+        let events = EventSink::new();
+        let mut received = events.subscribe();
+        super::Process::maybe_handle_old_server_join_logging(
+            "local:a",
+            "2026-01-02 03:04:05 [CLIENT] [INFO] Connecting to play.example, 25566",
+            &events,
+        )
+        .unwrap();
+        assert!(matches!(
+            received.try_recv(),
+            Ok(Event::Instance(InstancePayload {
+                instance_id,
+                event: InstancePayloadType::ServerJoined { host, port: 25566, .. },
+            })) if instance_id == "local:a" && host == "play.example"
+        ));
+    }
 
     #[tokio::test]
     async fn reads_start_time_of_running_process() {

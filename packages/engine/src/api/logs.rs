@@ -12,9 +12,11 @@ use tokio::{
 
 use crate::{
     Engine, ErrorKind,
+    sandbox::Folder,
     state::SavedMinecraftAccount,
     util::io::{self, IOError},
 };
+use contracts::Side;
 
 #[derive(Serialize, Debug)]
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
@@ -91,6 +93,56 @@ struct LogCompactionStats {
 struct CompactedLog {
     output: String,
     stats: LogCompactionStats,
+}
+
+impl LogType {
+    fn folder(self) -> &'static str {
+        match self {
+            LogType::InfoLog => "logs",
+            LogType::CrashReport => "crash-reports",
+        }
+    }
+}
+
+/// A server's folder, which its logs are read from through a handle ([`Folder`]), so a link or
+/// FIFO a mod planted there is never followed or read. `None` on the App, which reads its own
+/// folders.
+fn server_folder(
+    state: &Engine,
+    instance_path: &str,
+) -> crate::Result<Option<Folder>> {
+    if state.side != Side::Server {
+        return Ok(None);
+    }
+    let root = state.directories.instances_dir().join(instance_path);
+    Ok(Some(
+        Folder::open(&root).map_err(|e| IOError::with_path(e, &root))?,
+    ))
+}
+
+/// The plain file `file_name` among the instance's logs of `log_type`, at `path` on the App.
+fn open_log(
+    state: &Engine,
+    instance_path: &str,
+    log_type: LogType,
+    file_name: &str,
+    path: &std::path::Path,
+) -> crate::Result<std::fs::File> {
+    let Some(folder) = server_folder(state, instance_path)? else {
+        return Ok(std::fs::File::open(path)
+            .map_err(|e| IOError::with_path(e, path))?);
+    };
+    let not_found = || std::io::Error::from(std::io::ErrorKind::NotFound);
+    let file =
+        match folder.open_file(&format!("{}/{file_name}", log_type.folder())) {
+            Ok(file) => file.ok_or_else(not_found),
+            // A link or anything but a plain file.
+            Err(error) if error.kind() == std::io::ErrorKind::InvalidInput => {
+                Err(not_found())
+            }
+            Err(error) => Err(error),
+        };
+    Ok(file.map_err(|e| IOError::with_path(e, path))?.into_std())
 }
 
 async fn resolve_instance_path(
@@ -295,7 +347,39 @@ pub async fn get_logs_from_type(
         }
     };
 
-    if logs_folder.exists() {
+    if let Some(folder) = server_folder(state, &instance_path)? {
+        // No folder, or a link where it should be, holds no logs.
+        let Ok(dir) = folder.open_dir(Some(log_type.folder())) else {
+            return Ok(());
+        };
+        for entry in dir
+            .entries()
+            .map_err(|e| IOError::with_path(e, &logs_folder))?
+            .filter_map(Result::ok)
+        {
+            if !entry.file_type().is_ok_and(|kind| kind.is_file()) {
+                continue;
+            }
+            let Ok(file_name) = entry.file_name().into_string() else {
+                continue;
+            };
+            let age = entry
+                .metadata()
+                .and_then(|metadata| metadata.created())
+                .map_or(SystemTime::UNIX_EPOCH, |time| time.into_std());
+            logs.push(
+                Logs::build(
+                    state,
+                    log_type,
+                    age,
+                    &instance_path,
+                    file_name,
+                    clear_contents,
+                )
+                .await,
+            );
+        }
+    } else if logs_folder.exists() {
         for entry in std::fs::read_dir(&logs_folder)
             .map_err(|e| IOError::with_path(e, &logs_folder))?
         {
@@ -400,8 +484,8 @@ async fn get_output_by_filename_from_path(
 
     if let Some(ext) = path.extension() {
         if ext == "gz" {
-            let file = std::fs::File::open(&path)
-                .map_err(|e| IOError::with_path(e, &path))?;
+            let file =
+                open_log(state, instance_path, log_type, file_name, &path)?;
             let gz =
                 flate2::read::GzDecoder::new(std::io::BufReader::new(file));
             let mut reader = std::io::BufReader::new(gz);
@@ -415,8 +499,8 @@ async fn get_output_by_filename_from_path(
             .await;
             return Ok(CensoredString::censor(compacted.output, &credentials));
         } else if ext == "log" || ext == "txt" {
-            let file = std::fs::File::open(&path)
-                .map_err(|e| IOError::with_path(e, &path))?;
+            let file =
+                open_log(state, instance_path, log_type, file_name, &path)?;
             let mut reader = std::io::BufReader::new(file);
             let compacted = read_compacted_log(&mut reader)
                 .map_err(|e| IOError::with_path(e, &path))?;
@@ -481,6 +565,24 @@ pub async fn delete_logs_by_filename(
     };
 
     let path = logs_folder.join(filename);
+    if let Some(folder) = server_folder(state, &instance_path)? {
+        // Only a plain file: never a link, or what is behind one.
+        let name = format!("{}/{filename}", log_type.folder());
+        if !folder
+            .metadata(&name)
+            .is_ok_and(|metadata| metadata.is_file())
+        {
+            return Err(IOError::with_path(
+                std::io::Error::from(std::io::ErrorKind::NotFound),
+                &path,
+            )
+            .into());
+        }
+        folder
+            .remove(&name)
+            .map_err(|e| IOError::with_path(e, &path))?;
+        return Ok(());
+    }
     io::remove_file(&path).await?;
     Ok(())
 }

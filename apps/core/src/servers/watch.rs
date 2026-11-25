@@ -83,8 +83,12 @@ impl Servers {
 
     pub(super) fn retries(
         &self,
-    ) -> MutexGuard<'_, HashMap<String, (String, u64)>> {
-        self.retries.lock().expect("not poisoned")
+    ) -> super::Tracked<'_, HashMap<String, (String, u64)>> {
+        super::Tracked {
+            guard: self.retries.lock().expect("not poisoned"),
+            changed: &self.changed,
+            written: false,
+        }
     }
 
     /// How many owner actions the server has seen. Crash processing takes it as a run ends and

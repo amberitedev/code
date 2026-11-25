@@ -311,7 +311,7 @@ async fn request_code(state: &Pairing<'_>) -> Result<Pending, String> {
                 "this Core's address {} is not allowed. {}",
                 state.address, error.description
             ),
-            ErrorCode::TooManyRequests => "this Core asked for too many codes in a short time".into(),
+            ErrorCode::RateLimited => "this Core asked for too many codes in a short time".into(),
             _ => format!("Amberite answered {status}. {}", error.description),
         },
         CallError::Decode { status, .. }
@@ -384,7 +384,7 @@ fn remote<'a>(state: &Pairing<'a>, key: Option<&'a str>) -> Remote<'a> {
         http: state.http,
         base: state.backend_url,
         bearer: key,
-        read_ticket: None,
+        ticket: None,
         timeout: None,
     }
 }

@@ -1,4 +1,6 @@
-import { type AbstractModrinthClient, type Archon, ModrinthApiError } from '@modrinth/api-client'
+import type { Server, ServerIcon } from '@amberite/contracts/core'
+import { instanceFiles } from '@amberite/contracts/engine'
+import type { AbstractModrinthClient } from '@modrinth/api-client'
 import { useQuery } from '@tanstack/vue-query'
 import { computed, type MaybeRefOrGetter, toValue } from 'vue'
 
@@ -6,27 +8,12 @@ import { getIconSymbolAsset } from '#ui/components/base/icon-editor-modal/editor
 import type { IconConfig } from '#ui/components/base/icon-editor-modal/types'
 import { injectModrinthClient } from '#ui/providers'
 
+import { serverDetailQueryOptions } from './server-queries'
 import { useCachedIcon } from './use-cached-icon'
 
 export const serverIconKeys = {
-	metadata: (serverId: string) => ['server-icons', serverId, 'metadata'] as const,
 	image: (serverId: string, hash: string | undefined) =>
 		['server-icons', serverId, 'image', hash] as const,
-}
-
-export function serverIconMetadataQueryOptions(serverId: string, client: AbstractModrinthClient) {
-	return {
-		queryKey: serverIconKeys.metadata(serverId),
-		queryFn: async (): Promise<Archon.Icons.v1.ServerIcon | null> => {
-			try {
-				return await client.archon.icons_v1.getMetadata(serverId)
-			} catch (error) {
-				if (error instanceof ModrinthApiError && error.statusCode === 404) return null
-				throw error
-			}
-		},
-		staleTime: 60_000,
-	}
 }
 
 /** Keyed by the icon hash, so a new icon is a new query and an unchanged one never refetches. */
@@ -37,22 +24,23 @@ export function serverIconImageQueryOptions(
 ) {
 	return {
 		queryKey: serverIconKeys.image(serverId, hash),
-		queryFn: () => client.archon.icons_v1.get(serverId, true),
+		queryFn: async () =>
+			(await client.cores.serverRoutes(serverId)).call(instanceFiles.GetInstanceIcon, {
+				params: { id: serverId },
+			}),
 		staleTime: Infinity,
 	}
 }
 
 /** Returns the config of an icon created with the icon editor, if its symbol is known. */
-export function serverIconEditorConfig(
-	icon: Archon.Icons.v1.ServerIcon | null | undefined,
-): IconConfig | null {
+export function serverIconEditorConfig(icon: ServerIcon | null | undefined): IconConfig | null {
 	const value = icon?.config
 	return value && getIconSymbolAsset(value.symbol) ? value : null
 }
 
 type UseServerIconOptions = {
-	/** Icon metadata already loaded with the server. Skips fetching the metadata separately. */
-	icon?: MaybeRefOrGetter<Archon.Icons.v1.ServerIcon | null | undefined>
+	/** Icon metadata already loaded with the server. Skips reading the server. */
+	icon?: MaybeRefOrGetter<ServerIcon | null | undefined>
 	enabled?: MaybeRefOrGetter<boolean>
 }
 
@@ -70,10 +58,12 @@ export function useServerIcon(
 			typeof window !== 'undefined' && !!toValue(serverId) && (toValue(options.enabled) ?? true),
 	)
 
+	// The icon is the server's, so the server's own query, which its Core's events refresh, has it.
 	const metadataQuery = useQuery(
 		computed(() => ({
-			...serverIconMetadataQueryOptions(toValue(serverId), client),
+			...serverDetailQueryOptions(client, toValue(serverId)),
 			enabled: enabled.value && toValue(options.icon) === undefined,
+			select: (server: Server) => server.icon,
 		})),
 	)
 

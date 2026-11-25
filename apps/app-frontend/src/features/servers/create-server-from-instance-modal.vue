@@ -11,7 +11,7 @@
 </template>
 
 <script setup lang="ts">
-import type { ListedCore } from '@modrinth/api-client'
+import type { ListedCore } from '@amberite/contracts/backend'
 import {
 	type CreationFlowContextValue,
 	CreationFlowModal,
@@ -77,7 +77,7 @@ async function create(ctx: CreationFlowContextValue) {
 	const instance = { id: props.instance.id, name: props.instance.name }
 	try {
 		if (!core) throw new Error('No Core was chosen')
-		const created = await client.archon.cores_v1.createServer(instance.name, core, confirmEula)
+		const created = await client.cores.createServer(instance.name, core, confirmEula)
 		if (!created) return
 		const { id } = created
 		flow.value?.hide()

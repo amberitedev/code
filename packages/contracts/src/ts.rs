@@ -1,8 +1,15 @@
-//! TypeScript for the protocol, written with ts-rs. Each crate that declares Endpoints writes one
-//! file into `packages/contracts/ts/` and checks it is fresh in its own tests.
+//! TypeScript for the protocol, written with ts-rs. Each crate that declares Endpoints writes its
+//! files into `packages/contracts/ts/` and checks they are fresh in its own tests, under the
+//! `export-ts` feature.
+
+use std::{
+    any::TypeId,
+    collections::HashSet,
+    path::{Path, PathBuf},
+};
 
 use serde::Serialize;
-use ts_rs::{Config, TS};
+use ts_rs::{Config, TS, TypeVisitor};
 
 use crate::{
     Empty, Endpoint, Json, Raw, RequestBody, ResponseBody, Stream, Upgrade,
@@ -21,11 +28,18 @@ pub trait TsBody {
     fn request_ts(cfg: &Config) -> String {
         Self::ts(cfg)
     }
+
+    /// Visit the types it carries.
+    fn visit(_: &mut impl TypeVisitor) {}
 }
 
-impl<T: TS> TsBody for Json<T> {
+impl<T: TS + 'static> TsBody for Json<T> {
     fn ts(cfg: &Config) -> String {
         T::name(cfg)
+    }
+
+    fn visit(v: &mut impl TypeVisitor) {
+        v.visit::<T>();
     }
 }
 
@@ -51,14 +65,51 @@ impl TsBody for Stream {
     }
 }
 
-impl<S: TS, R: TS> TsBody for Upgrade<S, R> {
+impl<S: TS + 'static, R: TS + 'static> TsBody for Upgrade<S, R> {
     fn ts(cfg: &Config) -> String {
         format!("{{ receive: {}, send: {} }}", S::name(cfg), R::name(cfg))
     }
+
+    fn visit(v: &mut impl TypeVisitor) {
+        v.visit::<S>();
+        v.visit::<R>();
+    }
 }
 
-/// `E` as a TypeScript `Endpoint` value, to place in its module's object. The types it names must
-/// be declared in the same file.
+/// Whether `E`'s params, query, body or response holds a [`Path`] or [`PathBuf`] anywhere inside.
+pub fn names_host_path<E>() -> bool
+where
+    E: Endpoint,
+    E::Params: TS + 'static,
+    E::Query: TS + 'static,
+    E::Body: TsBody,
+    E::Response: TsBody,
+{
+    #[derive(Default)]
+    struct HostPaths {
+        seen: HashSet<TypeId>,
+        found: bool,
+    }
+    impl TypeVisitor for HostPaths {
+        fn visit<T: TS + 'static + ?Sized>(&mut self) {
+            let id = TypeId::of::<T>();
+            self.found |=
+                id == TypeId::of::<PathBuf>() || id == TypeId::of::<Path>();
+            if self.seen.insert(id) {
+                T::visit_dependencies(self);
+                T::visit_generics(self);
+            }
+        }
+    }
+    let mut visitor = HostPaths::default();
+    visitor.visit::<E::Params>();
+    visitor.visit::<E::Query>();
+    E::Body::visit(&mut visitor);
+    E::Response::visit(&mut visitor);
+    visitor.found
+}
+
+/// `E` as a TypeScript `Endpoint` value, to place in its module's object.
 pub fn endpoint<E>() -> String
 where
     E: Endpoint,
@@ -69,11 +120,12 @@ where
 {
     let cfg = &config();
     format!(
-        "{{ method: {}, path: {}, auth: {}, dangerous: {}, body: {}, response: {} }} as Endpoint<{}, {}, {}, {}>",
+        "{{ method: {}, path: {}, auth: {}, dangerous: {}, untimed: {}, body: {}, response: {} }} as Endpoint<{}, {}, {}, {}>",
         json(&E::METHOD),
         json(&E::PATH),
         json(&E::AUTH),
         E::DANGEROUS,
+        E::UNTIMED,
         json(&<E::Body as RequestBody>::KIND),
         json(&<E::Response as ResponseBody>::KIND),
         E::Params::name(cfg),
@@ -81,6 +133,123 @@ where
         E::Body::request_ts(cfg),
         E::Response::ts(cfg),
     )
+}
+
+/// Asserts that the generated TypeScript at `path` is `generated`, or writes it when `WRITE_TS`
+/// is set.
+pub fn check(path: &str, generated: &str) {
+    if std::env::var_os("WRITE_TS").is_some() {
+        std::fs::write(path, generated)
+            .expect("the generated file is writable");
+        return;
+    }
+    let written = std::fs::read_to_string(path).unwrap_or_default();
+    assert!(
+        written.replace("\r\n", "\n") == generated,
+        "{path} is out of date. Regenerate it with WRITE_TS=1 node scripts/dev-runner.ts test <crate>"
+    );
+}
+
+/// The routes of one [`endpoints!`](crate::endpoints) group, as a TypeScript object.
+pub struct Module {
+    pub name: &'static str,
+    pub docs: &'static [&'static str],
+    /// Each route's name and its [`endpoint`] value.
+    pub endpoints: Vec<(&'static str, String)>,
+}
+
+impl Module {
+    /// `export const <name> = { ... }`, keyed by each route's name, or by its camelCase form when
+    /// `camel`.
+    pub fn ts(&self, camel: bool) -> String {
+        let docs = match self.docs {
+            [] => String::new(),
+            [line] => format!("/**{line} */\n"),
+            lines => {
+                let lines: String =
+                    lines.iter().map(|line| format!(" *{line}\n")).collect();
+                format!("/**\n{lines} */\n")
+            }
+        };
+        let entries: String = self
+            .endpoints
+            .iter()
+            .map(|(name, endpoint)| {
+                let key = match camel {
+                    true => name[..1].to_lowercase() + &name[1..],
+                    false => (*name).to_owned(),
+                };
+                format!("\t{key}: {endpoint},\n")
+            })
+            .collect();
+        format!("\n{docs}export const {} = {{\n{entries}}}\n", self.name)
+    }
+}
+
+/// A generated file in `packages/contracts/ts/`: its header, an `import type` of each type it
+/// names from the `earlier` files (each a name and its contents), and `body`. `package` is the
+/// crate whose tests write it.
+pub fn file(package: &str, body: &str, earlier: &[(&str, &str)]) -> String {
+    let words = code_words(body);
+    let imports: String = earlier
+        .iter()
+        .filter_map(|(name, contents)| {
+            let used: Vec<&str> = type_exports(contents)
+                .filter(|export| words.contains(export))
+                .collect();
+            (!used.is_empty()).then(|| {
+                format!(
+                    "import type {{ {} }} from './{name}'\n",
+                    used.join(", ")
+                )
+            })
+        })
+        .collect();
+    let imports = match imports.is_empty() {
+        true => imports,
+        false => imports + "\n",
+    };
+    format!(
+        "// Generated by ts-rs from the {package} crate. Do not edit.\n\
+         // Regenerate: WRITE_TS=1 node scripts/dev-runner.ts test {package}\n\n\
+         {imports}{}",
+        body.trim_start_matches('\n')
+    )
+}
+
+/// The types a generated file exports, in order.
+fn type_exports(contents: &str) -> impl Iterator<Item = &str> {
+    contents.lines().filter_map(|line| {
+        let rest = line
+            .strip_prefix("export type ")
+            .or_else(|| line.strip_prefix("export interface "))?;
+        rest.split(|c: char| !(c.is_alphanumeric() || c == '_'))
+            .next()
+    })
+}
+
+/// Every identifier in `body` outside its comments.
+fn code_words(body: &str) -> std::collections::HashSet<&str> {
+    let mut code = Vec::new();
+    let mut rest = body;
+    while let Some(at) = [rest.find("/*"), rest.find("//")]
+        .into_iter()
+        .flatten()
+        .min()
+    {
+        code.push(&rest[..at]);
+        rest = match rest[at..].starts_with("/*") {
+            true => rest[at..].split_once("*/").map_or("", |(_, after)| after),
+            false => rest[at..].split_once('\n').map_or("", |(_, after)| after),
+        };
+    }
+    code.push(rest);
+    code.into_iter()
+        .flat_map(|code| {
+            code.split(|c: char| !(c.is_alphanumeric() || c == '_'))
+        })
+        .filter(|word| !word.is_empty())
+        .collect()
 }
 
 fn json(value: &impl Serialize) -> String {
@@ -140,10 +309,11 @@ mod tests {
 
     use crate::{
         ApiError, Auth, BodyKind, Empty, Endpoint, ErrorCode, Hash, Json,
-        Method, PROTOCOL_VERSION, backend, core, limits, rules, store, tickets,
+        Method, ModLoader, PROTOCOL_VERSION, ReleaseChannel, backend, core,
+        limits, rules, tickets,
     };
 
-    const PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/ts/contracts.ts");
+    const DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/ts");
 
     const ENDPOINT: &str = "
 /** A route, as `ContractClient` calls it. `_types` only carries its Rust types. */
@@ -152,13 +322,15 @@ export interface Endpoint<P = unknown, Q = unknown, B = unknown, R = unknown> {
 \tpath: string
 \tauth: Auth
 \tdangerous: boolean
+\tuntimed: boolean
 \tbody: BodyKind
 \tresponse: BodyKind
 \treadonly _types?: { params: P; query: Q; body: B; response: R }
 }
 ";
 
-    fn file() -> String {
+    /// Shared primitives: the Endpoint machinery, errors, limits, rules and tickets.
+    fn protocol() -> String {
         let cfg = super::config();
         let declarations = [
             Method::decl(&cfg),
@@ -167,42 +339,49 @@ export interface Endpoint<P = unknown, Q = unknown, B = unknown, R = unknown> {
             ApiError::decl(&cfg),
             ErrorCode::decl(&cfg),
             Hash::decl(&cfg),
+            ModLoader::decl(&cfg),
+            ReleaseChannel::decl(&cfg),
         ]
         .into_iter()
         .chain(tickets::ts_types())
         .map(|declaration| format!("\nexport {declaration}\n"))
         .collect::<String>();
-        format!(
-            "// Generated from packages/contracts by ts-rs. Do not edit.\n\
-             // Regenerate: cargo test -p contracts -- --ignored write_ts\n\n\
-             export const PROTOCOL_VERSION = {PROTOCOL_VERSION}\n{declarations}{ENDPOINT}{}{}{}{}{}{}{}{}{}{}{}",
+        let body = format!(
+            "export const PROTOCOL_VERSION = {PROTOCOL_VERSION}\n{declarations}{ENDPOINT}{}{}{}",
             limits::ts(),
             rules::ts(),
             tickets::ts(),
+        );
+        super::file("contracts", &body, &[])
+    }
+
+    fn backend(protocol: &str) -> String {
+        let body = [
             backend::cores::ts(),
             backend::sharing::ts(),
             backend::social::ts(),
             backend::accounts::ts(),
             backend::dev::ts(),
             backend::ts(),
-            core::ts(),
-            store::ts(),
-        )
+        ]
+        .concat();
+        super::file("contracts", &body, &[("protocol", protocol)])
     }
 
     #[test]
     fn ts_is_up_to_date() {
-        let written = std::fs::read_to_string(PATH).unwrap_or_default();
-        assert!(
-            written.replace("\r\n", "\n") == file(),
-            "{PATH} is out of date. Run: cargo test -p contracts -- --ignored write_ts"
+        let protocol = protocol();
+        let backend = backend(&protocol);
+        let core = super::file(
+            "contracts",
+            &core::ts(),
+            &[("protocol", &protocol), ("backend", &backend)],
         );
-    }
-
-    #[test]
-    #[ignore = "writes the generated file; run on purpose"]
-    fn write_ts() {
-        std::fs::write(PATH, file()).unwrap();
+        for (name, file) in
+            [("protocol", protocol), ("backend", backend), ("core", core)]
+        {
+            super::check(&format!("{DIR}/{name}.ts"), &file);
+        }
     }
 
     struct ClearCache;
@@ -222,7 +401,7 @@ export interface Endpoint<P = unknown, Q = unknown, B = unknown, R = unknown> {
     fn an_endpoint_is_the_object_contract_client_reads() {
         assert_eq!(
             super::endpoint::<ClearCache>(),
-            r#"{ method: "DELETE", path: "/v1/cache", auth: "session", dangerous: true, body: "empty", response: "json" } as Endpoint<null, null, void, number>"#
+            r#"{ method: "DELETE", path: "/v1/cache", auth: "session", dangerous: true, untimed: false, body: "empty", response: "json" } as Endpoint<null, null, void, number>"#
         );
     }
 }

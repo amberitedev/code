@@ -1,6 +1,6 @@
 //! The engine's wire types, generated to `packages/contracts/ts/engine.ts`, which
 //! `cargo test -p engine` keeps fresh. Regenerate it with
-//! `cargo test -p engine -- --ignored write_ts`.
+//! `WRITE_TS=1 node scripts/dev-runner.ts test engine`.
 
 use contracts::ts::config;
 use minecraft_meta_manifest::fabriclike::{
@@ -24,16 +24,13 @@ use crate::{
             ProjectIdQuery, ProjectLock, ProjectPath, ProjectToggle,
             ProjectVersionSwitch,
         },
-        content::{EditedDecision, SideChange, SidesUnlocked},
+        content::{SideChange, SidesUnlocked},
         files::{
             self, EditedInstanceIcon, ExtractDryRunResult, InstanceFileDelete,
             InstanceFileKind, InstanceFileMove, InstanceFilePath,
             InstanceFileStat, InstanceFileWrite, InstanceUpload,
             InstanceUploadRef, InstanceUploadScope, InstanceUploadStatus,
             InstanceZipExtract, InstanceZipRequest, UploadScope,
-        },
-        groups::{
-            self, InstanceGroupRef, InstanceGroupUpdate, NewInstanceGroup,
         },
         install::{
             self as installs, InstallJobQuery, InstallJobRef, InstanceInstall,
@@ -54,8 +51,8 @@ use crate::{
         worlds::{
             self, InstanceServerDesync, InstanceServerRef,
             InstanceServerUpdate, ManagedInstanceServer, NewInstanceServer,
-            RecentWorldsQuery, ServerStatusQuery, WorldDisplayStatusUpdate,
-            WorldRename, WorldSaveRef,
+            ServerStatusQuery, WorldDisplayStatusUpdate, WorldRename,
+            WorldSaveRef,
         },
     },
     event::*,
@@ -66,11 +63,10 @@ use crate::{
         InstallProgressSecondary,
         model::{InstallApiErrorDetails, InstallJobDisplay, InstallTarget},
     },
-    instance::{ContentSide, EditedFile},
+    instance::ContentSide,
     instance::{
-        InstallProjectWithDependenciesRequest, InstanceFileItem, InstanceGroup,
-        InstanceGroupMembershipUpdate, PackExportCandidate,
-        PackExportCandidateType, SharedHistorySettings,
+        InstallProjectWithDependenciesRequest, InstanceFileItem,
+        PackExportCandidate, PackExportCandidateType, SharedHistorySettings,
         SharedInstanceExternalFilePreview, SharedInstanceHistoryEntry,
         SharedInstanceInstallPreview, SharedInstanceInvite,
         SharedInstanceInviteCreator, SharedInstanceInviteInstallPreview,
@@ -84,16 +80,15 @@ use crate::{
     state::{
         CacheBehaviour, CacheValueType, Category, ContentFile, ContentItem,
         ContentItemOwner, ContentItemProject, ContentItemVersion,
-        ContentSetSyncStatus, ContentSourceKind, DefaultPage, Dependency,
-        DependencyType, DonationLink, EmbeddedContentMetadata, FeatureFlag,
-        FileMetadata, FileType, GalleryItem, GameVersion, Hooks,
-        InstanceInstallCandidate, InstanceInstallStage, InstanceInstallTarget,
-        InstanceSyncedOptions, InstanceTabVisibility, JavaVersion, License,
-        LinkedModpackInfo, Loader, Log4jEvent, MemorySettings, ModLoader,
-        Organization, OwnerType, PendingChange, ProcessMetadata, Project,
-        ProjectType, ProjectV3, ReleaseChannel, SearchEntry, SearchResult,
-        SearchResultV3, SearchResults, SearchResultsV3, ServerSides, Settings,
-        SharedInstanceRole, SideType, SyncedPackInfo, TeamMember, Theme, User,
+        ContentSetSyncStatus, ContentSourceKind, Dependency, DependencyType,
+        DonationLink, EmbeddedContentMetadata, FileMetadata, FileType,
+        GalleryItem, GameVersion, Hooks, InstanceInstallCandidate,
+        InstanceInstallStage, InstanceInstallTarget, InstanceSyncedOptions,
+        InstanceTabVisibility, JavaVersion, License, LinkedModpackInfo, Loader,
+        Log4jEvent, MemorySettings, Organization, OwnerType, ProcessMetadata,
+        Project, ProjectType, ProjectV3, SearchEntry, SearchResult,
+        SearchResultV3, SearchResults, SearchResultsV3, ServerSides,
+        SharedInstanceRole, SideType, SyncedPackInfo, TeamMember, User,
         Version, VersionEnvironment, VersionFile, WindowSize,
         content_store::StoreUsage,
     },
@@ -106,8 +101,7 @@ use crate::{
 
 use crate::state::CachedSharedInstanceSummary;
 
-const PATH: &str =
-    concat!(env!("CARGO_MANIFEST_DIR"), "/../contracts/ts/engine.ts");
+const DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../contracts/ts");
 
 fn file() -> String {
     let cfg = config();
@@ -133,7 +127,6 @@ fn file() -> String {
         InstallApiErrorDetails::decl(&cfg),
         InstallErrorContext::decl(&cfg),
         ImportLauncherType::decl(&cfg),
-        ModLoader::decl(&cfg),
         WarningPayload::decl(&cfg),
         LogPayload::decl(&cfg),
         LogEvent::decl(&cfg),
@@ -147,17 +140,11 @@ fn file() -> String {
         ContentSetSyncStatus::decl(&cfg),
         InstanceSyncedOptions::decl(&cfg),
         InstanceTabVisibility::decl(&cfg),
-        ReleaseChannel::decl(&cfg),
         MemorySettings::decl(&cfg),
         WindowSize::decl(&cfg),
         Hooks::decl(&cfg),
         InstanceRef::decl(&cfg),
         InstanceIds::decl(&cfg),
-        InstanceGroup::decl(&cfg),
-        InstanceGroupMembershipUpdate::decl(&cfg),
-        InstanceGroupRef::decl(&cfg),
-        NewInstanceGroup::decl(&cfg),
-        InstanceGroupUpdate::decl(&cfg),
         World::decl(&cfg),
         WorldWithInstance::decl(&cfg),
         WorldDetails::decl(&cfg),
@@ -172,7 +159,6 @@ fn file() -> String {
         ServerPlayers::decl(&cfg),
         ServerGameProfile::decl(&cfg),
         ServerVersion::decl(&cfg),
-        RecentWorldsQuery::decl(&cfg),
         ServerStatusQuery::decl(&cfg),
         WorldSaveRef::decl(&cfg),
         InstanceServerRef::decl(&cfg),
@@ -183,10 +169,6 @@ fn file() -> String {
         InstanceServerUpdate::decl(&cfg),
         InstanceServerDesync::decl(&cfg),
         StoreUsage::decl(&cfg),
-        Settings::decl(&cfg),
-        Theme::decl(&cfg),
-        DefaultPage::decl(&cfg),
-        FeatureFlag::decl(&cfg),
         Category::decl(&cfg),
         Loader::decl(&cfg),
         GameVersion::decl(&cfg),
@@ -304,11 +286,8 @@ fn file() -> String {
         PackExportCandidateType::decl(&cfg),
         ServerSides::decl(&cfg),
         ContentSide::decl(&cfg),
-        EditedFile::decl(&cfg),
-        PendingChange::decl(&cfg),
         SideChange::decl(&cfg),
         SidesUnlocked::decl(&cfg),
-        EditedDecision::decl(&cfg),
         SharedInstanceUsers::decl(&cfg),
         SharedInstanceUser::decl(&cfg),
         SharedInstanceJoinType::decl(&cfg),
@@ -319,52 +298,38 @@ fn file() -> String {
         SharedInstancePublishPreview::decl(&cfg),
         SharedInstancePublishFile::decl(&cfg),
         CachedSharedInstanceSummary::decl(&cfg),
-        // The payloads of the App's events that engine code still raises.
-        FriendPayload::decl(&cfg),
-        FriendStatusPayload::decl(&cfg),
-        OnboardingChecklist::decl(&cfg),
-        InstanceGroupsChangedPayload::decl(&cfg),
-        CommandPayload::decl(&cfg),
     ]
     .map(|declaration| format!("\nexport {declaration}\n"))
     .concat();
-    let modules = [
-        ("instances", instances::ts_entries()),
-        ("instanceGroups", groups::ts_entries()),
-        ("loadingBars", loading::ts_entries()),
-        ("worlds", worlds::ts_entries()),
-        ("contentStore", store::ts_entries()),
-        ("tags", tags::ts_entries()),
-        ("metadata", metadata::ts_entries()),
-        ("cache", cache::ts_entries()),
-        ("logs", logs::ts_entries()),
-        ("processes", process::ts_entries()),
-        ("java", jre::ts_entries()),
-        ("instanceFiles", files::ts_entries()),
-        ("installs", installs::ts_entries()),
-        ("instanceContent", content::ts_entries()),
-        ("instanceSharing", sharing::ts_entries()),
+    let modules: String = [
+        instances::ts_module(),
+        loading::ts_module(),
+        worlds::ts_module(),
+        store::ts_module(),
+        tags::ts_module(),
+        metadata::ts_module(),
+        cache::ts_module(),
+        logs::ts_module(),
+        process::ts_module(),
+        jre::ts_module(),
+        files::ts_module(),
+        installs::ts_module(),
+        content::ts_module(),
+        sharing::ts_module(),
     ]
-    .map(|(name, entries)| format!("\nexport const {name} = {{\n{entries}}}\n"))
+    .map(|module| module.ts(false))
     .concat();
-    format!(
-        "// Generated from packages/engine by ts-rs. Do not edit.\n\
-         // Regenerate: cargo test -p engine -- --ignored write_ts\n\n\
-         import type {{ Endpoint, RemovedFile, SharedIconConfig, UserIds }} from './contracts'\n{declarations}{modules}"
-    )
+    let earlier = ["protocol", "backend", "core"].map(|name| {
+        let path = format!("{DIR}/{name}.ts");
+        (name, std::fs::read_to_string(path).unwrap_or_default())
+    });
+    let earlier = earlier
+        .each_ref()
+        .map(|(name, contents)| (*name, contents.as_str()));
+    contracts::ts::file("engine", &format!("{declarations}{modules}"), &earlier)
 }
 
 #[test]
 fn ts_is_up_to_date() {
-    let written = std::fs::read_to_string(PATH).unwrap_or_default();
-    assert!(
-        written.replace("\r\n", "\n") == file(),
-        "{PATH} is out of date. Run: cargo test -p engine -- --ignored write_ts"
-    );
-}
-
-#[test]
-#[ignore = "writes the generated file; run on purpose"]
-fn write_ts() {
-    std::fs::write(PATH, file()).unwrap();
+    contracts::ts::check(&format!("{DIR}/engine.ts"), &file());
 }

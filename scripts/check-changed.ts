@@ -38,6 +38,12 @@ const PACKAGES = [
 		test: true,
 		reachedBy: ['apps/backend', 'packages/contracts'],
 	},
+	{
+		name: '@modrinth/api-client',
+		folder: 'packages/api-client',
+		test: false,
+		reachedBy: ['packages/api-client', 'packages/contracts'],
+	},
 	// A fixture helper calls the generated endpoints, so a changed contract shows up here.
 	{
 		name: '@amberite/fixtures',
@@ -107,9 +113,10 @@ for (const pack of PACKAGES) {
 		})
 	}
 }
-// The root test run (vite.config.ts) covers scripts/ and the unit tests of api-client and fixtures.
+// The root test run (vite.config.ts) covers scripts/ and the unit tests of api-client, fixtures
+// and ui.
 const unitTests = changed.flatMap((file) => {
-	if (!/^(?:scripts|packages\/(?:api-client|fixtures)\/src)\/.+\.ts$/.test(file)) return []
+	if (!/^(?:scripts|packages\/(?:api-client|fixtures|ui)\/src)\/.+\.ts$/.test(file)) return []
 	const test = file.replace(/(?<!\.test)\.ts$/, '.test.ts')
 	return NodeFS.existsSync(NodePath.join(root, test)) ? [test] : []
 })
@@ -129,7 +136,7 @@ else {
 	// The crates CI leaves out of the workspace tests (ci.yml, rust job).
 	const untested = new Set(['toasty'])
 	const tested = crates.filter((crate) => !untested.has(crate.name) && under(crate.folder))
-	if (tested.some((crate) => crate.name === 'theseus_gui')) {
+	if (tested.some((crate) => crate.name === 'amberite-app')) {
 		// Tauri only checks that the frontend build folder exists, as in CI.
 		NodeFS.mkdirSync(NodePath.join(root, 'apps', 'app-frontend', 'dist'), { recursive: true })
 	}

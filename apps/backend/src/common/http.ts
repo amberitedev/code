@@ -1,4 +1,4 @@
-import type { ErrorCode } from '@amberite/contracts'
+import type { ErrorCode } from '@amberite/contracts/protocol'
 
 export class ApiError extends Error {
 	constructor(

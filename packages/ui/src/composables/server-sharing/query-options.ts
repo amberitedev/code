@@ -1,34 +1,57 @@
-import type { AbstractModrinthClient } from '@modrinth/api-client'
+import { instanceSharing } from '@amberite/contracts/engine'
+import {
+	type AbstractModrinthClient,
+	ApiCallError,
+	type ContractClient,
+} from '@modrinth/api-client'
 
 import { serverKeys, sharedInstanceKeys } from '#ui/composables/server-queries'
 
 import { sharedDiffItems } from './share-diff'
 
+/** What pushing the server's content would change in its own share. 404 while it has none. */
 export function serverShareDiffQueryOptions(
-	client: AbstractModrinthClient,
+	core: ContractClient,
 	serverId: string,
-	worldId: string,
+	running: boolean,
 	userId: string | undefined,
 ) {
 	return {
-		queryKey: serverKeys.shareDiff(serverId, worldId, userId),
+		queryKey: serverKeys.shareDiff(serverId, userId),
 		queryFn: async () => {
-			const diff = await client.archon.content_v1.getShareDiff(serverId, worldId)
+			const preview = await core.call(instanceSharing.GetSharedInstancePublishPreview, {
+				params: { id: serverId },
+			})
+			if (!preview) throw new ApiCallError(404, 'not_found', 'The server has no share.')
+			const hasChanges = preview.diffs.length > 0
+			const diff = {
+				shared_instance_id: preview.sharedInstanceId,
+				latest_version: preview.latestVersion,
+				has_changes: hasChanges,
+				// A running server takes server-side changes only once it restarts.
+				requires_restart: hasChanges && running,
+				diffs: preview.diffs,
+			}
 			return { diff, items: sharedDiffItems(diff.diffs) }
 		},
 		retry: false,
 	}
 }
 
+/** The server's config files a push can carry. */
 export function serverShareableFilesQueryOptions(
-	client: AbstractModrinthClient,
+	core: ContractClient,
 	serverId: string,
-	worldId: string,
 	userId: string | undefined,
 ) {
 	return {
-		queryKey: serverKeys.shareFiles(serverId, worldId, userId),
-		queryFn: () => client.archon.content_v1.getShareableFiles(serverId, worldId),
+		queryKey: serverKeys.shareFiles(serverId, userId),
+		queryFn: async () => {
+			const preview = await core.call(instanceSharing.GetSharedInstancePublishPreview, {
+				params: { id: serverId },
+			})
+			return { files: preview?.files ?? [], truncated: false }
+		},
 		retry: false,
 	}
 }

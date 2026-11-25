@@ -32,7 +32,9 @@ async fn status(db: &SqlitePool) -> Result<PairingStatus, ApiError> {
     };
     Ok(PairingStatus {
         paired,
-        expires_at: shown.as_ref().map(|shown| shown.expires_at),
+        expires_at: shown
+            .as_ref()
+            .map(|shown| crate::access::at(shown.expires_at)),
         code: shown.map(|shown| shown.code),
     })
 }

@@ -4,16 +4,13 @@ import {
 	type IconCacheContext,
 	serverIconEditorConfig,
 	serverIconImageQueryOptions,
-	serverIconKeys,
-	serverIconMetadataQueryOptions,
 	serverListQueryOptions,
 } from '@modrinth/ui'
 import type { QueryClient } from '@tanstack/vue-query'
 
 /**
- * Warms the hosting caches for a signed-in user: their server list, the icons of their
- * available servers, and billing data (Modrinth hosting only). Icons are skipped once
- * `isCurrentSession` returns false.
+ * Warms the hosting caches for a signed-in user: their server list and the icons of their
+ * available servers. Icons are skipped once `isCurrentSession` returns false.
  */
 export async function prefetchHostingData(
 	queryClient: QueryClient,
@@ -21,33 +18,14 @@ export async function prefetchHostingData(
 	iconCache: IconCacheContext,
 	isCurrentSession: () => boolean,
 ) {
-	// Self-hosted servers run on Cores, which have no billing.
-	if (!client.selfHostedHosting) {
-		void queryClient.prefetchQuery({
-			queryKey: ['billing', 'subscriptions'],
-			queryFn: () => client.labrinth.billing_internal.getSubscriptions(),
-			staleTime: 30_000,
-		})
-		void queryClient.prefetchQuery({
-			queryKey: ['billing', 'payments'],
-			queryFn: () => client.labrinth.billing_internal.getPayments(),
-			staleTime: 30_000,
-		})
-	}
-
 	const response = await queryClient.fetchQuery(serverListQueryOptions(client)).catch(() => null)
 	if (!response || !isCurrentSession()) return
 
 	await Promise.allSettled(
 		response.servers
-			.filter((server) => server.status === 'available' && !server.is_medal)
+			.filter((server) => server.status === 'available')
 			.map(async (server) => {
-				if (server.icon !== undefined) {
-					queryClient.setQueryData(serverIconKeys.metadata(server.server_id), server.icon)
-				}
-				const metadata = await queryClient.fetchQuery(
-					serverIconMetadataQueryOptions(server.server_id, client),
-				)
+				const metadata = server.icon
 				if (!metadata) return
 				const config = serverIconEditorConfig(metadata)
 				if (config) {

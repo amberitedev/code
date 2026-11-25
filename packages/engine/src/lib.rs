@@ -27,12 +27,10 @@ mod ts;
 pub use api::*;
 pub use error::*;
 pub use event::{
-    DesktopEvent, Event, EventSink, FriendPayload, FriendStatusPayload,
-    InstanceGroupsChangedPayload, InstancePayload, InstancePayloadType,
-    LoadingBar, LoadingBarType, ProcessPayload, ProcessPayloadType,
-    emit::emit_command, emit::emit_friend, emit::emit_instance,
-    emit::emit_loading, emit::emit_notification,
-    emit::emit_onboarding_checklist, emit::emit_warning, emit::init_loading,
+    Event, EventSink, InstancePayload, InstancePayloadType, LoadingBar,
+    LoadingBarType, LogEvent, LogPayload, ProcessPayload, ProcessPayloadType,
+    emit::emit_instance, emit::emit_loading, emit::emit_warning,
+    emit::init_loading,
 };
 pub use launcher::server;
 pub use launcher::{
@@ -40,7 +38,6 @@ pub use launcher::{
 };
 pub use self_hosted::accounts::AccountEndpoints;
 pub use state::INSTANCES_FOLDER_NAME;
-pub use state::instances::commands::server_jar;
 pub use state::{
     BackendSession, BackendSessionKind, Engine, EngineConfig,
     GameOptionsPackSource, InstanceHooks, ModrinthSession, PackOverrides,
@@ -61,13 +58,12 @@ pub fn install_crypto_provider() {
     let _ = rustls::crypto::ring::default_provider().install_default();
 }
 
-pub fn launcher_user_agent() -> String {
-    const LAUNCHER_BASE_USER_AGENT: &str =
-        concat!("modrinth/theseus/", env!("CARGO_PKG_VERSION"),);
+static USER_AGENT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
-    format!(
-        "{} ({}; support@modrinth.com)",
-        LAUNCHER_BASE_USER_AGENT,
-        std::env::consts::OS
-    )
+/// The user agent of this process's requests: the first engine's `EngineConfig.user_agent`. The
+/// reqwest clients are process-wide, so a process has one. Only engine-less tests see the default.
+pub fn launcher_user_agent() -> String {
+    USER_AGENT.get().cloned().unwrap_or_else(|| {
+        concat!("engine/", env!("CARGO_PKG_VERSION")).to_owned()
+    })
 }

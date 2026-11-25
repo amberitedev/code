@@ -1,8 +1,8 @@
 # Local accounts and sharing backend
 
 One Cloudflare Worker owns account, social, and sharing metadata in D1. Shared files live on Cores;
-the Worker keeps each version's manifest in an R2 bucket, which
-wrangler emulates locally, and never carries a file byte. There are no
+the Worker keeps each version's manifest, share icons and avatars in an R2 bucket, which
+wrangler emulates locally, and never carries a shared file's byte. There are no
 remote bindings or deployment scripts. The root development runner supplies local secrets and keeps
 persistent state under the worktree's `.data/`.
 
@@ -67,6 +67,10 @@ A Core pairs with a code its owner approves in the App (`POST /core/auth/code`, 
 with `POST /core/state` on start and when something changes, never on a timer, and a report that
 changes nothing writes nothing. Only the owner is told where a Core is. A Core removed from its
 account gets `410 core_removed` from every one of its calls and un-pairs.
+
+A Core reaches shares on its own routes, `/core/shares`, acting for its owner: it writes the shares
+of its servers that follow no instance, and reads any share its owner can read, so a server can
+follow one. The owner's access is checked on every read.
 
 The App removes a Core by telling the Core first, with a ticket, and then calling
 `DELETE /cores/:id`. A Core that was off learns from the 410 at its next start.

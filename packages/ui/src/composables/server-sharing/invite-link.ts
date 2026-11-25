@@ -1,3 +1,4 @@
+import { core as coreRoutes } from '@amberite/contracts/core'
 import type { AbstractModrinthClient, SharedInstances } from '@modrinth/api-client'
 
 // The invite rules for instance and server shares alike; the App's share pages import them too.
@@ -68,24 +69,27 @@ export async function ensureServerInviteLink(
 }
 
 /**
- * Shares the world when it has no shared instance yet, then returns a share URL for an
+ * Shares the server when it has no shared instance yet, then returns a share URL for an
  * invite link that still has uses left. Returns `null` once `isCurrent` reports the caller moved on.
  */
 export async function createServerInviteLink(
 	client: AbstractModrinthClient,
 	serverId: string,
-	worldId: string,
 	siteUrl: string,
 	isCurrent: () => boolean,
 ): Promise<string | null> {
-	const details = await client.archon.servers_v1.get(serverId)
+	const core = await client.cores.serverRoutes(serverId)
+	const params = { id: serverId }
+	const server = await core.call(coreRoutes.GetServer, { params })
 	if (!isCurrent()) return null
-	const existingId = details.worlds.find((world) => world.id === worldId)?.content
-		?.shared_instance_id
 	const instanceId =
-		existingId ??
-		(await client.archon.content_v1.share(serverId, worldId, [], { timeout: 20_000 }))
-			.shared_instance_id
+		server.shared_instance_id ??
+		(
+			await core.call(coreRoutes.ShareServer, {
+				params,
+				body: { file_paths: [], removed_paths: [], restart: false },
+			})
+		).shared_instance_id
 	if (!isCurrent()) return null
 	const inviteId = await ensureServerInviteLink(client, serverId, instanceId, undefined, {
 		maximizeUses: true,

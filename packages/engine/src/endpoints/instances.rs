@@ -2,7 +2,6 @@ use anyhow::Context;
 use contracts::{Empty, Json};
 use serde::{Deserialize, Serialize};
 
-use super::endpoints;
 use crate::{
     ErrorKind,
     state::{
@@ -17,20 +16,22 @@ use crate::{
     },
 };
 
-endpoints! {
+contracts::endpoints! {
+    group instances;
+
     /// Every instance the caller may view.
-    ListInstances: Get "/instances", (), (), Empty => Json<Vec<Instance>>;
+    ListInstances: Get "/instances", Session, (), (), Empty => Json<Vec<Instance>>, client_only;
     /// The instances among `ids` that exist and the caller may view.
-    GetInstances: Get "/instances/many", (), InstanceIds, Empty => Json<Vec<Instance>>;
+    GetInstances: Get "/instances/many", Session, (), InstanceIds, Empty => Json<Vec<Instance>>, client_only;
     /// `null` when there is no such instance.
-    GetInstance: Get "/instances/{id}", InstanceRef, (), Empty => Json<Option<Instance>>;
+    GetInstance: Get "/instances/{id}", Session, InstanceRef, (), Empty => Json<Option<Instance>>, client_only;
     /// Deletes the instance and its folder.
-    RemoveInstance: Delete "/instances/{id}", InstanceRef, (), Empty => Empty;
-    EditInstance: Patch "/instances/{id}", InstanceRef, (), Json<InstanceUpdate> => Empty;
+    RemoveInstance: Delete "/instances/{id}", Session, InstanceRef, (), Empty => Empty, client_only;
+    EditInstance: Patch "/instances/{id}", Session, InstanceRef, (), Json<InstanceUpdate> => Empty, client_only;
     /// Stops the instance's running game.
-    KillInstance: Post "/instances/{id}/kill", InstanceRef, (), Empty => Empty;
+    KillInstance: Post "/instances/{id}/kill", Session, InstanceRef, (), Empty => Empty, client_only;
     /// The installed Java that suits the instance's game version, if any.
-    GetOptimalJava: Get "/instances/{id}/java", InstanceRef, (), Empty => Json<Option<JavaVersion>>;
+    GetOptimalJava: Get "/instances/{id}/java", Session, InstanceRef, (), Empty => Json<Option<JavaVersion>>, client_only;
 }
 
 #[derive(Serialize, Deserialize)]
@@ -59,8 +60,6 @@ pub struct InstanceUpdate {
         ts(as = "Option<Option<String>>", optional)
     )]
     pub loader_version: Option<Option<String>>,
-    #[cfg_attr(feature = "export-ts", ts(optional = nullable))]
-    pub group_ids: Option<Vec<String>>,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -148,7 +147,6 @@ impl InstanceUpdate {
             icon_path: None,
             icon_config: None,
             update_channel: self.update_channel,
-            group_ids: self.group_ids,
             link: self
                 .link
                 .map(|link| match link {
@@ -203,7 +201,6 @@ pub struct Instance {
     pub protocol_version: Option<u32>,
     pub loader: ModLoader,
     pub loader_version: Option<String>,
-    pub group_ids: Vec<String>,
     pub link: Option<InstanceLink>,
     pub shared_instance: Option<SharedInstanceAttachment>,
     pub quarantined: bool,
@@ -309,7 +306,6 @@ impl From<InstanceMetadata> for Instance {
             protocol_version: metadata.applied_content_set.protocol_version,
             loader: metadata.applied_content_set.loader,
             loader_version: metadata.applied_content_set.loader_version,
-            group_ids: metadata.group_ids,
             link: InstanceLink::from_core(metadata.link),
             shared_instance: metadata.shared_instance.map(Into::into),
             quarantined: metadata.quarantined,

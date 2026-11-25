@@ -1,13 +1,6 @@
-import type { Archon } from '@modrinth/api-client'
+import type { Action, ActionEntry } from '@amberite/contracts/core'
 import type { IconComponent } from '@modrinth/assets'
-import {
-	DatabaseBackupIcon,
-	FileIcon,
-	PackageIcon,
-	PowerIcon,
-	ServerIcon,
-	SettingsIcon,
-} from '@modrinth/assets'
+import { DatabaseBackupIcon, PowerIcon, ServerIcon } from '@modrinth/assets'
 
 import type { DropdownFilterBarOption } from '#ui/components/base/DropdownFilterBar.vue'
 import type {
@@ -17,59 +10,23 @@ import type {
 } from '#ui/components/base/TimeFramePicker.vue'
 import { defineMessage, type MessageDescriptor } from '#ui/composables/i18n'
 
-export const SUPPORT_ACTION_LOG_USER_FILTER = 'support'
-export const SERVER_SCOPED_ACTION_LOG_WORLD_FILTER = '__server_scoped__'
-
+/** The actions a Core logs for one server, as `ListActivity` filters by them. */
 export const actionLogActionNames = [
 	'server_created',
-	'changed_server_name',
-	'changed_server_subdomain',
-	'server_reallocated',
-	'server_plan_changed',
-	'server_suspended',
-	'server_unsuspended',
-	'server_suspension_lifted',
-	'server_resuspended',
-	'addon_added',
-	'addon_uploaded',
-	'addon_disabled',
-	'addon_enabled',
-	'addon_deleted',
-	'addon_updated',
-	'addon_server_enabled',
-	'addon_player_enabled',
-	'addon_side_toggle_locked',
-	'modpack_changed',
-	'modpack_unlinked',
-	'instance_version_applied',
-	'server_repaired',
-	'server_reset',
-	'world_data_reset',
 	'server_started',
 	'server_stopped',
 	'server_restarted',
 	'server_killed',
-	'port_allocation_added',
-	'port_allocation_removed',
-	'loader_version_edited',
-	'game_version_edited',
-	'server_properties_modified',
-	'file_uploaded',
-	'file_deleted',
-	'file_renamed',
-	'file_edited',
-	'sftp_login',
-	'sftp_credentials_rolled',
 	'console_command_executed',
-	'console_cleared',
+	'content_changed',
+	'settings_changed',
 	'backup_created',
 	'backup_renamed',
 	'backup_restored',
 	'backup_deleted',
-	'startup_command_modified',
-	'java_runtime_modified',
-	'java_version_modified',
-] as const satisfies readonly Archon.Actions.v1.ActionName[]
+	'backup_downloaded',
+	'world_downloaded',
+] as const satisfies readonly Action['action'][]
 
 export type ActionLogFilterActionName = (typeof actionLogActionNames)[number]
 
@@ -83,18 +40,7 @@ export const actionLogActionGroups = [
 			defaultMessage: 'Server',
 		}),
 		icon: ServerIcon,
-		actions: [
-			'server_created',
-			'server_reallocated',
-			'server_plan_changed',
-			'server_repaired',
-			'server_reset',
-			'server_suspended',
-			'server_unsuspended',
-			'server_suspension_lifted',
-			'server_resuspended',
-			'world_data_reset',
-		],
+		actions: ['server_created', 'content_changed', 'settings_changed'],
 	},
 	{
 		key: 'power-console',
@@ -109,45 +55,6 @@ export const actionLogActionGroups = [
 			'server_restarted',
 			'server_killed',
 			'console_command_executed',
-			'console_cleared',
-		],
-	},
-	{
-		key: 'content',
-		label: defineMessage({
-			id: 'servers.access-page.activity-log-filter.action-group.content',
-			defaultMessage: 'Content and modpack',
-		}),
-		icon: PackageIcon,
-		actions: [
-			'addon_added',
-			'addon_uploaded',
-			'addon_disabled',
-			'addon_enabled',
-			'addon_updated',
-			'addon_server_enabled',
-			'addon_player_enabled',
-			'addon_side_toggle_locked',
-			'addon_deleted',
-			'modpack_changed',
-			'modpack_unlinked',
-			'instance_version_applied',
-		],
-	},
-	{
-		key: 'files',
-		label: defineMessage({
-			id: 'servers.access-page.activity-log-filter.action-group.files',
-			defaultMessage: 'Files and SFTP',
-		}),
-		icon: FileIcon,
-		actions: [
-			'file_uploaded',
-			'file_edited',
-			'file_renamed',
-			'file_deleted',
-			'sftp_login',
-			'sftp_credentials_rolled',
 		],
 	},
 	{
@@ -157,26 +64,13 @@ export const actionLogActionGroups = [
 			defaultMessage: 'Backups',
 		}),
 		icon: DatabaseBackupIcon,
-		actions: ['backup_created', 'backup_renamed', 'backup_restored', 'backup_deleted'],
-	},
-	{
-		key: 'settings',
-		label: defineMessage({
-			id: 'servers.access-page.activity-log-filter.action-group.settings',
-			defaultMessage: 'Settings and runtime',
-		}),
-		icon: SettingsIcon,
 		actions: [
-			'changed_server_name',
-			'changed_server_subdomain',
-			'port_allocation_added',
-			'port_allocation_removed',
-			'loader_version_edited',
-			'game_version_edited',
-			'server_properties_modified',
-			'startup_command_modified',
-			'java_runtime_modified',
-			'java_version_modified',
+			'backup_created',
+			'backup_renamed',
+			'backup_restored',
+			'backup_deleted',
+			'backup_downloaded',
+			'world_downloaded',
 		],
 	},
 ] as const satisfies readonly {
@@ -236,15 +130,14 @@ export function getAuditLogTimeframeRange(
 	return getPresetAuditLogTimeframeRange(selection.preset, now)
 }
 
-export function getActionLogEntryId(entry: Archon.Actions.v1.ActionEntry) {
+export function getActionLogEntryId(entry: ActionEntry) {
 	return JSON.stringify([
 		entry.timestamp,
 		entry.actor.type,
-		entry.actor.type === 'user' ? entry.actor.user_id : (entry.actor.user_id ?? 'support'),
+		entry.actor.type === 'user' ? entry.actor.user_id : 'cli',
 		entry.server_id,
-		entry.world_id ?? null,
 		entry.action.action,
-		stableStringify(entry.action.metadata),
+		stableStringify('metadata' in entry.action ? entry.action.metadata : null),
 	])
 }
 
