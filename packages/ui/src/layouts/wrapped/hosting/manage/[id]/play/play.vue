@@ -149,7 +149,7 @@ const { serverId, server } = injectModrinthServerContext()
 const { canSetup } = useServerPermissions()
 const ensureServerRunning = useEnsureServerRunning()
 // The server's own share, or the one of the instance it follows.
-const sharedInstanceId = computed(() => server.value.shared_instance_id)
+const sharedInstanceId = computed(() => server.value?.shared_instance_id ?? null)
 const { needsUpdate } = useServerOwnShare()
 const followsInstance = computed(() => !!server.value?.linked_instance)
 const players = useServerPlayers(serverId, sharedInstanceId, canSetup)
@@ -172,7 +172,7 @@ const removeModal = ref<InstanceType<typeof ConfirmModal>>()
 const playerToRemove = ref<InvitedPlayerRow>()
 const previewAction = ref<'play' | 'push'>('push')
 const inviteHeader = computed(() =>
-	formatMessage(messages.inviteHeader, { name: server.value.name }),
+	formatMessage(messages.inviteHeader, { name: server.value?.name }),
 )
 const inviteProps = computed<InvitePlayersContentProps>(() => ({
 	friends: players.candidates.value,
@@ -195,10 +195,10 @@ const inviteBinding = computed<ServerInviteBinding>(() => ({
 	onInvite: invitePlayer,
 	onCancel: (user) => changeMember(user.id, true),
 }))
-const serverAddress = computed(() => getHostingServerAddress(server.value.net))
+const serverAddress = computed(() => getHostingServerAddress(server.value?.net))
 async function performAction(action: Action, target: ServerShareActionTarget) {
-	const { worldId: targetWorldId, configPaths, isCurrent: sameContext } = target
-	let id = server.value.shared_instance_id
+	const { configPaths, isCurrent: sameContext } = target
+	let id = server.value?.shared_instance_id
 	// A server that follows an instance reads that instance's share, which only the instance
 	// owner's App pushes: here it only manages players and plays.
 	const shouldShare =
@@ -218,7 +218,7 @@ async function performAction(action: Action, target: ServerShareActionTarget) {
 	if (action === 'play') {
 		await ensureServerRunning(sameContext)
 		if (!sameContext()) return
-		await props.onPlayServer({ serverId, worldId: targetWorldId })
+		await props.onPlayServer({ serverId })
 	} else if (action === 'invite') {
 		await nextTick()
 		const members = await players.members.refetch({ throwOnError: true })
@@ -238,7 +238,7 @@ async function exportModpack() {
 	try {
 		await serverDownload.download(
 			'server-mrpack',
-			mrpackFilename(server.value.name),
+			mrpackFilename(server.value?.name ?? serverId),
 			coreRoutes.ExportModpack,
 			{ params: { id: serverId } },
 		)
@@ -304,7 +304,7 @@ watch(
 		if (inviteHandoffStarted || actionsLocked.value) return
 		inviteHandoffStarted = true
 		if (canSetup.value) await perform('invite')
-		if (!inviteHandoff.binding.value && !inviteHandoff.migration.value) inviteHandoff.cancel()
+		if (!inviteHandoff.binding.value) inviteHandoff.cancel()
 	},
 	{ immediate: true },
 )

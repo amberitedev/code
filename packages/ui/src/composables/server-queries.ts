@@ -6,16 +6,18 @@ export const serverKeys = {
 	detail: (serverId: string) => ['servers', 'detail', serverId] as const,
 	content: (serverId: string) => ['content', 'list', 'v1', serverId] as const,
 	startup: (serverId: string) => ['servers', 'startup', 'v1', serverId] as const,
-	shareDiff: (serverId: string, ...scope: [worldId?: string, userId?: string]) =>
+	shareDiff: (serverId: string, ...scope: [userId?: string]) =>
 		['servers', 'share-diff', serverId, ...scope] as const,
-	shareHistory: (serverId: string) => ['servers', 'share-history', serverId] as const,
 	/** The listings of the server's files, by folder. */
 	files: (serverId: string) => ['servers', 'files', serverId] as const,
-	shareFiles: (serverId: string, worldId: string, userId: string | undefined) =>
-		['servers', 'share-files', serverId, worldId, userId] as const,
+	shareFiles: (serverId: string, userId: string | undefined) =>
+		['servers', 'share-files', serverId, userId] as const,
 	sharingUpdateTarget: (userId: string, serverId: string | undefined) =>
 		['servers', 'sharing-update-target', userId, serverId ?? null] as const,
 }
+
+/** The share history kept with an instance on this computer, or with a server on its Core. */
+export const shareHistoryKey = (instanceId: string) => ['share-history', instanceId] as const
 
 /** Query keys for shared instance data. Shorter forms are prefixes of longer ones for invalidation. */
 export const sharedInstanceKeys = {

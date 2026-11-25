@@ -1,10 +1,11 @@
-import type { ApiError, Endpoint } from '@amberite/contracts/protocol'
+import type { Endpoint } from '@amberite/contracts/protocol'
 import { cores, type ListedCore } from '@amberite/contracts/backend'
 import { type CoreSession, core as coreRoutes, type Server } from '@amberite/contracts/core'
 
 import type { ContractClient, LocationOf } from '../contracts/client'
 import { ApiCallError } from '../contracts/errors'
 import type { AbstractModrinthClient } from '../core/abstract-client'
+import { READY_MS } from '../events/event-stream'
 import type { CoreCallError, CoreSessions } from '../types/client'
 
 /** How long a Core's local address may take to answer before its internet address is used. */
@@ -95,25 +96,30 @@ export class Cores {
 		this.routes.delete(core.id)
 		this.listed = this.listed.filter((listed) => listed.id !== core.id)
 		this.cores = null
+		this.client.forgetCore(core.id)
 	}
 
 	/**
 	 * Run a long op on a Core: `start` sends its route with a new op id, which the Core answers
-	 * at once. Resolves once the op ends on the Core's event socket, and rejects with its error. A
-	 * resync may have lost the end: an op the Core no longer runs then ends as lost.
+	 * at once. Resolves once the op ends on the Core's event socket, and rejects with its error.
+	 * Rejects with `network_error`, without starting, when the socket cannot open, and once
+	 * started, when the socket drops and stays down for `READY_MS`. A resync may have lost the end:
+	 * an op the Core no longer runs then ends as lost.
 	 */
 	public async op(coreId: string, start: (op: string) => Promise<unknown>): Promise<void> {
 		const op = crypto.randomUUID()
 		const events = this.client.coreEvents(coreId)
 		let started = false
-		let finish: (error: ApiError | null) => void = () => {}
+		let finish: (error: ApiCallError | null) => void = () => {}
 		const ended = new Promise<void>((resolve, reject) => {
-			finish = (error) =>
-				error ? reject(new ApiCallError(0, error.error, error.description)) : resolve()
+			finish = (error) => (error ? reject(error) : resolve())
 		})
+		let down: ReturnType<typeof setTimeout> | undefined
 		const stops = [
 			events.on('op_ended', (end) => {
-				if (end.op === op) finish(end.error)
+				if (end.op !== op) return
+				const { error } = end
+				finish(error && new ApiCallError(0, error.error, error.description))
 			}),
 			events.on('resync', async () => {
 				if (!started) return
@@ -122,7 +128,15 @@ export class Cores {
 					.call(coreRoutes.ListOps)
 					.catch(() => null)
 				if (running && !running.includes(op))
-					finish({ error: 'unknown', description: 'Lost track of the operation' })
+					finish(new ApiCallError(0, 'unknown', 'Lost track of the operation'))
+			}),
+			events.onStatus((open) => {
+				clearTimeout(down)
+				if (open) return
+				down = setTimeout(
+					() => finish(new ApiCallError(0, 'network_error', 'The Core went offline')),
+					READY_MS,
+				)
 			}),
 		]
 		try {
@@ -132,6 +146,7 @@ export class Cores {
 			started = true
 			await ended
 		} finally {
+			clearTimeout(down)
 			for (const stop of stops) stop()
 		}
 	}
@@ -192,14 +207,6 @@ export class Cores {
 		return this.sessions().signOut(coreId)
 	}
 
-	/** The listed Core a request URL goes to, if any. */
-	public coreForUrl(url: string): ListedCore | undefined {
-		return this.listed.find((core) => {
-			const base = this.routes.get(core.id)?.base
-			return base !== undefined && (url === base || url.startsWith(`${base}/`))
-		})
-	}
-
 	/** The listed Core with this id. */
 	public async core(coreId: string): Promise<ListedCore> {
 		const core = (await this.known()).find((candidate) => candidate.id === coreId)
@@ -246,11 +253,6 @@ export class Cores {
 		if (!core || this.address(core) !== core.address) return net
 		const ip = new URL(core.address).hostname.replace(/^\[|\]$/g, '')
 		return { ...net, ip, port: net.game_port }
-	}
-
-	/** The base URL requests to the Core that has `serverId` go to. */
-	public async serverUrl(serverId: string): Promise<string> {
-		return this.base(await this.coreOf(serverId))
 	}
 
 	/**

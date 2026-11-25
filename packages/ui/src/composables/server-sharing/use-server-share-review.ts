@@ -12,13 +12,12 @@ import { computed, onScopeDispose, type Ref, ref, watch } from 'vue'
 import type ServerSharePushModal from '#ui/components/servers/sharing/ServerSharePushModal.vue'
 import { defineMessages, useVIntl } from '#ui/composables/i18n'
 import { useServerPermissions } from '#ui/composables/server-permissions'
-import { serverKeys } from '#ui/composables/server-queries'
+import { serverKeys, shareHistoryKey } from '#ui/composables/server-queries'
 import { injectAuth, injectModrinthServerContext, injectNotificationManager } from '#ui/providers'
 
 import { serverShareableFilesQueryOptions, serverShareDiffQueryOptions } from './query-options'
 
 export type ServerShareActionTarget = {
-	worldId: string
 	userId: string | undefined
 	configPaths: string[]
 	/** Configs the share carries that this push stops sharing. */
@@ -35,15 +34,13 @@ export function useServerShareReview<Action extends string = 'push'>(options?: {
 }) {
 	const auth = injectAuth()
 	const { serverId, core, server, busyReasons, isServerRunning } = injectModrinthServerContext()
-	// A Core names a server's one world by the server's id.
-	const worldId = computed<string | null>(() => serverId)
 	const { canSetup } = useServerPermissions()
 	const { handleError } = injectNotificationManager()
 	const { formatMessage } = useVIntl()
 	const queryClient = useQueryClient()
 	const diffModal = ref<InstanceType<typeof ServerSharePushModal>>()
 	const previewOpen = ref(false)
-	const sharedInstanceId = computed(() => server.value.shared_instance_id)
+	const sharedInstanceId = computed(() => server.value?.shared_instance_id)
 	let disposed = false
 	onScopeDispose(() => {
 		disposed = true
@@ -87,22 +84,19 @@ export function useServerShareReview<Action extends string = 'push'>(options?: {
 	)
 
 	function currentTarget(): ServerShareActionTarget | undefined {
-		const targetWorldId = worldId.value
 		const userId = auth.user.value?.id
-		if (!targetWorldId || disposed) return
+		if (disposed) return
 		return {
-			worldId: targetWorldId,
 			userId,
 			configPaths: [],
 			removedConfigPaths: [],
-			isCurrent: () =>
-				!disposed && worldId.value === targetWorldId && auth.user.value?.id === userId,
+			isCurrent: () => !disposed && auth.user.value?.id === userId,
 		}
 	}
 
 	/** Warms the shareable files cache so the review's file tree is ready when it opens. */
 	function prefetchFiles() {
-		if (!canSetup.value || !worldId.value) return
+		if (!canSetup.value) return
 		void queryClient.prefetchQuery({
 			...serverShareableFilesQueryOptions(core, serverId, auth.user.value?.id),
 			staleTime: 30_000,
@@ -144,7 +138,7 @@ export function useServerShareReview<Action extends string = 'push'>(options?: {
 		await Promise.all([
 			queryClient.invalidateQueries({ queryKey: serverKeys.detail(serverId) }),
 			queryClient.invalidateQueries({ queryKey: serverKeys.shareDiff(serverId) }),
-			queryClient.invalidateQueries({ queryKey: serverKeys.shareHistory(serverId) }),
+			queryClient.invalidateQueries({ queryKey: shareHistoryKey(serverId) }),
 		])
 		return shared
 	}
@@ -190,7 +184,7 @@ export function useServerShareReview<Action extends string = 'push'>(options?: {
 		}
 	}
 
-	watch([worldId, sharedInstanceId, () => auth.user.value?.id], () => {
+	watch([sharedInstanceId, () => auth.user.value?.id], () => {
 		previewOpen.value = false
 		diffModal.value?.hide()
 	})

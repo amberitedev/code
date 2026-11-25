@@ -5,48 +5,6 @@ import { installs, instanceContent, instanceFiles, logs } from '@amberite/contra
 import { ContractClient, type ContractTransport, fetchWithProgress } from '../contracts/client'
 import { ApiCallError } from '../contracts/errors'
 import type { AbstractModrinthClient } from '../core/abstract-client'
-import { AbstractFeature } from '../core/abstract-feature'
-import { ModrinthApiError } from '../core/errors'
-import type { RequestContext } from '../types/request'
-
-/**
- * Requests to a listed Core. The client adds this itself when `ClientConfig.coreSessions` is set.
- * A request Core answers with 401 `invalid_credentials` (no session, or it ended) signs in with a
- * new ticket once and is sent again. Any other 401, such as a refused ticket, is the answer.
- */
-export class CoreSessionFeature extends AbstractFeature {
-	constructor(private readonly client: AbstractModrinthClient) {
-		super({ name: 'core-session' })
-	}
-
-	shouldApply(context: RequestContext): boolean {
-		return super.shouldApply(context) && this.client.cores.coreForUrl(context.url) !== undefined
-	}
-
-	async execute<T>(next: () => Promise<T>, context: RequestContext): Promise<T> {
-		const cores = this.client.cores
-		const core = cores.coreForUrl(context.url)
-		if (!core) return next()
-		try {
-			return await next()
-		} catch (error) {
-			if (!signedOut(error)) throw error
-			await cores.signIn(core)
-			return next()
-		}
-	}
-}
-
-function signedOut(error: unknown): boolean {
-	if (!(error instanceof ModrinthApiError) || error.statusCode !== 401) return false
-	const data = error.responseData
-	return (
-		typeof data === 'object' &&
-		data !== null &&
-		'error' in data &&
-		data.error === 'invalid_credentials'
-	)
-}
 
 /** How long a Core call waits for its answer: a Core answers its own routes within 30 seconds. */
 const CORE_TIMEOUT_MS = 35_000

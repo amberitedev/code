@@ -72,7 +72,6 @@ import {
 	provideInstallationSettings,
 	ServerSetupModal,
 	useDebugLogger,
-	useModrinthServersConsole,
 	useServerPermissions,
 	useVIntl,
 } from '@modrinth/ui'
@@ -97,6 +96,7 @@ const {
 	serverId,
 	coreId,
 	core,
+	console: modrinthServersConsole,
 } = injectModrinthServerContext()
 const { addNotification } = injectNotificationManager()
 const queryClient = useQueryClient()
@@ -105,7 +105,6 @@ const contentQueryKey = serverKeys.content(serverId)
 const tags = injectTags()
 const { formatMessage } = useVIntl()
 const serverSettings = injectServerSettings()
-const modrinthServersConsole = useModrinthServersConsole()
 const { canSetup, canResetServer, permissionDeniedMessage } = useServerPermissions()
 
 const modpackUploadModal =
@@ -213,7 +212,7 @@ const requiresInstallation = computed(() => installation.value?.status === 'fail
 /** The Modrinth modpack the server runs. */
 const modpack = computed(() => packQuery.data.value ?? null)
 /** The App instance the server follows, whose owner pushes its versions. */
-const follow = computed(() => server.value.linked_instance)
+const follow = computed(() => server.value?.linked_instance)
 
 const modpackProjectId = computed(() => modpack.value?.project.id ?? null)
 
@@ -400,6 +399,8 @@ function rollbackOptimisticInstallation(snapshot: InstallationCacheSnapshot) {
 
 async function uploadLocalModpackWithSoftOverride(file: File) {
 	modpackUploadProgress.value = { loaded: 0, total: 0, progress: 0 }
+	// Before the upload: the Core's install job starts before it answers, and may end before.
+	beginInstallation({ type: 'local_modpack', filename: file.name })
 	try {
 		await setUpServer(
 			client,
@@ -409,6 +410,7 @@ async function uploadLocalModpackWithSoftOverride(file: File) {
 			{ onUploadProgress: (progress) => (modpackUploadProgress.value = progress) },
 		)
 	} catch (err) {
+		cancelOptimisticInstallation()
 		emit('reinstall-failed')
 		addNotification({
 			type: 'error',
@@ -426,10 +428,6 @@ async function uploadLocalModpackWithSoftOverride(file: File) {
 		modpackUploadProgress.value = null
 	}
 	modpackUploadModal.value?.hide()
-	beginInstallation({
-		type: 'local_modpack',
-		filename: file.name,
-	})
 	emit('reinstall')
 }
 
@@ -460,16 +458,19 @@ provideInstallationSettings({
 	onGameVersionHover: handleGameVersionHover,
 	loading: computed(() => packQuery.isLoading.value),
 	installationInfo: computed(() => {
-		const rawLoader = server.value.loader
+		const rawLoader = server.value?.loader
 		const loader = rawLoader ? formatLoaderLabel(rawLoader) : null
 		const rows = [
 			{ label: formatMessage(commonMessages.platformLabel), value: loader },
-			{ label: formatMessage(commonMessages.gameVersionLabel), value: server.value.mc_version },
+			{
+				label: formatMessage(commonMessages.gameVersionLabel),
+				value: server.value?.mc_version ?? null,
+			},
 		]
 		if (loader !== 'Vanilla') {
 			rows.push({
 				label: formatMessage(messages.loaderVersionLabel, { loader: loader ?? 'null' }),
-				value: server.value.loader_version,
+				value: server.value?.loader_version ?? null,
 			})
 		}
 		return rows
@@ -624,11 +625,13 @@ provideInstallationSettings({
 			})
 		} catch (err) {
 			debug('repair: failed', err)
-			cancelOptimisticInstallation()
 			addNotification({
 				type: 'error',
 				text: err instanceof Error ? err.message : formatMessage(messages.failedToRepair),
 			})
+		} finally {
+			// A repair answers once done and runs no install job to end what began here.
+			cancelOptimisticInstallation()
 		}
 	},
 
@@ -737,8 +740,8 @@ provideInstallationSettings({
 		currentVersionId: modpack.value?.version?.id ?? '',
 		projectIconUrl: modpack.value?.project.icon_url ?? undefined,
 		projectName: modpack.value?.project.title ?? formatMessage(commonMessages.modpackLabel),
-		currentGameVersion: server.value.mc_version ?? '',
-		currentLoader: server.value.loader ?? '',
+		currentGameVersion: server.value?.mc_version ?? '',
+		currentLoader: server.value?.loader ?? '',
 	})),
 
 	isServer: true,

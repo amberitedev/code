@@ -4,6 +4,7 @@ import type { Server } from '@amberite/contracts/core'
 import { describe, expect, it, vi } from 'vite-plus/test'
 
 import type { AbstractModrinthClient } from '../core/abstract-client'
+import { READY_MS } from '../events/event-stream'
 import { Cores } from './cores'
 
 import { SelfHostedFeature } from '../features/self-hosted'
@@ -105,14 +106,22 @@ describe('joinNet', () => {
 })
 
 describe('a long op on a Core', () => {
-	/** A Core whose socket hands its events to `handlers`, and which runs `running` ops. */
+	/**
+	 * A Core whose socket hands its events to `handlers` and its status to `status`, and which runs
+	 * `running` ops.
+	 */
 	function core(running: string[]) {
 		const handlers = new Map<string, (payload: unknown) => void>()
+		let status: (open: boolean) => void = () => {}
 		const events = {
 			ready: async () => {},
 			on: (type: string, handler: (payload: unknown) => void) => {
 				handlers.set(type, handler)
 				return () => handlers.delete(type)
+			},
+			onStatus: (handler: (open: boolean) => void) => {
+				status = handler
+				return () => {}
 			},
 		}
 		const client = {
@@ -123,7 +132,7 @@ describe('a long op on a Core', () => {
 		const ending = new Cores(client).op('core', async (op) => {
 			started = op
 		})
-		return { handlers, ending, started: () => started }
+		return { handlers, ending, started: () => started, status: (open: boolean) => status(open) }
 	}
 
 	it('ends as its end on the socket says', async () => {
@@ -143,5 +152,22 @@ describe('a long op on a Core', () => {
 		await vi.waitFor(() => expect(started()).toBeDefined())
 		handlers.get('resync')!(undefined)
 		await expect(ending).rejects.toMatchObject({ code: 'unknown' })
+	})
+
+	it('fails once the socket drops and stays down, not while it comes back', async () => {
+		vi.useFakeTimers()
+		try {
+			const { ending, started, status } = core([])
+			await vi.waitFor(() => expect(started()).toBeDefined())
+			const failed = expect(ending).rejects.toMatchObject({ code: 'network_error' })
+			status(false)
+			await vi.advanceTimersByTimeAsync(READY_MS - 1)
+			status(true)
+			status(false)
+			await vi.advanceTimersByTimeAsync(READY_MS)
+			await failed
+		} finally {
+			vi.useRealTimers()
+		}
 	})
 })

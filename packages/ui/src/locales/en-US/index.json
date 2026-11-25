@@ -902,71 +902,11 @@
   "creation-flow.button.setup-server": {
     "defaultMessage": "Setup server"
   },
-  "creation-flow.curseforge.change-button": {
-    "defaultMessage": "Change"
-  },
-  "creation-flow.curseforge.checking-server-pack": {
-    "defaultMessage": "Checking for a server pack..."
-  },
-  "creation-flow.curseforge.description": {
-    "defaultMessage": "Use a modpack that isn’t available on Modrinth."
-  },
-  "creation-flow.curseforge.file-description": {
-    "defaultMessage": "You’ll need the regular modpack file, and can optionally add a server pack after if we can’t find one."
-  },
-  "creation-flow.curseforge.file-label": {
-    "defaultMessage": "CurseForge Modpack file"
-  },
-  "creation-flow.curseforge.ftb-installer": {
-    "defaultMessage": "This version comes with FTB’s server installer, which we’ll use to set up the server."
-  },
-  "creation-flow.curseforge.invalid-link": {
-    "defaultMessage": "Enter a CurseForge Minecraft modpack or modpack version link."
-  },
-  "creation-flow.curseforge.link-description": {
-    "defaultMessage": "You can use a link to a modpack or a specific modpack version."
-  },
-  "creation-flow.curseforge.link-label": {
-    "defaultMessage": "CurseForge modpack link"
-  },
-  "creation-flow.curseforge.lookup-failed": {
-    "defaultMessage": "We couldn’t reach CurseForge. Please try again."
-  },
-  "creation-flow.curseforge.minecraft-version": {
-    "defaultMessage": "Minecraft {version}"
-  },
-  "creation-flow.curseforge.not-found": {
-    "defaultMessage": "We couldn’t find this modpack on CurseForge."
-  },
-  "creation-flow.curseforge.or-upload": {
-    "defaultMessage": "Or upload it yourself"
-  },
   "creation-flow.curseforge.processing-file": {
     "defaultMessage": "Processing..."
   },
   "creation-flow.curseforge.remove-file": {
     "defaultMessage": "Remove {filename}"
-  },
-  "creation-flow.curseforge.selected-file-label": {
-    "defaultMessage": "Modpack file"
-  },
-  "creation-flow.curseforge.server-pack-available": {
-    "defaultMessage": "A server pack is available for this version. We’ll install {filename} on the server."
-  },
-  "creation-flow.curseforge.server-pack-closest": {
-    "defaultMessage": "A server pack is not available for this version. The closest version with a server pack is <link>{version}</link>."
-  },
-  "creation-flow.curseforge.server-pack-description": {
-    "defaultMessage": "You can optionally add a server pack to make it easier to determine what needs to be installed on the server."
-  },
-  "creation-flow.curseforge.server-pack-label": {
-    "defaultMessage": "Server pack <optional>(optional)</optional>"
-  },
-  "creation-flow.curseforge.server-pack-none": {
-    "defaultMessage": "We could not find a server pack for any version of this project. We recommend choosing a different pack or uploading the server pack manually."
-  },
-  "creation-flow.curseforge.title": {
-    "defaultMessage": "Upload a CurseForge modpack"
   },
   "creation-flow.curseforge.upload-prompt": {
     "defaultMessage": "Drag and drop file or click to browse"
@@ -1811,9 +1751,6 @@
   "files.navbar.upload-from-zip": {
     "defaultMessage": "Upload from .zip file"
   },
-  "files.navbar.upload-from-zip-url": {
-    "defaultMessage": "Upload from .zip URL"
-  },
   "files.operations.compressed": {
     "defaultMessage": "{progress}% compressed"
   },
@@ -1880,36 +1817,6 @@
   "files.unsaved-changes-modal.header": {
     "defaultMessage": "Unsaved changes"
   },
-  "files.upload-dropdown.cancelled": {
-    "defaultMessage": "Cancelled"
-  },
-  "files.upload-dropdown.failed-file-exists": {
-    "defaultMessage": "Failed - File already exists"
-  },
-  "files.upload-dropdown.failed-generic": {
-    "defaultMessage": "Failed - {error}"
-  },
-  "files.upload-dropdown.failed-incorrect-type": {
-    "defaultMessage": "Failed - Incorrect file type"
-  },
-  "files.upload-dropdown.failed-to-upload": {
-    "defaultMessage": "Failed to upload {fileName}"
-  },
-  "files.upload-dropdown.file": {
-    "defaultMessage": "File"
-  },
-  "files.upload-dropdown.file-uploads": {
-    "defaultMessage": "{fileType} uploads"
-  },
-  "files.upload-dropdown.incorrect-file-type": {
-    "defaultMessage": "Upload had incorrect file type"
-  },
-  "files.upload-dropdown.unexpected-error": {
-    "defaultMessage": "An unexpected error occurred."
-  },
-  "files.upload-dropdown.uploads-left": {
-    "defaultMessage": " - {count} left"
-  },
   "files.upload.drag-and-drop.drop-to-upload": {
     "defaultMessage": "Drop {type} here to upload"
   },
@@ -1924,30 +1831,6 @@
   },
   "files.validation.name-required": {
     "defaultMessage": "Name is required."
-  },
-  "files.zip-url-modal.backup-name": {
-    "defaultMessage": "Before .zip URL upload"
-  },
-  "files.zip-url-modal.error-url-invalid": {
-    "defaultMessage": "URL must be valid."
-  },
-  "files.zip-url-modal.error-url-required": {
-    "defaultMessage": "URL is required."
-  },
-  "files.zip-url-modal.install-button": {
-    "defaultMessage": "Install"
-  },
-  "files.zip-url-modal.install-failed-title": {
-    "defaultMessage": "Installation failed"
-  },
-  "files.zip-url-modal.unknown-error": {
-    "defaultMessage": "An unknown error occurred"
-  },
-  "files.zip-url-modal.zip-description": {
-    "defaultMessage": "Copy and paste the direct download URL of a .zip file."
-  },
-  "files.zip-url-modal.zip-header": {
-    "defaultMessage": "Uploading .zip contents from URL"
   },
   "filter-bar.add": {
     "defaultMessage": "Add"
@@ -5162,20 +5045,11 @@
   "servers.access-page.activity-log-filter.action-group.backups": {
     "defaultMessage": "Backups"
   },
-  "servers.access-page.activity-log-filter.action-group.content": {
-    "defaultMessage": "Content and modpack"
-  },
-  "servers.access-page.activity-log-filter.action-group.files": {
-    "defaultMessage": "Files and SFTP"
-  },
   "servers.access-page.activity-log-filter.action-group.power-console": {
     "defaultMessage": "Power and console"
   },
   "servers.access-page.activity-log-filter.action-group.server": {
     "defaultMessage": "Server"
-  },
-  "servers.access-page.activity-log-filter.action-group.settings": {
-    "defaultMessage": "Settings and runtime"
   },
   "servers.access-page.activity-log-filter.action-types": {
     "defaultMessage": "Actions"
@@ -5183,38 +5057,14 @@
   "servers.access-page.activity-log-filter.action-types-search": {
     "defaultMessage": "Search actions..."
   },
-  "servers.access-page.activity-log-filter.action.addon-added": {
-    "defaultMessage": "Added content"
-  },
-  "servers.access-page.activity-log-filter.action.addon-deleted": {
-    "defaultMessage": "Deleted content"
-  },
-  "servers.access-page.activity-log-filter.action.addon-disabled": {
-    "defaultMessage": "Disabled content"
-  },
-  "servers.access-page.activity-log-filter.action.addon-enabled": {
-    "defaultMessage": "Enabled content"
-  },
-  "servers.access-page.activity-log-filter.action.addon-player-enabled": {
-    "defaultMessage": "Changed player content enablement"
-  },
-  "servers.access-page.activity-log-filter.action.addon-server-enabled": {
-    "defaultMessage": "Changed server content enablement"
-  },
-  "servers.access-page.activity-log-filter.action.addon-side-toggle-locked": {
-    "defaultMessage": "Changed content side toggle lock"
-  },
-  "servers.access-page.activity-log-filter.action.addon-updated": {
-    "defaultMessage": "Updated content"
-  },
-  "servers.access-page.activity-log-filter.action.addon-uploaded": {
-    "defaultMessage": "Uploaded content"
-  },
   "servers.access-page.activity-log-filter.action.backup-created": {
     "defaultMessage": "Created backup"
   },
   "servers.access-page.activity-log-filter.action.backup-deleted": {
     "defaultMessage": "Deleted backup"
+  },
+  "servers.access-page.activity-log-filter.action.backup-downloaded": {
+    "defaultMessage": "Downloaded backup"
   },
   "servers.access-page.activity-log-filter.action.backup-renamed": {
     "defaultMessage": "Renamed backup"
@@ -5222,53 +5072,11 @@
   "servers.access-page.activity-log-filter.action.backup-restored": {
     "defaultMessage": "Restored backup"
   },
-  "servers.access-page.activity-log-filter.action.changed-server-name": {
-    "defaultMessage": "Changed server name"
-  },
-  "servers.access-page.activity-log-filter.action.changed-server-subdomain": {
-    "defaultMessage": "Changed server subdomain"
-  },
-  "servers.access-page.activity-log-filter.action.console-cleared": {
-    "defaultMessage": "Cleared console"
-  },
   "servers.access-page.activity-log-filter.action.console-command-executed": {
     "defaultMessage": "Ran console command"
   },
-  "servers.access-page.activity-log-filter.action.file-deleted": {
-    "defaultMessage": "Deleted file"
-  },
-  "servers.access-page.activity-log-filter.action.file-edited": {
-    "defaultMessage": "Edited file"
-  },
-  "servers.access-page.activity-log-filter.action.file-renamed": {
-    "defaultMessage": "Renamed file"
-  },
-  "servers.access-page.activity-log-filter.action.file-uploaded": {
-    "defaultMessage": "Uploaded file"
-  },
-  "servers.access-page.activity-log-filter.action.game-version-edited": {
-    "defaultMessage": "Changed Minecraft version"
-  },
-  "servers.access-page.activity-log-filter.action.java-runtime-modified": {
-    "defaultMessage": "Changed Java runtime"
-  },
-  "servers.access-page.activity-log-filter.action.java-version-modified": {
-    "defaultMessage": "Changed Java version"
-  },
-  "servers.access-page.activity-log-filter.action.loader-version-edited": {
-    "defaultMessage": "Changed loader version"
-  },
-  "servers.access-page.activity-log-filter.action.modpack-changed": {
-    "defaultMessage": "Changed modpack"
-  },
-  "servers.access-page.activity-log-filter.action.modpack-unlinked": {
-    "defaultMessage": "Unlinked modpack"
-  },
-  "servers.access-page.activity-log-filter.action.port-allocation-added": {
-    "defaultMessage": "Added port allocation"
-  },
-  "servers.access-page.activity-log-filter.action.port-allocation-removed": {
-    "defaultMessage": "Removed port allocation"
+  "servers.access-page.activity-log-filter.action.content-changed": {
+    "defaultMessage": "Changed content"
   },
   "servers.access-page.activity-log-filter.action.server-created": {
     "defaultMessage": "Created server"
@@ -5276,26 +5084,8 @@
   "servers.access-page.activity-log-filter.action.server-killed": {
     "defaultMessage": "Killed server"
   },
-  "servers.access-page.activity-log-filter.action.server-plan-changed": {
-    "defaultMessage": "Changed plan"
-  },
-  "servers.access-page.activity-log-filter.action.server-properties-modified": {
-    "defaultMessage": "Modified server properties"
-  },
-  "servers.access-page.activity-log-filter.action.server-reallocated": {
-    "defaultMessage": "Reallocated server"
-  },
-  "servers.access-page.activity-log-filter.action.server-repaired": {
-    "defaultMessage": "Repaired server"
-  },
-  "servers.access-page.activity-log-filter.action.server-reset": {
-    "defaultMessage": "Reset server"
-  },
   "servers.access-page.activity-log-filter.action.server-restarted": {
     "defaultMessage": "Restarted server"
-  },
-  "servers.access-page.activity-log-filter.action.server-resuspended": {
-    "defaultMessage": "Server suspended again"
   },
   "servers.access-page.activity-log-filter.action.server-started": {
     "defaultMessage": "Started server"
@@ -5303,26 +5093,11 @@
   "servers.access-page.activity-log-filter.action.server-stopped": {
     "defaultMessage": "Stopped server"
   },
-  "servers.access-page.activity-log-filter.action.server-suspended": {
-    "defaultMessage": "Server suspended"
+  "servers.access-page.activity-log-filter.action.settings-changed": {
+    "defaultMessage": "Changed settings"
   },
-  "servers.access-page.activity-log-filter.action.server-suspension-lifted": {
-    "defaultMessage": "Suspension temporarily lifted"
-  },
-  "servers.access-page.activity-log-filter.action.server-unsuspended": {
-    "defaultMessage": "Server unsuspended"
-  },
-  "servers.access-page.activity-log-filter.action.sftp-credentials-rolled": {
-    "defaultMessage": "Rotated SFTP credentials"
-  },
-  "servers.access-page.activity-log-filter.action.sftp-login": {
-    "defaultMessage": "Logged in via SFTP"
-  },
-  "servers.access-page.activity-log-filter.action.startup-command-modified": {
-    "defaultMessage": "Changed startup command"
-  },
-  "servers.access-page.activity-log-filter.action.world-data-reset": {
-    "defaultMessage": "Reset world data"
+  "servers.access-page.activity-log-filter.action.world-downloaded": {
+    "defaultMessage": "Downloaded world"
   },
   "servers.access-page.activity-log-filter.add": {
     "defaultMessage": "Add filter"
@@ -5335,12 +5110,6 @@
   },
   "servers.access-page.activity-log-filter.empty-search": {
     "defaultMessage": "No options found."
-  },
-  "servers.access-page.activity-log-filter.instances": {
-    "defaultMessage": "Instances"
-  },
-  "servers.access-page.activity-log-filter.server-scoped-instance": {
-    "defaultMessage": "Server"
   },
   "servers.access-page.activity-log-filter.support-actor": {
     "defaultMessage": "Support"
@@ -5359,15 +5128,6 @@
   },
   "servers.admonitions.background-task-running": {
     "defaultMessage": "Background task running"
-  },
-  "servers.admonitions.curseforge-files.body": {
-    "defaultMessage": "We couldn’t determine where {count, plural, one {# file} other {# files}} from your modpack should be installed, so we’ve enabled them for both the server and players. Review them, as files that don’t belong on the server may prevent it from starting."
-  },
-  "servers.admonitions.curseforge-files.review": {
-    "defaultMessage": "Review files"
-  },
-  "servers.admonitions.curseforge-files.title": {
-    "defaultMessage": "Review where these files should be installed"
   },
   "servers.audit-log.actor.support": {
     "defaultMessage": "Support"
@@ -5957,26 +5717,11 @@
   "servers.busy.installing": {
     "defaultMessage": "Server is installing"
   },
-  "servers.busy.migrating": {
-    "defaultMessage": "Server content update in progress"
-  },
-  "servers.curseforge-files-review.body": {
-    "defaultMessage": "{count, plural, one {# file} other {# files}} in this modpack {count, plural, one {isn’t} other {aren’t}} published on Modrinth, or we can’t determine whether {count, plural, one {it} other {they}} should be installed on the server, available to players, or both. Review and complete {count, plural, one {it} other {these}} in the <bold>Enabled for</bold> column."
-  },
-  "servers.curseforge-files-review.header": {
-    "defaultMessage": "Review modpack files"
-  },
   "servers.download.failed.description": {
     "defaultMessage": "An error occurred while trying to download the world's files."
   },
   "servers.download.failed.title": {
     "defaultMessage": "Download failed"
-  },
-  "servers.download.unavailable.description": {
-    "defaultMessage": "This world's files cannot currently be downloaded."
-  },
-  "servers.download.unavailable.title": {
-    "defaultMessage": "Download unavailable"
   },
   "servers.eula.accept": {
     "defaultMessage": "I agree to the EULA"
@@ -6008,14 +5753,8 @@
   "servers.files.config-push.restart-body": {
     "defaultMessage": "Pushing an update will restart your server, and players who are online will be disconnected."
   },
-  "servers.files.server-locked": {
-    "defaultMessage": "This server is locked and its files are read-only."
-  },
   "servers.files.zip-created": {
     "defaultMessage": "ZIP created"
-  },
-  "servers.files.zip-created-description": {
-    "defaultMessage": "Created {destination}"
   },
   "servers.home-address-notice": {
     "defaultMessage": "People who join this server can see your home address."
@@ -6097,60 +5836,6 @@
   },
   "servers.modpack-upload.file-label": {
     "defaultMessage": ".mrpack file"
-  },
-  "servers.play-migration.acknowledge": {
-    "defaultMessage": "I understand my server will be reinstalled and restarted."
-  },
-  "servers.play-migration.backup.description": {
-    "defaultMessage": "We’ll make a backup you can restore if anything goes wrong called “{name}”."
-  },
-  "servers.play-migration.backup.name": {
-    "defaultMessage": "Before reinstalling server content"
-  },
-  "servers.play-migration.backup.title": {
-    "defaultMessage": "Backup your server"
-  },
-  "servers.play-migration.confirm": {
-    "defaultMessage": "Backup & reinstall"
-  },
-  "servers.play-migration.content-locked": {
-    "defaultMessage": "Share your server on the Play tab to choose where content is enabled."
-  },
-  "servers.play-migration.curseforge.warning": {
-    "defaultMessage": "It looks like your server was set up using a CurseForge modpack. You’ll need to upload the <exact>exact</exact> same pack again to avoid corrupting your world."
-  },
-  "servers.play-migration.description": {
-    "defaultMessage": "We need to make a few changes to your server’s content to get it ready to share with your friends!"
-  },
-  "servers.play-migration.mrpack.file-description": {
-    "defaultMessage": "The pack can include client-side content, like mods and resource packs, so we can share it with your players."
-  },
-  "servers.play-migration.mrpack.file-label": {
-    "defaultMessage": ".mrpack file"
-  },
-  "servers.play-migration.mrpack.warning": {
-    "defaultMessage": "It looks like your server was set up using an external .mrpack. You’ll need to upload the <exact>exact</exact> same pack to avoid corrupting your world."
-  },
-  "servers.play-migration.reinstall.custom-description": {
-    "defaultMessage": "We’ll reinstall your server content, enabling each project for the server, players, or both based on its environment."
-  },
-  "servers.play-migration.reinstall.modpack-description": {
-    "defaultMessage": "We’ll reinstall {modpack} and any additional content, enabling each project for the server, players, or both based on its environment."
-  },
-  "servers.play-migration.reinstall.title": {
-    "defaultMessage": "Reinstall your content"
-  },
-  "servers.play-migration.restart.description": {
-    "defaultMessage": "We’ll restart your server which may take a few minutes."
-  },
-  "servers.play-migration.restart.title": {
-    "defaultMessage": "Restart your server"
-  },
-  "servers.play-migration.title": {
-    "defaultMessage": "Get your server ready"
-  },
-  "servers.play-migration.what-will-happen": {
-    "defaultMessage": "What will happen"
   },
   "servers.play.busy": {
     "defaultMessage": "Wait for the current server operation to finish."

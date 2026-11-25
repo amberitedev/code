@@ -218,12 +218,15 @@ describe('Core sessions', () => {
 		const api = new FakeClient()
 		api.hasSession = true
 		await api.cores.list()
+		const events = api.coreEvents(CORE.id)
 		await api.cores.revoke(CORE)
 		const calls = api.sent
 			.filter((request) => !request.url.endsWith('/ticket'))
 			.map((request) => `${request.method} ${request.url}`)
 		expect(calls.slice(-2)).toEqual([`DELETE ${PROXY}/pairing`, `DELETE ${ACCOUNTS}/cores/core`])
 		expect(api.hasSession).toBe(false)
+		// Its socket and routes are dropped with it.
+		expect(api.coreEvents(CORE.id)).not.toBe(events)
 	})
 
 	it('removes a Core it cannot reach from the backend alone', async () => {

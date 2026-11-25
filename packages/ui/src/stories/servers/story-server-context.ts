@@ -2,6 +2,7 @@ import type { Server } from '@amberite/contracts/core'
 import { ContractClient, type UploadState } from '@modrinth/api-client'
 import { computed, ref } from 'vue'
 
+import { createConsoleState } from '../../composables/server-console'
 import type { CancelUploadHandler, ModrinthServerContext } from '../../providers/server-context'
 
 /** A running server on a Core that answers nothing, for stories to override. */
@@ -18,7 +19,7 @@ export function storyServerContext(
 		serverId: 'story-server',
 		coreId: 'story-core',
 		core,
-		server: ref<Server>({
+		server: ref<Server | undefined>({
 			server_id: 'story-server',
 			name: 'Story server',
 			owner_id: null,
@@ -41,6 +42,7 @@ export function storyServerContext(
 			eula_accepted: true,
 			...server,
 		}),
+		console: createConsoleState(),
 		isConnected: ref(true),
 		powerState: ref('running'),
 		isServerRunning: computed(() => true),

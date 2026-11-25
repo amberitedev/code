@@ -116,7 +116,7 @@
 		</Accordion>
 
 		<InlineBackupCreator
-			v-if="ctx.flowType === 'reset-server' && ctx.setupType.value !== 'curseforge'"
+			v-if="ctx.flowType === 'reset-server'"
 			ref="backupCreator"
 			:backup-name="formatMessage(messages.beforeResetServerBackupName)"
 			hide-shift-click-hint

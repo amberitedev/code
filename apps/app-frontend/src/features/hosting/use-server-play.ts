@@ -100,7 +100,7 @@ export function useServerPlay(modals: Ref<ServerPlayModals | undefined>) {
 	const { formatMessage } = useVIntl()
 	const updateDiffs = ref<ContentDiffItem[]>([])
 	const pendingUpdate = ref<{ target: LaunchTarget; instanceId: string }>()
-	const activeInstall = ref<{ serverId: string; worldId: string; instanceId: string }>()
+	const activeInstall = ref<{ serverId: string; instanceId: string }>()
 
 	async function cacheServerIcon(serverId: string) {
 		const metadata = await queryClient.fetchQuery(serverIconMetadataQueryOptions(serverId, client))
@@ -281,7 +281,6 @@ export function useServerPlay(modals: Ref<ServerPlayModals | undefined>) {
 				if (!installedId) throw new Error(formatMessage(messages.notReady))
 				activeInstall.value = {
 					serverId: target.serverId,
-					worldId: target.worldId,
 					instanceId: installedId,
 				}
 				notifyWhenInstalled(target, job.job_id, installedId)
@@ -323,7 +322,7 @@ export function useServerPlay(modals: Ref<ServerPlayModals | undefined>) {
 	}
 
 	const prepareMutation = useMutation({
-		mutationFn: async ({ serverId, worldId }: ServerPlayTarget) => {
+		mutationFn: async ({ serverId }: ServerPlayTarget) => {
 			await waitForAuth()
 			if (!auth.session_token.value && !(await modals.value?.showAccountRequired())) return
 			const credentials = await getCredentials()
@@ -337,7 +336,6 @@ export function useServerPlay(modals: Ref<ServerPlayModals | undefined>) {
 			})
 			const target: LaunchTarget = {
 				serverId,
-				worldId,
 				sharedInstanceId,
 				name: server.name,
 				userId: credentials.user_id,
@@ -369,7 +367,7 @@ export function useServerPlay(modals: Ref<ServerPlayModals | undefined>) {
 
 	async function play(target: ServerPlayTarget) {
 		const installing = activeInstall.value
-		if (installing?.serverId === target.serverId && installing.worldId === target.worldId) {
+		if (installing?.serverId === target.serverId) {
 			await router.push(`/instance/${encodeURIComponent(installing.instanceId)}`)
 			return
 		}

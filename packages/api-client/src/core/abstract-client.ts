@@ -20,7 +20,7 @@ import type { UploadMetadata, UploadProgress, UploadRequestOptions } from '../ty
 import { appendRequestParams } from '../utils/fetch'
 import type { AbstractFeature } from './abstract-feature'
 import type { AbstractModule } from './abstract-module'
-import { CoreSessionFeature, coreSessionTransport, protocolChecked } from '../features/core-session'
+import { coreSessionTransport, protocolChecked } from '../features/core-session'
 import { SelfHostedFeature } from '../features/self-hosted'
 import { AbstractUploadClient } from './abstract-upload-client'
 import { ModrinthApiError, ModrinthServerError } from './errors'
@@ -119,6 +119,7 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 	public coreEvents(coreId: string): EventStream<CoreStreamEvent, Topic> {
 		const known = this._coreEvents.get(coreId)
 		if (known) return known
+		if (!coreId) throw new ApiCallError(404, 'not_found', 'There is no Core to listen to')
 		const stream = new EventStream<CoreStreamEvent, Topic>({
 			url: async () =>
 				`${(await this.cores.url(coreId)).replace(/^http/, 'ws').replace(/\/$/, '')}${coreRoutes.EventSocket.path}`,
@@ -131,6 +132,13 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 		})
 		this._coreEvents.set(coreId, stream)
 		return stream
+	}
+
+	/** Close a Core's socket and drop its routes, such as once it is removed. */
+	public forgetCore(coreId: string): void {
+		this._coreEvents.get(coreId)?.close()
+		this._coreEvents.delete(coreId)
+		this._coreClients.delete(coreId)
 	}
 
 	public readonly iso3166!: InferredClientModules['iso3166']
@@ -148,7 +156,6 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 			...config,
 		}
 		this.features = config.features ?? []
-		if (config.coreSessions) this.features.unshift(new CoreSessionFeature(this))
 		this.initializeModules()
 	}
 
@@ -216,7 +223,7 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 	async request<T>(path: string, options: RequestOptions): Promise<T> {
 		const url = this.buildUrl(path, await this.resolveApiBaseUrl(options), options.version)
 
-		const defaultHeaders = await this.defaultHeadersFor(options)
+		const defaultHeaders = await this.buildDefaultHeaders()
 
 		// Merge options with defaults
 		const mergedOptions: RequestOptions = {
@@ -283,7 +290,7 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 
 	async stream(path: string, options: RequestOptions): Promise<ReadableStream<Uint8Array>> {
 		const url = this.buildUrl(path, await this.resolveApiBaseUrl(options), options.version)
-		const defaultHeaders = await this.defaultHeadersFor(options)
+		const defaultHeaders = await this.buildDefaultHeaders()
 		const mergedOptions: RequestOptions = {
 			method: 'GET',
 			retry: false,
@@ -409,8 +416,6 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 	 */
 	protected async resolveApiBaseUrl(options: Pick<RequestOptions, 'api'>): Promise<string> {
 		if (options.api === 'labrinth') return this.resolveBaseUrl(this.config.labrinthBaseUrl!)
-		if (options.api === 'archon')
-			throw new ApiCallError(404, 'not_found', 'There is no Modrinth Hosting')
 		if (options.api === 'sharedinstances') return this.selfHosted().baseUrl
 		return options.api
 	}
@@ -479,19 +484,6 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 			startTime: Date.now(),
 			metadata,
 		}
-	}
-
-	/** The default headers for one request, without an inherited `Authorization` when it asks. */
-	protected async defaultHeadersFor(
-		options: Pick<RequestOptions, 'ownAuthorization'>,
-	): Promise<Record<string, string>> {
-		const headers = await this.buildDefaultHeaders()
-		if (options.ownAuthorization) {
-			for (const name of Object.keys(headers)) {
-				if (name.toLowerCase() === 'authorization') delete headers[name]
-			}
-		}
-		return headers
 	}
 
 	/**

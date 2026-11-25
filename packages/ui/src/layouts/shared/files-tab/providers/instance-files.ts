@@ -7,15 +7,7 @@ import type { EditingFile, FileItem } from '../types'
 import type { FileManagerContext } from './file-manager'
 
 /** What went wrong, as the host tells the user. */
-export type FilesFailure =
-	| 'create'
-	| 'rename'
-	| 'move'
-	| 'delete'
-	| 'upload'
-	| 'extract'
-	| 'write'
-	| 'zip'
+export type FilesFailure = 'create' | 'rename' | 'move' | 'delete' | 'upload' | 'write' | 'zip'
 
 export interface InstanceFilesOptions {
 	/** `client.local` for an instance on this computer, `client.core(id)` for a server. */
@@ -27,6 +19,7 @@ export interface InstanceFilesOptions {
 	queryKey: (path: string) => QueryKey
 	/** The prefix of every listing's key, to mark them all stale. */
 	queryKeyPrefix: MaybeRefOrGetter<QueryKey>
+	/** Tells the user a change failed. The change then rejects too, so its caller stops. */
 	onFailure: (failure: FilesFailure, error: unknown) => void
 	/** Called after a file was written from the editor or uploaded. */
 	onWritten?: (path: string) => void
@@ -97,6 +90,7 @@ export function useInstanceFiles(options: InstanceFilesOptions) {
 			await change()
 		} catch (error) {
 			options.onFailure(failure, error)
+			throw error
 		} finally {
 			await refresh()
 		}
@@ -257,6 +251,7 @@ export function useInstanceFiles(options: InstanceFilesOptions) {
 		uploadFiles,
 		cancelUpload: () => uploading?.abort(),
 		uploadState,
+		// The Files layout tells the user when an extraction fails.
 		extractFile: async (path: string, override: boolean, dry: boolean) => {
 			try {
 				const result = await client().call(instanceFiles.ExtractInstanceZip, {
@@ -264,8 +259,6 @@ export function useInstanceFiles(options: InstanceFilesOptions) {
 					body: { path: instancePath(path), override_conflicts: override, dry_run: dry },
 				})
 				return result ?? undefined
-			} catch (error) {
-				options.onFailure('extract', error)
 			} finally {
 				if (!dry) await refresh()
 			}

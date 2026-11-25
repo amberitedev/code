@@ -50,7 +50,7 @@ export abstract class XHRUploadClient extends AbstractModrinthClient {
 				const isFormData =
 					('formData' in options && options.formData instanceof FormData) ||
 					('multipartField' in options && !!options.multipartField)
-				const baseHeaders = await this.defaultHeadersFor(options)
+				const baseHeaders = await this.buildDefaultHeaders()
 				if (isFormData) {
 					delete baseHeaders['Content-Type']
 				} else {

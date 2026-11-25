@@ -79,12 +79,12 @@ const emit = defineEmits<{
 }>()
 
 const initialLoader = computed(() => {
-	const loader = serverContext.server.value.loader
+	const loader = serverContext.server.value?.loader
 	if (!loader || loader === 'Vanilla') return undefined
 	return loader.toLowerCase()
 })
 
-const initialGameVersion = computed(() => serverContext.server.value.mc_version ?? undefined)
+const initialGameVersion = computed(() => serverContext.server.value?.mc_version ?? undefined)
 const canCompleteSetup = computed(() =>
 	props.initialSetup ? canSetup.value : canResetServer.value,
 )
@@ -111,11 +111,11 @@ async function onFlowComplete(ctx: CreationFlowContextValue) {
 		if (ctx.projectInstall.value) {
 			await ctx.installServerContent(coreId, serverId)
 			emitReinstall()
-		} else if (ctx.setupType.value === 'curseforge') {
-			throw new Error('A Core does not install CurseForge modpacks.')
 		} else if (ctx.setupType.value === 'modpack' && ctx.modpackFile.value) {
 			debug('onFlowComplete: mrpack upload path')
 			const file = ctx.modpackFile.value
+			// Before the upload: the Core's install job starts before it answers, and may end before.
+			serverContext.beginInstallation({ type: 'local_modpack', filename: file.name })
 			await ctx.trackUpload((onUploadProgress) =>
 				setUpServer(
 					client,
@@ -125,7 +125,6 @@ async function onFlowComplete(ctx: CreationFlowContextValue) {
 					{ properties: ctx.buildProperties(), onUploadProgress },
 				),
 			)
-			serverContext.beginInstallation({ type: 'local_modpack', filename: file.name })
 			emitReinstall()
 		} else if (ctx.setupType.value === 'modpack' && ctx.modpackSelection.value) {
 			const { projectId, versionId } = ctx.modpackSelection.value

@@ -84,7 +84,6 @@ const {
 } = useAccessAuditLog({
 	core,
 	serverId,
-	showAuditLogInstances,
 	addNotification,
 })
 </script>

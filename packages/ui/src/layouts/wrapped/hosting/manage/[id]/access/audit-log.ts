@@ -2,13 +2,11 @@ import {
 	type ActionLogFilter,
 	type ActionLogResponse,
 	type ActionEntry,
-	type Backup,
 	type SortOrder,
 	core as coreRoutes,
 } from '@amberite/contracts/core'
 import type { ContractClient } from '@modrinth/api-client'
 import { useInfiniteQuery, useQueryClient } from '@tanstack/vue-query'
-import type { ComputedRef } from 'vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
 import type {
@@ -24,6 +22,7 @@ import type {
 import type { ServerAuditLogEntry } from '#ui/components/servers/access'
 import { parseAuditEvent } from '#ui/components/servers/access/events'
 import { useVIntl } from '#ui/composables/i18n'
+import { useServerBackupsQueue } from '#ui/composables/server-backups-queue'
 import type { AbstractWebNotificationManager } from '#ui/providers/web-notifications'
 
 import {
@@ -33,33 +32,25 @@ import {
 	getActionLogEntryId,
 	getAuditLogTimeframeRange,
 	isActionLogActionName,
-	SERVER_SCOPED_ACTION_LOG_WORLD_FILTER,
 } from './audit-log-utils'
 import { accessMessages, actionLogActionMessages } from './messages'
 
-type AuditLogFilterKey = 'users' | 'worlds' | 'actions'
+type AuditLogFilterKey = 'users' | 'actions'
 
 type UseAccessAuditLogOptions = {
 	core: ContractClient
 	serverId: string
-	showAuditLogInstances: ComputedRef<boolean>
 	addNotification: AbstractWebNotificationManager['addNotification']
 }
 
 const ACTION_LOG_PAGE_SIZE = 200
 const ACTION_LOG_FILTER_OVERLAY_MS = 750
 
-export function useAccessAuditLog({
-	core,
-	serverId,
-	showAuditLogInstances,
-	addNotification,
-}: UseAccessAuditLogOptions) {
+export function useAccessAuditLog({ core, serverId, addNotification }: UseAccessAuditLogOptions) {
 	const { formatMessage } = useVIntl()
 	const queryClient = useQueryClient()
 	const auditLogFilters = ref<Record<string, string[]>>({
 		users: [],
-		worlds: [],
 		actions: [],
 	})
 	const auditLogTimeframeMode = ref<TimeFrameMode>('preset')
@@ -70,16 +61,8 @@ export function useAccessAuditLog({
 	const auditLogTimeframeCustomEndDate = ref('')
 	const auditLogSortDirection = ref<SortOrder>('desc')
 
-	const worldOptions = computed((): { id: string; name: string }[] => [])
-	const isAuditLogWorldFilterVisible = computed(
-		() => showAuditLogInstances.value && worldOptions.value.length > 0,
-	)
-
-	const worldById = computed(
-		() => new Map(worldOptions.value.map((world) => [world.id, world] as const)),
-	)
-
-	const backupById = computed(() => new Map<string, Backup>())
+	// Names the backups the log mentions.
+	const { backupById } = useServerBackupsQueue(serverId, core)
 
 	const actionLogDateFilter = computed(() => {
 		const range = getAuditLogTimeframeRange({
@@ -235,22 +218,6 @@ export function useAccessAuditLog({
 		return extractAuditLogUserFilterOptions(actionLogQuery.data.value?.pages ?? [])
 	})
 
-	const auditLogWorldFilterOptions = computed<DropdownFilterBarOption[]>(() => [
-		{
-			value: SERVER_SCOPED_ACTION_LOG_WORLD_FILTER,
-			label: formatMessage(accessMessages.serverScopedInstance),
-			searchTerms: [
-				SERVER_SCOPED_ACTION_LOG_WORLD_FILTER,
-				formatMessage(accessMessages.serverScopedInstance),
-			],
-		},
-		...worldOptions.value.map((world) => ({
-			value: world.id,
-			label: world.name,
-			searchTerms: [world.id, world.name],
-		})),
-	])
-
 	const auditLogActionFilterOptions = computed<DropdownFilterBarItem[]>(() =>
 		actionLogActionGroups.flatMap((group) => [
 			{
@@ -277,14 +244,6 @@ export function useAccessAuditLog({
 			},
 		]
 
-		if (isAuditLogWorldFilterVisible.value) {
-			categories.push({
-				key: 'worlds',
-				label: formatMessage(accessMessages.instanceFilter),
-				options: auditLogWorldFilterOptions.value,
-			})
-		}
-
 		categories.push({
 			key: 'actions',
 			label: formatMessage(accessMessages.actionTypeFilter),
@@ -305,10 +264,9 @@ export function useAccessAuditLog({
 	const hasActiveAuditLogFilters = computed(
 		() =>
 			hasActiveAuditLogDateFilter.value ||
-			(isAuditLogWorldFilterVisible.value
-				? (['users', 'worlds', 'actions'] satisfies AuditLogFilterKey[])
-				: (['users', 'actions'] satisfies AuditLogFilterKey[])
-			).some((key) => selectedAuditLogFilterValues(key).length > 0),
+			(['users', 'actions'] satisfies AuditLogFilterKey[]).some(
+				(key) => selectedAuditLogFilterValues(key).length > 0,
+			),
 	)
 
 	watch(
@@ -428,7 +386,6 @@ export function useAccessAuditLog({
 			serverId,
 			users: actionLog.users,
 			addons: {},
-			worldById: worldById.value,
 			backupById: backupById.value,
 			versions: {},
 		})

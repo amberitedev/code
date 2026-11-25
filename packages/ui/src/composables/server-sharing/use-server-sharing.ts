@@ -22,14 +22,12 @@ export function useServerSharingSettings() {
 	const queryClient = useQueryClient()
 	const { handleError } = injectNotificationManager()
 	const { serverId, core, server, busyReasons } = injectModrinthServerContext()
-	// A Core names a server's one world by the server's id.
-	const worldId = computed<string | null>(() => serverId)
 	const { canSetup, permissionDeniedMessage } = useServerPermissions()
 	const userId = computed(() => auth.user.value?.id)
-	const sharedInstanceId = computed(() => server.value.shared_instance_id)
+	const sharedInstanceId = computed(() => server.value?.shared_instance_id)
 	const targetKey = computed(() =>
-		canSetup.value && worldId.value && sharedInstanceId.value && userId.value
-			? JSON.stringify([serverId, worldId.value, sharedInstanceId.value, userId.value])
+		canSetup.value && sharedInstanceId.value && userId.value
+			? JSON.stringify([serverId, sharedInstanceId.value, userId.value])
 			: null,
 	)
 	const invites = useQuery(
@@ -47,7 +45,7 @@ export function useServerSharingSettings() {
 	)
 	const shareActions = useIsMutating({ mutationKey: ['servers', 'share-action', serverId] })
 
-	type ShareTarget = { worldId: string; instanceId: string }
+	type ShareTarget = { instanceId: string }
 	const revokeMutation = useMutation({
 		mutationFn: (target: ShareTarget & { inviteId: string }) =>
 			client.sharedinstances.players_v1.deleteLink(serverId, target.instanceId, target.inviteId),
@@ -80,15 +78,8 @@ export function useServerSharingSettings() {
 	)
 
 	function currentTarget(expectedKey: string): ShareTarget | undefined {
-		if (
-			busy.value ||
-			expectedKey !== targetKey.value ||
-			!worldId.value ||
-			!sharedInstanceId.value
-		) {
-			return
-		}
-		return { worldId: worldId.value, instanceId: sharedInstanceId.value }
+		if (busy.value || expectedKey !== targetKey.value || !sharedInstanceId.value) return
+		return { instanceId: sharedInstanceId.value }
 	}
 
 	const settings: SharingSettingsContext = {

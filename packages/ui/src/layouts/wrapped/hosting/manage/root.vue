@@ -512,11 +512,13 @@ async function handleInstallationRetry() {
 	try {
 		await core.call(instanceContent.RepairContent, { params: { id: props.serverId } })
 	} catch (err) {
-		cancelOptimisticInstallation()
 		addNotification({
 			type: 'error',
 			text: err instanceof Error ? err.message : 'Failed to retry installation',
 		})
+	} finally {
+		// A repair answers once done and runs no install job to end what began here.
+		cancelOptimisticInstallation()
 	}
 }
 

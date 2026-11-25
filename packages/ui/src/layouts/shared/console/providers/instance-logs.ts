@@ -13,11 +13,9 @@ import {
 	watchEffect,
 } from 'vue'
 
-import { createConsoleState } from '#ui/composables/server-console'
+import { type ConsoleState, createConsoleState } from '#ui/composables/server-console'
 
 import type { LogSource } from '../types'
-
-type ConsoleState = ReturnType<typeof createConsoleState>
 
 export interface InstanceLogsOptions {
 	/** `client.local` for an instance on this computer, `client.core(id)` for a server. */

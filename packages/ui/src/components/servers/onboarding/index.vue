@@ -77,7 +77,7 @@ async function browseModpacks() {
 	if (!request) return
 	await navigateAndWaitForPage({
 		path: props.browsePath,
-		query: { sid: request.serverId, wid: request.worldId, from: 'onboarding' },
+		query: { sid: request.serverId, from: 'onboarding' },
 	})
 }
 
@@ -107,7 +107,6 @@ const install = useMutation({
 		if (instance && instanceSource) {
 			return instanceSource.pushInstance({
 				serverId: request.serverId,
-				worldId: request.worldId,
 				instanceId: instance.id,
 				properties: config.buildProperties(),
 			})
@@ -154,7 +153,7 @@ async function onCreate(config: CreationFlowContextValue) {
 	flow.inviteActive.value = true
 	const navigateToOverview = () => navigateAndWaitForPage(`/hosting/manage/${request.serverId}`)
 	config.navigating.value = true
-	config.showInvite(request.serverId, request.worldId, request.siteUrl, () => {
+	config.showInvite(request.serverId, request.siteUrl, () => {
 		introCompletion = dismissServerIntro.mutateAsync(request.serverId).then(() => {})
 		return introCompletion
 	})

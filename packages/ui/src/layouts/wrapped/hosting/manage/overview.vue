@@ -29,7 +29,6 @@ import type { Mclogs } from '@modrinth/api-client'
 import { useStorage } from '@vueuse/core'
 import { computed, ref, watch } from 'vue'
 
-import { useModrinthServersConsole } from '#ui/composables'
 import { useServerPermissions } from '#ui/composables/server-permissions'
 import {
 	ConsolePageLayout,
@@ -60,8 +59,8 @@ const {
 	isConnected,
 	isServerRunning,
 	powerState: serverPowerState,
+	console: modrinthServersConsole,
 } = injectModrinthServerContext()
-const modrinthServersConsole = useModrinthServersConsole()
 const { handleError } = injectNotificationManager()
 const logs = useInstanceLogs({
 	client: core,
