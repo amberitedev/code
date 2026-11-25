@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vite-plus/test'
-import { accounts, social } from '../packages/contracts/ts'
+import { accounts, social } from '../packages/contracts/ts/backend'
 import { AuthFeature } from '../packages/api-client/src/features/auth'
 import { SelfHostedFeature } from '../packages/api-client/src/features/self-hosted'
 import { GenericModrinthClient } from '../packages/api-client/src/platform/generic'
