@@ -4,6 +4,7 @@ import { createContext, injectAuth, useSharedInstanceEvent } from '@modrinth/ui'
 import { queryOptions, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, type Ref, ref, watch } from 'vue'
 
+import { findRunningSharedInstancePublish } from '@/components/ui/download-manager/shared-instance-publishes'
 import { useUserQuery } from '@/composables/users/use-user-query'
 import { injectInstanceLaunchState } from '@/features/instances/launch-state'
 import {
@@ -200,16 +201,19 @@ export function createSharedInstanceContext(
 				: instance.value?.shared_instance?.id,
 		() => void refreshAvailability(),
 	)
-	// A new version shows as an update without polling. Joins a read already running, so the
-	// reconnect that fires both events reads once.
+	// Joins a read already running, so the reconnect that fires both events reads once. This App's
+	// own publish is skipped: its version arrives mid-publish, and the publish refreshes when done.
 	useSharedInstanceEvent(
 		'shared_instance_versions',
 		() => instance.value?.shared_instance?.id,
-		() =>
+		() => {
+			const id = instance.value?.id
+			if (!id || findRunningSharedInstancePublish(id)) return
 			void queryClient.invalidateQueries(
-				{ queryKey: instanceKeys.sharedUpdatePreviews(instance.value?.id ?? '') },
+				{ queryKey: instanceKeys.sharedUpdatePreviews(id) },
 				{ cancelRefetch: false },
-			),
+			)
+		},
 	)
 
 	async function refreshAvailability() {

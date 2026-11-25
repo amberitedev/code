@@ -838,6 +838,7 @@ const stopInstance = async (context: string) => {
 
 const handlePlayServer = async () => {
 	if (hosting.isHostingInstance.value) {
+		if (!serverAddress.value) await hosting.refreshOnlineStatus()
 		if (serverAddress.value) await startInstance('InstancePage', serverAddress.value)
 		return
 	}
