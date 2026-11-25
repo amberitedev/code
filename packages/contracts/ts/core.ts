@@ -128,7 +128,7 @@ export type Topic = { "type": "instance", id: string, } | { "type": "installs" }
 
 export type ClientMessage = { "type": "subscribe", topic: Topic, } | { "type": "unsubscribe", topic: Topic, };
 
-export type CoreEvent = { "type": "power_state", "payload": { server: string, state: PowerState, } } | { "type": "uptime", "payload": { server: string, uptime: number, } } | { "type": "backup_progress", "payload": { server: string, id: string, task: BackupTask, state: BackupTaskState, progress: number, start_time: number | null, finish_time: number | null, } } | { "type": "server_changed", "payload": { server: string, } } | { "type": "op_ended", "payload": { op: string, error: ApiError | null, } } | { "type": "resync" };
+export type CoreEvent = { "type": "power_state", "payload": { server: string, state: PowerState, } } | { "type": "uptime", "payload": { server: string, uptime: number, } } | { "type": "backup_progress", "payload": { server: string, id: string, task: BackupTask, state: BackupTaskState, progress: number, start_time: number | null, finish_time: number | null, } } | { "type": "server_changed", "payload": { server: string, } } | { "type": "op_ended", "payload": { op: string, error: ApiError | null, } } | { "type": "resync" } | { "type": "subscribe_failed", "payload": { topic: Topic, error: ApiError, } };
 
 export type PowerState = "running" | "stopped" | "starting" | "stopping" | "crashed";
 

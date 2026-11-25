@@ -1,8 +1,8 @@
 //! `GET /events`: one socket per client, on which it subscribes to topics
 //! (`contracts::core::Topic`) and gets the Core's [`CoreEvent`]s and the engine's events for them.
-//! Only the owner opens one, and the owner sees every topic. The session is checked again when it
-//! changes, when the socket falls behind, and every [`RECHECK_EVERY`]; one that ended closes the
-//! socket.
+//! Only the owner opens one, and the owner sees every topic of a server that exists. The session
+//! is checked again when it changes, when the socket falls behind, and every [`RECHECK_EVERY`];
+//! one that ended closes the socket.
 
 use std::{
     collections::{HashMap, VecDeque},
@@ -46,6 +46,13 @@ const POWER_RETRY: Duration = Duration::from_secs(1);
 const CONSOLE_CAPACITY: usize = 256;
 /// How often a console follower checks whether anyone still reads it.
 const FOLLOWER_IDLE_CHECK: Duration = Duration::from_secs(5);
+/// Core events a socket may fall behind by before it lags.
+const EVENTS_CAPACITY: usize = 256;
+
+/// A new `CoreState::events`.
+pub fn sender() -> broadcast::Sender<CoreEvent> {
+    broadcast::channel(EVENTS_CAPACITY).0
+}
 
 pub async fn socket(
     caller: Caller,
@@ -64,7 +71,7 @@ pub async fn socket(
         )
         .into_response();
     };
-    let core = state.backups.events.subscribe();
+    let core = state.events.subscribe();
     let engine = state.engine.events.subscribe();
     upgrade.on_upgrade(move |socket| {
         let (console, consoles) = mpsc::channel(CONSOLE_CAPACITY);
@@ -241,6 +248,13 @@ impl Loop {
         if self.topics.contains_key(&topic) {
             return Ok(());
         }
+        if let Some(server) = server_of(&topic)
+            && let Err(error) =
+                self.state.access.require(&self.caller, server).await
+        {
+            return send(socket, &CoreEvent::SubscribeFailed { topic, error })
+                .await;
+        }
         let forward = match &topic {
             Topic::Console { id } => {
                 let path = self.state.servers.paths().console_log(id);
@@ -332,7 +346,9 @@ impl Loop {
             }
             // The caller that started it may be on any socket.
             CoreEvent::OpEnded { .. } => return true,
-            CoreEvent::Resync => return false,
+            CoreEvent::Resync | CoreEvent::SubscribeFailed { .. } => {
+                return false;
+            }
         };
         self.topics.contains_key(&topic)
     }
@@ -396,6 +412,17 @@ impl Loop {
         self.topics.contains_key(&Topic::Instance {
             id: instance.clone(),
         })
+    }
+}
+
+/// The server a topic is about. On a Core an instance is a server.
+fn server_of(topic: &Topic) -> Option<&str> {
+    match topic {
+        Topic::Instance { id }
+        | Topic::Console { id }
+        | Topic::Server { id }
+        | Topic::Backups { id } => Some(id),
+        Topic::Installs | Topic::Servers => None,
     }
 }
 
@@ -525,7 +552,7 @@ pub async fn watch_power(state: Arc<CoreState>) {
     loop {
         let phases = state.servers.phases();
         let mut unread = false;
-        if state.backups.events.receiver_count() == 0 {
+        if state.events.receiver_count() == 0 {
             seen = phases;
         } else {
             let ended: Vec<String> = seen
@@ -565,10 +592,10 @@ async fn announce(state: &CoreState, id: &str, phase: Option<Phase>) -> bool {
         return false;
     };
     for event in power_events(state, id, power).await {
-        let _ = state.backups.events.send(event);
+        let _ = state.events.send(event);
     }
     // A change of phase also changes `status`, such as the end of an install.
-    let _ = state.backups.events.send(CoreEvent::ServerChanged {
+    let _ = state.events.send(CoreEvent::ServerChanged {
         server: id.to_owned(),
     });
     true

@@ -169,14 +169,22 @@ pub fn require_owner(caller: &Caller) -> Result<(), ApiError> {
 }
 
 impl CoreAccess {
-    /// Everything for the owner. Anyone else gets the same 404 as for a server that does not
-    /// exist.
+    /// Every server for the owner. Anyone else gets the same 404 as for a server that does not
+    /// exist. Every server-scoped route and topic goes through it, so `server_id` names a server
+    /// in `core.db` before it reaches a path.
     pub async fn require(
         &self,
         caller: &Caller,
         server_id: &str,
     ) -> Result<(), ApiError> {
-        if caller.is_owner() {
+        let exists = caller.is_owner()
+            && sqlx::query("SELECT 1 FROM servers WHERE id = ?1")
+                .bind(server_id)
+                .fetch_optional(&self.db)
+                .await
+                .map_err(internal)?
+                .is_some();
+        if exists {
             Ok(())
         } else {
             Err(ApiError::new(

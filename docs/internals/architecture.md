@@ -246,10 +246,10 @@ Each host serves one `/events` socket that carries the engine's events and its o
 - The App's socket ([`local_api/events.rs`](../../apps/app/src/local_api/events.rs)) forwards every event
   to every client. One local user sees everything, so there is no subscribe protocol.
 - The Core's socket ([`api/events.rs`](../../apps/core/src/api/events.rs)) takes subscriptions to
-  topics. Only the owner opens one, and the owner sees every topic, so a subscription is never
-  refused: a missing or removed server's topic stays quiet, and its routes answer `not_found`. It
-  checks the session again when it changes, when the socket falls behind, and on a timer, and closes
-  the socket once it ended.
+  topics. Only the owner opens one, and the owner sees every topic. A server's topic goes through
+  the same check as its routes, so subscribing to a server that does not exist answers
+  `subscribe_failed` with `not_found`. It checks the session again when it changes, when the socket
+  falls behind, and on a timer, and closes the socket once it ended.
 - A log line is the engine's `log` event on both hosts: a Core sends its servers' console lines as
   that event, so one console reads either.
 - A socket that falls behind sends `Resync` and carries on. The UI refetches its queries, so a lost

@@ -370,7 +370,7 @@ export async function versionRow(env: Env, id: string, version: number): Promise
  * A version a member reads: the latest without `version`. Members only see versions once they are
  * ready; the App reads the 404 as "never ready".
  */
-async function memberVersion(
+export async function memberVersion(
 	env: Env,
 	item: InstanceRow,
 	userId: string,

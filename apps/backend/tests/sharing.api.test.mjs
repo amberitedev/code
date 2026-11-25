@@ -945,6 +945,27 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 			await ok(await asCore('', 'POST', { name: 'Server', server_id: 'server' })),
 			serverShare,
 		)
+		// The Core sets its server's share icon with its key, as the owner would with their session.
+		const serverIcon = randomBytes(64)
+		await ok(
+			await send(
+				`http://local.test/core/shares/${serverShare.id}/icon`,
+				'PUT',
+				'amc_core',
+				serverIcon,
+				{ 'content-type': 'image/png' },
+			),
+		)
+		const uploaded = await ok(await call(`/instances/${serverShare.id}`))
+		assert.deepEqual(
+			Buffer.from(await (await send(uploaded.icon, 'GET')).arrayBuffer()),
+			serverIcon,
+		)
+		await ok(await asCore(`/${serverShare.id}/icon/generated`, 'PUT', iconConfig))
+		assert.deepEqual((await ok(await call(`/instances/${serverShare.id}`))).icon_config, iconConfig)
+		assert.equal((await send(uploaded.icon, 'GET')).status, 404, 'the replaced image is gone')
+		await ok(await asCore(`/${serverShare.id}/icon`, 'DELETE'))
+		assert.equal((await ok(await call(`/instances/${serverShare.id}`))).icon_config, null)
 		// A Core key is no session, and a session is no Core key.
 		await code(
 			await call('/instances', 'POST', { name: 'Server' }, 'amc_core'),
@@ -997,6 +1018,11 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 			'not_owner',
 		)
 		await code(
+			await asCore(`/${serverShare.id}/icon`, 'DELETE', undefined, 'core2'),
+			403,
+			'not_owner',
+		)
+		await code(
 			await asCore(`/${serverShare.id}/versions`, 'GET', undefined, 'core2'),
 			401,
 			'not_member',
@@ -1044,6 +1070,12 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		assert.equal(coreRead.upload, undefined)
 		assert.equal(coreRead.reports, undefined)
 		assert.ok((await ok(await call(`/instances/${alone.id}/versions`))).upload)
+		// A member's Core sees a version once it is ready, as the member does.
+		const unready = `/${alone.id}/versions/${coreRead.version}`
+		await join(alone.id, 'other')
+		await code(await asCore(unready, 'GET', undefined, 'core2'), 404, 'version_not_found')
+		assert.equal((await ok(await asCore(unready))).ready, false, "the owner's Core reads it")
+		await leave(alone.id, 'other')
 
 		// Removing the Core from the account deletes its server-first shares.
 		await ok(await send('http://local.test/cores/core', 'DELETE', 'mra_owner'))

@@ -5,13 +5,15 @@ use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
 
-use contracts::ErrorCode;
 use contracts::backend::sharing::VersionContent;
 use contracts::client::{CallError, Remote};
+use contracts::{ErrorCode, Raw};
 use sharing_client::pool::StoreClient;
 use sharing_client::push::{self, KeptConfigs, LocateConfig, PushError};
 use sharing_client::rules::ShareScope;
-use sharing_client::shares::{Caller, Unavailable, delete_share};
+use sharing_client::shares::{
+    Caller, Icon, Unavailable, delete_share, set_icon,
+};
 
 /// Answers each request with the next (status, body) and records each request line.
 fn serve(answers: Vec<(u16, String)>) -> (String, Arc<Mutex<Vec<String>>>) {
@@ -182,4 +184,39 @@ async fn deleting_a_gone_share_succeeds() {
         ),
         "{error:?}"
     );
+}
+
+#[tokio::test]
+async fn a_cores_key_sets_the_icon_on_its_own_routes() {
+    let http = http();
+    let config: modrinth_content_management::icons::IconConfig = serde_json::from_str(
+        r##"{"background":{"type":"color","value":"#c78aff"},"symbol":"dusk_block"}"##,
+    )
+    .unwrap();
+    for (caller, path) in [
+        (Caller::Account, "/v1/instances/share/icon"),
+        (Caller::Core, "/core/shares/share/icon"),
+    ] {
+        let (url, seen) = serve(vec![(204, String::new()); 3]);
+        for icon in [
+            Icon::Image(Raw {
+                content_type: "image/png".into(),
+                bytes: bytes::Bytes::from_static(b"png"),
+            }),
+            Icon::Generated(config.clone()),
+            Icon::None,
+        ] {
+            set_icon(caller, &remote(&http, &url), "share", icon)
+                .await
+                .unwrap();
+        }
+        assert_eq!(
+            *seen.lock().unwrap(),
+            [
+                format!("PUT {path} HTTP/1.1"),
+                format!("PUT {path}/generated HTTP/1.1"),
+                format!("DELETE {path} HTTP/1.1"),
+            ]
+        );
+    }
 }

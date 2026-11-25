@@ -107,8 +107,8 @@ pub struct Backups {
     paths: Paths,
     db: SqlitePool,
     servers: Arc<Servers>,
-    /// Events for `/events` sockets: backup progress, content installs and power changes.
-    pub events: broadcast::Sender<CoreEvent>,
+    /// `CoreState::events`, for backup progress.
+    events: broadcast::Sender<CoreEvent>,
     wake: Notify,
     /// The ids of operations as they finish.
     finished: broadcast::Sender<i64>,
@@ -125,12 +125,13 @@ impl Backups {
         paths: Paths,
         db: SqlitePool,
         servers: Arc<Servers>,
+        events: broadcast::Sender<CoreEvent>,
     ) -> Result<Arc<Self>, Error> {
         let backups = Arc::new(Self {
             paths,
             db,
             servers,
-            events: broadcast::channel(256).0,
+            events,
             wake: Notify::new(),
             finished: broadcast::channel(64).0,
             copying: tokio::sync::Mutex::new(()),
@@ -421,7 +422,7 @@ impl Backups {
             OpKind::Create => BackupTask::Create,
             OpKind::Restore => BackupTask::Restore,
         };
-        let started = chrono::Utc::now().timestamp_millis();
+        let started = chrono::Utc::now().timestamp();
         send_progress(
             &self.events,
             &operation,
@@ -463,7 +464,7 @@ impl Backups {
         } else {
             BackupState::Failed
         };
-        let ended = Some(chrono::Utc::now().timestamp_millis());
+        let ended = Some(chrono::Utc::now().timestamp());
         send_progress(
             &self.events,
             &operation,

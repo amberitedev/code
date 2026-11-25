@@ -154,10 +154,12 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
         config.local_only(),
     )
     .await?;
+    let events = api::events::sender();
     let backups = crate::backups::Backups::open(
         paths.clone(),
         db.clone(),
         Arc::clone(&servers),
+        events.clone(),
     )
     .await?;
     let update = Arc::new(Updater::new(
@@ -181,6 +183,7 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
         servers,
         access: Arc::clone(&access),
         backups,
+        events,
         update: Arc::clone(&update),
         network: Arc::clone(&network),
         storage: Arc::clone(&storage),

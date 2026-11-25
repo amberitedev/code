@@ -9,13 +9,14 @@
 //! follow one.
 
 use chrono::{DateTime, Utc};
+use modrinth_content_management::icons::IconConfig;
 use serde::{Deserialize, Serialize};
 
 use super::sharing::{
     CreatedId, InstanceVersion, InstanceVersionId, NewInstanceVersion,
     SharedInstanceId, SharedInstanceUpdate,
 };
-use crate::{Empty, Json, Upgrade, tickets::PublicKeys};
+use crate::{Empty, Json, Raw, Upgrade, tickets::PublicKeys};
 
 /// Body of [`RequestSignInCode`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -219,6 +220,12 @@ crate::endpoints! {
     RenameServerShare: Patch "/core/shares/{id}", CoreKey, SharedInstanceId, (), Json<SharedInstanceUpdate> => Empty;
     /// Core: delete one of its servers' shares, even while its owner may not share.
     DeleteServerShare: Delete "/core/shares/{id}", CoreKey, SharedInstanceId, (), Empty => Empty;
+    /// Core: upload an image as one of its servers' shares' icon.
+    SetServerShareIcon: Put "/core/shares/{id}/icon", CoreKey, SharedInstanceId, (), Raw => Empty;
+    /// Core: set an icon editor icon on one of its servers' shares.
+    SetServerShareGeneratedIcon: Put "/core/shares/{id}/icon/generated", CoreKey, SharedInstanceId, (), Json<IconConfig> => Empty;
+    /// Core: remove the icon of one of its servers' shares.
+    RemoveServerShareIcon: Delete "/core/shares/{id}/icon", CoreKey, SharedInstanceId, (), Empty => Empty;
     /// Core: push a version of one of its servers' shares.
     CreateServerShareVersion: Post "/core/shares/{id}/versions", CoreKey, SharedInstanceId, (), Json<NewInstanceVersion> => Json<InstanceVersion>;
     /// Core: the latest version of a share its owner reads, without the owner's extras.

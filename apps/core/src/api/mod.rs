@@ -65,6 +65,9 @@ pub struct CoreState {
     pub servers: Arc<crate::servers::Servers>,
     pub access: Arc<crate::access::CoreAccess>,
     pub backups: Arc<crate::backups::Backups>,
+    /// The Core's events for `/events` sockets: power, server changes, ended ops and backup
+    /// progress.
+    pub events: tokio::sync::broadcast::Sender<events::CoreEvent>,
     pub update: Arc<crate::update::Updater>,
     pub network: Arc<crate::network::forward::Network>,
     pub storage: Arc<crate::storage::Storage>,

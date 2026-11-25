@@ -43,9 +43,14 @@ async fn setup() -> Setup {
     std::fs::create_dir_all(paths.server(&server).join("mods")).unwrap();
     std::fs::write(paths.server(&server).join("mods").join("a.jar"), "mod")
         .unwrap();
-    let backups = Backups::open(paths.clone(), db.clone(), servers)
-        .await
-        .unwrap();
+    let backups = Backups::open(
+        paths.clone(),
+        db.clone(),
+        servers,
+        crate::api::events::sender(),
+    )
+    .await
+    .unwrap();
     Setup {
         _dir: dir,
         paths,
@@ -76,11 +81,27 @@ fn entries(zip: &Path) -> Vec<String> {
 async fn a_backup_holds_the_world_and_settings_and_restores_them() {
     let setup = setup().await;
     let backups = &setup.backups;
+    let mut events = backups.events.subscribe();
     let (id, operation) = backups
         .create(&setup.server, "First", Kind::Manual, None)
         .await
         .unwrap();
     backups.wait(operation).await.unwrap();
+    // Unix seconds, as Kyros sends them.
+    let (started, finished) = loop {
+        if let CoreEvent::BackupProgress {
+            state: BackupState::Done,
+            start_time: Some(started),
+            finish_time: Some(finished),
+            ..
+        } = events.recv().await.unwrap()
+        {
+            break (started, finished);
+        }
+    };
+    let now = crate::access::now();
+    assert!((now - 60..=now).contains(&started), "{started}");
+    assert!((started..=now).contains(&finished), "{finished}");
     let zip = backups.file(&setup.server, &id);
     assert_eq!(
         entries(&zip),
