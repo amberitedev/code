@@ -33,9 +33,9 @@ export function useInstallJobs(options: InstallJobsOptions) {
 
 	/** Reads the unfinished jobs again, as after a resync. */
 	async function refresh() {
-		const listed = await toValue(options.client)
-			.call(installs.ListInstallJobs, { query: { include_finished: false } })
-			.catch(() => [])
+		const listed = await toValue(options.client).call(installs.ListInstallJobs, {
+			query: { include_finished: false },
+		})
 		const next = new Map([...jobs.value].filter(([, job]) => !unfinished(job)))
 		for (const job of listed) if (mine(job)) next.set(job.job_id, job)
 		jobs.value = next
