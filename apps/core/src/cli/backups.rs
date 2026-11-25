@@ -5,9 +5,10 @@ use color_eyre::eyre::{Result, bail};
 use contracts::{
     Empty, Json,
     core::{
-        BackupKind, BackupRef, BackupState, ChangeBackupSchedule, CreateBackup,
-        ListBackups, NewBackup, OperationKind, OperationState, RestoreBackup,
-        ScheduleUpdate, ServerBackup as Backup, ServerBackups, ServerId,
+        Backup, BackupRef, BackupRequest, BackupStatus, BackupsQueue,
+        ChangeBackupOptions, CreateBackup, ListBackups, OperationState,
+        OperationType, PatchBackupOptions, RestoreBackup, RotationAck,
+        ServerId,
     },
 };
 
@@ -47,25 +48,25 @@ pub enum BackupsCommand {
 /// recorded.
 fn failure(backup: &Backup) -> Option<String> {
     let last = backup
-        .operations
-        .last()
+        .history
+        .first()
         .filter(|op| op.state == OperationState::Failed)?;
     Some(format!(
         "{} failed: {}",
-        match last.kind {
-            OperationKind::Create => "create",
-            OperationKind::Restore => "restore",
+        match last.operation_type {
+            OperationType::Create => "create",
+            OperationType::Restore => "restore",
         },
         last.error.as_deref().unwrap_or("no reason was recorded")
     ))
 }
 
-fn state(state: BackupState) -> &'static str {
+fn state(state: BackupStatus) -> &'static str {
     match state {
-        BackupState::Queued => "queued",
-        BackupState::Running => "running",
-        BackupState::Failed => "failed",
-        BackupState::Done => "done",
+        BackupStatus::Pending => "queued",
+        BackupStatus::InProgress => "running",
+        BackupStatus::Error => "failed",
+        BackupStatus::Done => "done",
     }
 }
 
@@ -73,7 +74,7 @@ pub async fn run(client: &Client, command: BackupsCommand) -> Result<Output> {
     match command {
         BackupsCommand::List { server } => {
             let server = servers::find(client, &server).await?;
-            let mut backups = list(client, &server.id).await?.backups;
+            let mut backups = list(client, &server.server_id).await?.backups;
             backups.sort_by_key(|backup| std::cmp::Reverse(backup.created_at));
             let text = if backups.is_empty() {
                 format!("{} has no backups yet", server.name)
@@ -85,13 +86,9 @@ pub async fn run(client: &Client, command: BackupsCommand) -> Result<Output> {
                             "{}  {}  {:<11} {}{}",
                             backup.id,
                             super::local_time(backup.created_at),
-                            state(backup.state),
+                            state(backup.status),
                             backup.name,
-                            if backup.kind == BackupKind::Manual {
-                                ""
-                            } else {
-                                " (scheduled)"
-                            }
+                            if backup.automated { " (scheduled)" } else { "" }
                         );
                         // The reason is Core's text, which may quote file names: escaped.
                         match failure(backup) {
@@ -113,9 +110,9 @@ pub async fn run(client: &Client, command: BackupsCommand) -> Result<Output> {
             });
             let created = call::<CreateBackup>(
                 client,
-                &id(&server.id),
+                &id(&server.server_id),
                 &(),
-                Json(NewBackup { name }),
+                Json(BackupRequest { name }),
             )
             .await?;
             Ok(Output::new(
@@ -125,10 +122,10 @@ pub async fn run(client: &Client, command: BackupsCommand) -> Result<Output> {
         }
         BackupsCommand::Restore { server, backup } => {
             let server = servers::find(client, &server).await?;
-            let backups = list(client, &server.id).await?.backups;
+            let backups = list(client, &server.server_id).await?.backups;
             let backup = pick(&backups, &backup)?;
             let target = BackupRef {
-                id: server.id.clone(),
+                id: server.server_id.clone(),
                 backup_id: backup.id.clone(),
             };
             call::<RestoreBackup>(client, &target, &(), Empty).await?;
@@ -144,34 +141,37 @@ pub async fn run(client: &Client, command: BackupsCommand) -> Result<Output> {
             keep,
         } => {
             let server = servers::find(client, &server).await?;
-            let mut current = list(client, &server.id).await?;
+            let mut current = list(client, &server.server_id).await?;
             let mut deleted = 0;
             if every.is_some() || off || keep.is_some() {
                 let keep = if off { Some(0) } else { keep };
-                if keep.is_some_and(|keep| keep > current.schedule.slots) {
+                if keep.is_some_and(|keep| keep > current.options.limit) {
                     bail!(
                         "a server has {} backup slots in all",
-                        current.schedule.slots
+                        current.options.limit
                     );
                 }
                 // The owner at the keyboard: scheduled backups past the new slots go now.
-                let changed = call::<ChangeBackupSchedule>(
+                let changed = call::<ChangeBackupOptions>(
                     client,
-                    &id(&server.id),
-                    &(),
-                    Json(ScheduleUpdate {
-                        interval_hours: every,
-                        keep,
-                        delete_excess: true,
+                    &id(&server.server_id),
+                    &RotationAck { ar: Some(true) },
+                    Json(PatchBackupOptions {
+                        split_automatic: keep,
+                        split_manual: None,
+                        interval: every,
                     }),
                 )
                 .await?;
-                deleted = changed.excess.len();
-                current = list(client, &server.id).await?;
+                deleted = changed.backup_ids.len();
+                current = list(client, &server.server_id).await?;
             }
-            let schedule = &current.schedule;
-            let manual = schedule.slots.saturating_sub(schedule.keep);
-            let mut text = match (schedule.keep, current.next_scheduled_at) {
+            let options = &current.options;
+            let manual = options.split_manual;
+            let mut text = match (
+                options.split_automatic,
+                current.next_auto_backup_at,
+            ) {
                 (0, _) | (_, None) => format!(
                     "{}: no scheduled backups; {manual} manual slots",
                     server.name
@@ -179,7 +179,7 @@ pub async fn run(client: &Client, command: BackupsCommand) -> Result<Output> {
                 (keep, Some(next)) => format!(
                     "{}: every {} hours, keeping the last {keep} ({manual} manual slots); next {}",
                     server.name,
-                    schedule.interval_hours,
+                    options.interval,
                     super::local_time(next)
                 ),
             };
@@ -200,7 +200,7 @@ fn id(server_id: &str) -> ServerId {
     }
 }
 
-async fn list(client: &Client, server_id: &str) -> Result<ServerBackups> {
+async fn list(client: &Client, server_id: &str) -> Result<BackupsQueue> {
     call::<ListBackups>(client, &id(server_id), &(), Empty).await
 }
 

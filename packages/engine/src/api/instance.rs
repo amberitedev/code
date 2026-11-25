@@ -20,12 +20,11 @@ mod run;
 mod shared;
 
 pub use self::content::{
-    ContentSide, complete_side_review, get_content_items,
-    get_dependencies_as_content_items, get_install_candidates,
-    get_installed_project_ids, get_linked_modpack_content,
-    get_linked_modpack_info, get_projects, list_content_sets,
-    refresh_content_updates, repair_content, set_content_side,
-    set_content_sides_unlocked, sync_content_files,
+    ContentSide, get_content_items, get_dependencies_as_content_items,
+    get_install_candidates, get_installed_project_ids,
+    get_linked_modpack_content, get_linked_modpack_info, get_projects,
+    list_content_sets, refresh_content_updates, repair_content,
+    set_content_side, set_content_sides_unlocked, sync_content_files,
 };
 pub(crate) use self::export_mrpack::get_mrpack_environment;
 pub use self::export_mrpack::{

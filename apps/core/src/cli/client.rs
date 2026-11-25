@@ -120,8 +120,8 @@ impl Client {
         Ok((status.as_u16(), content_type, body))
     }
 
-    /// The `/events` socket, subscribed to a server's console. It sends `console` events as JSON
-    /// text.
+    /// The `/events` socket, subscribed to a server's console. It sends each line as the engine's
+    /// `log` event, as JSON text.
     pub async fn console(
         &self,
         server_id: &str,

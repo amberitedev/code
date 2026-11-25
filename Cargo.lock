@@ -2246,6 +2246,7 @@ dependencies = [
  "ariadne",
  "axum",
  "bytes",
+ "chrono",
  "clap 4.6.7",
  "contracts",
  "http",

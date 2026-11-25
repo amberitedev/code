@@ -1,37 +1,46 @@
-//! A Core's servers: listing and creating them, power, setup, `server.properties` and backups.
+//! A Core's servers: listing and creating them, power, startup and `server.properties`, in
+//! Modrinth Hosting's shapes (`Archon.*` in `packages/api-client/src/modules`).
 
 use std::collections::BTreeMap;
 
+use chrono::{DateTime, Utc};
+use modrinth_content_management::icons::IconConfig;
 use serde::{Deserialize, Serialize};
 
-use super::{CoreUser, ReachabilityReport};
-use crate::ReleaseChannel;
+use super::ReachabilityReport;
+use crate::{ModLoader, ReleaseChannel};
 
-/// A server on a Core.
+/// A server on a Core, in Modrinth Hosting's server shape (`Archon.Servers.v0.Server`) where a
+/// Core has the field, with what a Core adds after it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
-pub struct CoreServer {
-    pub id: String,
+pub struct Server {
+    pub server_id: String,
     pub name: String,
     /// Null until the Core is paired.
     pub owner_id: Option<String>,
-    /// Its loader or pack is installing now.
-    pub installing: bool,
-    /// `vanilla`, `fabric`, `quilt`, `forge`, `neoforge` or `paper`. Null until installed.
-    pub loader: Option<String>,
+    pub net: Net,
+    pub status: Status,
+    /// Null until something is installed.
+    pub loader: Option<Loader>,
     pub loader_version: Option<String>,
-    pub game_version: Option<String>,
-    pub net: ServerNet,
-    pub power: ServerPower,
+    pub mc_version: Option<String>,
+    /// The Modrinth pack it runs, if any.
+    pub upstream: Option<Upstream>,
+    /// `intro` is set while nothing is installed: the server is not set up yet.
+    pub flows: Flows,
+    pub icon: Option<ServerIcon>,
+    pub power_state: ServerPower,
     /// The App instance it follows.
     pub linked_instance: Option<LinkedInstance>,
+    /// The share it reads: its instance's when it follows one, else its own once it is shared.
+    pub shared_instance_id: Option<String>,
     /// Whether players can join from the internet. Null while it does not run.
     pub reachability: Option<ReachabilityReport>,
     /// Who is online. Null while it does not run.
     pub players: Option<Vec<String>>,
     pub memory_mb: u32,
-    /// Unix seconds.
-    pub created_at: i64,
+    pub created_at: DateTime<Utc>,
     pub update_channel: ReleaseChannel,
     /// The owner accepted the Minecraft EULA for every server on this Core. None starts before.
     pub eula_accepted: bool,
@@ -40,7 +49,7 @@ pub struct CoreServer {
 /// Where players join a server.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
-pub struct ServerNet {
+pub struct Net {
     /// With `port`, where players join from the internet: the router's address when it forwarded
     /// another port than the game port, otherwise the Core's.
     pub ip: Option<String>,
@@ -56,6 +65,84 @@ pub struct ServerNet {
 pub struct JoinAddress {
     pub ip: String,
     pub port: u16,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[serde(rename_all = "snake_case")]
+pub enum Status {
+    /// Its loader or pack is installing now.
+    Installing,
+    Available,
+}
+
+/// A server's loader, as Modrinth Hosting names it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+pub enum Loader {
+    Vanilla,
+    Fabric,
+    Quilt,
+    Forge,
+    NeoForge,
+    Paper,
+}
+
+impl From<ModLoader> for Loader {
+    fn from(loader: ModLoader) -> Self {
+        match loader {
+            ModLoader::Vanilla => Self::Vanilla,
+            ModLoader::Fabric => Self::Fabric,
+            ModLoader::Quilt => Self::Quilt,
+            ModLoader::Forge => Self::Forge,
+            ModLoader::NeoForge => Self::NeoForge,
+            ModLoader::Paper => Self::Paper,
+        }
+    }
+}
+
+impl From<Loader> for ModLoader {
+    fn from(loader: Loader) -> Self {
+        match loader {
+            Loader::Vanilla => Self::Vanilla,
+            Loader::Fabric => Self::Fabric,
+            Loader::Quilt => Self::Quilt,
+            Loader::Forge => Self::Forge,
+            Loader::NeoForge => Self::NeoForge,
+            Loader::Paper => Self::Paper,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+pub struct Upstream {
+    pub kind: UpstreamKind,
+    pub project_id: String,
+    pub version_id: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[serde(rename_all = "snake_case")]
+pub enum UpstreamKind {
+    Modpack,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+pub struct Flows {
+    pub intro: bool,
+}
+
+/// A server's icon, which is its instance's.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+pub struct ServerIcon {
+    /// The image's content hash: a new icon has a new one.
+    pub hash: String,
+    /// Set when the icon editor drew it.
+    pub config: Option<IconConfig>,
 }
 
 /// Where a server is in its run, or how its last run ended: `offline` (stopped or never run),
@@ -116,7 +203,6 @@ pub struct ServerUpdate {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
-#[serde(rename_all = "snake_case")]
 pub enum PowerAction {
     Start,
     Stop,
@@ -134,8 +220,7 @@ pub struct PowerChange {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct LoaderInstall {
-    /// As [`CoreServer::loader`] names it.
-    pub loader: String,
+    pub loader: Loader,
     /// Null for the newest.
     pub loader_version: Option<String>,
     pub game_version: String,
@@ -168,10 +253,6 @@ pub struct InstanceFollow {
     pub instance: FollowedInstance,
     /// The instance's share, whose latest version the server applies.
     pub shared_instance_id: String,
-    /// Ignored: the Core reads the share as its owner. Goes with `core-hosting/content.ts`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "export-ts", ts(optional))]
-    pub ticket: Option<String>,
     /// Stop a running server to apply the version now, and start it again after.
     pub restart: bool,
 }
@@ -184,181 +265,110 @@ pub struct FollowedInstance {
     pub name: String,
 }
 
-/// How a server starts, and what it shares.
+/// How a server starts. A Core builds the command itself.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
-pub struct ServerSetup {
+pub struct RuntimeOptions {
     /// The Java major it runs. Null until installed.
     pub java_version: Option<u32>,
     /// The command line it runs, as people read it. Null until installed.
-    pub invocation: Option<String>,
-    /// The share it reads: its instance's when it follows one, else its own once it is shared.
-    pub shared_instance_id: Option<String>,
-    /// It has changes its own share's latest version does not. Always false while it follows an
-    /// instance.
-    pub shared_instance_needs_update: bool,
-    /// The Core machine's CPU threads.
-    pub cpus: u32,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
-pub struct JavaMajor {
-    /// A Java major the Core installs (8, 11, 17, 21 or 25), or null for the one the Minecraft
-    /// version needs.
-    pub major: Option<u32>,
-}
-
-/// Every key of a server's `server.properties`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
-pub struct ServerProperties {
-    pub properties: BTreeMap<String, String>,
+    pub original_invocation: Option<String>,
 }
 
 /// Used from the server's next start.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
-pub struct PropertiesUpdate {
-    /// Null removes the key.
-    pub properties: BTreeMap<String, Option<String>>,
+pub struct PatchRuntimeOptions {
+    /// A Java major the Core installs (8, 11, 17, 21 or 25), or null for the one the Minecraft
+    /// version needs.
+    pub java_version: Option<u32>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// A server's `server.properties`: the keys Modrinth Hosting names, with dashes as underscores,
+/// and every other key as the file names it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
-pub struct ServerBackups {
-    pub backups: Vec<ServerBackup>,
-    pub schedule: BackupSchedule,
-    /// Unix seconds. Null while scheduled backups are off.
-    pub next_scheduled_at: Option<i64>,
+pub struct PropertiesFields {
+    pub known: KnownPropertiesFields,
+    pub custom: BTreeMap<String, String>,
 }
 
-/// A server has `slots` backup slots: `keep` for scheduled backups, the rest for manual ones.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// What to change. Absent keys stay; in `custom`, null removes the key.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
-pub struct BackupSchedule {
-    pub interval_hours: u32,
-    pub keep: u32,
-    pub slots: u32,
+pub struct PatchPropertiesFields {
+    #[serde(default)]
+    #[cfg_attr(feature = "export-ts", ts(optional))]
+    pub known: Option<KnownPropertiesFields>,
+    #[serde(default)]
+    #[cfg_attr(feature = "export-ts", ts(optional))]
+    pub custom: Option<BTreeMap<String, Option<String>>>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
-pub struct ServerBackup {
-    pub id: String,
-    pub name: String,
-    /// Unix seconds.
-    pub created_at: i64,
-    pub state: BackupState,
-    pub kind: BackupKind,
-    /// Unix seconds. Set on scheduled backups that hold a slot: when later scheduled backups push
-    /// it out.
-    pub rotates_at: Option<i64>,
-    pub operations: Vec<BackupOperation>,
+macro_rules! known_properties {
+    ($($field:ident),* $(,)?) => {
+        /// The `server.properties` keys Modrinth Hosting names, each optional.
+        #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+        #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+        pub struct KnownPropertiesFields {
+            $(
+                #[serde(default, skip_serializing_if = "Option::is_none")]
+                #[cfg_attr(feature = "export-ts", ts(optional = nullable))]
+                pub $field: Option<String>,
+            )*
+        }
+
+        impl KnownPropertiesFields {
+            /// Each field set, under the file's key for it.
+            pub fn entries(&self) -> Vec<(String, &str)> {
+                let mut entries = Vec::new();
+                $(
+                    if let Some(value) = &self.$field {
+                        entries.push((stringify!($field).replace('_', "-"), value.as_str()));
+                    }
+                )*
+                entries
+            }
+
+            /// Takes the value of the file's `key` when it is a known key. False when it is not.
+            pub fn set(&mut self, key: &str, value: String) -> bool {
+                match key.replace('-', "_").as_str() {
+                    $(stringify!($field) => self.$field = Some(value),)*
+                    _ => return false,
+                }
+                true
+            }
+        }
+    };
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
-#[serde(rename_all = "snake_case")]
-pub enum BackupState {
-    Queued,
-    Running,
-    Done,
-    Failed,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
-#[serde(rename_all = "snake_case")]
-pub enum BackupKind {
-    Manual,
-    Scheduled,
-    /// Made before a pack update or a restore.
-    PreUpdate,
-}
-
-/// Making a backup or restoring it.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
-pub struct BackupOperation {
-    pub id: i64,
-    pub kind: OperationKind,
-    pub state: OperationState,
-    /// Unix seconds, as are the other times.
-    pub queued_at: i64,
-    pub started_at: Option<i64>,
-    pub ended_at: Option<i64>,
-    pub error: Option<String>,
-    /// Someone dismissed it once it ended.
-    pub acked: bool,
-    /// Who started it. Null for the schedule.
-    pub user: Option<CoreUser>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
-#[serde(rename_all = "snake_case")]
-pub enum OperationKind {
-    Create,
-    Restore,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
-#[serde(rename_all = "snake_case")]
-pub enum OperationState {
-    Queued,
-    Running,
-    Done,
-    Failed,
-    Cancelled,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
-pub struct NewBackup {
-    /// 1 to 64 characters.
-    pub name: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
-pub struct CreatedBackup {
-    pub id: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
-pub struct BackupUpdate {
-    pub name: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
-pub struct BackupIds {
-    pub ids: Vec<String>,
-}
-
-/// What is given changes; the rest stays.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
-pub struct ScheduleUpdate {
-    /// Hourly at most, every 744 hours at least.
-    pub interval_hours: Option<u32>,
-    /// 0 turns scheduled backups off.
-    pub keep: Option<u32>,
-    /// Keeping fewer than there are deletes the oldest scheduled backups. Without this the change
-    /// is only described; with it, it is the owner's dangerous action.
-    pub delete_excess: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
-pub struct ScheduleChange {
-    pub applied: bool,
-    /// The scheduled backups the change deletes, or deleted once applied.
-    pub excess: Vec<String>,
-}
+known_properties!(
+    allow_cheats,
+    allow_flight,
+    difficulty,
+    enforce_whitelist,
+    force_gamemode,
+    gamemode,
+    generate_structures,
+    generator_settings,
+    hardcore,
+    level_seed,
+    level_type,
+    max_players,
+    max_tick_time,
+    motd,
+    pause_when_empty_seconds,
+    player_idle_timeout,
+    require_resource_pack,
+    resource_pack,
+    resource_pack_id,
+    resource_pack_sha1,
+    simulation_distance,
+    spawn_protection,
+    sync_chunk_writes,
+    view_distance,
+    white_list,
+);
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
@@ -382,9 +392,15 @@ pub(super) fn ts_types() -> Vec<String> {
 
     let cfg = crate::ts::config();
     vec![
-        CoreServer::decl(&cfg),
-        ServerNet::decl(&cfg),
+        Server::decl(&cfg),
+        Net::decl(&cfg),
         JoinAddress::decl(&cfg),
+        Status::decl(&cfg),
+        Loader::decl(&cfg),
+        Upstream::decl(&cfg),
+        UpstreamKind::decl(&cfg),
+        Flows::decl(&cfg),
+        ServerIcon::decl(&cfg),
         ServerPower::decl(&cfg),
         LinkedInstance::decl(&cfg),
         LinkedPackState::decl(&cfg),
@@ -397,24 +413,11 @@ pub(super) fn ts_types() -> Vec<String> {
         SharedServer::decl(&cfg),
         InstanceFollow::decl(&cfg),
         FollowedInstance::decl(&cfg),
-        ServerSetup::decl(&cfg),
-        JavaMajor::decl(&cfg),
-        ServerProperties::decl(&cfg),
-        PropertiesUpdate::decl(&cfg),
-        ServerBackups::decl(&cfg),
-        BackupSchedule::decl(&cfg),
-        ServerBackup::decl(&cfg),
-        BackupState::decl(&cfg),
-        BackupKind::decl(&cfg),
-        BackupOperation::decl(&cfg),
-        OperationKind::decl(&cfg),
-        OperationState::decl(&cfg),
-        NewBackup::decl(&cfg),
-        CreatedBackup::decl(&cfg),
-        BackupUpdate::decl(&cfg),
-        BackupIds::decl(&cfg),
-        ScheduleUpdate::decl(&cfg),
-        ScheduleChange::decl(&cfg),
+        RuntimeOptions::decl(&cfg),
+        PatchRuntimeOptions::decl(&cfg),
+        PropertiesFields::decl(&cfg),
+        PatchPropertiesFields::decl(&cfg),
+        KnownPropertiesFields::decl(&cfg),
         BackupRef::decl(&cfg),
         OperationRef::decl(&cfg),
     ]

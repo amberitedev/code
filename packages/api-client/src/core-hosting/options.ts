@@ -9,26 +9,21 @@ import { sameCommand } from './servers-v0'
 export function options(client: AbstractModrinthClient): Adapter<ArchonOptionsV1Module> {
 	return {
 		async getStartup(serverId) {
-			const setup = await (
+			const startup = await (
 				await coreOf(client, serverId)
-			).call(core.GetSetup, {
+			).call(core.GetStartup, {
 				params: { id: serverId },
 			})
-			return {
-				java_version: setup.java_version,
-				jre_vendor: null,
-				original_invocation: setup.invocation,
-				startup_command: setup.invocation,
-			}
+			return { ...startup, jre_vendor: null, startup_command: startup.original_invocation }
 		},
 		async patchStartup(serverId, _worldId, body) {
 			const routes = await coreOf(client, serverId)
 			const params = { id: serverId }
-			const { invocation } = await routes.call(core.GetSetup, { params })
-			if (invocation !== null) sameCommand(body.startup_command, invocation)
-			await routes.call(core.SetJavaVersion, {
+			const { original_invocation } = await routes.call(core.GetStartup, { params })
+			if (original_invocation !== null) sameCommand(body.startup_command, original_invocation)
+			await routes.call(core.ChangeStartup, {
 				params,
-				body: { major: body.java_version ?? null },
+				body: { java_version: body.java_version ?? null },
 			})
 		},
 	}

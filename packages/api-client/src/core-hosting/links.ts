@@ -15,18 +15,22 @@ export function node(nodeUrlHost: string) {
 }
 
 /**
- * A token for one GET of `path` (from the Core's root, with its query) on the Core of a server's
- * node URL, within five minutes, for a download that cannot send the session. Use it with
- * `linkUrl` and the same `path`.
+ * The URL of `path` (from the Core's root, with its query) on the Core of a server's node URL.
+ * It goes through the App's Core proxy, which adds this device's session, so a native save needs
+ * no token.
  */
-export async function link(client: AbstractModrinthClient, nodeUrlHost: string, path: string) {
-	return (await coreOf(client, node(nodeUrlHost).serverId)).call(core.CreateDownloadLink, {
-		body: { path },
-	})
+export function coreUrl(nodeUrlHost: string, path: string): string {
+	return `${node(nodeUrlHost).base}${path}`
 }
 
-export function linkUrl(nodeUrlHost: string, path: string, token: string): string {
-	return `${node(nodeUrlHost).base}${path}${path.includes('?') ? '&' : '?'}link=${token}`
+/**
+ * Nothing to authorize: a download goes through the App's Core proxy, which adds this device's
+ * session. One call first signs in again when that session ended, so the download has one.
+ */
+export async function authorize(client: AbstractModrinthClient, nodeUrlHost: string) {
+	const { serverId } = node(nodeUrlHost)
+	await (await coreOf(client, serverId)).call(core.GetServer, { params: { id: serverId } })
+	return { token: '' }
 }
 
 /** `path` under the server's own routes, `/servers/{id}`. */

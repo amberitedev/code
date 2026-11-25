@@ -39,7 +39,7 @@ pub async fn send(
         &state.db,
         &caller,
         Some(&id),
-        Action::ConsoleCommand { command },
+        Action::ConsoleCommandExecuted { command },
     )
     .await;
     Ok(Empty)

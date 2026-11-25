@@ -61,7 +61,6 @@ contracts::endpoints! {
     /// routes below.
     SetSide: Post "/instances/{id}/content/side", Session, InstanceRef, (), Json<SideChange> => Empty, shared;
     SetSidesUnlocked: Post "/instances/{id}/content/sides-unlocked", Session, InstanceRef, (), Json<SidesUnlocked> => Empty, shared;
-    CompleteSideReview: Post "/instances/{id}/content/side-review", Session, InstanceRef, (), Empty => Empty, shared;
     /// Installs the followed pack again, placing every file of it that is missing or changed.
     RepairContent: Post "/instances/{id}/content/repair", Session, InstanceRef, (), Empty => Empty, shared;
 }

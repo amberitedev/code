@@ -10,14 +10,17 @@ use axum::extract::State;
 use contracts::{
     ApiError, Empty, ErrorCode, Json,
     core::{
-        Action, ChangePower, ChangeServer, CoreServer, CreateServer,
-        DeleteServer, GetServer, GetSetup, InstallLoader, InstallModpackFile,
-        JoinAddress, ListServers, PowerAction, ServerId, ServerNet,
-        ServerPower, ServerSetup, ShareServer, SharedServer,
+        Action, ChangePower, ChangeServer, CreateServer, DeleteServer, Flows,
+        GetServer, InstallLoader, InstallModpackFile, JoinAddress, ListServers,
+        Net, PowerAction, Server, ServerIcon, ServerId, ServerPower,
+        ShareServer, SharedServer, Status, Upstream, UpstreamKind,
     },
     server::Req,
 };
-use engine::{routes::api_error, state::SharedInstanceRole};
+use engine::{
+    routes::api_error,
+    state::{InstanceLink, SharedInstanceRole},
+};
 use futures::TryStreamExt;
 use tokio::io::AsyncWriteExt;
 
@@ -25,7 +28,7 @@ use super::{CoreState, engine_mount, internal};
 use crate::{
     access::{Caller, Dangerous, activity, require_owner},
     servers::{
-        Phase, ServerError, launch,
+        Phase, ServerError,
         platform::{self, Platform},
         server_rows,
     },
@@ -70,7 +73,7 @@ fn join_address(
     }
 }
 
-fn net(state: &CoreState, row: &server_rows::ServerRow) -> ServerNet {
+fn net(state: &CoreState, row: &server_rows::ServerRow) -> Net {
     let game_port = u16::try_from(row.port).unwrap_or_default();
     // Known while the server runs and its port is forwarded, or open on a public address.
     let outside = state
@@ -78,7 +81,7 @@ fn net(state: &CoreState, row: &server_rows::ServerRow) -> ServerNet {
         .report(&row.id)
         .and_then(|report| report.outside);
     let (ip, port) = join_address(state.network.join_ip(), game_port, outside);
-    ServerNet {
+    Net {
         ip: ip.map(|ip| ip.to_string()),
         port,
         outside: outside.map(|address| JoinAddress {
@@ -111,7 +114,7 @@ pub(super) async fn power_state(
 async fn server(
     state: &CoreState,
     row: server_rows::ServerRow,
-) -> Result<CoreServer, ApiError> {
+) -> Result<Server, ApiError> {
     let phase = state.servers.phase(&row.id);
     let power = power_state(state, &row.id, phase).await.map_err(internal)?;
     let owner_id: Option<String> =
@@ -136,9 +139,35 @@ async fn server(
     .await?;
     let set = instance.applied_content_set;
     let installed = !set.game_version.is_empty();
-    Ok(CoreServer {
+    let upstream = match instance.link {
+        InstanceLink::ModrinthModpack {
+            project_id,
+            version_id,
+        } => Some(Upstream {
+            kind: UpstreamKind::Modpack,
+            project_id,
+            version_id,
+        }),
+        _ => None,
+    };
+    // The cached icon is named by its content's hash.
+    let icon = instance.instance.icon_path.as_deref().and_then(|path| {
+        let hash = std::path::Path::new(path).file_stem()?.to_str()?;
+        Some(ServerIcon {
+            hash: hash.to_owned(),
+            config: instance.icon_config.clone(),
+        })
+    });
+    Ok(Server {
         net: net(state, &row),
+        status: if phase == Some(Phase::Installing) {
+            Status::Installing
+        } else {
+            Status::Available
+        },
+        flows: Flows { intro: !installed },
         linked_instance,
+        shared_instance_id: instance.shared_instance.map(|share| share.id),
         reachability: state
             .network
             .report(&row.id)
@@ -147,17 +176,18 @@ async fn server(
             .servers
             .insight(&row.id)
             .map(|insight| insight.players.into_iter().collect()),
-        installing: phase == Some(Phase::Installing),
         memory_mb: u32::try_from(row.memory_mb).unwrap_or_default(),
         update_channel: instance.instance.update_channel,
-        id: row.id,
+        server_id: row.id,
         name: row.name,
         owner_id,
-        loader: installed.then(|| set.loader.as_str().to_owned()),
+        loader: installed.then(|| set.loader.into()),
         loader_version: set.loader_version.filter(|_| installed),
-        game_version: installed.then_some(set.game_version),
-        power,
-        created_at: row.created_at,
+        mc_version: installed.then_some(set.game_version),
+        upstream,
+        icon,
+        power_state: power,
+        created_at: crate::access::at(row.created_at),
         eula_accepted,
     })
 }
@@ -166,7 +196,7 @@ pub async fn list(
     caller: Caller,
     State(state): State<Arc<CoreState>>,
     _: Req<ListServers>,
-) -> Result<Json<Vec<CoreServer>>, ApiError> {
+) -> Result<Json<Vec<Server>>, ApiError> {
     require_owner(&caller)?;
     let mut servers = Vec::new();
     for row in server_rows::list(&state.db, &state.engine)
@@ -182,7 +212,7 @@ pub async fn get(
     caller: Caller,
     State(state): State<Arc<CoreState>>,
     Req { params, .. }: Req<GetServer>,
-) -> Result<Json<CoreServer>, ApiError> {
+) -> Result<Json<Server>, ApiError> {
     let id = params.id;
     state.access.require(&caller, &id).await?;
     let row = server_rows::get(&state.db, &state.engine, &id)
@@ -306,12 +336,7 @@ pub async fn install(
 ) -> Result<Empty, ApiError> {
     let id = params.id;
     state.access.require(&caller, &id).await?;
-    let Some(loader) = platform::parse_loader(&body.loader) else {
-        return Err(ApiError::new(
-            ErrorCode::InvalidInput,
-            "Core installs Vanilla, Fabric, Quilt, Forge, NeoForge, and Paper.",
-        ));
-    };
+    let loader = body.loader.into();
     if state.servers.engine_installing(&id).await? {
         return Err(ServerError::Installing.into());
     }
@@ -585,71 +610,6 @@ async fn remove_server(
         tracing::warn!(server = %id, %error, "could not forget the share's history");
     }
     Ok(())
-}
-
-pub async fn setup(
-    caller: Caller,
-    State(state): State<Arc<CoreState>>,
-    Req { params, .. }: Req<GetSetup>,
-) -> Result<Json<ServerSetup>, ApiError> {
-    let id = params.id;
-    state.access.require(&caller, &id).await?;
-    let row = server_rows::get(&state.db, &state.engine, &id)
-        .await
-        .map_err(internal)?
-        .ok_or_else(|| ServerError::NotFound(id.clone()))?;
-    let (java_version, invocation) =
-        match platform::platform(&state.engine, &id)
-            .await
-            .map_err(api_error)?
-        {
-            Some(platform) => (
-                launch::java_major(&state.engine, &row, &platform.game_version)
-                    .await
-                    .ok(),
-                engine::server::server_command(&state.engine, &id)
-                    .await
-                    .ok()
-                    .map(|command| {
-                        // Shown with the tuned flags, whatever the server's own.
-                        let tuned = server_rows::ServerRow {
-                            jvm_flags: None,
-                            ..row.clone()
-                        };
-                        launch::invocation(&launch::args(
-                            state.servers.paths(),
-                            &tuned,
-                            command.args,
-                        ))
-                    }),
-            ),
-            None => (None, None),
-        };
-    let shared_instance_id = engine::instance::get(&state.engine, &id)
-        .await
-        .map_err(api_error)?
-        .and_then(|instance| instance.shared_instance)
-        .map(|share| share.id);
-    // Best effort: what a push would change, as the share's latest version reads.
-    let shared_instance_needs_update = match &shared_instance_id {
-        Some(_) => engine::instance::get_shared_instance_publish_preview(
-            &state.engine,
-            &id,
-        )
-        .await
-        .ok()
-        .flatten()
-        .is_some_and(|preview| !preview.diffs.is_empty()),
-        None => false,
-    };
-    Ok(Json(ServerSetup {
-        java_version,
-        invocation,
-        shared_instance_id,
-        shared_instance_needs_update,
-        cpus: std::thread::available_parallelism()
-            .map_or(1, |cpus| cpus.get() as u32),
-    }))
 }
 
 #[cfg(test)]

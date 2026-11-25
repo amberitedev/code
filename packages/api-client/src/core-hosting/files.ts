@@ -7,7 +7,7 @@ import type { KyrosFilesV1Module } from '../modules/kyros/files/v1'
 import type { Kyros } from '../modules/kyros/types'
 import { nodeAuthState } from '../state/node-auth'
 import { type Adapter, coreOf } from './adapter'
-import { link, linkUrl, node, serverPath } from './links'
+import { authorize, coreUrl, node, serverPath } from './links'
 
 /** The server whose panel is open: upstream's v0 file methods name none, and go to its node. */
 async function openServer(client: AbstractModrinthClient) {
@@ -92,41 +92,28 @@ export function filesV0(client: AbstractModrinthClient): Adapter<KyrosFilesV0Mod
 	}
 }
 
+/** Downloads go through the App's Core proxy with this device's session. A file's token is its path. */
 export function filesV1(client: AbstractModrinthClient): Adapter<KyrosFilesV1Module> {
-	// `getFileDownloadUrl` is not given the file, so each token keeps the path it was made for.
-	const files = new Map<string, string>()
-	const worldZip = (nodeUrlHost: string, worldId: string) =>
-		serverPath(nodeUrlHost, `/v1/worlds/${encodeURIComponent(worldId)}/files/download-full-zip`)
 	return {
 		async authorizeFileDownload(nodeUrlHost, _worldId, path) {
+			await authorize(client, nodeUrlHost)
+			return { token: path }
+		},
+		getFileDownloadUrl(nodeUrlHost, _worldId, path) {
 			const { serverId } = node(nodeUrlHost)
-			const file = `/instances/${serverId}/files/content?path=${encodeURIComponent(path)}`
-			const made = await link(client, nodeUrlHost, file)
-			files.set(made.token, file)
-			return made
+			return coreUrl(
+				nodeUrlHost,
+				`/instances/${serverId}/files/content?path=${encodeURIComponent(path)}`,
+			)
 		},
-		getFileDownloadUrl(nodeUrlHost, _worldId, token) {
-			const file = files.get(token)
-			if (!file) throw new ModrinthApiError('This download link was used', { statusCode: 401 })
-			files.delete(token)
-			return linkUrl(nodeUrlHost, file, token)
-		},
-		authorizeFullWorldDownload: (nodeUrlHost, worldId) =>
-			link(client, nodeUrlHost, worldZip(nodeUrlHost, worldId)),
-		getFullWorldDownloadUrl: (nodeUrlHost, worldId, token) =>
-			linkUrl(nodeUrlHost, worldZip(nodeUrlHost, worldId), token),
+		authorizeFullWorldDownload: (nodeUrlHost) => authorize(client, nodeUrlHost),
+		getFullWorldDownloadUrl: (nodeUrlHost) =>
+			coreUrl(nodeUrlHost, serverPath(nodeUrlHost, '/download')),
 		async stat(worldId, { path }) {
-			const stat = await (
-				await coreOf(client, worldId)
-			).call(instanceFiles.StatInstanceFile, { params: { id: worldId }, query: { path } })
-			return {
-				name: stat.name,
-				full_path: `/${stat.path}`,
-				size_bytes: stat.size,
-				type: stat.type,
-				mtime: stat.modified,
-				ctime: stat.created,
-			}
+			return (await coreOf(client, worldId)).call(instanceFiles.StatInstanceFile, {
+				params: { id: worldId },
+				query: { path },
+			})
 		},
 		async createZip(worldId, data, onProgress) {
 			await (

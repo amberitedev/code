@@ -24,7 +24,7 @@ use contracts::{
     ApiError, ErrorCode,
     core::{ClientMessage, PowerState, ServerPower, Topic},
 };
-use engine::Event;
+use engine::{Event, LogEvent, LogPayload};
 use tokio::sync::{
     broadcast::{self, error::RecvError},
     mpsc,
@@ -97,8 +97,26 @@ struct Loop {
     _guard: StreamGuard,
     /// Each subscribed topic, with a console subscription's forwarding task.
     topics: HashMap<Topic, Option<Forward>>,
-    /// Where console subscriptions forward their lines, or `Resync` when they fell behind.
-    console: mpsc::Sender<CoreEvent>,
+    /// Where console subscriptions forward their lines.
+    console: mpsc::Sender<Line>,
+}
+
+/// What a console subscription forwards.
+enum Line {
+    Line {
+        server: String,
+        line: String,
+    },
+    /// It fell behind and lost lines.
+    Lagged,
+}
+
+/// A console line as the engine's `log` event, the same as an App instance's.
+fn log_event(server: String, line: String) -> Event {
+    Event::Log(LogPayload {
+        instance_id: server,
+        event: LogEvent::Legacy { message: line },
+    })
 }
 
 impl Loop {
@@ -108,7 +126,7 @@ impl Loop {
         mut changes: broadcast::Receiver<Changed>,
         mut core: broadcast::Receiver<CoreEvent>,
         mut engine: broadcast::Receiver<Event>,
-        mut consoles: mpsc::Receiver<CoreEvent>,
+        mut consoles: mpsc::Receiver<Line>,
     ) {
         let mut recheck = tokio::time::interval(RECHECK_EVERY);
         recheck.tick().await;
@@ -131,7 +149,7 @@ impl Loop {
         changes: &mut broadcast::Receiver<Changed>,
         core: &mut broadcast::Receiver<CoreEvent>,
         engine: &mut broadcast::Receiver<Event>,
-        consoles: &mut mpsc::Receiver<CoreEvent>,
+        consoles: &mut mpsc::Receiver<Line>,
         recheck: &mut tokio::time::Interval,
     ) -> Result<(), Closed> {
         loop {
@@ -156,13 +174,13 @@ impl Loop {
                     Err(RecvError::Lagged(_)) => true,
                     Err(RecvError::Closed) => return Err(Closed),
                 },
-                Some(event) = consoles.recv() => match event {
-                    CoreEvent::Resync => true,
+                Some(line) = consoles.recv() => match line {
+                    Line::Lagged => true,
                     // A line forwarded before its topic ended is dropped.
-                    CoreEvent::Console { ref server, .. }
+                    Line::Line { server, .. }
                         if !self.topics.contains_key(&Topic::Console { id: server.clone() }) => false,
-                    event => {
-                        send(socket, &event).await?;
+                    Line::Line { server, line } => {
+                        send(socket, &log_event(server, line)).await?;
                         false
                     }
                 },
@@ -232,11 +250,7 @@ impl Loop {
                 let path = self.state.servers.paths().console_log(id);
                 let (backlog, lines) = self.state.consoles.subscribe(path, id);
                 for line in backlog {
-                    let line = CoreEvent::Console {
-                        server: id.clone(),
-                        line,
-                    };
-                    send(socket, &line).await?;
+                    send(socket, &log_event(id.clone(), line)).await?;
                 }
                 Some(forward(id.clone(), lines, self.console.clone()))
             }
@@ -259,17 +273,27 @@ impl Loop {
         }
     }
 
-    /// The server's power, as a `Server` subscription starts with.
+    /// The server's power, as a `Server` subscription starts with. A server that does not exist
+    /// has none.
     async fn snapshot(
         &self,
         socket: &mut WebSocket,
         server: &str,
     ) -> Result<(), Closed> {
-        let phase = self.state.servers.phase(server);
-        let power = power_of(&self.state, server, phase)
+        let exists = crate::servers::server_rows::ids(&self.state.db)
             .await
-            .unwrap_or(PowerState::Stopped);
-        send(socket, &power_event(&self.state, server, power).await).await
+            .is_ok_and(|ids| ids.iter().any(|id| id == server));
+        let phase = self.state.servers.phase(server);
+        let Some(power) = power_of(&self.state, server, phase)
+            .await
+            .filter(|_| exists)
+        else {
+            return Ok(());
+        };
+        for event in power_events(&self.state, server, power).await {
+            send(socket, &event).await?;
+        }
+        Ok(())
     }
 
     /// The unfinished install jobs, as an `Installs` subscription starts with.
@@ -293,16 +317,14 @@ impl Loop {
 
     fn wants(&self, event: &CoreEvent) -> bool {
         let topic = match event {
-            CoreEvent::Power { server, .. } => {
+            CoreEvent::PowerState { server, .. }
+            | CoreEvent::Uptime { server, .. } => {
                 Topic::Server { id: server.clone() }
             }
-            CoreEvent::Backup { server, .. } => {
+            CoreEvent::BackupProgress { server, .. } => {
                 Topic::Backups { id: server.clone() }
             }
-            CoreEvent::Console { server, .. } => {
-                Topic::Console { id: server.clone() }
-            }
-            CoreEvent::Ended { .. } | CoreEvent::Resync => return false,
+            CoreEvent::Resync => return false,
         };
         self.topics.contains_key(&topic)
     }
@@ -322,20 +344,20 @@ impl Loop {
     }
 }
 
-/// Pass a console subscription's lines to its socket, or `Resync` when it fell behind.
+/// Pass a console subscription's lines to its socket, and say when it fell behind.
 fn forward(
     server: String,
     mut lines: broadcast::Receiver<String>,
-    out: mpsc::Sender<CoreEvent>,
+    out: mpsc::Sender<Line>,
 ) -> Forward {
     Forward(tokio::spawn(async move {
         loop {
             let event = match lines.recv().await {
-                Ok(line) => CoreEvent::Console {
+                Ok(line) => Line::Line {
                     server: server.clone(),
                     line,
                 },
-                Err(RecvError::Lagged(_)) => CoreEvent::Resync,
+                Err(RecvError::Lagged(_)) => Line::Lagged,
                 Err(RecvError::Closed) => return,
             };
             if out.send(event).await.is_err() {
@@ -487,10 +509,9 @@ async fn announce(state: &CoreState, id: &str, phase: Option<Phase>) -> bool {
     let Some(power) = power_of(state, id, phase).await else {
         return false;
     };
-    let _ = state
-        .backups
-        .events
-        .send(power_event(state, id, power).await);
+    for event in power_events(state, id, power).await {
+        let _ = state.backups.events.send(event);
+    }
     true
 }
 
@@ -519,20 +540,22 @@ async fn power_of(
 
 /// `power`, and for a running server how long its run has been up, which the App's uptime counts
 /// on from.
-async fn power_event(
+async fn power_events(
     state: &CoreState,
     id: &str,
     power: PowerState,
-) -> CoreEvent {
+) -> Vec<CoreEvent> {
     let uptime = match power {
         PowerState::Running => run_started_at(&state.db, id)
             .await
             .map(|started| u64::try_from(now() - started).unwrap_or(0)),
         _ => None,
     };
-    CoreEvent::Power {
-        server: id.to_owned(),
+    let server = id.to_owned();
+    let mut events = vec![CoreEvent::PowerState {
+        server: server.clone(),
         state: power,
-        uptime,
-    }
+    }];
+    events.extend(uptime.map(|uptime| CoreEvent::Uptime { server, uptime }));
+    events
 }

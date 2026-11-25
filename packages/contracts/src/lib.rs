@@ -30,7 +30,7 @@ pub use instance::{ModLoader, ReleaseChannel};
 pub use side::Side;
 
 /// Bumped only when old and new sides can no longer talk to each other. Releases do not touch it.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]

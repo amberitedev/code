@@ -52,7 +52,7 @@ pub async fn status(client: &Client) -> Result<Output> {
         update: UpdateStatus,
         machine: Machine,
         pairing: PairingStatus,
-        servers: Vec<contracts::core::CoreServer>,
+        servers: Vec<contracts::core::Server>,
     }
     let health = call::<CheckHealth>(client, &(), &(), Empty).await?;
     let update = call::<GetUpdate>(client, &(), &(), Empty).await?;
@@ -113,7 +113,7 @@ fn pairing_text(status: &PairingStatus) -> String {
         _ if status.paired => "This Core is paired".into(),
         (Some(code), Some(expires_at)) => format!(
             "This Core is not paired yet.\n{}\nFor a new code: copal pair",
-            pairing::instructions(code, expires_at)
+            pairing::instructions(code, expires_at.timestamp())
         ),
         _ => "This Core is not paired yet and is still getting a code from Amberite. copal logs says why.".into(),
     }

@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use super::social::{Never, User, UserRef};
@@ -93,11 +94,11 @@ pub enum LoginAnswer {
 pub struct SessionDetails {
     pub id: String,
     pub user_id: String,
-    pub created: String,
-    pub last_login: String,
-    pub expires: String,
+    pub created: DateTime<Utc>,
+    pub last_login: DateTime<Utc>,
+    pub expires: DateTime<Utc>,
     /// Until when [`RefreshSession`] can rotate it.
-    pub refresh_expires: String,
+    pub refresh_expires: DateTime<Utc>,
     pub user_agent: String,
     pub ip: String,
     pub os: Option<Never>,

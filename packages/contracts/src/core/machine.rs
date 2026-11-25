@@ -1,5 +1,6 @@
 //! The Core itself: updates, storage for the pool, the EULA, its log, and the machine it runs on.
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -17,8 +18,7 @@ pub struct UpdateStatus {
     pub latest: Option<String>,
     /// `latest` is newer than the running version.
     pub update_available: bool,
-    /// Unix seconds.
-    pub checked_at: Option<i64>,
+    pub checked_at: Option<DateTime<Utc>>,
     /// Why the last check failed.
     pub check_error: Option<String>,
     /// The version a rollback goes back to.
@@ -134,8 +134,8 @@ pub struct StorageStatus {
 pub struct Eula {
     /// The EULA's address.
     pub url: String,
-    /// Unix seconds. Null until the owner accepts it.
-    pub accepted_at: Option<i64>,
+    /// Null until the owner accepts it.
+    pub accepted_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -158,6 +158,8 @@ pub struct CoreLogs {
 pub struct Machine {
     /// This machine's memory. Null when the OS does not say.
     pub memory_mb: Option<u64>,
+    /// This machine's CPU threads.
+    pub cpus: u32,
     /// The memory every server together may use.
     pub assigned_mb: i64,
     /// Set when the servers together may use more than the machine has.
@@ -179,8 +181,7 @@ pub struct ReachabilityReport {
     pub found: Vec<String>,
     /// Every step of the fix, `next_step` first.
     pub fix: Vec<String>,
-    /// Unix seconds.
-    pub checked_at: i64,
+    pub checked_at: DateTime<Utc>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

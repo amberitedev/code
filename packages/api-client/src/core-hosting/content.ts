@@ -15,6 +15,7 @@ import type { ArchonContentV1Module } from '../modules/archon/content/v1'
 import type { Archon } from '../modules/archon/types'
 import type { UploadHandle, UploadProgress } from '../types/upload'
 import { type Adapter, coreOf } from './adapter'
+import { loader } from './servers-v0'
 
 declare module '../modules/archon/content/v1' {
 	interface ArchonContentV1Module {
@@ -71,11 +72,13 @@ async function writeProperties(
 	given?: Archon.Content.v1.PropertiesFields | null,
 ) {
 	if (!given) return
-	const changes: Record<string, string | null> = {}
-	for (const [field, value] of Object.entries(given.known))
-		if (typeof value === 'string') changes[field.replace(/_/g, '-')] = value
-	Object.assign(changes, given.custom)
-	await api.call(core.ChangeProperties, { params: { id: serverId }, body: { properties: changes } })
+	const known = Object.fromEntries(
+		Object.entries(given.known).filter(([, value]) => typeof value === 'string'),
+	)
+	await api.call(core.ChangeProperties, {
+		params: { id: serverId },
+		body: { known, custom: given.custom },
+	})
 }
 
 /** An item of the engine's content list, from its pack or added. */
@@ -262,12 +265,12 @@ export function content(client: AbstractModrinthClient): Adapter<ArchonContentV1
 							options?.needs_side_type_review !== true,
 					) ?? null
 			return {
-				modloader: server.loader,
+				modloader: server.loader && server.loader.toLowerCase(),
 				modloader_version: server.loader_version,
-				game_version: server.game_version,
+				game_version: server.mc_version,
 				update_channel: server.update_channel,
 				modpack: pack && modpack(pack),
-				installing: server.installing ? 'modpack' : undefined,
+				installing: server.status === 'installing' ? 'modpack' : undefined,
 				files_need_side_type_review: 0,
 				addons,
 			}
@@ -301,11 +304,8 @@ export function content(client: AbstractModrinthClient): Adapter<ArchonContentV1
 				},
 			})
 		},
-		async completeSideTypeReview(serverId) {
-			await (
-				await coreOf(client, serverId)
-			).call(instanceContent.CompleteSideReview, params(serverId))
-		},
+		// A Core never guesses sides, so it never asks for a review.
+		async completeSideTypeReview() {},
 		async installContent(serverId, _worldId, request) {
 			const api = await coreOf(client, serverId)
 			switch (request.content_variant) {
@@ -314,7 +314,7 @@ export function content(client: AbstractModrinthClient): Adapter<ArchonContentV1
 					await api.call(core.InstallLoader, {
 						...params(serverId),
 						body: {
-							loader: request.loader === 'neo_forge' ? 'neoforge' : request.loader,
+							loader: loader(request.loader),
 							loader_version: request.version || null,
 							game_version: request.game_version ?? '',
 						},
@@ -336,7 +336,6 @@ export function content(client: AbstractModrinthClient): Adapter<ArchonContentV1
 						body: {
 							instance: request.instance,
 							shared_instance_id: request.shared_instance_id,
-							ticket: request.ticket,
 							restart: request.restart ?? false,
 						},
 					})
@@ -406,7 +405,7 @@ export function content(client: AbstractModrinthClient): Adapter<ArchonContentV1
 				shared_instance_id: preview.sharedInstanceId,
 				latest_version: preview.latestVersion,
 				has_changes: hasChanges,
-				requires_restart: hasChanges && server.power === 'running',
+				requires_restart: hasChanges && server.power_state === 'running',
 				diffs: preview.diffs,
 			}
 		},

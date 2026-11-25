@@ -4,12 +4,14 @@
 //! A dangerous route also needs a fresh ticket in the `X-Amberite-Ticket` header.
 
 mod access;
+mod backups;
 mod events;
 mod hosting;
 mod machine;
 mod servers;
 
 pub use access::*;
+pub use backups::*;
 pub use events::*;
 pub use hosting::*;
 pub use machine::*;
@@ -44,22 +46,6 @@ pub struct SessionId {
     pub id: String,
 }
 
-/// A server and its world, in upstream's hosting paths. A server has the one world `wid` names.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
-pub struct WorldRef {
-    pub id: String,
-    pub wid: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
-pub struct WorldBackupRef {
-    pub id: String,
-    pub wid: String,
-    pub bid: String,
-}
-
 crate::endpoints! {
     /// A Core's own routes.
     group core;
@@ -77,10 +63,8 @@ crate::endpoints! {
     SignOut: Delete "/sessions/current", Session, (), (), Empty => Empty;
     /// End another device's session.
     RevokeSession: Delete "/sessions/{id}", Session, SessionId, (), Empty => Empty, dangerous;
-    /// A link for a download that cannot send the session, such as a native save.
-    CreateDownloadLink: Post "/links", Session, (), (), Json<NewDownloadLink> => Json<DownloadLink>;
-    /// The activity log, newest first.
-    ListActivity: Get "/activity", Session, (), ActivityQuery, Empty => Json<ActivityPage>;
+    /// The activity log, filtered and paged as the query asks.
+    ListActivity: Get "/activity", Session, (), ActivityQuery, Empty => Json<ActionLogResponse>;
     /// Whether this Core is paired, and the code it shows while it is not.
     GetPairing: Get "/pairing", Session, (), (), Empty => Json<PairingStatus>;
     /// Drop the code shown and get another, within 20 seconds, while unpaired.
@@ -112,11 +96,11 @@ crate::endpoints! {
     /// The machine the Core runs on.
     GetMachine: Get "/machine", Session, (), (), Empty => Json<Machine>;
     /// Every server on this Core.
-    ListServers: Get "/servers", Session, (), (), Empty => Json<Vec<CoreServer>>;
+    ListServers: Get "/servers", Session, (), (), Empty => Json<Vec<Server>>;
     /// An empty server, to install a loader or pack on.
     CreateServer: Post "/servers", Session, (), (), Json<NewServer> => Json<ServerId>;
     /// One server.
-    GetServer: Get "/servers/{id}", Session, ServerId, (), Empty => Json<CoreServer>;
+    GetServer: Get "/servers/{id}", Session, ServerId, (), Empty => Json<Server>;
     /// Rename a server or change its update channel.
     ChangeServer: Patch "/servers/{id}", Session, ServerId, (), Json<ServerUpdate> => Empty;
     /// A stopped server, with its world, files and backups.
@@ -134,24 +118,24 @@ crate::endpoints! {
     /// on and its own share goes. A stopped server installs it now; a running one when it next
     /// stops.
     FollowInstance: Post "/servers/{id}/follow", Session, ServerId, (), Json<InstanceFollow> => Empty;
-    /// How the server runs: its command, Java and shared instance.
-    GetSetup: Get "/servers/{id}/setup", Session, ServerId, (), Empty => Json<ServerSetup>;
+    /// How the server starts: its Java and its command.
+    GetStartup: Get "/servers/{id}/startup", Session, ServerId, (), Empty => Json<RuntimeOptions>;
     /// The managed Java the server runs, from its next start.
-    SetJavaVersion: Put "/servers/{id}/java-version", Session, ServerId, (), Json<JavaMajor> => Empty;
+    ChangeStartup: Patch "/servers/{id}/startup", Session, ServerId, (), Json<PatchRuntimeOptions> => Empty;
     /// The server's `server.properties`.
-    GetProperties: Get "/servers/{id}/properties", Session, ServerId, (), Empty => Json<ServerProperties>;
+    GetProperties: Get "/servers/{id}/properties", Session, ServerId, (), Empty => Json<PropertiesFields>;
     /// Answers with the file as it is now.
-    ChangeProperties: Patch "/servers/{id}/properties", Session, ServerId, (), Json<PropertiesUpdate> => Json<ServerProperties>;
-    /// The server's backups, their schedule, and the operations queued on them.
-    ListBackups: Get "/servers/{id}/backups", Session, ServerId, (), Empty => Json<ServerBackups>;
+    ChangeProperties: Patch "/servers/{id}/properties", Session, ServerId, (), Json<PatchPropertiesFields> => Json<PropertiesFields>;
+    /// The server's backups, their options, and the operations queued on them.
+    ListBackups: Get "/servers/{id}/backups", Session, ServerId, (), Empty => Json<BackupsQueue>;
     /// Back up the server as it is, hot when it runs, into a free manual slot.
-    CreateBackup: Post "/servers/{id}/backups", Session, ServerId, (), Json<NewBackup> => Json<CreatedBackup>;
-    /// Deleting the excess scheduled backups needs the ticket.
-    ChangeBackupSchedule: Patch "/servers/{id}/backups/schedule", Session, ServerId, (), Json<ScheduleUpdate> => Json<ScheduleChange>;
+    CreateBackup: Post "/servers/{id}/backups", Session, ServerId, (), Json<BackupRequest> => Json<PostBackupResponse>;
+    /// Deleting the excess scheduled backups (`ar`) needs the ticket.
+    ChangeBackupOptions: Patch "/servers/{id}/backups/options", Session, ServerId, RotationAck, Json<PatchBackupOptions> => Json<PatchBackupOptionsResponse>;
     /// Delete several backups.
-    DeleteBackups: Post "/servers/{id}/backups/delete", Session, ServerId, (), Json<BackupIds> => Empty, dangerous;
+    DeleteBackups: Post "/servers/{id}/backups/delete", Session, ServerId, (), Json<DeleteManyBackupRequest> => Empty, dangerous;
     /// Rename a backup.
-    RenameBackup: Patch "/servers/{id}/backups/{backup_id}", Session, BackupRef, (), Json<BackupUpdate> => Empty;
+    RenameBackup: Patch "/servers/{id}/backups/{backup_id}", Session, BackupRef, (), Json<PatchBackup> => Empty;
     /// Delete one backup.
     DeleteBackup: Delete "/servers/{id}/backups/{backup_id}", Session, BackupRef, (), Empty => Empty, dangerous;
     /// Queue a restore over the stopped server's world, after a backup of it.
@@ -179,12 +163,12 @@ crate::endpoints! {
     /// Check a running server's port again, answering once checked.
     CheckReachability: Post "/servers/{id}/reachability", Session, ServerId, (), Empty => Json<ServerInsight>;
 
-    /// A backup as a zip, streamed. A native save asks for a link first ([`CreateDownloadLink`]).
-    DownloadBackup: Get "/servers/{id}/v1/worlds/{wid}/backups/{bid}/download", Session, WorldBackupRef, (), Empty => Stream;
+    /// A backup as a zip, streamed.
+    DownloadBackup: Get "/servers/{id}/backups/{backup_id}/download", Session, BackupRef, (), Empty => Stream;
     /// The server's files as a zip, streamed.
-    DownloadWorld: Get "/servers/{id}/v1/worlds/{wid}/files/download-full-zip", Session, WorldRef, (), Empty => Stream;
+    DownloadWorld: Get "/servers/{id}/download", Session, ServerId, (), Empty => Stream;
     /// The server's content as an `.mrpack`: its content folders and `config/`.
-    ExportModpack: Get "/servers/{id}/v1/worlds/{wid}/content/export-mrpack", Session, WorldRef, (), Empty => Stream;
+    ExportModpack: Get "/servers/{id}/export.mrpack", Session, ServerId, (), Empty => Stream;
 }
 
 #[cfg(test)]
@@ -196,13 +180,12 @@ pub(crate) fn ts() -> String {
         Health::decl(&cfg),
         ServerId::decl(&cfg),
         SessionId::decl(&cfg),
-        WorldRef::decl(&cfg),
-        WorldBackupRef::decl(&cfg),
     ]
     .into_iter()
     .chain(access::ts_types())
     .chain(events::ts_types())
     .chain(servers::ts_types())
+    .chain(backups::ts_types())
     .chain(machine::ts_types())
     .chain(hosting::ts_types())
     .map(|declaration| format!("\nexport {declaration}\n"))

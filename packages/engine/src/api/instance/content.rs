@@ -360,16 +360,6 @@ pub async fn set_content_sides_unlocked(
     save_sides(state, &metadata, &folder, &path, &sides).await
 }
 
-/// Nothing to do: a server engine never guesses sides, so it never asks for a review. Kept until
-/// `core-hosting/content.ts`, its only caller, goes.
-pub async fn complete_side_review(
-    state: &Engine,
-    instance_id: &str,
-) -> crate::Result<()> {
-    server_only(state)?;
-    instance_metadata(state, instance_id).await.map(|_| ())
-}
-
 /// Install the pack the server follows again, placing every file of it that is missing or
 /// changed.
 pub async fn repair_content(

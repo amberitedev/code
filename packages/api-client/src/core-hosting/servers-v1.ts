@@ -1,4 +1,4 @@
-import { core, type Performance, type Restarts } from '@amberite/contracts'
+import { core, instanceSharing, type Performance, type Restarts } from '@amberite/contracts'
 
 import type { AbstractModrinthClient } from '../core/abstract-client'
 import type { ArchonServersV1Module } from '../modules/archon/servers/v1'
@@ -22,17 +22,25 @@ export function serversV1(client: AbstractModrinthClient): Adapter<ArchonServers
 	async function get(serverId: string): Promise<Archon.Servers.v1.ServerFull> {
 		const routes = await coreOf(client, serverId)
 		const params = { params: { id: serverId } }
-		const [server, setup, base] = await Promise.all([
+		const [server, startup, machine, base] = await Promise.all([
 			routes.call(core.GetServer, params),
-			routes.call(core.GetSetup, params),
+			routes.call(core.GetStartup, params),
+			routes.call(core.GetMachine),
 			client.cores.serverUrl(serverId),
 		])
+		// Best effort: a push would change something.
+		const preview =
+			server.shared_instance_id === null
+				? null
+				: await routes
+						.call(instanceSharing.GetSharedInstancePublishPreview, params)
+						.catch(() => null)
 		const host = new URL(base).host
 		return {
-			id: server.id,
+			id: server.server_id,
 			name: server.name,
 			subdomain: '',
-			specs: { cpu: setup.cpus, memory_mb: server.memory_mb, storage_mb: 0, swap_mb: 0 },
+			specs: { cpu: machine.cpus, memory_mb: server.memory_mb, storage_mb: 0, swap_mb: 0 },
 			sftp_username: '',
 			sftp_password: '',
 			tags: [],
@@ -43,31 +51,31 @@ export function serversV1(client: AbstractModrinthClient): Adapter<ArchonServers
 					region: '',
 					region_should_be_user_displayed: false,
 					hostname: host,
-					url_host: coreNodeUrl(base, server.id),
+					url_host: coreNodeUrl(base, server.server_id),
 					is_decommissioned_node: false,
 				},
 			},
 			icon: null,
 			worlds: [
 				{
-					id: server.id,
+					id: server.server_id,
 					name: server.name,
 					update_channel: server.update_channel,
-					created_at: new Date(server.created_at * 1000).toISOString(),
+					created_at: server.created_at,
 					is_active: true,
 					download_method: { method_type: 'direct_node_download' },
 					backups: [],
 					content:
-						server.loader && server.game_version
+						server.loader && server.mc_version
 							? {
-									shared_instance_id: setup.shared_instance_id,
-									shared_instance_needs_update: setup.shared_instance_needs_update,
-									modloader: server.loader,
+									shared_instance_id: server.shared_instance_id,
+									shared_instance_needs_update: (preview?.diffs.length ?? 0) > 0,
+									modloader: server.loader.toLowerCase(),
 									modloader_version: server.loader_version ?? '',
-									game_version: server.game_version,
-									java_version: setup.java_version,
-									invocation: setup.invocation,
-									original_invocation: setup.invocation,
+									game_version: server.mc_version,
+									java_version: startup.java_version,
+									invocation: startup.original_invocation,
+									original_invocation: startup.original_invocation,
 								}
 							: null,
 					readiness: { data_synchronized_fetched: true },

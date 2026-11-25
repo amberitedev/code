@@ -28,8 +28,9 @@ pub use api::*;
 pub use error::*;
 pub use event::{
     Event, EventSink, InstancePayload, InstancePayloadType, LoadingBar,
-    LoadingBarType, ProcessPayload, ProcessPayloadType, emit::emit_instance,
-    emit::emit_loading, emit::emit_warning, emit::init_loading,
+    LoadingBarType, LogEvent, LogPayload, ProcessPayload, ProcessPayloadType,
+    emit::emit_instance, emit::emit_loading, emit::emit_warning,
+    emit::init_loading,
 };
 pub use launcher::server;
 pub use launcher::{

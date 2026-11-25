@@ -253,7 +253,7 @@ impl Updater {
                 latest > &version && !failed_before(latest, failed.as_deref())
             }),
             latest: checked.latest.map(|latest| latest.to_string()),
-            checked_at: checked.at,
+            checked_at: checked.at.map(crate::access::at),
             check_error: checked.error,
             previous: state.as_ref().and_then(|state| state.previous.clone()),
             failed,

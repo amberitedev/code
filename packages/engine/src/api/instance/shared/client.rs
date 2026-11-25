@@ -336,20 +336,14 @@ pub(super) async fn get_remote_users(
 fn shared_instance_user(user: InstanceUser) -> SharedInstanceUser {
     SharedInstanceUser {
         id: user.id,
-        joined_at: user.joined_at.as_deref().and_then(timestamp),
+        joined_at: user.joined_at,
         join_type: match user.join_type {
             JoinType::Owner => SharedInstanceJoinType::Owner,
             JoinType::Invite => SharedInstanceJoinType::Invite,
             JoinType::Link => SharedInstanceJoinType::Link,
         },
-        last_played: user.last_played.as_deref().and_then(timestamp),
+        last_played: user.last_played,
     }
-}
-
-fn timestamp(text: &str) -> Option<DateTime<Utc>> {
-    DateTime::parse_from_rfc3339(text)
-        .ok()
-        .map(|time| time.with_timezone(&Utc))
 }
 
 pub(super) async fn get_latest_remote_version(
@@ -484,13 +478,11 @@ pub(super) async fn get_remote_invites(
     let links = call::<ListInvites>(state, shared_instance_id, Empty).await?;
     Ok(links
         .into_iter()
-        .filter_map(|link| {
-            Some(SharedInstanceInvite {
-                expiration: timestamp(&link.expiration)?,
-                id: link.id,
-                max_uses: link.max_uses as i32,
-                uses: link.uses as i32,
-            })
+        .map(|link| SharedInstanceInvite {
+            expiration: link.expiration,
+            id: link.id,
+            max_uses: link.max_uses as i32,
+            uses: link.uses as i32,
         })
         .collect())
 }

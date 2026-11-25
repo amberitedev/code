@@ -93,14 +93,16 @@ pub struct ExtractDryRunResult {
 
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+/// Kyros's `FileStatResponse`.
 pub struct InstanceFileStat {
     pub name: String,
-    pub path: String,
-    pub size: u64,
+    /// From the instance's folder, with a leading `/`.
+    pub full_path: String,
+    pub size_bytes: u64,
     #[serde(rename = "type")]
     pub kind: InstanceFileKind,
-    pub modified: DateTime<Utc>,
-    pub created: DateTime<Utc>,
+    pub mtime: DateTime<Utc>,
+    pub ctime: DateTime<Utc>,
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
@@ -162,7 +164,7 @@ pub enum InstanceUploadStatus {
     Finalized,
 }
 
-/// Times are Unix seconds.
+/// Kyros's upload session. Times are Unix seconds, numbers as Kyros sends them.
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct InstanceUpload {
