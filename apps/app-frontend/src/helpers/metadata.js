@@ -1,4 +1,4 @@
-import { metadata } from '@modrinth/api-client'
+import { metadata } from '@amberite/contracts/engine'
 
 import { apiClient } from '@/platform/modrinth-client'
 
