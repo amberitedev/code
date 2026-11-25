@@ -1,0 +1,13 @@
+{
+	"version": "4.1.10",
+	"results": [
+		[
+			":src/composables/server-sharing/invite-link.test.ts",
+			{ "duration": 5.804700000000139, "failed": false }
+		],
+		[
+			":src/composables/server-sharing/shared-instance.test.ts",
+			{ "duration": 14.736100000000079, "failed": false }
+		]
+	]
+}

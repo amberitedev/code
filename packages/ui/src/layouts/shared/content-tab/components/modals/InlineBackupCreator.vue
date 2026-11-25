@@ -1,6 +1,6 @@
 <template>
 	<div class="flex flex-col gap-3">
-		<span class="text-primary">
+		<span v-if="backup.available" class="text-primary">
 			{{
 				formatMessage(messages.warningBody, {
 					type: formatMessage(backup.isServer ? messages.worldLabel : messages.instanceLabel),

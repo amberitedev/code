@@ -7,8 +7,8 @@
 			body: formatMessage(commonMessages.shareRequiresUnlinkBody),
 		}"
 		:backup-tip="backupTip"
-		:action-disabled="running"
-		:action-disabled-tooltip="running ? formatMessage(messages.stopFirst) : undefined"
+		:action-disabled="!!blocked"
+		:action-disabled-tooltip="blocked ?? undefined"
 	/>
 </template>
 
@@ -28,9 +28,17 @@ const messages = defineMessages({
 		defaultMessage: 'Stop the server to unlink its modpack',
 	},
 })
-// The Core leaves a running server's content as it is. Setup has no server context and no running server.
+// The Core refuses to unlink while the server is busy or live. Setup has no server context: the
+// invite waits for the install there.
 const serverContext = injectModrinthServerContext(null)
-const running = computed(() => !!serverContext?.isServerRunning.value)
+const blocked = computed(() => {
+	if (!serverContext) return null
+	const busy = serverContext.busyReasons.value[0]
+	if (busy) return formatMessage(busy.reason)
+	return ['stopped', 'crashed'].includes(serverContext.powerState.value)
+		? null
+		: formatMessage(messages.stopFirst)
+})
 const modal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 const backupTip = ref<string>()
 

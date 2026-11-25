@@ -90,9 +90,9 @@ export async function createServerInviteLink(
 	const core = await client.cores.serverRoutes(serverId)
 	const params = { id: serverId }
 	const server = options.afterInstall
-		? await installedServer(client, core, serverId)
+		? await installedServer(client, core, serverId, isCurrent)
 		: await core.call(coreRoutes.GetServer, { params })
-	if (!isCurrent()) return null
+	if (!server || !isCurrent()) return null
 	let instanceId = server.shared_instance_id
 	if (!instanceId) {
 		await unlinkBeforeShare(core, server, options.shareUnlink)
@@ -111,12 +111,16 @@ export async function createServerInviteLink(
 	return inviteLinkUrl(siteUrl, inviteId)
 }
 
-/** The server once it no longer installs, read again on each change its Core announces. */
+/**
+ * The server once it no longer installs, read again on each change its Core announces. `null` once
+ * `isCurrent` reports the caller moved on.
+ */
 async function installedServer(
 	client: AbstractModrinthClient,
 	core: ContractClient,
 	serverId: string,
-): Promise<Server> {
+	isCurrent: () => boolean,
+): Promise<Server | null> {
 	const events = client.coreEvents((await client.cores.coreOf(serverId)).id)
 	let changed = () => {}
 	const stops = [
@@ -134,6 +138,7 @@ async function installedServer(
 			const server = await core.call(coreRoutes.GetServer, { params: { id: serverId } })
 			if (server.status !== 'installing') return server
 			await next
+			if (!isCurrent()) return null
 		}
 	} finally {
 		for (const stop of stops) stop()
