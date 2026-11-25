@@ -729,7 +729,16 @@ async fn content_changes_wait_for_a_stopped_server_and_a_pack_update_backs_up_fi
         )
         .await;
     assert_ne!(error["error"], "already_running");
+    // Core's watch adopts the lock as a server it did not start, and lets it go a tick after the
+    // lock drops: the server has stopped once Core sees it so.
+    let servers = &core.state.servers;
+    servers
+        .until(|servers| servers.phase(&server).is_some())
+        .await;
     drop(shim);
+    servers
+        .until(|servers| servers.phase(&server).is_none())
+        .await;
 
     let (status, _) = core
         .call(Method::POST, &unlink, Some(&owner), None, None)
