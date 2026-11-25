@@ -1,5 +1,6 @@
 import { installs } from '@amberite/contracts/engine'
 import type { ContractClient } from '@modrinth/api-client'
+import { shareHistoryKey } from '@modrinth/ui'
 import { useMutation, useQuery } from '@tanstack/vue-query'
 import { computed, type MaybeRefOrGetter, toValue } from 'vue'
 
@@ -39,7 +40,7 @@ export function useShareHistory(source: MaybeRefOrGetter<ShareHistorySource | nu
 		return from
 	}
 	const history = useQuery({
-		queryKey: computed(() => ['share-history', toValue(source)?.instanceId] as const),
+		queryKey: computed(() => shareHistoryKey(toValue(source)?.instanceId ?? '')),
 		queryFn: () => {
 			const { client, instanceId } = call()
 			return client.call(installs.GetSharedInstanceHistory, { params: { id: instanceId } })

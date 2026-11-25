@@ -12,7 +12,7 @@ import { computed, onScopeDispose, type Ref, ref, watch } from 'vue'
 import type ServerSharePushModal from '#ui/components/servers/sharing/ServerSharePushModal.vue'
 import { defineMessages, useVIntl } from '#ui/composables/i18n'
 import { useServerPermissions } from '#ui/composables/server-permissions'
-import { serverKeys } from '#ui/composables/server-queries'
+import { serverKeys, shareHistoryKey } from '#ui/composables/server-queries'
 import { injectAuth, injectModrinthServerContext, injectNotificationManager } from '#ui/providers'
 
 import { serverShareableFilesQueryOptions, serverShareDiffQueryOptions } from './query-options'
@@ -144,7 +144,7 @@ export function useServerShareReview<Action extends string = 'push'>(options?: {
 		await Promise.all([
 			queryClient.invalidateQueries({ queryKey: serverKeys.detail(serverId) }),
 			queryClient.invalidateQueries({ queryKey: serverKeys.shareDiff(serverId) }),
-			queryClient.invalidateQueries({ queryKey: serverKeys.shareHistory(serverId) }),
+			queryClient.invalidateQueries({ queryKey: shareHistoryKey(serverId) }),
 		])
 		return shared
 	}

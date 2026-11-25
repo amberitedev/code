@@ -9,7 +9,6 @@ import {
 	sharedStorageKey,
 	useDeleteVersion,
 	useSharedStorage,
-	versionHistoryKey,
 } from '@/features/settings/sharing/use-shared-storage'
 import ShareHistory from '@/features/share-history/share-history.vue'
 import { usePlayInstanceServer } from '@/features/share-history/use-play-instance-server'
@@ -51,7 +50,6 @@ watch(
 	() => instance.value.shared_instance?.latest_version,
 	() => {
 		void history.refetch()
-		queryClient.invalidateQueries({ queryKey: versionHistoryKey(instance.value.id) })
 		queryClient.invalidateQueries({ queryKey: sharedHistorySettingsKey })
 		queryClient.invalidateQueries({ queryKey: sharedStorageKey })
 	},

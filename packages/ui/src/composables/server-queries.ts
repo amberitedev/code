@@ -8,7 +8,6 @@ export const serverKeys = {
 	startup: (serverId: string) => ['servers', 'startup', 'v1', serverId] as const,
 	shareDiff: (serverId: string, ...scope: [worldId?: string, userId?: string]) =>
 		['servers', 'share-diff', serverId, ...scope] as const,
-	shareHistory: (serverId: string) => ['servers', 'share-history', serverId] as const,
 	/** The listings of the server's files, by folder. */
 	files: (serverId: string) => ['servers', 'files', serverId] as const,
 	shareFiles: (serverId: string, worldId: string, userId: string | undefined) =>
@@ -16,6 +15,9 @@ export const serverKeys = {
 	sharingUpdateTarget: (userId: string, serverId: string | undefined) =>
 		['servers', 'sharing-update-target', userId, serverId ?? null] as const,
 }
+
+/** The share history kept with an instance on this computer, or with a server on its Core. */
+export const shareHistoryKey = (instanceId: string) => ['share-history', instanceId] as const
 
 /** Query keys for shared instance data. Shorter forms are prefixes of longer ones for invalidation. */
 export const sharedInstanceKeys = {
