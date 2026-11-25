@@ -2,10 +2,10 @@
 //! (`SharedInstanceUpdateDiff`), which the content diff list reads.
 
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
 /// One change of a share diff, named for people.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct SharedInstanceUpdateDiff {
     #[serde(rename = "type")]
@@ -17,18 +17,22 @@ pub struct SharedInstanceUpdateDiff {
     pub current_version_name: Option<String>,
     pub new_version_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
+    #[cfg_attr(feature = "export-ts", ts(optional))]
     pub config_file_count: Option<usize>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    #[ts(optional, as = "Option<Vec<String>>")]
+    #[cfg_attr(
+        feature = "export-ts",
+        ts(optional, as = "Option<Vec<String>>")
+    )]
     pub config_file_names: Vec<String>,
     /// A removal of something the owner had turned off, which members never ran.
     #[serde(default, skip_serializing_if = "is_false")]
-    #[ts(optional, as = "Option<bool>")]
+    #[cfg_attr(feature = "export-ts", ts(optional, as = "Option<bool>"))]
     pub disabled: bool,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum SharedInstanceUpdateDiffType {
     Added,

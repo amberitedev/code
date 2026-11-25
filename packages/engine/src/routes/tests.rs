@@ -17,7 +17,7 @@ use crate::{
     install::{InstallJobStatus, InstallRequest, model::InstallJobState},
     state::{
         CacheValue, CachedEntry,
-        tests::{add_instance, engine},
+        tests::{add_instance, engine, link_dir},
     },
 };
 
@@ -1003,24 +1003,6 @@ async fn a_servers_file_routes_follow_no_link() {
     assert_eq!(
         std::fs::read_to_string(outside.path().join("secret.txt")).unwrap(),
         "secret"
-    );
-}
-
-/// Make `link` a link to the folder `target`: a symlink on Unix, a junction on Windows, which
-/// needs no privilege.
-fn link_dir(target: &std::path::Path, link: &std::path::Path) {
-    #[cfg(unix)]
-    std::os::unix::fs::symlink(target, link).unwrap();
-    #[cfg(windows)]
-    assert!(
-        std::process::Command::new("cmd")
-            .args(["/C", "mklink", "/J"])
-            .arg(link)
-            .arg(target)
-            .output()
-            .unwrap()
-            .status
-            .success()
     );
 }
 

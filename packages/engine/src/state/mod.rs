@@ -459,7 +459,7 @@ impl Engine {
                 fetch_semaphore,
                 io_semaphore,
                 api_semaphore,
-                installs: Arc::new(Installs::new()),
+                installs: Arc::new(Installs::new(side)),
                 instance_locks: InstanceLocks::default(),
                 publish_reports: Default::default(),
                 uploads: Default::default(),
@@ -640,6 +640,24 @@ pub(crate) mod tests {
 
     pub(crate) async fn engine(dir: PathBuf) -> Arc<Engine> {
         Engine::new(config(dir)).await.unwrap()
+    }
+
+    /// Make `link` a link to the folder `target`: a symlink on Unix, a junction on Windows, which
+    /// needs no privilege.
+    pub(crate) fn link_dir(target: &Path, link: &Path) {
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(target, link).unwrap();
+        #[cfg(windows)]
+        assert!(
+            std::process::Command::new("cmd")
+                .args(["/C", "mklink", "/J"])
+                .arg(link)
+                .arg(target)
+                .output()
+                .unwrap()
+                .status
+                .success()
+        );
     }
 
     pub(super) fn write(path: &Path) {

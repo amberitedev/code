@@ -43,7 +43,10 @@ pub struct FileWatcher {
 /// folder's own watch sees them appear.
 struct Watching {
     debouncer: Debouncer<WriteOnlyWatcher>,
-    roots: HashSet<PathBuf>,
+    /// Each instance's folder as watched, by that spelling and its canonical one: a platform can
+    /// name events by the real path (FSEvents gives `/private/var` for `/var`, or a linked data
+    /// folder's target).
+    roots: HashMap<PathBuf, PathBuf>,
     folders: HashSet<PathBuf>,
 }
 
@@ -223,7 +226,7 @@ pub(crate) fn init_watcher(
             side,
             watcher: RwLock::new(Watching {
                 debouncer: file_watcher,
-                roots: HashSet::new(),
+                roots: HashMap::new(),
                 folders: HashSet::new(),
             }),
             instance_ids: RwLock::new(HashMap::new()),
@@ -469,7 +472,12 @@ pub(crate) async fn watch_instance_folder(
             "Failed to watch root instance directory for watcher {full_instance_path:?}: {e}"
         );
     }
-    watching.roots.insert(full_instance_path.clone());
+    if let Ok(canonical) = full_instance_path.canonicalize() {
+        watching.roots.insert(canonical, full_instance_path.clone());
+    }
+    watching
+        .roots
+        .insert(full_instance_path.clone(), full_instance_path.clone());
     for sub_path in watched_subpaths(watcher.side) {
         watching.attach(&full_instance_path.join(sub_path));
     }
@@ -487,20 +495,19 @@ async fn attach_or_drop(watcher: &FileWatcher, events: &[DebouncedEvent]) {
     let mut watching = watcher.watcher.write().await;
     let folders: Vec<_> = events
         .iter()
-        .map(|event| event.path.as_path())
-        .filter(|path| {
-            path.parent()
-                .is_some_and(|parent| watching.roots.contains(parent))
-                && path.file_name().is_some_and(|name| {
-                    watched_subpaths(watcher.side).any(|sub| name == sub)
-                })
+        .filter_map(|event| {
+            let root = watching.roots.get(event.path.parent()?)?;
+            let name = event.path.file_name()?;
+            watched_subpaths(watcher.side)
+                .any(|sub| name == sub)
+                .then(|| root.join(name))
         })
         .collect();
     for folder in folders {
         if folder.is_dir() {
-            watching.attach(folder);
-        } else if watching.folders.contains(folder) {
-            watching.unwatch(folder);
+            watching.attach(&folder);
+        } else if watching.folders.contains(&folder) {
+            watching.unwatch(&folder);
         }
     }
 }
@@ -549,7 +556,7 @@ pub(crate) async fn unwatch_instance_folder(
 
     let full_instance_path = dirs.instances_dir().join(instance_path);
     let mut watching = watcher.watcher.write().await;
-    watching.roots.remove(&full_instance_path);
+    watching.roots.retain(|_, root| *root != full_instance_path);
     for sub_path in watched_subpaths(watcher.side) {
         watching.unwatch(&full_instance_path.join(sub_path));
     }
@@ -591,7 +598,8 @@ mod tests {
     use super::*;
     use crate::state::instances::adapters::sqlite::content_rows;
     use crate::state::instances::commands::set_instance_install_stage;
-    use crate::state::tests::{add_instance, engine, write};
+    use crate::state::tests::{add_instance, engine, link_dir, write};
+    use notify_debouncer_mini::DebouncedEventKind;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn a_content_folder_is_watched_once_it_appears_and_never_made() {
@@ -640,6 +648,42 @@ mod tests {
         })
         .await
         .expect("mods/b.jar was never seen");
+    }
+
+    /// A platform can name an event by the real path of a folder watched through a link, as
+    /// FSEvents does for a linked data folder.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_content_folder_named_by_its_real_path_is_watched() {
+        let tmp = tempfile::tempdir().unwrap();
+        let real = tmp.path().join("real");
+        std::fs::create_dir_all(real.join("Survival")).unwrap();
+        let instances = tmp.path().join("profiles");
+        link_dir(&real, &instances);
+        let dirs = DirectoryInfo::init(
+            tmp.path().join("config"),
+            instances.clone(),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        // Its events go nowhere, so only the event below attaches anything.
+        let (watcher, _) = init_watcher(Side::Client).unwrap();
+        watch_instance_folder("a", "Survival", &watcher, &dirs).await;
+
+        let mods = real.join("Survival").join("mods");
+        std::fs::create_dir(&mods).unwrap();
+        let appeared = DebouncedEvent {
+            path: mods.canonicalize().unwrap(),
+            kind: DebouncedEventKind::Any,
+        };
+        attach_or_drop(&watcher, &[appeared]).await;
+        let watched = instances.join("Survival").join("mods");
+        assert!(watcher.watcher.read().await.folders.contains(&watched));
+
+        unwatch_instance_folder("a", "Survival", &watcher, &dirs).await;
+        let watching = watcher.watcher.read().await;
+        assert!(watching.roots.is_empty() && watching.folders.is_empty());
     }
 
     #[tokio::test(flavor = "multi_thread")]

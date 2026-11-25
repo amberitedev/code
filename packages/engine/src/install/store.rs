@@ -6,6 +6,7 @@ use crate::ErrorKind;
 use crate::state::Installs;
 use anyhow::{Context, bail};
 use chrono::{DateTime, TimeZone, Utc};
+use contracts::Side;
 use sqlx::SqlitePool;
 use std::collections::HashMap;
 use std::sync::{Arc, MutexGuard, Weak};
@@ -99,12 +100,34 @@ impl InstallJobRecord {
             modified: self.modified.to_rfc3339(),
             finished: self.finished.map(|finished| finished.to_rfc3339()),
         };
+        if installs.side == Side::Server {
+            without_host_paths(&mut snapshot);
+        }
         set_controls(&mut snapshot, self.id, active, installs);
         if active && let Some(job) = live_jobs(installs).get_mut(&self.id) {
             job.apply_progress(&mut snapshot);
             job.snapshot = Some(snapshot.clone());
         }
         snapshot
+    }
+}
+
+/// Drops what names a path on the host: an instance's icon file, and where a failed step read
+/// or wrote. An icon from Modrinth is a URL and stays.
+fn without_host_paths(snapshot: &mut InstallJobSnapshot) {
+    if let Some(display) = &mut snapshot.display {
+        display.icon.take_if(|icon| {
+            !icon.starts_with("https://") && !icon.starts_with("http://")
+        });
+    }
+    let errors = [&mut snapshot.error, &mut snapshot.rollback_error];
+    for context in errors
+        .into_iter()
+        .flatten()
+        .filter_map(|error| error.context.as_mut())
+    {
+        context.source_path = None;
+        context.target_path = None;
     }
 }
 
@@ -770,4 +793,66 @@ fn timestamp(value: i64) -> DateTime<Utc> {
 
 fn optional_timestamp(value: i64) -> Option<DateTime<Utc>> {
     Utc.timestamp_opt(value, 0).single()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::install::model::{
+        InstallErrorContext, InstallErrorView, InstallJobDisplay,
+        InstallPhaseId,
+    };
+    use crate::state::{EngineConfig, tests};
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_servers_jobs_name_no_path_on_its_host() {
+        crate::install_crypto_provider();
+        let dir = tempfile::tempdir().unwrap();
+        let engine = crate::Engine::new(EngineConfig {
+            side: Side::Server,
+            ..tests::config(dir.path().to_path_buf())
+        })
+        .await
+        .unwrap();
+        tests::add_instance(&engine, "s", "srv").await;
+        let request = InstallRequest::InstallExistingInstance {
+            instance_id: "s".to_owned(),
+            force: false,
+        };
+        let mut state = InstallJobState::new(&request);
+        state.display = Some(InstallJobDisplay {
+            title: "srv".to_owned(),
+            icon: Some("/srv/copal/icon.png".to_owned()),
+        });
+        let failed = InstallErrorView {
+            context: Some(
+                InstallErrorContext::new("extract modpack override")
+                    .source_path("/srv/copal/pack.mrpack")
+                    .target_path("/srv/copal/profiles/srv/config/a.toml")
+                    .entry_path("overrides/config/a.toml")
+                    .build(),
+            ),
+            ..InstallErrorView::from_message(
+                "path_error",
+                InstallPhaseId::ExtractingOverrides,
+                "failed",
+            )
+        };
+        state.error = Some(failed.clone());
+        state.rollback_error = Some(failed);
+        insert(
+            Uuid::new_v4(),
+            &request,
+            &state,
+            InstallJobStatus::Failed,
+            &engine.pool,
+        )
+        .await
+        .unwrap();
+
+        let jobs = crate::install::list_jobs(true, &engine).await.unwrap();
+        let json = serde_json::to_string(&jobs).unwrap();
+        assert!(!json.contains("/srv/copal"), "{json}");
+        assert!(json.contains("overrides/config/a.toml"), "{json}");
+    }
 }

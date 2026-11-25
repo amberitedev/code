@@ -5,8 +5,14 @@ mod uploads;
 
 use std::sync::Arc;
 
-use axum::extract::State;
+use axum::{
+    body::Body,
+    extract::State,
+    http::header::{CONTENT_LENGTH, CONTENT_TYPE},
+    response::{IntoResponse, Response},
+};
 use contracts::{ApiError, Empty, ErrorCode, Json, Raw, server::Req};
+use tokio_util::io::ReaderStream;
 
 pub use self::uploads::Uploads;
 use super::api_error;
@@ -54,13 +60,18 @@ pub async fn read_instance_file(
     State(engine): State<Arc<Engine>>,
     instance: InstanceAccess,
     request: Req<ReadInstanceFile>,
-) -> Result<Raw, ApiError> {
-    let bytes =
-        sandboxed::read(&engine, &instance.id, &request.query.path).await?;
-    Ok(Raw {
-        content_type: "application/octet-stream".to_owned(),
-        bytes: bytes.into(),
-    })
+) -> Result<Response, ApiError> {
+    let file = sandboxed::open_file(&engine, &instance.id, &request.query.path)
+        .await?;
+    let length = file.metadata().map_err(sandboxed::internal)?.len();
+    Ok((
+        [
+            (CONTENT_TYPE, "application/octet-stream".to_owned()),
+            (CONTENT_LENGTH, length.to_string()),
+        ],
+        Body::from_stream(ReaderStream::new(tokio::fs::File::from_std(file))),
+    )
+        .into_response())
 }
 
 pub async fn write_instance_file(

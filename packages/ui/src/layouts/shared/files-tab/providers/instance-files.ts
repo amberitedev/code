@@ -104,11 +104,13 @@ export function useInstanceFiles(options: InstanceFilesOptions) {
 
 	const editingFile = ref<EditingFile | null>(null)
 
-	const readFileAsBlob = (path: string) =>
-		client().call(instanceFiles.ReadInstanceFile, {
+	const readFileAsBlob = async (path: string) => {
+		const response = await client().call(instanceFiles.ReadInstanceFile, {
 			params: params(),
 			query: { path: instancePath(path) },
 		})
+		return response.blob()
+	}
 
 	const uploadState =
 		options.uploadState ??

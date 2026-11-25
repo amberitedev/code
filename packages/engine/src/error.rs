@@ -319,6 +319,7 @@ fn format_duration(duration: Duration) -> String {
 pub type Error = anyhow::Error;
 
 impl ErrorKind {
+    // Each variant also goes in the list of `every_error_kind_has_a_real_error_code`.
     fn code(&self) -> &'static str {
         match self {
             Self::SharedInstanceUnavailable(reason) => match reason {
