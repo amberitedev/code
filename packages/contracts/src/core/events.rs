@@ -37,8 +37,7 @@ pub enum ClientMessage {
 
 /// What the Core sends on `/events`, beside the engine's events. A console line is the engine's
 /// `log` event, the same as an App instance's. The payloads are Modrinth Hosting's server socket
-/// events (`Archon.Websocket.v0`), with the server they are about. A topic of a missing or removed
-/// server gets no events; the server's routes answer `not_found`.
+/// events (`Archon.Websocket.v0`), with the server they are about.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 #[serde(tag = "type", content = "payload", rename_all = "snake_case")]
@@ -74,6 +73,12 @@ pub enum CoreEvent {
     },
     /// This socket fell behind and lost events: refetch what is shown.
     Resync,
+    /// A subscription was refused, as the topic's routes would be: `not_found` for a server that
+    /// does not exist. The topic gets no events.
+    SubscribeFailed {
+        topic: Topic,
+        error: ApiError,
+    },
 }
 
 /// Mirrors Archon.Websocket.v0.PowerState.

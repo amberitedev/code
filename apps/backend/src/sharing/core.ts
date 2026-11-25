@@ -2,14 +2,14 @@ import { cores } from '@amberite/contracts/backend'
 
 import { accountLocked } from '../common/auth'
 import { ApiError } from '../common/http'
-import { noBody, route } from '../common/router'
+import { noBody, rawBody, route } from '../common/router'
 import type { Env } from '../common/types'
 import { requireListedCore } from '../cores'
 import { blacklisted, instance, member, now, quarantined } from './access'
-import { parseNewServerShare, parseNewVersion, parseUpdate } from './parse'
+import { parseNewServerShare, parseNewVersion, parseUpdate, validIconConfig } from './parse'
 import { MAX_MANIFEST_BODY } from './pool'
-import { deleteShare, renameShare } from './shares'
-import { createVersion, latestVersion, versionResponse, versionRow } from './versions'
+import { ICON_BYTES, deleteShare, renameShare, setIcon, uploadIcon } from './shares'
+import { createVersion, memberVersion, versionResponse } from './versions'
 
 // Sharing as a Core reaches it with its own key, on its own routes, acting for its owner.
 
@@ -42,23 +42,20 @@ async function coreShare(env: Env, core: { id: string; owner_id: string }, id: s
 
 /**
  * A version a Core reads for its owner: of its own server's share, or of a share a server follows.
- * The owner must read the share, so a Core reads nothing its owner cannot. Its owner's lock and
- * sharing ban come with its key.
+ * The owner must read the share, so a Core reads nothing its owner cannot, an unready version
+ * included. Its owner's lock and sharing ban come with its key.
  */
 async function coreVersion(request: Request, env: Env, id: string, version?: number) {
 	const core = await sharingCore(request, env)
 	const item = await instance(env, id)
 	await member(env, item, core.owner_id)
-	if (item.quarantine) throw quarantined()
-	const row =
-		version === undefined ? await latestVersion(env, id) : await versionRow(env, id, version)
-	return versionResponse(env, item, row, null)
+	return versionResponse(env, item, await memberVersion(env, item, core.owner_id, version), null)
 }
 
 /**
  * A Core, with its key, writing the share of one of its server-first servers (a server that
  * follows no instance) as the share's owner, its own owner account: create (answering the
- * server's existing share if it has one), rename, delete, and its versions. It also reads the
+ * server's existing share if it has one), rename, delete, its icon, and its versions. It also reads the
  * versions of any share its owner reads, which a server may follow (`content::shared` in Core).
  * It reaches no other share.
  */
@@ -86,6 +83,27 @@ export const coreKeyRoutes = [
 	route(cores.DeleteServerShare, noBody, async ({ request, env, params }) => {
 		await coreShare(env, await sharingCore(request, env, true), params.id)
 		await deleteShare(env, params.id)
+	}),
+	route(
+		cores.SetServerShareIcon,
+		rawBody,
+		async ({ request, env, params, body }) => {
+			const item = await coreShare(env, await sharingCore(request, env), params.id)
+			await uploadIcon(request, env, item, await body())
+		},
+		ICON_BYTES,
+	),
+	route(
+		cores.SetServerShareGeneratedIcon,
+		validIconConfig,
+		async ({ request, env, params, body }) => {
+			const item = await coreShare(env, await sharingCore(request, env), params.id)
+			await setIcon(env, item, null, JSON.stringify(await body()))
+		},
+	),
+	route(cores.RemoveServerShareIcon, noBody, async ({ request, env, params }) => {
+		const item = await coreShare(env, await sharingCore(request, env), params.id)
+		await setIcon(env, item, null, null)
 	}),
 	route(
 		cores.CreateServerShareVersion,

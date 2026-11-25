@@ -44,7 +44,7 @@ where
             Err(error) => Some(internal(error)),
         };
         state.ops.0.lock().expect("not poisoned").remove(&op);
-        let _ = state.backups.events.send(CoreEvent::OpEnded { op, error });
+        let _ = state.events.send(CoreEvent::OpEnded { op, error });
     });
     Ok(StatusCode::ACCEPTED)
 }

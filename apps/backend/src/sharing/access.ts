@@ -1,6 +1,6 @@
 import type { SharedIconConfig } from '@amberite/contracts/backend'
 
-import { accountLocked, requireUserWithSharing } from '../common/auth'
+import { requireUserWithSharing } from '../common/auth'
 import { ApiError } from '../common/http'
 import type { Env } from '../common/types'
 
@@ -90,20 +90,6 @@ export async function sharer(request: Request, env: Env) {
 	const user = await requireUserWithSharing(request, env)
 	if (user.blacklisted) throw blacklisted()
 	return user
-}
-
-/**
- * Refuses `userId` while their account is locked or may not use sharing, for a caller who is not
- * that account: one read for both.
- */
-export async function requireSharingAllowed(env: Env, userId: string): Promise<void> {
-	const row = await env.DB.prepare(
-		'SELECT EXISTS (SELECT 1 FROM user_locks WHERE user_id = ?1) AS locked, EXISTS (SELECT 1 FROM sharing_blacklist WHERE user_id = ?1) AS blacklisted',
-	)
-		.bind(userId)
-		.first<{ locked: number; blacklisted: number }>()
-	if (row?.locked) accountLocked()
-	if (row?.blacklisted) throw blacklisted()
 }
 
 /** A share the caller reads, pending invitees too with `allowPending`. */

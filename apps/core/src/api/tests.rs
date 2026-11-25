@@ -79,10 +79,12 @@ async fn core_with_backend(backend: Option<&str>) -> Core {
     .await
     .unwrap();
     keys.set(&signer.public_keys()).await;
+    let events = super::events::sender();
     let backups = crate::backups::Backups::open(
         servers.paths().clone(),
         db.clone(),
         Arc::clone(&servers),
+        events.clone(),
     )
     .await
     .unwrap();
@@ -107,6 +109,7 @@ async fn core_with_backend(backend: Option<&str>) -> Core {
         network: Arc::new(crate::network::forward::Network::off(db.clone())),
         db,
         backups,
+        events,
         update,
         storage,
         consoles: Arc::default(),
@@ -623,6 +626,68 @@ async fn content_and_files_stay_inside_the_server() {
         .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(read["known"]["motd"], "Edited");
+}
+
+/// Server ids that name a folder outside the Core's, as a percent-encoded path segment: one that
+/// climbs out, and an absolute one. Each would land in `outside` under the test's folder.
+fn escaping_ids(core: &Core) -> Vec<String> {
+    let absolute = core._dir.path().join("outside").display().to_string();
+    let encode = |id: &str| {
+        id.replace('%', "%25")
+            .replace('/', "%2F")
+            .replace('\\', "%5C")
+            .replace(':', "%3A")
+    };
+    vec![encode("../outside"), encode(&absolute)]
+}
+
+#[tokio::test]
+async fn a_server_id_that_names_no_server_is_not_found() {
+    let core = core().await;
+    let owner = core.sign_in("owner").await;
+    for id in escaping_ids(&core) {
+        let (status, error) = core
+            .call(
+                Method::PATCH,
+                &format!("/servers/{id}/properties"),
+                Some(&owner),
+                None,
+                Some(json!({ "known": { "motd": "Hi" } })),
+            )
+            .await;
+        assert_eq!(
+            (status, &error["error"]),
+            (StatusCode::NOT_FOUND, &json!("not_found")),
+            "{id}"
+        );
+        let (status, error) = core
+            .call(
+                Method::GET,
+                &format!("/servers/{id}/properties"),
+                Some(&owner),
+                None,
+                None,
+            )
+            .await;
+        assert_eq!(
+            (status, &error["error"]),
+            (StatusCode::NOT_FOUND, &json!("not_found")),
+            "{id}"
+        );
+        let (status, _) = raw(
+            &core,
+            Method::POST,
+            &format!("/servers/{id}/modpack-file"),
+            &owner,
+            "not a pack",
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{id}");
+    }
+    assert!(
+        !core._dir.path().join("outside").exists(),
+        "nothing was written outside the Core's folders"
+    );
 }
 
 #[tokio::test]
@@ -1476,7 +1541,7 @@ async fn next(socket: &mut EventSocket) -> Option<Value> {
 }
 
 #[tokio::test]
-async fn console_lines_are_log_events_and_a_missing_server_has_none() {
+async fn console_lines_are_log_events_and_a_missing_server_is_not_found() {
     let core = core().await;
     let owner = core.sign_in("owner").await;
     let log = core.state.servers.paths().console_log(&core.server);
@@ -1502,7 +1567,21 @@ async fn console_lines_are_log_events_and_a_missing_server_has_none() {
         })
     );
 
-    subscribe(&mut socket, json!({ "type": "server", "id": "missing" })).await;
+    let escaping = [
+        "../outside".to_owned(),
+        core._dir.path().join("outside").display().to_string(),
+    ];
+    for id in ["missing", &escaping[0], &escaping[1]] {
+        for kind in ["server", "console", "backups", "instance"] {
+            let topic = json!({ "type": kind, "id": id });
+            subscribe(&mut socket, topic.clone()).await;
+            let refused = next(&mut socket).await.unwrap();
+            assert_eq!(refused["type"], "subscribe_failed", "{topic}");
+            assert_eq!(refused["payload"]["topic"], topic);
+            assert_eq!(refused["payload"]["error"]["error"], "not_found");
+        }
+    }
+    assert!(!core._dir.path().join("outside").exists());
     subscribe(&mut socket, json!({ "type": "server", "id": core.server }))
         .await;
     let power = next(&mut socket).await.unwrap();
@@ -1699,11 +1778,7 @@ async fn a_lagged_subscriber_gets_resync_and_the_servers_state_again() {
     next(&mut socket).await.unwrap();
 
     for _ in 0..300 {
-        let _ = core
-            .state
-            .backups
-            .events
-            .send(super::events::CoreEvent::Resync);
+        let _ = core.state.events.send(super::events::CoreEvent::Resync);
     }
     assert_eq!(next(&mut socket).await.unwrap()["type"], "resync");
     assert_eq!(next(&mut socket).await.unwrap()["type"], "power_state");
@@ -1767,12 +1842,11 @@ async fn share_versions(version: Arc<std::sync::atomic::AtomicI32>) -> String {
     url
 }
 
-/// The App's body, which still sends a ticket the Core ignores.
+/// The App's body.
 fn follow_instance(share: &str) -> Value {
     json!({
         "instance": { "id": "app-instance", "name": "Our pack" },
         "shared_instance_id": share,
-        "ticket": "ignored",
         "restart": false,
     })
 }

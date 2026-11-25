@@ -70,19 +70,33 @@ export async function renameShare(
 		.run()
 }
 
-const ICON_BYTES = 256 * 1024
+export const ICON_BYTES = 256 * 1024
 
 /** Where an uploaded icon is kept in R2. Under the share, so `sweepFiles` clears them with it. */
 const iconKey = (share: string, upload: string) => `icons/${share}/${upload}`
 
 /** Replaces the share's icon with an uploaded image's `url` or icon editor `config`, and drops
  * the image it had. */
-async function setIcon(env: Env, item: InstanceRow, url: string | null, config: string | null) {
+export async function setIcon(
+	env: Env,
+	item: InstanceRow,
+	url: string | null,
+	config: string | null,
+) {
 	await env.DB.prepare('UPDATE shared_instances SET icon = ?,icon_config = ? WHERE id = ?')
 		.bind(url, config, item.id)
 		.run()
 	const upload = item.icon?.split('/').pop()
 	if (upload) await env.FILES.delete(iconKey(item.id, upload))
+}
+
+/** Replaces the share's icon with `image`, served from this backend as it was sent. */
+export async function uploadIcon(request: Request, env: Env, item: InstanceRow, image: Blob) {
+	const upload = crypto.randomUUID()
+	await env.FILES.put(iconKey(item.id, upload), await image.arrayBuffer(), {
+		httpMetadata: { contentType: image.type || 'image/png' },
+	})
+	await setIcon(env, item, `${new URL(request.url).origin}/v1/icons/${item.id}/${upload}`, null)
 }
 
 /** Anyone may fetch an icon, signed in or not: invite previews show it before anyone signs in. */
@@ -163,12 +177,7 @@ export const shareRoutes = [
 			const user = await sharer(request, env)
 			const item = await readable(env, params.id, user.id)
 			owner(item, user.id)
-			const image = await body()
-			const upload = crypto.randomUUID()
-			await env.FILES.put(iconKey(item.id, upload), await image.arrayBuffer(), {
-				httpMetadata: { contentType: image.type || 'image/png' },
-			})
-			await setIcon(env, item, `${new URL(request.url).origin}/v1/icons/${item.id}/${upload}`, null)
+			await uploadIcon(request, env, item, await body())
 		},
 		ICON_BYTES,
 	),

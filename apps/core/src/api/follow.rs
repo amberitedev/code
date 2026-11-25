@@ -255,7 +255,7 @@ async fn failed(state: &CoreState, id: &str, error: &str) {
 
 /// The server's `linked_instance` reads differently now.
 fn changed(state: &CoreState, id: &str) {
-    let _ = state.backups.events.send(CoreEvent::ServerChanged {
+    let _ = state.events.send(CoreEvent::ServerChanged {
         server: id.to_owned(),
     });
 }

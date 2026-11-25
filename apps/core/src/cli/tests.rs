@@ -142,10 +142,12 @@ async fn core() -> (tempfile::TempDir, Arc<CoreState>, Client) {
     )
     .await
     .unwrap();
+    let events = crate::api::events::sender();
     let backups = crate::backups::Backups::open(
         paths.clone(),
         db.clone(),
         Arc::clone(&servers),
+        events.clone(),
     )
     .await
     .unwrap();
@@ -154,6 +156,7 @@ async fn core() -> (tempfile::TempDir, Arc<CoreState>, Client) {
         engine,
         access: Arc::new(CoreAccess::new(db.clone(), keys)),
         backups,
+        events,
         update: Arc::new(Updater::new(
             paths.clone(),
             db.clone(),

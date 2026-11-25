@@ -14,15 +14,15 @@ use contracts::backend::sharing::{
     DeclinePendingInvite, DeleteInvite, GetInvite, GetLatestVersion,
     GetSharedInstance, InstanceInviteId, InstanceUser, Invite,
     InviteInstanceUsers, InvitePreviewQuery, JoinType, ListInstanceUsers,
-    ListInvites, NewInviteLink, NewSharedInstance, RemoveIcon,
-    RemoveInstanceUsers, SetGeneratedIcon, SetIcon, SharedInstance,
-    SharedInstanceId, SharedInstanceUpdate, UpdateSharedInstance, UserIds,
+    ListInvites, NewInviteLink, NewSharedInstance, RemoveInstanceUsers,
+    SharedInstance, SharedInstanceId, SharedInstanceUpdate,
+    UpdateSharedInstance, UserIds,
 };
 pub(super) use contracts::backend::sharing::{ExternalFile, InstanceVersion};
 use contracts::client::{Body, CallError, Reply};
 use contracts::{Empty, Endpoint, Json, Raw};
 use sharing_client::shares::{
-    Caller, OwnedRemote, Unavailable, call_as, delete_share,
+    Caller, Icon, OwnedRemote, Unavailable, call_as, delete_share, set_icon,
 };
 
 #[derive(Debug)]
@@ -285,40 +285,25 @@ pub(super) async fn update_remote_instance_icon(
     state: &Engine,
 ) -> crate::Result<()> {
     // An icon editor icon goes up as its settings alone; members draw it themselves.
-    match (icon_config, icon_path) {
-        (Some(config), _) => {
-            call::<SetGeneratedIcon>(
-                state,
-                shared_instance_id,
-                Json(config.clone()),
-            )
-            .await
-        }
+    let icon = match (icon_config, icon_path) {
+        (Some(config), _) => Icon::Generated(config.clone()),
         (None, Some(icon_path)) => {
             let bytes = crate::util::io::read(icon_path).await?;
-            // The backend serves the image with the type it was sent with.
-            let content_type = infer::get(&bytes)
-                .map_or("application/octet-stream", |kind| kind.mime_type())
-                .to_owned();
-            let backend = backend_with(&state.sessions, true)?;
-            let image = Raw {
-                content_type,
+            Icon::Image(Raw {
+                content_type: infer::get(&bytes)
+                    .map_or("application/octet-stream", |kind| kind.mime_type())
+                    .to_owned(),
                 bytes: bytes.into(),
-            };
-            send::<SetIcon>(
-                state,
-                &backend,
-                &share(shared_instance_id),
-                &(),
-                image,
-            )
-            .await?
-            .map_err(backend_error)
+            })
         }
-        (None, None) => {
-            call::<RemoveIcon>(state, shared_instance_id, Empty).await
-        }
-    }
+        (None, None) => Icon::None,
+    };
+    let backend =
+        backend_with(&state.sessions, matches!(icon, Icon::Image(_)))?;
+    let _permit = state.api_semaphore.0.acquire().await?;
+    set_icon(backend.caller, &backend.remote(), shared_instance_id, icon)
+        .await
+        .map_err(backend_error)
 }
 
 pub(super) async fn get_remote_users(
