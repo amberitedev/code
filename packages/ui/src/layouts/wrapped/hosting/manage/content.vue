@@ -167,14 +167,14 @@ const environmentWarningModal = ref<InstanceType<typeof ConfirmEnvironmentModal>
 const params = { params: { id: serverId } }
 
 const type = computed(() => {
-	const loader = server.value.loader
+	const loader = server.value?.loader
 	if (loader === 'Paper') return 'plugin'
 	if (loader === 'Vanilla') return 'datapack'
 	return 'mod'
 })
 
 /** The App instance this server follows, whose owner pushes its versions. */
-const follow = computed(() => server.value.linked_instance)
+const follow = computed(() => server.value?.linked_instance)
 const linkedInstanceId = computed(() => follow.value?.id ?? null)
 const applyingInstanceUpdate = ref(false)
 
@@ -212,7 +212,7 @@ const refresh = content.refresh
 const setupActionDisabled = computed(() => !canSetup.value || busyReasons.value.length > 0)
 const isInstallingContent = computed(
 	() =>
-		server.value.status === 'installing' ||
+		server.value?.status === 'installing' ||
 		busyReasons.value.some(
 			(r) =>
 				r.reason.id === 'servers.busy.installing' || r.reason.id === 'servers.busy.syncing-content',
@@ -411,8 +411,8 @@ async function resolveStoredServerAddonPlans(plans: BrowseInstallPlan[]) {
 		resolvePlan: async (plan, existingProjectIds) => {
 			const target = getTargetInstallPreferences(
 				{
-					gameVersion: server.value.mc_version ?? undefined,
-					loader: server.value.loader?.toLowerCase(),
+					gameVersion: server.value?.mc_version ?? undefined,
+					loader: server.value?.loader?.toLowerCase(),
 				},
 				plan.contentType,
 			)
@@ -423,7 +423,7 @@ async function resolveStoredServerAddonPlans(plans: BrowseInstallPlan[]) {
 				selected: toResolvePreferences(plan.preferences),
 				target: toResolvePreferences(target),
 				existing_project_ids: existingProjectIds,
-				update_channel: server.value.update_channel,
+				update_channel: server.value?.update_channel,
 			})
 
 			return [resolved.primary, ...resolved.dependencies].map((item) => ({
@@ -628,8 +628,8 @@ const modpackUpdateModal = ref<InstanceType<typeof ConfirmModpackUpdateModal>>()
 const pendingModpackUpdateVersion = ref<Labrinth.Versions.v2.Version | null>(null)
 const isModpackUpdateDowngrade = ref(false)
 
-const currentGameVersion = computed(() => server.value.mc_version ?? '')
-const currentLoader = computed(() => server.value.loader?.toLowerCase() ?? '')
+const currentGameVersion = computed(() => server.value?.mc_version ?? '')
+const currentLoader = computed(() => server.value?.loader?.toLowerCase() ?? '')
 
 function handleBrowseContent() {
 	if (contentActionDisabled.value) return

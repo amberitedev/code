@@ -79,12 +79,12 @@ const emit = defineEmits<{
 }>()
 
 const initialLoader = computed(() => {
-	const loader = serverContext.server.value.loader
+	const loader = serverContext.server.value?.loader
 	if (!loader || loader === 'Vanilla') return undefined
 	return loader.toLowerCase()
 })
 
-const initialGameVersion = computed(() => serverContext.server.value.mc_version ?? undefined)
+const initialGameVersion = computed(() => serverContext.server.value?.mc_version ?? undefined)
 const canCompleteSetup = computed(() =>
 	props.initialSetup ? canSetup.value : canResetServer.value,
 )

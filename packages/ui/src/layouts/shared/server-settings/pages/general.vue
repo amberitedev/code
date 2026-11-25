@@ -200,7 +200,7 @@ watch(data, (newData) => {
 })
 const updateChannelOptions: ReleaseChannel[] = ['release', 'beta', 'alpha']
 
-const worldUpdateChannel = computed(() => data.value.update_channel)
+const worldUpdateChannel = computed(() => data.value?.update_channel ?? 'release')
 const updateChannel = ref<ReleaseChannel>(worldUpdateChannel.value)
 
 watch(worldUpdateChannel, (channel) => {

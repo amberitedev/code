@@ -26,7 +26,7 @@ export function useServerSharingSettings() {
 	const worldId = computed<string | null>(() => serverId)
 	const { canSetup, permissionDeniedMessage } = useServerPermissions()
 	const userId = computed(() => auth.user.value?.id)
-	const sharedInstanceId = computed(() => server.value.shared_instance_id)
+	const sharedInstanceId = computed(() => server.value?.shared_instance_id)
 	const targetKey = computed(() =>
 		canSetup.value && worldId.value && sharedInstanceId.value && userId.value
 			? JSON.stringify([serverId, worldId.value, sharedInstanceId.value, userId.value])

@@ -14,7 +14,7 @@ import { useSharedInstanceInstalledOnce } from './shared-instance'
 export function useServerOwnShare() {
 	const { serverId, core, server } = injectModrinthServerContext()
 	const sharedInstanceId = computed(() =>
-		server.value.linked_instance ? null : server.value.shared_instance_id,
+		server.value?.linked_instance ? null : (server.value?.shared_instance_id ?? null),
 	)
 	const installedOnce = useSharedInstanceInstalledOnce(sharedInstanceId)
 	const preview = useQuery({

@@ -43,7 +43,7 @@ export function useServerShareReview<Action extends string = 'push'>(options?: {
 	const queryClient = useQueryClient()
 	const diffModal = ref<InstanceType<typeof ServerSharePushModal>>()
 	const previewOpen = ref(false)
-	const sharedInstanceId = computed(() => server.value.shared_instance_id)
+	const sharedInstanceId = computed(() => server.value?.shared_instance_id)
 	let disposed = false
 	onScopeDispose(() => {
 		disposed = true

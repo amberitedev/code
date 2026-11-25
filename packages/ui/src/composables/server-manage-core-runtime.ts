@@ -149,7 +149,7 @@ export function useServerManageCoreRuntime(options: UseServerManageCoreRuntimeOp
 		serverId,
 		coreId,
 		core,
-		server: options.server as Ref<Server>,
+		server: options.server,
 		isConnected,
 		powerState,
 		isServerRunning,

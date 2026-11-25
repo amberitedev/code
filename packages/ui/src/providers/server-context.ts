@@ -23,7 +23,8 @@ export interface ModrinthServerContext {
 	/** The Core that has the server, and its routes. */
 	readonly coreId: string
 	readonly core: ContractClient
-	readonly server: Ref<Server>
+	/** Undefined until the server first loads. */
+	readonly server: Ref<Server | undefined>
 
 	/** The Core's event socket is open. */
 	readonly isConnected: Ref<boolean>

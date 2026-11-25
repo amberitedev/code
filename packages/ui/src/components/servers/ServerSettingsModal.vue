@@ -87,7 +87,7 @@ const tabs = computed<TabbedModalTab[]>(() =>
 			serverStatus: server.value?.status,
 			// On a Core only a server that follows no instance has a share of its own; one that
 			// follows an instance reports that instance's share, which it does not manage.
-			isShared: !server.value.linked_instance && !!server.value.shared_instance_id,
+			isShared: !server.value?.linked_instance && !!server.value?.shared_instance_id,
 		}
 		const name = defineMessage({
 			id: `server.settings.tabs.${tab.id}`,
@@ -172,7 +172,7 @@ defineExpose({ show, hide })
 		<template #title>
 			<span class="flex items-center gap-2 text-lg font-semibold text-primary">
 				<template v-if="coreInfo">{{ coreInfo.name }} <ChevronRightIcon /></template>
-				{{ server.name || 'Server' }} <ChevronRightIcon />
+				{{ server?.name || 'Server' }} <ChevronRightIcon />
 				<span class="font-extrabold text-contrast">{{
 					formatMessage(commonMessages.settingsLabel)
 				}}</span>

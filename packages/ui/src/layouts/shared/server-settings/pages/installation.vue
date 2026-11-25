@@ -213,7 +213,7 @@ const requiresInstallation = computed(() => installation.value?.status === 'fail
 /** The Modrinth modpack the server runs. */
 const modpack = computed(() => packQuery.data.value ?? null)
 /** The App instance the server follows, whose owner pushes its versions. */
-const follow = computed(() => server.value.linked_instance)
+const follow = computed(() => server.value?.linked_instance)
 
 const modpackProjectId = computed(() => modpack.value?.project.id ?? null)
 
@@ -460,16 +460,19 @@ provideInstallationSettings({
 	onGameVersionHover: handleGameVersionHover,
 	loading: computed(() => packQuery.isLoading.value),
 	installationInfo: computed(() => {
-		const rawLoader = server.value.loader
+		const rawLoader = server.value?.loader
 		const loader = rawLoader ? formatLoaderLabel(rawLoader) : null
 		const rows = [
 			{ label: formatMessage(commonMessages.platformLabel), value: loader },
-			{ label: formatMessage(commonMessages.gameVersionLabel), value: server.value.mc_version },
+			{
+				label: formatMessage(commonMessages.gameVersionLabel),
+				value: server.value?.mc_version ?? null,
+			},
 		]
 		if (loader !== 'Vanilla') {
 			rows.push({
 				label: formatMessage(messages.loaderVersionLabel, { loader: loader ?? 'null' }),
-				value: server.value.loader_version,
+				value: server.value?.loader_version ?? null,
 			})
 		}
 		return rows
@@ -737,8 +740,8 @@ provideInstallationSettings({
 		currentVersionId: modpack.value?.version?.id ?? '',
 		projectIconUrl: modpack.value?.project.icon_url ?? undefined,
 		projectName: modpack.value?.project.title ?? formatMessage(commonMessages.modpackLabel),
-		currentGameVersion: server.value.mc_version ?? '',
-		currentLoader: server.value.loader ?? '',
+		currentGameVersion: server.value?.mc_version ?? '',
+		currentLoader: server.value?.loader ?? '',
 	})),
 
 	isServer: true,
