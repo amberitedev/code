@@ -3,7 +3,7 @@ import type { AbstractModrinthClient } from '@modrinth/api-client'
 import { expect, test } from 'vitest'
 
 import { createServerInviteLink } from './invite-link'
-import { ShareUnlinkDeclined } from './unlink-before-share'
+import { ShareUnlinkDeclined } from './shareable'
 
 const uploadedPack = { name: 'Drop Check', version_number: '1.0.0' }
 

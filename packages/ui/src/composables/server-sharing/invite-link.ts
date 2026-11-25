@@ -1,7 +1,7 @@
 import { core as coreRoutes, type Server } from '@amberite/contracts/core'
 import type { AbstractModrinthClient, ContractClient, SharedInstances } from '@modrinth/api-client'
 
-import { type ShareUnlinkPrompt, unlinkBeforeShare } from './unlink-before-share'
+import { ensureShareable, type ShareUnlinkPrompt } from './shareable'
 
 // The invite rules for instance and server shares alike; the App's share pages import them too.
 // The age and default uses mirror SHARED_INSTANCE_INVITE_MAX_AGE_SECONDS and
@@ -95,7 +95,7 @@ export async function createServerInviteLink(
 	if (!server || !isCurrent()) return null
 	let instanceId = server.shared_instance_id
 	if (!instanceId) {
-		await unlinkBeforeShare(core, server, options.shareUnlink)
+		await ensureShareable(core, server, options.shareUnlink)
 		if (!isCurrent()) return null
 		instanceId = (
 			await core.call(coreRoutes.ShareServer, {

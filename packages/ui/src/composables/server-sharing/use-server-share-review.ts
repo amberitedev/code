@@ -1,4 +1,4 @@
-import { core as coreRoutes } from '@amberite/contracts/core'
+import { core as coreRoutes, type Server } from '@amberite/contracts/core'
 import { ModrinthApiError } from '@modrinth/api-client'
 import {
 	useIsFetching,
@@ -16,11 +16,7 @@ import { serverKeys, shareHistoryKey } from '#ui/composables/server-queries'
 import { injectAuth, injectModrinthServerContext, injectNotificationManager } from '#ui/providers'
 
 import { serverShareableFilesQueryOptions, serverShareDiffQueryOptions } from './query-options'
-import {
-	injectShareUnlinkPrompt,
-	ShareUnlinkDeclined,
-	unlinkBeforeShare,
-} from './unlink-before-share'
+import { ensureShareable, injectShareUnlinkPrompt, ShareUnlinkDeclined } from './shareable'
 
 export type ServerShareActionTarget = {
 	userId: string | undefined
@@ -47,7 +43,6 @@ export function useServerShareReview<Action extends string = 'push'>(options?: {
 	const previewOpen = ref(false)
 	const sharedInstanceId = computed(() => server.value?.shared_instance_id)
 	const shareUnlink = injectShareUnlinkPrompt(null)
-	const unlinking = ref(false)
 	let disposed = false
 	onScopeDispose(() => {
 		disposed = true
@@ -87,7 +82,6 @@ export function useServerShareReview<Action extends string = 'push'>(options?: {
 			shareActions.value > 0 ||
 			sharePreviews.value > 0 ||
 			busyReasons.value.length > 0 ||
-			unlinking.value ||
 			!!options?.disabled?.value,
 	)
 
@@ -111,15 +105,17 @@ export function useServerShareReview<Action extends string = 'push'>(options?: {
 		})
 	}
 
-	async function unlinkUploadedPack() {
-		if (!server.value?.uploaded_modpack) return
-		unlinking.value = true
-		try {
-			if (await unlinkBeforeShare(core, server.value, shareUnlink))
+	// A share action, so every share button on the server waits while it asks and unlinks.
+	const unlinkMutation = useMutation({
+		mutationKey: ['servers', 'share-action', serverId],
+		mutationFn: async (current: Server) => {
+			if (await ensureShareable(core, current, shareUnlink))
 				await queryClient.invalidateQueries({ queryKey: serverKeys.detail(serverId) })
-		} finally {
-			unlinking.value = false
-		}
+		},
+	})
+
+	async function unlinkUploadedPack() {
+		if (server.value?.uploaded_modpack) await unlinkMutation.mutateAsync(server.value)
 	}
 
 	/**

@@ -36,9 +36,9 @@ const blocked = computed(() => {
 	if (!serverContext) return null
 	const busy = serverContext.busyReasons.value[0]
 	if (busy) return formatMessage(busy.reason)
-	return ['stopped', 'crashed'].includes(serverContext.powerState.value)
-		? null
-		: formatMessage(messages.stopFirst)
+	return ['running', 'starting', 'stopping'].includes(serverContext.powerState.value)
+		? formatMessage(messages.stopFirst)
+		: null
 })
 const modal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
 const backupTip = ref<string>()

@@ -19,11 +19,11 @@ export const [injectShareUnlinkPrompt, provideShareUnlinkPrompt] = createContext
 export class ShareUnlinkDeclined extends Error {}
 
 /**
- * Unlinks the `.mrpack` a server was set up from by upload once its owner confirms, since a share
- * cannot carry one. Every way to share a server calls it first. Resolves whether it unlinked one;
+ * Makes `server` shareable. A share cannot carry an uploaded `.mrpack`, so once the owner confirms
+ * it is unlinked. Every way to share a server calls this first. Resolves whether it unlinked one;
  * throws {@link ShareUnlinkDeclined} when the owner keeps the pack.
  */
-export async function unlinkBeforeShare(
+export async function ensureShareable(
 	core: ContractClient,
 	server: Server,
 	prompt: ShareUnlinkPrompt | null,

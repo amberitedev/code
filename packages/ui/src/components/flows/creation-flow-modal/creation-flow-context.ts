@@ -712,7 +712,11 @@ export function createCreationFlowContext(
 		modal.value?.setStage('invite-friends')
 		loading.value = false
 		// An uploaded pack is still installing, and can only be unlinked for sharing once it is done.
-		invite.start({ serverId, siteUrl, afterInstall: !!modpackFile.value })
+		invite.start({
+			serverId,
+			siteUrl,
+			afterInstall: setupType.value === 'modpack' && !!modpackFile.value,
+		})
 	}
 
 	async function completeInvite() {

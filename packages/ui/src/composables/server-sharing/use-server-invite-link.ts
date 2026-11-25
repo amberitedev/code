@@ -5,7 +5,7 @@ import { injectModrinthClient } from '#ui/providers'
 import { commonMessages } from '#ui/utils/common-messages'
 
 import { createServerInviteLink } from './invite-link'
-import { injectShareUnlinkPrompt, ShareUnlinkDeclined } from './unlink-before-share'
+import { injectShareUnlinkPrompt, ShareUnlinkDeclined } from './shareable'
 
 export type ServerInviteLinkTarget = {
 	serverId: string
