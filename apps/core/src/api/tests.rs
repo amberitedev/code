@@ -1675,7 +1675,7 @@ async fn ending_the_session_closes_the_socket() {
 }
 
 #[tokio::test]
-async fn an_installs_subscription_starts_with_the_unfinished_jobs() {
+async fn the_unfinished_jobs_are_listed_and_start_an_installs_subscription() {
     use engine::install::{
         InstallJobStatus, InstallRequest, model::InstallJobState,
     };
@@ -1696,6 +1696,18 @@ async fn an_installs_subscription_starts_with_the_unfinished_jobs() {
     .await
     .unwrap();
     let owner = core.sign_in("owner").await;
+    let (status, listed) = core
+        .call(
+            Method::GET,
+            "/install-jobs?include_finished=false",
+            Some(&owner),
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{listed}");
+    assert_eq!(listed[0]["job_id"], job.to_string(), "{listed}");
+
     let mut socket = core.events(&owner).await;
     subscribe(&mut socket, json!({ "type": "installs" })).await;
     subscribe(&mut socket, json!({ "type": "server", "id": core.server }))

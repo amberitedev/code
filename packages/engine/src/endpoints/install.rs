@@ -39,7 +39,7 @@ contracts::endpoints! {
     /// the rest.
     SetSharedHistoryKept: Put "/shared-history/kept", Session, (), (), Json<SharedHistoryKept> => Json<SharedHistorySettings>, client_only;
     /// The jobs whose instance the caller may view.
-    ListInstallJobs: Get "/install-jobs", Session, (), InstallJobQuery, Empty => Json<Vec<InstallJobSnapshot>>, client_only;
+    ListInstallJobs: Get "/install-jobs", Session, (), InstallJobQuery, Empty => Json<Vec<InstallJobSnapshot>>, shared;
     GetInstallJob: Get "/install-jobs/{id}", Session, InstallJobRef, (), Empty => Json<InstallJobSnapshot>, client_only;
     RetryInstallJob: Post "/install-jobs/{id}/retry", Session, InstallJobRef, (), Empty => Json<InstallJobSnapshot>, client_only;
     PauseInstallJob: Post "/install-jobs/{id}/pause", Session, InstallJobRef, (), Empty => Json<InstallJobSnapshot>, client_only;

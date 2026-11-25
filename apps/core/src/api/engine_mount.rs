@@ -1,10 +1,10 @@
-//! The engine's content, share, file, upload, icon and log routes on a Core, behind `CoreAccess`:
-//! every engine route declared `shared`, and no `client_only` one (the tests check both). None
-//! carries a host path, reaches the engine's settings, store, caches, Java or processes, or edits
-//! the instance, which writes launch hooks, Java and environment variables (`api::servers` changes
-//! a server's name and update channel itself). A server's live console is Core's own. A change is logged; a content change also
-//! holds the server, so it is refused while the server runs or installs. Its [`Hook`] says what
-//! else it does.
+//! The engine's content, share, install job list, file, upload, icon and log routes on a Core,
+//! behind `CoreAccess`: every engine route declared `shared`, and no `client_only` one (the tests
+//! check both). None carries a host path, reaches the engine's settings, store, caches, Java or
+//! processes, or edits the instance, which writes launch hooks, Java and environment variables
+//! (`api::servers` changes a server's name and update channel itself). A server's live console is
+//! Core's own. A change is logged; a content change also holds the server, so it is refused while
+//! the server runs or installs. Its [`Hook`] says what else it does.
 
 use std::{io::Cursor, sync::Arc};
 
@@ -130,6 +130,7 @@ pub fn routes<M: Mount<Shared>>(mount: M) -> M {
             remove_instance_icon,
         ))
         .endpoint::<DeleteInstanceLog, _, _>(change(FILE, delete_instance_log))
+        .endpoint::<ListInstallJobs, _, _>(list_install_jobs)
 }
 
 /// The `untimed` routes: they download, or back the world up, first, or go through whole files and
