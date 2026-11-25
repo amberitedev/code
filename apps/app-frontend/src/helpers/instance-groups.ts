@@ -2,7 +2,7 @@ import {
 	instanceGroups,
 	type InstanceGroupDefinition,
 	type InstanceGroupMembershipUpdate,
-} from '@modrinth/api-client'
+} from '@amberite/contracts/app'
 
 import { apiClient } from '@/platform/modrinth-client'
 

@@ -2,10 +2,10 @@ import {
 	type ActiveOperation,
 	type Backup,
 	type BackupTaskState,
-	type ContractClient,
 	core as coreRoutes,
 	type CoreEvent,
-} from '@modrinth/api-client'
+} from '@amberite/contracts/core'
+import type { ContractClient } from '@modrinth/api-client'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, reactive } from 'vue'
 

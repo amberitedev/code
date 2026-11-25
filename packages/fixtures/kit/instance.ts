@@ -1,16 +1,15 @@
 import * as NodeCrypto from 'node:crypto'
 import * as NodeFS from 'node:fs'
 import * as NodePath from 'node:path'
+import type { ModLoader } from '@amberite/contracts/protocol'
 import {
 	installs,
 	instanceContent,
 	instances,
 	instanceSharing,
 	type InstallJobSnapshot,
-	localInstalls,
-	localSharing,
-	type ModLoader,
-} from '@amberite/contracts'
+} from '@amberite/contracts/engine'
+import { localInstalls, localSharing } from '@amberite/contracts/app'
 
 import { call } from '../src/call.ts'
 import { type App, FixtureError, state, step, until } from '../src/context.ts'

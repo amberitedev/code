@@ -1,12 +1,11 @@
 import {
-	type AbstractModrinthClient,
 	core as coreRoutes,
-	instanceContent,
 	type KnownPropertiesFields,
 	type Loader,
 	type PatchPropertiesFields,
-	type UploadProgress,
-} from '@modrinth/api-client'
+} from '@amberite/contracts/core'
+import { instanceContent } from '@amberite/contracts/engine'
+import type { AbstractModrinthClient, UploadProgress } from '@modrinth/api-client'
 
 /** What a server is set up with. */
 export type ServerSetup =

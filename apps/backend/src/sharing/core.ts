@@ -1,4 +1,4 @@
-import { cores } from '@amberite/contracts'
+import { cores } from '@amberite/contracts/backend'
 
 import { accountLocked } from '../common/auth'
 import { ApiError } from '../common/http'

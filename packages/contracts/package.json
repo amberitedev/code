@@ -6,6 +6,11 @@
 	"type": "module",
 	"types": "./ts/index.ts",
 	"exports": {
-		".": "./ts/index.ts"
+		".": "./ts/index.ts",
+		"./app": "./ts/app.ts",
+		"./backend": "./ts/backend.ts",
+		"./core": "./ts/core.ts",
+		"./engine": "./ts/engine.ts",
+		"./protocol": "./ts/protocol.ts"
 	}
 }

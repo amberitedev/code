@@ -1,4 +1,5 @@
-import { core, sharing } from '@amberite/contracts'
+import { sharing } from '@amberite/contracts/backend'
+import { core } from '@amberite/contracts/core'
 
 import { AbstractModule } from '../../core/abstract-module'
 import type { SharedInstances } from '../../modules/shared-instances/types'

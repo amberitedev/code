@@ -81,7 +81,7 @@
 </template>
 
 <script setup lang="ts">
-import { type PatchBackupOptions, core as coreRoutes } from '@modrinth/api-client'
+import { type PatchBackupOptions, core as coreRoutes } from '@amberite/contracts/core'
 import { SpinnerIcon } from '@modrinth/assets'
 import { useMutation } from '@tanstack/vue-query'
 import { computed, ref, watch } from 'vue'

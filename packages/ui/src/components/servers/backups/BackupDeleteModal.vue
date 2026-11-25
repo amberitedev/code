@@ -39,7 +39,7 @@
 </template>
 
 <script setup lang="ts">
-import type { Backup } from '@modrinth/api-client'
+import type { Backup } from '@amberite/contracts/core'
 import { TrashIcon, XIcon } from '@modrinth/assets'
 import { computed, ref } from 'vue'
 

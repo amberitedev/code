@@ -7,7 +7,9 @@ import * as NodeCrypto from 'node:crypto'
 import * as NodeFS from 'node:fs'
 import * as NodePath from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { core as coreApi, cores as coresApi, localAccounts } from '@amberite/contracts'
+import { cores as coresApi } from '@amberite/contracts/backend'
+import { core as coreApi } from '@amberite/contracts/core'
+import { localAccounts } from '@amberite/contracts/app'
 
 import { answers, appUrl, backendSession, call, send } from './call.ts'
 import {

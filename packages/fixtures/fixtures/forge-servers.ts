@@ -2,7 +2,7 @@
 // era, the NeoForge builds published under Forge's name, and NeoForge's one-step patching. Each
 // installs from its server profile in meta/.
 
-import { core } from '@amberite/contracts'
+import { core } from '@amberite/contracts/core'
 import { call, server, stack } from '@amberite/fixtures'
 
 const {

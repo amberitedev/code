@@ -137,7 +137,8 @@
 </template>
 
 <script setup lang="ts">
-import { core as coreRoutes, type ReleaseChannel } from '@modrinth/api-client'
+import type { ReleaseChannel } from '@amberite/contracts/protocol'
+import { core as coreRoutes } from '@amberite/contracts/core'
 import { TrashIcon } from '@modrinth/assets'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, ref, watch } from 'vue'

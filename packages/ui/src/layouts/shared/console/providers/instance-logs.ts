@@ -1,4 +1,5 @@
-import { type ContractClient, type Logs, logs as logRoutes } from '@modrinth/api-client'
+import { type Logs, logs as logRoutes } from '@amberite/contracts/engine'
+import type { ContractClient } from '@modrinth/api-client'
 import { type QueryKey, useQuery, useQueryClient } from '@tanstack/vue-query'
 import {
 	computed,

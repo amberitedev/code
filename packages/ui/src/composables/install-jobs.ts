@@ -1,4 +1,5 @@
-import { type ContractClient, type InstallJobSnapshot, installs } from '@modrinth/api-client'
+import { type InstallJobSnapshot, installs } from '@amberite/contracts/engine'
+import type { ContractClient } from '@modrinth/api-client'
 import { computed, type MaybeRefOrGetter, ref, toValue, watch } from 'vue'
 
 export interface InstallJobsOptions {

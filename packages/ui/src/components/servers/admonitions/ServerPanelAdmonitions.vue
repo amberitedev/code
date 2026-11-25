@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { core as coreRoutes } from '@modrinth/api-client'
+import { core as coreRoutes } from '@amberite/contracts/core'
 import { computed, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 

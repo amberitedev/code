@@ -1,10 +1,6 @@
-import {
-	core,
-	type ErrorCode,
-	type ListedCore,
-	PROTOCOL_VERSION,
-	type Server,
-} from '@amberite/contracts'
+import { type ErrorCode, PROTOCOL_VERSION } from '@amberite/contracts/protocol'
+import type { ListedCore } from '@amberite/contracts/backend'
+import { core, type Server } from '@amberite/contracts/core'
 import { describe, expect, it } from 'vite-plus/test'
 
 import { ModrinthApiError } from '../core/errors'

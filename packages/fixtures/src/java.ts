@@ -6,7 +6,7 @@
 
 import * as NodeFS from 'node:fs'
 import * as NodePath from 'node:path'
-import { java, type JavaVersion } from '@amberite/contracts'
+import { java, type JavaVersion } from '@amberite/contracts/engine'
 
 import { call } from './call.ts'
 import type { App } from './context.ts'

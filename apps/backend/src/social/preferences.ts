@@ -1,4 +1,4 @@
-import type { PreferencesUpdate, UserPreferences } from '@amberite/contracts'
+import type { PreferencesUpdate, UserPreferences } from '@amberite/contracts/backend'
 
 import { invalid, objectBody } from '../common/http'
 import type { Env, UserRow } from '../common/types'

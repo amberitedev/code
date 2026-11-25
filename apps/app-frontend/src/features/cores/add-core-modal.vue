@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ApiCallError, cores, type PendingCore } from '@modrinth/api-client'
+import { cores, type PendingCore } from '@amberite/contracts/backend'
+import { ApiCallError } from '@modrinth/api-client'
 import { RightArrowIcon } from '@modrinth/assets'
 import { Button, injectModrinthClient, NewModal } from '@modrinth/ui'
 import { useQueryClient } from '@tanstack/vue-query'

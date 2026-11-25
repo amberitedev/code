@@ -7,7 +7,7 @@ import {
 	localAccounts,
 	type ModrinthAuthFlow,
 	type ModrinthCredentials,
-} from '@modrinth/api-client'
+} from '@amberite/contracts/app'
 
 import { apiClient } from '@/platform/modrinth-client'
 

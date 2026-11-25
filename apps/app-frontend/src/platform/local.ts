@@ -1,4 +1,5 @@
-import { type ContractTransport, fetchWithProgress, localFiles } from '@modrinth/api-client'
+import { localFiles } from '@amberite/contracts/app'
+import { type ContractTransport, fetchWithProgress } from '@modrinth/api-client'
 
 declare global {
 	interface Window {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { instanceFiles } from '@modrinth/api-client'
+import { instanceFiles } from '@amberite/contracts/engine'
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 

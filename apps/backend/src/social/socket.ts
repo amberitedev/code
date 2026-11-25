@@ -3,7 +3,7 @@ import type {
 	FriendsSocketMessage,
 	ServerToClientMessage,
 	UserStatus,
-} from '@amberite/contracts'
+} from '@amberite/contracts/backend'
 import { DurableObject } from 'cloudflare:workers'
 import { requireSession } from '../common/auth'
 import type { Env } from '../common/types'

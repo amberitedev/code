@@ -35,7 +35,7 @@
 </template>
 
 <script setup lang="ts">
-import { core, type Server } from '@modrinth/api-client'
+import { core, type Server } from '@amberite/contracts/core'
 import { HistoryIcon, ServerStackIcon } from '@modrinth/assets'
 import {
 	commonMessages,

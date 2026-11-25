@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { contentStore, type StoreUsage } from '@modrinth/api-client'
+import { contentStore, type StoreUsage } from '@amberite/contracts/engine'
 import { LoaderCircleIcon, TrashIcon } from '@modrinth/assets'
 import {
 	type BarSegment,

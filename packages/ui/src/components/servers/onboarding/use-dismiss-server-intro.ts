@@ -1,4 +1,4 @@
-import type { Server } from '@modrinth/api-client'
+import type { Server } from '@amberite/contracts/core'
 import { useMutation, useQueryClient } from '@tanstack/vue-query'
 
 import { serverKeys } from '#ui/composables/server-queries'

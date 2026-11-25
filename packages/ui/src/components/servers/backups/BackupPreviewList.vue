@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Backup } from '@modrinth/api-client'
+import type { Backup } from '@amberite/contracts/core'
 import { onMounted, ref } from 'vue'
 
 import { useScrollIndicator } from '../../../composables/scroll-indicator'

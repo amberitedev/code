@@ -1,10 +1,10 @@
 import {
 	core,
 	type LinkedInstance,
-	ModrinthApiError,
 	type PatchPropertiesFields,
 	type Server,
-} from '@modrinth/api-client'
+} from '@amberite/contracts/core'
+import { ModrinthApiError } from '@modrinth/api-client'
 import { serverListQueryOptions } from '@modrinth/ui'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, type MaybeRefOrGetter, onScopeDispose, ref, toValue, watch } from 'vue'

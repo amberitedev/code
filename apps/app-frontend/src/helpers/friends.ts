@@ -1,4 +1,5 @@
-import { friends as friendRoutes, type UserFriend, type UserStatus } from '@modrinth/api-client'
+import type { UserFriend, UserStatus } from '@amberite/contracts/backend'
+import { friends as friendRoutes } from '@amberite/contracts/app'
 import type { User } from '@modrinth/utils'
 import type { Dayjs } from 'dayjs'
 import dayjs from 'dayjs'

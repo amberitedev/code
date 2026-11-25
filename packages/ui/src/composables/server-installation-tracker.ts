@@ -1,4 +1,4 @@
-import type { InstallJobSnapshot } from '@modrinth/api-client'
+import type { InstallJobSnapshot } from '@amberite/contracts/engine'
 import { computed, type ComputedRef, ref, watch } from 'vue'
 
 export type ServerPlatform = 'vanilla' | 'fabric' | 'quilt' | 'forge' | 'neoforge' | 'paper'

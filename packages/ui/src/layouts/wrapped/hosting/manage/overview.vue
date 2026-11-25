@@ -23,7 +23,9 @@
 </template>
 
 <script setup lang="ts">
-import { core as coreRoutes, instanceFiles, type Mclogs } from '@modrinth/api-client'
+import { core as coreRoutes } from '@amberite/contracts/core'
+import { instanceFiles } from '@amberite/contracts/engine'
+import type { Mclogs } from '@modrinth/api-client'
 import { useStorage } from '@vueuse/core'
 import { computed, ref, watch } from 'vue'
 

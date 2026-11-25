@@ -1,4 +1,5 @@
-import type { ContentItem as EngineContentItem, Labrinth } from '@modrinth/api-client'
+import type { ContentItem as EngineContentItem } from '@amberite/contracts/engine'
+import type { Labrinth } from '@modrinth/api-client'
 
 import type { ContentSide } from '../types'
 

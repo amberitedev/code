@@ -1,10 +1,6 @@
-import {
-	type AbstractModrinthClient,
-	ApiCallError,
-	core as coreRoutes,
-	instanceFiles,
-	type ServerIcon,
-} from '@modrinth/api-client'
+import { core as coreRoutes, type ServerIcon } from '@amberite/contracts/core'
+import { instanceFiles } from '@amberite/contracts/engine'
+import { type AbstractModrinthClient, ApiCallError } from '@modrinth/api-client'
 import { useQuery } from '@tanstack/vue-query'
 import { computed, type MaybeRefOrGetter, toValue } from 'vue'
 

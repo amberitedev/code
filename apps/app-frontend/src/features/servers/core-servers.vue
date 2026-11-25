@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ListedCore } from '@modrinth/api-client'
+import type { ListedCore } from '@amberite/contracts/backend'
 import { LinkIcon, PlusIcon, SearchIcon, SettingsIcon, UpdatedIcon } from '@modrinth/assets'
 import {
 	Button,

@@ -1,4 +1,5 @@
-import type { ContractClient, PowerState, Server, UploadState } from '@modrinth/api-client'
+import type { PowerState, Server } from '@amberite/contracts/core'
+import type { ContractClient, UploadState } from '@modrinth/api-client'
 import type { ComputedRef, Ref } from 'vue'
 
 import type { MessageDescriptor } from '#ui/composables/i18n'

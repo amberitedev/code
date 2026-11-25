@@ -1,4 +1,4 @@
-import { type PackSyncTarget, type SyncedPackType, syncedPacks } from '@modrinth/api-client'
+import { type PackSyncTarget, type SyncedPackType, syncedPacks } from '@amberite/contracts/app'
 import type { ContentItem } from '@modrinth/ui'
 import { queryOptions } from '@tanstack/vue-query'
 

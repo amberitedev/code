@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { OperationState } from '@modrinth/api-client'
+import type { OperationState } from '@amberite/contracts/core'
 import {
 	CheckCircleIcon,
 	InfoIcon,

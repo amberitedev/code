@@ -1,7 +1,7 @@
 // An App's long operations answer 202 at once and report how they ended only as an event, so a
 // helper that starts one listens for that event.
 
-import type { LocalEvent } from '@amberite/contracts'
+import type { LocalEvent } from '@amberite/contracts/app'
 
 import { appUrl, restartIfPatched } from './call.ts'
 import { type App, FixtureError, runtime } from './context.ts'

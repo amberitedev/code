@@ -1,11 +1,5 @@
-import type {
-	KnownPropertiesFields,
-	Kyros,
-	LauncherMeta,
-	LocalFile,
-	PatchPropertiesFields,
-	UploadProgress,
-} from '@modrinth/api-client'
+import type { KnownPropertiesFields, PatchPropertiesFields } from '@amberite/contracts/core'
+import type { Kyros, LauncherMeta, LocalFile, UploadProgress } from '@modrinth/api-client'
 import { useQueryClient } from '@tanstack/vue-query'
 import { computed, type ComputedRef, nextTick, type Ref, ref, type ShallowRef, watch } from 'vue'
 import type { ComponentExposed } from 'vue-component-type-helpers'

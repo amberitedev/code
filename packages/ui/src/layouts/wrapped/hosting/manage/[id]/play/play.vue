@@ -81,7 +81,7 @@
 </template>
 
 <script setup lang="ts">
-import { core as coreRoutes } from '@modrinth/api-client'
+import { core as coreRoutes } from '@amberite/contracts/core'
 import { useIntersectionObserver } from '@vueuse/core'
 import { computed, nextTick, onScopeDispose, ref, watch } from 'vue'
 

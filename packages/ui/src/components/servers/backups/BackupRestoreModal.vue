@@ -38,7 +38,7 @@
 </template>
 
 <script setup lang="ts">
-import { core as coreRoutes, type Backup } from '@modrinth/api-client'
+import { core as coreRoutes, type Backup } from '@amberite/contracts/core'
 import { RotateCounterClockwiseIcon, SpinnerIcon, XIcon } from '@modrinth/assets'
 import { useMutation, useQueryClient } from '@tanstack/vue-query'
 import { computed, ref } from 'vue'

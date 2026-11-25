@@ -1,9 +1,10 @@
+import { localSharing } from '@amberite/contracts/app'
 import { injectAuth, injectModrinthClient } from '@modrinth/ui'
 import { useQueries, useQuery } from '@tanstack/vue-query'
 import { computed, type MaybeRefOrGetter, toValue, watch } from 'vue'
 
 import type { GameInstance } from '@/helpers/types'
-import { getCachedSharedInstanceLibrary } from '@/platform/app-lib/shared-instances/commands'
+import { apiClient } from '@/platform/modrinth-client'
 
 import {
 	fromCachedSummary,
@@ -21,7 +22,8 @@ export function useUninstalledSharedInstances(instances: MaybeRefOrGetter<GameIn
 	const cachedQuery = useQuery({
 		networkMode: 'always' as const,
 		queryKey: computed(() => sharedInstanceLibraryKeys.cached(userId.value)),
-		queryFn: async () => (await getCachedSharedInstanceLibrary()).map(fromCachedSummary),
+		queryFn: async () =>
+			(await apiClient.local.call(localSharing.getCachedSharedLibrary)).map(fromCachedSummary),
 		enabled: computed(() => !!userId.value),
 		staleTime: Infinity,
 	})

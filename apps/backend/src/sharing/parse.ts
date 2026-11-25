@@ -1,19 +1,21 @@
 import {
-	type FollowedShare,
 	MAX_VERSION_FILES,
-	type NewInstanceVersion,
-	type NewInviteLink,
-	type NewServerShare,
-	type NewSharedInstance,
-	type OutsideAddress,
 	REMOVED_FILE_FOLDERS,
 	REMOVED_FILE_SUFFIXES,
-	type RemovedFile,
-	type SharedIconConfig,
-	type SharedInstanceUpdate,
-	type UserIds,
-	type VersionFault,
-} from '@amberite/contracts'
+} from '@amberite/contracts/protocol'
+import type {
+	FollowedShare,
+	NewInstanceVersion,
+	NewInviteLink,
+	NewServerShare,
+	NewSharedInstance,
+	OutsideAddress,
+	RemovedFile,
+	SharedIconConfig,
+	SharedInstanceUpdate,
+	UserIds,
+	VersionFault,
+} from '@amberite/contracts/backend'
 
 import { ApiError } from '../common/http'
 import { externalFile } from './pool'

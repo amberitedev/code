@@ -1,4 +1,5 @@
-import { type ContractClient, installs } from '@modrinth/api-client'
+import { installs } from '@amberite/contracts/engine'
+import type { ContractClient } from '@modrinth/api-client'
 import { useMutation, useQuery } from '@tanstack/vue-query'
 import { computed, type MaybeRefOrGetter, toValue } from 'vue'
 

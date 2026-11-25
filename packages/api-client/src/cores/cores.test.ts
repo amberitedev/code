@@ -1,4 +1,6 @@
-import { type ListedCore, PROTOCOL_VERSION, type Server } from '@amberite/contracts'
+import { PROTOCOL_VERSION } from '@amberite/contracts/protocol'
+import type { ListedCore } from '@amberite/contracts/backend'
+import type { Server } from '@amberite/contracts/core'
 import { describe, expect, it, vi } from 'vite-plus/test'
 
 import type { AbstractModrinthClient } from '../core/abstract-client'

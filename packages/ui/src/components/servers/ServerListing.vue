@@ -116,7 +116,7 @@
 </template>
 
 <script setup lang="ts">
-import { core, type Server } from '@modrinth/api-client'
+import { core, type Server } from '@amberite/contracts/core'
 import { SparklesIcon, SpinnerIcon } from '@modrinth/assets'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed } from 'vue'

@@ -1,4 +1,4 @@
-import { sharing } from '@amberite/contracts'
+import { sharing } from '@amberite/contracts/backend'
 
 import { requireUser } from '../common/auth'
 import { ApiError } from '../common/http'

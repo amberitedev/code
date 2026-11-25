@@ -1,10 +1,10 @@
+import type { StoreHost } from '@amberite/contracts/protocol'
 import type {
 	ExternalFile,
-	StoreHost,
 	StoredShare,
 	VersionDownload,
 	VersionUpload,
-} from '@amberite/contracts'
+} from '@amberite/contracts/backend'
 
 import { isPrivateHost } from '../common/address'
 import { ApiError } from '../common/http'

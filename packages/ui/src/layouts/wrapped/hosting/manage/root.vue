@@ -174,12 +174,9 @@
 </template>
 
 <script setup lang="ts">
-import {
-	core as coreRoutes,
-	instanceContent,
-	instanceFiles,
-	ModrinthApiError,
-} from '@modrinth/api-client'
+import { core as coreRoutes } from '@amberite/contracts/core'
+import { instanceContent, instanceFiles } from '@amberite/contracts/engine'
+import { ModrinthApiError } from '@modrinth/api-client'
 import {
 	BoxesIcon,
 	DatabaseBackupIcon,

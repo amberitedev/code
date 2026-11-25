@@ -3,7 +3,7 @@
 import * as NodeFS from 'node:fs'
 import * as NodePath from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { dev, type SqlAnswer, type SqlStatement } from '@amberite/contracts'
+import { dev, type SqlAnswer, type SqlStatement } from '@amberite/contracts/backend'
 
 import { devCall } from './call.ts'
 import { type App, type Core, FixtureError, state } from './context.ts'

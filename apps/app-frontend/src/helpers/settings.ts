@@ -3,7 +3,7 @@
  * So, for example, addDefaultInstance creates a blank instance object, where the Rust struct is serialized,
  *  and deserialized into a usable JS object.
  */
-import { type Settings, settings as settingsRoutes } from '@modrinth/api-client'
+import { type Settings, settings as settingsRoutes } from '@amberite/contracts/app'
 import { queryOptions } from '@tanstack/vue-query'
 
 import { apiClient } from '@/platform/modrinth-client'

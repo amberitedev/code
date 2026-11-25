@@ -298,7 +298,8 @@
 </template>
 
 <script setup lang="ts">
-import { type Archon, core as coreRoutes } from '@modrinth/api-client'
+import { core as coreRoutes } from '@amberite/contracts/core'
+import type { Archon } from '@modrinth/api-client'
 import { SearchIcon, SpinnerIcon } from '@modrinth/assets'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import Fuse from 'fuse.js'

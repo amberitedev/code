@@ -38,6 +38,7 @@
 </template>
 
 <script setup lang="ts">
+import { instanceSharing } from '@amberite/contracts/engine'
 import { injectNotificationManager, StackedAdmonitions } from '@modrinth/ui'
 import { computed, ref, watch } from 'vue'
 
@@ -45,7 +46,7 @@ import { useLinkedServers } from '@/features/servers/linked-servers'
 import { toError } from '@/helpers/errors'
 import type { SharedInstanceUnavailableReason } from '@/helpers/install'
 import type { GameInstance } from '@/helpers/types'
-import { dismissSharedInstanceRestoredNotice } from '@/platform/app-lib/shared-instances/commands'
+import { apiClient } from '@/platform/modrinth-client'
 
 import InstanceAdmonitionsLinkedServerFailed from './linked-server-failed.vue'
 import InstanceAdmonitionsSharedInstanceOwnerUpdate from './shared-instance-owner-update.vue'
@@ -114,10 +115,14 @@ const showSharedInstanceRestoredAdmonition = computed(
 
 async function dismissRestoredNotice() {
 	restoredNoticeDismissed.value = true
-	await dismissSharedInstanceRestoredNotice(props.instance.id).catch((error) => {
-		restoredNoticeDismissed.value = false
-		handleError(toError(error))
-	})
+	await apiClient.local
+		.call(instanceSharing.DismissSharedInstanceRestoredNotice, {
+			params: { id: props.instance.id },
+		})
+		.catch((error) => {
+			restoredNoticeDismissed.value = false
+			handleError(toError(error))
+		})
 }
 const stackItems = computed<InstanceAdmonitionItem[]>(() => {
 	const items: InstanceAdmonitionItem[] = []

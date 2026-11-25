@@ -25,7 +25,7 @@ import type {
 	UserPreferences,
 	UserSession,
 	UserUpdate,
-} from '@amberite/contracts'
+} from '@amberite/contracts/backend'
 
 import type { Labrinth } from '../modules/labrinth/types'
 import type { SharedInstances } from '../modules/shared-instances/types'

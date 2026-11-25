@@ -1,4 +1,4 @@
-import { core } from '@modrinth/api-client'
+import { core } from '@amberite/contracts/core'
 import { injectAuth, injectModrinthClient, serverKeys } from '@modrinth/ui'
 import { useQuery } from '@tanstack/vue-query'
 import { computed, type Ref } from 'vue'

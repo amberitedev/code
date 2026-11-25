@@ -1,4 +1,4 @@
-import type { SharedInstanceList } from '@modrinth/api-client'
+import type { SharedInstanceList } from '@amberite/contracts/backend'
 import { type MaybeRefOrGetter, toValue } from 'vue'
 
 import { useAppEvent } from '@/composables/use-app-event'

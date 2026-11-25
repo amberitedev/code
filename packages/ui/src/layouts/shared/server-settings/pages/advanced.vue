@@ -56,7 +56,7 @@
 </template>
 
 <script setup lang="ts">
-import { core as coreRoutes } from '@modrinth/api-client'
+import { core as coreRoutes } from '@amberite/contracts/core'
 import { EyeIcon, EyeOffIcon, SpinnerIcon } from '@modrinth/assets'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, ref, watch } from 'vue'

@@ -1,12 +1,6 @@
-import {
-	type ApiError,
-	type CoreSession,
-	type Endpoint,
-	core as coreRoutes,
-	cores,
-	type ListedCore,
-	type Server,
-} from '@amberite/contracts'
+import type { ApiError, Endpoint } from '@amberite/contracts/protocol'
+import { cores, type ListedCore } from '@amberite/contracts/backend'
+import { type CoreSession, core as coreRoutes, type Server } from '@amberite/contracts/core'
 
 import type { ContractClient, LocationOf } from '../contracts/client'
 import { ApiCallError } from '../contracts/errors'
