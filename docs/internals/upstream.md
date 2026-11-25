@@ -53,11 +53,14 @@ leaves it unreachable or in the wrong place.
 - A change to a desktop domain (accounts, skins, friends, Discord, settings and the like) goes to
   that domain's folder, `apps/app/src/<domain>`, and its migrations to the App's migrations.
 - A new upstream migration is ported by hand into the fresh engine or App schema.
-- Upstream's Archon calls in our screens go to the engine API.
-- Upstream's `archon` and `shared-instances` modules in api-client stay as upstream has them, for
-  upstream's own pages, minus the Modrinth Hosting business modules below. Our screens use our API.
-- A hosting method upstream's pages call on a Core is answered by an adapter in
-  `packages/api-client/src/core-hosting/`, one file per upstream module, over the Core's Endpoints.
+- Upstream's Archon and Kyros calls in our screens become calls of the Core's or the engine's
+  Endpoints with `client.core(coreId)`, on their generated types. Where an upstream shape names a
+  world, a Core server's one world has the server's id.
+- Upstream's `archon` and `kyros` modules in api-client are under `ignore`: there is no Modrinth
+  Hosting to call, so `client.archon` and `client.kyros` do not exist. Their `types.ts` stay as
+  upstream has them, for the upstream screens that still name them, with no fields of ours.
+- Upstream's `shared-instances` modules stay as upstream has them, minus the Modrinth Hosting
+  business modules below. Our screens use our API.
 - There is no Modrinth Hosting. Its business code (billing and purchase, Stripe, Intercom, surveys,
   suspension, staff support tools and their api-client modules) goes under `ignore`, and nothing
   falls back to Modrinth's hosting or shared-instances hosts.

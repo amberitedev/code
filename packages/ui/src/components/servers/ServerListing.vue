@@ -116,13 +116,14 @@
 </template>
 
 <script setup lang="ts">
-import type { Archon } from '@modrinth/api-client'
+import { core, type Server } from '@modrinth/api-client'
 import { SparklesIcon, SpinnerIcon } from '@modrinth/assets'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { defineMessages, useVIntl } from '../../composables/i18n'
+import { serverKeys } from '../../composables/server-queries'
 import { useServerIcon } from '../../composables/use-server-icon'
 import { injectModrinthClient } from '../../providers/api-client'
 import Avatar from '../base/Avatar.vue'
@@ -159,44 +160,36 @@ const messages = defineMessages({
 	},
 })
 
-type ServerListingProps = {
-	server_id: string
-	name: string
-	status: Archon.Servers.v0.Status
-	game?: Archon.Servers.v0.Game
-	mc_version?: string | null
-	loader?: Archon.Servers.v0.Loader | null
-	loader_version?: string | null
-	net?: Archon.Servers.v0.Net
-	upstream?: Archon.Servers.v0.Upstream | null
-	icon?: Archon.Icons.v1.ServerIcon | null
-	flows?: Archon.Servers.v0.Flows
-	online?: boolean
-	playerCount?: {
-		current?: number
-		max?: number
+type ServerListingProps = Pick<Server, 'server_id' | 'name' | 'status'> &
+	Partial<
+		Pick<Server, 'mc_version' | 'loader' | 'loader_version' | 'net' | 'upstream' | 'icon' | 'flows'>
+	> & {
+		game?: string
+		online?: boolean
+		playerCount?: {
+			current?: number
+			max?: number
+		}
+		isProvisioning?: boolean
+		owner?: ServerListingOwner
 	}
-	isProvisioning?: boolean
-	owner?: ServerListingOwner
-}
 
 const props = defineProps<ServerListingProps>()
 const router = useRouter()
 
-const { archon, labrinth } = injectModrinthClient()
+const client = injectModrinthClient()
+const { labrinth } = client
 const queryClient = useQueryClient()
 
-/** Warms the two requests the server panel opens with while the pointer is over the row. */
+/** Warms the request the server panel opens with while the pointer is over the row. */
 function prefetchServer() {
 	if (isDisabled.value) return
 	void queryClient.prefetchQuery({
-		queryKey: ['servers', 'detail', props.server_id],
-		queryFn: () => archon.servers_v0.get(props.server_id),
-		staleTime: 30_000,
-	})
-	void queryClient.prefetchQuery({
-		queryKey: ['servers', 'v1', 'detail', props.server_id],
-		queryFn: () => archon.servers_v1.get(props.server_id),
+		queryKey: serverKeys.detail(props.server_id),
+		queryFn: async () =>
+			(await client.cores.serverRoutes(props.server_id)).call(core.GetServer, {
+				params: { id: props.server_id },
+			}),
 		staleTime: 30_000,
 	})
 }

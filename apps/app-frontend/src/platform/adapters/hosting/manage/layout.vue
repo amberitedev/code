@@ -35,12 +35,13 @@
 </template>
 
 <script setup lang="ts">
-import type { Archon } from '@modrinth/api-client'
+import { core, type Server } from '@modrinth/api-client'
 import { HistoryIcon, ServerStackIcon } from '@modrinth/assets'
 import {
 	commonMessages,
 	injectAuth,
 	injectModrinthClient,
+	serverKeys,
 	ServersManageRootLayout,
 	useVIntl,
 } from '@modrinth/ui'
@@ -94,7 +95,7 @@ const historyTabs = computed(() =>
 
 function getCachedServerName(id: string): string | undefined {
 	return queryClient
-		.getQueryData<Archon.Servers.v0.ServerGetResponse>(['servers'])
+		.getQueryData<{ servers: Server[] }>(serverKeys.list())
 		?.servers.find((server) => server.server_id === id)?.name
 }
 
@@ -108,14 +109,17 @@ const { data: coreId, isLoading: coreLoading } = useQuery({
 })
 
 const { data: serverData } = useQuery({
-	queryKey: computed(() => ['servers', 'detail', serverId.value]),
-	queryFn: () => client.archon.servers_v0.get(serverId.value),
+	queryKey: computed(() => serverKeys.detail(serverId.value)),
+	queryFn: async () =>
+		(await client.cores.serverRoutes(serverId.value)).call(core.GetServer, {
+			params: { id: serverId.value },
+		}),
 	enabled: computed(() => Boolean(serverId.value)),
 	// The panel's own query of this server says when its Core is offline; retrying only delays it.
 	retry: false,
 	placeholderData: () =>
 		queryClient
-			.getQueryData<Archon.Servers.v0.ServerGetResponse>(['servers'])
+			.getQueryData<{ servers: Server[] }>(serverKeys.list())
 			?.servers.find((server) => server.server_id === serverId.value),
 	staleTime: 30_000,
 })

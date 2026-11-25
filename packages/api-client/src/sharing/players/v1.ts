@@ -1,4 +1,4 @@
-import { sharing } from '@amberite/contracts'
+import { core, sharing } from '@amberite/contracts'
 
 import { AbstractModule } from '../../core/abstract-module'
 import type { SharedInstances } from '../../modules/shared-instances/types'
@@ -77,12 +77,9 @@ export class SharedInstancesPlayersV1Module extends AbstractModule {
 	 * not). Players join that when known, otherwise the port on the Core's latest address.
 	 */
 	private async server(serverId: string, instanceId: string) {
-		const { name, net } = await this.client.archon.servers_v0.get(serverId)
-		return {
-			instance_id: instanceId,
-			name,
-			port: net.game_port ?? net.port,
-			outside: net.outside ?? null,
-		}
+		const { name, net } = await (
+			await this.client.cores.serverRoutes(serverId)
+		).call(core.GetServer, { params: { id: serverId } })
+		return { instance_id: instanceId, name, port: net.game_port, outside: net.outside }
 	}
 }

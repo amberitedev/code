@@ -10,7 +10,6 @@
 		:initial-game-version="initialGameVersion"
 		:fade="props.initialSetup ? undefined : 'danger'"
 		:get-project-versions="getProjectVersions"
-		:get-curse-forge-target="getCurseForgeTarget"
 		:finish-disabled="!canCompleteSetup"
 		:finish-disabled-tooltip="!canCompleteSetup ? permissionDeniedMessage : undefined"
 		@create="onFlowComplete"
@@ -20,19 +19,19 @@
 </template>
 
 <script setup lang="ts">
-import type { Archon, ModrinthApiError } from '@modrinth/api-client'
+import type { ModrinthApiError } from '@modrinth/api-client'
 import { computed, useTemplateRef } from 'vue'
 
 import { useDebugLogger } from '#ui/composables/debug-logger'
-import type { ServerInstallationKey } from '#ui/composables/server-installation-tracker'
+import type { ServerPlatform } from '#ui/composables/server-installation-tracker'
 import { useServerPermissions } from '#ui/composables/server-permissions'
+import { setUpServer } from '#ui/composables/server-setup'
 
 import { defineMessages, useVIntl } from '../../composables/i18n'
 import { injectModrinthClient } from '../../providers/api-client'
 import { injectModrinthServerContext } from '../../providers/server-context'
 import { injectNotificationManager } from '../../providers/web-notifications'
 import type { CreationFlowContextValue } from '../flows/creation-flow-modal/creation-flow-context'
-import { installCurseForgeModpack } from '../flows/creation-flow-modal/curseforge'
 import CreationFlowModal from '../flows/creation-flow-modal/index.vue'
 
 const { formatMessage } = useVIntl()
@@ -61,21 +60,12 @@ const client = injectModrinthClient()
 const serverContext = injectModrinthServerContext()
 const { addNotification } = injectNotificationManager()
 
-const serverLoaders = ['vanilla', 'fabric', 'neoforge', 'forge', 'quilt', 'paper', 'purpur']
+const serverLoaders = ['vanilla', 'fabric', 'neoforge', 'forge', 'quilt', 'paper']
 const { canSetup, canResetServer, permissionDeniedMessage } = useServerPermissions()
 
 async function getProjectVersions(projectId: string) {
 	const versions = await client.labrinth.versions_v3.getProjectVersions(projectId)
 	return versions.map((v) => ({ id: v.id }))
-}
-
-async function getCurseForgeTarget() {
-	return { worldId: serverContext.serverId }
-}
-
-function toApiLoader(loader: string): Archon.Content.v1.Modloader {
-	if (loader === 'neoforge') return 'neo_forge'
-	return loader as Archon.Content.v1.Modloader
 }
 
 const props = defineProps<{
@@ -114,82 +104,63 @@ async function onFlowComplete(ctx: CreationFlowContextValue) {
 		selectedLoader: ctx.selectedLoader.value,
 		selectedGameVersion: ctx.selectedGameVersion.value,
 		selectedLoaderVersion: ctx.selectedLoaderVersion.value,
-		worldId: serverContext.serverId,
 	})
 
+	const { coreId, serverId } = serverContext
 	try {
 		if (ctx.projectInstall.value) {
-			await ctx.installServerContent(serverContext.serverId, serverContext.serverId)
+			await ctx.installServerContent(coreId, serverId)
 			emitReinstall()
+		} else if (ctx.setupType.value === 'curseforge') {
+			throw new Error('A Core does not install CurseForge modpacks.')
 		} else if (ctx.setupType.value === 'modpack' && ctx.modpackFile.value) {
 			debug('onFlowComplete: mrpack upload path')
-			await handleMrpackUpload(ctx, ctx.modpackFile.value)
-		} else if (ctx.setupType.value === 'curseforge') {
-			debug('onFlowComplete: curseforge path')
-			await handleCurseForgeInstall(ctx)
+			const file = ctx.modpackFile.value
+			await ctx.trackUpload((onUploadProgress) =>
+				setUpServer(
+					client,
+					coreId,
+					serverId,
+					{ type: 'pack-file', file },
+					{ properties: ctx.buildProperties(), onUploadProgress },
+				),
+			)
+			serverContext.beginInstallation({ type: 'local_modpack', filename: file.name })
+			emitReinstall()
 		} else if (ctx.setupType.value === 'modpack' && ctx.modpackSelection.value) {
-			debug('onFlowComplete: modpack selection path, calling installContent')
+			const { projectId, versionId } = ctx.modpackSelection.value
 			serverContext.beginInstallation({
 				type: 'modrinth_modpack',
-				project_id: ctx.modpackSelection.value.projectId,
-				version_id: ctx.modpackSelection.value.versionId,
+				project_id: projectId,
+				version_id: versionId,
 			})
-			await client.archon.content_v1.installContent(
-				serverContext.serverId,
-				serverContext.serverId,
-				{
-					content_variant: 'modpack',
-					spec: {
-						platform: 'modrinth',
-						project_id: ctx.modpackSelection.value.projectId,
-						version_id: ctx.modpackSelection.value.versionId,
-					},
-					soft_override: false,
-					properties: ctx.buildProperties(),
-				},
+			await setUpServer(
+				client,
+				coreId,
+				serverId,
+				{ type: 'modpack', projectId, versionId },
+				{ properties: ctx.buildProperties() },
 			)
-			debug('onFlowComplete: modpack installContent returned, emitting reinstall')
 			emitReinstall()
 		} else {
-			const loader = ctx.selectedLoader.value
-			const loaderVersion =
-				!loader || loader === 'vanilla' ? '' : (ctx.selectedLoaderVersion.value ?? '')
-
-			debug('onFlowComplete: bare install path', {
-				loader,
-				loaderVersion,
-				gameVersion: ctx.selectedGameVersion.value,
-				apiLoader: toApiLoader(loader ?? 'vanilla'),
-			})
+			const loader = ctx.selectedLoader.value ?? 'vanilla'
+			const loaderVersion = loader === 'vanilla' ? '' : (ctx.selectedLoaderVersion.value ?? '')
+			const gameVersion = ctx.selectedGameVersion.value ?? ''
 
 			serverContext.beginInstallation({
 				type: 'platform',
-				platform: (loader ?? 'vanilla') as Extract<
-					ServerInstallationKey,
-					{ type: 'platform' }
-				>['platform'],
+				platform: loader as ServerPlatform,
 				platform_version: loaderVersion,
-				game_version: ctx.selectedGameVersion.value ?? '',
+				game_version: gameVersion,
 			})
-			await client.archon.content_v1.installContent(
-				serverContext.serverId,
-				serverContext.serverId,
-				{
-					content_variant: 'bare',
-					loader: toApiLoader(loader ?? 'vanilla'),
-					version: loaderVersion,
-					game_version: ctx.selectedGameVersion.value ?? undefined,
-					soft_override: false,
-					properties: ctx.buildProperties(),
-				},
+			await setUpServer(
+				client,
+				coreId,
+				serverId,
+				{ type: 'loader', loader, loaderVersion, gameVersion },
+				{ properties: ctx.buildProperties() },
 			)
-
-			debug('onFlowComplete: bare installContent returned, emitting reinstall')
-			emitReinstall({
-				loader: loader ?? 'vanilla',
-				lVersion: loaderVersion,
-				mVersion: ctx.selectedGameVersion.value,
-			})
+			emitReinstall({ loader, lVersion: loaderVersion, mVersion: ctx.selectedGameVersion.value })
 		}
 
 		creationFlowRef.value?.hide()
@@ -214,38 +185,6 @@ async function onFlowComplete(ctx: CreationFlowContextValue) {
 	}
 }
 
-async function handleMrpackUpload(ctx: CreationFlowContextValue, file: File) {
-	await ctx.trackUpload(
-		(onProgress) =>
-			client.kyros.content_v1.uploadModpackFile(
-				serverContext.serverId,
-				file,
-				ctx.buildProperties(),
-				{ softOverride: false, onProgress },
-			).promise,
-	)
-	serverContext.beginInstallation({
-		type: 'local_modpack',
-		filename: file.name,
-	})
-	emitReinstall()
-}
-
-async function handleCurseForgeInstall(ctx: CreationFlowContextValue) {
-	const worldId = serverContext.serverId
-	if (ctx.curseforgeModpackFile.value || ctx.curseforgeServerPackFile.value) {
-		await ctx.trackUpload((onUploadProgress) =>
-			installCurseForgeModpack(client, worldId, ctx, { softOverride: false, onUploadProgress }),
-		)
-	} else {
-		await installCurseForgeModpack(client, worldId, ctx, {
-			softOverride: false,
-		})
-	}
-	serverContext.beginInstallation({ type: 'unknown' })
-	emitReinstall()
-}
-
 function emitReinstall(args?: { loader: string; lVersion: string; mVersion: string | null }) {
 	debug('emitReinstall:', args)
 	emit('reinstall', args)
@@ -255,7 +194,6 @@ function show() {
 	if (!canCompleteSetup.value) return
 
 	void creationFlowRef.value?.ctx?.fetchLoaderMetadata('paper')
-	void creationFlowRef.value?.ctx?.fetchLoaderMetadata('purpur')
 	creationFlowRef.value?.show()
 }
 

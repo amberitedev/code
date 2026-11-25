@@ -22,7 +22,7 @@ const CORE: ListedCore = {
 }
 const SERVER = {
 	server_id: '00000000-0000-4000-8000-000000000001',
-	net: { ip: '203.0.113.5', port: 41000, domain: '', game_port: 25565 },
+	net: { ip: '203.0.113.5', port: 41000, outside: null, game_port: 25565 },
 }
 const LISTED: Server = {
 	server_id: SERVER.server_id,

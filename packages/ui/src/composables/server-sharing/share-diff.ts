@@ -1,4 +1,4 @@
-import type { Copal } from '@modrinth/api-client'
+import type { SharedInstanceUpdateDiff } from '@modrinth/api-client'
 
 import type { ContentDiffItem } from '#ui/layouts/shared/installation-settings/types'
 
@@ -7,9 +7,7 @@ import type { ContentDiffItem } from '#ui/layouts/shared/installation-settings/t
  * Core server's push, all give it in `sharing_client::diff`'s shape. File names are URL-encoded
  * because the diff list decodes them.
  */
-export function sharedDiffItems(
-	diffs: readonly Copal.SharedInstanceUpdateDiff[],
-): ContentDiffItem[] {
+export function sharedDiffItems(diffs: readonly SharedInstanceUpdateDiff[]): ContentDiffItem[] {
 	return diffs.map((diff) => ({
 		type: diff.type,
 		projectName: diff.projectName ?? undefined,

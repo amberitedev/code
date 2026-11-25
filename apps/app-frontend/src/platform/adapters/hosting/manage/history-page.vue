@@ -40,7 +40,7 @@ function reportError(title: string) {
 function reloadServer() {
 	return Promise.all([
 		queryClient.invalidateQueries({ queryKey: serverKeys.content(serverId.value) }),
-		queryClient.invalidateQueries({ queryKey: serverKeys.detailV1(serverId.value) }),
+		queryClient.invalidateQueries({ queryKey: serverKeys.detail(serverId.value) }),
 		queryClient.invalidateQueries({ queryKey: serverKeys.shareDiff(serverId.value) }),
 	])
 }

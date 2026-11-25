@@ -21,7 +21,6 @@ import MultiStageModal from '../../base/MultiStageModal.vue'
 import {
 	createCreationFlowContext,
 	type CreationFlowContextValue,
-	type CurseForgeTarget,
 	type FlowType,
 	type LoaderManifestResolver,
 	type ProjectInstallCreateData,
@@ -51,7 +50,6 @@ const props = withDefaults(
 		createProjectInstall?: (data: ProjectInstallCreateData) => Promise<void>
 		getProjectVersions?: (projectId: string) => Promise<{ id: string }[]>
 		getLoaderManifest?: LoaderManifestResolver
-		getCurseForgeTarget?: () => Promise<CurseForgeTarget>
 		randomizeInstanceIcon?: () => Promise<{ path: string; previewUrl: string } | null>
 		customizeInstanceIcon?: () => void
 		finishDisabled?: boolean
@@ -102,7 +100,6 @@ const ctx = createCreationFlowContext(
 		createProjectInstall: props.createProjectInstall,
 		getProjectVersions: props.getProjectVersions,
 		getLoaderManifest: props.getLoaderManifest,
-		getCurseForgeTarget: props.getCurseForgeTarget,
 		randomizeInstanceIcon: props.randomizeInstanceIcon,
 		customizeInstanceIcon: props.customizeInstanceIcon,
 		finishDisabled: computed(() => props.finishDisabled ?? false),

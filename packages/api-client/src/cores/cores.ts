@@ -5,13 +5,12 @@ import {
 	core as coreRoutes,
 	cores,
 	type ListedCore,
+	type Server,
 } from '@amberite/contracts'
 
 import type { ContractClient, LocationOf } from '../contracts/client'
 import { ApiCallError } from '../contracts/errors'
 import type { AbstractModrinthClient } from '../core/abstract-client'
-import { archonServer } from '../core-hosting/servers-v0'
-import type { Archon } from '../modules/archon/types'
 import type { CoreCallError, CoreSessions } from '../types/client'
 
 /** How long a Core's local address may take to answer before its internet address is used. */
@@ -246,9 +245,8 @@ export class Cores {
 	 * Pass the result to `getHostingServerAddress`; show and copy the plain `net`, which is what
 	 * everyone else joins.
 	 */
-	public joinNet(server: Pick<Archon.Servers.v0.Server, 'server_id' | 'net'>) {
+	public joinNet(server: Pick<Server, 'server_id' | 'net'>) {
 		const { net } = server
-		if (net.game_port === undefined) return net
 		const coreId = this.serverCores.get(server.server_id)
 		const core = this.listed.find((candidate) => candidate.id === coreId)
 		if (!core || this.address(core) !== core.address) return net
@@ -265,27 +263,22 @@ export class Cores {
 	 * The servers of every listed Core as one list. A Core that cannot be reached is left out and
 	 * named in `offline_cores`; when none can be reached this throws. A Core that did not answer
 	 * makes the next call ask the backend for the list again, at most once every
-	 * `FAILURE_REFETCH_MS`, so polling while a Core is down does not redo the routing every time.
+	 * `FAILURE_REFETCH_MS`, so a list read while a Core is down does not redo the routing every time.
 	 */
-	public async servers(): Promise<Archon.Servers.v0.ServerGetResponse> {
+	public async servers(): Promise<{ servers: Server[]; offline_cores: string[] }> {
 		const cores = await this.known()
 		const results = await Promise.allSettled(
 			cores.map((core) => this.client.core(core.id).call(coreRoutes.ListServers)),
 		)
-		const merged: Archon.Servers.v0.ServerGetResponse = {
-			servers: [],
-			pagination: { current_page: 1, page_size: 0, total_pages: 1, total_items: 0 },
-			users: {},
-			offline_cores: [],
-		}
+		const merged = { servers: [] as Server[], offline_cores: [] as string[] }
 		results.forEach((result, index) => {
 			if (result.status !== 'fulfilled') {
-				merged.offline_cores?.push(cores[index].id)
+				merged.offline_cores.push(cores[index].id)
 				return
 			}
 			for (const server of result.value) {
 				this.serverCores.set(server.server_id, cores[index].id)
-				merged.servers.push(archonServer(server, this.base(cores[index])))
+				merged.servers.push(server)
 			}
 		})
 		const failure = results.find((result) => result.status === 'rejected')
@@ -295,7 +288,6 @@ export class Cores {
 			this.cores = null
 		}
 		if (failure && !results.some((result) => result.status === 'fulfilled')) throw failure.reason
-		merged.pagination.page_size = merged.pagination.total_items = merged.servers.length
 		return merged
 	}
 

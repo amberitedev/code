@@ -1,4 +1,4 @@
-import { ModrinthApiError } from '@modrinth/api-client'
+import { core as coreRoutes, ModrinthApiError } from '@modrinth/api-client'
 import {
 	useIsFetching,
 	useIsMutating,
@@ -12,12 +12,7 @@ import type ServerSharePushModal from '#ui/components/servers/sharing/ServerShar
 import { defineMessages, useVIntl } from '#ui/composables/i18n'
 import { useServerPermissions } from '#ui/composables/server-permissions'
 import { serverKeys } from '#ui/composables/server-queries'
-import {
-	injectAuth,
-	injectModrinthClient,
-	injectModrinthServerContext,
-	injectNotificationManager,
-} from '#ui/providers'
+import { injectAuth, injectModrinthServerContext, injectNotificationManager } from '#ui/providers'
 
 import { serverShareableFilesQueryOptions, serverShareDiffQueryOptions } from './query-options'
 
@@ -37,9 +32,8 @@ export function useServerShareReview<Action extends string = 'push'>(options?: {
 	execute: (action: Action, target: ServerShareActionTarget) => Promise<void>
 	disabled?: Ref<boolean>
 }) {
-	const client = injectModrinthClient()
 	const auth = injectAuth()
-	const { serverId, server, busyReasons } = injectModrinthServerContext()
+	const { serverId, core, server, busyReasons, isServerRunning } = injectModrinthServerContext()
 	// A Core names a server's one world by the server's id.
 	const worldId = computed<string | null>(() => serverId)
 	const { canSetup } = useServerPermissions()
@@ -55,7 +49,7 @@ export function useServerShareReview<Action extends string = 'push'>(options?: {
 	})
 	const previewQuery = useQuery(
 		computed(() => ({
-			...serverShareDiffQueryOptions(client, serverId, worldId.value ?? '', auth.user.value?.id),
+			...serverShareDiffQueryOptions(core, serverId, isServerRunning.value, auth.user.value?.id),
 			enabled: false,
 		})),
 	)
@@ -109,7 +103,7 @@ export function useServerShareReview<Action extends string = 'push'>(options?: {
 	function prefetchFiles() {
 		if (!canSetup.value || !worldId.value) return
 		void queryClient.prefetchQuery({
-			...serverShareableFilesQueryOptions(client, serverId, worldId.value, auth.user.value?.id),
+			...serverShareableFilesQueryOptions(core, serverId, auth.user.value?.id),
 			staleTime: 30_000,
 		})
 	}
@@ -137,16 +131,18 @@ export function useServerShareReview<Action extends string = 'push'>(options?: {
 
 	async function publish(target: ServerShareActionTarget) {
 		if (!canSetup.value) throw new Error(formatMessage(messages.permission))
-		const shared = await client.archon.content_v1.share(
-			serverId,
-			target.worldId,
-			target.configPaths,
-			{ restart: target.restart, removedConfigPaths: target.removedConfigPaths },
-		)
+		const shared = await core.call(coreRoutes.ShareServer, {
+			params: { id: serverId },
+			body: {
+				file_paths: target.configPaths,
+				removed_paths: target.removedConfigPaths,
+				restart: target.restart ?? false,
+			},
+		})
 		target.pushed = true
 		await Promise.all([
-			queryClient.invalidateQueries({ queryKey: serverKeys.detailV1(serverId) }),
-			queryClient.invalidateQueries({ queryKey: serverKeys.shareDiff(serverId, target.worldId) }),
+			queryClient.invalidateQueries({ queryKey: serverKeys.detail(serverId) }),
+			queryClient.invalidateQueries({ queryKey: serverKeys.shareDiff(serverId) }),
 			queryClient.invalidateQueries({ queryKey: serverKeys.shareHistory(serverId) }),
 		])
 		return shared

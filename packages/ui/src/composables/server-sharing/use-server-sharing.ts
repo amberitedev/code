@@ -1,4 +1,4 @@
-import type { SharedInstances } from '@modrinth/api-client'
+import { instanceSharing, type SharedInstances } from '@modrinth/api-client'
 import { useIsMutating, useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed } from 'vue'
 
@@ -20,7 +20,7 @@ export function useServerSharingSettings() {
 	const auth = injectAuth()
 	const queryClient = useQueryClient()
 	const { handleError } = injectNotificationManager()
-	const { serverId, server, busyReasons } = injectModrinthServerContext()
+	const { serverId, core, server, busyReasons } = injectModrinthServerContext()
 	// A Core names a server's one world by the server's id.
 	const worldId = computed<string | null>(() => serverId)
 	const { canSetup, permissionDeniedMessage } = useServerPermissions()
@@ -63,10 +63,11 @@ export function useServerSharingSettings() {
 	})
 	const unpublishMutation = useMutation({
 		mutationKey: ['servers', 'share-action', serverId],
-		mutationFn: (target: ShareTarget) => client.archon.content_v1.unshare(serverId, target.worldId),
+		mutationFn: (_target: ShareTarget) =>
+			core.call(instanceSharing.UnpublishSharedInstance, { params: { id: serverId } }),
 		onSuccess: (_data, target) =>
-			clearServerSharedInstance(queryClient, serverId, target.worldId, target.instanceId),
-		onSettled: () => queryClient.invalidateQueries({ queryKey: serverKeys.detailV1(serverId) }),
+			clearServerSharedInstance(queryClient, serverId, target.instanceId),
+		onSettled: () => queryClient.invalidateQueries({ queryKey: serverKeys.detail(serverId) }),
 	})
 	const busy = computed(
 		() =>

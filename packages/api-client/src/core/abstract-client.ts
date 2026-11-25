@@ -14,7 +14,6 @@ import { Cores } from '../cores/cores'
 import { EventStream } from '../events/event-stream'
 import type { InferredClientModules } from '../modules'
 import { buildModuleStructure } from '../modules'
-import { withCoreHosting } from '../core-hosting'
 import type { BaseUrlConfig, ClientConfig } from '../types/client'
 import type { DownloadSink } from '../types/download'
 import type { RequestContext, RequestOptions } from '../types/request'
@@ -22,17 +21,10 @@ import type { UploadMetadata, UploadProgress, UploadRequestOptions } from '../ty
 import { appendRequestParams } from '../utils/fetch'
 import type { AbstractFeature } from './abstract-feature'
 import type { AbstractModule } from './abstract-module'
-import type { AbstractSyncClient } from './abstract-sync'
 import { CoreSessionFeature, coreSessionTransport, protocolChecked } from '../features/core-session'
 import { SelfHostedFeature } from '../features/self-hosted'
 import { AbstractUploadClient } from './abstract-upload-client'
-import type { AbstractWebSocketClient } from './abstract-websocket'
 import { ModrinthApiError, ModrinthServerError } from './errors'
-
-type ArchonClientModules = Omit<InferredClientModules['archon'], 'backups_v1'> & {
-	/** @deprecated Use `backups_queue_v1` for the Backups Queue API. */
-	backups_v1: InferredClientModules['archon']['backups_v1']
-}
 
 /** What a Core's event socket sends: its own events and its engine's. */
 export type CoreStreamEvent = CoreEvent | EngineEvent
@@ -61,10 +53,6 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 	private _cores?: Cores
 
 	public readonly labrinth!: InferredClientModules['labrinth']
-	public readonly archon!: ArchonClientModules & {
-		sockets: AbstractWebSocketClient
-		sync: AbstractSyncClient
-	}
 	/** See `ClientConfig.connectCore`. */
 	public get connectCore(): ClientConfig['connectCore'] {
 		return this.config.connectCore
@@ -146,7 +134,6 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 		return stream
 	}
 
-	public readonly kyros!: InferredClientModules['kyros']
 	public readonly iso3166!: InferredClientModules['iso3166']
 	public readonly mclogs!: InferredClientModules['mclogs']
 	public readonly launchermeta!: InferredClientModules['launchermeta']
@@ -164,7 +151,6 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 		this.features = config.features ?? []
 		if (config.coreSessions) this.features.unshift(new CoreSessionFeature(this))
 		this.initializeModules()
-		withCoreHosting(this)
 	}
 
 	/**

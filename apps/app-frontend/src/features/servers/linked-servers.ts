@@ -1,4 +1,10 @@
-import { type Archon, ModrinthApiError } from '@modrinth/api-client'
+import {
+	core,
+	type LinkedInstance,
+	ModrinthApiError,
+	type PatchPropertiesFields,
+	type Server,
+} from '@modrinth/api-client'
 import { serverListQueryOptions } from '@modrinth/ui'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, type MaybeRefOrGetter, onScopeDispose, ref, toValue, watch } from 'vue'
@@ -7,9 +13,7 @@ import { useCores } from '@/features/cores/use-cores'
 import { ensure_shared_instance } from '@/helpers/instance'
 import { apiClient } from '@/platform/modrinth-client'
 
-export type LinkedServer = Archon.Servers.v0.Server & {
-	linked_instance: Archon.Servers.v0.LinkedInstance
-}
+export type LinkedServer = Server & { linked_instance: LinkedInstance }
 
 /**
  * The one query for the Cores' server list, under the same key and fetch as the Servers page so
@@ -137,7 +141,7 @@ export function useLinkedServers(instanceId: MaybeRefOrGetter<string | undefined
 }
 
 /** Whether the server's process is up, including while it starts or stops. */
-export function isServerRunning(server: Archon.Servers.v0.Server) {
+export function isServerRunning(server: Server) {
 	return (
 		server.power_state === 'running' ||
 		server.power_state === 'starting' ||
@@ -159,15 +163,15 @@ export function linkedServerState(server: LinkedServer): LinkedServerState {
 }
 
 /** Why a running server cannot be joined from the internet, or undefined when it can. */
-export function unreachableCause(server: Archon.Servers.v0.Server) {
+export function unreachableCause(server: Server) {
 	if (server.power_state !== 'running' || server.reachability?.state !== 'unreachable') {
 		return undefined
 	}
-	return server.reachability.cause ?? undefined
+	return server.reachability.title
 }
 
 /** Players on a running server, as Core's health check last saw them. */
-export function playersOnline(server: Archon.Servers.v0.Server) {
+export function playersOnline(server: Server) {
 	return server.players?.length ?? 0
 }
 
@@ -181,17 +185,16 @@ export function playersOnline(server: Archon.Servers.v0.Server) {
 export async function pushInstanceToServer(
 	instance: { id: string; name: string },
 	serverId: string,
-	options: { properties?: Archon.Content.v1.PropertiesFields; restart?: boolean } = {},
+	options: { properties?: PatchPropertiesFields; restart?: boolean } = {},
 ) {
 	const share = await ensure_shared_instance(instance.id)
-	// A Core server has one world, with the server's own id.
-	const worldId = serverId
-	await apiClient.archon.content_v1.installContent(serverId, worldId, {
-		content_variant: 'instance',
-		instance,
-		shared_instance_id: share.id,
-		properties: options.properties,
-		restart: options.restart,
+	const routes = await apiClient.cores.serverRoutes(serverId)
+	const params = { id: serverId }
+	if (options.properties)
+		await routes.call(core.ChangeProperties, { params, body: options.properties })
+	await routes.call(core.FollowInstance, {
+		params,
+		body: { instance, shared_instance_id: share.id, restart: options.restart ?? false },
 	})
 }
 

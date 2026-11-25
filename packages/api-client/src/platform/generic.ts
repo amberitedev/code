@@ -1,7 +1,6 @@
 import { $fetch, FetchError } from 'ofetch'
 
 import { ModrinthApiError } from '../core/errors'
-import { CoreSyncClient, CoreWebSocketClient } from '../core-hosting/sockets'
 import type { ClientConfig } from '../types/client'
 import type { RequestOptions } from '../types/request'
 import { appendRequestParams, parseResponseErrorData, toFetchBody } from '../utils/fetch'
@@ -28,19 +27,6 @@ import { XHRUploadClient } from './xhr-upload-client'
 export class GenericModrinthClient extends XHRUploadClient {
 	constructor(config: ClientConfig) {
 		super(config)
-
-		Object.defineProperty(this.archon, 'sockets', {
-			value: new CoreWebSocketClient(this),
-			writable: false,
-			enumerable: true,
-			configurable: false,
-		})
-		Object.defineProperty(this.archon, 'sync', {
-			value: new CoreSyncClient(this),
-			writable: false,
-			enumerable: true,
-			configurable: false,
-		})
 	}
 
 	protected async executeRequest<T>(url: string, options: RequestOptions): Promise<T> {

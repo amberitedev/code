@@ -5249,9 +5249,6 @@
   "servers.access-page.activity-log-filter.action.game-version-edited": {
     "defaultMessage": "Changed Minecraft version"
   },
-  "servers.access-page.activity-log-filter.action.instance-version-applied": {
-    "defaultMessage": "Updated from instance"
-  },
   "servers.access-page.activity-log-filter.action.java-runtime-modified": {
     "defaultMessage": "Changed Java runtime"
   },
@@ -5518,9 +5515,6 @@
   },
   "servers.audit-log.event.game-version-changed": {
     "defaultMessage": "Changed Minecraft version to <version></version>"
-  },
-  "servers.audit-log.event.instance-version-applied": {
-    "defaultMessage": "Updated server to a new version of <modpack></modpack>"
   },
   "servers.audit-log.event.java-runtime-modified": {
     "defaultMessage": "Changed Java runtime to <vendor></vendor>"

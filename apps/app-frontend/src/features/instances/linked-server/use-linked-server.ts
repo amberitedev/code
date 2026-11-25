@@ -1,4 +1,3 @@
-import type { Archon } from '@modrinth/api-client'
 import { injectAuth, injectModrinthClient } from '@modrinth/ui'
 import { queryOptions, useQuery } from '@tanstack/vue-query'
 import { useStorage } from '@vueuse/core'
@@ -15,20 +14,12 @@ type LinkedServerMetadata = {
 	region?: string
 }
 
+/** What is remembered of the server a Play instance joins. A Core names no region. */
 export function linkedServerMetadata(
-	server: Archon.Servers.v1.ServerFull,
 	sharedInstanceId: string,
 	address: string,
 ): LinkedServerMetadata {
-	const location = server.location
-	return {
-		sharedInstanceId,
-		address,
-		region:
-			location.status === 'assigned' && location.location_metadata.region_should_be_user_displayed
-				? location.location_metadata.region
-				: undefined,
-	}
+	return { sharedInstanceId, address }
 }
 
 /** Last known hosting metadata per instance, used while offline or before the linked server loads. */
