@@ -139,17 +139,21 @@ pub async fn run(client: &Client, command: ServersCommand) -> Result<Output> {
             )
             .await?;
             let id = created.id.clone();
-            let installed = call::<InstallLoader>(
-                client,
-                &created,
-                &(),
-                Json(LoaderInstall {
-                    loader: Loader::Vanilla,
-                    loader_version: None,
-                    game_version: version.clone(),
-                }),
-            )
-            .await;
+            let installed = client
+                .op(|op| {
+                    call::<InstallLoader>(
+                        client,
+                        &created,
+                        &(),
+                        Json(LoaderInstall {
+                            loader: Loader::Vanilla,
+                            loader_version: None,
+                            game_version: version.clone(),
+                            op,
+                        }),
+                    )
+                })
+                .await;
             // The server exists from here on, so a failed install names it and how to remove it.
             // `--json` keeps the shape of every other failure, with the server's id added.
             if let Err(error) = installed {
@@ -196,7 +200,7 @@ pub async fn run(client: &Client, command: ServersCommand) -> Result<Output> {
         ServersCommand::Restart { server } => {
             let server = find(client, &server).await?;
             power(client, &server, PowerAction::Restart).await?;
-            done(client, &server, "is restarting").await
+            done(client, &server, "is running again").await
         }
         ServersCommand::Console(ConsoleCommand::Send { server, command }) => {
             let server = find(client, &server).await?;
@@ -496,7 +500,16 @@ async fn power(
     server: &Server,
     action: PowerAction,
 ) -> Result<()> {
-    call::<ChangePower>(client, &id(server), &(), Json(PowerChange { action }))
+    let target = id(server);
+    client
+        .op(|op| {
+            call::<ChangePower>(
+                client,
+                &target,
+                &(),
+                Json(PowerChange { action, op }),
+            )
+        })
         .await
 }
 

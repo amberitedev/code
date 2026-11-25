@@ -169,6 +169,9 @@ impl Loop {
                         if self.wants_engine(&event) {
                             send(socket, &event).await?;
                         }
+                        if let Some(changed) = self.server_changed(&event) {
+                            send(socket, &changed).await?;
+                        }
                         false
                     }
                     Err(RecvError::Lagged(_)) => true,
@@ -212,14 +215,7 @@ impl Loop {
             if lagged {
                 self.recheck().await?;
                 send(socket, &CoreEvent::Resync).await?;
-                let servers: Vec<String> = self
-                    .topics
-                    .keys()
-                    .filter_map(|topic| match topic {
-                        Topic::Server { id } => Some(id.clone()),
-                        _ => None,
-                    })
-                    .collect();
+                let servers = self.watched_servers().await;
                 for server in servers {
                     self.snapshot(socket, &server).await?;
                 }
@@ -260,6 +256,12 @@ impl Loop {
         self.topics.insert(topic, forward);
         match start {
             Topic::Server { id } => self.snapshot(socket, &id).await,
+            Topic::Servers => {
+                for id in self.all_servers().await {
+                    self.snapshot(socket, &id).await?;
+                }
+                Ok(())
+            }
             Topic::Installs => self.unfinished_jobs(socket).await,
             _ => Ok(()),
         }
@@ -318,15 +320,68 @@ impl Loop {
     fn wants(&self, event: &CoreEvent) -> bool {
         let topic = match event {
             CoreEvent::PowerState { server, .. }
-            | CoreEvent::Uptime { server, .. } => {
+            | CoreEvent::Uptime { server, .. }
+            | CoreEvent::ServerChanged { server } => {
+                if self.topics.contains_key(&Topic::Servers) {
+                    return true;
+                }
                 Topic::Server { id: server.clone() }
             }
             CoreEvent::BackupProgress { server, .. } => {
                 Topic::Backups { id: server.clone() }
             }
+            // The caller that started it may be on any socket.
+            CoreEvent::OpEnded { .. } => return true,
             CoreEvent::Resync => return false,
         };
         self.topics.contains_key(&topic)
+    }
+
+    /// A server's instance was made, edited, removed or had content installed: what its `Server`
+    /// shows may have changed, for whoever watches it.
+    fn server_changed(&self, event: &Event) -> Option<CoreEvent> {
+        let Event::Instance(payload) = event else {
+            return None;
+        };
+        use engine::InstancePayloadType::*;
+        if !matches!(
+            payload.event,
+            Created
+                | Edited
+                | Removed
+                | ContentInstallFinished { .. }
+                | ContentInstallFailed { .. }
+        ) {
+            return None;
+        }
+        let changed = CoreEvent::ServerChanged {
+            server: payload.instance_id.clone(),
+        };
+        self.wants(&changed).then_some(changed)
+    }
+
+    /// Every server on the Core.
+    async fn all_servers(&self) -> Vec<String> {
+        crate::servers::server_rows::ids(&self.state.db)
+            .await
+            .unwrap_or_else(|error| {
+                tracing::warn!(%error, "listing servers");
+                Vec::new()
+            })
+    }
+
+    /// The servers a subscription asks for the power of.
+    async fn watched_servers(&self) -> Vec<String> {
+        if self.topics.contains_key(&Topic::Servers) {
+            return self.all_servers().await;
+        }
+        self.topics
+            .keys()
+            .filter_map(|topic| match topic {
+                Topic::Server { id } => Some(id.clone()),
+                _ => None,
+            })
+            .collect()
     }
 
     fn wants_engine(&self, event: &Event) -> bool {
@@ -512,6 +567,10 @@ async fn announce(state: &CoreState, id: &str, phase: Option<Phase>) -> bool {
     for event in power_events(state, id, power).await {
         let _ = state.backups.events.send(event);
     }
+    // A change of phase also changes `status`, such as the end of an install.
+    let _ = state.backups.events.send(CoreEvent::ServerChanged {
+        server: id.to_owned(),
+    });
     true
 }
 

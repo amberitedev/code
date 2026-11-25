@@ -2,6 +2,10 @@ import {
 	core as coreRoutes,
 	type Endpoint,
 	type Health,
+	installs,
+	instanceContent,
+	instanceFiles,
+	logs,
 	PROTOCOL_VERSION,
 	TICKET_HEADER,
 } from '@amberite/contracts'
@@ -52,6 +56,37 @@ function signedOut(error: unknown): boolean {
 	)
 }
 
+/** How long a Core call waits for its answer: a Core answers its own routes within 30 seconds. */
+const CORE_TIMEOUT_MS = 35_000
+
+/**
+ * Routes a Core answers only once their work is done, which can take any time: the engine's
+ * long routes (`long_routes` in `apps/core/src/api/engine_mount.rs`), a push, following an
+ * instance, and installing an update. Long ops of a Core's own answer 202 at once instead.
+ */
+const UNTIMED = new Set<Endpoint>([
+	instanceContent.GetLinkedModpack,
+	instanceContent.AddProjectFromVersion,
+	instanceContent.InstallProjectWithDependencies,
+	instanceContent.UpdateProject,
+	instanceContent.SwitchProjectVersion,
+	instanceContent.RepairContent,
+	instanceContent.RepairModpack,
+	instanceContent.InstallModpack,
+	instanceContent.UpdateModpackVersion,
+	installs.UpdateInstanceContent,
+	installs.RestoreSharedInstanceVersion,
+	instanceFiles.ReadInstanceFile,
+	instanceFiles.ExtractInstanceZip,
+	instanceFiles.ZipInstanceFiles,
+	instanceFiles.FinalizeInstanceUpload,
+	logs.ListInstanceLogs,
+	logs.GetInstanceLogOutput,
+	coreRoutes.ShareServer,
+	coreRoutes.FollowInstance,
+	coreRoutes.InstallUpdate,
+])
+
 /**
  * How `client.core(id)` reaches a listed Core by default: at the base `cores` routes it
  * to, where the platform adds this device's session. A dangerous call carries a fresh ticket, and
@@ -66,6 +101,7 @@ export function coreSessionTransport(
 	const cores = client.cores
 	return {
 		base: () => cores.url(coreId),
+		timeout: (endpoint) => (UNTIMED.has(endpoint) ? undefined : CORE_TIMEOUT_MS),
 		headers: async (endpoint) => {
 			const headers: Record<string, string> = {}
 			if (endpoint.dangerous) headers[TICKET_HEADER] = await cores.ticket(coreId)

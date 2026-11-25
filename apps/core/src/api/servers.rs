@@ -6,7 +6,7 @@ use std::{
     sync::Arc,
 };
 
-use axum::extract::State;
+use axum::{extract::State, http::StatusCode};
 use contracts::{
     ApiError, Empty, ErrorCode, Json,
     core::{
@@ -24,7 +24,7 @@ use engine::{
 use futures::TryStreamExt;
 use tokio::io::AsyncWriteExt;
 
-use super::{CoreState, engine_mount, internal};
+use super::{CoreState, engine_mount, internal, ops};
 use crate::{
     access::{Caller, Dangerous, activity, require_owner},
     servers::{
@@ -294,13 +294,19 @@ pub async fn change(
     Ok(Empty)
 }
 
+/// A long op. What it cannot do at all, such as starting before the EULA is accepted or
+/// restarting a stopped server, is refused before it starts.
 pub async fn power(
     caller: Caller,
     State(state): State<Arc<CoreState>>,
     Req { params, body, .. }: Req<ChangePower>,
-) -> Result<Empty, ApiError> {
+) -> Result<StatusCode, ApiError> {
     let id = params.id;
     state.access.require(&caller, &id).await?;
+    server_rows::get(&state.db, &state.engine, &id)
+        .await
+        .map_err(internal)?
+        .ok_or_else(|| ServerError::NotFound(id.clone()))?;
     let action = match body.action {
         PowerAction::Start => Action::ServerStarted,
         PowerAction::Stop => Action::ServerStopped,
@@ -308,32 +314,40 @@ pub async fn power(
         PowerAction::Restart => Action::ServerRestarted,
     };
     match body.action {
-        PowerAction::Start => state.servers.start(&id).await?,
-        PowerAction::Stop => state.servers.stop(&id).await?,
-        PowerAction::Kill => state.servers.kill(&id).await?,
-        PowerAction::Restart => {
-            if state.servers.phase(&id).is_none() {
-                return Err(ServerError::NotRunning.into());
-            }
-            let (state, id) = (Arc::clone(&state), id.clone());
-            tokio::spawn(async move {
-                if let Err(error) = state.servers.restart(&id).await {
-                    tracing::warn!(server = %id, %error, "restart failed");
-                }
-            });
+        PowerAction::Start
+            if super::eula::accepted_at(&state.db)
+                .await
+                .map_err(internal)?
+                .is_none() =>
+        {
+            return Err(ServerError::Eula.into());
         }
+        PowerAction::Restart if state.servers.phase(&id).is_none() => {
+            return Err(ServerError::NotRunning.into());
+        }
+        _ => {}
     }
-    activity::log(&state.db, &caller, Some(&id), action).await;
-    Ok(Empty)
+    let work_state = Arc::clone(&state);
+    ops::start(&state, body.op, async move {
+        let state = work_state;
+        match body.action {
+            PowerAction::Start => state.servers.start(&id).await?,
+            PowerAction::Stop => state.servers.stop(&id).await?,
+            PowerAction::Kill => state.servers.kill(&id).await?,
+            PowerAction::Restart => state.servers.restart(&id).await?,
+        }
+        activity::log(&state.db, &caller, Some(&id), action).await;
+        Ok(())
+    })
 }
 
-/// Install a loader on a stopped server through the engine's install job for it, answering once
-/// the job is done. Its progress reaches the event socket as the job's events.
+/// A long op: install a loader on a stopped server through the engine's install job for it, held
+/// until the job is done. Its progress reaches the event socket as the job's events.
 pub async fn install(
     caller: Caller,
     State(state): State<Arc<CoreState>>,
     Req { params, body, .. }: Req<InstallLoader>,
-) -> Result<Empty, ApiError> {
+) -> Result<StatusCode, ApiError> {
     let id = params.id;
     state.access.require(&caller, &id).await?;
     let loader = body.loader.into();
@@ -345,30 +359,29 @@ pub async fn install(
         .await
         .map_err(internal)?
         .ok_or_else(|| ServerError::NotFound(id.clone()))?;
-    if platform::platform(&state.engine, &id)
-        .await
-        .map_err(api_error)?
-        .is_some()
-    {
-        state.backups.pre_update(&id).await?;
-    }
     let platform = Platform {
         loader,
         game_version: body.game_version,
         loader_version: body.loader_version,
     };
-    // Not cancelled with the request: the job goes on, so the hold and the restore must too.
-    let engine = Arc::clone(&state.engine);
-    tokio::spawn(async move {
-        let installed = platform::install(&engine, hold.id(), &platform).await;
+    let work_state = Arc::clone(&state);
+    ops::start(&state, body.op, async move {
+        let state = work_state;
+        if platform::platform(&state.engine, &id)
+            .await
+            .map_err(api_error)?
+            .is_some()
+        {
+            state.backups.pre_update(&id).await?;
+        }
+        let installed =
+            platform::install(&state.engine, hold.id(), &platform).await;
         drop(hold);
-        installed
+        installed.map_err(api_error)?;
+        activity::log(&state.db, &caller, Some(&id), Action::ContentChanged)
+            .await;
+        Ok(())
     })
-    .await
-    .map_err(internal)?
-    .map_err(api_error)?;
-    activity::log(&state.db, &caller, Some(&id), Action::ContentChanged).await;
-    Ok(Empty)
 }
 
 /// Install the `.mrpack` in the body over the stopped server, in the background. It is staged in

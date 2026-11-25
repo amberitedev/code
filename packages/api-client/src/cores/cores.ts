@@ -1,4 +1,10 @@
-import { type CoreSession, core as coreRoutes, cores, type ListedCore } from '@amberite/contracts'
+import {
+	type ApiError,
+	type CoreSession,
+	core as coreRoutes,
+	cores,
+	type ListedCore,
+} from '@amberite/contracts'
 
 import { ApiCallError } from '../contracts/errors'
 import type { AbstractModrinthClient } from '../core/abstract-client'
@@ -94,6 +100,45 @@ export class Cores {
 		this.routes.delete(core.id)
 		this.listed = this.listed.filter((listed) => listed.id !== core.id)
 		this.cores = null
+	}
+
+	/**
+	 * Run a long op on a Core: `start` sends its route with a new op id, which the Core answers
+	 * at once. Resolves once the op ends on the Core's event socket, and rejects with its error. A
+	 * resync may have lost the end: an op the Core no longer runs then ends as lost.
+	 */
+	public async op(coreId: string, start: (op: string) => Promise<unknown>): Promise<void> {
+		const op = crypto.randomUUID()
+		const events = this.client.coreEvents(coreId)
+		let started = false
+		let finish: (error: ApiError | null) => void = () => {}
+		const ended = new Promise<void>((resolve, reject) => {
+			finish = (error) =>
+				error ? reject(new ApiCallError(0, error.error, error.description)) : resolve()
+		})
+		const stops = [
+			events.on('op_ended', (end) => {
+				if (end.op === op) finish(end.error)
+			}),
+			events.on('resync', async () => {
+				if (!started) return
+				const running = await this.client
+					.core(coreId)
+					.call(coreRoutes.ListOps)
+					.catch(() => null)
+				if (running && !running.includes(op))
+					finish({ error: 'unknown', description: 'Lost track of the operation' })
+			}),
+		]
+		try {
+			// Open first, so the end cannot pass before anyone listens.
+			await events.ready()
+			await start(op)
+			started = true
+			await ended
+		} finally {
+			for (const stop of stops) stop()
+		}
 	}
 
 	/** A ticket for `coreId`, which only its owner gets. */

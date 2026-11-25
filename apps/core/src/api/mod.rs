@@ -14,6 +14,7 @@ pub mod follow;
 pub mod health;
 pub mod insight;
 pub mod logs;
+pub mod ops;
 pub mod pairing;
 pub mod performance;
 pub mod properties;
@@ -68,6 +69,7 @@ pub struct CoreState {
     pub network: Arc<crate::network::forward::Network>,
     pub storage: Arc<crate::storage::Storage>,
     pub consoles: Arc<events::Consoles>,
+    pub ops: ops::Ops,
 }
 
 /// The router's state. Routes take `State<Arc<CoreState>>`; the engine's extractors find
@@ -143,17 +145,19 @@ pub fn router(state: Arc<CoreState>) -> Router {
         .endpoint::<AckOperation, _, _>(backups::ack)
         .endpoint::<CancelOperation, _, _>(backups::cancel)
         .endpoint::<SetJava, _, _>(startup::set_java_path)
+        // Long ops answer 202 at once and end on the socket (`ops`).
+        .endpoint::<ListOps, _, _>(ops::list)
+        .endpoint::<ChangePower, _, _>(servers::power)
+        .endpoint::<CheckReachability, _, _>(insight::check)
+        .endpoint::<InstallLoader, _, _>(servers::install)
         .merge(engine_mount::routes(Router::new()))
         // Applies to the routes above only.
         .layer(TimeoutLayer::with_status_code(
             StatusCode::REQUEST_TIMEOUT,
             REQUEST_TIMEOUT,
         ))
-        // Starting a server answers once Java runs, and an install or update once it is done.
-        .endpoint::<ChangePower, _, _>(servers::power)
+        // An update answers once it is installed, just before the Core restarts into it.
         .endpoint::<InstallUpdate, _, _>(update::apply)
-        .endpoint::<CheckReachability, _, _>(insight::check)
-        .endpoint::<InstallLoader, _, _>(servers::install)
         // A push uploads the server's files and waits for the store to confirm them.
         .endpoint::<ShareServer, _, _>(servers::share)
         // Following an instance reads its share's version first.

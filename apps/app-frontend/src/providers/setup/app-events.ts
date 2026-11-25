@@ -1,4 +1,3 @@
-import { events as eventRoutes, type LocalEvent } from '@modrinth/api-client'
 import { useQueryClient } from '@tanstack/vue-query'
 import { onScopeDispose } from 'vue'
 
@@ -11,27 +10,23 @@ import {
 	provideAppEvents,
 } from '@/providers/app-events'
 
-type UntypedAppEventHandler = (payload: unknown) => void | Promise<void>
-
-const REOPEN_AFTER_MS = 1000
-
+/**
+ * The App's events, from its one event socket (`apiClient.localEvents`). A resync, which the
+ * socket hands over when it reopened or fell behind, refetches every query; its first open lost
+ * nothing, so the App's start refetches nothing.
+ */
 export function setupAppEventsProvider() {
 	const queryClient = useQueryClient()
-	const handlers = new Map<AppEventType, Set<UntypedAppEventHandler>>()
+	const stream = apiClient.localEvents
 
 	function on<Type extends AppEventType>(type: Type, handler: AppEventHandler<Type>) {
-		let eventHandlers = handlers.get(type)
-		if (!eventHandlers) {
-			eventHandlers = new Set()
-			handlers.set(type, eventHandlers)
-		}
-
-		const untypedHandler = handler as unknown as UntypedAppEventHandler
-		eventHandlers.add(untypedHandler)
-		return () => {
-			eventHandlers.delete(untypedHandler)
-			if (eventHandlers.size === 0) handlers.delete(type)
-		}
+		return stream.on(type, (payload) => {
+			void Promise.resolve()
+				.then(() => handler(payload as Parameters<AppEventHandler<Type>>[0]))
+				.catch((error) => {
+					console.error(`Unhandled ${type} app event`, error)
+				})
+		})
 	}
 
 	function once<Type extends AppEventType>(type: Type, handler: AppEventHandler<Type>) {
@@ -44,62 +39,21 @@ export function setupAppEventsProvider() {
 	}
 
 	const events: AppEvents = { on, once }
-
-	function dispatch(event: LocalEvent) {
-		// The socket fell behind and lost events, so nothing shown can be trusted.
-		if (event.type === 'resync') void queryClient.invalidateQueries()
-		dispatchOpEvent(event)
-		const eventHandlers = handlers.get(event.type)
-		if (!eventHandlers) return
-
-		const payload = 'payload' in event ? event.payload : undefined
-		for (const handler of [...eventHandlers]) {
-			void Promise.resolve()
-				.then(() => handler(payload))
-				.catch((error) => {
-					console.error(`Unhandled ${event.type} app event`, error)
-				})
-		}
-	}
-
-	const url = apiClient.local.url(eventRoutes.eventSocket).replace(/^http/, 'ws')
-	let socket: WebSocket | undefined
-	let disposed = false
-
-	/** Resolves once the socket is open: every event raised after that reaches the handlers. */
-	function connect(): Promise<void> {
-		return new Promise((resolve, reject) => {
-			const opening = new WebSocket(url)
-			opening.onmessage = (message) => dispatch(JSON.parse(message.data) as LocalEvent)
-			opening.onopen = () => {
-				socket = opening
-				// Events raised while no socket was open are lost, ends of ops among them.
-				dispatch({ type: 'resync' })
-				resolve()
-			}
-			opening.onerror = () => reject(new Error("The App's event socket failed"))
-			opening.onclose = () => {
-				if (socket === opening && !disposed) reopen()
-			}
-		})
-	}
-
-	function reopen() {
-		setTimeout(() => {
-			if (disposed) return
-			void connect().catch(reopen)
-		}, REOPEN_AFTER_MS)
-	}
+	const stops = [
+		stream.on('resync', () => void queryClient.invalidateQueries()),
+		stream.onAny(dispatchOpEvent),
+	]
 
 	provideAppEvents(events)
 
 	function dispose() {
-		disposed = true
-		socket?.close()
-		handlers.clear()
+		for (const stop of stops) stop()
 	}
 
 	onScopeDispose(dispose)
+
+	/** Resolves once the socket is open: every event raised after that reaches the handlers. */
+	const connect = () => stream.ready()
 
 	return { connect, events, dispose }
 }

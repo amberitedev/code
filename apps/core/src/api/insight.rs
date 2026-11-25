@@ -89,20 +89,23 @@ pub async fn get(
     Ok(Json(insight(&state, &id).await?))
 }
 
+/// A long op; `GetInsight` has what it found.
 pub async fn check(
     caller: Caller,
     State(state): State<Arc<CoreState>>,
-    request: Req<CheckReachability>,
-) -> Result<Json<ServerInsight>, ApiError> {
-    let id = request.params.id;
+    Req { params, body, .. }: Req<CheckReachability>,
+) -> Result<axum::http::StatusCode, ApiError> {
+    let id = params.id;
     state.access.require(&caller, &id).await?;
     if state.servers.phase(&id).is_none() {
         return Err(ServerError::NotRunning.into());
     }
-    Arc::clone(&state.network)
-        .check(Arc::clone(&state.servers), id.clone())
-        .await;
-    Ok(Json(insight(&state, &id).await?))
+    let (network, servers) =
+        (Arc::clone(&state.network), Arc::clone(&state.servers));
+    super::ops::start(&state, body.op, async move {
+        network.check(servers, id).await;
+        Ok(())
+    })
 }
 
 pub async fn machine(

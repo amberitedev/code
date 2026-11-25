@@ -1,6 +1,17 @@
+import {
+	type ClientMessage,
+	core as coreRoutes,
+	type CoreEvent,
+	type EngineEvent,
+	events as localRoutes,
+	type LocalEvent,
+	type Topic,
+} from '@amberite/contracts'
+
 import { ContractClient } from '../contracts/client'
 import { ApiCallError } from '../contracts/errors'
 import { Cores } from '../cores/cores'
+import { EventStream } from '../events/event-stream'
 import type { InferredClientModules } from '../modules'
 import { buildModuleStructure } from '../modules'
 import { withCoreHosting } from '../core-hosting'
@@ -23,6 +34,9 @@ type ArchonClientModules = Omit<InferredClientModules['archon'], 'backups_v1'> &
 	backups_v1: InferredClientModules['archon']['backups_v1']
 }
 
+/** What a Core's event socket sends: its own events and its engine's. */
+export type CoreStreamEvent = CoreEvent | EngineEvent
+
 /**
  * Abstract base client for Modrinth APIs
  */
@@ -41,7 +55,9 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 	private _moduleNamespaces: Map<string, Record<string, AbstractModule>> = new Map()
 
 	private _local?: ContractClient
+	private _localEvents?: EventStream<LocalEvent>
 	private _coreClients: Map<string, ContractClient> = new Map()
+	private _coreEvents: Map<string, EventStream<CoreStreamEvent, Topic>> = new Map()
 	private _cores?: Cores
 
 	public readonly labrinth!: InferredClientModules['labrinth']
@@ -100,6 +116,34 @@ export abstract class AbstractModrinthClient extends AbstractUploadClient {
 		const client = new ContractClient(protocolChecked(transport))
 		this._coreClients.set(coreId, client)
 		return client
+	}
+
+	/** The App's events: its own and its engine's, everything on one socket. */
+	public get localEvents(): EventStream<LocalEvent> {
+		return (this._localEvents ??= new EventStream({
+			url: async () => this.local.url(localRoutes.eventSocket).replace(/^http/, 'ws'),
+		}))
+	}
+
+	/**
+	 * A listed Core's events on its one socket, for the topics subscribed to: every server's, which
+	 * the Core's owner may all see.
+	 */
+	public coreEvents(coreId: string): EventStream<CoreStreamEvent, Topic> {
+		const known = this._coreEvents.get(coreId)
+		if (known) return known
+		const stream = new EventStream<CoreStreamEvent, Topic>({
+			url: async () =>
+				`${(await this.cores.url(coreId)).replace(/^http/, 'ws').replace(/\/$/, '')}${coreRoutes.EventSocket.path}`,
+			message: (topic, subscribe): ClientMessage => ({
+				type: subscribe ? 'subscribe' : 'unsubscribe',
+				topic,
+			}),
+			// The socket cannot sign in again itself: a call does, once its session ended.
+			beforeReopen: () => this.core(coreId).call(coreRoutes.GetPairing),
+		})
+		this._coreEvents.set(coreId, stream)
+		return stream
 	}
 
 	public readonly kyros!: InferredClientModules['kyros']

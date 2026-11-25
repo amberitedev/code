@@ -214,6 +214,8 @@ pub enum PowerAction {
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct PowerChange {
     pub action: PowerAction,
+    /// The long op's id (see [`OpStart`](super::OpStart)).
+    pub op: String,
 }
 
 /// A loader to install on a stopped server. Packs install through the content routes.
@@ -224,6 +226,8 @@ pub struct LoaderInstall {
     /// Null for the newest.
     pub loader_version: Option<String>,
     pub game_version: String,
+    /// The long op's id (see [`OpStart`](super::OpStart)).
+    pub op: String,
 }
 
 /// Body of `ShareServer`.

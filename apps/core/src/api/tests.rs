@@ -110,6 +110,7 @@ async fn core_with_backend(backend: Option<&str>) -> Core {
         update,
         storage,
         consoles: Arc::default(),
+        ops: Default::default(),
     });
     Core {
         _dir: dir,
@@ -218,7 +219,7 @@ async fn servers_wait_for_the_eula_and_every_route_for_a_session() {
             &format!("/servers/{server}/power"),
             Some(&owner),
             None,
-            Some(json!({ "action": "Start" })),
+            Some(json!({ "action": "Start", "op": "start" })),
         )
         .await;
     assert_eq!(error["error"], "eula_not_accepted");
@@ -1509,6 +1510,69 @@ async fn console_lines_are_log_events_and_a_missing_server_has_none() {
     assert_eq!(power["payload"]["server"], core.server.as_str());
 }
 
+/// The next event of `kind`, skipping others.
+async fn next_of(socket: &mut EventSocket, kind: &str) -> Value {
+    loop {
+        let event = next(socket).await.unwrap();
+        if event["type"] == kind {
+            return event;
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_long_op_answers_at_once_and_ends_on_the_socket() {
+    let core = core().await;
+    let owner = core.sign_in("owner").await;
+    core.call(Method::POST, "/eula", Some(&owner), None, None)
+        .await;
+    let mut socket = core.events(&owner).await;
+
+    // Nothing is installed, so the start fails after it was accepted.
+    let start = json!({ "action": "Start", "op": "first" });
+    let (status, _) = core
+        .call(
+            Method::POST,
+            &format!("/servers/{}/power", core.server),
+            Some(&owner),
+            None,
+            Some(start),
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let ended = next_of(&mut socket, "op_ended").await;
+    assert_eq!(ended["payload"]["op"], "first");
+    assert!(ended["payload"]["error"]["error"].is_string(), "{ended}");
+    let (_, running) = core
+        .call(Method::GET, "/ops", Some(&owner), None, None)
+        .await;
+    assert_eq!(running, json!([]));
+}
+
+#[tokio::test]
+async fn the_servers_topic_has_every_servers_power_and_changes() {
+    let core = core().await;
+    let owner = core.sign_in("owner").await;
+    let mut socket = core.events(&owner).await;
+    subscribe(&mut socket, json!({ "type": "servers" })).await;
+    let power = next_of(&mut socket, "power_state").await;
+    assert_eq!(power["payload"]["server"], core.server.as_str());
+
+    let rename = Some(json!({ "name": "Renamed", "update_channel": null }));
+    let (status, _) = core
+        .call(
+            Method::PATCH,
+            &format!("/servers/{}", core.server),
+            Some(&owner),
+            None,
+            rename,
+        )
+        .await;
+    assert!(status.is_success());
+    let changed = next_of(&mut socket, "server_changed").await;
+    assert_eq!(changed["payload"]["server"], core.server.as_str());
+}
+
 #[tokio::test]
 async fn ending_the_session_closes_the_socket() {
     let core = core().await;
@@ -1592,7 +1656,7 @@ async fn a_loader_install_is_refused_while_the_engine_installs_the_server() {
             &format!("/servers/{}/reinstall", core.server),
             Some(&owner),
             None,
-            Some(json!({ "loader": "Fabric", "loader_version": null, "game_version": "1.21.4" })),
+            Some(json!({ "loader": "Fabric", "loader_version": null, "game_version": "1.21.4", "op": "install" })),
         )
         .await;
     assert_eq!(error["error"], "installing", "{error}");

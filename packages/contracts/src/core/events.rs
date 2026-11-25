@@ -4,6 +4,8 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::ApiError;
+
 /// A stream of events a socket can subscribe to.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
@@ -16,8 +18,11 @@ pub enum Topic {
     Installs,
     /// A server's console lines, as the engine's `log` events, starting with its last 200.
     Console { id: String },
-    /// A server's power state, starting with the current one.
+    /// A server's power state, starting with the current one, and its changes.
     Server { id: String },
+    /// Every server's power state, starting with each current one, and their changes: what a list
+    /// of servers shows.
+    Servers,
     /// A server's backup progress.
     Backups { id: String },
 }
@@ -56,6 +61,16 @@ pub enum CoreEvent {
         progress: f64,
         start_time: Option<i64>,
         finish_time: Option<i64>,
+    },
+    /// Something a server's `Server` shows changed, or the server was made or removed: fetch it
+    /// again.
+    ServerChanged {
+        server: String,
+    },
+    /// A long op ended, sent to every socket. `error` is null when it succeeded.
+    OpEnded {
+        op: String,
+        error: Option<ApiError>,
     },
     /// This socket fell behind and lost events: refetch what is shown.
     Resync,
