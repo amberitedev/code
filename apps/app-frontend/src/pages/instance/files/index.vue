@@ -13,12 +13,12 @@ import {
 import { useQuery } from '@tanstack/vue-query'
 import { computed, ref, watch } from 'vue'
 
-import { injectAppEvents } from '@/providers/app-events'
 import { get_full_path } from '@/helpers/instance'
 import { highlightInFolder } from '@/helpers/utils'
 import { save } from '@/platform/dialog'
 import { apiClient } from '@/platform/modrinth-client'
 import { saveInstanceFileAs } from '@/platform/ops'
+import { injectAppEvents } from '@/providers/app-events'
 
 import { injectInstancePage } from '../instance-context'
 import { instanceKeys } from '../query-options'

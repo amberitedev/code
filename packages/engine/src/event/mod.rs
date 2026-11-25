@@ -73,8 +73,9 @@ pub enum Event {
     InstallJob(std::sync::Arc<InstallJobSnapshot>),
     Warning(WarningPayload),
     Log(LogPayload),
-    /// Something in an instance's watched files changed on disk, once per batch of the watcher:
-    /// whoever lists its files reads them again. No paths, so it stays one small event.
+    /// Something in an instance's watched files changed on disk, once per batch of the watcher and
+    /// again once the content index caught up: whoever lists its files reads them again. No
+    /// paths, so it stays one small event.
     FilesChanged {
         instance_id: String,
     },

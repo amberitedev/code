@@ -71,7 +71,12 @@ async fn react(
                 let Some(engine) = engine.upgrade() else {
                     return;
                 };
-                if !matches!(event, Event::Log(_) | Event::Loading(_)) {
+                if !matches!(
+                    event,
+                    Event::Log(_)
+                        | Event::Loading(_)
+                        | Event::FilesChanged { .. }
+                ) {
                     tauri::async_runtime::spawn(follow(
                         engine.clone(),
                         event.clone(),
@@ -249,7 +254,7 @@ async fn follow(engine: Desktop, event: Event) {
             return;
         }
         Event::PathsChanged { instance_id, paths } => {
-            files_changed(&engine, &instance_id, &paths).await;
+            paths_changed(&engine, &instance_id, &paths).await;
             return;
         }
         _ => return,
@@ -300,7 +305,7 @@ async fn remember_icon(
     crate::library::recent_icons::record(&config, engine.db()).await
 }
 
-async fn files_changed(engine: &Desktop, instance_id: &str, paths: &[String]) {
+async fn paths_changed(engine: &Desktop, instance_id: &str, paths: &[String]) {
     let mut option_files = BTreeSet::new();
     let (mut packs, mut locales, mut screenshots) = (false, false, false);
     for path in paths {
