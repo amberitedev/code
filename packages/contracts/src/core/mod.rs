@@ -24,6 +24,15 @@ use crate::{Empty, Json, Stream, Upgrade};
 /// The header a dangerous route's fresh ticket travels in.
 pub const TICKET_HEADER: &str = "x-amberite-ticket";
 
+/// A long op's start: the route answers 202 once it runs, and the socket's `OpEnded` with this id
+/// says how it ended.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+pub struct OpStart {
+    /// Made by the caller, unique among its running ops.
+    pub op: String,
+}
+
 /// What `GET /health` answers, to anyone.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
@@ -105,10 +114,9 @@ crate::endpoints! {
     ChangeServer: Patch "/servers/{id}", Session, ServerId, (), Json<ServerUpdate> => Empty;
     /// A stopped server, with its world, files and backups.
     DeleteServer: Delete "/servers/{id}", Session, ServerId, (), Empty => Empty, dangerous;
-    /// Start answers once Java runs, stop and kill once the server has the request, restart at
-    /// once.
+    /// A long op: start ends once Java runs, stop and kill once the server has the request.
     ChangePower: Post "/servers/{id}/power", Session, ServerId, (), Json<PowerChange> => Empty;
-    /// Install a loader on a stopped server, answering once it is done.
+    /// A long op: install a loader on a stopped server.
     InstallLoader: Post "/servers/{id}/reinstall", Session, ServerId, (), Json<LoaderInstall> => Empty;
     /// Install an `.mrpack`, the body, over a stopped server. It goes on in the background.
     InstallModpackFile: Post "/servers/{id}/modpack-file", Session, ServerId, (), Stream => Empty;
@@ -160,8 +168,10 @@ crate::endpoints! {
     SetJava: Put "/servers/{id}/java", Session, ServerId, (), Json<JavaPath> => Empty;
     /// What the server is doing and why it last stopped.
     GetInsight: Get "/servers/{id}/insight", Session, ServerId, (), Empty => Json<ServerInsight>;
-    /// Check a running server's port again, answering once checked.
-    CheckReachability: Post "/servers/{id}/reachability", Session, ServerId, (), Empty => Json<ServerInsight>;
+    /// A long op: check a running server's port again. `GetInsight` has the result.
+    CheckReachability: Post "/servers/{id}/reachability", Session, ServerId, (), Json<OpStart> => Empty;
+    /// The ids of the running long ops: one missing from it has ended, its `OpEnded` perhaps lost.
+    ListOps: Get "/ops", Session, (), (), Empty => Json<Vec<String>>;
 
     /// A backup as a zip, streamed.
     DownloadBackup: Get "/servers/{id}/backups/{backup_id}/download", Session, BackupRef, (), Empty => Stream;
@@ -180,6 +190,7 @@ pub(crate) fn ts() -> String {
         Health::decl(&cfg),
         ServerId::decl(&cfg),
         SessionId::decl(&cfg),
+        OpStart::decl(&cfg),
     ]
     .into_iter()
     .chain(access::ts_types())

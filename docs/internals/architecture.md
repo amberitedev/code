@@ -188,7 +188,11 @@ App's origin from reading the file routes. The secret is the security boundary f
 Long operations start and return: the route takes a caller-made op id and answers 202, progress
 arrives as `AppEvent::Progress`, and the end as `AppEvent::OpEnded`
 ([`ops.rs`](../../apps/app/src/local_api/ops.rs)). No request stays open for an operation's length,
-so no operation holds one of the six HTTP/1.1 connections the UI shares.
+so no operation holds one of the six HTTP/1.1 connections the UI shares. A Core's own long
+operations (power, loader installs, reachability checks) work the same way and end with
+`CoreEvent::OpEnded` ([`api/ops.rs`](../../apps/core/src/api/ops.rs)), so a Core call can have a
+timeout. The engine's long routes still answer once done on a Core, which holds the server
+meanwhile; the Core transport leaves only those untimed.
 
 ### The Core proxy has its own listener
 
@@ -250,6 +254,11 @@ Each host serves one `/events` socket that carries the engine's events and its o
   that event, so one console reads either.
 - A socket that falls behind sends `Resync` and carries on. The UI refetches its queries, so a lost
   install completion or process exit is never silent.
+- The UI holds one socket per host, the App's and each Core's, in an `EventStream`
+  ([`event-stream.ts`](../../packages/api-client/src/events/event-stream.ts)) that every screen
+  shares: topics are counted and subscribed again when it reopens, a reopen reads as a resync, and
+  its status is whether the Core is online. The first open is no resync, so starting the App
+  refetches nothing. Server lists follow a Core's `servers` topic instead of polling.
 - `Event::FilesChanged` stays in-process. The socket loops drop it.
 
 ## The UI runs in a plain browser tab

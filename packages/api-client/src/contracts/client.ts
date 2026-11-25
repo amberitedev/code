@@ -16,8 +16,11 @@ export interface ContractTransport {
 	/** Given the route, so a transport can leave out credentials or attach a fresh ticket. */
 	headers(endpoint: Endpoint): Promise<Record<string, string>>
 	fetch(url: string, init: TransportInit): Promise<Response>
-	/** Milliseconds a call without a file body waits for its answer. None when unset. */
-	timeout?: number
+	/**
+	 * Milliseconds a call without a file body waits for its answer, for every route or by route.
+	 * None when unset.
+	 */
+	timeout?: number | ((endpoint: Endpoint) => number | undefined)
 }
 
 /** How one call is sent. */
@@ -121,7 +124,11 @@ export class ContractClient {
 		if (from) headers.Range = `bytes=${from}-`
 
 		// A file can take any time to send, so only a timeout asked for limits it.
-		const timeout = options.timeout ?? (body instanceof Blob ? undefined : this.transport.timeout)
+		const defaultTimeout =
+			typeof this.transport.timeout === 'function'
+				? this.transport.timeout(endpoint)
+				: this.transport.timeout
+		const timeout = options.timeout ?? (body instanceof Blob ? undefined : defaultTimeout)
 		const controller = new AbortController()
 		let timedOut: ApiCallError | undefined
 		const timer =

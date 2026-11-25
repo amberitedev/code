@@ -8,7 +8,9 @@ use std::sync::Arc;
 use axum::extract::State;
 use contracts::{
     ApiError, Empty,
-    core::{Action, FollowInstance, LinkedInstance, LinkedPackState},
+    core::{
+        Action, CoreEvent, FollowInstance, LinkedInstance, LinkedPackState,
+    },
     server::Req,
 };
 use engine::{
@@ -66,6 +68,7 @@ pub async fn follow(
     .execute(&state.db)
     .await
     .map_err(internal)?;
+    changed(&state, &id);
     activity::log(&state.db, &caller, Some(&id), Action::ContentChanged).await;
     match hold {
         Some(hold) => {
@@ -153,6 +156,7 @@ async fn apply_pending(state: Arc<CoreState>, id: String) {
     let Some((pending, start_after)) = taken else {
         return;
     };
+    changed(&state, &id);
     let applied = match serde_json::from_str(&pending) {
         Ok(data) => apply(&state, hold, data, start_after).await,
         Err(error) => Err(internal(error)),
@@ -207,6 +211,7 @@ async fn apply(
                 .bind(&id)
                 .execute(&state.db)
                 .await;
+                changed(&state, &id);
             }
             Some(error) => failed(&state, &id, &error).await,
         }
@@ -245,6 +250,14 @@ async fn failed(state: &CoreState, id: &str, error: &str) {
     .bind(id)
     .execute(&state.db)
     .await;
+    changed(state, id);
+}
+
+/// The server's `linked_instance` reads differently now.
+fn changed(state: &CoreState, id: &str) {
+    let _ = state.backups.events.send(CoreEvent::ServerChanged {
+        server: id.to_owned(),
+    });
 }
 
 /// Stop following: a server unlinked from its instance's share.
@@ -252,8 +265,9 @@ pub(super) async fn forget(state: &CoreState, id: &str) -> sqlx::Result<()> {
     sqlx::query("DELETE FROM follows WHERE server_id = ?")
         .bind(id)
         .execute(&state.db)
-        .await
-        .map(drop)
+        .await?;
+    changed(state, id);
+    Ok(())
 }
 
 /// The App instance server `id` follows, with `attachment`, its instance's share: shown while it

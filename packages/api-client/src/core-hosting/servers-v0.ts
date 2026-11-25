@@ -5,7 +5,7 @@ import type { AbstractModrinthClient } from '../core/abstract-client'
 import type { ArchonServersV0Module } from '../modules/archon/servers/v0'
 import type { Archon } from '../modules/archon/types'
 import { coreNodeUrl } from '../utils/node-url'
-import { type Adapter, coreOf } from './adapter'
+import { type Adapter, coreOf, opOn } from './adapter'
 
 const LOADERS: Loader[] = ['Vanilla', 'Fabric', 'Quilt', 'Forge', 'NeoForge', 'Paper']
 
@@ -123,8 +123,9 @@ export function serversV0(client: AbstractModrinthClient): Adapter<ArchonServers
 			return { url: `${(await base(serverId)).replace(/^http/, 'ws')}/events`, token: '' }
 		},
 		async power(serverId, action) {
-			const change = { params: { id: serverId }, body: { action } }
-			await (await coreOf(client, serverId)).call(core.ChangePower, change)
+			await opOn(client, serverId, (routes, op) =>
+				routes.call(core.ChangePower, { params: { id: serverId }, body: { action, op } }),
+			)
 		},
 		async reinstall(serverId, request, hardReset = false) {
 			if (hardReset || !('loader' in request) || !request.game_version)
@@ -133,16 +134,18 @@ export function serversV0(client: AbstractModrinthClient): Adapter<ArchonServers
 					'invalid_input',
 					'Core installs a loader on a server and never erases it. Install packs through its content.',
 				)
-			await (
-				await coreOf(client, serverId)
-			).call(core.InstallLoader, {
-				params: { id: serverId },
-				body: {
-					loader: loader(request.loader),
-					loader_version: request.loader_version ?? null,
-					game_version: request.game_version,
-				},
-			})
+			const game_version = request.game_version
+			await opOn(client, serverId, (routes, op) =>
+				routes.call(core.InstallLoader, {
+					params: { id: serverId },
+					body: {
+						loader: loader(request.loader),
+						loader_version: request.loader_version ?? null,
+						game_version,
+						op,
+					},
+				}),
+			)
 		},
 		async getStartupConfig(serverId) {
 			const { invocation, major } = await installedStartup(client, serverId)

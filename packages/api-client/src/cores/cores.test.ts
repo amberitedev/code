@@ -1,5 +1,8 @@
 import { type ListedCore, PROTOCOL_VERSION, type Server } from '@amberite/contracts'
-import { describe, expect, it } from 'vite-plus/test'
+import { describe, expect, it, vi } from 'vite-plus/test'
+
+import type { AbstractModrinthClient } from '../core/abstract-client'
+import { Cores } from './cores'
 
 import { SelfHostedFeature } from '../features/self-hosted'
 import { GenericModrinthClient } from '../platform/generic'
@@ -96,5 +99,47 @@ describe('joinNet', () => {
 		const client = new FakeClient(false)
 		await client.cores.servers()
 		expect(client.cores.joinNet(SERVER)).toBe(SERVER.net)
+	})
+})
+
+describe('a long op on a Core', () => {
+	/** A Core whose socket hands its events to `handlers`, and which runs `running` ops. */
+	function core(running: string[]) {
+		const handlers = new Map<string, (payload: unknown) => void>()
+		const events = {
+			ready: async () => {},
+			on: (type: string, handler: (payload: unknown) => void) => {
+				handlers.set(type, handler)
+				return () => handlers.delete(type)
+			},
+		}
+		const client = {
+			coreEvents: () => events,
+			core: () => ({ call: async () => running }),
+		} as unknown as AbstractModrinthClient
+		let started: string | undefined
+		const ending = new Cores(client).op('core', async (op) => {
+			started = op
+		})
+		return { handlers, ending, started: () => started }
+	}
+
+	it('ends as its end on the socket says', async () => {
+		const { handlers, ending, started } = core([])
+		await vi.waitFor(() => expect(started()).toBeDefined())
+		handlers.get('op_ended')!({ op: 'another', error: null })
+		handlers.get('op_ended')!({
+			op: started(),
+			error: { error: 'not_found', description: 'There is no server.' },
+		})
+		await expect(ending).rejects.toMatchObject({ code: 'not_found' })
+		expect(handlers.size).toBe(0)
+	})
+
+	it('ends as lost when a resync lost its end', async () => {
+		const { handlers, ending, started } = core(['another'])
+		await vi.waitFor(() => expect(started()).toBeDefined())
+		handlers.get('resync')!(undefined)
+		await expect(ending).rejects.toMatchObject({ code: 'unknown' })
 	})
 })

@@ -6,7 +6,7 @@ use bytes::Bytes;
 use color_eyre::eyre::{Result, WrapErr, bail};
 use contracts::{
     ApiError, Empty,
-    core::{CheckHealth, ClientMessage, Topic},
+    core::{CheckHealth, ClientMessage, CoreEvent, Topic},
 };
 use http_body_util::{BodyExt, Full};
 use hyper_util::rt::TokioIo;
@@ -120,6 +120,48 @@ impl Client {
         Ok((status.as_u16(), content_type, body))
     }
 
+    /// The `/events` socket.
+    async fn events(&self) -> Result<WebSocketStream<Box<dyn Stream>>> {
+        let (socket, _) = tokio_tungstenite::client_async(
+            "ws://copal/events",
+            self.connect().await?,
+        )
+        .await
+        .wrap_err("Core refused the event socket")?;
+        Ok(socket)
+    }
+
+    /// Run a long op: `start` sends its route with the op id, and this waits for its `OpEnded`. The
+    /// socket opens first, so the end is never missed.
+    pub async fn op<F, Fut>(&self, start: F) -> Result<()>
+    where
+        F: FnOnce(String) -> Fut,
+        Fut: Future<Output = Result<()>>,
+    {
+        use futures::StreamExt;
+        use tokio_tungstenite::tungstenite::Message;
+
+        let op = uuid::Uuid::new_v4().to_string();
+        let mut socket = self.events().await?;
+        start(op.clone()).await?;
+        while let Some(message) = socket.next().await {
+            let Message::Text(text) = message? else {
+                continue;
+            };
+            // The engine's events read as no `CoreEvent`, and are skipped.
+            if let Ok(CoreEvent::OpEnded { op: ended, error }) =
+                serde_json::from_str(&text)
+                && ended == op
+            {
+                return match error {
+                    Some(error) => Err(Refused(error).into()),
+                    None => Ok(()),
+                };
+            }
+        }
+        bail!("The event socket closed before the operation ended")
+    }
+
     /// The `/events` socket, subscribed to a server's console. It sends each line as the engine's
     /// `log` event, as JSON text.
     pub async fn console(
@@ -129,12 +171,7 @@ impl Client {
         use futures::SinkExt;
         use tokio_tungstenite::tungstenite::Message;
 
-        let (mut socket, _) = tokio_tungstenite::client_async(
-            "ws://copal/events",
-            self.connect().await?,
-        )
-        .await
-        .wrap_err("Core refused the event socket")?;
+        let mut socket = self.events().await?;
         let subscribe = ClientMessage::Subscribe {
             topic: Topic::Console {
                 id: server_id.to_owned(),

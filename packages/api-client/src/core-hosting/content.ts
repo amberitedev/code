@@ -14,7 +14,7 @@ import type { AbstractModrinthClient } from '../core/abstract-client'
 import type { ArchonContentV1Module } from '../modules/archon/content/v1'
 import type { Archon } from '../modules/archon/types'
 import type { UploadHandle, UploadProgress } from '../types/upload'
-import { type Adapter, coreOf } from './adapter'
+import { type Adapter, coreOf, opOn } from './adapter'
 import { loader } from './servers-v0'
 
 declare module '../modules/archon/content/v1' {
@@ -311,14 +311,17 @@ export function content(client: AbstractModrinthClient): Adapter<ArchonContentV1
 			switch (request.content_variant) {
 				case 'bare':
 					await writeProperties(api, serverId, request.properties)
-					await api.call(core.InstallLoader, {
-						...params(serverId),
-						body: {
-							loader: loader(request.loader),
-							loader_version: request.version || null,
-							game_version: request.game_version ?? '',
-						},
-					})
+					await opOn(client, serverId, (routes, op) =>
+						routes.call(core.InstallLoader, {
+							...params(serverId),
+							body: {
+								loader: loader(request.loader),
+								loader_version: request.version || null,
+								game_version: request.game_version ?? '',
+								op,
+							},
+						}),
+					)
 					return
 				case 'modpack':
 					if (request.spec.platform !== 'modrinth')

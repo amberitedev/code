@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 
-import type { AbstractModrinthClient } from '../core/abstract-client'
+import type { Topic } from '@amberite/contracts'
+
+import type { AbstractModrinthClient, CoreStreamEvent } from '../core/abstract-client'
+import { EventStream } from '../events/event-stream'
 import type { Archon } from '../modules/archon/types'
 import { CoreSyncClient, CoreWebSocketClient } from './sockets'
 
@@ -8,7 +11,7 @@ const SERVER = 'server'
 
 class FakeSocket {
 	static OPEN = 1
-	static last: FakeSocket
+	static last: FakeSocket | undefined
 	readyState = FakeSocket.OPEN
 	sent: unknown[] = []
 	onopen = () => {}
@@ -37,16 +40,26 @@ class FakeSocket {
  */
 async function panelHears(answers: unknown[]) {
 	vi.stubGlobal('WebSocket', FakeSocket)
+	FakeSocket.last = undefined
 	const sync = new CoreSyncClient({} as AbstractModrinthClient)
 	const synced: Archon.Sync.v1.SyncEvent[] = []
 	sync.onAny(SERVER, (event) => synced.push(event))
-	const client = new CoreWebSocketClient({ archon: { sync } } as unknown as AbstractModrinthClient)
+	const events = new EventStream<CoreStreamEvent, Topic>({
+		url: async () => 'ws://core/events',
+		message: (topic, subscribe) => ({ type: subscribe ? 'subscribe' : 'unsubscribe', topic }),
+	})
+	const client = new CoreWebSocketClient({
+		archon: { sync },
+		cores: { coreOf: async () => ({ id: 'core' }) },
+		coreEvents: () => events,
+	} as unknown as AbstractModrinthClient)
 	const heard: Archon.Websocket.v0.WSEvent[] = []
 	for (const type of ['auth-ok', 'install-progress', 'installation-result'] as const) {
 		client.on(SERVER, type, (event) => heard.push(event))
 	}
-	const connected = client.connect(SERVER, { url: 'ws://core/events', token: '' })
-	const socket = FakeSocket.last
+	const connected = client.connect(SERVER)
+	await vi.waitFor(() => expect(FakeSocket.last).toBeDefined())
+	const socket = FakeSocket.last!
 	socket.onopen()
 	for (const answer of answers) socket.receive(answer)
 	await connected

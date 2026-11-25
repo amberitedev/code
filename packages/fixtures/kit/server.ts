@@ -41,6 +41,8 @@ export async function server(
 				loader: spec.loader ?? 'Vanilla',
 				loader_version: spec.loaderVersion ?? null,
 				game_version: spec.gameVersion,
+				// A long op: the Core answers at once, and the wait below sees it end.
+				op: crypto.randomUUID(),
 			},
 		)
 		await until(
@@ -56,7 +58,7 @@ export async function server(
 	})
 	if (spec.running) {
 		await step(`"${spec.name}" starts`, async () => {
-			await call(core, coreApi.ChangePower, { id }, { action: 'Start' })
+			await call(core, coreApi.ChangePower, { id }, { action: 'Start', op: crypto.randomUUID() })
 			await until(`"${spec.name}" is running`, async () => {
 				const { power_state } = await call(core, coreApi.GetServer, { id })
 				return power_state === 'running'
