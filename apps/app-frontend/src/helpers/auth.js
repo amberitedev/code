@@ -3,7 +3,8 @@
  * So, for example, addDefaultInstance creates a blank instance object, where the Rust struct is serialized,
  *  and deserialized into a usable JS object.
  */
-import { ApiCallError, localAccounts } from '@modrinth/api-client'
+import { localAccounts } from '@amberite/contracts/app'
+import { ApiCallError } from '@modrinth/api-client'
 
 import { apiClient } from '@/platform/modrinth-client'
 

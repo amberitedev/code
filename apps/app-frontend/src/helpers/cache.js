@@ -1,4 +1,4 @@
-import { cache } from '@modrinth/api-client'
+import { cache } from '@amberite/contracts/engine'
 
 import { apiClient } from '@/platform/modrinth-client'
 

@@ -1,4 +1,4 @@
-import { desktop, updates } from '@modrinth/api-client'
+import { desktop, updates } from '@amberite/contracts/app'
 
 import { get_full_path, get_mod_full_path } from '@/helpers/instance'
 import { save } from '@/platform/dialog'
