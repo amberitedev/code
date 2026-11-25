@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { onboarding } from '@amberite/contracts/app'
 import { PlayIcon, PlusIcon } from '@modrinth/assets'
 import {
 	ContextMenu,
@@ -22,7 +23,7 @@ import { useHiddenInstances } from '@/features/library/hidden-instances/use-hidd
 import { prefetchSharedInstanceLibrary } from '@/features/library/shared-instances/queries'
 import { traceStartupStep } from '@/helpers/startup-debug'
 import { instanceListQueryOptions } from '@/pages/instance/query-options'
-import { skipCreateInstanceOnboarding } from '@/platform/app-lib/onboarding-checklist/commands'
+import { apiClient } from '@/platform/modrinth-client'
 import { injectOnboardingChecklist } from '@/providers/onboarding-checklist'
 import { useRootBreadcrumb } from '@/shared/breadcrumbs'
 
@@ -79,7 +80,7 @@ watch(
 )
 
 function skipWelcomeScreen() {
-	skipCreateInstanceOnboarding().catch(handleError)
+	apiClient.local.call(onboarding.skipCreateInstanceOnboarding).catch(handleError)
 }
 
 const instancesQuery = useQuery(instanceListQueryOptions())

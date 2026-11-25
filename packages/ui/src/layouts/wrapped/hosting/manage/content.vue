@@ -1,11 +1,7 @@
 <script setup lang="ts">
-import {
-	core as coreRoutes,
-	type ContentItem as EngineContentItem,
-	instanceContent,
-	type Labrinth,
-	ModrinthApiError,
-} from '@modrinth/api-client'
+import { core as coreRoutes } from '@amberite/contracts/core'
+import { type ContentItem as EngineContentItem, instanceContent } from '@amberite/contracts/engine'
+import { type Labrinth, ModrinthApiError } from '@modrinth/api-client'
 import { UnlinkIcon } from '@modrinth/assets'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, nextTick, ref, watch } from 'vue'

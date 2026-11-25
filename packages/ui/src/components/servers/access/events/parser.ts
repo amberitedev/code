@@ -1,4 +1,5 @@
-import type { ActionEntry, ActionUser, Archon, UserResp } from '@modrinth/api-client'
+import type { ActionEntry, ActionUser, UserResp } from '@amberite/contracts/core'
+import type { Archon } from '@modrinth/api-client'
 import { PackageIcon } from '@modrinth/assets'
 import type { Component } from 'vue'
 

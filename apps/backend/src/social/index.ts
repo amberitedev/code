@@ -6,7 +6,7 @@ import {
 	type UserFriend,
 	type UserUpdate,
 	social,
-} from '@amberite/contracts'
+} from '@amberite/contracts/backend'
 
 import { accountLock, findUser, publicUser, requireUser } from '../common/auth'
 import { randomId } from '../common/crypto'

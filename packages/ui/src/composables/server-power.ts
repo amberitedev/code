@@ -1,5 +1,6 @@
-import type { AbstractModrinthClient, PowerAction } from '@modrinth/api-client'
-import { core as coreRoutes } from '@modrinth/api-client'
+import type { PowerAction } from '@amberite/contracts/core'
+import type { AbstractModrinthClient } from '@modrinth/api-client'
+import { core as coreRoutes } from '@amberite/contracts/core'
 
 /** Starts, stops, restarts or kills a server: a long op on its Core, which ends once done. */
 export function changeServerPower(

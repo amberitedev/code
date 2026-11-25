@@ -1,4 +1,4 @@
-import { onboarding, type OnboardingChecklist } from '@modrinth/api-client'
+import { onboarding, type OnboardingChecklist } from '@amberite/contracts/app'
 
 import { apiClient } from '@/platform/modrinth-client'
 

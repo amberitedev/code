@@ -1,4 +1,4 @@
-import type { BodyKind, Endpoint, ErrorCode } from '@amberite/contracts'
+import type { BodyKind, Endpoint, ErrorCode } from '@amberite/contracts/protocol'
 
 import type { UploadProgress } from '../types/upload'
 import { ApiCallError } from './errors'

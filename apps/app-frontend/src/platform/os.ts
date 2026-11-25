@@ -1,4 +1,5 @@
-import { boot as bootRoutes, type Boot, ContractClient } from '@modrinth/api-client'
+import { boot as bootRoutes, type Boot } from '@amberite/contracts/app'
+import { ContractClient } from '@modrinth/api-client'
 
 import { localBase, localTransport } from '@/platform/local'
 

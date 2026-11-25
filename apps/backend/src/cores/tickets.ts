@@ -1,12 +1,12 @@
 import {
-	type CoreTicket,
 	type FetchTicket,
 	type PullTicket,
 	type SessionTicket,
 	type StoreHost,
 	type StoreTicket,
 	TICKET_ISSUER,
-} from '@amberite/contracts'
+} from '@amberite/contracts/protocol'
+import type { CoreTicket } from '@amberite/contracts/backend'
 
 import { requireUser } from '../common/auth'
 import { randomId } from '../common/crypto'

@@ -1,4 +1,6 @@
-import { getHiddenInstanceIds } from '@/platform/app-lib/hidden-instances/commands'
+import { library } from '@amberite/contracts/app'
+
+import { apiClient } from '@/platform/modrinth-client'
 
 export const hiddenInstanceKeys = {
 	all: ['hidden-instances'] as const,
@@ -8,6 +10,6 @@ export const hiddenInstanceKeys = {
 export const hiddenInstanceIdsQueryOptions = (userId: string | null) => ({
 	networkMode: 'always' as const,
 	queryKey: hiddenInstanceKeys.ids(userId),
-	queryFn: getHiddenInstanceIds,
+	queryFn: () => apiClient.local.call(library.listHiddenInstances),
 	staleTime: Infinity,
 })

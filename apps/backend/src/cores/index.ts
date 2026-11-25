@@ -6,7 +6,7 @@ import {
 	type SignInStatus,
 	type StateReport,
 	cores,
-} from '@amberite/contracts'
+} from '@amberite/contracts/backend'
 
 import { requireUser, tokenFrom } from '../common/auth'
 import { isPrivateHost } from '../common/address'

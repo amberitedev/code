@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ListedCore } from '@modrinth/api-client'
+import type { ListedCore } from '@amberite/contracts/backend'
 import { Button, injectModrinthClient, injectNotificationManager, NewModal } from '@modrinth/ui'
 import { ref } from 'vue'
 

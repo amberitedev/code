@@ -1,4 +1,5 @@
-import type { ActionEntry, Archon } from '@modrinth/api-client'
+import type { ActionEntry } from '@amberite/contracts/core'
+import type { Archon } from '@modrinth/api-client'
 import type { IconComponent } from '@modrinth/assets'
 import {
 	DatabaseBackupIcon,

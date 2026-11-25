@@ -4,40 +4,40 @@
  *  and deserialized into a usable JS object.
  */
 import {
-	ApiCallError,
 	type ContentItem as ContentItemResponse,
-	desktop,
 	type GameInstance as InstanceResponse,
-	type GlobalSyncedOptions,
-	type IconConfig,
 	instanceContent,
-	instanceGroups,
-	instancePaths,
 	instances,
 	instanceSharing,
 	type InstanceSyncedOptions,
-	type Labrinth,
+	type ProjectType,
+	type SharedInstanceInvite,
+	type SharedInstanceInviteLink,
+	type SharedInstancePublishPreview,
+	type SharedInstanceUsers,
+} from '@amberite/contracts/engine'
+import {
+	desktop,
+	type GlobalSyncedOptions,
+	instanceGroups,
+	instancePaths,
 	launch,
 	library,
 	localSharing,
-	type ProjectType,
 	type ScreenshotFile,
 	type ScreenshotGroup,
 	type ScreenshotGroupImport,
 	type ScreenshotGroupMembershipUpdate,
 	type ScreenshotKey,
 	screenshots,
-	type SharedInstanceInvite,
-	type SharedInstanceInviteLink,
-	type SharedInstancePublishPreview,
-	type SharedInstanceUsers,
 	type SyncedOption,
 	type SyncedOptionJoinPreview,
 	type SyncedOptionJoinResolution,
 	type SyncedOptionsOverview,
 	syncedOptions,
 	type SyncedServer,
-} from '@modrinth/api-client'
+} from '@amberite/contracts/app'
+import { ApiCallError, type IconConfig, type Labrinth } from '@modrinth/api-client'
 import { type ContentItem, type ContentOwner, getIconSymbolAsset } from '@modrinth/ui'
 
 import { localFileUrl } from '@/platform/local'
@@ -268,7 +268,7 @@ export type {
 	SyncedOptionJoinResolution,
 	SyncedOptionsOverview,
 	SyncedServer,
-} from '@modrinth/api-client'
+} from '@amberite/contracts/app'
 
 export type InstanceScreenshot = ScreenshotFile & {
 	url: string
@@ -767,7 +767,7 @@ export type {
 	SharedInstancePublishPreview,
 	SharedInstanceUser,
 	SharedInstanceUsers,
-} from '@modrinth/api-client'
+} from '@amberite/contracts/engine'
 
 export async function can_current_user_use_shared_instances(): Promise<boolean> {
 	return await apiClient.local.call(localSharing.canUseSharedInstances)

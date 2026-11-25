@@ -1,4 +1,4 @@
-import { backend } from '@amberite/contracts'
+import { backend } from '@amberite/contracts/backend'
 
 import { accountRoutes } from './accounts'
 import { ApiError, errorResponse, routePath } from './common/http'

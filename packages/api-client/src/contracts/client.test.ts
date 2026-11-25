@@ -1,4 +1,4 @@
-import type { Endpoint } from '@amberite/contracts'
+import type { Endpoint } from '@amberite/contracts/protocol'
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 
 import { ModrinthApiError, ModrinthServerError } from '../core/errors'

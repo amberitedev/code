@@ -1,4 +1,3 @@
-export * from '@amberite/contracts'
 export * from './contracts'
 export { AbstractModrinthClient } from './core/abstract-client'
 export { AbstractFeature, type FeatureConfig } from './core/abstract-feature'

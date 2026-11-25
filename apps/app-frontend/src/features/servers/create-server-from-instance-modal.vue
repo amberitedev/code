@@ -11,7 +11,7 @@
 </template>
 
 <script setup lang="ts">
-import type { ListedCore } from '@modrinth/api-client'
+import type { ListedCore } from '@amberite/contracts/backend'
 import {
 	type CreationFlowContextValue,
 	CreationFlowModal,

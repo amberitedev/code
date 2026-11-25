@@ -1,10 +1,5 @@
-import {
-	ApiCallError,
-	type ContractClient,
-	instanceFiles,
-	type InstanceZipRequest,
-	type UploadState,
-} from '@modrinth/api-client'
+import { instanceFiles, type InstanceZipRequest } from '@amberite/contracts/engine'
+import { ApiCallError, type ContractClient, type UploadState } from '@modrinth/api-client'
 import { type QueryKey, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, type MaybeRefOrGetter, type Ref, ref, toValue, watch } from 'vue'
 

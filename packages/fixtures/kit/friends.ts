@@ -1,4 +1,4 @@
-import { social } from '@amberite/contracts'
+import { social } from '@amberite/contracts/backend'
 
 import { call } from '../src/call.ts'
 import type { Account, App } from '../src/context.ts'

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { core as coreRoutes } from '@modrinth/api-client'
+import { core as coreRoutes } from '@amberite/contracts/core'
 import { ChevronRightIcon } from '@modrinth/assets'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, ref, watch } from 'vue'

@@ -1,4 +1,4 @@
-import type { ErrorCode } from '@amberite/contracts'
+import type { ErrorCode } from '@amberite/contracts/protocol'
 
 import { ModrinthApiError } from '../core/errors'
 import { isModrinthErrorResponse } from '../types/errors'

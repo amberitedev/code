@@ -3,7 +3,7 @@ import {
 	type InstanceUser,
 	type InviteLink,
 	sharing,
-} from '@amberite/contracts'
+} from '@amberite/contracts/backend'
 
 import { ApiError } from '../common/http'
 import { notifyMembers, notifyUsers } from '../common/notifications'

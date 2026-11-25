@@ -4,7 +4,7 @@ import {
 	type ScenarioLogin,
 	type SqlAnswer,
 	type SqlStatement,
-} from '@amberite/contracts'
+} from '@amberite/contracts/backend'
 
 import { validateUsername } from './accounts'
 import { findUser, issueSession, requireLocal } from './common/auth'

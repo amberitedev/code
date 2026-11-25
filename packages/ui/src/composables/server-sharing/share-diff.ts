@@ -1,4 +1,4 @@
-import type { SharedInstanceUpdateDiff } from '@modrinth/api-client'
+import type { SharedInstanceUpdateDiff } from '@amberite/contracts/engine'
 
 import type { ContentDiffItem } from '#ui/layouts/shared/installation-settings/types'
 

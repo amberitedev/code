@@ -53,13 +53,9 @@
 </template>
 
 <script setup lang="ts">
-import {
-	type ContentItem as EngineContentItem,
-	instanceContent,
-	type Labrinth,
-	type Server,
-	type UploadProgress,
-} from '@modrinth/api-client'
+import type { Server } from '@amberite/contracts/core'
+import { type ContentItem as EngineContentItem, instanceContent } from '@amberite/contracts/engine'
+import type { Labrinth, UploadProgress } from '@modrinth/api-client'
 import { ArrowLeftRightIcon, RotateCounterClockwiseIcon } from '@modrinth/assets'
 import {
 	commonMessages,

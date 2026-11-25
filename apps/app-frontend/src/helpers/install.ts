@@ -1,20 +1,13 @@
 import {
-	type CreatePackLocation,
-	type IconConfig,
 	type ImportLauncherType,
-	type InstallCreateInstanceRequest,
 	type InstallErrorView,
 	type InstallJavaStep,
 	type InstallJobSnapshot,
 	type InstallJobStatus,
-	type InstallModpackPreview,
 	type InstallPhaseId,
-	type InstallPostInstallEdit,
 	type InstallProgress,
 	type InstallProgressSecondary,
 	installs,
-	launcherImport,
-	localInstalls,
 	type SharedHistorySettings,
 	type SharedInstanceExternalFilePreview,
 	type SharedInstanceHistoryEntry,
@@ -22,7 +15,16 @@ import {
 	type SharedInstanceInviteInstallPreview,
 	type SharedInstanceUpdateDiff,
 	type SharedInstanceUpdatePreview,
-} from '@modrinth/api-client'
+} from '@amberite/contracts/engine'
+import {
+	type CreatePackLocation,
+	type InstallCreateInstanceRequest,
+	type InstallModpackPreview,
+	type InstallPostInstallEdit,
+	launcherImport,
+	localInstalls,
+} from '@amberite/contracts/app'
+import type { IconConfig } from '@modrinth/api-client'
 
 import { apiClient } from '@/platform/modrinth-client'
 import type { AppEvents } from '@/providers/app-events'

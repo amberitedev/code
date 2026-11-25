@@ -1,4 +1,4 @@
-import type { LocalEvent } from '@modrinth/api-client'
+import type { LocalEvent } from '@amberite/contracts/app'
 import { createContext } from '@modrinth/ui'
 
 export type AppEventType = LocalEvent['type']

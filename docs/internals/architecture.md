@@ -108,9 +108,9 @@ with the one `contracts::endpoints!` macro, a group per module, and never implem
 hand outside tests. Under the `export-ts` feature ts-rs writes the TypeScript, which is committed
 and kept fresh by each crate's tests; `WRITE_TS=1 node scripts/dev-runner.ts test <crate>` rewrites
 it. Each generated file is a namespace of its own (`protocol`, `backend`, `core`, `engine`,
-`app`) that imports the types it names from the files before it. `@amberite/contracts`
-(`packages/contracts/ts/index.ts`) still re-exports them all flat, so an exported name must be
-unique across them.
+`app`) that imports the types it names from the files before it. Code imports a name from its file
+(`@amberite/contracts/core`), or a whole file as its namespace from `@amberite/contracts`, so a name
+need only be unique within its file. `@modrinth/api-client` re-exports none of them.
 
 Endpoints are declared where their types are:
 

@@ -68,7 +68,7 @@
 </template>
 
 <script setup lang="ts">
-import { instanceFiles } from '@modrinth/api-client'
+import { instanceFiles } from '@amberite/contracts/engine'
 import { EditIcon, PaletteIcon, SpinnerIcon, TransferIcon, UploadIcon } from '@modrinth/assets'
 import { useQueryClient } from '@tanstack/vue-query'
 import { computed, ref } from 'vue'

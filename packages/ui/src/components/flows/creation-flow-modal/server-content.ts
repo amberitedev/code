@@ -1,8 +1,5 @@
-import {
-	type AbstractModrinthClient,
-	core as coreRoutes,
-	type Labrinth,
-} from '@modrinth/api-client'
+import { core as coreRoutes } from '@amberite/contracts/core'
+import type { AbstractModrinthClient, Labrinth } from '@modrinth/api-client'
 
 import { addServerVersions, setUpServer } from '../../../composables/server-setup'
 import type { CreationFlowContextValue, ProjectInstallSelection } from './creation-flow-context'

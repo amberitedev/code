@@ -1,4 +1,4 @@
-import { type FileStat, localFiles } from '@modrinth/api-client'
+import { type FileStat, localFiles } from '@amberite/contracts/app'
 
 import { apiClient } from '@/platform/modrinth-client'
 

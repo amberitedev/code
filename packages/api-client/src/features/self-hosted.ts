@@ -1,4 +1,4 @@
-import { accounts, social } from '@amberite/contracts'
+import { accounts, social } from '@amberite/contracts/backend'
 
 import type { ContractTransport } from '../contracts/client'
 import { ApiCallError } from '../contracts/errors'

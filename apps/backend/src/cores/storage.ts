@@ -1,4 +1,9 @@
-import type { HeldVersion, PullOrder, StorageAnswer, StorageReport } from '@amberite/contracts'
+import type {
+	HeldVersion,
+	PullOrder,
+	StorageAnswer,
+	StorageReport,
+} from '@amberite/contracts/backend'
 
 import { invalid, objectBody } from '../common/http'
 import type { Env } from '../common/types'

@@ -7,7 +7,7 @@ import {
 	type NewInviteLink,
 	type VersionManifest,
 	sharing,
-} from '@amberite/contracts'
+} from '@amberite/contracts/backend'
 
 import { ApiError } from '../common/http'
 import {

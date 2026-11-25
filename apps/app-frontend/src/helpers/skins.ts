@@ -1,10 +1,10 @@
-import { type Cape, type Skin, type SkinModel, skins } from '@modrinth/api-client'
+import { type Cape, type Skin, type SkinModel, skins } from '@amberite/contracts/app'
 import { arrayBufferToBase64 } from '@modrinth/utils/utils'
 
 import { readFile } from '@/platform/files'
 import { apiClient } from '@/platform/modrinth-client'
 
-export type { Cape, Skin, SkinModel, SkinSource } from '@modrinth/api-client'
+export type { Cape, Skin, SkinModel, SkinSource } from '@amberite/contracts/app'
 
 export interface SkinTextureUrl {
 	original: string

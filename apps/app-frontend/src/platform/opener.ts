@@ -1,4 +1,4 @@
-import { desktop } from '@modrinth/api-client'
+import { desktop } from '@amberite/contracts/app'
 
 import { apiClient } from '@/platform/modrinth-client'
 

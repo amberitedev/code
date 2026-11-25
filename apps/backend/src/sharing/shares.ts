@@ -1,4 +1,5 @@
-import { ALLOWANCE_BYTES, type SharedInstanceUpdate, sharing } from '@amberite/contracts'
+import { ALLOWANCE_BYTES } from '@amberite/contracts/protocol'
+import { type SharedInstanceUpdate, sharing } from '@amberite/contracts/backend'
 
 import { requireUser } from '../common/auth'
 import { ApiError } from '../common/http'

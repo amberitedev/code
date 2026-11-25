@@ -271,6 +271,9 @@ importers:
 
   apps/app-frontend:
     dependencies:
+      '@amberite/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@dnd-kit/dom':
         specifier: ^0.5.0
         version: 0.5.0
@@ -562,6 +565,9 @@ importers:
 
   packages/ui:
     dependencies:
+      '@amberite/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@codemirror/commands':
         specifier: ^6.3.2
         version: 6.10.1

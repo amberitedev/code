@@ -5,7 +5,9 @@ import * as NodeFS from 'node:fs'
 import * as NodeHttp from 'node:http'
 import * as NodeHttps from 'node:https'
 import * as NodePath from 'node:path'
-import { core as coreApi, cores as coresApi, dev, type Endpoint } from '@amberite/contracts'
+import type { Endpoint } from '@amberite/contracts/protocol'
+import { cores as coresApi, dev } from '@amberite/contracts/backend'
+import { core as coreApi } from '@amberite/contracts/core'
 
 import {
 	type Account,

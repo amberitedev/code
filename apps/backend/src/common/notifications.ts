@@ -1,4 +1,4 @@
-import type { Notification, SharedInstanceList } from '@amberite/contracts'
+import type { Notification, SharedInstanceList } from '@amberite/contracts/backend'
 
 import { randomId } from './crypto'
 import type { Env } from './types'

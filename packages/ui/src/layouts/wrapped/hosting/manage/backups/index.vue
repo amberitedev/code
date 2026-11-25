@@ -164,7 +164,7 @@
 </template>
 
 <script setup lang="ts">
-import { type Backup, core as coreRoutes } from '@modrinth/api-client'
+import { type Backup, core as coreRoutes } from '@amberite/contracts/core'
 import {
 	CalendarClockIcon,
 	DownloadIcon,

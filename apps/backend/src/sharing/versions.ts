@@ -1,12 +1,11 @@
+import { ALLOWANCE_BYTES, MAX_SHARE_BYTES } from '@amberite/contracts/protocol'
 import {
-	ALLOWANCE_BYTES,
 	type InstanceVersion,
-	MAX_SHARE_BYTES,
 	type NewInstanceVersion,
 	type VersionFault,
 	type VersionManifest,
 	sharing,
-} from '@amberite/contracts'
+} from '@amberite/contracts/backend'
 
 import { ApiError } from '../common/http'
 import { JsonText, noBody, route, spliceJson } from '../common/router'

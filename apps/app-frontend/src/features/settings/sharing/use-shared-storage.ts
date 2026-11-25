@@ -1,4 +1,4 @@
-import { sharing, type ShareStorage } from '@modrinth/api-client'
+import { sharing, type ShareStorage } from '@amberite/contracts/backend'
 import { injectModrinthClient, injectNotificationManager } from '@modrinth/ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 

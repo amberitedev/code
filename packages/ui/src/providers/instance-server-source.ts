@@ -1,4 +1,4 @@
-import type { PatchPropertiesFields } from '@modrinth/api-client'
+import type { PatchPropertiesFields } from '@amberite/contracts/core'
 
 import { createContext } from '.'
 

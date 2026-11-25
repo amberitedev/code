@@ -1,4 +1,6 @@
-import { core as coreRoutes, type Endpoint, type LocationOf } from '@modrinth/api-client'
+import type { Endpoint } from '@amberite/contracts/protocol'
+import { core as coreRoutes } from '@amberite/contracts/core'
+import type { LocationOf } from '@modrinth/api-client'
 
 import { injectModrinthClient } from '../providers/api-client'
 import { type FileDownload, injectFileDownload } from '../providers/file-download'

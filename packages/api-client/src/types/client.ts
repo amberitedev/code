@@ -1,4 +1,5 @@
-import type { ApiError, CoreSession } from '@amberite/contracts'
+import type { ApiError } from '@amberite/contracts/protocol'
+import type { CoreSession } from '@amberite/contracts/core'
 
 import type { ContractTransport } from '../contracts/client'
 import type { AbstractFeature } from '../core/abstract-feature'

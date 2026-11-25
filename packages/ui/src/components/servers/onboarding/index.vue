@@ -18,7 +18,7 @@
 </template>
 
 <script setup lang="ts">
-import type { Server } from '@modrinth/api-client'
+import type { Server } from '@amberite/contracts/core'
 import { useMutation, useQueryClient } from '@tanstack/vue-query'
 import { until } from '@vueuse/core'
 import { computed, nextTick, useTemplateRef, watch } from 'vue'

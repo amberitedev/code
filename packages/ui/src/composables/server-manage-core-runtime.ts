@@ -1,4 +1,5 @@
-import type { CoreEvent, PowerState, Server, UploadState } from '@modrinth/api-client'
+import type { CoreEvent, PowerState, Server } from '@amberite/contracts/core'
+import type { UploadState } from '@modrinth/api-client'
 import { useQueryClient } from '@tanstack/vue-query'
 import type { ComputedRef, Ref } from 'vue'
 import { computed, onScopeDispose, ref } from 'vue'

@@ -1,4 +1,4 @@
-import { SERVER_SHARE_FOLDER, SHAREABLE_CONFIG_EXTENSIONS } from '@modrinth/api-client'
+import { SERVER_SHARE_FOLDER, SHAREABLE_CONFIG_EXTENSIONS } from '@amberite/contracts/protocol'
 
 // Mirrors `ShareScope::Server` in packages/sharing-client/src/rules/mod.rs, which decides what a
 // server's share carries; the extension list is generated from it.

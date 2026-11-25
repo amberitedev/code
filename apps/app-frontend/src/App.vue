@@ -1,5 +1,6 @@
 <script setup>
-import { ModrinthApiError, social } from '@modrinth/api-client'
+import { social } from '@amberite/contracts/backend'
+import { ModrinthApiError } from '@modrinth/api-client'
 import {
 	ArrowLeftRightIcon,
 	CompassIcon,

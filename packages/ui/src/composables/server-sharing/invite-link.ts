@@ -1,8 +1,5 @@
-import {
-	type AbstractModrinthClient,
-	core as coreRoutes,
-	type SharedInstances,
-} from '@modrinth/api-client'
+import { core as coreRoutes } from '@amberite/contracts/core'
+import type { AbstractModrinthClient, SharedInstances } from '@modrinth/api-client'
 
 // The invite rules for instance and server shares alike; the App's share pages import them too.
 // The age and default uses mirror SHARED_INSTANCE_INVITE_MAX_AGE_SECONDS and

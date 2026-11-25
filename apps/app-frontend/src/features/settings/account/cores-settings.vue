@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import {
 	core as coreRoutes,
-	ProtocolMismatch,
 	type StorageSettings,
 	type StorageStatus,
-} from '@modrinth/api-client'
+} from '@amberite/contracts/core'
+import { ProtocolMismatch } from '@modrinth/api-client'
 import { InfoIcon, PlusIcon, UnlinkIcon, UpdatedIcon } from '@modrinth/assets'
 import {
 	Admonition,

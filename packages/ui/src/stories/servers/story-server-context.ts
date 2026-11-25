@@ -1,4 +1,5 @@
-import { ContractClient, type Server, type UploadState } from '@modrinth/api-client'
+import type { Server } from '@amberite/contracts/core'
+import { ContractClient, type UploadState } from '@modrinth/api-client'
 import { computed, ref } from 'vue'
 
 import type { CancelUploadHandler, ModrinthServerContext } from '../../providers/server-context'

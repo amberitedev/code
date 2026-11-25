@@ -2,11 +2,10 @@ import {
 	type ClientMessage,
 	core as coreRoutes,
 	type CoreEvent,
-	type EngineEvent,
-	events as localRoutes,
-	type LocalEvent,
 	type Topic,
-} from '@amberite/contracts'
+} from '@amberite/contracts/core'
+import type { EngineEvent } from '@amberite/contracts/engine'
+import { events as localRoutes, type LocalEvent } from '@amberite/contracts/app'
 
 import { ContractClient } from '../contracts/client'
 import { ApiCallError } from '../contracts/errors'

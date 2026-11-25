@@ -1,4 +1,4 @@
-import { core } from '@modrinth/api-client'
+import { core } from '@amberite/contracts/core'
 import {
 	type ContentDiffItem,
 	defineMessages,
@@ -40,7 +40,7 @@ import {
 	instanceKeys,
 	sharedInstanceUpdatePreviewQueryOptions,
 } from '@/pages/instance/query-options'
-import { cacheIconBytes } from '@/platform/app-lib/icons/commands'
+import { cacheIconBytes } from '@/platform/adapters/icon-cache'
 import { injectAppEvents } from '@/providers/app-events'
 
 type LaunchTarget = ServerPlayTarget & {

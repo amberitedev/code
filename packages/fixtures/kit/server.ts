@@ -1,4 +1,6 @@
-import { core as coreApi, installs, type Loader, sharing } from '@amberite/contracts'
+import { sharing } from '@amberite/contracts/backend'
+import { core as coreApi, type Loader } from '@amberite/contracts/core'
+import { installs } from '@amberite/contracts/engine'
 
 import { call } from '../src/call.ts'
 import { type App, type Core, FixtureError, step, until } from '../src/context.ts'

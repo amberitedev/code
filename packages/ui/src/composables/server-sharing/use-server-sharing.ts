@@ -1,4 +1,5 @@
-import { instanceSharing, type SharedInstances } from '@modrinth/api-client'
+import { instanceSharing } from '@amberite/contracts/engine'
+import type { SharedInstances } from '@modrinth/api-client'
 import { useIsMutating, useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed } from 'vue'
 

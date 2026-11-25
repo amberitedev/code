@@ -1,8 +1,8 @@
+import { pairedCores } from '@amberite/contracts/app'
 import {
 	type AbstractModrinthClient,
 	AuthFeature,
 	GenericModrinthClient,
-	pairedCores,
 	SelfHostedFeature,
 	TauriModrinthClient,
 	VerboseLoggingFeature,

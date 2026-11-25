@@ -3,10 +3,10 @@ import {
 	type ActionLogResponse,
 	type ActionEntry,
 	type Backup,
-	type ContractClient,
 	type SortOrder,
 	core as coreRoutes,
-} from '@modrinth/api-client'
+} from '@amberite/contracts/core'
+import type { ContractClient } from '@modrinth/api-client'
 import { useInfiniteQuery, useQueryClient } from '@tanstack/vue-query'
 import type { ComputedRef } from 'vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'

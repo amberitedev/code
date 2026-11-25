@@ -1,8 +1,8 @@
+import { instanceSharing } from '@amberite/contracts/engine'
 import {
 	type AbstractModrinthClient,
 	ApiCallError,
 	type ContractClient,
-	instanceSharing,
 } from '@modrinth/api-client'
 
 import { serverKeys, sharedInstanceKeys } from '#ui/composables/server-queries'

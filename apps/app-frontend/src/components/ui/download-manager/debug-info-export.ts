@@ -1,4 +1,4 @@
-import { ops } from '@modrinth/api-client'
+import { ops } from '@amberite/contracts/app'
 import { computed, reactive, ref } from 'vue'
 
 import { toError } from '@/helpers/errors'

@@ -1,4 +1,4 @@
-import type { SharedIconConfig } from '@amberite/contracts'
+import type { SharedIconConfig } from '@amberite/contracts/backend'
 
 import { accountLocked, requireUserWithSharing } from '../common/auth'
 import { ApiError } from '../common/http'

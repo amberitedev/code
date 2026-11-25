@@ -1,4 +1,6 @@
-import { core, instanceContent, type Labrinth, type Server } from '@modrinth/api-client'
+import { core, type Server } from '@amberite/contracts/core'
+import { instanceContent } from '@amberite/contracts/engine'
+import type { Labrinth } from '@modrinth/api-client'
 import {
 	addServerVersions,
 	type BrowseInstallPlan,

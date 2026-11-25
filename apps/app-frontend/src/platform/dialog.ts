@@ -1,4 +1,4 @@
-import { desktop, type DialogFilter } from '@modrinth/api-client'
+import { desktop, type DialogFilter } from '@amberite/contracts/app'
 
 import { apiClient } from '@/platform/modrinth-client'
 

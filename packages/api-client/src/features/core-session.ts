@@ -1,14 +1,6 @@
-import {
-	core as coreRoutes,
-	type Endpoint,
-	type Health,
-	installs,
-	instanceContent,
-	instanceFiles,
-	logs,
-	PROTOCOL_VERSION,
-	TICKET_HEADER,
-} from '@amberite/contracts'
+import { type Endpoint, PROTOCOL_VERSION } from '@amberite/contracts/protocol'
+import { core as coreRoutes, type Health, TICKET_HEADER } from '@amberite/contracts/core'
+import { installs, instanceContent, instanceFiles, logs } from '@amberite/contracts/engine'
 
 import { ContractClient, type ContractTransport, fetchWithProgress } from '../contracts/client'
 import { ApiCallError } from '../contracts/errors'

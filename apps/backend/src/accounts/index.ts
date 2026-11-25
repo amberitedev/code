@@ -12,7 +12,7 @@ import {
 	type TwoFactorCode,
 	type TwoFactorLogin,
 	type TwoFactorSetup,
-} from '@amberite/contracts'
+} from '@amberite/contracts/backend'
 import zxcvbn from 'zxcvbn'
 
 import {

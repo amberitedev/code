@@ -4,7 +4,7 @@ import {
 	type LocalEvent,
 	type LocalUpload,
 	ops,
-} from '@modrinth/api-client'
+} from '@amberite/contracts/app'
 
 import { apiClient } from '@/platform/modrinth-client'
 

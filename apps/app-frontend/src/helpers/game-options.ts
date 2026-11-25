@@ -5,7 +5,7 @@ import {
 	type GameSettingsEditorState,
 	type SaveGameSettingsResult,
 	type UpdateGameSettingsRequest,
-} from '@modrinth/api-client'
+} from '@amberite/contracts/app'
 import { queryOptions } from '@tanstack/vue-query'
 
 import { apiClient } from '@/platform/modrinth-client'
@@ -31,7 +31,7 @@ export type {
 	GameSettingsEditorState,
 	SaveGameSettingsResult,
 	UpdateGameSettingsRequest,
-} from '@modrinth/api-client'
+} from '@amberite/contracts/app'
 
 export async function get_game_setting_locale_labels(
 	instanceId: string | undefined,
