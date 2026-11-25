@@ -188,20 +188,6 @@ export function parseAuditEvent(entry: ActionEntry, lookups: AuditEventLookups):
 					versionLabel,
 				])
 			}
-			case 'instance_version_applied': {
-				const name = stringField(metadataRecord(metadata), 'name')
-				if (!name) return unknown(base, action)
-				const instance: EventEntity = {
-					id: name,
-					label: name,
-					icon: PackageIcon,
-					iconShape: 'square',
-				}
-				return parsed(ModpackEvent, base, { kind: 'instance_updated', modpack: instance }, [
-					...actionSearchParts(action),
-					name,
-				])
-			}
 			case 'port_allocation_added':
 			case 'port_allocation_removed': {
 				const port = numberField(metadataRecord(metadata), 'port')

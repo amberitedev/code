@@ -1,8 +1,3 @@
-import type {
-	SharedInstanceHistoryEntry as ShareHistoryEntry,
-	SharedInstanceUpdateDiff,
-} from '@amberite/contracts'
-
 import type { IconConfig } from '../../types/icons'
 import type { Labrinth } from '../labrinth/types'
 
@@ -136,8 +131,6 @@ export namespace Archon {
 				| 'addon_side_toggle_locked'
 				| 'modpack_changed'
 				| 'modpack_unlinked'
-				/** Core only. The server was moved to a version of the App instance it follows. */
-				| 'instance_version_applied'
 				| 'server_repaired'
 				| 'server_reset'
 				| 'world_data_reset'
@@ -312,26 +305,44 @@ export namespace Archon {
 				backup_id: string | null
 			}
 
-			/** What a push of a server's own share would change, in the App's diff shape. */
+			export type SharedContentChange<T> =
+				| { kind: 'added'; after: T }
+				| { kind: 'removed'; before: T }
+				| { kind: 'updated'; before: T; after: T }
+
+			export type SharedContentDiffEntry =
+				| { type: 'project'; project_id: string; change: SharedContentChange<string> }
+				| {
+						type: 'external_file'
+						file_type: string
+						file_name: string
+						kind: 'added' | 'removed' | 'updated'
+				  }
+				| { type: 'modpack' | 'game_version'; change: SharedContentChange<string> }
+				| { type: 'loader'; change: SharedContentChange<{ name: string; version: string | null }> }
+
 			export type SharedInstancePublishDiff = {
 				shared_instance_id: string
 				latest_version: number
+				local_updated_at: string
 				has_changes: boolean
-				/** The server is running, so it runs these changes only once it restarts. */
 				requires_restart: boolean
-				diffs: SharedInstanceUpdateDiff[]
+				diffs: SharedContentDiffEntry[]
+				projects: Record<string, { name: string; icon_url: string | null }>
+				versions: Record<
+					string,
+					{
+						project_id: string
+						name: string
+						version_number: string | null
+					}
+				>
 			}
-
-			/** A pushed version of a server's own share, as its History page shows it. */
-			export type SharedInstanceHistoryEntry = ShareHistoryEntry
 
 			export type ShareableFile = {
 				path: string
 				size: number
-				/** Under `config/`, but a share cannot carry it. */
 				blocked: boolean
-				/** The share's latest version carries it. */
-				shared: boolean
 			}
 
 			export type ShareableFilesResponse = {
@@ -407,12 +418,7 @@ export namespace Archon {
 				version: AddonVersion | null
 				owner: ContentOwner | null
 				icon_url: string | null
-				/** Core only. False for client-only pack content: listed, never put on the server. */
-				installed?: boolean
 			}
-
-			/** Core only. Where a linked server is with the newest version pushed to it. */
-			export type LinkedPackState = 'up_to_date' | 'downloading' | 'pending' | 'applying' | 'failed'
 
 			export type Addons = {
 				modloader: string | null
@@ -519,7 +525,7 @@ export namespace Archon {
 			}
 
 			export type ModpackFields = {
-				readonly spec: ModpackSpec
+				spec: ModpackSpec
 				has_update: string | null
 				title: string | null
 				description: string | null
@@ -529,11 +535,6 @@ export namespace Archon {
 				date_published: string | null
 				downloads: number | null
 				followers: number | null
-				/** Core only. Set when the pack is an App instance: the App's id for it. */
-				instance_id?: string | null
-				/** Core only. `pending` means the update applies when the server next stops. */
-				state?: LinkedPackState
-				error?: string | null
 			}
 
 			export type KnownPropertiesFields = {
@@ -603,20 +604,6 @@ export namespace Archon {
 						game_version?: string
 						soft_override: boolean
 						properties?: PropertiesFields | null
-				  }
-				| {
-						/**
-						 * Core only. Applies the latest version of an App instance's share, which Core
-						 * reads from the backend and fetches from the pool itself. A running server takes
-						 * it when it next stops, or with `restart` is stopped, updated, and started again.
-						 */
-						content_variant: 'instance'
-						instance: { id: string; name: string }
-						shared_instance_id: string
-						/** Ignored: the Core reads the share as its owner. */
-						ticket?: string
-						properties?: PropertiesFields | null
-						restart?: boolean
 				  }
 
 			export type AddonDiffVersion = {
@@ -768,8 +755,6 @@ export namespace Archon {
 				servers: Server[]
 				pagination: Pagination
 				users: Record<string, ServerOwner>
-				/** Ids of listed Cores that did not answer. Only set when hosting is self-hosted. */
-				offline_cores?: string[]
 			}
 
 			export type Pagination = {
@@ -837,30 +822,6 @@ export namespace Archon {
 				icon: Icons.v1.ServerIcon | null
 
 				medal_expires?: string
-
-				/** Core only. The App instance this server follows, if any. */
-				linked_instance?: LinkedInstance | null
-				/**
-				 * Core only. Lets a list show running servers without opening a socket each. When the
-				 * server is down, how its last run ended: `offline` (stopped), `crashed`, or `killed`.
-				 */
-				power_state?: 'offline' | 'starting' | 'running' | 'stopping' | 'crashed' | 'killed'
-				/** Core only. Null while the server is not running. */
-				reachability?: Reachability | null
-				/** Core only. Who is online, from Core's health check. Null while the server is not running. */
-				players?: string[] | null
-			}
-
-			export type LinkedInstance = {
-				/** The App's id for the instance. */
-				id: string
-				name: string
-				state: Content.v1.LinkedPackState
-				error: string | null
-				/** The instance's share, whose versions the server applies. */
-				shared_instance_id: string | null
-				/** The version of the share the server runs. */
-				version: number | null
 			}
 
 			export type SuspensionLift = {
@@ -876,22 +837,6 @@ export namespace Archon {
 				ip: string | null
 				port: number
 				domain: string
-				/** Core: where the server is on the internet, when it can be joined from there. */
-				outside?: { ip: string; port: number } | null
-				/**
-				 * Core: the port the server listens on. `ip` and `port` are where players join from the
-				 * internet, which is the router's port when it forwarded a different one.
-				 */
-				game_port?: number
-			}
-
-			/**
-			 * Core: whether a running server can be joined from the internet. `unverified` means its
-			 * port is forwarded but could not be tested. `cause` says why it is unreachable.
-			 */
-			export type Reachability = {
-				state: 'checking' | 'reachable' | 'unverified' | 'unreachable'
-				cause: string | null
 			}
 
 			export type Upstream = {

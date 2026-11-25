@@ -2,8 +2,6 @@ import {
 	type AbstractModrinthClient,
 	AuthFeature,
 	GenericModrinthClient,
-	NodeAuthFeature,
-	nodeAuthState,
 	pairedCores,
 	SelfHostedFeature,
 	TauriModrinthClient,
@@ -60,10 +58,6 @@ export const apiClient: AbstractModrinthClient = new ModrinthClient({
 		new SelfHostedFeature({
 			baseUrl: config.accountApiUrl,
 			token: async () => (await getModrinthCredentials())?.session,
-		}),
-		new NodeAuthFeature({
-			getAuth: () => nodeAuthState.getAuth?.() ?? null,
-			refreshAuth: async () => await nodeAuthState.refreshAuth?.(),
 		}),
 		new AuthFeature({
 			token: async () => (await getModrinthCredentials())?.session,

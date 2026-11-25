@@ -33,7 +33,6 @@ import type { UploadProgress } from '@modrinth/api-client'
 import { computed, ref } from 'vue'
 
 import { createCurseForgeSelection } from '#ui/components/flows/creation-flow-modal/curseforge'
-import { injectModrinthClient } from '#ui/providers'
 
 import ServerPlayMigrationContent from './ServerPlayMigrationContent.vue'
 import ServerPlayMigrationCurseForgeStage from './ServerPlayMigrationCurseForgeStage.vue'
@@ -55,13 +54,9 @@ const emit = defineEmits<{
 	confirm: [source: ServerPlayMigrationSource]
 }>()
 
-const client = injectModrinthClient()
 const stage = ref<'intro' | 'upload'>('intro')
 const acknowledged = ref(false)
-const selection = createCurseForgeSelection(client, () => {
-	if (!props.worldId) throw new Error('The server has no world to restore')
-	return { worldId: props.worldId }
-})
+const selection = createCurseForgeSelection()
 
 const needsUpload = computed(
 	() => props.kind === 'curseforge' || (props.kind === 'mrpack' && !props.hasUploadedMrpack),

@@ -1,4 +1,11 @@
-import type { Archon, Kyros, LauncherMeta, LocalFile, UploadProgress } from '@modrinth/api-client'
+import type {
+	KnownPropertiesFields,
+	Kyros,
+	LauncherMeta,
+	LocalFile,
+	PatchPropertiesFields,
+	UploadProgress,
+} from '@modrinth/api-client'
 import { useQueryClient } from '@tanstack/vue-query'
 import { computed, type ComputedRef, nextTick, type Ref, ref, type ShallowRef, watch } from 'vue'
 import type { ComponentExposed } from 'vue-component-type-helpers'
@@ -10,6 +17,7 @@ import {
 	useVIntl,
 	type VIntlFormatters,
 } from '#ui/composables/i18n'
+import { knownProperties } from '#ui/composables/server-setup'
 import { type ServerInviteLink, useServerInviteLink } from '#ui/composables/server-sharing'
 import { formatLoaderLabel } from '#ui/utils/loaders'
 
@@ -18,6 +26,7 @@ import type { ImportableLauncher } from '../../../providers/instance-import'
 import type { ServerInstanceOption } from '../../../providers/instance-server-source'
 import type { MultiStageModal, StageConfigInput } from '../../base'
 import type { ComboboxOption } from '../../base/Combobox.vue'
+import { curseForgeUnsupported } from './curseforge'
 import { installServerContent, prepareServerContent, searchServerContent } from './server-content'
 import { stageConfigs } from './stages'
 
@@ -153,12 +162,6 @@ export interface ProjectInstallCreateData {
 	gameVersion: string
 }
 
-/** Where CurseForge modpack links are resolved and installed. */
-export interface CurseForgeTarget {
-	worldId: string
-	auth?: Archon.Servers.v0.JWTAuth
-}
-
 export interface GeneratedInstanceIcon {
 	path: string
 	previewUrl: string
@@ -276,7 +279,7 @@ export interface CreationFlowContextValue {
 	setInstancePickMode: () => void
 	browseModpacks: () => Promise<void>
 	selectProject: (projectId: string, projectType: string, versionId?: string) => Promise<void>
-	installServerContent: (serverId: string, worldId: string) => Promise<void>
+	installServerContent: (coreId: string, serverId: string) => Promise<void>
 	finish: () => void
 	/**
 	 * Shows the uploading stage while `run` uploads, returning to the final stage if it fails.
@@ -292,7 +295,7 @@ export interface CreationFlowContextValue {
 		onDone: () => void | Promise<void>,
 	) => void
 	completeInvite: () => Promise<void>
-	buildProperties: () => Archon.Content.v1.PropertiesFields
+	buildProperties: () => PatchPropertiesFields
 	fetchLoaderMetadata: (loader?: string | null) => Promise<void>
 	prefetchLoaderMetadata: () => Promise<void>
 
@@ -331,7 +334,6 @@ export interface CreationFlowOptions {
 	createProjectInstall?: (data: ProjectInstallCreateData) => Promise<void>
 	getProjectVersions?: (projectId: string) => Promise<{ id: string }[]>
 	getLoaderManifest?: LoaderManifestResolver
-	getCurseForgeTarget?: () => Promise<CurseForgeTarget>
 	randomizeInstanceIcon?: () => Promise<GeneratedInstanceIcon | null>
 	customizeInstanceIcon?: () => void
 	finishDisabled?: ComputedRef<boolean>
@@ -370,7 +372,6 @@ export function createCreationFlowContext(
 		options.getProjectVersions ??
 		((projectId: string) => client.labrinth.versions_v3.getProjectVersions(projectId))
 	const getLoaderManifest = options.getLoaderManifest ?? null
-	const getCurseForgeTarget = options.getCurseForgeTarget
 	const finishDisabled = options.finishDisabled ?? computed(() => false)
 	const finishDisabledTooltip = options.finishDisabledTooltip ?? computed(() => undefined)
 
@@ -785,24 +786,12 @@ export function createCreationFlowContext(
 		}
 	}
 
-	async function curseforgeTarget(): Promise<CurseForgeTarget> {
-		if (!getCurseForgeTarget) throw new Error('CurseForge modpacks are unavailable in this flow')
-		return getCurseForgeTarget()
-	}
+	const queryCurseForgeLink = async (_link: string, _fileId?: number) => curseForgeUnsupported()
+	const listCurseForgeFiles = async (_projectId: number) => curseForgeUnsupported()
 
-	async function queryCurseForgeLink(link: string, fileId?: number) {
-		const { worldId, auth } = await curseforgeTarget()
-		return client.kyros.flameanvil_v1.queryLink(worldId, { link, file_id: fileId }, { auth })
-	}
-
-	async function listCurseForgeFiles(projectId: number) {
-		const { worldId, auth } = await curseforgeTarget()
-		return client.kyros.flameanvil_v1.listProjectFiles(worldId, projectId, undefined, { auth })
-	}
-
-	function buildProperties(): Archon.Content.v1.PropertiesFields {
+	function buildProperties(): PatchPropertiesFields {
 		const isHardcore = gamemode.value === 'hardcore'
-		const known: Archon.Content.v1.KnownPropertiesFields = {
+		const known: KnownPropertiesFields = {
 			gamemode: isHardcore ? 'survival' : gamemode.value,
 			hardcore: isHardcore ? 'true' : 'false',
 			difficulty: difficulty.value,
@@ -817,7 +806,7 @@ export function createCreationFlowContext(
 			known.generator_settings = generatorSettingsCustom.value
 		}
 
-		return { known }
+		return { known: knownProperties(known) }
 	}
 
 	const resolvedStageConfigs = disableClose
@@ -899,8 +888,8 @@ export function createCreationFlowContext(
 		setInstancePickMode,
 		browseModpacks,
 		selectProject,
-		installServerContent: (serverId, worldId) =>
-			installServerContent(client, contextValue, serverId, worldId),
+		installServerContent: (coreId, serverId) =>
+			installServerContent(client, contextValue, coreId, serverId),
 		finish,
 		trackUpload,
 		showInvite,

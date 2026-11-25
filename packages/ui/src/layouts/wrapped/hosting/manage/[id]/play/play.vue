@@ -2,7 +2,7 @@
 	<div class="relative flex flex-col gap-6">
 		<ServerPlayCard
 			:address="serverAddress"
-			:disabled="actionsLocked || migrating || (!canSetup && !sharedInstanceId)"
+			:disabled="actionsLocked || (!canSetup && !sharedInstanceId)"
 			:pending-action="exporting ? 'download' : pendingAction"
 			@play="perform('play')"
 			@download="exportModpack"
@@ -22,11 +22,11 @@
 				:rows="players.rows.value"
 				:loading="players.members.isLoading.value"
 				:can-manage="canSetup"
-				:disabled="players.membershipMutation.isPending.value || actionsLocked || migrating"
+				:disabled="players.membershipMutation.isPending.value || actionsLocked"
 				:show-push-update="!!sharedInstanceId && !followsInstance"
-				:push-update-disabled="actionsLocked || migrating"
+				:push-update-disabled="actionsLocked"
 				:push-update-pending="previewQuery.isFetching.value || pendingAction === 'push'"
-				:invite-disabled="actionsLocked || migrating"
+				:invite-disabled="actionsLocked"
 				:invite-pending="pendingAction === 'invite'"
 				@push-update="showPreview()"
 				@push-update-hover="shareReview.prefetchFiles()"
@@ -122,10 +122,6 @@ import { useServerDownload } from '#ui/composables/server-download'
 import { injectPageContext } from '#ui/providers/page-context'
 import { getHostingServerAddress } from '#ui/utils/servers'
 
-import {
-	injectServerPlayMigration,
-	type ServerPlayMigrationNext,
-} from '../../providers/server-play-migration'
 import ServerPlayCard from './ServerPlayCard.vue'
 import { useServerPlayers } from './use-server-players'
 
@@ -159,13 +155,7 @@ const followsInstance = computed(() => !!server.value?.linked_instance)
 const players = useServerPlayers(serverId, sharedInstanceId, canSetup)
 const invitePlayersModal = ref<InstanceType<typeof InvitePlayersModal>>()
 const inviteHandoff = injectServerInviteHandoff(null)
-const migration = injectServerPlayMigration(null)
-const migrating = computed(() => !!migration && (migration.active.value || !migration.ready.value))
 let inviteHandoffStarted = false
-let disposed = false
-onScopeDispose(() => {
-	disposed = true
-})
 const shareReview = useServerShareReview<Action>({
 	execute: performAction,
 	disabled: computed(() => players.linkMutation.isPending.value),
@@ -266,44 +256,15 @@ async function perform(
 	restart?: boolean,
 	removedConfigPaths: string[] = [],
 ) {
-	if (actionsLocked.value || migrating.value) return
-	if (
-		requireMigration(action, () =>
-			perform(action, reviewed, configPaths, restart, removedConfigPaths),
-		)
-	)
-		return
+	if (actionsLocked.value) return
 	if (action === 'play' && !reviewed && canSetup.value && needsUpdate.value) {
 		void showPreview(true)
 		return
 	}
 	await runAction(action, reviewed, configPaths, restart, removedConfigPaths)
 }
-function requireMigration(action: Action, resume: () => Promise<void>) {
-	if (!migration?.required.value) return false
-	const next: ServerPlayMigrationNext =
-		action === 'invite'
-			? 'invite'
-			: () => {
-					if (!disposed) void resume()
-				}
-	if (inviteHandoff?.requested.value) {
-		inviteHandoff.provideMigration({
-			kind: migration.kind.value ?? 'custom',
-			modpackName: migration.modpackName.value,
-			hasUploadedMrpack: migration.hasUploadedMrpack.value,
-			worldId: serverId,
-			uploadProgress: migration.uploadProgress,
-			start: (source, onRequested) => migration.start(source, next, onRequested),
-		})
-	} else {
-		migration.prompt(next)
-	}
-	return true
-}
 async function showPreview(playAfter = false) {
-	if (actionsLocked.value || migrating.value) return
-	if (requireMigration('push', () => showPreview(playAfter))) return
+	if (actionsLocked.value) return
 	previewAction.value = playAfter ? 'play' : 'push'
 	await shareReview.showPreview(previewAction.value)
 }
@@ -334,13 +295,13 @@ async function updateInviteLink(settings: InviteLinkSettings) {
 	})
 }
 watch(
-	[canSetup, () => inviteHandoff?.requested.value, migrating, actionsLocked],
+	[canSetup, () => inviteHandoff?.requested.value, actionsLocked],
 	async () => {
 		if (!inviteHandoff?.requested.value) {
 			inviteHandoffStarted = false
 			return
 		}
-		if (inviteHandoffStarted || migrating.value || actionsLocked.value) return
+		if (inviteHandoffStarted || actionsLocked.value) return
 		inviteHandoffStarted = true
 		if (canSetup.value) await perform('invite')
 		if (!inviteHandoff.binding.value && !inviteHandoff.migration.value) inviteHandoff.cancel()

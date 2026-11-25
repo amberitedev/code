@@ -1,26 +1,26 @@
 <script setup lang="ts">
-import { type Archon, type Labrinth, ModrinthApiError } from '@modrinth/api-client'
+import {
+	core as coreRoutes,
+	type ContentItem as EngineContentItem,
+	instanceContent,
+	type Labrinth,
+	ModrinthApiError,
+} from '@modrinth/api-client'
 import { UnlinkIcon } from '@modrinth/assets'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
+import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, nextTick, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRouter } from 'vue-router'
 
 import type { ButtonMenuOption } from '#ui/components/base/buttons'
 import ReadyTransition from '#ui/components/base/ReadyTransition.vue'
-import { switchCurseForgeModpackFile } from '#ui/components/flows/creation-flow-modal/curseforge'
 import UnknownFileWarningModal from '#ui/components/modal/UnknownFileWarningModal.vue'
 import type { UpdateAllSelection } from '#ui/components/modal/update-all-modal/update-all-modal-types'
-import { serverPlayMigrationMessages } from '#ui/components/servers/play-migration/messages'
-import { useUploadSessionUpload } from '#ui/composables/hosting/kyros-session-upload'
+import { useContentUpload } from '#ui/composables/content-upload'
 import { defineMessages, useVIntl } from '#ui/composables/i18n'
-import {
-	type AddonToggleChanges,
-	addonToggleKey,
-	applyPendingAddonToggle,
-} from '#ui/composables/server-content-toggle-state'
-import { waitForServerContextRuntimeReady } from '#ui/composables/server-context-runtime'
 import { useServerPermissions } from '#ui/composables/server-permissions'
 import { useServerPreferences } from '#ui/composables/server-preferences'
+import { serverKeys } from '#ui/composables/server-queries'
+import { addServerVersions } from '#ui/composables/server-setup'
 import {
 	injectModrinthClient,
 	injectModrinthServerContext,
@@ -28,7 +28,6 @@ import {
 	injectServerSettingsModal,
 } from '#ui/providers'
 import { commonMessages } from '#ui/utils/common-messages'
-import { resolveServerPlatform } from '#ui/utils/loaders'
 import { versionChangesGameVersion } from '#ui/utils/version-compatibility'
 
 import type { BrowseInstallPlan } from '../../../shared/browse-tab/composables/install-logic'
@@ -55,17 +54,13 @@ import {
 	friendlyAddonName,
 	getAddonEnvironment,
 	hasDetectedEnvironment,
+	isDisabledFor,
 	isEnabledForAnySide,
 	isIncompatibleEnvironment,
 	isPlayerOnlyContent,
 	isRequiredEnvironment,
 } from '../../../shared/content-tab/utils/addon-environment'
 import { summarizeManagedContent } from '../../../shared/content-tab/utils/managed-content'
-import { useAddonToggles } from './composables/use-addon-toggles'
-import { useCurseForgeModpackFiles } from './composables/use-curseforge-modpack-files'
-import { injectServerPlayMigration } from './providers/server-play-migration'
-
-type AddonWithUiState = Archon.Content.v1.Addon & { installing?: boolean }
 
 const { formatMessage } = useVIntl()
 
@@ -185,15 +180,19 @@ const messages = defineMessages({
 })
 
 const client = injectModrinthClient()
-const { server, busyReasons, beginInstallation, uploadState, cancelUpload, powerState } =
-	injectModrinthServerContext()
-const serverPlayMigration = injectServerPlayMigration(null)
-// A Core names a server's one world by the server's id.
-const worldId = computed<string | null>(() => server.value.server_id)
-const contentUploadSession = useUploadSessionUpload({
-	client,
-	scope: 'content',
-	worldId,
+const {
+	serverId,
+	coreId,
+	core,
+	server,
+	busyReasons,
+	beginInstallation,
+	uploadState,
+	cancelUpload,
+} = injectModrinthServerContext()
+const contentUpload = useContentUpload({
+	client: core,
+	instanceId: serverId,
 	uploadState,
 	cancelUpload,
 })
@@ -204,94 +203,58 @@ const skipUnknownFileWarningKey = 'hosting-skip-unknown-file-warning'
 const { addNotification } = injectNotificationManager()
 const { openServerSettings, browseServerContent } = injectServerSettingsModal()
 const { canSetup, permissionDeniedMessage } = useServerPermissions()
-const route = useRoute()
 const router = useRouter()
 const queryClient = useQueryClient()
-const serverId = route.params.id as string
 const userPreferences = useServerPreferences(serverId)
 const environmentWarningModal = ref<InstanceType<typeof ConfirmEnvironmentModal>>()
 
+const params = { params: { id: serverId } }
+const read = { ...params, query: {} }
+
 const type = computed(() => {
-	const loader = server.value?.loader?.toLowerCase()
-	if (loader === 'paper' || loader === 'purpur') return 'plugin'
-	if (loader === 'vanilla') return 'datapack'
+	const loader = server.value.loader
+	if (loader === 'Paper') return 'plugin'
+	if (loader === 'Vanilla') return 'datapack'
 	return 'mod'
 })
 
-const queryKey = computed(() => ['content', 'list', 'v1', serverId])
-const modpackContentQueryKey = computed(() => ['content', 'list', 'v1', serverId, 'modpack'])
-
+// Under the server's content key, which its Core's socket invalidates when the server changes.
+const contentKey = serverKeys.content(serverId)
 const contentQuery = useQuery({
-	queryKey,
-	queryFn: async () => {
-		const targetWorldId = worldId.value!
-		const content = await client.archon.content_v1.getAddons(serverId, targetWorldId, {
-			from_modpack: false,
-		})
-		return {
-			...content,
-			addons:
-				content.addons?.map((addon) =>
-					applyPendingAddonToggle(queryClient, serverId, targetWorldId, addon),
-				) ?? null,
-		}
-	},
-	enabled: computed(() => worldId.value !== null),
+	queryKey: [...contentKey, 'own'],
+	queryFn: () => core.call(instanceContent.ListContentItems, read),
 	staleTime: 30_000,
-	// A linked pack installs in the background, so keep reading until it settles. A pending update
-	// waits for the server to stop, which can take a while, so it is read more slowly.
-	refetchInterval: (query) => {
-		const state = query.state.data?.modpack?.state
-		if (state === 'downloading' || state === 'applying') return 2_000
-		return state === 'pending' ? 10_000 : false
-	},
+})
+const packQuery = useQuery({
+	queryKey: [...contentKey, 'pack'],
+	queryFn: () => core.call(instanceContent.GetLinkedModpack, read),
+	staleTime: 30_000,
 })
 
-// A pending update applies as soon as the server stops.
-watch(powerState, (state) => {
-	if (state === 'stopped' && contentQuery.data.value?.modpack?.state === 'pending') {
-		void contentQuery.refetch()
-	}
-})
-
-/** The App instance this server follows, when its linked pack is one. */
-const linkedInstanceId = computed(() => contentQuery.data.value?.modpack?.instance_id ?? null)
+/** The App instance this server follows, whose owner pushes its versions. */
+const follow = computed(() => server.value.linked_instance)
+const linkedInstanceId = computed(() => follow.value?.id ?? null)
 const applyingInstanceUpdate = ref(false)
 
 const isModpackContentModalOpen = ref(false)
-const modpackContentQuery = useQuery({
-	queryKey: modpackContentQueryKey,
-	queryFn: async () => {
-		const targetWorldId = worldId.value!
-		const content = await client.archon.content_v1.getAddons(serverId, targetWorldId, {
-			from_modpack: true,
-		})
-		return {
-			...content,
-			addons:
-				content.addons?.map((addon) =>
-					applyPendingAddonToggle(queryClient, serverId, targetWorldId, addon),
-				) ?? null,
-		}
-	},
-	enabled: computed(() => worldId.value !== null && !!contentQuery.data.value?.modpack),
+const packContentQuery = useQuery({
+	queryKey: [...contentKey, 'pack-content'],
+	queryFn: () => core.call(instanceContent.ListLinkedModpackContent, read),
+	enabled: computed(() => !!packQuery.data.value || !!follow.value),
 	staleTime: 30_000,
 })
 
-// The pack's content changes whenever an update finishes applying.
-watch(
-	() => contentQuery.data.value?.modpack?.state,
-	(state, previous) => {
-		if (previous && state !== previous) {
-			void queryClient.invalidateQueries({ queryKey: modpackContentQueryKey.value })
-		}
-	},
-)
+/** Files the panel is changing now, by path, shown as installing until the list reads again. */
+const changing = ref(new Set<string>())
+
+async function refresh() {
+	await queryClient.invalidateQueries({ queryKey: contentKey })
+}
 
 const setupActionDisabled = computed(() => !canSetup.value || busyReasons.value.length > 0)
 const isInstallingContent = computed(
 	() =>
-		server.value?.status === 'installing' ||
+		server.value.status === 'installing' ||
 		busyReasons.value.some(
 			(r) =>
 				r.reason.id === 'servers.busy.installing' || r.reason.id === 'servers.busy.syncing-content',
@@ -316,20 +279,13 @@ const setupActionBusyMessage = computed(() => {
 	return filteredReasons.length > 0 ? formatMessage(filteredReasons[0].reason) : null
 })
 
-// A Core reports no install progress per file.
-const currentWorldInstallProgressItems = computed(
-	(): Archon.Websocket.v0.InstallProgressItem[] => [],
-)
 const contentActionDisabled = computed(() => !canSetup.value || busyReasons.value.length > 0)
 const contentActionBusyMessage = computed(() => {
 	if (!canSetup.value) return permissionDeniedMessage.value
 	return busyReasons.value.length > 0 ? formatMessage(busyReasons.value[0].reason) : null
 })
 
-const modpackProjectId = computed(() => {
-	const spec = contentQuery.data.value?.modpack?.spec
-	return spec?.platform === 'modrinth' ? spec.project_id : null
-})
+const modpackProjectId = computed(() => packQuery.data.value?.project.id ?? null)
 
 const modpackVersionsQuery = useQuery({
 	queryKey: computed(() => ['labrinth', 'versions', 'v2', modpackProjectId.value]),
@@ -337,12 +293,6 @@ const modpackVersionsQuery = useQuery({
 		client.labrinth.versions_v2.getProjectVersions(modpackProjectId.value!, {
 			include_changelog: false,
 		}),
-	enabled: computed(() => !!modpackProjectId.value),
-})
-
-const projectQuery = useQuery({
-	queryKey: computed(() => ['labrinth', 'project', modpackProjectId.value]),
-	queryFn: () => client.labrinth.projects_v2.get(modpackProjectId.value!),
 	enabled: computed(() => !!modpackProjectId.value),
 })
 
@@ -355,120 +305,73 @@ function sortVersionsByPublishedDate(versions: Labrinth.Versions.v2.Version[]) {
 }
 
 const updatingModpack = ref(false)
-
-const curseforgeModpackLink = computed(() => {
-	const spec = contentQuery.data.value?.modpack?.spec
-	return spec?.platform === 'curseforge' ? (spec.link ?? null) : null
-})
-
-const {
-	filesQuery: curseforgeFilesQuery,
-	filesById: curseforgeFilesById,
-	versions: curseforgeModpackVersions,
-} = useCurseForgeModpackFiles({
-	client,
-	worldId,
-	link: curseforgeModpackLink,
-	enabled: updatingModpack,
-})
-
-const modpackVersions = computed(() =>
-	curseforgeModpackLink.value
-		? curseforgeModpackVersions.value
-		: (modpackVersionsQuery.data.value ?? []),
-)
-
-const currentModpackVersionId = computed(() => {
-	const spec = contentQuery.data.value?.modpack?.spec
-	if (spec?.platform === 'modrinth') return spec.version_id
-	return curseforgeModpackLink.value ? String(curseforgeModpackLink.value.file_id) : null
-})
-
-const newestModpackUpdateVersion = computed(() => {
-	const currentVersionId = currentModpackVersionId.value
-	if (!currentVersionId) return null
-
-	const versions = sortVersionsByPublishedDate(modpackVersions.value)
-	const currentVersion = versions.find((version) => version.id === currentVersionId)
-	const installedPublishedAt = contentQuery.data.value?.modpack?.date_published
-	const storedCurrentTime = installedPublishedAt
-		? new Date(installedPublishedAt).getTime()
-		: Number.NaN
-	const currentVersionTime = Number.isNaN(storedCurrentTime)
-		? currentVersion
-			? getVersionTime(currentVersion)
-			: Number.NaN
-		: storedCurrentTime
-
-	return (
-		versions.find((version) => {
-			if (version.id === currentVersionId) return false
-			if (Number.isNaN(currentVersionTime)) return true
-			return getVersionTime(version) > currentVersionTime
-		}) ?? null
-	)
-})
+const modpackVersions = computed(() => modpackVersionsQuery.data.value ?? [])
+const currentModpackVersionId = computed(() => packQuery.data.value?.version?.id ?? null)
 
 const managedContent = computed<ManagedContentData | null>(() => {
-	const mp = contentQuery.data.value?.modpack
-	if (!mp) return null
-	const spec = mp.spec
-	const isLocal = spec.platform === 'local_file'
-	const project = projectQuery.data.value
-	const projectId = spec.platform === 'modrinth' ? spec.project_id : null
-	const addons = modpackContentQuery.data.value?.addons
-	const summary = addons
-		? summarizeManagedContent(addons.map(addonToContentItem))
-		: modpackContentQuery.isLoading.value
+	const pack = packQuery.data.value
+	const followed = follow.value
+	if (!pack && !followed) return null
+	const items = packContentQuery.data.value
+	const summary = items
+		? summarizeManagedContent(items.map((item) => toContentItem(item, true)))
+		: packContentQuery.isLoading.value
 			? undefined
 			: []
-	const title =
-		spec.platform === 'modrinth'
-			? (project?.title ?? mp.title ?? spec.project_id)
-			: (mp.title ?? (spec.platform === 'local_file' ? spec.name : spec.filename))
-	const linkedInstance = !!mp.instance_id
+	const disabled = setupActionDisabled.value || applyingInstanceUpdate.value
+	const disabledText = setupActionBusyMessage.value ?? formatMessage(commonMessages.installingLabel)
+	if (followed) {
+		return {
+			card: {
+				kind: 'modpack',
+				installing:
+					isInstallingContent.value ||
+					followed.state === 'downloading' ||
+					followed.state === 'applying',
+				title: followed.name,
+				status:
+					followed.state === 'pending'
+						? formatMessage(messages.updateWaiting)
+						: followed.state === 'failed'
+							? (followed.error ?? formatMessage(messages.updateFailed))
+							: undefined,
+				// Only when a pushed update is waiting or failed; an up-to-date server has nothing to do.
+				primaryActionLabel:
+					followed.state === 'pending'
+						? formatMessage(messages.restartToApply)
+						: followed.state === 'failed'
+							? formatMessage(messages.retryUpdate)
+							: undefined,
+				manager: {
+					name: followed.name,
+					link: `/instance/${encodeURIComponent(followed.id)}`,
+				},
+				summary,
+				canSwitchVersion: false,
+			},
+			disabled,
+			disabledText,
+		}
+	}
+	const project = pack!.project
+	const slug = project.slug ?? project.id
 	return {
 		card: {
 			kind: 'modpack',
-			installing:
-				isInstallingContent.value || mp.state === 'downloading' || mp.state === 'applying',
-			title: linkedInstance ? title : undefined,
-			status:
-				mp.state === 'pending'
-					? formatMessage(messages.updateWaiting)
-					: mp.state === 'failed'
-						? (mp.error ?? formatMessage(messages.updateFailed))
-						: undefined,
-			// Only when a pushed update is waiting or failed; an up-to-date server has nothing to do.
-			primaryActionLabel: !linkedInstance
-				? undefined
-				: mp.state === 'pending'
-					? formatMessage(messages.restartToApply)
-					: mp.state === 'failed'
-						? formatMessage(messages.retryUpdate)
-						: undefined,
+			installing: isInstallingContent.value,
 			manager: {
-				name: title,
-				iconUrl: (projectId ? (project?.icon_url ?? mp.icon_url) : mp.icon_url) ?? undefined,
-				link: linkedInstance
-					? `/instance/${encodeURIComponent(mp.instance_id!)}`
-					: projectId
-						? `/project/${project?.slug ?? projectId}`
-						: curseforgeModpackLink.value
-							? `https://www.curseforge.com/minecraft/modpacks/${curseforgeModpackLink.value.slug}`
-							: undefined,
+				name: project.title,
+				iconUrl: project.icon_url ?? undefined,
+				link: `/project/${slug}`,
 			},
 			summary,
-			versionNumber: isLocal ? undefined : (mp.version_number ?? undefined),
-			versionLink:
-				spec.platform === 'modrinth'
-					? `/project/${project?.slug ?? spec.project_id}/version/${spec.version_id}`
-					: undefined,
-			updatedAt: isLocal ? undefined : (mp.date_published ?? undefined),
-			canSwitchVersion: spec.platform === 'modrinth' || !!curseforgeModpackLink.value,
+			versionNumber: pack!.version?.version_number,
+			versionLink: pack!.version ? `/project/${slug}/version/${pack!.version.id}` : undefined,
+			updatedAt: pack!.version?.date_published,
+			canSwitchVersion: true,
 		},
-		disabled: setupActionDisabled.value || applyingInstanceUpdate.value,
-		disabledText: setupActionBusyMessage.value ?? formatMessage(commonMessages.installingLabel),
+		disabled,
+		disabledText,
 	}
 })
 
@@ -486,13 +389,20 @@ const managedContentMenuOptions = computed<ButtonMenuOption[]>(() =>
 		: [],
 )
 
-/** Applies the update the instance pushed: restarts a running server, or retries a failed one. */
+/** Applies the version the instance pushed: restarts a running server, or retries a failed one. */
 async function handleApplyInstanceUpdate() {
-	if (!worldId.value || applyingInstanceUpdate.value) return
+	const followed = follow.value
+	if (!followed?.shared_instance_id || applyingInstanceUpdate.value) return
 	applyingInstanceUpdate.value = true
 	try {
-		await client.archon.content_v1.updateModpack(serverId, worldId.value)
-		await contentQuery.refetch()
+		await core.call(coreRoutes.FollowInstance, {
+			...params,
+			body: {
+				instance: { id: followed.id, name: followed.name },
+				shared_instance_id: followed.shared_instance_id,
+				restart: true,
+			},
+		})
 	} catch (err) {
 		addNotification({
 			type: 'error',
@@ -505,14 +415,13 @@ async function handleApplyInstanceUpdate() {
 }
 
 function getEnabledForWarning(
-	addon: Archon.Content.v1.Addon,
+	addon: EngineContentItem,
+	fromPack: boolean,
 ): { kind: ContentWarningType; tooltip: string } | null {
 	if (isPlayerOnlyContent(addon)) return null
-	if (!addon.disabled_server) {
-		if (addon.pack_client_retained)
+	if (!isDisabledFor(addon, 'server')) {
+		if (addon.server?.server_override)
 			return { kind: 'retained', tooltip: formatMessage(commonMessages.clientRetainedWarning) }
-		if (addon.pack_client_depends)
-			return { kind: 'depends', tooltip: formatMessage(commonMessages.clientDependsWarning) }
 		if (isIncompatibleEnvironment(addon, 'server')) {
 			return {
 				kind: 'environment',
@@ -524,132 +433,36 @@ function getEnabledForWarning(
 			}
 		}
 	}
-	if (!addon.disabled_player && isIncompatibleEnvironment(addon, 'player')) {
+	if (!isDisabledFor(addon, 'player') && isIncompatibleEnvironment(addon, 'player')) {
 		return { kind: 'server-only', tooltip: formatMessage(messages.serverOnlyEnabledForPlayers) }
 	}
-	const sidesUnknown = addon.from_modpack
-		? addon.needs_side_type_review
-		: !hasDetectedEnvironment(addon)
-	if (sidesUnknown)
+	// A pack's files have the sides the pack gave them.
+	if (!fromPack && !hasDetectedEnvironment(addon))
 		return { kind: 'unknown-environment', tooltip: formatMessage(messages.unknownEnvironment) }
 	return null
 }
 
-const modpackAddons = ref<Archon.Content.v1.Addon[]>([])
-
-const addonLookup = computed(() => {
-	const map = new Map<string, Archon.Content.v1.Addon>()
-	for (const addon of contentQuery.data.value?.addons ?? []) {
-		map.set(addonToggleKey(addon), addon)
-	}
-	return map
-})
-
-const modpackAddonLookup = computed(
-	() => new Map(modpackAddons.value.map((addon) => [addonToggleKey(addon), addon])),
+/** The engine's files by path, the id each row has. */
+const filesByPath = computed(
+	() =>
+		new Map(
+			[...(contentQuery.data.value ?? []), ...(packContentQuery.data.value ?? [])].map((item) => [
+				item.file_path,
+				item,
+			]),
+		),
 )
 
-function getAddonForItem(item: ContentItem) {
-	return item.source_kind === 'modrinth_modpack'
-		? modpackAddonLookup.value.get(item.id)
-		: addonLookup.value.get(item.id)
-}
-
-function getAddonQueryKey(addon: Archon.Content.v1.Addon) {
-	return addon.from_modpack ? modpackContentQueryKey.value : queryKey.value
-}
-
-const projectMetadataBatchSize = 800
-const contentProjectIds = computed(() =>
-	[...(contentQuery.data.value?.addons ?? []), ...modpackAddons.value]
-		.map((addon) => addon.project_id)
-		.filter((id): id is string => !!id)
-		.filter((id, index, ids) => ids.indexOf(id) === index)
-		.sort(),
-)
-const contentProjectsQuery = useQuery({
-	queryKey: computed(() => ['labrinth', 'projects', 'v2', contentProjectIds.value]),
-	queryFn: async () => {
-		const batches = []
-		for (let index = 0; index < contentProjectIds.value.length; index += projectMetadataBatchSize) {
-			batches.push(contentProjectIds.value.slice(index, index + projectMetadataBatchSize))
-		}
-		return (
-			await Promise.all(batches.map((ids) => client.labrinth.projects_v2.getMultiple(ids)))
-		).flat()
-	},
-	enabled: computed(() => contentProjectIds.value.length > 0),
-})
-const contentProjectsById = computed(
-	() => new Map((contentProjectsQuery.data.value ?? []).map((project) => [project.id, project])),
-)
-
-function isRequiredForSide(addon: Archon.Content.v1.Addon, side: ContentSide) {
-	const project = addon.project_id ? contentProjectsById.value.get(addon.project_id) : undefined
-	return isRequiredEnvironment(addon, side, project)
-}
-
-function normalizeInstallFilename(filename: string) {
-	const normalized = filename.endsWith('.disabled')
-		? filename.slice(0, -'.disabled'.length)
-		: filename
-	return normalized.toLowerCase()
-}
-
-type FileInstallProgressItem = Archon.Websocket.v0.InstallProgressItem & {
-	key: Archon.Websocket.v0.InstallProgressFileKey
-}
-
-const fileInstallProgressItems = computed<FileInstallProgressItem[]>(() =>
-	currentWorldInstallProgressItems.value.filter(
-		(item): item is FileInstallProgressItem => item.key.type === 'file',
-	),
-)
-
-function getFileInstallFilenames(key: Archon.Websocket.v0.InstallProgressFileKey) {
-	return [key.source_filename, key.target_filename]
-		.filter((filename): filename is string => !!filename)
-		.map(normalizeInstallFilename)
-}
-
-function isFileInstallActive(item: FileInstallProgressItem) {
-	return item.error == null && item.progress !== 100
-}
-
-function getContentItemInstallFilename(item: ContentItem) {
-	const filename = item.version?.file_name || item.file_name
-	return normalizeInstallFilename(filename)
-}
-
-function getContentItemInstallProgress(item: ContentItem): FileInstallProgressItem | undefined {
-	const projectId = item.project?.id
-	const versionId = item.version?.id
-	const filename = getContentItemInstallFilename(item)
-
-	return fileInstallProgressItems.value.find((progressItem) => {
-		const key = progressItem.key
-		if (key.project_id === projectId) return true
-		if (key.version_id === versionId) return true
-		return getFileInstallFilenames(key).includes(filename)
-	})
-}
-
-function decorateContentItemWithInstallProgress(
-	contentItem: ContentItem,
-	installProgress: FileInstallProgressItem,
-): ContentItem {
-	return {
-		...contentItem,
-		installProgress: isFileInstallActive(installProgress) ? installProgress.progress : undefined,
-	}
+function fileFor(item: ContentItem) {
+	return filesByPath.value.get(item.id)
 }
 
 const isFlushingStoredServerInstalls = ref(false)
 
 function getInstalledProjectIds() {
 	return new Set(
-		(contentQuery.data.value?.addons ?? [])
-			.map((addon) => addon.project_id)
+		(contentQuery.data.value ?? [])
+			.map((item) => item.project?.id)
 			.filter((projectId): projectId is string => !!projectId),
 	)
 }
@@ -669,7 +482,10 @@ async function resolveStoredServerAddonPlans(plans: BrowseInstallPlan[]) {
 		existingProjectIds: getInstalledProjectIds(),
 		resolvePlan: async (plan, existingProjectIds) => {
 			const target = getTargetInstallPreferences(
-				resolveServerPlatform(server.value, contentQuery.data.value),
+				{
+					gameVersion: server.value.mc_version ?? undefined,
+					loader: server.value.loader?.toLowerCase(),
+				},
 				plan.contentType,
 			)
 			const resolved = await client.labrinth.content_v3.resolve({
@@ -690,34 +506,26 @@ async function resolveStoredServerAddonPlans(plans: BrowseInstallPlan[]) {
 	})
 }
 
+/** Installs what the browse page queued for this server, then reads the list again. */
 async function flushStoredServerInstalls() {
-	const wid = worldId.value
-	if (!wid || isFlushingStoredServerInstalls.value) return
-
-	const queuedPlans = getStoredServerAddonInstallQueue(serverId, wid)
+	if (isFlushingStoredServerInstalls.value) return
+	// A Core server has one world, named by the server's id.
+	const queuedPlans = getStoredServerAddonInstallQueue(serverId, serverId)
 	if (queuedPlans.size === 0) return
-
-	try {
-		await waitForServerContextRuntimeReady(client, serverId)
-	} catch (error) {
-		addNotification({
-			type: 'error',
-			title: formatMessage(messages.failedToInstallContent),
-			text: error instanceof Error ? error.message : undefined,
-		})
-		return
-	}
 
 	isFlushingStoredServerInstalls.value = true
 	try {
 		const result = await flushStoredServerAddonInstallQueue({
 			serverId,
-			worldId: wid,
+			worldId: serverId,
 			install: async (plans) => {
 				const addons = await resolveStoredServerAddonPlans(plans)
-				if (addons.length > 0) {
-					await client.archon.content_v1.addAddons(serverId, wid, addons)
-				}
+				await addServerVersions(
+					client,
+					coreId,
+					serverId,
+					addons.map((addon) => addon.version_id),
+				)
 			},
 		})
 
@@ -727,118 +535,160 @@ async function flushStoredServerInstalls() {
 				title: formatMessage(messages.failedToInstallContent),
 				text: result.error instanceof Error ? result.error.message : undefined,
 			})
-			return
 		}
 	} finally {
 		isFlushingStoredServerInstalls.value = false
+		await refresh()
+	}
+}
+void flushStoredServerInstalls()
+
+function toContentItem(addon: EngineContentItem, fromPack = false): ContentItem {
+	const serverEnabled = !isPlayerOnlyContent(addon) && !isDisabledFor(addon, 'server')
+	const playerEnabled = !isDisabledFor(addon, 'player')
+	// A client-only pack file the Core never placed: turning its server side on places it, and
+	// players always get it with the pack.
+	const notInstalled = addon.server?.installed === false
+	const lockedSides: ContentSide[] = notInstalled
+		? ['player']
+		: isPlayerOnlyContent(addon)
+			? ['server']
+			: []
+	const warning = getEnabledForWarning(addon, fromPack)
+	const project = addon.project
+	return {
+		project: {
+			id: project?.id ?? addon.file_name,
+			slug: project?.slug ?? project?.id ?? addon.file_name,
+			title: project?.title ?? friendlyAddonName(addon),
+			icon_url: project?.icon_url ?? undefined,
+		},
+		version: {
+			id: addon.version?.id ?? addon.file_name,
+			version_number: notInstalled
+				? formatMessage(messages.notInstalledClientOnly)
+				: (addon.version?.version_number ??
+					addon.embedded_metadata?.version ??
+					formatMessage(commonMessages.unknownLabel)),
+			file_name: addon.file_name,
+		},
+		owner: addon.owner
+			? {
+					id: addon.owner.id,
+					name: addon.owner.name,
+					type: addon.owner.type,
+					avatar_url: addon.owner.avatar_url ?? undefined,
+					link: `/${addon.owner.type}/${addon.owner.id}`,
+				}
+			: undefined,
+		id: addon.file_path,
+		external: !project,
+		source_kind: fromPack ? 'modrinth_modpack' : undefined,
+		enabled: addon.enabled && (serverEnabled || playerEnabled),
+		enabledFor: {
+			server: serverEnabled,
+			player: playerEnabled,
+			locked: lockedSides.length > 0,
+			lockedTooltip: notInstalled
+				? formatMessage(messages.notInstalledLock)
+				: isPlayerOnlyContent(addon)
+					? formatMessage(
+							addon.project_type === 'resourcepack'
+								? messages.resourcePackLock
+								: messages.shaderLock,
+						)
+					: undefined,
+			disabledSides: lockedSides,
+			warningTooltip: warning?.tooltip,
+			warningKind: warning?.kind,
+		},
+		file_name: addon.file_name,
+		file_path: addon.file_path,
+		size: addon.size,
+		date_added: addon.date_added ?? undefined,
+		project_type: addon.project_type,
+		has_update: addon.has_update,
+		update_version_id: addon.update_version_id,
+		environment: addon.environment ?? undefined,
+		pack_client_retained: addon.server?.server_override,
+		installing: changing.value.has(addon.file_path),
 	}
 }
 
 const contentItems = computed<ContentItem[]>(() =>
-	(contentQuery.data.value?.addons ?? []).map((addon) => {
-		const contentItem = addonToContentItem(addon)
-		if (!contentItem.installing) return contentItem
-
-		const installProgress = getContentItemInstallProgress(contentItem)
-		return installProgress
-			? decorateContentItemWithInstallProgress(contentItem, installProgress)
-			: contentItem
-	}),
+	(contentQuery.data.value ?? []).map((item) => toContentItem(item)),
 )
 const contentReadyPending = computed(
-	() =>
-		contentQuery.isLoading.value &&
-		contentQuery.data.value === undefined &&
-		contentItems.value.length === 0,
+	() => contentQuery.isLoading.value && contentQuery.data.value === undefined,
 )
 
-function getContentItemId(item: ContentItem) {
-	return item.id
+/** Runs `change` on the files at `paths`, showing them as installing until the list reads again. */
+async function changeFiles(
+	paths: string[],
+	change: () => Promise<unknown>,
+	failure: (error: unknown) => void,
+) {
+	changing.value = new Set([...changing.value, ...paths])
+	try {
+		await change()
+	} catch (error) {
+		failure(error)
+	} finally {
+		await refresh()
+		const next = new Set(changing.value)
+		for (const path of paths) next.delete(path)
+		changing.value = next
+	}
 }
 
-watch(
-	worldId,
-	() => {
-		void flushStoredServerInstalls()
-	},
-	{ immediate: true },
-)
+type SideChanges = { enabled?: boolean; server?: boolean; player?: boolean }
 
-const deleteMutation = useMutation({
-	mutationFn: ({ addon }: { addon: Archon.Content.v1.Addon }) =>
-		client.archon.content_v1.deleteAddon(serverId, worldId.value!, {
-			filename: addon.filename,
-			kind: addon.kind,
-		}),
-	onMutate: async ({ addon }) => {
-		cancelQueuedAddonToggle(addon)
-		await queryClient.cancelQueries({ queryKey: queryKey.value })
-		const previousData = queryClient.getQueryData<Archon.Content.v1.Addons>(queryKey.value)
-		queryClient.setQueryData(queryKey.value, (oldData: Archon.Content.v1.Addons | undefined) => {
-			if (!oldData) return oldData
-			return {
-				...oldData,
-				addons: (oldData.addons ?? []).filter((a) => addonToggleKey(a) !== addonToggleKey(addon)),
+/** Turns the file on or off, then its sides. Turning it on renames it, so sides use its new path. */
+function applyChanges(addon: EngineContentItem, changes: SideChanges) {
+	return changeFiles(
+		[addon.file_path],
+		async () => {
+			let path = addon.file_path
+			if (changes.enabled !== undefined)
+				path = await core.call(instanceContent.ToggleProject, {
+					...params,
+					body: { project_path: path, desired_enabled: changes.enabled },
+				})
+			for (const side of ['server', 'player'] as const) {
+				const enabled = changes[side]
+				if (enabled === undefined) continue
+				await core.call(instanceContent.SetSide, {
+					...params,
+					body: { project_path: path, side, enabled },
+				})
 			}
-		})
-		return {
-			previousData,
-			dataUpdateCount: queryClient.getQueryState(queryKey.value)?.dataUpdateCount,
-		}
-	},
-	onError: (err, _vars, context) => {
-		if (
-			context?.previousData &&
-			queryClient.getQueryState(queryKey.value)?.dataUpdateCount === context.dataUpdateCount
-		) {
-			queryClient.setQueryData(queryKey.value, context.previousData)
-		}
-		addNotification({
-			type: 'error',
-			title: formatMessage(messages.failedToRemoveContent),
-			text: err instanceof Error ? err.message : undefined,
-		})
-	},
-})
-
-const { queueAddonToggle, cancelQueuedAddonToggle } = useAddonToggles({
-	client,
-	queryClient,
-	serverId,
-	worldId,
-	queryKeyFor: getAddonQueryKey,
-	onError: (error, batch) => {
-		addNotification({
-			type: 'error',
-			title: formatMessage(
-				batch.changes.enabled !== undefined
-					? messages.failedToToggle
-					: messages.failedToSetEnabledFor,
-				{ name: friendlyAddonName(batch.addon) },
-			),
-			text: error instanceof Error ? error.message : undefined,
-		})
-	},
-})
+		},
+		(error) =>
+			addNotification({
+				type: 'error',
+				title: formatMessage(
+					changes.enabled !== undefined ? messages.failedToToggle : messages.failedToSetEnabledFor,
+					{ name: friendlyAddonName(addon) },
+				),
+				text: error instanceof Error ? error.message : undefined,
+			}),
+	)
+}
 
 async function handleSetEnabledFor(item: ContentItem, side: ContentSide, enabled: boolean) {
-	if (contentActionDisabled.value || serverPlayMigration?.required.value) return
-	const addon = getAddonForItem(item)
+	if (contentActionDisabled.value) return
+	const addon = fileFor(item)
 	if (
 		!addon ||
-		(addon.installed === false && side !== 'server') ||
+		(addon.server?.installed === false && side !== 'server') ||
 		(side === 'server' && isPlayerOnlyContent(addon))
 	)
 		return
-	const targetWorldId = worldId.value
-	const showPerformanceWarning = enabled && side === 'server' && addon.project_id === 'uCdwusMi'
+	const showPerformanceWarning = enabled && side === 'server' && addon.project?.id === 'uCdwusMi'
 	if (
 		userPreferences.value.warnOnIncompatibleContent &&
 		(showPerformanceWarning ||
-			(enabled
-				? !(side === 'server' && addon.pack_client_depends) &&
-					isIncompatibleEnvironment(addon, side)
-				: isRequiredForSide(addon, side)))
+			(enabled ? isIncompatibleEnvironment(addon, side) : isRequiredEnvironment(addon, side)))
 	) {
 		const confirmed = await environmentWarningModal.value?.show(
 			item.project.title,
@@ -847,107 +697,55 @@ async function handleSetEnabledFor(item: ContentItem, side: ContentSide, enabled
 			getAddonEnvironment(addon) === 'singleplayer_only',
 			showPerformanceWarning,
 		)
-		if (!confirmed || contentActionDisabled.value || worldId.value !== targetWorldId) return
+		if (!confirmed || contentActionDisabled.value) return
 	}
-	queueAddonToggle(addon, { [side]: enabled })
+	await applyChanges(addon, { [side]: enabled })
 }
 
 async function handleToggleEnabled(item: ContentItem) {
 	if (contentActionDisabled.value) return
-	const addon = getAddonForItem(item)
-	if (!addon || addon.installed === false) return
-	if (!addon.disabled && !isEnabledForAnySide(addon) && !serverPlayMigration?.required.value) {
+	const addon = fileFor(item)
+	if (!addon || addon.server?.installed === false) return
+	if (addon.enabled && !isEnabledForAnySide(addon)) {
 		const sides = (['server', 'player'] as const).filter(
 			(side) =>
 				!(side === 'server' && isPlayerOnlyContent(addon)) &&
 				!isIncompatibleEnvironment(addon, side),
 		)
-		const changes: AddonToggleChanges = {}
+		const changes: SideChanges = {}
 		for (const side of sides.length > 0 ? sides : (['player'] as const)) changes[side] = true
-		queueAddonToggle(addon, changes)
+		await applyChanges(addon, changes)
 		return
 	}
-	queueAddonToggle(addon, { enabled: addon.disabled })
-}
-
-async function handleModpackSetEnabledFor(item: ContentItem, side: ContentSide, enabled: boolean) {
-	try {
-		await handleSetEnabledFor(item, side, enabled)
-	} catch {
-		return
-	}
-}
-
-async function handleModpackToggleEnabled(item: ContentItem) {
-	try {
-		await handleToggleEnabled(item)
-	} catch {
-		return
-	}
+	await applyChanges(addon, { enabled: !addon.enabled })
 }
 
 async function handleDeleteItem(item: ContentItem) {
-	if (contentActionDisabled.value) return
-	const addon = getAddonForItem(item)
-	if (!addon) return
-	await deleteMutation.mutateAsync({ addon })
-}
-
-function itemsToAddonRequests(items: ContentItem[]): Archon.Content.v1.RemoveAddonRequest[] {
-	return items.flatMap((item) => {
-		if (item.installing) return []
-		const addon = getAddonForItem(item)
-		if (!addon) return []
-		return [{ filename: addon.filename, kind: addon.kind }]
-	})
-}
-
-async function optimisticallyUpdateAddons(
-	update: (addons: Archon.Content.v1.Addon[]) => Archon.Content.v1.Addon[],
-) {
-	const targetQueryKey = queryKey.value
-	await queryClient.cancelQueries({ queryKey: targetQueryKey, exact: true })
-	const previousData = queryClient.getQueryData<Archon.Content.v1.Addons>(targetQueryKey)
-	queryClient.setQueryData<Archon.Content.v1.Addons>(targetQueryKey, (current) =>
-		current ? { ...current, addons: update(current.addons ?? []) } : current,
-	)
-	const dataUpdateCount = queryClient.getQueryState(targetQueryKey)?.dataUpdateCount
-	return () => {
-		if (
-			previousData &&
-			queryClient.getQueryState(targetQueryKey)?.dataUpdateCount === dataUpdateCount
-		) {
-			queryClient.setQueryData(targetQueryKey, previousData)
-		}
-	}
+	await handleBulkDelete([item])
 }
 
 async function handleBulkDelete(items: ContentItem[]) {
 	if (contentActionDisabled.value) return
-	const requests = itemsToAddonRequests(items)
-	if (requests.length === 0) return
-	for (const item of items) {
-		const addon = getAddonForItem(item)
-		if (addon) cancelQueuedAddonToggle(addon)
-	}
-	const rollback = await optimisticallyUpdateAddons((addons) =>
-		addons.filter(
-			(addon) =>
-				!requests.some(
-					(request) => request.filename === addon.filename && request.kind === addon.kind,
+	const paths = items.filter((item) => !item.installing && fileFor(item)).map((item) => item.id)
+	if (paths.length === 0) return
+	await changeFiles(
+		paths,
+		async () => {
+			for (const path of paths)
+				await core.call(instanceContent.RemoveProject, {
+					...params,
+					body: { project_path: path },
+				})
+		},
+		(error) =>
+			addNotification({
+				type: 'error',
+				title: formatMessage(
+					paths.length > 1 ? messages.failedToBulkDelete : messages.failedToRemoveContent,
 				),
-		),
+				text: error instanceof Error ? error.message : undefined,
+			}),
 	)
-	try {
-		await client.archon.content_v1.deleteAddons(serverId, worldId.value!, requests)
-	} catch (err) {
-		rollback()
-		addNotification({
-			type: 'error',
-			title: formatMessage(messages.failedToBulkDelete),
-			text: err instanceof Error ? err.message : undefined,
-		})
-	}
 }
 
 const modpackUnlinkModal = ref<InstanceType<typeof ConfirmUnlinkModal>>()
@@ -957,14 +755,12 @@ const contentUpdaterModal = ref<InstanceType<typeof ContentUpdaterModal>>()
 const updatingProject = ref<ContentItem | null>(null)
 const loadingChangelog = ref(false)
 
-watch(
-	() => modpackContentQuery.data.value?.addons,
-	(addons) => {
-		if (!isModpackContentModalOpen.value || !addons) return
-		modpackAddons.value = addons
-		modpackContentModal.value?.setItems(addons.map(addonToContentItem))
-	},
+const packContentItems = computed(() =>
+	(packContentQuery.data.value ?? []).map((item) => toContentItem(item, true)),
 )
+watch(packContentItems, (items) => {
+	if (isModpackContentModalOpen.value) modpackContentModal.value?.setItems(items)
+})
 
 const updatingProjectId = computed(() => updatingProject.value?.project?.id ?? null)
 
@@ -983,40 +779,28 @@ const updatingProjectVersions = computed(() => {
 	return sortVersionsByPublishedDate(source)
 })
 
-const loadingVersions = computed(() => {
-	if (!updatingModpack.value) return projectVersionsQuery.isLoading.value
-	return curseforgeModpackLink.value
-		? curseforgeFilesQuery.isLoading.value
-		: modpackVersionsQuery.isLoading.value
-})
+const loadingVersions = computed(() =>
+	updatingModpack.value
+		? modpackVersionsQuery.isLoading.value
+		: projectVersionsQuery.isLoading.value,
+)
 
 const modpackUpdateModal = ref<InstanceType<typeof ConfirmModpackUpdateModal>>()
 const pendingModpackUpdateVersion = ref<Labrinth.Versions.v2.Version | null>(null)
 const isModpackUpdateDowngrade = ref(false)
 
-const currentGameVersion = computed(
-	() => contentQuery.data.value?.game_version ?? server.value?.mc_version ?? '',
-)
-const currentLoader = computed(
-	() => contentQuery.data.value?.modloader ?? server.value?.loader ?? '',
-)
+const currentGameVersion = computed(() => server.value.mc_version ?? '')
+const currentLoader = computed(() => server.value.loader?.toLowerCase() ?? '')
 
 function handleBrowseContent() {
 	if (contentActionDisabled.value) return
 	const contentType = type.value
-	if (browseServerContent && ['mod', 'plugin', 'datapack'].includes(contentType)) {
-		browseServerContent({
-			serverId,
-			worldId: worldId.value,
-			type: contentType as 'mod' | 'plugin' | 'datapack',
-		})
+	if (browseServerContent) {
+		browseServerContent({ serverId, worldId: serverId, type: contentType })
 		return
 	}
 
-	router.push({
-		path: `/discover/${type.value}s`,
-		query: { sid: serverId, wid: worldId.value },
-	})
+	router.push({ path: `/discover/${contentType}s`, query: { sid: serverId } })
 }
 
 function handleUploadFiles() {
@@ -1028,8 +812,6 @@ function handleUploadFiles() {
 	input.onchange = async () => {
 		if (!input.files) return
 		const files = Array.from(input.files)
-		const wid = worldId.value
-		if (!wid) return
 
 		try {
 			const fileRecognition = await Promise.all(files.map(isFileOnModrinth))
@@ -1042,15 +824,15 @@ function handleUploadFiles() {
 			}
 			if (confirmedFiles.length === 0) return
 
-			await contentUploadSession.uploadFiles(
-				confirmedFiles.map((file) => ({ file, filename: file.name })),
-			)
+			await contentUpload.uploadFiles(confirmedFiles)
 		} catch (err) {
 			addNotification({
 				type: 'error',
 				title: formatMessage(messages.failedToUpload),
 				text: err instanceof Error ? err.message : undefined,
 			})
+		} finally {
+			await refresh()
 		}
 	}
 	input.click()
@@ -1095,126 +877,19 @@ function handleUnknownFileContinue(dontShowAgain: boolean) {
 	resolveUnknownFileWarning(true)
 }
 
-function addonToContentItem(addon: AddonWithUiState): ContentItem {
-	const projectMetadata = addon.project_id
-		? contentProjectsById.value.get(addon.project_id)
-		: undefined
-	const environment = getAddonEnvironment(addon)
-	const embeddedIcon =
-		!addon.icon_url &&
-		addon.manifest?.icon_embedded &&
-		worldId.value &&
-		(addon.kind === 'mod' || addon.kind === 'plugin')
-			? {
-					queryKey: [
-						'kyros',
-						'content',
-						'embedded-icon',
-						worldId.value,
-						addon.kind,
-						addon.filename,
-					] as const,
-					queryFn: () =>
-						client.kyros.content_v1.getEmbeddedAddonIcon(
-							worldId.value!,
-							addon.kind === 'mod' ? 'mods' : 'plugins',
-							addon.filename,
-						),
-					fallbackUrl: projectMetadata?.icon_url,
-				}
-			: undefined
-	const serverEnabled = !isPlayerOnlyContent(addon) && !addon.disabled_server
-	const playerEnabled = !addon.disabled_player
-	const needsMigration = !!serverPlayMigration?.required.value
-	// A client-only pack file the Core never placed: turning its server side on places it, and
-	// players always get it with the pack.
-	const notInstalled = addon.installed === false
-	const lockedSides: ContentSide[] = needsMigration
-		? ['server', 'player']
-		: notInstalled
-			? ['player']
-			: isPlayerOnlyContent(addon)
-				? ['server']
-				: []
-	const warning = needsMigration ? undefined : getEnabledForWarning(addon)
-	return {
-		project: {
-			...(projectMetadata ?? {}),
-			id: addon.project_id ?? addon.filename,
-			slug: projectMetadata?.slug ?? addon.project_id ?? addon.filename,
-			title: projectMetadata?.title ?? friendlyAddonName(addon),
-			icon_url:
-				addon.icon_url ?? (embeddedIcon ? undefined : projectMetadata?.icon_url) ?? undefined,
-		},
-		version: {
-			id: addon.version?.id ?? addon.filename,
-			version_number:
-				addon.installed === false
-					? formatMessage(messages.notInstalledClientOnly)
-					: (addon.version?.name ??
-						addon.manifest?.version ??
-						formatMessage(commonMessages.unknownLabel)),
-			file_name: addon.filename,
-		},
-		owner: addon.owner
-			? {
-					id: addon.owner.id,
-					name: addon.owner.name,
-					type: addon.owner.type,
-					avatar_url: addon.owner.icon_url ?? undefined,
-					link: `/${addon.owner.type}/${addon.owner.id}`,
-				}
-			: undefined,
-		id: addonToggleKey(addon),
-		external: !addon.project_id,
-		source_kind: addon.from_modpack ? 'modrinth_modpack' : undefined,
-		enabled: !addon.disabled && (serverEnabled || playerEnabled),
-		enabledFor: {
-			server: serverEnabled,
-			player: playerEnabled,
-			locked: lockedSides.length > 0,
-			lockedTooltip: needsMigration
-				? formatMessage(serverPlayMigrationMessages.contentLocked)
-				: notInstalled
-					? formatMessage(messages.notInstalledLock)
-					: isPlayerOnlyContent(addon)
-						? formatMessage(
-								addon.kind === 'resourcepack' ? messages.resourcePackLock : messages.shaderLock,
-							)
-						: undefined,
-			disabledSides: lockedSides,
-			warningTooltip: warning?.tooltip,
-			warningKind: warning?.kind,
-		},
-		embeddedIcon,
-		file_name: addon.filename,
-		date_added: addon.btime,
-		project_type: addon.kind,
-		has_update: !!addon.has_update,
-		update_version_id: addon.has_update,
-		environment,
-		pack_client_retained: addon.pack_client_retained,
-		pack_client_depends: addon.pack_client_depends,
-		installing: addon.installing ?? addon.status === 'pending',
-	}
-}
-
 async function handleViewModpackContent() {
 	isModpackContentModalOpen.value = true
 
-	if (modpackContentQuery.data.value) {
-		modpackAddons.value = modpackContentQuery.data.value.addons ?? []
-		modpackContentModal.value?.show(modpackAddons.value.map(addonToContentItem))
+	if (packContentQuery.data.value) {
+		modpackContentModal.value?.show(packContentItems.value)
 		return
 	}
 
 	modpackContentModal.value?.showLoading()
 	try {
-		const { data } = await modpackContentQuery.refetch()
+		const { data } = await packContentQuery.refetch()
 		if (!data) throw new Error('Failed to load modpack content')
-		modpackAddons.value = data.addons ?? []
-		const items = (data.addons ?? []).map(addonToContentItem)
-		modpackContentModal.value?.show(items)
+		modpackContentModal.value?.show(packContentItems.value)
 	} catch (err) {
 		isModpackContentModalOpen.value = false
 		modpackContentModal.value?.hide()
@@ -1233,21 +908,22 @@ function handleModpackUnlink() {
 async function handleModpackUnlinkConfirm() {
 	if (setupActionDisabled.value) return
 	try {
-		await client.archon.content_v1.unlinkModpack(serverId, worldId.value!)
+		await core.call(instanceContent.UnlinkModpack, params)
 	} catch (err) {
 		addNotification({
 			type: 'error',
 			title: formatMessage(messages.failedToUnlink),
 			text: err instanceof Error ? err.message : undefined,
 		})
+	} finally {
+		await refresh()
 	}
 }
 
 async function handleBulkUpdate(selections: UpdateAllSelection[]) {
 	if (contentActionDisabled.value) return
-	const addonIds = new Set<string>()
-	const addons = selections.flatMap((selection) => {
-		const item = contentItems.value.find((item) => getContentItemId(item) === selection.id)
+	const updates = selections.flatMap((selection) => {
+		const item = contentItems.value.find((item) => item.id === selection.id)
 		if (
 			!item?.has_update ||
 			item.locked ||
@@ -1255,30 +931,33 @@ async function handleBulkUpdate(selections: UpdateAllSelection[]) {
 			item.project.id !== selection.projectId
 		)
 			return []
-		addonIds.add(item.id)
-		return [{ filename: item.file_name, version_id: selection.version.id }]
+		return [{ path: item.id, versionId: selection.version.id }]
 	})
-	if (addons.length === 0) return
-	const rollback = await optimisticallyUpdateAddons((current) =>
-		current.map((addon) =>
-			addonIds.has(addonToggleKey(addon)) ? { ...addon, installing: true } : addon,
-		),
+	if (updates.length === 0) return
+	let failed: unknown
+	await changeFiles(
+		updates.map(({ path }) => path),
+		async () => {
+			for (const { path, versionId } of updates)
+				await core.call(instanceContent.SwitchProjectVersion, {
+					...params,
+					body: { project_path: path, version_id: versionId },
+				})
+		},
+		(error) => {
+			failed = error
+			addNotification({
+				type: 'error',
+				title: formatMessage(messages.failedToBulkUpdate),
+				text: error instanceof Error ? error.message : undefined,
+			})
+		},
 	)
-	try {
-		await client.archon.content_v1.updateAddons(serverId, worldId.value!, addons)
-	} catch (err) {
-		rollback()
-		addNotification({
-			type: 'error',
-			title: formatMessage(messages.failedToBulkUpdate),
-			text: err instanceof Error ? err.message : undefined,
-		})
-		throw err
-	}
+	if (failed) throw failed
 }
 
 async function handleUpdateItem(id: string) {
-	const item = contentItems.value.find((i) => getContentItemId(i) === id)
+	const item = contentItems.value.find((i) => i.id === id)
 	if (!item?.has_update || !item.project?.id || !item.version?.id) return
 
 	updatingModpack.value = false
@@ -1305,8 +984,8 @@ async function handleSwitchVersion(item: ContentItem) {
 async function handleModpackUpdate() {
 	if (setupActionDisabled.value) return
 	if (linkedInstanceId.value) return handleApplyInstanceUpdate()
-	const mp = contentQuery.data.value?.modpack
-	if (!mp || (mp.spec.platform !== 'modrinth' && !curseforgeModpackLink.value)) return
+	const pack = packQuery.data.value
+	if (!pack) return
 
 	updatingModpack.value = true
 	updatingProject.value = null
@@ -1314,9 +993,7 @@ async function handleModpackUpdate() {
 
 	await nextTick()
 
-	contentUpdaterModal.value?.show(
-		newestModpackUpdateVersion.value?.id ?? mp.has_update ?? undefined,
-	)
+	contentUpdaterModal.value?.show(pack.update_version_id ?? undefined)
 }
 
 function spliceVersionInCache(fullVersion: Labrinth.Versions.v2.Version) {
@@ -1329,12 +1006,8 @@ function spliceVersionInCache(fullVersion: Labrinth.Versions.v2.Version) {
 	})
 }
 
-const updatingCurseForgeModpack = computed(
-	() => updatingModpack.value && !!curseforgeModpackLink.value,
-)
-
 async function handleVersionSelect(version: Labrinth.Versions.v2.Version) {
-	if (version.changelog || updatingCurseForgeModpack.value) return
+	if (version.changelog) return
 	loadingChangelog.value = true
 	try {
 		const fullVersion = await client.labrinth.versions_v2.getVersion(version.id)
@@ -1347,7 +1020,7 @@ async function handleVersionSelect(version: Labrinth.Versions.v2.Version) {
 }
 
 async function handleVersionHover(version: Labrinth.Versions.v2.Version) {
-	if (version.changelog || updatingCurseForgeModpack.value) return
+	if (version.changelog) return
 	try {
 		const fullVersion = await client.labrinth.versions_v2.getVersion(version.id)
 		spliceVersionInCache(fullVersion)
@@ -1386,68 +1059,58 @@ function handleModalUpdate(selectedVersion: Labrinth.Versions.v2.Version, event?
 	}
 
 	if (contentActionDisabled.value) return
-	performUpdate(selectedVersion)
+	void performUpdate(selectedVersion)
 }
 
 async function performUpdate(selectedVersion: Labrinth.Versions.v2.Version) {
-	if (
-		(updatingModpack.value && setupActionDisabled.value) ||
-		(!updatingModpack.value && contentActionDisabled.value)
-	)
-		return
 	const item = updatingProject.value
-	const rollback = item
-		? await optimisticallyUpdateAddons((addons) =>
-				addons.map((addon) =>
-					addonToggleKey(addon) === item.id ? { ...addon, installing: true } : addon,
-				),
-			)
-		: undefined
-	try {
-		const curseforgeLink = curseforgeModpackLink.value
-		if (updatingModpack.value && curseforgeLink) {
-			const file = curseforgeFilesById.value.get(selectedVersion.id)
-			if (!file) return
-			await switchCurseForgeModpackFile(client, worldId.value!, curseforgeLink, file)
-			beginInstallation({ type: 'unknown' })
-		} else if (updatingModpack.value) {
-			const mp = contentQuery.data.value?.modpack
-			if (!mp || mp.spec.platform !== 'modrinth') return
-			await client.archon.content_v1.installContent(serverId, worldId.value!, {
-				content_variant: 'modpack',
-				spec: {
-					platform: 'modrinth',
-					project_id: mp.spec.project_id,
-					version_id: selectedVersion.id,
-				},
-				soft_override: true,
+	const modpack = updatingModpack.value
+	resetUpdateState()
+	if (modpack) {
+		if (setupActionDisabled.value) return
+		const pack = packQuery.data.value
+		if (!pack) return
+		try {
+			beginInstallation({
+				type: 'modrinth_modpack',
+				project_id: pack.project.id,
+				version_id: selectedVersion.id,
 			})
-		} else if (item) {
-			const addon = getAddonForItem(item)
-			if (addon) {
-				await client.archon.content_v1.updateAddon(serverId, worldId.value!, {
-					filename: addon.filename,
-					version_id: selectedVersion.id,
-				})
-			}
+			await core.call(instanceContent.UpdateModpackVersion, {
+				...params,
+				body: { version_id: selectedVersion.id },
+			})
+		} catch (err) {
+			addNotification({
+				type: 'error',
+				title: formatMessage(messages.failedToUpdate),
+				text: err instanceof Error ? err.message : undefined,
+			})
 		}
-	} catch (err) {
-		rollback?.()
-		addNotification({
-			type: 'error',
-			title: formatMessage(messages.failedToUpdate),
-			text: err instanceof Error ? err.message : undefined,
-		})
-	} finally {
-		resetUpdateState()
+		return
 	}
+	if (!item || contentActionDisabled.value) return
+	await changeFiles(
+		[item.id],
+		() =>
+			core.call(instanceContent.SwitchProjectVersion, {
+				...params,
+				body: { project_path: item.id, version_id: selectedVersion.id },
+			}),
+		(error) =>
+			addNotification({
+				type: 'error',
+				title: formatMessage(messages.failedToUpdate),
+				text: error instanceof Error ? error.message : undefined,
+			}),
+	)
 }
 
 function handleModpackUpdateConfirm() {
 	if (setupActionDisabled.value) return
 	if (pendingModpackUpdateVersion.value) {
 		contentUpdaterModal.value?.hide()
-		performUpdate(pendingModpackUpdateVersion.value)
+		void performUpdate(pendingModpackUpdateVersion.value)
 		pendingModpackUpdateVersion.value = null
 	}
 }
@@ -1476,9 +1139,7 @@ provideContentManager({
 	},
 	deleteItem: handleDeleteItem,
 	bulkDeleteItems: handleBulkDelete,
-	refresh: async () => {
-		await contentQuery.refetch()
-	},
+	refresh,
 	browse: handleBrowseContent,
 	uploadFiles: handleUploadFiles,
 	deletionContext: 'server',
@@ -1494,14 +1155,13 @@ provideContentManager({
 	managedContentMenuOptions,
 	openManagedContentSettings: () => openServerSettings({ tabId: 'installation' }),
 	switchVersion: handleSwitchVersion,
-	getItemId: getContentItemId,
+	getItemId: (item) => item.id,
 	mapToTableItem: (item) => {
 		const projectType = item.project_type ?? type.value
-		const addon = getAddonForItem(item)
-		const hasModrinthProject = !!addon?.project_id || (!!item.installing && !!item.project?.id)
+		const hasModrinthProject = !item.external
 		const projectSlugOrId = item.project.slug ?? item.project.id
 		return {
-			id: getContentItemId(item),
+			id: item.id,
 			project: item.project,
 			projectLink: hasModrinthProject ? `/${projectType}/${projectSlugOrId}` : undefined,
 			version: item.version,
@@ -1512,14 +1172,22 @@ provideContentManager({
 			owner: item.owner
 				? { ...item.owner, link: item.owner.link ?? `/${item.owner.type}/${item.owner.id}` }
 				: undefined,
-			external: item.external ?? !hasModrinthProject,
+			external: item.external,
 			enabled: item.enabled,
 			enabledFor: item.enabledFor,
-			embeddedIcon: item.embeddedIcon,
+			installing: item.installing,
 		}
 	},
-	filterPersistKey: `server:${serverId}:${worldId.value}`,
+	filterPersistKey: `server:${serverId}`,
 })
+
+async function handleModpackSetEnabledFor(item: ContentItem, side: ContentSide, enabled: boolean) {
+	await handleSetEnabledFor(item, side, enabled)
+}
+
+async function handleModpackToggleEnabled(item: ContentItem) {
+	await handleToggleEnabled(item)
+}
 </script>
 
 <template>

@@ -41,7 +41,6 @@ export const actionLogActionNames = [
 	'addon_side_toggle_locked',
 	'modpack_changed',
 	'modpack_unlinked',
-	'instance_version_applied',
 	'server_repaired',
 	'server_reset',
 	'world_data_reset',
@@ -131,7 +130,6 @@ export const actionLogActionGroups = [
 			'addon_deleted',
 			'modpack_changed',
 			'modpack_unlinked',
-			'instance_version_applied',
 		],
 	},
 	{

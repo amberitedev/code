@@ -110,7 +110,7 @@ and kept fresh by each crate's tests; `WRITE_TS=1 node scripts/dev-runner.ts tes
 it. Each generated file is a namespace of its own (`protocol`, `backend`, `core`, `engine`,
 `app`) that imports the types it names from the files before it. `@amberite/contracts`
 (`packages/contracts/ts/index.ts`) still re-exports them all flat, so an exported name must be
-unique across them, until `core-hosting/*` goes and the index exports each file as its namespace.
+unique across them.
 
 Endpoints are declared where their types are:
 
@@ -118,8 +118,8 @@ Endpoints are declared where their types are:
   `ts/core.ts` over the shared primitives in `ts/protocol.ts`. The store's Endpoints are Rust-only.
   A Core's own types are Modrinth Hosting's (`Archon`/`Kyros` in `packages/api-client/src/modules`)
   for every feature a Core has, field for field, and carry none of its fields for features a Core
-  lacks (SFTP, regions, billing, suspension, worlds). Upstream's server screens then read a Core with
-  no translation.
+  lacks (SFTP, regions, billing, suspension, worlds). Upstream's server screens call a Core's
+  Endpoints directly and read its answers with no translation layer between them.
 - Engine Endpoints are in [`packages/engine/src/endpoints`](../../packages/engine/src/endpoints/mod.rs),
   generated to `ts/engine.ts`. The engine's wire types are upstream's (`Instance`,
   `InstallJobSnapshot`), and contracts sits below the engine, so contracts cannot name them. Moving

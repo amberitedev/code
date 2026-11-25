@@ -83,7 +83,7 @@ const project: Labrinth.Projects.v3.Project = await client.labrinth.projects_v3.
 
 ## Hosting API Modules
 
-- Amberite answers upstream's `archon` and `kyros` modules from the account's own Cores (`src/core-hosting/`). There is no Modrinth Hosting.
+- There is no Modrinth Hosting, so there are no `archon` or `kyros` modules; only their types stay, for upstream's UI. A Core's routes are called with `client.core(coreId)`, and its servers are listed with `client.cores.servers()`.
 
 ## Base URLs
 
@@ -126,14 +126,14 @@ const client = new GenericModrinthClient({
 })
 ```
 
-Built-in features include authentication, node auth, retries, circuit breaking, and verbose logging.
+Built-in features include authentication, retries, circuit breaking, and verbose logging.
 
 ## Uploads
 
 Upload endpoints return an `UploadHandle<T>` with progress and cancellation support:
 
 ```ts
-const upload = client.kyros.files_v0.uploadFile(path, file)
+const upload = client.upload(path, { api: 'labrinth', version: 3, file })
 
 upload.onProgress(({ progress }) => {
 	console.log(Math.round(progress * 100))

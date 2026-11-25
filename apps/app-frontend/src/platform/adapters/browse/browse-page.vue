@@ -892,7 +892,7 @@ const installContext = computed(() => {
 			serverId: serverIdQuery.value,
 			upstream: serverContextServerData.value.upstream,
 			iconSrc: null as string | null,
-			isMedal: serverContextServerData.value.is_medal,
+			isMedal: false,
 			backUrl: serverBackUrl.value,
 			backLabel: serverBackLabel.value,
 			heading: serverBrowseHeading.value,

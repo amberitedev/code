@@ -140,10 +140,6 @@ export const actionLogActionMessages = defineMessages({
 		id: 'servers.access-page.activity-log-filter.action.modpack-unlinked',
 		defaultMessage: 'Unlinked modpack',
 	},
-	instance_version_applied: {
-		id: 'servers.access-page.activity-log-filter.action.instance-version-applied',
-		defaultMessage: 'Updated from instance',
-	},
 	server_repaired: {
 		id: 'servers.access-page.activity-log-filter.action.server-repaired',
 		defaultMessage: 'Repaired server',

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Archon, ListedCore } from '@modrinth/api-client'
+import type { ListedCore } from '@modrinth/api-client'
 import { LinkIcon, PlusIcon, SearchIcon, SettingsIcon, UpdatedIcon } from '@modrinth/assets'
 import {
 	Button,
@@ -13,6 +13,7 @@ import {
 	injectNotificationManager,
 	injectServerEula,
 	Input,
+	installServerCreationConfig,
 	ServerListing,
 	useGhostReveal,
 } from '@modrinth/ui'
@@ -107,43 +108,18 @@ function serverName(config: CreationFlowContextValue) {
 }
 
 /** Sets up a server that already exists, from what was chosen in the setup modal. */
-async function install(serverId: string, config: CreationFlowContextValue) {
-	// A Core server has one world, with the server's own id.
-	const worldId = serverId
-	const properties = config.buildProperties()
-	if (config.instanceSelection.value && instanceSource) {
+async function install(coreId: string, serverId: string, config: CreationFlowContextValue) {
+	const instance = config.instanceSelection.value
+	if (instance && instanceSource) {
 		await instanceSource.pushInstance({
 			serverId,
-			worldId,
-			instanceId: config.instanceSelection.value.id,
-			properties,
+			worldId: serverId,
+			instanceId: instance.id,
+			properties: config.buildProperties(),
 		})
-	} else if (config.setupType.value === 'modpack' && config.modpackFile.value) {
-		await client.archon.content_v1.uploadModpackFile(serverId, worldId, config.modpackFile.value, {
-			properties,
-		}).promise
-	} else if (config.setupType.value === 'modpack' && config.modpackSelection.value) {
-		await client.archon.content_v1.installContent(serverId, worldId, {
-			content_variant: 'modpack',
-			spec: {
-				platform: 'modrinth',
-				project_id: config.modpackSelection.value.projectId,
-				version_id: config.modpackSelection.value.versionId,
-			},
-			soft_override: false,
-			properties,
-		})
-	} else {
-		const loader = config.selectedLoader.value ?? 'vanilla'
-		await client.archon.content_v1.installContent(serverId, worldId, {
-			content_variant: 'bare',
-			loader: (loader === 'neoforge' ? 'neo_forge' : loader) as Archon.Content.v1.Modloader,
-			version: config.selectedLoaderVersion.value ?? '',
-			game_version: config.selectedGameVersion.value ?? undefined,
-			soft_override: false,
-			properties,
-		})
+		return
 	}
+	await installServerCreationConfig(client, config, coreId, serverId)
 }
 
 /**
@@ -159,7 +135,7 @@ async function createServer(config: CreationFlowContextValue) {
 		if (!created) return
 		const { id } = created
 		try {
-			await install(id, config)
+			await install(core.id, id, config)
 		} catch (cause) {
 			console.error('Failed to set up the new server', cause)
 			addNotification({
@@ -285,7 +261,12 @@ async function browseModpacks() {
 			</EmptyState>
 		</div>
 		<div v-else-if="data" class="flex flex-col gap-3" :class="serversReveal">
-			<ServerListing v-for="server in servers" :key="server.server_id" v-bind="server" />
+			<ServerListing
+				v-for="server in servers"
+				:key="server.server_id"
+				v-bind="server"
+				game="Minecraft"
+			/>
 			<EmptyState
 				v-if="servers.length === 0"
 				type="no-search-result"
@@ -297,7 +278,7 @@ async function browseModpacks() {
 		<CreationFlowModal
 			ref="setupModal"
 			type="server-onboarding"
-			:available-loaders="['vanilla', 'fabric', 'neoforge', 'forge', 'quilt', 'paper', 'purpur']"
+			:available-loaders="['vanilla', 'fabric', 'neoforge', 'forge', 'quilt', 'paper']"
 			:show-snapshot-toggle="true"
 			:search-projects="searchModpacks"
 			:get-project-versions="getProjectVersions"

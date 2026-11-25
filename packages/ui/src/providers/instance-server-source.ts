@@ -1,4 +1,4 @@
-import type { Archon } from '@modrinth/api-client'
+import type { PatchPropertiesFields } from '@modrinth/api-client'
 
 import { createContext } from '.'
 
@@ -24,7 +24,7 @@ export interface InstanceServerSourceProvider {
 		serverId: string
 		worldId: string
 		instanceId: string
-		properties?: Archon.Content.v1.PropertiesFields
+		properties?: PatchPropertiesFields
 		restart?: boolean
 	}) => Promise<void>
 }

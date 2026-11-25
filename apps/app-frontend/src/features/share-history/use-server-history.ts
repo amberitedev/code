@@ -1,3 +1,4 @@
+import { core } from '@modrinth/api-client'
 import { injectAuth, injectModrinthClient, serverKeys } from '@modrinth/ui'
 import { useQuery } from '@tanstack/vue-query'
 import { computed, type Ref } from 'vue'
@@ -20,15 +21,12 @@ export function useServerHistory(serverId: Ref<string>) {
 	const auth = injectAuth()
 	const server = useQuery({
 		queryKey: computed(() => serverKeys.detail(serverId.value)),
-		queryFn: () => client.archon.servers_v0.get(serverId.value),
+		queryFn: async () =>
+			(await client.cores.serverRoutes(serverId.value)).call(core.GetServer, {
+				params: { id: serverId.value },
+			}),
 		enabled: computed(() => !!serverId.value),
 		// A Core that does not answer is offline; the panel says so instead of waiting on retries.
-		retry: false,
-	})
-	const serverFull = useQuery({
-		queryKey: computed(() => serverKeys.detailV1(serverId.value)),
-		queryFn: () => client.archon.servers_v1.get(serverId.value),
-		enabled: computed(() => !!serverId.value),
 		retry: false,
 	})
 	const linkedId = computed(() => server.data.value?.linked_instance?.id ?? null)
@@ -40,15 +38,11 @@ export function useServerHistory(serverId: Ref<string>) {
 	return computed(() => {
 		const data = server.data.value
 		if (!data || !auth.user.value?.id || data.owner_id !== auth.user.value.id) return null
-		const world =
-			serverFull.data.value?.worlds.find((each) => each.is_active) ??
-			serverFull.data.value?.worlds[0]
-		if (!world) return null
 		if (data.linked_instance) {
 			if (linked.data.value?.shared_instance?.role === 'member') return null
 			return { source: 'instance', instanceId: data.linked_instance.id } as const
 		}
-		if (!world.content?.shared_instance_id) return null
-		return { source: 'server', serverId: serverId.value, worldId: world.id } as const
+		if (!data.shared_instance_id) return null
+		return { source: 'server', serverId: serverId.value } as const
 	})
 }
