@@ -19,6 +19,8 @@
 //! Launcher-enforced settings, such as fullscreen, are applied last and excluded
 //! when importing `options.txt`.
 
+use crate::state::Desktop;
+
 mod api_types;
 mod catalog;
 mod fullscreen;
@@ -84,12 +86,9 @@ pub(in crate::synced_options) use write_shared_settings::{
 };
 
 pub(in crate::synced_options) async fn canonical_exists(
-    state: &engine::state::Engine,
+    state: &Desktop,
 ) -> engine::Result<bool> {
-    crate::synced_options::state::shared_game_options_exist(crate::db::pool(
-        state,
-    ))
-    .await
+    crate::synced_options::state::shared_game_options_exist(state.db()).await
 }
 
 const OPTIONS_FILE: &str = "options.txt";

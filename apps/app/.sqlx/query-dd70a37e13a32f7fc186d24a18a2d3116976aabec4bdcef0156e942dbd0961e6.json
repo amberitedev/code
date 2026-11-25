@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n\t\tSELECT instance_id\n\t\tFROM instance_group_memberships\n\t\tWHERE group_id = ?\n\t\t",
+  "query": "SELECT instance_id FROM instance_group_memberships WHERE group_id = ?",
   "describe": {
     "columns": [
       {
@@ -22,5 +22,5 @@
       false
     ]
   },
-  "hash": "c264c05f91394756ef724b6cbb0c4ab5534a7f105cf386b53ac44c5527d2e2e7"
+  "hash": "dd70a37e13a32f7fc186d24a18a2d3116976aabec4bdcef0156e942dbd0961e6"
 }

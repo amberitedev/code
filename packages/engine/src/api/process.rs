@@ -4,7 +4,7 @@ use crate::ErrorKind;
 use crate::state::ProcessMetadata;
 pub use crate::{
     Engine,
-    state::{Hooks, MemorySettings, Settings, WindowSize},
+    state::{Hooks, MemorySettings, WindowSize},
 };
 use uuid::Uuid;
 

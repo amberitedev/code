@@ -4,7 +4,7 @@
 )]
 #![recursion_limit = "256"]
 
-use engine::prelude::*;
+use crate::state::Desktop;
 use native_dialog::{DialogBuilder, MessageLevel};
 use std::sync::Arc;
 use tauri::{Listener, Manager};
@@ -13,6 +13,7 @@ mod accounts;
 mod cores;
 mod data_dir;
 mod db;
+mod db_backup;
 mod desktop;
 mod dev;
 mod discord;
@@ -30,6 +31,7 @@ mod reactions;
 mod screenshots;
 mod settings;
 mod skins;
+mod state;
 mod synced_options;
 
 #[cfg(target_os = "macos")]
@@ -48,24 +50,20 @@ fn user_agent() -> String {
 /// event socket runs it again after a failure.
 async fn start_engine(
     app: tauri::AppHandle,
-    events: engine::EventSink,
+    events: local_api::events::Events,
     presence: Arc<presence::Presence>,
-) -> anyhow::Result<Arc<Engine>> {
+) -> anyhow::Result<Desktop> {
     tracing::info!("Initializing app state...");
     let started = async {
-        let reacting = events.subscribe();
-        let config = data_dir::engine_config(
+        let reacting = events.engine.subscribe();
+        let state = data_dir::open(
             data_dir::resolve(&app.config().identifier)?,
-            events,
+            events.engine,
+            events.app,
             dev::accounts()?,
         )
         .await?;
-        let state = Engine::new(config).await?;
-        accounts::self_hosted::bind_origin(
-            crate::db::pool(&state),
-            &state.sessions,
-        )
-        .await?;
+        accounts::self_hosted::bind_origin(state.db(), &state.sessions).await?;
         reactions::start(&state, Arc::clone(&presence), app.clone(), reacting);
         #[cfg(debug_assertions)]
         dev::sign_in(&state, &presence).await;
@@ -303,14 +301,13 @@ fn main() {
         )
         .setup(move |app| {
             let _ = desktop.set(app.handle().clone());
-            let sink = events.engine;
-            app.manage(sink.clone());
-            app.manage(events.app);
+            app.manage(events.engine.clone());
+            app.manage(events.app.clone());
             let handle = app.handle().clone();
             app.state::<engine_handle::EngineHandle>().start(move || {
                 start_engine(
                     handle.clone(),
-                    sink.clone(),
+                    events.clone(),
                     Arc::clone(&presence),
                 )
             });
@@ -417,7 +414,7 @@ fn main() {
                     let should_restart = updater.restarts_after();
                     if let Some((update, data)) = &updater.take_downloaded() {
                         let state = app.state::<engine_handle::EngineHandle>().try_get();
-                        fn set_changelog_toast(state: Option<&Engine>, version: Option<String>) {
+                        fn set_changelog_toast(state: Option<&Desktop>, version: Option<String>) {
                             let Some(state) = state else {
                                 return;
                             };

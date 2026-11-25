@@ -140,7 +140,7 @@ async fn cache_remote_icon(
     Req { body, .. }: Req<CacheRemoteIcon>,
 ) -> Result<Json<PathBuf>, ApiError> {
     let state = engine.get().await;
-    engine::instance::cache_remote_icon(&state, &body.source)
+    engine::instance::cache_remote_icon(state.engine(), &body.source)
         .await
         .map(Json)
         .map_err(|error| {

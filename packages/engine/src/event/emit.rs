@@ -1,13 +1,10 @@
-use super::{EventSink, FriendPayload, LoadingBarId};
-use crate::event::OnboardingChecklist;
+use super::{EventSink, LoadingBarId};
 use crate::event::{
-    CommandPayload, DesktopEvent, Event, EventError,
-    InstanceGroupsChangedPayload, InstancePayload, InstancePayloadType,
-    LoadingBar, LoadingBarType, LoadingPayload, ProcessPayload,
-    ProcessPayloadType, WarningPayload,
+    Event, EventError, InstancePayload, InstancePayloadType, LoadingBar,
+    LoadingBarType, LoadingPayload, ProcessPayload, ProcessPayloadType,
+    WarningPayload,
 };
 use futures::prelude::*;
-use serde_json::Value;
 use uuid::Uuid;
 
 /*
@@ -119,18 +116,6 @@ pub async fn emit_warning(
     Ok(())
 }
 
-// emit_command(CommandPayload::Something { something })
-// ie: installing a pack, opening an .mrpack, etc
-// Generally used for url deep links and file opens that we want to handle in the frontend
-pub async fn emit_command(
-    events: &EventSink,
-    command: CommandPayload,
-) -> crate::Result<()> {
-    tracing::debug!("Command: {}", serde_json::to_string(&command)?);
-    events.send(Event::Desktop(DesktopEvent::Command(command)));
-    Ok(())
-}
-
 // emit_process(uuid, pid, event, message)
 pub async fn emit_process(
     events: &EventSink,
@@ -161,40 +146,22 @@ pub async fn emit_instance(
     Ok(())
 }
 
-pub async fn emit_instance_groups_changed(
+/// A game in `instance_id` joined a server. The App records it for the worlds list.
+pub(crate) fn emit_server_joined(
     events: &EventSink,
-    instance_ids: &[String],
-) -> crate::Result<()> {
-    events.send(Event::Desktop(DesktopEvent::InstanceGroupsChanged(
-        InstanceGroupsChangedPayload {
-            instance_ids: instance_ids.to_vec(),
+    instance_id: &str,
+    host: &str,
+    port: u16,
+    timestamp: chrono::DateTime<chrono::Utc>,
+) {
+    events.send(Event::Instance(InstancePayload {
+        instance_id: instance_id.to_string(),
+        event: InstancePayloadType::ServerJoined {
+            host: host.to_string(),
+            port,
+            timestamp: timestamp.to_rfc3339(),
         },
-    )));
-    Ok(())
-}
-
-pub async fn emit_onboarding_checklist(
-    events: &EventSink,
-    checklist: OnboardingChecklist,
-) -> crate::Result<()> {
-    events.send(Event::Desktop(DesktopEvent::OnboardingChecklist(checklist)));
-    Ok(())
-}
-
-pub async fn emit_friend(
-    events: &EventSink,
-    payload: FriendPayload,
-) -> crate::Result<()> {
-    events.send(Event::Desktop(DesktopEvent::Friend(payload)));
-    Ok(())
-}
-
-pub async fn emit_notification(
-    events: &EventSink,
-    payload: Value,
-) -> crate::Result<()> {
-    events.send(Event::Desktop(DesktopEvent::Notification(payload)));
-    Ok(())
+    }));
 }
 
 // loading_join! macro

@@ -12,12 +12,13 @@ use super::options_file::{
 use super::pack_updates::materialize_pack_options_if_missing;
 use super::read_instance_changes::read_instance_changes_into_shared_settings;
 use super::source_selection::initialize_from_source_instance;
+use crate::state::Desktop;
 use crate::synced_options::state::SyncedInstance;
 use crate::synced_options::state::{
     CanonicalValue, game_options_sync_is_enabled, load_game_option_preferences,
     load_game_options_sync_state, load_shared_game_options,
 };
-use engine::state::{Engine, InstanceMetadata, SyncedOption};
+use engine::state::{InstanceMetadata, SyncedOption};
 use engine::util::io;
 
 struct AppliedSettings {
@@ -27,7 +28,7 @@ struct AppliedSettings {
 
 pub(super) async fn sync_is_active_for_instance(
     metadata: &SyncedInstance,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<bool> {
     Ok(metadata.synced.game_options
         && !synced_options::pending::contains(
@@ -36,17 +37,16 @@ pub(super) async fn sync_is_active_for_instance(
             state,
         )
         .await?
-        && game_options_sync_is_enabled(crate::db::pool(state)).await?)
+        && game_options_sync_is_enabled(state.db()).await?)
 }
 
 pub(super) async fn remember_processed_sha(
     instance_id: &str,
     sha1: &str,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<()> {
     let (canonical_revision, _) =
-        load_game_options_sync_state(crate::db::pool(state), CATALOG_REVISION)
-            .await?;
+        load_game_options_sync_state(state.db(), CATALOG_REVISION).await?;
     synced_options::begin_checkpoint(
         instance_id,
         SyncedOption::GameOptions,
@@ -69,11 +69,10 @@ pub(super) async fn remember_processed_sha(
 async fn apply_shared_settings_to_document(
     metadata: &InstanceMetadata,
     document: &mut GameOptionsDocument,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<AppliedSettings> {
-    let values = load_shared_game_options(crate::db::pool(state)).await?;
-    let preferences =
-        load_game_option_preferences(crate::db::pool(state)).await?;
+    let values = load_shared_game_options(state.db()).await?;
+    let preferences = load_game_option_preferences(state.db()).await?;
     let mut count = 0;
     let mut used_migration = false;
 
@@ -180,7 +179,7 @@ async fn apply_shared_settings_to_document(
 
 pub(super) async fn apply_shared_settings_to_instance(
     metadata: &SyncedInstance,
-    state: &Engine,
+    state: &Desktop,
     allow_protected: bool,
 ) -> engine::Result<SyncOutcome> {
     if !allow_protected && synced_options::sync_files_are_protected(metadata) {
@@ -238,7 +237,7 @@ pub(super) async fn apply_shared_settings_to_instance(
 
 pub(super) async fn capture_instance_options(
     metadata: &SyncedInstance,
-    state: &Engine,
+    state: &Desktop,
     allow_protected: bool,
 ) -> engine::Result<SyncOutcome> {
     if !allow_protected && synced_options::sync_files_are_protected(metadata) {
@@ -269,10 +268,8 @@ pub(super) async fn capture_instance_options(
     }
 
     let canonical_changed =
-        if crate::synced_options::state::shared_game_options_exist(
-            crate::db::pool(state),
-        )
-        .await?
+        if crate::synced_options::state::shared_game_options_exist(state.db())
+            .await?
         {
             read_instance_changes_into_shared_settings(
                 metadata, &document, state,
@@ -296,7 +293,7 @@ pub(super) async fn capture_instance_options(
 
 pub(in crate::synced_options) async fn capture_instance_file_change(
     metadata: &SyncedInstance,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<()> {
     capture_instance_options(metadata, state, false).await?;
     Ok(())
@@ -304,14 +301,14 @@ pub(in crate::synced_options) async fn capture_instance_file_change(
 
 pub(in crate::synced_options) async fn apply_instance_with_state(
     metadata: &SyncedInstance,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<()> {
     apply_shared_settings_to_instance(metadata, state, false).await?;
     Ok(())
 }
 
 pub(super) async fn sync_other_participating_instances(
-    state: &Engine,
+    state: &Desktop,
     excluded_instance_id: Option<&str>,
 ) -> SaveGameSettingsResult {
     let mut result = SaveGameSettingsResult {
@@ -323,7 +320,7 @@ pub(super) async fn sync_other_participating_instances(
         failed: 0,
         conflicts: Vec::new(),
     };
-    match game_options_sync_is_enabled(crate::db::pool(state)).await {
+    match game_options_sync_is_enabled(state.db()).await {
         Ok(true) => {}
         Ok(false) => return result,
         Err(error) => {
@@ -372,7 +369,7 @@ pub(super) async fn sync_other_participating_instances(
 }
 
 pub(crate) async fn sync_all_participating_instances(
-    state: &Engine,
+    state: &Desktop,
 ) -> SaveGameSettingsResult {
     sync_other_participating_instances(state, None).await
 }

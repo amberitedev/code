@@ -1,7 +1,9 @@
 use contracts::{ApiError, ErrorCode};
-use engine::{Engine, access::BoxFuture};
+use engine::access::BoxFuture;
 use std::sync::{Arc, OnceLock};
 use tokio::sync::watch;
+
+use crate::state::Desktop;
 
 /// The engine App setup starts, which the local server's routes wait for.
 #[derive(Clone)]
@@ -10,13 +12,12 @@ pub struct EngineHandle {
     start: Arc<OnceLock<Start>>,
 }
 
-type Start = Box<
-    dyn Fn() -> BoxFuture<'static, anyhow::Result<Arc<Engine>>> + Send + Sync,
->;
+type Start =
+    Box<dyn Fn() -> BoxFuture<'static, anyhow::Result<Desktop>> + Send + Sync>;
 
 enum Startup {
     Starting,
-    Ready(Arc<Engine>),
+    Ready(Desktop),
     Failed(ApiError),
 }
 
@@ -33,7 +34,7 @@ impl EngineHandle {
     /// Runs `start` now, and again whenever [`Self::retry`] follows a failure.
     pub fn start<F>(&self, start: impl Fn() -> F + Send + Sync + 'static)
     where
-        F: Future<Output = anyhow::Result<Arc<Engine>>> + Send + 'static,
+        F: Future<Output = anyhow::Result<Desktop>> + Send + 'static,
     {
         if self.start.set(Box::new(move || Box::pin(start()))).is_ok() {
             self.run();
@@ -66,7 +67,7 @@ impl EngineHandle {
         tauri::async_runtime::spawn(async move { handle.set(started.await) });
     }
 
-    pub fn set(&self, started: anyhow::Result<Arc<Engine>>) {
+    pub fn set(&self, started: anyhow::Result<Desktop>) {
         self.startup.send_replace(match started {
             Ok(engine) => Startup::Ready(engine),
             Err(error) => Startup::Failed(startup_error(error)),
@@ -74,27 +75,27 @@ impl EngineHandle {
     }
 
     /// Never returns after a failed start; the page shows that failure from `/events` instead.
-    pub async fn get(&self) -> Arc<Engine> {
+    pub async fn get(&self) -> Desktop {
         let mut startup = self.startup.subscribe();
         let startup = startup
             .wait_for(|startup| matches!(startup, Startup::Ready(_)))
             .await
             .expect("the handle owns its sender");
         match &*startup {
-            Startup::Ready(engine) => Arc::clone(engine),
+            Startup::Ready(engine) => engine.clone(),
             _ => unreachable!("wait_for returns only a ready engine"),
         }
     }
 
     /// Waits for startup to end, and answers why it failed.
-    pub async fn ready(&self) -> Result<Arc<Engine>, ApiError> {
+    pub async fn ready(&self) -> Result<Desktop, ApiError> {
         let mut startup = self.startup.subscribe();
         let startup = startup
             .wait_for(|startup| !matches!(startup, Startup::Starting))
             .await
             .expect("the handle owns its sender");
         match &*startup {
-            Startup::Ready(engine) => Ok(Arc::clone(engine)),
+            Startup::Ready(engine) => Ok(engine.clone()),
             Startup::Failed(error) => Err(error.clone()),
             Startup::Starting => {
                 unreachable!("wait_for returns a settled startup")
@@ -103,9 +104,9 @@ impl EngineHandle {
     }
 
     /// The engine if startup has set it, without waiting.
-    pub fn try_get(&self) -> Option<Arc<Engine>> {
+    pub fn try_get(&self) -> Option<Desktop> {
         match &*self.startup.borrow() {
-            Startup::Ready(engine) => Some(Arc::clone(engine)),
+            Startup::Ready(engine) => Some(engine.clone()),
             _ => None,
         }
     }

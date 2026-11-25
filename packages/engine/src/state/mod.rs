@@ -47,10 +47,9 @@ mod sessions;
 pub use self::sessions::*;
 
 pub mod db;
-pub(crate) mod db_backup;
+pub mod db_backup;
 
 pub mod attached_world_data;
-pub mod server_join_log;
 
 pub struct EngineConfig {
     pub data_dir: PathBuf,
@@ -71,7 +70,10 @@ pub struct EngineConfig {
 /// Host work the engine's own instance changes wait on, the host's view of an instance's server
 /// list, and the saved secrets logs hide. The App keeps synced options, packs and servers here;
 /// the defaults are an engine with nothing synced or saved, which edits `servers.dat` directly.
-pub trait InstanceHooks: std::any::Any + Send + Sync {
+pub trait InstanceHooks: Send + Sync {
+    /// Called once as the engine is built, before any other hook, with the engine they serve.
+    fn bind(&self, _engine: std::sync::Weak<Engine>) {}
+
     fn secrets<'a>(
         &'a self,
         _engine: &'a Engine,
@@ -447,24 +449,28 @@ impl Engine {
             Side::Client => None,
         };
 
-        let state = Arc::new(Self {
-            side,
-            directories,
-            content_store,
-            fetch_semaphore,
-            io_semaphore,
-            api_semaphore,
-            installs: Arc::new(Installs::new()),
-            instance_locks: InstanceLocks::default(),
-            publish_reports: Default::default(),
-            uploads: Default::default(),
-            process_manager: ProcessManager::new(),
-            pool,
-            file_watcher,
-            events,
-            sessions: Sessions::new(accounts),
-            pack_client,
-            hooks: hooks.unwrap_or_else(|| Arc::new(NoHooks)),
+        let hooks = hooks.unwrap_or_else(|| Arc::new(NoHooks));
+        let state = Arc::new_cyclic(|engine| {
+            hooks.bind(engine.clone());
+            Self {
+                side,
+                directories,
+                content_store,
+                fetch_semaphore,
+                io_semaphore,
+                api_semaphore,
+                installs: Arc::new(Installs::new()),
+                instance_locks: InstanceLocks::default(),
+                publish_reports: Default::default(),
+                uploads: Default::default(),
+                process_manager: ProcessManager::new(),
+                pool,
+                file_watcher,
+                events,
+                sessions: Sessions::new(accounts),
+                pack_client,
+                hooks,
+            }
         });
 
         state.content_store.recover(None).await?;

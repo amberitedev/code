@@ -1,11 +1,12 @@
-use std::{path::PathBuf, sync::Arc};
+use crate::state::Desktop;
+use std::path::PathBuf;
 
 use axum::{Router, extract::State};
 use contracts::{
     ApiError, Json,
     server::{Mount, Req},
 };
-use engine::{Engine, pack::import, routes::api_error};
+use engine::{pack::import, routes::api_error};
 
 use crate::local_api::{
     AppState,
@@ -51,14 +52,14 @@ async fn get_default_launcher_path(
 }
 
 async fn import_instance(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { body, .. }: Req<ImportInstance>,
 ) -> Result<Json<ImportJob>, ApiError> {
     engine::install::import_instance(
         body.launcher_type,
         body.base_path,
         body.instance_folder,
-        &engine,
+        engine.engine(),
     )
     .await
     .map(|job| Json(ImportJob(job)))

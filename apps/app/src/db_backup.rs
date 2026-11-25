@@ -1,0 +1,258 @@
+//! Backs up app.db before a new App version opens it, so an update that breaks it can be undone.
+
+use engine::ErrorKind;
+use engine::state::db_backup::{
+    copy_db_files, create_sqlite_snapshot, remove_partial_backup,
+};
+use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection};
+use sqlx::{ConnectOptions, Connection};
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+const CURRENT_APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+pub async fn maybe_backup_existing_app_db(
+    db_path: &Path,
+) -> engine::Result<()> {
+    if !db_path.try_exists()? {
+        tracing::debug!(
+            "Skipping pre-migration app database backup because {} does not exist",
+            db_path.display()
+        );
+        return Ok(());
+    }
+
+    tracing::debug!(
+        "Inspecting {} for a pre-migration app database backup",
+        db_path.display()
+    );
+
+    let mut conn = match open_read_only_db(db_path).await {
+        Ok(conn) => conn,
+        Err(err) => {
+            tracing::error!(
+                "Failed to open {} read-only before migrations: {err}",
+                db_path.display()
+            );
+            return Err(err);
+        }
+    };
+
+    let has_user_tables = match has_user_tables(&mut conn).await {
+        Ok(has_user_tables) => has_user_tables,
+        Err(err) => {
+            tracing::error!(
+                "Failed to inspect app database tables before migrations: {err}"
+            );
+            return Err(err);
+        }
+    };
+    if !has_user_tables {
+        tracing::debug!(
+            "Skipping pre-migration app database backup because {} has no app data tables",
+            db_path.display()
+        );
+        return Ok(());
+    }
+
+    let stored_version = match read_stored_app_version(&mut conn).await {
+        Ok(version) => version,
+        Err(err) => {
+            tracing::error!(
+                "Failed to read stored app database version before migrations: {err}"
+            );
+            return Err(err);
+        }
+    };
+    if stored_version.as_deref() == Some(CURRENT_APP_VERSION) {
+        tracing::debug!(
+            "Skipping pre-migration app database backup because app version is already recorded as {CURRENT_APP_VERSION}"
+        );
+        return Ok(());
+    }
+
+    let stored_version = stored_version.as_deref().unwrap_or("unknown");
+    let backup_dir = match app_db_backup_dir() {
+        Ok(path) => path,
+        Err(err) => {
+            tracing::error!(
+                "Failed to resolve app database backup directory before migrations: {err}"
+            );
+            return Err(err);
+        }
+    };
+    let backup_path = match next_backup_path(
+        &backup_dir,
+        stored_version,
+        CURRENT_APP_VERSION,
+    )
+    .await
+    {
+        Ok(path) => path,
+        Err(err) => {
+            tracing::error!(
+                "Failed to choose app database backup path in {} before migrations: {err}",
+                backup_dir.display()
+            );
+            return Err(err);
+        }
+    };
+
+    tracing::info!(
+        "Creating pre-migration app database backup from version {stored_version} before opening with version {CURRENT_APP_VERSION} at {}",
+        backup_path.display()
+    );
+
+    if let Err(err) = create_sqlite_snapshot(&mut conn, &backup_path).await {
+        tracing::error!(
+            "Failed to create pre-migration app database backup at {}, falling back to copying the database files: {err}",
+            backup_path.display()
+        );
+        remove_partial_backup(&backup_path).await;
+        let _ = conn.close().await;
+
+        if let Err(copy_err) = copy_db_files(db_path, &backup_path).await {
+            tracing::error!(
+                "Failed to copy app database files to {}: {copy_err}",
+                backup_path.display()
+            );
+            remove_partial_backup(&backup_path).await;
+            return Err(copy_err);
+        }
+    }
+
+    tracing::info!(
+        "Created pre-migration app database backup at {}",
+        backup_path.display()
+    );
+
+    Ok(())
+}
+
+async fn open_read_only_db(db_path: &Path) -> engine::Result<SqliteConnection> {
+    let conn_options = SqliteConnectOptions::new()
+        .filename(db_path)
+        .busy_timeout(Duration::from_secs(30))
+        .read_only(true)
+        .create_if_missing(false);
+
+    Ok(conn_options.connect().await?)
+}
+
+pub fn app_db_backup_dir() -> engine::Result<PathBuf> {
+    if let Some(path) = std::env::var_os("AMBERITE_DB_BACKUP_DIR") {
+        return Ok(PathBuf::from(path));
+    }
+
+    let base = dirs::data_local_dir().or_else(dirs::data_dir).ok_or(
+        ErrorKind::FSError(
+            "could not find valid data dir for app database backups"
+                .to_string(),
+        ),
+    )?;
+
+    Ok(base.join("Modrinth").join("Backups").join("app-db"))
+}
+
+async fn has_user_tables(conn: &mut SqliteConnection) -> engine::Result<bool> {
+    let count = sqlx::query_scalar!(
+        "
+		SELECT COUNT(*)
+		FROM sqlite_master
+		WHERE type = 'table'
+			AND name NOT LIKE 'sqlite_%'
+			AND name NOT IN ('_sqlx_migrations', 'app_metadata')
+		",
+    )
+    .fetch_one(&mut *conn)
+    .await?;
+
+    Ok(count > 0)
+}
+
+async fn read_stored_app_version(
+    conn: &mut SqliteConnection,
+) -> engine::Result<Option<String>> {
+    if !has_table(conn, "app_metadata").await? {
+        return Ok(None);
+    }
+
+    Ok(sqlx::query_scalar!(
+        "SELECT value FROM app_metadata WHERE key = 'app_version'"
+    )
+    .fetch_optional(&mut *conn)
+    .await?)
+}
+
+async fn has_table(
+    conn: &mut SqliteConnection,
+    table_name: &str,
+) -> engine::Result<bool> {
+    let count = sqlx::query_scalar!(
+        "
+		SELECT COUNT(*)
+		FROM sqlite_master
+		WHERE type = 'table' AND name = ?
+		",
+        table_name,
+    )
+    .fetch_one(&mut *conn)
+    .await?;
+
+    Ok(count > 0)
+}
+
+async fn next_backup_path(
+    backup_dir: &Path,
+    stored_version: &str,
+    current_version: &str,
+) -> engine::Result<PathBuf> {
+    engine::util::io::create_dir_all(backup_dir).await?;
+
+    let stored_version = sanitize_version_for_filename(stored_version);
+    let current_version = sanitize_version_for_filename(current_version);
+
+    let backup_path = backup_dir.join(format!(
+        "app-db-before-{current_version}-from-{stored_version}.db"
+    ));
+    if !backup_path.try_exists()? {
+        return Ok(backup_path);
+    }
+
+    for suffix in 2.. {
+        let backup_path = backup_dir.join(format!(
+            "app-db-before-{current_version}-from-{stored_version}-{suffix}.db"
+        ));
+        if !backup_path.try_exists()? {
+            return Ok(backup_path);
+        }
+    }
+
+    unreachable!()
+}
+
+fn sanitize_version_for_filename(version: &str) -> String {
+    let mut sanitized = String::new();
+    let mut replaced_last_char = false;
+
+    for character in version.chars() {
+        if character.is_ascii_alphanumeric()
+            || character == '.'
+            || character == '-'
+            || character == '_'
+        {
+            sanitized.push(character);
+            replaced_last_char = false;
+        } else if !replaced_last_char {
+            sanitized.push('-');
+            replaced_last_char = true;
+        }
+    }
+
+    let sanitized = sanitized.trim_matches(&['.', '-', '_'][..]);
+    if sanitized.is_empty() {
+        "unknown".to_string()
+    } else {
+        sanitized.to_string()
+    }
+}

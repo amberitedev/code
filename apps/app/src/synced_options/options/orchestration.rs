@@ -1,13 +1,13 @@
+use crate::state::Desktop;
 use crate::synced_options::state::SyncedInstance;
 use anyhow::bail;
 use engine::state::{InstanceLink, InstanceMetadata, SyncedOption};
 use engine::util::io;
-use engine::{Engine, ErrorKind, InstancePayloadType, emit_instance};
+use engine::{ErrorKind, InstancePayloadType, emit_instance};
 use quartz_nbt::NbtCompound;
 use serde::{Deserialize, Serialize};
 use std::future::Future;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::super::{packs as synced_packs, servers as synced_servers};
@@ -124,15 +124,15 @@ enum CapabilityStatus {
 }
 
 pub async fn get_global_options(
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<GlobalSyncedOptions> {
     get_global_options_with_state(state).await
 }
 
 pub async fn get_initialized_options(
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<GlobalSyncedOptions> {
-    let _guard = crate::hooks::synced_options(state).lock().await;
+    let _guard = state.synced_options().lock().await;
     let mut options = GlobalSyncedOptions::default();
 
     for option in SyncedOption::ALL {
@@ -143,14 +143,14 @@ pub async fn get_initialized_options(
 }
 
 pub async fn get_synced_options_folder(
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<PathBuf> {
     create_synced_directories(state).await?;
     Ok(synced_options_path(state))
 }
 
 async fn get_global_options_with_state(
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<GlobalSyncedOptions> {
     let mut options = GlobalSyncedOptions::default();
     let rows = sqlx::query!(
@@ -159,7 +159,7 @@ async fn get_global_options_with_state(
 		FROM sync_feature_settings
 		"#,
     )
-    .fetch_all(crate::db::pool(state))
+    .fetch_all(state.db())
     .await?;
 
     for row in rows {
@@ -172,7 +172,7 @@ async fn get_global_options_with_state(
 }
 
 pub async fn get_overview(
-    state: &Engine,
+    state: &Desktop,
     instance_id: &str,
 ) -> engine::Result<SyncedOptionsOverview> {
     let global_options = get_global_options_with_state(state).await?;
@@ -199,7 +199,7 @@ async fn capability(
     metadata: &InstanceMetadata,
     option: SyncedOption,
     global_enabled: bool,
-    state: &Engine,
+    state: &Desktop,
 ) -> SyncedOptionCapability {
     let status =
         capability_status(metadata, option, global_enabled, state).await;
@@ -220,7 +220,7 @@ async fn capability_status(
     metadata: &InstanceMetadata,
     option: SyncedOption,
     global_enabled: bool,
-    state: &Engine,
+    state: &Desktop,
 ) -> CapabilityStatus {
     if !option.is_available() {
         return CapabilityStatus::Unsupported(
@@ -251,7 +251,7 @@ pub(in crate::synced_options) async fn instance_option_supported(
     metadata: &InstanceMetadata,
     option: SyncedOption,
     global_enabled: bool,
-    state: &Engine,
+    state: &Desktop,
 ) -> bool {
     if pending::contains(&metadata.instance.id, option, state)
         .await
@@ -268,7 +268,7 @@ pub(in crate::synced_options) async fn instance_option_supported(
 async fn version_capability(
     metadata: &InstanceMetadata,
     option: SyncedOption,
-    state: &Engine,
+    state: &Desktop,
 ) -> CapabilityStatus {
     if matches!(
         option,
@@ -345,7 +345,7 @@ async fn version_capability(
 }
 
 pub async fn set_global_option(
-    state: &Engine,
+    state: &Desktop,
     option: SyncedOption,
     enabled: bool,
     base_instance_id: Option<&str>,
@@ -355,7 +355,7 @@ pub async fn set_global_option(
             "data pack syncing is currently disabled".to_string(),
         ));
     }
-    let _guard = crate::hooks::synced_options(state).lock().await;
+    let _guard = state.synced_options().lock().await;
     pending::cancel(option, None, state).await?;
     set_global_option_with_state(option, enabled, base_instance_id, state).await
 }
@@ -364,7 +364,7 @@ async fn set_global_option_with_state(
     option: SyncedOption,
     enabled: bool,
     base_instance_id: Option<&str>,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<GlobalSyncedOptions> {
     let initializing_game_options_from_base = enabled
         && option == SyncedOption::GameOptions
@@ -469,7 +469,7 @@ async fn set_global_option_with_state(
 async fn set_global_option_enabled(
     option: SyncedOption,
     enabled: bool,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<()> {
     let option_name = option.as_str();
     sqlx::query!(
@@ -483,7 +483,7 @@ async fn set_global_option_enabled(
         option_name,
         enabled,
     )
-    .execute(crate::db::pool(state))
+    .execute(state.db())
     .await?;
     Ok(())
 }
@@ -491,7 +491,7 @@ async fn set_global_option_enabled(
 async fn enable_global_option_from_base(
     option: SyncedOption,
     base_instance_id: &str,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<GlobalSyncedOptions> {
     let source =
         crate::synced_options::state::get_instance(state, base_instance_id)
@@ -523,7 +523,7 @@ async fn enable_global_option_from_base(
             base_instance_id,
             option,
             true,
-            crate::db::pool(state),
+            state.db(),
         )
         .await?;
         set_global_option_enabled(option, true, state).await?;
@@ -564,7 +564,7 @@ async fn enable_global_option_from_base(
         base_instance_id,
         option,
         true,
-        crate::db::pool(state),
+        state.db(),
     )
     .await?;
     set_global_option_enabled(option, true, state).await?;
@@ -600,7 +600,7 @@ async fn enable_global_option_from_base(
 async fn complete_pending_source(
     instance_id: &str,
     option: SyncedOption,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<()> {
     pending::remove(
         &PendingChange {
@@ -616,7 +616,7 @@ async fn complete_pending_source(
 async fn queue_source(
     metadata: &InstanceMetadata,
     option: SyncedOption,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<GlobalSyncedOptions> {
     pending::save(
         PendingChange {
@@ -631,7 +631,7 @@ async fn queue_source(
         &metadata.instance.id,
         option,
         true,
-        crate::db::pool(state),
+        state.db(),
     )
     .await?;
     set_global_option_enabled(option, true, state).await?;
@@ -642,7 +642,7 @@ async fn queue_source(
 async fn defer_option(
     metadata: &InstanceMetadata,
     option: SyncedOption,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<()> {
     let variants: &[&str] = match option {
         SyncedOption::CommandHistory | SyncedOption::MultiplayerServers => {
@@ -670,7 +670,7 @@ async fn defer_option(
 }
 
 pub async fn set_instance_option(
-    state: &Engine,
+    state: &Desktop,
     instance_id: &str,
     option: SyncedOption,
     enabled: bool,
@@ -681,7 +681,7 @@ pub async fn set_instance_option(
             "data pack syncing is currently disabled".to_string(),
         ));
     }
-    let _guard = crate::hooks::synced_options(state).lock().await;
+    let _guard = state.synced_options().lock().await;
     let metadata =
         crate::synced_options::state::get_instance(state, instance_id)
             .await?
@@ -734,7 +734,7 @@ pub async fn set_instance_option(
         instance_id,
         option,
         enabled,
-        crate::db::pool(state),
+        state.db(),
     )
     .await?;
     if can_reconcile {
@@ -750,7 +750,7 @@ pub async fn set_instance_option(
                         instance_id,
                         option,
                         previous_enabled,
-                        crate::db::pool(state),
+                        state.db(),
                     )
                     .await
             {
@@ -775,7 +775,7 @@ pub async fn set_instance_option(
 }
 
 pub async fn set_synced_option(
-    state: &Engine,
+    state: &Desktop,
     instance_id: &str,
     option: SyncedOption,
     enabled: bool,
@@ -796,11 +796,11 @@ pub async fn set_synced_option(
 }
 
 pub async fn get_instance_option_join_preview(
-    state: &Engine,
+    state: &Desktop,
     instance_id: &str,
     option: SyncedOption,
 ) -> engine::Result<SyncedOptionJoinPreview> {
-    let _guard = crate::hooks::synced_options(state).lock().await;
+    let _guard = state.synced_options().lock().await;
     let metadata =
         crate::synced_options::state::get_instance(state, instance_id)
             .await?
@@ -822,7 +822,7 @@ pub async fn get_instance_option_join_preview(
 async fn instance_option_join_action(
     metadata: &InstanceMetadata,
     option: SyncedOption,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<SyncedOptionJoinAction> {
     if !canonical_exists(option, state).await? {
         return Ok(SyncedOptionJoinAction::SeedShared);
@@ -852,7 +852,7 @@ async fn prepare_instance_join(
     metadata: &InstanceMetadata,
     option: SyncedOption,
     resolution: Option<SyncedOptionJoinResolution>,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<()> {
     let action = instance_option_join_action(metadata, option, state).await?;
     backup_instance_option_file(metadata, option, state).await?;
@@ -881,7 +881,7 @@ async fn prepare_instance_join(
     defer_option(metadata, option, state).await
 }
 
-async fn apply_pending_changes(state: &Engine) -> engine::Result<()> {
+async fn apply_pending_changes(state: &Desktop) -> engine::Result<()> {
     for change in pending::read(state).await? {
         if !pending::read(state).await?.contains(&change) {
             continue;
@@ -952,8 +952,8 @@ async fn apply_pending_changes(state: &Engine) -> engine::Result<()> {
     Ok(())
 }
 
-pub async fn reconcile_all(state: &Engine) -> engine::Result<()> {
-    let _guard = crate::hooks::synced_options(state).lock().await;
+pub async fn reconcile_all(state: &Desktop) -> engine::Result<()> {
+    let _guard = state.synced_options().lock().await;
     create_synced_directories(state).await?;
     apply_pending_changes(state).await?;
     let instances = crate::synced_options::state::list_instances(state).await?;
@@ -971,11 +971,11 @@ pub async fn reconcile_all(state: &Engine) -> engine::Result<()> {
 }
 
 pub(crate) async fn monitor_persisted_processes(
-    state: &Arc<Engine>,
+    state: &Desktop,
 ) -> engine::Result<()> {
     let instance_ids = engine::process::persisted_instance_ids(state).await?;
     for instance_id in instance_ids {
-        let engine = Arc::downgrade(state);
+        let engine = state.downgrade();
         tokio::spawn(async move {
             loop {
                 let Some(state) = engine.upgrade() else {
@@ -1021,19 +1021,14 @@ pub(crate) async fn monitor_persisted_processes(
 
 /// Starts the desktop's synced options: the pack worker, the locale indexer, which calls
 /// `on_locales_indexed` after each pass, the startup reconciles and the pack retention pass.
-pub fn start(
-    engine: &Arc<Engine>,
-    on_locales_indexed: impl Fn() + Send + 'static,
-) {
-    crate::hooks::synced_options(engine)
-        .packs
-        .bind(Arc::downgrade(engine));
+pub fn start(engine: &Desktop, on_locales_indexed: impl Fn() + Send + 'static) {
+    engine.synced_options().packs.start();
     super::game_options::start_game_locale_indexer(
-        Arc::clone(engine),
+        engine.clone(),
         on_locales_indexed,
     );
 
-    let state = Arc::clone(engine);
+    let state = engine.clone();
     tokio::spawn(async move {
         if let Ok(instances) =
             engine::state::instances::load_instance_rows(state.pool()).await
@@ -1064,7 +1059,7 @@ pub fn start(
         }
     });
 
-    let maintained = Arc::downgrade(engine);
+    let maintained = engine.downgrade();
     tokio::spawn(async move {
         let mut interval =
             tokio::time::interval(std::time::Duration::from_secs(600));
@@ -1085,17 +1080,17 @@ pub fn start(
 
 /// Keeps reconciliation state on the heap so callers do not inherit its size.
 pub fn reconcile_instance<'a>(
-    state: &'a Engine,
+    state: &'a Desktop,
     instance_id: &'a str,
 ) -> impl Future<Output = engine::Result<()>> + Send + 'a {
     Box::pin(reconcile_instance_inner(state, instance_id))
 }
 
 async fn reconcile_instance_inner(
-    state: &Engine,
+    state: &Desktop,
     instance_id: &str,
 ) -> engine::Result<()> {
-    let _guard = crate::hooks::synced_options(state).lock().await;
+    let _guard = state.synced_options().lock().await;
     apply_pending_changes(state).await?;
     // Reconciles queued by events can run after their instance is removed.
     let Some(metadata) =
@@ -1107,10 +1102,10 @@ async fn reconcile_instance_inner(
 }
 
 pub async fn reconcile_instance_after_pack_update(
-    state: &Engine,
+    state: &Desktop,
     instance_id: &str,
 ) -> engine::Result<()> {
-    let _guard = crate::hooks::synced_options(state).lock().await;
+    let _guard = state.synced_options().lock().await;
     let metadata =
         crate::synced_options::state::get_instance(state, instance_id)
             .await?
@@ -1119,10 +1114,10 @@ pub async fn reconcile_instance_after_pack_update(
 }
 
 pub async fn prepare_instance_update(
-    state: &Engine,
+    state: &Desktop,
     instance_id: &str,
 ) -> engine::Result<()> {
-    let _guard = crate::hooks::synced_options(state).lock().await;
+    let _guard = state.synced_options().lock().await;
     let metadata =
         crate::synced_options::state::get_instance(state, instance_id)
             .await?
@@ -1162,7 +1157,7 @@ pub async fn prepare_instance_update(
 
 async fn reconcile_instance_with_state(
     metadata: &SyncedInstance,
-    state: &Engine,
+    state: &Desktop,
     allow_protected: bool,
 ) -> engine::Result<()> {
     if !allow_protected && sync_files_are_protected(metadata) {
@@ -1212,7 +1207,7 @@ async fn reconcile_instance_with_state(
 async fn reconcile_option(
     metadata: &SyncedInstance,
     option: SyncedOption,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<()> {
     match option {
         SyncedOption::GameOptions => {
@@ -1236,11 +1231,11 @@ async fn reconcile_option(
 }
 
 pub async fn reconcile_changed_file(
-    state: &Engine,
+    state: &Desktop,
     instance_id: &str,
     file_name: &str,
 ) -> engine::Result<()> {
-    let _guard = crate::hooks::synced_options(state).lock().await;
+    let _guard = state.synced_options().lock().await;
     apply_pending_changes(state).await?;
     let metadata =
         crate::synced_options::state::get_instance(state, instance_id).await?;
@@ -1289,15 +1284,15 @@ pub async fn reconcile_changed_file(
     }
 }
 
-pub fn synced_options_path(state: &Engine) -> PathBuf {
+pub fn synced_options_path(state: &Desktop) -> PathBuf {
     state.directories.synced_options_dir()
 }
 
 pub async fn remove_generated_instance_files(
     instance_id: &str,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<()> {
-    let _guard = crate::hooks::synced_options(state).lock().await;
+    let _guard = state.synced_options().lock().await;
     let instance_id = safe_instance_id(instance_id);
     for path in [
         synced_options_path(state)
@@ -1318,7 +1313,7 @@ pub async fn remove_generated_instance_files(
 }
 
 pub(super) async fn create_synced_directories(
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<()> {
     for path in [
         synced_options_path(state),
@@ -1334,7 +1329,7 @@ pub(super) async fn create_synced_directories(
 async fn backup_instance_option_file(
     metadata: &InstanceMetadata,
     option: SyncedOption,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<()> {
     let directory = instance_dir(metadata, state);
     let path = match option {
@@ -1366,7 +1361,7 @@ pub(super) async fn backup_bytes(
     owner: &str,
     file_name: &str,
     contents: &[u8],
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<()> {
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1384,7 +1379,7 @@ pub(super) async fn backup_bytes(
 pub(super) async fn seed_from_instance(
     metadata: &InstanceMetadata,
     option: SyncedOption,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<()> {
     create_synced_directories(state).await?;
     let instance_dir = instance_dir(metadata, state);
@@ -1448,7 +1443,7 @@ pub(super) async fn seed_from_instance(
 async fn ensure_option(
     metadata: &SyncedInstance,
     option: SyncedOption,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<()> {
     match option {
         SyncedOption::GameOptions => {
@@ -1472,7 +1467,7 @@ async fn ensure_option(
 async fn detach_option(
     metadata: &InstanceMetadata,
     option: SyncedOption,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<()> {
     let instance_dir = instance_dir(metadata, state);
     match option {
@@ -1508,7 +1503,7 @@ async fn detach_option(
 
 async fn canonical_exists(
     option: SyncedOption,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<bool> {
     Ok(match option {
         SyncedOption::GameOptions => {
@@ -1528,7 +1523,7 @@ async fn canonical_exists(
 pub(super) async fn option_effective(
     metadata: &SyncedInstance,
     option: SyncedOption,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<bool> {
     if sync_files_are_protected(metadata)
         || instance_is_running(metadata, state).await?
@@ -1541,7 +1536,7 @@ pub(super) async fn option_effective(
 async fn option_participates(
     metadata: &SyncedInstance,
     option: SyncedOption,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<bool> {
     if pending::contains(&metadata.instance.id, option, state).await? {
         return Ok(false);

@@ -100,49 +100,13 @@ async fn host(dir: &tempfile::TempDir, allow: bool) -> Router {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn the_library_reads_and_groups_instances_in_the_helpers_shapes() {
+async fn the_library_reads_instances_in_the_helpers_shapes() {
     let dir = tempfile::tempdir().unwrap();
     let router = host(&dir, true).await;
 
-    let (status, group) = send(
-        &router,
-        "POST",
-        "/instance-groups",
-        Some(json!({ "name": "Modded" })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(group["name"], "Modded");
-    let group_id = group["id"].as_str().unwrap();
-
-    let (status, _) = send(
-        &router,
-        "PATCH",
-        &format!("/instance-groups/{group_id}"),
-        Some(json!({ "name": "Heavy" })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    let (status, _) = send(
-        &router,
-        "PUT",
-        "/instance-groups/memberships",
-        Some(json!([{ "instance_id": "local:a", "group_ids": [group_id] }])),
-    )
-    .await;
-    assert_eq!(status, StatusCode::NO_CONTENT);
-
-    let (_, groups) = send(&router, "GET", "/instance-groups", None).await;
-    assert!(
-        groups
-            .as_array()
-            .unwrap()
-            .contains(&json!({ "id": group_id, "name": "Heavy" }))
-    );
     let (_, instance) =
         send(&router, "GET", "/instances/local%3Aa", None).await;
     assert_eq!(instance["path"], "Survival");
-    assert_eq!(instance["group_ids"], json!([group_id]));
     let (_, listed) = send(&router, "GET", "/instances", None).await;
     assert_eq!(listed[0]["id"], "local:a");
     let (_, many) = send(
@@ -158,7 +122,7 @@ async fn the_library_reads_and_groups_instances_in_the_helpers_shapes() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_denied_caller_sees_no_instances_and_touches_no_groups_or_store() {
+async fn a_denied_caller_sees_no_instances_and_touches_no_store() {
     let dir = tempfile::tempdir().unwrap();
     let router = host(&dir, false).await;
 
@@ -173,14 +137,6 @@ async fn a_denied_caller_sees_no_instances_and_touches_no_groups_or_store() {
             "{list}"
         );
     }
-    let (status, _) = send(
-        &router,
-        "POST",
-        "/instance-groups",
-        Some(json!({ "name": "Modded" })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
     for (method, uri, body) in [
         ("GET", "/content-store/usage", None),
         ("POST", "/content-store/cleanup", None),
@@ -213,8 +169,28 @@ async fn a_denied_caller_sees_no_instances_and_touches_no_groups_or_store() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn worlds_and_servers_are_read_and_edited_through_their_routes() {
+    crate::install_crypto_provider();
     let dir = tempfile::tempdir().unwrap();
-    let router = host(&dir, true).await;
+    let engine = engine(dir.path().to_path_buf()).await;
+    add_instance(&engine, "local:a", "Survival").await;
+    let router = super::routes().with_state(Host {
+        engine: Arc::clone(&engine),
+        access: Arc::new(FakeAccess { allow: true }),
+    });
+    // The host keeps join times and lists worlds with them.
+    let joined: chrono::DateTime<chrono::Utc> =
+        "2026-01-02T03:04:05Z".parse().unwrap();
+    let joins = crate::worlds::ServerJoins::from([(
+        ("hub.example.com".to_string(), 25565),
+        joined,
+    )]);
+    let list = async || {
+        let worlds =
+            crate::worlds::get_instance_worlds(&engine, "local:a", &joins)
+                .await
+                .unwrap();
+        serde_json::to_value(worlds).unwrap()
+    };
     let save = dir
         .path()
         .join(crate::INSTANCES_FOLDER_NAME)
@@ -284,8 +260,7 @@ async fn worlds_and_servers_are_read_and_edited_through_their_routes() {
     let (_, world) =
         send(&router, "GET", "/instances/local%3Aa/saves/World1", None).await;
     assert_eq!(world["name"], "New");
-    let (_, worlds) =
-        send(&router, "GET", "/instances/local%3Aa/worlds", None).await;
+    let worlds = list().await;
     let server = worlds
         .as_array()
         .unwrap()
@@ -295,24 +270,32 @@ async fn worlds_and_servers_are_read_and_edited_through_their_routes() {
     assert_eq!(server["name"], "Lobby");
     assert_eq!(server["pack_status"], "enabled");
     assert_eq!(server["display_status"], "hidden");
+    assert_eq!(server["last_played"], json!(joined));
 
-    let (_, shown) = send(
-        &router,
-        "GET",
-        "/worlds/recent?limit=10&display_statuses=%5B%22normal%22%2C%22favorite%22%5D",
-        None,
+    let all_joins = std::collections::HashMap::from([(
+        "local:a".to_string(),
+        joins.clone(),
+    )]);
+    let recent = async |statuses| {
+        let worlds =
+            crate::worlds::get_recent_worlds(&engine, 10, statuses, &all_joins)
+                .await
+                .unwrap();
+        serde_json::to_value(worlds).unwrap()
+    };
+    let shown = recent(
+        crate::worlds::DisplayStatus::Normal
+            | crate::worlds::DisplayStatus::Favorite,
     )
     .await;
     assert_eq!(shown, json!([world_with_instance(&world)]));
-    let (_, all) = send(&router, "GET", "/worlds/recent?limit=10", None).await;
+    let all = recent(enumset::EnumSet::all()).await;
     assert_eq!(all.as_array().unwrap().len(), 2);
 
     let (status, _) =
         send(&router, "DELETE", "/instances/local%3Aa/servers/0", None).await;
     assert_eq!(status, StatusCode::NO_CONTENT);
-    let (_, worlds) =
-        send(&router, "GET", "/instances/local%3Aa/worlds", None).await;
-    assert_eq!(worlds, json!([world]));
+    assert_eq!(list().await, json!([world]));
 }
 
 #[tokio::test(flavor = "multi_thread")]

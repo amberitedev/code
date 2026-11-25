@@ -4,9 +4,7 @@ use crate::instance::get_full_path;
 use crate::launcher::get_loader_version_from_profile;
 use crate::server_address::{parse_server_address, resolve_server_address};
 use crate::state::attached_world_data::AttachedWorldData;
-use crate::state::{
-    InstanceInstallStage, attached_world_data, server_join_log,
-};
+use crate::state::{InstanceInstallStage, attached_world_data};
 use crate::util::protocol_version::OLD_PROTOCOL_VERSIONS;
 pub use crate::util::protocol_version::ProtocolVersion;
 pub use crate::util::server_ping::{
@@ -206,10 +204,16 @@ impl From<ServerPackStatus> for Option<bool> {
     }
 }
 
+/// When this machine last joined each server of an instance, by host and port. The host keeps
+/// them from the engine's `ServerJoined` events.
+pub type ServerJoins = std::collections::HashMap<(String, u16), DateTime<Utc>>;
+
+/// `joins` holds each instance's [`ServerJoins`] by instance id.
 pub async fn get_recent_worlds(
     state: &Engine,
     limit: usize,
     display_statuses: EnumSet<DisplayStatus>,
+    joins: &std::collections::HashMap<String, ServerJoins>,
 ) -> Result<Vec<WorldWithInstance>> {
     let instances_dir = state.directories.instances_dir();
 
@@ -228,8 +232,13 @@ pub async fn get_recent_worlds(
         let instance_id = &instance.instance.id;
         let instance_path = &instance.instance.path;
         let instance_dir = instances_dir.join(instance_path);
-        let instance_worlds =
-            get_all_worlds_in_instance(state, instance_id, &instance_dir).await;
+        let instance_worlds = get_all_worlds_in_instance(
+            state,
+            instance_id,
+            &instance_dir,
+            joins.get(instance_id),
+        )
+        .await;
         if let Err(e) = instance_worlds {
             tracing::error!(
                 "Failed to get worlds for instance {}: {}",
@@ -270,11 +279,13 @@ pub async fn get_recent_worlds(
 pub async fn get_instance_worlds(
     state: &crate::Engine,
     instance_id: &str,
+    joins: &ServerJoins,
 ) -> Result<Vec<World>> {
     get_all_worlds_in_instance(
         state,
         instance_id,
         &get_full_path(state, instance_id).await?,
+        Some(joins),
     )
     .await
 }
@@ -315,6 +326,7 @@ async fn get_all_worlds_in_instance(
     state: &Engine,
     instance_id: &str,
     instance_dir: &Path,
+    joins: Option<&ServerJoins>,
 ) -> Result<Vec<World>> {
     let mut worlds = vec![];
     get_singleplayer_worlds_in_instance(instance_dir, &mut worlds).await?;
@@ -323,6 +335,7 @@ async fn get_all_worlds_in_instance(
         state,
         instance_id,
         instance_dir,
+        joins,
         &mut worlds,
     )
     .await?;
@@ -483,6 +496,7 @@ async fn get_server_worlds_in_instance(
     state: &Engine,
     instance_id: &str,
     _instance_dir: &Path,
+    joins: Option<&ServerJoins>,
     worlds: &mut Vec<World>,
 ) -> Result<()> {
     let metadata = crate::state::get_instance(instance_id, &state.pool)
@@ -493,10 +507,6 @@ async fn get_server_worlds_in_instance(
         return Ok(());
     }
 
-    let join_log = server_join_log::get_joins(instance_id, &state.pool)
-        .await
-        .ok();
-
     for (index, server) in servers.into_iter().enumerate() {
         if server.hidden() {
             // TODO: Figure out whether we want to hide or show direct connect servers
@@ -506,8 +516,7 @@ async fn get_server_worlds_in_instance(
         let server_id = server.id.clone();
         let world = World {
             name: server.name(),
-            last_played: join_log
-                .as_ref()
+            last_played: joins
                 .and_then(|log| {
                     let (host, port) = parse_server_address(&address).ok()?;
                     log.get(&(host.to_owned(), port))

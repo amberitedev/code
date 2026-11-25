@@ -3,16 +3,17 @@ use super::super::options::{
 };
 use super::PackLibrary;
 use super::storage::{read_library, write_library};
+use crate::state::Desktop;
 use crate::synced_options::state::SyncedInstance;
 use anyhow::{Context, bail};
 use engine::ErrorKind;
+use engine::state::InstanceMetadata;
 use engine::state::instances::adapters::{filesystem, sqlite::content_rows};
-use engine::state::{Engine, InstanceMetadata};
 use parking_lot::Mutex;
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, OnceLock, Weak};
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tokio::sync::{MutexGuard, oneshot};
 use tokio::time::Instant;
@@ -31,18 +32,19 @@ struct Queue {
 pub(crate) struct PackSyncWorker {
     queue: Mutex<Queue>,
     pub(super) revision: AtomicU64,
-    engine: OnceLock<Weak<Engine>>,
+    started: OnceLock<()>,
 }
 
 impl PackSyncWorker {
     /// Lets the worker run; requests made before this only queue.
-    pub(crate) fn bind(&self, engine: Weak<Engine>) {
-        let _ = self.engine.set(engine);
+    pub(crate) fn start(&self) {
+        let _ = self.started.set(());
     }
 }
 
-pub fn queue_reconciliation(state: &Engine, instance_id: &str) {
-    crate::hooks::synced_options(state)
+pub fn queue_reconciliation(state: &Desktop, instance_id: &str) {
+    state
+        .synced_options()
         .packs
         .queue
         .lock()
@@ -51,18 +53,18 @@ pub fn queue_reconciliation(state: &Engine, instance_id: &str) {
     start(state);
 }
 
-pub(super) fn queue_all(state: &Engine) {
-    crate::hooks::synced_options(state).packs.queue.lock().all = true;
+pub(super) fn queue_all(state: &Desktop) {
+    state.synced_options().packs.queue.lock().all = true;
     start(state);
 }
 
 pub async fn flush(
-    state: &Engine,
+    state: &Desktop,
     instance_id: &str,
 ) -> Result<(), Arc<engine::Error>> {
     let (sender, receiver) = oneshot::channel();
     {
-        let mut queue = crate::hooks::synced_options(state).packs.queue.lock();
+        let mut queue = state.synced_options().packs.queue.lock();
         if let Some(retry_at) = queue.retry_at.get(instance_id) {
             let remaining = retry_at.saturating_duration_since(Instant::now());
             if !remaining.is_zero() {
@@ -87,17 +89,13 @@ pub async fn flush(
         .context("pack sync worker stopped before completing the request")?
 }
 
-fn start(state: &Engine) {
-    let Some(state) = crate::hooks::synced_options(state)
-        .packs
-        .engine
-        .get()
-        .and_then(Weak::upgrade)
-    else {
+fn start(state: &Desktop) {
+    if state.synced_options().packs.started.get().is_none() {
         return;
-    };
+    }
+    let state = state.clone();
     {
-        let mut queue = crate::hooks::synced_options(&state).packs.queue.lock();
+        let mut queue = state.synced_options().packs.queue.lock();
         if queue.running {
             return;
         }
@@ -107,16 +105,13 @@ fn start(state: &Engine) {
         loop {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             let all = std::mem::take(
-                &mut crate::hooks::synced_options(&state)
-                    .packs
-                    .queue
-                    .lock()
-                    .all,
+                &mut state.synced_options().packs.queue.lock().all,
             );
             if all {
                 match engine::state::list_instances(state.pool()).await {
                     Ok(instances) => {
-                        crate::hooks::synced_options(&state)
+                        state
+                            .synced_options()
                             .packs
                             .queue
                             .lock()
@@ -131,19 +126,14 @@ fn start(state: &Engine) {
                         tracing::warn!(
                             "Could not enumerate pack sync targets: {error}"
                         );
-                        crate::hooks::synced_options(&state)
-                            .packs
-                            .queue
-                            .lock()
-                            .all = true;
+                        state.synced_options().packs.queue.lock().all = true;
                         tokio::time::sleep(std::time::Duration::from_secs(1))
                             .await;
                     }
                 }
             }
             let (instance_id, mut pending) = {
-                let mut queue =
-                    crate::hooks::synced_options(&state).packs.queue.lock();
+                let mut queue = state.synced_options().packs.queue.lock();
                 let next = queue
                     .waiters
                     .keys()
@@ -169,10 +159,8 @@ fn start(state: &Engine) {
             if let Err(error) = &result {
                 match error.downcast_ref::<engine::ErrorKind>() {
                     Some(engine::ErrorKind::PackSyncChanged) => {
-                        let mut queue = crate::hooks::synced_options(&state)
-                            .packs
-                            .queue
-                            .lock();
+                        let mut queue =
+                            state.synced_options().packs.queue.lock();
                         queue.instances.insert(instance_id.clone());
                         if !pending.is_empty() {
                             queue
@@ -188,10 +176,7 @@ fn start(state: &Engine) {
                             + (*retry_in).max(Duration::from_secs(1));
                         {
                             let mut queue =
-                                crate::hooks::synced_options(&state)
-                                    .packs
-                                    .queue
-                                    .lock();
+                                state.synced_options().packs.queue.lock();
                             queue.instances.insert(instance_id.clone());
                             queue
                                 .retry_at
@@ -206,7 +191,8 @@ fn start(state: &Engine) {
                         let state = state.clone();
                         tokio::spawn(async move {
                             tokio::time::sleep_until(retry_at).await;
-                            crate::hooks::synced_options(&state)
+                            state
+                                .synced_options()
                                 .packs
                                 .queue
                                 .lock()
@@ -229,20 +215,20 @@ fn start(state: &Engine) {
 
 /// Releases the canonical-state lock for preparation and rejects outdated results.
 pub(super) struct Preparation<'a> {
-    state: &'a Engine,
+    state: &'a Desktop,
     guard: Option<MutexGuard<'a, ()>>,
     metadata: &'a SyncedInstance,
 }
 
 impl<'a> Preparation<'a> {
     pub(super) async fn new(
-        state: &'a Engine,
+        state: &'a Desktop,
         metadata: &'a SyncedInstance,
     ) -> Self {
         Self {
             state,
             metadata,
-            guard: Some(crate::hooks::synced_options(state).lock().await),
+            guard: Some(state.synced_options().lock().await),
         }
     }
 
@@ -252,7 +238,9 @@ impl<'a> Preparation<'a> {
         work: impl Future<Output = engine::Result<T>>,
     ) -> engine::Result<T> {
         write_library(library, self.state).await?;
-        let revision = crate::hooks::synced_options(self.state)
+        let revision = self
+            .state
+            .synced_options()
             .packs
             .revision
             .load(Ordering::Acquire);
@@ -260,10 +248,11 @@ impl<'a> Preparation<'a> {
         let before = fingerprint(self.metadata, self.state).await?;
         self.guard.take();
         let result = work.await;
-        self.guard =
-            Some(crate::hooks::synced_options(self.state).lock().await);
+        self.guard = Some(self.state.synced_options().lock().await);
         self.validate_metadata().await?;
-        if crate::hooks::synced_options(self.state)
+        if self
+            .state
+            .synced_options()
             .packs
             .revision
             .load(Ordering::Acquire)
@@ -311,7 +300,7 @@ fn metadata_key(metadata: &SyncedInstance) -> serde_json::Value {
 
 async fn fingerprint(
     metadata: &InstanceMetadata,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<Vec<(String, String)>> {
     let directory = state.directories.instances_dir();
     let instance_path = metadata.instance.path.clone();

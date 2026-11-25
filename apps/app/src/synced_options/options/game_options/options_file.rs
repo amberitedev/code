@@ -6,10 +6,11 @@ use super::{
     MAX_KEY_BYTES, MAX_OPTIONS_BYTES, MAX_OPTIONS_LINES, MAX_VALUE_BYTES,
     OPTIONS_FILE,
 };
+use crate::state::Desktop;
 use anyhow::bail;
 use encoding_rs::{Encoding, UTF_8, UTF_16BE, UTF_16LE};
 use engine::ErrorKind;
-use engine::state::{Engine, InstanceMetadata};
+use engine::state::InstanceMetadata;
 use engine::util::io;
 use sha1_smol::Sha1;
 use std::collections::HashMap;
@@ -60,7 +61,7 @@ impl GameOptionsDocument {
     /// Unknown versions without embedded metadata wait for Minecraft's own file.
     pub(super) async fn for_instance(
         metadata: &InstanceMetadata,
-        state: &Engine,
+        state: &Desktop,
     ) -> engine::Result<Option<Self>> {
         let content_set = &metadata.applied_content_set;
         let version = &content_set.game_version;
@@ -342,7 +343,7 @@ pub(super) fn validate_raw_key_value(
 
 pub(super) fn options_path(
     metadata: &InstanceMetadata,
-    state: &Engine,
+    state: &Desktop,
 ) -> PathBuf {
     synced_options::instance_dir(metadata, state).join(OPTIONS_FILE)
 }

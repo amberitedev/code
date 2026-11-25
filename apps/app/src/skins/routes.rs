@@ -1,13 +1,12 @@
 //! Serves `crate::local_api::endpoints::skins` over `crate::skins::minecraft_skins`.
 
-use std::sync::Arc;
+use crate::state::Desktop;
 
 use axum::{Router, extract::State};
 use contracts::{
     ApiError, Empty, Json, Raw,
     server::{Mount, Req},
 };
-use engine::Engine;
 
 use crate::accounts::api_error;
 use crate::local_api::{
@@ -37,7 +36,7 @@ pub fn routes() -> Router<AppState> {
 }
 
 async fn list_capes(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     _: Req<ListCapes>,
 ) -> Answer<Json<Vec<Cape>>> {
     minecraft_skins::get_available_capes(&engine)
@@ -47,7 +46,7 @@ async fn list_capes(
 }
 
 async fn list_skins(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     _: Req<ListSkins>,
 ) -> Answer<Json<Vec<Skin>>> {
     minecraft_skins::get_available_skins(&engine)
@@ -57,7 +56,7 @@ async fn list_skins(
 }
 
 async fn save_custom_skin(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { body, .. }: Req<SaveCustomSkin>,
 ) -> Answer<Json<Skin>> {
     minecraft_skins::save_custom_skin(
@@ -74,7 +73,7 @@ async fn save_custom_skin(
 }
 
 async fn remove_custom_skin(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { body, .. }: Req<RemoveCustomSkin>,
 ) -> Answer<Empty> {
     minecraft_skins::remove_custom_skin(&engine, body)
@@ -84,7 +83,7 @@ async fn remove_custom_skin(
 }
 
 async fn set_custom_skin_order(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { body, .. }: Req<SetCustomSkinOrder>,
 ) -> Answer<Empty> {
     minecraft_skins::set_custom_skin_order(&engine, body)
@@ -94,7 +93,7 @@ async fn set_custom_skin_order(
 }
 
 async fn add_and_equip_custom_skin(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { body, .. }: Req<AddAndEquipCustomSkin>,
 ) -> Answer<Json<Skin>> {
     minecraft_skins::add_and_equip_custom_skin(
@@ -109,7 +108,7 @@ async fn add_and_equip_custom_skin(
 }
 
 async fn equip_skin(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { body, .. }: Req<EquipSkin>,
 ) -> Answer<Empty> {
     minecraft_skins::equip_skin(&engine, body)
@@ -119,7 +118,7 @@ async fn equip_skin(
 }
 
 async fn unequip_skin(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     _: Req<UnequipSkin>,
 ) -> Answer<Empty> {
     minecraft_skins::unequip_skin(&engine)
@@ -129,7 +128,7 @@ async fn unequip_skin(
 }
 
 async fn flush_pending_skin_change(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { query, .. }: Req<FlushPendingSkinChange>,
 ) -> Answer<Empty> {
     match query.profile_id {

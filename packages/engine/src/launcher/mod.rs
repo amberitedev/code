@@ -14,7 +14,6 @@ use crate::launcher::quick_play_version::{
     QuickPlayServerVersion, QuickPlayVersion,
 };
 use crate::server_address::{ServerAddress, parse_server_address};
-use crate::state::server_join_log::JoinLogEntry;
 use crate::state::{
     DirectoryInfo, InstanceInstallStage, InstanceLaunchContext, InstanceLink,
     JavaVersion, MemorySettings, ProcessMetadata, WindowSize,
@@ -1134,7 +1133,7 @@ pub async fn launch_minecraft(
     if let QuickPlayType::Server(address) = &mut quick_play_type
         && quick_play_version.server >= QuickPlayServerVersion::BuiltinLegacy
     {
-        // Record last-played for the original server address immediately so
+        // Report the join for the original server address immediately so
         // recent-worlds can match without DNS/SRV resolution.
         let original = match address {
             ServerAddress::Unresolved(address) => parse_server_address(address)
@@ -1146,17 +1145,14 @@ pub async fn launch_minecraft(
                 ..
             } => Some((original_host.clone(), *original_port)),
         };
-        if let Some((host, port)) = original
-            && let Err(e) = (JoinLogEntry {
-                instance_id: instance.id.clone(),
-                host,
+        if let Some((host, port)) = original {
+            crate::event::emit::emit_server_joined(
+                &state.events,
+                &instance.id,
+                &host,
                 port,
-                join_time: Utc::now(),
-            })
-            .upsert(&state.pool)
-            .await
-        {
-            tracing::warn!("Failed to write server join log entry: {e}");
+                Utc::now(),
+            );
         }
 
         address.resolve().await?;

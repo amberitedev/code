@@ -317,6 +317,31 @@ CREATE TABLE hidden_instances (
 	PRIMARY KEY (user_id, instance_id)
 );
 
+CREATE TABLE instance_groups (
+	id TEXT NOT NULL,
+	name TEXT NOT NULL,
+	display_order INTEGER NOT NULL DEFAULT 0,
+
+	PRIMARY KEY (id)
+);
+
+CREATE TABLE instance_group_memberships (
+	instance_id TEXT NOT NULL,
+	group_id TEXT NOT NULL,
+
+	PRIMARY KEY (instance_id, group_id),
+	FOREIGN KEY (group_id) REFERENCES instance_groups(id) ON DELETE CASCADE
+);
+
+CREATE TABLE join_log (
+	instance_id TEXT NOT NULL,
+	host TEXT NOT NULL,
+	port INTEGER NOT NULL,
+	join_time INTEGER NOT NULL,
+
+	PRIMARY KEY (instance_id, host, port)
+);
+
 CREATE UNIQUE INDEX custom_minecraft_skins_one_per_texture
     ON custom_minecraft_skins (minecraft_user_uuid, texture_key);
 
@@ -341,6 +366,13 @@ CREATE INDEX screenshot_groups_display_order
 
 CREATE INDEX screenshot_group_memberships_group_id
 	ON screenshot_group_memberships(group_id);
+
+CREATE INDEX instance_groups_name ON instance_groups(name);
+
+CREATE INDEX instance_groups_display_order ON instance_groups(display_order);
+
+CREATE INDEX instance_group_memberships_group_id
+	ON instance_group_memberships(group_id);
 
 CREATE TRIGGER custom_minecraft_skins_user_uuid_insert_check
     BEFORE INSERT ON custom_minecraft_skins FOR EACH ROW
@@ -386,6 +418,9 @@ END;
 INSERT INTO settings (id, extra_launch_args, custom_env_vars) VALUES (0, jsonb_array(), jsonb_array());
 
 INSERT INTO onboarding_checklist (id) VALUES (0);
+
+INSERT INTO instance_groups (id, name, display_order)
+VALUES ('group:favorites', 'Favorites', -1);
 
 INSERT INTO sync_feature_settings (feature, globally_enabled, new_instance_default)
 VALUES

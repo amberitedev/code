@@ -3,15 +3,16 @@ use super::operations::{
     source_screenshots_dir,
 };
 use super::rows::{self as screenshot_rows, ScreenshotRow};
+use crate::state::Desktop;
 use anyhow::Context;
 use chrono::{DateTime, Utc};
+use engine::ErrorKind;
 use engine::state::DirectoryInfo;
 use engine::state::instances::adapters::sqlite::instance_rows::{
     self, InstanceScreenshotSource,
 };
 use engine::util::fetch::sha1_file_async;
 use engine::util::io::IOError;
-use engine::{Engine, ErrorKind};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -78,16 +79,16 @@ fn resolve_scanned_screenshot(
 }
 
 pub(super) async fn list_source_screenshots(
-    state: &Engine,
+    state: &Desktop,
     source: InstanceScreenshotSource,
 ) -> engine::Result<Vec<InstanceScreenshot>> {
-    let _lock = crate::hooks::lock_screenshots(state, &source.id).await;
+    let _lock = state.lock_screenshots(&source.id).await;
     let scanned = scan_source_screenshots(&state.directories, &source).await?;
     reconcile_source_screenshots(state, &source, scanned).await
 }
 
 pub async fn reconcile_screenshots(
-    state: &Engine,
+    state: &Desktop,
     instance_id: &str,
 ) -> engine::Result<()> {
     let Some(source) = instance_rows::get_instance_screenshot_source(
@@ -182,13 +183,12 @@ fn scan_screenshots_dir(
 }
 
 pub(super) async fn reconcile_source_screenshots(
-    state: &Engine,
+    state: &Desktop,
     source: &InstanceScreenshotSource,
     scanned: Vec<ScannedScreenshot>,
 ) -> engine::Result<Vec<InstanceScreenshot>> {
     let existing =
-        screenshot_rows::list_screenshots(&source.id, crate::db::pool(state))
-            .await?;
+        screenshot_rows::list_screenshots(&source.id, state.db()).await?;
     let mut unmatched_by_name = existing
         .into_iter()
         .map(|row| (row.file_name.clone(), row))
@@ -273,7 +273,7 @@ pub(super) async fn reconcile_source_screenshots(
         ));
     }
 
-    let mut tx = crate::db::pool(state).begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = state.db().begin_with("BEGIN IMMEDIATE").await?;
     for row in unmatched_by_hash.into_values().flatten() {
         screenshot_rows::delete_screenshot(&row.id, &mut tx).await?;
     }

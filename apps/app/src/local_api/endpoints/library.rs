@@ -1,5 +1,6 @@
 use contracts::{Empty, Json, Raw};
 use engine::data::IconConfig;
+use engine::worlds::{World, WorldWithInstance};
 use serde::{Deserialize, Serialize};
 
 use super::IdParams;
@@ -19,6 +20,18 @@ contracts::endpoints! {
     /// Draws an icon from the editor's settings and makes it the instance's. Answers the cached
     /// file's path, or `null` when `only_if_empty` kept the instance's own icon.
     SetGeneratedInstanceIcon: Put "/app/instances/{id}/icon/generated", None, IdParams, (), Json<GeneratedInstanceIcon> => Json<Option<String>>;
+    /// The most recently played worlds across every instance, newest first.
+    ListRecentWorlds: Get "/app/worlds/recent", None, (), RecentWorldsQuery, Empty => Json<Vec<WorldWithInstance>>;
+    /// The instance's singleplayer worlds and servers.
+    ListInstanceWorlds: Get "/app/instances/{id}/worlds", None, IdParams, (), Empty => Json<Vec<World>>;
+}
+
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+pub struct RecentWorldsQuery {
+    pub limit: usize,
+    /// A JSON array of statuses; every status when absent.
+    pub display_statuses: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]

@@ -49,8 +49,8 @@ Rust imports go `contracts` <- `sharing-client` <- `engine` <- `apps/app`, `apps
 - `packages/api-client` is the one TypeScript client. Every UI call goes through it.
 
 Desktop domains (accounts, skins, friends, Discord, synced options, screenshots, settings,
-onboarding, hidden instances) live in `apps/app/src/<domain>`, not in a package, because only the
-App imports them. A new desktop feature is a new folder in the App and needs no engine change.
+onboarding, the Library's groups, hidden instances and join log) live in `apps/app/src/<domain>`,
+not in a package, because only the App imports them. A new desktop feature is a new folder in the App and needs no engine change.
 
 ## The engine has no global
 
@@ -75,6 +75,11 @@ drops the last `Arc`, so tests run two engines side by side.
   orderings an event cannot express, such as capturing the user's options before a modpack update
   overwrites them. Everything else the App does in response to the engine follows engine events in
   [`reactions.rs`](../../apps/app/src/reactions.rs). A Core passes no hooks.
+- Data the engine needs from its host comes in as an argument, as the App's server join times do
+  for the worlds lists. The engine reports a join as an event and keeps no record of it.
+- App code takes a `Desktop` ([`state.rs`](../../apps/app/src/state.rs)): the engine with app.db
+  and the App's own state and events. Routes get it from `AppState`; the hooks are bound to the
+  engine as it is built and rebuild it from there.
 
 ## Each host owns its state and its database
 

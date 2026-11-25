@@ -1,10 +1,13 @@
 use anyhow::Context;
 use contracts::Side;
-use engine::{AccountEndpoints, EngineConfig, EventSink, data::Settings};
+use engine::{AccountEndpoints, Engine, EngineConfig, EventSink};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use tokio::sync::broadcast;
 
-use crate::settings::rows::SettingsRow;
+use crate::local_api::events::AppEvent;
+use crate::settings::Settings;
+use crate::state::{Desktop, DesktopState};
 
 const LOGS_FOLDER: &str = "launcher_logs";
 
@@ -21,13 +24,14 @@ pub fn logs_dir(identifier: &str) -> anyhow::Result<PathBuf> {
     Ok(resolve(identifier)?.join(LOGS_FOLDER))
 }
 
-/// Opens app.db, finishes a pending data-directory move and reads the limits, so the engine opens
-/// on the data where it now is. A failed move keeps its `directory_move_*` code.
-pub async fn engine_config(
+/// Opens app.db, finishes a pending data-directory move and reads the limits, then opens the
+/// engine on the data where it now is. A failed move keeps its `directory_move_*` code.
+pub async fn open(
     settings_dir: PathBuf,
     events: EventSink,
+    app_events: broadcast::Sender<AppEvent>,
     accounts: Option<AccountEndpoints>,
-) -> anyhow::Result<EngineConfig> {
+) -> anyhow::Result<Desktop> {
     let db = crate::db::open(&settings_dir).await?;
     let settings = Settings::get(&db).await?;
     let data_dir = engine::settings::prepare_data_dir(
@@ -44,7 +48,8 @@ pub async fn engine_config(
         },
     )
     .await?;
-    Ok(EngineConfig {
+    let state = Arc::new(DesktopState::new(db, app_events));
+    let config = EngineConfig {
         instances_dir: data_dir.join(engine::INSTANCES_FOLDER_NAME),
         data_dir,
         logs_dir: Some(settings_dir.join(LOGS_FOLDER)),
@@ -54,9 +59,12 @@ pub async fn engine_config(
         max_concurrent_writes: settings.max_concurrent_writes,
         events,
         accounts,
-        hooks: Some(Arc::new(crate::hooks::DesktopHooks::new(db))),
+        hooks: Some(Arc::new(crate::hooks::DesktopHooks::new(Arc::clone(
+            &state,
+        )))),
         user_agent: crate::user_agent(),
-    })
+    };
+    Ok(Desktop::new(Engine::new(config).await?, state))
 }
 
 /// Drops a pending data-directory move, so the next start opens the previous directory.
@@ -75,4 +83,24 @@ pub async fn cancel_directory_change(identifier: &str) -> anyhow::Result<()> {
     settings.update(&db).await?;
     db.close().await;
     Ok(())
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+
+    /// An App on `dir` whose events nobody reads.
+    pub(crate) async fn open(
+        dir: &Path,
+        accounts: Option<AccountEndpoints>,
+    ) -> anyhow::Result<Desktop> {
+        engine::install_crypto_provider();
+        super::open(
+            dir.to_path_buf(),
+            EventSink::new(),
+            broadcast::Sender::new(16),
+            accounts,
+        )
+        .await
+    }
 }

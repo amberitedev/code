@@ -25,8 +25,8 @@ import { useHiddenInstances } from '@/features/library/hidden-instances/use-hidd
 import { trackEvent } from '@/helpers/analytics'
 import { toError } from '@/helpers/errors'
 import { install_duplicate_instance } from '@/helpers/install'
-import { edit, edit_icon } from '@/helpers/instance'
-import { FAVORITES_GROUP_ID } from '@/helpers/instance-groups'
+import { edit_icon } from '@/helpers/instance'
+import { FAVORITES_GROUP_ID, set_group_memberships } from '@/helpers/instance-groups'
 
 import { injectInstanceActions } from './instance-actions/context'
 import type { InstanceCard } from './use-instance-actions'
@@ -96,8 +96,8 @@ export function useInstanceMenu() {
 	const { getVisibilityOption } = useHiddenInstances()
 
 	const setInstanceGroups = async (item: InstanceCard, groupIds: string[]) =>
-		await edit(item.instance.id, { group_ids: groupIds }).catch((error) =>
-			handleError(toError(error)),
+		await set_group_memberships([{ instance_id: item.instance.id, group_ids: groupIds }]).catch(
+			(error) => handleError(toError(error)),
 		)
 
 	const duplicateInstance = async (instanceId: string) => {

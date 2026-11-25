@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM instance_group_memberships WHERE instance_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "9502520375803ead89f3aae4e644d1e4aefcf1c9dd85f91ea24efffac3127dc7"
+}

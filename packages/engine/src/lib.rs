@@ -27,12 +27,9 @@ mod ts;
 pub use api::*;
 pub use error::*;
 pub use event::{
-    DesktopEvent, Event, EventSink, FriendPayload, FriendStatusPayload,
-    InstanceGroupsChangedPayload, InstancePayload, InstancePayloadType,
-    LoadingBar, LoadingBarType, ProcessPayload, ProcessPayloadType,
-    emit::emit_command, emit::emit_friend, emit::emit_instance,
-    emit::emit_loading, emit::emit_notification,
-    emit::emit_onboarding_checklist, emit::emit_warning, emit::init_loading,
+    Event, EventSink, InstancePayload, InstancePayloadType, LoadingBar,
+    LoadingBarType, ProcessPayload, ProcessPayloadType, emit::emit_instance,
+    emit::emit_loading, emit::emit_warning, emit::init_loading,
 };
 pub use launcher::server;
 pub use launcher::{

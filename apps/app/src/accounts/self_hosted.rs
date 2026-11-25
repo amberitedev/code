@@ -140,14 +140,9 @@ mod tests {
             String::from_utf8_lossy(&head[..read]).to_lowercase()
         });
         let dir = tempfile::tempdir().unwrap();
-        let engine = engine::Engine::new(
-            crate::data_dir::engine_config(
-                dir.path().to_path_buf(),
-                engine::EventSink::new(),
-                Some(engine::AccountEndpoints::new(&api, None).unwrap()),
-            )
-            .await
-            .unwrap(),
+        let engine = crate::data_dir::tests::open(
+            dir.path(),
+            Some(engine::AccountEndpoints::new(&api, None).unwrap()),
         )
         .await
         .unwrap();
@@ -179,24 +174,19 @@ mod tests {
     async fn imported_accounts_cannot_be_reactivated_on_another_service() {
         engine::install_crypto_provider();
         let dir = tempfile::tempdir().unwrap();
-        let engine = engine::Engine::new(
-            crate::data_dir::engine_config(
-                dir.path().to_path_buf(),
-                engine::EventSink::new(),
-                Some(
-                    engine::AccountEndpoints::new(
-                        "https://accounts.example/",
-                        None,
-                    )
-                    .unwrap(),
-                ),
-            )
-            .await
-            .unwrap(),
+        let engine = crate::data_dir::tests::open(
+            dir.path(),
+            Some(
+                engine::AccountEndpoints::new(
+                    "https://accounts.example/",
+                    None,
+                )
+                .unwrap(),
+            ),
         )
         .await
         .unwrap();
-        let (pool, sessions) = (crate::db::pool(&engine), &engine.sessions);
+        let (pool, sessions) = (engine.db(), &engine.sessions);
         credentials().upsert(pool).await.unwrap();
         sqlx::query("INSERT INTO app_metadata(key,value,updated_at) VALUES ('account_origin','https://another-service.example/',unixepoch())")
             .execute(pool).await.unwrap();

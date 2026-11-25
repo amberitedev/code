@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n\t\tSELECT groups.id\n\t\tFROM instance_group_memberships memberships\n\t\tINNER JOIN instance_groups groups\n\t\t\tON groups.id = memberships.group_id\n\t\tWHERE memberships.instance_id = ?\n\t\tORDER BY groups.name\n\t\t",
+  "query": "\n\t\tSELECT id\n\t\tFROM instance_groups\n\t\tWHERE id != ?\n\t\tORDER BY display_order, name, id\n\t\t",
   "describe": {
     "columns": [
       {
@@ -22,5 +22,5 @@
       false
     ]
   },
-  "hash": "73a5b7a4b61a75705f6ed3ea370ec66677b42cdd09b8ae87cee0ef89d3875681"
+  "hash": "1038047a6366cba23f0a1ed869b0a6c14c18271f25358dacd96bbec2b33f2d10"
 }

@@ -177,6 +177,7 @@
 		"packages/app-lib/migrations": "packages/engine/migrations/20261113120000_init.sql",
 		"packages/app-lib/src/api/friends.rs": "apps/app/src/friends/api.rs",
 		"packages/app-lib/src/api/handler.rs": "apps/app/src/desktop/deep_links.rs",
+		"packages/app-lib/src/api/instance/groups.rs": "apps/app/src/library/groups.rs",
 		"packages/app-lib/src/api/instance/hidden.rs": "apps/app/src/library/hidden.rs",
 		"packages/app-lib/src/api/instance/screenshot_groups.rs": "apps/app/src/screenshots/groups.rs",
 		"packages/app-lib/src/api/instance/screenshots": "apps/app/src/screenshots",
@@ -193,6 +194,7 @@
 		"packages/app-lib/src/api/users.rs": "apps/app-frontend/src/helpers/users.ts",
 		"packages/app-lib/src/logger.rs": "apps/app/src/logger.rs",
 		"packages/app-lib/src/state/content_store/commands/migration.rs": "packages/engine/src/state/content_store/commands/recovery.rs",
+		"packages/app-lib/src/state/db_backup.rs": "apps/app/src/db_backup.rs",
 		"packages/app-lib/src/state/discord.rs": "apps/app/src/discord/mod.rs",
 		"packages/app-lib/src/state/friends.rs": "apps/app/src/friends/state/friends.rs",
 		"packages/app-lib/src/state/hidden_instances.rs": "apps/app/src/library/hidden_instances.rs",
@@ -204,8 +206,11 @@
 		"packages/app-lib/src/state/mr_auth.rs": "apps/app/src/accounts/state/mr_auth.rs",
 		"packages/app-lib/src/state/onboarding_checklist.rs": "apps/app/src/onboarding/state.rs",
 		"packages/app-lib/src/state/presence.rs": "apps/app/src/presence.rs",
+		"packages/app-lib/src/state/server_join_log.rs": "apps/app/src/library/join_log.rs",
+		"packages/app-lib/src/state/settings.rs": "apps/app/src/settings/mod.rs",
 		"packages/app-lib/src/state/synced_options.rs": "apps/app/src/synced_options/state/mod.rs",
 		"packages/app-lib/src/state/tunnel.rs": "apps/app/src/friends/state/tunnel.rs",
+		"packages/app-lib/src/util/network.rs": "apps/app/src/desktop/network.rs",
 		"packages/ariadne/src/networking": "apps/backend/src/social/socket.ts"
 	}
 }

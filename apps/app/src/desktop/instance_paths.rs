@@ -1,11 +1,12 @@
-use std::{path::PathBuf, sync::Arc};
+use crate::state::Desktop;
+use std::path::PathBuf;
 
 use axum::{Router, extract::State};
 use contracts::{
     ApiError, Empty, Json,
     server::{Mount, Req},
 };
-use engine::{Engine, routes::api_error};
+use engine::routes::api_error;
 
 use crate::local_api::{
     AppState,
@@ -26,7 +27,7 @@ pub fn routes() -> Router<AppState> {
 }
 
 async fn get_instance_path(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     request: Req<GetInstancePath>,
 ) -> Result<Json<PathBuf>, ApiError> {
     engine::instance::get_full_path(&engine, &request.params.id)
@@ -36,7 +37,7 @@ async fn get_instance_path(
 }
 
 async fn get_instance_content_path(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     request: Req<GetInstanceContentPath>,
 ) -> Result<Json<PathBuf>, ApiError> {
     engine::instance::get_mod_full_path(
@@ -50,7 +51,7 @@ async fn get_instance_content_path(
 }
 
 async fn add_project_from_path(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     request: Req<AddProjectFromPath>,
 ) -> Result<Json<String>, ApiError> {
     let project = request.body;
@@ -66,7 +67,7 @@ async fn add_project_from_path(
 }
 
 async fn check_file_on_modrinth(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     request: Req<CheckFileOnModrinth>,
 ) -> Result<Json<bool>, ApiError> {
     engine::instance::is_file_on_modrinth(&engine, &request.body.path)
@@ -76,7 +77,7 @@ async fn check_file_on_modrinth(
 }
 
 async fn export_mrpack(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     request: Req<ExportMrpack>,
 ) -> Result<Empty, ApiError> {
     let export = request.body;
@@ -96,7 +97,7 @@ async fn export_mrpack(
 }
 
 async fn set_instance_icon_from_path(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     request: Req<SetInstanceIconFromPath>,
 ) -> Result<Empty, ApiError> {
     engine::instance::edit_icon(

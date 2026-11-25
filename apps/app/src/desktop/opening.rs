@@ -117,19 +117,16 @@ pub async fn handle_command<R: Runtime>(
     }
 
     tracing::info!("handle command: {command}");
-    // Amberite's own links go straight to the frontend; the engine only knows the Modrinth ones.
-    if let Some(command) = amberite_command(&command) {
-        let _ = app
-            .state::<broadcast::Sender<AppEvent>>()
-            .send(AppEvent::Command(Command::Amberite(command)));
-        if !crate::dev::window_hidden()
-            && let Some(window) = app.get_window("main")
-        {
-            let _ = window.set_focus();
-        }
-        return Ok(());
+    let command = parse_opening_command(&events, &command).await?;
+    let _ = app
+        .state::<broadcast::Sender<AppEvent>>()
+        .send(AppEvent::Command(command));
+    if !crate::dev::window_hidden()
+        && let Some(window) = app.get_window("main")
+    {
+        let _ = window.set_focus();
     }
-    crate::desktop::deep_links::parse_and_emit_command(&events, &command).await
+    Ok(())
 }
 
 async fn opening_command(

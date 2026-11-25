@@ -3,6 +3,7 @@ import {
 	type DisplayStatus,
 	type InstancePayload,
 	launch,
+	library,
 	type ProtocolVersion,
 	type ServerPackStatus,
 	type ServerSource,
@@ -95,14 +96,14 @@ export async function get_recent_worlds(
 	limit: number,
 	displayStatuses?: DisplayStatus[],
 ): Promise<WorldWithInstance[]> {
-	const worlds = await apiClient.local.call(worldRoutes.ListRecentWorlds, {
+	const worlds = await apiClient.local.call(library.listRecentWorlds, {
 		query: { limit, display_statuses: displayStatuses ? JSON.stringify(displayStatuses) : null },
 	})
 	return worlds.map(withIconUrl)
 }
 
 export async function get_instance_worlds(instanceId: string): Promise<World[]> {
-	const worlds = await apiClient.local.call(worldRoutes.ListInstanceWorlds, {
+	const worlds = await apiClient.local.call(library.listInstanceWorlds, {
 		params: { id: instanceId },
 	})
 	return worlds.map(withIconUrl)

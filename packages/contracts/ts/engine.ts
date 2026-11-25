@@ -56,7 +56,7 @@ export type Log4jEvent = { timestamp_millis: number | null, logger_name: string 
 
 export type LoadingBar = { loading_bar_uuid: string, message: string, total: number, current: number, bar_type: LoadingBarType, };
 
-export type GameInstance = { id: string, path: string, install_stage: InstanceInstallStage, launcher_feature_version: string, name: string, icon_path: string | null, icon_config: SharedIconConfig | null, game_version: string, protocol_version: number | null, loader: ModLoader, loader_version: string | null, group_ids: Array<string>, link: InstanceLink | null, shared_instance: SharedInstanceAttachment | null, quarantined: boolean, update_channel: ReleaseChannel, created: string, modified: string, last_played: string | null, submitted_time_played: number, recent_time_played: number, java_path: string | null, extra_launch_args: Array<string> | null, custom_env_vars: Array<[string, string]> | null, memory: MemorySettings | null, force_fullscreen: boolean | null, game_resolution: WindowSize | null, hooks: Hooks, visible_tabs: InstanceTabVisibility, };
+export type GameInstance = { id: string, path: string, install_stage: InstanceInstallStage, launcher_feature_version: string, name: string, icon_path: string | null, icon_config: SharedIconConfig | null, game_version: string, protocol_version: number | null, loader: ModLoader, loader_version: string | null, link: InstanceLink | null, shared_instance: SharedInstanceAttachment | null, quarantined: boolean, update_channel: ReleaseChannel, created: string, modified: string, last_played: string | null, submitted_time_played: number, recent_time_played: number, java_path: string | null, extra_launch_args: Array<string> | null, custom_env_vars: Array<[string, string]> | null, memory: MemorySettings | null, force_fullscreen: boolean | null, game_resolution: WindowSize | null, hooks: Hooks, visible_tabs: InstanceTabVisibility, };
 
 export type InstanceLink = { "type": "modrinth_modpack", project_id: string, version_id: string, } | { "type": "server_project", project_id: string, } | { "type": "server_project_modpack", server_project_id: string, content_project_id: string | null, content_version_id: string, project_id: string | null, version_id: string | null, } | { "type": "imported_modpack", project_id: string | null, version_id: string | null, name: string | null, version_number: string | null, filename: string | null, } | { "type": "modrinth_hosting", server_id: string, instance_ids: Array<string>, active_instance_id: string | null, } | { "type": "shared_instance", modpack_project_id: string | null, modpack_version_id: string | null, };
 
@@ -86,16 +86,6 @@ export type InstanceIds = {
  */
 ids: string, };
 
-export type InstanceGroupDefinition = { id: string, name: string, };
-
-export type InstanceGroupMembershipUpdate = { instance_id: string, group_ids: Array<string>, };
-
-export type InstanceGroupRef = { id: string, };
-
-export type NewInstanceGroup = { name: string, };
-
-export type InstanceGroupUpdate = { name: string, };
-
 export type World = { name: string, last_played?: string, icon?: string, display_status: DisplayStatus, } & ({ "type": "singleplayer", path: string, game_mode: SingleplayerGameMode, hardcore: boolean, locked: boolean, } | { "type": "server", index: number, server_id: string, source: ServerSource, address: string, pack_status: ServerPackStatus, project_id?: string, content_kind?: string, });
 
 export type WorldWithInstance = { instance_id: string, name: string, last_played?: string, icon?: string, display_status: DisplayStatus, } & ({ "type": "singleplayer", path: string, game_mode: SingleplayerGameMode, hardcore: boolean, locked: boolean, } | { "type": "server", index: number, server_id: string, source: ServerSource, address: string, pack_status: ServerPackStatus, project_id?: string, content_kind?: string, });
@@ -124,12 +114,6 @@ export type ServerGameProfile = { id: string, name: string, };
 
 export type ServerVersion = { name: string, protocol: number, legacy: boolean, };
 
-export type RecentWorldsQuery = { limit: number, 
-/**
- * A JSON array of statuses; every status when absent.
- */
-display_statuses: string | null, };
-
 export type ServerStatusQuery = { address: string, protocol_version: number | null, legacy: boolean, };
 
 export type WorldSaveRef = { id: string, 
@@ -157,14 +141,6 @@ export type InstanceServerUpdate = { name: string, address: string, pack_status:
 export type InstanceServerDesync = { server_id: string, mode: DesyncServerMode, };
 
 export type StoreUsage = { unique_bytes: number, shared_bytes: number, unused_cache_bytes: number, estimated_saved_bytes: number, private_copy_bytes: number, object_count: number, damaged_objects: number, cache_limit_bytes: number, };
-
-export type Settings = { max_concurrent_downloads: number, max_concurrent_writes: number, theme: AppTheme, locale: string, default_page: DefaultPage, collapsed_navigation: boolean, hide_nametag_skins_page: boolean, advanced_rendering: boolean, native_decorations: boolean, toggle_sidebar: boolean, sync_theme_across_devices: boolean, sync_behavior_across_devices: boolean, sync_features_across_devices: boolean, show_files_tab_in_instances: boolean, show_worlds_tab_in_instances: boolean, show_screenshots_tab_in_instances: boolean, show_skin_selector_in_sidebar: boolean, show_jump_in: boolean, always_show_copy_details: boolean, hide_installed_modpacks: boolean, advanced_filters_collapsed: boolean, dismissed_photosensitivity_filter_warning: boolean, friends_active_collapsed: boolean, friends_online_collapsed: boolean, friends_offline_collapsed: boolean, friends_pending_collapsed: boolean, telemetry: boolean, discord_rpc: boolean, personalized_ads: boolean, extra_launch_args: Array<string>, custom_env_vars: Array<[string, string]>, memory: MemorySettings, force_fullscreen: boolean, game_resolution: WindowSize, hide_on_process_start: boolean, refocus_on_game_close: boolean, compact_instance_cards: boolean, show_play_time: boolean, warn_on_unknown_modpacks: boolean, skip_non_essential_warnings: boolean, hooks: Hooks, custom_dir: string | null, prev_custom_dir: string | null, developer_mode: boolean, feature_flags: { [key in FeatureFlag]?: boolean }, skipped_update: string | null, pending_update_toast_for_version: string | null, auto_download_updates: boolean | null, version: number, };
-
-export type AppTheme = "dark" | "light" | "oled" | "retro" | "system";
-
-export type DefaultPage = "Home" | "Library";
-
-export type FeatureFlag = "page_path" | "project_background" | "server_ram_as_bytes_always_on" | "always_show_app_controls" | "show_sync_instances_update_modal" | "pride_fundraiser" | "servers_in_app" | "server_project_qa" | "i18n_debug" | "localhost_sign_in" | "show_version_environment_column";
 
 export type CategoryTag = { name: string, project_type: string, header: string, icon: string, };
 
@@ -363,7 +339,7 @@ export type SharedInstanceInviteCreator = { id: string, name: string, avatar: st
 
 export type SharedHistorySettings = { kept: number | null, entries: { [key in string]: number }, };
 
-export type InstanceUpdate = { name?: string | null, game_version?: string | null, loader?: ModLoader | null, loader_version?: string | null, group_ids?: Array<string> | null, link?: InstanceLink | null, update_channel?: ReleaseChannel | null, java_path?: string | null, extra_launch_args?: Array<string> | null, custom_env_vars?: Array<[string, string]> | null, memory?: MemorySettings | null, force_fullscreen?: boolean | null, game_resolution?: WindowSize | null, hooks?: Hooks | null, visible_tabs?: InstanceTabVisibility | null, };
+export type InstanceUpdate = { name?: string | null, game_version?: string | null, loader?: ModLoader | null, loader_version?: string | null, link?: InstanceLink | null, update_channel?: ReleaseChannel | null, java_path?: string | null, extra_launch_args?: Array<string> | null, custom_env_vars?: Array<[string, string]> | null, memory?: MemorySettings | null, force_fullscreen?: boolean | null, game_resolution?: WindowSize | null, hooks?: Hooks | null, visible_tabs?: InstanceTabVisibility | null, };
 
 export type ContentFile = { hash: string, file_name: string, enabled: boolean, locked: boolean, size: number, metadata: FileMetadata | null, update_version_id: string | null, project_type: ProjectType, source_kind: ContentSourceKind | null, };
 
@@ -505,16 +481,6 @@ shared: boolean, };
 
 export type CachedSharedInstanceSummary = { shared_instance_id: string, role: SharedInstanceRole, manager_id: string | null, name: string, icon_url: string | null, game_version: string, loader: ModLoader, };
 
-export type FriendPayload = { "event": "friend_request", from: string, } | { "event": "user_offline", id: string, } | { "event": "status_update", user_status: FriendStatusPayload, } | { "event": "status_sync" } | { "event": "friend_request_rejected", from: string, };
-
-export type FriendStatusPayload = { user_id: string, profile_name: string | null, last_update: string, };
-
-export type OnboardingChecklist = { has_created_instance: boolean, has_logged_into_minecraft: boolean, has_logged_into_modrinth: boolean, show_checklist: boolean, };
-
-export type InstanceGroupsChangedPayload = { instance_ids: Array<string>, };
-
-export type CommandPayload = { "event": "InstallMod", id: string, } | { "event": "InstallVersion", id: string, } | { "event": "InstallModpack", id: string, } | { "event": "InstallServer", id: string, } | { "event": "LaunchInstance", id: string, server: string | null, singleplayer_world: string | null, } | { "event": "InstallSharedInstanceInvite", invite_id: string, } | { "event": "RunMRPack", path: string, } | { "event": "PlayHostingServer", server_id: string, world_id: string, };
-
 export const instances = {
 	ListInstances: { method: "GET", path: "/instances", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<GameInstance>>,
 	GetInstances: { method: "GET", path: "/instances/many", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, InstanceIds, void, Array<GameInstance>>,
@@ -525,23 +491,12 @@ export const instances = {
 	GetOptimalJava: { method: "GET", path: "/instances/{id}/java", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceRef, null, void, JavaVersion | null>,
 }
 
-export const instanceGroups = {
-	ListInstanceGroups: { method: "GET", path: "/instance-groups", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<InstanceGroupDefinition>>,
-	CreateInstanceGroup: { method: "POST", path: "/instance-groups", auth: "session", dangerous: false, body: "json", response: "json" } as Endpoint<null, null, NewInstanceGroup, InstanceGroupDefinition>,
-	RenameInstanceGroup: { method: "PATCH", path: "/instance-groups/{id}", auth: "session", dangerous: false, body: "json", response: "json" } as Endpoint<InstanceGroupRef, null, InstanceGroupUpdate, InstanceGroupDefinition>,
-	DeleteInstanceGroup: { method: "DELETE", path: "/instance-groups/{id}", auth: "session", dangerous: false, body: "empty", response: "empty" } as Endpoint<InstanceGroupRef, null, void, void>,
-	SetInstanceGroupOrder: { method: "PUT", path: "/instance-groups/order", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, Array<string>, void>,
-	SetInstanceGroupMemberships: { method: "PUT", path: "/instance-groups/memberships", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<null, null, Array<InstanceGroupMembershipUpdate>, void>,
-}
-
 export const loadingBars = {
 	ListLoadingBars: { method: "GET", path: "/loading-bars", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, null, void, { [key in string]: LoadingBar }>,
 }
 
 export const worlds = {
-	ListRecentWorlds: { method: "GET", path: "/worlds/recent", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, RecentWorldsQuery, void, Array<WorldWithInstance>>,
 	GetServerStatus: { method: "GET", path: "/server-status", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<null, ServerStatusQuery, void, ServerStatus>,
-	ListInstanceWorlds: { method: "GET", path: "/instances/{id}/worlds", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceRef, null, void, Array<World>>,
 	SetWorldDisplayStatus: { method: "PUT", path: "/instances/{id}/worlds/display-status", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<InstanceRef, null, WorldDisplayStatusUpdate, void>,
 	GetInstanceProtocolVersion: { method: "GET", path: "/instances/{id}/protocol-version", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceRef, null, void, ProtocolVersion | null>,
 	GetSingleplayerWorld: { method: "GET", path: "/instances/{id}/saves/{world}", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<WorldSaveRef, null, void, World>,

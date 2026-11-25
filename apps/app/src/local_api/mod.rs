@@ -41,7 +41,9 @@ use crate::{
     engine_handle::EngineHandle,
     friends, import, launch, library, onboarding,
     presence::Presence,
-    screenshots, settings, skins, synced_options,
+    screenshots, settings, skins,
+    state::Desktop,
+    synced_options,
 };
 
 use endpoints::{
@@ -233,12 +235,18 @@ pub struct AppState {
     events: EventSink,
 }
 
-impl FromRef<AppState> for Arc<Engine> {
+impl FromRef<AppState> for Desktop {
     fn from_ref(state: &AppState) -> Self {
         state
             .engine
             .try_get()
             .expect("wait_for_engine holds these routes until the engine is up")
+    }
+}
+
+impl FromRef<AppState> for Arc<Engine> {
+    fn from_ref(state: &AppState) -> Self {
+        Arc::clone(Desktop::from_ref(state).engine())
     }
 }
 

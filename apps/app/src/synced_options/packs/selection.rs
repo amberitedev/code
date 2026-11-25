@@ -6,10 +6,11 @@ use super::super::options::{get_global_options, instance_dir};
 use super::reconciliation::participating;
 use super::selection_compatibility;
 use super::{PackLibrary, PackPlacement, SyncedPack};
+use crate::state::Desktop;
 use crate::synced_options::state::SyncedInstance;
 use engine::state::instances::adapters::sqlite::content_rows;
 use engine::state::{
-    ContentSourceKind, Engine, InstanceMetadata, ProjectType, SyncedOption,
+    ContentSourceKind, InstanceMetadata, ProjectType, SyncedOption,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -43,7 +44,7 @@ fn target_entry(metadata: &InstanceMetadata, entry: String) -> String {
 
 async fn local_sources(
     metadata: &InstanceMetadata,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<BTreeMap<String, ContentSourceKind>> {
     let (files, entries) = tokio::try_join!(
         content_rows::get_instance_files(&metadata.instance.id, state.pool()),
@@ -104,7 +105,7 @@ fn can_capture(
 pub(super) async fn selected_in_instance(
     metadata: &InstanceMetadata,
     project_path: &str,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<Option<bool>> {
     let Some(entry) = option_entry(project_path) else {
         return Ok(None);
@@ -119,7 +120,7 @@ pub(super) async fn selected_in_instance(
 pub(super) async fn capture_source_order(
     metadata: &InstanceMetadata,
     library: &mut PackLibrary,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<()> {
     let Some(options) = read_resource_pack_entries(metadata, state).await?
     else {
@@ -175,7 +176,7 @@ pub(super) async fn capture_source_order(
 pub(super) async fn capture(
     metadata: &SyncedInstance,
     library: &mut PackLibrary,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<Option<bool>> {
     if super::super::options::pending::contains(
         &metadata.instance.id,
@@ -350,7 +351,7 @@ pub(super) async fn apply_removal(
     metadata: &SyncedInstance,
     library: &mut PackLibrary,
     placement: Option<&PackPlacement>,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<bool> {
     let Some(placement) = placement else {
         return Ok(true);
@@ -402,7 +403,7 @@ pub(super) async fn apply(
     metadata: &SyncedInstance,
     library: &mut PackLibrary,
     previous_placements: &BTreeMap<String, PackPlacement>,
-    state: &Engine,
+    state: &Desktop,
 ) -> engine::Result<bool> {
     let directory = instance_dir(metadata, state);
     let global = get_global_options(state).await?;

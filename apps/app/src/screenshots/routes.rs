@@ -1,6 +1,6 @@
 //! Serves `crate::local_api::endpoints::screenshots` over the engine crate's screenshot code.
 
-use std::sync::Arc;
+use crate::state::Desktop;
 
 use axum::{
     Router,
@@ -11,7 +11,7 @@ use contracts::{
     ApiError, Empty, Json,
     server::{Mount, Req},
 };
-use engine::{Engine, routes::api_error};
+use engine::routes::api_error;
 
 use super::{ScreenshotGroup, ScreenshotKey};
 
@@ -57,7 +57,7 @@ fn files(
 }
 
 async fn list_instance_screenshots(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { params, .. }: Req<ListInstanceScreenshots>,
 ) -> Answer<Json<Vec<ScreenshotFile>>> {
     crate::screenshots::list_screenshots(&engine, &params.id)
@@ -67,7 +67,7 @@ async fn list_instance_screenshots(
 }
 
 async fn list_screenshots(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     _: Req<ListScreenshots>,
 ) -> Answer<Json<Vec<ScreenshotFile>>> {
     crate::screenshots::list_all_screenshots(&engine)
@@ -77,7 +77,7 @@ async fn list_screenshots(
 }
 
 async fn list_synced_screenshots(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     _: Req<ListSyncedScreenshots>,
 ) -> Answer<Json<Vec<ScreenshotFile>>> {
     crate::screenshots::list_synced_screenshots(&engine)
@@ -87,7 +87,7 @@ async fn list_synced_screenshots(
 }
 
 async fn save_edited_screenshot(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { query, body, .. }: Req<SaveEditedScreenshot>,
 ) -> Answer<Json<ScreenshotFile>> {
     let key = ScreenshotKey {
@@ -106,7 +106,7 @@ async fn save_edited_screenshot(
 }
 
 async fn delete_screenshots(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { body, .. }: Req<DeleteScreenshots>,
 ) -> Answer<Empty> {
     crate::screenshots::delete_screenshots(&engine, &body)
@@ -116,7 +116,7 @@ async fn delete_screenshots(
 }
 
 async fn export_screenshots(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { body, .. }: Req<ExportScreenshots>,
 ) -> Answer<Empty> {
     crate::screenshots::export_screenshots(
@@ -130,7 +130,7 @@ async fn export_screenshots(
 }
 
 async fn move_screenshots(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { body, .. }: Req<MoveScreenshots>,
 ) -> Answer<Json<Vec<ScreenshotKey>>> {
     crate::screenshots::move_screenshots(
@@ -144,7 +144,7 @@ async fn move_screenshots(
 }
 
 async fn list_screenshot_groups(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     _: Req<ListScreenshotGroups>,
 ) -> Answer<Json<Vec<ScreenshotGroup>>> {
     crate::screenshots::list_screenshot_groups(&engine)
@@ -154,7 +154,7 @@ async fn list_screenshot_groups(
 }
 
 async fn create_screenshot_group(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { body, .. }: Req<CreateScreenshotGroup>,
 ) -> Answer<Json<ScreenshotGroup>> {
     crate::screenshots::create_screenshot_group(
@@ -168,7 +168,7 @@ async fn create_screenshot_group(
 }
 
 async fn rename_screenshot_group(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { params, body, .. }: Req<RenameScreenshotGroup>,
 ) -> Answer<Json<ScreenshotGroup>> {
     crate::screenshots::rename_screenshot_group(&engine, params.id, body.name)
@@ -178,7 +178,7 @@ async fn rename_screenshot_group(
 }
 
 async fn delete_screenshot_group(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { params, .. }: Req<DeleteScreenshotGroup>,
 ) -> Answer<Empty> {
     crate::screenshots::delete_screenshot_group(&engine, params.id)
@@ -188,7 +188,7 @@ async fn delete_screenshot_group(
 }
 
 async fn set_screenshot_group_memberships(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { body, .. }: Req<SetScreenshotGroupMemberships>,
 ) -> Answer<Empty> {
     crate::screenshots::set_screenshot_group_memberships(&engine, body)
@@ -198,7 +198,7 @@ async fn set_screenshot_group_memberships(
 }
 
 async fn import_screenshot_groups(
-    State(engine): State<Arc<Engine>>,
+    State(engine): State<Desktop>,
     Req { body, .. }: Req<ImportScreenshotGroups>,
 ) -> Answer<Empty> {
     crate::screenshots::import_screenshot_groups(&engine, body)
