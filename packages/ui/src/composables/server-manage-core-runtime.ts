@@ -1,17 +1,20 @@
-import type { CoreEvent, PowerState, Server } from '@amberite/contracts/core'
+import type { CoreEvent, PowerState, Server, ServerPower } from '@amberite/contracts/core'
 import type { UploadState } from '@modrinth/api-client'
 import { useQueryClient } from '@tanstack/vue-query'
 import type { ComputedRef, Ref } from 'vue'
-import { computed, onScopeDispose, ref } from 'vue'
+import { computed, onScopeDispose, ref, watch } from 'vue'
 
 import type { FileOperation } from '../layouts/shared/files-tab/types'
 import { injectModrinthClient, provideModrinthServerContext } from '../providers'
 import type { BusyReason, CancelUploadHandler } from '../providers/server-context'
 import { defineMessage } from './i18n'
 import { useInstallJobs } from './install-jobs'
-import { useModrinthServersConsole } from './server-console'
+import { createConsoleState } from './server-console'
 import { useServerInstallationTracker } from './server-installation-tracker'
 import { serverKeys } from './server-queries'
+
+/** How long a burst of changes waits before the server is read again, so it is read once. */
+const CHANGES_SETTLE_MS = 500
 
 type BackupProgress = Extract<CoreEvent, { type: 'backup_progress' }>['payload']
 
@@ -30,13 +33,24 @@ type UseServerManageCoreRuntimeOptions = {
 export function useServerManageCoreRuntime(options: UseServerManageCoreRuntimeOptions) {
 	const client = injectModrinthClient()
 	const queryClient = useQueryClient()
-	const serverConsole = useModrinthServersConsole()
+	// Each panel has its own console: a Core sends the backlog on subscribe, and the next panel
+	// may mount before this one unmounts.
+	const serverConsole = createConsoleState()
 	const { serverId, coreId } = options
 	const core = client.core(coreId)
 	const events = client.coreEvents(coreId)
 
 	const isConnected = ref(events.open)
 	const powerState = ref<PowerState>('stopped')
+	// The server's power until the socket says otherwise.
+	let heardPower = false
+	watch(
+		() => options.server.value?.power_state,
+		(power) => {
+			if (power && !heardPower) powerState.value = fromServerPower(power)
+		},
+		{ immediate: true },
+	)
 	const isServerRunning = computed(() => powerState.value === 'running')
 	const uptimeSeconds = ref(0)
 	let uptimeTicker: ReturnType<typeof setInterval> | undefined
@@ -68,10 +82,14 @@ export function useServerManageCoreRuntime(options: UseServerManageCoreRuntimeOp
 		uptimeTicker = setInterval(() => uptimeSeconds.value++, 1000)
 	}
 
-	/** What the server shows may have changed: read it again. */
+	let settle: ReturnType<typeof setTimeout> | undefined
+	/** What the server shows may have changed: read it again, once for a burst of changes. */
 	function changed() {
-		void queryClient.invalidateQueries({ queryKey: serverKeys.detail(serverId) })
-		void queryClient.invalidateQueries({ queryKey: serverKeys.content(serverId) })
+		settle ??= setTimeout(() => {
+			settle = undefined
+			void queryClient.invalidateQueries({ queryKey: serverKeys.detail(serverId) })
+			void queryClient.invalidateQueries({ queryKey: serverKeys.content(serverId) })
+		}, CHANGES_SETTLE_MS)
 	}
 
 	let wasClosed = false
@@ -92,6 +110,7 @@ export function useServerManageCoreRuntime(options: UseServerManageCoreRuntimeOp
 		events.on('resync', () => void jobs.refresh()),
 		events.on('power_state', (power) => {
 			if (power.server !== serverId) return
+			heardPower = true
 			powerState.value = power.state
 			if (power.state !== 'running') {
 				clearInterval(uptimeTicker)
@@ -120,6 +139,7 @@ export function useServerManageCoreRuntime(options: UseServerManageCoreRuntimeOp
 		for (const stop of stops) stop()
 		jobs.stop()
 		clearInterval(uptimeTicker)
+		clearTimeout(settle)
 	})
 
 	const uploadState = ref<UploadState>({
@@ -150,6 +170,7 @@ export function useServerManageCoreRuntime(options: UseServerManageCoreRuntimeOp
 		coreId,
 		core,
 		server: options.server,
+		console: serverConsole,
 		isConnected,
 		powerState,
 		isServerRunning,
@@ -179,4 +200,8 @@ export function useServerManageCoreRuntime(options: UseServerManageCoreRuntimeOp
 		uptimeSeconds,
 		uploadState,
 	}
+}
+
+function fromServerPower(power: ServerPower): PowerState {
+	return power === 'offline' || power === 'killed' ? 'stopped' : power
 }

@@ -19,7 +19,11 @@ class FakeSocket {
 		this.sent.push(JSON.parse(text))
 	}
 
-	close() {}
+	closed = false
+
+	close() {
+		this.closed = true
+	}
 
 	open() {
 		this.readyState = FakeSocket.OPEN
@@ -98,5 +102,50 @@ describe('an event stream', () => {
 		expect(resyncs).toEqual(['resync'])
 		expect(status).toEqual([true, false, true])
 		expect(reopened.sent).toEqual([{ topic: 'server-a', subscribe: true }])
+	})
+
+	it('sends a later holder of a held topic its start again', async () => {
+		const events = stream()
+		events.subscribe('server-a')
+		await settle()
+		const socket = FakeSocket.opened[0]!
+		socket.open()
+		events.subscribe('server-a')
+
+		expect(socket.sent).toEqual([
+			{ topic: 'server-a', subscribe: true },
+			{ topic: 'server-a', subscribe: false },
+			{ topic: 'server-a', subscribe: true },
+		])
+	})
+
+	it('closes once nothing holds it, and opens afresh for the next holder', async () => {
+		const events = stream()
+		const resyncs: unknown[] = []
+		const leave = events.subscribe('server-a')
+		await settle()
+		FakeSocket.opened[0]!.open()
+		leave()
+		expect(FakeSocket.opened[0]!.closed).toBe(true)
+		expect(events.open).toBe(false)
+
+		events.on('resync', () => resyncs.push('resync'))
+		await settle()
+		FakeSocket.opened[1]!.open()
+		expect(FakeSocket.opened).toHaveLength(2)
+		expect(resyncs).toEqual([])
+	})
+
+	it('is not ready when its socket fails to open, or does not open in time', async () => {
+		const events = stream()
+		const failed = events.ready()
+		await settle()
+		FakeSocket.opened[0]!.drop()
+		await expect(failed).rejects.toMatchObject({ code: 'network_error' })
+
+		const slow = events.ready(5000)
+		const expectation = expect(slow).rejects.toMatchObject({ code: 'network_error' })
+		await vi.advanceTimersByTimeAsync(5000)
+		await expectation
 	})
 })

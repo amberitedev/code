@@ -3,6 +3,7 @@ import type { ContractClient, UploadState } from '@modrinth/api-client'
 import type { ComputedRef, Ref } from 'vue'
 
 import type { MessageDescriptor } from '#ui/composables/i18n'
+import type { ConsoleState } from '#ui/composables/server-console'
 import type {
 	ServerInstallationKey,
 	ServerInstallationState,
@@ -25,6 +26,8 @@ export interface ModrinthServerContext {
 	readonly core: ContractClient
 	/** Undefined until the server first loads. */
 	readonly server: Ref<Server | undefined>
+	/** The server's live console, from when this panel opened. */
+	readonly console: ConsoleState
 
 	/** The Core's event socket is open. */
 	readonly isConnected: Ref<boolean>

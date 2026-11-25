@@ -72,7 +72,6 @@ import {
 	provideInstallationSettings,
 	ServerSetupModal,
 	useDebugLogger,
-	useModrinthServersConsole,
 	useServerPermissions,
 	useVIntl,
 } from '@modrinth/ui'
@@ -97,6 +96,7 @@ const {
 	serverId,
 	coreId,
 	core,
+	console: modrinthServersConsole,
 } = injectModrinthServerContext()
 const { addNotification } = injectNotificationManager()
 const queryClient = useQueryClient()
@@ -105,7 +105,6 @@ const contentQueryKey = serverKeys.content(serverId)
 const tags = injectTags()
 const { formatMessage } = useVIntl()
 const serverSettings = injectServerSettings()
-const modrinthServersConsole = useModrinthServersConsole()
 const { canSetup, canResetServer, permissionDeniedMessage } = useServerPermissions()
 
 const modpackUploadModal =

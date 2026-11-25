@@ -1,4 +1,3 @@
-import { createGlobalState } from '@vueuse/core'
 import { type Ref, ref, shallowRef, triggerRef } from 'vue'
 
 import { detectLogLevel } from '../layouts/shared/console/composables/log-level'
@@ -415,4 +414,4 @@ export function createConsoleState() {
 	}
 }
 
-export const useModrinthServersConsole = createGlobalState(createConsoleState)
+export type ConsoleState = ReturnType<typeof createConsoleState>
