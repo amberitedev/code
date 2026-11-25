@@ -856,7 +856,7 @@ fn send_progress(
     started: i64,
     finished: Option<i64>,
 ) {
-    let _ = events.send(CoreEvent::Backup {
+    let _ = events.send(CoreEvent::BackupProgress {
         server: operation.server_id.clone(),
         id: Uuid::parse_str(&operation.backup_id).unwrap_or_default(),
         task,

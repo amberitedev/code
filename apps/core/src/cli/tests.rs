@@ -194,7 +194,7 @@ async fn core_commands_round_trip() {
     let eula = super::machine::eula(&client, false).await.unwrap();
     assert!(eula.json["accepted_at"].is_null());
     let eula = super::machine::eula(&client, true).await.unwrap();
-    assert!(eula.json["accepted_at"].is_i64());
+    assert!(eula.json["accepted_at"].is_string());
     let status = super::machine::update(
         &client,
         UpdateCommand::Channel {

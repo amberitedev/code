@@ -1,4 +1,4 @@
-//! Who can do what: tickets, sessions, download links, the local socket, the activity log, and
+//! Who can do what: tickets, sessions, the local socket, the activity log, and
 //! backend sync. A Core answers its owner only. The request and response shapes are in
 //! `api::sessions`, `api::activity`, and, for the backend, `contracts::backend::cores`.
 //!
@@ -8,7 +8,6 @@
 
 pub mod activity;
 pub mod keys;
-pub mod links;
 pub mod local;
 pub mod owed;
 pub mod pairing;
@@ -47,6 +46,11 @@ pub fn now() -> i64 {
     chrono::Utc::now().timestamp()
 }
 
+/// Unix `seconds` as the wire's time.
+pub fn at(seconds: i64) -> chrono::DateTime<chrono::Utc> {
+    chrono::DateTime::from_timestamp(seconds, 0).unwrap_or_default()
+}
+
 /// Access state shared by every route, and the engine's [`Access`] on this Core.
 pub struct CoreAccess {
     db: SqlitePool,
@@ -58,7 +62,6 @@ pub struct CoreAccess {
     pub owed: Arc<Notify>,
     /// Asks the pairing loop for a fresh code (`copal pair`).
     pub new_code: Notify,
-    links: links::Links,
     streams: Mutex<HashMap<String, usize>>,
     sign_ins: Mutex<HashMap<IpAddr, (Instant, u32)>>,
 }
@@ -78,7 +81,6 @@ impl CoreAccess {
             changed: broadcast::channel(64).0,
             owed: Arc::new(Notify::new()),
             new_code: Notify::new(),
-            links: links::Links::default(),
             streams: Mutex::default(),
             sign_ins: Mutex::default(),
         }
@@ -193,9 +195,6 @@ impl Access for CoreAccess {
         Box::pin(async move {
             if request.extensions.get::<local::Local>().is_some() {
                 return Ok(Caller::Local);
-            }
-            if let Some((token, path)) = links::split(&request.uri) {
-                return self.redeem(token, &path).await;
             }
             let token = request
                 .headers

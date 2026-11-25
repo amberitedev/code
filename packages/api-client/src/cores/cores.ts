@@ -217,7 +217,7 @@ export class Cores {
 				return
 			}
 			for (const server of result.value) {
-				this.serverCores.set(server.id, cores[index].id)
+				this.serverCores.set(server.server_id, cores[index].id)
 				merged.servers.push(archonServer(server, this.base(cores[index])))
 			}
 		})

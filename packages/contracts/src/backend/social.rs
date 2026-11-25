@@ -8,6 +8,7 @@ use ariadne::{
     networking::message::{ClientToServerMessage, ServerToClientMessage},
     users::UserStatus,
 };
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -39,7 +40,7 @@ pub struct UserCampaigns {
 pub struct UserLock {
     pub locked_by: String,
     pub reason: String,
-    pub created: String,
+    pub created: DateTime<Utc>,
 }
 
 /// An account. The private fields are null unless it is the caller's own or the caller is an
@@ -52,7 +53,7 @@ pub struct User {
     pub avatar_url: Option<String>,
     pub raw_avatar_url: Option<String>,
     pub bio: Option<String>,
-    pub created: String,
+    pub created: DateTime<Utc>,
     pub role: Role,
     pub badges: u64,
     pub campaigns: UserCampaigns,
@@ -65,7 +66,7 @@ pub struct User {
     pub stripe_customer_id: Option<Never>,
     pub github_id: Option<Never>,
     pub allow_friend_requests: Option<bool>,
-    pub eligibility_verified_at: Option<String>,
+    pub eligibility_verified_at: Option<DateTime<Utc>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lock: Option<UserLock>,
 }
@@ -86,7 +87,7 @@ pub struct UserFriend {
     pub id: String,
     pub friend_id: String,
     pub accepted: bool,
-    pub created: String,
+    pub created: DateTime<Utc>,
 }
 
 /// Body of [`EditUser`]. A null `bio` clears it.
@@ -250,7 +251,7 @@ pub struct Notification {
     pub id: String,
     pub user_id: String,
     pub read: bool,
-    pub created: String,
+    pub created: DateTime<Utc>,
     #[cfg_attr(
         feature = "export-ts",
         ts(type = "{ type: string, [key: string]: unknown }")

@@ -18,9 +18,7 @@ use crate::{
         SwitchProjectVersion, SyncContentFiles, ToggleProject, UnlinkModpack,
         UpdateModpackVersion, UpdateProject,
     },
-    endpoints::content::{
-        CompleteSideReview, RepairContent, SetSide, SetSidesUnlocked,
-    },
+    endpoints::content::{RepairContent, SetSide, SetSidesUnlocked},
     install::InstallJobSnapshot,
     instance::{self, PackExportCandidate},
     state::{
@@ -404,17 +402,6 @@ pub async fn set_sides_unlocked(
     .await
     .map(|()| Empty)
     .map_err(api_error)
-}
-
-pub async fn complete_side_review(
-    State(engine): State<Arc<Engine>>,
-    instance: InstanceAccess,
-    _: Req<CompleteSideReview>,
-) -> Result<Empty, ApiError> {
-    instance::complete_side_review(&engine, &instance.id)
-        .await
-        .map(|()| Empty)
-        .map_err(api_error)
 }
 
 pub async fn repair_content(

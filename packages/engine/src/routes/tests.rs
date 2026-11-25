@@ -846,6 +846,7 @@ async fn a_servers_files_stay_in_its_folder_and_never_replace_what_it_owns() {
         send(&router, "GET", &format!("{files}/stat?path=config"), None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(stat["type"], "directory");
+    assert_eq!(stat["full_path"], "/config", "Kyros's stat shape");
     for path in [
         "..%2Fescape.txt",
         "a%2F..%2F..%2Fescape.txt",

@@ -51,9 +51,7 @@ use crate::{
             SetProjectLocked, SwitchProjectVersion, SyncContentFiles,
             ToggleProject, UnlinkModpack, UpdateModpackVersion, UpdateProject,
         },
-        content::{
-            CompleteSideReview, RepairContent, SetSide, SetSidesUnlocked,
-        },
+        content::{RepairContent, SetSide, SetSidesUnlocked},
         files::{
             AddInstanceUploadFile, CancelInstanceUpload,
             CreateInstanceDirectory, DeleteInstanceFile, ExtractInstanceZip,
@@ -152,7 +150,6 @@ where
         .endpoint::<RepairModpack, _, _>(repair_modpack)
         .endpoint::<SetSide, _, _>(set_side)
         .endpoint::<SetSidesUnlocked, _, _>(set_sides_unlocked)
-        .endpoint::<CompleteSideReview, _, _>(complete_side_review)
         .endpoint::<RepairContent, _, _>(repair_content)
         .endpoint::<ListPackExportCandidates, _, _>(list_pack_export_candidates)
         .endpoint::<ListLoadingBars, _, _>(list_loading_bars)

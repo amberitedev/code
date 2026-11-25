@@ -224,13 +224,9 @@ tokens: number, };
 
 export type InstanceUser = { id: string, 
 /**
- * RFC 3339. Null while the invite is pending.
+ * Null while the invite is pending.
  */
-joined_at: string | null, join_type: JoinType, 
-/**
- * RFC 3339.
- */
-last_played: string | null, };
+joined_at: string | null, join_type: JoinType, last_played: string | null, };
 
 export type JoinType = "owner" | "invite" | "link";
 
@@ -238,11 +234,7 @@ export type UserIds = { user_ids: Array<string>, };
 
 export type FailedInvites = { failed: Array<string>, };
 
-export type InviteLink = { id: string, 
-/**
- * RFC 3339.
- */
-expiration: string, 
+export type InviteLink = { id: string, expiration: string, 
 /**
  * 0 for no limit.
  */
@@ -401,11 +393,7 @@ loader_version: string, };
 
 export type VersionDownload = { holders: Array<StoreHost>, ticket: string, };
 
-export type VersionUpload = { core: StoreHost, ticket: string, 
-/**
- * RFC 3339.
- */
-expires: string, };
+export type VersionUpload = { core: StoreHost, ticket: string, expires: string, };
 
 export type VersionReports = { 
 /**
@@ -475,11 +463,7 @@ cores: Array<string>,
  */
 versions: Array<StoredVersion>, };
 
-export type StoredVersion = { version: number, 
-/**
- * RFC 3339.
- */
-created: string, bytes: number, ready: boolean, 
+export type StoredVersion = { version: number, created: string, bytes: number, ready: boolean, 
 /**
  * The latest ready version, which members install. It cannot be deleted.
  */

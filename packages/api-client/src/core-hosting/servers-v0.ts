@@ -1,9 +1,4 @@
-import {
-	core,
-	type CoreServer,
-	type PowerAction,
-	type ReachabilityReport,
-} from '@amberite/contracts'
+import { core, type Loader, type Server } from '@amberite/contracts'
 
 import { ApiCallError } from '../contracts/errors'
 import type { AbstractModrinthClient } from '../core/abstract-client'
@@ -12,13 +7,18 @@ import type { Archon } from '../modules/archon/types'
 import { coreNodeUrl } from '../utils/node-url'
 import { type Adapter, coreOf } from './adapter'
 
-const LOADERS: Record<string, Archon.Servers.v0.Loader> = {
-	vanilla: 'Vanilla',
-	fabric: 'Fabric',
-	quilt: 'Quilt',
-	forge: 'Forge',
-	neoforge: 'NeoForge',
-	paper: 'Paper',
+const LOADERS: Loader[] = ['Vanilla', 'Fabric', 'Quilt', 'Forge', 'NeoForge', 'Paper']
+
+/** The Core's loader `name` names, in any case. */
+export function loader(name: string): Loader {
+	const found = LOADERS.find((each) => each.toLowerCase() === name.replace('_', '').toLowerCase())
+	if (!found)
+		throw new ApiCallError(
+			400,
+			'invalid_input',
+			'Core installs Vanilla, Fabric, Quilt, Forge, NeoForge, and Paper.',
+		)
+	return found
 }
 
 /**
@@ -26,13 +26,6 @@ const LOADERS: Record<string, Archon.Servers.v0.Loader> = {
  * survive as a JavaScript number. Core answers only its owner.
  */
 const OWNER_PERMISSIONS = 2 ** 64 - 2 ** 15
-
-const POWER = {
-	Start: 'start',
-	Stop: 'stop',
-	Restart: 'restart',
-	Kill: 'kill',
-} satisfies Record<Parameters<ArchonServersV0Module['power']>[1], PowerAction>
 
 const JDK_MAJORS = { lts8: 8, lts11: 11, lts17: 17, lts21: 21 } as const
 type JdkName = keyof typeof JDK_MAJORS
@@ -49,54 +42,47 @@ function isJdkName(name: string): name is JdkName {
 	return name in JDK_MAJORS
 }
 
-function reachability(report: ReachabilityReport): Archon.Servers.v0.Reachability {
-	return { state: report.state, cause: report.state === 'reachable' ? null : report.title }
-}
-
-/** `server` in the hosting API's shape. Its node is the Core, at `base`. See `coreNodeUrl`. */
-export function archonServer(server: CoreServer, base: string): Archon.Servers.v0.Server {
+/**
+ * `server` with the hosting API's fields a Core has no use for. Its node is the Core, at `base`.
+ * See `coreNodeUrl`. The panel shows a server that is not set up as installing.
+ */
+export function archonServer(server: Server, base: string): Archon.Servers.v0.Server {
 	return {
-		server_id: server.id,
-		name: server.name,
+		...server,
 		owner_id: server.owner_id ?? '',
 		net: { ...server.net, domain: '' },
 		game: 'Minecraft',
 		backup_quota: 0,
 		used_backup_quota: 0,
-		status: server.installing || !server.game_version ? 'installing' : 'available',
+		status: server.flows.intro ? 'installing' : server.status,
+		flows: { intro: false },
 		suspension_reason: null,
-		loader: (server.loader && LOADERS[server.loader]) || null,
-		loader_version: server.loader_version,
-		mc_version: server.game_version,
-		upstream: null,
 		sftp_username: '',
 		sftp_password: '',
 		sftp_host: '',
 		datacenter: '',
 		notices: [],
-		node: { token: '', instance: coreNodeUrl(base, server.id) },
-		flows: { intro: false },
+		node: { token: '', instance: coreNodeUrl(base, server.server_id) },
 		is_medal: false,
 		current_user_permissions: OWNER_PERMISSIONS,
 		locked_since: null,
-		icon: null,
-		linked_instance: server.linked_instance,
-		power_state: server.power,
-		reachability: server.reachability && reachability(server.reachability),
-		players: server.players,
+		reachability: server.reachability && {
+			state: server.reachability.state,
+			cause: server.reachability.state === 'reachable' ? null : server.reachability.title,
+		},
 	}
 }
 
-/** The server's setup, or `conflict` while it is not installed. */
-async function installedSetup(client: AbstractModrinthClient, serverId: string) {
-	const setup = await (
+/** The server's startup, or `conflict` while it is not installed. */
+async function installedStartup(client: AbstractModrinthClient, serverId: string) {
+	const startup = await (
 		await coreOf(client, serverId)
-	).call(core.GetSetup, {
+	).call(core.GetStartup, {
 		params: { id: serverId },
 	})
-	if (setup.invocation === null || setup.java_version === null)
+	if (startup.original_invocation === null || startup.java_version === null)
 		throw new ApiCallError(409, 'conflict', 'The server is not installed yet.')
-	return { invocation: setup.invocation, major: setup.java_version }
+	return { invocation: startup.original_invocation, major: startup.java_version }
 }
 
 /** Core builds the startup command itself; memory and flags are set per server. */
@@ -137,7 +123,7 @@ export function serversV0(client: AbstractModrinthClient): Adapter<ArchonServers
 			return { url: `${(await base(serverId)).replace(/^http/, 'ws')}/events`, token: '' }
 		},
 		async power(serverId, action) {
-			const change = { params: { id: serverId }, body: { action: POWER[action] } }
+			const change = { params: { id: serverId }, body: { action } }
 			await (await coreOf(client, serverId)).call(core.ChangePower, change)
 		},
 		async reinstall(serverId, request, hardReset = false) {
@@ -152,14 +138,14 @@ export function serversV0(client: AbstractModrinthClient): Adapter<ArchonServers
 			).call(core.InstallLoader, {
 				params: { id: serverId },
 				body: {
-					loader: request.loader.toLowerCase(),
+					loader: loader(request.loader),
 					loader_version: request.loader_version ?? null,
 					game_version: request.game_version,
 				},
 			})
 		},
 		async getStartupConfig(serverId) {
-			const { invocation, major } = await installedSetup(client, serverId)
+			const { invocation, major } = await installedStartup(client, serverId)
 			return {
 				invocation,
 				original_invocation: invocation,
@@ -169,16 +155,16 @@ export function serversV0(client: AbstractModrinthClient): Adapter<ArchonServers
 			}
 		},
 		async updateStartupConfig(serverId, config) {
-			const { invocation, major } = await installedSetup(client, serverId)
+			const { invocation, major } = await installedStartup(client, serverId)
 			sameCommand(config.invocation, invocation)
 			// The panel sends back what it read, and that name is lossy: the same name is no change.
 			if (config.jdk_version === jdkName(major)) return
 			const chosen = config.jdk_version && isJdkName(config.jdk_version) ? config.jdk_version : null
 			await (
 				await coreOf(client, serverId)
-			).call(core.SetJavaVersion, {
+			).call(core.ChangeStartup, {
 				params: { id: serverId },
-				body: { major: chosen && JDK_MAJORS[chosen] },
+				body: { java_version: chosen && JDK_MAJORS[chosen] },
 			})
 		},
 	}

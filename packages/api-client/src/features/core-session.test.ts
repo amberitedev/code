@@ -1,9 +1,9 @@
 import {
 	core,
-	type CoreServer,
 	type ErrorCode,
 	type ListedCore,
 	PROTOCOL_VERSION,
+	type Server,
 } from '@amberite/contracts'
 import { describe, expect, it } from 'vite-plus/test'
 
@@ -21,21 +21,25 @@ const ACCOUNT = 'mra_account'
 const PROXY = 'http://127.0.0.1:5000/c0ffee'
 const SERVER = '00000000-0000-4000-8000-000000000001'
 /** `SERVER` as the Core lists it. */
-const LISTED: CoreServer = {
-	id: SERVER,
+const LISTED: Server = {
+	server_id: SERVER,
 	name: 'Survival',
 	owner_id: 'owner',
-	installing: false,
+	status: 'available',
 	loader: null,
 	loader_version: null,
-	game_version: null,
+	mc_version: null,
+	upstream: null,
+	flows: { intro: true },
+	icon: null,
 	net: { ip: null, port: 25565, outside: null, game_port: 25565 },
-	power: 'offline',
+	power_state: 'offline',
 	linked_instance: null,
+	shared_instance_id: null,
 	reachability: null,
 	players: null,
 	memory_mb: 2048,
-	created_at: 0,
+	created_at: '1970-01-01T00:00:00Z',
 	update_channel: 'release',
 	eula_accepted: true,
 }
@@ -273,39 +277,43 @@ describe('a Core on another protocol version', () => {
 })
 
 describe('the activity log of a server on a Core', () => {
-	it("reads a server's activity as its action log", async () => {
+	it('asks the Core to filter, and names the CLI as an actor', async () => {
 		const api = new FakeClient()
-		const at = 1_700_000_000
+		const timestamp = '2023-11-14T22:13:20Z'
 		api.routes[`${PROXY}/activity`] = {
-			entries: [
+			data: [
 				{
-					id: 5,
-					at,
-					user: { id: 'owner', name: 'Owner', avatar_url: null },
+					actor: { type: 'user', user_id: 'owner' },
+					action: { action: 'console_command_executed', metadata: { command: 'say hi' } },
 					server_id: SERVER,
-					action: { type: 'console_command', command: 'say hi' },
+					timestamp,
 				},
-				{ id: 4, at, user: null, server_id: SERVER, action: { type: 'server_started' } },
+				{
+					actor: { type: 'cli' },
+					action: { action: 'server_started' },
+					server_id: SERVER,
+					timestamp,
+				},
 			],
-			next_before: 4,
+			next_offset: 2,
+			users: { owner: { username: 'Owner', avatar_url: null } },
 		}
-		const log = await api.archon.actions_v1.list(SERVER, { limit: 2 })
+		const log = await api.archon.actions_v1.list(SERVER, {
+			limit: 2,
+			offset: 2,
+			filter: { actions: ['server_started'] },
+		})
 
-		expect(log.next_offset).toBe(4)
-		expect(log.data.map((entry) => [entry.actor, entry.action])).toEqual([
-			[
-				{ type: 'user', user_id: 'owner' },
-				{ action: 'console_command_executed', metadata: { command: 'say hi' } },
-			],
-			[{ type: 'user', user_id: 'core-cli' }, { action: 'server_started' }],
+		expect(log.data.map((entry) => entry.actor)).toEqual([
+			{ type: 'user', user_id: 'owner' },
+			{ type: 'user', user_id: 'core-cli' },
 		])
 		expect(log.users.owner.username).toBe('Owner')
-		const activity = () =>
-			api.sent.findLast((request) => request.url.startsWith(`${PROXY}/activity`))?.url
-		expect(activity()).toBe(`${PROXY}/activity?server_id=${SERVER}&limit=2`)
-
-		await api.archon.actions_v1.list(SERVER, { limit: 2, offset: 4 })
-		expect(activity()).toBe(`${PROXY}/activity?server_id=${SERVER}&limit=2&before=4`)
+		const sent = api.sent.findLast((request) => request.url.startsWith(`${PROXY}/activity`))?.url
+		const query = new URL(sent!).searchParams
+		expect(query.get('server_id')).toBe(SERVER)
+		expect(query.get('offset')).toBe('2')
+		expect(JSON.parse(query.get('filter')!)).toEqual({ actions: ['server_started'] })
 	})
 })
 

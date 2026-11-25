@@ -254,7 +254,11 @@ export type InstanceZipExtract = { path: string, target?: string, override_confl
 
 export type ExtractDryRunResult = { modpack_name: string | null, conflicting_files: Array<string>, };
 
-export type InstanceFileStat = { name: string, path: string, size: number, type: InstanceFileKind, modified: string, created: string, };
+export type InstanceFileStat = { name: string, 
+/**
+ * From the instance's folder, with a leading `/`.
+ */
+full_path: string, size_bytes: number, type: InstanceFileKind, mtime: string, ctime: string, };
 
 export type InstanceFileKind = "regular" | "directory" | "symlink" | "other";
 
@@ -638,7 +642,6 @@ export const instanceContent = {
 	ListPackExportCandidates: { method: "GET", path: "/instances/{id}/export-candidates", auth: "session", dangerous: false, body: "empty", response: "json" } as Endpoint<InstanceRef, ExportCandidatesQuery, void, Array<PackExportCandidate>>,
 	SetSide: { method: "POST", path: "/instances/{id}/content/side", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<InstanceRef, null, SideChange, void>,
 	SetSidesUnlocked: { method: "POST", path: "/instances/{id}/content/sides-unlocked", auth: "session", dangerous: false, body: "json", response: "empty" } as Endpoint<InstanceRef, null, SidesUnlocked, void>,
-	CompleteSideReview: { method: "POST", path: "/instances/{id}/content/side-review", auth: "session", dangerous: false, body: "empty", response: "empty" } as Endpoint<InstanceRef, null, void, void>,
 	RepairContent: { method: "POST", path: "/instances/{id}/content/repair", auth: "session", dangerous: false, body: "empty", response: "empty" } as Endpoint<InstanceRef, null, void, void>,
 }
 

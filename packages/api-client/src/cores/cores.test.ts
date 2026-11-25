@@ -1,4 +1,4 @@
-import { type CoreServer, type ListedCore, PROTOCOL_VERSION } from '@amberite/contracts'
+import { type ListedCore, PROTOCOL_VERSION, type Server } from '@amberite/contracts'
 import { describe, expect, it } from 'vite-plus/test'
 
 import { SelfHostedFeature } from '../features/self-hosted'
@@ -21,21 +21,25 @@ const SERVER = {
 	server_id: '00000000-0000-4000-8000-000000000001',
 	net: { ip: '203.0.113.5', port: 41000, domain: '', game_port: 25565 },
 }
-const LISTED: CoreServer = {
-	id: SERVER.server_id,
+const LISTED: Server = {
+	server_id: SERVER.server_id,
 	name: 'Survival',
 	owner_id: 'owner',
-	installing: false,
+	status: 'available',
 	loader: null,
 	loader_version: null,
-	game_version: null,
+	mc_version: null,
+	upstream: null,
+	flows: { intro: true },
+	icon: null,
 	net: { ip: SERVER.net.ip, port: SERVER.net.port, outside: null, game_port: 25565 },
-	power: 'offline',
+	power_state: 'offline',
 	linked_instance: null,
+	shared_instance_id: null,
 	reachability: null,
 	players: null,
 	memory_mb: 2048,
-	created_at: 0,
+	created_at: '1970-01-01T00:00:00Z',
 	update_channel: 'release',
 	eula_accepted: true,
 }

@@ -53,7 +53,7 @@ async function panelHears(answers: unknown[]) {
 	return { heard, subscribed: socket.sent, synced }
 }
 
-const power = { type: 'power', payload: { server: SERVER, state: 'stopped', uptime: null } }
+const power = { type: 'power_state', payload: { server: SERVER, state: 'stopped' } }
 
 describe('a Core server socket', () => {
 	afterEach(() => {

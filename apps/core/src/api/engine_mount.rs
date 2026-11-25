@@ -9,14 +9,14 @@
 use std::{io::Cursor, sync::Arc};
 
 use axum::{
-    extract::{FromRequestParts, Path, RawPathParams, Request, State},
+    extract::{FromRequestParts, RawPathParams, Request, State},
     handler::Handler,
     response::{IntoResponse, Response},
 };
 use contracts::{
     ApiError, ErrorCode, Json,
     backend::cores::ForgottenServer,
-    core::Action,
+    core::{Action, ExportModpack},
     server::{Mount, Req},
 };
 use engine::{
@@ -30,7 +30,7 @@ use engine::{
 use futures::future::BoxFuture;
 use uuid::Uuid;
 
-use super::{CoreState, Shared, backups::zip_response, internal, world};
+use super::{CoreState, Shared, backups::zip_response, internal};
 use crate::{
     access::{Caller, activity, owed::OwedCall},
     servers::{Hold, ServerError, server_rows},
@@ -88,10 +88,6 @@ pub fn routes<M: Mount<Shared>>(mount: M) -> M {
         .endpoint::<RemoveProject, _, _>(change(EDIT, remove_project))
         .endpoint::<SetSide, _, _>(change(EDIT, set_side))
         .endpoint::<SetSidesUnlocked, _, _>(change(EDIT, set_sides_unlocked))
-        .endpoint::<CompleteSideReview, _, _>(change(
-            EDIT,
-            complete_side_review,
-        ))
         .endpoint::<UnlinkModpack, _, _>(change(EDIT, unlink_modpack))
         .endpoint::<DeleteSharedInstanceVersion, _, _>(change(
             SHARE,
@@ -207,15 +203,14 @@ async fn extract_zip(
 }
 
 /// [`ExportModpack`](contracts::core::ExportModpack): the server's content as an `.mrpack`, written
-/// to its staging folder, streamed, then removed. The App saves it natively, so it asks for a link
-/// first (`access::links`). A server exports what upstream's export selects by default: its
-/// content folders and `config/`.
+/// to its staging folder, streamed, then removed. A server exports what upstream's export selects
+/// by default: its content folders and `config/`.
 pub(super) async fn export_mrpack(
     caller: Caller,
     State(state): State<Arc<CoreState>>,
-    Path((id, wid)): Path<(String, String)>,
+    Req { params, .. }: Req<ExportModpack>,
 ) -> Result<Response, ApiError> {
-    world(&id, &wid)?;
+    let id = params.id;
     state.access.require(&caller, &id).await?;
     let server = server_rows::get(&state.db, &state.engine, &id)
         .await

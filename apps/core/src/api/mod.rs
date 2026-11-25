@@ -1,9 +1,8 @@
 //! The HTTP API: Axum routes, one file per resource. The same router serves HTTPS and the local
 //! socket (see `access::local`).
 //!
-//! Routes only a Core has are `contracts::core` Endpoints. A server's content, share, files, icon
-//! and logs are the engine's routes (`engine_mount`). The download routes match the `Kyros.*` shapes in
-//! `packages/api-client/src/modules`.
+//! Routes only a Core has are `contracts::core` Endpoints, in Modrinth Hosting's shapes. A server's
+//! content, share, files, icon and logs are the engine's routes (`engine_mount`).
 
 pub mod activity;
 pub mod backups;
@@ -49,18 +48,6 @@ use tower_http::{timeout::TimeoutLayer, trace::TraceLayer};
 /// A failure on the Core's side, such as a database or disk error, described by its cause.
 pub fn internal(error: impl std::fmt::Display) -> ApiError {
     ApiError::new(ErrorCode::InternalError, format!("{error:#}"))
-}
-
-/// The one world of a server has the server's id.
-pub fn world(id: &str, wid: &str) -> Result<(), ApiError> {
-    if id.eq_ignore_ascii_case(wid) {
-        Ok(())
-    } else {
-        Err(ApiError::new(
-            ErrorCode::NotFound,
-            format!("There is no world {wid}."),
-        ))
-    }
 }
 
 /// The longest a request may take, except the routes that wait on a server.
@@ -116,7 +103,6 @@ pub fn router(state: Arc<CoreState>) -> Router {
         .endpoint::<ListSessions, _, _>(sessions::list)
         .endpoint::<SignOut, _, _>(sessions::sign_out)
         .endpoint::<RevokeSession, _, _>(sessions::revoke)
-        .endpoint::<CreateDownloadLink, _, _>(crate::access::links::create)
         .endpoint::<ListActivity, _, _>(activity::list)
         .endpoint::<GetPairing, _, _>(pairing::get)
         .endpoint::<RequestPairingCode, _, _>(pairing::new_code)
@@ -142,13 +128,13 @@ pub fn router(state: Arc<CoreState>) -> Router {
         .endpoint::<GetServer, _, _>(servers::get)
         .endpoint::<ChangeServer, _, _>(servers::change)
         .endpoint::<DeleteServer, _, _>(servers::delete)
-        .endpoint::<GetSetup, _, _>(servers::setup)
-        .endpoint::<SetJavaVersion, _, _>(startup::set_java_version)
+        .endpoint::<GetStartup, _, _>(startup::get)
+        .endpoint::<ChangeStartup, _, _>(startup::change)
         .endpoint::<GetProperties, _, _>(properties::get)
         .endpoint::<ChangeProperties, _, _>(properties::change)
         .endpoint::<ListBackups, _, _>(backups::list)
         .endpoint::<CreateBackup, _, _>(backups::create)
-        .endpoint::<ChangeBackupSchedule, _, _>(backups::change_schedule)
+        .endpoint::<ChangeBackupOptions, _, _>(backups::change_options)
         .endpoint::<DeleteBackups, _, _>(backups::delete_many)
         .endpoint::<RenameBackup, _, _>(backups::rename)
         .endpoint::<DeleteBackup, _, _>(backups::delete)
@@ -189,7 +175,6 @@ pub fn router(state: Arc<CoreState>) -> Router {
         .route("/store/{*rest}", any(storage::forward))
         .layer(DefaultBodyLimit::disable())
         .with_state(Shared(state))
-        // Without the query, which can hold a download link (`access::links`).
         .layer(TraceLayer::new_for_http().make_span_with(
             |request: &axum::extract::Request| {
                 tracing::debug_span!(

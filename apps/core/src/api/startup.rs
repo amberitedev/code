@@ -1,12 +1,13 @@
-//! The Java a server runs: a managed major other than the one the Minecraft version needs, or, as
-//! an advanced override, a custom Java path. Both run as `copal-servers` like every server.
+//! How a server starts: the command it runs, and the Java: a managed major other than the one the
+//! Minecraft version needs, or, as an advanced override, a custom Java path. Both run as
+//! `copal-servers` like every server.
 
 use std::sync::Arc;
 
 use axum::extract::State;
 use contracts::{
-    ApiError, Empty, ErrorCode,
-    core::{Action, SetJava, SetJavaVersion},
+    ApiError, Empty, ErrorCode, Json,
+    core::{Action, ChangeStartup, GetStartup, RuntimeOptions, SetJava},
     server::Req,
 };
 
@@ -15,7 +16,7 @@ use engine::state::InstanceLaunchOverridesPatch;
 use super::{CoreState, internal};
 use crate::{
     access::{Caller, activity},
-    servers::{ServerError, platform, server_rows},
+    servers::{ServerError, launch, platform, server_rows},
 };
 
 /// Java majors Core installs.
@@ -61,13 +62,59 @@ async fn set_major(
     Ok(())
 }
 
-pub async fn set_java_version(
+pub async fn get(
     caller: Caller,
     State(state): State<Arc<CoreState>>,
-    Req { params, body, .. }: Req<SetJavaVersion>,
+    Req { params, .. }: Req<GetStartup>,
+) -> Result<Json<RuntimeOptions>, ApiError> {
+    let id = params.id;
+    state.access.require(&caller, &id).await?;
+    let row = server_rows::get(&state.db, &state.engine, &id)
+        .await
+        .map_err(internal)?
+        .ok_or_else(|| ServerError::NotFound(id.clone()))?;
+    let Some(platform) = platform::platform(&state.engine, &id)
+        .await
+        .map_err(engine::routes::api_error)?
+    else {
+        return Ok(Json(RuntimeOptions {
+            java_version: None,
+            original_invocation: None,
+        }));
+    };
+    let java_version =
+        launch::java_major(&state.engine, &row, &platform.game_version)
+            .await
+            .ok();
+    let original_invocation =
+        engine::server::server_command(&state.engine, &id)
+            .await
+            .ok()
+            .map(|command| {
+                // Shown with the tuned flags, whatever the server's own.
+                let tuned = server_rows::ServerRow {
+                    jvm_flags: None,
+                    ..row.clone()
+                };
+                launch::invocation(&launch::args(
+                    state.servers.paths(),
+                    &tuned,
+                    command.args,
+                ))
+            });
+    Ok(Json(RuntimeOptions {
+        java_version,
+        original_invocation,
+    }))
+}
+
+pub async fn change(
+    caller: Caller,
+    State(state): State<Arc<CoreState>>,
+    Req { params, body, .. }: Req<ChangeStartup>,
 ) -> Result<Empty, ApiError> {
     state.access.require(&caller, &params.id).await?;
-    set_major(&state, &caller, &params.id, body.major).await?;
+    set_major(&state, &caller, &params.id, body.java_version).await?;
     Ok(Empty)
 }
 

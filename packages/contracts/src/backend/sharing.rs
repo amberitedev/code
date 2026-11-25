@@ -5,6 +5,7 @@
 //! An account calls them with its session. A Core reaches shares with its key on routes of its own
 //! (`super::cores`). A share that is gone answers 404, one the caller can no longer read 401.
 
+use chrono::{DateTime, Utc};
 use modrinth_content_management::icons::IconConfig;
 use serde::{Deserialize, Serialize};
 
@@ -152,11 +153,10 @@ pub struct InstanceUsers {
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct InstanceUser {
     pub id: String,
-    /// RFC 3339. Null while the invite is pending.
-    pub joined_at: Option<String>,
+    /// Null while the invite is pending.
+    pub joined_at: Option<DateTime<Utc>>,
     pub join_type: JoinType,
-    /// RFC 3339.
-    pub last_played: Option<String>,
+    pub last_played: Option<DateTime<Utc>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -185,8 +185,7 @@ pub struct FailedInvites {
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct InviteLink {
     pub id: String,
-    /// RFC 3339.
-    pub expiration: String,
+    pub expiration: DateTime<Utc>,
     /// 0 for no limit.
     pub max_uses: u32,
     pub uses: u32,
@@ -256,7 +255,7 @@ pub struct InviteUser {
     pub id: String,
     pub name: String,
     pub avatar: Option<String>,
-    pub joined_at: Option<String>,
+    pub joined_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -370,8 +369,7 @@ pub struct VersionDownload {
 pub struct VersionUpload {
     pub core: StoreHost,
     pub ticket: String,
-    /// RFC 3339.
-    pub expires: String,
+    pub expires: DateTime<Utc>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -444,8 +442,7 @@ pub struct StoredShare {
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct StoredVersion {
     pub version: i32,
-    /// RFC 3339.
-    pub created: String,
+    pub created: DateTime<Utc>,
     pub bytes: u64,
     pub ready: bool,
     /// The latest ready version, which members install. It cannot be deleted.

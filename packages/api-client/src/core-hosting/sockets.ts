@@ -121,16 +121,9 @@ export class CoreWebSocketClient extends AbstractWebSocketClient {
 					if (connection.authenticated) emitInstalls()
 					return
 				}
-				// Of this server's topics, `server` answers first: with the power state, or `ended`
-				// without access.
-				if (event.type === 'ended' && event.payload.topic.type === 'server') {
-					connection.authenticated = false
-					this.emit(serverId, { event: 'auth-incorrect' })
-					reject(new Error(`No access to server ${serverId} on its Core`))
-					this.closeConnection(serverId)
-					return
-				}
-				if (event.type === 'power' && !connection.authenticated) {
+				// Of this server's topics, `server` answers first, with the power state. A server that
+				// does not exist has none, and its routes answer `not_found`.
+				if (event.type === 'power_state' && !connection.authenticated) {
 					connection.authenticated = true
 					connection.reconnectAttempts = 0
 					connection.isReconnecting = false
@@ -259,14 +252,15 @@ function toInstallResult(item: InstallProgressItem): WSEvent {
 
 function toArchon(event: CoreEvent | EngineEvent): WSEvent[] {
 	switch (event.type) {
-		case 'console':
-			return [{ event: 'log', stream: 'stdout', message: event.payload.line }]
-		case 'power': {
-			const { state, uptime } = event.payload
-			const power: WSEvent = { event: 'power-state', state }
-			return uptime === null ? [power] : [power, { event: 'uptime', uptime }]
-		}
-		case 'backup': {
+		case 'log':
+			return event.payload.type === 'legacy'
+				? [{ event: 'log', stream: 'stdout', message: event.payload.message }]
+				: []
+		case 'power_state':
+			return [{ event: 'power-state', state: event.payload.state }]
+		case 'uptime':
+			return [{ event: 'uptime', uptime: event.payload.uptime }]
+		case 'backup_progress': {
 			const { server: _, ...progress } = event.payload
 			return [{ event: 'backup-progress', ...progress }]
 		}

@@ -116,6 +116,10 @@ Endpoints are declared where their types are:
 
 - Backend and Core-native Endpoints are in `packages/contracts`, generated to `ts/backend.ts` and
   `ts/core.ts` over the shared primitives in `ts/protocol.ts`. The store's Endpoints are Rust-only.
+  A Core's own types are Modrinth Hosting's (`Archon`/`Kyros` in `packages/api-client/src/modules`)
+  for every feature a Core has, field for field, and carry none of its fields for features a Core
+  lacks (SFTP, regions, billing, suspension, worlds). Upstream's server screens then read a Core with
+  no translation.
 - Engine Endpoints are in [`packages/engine/src/endpoints`](../../packages/engine/src/endpoints/mod.rs),
   generated to `ts/engine.ts`. The engine's wire types are upstream's (`Instance`,
   `InstallJobSnapshot`), and contracts sits below the engine, so contracts cannot name them. Moving
@@ -129,6 +133,9 @@ A route whose body or answer carries a host filesystem path is an App route, nev
 A Core serves the engine's routes to remote users, so an engine route that took a path would hand
 them the Core's disk. Engine routes take paths relative to an instance and check them at the route
 edge ([`routes/files.rs`](../../packages/engine/src/routes/files.rs)).
+
+Times on the wire are RFC 3339 (`DateTime<Utc>`), except where Modrinth Hosting sends a number,
+which a Core's matching type sends too.
 
 Errors are one `ApiError { error, description }` on the wire
 ([`error.rs`](../../packages/contracts/src/error.rs)). `ErrorCode` is one closed snake_case enum
@@ -235,8 +242,12 @@ Each host serves one `/events` socket that carries the engine's events and its o
 - The App's socket ([`local_api/events.rs`](../../apps/app/src/local_api/events.rs)) forwards every event
   to every client. One local user sees everything, so there is no subscribe protocol.
 - The Core's socket ([`api/events.rs`](../../apps/core/src/api/events.rs)) takes subscriptions to
-  topics. Only the owner opens one, and the owner sees every topic. It checks the session again when
-  it changes, when the socket falls behind, and on a timer, and closes the socket once it ended.
+  topics. Only the owner opens one, and the owner sees every topic, so a subscription is never
+  refused: a missing or removed server's topic stays quiet, and its routes answer `not_found`. It
+  checks the session again when it changes, when the socket falls behind, and on a timer, and closes
+  the socket once it ended.
+- A log line is the engine's `log` event on both hosts: a Core sends its servers' console lines as
+  that event, so one console reads either.
 - A socket that falls behind sends `Resync` and carries on. The UI refetches its queries, so a lost
   install completion or process exit is never silent.
 - `Event::FilesChanged` stays in-process. The socket loops drop it.

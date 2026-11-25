@@ -507,8 +507,8 @@ pub(super) async fn stat(
             .to_owned();
         Ok(InstanceFileStat {
             name,
-            path: path.unwrap_or_default(),
-            size: meta.len(),
+            full_path: format!("/{}", path.unwrap_or_default()),
+            size_bytes: meta.len(),
             kind: if meta.file_type().is_symlink() {
                 InstanceFileKind::Symlink
             } else if meta.is_dir() {
@@ -518,8 +518,8 @@ pub(super) async fn stat(
             } else {
                 InstanceFileKind::Other
             },
-            modified: time(meta.modified()),
-            created: time(meta.created()),
+            mtime: time(meta.modified()),
+            ctime: time(meta.created()),
         })
     })
     .await

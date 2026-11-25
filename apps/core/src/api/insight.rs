@@ -47,7 +47,7 @@ impl From<Report> for ReachabilityReport {
                 .collect(),
             found: diagnosis.found,
             fix: diagnosis.fix,
-            checked_at: report.at,
+            checked_at: crate::access::at(report.at),
         }
     }
 }
@@ -68,10 +68,10 @@ async fn insight(
         players: live.players.into_iter().collect(),
         players_checked: live.players_checked,
         frozen: live.frozen,
-        answered_at: live.answered_at,
+        answered_at: live.answered_at.map(crate::access::at),
         crash_restart_stopped: state.servers.gave_up(id),
         last_crash: last_crash.map(|(at, exit_code, last_lines)| Crash {
-            at,
+            at: crate::access::at(at),
             exit_code,
             last_lines: last_lines.unwrap_or_default(),
         }),
@@ -127,6 +127,8 @@ pub async fn machine(
         });
     Ok(Json(Machine {
         memory_mb,
+        cpus: std::thread::available_parallelism()
+            .map_or(1, |cpus| u32::try_from(cpus.get()).unwrap_or(u32::MAX)),
         assigned_mb,
         warning,
         api_reachability: state.network.report(forward::CORE).map(Into::into),

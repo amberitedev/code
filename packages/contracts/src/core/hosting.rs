@@ -1,5 +1,6 @@
 //! What a Core adds to its servers: memory, JVM flags, restarts, Java, the console, and insight.
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -144,8 +145,8 @@ pub struct ServerInsight {
     /// The server stopped answering the Core's health check, so it is probably frozen. Offer a
     /// restart.
     pub frozen: bool,
-    /// Unix seconds of the server's last answer to the health check.
-    pub answered_at: Option<i64>,
+    /// The server's last answer to the health check.
+    pub answered_at: Option<DateTime<Utc>>,
     /// The Core stopped starting the server again after it crashed 3 times in 10 minutes.
     pub crash_restart_stopped: bool,
     /// The last crash, with the console lines before it.
@@ -158,8 +159,7 @@ pub struct ServerInsight {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct Crash {
-    /// Unix seconds.
-    pub at: i64,
+    pub at: DateTime<Utc>,
     pub exit_code: Option<i32>,
     /// The console lines before the crash.
     pub last_lines: String,

@@ -1,6 +1,7 @@
 //! Routes the local dev backend serves to the dev runner and dev Apps. Elsewhere they answer 404.
 //! A caller sends the runner's secret in `X-Local-Dev-Secret`.
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -30,7 +31,7 @@ pub struct OutboxEmail {
     pub recipient: String,
     pub kind: EmailKind,
     pub flow: String,
-    pub created: String,
+    pub created: DateTime<Utc>,
 }
 
 /// Body of [`Sql`]: one statement and the values for its `?` marks.

@@ -47,7 +47,10 @@ pub async fn get(
     require_owner(&caller)?;
     Ok(Json(Eula {
         url: URL.into(),
-        accepted_at: accepted_at(&state.db).await.map_err(internal)?,
+        accepted_at: accepted_at(&state.db)
+            .await
+            .map_err(internal)?
+            .map(crate::access::at),
     }))
 }
 
@@ -64,6 +67,9 @@ pub async fn post(
     }
     Ok(Json(Eula {
         url: URL.into(),
-        accepted_at: accepted_at(&state.db).await.map_err(internal)?,
+        accepted_at: accepted_at(&state.db)
+            .await
+            .map_err(internal)?
+            .map(crate::access::at),
     }))
 }

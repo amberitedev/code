@@ -8,6 +8,7 @@
 //! of a server that follows no instance, and reads any share its owner reads, so a server can
 //! follow one.
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use super::sharing::{
@@ -165,8 +166,8 @@ pub struct ListedCore {
     /// SHA-256 of the certificate this Core serves HTTPS with. The App trusts only this
     /// certificate for this Core. Null for a Core that does not serve HTTPS yet.
     pub cert_fingerprint: Option<String>,
-    pub created: String,
-    pub last_seen: String,
+    pub created: DateTime<Utc>,
+    pub last_seen: DateTime<Utc>,
 }
 
 /// A signed session ticket.
