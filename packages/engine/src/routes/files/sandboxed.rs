@@ -31,6 +31,17 @@ pub(super) fn internal(error: impl std::fmt::Display) -> ApiError {
     ApiError::new(ErrorCode::InternalError, error.to_string())
 }
 
+/// A folder's refusal of the path, such as one through a link, is the caller's; any other
+/// failure is ours.
+fn io_error(error: std::io::Error) -> ApiError {
+    match error.kind() {
+        std::io::ErrorKind::InvalidInput => {
+            ApiError::new(ErrorCode::InvalidInput, error.to_string())
+        }
+        _ => internal(error),
+    }
+}
+
 pub(super) fn not_found(path: &str) -> ApiError {
     ApiError::new(ErrorCode::NotFound, format!("There is no {path}."))
 }
@@ -321,7 +332,7 @@ pub(super) async fn write(
         files
             .folder
             .write(&path, &mut bytes.as_ref())
-            .map_err(internal)?;
+            .map_err(io_error)?;
         Ok(())
     })
     .await
@@ -336,7 +347,7 @@ pub(super) async fn create_directory(
     let (files, held) = changing(engine, id).await?;
     locked(held, move || {
         files.guard.edit(&files.folder, &path)?;
-        files.folder.create_dir_all(&path).map_err(internal)?;
+        files.folder.create_dir_all(&path).map_err(io_error)?;
         Ok(())
     })
     .await
@@ -365,7 +376,7 @@ pub(super) async fn rename(
                 format!("{to} already exists."),
             ));
         }
-        folder.rename(&from, &to).map_err(internal)
+        folder.rename(&from, &to).map_err(io_error)
     })
     .await
 }
@@ -391,7 +402,7 @@ pub(super) async fn delete(
                 )
             })?;
         } else {
-            folder.remove(&path).map_err(internal)?;
+            folder.remove(&path).map_err(io_error)?;
         }
         Ok(())
     })

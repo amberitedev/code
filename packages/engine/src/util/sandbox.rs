@@ -175,11 +175,11 @@ pub struct Folder {
     root: PathBuf,
 }
 
-/// A link where Core will not follow one.
+/// A link where none is followed.
 fn link(path: &str) -> io::Error {
     io::Error::new(
         io::ErrorKind::InvalidInput,
-        format!("{path} goes through a link, which Core does not follow"),
+        format!("{path} goes through a link, which is not followed"),
     )
 }
 

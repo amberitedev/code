@@ -1214,7 +1214,7 @@ async fn the_apps_files_follow_a_linked_data_folder_but_no_link_in_an_instance()
     ] {
         let (status, _) =
             send_raw(&router, method, &uri, b"overwritten".to_vec()).await;
-        assert!(!status.is_success(), "{method} {uri}");
+        assert!(status.is_client_error(), "{method} {uri}: {status}");
     }
     let (status, _) = send(
         &router,
@@ -1223,7 +1223,7 @@ async fn the_apps_files_follow_a_linked_data_folder_but_no_link_in_an_instance()
         Some(json!({ "source": "linked", "destination": "moved" })),
     )
     .await;
-    assert!(!status.is_success());
+    assert!(status.is_client_error(), "{status}");
     assert_eq!(
         std::fs::read_to_string(outside.path().join("secret.txt")).unwrap(),
         "secret"
