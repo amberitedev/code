@@ -120,8 +120,6 @@ export function sharedInstanceUpdatePreviewQueryOptions(
 		queryFn: () => install_get_shared_instance_update_preview(instanceId),
 		retry: false,
 		staleTime: 30_000,
-		refetchOnWindowFocus: 'always',
-		refetchInterval: 60_000,
 	})
 }
 

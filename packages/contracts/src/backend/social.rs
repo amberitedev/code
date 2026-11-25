@@ -268,6 +268,8 @@ pub struct Notification {
 #[serde(rename_all = "snake_case")]
 pub enum SharedInstanceList {
     SharedInstanceUsers,
+    /// A new version is ready to install.
+    SharedInstanceVersions,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -278,8 +280,8 @@ pub struct SharedInstanceChangeBody {
     pub shared_instance_id: String,
 }
 
-/// A shared instance's member list changed, so an open page fetches it again. Shaped like a
-/// notification so the App passes it on, but not stored.
+/// A shared instance's members or versions changed, so an open page fetches them again. Shaped
+/// like a notification so the App passes it on, but not stored.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct SharedInstanceChange {

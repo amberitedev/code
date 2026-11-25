@@ -121,7 +121,7 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 			assert.equal(response.status, status)
 			assert.equal((await response.json()).error, code)
 		}
-		/** `user`'s friends socket, and a wait for it to be told a share's members changed. */
+		/** `user`'s friends socket, and a wait for it to be told a share's `type` list changed. */
 		const listen = async (user) => {
 			const connection = await backend.fetch(
 				`http://local.test/_internal/launcher_socket?code=mra_${user}`,
@@ -131,15 +131,13 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 			live.accept()
 			const events = []
 			live.addEventListener('message', (event) => events.push(JSON.parse(event.data)))
-			const told = (share) =>
+			const told = (share, type = 'shared_instance_users') =>
 				new Promise((resolve, reject) => {
-					const timer = setTimeout(() => reject(new Error(`no live event for ${share}`)), 2000)
+					const timer = setTimeout(() => reject(new Error(`no ${type} event for ${share}`)), 2000)
 					const check = () => {
 						if (
 							events.some(
-								(event) =>
-									event.body?.type === 'shared_instance_users' &&
-									event.body.shared_instance_id === share,
+								(event) => event.body?.type === type && event.body.shared_instance_id === share,
 							)
 						) {
 							clearTimeout(timer)
@@ -788,6 +786,14 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 			(await ok(await call('/servers/core/srv1/players'))).users.map((user) => user.id),
 			['friend', 'other'],
 		)
+		// A new version reaches its players and members live, so an open page shows the update.
+		const stranger = await listen('stranger')
+		await ok(await push(smp.id, []))
+		await Promise.all([
+			told(smp.id, 'shared_instance_versions'),
+			stranger.told(smp.id, 'shared_instance_versions'),
+		])
+		stranger.live.close()
 		// Only the Core's owner or the share's owner removes a player; removal ends their access.
 		assert.equal(
 			(await call('/servers/core/srv1/players', 'DELETE', { user_ids: ['friend'] }, 'mra_stranger'))
@@ -848,7 +854,7 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		await ok(
 			await call(`/instances/${smp.id}/invites/${memberLink.id}`, 'POST', undefined, 'mra_friend'),
 		)
-		assert.equal((await ok(await asFriend(`/instances/${smp.id}/versions`))).version, 1)
+		assert.equal((await ok(await asFriend(`/instances/${smp.id}/versions`))).version, 2)
 		// Players do not see the member list.
 		await code(await asFriend(`/instances/${smp.id}/users`), 403, 'members_only')
 		// Each Core's owner sees their server's links.

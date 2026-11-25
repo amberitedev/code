@@ -200,6 +200,17 @@ export function createSharedInstanceContext(
 				: instance.value?.shared_instance?.id,
 		() => void refreshAvailability(),
 	)
+	// A new version shows as an update without polling. Joins a read already running, so the
+	// reconnect that fires both events reads once.
+	useSharedInstanceEvent(
+		'shared_instance_versions',
+		() => instance.value?.shared_instance?.id,
+		() =>
+			void queryClient.invalidateQueries(
+				{ queryKey: instanceKeys.sharedUpdatePreviews(instance.value?.id ?? '') },
+				{ cancelRefetch: false },
+			),
+	)
 
 	async function refreshAvailability() {
 		forcedUnavailableReason.value = null
