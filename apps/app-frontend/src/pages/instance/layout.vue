@@ -768,6 +768,8 @@ const startInstance = async (context: string, address?: string, skipOfflineWarni
 			checkingSharedInstanceLaunch.value = false
 		}
 		if (instance.value?.id !== instanceId) return
+		// The linked server is not polled, so join the address that read just returned.
+		if (address) address = serverAddress.value ?? address
 		if (status === 'stopped') {
 			pendingOfflineLaunch.value = { instanceId, context, address }
 			serverOfflineModal.value?.show()
