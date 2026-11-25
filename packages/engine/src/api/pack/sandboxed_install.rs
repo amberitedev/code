@@ -908,13 +908,15 @@ async fn apply_steps(
                     row.relative_path.clone(),
                     format!("{}.disabled", row.relative_path),
                 ] {
-                    if let Some(sha1) = sha1_now(folder, &path).await? {
-                        on_disk = Some((path, sha1));
+                    if let Some((sha1, size)) =
+                        on_disk_now(folder, &path).await?
+                    {
+                        on_disk = Some((path, sha1, size));
                         break;
                     }
                 }
                 match on_disk {
-                    Some((target, sha1))
+                    Some((target, sha1, _))
                         if !server_owned && sha1 == row.sha1 =>
                     {
                         let folder = Arc::clone(folder);
@@ -929,10 +931,11 @@ async fn apply_steps(
                         )
                         .await?;
                     }
-                    Some((_, sha1)) if !server_owned => {
+                    Some((_, sha1, size)) if !server_owned => {
                         let theirs = TrackedFile {
                             source_kind: ContentSourceKind::Local,
                             sha1,
+                            size,
                             ..row
                         };
                         content_rows::upsert_tracked_file(
@@ -958,14 +961,20 @@ async fn apply_steps(
     Ok(())
 }
 
-/// The SHA-1 of the file at `path` as it is now.
-async fn sha1_now(
+/// The SHA-1 and size of the file at `path` as it is now.
+async fn on_disk_now(
     folder: &Arc<Folder>,
     path: &str,
-) -> crate::Result<Option<String>> {
+) -> crate::Result<Option<(String, u64)>> {
     let folder = Arc::clone(folder);
     let path = path.to_owned();
-    Ok(tokio::task::spawn_blocking(move || folder.sha1(&path)).await??)
+    Ok(tokio::task::spawn_blocking(move || -> std::io::Result<_> {
+        let Some(sha1) = folder.sha1(&path)? else {
+            return Ok(None);
+        };
+        Ok(Some((sha1, folder.metadata(&path)?.len())))
+    })
+    .await??)
 }
 
 /// Write one file the pack wants at `path`: a staged download, or an entry of the pack's own
@@ -1068,7 +1077,9 @@ mod server_pack_tests {
     use contracts::Side;
 
     use crate::Engine;
-    use crate::api::instance::{ContentSide, repair_content, set_content_side};
+    use crate::api::instance::{
+        ContentSide, repair_content, set_content_side, toggle_disable_project,
+    };
     use crate::state::instances::adapters::sqlite::content_rows;
     use crate::state::tests::{add_instance, config};
 
@@ -1404,6 +1415,107 @@ mod server_pack_tests {
             !b.unwrap().unwrap().0.by_pack(),
             "an edit the pack dropped is the owner's"
         );
+    }
+
+    /// Back the server's mods up as the install runner does, let an install write half a jar
+    /// and fail, and roll it back. The mods must be as they were.
+    async fn fail_an_install(server: &Server) {
+        use crate::api::pack::install_from::CreatePackLocation;
+        use crate::install::model::{InstallJobState, InstallRollbackState};
+        use crate::install::{InstallRequest, recovery};
+
+        let state = &server.state;
+        let mods = server.dir.join("mods");
+        let read = |path: std::fs::DirEntry| {
+            (path.file_name(), std::fs::read(path.path()).unwrap())
+        };
+        let mut was: Vec<_> = std::fs::read_dir(&mods)
+            .unwrap()
+            .map(|entry| read(entry.unwrap()))
+            .collect();
+        let metadata = super::instance_metadata(state, ID).await.unwrap();
+        let request = InstallRequest::InstallPackToExistingInstance {
+            instance_id: ID.to_owned(),
+            location: CreatePackLocation::FromFile {
+                path: "broken.mrpack".into(),
+            },
+            post_install_edit: None,
+        };
+        let mut job = InstallJobState::new(&request);
+        job.paths.staging_dir = Some(
+            recovery::prepare_instance_update_backup(
+                uuid::Uuid::new_v4(),
+                &metadata,
+                Some(vec!["mods".to_owned()]),
+                state,
+            )
+            .await
+            .unwrap(),
+        );
+        job.rollback = Some(InstallRollbackState {
+            install_stage: metadata.instance.install_stage,
+            instance: metadata,
+        });
+        server.write("mods/broken.jar", "half");
+
+        recovery::apply_cleanup(&job, state).await.unwrap();
+
+        let mut is: Vec<_> = std::fs::read_dir(&mods)
+            .unwrap()
+            .map(|entry| read(entry.unwrap()))
+            .collect();
+        was.sort();
+        is.sort();
+        assert_eq!(is, was);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_failed_install_rolls_back_over_a_turned_off_edit_the_pack_dropped()
+     {
+        let server = server().await;
+        let state = &server.state;
+        let jar = fabric_jar("*");
+        server.install("", &[("overrides/mods/a.jar", &jar)]).await;
+        toggle_disable_project(state, ID, "mods/a.jar", Some(false))
+            .await
+            .unwrap();
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(server.dir.join("mods/a.jar.disabled"))
+            .unwrap()
+            .write_all(b"mine")
+            .unwrap();
+        server.install("", &[]).await;
+
+        fail_an_install(&server).await;
+
+        toggle_disable_project(state, ID, "mods/a.jar", Some(true))
+            .await
+            .unwrap();
+        assert!(server.dir.join("mods/a.jar").exists());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_failed_install_rolls_back_over_a_turned_off_file_the_pack_updated()
+     {
+        let server = server().await;
+        let state = &server.state;
+        server
+            .install("", &[("overrides/mods/a.jar", &fabric_jar("*"))])
+            .await;
+        toggle_disable_project(state, ID, "mods/a.jar", Some(false))
+            .await
+            .unwrap();
+        server
+            .install("", &[("overrides/mods/a.jar", &fabric_jar("server"))])
+            .await;
+
+        fail_an_install(&server).await;
+
+        toggle_disable_project(state, ID, "mods/a.jar", Some(true))
+            .await
+            .unwrap();
+        assert!(server.dir.join("mods/a.jar").exists());
     }
 }
 

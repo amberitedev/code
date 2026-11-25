@@ -1431,7 +1431,7 @@ pub(crate) struct TrackedFile {
     pub source_kind: ContentSourceKind,
     /// As the engine placed it.
     pub sha1: String,
-    /// As the engine placed it; 0 for a file it found there rather than placed.
+    /// As the engine placed it or kept the owner's edit; 0 for a file it found there.
     pub size: u64,
     pub project_id: Option<String>,
     pub version_id: Option<String>,
@@ -1607,7 +1607,8 @@ async fn remove_file_rows(
 }
 
 /// Record a file the engine placed or found, replacing what was recorded for its path but its
-/// sides, which stay with the path. A client-only row of the pack at the path gives way to it.
+/// sides, which stay with the path. A client-only row of the pack at the path gives way to it. A
+/// new hash drops the file's content store binding, which names the old content.
 pub(crate) async fn upsert_tracked_file(
     pool: &SqlitePool,
     instance_id: &str,
@@ -1617,6 +1618,19 @@ pub(crate) async fn upsert_tracked_file(
     let now = Utc::now().timestamp();
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     remove_file_rows(&mut tx, instance_id, &file.relative_path, true).await?;
+    let previous: Option<(String, String)> = sqlx::query_as(
+        "SELECT id, sha1 FROM instance_files WHERE instance_id = ? AND relative_path = ? \
+         AND missing = 0",
+    )
+    .bind(instance_id)
+    .bind(&file.relative_path)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if let Some((id, sha1)) = previous
+        && sha1 != file.sha1
+    {
+        crate::state::content_store::remove_file_storage(&mut tx, &id).await?;
+    }
     let file_id: String = sqlx::query_scalar(
         "INSERT INTO instance_files (id, instance_id, relative_path, file_name, enabled, sha1, \
          size, missing, added_at, modified_at) VALUES (?, ?, ?, ?, 1, ?, ?, 0, ?, ?) \

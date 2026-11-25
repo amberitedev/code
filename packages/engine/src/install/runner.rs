@@ -161,11 +161,6 @@ pub async fn bulk_update_content(
     updates: Vec<super::model::ContentUpdateSelection>,
     state: &Arc<Engine>,
 ) -> crate::Result<InstallJobSnapshot> {
-    if updates.is_empty() {
-        bail!(ErrorKind::InputError(
-            "no content selected to update".to_string(),
-        ));
-    }
     start(
         state,
         InstallRequest::BulkUpdateContent {
