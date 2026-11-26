@@ -2,7 +2,7 @@
 
 Amberite is a Minecraft launcher for modding and sharing, with self-hosted servers. The desktop App manages the Core, a Rust server manager you run on any machine.
 
-You can think of Amberite as a self-hosted alternative to Modrinth Hosting, BisectHosting and other hosting platforms. The main difference is that Amberite integrates directly into your launcher, like Modrinth Hosting.
+You can think of Amberite as a self-hosted alternative to Modrinth Hosting. Like Modrinth Hosting, Amberite integrates directly into your launcher, and it is the product to compare against. Other self-hosting tools, such as Lodestone, are worth looking at for ideas.
 
 Nothing is released, so there's nothing to migrate. But there are some things we never compromise on.
 
