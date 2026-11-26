@@ -66,5 +66,6 @@ describe('upload', () => {
 
 	it('links nothing when the lines do not match the captures', () => {
 		expect(upload(print('https://a'), ['one.png', 'two.png']).size).toBe(0)
+		expect(upload(print(''), ['one.png']).size).toBe(0)
 	})
 })

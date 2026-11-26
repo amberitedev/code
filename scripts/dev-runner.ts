@@ -2391,6 +2391,16 @@ export function connectStack(paths: WorktreePaths, input: RunnerInput) {
 				await new Promise((resolve) => setTimeout(resolve, 500))
 			}
 		},
+		/** Resolves once the frontend serves the App's page, which `ready` asks only of a stack with Apps. */
+		async pageLoads(): Promise<void> {
+			const deadline = Date.now() + UP_WAIT_MS
+			for (;;) {
+				const current = runtime()
+				if (current && (await appPageLoads(current.urls.app))) return
+				if (Date.now() > deadline) throw new DevRunnerError('The App page did not load.')
+				await new Promise((resolve) => setTimeout(resolve, 500))
+			}
+		},
 	}
 }
 

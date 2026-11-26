@@ -15,7 +15,7 @@ test('a server page opened while its Core is off names the server', async ({
 
 	// The App has shown this server before, as it has for anyone who made it.
 	await amberite.open(alice, '/hosting/manage/')
-	await expect(screen.getByText('Survival SMP')).toBeVisible()
+	await screen.getByText('Survival SMP').waitFor()
 
 	await amberite.stop(survival.core)
 	await amberite.open(alice, `/hosting/manage/${survival.id}`)

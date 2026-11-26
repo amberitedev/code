@@ -15,7 +15,7 @@ const DOC_RULES = [
 	},
 	{
 		files: 'docs/internals/testing.md',
-		applyTo: '{apps,packages,scripts}/**/*.{ts,mjs,rs}',
+		applyTo: '{apps,packages,scripts}/**/*.{ts,mjs,rs,vue}',
 		instructions:
 			'Hold changed tests to the rules in docs/internals/testing.md. Request tests only as those rules allow.',
 	},

@@ -6,7 +6,7 @@ import * as NodePath from 'node:path'
 import { test as base } from '@e2e-dev/web'
 
 import { stop } from '../src/call.ts'
-import { type App, type Core, type Runtime, runtime } from '../src/context.ts'
+import { type App, type Core, FixtureError, type Runtime, runtime } from '../src/context.ts'
 import { apply } from '../src/run.ts'
 import { stackEnv } from './stack-env.ts'
 
@@ -31,11 +31,19 @@ const runner = {
 	worktree,
 	// The runner rewrites its file as it works: a torn read is "not yet", and the caller asks again.
 	runtime: (): Runtime | undefined => {
+		let current: Runtime & { readonly buildFailed?: string }
 		try {
-			return JSON.parse(NodeFS.readFileSync(NodePath.join(data, 'runtime.json'), 'utf8')) as Runtime
+			current = JSON.parse(NodeFS.readFileSync(NodePath.join(data, 'runtime.json'), 'utf8'))
 		} catch {
 			return undefined
 		}
+		// Nothing a scenario waits for will come, so it stops here and not at its timeout.
+		if (current.buildFailed) {
+			throw new FixtureError(
+				`${current.buildFailed} did not build. See ${NodePath.join(data, 'dev.log')}`,
+			)
+		}
+		return current
 	},
 	send: (command: string) =>
 		NodeFS.appendFileSync(
@@ -70,8 +78,8 @@ export const test = base.extend<{ amberite: Amberite }>({
 				const tab = runtime().apps.find((entry) => entry.index === who.index)?.tabUrl
 				if (!tab) throw new Error(`${who.name}'s App is not part of the running stack.`)
 				// The tab URL carries the App's local API in its fragment, which a route keeps.
-				const url = new URL(tab)
-				url.pathname = path
+				const url = new URL(path, tab)
+				url.hash = new URL(tab).hash
 				await app.open(url.href)
 				await browser.evaluate(APP_DRAWN)
 			},

@@ -19,6 +19,8 @@ const paths = resolveWorktreePaths()
 // Apps sign themselves in and are driven from browser tabs, as for a fixture.
 const stack = connectStack(paths, { ...parseInput([]), accountWeb: false, hideWindows: true })
 const runtime = await stack.answering()
+// A scenario opens the App as soon as it has seeded, which a new checkout's frontend is not ready for.
+await stack.pageLoads()
 
 const env: StackEnv = {
 	appUrl: runtime.urls.app,

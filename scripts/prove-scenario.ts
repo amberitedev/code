@@ -106,7 +106,7 @@ export function upload(command: string, captures: ReadonlyArray<string>): Map<st
 		encoding: 'utf8',
 		windowsHide: true,
 	})
-	const urls = result.status === 0 ? result.stdout.trim().split(/\r?\n/) : []
+	const urls = result.status === 0 ? result.stdout.split(/\r?\n/).filter(Boolean) : []
 	// Lines pair with captures by position, so another count would mislabel every image.
 	if (urls.length !== captures.length) {
 		console.error(`Upload failed, linking local captures: ${result.stderr || result.stdout}`)
@@ -173,22 +173,32 @@ async function main(): Promise<void> {
 	let baseSide: Side | undefined
 	// A scenario that does not pass here proves nothing, whatever base does.
 	if (headSide.status === 'passed') {
-		const sha = git(['merge-base', 'HEAD', baseRef], head)
-		// Beside this checkout, so its stack gets ports and data of its own.
-		const worktree = `${head}-scenario-${sha.slice(0, 10)}`
+		let worktree: string | undefined
 		const discard = () => {
-			if (!NodeFS.existsSync(worktree)) return
-			node([NodePath.join(scripts, 'dev-runner.ts'), 'down'], worktree)
-			git(['worktree', 'remove', '--force', worktree], head)
+			if (!worktree) return
+			if (NodeFS.existsSync(worktree)) {
+				node([NodePath.join(scripts, 'dev-runner.ts'), 'down'], worktree)
+				// Not `git worktree remove`: on Windows it deletes what a folder junction points to,
+				// and installed packages are links into the store every checkout shares.
+				NodeFS.rmSync(worktree, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 })
+			}
+			git(['worktree', 'prune'], head)
 		}
-		// A run that was killed left its worktree behind, and git refuses to add over it.
-		discard()
-		git(['worktree', 'add', '--quiet', '--detach', worktree, sha], head)
 		try {
+			const sha = git(['merge-base', 'HEAD', baseRef], head)
+			// Beside this checkout, so its stack gets ports and data of its own.
+			worktree = `${head}-scenario-${sha.slice(0, 10)}`
+			// A run that was killed left its worktree behind, and git refuses to add over it.
+			discard()
+			git(['worktree', 'add', '--quiet', '--detach', worktree, sha], head)
 			if (node([NodePath.join(worktree, 'scripts', 'setup-worktree.ts')], worktree) !== 0) {
-				throw new Error(`Could not set up the base checkout at ${worktree}.`)
+				throw new Error(`could not set up the base checkout at ${worktree}`)
 			}
 			baseSide = runSide('base', worktree)
+		} catch (error) {
+			// No base to run on says nothing about the behavior, as when the App did not run there.
+			const message = error instanceof Error ? error.message : String(error)
+			baseSide = { status: 'error', stopped: 'app', title: '', message, captures: [] }
 		} finally {
 			discard()
 		}
@@ -226,9 +236,4 @@ async function main(): Promise<void> {
 	process.exitCode = result.exit
 }
 
-if (
-	process.argv[1] &&
-	NodePath.resolve(process.argv[1]) === NodeURL.fileURLToPath(import.meta.url)
-) {
-	await main()
-}
+if (import.meta.main) await main()
