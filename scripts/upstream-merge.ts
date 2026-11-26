@@ -158,25 +158,27 @@ export function mergeUpstream({ base, upstream, moved, sides, cwd }: MergeOption
 	each(['add'], [...settled.ours, ...settled.theirs])
 	each(['rm', '-q', '-f'], settled.remove)
 
-	// Modrinth's new files, not the ones it only moved. One inside a folder we deleted is not ours to
-	// take either.
+	// Modrinth's new and moved files. One that lands in a folder we deleted is not ours to take;
+	// only a new one is reported as added. `-z` lists `A\0<path>` or `R<score>\0<from>\0<to>`.
 	const unwanted: string[] = []
-	const added = [
+	const arrived = list([
 		'diff',
 		'--cached',
 		'--find-renames',
-		'--name-only',
-		'--diff-filter=A',
+		'--name-status',
+		'--diff-filter=AR',
 		'-z',
 		'HEAD',
-	]
-	for (const path of list(added)) {
+	])
+	for (let index = 0; index < arrived.length;) {
+		const isNew = arrived[index]?.startsWith('A')
+		index += isNew ? 1 : 2
+		const path = arrived[index++] ?? ''
 		const folder = deletedFolder(path)
-		if (folder === undefined) merged.added.push(path)
-		else {
+		if (folder !== undefined) {
 			unwanted.push(path)
 			merged.dropped.push({ path, folder })
-		}
+		} else if (isNew) merged.added.push(path)
 	}
 	each(['rm', '-q', '-f'], unwanted)
 

@@ -40,7 +40,18 @@ const LOCKFILES = {
 	'pnpm-lock.yaml': 'pnpm install --lockfile-only --no-frozen-lockfile --ignore-scripts',
 }
 
-const MARKERS = ['grep', '-I', '-l', '-E', '^(<<<<<<<|>>>>>>>) ']
+const MARKER = '^(<<<<<<<|>>>>>>>) '
+
+// Files with conflict markers in `commit`, or in the index without one.
+function markers(commit?: string) {
+	// Git wants `--cached` before the pattern and a commit after it. A commit prefixes each path
+	// with `<commit>:`.
+	return commit
+		? lines(probe('grep', '-I', '-l', '-E', '-e', MARKER, commit)).map((path) =>
+				path.slice(commit.length + 1),
+			)
+		: lines(probe('grep', '-I', '-l', '-E', '--cached', '-e', MARKER))
+}
 
 const [argument] = process.argv.slice(2)
 try {
@@ -92,8 +103,9 @@ function finish() {
 	const unmerged = git('diff', '--name-only', '--diff-filter=U')
 	if (unmerged) throw new Error(`Still unmerged:\n${unmerged}`)
 	// A file that holds markers at HEAD, such as a merge fixture, is not ours to flag.
-	const known = new Set(lines(probe(...MARKERS, 'HEAD')).map((path) => path.replace(/^HEAD:/, '')))
-	const marked = lines(probe(...MARKERS)).filter((path) => !known.has(path))
+	const known = new Set(markers('HEAD'))
+	// The index, since that is what the commit records.
+	const marked = markers().filter((path) => !known.has(path))
 	if (marked.length > 0) throw new Error(`Conflict markers left in:\n${marked.join('\n')}`)
 
 	for (const [file, command] of Object.entries(LOCKFILES)) {

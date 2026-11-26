@@ -50,6 +50,7 @@ it('merges upstream into our tree and settles what the tree already answers', ()
 		'lib/cut.rs': lines('cut', 5),
 		'lib/desktop.rs': `fn desktop() {}\n${lines('base', 10)}`,
 		'lib/.sqlx/query-aaaa.json': `{"query": "SELECT 1",\n${lines('"describe"', 10)}}\n`,
+		'keep.rs': lines('keep', 5),
 		'site/page.rs': lines('page', 5),
 		'split/one.rs': lines('one', 5),
 		'split/two.rs': lines('two', 5),
@@ -79,6 +80,8 @@ it('merges upstream into our tree and settles what the tree already answers', ()
 	NodeFS.mkdirSync(NodePath.join(repo, 'right'))
 	git('mv', 'split/one.rs', 'left/one.rs')
 	git('mv', 'split/two.rs', 'right/two.rs')
+	// A file we kept, moved into a folder we deleted.
+	git('mv', 'keep.rs', 'site/keep.rs')
 	commit('upstream')
 	const upstream = git('rev-parse', 'HEAD')
 
@@ -109,6 +112,7 @@ it('merges upstream into our tree and settles what the tree already answers', ()
 		conflicts: ['engine/both.rs'],
 		dropped: [
 			{ path: 'engine/cut.rs', folder: undefined },
+			{ path: 'site/keep.rs', folder: 'site' },
 			{ path: 'site/new.rs', folder: 'site' },
 			{ path: 'site/page.rs', folder: 'site' },
 		],
