@@ -153,6 +153,7 @@ mod tests {
     use std::cell::Cell;
     use std::fs;
     use std::io::Write;
+    use std::time::Duration;
 
     #[test]
     fn unchanged_files_are_not_read_again() {
@@ -221,6 +222,16 @@ mod tests {
             .hash(&path, &|_| {
                 if !edited.replace(true) {
                     fs::write(&path, &changed).unwrap();
+                    // A fast disk finishes both writes in one clock tick, which leaves
+                    // the stamp as it was.
+                    File::options()
+                        .write(true)
+                        .open(&path)
+                        .unwrap()
+                        .set_modified(
+                            SystemTime::now() + Duration::from_secs(1),
+                        )
+                        .unwrap();
                 }
             })
             .unwrap();
