@@ -72,18 +72,27 @@ export async function checkTypes(worktree: string, file: string): Promise<boolea
 
 /** Runs the fixture top to bottom. A line that fails stops it there, with the stack left up. */
 export async function runFixture(input: Runner & { readonly file: string }): Promise<void> {
-	begin(input)
 	const started = performance.now()
 	console.log(`[fixture] ${NodePath.basename(input.file)}`)
-	await import(NodeURL.pathToFileURL(input.file).href)
+	await apply(input, () => import(NodeURL.pathToFileURL(input.file).href))
+	console.log(`[fixture] applied in ${((performance.now() - started) / 1000).toFixed(1)} s`)
+}
+
+/**
+ * Runs `build`, whose first line is `stack(...)`, against the dev stack `runner` reaches, and
+ * finishes what it left open. A fixture file is one `build`; a scenario passes its own.
+ */
+export async function apply<T>(runner: Runner, build: () => Promise<T>): Promise<T> {
+	begin(runner)
+	const built = await build()
 	const made = state.stack
 	if (!made) throw new FixtureError('The fixture never called stack(), so nothing was applied.')
 	for (const label of [...state.dirty]) await restartIfPatched(label)
 	await Promise.all(made.apps.map(rememberJava))
 	// Everything a helper started has finished by now, so no download is half written.
 	const kept =
-		made.apps.reduce((sum, app) => sum + keepGameFiles(input.primary, 'app', app.dir), 0) +
-		made.cores.reduce((sum, core) => sum + keepGameFiles(input.primary, 'core', core.dir), 0)
+		made.apps.reduce((sum, app) => sum + keepGameFiles(runner.primary, 'app', app.dir), 0) +
+		made.cores.reduce((sum, core) => sum + keepGameFiles(runner.primary, 'core', core.dir), 0)
 	if (kept > 0) console.log(`[fixture] kept ${kept} downloaded game files for other checkouts`)
-	console.log(`[fixture] applied in ${((performance.now() - started) / 1000).toFixed(1)} s`)
+	return built
 }

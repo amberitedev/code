@@ -748,7 +748,7 @@ export function parseInput(args: ReadonlyArray<string>): RunnerInput {
 	}
 }
 
-function resolveWorktreePaths(): WorktreePaths {
+export function resolveWorktreePaths(): WorktreePaths {
 	const worktree = git(['rev-parse', '--show-toplevel'], process.cwd())
 	const worktreeList = git(['worktree', 'list', '--porcelain'], worktree)
 	const primary =
@@ -2342,6 +2342,59 @@ function sendRunnerCommand(paths: WorktreePaths, command: string): void {
 }
 
 /**
+ * The dev stack a fixture or a scenario fills, started with its data held when none is running.
+ * `runner` is what the fixture package's helpers talk to it through.
+ */
+export function connectStack(paths: WorktreePaths, input: RunnerInput) {
+	const live = readLiveRuntime(paths)
+	// An App decides whether to show its window when it starts, so asking a running one is too late.
+	if (live?.hideWindows && !input.hideWindows) {
+		throw new DevRunnerError('Already running with App windows hidden. Run vp run down first.')
+	}
+	const started = live ? undefined : startRunner(paths, { ...input, held: true })
+	/** The runner this command talks to, or an error once it can no longer finish the job. */
+	const runtime = (): RuntimeFile | undefined => {
+		if (started && !processIsRunning(started)) {
+			throw new DevRunnerError(`The dev runner stopped. See ${devLogPath(paths)}`)
+		}
+		const current = readLiveRuntime(paths)
+		if (current?.buildFailed) {
+			throw new DevRunnerError(`${current.buildFailed} did not build. See ${devLogPath(paths)}`)
+		}
+		return current && (!started || current.pid === started) ? current : undefined
+	}
+	return {
+		wasRunning: live !== undefined,
+		runner: {
+			data: paths.data,
+			primary: paths.primary,
+			runtime,
+			send: (command: string) => sendRunnerCommand(paths, command),
+			worktree: paths.worktree,
+		},
+		/** Resolves once the runner answers. Its Apps and Cores may still be held or starting. */
+		async answering(): Promise<RuntimeFile> {
+			for (;;) {
+				const current = runtime()
+				if (current) return current
+				await new Promise((resolve) => setTimeout(resolve, 200))
+			}
+		},
+		/** Resolves once everything that is meant to run answers. */
+		async ready(): Promise<RuntimeFile> {
+			const deadline = Date.now() + UP_WAIT_MS
+			for (;;) {
+				// The runner rewrites its file as it works, so one read can come back empty.
+				const current = runtime()
+				if (current && (await runtimeIsReady(current))) return current
+				if (Date.now() > deadline) throw new DevRunnerError('The stack did not become ready.')
+				await new Promise((resolve) => setTimeout(resolve, 500))
+			}
+		},
+	}
+}
+
+/**
  * `fixture <name>`: the whole setup in one command. Starts the dev stack when none is running,
  * replaces its data with what the fixture builds, and prints where to reach it.
  */
@@ -2356,51 +2409,21 @@ async function applyFixture(paths: WorktreePaths, name: string, input: RunnerInp
 		process.exitCode = 1
 		return
 	}
-	const live = readLiveRuntime(paths)
-	// An App decides whether to show its window when it starts, so asking a running one is too late.
-	if (live?.hideWindows && !input.hideWindows) {
-		throw new DevRunnerError('Already running with App windows hidden. Run vp run down first.')
-	}
-	const started = live ? undefined : startRunner(paths, { ...input, held: true })
+	const stack = connectStack(paths, input)
 	const waitStarted = performance.now()
 	const record = (result: 'ok' | 'failed') =>
 		recordTiming(paths.primary, {
 			kind: 'fixture',
 			worktree: paths.worktree,
 			result,
-			startedRunner: started !== undefined,
+			startedRunner: !stack.wasRunning,
 			fixture: NodePath.basename(file),
 			ms: { total: Math.round(performance.now() - waitStarted) },
 		})
-	/** The runner this command talks to, or an error once it can no longer finish the job. */
-	const runtime = (): RuntimeFile | undefined => {
-		if (started && !processIsRunning(started)) {
-			throw new DevRunnerError(`The dev runner stopped. See ${devLogPath(paths)}`)
-		}
-		const current = readLiveRuntime(paths)
-		if (current?.buildFailed) {
-			throw new DevRunnerError(`${current.buildFailed} did not build. See ${devLogPath(paths)}`)
-		}
-		return current && (!started || current.pid === started) ? current : undefined
-	}
 	try {
-		while (!runtime()) await new Promise((resolve) => setTimeout(resolve, 200))
-		await fixtures.runFixture({
-			data: paths.data,
-			file,
-			primary: paths.primary,
-			runtime,
-			send: (command: string) => sendRunnerCommand(paths, command),
-			worktree: paths.worktree,
-		})
-		const deadline = Date.now() + UP_WAIT_MS
-		for (;;) {
-			// The runner rewrites its file as it works, so one read can come back empty.
-			const current = runtime()
-			if (current && (await runtimeIsReady(current))) break
-			if (Date.now() > deadline) throw new DevRunnerError('The stack did not become ready.')
-			await new Promise((resolve) => setTimeout(resolve, 500))
-		}
+		await stack.answering()
+		await fixtures.runFixture({ ...stack.runner, file })
+		await stack.ready()
 	} catch (error) {
 		record('failed')
 		runnerLog('error', error instanceof Error ? error.message : String(error))
@@ -2410,7 +2433,7 @@ async function applyFixture(paths: WorktreePaths, name: string, input: RunnerInp
 	}
 	record('ok')
 	await printStatus(paths)
-	if (live) runnerLog('info', 'Every App restarted, so reload any tab that was open.')
+	if (stack.wasRunning) runnerLog('info', 'Every App restarted, so reload any tab that was open.')
 }
 
 /** `stop <name>` and `rs <name>`: asks the runner, then waits until the program is there. */

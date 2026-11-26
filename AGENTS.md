@@ -73,6 +73,7 @@ Every command, the log, and ports: [scripts](docs/internals/scripts.md).
 - Test at one layer: the lowest one that fails on `main`. Do not repeat the case in a wrapper test or at each call site.
 - Never wait on sleeps or polling in a test. Await the event that marks the milestone. A test that needs a timeout to pass is wrong, and a flaky test is fixed, not retried.
 - Proof for a bug fix depends on the bug. Logic, data, state, and protocol bugs get a failing test first (the fewest that fail for that reason on `main`, or before the fix for a bug this branch introduced), then the fix. Purely visual bugs (spacing, colour, alignment, a layout shift) get before/after screenshots as their proof and no test. A Core- or backend-only fix with no visible surface ships the test plus a short runtime transcript.
+- Use a [scenario](docs/internals/fixtures.md#scenarios) as real-app proof for a bug fix a user could reproduce in the App: `vp run scenarios:prove <file>` passes only when the scenario fails on `main` and passes on your checkout.
 - User-visible App changes get one integrated pass in the real App, on a [fixture](docs/internals/fixtures.md) that describes the state the change needs: [test-app](.agents/skills/test-app/SKILL.md). The primary agent does this once after integrating. Subagents do not start their own dev stacks.
 
 ## Documentation
