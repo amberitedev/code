@@ -80,6 +80,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm --filter @amberite/backend --filter @amberite/fixtures --filter @modrinth/api-client --filter @modrinth/app-frontend typecheck
+      # The App's browser tests render in it.
+      - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test:unit
       - run: pnpm --filter @amberite/backend test
 
