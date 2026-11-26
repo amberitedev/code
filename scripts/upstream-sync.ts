@@ -6,20 +6,32 @@
 //                                                   Without a ref, fetches Modrinth's main.
 //        node scripts/upstream-sync.ts --continue   Once nothing is unmerged: regenerate the
 //                                                   lockfiles and make the merge commit.
-//        node scripts/upstream-sync.ts --ports      List the Modrinth changes still owed to code
-//                                                   we rewrote. Fails while one has no trailer.
 //
-// `git merge --abort` undoes a started merge. What the merge settles without asking is in
-// scripts/upstream-merge.ts and scripts/upstream-map.ts.
+// `git merge --abort` undoes a started merge. A file or folder we deleted stays deleted, and the
+// report lists every Modrinth change that left out.
 
 import * as NodeChildProcess from 'node:child_process'
 import * as NodeFS from 'node:fs'
 
-import { MOVED, PORTED, SIDES } from './upstream-map.ts'
-import { type Merged, lookup, matches, mergeUpstream, ourPath } from './upstream-merge.ts'
-import { type Port, owing, readPorts } from './upstream-ports.ts'
+import { type Merged, matches, mergeUpstream, ourPath } from './upstream-merge.ts'
 
 const MODRINTH = 'https://github.com/modrinth/code.git'
+
+// The folder we renamed. Its files are rewritten and hash-named, so git cannot pair them by
+// similarity; a file we moved on its own still looks like Modrinth's, and git pairs it.
+const MOVED = { 'packages/app-lib': 'packages/engine' }
+
+// Files nobody merges by hand. When both sides changed one, this side wins.
+const SIDES = [
+	[/(^|\/)(AGENTS|CLAUDE)\.md$/, 'ours'],
+	[/^README\.md$/, 'ours'],
+	// Keyed by a hash of the query, so ours describes our schema.
+	[/\/\.sqlx\//, 'ours'],
+	// Modrinth's translators own every language but the source one.
+	[/\/locales\/(?!en-US\/)[^/]+\/index\.json$/, 'theirs'],
+	// `--continue` regenerates these against our manifests.
+	[/^(Cargo\.lock|pnpm-lock\.yaml)$/, 'theirs'],
+] as const
 
 // Regenerated against our manifests after the merge. Starting from Modrinth's lockfile keeps its
 // versions; each command prunes and tops it up. pnpm freezes the lockfile in CI unless told not to.
@@ -33,7 +45,6 @@ const MARKERS = ['grep', '-I', '-l', '-E', '^(<<<<<<<|>>>>>>>) ']
 const [argument] = process.argv.slice(2)
 try {
 	if (argument === '--continue') finish()
-	else if (argument === '--ports') ports()
 	else start(argument)
 } catch (error) {
 	// The message is the instruction; a stack trace buries it.
@@ -65,52 +76,13 @@ function start(ref: string | undefined) {
 				return [sha, touched] as const
 			}),
 	)
-	const map = { ...MOVED, ...PORTED }
-	const mapErrors = [
-		...Object.keys(map)
-			.filter((path) => !git('ls-tree', upstream, '--', path))
-			.map((path) => `${path} is gone from Modrinth`),
-		...Object.values(map)
-			.filter((path) => !git('ls-tree', 'HEAD', '--', path))
-			.map((path) => `${path} is gone from our tree`),
-	]
 
-	const owed = history().filter((port) => port.state === 'open' || port.state === 'later')
 	const merged = mergeUpstream({ base, upstream, moved: MOVED, sides: SIDES, cwd: process.cwd() })
-	const { text, toPort } = report({ base, upstream, commits, paths, merged, mapErrors, owed })
 	NodeFS.writeFileSync(
 		git('rev-parse', '--git-path', 'MERGE_MSG'),
-		`chore: merge Modrinth (${commits.length} commits)\n${owing(toPort)}`,
+		`chore: merge Modrinth (${commits.length} commits)\n`,
 	)
-	console.log(text)
-}
-
-function ports() {
-	const all = history()
-	const inState = (state: Port['state']) => all.filter((port) => port.state === state)
-	const [open, later] = [inState('open'), inState('later')]
-	console.log(`${inState('ported').length} ported, ${inState('skipped').length} skipped.`)
-	if (later.length > 0) console.log(['', 'Later:', ...later.map(describe)].join('\n'))
-	if (open.length > 0) {
-		throw new Error(
-			[
-				'',
-				'No trailer yet. Port each one in a commit that ends with `Upstream: <sha>`, or put',
-				'`Upstream-skip: <sha> <why>` or `Upstream-later: <sha> <why>` on any commit:',
-				...open.map(describe),
-			].join('\n'),
-		)
-	}
-}
-
-// Every change a sync in this branch's history owed, read from the commits that mention one.
-function history() {
-	const mentions = '^(To port:|Upstream(-skip|-later)?: )'
-	return readPorts(git('log', '-E', `--grep=${mentions}`, '--format=%B%x01').split('\x01'))
-}
-
-function describe(port: Port) {
-	return `${port.sha} ${port.title}${port.note && `: ${port.note}`}`
+	console.log(report({ base, upstream, commits, paths, merged }))
 }
 
 function finish() {
@@ -154,77 +126,43 @@ type Report = {
 	// Modrinth's paths each commit touched, by short sha.
 	paths: Map<string, string[]>
 	merged: Merged
-	mapErrors: string[]
-	// Changes earlier syncs left unported.
-	owed: Port[]
 }
 
-function report({ base, upstream, commits, paths, merged, mapErrors, owed }: Report) {
-	const index = new Set(lines(git('ls-files')))
+function report({ base, upstream, commits, paths, merged }: Report) {
 	const dropped = new Map(merged.dropped.map((entry) => [entry.path, entry.folder]))
 	const folders = [...new Set(dropped.values())].filter((folder) => folder !== undefined)
-	const isCut = (path: string) =>
+	const isDropped = (path: string) =>
 		dropped.has(path) || folders.some((folder) => matches(path, folder))
-	// Where a change to Modrinth's `path` has to be carried by hand. A ported file we only moved is
-	// neither dropped nor at its own path: git merged the change into our file.
-	const target = (path: string) => {
-		const ours = ourPath(path, MOVED)
-		return dropped.has(ours) || index.has(ours) ? lookup(path, PORTED)?.[1] : undefined
-	}
 
-	const toPort: string[] = []
-	const porting: string[] = []
 	const log: string[] = []
-	// Our paths that Modrinth touched, with the commits that did, minus the ones listed for porting.
+	// Our paths that Modrinth touched, with the commits that did.
 	const touching = new Map<string, string[]>()
 	for (const commit of commits) {
 		const [sha = '', title = ''] = commit.split('\t')
-		const touched = (paths.get(sha) ?? []).map((path) => ({
-			path,
-			ours: ourPath(path, MOVED),
-			target: target(path),
-		}))
-		const ports = touched.filter((change) => change.target !== undefined)
-		for (const change of touched) {
-			if (change.target === undefined) {
-				touching.set(change.ours, [...(touching.get(change.ours) ?? []), sha])
-			}
-		}
-		if (ports.length > 0) {
-			toPort.push(`${sha} ${title}`)
-			porting.push(
-				`${sha} ${title}`,
-				...ports.map((change) => `    ${change.path} -> ${change.target}`),
-			)
-		}
-		const kind =
-			ports.length > 0 ? 'port' : touched.every((change) => isCut(change.ours)) ? 'cut ' : '    '
-		log.push(`${kind} ${sha} ${title}`)
+		const touched = (paths.get(sha) ?? []).map((path) => ourPath(path, MOVED))
+		for (const path of touched) touching.set(path, [...(touching.get(path) ?? []), sha])
+		log.push(`${touched.every(isDropped) ? 'dropped' : '       '} ${sha} ${title}`)
 	}
 
 	const generated = (path: string) => SIDES.some(([pattern]) => pattern.test(path))
-	const loose = merged.dropped
+	const files = merged.dropped
 		.filter((entry) => entry.folder === undefined && !generated(entry.path))
-		.flatMap((entry) => {
-			const shas = touching.get(entry.path)
-			return shas ? [`${entry.path} (${shas.join(', ')})`] : []
-		})
+		.map((entry) => `${entry.path} (${(touching.get(entry.path) ?? []).join(', ')})`)
 	const cut = folders
 		.map((folder) => ({
 			folder,
-			files: merged.dropped.filter((entry) => entry.folder === folder).length,
+			count: merged.dropped.filter((entry) => entry.folder === folder).length,
 		}))
-		.sort((a, b) => b.files - a.files)
-		.map(({ folder, files }) => `${folder} (${files} files)`)
+		.sort((a, b) => b.count - a.count)
+		.map(({ folder, count }) => `${folder} (${count} files)`)
 
 	const section = (title: string, hint: string, items: string[]) =>
 		items.length > 0 ? ['', `## ${title}`, hint, '', ...items] : []
-	const text = [
+	return [
 		`# Modrinth sync: ${commits.length} commits`,
 		'',
 		`base ${base}`,
 		`upstream ${upstream}`,
-		...section('Fix scripts/upstream-map.ts', 'A path it names has moved or is gone.', mapErrors),
 		...section(
 			`Conflicts (${merged.conflicts.length})`,
 			'`git status` shows each one. Resolve, then `git add`.',
@@ -232,23 +170,13 @@ function report({ base, upstream, commits, paths, merged, mapErrors, owed }: Rep
 		),
 		...section('Git also reported', 'These have no unmerged file.', merged.notes),
 		...section(
-			`To port (${toPort.length})`,
-			'Modrinth changed code we rewrote, so nothing merged. `git show <sha> -- <path>` is the change. Each commit here needs a trailer before the sync is done: see scripts/upstream-ports.ts.',
-			porting,
-		),
-		...section(
-			`Still owed from earlier syncs (${owed.length})`,
-			'Put off before. Port it now, or leave it for the next sync to list again.',
-			owed.map(describe),
-		),
-		...section(
-			`Dropped (${loose.length})`,
-			'Modrinth changed a file we deleted, so the change was left out. Nothing to do for one we cut. If we only moved it, add it to MOVED and start over. If we rewrote it, port the change and add it to PORTED.',
-			loose,
+			`Dropped (${files.length})`,
+			'Modrinth changed a file we deleted, so the change was left out. Where our code does that job now, `git show <sha> -- <path>` is the change to carry over by hand.',
+			files,
 		),
 		...section(
 			'Dropped with their folder',
-			'We deleted these folders, so changes and new files inside them were left out. One we moved belongs in MOVED, one we rewrote in PORTED.',
+			'We deleted these folders, so changes and new files inside them were left out.',
 			cut,
 		),
 		...section(
@@ -256,9 +184,12 @@ function report({ base, upstream, commits, paths, merged, mapErrors, owed }: Rep
 			'Modrinth added these and they came in.',
 			merged.added,
 		),
-		...section('Commits', '`port` is listed above. Nothing of a `cut` commit is in our tree.', log),
+		...section(
+			'Commits',
+			'Nothing of a `dropped` commit merged. Read its title: a fix to code we rewrote still needs carrying over.',
+			log,
+		),
 	].join('\n')
-	return { text, toPort }
 }
 
 function git(...args: string[]) {

@@ -1,5 +1,5 @@
 // The merge step of scripts/upstream-sync.ts. It merges Modrinth into HEAD and settles everything
-// our tree and scripts/upstream-map.ts already answer, so only real decisions are left unmerged.
+// our tree already answers, so only real decisions are left unmerged.
 
 import * as NodeChildProcess from 'node:child_process'
 import * as NodeFS from 'node:fs'
@@ -10,8 +10,9 @@ type MergeOptions = {
 	// Merge base of HEAD and `upstream`, both commit shas.
 	base: string
 	upstream: string
-	// MOVED and SIDES from scripts/upstream-map.ts.
+	// Modrinth's path prefix to ours, for folders git cannot pair by similarity.
 	moved: Record<string, string>
+	// Files a side wins without a conflict, when both changed one.
 	sides: readonly (readonly [RegExp, 'ours' | 'theirs'])[]
 	cwd: string
 }

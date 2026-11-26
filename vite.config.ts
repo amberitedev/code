@@ -133,7 +133,26 @@ export default defineConfig({
 									message:
 										'Window chrome comes from @/platform/window; everything else is an App route.',
 								},
+								{
+									group: ['**/helpers/ads', '**/helpers/ads.js', '**/sidebar/promotion.vue'],
+									message: 'Amberite shows no ads.',
+								},
+								{
+									group: ['@stripe/*'],
+									message: 'Amberite takes no payments.',
+								},
 							],
+						},
+					],
+				},
+			},
+			{
+				files: ['packages/ui/src/**', 'packages/api-client/src/**'],
+				rules: {
+					'eslint/no-restricted-imports': [
+						'error',
+						{
+							patterns: [{ group: ['@stripe/*'], message: 'Amberite takes no payments.' }],
 						},
 					],
 				},
