@@ -8,7 +8,7 @@ export type PayloadOf<Event extends Typed, Type extends Event['type']> =
 
 /** How long a closed socket waits before it opens again, doubling up to `MAX_REOPEN_MS`. */
 const FIRST_REOPEN_MS = 1000
-const MAX_REOPEN_MS = 30_000
+const MAX_REOPEN_MS = 5000
 /** How long `ready` waits for the socket to open. */
 export const READY_MS = 10_000
 

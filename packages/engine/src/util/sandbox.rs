@@ -195,6 +195,29 @@ pub fn open_child(dir: &Dir, name: &str, path: &str) -> io::Result<Dir> {
         })
 }
 
+/// `error` reading `path`, said plainly when another program holds the file: on Windows, a
+/// program can open a file without letting others read it, or lock it as Java does `session.lock`.
+#[cfg_attr(not(windows), allow(unused_variables))]
+pub fn held_elsewhere(error: io::Error, path: &str) -> io::Error {
+    #[cfg(windows)]
+    {
+        use windows::Win32::Foundation::{
+            ERROR_LOCK_VIOLATION, ERROR_SHARING_VIOLATION,
+        };
+        let held = [ERROR_SHARING_VIOLATION.0, ERROR_LOCK_VIOLATION.0]
+            .map(|code| Some(code as i32));
+        if held.contains(&error.raw_os_error()) {
+            return io::Error::new(
+                io::ErrorKind::ResourceBusy,
+                format!(
+                    "{path} is open in another program. Close it and try again."
+                ),
+            );
+        }
+    }
+    error
+}
+
 /// Open the plain file `name` inside `dir` without following a link or blocking, and check the
 /// handle is a plain file before anything reads it. `path` names it in errors.
 pub fn open_plain(
@@ -215,9 +238,17 @@ pub fn open_plain(
         cap_fs_ext::FollowSymlinks::No,
     );
     cap_fs_ext::OpenOptionsSyncExt::nonblock(&mut options, true);
-    let file = match dir.open_with(name, &options) {
+    let file = match dir
+        .open_with(name, &options)
+        .map_err(|error| held_elsewhere(error, path))
+    {
         Ok(file) => file,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+        Err(error)
+            if matches!(
+                error.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::ResourceBusy
+            ) =>
+        {
             return Err(error);
         }
         // Java writes some files, such as `level.dat`, that only `copal-servers` may read. Say
@@ -728,6 +759,41 @@ mod tests {
         let folder = Folder::open(dir.path()).unwrap();
         assert_eq!(folder.sha1("config.toml").unwrap(), None);
         assert!(folder.open_file("config.toml").is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_file_another_program_holds_says_so() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bad.zip");
+        std::fs::write(&path, "zip").unwrap();
+        let folder = Folder::open(dir.path()).unwrap();
+        let busy = |error: io::Error| {
+            assert_eq!(error.kind(), io::ErrorKind::ResourceBusy, "{error}");
+            assert!(error.to_string().contains("open in another program"));
+        };
+
+        // Opened without letting others read it.
+        let held = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&path)
+            .unwrap();
+        busy(folder.open_file("bad.zip").unwrap_err());
+        drop(held);
+
+        // Locked, as Java locks `session.lock`: it opens, but reading it fails.
+        let held = std::fs::File::options()
+            .read(true)
+            .write(true)
+            .open(&path)
+            .unwrap();
+        held.lock().unwrap();
+        let mut file = folder.open_file("bad.zip").unwrap().unwrap();
+        let error =
+            io::Read::read_to_end(&mut file, &mut Vec::new()).unwrap_err();
+        busy(held_elsewhere(error, "bad.zip"));
     }
 
     #[cfg(windows)]

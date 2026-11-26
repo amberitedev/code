@@ -427,6 +427,8 @@ export function useSearch(
 	tags: Ref<Tags>,
 	providedFilters: Ref<FilterValue[]>,
 	environmentOverride: Ref<EnvironmentSearchOverride | undefined> = ref(undefined),
+	/** Query params the page keeps for itself, which are not filters. */
+	ignoredQueryParams: readonly string[] = [],
 ) {
 	const query = ref('')
 	const maxResults = ref(20)
@@ -980,7 +982,7 @@ export function useSearch(
 	readQueryParams()
 
 	function readQueryParams() {
-		const readParams = new Set<string>()
+		const readParams = new Set<string>(ignoredQueryParams)
 
 		// Load legacy params
 		loadQueryParam(['l'], (openSource) => {

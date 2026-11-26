@@ -60,7 +60,7 @@ const failureTitles = {
 	delete: commonMessages.deleteFailedLabel,
 	upload: commonMessages.uploadFailedLabel,
 	write: commonMessages.uploadFailedLabel,
-	zip: commonMessages.createFailedLabel,
+	zip: commonMessages.zipFailedLabel,
 } satisfies Record<FilesFailure, unknown>
 
 const serverBusy = computed(() => busyReasons.value.length > 0)

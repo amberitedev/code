@@ -3152,6 +3152,9 @@
   "label.yes": {
     "defaultMessage": "Yes"
   },
+  "label.zip-failed": {
+    "defaultMessage": "ZIP failed"
+  },
   "layout.account-switcher.switching": {
     "defaultMessage": "Switching accounts..."
   },

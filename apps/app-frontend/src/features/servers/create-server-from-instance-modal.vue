@@ -4,7 +4,11 @@
 		type="server-onboarding"
 		:search-projects="noProjects"
 		:get-project-versions="noVersions"
-		:on-back="() => flow?.hide()"
+		:on-back="
+			() => {
+				flow?.hide()
+			}
+		"
 		@create="create"
 	/>
 	<ChooseCoreModal ref="chooseCore" />
@@ -78,14 +82,19 @@ async function create(ctx: CreationFlowContextValue) {
 	try {
 		if (!core) throw new Error('No Core was chosen')
 		const created = await client.cores.createServer(instance.name, core, confirmEula)
-		if (!created) return
+		if (!created) {
+			ctx.loading.value = false
+			return
+		}
 		const { id } = created
+		// Read before hiding: the flow may be reopened, and reset, while the instance is sent.
+		const properties = ctx.buildProperties()
 		flow.value?.hide()
 		// The members of a shared instance are the people likely to be invited to its server.
 		if (props.instance.shared_instance) notifyHomeAddressOnce(addNotification, formatMessage)
 		await queryClient.invalidateQueries({ queryKey: serverKeys.list() })
 		try {
-			await pushInstanceToServer(instance, id, { properties: ctx.buildProperties() })
+			await pushInstanceToServer(instance, id, { properties })
 		} catch (error) {
 			console.error('Failed to send the instance to its new server', error)
 			addNotification({
@@ -95,6 +104,7 @@ async function create(ctx: CreationFlowContextValue) {
 			})
 		}
 	} catch (error) {
+		ctx.loading.value = false
 		console.error('Failed to create server', error)
 		addNotification({
 			type: 'error',
@@ -102,7 +112,6 @@ async function create(ctx: CreationFlowContextValue) {
 			text: coreProblem(error),
 		})
 	} finally {
-		ctx.loading.value = false
 		await queryClient.invalidateQueries({ queryKey: serverKeys.list() })
 	}
 }

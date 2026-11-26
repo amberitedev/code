@@ -51,7 +51,7 @@ const failureTitles = {
 	delete: commonMessages.deleteFailedLabel,
 	upload: commonMessages.uploadFailedLabel,
 	write: commonMessages.uploadFailedLabel,
-	zip: commonMessages.createFailedLabel,
+	zip: commonMessages.zipFailedLabel,
 } satisfies Record<FilesFailure, unknown>
 
 // Only joins paths for display and Open in folder, so the listing never waits on it.

@@ -31,12 +31,15 @@ pub(super) fn internal(error: impl std::fmt::Display) -> ApiError {
     ApiError::new(ErrorCode::InternalError, error.to_string())
 }
 
-/// A folder's refusal of the path, such as one through a link, is the caller's; any other
-/// failure is ours.
+/// A folder's refusal of the path, such as one through a link, is the caller's, and a file
+/// another program holds is a conflict that may pass once it lets go; any other failure is ours.
 fn io_error(error: std::io::Error) -> ApiError {
     match error.kind() {
         std::io::ErrorKind::InvalidInput => {
             ApiError::new(ErrorCode::InvalidInput, error.to_string())
+        }
+        std::io::ErrorKind::ResourceBusy => {
+            ApiError::new(ErrorCode::Conflict, error.to_string())
         }
         _ => internal(error),
     }
@@ -306,7 +309,7 @@ pub(super) async fn open_file(
             Err(error) if error.kind() == std::io::ErrorKind::InvalidInput => {
                 Err(not_found(&path))
             }
-            Err(error) => Err(internal(error)),
+            Err(error) => Err(io_error(error)),
         }
     })
     .await
@@ -563,10 +566,10 @@ fn zip_tree(
             zip.start_file(&path, options).map_err(internal)?;
             std::io::copy(
                 &mut sandbox::open_plain(dir, &name, &path)
-                    .map_err(internal)?,
+                    .map_err(io_error)?,
                 zip,
             )
-            .map_err(internal)?;
+            .map_err(|error| io_error(sandbox::held_elsewhere(error, &path)))?;
         }
     }
     Ok(())
@@ -647,7 +650,9 @@ pub(super) async fn zip(
                         .open_file(&path)
                         .map_err(io_error)?
                         .ok_or_else(|| not_found(name))?;
-                    std::io::copy(&mut file, &mut zip).map_err(internal)?;
+                    std::io::copy(&mut file, &mut zip).map_err(|error| {
+                        io_error(sandbox::held_elsewhere(error, &path))
+                    })?;
                 }
             }
             zip.finish().map_err(internal)?;
