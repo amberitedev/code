@@ -31,14 +31,13 @@ pub(super) fn internal(error: impl std::fmt::Display) -> ApiError {
     ApiError::new(ErrorCode::InternalError, error.to_string())
 }
 
-/// A folder's refusal of the path, such as one through a link, is the caller's; any other
-/// failure is ours.
+/// A folder's refusal of the path, such as one through a link, is the caller's, and a file
+/// another program holds is a conflict that may pass once it lets go; any other failure is ours.
 fn io_error(error: std::io::Error) -> ApiError {
     match error.kind() {
         std::io::ErrorKind::InvalidInput => {
             ApiError::new(ErrorCode::InvalidInput, error.to_string())
         }
-        // Another program holds the file; the same request may go once it lets go.
         std::io::ErrorKind::ResourceBusy => {
             ApiError::new(ErrorCode::Conflict, error.to_string())
         }
