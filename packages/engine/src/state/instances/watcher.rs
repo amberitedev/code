@@ -214,6 +214,10 @@ fn queue_content_sync(instance_id: String, state: Arc<Engine>) {
                 InstancePayloadType::Synced,
             )
             .await;
+            // The listing's read-only marks follow the index this sync just wrote.
+            state.events.send(crate::event::Event::FilesChanged {
+                instance_id: instance_id.clone(),
+            });
             match state.file_watcher.content_syncs.entry(instance_id.clone()) {
                 Entry::Occupied(mut entry) if *entry.get() => {
                     *entry.get_mut() = false
@@ -276,12 +280,14 @@ pub(crate) fn watch_instance_events(
                     let mut visited_screenshot_instances = Vec::new();
                     let mut changed_files =
                         HashMap::<String, BTreeSet<String>>::new();
+                    let mut touched = BTreeSet::new();
 
                     for e in &events {
                         if let Some((instance_id, first_file_name)) =
                             watching.locate(&e.path)
                         {
                             let instance_id = instance_id.to_owned();
+                            touched.insert(instance_id.clone());
                             let sync_content =
                                 first_file_name.as_ref().is_some_and(|name| {
                                     content_folders(state.side)
@@ -409,9 +415,14 @@ pub(crate) fn watch_instance_events(
                     }
 
                     for (instance_id, names) in changed_files {
-                        state.events.send(crate::event::Event::FilesChanged {
+                        state.events.send(crate::event::Event::PathsChanged {
                             instance_id,
                             paths: names.into_iter().collect(),
+                        });
+                    }
+                    for instance_id in touched {
+                        state.events.send(crate::event::Event::FilesChanged {
+                            instance_id,
                         });
                     }
                 }
@@ -734,5 +745,34 @@ mod tests {
         })
         .await
         .expect("the second engine's sync never ran");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_listing_is_read_again_once_the_sync_indexed_it() {
+        crate::install_crypto_provider();
+        let tmp = tempfile::tempdir().unwrap();
+        write(&tmp.path().join("profiles/Survival/mods/a.jar"));
+        let engine = engine(tmp.path().to_path_buf()).await;
+        add_instance(&engine, "a", "Survival").await;
+        let mut events = engine.events.subscribe();
+
+        // Nothing watches the folder, so only the sync can say its files changed.
+        queue_content_sync("a".to_string(), Arc::clone(&engine));
+        tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Ok(crate::event::Event::FilesChanged { instance_id }) =
+                    events.recv().await
+                    && instance_id == "a"
+                {
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("the sync never said the files changed");
+        let files = content_rows::get_instance_files("a", &engine.pool)
+            .await
+            .unwrap();
+        assert!(files.iter().any(|file| file.relative_path == "mods/a.jar"));
     }
 }

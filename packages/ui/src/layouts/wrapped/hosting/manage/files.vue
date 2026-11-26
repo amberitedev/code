@@ -120,6 +120,7 @@ const currentPath = computed({
 
 const files = useInstanceFiles({
 	client: core,
+	events: client.coreEvents(coreId),
 	instanceId: serverId,
 	currentPath,
 	queryKey: (path) => serverKeys.directory(serverId, path),

@@ -1,7 +1,11 @@
-import { instanceFiles, type InstanceZipRequest } from '@amberite/contracts/engine'
+import {
+	type EngineEvent,
+	instanceFiles,
+	type InstanceZipRequest,
+} from '@amberite/contracts/engine'
 import { ApiCallError, type ContractClient, type UploadState } from '@modrinth/api-client'
 import { type QueryKey, useQuery, useQueryClient } from '@tanstack/vue-query'
-import { computed, type MaybeRefOrGetter, type Ref, ref, toValue, watch } from 'vue'
+import { computed, type MaybeRefOrGetter, onScopeDispose, type Ref, ref, toValue, watch } from 'vue'
 
 import type { EditingFile, FileItem } from '../types'
 import type { FileManagerContext } from './file-manager'
@@ -12,6 +16,13 @@ export type FilesFailure = 'create' | 'rename' | 'move' | 'delete' | 'upload' | 
 export interface InstanceFilesOptions {
 	/** `client.local` for an instance on this computer, `client.core(id)` for a server. */
 	client: MaybeRefOrGetter<ContractClient>
+	/**
+	 * The events of the same host, whose `files_changed` reads the shown folder again. A Core sends
+	 * it on the instance's topic, which the host keeps subscribed.
+	 */
+	events: {
+		on(type: 'files_changed', handler: (payload: FilesChanged) => void): () => void
+	}
 	instanceId: MaybeRefOrGetter<string>
 	/** The folder shown, from the instance's folder, without a leading `/`. The host keeps it. */
 	currentPath: Ref<string>
@@ -26,6 +37,8 @@ export interface InstanceFilesOptions {
 	/** Where an upload's progress goes, when the host shows it outside the tab. */
 	uploadState?: Ref<UploadState>
 }
+
+type FilesChanged = Extract<EngineEvent, { type: 'files_changed' }>['payload']
 
 /** `path` without a leading `/`, as the engine names paths in an instance. */
 export function instancePath(path: string): string {
@@ -63,7 +76,7 @@ export function useInstanceFiles(options: InstanceFilesOptions) {
 	const params = () => ({ id: toValue(options.instanceId) })
 
 	// A cached listing shows at once. Opening the tab always reads it again in the background,
-	// because files change outside the tab.
+	// because the watcher does not see every folder, such as a server's world.
 	const directory = useQuery(
 		computed(() => ({
 			...directoryQueryOptions(options, options.currentPath.value),
@@ -91,6 +104,11 @@ export function useInstanceFiles(options: InstanceFilesOptions) {
 	async function refresh() {
 		await queryClient.invalidateQueries({ queryKey: toValue(options.queryKeyPrefix) })
 	}
+	onScopeDispose(
+		options.events.on('files_changed', ({ instance_id }) => {
+			if (instance_id === toValue(options.instanceId)) void refresh()
+		}),
+	)
 
 	async function attempt(failure: FilesFailure, change: () => Promise<unknown>) {
 		try {
@@ -179,7 +197,8 @@ export function useInstanceFiles(options: InstanceFilesOptions) {
 
 	return {
 		items,
-		loading: directory.isFetching,
+		// Only the first read: a refetch of an empty folder would hide the whole tab.
+		loading: directory.isLoading,
 		error: computed(() => directory.error.value ?? null),
 		firstPaintPending,
 		currentPath: options.currentPath,
