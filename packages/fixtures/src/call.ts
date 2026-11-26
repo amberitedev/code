@@ -213,6 +213,20 @@ export async function restart(label: string): Promise<void> {
 	}
 }
 
+/** Stops one program through the dev runner, such as a Core that is to be offline. */
+export async function stop(label: string): Promise<void> {
+	const request = NodeCrypto.randomUUID()
+	current().send(`stop ${label} #${request}`)
+	const deadline = Date.now() + 60_000
+	for (;;) {
+		const answer = runtime().requests[request]
+		if (answer === 'stopped') return
+		if (answer) throw new FixtureError(`${label} is ${answer}, not stopped.`)
+		if (Date.now() > deadline) throw new FixtureError(`${label} did not stop.`)
+		await sleep(100)
+	}
+}
+
 /** Whether a program of the stack answers on its API. */
 export async function answers(label: string): Promise<boolean> {
 	const [kind, index] = label.split(':')

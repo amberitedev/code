@@ -113,12 +113,19 @@ for (const pack of PACKAGES) {
 		})
 	}
 }
-// The root test run (vite.config.ts) covers scripts/ and the unit tests of api-client, fixtures
-// and ui.
+// The root test run (vite.config.ts) covers scripts/, the unit tests of api-client, fixtures and
+// ui, and the App frontend's unit and browser tests. A test sits beside the file it covers.
 const unitTests = changed.flatMap((file) => {
-	if (!/^(?:scripts|packages\/(?:api-client|fixtures|ui)\/src)\/.+\.ts$/.test(file)) return []
-	const test = file.replace(/(?<!\.test)\.ts$/, '.test.ts')
-	return NodeFS.existsSync(NodePath.join(root, test)) ? [test] : []
+	if (
+		!/^(?:scripts|apps\/app-frontend\/src|packages\/(?:api-client|fixtures|ui)\/src)\/.+\.(?:ts|vue)$/.test(
+			file,
+		)
+	)
+		return []
+	const stem = file.replace(/(?:\.browser)?(?:\.test)?\.(?:ts|vue)$/, '')
+	return [`${stem}.test.ts`, `${stem}.browser.test.ts`].filter((test) =>
+		NodeFS.existsSync(NodePath.join(root, test)),
+	)
 })
 if (unitTests.length > 0) {
 	steps.push({ name: 'unit tests', command: 'vp', args: ['test', 'run', ...new Set(unitTests)] })

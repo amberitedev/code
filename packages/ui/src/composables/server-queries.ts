@@ -1,5 +1,6 @@
 import { core } from '@amberite/contracts/core'
 import type { AbstractModrinthClient } from '@modrinth/api-client'
+import { createGlobalState, useStorage } from '@vueuse/core'
 
 /** Query keys for servers on Cores. Shorter forms are prefixes of longer ones for invalidation. */
 export const serverKeys = {
@@ -46,11 +47,28 @@ export const sharedInstanceKeys = {
 	friends: (userId: string | undefined) => ['shared-instances', 'friends', userId] as const,
 }
 
+/**
+ * The last name each server had, kept on disk: a Core that is off cannot say what its servers are
+ * called. Every read of a server from its Core writes it.
+ */
+export const useServerNames = createGlobalState(() =>
+	useStorage<Record<string, string>>('server-names', {}),
+)
+
 export function serverListQueryOptions(client: AbstractModrinthClient) {
 	return {
 		queryKey: serverKeys.list(),
 		staleTime: 30_000,
-		queryFn: () => client.cores.servers(),
+		queryFn: async () => {
+			const list = await client.cores.servers()
+			const names = useServerNames()
+			// When every Core answered, a server that is not listed is gone.
+			names.value = {
+				...(list.offline_cores.length > 0 ? names.value : {}),
+				...Object.fromEntries(list.servers.map((server) => [server.server_id, server.name])),
+			}
+			return list
+		},
 	}
 }
 
@@ -58,10 +76,13 @@ export function serverListQueryOptions(client: AbstractModrinthClient) {
 export function serverDetailQueryOptions(client: AbstractModrinthClient, serverId: string) {
 	return {
 		queryKey: serverKeys.detail(serverId),
-		queryFn: async () =>
-			(await client.cores.serverRoutes(serverId)).call(core.GetServer, {
-				params: { id: serverId },
-			}),
+		queryFn: async () => {
+			const server = await (
+				await client.cores.serverRoutes(serverId)
+			).call(core.GetServer, { params: { id: serverId } })
+			useServerNames().value[serverId] = server.name
+			return server
+		},
 		staleTime: 30_000,
 		// A Core that does not answer is offline: say so at once instead of retrying.
 		retry: false,

@@ -49,6 +49,8 @@ Thumbs.db
 # Nuxt dev/build outputs
 .output
 .data
+# What a scenario run leaves: its report, screenshots and traces.
+.e2e
 .nuxt
 .nitro
 .cache

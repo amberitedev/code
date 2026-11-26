@@ -1,5 +1,7 @@
 import 'vite-plus/test/config'
 
+import * as NodePath from 'node:path'
+
 import { defineConfig } from 'vite-plus'
 
 export default defineConfig({
@@ -7,16 +9,34 @@ export default defineConfig({
 		fmt: false,
 	},
 	test: {
-		environment: 'node',
-		include: [
-			'scripts/**/*.test.ts',
-			'packages/api-client/src/**/*.test.ts',
-			'packages/fixtures/src/**/*.test.ts',
-			'packages/ui/src/**/*.test.ts',
+		projects: [
+			{
+				// The App's own import shortcut, for the logic its UI calls.
+				resolve: { alias: { '@': NodePath.resolve(import.meta.dirname, 'apps/app-frontend/src') } },
+				test: {
+					name: 'unit',
+					environment: 'node',
+					include: [
+						'scripts/**/*.test.ts',
+						'apps/app-frontend/src/**/*.test.ts',
+						'packages/api-client/src/**/*.test.ts',
+						'packages/fixtures/src/**/*.test.ts',
+						'packages/ui/src/**/*.test.ts',
+					],
+					exclude: [
+						'**/*.browser.test.ts',
+						'**/.data/**',
+						'**/.repos/**',
+						'**/dist/**',
+						'**/node_modules/**',
+						'**/target/**',
+					],
+					hookTimeout: 60_000,
+					testTimeout: 60_000,
+				},
+			},
+			'apps/app-frontend/vitest.browser.config.ts',
 		],
-		exclude: ['**/.data/**', '**/.repos/**', '**/dist/**', '**/node_modules/**', '**/target/**'],
-		hookTimeout: 60_000,
-		testTimeout: 60_000,
 	},
 	staged: {
 		'*': 'vp fmt --no-error-on-unmatched-pattern',

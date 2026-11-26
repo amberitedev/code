@@ -63,17 +63,10 @@ Every command, the log, and ports: [scripts](docs/internals/scripts.md).
 
 ## Verifying
 
-- Before you push, run `vp run check:changed`. It runs CI's fast checks for changed files: lint, typos, TOML, typecheck and tests of the affected packages, and for Rust `rustfmt`, a build, and the tests of changed crates. CI still runs the full suites.
-- While you iterate, run only the tests that cover what you changed.
-- Rust tests run through `node scripts/dev-runner.ts test <crate>`. A plain `cargo test` rebuilds everything in a separate folder.
-- **Do not run repo-wide checks.** No `vp check`, no `vp run -r test`, no `vp run -r typecheck` unless the developer asks. CI owns the full suite.
-- Core and backend behavior changes ship with focused tests for that behavior.
-- Test behavior that can break, such as two things happening at once, an operation that fails halfway, sharing and sync between the App, a Core and the backend, files and archives from other people, external formats (modpacks, Modrinth's API), and the logic a bug fix changed. Leave out tests for what types already guarantee, trivial logic, copy text, smoke runs, mock-call mirrors, and props rendered to static markup.
-- Extend before you add. When an existing test or table covers the behavior, add a row or an assertion there. Write a new test only when no case fits.
-- Test at one layer: the lowest one that fails on `main`. Do not repeat the case in a wrapper test or at each call site.
-- Never wait on sleeps or polling in a test. Await the event that marks the milestone. A test that needs a timeout to pass is wrong, and a flaky test is fixed, not retried.
-- Proof for a bug fix depends on the bug. Logic, data, state, and protocol bugs get a failing test first (the fewest that fail for that reason on `main`, or before the fix for a bug this branch introduced), then the fix. Purely visual bugs (spacing, colour, alignment, a layout shift) get before/after screenshots as their proof and no test. A Core- or backend-only fix with no visible surface ships the test plus a short runtime transcript.
-- User-visible App changes get one integrated pass in the real App, on a [fixture](docs/internals/fixtures.md) that describes the state the change needs: [test-app](.agents/skills/test-app/SKILL.md). The primary agent does this once after integrating. Subagents do not start their own dev stacks.
+- Before you push, run `vp run check:changed`. It runs CI's fast checks for changed files: lint, typos, TOML, typecheck and tests of the affected packages, and for Rust `rustfmt`, a build, and the tests of changed crates. **Do not run repo-wide checks** (`vp check`, `vp run -r test`, `vp run -r typecheck`) unless asked. CI owns the full suite.
+- Iterate with only the tests that cover what you changed: `vp test run <files>`, and for Rust `node scripts/dev-runner.ts test <crate>`. A plain `cargo test` rebuilds everything in a separate folder.
+- Follow [testing](docs/internals/testing.md) for what to test, bug-fix proof, waiting for work (no sleeps or polling), and real-app [Scenarios](docs/internals/testing.md#scenarios) (`vp run scenarios:prove`).
+- Give user-visible App changes one integrated pass in the real App, on a [fixture](docs/internals/fixtures.md) that describes the state the change needs: [test-app](.agents/skills/test-app/SKILL.md) (primary agent only, once after integrating; subagents do not start dev stacks). Inspect the rendered result and walk the flow as a user would, checking layout, visual hierarchy and ergonomics, and fix anything rough before handing back.
 
 ## Documentation
 

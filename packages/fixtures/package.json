@@ -15,7 +15,9 @@
 		"@amberite/contracts": "workspace:*"
 	},
 	"devDependencies": {
+		"@e2e-dev/web": "0.16.0",
 		"@types/node": "^24",
+		"e2e": "0.23.1",
 		"typescript": "^5.9.3"
 	}
 }

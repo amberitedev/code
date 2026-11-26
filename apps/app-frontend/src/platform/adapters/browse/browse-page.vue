@@ -40,6 +40,7 @@ import {
 	stripServerRuntimeInstallOverrides,
 	useBrowseSearch,
 	useDebugLogger,
+	useServerNames,
 	useVIntl,
 } from '@modrinth/ui'
 import { queryOptions, useQuery, useQueryClient } from '@tanstack/vue-query'
@@ -226,10 +227,15 @@ watch(serverBackUrl, (value) => {
 	}
 })
 const serverIcon = useCachedServerIcon(() => String(displayedBrowseRoute.value.query.sid ?? ''))
+// As on the server's own pages: its last name, since its Core may be off.
+const serverNames = useServerNames()
 const serverBreadcrumbDefinition = {
 	slot: 'server',
 	id: () => `server:${String(displayedBrowseRoute.value.query.sid ?? '')}`,
-	label: () => serverContextServerData.value?.name ?? formatMessage(commonMessages.loadingLabel),
+	label: () =>
+		serverContextServerData.value?.name ??
+		serverNames.value[String(displayedBrowseRoute.value.query.sid ?? '')] ??
+		'Server',
 	visual: () => ({
 		type: 'image' as const,
 		src: serverIcon.value,

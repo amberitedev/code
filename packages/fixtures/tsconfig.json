@@ -11,5 +11,11 @@
 		"allowImportingTsExtensions": true,
 		"erasableSyntaxOnly": true
 	},
-	"include": ["src/**/*.ts", "kit/**/*.ts", "fixtures/**/*.ts"]
+	"include": [
+		"src/**/*.ts",
+		"kit/**/*.ts",
+		"fixtures/**/*.ts",
+		"scenarios/**/*.ts",
+		"e2e.config.ts"
+	]
 }
