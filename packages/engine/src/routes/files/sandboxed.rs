@@ -309,7 +309,7 @@ pub(super) async fn open_file(
             Err(error) if error.kind() == std::io::ErrorKind::InvalidInput => {
                 Err(not_found(&path))
             }
-            Err(error) => Err(internal(error)),
+            Err(error) => Err(io_error(error)),
         }
     })
     .await
