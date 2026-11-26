@@ -50,7 +50,6 @@ import type { Server } from '@amberite/contracts/core'
 import { ApiCallError } from '@modrinth/api-client'
 import { HistoryIcon, ServerStackIcon, TriangleAlertIcon } from '@modrinth/assets'
 import {
-	commonMessages,
 	ErrorInformationCard,
 	injectAuth,
 	injectModrinthClient,
@@ -58,7 +57,7 @@ import {
 	serverDetailQueryOptions,
 	serverKeys,
 	ServersManageRootLayout,
-	useVIntl,
+	useServerNames,
 } from '@modrinth/ui'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, ref, shallowRef, watch } from 'vue'
@@ -74,7 +73,6 @@ const router = useRouter()
 const auth = injectAuth()
 const client = injectModrinthClient()
 const queryClient = useQueryClient()
-const { formatMessage } = useVIntl()
 
 const serverRoute = shallowRef(router.currentRoute.value)
 watch(
@@ -93,12 +91,6 @@ const serverId = computed(() => {
 	const rawId = serverRoute.value.params.id
 	return Array.isArray(rawId) ? (rawId[0] ?? '') : (rawId ?? '')
 })
-
-function getCachedServerName(id: string): string | undefined {
-	return queryClient
-		.getQueryData<{ servers: Server[] }>(serverKeys.list())
-		?.servers.find((server) => server.server_id === id)?.name
-}
 
 // The panel talks to the server's Core, so it opens once the Core is known.
 const {
@@ -141,16 +133,17 @@ const historyTabs = computed(() =>
 		: [],
 )
 
+// A server the App has not seen has no name until its Core answers, and none if the Core is off.
+const serverNames = useServerNames()
+const lastName = (id: string) => serverNames.value[id] ?? 'Server'
 const breadcrumbServerId = ref(serverId.value)
-const breadcrumbLabel = ref(
-	getCachedServerName(serverId.value) ?? formatMessage(commonMessages.loadingLabel),
-)
+const breadcrumbLabel = ref(lastName(serverId.value))
 watch(
 	serverId,
 	(value) => {
 		if (!route.path.startsWith('/hosting/manage/') || route.name === 'Servers') return
 		breadcrumbServerId.value = value
-		breadcrumbLabel.value = getCachedServerName(value) ?? formatMessage(commonMessages.loadingLabel)
+		breadcrumbLabel.value = lastName(value)
 	},
 	{ flush: 'sync' },
 )
