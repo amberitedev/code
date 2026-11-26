@@ -1468,6 +1468,8 @@ export function downloadPrograms(
 		}
 		// A zip archive does not carry the permission to run.
 		for (const program of programs) NodeFS.chmodSync(program, 0o755)
+		// A machine that has never built has no cache yet.
+		NodeFS.mkdirSync(build.cacheDir, { recursive: true })
 		NodeFS.renameSync(partial, NodePath.join(build.cacheDir, key))
 		return true
 	} catch {
