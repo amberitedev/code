@@ -1,10 +1,12 @@
 import * as NodeChildProcess from 'node:child_process'
 import * as NodeFS from 'node:fs'
+import * as NodeNet from 'node:net'
 import * as NodeOS from 'node:os'
 import * as NodePath from 'node:path'
 import { describe, expect, it } from 'vite-plus/test'
 
 import {
+	appLocalAddresses,
 	appTabUrl,
 	createCommandInput,
 	createRuntimeEnvironment,
@@ -18,7 +20,6 @@ import {
 	programKey,
 	readStackShape,
 	resolveStartOffset,
-	sharedLabels,
 	testBuild,
 } from './dev-runner.ts'
 
@@ -33,7 +34,6 @@ describe('dev runner ports', () => {
 		expect(portsForOffset(0)).toEqual({
 			app: 1420,
 			backend: 8787,
-			accountWeb: 3100,
 			core: 16662,
 		})
 	})
@@ -95,7 +95,6 @@ describe('dev runner ports', () => {
 		expect(portsForOffset(offset)).toEqual({
 			app: 1421,
 			backend: 8788,
-			accountWeb: 3101,
 			core: 16663,
 		})
 	})
@@ -125,12 +124,9 @@ describe('dev runner environment', () => {
 })
 
 describe('dev runner programs', () => {
-	it('runs the backend and the frontend beside the stack, and the sign-in website when asked', async () => {
-		expect(sharedLabels()).toEqual(['backend', 'account-web', 'app-frontend'])
-		expect(sharedLabels(false)).toEqual(['backend', 'app-frontend'])
+	it('checks the ports of the frontend, the backend and the first Core', async () => {
 		const checked: number[] = []
 		await findFirstAvailableOffset({
-			accountWeb: false,
 			checkPort: async (port) => {
 				checked.push(port)
 				return true
@@ -160,18 +156,41 @@ describe('dev runner stack', () => {
 		)
 	})
 
-	it('reads the options a background start passes', () => {
-		expect(parseInput([])).toEqual({ accountWeb: true, held: false, hideWindows: false })
-		expect(parseInput(['--no-account-web', '--hide-windows', '--held'])).toEqual({
-			accountWeb: false,
-			held: true,
+	it('reads the fixture and options of dev', () => {
+		expect(parseInput([])).toEqual({ fixture: undefined, held: false, hideWindows: false })
+		expect(parseInput(['backend', '--hide-windows'])).toEqual({
+			fixture: 'backend',
+			held: false,
 			hideWindows: true,
 		})
+		expect(parseInput(['--held', '--hide-windows'])).toMatchObject({ held: true })
 		expect(() => parseInput(['--nope'])).toThrow('Unknown option --nope')
+		expect(() => parseInput(['default', 'backend'])).toThrow('one fixture')
+		expect(() => parseInput(['--held', 'default'])).toThrow('takes no fixture')
 	})
 
-	it('leaves the Apps and Cores to a fixture', () => {
-		expect(() => parseInput(['2'])).toThrow('A fixture names the Apps and Cores')
+	it('keeps each App at its local address across starts', async () => {
+		const scratch = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), 'dev-runner-'))
+		const taken = NodeNet.createServer()
+		try {
+			const first = await appLocalAddresses(scratch, 2)
+			expect(new Set(first.map(({ port }) => port)).size).toBe(2)
+			// A stack with one more App keeps the first two.
+			const second = await appLocalAddresses(scratch, 3)
+			expect(second.slice(0, 2)).toEqual(first)
+			// One with fewer leaves the rest kept for later.
+			await appLocalAddresses(scratch, 1)
+			expect(await appLocalAddresses(scratch, 3)).toEqual(second)
+			// A kept port something else holds is replaced; the secret stays.
+			await new Promise<void>((resolve) => taken.listen(second[1]!.port, '127.0.0.1', resolve))
+			const moved = await appLocalAddresses(scratch, 3)
+			expect(moved[1]!.port).not.toBe(second[1]!.port)
+			expect(moved[1]!.secret).toBe(second[1]!.secret)
+			expect([moved[0], moved[2]]).toEqual([second[0], second[2]])
+		} finally {
+			taken.close()
+			NodeFS.rmSync(scratch, { force: true, recursive: true })
+		}
 	})
 
 	it('reads the stack a fixture wrote', () => {
@@ -253,9 +272,8 @@ describe('dev runner stack', () => {
 		])
 	})
 
-	it('runs the programs a mode shares beside the stack', () => {
+	it('runs the backend and the frontend beside the stack', () => {
 		const specs = createSharedSpecs({
-			accountWeb: false,
 			env: {},
 			paths,
 			ports: portsForOffset(0),

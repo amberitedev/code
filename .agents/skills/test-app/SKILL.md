@@ -10,13 +10,14 @@ it unavailable. Do not install or switch to another automation system.
 
 ## Start the app
 
-Reuse this task's healthy stack: `vp run status` prints each App's `tab:` URL. Otherwise run
-`vp run fixture` from the repository root, which starts the stack in the background on this
-checkout's ignored `.data` and prints them. Read the actual URLs from that output. The bare
-frontend URL reaches no App.
+Reuse this task's stack: `vp run status` prints each App's `tab:` URL. Otherwise start one as a
+background task from the repository root with `vp run dev <fixture> --hide-windows`. It runs on
+this checkout's ignored `.data` and prints the URLs when it is ready. The bare frontend URL reaches
+no App.
 
 Test with meaningful state. Describe the state that lets you test the scenario you want as a
-[fixture](../../../docs/internals/fixtures.md) and apply it, rather than clicking state together.
+[fixture](../../../docs/internals/fixtures.md) and apply it with `vp run fixture <name>`, rather
+than clicking state together.
 
 ## Use the Browser panel
 
@@ -26,7 +27,7 @@ exists yet; opening a tab needs no user action. Stop verification and explain th
 the tools are absent or `preview_open` reports unavailable or fails.
 
 Open each App's `tab:` URL in its own tab, then use `preview_snapshot` and T3's interaction tools.
-Each tab is one account, signed in. After a fixture is applied, open the new URLs.
+Each tab is one account, signed in. A tab keeps its URL across fixtures; reload it after one.
 
 Snapshots and clicks need the T3 Code window on screen. If they time out, ask for the window and
 continue through `preview_evaluate`.
@@ -35,6 +36,6 @@ continue through `preview_evaluate`.
 
 Exercise the affected flow in every account it reaches and capture the state that proves it works.
 
-Stop the stack with `vp run down` when you are done: this machine runs several agents. Then run
-`vp run fixture --show-windows`, which starts a clean stack with App windows for the developer to
-try the change, and leave those Apps to them.
+Stop the stack when you are done by stopping its task, or with `vp run down`: this machine runs
+several agents. Leave nothing running for the developer; tell them the `vp run dev <fixture>` that
+shows the change.

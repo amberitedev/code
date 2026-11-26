@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 // How fast the dev loop is for an agent in a new worktree, as one score. Each scenario is timed
-// the way an agent waits on it: worktree setup, `up` until the App is usable, and for a change
+// the way an agent waits on it: worktree setup, `dev` until the App is usable, and for a change
 // that would ship, `check:changed`. A scenario scores 100 when it takes its target time, 200 at
 // half of it. The overall score is their harmonic mean, so one slow scenario holds it down: a
 // 20 minute cold start cannot be bought back with a 1 second warm one.
@@ -152,7 +152,7 @@ class Bench {
 	}
 
 	/**
-	 * A new worktree with `edits`, through setup and `up`, then `check:changed` unless told not.
+	 * A new worktree with `edits`, through setup and `dev`, then `check:changed` unless told not.
 	 * `after` runs next in the same worktree, and only its steps count.
 	 */
 	async worktree(
@@ -242,22 +242,27 @@ class Bench {
 		return total(first!) >= total(second!) ? first! : second!
 	}
 
-	/** `up` again while it reports still starting, as an agent does. */
+	/** Starts the stack as an agent does and times it until it says it is ready. `down` stops it. */
 	async up(name: string, path: string): Promise<number> {
-		let seconds = 0
-		for (;;) {
-			const started = performance.now()
-			let output: string
-			try {
-				output = await this.exec(name, 'up', path, ['scripts/dev-runner.ts', 'up'])
-			} catch (error) {
-				// The default fixture gives up on a build that outlasts its wait and asks for a rerun.
-				if (!/still being built|did not become ready/.test(String(error))) throw error
-				output = 'Still starting'
+		NodeFS.mkdirSync(this.logs, { recursive: true })
+		const log = NodePath.join(this.logs, `${name}.log`)
+		NodeFS.appendFileSync(log, '\n=== up: node scripts/dev-runner.ts dev --hide-windows\n')
+		const started = performance.now()
+		const child = NodeChildProcess.spawn(
+			this.node,
+			['scripts/dev-runner.ts', 'dev', '--hide-windows'],
+			{ cwd: path, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true },
+		)
+		await new Promise<void>((resolve, reject) => {
+			const collect = (chunk: Buffer) => {
+				NodeFS.appendFileSync(log, chunk)
+				if (chunk.toString().includes(' · ready')) resolve()
 			}
-			seconds += (performance.now() - started) / 1000
-			if (!output.includes('Still starting')) return seconds
-		}
+			child.stdout.on('data', collect)
+			child.stderr.on('data', collect)
+			child.once('close', (code) => reject(new Error(`${name} up exited ${code}. See ${log}`)))
+		})
+		return (performance.now() - started) / 1000
 	}
 
 	async step(
