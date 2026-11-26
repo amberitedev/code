@@ -4,8 +4,9 @@
 // and on the commit it branched from, and says whether it fails there and passes here.
 // See docs/internals/testing.md#scenarios.
 //
-// Exits 0 when proven, 1 when not, 2 when the App did not run, and 3 when the scenario stopped
-// before its assertion.
+// Exits 0 when proven, 1 when not, 2 when the scenario could not run (the App did not run, or the
+// command was used wrongly), and 3 when the scenario cannot prove anything as written (it stopped
+// before its assertion, or its file holds several tests).
 
 import * as NodeChildProcess from 'node:child_process'
 import * as NodeFS from 'node:fs'
@@ -32,7 +33,7 @@ export interface Side {
 	readonly status: 'passed' | 'failed' | 'error'
 	readonly title: string
 	readonly message?: string
-	/** For `error`: the App did not run, or it ran and the scenario stopped before its assertion. */
+	/** For `error`: the scenario could not run, or it cannot prove anything as it is written. */
 	readonly stopped?: 'app' | 'scenario'
 	/** Screenshot paths, in the order the scenario took them. */
 	readonly captures: ReadonlyArray<string>
@@ -209,10 +210,13 @@ async function main(): Promise<void> {
 			baseSide = runSide('base', worktree)
 		} catch (error) {
 			// No base to run on says nothing about the behavior, as when the App did not run there.
-			const message = error instanceof Error ? error.message : String(error)
+			// One line: the verdict quotes it, and git's errors span several.
+			const message = (error instanceof Error ? error.message : String(error))
+				.replaceAll(/\s+/g, ' ')
+				.trim()
 			baseSide = { status: 'error', stopped: 'app', title: '', message, captures: [] }
 		} finally {
-			// Two finished runs are worth more than a tidy folder, and the next run clears it first.
+			// Two finished runs are worth more than a tidy folder. A run from the same base clears it.
 			try {
 				discard()
 			} catch (error) {
