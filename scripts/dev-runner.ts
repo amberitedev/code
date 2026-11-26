@@ -1422,8 +1422,9 @@ export function downloadPrograms(
 			timeout: 5 * 60_000,
 			windowsHide: true,
 		})
-	// Beside its final place and renamed into it, so a half-fetched folder is never taken for one.
-	const partial = NodePath.join(build.cacheDir, `${key}.${process.pid}.partial`)
+	// Fetched beside the cache and renamed into it, so a half-fetched folder is never taken for
+	// programs, and no other checkout meets it while it tidies the cache.
+	const partial = NodePath.join(`${build.cacheDir}-fetch`, `${key}.${process.pid}`)
 	const archive = `${partial}.zip`
 	try {
 		const listed = gh(
