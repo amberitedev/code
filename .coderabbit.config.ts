@@ -29,6 +29,9 @@ const DOC_RULES = [
 
 export default defineConfig({
 	reviews: {
+		// Our agents read the finding and fix it. CodeRabbit's own fixer and its ready-made prompt stay off.
+		enable_prompt_for_ai_agents: false,
+		finishing_touches: { autofix: { enabled: false } },
 		path_instructions: DOC_RULES.map((rule) => ({
 			path: rule.applyTo,
 			instructions: rule.instructions,
