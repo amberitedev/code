@@ -68,9 +68,13 @@ console.log(
 // A copy, not a link: Windows only allows symlinks with Developer Mode or elevation.
 function copyEnvFile(): void {
 	// A primary checkout still on main keeps the engine at its old path.
-	const from = [ENV_FILE, NodePath.join('packages', 'app-lib', '.env')]
-		.map((file) => NodePath.join(primary, file))
-		.find((file) => NodeFS.existsSync(file))
+	const from = [
+		...[ENV_FILE, NodePath.join('packages', 'app-lib', '.env')].map((file) =>
+			NodePath.join(primary, file),
+		),
+		// What CI builds the dev programs with. A checkout with other settings compiles its own.
+		NodePath.join(worktree, `${ENV_FILE}.prod`),
+	].find((file) => NodeFS.existsSync(file))
 	const to = NodePath.join(worktree, ENV_FILE)
 	if (from === undefined || NodeFS.existsSync(to)) return
 	NodeFS.copyFileSync(from, to)

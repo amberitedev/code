@@ -96,6 +96,17 @@ committed, so the same Rust in two checkouts gives the same key. When the key al
 the runner starts it without Cargo. That is the usual case in a worktree that does not touch Rust.
 The six most recently used keys are kept.
 
+When the key has no program here, the runner looks for one CI built before it compiles. The
+[Dev programs](../../.github/workflows/dev-programs.yml) workflow builds every Rust change on `main`
+for Windows and keeps both programs for 90 days in an artifact named after the key, which `gh`
+downloads. So a checkout whose Rust is `main`'s compiles nothing, even on a machine that never built
+it. Two traps:
+
+- The key only matches when `packages/engine/.env` is the copy of `.env.prod` that setup makes.
+  Other settings give another key, and that checkout compiles its own.
+- Only an artifact from a run on `main` of this repository is taken. A pull request can upload one
+  under any name, and the runner runs what it downloads.
+
 Nothing in the build depends on ports. The App is told where its frontend is, and whether to keep
 its window hidden, in `--amberite-dev-config` when it starts.
 

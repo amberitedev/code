@@ -377,7 +377,7 @@ async function main(): Promise<void> {
 		return
 	}
 	if (command === 'stop' || command === 'rs') return sendProgramCommand(paths, command, commandArgs)
-	if (command === 'build') return buildPrograms(paths)
+	if (command === 'build') return buildPrograms(paths, commandArgs.includes('--artifact'))
 	if (command === 'test') return testCrates(paths, commandArgs)
 	if (command !== 'dev') {
 		throw new DevRunnerError(
@@ -785,9 +785,10 @@ function readSharedEnv(paths: WorktreePaths): NodeJS.ProcessEnv {
 
 /**
  * `build`: compiles the App and Core for this checkout's current Rust without starting anything,
- * so a later `up` finds them ready. Worktree setup runs it in the background.
+ * so a later `up` finds them ready. Worktree setup runs it in the background. `--artifact` builds
+ * nothing and prints the name CI keeps this build's programs under.
  */
-async function buildPrograms(paths: WorktreePaths): Promise<void> {
+async function buildPrograms(paths: WorktreePaths, nameOnly: boolean): Promise<void> {
 	const ports = portsForOffset(0)
 	const specs = createStackSpecs({
 		// Only the builds are used, so no App ever gets this address.
@@ -801,6 +802,10 @@ async function buildPrograms(paths: WorktreePaths): Promise<void> {
 		shape: { apps: [{ name: 'alice' }], cores: 1, id: 'build' },
 	})
 	const spec = specs.find((candidate) => candidate.program)!
+	if (nameOnly) {
+		console.log(programsArtifact(programKey(paths.worktree, spec.program!.build)))
+		return
+	}
 	if (!(await ensureProgram(paths.worktree, spec, spec.program!.build, new Set(), () => false))) {
 		process.exitCode = 1
 	}
@@ -1326,6 +1331,8 @@ async function buildProgram(
 	let key = initialKey
 	if (complete(key)) {
 		runnerLog('info', `${spec.label} using ${cached(key)}`)
+	} else if (downloadPrograms(worktree, build, key)) {
+		runnerLog('info', `${spec.label} downloaded ${cached(key)}, built by CI`)
 	} else {
 		const started = performance.now()
 		const unlock = await lockBuilds(cache, spec.label, stopped)
@@ -1386,6 +1393,89 @@ async function buildProgram(
 		}
 	}
 	return cached(key)
+}
+
+/** The artifact CI keeps a build's programs in, and a checkout with the same key looks for. */
+export function programsArtifact(key: string): string {
+	return `programs-${process.platform}-${process.arch}-${key}`
+}
+
+/**
+ * Fetches the programs CI built for this key (the `Dev programs` workflow) into the cache, so a
+ * checkout whose Rust is on the default branch compiles nothing. False when there are none, or
+ * when `gh` is missing or signed out: the caller builds as before.
+ *
+ * Only a run on `branch` of this repository counts. Anyone's pull request can upload an artifact
+ * under any name, and this one is run.
+ */
+export function downloadPrograms(
+	worktree: string,
+	build: Pick<ProgramBuild, 'cacheDir' | 'programs'>,
+	key: string,
+	branch = 'main',
+): boolean {
+	const gh = (args: ReadonlyArray<string>, stdout: 'pipe' | number) =>
+		NodeChildProcess.spawnSync('gh', args, {
+			cwd: worktree,
+			encoding: 'utf8',
+			stdio: ['ignore', stdout, 'ignore'],
+			timeout: 5 * 60_000,
+			windowsHide: true,
+		})
+	// Beside its final place and renamed into it, so a half-fetched folder is never taken for one.
+	const partial = NodePath.join(build.cacheDir, `${key}.${process.pid}.partial`)
+	const archive = `${partial}.zip`
+	try {
+		const listed = gh(
+			['api', `repos/{owner}/{repo}/actions/artifacts?name=${programsArtifact(key)}`],
+			'pipe',
+		)
+		if (listed.status !== 0) return false
+		const { artifacts } = JSON.parse(listed.stdout) as {
+			artifacts: ReadonlyArray<{
+				readonly expired: boolean
+				readonly id: number
+				readonly workflow_run?: {
+					readonly head_branch: string
+					readonly head_repository_id: number
+					readonly repository_id: number
+				}
+			}>
+		}
+		const artifact = artifacts.find(
+			({ expired, workflow_run: run }) =>
+				!expired && run?.head_branch === branch && run.head_repository_id === run.repository_id,
+		)
+		if (!artifact) return false
+		NodeFS.mkdirSync(partial, { recursive: true })
+		const file = NodeFS.openSync(archive, 'w')
+		const fetched = gh(['api', `repos/{owner}/{repo}/actions/artifacts/${artifact.id}/zip`], file)
+		NodeFS.closeSync(file)
+		if (fetched.status !== 0) return false
+		// Windows' own `tar` reads zip archives; the one Git brings does not. Elsewhere `unzip` does.
+		const unpacked =
+			process.platform === 'win32'
+				? NodeChildProcess.spawnSync(
+						NodePath.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe'),
+						['-xf', archive, '-C', partial],
+						{ windowsHide: true },
+					)
+				: NodeChildProcess.spawnSync('unzip', ['-o', '-q', archive, '-d', partial])
+		const programs = build.programs.map((program) => NodePath.join(partial, program))
+		if (unpacked.status !== 0 || !programs.every((program) => NodeFS.existsSync(program))) {
+			return false
+		}
+		// A zip archive does not carry the permission to run.
+		for (const program of programs) NodeFS.chmodSync(program, 0o755)
+		NodeFS.renameSync(partial, NodePath.join(build.cacheDir, key))
+		return true
+	} catch {
+		// Not answered as expected, or another checkout put the programs there first: build instead.
+		return false
+	} finally {
+		NodeFS.rmSync(archive, { force: true })
+		NodeFS.rmSync(partial, { recursive: true, force: true })
+	}
 }
 
 /**

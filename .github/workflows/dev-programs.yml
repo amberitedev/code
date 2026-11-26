@@ -1,0 +1,78 @@
+name: Dev programs
+
+# Builds the App and Core the way a checkout's dev stack runs them, under the key the dev runner
+# gives that build, so `scripts/dev-runner.ts` downloads them instead of compiling. A checkout
+# whose Rust differs from main's still compiles its own.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**/*.rs'
+      - '**/Cargo.toml'
+      - Cargo.lock
+      - rust-toolchain.toml
+      - .cargo/**
+      - apps/app/**
+      - apps/core/**
+      - apps/app-frontend/package.json
+      - packages/ariadne/**
+      - packages/async-minecraft-ping/**
+      - packages/contracts/**
+      - packages/engine/**
+      - packages/minecraft-meta-manifest/**
+      - packages/modrinth-content-management/**
+      - packages/path-util/**
+      - packages/sharing-client/**
+      - packages/sharing-storage/**
+      - scripts/dev-runner.ts
+      - .github/workflows/dev-programs.yml
+  # A change to this workflow proves itself. Its artifacts are not on main, so nothing downloads them.
+  pull_request:
+    paths:
+      - .github/workflows/dev-programs.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A build in progress finishes and saves its cache. Of the pushes that arrive meanwhile, only the
+# newest waits its turn.
+concurrency:
+  group: dev-programs-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    name: Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .nvmrc
+      - uses: actions-rust-lang/setup-rust-toolchain@2b1f5e9b395427c92ee4e3331786ca3c37afe2d7 # v1.16.0
+        with:
+          # Where the dev runner compiles.
+          cache-workspaces: '. -> target/dev-shared'
+          # The action's default fails on warnings, and a checkout builds with no flags of its own.
+          rustflags: ''
+      # The settings every checkout's dev programs are built with, so their keys match this one.
+      - run: cp packages/engine/.env.prod packages/engine/.env
+        shell: bash
+      - name: Name the build
+        id: build
+        shell: bash
+        run: |
+          artifact=$(node scripts/dev-runner.ts build --artifact)
+          echo "artifact=$artifact" >> "$GITHUB_OUTPUT"
+          echo "key=${artifact##*-}" >> "$GITHUB_OUTPUT"
+      - run: node scripts/dev-runner.ts build
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.build.outputs.artifact }}
+          path: target/dev-shared/dev-bin/${{ steps.build.outputs.key }}/
+          if-no-files-found: error
+          retention-days: 90
