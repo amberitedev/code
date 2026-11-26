@@ -49,7 +49,12 @@ export async function call<P, Q, B, R>(
 	const answer = await send(`${target.base}${route}${search}`, {
 		method: endpoint.method,
 		headers: target.headers,
-		body: endpoint.body === 'json' ? JSON.stringify(body ?? null) : undefined,
+		body:
+			endpoint.body === 'json'
+				? JSON.stringify(body ?? null)
+				: body instanceof Blob
+					? Buffer.from(await body.arrayBuffer())
+					: undefined,
 	})
 	if (answer.status >= 400) {
 		throw new FixtureError(
@@ -231,7 +236,8 @@ export function send(
 	init: {
 		readonly method: string
 		readonly headers: Record<string, string>
-		readonly body?: string
+		/** JSON, or the bytes of a `stream` body. */
+		readonly body?: string | Buffer
 	},
 ): Promise<{ readonly status: number; readonly text: string }> {
 	return new Promise((resolve, reject) => {
@@ -239,7 +245,11 @@ export function send(
 		const headers =
 			init.body === undefined
 				? init.headers
-				: { ...init.headers, 'content-type': 'application/json' }
+				: {
+						...init.headers,
+						'content-type':
+							typeof init.body === 'string' ? 'application/json' : 'application/octet-stream',
+					}
 		const options = { method: init.method, headers, timeout: 120_000 }
 		const request =
 			target.protocol === 'https:'

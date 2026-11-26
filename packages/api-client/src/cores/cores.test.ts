@@ -41,6 +41,7 @@ const LISTED: Server = {
 	net: { ip: SERVER.net.ip, port: SERVER.net.port, outside: null, game_port: 25565 },
 	power_state: 'stopped',
 	linked_instance: null,
+	uploaded_modpack: null,
 	shared_instance_id: null,
 	reachability: null,
 	players: null,

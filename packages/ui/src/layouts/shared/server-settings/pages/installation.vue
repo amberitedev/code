@@ -214,6 +214,10 @@ const requiresInstallation = computed(() => installation.value?.status === 'fail
 const modpack = computed(() => contentQuery.data.value?.modpack ?? null)
 /** The App instance the server follows, whose owner pushes its versions. */
 const follow = computed(() => server.value?.linked_instance)
+/** The `.mrpack` the server was set up from by upload, when Modrinth does not know it. */
+const uploadedModpack = computed(() =>
+	modpack.value ? null : (server.value?.uploaded_modpack ?? null),
+)
 
 const modpackProjectId = computed(() => modpack.value?.project.id ?? null)
 
@@ -398,6 +402,11 @@ function rollbackOptimisticInstallation(snapshot: InstallationCacheSnapshot) {
 	queryClient.setQueryData(serverDetailQueryKey, snapshot.server)
 }
 
+function promptLocalModpackUpload(action: 'reinstall' | 'swap') {
+	modpackUploadAction.value = action
+	modpackUploadModal.value?.show()
+}
+
 async function uploadLocalModpackWithSoftOverride(file: File) {
 	modpackUploadProgress.value = { loaded: 0, total: 0, progress: 0 }
 	// Before the upload: the Core's install job starts before it answers, and may end before.
@@ -473,7 +482,7 @@ provideInstallationSettings({
 		}
 		return rows
 	}),
-	isLinked: computed(() => !!modpack.value || !!follow.value),
+	isLinked: computed(() => !!modpack.value || !!follow.value || !!uploadedModpack.value),
 	isBusy: setupActionDisabled,
 	busyMessage: setupActionDisabledMessage,
 	isLinkedInstance: computed(() => !!follow.value),
@@ -484,6 +493,13 @@ provideInstallationSettings({
 				iconUrl: null,
 				title: followed.name,
 				link: `/instance/${encodeURIComponent(followed.id)}`,
+			}
+		const uploaded = uploadedModpack.value
+		if (uploaded)
+			return {
+				iconUrl: null,
+				title: uploaded.name ?? server.value?.name ?? '',
+				versionNumber: uploaded.version_number,
 			}
 		if (!modpack.value) return null
 		const { project, version, owner } = modpack.value
@@ -635,6 +651,7 @@ provideInstallationSettings({
 
 	async reinstallModpack() {
 		if (setupActionDisabled.value) return
+		if (uploadedModpack.value) return promptLocalModpackUpload('reinstall')
 		const pack = modpack.value
 		if (!pack?.version) return
 		const projectId = pack.project.id
@@ -654,7 +671,10 @@ provideInstallationSettings({
 		}
 	},
 
-	async swapModpack() {},
+	async swapModpack() {
+		if (setupActionDisabled.value || !uploadedModpack.value) return
+		promptLocalModpackUpload('swap')
+	},
 
 	async unlinkModpack() {
 		if (setupActionDisabled.value) return
@@ -745,7 +765,7 @@ provideInstallationSettings({
 	isServer: true,
 	isApp: serverSettings.isApp.value,
 	showModpackVersionActions: computed(() => !!modpack.value),
-	isLocalFile: false,
+	isLocalFile: computed(() => !!uploadedModpack.value),
 
 	lockPlatform: false,
 	hideLoaderVersion: false,

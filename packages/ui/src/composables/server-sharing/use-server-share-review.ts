@@ -1,4 +1,4 @@
-import { core as coreRoutes } from '@amberite/contracts/core'
+import { core as coreRoutes, type Server } from '@amberite/contracts/core'
 import { ModrinthApiError } from '@modrinth/api-client'
 import {
 	useIsFetching,
@@ -16,6 +16,7 @@ import { serverKeys, shareHistoryKey } from '#ui/composables/server-queries'
 import { injectAuth, injectModrinthServerContext, injectNotificationManager } from '#ui/providers'
 
 import { serverShareableFilesQueryOptions, serverShareDiffQueryOptions } from './query-options'
+import { ensureShareable, injectShareUnlinkPrompt, ShareUnlinkDeclined } from './shareable'
 
 export type ServerShareActionTarget = {
 	userId: string | undefined
@@ -41,6 +42,7 @@ export function useServerShareReview<Action extends string = 'push'>(options?: {
 	const diffModal = ref<InstanceType<typeof ServerSharePushModal>>()
 	const previewOpen = ref(false)
 	const sharedInstanceId = computed(() => server.value?.shared_instance_id)
+	const shareUnlink = injectShareUnlinkPrompt(null)
 	let disposed = false
 	onScopeDispose(() => {
 		disposed = true
@@ -103,6 +105,19 @@ export function useServerShareReview<Action extends string = 'push'>(options?: {
 		})
 	}
 
+	// A share action, so every share button on the server waits while it asks and unlinks.
+	const unlinkMutation = useMutation({
+		mutationKey: ['servers', 'share-action', serverId],
+		mutationFn: async (current: Server) => {
+			if (await ensureShareable(core, current, shareUnlink))
+				await queryClient.invalidateQueries({ queryKey: serverKeys.detail(serverId) })
+		},
+	})
+
+	async function unlinkUploadedPack() {
+		if (server.value?.uploaded_modpack) await unlinkMutation.mutateAsync(server.value)
+	}
+
 	/**
 	 * Opens the diff review for the current world. When the shared instance has no ready
 	 * version yet there is nothing to diff against, so `action` runs straight away instead.
@@ -111,6 +126,13 @@ export function useServerShareReview<Action extends string = 'push'>(options?: {
 		if (!canSetup.value || pending.value) return
 		const target = currentTarget()
 		if (!target) return
+		try {
+			await unlinkUploadedPack()
+		} catch (error) {
+			if (!(error instanceof ShareUnlinkDeclined)) handleError(error)
+			return
+		}
+		if (!target.isCurrent()) return
 		previewOpen.value = true
 		prefetchFiles()
 		const result = await previewQuery.refetch()
@@ -126,6 +148,7 @@ export function useServerShareReview<Action extends string = 'push'>(options?: {
 
 	async function publish(target: ServerShareActionTarget) {
 		if (!canSetup.value) throw new Error(formatMessage(messages.permission))
+		await unlinkUploadedPack()
 		const shared = await core.call(coreRoutes.ShareServer, {
 			params: { id: serverId },
 			body: {
@@ -169,6 +192,10 @@ export function useServerShareReview<Action extends string = 'push'>(options?: {
 			await actionMutation.mutateAsync({ action, reviewed, target })
 			if (target.isCurrent()) previewOpen.value = false
 		} catch (error) {
+			if (error instanceof ShareUnlinkDeclined) {
+				if (target.isCurrent()) previewOpen.value = false
+				return
+			}
 			handleError(error)
 			if (!reviewed || !previewOpen.value || !target.isCurrent()) return
 			// The review holds the diff from before the push. Once the push landed it stays closed;

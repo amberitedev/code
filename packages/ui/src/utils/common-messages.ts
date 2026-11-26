@@ -480,6 +480,14 @@ export const commonMessages = defineMessages({
 		id: 'button.unlink-modpack',
 		defaultMessage: 'Unlink modpack',
 	},
+	shareRequiresUnlinkHeader: {
+		id: 'sharing.unlink.header',
+		defaultMessage: 'Sharing requires unlinking',
+	},
+	shareRequiresUnlinkBody: {
+		id: 'sharing.unlink.body',
+		defaultMessage: 'You must unlink this modpack to share your instance',
+	},
 	reinstallModpackButton: {
 		id: 'button.reinstall-modpack',
 		defaultMessage: 'Reinstall modpack',

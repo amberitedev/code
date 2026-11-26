@@ -786,6 +786,53 @@ async fn content_changes_wait_for_a_stopped_server_and_a_pack_update_backs_up_fi
 }
 
 #[tokio::test]
+async fn a_server_set_up_from_an_uploaded_pack_shows_it_until_unlinked() {
+    let core = core().await;
+    let server = core.server.clone();
+    let owner = core.sign_in("owner").await;
+    let detail = format!("/servers/{server}");
+    engine::instance::edit(
+        &core.state.engine,
+        &server,
+        engine::state::EditInstance {
+            link: Some(engine::state::InstanceLink::ImportedModpack {
+                project_id: None,
+                version_id: None,
+                name: Some("Drop Check".into()),
+                version_number: Some("1.0.0".into()),
+                filename: Some("upload.mrpack".into()),
+            }),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let (_, before) = core
+        .call(Method::GET, &detail, Some(&owner), None, None)
+        .await;
+    assert_eq!(
+        before["uploaded_modpack"],
+        json!({ "name": "Drop Check", "version_number": "1.0.0" })
+    );
+
+    let (status, _) = core
+        .call(
+            Method::POST,
+            &format!("/instances/{server}/modpack/unlink"),
+            Some(&owner),
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, after) = core
+        .call(Method::GET, &detail, Some(&owner), None, None)
+        .await;
+    assert_eq!(after["uploaded_modpack"], Value::Null);
+}
+
+#[tokio::test]
 async fn restores_need_the_owners_fresh_ticket_and_downloads_the_session() {
     let core = core().await;
     let server = core.server.clone();

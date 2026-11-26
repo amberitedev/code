@@ -33,6 +33,9 @@ pub struct Server {
     pub power_state: ServerPower,
     /// The App instance it follows.
     pub linked_instance: Option<LinkedInstance>,
+    /// The `.mrpack` it was set up from by upload, whose files it keeps apart as a Modrinth pack's.
+    /// A share cannot carry one, so the server is unlinked from it before it is shared.
+    pub uploaded_modpack: Option<UploadedModpack>,
     /// The share it reads: its instance's when it follows one, else its own once it is shared.
     pub shared_instance_id: Option<String>,
     /// Whether players can join from the internet. Null while it does not run.
@@ -158,6 +161,14 @@ pub enum ServerPower {
     Stopping,
     Crashed,
     Killed,
+}
+
+/// A `.mrpack` a server was set up from by upload, as the pack names itself.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+pub struct UploadedModpack {
+    pub name: Option<String>,
+    pub version_number: Option<String>,
 }
 
 /// The App instance a server follows.
@@ -407,6 +418,7 @@ pub(super) fn ts_types() -> Vec<String> {
         Flows::decl(&cfg),
         ServerIcon::decl(&cfg),
         ServerPower::decl(&cfg),
+        UploadedModpack::decl(&cfg),
         LinkedInstance::decl(&cfg),
         LinkedPackState::decl(&cfg),
         NewServer::decl(&cfg),
