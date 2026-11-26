@@ -1,5 +1,5 @@
 // Scenarios: tests that drive the real App on this checkout's dev stack. `vp run scenarios` starts
-// the stack and runs this; see docs/internals/fixtures.md#scenarios.
+// the stack and runs this; see docs/internals/testing.md#scenarios.
 import { web } from '@e2e-dev/web'
 import type { E2EConfig } from 'e2e'
 

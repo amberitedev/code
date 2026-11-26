@@ -3,7 +3,7 @@
 // `vp run scenarios [e2e run arguments]`: drives the real App through the scenarios in
 // packages/fixtures/scenarios, on the dev stack of the checkout it is run from. Starts the stack
 // when none runs and leaves it up, holding the last scenario's data.
-// See docs/internals/fixtures.md#scenarios.
+// See docs/internals/testing.md#scenarios.
 
 import * as NodeChildProcess from 'node:child_process'
 import * as NodePath from 'node:path'

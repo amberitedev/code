@@ -2,7 +2,7 @@
 
 // `vp run scenarios:prove <scenario> [--base <ref>] [--upload-command <command>]`: runs one scenario on this checkout as it is
 // and on the commit it branched from, and says whether it fails there and passes here.
-// See docs/internals/fixtures.md#scenarios.
+// See docs/internals/testing.md#scenarios.
 //
 // Exits 0 when proven, 1 when not, 2 when the App did not run, and 3 when the scenario stopped
 // before its assertion.
