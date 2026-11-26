@@ -28,7 +28,12 @@ describe('readSide', () => {
 			'scenario',
 		],
 		['no report', undefined, 'error', 'app'],
-		['two tests in the file', report({ status: 'passed' }, { status: 'failed' }), 'error', 'app'],
+		[
+			'two tests in the file',
+			report({ status: 'passed' }, { status: 'failed' }),
+			'error',
+			'scenario',
+		],
 	])('reads %s', (_, input, status, stopped) => {
 		expect(readSide('results', input)).toMatchObject({ status, ...(stopped ? { stopped } : {}) })
 	})

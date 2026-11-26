@@ -2396,6 +2396,9 @@ export function connectStack(paths: WorktreePaths, input: RunnerInput) {
 			const deadline = Date.now() + UP_WAIT_MS
 			for (;;) {
 				const current = runtime()
+				if (current?.programs['app-frontend'] === 'failed') {
+					throw new DevRunnerError(`The App frontend stays down. See ${devLogPath(paths)}`)
+				}
 				if (current && (await appPageLoads(current.urls.app))) return
 				if (Date.now() > deadline) throw new DevRunnerError('The App page did not load.')
 				await new Promise((resolve) => setTimeout(resolve, 500))

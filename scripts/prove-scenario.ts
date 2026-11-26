@@ -49,7 +49,13 @@ export function readSide(resultsDir: string, report: Report | undefined): Side {
 			ran.length > 1
 				? `the scenario file ran ${ran.length} tests; a proof needs exactly one`
 				: 'e2e wrote no report: the stack did not start, or no test was selected'
-		return { status: 'error', stopped: 'app', title: '', message, captures: [] }
+		return {
+			status: 'error',
+			stopped: ran.length > 1 ? 'scenario' : 'app',
+			title: '',
+			message,
+			captures: [],
+		}
 	}
 	const { error } = attempt
 	const status =
@@ -106,7 +112,13 @@ export function upload(command: string, captures: ReadonlyArray<string>): Map<st
 		encoding: 'utf8',
 		windowsHide: true,
 	})
-	const urls = result.status === 0 ? result.stdout.split(/\r?\n/).filter(Boolean) : []
+	const urls =
+		result.status === 0
+			? result.stdout
+					.split(/\r?\n/)
+					.map((line) => line.trim())
+					.filter(Boolean)
+			: []
 	// Lines pair with captures by position, so another count would mislabel every image.
 	if (urls.length !== captures.length) {
 		console.error(`Upload failed, linking local captures: ${result.stderr || result.stdout}`)
@@ -200,7 +212,12 @@ async function main(): Promise<void> {
 			const message = error instanceof Error ? error.message : String(error)
 			baseSide = { status: 'error', stopped: 'app', title: '', message, captures: [] }
 		} finally {
-			discard()
+			// Two finished runs are worth more than a tidy folder, and the next run clears it first.
+			try {
+				discard()
+			} catch (error) {
+				console.error(`Could not remove ${worktree}: ${String(error)}`)
+			}
 		}
 	}
 
@@ -211,7 +228,7 @@ async function main(): Promise<void> {
 		: new Map<string, string>()
 	const row = (name: string, side: Side | undefined) => {
 		if (!side) return `| ${name} | not run | |`
-		const message = side.message?.replaceAll('\n', ' ').replaceAll('|', '\\|')
+		const message = side.message?.replaceAll(/\r?\n/g, ' ').replaceAll('|', '\\|')
 		// Uploaded, or relative to the proof, so its Markdown shows them wherever the folder is opened.
 		const captures = side.captures.map(
 			(capture) =>
@@ -236,4 +253,10 @@ async function main(): Promise<void> {
 	process.exitCode = result.exit
 }
 
-if (import.meta.main) await main()
+if (import.meta.main) {
+	// Not 1, which says the scenario ran on both sides and did not prove the fix.
+	await main().catch((error: unknown) => {
+		console.error(error instanceof Error ? error.message : String(error))
+		process.exitCode = 2
+	})
+}
