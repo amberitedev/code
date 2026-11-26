@@ -619,6 +619,10 @@ export const commonMessages = defineMessages({
 		id: 'label.create-failed',
 		defaultMessage: 'Create failed',
 	},
+	zipFailedLabel: {
+		id: 'label.zip-failed',
+		defaultMessage: 'ZIP failed',
+	},
 	extractFailedLabel: {
 		id: 'label.extract-failed',
 		defaultMessage: 'Extract failed',

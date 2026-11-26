@@ -14,7 +14,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, useTemplateRef } from 'vue'
+import { computed, nextTick, useTemplateRef } from 'vue'
 import type { ComponentExposed } from 'vue-component-type-helpers'
 
 import MultiStageModal from '../../base/MultiStageModal.vue'
@@ -116,7 +116,11 @@ async function show(prepare?: (context: CreationFlowContextValue) => void | Prom
 	modal.value?.show()
 }
 
-function hide() {
+// The final stage refuses to close while `loading`; an owner hiding the flow is done with it.
+// The modal reads that refusal as a prop, so it hides once the cleared `loading` has rendered.
+async function hide() {
+	ctx.loading.value = false
+	await nextTick()
 	modal.value?.hide()
 }
 

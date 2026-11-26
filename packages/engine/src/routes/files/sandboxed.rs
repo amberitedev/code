@@ -38,6 +38,10 @@ fn io_error(error: std::io::Error) -> ApiError {
         std::io::ErrorKind::InvalidInput => {
             ApiError::new(ErrorCode::InvalidInput, error.to_string())
         }
+        // Another program holds the file; the same request may go once it lets go.
+        std::io::ErrorKind::ResourceBusy => {
+            ApiError::new(ErrorCode::Conflict, error.to_string())
+        }
         _ => internal(error),
     }
 }
@@ -563,10 +567,10 @@ fn zip_tree(
             zip.start_file(&path, options).map_err(internal)?;
             std::io::copy(
                 &mut sandbox::open_plain(dir, &name, &path)
-                    .map_err(internal)?,
+                    .map_err(io_error)?,
                 zip,
             )
-            .map_err(internal)?;
+            .map_err(|error| io_error(sandbox::held_elsewhere(error, &path)))?;
         }
     }
     Ok(())
@@ -647,7 +651,9 @@ pub(super) async fn zip(
                         .open_file(&path)
                         .map_err(io_error)?
                         .ok_or_else(|| not_found(name))?;
-                    std::io::copy(&mut file, &mut zip).map_err(internal)?;
+                    std::io::copy(&mut file, &mut zip).map_err(|error| {
+                        io_error(sandbox::held_elsewhere(error, &path))
+                    })?;
                 }
             }
             zip.finish().map_err(internal)?;

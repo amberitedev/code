@@ -81,7 +81,16 @@ const problem = computed(() => {
 		heading: "Can't reach your Core",
 		description: "Check that your Core is running and that you're online, then try again.",
 		retrying: isFetching.value,
-		retry: () => refetch(),
+		// Offline means no socket is open, so reopen them now rather than at their next backoff.
+		retry: () => {
+			for (const { id } of coresQuery.cores.value) {
+				void client
+					.coreEvents(id)
+					.ready()
+					.catch(() => undefined)
+			}
+			return refetch()
+		},
 	}
 })
 

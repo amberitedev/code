@@ -136,6 +136,18 @@ describe('an event stream', () => {
 		expect(resyncs).toEqual([])
 	})
 
+	it('waits at most five seconds between reopens', async () => {
+		const events = stream()
+		events.subscribe('server-a')
+		await settle()
+		for (const wait of [1000, 2000, 4000, 5000, 5000]) {
+			const attempts = FakeSocket.opened.length
+			FakeSocket.opened.at(-1)!.drop()
+			await vi.advanceTimersByTimeAsync(wait)
+			expect(FakeSocket.opened).toHaveLength(attempts + 1)
+		}
+	})
+
 	it('opens at once for a caller that waits on it, not after the reopen backoff', async () => {
 		const events = stream()
 		events.subscribe('server-a')

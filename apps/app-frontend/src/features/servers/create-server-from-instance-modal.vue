@@ -4,7 +4,11 @@
 		type="server-onboarding"
 		:search-projects="noProjects"
 		:get-project-versions="noVersions"
-		:on-back="() => flow?.hide()"
+		:on-back="
+			() => {
+				flow?.hide()
+			}
+		"
 		@create="create"
 	/>
 	<ChooseCoreModal ref="chooseCore" />
