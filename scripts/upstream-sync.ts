@@ -108,6 +108,8 @@ function finish() {
 	// The hooks format and lint staged files, which here is all of Modrinth's changes.
 	git('commit', '--quiet', '--no-verify', '--no-edit')
 	console.log(git('log', '-1', '--format=Committed %h %s'))
+	// The repo allows squashing, and a squash drops Modrinth as a parent.
+	console.log('Land it with a merge commit. A squash or rebase makes the next sync start over.')
 }
 
 // Modrinth's main, with full history: a shallow one has no merge base with us.
