@@ -7,13 +7,6 @@ on:
   push:
     branches: [main]
   pull_request:
-  # The upstream sync workflow calls this for its branch before a pull request exists.
-  workflow_call:
-    inputs:
-      ref:
-        description: Branch to check. Every job runs, without the change filter.
-        type: string
-        required: true
   workflow_dispatch:
     inputs:
       ref:
@@ -89,6 +82,22 @@ jobs:
       - run: pnpm --filter @amberite/backend --filter @amberite/fixtures --filter @modrinth/api-client --filter @modrinth/app-frontend typecheck
       - run: pnpm test:unit
       - run: pnpm --filter @amberite/backend test
+
+  # A sync may not merge while a Modrinth change to code we rewrote is unaccounted for.
+  ports:
+    name: Upstream ports
+    if: startsWith(github.head_ref, 'sync/upstream-')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # The record is in commit messages.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .nvmrc
+      - run: node scripts/upstream-sync.ts --ports
 
   hygiene:
     name: Typos and TOML

@@ -1,29 +1,54 @@
-// The merge step of scripts/upstream-sync.ts. Git pairs renamed files by similarity, so a file we
-// moved and rewrote, or a hash-named file upstream replaced, turns into a tree conflict. We know
-// every rename, so the base and upstream trees are rewritten to our paths first and the three-way
-// merge has no rename of ours left to guess.
+// The merge step of scripts/upstream-sync.ts. It merges Modrinth into HEAD and settles everything
+// our tree and scripts/upstream-map.ts already answer, so only real decisions are left unmerged.
 
 import * as NodeChildProcess from 'node:child_process'
 import * as NodeFS from 'node:fs'
 import * as NodeOS from 'node:os'
 import * as NodePath from 'node:path'
 
-import { type UpstreamConfig, ourPath } from './upstream-paths.ts'
-
 type MergeOptions = {
 	// Merge base of HEAD and `upstream`, both commit shas.
 	base: string
 	upstream: string
-	renamed: UpstreamConfig['renamed']
+	// MOVED and SIDES from scripts/upstream-map.ts.
+	moved: Record<string, string>
+	sides: readonly (readonly [RegExp, 'ours' | 'theirs'])[]
 	cwd: string
 }
 
-// Leaves the merged tree in the index and working tree with MERGE_HEAD set to upstream, so the next
-// `git commit` makes the merge commit. Returns the conflicted paths; their markers are in the files,
-// and git's explanation of each is printed to stderr. Needs git 2.45 or newer (merge-tree on trees).
-export function mergeMapped({ base, upstream, renamed, cwd }: MergeOptions) {
+export type Merged = {
+	// Our paths still unmerged. `git status` shows each one's kind.
+	conflicts: string[]
+	// Modrinth's changes left out because we deleted the file or, with `folder`, the whole folder.
+	dropped: { path: string; folder?: string }[]
+	// Modrinth's new files that came in.
+	added: string[]
+	// Conflicts git reports with no unmerged file, such as a folder Modrinth split two ways.
+	notes: string[]
+}
+
+export function matches(path: string, prefix: string) {
+	return path === prefix || path.startsWith(`${prefix}/`)
+}
+
+// The value of the longest matching key, and that key.
+export function lookup(path: string, map: Record<string, string>) {
+	return Object.entries(map)
+		.filter(([prefix]) => matches(path, prefix))
+		.sort(([a], [b]) => b.length - a.length)[0]
+}
+
+export function ourPath(path: string, moved: Record<string, string>) {
+	const [from, to] = lookup(path, moved) ?? [path, path]
+	return to + path.slice(from.length)
+}
+
+// Leaves the merge in the index and working tree as `git merge` would, with MERGE_HEAD set to
+// upstream: the next `git commit` makes the merge commit and `git merge --abort` undoes it. Needs a
+// clean index.
+export function mergeUpstream({ base, upstream, moved, sides, cwd }: MergeOptions): Merged {
 	const git = (args: string[], options: { env?: NodeJS.ProcessEnv; input?: string } = {}) =>
-		NodeChildProcess.spawnSync('git', args, {
+		NodeChildProcess.spawnSync('git', ['-c', 'core.quotePath=false', ...args], {
 			cwd,
 			encoding: 'utf8',
 			env: { ...process.env, ...options.env },
@@ -33,74 +58,131 @@ export function mergeMapped({ base, upstream, renamed, cwd }: MergeOptions) {
 	const ok = (...params: Parameters<typeof git>) => {
 		const result = git(...params)
 		if (result.status !== 0) throw new Error(`git ${params[0][0]} failed:\n${result.stderr}`)
-		return result.stdout.trim()
+		return result.stdout
+	}
+	const list = (...params: Parameters<typeof git>) =>
+		ok(...params)
+			.split('\0')
+			.filter(Boolean)
+	// A path list on stdin, since hundreds of paths overflow a Windows command line.
+	const each = (command: string[], paths: string[]) => {
+		if (paths.length === 0) return
+		ok([...command, '--pathspec-from-file=-', '--pathspec-file-nul'], { input: paths.join('\0') })
 	}
 
-	if (base === upstream) throw new Error(`Already up to date with ${upstream}`)
-	// read-tree would carry staged changes into the merge commit, where `git merge` refused them.
-	if (git(['diff-index', '--quiet', '--cached', 'HEAD']).status !== 0) {
-		throw new Error('The index has staged changes; commit or unstage them first')
-	}
-
-	// A fresh index takes `ls-tree` lines as they are, so modes, symlinks and submodules carry over.
+	// Git pairs renamed files by similarity, which fails for a folder we moved and rewrote and for
+	// its hash-named files. We know those renames, so each tree is rewritten to our paths first. A
+	// fresh index takes `ls-tree` lines as they are, so modes, symlinks and submodules carry over.
 	const mappedTree = (commit: string) => {
 		const dir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), 'upstream-merge-'))
 		try {
 			const env = { GIT_INDEX_FILE: NodePath.join(dir, 'index') }
-			const input = ok(['ls-tree', '-r', '-z', '--full-tree', commit])
-				.split('\0')
-				.filter(Boolean)
+			const input = list(['ls-tree', '-r', '-z', '--full-tree', commit])
 				.map((entry) => {
 					const tab = entry.indexOf('\t')
-					return `${entry.slice(0, tab)}\t${ourPath(entry.slice(tab + 1), renamed)}\0`
+					return `${entry.slice(0, tab)}\t${ourPath(entry.slice(tab + 1), moved)}\0`
 				})
 				.join('')
 			ok(['update-index', '-z', '--index-info'], { env, input })
-			return ok(['write-tree'], { env })
+			return ok(['write-tree'], { env }).trim()
 		} finally {
 			NodeFS.rmSync(dir, { recursive: true, force: true })
 		}
 	}
+	const folders = (tree: string) =>
+		new Set(list(['ls-tree', '-r', '-d', '-z', '--name-only', tree]))
 
-	// Our mapped prefixes leave no rename to detect; directoryRenames still places files we added
-	// inside a folder upstream moved on its own.
-	const merge = git([
-		'-c',
-		'merge.directoryRenames=true',
-		'merge-tree',
-		'--write-tree',
-		'-z',
-		'--name-only',
-		`--merge-base=${mappedTree(base)}`,
-		'HEAD',
-		mappedTree(upstream),
-	])
-	// Exit 1 means conflicts; anything else is an error.
-	if (merge.status !== 0 && merge.status !== 1) {
-		throw new Error(`git merge-tree failed:\n${merge.stderr}`)
-	}
-	// `<tree>\0<conflicted path>\0...\0\0` then messages as `<count>\0<paths>\0<type>\0<text>\0`.
-	const end = merge.stdout.indexOf('\0\0')
-	const [tree = '', ...conflicts] = merge.stdout
-		.slice(0, end === -1 ? undefined : end)
-		.split('\0')
-		.filter(Boolean)
-	const messages = end === -1 ? [] : merge.stdout.slice(end + 2).split('\0')
-	// Some conflicts, such as a folder upstream split two ways, have a message and no conflicted file.
-	const flagged: string[] = []
-	for (let index = 0; index + 2 < messages.length;) {
-		const count = Number(messages[index])
-		const [type = '', text = ''] = messages.slice(index + 1 + count)
-		if (type.startsWith('CONFLICT')) flagged.push(...messages.slice(index + 1, index + 1 + count))
-		process.stderr.write(`${text.trimEnd()}\n`)
-		index += count + 3
+	const [baseTree, upstreamTree] = [mappedTree(base), mappedTree(upstream)]
+	const [baseFolders, ourFolders] = [folders(baseTree), folders('HEAD')]
+	// The topmost folder of `path` that Modrinth had at the merge base and we no longer have.
+	const deletedFolder = (path: string) => {
+		const parts = path.split('/')
+		for (let depth = 1; depth < parts.length; depth++) {
+			const folder = parts.slice(0, depth).join('/')
+			if (baseFolders.has(folder) && !ourFolders.has(folder)) return folder
+		}
 	}
 
 	// MERGE_HEAD goes first: if a later step fails, git merge --abort undoes it.
 	NodeFS.writeFileSync(
-		NodePath.resolve(cwd, ok(['rev-parse', '--git-path', 'MERGE_HEAD'])),
+		NodePath.resolve(cwd, ok(['rev-parse', '--git-path', 'MERGE_HEAD']).trim()),
 		`${upstream}\n`,
 	)
-	ok(['read-tree', '-u', '-m', 'HEAD', tree])
-	return [...new Set([...conflicts, ...flagged])].sort()
+	// directoryRenames places Modrinth's new files inside a folder we moved; zdiff3 puts the merge
+	// base in each conflict, which shows what Modrinth changed.
+	const merge = git(
+		[
+			'-c',
+			'merge.directoryRenames=true',
+			'-c',
+			'merge.conflictStyle=zdiff3',
+			'merge-recursive',
+			baseTree,
+			'--',
+			'HEAD',
+			upstreamTree,
+		],
+		{ env: { [`GITHEAD_${upstreamTree}`]: 'modrinth' } },
+	)
+	// Exit 1 means conflicts; anything else is an error.
+	if (merge.status !== 0 && merge.status !== 1) {
+		throw new Error(`git merge-recursive failed:\n${merge.stdout}${merge.stderr}`)
+	}
+
+	// `<mode> <object> <stage>\t<path>` for each side an unmerged path has: 1 base, 2 ours, 3 theirs.
+	const stages = new Map<string, Set<string>>()
+	for (const entry of list(['ls-files', '-u', '-z'])) {
+		const tab = entry.indexOf('\t')
+		const path = entry.slice(tab + 1)
+		stages.set(path, (stages.get(path) ?? new Set()).add(entry.slice(tab - 1, tab)))
+	}
+	const settled = { remove: [] as string[], ours: [] as string[], theirs: [] as string[] }
+	const merged: Merged = { conflicts: [], dropped: [], added: [], notes: [] }
+	for (const [path, has] of stages) {
+		const side = sides.find(([pattern]) => pattern.test(path))?.[1]
+		if (has.has('1') && !has.has('2')) {
+			// We deleted it and Modrinth changed it. It stays deleted.
+			settled.remove.push(path)
+			merged.dropped.push({ path, folder: deletedFolder(path) })
+		} else if (side && has.has('2')) {
+			if (side === 'ours') settled.ours.push(path)
+			else if (has.has('3')) settled.theirs.push(path)
+			else settled.remove.push(path)
+		} else {
+			merged.conflicts.push(path)
+		}
+	}
+	each(['checkout', '--ours'], settled.ours)
+	each(['checkout', '--theirs'], settled.theirs)
+	each(['add'], [...settled.ours, ...settled.theirs])
+	each(['rm', '-q', '-f'], settled.remove)
+
+	// Modrinth's new files, not the ones it only moved. One inside a folder we deleted is not ours to
+	// take either.
+	const unwanted: string[] = []
+	const added = [
+		'diff',
+		'--cached',
+		'--find-renames',
+		'--name-only',
+		'--diff-filter=A',
+		'-z',
+		'HEAD',
+	]
+	for (const path of list(added)) {
+		const folder = deletedFolder(path)
+		if (folder === undefined) merged.added.push(path)
+		else {
+			unwanted.push(path)
+			merged.dropped.push({ path, folder })
+		}
+	}
+	each(['rm', '-q', '-f'], unwanted)
+
+	merged.notes = merge.stdout
+		.split('\n')
+		.filter((line) => /^CONFLICT \((?!content|modify\/delete|rename\/delete)/.test(line))
+	merged.conflicts.sort()
+	merged.dropped.sort((a, b) => (a.path < b.path ? -1 : 1))
+	return merged
 }
