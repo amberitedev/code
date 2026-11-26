@@ -8,6 +8,7 @@ import {
 } from '@amberite/contracts/backend'
 
 import { ApiError } from '../common/http'
+import { notifyUsers } from '../common/notifications'
 import { JsonText, noBody, route, spliceJson } from '../common/router'
 import type { Env } from '../common/types'
 import { type InstanceRow, PLAYERS, now, owner, quarantined, readable, sharer } from './access'
@@ -118,7 +119,8 @@ async function pruneVersions(env: Env, id: string): Promise<void> {
 
 /**
  * A version became ready: its home Core confirmed it holds the files. Invites waiting on
- * something to install go out, and older versions are pruned.
+ * something to install go out, everyone who installed the share is told so their App shows the
+ * update, and older versions are pruned.
  */
 export async function versionReady(env: Env, id: string, version: number): Promise<void> {
 	const result = await env.DB.prepare(
@@ -128,6 +130,17 @@ export async function versionReady(env: Env, id: string, version: number): Promi
 		.run()
 	if (!result.meta.changes) return
 	await notifyReadyInvites(env, id)
+	const { results } = await env.DB.prepare(
+		`SELECT user_id FROM shared_instance_users WHERE instance_id = ?1 AND joined_at IS NOT NULL UNION SELECT owner_id FROM shared_instances WHERE id = ?1 UNION SELECT p.user_id FROM ${PLAYERS} WHERE s.instance_id = ?1 AND p.joined_at IS NOT NULL`,
+	)
+		.bind(id)
+		.all<{ user_id: string }>()
+	await notifyUsers(
+		env,
+		results.map((row) => row.user_id),
+		id,
+		'shared_instance_versions',
+	)
 	await pruneVersions(env, id)
 }
 

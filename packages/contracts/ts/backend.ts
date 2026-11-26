@@ -614,7 +614,7 @@ action_route: [string, string], };
 
 export type Notification = { id: string, user_id: string, read: boolean, created: string, body: { type: string, [key: string]: unknown }, name: string, text: string, link: string, actions: Array<NotificationAction>, };
 
-export type SharedInstanceList = "shared_instance_users";
+export type SharedInstanceList = "shared_instance_users" | "shared_instance_versions";
 
 export type SharedInstanceChangeBody = { type: SharedInstanceList, shared_instance_id: string, };
 

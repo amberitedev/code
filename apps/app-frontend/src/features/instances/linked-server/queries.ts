@@ -28,8 +28,8 @@ export function linkedServerQueryOptions(
 				linkedServer: shared.linked_server,
 			}
 		},
+		// Not polled: launching reads it again (`refreshOnlineStatus`) and joins that address.
 		staleTime: 30_000,
-		refetchInterval: 30_000,
 		retry: false,
 	})
 }
