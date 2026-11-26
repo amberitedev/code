@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
-// Merges Modrinth into the current branch. The /upstream-sync skill runs it and works from the
-// report it prints.
+// Merges Modrinth into the current branch and prints a report of what is left to settle.
 //
 // Usage: node scripts/upstream-sync.ts [ref]        Start the merge and print the report.
 //                                                   Without a ref, fetches Modrinth's main.
@@ -11,7 +10,7 @@
 //                                                   we rewrote. Fails while one has no trailer.
 //
 // `git merge --abort` undoes a started merge. What the merge settles without asking is in
-// scripts/upstream-merge.ts and scripts/upstream-map.ts; the reasons are in docs/internals/upstream.md.
+// scripts/upstream-merge.ts and scripts/upstream-map.ts.
 
 import * as NodeChildProcess from 'node:child_process'
 import * as NodeFS from 'node:fs'

@@ -243,8 +243,8 @@ errors and warnings to the same terminal; error and warning notifications are lo
 
 ## Upstream sync
 
-`node scripts/upstream-sync.ts` merges Modrinth. What it settles and the porting rules are in
-[upstream](upstream.md).
+`node scripts/upstream-sync.ts` merges Modrinth and prints what is left to settle. Its header
+lists the other commands.
 
 ## Timings
 
