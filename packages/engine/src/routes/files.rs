@@ -15,7 +15,7 @@ use contracts::{ApiError, Empty, ErrorCode, Json, Raw, server::Req};
 use tokio_util::io::ReaderStream;
 
 pub use self::uploads::Uploads;
-use super::api_error;
+use super::{api_error, input_error};
 use crate::{
     Engine,
     access::InstanceAccess,
@@ -276,7 +276,7 @@ pub async fn set_instance_icon(
     )
     .await
     .map(|()| Empty)
-    .map_err(api_error)
+    .map_err(input_error)
 }
 
 pub async fn set_edited_instance_icon(
@@ -293,7 +293,7 @@ pub async fn set_edited_instance_icon(
     )
     .await
     .map(|()| Empty)
-    .map_err(api_error)
+    .map_err(input_error)
 }
 
 pub async fn remove_instance_icon(

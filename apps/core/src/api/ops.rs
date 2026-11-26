@@ -43,6 +43,19 @@ where
             Ok(Err(error)) => Some(error),
             Err(error) => Some(internal(error)),
         };
+        // Every socket hears it, so a path in it names the Core's data folder no further up. The
+        // engine names some paths as they resolve: `\\?\C:\…` on Windows.
+        let root = state.servers.paths().root();
+        let roots =
+            [std::fs::canonicalize(root).ok(), Some(root.to_path_buf())];
+        let error = error.map(|mut error| {
+            for root in roots.iter().flatten() {
+                error.description = error
+                    .description
+                    .replace(&*root.join("").to_string_lossy(), "");
+            }
+            error
+        });
         state.ops.0.lock().expect("not poisoned").remove(&op);
         let _ = state.events.send(CoreEvent::OpEnded { op, error });
     });

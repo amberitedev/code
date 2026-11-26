@@ -69,6 +69,7 @@
 
 <script setup lang="ts">
 import { instanceFiles } from '@amberite/contracts/engine'
+import { ApiCallError } from '@modrinth/api-client'
 import { EditIcon, PaletteIcon, SpinnerIcon, TransferIcon, UploadIcon } from '@modrinth/assets'
 import { useQueryClient } from '@tanstack/vue-query'
 import { computed, ref } from 'vue'
@@ -189,11 +190,15 @@ async function uploadIcon(file: File, config: IconConfig | null): Promise<boolea
 			text: 'Your server icon was successfully changed.',
 		})
 		return true
-	} catch {
+	} catch (error) {
 		addNotification({
 			type: 'error',
 			title: 'Upload failed',
-			text: 'Failed to upload server icon.',
+			// Only the reason for a bad file is meant for the person uploading.
+			text:
+				error instanceof ApiCallError && error.code === 'invalid_input'
+					? error.description
+					: 'Failed to upload server icon.',
 		})
 		return false
 	} finally {

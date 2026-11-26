@@ -1638,6 +1638,37 @@ async fn a_long_op_answers_at_once_and_ends_on_the_socket() {
 }
 
 #[tokio::test]
+async fn a_failed_op_names_paths_from_the_cores_folder_on() {
+    let core = core().await;
+    let mut events = core.state.events.subscribe();
+    let meta = core.state.servers.paths().meta();
+    let resolved = std::fs::canonicalize(&meta).unwrap();
+    let failed = super::internal(format!(
+        "denied, path: {}, then {}",
+        meta.join("versions/1.json").display(),
+        resolved.join("2.json").display(),
+    ));
+    super::ops::start(&core.state, "op".into(), async move { Err(failed) })
+        .unwrap();
+
+    let super::events::CoreEvent::OpEnded {
+        error: Some(error), ..
+    } = events.recv().await.unwrap()
+    else {
+        panic!("the op failed");
+    };
+    let meta = std::path::Path::new("meta");
+    assert_eq!(
+        error.description,
+        format!(
+            "denied, path: {}, then {}",
+            meta.join("versions/1.json").display(),
+            meta.join("2.json").display(),
+        )
+    );
+}
+
+#[tokio::test]
 async fn the_servers_topic_has_every_servers_power_and_changes() {
     let core = core().await;
     let owner = core.sign_in("owner").await;

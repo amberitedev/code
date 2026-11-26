@@ -6,9 +6,9 @@ use crate::ErrorKind;
 use crate::state::Installs;
 use anyhow::{Context, bail};
 use chrono::{DateTime, TimeZone, Utc};
-use contracts::Side;
 use sqlx::SqlitePool;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, MutexGuard, Weak};
 use tokio::sync::Notify;
 use uuid::Uuid;
@@ -100,8 +100,8 @@ impl InstallJobRecord {
             modified: self.modified.to_rfc3339(),
             finished: self.finished.map(|finished| finished.to_rfc3339()),
         };
-        if installs.side == Side::Server {
-            without_host_paths(&mut snapshot);
+        if let Some(folders) = &installs.server_folders {
+            without_host_paths(&mut snapshot, folders);
         }
         set_controls(&mut snapshot, self.id, active, installs);
         if active && let Some(job) = live_jobs(installs).get_mut(&self.id) {
@@ -113,21 +113,28 @@ impl InstallJobRecord {
 }
 
 /// Drops what names a path on the host: an instance's icon file, and where a failed step read
-/// or wrote. An icon from Modrinth is a URL and stays.
-fn without_host_paths(snapshot: &mut InstallJobSnapshot) {
+/// or wrote. An icon from Modrinth is a URL and stays. A message names a path in one of the
+/// engine's `folders` from that folder on, such as `meta/versions/1.21.json`.
+fn without_host_paths(snapshot: &mut InstallJobSnapshot, folders: &[PathBuf]) {
     if let Some(display) = &mut snapshot.display {
         display.icon.take_if(|icon| {
             !icon.starts_with("https://") && !icon.starts_with("http://")
         });
     }
     let errors = [&mut snapshot.error, &mut snapshot.rollback_error];
-    for context in errors
-        .into_iter()
-        .flatten()
-        .filter_map(|error| error.context.as_mut())
-    {
-        context.source_path = None;
-        context.target_path = None;
+    for error in errors.into_iter().flatten() {
+        for folder in folders {
+            if let Some(name) = folder.file_name() {
+                error.message = error.message.replace(
+                    &*folder.to_string_lossy(),
+                    &name.to_string_lossy(),
+                );
+            }
+        }
+        if let Some(context) = &mut error.context {
+            context.source_path = None;
+            context.target_path = None;
+        }
     }
 }
 
@@ -803,6 +810,8 @@ mod tests {
         InstallPhaseId,
     };
     use crate::state::{EngineConfig, tests};
+    use contracts::Side;
+    use std::path::Path;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn a_servers_jobs_name_no_path_on_its_host() {
@@ -815,6 +824,12 @@ mod tests {
         .await
         .unwrap();
         tests::add_instance(&engine, "s", "srv").await;
+        let missing = engine.directories.metadata_dir().join("versions/1.json");
+        let placed = engine
+            .content_store
+            .instance_path("srv", "config/a.toml")
+            .await
+            .unwrap();
         let request = InstallRequest::InstallExistingInstance {
             instance_id: "s".to_owned(),
             force: false,
@@ -835,7 +850,7 @@ mod tests {
             ..InstallErrorView::from_message(
                 "path_error",
                 InstallPhaseId::ExtractingOverrides,
-                "failed",
+                format!("{}, then {}", missing.display(), placed.display()),
             )
         };
         state.error = Some(failed.clone());
@@ -854,5 +869,19 @@ mod tests {
         let json = serde_json::to_string(&jobs).unwrap();
         assert!(!json.contains("/srv/copal"), "{json}");
         assert!(json.contains("overrides/config/a.toml"), "{json}");
+        let instances = engine.directories.instances_dir();
+        let instances = Path::new(instances.file_name().unwrap());
+        let named = format!(
+            "{}, then {}",
+            Path::new("meta").join("versions/1.json").display(),
+            instances
+                .join("srv")
+                .join("config")
+                .join("a.toml")
+                .display(),
+        );
+        for error in [&jobs[0].error, &jobs[0].rollback_error] {
+            assert_eq!(error.as_ref().unwrap().message, named);
+        }
     }
 }

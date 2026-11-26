@@ -93,7 +93,7 @@ async fn cache_icon(
     engine::instance::cache_icon_bytes(&engine, request.body.bytes.to_vec())
         .await
         .map(Json)
-        .map_err(engine::routes::api_error)
+        .map_err(engine::routes::input_error)
 }
 
 async fn cache_generated_icon(
@@ -106,7 +106,7 @@ async fn cache_generated_icon(
         body.symbol_bytes,
     )
     .await
-    .map_err(engine::routes::api_error)?;
+    .map_err(engine::routes::input_error)?;
     if body.add_to_recents {
         super::recent_icons::record(&body.config, engine.db())
             .await
@@ -138,7 +138,7 @@ async fn set_generated_instance_icon(
         .await
         .map(Some)
     }
-    .map_err(engine::routes::api_error)?;
+    .map_err(engine::routes::input_error)?;
     if icon.is_some() {
         super::recent_icons::record(&body.config, engine.db())
             .await
