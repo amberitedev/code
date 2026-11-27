@@ -253,9 +253,16 @@ lists the other commands.
 Setup, every Rust build and test run, every `up`, and every applied fixture append one JSON line to
 the primary checkout's `.data/timings.jsonl`, shared by all checkouts. Each line has `kind`
 (`setup`, `build`, `test`, `up`, `fixture`), the worktree, the result, and milliseconds per step:
-`install` for setup, `lockWait` and `compile` plus the number of repo crates compiled again for a
-build, the same plus `test` and the tested crates for a test run, and the wait until ready for
-`up` and `fixture`. It records what happened, under whatever else the machine was doing.
+`install` for setup, `lockWait` and `compile` for a build, the same plus `test` and the tested
+crates for a test run, and the wait until ready for `up` and `fixture`. It records what happened,
+under whatever else the machine was doing.
+
+Build and test lines also say what compiled and why, so we can see where Rust build time goes:
+`rebuilt` gives each repo crate that compiled again a reason (`edited` with the files this checkout
+changed since its last build, `other-checkout` when another worktree replaced it in the shared build
+output, `other-build` when only the programs or only a test run had compiled it), and `units` has
+Cargo's `--timings` seconds per repo crate unit, split into `frontend` and `codegen` where Cargo
+reports them. Each checkout's last-built files are in its `.data/built-files.json`.
 
 To check whether a change to the dev setup made it faster, run `node scripts/dev-bench.ts`. It
 times the agent loop (a new worktree's setup, `up` until the App is usable, `check:changed`) for a
