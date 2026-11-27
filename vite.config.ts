@@ -51,13 +51,12 @@ export default defineConfig({
 		],
 	},
 	staged: {
-		// In order, so lint reads the formatted file.
+		// One glob, so its commands run in order and lint reads the formatted files. knip stays in
+		// check:changed and CI: it reads the whole working tree, not what is staged.
 		'*': [
 			'vp fmt --no-error-on-unmatched-pattern',
 			'vp lint --deny-warnings --no-error-on-unmatched-pattern',
 		],
-		// knip reads the whole repo, so it takes no file list.
-		'{*.{js,mjs,cjs,ts,mts,cts,vue},package.json,knip.jsonc}': () => 'vp run knip',
 	},
 	fmt: {
 		semi: false,
