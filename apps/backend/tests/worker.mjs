@@ -5,7 +5,8 @@ import { fileURLToPath } from 'node:url'
 
 const require = createRequire(import.meta.url)
 const wranglerRequire = createRequire(require.resolve('wrangler'))
-const { Miniflare } = wranglerRequire('miniflare')
+// Miniflare 5 takes a new options shape; this test keeps the documented v4 one and converts it.
+const { Miniflare, convertV4MiniflareOptions } = wranglerRequire('miniflare')
 const { build } = wranglerRequire('esbuild')
 
 /**
@@ -22,19 +23,21 @@ export async function startBackend(name, bindings = {}) {
 		target: 'es2022',
 		external: ['cloudflare:workers', 'cloudflare:sockets', 'node:*'],
 	})
-	const runtime = new Miniflare({
-		modules: true,
-		script: bundle.outputFiles[0].text,
-		compatibilityDate: '2026-07-22',
-		compatibilityFlags: ['nodejs_compat'],
-		d1Databases: { DB: name },
-		r2Buckets: { FILES: name },
-		durableObjects: {
-			FRIENDS: { className: 'FriendsHub', useSQLite: true },
-			CORE_SIGN_IN: { className: 'CoreSignIn', useSQLite: true },
-		},
-		bindings: { LOCAL_DEV: 'true', ...bindings },
-	})
+	const runtime = new Miniflare(
+		convertV4MiniflareOptions({
+			modules: true,
+			script: bundle.outputFiles[0].text,
+			compatibilityDate: '2026-07-22',
+			compatibilityFlags: ['nodejs_compat'],
+			d1Databases: { DB: name },
+			r2Buckets: { FILES: name },
+			durableObjects: {
+				FRIENDS: { className: 'FriendsHub', useSQLite: true },
+				CORE_SIGN_IN: { className: 'CoreSignIn', useSQLite: true },
+			},
+			bindings: { LOCAL_DEV: 'true', ...bindings },
+		}),
+	)
 	const db = await runtime.getD1Database('DB')
 	const migrations = new URL('../migrations/', import.meta.url)
 	const statements = []
