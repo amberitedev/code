@@ -63,7 +63,7 @@ Every command, the log, and ports: [scripts](docs/internals/scripts.md).
 
 ## Verifying
 
-- Before you push, run `vp run check:changed`. It runs CI's fast checks for changed files: lint, typos, TOML, typecheck and tests of the affected packages, and for Rust `rustfmt`, a build, and the tests of changed crates. **Do not run repo-wide checks** (`vp check`, `vp run -r test`, `vp run -r typecheck`) unless asked. CI owns the full suite.
+- Before you push, run `vp run check:changed`. It runs CI's fast checks for changed files: lint, typos, TOML, knip, typecheck and tests of the affected packages, and for Rust `rustfmt`, the test rules, a build, and Clippy and the tests of changed crates. **Do not run repo-wide checks** (`vp check`, `vp run -r test`, `vp run -r typecheck`) unless asked. CI owns the full suite.
 - Iterate with only the tests that cover what you changed: `vp test run <files>`, and for Rust `node scripts/dev-runner.ts test <crate>`. A plain `cargo test` rebuilds everything in a separate folder.
 - Follow [testing](docs/internals/testing.md) for what to test, bug-fix proof, waiting for work (no sleeps or polling), and real-app [Scenarios](docs/internals/testing.md#scenarios) (`vp run scenarios:prove`).
 - Give user-visible App changes one integrated pass in the real App, on a [fixture](docs/internals/fixtures.md) that describes the state the change needs: [test-app](.agents/skills/test-app/SKILL.md) (primary agent only, once after integrating; subagents do not start dev stacks). Inspect the rendered result and walk the flow as a user would, checking layout, visual hierarchy and ergonomics, and fix anything rough before handing back.

@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
 // CI's fast checks for this branch's changes, so they fail here instead of after a push:
-// lint, typos and TOML on the changed files, typecheck and tests of the affected packages, and
-// for Rust, `cargo fmt`, a build through the dev runner (the same compile check a start does,
-// sharing its build folder), and the tests of every workspace crate with a changed file, also
-// through the runner and in that folder.
+// lint, typos and TOML on the changed files, knip, typecheck and tests of the affected packages,
+// and for Rust, `cargo fmt`, the test rules, a build through the dev runner (the same compile
+// check a start does, sharing its build folder), then Clippy and the tests of every workspace
+// crate with a changed file, also through the runner and in that folder.
 //
 //   vp run check:changed          compare against the merge base with origin/main
 //   vp run check:changed <ref>    compare against the merge base with <ref>
@@ -52,6 +52,18 @@ const PACKAGES = [
 		reachedBy: ['packages/fixtures', 'packages/contracts'],
 	},
 	{
+		name: '@modrinth/ui',
+		folder: 'packages/ui',
+		test: false,
+		reachedBy: [
+			'packages/ui',
+			'packages/api-client',
+			'packages/assets',
+			'packages/contracts',
+			'packages/utils',
+		],
+	},
+	{
 		name: '@modrinth/app-frontend',
 		folder: 'apps/app-frontend',
 		test: false,
@@ -84,6 +96,12 @@ const failed: string[] = []
 const scripts = matching(/\.(?:[cm]?[jt]s|vue)$/)
 if (scripts.length > 0) {
 	steps.push({ name: 'lint', command: 'vp', args: ['lint', '--deny-warnings'], files: scripts })
+}
+// Any code or manifest change can leave a file, export or dependency unused, so knip reads it all.
+if (
+	touched.some((file) => /\.(?:[cm]?[jt]s|vue)$|(?:^|\/)package\.json$|^knip\.jsonc$/.test(file))
+) {
+	steps.push({ name: 'knip', command: 'vp', args: ['run', 'knip'] })
 }
 // Excluded files stay excluded when named, as in CI's run over the whole repo.
 if (onPath('typos')) {
@@ -133,8 +151,14 @@ if (unitTests.length > 0) {
 const rust = matching(/\.rs$/)
 if (rust.length > 0) {
 	steps.push({ name: 'rustfmt', command: 'rustfmt', args: ['--check'], files: rust })
+	steps.push({
+		name: 'rust test rules',
+		command: 'node',
+		args: ['scripts/check-rust-tests.ts'],
+		files: rust,
+	})
 }
-// Builds go one at a time anyway, so the Rust tests follow the build in one chain.
+// Builds go one at a time anyway, so Clippy and the Rust tests follow the build in one chain.
 let rustTests: Step | undefined
 const crates = under('apps', 'packages') ? workspaceCrates() : []
 if (crates === 'no cargo') skipped.push('rust tests (cargo is not installed)')
@@ -142,18 +166,25 @@ else if (crates === 'failed') failed.push('rust tests (cargo metadata failed)')
 else {
 	// The crates CI leaves out of the workspace tests (ci.yml, rust job).
 	const untested = new Set(['toasty'])
-	const tested = crates.filter((crate) => !untested.has(crate.name) && under(crate.folder))
-	if (tested.some((crate) => crate.name === 'amberite-app')) {
+	const linted = crates.filter((crate) => under(crate.folder)).map((crate) => crate.name)
+	const tested = linted.filter((crate) => !untested.has(crate))
+	if (linted.includes('amberite-app')) {
 		// Tauri only checks that the frontend build folder exists, as in CI.
 		NodeFS.mkdirSync(NodePath.join(root, 'apps', 'app-frontend', 'dist'), { recursive: true })
 	}
-	if (tested.length > 0) {
-		rustTests = {
-			name: 'rust tests',
-			command: 'node',
-			args: ['scripts/dev-runner.ts', 'test', ...tested.map((crate) => crate.name)],
-		}
-	}
+	const tests: Step | undefined =
+		tested.length > 0
+			? { name: 'rust tests', command: 'node', args: ['scripts/dev-runner.ts', 'test', ...tested] }
+			: undefined
+	rustTests =
+		linted.length > 0
+			? {
+					name: 'clippy',
+					command: 'node',
+					args: ['scripts/dev-runner.ts', 'clippy', ...linted],
+					next: tests,
+				}
+			: tests
 }
 if (touched.some((file) => /\.rs$|(?:^|\/)Cargo\.(?:toml|lock)$/.test(file))) {
 	steps.push({

@@ -38,7 +38,8 @@
 		"build-storybook": "pnpm i18n:coverage && pnpm --filter @modrinth/ui build-storybook",
 		"icons:add": "pnpm --filter @modrinth/assets icons:add",
 		"scripts": "node scripts/run.mjs",
-		"i18n:coverage": "node scripts/run.mjs coverage-i18n --write packages/ui/src/layouts/wrapped/settings/language-settings/language-settings-coverage.generated.ts --quiet"
+		"i18n:coverage": "node scripts/run.mjs coverage-i18n --write packages/ui/src/layouts/wrapped/settings/language-settings/language-settings-coverage.generated.ts --quiet",
+		"knip": "knip"
 	},
 	"devDependencies": {
 		"@coderabbitai/config": "1.2.0",

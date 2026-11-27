@@ -51,7 +51,13 @@ export default defineConfig({
 		],
 	},
 	staged: {
-		'*': 'vp fmt --no-error-on-unmatched-pattern',
+		// In order, so lint reads the formatted file.
+		'*': [
+			'vp fmt --no-error-on-unmatched-pattern',
+			'vp lint --deny-warnings --no-error-on-unmatched-pattern',
+		],
+		// knip reads the whole repo, so it takes no file list.
+		'{*.{js,mjs,cjs,ts,mts,cts,vue},package.json,knip.jsonc}': () => 'vp run knip',
 	},
 	fmt: {
 		semi: false,
