@@ -20,7 +20,9 @@ use async_trait::async_trait;
 use tempfile::TempDir;
 use toasty_core::{
     Result, Schema,
-    driver::{Capability, ConnectContext, Connection, Driver, ExecResponse, Operation},
+    driver::{
+        Capability, ConnectContext, Connection, Driver, ExecResponse, Operation,
+    },
     schema::{
         db::{AppliedMigration, Migration},
         diff,
@@ -79,7 +81,10 @@ impl Driver for MockDriver {
         self.inner.capability()
     }
 
-    async fn connect(&self, cx: &ConnectContext) -> Result<Box<dyn Connection>> {
+    async fn connect(
+        &self,
+        cx: &ConnectContext,
+    ) -> Result<Box<dyn Connection>> {
         let inner = self.inner.connect(cx).await?;
         self.state.connects.fetch_add(1, Ordering::Relaxed);
         Ok(Box::new(MockConnection {
@@ -107,13 +112,17 @@ struct MockConnection {
 
 #[async_trait]
 impl Connection for MockConnection {
-    async fn exec(&mut self, schema: &Arc<Schema>, op: Operation) -> Result<ExecResponse> {
+    async fn exec(
+        &mut self,
+        schema: &Arc<Schema>,
+        op: Operation,
+    ) -> Result<ExecResponse> {
         if self.state.exec_fail_tokens.load(Ordering::Relaxed) > 0 {
             self.state.exec_fail_tokens.fetch_sub(1, Ordering::Relaxed);
             self.valid = false;
-            return Err(toasty_core::Error::connection_lost(std::io::Error::other(
-                "mock exec failure",
-            )));
+            return Err(toasty_core::Error::connection_lost(
+                std::io::Error::other("mock exec failure"),
+            ));
         }
         self.inner.exec(schema, op).await
     }
@@ -127,9 +136,9 @@ impl Connection for MockConnection {
         if self.state.ping_fail_tokens.load(Ordering::Relaxed) > 0 {
             self.state.ping_fail_tokens.fetch_sub(1, Ordering::Relaxed);
             self.valid = false;
-            return Err(toasty_core::Error::connection_lost(std::io::Error::other(
-                "mock ping failure",
-            )));
+            return Err(toasty_core::Error::connection_lost(
+                std::io::Error::other("mock ping failure"),
+            ));
         }
         self.inner.ping().await
     }
@@ -142,7 +151,12 @@ impl Connection for MockConnection {
         self.inner.applied_migrations().await
     }
 
-    async fn apply_migration(&mut self, id: u64, name: &str, migration: &Migration) -> Result<()> {
+    async fn apply_migration(
+        &mut self,
+        id: u64,
+        name: &str,
+        migration: &Migration,
+    ) -> Result<()> {
         self.inner.apply_migration(id, name, migration).await
     }
 }
@@ -212,7 +226,8 @@ async fn pool_recovers_after_connection_lost() {
 /// needing a user query to trip it.
 #[tokio::test(start_paused = true)]
 async fn sweep_evicts_dead_idle_connection() {
-    let (mut db, state) = build_db(1, Some(Duration::from_millis(50)), false).await;
+    let (mut db, state) =
+        build_db(1, Some(Duration::from_millis(50)), false).await;
 
     // Force the pool to open its one connection.
     toasty::create!(User {
@@ -253,7 +268,8 @@ async fn eager_escalation_after_observed_loss() {
     // 60-second interval so the periodic tick cannot fire during the
     // test — only the notify-driven escalation path can drain the
     // queued faults here.
-    let (mut db, state) = build_db(3, Some(Duration::from_secs(60)), false).await;
+    let (mut db, state) =
+        build_db(3, Some(Duration::from_secs(60)), false).await;
 
     let c1 = db.connection().await.unwrap();
     let c2 = db.connection().await.unwrap();
