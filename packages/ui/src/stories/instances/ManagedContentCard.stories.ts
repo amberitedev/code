@@ -72,9 +72,9 @@ const meta = {
 		showViewContent: true,
 		showSettings: true,
 		showPrimaryAction: true,
-		onViewContent: fn(),
+		'onView-content': fn(),
 		onSettings: fn(),
-		onPrimaryAction: fn(),
+		'onPrimary-action': fn(),
 	},
 } satisfies Meta<typeof ManagedContentCard>
 

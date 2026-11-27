@@ -1,0 +1,58 @@
+{
+	"$schema": "https://unpkg.com/knip@6/schema.json",
+	// Commands from Windows.
+	"ignoreBinaries": ["tasklist"],
+	"workspaces": {
+		".": {
+			// Run by path: from package.json, t3.json, CI and one another. CodeRabbit reads its
+			// config by name.
+			"entry": ["scripts/*.{ts,mjs}", ".coderabbit.config.ts"],
+		},
+		"apps/app": {
+			// The webview runs it, through `include_str!`.
+			"entry": ["src/desktop/webview-logs.js"],
+			// Tauri's `beforeBuildCommand` builds it.
+			"ignoreDependencies": ["@modrinth/app-frontend"],
+		},
+		"apps/app-frontend": {
+			// The root vite.config.ts runs its tests.
+			"entry": ["src/**/*.test.ts"],
+			// The root's `scripts` command.
+			"ignoreBinaries": ["i18n-icu-contract"],
+		},
+		"apps/backend": {
+			// `accounts.mjs` is run by hand against a running backend.
+			"entry": ["tests/*.mjs"],
+		},
+		"packages/api-client": {
+			// Imported by nothing: the typecheck compiles it to prove our types fit upstream's.
+			"entry": ["src/contracts/labrinth-compat.ts"],
+		},
+		"packages/assets": {
+			// `icons:add` copies icons out of its folder.
+			"ignoreDependencies": ["lucide-static"],
+		},
+		"packages/fixtures": {
+			// The dev runner imports its runner and applies fixtures by path; e2e loads its config
+			// and the scenarios.
+			"entry": [
+				"e2e.config.ts",
+				"fixtures/*.ts",
+				"scenarios/*.ts",
+				"src/packages.ts",
+				"src/run.ts",
+			],
+		},
+		"packages/ui": {
+			// Vite loads it by name.
+			"entry": ["postcss.config.js"],
+			// `require` inside `ace.define` is ace's module loader, not a package import.
+			"ignoreDependencies": ["ace"],
+			"ignoreBinaries": ["i18n-icu-contract"],
+		},
+		"packages/utils": {
+			// It has no typescript of its own, which knip needs before it reads the tsconfig it extends.
+			"typescript": true,
+		},
+	},
+}

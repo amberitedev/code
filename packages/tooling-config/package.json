@@ -1,16 +1,14 @@
 {
 	"name": "@modrinth/tooling-config",
 	"version": "0.0.0",
-	"type": "module",
 	"private": true,
 	"description": "Unified tooling configuration for Modrinth monorepo",
-	"main": "./index.js",
-	"scripts": {
-		"lint": "prettier --check .",
-		"fix": "prettier --write ."
-	},
+	"files": [
+		"typescript/",
+		"tailwind/"
+	],
+	"type": "module",
 	"exports": {
-		"./eslint/*": "./eslint/*",
 		"./typescript/*": "./typescript/*",
 		"./prettier.config.cjs": "./prettier.config.cjs",
 		"./frontend.prettier.config.cjs": "./frontend.prettier.config.cjs",
@@ -19,17 +17,9 @@
 		"./tailwind/*": "./tailwind/*",
 		"./script-utils/*": "./script-utils/*"
 	},
-	"files": [
-		"eslint/",
-		"typescript/",
-		"prettier/",
-		"tailwind/",
-		"index.js"
-	],
-	"peerDependencies": {
-		"eslint": "^10.0.0",
-		"prettier": "^3.6.2",
-		"typescript": ">=5.0.0"
+	"scripts": {
+		"lint": "prettier --check .",
+		"fix": "prettier --write ."
 	},
 	"dependencies": {
 		"@prettier/plugin-xml": "^3.4.2",
@@ -37,18 +27,11 @@
 		"prettier-plugin-toml": "^4.1.0"
 	},
 	"devDependencies": {
-		"@eslint/compat": "^2.1.1",
-		"@eslint/js": "^10.0.1",
-		"@nuxt/eslint-config": "^1.17.0",
 		"@vue/tsconfig": "^0.9.1",
-		"eslint": "^10.15.0",
-		"eslint-config-prettier": "^10.1.8",
-		"eslint-plugin-prettier": "^5.5.7",
-		"eslint-plugin-simple-import-sort": "^14.0.0",
-		"eslint-plugin-turbo": "^2.11.13",
-		"eslint-plugin-vue": "^10.12.1",
-		"vue-eslint-parser": "^10.4.2",
-		"globals": "^17.14.0",
-		"typescript-eslint": "^8.74.0"
+		"tailwindcss": "^3.4.4"
+	},
+	"peerDependencies": {
+		"prettier": "^3.6.2",
+		"typescript": ">=5.0.0"
 	}
 }

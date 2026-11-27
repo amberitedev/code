@@ -201,8 +201,6 @@ export type {
 	ScreenshotGroupMembershipUpdate,
 	ScreenshotKey,
 	SyncedOption,
-	SyncedOptionCapability,
-	SyncedOptionJoinAction,
 	SyncedOptionJoinPreview,
 	SyncedOptionJoinResolution,
 	SyncedOptionsOverview,
@@ -371,12 +369,6 @@ export async function set_command_history(contents: string): Promise<string> {
 	return await apiClient.local.call(syncedOptions.setCommandHistory, { body: { contents } })
 }
 
-export async function open_synced_options_folder(): Promise<void> {
-	return await apiClient.local.call(desktop.openFolder, {
-		body: { folder: 'synced_options' },
-	})
-}
-
 export async function list_synced_servers(): Promise<SyncedServer[]> {
 	return await apiClient.local.call(syncedOptions.listSyncedServers)
 }
@@ -387,12 +379,6 @@ export async function update_synced_server(server: SyncedServer): Promise<void> 
 
 export async function remove_synced_server(serverId: string): Promise<void> {
 	return await apiClient.local.call(syncedOptions.removeSyncedServer, { params: { id: serverId } })
-}
-
-export async function rebuild_synced_options(instanceId?: string): Promise<void> {
-	return await apiClient.local.call(syncedOptions.rebuildSyncedOptions, {
-		body: { instance_id: instanceId },
-	})
 }
 
 export interface JavaVersion {
@@ -410,26 +396,11 @@ export async function list(): Promise<GameInstance[]> {
 	return await withDesktopFields(apiClient.local.call(instances.ListInstances))
 }
 
-export async function check_installed(instanceId: string, projectId: string): Promise<boolean> {
-	return await apiClient.local.call(instanceContent.CheckProjectInstalled, {
-		params: { id: instanceId },
-		query: { project_id: projectId },
-	})
-}
-
-// Updates a specified project
-export async function update_project(instanceId: string, projectPath: string): Promise<string> {
-	return await apiClient.local.call(instanceContent.UpdateProject, {
-		params: { id: instanceId },
-		body: { project_path: projectPath },
-	})
-}
-
 // Add a project to an instance from a version
 // Returns a path to the new project file
 export type DownloadReason = 'standalone' | 'dependency' | 'modpack' | 'update'
 
-export interface ResolutionPreferences {
+interface ResolutionPreferences {
 	game_versions?: string[]
 	loaders?: string[]
 }
@@ -441,7 +412,7 @@ export interface ResolveContentRequest {
 	selected?: ResolutionPreferences
 }
 
-export interface ResolvedContent {
+interface ResolvedContent {
 	project_id: string
 	version_id: string
 	dependent_on_version_id?: string | null
@@ -667,7 +638,6 @@ export async function get_recent_icon_configs(): Promise<IconConfig[]> {
 export type {
 	SharedInstanceInvite,
 	SharedInstanceInviteLink,
-	SharedInstanceJoinType,
 	SharedInstancePublishFile,
 	SharedInstancePublishPreview,
 	SharedInstanceUser,

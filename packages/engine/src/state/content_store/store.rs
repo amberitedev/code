@@ -68,7 +68,7 @@ impl ContentStore {
             pool,
             cleanup_lock: Arc::new(RwLock::new(())),
             runtime_cache_lock: RwLock::new(()),
-            java_installs: Default::default(),
+            java_installs: dashmap::DashMap::default(),
             download_locks: std::array::from_fn(|_| Mutex::new(())),
             publish_locks: std::array::from_fn(|_| Mutex::new(())),
             files_lock: Mutex::new(()),

@@ -110,6 +110,7 @@ const pageHeaderComponents = {
 const meta = {
 	title: 'Base/PageHeader',
 	component: PageHeader,
+	args: { title: '' },
 	parameters: {
 		layout: 'padded',
 	},

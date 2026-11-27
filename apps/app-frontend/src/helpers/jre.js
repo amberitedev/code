@@ -60,7 +60,7 @@ export async function auto_install_java(javaVersion) {
 }
 
 // Get max memory in KiB
-export async function get_max_memory() {
+async function get_max_memory() {
 	return await apiClient.local.call(java.GetSystemMemory)
 }
 

@@ -188,7 +188,7 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
         network: Arc::clone(&network),
         storage: Arc::clone(&storage),
         consoles: Arc::default(),
-        ops: Default::default(),
+        ops: crate::api::ops::Ops::default(),
     });
     tokio::spawn(api::events::watch_power(Arc::clone(&state)));
     tokio::spawn(api::follow::apply_on_stop(Arc::clone(&state)));

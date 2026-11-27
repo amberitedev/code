@@ -99,7 +99,7 @@ const specsLabel = computed(() => {
 	const cpu = numberValue(props.newSpecs?.cpu)
 	const memory = numberValue(props.newSpecs?.memory_mb)
 	const storage = numberValue(props.newSpecs?.storage_mb)
-	const parts = []
+	const parts: string[] = []
 	if (cpu != null) parts.push(formatMessage(messages.cpuSpec, { count: cpu }))
 	if (memory != null) parts.push(formatMemoryMb(memory))
 	if (storage != null) parts.push(formatStorageMb(storage))

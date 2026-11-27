@@ -15,10 +15,10 @@ Rules for writing tests, and for asking for them in review.
 
 ## Waiting for work
 
-- Never wait on sleeps or polling. Await the event that marks the milestone: the Core's event, the op's end, the channel's message. A test that needs a timeout to pass is wrong.
-  - No per-test timeout argument or retry. The project timeout is the ceiling, and flaky tests are fixed, not retried.
-  - No `Instant::now()`, `performance.now()` or `Date.now()` deltas. Assert on events and counts, not elapsed time.
-  - `#[ignore]`, `it.skip` and friends need a tracking issue on the line above: `// quarantine: #1234 <why>`.
+- Never wait on sleeps or polling. Await the event that marks the milestone: the Core's event, the op's end, the channel's message. A test that needs a timeout to pass is wrong. State that no event announces, such as what the page shows, is awaited with `expect.poll`, `expect.element` or `vi.waitFor`, the only polls allowed. Enforced by `amberite/no-wait-in-tests`, and in Rust by `scripts/check-rust-tests.ts`, which allows tokio's timers on its paused clock.
+  - No per-test timeout argument or retry. The project timeout is the ceiling, and flaky tests are fixed, not retried. Enforced by `amberite/no-test-timeout-or-unquarantined-skip`.
+  - No `Instant::now()`, `performance.now()` or `Date.now()` deltas. Assert on events and counts, not elapsed time. Enforced by `eslint/no-restricted-properties` in test files, and in Rust by `scripts/check-rust-tests.ts`.
+  - `#[ignore]`, `it.skip` and friends need a tracking issue on the line above: `// quarantine: #1234 <why>`. `.only` is never committed. Enforced by `amberite/no-test-timeout-or-unquarantined-skip` and `scripts/check-rust-tests.ts`.
 
 ## App browser tests
 
@@ -40,7 +40,7 @@ Nothing runs them all on a schedule, and CI does not run them. Each one is writt
 - One test per file, with `test` and the fixture tool from `./amberite.ts`.
 - `amberite.seed(...)` takes what a fixture file holds and returns what it builds, so the test keeps its Apps, Cores and ids. `amberite.open(app, path)` opens that App's tab at a route, and `amberite.stop(core)` turns a program off.
 - Open the page under test directly with `amberite.open`, unless the scenario is about getting there.
-- Put `expect` assertions only on the behavior the bug breaks, and take `app.screenshot('label')` where the bug shows, so `scenarios:prove` has the capture from both sides. Never call `agent.act` or `agent.assert` (no model is configured).
+- Put `expect` assertions only on the behavior the bug breaks, and take `app.screenshot('label')` where the bug shows, so `scenarios:prove` has the capture from both sides. Never call `agent.act` or `agent.assert` (no model is configured); `eslint/no-restricted-properties` enforces it.
 - Screenshots are the proof. Every run also records a video, kept with them and a `trace.md` of every step under `packages/fixtures/.e2e/results`: use it only when a still cannot show the behavior, such as motion or order, or when the developer asks for it.
 - A run uses the running stack and replaces its data, as applying a fixture does, leaving it on the last scenario's. With no stack running, it starts one and stops it when it finishes. A run takes the fixture's turn, so a second run or a `vp run fixture` on the same checkout waits for it.
 - `scenarios:prove` runs the scenario on this checkout as it is, uncommitted changes included, then on the merge base with `origin/main` (or `--base <ref>`) in a temporary worktree beside this one. It exits `0` only when the test fails on base and passes here (`1` = did not prove, `2` = the scenario could not run: the App did not run, or the command was used wrongly, `3` = the scenario cannot prove anything as written: it stopped before its assertion, or its file holds several tests). The scenario, the fixture tool and the dev runner are always this checkout's, so base only supplies the programs. It writes `packages/fixtures/.e2e/prove/proof.md` in the shape of that comment, with each capture beside the one base took under the same name. `--comment <pull request>` posts it with the captures, `--what "<sentence>"` is its one sentence, and `--by "<model>"` names you in its last line. `--upload-command "<command>"` runs that command with the capture files as arguments and puts the URLs it prints, one a line, in the proof in place of the local paths.

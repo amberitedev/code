@@ -55,7 +55,7 @@ type ModuleConstructor = new (client: AbstractModrinthClient) => AbstractModule
  *
  * TODO: Better way? Probably not
  */
-export const MODULE_REGISTRY = {
+const MODULE_REGISTRY = {
 	iso3166_data: ISO3166Module,
 	mclogs_insights_v1: MclogsInsightsV1Module,
 	mclogs_logs_v1: MclogsLogsV1Module,
@@ -102,8 +102,6 @@ export const MODULE_REGISTRY = {
 	sharedinstances_users_v1: SharedInstancesUsersV1Module,
 } as const satisfies Record<string, ModuleConstructor>
 
-export type ModuleID = keyof typeof MODULE_REGISTRY
-
 /**
  * Parse a module ID into [api, moduleName] tuple
  *
@@ -111,7 +109,7 @@ export type ModuleID = keyof typeof MODULE_REGISTRY
  * @returns Tuple of [api, moduleName] (e.g., ['labrinth', 'projects_v2'])
  * @throws Error if module ID doesn't match expected format
  */
-export function parseModuleID(id: string): [string, string] {
+function parseModuleID(id: string): [string, string] {
 	const parts = id.split('_')
 	if (parts.length < 2) {
 		throw new Error(

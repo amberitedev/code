@@ -10,6 +10,14 @@ import TimeFramePicker, {
 const meta = {
 	title: 'Base/TimeFramePicker',
 	component: TimeFramePicker,
+	args: {
+		mode: 'preset',
+		preset: 'last_30_days',
+		lastAmount: 1,
+		lastUnit: 'days',
+		customStartDate: '2026-04-23',
+		customEndDate: '2026-05-22',
+	},
 	parameters: {
 		layout: 'padded',
 	},

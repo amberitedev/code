@@ -413,10 +413,11 @@ async function main(): Promise<void> {
 	if (command === 'stop' || command === 'rs') return sendProgramCommand(paths, command, commandArgs)
 	if (command === 'build') return buildPrograms(paths, commandArgs)
 	if (command === 'test') return testCrates(paths, commandArgs)
+	if (command === 'clippy') return clippyCrates(paths, commandArgs)
 	if (command === 'gen-ts') return generateTypeScript(paths, commandArgs)
 	if (command !== 'dev') {
 		throw new DevRunnerError(
-			`Unknown command ${command ?? ''}. Expected dev, fixture, status, stop, rs, down, build, test or gen-ts.`,
+			`Unknown command ${command ?? ''}. Expected dev, fixture, status, stop, rs, down, build, test, clippy or gen-ts.`,
 		)
 	}
 	const input = parseInput(commandArgs)
@@ -932,19 +933,26 @@ function readSharedEnv(paths: WorktreePaths): NodeJS.ProcessEnv {
 }
 
 /**
- * `build [--test <crate>]...`: compiles the App and Core for this checkout's current Rust without
+ * `build [--clippy <crate>]... [--test <crate>]...`: compiles the App and Core for this checkout's current Rust without
  * starting anything, so a later `dev` finds them ready. `dev` runs it before it starts the Cores and Apps.
- * With `--test`, the crates are tested after it, failed or not. `--artifact` alone builds nothing
+ * With `--clippy` and `--test`, the crates are linted and then tested after it, failed or not. `--artifact` alone builds nothing
  * and prints the name CI keeps this build's programs under.
  */
 async function buildPrograms(paths: WorktreePaths, args: ReadonlyArray<string>): Promise<void> {
 	if (args.length === 1 && args[0] === '--artifact') return buildProgramsOnce(paths, true)
-	const tests = args.filter((_, index) => index % 2 === 1)
-	if (args.some((arg, index) => index % 2 === 0 && arg !== '--test') || args.length % 2 === 1) {
-		throw new DevRunnerError('build takes only `--test <crate>` pairs.')
+	const named = (flag: string) =>
+		args.filter((_, index) => index % 2 === 1 && args[index - 1] === flag)
+	if (
+		args.length % 2 === 1 ||
+		args.some((arg, index) => index % 2 === 0 && arg !== '--clippy' && arg !== '--test')
+	) {
+		throw new DevRunnerError('build takes only `--clippy <crate>` and `--test <crate>` pairs.')
 	}
 	await buildProgramsOnce(paths)
-	if (tests.length > 0) await testCrates(paths, tests)
+	// One after the other: they share this checkout's build output.
+	const linted = named('--clippy')
+	if (linted.length > 0) await clippyCrates(paths, [...linted, '--test', ...named('--test')])
+	else if (named('--test').length > 0) await testCrates(paths, named('--test'))
 }
 
 async function buildProgramsOnce(paths: WorktreePaths, nameOnly = false): Promise<void> {
@@ -982,6 +990,32 @@ async function testCrates(paths: WorktreePaths, crates: ReadonlyArray<string>): 
 	const env = { ...process.env, SQLX_OFFLINE: 'true' }
 	const build = testBuild(paths, readSharedEnv(paths), crates)
 	if (!(await runTests(paths, env, crates, build))) process.exitCode = 1
+}
+
+/**
+ * `clippy [crate...] [--test <crate>...]`: Clippy over the crates and their tests, or the whole
+ * workspace, with warnings as errors as in CI, in this checkout's build output. The crates after
+ * `--test` are tested after it, failed or not.
+ */
+async function clippyCrates(paths: WorktreePaths, args: ReadonlyArray<string>): Promise<void> {
+	const split = args.indexOf('--test')
+	const crates = split < 0 ? args : args.slice(0, split)
+	const tests = split < 0 ? [] : args.slice(split + 1)
+	const known = new Set([...localCrates(paths.worktree).values()].map((crate) => crate.name))
+	const unknown = crates.filter((crate) => !known.has(crate))
+	if (unknown.length > 0) {
+		throw new DevRunnerError(`No workspace crate is named ${unknown.join(', ')}.`)
+	}
+	// Tauri only checks that the frontend build folder exists.
+	NodeFS.mkdirSync(NodePath.join(paths.worktree, 'apps', 'app-frontend', 'dist'), {
+		recursive: true,
+	})
+	const spec = { env: { ...process.env, SQLX_OFFLINE: 'true' }, label: 'clippy' }
+	const packages = crates.length === 0 ? ['--workspace'] : crates.flatMap((c) => ['--package', c])
+	const lint = ['clippy', '--locked', ...packages, '--all-targets', '--', '-D', 'warnings']
+	const build = programsBuild(paths, readSharedEnv(paths))
+	if (!(await runCargo(spec, build, new Set(), lint))) process.exitCode = 1
+	if (tests.length > 0) await testCrates(paths, tests)
 }
 
 /**

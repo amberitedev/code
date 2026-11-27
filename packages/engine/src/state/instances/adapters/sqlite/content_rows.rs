@@ -38,8 +38,8 @@ impl TryFrom<ContentSetRow> for ContentSet {
             id: row.id,
             instance_id: row.instance_id,
             name: row.name,
-            source_kind: ContentSourceKind::from_str(&row.source_kind)?,
-            status: ContentSetStatus::from_str(&row.status)?,
+            source_kind: ContentSourceKind::parse(&row.source_kind)?,
+            status: ContentSetStatus::parse(&row.status)?,
             game_version: row.game_version,
             protocol_version: row.protocol_version.map(|value| value as u32),
             loader: ModLoader::from_string(&row.loader),
@@ -63,7 +63,7 @@ impl TryFrom<ContentSetRemoteRefRow> for ContentSetRemoteRef {
     fn try_from(row: ContentSetRemoteRefRow) -> crate::Result<Self> {
         Ok(Self {
             content_set_id: row.content_set_id,
-            ref_type: ContentSetRemoteRefType::from_str(&row.ref_type)?,
+            ref_type: ContentSetRemoteRefType::parse(&row.ref_type)?,
             ref_id: row.ref_id,
         })
     }
@@ -86,12 +86,12 @@ impl TryFrom<ContentSetSyncStateRow> for ContentSetSyncState {
     fn try_from(row: ContentSetSyncStateRow) -> crate::Result<Self> {
         Ok(Self {
             content_set_id: row.content_set_id,
-            provider: ContentSetSyncProvider::from_str(&row.provider)?,
+            provider: ContentSetSyncProvider::parse(&row.provider)?,
             applied_update_id: row.applied_update_id,
             applied_backtrack_version: row.applied_backtrack_version,
             latest_available_update_id: row.latest_available_update_id,
             checked_at: row.checked_at.and_then(optional_timestamp),
-            status: ContentSetSyncStatus::from_str(&row.status)?,
+            status: ContentSetSyncStatus::parse(&row.status)?,
         })
     }
 }
@@ -160,11 +160,11 @@ impl TryFrom<ContentEntryRow> for ContentEntry {
             project_type: project_type_from_str(&row.project_type)?,
             project_id: row.project_id,
             version_id: row.version_id,
-            source_kind: ContentSourceKind::from_str(&row.source_kind)?,
-            server_requirement: ContentRequirement::from_str(
+            source_kind: ContentSourceKind::parse(&row.source_kind)?,
+            server_requirement: ContentRequirement::parse(
                 &row.server_requirement,
             )?,
-            client_requirement: ContentRequirement::from_str(
+            client_requirement: ContentRequirement::parse(
                 &row.client_requirement,
             )?,
             enabled: row.enabled == 1,
@@ -1521,7 +1521,7 @@ impl TryFrom<TrackedRow> for (TrackedFile, EntrySides) {
         Ok((
             TrackedFile {
                 relative_path: row.relative_path,
-                source_kind: ContentSourceKind::from_str(&row.source_kind)?,
+                source_kind: ContentSourceKind::parse(&row.source_kind)?,
                 sha1: row.sha1,
                 size: u64::try_from(row.size).unwrap_or_default(),
                 project_id: row.project_id,
@@ -1529,10 +1529,10 @@ impl TryFrom<TrackedRow> for (TrackedFile, EntrySides) {
             },
             EntrySides {
                 enabled: row.enabled,
-                server_requirement: ContentRequirement::from_str(
+                server_requirement: ContentRequirement::parse(
                     &row.server_requirement,
                 )?,
-                client_requirement: ContentRequirement::from_str(
+                client_requirement: ContentRequirement::parse(
                     &row.client_requirement,
                 )?,
                 unlocked: row.sides_unlocked,

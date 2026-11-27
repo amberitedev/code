@@ -184,10 +184,10 @@ pub async fn run(client: &Client, command: BackupsCommand) -> Result<Output> {
                 ),
             };
             if deleted > 0 {
-                text.push_str(&format!(
-                    "\ndeleted {deleted} older scheduled backup{}",
-                    if deleted == 1 { "" } else { "s" }
-                ));
+                let plural = if deleted == 1 { "" } else { "s" };
+                text = format!(
+                    "{text}\ndeleted {deleted} older scheduled backup{plural}"
+                );
             }
             Ok(Output::new(text, &current))
         }

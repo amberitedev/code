@@ -219,9 +219,10 @@ fn target<E: Endpoint>(
     let url = url::<E>(base, params)?;
     let query = serde_urlencoded::to_string(query)
         .expect("an Endpoint's query is flat");
-    Ok(match query.is_empty() {
-        true => url,
-        false => format!("{url}?{query}"),
+    Ok(if query.is_empty() {
+        url
+    } else {
+        format!("{url}?{query}")
     })
 }
 

@@ -8,11 +8,11 @@ import { get_user_many } from '@/helpers/cache'
 import type { ModrinthCredentials } from '@/helpers/mr_auth'
 import { apiClient } from '@/platform/modrinth-client'
 
-export type { UserFriend, UserStatus }
+export type { UserStatus }
 
 export const friendsQueryKey = (userId?: string | null) => ['friends', userId ?? null] as const
 
-export async function friends(): Promise<UserFriend[]> {
+async function friends(): Promise<UserFriend[]> {
 	return await apiClient.local.call(friendRoutes.listFriends)
 }
 
@@ -140,11 +140,11 @@ export function removeCachedFriend(
 	return friends.filter((friend) => !matchesFriend(friend, id, username, currentUserId))
 }
 
-export function normalizeFriendKey(value: string) {
+function normalizeFriendKey(value: string) {
 	return value.trim().toLowerCase()
 }
 
-export async function transformFriends(
+async function transformFriends(
 	friends: UserFriend[],
 	credentials: ModrinthCredentials | null,
 ): Promise<FriendWithUserData[]> {

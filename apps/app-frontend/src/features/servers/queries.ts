@@ -7,17 +7,14 @@ import {
 	type ServerStatus,
 } from '@/helpers/worlds'
 
-export const SERVER_STATUS_CACHE_MS = 10 * 60 * 1000
+const SERVER_STATUS_CACHE_MS = 10 * 60 * 1000
 
 function getProtocolVersionKey(protocolVersion: ProtocolVersion | null) {
 	if (!protocolVersion) return 'default'
 	return `${protocolVersion.version}:${protocolVersion.legacy ? 'legacy' : 'modern'}`
 }
 
-export function getServerStatusQueryKey(
-	address: string,
-	protocolVersion: ProtocolVersion | null = null,
-) {
+function getServerStatusQueryKey(address: string, protocolVersion: ProtocolVersion | null = null) {
 	return [
 		'minecraft-server-status',
 		normalizeServerAddress(address) || address.trim().toLowerCase(),

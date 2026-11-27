@@ -2,7 +2,7 @@ import type { Skin } from '../skins'
 import { get_normalized_skin_texture } from '../skins'
 import { headStorage } from '../storage/head-storage'
 
-export async function generatePlayerHeadBlob(skinUrl: string, size: number = 64): Promise<Blob> {
+async function generatePlayerHeadBlob(skinUrl: string, size: number = 64): Promise<Blob> {
 	return new Promise((resolve, reject) => {
 		const img = new Image()
 		img.crossOrigin = 'anonymous'

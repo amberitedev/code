@@ -150,7 +150,7 @@ pub async fn update_shared_instance(
         state,
         InstallRequest::UpdateSharedInstance {
             instance_id,
-            version,
+            version: version.map(Box::new),
         },
     )
     .await
@@ -1693,7 +1693,7 @@ async fn run_request(
                     .await?;
                     lock_instance(&instance_id, state).await?;
                     let data = match version {
-                    Some(version) => version,
+                    Some(version) => *version,
                     None => diagnostics::install_step(
                         job_id,
                         "resolve_shared_instance_update",

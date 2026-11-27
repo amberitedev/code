@@ -50,6 +50,8 @@ jobs:
               - rust-toolchain.toml
               - rustfmt.toml
               - .cargo/**
+              - clippy.toml
+              - scripts/check-rust-tests.ts
               # Whole crate folders: crates compile in or test against files of every type.
               - apps/app/**
               - apps/core/**
@@ -79,7 +81,8 @@ jobs:
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
-      - run: pnpm --filter @amberite/backend --filter @amberite/fixtures --filter @modrinth/api-client --filter @modrinth/app-frontend typecheck
+      - run: pnpm knip
+      - run: pnpm --filter @amberite/backend --filter @amberite/fixtures --filter @modrinth/api-client --filter @modrinth/ui --filter @modrinth/app-frontend typecheck
       # The App's browser tests render in it.
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test:unit
@@ -106,6 +109,8 @@ jobs:
     if: needs.changes.outputs.rust == 'true'
     # Blacksmith: the Rust cache downloads faster there. The other jobs are too short to gain.
     runs-on: blacksmith-4vcpu-ubuntu-2604
+    # Tests await events, so one that never gets its event hangs; this is their ceiling.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -122,7 +127,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - uses: actions-rust-lang/setup-rust-toolchain@2b1f5e9b395427c92ee4e3331786ca3c37afe2d7 # v1.16.0
         with:
-          components: rustfmt
+          components: clippy, rustfmt
       - uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc # v2.86.7
         with:
           tool: cargo-shear@1.11.2
@@ -130,7 +135,9 @@ jobs:
       # Tauri only checks that the frontend build folder exists; an empty one is enough to compile.
       - run: mkdir -p apps/app-frontend/dist
       - run: cargo fmt --all --check
+      - run: node scripts/check-rust-tests.ts
       - run: cargo shear
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --exclude toasty --locked --no-fail-fast --features amberite-app/export-ts
       - run: sh -n apps/core/scripts/install.sh
       # A cargo error fails the step, and amberite-app proves the pattern matches tauri.

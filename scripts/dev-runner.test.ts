@@ -372,10 +372,11 @@ describe('dev runner program cache', () => {
 			write(NodePath.join(source, '.fingerprint', 'engine-0123456789abcdef', 'lib-engine'))
 			write(NodePath.join(source, '.fingerprint', 'tauri-0123456789abcdef', 'lib-tauri'))
 			write(NodePath.join(source, 'build', 'tauri-0123456789abcdef', 'out', 'permission-files'))
-			write(NodePath.join(output(primary), 'cargo-started'), 'run')
+			const started = NodePath.join(output(primary), 'cargo-started')
+			write(started, 'run')
 			const running = NodePath.join(output(primary), `cargo-running.${process.pid}.a`)
 			write(running)
-			const later = new Date(Date.now() + 60_000)
+			const later = new Date(NodeFS.statSync(started).mtimeMs + 60_000)
 			write(NodePath.join(output(broken), 'cargo-started'), 'run')
 			NodeFS.utimesSync(NodePath.join(output(broken), 'cargo-started'), later, later)
 

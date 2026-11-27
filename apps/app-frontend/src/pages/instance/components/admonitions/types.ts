@@ -1,6 +1,6 @@
 import type { StackedAdmonitionItem } from '@modrinth/ui'
 
-export type InstanceAdmonitionKind =
+type InstanceAdmonitionKind =
 	| 'linked-server-failed'
 	| 'shared-instance-stale'
 	| 'shared-instance-owner-update'

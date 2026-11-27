@@ -139,9 +139,7 @@ function isSharedInstanceTooLargeError(error: unknown) {
 	)
 }
 
-export function sharedInstanceUnavailableTextMessage(
-	reason: SharedInstanceUnavailableReason | null,
-) {
+function sharedInstanceUnavailableTextMessage(reason: SharedInstanceUnavailableReason | null) {
 	if (reason === 'deleted') return sharedInstanceErrorMessages.deletedText
 	if (reason === 'access_revoked') return sharedInstanceErrorMessages.accessRevokedText
 	if (reason === 'quarantined') return sharedInstanceErrorMessages.lockedText

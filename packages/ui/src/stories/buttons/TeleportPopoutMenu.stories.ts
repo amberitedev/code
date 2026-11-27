@@ -7,6 +7,7 @@ import TeleportPopoutMenu from '../../components/base/buttons/TeleportPopoutMenu
 const meta = {
 	title: 'Buttons/Teleport Popout Menu',
 	component: TeleportPopoutMenu,
+	args: { label: '' },
 } satisfies Meta<typeof TeleportPopoutMenu>
 
 export default meta

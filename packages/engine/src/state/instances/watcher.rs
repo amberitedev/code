@@ -733,15 +733,19 @@ mod tests {
             .await
             .unwrap();
 
+            let mut events = b.events.subscribe();
             queue_content_sync("same".to_string(), Arc::clone(&a));
             queue_content_sync("same".to_string(), Arc::clone(&b));
-            while content_rows::get_instance_files("same", &b.pool)
-                .await
-                .unwrap()
-                .is_empty()
-            {
-                tokio::time::sleep(Duration::from_millis(50)).await;
-            }
+            while !matches!(
+                events.recv().await,
+                Ok(crate::event::Event::FilesChanged { instance_id }) if instance_id == "same"
+            ) {}
+            assert!(
+                !content_rows::get_instance_files("same", &b.pool)
+                    .await
+                    .unwrap()
+                    .is_empty()
+            );
         })
         .await
         .expect("the second engine's sync never ran");

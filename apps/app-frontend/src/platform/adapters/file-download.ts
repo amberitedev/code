@@ -4,7 +4,7 @@ import type { FileDownloadProvider } from '@modrinth/ui'
 import { save } from '@/platform/dialog'
 import { cancelOp, type ExternalFileProgress, saveExternal } from '@/platform/ops'
 
-export interface FileDownloadTask {
+interface FileDownloadTask {
 	update: (progress: ExternalFileProgress) => void
 	succeed: (filename: string) => void
 	fail: (error: string) => void

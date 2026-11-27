@@ -116,7 +116,7 @@ export function appUrl(app: Pick<App, 'index' | 'name'>): string {
 	return base
 }
 
-export function coreUrl(index: number): string {
+function coreUrl(index: number): string {
 	const url = runtime().cores.find((entry) => entry.index === index)?.url
 	if (!url) throw new FixtureError(`Core ${index} is not part of the running stack.`)
 	return url
@@ -194,7 +194,7 @@ export function restartIfPatched(label: string): Promise<void> {
 const restarts = new Map<string, Promise<void>>()
 
 /** Restarts one program through the dev runner and waits until it answers again. */
-export async function restart(label: string): Promise<void> {
+async function restart(label: string): Promise<void> {
 	// The id marks this request: the program's state alone could be left from before it, or come
 	// from a restart the runner made on its own.
 	const request = NodeCrypto.randomUUID()

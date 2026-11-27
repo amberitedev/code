@@ -5,7 +5,7 @@ import { useAppEvent } from '@/composables/use-app-event'
 import { getOnboardingChecklist, type OnboardingChecklist } from '@/helpers/onboarding-checklist'
 import type { AppEvents } from '@/providers/app-events'
 
-export interface OnboardingChecklistContext {
+interface OnboardingChecklistContext {
 	hasCreatedInstance: ComputedRef<boolean>
 	hasLoggedIntoMinecraft: ComputedRef<boolean>
 	hasLoggedIntoModrinth: ComputedRef<boolean>
@@ -17,7 +17,7 @@ export interface OnboardingChecklistProvider extends OnboardingChecklistContext 
 	initialize: () => Promise<void>
 }
 
-export const [injectOnboardingChecklist, provideOnboardingChecklist] =
+const [injectOnboardingChecklist, provideOnboardingChecklist] =
 	createContext<OnboardingChecklistContext>('root', 'onboardingChecklist')
 
 export function setupOnboardingChecklistProvider(
@@ -55,3 +55,5 @@ export function setupOnboardingChecklistProvider(
 
 	return { ...context, initialize }
 }
+
+export { injectOnboardingChecklist }

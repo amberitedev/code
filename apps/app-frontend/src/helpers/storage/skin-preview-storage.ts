@@ -5,7 +5,7 @@ interface StoredPreview {
 	timestamp: number
 }
 
-export class SkinPreviewStorage {
+class SkinPreviewStorage {
 	private dbName = 'skin-previews'
 	private version = 1
 	private db: IDBDatabase | null = null

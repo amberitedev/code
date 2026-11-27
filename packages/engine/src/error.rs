@@ -473,7 +473,9 @@ mod tests {
             },
             ErrorKind::NoMinecraftProfile,
             ErrorKind::LauncherError(String::new()),
-            ErrorKind::JREError(JREError::NoExecutable(Default::default())),
+            ErrorKind::JREError(JREError::NoExecutable(
+                std::path::PathBuf::default(),
+            )),
             ErrorKind::NoValueFor(String::new()),
             ErrorKind::ApiIsDownError(1),
             ErrorKind::ZipError(ZipError::FileNotFound),

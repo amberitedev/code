@@ -31,10 +31,6 @@ export async function enqueueUpdateForInstallation(_updateRid) {
 	if (error) throw new Error(error.description)
 }
 
-export async function removeEnqueuedUpdate() {
-	return await apiClient.local.call(updates.discardDownloadedUpdate)
-}
-
 export async function setRestartAfterPendingUpdate(should_restart) {
 	return await apiClient.local.call(updates.setRestartAfterUpdate, {
 		body: { restart: should_restart },
@@ -56,10 +52,6 @@ export async function openPath(path) {
 
 export async function highlightInFolder(path) {
 	return await apiClient.local.call(desktop.revealPath, { body: { path } })
-}
-
-export async function showLauncherLogsFolder() {
-	return await apiClient.local.call(desktop.openFolder, { body: { folder: 'launcher_logs' } })
 }
 
 export async function createInstanceShortcut(instanceName, instanceId, options = {}) {
@@ -93,23 +85,6 @@ export async function showInstanceInFolder(instanceId) {
 export async function highlightModInInstance(instanceId, projectPath) {
 	const fullPath = await get_mod_full_path(instanceId, projectPath)
 	return await highlightInFolder(fullPath)
-}
-
-export async function restartApp() {
-	return await apiClient.local.call(updates.restartApp)
-}
-
-export const releaseColor = (releaseType) => {
-	switch (releaseType) {
-		case 'release':
-			return 'green'
-		case 'beta':
-			return 'orange'
-		case 'alpha':
-			return 'red'
-		default:
-			return ''
-	}
 }
 
 export async function copyToClipboard(text) {

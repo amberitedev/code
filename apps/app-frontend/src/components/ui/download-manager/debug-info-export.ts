@@ -6,7 +6,7 @@ import { save } from '@/platform/dialog'
 import { apiClient } from '@/platform/modrinth-client'
 import { cancelOp, runOp } from '@/platform/ops'
 
-export interface DebugInfoExportProgress {
+interface DebugInfoExportProgress {
 	stage: 'preparing' | 'exporting' | 'finishing'
 	processedBytes: number
 	totalBytes: number | null

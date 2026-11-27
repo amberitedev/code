@@ -1,4 +1,4 @@
-import { type PackSyncTarget, type SyncedPackType, syncedPacks } from '@amberite/contracts/app'
+import { type SyncedPackType, syncedPacks } from '@amberite/contracts/app'
 import type { ContentItem as EngineContentItem } from '@amberite/contracts/engine'
 import { type ContentItem, toContentItem } from '@modrinth/ui'
 import { queryOptions } from '@tanstack/vue-query'
@@ -18,11 +18,6 @@ export function isSyncedPackTypeAvailable(projectType: ContentItem['project_type
 	)
 }
 
-export interface PackSyncPreview {
-	pack: ContentItem
-	instances: PackSyncTarget[]
-}
-
 export const syncedPackKeys = {
 	all: ['synced-packs'] as const,
 	list: (type: SyncedPackType) => ['synced-packs', 'list', type] as const,
@@ -37,23 +32,12 @@ export function syncedPackQueryOptions(type: SyncedPackType) {
 	})
 }
 
-export async function list_synced_packs(projectType: SyncedPackType): Promise<ContentItem[]> {
+async function list_synced_packs(projectType: SyncedPackType): Promise<ContentItem[]> {
 	// The App's synced pack routes declare their items as JSON values: they are the engine's.
 	const items = (await apiClient.local.call(syncedPacks.listSyncedPacks, {
 		query: { project_type: projectType },
 	})) as EngineContentItem[]
 	return items.map((item) => toContentItem(item, localContentMapping))
-}
-
-export async function get_pack_sync_preview(
-	instanceId: string,
-	projectPath: string,
-): Promise<PackSyncPreview> {
-	const preview = await apiClient.local.call(syncedPacks.previewPackSync, {
-		params: { id: instanceId },
-		query: { project_path: projectPath },
-	})
-	return { ...preview, pack: toContentItem(preview.pack as EngineContentItem, localContentMapping) }
 }
 
 export function sync_pack(instanceId: string, projectPath: string): Promise<void> {
@@ -71,16 +55,6 @@ export function desync_pack(
 	return apiClient.local.call(syncedPacks.desyncPack, {
 		params: { id: instanceId, pack_id: packId },
 		query: { mode },
-	})
-}
-
-export function upload_synced_pack(
-	path: string,
-	projectType: SyncedPackType,
-	gameVersions: string[],
-): Promise<void> {
-	return apiClient.local.call(syncedPacks.uploadSyncedPack, {
-		body: { path, project_type: projectType, game_versions: gameVersions },
 	})
 }
 

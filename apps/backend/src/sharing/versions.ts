@@ -90,7 +90,7 @@ export async function versionResponse(
 }
 
 /** The newest complete version, or the one being uploaded when none is complete yet. */
-export async function latestVersion(env: Env, id: string): Promise<VersionRow> {
+async function latestVersion(env: Env, id: string): Promise<VersionRow> {
 	const result = await env.DB.prepare(
 		'SELECT * FROM shared_instance_versions WHERE instance_id = ? ORDER BY ready DESC, version DESC LIMIT 1',
 	)
@@ -369,7 +369,7 @@ function versionNumber(value: number): number {
 	return Number(text)
 }
 
-export async function versionRow(env: Env, id: string, version: number): Promise<VersionRow> {
+async function versionRow(env: Env, id: string, version: number): Promise<VersionRow> {
 	const row = await env.DB.prepare(
 		'SELECT * FROM shared_instance_versions WHERE instance_id = ? AND version = ?',
 	)

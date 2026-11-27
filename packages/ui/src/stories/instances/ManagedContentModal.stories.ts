@@ -6,9 +6,9 @@ import ManagedContentModal from '../../layouts/shared/content-tab/components/man
 import type { ContentItem } from '../../layouts/shared/content-tab/types'
 
 const sodiumItem: ContentItem = {
+	id: 'sodiumItem',
 	file_name: 'sodium-fabric-0.8.2+mc1.21.1.jar',
 	file_path: '',
-	hash: '',
 	size: 1024000,
 	enabled: true,
 	project_type: 'mod',
@@ -35,9 +35,9 @@ const sodiumItem: ContentItem = {
 }
 
 const lithiumItem: ContentItem = {
+	id: 'lithiumItem',
 	file_name: 'lithium-fabric-0.14.3+mc1.21.1.jar',
 	file_path: '',
-	hash: '',
 	size: 512000,
 	enabled: true,
 	project_type: 'mod',
@@ -64,9 +64,9 @@ const lithiumItem: ContentItem = {
 }
 
 const fabricApiItem: ContentItem = {
+	id: 'fabricApiItem',
 	file_name: 'fabric-api-0.141.3+26.1.jar',
 	file_path: '',
-	hash: '',
 	size: 2048000,
 	enabled: true,
 	project_type: 'mod',
@@ -92,9 +92,9 @@ const fabricApiItem: ContentItem = {
 }
 
 const modMenuItem: ContentItem = {
+	id: 'modMenuItem',
 	file_name: 'modmenu-16.0.0.jar',
 	file_path: '',
-	hash: '',
 	size: 256000,
 	enabled: true,
 	project_type: 'mod',
@@ -119,9 +119,9 @@ const modMenuItem: ContentItem = {
 }
 
 const irisItem: ContentItem = {
+	id: 'irisItem',
 	file_name: 'iris-1.8.0+mc1.21.1.jar',
 	file_path: '',
-	hash: '',
 	size: 1536000,
 	enabled: true,
 	project_type: 'mod',
@@ -146,9 +146,9 @@ const irisItem: ContentItem = {
 }
 
 const entityModelFeaturesItem: ContentItem = {
+	id: 'entityModelFeaturesItem',
 	file_name: 'entity-model-features-fabric-2.4.1+mc1.21.1.jar',
 	file_path: '',
-	hash: '',
 	size: 768000,
 	enabled: true,
 	project_type: 'mod',
@@ -174,9 +174,9 @@ const entityModelFeaturesItem: ContentItem = {
 }
 
 const entityTextureFeaturesItem: ContentItem = {
+	id: 'entityTextureFeaturesItem',
 	file_name: 'entity-texture-features-fabric-6.2.9+mc1.21.1.jar',
 	file_path: '',
-	hash: '',
 	size: 640000,
 	enabled: true,
 	project_type: 'mod',
@@ -201,9 +201,9 @@ const entityTextureFeaturesItem: ContentItem = {
 }
 
 const complementaryShaderItem: ContentItem = {
+	id: 'complementaryShaderItem',
 	file_name: 'ComplementaryReimagined_r5.3.zip',
 	file_path: '',
-	hash: '',
 	size: 2048000,
 	enabled: true,
 	project_type: 'shader',
@@ -228,9 +228,9 @@ const complementaryShaderItem: ContentItem = {
 }
 
 const bslShaderItem: ContentItem = {
+	id: 'bslShaderItem',
 	file_name: 'BSL_v8.2.09.zip',
 	file_path: '',
-	hash: '',
 	size: 1024000,
 	enabled: true,
 	project_type: 'shader',
@@ -255,9 +255,9 @@ const bslShaderItem: ContentItem = {
 }
 
 const faithfulItem: ContentItem = {
+	id: 'faithfulItem',
 	file_name: 'Faithful 32x - 1.21.zip',
 	file_path: '',
-	hash: '',
 	size: 8192000,
 	enabled: true,
 	project_type: 'resourcepack',
@@ -283,9 +283,9 @@ const faithfulItem: ContentItem = {
 }
 
 const vanillaTweaksItem: ContentItem = {
+	id: 'vanillaTweaksItem',
 	file_name: 'VanillaTweaks_r3.zip',
 	file_path: '',
-	hash: '',
 	size: 512000,
 	enabled: true,
 	project_type: 'resourcepack',
@@ -293,7 +293,6 @@ const vanillaTweaksItem: ContentItem = {
 		id: 'rp2',
 		slug: 'vanilla-tweaks',
 		title: 'Vanilla Tweaks',
-		icon_url: null,
 	},
 	version: {
 		id: 'rpv2',
@@ -310,9 +309,9 @@ const vanillaTweaksItem: ContentItem = {
 }
 
 const stayTrueItem: ContentItem = {
+	id: 'stayTrueItem',
 	file_name: 'Stay_True_1.21.zip',
 	file_path: '',
-	hash: '',
 	size: 4096000,
 	enabled: true,
 	project_type: 'resourcepack',

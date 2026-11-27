@@ -113,7 +113,7 @@ async fn core_with_backend(backend: Option<&str>) -> Core {
         update,
         storage,
         consoles: Arc::default(),
-        ops: Default::default(),
+        ops: super::ops::Ops::default(),
     });
     Core {
         _dir: dir,
@@ -2098,18 +2098,19 @@ async fn a_running_server_takes_the_newest_pushed_version_once_it_stops() {
     assert_eq!(pending().await, 3);
 
     drop(shim);
+    let mut changes = core.state.events.subscribe();
     let _ = core
         .state
         .servers
         .events
         .send(crate::servers::Lifecycle::Ended(core.server.clone()));
-    tokio::time::timeout(std::time::Duration::from_secs(10), async {
-        while pending().await != 0 {
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        }
-    })
-    .await
-    .expect("the version applies once the server stops");
+    // The version leaves the queue before the server says it changed.
+    while pending().await != 0 {
+        while !matches!(
+            changes.recv().await.unwrap(),
+            contracts::core::CoreEvent::ServerChanged { server } if server == core.server
+        ) {}
+    }
     assert_eq!(
         core.count("SELECT COUNT(*) FROM follows WHERE state = 'pending'")
             .await,

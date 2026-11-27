@@ -36,9 +36,9 @@ mod settings_editor;
 mod source_selection;
 mod write_shared_settings;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "export-ts"))]
 pub use crate::synced_options::state::{CanonicalValue, GameOptionKind};
-#[cfg(test)]
+#[cfg(all(test, feature = "export-ts"))]
 pub use api_types::{
     EditableGameSetting, GameOptionCompatibility,
     GameOptionCompatibilityBucket, GameOptionCompatibilityReason,
@@ -58,7 +58,7 @@ pub use local_settings_editor::{
 };
 pub use locales::queue_game_locale_index;
 pub(crate) use locales::{GameLocaleIndexer, start_game_locale_indexer};
-#[cfg(test)]
+#[cfg(all(test, feature = "export-ts"))]
 pub use locales::{
     GameSettingLocaleLabel, GameSettingSource, GameSettingSourceProject,
 };

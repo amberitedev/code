@@ -229,6 +229,7 @@ const cobblemonVersions: Labrinth.Versions.v2.Version[] = [
 const meta = {
 	title: 'Instances/ContentUpdaterModal',
 	component: ContentUpdaterModal,
+	args: { isApp: false },
 	parameters: {
 		layout: 'centered',
 	},

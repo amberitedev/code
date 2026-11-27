@@ -1,8 +1,6 @@
 import { AbstractModule } from '../../core/abstract-module'
 import type { LauncherMeta } from './types'
 
-export type { LauncherMeta } from './types'
-
 const LAUNCHER_META_BASE_URL = 'https://launcher-meta.modrinth.com'
 
 export class LauncherMetaManifestV0Module extends AbstractModule {

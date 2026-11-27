@@ -23,6 +23,8 @@ extend-ignore-re = [
 ]
 
 [default.extend-words]
+# Jasmine's skipped suite, which the lint plugin rejects
+xdescribe = "xdescribe"
 # Terms Of Use in `tou-link`
 tou = "tou"
 # Google Ad Manager

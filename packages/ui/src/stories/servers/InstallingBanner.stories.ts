@@ -63,7 +63,7 @@ export const PlatformProgress: Story = {
 		status: 'installing',
 		progress: 45,
 		error: null,
-		source: 'websocket',
+		source: 'job',
 	}),
 }
 
@@ -79,7 +79,7 @@ export const Vanilla: Story = {
 		status: 'installing',
 		progress: 20,
 		error: null,
-		source: 'websocket',
+		source: 'job',
 	}),
 }
 
@@ -94,7 +94,7 @@ export const Modpack: Story = {
 		status: 'installing',
 		progress: 72,
 		error: null,
-		source: 'websocket',
+		source: 'job',
 	}),
 }
 
@@ -110,7 +110,7 @@ export const PlatformFailed: Story = {
 		status: 'failed',
 		progress: null,
 		error: 'Platform installer failed',
-		source: 'websocket',
+		source: 'job',
 	}),
 }
 
@@ -125,7 +125,7 @@ export const ModpackFailed: Story = {
 		status: 'failed',
 		progress: null,
 		error: 'The modpack does not include a downloadable file',
-		source: 'websocket',
+		source: 'job',
 	}),
 }
 
@@ -139,6 +139,6 @@ export const LocalModpackFailed: Story = {
 		status: 'failed',
 		progress: null,
 		error: 'The modpack could not be read',
-		source: 'websocket',
+		source: 'job',
 	}),
 }

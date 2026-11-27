@@ -284,7 +284,7 @@ async fn record_join(
             )
             .await
         }
-        Err(error) => Err(anyhow::Error::new(error).into()),
+        Err(error) => Err(anyhow::Error::new(error)),
     };
     if let Err(error) = recorded {
         tracing::warn!("Failed to record joining {host}:{port}: {error}");

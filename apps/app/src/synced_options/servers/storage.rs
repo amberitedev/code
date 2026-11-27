@@ -220,7 +220,7 @@ async fn load_local_with<'e>(
         .map(|row| {
             Ok(LocalServer {
                 id: row.id,
-                source: ServerSource::from_str(&row.source).ok_or(
+                source: ServerSource::parse(&row.source).ok_or(
                     ErrorKind::InputError(format!(
                         "unknown server source {}",
                         row.source

@@ -63,7 +63,7 @@ Every command, the log, and ports: [scripts](docs/internals/scripts.md).
 
 ## Verifying
 
-- Before you push, run `vp run check:changed`. It runs CI's fast checks for changed files: lint, typos, TOML, typecheck and tests of the affected packages, and for Rust `rustfmt`, a build, and the tests of changed crates. **Do not run repo-wide checks** (`vp check`, `vp run -r test`, `vp run -r typecheck`) unless asked. CI owns the full suite.
+- Before you push, run `vp run check:changed`. It runs CI's fast checks for changed files: lint, typos, TOML, knip, typecheck and tests of the affected packages, and for Rust `rustfmt`, the test rules, a build, and Clippy and the tests of changed crates. **Do not run repo-wide checks** (`vp check`, `vp run -r test`, `vp run -r typecheck`) unless asked. CI owns the full suite.
 - Iterate with only the tests that cover what you changed: `vp test run <files>`, and for Rust `node scripts/dev-runner.ts test <crate>`. A plain `cargo test` rebuilds everything in a separate folder.
 - After changing a Rust wire type, `vp run gen:ts` writes the TypeScript the crates generate. After changing a query or a migration, `vp run sqlx:prepare` writes the `.sqlx` files.
 - Follow [testing](docs/internals/testing.md) for what to test, bug-fix proof, waiting for work (no sleeps or polling), and real-app [Scenarios](docs/internals/testing.md#scenarios) (`vp run scenarios:prove`).

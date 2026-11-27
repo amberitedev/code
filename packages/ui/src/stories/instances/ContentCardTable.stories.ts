@@ -218,6 +218,7 @@ const meta = {
 	parameters: {
 		layout: 'padded',
 	},
+	args: { items: [] },
 	argTypes: {
 		items: {
 			control: 'object',
@@ -735,18 +736,18 @@ export const WithOverflowMenu: Story = {
 				{
 					...sodiumItem,
 					overflowOptions: [
-						{ id: 'view', action: () => console.log('View sodium') },
-						{ id: 'folder', action: () => console.log('Open folder') },
-						{ divider: true },
-						{ id: 'remove', action: () => console.log('Remove'), color: 'red' as const },
+						{ id: 'view', label: 'View', action: () => console.log('View sodium') },
+						{ id: 'folder', label: 'Open folder', action: () => console.log('Open folder') },
+						{ type: 'divider' },
+						{ id: 'remove', label: 'Remove', action: () => console.log('Remove'), tone: 'red' },
 					],
 				},
 				{
 					...modMenuItem,
 					overflowOptions: [
-						{ id: 'view', action: () => console.log('View modmenu') },
-						{ divider: true },
-						{ id: 'remove', action: () => console.log('Remove'), color: 'red' as const },
+						{ id: 'view', label: 'View', action: () => console.log('View modmenu') },
+						{ type: 'divider' },
+						{ id: 'remove', label: 'Remove', action: () => console.log('Remove'), tone: 'red' },
 					],
 				},
 			]

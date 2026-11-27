@@ -2,7 +2,7 @@ import { createContext } from '@modrinth/ui'
 import type { Component, ComputedRef, MaybeRefOrGetter } from 'vue'
 import type { RouteLocationRaw } from 'vue-router'
 
-export type BreadcrumbVisual =
+type BreadcrumbVisual =
 	| {
 			type: 'icon'
 			component: Component

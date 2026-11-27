@@ -9,7 +9,7 @@ export type SharedInstanceInstallOptions = {
 	onInstalled?: () => void
 }
 
-export interface SharedInstanceActionsContext {
+interface SharedInstanceActionsContext {
 	loadingIds: ComputedRef<Set<string>>
 	removing: ComputedRef<boolean>
 	install: (instance: UninstalledSharedInstance, options?: SharedInstanceInstallOptions) => void
@@ -17,7 +17,7 @@ export interface SharedInstanceActionsContext {
 	requestRemove: (instances: UninstalledSharedInstance[], event?: MouseEvent) => void
 }
 
-export const [injectSharedInstanceActions, provideSharedInstanceActions] =
+const [injectSharedInstanceActions, provideSharedInstanceActions] =
 	createContext<SharedInstanceActionsContext>('SharedInstanceModals', 'sharedInstanceActions')
 
 export function setupSharedInstanceActionsProvider() {
@@ -31,3 +31,5 @@ export function setupSharedInstanceActionsProvider() {
 		requestRemove: (instances, event) => modals.value?.requestRemove(instances, event),
 	})
 }
+
+export { injectSharedInstanceActions }

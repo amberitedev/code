@@ -3,7 +3,7 @@ interface StoredHead {
 	timestamp: number
 }
 
-export class HeadStorage {
+class HeadStorage {
 	private dbName = 'head-storage'
 	private version = 1
 	private db: IDBDatabase | null = null

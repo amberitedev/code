@@ -17,7 +17,7 @@ impl ContentSetRemoteRefType {
         }
     }
 
-    pub fn from_str(value: &str) -> crate::Result<Self> {
+    pub fn parse(value: &str) -> crate::Result<Self> {
         match value {
             "shared_content_set" => Ok(Self::SharedContentSet),
             "hosting_instance" => Ok(Self::HostingInstance),

@@ -5,13 +5,15 @@ import type { GameInstance } from '@/helpers/types'
 
 import type InstanceActionModals from './instance-action-modals.vue'
 
-export interface InstanceActionsContext {
+interface InstanceActionsContext {
 	confirmDelete: (instance: GameInstance) => void
 	editIcon: (instance: GameInstance) => void
 }
 
-export const [injectInstanceActions, provideInstanceActions] =
-	createContext<InstanceActionsContext>('InstanceActionModals', 'instanceActions')
+const [injectInstanceActions, provideInstanceActions] = createContext<InstanceActionsContext>(
+	'InstanceActionModals',
+	'instanceActions',
+)
 
 export function setupInstanceActionsProvider() {
 	const modals = useTemplateRef<InstanceType<typeof InstanceActionModals>>('instanceActionModals')
@@ -21,3 +23,5 @@ export function setupInstanceActionsProvider() {
 		editIcon: (instance) => void modals.value?.editIcon(instance),
 	})
 }
+
+export { injectInstanceActions }

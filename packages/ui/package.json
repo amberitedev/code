@@ -19,25 +19,19 @@
 			"types": "./index.ts",
 			"default": "./index.ts"
 		},
-		"./pages": {
-			"types": "./src/pages/index.ts",
-			"default": "./src/pages/index.ts"
-		},
 		"./src/*": "./src/*"
 	},
 	"scripts": {
-		"lint": "eslint . && prettier --check .",
-		"fix": "eslint . --fix && prettier --write .",
 		"intl:extract": "formatjs extract \"src/**/*.{vue,ts,tsx,js,jsx,mts,cts,mjs,cjs}\" --ignore \"src/**/*.d.ts\" --out-file src/locales/en-US/index.json --preserve-whitespace",
 		"intl:prune-local": "pnpm -w scripts i18n-icu-contract prune-local --scope packages/ui",
 		"storybook": "storybook dev -p 6006",
-		"build-storybook": "storybook build"
+		"build-storybook": "storybook build",
+		"typecheck": "vue-tsc --noEmit --incremental --tsBuildInfoFile node_modules/.cache/typecheck.tsbuildinfo"
 	},
 	"dependencies": {
 		"@amberite/contracts": "workspace:*",
 		"@codemirror/commands": "^6.11.2",
 		"@codemirror/lang-markdown": "^6.5.2",
-		"@codemirror/language": "^6.13.1",
 		"@codemirror/state": "^6.7.6",
 		"@codemirror/view": "^6.44.2",
 		"@floating-ui/vue": "^2.0.1",
@@ -47,10 +41,7 @@
 		"@tanstack/vue-query": "5.108.4",
 		"@tresjs/cientos": "^4.3.0",
 		"@tresjs/core": "^4.3.4",
-		"@tresjs/post-processing": "^2.4.0",
-		"@types/markdown-it": "^14.2.0",
 		"@types/three": "^0.187.0",
-		"@vintl/how-ago": "^3.0.1",
 		"@vueuse/core": "^11.1.0",
 		"@xterm/addon-fit": "^0.11.0",
 		"@xterm/addon-search": "^0.16.0",
@@ -64,33 +55,23 @@
 		"fabric": "^7.4.0",
 		"flatpickr": "^4.6.13",
 		"fuse.js": "^7.5.0",
-		"highlight.js": "^11.12.0",
 		"intl-messageformat": "^12.2.1",
-		"jszip": "^3.10.2",
 		"lru-cache": "^11.5.3",
-		"markdown-it": "^13.0.2",
 		"motion-v": "^2.13.0",
 		"overlayscrollbars": "^2.17.1",
-		"postprocessing": "^6.39.6",
 		"qrcode.vue": "^3.11.1",
 		"three": "^0.187.0",
 		"vue-i18n": "^11.4.24",
-		"vue-select": "4.0.0-beta.6",
-		"vue-typed-virtual-list": "^1.0.10",
 		"vue3-ace-editor": "^2.2.4",
-		"vue3-apexcharts": "^1.11.3",
-		"xss": "^1.0.17"
+		"vue3-apexcharts": "^1.11.3"
 	},
 	"devDependencies": {
 		"@formatjs/cli": "^6.23.1",
 		"@modrinth/tooling-config": "workspace:*",
 		"@storybook/addon-a11y": "^10.6.9",
 		"@storybook/addon-themes": "^10.6.9",
-		"@storybook/builder-vite": "^10.6.9",
 		"@storybook/vue3-vite": "^10.6.9",
-		"@tailwindcss/vite": "^4.3.5",
 		"@vitejs/plugin-vue": "^6.0.11",
-		"eslint-plugin-storybook": "^10.6.9",
 		"storybook": "^10.6.9",
 		"tailwindcss": "^3.4.4",
 		"typescript": "^5.4.5",
@@ -99,7 +80,7 @@
 		"vue": "^3.5.46",
 		"vue-component-type-helpers": "^3.3.14",
 		"vue-router": "^5.5.3",
-		"wrangler": "^4.168.0"
+		"vue-tsc": "^2.1.6"
 	},
 	"web-types": "../../web-types.json"
 }

@@ -42,6 +42,7 @@ export const Default: Story = {
 		project: {
 			actualProjectType: 'mod',
 			project_type: 'mod',
+			game_versions: ['1.21.4', '1.21.3', '1.21.1', '1.20.4', '1.20.1'],
 			loaders: ['fabric', 'forge', 'neoforge'],
 			client_side: 'required',
 			server_side: 'optional',

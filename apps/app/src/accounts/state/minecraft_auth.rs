@@ -206,15 +206,13 @@ async fn login_begin_inner(
     )
     .await
     {
-        Ok((session_id, redirect_uri)) => {
-            return Ok(MinecraftLoginFlow {
-                verifier,
-                challenge,
-                session_id,
-                auth_request_uri: redirect_uri.value.msa_oauth_redirect,
-            });
-        }
-        Err(err) => return Err(err.into()),
+        Ok((session_id, redirect_uri)) => Ok(MinecraftLoginFlow {
+            verifier,
+            challenge,
+            session_id,
+            auth_request_uri: redirect_uri.value.msa_oauth_redirect,
+        }),
+        Err(err) => Err(err.into()),
     }
 }
 

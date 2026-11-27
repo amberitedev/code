@@ -20,7 +20,9 @@ use async_trait::async_trait;
 use tempfile::TempDir;
 use toasty_core::{
     Result, Schema,
-    driver::{Capability, ConnectContext, Connection, Driver, ExecResponse, Operation},
+    driver::{
+        Capability, ConnectContext, Connection, Driver, ExecResponse, Operation,
+    },
     schema::{
         db::{AppliedMigration, Migration},
         diff,
@@ -79,7 +81,10 @@ impl Driver for MockDriver {
         self.inner.capability()
     }
 
-    async fn connect(&self, cx: &ConnectContext) -> Result<Box<dyn Connection>> {
+    async fn connect(
+        &self,
+        cx: &ConnectContext,
+    ) -> Result<Box<dyn Connection>> {
         let inner = self.inner.connect(cx).await?;
         self.state.connects.fetch_add(1, Ordering::Relaxed);
         Ok(Box::new(MockConnection {
@@ -107,13 +112,17 @@ struct MockConnection {
 
 #[async_trait]
 impl Connection for MockConnection {
-    async fn exec(&mut self, schema: &Arc<Schema>, op: Operation) -> Result<ExecResponse> {
+    async fn exec(
+        &mut self,
+        schema: &Arc<Schema>,
+        op: Operation,
+    ) -> Result<ExecResponse> {
         if self.state.exec_fail_tokens.load(Ordering::Relaxed) > 0 {
             self.state.exec_fail_tokens.fetch_sub(1, Ordering::Relaxed);
             self.valid = false;
-            return Err(toasty_core::Error::connection_lost(std::io::Error::other(
-                "mock exec failure",
-            )));
+            return Err(toasty_core::Error::connection_lost(
+                std::io::Error::other("mock exec failure"),
+            ));
         }
         self.inner.exec(schema, op).await
     }
@@ -127,9 +136,9 @@ impl Connection for MockConnection {
         if self.state.ping_fail_tokens.load(Ordering::Relaxed) > 0 {
             self.state.ping_fail_tokens.fetch_sub(1, Ordering::Relaxed);
             self.valid = false;
-            return Err(toasty_core::Error::connection_lost(std::io::Error::other(
-                "mock ping failure",
-            )));
+            return Err(toasty_core::Error::connection_lost(
+                std::io::Error::other("mock ping failure"),
+            ));
         }
         self.inner.ping().await
     }
@@ -142,7 +151,12 @@ impl Connection for MockConnection {
         self.inner.applied_migrations().await
     }
 
-    async fn apply_migration(&mut self, id: u64, name: &str, migration: &Migration) -> Result<()> {
+    async fn apply_migration(
+        &mut self,
+        id: u64,
+        name: &str,
+        migration: &Migration,
+    ) -> Result<()> {
         self.inner.apply_migration(id, name, migration).await
     }
 }
@@ -212,7 +226,8 @@ async fn pool_recovers_after_connection_lost() {
 /// needing a user query to trip it.
 #[tokio::test(start_paused = true)]
 async fn sweep_evicts_dead_idle_connection() {
-    let (mut db, state) = build_db(1, Some(Duration::from_millis(50)), false).await;
+    let (mut db, state) =
+        build_db(1, Some(Duration::from_millis(50)), false).await;
 
     // Force the pool to open its one connection.
     toasty::create!(User {
@@ -253,7 +268,8 @@ async fn eager_escalation_after_observed_loss() {
     // 60-second interval so the periodic tick cannot fire during the
     // test — only the notify-driven escalation path can drain the
     // queued faults here.
-    let (mut db, state) = build_db(3, Some(Duration::from_secs(60)), false).await;
+    let (mut db, state) =
+        build_db(3, Some(Duration::from_secs(60)), false).await;
 
     let c1 = db.connection().await.unwrap();
     let c2 = db.connection().await.unwrap();
@@ -415,9 +431,9 @@ async fn pre_ping_runs_on_every_checkout() {
 }
 
 /// Lifetime cap: a connection older than `pool_max_connection_lifetime`
-/// is evicted by `recycle` and replaced with a fresh one. Uses real
-/// time because deadpool's `Metrics::age` reads `std::time::Instant`,
-/// which `tokio::time::pause` does not advance.
+/// is evicted by `recycle` and replaced with a fresh one. A zero cap makes
+/// every connection old enough, since deadpool's `Metrics::age` reads
+/// `std::time::Instant`, which `tokio::time::pause` does not advance.
 #[tokio::test]
 async fn lifetime_cap_evicts_aged_connection() {
     let driver = MockDriver::new();
@@ -427,7 +443,7 @@ async fn lifetime_cap_evicts_aged_connection() {
         .models(toasty::models!(User))
         .max_pool_size(1)
         .pool_health_check_interval(None)
-        .pool_max_connection_lifetime(Some(Duration::from_millis(50)))
+        .pool_max_connection_lifetime(Some(Duration::ZERO))
         .build(driver)
         .await
         .unwrap();
@@ -442,9 +458,6 @@ async fn lifetime_cap_evicts_aged_connection() {
     .unwrap();
 
     let connects_before = state.connects.load(Ordering::Relaxed);
-
-    // Real-time wait past the lifetime cap.
-    tokio::time::sleep(Duration::from_millis(150)).await;
 
     toasty::create!(User {
         name: "bob",
@@ -474,7 +487,7 @@ async fn idle_time_cap_evicts_long_idle_connection() {
         .models(toasty::models!(User))
         .max_pool_size(1)
         .pool_health_check_interval(None)
-        .pool_max_connection_idle_time(Some(Duration::from_millis(50)))
+        .pool_max_connection_idle_time(Some(Duration::ZERO))
         .build(driver)
         .await
         .unwrap();
@@ -489,9 +502,6 @@ async fn idle_time_cap_evicts_long_idle_connection() {
     .unwrap();
 
     let connects_before = state.connects.load(Ordering::Relaxed);
-
-    // Real-time wait past the idle cap.
-    tokio::time::sleep(Duration::from_millis(150)).await;
 
     toasty::create!(User {
         name: "bob",

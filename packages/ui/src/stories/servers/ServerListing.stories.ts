@@ -13,7 +13,8 @@ const baseServer = {
 	net: {
 		ip: '203.0.113.42',
 		port: 25565,
-		domain: 'play',
+		outside: null,
+		game_port: 25565,
 	},
 } as const
 

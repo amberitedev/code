@@ -51,11 +51,12 @@ impl FileStamp {
             let mut information = BY_HANDLE_FILE_INFORMATION::default();
             let mut basic = FILE_BASIC_INFO::default();
             unsafe {
-                GetFileInformationByHandle(handle, &mut information).ok()?;
+                GetFileInformationByHandle(handle, &raw mut information)
+                    .ok()?;
                 GetFileInformationByHandleEx(
                     handle,
                     FileBasicInfo,
-                    (&mut basic as *mut FILE_BASIC_INFO).cast(),
+                    (&raw mut basic).cast(),
                     size_of::<FILE_BASIC_INFO>() as u32,
                 )
                 .ok()?;
@@ -170,14 +171,33 @@ mod tests {
     }
 
     #[test]
-    fn edits_with_restored_size_and_write_time_are_rehashed() {
+    fn a_stamp_carries_the_files_change_time() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("mod.jar");
+        fs::write(&path, b"content").unwrap();
+        // A write time of zero, so only a real change time can be above it.
+        File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(SystemTime::UNIX_EPOCH)
+            .unwrap();
+        let stamp = FileStamp::read(&File::open(&path).unwrap()).unwrap();
+        assert_eq!(stamp.modified, SystemTime::UNIX_EPOCH);
+        assert!(stamp.changed.0 > 0);
+    }
+
+    #[test]
+    fn an_edit_only_the_change_time_shows_is_rehashed() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("mod.jar");
         fs::write(&path, b"original").unwrap();
         let modified = fs::metadata(&path).unwrap().modified().unwrap();
         let cache = VerifiedFiles::default();
         let original = cache.hash(&path, &|_| {}).unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(20));
+        // Restored size and write time leave the change time, which a fast disk can keep within
+        // one clock tick of the hash: dated earlier, the cached stamp differs only there.
+        cache.files.lock().get_mut(&path).unwrap().stamp.changed.0 -= 1;
         let mut file = File::options().write(true).open(&path).unwrap();
         file.write_all(b"modified").unwrap();
         file.set_modified(modified).unwrap();

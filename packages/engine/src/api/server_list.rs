@@ -167,7 +167,7 @@ impl ServerSource {
         }
     }
 
-    pub fn from_str(value: &str) -> Option<Self> {
+    pub fn parse(value: &str) -> Option<Self> {
         match value {
             "user_synced" => Some(Self::UserSynced),
             "modpack" => Some(Self::Modpack),

@@ -24,7 +24,7 @@ pub async fn platform(
         return Ok(None);
     };
     let set = instance.applied_content_set;
-    Ok((!set.game_version.is_empty()).then(|| Platform {
+    Ok((!set.game_version.is_empty()).then_some(Platform {
         loader: set.loader,
         game_version: set.game_version,
         loader_version: set.loader_version,

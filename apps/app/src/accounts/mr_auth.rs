@@ -134,12 +134,10 @@ pub async fn remove_user(
             .await?
             .into_iter()
             .find(|creds| creds.user_id == user_id)
-    {
-        if let Err(error) =
+        && let Err(error) =
             crate::accounts::self_hosted::revoke(&creds, &state.sessions).await
-        {
-            tracing::warn!("Could not revoke account session: {error}");
-        }
+    {
+        tracing::warn!("Could not revoke account session: {error}");
     }
     ModrinthCredentials::remove(user_id, state.db()).await?;
 

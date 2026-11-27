@@ -12,7 +12,7 @@ await build({
 	minify: true,
 	sourcemap: true,
 	legalComments: 'none',
-	external: ['ofetch', 'mitt', '@tauri-apps/plugin-http'],
+	external: ['ofetch', '@tauri-apps/plugin-http'],
 	plugins: [
 		dts({
 			bundleTypes: { bundledPackages: ['@amberite/contracts'] },

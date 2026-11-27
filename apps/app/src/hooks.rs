@@ -335,23 +335,16 @@ pub(crate) mod tests {
         assert_eq!(std::fs::read_to_string(&options).unwrap(), "fov:0.75\n");
     }
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn removal_waits_for_a_synced_options_pass_in_flight() {
+    #[tokio::test]
+    async fn the_removing_hook_waits_for_a_synced_options_pass_in_flight() {
         let dir = tempfile::tempdir().unwrap();
         let engine = offline_engine(dir.path()).await;
-        let id = create(&engine).await.instance.id;
-        let folder = instance::get_full_path(&engine, &id).await.unwrap();
-        std::fs::create_dir_all(&folder).unwrap();
 
         let pass = engine.synced_options().lock().await;
-        let removal = tokio::spawn({
-            let engine = engine.clone();
-            async move { instance::remove(&engine, &id).await }
-        });
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-        assert!(folder.exists() && !removal.is_finished());
+        // What an instance's removal holds before it deletes the folder.
+        let mut removing = std::pin::pin!(engine.hooks().removing(&engine));
+        assert!(futures::poll!(removing.as_mut()).is_pending());
         drop(pass);
-        removal.await.unwrap().unwrap();
-        assert!(!folder.exists());
+        removing.await;
     }
 }

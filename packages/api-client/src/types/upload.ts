@@ -71,7 +71,7 @@ interface BaseUploadRequestOptions extends Omit<RequestOptions, 'body' | 'method
 /**
  * Options for single file upload requests
  */
-export interface FileUploadRequestOptions extends BaseUploadRequestOptions {
+interface FileUploadRequestOptions extends BaseUploadRequestOptions {
 	/** File, Blob, or local file to upload */
 	file: UploadFile
 	/** Sends the file as this multipart form field rather than as the raw body */
@@ -85,7 +85,7 @@ export interface FileUploadRequestOptions extends BaseUploadRequestOptions {
  * Used for multipart uploads (e.g., version file uploads) that need
  * to send metadata alongside files.
  */
-export interface FormDataUploadRequestOptions extends BaseUploadRequestOptions {
+interface FormDataUploadRequestOptions extends BaseUploadRequestOptions {
 	/** FormData containing files and metadata */
 	formData: FormData
 	file?: never
@@ -112,7 +112,7 @@ export interface FileUploadMetadata extends Record<string, unknown> {
 /**
  * Metadata attached to FormData upload contexts
  */
-export interface FormDataUploadMetadata extends Record<string, unknown> {
+interface FormDataUploadMetadata extends Record<string, unknown> {
 	isUpload: true
 	formData: FormData
 	file?: never
