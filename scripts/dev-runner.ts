@@ -2443,7 +2443,9 @@ export async function holdStack(
 			resolve()
 		}),
 	)
-	while (readLiveRuntime(paths)?.pid !== child.pid) {
+	for (;;) {
+		const runtime = readLiveRuntime(paths)
+		if (runtime?.pid === child.pid && !runtime.starting) break
 		if (!running) throw new DevRunnerError(`The dev stack stopped. See ${devLogPath(paths)}`)
 		await new Promise((resolve) => setTimeout(resolve, 200))
 	}
