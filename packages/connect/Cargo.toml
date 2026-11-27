@@ -20,7 +20,6 @@ sha2 = { workspace = true }
 # One socket for IPv6 and IPv4.
 socket2 = "0.6.5"
 tokio = { workspace = true, features = ["io-util", "macros", "net", "rt", "sync", "time"] }
-tracing = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["io-util", "macros", "net", "rt", "sync", "time"] }
