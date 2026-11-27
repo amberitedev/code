@@ -15,8 +15,8 @@
 	"devDependencies": {
 		"@modrinth/tooling-config": "workspace:*",
 		"@types/node": "^24",
-		"jiti": "^2.4.2",
-		"lucide-static": "^0.562.0",
-		"vue": "^3.5.43"
+		"jiti": "^2.7.0",
+		"lucide-static": "^1.81.0",
+		"vue": "^3.5.46"
 	}
 }

@@ -27,12 +27,15 @@ function titleBar(width: number, name: string) {
 }
 
 test('a server name too long for the title bar is cut off inside it, and a short one is not', async () => {
-	const long = titleBar(300, 'A server with a name much longer than the title bar has room for')
+	const long = await titleBar(
+		300,
+		'A server with a name much longer than the title bar has room for',
+	)
 	const bar = long.container.firstElementChild as HTMLElement
 	await expect.poll(() => bar.style.getPropertyValue('--scroll-distance')).not.toBe('')
 	expect(bar.getBoundingClientRect().width).toBeLessThanOrEqual(300)
 
-	const short = titleBar(300, 'Survival')
+	const short = await titleBar(300, 'Survival')
 	await expect.element(short.getByText('Survival')).toBeVisible()
 	expect(
 		(short.container.firstElementChild as HTMLElement).style.getPropertyValue('--scroll-distance'),
