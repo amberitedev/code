@@ -24,6 +24,10 @@
 			// `accounts.mjs` is run by hand against a running backend.
 			"entry": ["tests/*.mjs"],
 		},
+		"packages/api-client": {
+			// Imported by nothing: the typecheck compiles it to prove our types fit upstream's.
+			"entry": ["src/contracts/labrinth-compat.ts"],
+		},
 		"packages/assets": {
 			// `icons:add` copies icons out of its folder.
 			"ignoreDependencies": ["lucide-static"],
@@ -47,8 +51,8 @@
 			"ignoreBinaries": ["i18n-icu-contract"],
 		},
 		"packages/utils": {
-			// Its tsconfig.json extends it.
-			"ignoreDependencies": ["@modrinth/tooling-config"],
+			// It has no typescript of its own, which knip needs before it reads the tsconfig it extends.
+			"typescript": true,
 		},
 	},
 }
