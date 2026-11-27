@@ -166,6 +166,25 @@ pub struct Crash {
 }
 
 #[cfg(test)]
+pub(super) fn ts_types() -> Vec<String> {
+    use ts_rs::TS;
+
+    let cfg = crate::ts::config();
+    vec![
+        Performance::decl(&cfg),
+        Memory::decl(&cfg),
+        JvmFlags::decl(&cfg),
+        Restarts::decl(&cfg),
+        Schedule::decl(&cfg),
+        Weekday::decl(&cfg),
+        ConsoleCommand::decl(&cfg),
+        JavaPath::decl(&cfg),
+        ServerInsight::decl(&cfg),
+        Crash::decl(&cfg),
+    ]
+}
+
+#[cfg(test)]
 mod tests {
     use super::{Schedule, TimeOfDay, Weekday};
 
@@ -188,23 +207,4 @@ mod tests {
             }
         );
     }
-}
-
-#[cfg(test)]
-pub(super) fn ts_types() -> Vec<String> {
-    use ts_rs::TS;
-
-    let cfg = crate::ts::config();
-    vec![
-        Performance::decl(&cfg),
-        Memory::decl(&cfg),
-        JvmFlags::decl(&cfg),
-        Restarts::decl(&cfg),
-        Schedule::decl(&cfg),
-        Weekday::decl(&cfg),
-        ConsoleCommand::decl(&cfg),
-        JavaPath::decl(&cfg),
-        ServerInsight::decl(&cfg),
-        Crash::decl(&cfg),
-    ]
 }

@@ -16,7 +16,7 @@ impl ContentSetSyncProvider {
         }
     }
 
-    pub fn from_str(value: &str) -> crate::Result<Self> {
+    pub fn parse(value: &str) -> crate::Result<Self> {
         match value {
             "shared_instance" => Ok(Self::SharedInstance),
             other => Err(unknown_value("content set sync provider", other)),
@@ -50,7 +50,7 @@ impl ContentSetSyncStatus {
         }
     }
 
-    pub fn from_str(value: &str) -> crate::Result<Self> {
+    pub fn parse(value: &str) -> crate::Result<Self> {
         match value {
             "unknown" => Ok(Self::Unknown),
             "up_to_date" => Ok(Self::UpToDate),

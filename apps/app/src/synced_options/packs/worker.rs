@@ -266,7 +266,7 @@ impl<'a> Preparation<'a> {
 
     async fn validate_metadata(&self) -> engine::Result<()> {
         let current = crate::synced_options::state::get_instance(
-            &self.state,
+            self.state,
             &self.metadata.instance.id,
         )
         .await?;

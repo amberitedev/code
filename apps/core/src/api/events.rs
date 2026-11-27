@@ -283,9 +283,10 @@ impl Loop {
 
     /// Close once the session ended.
     async fn recheck(&self) -> Result<(), Closed> {
-        match self.state.access.revalidate(&self.caller).await {
-            true => Ok(()),
-            false => Err(Closed),
+        if self.state.access.revalidate(&self.caller).await {
+            Ok(())
+        } else {
+            Err(Closed)
         }
     }
 

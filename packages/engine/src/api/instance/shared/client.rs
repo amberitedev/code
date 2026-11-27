@@ -122,9 +122,9 @@ pub(super) fn backend_error(error: CallError) -> crate::Error {
     };
     let error = anyhow::Error::new(error);
     if server_side {
-        error.context(ErrorKind::SharedInstancesApiError).into()
+        error.context(ErrorKind::SharedInstancesApiError)
     } else {
-        error.into()
+        error
     }
 }
 

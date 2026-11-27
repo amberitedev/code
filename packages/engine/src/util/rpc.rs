@@ -25,6 +25,12 @@ pub struct RpcServerBuilder {
     handlers: HandlerMap,
 }
 
+impl Default for RpcServerBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RpcServerBuilder {
     pub fn new() -> Self {
         Self {

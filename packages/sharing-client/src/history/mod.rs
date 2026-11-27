@@ -176,7 +176,7 @@ pub async fn list<S: HistoryStore>(
     share_id: &str,
 ) -> Result<Vec<HistoryEntry>, S::Error> {
     let mut entries = adapters::entries(store.db(), share_id).await?;
-    entries.sort_by(|a, b| b.version.cmp(&a.version));
+    entries.sort_by_key(|entry| std::cmp::Reverse(entry.version));
     Ok(entries)
 }
 

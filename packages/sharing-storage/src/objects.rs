@@ -410,7 +410,7 @@ pub fn list_of(objects: &[&[u8]]) -> VersionList {
             size: bytes.len() as u64,
         })
         .collect();
-    objects.sort_by(|a, b| a.hash.cmp(&b.hash));
+    objects.sort_by_key(|a| a.hash);
     VersionList { objects }
 }
 

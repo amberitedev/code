@@ -41,8 +41,8 @@ impl TryFrom<InstanceRow> for Instance {
             id: row.id,
             path: row.path,
             applied_content_set_id: row.applied_content_set_id,
-            install_stage: InstanceInstallStage::from_str(&row.install_stage),
-            launcher_feature_version: LauncherFeatureVersion::from_str(
+            install_stage: InstanceInstallStage::parse(&row.install_stage),
+            launcher_feature_version: LauncherFeatureVersion::parse(
                 &row.launcher_feature_version,
             ),
             update_channel: ReleaseChannel::from_key(&row.update_channel),
@@ -280,11 +280,11 @@ impl InstanceMetadataRow {
                 self.content_set_name,
                 "instance_content_sets.name",
             )?,
-            source_kind: ContentSourceKind::from_str(&required(
+            source_kind: ContentSourceKind::parse(&required(
                 self.content_set_source_kind,
                 "instance_content_sets.source_kind",
             )?)?,
-            status: ContentSetStatus::from_str(&required(
+            status: ContentSetStatus::parse(&required(
                 self.content_set_status,
                 "instance_content_sets.status",
             )?)?,
@@ -1405,7 +1405,7 @@ fn shared_instance_attachment(
         None => SharedInstanceRole::Member,
     };
     let status = match shared_sync_status {
-        Some(status) => ContentSetSyncStatus::from_str(&status)?,
+        Some(status) => ContentSetSyncStatus::parse(&status)?,
         None => ContentSetSyncStatus::Unknown,
     };
 

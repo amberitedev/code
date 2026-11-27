@@ -1001,7 +1001,7 @@ fn push_error(error: push::PushError) -> crate::Error {
         }
         PushError::Io(error) => error.into(),
         PushError::Backend(error) => backend_error(error),
-        error => anyhow::Error::new(error).into(),
+        error => anyhow::Error::new(error),
     }
 }
 
@@ -1021,7 +1021,7 @@ pub(super) async fn collect_shareable_files(
         sharing_client::rules::list_shareable(
             share_scope(side),
             &sharing_client::rules::DiskFolder(&instance_path),
-            &Default::default(),
+            &BTreeSet::default(),
             limit,
         )
     })

@@ -379,9 +379,10 @@ async function main(): Promise<void> {
 	if (command === 'stop' || command === 'rs') return sendProgramCommand(paths, command, commandArgs)
 	if (command === 'build') return buildPrograms(paths)
 	if (command === 'test') return testCrates(paths, commandArgs)
+	if (command === 'clippy') return clippyCrates(paths, commandArgs)
 	if (command !== 'dev') {
 		throw new DevRunnerError(
-			`Unknown command ${command ?? ''}. Expected fixture, up, dev, status, stop, rs, down, build or test.`,
+			`Unknown command ${command ?? ''}. Expected fixture, up, dev, status, stop, rs, down, build, test or clippy.`,
 		)
 	}
 	const input = parseInput(commandArgs)
@@ -821,6 +822,33 @@ async function testCrates(paths: WorktreePaths, crates: ReadonlyArray<string>): 
 	const env = { ...process.env, SQLX_OFFLINE: 'true' }
 	const build = testBuild(paths, readSharedEnv(paths), crates)
 	if (!(await runTests(paths, env, crates, build))) process.exitCode = 1
+}
+
+/**
+ * `clippy [crate...]`: Clippy over the crates and their tests, or the whole workspace, with
+ * warnings as errors as in CI, in the shared build output one build at a time.
+ */
+async function clippyCrates(paths: WorktreePaths, crates: ReadonlyArray<string>): Promise<void> {
+	const known = new Set([...localCrates(paths.worktree).values()].map((crate) => crate.name))
+	const unknown = crates.filter((crate) => !known.has(crate))
+	if (unknown.length > 0) {
+		throw new DevRunnerError(`No workspace crate is named ${unknown.join(', ')}.`)
+	}
+	// Tauri only checks that the frontend build folder exists.
+	NodeFS.mkdirSync(NodePath.join(paths.worktree, 'apps', 'app-frontend', 'dist'), {
+		recursive: true,
+	})
+	const spec = { env: { ...process.env, SQLX_OFFLINE: 'true' }, label: 'clippy' }
+	const { cargoArgs: _, programs: __, ...build } = programsBuild(paths, readSharedEnv(paths))
+	const unlock = await lockBuilds(build.cacheDir, spec.label, () => false)
+	if (!unlock) return
+	try {
+		const packages = crates.length === 0 ? ['--workspace'] : crates.flatMap((c) => ['--package', c])
+		const args = ['clippy', '--locked', ...packages, '--all-targets', '--', '-D', 'warnings']
+		if (!(await runCargo(spec, build, new Set(), args))) process.exitCode = 1
+	} finally {
+		unlock()
+	}
 }
 
 export function testBuild(

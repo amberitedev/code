@@ -40,9 +40,10 @@ impl Access for FakeAccess {
         _: Option<&'a str>,
     ) -> BoxFuture<'a, Result<(), ApiError>> {
         Box::pin(async move {
-            match self.allow {
-                true => Ok(()),
-                false => Err(ApiError::new(ErrorCode::Forbidden, "denied")),
+            if self.allow {
+                Ok(())
+            } else {
+                Err(ApiError::new(ErrorCode::Forbidden, "denied"))
             }
         })
     }

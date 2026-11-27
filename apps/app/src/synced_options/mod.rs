@@ -5,7 +5,7 @@ mod servers;
 pub mod state;
 
 pub use self::options::game_options::queue_game_locale_index;
-#[cfg(test)]
+#[cfg(all(test, feature = "export-ts"))]
 pub use self::options::game_options::{
     CanonicalValue as GameOptionCanonicalValue, EditableGameSetting,
     GameOptionCompatibility, GameOptionCompatibilityBucket,
@@ -43,7 +43,7 @@ pub use self::options::{
     get_overview as get_synced_options_overview, get_synced_options_folder,
     set_command_history, set_global_option as set_global_synced_option,
 };
-#[cfg(test)]
+#[cfg(all(test, feature = "export-ts"))]
 pub use self::options::{SyncedOptionCapability, SyncedOptionJoinAction};
 pub use self::options::{
     prepare_instance_update, reconcile_all as reconcile_all_synced_options,
@@ -52,7 +52,7 @@ pub use self::options::{
     reconcile_instance_after_pack_update, remove_generated_instance_files,
     set_synced_option, start as start_synced_options,
 };
-#[cfg(test)]
+#[cfg(all(test, feature = "export-ts"))]
 pub use self::packs::PackSyncTarget;
 pub use self::servers::{
     SyncedServer, capture_modpack_server_override, desync_server,

@@ -417,11 +417,13 @@ fn coordinate(path: &str) -> Result<String> {
         coordinate.group_id, coordinate.artifact_id, coordinate.version
     );
     if let Some(classifier) = coordinate.classifier {
-        name.push_str(&format!(":{classifier}"));
+        name.push(':');
+        name.push_str(classifier.as_str());
     }
     match coordinate.extension {
         Some(extension) if extension.as_str() != "jar" => {
-            name.push_str(&format!("@{extension}"));
+            name.push('@');
+            name.push_str(extension.as_str());
         }
         _ => {}
     }

@@ -25,7 +25,7 @@ impl InstanceInstallStage {
         }
     }
 
-    pub fn from_str(val: &str) -> Self {
+    pub fn parse(val: &str) -> Self {
         match val {
             "installed" => Self::Installed,
             "minecraft_installing" => Self::MinecraftInstalling,
@@ -61,7 +61,7 @@ impl LauncherFeatureVersion {
         }
     }
 
-    pub fn from_str(val: &str) -> Self {
+    pub fn parse(val: &str) -> Self {
         match val {
             "none" => Self::None,
             "migrated_server_last_play_time" => {

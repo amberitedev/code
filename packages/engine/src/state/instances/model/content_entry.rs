@@ -23,7 +23,7 @@ impl ContentRequirement {
         }
     }
 
-    pub fn from_str(value: &str) -> crate::Result<Self> {
+    pub fn parse(value: &str) -> crate::Result<Self> {
         match value {
             "required" => Ok(Self::Required),
             "optional" => Ok(Self::Optional),

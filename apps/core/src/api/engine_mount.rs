@@ -323,13 +323,14 @@ where
     if hook.backup {
         state.backups.pre_update(&id).await?;
     }
-    let share = match hook.forget_players {
-        true => engine::instance::get(&state.engine, &id)
+    let share = if hook.forget_players {
+        engine::instance::get(&state.engine, &id)
             .await
             .map_err(api_error)?
             .and_then(|instance| instance.shared_instance)
-            .map(|share| share.id),
-        false => None,
+            .map(|share| share.id)
+    } else {
+        None
     };
     let response = handler.call(Request::from_parts(parts, body), shared).await;
     if !response.status().is_success() {
@@ -343,9 +344,10 @@ where
         .await;
         return Ok(response);
     }
-    let action = match hook.icon {
-        true => Action::SettingsChanged,
-        false => Action::ContentChanged,
+    let action = if hook.icon {
+        Action::SettingsChanged
+    } else {
+        Action::ContentChanged
     };
     activity::log(&state.db, &caller, Some(&id), action).await;
     if let Some(share_id) = share {

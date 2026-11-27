@@ -37,7 +37,7 @@ impl ContentSourceKind {
         }
     }
 
-    pub fn from_str(value: &str) -> crate::Result<Self> {
+    pub fn parse(value: &str) -> crate::Result<Self> {
         match value {
             "local" => Ok(Self::Local),
             "modrinth_modpack" => Ok(Self::ModrinthModpack),
@@ -69,7 +69,7 @@ impl ContentSetStatus {
         }
     }
 
-    pub fn from_str(value: &str) -> crate::Result<Self> {
+    pub fn parse(value: &str) -> crate::Result<Self> {
         match value {
             "available" => Ok(Self::Available),
             "installing" => Ok(Self::Installing),

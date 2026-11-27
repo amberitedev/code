@@ -227,7 +227,7 @@ where
     let (status, answer) = target
         .call(request.map(Full::new))
         .await
-        .map_err(|problem| CallError::Transport(problem))?;
+        .map_err(CallError::Transport)?;
     response::<E>(status.as_u16(), None, answer)
 }
 

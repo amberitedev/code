@@ -26,5 +26,5 @@ pub use self::orchestration::{
     remove_generated_instance_files, set_global_option, set_synced_option,
     start, synced_options_path,
 };
-#[cfg(test)]
+#[cfg(all(test, feature = "export-ts"))]
 pub use self::orchestration::{SyncedOptionCapability, SyncedOptionJoinAction};

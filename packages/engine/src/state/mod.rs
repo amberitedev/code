@@ -462,8 +462,9 @@ impl Engine {
                 api_semaphore,
                 installs,
                 instance_locks: InstanceLocks::default(),
-                publish_reports: Default::default(),
-                uploads: Default::default(),
+                publish_reports: crate::api::instance::PublishReports::default(
+                ),
+                uploads: crate::routes::Uploads::default(),
                 process_manager: ProcessManager::new(),
                 pool,
                 file_watcher,
