@@ -62,9 +62,11 @@ prints to `.data/dev.log`, which other commands point at.
 
 `fixture` waits until every service answers, every App answers on its local API, and the frontend
 serves the App's page. In a new checkout the frontend spends a minute or two preparing its
-dependencies; that happens inside the wait. It returns after 9 minutes if the stack is still
-compiling; run it again to keep waiting. It fails at once when a Rust build fails, or when the
-App's entry module does not compile, printing the compiler error; the stack keeps running.
+dependencies; that happens inside the wait. It fails when a program is still compiling after 9
+minutes; the build goes on, and applying again starts the fixture over. It fails at once when a
+Rust build fails, or when the App's entry module does not compile, printing the compiler error;
+the stack keeps running. While `dev` is still on its first start, `fixture`, a scenario and
+`status --wait` wait for it, since that start would replace what they put in.
 
 Apps sign themselves in to their fixture account, so no sign-in website runs. A hidden App never
 shows, raises or focuses a window; agents use it from its browser tab.
@@ -224,7 +226,8 @@ time, and a pattern can also match the agent doing the work.
 
 Every program follows one rule. An exit nobody asked for is a crash: the runner starts the program
 again, waiting twice as long each time, and after five exits in a minute it leaves the program down
-and prints why. One program going down never stops the others, the backend included. A stop someone
+and prints why. One program going down never stops the others, the backend included, except
+during `dev`'s first start: a stack that cannot become ready then is stopped. A stop someone
 asked for is not a crash: `vp run stop <name>` keeps a program down until `vp run rs <name>`, which
 starts or restarts it and rebuilds first when its Rust changed. Closing an App's window counts as
 asking. `<name>` is a label from `vp run status`: `backend`, `core:1`, `app:2`, or an App's account

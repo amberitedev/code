@@ -258,7 +258,7 @@ class Bench {
 			['scripts/dev-runner.ts', 'dev', '--hide-windows'],
 			{ cwd: path, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true },
 		)
-		running.add(path)
+		running.set(path, child)
 		await new Promise<void>((resolve, reject) => {
 			for (const stream of [child.stdout, child.stderr]) {
 				NodeReadline.createInterface({ input: stream }).on('line', (line) => {
@@ -360,19 +360,28 @@ class Bench {
 	}
 }
 
-/** The worktrees whose `dev` this run started and has not stopped yet. */
-const running = new Set<string>()
+/** The `dev` this run started in each worktree and has not stopped yet. */
+const running = new Map<string, NodeChildProcess.ChildProcess>()
 
 async function main(): Promise<void> {
 	// An interrupted run stops the stacks it started, which no terminal holds.
 	for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
 		process.once(signal, () => {
-			for (const path of running) {
+			for (const [path, child] of running) {
 				NodeChildProcess.spawnSync(process.execPath, ['scripts/dev-runner.ts', 'down'], {
 					cwd: path,
 					stdio: 'ignore',
 					windowsHide: true,
 				})
+				// One that has not written its runtime file yet is unknown to `down`.
+				if (child.pid && child.exitCode === null) {
+					if (process.platform === 'win32') {
+						NodeChildProcess.spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
+							stdio: 'ignore',
+							windowsHide: true,
+						})
+					} else child.kill('SIGTERM')
+				}
 			}
 			process.exit(130)
 		})

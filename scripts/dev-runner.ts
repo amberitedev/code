@@ -29,6 +29,8 @@ const ANSWERED_REQUESTS = 50
 const DEFAULT_FIXTURE = 'default'
 const NOT_RUNNING = 'No stack is running. Start one with: vp run dev [fixture]'
 const RUNNER_FLAGS = ['--hide-windows', '--held']
+/** Set, to the runner's PID, on the fixture a runner applies as its first start. */
+const FIRST_APPLY = 'DEV_RUNNER_FIRST_APPLY'
 const PORT_PROBE_HOSTS = ['127.0.0.1', '::1'] as const
 // Stays under the ten minute limit agent shells put on a foreground command.
 const READY_WAIT_MS = 9 * 60_000
@@ -153,10 +155,12 @@ export type RuntimeFile = {
 	/** A process whose Rust build failed. A fixture stops waiting when it sees one. */
 	buildFailed?: string
 	/**
-	 * Set until the runner has built the programs and started its first stack, or applied its first
-	 * fixture: until then the stack has nothing to be ready with.
+	 * Set until the runner has built the programs and started its first stack's programs, or
+	 * applied its first fixture. Until then nothing else changes the stack's data.
 	 */
 	starting?: boolean
+	/** When the runner's process was created, as the OS reports it: a reused PID is not this runner. */
+	readonly started?: string
 	readonly ports: DevPorts
 	/** Every program by label, such as `backend`, `core:1` and `app:2`. */
 	programs: Record<string, ProgramState>
@@ -422,6 +426,8 @@ async function main(): Promise<void> {
 		)
 	}
 	logToFile(paths)
+	// No apply outlives its runner, so a turn still held is a leftover.
+	NodeFS.rmSync(fixtureLockPath(paths.data), { force: true })
 	const { offset: startOffset, source } = resolveStartOffset({
 		devInstance: process.env.DEV_INSTANCE,
 		explicitOffset: process.env.PORT_OFFSET,
@@ -449,6 +455,7 @@ async function main(): Promise<void> {
 
 	const runtime: RuntimeFile = {
 		pid: process.pid,
+		started: processStarted(process.pid),
 		starting: true,
 		branch,
 		dataDir: paths.data,
@@ -467,9 +474,10 @@ async function main(): Promise<void> {
 	const save = () => {
 		if (!stopping) writeRuntimeFile(paths, runtime)
 	}
-	const setBuildFailed = (label: string, failed: boolean) => {
-		if ((runtime.buildFailed === label) === failed) return
-		runtime.buildFailed = failed ? label : undefined
+	/** Both programs come from one build, so its latest result stands for either. */
+	const setBuildFailed = (label: string | undefined) => {
+		if (runtime.buildFailed === label) return
+		runtime.buildFailed = label
 		save()
 	}
 	const setState = (label: string, state: ProgramState | undefined) => {
@@ -510,7 +518,7 @@ async function main(): Promise<void> {
 		setState(spec.label, 'starting')
 		let program: string | undefined
 		if (spec.program) {
-			setBuildFailed(spec.label, false)
+			setBuildFailed(undefined)
 			const built = await ensureProgram(
 				paths.worktree,
 				spec,
@@ -521,7 +529,7 @@ async function main(): Promise<void> {
 			if (stopping || starts.get(spec.label) !== token) return
 			program = built && NodePath.join(built, spec.program.file)
 			if (!program) {
-				setBuildFailed(spec.label, true)
+				setBuildFailed(spec.label)
 				setState(spec.label, 'failed')
 				runnerLog('error', `${spec.label} did not build. Use rs ${spec.label} after fixing it.`)
 				return
@@ -633,6 +641,7 @@ async function main(): Promise<void> {
 			(label) => label === 'backend' || isStackLabel(label),
 		)
 		await Promise.all(labels.map(stopProgram))
+		setBuildFailed(undefined)
 		runnerLog('info', 'Backend, Cores and Apps stopped for a fixture.')
 	}
 	/** Starts the Apps and Cores `shape` names, replacing the ones that ran before. */
@@ -778,30 +787,44 @@ async function main(): Promise<void> {
 			result: 'ok',
 			ms: { total: Math.round(performance.now() - begun) },
 		})
-		await startDone()
+		await printStatus(paths)
 	}
-	/** The first start is done: the stack can be ready now. */
-	const startDone = async () => {
-		if (stopping) return
+	/** The first start is done: readiness is asked of what runs now, and others may change it. */
+	const startDone = () => {
 		runtime.starting = undefined
 		save()
-		await printStatus(paths)
 	}
 
 	try {
 		for (const spec of shared) if (spec.label !== 'backend') void startProgram(spec)
 		// A fixture waits nine minutes for a program, which a cold build outlasts, so build first.
-		if ((await runFromRunner(paths, ['build'], builds)) !== 0) {
+		const built = await ensureProgram(
+			paths.worktree,
+			{ env, label: 'build' },
+			programsBuild(paths, env),
+			builds,
+			() => stopping,
+		)
+		if (stopping) {
+			// Stopped during the build: start nothing.
+		} else if (!built) {
 			fail('The App and Core did not build. Fix the error above and start dev again.')
 		} else if (started) {
 			void startStack(started)
-				.then(announceReady)
+				.then(() => {
+					startDone()
+					return announceReady()
+				})
 				.catch((error: unknown) => fail(error instanceof Error ? error.message : String(error)))
 		} else {
 			runnerLog('info', 'Backend, Cores and Apps wait for a fixture.')
-			if (!fixture) await startDone()
-			else if ((await runFromRunner(paths, ['fixture', fixture], builds)) === 0) await startDone()
-			else fail(`The ${fixture} fixture did not apply, so the stack cannot become ready.`)
+			if (!fixture) startDone()
+			else if ((await applyFirstFixture(paths, fixture, builds)) !== 0) {
+				fail(`The ${fixture} fixture did not apply, so the stack cannot become ready.`)
+			} else if (!stopping) {
+				startDone()
+				await printStatus(paths)
+			}
 		}
 		await finished
 	} finally {
@@ -810,18 +833,23 @@ async function main(): Promise<void> {
 }
 
 /**
- * Runs another command of this runner, such as `build` or `fixture <name>`, as a person would.
- * Resolves with its exit code; the runner stops it when the runner stops.
+ * Applies the runner's first fixture as `vp run fixture` would, in a child the runner stops when
+ * it stops. Resolves with its exit code.
  */
-function runFromRunner(
+function applyFirstFixture(
 	paths: WorktreePaths,
-	args: ReadonlyArray<string>,
+	fixture: string,
 	children: Set<NodeChildProcess.ChildProcess>,
 ): Promise<number> {
 	const child = NodeChildProcess.spawn(
 		process.execPath,
-		[NodeURL.fileURLToPath(import.meta.url), ...args],
-		{ cwd: paths.worktree, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true },
+		[NodeURL.fileURLToPath(import.meta.url), 'fixture', fixture],
+		{
+			cwd: paths.worktree,
+			env: { ...process.env, [FIRST_APPLY]: String(process.pid) },
+			stdio: ['ignore', 'pipe', 'pipe'],
+			windowsHide: true,
+		},
 	)
 	// Through this process's own output, so the dev log has it too.
 	child.stdout.on('data', (chunk: Buffer) => process.stdout.write(chunk))
@@ -2191,12 +2219,15 @@ function readLiveRuntime(paths: WorktreePaths): RuntimeFile | undefined {
 }
 
 /**
- * The live runtime file, once its PID is checked to be a dev runner: a runner killed outright
- * leaves its PID behind, and Windows hands PIDs out again. The check is slow, so ask it once.
+ * The live runtime file, once its PID is checked to be the runner that wrote it: a runner killed
+ * outright leaves its PID behind, and Windows hands PIDs out again, to other runners too. The
+ * check is slow, so ask it once.
  */
 function readRunner(paths: WorktreePaths): RuntimeFile | undefined {
 	const runtime = readLiveRuntime(paths)
-	return runtime?.pid && processIsDevRunner(runtime.pid) ? runtime : undefined
+	return runtime?.pid && runtime.started && processStarted(runtime.pid) === runtime.started
+		? runtime
+		: undefined
 }
 
 function processIsRunning(pid: number): boolean {
@@ -2208,8 +2239,8 @@ function processIsRunning(pid: number): boolean {
 	}
 }
 
-// A recorded PID can be reused by an unrelated process after a crash or reboot.
-function processIsDevRunner(pid: number): boolean {
+/** When the process with `pid` was created, as the OS reports it, or `undefined` when none runs. */
+function processStarted(pid: number): string | undefined {
 	const result =
 		process.platform === 'win32'
 			? NodeChildProcess.spawnSync(
@@ -2217,12 +2248,12 @@ function processIsDevRunner(pid: number): boolean {
 					[
 						'-NoProfile',
 						'-Command',
-						`(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CommandLine`,
+						`(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CreationDate.ToFileTimeUtc()`,
 					],
 					{ encoding: 'utf8', windowsHide: true },
 				)
-			: NodeChildProcess.spawnSync('ps', ['-o', 'args=', '-p', String(pid)], { encoding: 'utf8' })
-	return result.status === 0 && result.stdout.includes('dev-runner')
+			: NodeChildProcess.spawnSync('ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8' })
+	return (result.status === 0 && result.stdout.trim()) || undefined
 }
 
 /** The ports the stack's programs listen on, by program label. */
@@ -2362,22 +2393,16 @@ async function printStatus(paths: WorktreePaths): Promise<boolean> {
 
 /** `status --wait`: waits until the stack that is starting is ready, or says why it is not. */
 async function waitUntilReady(paths: WorktreePaths): Promise<void> {
-	// A `dev` started a moment ago has not written its runtime file yet.
+	// A `dev` started a moment ago has not written its runtime file yet, and the file it replaces
+	// can name a PID that is now another process's.
 	const deadline = Date.now() + 30_000
-	while (!readLiveRuntime(paths)) {
+	while (!readRunner(paths)) {
 		if (Date.now() > deadline) throw new DevRunnerError(NOT_RUNNING)
 		await new Promise((resolve) => setTimeout(resolve, 500))
 	}
 	const stack = connectStack(paths)
 	try {
-		const deadline = Date.now() + READY_WAIT_MS
-		for (;;) {
-			// The runner rewrites its file as it works, so one read can come back empty.
-			const current = stack.runner.runtime()
-			if (current && !current.starting) break
-			if (Date.now() > deadline) throw new StillStarting('The stack is still starting.')
-			await new Promise((resolve) => setTimeout(resolve, 500))
-		}
+		await untilStarted(stack.runner.runtime)
 		await stack.ready()
 	} catch (error) {
 		if (!(error instanceof StillStarting)) throw error
@@ -2390,30 +2415,61 @@ async function waitUntilReady(paths: WorktreePaths): Promise<void> {
  * until the returned function is called: two applies at once would replace each other's data.
  */
 export async function fixtureTurn(data: string): Promise<() => void> {
-	const lock = NodePath.join(data, 'fixture.lock')
+	const lock = fixtureLockPath(data)
+	const holder = () => {
+		try {
+			return NodeFS.readFileSync(lock, 'utf8')
+		} catch {
+			return undefined
+		}
+	}
+	const mine = String(process.pid)
 	let told = false
 	for (;;) {
 		try {
-			NodeFS.writeFileSync(lock, String(process.pid), { flag: 'wx' })
-			return () => NodeFS.rmSync(lock, { force: true })
+			NodeFS.writeFileSync(lock, mine, { flag: 'wx' })
+			// `dev` and `down` clear a turn left by a killed apply, and another may hold it by then.
+			return () => {
+				if (holder() === mine) NodeFS.rmSync(lock, { force: true })
+			}
 		} catch (error) {
 			if (!(error instanceof Error && 'code' in error && error.code === 'EEXIST')) throw error
 		}
-		let holder: string
-		try {
-			holder = NodeFS.readFileSync(lock, 'utf8')
-		} catch {
+		const seen = holder()
+		// Empty while its writer is still writing it. Read again before removing it: another waiter
+		// may already have taken the turn over.
+		if (seen && !processIsRunning(Number(seen))) {
+			if (holder() === seen) NodeFS.rmSync(lock, { force: true })
 			continue
 		}
-		// Empty while its writer is still writing it.
-		if (holder && !processIsRunning(Number(holder))) {
-			NodeFS.rmSync(lock, { force: true })
-			continue
-		}
-		if (holder && !told) {
-			runnerLog('info', `Waiting for the fixture PID ${holder} is applying.`)
+		if (seen && !told) {
+			runnerLog('info', `Another fixture is being applied (PID ${seen}). This one waits for it.`)
 			told = true
 		}
+		await new Promise((resolve) => setTimeout(resolve, 500))
+	}
+}
+
+function fixtureLockPath(data: string): string {
+	return NodePath.join(data, 'fixture.lock')
+}
+
+/**
+ * Waits until the stack's first start is done, failing after `READY_WAIT_MS`. Until then the runner
+ * starts its own stack, which would replace any data put in before it.
+ */
+async function untilStarted(runtime: () => RuntimeFile | undefined): Promise<void> {
+	const deadline = Date.now() + READY_WAIT_MS
+	let told = false
+	for (;;) {
+		// The runner rewrites its file as it works, so one read can come back empty.
+		const current = runtime()
+		if (current && !current.starting) return
+		if (current && !told) {
+			runnerLog('info', 'Waiting for the stack to finish starting.')
+			told = true
+		}
+		if (Date.now() > deadline) throw new StillStarting('The stack is still starting.')
 		await new Promise((resolve) => setTimeout(resolve, 500))
 	}
 }
@@ -2430,7 +2486,10 @@ function sendRunnerCommand(paths: WorktreePaths, command: string): void {
 export async function holdStack(
 	paths: WorktreePaths,
 ): Promise<{ readonly release: () => Promise<void> }> {
-	if (readRunner(paths)) return { release: async () => {} }
+	if (readRunner(paths)) {
+		await untilStarted(connectStack(paths).runner.runtime)
+		return { release: async () => {} }
+	}
 	const child = NodeChildProcess.spawn(
 		process.execPath,
 		[NodeURL.fileURLToPath(import.meta.url), 'dev', '--held', '--hide-windows'],
@@ -2445,7 +2504,7 @@ export async function holdStack(
 	)
 	for (;;) {
 		const runtime = readLiveRuntime(paths)
-		if (runtime?.pid === child.pid && !runtime.starting) break
+		if (runtime && runtime.pid === child.pid && !runtime.starting) break
 		if (!running) throw new DevRunnerError(`The dev stack stopped. See ${devLogPath(paths)}`)
 		await new Promise((resolve) => setTimeout(resolve, 200))
 	}
@@ -2529,6 +2588,8 @@ async function applyFixture(paths: WorktreePaths, name: string): Promise<void> {
 		process.exitCode = 1
 		return
 	}
+	const first = process.env[FIRST_APPLY] === String(stack.live.pid)
+	if (!first) await untilStarted(stack.runner.runtime)
 	const release = await fixtureTurn(paths.data)
 	const waitStarted = performance.now()
 	const record = (result: 'ok' | 'failed') =>
@@ -2545,15 +2606,18 @@ async function applyFixture(paths: WorktreePaths, name: string): Promise<void> {
 	} catch (error) {
 		record('failed')
 		runnerLog('error', error instanceof Error ? error.message : String(error))
-		runnerLog('info', 'The stack stays up as far as the fixture got. Applying again starts over.')
+		// A runner whose first fixture fails stops its stack.
+		if (!first) {
+			runnerLog('info', 'The stack stays up as far as the fixture got. Applying again starts over.')
+		}
 		process.exitCode = 1
 		return
 	} finally {
 		release()
 	}
 	record('ok')
-	// A stack's first fixture: its runner prints this once it has taken the fixture as applied.
-	if (!readLiveRuntime(paths)?.starting) await printStatus(paths)
+	// The runner prints this for its first fixture, once it has taken it as applied.
+	if (!first) await printStatus(paths)
 	if (stack.live.apps.length > 0) {
 		runnerLog('info', 'Tabs keep their URLs. Reload an open one to see the new data.')
 	}
@@ -2566,7 +2630,7 @@ async function sendProgramCommand(
 	args: ReadonlyArray<string>,
 ): Promise<void> {
 	const [name] = args
-	const before = readLiveRuntime(paths)
+	const before = readRunner(paths)
 	if (!before) throw new DevRunnerError(NOT_RUNNING)
 	const known = Object.keys(before.programs)
 	const app = before.apps.find((app) => String(app.index) === name || app.name === name)
@@ -2600,9 +2664,10 @@ async function down(paths: WorktreePaths): Promise<void> {
 		runnerLog('info', 'not running')
 		return
 	}
-	if (!processIsDevRunner(runtime.pid)) {
+	if (!readRunner(paths)) {
 		// Left by a runner that was killed, and its PID now belongs to something else.
 		writeRuntimeFile(paths, stoppedRuntime(runtime))
+		NodeFS.rmSync(fixtureLockPath(paths.data), { force: true })
 		runnerLog('info', 'not running')
 		return
 	}
@@ -2631,6 +2696,8 @@ async function down(paths: WorktreePaths): Promise<void> {
 		await new Promise((resolve) => setTimeout(resolve, 200))
 	}
 	writeRuntimeFile(paths, stoppedRuntime(runtime))
+	// An apply killed with its runner leaves its turn behind.
+	NodeFS.rmSync(fixtureLockPath(paths.data), { force: true })
 	runnerLog('info', `stopped PID ${runtime.pid}`)
 }
 
